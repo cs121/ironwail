@@ -93,6 +93,7 @@ typedef struct texture_s
 	textype_t			type;
 	struct gltexture_s	*gltexture; //johnfitz -- pointer to gltexture
 	struct gltexture_s	*fullbright; //johnfitz -- fullbright mask texture
+	struct gltexture_s	*emissive;   // emissive texture map (Quake 3 style glow)
 	int					anim_total;				// total tenths in sequence ( 0 = no)
 	int					anim_min, anim_max;		// time for this frame min <=time< max
 	struct texture_s	*anim_next;		// in the animation sequence
@@ -340,6 +341,7 @@ typedef struct {
 	} poseverttype;	//spike
 	struct gltexture_s	*gltextures[MAX_SKINS][4]; //johnfitz
 	struct gltexture_s	*fbtextures[MAX_SKINS][4]; //johnfitz
+	struct gltexture_s	*emissivetextures[MAX_SKINS][4];
 	int					texels[MAX_SKINS];	// only for player skins
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;

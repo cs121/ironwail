@@ -51,6 +51,7 @@ struct Call
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
+	uvec2	emhandle;
 #else
 	int		baseinstance;
 	int		padding;
@@ -59,7 +60,9 @@ struct Call
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
 	CF_USE_FULLBRIGHT = 2u,
-	CF_NOLIGHTMAP = 4u
+	CF_NOLIGHTMAP = 4u,
+	CF_USE_EMISSIVE = 8u,
+	CF_ALPHA_TEST = 16u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
@@ -109,7 +112,8 @@ layout(location=6) noperspective out vec2 out_coord;
 layout(location=7) flat out vec4 out_styles;
 layout(location=8) flat out float out_lmofs;
 #if BINDLESS
-	layout(location=9) flat out uvec4 out_samplers;
+	layout(location=9) flat out uvec4 out_samplers0;
+        layout(location=10) flat out uvec2 out_samplers1;
 #endif
 
 void main()
@@ -152,10 +156,11 @@ void main()
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
 #if BINDLESS
-	out_samplers.xy = call.txhandle;
+	out_samplers0.xy = call.txhandle;
 	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
-		out_samplers.zw = call.fbhandle;
+		out_samplers0.zw = call.fbhandle;
 	else
-		out_samplers.zw = out_samplers.xy;
+		out_samplers0.zw = out_samplers0.xy;
+	out_samplers1.xy = call.emhandle;
 #endif
 }

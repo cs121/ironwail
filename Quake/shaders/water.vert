@@ -22,6 +22,7 @@ struct Call
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
+	uvec2	emhandle;
 #else
 	int		baseinstance;
 	int		padding;
@@ -30,7 +31,9 @@ struct Call
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
 	CF_USE_FULLBRIGHT = 2u,
-	CF_NOLIGHTMAP = 4u
+	CF_NOLIGHTMAP = 4u,
+	CF_USE_EMISSIVE = 8u,
+	CF_ALPHA_TEST = 16u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
@@ -66,23 +69,32 @@ layout(location=2) in float in_lmofs;
 layout(location=3) in ivec4 in_styles;
 
 
-layout(location=0) flat out float out_alpha;layout(location=1) out vec2 out_uv;
-layout(location=2) out vec3 out_pos;
+layout(location=0) flat out uint out_flags;
+layout(location=1) flat out float out_alpha;
+layout(location=2) out vec2 out_uv;
+layout(location=3) out vec3 out_pos;
 #if BINDLESS
-	layout(location=3) flat out uvec2 out_sampler;
+        layout(location=4) flat out uvec4 out_samplers0;
+        layout(location=5) flat out uvec2 out_samplers1;
 #endif
 
 void main()
 {
-	Call call = call_data[DRAW_ID];
-	int instance_id = GET_INSTANCE_ID(call);
-	Instance instance = instance_data[instance_id];
-	vec3 pos = Transform(in_pos, instance);
-	gl_Position = ViewProj * vec4(pos, 1.0);
-	out_uv = in_uv.xy;
-	out_pos = pos - EyePos;
-	out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
+        Call call = call_data[DRAW_ID];
+        int instance_id = GET_INSTANCE_ID(call);
+        Instance instance = instance_data[instance_id];
+        vec3 pos = Transform(in_pos, instance);
+        gl_Position = ViewProj * vec4(pos, 1.0);
+        out_flags = call.flags;
+        out_uv = in_uv.xy;
+        out_pos = pos - EyePos;
+        out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS
-	out_sampler = call.txhandle;
+        out_samplers0.xy = call.txhandle;
+        if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
+                out_samplers0.zw = call.fbhandle;
+        else
+                out_samplers0.zw = out_samplers0.xy;
+        out_samplers1.xy = call.emhandle;
 #endif
 }

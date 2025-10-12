@@ -495,7 +495,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	GLuint		buffers[2];
 	GLintptr	offsets[2];
 	GLsizeiptr	sizes[2];
-	gltexture_t	*textures[2];
+	gltexture_t	*textures[3];
 
 	if (!ibuf.count)
 		return;
@@ -595,29 +595,38 @@ void R_FlushAliasInstances (qboolean showtris)
 
 		textures[0] = hdr->gltextures[skinnum][anim];
 		textures[1] = hdr->fbtextures[skinnum][anim];
+		textures[2] = hdr->emissivetextures[skinnum][anim];
 		if (hdr == mainhdr && ibuf.ent->colormap != vid.colormap && !gl_nocolors.value)
 			if (CL_IsPlayerEnt (ibuf.ent)) /* && !strcmp (ibuf.ent->model->name, "progs/player.mdl") */
 				textures[0] = playertextures[ibuf.ent - cl_entities - 1];
 
 		if (!gl_fullbrights.value)
+		{
 			textures[1] = blacktexture;
+			textures[2] = blacktexture;
+		}
 
 		if (r_lightmap_cheatsafe)
 		{
 			textures[0] = greytexture;
 			textures[1] = blacktexture;
+			textures[2] = blacktexture;
 		}
 
 		if (!textures[1])
 			textures[1] = blacktexture;
 
+		if (!textures[2])
+			textures[2] = blacktexture;
+
 		if (showtris)
 		{
 			textures[0] = blacktexture;
 			textures[1] = whitetexture;
+			textures[2] = blacktexture;
 		}
 
-		GL_BindTextures (0, 2, textures);
+		GL_BindTextures (0, 3, textures);
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
 

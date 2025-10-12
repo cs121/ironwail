@@ -15,6 +15,7 @@ struct Call
 #if BINDLESS
         uvec2   txhandle;
         uvec2   fbhandle;
+        uvec2   emhandle;
 #else
         int             baseinstance;
         int             padding;
@@ -24,7 +25,7 @@ const uint
         CF_USE_POLYGON_OFFSET = 1u,
         CF_USE_FULLBRIGHT = 2u,
         CF_NOLIGHTMAP = 4u,
-        CF_ALPHA_TEST = 8u
+        CF_USE_EMISSIVE = 8u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer

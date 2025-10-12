@@ -163,6 +163,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLfloat		alpha;
 	GLuint64	texture;
 	GLuint64	fullbright;
+	GLuint64	emissive;
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -184,7 +185,7 @@ static union {
 	} bindless;
 	struct {
 		bmodel_bound_gpu_call_t		params[MAX_BMODEL_DRAWS];
-		gltexture_t					*textures[MAX_BMODEL_DRAWS][2];
+		gltexture_t					*textures[MAX_BMODEL_DRAWS][3];
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
@@ -273,6 +274,7 @@ static void R_FlushBModelCalls (void)
 		{
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
+			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
 		}
 	}
@@ -280,7 +282,8 @@ static void R_FlushBModelCalls (void)
 	num_bmodel_calls = 0;
 }
 
-#define CALLFLAG_ALPHA_TEST      (1u << 3)
+#define CALLFLAG_EMISSIVE        (1u << 3)
+#define CALLFLAG_ALPHA_TEST      (1u << 4)
 
 /*
 =============
@@ -291,7 +294,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 {
 	GLuint		flags;
 	float		alpha;
-	gltexture_t	*tx, *fb;
+	gltexture_t	*tx, *fb, *em;
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
@@ -300,20 +303,24 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	{
 		tx = t->gltexture;
 		fb = t->fullbright;
+		em = t->emissive;
 		if (r_lightmap_cheatsafe)
-			tx = fb = NULL;
+			tx = fb = em = NULL;
 		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
 			fb = NULL;
 	}
 	else
 	{
 		tx = fb = whitetexture;
+		em = NULL;
 	}
 
 	if (!gl_zfix.value || map_checks.value)
 		zfix = 0;
 
         flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
+        if (em != NULL)
+                flags |= CALLFLAG_EMISSIVE;
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
@@ -325,6 +332,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->alpha = alpha;
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
+		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
 	}
 	else
 	{
@@ -336,6 +344,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->padding = 0;
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
+		textures[2] = em ? em : blacktexture;
 	}
 
 	SDL_assert (num_instances > 0);
