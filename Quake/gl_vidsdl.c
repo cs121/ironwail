@@ -1378,8 +1378,7 @@ GL_EndRendering
 */
 void GL_EndRendering (void)
 {
-	GL_PostProcess ();
-	GL_ReleaseFrameResources ();
+       GL_ReleaseFrameResources ();
 
 	if (!scr_skipupdate)
 	{
