@@ -1,4 +1,4 @@
-#include "shadow_common.glsl"
+#include "frame_uniforms.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {

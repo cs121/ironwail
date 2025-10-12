@@ -23,20 +23,6 @@ On most maps performance is indeed not much of a concern on a modern system. In 
 - capped framerate when no map is loaded
 - ability to run the game from a folder containing Unicode characters
 
-## Tuning & Troubleshooting
-
-Soft shadow quality can be adjusted at runtime using the following console variables:
-
-- `r_shadow_soft` toggles a simple 3×3 percentage-closer filter. Set to `0` for hard edges, or `1` to smooth the result.
-- `r_shadow_pcf_size` scales the filter radius in texels (range `1`–`3`). Larger values blur the edge more at the cost of extra overblur.
-- `r_shadow_normal_offset` applies a receiver offset along the surface normal based on `N·L`. Increase it slightly if shadow acne appears, but lower it if peter-panning becomes visible.
-- `r_shadow_bias` and `r_shadow_slope_bias` remain available for fine-tuning depth bias values.
-- `r_shadow_map_size` can be changed on the fly to recreate the shadow atlas at a different resolution. Consider dropping to `1024` on weaker GPUs.
-
-An optional variance shadow map path is provided via `r_shadow_vsm`. When enabled, the engine switches the shadow pass to a floating-point moment texture (`RG32F`) and the forward shader evaluates a min-variance filter. Use `r_shadow_vsm_bleed_reduce` (range `0`–`0.99`) to clamp light bleeding when VSM is active.
-
-When tuning, start with soft shadows disabled to verify bias settings, then re-enable PCF or VSM once acne and peter-panning are under control.
-
 ## System requirements
 
 | | Minimum GPU | Recommended GPU |
