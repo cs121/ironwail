@@ -255,9 +255,8 @@ OBJS = strlcat.o \
 	cl_tent.o \
 	console.o \
 	keys.o \
-	menu.o \
-	sidebar.o \
-	sbar.o \
+        menu.o \
+        sbar.o \
 	view.o \
         wad.o \
         cmd.o \
