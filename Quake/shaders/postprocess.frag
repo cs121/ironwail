@@ -1,5 +1,6 @@
 layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
+layout(binding=2) uniform sampler2D DepthTexture;
 
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
@@ -60,6 +61,8 @@ float tri(float x)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
 layout(location=0) uniform vec4 Params;
+layout(location=1) uniform vec4 DoFParams0; // x: enabled, y: focus distance, z: focus range, w: max blur radius (pixels)
+layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: reversed-Z flag (>0.5 when reversed)
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -69,10 +72,68 @@ void main()
 	float contrast = Params.y;
 	float scale = Params.z;
 	float dither = Params.w;
-	out_fragcolor = texelFetch(GammaTexture, ivec2(gl_FragCoord), 0);
+		ivec2 pixel = ivec2(gl_FragCoord.xy);
+		vec4 color = texelFetch(GammaTexture, pixel, 0);
+		if (DoFParams0.x > 0.5)
+		{
+				vec2 texSize = vec2(textureSize(GammaTexture, 0));
+				vec2 uv = (vec2(pixel) + 0.5) / texSize;
+				float rawDepth = texture(DepthTexture, uv).r;
+				float nearPlane = DoFParams1.x;
+				float farPlane = DoFParams1.y;
+				float reversed = DoFParams1.z;
+				float linearDepth;
+				if (reversed > 0.5)
+				{
+						float denom = nearPlane + rawDepth * (farPlane - nearPlane);
+						linearDepth = (nearPlane * farPlane) / max(denom, 1e-6);
+				}
+				else
+				{
+						float ndcDepth = rawDepth * 2.0 - 1.0;
+						float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+						linearDepth = (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+				}
+				float focusDistance = DoFParams0.y;
+				float focusRange = max(DoFParams0.z, 0.0001);
+				float maxBlur = max(DoFParams0.w, 0.0);
+				float coc = abs(linearDepth - focusDistance);
+				float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
+				float blurRadius = blurFactor * maxBlur;
+				if (blurRadius > 0.0001)
+				{
+						vec2 invRes = 1.0 / texSize;
+						const vec2 kernel[8] = vec2[](
+								vec2(1.0, 0.0),
+								vec2(-1.0, 0.0),
+								vec2(0.0, 1.0),
+								vec2(0.0, -1.0),
+								vec2(0.70710678, 0.70710678),
+								vec2(-0.70710678, 0.70710678),
+								vec2(0.70710678, -0.70710678),
+								vec2(-0.70710678, -0.70710678)
+						);
+						float noise = SCREEN_SPACE_NOISE();
+						float angle = noise * 6.28318530718;
+						float sine = sin(angle);
+						float cosine = cos(angle);
+						mat2 rotation = mat2(cosine, -sine, sine, cosine);
+						vec3 accum = color.rgb;
+						float weight = 1.0;
+						for (int i = 0; i < 8; ++i)
+						{
+								vec2 offset = rotation * kernel[i] * blurRadius * invRes;
+								vec3 sampleColor = texture(GammaTexture, uv + offset).rgb;
+								accum += sampleColor;
+								weight += 1.0;
+						}
+						color.rgb = accum / weight;
+				}
+		}
+		out_fragcolor = color;
 #if PALETTIZE == 1
-	vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
-	out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
+		vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
+		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 	out_fragcolor.rgb += DITHER_NOISE(noiseuv) * dither;
 	out_fragcolor.rgb *= out_fragcolor.rgb;
 #endif // PALETTIZE == 1
