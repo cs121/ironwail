@@ -84,6 +84,9 @@ extern gltexture_t *whitetexture;
 extern gltexture_t *greytexture;
 extern gltexture_t *blacktexture;
 
+extern GLuint gl_palette_lut;
+extern GLuint gl_palette_buffer[2];
+
 extern unsigned int d_8to24table[256];
 extern unsigned int d_8to24table_fbright[256];
 extern unsigned int d_8to24table_nobright[256];

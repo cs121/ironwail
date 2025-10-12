@@ -1055,3 +1055,15 @@ void GL_ReserveDeviceMemory (GLenum target, size_t numbytes, GLuint *outbuf, siz
 
 	frameres_device_offset += numbytes;
 }
+
+void R_InitShadow (void)
+{
+}
+
+void R_ShutdownShadow (void)
+{
+}
+
+void R_ResizeShadowMapIfNeeded (void)
+{
+}

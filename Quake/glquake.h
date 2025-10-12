@@ -457,6 +457,9 @@ void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
 
 void R_UploadFrameData (void);
+void R_InitShadow (void);
+void R_ShutdownShadow (void);
+void R_ResizeShadowMapIfNeeded (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
