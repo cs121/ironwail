@@ -120,9 +120,6 @@
     <ClCompile Include="..\..\Quake\menu.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\sidebar.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\miniz.c">
       <Filter>Source Files</Filter>
     </ClCompile>
