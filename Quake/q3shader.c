@@ -115,7 +115,7 @@ static void Q3Shader_Insert (q3shader_t *shader)
         }
         else
         {
-                VEC_GROW ((void **) &q3shader_registry, sizeof (q3shader_registry[0]), 1);
+                Vec_Grow ((void **) &q3shader_registry, sizeof (q3shader_registry[0]), 1);
                 q3shader_registry[VEC_HEADER (q3shader_registry).size++] = *shader;
         }
 
@@ -304,7 +304,7 @@ static const char *Q3Shader_ParseShaderBlock (const char *data, const char *file
                                 return NULL;
                         }
 
-                        VEC_GROW ((void **) &shader->stages, sizeof (shader->stages[0]), 1);
+                        Vec_Grow ((void **) &shader->stages, sizeof (shader->stages[0]), 1);
                         shader->stages[VEC_HEADER (shader->stages).size++] = stage;
                         continue;
                 }
@@ -467,7 +467,7 @@ static qboolean Q3Shader_AddDirectiveArg (q3shader_directive_t *directive, const
                         return false;
         }
 
-        VEC_GROW ((void **) &directive->args, sizeof (directive->args[0]), 1);
+        Vec_Grow ((void **) &directive->args, sizeof (directive->args[0]), 1);
         directive->args[VEC_HEADER (directive->args).size++] = copy;
         return true;
 }
@@ -477,7 +477,7 @@ static void Q3Shader_AddDirective (q3shader_directive_t **list, q3shader_directi
         if (!list || !directive)
                 return;
 
-        VEC_GROW ((void **) list, sizeof ((*list)[0]), 1);
+        Vec_Grow ((void **) list, sizeof ((*list)[0]), 1);
         (*list)[VEC_HEADER (*list).size++] = *directive;
         directive->args = NULL;
 }
@@ -496,7 +496,7 @@ static qboolean Q3Shader_AddPath (char ***vec, const char *path)
                 return false;
         }
 
-        VEC_GROW ((void **) vec, sizeof ((*vec)[0]), 1);
+        Vec_Grow ((void **) vec, sizeof ((*vec)[0]), 1);
         (*vec)[VEC_HEADER (*vec).size++] = copy;
         return true;
 }
@@ -695,7 +695,7 @@ static void Q3Shader_ApplyStageDirective (q3shader_stage_t *stage, const q3shade
                         Q3Shader_FreeStringVec (&stage->anim_maps);
                         for (i = 1; i < VEC_SIZE (directive->args); ++i)
                         {
-                                VEC_GROW ((void **) &stage->anim_maps, sizeof (stage->anim_maps[0]), 1);
+                                Vec_Grow ((void **) &stage->anim_maps, sizeof (stage->anim_maps[0]), 1);
                                 stage->anim_maps[VEC_HEADER (stage->anim_maps).size++] = Q3Shader_CopyString (directive->args[i]);
                         }
                 }
@@ -732,7 +732,7 @@ static void Q3Shader_ApplyStageDirective (q3shader_stage_t *stage, const q3shade
                 char *value = Q3Shader_JoinArgs (directive, 0);
                 if (value)
                 {
-                        VEC_GROW ((void **) &stage->tcMods, sizeof (stage->tcMods[0]), 1);
+                        Vec_Grow ((void **) &stage->tcMods, sizeof (stage->tcMods[0]), 1);
                         stage->tcMods[VEC_HEADER (stage->tcMods).size++] = value;
                 }
         }
