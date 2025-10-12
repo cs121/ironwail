@@ -317,36 +317,6 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_fullbright);
         Cvar_RegisterVariable (&r_drawentities);
         Cvar_RegisterVariable (&r_shadows);
-        Cvar_RegisterVariable (&r_shadow_map_size);
-        Cvar_SetCallback (&r_shadow_map_size, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_bias);
-        Cvar_SetCallback (&r_shadow_bias, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_slope_bias);
-        Cvar_SetCallback (&r_shadow_slope_bias, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_soft);
-        Cvar_SetCallback (&r_shadow_soft, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_pcf_size);
-        Cvar_SetCallback (&r_shadow_pcf_size, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_normal_offset);
-        Cvar_SetCallback (&r_shadow_normal_offset, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_vsm);
-        Cvar_SetCallback (&r_shadow_vsm, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_vsm_bleed_reduce);
-        Cvar_SetCallback (&r_shadow_vsm_bleed_reduce, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_csm);
-        Cvar_SetCallback (&r_shadow_csm, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_csm_splits);
-        Cvar_SetCallback (&r_shadow_csm_splits, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_csm_stable);
-        Cvar_SetCallback (&r_shadow_csm_stable, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_csm_fade);
-        Cvar_SetCallback (&r_shadow_csm_fade, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_showcsm);
-        Cvar_SetCallback (&r_shadow_showcsm, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_showmap);
-        Cvar_SetCallback (&r_shadow_showmap, R_ShadowCvarChanged);
-        Cvar_RegisterVariable (&r_shadow_quality);
-        Cvar_SetCallback (&r_shadow_quality, R_ShadowCvarChanged);
         Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
@@ -551,10 +521,8 @@ static void R_ParseWorldspawn (void)
                 if (!strcmp("slimealpha", key))
                                 map_slimealpha = atof(value);
 
-                R_ShadowParseWorldspawnKey (key, value);
         }
 
-        R_ShadowFinalizeWorldspawn ();
 }
 
 
@@ -583,7 +551,6 @@ void R_NewMap (void)
         r_framecount = 0; //johnfitz -- paranoid?
         r_visframecount = 0; //johnfitz -- paranoid?
 
-        R_ShadowNewMap ();
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn

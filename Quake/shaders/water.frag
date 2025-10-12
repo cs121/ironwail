@@ -6,7 +6,7 @@
         layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
 
-#include "shadow_common.glsl"
+#include "frame_uniforms.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
