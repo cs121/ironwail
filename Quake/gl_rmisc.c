@@ -53,6 +53,10 @@ extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
 extern cvar_t r_oit;
 extern cvar_t r_dither;
+extern cvar_t r_dof;
+extern cvar_t r_dof_focus;
+extern cvar_t r_dof_range;
+extern cvar_t r_dof_strength;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -359,6 +363,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
+	Cvar_RegisterVariable (&r_dof);
+	Cvar_RegisterVariable (&r_dof_focus);
+	Cvar_RegisterVariable (&r_dof_range);
+	Cvar_RegisterVariable (&r_dof_strength);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 

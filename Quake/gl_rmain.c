@@ -105,6 +105,10 @@ cvar_t	r_simd = {"r_simd","1",CVAR_ARCHIVE};
 cvar_t	r_alphasort = {"r_alphasort","1",CVAR_ARCHIVE};
 cvar_t	r_oit = {"r_oit","1",CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "1.0", CVAR_ARCHIVE};
+cvar_t	r_dof = {"r_dof", "0", CVAR_ARCHIVE};
+cvar_t	r_dof_focus = {"r_dof_focus", "64", CVAR_ARCHIVE};
+cvar_t	r_dof_range = {"r_dof_range", "48", CVAR_ARCHIVE};
+cvar_t	r_dof_strength = {"r_dof_strength", "6", CVAR_ARCHIVE};
 
 cvar_t	r_overbrightbits = {"r_overbrightbits", "1", CVAR_ARCHIVE};
 
@@ -203,6 +207,13 @@ static float shadow_pending_intensity;
 static qboolean shadow_has_intensity;
 static float shadow_view_znear;
 static float shadow_view_zfar;
+static float view_znear;
+static float view_zfar;
+
+static qboolean R_DoFEnabled (void)
+{
+	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+}
 
 static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out);
 
@@ -1261,6 +1272,9 @@ void GL_PostProcess (void)
 {
 	int palidx, variant;
 	float dither;
+	qboolean dof_enabled;
+	float dof_focus, dof_range, dof_strength;
+	float dof_znear, dof_zfar;
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -1281,10 +1295,31 @@ void GL_PostProcess (void)
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
 
+	dof_enabled = R_DoFEnabled ();
+	if (dof_enabled)
+	{
+		dof_focus = q_max (0.f, r_dof_focus.value);
+		dof_range = q_max (0.f, r_dof_range.value);
+		dof_strength = q_max (0.f, r_dof_strength.value);
+		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+		GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
+		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+	}
+	else
+	{
+		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+	}
+
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
 }
+
 
 /*
 =================
@@ -1770,6 +1805,8 @@ void R_SetFrustum (void)
 
         shadow_view_znear = znear;
         shadow_view_zfar = zfar;
+        view_znear = znear;
+        view_zfar = zfar;
 
         GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
 
@@ -1816,7 +1853,7 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	return vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
+	return vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ();
 }
 
 /*
@@ -2906,34 +2943,48 @@ void R_WarpScaleView (void)
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 
-        if (msaa)
-        {
-                GL_BeginGroup ("MSAA resolve");
+	if (msaa)
+	{
+		GL_BeginGroup ("MSAA resolve");
 
-                GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-                glReadBuffer (GL_COLOR_ATTACHMENT0);
-                if (needwarpscale)
-                {
-                        GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
-                        glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                        GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                }
-                else
-                {
-                        GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
-                        if (fbodest)
-                                glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                        else
-                                glDrawBuffer (GL_BACK);
-                        GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                }
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		if (needwarpscale)
+		{
+			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		else
+		{
+			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+			if (fbodest)
+				glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			else
+				glDrawBuffer (GL_BACK);
+			{
+				GLbitfield mask = GL_COLOR_BUFFER_BIT;
+				if (fbodest == framebufs.composite.fbo && R_DoFEnabled ())
+					mask |= GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
+				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
+			}
+		}
 
-                GL_EndGroup ();
-        }
+		GL_EndGroup ();
+	}
 
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
-        if (fbodest)
-        {
+	if (fbodest == framebufs.composite.fbo && R_DoFEnabled () && (!msaa || needwarpscale))
+	{
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+	}
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
+	if (fbodest)
+	{
                 glDrawBuffer (GL_COLOR_ATTACHMENT0);
                 glReadBuffer (GL_COLOR_ATTACHMENT0);
         }
