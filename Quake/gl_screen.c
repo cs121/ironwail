@@ -2109,9 +2109,11 @@ void SCR_UpdateScreen (void)
 
 	V_UpdateBlend (); //johnfitz -- V_UpdatePalette cleaned up and renamed
 
-	V_RenderView ();
+       V_RenderView ();
 
-	GL_BeginGroup ("2D");
+       GL_PostProcess ();
+
+       GL_BeginGroup ("2D");
 
 	GL_Set2D ();
 
