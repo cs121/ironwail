@@ -10,7 +10,7 @@
         layout(location=0) out vec2 out_moments;
 #endif
 
-const uint CF_ALPHA_TEST = 8u;
+const uint CF_ALPHA_TEST = 16u;
 
 layout(location=0) flat in uint in_flags;
 layout(location=1) in vec2 in_uv;

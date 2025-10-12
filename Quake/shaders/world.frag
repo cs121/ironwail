@@ -3,6 +3,7 @@
 #else
 	layout(binding=0) uniform sampler2D Tex;
 	layout(binding=1) uniform sampler2D FullbrightTex;
+        layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2DArray ShadowMap;
@@ -65,6 +66,7 @@ struct Call
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
+	uvec2	emhandle;
 #else
 	int		baseinstance;
 	int		padding;
@@ -74,7 +76,8 @@ const uint
 	CF_USE_POLYGON_OFFSET = 1u,
 	CF_USE_FULLBRIGHT = 2u,
 	CF_NOLIGHTMAP = 4u,
-	CF_ALPHA_TEST = 8u
+	CF_USE_EMISSIVE = 8u,
+	CF_ALPHA_TEST = 16u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
@@ -118,7 +121,8 @@ layout(location=6) noperspective in vec2 in_coord;
 layout(location=7) flat in vec4 in_styles;
 layout(location=8) flat in float in_lmofs;
 #if BINDLESS
-        layout(location=9) flat in uvec4 in_samplers;
+        layout(location=9) flat in uvec4 in_samplers0;
+        layout(location=10) flat in uvec2 in_samplers1;
 #endif
 
 // ALU-only 16x16 Bayer matrix
@@ -410,21 +414,28 @@ void main()
 	return;
 #endif
 	vec3 fullbright = vec3(0.);
+        vec3 emissive = vec3(0.);
 	vec2 uv = in_uv;
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
 #endif
 #if BINDLESS
-	sampler2D Tex = sampler2D(in_samplers.xy);
-	sampler2D FullbrightTex;
-	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
-	{
-		FullbrightTex = sampler2D(in_samplers.zw);
-		fullbright = texture(FullbrightTex, uv).rgb;
-	}
+        sampler2D Tex = sampler2D(in_samplers0.xy);
+        if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
+        {
+                sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
+                fullbright = texture(FullbrightTex, uv).rgb;
+        }
+        if ((in_flags & CF_USE_EMISSIVE) != 0u)
+        {
+                sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
+                emissive = texture(EmissiveSampler, uv).rgb;
+        }
 #else
-	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
-		fullbright = texture(FullbrightTex, uv).rgb;
+        if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
+                fullbright = texture(FullbrightTex, uv).rgb;
+        if ((in_flags & CF_USE_EMISSIVE) != 0u)
+                emissive = texture(EmissiveTex, uv).rgb;
 #endif
 #if DITHER >= 2
 	vec4 result = texture(Tex, uv, -1.0);
@@ -531,7 +542,8 @@ void main()
 #else
         result.rgb *= total_lightmap;
 #endif
-	result.rgb += fullbright;
+        result.rgb += fullbright;
+        result.rgb += emissive;
 	result = clamp(result, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 

@@ -66,6 +66,7 @@ float tri(float x)
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
+layout(binding=2) uniform sampler2D EmissiveTex;
 
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
@@ -115,12 +116,13 @@ layout(location=2) in vec3 in_pos;
 
 void main()
 {
-	vec2 uv = in_texcoord;
+        vec2 uv = in_texcoord;
+        vec3 emissive = vec3(0.0);
 #if MODE == 2
-	uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
-	vec4 result = textureLod(Tex, uv, 0.);
+        uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
+        vec4 result = textureLod(Tex, uv, 0.);
 #else
-	vec4 result = texture(Tex, uv);
+        vec4 result = texture(Tex, uv);
 #endif
 #if ALPHATEST
 	if (result.a < 0.666)
@@ -130,13 +132,18 @@ void main()
 	result.rgb = mix(result.rgb, result.rgb * in_color.rgb, result.a);
 #endif
 	result.a = in_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
+        vec3 fullbright;
 #if MODE == 2
-	result.rgb += textureLod(FullbrightTex, uv, 0.).rgb;
+        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
+        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
 #else
-	result.rgb += texture(FullbrightTex, uv).rgb;
+        fullbright = texture(FullbrightTex, uv).rgb;
+        emissive = texture(EmissiveTex, uv).rgb;
 #endif
-	result.rgb = clamp(result.rgb, 0.0, 1.0);
-	float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
+        result.rgb += fullbright;
+        result.rgb += emissive;
+        result.rgb = clamp(result.rgb, 0.0, 1.0);
+        float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
 	fog = clamp(fog, 0.0, 1.0);
 	result.rgb = mix(Fog.rgb, result.rgb, fog);
 	out_fragcolor = result;
