@@ -2979,7 +2979,7 @@ void R_WarpScaleView (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + r_refdef.vrect.width, srcy + r_refdef.vrect.height, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
