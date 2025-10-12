@@ -2585,6 +2585,159 @@ size_t Mod_SanitizeMapDescription (char *dst, size_t dstsize, const char *src)
 
 /*
 =================
+Mod_LoadMapDescription helpers
+=================
+*/
+static qboolean Mod_MapDescription_ParseEntities (char *desc, size_t maxchars, const char *buffer, qboolean playable_hint)
+{
+        const char      *data;
+        int             entity_index;
+        qboolean        ret = playable_hint;
+
+        for (entity_index = 0, data = buffer; data; entity_index++)
+        {
+                data = COM_Parse (data);
+                if (!data || com_token[0] != '{')
+                        return ret;
+
+                while (1)
+                {
+                        qboolean is_message;
+                        qboolean is_classname;
+
+                        data = COM_Parse (data);
+                        if (!data)
+                                return ret;
+                        if (com_token[0] == '}')
+                                break;
+
+                        is_message = (entity_index == 0) && !strcmp (com_token, "message");
+                        is_classname = (entity_index != 0) && !strcmp (com_token, "classname");
+
+                        data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+                        if (!data)
+                                return ret;
+
+                        if (is_message)
+                        {
+                                Mod_SanitizeMapDescription (desc, maxchars, com_token);
+                                if (ret)
+                                        return true;
+                        }
+                        else if (is_classname)
+                        {
+#define CLASSNAME_STARTS_WITH(str)      (!strncmp (com_token, str, strlen (str)))
+#define CLASSNAME_IS(str)               (!strcmp (com_token, str))
+
+                                if (CLASSNAME_STARTS_WITH ("info_player_") ||
+                                        CLASSNAME_STARTS_WITH ("ammo_") ||
+                                        CLASSNAME_STARTS_WITH ("weapon_") ||
+                                        CLASSNAME_STARTS_WITH ("monster_") ||
+                                        CLASSNAME_IS ("trigger_changelevel"))
+                                {
+                                        return true;
+                                }
+
+#undef CLASSNAME_IS
+#undef CLASSNAME_STARTS_WITH
+                        }
+                }
+        }
+
+        return ret;
+}
+
+static qboolean Mod_LoadMapDescription_ReadEntityLump (char *desc, size_t maxchars, FILE *f, int filesize, int fileofs, int filelen)
+{
+        char            buf[4 * 1024];
+        qboolean        playable = false;
+        size_t          readlen;
+
+        if (filelen < 0 || fileofs < 0 || filelen > filesize || fileofs > filesize - filelen)
+                return false;
+
+        if (filelen >= (int) sizeof (buf))
+        {
+                playable = true;
+                filelen = sizeof (buf) - 1;
+        }
+
+        if (fseek (f, fileofs, SEEK_SET))
+                return false;
+
+        readlen = fread (buf, 1, (size_t) filelen, f);
+        if (!readlen)
+                return false;
+        buf[readlen] = '\0';
+
+        return Mod_MapDescription_ParseEntities (desc, maxchars, buf, playable);
+}
+
+static qboolean Mod_LoadMapDescription_Q1 (char *desc, size_t maxchars, FILE *f, int filesize)
+{
+        dheader_t       header;
+        int             i;
+
+        if (filesize <= (int) sizeof (header))
+                return false;
+
+        if (fread (&header, sizeof (header), 1, f) != 1)
+                return false;
+
+        header.version = LittleLong (header.version);
+
+        switch (header.version)
+        {
+        case BSPVERSION:
+        case BSP2VERSION_2PSB:
+        case BSP2VERSION_BSP2:
+        case BSPVERSION_QUAKE64:
+                break;
+        default:
+                return false;
+        }
+
+        for (i = 0; i < HEADER_LUMPS; i++)
+        {
+                header.lumps[i].fileofs = LittleLong (header.lumps[i].fileofs);
+                header.lumps[i].filelen = LittleLong (header.lumps[i].filelen);
+        }
+
+        return Mod_LoadMapDescription_ReadEntityLump (desc, maxchars, f, filesize,
+                        header.lumps[LUMP_ENTITIES].fileofs, header.lumps[LUMP_ENTITIES].filelen);
+}
+
+static qboolean Mod_LoadMapDescription_Q3 (char *desc, size_t maxchars, FILE *f, int filesize)
+{
+        q3_dheader_t    header;
+        int             i;
+
+        if (filesize <= (int) sizeof (header))
+                return false;
+
+        header.ident = Q3BSP_IDENT;
+
+        if (fread (&header.version, sizeof (header.version), 1, f) != 1)
+                return false;
+        header.version = LittleLong (header.version);
+        if (header.version != Q3BSP_VERSION)
+                return false;
+
+        if (fread (header.lumps, sizeof (header.lumps), 1, f) != 1)
+                return false;
+
+        for (i = 0; i < Q3_HEADER_LUMPS; i++)
+        {
+                header.lumps[i].fileofs = LittleLong (header.lumps[i].fileofs);
+                header.lumps[i].filelen = LittleLong (header.lumps[i].filelen);
+        }
+
+        return Mod_LoadMapDescription_ReadEntityLump (desc, maxchars, f, filesize,
+                        header.lumps[Q3_LUMP_ENTITIES].fileofs, header.lumps[Q3_LUMP_ENTITIES].filelen);
+}
+
+/*
+=================
 Mod_LoadMapDescription
 
 Parses the entity lump in the given map to find its worldspawn message
@@ -2594,130 +2747,51 @@ Returns true if map is playable, false otherwise
 */
 qboolean Mod_LoadMapDescription (char *desc, size_t maxchars, const char *map)
 {
-	char		buf[4 * 1024];
-	char		path[MAX_QPATH];
-	const char	*data;
-	FILE		*f;
-	lump_t		*entlump;
-	dheader_t	header;
-	int			i, filesize;
-	qboolean	ret = false;
+        char            path[MAX_QPATH];
+        FILE            *f = NULL;
+        int             filesize;
+        int             ident;
+        qboolean        ret = false;
 
-	if (!maxchars)
-		return false;
-	*desc = '\0';
+        if (!maxchars)
+                return false;
+        *desc = '\0';
 
-	if ((size_t) q_snprintf (path, sizeof (path), "maps/%s.bsp", map) >= sizeof (path))
-		return false;
+        if ((size_t) q_snprintf (path, sizeof (path), "maps/%s.bsp", map) >= sizeof (path))
+                return false;
 
-	filesize = COM_FOpenFile (path, &f, NULL);
-	if (filesize <= (int) sizeof (header))
-	{
-		if (filesize != -1)
-			fclose (f);
-		return false;
-	}
+        filesize = COM_FOpenFile (path, &f, NULL);
+        if (filesize <= 0 || !f)
+        {
+                if (f)
+                        fclose (f);
+                return false;
+        }
 
-	if (fread (&header, sizeof (header), 1, f) != 1)
-	{
-		fclose (f);
-		return false;
-	}
+        if (fread (&ident, sizeof (ident), 1, f) != 1)
+        {
+                fclose (f);
+                return false;
+        }
 
-	header.version = LittleLong (header.version);
+        ident = LittleLong (ident);
 
-	switch (header.version)
-	{
-	case BSPVERSION:
-	case BSP2VERSION_2PSB:
-	case BSP2VERSION_BSP2:
-	case BSPVERSION_QUAKE64:
-		break;
-	default:
-		fclose (f);
-		return false;
-	}
+        if (ident == Q3BSP_IDENT)
+        {
+                ret = Mod_LoadMapDescription_Q3 (desc, maxchars, f, filesize);
+        }
+        else
+        {
+                if (fseek (f, 0, SEEK_SET))
+                {
+                        fclose (f);
+                        return false;
+                }
+                ret = Mod_LoadMapDescription_Q1 (desc, maxchars, f, filesize);
+        }
 
-	for (i = 1; i < (int) (sizeof (header) / sizeof (int)); i++)
-		((int *)&header)[i] = LittleLong ( ((int *)&header)[i]);
-
-	entlump = &header.lumps[LUMP_ENTITIES];
-	if (entlump->filelen < 0 || entlump->filelen >= filesize ||
-		entlump->fileofs < 0 || entlump->fileofs + entlump->filelen > filesize)
-	{
-		fclose (f);
-		return false;
-	}
-
-	// if the entity lump is large enough we assume the map is playable
-	// and only try to parse the first entity (worldspawn) for the map title
-	if (entlump->filelen >= sizeof (buf))
-	{
-		ret = true;
-		entlump->filelen = sizeof (buf) - 1;
-	}
-
-	fseek (f, entlump->fileofs - sizeof (header), SEEK_CUR);
-	i = fread (buf, 1, entlump->filelen, f);
-	fclose (f);
-
-	if (i <= 0)
-		return false;
-	buf[i] = '\0';
-
-	for (i = 0, data = buf; data; i++)
-	{
-		data = COM_Parse (data);
-		if (!data || com_token[0] != '{')
-			return ret;
-
-		while (1)
-		{
-			qboolean is_message;
-			qboolean is_classname;
-
-			// parse key
-			data = COM_Parse (data);
-			if (!data)
-				return ret;
-			if (com_token[0] == '}')
-				break;
-
-			is_message = i == 0 && !strcmp (com_token, "message");
-			is_classname = i != 0 && !strcmp (com_token, "classname");
-
-			// parse value
-			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
-			if (!data)
-				return ret;
-
-			if (is_message)
-			{
-				Mod_SanitizeMapDescription (desc, maxchars, com_token);
-				if (ret)
-					return true;
-			}
-			else if (is_classname)
-			{
-				#define CLASSNAME_STARTS_WITH(str)	(!strncmp (com_token, str, strlen (str)))
-				#define CLASSNAME_IS(str)			(!strcmp (com_token, str))
-
-				if (CLASSNAME_STARTS_WITH ("info_player_") ||
-					CLASSNAME_STARTS_WITH ("ammo_") ||
-					CLASSNAME_STARTS_WITH ("weapon_") ||
-					CLASSNAME_STARTS_WITH ("monster_") ||
-					CLASSNAME_IS ("trigger_changelevel"))
-				{
-					return true;
-				}
-
-				#undef CLASSNAME_IS
-				#undef CLASSNAME_STARTS_WITH
-			}
-		}
-	}
-
-	return ret;
+        fclose (f);
+        return ret;
 }
 
 /*
