@@ -1296,8 +1296,24 @@ void GL_PostProcess (void)
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
 
 	dof_enabled = R_DoFEnabled ();
-	if (dof_enabled)
+
 	{
+		float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
+		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
+		float view_size_x = r_refdef.vrect.width / (float)vid.width;
+		float view_size_y = r_refdef.vrect.height / (float)vid.height;
+		float inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
+
+		GL_Uniform4fFunc (3,
+			view_min_x,
+			view_min_y,
+			view_min_x + view_size_x,
+			view_min_y + view_size_y);
+		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
+        }
+
+        if (dof_enabled)
+        {
 		dof_focus = q_max (0.f, r_dof_focus.value);
 		dof_range = q_max (0.f, r_dof_range.value);
 		dof_strength = q_max (0.f, r_dof_strength.value);
@@ -2966,7 +2982,7 @@ void R_WarpScaleView (void)
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
 				if (fbodest == framebufs.composite.fbo && R_DoFEnabled ())
 					mask |= GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
-				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
+					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
 			}
 		}
 
@@ -2979,7 +2995,7 @@ void R_WarpScaleView (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + r_refdef.vrect.width, srcy + r_refdef.vrect.height, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);

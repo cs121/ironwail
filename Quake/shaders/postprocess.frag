@@ -63,74 +63,92 @@ float tri(float x)
 layout(location=0) uniform vec4 Params;
 layout(location=1) uniform vec4 DoFParams0; // x: enabled, y: focus distance, z: focus range, w: max blur radius (pixels)
 layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: reversed-Z flag (>0.5 when reversed)
+layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
+layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
 
 layout(location=0) out vec4 out_fragcolor;
 
 void main()
 {
-	float gamma = Params.x;
-	float contrast = Params.y;
-	float scale = Params.z;
-	float dither = Params.w;
-		ivec2 pixel = ivec2(gl_FragCoord.xy);
-		vec4 color = texelFetch(GammaTexture, pixel, 0);
-		if (DoFParams0.x > 0.5)
-		{
-				vec2 texSize = vec2(textureSize(GammaTexture, 0));
-				vec2 uv = (vec2(pixel) + 0.5) / texSize;
-				float rawDepth = texture(DepthTexture, uv).r;
-				float nearPlane = DoFParams1.x;
-				float farPlane = DoFParams1.y;
-				float reversed = DoFParams1.z;
-				float linearDepth;
-				if (reversed > 0.5)
-				{
-						float denom = nearPlane + rawDepth * (farPlane - nearPlane);
-						linearDepth = (nearPlane * farPlane) / max(denom, 1e-6);
-				}
-				else
-				{
-						float ndcDepth = rawDepth * 2.0 - 1.0;
-						float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-						linearDepth = (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
-				}
-				float focusDistance = DoFParams0.y;
-				float focusRange = max(DoFParams0.z, 0.0001);
-				float maxBlur = max(DoFParams0.w, 0.0);
-				float coc = abs(linearDepth - focusDistance);
-				float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
-				float blurRadius = blurFactor * maxBlur;
-				if (blurRadius > 0.0001)
-				{
-						vec2 invRes = 1.0 / texSize;
-						const vec2 kernel[8] = vec2[](
-								vec2(1.0, 0.0),
-								vec2(-1.0, 0.0),
-								vec2(0.0, 1.0),
-								vec2(0.0, -1.0),
-								vec2(0.70710678, 0.70710678),
-								vec2(-0.70710678, 0.70710678),
-								vec2(0.70710678, -0.70710678),
-								vec2(-0.70710678, -0.70710678)
-						);
-						float noise = SCREEN_SPACE_NOISE();
-						float angle = noise * 6.28318530718;
-						float sine = sin(angle);
-						float cosine = cos(angle);
-						mat2 rotation = mat2(cosine, -sine, sine, cosine);
-						vec3 accum = color.rgb;
-						float weight = 1.0;
-						for (int i = 0; i < 8; ++i)
-						{
-								vec2 offset = rotation * kernel[i] * blurRadius * invRes;
-								vec3 sampleColor = texture(GammaTexture, uv + offset).rgb;
-								accum += sampleColor;
-								weight += 1.0;
-						}
-						color.rgb = accum / weight;
-				}
-		}
-		out_fragcolor = color;
+        float gamma = Params.x;
+        float contrast = Params.y;
+        float scale = Params.z;
+        float dither = Params.w;
+        ivec2 pixel = ivec2(gl_FragCoord.xy);
+        vec4 color = texelFetch(GammaTexture, pixel, 0);
+        vec2 texSize = vec2(textureSize(GammaTexture, 0));
+        vec2 uv = (vec2(pixel) + 0.5) / texSize;
+        vec2 viewMin = ViewRect.xy;
+        vec2 viewMax = ViewRect.zw;
+        bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
+        if (DoFParams0.x > 0.5 && inView)
+        {
+                vec2 depthTexSize = vec2(textureSize(DepthTexture, 0));
+                vec2 viewMinPx = viewMin * depthTexSize;
+                vec2 viewMaxPx = viewMax * depthTexSize;
+                vec2 viewSizePx = max(viewMaxPx - viewMinPx, vec2(0.0));
+                vec2 invViewScale = max(DepthParams.xy, vec2(1e-4));
+                vec2 depthSizePx = max(vec2(1.0), floor(viewSizePx * invViewScale + vec2(0.0001)));
+                vec2 fragPx = gl_FragCoord.xy;
+                vec2 relPx = clamp(fragPx - viewMinPx, vec2(0.0), max(viewSizePx - vec2(1e-4), vec2(0.0)));
+                vec2 depthIdx = floor(relPx * invViewScale);
+                vec2 maxDepthIdx = max(depthSizePx - vec2(1.0), vec2(0.0));
+                depthIdx = clamp(depthIdx, vec2(0.0), maxDepthIdx);
+                vec2 depthPx = viewMinPx + depthIdx + vec2(0.5);
+                vec2 depthUV = depthPx / depthTexSize;
+                float rawDepth = texture(DepthTexture, depthUV).r;
+                float nearPlane = DoFParams1.x;
+                float farPlane = DoFParams1.y;
+                float reversed = DoFParams1.z;
+                float linearDepth;
+                if (reversed > 0.5)
+                {
+                        float denom = nearPlane + rawDepth * (farPlane - nearPlane);
+                        linearDepth = (nearPlane * farPlane) / max(denom, 1e-6);
+                }
+                else
+                {
+                        float ndcDepth = rawDepth * 2.0 - 1.0;
+                        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+                        linearDepth = (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+                }
+                float focusDistance = DoFParams0.y;
+                float focusRange = max(DoFParams0.z, 0.0001);
+                float maxBlur = max(DoFParams0.w, 0.0);
+                float coc = abs(linearDepth - focusDistance);
+                float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
+                float blurRadius = blurFactor * maxBlur;
+                if (blurRadius > 0.0001)
+                {
+                        vec2 invRes = 1.0 / texSize;
+                        const vec2 kernel[8] = vec2[](
+                                vec2(1.0, 0.0),
+                                vec2(-1.0, 0.0),
+                                vec2(0.0, 1.0),
+                                vec2(0.0, -1.0),
+                                vec2(0.70710678, 0.70710678),
+                                vec2(-0.70710678, 0.70710678),
+                                vec2(0.70710678, -0.70710678),
+                                vec2(-0.70710678, -0.70710678)
+                        );
+                        float noise = SCREEN_SPACE_NOISE();
+                        float angle = noise * 6.28318530718;
+                        float sine = sin(angle);
+                        float cosine = cos(angle);
+                        mat2 rotation = mat2(cosine, -sine, sine, cosine);
+                        vec3 accum = color.rgb;
+                        float weight = 1.0;
+                        for (int i = 0; i < 8; ++i)
+                        {
+                                vec2 offset = rotation * kernel[i] * blurRadius * invRes;
+                                vec3 sampleColor = texture(GammaTexture, uv + offset).rgb;
+                                accum += sampleColor;
+                                weight += 1.0;
+                        }
+                        color.rgb = accum / weight;
+                }
+        }
+        out_fragcolor = color;
 #if PALETTIZE == 1
 		vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
