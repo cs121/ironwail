@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+#define NOISESCALE     (1.0f / 127.0f)
+
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -32,6 +34,9 @@ vec3_t		*r_pointfile;
 
 int			r_visframecount;	// bumped when going to a new PVS
 int			r_framecount;		// used for dlight push checking
+
+static entity_t *cl_sorted_visedicts[MAX_VISEDICTS + 1];
+static int cl_modtype_ofs[mod_numtypes * 2 + 1];
 
 mplane_t	frustum[4];
 float		r_matview[16];
