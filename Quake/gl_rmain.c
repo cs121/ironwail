@@ -666,7 +666,14 @@ static GLuint GL_GenerateSSAOTexture (void)
     if (loc_ndc_zero_to_one >= 0)
         GL_Uniform1iFunc (loc_ndc_zero_to_one, gl_clipcontrol_able ? 1 : 0);
     if (loc_view_z_sign >= 0)
-        GL_Uniform1fFunc (loc_view_z_sign, -1.f);
+    {
+        /*
+         * Reverse-Z projections flip the view-space forward axis compared to
+         * the legacy matrix, so expose the actual sign to the shader.
+         */
+        const float view_z_sign = gl_clipcontrol_able ? -1.f : 1.f;
+        GL_Uniform1fFunc (loc_view_z_sign, view_z_sign);
+    }
 
     glDrawArrays (GL_TRIANGLES, 0, 3);
 
