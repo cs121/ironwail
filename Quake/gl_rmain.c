@@ -53,6 +53,7 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
+static qboolean R_SSAOEnabled (void);
 
 static const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
