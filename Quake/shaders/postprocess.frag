@@ -2,8 +2,6 @@ layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
-layout(binding=4) uniform sampler2D GodrayTexture;
-
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -84,7 +82,7 @@ layout(location=1) uniform vec4 DoFParams0; // x: enabled, y: focus distance, z:
 layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: reversed-Z flag (>0.5 when reversed)
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
-layout(location=5) uniform vec4 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled, w: godrays enabled
+layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -187,15 +185,9 @@ void main()
         {
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
-        float godrayEnabled = HDRParams.w;
-        vec3 shaftColor = vec3(0.0);
-        if (godrayEnabled > 0.5)
-        {
-                shaftColor = texture(GodrayTexture, uv).rgb;
-        }
         float exposure = max(HDRParams.y, 0.0);
         float tonemapEnabled = HDRParams.z;
-        vec3 combined = (hdrColor + bloomColor + shaftColor) * exposure * contrast;
+        vec3 combined = (hdrColor + bloomColor) * exposure * contrast;
         combined = max(combined, vec3(0.0));
         vec3 mapped = tonemapEnabled > 0.5 ? HableTonemap(combined) : clamp(combined, 0.0, 1.0);
         mapped = clamp(mapped, 0.0, 1.0);
