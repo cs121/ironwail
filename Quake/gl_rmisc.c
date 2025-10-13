@@ -57,6 +57,8 @@ extern cvar_t r_dof;
 extern cvar_t r_dof_focus;
 extern cvar_t r_dof_range;
 extern cvar_t r_dof_strength;
+extern cvar_t r_motionblur;
+extern cvar_t r_motionblur_samples;
 extern cvar_t r_tonemap;
 extern cvar_t r_tonemap_exposure;
 extern cvar_t r_bloom;
