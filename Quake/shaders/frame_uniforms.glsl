@@ -4,6 +4,7 @@
 layout(std140, binding=0) uniform FrameDataUBO
 {
         mat4    ViewProj;
+        mat4    PrevViewProj;
         vec4    Fog;
         vec4    SkyFog;
         vec3    WindDir;
@@ -14,6 +15,8 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _Pad0;
         vec3    EyePos;
         float   Time;
+        vec3    PrevEyePos;
+        float   DeltaTime;
         float   ZLogScale;
         float   ZLogBias;
         uint    NumLights;
