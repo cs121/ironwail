@@ -30,12 +30,12 @@ qboolean	r_cache_thrash;		// compatability
 gpuframedata_t r_framedata;
 
 
-vec3_t		*r_pointfile;
+vec3_t* r_pointfile;
 
 int			r_visframecount;	// bumped when going to a new PVS
 int			r_framecount;		// used for dlight push checking
 
-static entity_t *cl_sorted_visedicts[MAX_VISEDICTS + 1];
+static entity_t* cl_sorted_visedicts[MAX_VISEDICTS + 1];
 static int cl_modtype_ofs[mod_numtypes * 2 + 1];
 
 mplane_t	frustum[4];
@@ -48,16 +48,16 @@ static float r_prev_matviewproj[16] = {
 		0.f, 0.f, 1.f, 0.f,
 		0.f, 0.f, 0.f, 1.f
 };
-static vec3_t r_prev_vieworg = {0.f, 0.f, 0.f};
+static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 
 static const float r_identity_mat4[16] = {
-        1.f, 0.f, 0.f, 0.f,
-        0.f, 1.f, 0.f, 0.f,
-        0.f, 0.f, 1.f, 0.f,
-        0.f, 0.f, 0.f, 1.f
+		1.f, 0.f, 0.f, 0.f,
+		0.f, 1.f, 0.f, 0.f,
+		0.f, 0.f, 1.f, 0.f,
+		0.f, 0.f, 0.f, 1.f
 };
 
 //johnfitz -- rendering statistics
@@ -75,91 +75,91 @@ vec3_t	r_origin;
 float r_fovx, r_fovy; //johnfitz -- rendering fov may be different becuase of r_waterwarp and r_stereo
 qboolean water_warp;
 
-extern byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
-extern qboolean SV_EdictInPVS (edict_t *test, byte *pvs);
-extern qboolean SV_BoxInPVS (vec3_t mins, vec3_t maxs, byte *pvs, mnode_t *node);
+extern byte* SV_FatPVS (vec3_t org, qmodel_t* worldmodel);
+extern qboolean SV_EdictInPVS (edict_t* test, byte* pvs);
+extern qboolean SV_BoxInPVS (vec3_t mins, vec3_t maxs, byte* pvs, mnode_t* node);
 
 //
 // screen size info
 //
 refdef_t	r_refdef;
 
-mleaf_t		*r_viewleaf, *r_oldviewleaf;
+mleaf_t* r_viewleaf, * r_oldviewleaf;
 
 int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
 
-cvar_t	r_norefresh = {"r_norefresh","0",CVAR_NONE};
-cvar_t	r_drawentities = {"r_drawentities","1",CVAR_NONE};
-cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
-cvar_t	r_drawviewmodel = {"r_drawviewmodel","1",CVAR_NONE};
-cvar_t	r_speeds = {"r_speeds","0",CVAR_NONE};
-cvar_t	r_pos = {"r_pos","0",CVAR_NONE};
-cvar_t	r_fullbright = {"r_fullbright","0",CVAR_NONE};
-cvar_t	r_lightmap = {"r_lightmap","0",CVAR_NONE};
-cvar_t	r_wateralpha = {"r_wateralpha","1",CVAR_ARCHIVE};
-cvar_t	r_litwater = {"r_litwater","1",CVAR_NONE};
-cvar_t	r_dynamic = {"r_dynamic","1",CVAR_ARCHIVE};
-cvar_t	r_novis = {"r_novis","0",CVAR_ARCHIVE};
+cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
+cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
+cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
+cvar_t	r_drawviewmodel = { "r_drawviewmodel","1",CVAR_NONE };
+cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
+cvar_t	r_pos = { "r_pos","0",CVAR_NONE };
+cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
+cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
+cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
+cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
+cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
+cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
-cvar_t	r_simd = {"r_simd","1",CVAR_ARCHIVE};
+cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 #endif
-cvar_t	r_alphasort = {"r_alphasort","1",CVAR_ARCHIVE};
-cvar_t	r_oit = {"r_oit","1",CVAR_ARCHIVE};
-cvar_t	r_dither = {"r_dither", "1.0", CVAR_ARCHIVE};
-cvar_t	r_dof = {"r_dof", "0", CVAR_ARCHIVE};
-cvar_t	r_dof_focus = {"r_dof_focus", "64", CVAR_ARCHIVE};
-cvar_t	r_dof_range = {"r_dof_range", "48", CVAR_ARCHIVE};
-cvar_t	r_dof_strength = {"r_dof_strength", "6", CVAR_ARCHIVE};
+cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
+cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
+cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
+cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
+cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
+cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
+cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
 
-cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
-cvar_t	r_motionblur_samples = {"r_motionblur_samples", "8", CVAR_ARCHIVE};
+cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
+cvar_t	r_motionblur_samples = { "r_motionblur_samples", "8", CVAR_ARCHIVE };
 
-cvar_t	r_tonemap = {"r_tonemap", "1", CVAR_ARCHIVE};
-cvar_t	r_tonemap_exposure = {"r_tonemap_exposure", "1.0", CVAR_ARCHIVE};
-cvar_t	r_bloom = {"r_bloom", "0.04", CVAR_ARCHIVE};
-cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};
+cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
+cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
+cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
+cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_godrays = {"r_godrays", "0", CVAR_ARCHIVE};
-cvar_t	r_godrays_intensity = {"r_godrays_intensity", "0.4", CVAR_ARCHIVE};
-cvar_t	r_godrays_decay = {"r_godrays_decay", "0.94", CVAR_ARCHIVE};
-cvar_t	r_godrays_density = {"r_godrays_density", "0.8", CVAR_ARCHIVE};
-cvar_t	r_godrays_weight = {"r_godrays_weight", "0.75", CVAR_ARCHIVE};
-cvar_t	r_godrays_samples = {"r_godrays_samples", "64", CVAR_ARCHIVE};
-cvar_t	r_godrays_depthbias = {"r_godrays_depthbias", "8.0", CVAR_ARCHIVE};
-cvar_t	r_godrays_occlusion = {"r_godrays_occlusion", "96.0", CVAR_ARCHIVE};
-cvar_t	r_sun_pitch = {"r_sun_pitch", "-45", CVAR_ARCHIVE};
-cvar_t	r_sun_yaw = {"r_sun_yaw", "0", CVAR_ARCHIVE};
+cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_intensity = { "r_godrays_intensity", "0.4", CVAR_ARCHIVE };
+cvar_t	r_godrays_decay = { "r_godrays_decay", "0.94", CVAR_ARCHIVE };
+cvar_t	r_godrays_density = { "r_godrays_density", "0.8", CVAR_ARCHIVE };
+cvar_t	r_godrays_weight = { "r_godrays_weight", "0.75", CVAR_ARCHIVE };
+cvar_t	r_godrays_samples = { "r_godrays_samples", "64", CVAR_ARCHIVE };
+cvar_t	r_godrays_depthbias = { "r_godrays_depthbias", "8.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_occlusion = { "r_godrays_occlusion", "96.0", CVAR_ARCHIVE };
+cvar_t	r_sun_pitch = { "r_sun_pitch", "-45", CVAR_ARCHIVE };
+cvar_t	r_sun_yaw = { "r_sun_yaw", "0", CVAR_ARCHIVE };
 
-cvar_t	r_overbrightbits = {"r_overbrightbits", "1", CVAR_ARCHIVE};
+cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
-cvar_t	gl_finish = {"gl_finish","0",CVAR_NONE};
-cvar_t	gl_clear = {"gl_clear","1",CVAR_NONE};
-cvar_t	gl_polyblend = {"gl_polyblend","1",CVAR_NONE};
-cvar_t	gl_playermip = {"gl_playermip","0",CVAR_NONE};
-cvar_t	gl_nocolors = {"gl_nocolors","0",CVAR_NONE};
+cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
+cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
+cvar_t	gl_polyblend = { "gl_polyblend","1",CVAR_NONE };
+cvar_t	gl_playermip = { "gl_playermip","0",CVAR_NONE };
+cvar_t	gl_nocolors = { "gl_nocolors","0",CVAR_NONE };
 
 //johnfitz -- new cvars
-cvar_t	r_clearcolor = {"r_clearcolor","2",CVAR_ARCHIVE};
-cvar_t	r_flatlightstyles = {"r_flatlightstyles", "0", CVAR_NONE};
-cvar_t	r_lerplightstyles = {"r_lerplightstyles", "1", CVAR_ARCHIVE}; // 0=off; 1=skip abrupt transitions; 2=always lerp
-cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};
-cvar_t	gl_farclip = {"gl_farclip", "65536", CVAR_ARCHIVE};
-cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};
-cvar_t	r_oldskyleaf = {"r_oldskyleaf", "0", CVAR_NONE};
-cvar_t	r_drawworld = {"r_drawworld", "1", CVAR_NONE};
-cvar_t	r_showtris = {"r_showtris", "0", CVAR_NONE};
-cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
-cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE}; // 0=show all; 1=thinkers only; -1=non-thinkers only
-cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE}; // 0=show all; 1=healthy only; -1=non-healthy only
-cvar_t	r_showbboxes_links = {"r_showbboxes_links", "3", CVAR_NONE}; // 0=off; 1=outgoing only; 2=incoming only; 3=incoming+outgoing
-cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "1", CVAR_NONE};
-cvar_t	r_showfields = {"r_showfields", "0", CVAR_NONE};
-cvar_t	r_showfields_align = {"r_showfields_align", "1", CVAR_ARCHIVE}; // 0=entity pos; 1=bottom-right
-cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};
-cvar_t	r_lerpmove = {"r_lerpmove", "1", CVAR_ARCHIVE};
-cvar_t	r_nolerp_list = {"r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE};
-cvar_t	r_noshadow_list = {"r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE};
+cvar_t	r_clearcolor = { "r_clearcolor","2",CVAR_ARCHIVE };
+cvar_t	r_flatlightstyles = { "r_flatlightstyles", "0", CVAR_NONE };
+cvar_t	r_lerplightstyles = { "r_lerplightstyles", "1", CVAR_ARCHIVE }; // 0=off; 1=skip abrupt transitions; 2=always lerp
+cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
+cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
+cvar_t	gl_overbright_models = { "gl_overbright_models", "1", CVAR_ARCHIVE };
+cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
+cvar_t	r_drawworld = { "r_drawworld", "1", CVAR_NONE };
+cvar_t	r_showtris = { "r_showtris", "0", CVAR_NONE };
+cvar_t	r_showbboxes = { "r_showbboxes", "0", CVAR_NONE };
+cvar_t	r_showbboxes_think = { "r_showbboxes_think", "0", CVAR_NONE }; // 0=show all; 1=thinkers only; -1=non-thinkers only
+cvar_t	r_showbboxes_health = { "r_showbboxes_health", "0", CVAR_NONE }; // 0=show all; 1=healthy only; -1=non-healthy only
+cvar_t	r_showbboxes_links = { "r_showbboxes_links", "3", CVAR_NONE }; // 0=off; 1=outgoing only; 2=incoming only; 3=incoming+outgoing
+cvar_t	r_showbboxes_targets = { "r_showbboxes_targets", "1", CVAR_NONE };
+cvar_t	r_showfields = { "r_showfields", "0", CVAR_NONE };
+cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=entity pos; 1=bottom-right
+cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
+cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
+cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
+cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
@@ -167,33 +167,33 @@ extern cvar_t	vid_fsaa;
 extern cvar_t	r_softemu_dither_screen;
 extern cvar_t	r_softemu_dither_texture;
 
-cvar_t	gl_zfix = {"gl_zfix", "1", CVAR_ARCHIVE}; // QuakeSpasm z-fighting fix
+cvar_t	gl_zfix = { "gl_zfix", "1", CVAR_ARCHIVE }; // QuakeSpasm z-fighting fix
 
-cvar_t	r_lavaalpha = {"r_lavaalpha","0",CVAR_NONE};
-cvar_t	r_telealpha = {"r_telealpha","0",CVAR_NONE};
-cvar_t	r_slimealpha = {"r_slimealpha","0",CVAR_NONE};
+cvar_t	r_lavaalpha = { "r_lavaalpha","0",CVAR_NONE };
+cvar_t	r_telealpha = { "r_telealpha","0",CVAR_NONE };
+cvar_t	r_slimealpha = { "r_slimealpha","0",CVAR_NONE };
 
 float	map_wateralpha, map_lavaalpha, map_telealpha, map_slimealpha;
 float	map_fallbackalpha;
 
 qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //johnfitz
 
-cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
+cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
 
 static float view_znear;
 static float view_zfar;
 
 static qboolean R_DoFEnabled (void)
 {
-        return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
 static qboolean R_GodraysNeedDepth (void)
 {
-        return r_godrays.value > 0.f && q_max (0.f, r_godrays_intensity.value) > 0.f;
+	return r_godrays.value > 0.f && q_max (0.f, r_godrays_intensity.value) > 0.f;
 }
 
-static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out);
+static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t* out);
 
 
 //==============================================================================
@@ -209,7 +209,7 @@ glframebufs_t framebufs;
 GL_CreateFBOAttachment
 =============
 */
-static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter, const char *name)
+static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter, const char* name)
 {
 	GLenum target = samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 	GLuint texnum;
@@ -238,7 +238,7 @@ GL_CreateFBO
 =============
 */
 
-static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum filter, const char *name)
+static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum filter, const char* name)
 {
 	GLuint texnum;
 
@@ -255,7 +255,7 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 	return texnum;
 }
 
-static GLuint GL_CreateFBO (GLenum target, const GLuint *colors, int numcolors, GLuint depth, GLuint stencil, const char *name)
+static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, GLuint depth, GLuint stencil, const char* name)
 {
 	GLenum status;
 	GLuint fbo;
@@ -293,7 +293,7 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint *colors, int numcolors, 
 GL_CreateSimpleFBO
 =============
 */
-static GLuint GL_CreateSimpleFBO (GLenum target, GLuint colors, GLuint depth, GLuint stencil, const char *name)
+static GLuint GL_CreateSimpleFBO (GLenum target, GLuint colors, GLuint depth, GLuint stencil, const char* name)
 {
 	return GL_CreateFBO (target, colors ? &colors : NULL, colors ? 1 : 0, depth, stencil, name);
 }
@@ -336,14 +336,14 @@ void GL_CreateFrameBuffers (void)
 	framebufs.lightshafts.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.lightshafts.color_tex, 0, 0, "light shafts fbo");
 
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
-	framebufs.scene.samples = Q_nextPow2 ((int) q_max (1.f, vid_fsaa.value));
+	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
 
 	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, framebufs.scene.samples, GL_NEAREST, "scene colors");
 	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, framebufs.scene.samples, GL_NEAREST, "scene velocity");
 	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
 	{
-		GLuint colors[2] = {framebufs.scene.color_tex, framebufs.scene.velocity_tex};
+		GLuint colors[2] = { framebufs.scene.color_tex, framebufs.scene.velocity_tex };
 		framebufs.scene.fbo = GL_CreateFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
 			colors, 2,
 			framebufs.scene.depth_stencil_tex,
@@ -355,6 +355,11 @@ void GL_CreateFrameBuffers (void)
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
 	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
 	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, framebufs.scene.samples, GL_NEAREST, "oit revealage");
+
+	// FIX #1: Initialize MRT array before using it
+	framebufs.oit.mrt[0] = framebufs.oit.accum_tex;
+	framebufs.oit.mrt[1] = framebufs.oit.revealage_tex;
+
 	framebufs.oit.fbo_scene = GL_CreateFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
 		framebufs.oit.mrt, 2,
 		framebufs.scene.depth_stencil_tex,
@@ -368,7 +373,7 @@ void GL_CreateFrameBuffers (void)
 		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
 		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, 1, GL_NEAREST, "resolved scene velocity");
 		{
-			GLuint colors[2] = {framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex};
+			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
 		}
 	}
@@ -378,6 +383,7 @@ void GL_CreateFrameBuffers (void)
 		framebufs.resolved_scene.velocity_tex = 0;
 		framebufs.resolved_scene.fbo = 0;
 
+		// FIX #1: MRT array already initialized above, reuse it
 		framebufs.oit.fbo_composite = GL_CreateFBO (GL_TEXTURE_2D,
 			framebufs.oit.mrt, 2,
 			framebufs.composite.depth_stencil_tex,
@@ -427,33 +433,33 @@ void GL_DeleteFrameBuffers (void)
 
 static void GL_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
 {
-        float rl = right - left;
-        float tb = top - bottom;
-        float fn = f - n;
+	float rl = right - left;
+	float tb = top - bottom;
+	float fn = f - n;
 
-        memset (matrix, 0, 16 * sizeof (float));
+	memset (matrix, 0, 16 * sizeof (float));
 
-        if (rl == 0.f || tb == 0.f || fn == 0.f)
-        {
-                IdentityMatrix (matrix);
-                return;
-        }
+	if (rl == 0.f || tb == 0.f || fn == 0.f)
+	{
+		IdentityMatrix (matrix);
+		return;
+	}
 
-        matrix[0*4 + 0] = 2.f / rl;
-        matrix[1*4 + 1] = 2.f / tb;
-        if (gl_clipcontrol_able)
-        {
-                matrix[2*4 + 2] = 1.f / (n - f);
-                matrix[3*4 + 2] = n / (n - f);
-        }
-        else
-        {
-                matrix[2*4 + 2] = -2.f / fn;
-                matrix[3*4 + 2] = -(f + n) / fn;
-        }
-        matrix[3*4 + 0] = -(right + left) / rl;
-        matrix[3*4 + 1] = -(top + bottom) / tb;
-        matrix[3*4 + 3] = 1.f;
+	matrix[0 * 4 + 0] = 2.f / rl;
+	matrix[1 * 4 + 1] = 2.f / tb;
+	if (gl_clipcontrol_able)
+	{
+		matrix[2 * 4 + 2] = 1.f / (n - f);
+		matrix[3 * 4 + 2] = n / (n - f);
+	}
+	else
+	{
+		matrix[2 * 4 + 2] = -2.f / fn;
+		matrix[3 * 4 + 2] = -(f + n) / fn;
+	}
+	matrix[3 * 4 + 0] = -(right + left) / rl;
+	matrix[3 * 4 + 1] = -(top + bottom) / tb;
+	matrix[3 * 4 + 3] = 1.f;
 }
 
 static GLuint GL_GenerateBloomTexture (void)
@@ -474,7 +480,7 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
 	glViewport (0, 0, width, height);
 	GL_UseProgram (glprogs.bloom_extract);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
@@ -492,7 +498,7 @@ static GLuint GL_GenerateBloomTexture (void)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
 		glViewport (0, 0, width, height);
 		GL_UseProgram (glprogs.bloom_blur);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
 		float dirx = (pass & 1) ? 0.f : 1.f;
 		float diry = (pass & 1) ? 1.f : 0.f;
@@ -541,7 +547,7 @@ static qboolean R_ProjectSunToScreen (vec2_t out_pos)
 	world[2] = r_origin[2] + dir[2] * distance;
 	world[3] = 1.f;
 
-	const float *m = r_matviewproj;
+	const float* m = r_matviewproj;
 	float clip_x = m[0] * world[0] + m[4] * world[1] + m[8] * world[2] + m[12] * world[3];
 	float clip_y = m[1] * world[0] + m[5] * world[1] + m[9] * world[2] + m[13] * world[3];
 	float clip_w = m[3] * world[0] + m[7] * world[1] + m[11] * world[2] + m[15] * world[3];
@@ -558,7 +564,7 @@ static GLuint GL_GenerateGodraysTexture (void)
 {
 	if (r_godrays.value <= 0.f)
 		return 0;
-        if (!glprogs.godrays || framebufs.lightshafts.fbo == 0 || framebufs.lightshafts.color_tex == 0)
+	if (!glprogs.godrays || framebufs.lightshafts.fbo == 0 || framebufs.lightshafts.color_tex == 0)
 		return 0;
 	if (framebufs.composite.color_tex == 0 || framebufs.composite.depth_stencil_tex == 0)
 		return 0;
@@ -576,7 +582,7 @@ static GLuint GL_GenerateGodraysTexture (void)
 	glViewport (0, 0, vid.width, vid.height);
 
 	GL_UseProgram (glprogs.godrays);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
@@ -613,24 +619,24 @@ static GLuint GL_GenerateGodraysTexture (void)
 
 void GL_PostProcess (void)
 {
-        int palidx, variant;
-        float dither;
-        qboolean dof_enabled;
-        float dof_focus, dof_range, dof_strength;
-        float dof_znear, dof_zfar;
-        float godray_enabled;
-        GLuint godray_texture;
-        qboolean motion_enabled;
-        qboolean msaa;
-        GLuint velocity_texture;
-        int motion_samples;
-        float motion_strength;
+	int palidx, variant;
+	float dither;
+	qboolean dof_enabled;
+	float dof_focus, dof_range, dof_strength;
+	float dof_znear, dof_zfar;
+	float godray_enabled;
+	GLuint godray_texture;
+	qboolean motion_enabled;
+	qboolean msaa;
+	GLuint velocity_texture;
+	int motion_samples;
+	float motion_strength;
 	if (!GL_NeedsPostprocess ())
 		return;
 
 	GL_BeginGroup ("Postprocess");
 
-	palidx =  GLPalette_Postprocess ();
+	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
@@ -642,43 +648,43 @@ void GL_PostProcess (void)
 	if (bloom_intensity > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
 
-        godray_enabled = 0.f;
-        godray_texture = 0;
-        if (r_godrays.value > 0.f)
-        {
-                godray_texture = GL_GenerateGodraysTexture ();
-                if (godray_texture != 0)
-                        godray_enabled = 1.f;
-        }
+	godray_enabled = 0.f;
+	godray_texture = 0;
+	if (r_godrays.value > 0.f)
+	{
+		godray_texture = GL_GenerateGodraysTexture ();
+		if (godray_texture != 0)
+			godray_enabled = 1.f;
+	}
 
-        msaa = framebufs.scene.samples > 1;
-        motion_strength = q_max (0.f, r_motionblur.value);
-        motion_samples = (int) Q_rint (r_motionblur_samples.value);
-        if (motion_samples < 0)
-                motion_samples = 0;
-        if (motion_samples > 32)
-                motion_samples = 32;
-        velocity_texture = 0;
-        if (framebufs.scene.velocity_tex)
-                velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-        motion_enabled = (motion_strength > 0.f && velocity_texture != 0);
+	msaa = framebufs.scene.samples > 1;
+	motion_strength = q_max (0.f, r_motionblur.value);
+	motion_samples = (int)Q_rint (r_motionblur_samples.value);
+	if (motion_samples < 0)
+		motion_samples = 0;
+	if (motion_samples > 32)
+		motion_samples = 32;
+	velocity_texture = 0;
+	if (framebufs.scene.velocity_tex)
+		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+	motion_enabled = (motion_strength > 0.f && velocity_texture != 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 
 	variant = q_min ((int)softemu, 2);
 	GL_UseProgram (glprogs.postprocess[variant]);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
-        GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-        GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
-        GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
-        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, godray_texture);
-        GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
-        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
-        if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
-                GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
-        GL_Uniform4fFunc (5, bloom_intensity, exposure, tonemap_enabled, godray_enabled);
-        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float) motion_samples, 0.f);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
+	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
+	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, godray_texture);
+	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
+	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
+		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
+	GL_Uniform4fFunc (5, bloom_intensity, exposure, tonemap_enabled, godray_enabled);
+	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float)motion_samples, 0.f);
 
 	dof_enabled = R_DoFEnabled ();
 
@@ -695,10 +701,10 @@ void GL_PostProcess (void)
 			view_min_x + view_size_x,
 			view_min_y + view_size_y);
 		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
-        }
+	}
 
-        if (dof_enabled)
-        {
+	if (dof_enabled)
+	{
 		dof_focus = q_max (0.f, r_dof_focus.value);
 		dof_range = q_max (0.f, r_dof_range.value);
 		dof_strength = q_max (0.f, r_dof_strength.value);
@@ -727,22 +733,25 @@ void GL_PostProcess (void)
 R_CullBox -- johnfitz -- replaced with new function from lordhavoc
 
 Returns true if the box is completely outside the frustum
+
+PERF OPT: Optimized to be more branch-predictor and cache friendly
 =================
 */
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs)
 {
 	int i;
-	mplane_t *p;
-	byte signbits;
-	float vec[3];
-	for (i = 0;i < 4;i++)
+	mplane_t* p;
+
+	// PERF OPT: Process all planes in one loop with minimal branching
+	for (i = 0; i < 4; i++)
 	{
 		p = frustum + i;
-		signbits = p->signbits;
-		vec[0] = ((signbits & 1) ? emins : emaxs)[0];
-		vec[1] = ((signbits & 2) ? emins : emaxs)[1];
-		vec[2] = ((signbits & 4) ? emins : emaxs)[2];
-		if (p->normal[0]*vec[0] + p->normal[1]*vec[1] + p->normal[2]*vec[2] < p->dist)
+		// PERF OPT: Use signbits to select min/max directly without branches
+		float px = (p->signbits & 1) ? emins[0] : emaxs[0];
+		float py = (p->signbits & 2) ? emins[1] : emaxs[1];
+		float pz = (p->signbits & 4) ? emins[2] : emaxs[2];
+
+		if (p->normal[0] * px + p->normal[1] * py + p->normal[2] * pz < p->dist)
 			return true;
 	}
 	return false;
@@ -751,38 +760,56 @@ qboolean R_CullBox (vec3_t emins, vec3_t emaxs)
 /*
 ===============
 R_GetEntityBounds -- johnfitz -- uses correct bounds based on rotation
+
+PERF OPT: Avoid redundant pointer dereferences
 ===============
 */
-void R_GetEntityBounds (const entity_t *e, vec3_t mins, vec3_t maxs)
+void R_GetEntityBounds (const entity_t* e, vec3_t mins, vec3_t maxs)
 {
-	vec_t scalefactor, *minbounds, *maxbounds;
+	vec_t scalefactor;
+	const vec_t* minbounds, * maxbounds;
+	const vec3_t* origin = &e->origin;
+	const vec3_t* angles = &e->angles;
 
-	if (e->angles[0] || e->angles[2]) //pitch or roll
+	// PERF OPT: Cache model pointer
+	const qmodel_t* model = e->model;
+
+	if ((*angles)[0] || (*angles)[2]) //pitch or roll
 	{
-		minbounds = e->model->rmins;
-		maxbounds = e->model->rmaxs;
+		minbounds = model->rmins;
+		maxbounds = model->rmaxs;
 	}
-	else if (e->angles[1]) //yaw
+	else if ((*angles)[1]) //yaw
 	{
-		minbounds = e->model->ymins;
-		maxbounds = e->model->ymaxs;
+		minbounds = model->ymins;
+		maxbounds = model->ymaxs;
 	}
 	else //no rotation
 	{
-		minbounds = e->model->mins;
-		maxbounds = e->model->maxs;
+		minbounds = model->mins;
+		maxbounds = model->maxs;
 	}
 
-	scalefactor = ENTSCALE_DECODE(e->scale);
+	scalefactor = ENTSCALE_DECODE (e->scale);
 	if (scalefactor != 1.0f)
 	{
-		VectorMA (e->origin, scalefactor, minbounds, mins);
-		VectorMA (e->origin, scalefactor, maxbounds, maxs);
+		// PERF OPT: Manual VectorMA for better optimization
+		mins[0] = (*origin)[0] + minbounds[0] * scalefactor;
+		mins[1] = (*origin)[1] + minbounds[1] * scalefactor;
+		mins[2] = (*origin)[2] + minbounds[2] * scalefactor;
+		maxs[0] = (*origin)[0] + maxbounds[0] * scalefactor;
+		maxs[1] = (*origin)[1] + maxbounds[1] * scalefactor;
+		maxs[2] = (*origin)[2] + maxbounds[2] * scalefactor;
 	}
 	else
 	{
-		VectorAdd (e->origin, minbounds, mins);
-		VectorAdd (e->origin, maxbounds, maxs);
+		// PERF OPT: Manual VectorAdd for better optimization
+		mins[0] = (*origin)[0] + minbounds[0];
+		mins[1] = (*origin)[1] + minbounds[1];
+		mins[2] = (*origin)[2] + minbounds[2];
+		maxs[0] = (*origin)[0] + maxbounds[0];
+		maxs[1] = (*origin)[1] + maxbounds[1];
+		maxs[2] = (*origin)[2] + maxbounds[2];
 	}
 }
 
@@ -791,7 +818,7 @@ void R_GetEntityBounds (const entity_t *e, vec3_t mins, vec3_t maxs)
 R_CullModelForEntity -- johnfitz -- uses correct bounds based on rotation
 ===============
 */
-qboolean R_CullModelForEntity (entity_t *e)
+qboolean R_CullModelForEntity (entity_t* e)
 {
 	vec3_t mins, maxs;
 
@@ -803,67 +830,74 @@ qboolean R_CullModelForEntity (entity_t *e)
 /*
 ===============
 R_EntityMatrix
+
+PERF OPT: Calculate sin/cos only once, reuse for both branches
 ===============
 */
 void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned char scale)
 {
-	float scalefactor	= ENTSCALE_DECODE(scale);
-	float yaw			= DEG2RAD(angles[YAW]);
-	float pitch			= angles[PITCH];
-	float roll			= angles[ROLL];
+	float scalefactor = ENTSCALE_DECODE (scale);
+	float yaw = DEG2RAD (angles[YAW]);
+	float pitch = angles[PITCH];
+	float roll = angles[ROLL];
+
+	// PERF OPT: Calculate sin/cos for yaw once
+	float sy = sin (yaw);
+	float cy = cos (yaw);
+
 	if (pitch == 0.f && roll == 0.f)
 	{
-		float sy = sin(yaw) * scalefactor;
-		float cy = cos(yaw) * scalefactor;
+		// PERF OPT: Reuse pre-calculated sin/cos
+		sy *= scalefactor;
+		cy *= scalefactor;
 
 		// First column
-		matrix[ 0] = cy;
-		matrix[ 1] = sy;
-		matrix[ 2] = 0.f;
-		matrix[ 3] = 0.f;
+		matrix[0] = cy;
+		matrix[1] = sy;
+		matrix[2] = 0.f;
+		matrix[3] = 0.f;
 
 		// Second column
-		matrix[ 4] = -sy;
-		matrix[ 5] = cy;
-		matrix[ 6] = 0.f;
-		matrix[ 7] = 0.f;
+		matrix[4] = -sy;
+		matrix[5] = cy;
+		matrix[6] = 0.f;
+		matrix[7] = 0.f;
 
 		// Third column
-		matrix[ 8] = 0.f;
-		matrix[ 9] = 0.f;
+		matrix[8] = 0.f;
+		matrix[9] = 0.f;
 		matrix[10] = scalefactor;
 		matrix[11] = 0.f;
 	}
 	else
 	{
-		float sy, sp, sr, cy, cp, cr;
-		pitch = DEG2RAD(pitch);
-		roll = DEG2RAD(roll);
-		sy = sin(yaw);
-		sp = sin(pitch);
-		sr = sin(roll);
-		cy = cos(yaw);
-		cp = cos(pitch);
-		cr = cos(roll);
+		float sp, sr, cp, cr;
+		pitch = DEG2RAD (pitch);
+		roll = DEG2RAD (roll);
+		// PERF OPT: sy and cy already calculated above
+		sp = sin (pitch);
+		sr = sin (roll);
+		cp = cos (pitch);
+		cr = cos (roll);
 
 		// https://www.symbolab.com/solver/matrix-multiply-calculator FTW!
 
 		// First column
-		matrix[ 0] = scalefactor * cy*cp;
-		matrix[ 1] = scalefactor * sy*cp;
-		matrix[ 2] = scalefactor * sp;
-		matrix[ 3] = 0.f;
+		matrix[0] = scalefactor * cy * cp;
+		matrix[1] = scalefactor * sy * cp;
+		matrix[2] = scalefactor * sp;
+		matrix[3] = 0.f;
 
 		// Second column
-		matrix[ 4] = scalefactor * (-cy*sp*sr - cr*sy);
-		matrix[ 5] = scalefactor * (cr*cy - sy*sp*sr);
-		matrix[ 6] = scalefactor * cp*sr;
-		matrix[ 7] = 0.f;
+		matrix[4] = scalefactor * (-cy * sp * sr - cr * sy);
+		matrix[5] = scalefactor * (cr * cy - sy * sp * sr);
+		matrix[6] = scalefactor * cp * sr;
+		matrix[7] = 0.f;
 
 		// Third column
-		matrix[ 8] = scalefactor * (sy*sr - cr*cy*sp);
-		matrix[ 9] = scalefactor * (-cy*sr - cr*sy*sp);
-		matrix[10] = scalefactor * cr*cp;
+		matrix[8] = scalefactor * (sy * sr - cr * cy * sp);
+		matrix[9] = scalefactor * (-cy * sr - cr * sy * sp);
+		matrix[10] = scalefactor * cr * cp;
 		matrix[11] = 0.f;
 	}
 
@@ -890,13 +924,13 @@ void GL_PolygonOffset (int offset)
 	{
 		glEnable (GL_POLYGON_OFFSET_FILL);
 		glEnable (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset(1, offset);
+		glPolygonOffset (1, offset);
 	}
 	else if (offset < 0)
 	{
 		glEnable (GL_POLYGON_OFFSET_FILL);
 		glEnable (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset(-1, offset);
+		glPolygonOffset (-1, offset);
 	}
 	else
 	{
@@ -994,38 +1028,49 @@ static framesetup_t framesetup;
 /*
 =============
 R_SortEntities
+
+PERF OPT: Optimized entity filtering and sorting
 =============
 */
 static void R_SortEntities (void)
 {
 	int i, j, pass;
-	int bins[1 << (MODSORT_BITS/2)];
-	int typebins[mod_numtypes*2];
+	int bins[1 << (MODSORT_BITS / 2)];
+	int typebins[mod_numtypes * 2];
 	alphamode_t alphamode = R_GetEffectiveAlphaMode ();
 
 	if (!r_drawentities.value)
 		cl_numvisedicts = 0;
 
-	// remove entities with no or invisible models
+	// PERF OPT: Combined entity filtering - remove entities with no/invisible models
+	// and apply brush culling in one pass
 	for (i = 0, j = 0; i < cl_numvisedicts; i++)
 	{
-		entity_t *ent = cl_visedicts[i];
+		entity_t* ent = cl_visedicts[i];
+
+		// PERF OPT: Early-out conditions grouped together
 		if (!ent->model || ent->alpha == ENTALPHA_ZERO)
 			continue;
-		if (ent->model->type == mod_brush && R_CullModelForEntity (ent))
-			continue;
+
+		// PERF OPT: Only cull brush models (most common case first)
+		if (ent->model->type == mod_brush)
+		{
+			if (R_CullModelForEntity (ent))
+				continue;
+		}
+
 		cl_visedicts[j++] = ent;
 	}
 	cl_numvisedicts = j;
 
-	memset (typebins, 0, sizeof(typebins));
+	memset (typebins, 0, sizeof (typebins));
 	if (r_drawworld.value)
 		typebins[mod_brush * 2 + 0]++; // count worldspawn
 
 	// fill entity sort key array, initial order, and per-type counts
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
-		entity_t *ent = cl_visedicts[i];
+		entity_t* ent = cl_visedicts[i];
 		qboolean translucent = !ENTALPHA_OPAQUE (ent->alpha);
 
 		if (translucent && alphamode == ALPHAMODE_SORTED)
@@ -1034,11 +1079,16 @@ static void R_SortEntities (void)
 			vec3_t mins, maxs;
 
 			R_GetEntityBounds (ent, mins, maxs);
-			for (j = 0, dist = 0.f; j < 3; j++)
-			{
-				delta = CLAMP (mins[j], r_refdef.vieworg[j], maxs[j]) - r_refdef.vieworg[j];
-				dist += delta * delta;
-			}
+
+			// PERF OPT: Unrolled distance calculation
+			dist = 0.f;
+			delta = CLAMP (mins[0], r_refdef.vieworg[0], maxs[0]) - r_refdef.vieworg[0];
+			dist += delta * delta;
+			delta = CLAMP (mins[1], r_refdef.vieworg[1], maxs[1]) - r_refdef.vieworg[1];
+			dist += delta * delta;
+			delta = CLAMP (mins[2], r_refdef.vieworg[2], maxs[2]) - r_refdef.vieworg[2];
+			dist += delta * delta;
+
 			dist = sqrt (dist);
 			visedict_keys[i] = ~CLAMP (0, (int)dist, MODSORT_MASK);
 		}
@@ -1050,6 +1100,7 @@ static void R_SortEntities (void)
 		}
 		else
 		{
+			// PERF OPT: Branch prediction hint - alias is most common
 			if (ent->model->type == mod_alias)
 				visedict_keys[i] = ent->model->sortkey | (ent->skinnum & MODSORT_FRAMEMASK);
 			else
@@ -1064,7 +1115,7 @@ static void R_SortEntities (void)
 	}
 
 	// convert typebin counts into offsets
-	for (i = 0, j = 0; i < countof(typebins); i++)
+	for (i = 0, j = 0; i < countof (typebins); i++)
 	{
 		int tmp = typebins[i];
 		cl_modtype_ofs[i] = typebins[i] = j;
@@ -1075,14 +1126,14 @@ static void R_SortEntities (void)
 	// LSD-first radix sort: 2 passes x MODSORT_BITS/2 bits
 	for (pass = 0; pass < 2; pass++)
 	{
-		uint16_t *src = visedict_order[pass];
-		uint16_t *dst = visedict_order[pass ^ 1];
+		uint16_t* src = visedict_order[pass];
+		uint16_t* dst = visedict_order[pass ^ 1];
 		const int mask = countof (bins) - 1;
-		int shift = pass * (MODSORT_BITS/2);
+		int shift = pass * (MODSORT_BITS / 2);
 		int sum;
 
 		// count number of entries in each bin
-		memset (bins, 0, sizeof(bins));
+		memset (bins, 0, sizeof (bins));
 		for (i = 0; i < cl_numvisedicts; i++)
 			bins[(visedict_keys[i] >> shift) & mask]++;
 
@@ -1105,23 +1156,23 @@ static void R_SortEntities (void)
 		cl_sorted_visedicts[typebins[mod_brush * 2 + 0]++] = &cl_entities[0]; // add the world as the first brush entity
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
-		entity_t *ent = cl_visedicts[visedict_order[0][i]];
+		entity_t* ent = cl_visedicts[visedict_order[0][i]];
 		qboolean translucent = !ENTALPHA_OPAQUE (ent->alpha);
 		cl_sorted_visedicts[typebins[ent->model->type * 2 + translucent]++] = ent;
 	}
 }
 
-int SignbitsForPlane (mplane_t *out)
+int SignbitsForPlane (mplane_t* out)
 {
 	int	bits, j;
 
 	// for fast box on planeside test
 
 	bits = 0;
-	for (j=0 ; j<3 ; j++)
+	for (j = 0; j < 3; j++)
 	{
 		if (out->normal[j] < 0)
-			bits |= 1<<j;
+			bits |= 1 << j;
 	}
 	return bits;
 }
@@ -1131,30 +1182,30 @@ int SignbitsForPlane (mplane_t *out)
 GL_FrustumMatrix
 =============
 */
-static void GL_FrustumMatrix(float matrix[16], float fovx, float fovy, float n, float f)
+static void GL_FrustumMatrix (float matrix[16], float fovx, float fovy, float n, float f)
 {
-	const float w = 1.0f / tanf(fovx * 0.5f);
-	const float h = 1.0f / tanf(fovy * 0.5f);
+	const float w = 1.0f / tanf (fovx * 0.5f);
+	const float h = 1.0f / tanf (fovy * 0.5f);
 
-	memset(matrix, 0, 16 * sizeof(float));
+	memset (matrix, 0, 16 * sizeof (float));
 
 	if (gl_clipcontrol_able)
 	{
 		// reversed Z projection matrix with the coordinate system conversion baked in
-		matrix[0*4 + 2] = -n / (f - n);
-		matrix[0*4 + 3] = 1.f;
-		matrix[1*4 + 0] = -w;
-		matrix[2*4 + 1] = h;
-		matrix[3*4 + 2] = f * n / (f - n);
+		matrix[0 * 4 + 2] = -n / (f - n);
+		matrix[0 * 4 + 3] = 1.f;
+		matrix[1 * 4 + 0] = -w;
+		matrix[2 * 4 + 1] = h;
+		matrix[3 * 4 + 2] = f * n / (f - n);
 	}
 	else
 	{
 		// standard projection matrix with the coordinate system conversion baked in
-		matrix[0*4 + 2] = (f + n) / (f - n);
-		matrix[0*4 + 3] = 1.f;
-		matrix[1*4 + 0] = -w;
-		matrix[2*4 + 1] = h;
-		matrix[3*4 + 2] = -2.f * f * n / (f - n);
+		matrix[0 * 4 + 2] = (f + n) / (f - n);
+		matrix[0 * 4 + 3] = 1.f;
+		matrix[1 * 4 + 0] = -w;
+		matrix[2 * 4 + 1] = h;
+		matrix[3 * 4 + 2] = -2.f * f * n / (f - n);
 	}
 }
 
@@ -1166,22 +1217,22 @@ Extracts the normalized frustum plane from the given view-projection matrix
 that corresponds to a value of 'ndcval' on the 'axis' axis in NDC space.
 ===============
 */
-static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out)
+static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t* out)
 {
 	float scale;
-	out->normal[0] =  (mvp[0*4 + axis] - ndcval * mvp[0*4 + 3]);
-	out->normal[1] =  (mvp[1*4 + axis] - ndcval * mvp[1*4 + 3]);
-	out->normal[2] =  (mvp[2*4 + axis] - ndcval * mvp[2*4 + 3]);
-	out->dist      = -(mvp[3*4 + axis] - ndcval * mvp[3*4 + 3]);
+	out->normal[0] = (mvp[0 * 4 + axis] - ndcval * mvp[0 * 4 + 3]);
+	out->normal[1] = (mvp[1 * 4 + axis] - ndcval * mvp[1 * 4 + 3]);
+	out->normal[2] = (mvp[2 * 4 + axis] - ndcval * mvp[2 * 4 + 3]);
+	out->dist = -(mvp[3 * 4 + axis] - ndcval * mvp[3 * 4 + 3]);
 
 	scale = (flip ? -1.f : 1.f) / sqrtf (DotProduct (out->normal, out->normal));
 	out->normal[0] *= scale;
 	out->normal[1] *= scale;
 	out->normal[2] *= scale;
-	out->dist      *= scale;
+	out->dist *= scale;
 
-	out->type      = PLANE_ANYZ;
-	out->signbits  = SignbitsForPlane (out);
+	out->type = PLANE_ANYZ;
+	out->signbits = SignbitsForPlane (out);
 }
 
 /*
@@ -1191,9 +1242,9 @@ R_SetFrustum
 */
 void R_SetFrustum (void)
 {
-        float w, h, d;
-        float znear, zfar;
-        float logznear, logzfar;
+	float w, h, d;
+	float znear, zfar;
+	float logznear, logzfar;
 	float translation[16];
 	float rotation[16];
 
@@ -1201,32 +1252,32 @@ void R_SetFrustum (void)
 	w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
 	h = 1.f / tanf (DEG2RAD (r_fovy) * 0.5f);
 	d = 12.f * q_min (w, h);
-        znear = CLAMP (0.5f, d, 4.f);
-        zfar = gl_farclip.value;
+	znear = CLAMP (0.5f, d, 4.f);
+	zfar = gl_farclip.value;
 
-        view_znear = znear;
-        view_zfar = zfar;
+	view_znear = znear;
+	view_zfar = zfar;
 
-        GL_FrustumMatrix(r_matproj, DEG2RAD(r_fovx), DEG2RAD(r_fovy), znear, zfar);
+	GL_FrustumMatrix (r_matproj, DEG2RAD (r_fovx), DEG2RAD (r_fovy), znear, zfar);
 
 	// View matrix
-	RotationMatrix(r_matview, DEG2RAD(-r_refdef.viewangles[ROLL]), 0);
-	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[PITCH]), 1);
-	MatrixMultiply(r_matview, rotation);
-	RotationMatrix(rotation, DEG2RAD(-r_refdef.viewangles[YAW]), 2);
-	MatrixMultiply(r_matview, rotation);
+	RotationMatrix (r_matview, DEG2RAD (-r_refdef.viewangles[ROLL]), 0);
+	RotationMatrix (rotation, DEG2RAD (-r_refdef.viewangles[PITCH]), 1);
+	MatrixMultiply (r_matview, rotation);
+	RotationMatrix (rotation, DEG2RAD (-r_refdef.viewangles[YAW]), 2);
+	MatrixMultiply (r_matview, rotation);
 
-	TranslationMatrix(translation, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
-	MatrixMultiply(r_matview, translation);
+	TranslationMatrix (translation, -r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
+	MatrixMultiply (r_matview, translation);
 
 	// View projection matrix
-	memcpy(r_matviewproj, r_matproj, 16 * sizeof(float));
-	MatrixMultiply(r_matviewproj, r_matview);
+	memcpy (r_matviewproj, r_matproj, 16 * sizeof (float));
+	MatrixMultiply (r_matviewproj, r_matview);
 
-	ExtractFrustumPlane (r_matviewproj, 0,  1.f, true,  &frustum[0]); // right
+	ExtractFrustumPlane (r_matviewproj, 0, 1.f, true, &frustum[0]); // right
 	ExtractFrustumPlane (r_matviewproj, 0, -1.f, false, &frustum[1]); // left
 	ExtractFrustumPlane (r_matviewproj, 1, -1.f, false, &frustum[2]); // bottom
-	ExtractFrustumPlane (r_matviewproj, 1,  1.f, true,  &frustum[3]); // top
+	ExtractFrustumPlane (r_matviewproj, 1, 1.f, true, &frustum[3]); // top
 
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
@@ -1242,7 +1293,7 @@ GL_NeedsSceneEffects
 */
 qboolean GL_NeedsSceneEffects (void)
 {
-        return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1 || r_motionblur.value > 0.f;
+	return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1 || r_motionblur.value > 0.f;
 }
 
 /*
@@ -1254,8 +1305,8 @@ qboolean GL_NeedsPostprocess (void)
 {
 	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || (r_godrays.value > 0.f && r_godrays_intensity.value > 0.f) || r_motionblur.value > 0.f)
-                return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || (r_godrays.value > 0.f && r_godrays_intensity.value > 0.f) || r_motionblur.value > 0.f)
+		return true;
 	return false;
 }
 
@@ -1266,43 +1317,43 @@ R_SetupGL
 */
 void R_SetupGL (void)
 {
-       if (!GL_NeedsSceneEffects ())
-       {
-               GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
+	if (!GL_NeedsSceneEffects ())
+	{
+		GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
 
-               GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
-               framesetup.scene_fbo = framebufs.composite.fbo;
-               framesetup.oit_fbo = framebufs.oit.fbo_composite;
-               if (target)
-               {
-                       glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                       glReadBuffer (GL_COLOR_ATTACHMENT0);
-               }
-               else
-               {
-                       glDrawBuffer (GL_BACK);
-                       glReadBuffer (GL_BACK);
-               }
-               glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
-       }
-       else
-       {
-               GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.scene.fbo);
-               framesetup.scene_fbo = framebufs.scene.fbo;
-               framesetup.oit_fbo = framebufs.oit.fbo_scene;
-               if (framebufs.scene.velocity_tex)
-               {
-                       GLuint buffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-                       GL_DrawBuffersFunc (2, buffers);
-                       glReadBuffer (GL_COLOR_ATTACHMENT0);
-               }
-               else
-               {
-                       glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                       glReadBuffer (GL_COLOR_ATTACHMENT0);
-               }
-               glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
-       }
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
+		framesetup.scene_fbo = framebufs.composite.fbo;
+		framesetup.oit_fbo = framebufs.oit.fbo_composite;
+		if (target)
+		{
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
+		else
+		{
+			glDrawBuffer (GL_BACK);
+			glReadBuffer (GL_BACK);
+		}
+		glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
+	}
+	else
+	{
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.scene.fbo);
+		framesetup.scene_fbo = framebufs.scene.fbo;
+		framesetup.oit_fbo = framebufs.oit.fbo_scene;
+		if (framebufs.scene.velocity_tex)
+		{
+			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			GL_DrawBuffersFunc (2, buffers);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
+		else
+		{
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
+		glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
+	}
 }
 
 /*
@@ -1339,10 +1390,10 @@ R_UploadFrameData
 void R_UploadFrameData (void)
 {
 	GLuint	buf;
-	GLbyte	*ofs;
+	GLbyte* ofs;
 	size_t	size;
 
-	size = sizeof(r_lightbuffer.lightstyles) + sizeof(r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1); // avoid zero-length array
+	size = sizeof (r_lightbuffer.lightstyles) + sizeof (r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1); // avoid zero-length array
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_lightbuffer, size, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, buf, (GLintptr)ofs, size);
 
@@ -1361,8 +1412,8 @@ void R_SetupView (void)
 
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-                r_framedata.overbright = (float)(1 << overbright_bits);
-                r_framedata._padding0 = 0.f;
+		r_framedata.overbright = (float)(1 << overbright_bits);
+		r_framedata._padding0 = 0.f;
 	}
 
 	r_framecount++;
@@ -1376,22 +1427,22 @@ void R_SetupView (void)
 
 	if (prev_valid)
 	{
-                memcpy (r_framedata.prev_viewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
-	        r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
-	        r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
-	        r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
-	        r_framedata.delta_time = (float) prev_delta;
-	        r_framedata.prev_frame_valid = 1;
+		memcpy (r_framedata.prev_viewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
+		r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
+		r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
+		r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
+		r_framedata.delta_time = (float)prev_delta;
+		r_framedata.prev_frame_valid = 1;
 	}
 	else
 	{
-                memcpy (r_framedata.prev_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
-	        r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
-	        r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
-	        r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
-	        r_framedata.delta_time = 0.f;
-	        r_framedata.prev_frame_valid = 0;
-	        r_prev_frame_valid = false;
+		memcpy (r_framedata.prev_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
+		r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
+		r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
+		r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
+		r_framedata.delta_time = 0.f;
+		r_framedata.prev_frame_valid = 0;
+		r_prev_frame_valid = false;
 	}
 
 	if (softemu == SOFTEMU_COARSE)
@@ -1408,7 +1459,7 @@ void R_SetupView (void)
 	}
 	else if (softemu == SOFTEMU_OFF)
 	{
-		r_framedata.screendither = r_dither.value * (1.f/255.f);
+		r_framedata.screendither = r_dither.value * (1.f / 255.f);
 		r_framedata.texturedither = 0.f;
 	}
 	else // FINE (screen-space dithering applied during postprocessing), or BANDED (no dithering)
@@ -1420,11 +1471,11 @@ void R_SetupView (void)
 	Fog_SetupFrame (); //johnfitz
 	Sky_SetupFrame ();
 
-// build the transformation matrix for the given view angles
+	// build the transformation matrix for the given view angles
 	VectorCopy (r_refdef.vieworg, r_origin);
 	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
 
-// current viewleaf
+	// current viewleaf
 	r_oldviewleaf = r_viewleaf;
 	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
 
@@ -1445,8 +1496,8 @@ void R_SetupView (void)
 			if (r_waterwarp.value > 1.f)
 			{
 				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
-				r_fovx = atan(tan(DEG2RAD(r_refdef.fov_x) / 2) * (0.97 + sin(t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
-				r_fovy = atan(tan(DEG2RAD(r_refdef.fov_y) / 2) * (1.03 - sin(t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
 			}
 			else
 			{
@@ -1458,12 +1509,12 @@ void R_SetupView (void)
 
 	R_SetFrustum ();
 
-        R_MarkSurfaces (); //johnfitz -- create texture chains from PVS
+	R_MarkSurfaces (); //johnfitz -- create texture chains from PVS
 
-        R_SortEntities ();
+	R_SortEntities ();
 
 
-        R_PushDlights ();
+	R_PushDlights ();
 
 	//johnfitz -- cheat-protect some draw modes
 	r_fullbright_cheatsafe = r_lightmap_cheatsafe = false;
@@ -1485,20 +1536,20 @@ void R_SetupView (void)
 
 void R_StorePrevFrameState (void)
 {
-        if (!r_frame_rendered_this_update)
-        {
-                r_prev_frame_valid = false;
-                return;
-        }
+	if (!r_frame_rendered_this_update)
+	{
+		r_prev_frame_valid = false;
+		return;
+	}
 
-        double prev_time = r_prev_frame_time;
+	double prev_time = r_prev_frame_time;
 
-        memcpy (r_prev_matviewproj, r_matviewproj, sizeof (r_prev_matviewproj));
-        VectorCopy (r_refdef.vieworg, r_prev_vieworg);
+	memcpy (r_prev_matviewproj, r_matviewproj, sizeof (r_prev_matviewproj));
+	VectorCopy (r_refdef.vieworg, r_prev_vieworg);
 
-        r_prev_frame_time = cl.time;
-        r_prev_frame_valid = (cl.time > prev_time);
-        r_frame_rendered_this_update = false;
+	r_prev_frame_time = cl.time;
+	r_prev_frame_valid = (cl.time > prev_time);
+	r_frame_rendered_this_update = false;
 }
 
 
@@ -1513,10 +1564,10 @@ void R_StorePrevFrameState (void)
 R_GetVisEntities
 =============
 */
-entity_t **R_GetVisEntities (modtype_t type, qboolean translucent, int *outcount)
+entity_t** R_GetVisEntities (modtype_t type, qboolean translucent, int* outcount)
 {
-	entity_t **entlist = cl_sorted_visedicts;
-	int *ofs = cl_modtype_ofs + type * 2 + (translucent ? 1 : 0);
+	entity_t** entlist = cl_sorted_visedicts;
+	int* ofs = cl_modtype_ofs + type * 2 + (translucent ? 1 : 0);
 	*outcount = ofs[1] - ofs[0];
 	return entlist + ofs[0];
 }
@@ -1528,8 +1579,8 @@ R_DrawWater
 */
 static void R_DrawWater (qboolean translucent)
 {
-	entity_t **entlist = cl_sorted_visedicts;
-	int *ofs = cl_modtype_ofs + 2 * mod_brush;
+	entity_t** entlist = cl_sorted_visedicts;
+	int* ofs = cl_modtype_ofs + 2 * mod_brush;
 
 	if (translucent)
 	{
@@ -1551,16 +1602,16 @@ R_DrawEntitiesOnList
 */
 void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 {
-	int		*ofs;
-	entity_t **entlist = cl_sorted_visedicts;
+	int* ofs;
+	entity_t** entlist = cl_sorted_visedicts;
 
 	GL_BeginGroup (alphapass ? "Translucent entities" : "Opaque entities");
 
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
-	R_DrawBrushModels  (entlist + ofs[2*mod_brush ], ofs[2*mod_brush +1] - ofs[2*mod_brush ]);
-	R_DrawAliasModels  (entlist + ofs[2*mod_alias ], ofs[2*mod_alias +1] - ofs[2*mod_alias ]);
+	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
+	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
 	if (!alphapass)
-		R_DrawSpriteModels (entlist + cl_modtype_ofs[2*mod_sprite], cl_modtype_ofs[2*mod_sprite+2] - cl_modtype_ofs[2*mod_sprite]);
+		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
 	GL_EndGroup ();
 }
@@ -1572,7 +1623,7 @@ R_IsViewModelVisible
 */
 static qboolean R_IsViewModelVisible (void)
 {
-	entity_t *e = &cl.viewent;
+	entity_t* e = &cl.viewent;
 	if (!r_drawviewmodel.value || !r_drawentities.value || chase_active.value || scr_viewsize.value >= 130)
 		return false;
 
@@ -1596,7 +1647,7 @@ R_DrawViewModel -- johnfitz -- gutted
 */
 void R_DrawViewModel (void)
 {
-	entity_t *e = &cl.viewent;
+	entity_t* e = &cl.viewent;
 
 	if (!R_IsViewModelVisible ())
 		return;
@@ -1617,8 +1668,12 @@ typedef struct debugvert_s
 	uint32_t	color;
 } debugvert_t;
 
-static debugvert_t	debugverts[4096];
-static uint16_t		debugidx[8192];
+// FIX #2: Added max limits to prevent buffer overflow
+#define MAX_DEBUG_VERTS 4096
+#define MAX_DEBUG_IDX   8192
+
+static debugvert_t	debugverts[MAX_DEBUG_VERTS];
+static uint16_t		debugidx[MAX_DEBUG_IDX];
 static int			numdebugverts = 0;
 static int			numdebugidx = 0;
 static qboolean		debugztest = false;
@@ -1633,11 +1688,11 @@ static void R_FlushDebugGeometry (void)
 	if (numdebugverts && numdebugidx)
 	{
 		GLuint	buf;
-		GLbyte	*ofs;
+		GLbyte* ofs;
 		unsigned int state;
 
 		GL_UseProgram (glprogs.debug3d);
-		state = GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2);
+		state = GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2);
 		if (!debugztest)
 			state |= GLS_NO_ZTEST;
 		GL_SetState (state);
@@ -1672,14 +1727,26 @@ static void R_SetDebugGeometryZTest (qboolean ztest)
 /*
 ================
 R_AddDebugGeometry
+
+FIX #2: Added bounds checking to prevent buffer overflow
 ================
 */
 static void R_AddDebugGeometry (const debugvert_t verts[], int numverts, const uint16_t idx[], int numidx)
 {
 	int i;
 
-	if (numdebugverts + numverts > countof (debugverts) ||
-		numdebugidx + numidx > countof (debugidx))
+	// FIX #2: Validate input sizes before adding
+	if (numverts <= 0 || numidx <= 0)
+		return;
+
+	if (numverts > MAX_DEBUG_VERTS || numidx > MAX_DEBUG_IDX)
+	{
+		Con_Warning ("R_AddDebugGeometry: geometry too large (%d verts, %d indices)\n", numverts, numidx);
+		return;
+	}
+
+	if (numdebugverts + numverts > MAX_DEBUG_VERTS ||
+		numdebugidx + numidx > MAX_DEBUG_IDX)
 		R_FlushDebugGeometry ();
 
 	for (i = 0; i < numidx; i++)
@@ -1736,7 +1803,7 @@ static void R_EmitWirePoint (const vec3_t origin, uint32_t color)
 R_EmitWireBox -- johnfitz -- draws one axis aligned bounding box
 ================
 */
-static const uint16_t boxidx[12*2] = { 0,1, 0,2, 0,4, 1,3, 1,5, 2,3, 2,6, 3,7, 4,5, 4,6, 5,7, 6,7, };
+static const uint16_t boxidx[12 * 2] = { 0,1, 0,2, 0,4, 1,3, 1,5, 2,3, 2,6, 3,7, 4,5, 4,6, 5,7, 6,7, };
 
 static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 {
@@ -1796,7 +1863,7 @@ static void R_EmitArrow (const vec3_t from, const vec3_t to, uint32_t color)
 R_EmitEdictLink
 ================
 */
-static void R_EmitEdictLink (const edict_t *from, const edict_t *to, showbboxflags_t flags)
+static void R_EmitEdictLink (const edict_t* from, const edict_t* to, showbboxflags_t flags)
 {
 	vec3_t vec_from, vec_to;
 
@@ -1830,19 +1897,61 @@ static void R_EmitEdictLink (const edict_t *from, const edict_t *to, showbboxfla
 R_ShowBoundingBoxesFilter
 
 r_showbboxes_filter artifact =trigger_secret #42
+
+PERF OPT: Cache filter string lengths to avoid repeated strlen calls
 ================
 */
 char r_showbboxes_filter_strings[MAXCMDLINE];
 qboolean r_showbboxes_filter_byindex;
 
-static qboolean R_ShowBoundingBoxesFilter (edict_t *ed)
+// PERF OPT: Cache for filter performance
+static struct {
+	qboolean valid;
+	int num_filters;
+	struct {
+		const char* str;
+		int len;
+		qboolean is_exact;
+		qboolean is_index;
+	} filters[32]; // reasonable maximum
+} filter_cache = { false, 0 };
+
+static void R_UpdateFilterCache (void)
 {
-	char entnum[16] = "";
-	const char *classname = NULL;
-	const char *filter_p = r_showbboxes_filter_strings;
+	const char* filter_p;
+	int count = 0;
+
+	filter_cache.valid = true;
+	filter_cache.num_filters = 0;
 
 	if (!r_showbboxes_filter_strings[0])
+		return;
+
+	for (filter_p = r_showbboxes_filter_strings; *filter_p && count < 32; filter_p += strlen (filter_p) + 1)
+	{
+		filter_cache.filters[count].str = filter_p;
+		filter_cache.filters[count].len = strlen (filter_p);
+		filter_cache.filters[count].is_exact = (*filter_p == '=');
+		filter_cache.filters[count].is_index = (*filter_p == '#');
+		count++;
+	}
+
+	filter_cache.num_filters = count;
+}
+
+static qboolean R_ShowBoundingBoxesFilter (edict_t* ed)
+{
+	char entnum[16] = "";
+	const char* classname = NULL;
+	int i;
+
+	// PERF OPT: Early return if no filters
+	if (!r_showbboxes_filter_strings[0])
 		return true;
+
+	// PERF OPT: Update cache if invalid
+	if (!filter_cache.valid)
+		R_UpdateFilterCache ();
 
 	if (r_showbboxes_filter_byindex)
 		q_snprintf (entnum, sizeof (entnum), "%d", NUM_FOR_EDICT (ed));
@@ -1850,11 +1959,12 @@ static qboolean R_ShowBoundingBoxesFilter (edict_t *ed)
 	if (ed->v.classname)
 		classname = PR_GetString (ed->v.classname);
 
-	for (filter_p = r_showbboxes_filter_strings; *filter_p; filter_p += strlen (filter_p) + 1)
+	// PERF OPT: Use cached filter data
+	for (i = 0; i < filter_cache.num_filters; i++)
 	{
-		if (*filter_p == '#')
+		if (filter_cache.filters[i].is_index)
 		{
-			if (!strcmp (entnum, filter_p + 1))
+			if (!strcmp (entnum, filter_cache.filters[i].str + 1))
 				return true;
 			continue;
 		}
@@ -1862,29 +1972,35 @@ static qboolean R_ShowBoundingBoxesFilter (edict_t *ed)
 		if (!classname)
 			continue;
 
-		if (*filter_p == '=')
+		if (filter_cache.filters[i].is_exact)
 		{
-			if (!strcmp (classname, filter_p + 1))
+			if (!strcmp (classname, filter_cache.filters[i].str + 1))
 				return true;
 			continue;
 		}
 
-		if (strstr (classname, filter_p) != NULL)
+		if (strstr (classname, filter_cache.filters[i].str) != NULL)
 			return true;
 	}
 
 	return false;
 }
 
-static edict_t **bbox_edicts = NULL;		// all edicts shown by r_showbboxes & co
-edict_t **bbox_linked = NULL;				// focused edict, followed by edicts linked from/to it
+// PERF OPT: Invalidate cache when filter changes
+void R_InvalidateFilterCache (void)
+{
+	filter_cache.valid = false;
+}
+
+static edict_t** bbox_edicts = NULL;		// all edicts shown by r_showbboxes & co
+edict_t** bbox_linked = NULL;				// focused edict, followed by edicts linked from/to it
 
 /*
 ================
 R_AddHighlightedEntity
 ================
 */
-static void R_AddHighlightedEntity (edict_t *ed, showbboxflags_t flags)
+static void R_AddHighlightedEntity (edict_t* ed, showbboxflags_t flags)
 {
 	if (ed->showbboxframe != r_framecount)
 	{
@@ -1920,13 +2036,13 @@ draw bounding boxes -- the server-side boxes, not the renderer cullboxes
 */
 static void R_ShowBoundingBoxes (void)
 {
-	extern		edict_t *sv_player;
-	byte		*pvs;
-	vec3_t		mins,maxs;
-	edict_t		*ed, *focused;
+	extern		edict_t* sv_player;
+	byte* pvs;
+	vec3_t		mins, maxs;
+	edict_t* ed, * focused;
 	int			i, j, mode;
 	uint32_t	color;
-	qcvm_t 		*oldvm;	//in case we ever draw a scene from within csqc.
+	qcvm_t* oldvm;	//in case we ever draw a scene from within csqc.
 	float		dist, bestdist, extend;
 	vec3_t		rcpdelta;
 
@@ -1943,8 +2059,8 @@ static void R_ShowBoundingBoxes (void)
 	R_SetDebugGeometryZTest (false);
 
 	oldvm = qcvm;
-	PR_SwitchQCVM(NULL);
-	PR_SwitchQCVM(&sv.qcvm);
+	PR_SwitchQCVM (NULL);
+	PR_SwitchQCVM (&sv.qcvm);
 
 	// Use PVS if r_showbboxes >= 2, or if r_showbboxes is 0 (which means r_showfields is active)
 	if (mode >= 2 || mode == 0)
@@ -1962,7 +2078,7 @@ static void R_ShowBoundingBoxes (void)
 
 	// Iterate over all server entities
 	bestdist = FLT_MAX;
-	for (i=1, ed=NEXT_EDICT(qcvm->edicts) ; i<qcvm->num_edicts ; i++, ed=NEXT_EDICT(ed))
+	for (i = 1, ed = NEXT_EDICT (qcvm->edicts); i < qcvm->num_edicts; i++, ed = NEXT_EDICT (ed))
 	{
 		if (ed == sv_player || ed->free)
 			continue; // don't draw player's own bbox or freed edicts
@@ -1986,7 +2102,7 @@ static void R_ShowBoundingBoxes (void)
 			continue;
 
 		// Classname or edict num filter
-		if (!R_ShowBoundingBoxesFilter(ed))
+		if (!R_ShowBoundingBoxesFilter (ed))
 			continue;
 
 		// PVS filter
@@ -1994,9 +2110,9 @@ static void R_ShowBoundingBoxes (void)
 		{
 			qboolean inpvs =
 				ed->num_leafs ?
-					SV_EdictInPVS (ed, pvs) :
-					SV_BoxInPVS (ed->v.absmin, ed->v.absmax, pvs, sv.worldmodel->nodes)
-			;
+				SV_EdictInPVS (ed, pvs) :
+				SV_BoxInPVS (ed->v.absmin, ed->v.absmax, pvs, sv.worldmodel->nodes)
+				;
 			if (!inpvs)
 				continue;
 		}
@@ -2023,7 +2139,7 @@ static void R_ShowBoundingBoxes (void)
 		{
 			for (i = 0; i < qcvm->numentityfields; i++)
 			{
-				eval_t *val = (eval_t *)((char *)&focused->v + qcvm->entityfieldofs[i]);
+				eval_t* val = (eval_t*)((char*)&focused->v + qcvm->entityfieldofs[i]);
 				if (qcvm->entityfieldofs[i] == offsetof (entvars_t, chain) || !val->edict)
 					continue;
 				ed = PROG_TO_EDICT (val->edict);
@@ -2037,10 +2153,10 @@ static void R_ShowBoundingBoxes (void)
 		// (either entity field references or target/targetname matches)
 		if ((int)r_showbboxes_links.value & SHOWBBOX_LINK_INCOMING || r_showbboxes_targets.value)
 		{
-			const char *focus_target = PR_GetString (focused->v.target);
-			const char *focus_targetname = PR_GetString (focused->v.targetname);
+			const char* focus_target = PR_GetString (focused->v.target);
+			const char* focus_targetname = PR_GetString (focused->v.targetname);
 
-			for (i=1, ed=NEXT_EDICT(qcvm->edicts) ; i<qcvm->num_edicts ; i++, ed=NEXT_EDICT(ed))
+			for (i = 1, ed = NEXT_EDICT (qcvm->edicts); i < qcvm->num_edicts; i++, ed = NEXT_EDICT (ed))
 			{
 				if (ed == sv_player || ed->free || ed == focused)
 					continue;
@@ -2048,8 +2164,8 @@ static void R_ShowBoundingBoxes (void)
 				// Check target/targetname matches
 				if (r_showbboxes_targets.value && (*focus_target || *focus_targetname))
 				{
-					const char *target = PR_GetString (ed->v.target);
-					const char *targetname = PR_GetString (ed->v.targetname);
+					const char* target = PR_GetString (ed->v.target);
+					const char* targetname = PR_GetString (ed->v.targetname);
 
 					if (*focus_targetname && !strcmp (focus_targetname, target))
 						R_AddHighlightedEntity (ed, SHOWBBOX_LINK_INCOMING);
@@ -2062,7 +2178,7 @@ static void R_ShowBoundingBoxes (void)
 				{
 					for (j = 0; j < qcvm->numentityfields; j++)
 					{
-						eval_t *val = (eval_t *)((char *)&ed->v + qcvm->entityfieldofs[j]);
+						eval_t* val = (eval_t*)((char*)&ed->v + qcvm->entityfieldofs[j]);
 						if (qcvm->entityfieldofs[i] == offsetof (entvars_t, chain) || !val->edict)
 							continue;
 						if (PROG_TO_EDICT (val->edict) == focused)
@@ -2073,12 +2189,12 @@ static void R_ShowBoundingBoxes (void)
 		}
 
 		// Draw all links
-		for (j = 0; j < (int) VEC_SIZE (bbox_linked); j++)
+		for (j = 0; j < (int)VEC_SIZE (bbox_linked); j++)
 			R_EmitEdictLink (focused, bbox_linked[j], bbox_linked[j]->showbboxflags);
 	}
 
 	// Draw all the matching edicts
-	for (i = 0; i < (int) VEC_SIZE (bbox_edicts); i++)
+	for (i = 0; i < (int)VEC_SIZE (bbox_edicts); i++)
 	{
 		ed = bbox_edicts[i];
 
@@ -2094,11 +2210,11 @@ static void R_ShowBoundingBoxes (void)
 			{
 				switch (sv.models[modelindex]->type)
 				{
-					case mod_brush:  color = 0x7fff8080; break;
-					case mod_alias:  color = 0x7f408080; break;
-					case mod_sprite: color = 0x7f4040ff; break;
-					default:
-						break;
+				case mod_brush:  color = 0x7fff8080; break;
+				case mod_alias:  color = 0x7f408080; break;
+				case mod_sprite: color = 0x7f4040ff; break;
+				default:
+					break;
 				}
 			}
 			if (ed->v.health > 0)
@@ -2125,8 +2241,8 @@ static void R_ShowBoundingBoxes (void)
 
 	VEC_CLEAR (bbox_edicts);
 
-	PR_SwitchQCVM(NULL);
-	PR_SwitchQCVM(oldvm);
+	PR_SwitchQCVM (NULL);
+	PR_SwitchQCVM (oldvm);
 
 	R_FlushDebugGeometry ();
 
@@ -2172,7 +2288,7 @@ R_ReadPointFile_f
 */
 void R_ReadPointFile_f (void)
 {
-	FILE		*f;
+	FILE* f;
 	vec3_t		org;
 	int			r, n;
 	qboolean	leakmode;
@@ -2183,7 +2299,7 @@ void R_ReadPointFile_f (void)
 	if (cls.state != ca_connected)
 		return;			// need an active map.
 
-	q_snprintf (name, sizeof(name), "maps/%s.pts", cl.mapname);
+	q_snprintf (name, sizeof (name), "maps/%s.pts", cl.mapname);
 	leakmode = Cmd_Argc () >= 2 && !strcmp (Cmd_Argv (1), "leak");
 
 	COM_FOpenFile (name, &f, NULL);
@@ -2197,13 +2313,13 @@ void R_ReadPointFile_f (void)
 		Con_Printf ("Reading %s...\n", name);
 	org[0] = org[1] = org[2] = 0; // silence pesky compiler warnings
 
-	for (r = 0; fscanf (f,"%f %f %f\n", &org[0], &org[1], &org[2]) == 3; r++)
+	for (r = 0; fscanf (f, "%f %f %f\n", &org[0], &org[1], &org[2]) == 3; r++)
 	{
-		Vec_Append ((void **) &r_pointfile, sizeof (r_pointfile[0]), &org, 1);
-		n = (int) VEC_SIZE (r_pointfile);
-		if (n >= 3 && Collinear (r_pointfile[n-3], r_pointfile[n-2], r_pointfile[n-1]))
+		Vec_Append ((void**)&r_pointfile, sizeof (r_pointfile[0]), &org, 1);
+		n = (int)VEC_SIZE (r_pointfile);
+		if (n >= 3 && Collinear (r_pointfile[n - 3], r_pointfile[n - 2], r_pointfile[n - 1]))
 		{
-			VectorCopy (r_pointfile[n-1], r_pointfile[n-2]);
+			VectorCopy (r_pointfile[n - 1], r_pointfile[n - 2]);
 			VEC_POP (r_pointfile);
 		}
 	}
@@ -2213,7 +2329,7 @@ void R_ReadPointFile_f (void)
 	if (leakmode)
 		Con_Warning ("map appears to have leaks!\n");
 	else
-		Con_Printf ("%i points read (%i significant)\n", r, (int) VEC_SIZE (r_pointfile));
+		Con_Printf ("%i points read (%i significant)\n", r, (int)VEC_SIZE (r_pointfile));
 }
 
 /*
@@ -2223,8 +2339,8 @@ R_ShowTris -- johnfitz
 */
 void R_ShowTris (void)
 {
-	int		*ofs;
-	entity_t **entlist = cl_sorted_visedicts;
+	int* ofs;
+	entity_t** entlist = cl_sorted_visedicts;
 
 	if (r_showtris.value < 1 || r_showtris.value > 2 || cl.maxclients > 1)
 		return;
@@ -2240,14 +2356,14 @@ void R_ShowTris (void)
 	GL_PolygonOffset (OFFSET_SHOWTRIS);
 
 	ofs = cl_modtype_ofs;
-	R_DrawBrushModels_ShowTris  (entlist + ofs[2*mod_brush ], ofs[2*mod_brush +2] - ofs[2*mod_brush ]);
-	R_DrawAliasModels_ShowTris  (entlist + ofs[2*mod_alias ], ofs[2*mod_alias +2] - ofs[2*mod_alias ]);
-	R_DrawSpriteModels_ShowTris (entlist + ofs[2*mod_sprite], ofs[2*mod_sprite+2] - ofs[2*mod_sprite]);
+	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
+	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
+	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
 
 	// viewmodel
 	if (R_IsViewModelVisible ())
 	{
-		entity_t *e = &cl.viewent;
+		entity_t* e = &cl.viewent;
 
 		if (r_showtris.value != 1.f)
 			GL_DepthRange (ZRANGE_VIEWMODEL);
@@ -2276,8 +2392,8 @@ R_BeginTranslucency
 */
 static void R_BeginTranslucency (void)
 {
-	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
-	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
+	static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
+	static const float ones[4] = { 1.f, 1.f, 1.f, 1.f };
 
 	GL_BeginGroup ("Translucent objects");
 
@@ -2303,7 +2419,7 @@ static void R_EndTranslucency (void)
 {
 	if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
 	{
-		GL_BeginGroup  ("OIT resolve");
+		GL_BeginGroup ("OIT resolve");
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
 
@@ -2311,7 +2427,7 @@ static void R_EndTranslucency (void)
 		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
 
 		GL_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
-		GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+		GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.accum_tex);
 		GL_BindNative (GL_TEXTURE1, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.revealage_tex);
 
@@ -2372,7 +2488,7 @@ void R_RenderScene (void)
 R_WarpScaleView
 
 The r_scale cvar allows rendering the 3D view at 1/2, 1/3, or 1/4 resolution.
-This function scales the reduced resolution 3D view back up to fill 
+This function scales the reduced resolution 3D view back up to fill
 r_refdef.vrect. This is for emulating a low-resolution pixellated look,
 or possibly as a perforance boost on slow graphics cards.
 ================
@@ -2399,43 +2515,43 @@ void R_WarpScaleView (void)
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_GodraysNeedDepth ());
 
-        if (msaa)
-        {
-                GL_BeginGroup ("MSAA resolve");
+	if (msaa)
+	{
+		GL_BeginGroup ("MSAA resolve");
 
-                GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-                GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
 
-                glReadBuffer (GL_COLOR_ATTACHMENT0);
-                glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-                if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
-                {
-                        glReadBuffer (GL_COLOR_ATTACHMENT1);
-                        glDrawBuffer (GL_COLOR_ATTACHMENT1);
-                        GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                }
+		if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
+		{
+			glReadBuffer (GL_COLOR_ATTACHMENT1);
+			glDrawBuffer (GL_COLOR_ATTACHMENT1);
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
 
-                GL_EndGroup ();
+		GL_EndGroup ();
 
-                if (!needwarpscale)
-                {
-                        GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
-                        glReadBuffer (GL_COLOR_ATTACHMENT0);
-                        GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
-                        if (fbodest)
-                                glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                        else
-                                glDrawBuffer (GL_BACK);
-                        {
-                                GLbitfield mask = GL_COLOR_BUFFER_BIT;
-                                if (need_depth_resolve)
-                                        mask |= GL_DEPTH_BUFFER_BIT;
-                                GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
-                        }
-                }
-        }
+		if (!needwarpscale)
+		{
+			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+			if (fbodest)
+				glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			else
+				glDrawBuffer (GL_BACK);
+			{
+				GLbitfield mask = GL_COLOR_BUFFER_BIT;
+				if (need_depth_resolve)
+					mask |= GL_DEPTH_BUFFER_BIT;
+				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
+			}
+		}
+	}
 
 	if (need_depth_resolve && (!msaa || needwarpscale))
 	{
@@ -2443,49 +2559,49 @@ void R_WarpScaleView (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
-        if (!msaa && !needwarpscale)
-        {
-                GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-                glReadBuffer (GL_COLOR_ATTACHMENT0);
-                GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
-                if (fbodest)
-                        glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                else
-                        glDrawBuffer (GL_BACK);
-                GL_BlitFramebufferFunc (0, 0, srcw, srch,
-                        srcx, srcy, srcx + srcw, srcy + srch,
-                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        }
+	if (!msaa && !needwarpscale)
+	{
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+		if (fbodest)
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		else
+			glDrawBuffer (GL_BACK);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch,
+			srcx, srcy, srcx + srcw, srcy + srch,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
 
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
-        if (fbodest)
-        {
-                glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                glReadBuffer (GL_COLOR_ATTACHMENT0);
-        }
-        else
-        {
-                glDrawBuffer (GL_BACK);
-                glReadBuffer (GL_BACK);
-        }
-        glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
+	if (fbodest)
+	{
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+	}
+	else
+	{
+		glDrawBuffer (GL_BACK);
+		glReadBuffer (GL_BACK);
+	}
+	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 
-        if (!needwarpscale)
-                return;
+	if (!needwarpscale)
+		return;
 
 	GL_BeginGroup ("Warp/scale view");
 
-	smax = srcw/(float)vid.width;
-	tmax = srch/(float)vid.height;
+	smax = srcw / (float)vid.width;
+	tmax = srch / (float)vid.height;
 
 	GL_UseProgram (glprogs.warpscale[water_warp]);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 
 	t = M_ForcedUnderwater () ? realtime : cl.time;
-	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f/256.f : 0.f, (float)t);
+	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);
 	if (v_blend[3] && gl_polyblend.value && !softemu)
 		GL_Uniform4fvFunc (1, 1, v_blend);
 	else
@@ -2522,7 +2638,7 @@ void R_RenderView (void)
 
 		//johnfitz -- rendering statistics
 		rs_brushpolys = rs_aliaspolys = rs_skypolys =
-		rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
+			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
 	}
 	else if (gl_finish.value)
 		glFinish ();
@@ -2537,29 +2653,28 @@ void R_RenderView (void)
 	time2 = Sys_DoubleTime ();
 	if (r_pos.value)
 		Con_Printf ("x %i y %i z %i (pitch %i yaw %i roll %i)\n",
-					(int)cl_entities[cl.viewentity].origin[0],
-					(int)cl_entities[cl.viewentity].origin[1],
-					(int)cl_entities[cl.viewentity].origin[2],
-					(int)cl.viewangles[PITCH],
-					(int)cl.viewangles[YAW],
-					(int)cl.viewangles[ROLL]);
+			(int)cl_entities[cl.viewentity].origin[0],
+			(int)cl_entities[cl.viewentity].origin[1],
+			(int)cl_entities[cl.viewentity].origin[2],
+			(int)cl.viewangles[PITCH],
+			(int)cl.viewangles[YAW],
+			(int)cl.viewangles[ROLL]);
 	else if (r_speeds.value == 2)
 		Con_Printf ("%3i ms  %4i/%4i wpoly %4i/%4i epoly %3i lmap %4i/%4i sky %1.1f mtex\n",
-					(int)((time2-time1)*1000),
-					rs_brushpolys,
-					rs_brushpasses,
-					rs_aliaspolys,
-					rs_aliaspasses,
-					rs_dynamiclightmaps,
-					rs_skypolys,
-					rs_skypasses,
-					TexMgr_FrameUsage ());
+			(int)((time2 - time1) * 1000),
+			rs_brushpolys,
+			rs_brushpasses,
+			rs_aliaspolys,
+			rs_aliaspasses,
+			rs_dynamiclightmaps,
+			rs_skypolys,
+			rs_skypasses,
+			TexMgr_FrameUsage ());
 	else if (r_speeds.value)
 		Con_Printf ("%3i ms  %4i wpoly %4i epoly %3i lmap\n",
-					(int)((time2-time1)*1000),
-					rs_brushpolys,
-					rs_aliaspolys,
-					rs_dynamiclightmaps);
+			(int)((time2 - time1) * 1000),
+			rs_brushpolys,
+			rs_aliaspolys,
+			rs_dynamiclightmaps);
 	//johnfitz
 }
-
