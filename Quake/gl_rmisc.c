@@ -352,6 +352,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
 	Cvar_RegisterVariable (&r_dof_strength);
+	Cvar_RegisterVariable (&r_motionblur);
+	Cvar_RegisterVariable (&r_motionblur_samples);
 	Cvar_RegisterVariable (&r_tonemap);
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);

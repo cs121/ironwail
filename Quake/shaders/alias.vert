@@ -1,6 +1,7 @@
 struct InstanceData
 {
 	vec4	WorldMatrix[3];
+	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	int		Pose1;
 	int		Pose2;
@@ -11,9 +12,14 @@ struct InstanceData
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	ViewProj;
+	mat4	PrevViewProj;
 	vec3	EyePos;
+	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	_Pad1;
+	float	_Pad2;
+	float	_Pad3;
 	InstanceData instances[];
 };
 
@@ -81,6 +87,8 @@ float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH
 #endif
 layout(location=1) out vec4 out_color;
 layout(location=2) out vec3 out_pos;
+layout(location=3) noperspective out vec4 out_curr_clip;
+layout(location=4) noperspective out vec4 out_prev_clip;
 
 void main()
 {
@@ -88,10 +96,17 @@ void main()
 	out_texcoord = in_uv;
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
+	vec3 local_vert = mix(pose1.pos, pose2.pos, inst.Blend);
 	mat4x3 worldmatrix = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
-	vec3 lerpedVert = (worldmatrix * vec4(mix(pose1.pos, pose2.pos, inst.Blend), 1.0)).xyz;
-	gl_Position = ViewProj * vec4(lerpedVert, 1.0);
-	out_pos = lerpedVert - EyePos;
+	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
+	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
+	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
+	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
+	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
+	gl_Position = curr_clip;
+	out_curr_clip = curr_clip;
+	out_prev_clip = prev_clip;
+	out_pos = world_vert - EyePos;
 	// transform world X and Z axes to local space
 	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
 	orientation = transpose(orientation);

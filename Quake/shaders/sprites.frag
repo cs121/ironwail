@@ -61,6 +61,7 @@ layout(location=0) in vec2 in_uv;
 layout(location=1) in vec3 in_pos;
 
 layout(location=0) out vec4 out_fragcolor;
+layout(location=1) out vec2 out_velocity;
 
 void main()
 {
@@ -69,12 +70,13 @@ void main()
 		discard;
 	result.rgb = ApplyFog(result.rgb, in_pos);
 	out_fragcolor = result;
+	out_velocity = vec2(0.0);
 #if DITHER
 	if (Fog.w > 0.)
 	{
-		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
-		out_fragcolor.rgb *= out_fragcolor.rgb;
+	out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
+	out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
+	out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
 	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;

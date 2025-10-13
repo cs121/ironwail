@@ -79,7 +79,11 @@ layout(std430, binding=1) restrict readonly buffer CallBuffer
 struct Instance
 {
 	vec4	mat[3];
+	vec4	prev_mat[3];
 	float	alpha;
+	float	pad0;
+	float	pad1;
+	float	pad2;
 };
 
 layout(std430, binding=2) restrict readonly buffer InstanceBuffer
@@ -87,10 +91,20 @@ layout(std430, binding=2) restrict readonly buffer InstanceBuffer
 	Instance instance_data[];
 };
 
+vec3 TransformPosition(vec3 p, vec4 mat[3])
+{
+	mat4x3 world = transpose(mat3x4(mat[0], mat[1], mat[2]));
+	return (world * vec4(p, 1.0)).xyz;
+}
+
 vec3 Transform(vec3 p, Instance instance)
 {
-	mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
-	return mat3(world[0], world[1], world[2]) * p + world[3];
+	return TransformPosition(p, instance.mat);
+}
+
+vec3 TransformPrev(vec3 p, Instance instance)
+{
+	return TransformPosition(p, instance.prev_mat);
 }
 
 layout(location=0) flat in uint in_flags;
@@ -110,6 +124,8 @@ layout(location=8) flat in float in_lmofs;
         layout(location=9) flat in uvec4 in_samplers0;
         layout(location=10) flat in uvec2 in_samplers1;
 #endif
+layout(location=11) noperspective in vec4 in_curr_clip;
+layout(location=12) noperspective in vec4 in_prev_clip;
 
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -158,6 +174,16 @@ float tri(float x)
 #define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
+
+vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
+{
+	const float EPS = 1e-6;
+	float inv_curr_w = abs(curr_clip.w) > EPS ? 1.0 / curr_clip.w : 0.0;
+	float inv_prev_w = abs(prev_clip.w) > EPS ? 1.0 / prev_clip.w : 0.0;
+	vec2 curr_ndc = curr_clip.xy * inv_curr_w;
+	vec2 prev_ndc = prev_clip.xy * inv_prev_w;
+	return (curr_ndc - prev_ndc) * 0.5;
+}
 
 float DepthToCanonical(float depth)
 {
@@ -210,6 +236,7 @@ vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
 	#define main main_body
 #else
 	layout(location=0) out vec4 OUT_COLOR;
+	layout(location=1) out vec2 out_velocity;
 #endif // OIT
 
 void main()
@@ -386,6 +413,9 @@ void main()
 
         result.a = in_alpha; // FIXME: This will make almost transparent things cut holes though heavy fog
         out_fragcolor = result;
+#if !OIT
+        out_velocity = ComputeVelocity(in_curr_clip, in_prev_clip) * result.a;
+#endif
 #if DITHER == 1
 	vec3 dpos = fwidth(in_pos);
 	float farblend = clamp(max(dpos.x, max(dpos.y, dpos.z)) * 0.5 - 0.125, 0., 1.);

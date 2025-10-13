@@ -60,6 +60,7 @@ layout(binding=2) uniform samplerCube Skybox;
 layout(location=0) in vec3 in_dir;
 
 layout(location=0) out vec4 out_fragcolor;
+layout(location=1) out vec2 out_velocity;
 
 void main()
 {
@@ -79,6 +80,7 @@ void main()
 	out_fragcolor = vec4(base.rgb * (1.0 - combined.a) + combined.rgb, 1);
 #else
 	out_fragcolor = texture(Skybox, in_dir);
+	out_velocity = vec2(0.0);
 #endif
 	out_fragcolor.rgb = mix(out_fragcolor.rgb, SkyFog.rgb, SkyFog.a);
 #if DITHER

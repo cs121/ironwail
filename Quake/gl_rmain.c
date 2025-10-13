@@ -42,10 +42,15 @@ mplane_t	frustum[4];
 float		r_matview[16];
 float		r_matproj[16];
 float		r_matviewproj[16];
-static float r_prev_matviewproj[16];
-static vec3_t r_prev_vieworg;
-static double r_prev_frame_time;
-static qboolean r_prev_frame_valid;
+static float r_prev_matviewproj[16] = {
+		1.f, 0.f, 0.f, 0.f,
+		0.f, 1.f, 0.f, 0.f,
+		0.f, 0.f, 1.f, 0.f,
+		0.f, 0.f, 0.f, 1.f
+};
+static vec3_t r_prev_vieworg = {0.f, 0.f, 0.f};
+static double r_prev_frame_time = 0.0;
+static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 
 static const float r_identity_mat4[16] = {
@@ -106,6 +111,9 @@ cvar_t	r_dof = {"r_dof", "0", CVAR_ARCHIVE};
 cvar_t	r_dof_focus = {"r_dof_focus", "64", CVAR_ARCHIVE};
 cvar_t	r_dof_range = {"r_dof_range", "48", CVAR_ARCHIVE};
 cvar_t	r_dof_strength = {"r_dof_strength", "6", CVAR_ARCHIVE};
+
+cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
+cvar_t	r_motionblur_samples = {"r_motionblur_samples", "8", CVAR_ARCHIVE};
 
 cvar_t	r_tonemap = {"r_tonemap", "1", CVAR_ARCHIVE};
 cvar_t	r_tonemap_exposure = {"r_tonemap_exposure", "1.0", CVAR_ARCHIVE};
@@ -332,13 +340,17 @@ void GL_CreateFrameBuffers (void)
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
 
 	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, framebufs.scene.samples, GL_NEAREST, "scene colors");
+	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, framebufs.scene.samples, GL_NEAREST, "scene velocity");
 	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
-	framebufs.scene.fbo = GL_CreateSimpleFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
-		framebufs.scene.color_tex,
-		framebufs.scene.depth_stencil_tex,
-		framebufs.scene.depth_stencil_tex,
-		"scene fbo"
-	);
+	{
+		GLuint colors[2] = {framebufs.scene.color_tex, framebufs.scene.velocity_tex};
+		framebufs.scene.fbo = GL_CreateFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
+			colors, 2,
+			framebufs.scene.depth_stencil_tex,
+			framebufs.scene.depth_stencil_tex,
+			"scene fbo"
+		);
+	}
 
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
 	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
@@ -354,11 +366,16 @@ void GL_CreateFrameBuffers (void)
 	if (framebufs.scene.samples > 1)
 	{
 		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
-		framebufs.resolved_scene.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.resolved_scene.color_tex, 0, 0, "resolved scene fbo");
+		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, 1, GL_NEAREST, "resolved scene velocity");
+		{
+			GLuint colors[2] = {framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex};
+			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
+		}
 	}
 	else
 	{
 		framebufs.resolved_scene.color_tex = 0;
+		framebufs.resolved_scene.velocity_tex = 0;
 		framebufs.resolved_scene.fbo = 0;
 
 		framebufs.oit.fbo_composite = GL_CreateFBO (GL_TEXTURE_2D,
@@ -392,10 +409,12 @@ void GL_DeleteFrameBuffers (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
+	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
+	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
@@ -594,13 +613,18 @@ static GLuint GL_GenerateGodraysTexture (void)
 
 void GL_PostProcess (void)
 {
-	int palidx, variant;
-	float dither;
-	qboolean dof_enabled;
-	float dof_focus, dof_range, dof_strength;
-	float dof_znear, dof_zfar;
-	float godray_enabled;
-	GLuint godray_texture;
+        int palidx, variant;
+        float dither;
+        qboolean dof_enabled;
+        float dof_focus, dof_range, dof_strength;
+        float dof_znear, dof_zfar;
+        float godray_enabled;
+        GLuint godray_texture;
+        qboolean motion_enabled;
+        qboolean msaa;
+        GLuint velocity_texture;
+        int motion_samples;
+        float motion_strength;
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -618,14 +642,26 @@ void GL_PostProcess (void)
 	if (bloom_intensity > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
 
-	godray_enabled = 0.f;
-	godray_texture = 0;
-	if (r_godrays.value > 0.f)
-	{
-		godray_texture = GL_GenerateGodraysTexture ();
-		if (godray_texture != 0)
-			godray_enabled = 1.f;
-	}
+        godray_enabled = 0.f;
+        godray_texture = 0;
+        if (r_godrays.value > 0.f)
+        {
+                godray_texture = GL_GenerateGodraysTexture ();
+                if (godray_texture != 0)
+                        godray_enabled = 1.f;
+        }
+
+        msaa = framebufs.scene.samples > 1;
+        motion_strength = q_max (0.f, r_motionblur.value);
+        motion_samples = (int) Q_rint (r_motionblur_samples.value);
+        if (motion_samples < 0)
+                motion_samples = 0;
+        if (motion_samples > 32)
+                motion_samples = 32;
+        velocity_texture = 0;
+        if (framebufs.scene.velocity_tex)
+                velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+        motion_enabled = (motion_strength > 0.f && velocity_texture != 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
@@ -633,14 +669,16 @@ void GL_PostProcess (void)
 	variant = q_min ((int)softemu, 2);
 	GL_UseProgram (glprogs.postprocess[variant]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
-	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
-	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, godray_texture);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
-	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
-		GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
-	GL_Uniform4fFunc (5, bloom_intensity, exposure, tonemap_enabled, godray_enabled);
+        GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+        GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
+        GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
+        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, godray_texture);
+        GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
+        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
+        if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
+                GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
+        GL_Uniform4fFunc (5, bloom_intensity, exposure, tonemap_enabled, godray_enabled);
+        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float) motion_samples, 0.f);
 
 	dof_enabled = R_DoFEnabled ();
 
@@ -1204,7 +1242,7 @@ GL_NeedsSceneEffects
 */
 qboolean GL_NeedsSceneEffects (void)
 {
-	return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1;
+        return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1 || r_motionblur.value > 0.f;
 }
 
 /*
@@ -1216,8 +1254,8 @@ qboolean GL_NeedsPostprocess (void)
 {
 	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || (r_godrays.value > 0.f && r_godrays_intensity.value > 0.f))
-		return true;
+        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || (r_godrays.value > 0.f && r_godrays_intensity.value > 0.f) || r_motionblur.value > 0.f)
+                return true;
 	return false;
 }
 
@@ -1252,8 +1290,17 @@ void R_SetupGL (void)
                GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.scene.fbo);
                framesetup.scene_fbo = framebufs.scene.fbo;
                framesetup.oit_fbo = framebufs.oit.fbo_scene;
-               glDrawBuffer (GL_COLOR_ATTACHMENT0);
-               glReadBuffer (GL_COLOR_ATTACHMENT0);
+               if (framebufs.scene.velocity_tex)
+               {
+                       GLuint buffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+                       GL_DrawBuffersFunc (2, buffers);
+                       glReadBuffer (GL_COLOR_ATTACHMENT0);
+               }
+               else
+               {
+                       glDrawBuffer (GL_COLOR_ATTACHMENT0);
+                       glReadBuffer (GL_COLOR_ATTACHMENT0);
+               }
                glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
        }
 }
@@ -1314,8 +1361,8 @@ void R_SetupView (void)
 
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-		r_framedata.overbright = (float)(1 << overbright_bits);
-		r_framedata._padding1 = 0.f;
+                r_framedata.overbright = (float)(1 << overbright_bits);
+                r_framedata._padding0 = 0.f;
 	}
 
 	r_framecount++;
@@ -1329,7 +1376,7 @@ void R_SetupView (void)
 
 	if (prev_valid)
 	{
-	        memcpy (r_framedata.prevviewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
+                memcpy (r_framedata.prev_viewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
 	        r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
 	        r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
 	        r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
@@ -1338,7 +1385,7 @@ void R_SetupView (void)
 	}
 	else
 	{
-	        memcpy (r_framedata.prevviewproj, r_identity_mat4, sizeof (r_identity_mat4));
+                memcpy (r_framedata.prev_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
 	        r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
 	        r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
 	        r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
@@ -2352,35 +2399,43 @@ void R_WarpScaleView (void)
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_GodraysNeedDepth ());
 
-	if (msaa)
-	{
-		GL_BeginGroup ("MSAA resolve");
+        if (msaa)
+        {
+                GL_BeginGroup ("MSAA resolve");
 
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		if (needwarpscale)
-		{
-			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		}
-		else
-		{
-			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
-			if (fbodest)
-				glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			else
-				glDrawBuffer (GL_BACK);
+                GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+                GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+
+                glReadBuffer (GL_COLOR_ATTACHMENT0);
+                glDrawBuffer (GL_COLOR_ATTACHMENT0);
+                GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+                if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
+                {
+                        glReadBuffer (GL_COLOR_ATTACHMENT1);
+                        glDrawBuffer (GL_COLOR_ATTACHMENT1);
+                        GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                }
+
+                GL_EndGroup ();
+
+                if (!needwarpscale)
+                {
+                        GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+                        glReadBuffer (GL_COLOR_ATTACHMENT0);
+                        GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+                        if (fbodest)
+                                glDrawBuffer (GL_COLOR_ATTACHMENT0);
+                        else
+                                glDrawBuffer (GL_BACK);
                         {
                                 GLbitfield mask = GL_COLOR_BUFFER_BIT;
                                 if (need_depth_resolve)
                                         mask |= GL_DEPTH_BUFFER_BIT;
                                 GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
                         }
-		}
-
-		GL_EndGroup ();
-	}
+                }
+        }
 
 	if (need_depth_resolve && (!msaa || needwarpscale))
 	{

@@ -68,6 +68,7 @@ layout(location=0) in vec3 in_dir;
 #endif
 
 layout(location=0) out vec4 out_fragcolor;
+layout(location=1) out vec2 out_velocity;
 
 void main()
 {
@@ -81,5 +82,6 @@ void main()
 	result.rgb = mix(result.rgb, layer.rgb, layer.a);
 	result.rgb = mix(result.rgb, SkyFog.rgb, SkyFog.a);
 	out_fragcolor = result;
+	out_velocity = vec2(0.0);
 	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
 }
