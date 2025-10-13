@@ -2,6 +2,7 @@ layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
+layout(binding=4) uniform sampler2D GodrayTexture;
 
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
@@ -57,17 +58,21 @@ float tri(float x)
 	return x;
 }
 
-vec3 ACESFilm(vec3 x)
+vec3 HableTonemap(vec3 x)
 {
-	const mat3 A = mat3(0.59719, 0.35458, 0.04823,
-		0.07600, 0.90834, 0.01566,
-		0.02840, 0.13383, 0.83777);
-	const mat3 B = mat3(1.60475, -0.53108, -0.07367,
-		-0.10208, 1.10813, -0.00605,
-		-0.00327, -0.07276, 1.07602);
-	x = A * x;
-	x = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-	return clamp(B * x, 0.0, 1.0);
+        const float A = 0.15;
+        const float B = 0.50;
+        const float C = 0.10;
+        const float D = 0.20;
+        const float E = 0.02;
+        const float F = 0.30;
+        const float W = 11.2;
+        vec3 numerator = x * (A * x + C * B) + D * E;
+        vec3 denominator = x * (A * x + B) + D * F;
+        vec3 mapped = numerator / denominator - E / F;
+        float white = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
+        mapped /= white;
+        return clamp(mapped, 0.0, 1.0);
 }
 
 #define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
@@ -79,7 +84,7 @@ layout(location=1) uniform vec4 DoFParams0; // x: enabled, y: focus distance, z:
 layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: reversed-Z flag (>0.5 when reversed)
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
-layout(location=5) uniform vec4 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled, w: unused
+layout(location=5) uniform vec4 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled, w: godrays enabled
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -175,18 +180,25 @@ void main()
 	uint remap = Palette[texelFetch(PaletteLUT, clr, 0).x];
 	out_fragcolor.rgb = vec3(UnpackRGB8(remap)) * (1./255.);
 #else
-	vec3 hdrColor = out_fragcolor.rgb;
-	float bloomIntensity = HDRParams.x;
-	vec3 bloomColor = vec3(0.0);
-	if (bloomIntensity > 0.0)
-	{
-		bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
-	}
-	float exposure = max(HDRParams.y, 0.0);
-	float tonemapEnabled = HDRParams.z;
-	hdrColor = max((hdrColor + bloomColor) * exposure * contrast, vec3(0.0));
-	vec3 mapped = tonemapEnabled > 0.5 ? ACESFilm(hdrColor) : clamp(hdrColor, 0.0, 1.0);
-	mapped = clamp(mapped, 0.0, 1.0);
-	out_fragcolor = vec4(pow(mapped, vec3(gamma)), 1.0);
+        vec3 hdrColor = out_fragcolor.rgb;
+        float bloomIntensity = HDRParams.x;
+        vec3 bloomColor = vec3(0.0);
+        if (bloomIntensity > 0.0)
+        {
+                bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
+        }
+        float godrayEnabled = HDRParams.w;
+        vec3 shaftColor = vec3(0.0);
+        if (godrayEnabled > 0.5)
+        {
+                shaftColor = texture(GodrayTexture, uv).rgb;
+        }
+        float exposure = max(HDRParams.y, 0.0);
+        float tonemapEnabled = HDRParams.z;
+        vec3 combined = (hdrColor + bloomColor + shaftColor) * exposure * contrast;
+        combined = max(combined, vec3(0.0));
+        vec3 mapped = tonemapEnabled > 0.5 ? HableTonemap(combined) : clamp(combined, 0.0, 1.0);
+        mapped = clamp(mapped, 0.0, 1.0);
+        out_fragcolor = vec4(pow(mapped, vec3(gamma)), 1.0);
 #endif // PALETTIZE
 }

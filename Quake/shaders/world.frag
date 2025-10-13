@@ -290,6 +290,15 @@ void main()
         if (surface_normal_len > 0.0)
                 surface_normal = surface_normal_vec / surface_normal_len;
         vec3 total_light = clamp(static_light, 0.0, 1.0);
+        vec3 specular_light = vec3(0.0);
+        vec3 to_eye = EyePos - in_pos;
+        float view_length = length(to_eye);
+        vec3 view_dir = vec3(0.0, 0.0, 1.0);
+        if (view_length > 0.0)
+                view_dir = to_eye / view_length;
+
+        const float SPECULAR_POWER = 16.0;
+        const float SPECULAR_SCALE = 0.4;
 
         if (NumLights > 0u)
         {
@@ -305,7 +314,7 @@ void main()
 			int cluster_idx = cluster_coord.x + cluster_coord.y * LIGHT_TILES_X + cluster_coord.z * LIGHT_TILES_X * LIGHT_TILES_Y;
 			total_light = vec3(ivec3((cluster_idx + 1) * 0x45d9f3b) >> ivec3(0, 8, 16) & 255) / 255.0;
 #endif // SHOW_ACTIVE_LIGHT_CLUSTERS
-			vec3 dynamic_light = vec3(0.);
+                        vec3 dynamic_light = vec3(0.);
 			vec4 plane;
 			plane.xyz = surface_normal;
 			plane.w = dot(in_pos, plane.xyz);
@@ -324,10 +333,31 @@ void main()
 					float minlight = l.minlight;
 					if (rad < minlight)
 						continue;
-					vec3 local_pos = l.origin - plane.xyz * dist;
-					minlight = rad - minlight;
-					dist = length(in_pos - local_pos);
-					dynamic_light += clamp((minlight - dist) / 16.0, 0.0, 1.0) * max(0., rad - dist) / 256. * l.color;
+                                        vec3 local_pos = l.origin - plane.xyz * dist;
+                                        minlight = rad - minlight;
+                                        vec3 light_vec = local_pos - in_pos;
+                                        float surface_dist = length(light_vec);
+                                        float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
+                                        float falloff = max(0., rad - surface_dist) / 256.;
+                                        vec3 light_contrib = attenuation * falloff * l.color;
+                                        dynamic_light += light_contrib;
+                                        if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+                                        {
+                                                vec3 light_dir = light_vec / surface_dist;
+                                                float ndotl = max(dot(surface_normal, light_dir), 0.0);
+                                                if (ndotl > 0.0)
+                                                {
+                                                        vec3 half_vec = light_dir + view_dir;
+                                                        float half_len = length(half_vec);
+                                                        if (half_len > 0.0)
+                                                        {
+                                                                half_vec /= half_len;
+                                                                float ndoth = max(dot(surface_normal, half_vec), 0.0);
+                                                                float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+                                                                specular_light += light_contrib * spec * SPECULAR_SCALE;
+                                                        }
+                                                }
+                                        }
 				}
 			}
                         total_light += max(min(dynamic_light, 1. - total_light), 0.);
@@ -349,7 +379,9 @@ void main()
 #endif
         result.rgb += fullbright;
         result.rgb += emissive;
-	result = clamp(result, 0.0, 1.0);
+        vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
+        result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
+        result = clamp(result, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 
         result.a = in_alpha; // FIXME: This will make almost transparent things cut holes though heavy fog

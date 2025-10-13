@@ -62,6 +62,17 @@ extern cvar_t r_tonemap_exposure;
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
 
+extern cvar_t r_godrays;
+extern cvar_t r_godrays_intensity;
+extern cvar_t r_godrays_decay;
+extern cvar_t r_godrays_density;
+extern cvar_t r_godrays_weight;
+extern cvar_t r_godrays_samples;
+extern cvar_t r_godrays_depthbias;
+extern cvar_t r_godrays_occlusion;
+extern cvar_t r_sun_pitch;
+extern cvar_t r_sun_yaw;
+
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
 #endif
@@ -345,6 +356,16 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
+	Cvar_RegisterVariable (&r_godrays);
+	Cvar_RegisterVariable (&r_godrays_intensity);
+	Cvar_RegisterVariable (&r_godrays_decay);
+	Cvar_RegisterVariable (&r_godrays_density);
+	Cvar_RegisterVariable (&r_godrays_weight);
+	Cvar_RegisterVariable (&r_godrays_samples);
+	Cvar_RegisterVariable (&r_godrays_depthbias);
+	Cvar_RegisterVariable (&r_godrays_occlusion);
+	Cvar_RegisterVariable (&r_sun_pitch);
+	Cvar_RegisterVariable (&r_sun_yaw);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
