@@ -78,7 +78,11 @@ layout(std430, binding=1) restrict readonly buffer CallBuffer
 struct Instance
 {
 	vec4	mat[3];
+	vec4	prev_mat[3];
 	float	alpha;
+	float	pad0;
+	float	pad1;
+	float	pad2;
 };
 
 layout(std430, binding=2) restrict readonly buffer InstanceBuffer
@@ -86,10 +90,20 @@ layout(std430, binding=2) restrict readonly buffer InstanceBuffer
 	Instance instance_data[];
 };
 
+vec3 TransformPosition(vec3 p, vec4 mat[3])
+{
+	mat4x3 world = transpose(mat3x4(mat[0], mat[1], mat[2]));
+	return (world * vec4(p, 1.0)).xyz;
+}
+
 vec3 Transform(vec3 p, Instance instance)
 {
-	mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
-	return mat3(world[0], world[1], world[2]) * p + world[3];
+	return TransformPosition(p, instance.mat);
+}
+
+vec3 TransformPrev(vec3 p, Instance instance)
+{
+	return TransformPosition(p, instance.prev_mat);
 }
 
 layout(location=0) in vec3 in_pos;
@@ -115,14 +129,22 @@ layout(location=8) flat out float out_lmofs;
 	layout(location=9) flat out uvec4 out_samplers0;
         layout(location=10) flat out uvec2 out_samplers1;
 #endif
+layout(location=11) noperspective out vec4 out_curr_clip;
+layout(location=12) noperspective out vec4 out_prev_clip;
 
 void main()
 {
 	Call call = call_data[DRAW_ID];
 	int instance_id = GET_INSTANCE_ID(call);
 	Instance instance = instance_data[instance_id];
-	out_pos = Transform(in_pos, instance);
-	gl_Position = ViewProj * vec4(out_pos, 1.0);
+	vec3 world_pos = Transform(in_pos, instance);
+	vec3 prev_world_pos = TransformPrev(in_pos, instance);
+	vec4 curr_clip = ViewProj * vec4(world_pos, 1.0);
+	vec4 prev_clip = PrevViewProj * vec4(prev_world_pos, 1.0);
+	out_pos = world_pos;
+	gl_Position = curr_clip;
+	out_curr_clip = curr_clip;
+	out_prev_clip = prev_clip;
 #if REVERSED_Z
 	const float ZBIAS = -1./1024;
 #else
@@ -130,6 +152,7 @@ void main()
 #endif
 	if ((call.flags & CF_USE_POLYGON_OFFSET) != 0u)
 		gl_Position.z += ZBIAS;
+	out_curr_clip = gl_Position;
 	out_uv = in_uv.xy;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;

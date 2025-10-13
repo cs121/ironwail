@@ -1,6 +1,7 @@
 struct InstanceData
 {
 	vec4	WorldMatrix[3];
+	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	int		Pose1;
 	int		Pose2;
@@ -11,9 +12,14 @@ struct InstanceData
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	ViewProj;
+	mat4	PrevViewProj;
 	vec3	EyePos;
+	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	_Pad1;
+	float	_Pad2;
+	float	_Pad3;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -64,6 +70,16 @@ float tri(float x)
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
+vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
+{
+	const float EPS = 1e-6;
+	float inv_curr_w = abs(curr_clip.w) > EPS ? 1.0 / curr_clip.w : 0.0;
+	float inv_prev_w = abs(prev_clip.w) > EPS ? 1.0 / prev_clip.w : 0.0;
+	vec2 curr_ndc = curr_clip.xy * inv_curr_w;
+	vec2 prev_ndc = prev_clip.xy * inv_prev_w;
+	return (curr_ndc - prev_ndc) * 0.5;
+}
+
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
@@ -75,6 +91,9 @@ layout(binding=2) uniform sampler2D EmissiveTex;
 #endif
 layout(location=1) in vec4 in_color;
 layout(location=2) in vec3 in_pos;
+layout(location=3) noperspective in vec4 in_curr_clip;
+layout(location=4) noperspective in vec4 in_prev_clip;
+
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -112,6 +131,7 @@ layout(location=2) in vec3 in_pos;
 	#define main main_body
 #else
 	layout(location=0) out vec4 OUT_COLOR;
+	layout(location=1) out vec2 out_velocity;
 #endif // OIT
 
 void main()
@@ -147,6 +167,9 @@ void main()
 	fog = clamp(fog, 0.0, 1.0);
 	result.rgb = mix(Fog.rgb, result.rgb, fog);
 	out_fragcolor = result;
+#if !OIT
+	out_velocity = ComputeVelocity(in_curr_clip, in_prev_clip) * result.a;
+#endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
 	if (abs(Fog.w) > 0.)

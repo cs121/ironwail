@@ -3,6 +3,7 @@ layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
 layout(binding=4) uniform sampler2D GodrayTexture;
+layout(binding=5) uniform sampler2D VelocityTexture;
 
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
@@ -85,6 +86,7 @@ layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: r
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
 layout(location=5) uniform vec4 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled, w: godrays enabled
+layout(location=6) uniform vec4 MotionParams; // x: enabled (>0.5), y: strength, z: sample count, w: unused
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -101,6 +103,38 @@ void main()
         vec2 viewMin = ViewRect.xy;
         vec2 viewMax = ViewRect.zw;
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
+        if (MotionParams.x > 0.5 && inView)
+        {
+                vec2 velocity = texture(VelocityTexture, uv).xy;
+                float motionStrength = MotionParams.y;
+                int taps = int(clamp(floor(MotionParams.z + 0.5), 0.0, 32.0));
+                if (motionStrength > 0.0 && taps > 0)
+                {
+                        vec2 scaledVelocity = velocity * motionStrength;
+                        scaledVelocity = clamp(scaledVelocity, vec2(-0.5), vec2(0.5));
+                        vec2 velocityPx = vec2(scaledVelocity.x * texSize.x, scaledVelocity.y * texSize.y);
+                        float speed = length(velocityPx);
+                        if (speed > 0.01)
+                        {
+                                vec3 accum = color.rgb;
+                                float weight = 1.0;
+                                float invSteps = 1.0 / float(taps + 1);
+                                float jitterPhase = SCREEN_SPACE_NOISE();
+                                vec2 jitter = scaledVelocity * (jitterPhase - 0.5) * invSteps;
+                                for (int i = 1; i <= taps; ++i)
+                                {
+                                        float t = float(i) * invSteps;
+                                        vec2 offset = scaledVelocity * t + jitter;
+                                        vec2 samplePos = clamp(uv + offset, viewMin, viewMax);
+                                        vec2 sampleNeg = clamp(uv - offset, viewMin, viewMax);
+                                        accum += texture(GammaTexture, samplePos).rgb;
+                                        accum += texture(GammaTexture, sampleNeg).rgb;
+                                        weight += 2.0;
+                                }
+                                color.rgb = accum / weight;
+                        }
+                }
+        }
         if (DoFParams0.x > 0.5 && inView)
         {
                 vec2 depthTexSize = vec2(textureSize(DepthTexture, 0));
