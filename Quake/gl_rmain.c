@@ -168,6 +168,11 @@ static qboolean R_DoFEnabled (void)
         return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
+static qboolean R_GodraysNeedDepth (void)
+{
+        return r_godrays.value > 0.f && q_max (0.f, r_godrays_intensity.value) > 0.f;
+}
+
 static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out);
 
 
@@ -2276,6 +2281,7 @@ void R_WarpScaleView (void)
 	float smax, tmax;
 	qboolean msaa = framebufs.scene.samples > 1;
 	qboolean needwarpscale;
+	qboolean need_depth_resolve;
 	GLuint fbodest;
 	double t;
 
@@ -2289,6 +2295,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
+	need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_GodraysNeedDepth ());
 
 	if (msaa)
 	{
@@ -2311,16 +2318,16 @@ void R_WarpScaleView (void)
 				glDrawBuffer (GL_BACK);
 			{
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
-				if (fbodest == framebufs.composite.fbo && R_DoFEnabled ())
+				if (need_depth_resolve)
 					mask |= GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
-					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
+				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
 			}
 		}
 
 		GL_EndGroup ();
 	}
 
-	if (fbodest == framebufs.composite.fbo && R_DoFEnabled () && (!msaa || needwarpscale))
+	if (need_depth_resolve && (!msaa || needwarpscale))
 	{
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
