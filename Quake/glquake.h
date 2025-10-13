@@ -419,6 +419,7 @@ typedef struct gpulightbuffer_s {
 
 typedef struct gpuframedata_s {
 	float	viewproj[16];
+	float	prevviewproj[16];
 	float	fogdata[4];
 	float	skyfogdata[4];
 	vec3_t	winddir;
@@ -429,12 +430,14 @@ typedef struct gpuframedata_s {
 	float	_padding1;
 	vec3_t	eyepos;
 	float	time;
+	vec3_t	prev_eyepos;
+	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
 	int			numlights;
+	int			prev_frame_valid;
 	int			_padding2;
 	int			_padding3;
-	int			_padding4;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
@@ -457,6 +460,7 @@ void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
 
 void R_UploadFrameData (void);
+void R_StorePrevFrameState (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);

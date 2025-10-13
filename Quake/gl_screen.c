@@ -2113,6 +2113,8 @@ void SCR_UpdateScreen (void)
 
        GL_PostProcess ();
 
+       R_StorePrevFrameState ();
+
        GL_BeginGroup ("2D");
 
 	GL_Set2D ();

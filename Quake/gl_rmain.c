@@ -42,6 +42,18 @@ mplane_t	frustum[4];
 float		r_matview[16];
 float		r_matproj[16];
 float		r_matviewproj[16];
+static float r_prev_matviewproj[16];
+static vec3_t r_prev_vieworg;
+static double r_prev_frame_time;
+static qboolean r_prev_frame_valid;
+static qboolean r_frame_rendered_this_update;
+
+static const float r_identity_mat4[16] = {
+        1.f, 0.f, 0.f, 0.f,
+        0.f, 1.f, 0.f, 0.f,
+        0.f, 0.f, 1.f, 0.f,
+        0.f, 0.f, 0.f, 1.f
+};
 
 //johnfitz -- rendering statistics
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
@@ -1311,6 +1323,30 @@ void R_SetupView (void)
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
 	r_framedata.time = cl.time;
+
+	double prev_delta = cl.time - r_prev_frame_time;
+	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
+
+	if (prev_valid)
+	{
+	        memcpy (r_framedata.prevviewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
+	        r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
+	        r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
+	        r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
+	        r_framedata.delta_time = (float) prev_delta;
+	        r_framedata.prev_frame_valid = 1;
+	}
+	else
+	{
+	        memcpy (r_framedata.prevviewproj, r_identity_mat4, sizeof (r_identity_mat4));
+	        r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
+	        r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
+	        r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
+	        r_framedata.delta_time = 0.f;
+	        r_framedata.prev_frame_valid = 0;
+	        r_prev_frame_valid = false;
+	}
+
 	if (softemu == SOFTEMU_COARSE)
 	{
 		r_framedata.screendither = NOISESCALE * r_dither.value * r_softemu_dither_screen.value;
@@ -1399,6 +1435,25 @@ void R_SetupView (void)
 	}
 	//johnfitz
 }
+
+void R_StorePrevFrameState (void)
+{
+        if (!r_frame_rendered_this_update)
+        {
+                r_prev_frame_valid = false;
+                return;
+        }
+
+        double prev_time = r_prev_frame_time;
+
+        memcpy (r_prev_matviewproj, r_matviewproj, sizeof (r_prev_matviewproj));
+        VectorCopy (r_refdef.vieworg, r_prev_vieworg);
+
+        r_prev_frame_time = cl.time;
+        r_prev_frame_valid = (cl.time > prev_time);
+        r_frame_rendered_this_update = false;
+}
+
 
 //==============================================================================
 //
@@ -2406,6 +2461,8 @@ void R_RenderView (void)
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
 	R_RenderScene ();
 	R_WarpScaleView ();
+
+	r_frame_rendered_this_update = true;
 
 	//johnfitz -- modified r_speeds output
 	time2 = Sys_DoubleTime ();
