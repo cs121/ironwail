@@ -531,6 +531,8 @@ typedef struct glprogs_s {
 	GLuint		viewblend;
 	GLuint		warpscale[2];		// [warp]
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
+	GLuint		bloom_extract;
+	GLuint		bloom_blur;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -584,6 +586,15 @@ typedef struct glframebufs_s {
 		GLuint		depth_stencil_tex;
 		GLuint		fbo;
 	}				composite;
+
+	struct {
+		GLuint		extract_tex;
+		GLuint		pingpong_tex[2];
+		GLuint		extract_fbo;
+		GLuint		pingpong_fbo[2];
+		int			width;
+		int			height;
+	}				bloom;
 
 	struct {
 		union {

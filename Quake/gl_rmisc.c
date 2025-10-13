@@ -57,6 +57,10 @@ extern cvar_t r_dof;
 extern cvar_t r_dof_focus;
 extern cvar_t r_dof_range;
 extern cvar_t r_dof_strength;
+extern cvar_t r_tonemap;
+extern cvar_t r_tonemap_exposure;
+extern cvar_t r_bloom;
+extern cvar_t r_bloom_threshold;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -337,6 +341,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
 	Cvar_RegisterVariable (&r_dof_strength);
+	Cvar_RegisterVariable (&r_tonemap);
+	Cvar_RegisterVariable (&r_tonemap_exposure);
+	Cvar_RegisterVariable (&r_bloom);
+	Cvar_RegisterVariable (&r_bloom_threshold);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 

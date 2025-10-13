@@ -95,6 +95,11 @@ cvar_t	r_dof_focus = {"r_dof_focus", "64", CVAR_ARCHIVE};
 cvar_t	r_dof_range = {"r_dof_range", "48", CVAR_ARCHIVE};
 cvar_t	r_dof_strength = {"r_dof_strength", "6", CVAR_ARCHIVE};
 
+cvar_t	r_tonemap = {"r_tonemap", "1", CVAR_ARCHIVE};
+cvar_t	r_tonemap_exposure = {"r_tonemap_exposure", "1.0", CVAR_ARCHIVE};
+cvar_t	r_bloom = {"r_bloom", "0.04", CVAR_ARCHIVE};
+cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};
+
 cvar_t	r_overbrightbits = {"r_overbrightbits", "1", CVAR_ARCHIVE};
 
 cvar_t	gl_finish = {"gl_finish","0",CVAR_NONE};
@@ -196,6 +201,24 @@ static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter,
 GL_CreateFBO
 =============
 */
+
+static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum filter, const char *name)
+{
+	GLuint texnum;
+
+	glGenTextures (1, &texnum);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
+	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, format, width, height);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	return texnum;
+}
+
 static GLuint GL_CreateFBO (GLenum target, const GLuint *colors, int numcolors, GLuint depth, GLuint stencil, const char *name)
 {
 	GLenum status;
@@ -246,7 +269,7 @@ GL_CreateFrameBuffers
 */
 void GL_CreateFrameBuffers (void)
 {
-	GLenum color_format = GL_RGB10_A2;
+	GLenum color_format = GL_RGBA16F;
 	GLenum depth_format = GL_DEPTH24_STENCIL8;
 
 	/* query MSAA limits */
@@ -263,6 +286,15 @@ void GL_CreateFrameBuffers (void)
 		framebufs.composite.depth_stencil_tex,
 		"composite fbo"
 	);
+
+	framebufs.bloom.width = q_max (1, vid.width / 2);
+	framebufs.bloom.height = q_max (1, vid.height / 2);
+	framebufs.bloom.extract_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom extract");
+	framebufs.bloom.pingpong_tex[0] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 0");
+	framebufs.bloom.pingpong_tex[1] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 1");
+	framebufs.bloom.extract_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.extract_tex, 0, 0, "bloom extract fbo");
+	framebufs.bloom.pingpong_fbo[0] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[0], 0, 0, "bloom blur fbo 0");
+	framebufs.bloom.pingpong_fbo[1] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[1], 0, 0, "bloom blur fbo 1");
 
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int) q_max (1.f, vid_fsaa.value));
@@ -317,22 +349,28 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
-        GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
-        GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
-        GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
-        GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
-        GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
+	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
+	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
+	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
-        GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
-        GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
-        GL_DeleteNativeTexture (framebufs.oit.accum_tex);
-        GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
-        GL_DeleteNativeTexture (framebufs.scene.color_tex);
-        GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
-        GL_DeleteNativeTexture (framebufs.composite.color_tex);
+	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
+	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
+	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
+	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
+	GL_DeleteNativeTexture (framebufs.scene.color_tex);
+	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
+	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
+	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
+	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
+	GL_DeleteNativeTexture (framebufs.composite.color_tex);
 
-        memset (&framebufs, 0, sizeof (framebufs));
+	memset (&framebufs, 0, sizeof (framebufs));
 }
 
 static void GL_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
@@ -366,6 +404,56 @@ static void GL_OrthoMatrix (float matrix[16], float left, float right, float bot
         matrix[3*4 + 3] = 1.f;
 }
 
+static GLuint GL_GenerateBloomTexture (void)
+{
+	int width = framebufs.bloom.width;
+	int height = framebufs.bloom.height;
+	GLuint fallback = framebufs.bloom.pingpong_tex[0] ? framebufs.bloom.pingpong_tex[0] : framebufs.bloom.extract_tex;
+	if (fallback == 0)
+		fallback = framebufs.bloom.extract_tex;
+	if (width <= 0 || height <= 0)
+		return fallback;
+	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
+		return fallback;
+
+	float threshold = q_max (0.f, r_bloom_threshold.value);
+
+	GL_BeginGroup ("Bloom extract");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.bloom_extract);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
+		(float)vid.width / (float)width,
+		(float)vid.height / (float)height);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_EndGroup ();
+
+	GLuint input_tex = framebufs.bloom.extract_tex;
+	const int passes = 4;
+	GL_BeginGroup ("Bloom blur");
+	for (int pass = 0; pass < passes; ++pass)
+	{
+		int target_index = pass & 1;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
+		glViewport (0, 0, width, height);
+		GL_UseProgram (glprogs.bloom_blur);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
+		float dirx = (pass & 1) ? 0.f : 1.f;
+		float diry = (pass & 1) ? 1.f : 0.f;
+		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, dirx, diry);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+		input_tex = framebufs.bloom.pingpong_tex[target_index];
+	}
+	GL_EndGroup ();
+
+	return input_tex;
+}
+
+
 void GL_PostProcess (void)
 {
 	int palidx, variant;
@@ -381,6 +469,15 @@ void GL_PostProcess (void)
 	palidx =  GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
+	float bloom_intensity = q_max (0.f, r_bloom.value);
+	float exposure = q_max (0.f, r_tonemap_exposure.value);
+	float tonemap_enabled = r_tonemap.value > 0.f ? 1.f : 0.f;
+	GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
+	if (framebufs.bloom.pingpong_tex[0])
+		bloom_texture = framebufs.bloom.pingpong_tex[0];
+	if (bloom_intensity > 0.f)
+		bloom_texture = GL_GenerateBloomTexture ();
+
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 
@@ -389,9 +486,11 @@ void GL_PostProcess (void)
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
+	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min(2.0f, q_max(1.0f, vid_contrast.value)), 1.f/r_refdef.scale, dither);
+	GL_Uniform4fFunc (5, bloom_intensity, exposure, tonemap_enabled, 0.f);
 
 	dof_enabled = R_DoFEnabled ();
 
@@ -965,7 +1064,11 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	return vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ();
+	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+		return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f)
+		return true;
+	return false;
 }
 
 /*
