@@ -17,7 +17,6 @@ uniform vec2 uNoiseScale;
 uniform vec2 uInvResolution;
 uniform bool  uReverseZ;
 uniform bool  uNDCZeroToOne;
-uniform float uViewZSign;
 
 float DepthToNDC(float depth01)
 {
@@ -37,7 +36,7 @@ vec3 ReconstructPosition(vec2 uv, float depth01)
     return view.xyz / max(view.w, 1e-6);
 }
 
-vec3 ComputeNormal(vec3 centerPos, vec2 uv)
+vec3 ComputeNormal(vec3 centerPos, vec2 uv, vec3 viewDir)
 {
     vec2 offsetX = vec2(uInvResolution.x, 0.0);
     vec2 offsetY = vec2(0.0, uInvResolution.y);
@@ -54,7 +53,6 @@ vec3 ComputeNormal(vec3 centerPos, vec2 uv)
     if (any(isnan(normal)) || length(normal) < 1e-4)
         normal = vec3(0.0, 0.0, 1.0);
 
-    vec3 viewDir = normalize(-centerPos);
     if (dot(normal, viewDir) < 0.0)
         normal = -normal;
     return normal;
@@ -70,7 +68,8 @@ void main()
     }
 
     vec3 position = ReconstructPosition(vUV, depth);
-    vec3 normal = ComputeNormal(position, vUV);
+    vec3 viewDir = normalize(-position);
+    vec3 normal = ComputeNormal(position, vUV, viewDir);
 
     vec3 noise = texture(uNoise, vUV * uNoiseScale).xyz * 2.0 - 1.0;
     noise.z = 0.0;
@@ -99,7 +98,7 @@ void main()
         vec3 depthPos = ReconstructPosition(sampleUV, sampleDepth);
         float range = uRadius / (abs(position.z - depthPos.z) + 1e-4);
         float weight = clamp(range, 0.0, 1.0);
-        float deltaForward = (depthPos.z - samplePos.z) * uViewZSign;
+        float deltaForward = dot(depthPos - samplePos, viewDir);
         const float thickness = 0.05;
         float stepSoft = smoothstep(uBias, uBias + thickness, deltaForward);
         occlusion += stepSoft * weight;

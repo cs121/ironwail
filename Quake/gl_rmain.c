@@ -588,7 +588,6 @@ static GLuint GL_GenerateSSAOTexture (void)
     static GLint loc_inv_resolution = -1;
     static GLint loc_reverse_z = -1;
     static GLint loc_ndc_zero_to_one = -1;
-    static GLint loc_view_z_sign = -1;
 
     if (cached_program != glprogs.ssao)
     {
@@ -596,7 +595,7 @@ static GLuint GL_GenerateSSAOTexture (void)
         loc_depth = loc_noise = loc_proj = loc_invproj = -1;
         loc_samples = loc_kernel = loc_radius = loc_bias = -1;
         loc_power = loc_intensity = loc_noise_scale = loc_inv_resolution = -1;
-        loc_reverse_z = loc_ndc_zero_to_one = loc_view_z_sign = -1;
+        loc_reverse_z = loc_ndc_zero_to_one = -1;
     }
 
     if (loc_depth < 0)
@@ -615,7 +614,6 @@ static GLuint GL_GenerateSSAOTexture (void)
         loc_inv_resolution = GL_GetUniformLocationFunc (glprogs.ssao, "uInvResolution");
         loc_reverse_z = GL_GetUniformLocationFunc (glprogs.ssao, "uReverseZ");
         loc_ndc_zero_to_one = GL_GetUniformLocationFunc (glprogs.ssao, "uNDCZeroToOne");
-        loc_view_z_sign = GL_GetUniformLocationFunc (glprogs.ssao, "uViewZSign");
     }
 
     int kernel_size = SSAO_MAX_KERNEL;
@@ -665,15 +663,6 @@ static GLuint GL_GenerateSSAOTexture (void)
         GL_Uniform1iFunc (loc_reverse_z, gl_clipcontrol_able ? 1 : 0);
     if (loc_ndc_zero_to_one >= 0)
         GL_Uniform1iFunc (loc_ndc_zero_to_one, gl_clipcontrol_able ? 1 : 0);
-    if (loc_view_z_sign >= 0)
-    {
-        /*
-         * Reverse-Z projections flip the view-space forward axis compared to
-         * the legacy matrix, so expose the actual sign to the shader.
-         */
-        const float view_z_sign = gl_clipcontrol_able ? -1.f : 1.f;
-        GL_Uniform1fFunc (loc_view_z_sign, view_z_sign);
-    }
 
     glDrawArrays (GL_TRIANGLES, 0, 3);
 
