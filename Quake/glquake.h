@@ -537,7 +537,6 @@ typedef struct glprogs_s {
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
-	GLuint		godrays;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -602,11 +601,6 @@ typedef struct glframebufs_s {
 		int			width;
 		int			height;
 	}				bloom;
-
-	struct {
-		GLuint		color_tex;
-		GLuint		fbo;
-	}				lightshafts;
 
 	struct {
 		union {
