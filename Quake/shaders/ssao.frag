@@ -40,6 +40,10 @@ vec3 ComputeNormal(vec3 centerPos, vec2 uv)
     vec3 normal = normalize(cross(tangent, bitangent));
     if (any(isnan(normal)) || length(normal) < 1e-4)
         normal = vec3(0.0, 0.0, 1.0);
+
+    vec3 viewDir = normalize(-centerPos);
+    if (dot(normal, viewDir) < 0.0)
+        normal = -normal;
     return normal;
 }
 
