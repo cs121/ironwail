@@ -15,13 +15,26 @@ uniform float uPower;
 uniform float uIntensity;
 uniform vec2 uNoiseScale;
 uniform vec2 uInvResolution;
+uniform bool  uReverseZ;
+uniform bool  uNDCZeroToOne;
+uniform float uViewZSign;
 
-vec3 ReconstructPosition(vec2 uv, float depth)
+float DepthToNDC(float depth01)
 {
-    float z = depth * 2.0 - 1.0;
-    vec4 clip = vec4(uv * 2.0 - 1.0, z, 1.0);
+    return uNDCZeroToOne ? depth01 : (depth01 * 2.0 - 1.0);
+}
+
+bool IsSkyDepth(float d)
+{
+    return uReverseZ ? (d <= 0.0005) : (d >= 0.9995);
+}
+
+vec3 ReconstructPosition(vec2 uv, float depth01)
+{
+    float z_ndc = DepthToNDC(depth01);
+    vec4 clip = vec4(uv * 2.0 - 1.0, z_ndc, 1.0);
     vec4 view = uInvProj * clip;
-    return view.xyz / view.w;
+    return view.xyz / max(view.w, 1e-6);
 }
 
 vec3 ComputeNormal(vec3 centerPos, vec2 uv)
@@ -32,8 +45,8 @@ vec3 ComputeNormal(vec3 centerPos, vec2 uv)
     float depthX = texture(uDepth, clamp(uv + offsetX, 0.0, 1.0)).r;
     float depthY = texture(uDepth, clamp(uv + offsetY, 0.0, 1.0)).r;
 
-    vec3 posX = (depthX >= 1.0) ? centerPos : ReconstructPosition(uv + offsetX, depthX);
-    vec3 posY = (depthY >= 1.0) ? centerPos : ReconstructPosition(uv + offsetY, depthY);
+    vec3 posX = IsSkyDepth(depthX) ? centerPos : ReconstructPosition(uv + offsetX, depthX);
+    vec3 posY = IsSkyDepth(depthY) ? centerPos : ReconstructPosition(uv + offsetY, depthY);
 
     vec3 tangent = posX - centerPos;
     vec3 bitangent = posY - centerPos;
@@ -50,7 +63,7 @@ vec3 ComputeNormal(vec3 centerPos, vec2 uv)
 void main()
 {
     float depth = texture(uDepth, vUV).r;
-    if (depth >= 1.0)
+    if (IsSkyDepth(depth))
     {
         FragAO = 1.0;
         return;
@@ -80,14 +93,16 @@ void main()
             continue;
 
         float sampleDepth = texture(uDepth, sampleUV).r;
-        if (sampleDepth >= 1.0)
+        if (IsSkyDepth(sampleDepth))
             continue;
 
         vec3 depthPos = ReconstructPosition(sampleUV, sampleDepth);
         float range = uRadius / (abs(position.z - depthPos.z) + 1e-4);
         float weight = clamp(range, 0.0, 1.0);
-        float delta = depthPos.z - samplePos.z;
-        occlusion += (delta > uBias ? 1.0 : 0.0) * weight;
+        float deltaForward = (depthPos.z - samplePos.z) * uViewZSign;
+        const float thickness = 0.05;
+        float stepSoft = smoothstep(uBias, uBias + thickness, deltaForward);
+        occlusion += stepSoft * weight;
     }
 
     float ao = 1.0 - (samples > 0 ? occlusion / float(samples) : 0.0);
