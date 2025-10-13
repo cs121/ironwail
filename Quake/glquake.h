@@ -419,7 +419,7 @@ typedef struct gpulightbuffer_s {
 
 typedef struct gpuframedata_s {
 	float	viewproj[16];
-	float	prevviewproj[16];
+	float	prev_viewproj[16];
 	float	fogdata[4];
 	float	skyfogdata[4];
 	vec3_t	winddir;
@@ -427,7 +427,7 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	float	_padding1;
+	float	_padding0;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
@@ -436,8 +436,8 @@ typedef struct gpuframedata_s {
 	float	zlogbias;
 	int			numlights;
 	int			prev_frame_valid;
+	int			_padding1;
 	int			_padding2;
-	int			_padding3;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
@@ -577,12 +577,14 @@ typedef struct glframebufs_s {
 	struct {
 		GLint		samples;
 		GLuint		color_tex;
+		GLuint		velocity_tex;
 		GLuint		depth_stencil_tex;
 		GLuint		fbo;
 	}				scene;
 
 	struct {
 		GLuint		color_tex;
+		GLuint		velocity_tex;
 		GLuint		fbo;
 	}				resolved_scene;
 

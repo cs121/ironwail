@@ -154,6 +154,7 @@ float GL_WaterAlphaForEntityTextureType (entity_t *ent, textype_t type)
 
 typedef struct bmodel_gpu_instance_s {
 	float		world[12];	// world matrix (transposed mat4x3)
+	float		prev_world[12];	// previous world matrix (transposed mat4x3)
 	float		alpha;
 	float		padding[3];
 } bmodel_gpu_instance_t;
@@ -199,18 +200,33 @@ R_InitBModelInstance
 */
 static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
 {
-	vec3_t angles;
-	float mat[16];
+        vec3_t angles;
+        vec3_t prev_angles;
+        float mat[16];
+        float prev_mat[16];
 
-	angles[0] = -ent->angles[0];
-	angles[1] =  ent->angles[1];
-	angles[2] =  ent->angles[2];
-	R_EntityMatrix (mat, ent->origin, angles, ent == &cl_entities[0] ? ENTSCALE_DEFAULT : ent->scale);
+        angles[0] = -ent->angles[0];
+        angles[1] =  ent->angles[1];
+        angles[2] =  ent->angles[2];
+        R_EntityMatrix (mat, ent->origin, angles, ent == &cl_entities[0] ? ENTSCALE_DEFAULT : ent->scale);
 
-	MatrixTranspose4x3 (mat, inst->world);
+        if (ent == &cl_entities[0])
+        {
+                memcpy (prev_mat, mat, sizeof (mat));
+        }
+        else
+        {
+                prev_angles[0] = -ent->previousangles[0];
+                prev_angles[1] =  ent->previousangles[1];
+                prev_angles[2] =  ent->previousangles[2];
+                R_EntityMatrix (prev_mat, ent->previousorigin, prev_angles, ent->scale);
+        }
 
-	inst->alpha = ent->alpha == ENTALPHA_DEFAULT ? -1.f : ENTALPHA_DECODE (ent->alpha);
-	memset (&inst->padding, 0, sizeof(inst->padding));
+        MatrixTranspose4x3 (mat, inst->world);
+        MatrixTranspose4x3 (prev_mat, inst->prev_world);
+
+        inst->alpha = ent->alpha == ENTALPHA_DEFAULT ? -1.f : ENTALPHA_DECODE (ent->alpha);
+        memset (&inst->padding, 0, sizeof(inst->padding));
 }
 
 /*

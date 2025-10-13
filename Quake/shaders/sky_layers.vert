@@ -48,7 +48,11 @@ layout(std430, binding=1) restrict readonly buffer CallBuffer
 struct Instance
 {
 	vec4	mat[3];
+	vec4	prev_mat[3];
 	float	alpha;
+	float	pad0;
+	float	pad1;
+	float	pad2;
 };
 
 layout(std430, binding=2) restrict readonly buffer InstanceBuffer
@@ -56,10 +60,15 @@ layout(std430, binding=2) restrict readonly buffer InstanceBuffer
 	Instance instance_data[];
 };
 
+vec3 TransformPosition(vec3 p, vec4 mat[3])
+{
+	mat4x3 world = transpose(mat3x4(mat[0], mat[1], mat[2]));
+	return (world * vec4(p, 1.0)).xyz;
+}
+
 vec3 Transform(vec3 p, Instance instance)
 {
-	mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
-	return mat3(world[0], world[1], world[2]) * p + world[3];
+	return TransformPosition(p, instance.mat);
 }
 
 layout(location=0) in vec3 in_pos;

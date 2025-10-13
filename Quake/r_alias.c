@@ -54,6 +54,7 @@ typedef struct {
 
 typedef struct aliasinstance_s {
 	float		worldmatrix[12];
+	float		prev_worldmatrix[12];
 	vec3_t		lightcolor;
 	float		alpha;
 	int32_t		pose1;
@@ -68,6 +69,7 @@ struct ibuf_s {
 
 	struct {
 		float	matviewproj[16];
+		float	prev_matviewproj[16];
 		vec3_t	eyepos;
 		float	_pad;
 		vec4_t	fog;
@@ -537,6 +539,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	GL_SetState (state);
 
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
 	// use fog density sign bit as overbright flag
@@ -755,7 +758,26 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 
 	instance = &ibuf.inst[ibuf.count++];
 
-	MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
+	{
+		float prev_model_matrix[16];
+		if (e == &cl.viewent)
+		{
+			memcpy (prev_model_matrix, model_matrix, sizeof (model_matrix));
+		}
+		else
+		{
+			vec3_t prev_origin;
+			vec3_t prev_angles;
+			VectorCopy (e->previousorigin, prev_origin);
+			VectorCopy (e->previousangles, prev_angles);
+			R_EntityMatrix (prev_model_matrix, prev_origin, prev_angles, e->scale);
+			ApplyTranslation (prev_model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
+			ApplyScale (prev_model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
+		}
+
+		MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
+		MatrixTranspose4x3 (prev_model_matrix, instance->prev_worldmatrix);
+	}
 
 	instance->lightcolor[0] = lightcolor[0];
 	instance->lightcolor[1] = lightcolor[1];

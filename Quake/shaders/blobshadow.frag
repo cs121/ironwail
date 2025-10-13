@@ -74,6 +74,7 @@ layout(location=2) in vec3 in_pos;
 #define main main_body
 #else
         layout(location=0) out vec4 OUT_COLOR;
+        layout(location=1) out vec2 out_velocity;
 #endif // OIT
 
 void main()
@@ -93,6 +94,9 @@ void main()
 
         vec3 color = mix(Fog.rgb, vec3(0.0), fog);
         OUT_COLOR = vec4(color, alpha);
+#if !OIT
+        out_velocity = vec2(0.0);
+#endif
 
         OUT_COLOR.rgb += bayer(ivec2(gl_FragCoord.xy)) * ScreenDither;
         OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
