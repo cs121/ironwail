@@ -2371,12 +2371,12 @@ void R_WarpScaleView (void)
 				glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			else
 				glDrawBuffer (GL_BACK);
-			{
-				GLbitfield mask = GL_COLOR_BUFFER_BIT;
-				if (need_depth_resolve)
-					mask |= GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
-				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
-			}
+                        {
+                                GLbitfield mask = GL_COLOR_BUFFER_BIT;
+                                if (need_depth_resolve)
+                                        mask |= GL_DEPTH_BUFFER_BIT;
+                                GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
+                        }
 		}
 
 		GL_EndGroup ();
@@ -2388,7 +2388,7 @@ void R_WarpScaleView (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+                GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
