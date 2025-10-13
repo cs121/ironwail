@@ -2446,9 +2446,23 @@ void R_WarpScaleView (void)
                 GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
-	if (fbodest)
-	{
+        if (!msaa && !needwarpscale)
+        {
+                GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+                glReadBuffer (GL_COLOR_ATTACHMENT0);
+                GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+                if (fbodest)
+                        glDrawBuffer (GL_COLOR_ATTACHMENT0);
+                else
+                        glDrawBuffer (GL_BACK);
+                GL_BlitFramebufferFunc (0, 0, srcw, srch,
+                        srcx, srcy, srcx + srcw, srcy + srch,
+                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
+        if (fbodest)
+        {
                 glDrawBuffer (GL_COLOR_ATTACHMENT0);
                 glReadBuffer (GL_COLOR_ATTACHMENT0);
         }
@@ -2459,8 +2473,8 @@ void R_WarpScaleView (void)
         }
         glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 
-	if (!needwarpscale)
-		return;
+        if (!needwarpscale)
+                return;
 
 	GL_BeginGroup ("Warp/scale view");
 
