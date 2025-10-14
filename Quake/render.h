@@ -86,6 +86,12 @@ typedef struct entity_s
 	vec3_t					previousangles;	//johnfitz -- transform lerping
 	vec3_t					currentangles;	//johnfitz -- transform lerping
 
+	// Cached transform from the previous rendered frame for motion blur.
+	vec3_t					motion_blur_prev_origin;
+	vec3_t					motion_blur_prev_angles;
+	int					motion_blur_prev_frame;
+	qboolean			motion_blur_prev_valid;
+
 	lightcache_t			lightcache;		// alias light trace cache
 
 	float					traildelay;		// time left until next particle trail update

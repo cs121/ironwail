@@ -1570,6 +1570,13 @@ void R_StorePrevFrameState (void)
 	r_frame_rendered_this_update = false;
 }
 
+qboolean R_PrevFrameValid (void)
+{
+        return r_prev_frame_valid;
+}
+
+
+
 
 //==============================================================================
 //
