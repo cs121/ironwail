@@ -768,7 +768,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		vec3_t prev_angles;
 		qboolean have_prev = false;
 
-		if (e != &cl.viewent && e->motion_blur_prev_valid && e->motion_blur_prev_frame == r_framecount - 1 && R_PrevFrameValid ())
+		if (e != &cl.viewent && e->motion_blur_prev_valid && e->motion_blur_prev_frame == r_framecount - 1)
 		{
 			VectorCopy (e->motion_blur_prev_origin, prev_origin);
 			VectorCopy (e->motion_blur_prev_angles, prev_angles);
