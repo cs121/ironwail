@@ -54,7 +54,7 @@ struct Surface
 	uint	numedges;
 	uint	firstvert;
 	vec3	mins;
-	uint	_pad0;
+	uint	lightmap;
 	vec3	maxs;
 	uint	_pad1;
 };
@@ -71,7 +71,8 @@ layout(std430, binding=5) restrict buffer SurfaceBuffer
 #define SURF_TEXNUM(base)			rawsurfaces[base + 1].y
 #define SURF_NUMEDGES(base)		rawsurfaces[base + 1].z
 #define SURF_FIRSTVERT(base)		rawsurfaces[base + 1].w
-#define SURF_MINS(base)			uintBitsToFloat(rawsurfaces[base + 2].xyz)
+#define SURF_MINS(base)		uintBitsToFloat(rawsurfaces[base + 2].xyz)
+#define SURF_LIGHTMAP(base)		rawsurfaces[base + 2].w
 #define SURF_MAXS(base)			uintBitsToFloat(rawsurfaces[base + 3].xyz)
 #define SIZEOF_SURFACE				4 /* uvec4s */
 
@@ -129,12 +130,14 @@ void main()
 	// surface is visible, append its triangles to the index buffer
 	// and update the draw command corresponding to its texture number
 	uint texnum = SURF_TEXNUM(surfbase);
-	uint numedges = SURF_NUMEDGES(surfbase);
-	uint firstvert = SURF_FIRSTVERT(surfbase);
-	uint cmdbase = texnum * uint(SIZEOF_CMD);
+	uint	numedges = SURF_NUMEDGES(surfbase);
+	uint	firstvert_abs = SURF_FIRSTVERT(surfbase);
+	uint	cmdbase = texnum * uint(SIZEOF_CMD);
+	uint	baseVertex = CMD_BASE_VERTEX(cmdbase);
 	// some bsps out there have faces with < 2 edges, which would cause underflow below
 	numedges = max(numedges, 2u);
-	uint ofs = CMD_FIRST_INDEX(cmdbase) + atomicAdd(CMD_COUNT(cmdbase), 3u * (numedges - 2u));
+	uint	ofs = CMD_FIRST_INDEX(cmdbase) + atomicAdd(CMD_COUNT(cmdbase), 3u * (numedges - 2u));
+	uint	firstvert = firstvert_abs - baseVertex;
 	for (uint i = 2u; i < numedges; i++)
 	{
 		indices[ofs++] = firstvert;

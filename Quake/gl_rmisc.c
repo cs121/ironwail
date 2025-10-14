@@ -386,6 +386,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_showfields_align);
 	Cvar_RegisterVariable (&gl_farclip);
 	Cvar_RegisterVariable (&gl_fullbrights);
+	Cvar_RegisterVariable (&gl_lightmap_atlas_size);
+	Cvar_SetCallback (&gl_lightmap_atlas_size, GL_OnLightmapAtlasSizeChanged);
+	GL_OnLightmapAtlasSizeChanged (&gl_lightmap_atlas_size);
 	Cvar_SetCallback (&gl_fullbrights, GL_Fullbrights_f);
 	Cvar_RegisterVariable (&gl_overbright_models);
 	Cvar_RegisterVariable (&r_lerpmodels);
