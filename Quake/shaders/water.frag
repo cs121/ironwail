@@ -162,7 +162,7 @@ void main()
         result.a *= in_alpha;
         out_fragcolor = result;
 #if !OIT
-        out_velocity = ComputeVelocity(in_curr_clip, in_prev_clip) * result.a;
+        out_velocity = vec2(0.0);
 #endif
 #if DITHER
 	if (Fog.w > 0.)

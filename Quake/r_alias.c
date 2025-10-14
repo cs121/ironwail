@@ -60,8 +60,11 @@ typedef struct aliasinstance_s {
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
-	int32_t		padding;
+	int32_t		flags;
 } aliasinstance_t;
+
+#define ALIAS_INSTANCE_FLAG_NONE          0
+#define ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR (1 << 0)
 
 struct ibuf_s {
 	int			count;
@@ -757,6 +760,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		ibuf.ent = e;
 
 	instance = &ibuf.inst[ibuf.count++];
+	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
 
 	{
 		float prev_model_matrix[16];
@@ -801,6 +805,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	instance->lightcolor[1] = lightcolor[1];
 	instance->lightcolor[2] = lightcolor[2];
 	instance->alpha = entalpha;
+	if (e == &cl.viewent)
+		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;

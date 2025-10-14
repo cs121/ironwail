@@ -414,7 +414,11 @@ void main()
         result.a = in_alpha; // FIXME: This will make almost transparent things cut holes though heavy fog
         out_fragcolor = result;
 #if !OIT
-        out_velocity = ComputeVelocity(in_curr_clip, in_prev_clip) * result.a;
+        vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
+        if (result.a < 0.999)
+                out_velocity = vec2(0.0);
+        else
+                out_velocity = velocity * result.a;
 #endif
 #if DITHER == 1
 	vec3 dpos = fwidth(in_pos);

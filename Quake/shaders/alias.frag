@@ -6,7 +6,7 @@ struct InstanceData
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
-	int		Padding;
+	int		Flags;
 };
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
@@ -80,6 +80,8 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
+const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
+
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
@@ -93,6 +95,7 @@ layout(location=1) in vec4 in_color;
 layout(location=2) in vec3 in_pos;
 layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
+layout(location=5) flat in int in_flags;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -167,7 +170,11 @@ void main()
 	result.rgb = mix(Fog.rgb, result.rgb, fog);
 	out_fragcolor = result;
 #if !OIT
-	out_velocity = ComputeVelocity(in_curr_clip, in_prev_clip) * result.a;
+	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
+	if ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0 || result.a < 0.999)
+		out_velocity = vec2(0.0);
+	else
+		out_velocity = velocity * result.a;
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
