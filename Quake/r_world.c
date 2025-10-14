@@ -202,28 +202,47 @@ static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
 {
         vec3_t angles;
         vec3_t prev_angles;
+        vec3_t curr_origin;
+        vec3_t prev_origin;
         float mat[16];
         float prev_mat[16];
+        qboolean has_prev = false;
 
-        angles[0] = -ent->angles[0];
-        angles[1] =  ent->angles[1];
-        angles[2] =  ent->angles[2];
-        R_EntityMatrix (mat, ent->origin, angles, ent == &cl_entities[0] ? ENTSCALE_DEFAULT : ent->scale);
+        VectorCopy (ent->origin, curr_origin);
+        VectorCopy (ent->angles, angles);
 
-        if (ent == &cl_entities[0])
+        if (ent->motion_blur_prev_valid && ent->motion_blur_prev_frame == r_framecount - 1 && R_PrevFrameValid ())
         {
-                memcpy (prev_mat, mat, sizeof (mat));
+                VectorCopy (ent->motion_blur_prev_origin, prev_origin);
+                VectorCopy (ent->motion_blur_prev_angles, prev_angles);
+                has_prev = true;
         }
-        else
+
+        if (!has_prev)
         {
-                prev_angles[0] = -ent->previousangles[0];
-                prev_angles[1] =  ent->previousangles[1];
-                prev_angles[2] =  ent->previousangles[2];
-                R_EntityMatrix (prev_mat, ent->previousorigin, prev_angles, ent->scale);
+                VectorCopy (curr_origin, prev_origin);
+                VectorCopy (angles, prev_angles);
         }
+
+        vec3_t matrix_angles;
+        vec3_t prev_matrix_angles;
+        float scale = (ent == &cl_entities[0]) ? ENTSCALE_DEFAULT : ent->scale;
+
+        VectorCopy (angles, matrix_angles);
+        VectorCopy (prev_angles, prev_matrix_angles);
+        matrix_angles[0] = -matrix_angles[0];
+        prev_matrix_angles[0] = -prev_matrix_angles[0];
+
+        R_EntityMatrix (mat, curr_origin, matrix_angles, scale);
+        R_EntityMatrix (prev_mat, prev_origin, prev_matrix_angles, scale);
 
         MatrixTranspose4x3 (mat, inst->world);
         MatrixTranspose4x3 (prev_mat, inst->prev_world);
+
+        VectorCopy (curr_origin, ent->motion_blur_prev_origin);
+        VectorCopy (ent->angles, ent->motion_blur_prev_angles);
+        ent->motion_blur_prev_frame = r_framecount;
+        ent->motion_blur_prev_valid = true;
 
         inst->alpha = ent->alpha == ENTALPHA_DEFAULT ? -1.f : ENTALPHA_DECODE (ent->alpha);
         memset (&inst->padding, 0, sizeof(inst->padding));

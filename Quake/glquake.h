@@ -461,6 +461,7 @@ void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases 
 
 void R_UploadFrameData (void);
 void R_StorePrevFrameState (void);
+qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);

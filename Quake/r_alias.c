@@ -760,16 +760,29 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 
 	{
 		float prev_model_matrix[16];
+		vec3_t prev_origin;
+		vec3_t prev_angles;
+		qboolean have_prev = false;
+
+		if (e != &cl.viewent && e->motion_blur_prev_valid && e->motion_blur_prev_frame == r_framecount - 1 && R_PrevFrameValid ())
+		{
+			VectorCopy (e->motion_blur_prev_origin, prev_origin);
+			VectorCopy (e->motion_blur_prev_angles, prev_angles);
+			have_prev = true;
+		}
+
+		if (!have_prev)
+		{
+			VectorCopy (lerpdata.origin, prev_origin);
+			VectorCopy (lerpdata.angles, prev_angles);
+		}
+
 		if (e == &cl.viewent)
 		{
 			memcpy (prev_model_matrix, model_matrix, sizeof (model_matrix));
 		}
 		else
 		{
-			vec3_t prev_origin;
-			vec3_t prev_angles;
-			VectorCopy (e->previousorigin, prev_origin);
-			VectorCopy (e->previousangles, prev_angles);
 			R_EntityMatrix (prev_model_matrix, prev_origin, prev_angles, e->scale);
 			ApplyTranslation (prev_model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
 			ApplyScale (prev_model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
@@ -778,6 +791,11 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
 		MatrixTranspose4x3 (prev_model_matrix, instance->prev_worldmatrix);
 	}
+
+	VectorCopy (lerpdata.origin, e->motion_blur_prev_origin);
+	VectorCopy (lerpdata.angles, e->motion_blur_prev_angles);
+	e->motion_blur_prev_frame = r_framecount;
+	e->motion_blur_prev_valid = true;
 
 	instance->lightcolor[0] = lightcolor[0];
 	instance->lightcolor[1] = lightcolor[1];
