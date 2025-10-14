@@ -76,14 +76,6 @@ static float GL_ConsoleVisibility (void)
 	return CLAMP (0.f, scr_con_current / height, 1.f);
 }
 
-static qboolean GL_ShouldApplyMotionBlur (void)
-{
-	if (r_motionblur.value <= 0.f)
-		return false;
-
-	return GL_ConsoleVisibility () <= 0.f;
-}
-
 static float GL_TemperedOverbright (float overbright)
 {
 	if (overbright <= 1.f)
@@ -644,6 +636,15 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_EndGroup ();
 
 	return input_tex;
+}
+
+
+static qboolean GL_ShouldApplyMotionBlur (void)
+{
+	if (r_motionblur.value <= 0.f)
+		return false;
+
+	return GL_ConsoleVisibility () <= 0.f;
 }
 
 
