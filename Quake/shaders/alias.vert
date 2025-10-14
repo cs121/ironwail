@@ -6,7 +6,7 @@ struct InstanceData
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
-	int		Padding;
+	int		Flags;
 };
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
@@ -89,6 +89,7 @@ layout(location=1) out vec4 out_color;
 layout(location=2) out vec3 out_pos;
 layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
+layout(location=5) flat out int out_flags;
 
 void main()
 {
@@ -106,6 +107,7 @@ void main()
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
+	out_flags = inst.Flags;
 	out_pos = world_vert - EyePos;
 	// transform world X and Z axes to local space
 	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));

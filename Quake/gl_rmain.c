@@ -171,7 +171,7 @@ cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_shutter = { "r_motionblur_shutter", "0.75", CVAR_ARCHIVE };
 cvar_t	r_motionblur_maxradiuspixels = { "r_motionblur_maxradiuspixels", "32", CVAR_ARCHIVE };
 cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE };
-cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.5", CVAR_ARCHIVE };
+cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
 
@@ -649,6 +649,17 @@ void GL_PostProcess (void)
         motion_strength = q_max (0.f, r_motionblur.value);
         motion_shutter = q_max (0.f, r_motionblur_shutter.value);
         motion_effective_shutter = motion_strength * motion_shutter;
+        if (motion_effective_shutter > 0.f && r_prev_frame_valid)
+        {
+                double frame_delta = cl.time - r_prev_frame_time;
+                if (frame_delta > 0.0)
+                {
+                        const double reference_delta = 1.0 / 60.0;
+                        float frame_scale = (float)(reference_delta / frame_delta);
+                        frame_scale = q_min (4.f, q_max (1.f, frame_scale));
+                        motion_effective_shutter *= frame_scale;
+                }
+        }
         motion_max_radius = q_max (0.f, r_motionblur_maxradiuspixels.value);
         motion_min_velocity = q_max (0.f, r_motionblur_minvelocity.value);
         motion_depth_threshold = q_max (0.f, r_motionblur_depththreshold.value);
