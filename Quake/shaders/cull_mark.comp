@@ -110,14 +110,14 @@ void main()
 	// frustum culling
 	vec3 mins = SURF_MINS(surfbase);
 	vec3 maxs = SURF_MAXS(surfbase);
+	vec3 center = (mins + maxs) * 0.5;
+	vec3 extents = (maxs - mins) * 0.5;
 	for (uint i = 0u; i < 4u; i++)
 	{
 		vec4 plane = frustum[i];
-		vec3 v;
-		v.x = plane.x < 0.0 ? mins.x : maxs.x;
-		v.y = plane.y < 0.0 ? mins.y : maxs.y;
-		v.z = plane.z < 0.0 ? mins.z : maxs.z;
-		if (dot(plane.xyz, v) < plane.w)
+		float signedDistance = dot(plane.xyz, center) - plane.w;
+		float radius = dot(abs(plane.xyz), extents);
+		if (signedDistance < -radius)
 			return;
 	}
 
