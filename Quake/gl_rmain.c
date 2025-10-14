@@ -53,7 +53,6 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
-static qboolean R_SSAOEnabled (void);
 
 static const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
@@ -169,11 +168,6 @@ cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_samples = { "r_motionblur_samples", "8", CVAR_ARCHIVE };
 
-cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
-cvar_t	r_ssao_radius = { "r_ssao_radius", "0.75", CVAR_ARCHIVE };
-cvar_t	r_ssao_bias = { "r_ssao_bias", "0.025", CVAR_ARCHIVE };
-cvar_t	r_ssao_power = { "r_ssao_power", "1.5", CVAR_ARCHIVE };
-cvar_t	r_ssao_intensity = { "r_ssao_intensity", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
@@ -248,47 +242,6 @@ static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean
 //==============================================================================
 
 glframebufs_t framebufs;
-static GLuint ssao_noise_tex;
-
-#define SSAO_MAX_KERNEL 16
-
-static const vec3_t ssao_kernel[SSAO_MAX_KERNEL] = {
-	{ 0.538100f, 0.185600f, 0.431900f },
-	{ 0.137900f, 0.248600f, 0.443000f },
-	{ 0.337100f, 0.567900f, 0.005700f },
-	{ 0.699900f, 0.045100f, 0.353600f },
-	{ 0.124600f, 0.027000f, 0.997100f },
-	{ 0.234500f, 0.769900f, 0.295400f },
-	{ 0.186500f, 0.942700f, 0.174100f },
-	{ 0.935900f, 0.265400f, 0.200000f },
-	{ 0.303300f, 0.393000f, 0.447900f },
-	{ 0.890200f, 0.146100f, 0.263500f },
-	{ 0.321500f, 0.198000f, 0.476300f },
-	{ 0.090700f, 0.610000f, 0.281300f },
-	{ 0.812700f, 0.165400f, 0.345000f },
-	{ 0.201000f, 0.198100f, 0.141200f },
-	{ 0.047800f, 0.280300f, 0.750200f },
-	{ 0.093800f, 0.843900f, 0.399400f }
-};
-
-static const vec3_t ssao_noise_vectors[16] = {
-	{ 0.437500f, 0.359400f, 0.000000f },
-	{ -0.058600f, 0.172500f, 0.000000f },
-	{ 0.601600f, -0.091800f, 0.000000f },
-	{ -0.137700f, -0.137000f, 0.000000f },
-	{ 0.223500f, -0.469800f, 0.000000f },
-	{ -0.512800f, -0.173600f, 0.000000f },
-	{ 0.172200f, 0.197600f, 0.000000f },
-	{ -0.391600f, 0.473200f, 0.000000f },
-	{ -0.072900f, -0.326400f, 0.000000f },
-	{ 0.162700f, -0.040600f, 0.000000f },
-	{ -0.341300f, 0.050700f, 0.000000f },
-	{ 0.533600f, 0.158300f, 0.000000f },
-	{ -0.183900f, 0.293900f, 0.000000f },
-	{ 0.084100f, 0.561900f, 0.000000f },
-	{ -0.616300f, 0.093400f, 0.000000f },
-	{ 0.363600f, -0.304600f, 0.000000f }
-};
 
 /*
 =============
@@ -409,22 +362,6 @@ void GL_CreateFrameBuffers (void)
 		"composite fbo"
 	);
 
-	framebufs.ssao.tex = GL_CreateFBOAttachment (GL_R8, 1, GL_LINEAR, "ssao occlusion");
-	framebufs.ssao.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.tex, 0, 0, "ssao fbo");
-
-	if (!ssao_noise_tex)
-	{
-		glGenTextures (1, &ssao_noise_tex);
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, ssao_noise_tex);
-		GL_ObjectLabelFunc (GL_TEXTURE, ssao_noise_tex, -1, "ssao noise");
-		GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_RGB16F, 4, 4);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGB, GL_FLOAT, ssao_noise_vectors);
-	}
-
 	framebufs.bloom.width = q_max (1, vid.width / 2);
 	framebufs.bloom.height = q_max (1, vid.height / 2);
 	framebufs.bloom.extract_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom extract");
@@ -507,7 +444,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.ssao.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
@@ -525,9 +461,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
 	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.composite.color_tex);
-	GL_DeleteNativeTexture (framebufs.ssao.tex);
-	GL_DeleteNativeTexture (ssao_noise_tex);
-	ssao_noise_tex = 0;
 
 	memset (&framebufs, 0, sizeof (framebufs));
 }
@@ -563,113 +496,6 @@ static void GL_OrthoMatrix (float matrix[16], float left, float right, float bot
 	matrix[3 * 4 + 3] = 1.f;
 }
 
-
-static GLuint GL_GenerateSSAOTexture (void)
-{
-    if (r_ssao.value <= 0.f)
-        return 0;
-    if (!glprogs.ssao || !framebufs.ssao.fbo || !framebufs.composite.depth_stencil_tex)
-        return 0;
-    if (!ssao_noise_tex)
-        return 0;
-
-    static GLuint cached_program = 0;
-    static GLint loc_depth = -1;
-    static GLint loc_noise = -1;
-    static GLint loc_proj = -1;
-    static GLint loc_invproj = -1;
-    static GLint loc_samples = -1;
-    static GLint loc_kernel = -1;
-    static GLint loc_radius = -1;
-    static GLint loc_bias = -1;
-    static GLint loc_power = -1;
-    static GLint loc_intensity = -1;
-    static GLint loc_noise_scale = -1;
-    static GLint loc_inv_resolution = -1;
-    static GLint loc_reverse_z = -1;
-    static GLint loc_ndc_zero_to_one = -1;
-
-    if (cached_program != glprogs.ssao)
-    {
-        cached_program = glprogs.ssao;
-        loc_depth = loc_noise = loc_proj = loc_invproj = -1;
-        loc_samples = loc_kernel = loc_radius = loc_bias = -1;
-        loc_power = loc_intensity = loc_noise_scale = loc_inv_resolution = -1;
-        loc_reverse_z = loc_ndc_zero_to_one = -1;
-    }
-
-    if (loc_depth < 0)
-    {
-        loc_depth = GL_GetUniformLocationFunc (glprogs.ssao, "uDepth");
-        loc_noise = GL_GetUniformLocationFunc (glprogs.ssao, "uNoise");
-        loc_proj = GL_GetUniformLocationFunc (glprogs.ssao, "uProj");
-        loc_invproj = GL_GetUniformLocationFunc (glprogs.ssao, "uInvProj");
-        loc_samples = GL_GetUniformLocationFunc (glprogs.ssao, "uSamples");
-        loc_kernel = GL_GetUniformLocationFunc (glprogs.ssao, "uKernelSize");
-        loc_radius = GL_GetUniformLocationFunc (glprogs.ssao, "uRadius");
-        loc_bias = GL_GetUniformLocationFunc (glprogs.ssao, "uBias");
-        loc_power = GL_GetUniformLocationFunc (glprogs.ssao, "uPower");
-        loc_intensity = GL_GetUniformLocationFunc (glprogs.ssao, "uIntensity");
-        loc_noise_scale = GL_GetUniformLocationFunc (glprogs.ssao, "uNoiseScale");
-        loc_inv_resolution = GL_GetUniformLocationFunc (glprogs.ssao, "uInvResolution");
-        loc_reverse_z = GL_GetUniformLocationFunc (glprogs.ssao, "uReverseZ");
-        loc_ndc_zero_to_one = GL_GetUniformLocationFunc (glprogs.ssao, "uNDCZeroToOne");
-    }
-
-    int kernel_size = SSAO_MAX_KERNEL;
-    float radius = q_max (0.f, r_ssao_radius.value);
-    float bias = q_max (0.f, r_ssao_bias.value);
-    float power = q_max (0.f, r_ssao_power.value);
-    float intensity = q_min (1.f, q_max (0.f, r_ssao_intensity.value));
-    float width = q_max (1.f, (float)vid.width);
-    float height = q_max (1.f, (float)vid.height);
-    float noise_scale_x = width / 4.f;
-    float noise_scale_y = height / 4.f;
-
-    GL_BeginGroup ("SSAO");
-    GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.fbo);
-    glViewport (0, 0, vid.width, vid.height);
-    GL_UseProgram (glprogs.ssao);
-    GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-
-    GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-    GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, ssao_noise_tex);
-
-    if (loc_depth >= 0)
-        GL_Uniform1iFunc (loc_depth, 0);
-    if (loc_noise >= 0)
-        GL_Uniform1iFunc (loc_noise, 1);
-    if (loc_proj >= 0)
-        GL_UniformMatrix4fvFunc (loc_proj, 1, GL_FALSE, r_matproj);
-    if (loc_invproj >= 0)
-        GL_UniformMatrix4fvFunc (loc_invproj, 1, GL_FALSE, r_matinvproj);
-    if (loc_samples >= 0)
-        GL_Uniform3fvFunc (loc_samples, kernel_size, (const GLfloat *)ssao_kernel);
-    if (loc_kernel >= 0)
-        GL_Uniform1iFunc (loc_kernel, kernel_size);
-    if (loc_radius >= 0)
-        GL_Uniform1fFunc (loc_radius, radius);
-    if (loc_bias >= 0)
-        GL_Uniform1fFunc (loc_bias, bias);
-    if (loc_power >= 0)
-        GL_Uniform1fFunc (loc_power, power);
-    if (loc_intensity >= 0)
-        GL_Uniform1fFunc (loc_intensity, intensity);
-    if (loc_noise_scale >= 0)
-        GL_Uniform2fFunc (loc_noise_scale, noise_scale_x, noise_scale_y);
-    if (loc_inv_resolution >= 0)
-        GL_Uniform2fFunc (loc_inv_resolution, 1.f / width, 1.f / height);
-    if (loc_reverse_z >= 0)
-        GL_Uniform1iFunc (loc_reverse_z, gl_clipcontrol_able ? 1 : 0);
-    if (loc_ndc_zero_to_one >= 0)
-        GL_Uniform1iFunc (loc_ndc_zero_to_one, gl_clipcontrol_able ? 1 : 0);
-
-    glDrawArrays (GL_TRIANGLES, 0, 3);
-
-    GL_EndGroup ();
-
-    return framebufs.ssao.tex;
-}
 
 static GLuint GL_GenerateBloomTexture (void)
 {
@@ -723,8 +549,6 @@ static GLuint GL_GenerateBloomTexture (void)
 
 void GL_PostProcess (void)
 {
-	static GLint ssao_sampler_loc[3] = { -1, -1, -1 };
-	static GLuint ssao_sampler_prog[3] = { 0, 0, 0 };
 	int palidx, variant;
 	float dither;
 	qboolean dof_enabled;
@@ -732,11 +556,9 @@ void GL_PostProcess (void)
 	float dof_znear, dof_zfar;
 	qboolean motion_enabled;
 	qboolean msaa;
-	GLuint velocity_texture;
-	int motion_samples;
-	float motion_strength;
-	GLuint ssao_texture;
-	qboolean ssao_enabled;
+        GLuint velocity_texture;
+        int motion_samples;
+        float motion_strength;
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -754,14 +576,6 @@ void GL_PostProcess (void)
         if (bloom_intensity > 0.f)
                 bloom_texture = GL_GenerateBloomTexture ();
 
-        ssao_texture = 0;
-        ssao_enabled = R_SSAOEnabled ();
-        if (ssao_enabled)
-        {
-                ssao_texture = GL_GenerateSSAOTexture ();
-                ssao_enabled = (ssao_texture != 0);
-        }
-
         msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
 	motion_samples = (int)Q_rint (r_motionblur_samples.value);
@@ -778,29 +592,17 @@ void GL_PostProcess (void)
 	glViewport (glx, gly, glwidth, glheight);
 
 	variant = q_min ((int)softemu, 2);
-	GL_UseProgram (glprogs.postprocess[variant]);
-	if (ssao_sampler_prog[variant] != glprogs.postprocess[variant])
-	{
-		ssao_sampler_prog[variant] = glprogs.postprocess[variant];
-		ssao_sampler_loc[variant] = -1;
-	}
-	if (ssao_sampler_loc[variant] < 0)
-		ssao_sampler_loc[variant] = GL_GetUniformLocationFunc (glprogs.postprocess[variant], "SSAOTexture");
+        GL_UseProgram (glprogs.postprocess[variant]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
-	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
-	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
-	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, ssao_enabled ? ssao_texture : 0);
-	if (ssao_sampler_loc[variant] >= 0)
-		GL_Uniform1iFunc (ssao_sampler_loc[variant], 5);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
+        GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
+        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
+        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
-	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
-	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float)motion_samples, 0.f);
-
-	GL_Uniform4fFunc (7, ssao_enabled ? 1.f : 0.f, 0.f, 0.f, 0.f);
+        GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
+        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float)motion_samples, 0.f);
 
 	dof_enabled = R_DoFEnabled ();
 
@@ -1410,11 +1212,6 @@ GL_NeedsSceneEffects
 =============
 */
 
-static qboolean R_SSAOEnabled (void)
-{
-    return (r_ssao.value > 0.f) && glprogs.ssao && framebufs.ssao.fbo && framebufs.composite.depth_stencil_tex;
-}
-
 qboolean GL_NeedsSceneEffects (void)
 {
 	return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1 || r_motionblur.value > 0.f;
@@ -1429,9 +1226,9 @@ qboolean GL_NeedsPostprocess (void)
 {
 	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_motionblur.value > 0.f || r_ssao.value > 0.f)
-		return true;
-	return false;
+        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_motionblur.value > 0.f)
+                return true;
+        return false;
 }
 
 /*
@@ -2637,7 +2434,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-	need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_SSAOEnabled ());
+        need_depth_resolve = (fbodest == framebufs.composite.fbo) && R_DoFEnabled ();
 
 	if (msaa)
 	{
