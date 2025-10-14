@@ -2,6 +2,7 @@ layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
+layout(binding=4) uniform sampler2D VelocityTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -83,6 +84,93 @@ layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: r
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
 layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
+layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strength, z: min velocity (pixels), w: depth threshold ratio
+layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, zw: reserved
+
+const int MOTION_MAX_SAMPLES = 64;
+
+struct DepthSamplingInfo
+{
+        vec2 viewMinPx;
+        vec2 viewMaxPx;
+        vec2 invViewScale;
+        vec2 depthTexSize;
+        vec2 maxDepthIdx;
+        bool valid;
+};
+
+DepthSamplingInfo MakeDepthSamplingInfo()
+{
+        DepthSamplingInfo info;
+        info.depthTexSize = vec2(textureSize(DepthTexture, 0));
+        info.valid = info.depthTexSize.x > 0.0 && info.depthTexSize.y > 0.0;
+        if (!info.valid)
+        {
+                info.viewMinPx = vec2(0.0);
+                info.viewMaxPx = vec2(0.0);
+                info.invViewScale = vec2(1.0);
+                info.maxDepthIdx = vec2(0.0);
+                return info;
+        }
+        vec2 viewMin = ViewRect.xy;
+        vec2 viewMax = ViewRect.zw;
+        info.viewMinPx = viewMin * info.depthTexSize;
+        info.viewMaxPx = viewMax * info.depthTexSize;
+        vec2 viewSizePx = max(info.viewMaxPx - info.viewMinPx, vec2(0.0));
+        info.invViewScale = max(DepthParams.xy, vec2(1e-4));
+        vec2 depthSizePx = max(vec2(1.0), floor(viewSizePx * info.invViewScale + vec2(0.0001)));
+        info.maxDepthIdx = max(depthSizePx - vec2(1.0), vec2(0.0));
+        return info;
+}
+
+vec2 ComputeDepthUV(vec2 fragPx, DepthSamplingInfo info)
+{
+        if (!info.valid)
+                return vec2(-1.0);
+        vec2 viewSizePx = max(info.viewMaxPx - info.viewMinPx, vec2(0.0));
+        vec2 relPx = clamp(fragPx - info.viewMinPx, vec2(0.0), max(viewSizePx - vec2(1e-4), vec2(0.0)));
+        vec2 depthIdx = clamp(floor(relPx * info.invViewScale), vec2(0.0), info.maxDepthIdx);
+        vec2 depthPx = info.viewMinPx + depthIdx + vec2(0.5);
+        return depthPx / info.depthTexSize;
+}
+
+float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
+{
+        vec2 depthUV = ComputeDepthUV(fragPx, info);
+        if (depthUV.x < 0.0 || depthUV.y < 0.0)
+                return 0.0;
+        float rawDepth = texture(DepthTexture, depthUV).r;
+        float nearPlane = DoFParams1.x;
+        float farPlane = DoFParams1.y;
+        float reversed = DoFParams1.z;
+        if (reversed > 0.5)
+        {
+                float denom = nearPlane + rawDepth * (farPlane - nearPlane);
+                return (nearPlane * farPlane) / max(denom, 1e-6);
+        }
+        else
+        {
+                float ndcDepth = rawDepth * 2.0 - 1.0;
+                float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+                return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        }
+}
+
+void AccumulateMotionSample(inout vec3 accum, inout float weight, vec2 sampleUV, vec2 sampleCoordPx, vec2 viewMin, vec2 viewMax, DepthSamplingInfo info, bool useDepth, float centerDepth, float depthThresholdRatio)
+{
+        if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
+                return;
+        if (useDepth)
+        {
+                float sampleDepth = SampleLinearDepth(sampleCoordPx, info);
+                float tolerance = depthThresholdRatio * max(centerDepth, 1e-6);
+                if (abs(sampleDepth - centerDepth) > tolerance)
+                        return;
+        }
+        vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
+        accum += sampleColor;
+        weight += 1.0;
+}
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -95,41 +183,68 @@ void main()
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
         vec2 texSize = vec2(textureSize(GammaTexture, 0));
+        vec2 invTexSize = vec2(1.0) / max(texSize, vec2(1.0));
         vec2 uv = (vec2(pixel) + 0.5) / texSize;
         vec2 viewMin = ViewRect.xy;
         vec2 viewMax = ViewRect.zw;
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
-        if (DoFParams0.x > 0.5 && inView)
+        DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
+
+        if (MotionParams0.x > 0.5 && inView)
         {
-                vec2 depthTexSize = vec2(textureSize(DepthTexture, 0));
-                vec2 viewMinPx = viewMin * depthTexSize;
-                vec2 viewMaxPx = viewMax * depthTexSize;
-                vec2 viewSizePx = max(viewMaxPx - viewMinPx, vec2(0.0));
-                vec2 invViewScale = max(DepthParams.xy, vec2(1e-4));
-                vec2 depthSizePx = max(vec2(1.0), floor(viewSizePx * invViewScale + vec2(0.0001)));
-                vec2 fragPx = gl_FragCoord.xy;
-                vec2 relPx = clamp(fragPx - viewMinPx, vec2(0.0), max(viewSizePx - vec2(1e-4), vec2(0.0)));
-                vec2 depthIdx = floor(relPx * invViewScale);
-                vec2 maxDepthIdx = max(depthSizePx - vec2(1.0), vec2(0.0));
-                depthIdx = clamp(depthIdx, vec2(0.0), maxDepthIdx);
-                vec2 depthPx = viewMinPx + depthIdx + vec2(0.5);
-                vec2 depthUV = depthPx / depthTexSize;
-                float rawDepth = texture(DepthTexture, depthUV).r;
-                float nearPlane = DoFParams1.x;
-                float farPlane = DoFParams1.y;
-                float reversed = DoFParams1.z;
-                float linearDepth;
-                if (reversed > 0.5)
+                float effectiveShutter = MotionParams0.y;
+                if (effectiveShutter > 0.0)
                 {
-                        float denom = nearPlane + rawDepth * (farPlane - nearPlane);
-                        linearDepth = (nearPlane * farPlane) / max(denom, 1e-6);
+                        vec2 velocity = texture(VelocityTexture, uv).xy;
+                        vec2 velocityPx = velocity * effectiveShutter * texSize;
+                        float speed = length(velocityPx);
+                        float minVelocity = max(MotionParams0.z, 0.0);
+                        float maxRadius = MotionParams1.x;
+                        int maxSamples = int(MotionParams1.y + 0.5);
+                        maxSamples = clamp(maxSamples, 1, MOTION_MAX_SAMPLES);
+                        if (maxRadius <= 0.0)
+                                maxRadius = speed;
+                        float radius = clamp(speed, 0.0, maxRadius);
+                        if (radius > minVelocity && maxSamples > 0)
+                        {
+                                float radiusNormDenom = max(maxRadius, 1e-3);
+                                float sampleCountF = clamp(radius / radiusNormDenom, 0.0, 1.0) * float(maxSamples);
+                                int sampleCount = clamp(int(floor(sampleCountF + 0.5)), 1, maxSamples);
+                                vec2 direction = speed > 1e-4 ? (velocityPx / speed) : vec2(0.0);
+                                bool useDepth = MotionParams0.w > 0.0 && depthInfo.valid;
+                                float centerDepth = 0.0;
+                                float depthThresholdRatio = max(MotionParams0.w, 0.0);
+                                if (useDepth)
+                                        centerDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                                vec3 accum = color.rgb;
+                                float weight = 1.0;
+                                float jitter = SCREEN_SPACE_NOISE();
+                                for (int i = 1; i <= MOTION_MAX_SAMPLES; ++i)
+                                {
+                                        if (i > sampleCount)
+                                                break;
+                                        float t = (float(i) - 0.5 + jitter) / float(sampleCount);
+                                        t = clamp(t, 0.0, 1.0);
+                                        vec2 offsetPx = direction * (t * radius);
+                                        if (length(offsetPx) < 1e-6)
+                                                continue;
+                                        vec2 offsetUV = offsetPx * invTexSize;
+                                        vec2 sampleUVPos = uv + offsetUV;
+                                        vec2 sampleUVNeg = uv - offsetUV;
+                                        vec2 fragCoordPos = gl_FragCoord.xy + offsetPx;
+                                        vec2 fragCoordNeg = gl_FragCoord.xy - offsetPx;
+                                        AccumulateMotionSample(accum, weight, sampleUVPos, fragCoordPos, viewMin, viewMax, depthInfo, useDepth, centerDepth, depthThresholdRatio);
+                                        AccumulateMotionSample(accum, weight, sampleUVNeg, fragCoordNeg, viewMin, viewMax, depthInfo, useDepth, centerDepth, depthThresholdRatio);
+                                }
+                                if (weight > 0.0)
+                                        color.rgb = accum / weight;
+                        }
                 }
-                else
-                {
-                        float ndcDepth = rawDepth * 2.0 - 1.0;
-                        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-                        linearDepth = (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
-                }
+        }
+
+        if (DoFParams0.x > 0.5 && inView && depthInfo.valid)
+        {
+                float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                 float focusDistance = DoFParams0.y;
                 float focusRange = max(DoFParams0.z, 0.0001);
                 float maxBlur = max(DoFParams0.w, 0.0);
@@ -138,7 +253,6 @@ void main()
                 float blurRadius = blurFactor * maxBlur;
                 if (blurRadius > 0.0001)
                 {
-                        vec2 invRes = 1.0 / texSize;
                         const vec2 kernel[8] = vec2[](
                                 vec2(1.0, 0.0),
                                 vec2(-1.0, 0.0),
@@ -158,7 +272,7 @@ void main()
                         float weight = 1.0;
                         for (int i = 0; i < 8; ++i)
                         {
-                                vec2 offset = rotation * kernel[i] * blurRadius * invRes;
+                                vec2 offset = rotation * kernel[i] * blurRadius * invTexSize;
                                 vec3 sampleColor = texture(GammaTexture, uv + offset).rgb;
                                 accum += sampleColor;
                                 weight += 1.0;

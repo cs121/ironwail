@@ -166,7 +166,11 @@ cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
-cvar_t	r_motionblur_samples = { "r_motionblur_samples", "8", CVAR_ARCHIVE };
+cvar_t	r_motionblur_shutter = { "r_motionblur_shutter", "0.75", CVAR_ARCHIVE };
+cvar_t	r_motionblur_maxradiuspixels = { "r_motionblur_maxradiuspixels", "32", CVAR_ARCHIVE };
+cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE };
+cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.5", CVAR_ARCHIVE };
+cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
 
 cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
@@ -554,11 +558,17 @@ void GL_PostProcess (void)
 	qboolean dof_enabled;
 	float dof_focus, dof_range, dof_strength;
 	float dof_znear, dof_zfar;
-	qboolean motion_enabled;
-	qboolean msaa;
+        qboolean motion_enabled;
+        qboolean msaa;
         GLuint velocity_texture;
-        int motion_samples;
+        GLuint depth_texture;
         float motion_strength;
+        float motion_shutter;
+        float motion_effective_shutter;
+        float motion_max_radius;
+        float motion_min_velocity;
+        float motion_depth_threshold;
+        int motion_max_samples;
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -577,16 +587,21 @@ void GL_PostProcess (void)
                 bloom_texture = GL_GenerateBloomTexture ();
 
         msaa = framebufs.scene.samples > 1;
-	motion_strength = q_max (0.f, r_motionblur.value);
-	motion_samples = (int)Q_rint (r_motionblur_samples.value);
-	if (motion_samples < 0)
-		motion_samples = 0;
-	if (motion_samples > 32)
-		motion_samples = 32;
-	velocity_texture = 0;
-	if (framebufs.scene.velocity_tex)
-		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-	motion_enabled = (motion_strength > 0.f && velocity_texture != 0);
+        motion_strength = q_max (0.f, r_motionblur.value);
+        motion_shutter = q_max (0.f, r_motionblur_shutter.value);
+        motion_effective_shutter = motion_strength * motion_shutter;
+        motion_max_radius = q_max (0.f, r_motionblur_maxradiuspixels.value);
+        motion_min_velocity = q_max (0.f, r_motionblur_minvelocity.value);
+        motion_depth_threshold = q_max (0.f, r_motionblur_depththreshold.value);
+        motion_max_samples = (int)Q_rint (r_motionblur_maxsamples.value);
+        if (motion_max_samples < 0)
+                motion_max_samples = 0;
+        if (motion_max_samples > 64)
+                motion_max_samples = 64;
+        velocity_texture = 0;
+        if (framebufs.scene.velocity_tex)
+                velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+        motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
@@ -602,12 +617,13 @@ void GL_PostProcess (void)
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
         GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
-        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_strength, (float)motion_samples, 0.f);
+        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
+        GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, 0.f, 0.f);
 
-	dof_enabled = R_DoFEnabled ();
+        dof_enabled = R_DoFEnabled ();
 
-	{
-		float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
+        {
+                float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
 		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
 		float view_size_x = r_refdef.vrect.width / (float)vid.width;
 		float view_size_y = r_refdef.vrect.height / (float)vid.height;
@@ -618,24 +634,28 @@ void GL_PostProcess (void)
 			view_min_y,
 			view_min_x + view_size_x,
 			view_min_y + view_size_y);
-		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
-	}
+                GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
+        }
 
-	if (dof_enabled)
-	{
-		dof_focus = q_max (0.f, r_dof_focus.value);
-		dof_range = q_max (0.f, r_dof_range.value);
-		dof_strength = q_max (0.f, r_dof_strength.value);
-		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
-		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
-		GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
-		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
-		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-	}
-	else
-	{
-		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
-		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+        depth_texture = 0;
+        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
+                depth_texture = framebufs.composite.depth_stencil_tex;
+        GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
+
+        if (dof_enabled)
+        {
+                dof_focus = q_max (0.f, r_dof_focus.value);
+                dof_range = q_max (0.f, r_dof_range.value);
+                dof_strength = q_max (0.f, r_dof_strength.value);
+                dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+                dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+                GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
+                GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+        }
+        else
+        {
+                dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+                dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
 		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
 		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
 	}
