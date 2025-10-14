@@ -63,6 +63,35 @@ static const float r_identity_mat4[16] = {
 };
 
 
+// Returns how much of the console is currently covering the screen in the range [0, 1].
+static float GL_ConsoleVisibility (void)
+{
+	if (scr_con_current <= 0.f)
+		return 0.f;
+
+	float height = (float)glheight;
+	if (height <= 0.f)
+		return 1.f;
+
+	return CLAMP (0.f, scr_con_current / height, 1.f);
+}
+
+static float GL_TemperedOverbright (float overbright)
+{
+	if (overbright <= 1.f)
+		return 1.f;
+
+	/*
+	* Compress the raw 2^n scaling so the boost favours highlights over the
+	* rest of the scene.  A sub-linear exponent keeps very bright areas hot
+	* while easing off on mid and dark tones to avoid washing out the image.
+	*/
+	const float exponent = 0.75f;
+	float tempered = powf (overbright, exponent);
+
+	return q_max (tempered, 1.f);
+}
+
 static qboolean MatrixInverse4x4(const float m[16], float out[16])
 {
     float inv[16];
@@ -1332,11 +1361,14 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
+	if (GL_ConsoleVisibility () > 0.f)
+		return false;
+
 	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_motionblur.value > 0.f)
-                return true;
-        return false;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_motionblur.value > 0.f)
+		return true;
+	return false;
 }
 
 /*
@@ -1441,7 +1473,22 @@ void R_SetupView (void)
 
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-		r_framedata.overbright = (float)(1 << overbright_bits);
+		float overbright = (float)(1 << overbright_bits);
+
+		if (overbright > 1.f)
+		{
+			overbright = GL_TemperedOverbright (overbright);
+
+			float console_vis = GL_ConsoleVisibility ();
+			if (console_vis > 0.f)
+			{
+				float compensated = 1.f + (overbright - 1.f) * (1.f - console_vis);
+				overbright = compensated;
+			}
+		}
+
+
+		r_framedata.overbright = overbright;
 		r_framedata._padding0 = 0.f;
 	}
 
