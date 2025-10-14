@@ -164,6 +164,7 @@ cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
+cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_shutter = { "r_motionblur_shutter", "0.75", CVAR_ARCHIVE };
@@ -234,6 +235,63 @@ static float view_zfar;
 static qboolean R_DoFEnabled (void)
 {
 	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+}
+
+static qboolean r_dof_autofocus_initialized = false;
+static float r_dof_autofocus_value = 0.f;
+
+static float R_GetDynamicDoFFocus (float fallback)
+{
+	trace_t trace;
+	vec3_t end;
+	float range;
+	float target;
+
+	if (r_dof_autofocus.value <= 0.f)
+	{
+		r_dof_autofocus_initialized = false;
+		return fallback;
+	}
+
+	if (cls.state != ca_connected || !cl.worldmodel || !cl.worldmodel->hulls)
+	{
+		r_dof_autofocus_initialized = false;
+		return fallback;
+	}
+
+	range = view_zfar > 0.f ? view_zfar : gl_farclip.value;
+	if (range <= 0.f)
+		range = 8192.f;
+
+	VectorMA (r_origin, range, vpn, end);
+
+	memset (&trace, 0, sizeof (trace));
+	trace.fraction = 1.f;
+	VectorCopy (end, trace.endpos);
+
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
+
+	if (trace.allsolid || trace.fraction <= 0.f)
+		target = fallback;
+	else
+		target = q_max (trace.fraction * range, 0.f);
+
+	if (!r_dof_autofocus_initialized)
+	{
+		r_dof_autofocus_value = target;
+		r_dof_autofocus_initialized = true;
+	}
+	else
+	{
+		float lerp = (float)host_frametime * 8.f;
+		if (lerp < 0.f)
+			lerp = 0.f;
+		else if (lerp > 1.f)
+			lerp = 1.f;
+		r_dof_autofocus_value += (target - r_dof_autofocus_value) * lerp;
+	}
+
+	return r_dof_autofocus_value;
 }
 
 static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean flip, mplane_t* out);
@@ -645,6 +703,7 @@ void GL_PostProcess (void)
         if (dof_enabled)
         {
                 dof_focus = q_max (0.f, r_dof_focus.value);
+                dof_focus = R_GetDynamicDoFFocus (dof_focus);
                 dof_range = q_max (0.f, r_dof_range.value);
                 dof_strength = q_max (0.f, r_dof_strength.value);
                 dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
@@ -654,11 +713,12 @@ void GL_PostProcess (void)
         }
         else
         {
+                r_dof_autofocus_initialized = false;
                 dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
                 dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
-		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
-		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
-	}
+                GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+                GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+        }
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
