@@ -195,7 +195,12 @@ void main()
                 float effectiveShutter = MotionParams0.y;
                 if (effectiveShutter > 0.0)
                 {
-                        vec2 velocity = texture(VelocityTexture, uv).xy;
+                        vec2 viewMin = ViewRect.xy;
+                        vec2 viewMax = ViewRect.zw;
+                        vec2 viewSize = max(viewMax - viewMin, vec2(1e-6));
+                        vec2 invScale = max(DepthParams.xy, vec2(1e-4));
+                        vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), viewSize * invScale);
+                        vec2 velocity = texture(VelocityTexture, velocityUV).xy;
                         vec2 velocityPx = velocity * effectiveShutter * texSize;
                         float speed = length(velocityPx);
                         float minVelocity = max(MotionParams0.z, 0.0);
