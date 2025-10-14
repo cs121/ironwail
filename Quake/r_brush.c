@@ -22,9 +22,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // r_brush.c: brush model rendering. renamed from r_surf.c
 
+#include <limits.h>
+
 #include "quakedef.h"
 
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
+
+cvar_t gl_lightmap_atlas_size = { "gl_lightmap_atlas_size", "1024", CVAR_ARCHIVE };
+
+int     lightmap_block_width = 256;
+int     lightmap_block_height = 256;
 
 int		gl_lightmap_format;
 int		lightmap_bytes;
@@ -47,6 +54,31 @@ unsigned		*lightmap_data;
 gltexture_t		*lightmap_texture;
 int				lightmap_width;
 int				lightmap_height;
+
+static int GL_SanitizeAtlasSize (int requested)
+{
+	int size = requested;
+
+	if (size <= 0)
+		size = 256;
+
+	if (gl_max_texture_size > 0)
+		size = q_min (size, (int)gl_max_texture_size);
+
+	size = q_max (size, 128);
+	size = (size + 15) & ~15; // align to lightmap texel pitch
+
+	return size;
+}
+
+void GL_OnLightmapAtlasSizeChanged (cvar_t *var)
+{
+	int sanitized = GL_SanitizeAtlasSize ((int)var->value);
+
+	if ((int)var->value != sanitized)
+		Cvar_SetValueQuick (var, sanitized);
+}
+
 
 
 /*
@@ -187,7 +219,7 @@ static int AllocBlock (int w, int h, short *x, short *y)
 			lightmaps = (lightmap_t *) realloc(lightmaps, sizeof(*lightmaps)*lightmap_count);
 			memset(&lightmaps[texnum], 0, sizeof(lightmaps[texnum]));
 			// as we're only tracking one texture, we don't need multiple copies any more.
-			Chart_Init (&lightmap_chart, LMBLOCK_WIDTH, LMBLOCK_HEIGHT);
+			Chart_Init (&lightmap_chart, lightmap_block_width, lightmap_block_height);
 			// reserve 1 texel for unlit water surfaces in maps with lit water
 			if (lightmap_count == 1)
 			{
@@ -462,14 +494,15 @@ void GL_BuildLightmaps (void)
 		Sys_Error ("GL_BuildLightmaps: bad lightmap format");
 	}
 
+	lightmap_block_width = lightmap_block_height = GL_SanitizeAtlasSize ((int)gl_lightmap_atlas_size.value);
 	// allocate lightmap blocks
 	GL_PackLitSurfaces ();
 
 	// determine combined texture size and allocate memory for it
 	xblocks = (int) ceil (sqrt (lightmap_count));
 	yblocks = (lightmap_count + xblocks - 1) / xblocks;
-	lightmap_width = xblocks * LMBLOCK_WIDTH;
-	lightmap_height = yblocks * LMBLOCK_HEIGHT;
+	lightmap_width = xblocks * lightmap_block_width;
+	lightmap_height = yblocks * lightmap_block_height;
 	lmsize = lightmap_width * lightmap_height;
 	if (q_max(lightmap_width, lightmap_height) > gl_max_texture_size)
 	{
@@ -495,8 +528,8 @@ void GL_BuildLightmaps (void)
 	for (i=0; i<lightmap_count; i++)
 	{
 		lm = &lightmaps[i];
-		lm->xofs = (i % xblocks) * LMBLOCK_WIDTH;
-		lm->yofs = (i / xblocks) * LMBLOCK_HEIGHT;
+		lm->xofs = (i % xblocks) * lightmap_block_width;
+		lm->yofs = (i / xblocks) * lightmap_block_height;
 	}
 
 	// fill reserved texel
@@ -519,8 +552,8 @@ void GL_BuildLightmaps (void)
 
 	//johnfitz -- warn about exceeding old limits
 	//GLQuake limit was 64 textures of 128x128. Estimate how many 128x128 textures we would need
-	//given that we are using lightmap_count of LMBLOCK_WIDTH x LMBLOCK_HEIGHT
-	i = lightmap_count * ((LMBLOCK_WIDTH / 128) * (LMBLOCK_HEIGHT / 128));
+	//given that we are using lightmap_count of lightmap_block_width x lightmap_block_height
+	i = lightmap_count * ((lightmap_block_width / 128) * (lightmap_block_height / 128));
 	if (i > 64)
 		Con_DWarning("%i lightmaps exceeds standard limit of 64.\n",i);
 	//johnfitz
@@ -759,6 +792,7 @@ void GL_BuildBModelMarkBuffers (void)
 	bmodel_gpu_marksurf_t *mark;
 	bmodel_draw_indirect_t *cmds;
 	bmodel_gpu_surf_t *surfs;
+	GLuint		*minverts;
 
 	if (!cl.worldmodel)
 		return;
@@ -799,6 +833,11 @@ void GL_BuildBModelMarkBuffers (void)
 	texidx = (int *) calloc (maxnumtex, sizeof(texidx[0]));
 	if (!texidx)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d tex indices)", maxnumtex);
+	minverts = (GLuint *) malloc (sizeof(minverts[0]) * numtex);
+	if (!minverts)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d base verts)", numtex);
+	for (i = 0; i < numtex; i++)
+		minverts[i] = UINT_MAX;
 
 	// fill marksurface data
 	for (i = sum = 0; i < cl.worldmodel->numleafs; i++)
@@ -835,6 +874,7 @@ void GL_BuildBModelMarkBuffers (void)
 		dst->plane[3] = src->plane->dist * flip;
 		dst->texnum = texidx[src->texinfo->texnum];
 		dst->numedges = src->numedges;
+		dst->lightmap = (GLuint) src->lightmaptexturenum;
 		dst->firstvert = src->vbo_firstvert;
 	}
 
@@ -851,7 +891,18 @@ void GL_BuildBModelMarkBuffers (void)
 			texidx[m->usedtextures[i]] = i;
 
 		for (i = 0, s = m->surfaces + m->firstmodelsurface; i < m->nummodelsurfaces; i++, s++)
-			cmds[m->firstcmd + texidx[s->texinfo->texnum]].count += (q_max (s->numedges, 2) - 2) * 3;
+		{
+			int draw_idx = m->firstcmd + texidx[s->texinfo->texnum];
+			int numedges = q_max (s->numedges, 2);
+			cmds[draw_idx].count += (numedges - 2) * 3;
+			if (minverts[draw_idx] > (GLuint) s->vbo_firstvert)
+				minverts[draw_idx] = (GLuint) s->vbo_firstvert;
+		}
+	}
+
+	for (i = 0; i < numtex; i++)
+	{
+		cmds[i].baseVertex = (minverts[i] == UINT_MAX) ? 0 : minverts[i];
 	}
 
 	// compute per-drawcall index buffer offsets
@@ -878,11 +929,12 @@ void GL_BuildBModelMarkBuffers (void)
 		for (i = 0, s = m->surfaces + m->firstmodelsurface; i < m->nummodelsurfaces; i++, s++)
 		{
 			bmodel_draw_indirect_t *draw = &cmds[m->firstcmd + texidx[s->texinfo->texnum]];
+			GLuint base = draw->baseVertex;
 			for (k = 2; k < s->numedges; k++)
 			{
-				idx[draw->firstIndex++] = s->vbo_firstvert;
-				idx[draw->firstIndex++] = s->vbo_firstvert + k - 1;
-				idx[draw->firstIndex++] = s->vbo_firstvert + k;
+				idx[draw->firstIndex++] = (GLuint) s->vbo_firstvert - base;
+				idx[draw->firstIndex++] = (GLuint) (s->vbo_firstvert + k - 1) - base;
+				idx[draw->firstIndex++] = (GLuint) (s->vbo_firstvert + k) - base;
 			}
 		}
 	}
@@ -914,5 +966,6 @@ void GL_BuildBModelMarkBuffers (void)
 	free (surfs);
 	free (mark);
 	free (idx);
+	free (minverts);
 	free (cmds);
 }

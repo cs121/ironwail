@@ -365,9 +365,9 @@ extern overflowtimes_t dev_overflows; //this stores the last time overflow messa
 
 //johnfitz -- moved here from r_brush.c
 extern int gl_lightmap_format, lightmap_bytes;
-
-#define LMBLOCK_WIDTH	256	//FIXME: make dynamic. if we have a decent card there's no real reason not to use 4k or 16k (assuming there's no lightstyles/dynamics that need uploading...)
-#define LMBLOCK_HEIGHT	256 //Alternatively, use texture arrays, which would avoid the need to switch textures as often.
+extern int lightmap_block_width, lightmap_block_height;
+extern cvar_t gl_lightmap_atlas_size;
+void GL_OnLightmapAtlasSizeChanged (cvar_t *var);
 
 typedef struct lightmap_s
 {
@@ -505,7 +505,7 @@ typedef struct bmodel_gpu_surf_s {
 	GLuint		numedges;
 	GLuint		firstvert;
 	vec3_t		mins;
-	GLuint		padding0;
+	GLuint		lightmap;
 	vec3_t		maxs;
 	GLuint		padding1;
 } bmodel_gpu_surf_t;
