@@ -76,6 +76,14 @@ static float GL_ConsoleVisibility (void)
 	return CLAMP (0.f, scr_con_current / height, 1.f);
 }
 
+static qboolean GL_ShouldApplyMotionBlur (void)
+{
+	if (r_motionblur.value <= 0.f)
+		return false;
+
+	return GL_ConsoleVisibility () <= 0.f;
+}
+
 static float GL_TemperedOverbright (float overbright)
 {
 	if (overbright <= 1.f)
@@ -657,10 +665,10 @@ void GL_PostProcess (void)
         float motion_min_velocity;
         float motion_depth_threshold;
         int motion_max_samples;
-	if (!GL_NeedsPostprocess ())
-		return;
+        if (!GL_NeedsPostprocess ())
+                return;
 
-	GL_BeginGroup ("Postprocess");
+        GL_BeginGroup ("Postprocess");
 
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
@@ -676,6 +684,8 @@ void GL_PostProcess (void)
 
         msaa = framebufs.scene.samples > 1;
         motion_strength = q_max (0.f, r_motionblur.value);
+        if (!GL_ShouldApplyMotionBlur ())
+                motion_strength = 0.f;
         motion_shutter = q_max (0.f, r_motionblur_shutter.value);
         motion_effective_shutter = motion_strength * motion_shutter;
         if (motion_effective_shutter > 0.f && r_prev_frame_valid)
@@ -1351,7 +1361,13 @@ GL_NeedsSceneEffects
 
 qboolean GL_NeedsSceneEffects (void)
 {
-	return framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1 || r_motionblur.value > 0.f;
+        if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
+                return true;
+
+        if (GL_ShouldApplyMotionBlur ())
+                return true;
+
+        return false;
 }
 
 /*
@@ -1361,14 +1377,11 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	if (GL_ConsoleVisibility () > 0.f)
-		return false;
-
-	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
-		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_motionblur.value > 0.f)
-		return true;
-	return false;
+        if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+                return true;
+        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
+                return true;
+        return false;
 }
 
 /*
