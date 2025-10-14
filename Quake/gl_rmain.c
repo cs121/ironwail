@@ -38,6 +38,7 @@ int			r_framecount;		// used for dlight push checking
 static entity_t* cl_sorted_visedicts[MAX_VISEDICTS + 1];
 static int cl_modtype_ofs[mod_numtypes * 2 + 1];
 
+static vec3_t	frustum_absnormal[4];
 mplane_t	frustum[4];
 float		r_matview[16];
 float		r_matproj[16];
@@ -730,28 +731,36 @@ void GL_PostProcess (void)
 =================
 R_CullBox -- johnfitz -- replaced with new function from lordhavoc
 
-Returns true if the box is completely outside the frustum
+Returns true if the box is completely outside the frustum.
 
-PERF OPT: Optimized to be more branch-predictor and cache friendly
+Uses the bounding-box center/extents formulation so the expensive corner
+selection only happens once per box.
 =================
 */
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs)
 {
+	vec3_t center;
+	vec3_t extents;
 	int i;
-	mplane_t* p;
 
-	// PERF OPT: Process all planes in one loop with minimal branching
+	center[0] = (emins[0] + emaxs[0]) * 0.5f;
+	center[1] = (emins[1] + emaxs[1]) * 0.5f;
+	center[2] = (emins[2] + emaxs[2]) * 0.5f;
+	extents[0] = (emaxs[0] - emins[0]) * 0.5f;
+	extents[1] = (emaxs[1] - emins[1]) * 0.5f;
+	extents[2] = (emaxs[2] - emins[2]) * 0.5f;
+
 	for (i = 0; i < 4; i++)
 	{
-		p = frustum + i;
-		// PERF OPT: Use signbits to select min/max directly without branches
-		float px = (p->signbits & 1) ? emins[0] : emaxs[0];
-		float py = (p->signbits & 2) ? emins[1] : emaxs[1];
-		float pz = (p->signbits & 4) ? emins[2] : emaxs[2];
+		const mplane_t *plane = &frustum[i];
+		const float *absnormal = frustum_absnormal[i];
+		float signed_distance = DotProduct (plane->normal, center) - plane->dist;
+		float radius = absnormal[0] * extents[0] + absnormal[1] * extents[1] + absnormal[2] * extents[2];
 
-		if (p->normal[0] * px + p->normal[1] * py + p->normal[2] * pz < p->dist)
+		if (signed_distance < -radius)
 			return true;
 	}
+
 	return false;
 }
 
@@ -1245,6 +1254,7 @@ void R_SetFrustum (void)
 	float logznear, logzfar;
 	float translation[16];
 	float rotation[16];
+	int i;
 
 	// reduce near clip distance at high FOV's to avoid seeing through walls
 	w = 1.f / tanf (DEG2RAD (r_fovx) * 0.5f);
@@ -1278,6 +1288,13 @@ void R_SetFrustum (void)
 	ExtractFrustumPlane (r_matviewproj, 0, -1.f, false, &frustum[1]); // left
 	ExtractFrustumPlane (r_matviewproj, 1, -1.f, false, &frustum[2]); // bottom
 	ExtractFrustumPlane (r_matviewproj, 1, 1.f, true, &frustum[3]); // top
+
+	for (i = 0; i < 4; i++)
+	{
+		frustum_absnormal[i][0] = fabsf (frustum[i].normal[0]);
+		frustum_absnormal[i][1] = fabsf (frustum[i].normal[1]);
+		frustum_absnormal[i][2] = fabsf (frustum[i].normal[2]);
+	}
 
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
