@@ -537,7 +537,6 @@ typedef struct glprogs_s {
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
-	GLuint		ssao;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -593,11 +592,6 @@ typedef struct glframebufs_s {
 		GLuint		depth_stencil_tex;
 		GLuint		fbo;
 	}				composite;
-
-	struct {
-		GLuint		tex;
-		GLuint		fbo;
-	}				ssao;
 
 	struct {
 		GLuint		extract_tex;

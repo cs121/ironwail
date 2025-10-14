@@ -2,7 +2,6 @@ layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
-uniform sampler2D SSAOTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -84,7 +83,6 @@ layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: r
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
 layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
-layout(location=7) uniform vec4 SSAOParams; // x: enabled flag
 
 layout(location=0) out vec4 out_fragcolor;
 
@@ -167,11 +165,6 @@ void main()
                         }
                         color.rgb = accum / weight;
                 }
-        }
-        if (SSAOParams.x > 0.5)
-        {
-                float ao = texture(SSAOTexture, uv).r;
-                color.rgb *= ao;
         }
         out_fragcolor = color;
 #if PALETTIZE == 1
