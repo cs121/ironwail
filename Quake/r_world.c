@@ -211,7 +211,7 @@ static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
         VectorCopy (ent->origin, curr_origin);
         VectorCopy (ent->angles, angles);
 
-        if (ent->motion_blur_prev_valid && ent->motion_blur_prev_frame == r_framecount - 1 && R_PrevFrameValid ())
+        if (ent->motion_blur_prev_valid && ent->motion_blur_prev_frame == r_framecount - 1)
         {
                 VectorCopy (ent->motion_blur_prev_origin, prev_origin);
                 VectorCopy (ent->motion_blur_prev_angles, prev_angles);
