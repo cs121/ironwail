@@ -132,8 +132,8 @@ layout(location=5) flat in int in_flags;
 
 	#define main main_body
 #else
-	layout(location=0) out vec4 OUT_COLOR;
-	layout(location=1) out vec2 out_velocity;
+        layout(location=0) out vec4 OUT_COLOR;
+        layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
 void main()
@@ -170,11 +170,12 @@ void main()
 	result.rgb = mix(Fog.rgb, result.rgb, fog);
 	out_fragcolor = result;
 #if !OIT
-	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
-	if ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0 || result.a < 0.999)
-		out_velocity = vec2(0.0);
-	else
-		out_velocity = velocity * result.a;
+        vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
+        float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
+        vec2 velocityOut = vec2(0.0);
+        if (viewModelMask < 0.5 && result.a >= 0.999)
+                velocityOut = velocity * result.a;
+        out_velocity = vec4(velocityOut, viewModelMask, 0.0);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag

@@ -95,14 +95,14 @@ layout(location=2) in vec3 in_pos;
 	#define main main_body
 #else
 	layout(location=0) out vec4 OUT_COLOR;
-	layout(location=1) out vec2 out_velocity;
+        layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
 void main()
 {
 	out_fragcolor = in_color;
 #if !OIT
-	out_velocity = vec2(0.0);
+        out_velocity = vec4(0.0);
 #endif
 	out_fragcolor.rgb = ApplyFog(out_fragcolor.rgb, in_pos);
 	float radius = length(in_uv);
