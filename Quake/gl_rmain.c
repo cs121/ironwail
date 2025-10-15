@@ -1718,6 +1718,8 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
 	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
+	if (alphapass)
+		R_DrawDecals (false);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
@@ -2466,6 +2468,7 @@ void R_ShowTris (void)
 	ofs = cl_modtype_ofs;
 	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
 	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
+	R_DrawDecals_ShowTris ();
 	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
 
 	// viewmodel
