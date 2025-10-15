@@ -159,6 +159,9 @@
     <ClCompile Include="..\..\Quake\r_brush.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\r_decals.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\r_part.c">
       <Filter>Source Files</Filter>
     </ClCompile>
