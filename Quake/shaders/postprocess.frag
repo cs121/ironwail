@@ -86,6 +86,7 @@ layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unus
 layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
 layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strength, z: min velocity (pixels), w: depth threshold ratio
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
+layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: vignette radius, z: vignette softness, w: chromatic aberration (pixels)
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -298,10 +299,55 @@ void main()
                         color.rgb = accum / weight;
                 }
         }
+
+        if (inView)
+        {
+                vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
+                float aspect = texSize.y > 0.0 ? texSize.x / texSize.y : 1.0;
+
+                float vignetteStrength = max(PostFXParams0.x, 0.0);
+                float vignetteRadius = max(PostFXParams0.y, 1e-3);
+                float vignetteSoftness = clamp(PostFXParams0.z, 1e-3, 1.0);
+                if (vignetteStrength > 0.0)
+                {
+                        vec2 vignetteCoord = viewUV * 2.0 - vec2(1.0);
+                        vignetteCoord.x *= aspect;
+                        float dist = length(vignetteCoord);
+                        float inner = vignetteRadius * (1.0 - vignetteSoftness);
+                        float outer = max(vignetteRadius, inner + 1e-3);
+                        float vignette = smoothstep(inner, outer, dist);
+                        float weight = min(vignetteStrength, 1.0);
+                        float factor = mix(1.0, 1.0 - vignette, weight);
+                        if (vignetteStrength > 1.0)
+                                factor *= pow(max(1.0 - vignette, 1e-3), vignetteStrength - 1.0);
+                        color.rgb *= factor;
+                }
+
+                float chromaticAmount = max(PostFXParams0.w, 0.0);
+                if (chromaticAmount > 0.0)
+                {
+                        vec2 dir = viewUV - vec2(0.5);
+                        float lenDir = length(dir);
+                        if (lenDir > 1e-4)
+                        {
+                                vec2 normDir = dir / lenDir;
+                                vec2 offsetPx = normDir * (chromaticAmount * lenDir);
+                                vec2 offsetUV = offsetPx * invTexSize;
+                                vec2 uvR = clamp(uv + offsetUV, viewMin, viewMax);
+                                vec2 uvB = clamp(uv - offsetUV, viewMin, viewMax);
+                                vec3 aberrated = color.rgb;
+                                aberrated.r = texture(GammaTexture, uvR).r;
+                                aberrated.b = texture(GammaTexture, uvB).b;
+                                float blend = clamp(chromaticAmount * lenDir, 0.0, 1.0);
+                                color.rgb = mix(color.rgb, aberrated, blend);
+                        }
+                }
+        }
+
         out_fragcolor = color;
 #if PALETTIZE == 1
-		vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
-		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
+                vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
+                out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 	out_fragcolor.rgb += DITHER_NOISE(noiseuv) * dither;
 	out_fragcolor.rgb *= out_fragcolor.rgb;
 #endif // PALETTIZE == 1

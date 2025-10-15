@@ -216,6 +216,10 @@ cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_vignette = { "r_vignette", "0", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius = { "r_vignette_radius", "0.75", CVAR_ARCHIVE };
+cvar_t	r_vignette_softness = { "r_vignette_softness", "0.45", CVAR_ARCHIVE };
+cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -743,6 +747,11 @@ void GL_PostProcess (void)
         GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
         GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
         GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
+        GL_Uniform4fFunc (8,
+                q_max (0.f, r_vignette.value),
+                q_max (0.f, r_vignette_radius.value),
+                q_max (0.f, r_vignette_softness.value),
+                q_max (0.f, r_chromatic_aberration.value));
 
         dof_enabled = R_DoFEnabled ();
 
