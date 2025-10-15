@@ -89,34 +89,26 @@ struct ibuf_s {
 #define BLOB_SHADOW_FADE_START   24.0f
 #define BLOB_SHADOW_FADE_RANGE   160.0f
 
-typedef struct blobshadowinstance_s
+typedef struct playershadowinstance_s
 {
-        float           center_radius[4];
-        float           params[4];
-} blobshadowinstance_t;
+        vec3_t          center;
+        float           radius;
+        vec3_t          tangent;
+        float           alpha;
+        vec3_t          bitangent;
+        float           softness;
+        vec3_t          normal;
+        float           offset;
+} playershadowinstance_t;
 
 static struct
 {
         int                     count;
-        struct {
-                float   matviewproj[16];
-                vec3_t  eyepos;
-                float   _pad;
-                vec4_t  fog;
-                float   dither;
-                float   _padding[3];
-        } global;
-        blobshadowinstance_t inst[MAX_ALIAS_INSTANCES];
+        playershadowinstance_t   inst[MAX_ALIAS_INSTANCES];
 } shadowbuf;
 
-static const float blobshadow_verts[4][2] = {
-        {-1.f, -1.f},
-        { 1.f, -1.f},
-        { 1.f,  1.f},
-        {-1.f,  1.f},
-};
-
-static const uint16_t blobshadow_idx[6] = {0, 1, 2, 0, 2, 3};
+#define PLAYER_SHADOW_SEGMENTS           16
+#define PLAYER_SHADOW_VERTEX_COUNT       (PLAYER_SHADOW_SEGMENTS + 2)
 
 /*
 =================
@@ -330,49 +322,30 @@ void R_SetupAliasLighting (entity_t	*e)
 
 void R_BlobShadows_Flush (void)
 {
-        GLuint  buf, vbuf, ibuf_handle;
-        GLbyte  *ofs, *vofs, *iofs;
-        size_t  bufsize;
-
         if (!shadowbuf.count)
                 return;
 
         GL_BeginGroup ("blob shadows");
 
-        memcpy (shadowbuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
-        memcpy (shadowbuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-        memcpy (shadowbuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
-        shadowbuf.global.fog[3] =
-                gl_overbright_models.value ?
-                        -fabs (r_framedata.fogdata[3]) :
-                         fabs (r_framedata.fogdata[3]);
-        shadowbuf.global.dither = r_framedata.screendither;
+        GL_UseProgram (glprogs.playershadow);
 
-        bufsize = sizeof (shadowbuf.global) + sizeof (shadowbuf.inst[0]) * shadowbuf.count;
-        GL_Upload (GL_SHADER_STORAGE_BUFFER, &shadowbuf.global, bufsize, &buf, &ofs);
-
-        GL_Upload (GL_ARRAY_BUFFER, blobshadow_verts, sizeof (blobshadow_verts), &vbuf, &vofs);
-        GL_BindBuffer (GL_ARRAY_BUFFER, vbuf);
-        GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof (blobshadow_verts[0]), vofs);
-
-        GL_Upload (GL_ELEMENT_ARRAY_BUFFER, blobshadow_idx, sizeof (blobshadow_idx), &ibuf_handle, &iofs);
-        GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, ibuf_handle);
-
-        GLuint buffers[1] = {buf};
-        GLintptr offsets[1] = {(GLintptr) ofs};
-        GLsizeiptr sizes[1] = {bufsize};
-        GL_BindBuffersRange (GL_SHADER_STORAGE_BUFFER, 1, 1, buffers, offsets, sizes);
-
-        GL_UseProgram (glprogs.blobshadow);
-
-        unsigned int state = GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(1);
+        unsigned int state = GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0);
         if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
                 state |= GLS_BLEND_ALPHA_OIT;
         else
                 state |= GLS_BLEND_ALPHA;
         GL_SetState (state);
 
-        GL_DrawElementsInstancedFunc (GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, iofs, shadowbuf.count);
+        for (int i = 0; i < shadowbuf.count; ++i)
+        {
+                const playershadowinstance_t *inst = &shadowbuf.inst[i];
+                GL_Uniform4fFunc (0, inst->center[0], inst->center[1], inst->center[2], inst->radius);
+                GL_Uniform4fFunc (1, inst->tangent[0], inst->tangent[1], inst->tangent[2], inst->alpha);
+                GL_Uniform4fFunc (2, inst->bitangent[0], inst->bitangent[1], inst->bitangent[2], inst->softness);
+                GL_Uniform4fFunc (3, inst->normal[0], inst->normal[1], inst->normal[2], inst->offset);
+
+                glDrawArrays (GL_TRIANGLE_FAN, 0, PLAYER_SHADOW_VERTEX_COUNT);
+        }
 
         shadowbuf.count = 0;
 
@@ -423,15 +396,36 @@ void R_BlobShadows_Add (const entity_t *e, const vec3_t mins, const vec3_t maxs,
         if (alpha <= 0.0f)
                 return;
 
-        blobshadowinstance_t *inst = &shadowbuf.inst[shadowbuf.count++];
-        inst->center_radius[0] = center[0];
-        inst->center_radius[1] = center[1];
-        inst->center_radius[2] = center[2];
-        inst->center_radius[3] = radius_x;
-        inst->params[0] = radius_y;
-        inst->params[1] = alpha;
-        inst->params[2] = 0.f;
-        inst->params[3] = 0.f;
+        playershadowinstance_t *inst = &shadowbuf.inst[shadowbuf.count++];
+        VectorCopy (center, inst->center);
+
+        float max_radius = q_max (radius_x, radius_y);
+        if (max_radius <= 0.f)
+                max_radius = 1.f;
+
+        inst->radius = max_radius;
+
+        float yaw = DEG2RAD (e->angles[YAW]);
+        float cy = cosf (yaw);
+        float sy = sinf (yaw);
+
+        float inv_radius = 1.f / max_radius;
+
+        inst->tangent[0] =  cy * radius_x * inv_radius;
+        inst->tangent[1] =  sy * radius_x * inv_radius;
+        inst->tangent[2] =  0.f;
+
+        inst->bitangent[0] = -sy * radius_y * inv_radius;
+        inst->bitangent[1] =  cy * radius_y * inv_radius;
+        inst->bitangent[2] =  0.f;
+
+        inst->alpha = alpha;
+
+        float softness = max_radius / 64.f;
+        inst->softness = CLAMP (0.25f, softness, 0.75f);
+
+        VectorSet (inst->normal, 0.f, 0.f, 1.f);
+        inst->offset = 0.f;
 }
 
 static void R_Alias_GetBounds (const entity_t *e, vec3_t mins, vec3_t maxs)
