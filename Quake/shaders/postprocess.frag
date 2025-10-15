@@ -370,36 +370,41 @@ vec3 ApplyMotionBlur(vec3 color, vec2 uv, vec2 texSize, DepthSamplingInfo depthI
 // Bilateral weight function: combines spatial and range (depth/color) weights
 float BilateralWeight(float spatialDist, float rangeDist, float sigmaSpatial, float sigmaRange)
 {
-	float spatialWeight = exp(-spatialDist / (2.0 * sigmaSpatial * sigmaSpatial));
-	float rangeWeight = exp(-rangeDist / (2.0 * sigmaRange * sigmaRange));
+	float spatialSigma = max(sigmaSpatial, 1e-4);
+	float rangeSigma = max(sigmaRange, 1e-4);
+	float spatialWeight = exp(-(spatialDist * spatialDist) / (2.0 * spatialSigma * spatialSigma));
+	float rangeWeight = exp(-(rangeDist * rangeDist) / (2.0 * rangeSigma * rangeSigma));
 	return spatialWeight * rangeWeight;
 }
 
 // Apply depth of field with bilateral filtering for better edge preservation
 vec3 ApplyDepthOfField(vec3 color, vec2 uv, vec2 invTexSize, DepthSamplingInfo depthInfo)
 {
-	float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-	float focusDistance = DoFParams0.y;
-	float focusRange = max(DoFParams0.z, 0.0001);
-	float maxBlur = max(DoFParams0.w, 0.0);
-	
-	// Calculate circle of confusion
-	float coc = abs(linearDepth - focusDistance);
-	float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
-	float blurRadius = blurFactor * maxBlur;
-	
-	// Early exit if no blur needed
-	if (blurRadius < 0.0001)
-		return color;
-	
-	// Bilateral filtering parameters
-	float sigmaSpatial = DoFParams2.x > 0.0 ? DoFParams2.x : BILATERAL_SIGMA_SPATIAL_DEFAULT;
-	float sigmaRange = DoFParams2.y > 0.0 ? DoFParams2.y : BILATERAL_SIGMA_RANGE_DEFAULT;
-	
-	// 8-tap radial blur kernel (optimized pattern)
-	const vec2 kernel[8] = vec2[](
-		vec2(1.0, 0.0),
-		vec2(-1.0, 0.0),
+        float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+        float focusDistance = DoFParams0.y;
+        float focusRange = max(DoFParams0.z, 0.0001);
+        float maxBlur = max(DoFParams0.w, 0.0);
+
+        // Calculate circle of confusion
+        float coc = abs(linearDepth - focusDistance);
+        float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
+        float blurRadius = blurFactor * maxBlur;
+
+        // Early exit if no blur needed
+        if (blurRadius < 0.0001)
+                return color;
+
+        // Bilateral filtering parameters
+        float sigmaSpatial = DoFParams2.x > 0.0 ? DoFParams2.x : BILATERAL_SIGMA_SPATIAL_DEFAULT;
+        float sigmaRange = DoFParams2.y > 0.0 ? DoFParams2.y : BILATERAL_SIGMA_RANGE_DEFAULT;
+
+        vec2 viewMin = ViewRect.xy;
+        vec2 viewMax = ViewRect.zw;
+
+        // 8-tap radial blur kernel (optimized pattern)
+        const vec2 kernel[8] = vec2[](
+                vec2(1.0, 0.0),
+                vec2(-1.0, 0.0),
 		vec2(0.0, 1.0),
 		vec2(0.0, -1.0),
 		vec2(0.70710678, 0.70710678),
@@ -416,31 +421,50 @@ vec3 ApplyDepthOfField(vec3 color, vec2 uv, vec2 invTexSize, DepthSamplingInfo d
 	mat2 rotation = mat2(cosine, -sine, sine, cosine);
 	
 	// Bilateral filtering accumulation
-	vec3 accum = color;
-	float weight = 1.0;
-	float centerLuma = dot(color, vec3(0.299, 0.587, 0.114));
-	
-	for (int i = 0; i < 8; ++i)
-	{
-		vec2 offset = rotation * kernel[i] * blurRadius * invTexSize;
-		vec2 sampleUV = uv + offset;
-		vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
-		
-		// Compute spatial distance
-		float spatialDist = length(offset * vec2(textureSize(GammaTexture, 0)));
-		
-		// Compute range distance (luminance-based)
-		float sampleLuma = dot(sampleColor, vec3(0.299, 0.587, 0.114));
-		float rangeDist = abs(sampleLuma - centerLuma);
-		
-		// Bilateral weight
-		float w = BilateralWeight(spatialDist, rangeDist, sigmaSpatial, sigmaRange);
-		
-		accum += sampleColor * w;
-		weight += w;
-	}
-	
-	return accum / max(weight, EPSILON);
+        vec3 accum = color;
+        float weight = 1.0;
+        float centerLuma = dot(color, vec3(0.299, 0.587, 0.114));
+        const float COLOR_SIGMA = 0.35;
+
+        for (int i = 0; i < 8; ++i)
+        {
+                vec2 offsetDir = rotation * kernel[i];
+                vec2 offsetPx = offsetDir * blurRadius;
+                vec2 sampleUV = uv + offsetPx * invTexSize;
+
+                if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
+                        continue;
+
+                vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
+                vec2 sampleCoord = gl_FragCoord.xy + offsetPx;
+
+                float sampleDepth = SampleLinearDepth(sampleCoord, depthInfo);
+                float sampleCoC = abs(sampleDepth - focusDistance);
+                float sampleBlurFactor = clamp((sampleCoC - focusRange) / focusRange, 0.0, 1.0);
+
+                if (sampleBlurFactor <= 0.0 && blurFactor > 0.0)
+                        continue;
+
+                float spatialDist = length(offsetPx);
+                float blurDelta = sampleBlurFactor - blurFactor;
+                float w = BilateralWeight(spatialDist, blurDelta, sigmaSpatial, sigmaRange);
+
+                float sampleLuma = dot(sampleColor, vec3(0.299, 0.587, 0.114));
+                float colorDiff = sampleLuma - centerLuma;
+                float colorWeight = exp(-(colorDiff * colorDiff) / (2.0 * COLOR_SIGMA * COLOR_SIGMA));
+
+                float defocus = max(sampleBlurFactor, blurFactor);
+                w *= colorWeight * defocus;
+
+                if (w <= 0.0)
+                        continue;
+
+                accum += sampleColor * w;
+                weight += w;
+        }
+
+        vec3 blurred = accum / max(weight, EPSILON);
+        return mix(color, blurred, blurFactor);
 }
 
 // ============================================================================
