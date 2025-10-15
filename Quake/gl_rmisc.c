@@ -409,6 +409,7 @@ void R_Init (void)
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
 	R_InitParticles ();
+	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
@@ -566,6 +567,7 @@ void R_NewMap (void)
 	R_ClearEfrags ();
 	r_viewleaf = NULL;
 	R_ClearParticles ();
+	R_ClearDecals ();
 	VEC_CLEAR (r_pointfile);
 
 	GL_BuildLightmaps ();
