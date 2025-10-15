@@ -67,6 +67,10 @@ extern cvar_t r_tonemap;
 extern cvar_t r_tonemap_exposure;
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
+extern cvar_t r_vignette;
+extern cvar_t r_vignette_radius;
+extern cvar_t r_vignette_softness;
+extern cvar_t r_chromatic_aberration;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -357,6 +361,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
+	Cvar_RegisterVariable (&r_vignette);
+	Cvar_RegisterVariable (&r_vignette_radius);
+	Cvar_RegisterVariable (&r_vignette_softness);
+	Cvar_RegisterVariable (&r_chromatic_aberration);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
