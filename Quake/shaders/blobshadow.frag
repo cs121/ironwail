@@ -92,8 +92,10 @@ void main()
         float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
         fog = clamp(fog, 0.0, 1.0);
 
-        vec3 color = mix(Fog.rgb, vec3(0.0), fog);
-        OUT_COLOR = vec4(color, alpha);
+        // Fade the shadow with distance fog by reducing opacity instead of tinting towards
+        // the fog colour. Tinting made the shadow look like a glowing disc when fog was bright.
+        alpha *= fog;
+        OUT_COLOR = vec4(vec3(0.0), alpha);
 #if !OIT
         out_velocity = vec2(0.0);
 #endif
