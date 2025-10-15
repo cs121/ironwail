@@ -612,13 +612,9 @@ typedef struct glframebufs_s {
 	}				bloom;
 
 	struct {
-		union {
-			GLuint			mrt[2];
-			struct {
-				GLuint		accum_tex;
-				GLuint		revealage_tex;
-			};
-		};
+		GLuint		accum_tex;
+		GLuint		revealage_tex;
+		GLuint		mrt[2];
 		GLuint		fbo_scene;
 		GLuint		fbo_composite;
 	}				oit;
