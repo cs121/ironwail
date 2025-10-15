@@ -55,12 +55,12 @@ layout(location=0) in vec3 in_dir;
 layout(location=1) in vec2 in_uv;
 
 layout(location=0) out vec4 out_fragcolor;
-layout(location=1) out vec2 out_velocity;
+layout(location=1) out vec4 out_velocity;
 
 void main()
 {
 	out_fragcolor = texture(Tex, in_uv);
-	out_velocity = vec2(0.0);
+        out_velocity = vec4(0.0);
 	out_fragcolor.rgb = mix(out_fragcolor.rgb, Fog.rgb, Fog.w);
 #if DITHER
 	out_fragcolor.rgb = sqrt(out_fragcolor.rgb);

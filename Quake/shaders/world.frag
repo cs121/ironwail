@@ -236,7 +236,7 @@ vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
 	#define main main_body
 #else
 	layout(location=0) out vec4 OUT_COLOR;
-	layout(location=1) out vec2 out_velocity;
+        layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
 void main()
@@ -415,10 +415,10 @@ void main()
         out_fragcolor = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
-        if (result.a < 0.999)
-                out_velocity = vec2(0.0);
-        else
-                out_velocity = velocity * result.a;
+        vec2 velocityOut = vec2(0.0);
+        if (result.a >= 0.999)
+                velocityOut = velocity * result.a;
+        out_velocity = vec4(velocityOut, 0.0, 0.0);
 #endif
 #if DITHER == 1
 	vec3 dpos = fwidth(in_pos);

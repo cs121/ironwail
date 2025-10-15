@@ -174,7 +174,6 @@ int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
 cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
 cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
-cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_drawviewmodel = { "r_drawviewmodel","1",CVAR_NONE };
 cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
 cvar_t	r_pos = { "r_pos","0",CVAR_NONE };
@@ -468,7 +467,7 @@ void GL_CreateFrameBuffers (void)
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
 
 	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, framebufs.scene.samples, GL_NEAREST, "scene colors");
-	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, framebufs.scene.samples, GL_NEAREST, "scene velocity");
+	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "scene velocity");
 	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
 	{
 		GLuint colors[2] = { framebufs.scene.color_tex, framebufs.scene.velocity_tex };
@@ -498,8 +497,8 @@ void GL_CreateFrameBuffers (void)
 	/* resolved scene framebuffer (color only) */
 	if (framebufs.scene.samples > 1)
 	{
-		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
-		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RG16F, 1, GL_NEAREST, "resolved scene velocity");
+	framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
+	framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
 		{
 			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
@@ -722,13 +721,13 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
         GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
-        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, motion_enabled ? velocity_texture : 0);
+        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
         GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
         GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
-        GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, 0.f, 0.f);
+        GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
 
         dof_enabled = R_DoFEnabled ();
 

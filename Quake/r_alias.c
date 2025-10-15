@@ -27,7 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
-extern cvar_t r_shadows;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -81,34 +80,6 @@ struct ibuf_s {
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
-
-#define BLOB_SHADOW_MIN_RADIUS   8.0f
-#define BLOB_SHADOW_SIZE_SCALE   0.9f
-#define BLOB_SHADOW_LIFT         0.2f
-#define BLOB_SHADOW_ALPHA_SCALE  0.55f
-#define BLOB_SHADOW_FADE_START   24.0f
-#define BLOB_SHADOW_FADE_RANGE   160.0f
-
-typedef struct playershadowinstance_s
-{
-        vec3_t          center;
-        float           radius;
-        vec3_t          tangent;
-        float           alpha;
-        vec3_t          bitangent;
-        float           softness;
-        vec3_t          normal;
-        float           offset;
-} playershadowinstance_t;
-
-static struct
-{
-        int                     count;
-        playershadowinstance_t   inst[MAX_ALIAS_INSTANCES];
-} shadowbuf;
-
-#define PLAYER_SHADOW_SEGMENTS           16
-#define PLAYER_SHADOW_VERTEX_COUNT       (PLAYER_SHADOW_SEGMENTS + 2)
 
 /*
 =================
@@ -318,161 +289,6 @@ void R_SetupAliasLighting (entity_t	*e)
 	}
 
         VectorScale (lightcolor, 1.0f / 200.0f, lightcolor);
-}
-
-void R_BlobShadows_Flush (void)
-{
-        if (!shadowbuf.count)
-                return;
-
-        GL_BeginGroup ("blob shadows");
-
-        GL_UseProgram (glprogs.playershadow);
-
-        unsigned int state = GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0);
-        if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
-                state |= GLS_BLEND_ALPHA_OIT;
-        else
-                state |= GLS_BLEND_ALPHA;
-        GL_SetState (state);
-
-        for (int i = 0; i < shadowbuf.count; ++i)
-        {
-                const playershadowinstance_t *inst = &shadowbuf.inst[i];
-                GL_Uniform4fFunc (0, inst->center[0], inst->center[1], inst->center[2], inst->radius);
-                GL_Uniform4fFunc (1, inst->tangent[0], inst->tangent[1], inst->tangent[2], inst->alpha);
-                GL_Uniform4fFunc (2, inst->bitangent[0], inst->bitangent[1], inst->bitangent[2], inst->softness);
-                GL_Uniform4fFunc (3, inst->normal[0], inst->normal[1], inst->normal[2], inst->offset);
-
-                glDrawArrays (GL_TRIANGLE_FAN, 0, PLAYER_SHADOW_VERTEX_COUNT);
-        }
-
-        shadowbuf.count = 0;
-
-        GL_EndGroup ();
-}
-
-void R_BlobShadows_Add (const entity_t *e, const vec3_t mins, const vec3_t maxs, float entalpha, float origin_z)
-{
-        if (!r_shadows.value)
-                return;
-
-        if (!e || e == &cl.viewent)
-                return;
-
-        if (!e->model || (e->model->flags & MOD_NOSHADOW))
-                return;
-
-        if (entalpha <= 0.0f)
-                return;
-
-        if (shadowbuf.count == countof (shadowbuf.inst))
-                R_BlobShadows_Flush ();
-
-        float min_x = q_min (mins[0], maxs[0]);
-        float max_x = q_max (mins[0], maxs[0]);
-        float min_y = q_min (mins[1], maxs[1]);
-        float max_y = q_max (mins[1], maxs[1]);
-        float min_z = q_min (mins[2], maxs[2]);
-
-        float radius_x = 0.5f * (max_x - min_x) * BLOB_SHADOW_SIZE_SCALE;
-        float radius_y = 0.5f * (max_y - min_y) * BLOB_SHADOW_SIZE_SCALE;
-        radius_x = q_max (radius_x, BLOB_SHADOW_MIN_RADIUS);
-        radius_y = q_max (radius_y, BLOB_SHADOW_MIN_RADIUS);
-
-        float shadow_z = min_z + BLOB_SHADOW_LIFT;
-
-        vec3_t center;
-        center[0] = 0.5f * (min_x + max_x);
-        center[1] = 0.5f * (min_y + max_y);
-        center[2] = shadow_z;
-
-        float hover = origin_z - shadow_z - BLOB_SHADOW_FADE_START;
-        if (hover < 0.f)
-                hover = 0.f;
-        float fade = 1.f - CLAMP (0.f, hover / BLOB_SHADOW_FADE_RANGE, 1.f);
-
-        float alpha = entalpha * BLOB_SHADOW_ALPHA_SCALE * fade;
-        if (alpha <= 0.0f)
-                return;
-
-        playershadowinstance_t *inst = &shadowbuf.inst[shadowbuf.count++];
-        VectorCopy (center, inst->center);
-
-        float max_radius = q_max (radius_x, radius_y);
-        if (max_radius <= 0.f)
-                max_radius = 1.f;
-
-        inst->radius = max_radius;
-
-        float yaw = DEG2RAD (e->angles[YAW]);
-        float cy = cosf (yaw);
-        float sy = sinf (yaw);
-
-        float inv_radius = 1.f / max_radius;
-
-        inst->tangent[0] =  cy * radius_x * inv_radius;
-        inst->tangent[1] =  sy * radius_x * inv_radius;
-        inst->tangent[2] =  0.f;
-
-        inst->bitangent[0] = -sy * radius_y * inv_radius;
-        inst->bitangent[1] =  cy * radius_y * inv_radius;
-        inst->bitangent[2] =  0.f;
-
-        inst->alpha = alpha;
-
-        float softness = max_radius / 64.f;
-        inst->softness = CLAMP (0.25f, softness, 0.75f);
-
-        VectorSet (inst->normal, 0.f, 0.f, 1.f);
-        inst->offset = 0.f;
-}
-
-static void R_Alias_GetBounds (const entity_t *e, vec3_t mins, vec3_t maxs)
-{
-        const vec3_t *minbounds, *maxbounds;
-        float scalefactor = ENTSCALE_DECODE(e->scale);
-        int i;
-
-        if (e->angles[0] || e->angles[2])
-        {
-                minbounds = &e->model->rmins;
-                maxbounds = &e->model->rmaxs;
-        }
-        else if (e->angles[1])
-        {
-                minbounds = &e->model->ymins;
-                maxbounds = &e->model->ymaxs;
-        }
-        else
-        {
-                minbounds = &e->model->mins;
-                maxbounds = &e->model->maxs;
-        }
-
-        if (scalefactor != 1.0f)
-        {
-                for (i = 0; i < 3; i++)
-                {
-                        mins[i] = e->origin[i] + (*minbounds)[i] * scalefactor;
-                        maxs[i] = e->origin[i] + (*maxbounds)[i] * scalefactor;
-                }
-        }
-        else
-        {
-                for (i = 0; i < 3; i++)
-                {
-                        mins[i] = e->origin[i] + (*minbounds)[i];
-                        maxs[i] = e->origin[i] + (*maxbounds)[i];
-                }
-        }
-}
-
-static void R_AddAliasShadow (const entity_t *e, const lerpdata_t *lerpdata, float entalpha)
-{
-        vec3_t mins, maxs;
-        R_Alias_GetBounds (e, mins, maxs);
-        R_BlobShadows_Add (e, mins, maxs, entalpha, lerpdata->origin[2]);
 }
 
 /*
@@ -728,12 +544,9 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         if (entalpha == 0)
                 return;
 
-        if (!showtris)
-                R_AddAliasShadow (e, &lerpdata, entalpha);
-
-	//
-	// set up lighting
-	//
+        //
+        // set up lighting
+        //
 	rs_aliaspolys += paliashdr->numtris;
 	R_SetupAliasLighting (e);
 
@@ -828,7 +641,6 @@ void R_DrawAliasModels (entity_t **ents, int count)
         for (i = 0; i < count; i++)
                 R_DrawAliasModel_Real (ents[i], false);
         R_FlushAliasInstances (false);
-        R_BlobShadows_Flush ();
 }
 
 /*
@@ -842,5 +654,4 @@ void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
         for (i = 0; i < count; i++)
                 R_DrawAliasModel_Real (ents[i], true);
         R_FlushAliasInstances (true);
-        R_BlobShadows_Flush ();
 }

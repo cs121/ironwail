@@ -85,7 +85,7 @@ layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: vi
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
 layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
 layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strength, z: min velocity (pixels), w: depth threshold ratio
-layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, zw: reserved
+layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 
 const int MOTION_MAX_SAMPLES = 64;
 
@@ -187,20 +187,27 @@ void main()
         vec2 uv = (vec2(pixel) + 0.5) / texSize;
         vec2 viewMin = ViewRect.xy;
         vec2 viewMax = ViewRect.zw;
+        vec2 viewSize = max(viewMax - viewMin, vec2(1e-6));
+        vec2 invScale = max(DepthParams.xy, vec2(1e-4));
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
 
-        if (MotionParams0.x > 0.5 && inView)
+        bool hasVelocityTexture = MotionParams1.z > 0.5;
+        vec2 velocity = vec2(0.0);
+        float viewModelMask = 0.0;
+        if (hasVelocityTexture && inView)
+        {
+                vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), viewSize * invScale);
+                vec4 velocitySample = texture(VelocityTexture, velocityUV);
+                velocity = velocitySample.xy;
+                viewModelMask = velocitySample.z;
+        }
+
+        if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5)
         {
                 float effectiveShutter = MotionParams0.y;
                 if (effectiveShutter > 0.0)
                 {
-                        vec2 viewMin = ViewRect.xy;
-                        vec2 viewMax = ViewRect.zw;
-                        vec2 viewSize = max(viewMax - viewMin, vec2(1e-6));
-                        vec2 invScale = max(DepthParams.xy, vec2(1e-4));
-                        vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), viewSize * invScale);
-                        vec2 velocity = texture(VelocityTexture, velocityUV).xy;
                         vec2 velocityPx = velocity * effectiveShutter * texSize;
                         float speed = length(velocityPx);
                         float minVelocity = max(MotionParams0.z, 0.0);
@@ -247,7 +254,7 @@ void main()
                 }
         }
 
-        if (DoFParams0.x > 0.5 && inView && depthInfo.valid)
+        if (DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5)
         {
                 float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                 float focusDistance = DoFParams0.y;
