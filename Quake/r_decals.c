@@ -341,7 +341,10 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         if (!cl.worldmodel || !cl.worldmodel->numleafs)
                 return false;
 
-        leaf = Mod_PointInLeaf ((vec3_t) point, cl.worldmodel);
+        vec3_t point_copy;
+        VectorCopy (point, point_copy);
+
+        leaf = Mod_PointInLeaf (point_copy, cl.worldmodel);
         if (!leaf)
                 return false;
 
