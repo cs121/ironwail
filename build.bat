@@ -33,4 +33,5 @@ if errorlevel 1 (
 )
 
 echo Done.
+pause
 exit /b 0

@@ -456,14 +456,6 @@ void R_DrawParticles_ShowTris (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
 
-void R_InitDecals (void);
-void R_ClearDecals (void);
-void R_UpdateDecals (void);
-void R_DrawDecals (qboolean showtris);
-void R_DrawDecals_ShowTris (void);
-void R_AddBulletDecal (const vec3_t point);
-void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
-
 void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
 
@@ -612,9 +604,13 @@ typedef struct glframebufs_s {
 	}				bloom;
 
 	struct {
-		GLuint		accum_tex;
-		GLuint		revealage_tex;
-		GLuint		mrt[2];
+		union {
+			GLuint			mrt[2];
+			struct {
+				GLuint		accum_tex;
+				GLuint		revealage_tex;
+			};
+		};
 		GLuint		fbo_scene;
 		GLuint		fbo_composite;
 	}				oit;

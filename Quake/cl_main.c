@@ -744,7 +744,6 @@ int CL_ReadFromServer (void)
 
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
-	R_UpdateDecals ();
 
 //johnfitz -- devstats
 

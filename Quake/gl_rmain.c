@@ -662,7 +662,6 @@ void GL_PostProcess (void)
         float motion_strength;
         float motion_shutter;
         float motion_effective_shutter;
-        double frame_delta;
         float motion_max_radius;
         float motion_min_velocity;
         float motion_depth_threshold;
@@ -690,10 +689,9 @@ void GL_PostProcess (void)
                 motion_strength = 0.f;
         motion_shutter = q_max (0.f, r_motionblur_shutter.value);
         motion_effective_shutter = motion_strength * motion_shutter;
-
-        frame_delta = (r_prev_frame_valid) ? cl.time - r_prev_frame_time : 0.0;
         if (motion_effective_shutter > 0.f && r_prev_frame_valid)
         {
+                double frame_delta = cl.time - r_prev_frame_time;
                 if (frame_delta > 0.0)
                 {
                         const double reference_delta = 1.0 / 60.0;
@@ -731,15 +729,6 @@ void GL_PostProcess (void)
         GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_enabled);
         GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
         GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, 0.f, 0.f);
-
-        float gpu_load = 0.f;
-        if (frame_delta > 0.0)
-        {
-                const double frametime_ms = frame_delta * 1000.0;
-                gpu_load = (frametime_ms > (1000.0 / 60.0)) ? 0.5f : 0.f;
-        }
-        GL_Uniform4fFunc (8, gpu_load, 0.f, 0.f, 0.f);
-        GL_Uniform4fFunc (9, 3.0f, 0.15f, 0.f, 0.f);
 
         dof_enabled = R_DoFEnabled ();
 
@@ -1718,8 +1707,6 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
 	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
-	if (alphapass)
-		R_DrawDecals (false);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
@@ -2468,7 +2455,6 @@ void R_ShowTris (void)
 	ofs = cl_modtype_ofs;
 	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
 	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
-	R_DrawDecals_ShowTris ();
 	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
 
 	// viewmodel
