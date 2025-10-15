@@ -709,7 +709,14 @@ void GL_PostProcess (void)
                 motion_max_samples = 64;
         velocity_texture = 0;
         if (framebufs.scene.velocity_tex)
+        {
                 velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+                if (framesetup.scene_fbo != framebufs.scene.fbo)
+                {
+                        // The scene FBO was not used this frame, so the velocity attachment still holds stale data.
+                        velocity_texture = 0;
+                }
+        }
         motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);

@@ -88,6 +88,7 @@ layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strengt
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 
 const int MOTION_MAX_SAMPLES = 64;
+const float OPAQUE_ALPHA_THRESHOLD = 0.999;
 
 struct DepthSamplingInfo
 {
@@ -167,8 +168,10 @@ void AccumulateMotionSample(inout vec3 accum, inout float weight, vec2 sampleUV,
                 if (abs(sampleDepth - centerDepth) > tolerance)
                         return;
         }
-        vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
-        accum += sampleColor;
+        vec4 sampleColor = texture(GammaTexture, sampleUV);
+        if (sampleColor.a < OPAQUE_ALPHA_THRESHOLD)
+                return;
+        accum += sampleColor.rgb;
         weight += 1.0;
 }
 
@@ -182,6 +185,7 @@ void main()
         float dither = Params.w;
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
+        bool centerOpaque = color.a >= OPAQUE_ALPHA_THRESHOLD;
         vec2 texSize = vec2(textureSize(GammaTexture, 0));
         vec2 invTexSize = vec2(1.0) / max(texSize, vec2(1.0));
         vec2 uv = (vec2(pixel) + 0.5) / texSize;
@@ -203,7 +207,7 @@ void main()
                 viewModelMask = velocitySample.z;
         }
 
-        if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5)
+        if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5 && centerOpaque)
         {
                 float effectiveShutter = MotionParams0.y;
                 if (effectiveShutter > 0.0)
@@ -254,7 +258,7 @@ void main()
                 }
         }
 
-        if (DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5)
+        if (DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5 && centerOpaque)
         {
                 float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                 float focusDistance = DoFParams0.y;
@@ -285,8 +289,10 @@ void main()
                         for (int i = 0; i < 8; ++i)
                         {
                                 vec2 offset = rotation * kernel[i] * blurRadius * invTexSize;
-                                vec3 sampleColor = texture(GammaTexture, uv + offset).rgb;
-                                accum += sampleColor;
+                                vec4 sampleColor = texture(GammaTexture, uv + offset);
+                                if (sampleColor.a < OPAQUE_ALPHA_THRESHOLD)
+                                        continue;
+                                accum += sampleColor.rgb;
                                 weight += 1.0;
                         }
                         color.rgb = accum / weight;
