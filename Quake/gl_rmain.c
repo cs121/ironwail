@@ -55,6 +55,14 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 
+typedef struct framesetup_s
+{
+        GLuint          scene_fbo;
+        GLuint          oit_fbo;
+} framesetup_t;
+
+static framesetup_t framesetup;
+
 static const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
 		0.f, 1.f, 0.f, 0.f,
@@ -1080,14 +1088,6 @@ void R_SetAlphaMode (alphamode_t mode)
 
 static uint32_t visedict_keys[MAX_VISEDICTS];
 static uint16_t visedict_order[2][MAX_VISEDICTS];
-
-typedef struct framesetup_s
-{
-	GLuint		scene_fbo;
-	GLuint		oit_fbo;
-} framesetup_t;
-
-static framesetup_t framesetup;
 
 /*
 =============
