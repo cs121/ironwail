@@ -49,6 +49,10 @@ void main()
                discard;
        float fog = exp2(abs(Fog.w) * -dot(in_viewpos, in_viewpos));
        fog = clamp(fog, 0.0, 1.0);
-       vec3 color = mix(Fog.rgb, vec3(0.0), fog);
-       out_fragcolor = vec4(color, alpha);
+
+       // Fade shadow intensity with fog distance without tinting towards the fog colour.
+       // Using the fog colour here made the shadow appear as a bright disc instead of darkening
+       // the ground beneath the player.
+       alpha *= fog;
+       out_fragcolor = vec4(vec3(0.0), alpha);
 }
