@@ -464,7 +464,13 @@ vec3 ApplyDepthOfField(vec3 color, vec2 uv, vec2 invTexSize, DepthSamplingInfo d
         }
 
         vec3 blurred = accum / max(weight, EPSILON);
-        return mix(color, blurred, blurFactor);
+
+        // The blur radius already scales with blurFactor so blending again with the
+        // original color makes the effect almost imperceptible.  Returning the
+        // fully blurred color restores the amount of defocus that the legacy
+        // shader produced while still taking advantage of the bilateral weights
+        // above.
+        return blurred;
 }
 
 // ============================================================================
