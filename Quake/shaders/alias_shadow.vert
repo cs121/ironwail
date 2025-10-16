@@ -89,7 +89,13 @@ void main()
         {
                 projected -= light_dir * (height / denom);
         }
-        projected += plane_normal * inst.ShadowParams.y;
+
+        vec3 view_dir = projected - EyePos;
+        float view_len = length(view_dir);
+        if (view_len > 0.0)
+        {
+                projected += (view_dir / view_len) * inst.ShadowParams.y;
+        }
 
         gl_Position = ViewProj * vec4(projected, 1.0);
         out_color = inst.LightColor;
