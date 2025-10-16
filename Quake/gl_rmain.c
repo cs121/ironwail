@@ -210,15 +210,20 @@ cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE
 cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
-
 cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_vignette = { "r_vignette", "0", CVAR_ARCHIVE };
-cvar_t	r_vignette_radius = { "r_vignette_radius", "0.75", CVAR_ARCHIVE };
-cvar_t	r_vignette_softness = { "r_vignette_softness", "0.45", CVAR_ARCHIVE };
+cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
+cvar_t	r_vignette_falloff = { "r_vignette_falloff", "2.0", CVAR_ARCHIVE };
+cvar_t	r_vignette_color_r = { "r_vignette_color_r", "0.0", CVAR_ARCHIVE };
+cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
+cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
+cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
@@ -748,10 +753,20 @@ void GL_PostProcess (void)
         GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
         GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
         GL_Uniform4fFunc (8,
-                q_max (0.f, r_vignette.value),
-                q_max (0.f, r_vignette_radius.value),
-                q_max (0.f, r_vignette_softness.value),
-                q_max (0.f, r_chromatic_aberration.value));
+                q_min (1.f, q_max (0.f, r_vignette.value)),
+                q_max (0.f, r_vignette_radius_inner.value),
+                q_max (0.f, r_vignette_radius_outer.value),
+                q_max (0.001f, r_vignette_falloff.value));
+        GL_Uniform4fFunc (9,
+                q_min (1.f, q_max (0.f, r_vignette_color_r.value)),
+                q_min (1.f, q_max (0.f, r_vignette_color_g.value)),
+                q_min (1.f, q_max (0.f, r_vignette_color_b.value)),
+                q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
+        GL_Uniform4fFunc (10,
+                q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
+                q_max (0.f, r_chromatic_aberration.value),
+                0.f,
+                0.f);
 
         dof_enabled = R_DoFEnabled ();
 
