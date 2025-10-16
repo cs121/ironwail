@@ -655,10 +655,10 @@ static void R_AddAliasShadowInstance (entity_t *e, aliashdr_t *paliashdr, const 
 	instance->shadow_plane[1] = plane[1];
 	instance->shadow_plane[2] = plane[2];
 	instance->shadow_plane[3] = plane[3];
-	instance->shadow_params[0] = softness;
-	instance->shadow_params[1] = 0.05f;
-	instance->shadow_params[2] = 0.f;
-	instance->shadow_params[3] = 0.f;
+        instance->shadow_params[0] = softness;
+        instance->shadow_params[1] = 0.02f; // view-direction bias to keep the shadow above the receiver
+        instance->shadow_params[2] = 0.f;
+        instance->shadow_params[3] = 0.f;
 
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
