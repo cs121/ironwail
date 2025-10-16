@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
+extern cvar_t r_shadows;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -80,6 +81,7 @@ struct ibuf_s {
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
+static struct ibuf_s shadowbuf;
 
 /*
 =================
@@ -454,6 +456,210 @@ void R_FlushAliasInstances (qboolean showtris)
 	GL_EndGroup();
 }
 
+
+static void R_FlushAliasShadowInstances (void)
+{
+        qmodel_t        *model;
+        aliashdr_t      *mainhdr, *hdr;
+        qboolean        md5;
+        GLuint          buf;
+        GLbyte          *ofs;
+        size_t          ibuf_size;
+        GLuint          buffers[2];
+        GLintptr        offsets[2];
+        GLsizeiptr      sizes[2];
+        unsigned        state;
+
+        if (!shadowbuf.count)
+                return;
+
+        model = shadowbuf.ent->model;
+        mainhdr = (aliashdr_t *) Mod_Extradata (model);
+        md5 = mainhdr->poseverttype == PV_IQM;
+
+        GL_BeginGroup ("Alias shadows");
+
+        GL_UseProgram (glprogs.alias_shadow[md5]);
+
+        state = GLS_NO_ZWRITE | GLS_BLEND_ALPHA | GLS_CULL_NONE;
+        state |= GLS_ATTRIBS (md5 ? 5 : 1);
+        GL_SetState (state);
+
+        memcpy (shadowbuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+        memcpy (shadowbuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+        memcpy (shadowbuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+        memcpy (shadowbuf.global.fog, r_framedata.fogdata, sizeof (shadowbuf.global.fog));
+        shadowbuf.global.dither = r_framedata.screendither;
+
+        ibuf_size = sizeof (shadowbuf.global) + sizeof (shadowbuf.inst[0]) * shadowbuf.count;
+        GL_Upload (GL_SHADER_STORAGE_BUFFER, &shadowbuf.global, ibuf_size, &buf, &ofs);
+
+        buffers[0] = buf;
+        offsets[0] = (GLintptr) ofs;
+        sizes[0] = ibuf_size;
+
+        GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
+        GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
+
+        for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *) hdr + hdr->nextsurface) : NULL)
+        {
+                if (md5)
+                {
+                        GL_VertexAttribPointerFunc  (0, 3, GL_FLOAT,                    GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, xyz)));
+                        GL_VertexAttribPointerFunc  (1, 4, GL_BYTE,                             GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, norm)));
+                        GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,                    GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, st)));
+                        GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE,    GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
+                        GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,              sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+
+                        buffers[1] = model->meshvbo;
+                        offsets[1] = hdr->vboposeofs;
+                        sizes[1] = sizeof (bonepose_t) * hdr->numbones * hdr->numboneposes;
+                }
+                else
+                {
+                        GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof (meshst_t), (void *) hdr->vbostofs);
+
+                        buffers[1] = model->meshvbo;
+                        offsets[1] = hdr->vbovertofs;
+                        sizes[1] = sizeof (meshxyz_t) * hdr->numverts_vbo * hdr->numposes;
+                }
+
+                GL_BindBuffersRange (GL_SHADER_STORAGE_BUFFER, 1, 2, buffers, offsets, sizes);
+
+                GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *) hdr->eboofs, shadowbuf.count);
+
+                rs_aliaspasses += hdr->numtris * shadowbuf.count;
+        }
+
+        shadowbuf.count = 0;
+
+        GL_EndGroup ();
+}
+
+static qboolean R_AliasShadow_CanAddToBatch (const entity_t *e)
+{
+        if (!shadowbuf.count)
+                return true;
+
+        if (shadowbuf.count == countof (shadowbuf.inst))
+                return false;
+
+        return shadowbuf.ent->model == e->model;
+}
+
+static void R_AddAliasShadowInstance (entity_t *e, aliashdr_t *paliashdr, const lerpdata_t *lerpdata, const float model_matrix[16], float entalpha)
+{
+        vec3_t          normal;
+        float           plane_dist;
+        vec4_t          plane;
+        vec4_t          light;
+        float           dot;
+        float           shadow_proj[16];
+        float           combined[16];
+        float           base_matrix[16];
+        float           height;
+        float           fade;
+        float           alpha;
+        aliasinstance_t *instance;
+
+        if (r_shadows.value <= 0.f)
+                return;
+
+        if (entalpha <= 0.f)
+                return;
+
+        if (e == &cl.viewent)
+                return;
+
+        if (!cl.worldmodel || e->model->flags & MOD_NOSHADOW)
+                return;
+
+        if (e->lightcache.surfidx <= 0)
+                return;
+
+        VectorCopy (e->lightcache.normal, normal);
+        if (DotProduct (normal, normal) < 1e-4f)
+                return;
+
+        plane_dist = e->lightcache.plane_dist;
+
+        plane[0] = normal[0];
+        plane[1] = normal[1];
+        plane[2] = normal[2];
+        plane[3] = -plane_dist;
+
+        light[0] = 0.f;
+        light[1] = 0.f;
+        light[2] = 1.f;
+        light[3] = 0.f;
+
+        dot = plane[0] * light[0] + plane[1] * light[1] + plane[2] * light[2] + plane[3] * light[3];
+        if (fabsf (dot) < 1e-5f)
+                return;
+
+        shadow_proj[0] = dot - light[0] * plane[0];
+        shadow_proj[4] = -light[0] * plane[1];
+        shadow_proj[8] = -light[0] * plane[2];
+        shadow_proj[12] = -light[0] * plane[3];
+
+        shadow_proj[1] = -light[1] * plane[0];
+        shadow_proj[5] = dot - light[1] * plane[1];
+        shadow_proj[9] = -light[1] * plane[2];
+        shadow_proj[13] = -light[1] * plane[3];
+
+        shadow_proj[2] = -light[2] * plane[0];
+        shadow_proj[6] = -light[2] * plane[1];
+        shadow_proj[10] = dot - light[2] * plane[2];
+        shadow_proj[14] = -light[2] * plane[3];
+
+        shadow_proj[3] = -light[3] * plane[0];
+        shadow_proj[7] = -light[3] * plane[1];
+        shadow_proj[11] = -light[3] * plane[2];
+        shadow_proj[15] = dot - light[3] * plane[3];
+
+        memcpy (combined, shadow_proj, sizeof (combined));
+        memcpy (base_matrix, model_matrix, sizeof (base_matrix));
+        MatrixMultiply (combined, base_matrix);
+        ApplyTranslation (combined, normal[0] * 0.05f, normal[1] * 0.05f, normal[2] * 0.05f);
+
+        height = DotProduct (lerpdata->origin, normal) - plane_dist;
+        fade = 1.f - CLAMP (0.f, fabsf (height) / 200.f, 1.f);
+        alpha = CLAMP (0.f, entalpha, 1.f) * 0.5f * fade;
+        if (alpha <= 0.f)
+                return;
+
+        if (!R_AliasShadow_CanAddToBatch (e))
+                R_FlushAliasShadowInstances ();
+
+        if (!shadowbuf.count)
+                shadowbuf.ent = e;
+
+        instance = &shadowbuf.inst[shadowbuf.count++];
+        instance->flags = ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR;
+
+        MatrixTranspose4x3 (combined, instance->worldmatrix);
+        MatrixTranspose4x3 (combined, instance->prev_worldmatrix);
+
+        instance->lightcolor[0] = 0.f;
+        instance->lightcolor[1] = 0.f;
+        instance->lightcolor[2] = 0.f;
+        instance->alpha = alpha;
+        instance->pose1 = lerpdata->pose1;
+        instance->pose2 = lerpdata->pose2;
+        instance->blend = lerpdata->blend;
+
+        if (paliashdr->poseverttype == PV_QUAKE1)
+        {
+                instance->pose1 *= paliashdr->numverts_vbo;
+                instance->pose2 *= paliashdr->numverts_vbo;
+        }
+        else
+        {
+                instance->pose1 *= paliashdr->numbones;
+                instance->pose2 *= paliashdr->numbones;
+        }
+}
+
 /*
 =================
 R_Alias_CanAddToBatch
@@ -561,7 +767,10 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		entalpha = 1.f;
 
 	if (!R_Alias_CanAddToBatch (e))
+	{
+		R_FlushAliasShadowInstances ();
 		R_FlushAliasInstances (showtris);
+	}
 
 	if (!ibuf.count)
 		ibuf.ent = e;
@@ -618,6 +827,9 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;
 
+	if (!showtris)
+		R_AddAliasShadowInstance (e, paliashdr, &lerpdata, model_matrix, entalpha);
+
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
 		instance->pose1 *= paliashdr->numverts_vbo;
@@ -640,7 +852,8 @@ void R_DrawAliasModels (entity_t **ents, int count)
         int i;
         for (i = 0; i < count; i++)
                 R_DrawAliasModel_Real (ents[i], false);
-        R_FlushAliasInstances (false);
+        R_FlushAliasShadowInstances ();
+	R_FlushAliasInstances (false);
 }
 
 /*
@@ -653,5 +866,6 @@ void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
         int i;
         for (i = 0; i < count; i++)
                 R_DrawAliasModel_Real (ents[i], true);
-        R_FlushAliasInstances (true);
+        R_FlushAliasShadowInstances ();
+	R_FlushAliasInstances (true);
 }

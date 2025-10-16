@@ -546,6 +546,9 @@ void GL_CreateShaders (void)
                                         glprogs.alias[oit][mode][alphatest][md5] =
                                                 GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
 
+        for (md5 = 0; md5 < 2; md5++)
+                glprogs.alias_shadow[md5] = GL_CreateProgram (GLSL_PATH("alias_shadow.vert"), GLSL_PATH("alias_shadow.frag"), "alias shadow|MD5 %d", md5);
+
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
 
         glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");

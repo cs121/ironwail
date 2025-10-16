@@ -334,16 +334,25 @@ loc0:
 				continue;
 			}
 
-			if (dist < *maxdist)
-			{
-				cache->surfidx = surf - cl.worldmodel->surfaces + 1;
-				cache->ds = ds;
-				cache->dt = dt;
-			}
-			else
-			{
-				cache->surfidx = -1;
-			}
+				if (dist < *maxdist)
+				{
+					cache->surfidx = surf - cl.worldmodel->surfaces + 1;
+					cache->ds = ds;
+					cache->dt = dt;
+					VectorCopy (surf->plane->normal, cache->normal);
+					cache->plane_dist = surf->plane->dist;
+					if (surf->flags & SURF_PLANEBACK)
+					{
+						VectorScale (cache->normal, -1.f, cache->normal);
+						cache->plane_dist = -cache->plane_dist;
+					}
+				}
+				else
+				{
+					cache->surfidx = -1;
+					cache->plane_dist = 0.f;
+					VectorClear (cache->normal);
+				}
 
 			return true; // success
 		}
@@ -385,6 +394,8 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 		|| fabsf (cache->pos[2] - p[2]) >= 1.f)
 	{
 		cache->surfidx = 0;
+		cache->plane_dist = 0.f;
+		VectorClear (cache->normal);
 		VectorCopy (p, cache->pos);
 		RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
 	}
