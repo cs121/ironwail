@@ -82,7 +82,13 @@ void main()
         vec3 plane_normal = inst.ShadowPlane.xyz;
         float plane_offset = inst.ShadowPlane.w;
         float height = dot(world_pos, plane_normal) + plane_offset;
-        vec3 projected = world_pos - vec3(0.0, 0.0, 1.0) * height;
+        const vec3 light_dir = vec3(0.0, 0.0, 1.0);
+        float denom = dot(plane_normal, light_dir);
+        vec3 projected = world_pos;
+        if (abs(denom) > 1e-5)
+        {
+                projected -= light_dir * (height / denom);
+        }
         projected += plane_normal * inst.ShadowParams.y;
 
         gl_Position = ViewProj * vec4(projected, 1.0);
