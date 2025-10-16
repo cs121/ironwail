@@ -61,6 +61,8 @@ typedef struct aliasinstance_s {
 	int32_t		pose2;
 	float		blend;
 	int32_t		flags;
+	float		shadow_plane[4];
+	float		shadow_params[4];
 } aliasinstance_t;
 
 #define ALIAS_INSTANCE_FLAG_NONE          0
@@ -553,121 +555,121 @@ static qboolean R_AliasShadow_CanAddToBatch (const entity_t *e)
 
 static void R_AddAliasShadowInstance (entity_t *e, aliashdr_t *paliashdr, const lerpdata_t *lerpdata, const float model_matrix[16], float entalpha)
 {
-        vec3_t          normal;
-        float           plane_dist;
-        vec4_t          plane;
-        vec4_t          light;
-        float           dot;
-        float           shadow_proj[16];
-        float           combined[16];
-        float           base_matrix[16];
-        float           height;
-        float           fade;
-        float           alpha;
-        aliasinstance_t *instance;
+	vec3_t		normal;
+	float		plane_dist;
+	vec4_t		plane;
+	float		height;
+	float		fade;
+	float		alpha;
+	aliasinstance_t *instance;
+	vec3_t		axis;
+	float		radius_scale;
+	float		softness;
 
-        if (r_shadows.value <= 0.f)
-                return;
+	if (r_shadows.value <= 0.f)
+		return;
 
-        if (entalpha <= 0.f)
-                return;
+	if (entalpha <= 0.f)
+		return;
 
-        if (e == &cl.viewent)
-                return;
+	if (e == &cl.viewent)
+		return;
 
-        if (!cl.worldmodel || e->model->flags & MOD_NOSHADOW)
-                return;
+	if (!cl.worldmodel || e->model->flags & MOD_NOSHADOW)
+		return;
 
-        if (e->lightcache.surfidx <= 0)
-                return;
+	if (e->lightcache.surfidx <= 0)
+		return;
 
-        VectorCopy (e->lightcache.normal, normal);
-        plane_dist = e->lightcache.plane_dist;
+	VectorCopy (e->lightcache.normal, normal);
+	plane_dist = e->lightcache.plane_dist;
 
-        {
-                float normal_len = VectorNormalize (normal);
+	{
+		float normal_len = VectorNormalize (normal);
 
-                if (normal_len < 1e-4f)
-                        return;
+		if (normal_len < 1e-4f)
+			return;
 
-                plane_dist /= normal_len;
-        }
+		plane_dist /= normal_len;
+	}
 
-        plane[0] = normal[0];
-        plane[1] = normal[1];
-        plane[2] = normal[2];
-        plane[3] = -plane_dist;
+	plane[0] = normal[0];
+	plane[1] = normal[1];
+	plane[2] = normal[2];
+	plane[3] = -plane_dist;
 
-        light[0] = 0.f;
-        light[1] = 0.f;
-        light[2] = 1.f;
-        light[3] = 0.f;
+	if (fabsf (plane[2]) < 1e-5f)
+		return;
 
-        dot = plane[0] * light[0] + plane[1] * light[1] + plane[2] * light[2] + plane[3] * light[3];
-        if (fabsf (dot) < 1e-5f)
-                return;
+	height = DotProduct (lerpdata->origin, normal) - plane_dist;
+	fade = 1.f - CLAMP (0.f, fabsf (height) / 200.f, 1.f);
+	alpha = CLAMP (0.f, entalpha, 1.f) * 0.5f * fade;
+	if (alpha <= 0.f)
+		return;
 
-        shadow_proj[0] = dot - light[0] * plane[0];
-        shadow_proj[4] = -light[0] * plane[1];
-        shadow_proj[8] = -light[0] * plane[2];
-        shadow_proj[12] = -light[0] * plane[3];
+	axis[0] = model_matrix[0];
+	axis[1] = model_matrix[1];
+	axis[2] = model_matrix[2];
+	float axis_x = VectorLength (axis);
+	axis[0] = model_matrix[4];
+	axis[1] = model_matrix[5];
+	axis[2] = model_matrix[6];
+	float axis_y = VectorLength (axis);
+	axis[0] = model_matrix[8];
+	axis[1] = model_matrix[9];
+	axis[2] = model_matrix[10];
+	float axis_z = VectorLength (axis);
+	radius_scale = q_max (axis_x, q_max (axis_y, axis_z));
+	if (radius_scale <= 0.f)
+		radius_scale = 1.f;
 
-        shadow_proj[1] = -light[1] * plane[0];
-        shadow_proj[5] = dot - light[1] * plane[1];
-        shadow_proj[9] = -light[1] * plane[2];
-        shadow_proj[13] = -light[1] * plane[3];
+	softness = 0.f;
+	if (r_shadows.value >= 2.f)
+	{
+		float world_radius = paliashdr->boundingradius * radius_scale;
+		if (world_radius <= 0.f)
+			world_radius = 1.f;
+		softness = 0.5f / world_radius;
+	}
 
-        shadow_proj[2] = -light[2] * plane[0];
-        shadow_proj[6] = -light[2] * plane[1];
-        shadow_proj[10] = dot - light[2] * plane[2];
-        shadow_proj[14] = -light[2] * plane[3];
+	if (!R_AliasShadow_CanAddToBatch (e))
+		R_FlushAliasShadowInstances ();
 
-        shadow_proj[3] = -light[3] * plane[0];
-        shadow_proj[7] = -light[3] * plane[1];
-        shadow_proj[11] = -light[3] * plane[2];
-        shadow_proj[15] = dot - light[3] * plane[3];
+	if (!shadowbuf.count)
+		shadowbuf.ent = e;
 
-        memcpy (combined, shadow_proj, sizeof (combined));
-        memcpy (base_matrix, model_matrix, sizeof (base_matrix));
-        MatrixMultiply (combined, base_matrix);
-        ApplyTranslation (combined, normal[0] * 0.05f, normal[1] * 0.05f, normal[2] * 0.05f);
+	instance = &shadowbuf.inst[shadowbuf.count++];
+	instance->flags = ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR;
 
-        height = DotProduct (lerpdata->origin, normal) - plane_dist;
-        fade = 1.f - CLAMP (0.f, fabsf (height) / 200.f, 1.f);
-        alpha = CLAMP (0.f, entalpha, 1.f) * 0.5f * fade;
-        if (alpha <= 0.f)
-                return;
+	MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
+	MatrixTranspose4x3 (model_matrix, instance->prev_worldmatrix);
 
-        if (!R_AliasShadow_CanAddToBatch (e))
-                R_FlushAliasShadowInstances ();
+	instance->lightcolor[0] = 0.f;
+	instance->lightcolor[1] = 0.f;
+	instance->lightcolor[2] = 0.f;
+	instance->alpha = alpha;
+	instance->pose1 = lerpdata->pose1;
+	instance->pose2 = lerpdata->pose2;
+	instance->blend = lerpdata->blend;
+	instance->shadow_plane[0] = plane[0];
+	instance->shadow_plane[1] = plane[1];
+	instance->shadow_plane[2] = plane[2];
+	instance->shadow_plane[3] = plane[3];
+	instance->shadow_params[0] = softness;
+	instance->shadow_params[1] = 0.05f;
+	instance->shadow_params[2] = 0.f;
+	instance->shadow_params[3] = 0.f;
 
-        if (!shadowbuf.count)
-                shadowbuf.ent = e;
-
-        instance = &shadowbuf.inst[shadowbuf.count++];
-        instance->flags = ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR;
-
-        MatrixTranspose4x3 (combined, instance->worldmatrix);
-        MatrixTranspose4x3 (combined, instance->prev_worldmatrix);
-
-        instance->lightcolor[0] = 0.f;
-        instance->lightcolor[1] = 0.f;
-        instance->lightcolor[2] = 0.f;
-        instance->alpha = alpha;
-        instance->pose1 = lerpdata->pose1;
-        instance->pose2 = lerpdata->pose2;
-        instance->blend = lerpdata->blend;
-
-        if (paliashdr->poseverttype == PV_QUAKE1)
-        {
-                instance->pose1 *= paliashdr->numverts_vbo;
-                instance->pose2 *= paliashdr->numverts_vbo;
-        }
-        else
-        {
-                instance->pose1 *= paliashdr->numbones;
-                instance->pose2 *= paliashdr->numbones;
-        }
+	if (paliashdr->poseverttype == PV_QUAKE1)
+	{
+		instance->pose1 *= paliashdr->numverts_vbo;
+		instance->pose2 *= paliashdr->numverts_vbo;
+	}
+	else
+	{
+		instance->pose1 *= paliashdr->numbones;
+		instance->pose2 *= paliashdr->numbones;
+	}
 }
 
 /*
@@ -836,6 +838,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;
+	memset (instance->shadow_plane, 0, sizeof (instance->shadow_plane));
+	memset (instance->shadow_params, 0, sizeof (instance->shadow_params));
 
 	if (!showtris)
 		R_AddAliasShadowInstance (e, paliashdr, &lerpdata, model_matrix, entalpha);
