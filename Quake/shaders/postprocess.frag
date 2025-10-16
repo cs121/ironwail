@@ -57,21 +57,47 @@ float tri(float x)
 	return x;
 }
 
-vec3 HableTonemap(vec3 x)
+vec3 UchimuraTonemap(vec3 x)
 {
-        const float A = 0.15;
-        const float B = 0.50;
-        const float C = 0.10;
-        const float D = 0.20;
-        const float E = 0.02;
-        const float F = 0.30;
-        const float W = 11.2;
-        vec3 numerator = x * (A * x + C * B) + D * E;
-        vec3 denominator = x * (A * x + B) + D * F;
-        vec3 mapped = numerator / denominator - E / F;
-        float white = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
-        mapped /= white;
-        return clamp(mapped, 0.0, 1.0);
+        const float P = 1.0;
+        const float a = 1.0;
+        const float m = 0.22;
+        const float l = 0.4;
+        const float c = 1.33;
+        const float b = 0.0;
+
+        float l0 = ((P - m) * l) / a;
+        float S0 = m + l0;
+        float S1 = m + a * l0;
+        float C2 = (a * P) / (P - S1);
+        float CP = -C2 / P;
+
+        vec3 w0 = vec3(1.0 - smoothstep(0.0, m, x));
+        vec3 w2 = vec3(step(m + l0, x));
+        vec3 w1 = vec3(1.0) - w0 - w2;
+
+        vec3 T = vec3(m * pow(x / m, vec3(c)) + b);
+        vec3 S = vec3(P - (P - S1) * exp(CP * (x - S0)));
+        vec3 L = vec3(m + a * (x - m));
+
+        return clamp(T * w0 + L * w1 + S * w2, 0.0, 1.0);
+}
+
+vec3 LottesTonemap(vec3 x)
+{
+        const vec3 a = vec3(1.6);
+        const vec3 d = vec3(0.977);
+        const vec3 hdrMax = vec3(8.0);
+        const vec3 midIn = vec3(0.18);
+        const vec3 midOut = vec3(0.267);
+
+        const vec3 b = (-pow(midIn, a) + pow(hdrMax, a) * midOut)
+                / ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+        const vec3 c = (pow(hdrMax, a * d) * pow(midIn, a)
+                - pow(hdrMax, a) * pow(midIn, a * d) * midOut)
+                / ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+
+        return clamp(pow(x, a) / (pow(x, a * d) * b + c), 0.0, 1.0);
 }
 
 #define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
@@ -83,7 +109,7 @@ layout(location=1) uniform vec4 DoFParams0; // x: enabled, y: focus distance, z:
 layout(location=2) uniform vec4 DoFParams1; // x: near plane, y: far plane, z: reversed-Z flag (>0.5 when reversed)
 layout(location=3) uniform vec4 ViewRect;   // xy: view min (normalized), zw: view max (normalized)
 layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unused
-layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
+layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap mode
 layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strength, z: min velocity (pixels), w: depth threshold ratio
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
@@ -392,10 +418,21 @@ void main()
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
         float exposure = max(HDRParams.y, 0.0);
-        float tonemapEnabled = HDRParams.z;
+        float tonemapMode = HDRParams.z;
         vec3 combined = (hdrColor + bloomColor) * exposure * contrast;
         combined = max(combined, vec3(0.0));
-        vec3 mapped = tonemapEnabled > 0.5 ? HableTonemap(combined) : clamp(combined, 0.0, 1.0);
+        vec3 mapped;
+        if (tonemapMode > 0.5)
+        {
+                if (tonemapMode < 1.5)
+                        mapped = UchimuraTonemap(combined);
+                else
+                        mapped = LottesTonemap(combined);
+        }
+        else
+        {
+                mapped = clamp(combined, 0.0, 1.0);
+        }
         mapped = clamp(mapped, 0.0, 1.0);
         out_fragcolor = vec4(pow(mapped, vec3(gamma)), 1.0);
 #endif // PALETTIZE
