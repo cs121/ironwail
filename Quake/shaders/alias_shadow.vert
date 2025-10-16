@@ -7,6 +7,8 @@ struct InstanceData
         int     Pose2;
         float   Blend;
         int     Flags;
+        vec4    ShadowPlane;
+        vec4    ShadowParams;
 };
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
@@ -64,6 +66,8 @@ vec3 GetPosePosition(uint pose)
 
 layout(location=0) out vec4 out_color;
 layout(location=1) out vec3 out_pos;
+layout(location=2) out float out_height;
+layout(location=3) flat out float out_softness;
 
 void main()
 {
@@ -75,7 +79,15 @@ void main()
         mat4x3 world = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
         vec3 world_pos = (world * vec4(local_pos, 1.0)).xyz;
 
-        gl_Position = ViewProj * vec4(world_pos, 1.0);
+        vec3 plane_normal = inst.ShadowPlane.xyz;
+        float plane_offset = inst.ShadowPlane.w;
+        float height = dot(world_pos, plane_normal) + plane_offset;
+        vec3 projected = world_pos - vec3(0.0, 0.0, 1.0) * height;
+        projected += plane_normal * inst.ShadowParams.y;
+
+        gl_Position = ViewProj * vec4(projected, 1.0);
         out_color = inst.LightColor;
-        out_pos = world_pos - EyePos;
+        out_pos = projected - EyePos;
+        out_height = abs(height);
+        out_softness = inst.ShadowParams.x;
 }
