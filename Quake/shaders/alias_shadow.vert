@@ -1,5 +1,3 @@
-#include "frame_uniforms.glsl"
-
 struct InstanceData
 {
         vec4    WorldMatrix[3];
