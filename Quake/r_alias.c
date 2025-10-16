@@ -485,6 +485,8 @@ static void R_FlushAliasShadowInstances (void)
         state |= GLS_ATTRIBS (md5 ? 5 : 1);
         GL_SetState (state);
 
+        GL_PolygonOffset (OFFSET_DECAL);
+
         memcpy (shadowbuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
         memcpy (shadowbuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
         memcpy (shadowbuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
@@ -533,6 +535,8 @@ static void R_FlushAliasShadowInstances (void)
 
         shadowbuf.count = 0;
 
+        GL_PolygonOffset (OFFSET_NONE);
+
         GL_EndGroup ();
 }
 
@@ -578,10 +582,16 @@ static void R_AddAliasShadowInstance (entity_t *e, aliashdr_t *paliashdr, const 
                 return;
 
         VectorCopy (e->lightcache.normal, normal);
-        if (DotProduct (normal, normal) < 1e-4f)
-                return;
-
         plane_dist = e->lightcache.plane_dist;
+
+        {
+                float normal_len = VectorNormalize (normal);
+
+                if (normal_len < 1e-4f)
+                        return;
+
+                plane_dist /= normal_len;
+        }
 
         plane[0] = normal[0];
         plane[1] = normal[1];
