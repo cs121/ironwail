@@ -68,8 +68,14 @@ extern cvar_t r_tonemap_exposure;
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
 extern cvar_t r_vignette;
-extern cvar_t r_vignette_radius;
-extern cvar_t r_vignette_softness;
+extern cvar_t r_vignette_radius_inner;
+extern cvar_t r_vignette_radius_outer;
+extern cvar_t r_vignette_falloff;
+extern cvar_t r_vignette_color_r;
+extern cvar_t r_vignette_color_g;
+extern cvar_t r_vignette_color_b;
+extern cvar_t r_vignette_blend_mode;
+extern cvar_t r_vignette_noise;
 extern cvar_t r_chromatic_aberration;
 
 #if defined(USE_SIMD)
@@ -362,8 +368,14 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
 	Cvar_RegisterVariable (&r_vignette);
-	Cvar_RegisterVariable (&r_vignette_radius);
-	Cvar_RegisterVariable (&r_vignette_softness);
+	Cvar_RegisterVariable (&r_vignette_radius_inner);
+	Cvar_RegisterVariable (&r_vignette_radius_outer);
+	Cvar_RegisterVariable (&r_vignette_falloff);
+	Cvar_RegisterVariable (&r_vignette_color_r);
+	Cvar_RegisterVariable (&r_vignette_color_g);
+	Cvar_RegisterVariable (&r_vignette_color_b);
+	Cvar_RegisterVariable (&r_vignette_blend_mode);
+	Cvar_RegisterVariable (&r_vignette_noise);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);

@@ -86,7 +86,9 @@ layout(location=4) uniform vec4 DepthParams; // xy: inverse view scale, zw: unus
 layout(location=5) uniform vec3 HDRParams; // x: bloom intensity, y: exposure, z: tonemap enabled
 layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strength, z: min velocity (pixels), w: depth threshold ratio
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
-layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: vignette radius, z: vignette softness, w: chromatic aberration (pixels)
+layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
+layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
+layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), zw: reserved
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -305,25 +307,51 @@ void main()
                 vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
                 float aspect = texSize.y > 0.0 ? texSize.x / texSize.y : 1.0;
 
-                float vignetteStrength = max(PostFXParams0.x, 0.0);
-                float vignetteRadius = max(PostFXParams0.y, 1e-3);
-                float vignetteSoftness = clamp(PostFXParams0.z, 1e-3, 1.0);
-                if (vignetteStrength > 0.0)
+                float vignetteStrength = clamp(PostFXParams0.x, 0.0, 1.0);
+                float vignetteInner = max(PostFXParams0.y, 0.0);
+                float vignetteOuter = max(PostFXParams0.z, vignetteInner + 1e-3);
+                float vignetteFalloff = max(PostFXParams0.w, 1e-3);
+                vec3 vignetteColor = clamp(PostFXParams1.xyz, vec3(0.0), vec3(1.0));
+                int vignetteBlendMode = clamp(int(PostFXParams1.w + 0.5), 0, 2);
+                float vignetteNoise = clamp(PostFXParams2.x, 0.0, 0.1);
+                if (vignetteStrength > 0.0 && vignetteOuter > vignetteInner)
                 {
                         vec2 vignetteCoord = viewUV * 2.0 - vec2(1.0);
                         vignetteCoord.x *= aspect;
                         float dist = length(vignetteCoord);
-                        float inner = vignetteRadius * (1.0 - vignetteSoftness);
-                        float outer = max(vignetteRadius, inner + 1e-3);
-                        float vignette = smoothstep(inner, outer, dist);
-                        float weight = min(vignetteStrength, 1.0);
-                        float factor = mix(1.0, 1.0 - vignette, weight);
-                        if (vignetteStrength > 1.0)
-                                factor *= pow(max(1.0 - vignette, 1e-3), vignetteStrength - 1.0);
-                        color.rgb *= factor;
+                        float range = max(vignetteOuter - vignetteInner, 1e-3);
+                        float fade = clamp((dist - vignetteInner) / range, 0.0, 1.0);
+                        if (vignetteNoise > 0.0)
+                        {
+                                float noise = whitenoise(gl_FragCoord.xy);
+                                fade = clamp(fade + noise * vignetteNoise * fade, 0.0, 1.0);
+                        }
+                        float vignette = pow(fade, vignetteFalloff);
+                        float intensity = min(vignette * vignetteStrength, 1.0);
+                        if (intensity > 0.0)
+                        {
+                                if (vignetteBlendMode == 1)
+                                {
+                                        vec3 overlayColor = vignetteColor;
+                                        vec3 overlayDark = 2.0 * color.rgb * overlayColor;
+                                        vec3 overlayLight = 1.0 - 2.0 * (1.0 - color.rgb) * (1.0 - overlayColor);
+                                        vec3 overlayResult = mix(overlayDark, overlayLight, step(0.5, color.rgb));
+                                        overlayResult = clamp(overlayResult, vec3(0.0), vec3(1.0));
+                                        color.rgb = mix(color.rgb, overlayResult, intensity);
+                                }
+                                else if (vignetteBlendMode == 2)
+                                {
+                                        color.rgb = clamp(color.rgb + vignetteColor * intensity, vec3(0.0), vec3(1.0));
+                                }
+                                else
+                                {
+                                        vec3 multiplier = mix(vec3(1.0), vignetteColor, intensity);
+                                        color.rgb *= multiplier;
+                                }
+                        }
                 }
 
-                float chromaticAmount = max(PostFXParams0.w, 0.0);
+                float chromaticAmount = max(PostFXParams2.y, 0.0);
                 if (chromaticAmount > 0.0)
                 {
                         vec2 dir = viewUV - vec2(0.5);
