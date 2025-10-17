@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "gl_shadow.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -1101,14 +1102,4 @@ void GL_ReserveDeviceMemory (GLenum target, size_t numbytes, GLuint *outbuf, siz
 	frameres_device_offset += numbytes;
 }
 
-void R_InitShadow (void)
-{
-}
-
-void R_ShutdownShadow (void)
-{
-}
-
-void R_ResizeShadowMapIfNeeded (void)
-{
-}
+/* Shadow management hooks are implemented in gl_shadow.c */

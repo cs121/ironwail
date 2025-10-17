@@ -1516,6 +1516,8 @@ void R_SetupView (void)
 {
 	R_AnimateLight ();
 
+	R_ShadowBeginFrame (r_framecount);
+
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
 		float overbright = (float)(1 << overbright_bits);
@@ -2609,6 +2611,8 @@ void R_RenderScene (void)
 	R_ShowBoundingBoxes (); //johnfitz
 
 	R_ShowPointFile ();
+
+	R_ShadowEndFrame ();
 }
 
 /*

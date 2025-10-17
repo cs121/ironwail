@@ -115,6 +115,17 @@ extern	cvar_t	gl_finish;
 
 extern	cvar_t	gl_playermip;
 
+extern	cvar_t	gl_shadows;
+extern	cvar_t	gl_shadow_mapsize;
+extern	cvar_t	gl_shadow_softness;
+extern	cvar_t	gl_shadow_pcf_samples;
+extern	cvar_t	gl_shadow_maxlights;
+extern	cvar_t	gl_shadow_bias;
+extern	cvar_t	gl_shadow_normalbias;
+extern	cvar_t	gl_shadow_update_static_interval;
+extern	cvar_t	gl_shadow_debug;
+extern	cvar_t	r_showshadows;
+
 extern int		gl_stencilbits;
 extern	qboolean	gl_buffer_storage_able;
 extern	qboolean	gl_multi_bind_able;
@@ -465,6 +476,8 @@ qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
+void R_ShadowBeginFrame (int frame_num);
+void R_ShadowEndFrame (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
