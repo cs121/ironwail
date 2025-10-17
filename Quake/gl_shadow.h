@@ -33,6 +33,7 @@ void R_ResizeShadowMapIfNeeded(void);
 void R_ShadowBeginFrame(int frame_num);
 void R_ShadowEndFrame(void);
 void R_ShadowApplyWorldUniforms(GLuint program);
+void R_ShadowSyncWorldLights(const gpulight_t *lights, int numlights);
 
 extern cvar_t gl_shadows;
 extern cvar_t gl_shadow_mapsize;

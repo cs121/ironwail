@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
+#include "gl_shadow.h"
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
@@ -180,6 +181,8 @@ void R_PushDlights (void)
 			out->minlight = l->minlight;
 		}
 	}
+
+	R_ShadowSyncWorldLights(r_lightbuffer.lights, r_framedata.numlights);
 
 	GL_BeginGroup ("Light clustering");
 
