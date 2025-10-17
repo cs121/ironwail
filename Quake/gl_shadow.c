@@ -1,5 +1,6 @@
 #include "quakedef.h"
 #include "gl_shadow.h"
+#include "gl_texmgr.h"
 
 #define SHADOW_POOL_SIZE 16
 
@@ -20,6 +21,7 @@ static struct shadow_manager_s {
     int max_lights;
     dlight_shadow_t pool[SHADOW_POOL_SIZE];
     int pool_size;
+    GLuint fallback_cube_tex;
 } shadow_manager;
 
 typedef struct shadow_program_uniforms_s {
@@ -43,6 +45,38 @@ typedef struct shadow_program_uniforms_s {
 
 static shadow_program_uniforms_t shadow_uniform_cache[SHADOW_PROGRAM_CACHE_MAX];
 static int shadow_uniform_cache_count;
+
+static qboolean Shadow_CreateFallbackCube(void)
+{
+    GLuint tex = 0;
+    static const GLfloat white = 1.0f;
+    int face;
+
+    glGenTextures(1, &tex);
+    if (!tex)
+        return false;
+
+    GL_BindNative(GL_TEXTURE0 + SHADOW_TEXTURE_UNIT_BASE, GL_TEXTURE_CUBE_MAP, tex);
+    for (face = 0; face < MAX_SHADOW_CUBE_FACES; ++face)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_R16F, 1, 1, 0,
+            GL_RED, GL_FLOAT, &white);
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    if (GL_ObjectLabelFunc)
+        GL_ObjectLabelFunc(GL_TEXTURE, tex, -1, "shadow fallback cube");
+
+    GL_BindNative(GL_TEXTURE0 + SHADOW_TEXTURE_UNIT_BASE, GL_TEXTURE_CUBE_MAP, 0);
+
+    shadow_manager.fallback_cube_tex = tex;
+    return true;
+}
 
 static void Shadow_DestroyCube(shadow_cube_t *cube)
 {
@@ -200,7 +234,7 @@ static int Shadow_ClampMapSize(int size)
 static void Shadow_UpdateSettings(void)
 {
     shadow_manager.map_size = Shadow_ClampMapSize((int)gl_shadow_mapsize.value);
-    shadow_manager.max_lights = CLAMP(0, (int)gl_shadow_maxlights.value, SHADOW_POOL_SIZE);
+    shadow_manager.max_lights = CLAMP(0, (int)gl_shadow_maxlights.value, MAX_SHADOW_LIGHTS);
 }
 
 void R_InitShadow(void)
@@ -209,6 +243,12 @@ void R_InitShadow(void)
     Shadow_RegisterCvars();
     Shadow_UpdateSettings();
     Shadow_ClearUniformCache();
+    if (!Shadow_CreateFallbackCube())
+    {
+        Con_Printf("Failed to create fallback shadow cubemap. Point light shadows disabled.\n");
+        shadow_manager.initialized = false;
+        return;
+    }
     shadow_manager.initialized = true;
 }
 
@@ -219,6 +259,11 @@ void R_ShutdownShadow(void)
 
     Shadow_ResetPool();
     Shadow_ClearUniformCache();
+    if (shadow_manager.fallback_cube_tex)
+    {
+        GL_DeleteNativeTexture(shadow_manager.fallback_cube_tex);
+        shadow_manager.fallback_cube_tex = 0;
+    }
     shadow_manager.initialized = false;
 }
 
@@ -235,7 +280,7 @@ void R_ResizeShadowMapIfNeeded(void)
         Shadow_ResetPool();
     }
 
-    shadow_manager.max_lights = CLAMP(0, (int)gl_shadow_maxlights.value, SHADOW_POOL_SIZE);
+    shadow_manager.max_lights = CLAMP(0, (int)gl_shadow_maxlights.value, MAX_SHADOW_LIGHTS);
 }
 
 void R_ShadowBeginFrame(int frame_num)
@@ -252,22 +297,94 @@ void R_ShadowApplyWorldUniforms(GLuint program)
     shadow_program_uniforms_t *uniforms;
     int show = (r_showshadows.value != 0.f) ? 1 : 0;
     int i;
+    int active_lights = 0;
+    int max_upload_lights;
+    float bias = gl_shadow_bias.value;
+    float normal_bias = gl_shadow_normalbias.value;
+    float softness = gl_shadow_softness.value;
+    int pcf_samples = (int)gl_shadow_pcf_samples.value;
+
+    if (!shadow_manager.initialized)
+        return;
+
+    if (pcf_samples < 1)
+        pcf_samples = 1;
 
     uniforms = Shadow_GetProgramUniforms(program);
     if (!uniforms)
         return;
 
+    if (!uniforms->sampler_units_initialized)
+    {
+        for (i = 0; i < MAX_SHADOW_LIGHTS; ++i)
+        {
+            if (uniforms->light_shadow_cube_loc[i] >= 0)
+                GL_Uniform1iFunc(uniforms->light_shadow_cube_loc[i], SHADOW_TEXTURE_UNIT_BASE + i);
+        }
+        uniforms->sampler_units_initialized = true;
+    }
+
     if (uniforms->show_shadows_loc >= 0)
         GL_Uniform1iFunc(uniforms->show_shadows_loc, show);
 
-    if (uniforms->active_lights_loc >= 0)
-        GL_Uniform1iFunc(uniforms->active_lights_loc, 0);
+    max_upload_lights = shadow_manager.max_lights;
+    if (max_upload_lights > MAX_SHADOW_LIGHTS)
+        max_upload_lights = MAX_SHADOW_LIGHTS;
 
-    for (i = 0; i < MAX_SHADOW_LIGHTS; ++i)
+    if (gl_shadows.value && shadow_manager.fallback_cube_tex)
     {
-        if (uniforms->light_shadow_cube_loc[i] >= 0)
-            GL_Uniform1iFunc(uniforms->light_shadow_cube_loc[i], SHADOW_TEXTURE_UNIT_BASE + i);
+        int total = q_min(r_framedata.numlights, max_upload_lights);
+        for (i = 0; i < total && active_lights < max_upload_lights; ++i)
+        {
+            gpulight_t *light = &r_lightbuffer.lights[i];
+            int slot = active_lights;
+
+            if (light->radius <= 0.0f)
+                continue;
+
+            if (uniforms->light_pos_loc[slot] >= 0)
+                GL_Uniform3fFunc(uniforms->light_pos_loc[slot], light->pos[0], light->pos[1], light->pos[2]);
+
+            if (uniforms->light_radius_loc[slot] >= 0)
+                GL_Uniform1fFunc(uniforms->light_radius_loc[slot], light->radius);
+
+            if (uniforms->light_color_loc[slot] >= 0)
+                GL_Uniform3fFunc(uniforms->light_color_loc[slot], light->color[0], light->color[1], light->color[2]);
+
+            if (uniforms->light_intensity_loc[slot] >= 0)
+                GL_Uniform1fFunc(uniforms->light_intensity_loc[slot], 1.0f);
+
+            if (uniforms->light_bias_loc[slot] >= 0)
+                GL_Uniform1fFunc(uniforms->light_bias_loc[slot], bias);
+
+            if (uniforms->light_normal_bias_loc[slot] >= 0)
+                GL_Uniform1fFunc(uniforms->light_normal_bias_loc[slot], normal_bias);
+
+            if (uniforms->light_softness_loc[slot] >= 0)
+                GL_Uniform1fFunc(uniforms->light_softness_loc[slot], softness);
+
+            if (uniforms->light_pcf_samples_loc[slot] >= 0)
+                GL_Uniform1iFunc(uniforms->light_pcf_samples_loc[slot], pcf_samples);
+
+            GL_BindNative(GL_TEXTURE0 + SHADOW_TEXTURE_UNIT_BASE + slot,
+                GL_TEXTURE_CUBE_MAP, shadow_manager.fallback_cube_tex);
+
+            ++active_lights;
+        }
     }
+
+    for (i = active_lights; i < max_upload_lights; ++i)
+    {
+        if (uniforms->light_radius_loc[i] >= 0)
+            GL_Uniform1fFunc(uniforms->light_radius_loc[i], 0.0f);
+        if (uniforms->light_intensity_loc[i] >= 0)
+            GL_Uniform1fFunc(uniforms->light_intensity_loc[i], 0.0f);
+        GL_BindNative(GL_TEXTURE0 + SHADOW_TEXTURE_UNIT_BASE + i,
+            GL_TEXTURE_CUBE_MAP, shadow_manager.fallback_cube_tex);
+    }
+
+    if (uniforms->active_lights_loc >= 0)
+        GL_Uniform1iFunc(uniforms->active_lights_loc, active_lights);
 }
 
 void R_ShadowEndFrame(void)
