@@ -15,6 +15,14 @@ cvar_t gl_shadow_update_static_interval = { "gl_shadow_update_static_interval", 
 cvar_t gl_shadow_debug = { "gl_shadow_debug", "0", CVAR_NONE };
 cvar_t r_showshadows = { "r_showshadows", "0", CVAR_NONE };
 
+typedef struct shadow_light_uniform_s {
+    vec3_t pos;
+    float radius;
+    vec3_t color;
+    float intensity;
+    GLuint cube_tex;
+} shadow_light_uniform_t;
+
 static struct shadow_manager_s {
     qboolean initialized;
     int map_size;
@@ -22,6 +30,8 @@ static struct shadow_manager_s {
     dlight_shadow_t pool[SHADOW_POOL_SIZE];
     int pool_size;
     GLuint fallback_cube_tex;
+    shadow_light_uniform_t active_lights[MAX_SHADOW_LIGHTS];
+    int active_light_count;
 } shadow_manager;
 
 typedef struct shadow_program_uniforms_s {
@@ -117,6 +127,7 @@ static void Shadow_ResetPool(void)
         slot->is_static = false;
     }
     shadow_manager.pool_size = 0;
+    shadow_manager.active_light_count = 0;
 }
 
 static void Shadow_ClearUniformCache(void)
@@ -289,7 +300,47 @@ void R_ShadowBeginFrame(int frame_num)
     if (!shadow_manager.initialized)
         return;
 
+    shadow_manager.active_light_count = 0;
     Shadow_UpdateSettings();
+}
+
+void R_ShadowSyncWorldLights(const gpulight_t *lights, int numlights)
+{
+    int i;
+    int count = 0;
+    int max_upload_lights;
+
+    if (!shadow_manager.initialized)
+        return;
+
+    shadow_manager.active_light_count = 0;
+
+    if (!gl_shadows.value)
+        return;
+
+    max_upload_lights = shadow_manager.max_lights;
+    if (max_upload_lights > MAX_SHADOW_LIGHTS)
+        max_upload_lights = MAX_SHADOW_LIGHTS;
+
+    for (i = 0; i < numlights && count < max_upload_lights; ++i)
+    {
+        const gpulight_t *src = &lights[i];
+        shadow_light_uniform_t *dst;
+
+        if (src->radius <= 0.0f)
+            continue;
+
+        dst = &shadow_manager.active_lights[count];
+        VectorCopy(src->pos, dst->pos);
+        dst->radius = src->radius;
+        VectorCopy(src->color, dst->color);
+        dst->intensity = 1.0f;
+        dst->cube_tex = shadow_manager.fallback_cube_tex;
+
+        ++count;
+    }
+
+    shadow_manager.active_light_count = count;
 }
 
 void R_ShadowApplyWorldUniforms(GLuint program)
@@ -333,10 +384,11 @@ void R_ShadowApplyWorldUniforms(GLuint program)
 
     if (gl_shadows.value && shadow_manager.fallback_cube_tex)
     {
-        int total = q_min(r_framedata.numlights, max_upload_lights);
+        int total = q_min(shadow_manager.active_light_count, max_upload_lights);
         for (i = 0; i < total && active_lights < max_upload_lights; ++i)
         {
-            gpulight_t *light = &r_lightbuffer.lights[i];
+            shadow_light_uniform_t *light = &shadow_manager.active_lights[i];
+            GLuint cube_tex = light->cube_tex ? light->cube_tex : shadow_manager.fallback_cube_tex;
             int slot = active_lights;
 
             if (light->radius <= 0.0f)
@@ -352,7 +404,7 @@ void R_ShadowApplyWorldUniforms(GLuint program)
                 GL_Uniform3fFunc(uniforms->light_color_loc[slot], light->color[0], light->color[1], light->color[2]);
 
             if (uniforms->light_intensity_loc[slot] >= 0)
-                GL_Uniform1fFunc(uniforms->light_intensity_loc[slot], 1.0f);
+                GL_Uniform1fFunc(uniforms->light_intensity_loc[slot], light->intensity);
 
             if (uniforms->light_bias_loc[slot] >= 0)
                 GL_Uniform1fFunc(uniforms->light_bias_loc[slot], bias);
@@ -367,7 +419,7 @@ void R_ShadowApplyWorldUniforms(GLuint program)
                 GL_Uniform1iFunc(uniforms->light_pcf_samples_loc[slot], pcf_samples);
 
             GL_BindNative(GL_TEXTURE0 + SHADOW_TEXTURE_UNIT_BASE + slot,
-                GL_TEXTURE_CUBE_MAP, shadow_manager.fallback_cube_tex);
+                GL_TEXTURE_CUBE_MAP, cube_tex);
 
             ++active_lights;
         }
