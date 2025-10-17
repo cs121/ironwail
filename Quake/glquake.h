@@ -550,6 +550,7 @@ typedef struct glprogs_s {
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
 	GLuint		oit_resolve[2];		// [msaa]
+	GLuint		shadow_depth_cube;	// omnidirectional shadow map pass
 
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]

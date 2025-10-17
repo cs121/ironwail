@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #define MAX_SHADOW_CUBE_FACES 6
+#define MAX_SHADOW_LIGHTS 4
 
 typedef struct shadow_cube_s {
     GLuint fbo;
@@ -31,6 +32,7 @@ void R_ShutdownShadow(void);
 void R_ResizeShadowMapIfNeeded(void);
 void R_ShadowBeginFrame(int frame_num);
 void R_ShadowEndFrame(void);
+void R_ShadowApplyWorldUniforms(GLuint program);
 
 extern cvar_t gl_shadows;
 extern cvar_t gl_shadow_mapsize;

@@ -22,6 +22,28 @@ static struct shadow_manager_s {
     int pool_size;
 } shadow_manager;
 
+typedef struct shadow_program_uniforms_s {
+    GLuint program;
+    GLint active_lights_loc;
+    GLint show_shadows_loc;
+    GLint light_pos_loc[MAX_SHADOW_LIGHTS];
+    GLint light_radius_loc[MAX_SHADOW_LIGHTS];
+    GLint light_color_loc[MAX_SHADOW_LIGHTS];
+    GLint light_intensity_loc[MAX_SHADOW_LIGHTS];
+    GLint light_bias_loc[MAX_SHADOW_LIGHTS];
+    GLint light_normal_bias_loc[MAX_SHADOW_LIGHTS];
+    GLint light_softness_loc[MAX_SHADOW_LIGHTS];
+    GLint light_pcf_samples_loc[MAX_SHADOW_LIGHTS];
+    GLint light_shadow_cube_loc[MAX_SHADOW_LIGHTS];
+    qboolean sampler_units_initialized;
+} shadow_program_uniforms_t;
+
+#define SHADOW_PROGRAM_CACHE_MAX 32
+#define SHADOW_TEXTURE_UNIT_BASE 8
+
+static shadow_program_uniforms_t shadow_uniform_cache[SHADOW_PROGRAM_CACHE_MAX];
+static int shadow_uniform_cache_count;
+
 static void Shadow_DestroyCube(shadow_cube_t *cube)
 {
     if (!cube)
@@ -61,6 +83,82 @@ static void Shadow_ResetPool(void)
         slot->is_static = false;
     }
     shadow_manager.pool_size = 0;
+}
+
+static void Shadow_ClearUniformCache(void)
+{
+    shadow_uniform_cache_count = 0;
+    memset(shadow_uniform_cache, 0, sizeof(shadow_uniform_cache));
+}
+
+static shadow_program_uniforms_t *Shadow_GetProgramUniforms(GLuint program)
+{
+    int i;
+    shadow_program_uniforms_t *entry = NULL;
+
+    for (i = 0; i < shadow_uniform_cache_count; ++i)
+    {
+        if (shadow_uniform_cache[i].program == program)
+            return &shadow_uniform_cache[i];
+    }
+
+    if (shadow_uniform_cache_count >= SHADOW_PROGRAM_CACHE_MAX)
+        return NULL;
+
+    entry = &shadow_uniform_cache[shadow_uniform_cache_count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->program = program;
+    entry->active_lights_loc = -1;
+    entry->show_shadows_loc = -1;
+    for (i = 0; i < MAX_SHADOW_LIGHTS; ++i)
+    {
+        entry->light_pos_loc[i] = -1;
+        entry->light_radius_loc[i] = -1;
+        entry->light_color_loc[i] = -1;
+        entry->light_intensity_loc[i] = -1;
+        entry->light_bias_loc[i] = -1;
+        entry->light_normal_bias_loc[i] = -1;
+        entry->light_softness_loc[i] = -1;
+        entry->light_pcf_samples_loc[i] = -1;
+        entry->light_shadow_cube_loc[i] = -1;
+    }
+
+    entry->active_lights_loc = GL_GetUniformLocationFunc(program, "uActiveLights");
+    entry->show_shadows_loc = GL_GetUniformLocationFunc(program, "uShowShadows");
+
+    for (i = 0; i < MAX_SHADOW_LIGHTS; ++i)
+    {
+        char name[64];
+
+        q_snprintf(name, sizeof(name), "uLights[%d].pos", i);
+        entry->light_pos_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].radius", i);
+        entry->light_radius_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].color", i);
+        entry->light_color_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].intensity", i);
+        entry->light_intensity_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].bias", i);
+        entry->light_bias_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].normalBias", i);
+        entry->light_normal_bias_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].softness", i);
+        entry->light_softness_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].pcfSamples", i);
+        entry->light_pcf_samples_loc[i] = GL_GetUniformLocationFunc(program, name);
+
+        q_snprintf(name, sizeof(name), "uLights[%d].shadowCube", i);
+        entry->light_shadow_cube_loc[i] = GL_GetUniformLocationFunc(program, name);
+    }
+
+    return entry;
 }
 
 static void Shadow_RegisterCvars(void)
@@ -110,6 +208,7 @@ void R_InitShadow(void)
     memset(&shadow_manager, 0, sizeof(shadow_manager));
     Shadow_RegisterCvars();
     Shadow_UpdateSettings();
+    Shadow_ClearUniformCache();
     shadow_manager.initialized = true;
 }
 
@@ -119,6 +218,7 @@ void R_ShutdownShadow(void)
         return;
 
     Shadow_ResetPool();
+    Shadow_ClearUniformCache();
     shadow_manager.initialized = false;
 }
 
@@ -145,6 +245,29 @@ void R_ShadowBeginFrame(int frame_num)
         return;
 
     Shadow_UpdateSettings();
+}
+
+void R_ShadowApplyWorldUniforms(GLuint program)
+{
+    shadow_program_uniforms_t *uniforms;
+    int show = (r_showshadows.value != 0.f) ? 1 : 0;
+    int i;
+
+    uniforms = Shadow_GetProgramUniforms(program);
+    if (!uniforms)
+        return;
+
+    if (uniforms->show_shadows_loc >= 0)
+        GL_Uniform1iFunc(uniforms->show_shadows_loc, show);
+
+    if (uniforms->active_lights_loc >= 0)
+        GL_Uniform1iFunc(uniforms->active_lights_loc, 0);
+
+    for (i = 0; i < MAX_SHADOW_LIGHTS; ++i)
+    {
+        if (uniforms->light_shadow_cube_loc[i] >= 0)
+            GL_Uniform1iFunc(uniforms->light_shadow_cube_loc[i], SHADOW_TEXTURE_UNIT_BASE + i);
+    }
 }
 
 void R_ShadowEndFrame(void)

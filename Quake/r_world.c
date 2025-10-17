@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "gl_shadow.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -284,6 +285,7 @@ static void R_FlushBModelCalls (void)
 	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
 
 	GL_UseProgram (bmodel_batch_program);
+	R_ShadowApplyWorldUniforms (bmodel_batch_program);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);

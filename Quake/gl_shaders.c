@@ -519,6 +519,8 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
+        glprogs.shadow_depth_cube = GL_CreateProgram (GLSL_PATH("shadow_depth_cube.vert"), GLSL_PATH("shadow_depth_cube.frag"), "shadow depth cube");
+
 	for (oit = 0; oit < 2; oit++)
 		for (dither = 0; dither < 3; dither++)
 			for (mode = 0; mode < 3; mode++)
