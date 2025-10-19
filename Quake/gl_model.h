@@ -147,6 +147,11 @@ typedef struct model_bspx_s
 
 	byte		*rgb_lightdata;
 	size_t		rgb_lightdata_size;
+
+	void		*lmstyles;
+	size_t		lmstyles_size;
+	int		lmstyles_per_face;
+	qboolean	lmstyles_is_16bit;
 } model_bspx_t;
 
 typedef struct msurface_s

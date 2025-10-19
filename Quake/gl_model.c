@@ -36,6 +36,9 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static void Mod_LoadBSPXLumps (dheader_t *header);
+static void Mod_ProcessLeafs_S (const dsleaf_t *in, size_t count);
+static void Mod_ProcessLeafs_L1 (const dl1leaf_t *in, size_t count);
+static void Mod_ProcessLeafs_L2 (const dl2leaf_t *in, size_t count);
 
 static void Mod_Print (void);
 
@@ -1383,6 +1386,13 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	size_t		lmshift_count = loadmodel->bspx.lmshift_count;
 	const int32_t	*lmoffsets = loadmodel->bspx.lmoffsets;
 	size_t		lmoffset_count = loadmodel->bspx.lmoffset_count;
+	const void		*lmstyles_data = loadmodel->bspx.lmstyles;
+	size_t		lmstyles_size = loadmodel->bspx.lmstyles_size;
+	int		lmstyles_per_face = loadmodel->bspx.lmstyles_per_face;
+	qboolean	lmstyles_is_16bit = loadmodel->bspx.lmstyles_is_16bit;
+	qboolean	lmstyles_overflow_warned = false;
+	qboolean	lmstyles_range_warned = false;
+	const char      *lmstyle_name = lmstyles_is_16bit ? "LMSTYLE16" : "LMSTYLE";
 
 	if (bsp2)
 	{
@@ -1403,6 +1413,44 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 	loadmodel->surfaces = out;
 	loadmodel->numsurfaces = (int)count;
+
+	if (lmstyles_data && lmstyles_per_face > 0)
+	{
+		size_t	entry_size = lmstyles_is_16bit ? sizeof(uint16_t) : sizeof(byte);
+		size_t	total_entries;
+
+		if (!entry_size || (lmstyles_size % entry_size) != 0)
+		{
+			Con_Printf("%s: ignoring malformed %s BSPX lump (unexpected size %zu bytes)\n", loadmodel->name, lmstyle_name, lmstyles_size);
+			lmstyles_data = NULL;
+			lmstyles_per_face = 0;
+		}
+		else
+		{
+			total_entries = lmstyles_size / entry_size;
+			if (!total_entries || (total_entries % (size_t)lmstyles_per_face))
+			{
+				Con_Printf("%s: ignoring malformed %s BSPX lump (per-face count mismatch)\n", loadmodel->name, lmstyle_name);
+				lmstyles_data = NULL;
+				lmstyles_per_face = 0;
+			}
+			else
+			{
+				size_t	face_total = total_entries / (size_t)lmstyles_per_face;
+				if (face_total != count)
+				{
+					Con_Printf("%s: ignoring %s BSPX lump with %zu faces (expected %zu)\n", loadmodel->name, lmstyle_name, face_total, count);
+					lmstyles_data = NULL;
+					lmstyles_per_face = 0;
+				}
+			}
+		}
+	}
+	else
+	{
+		lmstyles_data = NULL;
+		lmstyles_per_face = 0;
+	}
 
 	for (surfnum=0 ; surfnum<(int)count ; surfnum++, out++)
 	{
@@ -1443,6 +1491,52 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 		if (lmoffsets && surfnum < (int)lmoffset_count)
 			lofs = lmoffsets[surfnum];
+
+		if (lmstyles_data)
+		{
+			size_t	base = (size_t)surfnum * (size_t)lmstyles_per_face;
+			int		copy_count = lmstyles_per_face;
+			if (copy_count > MAXLIGHTMAPS)
+			{
+				if (!lmstyles_overflow_warned)
+				{
+					Con_Warning("%s: %s BSPX lump specifies %d styles per face; truncating to %d\n", loadmodel->name, lmstyle_name, lmstyles_per_face, MAXLIGHTMAPS);
+					lmstyles_overflow_warned = true;
+				}
+				copy_count = MAXLIGHTMAPS;
+			}
+			for (i = 0; i < MAXLIGHTMAPS; i++)
+				out->styles[i] = 255;
+			if (lmstyles_is_16bit)
+			{
+				const uint16_t *styles16 = ((const uint16_t *)lmstyles_data) + base;
+				for (i = 0; i < copy_count; i++)
+				{
+					uint16_t value = styles16[i];
+					if (value == 0xffff)
+					{
+						out->styles[i] = 255;
+					}
+					else if (value > 255)
+					{
+						if (!lmstyles_range_warned)
+						{
+							Con_Warning("%s: %s BSPX lump contains lightstyle %u outside the 0-255 range; treating as unlit\n", loadmodel->name, lmstyle_name, value);
+							lmstyles_range_warned = true;
+						}
+						out->styles[i] = 255;
+					}
+					else
+						out->styles[i] = (byte)value;
+				}
+			}
+			else
+			{
+				const byte *styles8 = ((const byte *)lmstyles_data) + base;
+				for (i = 0; i < copy_count; i++)
+					out->styles[i] = styles8[i];
+			}
+		}
 
 		out->flags = 0;
 		if (out->numedges < 3)
@@ -2106,10 +2200,11 @@ static void Mod_LoadSubmodels (lump_t *l)
 
 
 
-static void Mod_LoadLeafsExternal(FILE* f)
+static void Mod_LoadLeafsExternal(FILE* f, int bsp2)
 {
 	int		mark, filelen;
-	void*	in;
+	size_t		elem_size, count;
+	void	*in;
 
 	filelen = 0;
 	if (fread(&filelen, 4, 1, f) != 1)
@@ -2117,8 +2212,28 @@ static void Mod_LoadLeafsExternal(FILE* f)
 		Con_Warning ("Couldn't read external leaf data length\n");
 		return;
 	}
+
 	filelen = LittleLong(filelen);
-	if (filelen <= 0) return;
+	if (filelen <= 0)
+		return;
+
+	if (bsp2 == 2)
+		elem_size = sizeof(dl2leaf_t);
+	else if (bsp2)
+		elem_size = sizeof(dl1leaf_t);
+	else
+		elem_size = sizeof(dsleaf_t);
+
+	if ((size_t)filelen % elem_size)
+	{
+		Con_Warning ("Ignoring external leaf data with unexpected size (%d bytes)\n", filelen);
+		return;
+	}
+
+	count = (size_t)filelen / elem_size;
+	if (!count)
+		return;
+
 	Con_DPrintf("...%d bytes leaf data\n", filelen);
 	mark = Hunk_LowMark ();
 	in = Hunk_AllocNameNoFill (filelen, "EXT_LEAF");
@@ -2127,7 +2242,13 @@ static void Mod_LoadLeafsExternal(FILE* f)
 		Hunk_FreeToLowMark (mark);
 		return;
 	}
-	Mod_ProcessLeafs_S((dsleaf_t *)in, filelen);
+
+	if (bsp2 == 2)
+		Mod_ProcessLeafs_L2((const dl2leaf_t *)in, count);
+	else if (bsp2)
+		Mod_ProcessLeafs_L1((const dl1leaf_t *)in, count);
+	else
+		Mod_ProcessLeafs_S((const dsleaf_t *)in, count);
 }
 
 /*
@@ -2201,7 +2322,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 			Con_DPrintf("found valid external .vis file for map\n");
 			loadmodel->visdata = Mod_LoadVisibilityExternal(fvis);
 			if (loadmodel->visdata) {
-				Mod_LoadLeafsExternal(fvis);
+				Mod_LoadLeafsExternal(fvis, bsp2);
 			}
 			fclose(fvis);
 			if (loadmodel->visdata && loadmodel->leafs && loadmodel->numleafs) {
@@ -3274,6 +3395,30 @@ static void Mod_LoadBSPXLumps (dheader_t *header)
 	filesize = (size_t)com_filesize;
 	base = mod_base;
 
+	size_t	face_struct_size = 0;
+	size_t	face_count = 0;
+
+	switch (loadmodel->bspversion)
+	{
+	case BSPVERSION:
+	case BSPVERSION_QUAKE64:
+		face_struct_size = sizeof(dsface_t);
+		break;
+	case BSP2VERSION_2PSB:
+	case BSP2VERSION_BSP2:
+		face_struct_size = sizeof(dlface_t);
+		break;
+	default:
+		break;
+	}
+
+	if (face_struct_size)
+	{
+		int faces_filelen = header->lumps[LUMP_FACES].filelen;
+		if (faces_filelen > 0 && (faces_filelen % (int)face_struct_size) == 0)
+			face_count = (size_t)faces_filelen / face_struct_size;
+	}
+
 	for (int i = 0; i < HEADER_LUMPS; i++)
 	{
 		int fileofs = header->lumps[i].fileofs;
@@ -3338,6 +3483,63 @@ static void Mod_LoadBSPXLumps (dheader_t *header)
 			for (int j = 0; j < count; j++)
 				loadmodel->bspx.lmoffsets[j] = LittleLong(((const int32_t *)lumpdata)[j]);
 			loadmodel->bspx.lmoffset_count = count;
+		}
+		else if (!strcmp(name, "LMSTYLE") || !strcmp(name, "LMSTYLE16"))
+		{
+			qboolean is16 = !strcmp(name, "LMSTYLE16");
+			size_t entry_size = is16 ? sizeof(uint16_t) : sizeof(byte);
+
+			if (!face_count)
+			{
+				Con_Printf("%s: ignoring %s BSPX lump with no faces\n", loadmodel->name, name);
+				continue;
+			}
+
+			if ((size_t)filelen % face_count)
+			{
+				Con_Printf("%s: ignoring malformed %s BSPX lump (length %d)\n", loadmodel->name, name, filelen);
+				continue;
+			}
+
+			size_t per_face_bytes = (size_t)filelen / face_count;
+			if (!per_face_bytes || (per_face_bytes % entry_size))
+			{
+				Con_Printf("%s: ignoring malformed %s BSPX lump (per-face size %zu)\n", loadmodel->name, name, per_face_bytes);
+				continue;
+			}
+
+			int per_face = (int)(per_face_bytes / entry_size);
+			if (per_face <= 0)
+			{
+				Con_Printf("%s: ignoring malformed %s BSPX lump (per-face count %d)\n", loadmodel->name, name, per_face);
+				continue;
+			}
+
+			if (loadmodel->bspx.lmstyles)
+			{
+				if (loadmodel->bspx.lmstyles_is_16bit)
+				{
+					if (!is16)
+						continue;
+				}
+				else if (!is16)
+					continue;
+			}
+
+			byte *styles = (byte *)Hunk_AllocName(filelen, loadname);
+			memcpy(styles, lumpdata, filelen);
+			if (is16)
+			{
+				uint16_t *styles16 = (uint16_t *)styles;
+				size_t total = (size_t)filelen / sizeof(uint16_t);
+				for (size_t j = 0; j < total; j++)
+					styles16[j] = (uint16_t)LittleShort(styles16[j]);
+			}
+
+			loadmodel->bspx.lmstyles = styles;
+			loadmodel->bspx.lmstyles_size = filelen;
+			loadmodel->bspx.lmstyles_per_face = per_face;
+			loadmodel->bspx.lmstyles_is_16bit = is16;
 		}
 		else if (!strcmp(name, "RGBLIGHTING"))
 		{
