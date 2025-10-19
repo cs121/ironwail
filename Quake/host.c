@@ -361,7 +361,6 @@ void Host_InitLocal (void)
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
 
         Host_InitCommands ();
-        Q3Shader_Init ();
 
         Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_speeds);
@@ -1527,6 +1526,5 @@ void Host_Shutdown(void)
         LOG_Close ();
 
         LOC_Shutdown ();
-        Q3Shader_Shutdown ();
 }
 
