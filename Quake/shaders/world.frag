@@ -61,11 +61,37 @@ float ShadowPointPCF(PointLight L, vec3 P, vec3 N)
         return visibility;
 }
 
+float ComputeDynamicLightContribution(float radius, float minlight, float distance)
+{
+        if (radius <= 0.0)
+                return 0.0;
+        float outer_radius = radius;
+        float clamped_minlight = min(minlight, outer_radius);
+        float inner_radius = max(outer_radius - minlight, 0.0);
+        if (distance >= outer_radius)
+                return 0.0;
+        float normalized;
+        if (outer_radius > inner_radius)
+        {
+                float range = outer_radius - inner_radius;
+                float fade = max(distance - inner_radius, 0.0);
+                normalized = 1.0 - clamp(fade / range, 0.0, 1.0);
+        }
+        else
+        {
+                float range = max(outer_radius, 1e-5);
+                normalized = 1.0 - clamp(distance / range, 0.0, 1.0);
+        }
+        float smooth = normalized * normalized;
+        smooth *= smooth;
+        return clamped_minlight + smooth * (outer_radius - clamped_minlight);
+}
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
         float fog = exp2(-Fog.w * dot(p, p));
-	fog = clamp(fog, 0.0, 1.0);
-	return mix(Fog.rgb, clr, fog);
+        fog = clamp(fog, 0.0, 1.0);
+        return mix(Fog.rgb, clr, fog);
 }
 
 #define LIGHT_TILES_X 32
@@ -405,13 +431,17 @@ void main()
                                 continue;
 
                         vec3 light_dir = light_vec / dist;
-                        float atten = clamp(1.0 - dist / L.radius, 0.0, 1.0);
                         float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                        if (atten <= 0.0 || ndotl <= 0.0)
+                        if (ndotl <= 0.0)
                                 continue;
 
-                        vec3 light_color = L.color * L.intensity;
-                        dynamic_light += light_color * ndotl * atten * shadow_vis;
+                        float contribution = ComputeDynamicLightContribution(L.radius, 0.0, dist);
+                        if (contribution <= 0.0)
+                                continue;
+
+                        float normalizedIntensity = contribution / max(L.radius, 1e-5);
+                        vec3 light_color = L.color * (L.intensity * normalizedIntensity);
+                        dynamic_light += light_color * ndotl * shadow_vis;
 
                         vec3 half_vec = light_dir + view_dir;
                         float half_len = length(half_vec);
@@ -420,7 +450,7 @@ void main()
                                 half_vec /= half_len;
                                 float ndoth = max(dot(surface_normal, half_vec), 0.0);
                                 float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-                                specular_light += light_color * spec * SPECULAR_SCALE * atten * shadow_vis;
+                                specular_light += light_color * spec * SPECULAR_SCALE * shadow_vis;
                         }
                 }
         }
@@ -451,36 +481,32 @@ void main()
                                         int j = findLSB(mask);
                                         mask ^= 1u << j;
                                         Light l = Lights[ofs + j];
-                                        float rad = l.radius;
-                                        float dist = dot(l.origin, plane.xyz) - plane.w;
-                                        rad -= abs(dist);
-                                        float minlight = l.minlight;
-                                        if (rad < minlight)
+                                        float sphere_radius = l.radius;
+                                        float plane_dist = dot(l.origin, plane.xyz) - plane.w;
+                                        sphere_radius -= abs(plane_dist);
+                                        if (sphere_radius <= 0.0)
                                                 continue;
-                                        vec3 local_pos = l.origin - plane.xyz * dist;
-                                        minlight = rad - minlight;
+                                        float clamped_minlight = min(l.minlight, sphere_radius);
+                                        vec3 local_pos = l.origin - plane.xyz * plane_dist;
                                         vec3 light_vec = local_pos - in_pos;
                                         float surface_dist = length(light_vec);
-                                        float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
-                                        float falloff = max(0., rad - surface_dist) / 256.;
-                                        vec3 light_contrib = attenuation * falloff * l.color;
-                                        cluster_light += light_contrib;
-                                        if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+                                        float contribution = ComputeDynamicLightContribution(sphere_radius, clamped_minlight, surface_dist);
+                                        if (contribution <= 0.0 || surface_dist <= 0.0)
+                                                continue;
+                                        vec3 light_dir = light_vec / surface_dist;
+                                        float ndotl = max(dot(surface_normal, light_dir), 0.0);
+                                        if (ndotl <= 0.0)
+                                                continue;
+                                        vec3 light_color = l.color * (contribution / 256.0);
+                                        cluster_light += light_color * ndotl;
+                                        vec3 half_vec = light_dir + view_dir;
+                                        float half_len = length(half_vec);
+                                        if (half_len > 0.0)
                                         {
-                                                vec3 light_dir = light_vec / surface_dist;
-                                                float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                                                if (ndotl > 0.0)
-                                                {
-                                                        vec3 half_vec = light_dir + view_dir;
-                                                        float half_len = length(half_vec);
-                                                        if (half_len > 0.0)
-                                                        {
-                                                                half_vec /= half_len;
-                                                                float ndoth = max(dot(surface_normal, half_vec), 0.0);
-                                                                float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-                                                                specular_light += light_contrib * spec * SPECULAR_SCALE;
-                                                        }
-                                                }
+                                                half_vec /= half_len;
+                                                float ndoth = max(dot(surface_normal, half_vec), 0.0);
+                                                float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+                                                specular_light += light_color * spec * SPECULAR_SCALE;
                                         }
                                 }
                         }
