@@ -179,6 +179,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
+	SV_BotInit ();
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -389,7 +390,7 @@ CLIENT SPAWNING
 
 static qboolean SV_IsLocalClient (client_t *client)
 {
-	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
+	return client->netconnection && Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
 /*
@@ -475,7 +476,10 @@ void SV_ConnectClient (int clientnum)
 
 	client = svs.clients + clientnum;
 
-	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
+	if (client->netconnection)
+		Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
+	else
+		Con_DPrintf ("Bot client connected\n");
 
 	edictnum = clientnum+1;
 
@@ -488,6 +492,7 @@ void SV_ConnectClient (int clientnum)
 		memcpy (spawn_parms, client->spawn_parms, sizeof(spawn_parms));
 	memset (client, 0, sizeof(*client));
 	client->netconnection = netconnection;
+	client->isbot = (client->netconnection == NULL);
 
 	strcpy (client->name, "unconnected");
 	client->active = true;
@@ -1180,6 +1185,9 @@ SV_SendClientDatagram
 */
 qboolean SV_SendClientDatagram (client_t *client)
 {
+	if (!client->netconnection)
+		return true;
+
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
 
@@ -1379,6 +1387,12 @@ void SV_SendClientMessages (void)
 	{
 		if (!host_client->active)
 			continue;
+		if (host_client->isbot)
+		{
+			SZ_Clear (&host_client->message);
+			host_client->sendsignon = PRESPAWN_DONE;
+			continue;
+		}
 
 		if (host_client->spawned)
 		{
