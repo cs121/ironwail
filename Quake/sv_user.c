@@ -626,17 +626,25 @@ void SV_RunClients (void)
 
 		sv_player = host_client->edict;
 
-		if (!SV_ReadClientMessage ())
+		if (host_client->isbot)
 		{
-			SV_DropClient (false);	// client misbehaved...
-			continue;
+			if (host_client->spawned)
+				SV_BotFrame (host_client);
 		}
-
-		if (!host_client->spawned)
+		else
 		{
-		// clear client movement until a new packet is received
-			memset (&host_client->cmd, 0, sizeof(host_client->cmd));
-			continue;
+			if (!SV_ReadClientMessage ())
+			{
+				SV_DropClient (false);	// client misbehaved...
+				continue;
+			}
+
+			if (!host_client->spawned)
+			{
+			// clear client movement until a new packet is received
+				memset (&host_client->cmd, 0, sizeof(host_client->cmd));
+				continue;
+			}
 		}
 
 // always pause in single player if in console or menus

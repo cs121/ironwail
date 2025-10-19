@@ -126,6 +126,18 @@ enum sendsignon_e
 	PRESPAWN_SIGNONMSG,
 };
 
+typedef struct bot_state_s
+{
+	float			next_repath;
+	float			strafe_change_time;
+	float			strafe_dir;
+	vec3_t			wander_dir;
+	vec3_t			last_origin;
+	float			stuck_check;
+	int			target_ent;
+	qboolean		has_enemy;
+} bot_state_t;
+
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
@@ -148,6 +160,9 @@ typedef struct client_s
 	edict_t			*edict;				// EDICT_NUM(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
+
+	qboolean		isbot;
+	bot_state_t	bot;
 
 	float			ping_times[NUM_PING_TIMES];
 	int				num_pings;			// ping_times[num_pings%NUM_PING_TIMES]
@@ -276,8 +291,13 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 void SV_LocalSound (client_t *client, const char *sample); // for 2021 rerelease
 
 void SV_DropClient (qboolean crash);
+void SV_ConnectClient (int clientnum);
 
 void SV_SendClientMessages (void);
+void SV_BotInit (void);
+void SV_BotFrame (client_t *client);
+client_t *SV_BotSpawn (const char *name);
+qboolean SV_ClientIsBot (const client_t *client);
 void SV_ClearDatagram (void);
 void SV_ReserveSignonSpace (int numbytes);
 

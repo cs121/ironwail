@@ -1600,12 +1600,31 @@ static void Host_Status_f (void)
 	if (ipxAvailable)
 		print_fn ("ipx:     %s\n", my_ipx_address);
 	print_fn ("map:     %s\n", sv.name);
-	print_fn ("players: %i active (%i max)\n\n", net_activeconnections, svs.maxclients);
+
+	{
+		int active = 0;
+		int bots = 0;
+		for (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)
+		{
+			if (!client->active)
+				continue;
+			active++;
+			if (client->isbot)
+				bots++;
+		}
+		if (bots)
+			print_fn ("players: %i active (%i max, %i bots)\n\n", active, svs.maxclients, bots);
+		else
+			print_fn ("players: %i active (%i max)\n\n", active, svs.maxclients);
+	}
 	for (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)
 	{
 		if (!client->active)
 			continue;
-		seconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
+		if (client->netconnection)
+			seconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
+		else
+			seconds = (int)(realtime - client->last_message);
 		minutes = seconds / 60;
 		if (minutes)
 		{
@@ -1617,7 +1636,10 @@ static void Host_Status_f (void)
 		else
 			hours = 0;
 		print_fn ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j+1, client->name, (int)client->edict->v.frags, hours, minutes, seconds);
-		print_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
+		if (client->netconnection)
+			print_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
+		else
+			print_fn ("   BOT\n");
 	}
 }
 
@@ -3088,7 +3110,7 @@ static void Host_Spawn_f (void)
 		pr_global_struct->self = EDICT_TO_PROG(sv_player);
 		PR_ExecuteProgram (pr_global_struct->ClientConnect);
 
-		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
+		if (!host_client->netconnection || (Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
 			Sys_Printf ("%s entered the game\n", host_client->name);
 
 		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
