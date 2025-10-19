@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "modelgen.h"
 #include "spritegn.h"
 
+#include <stdint.h>
+
 /*
 
 d*_t structures are on-disk representations
@@ -135,6 +137,18 @@ typedef struct glvert_s {
 	unsigned	styles;
 } glvert_t;
 
+typedef struct model_bspx_s
+{
+	byte		*lmshift;
+	int		lmshift_count;
+
+	int32_t	*lmoffsets;
+	int		lmoffset_count;
+
+	byte		*rgb_lightdata;
+	size_t		rgb_lightdata_size;
+} model_bspx_t;
+
 typedef struct msurface_s
 {
 	mplane_t	*plane;
@@ -149,6 +163,7 @@ typedef struct msurface_s
 	short		lightmaptexturenum;
 	short		extents[2];
 	short		light_s, light_t;	// gl lightmap coordinates
+	byte		lightmap_shift;	// lightmap texel scale exponent
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
@@ -498,6 +513,8 @@ typedef struct qmodel_s
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
 	qboolean	haslitwater;
+
+	model_bspx_t	bspx;
 
 //
 // alias model

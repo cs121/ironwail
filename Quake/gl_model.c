@@ -35,6 +35,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
+static void Mod_LoadBSPXLumps (dheader_t *header);
 
 static void Mod_Print (void);
 
@@ -55,6 +56,19 @@ typedef struct
 	const byte	*data;
 	size_t		size;
 } mod_lump_info_t;
+
+typedef struct
+{
+	char		id[4];
+	uint32_t	numlumps;
+} bspx_header_t;
+
+typedef struct
+{
+	char		lumpname[24];
+	uint32_t	fileofs;
+	uint32_t	filelen;
+} bspx_lump_t;
 
 static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, const lump_t *l, mod_lump_error_fn error_fn)
 {
@@ -900,6 +914,13 @@ static void Mod_LoadLighting (lump_t *l)
 
 	loadmodel->lightdata = NULL;
 	loadmodel->litfile = false;
+
+	if (loadmodel->bspx.rgb_lightdata)
+	{
+		loadmodel->lightdata = loadmodel->bspx.rgb_lightdata;
+		loadmodel->litfile = true;
+		return;
+	}
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -1301,8 +1322,10 @@ static void CalcSurfaceExtents (msurface_t *s)
 
 	for (i=0 ; i<2 ; i++)
 	{
-		int bmin = 16 * (int) floor (mins[i]/16);
-		int bmax = 16 * (int) ceil (maxs[i]/16);
+		int scale = 1 << s->lightmap_shift;
+		double scaled = (double)scale;
+		int bmin = scale * (int) floor (mins[i] / scaled);
+		int bmax = scale * (int) ceil (maxs[i] / scaled);
 
 		s->texturemins[i] = bmin;
 		s->extents[i] = bmax - bmin;
@@ -1356,6 +1379,10 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	size_t		count;
 	int		i, surfnum, lofs;
 	int		planenum, side, texinfon;
+	const byte	*lmshift = loadmodel->bspx.lmshift;
+	size_t		lmshift_count = loadmodel->bspx.lmshift_count;
+	const int32_t	*lmoffsets = loadmodel->bspx.lmoffsets;
+	size_t		lmoffset_count = loadmodel->bspx.lmoffset_count;
 
 	if (bsp2)
 	{
@@ -1404,6 +1431,18 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			lofs = LittleLong(ins->lightofs);
 			ins++;
 		}
+
+		byte shift = 4;
+		if (lmshift && surfnum < (int)lmshift_count)
+		{
+			shift = lmshift[surfnum];
+			if (shift > 7)
+				shift = 7;
+		}
+		out->lightmap_shift = shift;
+
+		if (lmoffsets && surfnum < (int)lmoffset_count)
+			lofs = lmoffsets[surfnum];
 
 		out->flags = 0;
 		if (out->numedges < 3)
@@ -2105,6 +2144,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	float		radius; //johnfitz
 
 	loadmodel->type = mod_brush;
+	memset(&loadmodel->bspx, 0, sizeof(loadmodel->bspx));
 
 	header = (dheader_t *)buffer;
 
@@ -2134,6 +2174,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
 	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
 		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
+
+	Mod_LoadBSPXLumps (header);
 
 // load into heap
 
@@ -3217,6 +3259,96 @@ static void *Mod_LoadSpriteGroup (void * pin, mspriteframe_t **ppframe, int fram
 	return ptemp;
 }
 
+
+static void Mod_LoadBSPXLumps (dheader_t *header)
+{
+	size_t bspxofs = 0;
+	size_t filesize;
+	const byte *base;
+	uint32_t numlumps;
+	const bspx_lump_t *xlump;
+
+	if (com_filesize <= 0)
+		return;
+
+	filesize = (size_t)com_filesize;
+	base = mod_base;
+
+	for (int i = 0; i < HEADER_LUMPS; i++)
+	{
+		int fileofs = header->lumps[i].fileofs;
+		int filelen = header->lumps[i].filelen;
+		if (filelen <= 0)
+			continue;
+
+		size_t end = (size_t)fileofs + (size_t)filelen;
+		if (end > bspxofs)
+			bspxofs = end;
+	}
+
+	bspxofs = (bspxofs + 3) & ~(size_t)3;
+
+	if (bspxofs + sizeof(bspx_header_t) > filesize)
+		return;
+
+	const bspx_header_t *bspx = (const bspx_header_t *)(base + bspxofs);
+	if (memcmp(bspx->id, "BSPX", 4))
+		return;
+
+	numlumps = LittleLong(bspx->numlumps);
+	xlump = (const bspx_lump_t *)(bspx + 1);
+
+	for (uint32_t i = 0; i < numlumps; i++, xlump++)
+	{
+		char name[25];
+		int fileofs = (int)LittleLong(xlump->fileofs);
+		int filelen = (int)LittleLong(xlump->filelen);
+
+		memcpy(name, xlump->lumpname, sizeof(xlump->lumpname));
+		name[sizeof(name) - 1] = '\0';
+
+		if (fileofs < 0 || filelen <= 0)
+			continue;
+
+		size_t end = (size_t)fileofs + (size_t)filelen;
+		if (end > filesize)
+			continue;
+
+		const byte *lumpdata = base + fileofs;
+
+		if (!strcmp(name, "LMSHIFT"))
+		{
+			if (loadmodel->bspx.lmshift)
+				continue;
+			loadmodel->bspx.lmshift = (byte *)Hunk_AllocName(filelen, loadname);
+			memcpy(loadmodel->bspx.lmshift, lumpdata, filelen);
+			loadmodel->bspx.lmshift_count = filelen;
+		}
+		else if (!strcmp(name, "LMOFFSET"))
+		{
+			if (loadmodel->bspx.lmoffsets)
+				continue;
+			if ((size_t)filelen % sizeof(int32_t))
+			{
+				Con_Printf("%s: ignoring malformed LMOFFSET BSPX lump\n", loadmodel->name);
+				continue;
+			}
+			int count = filelen / (int)sizeof(int32_t);
+			loadmodel->bspx.lmoffsets = (int32_t *)Hunk_AllocName(filelen, loadname);
+			for (int j = 0; j < count; j++)
+				loadmodel->bspx.lmoffsets[j] = LittleLong(((const int32_t *)lumpdata)[j]);
+			loadmodel->bspx.lmoffset_count = count;
+		}
+		else if (!strcmp(name, "RGBLIGHTING"))
+		{
+			if (loadmodel->bspx.rgb_lightdata)
+				continue;
+			loadmodel->bspx.rgb_lightdata = (byte *)Hunk_AllocName(filelen, loadname);
+			memcpy(loadmodel->bspx.rgb_lightdata, lumpdata, filelen);
+			loadmodel->bspx.rgb_lightdata_size = filelen;
+		}
+	}
+}
 
 /*
 =================
