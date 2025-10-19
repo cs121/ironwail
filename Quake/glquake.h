@@ -428,6 +428,13 @@ typedef struct gpulightbuffer_s {
 	gpulight_t	lights[MAX_DLIGHTS];
 } gpulightbuffer_t;
 
+typedef enum shading_model_e {
+	SHADING_MODEL_LAMBERT = 0,
+	SHADING_MODEL_HALF_LAMBERT = 1,
+	SHADING_MODEL_OREN_NAYAR = 2,
+	SHADING_MODEL_COUNT
+} shading_model_t;
+
 typedef struct gpuframedata_s {
 	float	viewproj[16];
 	float	prev_viewproj[16];
@@ -438,7 +445,7 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	float	_padding0;
+	unsigned int	shading_model;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;

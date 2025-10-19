@@ -196,6 +196,7 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 #endif
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
+cvar_t	r_shading_model = { "r_shading_model", "0", CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
@@ -1536,7 +1537,8 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
-		r_framedata._padding0 = 0.f;
+		int shading_model = CLAMP (0, (int)Q_rint (r_shading_model.value), SHADING_MODEL_COUNT - 1);
+		r_framedata.shading_model = (unsigned int)shading_model;
 	}
 
 	r_framecount++;

@@ -94,6 +94,66 @@ vec3 ApplyFog(vec3 clr, vec3 p)
         return mix(Fog.rgb, clr, fog);
 }
 
+const uint SHADING_MODEL_LAMBERT = 0u;
+const uint SHADING_MODEL_HALF_LAMBERT = 1u;
+const uint SHADING_MODEL_OREN_NAYAR = 2u;
+
+float EvaluateHalfLambert(float ndotlRaw)
+{
+        float result = ndotlRaw * 0.5 + 0.5;
+        result = clamp(result, 0.0, 1.0);
+        return result * result;
+}
+
+float EvaluateOrenNayar(vec3 normal, vec3 light_dir, vec3 view_dir)
+{
+        float ndotl = max(dot(normal, light_dir), 0.0);
+        float ndotv = max(dot(normal, view_dir), 0.0);
+        if (ndotl <= 0.0 || ndotv <= 0.0)
+                return 0.0;
+
+        const float sigma = 0.5;
+        const float sigma2 = sigma * sigma;
+        float A = 1.0 - (0.5 * sigma2 / (sigma2 + 0.33));
+        float B = 0.45 * (sigma2 / (sigma2 + 0.09));
+
+        float sinThetaL = sqrt(max(1.0 - ndotl * ndotl, 0.0));
+        float sinThetaV = sqrt(max(1.0 - ndotv * ndotv, 0.0));
+
+        float cosPhiDiff = 0.0;
+        if (sinThetaL > 1e-4 && sinThetaV > 1e-4)
+        {
+                vec3 projL = normalize(light_dir - normal * ndotl);
+                vec3 projV = normalize(view_dir - normal * ndotv);
+                cosPhiDiff = clamp(dot(projL, projV), -1.0, 1.0);
+        }
+
+        float sinAlpha;
+        float tanBeta;
+        if (ndotv > ndotl)
+        {
+                sinAlpha = sinThetaV;
+                tanBeta = sinThetaL / max(ndotl, 1e-4);
+        }
+        else
+        {
+                sinAlpha = sinThetaL;
+                tanBeta = sinThetaV / max(ndotv, 1e-4);
+        }
+
+        float oren = ndotl * (A + B * max(0.0, cosPhiDiff) * sinAlpha * tanBeta);
+        return clamp(oren, 0.0, 1.0);
+}
+
+float ComputeDiffuseLighting(uint shadingModel, vec3 normal, vec3 light_dir, vec3 view_dir, float ndotlRaw)
+{
+        if (shadingModel == SHADING_MODEL_HALF_LAMBERT)
+                return EvaluateHalfLambert(ndotlRaw);
+        if (shadingModel == SHADING_MODEL_OREN_NAYAR)
+                return EvaluateOrenNayar(normal, light_dir, view_dir);
+        return max(ndotlRaw, 0.0);
+}
+
 #define LIGHT_TILES_X 32
 #define LIGHT_TILES_Y 16
 #define LIGHT_TILES_Z 32
@@ -402,6 +462,7 @@ void main()
         vec3 view_dir = vec3(0.0, 0.0, 1.0);
         if (view_length > 0.0)
                 view_dir = to_eye / view_length;
+        uint shadingModel = ShadingModel;
 
         const float SPECULAR_POWER = 16.0;
         const float SPECULAR_SCALE = 0.4;
@@ -431,8 +492,10 @@ void main()
                                 continue;
 
                         vec3 light_dir = light_vec / dist;
-                        float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                        if (ndotl <= 0.0)
+                        float ndotl_raw = dot(surface_normal, light_dir);
+                        float lambert = max(ndotl_raw, 0.0);
+                        float diffuse_term = ComputeDiffuseLighting(shadingModel, surface_normal, light_dir, view_dir, ndotl_raw);
+                        if (diffuse_term <= 0.0)
                                 continue;
 
                         float contribution = ComputeDynamicLightContribution(L.radius, 0.0, dist);
@@ -441,15 +504,15 @@ void main()
 
                         float normalizedIntensity = contribution / max(L.radius, 1e-5);
                         vec3 light_color = L.color * (L.intensity * normalizedIntensity);
-                        dynamic_light += light_color * ndotl * shadow_vis;
+                        dynamic_light += light_color * diffuse_term * shadow_vis;
 
                         vec3 half_vec = light_dir + view_dir;
                         float half_len = length(half_vec);
-                        if (half_len > 0.0)
+                        if (half_len > 0.0 && lambert > 0.0)
                         {
                                 half_vec /= half_len;
                                 float ndoth = max(dot(surface_normal, half_vec), 0.0);
-                                float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+                                float spec = pow(ndoth, SPECULAR_POWER) * lambert;
                                 specular_light += light_color * spec * SPECULAR_SCALE * shadow_vis;
                         }
                 }
@@ -494,18 +557,20 @@ void main()
                                         if (contribution <= 0.0 || surface_dist <= 0.0)
                                                 continue;
                                         vec3 light_dir = light_vec / surface_dist;
-                                        float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                                        if (ndotl <= 0.0)
+                                        float ndotl_raw = dot(surface_normal, light_dir);
+                                        float lambert = max(ndotl_raw, 0.0);
+                                        float diffuse_term = ComputeDiffuseLighting(shadingModel, surface_normal, light_dir, view_dir, ndotl_raw);
+                                        if (diffuse_term <= 0.0)
                                                 continue;
                                         vec3 light_color = l.color * (contribution / 256.0);
-                                        cluster_light += light_color * ndotl;
+                                        cluster_light += light_color * diffuse_term;
                                         vec3 half_vec = light_dir + view_dir;
                                         float half_len = length(half_vec);
-                                        if (half_len > 0.0)
+                                        if (half_len > 0.0 && lambert > 0.0)
                                         {
                                                 half_vec /= half_len;
                                                 float ndoth = max(dot(surface_normal, half_vec), 0.0);
-                                                float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+                                                float spec = pow(ndoth, SPECULAR_POWER) * lambert;
                                                 specular_light += light_color * spec * SPECULAR_SCALE;
                                         }
                                 }
