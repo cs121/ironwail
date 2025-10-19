@@ -53,6 +53,7 @@ extern cvar_t r_shadows;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
 extern cvar_t r_oit;
+extern cvar_t r_shading_model;
 extern cvar_t r_dither;
 extern cvar_t r_dof;
 extern cvar_t r_dof_autofocus;
@@ -290,6 +291,18 @@ static void R_SetSlimealpha_f (cvar_t *var)
 
 /*
 ====================
+R_ShadingModel_f
+====================
+*/
+static void R_ShadingModel_f (cvar_t *var)
+{
+	int value = CLAMP (0, (int)Q_rint (var->value), SHADING_MODEL_COUNT - 1);
+	if (value != (int)var->value)
+		Cvar_SetValueQuick (var, (float)value);
+}
+
+/*
+====================
 R_OverbrightBits_f
 ====================
 */
@@ -353,6 +366,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_pos);
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
+	Cvar_RegisterVariable (&r_shading_model);
+	Cvar_SetCallback (&r_shading_model, R_ShadingModel_f);
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_dof);
         Cvar_RegisterVariable (&r_dof_autofocus);
