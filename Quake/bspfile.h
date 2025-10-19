@@ -239,6 +239,8 @@ typedef struct
 } dledge_t;
 
 #define	MAXLIGHTMAPS	4
+#define INVALID_LIGHTSTYLE_OLD 0xffu
+#define INVALID_LIGHTSTYLE    INVALID_LIGHTSTYLE_OLD
 typedef struct
 {
 	short		planenum;

@@ -150,6 +150,7 @@ typedef struct msurface_s
 	short		extents[2];
 	short		light_s, light_t;	// gl lightmap coordinates
 
+	byte		lmshift;
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
 

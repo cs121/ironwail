@@ -254,25 +254,39 @@ vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 {
 	byte *lightmap;
-	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
+	int maps, line3, dsfrac, dtfrac, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
 	int scale;
-	line3 = ((surf->extents[0]>>4)+1)*3;
+	int shift = surf->lmshift;
+	int step_s = (surf->extents[0] >> shift) + 1;
+	int step_t = (surf->extents[1] >> shift) + 1;
+	line3 = step_s * 3;
+	if (shift)
+	{
+		int mask = (1 << shift) - 1;
+		dsfrac = ds & mask;
+		dtfrac = dt & mask;
+	}
+	else
+	{
+		dsfrac = 0;
+		dtfrac = 0;
+	}
 
-	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
+	lightmap = surf->samples + ((dt >> shift) * step_s + (ds >> shift))*3; // LordHavoc: *3 for color
 
-	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != 255;maps++)
+	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE;maps++)
 	{
 		scale = d_lightstylevalue[surf->styles[maps]];
 		r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
 		r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
 		r10 += lightmap[line3+0] * scale; g10 += lightmap[line3+1] * scale; b10 += lightmap[line3+2] * scale;
 		r11 += lightmap[line3+3] * scale; g11 += lightmap[line3+4] * scale; b11 += lightmap[line3+5] * scale;
-		lightmap += ((surf->extents[0]>>4)+1) * ((surf->extents[1]>>4)+1)*3; // LordHavoc: *3 for colored lighting
+		lightmap += step_s * step_t * 3; // LordHavoc: *3 for colored lighting
 	}
 
-	color[0] = ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)) * (1.f/256.f);
-	color[1] = ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)) * (1.f/256.f);
-	color[2] = ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)) * (1.f/256.f);
+	color[0] = ((((((((r11-r10) * dsfrac) >> shift) + r10)-((((r01-r00) * dsfrac) >> shift) + r00)) * dtfrac) >> shift) + ((((r01-r00) * dsfrac) >> shift) + r00)) * (1.f/256.f);
+	color[1] = ((((((((g11-g10) * dsfrac) >> shift) + g10)-((((g01-g00) * dsfrac) >> shift) + g00)) * dtfrac) >> shift) + ((((g01-g00) * dsfrac) >> shift) + g00)) * (1.f/256.f);
+	color[2] = ((((((((b11-b10) * dsfrac) >> shift) + b10)-((((b01-b00) * dsfrac) >> shift) + b00)) * dtfrac) >> shift) + ((((b01-b00) * dsfrac) >> shift) + b00)) * (1.f/256.f);
 }
 
 /*

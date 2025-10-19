@@ -48,173 +48,94 @@ static int	mod_novis_capacity;
 static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 
-typedef void (*mod_lump_error_fn)(const char *fmt, ...);
+static const void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
+{
+	int i;
+	if (lumpsize)
+		*lumpsize = 0;
+	if (!bspx_header)
+		return NULL;
+	for (i = 0; i < bspx_header->numlumps; i++)
+	{
+		if (!strncmp(bspx_header->lumps[i].lumpname, lumpname, sizeof(bspx_header->lumps[i].lumpname)))
+		{
+			if (lumpsize)
+				*lumpsize = bspx_header->lumps[i].filelen;
+			return bspx_base + bspx_header->lumps[i].fileofs;
+		}
+	}
+	return NULL;
+}
+
+static void Q1BSPX_Setup(qmodel_t *mod, byte *filebase, qfileofs_t filelen, lump_t *lumps, int numlumps)
+{
+	int	i;
+	int	offs = 0;
+	bspx_header_t *header;
+	qboolean	misaligned = false;
+	qfileofs_t	limit = filelen;
+
+	bspx_base = (const char *)filebase;
+	bspx_header = NULL;
+
+	for (i = 0; i < numlumps; i++)
+	{
+		if ((lumps[i].fileofs & 3) && i != LUMP_ENTITIES)
+			misaligned = true;
+		if (offs < lumps[i].fileofs + lumps[i].filelen)
+			offs = lumps[i].fileofs + lumps[i].filelen;
+	}
+
+	if (misaligned)
+		Con_DWarning("%s contains misaligned lumps\n", mod->name);
+
+	offs = (offs + 3) & ~3;
+	if (limit < 0 || offs + (int)sizeof(*header) > limit)
+		return;
+
+	header = (bspx_header_t *)(filebase + offs);
+	i = LittleLong(header->numlumps);
+	if (strncmp(header->id, "BSPX", 4) || i < 0)
+		return;
+
+	if ((qfileofs_t)(offs + sizeof(*header) + sizeof(header->lumps[0]) * (i ? (i - 1) : 0)) > limit)
+		return;
+
+	header->numlumps = i;
+	while (i-- > 0)
+	{
+		qfileofs_t lumpofs = LittleLong(header->lumps[i].fileofs);
+		qfileofs_t lumplen = LittleLong(header->lumps[i].filelen);
+
+		header->lumps[i].fileofs = (int)lumpofs;
+		header->lumps[i].filelen = (int)lumplen;
+
+		if (header->lumps[i].fileofs & 3)
+			Con_DWarning("%s contains misaligned bspx lump %s\n", mod->name, header->lumps[i].lumpname);
+
+		if (lumpofs < 0 || lumplen < 0 || lumpofs + lumplen > limit)
+			return;
+	}
+
+	bspx_header = header;
+}
 
 typedef struct
 {
-	const byte	*data;
-	size_t		size;
-} mod_lump_info_t;
+	char		lumpname[24];
+	int		fileofs;
+	int		filelen;
+} bspx_lump_t;
 
-static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, const lump_t *l, mod_lump_error_fn error_fn)
+typedef struct
 {
-	mod_lump_info_t info;
-	qfileofs_t	start;
-	qfileofs_t	length;
-	qfileofs_t	end;
+	char		id[4];
+	int		numlumps;
+	bspx_lump_t	lumps[1];
+} bspx_header_t;
 
-	info.data = mod_base + l->fileofs;
-	info.size = 0;
-
-	if (!l->filelen)
-		return info;
-
-	if (l->fileofs < 0 || l->filelen < 0)
-		error_fn ("%s: %s lump has negative offset or length in %s", context, lumpname, loadmodel->name);
-
-	start = (qfileofs_t) l->fileofs;
-	length = (qfileofs_t) l->filelen;
-	end = start + length;
-
-	if (length < 0 || start < 0 || end < start)
-		error_fn ("%s: %s lump overflow in %s", context, lumpname, loadmodel->name);
-
-	if (com_filesize >= 0 && end > com_filesize)
-		error_fn ("%s: %s lump extends past file size in %s", context, lumpname, loadmodel->name);
-
-	info.size = (size_t) length;
-	return info;
-}
-
-static size_t Mod_LumpElementCount (const char *context, const char *lumpname, size_t element_size, const lump_t *l, mod_lump_error_fn error_fn, const void **data_out)
-{
-	mod_lump_info_t info = Mod_LumpData (context, lumpname, l, error_fn);
-
-	if (element_size && (info.size % element_size))
-		error_fn ("%s: %s lump size (%d bytes) is not a multiple of %zu in %s", context, lumpname, l->filelen, element_size, loadmodel->name);
-
-	if (data_out)
-		*data_out = info.data;
-
-	return element_size ? (info.size / element_size) : 0;
-}
-
-#define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
-static qmodel_t	mod_known[MAX_MOD_KNOWN];
-static int		mod_numknown;
-
-texture_t	*r_notexture_mip; //johnfitz -- moved here from r_main.c
-texture_t	*r_notexture_mip2; //johnfitz -- used for non-lightmapped surfs with a missing texture
-
-/*
-===============
-R_MD5_f -- called when r_md5 changes
-===============
-*/
-static void R_MD5_f (cvar_t *cvar)
-{
-	int			i;
-	qmodel_t	*mod;
-
-	//ericw -- free alias model VBOs
-	GLMesh_DeleteVertexBuffers ();
-
-	for (i=0 , mod=mod_known ; i<mod_numknown ; i++, mod++)
-	{
-		if (mod->type == mod_alias)
-		{
-			if (Cache_Check (&mod->cache))
-				Cache_Free (&mod->cache, true);
-			mod->needload = true;
-		}
-	}
-
-	for (i=0 , mod=mod_known ; i<mod_numknown ; i++, mod++)
-		if (mod->type == mod_alias)
-			Mod_LoadModel (mod, false);
-
-	if (cls.state == ca_connected && cls.signon == SIGNONS)
-		for (i = 0; i < cl.maxclients; i++)
-			R_TranslateNewPlayerSkin (i);
-}
-
-/*
-===============
-Mod_Init
-===============
-*/
-void Mod_Init (void)
-{
-	Cvar_RegisterVariable (&external_vis);
-	Cvar_RegisterVariable (&external_ents);
-	Cvar_RegisterVariable (&r_md5);
-	Cvar_SetCallback (&r_md5, R_MD5_f);
-
-	Cmd_AddCommand ("mcache", Mod_Print);
-
-	//johnfitz -- create notexture miptex
-	r_notexture_mip = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip");
-	strcpy (r_notexture_mip->name, "notexture");
-	r_notexture_mip->height = r_notexture_mip->width = 32;
-
-	r_notexture_mip2 = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip2");
-	strcpy (r_notexture_mip2->name, "notexture2");
-	r_notexture_mip2->height = r_notexture_mip2->width = 32;
-	//johnfitz
-}
-
-/*
-===============
-Mod_Extradata
-
-Caches the data if needed
-===============
-*/
-void *Mod_Extradata (qmodel_t *mod)
-{
-	void	*r;
-
-	r = Cache_Check (&mod->cache);
-	if (r)
-		return r;
-
-	Mod_LoadModel (mod, true);
-
-	if (!mod->cache.data)
-		Sys_Error ("Mod_Extradata: caching failed");
-	return mod->cache.data;
-}
-
-/*
-===============
-Mod_PointInLeaf
-===============
-*/
-mleaf_t *Mod_PointInLeaf (vec3_t p, qmodel_t *model)
-{
-	mnode_t		*node;
-	float		d;
-	mplane_t	*plane;
-
-	if (!model || !model->nodes)
-		Sys_Error ("Mod_PointInLeaf: bad model");
-
-	node = model->nodes;
-	while (1)
-	{
-		if (node->contents < 0)
-			return (mleaf_t *)node;
-		plane = node->plane;
-		d = DotProduct (p,plane->normal) - plane->dist;
-		if (d > 0)
-			node = node->children[0];
-		else
-			node = node->children[1];
-	}
-
-	return NULL;	// never reached
-}
-
+static const char	*bspx_base;
+static bspx_header_t	*bspx_header;
 
 /*
 ===================
@@ -444,6 +365,9 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 
 	loadmodel = mod;
 
+	bspx_base = NULL;
+	bspx_header = NULL;
+
 //
 // fill it in
 //
@@ -498,6 +422,7 @@ qmodel_t *Mod_ForName (const char *name, qboolean crash)
 */
 
 static byte	*mod_base;
+
 
 /*
 =================
@@ -945,6 +870,50 @@ static void Mod_LoadLighting (lump_t *l)
 	}
 
 	// LordHavoc: no .lit found, expand the white lighting data to color
+	if (raw_size)
+	{
+		int bspxsize = 0;
+		const byte *bspxdata;
+
+		bspxdata = (const byte *)Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
+		if (bspxdata && bspxsize >= 0 && (size_t)bspxsize == raw_size * 3)
+		{
+			if (bspxsize > INT_MAX)
+				Host_Error("Mod_LoadLighting: bspx lighting too large in %s", loadmodel->name);
+			loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (bspxsize, litfilename);
+			memcpy(loadmodel->lightdata, bspxdata, (size_t)bspxsize);
+			loadmodel->litfile = true;
+			return;
+		}
+
+		bspxdata = (const byte *)Q1BSPX_FindLump("LIGHTING_E5BGR9", &bspxsize);
+		if (bspxdata && bspxsize >= 0 && (size_t)bspxsize == raw_size * 4)
+		{
+			static const float rgb9e5tab[32] = {
+				1.0f/(1<<24), 1.0f/(1<<23), 1.0f/(1<<22), 1.0f/(1<<21), 1.0f/(1<<20), 1.0f/(1<<19), 1.0f/(1<<18), 1.0f/(1<<17),
+				1.0f/(1<<16), 1.0f/(1<<15), 1.0f/(1<<14), 1.0f/(1<<13), 1.0f/(1<<12), 1.0f/(1<<11), 1.0f/(1<<10), 1.0f/(1<<9),
+				1.0f/(1<<8), 1.0f/(1<<7), 1.0f/(1<<6), 1.0f/(1<<5), 1.0f/(1<<4), 1.0f/(1<<3), 1.0f/(1<<2), 1.0f/(1<<1),
+				1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f, 64.0f, 128.0f
+			};
+			if (raw_size > (size_t)INT_MAX / 3)
+				Host_Error("Mod_LoadLighting: bspx hdr lighting too large in %s", loadmodel->name);
+			loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ((int)(raw_size * 3), litfilename);
+			out = loadmodel->lightdata;
+			for (size_t i = 0; i < raw_size; i++)
+			{
+				uint32_t packed;
+				memcpy(&packed, bspxdata + i * 4, sizeof(packed));
+				packed = LittleLong(packed);
+				float exponent = rgb9e5tab[(packed >> 27) & 31] * (1 << 7);
+				*out++ = (byte) q_min(255, (int)(exponent * ((packed >> 0) & 0x1ff)));
+				*out++ = (byte) q_min(255, (int)(exponent * ((packed >> 9) & 0x1ff)));
+				*out++ = (byte) q_min(255, (int)(exponent * ((packed >> 18) & 0x1ff)));
+			}
+			loadmodel->litfile = true;
+			return;
+		}
+	}
+
 	if (!raw_size)
 		return;
 
@@ -987,18 +956,6 @@ static void Mod_LoadLighting (lump_t *l)
 		*out++ = d;
 		*out++ = d;
 	}
-}
-
-
-/*
-=================
-Mod_LoadVisibility
-=================
-*/
-static void Mod_LoadVisibility (lump_t *l)
-{
-	mod_lump_info_t lump = Mod_LumpData ("Mod_LoadVisibility", "visibility", l, Sys_Error);
-	size_t size = lump.size;
 
 	loadmodel->viswarn = false;
 	if (!size)
@@ -1080,6 +1037,48 @@ _load_embedded:
 	memcpy (loadmodel->entities, lump.data, size);
 }
 
+
+/*
+=================
+Mod_ParseWorldspawnKey
+=================
+*/
+static const char *Mod_ParseWorldspawnKey(qmodel_t *mod, const char *wantkey, char *buffer, size_t buffer_size)
+{
+	char foundkey[128];
+	const char *data;
+
+	if (!mod->entities)
+		return NULL;
+
+	data = COM_Parse(mod->entities);
+	if (!data || com_token[0] != '{')
+		return NULL;
+
+	while (1)
+	{
+		data = COM_Parse(data);
+		if (!data)
+			break;
+		if (com_token[0] == '}')
+			break;
+		if (com_token[0] == '_')
+			q_strlcpy(foundkey, com_token + 1, sizeof(foundkey));
+		else
+			q_strlcpy(foundkey, com_token, sizeof(foundkey));
+
+		data = COM_Parse(data);
+		if (!data)
+			break;
+		if (!strcmp(wantkey, foundkey))
+		{
+			q_strlcpy(buffer, com_token, buffer_size);
+			return buffer;
+		}
+	}
+
+	return NULL;
+}
 
 /*
 =================
@@ -1356,6 +1355,16 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	size_t		count;
 	int		i, surfnum, lofs;
 	int		planenum, side, texinfon;
+	const byte	*lmshift_data = NULL;
+	const uint32_t	*lmoffset_data = NULL;
+	const byte	*lmstyle8_data = NULL;
+	const uint16_t	*lmstyle16_data = NULL;
+	int		stylesperface = MAXLIGHTMAPS;
+	int		lumpsize;
+	int		defaultshift = 4;
+	char		scalebuf[16];
+	static qboolean	warned_lmshift_clamp = false;
+	static qboolean	warned_lmstyle_overflow = false;
 
 	if (bsp2)
 	{
@@ -1367,6 +1376,58 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	}
 	if (count > (size_t)INT_MAX / sizeof(*out))
 		Host_Error("Mod_LoadFaces: too many faces in %s", loadmodel->name);
+
+	lumpsize = 0;
+	lmshift_data = (const byte *)Q1BSPX_FindLump("LMSHIFT", &lumpsize);
+	if (!lmshift_data || lumpsize != (int)count)
+		lmshift_data = NULL;
+
+	lumpsize = 0;
+	lmoffset_data = (const uint32_t *)Q1BSPX_FindLump("LMOFFSET", &lumpsize);
+	if (!lmoffset_data || lumpsize != (int)(count * sizeof(uint32_t)))
+		lmoffset_data = NULL;
+
+	lumpsize = 0;
+	lmstyle16_data = (const uint16_t *)Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
+	if (lmstyle16_data && count > 0)
+	{
+		stylesperface = lumpsize / (int)(count * sizeof(uint16_t));
+		if (stylesperface <= 0 || lumpsize != (int)(count * sizeof(uint16_t) * stylesperface))
+			lmstyle16_data = NULL;
+	}
+	if (!lmstyle16_data)
+	{
+		lumpsize = 0;
+		lmstyle8_data = (const byte *)Q1BSPX_FindLump("LMSTYLE", &lumpsize);
+		if (lmstyle8_data && count > 0)
+		{
+			stylesperface = lumpsize / (int)(count * sizeof(byte));
+			if (stylesperface <= 0 || lumpsize != (int)(count * sizeof(byte) * stylesperface))
+				lmstyle8_data = NULL;
+		}
+	}
+	if (!lmstyle16_data && !lmstyle8_data)
+		stylesperface = MAXLIGHTMAPS;
+	if (stylesperface > MAXLIGHTMAPS)
+		stylesperface = MAXLIGHTMAPS;
+
+	if (Mod_ParseWorldspawnKey(loadmodel, "lightmap_scale", scalebuf, sizeof(scalebuf)))
+	{
+		int scale = atoi(scalebuf);
+		if (scale > 0)
+		{
+			defaultshift = 0;
+			while (scale > 1 && defaultshift < 7)
+			{
+				defaultshift++;
+				scale >>= 1;
+			}
+		}
+	}
+
+	warned_lmshift_clamp = false;
+	warned_lmstyle_overflow = false;
+
 	out = (msurface_t *)Hunk_AllocName ( (int)(count*sizeof(*out)), loadname);
 
 	//johnfitz -- warn mappers about exceeding old limits
@@ -1405,6 +1466,63 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			ins++;
 		}
 
+		out->lmshift = (byte)defaultshift;
+		if (lmshift_data)
+		{
+			byte raw_shift = lmshift_data[surfnum];
+			if (raw_shift != 255)
+			{
+				if (raw_shift > 7)
+				{
+					if (!warned_lmshift_clamp)
+					{
+						Con_DWarning("Mod_LoadFaces: clamping lmshift %u on face %d\n", (unsigned)raw_shift, surfnum);
+						warned_lmshift_clamp = true;
+					}
+					raw_shift = 7;
+				}
+				out->lmshift = raw_shift;
+			}
+		}
+
+		if (lmstyle16_data)
+		{
+			int stylecount = q_min(stylesperface, MAXLIGHTMAPS);
+			int styleindex = surfnum * stylesperface;
+			for (i = 0; i < MAXLIGHTMAPS; i++)
+				out->styles[i] = INVALID_LIGHTSTYLE;
+			for (i = 0; i < stylecount; i++)
+			{
+				int style = (int)LittleShort((short)lmstyle16_data[styleindex + i]);
+				if (style < 0)
+					style = INVALID_LIGHTSTYLE;
+				else if (style > 255)
+				{
+					if (!warned_lmstyle_overflow)
+					{
+						Con_DWarning("Mod_LoadFaces: LMSTYLE16 value %d exceeds 255, clamping\n", style);
+						warned_lmstyle_overflow = true;
+					}
+					style = INVALID_LIGHTSTYLE;
+				}
+				out->styles[i] = (byte)style;
+			}
+		}
+		else if (lmstyle8_data)
+		{
+			int stylecount = q_min(stylesperface, MAXLIGHTMAPS);
+			int styleindex = surfnum * stylesperface;
+			for (i = 0; i < MAXLIGHTMAPS; i++)
+				out->styles[i] = INVALID_LIGHTSTYLE;
+			for (i = 0; i < stylecount; i++)
+			{
+				byte style = lmstyle8_data[styleindex + i];
+				out->styles[i] = style;
+				if (style == INVALID_LIGHTSTYLE)
+					break;
+			}
+		}
+
 		out->flags = 0;
 		if (out->numedges < 3)
 			Con_Warning("surfnum %d: bad numedges %d\n", surfnum, out->numedges);
@@ -1421,13 +1539,24 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 		Mod_CalcSurfaceBounds (out); //johnfitz -- for per-surface frustum culling
 
 	// lighting info
-		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake
+	{
+		int sampleofs;
 
-		if (lofs == -1)
-			out->samples = NULL;
+		if (lmoffset_data)
+			sampleofs = (int)LittleLong((int)lmoffset_data[surfnum]);
 		else
-			out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+			sampleofs = lofs;
+
+		if (!lmoffset_data && loadmodel->bspversion == BSPVERSION_QUAKE64)
+			sampleofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake
+
+		if (!loadmodel->lightdata || sampleofs == -1)
+			out->samples = NULL;
+		else if (lmoffset_data)
+			out->samples = loadmodel->lightdata + sampleofs;
+		else
+			out->samples = loadmodel->lightdata + (sampleofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+	}
 
 		texture = loadmodel->textures[out->texinfo->texnum];
 
@@ -2135,6 +2264,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
 		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
 
+	Q1BSPX_Setup(mod, (byte *)buffer, com_filesize, header->lumps, HEADER_LUMPS);
+
 // load into heap
 
 	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
@@ -2144,6 +2275,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
 	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
+	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
 	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
 	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
 
@@ -2175,7 +2307,6 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 visdone:
 	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
-	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
 	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
 
 	Mod_MakeHull0 ();
@@ -2193,6 +2324,9 @@ visdone:
 		mod->nummodelsurfaces = mod->numsurfaces;
 	mod->sortkey = (CRC_Block (mod->name, strlen(mod->name)) & MODSORT_MODELMASK) << MODSORT_FRAMEBITS;
 	Mod_FindUsedTextures (mod);
+
+	bspx_base = NULL;
+	bspx_header = NULL;
 
 	// johnfitz -- okay, so that i stop getting confused every time i look at this loop, here's how it works:
 	// we're looping through the submodels starting at 0.  Submodel 0 is the main model, so we don't have to

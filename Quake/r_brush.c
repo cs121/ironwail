@@ -246,9 +246,9 @@ GL_NumLightmapTaps
 */
 static int GL_NumLightmapTaps (const msurface_t *surf)
 {
-	if (surf->styles[1] == 255)
+	if (surf->styles[1] == INVALID_LIGHTSTYLE)
 		return 1;
-	if (surf->styles[2] == 255)
+	if (surf->styles[2] == INVALID_LIGHTSTYLE)
 		return 2;
 	return 3;
 }
@@ -267,13 +267,15 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	byte		*src;
 	unsigned	*dst;
 	int			s, t, facesize;
+	int			shift;
 
-	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == 255)
+	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == INVALID_LIGHTSTYLE)
 		return;
 
 	lm = &lightmaps[surf->lightmaptexturenum];
-	smax = (surf->extents[0]>>4)+1;
-	tmax = (surf->extents[1]>>4)+1;
+	shift = surf->lmshift;
+	smax = (surf->extents[0] >> shift) + 1;
+	tmax = (surf->extents[1] >> shift) + 1;
 	xofs = lm->xofs + surf->light_s;
 	yofs = lm->yofs + surf->light_t;
 	facesize = smax * tmax * 3;
@@ -281,13 +283,13 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	src = surf->samples;
 	dst = lightmap_data + yofs * lightmap_width + xofs;
 
-	if (surf->styles[1] == 255) // single lightstyle
+	if (surf->styles[1] == INVALID_LIGHTSTYLE) // single lightstyle
 	{
 		for (t = 0; t < tmax; t++, dst += lightmap_width)
 			for (s = 0; s < smax; s++, src += 3)
 				dst[s] = src[0] | (src[1] << 8) | (src[2] << 16) | 0xff000000u;
 	}
-	else if (surf->styles[2] == 255) // 2 lightstyles
+	else if (surf->styles[2] == INVALID_LIGHTSTYLE) // 2 lightstyles
 	{
 		for (t = 0; t < tmax; t++, dst += lightmap_width)
 		{
@@ -306,7 +308,7 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 			{
 				const byte *mapsrc = src;
 				unsigned r = 0, g = 0, b = 0;
-				for (map = 0; map < 4 && surf->styles[map] != 255; map++, mapsrc += facesize)
+				for (map = 0; map < 4 && surf->styles[map] != INVALID_LIGHTSTYLE; map++, mapsrc += facesize)
 				{
 					r |= mapsrc[0] << (map << 3);
 					g |= mapsrc[1] << (map << 3);
@@ -372,11 +374,12 @@ static void GL_PackLitSurfaces (void)
 		for (i=0, surf=m->surfaces ; i<m->numsurfaces ; i++, surf++)
 		{
 			int w, h;
+			int shift = surf->lmshift;
 			if (surf->flags & SURF_DRAWTILED)
 				continue;
 
-			w = (surf->extents[0]>>4)+1;
-			h = (surf->extents[1]>>4)+1;
+			w = (surf->extents[0] >> shift) + 1;
+			h = (surf->extents[1] >> shift) + 1;
 			if (!surf->samples)
 			{
 				maxblack[0] = q_max (maxblack[0], w);
@@ -442,10 +445,12 @@ static void GL_PackLitSurfaces (void)
 	for (i = 0, j = VEC_SIZE (lit_surfs); i < j; i++)
 	{
 		int smax, tmax;
+		int shift;
 
 		surf = lit_surfs[lit_surf_order[0][i]];
-		smax = (surf->extents[0]>>4)+1;
-		tmax = (surf->extents[1]>>4)+1;
+		shift = surf->lmshift;
+		smax = (surf->extents[0] >> shift) + 1;
+		tmax = (surf->extents[1] >> shift) + 1;
 		smax *= GL_NumLightmapTaps (surf);
 		num_lightmap_samples += smax * tmax;
 
@@ -615,9 +620,6 @@ void GL_BuildBModelVertexBuffer (void)
 	int			i, j, k;
 	qmodel_t	*m;
 	glvert_t	*varray;
-	float		lmscalex = 1.f / 16.f / lightmap_width;
-	float		lmscaley = 1.f / 16.f / lightmap_height;
-
 // ask GL for a name for our VBO
 	GL_DeleteBuffer (gl_bmodel_vbo);
 	
@@ -654,8 +656,10 @@ void GL_BuildBModelVertexBuffer (void)
 			texture_t	*texture = m->textures[fa->texinfo->texnum];
 			glvert_t	*vert = &varray[varray_index];
 			float		texscalex, texscaley, useofs, lmofs;
+			float		lmunit = 0.f, inv_lmwidth = 0.f, inv_lmheight = 0.f, lmhalf = 0.f;
+			int		shift = 0;
 			medge_t		*r_pedge;
-			lightmap_t	*lm;
+			lightmap_t		*lm;
 
 			if (fa->flags & SURF_DRAWTILED)
 			{
@@ -671,6 +675,11 @@ void GL_BuildBModelVertexBuffer (void)
 			}
 			else
 			{
+				shift = fa->lmshift;
+				lmunit = (float)(1 << shift);
+				inv_lmwidth = 1.f / (lmunit * lightmap_width);
+				inv_lmheight = 1.f / (lmunit * lightmap_height);
+				lmhalf = lmunit * 0.5f;
 				if (fa->flags & SURF_DRAWTURB)
 				{
 					texscaley = texscalex = 1.f / 128.f; //warp animation repeats every 128
@@ -683,7 +692,7 @@ void GL_BuildBModelVertexBuffer (void)
 					useofs = 1.f;
 				}
 				lm = &lightmaps[fa->lightmaptexturenum];
-				lmofs = ((fa->extents[0]>>4)+1) / (float)lightmap_width;
+				lmofs = ((fa->extents[0] >> shift) + 1) / (float)lightmap_width;
 			}
 
 			fa->vbo_firstvert = varray_index;
@@ -733,15 +742,15 @@ void GL_BuildBModelVertexBuffer (void)
 					//
 					s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
 					s -= fa->texturemins[0];
-					s += (fa->light_s + lm->xofs) * 16;
-					s += 8;
-					s *= lmscalex;
+					s += (fa->light_s + lm->xofs) * lmunit;
+					s += lmhalf;
+					s *= inv_lmwidth;
 
 					t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
 					t -= fa->texturemins[1];
-					t += (fa->light_t + lm->yofs) * 16;
-					t += 8;
-					t *= lmscaley;
+					t += (fa->light_t + lm->yofs) * lmunit;
+					t += lmhalf;
+					t *= inv_lmheight;
 
 					vert->st[2] = s;
 					vert->st[3] = t;
