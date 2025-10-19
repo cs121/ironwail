@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
+#include <limits.h>
 
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
@@ -46,6 +47,57 @@ static int	mod_novis_capacity;
 
 static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
+
+typedef void (*mod_lump_error_fn)(const char *fmt, ...);
+
+typedef struct
+{
+	const byte	*data;
+	size_t		size;
+} mod_lump_info_t;
+
+static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, const lump_t *l, mod_lump_error_fn error_fn)
+{
+	mod_lump_info_t info;
+	qfileofs_t	start;
+	qfileofs_t	length;
+	qfileofs_t	end;
+
+	info.data = mod_base + l->fileofs;
+	info.size = 0;
+
+	if (!l->filelen)
+		return info;
+
+	if (l->fileofs < 0 || l->filelen < 0)
+		error_fn ("%s: %s lump has negative offset or length in %s", context, lumpname, loadmodel->name);
+
+	start = (qfileofs_t) l->fileofs;
+	length = (qfileofs_t) l->filelen;
+	end = start + length;
+
+	if (length < 0 || start < 0 || end < start)
+		error_fn ("%s: %s lump overflow in %s", context, lumpname, loadmodel->name);
+
+	if (com_filesize >= 0 && end > com_filesize)
+		error_fn ("%s: %s lump extends past file size in %s", context, lumpname, loadmodel->name);
+
+	info.size = (size_t) length;
+	return info;
+}
+
+static size_t Mod_LumpElementCount (const char *context, const char *lumpname, size_t element_size, const lump_t *l, mod_lump_error_fn error_fn, const void **data_out)
+{
+	mod_lump_info_t info = Mod_LumpData (context, lumpname, l, error_fn);
+
+	if (element_size && (info.size % element_size))
+		error_fn ("%s: %s lump size (%d bytes) is not a multiple of %zu in %s", context, lumpname, l->filelen, element_size, loadmodel->name);
+
+	if (data_out)
+		*data_out = info.data;
+
+	return element_size ? (info.size / element_size) : 0;
+}
 
 #define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
 static qmodel_t	mod_known[MAX_MOD_KNOWN];
@@ -837,11 +889,14 @@ Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
 */
 static void Mod_LoadLighting (lump_t *l)
 {
-	int i, mark;
-	byte *in, *out, *data;
-	byte d, q64_b0, q64_b1;
-	char litfilename[MAX_OSPATH];
-	unsigned int path_id;
+	mod_lump_info_t lump = Mod_LumpData ("Mod_LoadLighting", "lighting", l, Sys_Error);
+	const byte	*raw = lump.data;
+	size_t		raw_size = lump.size;
+	byte		*out, *data, *inbuf;
+	byte		d, q64_b0, q64_b1;
+	char		litfilename[MAX_OSPATH];
+	unsigned int	path_id;
+	int		mark;
 
 	loadmodel->lightdata = NULL;
 	loadmodel->litfile = false;
@@ -860,13 +915,13 @@ static void Mod_LoadLighting (lump_t *l)
 			Hunk_FreeToLowMark(mark);
 			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
 		}
-		else
-		if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+		else if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
 		{
-			i = LittleLong(((int *)data)[1]);
-			if (i == 1)
+			int version = LittleLong(((int *)data)[1]);
+			if (version == 1)
 			{
-				if (8+l->filelen*3 == com_filesize)
+				qfileofs_t expected = 8 + (qfileofs_t)raw_size * 3;
+				if (com_filesize == expected)
 				{
 					Con_DPrintf2("%s loaded\n", litfilename);
 					loadmodel->lightdata = data + 8;
@@ -874,12 +929,12 @@ static void Mod_LoadLighting (lump_t *l)
 					return;
 				}
 				Hunk_FreeToLowMark(mark);
-				Con_Printf("Outdated .lit file (%s should be %u bytes, not %" SDL_PRIs64 "\n", litfilename, 8+l->filelen*3, com_filesize);
+				Con_Printf("Outdated .lit file (%s should be %" SDL_PRIs64 " bytes, not %" SDL_PRIs64 "\n", litfilename, expected, com_filesize);
 			}
 			else
 			{
 				Hunk_FreeToLowMark(mark);
-				Con_Printf("Unknown .lit file version (%d)\n", i);
+				Con_Printf("Unknown .lit file version (%d)\n", version);
 			}
 		}
 		else
@@ -888,39 +943,46 @@ static void Mod_LoadLighting (lump_t *l)
 			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
 		}
 	}
+
 	// LordHavoc: no .lit found, expand the white lighting data to color
-	if (!l->filelen)
+	if (!raw_size)
 		return;
 
-	// Quake64 bsp lighmap data
 	if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 	{
 		// RGB lightmap samples are packed in 16bits.
 		// RRRRR GGGGG BBBBBB
+		if (raw_size & 1)
+			Host_Error("Mod_LoadLighting: odd Quake64 lightmap size in %s", loadmodel->name);
+		if ((raw_size / 2) > (size_t)INT_MAX / 3)
+			Host_Error("Mod_LoadLighting: Quake64 lightmap too large in %s", loadmodel->name);
 
-		loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( (l->filelen / 2)*3, litfilename);
-		in = mod_base + l->fileofs;
+		loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ((int)((raw_size / 2) * 3), litfilename);
+		const byte *in = raw;
 		out = loadmodel->lightdata;
 
-		for (i = 0;i < (l->filelen / 2) ;i++)
+		for (size_t i = 0; i < raw_size / 2; i++)
 		{
 			q64_b0 = *in++;
 			q64_b1 = *in++;
 
 			*out++ = q64_b0 & 0xf8;/* 0b11111000 */
-			*out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
-			*out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
+			*out++ = (byte)(((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5));/* 0b00000111, 0b11000000 */
+			*out++ = (byte)((q64_b1 & 0x3f) << 2);/* 0b00111111 */
 		}
 		return;
 	}
 
-	loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( l->filelen*3, litfilename);
-	in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
+	if (raw_size > (size_t)INT_MAX / 3)
+		Host_Error("Mod_LoadLighting: lightmap too large in %s", loadmodel->name);
+
+	loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ((int)(raw_size * 3), litfilename);
+	inbuf = loadmodel->lightdata + (int)(raw_size * 2); // place the file at the end, so it will not be overwritten until the very last write
 	out = loadmodel->lightdata;
-	memcpy (in, mod_base + l->fileofs, l->filelen);
-	for (i = 0;i < l->filelen;i++)
+	memcpy (inbuf, raw, raw_size);
+	for (size_t i = 0; i < raw_size; i++)
 	{
-		d = *in++;
+		d = *inbuf++;
 		*out++ = d;
 		*out++ = d;
 		*out++ = d;
@@ -935,14 +997,19 @@ Mod_LoadVisibility
 */
 static void Mod_LoadVisibility (lump_t *l)
 {
+	mod_lump_info_t lump = Mod_LumpData ("Mod_LoadVisibility", "visibility", l, Sys_Error);
+	size_t size = lump.size;
+
 	loadmodel->viswarn = false;
-	if (!l->filelen)
+	if (!size)
 	{
 		loadmodel->visdata = NULL;
 		return;
 	}
-	loadmodel->visdata = (byte *) Hunk_AllocNameNoFill ( l->filelen, loadname);
-	memcpy (loadmodel->visdata, mod_base + l->fileofs, l->filelen);
+	if (size > (size_t)INT_MAX)
+		Host_Error("Mod_LoadVisibility: vis lump too large in %s", loadmodel->name);
+	loadmodel->visdata = (byte *) Hunk_AllocNameNoFill ((int)size, loadname);
+	memcpy (loadmodel->visdata, lump.data, size);
 }
 
 
@@ -959,13 +1026,15 @@ static void Mod_LoadEntities (lump_t *l)
 	int		mark;
 	unsigned int	path_id;
 	unsigned int	crc = 0;
+	mod_lump_info_t lump = Mod_LumpData ("Mod_LoadEntities", "entities", l, Sys_Error);
+	size_t size = lump.size;
 
 	if (! external_ents.value)
 		goto _load_embedded;
 
 	mark = Hunk_LowMark();
-	if (l->filelen > 0) {
-		crc = CRC_Block(mod_base + l->fileofs, l->filelen - 1);
+	if (size > 0) {
+		crc = CRC_Block(lump.data, size - 1);
 	}
 
 	q_strlcpy(basemapname, loadmodel->name, sizeof(basemapname));
@@ -1000,13 +1069,15 @@ static void Mod_LoadEntities (lump_t *l)
 	}
 
 _load_embedded:
-	if (!l->filelen)
+	if (!size)
 	{
 		loadmodel->entities = NULL;
 		return;
 	}
-	loadmodel->entities = (char *) Hunk_AllocNameNoFill ( l->filelen, loadname);
-	memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
+	if (size > (size_t)INT_MAX)
+		Host_Error("Mod_LoadEntities: entities lump too large in %s", loadmodel->name);
+	loadmodel->entities = (char *) Hunk_AllocNameNoFill ((int)size, loadname);
+	memcpy (loadmodel->entities, lump.data, size);
 }
 
 
@@ -1017,26 +1088,27 @@ Mod_LoadVertexes
 */
 static void Mod_LoadVertexes (lump_t *l)
 {
-	dvertex_t	*in;
+	const dvertex_t	*in;
 	mvertex_t	*out;
-	int			i, count;
+	size_t		count;
+	int		i;
 
-	in = (dvertex_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (mvertex_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadVertexes", "vertexes", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX / sizeof(*out))
+		Host_Error("Mod_LoadVertexes: too many vertexes in %s", loadmodel->name);
+	out = (mvertex_t *) Hunk_AllocNameNoFill ((int)(count * sizeof(*out)), loadname);
 
 	loadmodel->vertexes = out;
-	loadmodel->numvertexes = count;
+	loadmodel->numvertexes = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		out->position[0] = LittleFloat (in->point[0]);
 		out->position[1] = LittleFloat (in->point[1]);
 		out->position[2] = LittleFloat (in->point[2]);
 	}
 }
+
 
 /*
 =================
@@ -1046,22 +1118,24 @@ Mod_LoadEdges
 static void Mod_LoadEdges (lump_t *l, int bsp2)
 {
 	medge_t *out;
-	int 	i, count;
+	size_t count;
+	int i;
 
 	if (bsp2)
 	{
-		dledge_t *in = (dledge_t *)(mod_base + l->fileofs);
+		const dledge_t *in;
 
-		if (l->filelen % sizeof(*in))
-			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+		count = Mod_LumpElementCount ("Mod_LoadEdges", "edges", sizeof(*in), l, Sys_Error, (const void **)&in);
+		if (count >= (size_t)INT_MAX)
+			Host_Error("Mod_LoadEdges: too many edges in %s", loadmodel->name);
+		if (count + 1 > (size_t)INT_MAX / sizeof(*out))
+			Host_Error("Mod_LoadEdges: edge allocation overflow in %s", loadmodel->name);
+		out = (medge_t *) Hunk_AllocNameNoFill ((int)((count + 1) * sizeof(*out)), loadname);
 
 		loadmodel->edges = out;
-		loadmodel->numedges = count;
+		loadmodel->numedges = (int)count;
 
-		for (i=0 ; i<count ; i++, in++, out++)
+		for (i=0 ; i<(int)count ; i++, in++, out++)
 		{
 			out->v[0] = LittleLong(in->v[0]);
 			out->v[1] = LittleLong(in->v[1]);
@@ -1069,24 +1143,26 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 	}
 	else
 	{
-		dsedge_t *in = (dsedge_t *)(mod_base + l->fileofs);
+		const dsedge_t *in;
 
-		if (l->filelen % sizeof(*in))
-			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+		count = Mod_LumpElementCount ("Mod_LoadEdges", "edges", sizeof(*in), l, Sys_Error, (const void **)&in);
+		if (count >= (size_t)INT_MAX)
+			Host_Error("Mod_LoadEdges: too many edges in %s", loadmodel->name);
+		if (count + 1 > (size_t)INT_MAX / sizeof(*out))
+			Host_Error("Mod_LoadEdges: edge allocation overflow in %s", loadmodel->name);
+		out = (medge_t *) Hunk_AllocNameNoFill ((int)((count + 1) * sizeof(*out)), loadname);
 
 		loadmodel->edges = out;
-		loadmodel->numedges = count;
+		loadmodel->numedges = (int)count;
 
-		for (i=0 ; i<count ; i++, in++, out++)
+		for (i=0 ; i<(int)count ; i++, in++, out++)
 		{
 			out->v[0] = (unsigned short)LittleShort(in->v[0]);
 			out->v[1] = (unsigned short)LittleShort(in->v[1]);
 		}
 	}
 }
+
 
 /*
 =================
@@ -1095,21 +1171,21 @@ Mod_LoadTexinfo
 */
 static void Mod_LoadTexinfo (lump_t *l)
 {
-	texinfo_t *in;
+	const texinfo_t *in;
 	mtexinfo_t *out;
-	int	i, j, count, miptex;
+	size_t count;
+	int i, j, miptex;
 	int missing = 0; //johnfitz
 
-	in = (texinfo_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (mtexinfo_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadTexinfo", "texinfo", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX / sizeof(*out))
+		Host_Error("Mod_LoadTexinfo: too many texinfo entries in %s", loadmodel->name);
+	out = (mtexinfo_t *) Hunk_AllocNameNoFill ((int)(count * sizeof(*out)), loadname);
 
 	loadmodel->texinfo = out;
-	loadmodel->numtexinfo = count;
+	loadmodel->numtexinfo = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<4 ; j++)
 		{
@@ -1142,6 +1218,7 @@ static void Mod_LoadTexinfo (lump_t *l)
 		Con_Printf ("Mod_LoadTexinfo: %d texture(s) missing from BSP file\n", missing);
 	//johnfitz
 }
+
 
 /*
 ================
@@ -1273,39 +1350,34 @@ Mod_LoadFaces
 */
 static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 {
-	dsface_t	*ins;
-	dlface_t	*inl;
-	msurface_t 	*out;
-	int			i, count, surfnum, lofs;
-	int			planenum, side, texinfon;
+	const dsface_t	*ins = NULL;
+	const dlface_t	*inl = NULL;
+	msurface_t	*out;
+	size_t		count;
+	int		i, surfnum, lofs;
+	int		planenum, side, texinfon;
 
 	if (bsp2)
 	{
-		ins = NULL;
-		inl = (dlface_t *)(mod_base + l->fileofs);
-		if (l->filelen % sizeof(*inl))
-			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-		count = l->filelen / sizeof(*inl);
+		count = Mod_LumpElementCount ("Mod_LoadFaces", "faces", sizeof(*inl), l, Sys_Error, (const void **)&inl);
 	}
 	else
 	{
-		ins = (dsface_t *)(mod_base + l->fileofs);
-		inl = NULL;
-		if (l->filelen % sizeof(*ins))
-			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-		count = l->filelen / sizeof(*ins);
+		count = Mod_LumpElementCount ("Mod_LoadFaces", "faces", sizeof(*ins), l, Sys_Error, (const void **)&ins);
 	}
-	out = (msurface_t *)Hunk_AllocName ( count*sizeof(*out), loadname);
+	if (count > (size_t)INT_MAX / sizeof(*out))
+		Host_Error("Mod_LoadFaces: too many faces in %s", loadmodel->name);
+	out = (msurface_t *)Hunk_AllocName ( (int)(count*sizeof(*out)), loadname);
 
 	//johnfitz -- warn mappers about exceeding old limits
 	if (count > 32767 && !bsp2)
-		Con_DWarning ("%i faces exceeds standard limit of 32767.\n", count);
+		Con_DWarning ("%zu faces exceeds standard limit of 32767.\n", count);
 	//johnfitz
 
 	loadmodel->surfaces = out;
-	loadmodel->numsurfaces = count;
+	loadmodel->numsurfaces = (int)count;
 
-	for (surfnum=0 ; surfnum<count ; surfnum++, out++)
+	for (surfnum=0 ; surfnum<(int)count ; surfnum++, out++)
 	{
 		texture_t *texture;
 		if (bsp2)
@@ -1350,7 +1422,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 	// lighting info
 		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake 
+			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake
 
 		if (lofs == -1)
 			out->samples = NULL;
@@ -1424,25 +1496,25 @@ Mod_LoadNodes
 */
 static void Mod_LoadNodes_S (lump_t *l)
 {
-	int			i, j, count, p;
-	dsnode_t	*in;
+	int		i, j, p;
+	size_t		count;
+	const dsnode_t		*in;
 	mnode_t		*out;
 
-	in = (dsnode_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (mnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadNodes", "nodes", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadNodes: too many nodes in %s", loadmodel->name);
+	out = (mnode_t *) Hunk_AllocName ((int)(count * sizeof(*out)), loadname);
 
 	//johnfitz -- warn mappers about exceeding old limits
 	if (count > 32767)
-		Con_DWarning ("%i nodes exceeds standard limit of 32767.\n", count);
+		Con_DWarning ("Mod_LoadNodes: %zu nodes exceeds standard limit of 32767.\n", count);
 	//johnfitz
 
 	loadmodel->nodes = out;
-	loadmodel->numnodes = count;
+	loadmodel->numnodes = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1450,17 +1522,17 @@ static void Mod_LoadNodes_S (lump_t *l)
 			out->minmaxs[3+j] = LittleShort (in->maxs[j]);
 		}
 
-		p = LittleLong(in->planenum);
+		p = LittleLong (in->planenum);
 		out->plane = loadmodel->planes + p;
 
-		out->firstsurface = (unsigned short)LittleShort (in->firstface); //johnfitz -- explicit cast as unsigned short
-		out->numsurfaces = (unsigned short)LittleShort (in->numfaces); //johnfitz -- explicit cast as unsigned short
+		out->firstsurface = (unsigned short) LittleShort (in->firstface); //johnfitz -- explicit cast as unsigned short
+		out->numsurfaces = (unsigned short) LittleShort (in->numfaces); //johnfitz -- explicit cast as unsigned short
 
 		for (j=0 ; j<2 ; j++)
 		{
 			//johnfitz -- hack to handle nodes > 32k, adapted from darkplaces
-			p = (unsigned short)LittleShort(in->children[j]);
-			if (p < count)
+			p = (unsigned short) LittleShort (in->children[j]);
+			if (p < (int)count)
 				out->children[j] = loadmodel->nodes + p;
 			else
 			{
@@ -1469,7 +1541,7 @@ static void Mod_LoadNodes_S (lump_t *l)
 					out->children[j] = (mnode_t *)(loadmodel->leafs + p);
 				else
 				{
-					Con_Printf("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
+					Con_Printf ("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
 					out->children[j] = (mnode_t *)(loadmodel->leafs); //map it to the solid leaf
 				}
 			}
@@ -1480,21 +1552,20 @@ static void Mod_LoadNodes_S (lump_t *l)
 
 static void Mod_LoadNodes_L1 (lump_t *l)
 {
-	int			i, j, count, p;
-	dl1node_t	*in;
+	int		i, j, p;
+	size_t		count;
+	const dl1node_t		*in;
 	mnode_t		*out;
 
-	in = (dl1node_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("Mod_LoadNodes: funny lump size in %s",loadmodel->name);
-
-	count = l->filelen / sizeof(*in);
-	out = (mnode_t *)Hunk_AllocName ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadNodes", "nodes", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadNodes: too many nodes in %s", loadmodel->name);
+	out = (mnode_t *) Hunk_AllocName ((int)(count * sizeof(*out)), loadname);
 
 	loadmodel->nodes = out;
-	loadmodel->numnodes = count;
+	loadmodel->numnodes = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1502,7 +1573,7 @@ static void Mod_LoadNodes_L1 (lump_t *l)
 			out->minmaxs[3+j] = LittleShort (in->maxs[j]);
 		}
 
-		p = LittleLong(in->planenum);
+		p = LittleLong (in->planenum);
 		out->plane = loadmodel->planes + p;
 
 		out->firstsurface = LittleLong (in->firstface); //johnfitz -- explicit cast as unsigned short
@@ -1511,17 +1582,17 @@ static void Mod_LoadNodes_L1 (lump_t *l)
 		for (j=0 ; j<2 ; j++)
 		{
 			//johnfitz -- hack to handle nodes > 32k, adapted from darkplaces
-			p = LittleLong(in->children[j]);
-			if (p >= 0 && p < count)
+			p = LittleLong (in->children[j]);
+			if (p >= 0 && p < (int)count)
 				out->children[j] = loadmodel->nodes + p;
 			else
 			{
-				p = 0xffffffff - p; //note this uses 65535 intentionally, -1 is leaf 0
+				p = 0xffffffff - p; //note this uses 0xffffffff intentionally, -1 is leaf 0
 				if (p >= 0 && p < loadmodel->numleafs)
 					out->children[j] = (mnode_t *)(loadmodel->leafs + p);
 				else
 				{
-					Con_Printf("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
+					Con_Printf ("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
 					out->children[j] = (mnode_t *)(loadmodel->leafs); //map it to the solid leaf
 				}
 			}
@@ -1532,21 +1603,20 @@ static void Mod_LoadNodes_L1 (lump_t *l)
 
 static void Mod_LoadNodes_L2 (lump_t *l)
 {
-	int			i, j, count, p;
-	dl2node_t	*in;
+	int		i, j, p;
+	size_t		count;
+	const dl2node_t		*in;
 	mnode_t		*out;
 
-	in = (dl2node_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("Mod_LoadNodes: funny lump size in %s",loadmodel->name);
-
-	count = l->filelen / sizeof(*in);
-	out = (mnode_t *)Hunk_AllocName ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadNodes", "nodes", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadNodes: too many nodes in %s", loadmodel->name);
+	out = (mnode_t *) Hunk_AllocName ((int)(count * sizeof(*out)), loadname);
 
 	loadmodel->nodes = out;
-	loadmodel->numnodes = count;
+	loadmodel->numnodes = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1554,7 +1624,7 @@ static void Mod_LoadNodes_L2 (lump_t *l)
 			out->minmaxs[3+j] = LittleFloat (in->maxs[j]);
 		}
 
-		p = LittleLong(in->planenum);
+		p = LittleLong (in->planenum);
 		out->plane = loadmodel->planes + p;
 
 		out->firstsurface = LittleLong (in->firstface); //johnfitz -- explicit cast as unsigned short
@@ -1563,17 +1633,17 @@ static void Mod_LoadNodes_L2 (lump_t *l)
 		for (j=0 ; j<2 ; j++)
 		{
 			//johnfitz -- hack to handle nodes > 32k, adapted from darkplaces
-			p = LittleLong(in->children[j]);
-			if (p > 0 && p < count)
+			p = LittleLong (in->children[j]);
+			if (p >= 0 && p < (int)count)
 				out->children[j] = loadmodel->nodes + p;
 			else
 			{
-				p = 0xffffffff - p; //note this uses 65535 intentionally, -1 is leaf 0
+				p = 0xffffffff - p; //note this uses 0xffffffff intentionally, -1 is leaf 0
 				if (p >= 0 && p < loadmodel->numleafs)
 					out->children[j] = (mnode_t *)(loadmodel->leafs + p);
 				else
 				{
-					Con_Printf("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
+					Con_Printf ("Mod_LoadNodes: invalid leaf index %i (file has only %i leafs)\n", p, loadmodel->numleafs);
 					out->children[j] = (mnode_t *)(loadmodel->leafs); //map it to the solid leaf
 				}
 			}
@@ -1585,34 +1655,33 @@ static void Mod_LoadNodes_L2 (lump_t *l)
 static void Mod_LoadNodes (lump_t *l, int bsp2)
 {
 	if (bsp2 == 2)
-		Mod_LoadNodes_L2(l);
+		Mod_LoadNodes_L2 (l);
 	else if (bsp2)
-		Mod_LoadNodes_L1(l);
+		Mod_LoadNodes_L1 (l);
 	else
-		Mod_LoadNodes_S(l);
+		Mod_LoadNodes_S (l);
 
 	Mod_SetParent (loadmodel->nodes, NULL);	// sets nodes and leafs
 }
 
-static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
+static void Mod_ProcessLeafs_S (const dsleaf_t *in, size_t count)
 {
-	mleaf_t		*out;
-	int			i, j, count, p;
+	mleaf_t	*out;
+	int		i, j, p;
 
-	if (filelen % sizeof(*in))
-		Sys_Error ("Mod_ProcessLeafs: funny lump size in %s", loadmodel->name);
-	count = filelen / sizeof(*in);
-	out = (mleaf_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadLeafs: too many leafs in %s", loadmodel->name);
+	out = (mleaf_t *) Hunk_AllocName ( (int)(count*sizeof(*out)), loadname);
 
 	//johnfitz
 	if (count > 32767)
-		Host_Error ("Mod_LoadLeafs: %i leafs exceeds limit of 32767.", count);
+		Host_Error ("Mod_LoadLeafs: %zu leafs exceeds limit of 32767.", count);
 	//johnfitz
 
 	loadmodel->leafs = out;
-	loadmodel->numleafs = count;
+	loadmodel->numleafs = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1639,22 +1708,21 @@ static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
 	}
 }
 
-static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
+
+static void Mod_ProcessLeafs_L1 (const dl1leaf_t *in, size_t count)
 {
-	mleaf_t		*out;
-	int			i, j, count, p;
+	mleaf_t	*out;
+	int		i, j, p;
 
-	if (filelen % sizeof(*in))
-		Sys_Error ("Mod_ProcessLeafs: funny lump size in %s", loadmodel->name);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadLeafs: too many leafs in %s", loadmodel->name);
 
-	count = filelen / sizeof(*in);
-
-	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), loadname);
+	out = (mleaf_t *) Hunk_AllocName ( (int)(count * sizeof(*out)), loadname);
 
 	loadmodel->leafs = out;
-	loadmodel->numleafs = count;
+	loadmodel->numleafs = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1681,22 +1749,21 @@ static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
 	}
 }
 
-static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
+
+static void Mod_ProcessLeafs_L2 (const dl2leaf_t *in, size_t count)
 {
-	mleaf_t		*out;
-	int			i, j, count, p;
+	mleaf_t	*out;
+	int		i, j, p;
 
-	if (filelen % sizeof(*in))
-		Sys_Error ("Mod_ProcessLeafs: funny lump size in %s", loadmodel->name);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadLeafs: too many leafs in %s", loadmodel->name);
 
-	count = filelen / sizeof(*in);
-
-	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), loadname);
+	out = (mleaf_t *) Hunk_AllocName ( (int)(count * sizeof(*out)), loadname);
 
 	loadmodel->leafs = out;
-	loadmodel->numleafs = count;
+	loadmodel->numleafs = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
 		{
@@ -1723,214 +1790,28 @@ static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
 	}
 }
 
-/*
-=================
-Mod_LoadLeafs
-=================
-*/
-static void Mod_LoadLeafs (lump_t *l, int bsp2)
-{
-	void *in = (void *)(mod_base + l->fileofs);
-
-	if (bsp2 == 2)
-		Mod_ProcessLeafs_L2 ((dl2leaf_t *)in, l->filelen);
-	else if (bsp2)
-		Mod_ProcessLeafs_L1 ((dl1leaf_t *)in, l->filelen);
-	else
-		Mod_ProcessLeafs_S  ((dsleaf_t *) in, l->filelen);
-}
-
-/*
-=================
-Mod_CheckWaterVis
-=================
-*/
-static void Mod_CheckWaterVis(void)
-{
-	mleaf_t		*leaf, *other;
-	msurface_t * surf;
-	int i, j, k;
-	int numclusters = loadmodel->submodels[0].visleafs;
-	int contentfound = 0;
-	int contenttransparent = 0;
-	int contenttype;
-	unsigned hascontents = 0;
-
-	if (r_novis.value)
-	{	//all can be
-		loadmodel->contentstransparent = (SURF_DRAWWATER|SURF_DRAWTELE|SURF_DRAWSLIME|SURF_DRAWLAVA);
-		return;
-	}
-
-	//pvs is 1-based. leaf 0 sees all (the solid leaf).
-	//leaf 0 has no pvs, and does not appear in other leafs either, so watch out for the biases.
-	for (i=0,leaf=loadmodel->leafs+1 ; i<numclusters ; i++, leaf++)
-	{
-		byte *vis;
-		if (leaf->contents < 0)	//err... wtf?
-			hascontents |= 1u<<-leaf->contents;
-		if (leaf->contents == CONTENTS_WATER)
-		{
-			if ((contenttransparent & (SURF_DRAWWATER|SURF_DRAWTELE))==(SURF_DRAWWATER|SURF_DRAWTELE))
-				continue;
-			//this check is somewhat risky, but we should be able to get away with it.
-			for (contenttype = 0, j = 0; j < leaf->nummarksurfaces; j++)
-			{
-				surf = &loadmodel->surfaces[leaf->firstmarksurface[j]];
-				if (surf->flags & (SURF_DRAWWATER|SURF_DRAWTELE))
-				{
-					contenttype = surf->flags & (SURF_DRAWWATER|SURF_DRAWTELE);
-					break;
-				}
-			}
-			//its possible that this leaf has absolutely no surfaces in it, turb or otherwise.
-			if (contenttype == 0)
-				continue;
-		}
-		else if (leaf->contents == CONTENTS_SLIME)
-			contenttype = SURF_DRAWSLIME;
-		else if (leaf->contents == CONTENTS_LAVA)
-			contenttype = SURF_DRAWLAVA;
-		//fixme: tele
-		else
-			continue;
-		if (contenttransparent & contenttype)
-		{
-			nextleaf:
-			continue;	//found one of this type already
-		}
-		contentfound |= contenttype;
-		vis = Mod_DecompressVis(leaf->compressed_vis, loadmodel);
-		for (j = 0; j < (numclusters+7)/8; j++)
-		{
-			if (vis[j])
-			{
-				for (k = 0; k < 8; k++)
-				{
-					if (vis[j] & (1u<<k))
-					{
-						other = &loadmodel->leafs[(j<<3)+k+1];
-						if (leaf->contents != other->contents)
-						{
-//							Con_Printf("%p:%i sees %p:%i\n", leaf, leaf->contents, other, other->contents);
-							contenttransparent |= contenttype;
-							goto nextleaf;
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if (!contenttransparent)
-	{	//no water leaf saw a non-water leaf
-		//but only warn when there's actually water somewhere there...
-		if (hascontents & ((1<<-CONTENTS_WATER)
-						|  (1<<-CONTENTS_SLIME)
-						|  (1<<-CONTENTS_LAVA)))
-			Con_DPrintf("%s is not watervised\n", loadmodel->name);
-	}
-	else
-	{
-		Con_DPrintf2("%s is vised for transparent", loadmodel->name);
-		if (contenttransparent & SURF_DRAWWATER)
-			Con_DPrintf2(" water");
-		if (contenttransparent & SURF_DRAWTELE)
-			Con_DPrintf2(" tele");
-		if (contenttransparent & SURF_DRAWLAVA)
-			Con_DPrintf2(" lava");
-		if (contenttransparent & SURF_DRAWSLIME)
-			Con_DPrintf2(" slime");
-		Con_DPrintf2("\n");
-	}
-	//any types that we didn't find are assumed to be transparent.
-	//this allows submodels to work okay (eg: ad uses func_illusionary teleporters for some reason).
-	loadmodel->contentstransparent = contenttransparent | (~contentfound & (SURF_DRAWWATER|SURF_DRAWTELE|SURF_DRAWSLIME|SURF_DRAWLAVA));
-}
-
-/*
-=================
-Mod_FindUsedTextures
-=================
-*/
-static void Mod_FindUsedTextures (qmodel_t *mod)
-{
-	msurface_t	*s;
-	int			i, count;
-	int			ofs[TEXTYPE_COUNT];
-	uint32_t	*inuse;
-
-	inuse = (uint32_t *) calloc (BITARRAY_DWORDS (mod->numtextures), sizeof (uint32_t));
-	if (!inuse)
-		Sys_Error ("Mod_FindUsedTextures: out of memory (%d bits)", mod->numtextures);
-
-	memset (ofs, 0, sizeof(ofs));
-	for (i = 0, s = mod->surfaces + mod->firstmodelsurface; i < mod->nummodelsurfaces; i++, s++)
-	{
-		texture_t *t = mod->textures[s->texinfo->texnum];
-		if (!t)
-			continue;
-		if (!GetBit (inuse, s->texinfo->texnum))
-		{
-			SetBit (inuse, s->texinfo->texnum);
-			ofs[t->type]++;
-		}
-	}
-
-	count = 0;
-	for (i = 0; i < TEXTYPE_COUNT; i++)
-	{
-		int tmp = ofs[i];
-		mod->texofs[i] = ofs[i] = count;
-		count += tmp;
-	}
-
-	mod->texofs [TEXTYPE_COUNT] = count;
-	mod->usedtextures = (int *) Hunk_Alloc (sizeof(mod->usedtextures[0]) * count);
-	for (i = 0; i < mod->numtextures; i++)
-	{
-		texture_t *t = mod->textures[i];
-		if (GetBit (inuse, i))
-			mod->usedtextures[ofs[t->type]++] = i;
-	}
-
-	free (inuse);
-
-	//Con_Printf("%s: %d/%d textures\n", mod->name, count, mod->numtextures);
-}
-
-/*
-=================
-Mod_LoadClipnodes
-=================
-*/
 static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 {
-	dsclipnode_t *ins;
-	dlclipnode_t *inl;
-
-	mclipnode_t *out; //johnfitz -- was dclipnode_t
-	int			i, count;
+	const dsclipnode_t	*ins = NULL;
+	const dlclipnode_t	*inl = NULL;
+	mclipnode_t	*out; //johnfitz -- was dclipnode_t
+	size_t		total;
+	int		i, j, count;
 	hull_t		*hull;
 
 	if (bsp2)
 	{
-		ins = NULL;
-		inl = (dlclipnode_t *)(mod_base + l->fileofs);
-		if (l->filelen % sizeof(*inl))
-			Sys_Error ("Mod_LoadClipnodes: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*inl);
+		total = Mod_LumpElementCount ("Mod_LoadClipnodes", "clipnodes", sizeof(*inl), l, Sys_Error, (const void **)&inl);
 	}
 	else
 	{
-		ins = (dsclipnode_t *)(mod_base + l->fileofs);
-		inl = NULL;
-		if (l->filelen % sizeof(*ins))
-			Sys_Error ("Mod_LoadClipnodes: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*ins);
+		total = Mod_LumpElementCount ("Mod_LoadClipnodes", "clipnodes", sizeof(*ins), l, Sys_Error, (const void **)&ins);
 	}
+
+	if (total > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadClipnodes: too many clipnodes in %s", loadmodel->name);
+	count = (int)total;
+
 	out = (mclipnode_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
 
 	//johnfitz -- warn about exceeding old limits
@@ -1964,6 +1845,18 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 	hull->clip_maxs[0] = 32;
 	hull->clip_maxs[1] = 32;
 	hull->clip_maxs[2] = 64;
+
+	hull = &loadmodel->hulls[3];
+	hull->clipnodes = out;
+	hull->firstclipnode = 0;
+	hull->lastclipnode = count-1;
+	hull->planes = loadmodel->planes;
+	hull->clip_mins[0] = -16;
+	hull->clip_mins[1] = -16;
+	hull->clip_mins[2] = -24;
+	hull->clip_maxs[0] = 16;
+	hull->clip_maxs[1] = 16;
+	hull->clip_maxs[2] = 32;
 
 	if (bsp2)
 	{
@@ -2005,19 +1898,12 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 	}
 }
 
-/*
-=================
-Mod_MakeHull0
-
-Duplicate the drawing hull structure as a clipping hull
-=================
-*/
 static void Mod_MakeHull0 (void)
 {
-	mnode_t		*in, *child;
+	mnode_t         *in, *child;
 	mclipnode_t *out; //johnfitz -- was dclipnode_t
-	int			i, j, count;
-	hull_t		*hull;
+	int             i, j, count;
+	hull_t          *hull;
 
 	hull = &loadmodel->hulls[0];
 
@@ -2044,31 +1930,25 @@ static void Mod_MakeHull0 (void)
 	}
 }
 
-/*
-=================
-Mod_LoadMarksurfaces
-=================
-*/
 static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 {
-	int		i, j, count;
-	int		*out;
+	int             *out;
+	size_t          total;
+
 	if (bsp2)
 	{
-		unsigned int *in = (unsigned int *)(mod_base + l->fileofs);
-
-		if (l->filelen % sizeof(*in))
-			Host_Error ("Mod_LoadMarksurfaces: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*in);
-		out = (int*)Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+		const unsigned int *in;
+		total = Mod_LumpElementCount ("Mod_LoadMarksurfaces", "marksurfaces", sizeof(*in), l, Sys_Error, (const void **)&in);
+		if (total > (size_t)INT_MAX)
+			Host_Error ("Mod_LoadMarksurfaces: too many marksurfaces in %s", loadmodel->name);
+		out = (int*)Hunk_AllocNameNoFill ( (int)(total*sizeof(*out)), loadname);
 
 		loadmodel->marksurfaces = out;
-		loadmodel->nummarksurfaces = count;
+		loadmodel->nummarksurfaces = (int)total;
 
-		for (i=0 ; i<count ; i++)
+		for (size_t i=0 ; i<total ; i++)
 		{
-			j = LittleLong(in[i]);
+			int j = LittleLong(in[i]);
 			if (j >= loadmodel->numsurfaces)
 				Host_Error ("Mod_LoadMarksurfaces: bad surface number");
 			out[i] = j;
@@ -2076,25 +1956,23 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 	}
 	else
 	{
-		short *in = (short *)(mod_base + l->fileofs);
-
-		if (l->filelen % sizeof(*in))
-			Host_Error ("Mod_LoadMarksurfaces: funny lump size in %s",loadmodel->name);
-
-		count = l->filelen / sizeof(*in);
-		out = (int*)Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+		const short *in;
+		total = Mod_LumpElementCount ("Mod_LoadMarksurfaces", "marksurfaces", sizeof(*in), l, Sys_Error, (const void **)&in);
+		if (total > (size_t)INT_MAX)
+			Host_Error ("Mod_LoadMarksurfaces: too many marksurfaces in %s", loadmodel->name);
+		out = (int*)Hunk_AllocNameNoFill ( (int)(total*sizeof(*out)), loadname);
 
 		loadmodel->marksurfaces = out;
-		loadmodel->nummarksurfaces = count;
+		loadmodel->nummarksurfaces = (int)total;
 
 		//johnfitz -- warn mappers about exceeding old limits
-		if (count > 32767)
-			Con_DWarning ("%i marksurfaces exceeds standard limit of 32767.\n", count);
+		if (total > 32767)
+			Con_DWarning ("%zu marksurfaces exceeds standard limit of 32767.\n", total);
 		//johnfitz
 
-		for (i=0 ; i<count ; i++)
+		for (size_t i=0 ; i<total ; i++)
 		{
-			j = (unsigned short)LittleShort(in[i]); //johnfitz -- explicit cast as unsigned short
+			int j = (unsigned short)LittleShort(in[i]); //johnfitz -- explicit cast as unsigned short
 			if (j >= loadmodel->numsurfaces)
 				Sys_Error ("Mod_LoadMarksurfaces: bad surface number");
 			out[i] = j;
@@ -2102,267 +1980,92 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 	}
 }
 
-/*
-=================
-Mod_LoadSurfedges
-=================
-*/
 static void Mod_LoadSurfedges (lump_t *l)
 {
-	int		i, count;
-	int		*in, *out;
+	const int *in;
+	int *out;
+	size_t count;
 
-	in = (int *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (int *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadSurfedges", "surfedges", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadSurfedges: too many surfedges in %s", loadmodel->name);
+	out = (int *) Hunk_AllocNameNoFill ( (int)(count*sizeof(*out)), loadname);
 
 	loadmodel->surfedges = out;
-	loadmodel->numsurfedges = count;
+	loadmodel->numsurfedges = (int)count;
 
-	for (i=0 ; i<count ; i++)
+	for (size_t i=0 ; i<count ; i++)
 		out[i] = LittleLong (in[i]);
 }
 
-
-/*
-=================
-Mod_LoadPlanes
-=================
-*/
 static void Mod_LoadPlanes (lump_t *l)
 {
-	int			i, j;
-	mplane_t	*out;
-	dplane_t 	*in;
-	int			count;
-	int			bits;
+	const dplane_t *in;
+	mplane_t *out;
+	size_t count;
+	int i, j, bits;
 
-	in = (dplane_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (mplane_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadPlanes", "planes", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX / sizeof(*out))
+		Host_Error ("Mod_LoadPlanes: too many planes in %s", loadmodel->name);
+	out = (mplane_t *) Hunk_AllocNameNoFill ( (int)(count*sizeof(*out)), loadname);
 
 	loadmodel->planes = out;
-	loadmodel->numplanes = count;
+	loadmodel->numplanes = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
+		out->normal[0] = LittleFloat (in->normal[0]);
+		out->normal[1] = LittleFloat (in->normal[1]);
+		out->normal[2] = LittleFloat (in->normal[2]);
+		out->dist = LittleFloat (in->dist);
+
 		bits = 0;
 		for (j=0 ; j<3 ; j++)
 		{
-			out->normal[j] = LittleFloat (in->normal[j]);
 			if (out->normal[j] < 0)
-				bits |= 1<<j;
+				bits |= (1<<j);
 		}
 
-		out->dist = LittleFloat (in->dist);
 		out->type = LittleLong (in->type);
 		out->signbits = bits;
-		out->pad[0] = out->pad[1] = 0;
 	}
 }
 
-/*
-=================
-RadiusFromBounds
-=================
-*/
-static float RadiusFromBounds (vec3_t mins, vec3_t maxs)
-{
-	int		i;
-	vec3_t	corner;
-
-	for (i=0 ; i<3 ; i++)
-	{
-		corner[i] = fabs(mins[i]) > fabs(maxs[i]) ? fabs(mins[i]) : fabs(maxs[i]);
-	}
-
-	return VectorLength (corner);
-}
-
-/*
-=================
-Mod_LoadSubmodels
-=================
-*/
 static void Mod_LoadSubmodels (lump_t *l)
 {
-	dmodel_t	*in;
-	dmodel_t	*out;
-	int			i, j, count;
+	const dmodel_t *in;
+	dmodel_t *out;
+	size_t count;
+	int i, j;
 
-	in = (dmodel_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
-		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
-	count = l->filelen / sizeof(*in);
-	out = (dmodel_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	count = Mod_LumpElementCount ("Mod_LoadSubmodels", "submodels", sizeof(*in), l, Sys_Error, (const void **)&in);
+	if (count > (size_t)INT_MAX)
+		Host_Error ("Mod_LoadSubmodels: too many submodels in %s", loadmodel->name);
+	out = (dmodel_t *) Hunk_AllocNameNoFill ( (int)(count*sizeof(*out)), loadname);
 
 	loadmodel->submodels = out;
-	loadmodel->numsubmodels = count;
+	loadmodel->numsubmodels = (int)count;
 
-	for (i=0 ; i<count ; i++, in++, out++)
+	for (i=0 ; i<(int)count ; i++, in++, out++)
 	{
 		for (j=0 ; j<3 ; j++)
-		{	// spread the mins / maxs by a pixel
-			out->mins[j] = LittleFloat (in->mins[j]) - 1;
-			out->maxs[j] = LittleFloat (in->maxs[j]) + 1;
+		{
+			out->mins[j] = LittleFloat (in->mins[j]);
+			out->maxs[j] = LittleFloat (in->maxs[j]);
 			out->origin[j] = LittleFloat (in->origin[j]);
 		}
+
 		for (j=0 ; j<MAX_MAP_HULLS ; j++)
 			out->headnode[j] = LittleLong (in->headnode[j]);
+
 		out->visleafs = LittleLong (in->visleafs);
 		out->firstface = LittleLong (in->firstface);
 		out->numfaces = LittleLong (in->numfaces);
 	}
-
-	// johnfitz -- check world visleafs -- adapted from bjp
-	out = loadmodel->submodels;
-
-	if (out->visleafs > 8192)
-		Con_DWarning ("%i visleafs exceeds standard limit of 8192.\n", out->visleafs);
-	//johnfitz
 }
 
-/*
-=================
-Mod_BoundsFromClipNode -- johnfitz
 
-update the model's clipmins and clipmaxs based on each node's plane.
-
-This works because of the way brushes are expanded in hull generation.
-Each brush will include all six axial planes, which bound that brush.
-Therefore, the bounding box of the hull can be constructed entirely
-from axial planes found in the clipnodes for that hull.
-=================
-*/
-#if 0 /* disabled for now -- see in Mod_SetupSubmodels()  */
-static void Mod_BoundsFromClipNode (qmodel_t *mod, int hull, int nodenum)
-{
-	mplane_t	*plane;
-	mclipnode_t	*node;
-
-	if (nodenum < 0)
-		return; //hit a leafnode
-
-	node = &mod->clipnodes[nodenum];
-	plane = mod->hulls[hull].planes + node->planenum;
-	switch (plane->type)
-	{
-
-	case PLANE_X:
-		if (plane->signbits == 1)
-			mod->clipmins[0] = q_min(mod->clipmins[0], -plane->dist - mod->hulls[hull].clip_mins[0]);
-		else
-			mod->clipmaxs[0] = q_max(mod->clipmaxs[0], plane->dist - mod->hulls[hull].clip_maxs[0]);
-		break;
-	case PLANE_Y:
-		if (plane->signbits == 2)
-			mod->clipmins[1] = q_min(mod->clipmins[1], -plane->dist - mod->hulls[hull].clip_mins[1]);
-		else
-			mod->clipmaxs[1] = q_max(mod->clipmaxs[1], plane->dist - mod->hulls[hull].clip_maxs[1]);
-		break;
-	case PLANE_Z:
-		if (plane->signbits == 4)
-			mod->clipmins[2] = q_min(mod->clipmins[2], -plane->dist - mod->hulls[hull].clip_mins[2]);
-		else
-			mod->clipmaxs[2] = q_max(mod->clipmaxs[2], plane->dist - mod->hulls[hull].clip_maxs[2]);
-		break;
-	default:
-		//skip nonaxial planes; don't need them
-		break;
-	}
-
-	Mod_BoundsFromClipNode (mod, hull, node->children[0]);
-	Mod_BoundsFromClipNode (mod, hull, node->children[1]);
-}
-#endif /* #if 0 */
-
-/* EXTERNAL VIS FILE SUPPORT:
- */
-typedef struct vispatch_s
-{
-	char	mapname[32];
-	int	filelen;	// length of data after header (VIS+Leafs)
-} vispatch_t;
-#define VISPATCH_HEADER_LEN 36
-
-static FILE *Mod_FindVisibilityExternal(void)
-{
-	vispatch_t header;
-	char visfilename[MAX_QPATH];
-	const char* shortname;
-	unsigned int path_id;
-	FILE *f;
-	long pos;
-	size_t r;
-
-	q_snprintf(visfilename, sizeof(visfilename), "maps/%s.vis", loadname);
-	if (COM_FOpenFile(visfilename, &f, &path_id) < 0)
-	{
-		Con_DPrintf("%s not found, trying ", visfilename);
-		q_snprintf(visfilename, sizeof(visfilename), "%s.vis", COM_SkipPath(com_gamedir));
-		Con_DPrintf("%s\n", visfilename);
-		if (COM_FOpenFile(visfilename, &f, &path_id) < 0)
-		{
-			Con_DPrintf("external vis not found\n");
-			return NULL;
-		}
-	}
-	if (path_id < loadmodel->path_id)
-	{
-		fclose(f);
-		Con_DPrintf("ignored %s from a gamedir with lower priority\n", visfilename);
-		return NULL;
-	}
-
-	Con_DPrintf("Found external VIS %s\n", visfilename);
-
-	shortname = COM_SkipPath(loadmodel->name);
-	pos = 0;
-	while ((r = fread(&header, 1, VISPATCH_HEADER_LEN, f)) == VISPATCH_HEADER_LEN)
-	{
-		header.filelen = LittleLong(header.filelen);
-		if (header.filelen <= 0) {	/* bad entry -- don't trust the rest. */
-			fclose(f);
-			return NULL;
-		}
-		if (!q_strcasecmp(header.mapname, shortname))
-			break;
-		pos += header.filelen + VISPATCH_HEADER_LEN;
-		fseek(f, pos, SEEK_SET);
-	}
-	if (r != VISPATCH_HEADER_LEN) {
-		fclose(f);
-		Con_DPrintf("%s not found in %s\n", shortname, visfilename);
-		return NULL;
-	}
-
-	return f;
-}
-
-static byte *Mod_LoadVisibilityExternal(FILE* f)
-{
-	int		mark, filelen;
-	byte*	visdata;
-
-	filelen = 0;
-	if (fread(&filelen, 4, 1, f) != 1)
-		return NULL;
-	filelen = LittleLong(filelen);
-	if (filelen <= 0) return NULL;
-	Con_DPrintf("...%d bytes visibility data\n", filelen);
-	mark = Hunk_LowMark ();
-	visdata = (byte *) Hunk_AllocNameNoFill (filelen, "EXT_VIS");
-	if (!fread(visdata, filelen, 1, f))
-	{
-		Hunk_FreeToLowMark (mark);
-		return NULL;
-	}
-	return visdata;
-}
 
 static void Mod_LoadLeafsExternal(FILE* f)
 {
