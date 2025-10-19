@@ -30,6 +30,42 @@ extern cvar_t r_dynamic;
 
 gpulightbuffer_t r_lightbuffer;
 
+
+float R_CalcDynamicLightContribution (float distance, float radius, float minlight)
+{
+        float   outer_radius, inner_radius, base_intensity, normalized, smooth;
+
+        if (radius <= 0.f)
+                return 0.f;
+
+        outer_radius = radius;
+        base_intensity = q_min (minlight, outer_radius);
+        inner_radius = outer_radius - minlight;
+        if (inner_radius < 0.f)
+                inner_radius = 0.f;
+
+        if (distance >= outer_radius)
+                return 0.f;
+
+        if (outer_radius > inner_radius)
+        {
+                float fade = distance - inner_radius;
+                float range = outer_radius - inner_radius;
+                fade = q_max (fade, 0.f);
+                normalized = 1.f - CLAMP (0.f, fade / range, 1.f);
+        }
+        else
+        {
+                float range = q_max (outer_radius, 1e-5f);
+                normalized = 1.f - CLAMP (0.f, distance / range, 1.f);
+        }
+
+        smooth = normalized * normalized;
+        smooth *= smooth;
+
+        return base_intensity + smooth * (outer_radius - base_intensity);
+}
+
 /*
 ==================
 R_AnimateLight

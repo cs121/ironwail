@@ -245,10 +245,15 @@ void R_SetupAliasLighting (entity_t	*e)
 	for (i=0; i<r_framedata.numlights; i++)
 	{
 		gpulight_t *l = &r_lightbuffer.lights[i];
-		VectorSubtract (e->origin, l->pos, dist);
-		add = DotProduct (dist, dist);
-		if (l->radius * l->radius > add)
-			VectorMA (lightcolor, l->radius - sqrtf (add), l->color, lightcolor);
+                VectorSubtract (e->origin, l->pos, dist);
+                add = DotProduct (dist, dist);
+                if (l->radius * l->radius > add)
+                {
+                        float distance = sqrtf (add);
+                        float contribution = R_CalcDynamicLightContribution (distance, l->radius, l->minlight);
+                        if (contribution > 0.f)
+                                VectorMA (lightcolor, contribution, l->color, lightcolor);
+                }
 	}
 
 	// minimum light value on gun (24)

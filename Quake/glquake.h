@@ -454,6 +454,7 @@ typedef struct gpuframedata_s {
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 
+float R_CalcDynamicLightContribution (float distance, float radius, float minlight);
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
