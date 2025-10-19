@@ -126,6 +126,14 @@ enum sendsignon_e
 	PRESPAWN_SIGNONMSG,
 };
 
+typedef enum bot_skill_e
+{
+	BOT_SKILL_EASY = 0,
+	BOT_SKILL_NORMAL,
+	BOT_SKILL_HARD,
+	BOT_SKILL_COUNT
+} bot_skill_t;
+
 typedef struct bot_state_s
 {
 	float			next_repath;
@@ -135,8 +143,15 @@ typedef struct bot_state_s
 	vec3_t			last_origin;
 	float			stuck_check;
 	int			target_ent;
-	qboolean		has_enemy;
+	qboolean			has_enemy;
+	float			next_attack_time;
+	int			last_enemy_ent;
+	float			last_enemy_health;
+	float			next_chat_time;
+	qboolean			death_taunted;
+	bot_skill_t		skill;
 } bot_state_t;
+
 
 typedef struct client_s
 {
@@ -296,7 +311,7 @@ void SV_ConnectClient (int clientnum);
 void SV_SendClientMessages (void);
 void SV_BotInit (void);
 void SV_BotFrame (client_t *client);
-client_t *SV_BotSpawn (const char *name);
+client_t *SV_BotSpawn (const char *name, bot_skill_t skill);
 qboolean SV_ClientIsBot (const client_t *client);
 void SV_ClearDatagram (void);
 void SV_ReserveSignonSpace (int numbytes);
