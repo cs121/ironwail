@@ -137,6 +137,14 @@ typedef struct glvert_s {
 	unsigned	styles;
 } glvert_t;
 
+typedef struct model_bspx_decoupled_lm_s
+{
+	uint16_t	lmwidth;
+	uint16_t	lmheight;
+	int32_t	offset;
+	float		world_to_lm[2][4];
+} model_bspx_decoupled_lm_t;
+
 typedef struct model_bspx_s
 {
 	byte		*lmshift;
@@ -148,10 +156,19 @@ typedef struct model_bspx_s
 	byte		*rgb_lightdata;
 	size_t		rgb_lightdata_size;
 
+	byte		*lightdir_data;
+	size_t		lightdir_data_size;
+
+	byte		*hdr_lightdata;
+	size_t		hdr_lightdata_size;
+
 	void		*lmstyles;
 	size_t		lmstyles_size;
 	int		lmstyles_per_face;
 	qboolean	lmstyles_is_16bit;
+
+	model_bspx_decoupled_lm_t *decoupled_lm;
+	int		decoupled_lm_count;
 } model_bspx_t;
 
 typedef struct msurface_s
@@ -175,6 +192,11 @@ typedef struct msurface_s
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
+
+	qboolean	bspx_has_decoupled_lm;
+	uint16_t	bspx_lmwidth;
+	uint16_t	bspx_lmheight;
+	float		bspx_world_to_lm[2][4];
 } msurface_t;
 
 typedef struct mnode_s

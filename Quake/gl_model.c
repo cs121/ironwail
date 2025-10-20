@@ -73,6 +73,14 @@ typedef struct
 	uint32_t	filelen;
 } bspx_lump_t;
 
+typedef struct
+{
+        uint16_t        lmwidth;
+        uint16_t        lmheight;
+        int32_t         offset;
+        float           world_to_lm[2][4];
+} bspx_decoupled_lm_disk_t;
+
 static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, const lump_t *l, mod_lump_error_fn error_fn)
 {
 	mod_lump_info_t info;
@@ -1393,6 +1401,8 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	qboolean	lmstyles_overflow_warned = false;
 	qboolean	lmstyles_range_warned = false;
 	const char      *lmstyle_name = lmstyles_is_16bit ? "LMSTYLE16" : "LMSTYLE";
+	const model_bspx_decoupled_lm_t *decoupled_lm = loadmodel->bspx.decoupled_lm;
+	int             decoupled_lm_count = loadmodel->bspx.decoupled_lm_count;
 
 	if (bsp2)
 	{
@@ -1455,6 +1465,16 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	for (surfnum=0 ; surfnum<(int)count ; surfnum++, out++)
 	{
 		texture_t *texture;
+		const model_bspx_decoupled_lm_t *dlm = NULL;
+		if (decoupled_lm && surfnum < decoupled_lm_count)
+		{
+			const model_bspx_decoupled_lm_t *candidate = &decoupled_lm[surfnum];
+			if (candidate->lmwidth && candidate->lmheight)
+				dlm = candidate;
+		}
+		out->bspx_has_decoupled_lm = false;
+		out->bspx_lmwidth = 0;
+		out->bspx_lmheight = 0;
 		if (bsp2)
 		{
 			out->firstedge = LittleLong(inl->firstedge);
@@ -1487,10 +1507,14 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			if (shift > 7)
 				shift = 7;
 		}
+		if (dlm)
+			shift = 4;
 		out->lightmap_shift = shift;
 
 		if (lmoffsets && surfnum < (int)lmoffset_count)
 			lofs = lmoffsets[surfnum];
+		if (dlm)
+			lofs = dlm->offset;
 
 		if (lmstyles_data)
 		{
@@ -1538,6 +1562,25 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			}
 		}
 
+		if (dlm)
+		{
+			out->bspx_has_decoupled_lm = true;
+			out->bspx_lmwidth = dlm->lmwidth;
+			out->bspx_lmheight = dlm->lmheight;
+			for (int row = 0; row < 2; row++)
+			{
+				for (int col = 0; col < 4; col++)
+					out->bspx_world_to_lm[row][col] = dlm->world_to_lm[row][col];
+			}
+			if (dlm->offset < 0)
+				lofs = -1;
+			else
+				lofs = dlm->offset;
+			out->texturemins[0] = out->texturemins[1] = 0;
+			out->extents[0] = ((int)dlm->lmwidth - 1) << out->lightmap_shift;
+			out->extents[1] = ((int)dlm->lmheight - 1) << out->lightmap_shift;
+		}
+
 		out->flags = 0;
 		if (out->numedges < 3)
 			Con_Warning("surfnum %d: bad numedges %d\n", surfnum, out->numedges);
@@ -1549,7 +1592,8 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 		out->texinfo = loadmodel->texinfo + texinfon;
 
-		CalcSurfaceExtents (out);
+		if (!out->bspx_has_decoupled_lm)
+			CalcSurfaceExtents (out);
 
 		Mod_CalcSurfaceBounds (out); //johnfitz -- for per-surface frustum culling
 
@@ -3484,6 +3528,40 @@ static void Mod_LoadBSPXLumps (dheader_t *header)
 				loadmodel->bspx.lmoffsets[j] = LittleLong(((const int32_t *)lumpdata)[j]);
 			loadmodel->bspx.lmoffset_count = count;
 		}
+		else if (!strcmp(name, "DECOUPLED_LM"))
+		{
+			if (loadmodel->bspx.decoupled_lm)
+				continue;
+			if ((size_t)filelen % sizeof(bspx_decoupled_lm_disk_t))
+			{
+				Con_Printf("%s: ignoring malformed DECOUPLED_LM BSPX lump\n", loadmodel->name);
+				continue;
+			}
+			size_t count = (size_t)filelen / sizeof(bspx_decoupled_lm_disk_t);
+			if (!count)
+				continue;
+			size_t entry_size = sizeof(model_bspx_decoupled_lm_t);
+			if (count > (size_t)INT_MAX / entry_size)
+			{
+				Con_Printf("%s: ignoring oversized DECOUPLED_LM BSPX lump (%zu entries)\n", loadmodel->name, count);
+				continue;
+			}
+			model_bspx_decoupled_lm_t *entries = (model_bspx_decoupled_lm_t *)Hunk_AllocName((int)(count * entry_size), loadname);
+			const bspx_decoupled_lm_disk_t *src = (const bspx_decoupled_lm_disk_t *)lumpdata;
+			for (size_t j = 0; j < count; j++)
+			{
+				entries[j].lmwidth = LittleShort(src[j].lmwidth);
+				entries[j].lmheight = LittleShort(src[j].lmheight);
+				entries[j].offset = LittleLong(src[j].offset);
+				for (int r = 0; r < 2; r++)
+				{
+					for (int c = 0; c < 4; c++)
+						entries[j].world_to_lm[r][c] = LittleFloat(src[j].world_to_lm[r][c]);
+				}
+			}
+			loadmodel->bspx.decoupled_lm = entries;
+			loadmodel->bspx.decoupled_lm_count = (int)count;
+		}
 		else if (!strcmp(name, "LMSTYLE") || !strcmp(name, "LMSTYLE16"))
 		{
 			qboolean is16 = !strcmp(name, "LMSTYLE16");
@@ -3548,6 +3626,22 @@ static void Mod_LoadBSPXLumps (dheader_t *header)
 			loadmodel->bspx.rgb_lightdata = (byte *)Hunk_AllocName(filelen, loadname);
 			memcpy(loadmodel->bspx.rgb_lightdata, lumpdata, filelen);
 			loadmodel->bspx.rgb_lightdata_size = filelen;
+		}
+		else if (!strcmp(name, "LIGHTINGDIR"))
+		{
+			if (loadmodel->bspx.lightdir_data)
+				continue;
+			loadmodel->bspx.lightdir_data = (byte *)Hunk_AllocName(filelen, loadname);
+			memcpy(loadmodel->bspx.lightdir_data, lumpdata, filelen);
+			loadmodel->bspx.lightdir_data_size = filelen;
+		}
+		else if (!strcmp(name, "LIGHTING_E5BGR9"))
+		{
+			if (loadmodel->bspx.hdr_lightdata)
+				continue;
+			loadmodel->bspx.hdr_lightdata = (byte *)Hunk_AllocName(filelen, loadname);
+			memcpy(loadmodel->bspx.hdr_lightdata, lumpdata, filelen);
+			loadmodel->bspx.hdr_lightdata_size = filelen;
 		}
 	}
 }
