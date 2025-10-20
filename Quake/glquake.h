@@ -452,6 +452,9 @@ typedef struct gpuframedata_s {
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
+	float	lightmap_mod[4];
+	float	lightmap_wave[4];
+	float	glow_params[4];
 	int			numlights;
 	int			prev_frame_valid;
 	int			_padding1;

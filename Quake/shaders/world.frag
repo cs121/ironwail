@@ -450,6 +450,29 @@ void main()
                 }
         }
 
+        float timeAmplitude = LightmapMod.x;
+        float timeSpeed = (abs(LightmapMod.y) > 1e-5) ? LightmapMod.y : 1.0;
+        float timePhase = LightmapMod.w;
+        float baseIntensity = LightmapMod.z;
+        float timeWave = (abs(timeAmplitude) > 1e-5) ? sin(Time * timeSpeed + timePhase) * timeAmplitude : 0.0;
+        float globalMultiplier = max(baseIntensity + timeWave, 0.0);
+
+        float waveAmplitude = LightmapWave.x;
+        float waveFrequency = LightmapWave.y;
+        float waveSpeed = LightmapWave.z;
+        float wavePhase = LightmapWave.w;
+        float spatialMultiplier = 1.0;
+        if (abs(waveAmplitude) > 1e-5 && abs(waveFrequency) > 1e-5)
+        {
+                vec3 waveDir = normalize(vec3(0.57735026, 0.57735026, 0.57735026));
+                float travel = dot(in_pos, waveDir);
+                float phase = travel * waveFrequency + Time * waveSpeed + wavePhase;
+                spatialMultiplier = max(1.0 + waveAmplitude * sin(phase), 0.0);
+        }
+
+        float lightmapMultiplier = max(globalMultiplier * spatialMultiplier, 0.0);
+        static_light *= lightmapMultiplier;
+
         vec3 surface_normal = vec3(0.0, 0.0, 1.0);
         vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
         float surface_normal_len = length(surface_normal_vec);

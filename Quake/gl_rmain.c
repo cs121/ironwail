@@ -216,6 +216,18 @@ cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_lightmap_multiplier = { "r_lightmap_multiplier", "0.0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_multiplier_speed = { "r_lightmap_multiplier_speed", "1.0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_multiplier_bias = { "r_lightmap_multiplier_bias", "1.0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_wave_amplitude = { "r_lightmap_wave_amplitude", "0.0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_wave_frequency = { "r_lightmap_wave_frequency", "0.0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_wave_speed = { "r_lightmap_wave_speed", "0.0", CVAR_ARCHIVE };
+
+cvar_t	r_screen_glow = { "r_screen_glow", "0.0", CVAR_ARCHIVE };
+cvar_t	r_screen_glow_threshold = { "r_screen_glow_threshold", "0.8", CVAR_ARCHIVE };
+cvar_t	r_screen_glow_radius = { "r_screen_glow_radius", "1.5", CVAR_ARCHIVE };
+cvar_t	r_screen_glow_softness = { "r_screen_glow_softness", "1.0", CVAR_ARCHIVE };
+
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
@@ -769,6 +781,11 @@ void GL_PostProcess (void)
                 q_max (0.f, r_chromatic_aberration.value),
                 0.f,
                 0.f);
+        GL_Uniform4fFunc (11,
+                q_max (0.f, r_screen_glow.value),
+                q_max (0.f, r_screen_glow_threshold.value),
+                q_max (0.f, r_screen_glow_radius.value),
+                q_max (0.f, r_screen_glow_softness.value));
 
         dof_enabled = R_DoFEnabled ();
 
@@ -1541,14 +1558,29 @@ void R_SetupView (void)
 		r_framedata.shading_model = (unsigned int)shading_model;
 	}
 
-	r_framecount++;
-	r_framedata.eyepos[0] = r_refdef.vieworg[0];
-	r_framedata.eyepos[1] = r_refdef.vieworg[1];
-	r_framedata.eyepos[2] = r_refdef.vieworg[2];
-	r_framedata.time = cl.time;
+        r_framecount++;
+        r_framedata.eyepos[0] = r_refdef.vieworg[0];
+        r_framedata.eyepos[1] = r_refdef.vieworg[1];
+        r_framedata.eyepos[2] = r_refdef.vieworg[2];
+        r_framedata.time = cl.time;
 
-	double prev_delta = cl.time - r_prev_frame_time;
-	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
+        r_framedata.lightmap_mod[0] = r_lightmap_multiplier.value;
+        r_framedata.lightmap_mod[1] = r_lightmap_multiplier_speed.value;
+        r_framedata.lightmap_mod[2] = q_max(0.f, r_lightmap_multiplier_bias.value);
+        r_framedata.lightmap_mod[3] = 0.f;
+
+        r_framedata.lightmap_wave[0] = r_lightmap_wave_amplitude.value;
+        r_framedata.lightmap_wave[1] = r_lightmap_wave_frequency.value;
+        r_framedata.lightmap_wave[2] = r_lightmap_wave_speed.value;
+        r_framedata.lightmap_wave[3] = 0.f;
+
+        r_framedata.glow_params[0] = q_max(0.f, r_screen_glow.value);
+        r_framedata.glow_params[1] = q_max(0.f, r_screen_glow_threshold.value);
+        r_framedata.glow_params[2] = q_max(0.f, r_screen_glow_radius.value);
+        r_framedata.glow_params[3] = q_max(0.f, r_screen_glow_softness.value);
+
+        double prev_delta = cl.time - r_prev_frame_time;
+        qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
 
 	if (prev_valid)
 	{
