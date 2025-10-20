@@ -115,6 +115,7 @@ layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), zw: reserved
+layout(location=11) uniform vec4 GlowParams0; // x: intensity, y: threshold, z: radius (pixels), w: softness exponent
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -395,6 +396,44 @@ void main()
                                 float blend = clamp(chromaticAmount * lenDir, 0.0, 1.0);
                                 color.rgb = mix(color.rgb, aberrated, blend);
                         }
+                }
+        }
+
+        float glowIntensity = max(GlowParams0.x, 0.0);
+        if (glowIntensity > 0.0)
+        {
+                float glowThreshold = max(GlowParams0.y, 0.0);
+                float glowRadius = max(GlowParams0.z, 0.0);
+                float glowSoftness = max(GlowParams0.w, 0.0);
+                float luminance = max(max(color.r, color.g), color.b);
+                float glowMask = max(luminance - glowThreshold, 0.0);
+                if (glowSoftness > 0.0)
+                        glowMask = pow(glowMask, glowSoftness);
+                if (glowMask > 0.0)
+                {
+                        const vec2 glowKernel[8] = vec2[](
+                                vec2(1.0, 0.0),
+                                vec2(-1.0, 0.0),
+                                vec2(0.0, 1.0),
+                                vec2(0.0, -1.0),
+                                vec2(0.70710678, 0.70710678),
+                                vec2(-0.70710678, 0.70710678),
+                                vec2(0.70710678, -0.70710678),
+                                vec2(-0.70710678, -0.70710678)
+                        );
+                        vec3 glowAccum = color.rgb;
+                        float glowWeight = 1.0;
+                        vec2 stepSize = invTexSize * max(glowRadius, 1e-3);
+                        for (int i = 0; i < glowKernel.length(); ++i)
+                        {
+                                vec2 offset = glowKernel[i] * stepSize;
+                                vec2 sampleUV = clamp(uv + offset, vec2(0.0), vec2(1.0));
+                                vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
+                                glowAccum += sampleColor;
+                                glowWeight += 1.0;
+                        }
+                        vec3 blurredGlow = glowAccum / glowWeight;
+                        color.rgb = clamp(color.rgb + blurredGlow * (glowMask * glowIntensity), 0.0, 1.0);
                 }
         }
 

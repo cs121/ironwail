@@ -19,6 +19,9 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   DeltaTime;
         float   ZLogScale;
         float   ZLogBias;
+        vec4    LightmapMod;
+        vec4    LightmapWave;
+        vec4    GlowParams;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    _Pad1;
