@@ -24,7 +24,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    GlowParams;
         uint    NumLights;
         uint    PrevFrameValid;
-        uint    _Pad1;
+        uint    HasDeluxemap;
         uint    _Pad2;
 };
 

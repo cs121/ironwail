@@ -1574,6 +1574,8 @@ void R_SetupView (void)
         r_framedata.lightmap_wave[2] = r_lightmap_wave_speed.value;
         r_framedata.lightmap_wave[3] = 0.f;
 
+        r_framedata.has_deluxemap = gl_has_deluxemap ? 1 : 0;
+
         r_framedata.glow_params[0] = q_max(0.f, r_screen_glow.value);
         r_framedata.glow_params[1] = q_max(0.f, r_screen_glow_threshold.value);
         r_framedata.glow_params[2] = q_max(0.f, r_screen_glow_radius.value);

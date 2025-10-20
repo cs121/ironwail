@@ -6,6 +6,7 @@
         layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
 layout(binding=2) uniform sampler2D LMTex;
+layout(binding=3) uniform sampler2D DeluxeTex;
 #include "frame_uniforms.glsl"
 
 const int SHADOW_MAX_LIGHTS = 4;
@@ -478,14 +479,32 @@ void main()
         float surface_normal_len = length(surface_normal_vec);
         if (surface_normal_len > 0.0)
                 surface_normal = surface_normal_vec / surface_normal_len;
-        vec3 total_light = clamp(static_light, 0.0, 1.0);
-        vec3 specular_light = vec3(0.0);
         vec3 to_eye = EyePos - in_pos;
         float view_length = length(to_eye);
         vec3 view_dir = vec3(0.0, 0.0, 1.0);
         if (view_length > 0.0)
                 view_dir = to_eye / view_length;
         uint shadingModel = ShadingModel;
+
+        if (HasDeluxemap != 0u)
+        {
+                vec3 encoded_dir = textureLod(DeluxeTex, lmuv, 0.0).xyz * 2.0 - 1.0;
+                float dir_len = length(encoded_dir);
+                vec3 luxel_dir = surface_normal;
+                if (dir_len > 1e-3)
+                        luxel_dir = encoded_dir / dir_len;
+                float ndotl_raw = dot(surface_normal, luxel_dir);
+                float ndotl = max(ndotl_raw, 0.0);
+                if (ndotl > 1e-4)
+                {
+                        vec3 radiance = static_light / ndotl;
+                        float diffuse_term = ComputeDiffuseLighting(shadingModel, surface_normal, luxel_dir, view_dir, ndotl_raw);
+                        static_light = radiance * diffuse_term;
+                }
+        }
+
+        vec3 total_light = clamp(static_light, 0.0, 1.0);
+        vec3 specular_light = vec3(0.0);
 
         const float SPECULAR_POWER = 16.0;
         const float SPECULAR_SCALE = 0.4;
