@@ -387,6 +387,9 @@ typedef struct lightmap_s
 } lightmap_t;
 extern lightmap_t *lightmaps;
 extern int lightmap_count;	//allocated lightmaps
+extern gltexture_t *lightmap_texture;
+extern gltexture_t *deluxemap_texture;
+extern qboolean gl_has_deluxemap;
 
 extern qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //johnfitz
 
@@ -457,7 +460,7 @@ typedef struct gpuframedata_s {
 	float	glow_params[4];
 	int			numlights;
 	int			prev_frame_valid;
-	int			_padding1;
+	int			has_deluxemap;
 	int			_padding2;
 } gpuframedata_t;
 

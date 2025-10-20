@@ -1400,6 +1400,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	qboolean	lmstyles_is_16bit = loadmodel->bspx.lmstyles_is_16bit;
 	qboolean	lmstyles_overflow_warned = false;
 	qboolean	lmstyles_range_warned = false;
+	qboolean	lightdir_warned = false;
 	const char      *lmstyle_name = lmstyles_is_16bit ? "LMSTYLE16" : "LMSTYLE";
 	const model_bspx_decoupled_lm_t *decoupled_lm = loadmodel->bspx.decoupled_lm;
 	int             decoupled_lm_count = loadmodel->bspx.decoupled_lm_count;
@@ -1463,18 +1464,19 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	}
 
 	for (surfnum=0 ; surfnum<(int)count ; surfnum++, out++)
-	{
-		texture_t *texture;
-		const model_bspx_decoupled_lm_t *dlm = NULL;
+        {
+                texture_t *texture;
+                const model_bspx_decoupled_lm_t *dlm = NULL;
 		if (decoupled_lm && surfnum < decoupled_lm_count)
 		{
 			const model_bspx_decoupled_lm_t *candidate = &decoupled_lm[surfnum];
 			if (candidate->lmwidth && candidate->lmheight)
 				dlm = candidate;
 		}
-		out->bspx_has_decoupled_lm = false;
-		out->bspx_lmwidth = 0;
-		out->bspx_lmheight = 0;
+                out->bspx_has_decoupled_lm = false;
+                out->bspx_lmwidth = 0;
+                out->bspx_lmheight = 0;
+                out->deluxemap = NULL;
 		if (bsp2)
 		{
 			out->firstedge = LittleLong(inl->firstedge);
@@ -1607,6 +1609,22 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
 
 		texture = loadmodel->textures[out->texinfo->texnum];
+		if (loadmodel->bspx.lightdir_data && lofs >= 0)
+		{
+			int smax = (out->extents[0] >> out->lightmap_shift) + 1;
+			int tmax = (out->extents[1] >> out->lightmap_shift) + 1;
+			size_t luxels = (size_t)smax * (size_t)tmax;
+			size_t offset = (size_t)lofs * 3;
+			size_t needed = luxels * 3;
+			if (offset + needed <= loadmodel->bspx.lightdir_data_size)
+				out->deluxemap = loadmodel->bspx.lightdir_data + offset;
+			else if (!lightdir_warned)
+			{
+				Con_Warning("%s: ignoring malformed LIGHTINGDIR BSPX data (surf %d)\n", loadmodel->name, surfnum);
+				lightdir_warned = true;
+			}
+		}
+
 
 		if (texture->type == TEXTYPE_SKY)
 		{

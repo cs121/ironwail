@@ -189,6 +189,7 @@ typedef struct msurface_s
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
+	byte		*deluxemap;			// optional directional samples
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
