@@ -348,16 +348,35 @@ loc0:
 		// ericw -- added double casts to force 64-bit precision.
 		// Without them the zombie at the start of jam3_ericw.bsp was
 		// incorrectly being lit up in SSE builds.
-			ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-			dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+			if (surf->bspx_has_decoupled_lm)
+			{
+				double lux_s = (double)surf->bspx_world_to_lm[0][0] * mid[0] + (double)surf->bspx_world_to_lm[0][1] * mid[1] + (double)surf->bspx_world_to_lm[0][2] * mid[2] + surf->bspx_world_to_lm[0][3];
+				double lux_t = (double)surf->bspx_world_to_lm[1][0] * mid[0] + (double)surf->bspx_world_to_lm[1][1] * mid[1] + (double)surf->bspx_world_to_lm[1][2] * mid[2] + surf->bspx_world_to_lm[1][3];
+				if (lux_s < 0.0 || lux_t < 0.0)
+					continue;
+				double max_s = (double)surf->bspx_lmwidth;
+				double max_t = (double)surf->bspx_lmheight;
+				if (lux_s > max_s || lux_t > max_t)
+					continue;
+				ds = (int)floor(lux_s * (double)(1 << surf->lightmap_shift));
+				dt = (int)floor(lux_t * (double)(1 << surf->lightmap_shift));
+			}
+			else
+			{
+				ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+				dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
 
-			if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
-				continue;
+				if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
+					continue;
 
-			ds -= surf->texturemins[0];
-			dt -= surf->texturemins[1];
+				ds -= surf->texturemins[0];
+				dt -= surf->texturemins[1];
 
-			if (ds > surf->extents[0] || dt > surf->extents[1])
+				if (ds > surf->extents[0] || dt > surf->extents[1])
+					continue;
+			}
+
+			if (ds < 0 || dt < 0 || ds > surf->extents[0] || dt > surf->extents[1])
 				continue;
 
 			if (surf->plane->type < 3)

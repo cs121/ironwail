@@ -684,9 +684,18 @@ void GL_BuildBModelVertexBuffer (void)
 					useofs = 1.f;
 				}
 				lm = &lightmaps[fa->lightmaptexturenum];
-				lmofs = ((fa->extents[0] >> fa->lightmap_shift) + 1) / (float)lightmap_width;
-				lmscalex = 1.f / ((float)(1 << fa->lightmap_shift) * lightmap_width);
-				lmscaley = 1.f / ((float)(1 << fa->lightmap_shift) * lightmap_height);
+				if (fa->bspx_has_decoupled_lm)
+				{
+					lmofs = fa->bspx_lmwidth / (float)lightmap_width;
+					lmscalex = 1.f / lightmap_width;
+					lmscaley = 1.f / lightmap_height;
+				}
+				else
+				{
+					lmofs = ((fa->extents[0] >> fa->lightmap_shift) + 1) / (float)lightmap_width;
+					lmscalex = 1.f / ((float)(1 << fa->lightmap_shift) * lightmap_width);
+					lmscaley = 1.f / ((float)(1 << fa->lightmap_shift) * lightmap_height);
+				}
 			}
 
 			fa->vbo_firstvert = varray_index;
@@ -734,17 +743,27 @@ void GL_BuildBModelVertexBuffer (void)
 					//
 					// lightmap texture coordinates
 					//
-					s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-					s -= fa->texturemins[0];
-					s += (fa->light_s + lm->xofs) * (1 << fa->lightmap_shift);
-					s += 8;
-					s *= lmscalex;
+					if (fa->bspx_has_decoupled_lm)
+					{
+						float lux_s = vec[0] * fa->bspx_world_to_lm[0][0] + vec[1] * fa->bspx_world_to_lm[0][1] + vec[2] * fa->bspx_world_to_lm[0][2] + fa->bspx_world_to_lm[0][3];
+						float lux_t = vec[0] * fa->bspx_world_to_lm[1][0] + vec[1] * fa->bspx_world_to_lm[1][1] + vec[2] * fa->bspx_world_to_lm[1][2] + fa->bspx_world_to_lm[1][3];
+						s = (lux_s + (fa->light_s + lm->xofs) + 0.5f) / (float)lightmap_width;
+						t = (lux_t + (fa->light_t + lm->yofs) + 0.5f) / (float)lightmap_height;
+					}
+					else
+					{
+						s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
+						s -= fa->texturemins[0];
+						s += (fa->light_s + lm->xofs) * (1 << fa->lightmap_shift);
+						s += 8;
+						s *= lmscalex;
 
-					t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-					t -= fa->texturemins[1];
-					t += (fa->light_t + lm->yofs) * (1 << fa->lightmap_shift);
-					t += 8;
-					t *= lmscaley;
+						t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
+						t -= fa->texturemins[1];
+						t += (fa->light_t + lm->yofs) * (1 << fa->lightmap_shift);
+						t += 8;
+						t *= lmscaley;
+					}
 
 					vert->st[2] = s;
 					vert->st[3] = t;
