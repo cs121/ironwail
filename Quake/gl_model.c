@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
 
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
@@ -97,14 +99,55 @@ typedef struct
         float           world_to_lm[2][4];
 } bspx_decoupled_lm_disk_t;
 
+static void Mod_VerifyDataRange (const void *ptr, size_t length, const char *context)
+{
+	size_t		size;
+	const byte	*base;
+	const byte	*bptr;
+	ptrdiff_t	diff;
+
+	if (!loadmodel)
+		Sys_Error ("%s: no model is currently loading", context);
+
+	if (!mod_base)
+		Sys_Error ("%s: model %s has no loaded data", context, loadmodel->name);
+
+	if (length == 0)
+		return;
+
+	if (loadmodel->filesize < 0)
+		Sys_Error ("%s: model %s has unknown file size", context, loadmodel->name);
+
+	if ((uint64_t)loadmodel->filesize > (uint64_t)SIZE_MAX)
+		Sys_Error ("%s: model %s file size exceeds addressable memory", context, loadmodel->name);
+
+	size = (size_t) loadmodel->filesize;
+	base = mod_base;
+	bptr = (const byte *) ptr;
+
+	if (bptr < base)
+		Sys_Error ("%s: pointer underflow while loading %s", context, loadmodel->name);
+
+	diff = bptr - base;
+	if (diff < 0)
+		Sys_Error ("%s: pointer underflow while loading %s", context, loadmodel->name);
+
+	if ((uint64_t)diff > (uint64_t)size)
+		Sys_Error ("%s: pointer overflow while loading %s", context, loadmodel->name);
+
+	if ((uint64_t)length > (uint64_t)size - (uint64_t)diff)
+		Sys_Error ("%s: truncated data while loading %s", context, loadmodel->name);
+}
+
 static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, const lump_t *l, mod_lump_error_fn error_fn)
 {
 	mod_lump_info_t info;
 	qfileofs_t	start;
 	qfileofs_t	length;
 	qfileofs_t	end;
+	const qfileofs_t filesize = loadmodel ? loadmodel->filesize : -1;
 
-	info.data = mod_base + l->fileofs;
+	info.data = NULL;
 	info.size = 0;
 
 	if (!l->filelen)
@@ -115,16 +158,30 @@ static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, 
 
 	start = (qfileofs_t) l->fileofs;
 	length = (qfileofs_t) l->filelen;
-	end = start + length;
 
-	if (length < 0 || start < 0 || end < start)
+	if (start < 0 || length <= 0)
 		error_fn ("%s: %s lump overflow in %s", context, lumpname, loadmodel->name);
 
-	const qfileofs_t filesize = loadmodel ? loadmodel->filesize : -1;
+	if (start > INT64_MAX - length)
+		error_fn ("%s: %s lump overflow in %s", context, lumpname, loadmodel->name);
 
-	if (filesize >= 0 && end > filesize)
+	end = start + length;
+
+	if (filesize >= 0 && (start > filesize || end > filesize))
 		error_fn ("%s: %s lump extends past file size in %s", context, lumpname, loadmodel->name);
 
+	if ((uint64_t)length > (uint64_t)SIZE_MAX)
+		error_fn ("%s: %s lump length overflow in %s", context, lumpname, loadmodel->name);
+
+	if ((uint64_t)start > (uint64_t)SIZE_MAX)
+		error_fn ("%s: %s lump offset overflow in %s", context, lumpname, loadmodel->name);
+
+	if (!mod_base)
+		error_fn ("%s: %s lump has no backing store in %s", context, lumpname, loadmodel->name);
+
+	Mod_VerifyDataRange (mod_base + (size_t) start, (size_t) length, context);
+
+	info.data = mod_base + (size_t) start;
 	info.size = (size_t) length;
 	return info;
 }
@@ -3080,6 +3137,7 @@ static void *Mod_LoadAliasFrame (void * pin, maliasframedesc_t *frame)
 		Sys_Error ("posenum >= MAXALIASFRAMES");
 
 	pdaliasframe = (daliasframe_t *)pin;
+	Mod_VerifyDataRange (pdaliasframe, sizeof(*pdaliasframe), "Mod_LoadAliasFrame");
 
 	q_strlcpy (frame->name, pdaliasframe->name, sizeof (frame->name));
 	frame->firstpose = posenum;
@@ -3094,6 +3152,7 @@ static void *Mod_LoadAliasFrame (void * pin, maliasframedesc_t *frame)
 	}
 
 	pinframe = (trivertx_t *)(pdaliasframe + 1);
+	Mod_VerifyDataRange (pinframe, (size_t)pheader->numverts * sizeof(*pinframe), "Mod_LoadAliasFrame vertices");
 
 	poseverts[posenum] = pinframe;
 	posenum++;
@@ -3117,8 +3176,11 @@ static void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 	void				*ptemp;
 
 	pingroup = (daliasgroup_t *)pin;
+	Mod_VerifyDataRange (pingroup, sizeof(*pingroup), "Mod_LoadAliasGroup");
 
 	numframes = LittleLong (pingroup->numframes);
+	if (numframes <= 0)
+		Sys_Error ("Mod_LoadAliasGroup: invalid # of frames: %d", numframes);
 
 	frame->firstpose = posenum;
 	frame->numposes = numframes;
@@ -3131,6 +3193,7 @@ static void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 	}
 
 	pin_intervals = (daliasinterval_t *)(pingroup + 1);
+	Mod_VerifyDataRange (pin_intervals, (size_t)numframes * sizeof(*pin_intervals), "Mod_LoadAliasGroup intervals");
 
 	frame->interval = LittleFloat (pin_intervals->interval);
 
@@ -3140,12 +3203,19 @@ static void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 
 	for (i=0 ; i<numframes ; i++)
 	{
-		if (posenum >= MAXALIASFRAMES) Sys_Error ("posenum >= MAXALIASFRAMES");
+		if (posenum >= MAXALIASFRAMES)
+			Sys_Error ("posenum >= MAXALIASFRAMES");
 
-		poseverts[posenum] = (trivertx_t *)((daliasframe_t *)ptemp + 1);
+		daliasframe_t *pdaliasframe = (daliasframe_t *)ptemp;
+		Mod_VerifyDataRange (pdaliasframe, sizeof(*pdaliasframe), "Mod_LoadAliasGroup frame");
+
+		trivertx_t *verts = (trivertx_t *)(pdaliasframe + 1);
+		Mod_VerifyDataRange (verts, (size_t)pheader->numverts * sizeof(*verts), "Mod_LoadAliasGroup vertices");
+
+		poseverts[posenum] = verts;
 		posenum++;
 
-		ptemp = (trivertx_t *)((daliasframe_t *)ptemp + 1) + pheader->numverts;
+		ptemp = verts + pheader->numverts;
 	}
 
 	return ptemp;
@@ -3239,18 +3309,18 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 {
 	int			i, j, k, size, groupskins;
 	char			name[MAX_QPATH];
-	byte			*skin, *texels;
+	byte			*texels;
 	daliasskingroup_t	*pinskingroup;
 	daliasskininterval_t	*pinskinintervals;
 	char			fbr_mask_name[MAX_QPATH]; //johnfitz -- added for fullbright support
 	src_offset_t		offset; //johnfitz
 	unsigned int		texflags = TEXPREF_PAD;
 
-	skin = (byte *)(pskintype + 1);
-
 	if (numskins < 1 || numskins > MAX_SKINS)
 		Sys_Error ("Mod_LoadAliasModel: Invalid # of skins: %d", numskins);
 
+	if (pheader->skinwidth > INT_MAX / pheader->skinheight)
+		Sys_Error ("Mod_LoadAliasModel: skin size overflow in %s", loadmodel->name);
 	size = pheader->skinwidth * pheader->skinheight;
 
 	if (loadmodel->flags & MF_HOLEY)
@@ -3258,38 +3328,42 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 
 	for (i=0 ; i<numskins ; i++)
 	{
+		Mod_VerifyDataRange (pskintype, sizeof(*pskintype), "Mod_LoadAllSkins header");
+
 		if (pskintype->type == ALIAS_SKIN_SINGLE)
 		{
-			Mod_FloodFillSkin( skin, pheader->skinwidth, pheader->skinheight );
+			byte *skin_pixels = (byte *)(pskintype + 1);
+			Mod_VerifyDataRange (skin_pixels, (size_t)size, "Mod_LoadAllSkins single pixels");
+			Mod_FloodFillSkin( skin_pixels, pheader->skinwidth, pheader->skinheight );
 
 			// save 8 bit texels for the player model to remap
 			texels = (byte *) Hunk_AllocName(size, loadname);
 			pheader->texels[i] = texels - (byte *)pheader;
-			memcpy (texels, (byte *)(pskintype + 1), size);
+			memcpy (texels, skin_pixels, size);
 
 			//johnfitz -- rewritten
 			q_snprintf (name, sizeof(name), "%s:frame%i", loadmodel->name, i);
-			offset = (src_offset_t)(pskintype+1) - (src_offset_t)mod_base;
-			if (Mod_CheckFullbrights ((byte *)(pskintype+1), size))
+			offset = (src_offset_t)(skin_pixels) - (src_offset_t)mod_base;
+			if (Mod_CheckFullbrights (skin_pixels, size))
 			{
 				if (!(texflags & TEXPREF_ALPHA))
 				{
 					pheader->gltextures[i][0] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-						SRC_INDEXED, (byte *)(pskintype+1), loadmodel->name, offset, texflags | TEXPREF_ALPHABRIGHT);
+						SRC_INDEXED, skin_pixels, loadmodel->name, offset, texflags | TEXPREF_ALPHABRIGHT);
 				}
 				else
 				{
 					pheader->gltextures[i][0] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-						SRC_INDEXED, (byte *)(pskintype+1), loadmodel->name, offset, texflags | TEXPREF_NOBRIGHT);
+						SRC_INDEXED, skin_pixels, loadmodel->name, offset, texflags | TEXPREF_NOBRIGHT);
 					q_snprintf (fbr_mask_name, sizeof(fbr_mask_name), "%s:frame%i_glow", loadmodel->name, i);
 					pheader->fbtextures[i][0] = TexMgr_LoadImage (loadmodel, fbr_mask_name, pheader->skinwidth, pheader->skinheight,
-						SRC_INDEXED, (byte *)(pskintype+1), loadmodel->name, offset, texflags | TEXPREF_FULLBRIGHT);
+						SRC_INDEXED, skin_pixels, loadmodel->name, offset, texflags | TEXPREF_FULLBRIGHT);
 				}
 			}
 			else
 			{
 				pheader->gltextures[i][0] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-					SRC_INDEXED, (byte *)(pskintype+1), loadmodel->name, offset, texflags);
+					SRC_INDEXED, skin_pixels, loadmodel->name, offset, texflags);
 				pheader->fbtextures[i][0] = NULL;
 			}
 
@@ -3306,58 +3380,64 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 			// animating skin group.  yuck.
 			pskintype++;
 			pinskingroup = (daliasskingroup_t *)pskintype;
+			Mod_VerifyDataRange (pinskingroup, sizeof(*pinskingroup), "Mod_LoadAllSkins group header");
 			groupskins = LittleLong (pinskingroup->numskins);
+			if (groupskins <= 0)
+				Sys_Error ("Mod_LoadAllSkins: invalid # of group skins: %d", groupskins);
 			pinskinintervals = (daliasskininterval_t *)(pinskingroup + 1);
+			Mod_VerifyDataRange (pinskinintervals, (size_t)groupskins * sizeof(*pinskinintervals), "Mod_LoadAllSkins group intervals");
 
 			pskintype = (daliasskintype_t *)(pinskinintervals + groupskins);
+			byte *group_pixels = (byte *)pskintype;
+			Mod_VerifyDataRange (group_pixels, (size_t)groupskins * (size_t)size, "Mod_LoadAllSkins group pixels");
 
 			for (j=0 ; j<groupskins ; j++)
 			{
-				Mod_FloodFillSkin( skin, pheader->skinwidth, pheader->skinheight );
+				byte *frame_pixels = group_pixels + (size_t)j * size;
+				Mod_FloodFillSkin( frame_pixels, pheader->skinwidth, pheader->skinheight );
 				if (j == 0) {
 					texels = (byte *) Hunk_AllocName(size, loadname);
 					pheader->texels[i] = texels - (byte *)pheader;
-					memcpy (texels, (byte *)(pskintype), size);
+					memcpy (texels, frame_pixels, size);
 				}
 
 				//johnfitz -- rewritten
 				q_snprintf (name, sizeof(name), "%s:frame%i_%i", loadmodel->name, i,j);
-				offset = (src_offset_t)(pskintype) - (src_offset_t)mod_base; //johnfitz
+				offset = (src_offset_t)(frame_pixels) - (src_offset_t)mod_base; //johnfitz
 				pheader->emissivetextures[i][j&3] = NULL;
-                                if (Mod_CheckFullbrights ((byte *)(pskintype), size))
+				if (Mod_CheckFullbrights (frame_pixels, size))
 				{
 					if (!(texflags & TEXPREF_ALPHA))
 					{
 						pheader->gltextures[i][j&3] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-							SRC_INDEXED, (byte *)(pskintype), loadmodel->name, offset, texflags | TEXPREF_ALPHABRIGHT);
+							SRC_INDEXED, frame_pixels, loadmodel->name, offset, texflags | TEXPREF_ALPHABRIGHT);
 					}
 					else
 					{
 						pheader->gltextures[i][j&3] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-							SRC_INDEXED, (byte *)(pskintype), loadmodel->name, offset, texflags | TEXPREF_NOBRIGHT);
+							SRC_INDEXED, frame_pixels, loadmodel->name, offset, texflags | TEXPREF_NOBRIGHT);
 						q_snprintf (fbr_mask_name, sizeof(fbr_mask_name), "%s:frame%i_%i_glow", loadmodel->name, i,j);
 						pheader->fbtextures[i][j&3] = TexMgr_LoadImage (loadmodel, fbr_mask_name, pheader->skinwidth, pheader->skinheight,
-							SRC_INDEXED, (byte *)(pskintype), loadmodel->name, offset, texflags | TEXPREF_FULLBRIGHT);
+							SRC_INDEXED, frame_pixels, loadmodel->name, offset, texflags | TEXPREF_FULLBRIGHT);
 					}
 				}
 				else
 				{
-                                pheader->gltextures[i][j&3] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
-                                        SRC_INDEXED, (byte *)(pskintype), loadmodel->name, offset, texflags);
-                                pheader->fbtextures[i][j&3] = NULL;
-				pheader->emissivetextures[i][j&3] = NULL;
+					pheader->gltextures[i][j&3] = TexMgr_LoadImage (loadmodel, name, pheader->skinwidth, pheader->skinheight,
+						SRC_INDEXED, frame_pixels, loadmodel->name, offset, texflags);
+					pheader->fbtextures[i][j&3] = NULL;
+					pheader->emissivetextures[i][j&3] = NULL;
 				}
 				//johnfitz
-
-				pskintype = (daliasskintype_t *)((byte *)(pskintype) + size);
 			}
+			pskintype = (daliasskintype_t *)(group_pixels + (size_t)groupskins * size);
 			k = j;
-                        for (/**/; j < 4; j++)
-                        {
-                                pheader->gltextures[i][j&3] = pheader->gltextures[i][j - k];
-                                pheader->fbtextures[i][j&3] = pheader->fbtextures[i][j - k];
-                                pheader->emissivetextures[i][j&3] = pheader->emissivetextures[i][j - k];
-                        }
+			for (/**/; j < 4; j++)
+			{
+				pheader->gltextures[i][j&3] = pheader->gltextures[i][j - k];
+				pheader->fbtextures[i][j&3] = pheader->fbtextures[i][j - k];
+				pheader->emissivetextures[i][j&3] = pheader->emissivetextures[i][j - k];
+			}
 		}
 	}
 
@@ -3543,6 +3623,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 
 	pinmodel = (mdl_t *)buffer;
 	mod_base = (byte *)buffer; //johnfitz
+	Mod_VerifyDataRange (pinmodel, sizeof(*pinmodel), "Mod_LoadAliasModel");
 
 	version = LittleLong (pinmodel->version);
 	if (version != ALIAS_VERSION)
@@ -3571,8 +3652,15 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // allocate space for a working header, plus all the data except the frames,
 // skin and group info
 //
-	size	= sizeof(aliashdr_t) +
-		 (LittleLong (pinmodel->numframes) - 1) * sizeof (pheader->frames[0]);
+	int disk_numframes = LittleLong (pinmodel->numframes);
+	if (disk_numframes < 1)
+		Sys_Error ("Mod_LoadAliasModel: Invalid # of frames: %d", disk_numframes);
+	size_t alias_header_size = sizeof(aliashdr_t);
+	size_t alias_frame_size = sizeof (pheader->frames[0]);
+	size_t alloc_size = alias_header_size + (size_t)(disk_numframes - 1) * alias_frame_size;
+	if (alloc_size > (size_t)INT_MAX)
+		Sys_Error ("Mod_LoadAliasModel: alias header too large in %s", mod->name);
+	size = (int)alloc_size;
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 
 //
@@ -3582,6 +3670,10 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	pheader->numskins = LittleLong (pinmodel->numskins);
 	pheader->skinwidth = LittleLong (pinmodel->skinwidth);
 	pheader->skinheight = LittleLong (pinmodel->skinheight);
+
+	if (pheader->skinwidth <= 0 || pheader->skinheight <= 0)
+		Sys_Error ("Mod_LoadAliasModel: invalid skin dimensions %d x %d in %s",
+				 pheader->skinwidth, pheader->skinheight, mod->name);
 
 	if (pheader->skinheight > MAX_LBM_HEIGHT)
 		Con_DWarning ("model %s has a skin taller than %d", mod->name,
@@ -3603,10 +3695,8 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	else if (pheader->numtris > MAXALIASTRIS_QS && (developer.value || map_checks.value))
 		Con_Warning ("model %s triangle count of %d exceeds QS limit of %d\n", mod->name, pheader->numtris, MAXALIASTRIS_QS);
 
-	pheader->numframes = LittleLong (pinmodel->numframes);
+	pheader->numframes = disk_numframes;
 	numframes = pheader->numframes;
-	if (numframes < 1)
-		Sys_Error ("Mod_LoadAliasModel: Invalid # of frames: %d", numframes);
 
 	pheader->size = LittleFloat (pinmodel->size) * ALIAS_BASE_SIZE_RATIO;
 	mod->synctype = (synctype_t) LittleLong (pinmodel->synctype);
@@ -3623,12 +3713,14 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // load the skins
 //
 	pskintype = (daliasskintype_t *)&pinmodel[1];
+	Mod_VerifyDataRange (pskintype, sizeof(*pskintype), "Mod_LoadAliasModel skins");
 	pskintype = (daliasskintype_t *) Mod_LoadAllSkins (pheader->numskins, pskintype);
 
 //
 // endian-swap base s and t vertices in place
 //
 	pinstverts = (stvert_t *)pskintype;
+	Mod_VerifyDataRange (pinstverts, (size_t)pheader->numverts * sizeof(*pinstverts), "Mod_LoadAliasModel stverts");
 	stverts = pinstverts;
 
 	for (i=0 ; i<pheader->numverts ; i++)
@@ -3642,6 +3734,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // endian-swap triangle lists in place
 //
 	pintriangles = (dtriangle_t *)&pinstverts[pheader->numverts];
+	Mod_VerifyDataRange (pintriangles, (size_t)pheader->numtris * sizeof(*pintriangles), "Mod_LoadAliasModel triangles");
 	triangles = pintriangles;
 
 	for (i=0 ; i<pheader->numtris ; i++)
@@ -3660,6 +3753,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 //
 	posenum = 0;
 	pframetype = (daliasframetype_t *)&pintriangles[pheader->numtris];
+	Mod_VerifyDataRange (pframetype, sizeof(*pframetype), "Mod_LoadAliasModel frame header");
 
 	for (i=0 ; i<numframes ; i++)
 	{
