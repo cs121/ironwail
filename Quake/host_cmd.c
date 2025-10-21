@@ -1967,7 +1967,8 @@ command from the console.  Active clients are kicked off.
 static void Host_Map_f (void)
 {
 	int		i;
-	char	name[MAX_QPATH], *p;
+	size_t	len;
+	char	name[MAX_QPATH];
 
 	if (Cmd_Argc() < 2)	//no map name given
 	{
@@ -2005,9 +2006,9 @@ static void Host_Map_f (void)
 	svs.serverflags = 0;			// haven't completed an episode yet
 	q_strlcpy (name, Cmd_Argv(1), sizeof(name));
 	// remove (any) trailing ".bsp" from mapname -- S.A.
-	p = strstr(name, ".bsp");
-	if (p && p[4] == '\0')
-		*p = '\0';
+	len = strlen(name);
+	if (len >= 4 && !q_strcasecmp(name + len - 4, ".bsp"))
+		name[len - 4] = '\0';
 	PR_SwitchQCVM(&sv.qcvm);
 	SV_SpawnServer (name);
 	PR_SwitchQCVM(NULL);
