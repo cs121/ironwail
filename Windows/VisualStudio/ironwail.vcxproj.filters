@@ -75,6 +75,9 @@
     <ClCompile Include="..\..\Quake\gl_rmain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\gl_shadow.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\gl_rmisc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -217,6 +220,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sv_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\sv_bot.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sv_move.c">
