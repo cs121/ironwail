@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef GL_MODEL_H
 #define GL_MODEL_H
 
+#include "sys.h"
 #include "modelgen.h"
 #include "spritegn.h"
 
@@ -463,6 +464,7 @@ typedef struct qmodel_s
 	unsigned int	path_id;		// path id of the game directory
 							// that this model came from
 	qboolean	needload;		// bmodels and sprites don't cache normally
+	qfileofs_t	filesize;		// size of the backing file when it was loaded
 
 	modtype_t	type;
 	int			numframes;

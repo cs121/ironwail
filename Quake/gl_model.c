@@ -120,7 +120,9 @@ static mod_lump_info_t Mod_LumpData (const char *context, const char *lumpname, 
 	if (length < 0 || start < 0 || end < start)
 		error_fn ("%s: %s lump overflow in %s", context, lumpname, loadmodel->name);
 
-	if (com_filesize >= 0 && end > com_filesize)
+	const qfileofs_t filesize = loadmodel ? loadmodel->filesize : -1;
+
+	if (filesize >= 0 && end > filesize)
 		error_fn ("%s: %s lump extends past file size in %s", context, lumpname, loadmodel->name);
 
 	info.size = (size_t) length;
@@ -484,6 +486,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	COM_FileBase (mod->name, loadname, sizeof(loadname));
 
 	loadmodel = mod;
+	loadmodel->filesize = com_filesize;
 
 //
 // fill it in
