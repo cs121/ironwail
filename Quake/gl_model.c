@@ -609,160 +609,213 @@ Mod_LoadTextures
 */
 static void Mod_LoadTextures (lump_t *l)
 {
-	int		i, j, pixels, num, maxanim, altmax;
-	miptex_t	*mt;
-	texture_t	*tx, *tx2;
-	texture_t	*anims[10];
-	texture_t	*altanims[10];
-	dmiptexlump_t	*m;
+        int             i, j, pixels, num, maxanim, altmax;
+        miptex_t        *mt;
+        texture_t       *tx, *tx2;
+        texture_t       *anims[10];
+        texture_t       *altanims[10];
+        dmiptexlump_t   *m = NULL;
 //johnfitz -- more variables
-	char		texturename[64];
-	int			nummiptex;
-	src_offset_t		offset;
-	int			mark, fwidth, fheight;
-	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
-	byte		*data;
-	enum srcformat fmt;
+        char            texturename[64];
+        int                     nummiptex = 0;
+        src_offset_t            offset;
+        int                     mark, fwidth, fheight;
+        char            filename[MAX_OSPATH], mapname[MAX_OSPATH];
+        byte            *data;
+        enum srcformat fmt;
+        mod_lump_info_t lump;
+        const byte      *lump_base;
+        const byte      *lump_end;
+        size_t          texture_header_size;
 //johnfitz
 
-	//johnfitz -- don't return early if no textures; still need to create dummy texture
-	if (!l->filelen)
-	{
-		Con_Printf ("Mod_LoadTextures: no textures in bsp file\n");
-		nummiptex = 0;
-		m = NULL; // avoid bogus compiler warning
-	}
-	else
-	{
-		m = (dmiptexlump_t *)(mod_base + l->fileofs);
-		m->nummiptex = LittleLong (m->nummiptex);
-		nummiptex = m->nummiptex;
-	}
-	//johnfitz
+        texture_header_size = (loadmodel->bspversion == BSPVERSION_QUAKE64) ?
+                sizeof(miptex64_t) : sizeof(miptex_t);
 
-	loadmodel->numtextures = nummiptex + 2; //johnfitz -- need 2 dummy texture chains for missing textures
-	loadmodel->textures = (texture_t **) Hunk_AllocName (loadmodel->numtextures * sizeof(*loadmodel->textures) , loadname);
+        lump = Mod_LumpData ("Mod_LoadTextures", "textures", l, Mod_LumpError);
+        lump_base = (const byte *)lump.data;
+        lump_end = lump_base + lump.size;
 
-	for (i=0 ; i<nummiptex ; i++)
-	{
-		m->dataofs[i] = LittleLong(m->dataofs[i]);
-		if (m->dataofs[i] == -1)
-			continue;
-		mt = (miptex_t *)((byte *)m + m->dataofs[i]);
-		mt->width = LittleLong (mt->width);
-		mt->height = LittleLong (mt->height);
-		for (j=0 ; j<MIPLEVELS ; j++)
-			mt->offsets[j] = LittleLong (mt->offsets[j]);
+        //johnfitz -- don't return early if no textures; still need to create dummy texture
+        if (!lump.size)
+        {
+                Con_Printf ("Mod_LoadTextures: no textures in bsp file\n");
+        }
+        else
+        {
+                size_t table_bytes;
 
-		if (mt->width == 0 || mt->height == 0)
-		{
-			Con_Warning ("Zero sized texture %s in %s!\n", mt->name, loadmodel->name);
-			continue;
-		}
+                if (lump.size < sizeof(int))
+                        Mod_LumpError ("Mod_LoadTextures: texture lump too short in %s", loadmodel->name);
 
-		if ( (mt->width & 15) || (mt->height & 15) )
-		{
-			if (loadmodel->bspversion != BSPVERSION_QUAKE64)
-				Con_Warning ("Texture %s (%d x %d) is not 16 aligned\n", mt->name, mt->width, mt->height);
-		}
+                m = (dmiptexlump_t *) lump_base;
+                nummiptex = LittleLong (m->nummiptex);
+                if (nummiptex < 0)
+                        Mod_LumpError ("Mod_LoadTextures: negative texture count (%d) in %s", nummiptex, loadmodel->name);
+                if ((size_t)nummiptex > (SIZE_MAX - sizeof(int)) / sizeof(int))
+                        Mod_LumpError ("Mod_LoadTextures: texture count overflow (%d) in %s", nummiptex, loadmodel->name);
 
-		pixels = mt->width*mt->height; // only copy the first mip, the rest are auto-generated
-		tx = (texture_t *) Hunk_AllocNameNoFill (sizeof(texture_t) +pixels, loadname );
-		// only clear the texture struct, not the pixel buffer following it
-		memset (tx, 0, sizeof (*tx));
-		loadmodel->textures[i] = tx;
+                table_bytes = sizeof(int) + (size_t)nummiptex * sizeof(int);
+                if (table_bytes > lump.size)
+                        Mod_LumpError ("Mod_LoadTextures: texture offset table overruns lump in %s", loadmodel->name);
+        }
 
-		memcpy (tx->name, mt->name, sizeof(tx->name));
-		if (!tx->name[0])
-		{
-			q_snprintf (tx->name, sizeof(tx->name), "unnamed%d", i);
-			Con_Warning ("unnamed texture in %s, renaming to %s\n", loadmodel->name, tx->name);
-		}
-		tx->width = mt->width;
-		tx->height = mt->height;
-		// the pixels immediately follow the structures
+        if (nummiptex > INT_MAX - 2)
+                Mod_LumpError ("Mod_LoadTextures: too many textures (%d) in %s", nummiptex, loadmodel->name);
 
-		// ericw -- check for pixels extending past the end of the lump.
-		// appears in the wild; e.g. jam2_tronyn.bsp (func_mapjam2),
-		// kellbase1.bsp (quoth), and can lead to a segfault if we read past
-		// the end of the .bsp file buffer
-		if (((byte*)(mt+1) + pixels) > (mod_base + l->fileofs + l->filelen))
-		{
-			Con_DPrintf("Texture %s extends past end of lump\n", mt->name);
-			pixels = q_max(0L, (long)((mod_base + l->fileofs + l->filelen) - (byte*)(mt+1)));
-		}
+        loadmodel->numtextures = nummiptex + 2; //johnfitz -- need 2 dummy texture chains for missing textures
+        loadmodel->textures = (texture_t **) Hunk_AllocName (loadmodel->numtextures * sizeof(*loadmodel->textures) , loadname);
 
-			tx->fullbright = NULL; //johnfitz
-			tx->emissive = NULL;
-		tx->shift = 0;	// Q64 only
-		tx->type = Mod_TextureTypeFromName (tx->name);
+        for (i=0 ; i<nummiptex ; i++)
+        {
+                const byte *tex_header;
+                const byte *src_pixels;
+                size_t      pixel_count;
 
-		if (loadmodel->bspversion != BSPVERSION_QUAKE64)
-		{
-			memcpy ( tx+1, mt+1, pixels);
-		}
-		else
-		{ // Q64 bsp
-			miptex64_t *mt64 = (miptex64_t *)mt;
-			tx->shift = LittleLong (mt64->shift);
-			memcpy ( tx+1, mt64+1, pixels);
-		}
+                m->dataofs[i] = LittleLong(m->dataofs[i]);
+                if (m->dataofs[i] == -1)
+                        continue;
 
-		if (!isDedicated) //no texture uploading for dedicated server
-		{
-			if (tx->type == TEXTYPE_SKY)
-			{
-				if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-					Sky_LoadTextureQ64 (loadmodel, tx);
-				else
-					Sky_LoadTexture (loadmodel, tx);
-			}
-			else if (TEXTYPE_ISLIQUID (tx->type))
-			{
-				//external textures -- first look in "textures/mapname/" then look in "textures/"
-				mark = Hunk_LowMark();
-				COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
-				q_snprintf (filename, sizeof(filename), "textures/%s/#%s", mapname, tx->name+1); //this also replaces the '*' with a '#'
-				data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				if (!data)
-				{
-					q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
-					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				}
+                if (m->dataofs[i] < 0 || (size_t)m->dataofs[i] > lump.size)
+                {
+                        Con_Printf ("%s: ignoring texture %d with invalid offset %d\n", loadmodel->name, i, m->dataofs[i]);
+                        m->dataofs[i] = -1;
+                        continue;
+                }
 
-				//now load whatever we found
-				if (data) //load external image
-				{
-					q_strlcpy (texturename, filename, sizeof(texturename));
-					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
-						fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-				}
-				else //use the texture from the bsp file
-				{
-					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-						SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-				}
-			}
-			else //regular texture
-			{
-				int	extraflags = TEXPREF_BINDLESS;
-				if (tx->type == TEXTYPE_CUTOUT)
-					extraflags |= TEXPREF_ALPHA;
+                if (lump.size - (size_t)m->dataofs[i] < texture_header_size)
+                {
+                        Con_Printf ("%s: ignoring texture %d with truncated header\n", loadmodel->name, i);
+                        m->dataofs[i] = -1;
+                        continue;
+                }
 
-				//external textures -- first look in "textures/mapname/" then look in "textures/"
-				mark = Hunk_LowMark ();
-				COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
-				q_snprintf (filename, sizeof(filename), "textures/%s/%s", mapname, tx->name);
-				data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				if (!data)
-				{
-					q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
-					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				}
+                tex_header = lump_base + (size_t)m->dataofs[i];
+                mt = (miptex_t *)tex_header;
+                mt->width = LittleLong (mt->width);
+                mt->height = LittleLong (mt->height);
+                for (j=0 ; j<MIPLEVELS ; j++)
+                        mt->offsets[j] = LittleLong (mt->offsets[j]);
 
-				//now load whatever we found
+                if (mt->width == 0 || mt->height == 0)
+                {
+                        Con_Warning ("Zero sized texture %s in %s!\n", mt->name, loadmodel->name);
+                        m->dataofs[i] = -1;
+                        continue;
+                }
+
+                if ((mt->width & 15) || (mt->height & 15))
+                {
+                        if (loadmodel->bspversion != BSPVERSION_QUAKE64)
+                                Con_Warning ("Texture %s (%d x %d) is not 16 aligned\n", mt->name, mt->width, mt->height);
+                }
+
+                pixel_count = (size_t)mt->width * (size_t)mt->height; // only copy the first mip, the rest are auto-generated
+                if (pixel_count > INT_MAX)
+                {
+                        Con_Printf ("%s: ignoring texture %s with %zu pixels (too large)\n", loadmodel->name, mt->name, pixel_count);
+                        m->dataofs[i] = -1;
+                        continue;
+                }
+                pixels = (int)pixel_count;
+
+                tx = (texture_t *) Hunk_AllocNameNoFill (sizeof(texture_t) + pixels, loadname );
+                // only clear the texture struct, not the pixel buffer following it
+                memset (tx, 0, sizeof (*tx));
+                loadmodel->textures[i] = tx;
+
+                memcpy (tx->name, mt->name, sizeof(tx->name));
+                if (!tx->name[0])
+                {
+                        q_snprintf (tx->name, sizeof(tx->name), "unnamed%d", i);
+                        Con_Warning ("unnamed texture in %s, renaming to %s\n", loadmodel->name, tx->name);
+                }
+                tx->width = mt->width;
+                tx->height = mt->height;
+
+                if (loadmodel->bspversion != BSPVERSION_QUAKE64)
+                {
+                        tx->shift = 0;
+                        src_pixels = (const byte *)(mt + 1);
+                }
+                else
+                { // Q64 bsp
+                        miptex64_t *mt64 = (miptex64_t *)mt;
+                        tx->shift = LittleLong (mt64->shift);
+                        src_pixels = (const byte *)(mt64 + 1);
+                }
+
+                // ericw -- check for pixels extending past the end of the lump.
+                // appears in the wild; e.g. jam2_tronyn.bsp (func_mapjam2),
+                // kellbase1.bsp (quoth), and can lead to a segfault if we read past
+                // the end of the .bsp file buffer
+                if ((size_t)(lump_end - src_pixels) < (size_t)pixels)
+                {
+                        Con_DPrintf("Texture %s extends past end of lump\n", mt->name);
+                        pixels = q_max(0L, (long)(lump_end - src_pixels));
+                }
+
+                tx->fullbright = NULL; //johnfitz
+                tx->emissive = NULL;
+                tx->type = Mod_TextureTypeFromName (tx->name);
+
+                memcpy ( tx+1, src_pixels, pixels);
+
+                if (!isDedicated) //no texture uploading for dedicated server
+                {
+                        if (tx->type == TEXTYPE_SKY)
+                        {
+                                if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+                                        Sky_LoadTextureQ64 (loadmodel, tx);
+                                else
+                                        Sky_LoadTexture (loadmodel, tx);
+                        }
+                        else if (TEXTYPE_ISLIQUID (tx->type))
+                        {
+                                //external textures -- first look in "textures/mapname/" then look in "textures/"
+                                mark = Hunk_LowMark();
+                                COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
+                                q_snprintf (filename, sizeof(filename), "textures/%s/#%s", mapname, tx->name+1); //this also replaces the '*' with a '#'
+                                data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                if (!data)
+                                {
+                                        q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
+                                        data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                }
+
+                                //now load whatever we found
+                                if (data) //load external image
+                                {
+                                        q_strlcpy (texturename, filename, sizeof(texturename));
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
+                                                fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                }
+                                else //use the texture from the bsp file
+                                {
+                                        q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
+                                        offset = (src_offset_t)(src_pixels) - (src_offset_t)mod_base;
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                }
+                        }
+                        else //regular texture
+                        {
+                                int     extraflags = TEXPREF_BINDLESS;
+                                if (tx->type == TEXTYPE_CUTOUT)
+                                        extraflags |= TEXPREF_ALPHA;
+
+                                //external textures -- first look in "textures/mapname/" then look in "textures/"
+                                mark = Hunk_LowMark ();
+                                COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
+                                q_snprintf (filename, sizeof(filename), "textures/%s/%s", mapname, tx->name);
+                                data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                if (!data)
+                                {
+                                        q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
+                                        data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                }
+
+                                //now load whatever we found
                                if (data) //load external image
                                {
                                        char filename2[MAX_OSPATH];
@@ -791,39 +844,38 @@ static void Mod_LoadTextures (lump_t *l)
                                                tx->fullbright = TexMgr_LoadImage (loadmodel, filename2, fwidth, fheight,
                                                        fmt, data, filename2, 0, TEXPREF_MIPMAP | extraflags );
                                }
-				else //use the texture from the bsp file
-				{
-					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-					if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
-					{
-						if (tx->type != TEXTYPE_CUTOUT)
-						{
-							tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | extraflags);
-						}
-						else
-						{
-							tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | extraflags);
-							q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
-							tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | extraflags);
-						}
-					}
-					else
-					{
-						tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-							SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
-					}
-				}
-				Hunk_FreeToLowMark (mark);
-			}
-		}
-		//johnfitz
-	}
-
-	//johnfitz -- last 2 slots in array should be filled with dummy textures
+                                else //use the texture from the bsp file
+                                {
+                                        q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
+                                        offset = (src_offset_t)(src_pixels) - (src_offset_t)mod_base;
+                                        if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
+                                        {
+                                                if (tx->type != TEXTYPE_CUTOUT)
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | extraflags);
+                                                }
+                                                else
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | extraflags);
+                                                        q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
+                                                        tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | extraflags);
+                                                }
+                                        }
+                                        else
+                                        {
+                                                tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                        SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
+                                        }
+                                }
+                                Hunk_FreeToLowMark (mark);
+                        }
+                }
+                //johnfitz
+        }
+        //johnfitz -- last 2 slots in array should be filled with dummy textures
 	loadmodel->textures[loadmodel->numtextures-2] = r_notexture_mip; //for lightmapped surfs
 	loadmodel->textures[loadmodel->numtextures-1] = r_notexture_mip2; //for SURF_DRAWTILED surfs
 
