@@ -101,13 +101,15 @@ static void Shadow_DestroyCube(shadow_cube_t *cube)
 
     if (cube->depth_rb)
     {
-        glDeleteRenderbuffers(1, &cube->depth_rb);
+        if (GL_DeleteRenderbuffersFunc)
+            GL_DeleteRenderbuffersFunc(1, &cube->depth_rb);
         cube->depth_rb = 0;
     }
 
     if (cube->fbo)
     {
-        glDeleteFramebuffers(1, &cube->fbo);
+        if (GL_DeleteFramebuffersFunc)
+            GL_DeleteFramebuffersFunc(1, &cube->fbo);
         cube->fbo = 0;
     }
 

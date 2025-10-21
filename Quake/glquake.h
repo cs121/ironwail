@@ -193,8 +193,12 @@ extern	const char	*gl_version;
 	x(void,			ActiveTexture, (GLenum texture))\
 	x(void,			GenerateMipmap, (GLenum target))\
 	x(void,			BindFramebuffer, (GLenum target, GLuint framebuffer))\
+	x(void,			BindRenderbuffer, (GLenum target, GLuint renderbuffer))\
 	x(void,			GenFramebuffers, (GLsizei n, GLuint *framebuffers))\
 	x(void,			DeleteFramebuffers, (GLsizei n, const GLuint *framebuffers))\
+	x(void,			GenRenderbuffers, (GLsizei n, GLuint *renderbuffers))\
+	x(void,			DeleteRenderbuffers, (GLsizei n, const GLuint *renderbuffers))\
+	x(void,			RenderbufferStorage, (GLenum target, GLenum internalformat, GLsizei width, GLsizei height))\
 	x(void,			FramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level))\
 	x(void,			FramebufferTextureLayer, (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer))\
 	x(GLenum,		CheckFramebufferStatus, (GLenum target))\
