@@ -1999,13 +1999,46 @@ static void Mod_ProcessLeafs_L2 (const dl2leaf_t *in, size_t count)
 	}
 }
 
+static void Mod_LoadLeafs (lump_t *l, int bsp2)
+{
+        size_t count = 0;
+
+        loadmodel->leafs = NULL;
+        loadmodel->numleafs = 0;
+
+        if (bsp2 == 2)
+        {
+                const dl2leaf_t *in = NULL;
+
+                count = Mod_LumpElementCount ("Mod_LoadLeafs", "leafs", sizeof(*in), l, Mod_LumpError, (const void **)&in);
+                if (count)
+                        Mod_ProcessLeafs_L2 (in, count);
+        }
+        else if (bsp2)
+        {
+                const dl1leaf_t *in = NULL;
+
+                count = Mod_LumpElementCount ("Mod_LoadLeafs", "leafs", sizeof(*in), l, Mod_LumpError, (const void **)&in);
+                if (count)
+                        Mod_ProcessLeafs_L1 (in, count);
+        }
+        else
+        {
+                const dsleaf_t *in = NULL;
+
+                count = Mod_LumpElementCount ("Mod_LoadLeafs", "leafs", sizeof(*in), l, Mod_LumpError, (const void **)&in);
+                if (count)
+                        Mod_ProcessLeafs_S (in, count);
+        }
+}
+
 static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 {
 	const dsclipnode_t	*ins = NULL;
 	const dlclipnode_t	*inl = NULL;
 	mclipnode_t	*out; //johnfitz -- was dclipnode_t
 	size_t		total;
-	int		i, j, count;
+	int		i, count;
 	hull_t		*hull;
 
 	if (bsp2)
