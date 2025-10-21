@@ -23,50 +23,45 @@ typedef struct bot_skill_config_s
 	float			death_taunt_chance;
 } bot_skill_config_t;
 
-static const bot_skill_config_t bot_skill_configs[BOT_SKILL_COUNT] =
-{
-	[ BOT_SKILL_EASY ] =
-	{
-	.forward_speed = 160.0f,
-	.strafe_speed = 90.0f,
-	.reaction_time = 1.4f,
-	.attack_delay = 0.45f,
-	.aim_inaccuracy = 12.0f,
-	.strafe_interval_min = 1.1f,
-	.strafe_interval_max = 1.6f,
-	.chat_interval = 9.0f,
-	.engage_taunt_chance = 0.25f,
-	.kill_taunt_chance = 0.5f,
-	.death_taunt_chance = 0.6f,
+static const bot_skill_config_t bot_skill_configs[BOT_SKILL_COUNT] = {
+	[ BOT_SKILL_EASY ] = {
+		.forward_speed = 160.0f,
+		.strafe_speed = 90.0f,
+		.reaction_time = 1.4f,
+		.attack_delay = 0.45f,
+		.aim_inaccuracy = 12.0f,
+		.strafe_interval_min = 1.1f,
+		.strafe_interval_max = 1.6f,
+		.chat_interval = 9.0f,
+		.engage_taunt_chance = 0.25f,
+		.kill_taunt_chance = 0.5f,
+		.death_taunt_chance = 0.6f,
 	},
-	[ BOT_SKILL_NORMAL ] =
-	{
-	.forward_speed = 200.0f,
-	.strafe_speed = 140.0f,
-	.reaction_time = 0.9f,
-	.attack_delay = 0.3f,
-	.aim_inaccuracy = 6.0f,
-	.strafe_interval_min = 0.75f,
-	.strafe_interval_max = 1.2f,
-	.chat_interval = 7.0f,
-	.engage_taunt_chance = 0.35f,
-	.kill_taunt_chance = 0.6f,
-	.death_taunt_chance = 0.7f,
+	[ BOT_SKILL_NORMAL ] = {
+		.forward_speed = 200.0f,
+		.strafe_speed = 140.0f,
+		.reaction_time = 0.9f,
+		.attack_delay = 0.3f,
+		.aim_inaccuracy = 6.0f,
+		.strafe_interval_min = 0.75f,
+		.strafe_interval_max = 1.2f,
+		.chat_interval = 7.0f,
+		.engage_taunt_chance = 0.35f,
+		.kill_taunt_chance = 0.6f,
+		.death_taunt_chance = 0.7f,
 	},
-	[ BOT_SKILL_HARD ] =
-	{
-	.forward_speed = 240.0f,
-	.strafe_speed = 200.0f,
-	.reaction_time = 0.45f,
-	.attack_delay = 0.18f,
-	.aim_inaccuracy = 2.5f,
-	.strafe_interval_min = 0.5f,
-	.strafe_interval_max = 0.9f,
-	.chat_interval = 5.0f,
-	.engage_taunt_chance = 0.5f,
-	.kill_taunt_chance = 0.75f,
-	.death_taunt_chance = 0.8f,
-	}
+	[ BOT_SKILL_HARD ] = {
+		.forward_speed = 240.0f,
+		.strafe_speed = 200.0f,
+		.reaction_time = 0.45f,
+		.attack_delay = 0.18f,
+		.aim_inaccuracy = 2.5f,
+		.strafe_interval_min = 0.5f,
+		.strafe_interval_max = 0.9f,
+		.chat_interval = 5.0f,
+		.engage_taunt_chance = 0.5f,
+		.kill_taunt_chance = 0.75f,
+		.death_taunt_chance = 0.8f,
 	}
 };
 
@@ -120,6 +115,8 @@ typedef enum
 	BOT_CHAT_DEATH
 } bot_chat_event_t;
 
+static float SV_BotRandomFloat (float min, float max);
+
 static bot_skill_t SV_BotClampSkill (bot_skill_t skill)
 {
 	if ((int) skill < 0 || (int) skill >= BOT_SKILL_COUNT)
@@ -149,7 +146,7 @@ static qboolean SV_BotTryParseSkillToken (const char *token, bot_skill_t *out)
 
 	for (i = 0; i < BOT_SKILL_COUNT; i++)
 	{
-		if (!Q_strcasecmp (token, bot_skill_names[i]))
+		if (!q_strcasecmp (token, bot_skill_names[i]))
 		{
 			*out = (bot_skill_t) i;
 			return true;
@@ -286,7 +283,7 @@ static void SV_BotMaybeTaunt (client_t *client, bot_chat_event_t event, edict_t 
 
 static float SV_BotRandomFloat (float min, float max)
 {
-return min + (max - min) * ((float) rand () / (float) RAND_MAX);
+	return min + (max - min) * ((float) rand () / (float) RAND_MAX);
 }
 
 qboolean SV_ClientIsBot (const client_t *client)
@@ -582,11 +579,11 @@ static qboolean SV_BotIsItem (edict_t *ent)
         if (!classname || !classname[0])
                 return false;
 
-        if (!Q_strncasecmp (classname, "item_", 5))
+        if (!q_strncasecmp (classname, "item_", 5))
                 return true;
-        if (!Q_strncasecmp (classname, "weapon_", 7))
+        if (!q_strncasecmp (classname, "weapon_", 7))
                 return true;
-        if (!Q_strncasecmp (classname, "ammo_", 5))
+        if (!q_strncasecmp (classname, "ammo_", 5))
                 return true;
 
         return false;
