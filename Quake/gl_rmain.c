@@ -29,6 +29,8 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
+extern gltexture_t *deluxemap_texture;
+
 
 vec3_t* r_pointfile;
 
@@ -227,6 +229,7 @@ cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
+cvar_t	r_shadingmodel = { "r_shadingmodel", "0", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -1515,6 +1518,21 @@ void R_SetupView (void)
 {
 	R_AnimateLight ();
 
+	memset (r_framedata.lightmapmod, 0, sizeof (r_framedata.lightmapmod));
+	memset (r_framedata.lightmapwave, 0, sizeof (r_framedata.lightmapwave));
+	memset (r_framedata.glowparams, 0, sizeof (r_framedata.glowparams));
+
+	r_framedata.lightmapmod[1] = 1.f;
+	r_framedata.lightmapmod[2] = 1.f;
+
+	unsigned int shading_model = (unsigned int)CLAMP (0, (int)Q_rint (r_shadingmodel.value), 2);
+	r_framedata.shadingmodel = shading_model;
+
+	if (Mod_BspxLightingEnabled () && deluxemap_texture && deluxemap_texture->texnum != 0)
+		r_framedata.has_deluxemap = 1u;
+	else
+		r_framedata.has_deluxemap = 0u;
+
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
 		float overbright = (float)(1 << overbright_bits);
@@ -1533,7 +1551,6 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
-		r_framedata._padding0 = 0.f;
 	}
 
 	r_framecount++;
