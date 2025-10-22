@@ -241,6 +241,15 @@ cvar_t	gl_nocolors = { "gl_nocolors","0",CVAR_NONE };
 cvar_t	r_clearcolor = { "r_clearcolor","2",CVAR_ARCHIVE };
 cvar_t	r_flatlightstyles = { "r_flatlightstyles", "0", CVAR_NONE };
 cvar_t	r_lerplightstyles = { "r_lerplightstyles", "1", CVAR_ARCHIVE }; // 0=off; 1=skip abrupt transitions; 2=always lerp
+cvar_t	r_lightstyle_multiplier = { "r_lightstyle_multiplier", "1.0", CVAR_ARCHIVE };
+cvar_t	r_lightstyle_sine = { "r_lightstyle_sine", "0", CVAR_ARCHIVE };
+cvar_t	r_lightstyle_sine_amplitude = { "r_lightstyle_sine_amplitude", "0.25", CVAR_ARCHIVE };
+cvar_t	r_lightstyle_sine_frequency = { "r_lightstyle_sine_frequency", "0.5", CVAR_ARCHIVE };
+cvar_t	r_lightstyle_sine_phase = { "r_lightstyle_sine_phase", "0.0", CVAR_ARCHIVE };
+cvar_t	r_lightstyle_sine_phase_step = { "r_lightstyle_sine_phase_step", "0.0", CVAR_ARCHIVE };
+cvar_t	r_flashblend = { "r_flashblend", "1", CVAR_ARCHIVE };
+cvar_t	r_flashblend_scale = { "r_flashblend_scale", "1.0", CVAR_ARCHIVE };
+cvar_t	r_flashblend_intensity = { "r_flashblend_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
 cvar_t	gl_overbright_models = { "gl_overbright_models", "1", CVAR_ARCHIVE };
@@ -2605,6 +2614,7 @@ void R_RenderScene (void)
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 
 	R_DrawParticles (false);
+	R_DrawLightHalos ();
 
 	Sky_DrawSky (); //johnfitz
 

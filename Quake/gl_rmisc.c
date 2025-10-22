@@ -408,6 +408,15 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_flatlightstyles);
 	Cvar_RegisterVariable (&r_lerplightstyles);
+	Cvar_RegisterVariable (&r_lightstyle_multiplier);
+	Cvar_RegisterVariable (&r_lightstyle_sine);
+	Cvar_RegisterVariable (&r_lightstyle_sine_amplitude);
+	Cvar_RegisterVariable (&r_lightstyle_sine_frequency);
+	Cvar_RegisterVariable (&r_lightstyle_sine_phase);
+	Cvar_RegisterVariable (&r_lightstyle_sine_phase_step);
+	Cvar_RegisterVariable (&r_flashblend);
+	Cvar_RegisterVariable (&r_flashblend_scale);
+	Cvar_RegisterVariable (&r_flashblend_intensity);
 	Cvar_RegisterVariable (&r_oldskyleaf);
 	Cvar_RegisterVariable (&r_drawworld);
 	Cvar_RegisterVariable (&r_showtris);

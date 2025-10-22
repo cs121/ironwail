@@ -44,6 +44,7 @@ extern vec3_t *r_pointfile;
 void R_TimeRefresh_f (void);
 void R_ReadPointFile_f (void);
 texture_t *R_TextureAnimation (texture_t *base, int frame);
+void R_DrawLightHalos (void);
 
 typedef enum {
 	pt_static, pt_grav, pt_slowgrav, pt_fire, pt_explode, pt_explode2, pt_blob, pt_blob2
@@ -104,6 +105,15 @@ extern	cvar_t	r_litwater;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
+extern	cvar_t	r_lightstyle_multiplier;
+extern	cvar_t	r_lightstyle_sine;
+extern	cvar_t	r_lightstyle_sine_amplitude;
+extern	cvar_t	r_lightstyle_sine_frequency;
+extern	cvar_t	r_lightstyle_sine_phase;
+extern	cvar_t	r_lightstyle_sine_phase_step;
+extern	cvar_t	r_flashblend;
+extern	cvar_t	r_flashblend_scale;
+extern	cvar_t	r_flashblend_intensity;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;
@@ -275,15 +285,16 @@ typedef enum {
 	GLS_BLEND_ALPHA				= 1 << 2,
 	GLS_BLEND_ALPHA_OIT			= 2 << 2,
 	GLS_BLEND_MULTIPLY			= 3 << 2,
-	GLS_MASK_BLEND				= 3 << 2,
+	GLS_BLEND_ADDITIVE			= 4 << 2,
+	GLS_MASK_BLEND				= 7 << 2,
 
-	GLS_CULL_BACK				= 0 << 4,
-	GLS_CULL_NONE				= 1 << 4,
-	GLS_CULL_FRONT				= 2 << 4,
-	GLS_MASK_CULL				= 3 << 4,
+	GLS_CULL_BACK				= 0 << 5,
+	GLS_CULL_NONE				= 1 << 5,
+	GLS_CULL_FRONT				= 2 << 5,
+	GLS_MASK_CULL				= 3 << 5,
 
 	GLS_ATTRIBS_BITS			= 3,
-	GLS_ATTRIBS_SHIFT			= 6,
+	GLS_ATTRIBS_SHIFT			= 7,
 	GLS_ATTRIBS_MAXCOUNT		= (1 << GLS_ATTRIBS_BITS) - 1,
 	GLS_MASK_ATTRIBS			= GLS_ATTRIBS_MAXCOUNT << GLS_ATTRIBS_SHIFT,
 

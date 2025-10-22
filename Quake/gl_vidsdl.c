@@ -1123,16 +1123,19 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 					break;
 				}
 				// fallthrough!
-			case GLS_BLEND_ALPHA:
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-				break;
-			case GLS_BLEND_MULTIPLY:
-				glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-				break;
-		}
-	}
+case GLS_BLEND_ALPHA:
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+break;
+case GLS_BLEND_MULTIPLY:
+glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+break;
+case GLS_BLEND_ADDITIVE:
+glBlendFunc(GL_ONE, GL_ONE);
+break;
+}
+}
 
-	if (diff & GLS_MASK_CULL)
+if (diff & GLS_MASK_CULL)
 	{
 		unsigned cull = mask & GLS_MASK_CULL;
 		if (cull == GLS_CULL_NONE)
