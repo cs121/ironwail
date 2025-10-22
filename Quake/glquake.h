@@ -427,17 +427,20 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	float	_padding0;
+	unsigned int	shadingmodel;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
-	int			numlights;
-	int			prev_frame_valid;
-	int			_padding1;
-	int			_padding2;
+	float	lightmapmod[4];
+	float	lightmapwave[4];
+	float	glowparams[4];
+	unsigned int	numlights;
+	unsigned int	prev_frame_valid;
+	unsigned int	has_deluxemap;
+	unsigned int	_pad2;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;

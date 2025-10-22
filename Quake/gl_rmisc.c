@@ -32,6 +32,7 @@ extern cvar_t gl_fullbrights;
 extern cvar_t gl_farclip;
 extern cvar_t gl_overbright_models;
 extern cvar_t r_overbrightbits;
+extern cvar_t r_shadingmodel;
 extern cvar_t r_waterwarp;
 extern cvar_t r_oldskyleaf;
 extern cvar_t r_drawworld;
@@ -300,6 +301,18 @@ static void R_OverbrightBits_f (cvar_t *var)
 
 /*
 ====================
+R_ShadingModel_f
+====================
+*/
+static void R_ShadingModel_f (cvar_t *var)
+{
+	int value = CLAMP (0, (int)Q_rint (var->value), 2);
+	if (value != (int)var->value)
+		Cvar_SetValueQuick (var, (float)value);
+}
+
+/*
+====================
 GL_WaterAlphaForTextureType
 ====================
 */
@@ -379,6 +392,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_chromatic_aberration);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
+	Cvar_RegisterVariable (&r_shadingmodel);
+	Cvar_SetCallback (&r_shadingmodel, R_ShadingModel_f);
+	R_ShadingModel_f (&r_shadingmodel);
 
 	Cvar_RegisterVariable (&gl_finish);
 	Cvar_RegisterVariable (&gl_clear);

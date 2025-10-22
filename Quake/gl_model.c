@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // models are the only shared resource between a client and server running
 // on the same machine.
 
+#include <limits.h>
 #include "quakedef.h"
 
 static qmodel_t*	loadmodel;
@@ -36,10 +37,41 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 
 static void Mod_Print (void);
+static void Mod_BspxResetModel (qmodel_t *mod);
+static void Mod_BspxParseLumps (const byte *buffer, size_t filesize);
+static void Mod_BspxIntegrate (const lump_t *lighting_lump);
+static void Bspx_BrushList_f (void);
 
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
+static cvar_t	r_bspx_enable = {"r_bspx_enable", "1", CVAR_ARCHIVE};
+static cvar_t	r_bspx_normals = {"r_bspx_normals", "1", CVAR_ARCHIVE};
+static cvar_t	r_bspx_lighting = {"r_bspx_lighting", "1", CVAR_ARCHIVE};
+static cvar_t	r_bspx_envmap = {"r_bspx_envmap", "0", CVAR_ARCHIVE};
+
+#define BSPX_SIGNATURE		"BSPX"
+#define BSPX_MAX_LUMP_SIZE	(64 * 1024 * 1024)
+
+typedef struct
+{
+	char	id[4];
+	int		numlumps;
+} bspx_header_disk_t;
+
+typedef struct
+{
+	char	lumpname[24];
+	int		fileofs;
+	int		filelen;
+} bspx_lump_disk_t;
+
+#define BSPX_WARNED_MAX 64
+static char bspx_warned_names[BSPX_WARNED_MAX][24];
+static int  bspx_warned_count;
+
+static void Bspx_WarnUnknown (const char *name);
+static int Bspx_LumpNameCompare (const void *pa, const void *pb);
 
 static byte	*mod_novis;
 static int	mod_novis_capacity;
@@ -93,22 +125,431 @@ Mod_Init
 */
 void Mod_Init (void)
 {
-	Cvar_RegisterVariable (&external_vis);
-	Cvar_RegisterVariable (&external_ents);
-	Cvar_RegisterVariable (&r_md5);
-	Cvar_SetCallback (&r_md5, R_MD5_f);
+        Cvar_RegisterVariable (&external_vis);
+        Cvar_RegisterVariable (&external_ents);
+        Cvar_RegisterVariable (&r_md5);
+        Cvar_RegisterVariable (&r_bspx_enable);
+        Cvar_RegisterVariable (&r_bspx_normals);
+        Cvar_RegisterVariable (&r_bspx_lighting);
+        Cvar_RegisterVariable (&r_bspx_envmap);
+        Cvar_SetCallback (&r_md5, R_MD5_f);
 
-	Cmd_AddCommand ("mcache", Mod_Print);
+        Cmd_AddCommand ("mcache", Mod_Print);
+        Cmd_AddCommand ("bspx_brushlist", Bspx_BrushList_f);
 
-	//johnfitz -- create notexture miptex
-	r_notexture_mip = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip");
-	strcpy (r_notexture_mip->name, "notexture");
-	r_notexture_mip->height = r_notexture_mip->width = 32;
+        //johnfitz -- create notexture miptex
+        r_notexture_mip = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip");
+        strcpy (r_notexture_mip->name, "notexture");
+        r_notexture_mip->height = r_notexture_mip->width = 32;
 
-	r_notexture_mip2 = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip2");
-	strcpy (r_notexture_mip2->name, "notexture2");
-	r_notexture_mip2->height = r_notexture_mip2->width = 32;
-	//johnfitz
+        r_notexture_mip2 = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip2");
+        strcpy (r_notexture_mip2->name, "notexture2");
+        r_notexture_mip2->height = r_notexture_mip2->width = 32;
+        //johnfitz
+}
+
+static void Bspx_WarnUnknown (const char *name)
+{
+        int i;
+
+        if (!name || !*name)
+                return;
+
+        for (i = 0; i < bspx_warned_count; i++)
+        {
+                if (!q_strcasecmp (bspx_warned_names[i], name))
+                        return;
+        }
+
+        if (bspx_warned_count < BSPX_WARNED_MAX)
+        {
+                q_strlcpy (bspx_warned_names[bspx_warned_count], name, sizeof(bspx_warned_names[0]));
+                bspx_warned_count++;
+        }
+
+        Con_DPrintf ("BSPX: ignoring unknown lump \"%s\"\n", name);
+}
+
+static int Bspx_LumpNameCompare (const void *pa, const void *pb)
+{
+        const bspx_lump_t *a = (const bspx_lump_t *) pa;
+        const bspx_lump_t *b = (const bspx_lump_t *) pb;
+        return q_strcasecmp (a->name, b->name);
+}
+
+static void Mod_BspxResetModel (qmodel_t *mod)
+{
+        if (!mod)
+                return;
+
+        mod->num_bspx_lumps = 0;
+        mod->bspx_lumps = NULL;
+        mod->bspx_vertex_normals = NULL;
+        mod->num_bspx_vertex_normals = 0;
+        mod->bspx_face_normals = NULL;
+        mod->num_bspx_face_normals = 0;
+        mod->bspx_rgb_lighting = NULL;
+        mod->bspx_rgb_lighting_size = 0;
+        mod->bspx_lighting_dir = NULL;
+        mod->bspx_lighting_dir_size = 0;
+        mod->lightdatasize = 0;
+}
+
+static void Mod_BspxParseLumps (const byte *buffer, size_t filesize)
+{
+        int                     i;
+        int                     stored;
+        const bspx_header_disk_t *header;
+        const bspx_lump_disk_t  *disk;
+        size_t                  table_size, table_offset;
+        size_t                  *span_starts = NULL;
+        size_t                  *span_ends = NULL;
+
+        if (!loadmodel)
+                return;
+
+        loadmodel->num_bspx_lumps = 0;
+        loadmodel->bspx_lumps = NULL;
+
+        if (!r_bspx_enable.value)
+                return;
+
+        if (!buffer || filesize < sizeof(*header))
+                return;
+
+        header = (const bspx_header_disk_t *)(buffer + filesize - sizeof(*header));
+        if (memcmp(header->id, BSPX_SIGNATURE, sizeof(header->id)) != 0)
+                return;
+
+        i = LittleLong (header->numlumps);
+        if (i <= 0)
+                return;
+
+        table_size = (size_t)i * sizeof(*disk);
+        if (table_size > filesize || table_size > filesize - sizeof(*header))
+        {
+                Con_DWarning ("BSPX: %s has malformed lump table\n", loadmodel->name);
+                return;
+        }
+
+        table_offset = filesize - sizeof(*header) - table_size;
+        if (table_offset > filesize)
+                return;
+
+        disk = (const bspx_lump_disk_t *)(buffer + table_offset);
+
+        loadmodel->bspx_lumps = (bspx_lump_t *) Hunk_AllocName (i * sizeof(bspx_lump_t), loadname);
+        if (!loadmodel->bspx_lumps)
+        {
+                Con_Warning ("BSPX: unable to allocate registry for %s\n", loadmodel->name);
+                return;
+        }
+
+        if (i > 0)
+        {
+                span_starts = (size_t *) malloc ((size_t)i * sizeof(size_t));
+                span_ends = (size_t *) malloc ((size_t)i * sizeof(size_t));
+                if (!span_starts || !span_ends)
+                {
+                        free (span_starts);
+                        free (span_ends);
+                        Con_Warning ("BSPX: overlap tracking allocation failed for %s\n", loadmodel->name);
+                        return;
+                }
+        }
+
+        stored = 0;
+        for (int lump_index = 0; lump_index < i; ++lump_index)
+        {
+                char            name[25];
+                int             fileofs = LittleLong (disk[lump_index].fileofs);
+                int             filelen = LittleLong (disk[lump_index].filelen);
+                size_t          start, length, end;
+                int             overlap_index = -1;
+
+                memcpy (name, disk[lump_index].lumpname, sizeof(disk[lump_index].lumpname));
+                name[sizeof(name) - 1] = '\0';
+
+                if (fileofs < 0 || filelen < 0)
+                {
+                        Con_DWarning ("BSPX: %s has negative offsets for lump \"%s\"\n", loadmodel->name, name);
+                        continue;
+                }
+
+                length = (size_t)filelen;
+                start = (size_t)fileofs;
+
+                if (length > BSPX_MAX_LUMP_SIZE)
+                {
+                        Con_DWarning ("BSPX: %s lump \"%s\" exceeds %u bytes\n", loadmodel->name, name, (unsigned)BSPX_MAX_LUMP_SIZE);
+                        continue;
+                }
+
+                if (start > filesize || length > filesize - start)
+                {
+                        Con_DWarning ("BSPX: %s lump \"%s\" points outside file\n", loadmodel->name, name);
+                        continue;
+                }
+
+                end = start + length;
+                if (end > table_offset)
+                {
+                        Con_DWarning ("BSPX: %s lump \"%s\" overlaps BSPX table\n", loadmodel->name, name);
+                        continue;
+                }
+
+                for (int test = 0; test < stored; ++test)
+                {
+                        if (!(end <= span_starts[test] || start >= span_ends[test]))
+                        {
+                                overlap_index = test;
+                                break;
+                        }
+                }
+
+                if (overlap_index >= 0)
+                {
+                        Con_DWarning ("BSPX: %s lump \"%s\" overlaps \"%s\"\n", loadmodel->name, name, loadmodel->bspx_lumps[overlap_index].name);
+                        continue;
+                }
+
+                bspx_lump_t *out = &loadmodel->bspx_lumps[stored];
+                memset (out, 0, sizeof(*out));
+                q_strlcpy (out->name, name, sizeof(out->name));
+                out->fileofs = fileofs;
+                out->filelen = filelen;
+
+                if (length > 0)
+                {
+                        out->data = (byte *) Hunk_AllocName (length, loadname);
+                        if (!out->data)
+                        {
+                                Con_Warning ("BSPX: failed to allocate %zu bytes for lump \"%s\" in %s\n", length, name, loadmodel->name);
+                                continue;
+                        }
+                        memcpy (out->data, buffer + start, length);
+                }
+                else
+                        out->data = NULL;
+
+                if (span_starts)
+                {
+                        span_starts[stored] = start;
+                        span_ends[stored] = end;
+                }
+
+                stored++;
+        }
+
+        free (span_starts);
+        free (span_ends);
+
+        loadmodel->num_bspx_lumps = stored;
+        if (stored > 1)
+                qsort (loadmodel->bspx_lumps, stored, sizeof(bspx_lump_t), Bspx_LumpNameCompare);
+        if (stored == 0)
+                loadmodel->bspx_lumps = NULL;
+}
+
+static void Mod_BspxIntegrate (const lump_t *lighting_lump)
+{
+        (void)lighting_lump;
+        const bspx_lump_t *lump;
+        size_t          expected;
+
+        if (!loadmodel || !loadmodel->bspx_lumps || loadmodel->num_bspx_lumps <= 0)
+                return;
+
+        loadmodel->bspx_vertex_normals = NULL;
+        loadmodel->num_bspx_vertex_normals = 0;
+        loadmodel->bspx_face_normals = NULL;
+        loadmodel->num_bspx_face_normals = 0;
+        loadmodel->bspx_rgb_lighting = NULL;
+        loadmodel->bspx_rgb_lighting_size = 0;
+        loadmodel->bspx_lighting_dir = NULL;
+        loadmodel->bspx_lighting_dir_size = 0;
+
+        lump = Mod_BspxFindLump (loadmodel, "VERTEXNORMALS");
+        if (lump && lump->filelen > 0)
+        {
+                expected = (size_t)loadmodel->numvertexes * sizeof(vec3_t);
+                if ((size_t)lump->filelen == expected)
+                {
+                        vec3_t *dst = (vec3_t *) Hunk_AllocName (expected, loadname);
+                        if (dst)
+                        {
+                                const float *src = (const float *) lump->data;
+                                for (int idx = 0; idx < loadmodel->numvertexes; ++idx)
+                                {
+                                        dst[idx][0] = LittleFloat (src[idx * 3 + 0]);
+                                        dst[idx][1] = LittleFloat (src[idx * 3 + 1]);
+                                        dst[idx][2] = LittleFloat (src[idx * 3 + 2]);
+                                }
+                                loadmodel->bspx_vertex_normals = dst;
+                                loadmodel->num_bspx_vertex_normals = loadmodel->numvertexes;
+                        }
+                }
+                else
+                        Con_DWarning ("BSPX: %s VERTEXNORMALS has %d bytes, expected %zu\n", loadmodel->name, lump->filelen, expected);
+        }
+
+        lump = Mod_BspxFindLump (loadmodel, "FACENORMALS");
+        if (lump && lump->filelen > 0)
+        {
+                expected = (size_t)loadmodel->numsurfaces * sizeof(vec3_t);
+                if ((size_t)lump->filelen == expected)
+                {
+                        vec3_t *dst = (vec3_t *) Hunk_AllocName (expected, loadname);
+                        if (dst)
+                        {
+                                const float *src = (const float *) lump->data;
+                                for (int idx = 0; idx < loadmodel->numsurfaces; ++idx)
+                                {
+                                        dst[idx][0] = LittleFloat (src[idx * 3 + 0]);
+                                        dst[idx][1] = LittleFloat (src[idx * 3 + 1]);
+                                        dst[idx][2] = LittleFloat (src[idx * 3 + 2]);
+                                }
+                                loadmodel->bspx_face_normals = dst;
+                                loadmodel->num_bspx_face_normals = loadmodel->numsurfaces;
+                        }
+                }
+                else
+                        Con_DWarning ("BSPX: %s FACENORMALS has %d bytes, expected %zu\n", loadmodel->name, lump->filelen, expected);
+        }
+
+        lump = Mod_BspxFindLump (loadmodel, "RGBLIGHTING");
+        if (lump && lump->filelen > 0)
+        {
+                loadmodel->bspx_rgb_lighting = lump->data;
+                loadmodel->bspx_rgb_lighting_size = lump->filelen;
+                if (!loadmodel->litfile && loadmodel->lightdata && loadmodel->lightdatasize == lump->filelen)
+                {
+                        if (r_bspx_lighting.value)
+                        {
+                                memcpy (loadmodel->lightdata, lump->data, lump->filelen);
+                                loadmodel->litfile = true;
+                        }
+                }
+                else if (loadmodel->lightdatasize && loadmodel->lightdatasize != lump->filelen)
+                        Con_DWarning ("BSPX: %s RGBLIGHTING size mismatch (%d vs %d)\n", loadmodel->name, lump->filelen, loadmodel->lightdatasize);
+        }
+
+        lump = Mod_BspxFindLump (loadmodel, "LIGHTINGDIR");
+        if (lump && lump->filelen > 0)
+        {
+                loadmodel->bspx_lighting_dir = lump->data;
+                loadmodel->bspx_lighting_dir_size = lump->filelen;
+                if (loadmodel->lightdatasize && loadmodel->lightdatasize != lump->filelen)
+                        Con_DWarning ("BSPX: %s LIGHTINGDIR size mismatch (%d vs %d)\n", loadmodel->name, lump->filelen, loadmodel->lightdatasize);
+        }
+
+        qboolean lighting_dir_mismatch = false;
+        if (loadmodel->surfaces && loadmodel->numsurfaces > 0)
+        {
+                const byte *dirbase = loadmodel->bspx_lighting_dir;
+                size_t dirsize = (size_t)loadmodel->bspx_lighting_dir_size;
+                for (int surfidx = 0; surfidx < loadmodel->numsurfaces; ++surfidx)
+                {
+                        msurface_t *surf = loadmodel->surfaces + surfidx;
+                        surf->bspx_lightdir_samples = NULL;
+                        if (!dirbase || dirsize == 0 || !loadmodel->lightdata || !surf->samples)
+                                continue;
+                        if (surf->samples < loadmodel->lightdata)
+                                continue;
+                        size_t offset = (size_t)(surf->samples - loadmodel->lightdata);
+                        if (offset >= dirsize)
+                        {
+                                if (!lighting_dir_mismatch)
+                                {
+                                        Con_DWarning ("BSPX: %s LIGHTINGDIR pointer out of range\n", loadmodel->name);
+                                        lighting_dir_mismatch = true;
+                                }
+                                continue;
+                        }
+                        int smax = (surf->extents[0] >> 4) + 1;
+                        int tmax = (surf->extents[1] >> 4) + 1;
+                        size_t facesize = (size_t)smax * (size_t)tmax * 3u;
+                        int styles = 0;
+                        while (styles < MAXLIGHTMAPS && surf->styles[styles] != 255)
+                                ++styles;
+                        if (styles <= 0)
+                                styles = 1;
+                        size_t span = facesize * (size_t)styles;
+                        if (offset + span > dirsize)
+                        {
+                                if (!lighting_dir_mismatch)
+                                {
+                                        Con_DWarning ("BSPX: %s LIGHTINGDIR block exceeds data size\n", loadmodel->name);
+                                        lighting_dir_mismatch = true;
+                                }
+                                continue;
+                        }
+                        surf->bspx_lightdir_samples = dirbase + offset;
+                }
+        }
+
+        for (int idx = 0; idx < loadmodel->num_bspx_lumps; ++idx)
+        {
+                const char *name = loadmodel->bspx_lumps[idx].name;
+                if (!q_strcasecmp (name, "VERTEXNORMALS") ||
+                        !q_strcasecmp (name, "FACENORMALS") ||
+                        !q_strcasecmp (name, "RGBLIGHTING") ||
+                        !q_strcasecmp (name, "LIGHTINGDIR") ||
+                        !q_strcasecmp (name, "ENVMAP") ||
+                        !q_strcasecmp (name, "SURFENVMAP") ||
+                        !q_strcasecmp (name, "BRUSHLIST") ||
+                        !q_strcasecmp (name, "ZIP_PAKFILE"))
+                        continue;
+
+                Bspx_WarnUnknown (name);
+        }
+}
+
+static void Bspx_BrushList_f (void)
+{
+        const bspx_lump_t *lump;
+        int             count;
+
+        if (!cl.worldmodel)
+        {
+                Con_Printf ("No world model loaded.\n");
+                return;
+        }
+
+        lump = Mod_BspxFindLump (cl.worldmodel, "BRUSHLIST");
+        if (!lump || !lump->data || lump->filelen <= 0)
+        {
+                Con_Printf ("No BSPX BRUSHLIST data available.\n");
+                return;
+        }
+
+        if (lump->filelen % sizeof(int32_t))
+        {
+                Con_Printf ("BRUSHLIST lump has unexpected size (%d bytes).\n", lump->filelen);
+                return;
+        }
+
+        count = lump->filelen / (int)sizeof(int32_t);
+        if (count <= 0)
+        {
+                Con_Printf ("BRUSHLIST is empty.\n");
+                return;
+        }
+
+        Con_Printf ("BRUSHLIST (%d brushes):\n", count);
+
+        const int32_t *values = (const int32_t *) lump->data;
+        int limit = q_min (count, 32);
+        for (int idx = 0; idx < limit; ++idx)
+        {
+                int brush = LittleLong (values[idx]);
+                Con_Printf (" %d", brush);
+                if ((idx & 7) == 7 || idx == limit - 1)
+                        Con_Printf ("\n");
+        }
+
+        if (limit < count)
+                Con_Printf ("... %d additional brushes not shown.\n", count - limit);
 }
 
 /*
@@ -236,20 +677,112 @@ byte *Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model)
 
 byte *Mod_NoVisPVS (qmodel_t *model)
 {
-	int pvsbytes;
- 
-	pvsbytes = (model->numleafs+7)>>3;
-	pvsbytes = (pvsbytes + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
-	if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
-	{
-		mod_novis_capacity = pvsbytes;
-		mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
-		if (!mod_novis)
-			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
-		
-		memset(mod_novis, 0xff, mod_novis_capacity);
-	}
-	return mod_novis;
+        int pvsbytes;
+
+        pvsbytes = (model->numleafs+7)>>3;
+        pvsbytes = (pvsbytes + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
+        if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
+        {
+                mod_novis_capacity = pvsbytes;
+                mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
+                if (!mod_novis)
+                        Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
+
+                memset(mod_novis, 0xff, mod_novis_capacity);
+        }
+        return mod_novis;
+}
+
+const bspx_lump_t *Mod_BspxFindLump (const qmodel_t *model, const char *name)
+{
+        int low, high;
+
+        if (!model || !model->bspx_lumps || model->num_bspx_lumps <= 0 || !name || !*name)
+                return NULL;
+
+        low = 0;
+        high = model->num_bspx_lumps - 1;
+        while (low <= high)
+        {
+                int mid = (low + high) >> 1;
+                int cmp = q_strcasecmp (name, model->bspx_lumps[mid].name);
+                if (cmp == 0)
+                        return &model->bspx_lumps[mid];
+                if (cmp < 0)
+                        high = mid - 1;
+                else
+                        low = mid + 1;
+        }
+
+        return NULL;
+}
+
+qboolean Mod_BspxSurfaceAverageVertexNormal (const qmodel_t *model, const msurface_t *surf, vec3_t out)
+{
+        double sum[3] = {0.0, 0.0, 0.0};
+        int count = 0;
+
+        if (!model || !surf || !out)
+                return false;
+        if (!model->bspx_vertex_normals || model->num_bspx_vertex_normals != model->numvertexes)
+                return false;
+        if (!model->surfedges || !model->edges || !model->vertexes)
+                return false;
+
+        for (int i = 0; i < surf->numedges; ++i)
+        {
+                int edge_index = model->surfedges[surf->firstedge + i];
+                int vert_index;
+
+                if (edge_index >= 0)
+                        vert_index = model->edges[edge_index].v[0];
+                else
+                        vert_index = model->edges[-edge_index].v[1];
+
+                if (vert_index < 0 || vert_index >= model->numvertexes)
+                        continue;
+
+                sum[0] += model->bspx_vertex_normals[vert_index][0];
+                sum[1] += model->bspx_vertex_normals[vert_index][1];
+                sum[2] += model->bspx_vertex_normals[vert_index][2];
+                count++;
+        }
+
+        if (count <= 0)
+                return false;
+
+        out[0] = (float)(sum[0] / count);
+        out[1] = (float)(sum[1] / count);
+        out[2] = (float)(sum[2] / count);
+
+        {
+                float length = VectorLength (out);
+                if (length < 1e-6f)
+                        return false;
+                VectorScale (out, 1.0f / length, out);
+        }
+
+        return true;
+}
+
+const vec3_t *Mod_BspxSurfaceNormal (const qmodel_t *model, int surfindex)
+{
+        if (!model || !model->bspx_face_normals || model->num_bspx_face_normals != model->numsurfaces)
+                return NULL;
+        if (surfindex < 0 || surfindex >= model->numsurfaces)
+                return NULL;
+
+        return &model->bspx_face_normals[surfindex];
+}
+
+qboolean Mod_BspxNormalsEnabled (void)
+{
+        return (r_bspx_enable.value != 0.0f) && (r_bspx_normals.value != 0.0f);
+}
+
+qboolean Mod_BspxLightingEnabled (void)
+{
+        return (r_bspx_enable.value != 0.0f) && (r_bspx_lighting.value != 0.0f);
 }
 
 /*
@@ -391,6 +924,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	COM_FileBase (mod->name, loadname, sizeof(loadname));
 
 	loadmodel = mod;
+	Mod_BspxResetModel (loadmodel);
 
 //
 // fill it in
@@ -844,6 +1378,7 @@ static void Mod_LoadLighting (lump_t *l)
 	unsigned int path_id;
 
 	loadmodel->lightdata = NULL;
+	loadmodel->lightdatasize = 0;
 	loadmodel->litfile = false;
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
@@ -870,6 +1405,7 @@ static void Mod_LoadLighting (lump_t *l)
 				{
 					Con_DPrintf2("%s loaded\n", litfilename);
 					loadmodel->lightdata = data + 8;
+					loadmodel->lightdatasize = l->filelen * 3;
 					loadmodel->litfile = true;
 					return;
 				}
@@ -899,6 +1435,7 @@ static void Mod_LoadLighting (lump_t *l)
 		// RRRRR GGGGG BBBBBB
 
 		loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( (l->filelen / 2)*3, litfilename);
+		loadmodel->lightdatasize = (l->filelen / 2) * 3;
 		in = mod_base + l->fileofs;
 		out = loadmodel->lightdata;
 
@@ -915,6 +1452,7 @@ static void Mod_LoadLighting (lump_t *l)
 	}
 
 	loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( l->filelen*3, litfilename);
+	loadmodel->lightdatasize = l->filelen * 3;
 	in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
 	out = loadmodel->lightdata;
 	memcpy (in, mod_base + l->fileofs, l->filelen);
@@ -1356,6 +1894,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			out->samples = NULL;
 		else
 			out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+		out->bspx_lightdir_samples = NULL;
 
 		texture = loadmodel->textures[out->texinfo->texnum];
 
@@ -2400,6 +2939,11 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dheader_t	*header;
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
+	size_t			bsp_filesize = 0;
+	const byte	*bsp_data = (const byte *)buffer;
+
+	if (com_filesize > 0 && com_filesize <= (qfileofs_t)SIZE_MAX)
+		bsp_filesize = (size_t)com_filesize;
 
 	loadmodel->type = mod_brush;
 
@@ -2428,6 +2972,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
 // swap all the lumps
 	mod_base = (byte *)header;
+	Mod_BspxParseLumps (bsp_data, bsp_filesize);
 
 	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
 		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
@@ -2475,6 +3020,7 @@ visdone:
 	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
 	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
 
+	Mod_BspxIntegrate (&header->lumps[LUMP_LIGHTING]);
 	Mod_MakeHull0 ();
 
 	mod->numframes = 2;		// regular and alternate animation
