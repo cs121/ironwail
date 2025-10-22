@@ -160,7 +160,7 @@ typedef struct msurface_s
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
-	byte		*bspx_lightdir_samples;
+	const byte	*bspx_lightdir_samples;
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
