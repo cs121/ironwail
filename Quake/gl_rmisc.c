@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "gl_shadow.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -48,12 +47,10 @@ extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
 extern cvar_t r_nolerp_list;
 extern cvar_t r_noshadow_list;
-extern cvar_t r_shadows;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
 extern cvar_t r_oit;
-extern cvar_t r_shading_model;
 extern cvar_t r_dither;
 extern cvar_t r_dof;
 extern cvar_t r_dof_autofocus;
@@ -70,16 +67,6 @@ extern cvar_t r_tonemap;
 extern cvar_t r_tonemap_exposure;
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
-extern cvar_t r_lightmap_multiplier;
-extern cvar_t r_lightmap_multiplier_speed;
-extern cvar_t r_lightmap_multiplier_bias;
-extern cvar_t r_lightmap_wave_amplitude;
-extern cvar_t r_lightmap_wave_frequency;
-extern cvar_t r_lightmap_wave_speed;
-extern cvar_t r_screen_glow;
-extern cvar_t r_screen_glow_threshold;
-extern cvar_t r_screen_glow_radius;
-extern cvar_t r_screen_glow_softness;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
 extern cvar_t r_vignette_radius_outer;
@@ -301,18 +288,6 @@ static void R_SetSlimealpha_f (cvar_t *var)
 
 /*
 ====================
-R_ShadingModel_f
-====================
-*/
-static void R_ShadingModel_f (cvar_t *var)
-{
-	int value = CLAMP (0, (int)Q_rint (var->value), SHADING_MODEL_COUNT - 1);
-	if (value != (int)var->value)
-		Cvar_SetValueQuick (var, (float)value);
-}
-
-/*
-====================
 R_OverbrightBits_f
 ====================
 */
@@ -376,8 +351,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_pos);
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
-	Cvar_RegisterVariable (&r_shading_model);
-	Cvar_SetCallback (&r_shading_model, R_ShadingModel_f);
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_dof);
         Cvar_RegisterVariable (&r_dof_autofocus);
@@ -394,16 +367,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
-	Cvar_RegisterVariable (&r_lightmap_multiplier);
-	Cvar_RegisterVariable (&r_lightmap_multiplier_speed);
-	Cvar_RegisterVariable (&r_lightmap_multiplier_bias);
-	Cvar_RegisterVariable (&r_lightmap_wave_amplitude);
-	Cvar_RegisterVariable (&r_lightmap_wave_frequency);
-	Cvar_RegisterVariable (&r_lightmap_wave_speed);
-	Cvar_RegisterVariable (&r_screen_glow);
-	Cvar_RegisterVariable (&r_screen_glow_threshold);
-	Cvar_RegisterVariable (&r_screen_glow_radius);
-	Cvar_RegisterVariable (&r_screen_glow_softness);
 	Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
 	Cvar_RegisterVariable (&r_vignette_radius_outer);
@@ -451,7 +414,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_nolerp_list);
 	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
 	Cvar_RegisterVariable (&r_noshadow_list);
-	Cvar_RegisterVariable (&r_shadows);
 	Cvar_SetCallback (&r_noshadow_list, R_Model_ExtraFlags_List_f);
 	//johnfitz
 
@@ -1137,4 +1099,14 @@ void GL_ReserveDeviceMemory (GLenum target, size_t numbytes, GLuint *outbuf, siz
 	frameres_device_offset += numbytes;
 }
 
-/* Shadow management hooks are implemented in gl_shadow.c */
+void R_InitShadow (void)
+{
+}
+
+void R_ShutdownShadow (void)
+{
+}
+
+void R_ResizeShadowMapIfNeeded (void)
+{
+}

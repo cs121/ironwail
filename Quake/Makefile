@@ -261,6 +261,7 @@ OBJS = strlcat.o \
         wad.o \
         cmd.o \
         common.o \
+        q3shader.o \
         steam.o \
 	json.o \
 	miniz.o \
@@ -274,7 +275,6 @@ OBJS = strlcat.o \
 	pr_edict.o \
 	pr_exec.o \
 	sv_main.o \
-	sv_bot.o \
 	sv_move.o \
 	sv_phys.o \
 	sv_user.o \

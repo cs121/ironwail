@@ -1072,24 +1072,16 @@ static void GL_CheckExtensions (void)
 	}
 	Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1.f, gl_texture_anisotropy.value, gl_max_anisotropy));
 
-        gl_buffer_storage_able =
-                !COM_CheckParm ("-nobufferstorage") &&
-                GL_FindExtension ("GL_ARB_buffer_storage") &&
-                GL_InitFunctions (gl_arb_buffer_storage_functions, false)
-        ;
+	gl_buffer_storage_able =
+		!COM_CheckParm ("-nobufferstorage") &&
+		GL_FindExtension ("GL_ARB_buffer_storage") &&
+		GL_InitFunctions (gl_arb_buffer_storage_functions, false)
+	;
 
-#if defined(_WIN32)
-        if (gl_buffer_storage_able && gl_vendor && !q_strncasecmp (gl_vendor, "Intel", 5))
-        {
-                Con_Warning ("Disabling GL_ARB_buffer_storage on Intel OpenGL drivers due to instability\n");
-                gl_buffer_storage_able = false;
-        }
-#endif
-
-        gl_multi_bind_able =
-                !COM_CheckParm ("-nomultibind") &&
-                GL_FindExtension ("GL_ARB_multi_bind") &&
-                GL_InitFunctions (gl_arb_multi_bind_functions, false)
+	gl_multi_bind_able =
+		!COM_CheckParm ("-nomultibind") &&
+		GL_FindExtension ("GL_ARB_multi_bind") &&
+		GL_InitFunctions (gl_arb_multi_bind_functions, false)
 	;
 
 	gl_bindless_able =

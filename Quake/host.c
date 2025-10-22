@@ -361,6 +361,7 @@ void Host_InitLocal (void)
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
 
         Host_InitCommands ();
+        Q3Shader_Init ();
 
         Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_speeds);
@@ -505,7 +506,7 @@ void SV_DropClient (qboolean crash)
 	if (!crash)
 	{
 		// send any final messages (don't check for errors)
-		if (host_client->netconnection && NET_CanSendMessage (host_client->netconnection))
+		if (NET_CanSendMessage (host_client->netconnection))
 		{
 			MSG_WriteByte (&host_client->message, svc_disconnect);
 			NET_SendMessage (host_client->netconnection, &host_client->message);
@@ -530,18 +531,14 @@ void SV_DropClient (qboolean crash)
 	}
 
 // break the net connection
-	if (host_client->netconnection)
-	{
-		NET_Close (host_client->netconnection);
-		host_client->netconnection = NULL;
-		if (net_activeconnections > 0)
-			net_activeconnections--;
-	}
+	NET_Close (host_client->netconnection);
+	host_client->netconnection = NULL;
 
 // free the client (the body stays around)
 	host_client->active = false;
 	host_client->name[0] = 0;
 	host_client->old_frags = -999999;
+	net_activeconnections--;
 
 // send notification to all clients
 	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
@@ -593,11 +590,6 @@ void Host_ShutdownServer(qboolean crash)
 		{
 			if (host_client->active && host_client->message.cursize)
 			{
-				if (!host_client->netconnection)
-				{
-					SZ_Clear (&host_client->message);
-					continue;
-				}
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
 					NET_SendMessage(host_client->netconnection, &host_client->message);
@@ -1535,5 +1527,6 @@ void Host_Shutdown(void)
         LOG_Close ();
 
         LOC_Shutdown ();
+        Q3Shader_Shutdown ();
 }
 

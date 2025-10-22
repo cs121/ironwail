@@ -38,7 +38,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>NotSet</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
@@ -244,7 +244,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\gl_refrag.c" />
     <ClCompile Include="..\..\Quake\gl_rlight.c" />
     <ClCompile Include="..\..\Quake\gl_rmain.c" />
-    <ClCompile Include="..\..\Quake\gl_shadow.c" />
     <ClCompile Include="..\..\Quake\gl_rmisc.c" />
     <ClCompile Include="..\..\Quake\gl_screen.c" />
     <ClCompile Include="..\..\Quake\gl_shaders.c" />
@@ -254,6 +253,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\gl_warp.c" />
     <ClCompile Include="..\..\Quake\host.c" />
     <ClCompile Include="..\..\Quake\host_cmd.c" />
+    <ClCompile Include="..\..\Quake\q3shader.c" />
     <ClCompile Include="..\..\Quake\image.c" />
     <ClCompile Include="..\..\Quake\in_sdl.c" />
     <ClCompile Include="..\..\Quake\json.c" />
@@ -334,7 +334,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sv_main.c" />
-    <ClCompile Include="..\..\Quake\sv_bot.c" />
     <ClCompile Include="..\..\Quake\sv_move.c" />
     <ClCompile Include="..\..\Quake\sv_phys.c" />
     <ClCompile Include="..\..\Quake\sv_user.c" />
@@ -390,6 +389,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\progdefs.h" />
     <ClInclude Include="..\..\Quake\progs.h" />
     <ClInclude Include="..\..\Quake\protocol.h" />
+    <ClInclude Include="..\..\Quake\q3shader.h" />
     <ClInclude Include="..\..\Quake\pr_comp.h" />
     <ClInclude Include="..\..\Quake\qs_bmp.h" />
     <ClInclude Include="..\..\Quake\quakedef.h" />

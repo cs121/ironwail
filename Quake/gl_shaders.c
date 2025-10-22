@@ -519,8 +519,6 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
-        glprogs.shadow_depth_cube = GL_CreateProgram (GLSL_PATH("shadow_depth_cube.vert"), GLSL_PATH("shadow_depth_cube.frag"), "shadow depth cube");
-
 	for (oit = 0; oit < 2; oit++)
 		for (dither = 0; dither < 3; dither++)
 			for (mode = 0; mode < 3; mode++)
@@ -547,9 +545,6 @@ void GL_CreateShaders (void)
                                 for (md5 = 0; md5 < 2; md5++)
                                         glprogs.alias[oit][mode][alphatest][md5] =
                                                 GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
-
-        for (md5 = 0; md5 < 2; md5++)
-                glprogs.alias_shadow[md5] = GL_CreateProgram (GLSL_PATH("alias_shadow.vert"), GLSL_PATH("alias_shadow.frag"), "alias shadow|MD5 %d", md5);
 
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
 

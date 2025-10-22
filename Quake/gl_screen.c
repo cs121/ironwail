@@ -2080,18 +2080,7 @@ void SCR_UpdateScreen (void)
 
 	if (scr_disabled_for_loading)
 	{
-		if (cls.state == ca_connected && cls.signon == SIGNONS)
-		{
-			// Fall back to normal rendering if we've finished connecting but
-			// never received the matching SCR_EndLoadingPlaque() call.  This can
-			// happen if an error during the signon sequence interrupts the
-			// loading plaque bookkeeping, leaving the screen permanently
-			// disabled even though the game world continues to run in the
-			// background.  Re-enabling here keeps the visuals in sync with the
-			// simulation instead of presenting a frozen, black screen.
-			scr_disabled_for_loading = false;
-		}
-		else if (realtime - scr_disabled_time > 60)
+		if (realtime - scr_disabled_time > 60)
 		{
 			scr_disabled_for_loading = false;
 			Con_Printf ("load failed.\n");

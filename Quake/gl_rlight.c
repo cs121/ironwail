@@ -22,49 +22,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
-#include "gl_shadow.h"
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 
 gpulightbuffer_t r_lightbuffer;
-
-
-float R_CalcDynamicLightContribution (float distance, float radius, float minlight)
-{
-        float   outer_radius, inner_radius, base_intensity, normalized, smooth;
-
-        if (radius <= 0.f)
-                return 0.f;
-
-        outer_radius = radius;
-        base_intensity = q_min (minlight, outer_radius);
-        inner_radius = outer_radius - minlight;
-        if (inner_radius < 0.f)
-                inner_radius = 0.f;
-
-        if (distance >= outer_radius)
-                return 0.f;
-
-        if (outer_radius > inner_radius)
-        {
-                float fade = distance - inner_radius;
-                float range = outer_radius - inner_radius;
-                fade = q_max (fade, 0.f);
-                normalized = 1.f - CLAMP (0.f, fade / range, 1.f);
-        }
-        else
-        {
-                float range = q_max (outer_radius, 1e-5f);
-                normalized = 1.f - CLAMP (0.f, distance / range, 1.f);
-        }
-
-        smooth = normalized * normalized;
-        smooth *= smooth;
-
-        return base_intensity + smooth * (outer_radius - base_intensity);
-}
 
 /*
 ==================
@@ -218,8 +181,6 @@ void R_PushDlights (void)
 		}
 	}
 
-	R_ShadowSyncWorldLights(r_lightbuffer.lights, r_framedata.numlights);
-
 	GL_BeginGroup ("Light clustering");
 
 	R_UploadFrameData ();
@@ -253,38 +214,26 @@ vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
 static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 {
-       byte *lightmap;
-       int maps;
-       int shift = surf->lightmap_shift;
-       int step = 1 << shift;
-       int fracmask = step - 1;
-       int dsfrac = ds & fracmask;
-       int dtfrac = dt & fracmask;
-       int width = (surf->extents[0] >> shift) + 1;
-       int height = (surf->extents[1] >> shift) + 1;
-       int stride = width * 3;
-       int blocksize = width * height * 3;
-       int r00 = 0, g00 = 0, b00 = 0;
-       int r01 = 0, g01 = 0, b01 = 0;
-       int r10 = 0, g10 = 0, b10 = 0;
-       int r11 = 0, g11 = 0, b11 = 0;
-       int scale;
+	byte *lightmap;
+	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
+	int scale;
+	line3 = ((surf->extents[0]>>4)+1)*3;
 
-       lightmap = surf->samples + ((dt >> shift) * width + (ds >> shift)) * 3; // LordHavoc: *3 for color
+	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
 
-       for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != 255;maps++)
-       {
-               scale = d_lightstylevalue[surf->styles[maps]];
-               r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
-               r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
-               r10 += lightmap[stride+0] * scale; g10 += lightmap[stride+1] * scale; b10 += lightmap[stride+2] * scale;
-               r11 += lightmap[stride+3] * scale; g11 += lightmap[stride+4] * scale; b11 += lightmap[stride+5] * scale;
-               lightmap += blocksize; // LordHavoc: *3 for colored lighting
-       }
+	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != 255;maps++)
+	{
+		scale = d_lightstylevalue[surf->styles[maps]];
+		r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
+		r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
+		r10 += lightmap[line3+0] * scale; g10 += lightmap[line3+1] * scale; b10 += lightmap[line3+2] * scale;
+		r11 += lightmap[line3+3] * scale; g11 += lightmap[line3+4] * scale; b11 += lightmap[line3+5] * scale;
+		lightmap += ((surf->extents[0]>>4)+1) * ((surf->extents[1]>>4)+1)*3; // LordHavoc: *3 for colored lighting
+	}
 
-       color[0] = ((((((((r11-r10) * dsfrac) >> shift) + r10)-((((r01-r00) * dsfrac) >> shift) + r00)) * dtfrac) >> shift) + ((((r01-r00) * dsfrac) >> shift) + r00)) * (1.f/256.f);
-       color[1] = ((((((((g11-g10) * dsfrac) >> shift) + g10)-((((g01-g00) * dsfrac) >> shift) + g00)) * dtfrac) >> shift) + ((((g01-g00) * dsfrac) >> shift) + g00)) * (1.f/256.f);
-       color[2] = ((((((((b11-b10) * dsfrac) >> shift) + b10)-((((b01-b00) * dsfrac) >> shift) + b00)) * dtfrac) >> shift) + ((((b01-b00) * dsfrac) >> shift) + b00)) * (1.f/256.f);
+	color[0] = ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)) * (1.f/256.f);
+	color[1] = ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)) * (1.f/256.f);
+	color[2] = ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)) * (1.f/256.f);
 }
 
 /*
@@ -348,35 +297,16 @@ loc0:
 		// ericw -- added double casts to force 64-bit precision.
 		// Without them the zombie at the start of jam3_ericw.bsp was
 		// incorrectly being lit up in SSE builds.
-			if (surf->bspx_has_decoupled_lm)
-			{
-				double lux_s = (double)surf->bspx_world_to_lm[0][0] * mid[0] + (double)surf->bspx_world_to_lm[0][1] * mid[1] + (double)surf->bspx_world_to_lm[0][2] * mid[2] + surf->bspx_world_to_lm[0][3];
-				double lux_t = (double)surf->bspx_world_to_lm[1][0] * mid[0] + (double)surf->bspx_world_to_lm[1][1] * mid[1] + (double)surf->bspx_world_to_lm[1][2] * mid[2] + surf->bspx_world_to_lm[1][3];
-				if (lux_s < 0.0 || lux_t < 0.0)
-					continue;
-				double max_s = (double)surf->bspx_lmwidth;
-				double max_t = (double)surf->bspx_lmheight;
-				if (lux_s > max_s || lux_t > max_t)
-					continue;
-				ds = (int)floor(lux_s * (double)(1 << surf->lightmap_shift));
-				dt = (int)floor(lux_t * (double)(1 << surf->lightmap_shift));
-			}
-			else
-			{
-				ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-				dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+			ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+			dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
 
-				if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
-					continue;
+			if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
+				continue;
 
-				ds -= surf->texturemins[0];
-				dt -= surf->texturemins[1];
+			ds -= surf->texturemins[0];
+			dt -= surf->texturemins[1];
 
-				if (ds > surf->extents[0] || dt > surf->extents[1])
-					continue;
-			}
-
-			if (ds < 0 || dt < 0 || ds > surf->extents[0] || dt > surf->extents[1])
+			if (ds > surf->extents[0] || dt > surf->extents[1])
 				continue;
 
 			if (surf->plane->type < 3)
@@ -404,25 +334,16 @@ loc0:
 				continue;
 			}
 
-				if (dist < *maxdist)
-				{
-					cache->surfidx = surf - cl.worldmodel->surfaces + 1;
-					cache->ds = ds;
-					cache->dt = dt;
-					VectorCopy (surf->plane->normal, cache->normal);
-					cache->plane_dist = surf->plane->dist;
-					if (surf->flags & SURF_PLANEBACK)
-					{
-						VectorScale (cache->normal, -1.f, cache->normal);
-						cache->plane_dist = -cache->plane_dist;
-					}
-				}
-				else
-				{
-					cache->surfidx = -1;
-					cache->plane_dist = 0.f;
-					VectorClear (cache->normal);
-				}
+			if (dist < *maxdist)
+			{
+				cache->surfidx = surf - cl.worldmodel->surfaces + 1;
+				cache->ds = ds;
+				cache->dt = dt;
+			}
+			else
+			{
+				cache->surfidx = -1;
+			}
 
 			return true; // success
 		}
@@ -464,8 +385,6 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 		|| fabsf (cache->pos[2] - p[2]) >= 1.f)
 	{
 		cache->surfidx = 0;
-		cache->plane_dist = 0.f;
-		VectorClear (cache->normal);
 		VectorCopy (p, cache->pos);
 		RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
 	}

@@ -196,7 +196,6 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 #endif
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
-cvar_t	r_shading_model = { "r_shading_model", "0", CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
@@ -215,18 +214,6 @@ cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
-
-cvar_t	r_lightmap_multiplier = { "r_lightmap_multiplier", "0.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_multiplier_speed = { "r_lightmap_multiplier_speed", "1.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_multiplier_bias = { "r_lightmap_multiplier_bias", "1.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_wave_amplitude = { "r_lightmap_wave_amplitude", "0.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_wave_frequency = { "r_lightmap_wave_frequency", "0.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_wave_speed = { "r_lightmap_wave_speed", "0.0", CVAR_ARCHIVE };
-
-cvar_t	r_screen_glow = { "r_screen_glow", "0.0", CVAR_ARCHIVE };
-cvar_t	r_screen_glow_threshold = { "r_screen_glow_threshold", "0.8", CVAR_ARCHIVE };
-cvar_t	r_screen_glow_radius = { "r_screen_glow_radius", "1.5", CVAR_ARCHIVE };
-cvar_t	r_screen_glow_softness = { "r_screen_glow_softness", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
@@ -268,7 +255,6 @@ cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
 cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
 cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
 cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
-cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
@@ -781,11 +767,6 @@ void GL_PostProcess (void)
                 q_max (0.f, r_chromatic_aberration.value),
                 0.f,
                 0.f);
-        GL_Uniform4fFunc (11,
-                q_max (0.f, r_screen_glow.value),
-                q_max (0.f, r_screen_glow_threshold.value),
-                q_max (0.f, r_screen_glow_radius.value),
-                q_max (0.f, r_screen_glow_softness.value));
 
         dof_enabled = R_DoFEnabled ();
 
@@ -1534,8 +1515,6 @@ void R_SetupView (void)
 {
 	R_AnimateLight ();
 
-	R_ShadowBeginFrame (r_framecount);
-
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
 		float overbright = (float)(1 << overbright_bits);
@@ -1554,35 +1533,17 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
-		int shading_model = CLAMP (0, (int)Q_rint (r_shading_model.value), SHADING_MODEL_COUNT - 1);
-		r_framedata.shading_model = (unsigned int)shading_model;
+		r_framedata._padding0 = 0.f;
 	}
 
-        r_framecount++;
-        r_framedata.eyepos[0] = r_refdef.vieworg[0];
-        r_framedata.eyepos[1] = r_refdef.vieworg[1];
-        r_framedata.eyepos[2] = r_refdef.vieworg[2];
-        r_framedata.time = cl.time;
+	r_framecount++;
+	r_framedata.eyepos[0] = r_refdef.vieworg[0];
+	r_framedata.eyepos[1] = r_refdef.vieworg[1];
+	r_framedata.eyepos[2] = r_refdef.vieworg[2];
+	r_framedata.time = cl.time;
 
-        r_framedata.lightmap_mod[0] = r_lightmap_multiplier.value;
-        r_framedata.lightmap_mod[1] = r_lightmap_multiplier_speed.value;
-        r_framedata.lightmap_mod[2] = q_max(0.f, r_lightmap_multiplier_bias.value);
-        r_framedata.lightmap_mod[3] = 0.f;
-
-        r_framedata.lightmap_wave[0] = r_lightmap_wave_amplitude.value;
-        r_framedata.lightmap_wave[1] = r_lightmap_wave_frequency.value;
-        r_framedata.lightmap_wave[2] = r_lightmap_wave_speed.value;
-        r_framedata.lightmap_wave[3] = 0.f;
-
-        r_framedata.has_deluxemap = gl_has_deluxemap ? 1 : 0;
-
-        r_framedata.glow_params[0] = q_max(0.f, r_screen_glow.value);
-        r_framedata.glow_params[1] = q_max(0.f, r_screen_glow_threshold.value);
-        r_framedata.glow_params[2] = q_max(0.f, r_screen_glow_radius.value);
-        r_framedata.glow_params[3] = q_max(0.f, r_screen_glow_softness.value);
-
-        double prev_delta = cl.time - r_prev_frame_time;
-        qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
+	double prev_delta = cl.time - r_prev_frame_time;
+	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
 
 	if (prev_valid)
 	{
@@ -2647,8 +2608,6 @@ void R_RenderScene (void)
 	R_ShowBoundingBoxes (); //johnfitz
 
 	R_ShowPointFile ();
-
-	R_ShadowEndFrame ();
 }
 
 /*

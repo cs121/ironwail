@@ -23,11 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef GL_MODEL_H
 #define GL_MODEL_H
 
-#include "sys.h"
 #include "modelgen.h"
 #include "spritegn.h"
-
-#include <stdint.h>
 
 /*
 
@@ -138,40 +135,6 @@ typedef struct glvert_s {
 	unsigned	styles;
 } glvert_t;
 
-typedef struct model_bspx_decoupled_lm_s
-{
-	uint16_t	lmwidth;
-	uint16_t	lmheight;
-	int32_t	offset;
-	float		world_to_lm[2][4];
-} model_bspx_decoupled_lm_t;
-
-typedef struct model_bspx_s
-{
-	byte		*lmshift;
-	int		lmshift_count;
-
-	int32_t	*lmoffsets;
-	int		lmoffset_count;
-
-	byte		*rgb_lightdata;
-	size_t		rgb_lightdata_size;
-
-	byte		*lightdir_data;
-	size_t		lightdir_data_size;
-
-	byte		*hdr_lightdata;
-	size_t		hdr_lightdata_size;
-
-	void		*lmstyles;
-	size_t		lmstyles_size;
-	int		lmstyles_per_face;
-	qboolean	lmstyles_is_16bit;
-
-	model_bspx_decoupled_lm_t *decoupled_lm;
-	int		decoupled_lm_count;
-} model_bspx_t;
-
 typedef struct msurface_s
 {
 	mplane_t	*plane;
@@ -186,19 +149,12 @@ typedef struct msurface_s
 	short		lightmaptexturenum;
 	short		extents[2];
 	short		light_s, light_t;	// gl lightmap coordinates
-	byte		lightmap_shift;	// lightmap texel scale exponent
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
-	byte		*deluxemap;			// optional directional samples
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
-
-	qboolean	bspx_has_decoupled_lm;
-	uint16_t	bspx_lmwidth;
-	uint16_t	bspx_lmheight;
-	float		bspx_world_to_lm[2][4];
 } msurface_t;
 
 typedef struct mnode_s
@@ -464,7 +420,6 @@ typedef struct qmodel_s
 	unsigned int	path_id;		// path id of the game directory
 							// that this model came from
 	qboolean	needload;		// bmodels and sprites don't cache normally
-	qfileofs_t	filesize;		// size of the backing file when it was loaded
 
 	modtype_t	type;
 	int			numframes;
@@ -543,8 +498,6 @@ typedef struct qmodel_s
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
 	qboolean	haslitwater;
-
-	model_bspx_t	bspx;
 
 //
 // alias model

@@ -37,8 +37,6 @@ typedef struct lightcache_s {
 	vec3_t				pos;
 	short				ds;
 	short				dt;
-	vec3_t				normal;
-	float				plane_dist;
 } lightcache_t;
 
 //johnfitz -- for lerping

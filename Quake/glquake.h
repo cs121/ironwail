@@ -115,17 +115,6 @@ extern	cvar_t	gl_finish;
 
 extern	cvar_t	gl_playermip;
 
-extern	cvar_t	gl_shadows;
-extern	cvar_t	gl_shadow_mapsize;
-extern	cvar_t	gl_shadow_softness;
-extern	cvar_t	gl_shadow_pcf_samples;
-extern	cvar_t	gl_shadow_maxlights;
-extern	cvar_t	gl_shadow_bias;
-extern	cvar_t	gl_shadow_normalbias;
-extern	cvar_t	gl_shadow_update_static_interval;
-extern	cvar_t	gl_shadow_debug;
-extern	cvar_t	r_showshadows;
-
 extern int		gl_stencilbits;
 extern	qboolean	gl_buffer_storage_able;
 extern	qboolean	gl_multi_bind_able;
@@ -193,12 +182,8 @@ extern	const char	*gl_version;
 	x(void,			ActiveTexture, (GLenum texture))\
 	x(void,			GenerateMipmap, (GLenum target))\
 	x(void,			BindFramebuffer, (GLenum target, GLuint framebuffer))\
-	x(void,			BindRenderbuffer, (GLenum target, GLuint renderbuffer))\
 	x(void,			GenFramebuffers, (GLsizei n, GLuint *framebuffers))\
 	x(void,			DeleteFramebuffers, (GLsizei n, const GLuint *framebuffers))\
-	x(void,			GenRenderbuffers, (GLsizei n, GLuint *renderbuffers))\
-	x(void,			DeleteRenderbuffers, (GLsizei n, const GLuint *renderbuffers))\
-	x(void,			RenderbufferStorage, (GLenum target, GLenum internalformat, GLsizei width, GLsizei height))\
 	x(void,			FramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level))\
 	x(void,			FramebufferTextureLayer, (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer))\
 	x(GLenum,		CheckFramebufferStatus, (GLenum target))\
@@ -391,9 +376,6 @@ typedef struct lightmap_s
 } lightmap_t;
 extern lightmap_t *lightmaps;
 extern int lightmap_count;	//allocated lightmaps
-extern gltexture_t *lightmap_texture;
-extern gltexture_t *deluxemap_texture;
-extern qboolean gl_has_deluxemap;
 
 extern qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //johnfitz
 
@@ -435,13 +417,6 @@ typedef struct gpulightbuffer_s {
 	gpulight_t	lights[MAX_DLIGHTS];
 } gpulightbuffer_t;
 
-typedef enum shading_model_e {
-	SHADING_MODEL_LAMBERT = 0,
-	SHADING_MODEL_HALF_LAMBERT = 1,
-	SHADING_MODEL_OREN_NAYAR = 2,
-	SHADING_MODEL_COUNT
-} shading_model_t;
-
 typedef struct gpuframedata_s {
 	float	viewproj[16];
 	float	prev_viewproj[16];
@@ -452,26 +427,22 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	unsigned int	shading_model;
+	float	_padding0;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
-	float	lightmap_mod[4];
-	float	lightmap_wave[4];
-	float	glow_params[4];
 	int			numlights;
 	int			prev_frame_valid;
-	int			has_deluxemap;
+	int			_padding1;
 	int			_padding2;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 
-float R_CalcDynamicLightContribution (float distance, float radius, float minlight);
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
@@ -494,8 +465,6 @@ qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
-void R_ShadowBeginFrame (int frame_num);
-void R_ShadowEndFrame (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
@@ -568,7 +537,6 @@ typedef struct glprogs_s {
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
 	GLuint		oit_resolve[2];		// [msaa]
-	GLuint		shadow_depth_cube;	// omnidirectional shadow map pass
 
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
@@ -578,7 +546,6 @@ typedef struct glprogs_s {
 	GLuint		skycubemap[2][2];	// [anim][dither]
 	GLuint		skyboxside[2];		// [dither]
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
-	GLuint		alias_shadow[2];		// [md5]
 	GLuint		sprites[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
