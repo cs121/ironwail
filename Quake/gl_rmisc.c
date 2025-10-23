@@ -79,6 +79,7 @@ extern cvar_t r_vignette_noise;
 extern cvar_t r_chromatic_aberration;
 extern cvar_t r_filmgrain;
 extern cvar_t r_filmgrain_size;
+extern cvar_t r_filmgrain_strength;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -381,6 +382,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_chromatic_aberration);
 	Cvar_RegisterVariable (&r_filmgrain);
 	Cvar_RegisterVariable (&r_filmgrain_size);
+	Cvar_RegisterVariable (&r_filmgrain_strength);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 

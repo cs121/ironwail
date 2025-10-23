@@ -227,6 +227,7 @@ cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
+cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -774,9 +775,11 @@ void GL_PostProcess (void)
                 float filmgrain_intensity = q_max (0.f, r_filmgrain.value);
                 filmgrain_intensity = q_min (1.f, filmgrain_intensity);
                 float filmgrain_size = q_max (1.f, r_filmgrain_size.value);
+                float filmgrain_strength = q_max (0.f, r_filmgrain_strength.value);
                 float filmgrain_time = (float)cl.time;
                 float filmgrain_time_alt = (float)(cl.time * 1.37);
-                GL_Uniform4fFunc (11, filmgrain_intensity, filmgrain_size, filmgrain_time, filmgrain_time_alt);
+                GL_Uniform4fFunc (11, filmgrain_intensity, filmgrain_size, filmgrain_strength, 0.f);
+                GL_Uniform4fFunc (12, filmgrain_time, filmgrain_time_alt, 0.f, 0.f);
         }
 
         dof_enabled = R_DoFEnabled ();
