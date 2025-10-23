@@ -116,6 +116,8 @@ layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), zw: reserved
 
+layout(location=11) uniform vec4 FilmGrainParams; // x: intensity, y: grain size (px), zw: temporal offsets
+
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
 
@@ -434,6 +436,17 @@ void main()
                 mapped = clamp(combined, 0.0, 1.0);
         }
         mapped = clamp(mapped, 0.0, 1.0);
+        float filmGrainIntensity = max(FilmGrainParams.x, 0.0);
+        if (filmGrainIntensity > 0.0)
+        {
+                float grainSize = max(FilmGrainParams.y, 1.0);
+                vec2 grainOffset = vec2(FilmGrainParams.z, FilmGrainParams.w);
+                vec2 grainCoord = (gl_FragCoord.xy + grainOffset) / grainSize;
+                float grain = tri(whitenoise01(grainCoord));
+                float luma = dot(mapped, vec3(0.2126, 0.7152, 0.0722));
+                float response = mix(1.0, clamp(1.0 - luma, 0.0, 1.0), 0.5);
+                mapped = clamp(mapped + grain * (filmGrainIntensity * response), 0.0, 1.0);
+        }
         out_fragcolor = vec4(pow(mapped, vec3(gamma)), 1.0);
 #endif // PALETTIZE
 }
