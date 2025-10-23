@@ -6,11 +6,11 @@ git pull
 
 
 rem --- Paths ---
-set "SRC_SHADERS=C:\ironwail\Quake\shaders"
-set "DST_DIR=C:\Program Files (x86)\Steam\steamapps\common\Quake\rerelease"
+set "SRC_SHADERS=c:\Quake\Source\ironwail\Quake\shaders"
+set "DST_DIR=C:\Quake\rerelease"
 set "DST_SHADERS=%DST_DIR%\id1\shaders"
 
-set "SRC_EXE=C:\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
+set "SRC_EXE=C:\Quake\Source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
 set "DST_EXE=%DST_DIR%\ironwail.exe"
 
 rem --- Ensure destination folders exist ---
