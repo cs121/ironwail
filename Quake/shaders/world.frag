@@ -566,7 +566,12 @@ void main()
                 ivec3 cluster_coord;
                 cluster_coord.x = int(floor(in_coord.x));
                 cluster_coord.y = int(floor(in_coord.y));
-                cluster_coord.z = int(floor(log2(in_depth) * ZLogScale + ZLogBias));
+                float clamped_depth = max(in_depth, 1e-6);
+                cluster_coord.z = int(floor(log2(clamped_depth) * ZLogScale + ZLogBias));
+                cluster_coord = clamp(
+                        cluster_coord,
+                        ivec3(0),
+                        ivec3(LIGHT_TILES_X - 1, LIGHT_TILES_Y - 1, LIGHT_TILES_Z - 1));
                 uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
                 if ((clusterdata.x | clusterdata.y) != 0u)
                 {
