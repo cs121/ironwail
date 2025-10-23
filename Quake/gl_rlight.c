@@ -87,8 +87,9 @@ void R_AnimateLight (void)
 		{
 			float angle = (wave_frequency * time_value + wave_phase + wave_phase_step * (float)j) * two_pi;
 			float wave = 1.f + wave_amplitude * sinf(angle);
-			if (wave < 0.f)
-				wave = 0.f;
+			const float min_wave = 0.05f; // prevent total blackouts when the wave dips too low
+			if (wave < min_wave)
+				wave = min_wave;
 			style_multiplier *= wave;
 		}
 		style_multiplier = q_max(style_multiplier, 0.f);
