@@ -83,9 +83,8 @@ float ComputeDynamicLightContribution(float radius, float minlight, float distan
                 float range = max(outer_radius, 1e-5);
                 normalized = 1.0 - clamp(distance / range, 0.0, 1.0);
         }
-        float smoothFactor = normalized * normalized;
-        smoothFactor *= smoothFactor;
-        return clamped_minlight + smoothFactor * (outer_radius - clamped_minlight);
+        float falloff = normalized;
+        return clamped_minlight + falloff * (outer_radius - clamped_minlight);
 }
 
 vec3 ApplyFog(vec3 clr, vec3 p)
