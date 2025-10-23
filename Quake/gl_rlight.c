@@ -23,6 +23,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include <stddef.h>
+#include <stdint.h>
+
+static float R_LightstyleNoise (int style, int sample)
+{
+        uint32_t seed = (uint32_t)style * 747796405u + (uint32_t)sample * 2891336453u + 0x9E3779B9u;
+        seed = (seed ^ (seed >> 16)) * 2246822519u;
+        seed = (seed ^ (seed >> 13)) * 3266489917u;
+        seed ^= seed >> 16;
+        return (seed & 0x00FFFFFFu) / 16777215.0f;
+}
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
@@ -68,31 +78,46 @@ void R_AnimateLight (void)
 		f = 0.0;
 
 	global_multiplier = q_max(r_lightstyle_multiplier.value, 0.f);
-	if (r_lightstyle_sine.value != 0.f)
-	{
-		wave_amplitude = r_lightstyle_sine_amplitude.value;
-		wave_frequency = r_lightstyle_sine_frequency.value;
-		wave_phase = r_lightstyle_sine_phase.value;
-		wave_phase_step = r_lightstyle_sine_phase_step.value;
-		if (wave_amplitude != 0.f && wave_frequency != 0.f)
-			use_wave = true;
-	}
+        if (r_lightstyle_sine.value != 0.f)
+        {
+                wave_amplitude = r_lightstyle_sine_amplitude.value;
+                wave_frequency = r_lightstyle_sine_frequency.value;
+                wave_phase = r_lightstyle_sine_phase.value;
+                wave_phase_step = r_lightstyle_sine_phase_step.value;
+                if (wave_amplitude != 0.f && wave_frequency != 0.f)
+                        use_wave = true;
+        }
 
-	time_value = (float)cl.time;
+        time_value = (float)cl.time;
 
-	for (j = 0; j < MAX_LIGHTSTYLES; j++)
-	{
-		float style_multiplier = global_multiplier;
-		if (use_wave)
-		{
-			float angle = (wave_frequency * time_value + wave_phase + wave_phase_step * (float)j) * two_pi;
-			float wave = 1.f + wave_amplitude * sinf(angle);
-			const float min_wave = 0.05f; // prevent total blackouts when the wave dips too low
-			if (wave < min_wave)
-				wave = min_wave;
-			style_multiplier *= wave;
-		}
-		style_multiplier = q_max(style_multiplier, 0.f);
+        for (j = 0; j < MAX_LIGHTSTYLES; j++)
+        {
+                float style_multiplier = global_multiplier;
+                if (use_wave)
+                {
+                        float base_time = wave_frequency * time_value + wave_phase + wave_phase_step * (float)j;
+                        float angle = base_time * two_pi;
+                        float sine_component = sinf(angle);
+                        float amplitude = fabsf(wave_amplitude);
+                        float max_amplitude = 0.25f;
+                        if (amplitude > max_amplitude)
+                                amplitude = max_amplitude;
+
+                        {
+                                float noise_time = base_time * 4.f;
+                                int noise_index = (int)floorf(noise_time);
+                                float noise_frac = noise_time - (float)noise_index;
+                                float noise0 = R_LightstyleNoise(j, noise_index);
+                                float noise1 = R_LightstyleNoise(j, noise_index + 1);
+                                float noise_component = (noise0 + (noise1 - noise0) * noise_frac) * 2.f - 1.f;
+                                sine_component = (sine_component + noise_component) * 0.5f;
+                        }
+
+                        float wave = 1.f + CLAMP(-1.f, sine_component, 1.f) * amplitude;
+                        wave = CLAMP(1.f - amplitude, wave, 1.f + amplitude);
+                        style_multiplier *= wave;
+                }
+                style_multiplier = q_max(style_multiplier, 0.f);
 
 		if (!cl_lightstyle[j].length)
 		{
