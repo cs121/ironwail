@@ -269,7 +269,7 @@ void R_DrawLightHalos (void)
 
 	float	scale_base;
 	float	intensity;
-	int		i;
+	unsigned int	i;
 	int		c;
 
 	if (r_flashblend.value <= 0.f)
