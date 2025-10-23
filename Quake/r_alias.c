@@ -229,7 +229,7 @@ void R_SetupAliasLighting (entity_t	*e)
 {
 	vec3_t		dist;
 	float		add;
-	unsigned int	i;
+	int			i;
 
 	// if the initial trace is completely black, try again from above
 	// this helps with models whose origin is slightly below ground level

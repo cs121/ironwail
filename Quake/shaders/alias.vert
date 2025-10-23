@@ -7,8 +7,6 @@ struct InstanceData
 	int		Pose2;
 	float	Blend;
 	int		Flags;
-	vec4	ShadowPlane;
-	vec4	ShadowParams;
 };
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer

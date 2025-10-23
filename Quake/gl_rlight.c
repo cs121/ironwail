@@ -22,30 +22,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
-#include <stddef.h>
-#include <stdint.h>
-
-static float R_LightstyleNoise (int style, int sample)
-{
-        uint32_t seed = (uint32_t)style * 747796405u + (uint32_t)sample * 2891336453u + 0x9E3779B9u;
-        seed = (seed ^ (seed >> 16)) * 2246822519u;
-        seed = (seed ^ (seed >> 13)) * 3266489917u;
-        seed ^= seed >> 16;
-        return (seed & 0x00FFFFFFu) / 16777215.0f;
-}
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern cvar_t r_lightstyle_multiplier;
-extern cvar_t r_lightstyle_sine;
-extern cvar_t r_lightstyle_sine_amplitude;
-extern cvar_t r_lightstyle_sine_frequency;
-extern cvar_t r_lightstyle_sine_phase;
-extern cvar_t r_lightstyle_sine_phase_step;
-extern cvar_t r_flashblend;
-extern cvar_t r_flashblend_scale;
-extern cvar_t r_flashblend_intensity;
 
 gpulightbuffer_t r_lightbuffer;
 
@@ -56,20 +36,12 @@ R_AnimateLight
 */
 void R_AnimateLight (void)
 {
-	int					i, j, k, n;
-	double				f, base;
-	float				global_multiplier;
-	float				wave_amplitude = 0.f;
-	float				wave_frequency = 0.f;
-	float				wave_phase = 0.f;
-	float				wave_phase_step = 0.f;
-	qboolean			use_wave = false;
-	float				time_value;
-	const float		two_pi = (float)(M_PI * 2.0);
+	int			i,j,k,n;
+	double		f,base;
 
-	//
-	// light animations
-	// 'm' is normal light, 'a' is no light, 'z' is double bright
+//
+// light animations
+// 'm' is normal light, 'a' is no light, 'z' is double bright
 	f = cl.time * 10.0;
 	base = floor(f);
 	i = (int)base;
@@ -77,58 +49,12 @@ void R_AnimateLight (void)
 	if (!r_lerplightstyles.value)
 		f = 0.0;
 
-	global_multiplier = q_max(r_lightstyle_multiplier.value, 0.f);
-        if (r_lightstyle_sine.value != 0.f)
-        {
-                wave_amplitude = r_lightstyle_sine_amplitude.value;
-                wave_frequency = r_lightstyle_sine_frequency.value;
-                wave_phase = r_lightstyle_sine_phase.value;
-                wave_phase_step = r_lightstyle_sine_phase_step.value;
-                if (wave_amplitude != 0.f && wave_frequency != 0.f)
-                        use_wave = true;
-        }
-
-        time_value = (float)cl.time;
-
-        for (j = 0; j < MAX_LIGHTSTYLES; j++)
-        {
-                float style_multiplier = global_multiplier;
-                if (use_wave)
-                {
-                        float base_time = wave_frequency * time_value + wave_phase + wave_phase_step * (float)j;
-                        float angle = base_time * two_pi;
-                        float sine_component = sinf(angle);
-                        float amplitude = fabsf(wave_amplitude);
-                        float max_amplitude = 0.25f;
-                        if (amplitude > max_amplitude)
-                                amplitude = max_amplitude;
-
-                        {
-                                float noise_time = base_time * 4.f;
-                                int noise_index = (int)floorf(noise_time);
-                                float noise_frac = noise_time - (float)noise_index;
-                                float noise0 = R_LightstyleNoise(j, noise_index);
-                                float noise1 = R_LightstyleNoise(j, noise_index + 1);
-                                float noise_component = (noise0 + (noise1 - noise0) * noise_frac) * 2.f - 1.f;
-                                sine_component = (sine_component + noise_component) * 0.5f;
-                        }
-
-                        float wave = 1.f + CLAMP(-1.f, sine_component, 1.f) * amplitude;
-                        wave = CLAMP(1.f - amplitude, wave, 1.f + amplitude);
-                        style_multiplier *= wave;
-                }
-                style_multiplier = q_max(style_multiplier, 0.f);
-
+	for (j=0 ; j<MAX_LIGHTSTYLES ; j++)
+	{
 		if (!cl_lightstyle[j].length)
 		{
-			float base_light = style_multiplier;
-			float fixed = base_light * 256.f;
-			if (fixed < 0.f)
-				fixed = 0.f;
-			else if (fixed > 65535.f)
-				fixed = 65535.f;
-			d_lightstylevalue[j] = (int)fixed;
-			r_lightbuffer.lightstyles[j] = base_light;
+			d_lightstylevalue[j] = 256;
+			r_lightbuffer.lightstyles[j] = 1.f;
 			continue;
 		}
 		//johnfitz -- r_flatlightstyles
@@ -148,26 +74,15 @@ void R_AnimateLight (void)
 		// only interpolate abrupt changes (e.g. flickering light in e1m1) if r_lerplightstyles >= 2
 		if (r_lerplightstyles.value < 2.f && abs(n - k) >= ('m' - 'a') / 2)
 			n = k;
-
-		{
-			float base_fixed = (float)(k * 22 + (n - k) * 22 * f);
-			float scaled_fixed = base_fixed * style_multiplier;
-			if (scaled_fixed < 0.f)
-				scaled_fixed = 0.f;
-			else if (scaled_fixed > 65535.f)
-				scaled_fixed = 65535.f;
-			d_lightstylevalue[j] = (int)scaled_fixed;
-		}
-
-		r_lightbuffer.lightstyles[j] = (k + (n - k) * f) * (22.f / 256.f) * style_multiplier;
+		d_lightstylevalue[j] = (int)(k*22 + (n-k)*22*f);
+		r_lightbuffer.lightstyles[j] = (k + (n-k)*f) * (22.f/256.f);
+		//johnfitz
 	}
 
 	if (r_fullbright_cheatsafe)
-	{
 		r_lightbuffer.lightstyles[0] = 1.f;
-		d_lightstylevalue[0] = 256;
-	}
 }
+
 /*
 =============================================================================
 
@@ -285,83 +200,6 @@ void R_PushDlights (void)
 
 	GL_EndGroup ();
 }
-void R_DrawLightHalos (void)
-{
-	typedef struct
-	{
-		vec3_t	pos;
-		GLubyte color[4];
-	} halo_vertex_t;
-
-	float	scale_base;
-	float	intensity;
-	unsigned int	i;
-	int		c;
-
-	if (r_flashblend.value <= 0.f)
-		return;
-
-	if (r_framedata.numlights <= 0)
-		return;
-
-	scale_base = q_max(r_flashblend_scale.value, 0.f);
-	intensity  = q_max(r_flashblend_intensity.value, 0.f);
-	if (scale_base <= 0.f || intensity <= 0.f)
-		return;
-
-	GL_BeginGroup ("Light halos");
-
-	GL_UseProgram (glprogs.particles[0][0]);
-	GL_SetState (GLS_BLEND_ADDITIVE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE |
-		GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
-
-	for (i = 0; i < r_framedata.numlights; ++i)
-	{
-		const gpulight_t *light = &r_lightbuffer.lights[i];
-		float radius = light->radius * scale_base;
-		halo_vertex_t vert;
-		float scalex, scaley;
-		float color_scale;
-		GLuint buf;
-		GLbyte *ofs;
-		float alpha;
-
-		if (radius <= 0.f)
-			continue;
-
-		scalex = radius * r_matproj[1 * 4 + 0];
-		scaley = -radius * r_matproj[2 * 4 + 1];
-		GL_Uniform3fFunc (0, scalex, scaley, 1.f);
-
-		VectorCopy (light->pos, vert.pos);
-
-		color_scale = intensity * 255.f;
-		for (c = 0; c < 3; ++c)
-		{
-			float channel = q_max (light->color[c], 0.f) * color_scale;
-			if (channel > 255.f)
-				channel = 255.f;
-			vert.color[c] = (GLubyte) channel;
-		}
-
-		alpha = q_max (q_max (vert.color[0], vert.color[1]), vert.color[2]);
-		if (alpha < 1.f)
-			alpha = q_min (color_scale, 255.f);
-		if (alpha > 255.f)
-			alpha = 255.f;
-		vert.color[3] = (GLubyte) alpha;
-
-		GL_Upload (GL_ARRAY_BUFFER, &vert, sizeof (vert), &buf, &ofs);
-		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
-		GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (vert), ofs + offsetof (halo_vertex_t, pos));
-		GL_VertexAttribPointerFunc (1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof (vert), ofs + offsetof (halo_vertex_t, color));
-		GL_DrawArraysInstancedFunc (GL_TRIANGLE_STRIP, 0, 4, 1);
-	}
-
-	GL_EndGroup ();
-}
-
-
 
 
 /*

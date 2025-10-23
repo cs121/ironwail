@@ -29,8 +29,6 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
-extern gltexture_t *deluxemap_texture;
-
 
 vec3_t* r_pointfile;
 
@@ -229,7 +227,6 @@ cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
-cvar_t	r_shadingmodel = { "r_shadingmodel", "0", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -241,15 +238,6 @@ cvar_t	gl_nocolors = { "gl_nocolors","0",CVAR_NONE };
 cvar_t	r_clearcolor = { "r_clearcolor","2",CVAR_ARCHIVE };
 cvar_t	r_flatlightstyles = { "r_flatlightstyles", "0", CVAR_NONE };
 cvar_t	r_lerplightstyles = { "r_lerplightstyles", "1", CVAR_ARCHIVE }; // 0=off; 1=skip abrupt transitions; 2=always lerp
-cvar_t	r_lightstyle_multiplier = { "r_lightstyle_multiplier", "1.0", CVAR_ARCHIVE };
-cvar_t	r_lightstyle_sine = { "r_lightstyle_sine", "0", CVAR_ARCHIVE };
-cvar_t	r_lightstyle_sine_amplitude = { "r_lightstyle_sine_amplitude", "0.25", CVAR_ARCHIVE };
-cvar_t	r_lightstyle_sine_frequency = { "r_lightstyle_sine_frequency", "0.5", CVAR_ARCHIVE };
-cvar_t	r_lightstyle_sine_phase = { "r_lightstyle_sine_phase", "0.0", CVAR_ARCHIVE };
-cvar_t	r_lightstyle_sine_phase_step = { "r_lightstyle_sine_phase_step", "0.0", CVAR_ARCHIVE };
-cvar_t	r_flashblend = { "r_flashblend", "1", CVAR_ARCHIVE };
-cvar_t	r_flashblend_scale = { "r_flashblend_scale", "1.0", CVAR_ARCHIVE };
-cvar_t	r_flashblend_intensity = { "r_flashblend_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
 cvar_t	gl_overbright_models = { "gl_overbright_models", "1", CVAR_ARCHIVE };
@@ -1527,21 +1515,6 @@ void R_SetupView (void)
 {
 	R_AnimateLight ();
 
-	memset (r_framedata.lightmapmod, 0, sizeof (r_framedata.lightmapmod));
-	memset (r_framedata.lightmapwave, 0, sizeof (r_framedata.lightmapwave));
-	memset (r_framedata.glowparams, 0, sizeof (r_framedata.glowparams));
-
-	r_framedata.lightmapmod[1] = 1.f;
-	r_framedata.lightmapmod[2] = 1.f;
-
-	unsigned int shading_model = (unsigned int)CLAMP (0, (int)Q_rint (r_shadingmodel.value), 2);
-	r_framedata.shadingmodel = shading_model;
-
-	if (Mod_BspxLightingEnabled () && deluxemap_texture && deluxemap_texture->texnum != 0)
-		r_framedata.has_deluxemap = 1u;
-	else
-		r_framedata.has_deluxemap = 0u;
-
 	{
 		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
 		float overbright = (float)(1 << overbright_bits);
@@ -1560,6 +1533,7 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
+		r_framedata._padding0 = 0.f;
 	}
 
 	r_framecount++;
@@ -2614,7 +2588,6 @@ void R_RenderScene (void)
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 
 	R_DrawParticles (false);
-	R_DrawLightHalos ();
 
 	Sky_DrawSky (); //johnfitz
 

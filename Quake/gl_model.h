@@ -51,14 +51,6 @@ typedef struct
 	vec3_t		position;
 } mvertex_t;
 
-typedef struct bspx_lump_s
-{
-        char            name[24];
-        int             fileofs;
-        int             filelen;
-        byte            *data;
-} bspx_lump_t;
-
 #define	SIDE_FRONT	0
 #define	SIDE_BACK	1
 #define	SIDE_ON		2
@@ -160,7 +152,6 @@ typedef struct msurface_s
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
-	const byte	*bspx_lightdir_samples;
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
@@ -499,7 +490,6 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
-	int			lightdatasize;
 	char		*entities;
 
 	qboolean	litfile;
@@ -508,17 +498,6 @@ typedef struct qmodel_s
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
 	qboolean	haslitwater;
-
-	int			num_bspx_lumps;
-	bspx_lump_t	*bspx_lumps;
-	vec3_t		*bspx_vertex_normals;
-	int			num_bspx_vertex_normals;
-	vec3_t		*bspx_face_normals;
-	int			num_bspx_face_normals;
-	byte		*bspx_rgb_lighting;
-	int			bspx_rgb_lighting_size;
-	byte		*bspx_lighting_dir;
-	int			bspx_lighting_dir_size;
 
 //
 // alias model
@@ -549,11 +528,6 @@ void	Mod_TouchModel (const char *name);
 mleaf_t *Mod_PointInLeaf (vec3_t p, qmodel_t *model);
 byte	*Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model);
 byte	*Mod_NoVisPVS (qmodel_t *model);
-const bspx_lump_t *Mod_BspxFindLump (const qmodel_t *model, const char *name);
-qboolean Mod_BspxSurfaceAverageVertexNormal (const qmodel_t *model, const msurface_t *surf, vec3_t out);
-const vec3_t *Mod_BspxSurfaceNormal (const qmodel_t *model, int surfindex);
-qboolean Mod_BspxNormalsEnabled (void);
-qboolean Mod_BspxLightingEnabled (void);
 
 void Mod_SetExtraFlags (qmodel_t *mod);
 size_t Mod_SanitizeMapDescription (char *dst, size_t dstsize, const char *src);

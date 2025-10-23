@@ -51,9 +51,7 @@ msurface_t		**lit_surfs;
 int				*lit_surf_order[2];
 int				num_lightmap_samples;
 unsigned		*lightmap_data;
-unsigned		*deluxemap_data;
 gltexture_t		*lightmap_texture;
-gltexture_t		*deluxemap_texture;
 int				lightmap_width;
 int				lightmap_height;
 
@@ -322,44 +320,6 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	}
 }
 
-static void GL_FillSurfaceDeluxemap (msurface_t *surf)
-{
-        lightmap_t *lm;
-        int smax, tmax;
-        int xofs, yofs;
-        unsigned *dst;
-        const byte *src;
-        int s, t;
-
-        if (!deluxemap_data || !surf->bspx_lightdir_samples)
-                return;
-        if (surf->lightmaptexturenum < 0 || surf->lightmaptexturenum >= lightmap_count)
-                return;
-
-        lm = &lightmaps[surf->lightmaptexturenum];
-        smax = (surf->extents[0]>>4)+1;
-        tmax = (surf->extents[1]>>4)+1;
-        xofs = lm->xofs + surf->light_s;
-        yofs = lm->yofs + surf->light_t;
-
-        dst = deluxemap_data + yofs * lightmap_width + xofs;
-        src = surf->bspx_lightdir_samples;
-
-        for (t = 0; t < tmax; ++t)
-        {
-                unsigned *row = dst + t * lightmap_width;
-                const byte *srcrow = src + t * smax * 3;
-                for (s = 0; s < smax; ++s)
-                {
-                        int idx = s * 3;
-                        unsigned r = srcrow[idx + 0];
-                        unsigned g = srcrow[idx + 1];
-                        unsigned b = srcrow[idx + 2];
-                        row[s] = r | (g << 8) | (b << 16) | 0xff000000u;
-                }
-        }
-}
-
 /*
 ==================
 GL_FreeLightmapData
@@ -372,11 +332,6 @@ static void GL_FreeLightmapData (void)
 		free (lightmap_data);
 		lightmap_data = NULL;
 	}
-	if (deluxemap_data)
-	{
-		free (deluxemap_data);
-		deluxemap_data = NULL;
-	}
 	if (lightmaps)
 	{
 		free (lightmaps);
@@ -386,7 +341,6 @@ static void GL_FreeLightmapData (void)
 	VEC_CLEAR (lit_surfs);
 
 	lightmap_texture = NULL; // freed by the texture manager
-	deluxemap_texture = NULL;
 	last_lightmap_allocated = 0;
 	lightmap_count = 0;
 	lightmap_width = 0;
@@ -570,21 +524,6 @@ void GL_BuildLightmaps (void)
 	if (!lightmap_data)
 		Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_data)));
 
-	deluxemap_data = NULL;
-	if (cl.worldmodel && cl.worldmodel->bspx_lighting_dir && cl.worldmodel->lightdatasize > 0 && cl.worldmodel->bspx_lighting_dir_size == cl.worldmodel->lightdatasize && Mod_BspxLightingEnabled ())
-	{
-		deluxemap_data = (unsigned *) calloc (lmsize, sizeof (*deluxemap_data));
-		if (!deluxemap_data)
-		{
-			Con_DWarning ("BSPX: unable to allocate deluxemap buffer (%d texels)\n", lmsize);
-		}
-		else
-		{
-			for (i = 0; i < lmsize; ++i)
-				deluxemap_data[i] = 0xffff8080u;
-		}
-	}
-
 	// compute offsets for each lightmap block
 	for (i=0; i<lightmap_count; i++)
 	{
@@ -595,8 +534,6 @@ void GL_BuildLightmaps (void)
 
 	// fill reserved texel
 	lightmap_data[0] = 0xff808080u;
-	if (deluxemap_data)
-		deluxemap_data[0] = 0xffff8080u;
 
 	// unlit map? fill with 50% grey
 	if (!cl.worldmodel->lightdata)
@@ -605,29 +542,13 @@ void GL_BuildLightmaps (void)
 
 	// fill lightmap samples
 	for (i = 0, j = VEC_SIZE (lit_surfs); i < j; i++)
-	{
-		msurface_t *surf = lit_surfs[i];
-		GL_FillSurfaceLightmap (surf);
-		if (deluxemap_data)
-			GL_FillSurfaceDeluxemap (surf);
-	}
+		GL_FillSurfaceLightmap (lit_surfs[i]);
 
 	lightmap_texture =
 		TexMgr_LoadImage (cl.worldmodel, "lightmap", lightmap_width, lightmap_height,
 			SRC_LIGHTMAP, (byte *)lightmap_data, "", (src_offset_t)lightmap_data,
 			TEXPREF_ALPHA | TEXPREF_LINEAR | TEXPREF_NOPICMIP
 		);
-
-	if (deluxemap_data)
-	{
-		deluxemap_texture =
-			TexMgr_LoadImage (cl.worldmodel, "deluxemap", lightmap_width, lightmap_height,
-				SRC_LIGHTMAP, (byte *)deluxemap_data, "", (src_offset_t)deluxemap_data,
-				TEXPREF_LINEAR | TEXPREF_NOPICMIP
-			);
-	}
-	else
-		deluxemap_texture = NULL;
 
 	//johnfitz -- warn about exceeding old limits
 	//GLQuake limit was 64 textures of 128x128. Estimate how many 128x128 textures we would need

@@ -12,19 +12,16 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
-        uint    ShadingModel;
+        float   _Pad0;
         vec3    EyePos;
         float   Time;
         vec3    PrevEyePos;
         float   DeltaTime;
         float   ZLogScale;
         float   ZLogBias;
-        vec4    LightmapMod;
-        vec4    LightmapWave;
-        vec4    GlowParams;
         uint    NumLights;
         uint    PrevFrameValid;
-        uint    HasDeluxemap;
+        uint    _Pad1;
         uint    _Pad2;
 };
 

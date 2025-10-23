@@ -358,55 +358,12 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
                 if (!R_SurfaceIsDecalable (surf))
                         continue;
 
-                vec3_t plane_normal;
-                qboolean used_bspx_normal = false;
-
-                VectorCopy (surf->plane->normal, plane_normal);
+                VectorCopy (surf->plane->normal, normal);
                 plane_dist = surf->plane->dist;
-                VectorCopy (plane_normal, normal);
-
-                if (Mod_BspxNormalsEnabled ())
-                {
-                        int surfindex = (int)(surf - cl.worldmodel->surfaces);
-                        const vec3_t *face_normal = Mod_BspxSurfaceNormal (cl.worldmodel, surfindex);
-                        if (face_normal)
-                        {
-                                VectorCopy (*face_normal, normal);
-                                used_bspx_normal = true;
-                        }
-                        else if (Mod_BspxSurfaceAverageVertexNormal (cl.worldmodel, surf, normal))
-                        {
-                                used_bspx_normal = true;
-                        }
-                        else
-                        {
-                                VectorCopy (plane_normal, normal);
-                        }
-                }
-
                 if (surf->flags & SURF_PLANEBACK)
                 {
-                        VectorScale (plane_normal, -1.f, plane_normal);
+                        VectorScale (normal, -1.f, normal);
                         plane_dist = -plane_dist;
-                        if (used_bspx_normal)
-                                VectorScale (normal, -1.f, normal);
-                        else
-                                VectorCopy (plane_normal, normal);
-                }
-                else if (!used_bspx_normal)
-                {
-                        VectorCopy (plane_normal, normal);
-                }
-
-                if (used_bspx_normal && surf->numedges > 0)
-                {
-                        int edge_index = cl.worldmodel->surfedges[surf->firstedge];
-                        int vert_index = (edge_index >= 0) ? cl.worldmodel->edges[edge_index].v[0] : cl.worldmodel->edges[-edge_index].v[1];
-                        if (vert_index >= 0 && vert_index < cl.worldmodel->numvertexes)
-                        {
-                                const vec3_t v = cl.worldmodel->vertexes[vert_index].position;
-                                plane_dist = DotProduct (normal, v);
-                        }
                 }
 
                 d = DotProduct (point, normal) - plane_dist;
