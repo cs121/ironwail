@@ -3274,6 +3274,10 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 	{
 		mod->flags |= MOD_FBRIGHTHACK;
 	}
+
+	// disable rotation for explosive barrels
+	if (!strcmp (mod->name, "progs/barrel.mdl"))
+		mod->flags &= ~EF_ROTATE;
 }
 
 /*
