@@ -228,9 +228,11 @@ static void R_ComputeViewmodelLighting(vec3_t out)
 {
         const vec3_t reflection_tint = { 0.2f, 0.2f, 0.25f };
         vec3_t accum = { 0.0f, 0.0f, 0.0f };
+        float intensity = q_max(r_viewmodel_dlight_intensity.value, 0.0f);
+        float max_component = q_max(intensity, 1.0f);
+
         if (r_dynamic.value && r_viewmodel_dlight.value > 0.0f)
         {
-                float intensity = q_max(r_viewmodel_dlight_intensity.value, 0.0f);
                 int i;
                 for (i = 0; i < MAX_DLIGHTS; ++i)
                 {
@@ -262,9 +264,9 @@ static void R_ComputeViewmodelLighting(vec3_t out)
                         VectorScale(accum, intensity, accum);
         }
 
-        accum[0] = CLAMP(accum[0], 0.0f, 1.0f);
-        accum[1] = CLAMP(accum[1], 0.0f, 1.0f);
-        accum[2] = CLAMP(accum[2], 0.0f, 1.0f);
+        accum[0] = CLAMP(accum[0], 0.0f, max_component);
+        accum[1] = CLAMP(accum[1], 0.0f, max_component);
+        accum[2] = CLAMP(accum[2], 0.0f, max_component);
 
         {
                 float ambient = CLAMP(r_viewmodel_dlight_ambient.value, 0.0f, 1.0f);
@@ -282,10 +284,6 @@ static void R_ComputeViewmodelLighting(vec3_t out)
                 final_color[0] += reflection[0];
                 final_color[1] += reflection[1];
                 final_color[2] += reflection[2];
-
-                final_color[0] = CLAMP(final_color[0], 0.0f, 1.0f);
-                final_color[1] = CLAMP(final_color[1], 0.0f, 1.0f);
-                final_color[2] = CLAMP(final_color[2], 0.0f, 1.0f);
 
                 VectorScale(final_color, 200.0f, out);
         }
