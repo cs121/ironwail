@@ -505,6 +505,54 @@ static qboolean R_Alias_CanAddToBatch (const entity_t *e)
 	return true;
 }
 
+static qboolean R_ShouldRotateAroundCenter (const entity_t *ent)
+{
+        return ent && ent->model && ent->model->type == mod_alias && (ent->model->flags & EF_ROTATE);
+}
+
+static void R_AdjustAliasMatrixForCenterRotation (const entity_t *ent, const float base_origin[3], const aliashdr_t *hdr, const float center_offset[3], float fovscale, float matrix[16])
+{
+        float           center_local[3];
+        float           desired_center[3];
+        float           current_center[3];
+        float           adjusted_scale[3];
+        float           adjusted_origin[3];
+        float           scalefactor;
+        int             i;
+
+        if (!ent || !hdr)
+                return;
+
+        scalefactor = ENTSCALE_DECODE (ent->scale);
+
+        adjusted_scale[0] = hdr->scale[0];
+        adjusted_scale[1] = hdr->scale[1] * fovscale;
+        adjusted_scale[2] = hdr->scale[2] * fovscale;
+
+        adjusted_origin[0] = hdr->scale_origin[0];
+        adjusted_origin[1] = hdr->scale_origin[1] * fovscale;
+        adjusted_origin[2] = hdr->scale_origin[2] * fovscale;
+
+        for (i = 0; i < 3; ++i)
+        {
+                float scale = adjusted_scale[i];
+                if (scale != 0.f)
+                        center_local[i] = (center_offset[i] - adjusted_origin[i]) / scale;
+                else
+                        center_local[i] = 0.f;
+
+                desired_center[i] = base_origin[i] + center_offset[i] * scalefactor;
+        }
+
+        current_center[0] = matrix[0] * center_local[0] + matrix[4] * center_local[1] + matrix[8]  * center_local[2] + matrix[12];
+        current_center[1] = matrix[1] * center_local[0] + matrix[5] * center_local[1] + matrix[9]  * center_local[2] + matrix[13];
+        current_center[2] = matrix[2] * center_local[0] + matrix[6] * center_local[1] + matrix[10] * center_local[2] + matrix[14];
+
+        matrix[12] += desired_center[0] - current_center[0];
+        matrix[13] += desired_center[1] - current_center[1];
+        matrix[14] += desired_center[2] - current_center[2];
+}
+
 /*
 =================
 R_DrawAliasModel_Real
@@ -517,11 +565,21 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	float		fovscale = 1.0f;
 	float		model_matrix[16];
 	aliasinstance_t	*instance;
+	vec3_t		center_offset = { 0.f, 0.f, 0.f };
+	qboolean	rotate_around_center;
 
 	//
 	// setup pose/lerp data -- do it first so we don't miss updates due to culling
 	//
 	paliashdr = (aliashdr_t *)Mod_Extradata (e->model);
+
+	rotate_around_center = R_ShouldRotateAroundCenter (e);
+	if (rotate_around_center)
+	{
+		center_offset[0] = 0.5f * (e->model->mins[0] + e->model->maxs[0]);
+		center_offset[1] = 0.5f * (e->model->mins[1] + e->model->maxs[1]);
+		center_offset[2] = 0.5f * (e->model->mins[2] + e->model->maxs[2]);
+	}
 
 	R_SetupAliasFrame (e, paliashdr, &lerpdata);
 	R_SetupEntityTransform (e, &lerpdata);
@@ -557,6 +615,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	R_EntityMatrix (model_matrix, lerpdata.origin, lerpdata.angles, e->scale);
 	ApplyTranslation (model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
 	ApplyScale (model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
+	if (rotate_around_center)
+		R_AdjustAliasMatrixForCenterRotation (e, lerpdata.origin, paliashdr, center_offset, fovscale, model_matrix);
 
 	//
 	// set up for alpha blending
@@ -630,6 +690,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 			R_EntityMatrix (prev_model_matrix, prev_origin, prev_angles, e->scale);
 			ApplyTranslation (prev_model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
 			ApplyScale (prev_model_matrix, paliashdr->scale[0], paliashdr->scale[1] * fovscale, paliashdr->scale[2] * fovscale);
+			if (rotate_around_center)
+				R_AdjustAliasMatrixForCenterRotation (e, prev_origin, paliashdr, center_offset, fovscale, prev_model_matrix);
 		}
 
 		MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
