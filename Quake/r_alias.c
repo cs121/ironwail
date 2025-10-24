@@ -224,6 +224,73 @@ void R_SetupEntityTransform (entity_t *e, lerpdata_t *lerpdata)
 		lerpdata->angles[PITCH] *= 0.3f;
 }
 
+static void R_ComputeViewmodelLighting(vec3_t out)
+{
+        const vec3_t reflection_tint = { 0.2f, 0.2f, 0.25f };
+        vec3_t accum = { 0.0f, 0.0f, 0.0f };
+        if (r_dynamic.value && r_viewmodel_dlight.value > 0.0f)
+        {
+                float intensity = q_max(r_viewmodel_dlight_intensity.value, 0.0f);
+                int i;
+                for (i = 0; i < MAX_DLIGHTS; ++i)
+                {
+                        dlight_t *dl = &cl_dlights[i];
+                        float radius = dl->radius;
+                        vec3_t to_light;
+                        float radius_sq, dist_sq, influence;
+
+                        if (dl->die < cl.time || dl->spawn > cl.time || radius <= 0.0f)
+                                continue;
+
+                        VectorSubtract(dl->origin, r_refdef.vieworg, to_light);
+                        dist_sq = DotProduct(to_light, to_light);
+                        radius_sq = radius * radius;
+                        if (dist_sq >= radius_sq || radius_sq <= 0.0f)
+                                continue;
+
+                        influence = 1.0f - (dist_sq / radius_sq);
+                        if (influence <= 0.0f)
+                                continue;
+                        influence *= influence;
+
+                        accum[0] += dl->color[0] * influence;
+                        accum[1] += dl->color[1] * influence;
+                        accum[2] += dl->color[2] * influence;
+                }
+
+                if (intensity != 1.0f)
+                        VectorScale(accum, intensity, accum);
+        }
+
+        accum[0] = CLAMP(accum[0], 0.0f, 1.0f);
+        accum[1] = CLAMP(accum[1], 0.0f, 1.0f);
+        accum[2] = CLAMP(accum[2], 0.0f, 1.0f);
+
+        {
+                float ambient = CLAMP(r_viewmodel_dlight_ambient.value, 0.0f, 1.0f);
+                float reflection_scale = CLAMP(r_viewmodel_dlight_reflection.value, 0.0f, 1.0f);
+                vec3_t final_color = { ambient, ambient, ambient };
+                vec3_t reflection;
+
+                final_color[0] += accum[0];
+                final_color[1] += accum[1];
+                final_color[2] += accum[2];
+
+                reflection[0] = reflection_tint[0] * reflection_scale;
+                reflection[1] = reflection_tint[1] * reflection_scale;
+                reflection[2] = reflection_tint[2] * reflection_scale;
+                final_color[0] += reflection[0];
+                final_color[1] += reflection[1];
+                final_color[2] += reflection[2];
+
+                final_color[0] = CLAMP(final_color[0], 0.0f, 1.0f);
+                final_color[1] = CLAMP(final_color[1], 0.0f, 1.0f);
+                final_color[2] = CLAMP(final_color[2], 0.0f, 1.0f);
+
+                VectorScale(final_color, 200.0f, out);
+        }
+}
+
 /*
 =================
 R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritten
@@ -231,11 +298,19 @@ R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritt
 */
 void R_SetupAliasLighting (entity_t     *e)
 {
-        // if the initial trace is completely black, try again from above
-        // this helps with models whose origin is slightly below ground level
-        // (e.g. some of the candles in the DOTM start map)
-        if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-                R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+        if (e == &cl.viewent && (r_viewmodel_dlight.value != 0.0f || r_viewmodel_dlight_ambient.value != 0.0f || r_viewmodel_dlight_reflection.value != 0.0f))
+        {
+                e->lightcache.surfidx = 0;
+                R_ComputeViewmodelLighting (lightcolor);
+        }
+        else
+        {
+                // if the initial trace is completely black, try again from above
+                // this helps with models whose origin is slightly below ground level
+                // (e.g. some of the candles in the DOTM start map)
+                if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+                        R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+        }
 
         VectorScale (lightcolor, 1.0f / 200.0f, lightcolor);
 }

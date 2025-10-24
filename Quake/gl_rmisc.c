@@ -340,6 +340,10 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_fullbright);
         Cvar_RegisterVariable (&r_drawentities);
         Cvar_RegisterVariable (&r_drawviewmodel);
+        Cvar_RegisterVariable (&r_viewmodel_dlight);
+        Cvar_RegisterVariable (&r_viewmodel_dlight_intensity);
+        Cvar_RegisterVariable (&r_viewmodel_dlight_ambient);
+        Cvar_RegisterVariable (&r_viewmodel_dlight_reflection);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
 	Cvar_RegisterVariable (&r_litwater);
