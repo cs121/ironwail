@@ -79,6 +79,13 @@ extern cvar_t r_vignette_noise;
 extern cvar_t r_chromatic_aberration;
 extern cvar_t r_filmgrain;
 extern cvar_t r_filmgrain_size;
+extern cvar_t r_ssao;
+extern cvar_t r_ssao_radius;
+extern cvar_t r_ssao_bias;
+extern cvar_t r_ssao_intensity;
+extern cvar_t r_ssao_power;
+extern cvar_t r_ssao_samples;
+
 extern cvar_t r_filmgrain_strength;
 
 #if defined(USE_SIMD)
@@ -373,6 +380,12 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
+	Cvar_RegisterVariable (&r_ssao);
+	Cvar_RegisterVariable (&r_ssao_radius);
+	Cvar_RegisterVariable (&r_ssao_bias);
+	Cvar_RegisterVariable (&r_ssao_intensity);
+	Cvar_RegisterVariable (&r_ssao_power);
+	Cvar_RegisterVariable (&r_ssao_samples);
 	Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
 	Cvar_RegisterVariable (&r_vignette_radius_outer);

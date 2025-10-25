@@ -119,7 +119,11 @@ layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: 
 layout(location=11) uniform vec4 FilmGrainParams; // x: intensity, y: grain size (px), z: strength, w: unused
 layout(location=12) uniform vec4 FilmGrainOffset; // xy: temporal offsets, zw: unused
 
+layout(location=13) uniform vec4 SSAOParams0; // x: enabled, y: radius (px), z: bias, w: intensity
+layout(location=14) uniform vec4 SSAOParams1; // x: samples, y: power, zw: reserved
+
 const int MOTION_MAX_SAMPLES = 64;
+const int SSAO_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
 
 struct DepthSamplingInfo
@@ -237,6 +241,57 @@ void main()
                 vec4 velocitySample = texture(VelocityTexture, velocityUV);
                 velocity = velocitySample.xy;
                 viewModelMask = velocitySample.z;
+        }
+
+        if (SSAOParams0.x > 0.5 && inView && depthInfo.valid && centerOpaque && viewModelMask < 0.5)
+        {
+                float radiusPx = max(SSAOParams0.y, 0.0);
+                float bias = max(SSAOParams0.z, 0.0);
+                float intensity = max(SSAOParams0.w, 0.0);
+                int sampleCount = clamp(int(SSAOParams1.x + 0.5), 1, SSAO_MAX_SAMPLES);
+                float power = max(SSAOParams1.y, 0.0);
+                if (radiusPx > 0.5 && intensity > 0.0 && sampleCount > 0)
+                {
+                        float centerDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                        if (centerDepth > 0.0)
+                        {
+                                float goldenAngle = 2.39996322972865332;
+                                float rotationNoise = SCREEN_SPACE_NOISE();
+                                float occlusionAccum = 0.0;
+                                float weightAccum = 0.0;
+                                for (int i = 0; i < SSAO_MAX_SAMPLES; ++i)
+                                {
+                                        if (i >= sampleCount)
+                                                break;
+                                        float fi = float(i);
+                                        float t = (fi + 0.5) / float(sampleCount);
+                                        float angle = (fi + rotationNoise) * goldenAngle;
+                                        float radius = radiusPx * t;
+                                        vec2 offset = vec2(cos(angle), sin(angle)) * radius;
+                                        vec2 sampleUV = uv + offset * invTexSize;
+                                        if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
+                                                continue;
+                                        float sampleDepth = SampleLinearDepth(gl_FragCoord.xy + offset, depthInfo);
+                                        if (sampleDepth <= 0.0)
+                                                continue;
+                                        float depthDelta = centerDepth - sampleDepth;
+                                        if (depthDelta <= bias)
+                                                continue;
+                                        float rangeWeight = 1.0 - t;
+                                        float occlusionSample = clamp((depthDelta - bias) / (depthDelta + centerDepth + 1e-4), 0.0, 1.0);
+                                        occlusionAccum += occlusionSample * rangeWeight;
+                                        weightAccum += rangeWeight;
+                                }
+                                if (weightAccum > 0.0)
+                                {
+                                        float occlusion = occlusionAccum / weightAccum;
+                                        float ao = clamp(1.0 - occlusion * intensity, 0.0, 1.0);
+                                        if (power > 0.0)
+                                                ao = pow(ao, power);
+                                        color.rgb *= ao;
+                                }
+                        }
+                }
         }
 
         if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5 && centerOpaque)
