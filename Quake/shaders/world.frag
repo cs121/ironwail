@@ -391,6 +391,14 @@ void main()
                 }
         }
 
+        if (RimWorld > 0.0)
+        {
+                float ndotv = max(dot(surface_normal, view_dir), 0.0);
+                float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), RimExponent);
+                vec3 rim_light = vec3(RimWorld * fresnel);
+                total_light += max(min(rim_light, 1. - total_light), 0.);
+        }
+
         vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
         total_light += max(min(sun_light, 1. - total_light), 0.);
 #if DITHER >= 2

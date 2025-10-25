@@ -33,7 +33,11 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _FrameScreenDither;
         float   _FrameTextureDither;
         float   _FrameOverbright;
+        float   _FrameRimAlias;
+        float   _FrameRimWorld;
+        float   _FrameRimExponent;
         float   _FramePad0;
+        float   _FramePadRim;
         vec3    _FrameEyePos;
         float   _FrameTime;
         vec3    _FramePrevEyePos;
@@ -249,6 +253,15 @@ void main()
         else
                 worldNormal = vec3(0.0, 0.0, 1.0);
         lighting += ComputeDynamicLights(in_world_pos, worldNormal);
+        if (_FrameRimAlias > 0.0)
+        {
+                vec3 to_eye = EyePos - in_world_pos;
+                float inv_len = inversesqrt(max(dot(to_eye, to_eye), 1e-8));
+                vec3 view_dir = to_eye * inv_len;
+                float ndotv = max(dot(worldNormal, view_dir), 0.0);
+                float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), _FrameRimExponent);
+                lighting += vec3(_FrameRimAlias * fresnel);
+        }
         lighting = max(lighting, vec3(0.0));
 
         uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;

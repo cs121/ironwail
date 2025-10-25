@@ -356,6 +356,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_dof);
+	Cvar_RegisterVariable (&r_rim_alias);
+	Cvar_RegisterVariable (&r_rim_world);
+	Cvar_RegisterVariable (&r_rim_exponent);
         Cvar_RegisterVariable (&r_dof_autofocus);
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);

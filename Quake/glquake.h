@@ -107,6 +107,9 @@ extern	cvar_t	r_scale;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;
+extern	cvar_t	r_rim_alias;
+extern	cvar_t	r_rim_world;
+extern	cvar_t	r_rim_exponent;
 
 extern	cvar_t	gl_clear;
 extern	cvar_t	gl_polyblend;
@@ -427,7 +430,11 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	float	_padding0;
+	float	rim_alias;
+	float	rim_world;
+	float	rim_exponent;
+	float	rim_pad0;
+	float	rim_pad1;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
