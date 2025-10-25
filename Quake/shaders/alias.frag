@@ -248,8 +248,7 @@ void main()
                 worldNormal = normalize(worldNormal);
         else
                 worldNormal = vec3(0.0, 0.0, 1.0);
-        if ((in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
-                lighting += ComputeDynamicLights(in_world_pos, worldNormal);
+        lighting += ComputeDynamicLights(in_world_pos, worldNormal);
         lighting = max(lighting, vec3(0.0));
 
         uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;

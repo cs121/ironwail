@@ -36,8 +36,6 @@ cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
-cvar_t	cl_itembob = {"cl_itembob", "8", CVAR_ARCHIVE};
-
 cvar_t	freelook = {"freelook","1", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring","0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe","0", CVAR_ARCHIVE};
@@ -318,54 +316,6 @@ qboolean CL_IsPlayerEnt (const entity_t *ent)
 	return PTR_IN_RANGE (ent, cl_entities + 1, cl_entities + 1 + cl.maxclients);
 }
 
-static qboolean CL_IsPickupModelName (const char *name)
-{
-	size_t i;
-	static const char * const pickup_exact[] = {
-		"progs/armor.mdl",
-		"progs/backpack.mdl",
-		"progs/end1.mdl",
-		"progs/end2.mdl",
-		"progs/end3.mdl",
-		"progs/end4.mdl",
-		"progs/invulner.mdl",
-		"progs/invisibl.mdl",
-		"progs/quaddama.mdl",
-		"progs/suit.mdl",
-	};
-
-	if (!name || !name[0])
-		return false;
-
-	for (i = 0; i < countof(pickup_exact); i++)
-	{
-		if (!strcmp (name, pickup_exact[i]))
-			return true;
-	}
-
-	if (!q_strncasecmp (name, "progs/g_", 8))
-		return true;
-	if (!q_strncasecmp (name, "maps/b_", 7))
-		return true;
-	if (!q_strncasecmp (name, "progs/w_", 8) && q_strcasestr (name, "_key"))
-		return true;
-	if (!q_strncasecmp (name, "progs/m_", 8) && q_strcasestr (name, "_key"))
-		return true;
-	if (q_strcasestr (name, "rune.mdl"))
-		return true;
-
-	return false;
-}
-
-static qboolean CL_IsPickupEntity (const entity_t *ent)
-{
-	if (!ent || !ent->model)
-		return false;
-	if (CL_IsPlayerEnt (ent))
-		return false;
-	return CL_IsPickupModelName (ent->model->name);
-}
-
 /*
 ===============
 CL_SetLightstyle
@@ -560,8 +510,6 @@ void CL_RelinkEntities (void)
 	float		frac, f, d;
 	vec3_t		delta;
 	float		bobjrotate;
-	float		pickupbob_height;
-	float		pickupbob_offset;
 	dlight_t	*dl;
 
 // determine partial update time
@@ -593,8 +541,6 @@ void CL_RelinkEntities (void)
 	}
 
 	bobjrotate = anglemod(100*cl.time);
-	pickupbob_height = q_max (cl_itembob.value, 0.f);
-	pickupbob_offset = pickupbob_height > 0.f ? (sinf (cl.time * (float)M_PI) * pickupbob_height + pickupbob_height) : 0.f;
 
 // start on the entity after the world
 	for (i=1,ent=cl_entities+1 ; i<cl.num_entities ; i++,ent++)
@@ -659,13 +605,7 @@ void CL_RelinkEntities (void)
 			CL_ResetTrail (ent);
 
 // rotate binary objects locally
-		if (CL_IsPickupEntity (ent))
-		{
-			if (pickupbob_offset > 0.f)
-				ent->origin[2] += pickupbob_offset;
-			ent->angles[1] = bobjrotate;
-		}
-		else if (ent->model->flags & EF_ROTATE)
+		if (ent->model->flags & EF_ROTATE)
 			ent->angles[1] = bobjrotate;
 
 		if (ent->effects & EF_BRIGHTFIELD)
@@ -1090,8 +1030,6 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&m_side);
 
 	Cvar_RegisterVariable (&cfg_unbindall);
-
-	Cvar_RegisterVariable (&cl_itembob);
 
 	Cvar_RegisterVariable (&cl_maxpitch); //johnfitz -- variable pitch clamping
 	Cvar_RegisterVariable (&cl_minpitch); //johnfitz -- variable pitch clamping
