@@ -215,6 +215,13 @@ cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_radius = { "r_ssao_radius", "48", CVAR_ARCHIVE };
+cvar_t	r_ssao_bias = { "r_ssao_bias", "4", CVAR_ARCHIVE };
+cvar_t	r_ssao_falloff = { "r_ssao_falloff", "64", CVAR_ARCHIVE };
+cvar_t	r_ssao_power = { "r_ssao_power", "1.5", CVAR_ARCHIVE };
+cvar_t	r_ssao_samples = { "r_ssao_samples", "8", CVAR_ARCHIVE };
+
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
@@ -283,7 +290,12 @@ static float view_zfar;
 
 static qboolean R_DoFEnabled (void)
 {
-	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+        return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+}
+
+static qboolean R_SSAOEnabled (void)
+{
+        return r_ssao.value > 0.f;
 }
 
 static qboolean r_dof_autofocus_initialized = false;
@@ -685,6 +697,13 @@ void GL_PostProcess (void)
         float motion_min_velocity;
         float motion_depth_threshold;
         int motion_max_samples;
+        qboolean ssao_enabled;
+        float ssao_intensity;
+        float ssao_radius;
+        float ssao_bias;
+        float ssao_falloff;
+        float ssao_power;
+        float ssao_samples;
         if (!GL_NeedsPostprocess ())
                 return;
 
@@ -739,7 +758,17 @@ void GL_PostProcess (void)
         }
         motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+        ssao_intensity = q_max (0.f, r_ssao.value);
+        ssao_radius = q_max (0.f, r_ssao_radius.value);
+        ssao_bias = q_max (0.f, r_ssao_bias.value);
+        ssao_falloff = q_max (0.001f, r_ssao_falloff.value);
+        ssao_power = q_max (0.f, r_ssao_power.value);
+        ssao_samples = q_max (1.f, r_ssao_samples.value);
+        if (ssao_samples > 16.f)
+                ssao_samples = 16.f;
+        ssao_enabled = (ssao_intensity > 0.f);
+
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 
 	variant = q_min ((int)softemu, 2);
@@ -782,6 +811,17 @@ void GL_PostProcess (void)
                 GL_Uniform4fFunc (12, filmgrain_time, filmgrain_time_alt, 0.f, 0.f);
         }
 
+        GL_Uniform4fFunc (13,
+                ssao_enabled ? 1.f : 0.f,
+                ssao_radius,
+                ssao_bias,
+                ssao_falloff);
+        GL_Uniform4fFunc (14,
+                ssao_intensity,
+                ssao_power,
+                ssao_samples,
+                0.f);
+
         dof_enabled = R_DoFEnabled ();
 
         {
@@ -800,7 +840,7 @@ void GL_PostProcess (void)
         }
 
         depth_texture = 0;
-        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
+        if (framebufs.composite.depth_stencil_tex && (dof_enabled || ssao_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
                 depth_texture = framebufs.composite.depth_stencil_tex;
         GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
@@ -1422,11 +1462,11 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-        if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
-                return true;
-        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
-                return true;
-        return false;
+	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled () || R_SSAOEnabled ())
+		return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
+		return true;
+	return false;
 }
 
 /*
@@ -2654,7 +2694,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-        need_depth_resolve = (fbodest == framebufs.composite.fbo) && R_DoFEnabled ();
+	need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_SSAOEnabled ());
 
 	if (msaa)
 	{

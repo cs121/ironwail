@@ -118,6 +118,8 @@ layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: 
 
 layout(location=11) uniform vec4 FilmGrainParams; // x: intensity, y: grain size (px), z: strength, w: unused
 layout(location=12) uniform vec4 FilmGrainOffset; // xy: temporal offsets, zw: unused
+layout(location=13) uniform vec4 SSAOParams0; // x: enabled, y: radius (px), z: bias (units), w: falloff (units)
+layout(location=14) uniform vec4 SSAOParams1; // x: intensity, y: power, z: samples, w: reserved
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -155,6 +157,25 @@ DepthSamplingInfo MakeDepthSamplingInfo()
         info.maxDepthIdx = max(depthSizePx - vec2(1.0), vec2(0.0));
         return info;
 }
+
+const vec2 SSAOKernel[16] = vec2[](
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, -1.0),
+        vec2(0.70710678, 0.70710678),
+        vec2(-0.70710678, 0.70710678),
+        vec2(0.70710678, -0.70710678),
+        vec2(-0.70710678, -0.70710678),
+        vec2(0.92387953, 0.38268343),
+        vec2(-0.92387953, 0.38268343),
+        vec2(0.92387953, -0.38268343),
+        vec2(-0.92387953, -0.38268343),
+        vec2(0.38268343, 0.92387953),
+        vec2(-0.38268343, 0.92387953),
+        vec2(0.38268343, -0.92387953),
+        vec2(-0.38268343, -0.92387953)
+);
 
 vec2 ComputeDepthUV(vec2 fragPx, DepthSamplingInfo info)
 {
@@ -328,6 +349,50 @@ void main()
                                 weight += 1.0;
                         }
                         color.rgb = accum / weight;
+                }
+        }
+
+        if (SSAOParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5 && centerOpaque)
+        {
+                float intensity = max(SSAOParams1.x, 0.0);
+                float radiusPx = max(SSAOParams0.y, 0.0);
+                float bias = max(SSAOParams0.z, 0.0);
+                float falloff = max(SSAOParams0.w, 0.0001);
+                int sampleCount = clamp(int(floor(SSAOParams1.z + 0.5)), 1, 16);
+                if (intensity > 0.0 && radiusPx > 0.0 && sampleCount > 0)
+                {
+                        float centerDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                        if (centerDepth > 0.0)
+                        {
+                                float power = max(SSAOParams1.y, 0.0);
+                                float jitter = SCREEN_SPACE_NOISE();
+                                float angle = jitter * 6.28318530718;
+                                float sine = sin(angle);
+                                float cosine = cos(angle);
+                                mat2 rotation = mat2(cosine, -sine, sine, cosine);
+                                float occlusion = 0.0;
+                                float invSamples = 1.0 / float(sampleCount);
+                                for (int i = 0; i < 16; ++i)
+                                {
+                                        if (i >= sampleCount)
+                                                break;
+                                        float scale = (float(i) + 0.5) * invSamples;
+                                        vec2 offsetPx = rotation * SSAOKernel[i] * (scale * radiusPx);
+                                        float sampleDepth = SampleLinearDepth(gl_FragCoord.xy + offsetPx, depthInfo);
+                                        if (sampleDepth <= 0.0)
+                                                continue;
+                                        float depthDiff = centerDepth - sampleDepth;
+                                        if (depthDiff <= bias)
+                                                continue;
+                                        float attenuation = clamp(1.0 - (depthDiff - bias) / falloff, 0.0, 1.0);
+                                        occlusion += attenuation;
+                                }
+                                float occlusionAvg = clamp(occlusion * invSamples, 0.0, 1.0);
+                                float ao = clamp(1.0 - occlusionAvg * intensity, 0.0, 1.0);
+                                if (power > 0.001)
+                                        ao = pow(ao, power);
+                                color.rgb *= ao;
+                        }
                 }
         }
 
