@@ -11,10 +11,17 @@ vec3 GetHemisphereSample(int index, int totalSamples)
         float angle = 6.28318530718 * fract(i * 0.61803398875);
         float radius = sqrt((i + 0.5) / n);
         float z = sqrt(max(0.0, 1.0 - radius * radius));
-        vec3 sample = vec3(cos(angle) * radius, sin(angle) * radius, z);
+        vec3 hemiSample = vec3(cos(angle) * radius, sin(angle) * radius, z);
         float scale = (i + 0.5) / n;
         scale = mix(0.1, 1.0, scale * scale);
-        return sample * scale;
+        return hemiSample * scale;
+}
+
+bool IsFiniteVec3(vec3 value)
+{
+        const float kLimit = 1e20;
+        vec3 clamped = clamp(value, vec3(-kLimit), vec3(kLimit));
+        return all(equal(value, clamped));
 }
 
 vec2 NormalizeViewUV(vec2 uv, vec2 viewMin, vec2 viewMax)
@@ -66,7 +73,7 @@ vec3 ReconstructNormal(vec2 fragPx, vec2 uv, vec2 invTexSize, vec2 viewMin, vec2
         vec3 dx = samples[1] - samples[0];
         vec3 dy = samples[3] - samples[2];
         vec3 normal = normalize(cross(dx, dy));
-        if (!all(isfinite(normal)) || length(normal) < SSAO_EPSILON)
+        if (!IsFiniteVec3(normal) || length(normal) < SSAO_EPSILON)
                 normal = vec3(0.0, 0.0, -1.0);
         else if (dot(normal, vec3(0.0, 0.0, -1.0)) < 0.0)
                 normal = -normal;
