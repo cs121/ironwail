@@ -147,12 +147,8 @@ vec2 ComputeDepthUV(vec2 fragPx, DepthSamplingInfo info)
         return depthPx / info.depthTexSize;
 }
 
-float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
+float LinearizeDepth(float rawDepth)
 {
-        vec2 depthUV = ComputeDepthUV(fragPx, info);
-        if (depthUV.x < 0.0 || depthUV.y < 0.0)
-                return 0.0;
-        float rawDepth = texture(DepthTexture, depthUV).r;
         float nearPlane = DoFParams1.x;
         float farPlane = DoFParams1.y;
         float reversed = DoFParams1.z;
@@ -167,6 +163,29 @@ float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
                 float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
                 return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
         }
+}
+
+float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
+{
+        vec2 depthUV = ComputeDepthUV(fragPx, info);
+        if (depthUV.x < 0.0 || depthUV.y < 0.0)
+                return 0.0;
+        float rawDepth = texture(DepthTexture, depthUV).r;
+        return LinearizeDepth(rawDepth);
+}
+
+bool SampleDepth(vec2 fragPx, DepthSamplingInfo info, out float rawDepth, out float linearDepth)
+{
+        vec2 depthUV = ComputeDepthUV(fragPx, info);
+        if (depthUV.x < 0.0 || depthUV.y < 0.0)
+        {
+                rawDepth = 0.0;
+                linearDepth = 0.0;
+                return false;
+        }
+        rawDepth = texture(DepthTexture, depthUV).r;
+        linearDepth = LinearizeDepth(rawDepth);
+        return linearDepth > 0.0;
 }
 
 #endif // POSTPROCESS_COMMON_GLSL

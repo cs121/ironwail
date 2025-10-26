@@ -886,10 +886,13 @@ void GL_PostProcess (void)
                 GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
         }
 
-	GL_Uniform4fFunc (13,
-	        ssao_enabled ? 1.f : 0.f,
-	        ssao_radius,
-	        ssao_bias,
+        GL_UniformMatrix4fvFunc (15, 1, GL_FALSE, r_matproj);
+        GL_UniformMatrix4fvFunc (19, 1, GL_FALSE, r_matinvproj);
+
+        GL_Uniform4fFunc (13,
+                ssao_enabled ? 1.f : 0.f,
+                ssao_radius,
+                ssao_bias,
 	        ssao_intensity);
 	GL_Uniform4fFunc (14,
 	        (float)ssao_samples,
