@@ -164,10 +164,13 @@ vec2 ComputeDepthUV(vec2 fragPx, DepthSamplingInfo info)
 {
         if (!info.valid)
                 return vec2(-1.0);
-        vec2 viewSizePx = max(info.viewMaxPx - info.viewMinPx, vec2(0.0));
-        vec2 relPx = clamp(fragPx - info.viewMinPx, vec2(0.0), max(viewSizePx - vec2(1e-4), vec2(0.0)));
-        vec2 depthIdx = clamp(floor(relPx * info.invViewScale), vec2(0.0), info.maxDepthIdx);
-        vec2 depthPx = info.viewMinPx + depthIdx + vec2(0.5);
+        vec2 viewMinPx = info.viewMinPx + vec2(0.5);
+        vec2 viewMaxPx = max(info.viewMaxPx - vec2(0.5), viewMinPx);
+        vec2 clampedFragPx = clamp(fragPx, viewMinPx, viewMaxPx);
+        vec2 depthPx = info.viewMinPx + (clampedFragPx - info.viewMinPx - vec2(0.5)) * info.invViewScale + vec2(0.5);
+        vec2 depthMinPx = info.viewMinPx + vec2(0.5);
+        vec2 depthMaxPx = depthMinPx + info.maxDepthIdx;
+        depthPx = clamp(depthPx, depthMinPx, max(depthMaxPx, depthMinPx));
         return depthPx / info.depthTexSize;
 }
 
