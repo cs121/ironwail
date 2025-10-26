@@ -23,6 +23,8 @@ layout(location=11) uniform vec4 FilmGrainParams; // x: intensity, y: grain size
 layout(location=12) uniform vec4 FilmGrainOffset; // xy: temporal offsets, zw: unused
 layout(location=13) uniform vec4 SSAOParams0; // x: enabled, y: radius (px), z: bias, w: intensity
 layout(location=14) uniform vec4 SSAOParams1; // x: samples, y: power, zw: reserved
+layout(location=15) uniform mat4 ProjectionMatrix;
+layout(location=19) uniform mat4 InverseProjectionMatrix;
 
 #include "postprocess_common.glsl"
 #include "postprocess_ssao.glsl"
