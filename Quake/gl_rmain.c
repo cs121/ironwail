@@ -829,17 +829,34 @@ void GL_PostProcess (void)
 
         {
                 float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
-		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
-		float view_size_x = r_refdef.vrect.width / (float)vid.width;
-		float view_size_y = r_refdef.vrect.height / (float)vid.height;
-		float inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
+                float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
+                float view_size_x = r_refdef.vrect.width / (float)vid.width;
+                float view_size_y = r_refdef.vrect.height / (float)vid.height;
+                float inv_scale_x = 1.f;
+                float inv_scale_y = 1.f;
 
-		GL_Uniform4fFunc (3,
-			view_min_x,
-			view_min_y,
-			view_min_x + view_size_x,
-			view_min_y + view_size_y);
-                GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
+                if (r_refdef.scale > 0)
+                {
+                        int render_width = r_refdef.vrect.width / r_refdef.scale;
+                        int render_height = r_refdef.vrect.height / r_refdef.scale;
+
+                        if (render_width < 1)
+                                render_width = 1;
+                        if (render_height < 1)
+                                render_height = 1;
+
+                        if (r_refdef.vrect.width > 0)
+                                inv_scale_x = (float)render_width / (float)r_refdef.vrect.width;
+                        if (r_refdef.vrect.height > 0)
+                                inv_scale_y = (float)render_height / (float)r_refdef.vrect.height;
+                }
+
+                GL_Uniform4fFunc (3,
+                        view_min_x,
+                        view_min_y,
+                        view_min_x + view_size_x,
+                        view_min_y + view_size_y);
+                GL_Uniform4fFunc (4, inv_scale_x, inv_scale_y, 0.f, 0.f);
         }
 
         depth_texture = 0;
