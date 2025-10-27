@@ -11,6 +11,27 @@ layout(binding=3) uniform sampler2D DeluxTex;
 
 #include "frame_uniforms.glsl"
 
+#define LIGHT_TILES_X 32
+#define LIGHT_TILES_Y 16
+#define LIGHT_TILES_Z 32
+#define MAX_LIGHTS    64
+
+struct Light
+{
+    vec3    origin;
+    float   radius;
+    vec3    color;
+    float   minlight;
+};
+
+layout(std430, binding=0) restrict readonly buffer LightBuffer
+{
+    float   LightStyles[64];
+    Light   Lights[];
+};
+
+layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
     float fog = exp2(-Fog.w * dot(p, p));
