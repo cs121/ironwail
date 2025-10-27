@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define NOISESCALE     (1.0f / 127.0f)
 
+extern gltexture_t *deluxemap_texture;
+
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -189,6 +191,7 @@ cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
 cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
+cvar_t	r_deluxemaps = { "r_deluxemaps", "1", CVAR_ARCHIVE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
@@ -1663,11 +1666,22 @@ void R_SetupView (void)
 		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
-		r_framedata.rim_pad0 = 0.f;
-		r_framedata.rim_pad1 = 0.f;
-	}
+                r_framedata.rim_pad0 = 0.f;
+                r_framedata.rim_pad1 = 0.f;
+        }
 
-	r_framecount++;
+        {
+                qboolean enable_delux =
+                        (r_deluxemaps.value > 0.f) &&
+                        !r_fullbright_cheatsafe && !r_lightmap_cheatsafe &&
+                        cl.worldmodel && cl.worldmodel->deluxdata &&
+                        deluxemap_texture;
+
+                r_framedata.delux_enabled = enable_delux ? 1 : 0;
+                r_framedata._padding1 = 0;
+        }
+
+        r_framecount++;
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];

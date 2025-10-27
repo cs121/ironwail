@@ -835,96 +835,226 @@ static void Mod_LoadTextures (lump_t *l)
 Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
 =================
 */
+static void Mod_LoadDeluxemap (const char *dlitfilename, int samplecount)
+{
+        int mark;
+        byte *data;
+        unsigned int path_id;
+        size_t expected;
+
+        loadmodel->deluxdata = NULL;
+        loadmodel->deluxfile = false;
+
+        if (samplecount <= 0)
+                return;
+
+        expected = (size_t)samplecount * 3;
+        mark = Hunk_LowMark ();
+        data = (byte *) COM_LoadHunkFile (dlitfilename, &path_id);
+        if (data)
+        {
+                if (path_id < loadmodel->path_id)
+                {
+                        Hunk_FreeToLowMark (mark);
+                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", dlitfilename);
+                }
+                else if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+                {
+                        int version = LittleLong (((int *)data)[1]);
+                        if (version == 2)
+                        {
+                                if ((size_t)(8 + expected) == com_filesize)
+                                {
+                                        Con_DPrintf2 ("%s loaded\n", dlitfilename);
+                                        loadmodel->deluxdata = data + 8;
+                                        loadmodel->deluxfile = true;
+                                        return;
+                                }
+                                Hunk_FreeToLowMark (mark);
+                                Con_Printf ("Mismatched .dlit file (%s should be %u bytes, not %" SDL_PRIs64 ")\n",
+                                        dlitfilename, (unsigned)(8 + expected), com_filesize);
+                        }
+                        else
+                        {
+                                Hunk_FreeToLowMark (mark);
+                                Con_Printf ("Unknown .dlit file version (%d)\n", version);
+                        }
+                }
+                else
+                {
+                        Hunk_FreeToLowMark (mark);
+                        Con_Printf ("Corrupt .dlit file (old version?), ignoring\n");
+                }
+        }
+        else
+        {
+                Con_DPrintf2 ("%s not found, synthesizing deluxemap\n", dlitfilename);
+        }
+
+        Hunk_FreeToLowMark (mark);
+
+        loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (samplecount * 3, dlitfilename);
+        memset (loadmodel->deluxdata, 0, samplecount * 3);
+}
+
 static void Mod_LoadLighting (lump_t *l)
 {
-	int i, mark;
-	byte *in, *out, *data;
-	byte d, q64_b0, q64_b1;
-	char litfilename[MAX_OSPATH];
-	unsigned int path_id;
+        int i, mark;
+        byte *in, *out, *data;
+        byte d, q64_b0, q64_b1;
+        char litfilename[MAX_OSPATH];
+        char dlitfilename[MAX_OSPATH];
+        unsigned int path_id;
+        int samplecount = 0;
 
-	loadmodel->lightdata = NULL;
-	loadmodel->litfile = false;
-	// LordHavoc: check for a .lit file
-	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
-	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
-	q_strlcat(litfilename, ".lit", sizeof(litfilename));
-	mark = Hunk_LowMark();
-	data = (byte*) COM_LoadHunkFile (litfilename, &path_id);
-	if (data)
-	{
-		// use lit file only from the same gamedir as the map
-		// itself or from a searchpath with higher priority.
-		if (path_id < loadmodel->path_id)
-		{
-			Hunk_FreeToLowMark(mark);
-			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
-		}
-		else
-		if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-		{
-			i = LittleLong(((int *)data)[1]);
-			if (i == 1)
-			{
-				if (8+l->filelen*3 == com_filesize)
-				{
-					Con_DPrintf2("%s loaded\n", litfilename);
-					loadmodel->lightdata = data + 8;
-					loadmodel->litfile = true;
-					return;
-				}
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Outdated .lit file (%s should be %u bytes, not %" SDL_PRIs64 "\n", litfilename, 8+l->filelen*3, com_filesize);
-			}
-			else
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Unknown .lit file version (%d)\n", i);
-			}
-		}
-		else
-		{
-			Hunk_FreeToLowMark(mark);
-			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
-		}
-	}
-	// LordHavoc: no .lit found, expand the white lighting data to color
-	if (!l->filelen)
-		return;
+        loadmodel->lightdata = NULL;
+        loadmodel->deluxdata = NULL;
+        loadmodel->litfile = false;
+        loadmodel->deluxfile = false;
 
-	// Quake64 bsp lighmap data
-	if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-	{
-		// RGB lightmap samples are packed in 16bits.
-		// RRRRR GGGGG BBBBBB
+        q_strlcpy (litfilename, loadmodel->name, sizeof (litfilename));
+        COM_StripExtension (litfilename, litfilename, sizeof (litfilename));
+        q_strlcpy (dlitfilename, litfilename, sizeof (dlitfilename));
+        q_strlcat (litfilename, ".lit", sizeof (litfilename));
+        q_strlcat (dlitfilename, ".dlit", sizeof (dlitfilename));
 
-		loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( (l->filelen / 2)*3, litfilename);
-		in = mod_base + l->fileofs;
-		out = loadmodel->lightdata;
+        mark = Hunk_LowMark ();
+        data = (byte *) COM_LoadHunkFile (litfilename, &path_id);
+        if (data)
+        {
+                if (path_id < loadmodel->path_id)
+                {
+                        Hunk_FreeToLowMark (mark);
+                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", litfilename);
+                }
+                else if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+                {
+                        i = LittleLong (((int *)data)[1]);
+                        if (i == 1)
+                        {
+                                if (8 + l->filelen * 3 == com_filesize)
+                                {
+                                        Con_DPrintf2 ("%s loaded\n", litfilename);
+                                        loadmodel->lightdata = data + 8;
+                                        loadmodel->litfile = true;
+                                        samplecount = l->filelen;
+                                        Mod_LoadDeluxemap (dlitfilename, samplecount);
+                                        return;
+                                }
+                                Hunk_FreeToLowMark (mark);
+                                Con_Printf ("Outdated .lit file (%s should be %u bytes, not %" SDL_PRIs64 ")\n",
+                                        litfilename, 8 + l->filelen * 3, com_filesize);
+                        }
+                        else
+                        {
+                                Hunk_FreeToLowMark (mark);
+                                Con_Printf ("Unknown .lit file version (%d)\n", i);
+                        }
+                }
+                else
+                {
+                        Hunk_FreeToLowMark (mark);
+                        Con_Printf ("Corrupt .lit file (old version?), ignoring\n");
+                }
+        }
 
-		for (i = 0;i < (l->filelen / 2) ;i++)
-		{
-			q64_b0 = *in++;
-			q64_b1 = *in++;
+        if (!l->filelen)
+        {
+                Mod_LoadDeluxemap (dlitfilename, 0);
+                return;
+        }
 
-			*out++ = q64_b0 & 0xf8;/* 0b11111000 */
-			*out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
-			*out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
-		}
-		return;
-	}
+        if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+        {
+                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ((l->filelen / 2) * 3, litfilename);
+                in = mod_base + l->fileofs;
+                out = loadmodel->lightdata;
 
-	loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill ( l->filelen*3, litfilename);
-	in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
-	out = loadmodel->lightdata;
-	memcpy (in, mod_base + l->fileofs, l->filelen);
-	for (i = 0;i < l->filelen;i++)
-	{
-		d = *in++;
-		*out++ = d;
-		*out++ = d;
-		*out++ = d;
-	}
+                for (i = 0; i < (l->filelen / 2); i++)
+                {
+                        q64_b0 = *in++;
+                        q64_b1 = *in++;
+
+                        *out++ = q64_b0 & 0xf8;
+                        *out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);
+                        *out++ = (q64_b1 & 0x3f) << 2;
+                }
+
+                samplecount = l->filelen / 2;
+                Mod_LoadDeluxemap (dlitfilename, samplecount);
+                return;
+        }
+
+#ifdef BSP29_VALVE
+        if (loadmodel->bspversion == BSPVERSION_VALVE)
+        {
+                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (l->filelen, litfilename);
+                memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
+                samplecount = l->filelen / 3;
+                Mod_LoadDeluxemap (dlitfilename, samplecount);
+                return;
+        }
+#endif
+
+        loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (l->filelen * 3, litfilename);
+        in = loadmodel->lightdata + l->filelen * 2;
+        out = loadmodel->lightdata;
+        memcpy (in, mod_base + l->fileofs, l->filelen);
+        for (i = 0; i < l->filelen; i++)
+        {
+                d = *in++;
+                *out++ = d;
+                *out++ = d;
+                *out++ = d;
+        }
+
+        samplecount = l->filelen;
+        Mod_LoadDeluxemap (dlitfilename, samplecount);
+}
+
+
+static void Mod_InitFallbackDeluxemap (msurface_t *surf)
+{
+        int style_count, i, count;
+        int smax, tmax, facesize;
+        vec3_t normal;
+        byte encoded[3];
+        byte *dst;
+
+        if (!surf->deluxsamples)
+                return;
+
+        style_count = 0;
+        while (style_count < MAXLIGHTMAPS && surf->styles[style_count] != 255)
+                style_count++;
+        if (style_count == 0)
+                style_count = 1;
+
+        smax = (surf->extents[0] >> 4) + 1;
+        tmax = (surf->extents[1] >> 4) + 1;
+        facesize = smax * tmax;
+
+        VectorCopy (surf->plane->normal, normal);
+        if (surf->flags & SURF_PLANEBACK)
+                VectorNegate (normal, normal);
+
+        for (i = 0; i < 3; i++)
+        {
+                float c = CLAMP (-1.0f, normal[i], 1.0f);
+                int v = (int) Q_rint ((c * 0.5f + 0.5f) * 255.0f);
+                encoded[i] = (byte) CLAMP (0, v, 255);
+        }
+
+        for (i = 0; i < style_count; i++)
+        {
+                dst = surf->deluxsamples + i * facesize * 3;
+                for (count = 0; count < facesize; count++, dst += 3)
+                {
+                        dst[0] = encoded[0];
+                        dst[1] = encoded[1];
+                        dst[2] = encoded[2];
+                }
+        }
 }
 
 
@@ -1352,10 +1482,25 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake 
 
-		if (lofs == -1)
-			out->samples = NULL;
-		else
-			out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+                if (lofs == -1)
+                {
+                        out->samples = NULL;
+                        out->deluxsamples = NULL;
+                }
+                else
+                {
+                        out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+                        if (loadmodel->deluxdata)
+                        {
+                                out->deluxsamples = loadmodel->deluxdata + (lofs * 3);
+                                if (!loadmodel->deluxfile)
+                                        Mod_InitFallbackDeluxemap (out);
+                        }
+                        else
+                        {
+                                out->deluxsamples = NULL;
+                        }
+                }
 
 		texture = loadmodel->textures[out->texinfo->texnum];
 

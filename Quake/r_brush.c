@@ -35,6 +35,7 @@ int     lightmap_block_height = 256;
 
 int		gl_lightmap_format;
 int		lightmap_bytes;
+int		deluxemap_bytes;
 
 typedef struct {
 	qboolean		reverse;
@@ -51,7 +52,9 @@ msurface_t		**lit_surfs;
 int				*lit_surf_order[2];
 int				num_lightmap_samples;
 unsigned		*lightmap_data;
+byte		*deluxemap_data;
 gltexture_t		*lightmap_texture;
+gltexture_t		*deluxemap_texture;
 int				lightmap_width;
 int				lightmap_height;
 
@@ -267,6 +270,12 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	byte		*src;
 	unsigned	*dst;
 	int			s, t, facesize;
+	const byte	*dirsrc;
+	byte		*dstdir;
+	int			tap_count;
+	int			dir_stride;
+	qboolean	use_fallback;
+	byte		fallback[3];
 
 	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == 255)
 		return;
@@ -318,6 +327,59 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 			}
 		}
 	}
+
+	if (!deluxemap_data)
+		return;
+
+	tap_count = GL_NumLightmapTaps (surf);
+	dir_stride = lightmap_width * deluxemap_bytes;
+	dirsrc = surf->deluxsamples;
+	use_fallback = (dirsrc == NULL);
+
+	if (use_fallback)
+	{
+		vec3_t normal;
+		int component;
+
+		VectorCopy (surf->plane->normal, normal);
+		if (surf->flags & SURF_PLANEBACK)
+			VectorNegate (normal, normal);
+
+		for (component = 0; component < 3; component++)
+		{
+			float c = CLAMP (-1.0f, normal[component], 1.0f);
+			int v = (int) Q_rint ((c * 0.5f + 0.5f) * 255.0f);
+			fallback[component] = (byte) CLAMP (0, v, 255);
+		}
+	}
+
+	for (t = 0; t < tmax; t++)
+	{
+		int row_index = yofs + t;
+		dstdir = deluxemap_data + row_index * dir_stride + xofs * deluxemap_bytes;
+
+		for (s = 0; s < smax; s++)
+		{
+			int texel_index = t * smax + s;
+			for (map = 0; map < tap_count; map++)
+			{
+				byte *pixel = dstdir + (s + map * smax) * deluxemap_bytes;
+				if (!use_fallback)
+				{
+					const byte *srcdir = dirsrc + map * facesize + texel_index * 3;
+					pixel[0] = srcdir[0];
+					pixel[1] = srcdir[1];
+					pixel[2] = srcdir[2];
+				}
+				else
+				{
+					pixel[0] = fallback[0];
+					pixel[1] = fallback[1];
+					pixel[2] = fallback[2];
+				}
+			}
+		}
+	}
 }
 
 /*
@@ -332,6 +394,11 @@ static void GL_FreeLightmapData (void)
 		free (lightmap_data);
 		lightmap_data = NULL;
 	}
+	if (deluxemap_data)
+	{
+		free (deluxemap_data);
+		deluxemap_data = NULL;
+	}
 	if (lightmaps)
 	{
 		free (lightmaps);
@@ -341,6 +408,7 @@ static void GL_FreeLightmapData (void)
 	VEC_CLEAR (lit_surfs);
 
 	lightmap_texture = NULL; // freed by the texture manager
+	deluxemap_texture = NULL; // freed by the texture manager
 	last_lightmap_allocated = 0;
 	lightmap_count = 0;
 	lightmap_width = 0;
@@ -493,6 +561,7 @@ void GL_BuildLightmaps (void)
 	default:
 		Sys_Error ("GL_BuildLightmaps: bad lightmap format");
 	}
+	deluxemap_bytes = 3;
 
 	lightmap_block_width = lightmap_block_height = GL_SanitizeAtlasSize ((int)gl_lightmap_atlas_size.value);
 	// allocate lightmap blocks
@@ -524,6 +593,24 @@ void GL_BuildLightmaps (void)
 	if (!lightmap_data)
 		Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_data)));
 
+	if (cl.worldmodel->deluxdata)
+	{
+		deluxemap_data = (byte *) malloc (lmsize * deluxemap_bytes);
+		if (!deluxemap_data)
+			Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * deluxemap_bytes));
+		for (i = 0; i < lmsize; i++)
+		{
+			byte *dst = deluxemap_data + i * deluxemap_bytes;
+			dst[0] = 128;
+			dst[1] = 128;
+			dst[2] = 255;
+		}
+	}
+	else
+	{
+		deluxemap_data = NULL;
+	}
+
 	// compute offsets for each lightmap block
 	for (i=0; i<lightmap_count; i++)
 	{
@@ -549,6 +636,18 @@ void GL_BuildLightmaps (void)
 			SRC_LIGHTMAP, (byte *)lightmap_data, "", (src_offset_t)lightmap_data,
 			TEXPREF_ALPHA | TEXPREF_LINEAR | TEXPREF_NOPICMIP
 		);
+	if (deluxemap_data)
+	{
+		deluxemap_texture =
+			TexMgr_LoadImage (cl.worldmodel, "deluxemap", lightmap_width, lightmap_height,
+				SRC_DELUXMAP, deluxemap_data, "", (src_offset_t)deluxemap_data,
+				TEXPREF_LINEAR | TEXPREF_NOPICMIP
+			);
+	}
+	else
+	{
+		deluxemap_texture = NULL;
+	}
 
 	//johnfitz -- warn about exceeding old limits
 	//GLQuake limit was 64 textures of 128x128. Estimate how many 128x128 textures we would need
