@@ -26,7 +26,7 @@ layout(location=14) uniform vec4 SSAOParams1; // x: samples, y: power, zw: reser
 layout(location=15) uniform mat4 ProjectionMatrix;
 layout(location=16) uniform vec4 GodRayParams0; // x: enabled, y: intensity, z: decay, w: weight
 layout(location=17) uniform vec4 GodRayParams1; // x: light x, y: light y, z: threshold, w: density
-layout(location=18) uniform vec4 GodRayParams2; // x: samples, y: threshold softness, zw: unused
+layout(location=18) uniform vec4 GodRayParams2; // x: samples, y: threshold softness, zw: direction
 layout(location=19) uniform mat4 InverseProjectionMatrix;
 layout(location=20) uniform vec4 DebugParams; // x: SSAO debug, yzw: reserved
 
