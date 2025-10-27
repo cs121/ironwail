@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <time.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <limits.h>
 #include "miniz.h"
 #include "unicode_translit.h"
@@ -2366,7 +2367,7 @@ static pack_t *COM_LoadPK3File (const char *packfile)
 			continue;
 		if (st.m_uncomp_size > INT_MAX)
 			continue;
-		if ((size_t) q_strlen (st.m_filename) >= sizeof (newfiles[0].name))
+		if (strlen (st.m_filename) >= sizeof (newfiles[0].name))
 			continue;
 		++count;
 	}

@@ -259,6 +259,7 @@ float Q_atof (const char *str);
 
 
 #include "strl_fn.h"
+#include "miniz.h"
 
 /* locale-insensitive strcasecmp replacement functions: */
 extern int q_strcasecmp (const char * s1, const char * s2);
@@ -378,7 +379,6 @@ typedef struct
 	int		zip_index;
 } packfile_t;
 
-struct mz_zip_archive;
 typedef enum
 {
 	PACKTYPE_PAK,
@@ -392,7 +392,7 @@ typedef struct pack_s
 	int		numfiles;
 	packfile_t	*files;
 	packtype_t	type;
-	struct mz_zip_archive	*zip;
+	mz_zip_archive	*zip;
 } pack_t;
 
 typedef struct searchpath_s
