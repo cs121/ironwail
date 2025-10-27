@@ -34,6 +34,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "miniz.h"
 #include "unicode_translit.h"
 
+static void mz_free (void *ptr)
+{
+	MZ_FREE (ptr);
+}
+
+static size_t mz_zip_file_read_func (void *opaque, mz_uint64 ofs, void *buf, size_t n);
+static mz_bool COM_ZipReaderInitFile (mz_zip_archive *archive, const char *path, mz_uint flags);
+static void COM_ZipReaderClose (mz_zip_archive *archive);
+
 static const char	*largv[MAX_NUM_ARGVS + 1];
 static char	argvdummy[] = " ";
 
@@ -2341,6 +2350,61 @@ static int COM_ComparePk3Names (const void *a, const void *b)
 	return q_strcasecmp (*sa, *sb);
 }
 
+static size_t mz_zip_file_read_func (void *opaque, mz_uint64 ofs, void *buf, size_t n)
+{
+	if (SDL_RWseek ((SDL_RWops*) opaque, (Sint64) ofs, RW_SEEK_SET) < 0)
+		return 0;
+	return SDL_RWread ((SDL_RWops*) opaque, buf, 1, n);
+}
+
+static mz_bool COM_ZipReaderInitFile (mz_zip_archive *archive, const char *path, mz_uint flags)
+{
+	SDL_RWops      *rw;
+	Sint64         size;
+
+	rw = SDL_RWFromFile (path, "rb");
+	if (!rw)
+		return MZ_FALSE;
+
+	size = SDL_RWsize (rw);
+	if (size <= 0)
+	{
+		SDL_RWclose (rw);
+		return MZ_FALSE;
+	}
+
+	archive->m_pRead = mz_zip_file_read_func;
+	archive->m_pIO_opaque = rw;
+
+	if (!mz_zip_reader_init (archive, (mz_uint64) size, flags))
+	{
+		SDL_RWclose (rw);
+		archive->m_pIO_opaque = NULL;
+		return MZ_FALSE;
+	}
+
+	return MZ_TRUE;
+}
+
+static void COM_ZipReaderClose (mz_zip_archive *archive)
+{
+	SDL_RWops *rw;
+
+	if (!archive)
+		return;
+
+	rw = (SDL_RWops *) archive->m_pIO_opaque;
+
+	if (archive->m_zip_mode != MZ_ZIP_MODE_INVALID)
+		mz_zip_reader_end (archive);
+
+	if (rw)
+	{
+		SDL_RWclose (rw);
+		archive->m_pIO_opaque = NULL;
+	}
+}
+
 static pack_t *COM_LoadPK3File (const char *packfile)
 {
 	mz_zip_archive   *archive = NULL;
@@ -2352,7 +2416,7 @@ static pack_t *COM_LoadPK3File (const char *packfile)
 
 	archive = (mz_zip_archive *) Z_Malloc (sizeof (*archive));
 	memset (archive, 0, sizeof (*archive));
-	if (!mz_zip_reader_init_file (archive, packfile, 0))
+	if (!COM_ZipReaderInitFile (archive, packfile, 0))
 		goto fail;
 
 	totalfiles = mz_zip_reader_get_num_files (archive);
@@ -2426,7 +2490,7 @@ fail:
 		Z_Free (newfiles);
 	if (archive)
 	{
-		mz_zip_reader_end (archive);
+		COM_ZipReaderClose (archive);
 		Z_Free (archive);
 	}
 	return NULL;
@@ -2454,7 +2518,7 @@ static void COM_FreePack (pack_t *pack)
 	{
 		if (pack->zip)
 		{
-			mz_zip_reader_end (pack->zip);
+			COM_ZipReaderClose (pack->zip);
 			Z_Free (pack->zip);
 		}
 	}
@@ -3743,13 +3807,6 @@ unsigned COM_HashBlock (const void *data, size_t size)
 		hash *= 0x01000193u;
 	}
 	return hash;
-}
-
-static size_t mz_zip_file_read_func(void *opaque, mz_uint64 ofs, void *buf, size_t n)
-{
-	if (SDL_RWseek((SDL_RWops*)opaque, (Sint64)ofs, RW_SEEK_SET) < 0)
-		return 0;
-	return SDL_RWread((SDL_RWops*)opaque, buf, 1, n);
 }
 
 /*
