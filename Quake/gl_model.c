@@ -1489,10 +1489,18 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
                 }
                 else
                 {
-                        out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+                        size_t sampleofs;
+
+#ifdef BSP29_VALVE
+                        sampleofs = (loadmodel->bspversion == BSPVERSION_VALVE) ? (size_t)lofs : (size_t)lofs * 3;
+#else
+                        sampleofs = (size_t)lofs * 3;
+#endif
+
+                        out->samples = loadmodel->lightdata + sampleofs; //johnfitz -- lit support via lordhavoc (was "+ i")
                         if (loadmodel->deluxdata)
                         {
-                                out->deluxsamples = loadmodel->deluxdata + (lofs * 3);
+                                out->deluxsamples = loadmodel->deluxdata + sampleofs;
                                 if (!loadmodel->deluxfile)
                                         Mod_InitFallbackDeluxemap (out);
                         }
