@@ -11,6 +11,143 @@ layout(binding=3) uniform sampler2D DeluxTex;
 
 #include "frame_uniforms.glsl"
 
+vec3 ApplyFog(vec3 clr, vec3 p)
+{
+    float fog = exp2(-Fog.w * dot(p, p));
+    fog = clamp(fog, 0.0, 1.0);
+    return mix(Fog.rgb, clr, fog);
+}
+
+const uint
+    CF_USE_POLYGON_OFFSET = 1u,
+    CF_USE_FULLBRIGHT = 2u,
+    CF_NOLIGHTMAP = 4u,
+    CF_USE_EMISSIVE = 8u,
+    CF_ALPHA_TEST = 16u
+;
+
+// ALU-only 16x16 Bayer matrix
+float bayer01(ivec2 coord)
+{
+    coord &= 15;
+    coord.y ^= coord.x;
+    uint v = uint(coord.y | (coord.x << 8));
+    v = (v ^ (v << 2)) & 0x3333;
+    v = (v ^ (v << 1)) & 0x5555;
+    v |= v >> 7;
+    v = bitfieldReverse(v) >> 24;
+    return float(v) * (1.0/256.0);
+}
+
+float bayer(ivec2 coord)
+{
+    return bayer01(coord) - 0.5;
+}
+
+// Hash without Sine
+// https://www.shadertoy.com/view/4djSRW
+float whitenoise01(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float whitenoise(vec2 p)
+{
+    return whitenoise01(p) - 0.5;
+}
+
+// Convert uniform distribution to triangle-shaped distribution
+// Input in [0..1], output in [-1..1]
+// Based on https://www.shadertoy.com/view/4t2SDh
+float tri(float x)
+{
+    float orig = x * 2.0 - 1.0;
+    uint signbit = floatBitsToUint(orig) & 0x80000000u;
+    x = sqrt(abs(orig)) - 1.;
+    x = uintBitsToFloat(floatBitsToUint(x) ^ signbit);
+    return x;
+}
+
+#define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
+#define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
+#define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
+
+vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
+{
+    const float EPS = 1e-6;
+    float inv_curr_w = abs(curr_clip.w) > EPS ? 1.0 / curr_clip.w : 0.0;
+    float inv_prev_w = abs(prev_clip.w) > EPS ? 1.0 / prev_clip.w : 0.0;
+    vec2 curr_ndc = curr_clip.xy * inv_curr_w;
+    vec2 prev_ndc = prev_clip.xy * inv_prev_w;
+    return (curr_ndc - prev_ndc) * 0.5;
+}
+
+vec3 ComputeSunLight(vec3 pos, vec3 normal)
+{
+    return vec3(0.0);
+}
+
+layout(location=0) flat in uint in_flags;
+layout(location=1) flat in float in_alpha;
+layout(location=2) in vec3 in_pos;
+#if MODE == 1
+layout(location=3) centroid in vec2 in_uv;
+#else
+layout(location=3) in vec2 in_uv;
+#endif
+layout(location=4) centroid in vec2 in_lmuv;
+layout(location=5) in float in_depth;
+layout(location=6) noperspective in vec2 in_coord;
+layout(location=7) flat in vec4 in_styles;
+layout(location=8) flat in float in_lmofs;
+#if BINDLESS
+layout(location=9) flat in uvec4 in_samplers0;
+layout(location=10) flat in uvec2 in_samplers1;
+#endif
+layout(location=11) noperspective in vec4 in_curr_clip;
+layout(location=12) noperspective in vec4 in_prev_clip;
+
+#define OUT_COLOR out_fragcolor
+#if OIT
+vec4 OUT_COLOR;
+layout(location=0) out vec4 out_accum;
+layout(location=1) out float out_reveal;
+
+vec3 GammaToLinear(vec3 v)
+{
+#if 0
+    return v*v;
+#else
+    return v;
+#endif
+}
+
+void main_body();
+
+void main()
+{
+    main_body();
+    OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
+    vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
+    float z = 1./gl_FragCoord.w;
+#if 0
+    float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/2e5, 2.0)), 1e-2, 3e3);
+#else
+    float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
+#endif
+    out_accum = vec4(color.rgb, color.a * weight);
+    out_accum.rgb *= out_accum.a;
+    out_reveal = color.a;
+}
+
+#define main main_body
+#else
+layout(location=0) out vec4 OUT_COLOR;
+layout(location=1) out vec4 out_velocity;
+#endif // OIT
+
 // === Performance-Schalter (optional) ===
 #ifndef USE_COARSE_DERIVATIVES
 #define USE_COARSE_DERIVATIVES 1   // 1: dFdxCoarse/dFdyCoarse wenn verfügbar, sonst fallback
