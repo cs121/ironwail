@@ -865,11 +865,11 @@ void GL_PostProcess (void)
                         }
                         else if (godrays_mode_value <= 0)
                         {
-                                float wall_angle = q_min (85.f, q_max (0.f, r_godrays_wall_angle.value));
+                                float wall_angle = q_min (90.f, q_max (0.f, r_godrays_wall_angle.value));
                                 float angle_rad = DEG2RAD (wall_angle);
                                 float horizontal_sign = (godrays_light_x <= 0.5f) ? 1.f : -1.f;
-                                godrays_dir_x = horizontal_sign * sinf (angle_rad);
-                                godrays_dir_y = cosf (angle_rad);
+                                godrays_dir_x = horizontal_sign * cosf (angle_rad);
+                                godrays_dir_y = sinf (angle_rad);
                         }
                 }
 
