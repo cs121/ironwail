@@ -261,7 +261,6 @@ OBJS = strlcat.o \
         wad.o \
         cmd.o \
         common.o \
-        q3shader.o \
         steam.o \
 	json.o \
 	miniz.o \
