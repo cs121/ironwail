@@ -80,7 +80,7 @@ void main()
         {
                 ApplyVignette(color.rgb, uv, viewMin, viewMax, texSize);
                 ApplyChromaticAberration(color.rgb, uv, invTexSize, viewMin, viewMax);
-                ApplyGodRays(color.rgb, uv, inView, viewMin, viewMax);
+                ApplyGodRays(color.rgb, uv, inView, viewMin, viewMax, texSize, depthInfo);
         }
 
         out_fragcolor = color;

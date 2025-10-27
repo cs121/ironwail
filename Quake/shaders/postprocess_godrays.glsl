@@ -3,7 +3,13 @@
 
 const int GODRAY_MAX_SAMPLES = 128;
 
-void ApplyGodRays(inout vec3 color, vec2 uv, bool inView, vec2 viewMin, vec2 viewMax)
+void ApplyGodRays(inout vec3 color,
+        vec2 uv,
+        bool inView,
+        vec2 viewMin,
+        vec2 viewMax,
+        vec2 texSize,
+        DepthSamplingInfo depthInfo)
 {
         if (!(GodRayParams0.x > 0.5 && inView))
                 return;
@@ -31,6 +37,17 @@ void ApplyGodRays(inout vec3 color, vec2 uv, bool inView, vec2 viewMin, vec2 vie
         float threshold = clamp(GodRayParams1.z, 0.0, 1.0);
         float softness = clamp(GodRayParams2.y, 1e-4, 1.0);
 
+        bool hasDepth = depthInfo.valid;
+        float centerDepth = 0.0;
+        if (hasDepth)
+        {
+                centerDepth = SampleLinearDepth(uv * texSize, depthInfo);
+                if (centerDepth <= 0.0)
+                        hasDepth = false;
+        }
+        const float depthBias = 24.0;
+        const float depthRange = 96.0;
+
         vec2 stepUV = delta / float(samples) * density;
         vec2 sampleUV = uv;
         float illuminationDecay = 1.0;
@@ -48,6 +65,17 @@ void ApplyGodRays(inout vec3 color, vec2 uv, bool inView, vec2 viewMin, vec2 vie
                 vec3 sampleColor = texture(GammaTexture, sampleUV).rgb;
                 float luminance = dot(sampleColor, vec3(0.2126, 0.7152, 0.0722));
                 float visibility = smoothstep(threshold, min(threshold + softness, 1.0), luminance);
+
+                if (hasDepth)
+                {
+                        float sampleDepth = SampleLinearDepth(sampleUV * texSize, depthInfo);
+                        if (sampleDepth > 0.0)
+                        {
+                                float depthDelta = sampleDepth - centerDepth;
+                                float depthVisibility = smoothstep(depthBias, depthBias + depthRange, depthDelta);
+                                visibility *= depthVisibility;
+                        }
+                }
 
                 scatterAccum += vec3(visibility) * illuminationDecay * weight;
                 illuminationDecay *= decay;
