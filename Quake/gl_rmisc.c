@@ -80,6 +80,7 @@ extern cvar_t r_chromatic_aberration;
 extern cvar_t r_filmgrain;
 extern cvar_t r_filmgrain_size;
 extern cvar_t r_ssao;
+extern cvar_t r_ssao_debug;
 extern cvar_t r_ssao_radius;
 extern cvar_t r_ssao_bias;
 extern cvar_t r_ssao_intensity;
@@ -394,6 +395,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
 	Cvar_RegisterVariable (&r_ssao);
+	Cvar_RegisterVariable (&r_ssao_debug);
 	Cvar_RegisterVariable (&r_ssao_radius);
 	Cvar_RegisterVariable (&r_ssao_bias);
 	Cvar_RegisterVariable (&r_ssao_intensity);

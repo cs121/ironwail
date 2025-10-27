@@ -28,6 +28,7 @@ layout(location=16) uniform vec4 GodRayParams0; // x: enabled, y: intensity, z: 
 layout(location=17) uniform vec4 GodRayParams1; // x: light x, y: light y, z: threshold, w: density
 layout(location=18) uniform vec4 GodRayParams2; // x: samples, y: threshold softness, zw: unused
 layout(location=19) uniform mat4 InverseProjectionMatrix;
+layout(location=20) uniform vec4 DebugParams; // x: SSAO debug, yzw: reserved
 
 #include "postprocess_common.glsl"
 #include "postprocess_ssao.glsl"
@@ -46,6 +47,7 @@ void main()
         float contrast = Params.y;
         float scale = Params.z;
         float dither = Params.w;
+        bool ssaoDebug = DebugParams.x > 0.5;
 
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
@@ -60,6 +62,22 @@ void main()
         vec2 invScale = max(DepthParams.xy, vec2(1e-4));
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
+
+        if (ssaoDebug)
+        {
+                float depth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                float debugValue = 0.0;
+                if (depthInfo.valid && depth > 0.0)
+                {
+                        float nearPlane = min(DoFParams1.x, DoFParams1.y);
+                        float farPlane = max(DoFParams1.x, DoFParams1.y);
+                        float denom = max(farPlane - nearPlane, 1e-6);
+                        float normalized = clamp((depth - nearPlane) / denom, 0.0, 1.0);
+                        debugValue = 1.0 - normalized;
+                }
+                out_fragcolor = vec4(vec3(debugValue), 1.0);
+                return;
+        }
 
         bool hasVelocityTexture = MotionParams1.z > 0.5;
         vec2 velocity = vec2(0.0);
