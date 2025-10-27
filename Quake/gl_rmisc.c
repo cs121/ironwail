@@ -372,6 +372,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
+	Cvar_RegisterVariable (&r_lightmap_strength);
 	Cvar_RegisterVariable (&r_dof);
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);

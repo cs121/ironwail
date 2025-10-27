@@ -12,10 +12,10 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
+        float   LightmapStrength;
         float   RimAlias;
         float   RimWorld;
         float   RimExponent;
-        float   _Pad0;
         float   _PadRim;
         vec3    EyePos;
         float   Time;

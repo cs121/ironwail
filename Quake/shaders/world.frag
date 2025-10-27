@@ -296,6 +296,8 @@ void main()
         }
     }
 
+    static_light *= LightmapStrength;
+
     // schnellere Flächennormalen aus Derivaten
     vec3 dn = cross(DFDX(in_pos), DFDY(in_pos));
     vec3 geom_normal = fastNorm(dn);
