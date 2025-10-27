@@ -250,6 +250,8 @@ cvar_t	r_godrays_decay = { "r_godrays_decay", "0.95", CVAR_ARCHIVE };
 cvar_t	r_godrays_weight = { "r_godrays_weight", "0.02", CVAR_ARCHIVE };
 cvar_t	r_godrays_samples = { "r_godrays_samples", "64", CVAR_ARCHIVE };
 cvar_t	r_godrays_softness = { "r_godrays_softness", "0.1", CVAR_ARCHIVE };
+cvar_t	r_godrays_mode = { "r_godrays_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_wall_angle = { "r_godrays_wall_angle", "40", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -848,6 +850,25 @@ void GL_PostProcess (void)
                 float godrays_light_x = q_min (1.f, q_max (0.f, r_godrays_light_x.value));
                 float godrays_light_y = q_min (1.f, q_max (0.f, r_godrays_light_y.value));
                 float godrays_threshold = q_min (1.f, q_max (0.f, r_godrays_threshold.value));
+                int godrays_mode_value = (int)Q_rint (r_godrays_mode.value);
+                float godrays_dir_x = 0.f;
+                float godrays_dir_y = 0.f;
+                if (godrays_intensity > 0.f && godrays_weight > 0.f && godrays_density > 0.f)
+                {
+                        if (godrays_mode_value == 1)
+                        {
+                                godrays_dir_x = 0.f;
+                                godrays_dir_y = 1.f;
+                        }
+                        else if (godrays_mode_value <= 0)
+                        {
+                                float wall_angle = q_min (85.f, q_max (0.f, r_godrays_wall_angle.value));
+                                float angle_rad = DEG2RAD (wall_angle);
+                                float horizontal_sign = (godrays_light_x <= 0.5f) ? 1.f : -1.f;
+                                godrays_dir_x = horizontal_sign * sinf (angle_rad);
+                                godrays_dir_y = cosf (angle_rad);
+                        }
+                }
 
                 GL_Uniform4fFunc (16,
                         godrays_intensity > 0.f ? 1.f : 0.f,
@@ -862,8 +883,8 @@ void GL_PostProcess (void)
                 GL_Uniform4fFunc (18,
                         godrays_samples,
                         godrays_softness,
-                        0.f,
-                        0.f);
+                        godrays_dir_x,
+                        godrays_dir_y);
         }
 
         dof_enabled = R_DoFEnabled ();

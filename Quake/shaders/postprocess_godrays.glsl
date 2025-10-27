@@ -28,14 +28,12 @@ void ApplyGodRays(inout vec3 color,
         vec2 lightUV = clamp(GodRayParams1.xy, vec2(0.0), vec2(1.0));
         lightUV = viewMin + lightUV * viewSize;
 
-        vec2 delta = lightUV - uv;
-        float deltaMag = max(abs(delta.x), abs(delta.y));
-        if (deltaMag <= 1e-6)
-                return;
-
         int samples = int(clamp(GodRayParams2.x + 0.5, 1.0, float(GODRAY_MAX_SAMPLES)));
         float threshold = clamp(GodRayParams1.z, 0.0, 1.0);
         float softness = clamp(GodRayParams2.y, 1e-4, 1.0);
+        vec2 direction = GodRayParams2.zw;
+        float directionLenSq = dot(direction, direction);
+        bool useDirectional = directionLenSq > 1e-6;
 
         bool hasDepth = depthInfo.valid;
         float centerDepth = 0.0;
@@ -48,17 +46,59 @@ void ApplyGodRays(inout vec3 color,
         const float depthBias = 24.0;
         const float depthRange = 96.0;
 
-        vec2 stepUV = delta / float(samples) * density;
         vec2 sampleUV = uv;
-        float illuminationDecay = 1.0;
+        vec2 stepUV = vec2(0.0);
+        float alignment = 1.0;
+        float stepLength = 0.0;
+        float maxTrace = 0.0;
+        float travelled = 0.0;
+
+        if (useDirectional)
+        {
+                vec2 dirNorm = direction / sqrt(directionLenSq);
+                vec2 rayVector = uv - lightUV;
+                float rayDistance = length(rayVector);
+                if (rayDistance <= 1e-6)
+                        return;
+                float along = dot(rayVector, dirNorm);
+                alignment = clamp(along / rayDistance, 0.0, 1.0);
+                if (alignment <= 1e-6)
+                        return;
+                stepLength = density / float(samples);
+                if (stepLength <= 1e-6)
+                        return;
+                stepUV = dirNorm * stepLength;
+                maxTrace = max(along, density);
+        }
+        else
+        {
+                vec2 delta = lightUV - uv;
+                float deltaMag = max(abs(delta.x), abs(delta.y));
+                if (deltaMag <= 1e-6)
+                        return;
+                stepUV = delta / float(samples) * density;
+        }
+
         vec3 scatterAccum = vec3(0.0);
+        float illuminationDecay = 1.0;
 
         for (int i = 0; i < GODRAY_MAX_SAMPLES; ++i)
         {
                 if (i >= samples)
                         break;
 
-                sampleUV += stepUV;
+                if (useDirectional)
+                {
+                        sampleUV -= stepUV;
+                        travelled += stepLength;
+                        if (travelled > maxTrace)
+                                break;
+                }
+                else
+                {
+                        sampleUV += stepUV;
+                }
+
                 if (any(lessThan(sampleUV, viewMin)) || any(greaterThan(sampleUV, viewMax)))
                         break;
 
@@ -81,7 +121,7 @@ void ApplyGodRays(inout vec3 color,
                 illuminationDecay *= decay;
         }
 
-        color += scatterAccum * intensity;
+        color += scatterAccum * intensity * alignment;
 }
 
 #endif // POSTPROCESS_GODRAYS_GLSL

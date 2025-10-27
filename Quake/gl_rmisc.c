@@ -96,6 +96,8 @@ extern cvar_t r_godrays_decay;
 extern cvar_t r_godrays_weight;
 extern cvar_t r_godrays_samples;
 extern cvar_t r_godrays_softness;
+extern cvar_t r_godrays_mode;
+extern cvar_t r_godrays_wall_angle;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -419,6 +421,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_godrays_weight);
 	Cvar_RegisterVariable (&r_godrays_samples);
 	Cvar_RegisterVariable (&r_godrays_softness);
+	Cvar_RegisterVariable (&r_godrays_mode);
+	Cvar_RegisterVariable (&r_godrays_wall_angle);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
