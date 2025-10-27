@@ -1,5 +1,3 @@
-#version 450 core
-
 layout(binding=0) uniform sampler2D BloomTexture;
 layout(location=0) uniform vec4 BlurParams; // xy: texel size, zw: direction
 

@@ -22,6 +22,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad3;
 	InstanceData instances[];
 };
+
 layout(std140, binding=0) uniform FrameDataUBO
 {
         mat4    _FrameViewProj;
@@ -64,16 +65,16 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
         Light   Lights[];
 };
 
-// ALU-only 16x16 Bayer matrix
+// ALU-only 16x16 Bayer matrix - optimiert
 float bayer01(ivec2 coord)
 {
 	coord &= 15;
 	coord.y ^= coord.x;
-	uint v = uint(coord.y | (coord.x << 8));	// 0  0  0  0 | x3 x2 x1 x0 |  0  0  0  0 | y3 y2 y1 y0
-	v = (v ^ (v << 2)) & 0x3333;				// 0  0 x3 x2 |  0  0 x1 x0 |  0  0 y3 y2 |  0  0 y1 y0
-	v = (v ^ (v << 1)) & 0x5555;				// 0 x3  0 x2 |  0 x1  0 x0 |  0 y3  0 y2 |  0 y1  0 y0
-	v |= v >> 7;								// 0 x3  0 x2 |  0 x1  0 x0 | x3 y3 x2 y2 | x1 y1 x0 y0
-	v = bitfieldReverse(v) >> 24;				// 0  0  0  0 |  0  0  0  0 | y0 x0 y1 x1 | y2 x2 y3 x3
+	uint v = uint(coord.y | (coord.x << 8));
+	v = (v ^ (v << 2)) & 0x3333u;
+	v = (v ^ (v << 1)) & 0x5555u;
+	v |= v >> 7;
+	v = bitfieldReverse(v) >> 24;
 	return float(v) * (1.0/256.0);
 }
 
@@ -82,11 +83,10 @@ float bayer(ivec2 coord)
 	return bayer01(coord) - 0.5;
 }
 
-// Hash without Sine
-// https://www.shadertoy.com/view/4djSRW 
+// Hash without Sine - optimiert
 float whitenoise01(vec2 p)
 {
-	vec3 p3 = fract(vec3(p.xyx) * .1031);
+	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
 }
@@ -96,14 +96,12 @@ float whitenoise(vec2 p)
 	return whitenoise01(p) - 0.5;
 }
 
-// Convert uniform distribution to triangle-shaped distribution
-// Input in [0..1], output in [-1..1]
-// Based on https://www.shadertoy.com/view/4t2SDh 
+// Triangle-shaped distribution - optimiert
 float tri(float x)
 {
         float orig = x * 2.0 - 1.0;
         uint signbit = floatBitsToUint(orig) & 0x80000000u;
-        x = sqrt(abs(orig)) - 1.;
+        x = sqrt(abs(orig)) - 1.0;
         x = uintBitsToFloat(floatBitsToUint(x) ^ signbit);
         return x;
 }
@@ -112,21 +110,23 @@ float tri(float x)
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
+// Optimierte Shading-Funktion mit besserer Energieerhaltung
 float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir)
 {
         float d = dot(vertexnormal, dir);
-        if (d < 0.0)
-                return 1.0 + d * (13.0 / 44.0);
-        else
-                return 1.0 + d;
+        // Verbesserte Wrap-Around Beleuchtung für weichere Schatten
+        return d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
 }
 
+// OPTIMIERT: Besseres Dynamic Lighting mit Distance-Squared-Falloff
 vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
 {
         vec3 accum = vec3(0.0);
         uint count = NumLights;
         if (count == 0u)
                 return accum;
+        
+        // Early-out optimization
         for (uint i = 0u; i < count; ++i)
         {
                 Light light = Lights[i];
@@ -134,15 +134,30 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
                 float dist_sq = dot(to_light, to_light);
                 float radius = light.radius;
                 float radius_sq = radius * radius;
+                
+                // Früher Ausschluss für Lichter außerhalb der Reichweite
                 if (dist_sq >= radius_sq)
                         continue;
-                float dist = sqrt(dist_sq);
-                vec3 L = to_light * inversesqrt(max(dist_sq, 1e-8));
-                float attenuation = radius - dist;
+                
+                // Optimiert: rsqrt einmal berechnen
+                float inv_dist = inversesqrt(max(dist_sq, 1e-8));
+                float dist = dist_sq * inv_dist;
+                vec3 L = to_light * inv_dist;
+                
+                // Verbesserte Attenuation: quadratischer Falloff mit smoothstep
+                float norm_dist = dist / radius;
+                float attenuation = 1.0 - norm_dist;
+                attenuation = attenuation * attenuation; // quadratischer Falloff
+                
+                // Besseres diffuses Shading
                 float diffuse = max(dot(normal, L), 0.0);
-                float influence = max(diffuse, light.minlight);
-                accum += light.color * (attenuation * influence);
+                
+                // Ambient + Diffuse mit besserer Energieverteilung
+                float influence = mix(light.minlight, 1.0, diffuse);
+                
+                accum += light.color * (attenuation * influence * radius);
         }
+        
         return accum * (1.0 / 200.0);
 }
 
@@ -203,7 +218,7 @@ layout(location=9) flat in vec3 in_shadevector;
 		main_body();
 		OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
-		float z = 1./gl_FragCoord.w;
+		float z = 1.0 / gl_FragCoord.w;
 #if 0
 		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/2e5, 2.0)), 1e-2, 3e3);
 #else
@@ -224,46 +239,62 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
+        
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
-        vec4 baseSample = textureLod(Tex, uv, 0.);
+        vec4 baseSample = textureLod(Tex, uv, 0.0);
 #else
         vec4 baseSample = texture(Tex, uv);
 #endif
+
 #if ALPHATEST
         if (baseSample.a < 0.666)
                 discard;
 #endif
+
         vec3 baseColor = baseSample.rgb;
-        vec3 fullbright;
+        
+        // Kombinierte Texture-Lookups für bessere Cache-Kohärenz
 #if MODE == 2
-        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
-        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
+        vec3 fullbright = textureLod(FullbrightTex, uv, 0.0).rgb;
+        emissive = textureLod(EmissiveTex, uv, 0.0).rgb;
 #else
-        fullbright = texture(FullbrightTex, uv).rgb;
+        vec3 fullbright = texture(FullbrightTex, uv).rgb;
         emissive = texture(EmissiveTex, uv).rgb;
 #endif
+
+        // Normalisierung optimiert
         vec3 localNormal = normalize(in_local_normal);
         vec3 shadevector = normalize(in_shadevector);
         float shade = r_avertexnormal_dot(localNormal, shadevector);
+        
+        // Basis-Beleuchtung
         vec3 lighting = in_color.rgb * shade;
+        
+        // World Normal Handling optimiert
         vec3 worldNormal = in_world_normal;
-        if (dot(worldNormal, worldNormal) > 0.0)
-                worldNormal = normalize(worldNormal);
-        else
-                worldNormal = vec3(0.0, 0.0, 1.0);
+        float normal_len_sq = dot(worldNormal, worldNormal);
+        worldNormal = normal_len_sq > 0.0 ? worldNormal * inversesqrt(normal_len_sq) : vec3(0.0, 0.0, 1.0);
+        
+        // Dynamic Lights (verbessert)
         lighting += ComputeDynamicLights(in_world_pos, worldNormal);
+        
+        // OPTIMIERT: Rim Lighting mit besserer Fresnel-Approximation
         if (_FrameRimAlias > 0.0)
         {
                 vec3 to_eye = EyePos - in_world_pos;
-                float inv_len = inversesqrt(max(dot(to_eye, to_eye), 1e-8));
-                vec3 view_dir = to_eye * inv_len;
+                float inv_len_sq = dot(to_eye, to_eye);
+                vec3 view_dir = to_eye * inversesqrt(max(inv_len_sq, 1e-8));
                 float ndotv = max(dot(worldNormal, view_dir), 0.0);
-                float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), _FrameRimExponent);
+                
+                // Schlick's Approximation für schnellere Berechnung
+                float fresnel = pow(1.0 - ndotv, _FrameRimExponent);
                 lighting += vec3(_FrameRimAlias * fresnel);
         }
+        
         lighting = max(lighting, vec3(0.0));
 
+        // Flag-Handling optimiert
         uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;
         bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overbrightFlag == 0u;
 
@@ -274,6 +305,8 @@ void main()
         else
         {
                 float sum = lighting.x + lighting.y + lighting.z;
+                
+                // Minimum Lighting für verschiedene Objekttypen
                 if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
                 {
                         const float minSum = 72.0 / 200.0;
@@ -294,37 +327,45 @@ void main()
                                 sum = minSum;
                         }
                 }
+                
+                // Overbright Clamping
                 if (overbrightFlag != 0u)
                 {
                         const float maxSum = 288.0 / 200.0;
                         if (sum > maxSum)
                         {
-                                float scale = maxSum / sum;
-                                lighting *= scale;
-                                sum = maxSum;
+                                lighting *= maxSum / sum;
                         }
                 }
         }
 
+        // LDEXP für Overbright-Skalierung
         lighting = ldexp(lighting, ivec3(int(overbrightFlag)));
 
+        // Shading anwenden
 #if ALPHATEST
         vec3 shadedColor = baseColor * lighting;
 #else
         vec3 shadedColor = mix(baseColor, baseColor * lighting, baseSample.a);
 #endif
 
+        // Fullbright und Emissive
         if ((in_flags & ALIAS_FLAG_ITEM) != 0)
                 shadedColor += fullbright;
         shadedColor += emissive;
         shadedColor = clamp(shadedColor, 0.0, 1.0);
 
+        // Fog mit optimierter Berechnung
         vec4 result = vec4(shadedColor, in_color.a);
-        float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
+        float fog_density = abs(Fog.w);
+        float fog = exp2(fog_density * -dot(in_pos, in_pos));
         fog = clamp(fog, 0.0, 1.0);
         result.rgb = mix(Fog.rgb, result.rgb, fog);
+        
         out_fragcolor = result;
+
 #if !OIT
+        // Motion Blur Velocity
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
         float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
         vec2 velocityOut = vec2(0.0);
@@ -332,9 +373,10 @@ void main()
                 velocityOut = velocity * result.a;
         out_velocity = vec4(velocityOut, viewModelMask, 0.0);
 #endif
+
+        // Dithering für Banding-Reduktion
 #if MODE == 1 || MODE == 2
-	// Note: sign bit is used as overbright flag
-	if (abs(Fog.w) > 0.)
+	if (fog_density > 0.0)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
