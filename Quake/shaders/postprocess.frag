@@ -24,6 +24,9 @@ layout(location=12) uniform vec4 FilmGrainOffset; // xy: temporal offsets, zw: u
 layout(location=13) uniform vec4 SSAOParams0; // x: enabled, y: radius (px), z: bias, w: intensity
 layout(location=14) uniform vec4 SSAOParams1; // x: samples, y: power, zw: reserved
 layout(location=15) uniform mat4 ProjectionMatrix;
+layout(location=16) uniform vec4 GodRayParams0; // x: enabled, y: intensity, z: decay, w: weight
+layout(location=17) uniform vec4 GodRayParams1; // x: light x, y: light y, z: threshold, w: density
+layout(location=18) uniform vec4 GodRayParams2; // x: samples, y: threshold softness, zw: unused
 layout(location=19) uniform mat4 InverseProjectionMatrix;
 
 #include "postprocess_common.glsl"
@@ -32,6 +35,7 @@ layout(location=19) uniform mat4 InverseProjectionMatrix;
 #include "postprocess_dof.glsl"
 #include "postprocess_vignette.glsl"
 #include "postprocess_chromatic.glsl"
+#include "postprocess_godrays.glsl"
 #include "postprocess_hdr.glsl"
 
 layout(location=0) out vec4 out_fragcolor;
@@ -76,6 +80,7 @@ void main()
         {
                 ApplyVignette(color.rgb, uv, viewMin, viewMax, texSize);
                 ApplyChromaticAberration(color.rgb, uv, invTexSize, viewMin, viewMax);
+                ApplyGodRays(color.rgb, uv, inView, viewMin, viewMax);
         }
 
         out_fragcolor = color;
