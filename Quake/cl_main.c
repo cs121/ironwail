@@ -313,7 +313,42 @@ CL_IsPlayerEnt
 */
 qboolean CL_IsPlayerEnt (const entity_t *ent)
 {
-	return PTR_IN_RANGE (ent, cl_entities + 1, cl_entities + 1 + cl.maxclients);
+        return PTR_IN_RANGE (ent, cl_entities + 1, cl_entities + 1 + cl.maxclients);
+}
+
+static void CL_SetDlightColor (dlight_t *dl, float r, float g, float b)
+{
+        dl->color[0] = r;
+        dl->color[1] = g;
+        dl->color[2] = b;
+}
+
+static void CL_ColorDlightForEntity (const entity_t *ent, dlight_t *dl)
+{
+        const char *modelname;
+
+        if (!ent || !ent->model)
+                return;
+
+        modelname = ent->model->name;
+        if (!modelname || !*modelname)
+                return;
+
+        if (q_strcasestr (modelname, "flame") ||
+            q_strcasestr (modelname, "torch") ||
+            q_strcasestr (modelname, "braz") ||
+            q_strcasestr (modelname, "lava"))
+        {
+                CL_SetDlightColor (dl, 1.0f, 0.38f, 0.12f);
+                return;
+        }
+
+        if (q_strcasestr (modelname, "missile") ||
+            q_strcasestr (modelname, "rocket"))
+        {
+                CL_SetDlightColor (dl, 1.0f, 0.34f, 0.10f);
+                return;
+        }
 }
 
 /*
@@ -624,6 +659,7 @@ void CL_RelinkEntities (void)
 			dl->radius = 200 + (rand()&31);
 			dl->minlight = 32;
 			dl->die = cl.time + 0.1;
+			CL_SetDlightColor (dl, 1.0f, 0.56f, 0.28f);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
@@ -642,6 +678,7 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			dl->radius = 400 + (rand()&31);
 			dl->die = cl.time + 0.001;
+			CL_ColorDlightForEntity (ent, dl);
 		}
 		if (ent->effects & EF_DIMLIGHT)
 		{
@@ -649,6 +686,7 @@ void CL_RelinkEntities (void)
 			VectorCopy (ent->origin,  dl->origin);
 			dl->radius = 200 + (rand()&31);
 			dl->die = cl.time + 0.001;
+			CL_ColorDlightForEntity (ent, dl);
 		}
 		if (ent->effects & EF_QEX_QUADLIGHT)
 		{
@@ -686,6 +724,7 @@ void CL_RelinkEntities (void)
 			VectorCopy (ent->origin, dl->origin);
 			dl->radius = 200;
 			dl->die = cl.time + 0.01;
+			CL_SetDlightColor (dl, 1.0f, 0.34f, 0.10f);
 		}
 		else if (ent->model->flags & EF_GRENADE)
 			CL_RocketTrail (ent, 1);

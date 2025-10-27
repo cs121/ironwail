@@ -23,6 +23,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+extern unsigned int d_8to24table[256];
+
+static void CL_SetDlightColor (dlight_t *dl, float r, float g, float b)
+{
+	dl->color[0] = r;
+	dl->color[1] = g;
+	dl->color[2] = b;
+}
+
+static void CL_SetDlightColorFromPalette (dlight_t *dl, int index)
+{
+	const byte *rgba;
+
+	index = CLAMP (0, index, 255);
+	rgba = (const byte *) &d_8to24table[index];
+	CL_SetDlightColor (dl, rgba[0] * (1.0f / 255.0f), rgba[1] * (1.0f / 255.0f), rgba[2] * (1.0f / 255.0f));
+}
+
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
 beam_t		cl_beams[MAX_BEAMS];
@@ -197,6 +215,7 @@ void CL_ParseTEnt (void)
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
+		CL_SetDlightColor (dl, 1.0f, 0.36f, 0.10f);
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -253,6 +272,10 @@ void CL_ParseTEnt (void)
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
+		if (colorLength > 0)
+			CL_SetDlightColorFromPalette (dl, colorStart + (colorLength >> 1));
+		else
+			CL_SetDlightColor (dl, 1.0f, 0.36f, 0.10f);
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
