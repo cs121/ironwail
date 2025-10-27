@@ -152,6 +152,7 @@ typedef struct msurface_s
 
 	byte		styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
+	byte		*deluxsamples;		// [numstyles*surfsize]
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
@@ -490,9 +491,11 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
+	byte		*deluxdata;
 	char		*entities;
 
 	qboolean	litfile;
+	qboolean	deluxfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
 
 	int			bspversion;

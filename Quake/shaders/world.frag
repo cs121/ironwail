@@ -1,3 +1,16 @@
+#if BINDLESS
+        #extension GL_ARB_bindless_texture : require
+#else
+        layout(binding=0) uniform sampler2D Tex;
+        layout(binding=1) uniform sampler2D FullbrightTex;
+        layout(binding=4) uniform sampler2D EmissiveTex;
+#endif
+
+layout(binding=2) uniform sampler2D LMTex;
+layout(binding=3) uniform sampler2D DeluxTex;
+
+#include "frame_uniforms.glsl"
+
 // === Performance-Schalter (optional) ===
 #ifndef USE_COARSE_DERIVATIVES
 #define USE_COARSE_DERIVATIVES 1   // 1: dFdxCoarse/dFdyCoarse wenn verfügbar, sonst fallback
@@ -22,6 +35,15 @@ float fastInvLen(vec3 v){
 vec3  fastNorm(vec3 v){
     float inv = fastInvLen(v);
     return (inv>0.0) ? v*inv : vec3(0.0,0.0,1.0);
+}
+
+vec3 DecodeDelux(vec3 encoded, vec3 fallback)
+{
+    vec3 normal = encoded * 2.0 - 1.0;
+    float len2 = dot(normal, normal);
+    if (len2 <= 1.0e-6)
+        return fallback;
+    return normal * inversesqrt(len2);
 }
 
 // schneller Specular für feste Power (hier 16)
@@ -118,7 +140,41 @@ void main()
 
     // schnellere Flächennormalen aus Derivaten
     vec3 dn = cross(DFDX(in_pos), DFDY(in_pos));
-    vec3 surface_normal = fastNorm(dn);
+    vec3 geom_normal = fastNorm(dn);
+    vec3 surface_normal = geom_normal;
+
+    if (DeluxEnabled != 0u)
+    {
+        vec3 accum = vec3(0.0);
+        float weight = 0.0;
+        vec3 dir0 = DecodeDelux(textureLod(DeluxTex, lmuv, 0.0).xyz, geom_normal);
+        float w0 = max(in_styles.x, 0.0);
+        accum += dir0 * w0;
+        weight += w0;
+
+        if (in_styles.y >= 0.0)
+        {
+            vec2 uv1 = vec2(lmuv.x + in_lmofs, lmuv.y);
+            vec3 dir1 = DecodeDelux(textureLod(DeluxTex, uv1, 0.0).xyz, geom_normal);
+            float w1 = max(in_styles.y, 0.0);
+            accum += dir1 * w1;
+            weight += w1;
+
+            if (in_styles.z >= 0.0)
+            {
+                vec2 uv2 = vec2(lmuv.x + in_lmofs * 2.0, lmuv.y);
+                vec3 dir2 = DecodeDelux(textureLod(DeluxTex, uv2, 0.0).xyz, geom_normal);
+                float w2 = max(in_styles.z, 0.0);
+                accum += dir2 * w2;
+                weight += w2;
+            }
+        }
+
+        if (weight > 0.0)
+            surface_normal = fastNorm(accum);
+        else
+            surface_normal = dir0;
+    }
 
     vec3 total_light = saturate(static_light);
     vec3 specular_light = vec3(0.0);

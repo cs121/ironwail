@@ -356,10 +356,11 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_fullbright);
         Cvar_RegisterVariable (&r_drawentities);
         Cvar_RegisterVariable (&r_drawviewmodel);
-	Cvar_RegisterVariable (&r_wateralpha);
-	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
-	Cvar_RegisterVariable (&r_litwater);
-	Cvar_RegisterVariable (&r_dynamic);
+        Cvar_RegisterVariable (&r_wateralpha);
+        Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
+        Cvar_RegisterVariable (&r_litwater);
+        Cvar_RegisterVariable (&r_deluxemaps);
+        Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
 	Cvar_RegisterVariable (&r_simd);

@@ -101,6 +101,7 @@ extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_litwater;
+extern	cvar_t	r_deluxemaps;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
@@ -367,7 +368,7 @@ extern overflowtimes_t dev_overflows; //this stores the last time overflow messa
 #define CONSOLE_RESPAM_TIME 3 // seconds between repeated warning messages
 
 //johnfitz -- moved here from r_brush.c
-extern int gl_lightmap_format, lightmap_bytes;
+extern int gl_lightmap_format, lightmap_bytes, deluxemap_bytes;
 extern int lightmap_block_width, lightmap_block_height;
 extern cvar_t gl_lightmap_atlas_size;
 void GL_OnLightmapAtlasSizeChanged (cvar_t *var);
@@ -443,8 +444,8 @@ typedef struct gpuframedata_s {
 	float	zlogbias;
 	int			numlights;
 	int			prev_frame_valid;
+	int			delux_enabled;
 	int			_padding1;
-	int			_padding2;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;

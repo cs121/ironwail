@@ -25,8 +25,8 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ZLogBias;
         uint    NumLights;
         uint    PrevFrameValid;
+        uint    DeluxEnabled;
         uint    _Pad1;
-        uint    _Pad2;
 };
 
 #endif // FRAME_UNIFORMS_GLSL

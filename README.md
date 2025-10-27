@@ -9,7 +9,7 @@ Ironwail is a high-performance fork of the GLQuake descendant [QuakeSpasm](https
 
 ## Highlights
 - UI upgrades: mouse support, in-game key binding for weapons, extra video and gameplay options that apply instantly.
-- Visual polish: alternative HUD styles (including Q64-inspired layouts), real-time palettization with optional dithering, classic underwater warp, lightmapped liquids, configurable Quake 3-style lightmap overbrightening, lightstyle interpolation, higher color/depth precision, and improved z-fighting workarounds.
+- Visual polish: alternative HUD styles (including Q64-inspired layouts), real-time palettization with optional dithering, classic underwater warp, lightmapped liquids, colored lightmaps with optional directional deluxemaps for smoother shading, configurable Quake 3-style lightmap overbrightening, lightstyle interpolation, higher color/depth precision, and improved z-fighting workarounds.
 - Performance boosts: GPU-driven culling, compute-based lightmap updates, reduced heap usage, faster loading on jumbo maps, and an automatic frame limiter when no map is loaded.
 - Quality-of-life: runs from Unicode paths and plays demanding maps like [Shibboleth](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html), [Raven Keep](https://www.quaddicted.com/reviews/ravenkeep.html), and [ad_tears](https://www.moddb.com/mods/arcane-dimensions) at high frame rates without manual `-heapsize` tuning.
 
