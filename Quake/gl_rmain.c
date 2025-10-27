@@ -222,6 +222,7 @@ cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_NONE };
 cvar_t	r_ssao_radius = { "r_ssao_radius", "32", CVAR_ARCHIVE };
 cvar_t	r_ssao_bias = { "r_ssao_bias", "0.01", CVAR_ARCHIVE };
 cvar_t	r_ssao_intensity = { "r_ssao_intensity", "1.0", CVAR_ARCHIVE };
@@ -725,6 +726,7 @@ void GL_PostProcess (void)
         float motion_depth_threshold;
         int motion_max_samples;
         qboolean ssao_enabled;
+        qboolean ssao_debug;
         float ssao_radius;
         float ssao_bias;
         float ssao_intensity;
@@ -794,6 +796,7 @@ void GL_PostProcess (void)
         if (ssao_samples > 64)
                 ssao_samples = 64;
         ssao_enabled = R_SSAOEnabled ();
+        ssao_debug = (r_ssao_debug.value > 0.f);
         if (ssao_samples <= 0 || ssao_radius <= 0.f || ssao_intensity <= 0.f)
                 ssao_enabled = false;
 
@@ -922,10 +925,13 @@ void GL_PostProcess (void)
         }
 
         depth_texture = 0;
-        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_enabled))
+        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_enabled || ssao_debug))
                 depth_texture = framebufs.composite.depth_stencil_tex;
         if (!depth_texture)
+        {
                 ssao_enabled = false;
+                ssao_debug = false;
+        }
         GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
         if (dof_enabled)
@@ -959,6 +965,11 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (14,
 	        (float)ssao_samples,
 	        ssao_power,
+	        0.f,
+	        0.f);
+	GL_Uniform4fFunc (20,
+	        ssao_debug ? 1.f : 0.f,
+	        0.f,
 	        0.f,
 	        0.f);
 
@@ -1562,7 +1573,7 @@ qboolean GL_NeedsPostprocess (void)
 {
         if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur () || R_SSAOEnabled () || r_godrays.value > 0.f)
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur () || R_SSAOEnabled () || r_godrays.value > 0.f || r_ssao_debug.value > 0.f)
 		return true;
         return false;
 }
@@ -2807,7 +2818,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_SSAOEnabled ());
+        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_SSAOEnabled () || r_ssao_debug.value > 0.f);
 
 	if (msaa)
 	{
