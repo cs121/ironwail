@@ -88,7 +88,7 @@ static int findhandle (void)
 
 	for (i = 1; i < MAX_HANDLES; i++)
 	{
-		if (!sys_handles[i])
+		if (sys_handles[i].type == SYS_HANDLE_NONE)
 			return i;
 	}
 	Sys_Error ("out of handles");
