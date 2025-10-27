@@ -237,6 +237,15 @@ cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.6", CVAR_ARCHIVE };
+cvar_t	r_godrays_density = { "r_godrays_density", "0.75", CVAR_ARCHIVE };
+cvar_t	r_godrays_decay = { "r_godrays_decay", "0.95", CVAR_ARCHIVE };
+cvar_t	r_godrays_weight = { "r_godrays_weight", "0.02", CVAR_ARCHIVE };
+cvar_t	r_godrays_samples = { "r_godrays_samples", "64", CVAR_ARCHIVE };
+cvar_t	r_godrays_softness = { "r_godrays_softness", "0.1", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -823,6 +832,34 @@ void GL_PostProcess (void)
                 float filmgrain_time_alt = (float)(cl.time * 1.37);
                 GL_Uniform4fFunc (11, filmgrain_intensity, filmgrain_size, filmgrain_strength, 0.f);
                 GL_Uniform4fFunc (12, filmgrain_time, filmgrain_time_alt, 0.f, 0.f);
+        }
+
+        {
+                float godrays_intensity = q_min (10.f, q_max (0.f, r_godrays.value));
+                float godrays_decay = q_min (0.999f, q_max (0.f, r_godrays_decay.value));
+                float godrays_weight = q_min (1.f, q_max (0.f, r_godrays_weight.value));
+                float godrays_density = q_min (4.f, q_max (0.f, r_godrays_density.value));
+                float godrays_samples = q_min (128.f, q_max (1.f, r_godrays_samples.value));
+                float godrays_softness = q_min (1.f, q_max (0.001f, r_godrays_softness.value));
+                float godrays_light_x = q_min (1.f, q_max (0.f, r_godrays_light_x.value));
+                float godrays_light_y = q_min (1.f, q_max (0.f, r_godrays_light_y.value));
+                float godrays_threshold = q_min (1.f, q_max (0.f, r_godrays_threshold.value));
+
+                GL_Uniform4fFunc (16,
+                        godrays_intensity > 0.f ? 1.f : 0.f,
+                        godrays_intensity,
+                        godrays_decay,
+                        godrays_weight);
+                GL_Uniform4fFunc (17,
+                        godrays_light_x,
+                        godrays_light_y,
+                        godrays_threshold,
+                        godrays_density);
+                GL_Uniform4fFunc (18,
+                        godrays_samples,
+                        godrays_softness,
+                        0.f,
+                        0.f);
         }
 
         dof_enabled = R_DoFEnabled ();
@@ -1500,8 +1537,8 @@ qboolean GL_NeedsPostprocess (void)
 {
         if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
-        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur () || R_SSAOEnabled ())
-                return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur () || R_SSAOEnabled () || r_godrays.value > 0.f)
+		return true;
         return false;
 }
 

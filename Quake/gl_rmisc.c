@@ -87,6 +87,15 @@ extern cvar_t r_ssao_power;
 extern cvar_t r_ssao_samples;
 
 extern cvar_t r_filmgrain_strength;
+extern cvar_t r_godrays;
+extern cvar_t r_godrays_light_x;
+extern cvar_t r_godrays_light_y;
+extern cvar_t r_godrays_threshold;
+extern cvar_t r_godrays_density;
+extern cvar_t r_godrays_decay;
+extern cvar_t r_godrays_weight;
+extern cvar_t r_godrays_samples;
+extern cvar_t r_godrays_softness;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -399,6 +408,15 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_filmgrain);
 	Cvar_RegisterVariable (&r_filmgrain_size);
 	Cvar_RegisterVariable (&r_filmgrain_strength);
+	Cvar_RegisterVariable (&r_godrays);
+	Cvar_RegisterVariable (&r_godrays_light_x);
+	Cvar_RegisterVariable (&r_godrays_light_y);
+	Cvar_RegisterVariable (&r_godrays_threshold);
+	Cvar_RegisterVariable (&r_godrays_density);
+	Cvar_RegisterVariable (&r_godrays_decay);
+	Cvar_RegisterVariable (&r_godrays_weight);
+	Cvar_RegisterVariable (&r_godrays_samples);
+	Cvar_RegisterVariable (&r_godrays_softness);
 	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
