@@ -184,6 +184,22 @@ layout(location=1) out vec4 out_velocity;
 float saturate(float x){ return clamp(x,0.0,1.0); }
 vec3  saturate(vec3 v){ return clamp(v,0.0,1.0); }
 
+vec3 clamp_preserving_hue(vec3 value, vec3 limit)
+{
+    vec3 positive = max(value, vec3(0.0));
+    vec3 max_value = max(limit, vec3(0.0));
+    float scale = 1.0;
+
+    if (positive.x > max_value.x)
+        scale = min(scale, max_value.x > 0.0 ? max_value.x / positive.x : 0.0);
+    if (positive.y > max_value.y)
+        scale = min(scale, max_value.y > 0.0 ? max_value.y / positive.y : 0.0);
+    if (positive.z > max_value.z)
+        scale = min(scale, max_value.z > 0.0 ? max_value.z / positive.z : 0.0);
+
+    return min(positive * scale, max_value);
+}
+
 // schneller rsqrt/len
 float fastLen(vec3 v){ return length(v); } // fallback
 float fastInvLen(vec3 v){
@@ -336,7 +352,7 @@ void main()
             surface_normal = dir0;
     }
 
-    vec3 total_light = saturate(static_light);
+    vec3 total_light = clamp_preserving_hue(static_light, vec3(1.0));
     vec3 specular_light = vec3(0.0);
 
     vec3 to_eye = EyePos - in_pos;
@@ -406,8 +422,10 @@ void main()
                     }
                 }
             }
-            // saturating Add (bleibt <= 1)
-            total_light += max(min(dynamic_light, vec3(1.0) - total_light), vec3(0.0));
+            // saturating Add (bleibt <= 1) with hue preservation
+            vec3 dynamic_remaining = max(vec3(0.0), vec3(1.0) - total_light);
+            if (dynamic_remaining.x > 0.0 || dynamic_remaining.y > 0.0 || dynamic_remaining.z > 0.0)
+                total_light += clamp_preserving_hue(dynamic_light, dynamic_remaining);
         }
     }
 
@@ -416,17 +434,22 @@ void main()
         float ndv = max(dot(surface_normal, view_dir), 0.0);
         float fres = pow(saturate(1.0 - ndv), RimExponent);
         vec3 rim = vec3(RimWorld * fres);
-        total_light += max(min(rim, vec3(1.0) - total_light), vec3(0.0));
+        vec3 rim_remaining = max(vec3(0.0), vec3(1.0) - total_light);
+        if (rim_remaining.x > 0.0 || rim_remaining.y > 0.0 || rim_remaining.z > 0.0)
+            total_light += clamp_preserving_hue(rim, rim_remaining);
     }
 
     // Sun (deine Funktion bleibt Stub/kompatibel)
     vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
-    total_light += max(min(sun_light, vec3(1.0) - total_light), vec3(0.0));
+    vec3 sun_remaining = max(vec3(0.0), vec3(1.0) - total_light);
+    if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0)
+        total_light += clamp_preserving_hue(sun_light, sun_remaining);
 
 #if DITHER >= 2
-    vec3 total_lightmap = saturate(floor(saturate(total_light) * 63.0 + 0.5) * (Overbright/63.0));
+    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(1.0));
+    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(1.0));
 #else
-    vec3 total_lightmap = saturate(total_light * Overbright);
+    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(1.0));
 #endif
 
 #if MODE != 1
@@ -438,7 +461,7 @@ void main()
     result.rgb += fullbright + emissive;
 
     // Specular clamp+Add
-    vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
+    vec3 spec_clamped = clamp_preserving_hue(specular_light, vec3(Overbright));
     result.rgb += spec_clamped * saturate(result.a);
 
     result = clamp(result, 0.0, 1.0);
