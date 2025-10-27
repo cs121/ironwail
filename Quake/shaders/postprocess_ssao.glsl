@@ -50,7 +50,12 @@ bool ReconstructViewPosition(vec2 fragPx, vec2 uv, vec2 viewMin, vec2 viewMax,
                 return false;
 
         position = viewPos4.xyz / viewPos4.w;
+        if (!IsFiniteVec3(position))
+                return false;
         if (viewPos4.w <= 0.0)
+                return false;
+        linearDepth = -position.z;
+        if (!(linearDepth > SSAO_EPSILON))
                 return false;
         return true;
 }
