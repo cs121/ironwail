@@ -375,7 +375,15 @@ typedef struct
 {
 	char	name[MAX_QPATH];
 	int		filepos, filelen;
+	int		zip_index;
 } packfile_t;
+
+struct mz_zip_archive;
+typedef enum
+{
+	PACKTYPE_PAK,
+	PACKTYPE_PK3
+} packtype_t;
 
 typedef struct pack_s
 {
@@ -383,6 +391,8 @@ typedef struct pack_s
 	int		handle;
 	int		numfiles;
 	packfile_t	*files;
+	packtype_t	type;
+	struct mz_zip_archive	*zip;
 } pack_t;
 
 typedef struct searchpath_s
