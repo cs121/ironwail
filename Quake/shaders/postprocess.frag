@@ -65,9 +65,11 @@ void main()
 
         if (ssaoDebug)
         {
-                float depth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                vec3 viewPos;
+                float depth = 0.0;
                 float debugValue = 0.0;
-                if (depthInfo.valid && depth > 0.0)
+                if (ReconstructViewPosition(gl_FragCoord.xy, uv, viewMin, viewMax,
+                                depthInfo, viewPos, depth))
                 {
                         float nearPlane = min(DoFParams1.x, DoFParams1.y);
                         float farPlane = max(DoFParams1.x, DoFParams1.y);
