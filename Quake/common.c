@@ -2419,7 +2419,7 @@ static pack_t *COM_LoadPK3File (const char *packfile)
 	if (!COM_ZipReaderInitFile (archive, packfile, 0))
 		goto fail;
 
-	totalfiles = mz_zip_reader_get_num_files (archive);
+	totalfiles = archive->m_total_files;
 	for (i = 0; i < (int) totalfiles; ++i)
 	{
 		mz_zip_archive_file_stat st;
