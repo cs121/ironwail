@@ -251,7 +251,7 @@ static void entity_link(WrenVM *vm)
 
 static void engine_time(WrenVM *vm)
 {
-    wrenSetSlotDouble(vm, 0, sv.time);
+    wrenSetSlotDouble(vm, 0, sv.qcvm.time);
 }
 
 static void engine_set_skill(WrenVM *vm)
