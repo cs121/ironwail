@@ -844,13 +844,64 @@ static void Mod_LoadTextures (lump_t *l)
 Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
 =================
 */
-static void Mod_LoadDeluxemap (const char *dlitfilename, int samplecount)
+static qboolean Mod_LoadDeluxemapFile (const char *filename, int samplecount, int expected_version, const char *filekind)
 {
         int mark;
         byte *data;
         unsigned int path_id;
         size_t expected;
 
+        if (!filename || !filename[0])
+                return false;
+
+        expected = (size_t)samplecount * 3;
+        mark = Hunk_LowMark ();
+        data = (byte *) COM_LoadHunkFile (filename, &path_id);
+        if (!data)
+        {
+                Hunk_FreeToLowMark (mark);
+                return false;
+        }
+
+        if (path_id < loadmodel->path_id)
+        {
+                Hunk_FreeToLowMark (mark);
+                Con_DPrintf ("ignored %s from a gamedir with lower priority\n", filename);
+                return false;
+        }
+
+        if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+        {
+                int version = LittleLong (((int *)data)[1]);
+                if (version == expected_version)
+                {
+                        uint64_t expected_total = 8 + (uint64_t)expected;
+                        if (expected_total == (uint64_t)com_filesize)
+                        {
+                                Con_DPrintf2 ("%s loaded\n", filename);
+                                loadmodel->deluxdata = data + 8;
+                                loadmodel->deluxfile = true;
+                                return true;
+                        }
+
+                        Hunk_FreeToLowMark (mark);
+                        Con_Printf ("Mismatched %s file (%s should be %" SDL_PRIu64 " bytes, not %" SDL_PRIs64 ")\n",
+                                filekind, filename, expected_total, com_filesize);
+                        return false;
+                }
+
+                Hunk_FreeToLowMark (mark);
+                Con_Printf ("Unknown %s file version (%d)\n", filekind, version);
+                return false;
+        }
+
+        Hunk_FreeToLowMark (mark);
+        Con_Printf ("Corrupt %s file (old version?), ignoring\n", filekind);
+        return false;
+}
+
+static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename, int samplecount)
+{
         loadmodel->deluxdata = NULL;
         loadmodel->deluxfile = false;
         loadmodel->numdeluxsamples = (samplecount > 0) ? samplecount : 0;
@@ -858,50 +909,13 @@ static void Mod_LoadDeluxemap (const char *dlitfilename, int samplecount)
         if (samplecount <= 0)
                 return;
 
-        expected = (size_t)samplecount * 3;
-        mark = Hunk_LowMark ();
-        data = (byte *) COM_LoadHunkFile (dlitfilename, &path_id);
-        if (data)
-        {
-                if (path_id < loadmodel->path_id)
-                {
-                        Hunk_FreeToLowMark (mark);
-                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", dlitfilename);
-                }
-                else if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-                {
-                        int version = LittleLong (((int *)data)[1]);
-                        if (version == 2)
-                        {
-                                if ((size_t)(8 + expected) == com_filesize)
-                                {
-                                        Con_DPrintf2 ("%s loaded\n", dlitfilename);
-                                        loadmodel->deluxdata = data + 8;
-                                        loadmodel->deluxfile = true;
-                                        return;
-                                }
-                                Hunk_FreeToLowMark (mark);
-                                Con_Printf ("Mismatched .dlit file (%s should be %u bytes, not %" SDL_PRIs64 ")\n",
-                                        dlitfilename, (unsigned)(8 + expected), com_filesize);
-                        }
-                        else
-                        {
-                                Hunk_FreeToLowMark (mark);
-                                Con_Printf ("Unknown .dlit file version (%d)\n", version);
-                        }
-                }
-                else
-                {
-                        Hunk_FreeToLowMark (mark);
-                        Con_Printf ("Corrupt .dlit file (old version?), ignoring\n");
-                }
-        }
-        else
-        {
-                Con_DPrintf2 ("%s not found, synthesizing deluxemap\n", dlitfilename);
-        }
+        if (Mod_LoadDeluxemapFile (dlitfilename, samplecount, 2, ".dlit"))
+                return;
 
-        Hunk_FreeToLowMark (mark);
+        if (Mod_LoadDeluxemapFile (luxfilename, samplecount, 1, ".lux"))
+                return;
+
+        Con_DPrintf2 ("%s and %s not found, synthesizing deluxemap\n", dlitfilename, luxfilename);
 
         loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (samplecount * 3, dlitfilename);
         memset (loadmodel->deluxdata, 0, samplecount * 3);
@@ -1059,6 +1073,7 @@ static void Mod_LoadLighting (lump_t *l)
         byte d, q64_b0, q64_b1;
         char litfilename[MAX_OSPATH];
         char dlitfilename[MAX_OSPATH];
+        char luxfilename[MAX_OSPATH];
         unsigned int path_id;
         int samplecount = 0;
 
@@ -1070,8 +1085,10 @@ static void Mod_LoadLighting (lump_t *l)
         q_strlcpy (litfilename, loadmodel->name, sizeof (litfilename));
         COM_StripExtension (litfilename, litfilename, sizeof (litfilename));
         q_strlcpy (dlitfilename, litfilename, sizeof (dlitfilename));
+        q_strlcpy (luxfilename, litfilename, sizeof (luxfilename));
         q_strlcat (litfilename, ".lit", sizeof (litfilename));
         q_strlcat (dlitfilename, ".dlit", sizeof (dlitfilename));
+        q_strlcat (luxfilename, ".lux", sizeof (luxfilename));
 
         mark = Hunk_LowMark ();
         data = (byte *) COM_LoadHunkFile (litfilename, &path_id);
@@ -1093,7 +1110,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         loadmodel->lightdata = data + 8;
                                         loadmodel->litfile = true;
                                         samplecount = l->filelen;
-                                        Mod_LoadDeluxemap (dlitfilename, samplecount);
+                                        Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                         return;
                                 }
                                 Hunk_FreeToLowMark (mark);
@@ -1115,7 +1132,7 @@ static void Mod_LoadLighting (lump_t *l)
 
         if (!l->filelen)
         {
-                Mod_LoadDeluxemap (dlitfilename, 0);
+                Mod_LoadDeluxemap (dlitfilename, luxfilename, 0);
                 return;
         }
 
@@ -1136,7 +1153,7 @@ static void Mod_LoadLighting (lump_t *l)
                 }
 
                 samplecount = l->filelen / 2;
-                Mod_LoadDeluxemap (dlitfilename, samplecount);
+                Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                 return;
         }
 
@@ -1146,7 +1163,7 @@ static void Mod_LoadLighting (lump_t *l)
                 loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (l->filelen, litfilename);
                 memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
                 samplecount = l->filelen / 3;
-                Mod_LoadDeluxemap (dlitfilename, samplecount);
+                Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                 return;
         }
 #endif
@@ -1164,7 +1181,7 @@ static void Mod_LoadLighting (lump_t *l)
         }
 
         samplecount = l->filelen;
-        Mod_LoadDeluxemap (dlitfilename, samplecount);
+        Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
 }
 
 
