@@ -273,7 +273,7 @@
     <ClCompile Include="..\..\wren_vm\wren_bindings.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren_vm.c">
+    <ClCompile Include="..\..\wren_vm\wren_runtime.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\wren_vm\wren\optional\wren_opt_meta.c">
@@ -521,7 +521,7 @@
     <ClInclude Include="..\..\wren_vm\wren_bindings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\wren_vm\wren_vm.h">
+    <ClInclude Include="..\..\wren_vm\wren_runtime.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\wren_vm\wren\include\wren.h">

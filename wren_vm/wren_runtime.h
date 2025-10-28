@@ -1,5 +1,5 @@
-#ifndef WREN_VM_H
-#define WREN_VM_H
+#ifndef IW_WREN_RUNTIME_H
+#define IW_WREN_RUNTIME_H
 
 #include "q_stdinc.h"
 
@@ -51,4 +51,4 @@ const char *WRENVM_GetCurrentMapName(void);
 }
 #endif
 
-#endif // WREN_VM_H
+#endif // IW_WREN_RUNTIME_H
