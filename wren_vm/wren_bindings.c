@@ -9,6 +9,11 @@
 #include "wren/include/wren.h"
 
 #include <stdlib.h>
+#include <math.h>
+
+// Forward declarations for engine-side AI helpers implemented in C.
+extern void PF_changeyaw(void);
+extern void SV_MoveToGoal(void);
 
 typedef struct wren_entity_ref_s
 {
@@ -249,6 +254,89 @@ static void entity_link(WrenVM *vm)
     SV_LinkEdict(ed, true);
 }
 
+static void entity_change_yaw_internal(edict_t *ent)
+{
+    if (!ent)
+        return;
+
+    int old_self = pr_global_struct->self;
+    pr_global_struct->self = EDICT_TO_PROG(ent);
+    PF_changeyaw();
+    pr_global_struct->self = old_self;
+}
+
+static void entity_change_yaw(WrenVM *vm)
+{
+    edict_t *ent = entity_get_edict(vm);
+    if (!ent)
+        return;
+
+    entity_change_yaw_internal(ent);
+    wrenSetSlotNull(vm, 0);
+}
+
+static void entity_walk_move(WrenVM *vm)
+{
+    edict_t *ent = entity_get_edict(vm);
+    if (!ent)
+        return;
+
+    double yaw = wrenGetSlotDouble(vm, 1);
+    double dist = wrenGetSlotDouble(vm, 2);
+
+    if (!((int)ent->v.flags & (FL_ONGROUND | FL_FLY | FL_SWIM)))
+    {
+        wrenSetSlotBool(vm, 0, false);
+        return;
+    }
+
+    vec3_t move;
+    double yaw_rad = yaw * (M_PI * 2.0) / 360.0;
+    move[0] = (float)(cos(yaw_rad) * dist);
+    move[1] = (float)(sin(yaw_rad) * dist);
+    move[2] = 0.0f;
+
+    int old_self = pr_global_struct->self;
+    dfunction_t *old_func = qcvm->xfunction;
+    pr_global_struct->self = EDICT_TO_PROG(ent);
+    qboolean result = SV_movestep(ent, move, true);
+    qcvm->xfunction = old_func;
+    pr_global_struct->self = old_self;
+
+    wrenSetSlotBool(vm, 0, result ? true : false);
+}
+
+static void entity_move_to_goal(WrenVM *vm)
+{
+    edict_t *ent = entity_get_edict(vm);
+    if (!ent)
+        return;
+
+    double dist = wrenGetSlotDouble(vm, 1);
+
+    if (!((int)ent->v.flags & (FL_ONGROUND | FL_FLY | FL_SWIM)))
+    {
+        wrenSetSlotBool(vm, 0, false);
+        return;
+    }
+
+    int old_self = pr_global_struct->self;
+    dfunction_t *old_func = qcvm->xfunction;
+    float old_parm0 = G_FLOAT(OFS_PARM0);
+    float old_return = G_FLOAT(OFS_RETURN);
+
+    pr_global_struct->self = EDICT_TO_PROG(ent);
+    G_FLOAT(OFS_PARM0) = (float)dist;
+    SV_MoveToGoal();
+
+    qcvm->xfunction = old_func;
+    pr_global_struct->self = old_self;
+    G_FLOAT(OFS_PARM0) = old_parm0;
+    G_FLOAT(OFS_RETURN) = old_return;
+
+    wrenSetSlotBool(vm, 0, true);
+}
+
 static void engine_time(WrenVM *vm)
 {
     wrenSetSlotDouble(vm, 0, sv.qcvm.time);
@@ -372,6 +460,7 @@ static WrenForeignMethodFn bind_foreign_method(WrenVM *vm, const char *module, c
         {
             if (!strcmp(signature, "remove")) return entity_remove;
             if (!strcmp(signature, "link")) return entity_link;
+            if (!strcmp(signature, "changeYaw")) return entity_change_yaw;
             if (!strcmp(signature, "origin")) return entity_get_origin;
             if (!strcmp(signature, "origin=(_)")) return entity_set_origin;
             if (!strcmp(signature, "angles")) return entity_get_angles;
@@ -388,6 +477,8 @@ static WrenForeignMethodFn bind_foreign_method(WrenVM *vm, const char *module, c
             if (!strcmp(signature, "health=(_)")) return entity_set_health;
             if (!strcmp(signature, "takedamage")) return entity_get_takedamage;
             if (!strcmp(signature, "takedamage=(_)")) return entity_set_takedamage;
+            if (!strcmp(signature, "walkMove(_,_)")) return entity_walk_move;
+            if (!strcmp(signature, "moveToGoal(_)")) return entity_move_to_goal;
         }
         return raise_not_implemented;
     }
