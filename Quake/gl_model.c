@@ -3219,6 +3219,8 @@ static void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 }
 
 
+static void Mod_CalcAliasBounds (aliashdr_t *a);
+
 static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 {
 	typedef struct
