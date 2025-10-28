@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "wren_vm.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -2003,13 +2004,15 @@ void SV_SpawnServer (const char *server)
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	q_snprintf (sv.modelname, sizeof(sv.modelname), "maps/%s.bsp", server);
 	sv.worldmodel = Mod_ForName (sv.modelname, false);
-	if (!sv.worldmodel)
-	{
-		Con_Printf ("Couldn't spawn server %s\n", sv.modelname);
-		sv.active = false;
-		return;
-	}
-	sv.models[1] = sv.worldmodel;
+        if (!sv.worldmodel)
+        {
+                Con_Printf ("Couldn't spawn server %s\n", sv.modelname);
+                sv.active = false;
+                return;
+        }
+        sv.models[1] = sv.worldmodel;
+
+        WRENVM_ResetForNewServer(server, sv.worldmodel->entities);
 
 //
 // clear world interaction links
@@ -2045,7 +2048,25 @@ void SV_SpawnServer (const char *server)
 // serverflags are for cross level information (sigils)
 	pr_global_struct->serverflags = svs.serverflags;
 
-	ED_LoadFromFile (sv.worldmodel->entities);
+        {
+                wrenvm_call_result_t spawn_result = WRENVM_CallSpawnEntities();
+                if (spawn_result == WRENV_CALL_OK)
+                {
+                        // handled by Wren, nothing else to do.
+                }
+                else if (spawn_result == WRENV_CALL_ERROR || (spawn_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
+                {
+                        Con_Printf("Wren spawnEntities failed%s; falling back to QuakeC\n",
+                                (spawn_result == WRENV_CALL_MISSING) ? " (missing)" : "");
+                        if (spawn_result == WRENV_CALL_ERROR)
+                                Con_Printf("Wren runtime error during spawnEntities.\n");
+                        ED_LoadFromFile (sv.worldmodel->entities);
+                }
+                else
+                {
+                        ED_LoadFromFile (sv.worldmodel->entities);
+                }
+        }
 
 	sv.active = true;
 

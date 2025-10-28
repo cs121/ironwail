@@ -32,6 +32,17 @@ endif()
 
 file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp")
 
+file(GLOB WREN_CORE_SRC CONFIGURE_DEPENDS "wren_vm/wren/vm/*.c")
+file(GLOB WREN_OPT_SRC CONFIGURE_DEPENDS "wren_vm/wren/optional/*.c")
+set(WREN_SRC ${WREN_CORE_SRC} ${WREN_OPT_SRC})
+
+add_library(wren STATIC ${WREN_SRC})
+target_include_directories(wren PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
+target_include_directories(wren PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/optional)
+target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
+
+list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_vm.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
+
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
 
@@ -62,6 +73,8 @@ endif()
 
 add_executable(ironwail ${IWAIL_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
+target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
+target_link_libraries(ironwail PRIVATE wren)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")
