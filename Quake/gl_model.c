@@ -26,12 +26,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+#define IDMD2HEADER    (('2'<<24)+('P'<<16)+('D'<<8)+'I')
+
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
 
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
+static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static void Mod_LoadBspx (const byte *buffer);
@@ -401,20 +404,24 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 // call the apropriate loader
 	mod->needload = false;
 
-	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
-	switch (mod_type)
-	{
-	case IDPOLYHEADER:
-		Mod_LoadAliasModel (mod, buf);
-		break;
+        mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
+        switch (mod_type)
+        {
+        case IDPOLYHEADER:
+                Mod_LoadAliasModel (mod, buf);
+                break;
 
-	case IDSPRITEHEADER:
-		Mod_LoadSpriteModel (mod, buf);
-		break;
+        case IDMD2HEADER:
+                Mod_LoadMD2Model (mod, buf);
+                break;
 
-	default:
-		Mod_LoadBrushModel (mod, buf);
-		break;
+        case IDSPRITEHEADER:
+                Mod_LoadSpriteModel (mod, buf);
+                break;
+
+        default:
+                Mod_LoadBrushModel (mod, buf);
+                break;
 	}
 
 	free (buf);
@@ -3209,6 +3216,434 @@ static void *Mod_LoadAliasGroup (void * pin,  maliasframedesc_t *frame)
 	}
 
 	return ptemp;
+}
+
+
+static void Mod_CalcAliasBounds (aliashdr_t *a);
+
+static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
+{
+	typedef struct
+	{
+		int				ident;
+		int				version;
+		int				skinwidth;
+		int				skinheight;
+		int				framesize;
+		int				num_skins;
+		int				num_vertices;
+		int				num_texcoords;
+		int				num_tris;
+		int				num_glcmds;
+		int				num_frames;
+		int				ofs_skins;
+		int				ofs_texcoords;
+		int				ofs_tris;
+		int				ofs_frames;
+		int				ofs_glcmds;
+		int				ofs_end;
+	} md2_header_t;
+	typedef struct
+	{
+		short		s;
+		short		t;
+	} md2_texcoord_t;
+	typedef struct
+	{
+		unsigned short	vertindex[3];
+		unsigned short	stindex[3];
+	} md2_triangle_t;
+	typedef struct
+	{
+		byte		v[3];
+		byte		lightnormalindex;
+	} md2_vertex_t;
+	typedef struct
+	{
+		float		scale[3];
+		float		translate[3];
+		char		name[16];
+		md2_vertex_t	verts[1];
+	} md2_frame_t;
+
+	md2_header_t	*md2;
+	int			version;
+	int			skinwidth, skinheight;
+	int			framesize;
+	int			numskins_raw;
+	int			numskins, numverts, numst, numtris, numframes;
+	int			ofs_skins, ofs_st, ofs_tris, ofs_frames, ofs_end;
+	size_t		filesize;
+	int			start;
+	size_t		size;
+	int			i, j, k;
+	const md2_texcoord_t	*md2_tc;
+	const md2_triangle_t	*md2_tris;
+	stvert_t		*st_storage;
+	dtriangle_t		*tri_storage;
+	unsigned short	*vertex_remap;
+	unsigned int	*pair_keys;
+	size_t		maxverts, newnumverts;
+	trivertx_t	*converted;
+	float			mins[3], maxs[3];
+	double			radius2;
+	const char	*skinbase;
+	char			modeldir[MAX_QPATH];
+
+	md2 = (md2_header_t *) buffer;
+	version = LittleLong (md2->version);
+	if (version != 8)
+		Sys_Error ("%s has wrong version number (%i should be %i)", mod->name, version, 8);
+
+	skinwidth = LittleLong (md2->skinwidth);
+	skinheight = LittleLong (md2->skinheight);
+	framesize = LittleLong (md2->framesize);
+	numskins_raw = LittleLong (md2->num_skins);
+	numverts = LittleLong (md2->num_vertices);
+	numst = LittleLong (md2->num_texcoords);
+	numtris = LittleLong (md2->num_tris);
+	numframes = LittleLong (md2->num_frames);
+	ofs_skins = LittleLong (md2->ofs_skins);
+	ofs_st = LittleLong (md2->ofs_texcoords);
+	ofs_tris = LittleLong (md2->ofs_tris);
+	ofs_frames = LittleLong (md2->ofs_frames);
+	ofs_end = LittleLong (md2->ofs_end);
+
+	if (numframes < 1)
+		Sys_Error ("Mod_LoadMD2Model: %s has no frames", mod->name);
+	if (numframes > MAXALIASFRAMES)
+		Sys_Error ("Mod_LoadMD2Model: %s has too many frames (%d > %d)", mod->name, numframes, MAXALIASFRAMES);
+	if (numverts < 1)
+		Sys_Error ("Mod_LoadMD2Model: %s has no vertices", mod->name);
+	if (numst < 1)
+		Sys_Error ("Mod_LoadMD2Model: %s has no texcoords", mod->name);
+	if (numtris < 1)
+		Sys_Error ("Mod_LoadMD2Model: %s has no triangles", mod->name);
+	if (framesize <= 0)
+		Sys_Error ("Mod_LoadMD2Model: %s has invalid frame size", mod->name);
+
+	if (ofs_skins < 0 || ofs_st < 0 || ofs_tris < 0 || ofs_frames < 0 || ofs_end < 0)
+		Sys_Error ("Mod_LoadMD2Model: %s has corrupt offsets", mod->name);
+
+	filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
+	if (filesize)
+	{
+		if ((size_t)ofs_end > filesize)
+			Sys_Error ("Mod_LoadMD2Model: %s has invalid end offset", mod->name);
+		if (numskins_raw > 0 && ((size_t)ofs_skins + (size_t)numskins_raw * 64 > filesize))
+			Sys_Error ("Mod_LoadMD2Model: %s skins exceed file size", mod->name);
+		if ((size_t)ofs_st + (size_t)numst * sizeof (md2_texcoord_t) > filesize)
+			Sys_Error ("Mod_LoadMD2Model: %s texcoords exceed file size", mod->name);
+		if ((size_t)ofs_tris + (size_t)numtris * sizeof (md2_triangle_t) > filesize)
+			Sys_Error ("Mod_LoadMD2Model: %s triangles exceed file size", mod->name);
+		if ((size_t)ofs_frames + (size_t)framesize * (size_t)numframes > filesize)
+			Sys_Error ("Mod_LoadMD2Model: %s frames exceed file size", mod->name);
+	}
+
+	start = Hunk_LowMark ();
+
+	size = sizeof (aliashdr_t) + (numframes - 1) * sizeof (pheader->frames[0]);
+	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
+	memset (pheader, 0, size);
+
+	pheader->numframes = numframes;
+	pheader->numposes = numframes;
+	pheader->poseverttype = PV_QUAKE1;
+	pheader->numtris = numtris;
+	pheader->skinwidth = skinwidth > 0 ? skinwidth : 1;
+	pheader->skinheight = skinheight > 0 ? skinheight : 1;
+	VectorClear (pheader->eyeposition);
+
+	mod->numframes = numframes;
+	mod->synctype = ST_SYNC;
+	mod->flags = 0;
+
+	numskins = numskins_raw;
+	if (numskins < 1)
+		numskins = 1;
+	if (numskins > MAX_SKINS)
+		numskins = MAX_SKINS;
+	pheader->numskins = numskins;
+
+	skinbase = (numskins_raw > 0) ? (const char *)((byte *)buffer + ofs_skins) : NULL;
+
+	q_strlcpy (modeldir, mod->name, sizeof (modeldir));
+	{
+		char *slash = strrchr (modeldir, '/');
+		if (slash)
+			slash[1] = '\0';
+		else
+			modeldir[0] = '\0';
+	}
+
+	for (i = 0; i < pheader->numskins; i++)
+	{
+		gltexture_t *tex = NULL;
+
+		for (j = 0; j < 4; j++)
+		{
+			pheader->gltextures[i][j] = notexture;
+			pheader->fbtextures[i][j] = NULL;
+			pheader->emissivetextures[i][j] = NULL;
+		}
+		pheader->texels[i] = 0;
+
+		if (skinbase && i < numskins_raw)
+		{
+			char rawname[65];
+			char clean[MAX_QPATH];
+			const char *attempts[3];
+			char attemptbuf[3][MAX_QPATH];
+			int numattempts = 0;
+
+			q_strlcpy (rawname, skinbase + i * 64, sizeof (rawname));
+			COM_StripExtension (rawname, clean, sizeof (clean));
+			for (j = 0; clean[j]; j++)
+				if (clean[j] == '\\')
+					clean[j] = '/';
+
+			if (clean[0])
+			{
+				q_strlcpy (attemptbuf[numattempts], clean, sizeof (attemptbuf[0]));
+				attempts[numattempts] = attemptbuf[numattempts];
+				numattempts++;
+
+				if (modeldir[0] && !strchr (clean, '/') && numattempts < (int)countof (attempts))
+				{
+					q_snprintf (attemptbuf[numattempts], sizeof (attemptbuf[0]), "%s%s", modeldir, clean);
+					attempts[numattempts] = attemptbuf[numattempts];
+					numattempts++;
+				}
+				if (strncmp (clean, "progs/", 6) && numattempts < (int)countof (attempts))
+				{
+					q_snprintf (attemptbuf[numattempts], sizeof (attemptbuf[0]), "progs/%s", clean);
+					attempts[numattempts] = attemptbuf[numattempts];
+					numattempts++;
+				}
+
+				for (j = 0; j < numattempts && !tex; j++)
+				{
+					int mark = Hunk_LowMark ();
+					int texwidth = 0, texheight = 0;
+					enum srcformat fmt = SRC_RGBA;
+					byte *data = Image_LoadImage (attempts[j], &texwidth, &texheight, &fmt);
+					if (data)
+						tex = TexMgr_LoadImage (mod, attempts[j], texwidth, texheight, fmt, data, attempts[j], 0, TEXPREF_MIPMAP);
+					Hunk_FreeToLowMark (mark);
+				}
+			}
+		}
+
+		if (tex)
+		{
+			for (j = 0; j < 4; j++)
+				pheader->gltextures[i][j] = tex;
+		}
+	}
+
+	md2_tc = (const md2_texcoord_t *) ((byte *)buffer + ofs_st);
+	md2_tris = (const md2_triangle_t *) ((byte *)buffer + ofs_tris);
+
+	maxverts = (size_t)numtris * 3;
+	st_storage = (stvert_t *) Z_Malloc (maxverts * sizeof (*st_storage));
+	tri_storage = (dtriangle_t *) Z_Malloc ((size_t)numtris * sizeof (*tri_storage));
+	vertex_remap = (unsigned short *) Z_Malloc (maxverts * sizeof (*vertex_remap));
+	pair_keys = (unsigned int *) Z_Malloc (maxverts * sizeof (*pair_keys));
+	newnumverts = 0;
+
+	for (i = 0; i < numtris; i++)
+	{
+		tri_storage[i].facesfront = 1;
+		for (j = 0; j < 3; j++)
+		{
+			unsigned short vindex = LittleShort (md2_tris[i].vertindex[j]);
+			unsigned short stindex = LittleShort (md2_tris[i].stindex[j]);
+			unsigned int key;
+
+			if (vindex >= (unsigned)numverts || stindex >= (unsigned)numst)
+				Sys_Error ("Mod_LoadMD2Model: %s has corrupt triangle indices", mod->name);
+
+			key = ((unsigned int)vindex << 16) | stindex;
+			for (k = 0; k < (int)newnumverts; k++)
+				if (pair_keys[k] == key)
+					break;
+
+			if (k == (int)newnumverts)
+			{
+				if (newnumverts >= maxverts)
+					Sys_Error ("Mod_LoadMD2Model: %s has too many unique vertices", mod->name);
+				pair_keys[newnumverts] = key;
+				vertex_remap[newnumverts] = vindex;
+				st_storage[newnumverts].onseam = 0;
+				st_storage[newnumverts].s = LittleShort (md2_tc[stindex].s);
+				st_storage[newnumverts].t = LittleShort (md2_tc[stindex].t);
+				newnumverts++;
+			}
+
+			tri_storage[i].vertindex[j] = k;
+		}
+	}
+
+	if (newnumverts > MAXALIASVERTS)
+		Sys_Error ("Mod_LoadMD2Model: %s has too many vertices (%zu > %d)", mod->name, newnumverts, MAXALIASVERTS);
+
+	pheader->numverts = (int)newnumverts;
+
+	converted = (trivertx_t *) Z_Malloc ((size_t)numframes * newnumverts * sizeof (*converted));
+
+	for (k = 0; k < 3; k++)
+	{
+		mins[k] = FLT_MAX;
+		maxs[k] = -FLT_MAX;
+	}
+	radius2 = 0;
+
+	for (i = 0; i < numframes; i++)
+	{
+		md2_frame_t *frame = (md2_frame_t *) ((byte *)buffer + ofs_frames + (size_t)i * framesize);
+		md2_vertex_t *verts = (md2_vertex_t *) (frame + 1);
+		float fscale[3], ftrans[3];
+
+		for (k = 0; k < 3; k++)
+		{
+			fscale[k] = LittleFloat (frame->scale[k]);
+			ftrans[k] = LittleFloat (frame->translate[k]);
+		}
+
+		for (j = 0; j < numverts; j++)
+		{
+			float pos[3];
+			double dist2;
+
+			for (k = 0; k < 3; k++)
+			{
+				pos[k] = fscale[k] * verts[j].v[k] + ftrans[k];
+				mins[k] = q_min (mins[k], pos[k]);
+				maxs[k] = q_max (maxs[k], pos[k]);
+			}
+
+			dist2 = pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2];
+			if (dist2 > radius2)
+				radius2 = dist2;
+		}
+	}
+
+	for (k = 0; k < 3; k++)
+	{
+		if (mins[k] == FLT_MAX)
+			mins[k] = maxs[k] = 0;
+		if (maxs[k] < mins[k])
+			maxs[k] = mins[k];
+		pheader->scale_origin[k] = mins[k];
+		if (maxs[k] == mins[k])
+			pheader->scale[k] = 1.0f;
+		else
+			pheader->scale[k] = (maxs[k] - mins[k]) / 255.0f;
+	}
+
+	{
+		float dx = maxs[0] - mins[0];
+		float dy = maxs[1] - mins[1];
+		float dz = maxs[2] - mins[2];
+		pheader->size = sqrtf (dx * dx + dy * dy + dz * dz);
+	}
+	pheader->boundingradius = (float) sqrt (radius2);
+
+	posenum = 0;
+	for (i = 0; i < numframes; i++)
+	{
+		md2_frame_t *frame = (md2_frame_t *) ((byte *)buffer + ofs_frames + (size_t)i * framesize);
+		md2_vertex_t *verts = (md2_vertex_t *) (frame + 1);
+		float fscale[3], ftrans[3];
+		trivertx_t *outverts = converted + (size_t)i * newnumverts;
+		byte frame_min[3] = {255, 255, 255};
+		byte frame_max[3] = {0, 0, 0};
+
+		for (k = 0; k < 3; k++)
+		{
+			fscale[k] = LittleFloat (frame->scale[k]);
+			ftrans[k] = LittleFloat (frame->translate[k]);
+		}
+
+		for (j = 0; j < (int)newnumverts; j++)
+		{
+			md2_vertex_t *vin = &verts[vertex_remap[j]];
+
+			for (k = 0; k < 3; k++)
+			{
+				float pos = fscale[k] * vin->v[k] + ftrans[k];
+				float scale = pheader->scale[k];
+				float origin = pheader->scale_origin[k];
+				int value = 0;
+
+				if (scale > 0)
+				{
+					value = (int) floorf (((pos - origin) / scale) + 0.5f);
+					if (value < 0) value = 0;
+					if (value > 255) value = 255;
+				}
+
+				outverts[j].v[k] = value;
+				if (value < frame_min[k]) frame_min[k] = value;
+				if (value > frame_max[k]) frame_max[k] = value;
+			}
+
+			outverts[j].lightnormalindex = vin->lightnormalindex;
+		}
+
+		poseverts[i] = outverts;
+
+		pheader->frames[i].firstpose = i;
+		pheader->frames[i].numposes = 1;
+		pheader->frames[i].interval = 0.1f;
+		pheader->frames[i].frame = i;
+		q_strlcpy (pheader->frames[i].name, frame->name, sizeof (pheader->frames[i].name));
+		for (k = 0; k < 3; k++)
+		{
+			pheader->frames[i].bboxmin.v[k] = frame_min[k];
+			pheader->frames[i].bboxmax.v[k] = frame_max[k];
+		}
+		pheader->frames[i].bboxmin.lightnormalindex = 0;
+		pheader->frames[i].bboxmax.lightnormalindex = 0;
+
+		posenum++;
+	}
+
+	stverts = st_storage;
+	triangles = tri_storage;
+
+	mod->type = mod_alias;
+	Mod_SetExtraFlags (mod);
+	Mod_CalcAliasBounds (pheader);
+
+	GL_MakeAliasModelDisplayLists (mod, pheader);
+
+	Z_Free (converted);
+	Z_Free (st_storage);
+	Z_Free (tri_storage);
+	Z_Free (vertex_remap);
+	Z_Free (pair_keys);
+
+	{
+		int end;
+		int total;
+
+		end = Hunk_LowMark ();
+		total = end - start;
+
+		Cache_Alloc (&mod->cache, total, loadname);
+		if (!mod->cache.data)
+			return;
+		memcpy (mod->cache.data, pheader, total);
+
+		mod->sortkey = ((CRC_Block (mod->name, strlen (mod->name)) >> 1) & MODSORT_FRAMEMASK) << MODSORT_FRAMEBITS;
+		if (mod->flags & MF_HOLEY)
+			mod->sortkey |= MODSORT_ALIAS_ALPHATEST;
+		else
+			mod->sortkey &= ~MODSORT_ALIAS_ALPHATEST;
+
+		Hunk_FreeToLowMark (start);
+	}
 }
 
 //=========================================================
