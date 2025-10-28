@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "json.h"
-#include "wren_vm.h"
+#include "../wren_vm/wren_vm.h"
 #include <time.h>
 #ifndef WITHOUT_CURL
 #include <curl/curl.h>
