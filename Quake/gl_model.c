@@ -34,6 +34,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
+static void Mod_LoadBspx (const byte *buffer);
 
 static void Mod_Print (void);
 
@@ -46,6 +47,7 @@ static int	mod_novis_capacity;
 
 static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
+static size_t   mod_bspx_filesize;
 
 #define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
 static qmodel_t	mod_known[MAX_MOD_KNOWN];
@@ -844,6 +846,7 @@ static void Mod_LoadDeluxemap (const char *dlitfilename, int samplecount)
 
         loadmodel->deluxdata = NULL;
         loadmodel->deluxfile = false;
+        loadmodel->numdeluxsamples = (samplecount > 0) ? samplecount : 0;
 
         if (samplecount <= 0)
                 return;
@@ -895,6 +898,151 @@ static void Mod_LoadDeluxemap (const char *dlitfilename, int samplecount)
 
         loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (samplecount * 3, dlitfilename);
         memset (loadmodel->deluxdata, 0, samplecount * 3);
+}
+
+static byte Mod_BspxEncodeDeluxComponent (float value)
+{
+        float c = CLAMP (-1.0f, value, 1.0f);
+        int v = (int) Q_rint ((c * 0.5f + 0.5f) * 255.0f);
+        return (byte) CLAMP (0, v, 255);
+}
+
+static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data, size_t length)
+{
+        size_t samplecount = (loadmodel->numdeluxsamples > 0) ? (size_t)loadmodel->numdeluxsamples : 0;
+        size_t expected_bytes = samplecount * 3;
+        size_t expected_floats = samplecount * 3 * sizeof(float);
+
+        if (samplecount == 0 || !data)
+                return false;
+
+        if (!loadmodel->deluxdata)
+        {
+                if (!expected_bytes)
+                        return false;
+                loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
+        }
+
+        if (length == expected_bytes)
+        {
+                memcpy (loadmodel->deluxdata, data, expected_bytes);
+                loadmodel->deluxfile = true;
+                return true;
+        }
+
+        if (length == expected_floats)
+        {
+                const float *src = (const float *)data;
+                byte *dst = loadmodel->deluxdata;
+                size_t count = samplecount;
+
+                for (size_t i = 0; i < count; ++i)
+                {
+                        float nx = LittleFloat (src[i * 3 + 0]);
+                        float ny = LittleFloat (src[i * 3 + 1]);
+                        float nz = LittleFloat (src[i * 3 + 2]);
+
+                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
+                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
+                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                }
+
+                loadmodel->deluxfile = true;
+                return true;
+        }
+
+        Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected %zu or %zu)\n",
+                lumpname, length, expected_bytes, expected_floats);
+        return false;
+}
+
+static void Mod_LoadBspx (const byte *buffer)
+{
+        typedef struct bspx_lump_s
+        {
+                char name[16];
+                int fileofs;
+                int filelen;
+        } bspx_lump_t;
+
+        const size_t footer_size = 8;
+        size_t filesize = mod_bspx_filesize;
+        size_t dirsize;
+        const byte *footer;
+        const byte *directory;
+        size_t max_payload;
+        int numlumps;
+
+        if (!buffer || filesize < footer_size)
+                return;
+
+        footer = buffer + filesize - footer_size;
+        if (memcmp (footer, "BSPX", 4) != 0)
+                return;
+
+        dirsize = (size_t)LittleLong (((const int *)footer)[1]);
+        if (dirsize == 0 || dirsize > filesize - footer_size)
+        {
+                Con_DPrintf2 ("Invalid BSPX directory size %zu\n", dirsize);
+                return;
+        }
+
+        directory = footer - dirsize;
+        if (directory < buffer)
+        {
+                Con_DPrintf2 ("BSPX directory points outside file\n");
+                return;
+        }
+
+        if (dirsize % sizeof(bspx_lump_t))
+        {
+                Con_DPrintf2 ("BSPX directory size %zu is not aligned\n", dirsize);
+                return;
+        }
+
+        numlumps = (int)(dirsize / sizeof(bspx_lump_t));
+        max_payload = (size_t)(directory - buffer);
+
+        for (int i = 0; i < numlumps; ++i)
+        {
+                const bspx_lump_t *entry = ((const bspx_lump_t *)directory) + i;
+                char lumpname[17];
+                size_t lumpofs, lumplen;
+                int raw_ofs = LittleLong (entry->fileofs);
+                int raw_len = LittleLong (entry->filelen);
+
+                memcpy (lumpname, entry->name, sizeof(entry->name));
+                lumpname[sizeof(entry->name)] = '\0';
+                for (int j = (int)sizeof(entry->name) - 1; j >= 0 && (lumpname[j] == '\0' || lumpname[j] == ' '); --j)
+                        lumpname[j] = '\0';
+
+                if (raw_ofs < 0 || raw_len < 0)
+                        continue;
+
+                lumpofs = (size_t)raw_ofs;
+                lumplen = (size_t)raw_len;
+
+                if (lumplen > 64 * 1024 * 1024)
+                        continue;
+
+                if (lumpofs > max_payload)
+                        continue;
+                if (lumplen > max_payload - lumpofs)
+                        continue;
+
+                if (!loadmodel->deluxfile &&
+                        (!q_strcasecmp (lumpname, "LIGHTINGDIR") ||
+                         !q_strcasecmp (lumpname, "DELUXEMAP") ||
+                         !q_strcasecmp (lumpname, "DELUXDATA") ||
+                         !q_strcasecmp (lumpname, "DELUXMAP") ||
+                         !q_strcasecmp (lumpname, "LUX") ||
+                         !q_strcasecmp (lumpname, "LUXDATA") ||
+                         !q_strcasecmp (lumpname, "LUXMAP") ||
+                         !q_strcasecmp (lumpname, "DLIT")))
+                {
+                        Mod_BspxImportDeluxemap (lumpname, buffer + lumpofs, lumplen);
+                }
+        }
 }
 
 static void Mod_LoadLighting (lump_t *l)
@@ -2555,6 +2703,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	float		radius; //johnfitz
 
 	loadmodel->type = mod_brush;
+	loadmodel->numdeluxsamples = 0;
+	mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 
 	header = (dheader_t *)buffer;
 
@@ -2596,6 +2746,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
 	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
 	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
+	Mod_LoadBspx ((const byte *)buffer);
 
 	if (mod->bspversion == BSPVERSION && external_vis.value && sv.modelname[0] && !q_strcasecmp(loadname, sv.name))
 	{
