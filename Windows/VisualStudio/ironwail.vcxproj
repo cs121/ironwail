@@ -353,7 +353,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren_vm.c">
+    <ClCompile Include="..\..\wren_vm\wren_runtime.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
@@ -487,7 +487,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\wsaerror.h" />
     <ClInclude Include="..\..\Quake\zone.h" />
     <ClInclude Include="..\..\wren_vm\wren_bindings.h" />
-    <ClInclude Include="..\..\wren_vm\wren_vm.h" />
+    <ClInclude Include="..\..\wren_vm\wren_runtime.h" />
     <ClInclude Include="..\..\wren_vm\wren\include\wren.h" />
   </ItemGroup>
   <ItemGroup>

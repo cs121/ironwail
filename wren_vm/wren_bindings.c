@@ -1,12 +1,11 @@
 #include "quakedef.h"
 #include "common.h"
 #include "cmd.h"
-#include "host.h"
 #include "mathlib.h"
 #include "pr_edict.h"
 #include "server.h"
 #include "world.h"
-#include "wren_vm.h"
+#include "wren_runtime.h"
 #include "wren_bindings.h"
 #include "wren/include/wren.h"
 

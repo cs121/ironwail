@@ -41,7 +41,7 @@ target_include_directories(wren PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/
 target_include_directories(wren PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/optional)
 target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
 
-list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_vm.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
+list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)

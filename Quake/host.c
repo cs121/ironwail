@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
-#include "../wren_vm/wren_vm.h"
+#include "../wren_vm/wren_runtime.h"
 #include <setjmp.h>
 
 /*
@@ -1128,9 +1128,15 @@ static void CL_LoadCSProgs (void)
 		    (PR_LoadProgs ("progs.dat", false) && qcvm->extfuncs.CSQC_DrawHud))
 		{
 			qcvm->max_edicts = CLAMP (MIN_EDICTS, (int)max_edicts.value, MAX_EDICTS);
-			qcvm->edicts = (edict_t *)malloc (qcvm->max_edicts * qcvm->edict_size);
+                        qcvm->edicts = (edict_t *)malloc (qcvm->max_edicts * qcvm->edict_size);
+                        if (!qcvm->edicts)
+                        {
+                                PR_ClearProgs (qcvm);
+                                PR_SwitchQCVM (NULL);
+                                return;
+                        }
 			qcvm->num_edicts = qcvm->reserved_edicts = 1;
-			memset (qcvm->edicts, 0, qcvm->num_edicts * qcvm->edict_size);
+                        memset (qcvm->edicts, 0, qcvm->num_edicts * qcvm->edict_size);
 
 			if (!qcvm->extfuncs.CSQC_DrawHud)
 			{ // no simplecsqc entry points... abort entirely!
@@ -1230,7 +1236,7 @@ void _Host_Frame (double time)
 		return;			// something bad happened, or the server disconnected
 
 // keep the random time dependent
-	rand ();
+        (void)rand ();
 
 // decide the simulation time
 	accumtime += host_netinterval?CLAMP(0.0, time, 0.2):0.0;	//for renderer/server isolation
