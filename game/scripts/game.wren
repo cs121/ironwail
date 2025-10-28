@@ -29,6 +29,9 @@ foreign class Entity {
   foreign health=(value)
   foreign takedamage
   foreign takedamage=(value)
+  foreign walkMove(yaw, dist)
+  foreign moveToGoal(dist)
+  foreign changeYaw()
 }
 
 class Game {
