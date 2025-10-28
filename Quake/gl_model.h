@@ -492,6 +492,7 @@ typedef struct qmodel_s
 	byte		*visdata;
 	byte		*lightdata;
 	byte		*deluxdata;
+	int				numdeluxsamples;
 	char		*entities;
 
 	qboolean	litfile;
