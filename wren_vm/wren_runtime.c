@@ -176,6 +176,157 @@ static WrenLoadModuleResult wrenvm_load_module(WrenVM *vm, const char *name)
     return result;
 }
 
+static qboolean wrenvm_import_module(const char *module_name)
+{
+    char qualified_name[MAX_QPATH];
+    char import_source[MAX_QPATH + 16];
+
+    if (!module_name || !module_name[0])
+        return true;
+
+    q_snprintf(qualified_name, sizeof(qualified_name), "q/%s", module_name);
+
+    if (wrenHasModule(wren_state.vm, qualified_name))
+        return true;
+
+    q_snprintf(import_source, sizeof(import_source), "import \"%s\"\n", qualified_name);
+    if (wrenInterpret(wren_state.vm, "__bootstrap", import_source) == WREN_RESULT_SUCCESS)
+        return true;
+
+    Con_Printf("[wren] failed to load module '%s'\n", qualified_name);
+    return false;
+}
+
+static qboolean wrenvm_import_scripts_from_directory(const char *directory, const char *module_prefix)
+{
+    findfile_t *find = Sys_FindFirst(directory, NULL);
+    if (!find)
+        return true;
+
+    do
+    {
+        char full_path[MAX_OSPATH];
+
+        if (!q_strcasecmp(find->name, ".") || !q_strcasecmp(find->name, ".."))
+            continue;
+
+        q_snprintf(full_path, sizeof(full_path), "%s/%s", directory, find->name);
+
+        if (find->attribs & FA_DIRECTORY)
+        {
+            char next_prefix[MAX_QPATH];
+
+            if (module_prefix && module_prefix[0])
+                q_snprintf(next_prefix, sizeof(next_prefix), "%s/%s", module_prefix, find->name);
+            else
+                q_strlcpy(next_prefix, find->name, sizeof(next_prefix));
+
+            if (!wrenvm_import_scripts_from_directory(full_path, next_prefix))
+            {
+                Sys_FindClose(find);
+                return false;
+            }
+        }
+        else
+        {
+            const char *ext = COM_FileGetExtension(find->name);
+            if (ext[0] && !q_strcasecmp(ext, "wren"))
+            {
+                char module_name[MAX_QPATH];
+                char base_name[MAX_QPATH];
+
+                COM_StripExtension(find->name, base_name, sizeof(base_name));
+                if (module_prefix && module_prefix[0])
+                    q_snprintf(module_name, sizeof(module_name), "%s/%s", module_prefix, base_name);
+                else
+                    q_strlcpy(module_name, base_name, sizeof(module_name));
+
+                if (!wrenvm_import_module(module_name))
+                {
+                    Sys_FindClose(find);
+                    return false;
+                }
+            }
+        }
+    } while ((find = Sys_FindNext(find)) != NULL);
+
+    return true;
+}
+
+static qboolean wrenvm_import_scripts_from_pack(pack_t *pak)
+{
+    int i;
+
+    if (!pak)
+        return true;
+
+    for (i = 0; i < pak->numfiles; i++)
+    {
+        const char *entry = pak->files[i].name;
+        const char *relative;
+        char module_name[MAX_QPATH];
+
+        if (q_strncasecmp(entry, "scripts/", 8) != 0)
+            continue;
+
+        relative = entry + 8;
+        if (!relative[0])
+            continue;
+
+        if (!q_strcasecmp(relative, ".") || !q_strcasecmp(relative, ".."))
+            continue;
+
+        if (relative[strlen(relative) - 1] == '/')
+            continue;
+
+        if (q_strcasecmp(COM_FileGetExtension(relative), "wren") != 0)
+            continue;
+
+        q_strlcpy(module_name, relative, sizeof(module_name));
+        COM_StripExtension(module_name, module_name, sizeof(module_name));
+        if (!module_name[0])
+            continue;
+
+        if (!wrenvm_import_module(module_name))
+            return false;
+    }
+
+    return true;
+}
+
+static qboolean wrenvm_import_scripts_from_searchpath(searchpath_t *search)
+{
+    if (!search)
+        return true;
+
+    if (search->pack)
+        return wrenvm_import_scripts_from_pack(search->pack);
+
+    if (!search->filename[0])
+        return true;
+
+    char scripts_dir[MAX_OSPATH];
+    q_snprintf(scripts_dir, sizeof(scripts_dir), "%s/scripts", search->filename);
+
+    if (!(Sys_FileType(scripts_dir) & FS_ENT_DIRECTORY))
+        return true;
+
+    return wrenvm_import_scripts_from_directory(scripts_dir, "");
+}
+
+static qboolean wrenvm_import_all_scripts(void)
+{
+    searchpath_t *search;
+
+    for (search = com_searchpaths; search; search = search->next)
+    {
+        if (!wrenvm_import_scripts_from_searchpath(search))
+            return false;
+    }
+
+    return true;
+}
+
 static qboolean wrenvm_create_vm(void)
 {
     WrenConfiguration config;
@@ -222,6 +373,9 @@ static qboolean wrenvm_load_game_module(void)
     wren_state.call_client_disconnect = wrenMakeCallHandle(wren_state.vm, "clientDisconnect(_)");
     wren_state.call_on_save = wrenMakeCallHandle(wren_state.vm, "onSave()");
     wren_state.call_on_load = wrenMakeCallHandle(wren_state.vm, "onLoad()");
+
+    if (!wrenvm_import_all_scripts())
+        return false;
 
     return true;
 }
