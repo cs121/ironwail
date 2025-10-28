@@ -1,6 +1,5 @@
 #include "quakedef.h"
 #include "common.h"
-#include "pr_edict.h"
 #include "server.h"
 #include "wren_runtime.h"
 #include "wren_bindings.h"

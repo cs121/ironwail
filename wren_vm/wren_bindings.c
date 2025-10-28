@@ -2,7 +2,6 @@
 #include "common.h"
 #include "cmd.h"
 #include "mathlib.h"
-#include "pr_edict.h"
 #include "server.h"
 #include "world.h"
 #include "wren_runtime.h"
