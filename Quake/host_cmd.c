@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "json.h"
+#include "wren_vm.h"
 #include <time.h>
 #ifndef WITHOUT_CURL
 #include <curl/curl.h>
@@ -2444,11 +2445,22 @@ static void Host_Savegame_f (void)
 	}
 
 	f = Sys_fopen (name, "w");
-	if (!f)
-	{
-		Con_Printf ("ERROR: couldn't open.\n");
-		return;
-	}
+        if (!f)
+        {
+                Con_Printf ("ERROR: couldn't open.\n");
+                return;
+        }
+
+        if (WRENVM_IsEnabled())
+        {
+                wrenvm_call_result_t save_result = WRENVM_CallOnSave();
+                if (save_result == WRENV_CALL_ERROR && WRENVM_IsStrict())
+                {
+                        Con_Printf("Wren onSave failed; aborting save.\n");
+                        fclose (f);
+                        return;
+                }
+        }
 
 	SDL_LockMutex (save_mutex);
 	while (save_pending)
@@ -2690,9 +2702,18 @@ static void Host_Loadgame_f (void)
 	for (i = 0; i < NUM_SPAWN_PARMS; i++)
 		svs.clients->spawn_parms[i] = spawn_parms[i];
 
-	PR_SwitchQCVM(NULL);
+        PR_SwitchQCVM(NULL);
 
-	q_strlcpy (sv.lastsave, relname, sizeof (sv.lastsave));
+        if (WRENVM_IsEnabled())
+        {
+                wrenvm_call_result_t load_result = WRENVM_CallOnLoad();
+                if (load_result == WRENV_CALL_ERROR && WRENVM_IsStrict())
+                {
+                        Con_Printf("Wren onLoad failed.\n");
+                }
+        }
+
+        q_strlcpy (sv.lastsave, relname, sizeof (sv.lastsave));
 
 	if (cls.state != ca_dedicated)
 	{
@@ -3086,7 +3107,28 @@ static void Host_Spawn_f (void)
 		// call the spawn function
 		pr_global_struct->time = qcvm->time;
 		pr_global_struct->self = EDICT_TO_PROG(sv_player);
-		PR_ExecuteProgram (pr_global_struct->ClientConnect);
+                if (WRENVM_IsEnabled())
+                {
+                        int client_id = (int)(host_client - svs.clients);
+                        wrenvm_call_result_t client_result = WRENVM_CallClientConnect(client_id);
+                        if (client_result == WRENV_CALL_OK)
+                        {
+                                // handled in Wren
+                        }
+                        else if (client_result == WRENV_CALL_ERROR || (client_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
+                        {
+                                Con_Printf("Wren clientConnect failed; using QuakeC fallback\n");
+                                PR_ExecuteProgram (pr_global_struct->ClientConnect);
+                        }
+                        else
+                        {
+                                PR_ExecuteProgram (pr_global_struct->ClientConnect);
+                        }
+                }
+                else
+                {
+                        PR_ExecuteProgram (pr_global_struct->ClientConnect);
+                }
 
 		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
 			Sys_Printf ("%s entered the game\n", host_client->name);

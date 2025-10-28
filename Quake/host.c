@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "wren_vm.h"
 #include <setjmp.h>
 
 /*
@@ -520,7 +521,28 @@ void SV_DropClient (qboolean crash)
 			PR_SwitchQCVM(&sv.qcvm);
 			saveSelf = pr_global_struct->self;
 			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
-			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
+                        if (WRENVM_IsEnabled())
+                        {
+                                int client_id = (int)(host_client - svs.clients);
+                                wrenvm_call_result_t disc_result = WRENVM_CallClientDisconnect(client_id);
+                                if (disc_result == WRENV_CALL_OK)
+                                {
+                                        // handled in Wren
+                                }
+                                else if (disc_result == WRENV_CALL_ERROR || (disc_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
+                                {
+                                        Con_Printf("Wren clientDisconnect failed; using QuakeC fallback\n");
+                                        PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
+                                }
+                                else
+                                {
+                                        PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
+                                }
+                        }
+                        else
+                        {
+                                PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
+                        }
 			pr_global_struct->self = saveSelf;
 			PR_SwitchQCVM(NULL);
 			PR_SwitchQCVM(oldvm);
@@ -1409,7 +1431,8 @@ void Host_Init (void)
 	PR_Init ();
 	Mod_Init ();
 	NET_Init ();
-	SV_Init ();
+        SV_Init ();
+        WRENVM_InitSystem();
 
 	Con_Printf ("Exe: " __TIME__ " " __DATE__ " (%s %d-bit)\n", SDL_GetPlatform (), (int)sizeof(void*)*8);
 	Con_Printf ("%4.1f megabyte heap\n", host_parms->memsize/ (1024*1024.0));
@@ -1499,7 +1522,8 @@ void Host_Shutdown(void)
 // keep Con_Printf from trying to update the screen
 	scr_disabled_for_loading = true;
 
-	Steam_Shutdown ();
+        Steam_Shutdown ();
+        WRENVM_ShutdownSystem();
 
 	AsyncQueue_Destroy (&async_queue);
 

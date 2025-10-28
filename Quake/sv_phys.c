@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_phys.c
 
 #include "quakedef.h"
+#include "wren_vm.h"
 
 /*
 
@@ -1233,7 +1234,27 @@ void SV_Physics (void)
 	pr_global_struct->self = EDICT_TO_PROG(qcvm->edicts);
 	pr_global_struct->other = EDICT_TO_PROG(qcvm->edicts);
 	pr_global_struct->time = qcvm->time;
-	PR_ExecuteProgram (pr_global_struct->StartFrame);
+    if (WRENVM_IsEnabled())
+    {
+        wrenvm_call_result_t result = WRENVM_CallStartFrame((float)host_frametime);
+        if (result == WRENV_CALL_OK)
+        {
+                // handled in Wren
+        }
+        else if (result == WRENV_CALL_ERROR || (result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
+        {
+                Con_Printf("Wren startFrame failed; using QuakeC fallback\n");
+                PR_ExecuteProgram (pr_global_struct->StartFrame);
+        }
+        else if (result != WRENV_CALL_OK)
+        {
+                PR_ExecuteProgram (pr_global_struct->StartFrame);
+        }
+    }
+    else
+    {
+        PR_ExecuteProgram (pr_global_struct->StartFrame);
+    }
 
 //SV_CheckAllEnts ();
 
