@@ -37,6 +37,56 @@ static struct
     qboolean missing_method;
 } last_error_state;
 
+#define WRENV_RESOLVE_BUFFER_COUNT 8
+
+static void wrenvm_module_dir_from_importer(const char *importer, char *out, size_t size)
+{
+    if (!importer || importer[0] == '\0' || strncmp(importer, "q/", 2) != 0)
+    {
+        q_strlcpy(out, "q", size);
+        return;
+    }
+
+    q_strlcpy(out, importer, size);
+
+    char *slash = strrchr(out, '/');
+    if (!slash || slash == out)
+    {
+        q_strlcpy(out, "q", size);
+        return;
+    }
+
+    *slash = '\0';
+}
+
+static void wrenvm_module_parent(char *path, size_t size)
+{
+    if (!path || !path[0])
+    {
+        q_strlcpy(path, "q", size);
+        return;
+    }
+
+    char *slash = strrchr(path, '/');
+    if (!slash)
+    {
+        q_strlcpy(path, "q", size);
+        return;
+    }
+
+    if (slash == path)
+    {
+        path[1] = '\0';
+    }
+    else
+    {
+        *slash = '\0';
+    }
+
+    if (!path[0])
+        q_strlcpy(path, "q", size);
+}
+
 static void wrenvm_dispose_handles(void)
 {
     if (!wren_state.vm)
@@ -135,8 +185,60 @@ static void wrenvm_error_fn(WrenVM *vm, WrenErrorType type, const char *module, 
 static const char *wrenvm_resolve_module(WrenVM *vm, const char *importer, const char *name)
 {
     (void)vm;
-    (void)importer;
-    return name;
+
+    if (!name || !name[0])
+        return name;
+
+    if (!strncmp(name, "q/", 2))
+        return name;
+
+    static char buffers[WRENV_RESOLVE_BUFFER_COUNT][MAX_QPATH];
+    static int next_buffer = 0;
+
+    char *resolved = buffers[next_buffer];
+    next_buffer = (next_buffer + 1) % WRENV_RESOLVE_BUFFER_COUNT;
+
+    if (name[0] != '.')
+    {
+        q_snprintf(resolved, MAX_QPATH, "q/%s", name);
+        return resolved;
+    }
+
+    char base[MAX_QPATH];
+    wrenvm_module_dir_from_importer(importer, base, sizeof(base));
+
+    const char *cursor = name;
+    while (cursor[0] == '.')
+    {
+        if (!strncmp(cursor, "../", 3))
+        {
+            wrenvm_module_parent(base, sizeof(base));
+            cursor += 3;
+            continue;
+        }
+        if (!strncmp(cursor, "./", 2))
+        {
+            cursor += 2;
+            continue;
+        }
+        break;
+    }
+
+    if (!cursor[0])
+    {
+        q_strlcpy(resolved, base, MAX_QPATH);
+        return resolved;
+    }
+
+    if (!strncmp(cursor, "/", 1))
+        ++cursor;
+
+    if (base[0] && q_strcasecmp(base, "q") != 0)
+        q_snprintf(resolved, MAX_QPATH, "%s/%s", base, cursor);
+    else
+        q_snprintf(resolved, MAX_QPATH, "q/%s", cursor);
+
+    return resolved;
 }
 
 static void wrenvm_release_module(WrenVM *vm, const char *name, WrenLoadModuleResult result)
