@@ -944,6 +944,79 @@ static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data,
                 loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
         }
 
+        if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+        {
+                int version = LittleLong (((const int *)data)[1]);
+                const byte *payload = data + 8;
+                size_t payload_length = length - 8;
+
+                if (version == 2)
+                {
+                        if (payload_length == expected_bytes)
+                        {
+                                memcpy (loadmodel->deluxdata, payload, expected_bytes);
+                                loadmodel->deluxfile = true;
+                                return true;
+                        }
+
+                        if (payload_length == expected_floats)
+                        {
+                                const float *src = (const float *)payload;
+                                byte *dst = loadmodel->deluxdata;
+                                size_t count = samplecount;
+
+                                for (size_t i = 0; i < count; ++i)
+                                {
+                                        float nx = LittleFloat (src[i * 3 + 0]);
+                                        float ny = LittleFloat (src[i * 3 + 1]);
+                                        float nz = LittleFloat (src[i * 3 + 2]);
+
+                                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
+                                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
+                                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                                }
+
+                                loadmodel->deluxfile = true;
+                                return true;
+                        }
+
+                        Con_DPrintf2 ("BSPX lump %s has unexpected version 2 size %zu (expected %zu or %zu)\n",
+                                lumpname, payload_length, expected_bytes, expected_floats);
+                        return false;
+                }
+
+                if (version == 1)
+                {
+                        if (payload_length == expected_floats)
+                        {
+                                const float *src = (const float *)payload;
+                                byte *dst = loadmodel->deluxdata;
+                                size_t count = samplecount;
+
+                                for (size_t i = 0; i < count; ++i)
+                                {
+                                        float nx = LittleFloat (src[i * 3 + 0]);
+                                        float ny = LittleFloat (src[i * 3 + 1]);
+                                        float nz = LittleFloat (src[i * 3 + 2]);
+
+                                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
+                                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
+                                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                                }
+
+                                loadmodel->deluxfile = true;
+                                return true;
+                        }
+
+                        Con_DPrintf2 ("BSPX lump %s has unexpected version 1 size %zu (expected %zu)\n",
+                                lumpname, payload_length, expected_floats);
+                        return false;
+                }
+
+                Con_DPrintf2 ("BSPX lump %s has unknown QLIT version %d\n", lumpname, version);
+                return false;
+        }
+
         if (length == expected_bytes)
         {
                 memcpy (loadmodel->deluxdata, data, expected_bytes);
