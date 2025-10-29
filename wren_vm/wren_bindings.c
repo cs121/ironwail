@@ -367,12 +367,13 @@ static void engine_load_map(WrenVM *vm)
         return;
     }
     Cbuf_AddText(va("map %s\n", map));
+    wrenSetSlotNull(vm, 0);
 }
 
 static void engine_spawn_from_map(WrenVM *vm)
 {
-    (void)vm;
     WRENVM_SpawnEntitiesFallback();
+    wrenSetSlotNull(vm, 0);
 }
 
 static void engine_randf(WrenVM *vm)
@@ -399,6 +400,109 @@ static void engine_crandom(WrenVM *vm)
     engine_randf(vm);
     double val = wrenGetSlotDouble(vm, 0);
     wrenSetSlotDouble(vm, 0, val - 0.5);
+}
+
+static qboolean nativebinding_supports(const char *name)
+{
+    if (!name || !name[0])
+        return false;
+
+    if (!strcmp(name, "time")) return true;
+    if (!strcmp(name, "setSkill")) return true;
+    if (!strcmp(name, "getSkill")) return true;
+    if (!strcmp(name, "loadMap")) return true;
+    if (!strcmp(name, "spawnFromMap")) return true;
+    if (!strcmp(name, "random")) return true;
+    if (!strcmp(name, "randomInt")) return true;
+    if (!strcmp(name, "crandom")) return true;
+
+    return false;
+}
+
+static void nativebinding_has(WrenVM *vm)
+{
+    const char *name = wrenGetSlotString(vm, 1);
+    wrenSetSlotBool(vm, 0, nativebinding_supports(name));
+}
+
+static qboolean nativebinding_expect_args(WrenVM *vm, int min_args)
+{
+    if (wrenGetSlotType(vm, 2) != WREN_TYPE_LIST)
+        return false;
+    return wrenGetListCount(vm, 2) >= min_args;
+}
+
+static void nativebinding_call(WrenVM *vm)
+{
+    const char *name = wrenGetSlotString(vm, 1);
+    if (!nativebinding_supports(name))
+    {
+        raise_not_implemented(vm);
+        return;
+    }
+
+    wrenEnsureSlots(vm, 4);
+
+    if (!strcmp(name, "time"))
+    {
+        engine_time(vm);
+        return;
+    }
+    if (!strcmp(name, "spawnFromMap"))
+    {
+        engine_spawn_from_map(vm);
+        return;
+    }
+    if (!strcmp(name, "random"))
+    {
+        engine_randf(vm);
+        return;
+    }
+    if (!strcmp(name, "randomInt"))
+    {
+        if (!nativebinding_expect_args(vm, 1))
+        {
+            raise_not_implemented(vm);
+            return;
+        }
+        wrenGetListElement(vm, 2, 0, 1);
+        engine_randi(vm);
+        return;
+    }
+    if (!strcmp(name, "crandom"))
+    {
+        engine_crandom(vm);
+        return;
+    }
+    if (!strcmp(name, "setSkill"))
+    {
+        if (!nativebinding_expect_args(vm, 1))
+        {
+            raise_not_implemented(vm);
+            return;
+        }
+        wrenGetListElement(vm, 2, 0, 1);
+        engine_set_skill(vm);
+        return;
+    }
+    if (!strcmp(name, "getSkill"))
+    {
+        engine_get_skill(vm);
+        return;
+    }
+    if (!strcmp(name, "loadMap"))
+    {
+        if (!nativebinding_expect_args(vm, 1))
+        {
+            raise_not_implemented(vm);
+            return;
+        }
+        wrenGetListElement(vm, 2, 0, 1);
+        engine_load_map(vm);
+        return;
+    }
+
+    raise_not_implemented(vm);
 }
 
 static void entity_allocate(WrenVM *vm)
@@ -438,14 +542,24 @@ static WrenForeignMethodFn bind_foreign_method(WrenVM *vm, const char *module, c
     {
         if (isStatic)
         {
-            if (!strcmp(signature, "time")) return engine_time;
+            if (!strcmp(signature, "time()")) return engine_time;
             if (!strcmp(signature, "setSkill(_)")) return engine_set_skill;
-            if (!strcmp(signature, "getSkill")) return engine_get_skill;
+            if (!strcmp(signature, "getSkill()")) return engine_get_skill;
             if (!strcmp(signature, "loadMap(_)")) return engine_load_map;
-            if (!strcmp(signature, "spawnFromMap")) return engine_spawn_from_map;
-            if (!strcmp(signature, "randf")) return engine_randf;
-            if (!strcmp(signature, "randi(_)")) return engine_randi;
-            if (!strcmp(signature, "crandom")) return engine_crandom;
+            if (!strcmp(signature, "spawnFromMap()")) return engine_spawn_from_map;
+            if (!strcmp(signature, "random()")) return engine_randf;
+            if (!strcmp(signature, "randomInt(_)")) return engine_randi;
+            if (!strcmp(signature, "crandom()")) return engine_crandom;
+        }
+        return raise_not_implemented;
+    }
+
+    if (!strcmp(className, "NativeBinding"))
+    {
+        if (isStatic)
+        {
+            if (!strcmp(signature, "has(_)")) return nativebinding_has;
+            if (!strcmp(signature, "call(_,_)")) return nativebinding_call;
         }
         return raise_not_implemented;
     }

@@ -3543,6 +3543,8 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 	{
 		// start up with GAMENAME by default (id1)
 		COM_AddGameDirectory (GAMENAME);
+		if (COM_GameDirExists ("game"))
+			COM_AddGameDirectory ("game");
 	}
 
 	/* this is the end of our base searchpath:
