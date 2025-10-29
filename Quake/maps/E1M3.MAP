@@ -4,6 +4,12 @@
 "worldtype"	"0"
 "wad"	"gfx/wizard.wad"
 "classname"	"worldspawn"
+	"_ambient"	"18"
+	"_minlight"	"6"
+	"_sunlight"	"70"
+	"_sunlight_color"	"0.85 0.72 0.58"
+	"_sun_mangle"	"45 120 0"
+	"fog"	"0.03 0.08 0.11 0.18"
 {
 ( 1424 272 52 ) ( 1424 272 0 ) ( 1424 240 0 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 ( 1412 272 52 ) ( 1424 272 52 ) ( 1424 240 52 ) WSWAMP2_1 0 0 0 1.000000 1.000000
@@ -8169,6 +8175,7 @@
 ( 592 -1240 -208 ) ( 584 -1240 -208 ) ( 584 -1344 -208 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "wait"	"-1"
 "sounds"	"3"
@@ -8183,6 +8190,7 @@
 ( 1360 264 -160 ) ( 1272 264 -160 ) ( 1272 248 -160 ) DOOR04_2 112 32 0 1.000000 1.000000
 }
 }
+
 {
 "wait"	"-1"
 "sounds"	"0"
@@ -8197,14 +8205,19 @@
 ( 1448 264 -160 ) ( 1360 264 -160 ) ( 1360 248 -160 ) DOOR04_2 112 32 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"1360 336 48"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"1360 440 476"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 }
+
 {
 "speed"	"35"
 "targetname"	"t5"
@@ -8255,6 +8268,7 @@
 ( 1496 520 128 ) ( 1360 520 128 ) ( 1360 504 128 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "speed"	"35"
 "targetname"	"t5"
@@ -8305,18 +8319,21 @@
 ( 1360 504 128 ) ( 1360 520 128 ) ( 1224 520 128 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t2"
 "targetname"	"t1"
 "origin"	"1360 296 136"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t3"
 "targetname"	"t2"
 "origin"	"1360 296 -88"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t4"
 "targetname"	"t3"
@@ -8324,24 +8341,28 @@
 "origin"	"1496 296 -88"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t3"
 "targetname"	"t4"
 "classname"	"path_corner"
 "origin"	"1496 292 -80"
 }
+
 {
 "target"	"t8"
 "targetname"	"t6"
 "classname"	"path_corner"
 "origin"	"1224 296 136"
 }
+
 {
 "target"	"t7"
 "targetname"	"t8"
 "classname"	"path_corner"
 "origin"	"1224 296 -88"
 }
+
 {
 "target"	"t9"
 "targetname"	"t7"
@@ -8349,11 +8370,13 @@
 "origin"	"1084 296 -88"
 "wait"	"-1"
 }
+
 {
 "targetname"	"t9"
 "origin"	"1084 276 -80"
 "classname"	"path_corner"
 }
+
 {
 "sounds"	"2"
 "target"	"t5"
@@ -8369,11 +8392,14 @@
 ( 1400 572 -128 ) ( 1352 572 -128 ) ( 1352 568 -128 ) +0BUTTON 8 8 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1360 552 -112"
 "classname"	"light"
 }
+
 {
 "sounds"	"0"
 "targetname"	"t5"
@@ -8392,6 +8418,7 @@
 ( 1448 288 -72 ) ( 1440 288 -72 ) ( 1440 280 -72 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "targetname"	"t5"
@@ -8411,6 +8438,7 @@
 ( 1448 296 -160 ) ( 1440 296 -160 ) ( 1440 288 -160 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "delay"	"10.5"
 "target"	"t10"
@@ -8425,6 +8453,7 @@
 ( 1496 568 -56 ) ( 1480 568 -56 ) ( 1480 552 -56 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "targetname"	"t10"
@@ -8446,6 +8475,7 @@
 ( 1272 296 12 ) ( 1224 344 12 ) ( 1272 296 28 ) WIZMET1_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "targetname"	"t5"
 "dmg"	"1000"
@@ -8463,45 +8493,61 @@
 ( 1424 288 -20 ) ( 1296 288 -20 ) ( 1296 272 -20 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-752 -1576 176"
 "classname"	"light"
 }
+
 {
 "angle"	"270"
 "origin"	"-736 -1592 88"
 "classname"	"info_player_start"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-584 -1800 312"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-488 -1800 320"
 "classname"	"light"
 }
+
 {
 "origin"	"-288 -1800 308"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-176 -1616 320"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 "origin"	"-184 -1248 280"
 }
+
 {
 "classname"	"light"
 "origin"	"-184 -1416 280"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "sounds"	"0"
 "angle"	"90"
@@ -8515,6 +8561,7 @@
 ( -464 -1248 48 ) ( -464 -1160 48 ) ( -480 -1160 48 ) DOOR04_2 32 48 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "angle"	"270"
@@ -8528,30 +8575,42 @@
 ( -464 -1336 48 ) ( -464 -1248 48 ) ( -480 -1248 48 ) DOOR04_2 32 48 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"-424 -1256 160"
 "light"	"250"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light_flame_small_yellow"
 "origin"	"-312 -1000 158"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 }
+
 {
 "origin"	"-400 -1096 158"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "classname"	"info_null"
 "origin"	"-720 -1244 52"
 "targetname"	"t11"
 }
+
 {
 "light"	"400"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 "origin"	"-712 -1240 164"
 "target"	"t11"
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -8569,6 +8628,7 @@
 ( -776 -1160 -32 ) ( -808 -1160 -32 ) ( -808 -1336 -32 ) WMET4_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "classname"	"func_door"
@@ -8586,6 +8646,7 @@
 ( -736 -1160 -32 ) ( -768 -1160 -32 ) ( -768 -1336 -32 ) WMET4_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -8603,6 +8664,7 @@
 ( -696 -1160 -32 ) ( -728 -1160 -32 ) ( -728 -1336 -32 ) WMET4_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -8620,6 +8682,7 @@
 ( -656 -1160 -32 ) ( -688 -1160 -32 ) ( -688 -1336 -32 ) WMET4_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "targetname"	"t12"
@@ -8636,6 +8699,7 @@
 ( -608 -1160 -32 ) ( -648 -1160 -32 ) ( -648 -1336 -32 ) WMET4_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t13"
 "classname"	"trigger_once"
@@ -8648,24 +8712,29 @@
 ( -708 -1224 60 ) ( -736 -1224 60 ) ( -736 -1240 60 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"1"
 "targetname"	"t13"
 "origin"	"-628 -1252 380"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 }
+
 {
 "target"	"t15"
 "targetname"	"t14"
 "origin"	"-816 -1384 504"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t16"
 "targetname"	"t15"
 "origin"	"-816 -1384 60"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t14"
 "targetname"	"t16"
@@ -8673,43 +8742,57 @@
 "origin"	"-816 -1384 232"
 "classname"	"path_corner"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-908 -1248 12"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-568 -1176 240"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-760 -1172 240"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-756 -1332 240"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-564 -1336 240"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "targetname"	"t12"
 "target"	"t18"
 "light"	"500"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-776 -1240 104"
 "classname"	"light"
 }
+
 {
 "targetname"	"t18"
 "origin"	"-818 -1240 104"
 "classname"	"info_null"
 }
+
 {
 "sounds"	"3"
 "wait"	"20"
@@ -8728,6 +8811,7 @@
 ( -488 -1184 72 ) ( -500 -1184 72 ) ( -500 -1312 72 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "wait"	"20"
 "targetname"	"t13"
@@ -8745,25 +8829,34 @@
 ( -488 -1184 120 ) ( -500 -1184 120 ) ( -500 -1312 120 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"-1224 -800 0"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-952 -936 8"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-1216 -960 8"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-776 -160 128"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -8779,6 +8872,7 @@
 ( -488 -160 -96 ) ( -488 -72 -96 ) ( -504 -72 -96 ) DOOR04_2 96 96 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "classname"	"func_door"
@@ -8794,227 +8888,331 @@
 ( -488 -248 -96 ) ( -488 -160 -96 ) ( -504 -160 -96 ) DOOR04_2 96 96 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"-264 -160 124"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"-544 -82 -4"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "origin"	"-544 -238 -4"
 "classname"	"light_torch_small_walltorch"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "classname"	"light_flame_small_yellow"
 "origin"	"-1144 48 38"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 }
+
 {
 "origin"	"-1432 -256 38"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "classname"	"light"
 "origin"	"1352 440 600"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"-1040 -272 38"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "classname"	"light_flame_small_yellow"
 "origin"	"-1352 -432 14"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 }
+
 {
 "origin"	"-960 -48 14"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "classname"	"light"
 "origin"	"-1408 -624 20"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1072 -512 20"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-1016 64 20"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-1048 -712 20"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-632 32 64"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-632 -168 -32"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-952 -432 16"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-952 0 -312"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-944 -248 -312"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-824 -72 -312"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-800 -344 -312"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-648 -176 -312"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-528 -320 -360"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-960 -448 -312"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1232 -448 -312"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-1232 -608 -312"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1432 -696 -312"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-1464 -376 -312"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1056 -736 -312"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-992 -560 -312"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"-620 -1958 256"
+	"_color"	"1.00 0.64 0.30"
+	"style"	"1"
 "classname"	"light_flame_large_yellow"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-624 -1912 176"
 "classname"	"light"
 }
+
 {
 "classname"	"light_flame_large_yellow"
 "origin"	"-966 -1750 256"
+	"_color"	"1.00 0.64 0.30"
+	"style"	"1"
 }
+
 {
 "classname"	"light"
 "origin"	"-920 -1744 176"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"250"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-768 -1760 200"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-616 -1600 248"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-288 -1632 144"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-352 -1696 144"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-584 -1640 136"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-184 -1488 144"
 "classname"	"light"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-152 -1832 144"
 "classname"	"light"
 }
+
 {
 "classname"	"light_flame_small_yellow"
 "origin"	"72 -1312 158"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 }
+
 {
 "light"	"300"
+	"style"	"1"
+	"_color"	"1.00 0.58 0.22"
 "classname"	"light_flame_small_yellow"
 "origin"	"120 -464 -98"
 }
+
 {
 "origin"	"-264 -520 30"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "origin"	"64 -480 -256"
 "classname"	"light"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"68 -548 -156"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"48 -128 -172"
 "targetname"	"t72"
 "target"	"t73"
 }
+
 {
 "origin"	"48 -672 -172"
 "classname"	"path_corner"
@@ -9022,6 +9220,7 @@
 "target"	"t77"
 "wait"	"-1"
 }
+
 {
 "sounds"	"1"
 "classname"	"func_train"
@@ -9052,6 +9251,7 @@
 ( -608 -384 -148 ) ( -608 -360 -164 ) ( -624 -384 -148 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_door_secret"
 "angle"	"0"
@@ -9066,6 +9266,7 @@
 ( 96 -120 -176 ) ( 64 -120 -176 ) ( 64 -128 -176 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "spawnflags"	"3"
@@ -9081,6 +9282,7 @@
 ( 64 -120 -176 ) ( 32 -120 -176 ) ( 32 -128 -176 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t76"
@@ -9093,6 +9295,7 @@
 ( 112 -324 -208 ) ( 16 -324 -208 ) ( 16 -336 -208 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "delay"	"2.4"
@@ -9107,6 +9310,7 @@
 ( 124 -108 -160 ) ( 112 -108 -160 ) ( 112 -120 -160 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "wait"	"-1"
 "classname"	"path_corner"
@@ -9114,13 +9318,16 @@
 "targetname"	"t77"
 "target"	"t73"
 }
+
 {
 "classname"	"light"
 "origin"	"64 -160 -152"
 "spawnflags"	"1"
 "light"	"250"
+	"_color"	"0.88 0.74 0.58"
 "targetname"	"t76"
 }
+
 {
 "sounds"	"3"
 "classname"	"func_door"
@@ -9138,6 +9345,7 @@
 ( 112 -136 -224 ) ( 16 -136 -224 ) ( 16 -216 -224 ) DOOR05_2 0 96 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -9154,6 +9362,7 @@
 ( 64 -128 -224 ) ( -32 -128 -224 ) ( -32 -208 -224 ) DOOR05_2 0 96 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "delay"	"3"
@@ -9168,6 +9377,7 @@
 ( 8 -112 -160 ) ( 0 -112 -160 ) ( 0 -120 -160 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"256"
 "classname"	"monster_zombie"
@@ -9175,6 +9385,7 @@
 "angle"	"90"
 "targetname"	"t79"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t79"
@@ -9187,6 +9398,7 @@
 ( 104 -184 -232 ) ( 24 -184 -232 ) ( 24 -208 -232 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"256"
 "angle"	"90"
@@ -9194,6 +9406,7 @@
 "classname"	"monster_zombie"
 "targetname"	"t79"
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -9211,49 +9424,70 @@
 ( 128 -416 -400 ) ( 0 -416 -400 ) ( 0 -528 -400 ) WSWAMP1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"136 -604 -260"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"384 -48 -168"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"776 -248 -256"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"768 -464 -256"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"216 136 -104"
 "classname"	"light"
 }
+
 {
 "origin"	"228 -168 -98"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "classname"	"light_flame_small_yellow"
 "origin"	"8 148 -98"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 }
+
 {
 "classname"	"light"
 "origin"	"976 -352 -168"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1368 -336 -112"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "sounds"	"0"
 "angle"	"90"
@@ -9267,6 +9501,7 @@
 ( 1480 -352 -160 ) ( 1480 -264 -160 ) ( 1464 -264 -160 ) DOOR04_2 32 32 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "angle"	"270"
@@ -9280,150 +9515,218 @@
 ( 1480 -440 -160 ) ( 1480 -352 -160 ) ( 1464 -352 -160 ) DOOR04_2 32 32 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1488 -360 72"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"1426 -274 -68"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "classname"	"light_torch_small_walltorch"
 "origin"	"1426 -430 -68"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.58 0.22"
 "classname"	"light_flame_small_yellow"
 "origin"	"1120 -136 -18"
 }
+
 {
 "classname"	"light"
 "origin"	"1608 -344 -8"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1608 -96 -8"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1168 -352 120"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"896 -216 -16"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"896 -488 -16"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1336 -224 88"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1336 -488 88"
 "classname"	"light"
 }
+
 {
 "light"	"250"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1728 -360 -80"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1500 -96 -80"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"1608 10 116"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"1608 -458 116"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 "origin"	"1686 396 672"
 "classname"	"light_flame_large_yellow"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 "classname"	"light_flame_large_yellow"
 "origin"	"1686 652 672"
 }
+
 {
 "classname"	"light_flame_large_yellow"
 "origin"	"1008 396 672"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 }
+
 {
 "origin"	"1008 652 672"
 "classname"	"light_flame_large_yellow"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 }
+
 {
 "classname"	"light"
 "origin"	"1360 800 736"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1360 752 592"
 "light"	"250"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1360 392 864"
 "light"	"450"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"450"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1360 648 864"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1632 496 672"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1064 488 672"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1600 968 672"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1104 968 672"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1200 240 648"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1520 240 648"
 "classname"	"light"
 }
+
 {
 "sounds"	"3"
 "classname"	"func_door"
@@ -9439,6 +9742,7 @@
 ( 1592 1040 536 ) ( 1336 1040 536 ) ( 1336 1024 536 ) METAL5_6 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "classname"	"func_door"
@@ -9453,6 +9757,7 @@
 ( 1464 1040 536 ) ( 1208 1040 536 ) ( 1208 1024 536 ) METAL5_6 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t80"
@@ -9465,69 +9770,100 @@
 ( 1464 1024 536 ) ( 1216 1024 536 ) ( 1216 1016 536 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1344 160 -32"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1608 152 -32"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-520 -448 -288"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-520 -640 -288"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"208 -1152 32"
 "classname"	"light"
 }
+
 {
 "light"	"200"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"150 -1466 -4"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "origin"	"518 -890 120"
+	"_color"	"1.00 0.64 0.30"
+	"style"	"1"
 "classname"	"light_flame_large_yellow"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"520 -888 36"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"516 -764 -48"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"520 -1028 4"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"-144 -728 -256"
+	"_color"	"0.88 0.74 0.58"
 "classname"	"light"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"-186 -822 -292"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "classname"	"light_torch_small_walltorch"
 "origin"	"306 -810 -292"
 }
+
 {
 "sounds"	"2"
 "targetname"	"t82"
@@ -9561,36 +9897,51 @@
 ( 560 -704 -144 ) ( 624 -768 -144 ) ( 560 -704 -128 ) PLAT_TOP2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"698 -886 -292"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "classname"	"light_torch_small_walltorch"
 "origin"	"522 -1066 -292"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"520 -776 -280"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"368 -888 -280"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"384 -248 -256"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"384 -456 -256"
 "classname"	"light"
 }
+
 {
 "sounds"	"2"
 "classname"	"func_plat"
@@ -9619,80 +9970,115 @@
 ( 144 -944 32 ) ( 48 -944 32 ) ( 48 -1056 32 ) PLAT_TOP2 16 80 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"280 -1000 102"
+	"_color"	"1.00 0.58 0.22"
+	"style"	"1"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.58 0.22"
 "classname"	"light_flame_small_yellow"
 "origin"	"728 -1128 78"
 }
+
 {
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.58 0.22"
 "origin"	"312 -1128 78"
 "classname"	"light_flame_small_yellow"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"150 -1210 -108"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"400 -1160 -10"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"632 -1160 -10"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"456 -1160 -118"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"576 -1160 -118"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"344 -1264 -118"
 "classname"	"light"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"344 -1096 -118"
 "classname"	"light"
 }
+
 {
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"712 -1064 -118"
 "classname"	"light"
 }
+
 {
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"216 -1000 -118"
 "classname"	"light"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"200 -1000 -6"
 "classname"	"light"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"96 -1000 -78"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"72 -1000 122"
 "classname"	"light"
 }
+
 {
 "sounds"	"0"
 "target"	"t81"
@@ -9708,6 +10094,7 @@
 ( -190 -960 48 ) ( -254 -960 48 ) ( -254 -1024 48 ) +0FLOORSW 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "targetname"	"t81"
@@ -9724,36 +10111,49 @@
 ( -272 -1064 64 ) ( -288 -1064 64 ) ( -288 -1080 64 ) WMET4_6 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-272 -1000 120"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"368 -1408 8"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"608 -808 -20"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"440 -808 -20"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"672 -880 -60"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"368 -888 -60"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "target"	"t82"
 "classname"	"trigger_once"
@@ -9766,6 +10166,7 @@
 ( 568 -712 -148 ) ( 472 -712 -148 ) ( 472 -752 -148 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t82"
 "classname"	"trigger_once"
@@ -9778,6 +10179,7 @@
 ( 328 -856 -352 ) ( 320 -856 -352 ) ( 320 -920 -352 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t83"
 "classname"	"trigger_once"
@@ -9790,6 +10192,7 @@
 ( -728 -320 -368 ) ( -744 -320 -368 ) ( -744 -456 -368 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "lip"	"-4"
 "sounds"	"0"
@@ -9808,18 +10211,21 @@
 ( -1176 -472 -464 ) ( -1232 -472 -464 ) ( -1232 -536 -464 ) WGRND1_5 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-1218 -532 -438"
 "angle"	"0"
 "targetname"	"t83"
 }
+
 {
 "origin"	"-1270 -558 -438"
 "classname"	"monster_zombie"
 "angle"	"0"
 "targetname"	"t83"
 }
+
 {
 "sounds"	"0"
 "targetname"	"t83"
@@ -9838,22 +10244,28 @@
 ( -840 -8 -398 ) ( -960 -8 -398 ) ( -960 -120 -398 ) WGRND1_5 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"2048"
 "sounds"	"1"
 "classname"	"item_key2"
 "origin"	"-976 -360 -336"
 }
+
 {
 "classname"	"light"
 "origin"	"80 -1144 24"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-72 -1136 80"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "lip"	"-4"
 "sounds"	"0"
@@ -9872,6 +10284,7 @@
 ( -840 -8 -496 ) ( -960 -8 -496 ) ( -960 -120 -496 ) WGRND1_5 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -9888,57 +10301,79 @@
 ( -1176 -472 -396 ) ( -1296 -472 -396 ) ( -1296 -584 -396 ) WGRND1_5 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "angle"	"315"
 "origin"	"-866 -44 -448"
 "classname"	"monster_zombie"
 "targetname"	"t83"
 }
+
 {
 "classname"	"light"
 "origin"	"-892 -64 -450"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1236 -528 -450"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"912 -208 -160"
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"920 -504 -160"
 "classname"	"light"
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"726 -206 -4"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "origin"	"726 -506 -4"
 "classname"	"light_torch_small_walltorch"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "classname"	"light"
 "origin"	"740 -360 -8"
 "light"	"200"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1344 -192 -112"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1344 -520 -112"
 "classname"	"light"
 }
+
 {
 "sounds"	"1"
 "classname"	"func_door"
@@ -9954,6 +10389,7 @@
 ( 1248 -112 -208 ) ( 1192 -112 -208 ) ( 1192 -120 -208 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "wait"	"-1"
@@ -9969,11 +10405,15 @@
 ( 1056 -112 -208 ) ( 1000 -112 -208 ) ( 1000 -120 -208 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"1120 -560 -18"
 "classname"	"light_flame_small_yellow"
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.58 0.22"
 }
+
 {
 "sounds"	"1"
 "wait"	"-1"
@@ -9989,6 +10429,7 @@
 ( 1192 -576 -208 ) ( 1192 -584 -208 ) ( 1248 -584 -208 ) ALTARB_2 32 64 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"1"
 "classname"	"func_door"
@@ -10004,46 +10445,63 @@
 ( 1000 -576 -208 ) ( 1000 -584 -208 ) ( 1056 -584 -208 ) ALTARB_2 32 64 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"1216 -136 -136"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1024 -136 -136"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1216 -568 -136"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1024 -568 -136"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1024 -40 -136"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1216 -40 -136"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1216 -656 -136"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1024 -656 -136"
 "classname"	"light"
 }
+
 {
 "sounds"	"2"
 "classname"	"func_button"
@@ -10059,21 +10517,28 @@
 ( 728 -336 -32 ) ( 720 -336 -32 ) ( 720 -368 -32 ) DOOR05_3 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"1120 -192 -104"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1120 -504 -104"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1760 128 -96"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "sounds"	"1"
 "classname"	"func_door_secret"
@@ -10089,12 +10554,14 @@
 ( 1752 160 -160 ) ( 1744 160 -160 ) ( 1744 96 -160 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"info_teleport_destination"
 "origin"	"1360 704 552"
 "angle"	"90"
 "targetname"	"t86"
 }
+
 {
 "classname"	"trigger_teleport"
 "target"	"t86"
@@ -10107,47 +10574,56 @@
 ( 1768 160 -132 ) ( 1764 160 -132 ) ( 1764 96 -132 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1724 -96 -80"
 "classname"	"light"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-216 -1504 96"
 "targetname"	"t87"
 "target"	"t88"
 }
+
 {
 "origin"	"-216 -1768 96"
 "classname"	"path_corner"
 "targetname"	"t90"
 "target"	"t87"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-216 -1768 96"
 "targetname"	"t88"
 "target"	"t89"
 }
+
 {
 "origin"	"-376 -1768 96"
 "classname"	"path_corner"
 "targetname"	"t89"
 "target"	"t90"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-194 -1466 112"
 "angle"	"270"
 "target"	"t87"
 }
+
 {
 "spawnflags"	"1"
 "angle"	"270"
 "origin"	"-154 -1002 72"
 "classname"	"monster_ogre"
 }
+
 {
 "classname"	"monster_ogre"
 "origin"	"358 -1274 -40"
@@ -10155,6 +10631,7 @@
 "targetname"	"t93"
 "spawnflags"	"768"
 }
+
 {
 "spawnflags"	"768"
 "classname"	"monster_wizard"
@@ -10162,6 +10639,7 @@
 "angle"	"270"
 "target"	"t91"
 }
+
 {
 "spawnflags"	"768"
 "classname"	"path_corner"
@@ -10169,6 +10647,7 @@
 "targetname"	"t91"
 "target"	"t92"
 }
+
 {
 "spawnflags"	"768"
 "origin"	"392 -1160 8"
@@ -10176,6 +10655,7 @@
 "targetname"	"t92"
 "target"	"t91"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"704 -1192 -120"
@@ -10183,6 +10663,7 @@
 "targetname"	"t93"
 "spawnflags"	"256"
 }
+
 {
 "spawnflags"	"256"
 "classname"	"trigger_once"
@@ -10196,6 +10677,7 @@
 ( 592 -1296 -64 ) ( 448 -1296 -64 ) ( 448 -1304 -64 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"768"
 "classname"	"trigger_once"
@@ -10209,36 +10691,42 @@
 ( 624 -968 -64 ) ( 432 -968 -64 ) ( 432 -976 -64 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"path_corner"
 "origin"	"232 -864 -344"
 "targetname"	"t94"
 "target"	"t95"
 }
+
 {
 "origin"	"8 -824 -344"
 "classname"	"path_corner"
 "targetname"	"t95"
 "target"	"t94"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-96 -816 -344"
 "targetname"	"t96"
 "target"	"t97"
 }
+
 {
 "origin"	"-168 -744 -344"
 "classname"	"path_corner"
 "targetname"	"t97"
 "target"	"t96"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"184 -856 -328"
 "angle"	"180"
 "target"	"t94"
 }
+
 {
 "angle"	"180"
 "origin"	"-48 -856 -328"
@@ -10246,18 +10734,21 @@
 "target"	"t96"
 "spawnflags"	"256"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-556 -12 -336"
 "angle"	"0"
 "targetname"	"t83"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-1384 -856 -336"
 "targetname"	"t83"
 "angle"	"270"
 }
+
 {
 "spawnflags"	"768"
 "classname"	"monster_ogre"
@@ -10265,78 +10756,91 @@
 "angle"	"90"
 "targetname"	"t111"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"384 -256 -296"
 "target"	"t100"
 "targetname"	"t103"
 }
+
 {
 "origin"	"768 -256 -296"
 "classname"	"path_corner"
 "targetname"	"t100"
 "target"	"t101"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"768 -448 -296"
 "targetname"	"t101"
 "target"	"t102"
 }
+
 {
 "origin"	"384 -456 -296"
 "classname"	"path_corner"
 "targetname"	"t102"
 "target"	"t103"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"384 -352 -280"
 "angle"	"90"
 "target"	"t103"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"776 -360 -280"
 "angle"	"270"
 "target"	"t101"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"384 -616 -296"
 "targetname"	"t105"
 "target"	"t104"
 }
+
 {
 "origin"	"192 -616 -296"
 "classname"	"path_corner"
 "targetname"	"t104"
 "target"	"t105"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"320 -616 -280"
 "angle"	"180"
 "target"	"t104"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-216 -688 -344"
 "targetname"	"t106"
 "target"	"t107"
 }
+
 {
 "origin"	"-336 -656 -344"
 "classname"	"path_corner"
 "targetname"	"t107"
 "target"	"t106"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-224 -656 -328"
 "angle"	"315"
 "target"	"t106"
 }
+
 {
 "spawnflags"	"1280"
 "classname"	"path_corner"
@@ -10344,6 +10848,7 @@
 "targetname"	"t108"
 "target"	"t109"
 }
+
 {
 "spawnflags"	"1280"
 "origin"	"232 -104 -200"
@@ -10351,6 +10856,7 @@
 "targetname"	"t109"
 "target"	"t108"
 }
+
 {
 "spawnflags"	"1280"
 "classname"	"monster_zombie"
@@ -10358,6 +10864,7 @@
 "angle"	"90"
 "target"	"t108"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t110"
@@ -10370,6 +10877,7 @@
 ( 264 -544 -312 ) ( 248 -544 -312 ) ( 248 -672 -312 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"552 -216 -280"
@@ -10377,12 +10885,14 @@
 "targetname"	"t110"
 "spawnflags"	"256"
 }
+
 {
 "angle"	"270"
 "origin"	"800 -216 -280"
 "classname"	"monster_zombie"
 "targetname"	"t110"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"656 -480 -280"
@@ -10390,12 +10900,14 @@
 "targetname"	"t110"
 "spawnflags"	"256"
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"8 -472 -32"
 "angle"	"180"
 "targetname"	"t111"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t111"
@@ -10408,30 +10920,35 @@
 ( -464 -72 -96 ) ( -472 -72 -96 ) ( -472 -248 -96 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"1024 -88 -184"
 "angle"	"270"
 "targetname"	"t84"
 }
+
 {
 "angle"	"270"
 "origin"	"1216 -72 -184"
 "classname"	"monster_zombie"
 "targetname"	"t84"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"1216 -608 -184"
 "angle"	"90"
 "targetname"	"t84"
 }
+
 {
 "angle"	"90"
 "origin"	"1024 -604 -184"
 "classname"	"monster_zombie"
 "targetname"	"t84"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t112"
@@ -10444,6 +10961,7 @@
 ( 1488 -264 -160 ) ( 1480 -264 -160 ) ( 1480 -440 -160 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"1280"
 "classname"	"path_corner"
@@ -10451,6 +10969,7 @@
 "targetname"	"t116"
 "target"	"t115"
 }
+
 {
 "spawnflags"	"1280"
 "origin"	"1528 752 544"
@@ -10458,6 +10977,7 @@
 "targetname"	"t115"
 "target"	"t116"
 }
+
 {
 "spawnflags"	"1280"
 "classname"	"monster_demon1"
@@ -10465,18 +10985,21 @@
 "angle"	"0"
 "target"	"t115"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"392 -1408 -48"
 "targetname"	"t118"
 "target"	"t122"
 }
+
 {
 "origin"	"216 -1408 -48"
 "classname"	"path_corner"
 "targetname"	"t117"
 "target"	"t118"
 }
+
 {
 "spawnflags"	"1"
 "classname"	"monster_ogre"
@@ -10484,22 +11007,28 @@
 "angle"	"180"
 "target"	"t117"
 }
+
 {
 "classname"	"weapon_nailgun"
 "origin"	"-712 -1240 60"
 "angle"	"90"
 }
+
 {
 "spawnflags"	"256"
 "classname"	"monster_ogre"
 "origin"	"790 -346 -40"
 "angle"	"0"
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"1658 -574 -92"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -10515,6 +11044,7 @@
 ( 1644 -468 -152 ) ( 1628 -468 -152 ) ( 1628 -484 -152 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -10530,6 +11060,7 @@
 ( 1596 -468 -152 ) ( 1580 -468 -152 ) ( 1580 -484 -152 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"3"
 "classname"	"func_door"
@@ -10545,6 +11076,7 @@
 ( 1560 -544 -80 ) ( 1560 -528 -80 ) ( 1560 -528 -64 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "sounds"	"0"
 "classname"	"func_door"
@@ -10560,11 +11092,13 @@
 ( 1560 -544 -124 ) ( 1560 -528 -124 ) ( 1560 -528 -108 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"item_shells"
 "origin"	"1592 -524 -152"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"trigger_once"
 "spawnflags"	"1792"
@@ -10578,6 +11112,7 @@
 ( 1660 -452 -152 ) ( 1560 -452 -152 ) ( 1560 -460 -152 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"1792"
 "classname"	"trigger_once"
@@ -10591,97 +11126,118 @@
 ( 1660 -440 -152 ) ( 1560 -440 -152 ) ( 1560 -448 -152 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"item_health"
 "origin"	"-960 -1616 64"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"-960 -1664 64"
 "classname"	"item_health"
 }
+
 {
 "classname"	"weapon_supershotgun"
 "origin"	"184 -1432 -56"
 "spawnflags"	"2048"
 }
+
 {
 "spawnflags"	"1024"
 "classname"	"item_shells"
 "origin"	"-688 -1944 88"
 }
+
 {
 "classname"	"item_rockets"
 "origin"	"-352 -1128 48"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"-1000 -1320 -32"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_armor1"
 "origin"	"-288 -992 48"
 }
+
 {
 "classname"	"item_health"
 "origin"	"-24 -1272 80"
 "spawnflags"	"2048"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"344 -1288 -152"
 }
+
 {
 "classname"	"item_health"
 "origin"	"656 -904 -112"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_health"
 "origin"	"616 -856 -112"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_rockets"
 "origin"	"504 -1064 -352"
 }
+
 {
 "classname"	"item_health"
 "origin"	"-144 -840 -348"
 }
+
 {
 "origin"	"-464 -684 -348"
 "classname"	"item_health"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"1008 -70 -208"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"1008 -656 -208"
 }
+
 {
 "classname"	"item_rockets"
 "origin"	"792 -264 -64"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_health"
 "origin"	"1200 -660 -208"
 }
+
 {
 "classname"	"item_health"
 "origin"	"1344 -200 -208"
 "spawnflags"	"1"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"1288 -200 -208"
 "classname"	"item_health"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t171"
@@ -10695,100 +11251,125 @@
 ( -88 -1560 88 ) ( -280 -1560 88 ) ( -280 -1576 88 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light"
 "origin"	"32 -1312 112"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-400 -1136 112"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-1144 0 -20"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1088 -272 -20"
 "classname"	"light"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"536 -1464 -64"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"-1192 16 -92"
 }
+
 {
 "origin"	"-1128 16 -92"
 "classname"	"item_spikes"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"344 -904 -112"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"-200 -176 -96"
 }
+
 {
 "classname"	"item_health"
 "origin"	"176 -152 -208"
 "spawnflags"	"1"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"272 -152 -208"
 "classname"	"item_health"
 }
+
 {
 "classname"	"item_health"
 "origin"	"24 152 -208"
 }
+
 {
 "classname"	"item_rockets"
 "origin"	"48 -112 -96"
 "spawnflags"	"1"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"-576 -24 -96"
 "spawnflags"	"2048"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"64 152 -208"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"-936 -936 -32"
 "classname"	"item_spikes"
 }
+
 {
 "classname"	"item_rockets"
 "origin"	"-1048 -752 -96"
 }
+
 {
 "origin"	"216 -1408 -48"
 "classname"	"path_corner"
 "targetname"	"t122"
 "target"	"t123"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"216 -1264 -48"
 "targetname"	"t123"
 "target"	"t117"
 }
+
 {
 "classname"	"item_health"
 "origin"	"152 -1144 -150"
 "spawnflags"	"1"
 }
+
 {
 "sounds"	"1"
 "classname"	"func_door"
@@ -10805,6 +11386,7 @@
 ( 96 -1416 48 ) ( -8 -1416 48 ) ( -8 -1432 48 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_ogre"
 "origin"	"34 -1466 72"
@@ -10812,6 +11394,7 @@
 "target"	"t124"
 "spawnflags"	"257"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"32 -1280 56"
@@ -10819,6 +11402,7 @@
 "target"	"t125"
 "spawnflags"	"256"
 }
+
 {
 "origin"	"-320 -1280 56"
 "classname"	"path_corner"
@@ -10826,108 +11410,145 @@
 "target"	"t124"
 "spawnflags"	"256"
 }
+
 {
 "classname"	"light"
 "origin"	"40 -1488 120"
 "light"	"75"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-264 -472 -32"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"80 -464 -136"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"232 -136 -144"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"48 144 -144"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"64 -96 -32"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"item_health"
 "origin"	"1288 104 -160"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"1336 104 -160"
 "classname"	"item_health"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"1600 968 536"
 }
+
 {
 "classname"	"light"
 "origin"	"584 -448 -256"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"568 -248 -256"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"400 -624 -256"
 "light"	"100"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-928 -48 -40"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"item_health"
 "origin"	"-1256 -1000 -30"
 "spawnflags"	"3584"
 }
+
 {
 "spawnflags"	"3584"
 "origin"	"-1208 -1000 -30"
 "classname"	"item_health"
 }
+
 {
 "classname"	"light"
 "origin"	"-1376 -104 26"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"-1320 -56 -94"
 "classname"	"item_health"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-448 -160 136"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-416 -216 -24"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-288 -64 -32"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"-448 -88 -32"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"-528 -304 -64"
@@ -10935,82 +11556,114 @@
 "spawnflags"	"256"
 "targetname"	"t148"
 }
+
 {
 "classname"	"light"
 "origin"	"-648 16 -48"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-600 -320 40"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"-1196 100 0"
 "angle"	"90"
 "targetname"	"t147"
 }
+
 {
 "classname"	"light"
 "origin"	"-704 -384 -152"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"-40 -992 152"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "origin"	"1686 884 672"
 "classname"	"light_flame_large_yellow"
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 }
+
 {
 "light"	"225"
+	"style"	"1"
+	"_color"	"1.00 0.64 0.30"
 "classname"	"light_flame_large_yellow"
 "origin"	"1008 884 672"
 }
+
 {
 "classname"	"light"
 "origin"	"1360 880 864"
 "light"	"450"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1344 960 576"
 "light"	"225"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light"
 "origin"	"1096 632 592"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1600 632 592"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1080 396 592"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1620 396 592"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"1084 884 592"
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1604 884 592"
 "classname"	"light"
 }
+
 {
 "classname"	"monster_demon1"
 "origin"	"1584 816 560"
@@ -11018,6 +11671,7 @@
 "target"	"t130"
 "spawnflags"	"1024"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"1536 880 544"
@@ -11025,6 +11679,7 @@
 "target"	"t131"
 "spawnflags"	"1024"
 }
+
 {
 "origin"	"1120 880 544"
 "classname"	"path_corner"
@@ -11032,6 +11687,7 @@
 "target"	"t130"
 "spawnflags"	"1024"
 }
+
 {
 "classname"	"trigger_changelevel"
 "map"	"e1m4"
@@ -11044,20 +11700,26 @@
 ( 1464 1056 536 ) ( 1216 1056 536 ) ( 1216 1040 536 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-136 -1568 144"
 "classname"	"light"
 }
+
 {
 "light"	"175"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-192 -1304 144"
 "classname"	"light"
 }
+
 {
 "classname"	"item_health"
 "origin"	"-200 -96 -96"
 }
+
 {
 "targetname"	"t13"
 "target"	"t14"
@@ -11142,33 +11804,39 @@
 ( -760 -1384 536 ) ( -808 -1336 536 ) ( -760 -1384 552 ) WIZWOOD1_7 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"item_health"
 "origin"	"-1208 -1000 -24"
 "spawnflags"	"1281"
 }
+
 {
 "spawnflags"	"1281"
 "origin"	"-1256 -1000 -24"
 "classname"	"item_health"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"-200 -216 -96"
 "spawnflags"	"2048"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-912 -88 -448"
 "angle"	"315"
 "spawnflags"	"256"
 }
+
 {
 "spawnflags"	"1025"
 "classname"	"monster_ogre"
 "origin"	"-1400 -256 -72"
 "angle"	"0"
 }
+
 {
 "targetname"	"t112"
 "target"	"t135"
@@ -11176,6 +11844,7 @@
 "origin"	"1608 -96 80"
 "classname"	"monster_ogre"
 }
+
 {
 "targetname"	"t112"
 "target"	"t135"
@@ -11183,6 +11852,7 @@
 "origin"	"1608 -344 104"
 "angle"	"90"
 }
+
 {
 "target"	"t119"
 "targetname"	"t135"
@@ -11198,6 +11868,7 @@
 ( 1776 -264 56 ) ( 1752 -264 56 ) ( 1752 -296 56 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t120"
 "targetname"	"t135"
@@ -11213,23 +11884,27 @@
 ( 1776 -304 56 ) ( 1752 -304 56 ) ( 1752 -336 56 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"368 -1136 -120"
 "angle"	"0"
 "targetname"	"t93"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-16 -904 -328"
 "angle"	"45"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"808 -488 -280"
 "angle"	"135"
 "spawnflags"	"256"
 }
+
 {
 "classname"	"monster_ogre"
 "origin"	"1384 -344 -136"
@@ -11237,36 +11912,42 @@
 "spawnflags"	"768"
 "targetname"	"t140"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-272 -1824 96"
 "targetname"	"t138"
 "target"	"t137"
 }
+
 {
 "origin"	"-176 -1800 96"
 "classname"	"path_corner"
 "targetname"	"t136"
 "target"	"t138"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"-176 -1800 96"
 "targetname"	"t137"
 "target"	"t139"
 }
+
 {
 "origin"	"-144 -1496 96"
 "classname"	"path_corner"
 "target"	"t136"
 "targetname"	"t139"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"-136 -1416 112"
 "angle"	"270"
 "target"	"t139"
 }
+
 {
 "classname"	"func_door"
 "angle"	"-1"
@@ -11283,16 +11964,21 @@
 ( -224 -1064 64 ) ( -240 -1064 64 ) ( -240 -1080 64 ) WMET4_6 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"64 -160 -296"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"64 -280 -296"
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"trigger_once"
 "spawnflags"	"768"
@@ -11306,6 +11992,7 @@
 ( 840 -296 -312 ) ( 832 -296 -312 ) ( 832 -416 -312 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"1536 104 -136"
@@ -11313,6 +12000,7 @@
 "targetname"	"t112"
 "spawnflags"	"1024"
 }
+
 {
 "angle"	"315"
 "origin"	"1440 168 -136"
@@ -11320,6 +12008,7 @@
 "targetname"	"t112"
 "spawnflags"	"1024"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"1592 112 -136"
@@ -11327,6 +12016,7 @@
 "targetname"	"t112"
 "spawnflags"	"1280"
 }
+
 {
 "targetname"	"t140"
 "spawnflags"	"1536"
@@ -11334,6 +12024,7 @@
 "origin"	"1384 -344 -136"
 "classname"	"monster_zombie"
 }
+
 {
 "angle"	"0"
 "classname"	"func_door_secret"
@@ -11346,6 +12037,7 @@
 ( 1688 -624 -160 ) ( 1536 -624 -160 ) ( 1536 -632 -160 ) WBRICK1_5 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t141"
 "classname"	"trigger_teleport"
@@ -11358,17 +12050,21 @@
 ( 1640 -672 -132 ) ( 1640 -668 -132 ) ( 1576 -668 -132 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"200"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"1608 -688 -88"
 "classname"	"light"
 }
+
 {
 "targetname"	"t141"
 "angle"	"90"
 "origin"	"1612 -372 72"
 "classname"	"info_teleport_destination"
 }
+
 {
 "classname"	"trigger_secret"
 {
@@ -11380,70 +12076,87 @@
 ( 1660 -304 64 ) ( 1564 -304 64 ) ( 1564 -392 64 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"2049"
 "origin"	"1592 -164 56"
 "classname"	"item_rockets"
 }
+
 {
 "classname"	"monster_zombie"
 "origin"	"116 132 -184"
 "angle"	"315"
 "spawnflags"	"768"
 }
+
 {
 "spawnflags"	"768"
 "angle"	"315"
 "origin"	"264 152 -184"
 "classname"	"monster_zombie"
 }
+
 {
 "origin"	"1608 -584 -152"
 "classname"	"item_armor2"
 }
+
 {
 "targetname"	"t144"
 "origin"	"-404 -1804 92"
 "classname"	"info_null"
 }
+
 {
 "target"	"t144"
 "light"	"350"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-392 -1804 160"
 "classname"	"light"
 }
+
 {
 "origin"	"-408 -1800 88"
 "classname"	"weapon_grenadelauncher"
 }
+
 {
 "target"	"t146"
 "targetname"	"t145"
 "classname"	"path_corner"
 "origin"	"-112 -1536 96"
 }
+
 {
 "target"	"t145"
 "targetname"	"t146"
 "origin"	"-112 -1608 96"
 "classname"	"path_corner"
 }
+
 {
 "target"	"t145"
 "angle"	"270"
 "origin"	"-104 -1480 112"
 "classname"	"monster_zombie"
 }
+
 {
 "classname"	"light"
 "origin"	"-584 8 -288"
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"-494 -334 -300"
 "light"	"250"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t147"
@@ -11456,6 +12169,7 @@
 ( -1164 -824 -28 ) ( -1164 -816 -28 ) ( -1260 -816 -28 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t148"
@@ -11469,11 +12183,13 @@
 ( -1152 -468 -104 ) ( -1320 -468 -104 ) ( -1320 -476 -104 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"-200 -136 -96"
 "classname"	"item_health"
 "spawnflags"	"3072"
 }
+
 {
 "speed"	"50"
 "sounds"	"1"
@@ -11490,6 +12206,7 @@
 ( -880 -896 -44 ) ( -896 -896 -44 ) ( -896 -1024 -44 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "targetname"	"t149"
 "spawnflags"	"768"
@@ -11497,6 +12214,7 @@
 "origin"	"-848 -928 -4"
 "classname"	"monster_zombie"
 }
+
 {
 "targetname"	"t149"
 "classname"	"monster_zombie"
@@ -11504,6 +12222,7 @@
 "angle"	"180"
 "spawnflags"	"768"
 }
+
 {
 "targetname"	"t149"
 "spawnflags"	"768"
@@ -11511,6 +12230,7 @@
 "origin"	"-856 -992 -4"
 "classname"	"monster_zombie"
 }
+
 {
 "target"	"t149"
 "spawnflags"	"768"
@@ -11524,6 +12244,7 @@
 ( -1048 -896 -28 ) ( -1056 -896 -28 ) ( -1056 -1008 -28 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "target"	"t169"
 "spawnflags"	"769"
@@ -11531,11 +12252,13 @@
 "origin"	"-1384 -256 -72"
 "classname"	"monster_shambler"
 }
+
 {
 "spawnflags"	"769"
 "origin"	"-808 -936 -32"
 "classname"	"item_rockets"
 }
+
 {
 "spawnflags"	"2"
 "target"	"t150"
@@ -11550,6 +12273,7 @@
 ( -1160 232 -88 ) ( -1288 232 -88 ) ( -1288 224 -88 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "targetname"	"t151"
 "spawnflags"	"768"
@@ -11557,17 +12281,21 @@
 "origin"	"-1224 272 -64"
 "classname"	"monster_shambler"
 }
+
 {
 "targetname"	"t150"
 "angle"	"270"
 "origin"	"-1232 -136 -88"
 "classname"	"info_teleport_destination"
 }
+
 {
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-800 -968 28"
 "classname"	"light"
 }
+
 {
 "spawnflags"	"768"
 "targetname"	"t155"
@@ -11575,6 +12303,7 @@
 "origin"	"600 -856 -344"
 "classname"	"path_corner"
 }
+
 {
 "spawnflags"	"768"
 "target"	"t153"
@@ -11582,6 +12311,7 @@
 "classname"	"path_corner"
 "origin"	"440 -848 -344"
 }
+
 {
 "spawnflags"	"768"
 "target"	"t154"
@@ -11589,6 +12319,7 @@
 "origin"	"440 -968 -344"
 "classname"	"path_corner"
 }
+
 {
 "spawnflags"	"768"
 "target"	"t155"
@@ -11596,18 +12327,21 @@
 "classname"	"path_corner"
 "origin"	"608 -968 -344"
 }
+
 {
 "spawnflags"	"768"
 "target"	"t152"
 "origin"	"536 -848 -328"
 "classname"	"monster_zombie"
 }
+
 {
 "spawnflags"	"768"
 "target"	"t154"
 "origin"	"520 -960 -328"
 "classname"	"monster_zombie"
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1024"
@@ -11620,11 +12354,15 @@
 ( 592 -1328 80 ) ( 288 -1328 80 ) ( 288 -1480 80 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"light_torch_small_walltorch"
 "origin"	"586 -1466 -4"
 "light"	"200"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 }
+
 {
 "target"	"t157"
 "classname"	"monster_ogre"
@@ -11633,6 +12371,7 @@
 "targetname"	"t156"
 "spawnflags"	"768"
 }
+
 {
 "classname"	"trigger_once"
 "spawnflags"	"768"
@@ -11646,6 +12385,7 @@
 ( 288 -1296 -56 ) ( 144 -1296 -56 ) ( 144 -1304 -56 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_once"
 "target"	"t156"
@@ -11659,11 +12399,14 @@
 ( 592 -1240 -64 ) ( 448 -1240 -64 ) ( 448 -1248 -64 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"672 -1400 -16"
 "classname"	"light"
 }
+
 {
 "sounds"	"1"
 "targetname"	"t157"
@@ -11679,6 +12422,7 @@
 ( 608 -1344 -74 ) ( 592 -1344 -74 ) ( 592 -1456 -74 ) WSWAMP2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "targetname"	"t157"
 "spawnflags"	"768"
@@ -11686,16 +12430,20 @@
 "origin"	"648 -1400 -40"
 "classname"	"monster_ogre"
 }
+
 {
 "target"	"t157"
 "origin"	"676 -1336 -28"
 "classname"	"info_null"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"520 -1296 16"
 "classname"	"light"
 }
+
 {
 "target"	"t12"
 "wait"	"-1"
@@ -11711,11 +12459,13 @@
 ( -824 -1216 80 ) ( -832 -1216 80 ) ( -832 -1264 80 ) +1SHOOT 16 -16 0 1.000000 1.000000
 }
 }
+
 {
 "spawnflags"	"2561"
 "classname"	"item_shells"
 "origin"	"672 -1144 -152"
 }
+
 {
 "classname"	"path_corner"
 "origin"	"248 88 -200"
@@ -11723,6 +12473,7 @@
 "targetname"	"t159"
 "target"	"t160"
 }
+
 {
 "spawnflags"	"768"
 "origin"	"216 -104 -200"
@@ -11730,6 +12481,7 @@
 "targetname"	"t160"
 "target"	"t159"
 }
+
 {
 "classname"	"monster_ogre"
 "origin"	"216 24 -184"
@@ -11737,12 +12489,14 @@
 "angle"	"90"
 "target"	"t159"
 }
+
 {
 "angle"	"0"
 "origin"	"782 -434 -40"
 "classname"	"monster_ogre"
 "spawnflags"	"768"
 }
+
 {
 "classname"	"monster_demon1"
 "origin"	"1600 184 -136"
@@ -11750,6 +12504,7 @@
 "targetname"	"t112"
 "spawnflags"	"769"
 }
+
 {
 "classname"	"monster_demon1"
 "origin"	"1496 1272 560"
@@ -11758,6 +12513,7 @@
 "targetname"	"t173"
 "target"	"t175"
 }
+
 {
 "angle"	"270"
 "origin"	"1392 1272 560"
@@ -11766,6 +12522,7 @@
 "targetname"	"t174"
 "target"	"t175"
 }
+
 {
 "classname"	"monster_shambler"
 "origin"	"1288 1288 560"
@@ -11773,6 +12530,7 @@
 "spawnflags"	"768"
 "targetname"	"t176"
 }
+
 {
 "classname"	"monster_demon1"
 "origin"	"1288 920 560"
@@ -11780,6 +12538,7 @@
 "spawnflags"	"768"
 "target"	"t174"
 }
+
 {
 "classname"	"monster_demon1"
 "origin"	"1408 920 560"
@@ -11787,6 +12546,7 @@
 "target"	"t173"
 "spawnflags"	"768"
 }
+
 {
 "classname"	"trigger_teleport"
 "spawnflags"	"770"
@@ -11801,6 +12561,7 @@
 ( 1504 1232 536 ) ( 1256 1232 536 ) ( 1256 1224 536 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_teleport"
 "spawnflags"	"770"
@@ -11815,6 +12576,7 @@
 ( 1600 1232 536 ) ( 1352 1232 536 ) ( 1352 1224 536 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_teleport"
 "spawnflags"	"770"
@@ -11829,6 +12591,7 @@
 ( 1704 1232 536 ) ( 1456 1232 536 ) ( 1456 1224 536 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"info_teleport_destination"
 "origin"	"1352 912 544"
@@ -11836,6 +12599,7 @@
 "spawnflags"	"768"
 "targetname"	"t165"
 }
+
 {
 "spawnflags"	"768"
 "angle"	"270"
@@ -11843,6 +12607,7 @@
 "classname"	"info_teleport_destination"
 "targetname"	"t167"
 }
+
 {
 "classname"	"info_teleport_destination"
 "origin"	"1176 912 544"
@@ -11850,21 +12615,25 @@
 "spawnflags"	"768"
 "targetname"	"t166"
 }
+
 {
 "spawnflags"	"2816"
 "origin"	"552 -1024 -352"
 "classname"	"item_rockets"
 }
+
 {
 "spawnflags"	"768"
 "origin"	"-1072 -256 -96"
 "classname"	"item_shells"
 }
+
 {
 "spawnflags"	"2817"
 "origin"	"-680 -1944 88"
 "classname"	"item_shells"
 }
+
 {
 "classname"	"trigger_once"
 "delay"	"3"
@@ -11880,6 +12649,7 @@
 ( -1104 272 -54 ) ( -1136 272 -54 ) ( -1136 248 -54 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"-1400 -856 -40"
@@ -11887,6 +12657,7 @@
 "spawnflags"	"768"
 "targetname"	"t147"
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"-1480 -312 112"
@@ -11894,6 +12665,7 @@
 "spawnflags"	"256"
 "targetname"	"t147"
 }
+
 {
 "classname"	"monster_wizard"
 "origin"	"-792 -452 152"
@@ -11901,6 +12673,7 @@
 "spawnflags"	"257"
 "targetname"	"t170"
 }
+
 {
 "classname"	"trigger_once"
 "spawnflags"	"256"
@@ -11914,6 +12687,7 @@
 ( -928 -72 -104 ) ( -936 -72 -104 ) ( -936 -256 -104 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "targetname"	"t171"
 "spawnflags"	"1281"
@@ -11921,6 +12695,7 @@
 "origin"	"28 -1352 72"
 "classname"	"monster_ogre"
 }
+
 {
 "targetname"	"t171"
 "spawnflags"	"769"
@@ -11928,46 +12703,55 @@
 "origin"	"28 -1344 72"
 "classname"	"monster_demon1"
 }
+
 {
 "angle"	"315"
 "origin"	"-864 -1696 92"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "angle"	"90"
 "origin"	"-1216 -928 -8"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "angle"	"180"
 "origin"	"1128 -352 -184"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "angle"	"225"
 "origin"	"384 136 -184"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "angle"	"180"
 "origin"	"-816 -152 -80"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "angle"	"180"
 "origin"	"-200 -368 -72"
 "classname"	"info_player_deathmatch"
 }
+
 {
 "spawnflags"	"1792"
 "origin"	"-976 -360 -360"
 "classname"	"weapon_rocketlauncher"
 }
+
 {
 "classname"	"weapon_supershotgun"
 "origin"	"784 -360 -64"
 "spawnflags"	"1792"
 }
+
 {
 "classname"	"trigger_teleport"
 "spawnflags"	"1792"
@@ -11981,6 +12765,7 @@
 ( 1088 832 556 ) ( 1084 832 556 ) ( 1084 768 556 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -11993,6 +12778,7 @@
 ( 1100 820 640 ) ( 1088 820 640 ) ( 1088 780 640 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -12005,6 +12791,7 @@
 ( 1100 832 544 ) ( 1084 832 544 ) ( 1084 816 544 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -12017,6 +12804,7 @@
 ( 1100 780 544 ) ( 1084 780 544 ) ( 1084 764 544 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -12029,6 +12817,7 @@
 ( 1100 820 544 ) ( 1088 820 544 ) ( 1088 780 544 ) WIZMET1_2 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -12041,6 +12830,7 @@
 ( 1096 820 556 ) ( 1088 820 556 ) ( 1088 780 556 ) *TELEPORT 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"info_teleport_destination"
 "origin"	"-864 -1696 76"
@@ -12048,6 +12838,7 @@
 "spawnflags"	"1792"
 "targetname"	"t172"
 }
+
 {
 "classname"	"func_wall"
 "spawnflags"	"1792"
@@ -12060,41 +12851,49 @@
 ( -832 -1664 64 ) ( -896 -1664 64 ) ( -896 -1728 64 ) COP3_4 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"item_health"
 "origin"	"1328 816 540"
 "spawnflags"	"1794"
 }
+
 {
 "classname"	"weapon_supernailgun"
 "origin"	"1648 -96 56"
 "spawnflags"	"1792"
 }
+
 {
 "classname"	"item_spikes"
 "origin"	"1560 -112 56"
 "spawnflags"	"1793"
 }
+
 {
 "classname"	"weapon_nailgun"
 "origin"	"232 24 -208"
 "spawnflags"	"1792"
 }
+
 {
 "classname"	"info_player_deathmatch"
 "origin"	"72 -864 -328"
 "angle"	"180"
 }
+
 {
 "classname"	"item_health"
 "origin"	"1064 504 540"
 "spawnflags"	"1536"
 }
+
 {
 "classname"	"item_health"
 "origin"	"1064 464 540"
 "spawnflags"	"2048"
 }
+
 {
 "targetname"	"t171"
 "classname"	"monster_demon1"
@@ -12102,6 +12901,7 @@
 "angle"	"0"
 "spawnflags"	"769"
 }
+
 {
 "classname"	"trigger_once"
 "message"	"Shoot the button!"
@@ -12116,51 +12916,67 @@
 ( -808 -1104 -216 ) ( -824 -1104 -216 ) ( -824 -1120 -216 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "mangle"	"20 225 0"
 "origin"	"-544 24 176"
 "classname"	"info_intermission"
 }
+
 {
 "mangle"	"20 305 0"
 "origin"	"904 -216 56"
 "classname"	"info_intermission"
 }
+
 {
 "mangle"	"12 65 0"
 "origin"	"1112 288 680"
 "classname"	"info_intermission"
 }
+
 {
 "mangle"	"15 45 0"
 "origin"	"-1448 -744 64"
 "classname"	"info_intermission"
 }
+
 {
 "light"	"200"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1552 -560 -464"
 "classname"	"light"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1448 -560 -424"
 "classname"	"light"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1672 -568 -424"
 "classname"	"light"
 }
+
 {
 "light"	"200"
+	"style"	"1"
+	"_color"	"1.00 0.55 0.24"
 "origin"	"-1774 -550 -300"
 "classname"	"light_torch_small_walltorch"
 }
+
 {
 "light"	"125"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"-1584 -560 -328"
 "classname"	"light"
 }
+
 {
 "classname"	"trigger_secret"
 {
@@ -12172,10 +12988,12 @@
 ( -1600 -496 -360 ) ( -1688 -496 -360 ) ( -1688 -616 -360 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"-1736 -552 -336"
 "classname"	"item_artifact_invisibility"
 }
+
 {
 "angle"	"180"
 "spawnflags"	"3"
@@ -12189,21 +13007,28 @@
 ( 416 -1296 -152 ) ( 304 -1296 -152 ) ( 304 -1312 -152 ) WMET4_6 0 -24 0 1.000000 1.000000
 }
 }
+
 {
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"368 -1400 -120"
 "classname"	"light"
 }
+
 {
 "classname"	"light"
 "origin"	"520 -1320 -120"
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 }
+
 {
 "light"	"150"
+	"_color"	"0.88 0.74 0.58"
 "origin"	"512 -1408 -120"
 "classname"	"light"
 }
+
 {
 "classname"	"trigger_secret"
 {
@@ -12215,44 +13040,53 @@
 ( 416 -1344 -144 ) ( 304 -1344 -144 ) ( 304 -1352 -144 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"544 -1424 -152"
 "classname"	"item_health"
 }
+
 {
 "spawnflags"	"1"
 "origin"	"504 -1304 -152"
 "classname"	"item_rockets"
 }
+
 {
 "spawnflags"	"2817"
 "origin"	"1072 968 544"
 "classname"	"item_shells"
 }
+
 {
 "classname"	"item_shells"
 "origin"	"1112 968 544"
 "spawnflags"	"2817"
 }
+
 {
 "angle"	"270"
 "origin"	"-648 -1592 88"
 "classname"	"info_player_coop"
 }
+
 {
 "classname"	"info_player_coop"
 "origin"	"-824 -1584 88"
 "angle"	"270"
 }
+
 {
 "angle"	"270"
 "origin"	"-888 -1584 88"
 "classname"	"info_player_coop"
 }
+
 {
 "classname"	"item_health"
 "origin"	"32 -1544 56"
 }
+
 {
 "spawnflags"	"1792"
 "classname"	"func_wall"
@@ -12273,6 +13107,7 @@
 ( 1440 1008 536 ) ( 1252 1008 536 ) ( 1252 996 536 ) WMET2_1 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "classname"	"trigger_counter"
 "count"	"2"
@@ -12288,83 +13123,110 @@
 ( 1584 1312 544 ) ( 1568 1312 544 ) ( 1568 1296 544 ) TRIGGER 0 0 0 1.000000 1.000000
 }
 }
+
 {
 "origin"	"162 -878 -208"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"-150 -758 -248"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"-518 -606 -256"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"-742 -166 -256"
 "classname"	"ambient_drip"
 }
+
 {
 "classname"	"ambient_drip"
 "origin"	"-958 -374 -256"
 }
+
 {
 "origin"	"-1070 -670 -256"
 "classname"	"ambient_drip"
 }
+
 {
 "classname"	"ambient_drip"
 "origin"	"-1438 -694 -256"
 }
+
 {
 "origin"	"394 -102 -152"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"50 98 -96"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"386 -262 -256"
 "classname"	"ambient_drip"
 }
+
 {
 "classname"	"ambient_drip"
 "origin"	"602 -470 -256"
 }
+
 {
 "origin"	"762 -246 -256"
 "classname"	"ambient_drip"
 }
+
 {
 "origin"	"978 -358 -192"
 "classname"	"ambient_drip"
 }
+
 {
 "classname"	"ambient_drip"
 "origin"	"-1686 -558 -288"
 }
+
 {
 "classname"	"ambient_drip"
 "origin"	"58 -214 -248"
 }
+
 {
 "origin"	"-822 -374 -304"
 "classname"	"ambient_swamp2"
 }
+
 {
 "classname"	"ambient_swamp2"
 "origin"	"-1150 -646 -304"
 }
+
 {
 "origin"	"-1470 -438 -304"
 "classname"	"ambient_swamp1"
 }
+
 {
 "classname"	"ambient_swamp1"
 "origin"	"-854 50 -304"
 }
+
 {
 "origin"	"-526 -526 -304"
 "classname"	"ambient_swamp1"
+}
+
+{
+	"classname"	"light_environment"
+	"_color"	"0.85 0.72 0.58"
+	"light"	"220"
+	"angles"	"45 120 0"
 }
