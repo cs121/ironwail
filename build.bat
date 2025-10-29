@@ -7,8 +7,10 @@ git pull
 
 rem --- Paths ---
 set "SRC_SHADERS=c:\Quake\Source\ironwail\Quake\shaders"
+set "SRC_GAME=c:\Quake\Source\ironwail\Quake\game"
 set "DST_DIR=C:\Quake\rerelease"
 set "DST_SHADERS=%DST_DIR%\id1\shaders"
+set "DST_GAME=%DST_DIR%\id1\game"
 
 set "SRC_EXE=C:\Quake\Source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
 set "DST_EXE=%DST_DIR%\ironwail.exe"
@@ -16,12 +18,15 @@ set "DST_EXE=%DST_DIR%\ironwail.exe"
 rem --- Ensure destination folders exist ---
 if not exist "%DST_DIR%\id1" mkdir "%DST_DIR%\id1"
 if not exist "%DST_SHADERS%" mkdir "%DST_SHADERS%"
+if not exist "%DST_GAME%" mkdir "%DST_GAME%"
 
 rem --- Copy shaders directory (use robocopy for folders) ---
 robocopy "%SRC_SHADERS%" "%DST_SHADERS%" *.* /E /R:1 /W:1 >nul
+robocopy "%SRC_GAME%" "%DST_GAME%" *.* /E /R:1 /W:1 >nul
 set "RC=%ERRORLEVEL%"
+
 if %RC% GEQ 8 (
-    echo [ERROR] Copying shaders failed with robocopy code %RC%.
+    echo [ERROR] Copying failed with robocopy code %RC%.
     exit /b %RC%
 )
 
