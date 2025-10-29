@@ -333,8 +333,11 @@ static float R_GetDynamicDoFFocus (float fallback)
 {
 	trace_t trace;
 	vec3_t end;
+	vec3_t delta;
+	vec3_t rcpdelta;
 	float range;
 	float target;
+	float best_fraction;
 
 	if (r_dof_autofocus.value <= 0.f)
 	{
@@ -353,6 +356,14 @@ static float R_GetDynamicDoFFocus (float fallback)
 		range = 8192.f;
 
 	VectorMA (r_origin, range, vpn, end);
+        VectorSubtract (end, r_origin, delta);
+        for (int i = 0; i < 3; i++)
+        {
+                if (fabsf (delta[i]) > 1e-6f)
+                        rcpdelta[i] = 1.f / delta[i];
+                else
+                        rcpdelta[i] = 1e30f;
+        }
 
 	memset (&trace, 0, sizeof (trace));
 	trace.fraction = 1.f;
@@ -364,6 +375,44 @@ static float R_GetDynamicDoFFocus (float fallback)
 		target = fallback;
 	else
 		target = q_max (trace.fraction * range, 0.f);
+
+	best_fraction = trace.fraction;
+	if (best_fraction < 0.f)
+		best_fraction = 0.f;
+	else if (best_fraction > 1.f)
+		best_fraction = 1.f;
+
+	if (!trace.allsolid && trace.fraction > 0.f)
+	{
+		vec3_t mins, maxs;
+
+		for (int i = 0; i < cl_numvisedicts; ++i)
+		{
+			entity_t *ent = cl_visedicts[i];
+			qmodel_t *model;
+			float frac;
+
+			if (!ent || ent == &cl.viewent)
+				continue;
+
+			model = ent->model;
+			if (!model || model == cl.worldmodel)
+				continue;
+			if (ent->alpha == ENTALPHA_ZERO)
+				continue;
+			if (model->type != mod_alias && model->type != mod_brush)
+				continue;
+
+			R_GetEntityBounds (ent, mins, maxs);
+			if (!RayVsBox (r_origin, rcpdelta, mins, maxs, &frac))
+				continue;
+			if (frac <= 0.f || frac >= best_fraction)
+				continue;
+
+			best_fraction = frac;
+			target = q_max (best_fraction * range, 0.f);
+		}
+	}
 
 	if (!r_dof_autofocus_initialized)
 	{
