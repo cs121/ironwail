@@ -331,8 +331,17 @@ static void R_UpdateViewweaponLightingParams (void)
 			ambient_linear[i] = ambient_floor;
 	}
 
-	vec3_t dir_color;
-	VectorScale (best_diff, dir_scale, dir_color);
+        vec3_t dir_color;
+        float dir_strength = best_diff[0] + best_diff[1] + best_diff[2];
+        float ambient_strength = (ambient_sample[0] + ambient_sample[1] + ambient_sample[2]) * (1.f / 3.f);
+        float lighting_strength = ambient_strength + dir_strength;
+        // Damp coloured highlights when both the local ambient and the detected
+        // directional component are very dim.  This prevents the view model from
+        // picking up a strong colour cast while standing in mostly unlit areas.
+        float lighting_factor = CLAMP (0.f, lighting_strength / 0.3f, 1.f);
+        float dir_factor = CLAMP (0.f, dir_strength / 0.25f, 1.f);
+        float directional_scale = dir_scale * lighting_factor * dir_factor;
+        VectorScale (best_diff, directional_scale, dir_color);
 
 	if (VectorNormalize (best_dir) == 0.f)
 	{
