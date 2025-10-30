@@ -27,20 +27,6 @@ layout(std140, binding=0) uniform FrameDataUBO
         uint    PrevFrameValid;
         uint    DeluxEnabled;
         uint    _Pad1;
-        vec3    ViewweaponAmbient;
-        float   ViewweaponMode;
-        vec3    ViewweaponDirColor;
-        float   ViewweaponRim;
-        vec3    ViewweaponDirDirection;
-        float   ViewweaponSpec;
-        float   ViewweaponDLights;
-        float   ViewweaponMuzzleBoost;
-        float   ViewweaponFogFix;
-        float   ViewweaponMinLight;
-        float   ViewweaponFlash;
-        float   ViewweaponHalfLambert;
-        float   ViewweaponPad0;
-        float   ViewweaponPad1;
 };
 
 #endif // FRAME_UNIFORMS_GLSL

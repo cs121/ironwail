@@ -46,22 +46,8 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _FrameZLogBias;
         uint    NumLights;
         uint    _FramePrevFrameValid;
-        uint    _FrameDeluxEnabled;
         uint    _FramePad1;
-        vec3    _FrameViewweaponAmbient;
-        float   _FrameViewweaponMode;
-        vec3    _FrameViewweaponDirColor;
-        float   _FrameViewweaponRim;
-        vec3    _FrameViewweaponDirDirection;
-        float   _FrameViewweaponSpec;
-        float   _FrameViewweaponDLights;
-        float   _FrameViewweaponMuzzleBoost;
-        float   _FrameViewweaponFogFix;
-        float   _FrameViewweaponMinLight;
-        float   _FrameViewweaponFlash;
-        float   _FrameViewweaponHalfLambert;
-        float   _FrameViewweaponPad0;
-        float   _FrameViewweaponPad1;
+        uint    _FramePad2;
 };
 
 struct Light
@@ -257,127 +243,70 @@ void main()
         fullbright = texture(FullbrightTex, uv).rgb;
         emissive = texture(EmissiveTex, uv).rgb;
 #endif
+        vec3 localNormal = normalize(in_local_normal);
+        vec3 shadevector = normalize(in_shadevector);
+        float shade = r_avertexnormal_dot(localNormal, shadevector);
+        vec3 lighting = (in_color.rgb * _FrameLightmapStrength) * shade;
         vec3 worldNormal = in_world_normal;
         if (dot(worldNormal, worldNormal) > 0.0)
                 worldNormal = normalize(worldNormal);
         else
                 worldNormal = vec3(0.0, 0.0, 1.0);
-        vec3 localNormal = normalize(in_local_normal);
-        vec3 shadevector = normalize(in_shadevector);
-        float shade = r_avertexnormal_dot(localNormal, shadevector);
-        bool isViewmodel = (in_flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        float viewMode = _FrameViewweaponMode;
-        vec3 lighting;
-
-        if (!isViewmodel || viewMode < 0.5)
+        lighting += ComputeDynamicLights(in_world_pos, worldNormal);
+        if (_FrameRimAlias > 0.0)
         {
-                lighting = (in_color.rgb * _FrameLightmapStrength) * shade;
-                lighting += ComputeDynamicLights(in_world_pos, worldNormal);
-                if (_FrameRimAlias > 0.0)
-                {
-                        vec3 to_eye = EyePos - in_world_pos;
-                        float inv_len = inversesqrt(max(dot(to_eye, to_eye), 1e-8));
-                        vec3 view_dir = to_eye * inv_len;
-                        float ndotv = max(dot(worldNormal, view_dir), 0.0);
-                        float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), _FrameRimExponent);
-                        lighting += vec3(_FrameRimAlias * fresnel);
-                }
-                lighting = max(lighting, vec3(0.0));
-        }
-        else
-        {
-                vec3 ambient = _FrameViewweaponAmbient;
-                vec3 dirColor = _FrameViewweaponDirColor;
-                vec3 dirDir = _FrameViewweaponDirDirection;
-                float dirLen = length(dirDir);
-                if (dirLen > 1e-4)
-                        dirDir /= dirLen;
-                else
-                        dirDir = vec3(0.0, 0.0, -1.0);
-                float ndotl = max(dot(worldNormal, -dirDir), 0.0);
-                float halfLambert = ndotl * 0.5 + 0.5;
-                float lambertMix = clamp(_FrameViewweaponHalfLambert, 0.0, 1.0);
-                float shadeTerm = mix(ndotl, halfLambert, lambertMix);
-                vec3 directional = dirColor * shadeTerm;
-                vec3 dynamic = ComputeDynamicLights(in_world_pos, worldNormal) * _FrameViewweaponDLights;
-                lighting = ambient + directional + dynamic;
-                float muzzleBoost = _FrameViewweaponMuzzleBoost * _FrameViewweaponFlash;
-                lighting += vec3(muzzleBoost);
                 vec3 to_eye = EyePos - in_world_pos;
                 float inv_len = inversesqrt(max(dot(to_eye, to_eye), 1e-8));
                 vec3 view_dir = to_eye * inv_len;
-                if (_FrameViewweaponRim > 0.0)
-                {
-                        float ndotv = max(dot(worldNormal, view_dir), 0.0);
-                        float rim = pow(clamp(1.0 - ndotv, 0.0, 1.0), 3.0);
-                        lighting += vec3(_FrameViewweaponRim * rim);
-                }
-                if (_FrameViewweaponSpec > 0.0)
-                {
-                        vec3 light_dir = normalize(-dirDir);
-                        vec3 half_vec = normalize(light_dir + view_dir);
-                        float specTerm = pow(max(dot(worldNormal, half_vec), 0.0), 32.0);
-                        lighting += vec3(_FrameViewweaponSpec * specTerm);
-                }
-                lighting = max(lighting, vec3(_FrameViewweaponMinLight));
+                float ndotv = max(dot(worldNormal, view_dir), 0.0);
+                float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), _FrameRimExponent);
+                lighting += vec3(_FrameRimAlias * fresnel);
         }
+        lighting = max(lighting, vec3(0.0));
 
         uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;
         bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overbrightFlag == 0u;
 
-        if (!isViewmodel || viewMode < 0.5)
+        if (useFullbrightHack)
         {
-                if (useFullbrightHack)
-                {
-                        lighting = vec3(256.0 / 200.0);
-                }
-                else
-                {
-                        float sum = lighting.x + lighting.y + lighting.z;
-                        if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
-                        {
-                                const float minSum = 72.0 / 200.0;
-                                if (sum < minSum)
-                                {
-                                        float add = (minSum - sum) / 3.0;
-                                        lighting += vec3(add);
-                                        sum = minSum;
-                                }
-                        }
-                        else if ((in_flags & ALIAS_FLAG_PLAYER) != 0)
-                        {
-                                const float minSum = 24.0 / 200.0;
-                                if (sum < minSum)
-                                {
-                                        float add = (minSum - sum) / 3.0;
-                                        lighting += vec3(add);
-                                        sum = minSum;
-                                }
-                        }
-                        if (overbrightFlag != 0u)
-                        {
-                                const float maxSum = 288.0 / 200.0;
-                                if (sum > maxSum)
-                                {
-                                        float scale = maxSum / sum;
-                                        lighting *= scale;
-                                }
-                        }
-                }
+                lighting = vec3(256.0 / 200.0);
         }
-        else if (overbrightFlag != 0u)
+        else
         {
                 float sum = lighting.x + lighting.y + lighting.z;
-                const float maxSum = 288.0 / 200.0;
-                if (sum > maxSum)
+                if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
                 {
-                        float scale = maxSum / sum;
-                        lighting *= scale;
+                        const float minSum = 72.0 / 200.0;
+                        if (sum < minSum)
+                        {
+                                float add = (minSum - sum) / 3.0;
+                                lighting += vec3(add);
+                                sum = minSum;
+                        }
+                }
+                else if ((in_flags & ALIAS_FLAG_PLAYER) != 0)
+                {
+                        const float minSum = 24.0 / 200.0;
+                        if (sum < minSum)
+                        {
+                                float add = (minSum - sum) / 3.0;
+                                lighting += vec3(add);
+                                sum = minSum;
+                        }
+                }
+                if (overbrightFlag != 0u)
+                {
+                        const float maxSum = 288.0 / 200.0;
+                        if (sum > maxSum)
+                        {
+                                float scale = maxSum / sum;
+                                lighting *= scale;
+                                sum = maxSum;
+                        }
                 }
         }
 
         lighting = ldexp(lighting, ivec3(int(overbrightFlag)));
-
 
 #if ALPHATEST
         vec3 shadedColor = baseColor * lighting;
@@ -393,14 +322,6 @@ void main()
         vec4 result = vec4(shadedColor, in_color.a);
         float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
         fog = clamp(fog, 0.0, 1.0);
-        if (isViewmodel && viewMode >= 0.5)
-        {
-                float fogFix = _FrameViewweaponFogFix;
-                if (fogFix > 0.0)
-                        fog = mix(fog, 1.0, clamp(fogFix, 0.0, 1.0));
-                else if (fogFix < 0.0)
-                        fog = mix(fog, 0.0, clamp(-fogFix, 0.0, 1.0));
-        }
         result.rgb = mix(Fog.rgb, result.rgb, fog);
         out_fragcolor = result;
 #if !OIT

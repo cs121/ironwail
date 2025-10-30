@@ -26,8 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define NOISESCALE     (1.0f / 127.0f)
 
 extern gltexture_t *deluxemap_texture;
-extern cvar_t r_showtris;
-extern vec3_t lightcolor;
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -58,22 +56,6 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
-
-#define VIEWWEAPON_PROBE_COUNT 6
-#define VIEWWEAPON_PROBE_DISTANCE 96.0f
-#define VIEWWEAPON_SMOOTHING 0.2f
-#define VIEWWEAPON_DIRECTION_THRESHOLD 0.02f
-
-static lightcache_t viewweapon_origin_cache;
-static lightcache_t viewweapon_probe_caches[VIEWWEAPON_PROBE_COUNT];
-static const qmodel_t* viewweapon_cached_world = NULL;
-static vec3_t viewweapon_smooth_ambient = { 0.f, 0.f, 0.f };
-static vec3_t viewweapon_smooth_dir_color = { 0.f, 0.f, 0.f };
-static vec3_t viewweapon_smooth_dir_dir = { 0.f, 0.f, -1.f };
-static qboolean viewweapon_smooth_valid = false;
-static float viewweapon_flash_intensity = 0.f;
-static double viewweapon_flash_timestamp = 0.0;
-static int viewweapon_active_mode = 0;
 
 typedef struct framesetup_s
 {
@@ -118,277 +100,6 @@ static float GL_TemperedOverbright (float overbright)
 	float tempered = powf (overbright, exponent);
 
 	return q_max (tempered, 1.f);
-}
-
-static void R_ViewweaponResetCaches (void)
-{
-        memset (&viewweapon_origin_cache, 0, sizeof (viewweapon_origin_cache));
-        memset (viewweapon_probe_caches, 0, sizeof (viewweapon_probe_caches));
-        viewweapon_smooth_valid = false;
-        viewweapon_flash_intensity = 0.f;
-        viewweapon_flash_timestamp = 0.0;
-        viewweapon_active_mode = 0;
-}
-
-static void R_ViewweaponDecayFlash (double now)
-{
-	if (viewweapon_flash_timestamp == 0.0)
-	{
-		viewweapon_flash_timestamp = now;
-		return;
-	}
-	double delta = now - viewweapon_flash_timestamp;
-	if (delta <= 0.0)
-		return;
-	float decay = (float)(delta * 8.0);
-	if (viewweapon_flash_intensity > 0.f)
-		viewweapon_flash_intensity = q_max (0.f, viewweapon_flash_intensity - decay);
-	viewweapon_flash_timestamp = now;
-}
-
-int R_ViewweaponLightingMode (void)
-{
-	return viewweapon_active_mode;
-}
-
-void R_Viewweapon_AddMuzzleFlash (void)
-{
-	viewweapon_flash_intensity = 1.f;
-	viewweapon_flash_timestamp = cl.time;
-}
-
-static void R_UpdateViewweaponLightingParams (void)
-{
-	int mode = CLAMP (0, (int)Q_rint (r_viewweaponLighting.value), 2);
-	if (r_fullbright_cheatsafe || r_lightmap_cheatsafe || r_showtris.value >= 1.f)
-		mode = 0;
-
-	viewweapon_active_mode = mode;
-	r_framedata.viewweapon_mode = (float)mode;
-
-	if (viewweapon_cached_world != cl.worldmodel)
-	{
-		viewweapon_cached_world = cl.worldmodel;
-		R_ViewweaponResetCaches ();
-	}
-
-	R_ViewweaponDecayFlash (cl.time);
-	r_framedata.viewweapon_flash = viewweapon_flash_intensity;
-
-	float ambient_scale = q_max (0.f, r_viewweaponAmbient.value);
-	float dir_scale = q_max (0.f, r_viewweaponDirScale.value);
-	float rim = q_max (0.f, r_viewweaponRim.value);
-	float spec = q_max (0.f, r_viewweaponSpec.value);
-	float dlights = q_max (0.f, r_viewweaponDLights.value);
-	if (!r_dynamic.value)
-		dlights = 0.f;
-	float muzzle = q_max (0.f, r_viewweaponMuzzleflashBoost.value);
-	float fogfix = r_viewweaponFogFix.value;
-	float minlight = q_max (0.f, ambient_scale * 0.08f);
-
-	r_framedata.viewweapon_rim = rim;
-	r_framedata.viewweapon_spec = spec;
-	r_framedata.viewweapon_dlights = dlights;
-	r_framedata.viewweapon_muzzleboost = muzzle;
-	r_framedata.viewweapon_fogfix = fogfix;
-	r_framedata.viewweapon_minlight = minlight;
-	r_framedata.viewweapon_pad0 = 0.f;
-	r_framedata.viewweapon_pad1 = 0.f;
-
-	float half_lambert = 0.f;
-	if (mode >= 2)
-		half_lambert = 1.f;
-	else if (mode == 1)
-		half_lambert = 0.5f;
-	r_framedata.viewweapon_half_lambert = half_lambert;
-
-	if (mode <= 0)
-	{
-		if (!viewweapon_smooth_valid)
-		{
-			VectorClear (viewweapon_smooth_ambient);
-			VectorClear (viewweapon_smooth_dir_color);
-			viewweapon_smooth_dir_dir[0] = 0.f;
-			viewweapon_smooth_dir_dir[1] = 0.f;
-			viewweapon_smooth_dir_dir[2] = -1.f;
-			viewweapon_smooth_valid = true;
-		}
-		VectorCopy (viewweapon_smooth_ambient, r_framedata.viewweapon_ambient);
-		VectorCopy (viewweapon_smooth_dir_color, r_framedata.viewweapon_dir_color);
-		VectorCopy (viewweapon_smooth_dir_dir, r_framedata.viewweapon_dir_dir);
-		return;
-	}
-
-	vec3_t ambient_sample = { 0.f, 0.f, 0.f };
-	vec3_t base_ambient = { 0.f, 0.f, 0.f };
-	vec3_t best_diff = { 0.f, 0.f, 0.f };
-	vec3_t best_dir = { -vpn[0], -vpn[1], -vpn[2] };
-	float best_weight = 0.f;
-	float ambient_base_floor = (ambient_scale > 0.f) ? 0.1f : 0.f;
-
-	vec3_t saved_lightcolor;
-	VectorCopy (lightcolor, saved_lightcolor);
-
-	if (cl.worldmodel && cl.worldmodel->lightdata)
-	{
-		if (R_LightPoint (r_refdef.vieworg, 0.f, &viewweapon_origin_cache))
-			VectorCopy (lightcolor, ambient_sample);
-		else
-			VectorClear (ambient_sample);
-
-		VectorScale (ambient_sample, 1.f / 200.f, base_ambient);
-		for (int i = 0; i < 3; ++i)
-		{
-			if (base_ambient[i] < ambient_base_floor)
-				base_ambient[i] = ambient_base_floor;
-		}
-
-		vec3_t dirs[VIEWWEAPON_PROBE_COUNT];
-		VectorCopy (vpn, dirs[0]);
-		dirs[1][0] = -vpn[0];
-		dirs[1][1] = -vpn[1];
-		dirs[1][2] = -vpn[2];
-		VectorCopy (vup, dirs[2]);
-		dirs[3][0] = -vup[0];
-		dirs[3][1] = -vup[1];
-		dirs[3][2] = -vup[2];
-		VectorCopy (vright, dirs[4]);
-		dirs[5][0] = -vright[0];
-		dirs[5][1] = -vright[1];
-		dirs[5][2] = -vright[2];
-
-                for (int i = 0; i < VIEWWEAPON_PROBE_COUNT; ++i)
-                {
-                        vec3_t sample_pos;
-                        VectorMA (r_refdef.vieworg, VIEWWEAPON_PROBE_DISTANCE, dirs[i], sample_pos);
-                        if (!R_LightPoint (sample_pos, 0.f, &viewweapon_probe_caches[i]))
-                                continue;
-
-                        vec3_t sample_linear;
-                        VectorScale (lightcolor, 1.f / 200.f, sample_linear);
-                        vec3_t diff;
-                        float weight = 0.f;
-                        for (int j = 0; j < 3; ++j)
-                        {
-                                float delta = sample_linear[j] - base_ambient[j];
-                                if (delta > 0.f)
-                                {
-                                        diff[j] = delta;
-                                        weight += delta;
-                                }
-                                else
-                                        diff[j] = 0.f;
-                        }
-
-                        if (weight <= 0.f)
-                                continue;
-
-                        float facing = DotProduct (dirs[i], vpn);
-                        if (facing < 0.f)
-                                continue;
-
-                        float bias = 0.25f + 0.75f * facing;
-                        weight *= bias;
-
-                        if (weight > best_weight)
-                        {
-                                best_weight = weight;
-                                VectorCopy (diff, best_diff);
-                                VectorCopy (dirs[i], best_dir);
-                        }
-                }
-	}
-	else
-	{
-		ambient_sample[0] = ambient_sample[1] = ambient_sample[2] = 96.f;
-		VectorScale (ambient_sample, 1.f / 200.f, base_ambient);
-		for (int i = 0; i < 3; ++i)
-		{
-			if (base_ambient[i] < ambient_base_floor)
-				base_ambient[i] = ambient_base_floor;
-		}
-	}
-
-	qboolean has_dir = best_weight > VIEWWEAPON_DIRECTION_THRESHOLD;
-	if (!has_dir)
-	{
-		VectorClear (best_diff);
-		best_dir[0] = -vpn[0];
-		best_dir[1] = -vpn[1];
-		best_dir[2] = -vpn[2];
-	}
-
-	VectorCopy (saved_lightcolor, lightcolor);
-
-	vec3_t ambient_linear;
-	VectorCopy (base_ambient, ambient_linear);
-	VectorScale (ambient_linear, ambient_scale, ambient_linear);
-
-	float ambient_floor = ambient_scale * 0.1f;
-	for (int i = 0; i < 3; ++i)
-	{
-		if (ambient_linear[i] < ambient_floor)
-			ambient_linear[i] = ambient_floor;
-	}
-
-        vec3_t dir_color;
-        float dir_strength = best_diff[0] + best_diff[1] + best_diff[2];
-        // ambient_sample is measured in lightmap units (0-255); scale it the same
-        // way as the directional samples so the damping heuristics operate in a
-        // consistent space.
-        float ambient_strength = (ambient_sample[0] + ambient_sample[1] + ambient_sample[2]) * (1.f / (3.f * 200.f));
-        float lighting_strength = ambient_strength + dir_strength;
-        // Damp coloured highlights when both the local ambient and the detected
-        // directional component are very dim.  This prevents the view model from
-        // picking up a strong colour cast while standing in mostly unlit areas.
-        float lighting_factor = CLAMP (0.f, lighting_strength / 0.3f, 1.f);
-        float dir_factor = CLAMP (0.f, dir_strength / 0.25f, 1.f);
-        float directional_scale = dir_scale * lighting_factor * dir_factor;
-        VectorScale (best_diff, directional_scale, dir_color);
-
-	if (VectorNormalize (best_dir) == 0.f)
-	{
-		best_dir[0] = -vpn[0];
-		best_dir[1] = -vpn[1];
-		best_dir[2] = -vpn[2];
-		VectorNormalize (best_dir);
-	}
-
-	if (!viewweapon_smooth_valid)
-	{
-		VectorCopy (ambient_linear, viewweapon_smooth_ambient);
-		VectorCopy (dir_color, viewweapon_smooth_dir_color);
-		VectorCopy (best_dir, viewweapon_smooth_dir_dir);
-		viewweapon_smooth_valid = true;
-	}
-	else
-	{
-		float ambient_smoothing = VIEWWEAPON_SMOOTHING;
-		float dir_smoothing = has_dir ? VIEWWEAPON_SMOOTHING : 1.0f;
-		for (int i = 0; i < 3; ++i)
-		{
-			viewweapon_smooth_ambient[i] += (ambient_linear[i] - viewweapon_smooth_ambient[i]) * ambient_smoothing;
-			viewweapon_smooth_dir_color[i] += (dir_color[i] - viewweapon_smooth_dir_color[i]) * dir_smoothing;
-			viewweapon_smooth_dir_dir[i] += (best_dir[i] - viewweapon_smooth_dir_dir[i]) * dir_smoothing;
-		}
-		if (VectorNormalize (viewweapon_smooth_dir_dir) == 0.f)
-		{
-			viewweapon_smooth_dir_dir[0] = -vpn[0];
-			viewweapon_smooth_dir_dir[1] = -vpn[1];
-			viewweapon_smooth_dir_dir[2] = -vpn[2];
-			VectorNormalize (viewweapon_smooth_dir_dir);
-		}
-	}
-
-	for (int i = 0; i < 3; ++i)
-	{
-		if (viewweapon_smooth_dir_color[i] < 0.f)
-			viewweapon_smooth_dir_color[i] = 0.f;
-	}
-
-	VectorCopy (viewweapon_smooth_ambient, r_framedata.viewweapon_ambient);
-	VectorCopy (viewweapon_smooth_dir_color, r_framedata.viewweapon_dir_color);
-	VectorCopy (viewweapon_smooth_dir_dir, r_framedata.viewweapon_dir_dir);
 }
 
 static qboolean MatrixInverse4x4(const float m[16], float out[16])
@@ -494,15 +205,6 @@ cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
 cvar_t	r_rim_exponent = { "r_rim_exponent", "4.0", CVAR_ARCHIVE };
-cvar_t	r_viewweaponLighting = { "r_viewweaponLighting", "2", CVAR_ARCHIVE };
-cvar_t	r_viewweaponAmbient = { "r_viewweaponAmbient", "1.0", CVAR_ARCHIVE };
-cvar_t	r_viewweaponDirScale = { "r_viewweaponDirScale", "1.25", CVAR_ARCHIVE };
-cvar_t	r_viewweaponRim = { "r_viewweaponRim", "0.3", CVAR_ARCHIVE };
-cvar_t	r_viewweaponSpec = { "r_viewweaponSpec", "0.2", CVAR_ARCHIVE };
-cvar_t	r_viewweaponDLights = { "r_viewweaponDLights", "1.0", CVAR_ARCHIVE };
-cvar_t	r_viewweaponMuzzleflashBoost = { "r_viewweaponMuzzleflashBoost", "0.35", CVAR_ARCHIVE };
-cvar_t	r_viewweaponFogFix = { "r_viewweaponFogFix", "0.2", CVAR_ARCHIVE };
-cvar_t	r_viewweaponMode = { "r_viewweaponMode", "modern", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
@@ -606,7 +308,7 @@ static float view_zfar;
 
 static qboolean R_DoFEnabled (void)
 {
-        return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
 static qboolean R_SSAOEnabled (void)
@@ -2116,15 +1818,13 @@ void R_SetupView (void)
 	Fog_SetupFrame (); //johnfitz
 	Sky_SetupFrame ();
 
-        // build the transformation matrix for the given view angles
-        VectorCopy (r_refdef.vieworg, r_origin);
-        AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+	// build the transformation matrix for the given view angles
+	VectorCopy (r_refdef.vieworg, r_origin);
+	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
 
-        R_UpdateViewweaponLightingParams ();
-
-        // current viewleaf
-        r_oldviewleaf = r_viewleaf;
-        r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
+	// current viewleaf
+	r_oldviewleaf = r_viewleaf;
+	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
 
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
