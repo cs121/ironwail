@@ -327,7 +327,7 @@ static void R_ViewweaponMode_f (cvar_t *var)
         if (!mode || !*mode)
                 return;
 
-        if (!Q_strcasecmp (mode, "classic"))
+        if (!q_strcasecmp (mode, "classic"))
         {
                 Cvar_SetValueQuick (&r_viewweaponLighting, 0.f);
                 Cvar_SetValueQuick (&r_viewweaponAmbient, 1.0f);
@@ -338,7 +338,7 @@ static void R_ViewweaponMode_f (cvar_t *var)
                 Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.35f);
                 Cvar_SetValueQuick (&r_viewweaponFogFix, 0.0f);
         }
-        else if (!Q_strcasecmp (mode, "q3"))
+        else if (!q_strcasecmp (mode, "q3"))
         {
                 Cvar_SetValueQuick (&r_viewweaponLighting, 1.f);
                 Cvar_SetValueQuick (&r_viewweaponAmbient, 0.9f);
@@ -349,7 +349,7 @@ static void R_ViewweaponMode_f (cvar_t *var)
                 Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.25f);
                 Cvar_SetValueQuick (&r_viewweaponFogFix, 0.1f);
         }
-        else if (!Q_strcasecmp (mode, "modern"))
+        else if (!q_strcasecmp (mode, "modern"))
         {
                 Cvar_SetValueQuick (&r_viewweaponLighting, 2.f);
                 Cvar_SetValueQuick (&r_viewweaponAmbient, 1.0f);
@@ -360,7 +360,7 @@ static void R_ViewweaponMode_f (cvar_t *var)
                 Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.35f);
                 Cvar_SetValueQuick (&r_viewweaponFogFix, 0.2f);
         }
-        else if (!Q_strcasecmp (mode, "custom"))
+        else if (!q_strcasecmp (mode, "custom"))
         {
                 return;
         }

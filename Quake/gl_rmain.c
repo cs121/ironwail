@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define NOISESCALE     (1.0f / 127.0f)
 
 extern gltexture_t *deluxemap_texture;
+extern cvar_t r_showtris;
+extern vec3_t lightcolor;
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -56,6 +58,21 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
+
+#define VIEWWEAPON_PROBE_COUNT 6
+#define VIEWWEAPON_PROBE_DISTANCE 96.0f
+#define VIEWWEAPON_SMOOTHING 0.2f
+
+static lightcache_t viewweapon_origin_cache;
+static lightcache_t viewweapon_probe_caches[VIEWWEAPON_PROBE_COUNT];
+static const qmodel_t* viewweapon_cached_world = NULL;
+static vec3_t viewweapon_smooth_ambient = { 0.f, 0.f, 0.f };
+static vec3_t viewweapon_smooth_dir_color = { 0.f, 0.f, 0.f };
+static vec3_t viewweapon_smooth_dir_dir = { 0.f, 0.f, -1.f };
+static qboolean viewweapon_smooth_valid = false;
+static float viewweapon_flash_intensity = 0.f;
+static double viewweapon_flash_timestamp = 0.0;
+static int viewweapon_active_mode = 0;
 
 typedef struct framesetup_s
 {
@@ -557,7 +574,7 @@ static int viewweapon_active_mode = 0;
 
 static qboolean R_DoFEnabled (void)
 {
-	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
+        return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
 static qboolean R_SSAOEnabled (void)
