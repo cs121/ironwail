@@ -333,7 +333,10 @@ static void R_UpdateViewweaponLightingParams (void)
 
         vec3_t dir_color;
         float dir_strength = best_diff[0] + best_diff[1] + best_diff[2];
-        float ambient_strength = (ambient_sample[0] + ambient_sample[1] + ambient_sample[2]) * (1.f / 3.f);
+        // ambient_sample is measured in lightmap units (0-255); scale it the same
+        // way as the directional samples so the damping heuristics operate in a
+        // consistent space.
+        float ambient_strength = (ambient_sample[0] + ambient_sample[1] + ambient_sample[2]) * (1.f / (3.f * 200.f));
         float lighting_strength = ambient_strength + dir_strength;
         // Damp coloured highlights when both the local ambient and the detected
         // directional component are very dim.  This prevents the view model from
