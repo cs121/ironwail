@@ -189,6 +189,14 @@ void R_PushDlights (void)
 	gpu_cluster_inputs_t cluster_inputs;
 
         int dynamic_count = 0;
+        int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
+        int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
+
+        int static_light_index_map_size = (static_light_count > 0) ? static_light_count : 1;
+        int static_shadow_index_map_size = (static_shadow_light_count > 0) ? static_shadow_light_count : 1;
+
+        int static_light_index_map[static_light_index_map_size];
+        int static_shadow_light_index_map[static_shadow_index_map_size];
 
         r_framedata.numlights = 0;
 
@@ -237,9 +245,11 @@ void R_PushDlights (void)
                 if (cl.worldmodel)
                 {
                         R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
-                                cl.worldmodel->bspx_num_static_lights, NULL);
+                                cl.worldmodel->bspx_num_static_lights,
+                                (static_light_count > 0) ? static_light_index_map : NULL);
                         R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
-                                cl.worldmodel->bspx_num_static_shadow_lights, NULL);
+                                cl.worldmodel->bspx_num_static_shadow_lights,
+                                (static_shadow_light_count > 0) ? static_shadow_light_index_map : NULL);
                 }
         }
 
@@ -257,13 +267,16 @@ void R_PushDlights (void)
                         cl.worldmodel->bspx_num_static_shadow_lights > 0)
                 {
                         int count = cl.worldmodel->bspx_num_static_shadow_lights;
-                        const bspx_static_light_t *lights = cl.worldmodel->bspx_static_shadow_lights;
 
                         for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
                         {
-                                if (lights[k].radius <= 0.0f)
+                                int mapped_index = (static_shadow_light_count > 0) ?
+                                        static_shadow_light_index_map[k] : -1;
+
+                                if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
                                         continue;
-                                R_FillGpuLightFromBspx (&lights[k], &shadow_lights[shadow_count++]);
+
+                                shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
                         }
                 }
 
@@ -272,10 +285,9 @@ void R_PushDlights (void)
                 {
                         const int *indices = cl.worldmodel->bspx_static_shadow_indices;
                         int count = cl.worldmodel->bspx_num_static_shadow_indices;
-                        const bspx_static_light_t *lights = cl.worldmodel->bspx_static_lights;
                         int maxlights = cl.worldmodel->bspx_num_static_lights;
 
-                        if (lights && maxlights > 0)
+                        if (cl.worldmodel->bspx_static_lights && maxlights > 0)
                         {
                                 for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
                                 {
@@ -285,16 +297,22 @@ void R_PushDlights (void)
                                         if (idx < 0 || idx >= maxlights)
                                                 continue;
 
-                                        if (lights[idx].radius <= 0.0f)
+                                        if (static_light_count <= 0)
+                                                continue;
+
+                                        int mapped_index = static_light_index_map[idx];
+
+                                        if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
                                                 continue;
 
                                         for (int n = dynamic_count; n < shadow_count; ++n)
                                         {
                                                 const gpulight_t *existing = &shadow_lights[n];
-                                                if (fabsf(existing->pos[0] - lights[idx].origin[0]) < 0.01f &&
-                                                    fabsf(existing->pos[1] - lights[idx].origin[1]) < 0.01f &&
-                                                    fabsf(existing->pos[2] - lights[idx].origin[2]) < 0.01f &&
-                                                    fabsf(existing->radius - lights[idx].radius) < 0.01f)
+                                                const gpulight_t *candidate = &r_lightbuffer.lights[mapped_index];
+                                                if (fabsf(existing->pos[0] - candidate->pos[0]) < 0.01f &&
+                                                    fabsf(existing->pos[1] - candidate->pos[1]) < 0.01f &&
+                                                    fabsf(existing->pos[2] - candidate->pos[2]) < 0.01f &&
+                                                    fabsf(existing->radius - candidate->radius) < 0.01f)
                                                 {
                                                         duplicate = true;
                                                         break;
@@ -303,7 +321,7 @@ void R_PushDlights (void)
                                         if (duplicate)
                                                 continue;
 
-                                        R_FillGpuLightFromBspx (&lights[idx], &shadow_lights[shadow_count++]);
+                                        shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
                                 }
                         }
                 }
