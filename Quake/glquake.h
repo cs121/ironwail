@@ -112,6 +112,15 @@ extern	cvar_t	r_alphasort;
 extern	cvar_t	r_rim_alias;
 extern	cvar_t	r_rim_world;
 extern	cvar_t	r_rim_exponent;
+extern	cvar_t	r_viewweaponLighting;
+extern	cvar_t	r_viewweaponAmbient;
+extern	cvar_t	r_viewweaponDirScale;
+extern	cvar_t	r_viewweaponRim;
+extern	cvar_t	r_viewweaponSpec;
+extern	cvar_t	r_viewweaponDLights;
+extern	cvar_t	r_viewweaponMuzzleflashBoost;
+extern	cvar_t	r_viewweaponFogFix;
+extern	cvar_t	r_viewweaponMode;
 
 extern	cvar_t	gl_clear;
 extern	cvar_t	gl_polyblend;
@@ -447,6 +456,20 @@ typedef struct gpuframedata_s {
 	int			prev_frame_valid;
 	int			delux_enabled;
 	int			_padding1;
+	vec3_t	viewweapon_ambient;
+	float	viewweapon_mode;
+	vec3_t	viewweapon_dir_color;
+	float	viewweapon_rim;
+	vec3_t	viewweapon_dir_dir;
+	float	viewweapon_spec;
+	float	viewweapon_dlights;
+	float	viewweapon_muzzleboost;
+	float	viewweapon_fogfix;
+	float	viewweapon_minlight;
+	float	viewweapon_flash;
+	float	viewweapon_half_lambert;
+	float	viewweapon_pad0;
+	float	viewweapon_pad1;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
@@ -485,6 +508,9 @@ void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
 void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
+void R_DrawViewModel (void);
+int R_ViewweaponLightingMode (void);
+void R_Viewweapon_AddMuzzleFlash (void);
 
 entity_t **R_GetVisEntities (modtype_t type, qboolean translucent, int *outcount);
 

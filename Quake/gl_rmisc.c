@@ -315,9 +315,59 @@ R_OverbrightBits_f
 */
 static void R_OverbrightBits_f (cvar_t *var)
 {
-	int value = CLAMP (0, (int)Q_rint (var->value), 3);
-	if (value != (int)var->value)
-		Cvar_SetValueQuick (var, (float)value);
+        int value = CLAMP (0, (int)Q_rint (var->value), 3);
+        if (value != (int)var->value)
+                Cvar_SetValueQuick (var, (float)value);
+}
+
+static void R_ViewweaponMode_f (cvar_t *var)
+{
+        const char *mode = var->string;
+
+        if (!mode || !*mode)
+                return;
+
+        if (!Q_strcasecmp (mode, "classic"))
+        {
+                Cvar_SetValueQuick (&r_viewweaponLighting, 0.f);
+                Cvar_SetValueQuick (&r_viewweaponAmbient, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponDirScale, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponRim, 0.0f);
+                Cvar_SetValueQuick (&r_viewweaponSpec, 0.0f);
+                Cvar_SetValueQuick (&r_viewweaponDLights, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.35f);
+                Cvar_SetValueQuick (&r_viewweaponFogFix, 0.0f);
+        }
+        else if (!Q_strcasecmp (mode, "q3"))
+        {
+                Cvar_SetValueQuick (&r_viewweaponLighting, 1.f);
+                Cvar_SetValueQuick (&r_viewweaponAmbient, 0.9f);
+                Cvar_SetValueQuick (&r_viewweaponDirScale, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponRim, 0.15f);
+                Cvar_SetValueQuick (&r_viewweaponSpec, 0.05f);
+                Cvar_SetValueQuick (&r_viewweaponDLights, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.25f);
+                Cvar_SetValueQuick (&r_viewweaponFogFix, 0.1f);
+        }
+        else if (!Q_strcasecmp (mode, "modern"))
+        {
+                Cvar_SetValueQuick (&r_viewweaponLighting, 2.f);
+                Cvar_SetValueQuick (&r_viewweaponAmbient, 1.0f);
+                Cvar_SetValueQuick (&r_viewweaponDirScale, 1.25f);
+                Cvar_SetValueQuick (&r_viewweaponRim, 0.3f);
+                Cvar_SetValueQuick (&r_viewweaponSpec, 0.2f);
+                Cvar_SetValueQuick (&r_viewweaponDLights, 1.15f);
+                Cvar_SetValueQuick (&r_viewweaponMuzzleflashBoost, 0.35f);
+                Cvar_SetValueQuick (&r_viewweaponFogFix, 0.2f);
+        }
+        else if (!Q_strcasecmp (mode, "custom"))
+        {
+                return;
+        }
+        else
+        {
+                Con_Printf ("Unknown r_viewweaponMode preset \"%s\"\n", mode);
+        }
 }
 
 /*
@@ -380,6 +430,16 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);
 	Cvar_RegisterVariable (&r_rim_exponent);
+	Cvar_RegisterVariable (&r_viewweaponLighting);
+	Cvar_RegisterVariable (&r_viewweaponAmbient);
+	Cvar_RegisterVariable (&r_viewweaponDirScale);
+	Cvar_RegisterVariable (&r_viewweaponRim);
+	Cvar_RegisterVariable (&r_viewweaponSpec);
+	Cvar_RegisterVariable (&r_viewweaponDLights);
+	Cvar_RegisterVariable (&r_viewweaponMuzzleflashBoost);
+	Cvar_RegisterVariable (&r_viewweaponFogFix);
+	Cvar_RegisterVariable (&r_viewweaponMode);
+	Cvar_SetCallback (&r_viewweaponMode, R_ViewweaponMode_f);
         Cvar_RegisterVariable (&r_dof_autofocus);
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
