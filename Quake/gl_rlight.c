@@ -24,6 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_shadow.h"
 
+enum
+{
+        BSPX_INDEX_MAP_CAP = MAX_DLIGHTS
+};
+
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
@@ -42,16 +47,16 @@ static void R_FillGpuLightFromBspx (const bspx_static_light_t *src, gpulight_t *
         dst->minlight = 0.0f;
 }
 
-static int R_AppendBspxLights (const bspx_static_light_t *lights, int count, int *index_map)
+static int R_AppendBspxLights (const bspx_static_light_t *lights, int count, int *index_map, int index_map_cap)
 {
         int appended = 0;
 
         if (!lights || count <= 0)
                 return 0;
 
-        if (index_map)
+        if (index_map && index_map_cap > 0)
         {
-                for (int i = 0; i < count; ++i)
+                for (int i = 0; i < index_map_cap; ++i)
                         index_map[i] = -1;
         }
 
@@ -64,16 +69,10 @@ static int R_AppendBspxLights (const bspx_static_light_t *lights, int count, int
                         continue;
 
                 dst = &r_lightbuffer.lights[r_framedata.numlights++];
-                if (index_map)
+                if (index_map && i < index_map_cap)
                         index_map[i] = r_framedata.numlights - 1;
                 R_FillGpuLightFromBspx (src, dst);
                 appended++;
-        }
-
-        if (index_map)
-        {
-                for (int i = appended; i < count; ++i)
-                        index_map[i] = (index_map[i] >= 0) ? index_map[i] : -1;
         }
 
         return appended;
@@ -191,12 +190,17 @@ void R_PushDlights (void)
         int dynamic_count = 0;
         int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
         int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
+        int static_light_map_count = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
+        int static_shadow_light_map_count = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
 
-        int static_light_index_map_size = (static_light_count > 0) ? static_light_count : 1;
-        int static_shadow_index_map_size = (static_shadow_light_count > 0) ? static_shadow_light_count : 1;
+        int static_light_index_map[BSPX_INDEX_MAP_CAP];
+        int static_shadow_light_index_map[BSPX_INDEX_MAP_CAP];
 
-        int static_light_index_map[static_light_index_map_size];
-        int static_shadow_light_index_map[static_shadow_index_map_size];
+        for (int i = 0; i < BSPX_INDEX_MAP_CAP; ++i)
+        {
+                static_light_index_map[i] = -1;
+                static_shadow_light_index_map[i] = -1;
+        }
 
         r_framedata.numlights = 0;
 
@@ -246,10 +250,12 @@ void R_PushDlights (void)
                 {
                         R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
                                 cl.worldmodel->bspx_num_static_lights,
-                                (static_light_count > 0) ? static_light_index_map : NULL);
+                                (static_light_map_count > 0) ? static_light_index_map : NULL,
+                                static_light_map_count);
                         R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
                                 cl.worldmodel->bspx_num_static_shadow_lights,
-                                (static_shadow_light_count > 0) ? static_shadow_light_index_map : NULL);
+                                (static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
+                                static_shadow_light_map_count);
                 }
         }
 
@@ -270,7 +276,7 @@ void R_PushDlights (void)
 
                         for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
                         {
-                                int mapped_index = (static_shadow_light_count > 0) ?
+                                int mapped_index = (k < static_shadow_light_map_count) ?
                                         static_shadow_light_index_map[k] : -1;
 
                                 if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
@@ -297,10 +303,11 @@ void R_PushDlights (void)
                                         if (idx < 0 || idx >= maxlights)
                                                 continue;
 
-                                        if (static_light_count <= 0)
+                                        if (static_light_map_count <= 0)
                                                 continue;
 
-                                        int mapped_index = static_light_index_map[idx];
+                                        int mapped_index = (idx < static_light_map_count) ?
+                                                static_light_index_map[idx] : -1;
 
                                         if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
                                                 continue;
