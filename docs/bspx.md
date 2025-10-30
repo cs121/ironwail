@@ -10,6 +10,8 @@ Ironwail can read and cache [BSPX](https://www.quaddicted.com/files/maps/bspx.tx
 | `FACENORMALS`   | Per-surface normals stored as float triples. | Used as the preferred normal in decal projection (`r_decals`), falling back to averaged vertex normals. |
 | `RGBLIGHTING`   | Packed RGB lightmap samples. | Copied into the standard lightmap buffer when `r_bspx_lighting` is enabled and no external `.lit` file overrides the map. |
 | `LIGHTINGDIR`   | Directional lighting samples aligned with the BSP lightmap. | When `r_bspx_lighting` is enabled the samples populate per-surface deluxemaps so shaders can reconstruct smooth normals; otherwise the data remains cached for tooling. |
+| `STATICLIGHTS`  | Array of static point lights stored as float tuples. | Converted into GPU lights at runtime so BSPX maps can ship with authored static light sources. |
+| `STATICSHADOWS` | Static shadow metadata. | When supplied as light tuples they are treated as additional shadow-casting lights; index payloads mark entries inside `STATICLIGHTS` that should feed the shadow system. |
 | `ENVMAP`, `SURFENVMAP` | Additional material metadata. | Stored as opaque blobs for future renderer features. |
 | `BRUSHLIST`     | List of brush indices. | Available through the `bspx_brushlist` console command for debugging tools. |
 | `ZIP_PAKFILE`   | Embedded archive payload. | Parsed and stored as an opaque blob. |

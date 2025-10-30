@@ -1050,6 +1050,116 @@ static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data,
         return false;
 }
 
+static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *data, size_t length,
+        bspx_static_light_t **out_lights, int *out_count)
+{
+        const size_t stride_with_intensity = sizeof(float) * 8;
+        const size_t stride_without_intensity = sizeof(float) * 7;
+        size_t stride = 0;
+        qboolean has_intensity = true;
+        int count;
+        bspx_static_light_t *lights;
+
+        if (!out_lights || !out_count)
+                return false;
+
+        *out_lights = NULL;
+        *out_count = 0;
+
+        if (!data || length == 0)
+                return true;
+
+        if (length % stride_with_intensity == 0)
+        {
+                stride = stride_with_intensity;
+                has_intensity = true;
+        }
+        else if (length % stride_without_intensity == 0)
+        {
+                stride = stride_without_intensity;
+                has_intensity = false;
+        }
+        else
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of %zu or %zu)\n",
+                        lumpname, length, stride_with_intensity, stride_without_intensity);
+                return false;
+        }
+
+        count = (int)(length / stride);
+        if (count <= 0)
+                return true;
+
+        lights = (bspx_static_light_t *) Hunk_AllocName (count * sizeof(*lights), lumpname);
+        if (!lights)
+                return false;
+
+        for (int i = 0; i < count; ++i)
+        {
+                const float *src = (const float *)(data + i * stride);
+                float intensity = 1.0f;
+
+                lights[i].origin[0] = LittleFloat (src[0]);
+                lights[i].origin[1] = LittleFloat (src[1]);
+                lights[i].origin[2] = LittleFloat (src[2]);
+
+                lights[i].radius = LittleFloat (src[3]);
+                if (lights[i].radius < 0.0f)
+                        lights[i].radius = 0.0f;
+
+                lights[i].color[0] = LittleFloat (src[4]);
+                lights[i].color[1] = LittleFloat (src[5]);
+                lights[i].color[2] = LittleFloat (src[6]);
+
+                if (has_intensity)
+                        intensity = LittleFloat (src[7]);
+
+                lights[i].intensity = (intensity > 0.0f) ? intensity : 0.0f;
+        }
+
+        *out_lights = lights;
+        *out_count = count;
+        return true;
+}
+
+static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const byte *data, size_t length,
+        int **out_indices, int *out_count)
+{
+        int count;
+        int *indices;
+
+        if (!out_indices || !out_count)
+                return false;
+
+        *out_indices = NULL;
+        *out_count = 0;
+
+        if (!data || length == 0)
+                return true;
+
+        if (length % sizeof(int))
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiple of %zu)\n",
+                        lumpname, length, sizeof(int));
+                return false;
+        }
+
+        count = (int)(length / sizeof(int));
+        if (count <= 0)
+                return true;
+
+        indices = (int *) Hunk_AllocName (count * sizeof(*indices), lumpname);
+        if (!indices)
+                return false;
+
+        for (int i = 0; i < count; ++i)
+                indices[i] = LittleLong (((const int *)data)[i]);
+
+        *out_indices = indices;
+        *out_count = count;
+        return true;
+}
+
 static void Mod_LoadBspx (const byte *buffer)
 {
         typedef struct bspx_lump_s
@@ -1135,6 +1245,21 @@ static void Mod_LoadBspx (const byte *buffer)
                          !q_strcasecmp (lumpname, "DLIT")))
                 {
                         Mod_BspxImportDeluxemap (lumpname, buffer + lumpofs, lumplen);
+                }
+
+                if (!q_strcasecmp (lumpname, "STATICLIGHTS") || !q_strcasecmp (lumpname, "STATIC_LIGHTS"))
+                {
+                        Mod_BspxImportStaticLights (lumpname, buffer + lumpofs, lumplen,
+                                &loadmodel->bspx_static_lights, &loadmodel->bspx_num_static_lights);
+                }
+                else if (!q_strcasecmp (lumpname, "STATICSHADOWS") || !q_strcasecmp (lumpname, "STATIC_SHADOWS"))
+                {
+                        if (!Mod_BspxImportStaticLights (lumpname, buffer + lumpofs, lumplen,
+                                        &loadmodel->bspx_static_shadow_lights, &loadmodel->bspx_num_static_shadow_lights))
+                        {
+                                Mod_BspxImportStaticShadowIndices (lumpname, buffer + lumpofs, lumplen,
+                                        &loadmodel->bspx_static_shadow_indices, &loadmodel->bspx_num_static_shadow_indices);
+                        }
                 }
         }
 }
@@ -2799,9 +2924,15 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 
-	loadmodel->type = mod_brush;
-	loadmodel->numdeluxsamples = 0;
-	mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
+        loadmodel->type = mod_brush;
+        loadmodel->numdeluxsamples = 0;
+        loadmodel->bspx_num_static_lights = 0;
+        loadmodel->bspx_static_lights = NULL;
+        loadmodel->bspx_num_static_shadow_lights = 0;
+        loadmodel->bspx_static_shadow_lights = NULL;
+        loadmodel->bspx_num_static_shadow_indices = 0;
+        loadmodel->bspx_static_shadow_indices = NULL;
+        mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 
 	header = (dheader_t *)buffer;
 
