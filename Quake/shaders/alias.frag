@@ -46,8 +46,22 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _FrameZLogBias;
         uint    NumLights;
         uint    _FramePrevFrameValid;
+        uint    _FrameDeluxEnabled;
         uint    _FramePad1;
-        uint    _FramePad2;
+        vec3    _FrameViewweaponAmbient;
+        float   _FrameViewweaponMode;
+        vec3    _FrameViewweaponDirColor;
+        float   _FrameViewweaponRim;
+        vec3    _FrameViewweaponDirDirection;
+        float   _FrameViewweaponSpec;
+        float   _FrameViewweaponDLights;
+        float   _FrameViewweaponMuzzleBoost;
+        float   _FrameViewweaponFogFix;
+        float   _FrameViewweaponMinLight;
+        float   _FrameViewweaponFlash;
+        float   _FrameViewweaponHalfLambert;
+        float   _FrameViewweaponPad0;
+        float   _FrameViewweaponPad1;
 };
 
 struct Light
