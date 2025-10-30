@@ -62,6 +62,7 @@ static qboolean r_frame_rendered_this_update;
 #define VIEWWEAPON_PROBE_COUNT 6
 #define VIEWWEAPON_PROBE_DISTANCE 96.0f
 #define VIEWWEAPON_SMOOTHING 0.2f
+#define VIEWWEAPON_DIRECTION_THRESHOLD 0.02f
 
 static lightcache_t viewweapon_origin_cache;
 static lightcache_t viewweapon_probe_caches[VIEWWEAPON_PROBE_COUNT];
@@ -219,9 +220,11 @@ static void R_UpdateViewweaponLightingParams (void)
 	}
 
 	vec3_t ambient_sample = { 0.f, 0.f, 0.f };
+	vec3_t base_ambient = { 0.f, 0.f, 0.f };
 	vec3_t best_diff = { 0.f, 0.f, 0.f };
 	vec3_t best_dir = { -vpn[0], -vpn[1], -vpn[2] };
 	float best_weight = 0.f;
+	float ambient_base_floor = (ambient_scale > 0.f) ? 0.1f : 0.f;
 
 	vec3_t saved_lightcolor;
 	VectorCopy (lightcolor, saved_lightcolor);
@@ -233,8 +236,12 @@ static void R_UpdateViewweaponLightingParams (void)
 		else
 			VectorClear (ambient_sample);
 
-		vec3_t base_ambient;
 		VectorScale (ambient_sample, 1.f / 200.f, base_ambient);
+		for (int i = 0; i < 3; ++i)
+		{
+			if (base_ambient[i] < ambient_base_floor)
+				base_ambient[i] = ambient_base_floor;
+		}
 
 		vec3_t dirs[VIEWWEAPON_PROBE_COUNT];
 		VectorCopy (vpn, dirs[0]);
@@ -283,12 +290,27 @@ static void R_UpdateViewweaponLightingParams (void)
 	else
 	{
 		ambient_sample[0] = ambient_sample[1] = ambient_sample[2] = 96.f;
+		VectorScale (ambient_sample, 1.f / 200.f, base_ambient);
+		for (int i = 0; i < 3; ++i)
+		{
+			if (base_ambient[i] < ambient_base_floor)
+				base_ambient[i] = ambient_base_floor;
+		}
+	}
+
+	qboolean has_dir = best_weight > VIEWWEAPON_DIRECTION_THRESHOLD;
+	if (!has_dir)
+	{
+		VectorClear (best_diff);
+		best_dir[0] = -vpn[0];
+		best_dir[1] = -vpn[1];
+		best_dir[2] = -vpn[2];
 	}
 
 	VectorCopy (saved_lightcolor, lightcolor);
 
 	vec3_t ambient_linear;
-	VectorScale (ambient_sample, 1.f / 200.f, ambient_linear);
+	VectorCopy (base_ambient, ambient_linear);
 	VectorScale (ambient_linear, ambient_scale, ambient_linear);
 
 	float ambient_floor = ambient_scale * 0.1f;
@@ -318,11 +340,13 @@ static void R_UpdateViewweaponLightingParams (void)
 	}
 	else
 	{
+		float ambient_smoothing = VIEWWEAPON_SMOOTHING;
+		float dir_smoothing = has_dir ? VIEWWEAPON_SMOOTHING : 1.0f;
 		for (int i = 0; i < 3; ++i)
 		{
-			viewweapon_smooth_ambient[i] += (ambient_linear[i] - viewweapon_smooth_ambient[i]) * VIEWWEAPON_SMOOTHING;
-			viewweapon_smooth_dir_color[i] += (dir_color[i] - viewweapon_smooth_dir_color[i]) * VIEWWEAPON_SMOOTHING;
-			viewweapon_smooth_dir_dir[i] += (best_dir[i] - viewweapon_smooth_dir_dir[i]) * VIEWWEAPON_SMOOTHING;
+			viewweapon_smooth_ambient[i] += (ambient_linear[i] - viewweapon_smooth_ambient[i]) * ambient_smoothing;
+			viewweapon_smooth_dir_color[i] += (dir_color[i] - viewweapon_smooth_dir_color[i]) * dir_smoothing;
+			viewweapon_smooth_dir_dir[i] += (best_dir[i] - viewweapon_smooth_dir_dir[i]) * dir_smoothing;
 		}
 		if (VectorNormalize (viewweapon_smooth_dir_dir) == 0.f)
 		{
