@@ -361,10 +361,18 @@ typedef struct
 } bonepose_t; //pose data for a single bone.
 typedef struct
 {
-	int parent; //-1 for a root bone
-	char name[32];
-	bonepose_t inverse;
+        int parent; //-1 for a root bone
+        char name[32];
+        bonepose_t inverse;
 } boneinfo_t;
+
+typedef struct bspx_static_light_s
+{
+        vec3_t  origin;
+        float   radius;
+        vec3_t  color;
+        float   intensity;
+} bspx_static_light_t;
 
 #define	MAXALIASVERTS		0x7fff //16-bit index buffer + onseam duplication
 #define	MAXALIASVERTS_QS	2000 //johnfitz -- was 1024
@@ -498,6 +506,13 @@ typedef struct qmodel_s
 	qboolean	litfile;
 	qboolean	deluxfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
+
+	int			bspx_num_static_lights;
+	bspx_static_light_t	*bspx_static_lights;
+	int			bspx_num_static_shadow_lights;
+	bspx_static_light_t	*bspx_static_shadow_lights;
+	int			bspx_num_static_shadow_indices;
+	int			*bspx_static_shadow_indices;
 
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
