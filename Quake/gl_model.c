@@ -5243,26 +5243,52 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
                                         surf->gltextures[surf->numskins][f] = TexMgr_LoadImage (mod, texname, fwidth, fheight, fmt, data, texname, 0, TEXPREF_ALPHA|TEXPREF_NOBRIGHT|TEXPREF_MIPMAP );
                                         surf->fbtextures[surf->numskins][f] = NULL;
                                         surf->emissivetextures[surf->numskins][f] = NULL;
-					if (fmt == SRC_INDEXED)
-					{	//8bit base texture. use it for fullbrights.
-						if (Mod_CheckFullbrights (data, fwidth*fheight))
-							surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage (mod, va("%s_luma", texname), fwidth, fheight, fmt, data, texname, 0, TEXPREF_ALPHA|TEXPREF_FULLBRIGHT|TEXPREF_MIPMAP );
-					}
-					else
-					{	//we found a 32bit base texture.
+                                        if (fmt == SRC_INDEXED)
+                                        {       //8bit base texture. use it for fullbrights.
+                                                if (Mod_CheckFullbrights (data, fwidth*fheight))
+                                                        surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage (mod, va("%s_luma", texname), fwidth, fheight, fmt, data, texname, 0, TEXPREF_ALPHA|TEXPREF_FULLBRIGHT|TEXPREF_MIPMAP );
+                                        }
+                                        else
+                                        {       //we found a 32bit base texture.
+                                                unsigned int ewidth, eheight;
+                                                enum srcformat efmt = SRC_RGBA;
+                                               void *edata;
+                                               int loadmark;
+
                                                 q_snprintf(emissivename, sizeof(emissivename), "progs/%s_%02u_%02u_emissive", com_token, surf->numskins, f);
-                                                surf->emissivetextures[surf->numskins][f] = TexMgr_LoadImage(mod, emissivename, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, emissivename, 0, TEXPREF_MIPMAP);
+                                                loadmark = Hunk_LowMark ();
+                                                edata = Image_LoadImage (emissivename, (int *)&ewidth, (int *)&eheight, &efmt);
+                                                if (edata)
+                                                        surf->emissivetextures[surf->numskins][f] = TexMgr_LoadImage(mod, emissivename, ewidth, eheight, efmt, edata, emissivename, 0, TEXPREF_MIPMAP);
+                                                Hunk_FreeToLowMark (loadmark);
+
                                                 if (!surf->fbtextures[surf->numskins][f])
                                                 {
+                                                        unsigned int glowwidth, glowheight;
+                                                        enum srcformat glowfmt = SRC_RGBA;
+                                                        void *glowdata;
+
                                                         q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_glow", com_token, surf->numskins, f);
-                                                        surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
+                                                        loadmark = Hunk_LowMark ();
+                                                        glowdata = Image_LoadImage (texname, (int *)&glowwidth, (int *)&glowheight, &glowfmt);
+                                                        if (glowdata)
+                                                                surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, glowwidth, glowheight, glowfmt, glowdata, texname, 0, TEXPREF_MIPMAP);
+                                                        Hunk_FreeToLowMark (loadmark);
                                                 }
                                                 if (!surf->fbtextures[surf->numskins][f])
                                                 {
+                                                        unsigned int lumawidth, lumaheight;
+                                                        enum srcformat lumafmt = SRC_RGBA;
+                                                        void *lumadata;
+
                                                         q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_luma", com_token, surf->numskins, f);
-                                                        surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
+                                                        loadmark = Hunk_LowMark ();
+                                                        lumadata = Image_LoadImage (texname, (int *)&lumawidth, (int *)&lumaheight, &lumafmt);
+                                                        if (lumadata)
+                                                                surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, lumawidth, lumaheight, lumafmt, lumadata, texname, 0, TEXPREF_MIPMAP);
+                                                        Hunk_FreeToLowMark (loadmark);
                                                 }
-					}
+                                        }
 
 					//now try to load glow/luma image from the same place
 					Hunk_FreeToLowMark (mark);
