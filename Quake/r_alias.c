@@ -498,16 +498,24 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         // set up lighting
         //
 	rs_aliaspolys += paliashdr->numtris;
-	R_SetupAliasLighting (e);
+        R_SetupAliasLighting (e);
 
-	// Viewmodel muzzle flashes look wrong when shaded using the ambient
-	// lighting at the player's position (typically pitch black in dark
-	// areas).  In the original software renderer the muzzle flash pixels
-	// are effectively fullbright, so replicate that behaviour by forcing a
-	// strong light contribution when the view model is drawing a muzzle
-	// flash frame.
-	if ((e->effects & EF_MUZZLEFLASH) && e == &cl.viewent)
-		lightcolor[0] = lightcolor[1] = lightcolor[2] = 256.0f / 200.0f;
+        {
+                int viewweapon_mode = 0;
+                if (e == &cl.viewent)
+                        viewweapon_mode = R_ViewweaponLightingMode ();
+
+                if (viewweapon_mode > 0)
+                {
+                        if ((e->effects & EF_MUZZLEFLASH) && !showtris)
+                                R_Viewweapon_AddMuzzleFlash ();
+                        lightcolor[0] = lightcolor[1] = lightcolor[2] = 1.f;
+                }
+                else if ((e->effects & EF_MUZZLEFLASH) && e == &cl.viewent)
+                {
+                        lightcolor[0] = lightcolor[1] = lightcolor[2] = 256.0f / 200.0f;
+                }
+        }
 
 	//
 	// draw it
