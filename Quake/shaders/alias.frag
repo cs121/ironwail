@@ -246,7 +246,7 @@ void main()
         vec3 localNormal = normalize(in_local_normal);
         vec3 shadevector = normalize(in_shadevector);
         float shade = r_avertexnormal_dot(localNormal, shadevector);
-        vec3 lighting = in_color.rgb * shade;
+        vec3 lighting = (in_color.rgb * _FrameLightmapStrength) * shade;
         vec3 worldNormal = in_world_normal;
         if (dot(worldNormal, worldNormal) > 0.0)
                 worldNormal = normalize(worldNormal);
