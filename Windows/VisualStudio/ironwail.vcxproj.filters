@@ -72,6 +72,9 @@
     <ClCompile Include="..\..\Quake\gl_rlight.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\gl_shadow.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\gl_rmain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
