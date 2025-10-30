@@ -257,35 +257,46 @@ static void R_UpdateViewweaponLightingParams (void)
 		dirs[5][1] = -vright[1];
 		dirs[5][2] = -vright[2];
 
-		for (int i = 0; i < VIEWWEAPON_PROBE_COUNT; ++i)
-		{
-			vec3_t sample_pos;
-			VectorMA (r_refdef.vieworg, VIEWWEAPON_PROBE_DISTANCE, dirs[i], sample_pos);
-			if (!R_LightPoint (sample_pos, 0.f, &viewweapon_probe_caches[i]))
-				continue;
+                for (int i = 0; i < VIEWWEAPON_PROBE_COUNT; ++i)
+                {
+                        vec3_t sample_pos;
+                        VectorMA (r_refdef.vieworg, VIEWWEAPON_PROBE_DISTANCE, dirs[i], sample_pos);
+                        if (!R_LightPoint (sample_pos, 0.f, &viewweapon_probe_caches[i]))
+                                continue;
 
-			vec3_t sample_linear;
-			VectorScale (lightcolor, 1.f / 200.f, sample_linear);
-			vec3_t diff;
-			float weight = 0.f;
-			for (int j = 0; j < 3; ++j)
-			{
-				float delta = sample_linear[j] - base_ambient[j];
-				if (delta > 0.f)
-				{
-					diff[j] = delta;
-					weight += delta;
-				}
-				else
-					diff[j] = 0.f;
-			}
-			if (weight > best_weight)
-			{
-				best_weight = weight;
-				VectorCopy (diff, best_diff);
-				VectorCopy (dirs[i], best_dir);
-			}
-		}
+                        vec3_t sample_linear;
+                        VectorScale (lightcolor, 1.f / 200.f, sample_linear);
+                        vec3_t diff;
+                        float weight = 0.f;
+                        for (int j = 0; j < 3; ++j)
+                        {
+                                float delta = sample_linear[j] - base_ambient[j];
+                                if (delta > 0.f)
+                                {
+                                        diff[j] = delta;
+                                        weight += delta;
+                                }
+                                else
+                                        diff[j] = 0.f;
+                        }
+
+                        if (weight <= 0.f)
+                                continue;
+
+                        float facing = DotProduct (dirs[i], vpn);
+                        if (facing < 0.f)
+                                continue;
+
+                        float bias = 0.25f + 0.75f * facing;
+                        weight *= bias;
+
+                        if (weight > best_weight)
+                        {
+                                best_weight = weight;
+                                VectorCopy (diff, best_diff);
+                                VectorCopy (dirs[i], best_dir);
+                        }
+                }
 	}
 	else
 	{
