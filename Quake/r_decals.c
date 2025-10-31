@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_decals.c -- runtime decal/mark surface rendering
 
 #include "quakedef.h"
+#include <ctype.h>
+#include <string.h>
 
 #define MAX_DECALS                      256
 #define DECAL_TEXTURE_SIZE      64
@@ -32,10 +34,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
 
-#define BULLET_DECAL_MIN_RADIUS 3.5f
-#define BULLET_DECAL_MAX_RADIUS 5.0f
+#define BULLET_DECAL_MIN_RADIUS 7.0f
+#define BULLET_DECAL_MAX_RADIUS 10.0f
 #define BLOOD_DECAL_MIN_RADIUS  6.0f
 #define BLOOD_DECAL_MAX_RADIUS  12.0f
+
+#define BLOOD_POOL_RADIUS       22.0f
+#define BLOOD_POOL_JITTER       12.0f
+#define BLOOD_POOL_SMALL_MIN    6.0f
+#define BLOOD_POOL_SMALL_MAX    10.0f
+
+#define DECAL_LIGHT_REFRESH     0.1
 
 #define BLOOD_WALL_THRESHOLD    0.65f
 
@@ -50,6 +59,7 @@ typedef struct decalvertex_s
 {
         vec3_t          pos;
         float           uv[2];
+        float           color[4];
 } decalvertex_t;
 
 typedef struct decal_s
@@ -57,6 +67,15 @@ typedef struct decal_s
         qboolean        active;
         double          die;
         gltexture_t     *texture;
+        gltexture_t     *base_texture;
+        decaltype_t     type;
+        float           radius;
+        vec3_t          origin;
+        vec3_t          normal;
+        float           tint[4];
+        vec3_t          light_color;
+        lightcache_t    lightcache;
+        double          last_light_update;
         decalvertex_t   verts[4];
 } decal_t;
 
@@ -84,6 +103,11 @@ static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_lifetime_cvar = {"r_decals_lifetime", "20", CVAR_ARCHIVE};
 static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
+static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
+
+extern vec3_t lightcolor;
+
+static byte r_decal_death_spawned[MAX_EDICTS];
 
 static int R_GetDecalLimit (void)
 {
@@ -132,6 +156,7 @@ static void R_FlushDecalBatch (void)
         GL_BindBuffer (GL_ARRAY_BUFFER, buf);
         GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, pos));
         GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, uv));
+        GL_VertexAttribPointerFunc (2, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, color));
 
         GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indices, sizeof(decal_indices[0]) * decal_batch_count * 6, &buf, &ofs);
         GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
@@ -190,9 +215,9 @@ static void R_GenerateDecalTexture (decaltype_t type)
                                 {
                                         float falloff = 1.0f - (dist / radius);
                                         float hole = q_max (0.f, 1.0f - dist * 3.0f);
-                                        alpha = powf (falloff, 1.8f) * 0.9f;
-                                        float shade = 0.20f + falloff * 0.35f;
-                                        shade = q_min (shade + hole * 0.2f, 0.6f);
+                                        alpha = powf (falloff, 1.8f) * 0.8f;
+                                        float shade = 0.05f + falloff * 0.18f;
+                                        shade = q_min (shade + hole * 0.1f, 0.35f);
                                         r = g = b = shade;
                                 }
                                 break;
@@ -207,10 +232,10 @@ static void R_GenerateDecalTexture (decaltype_t type)
                                         float ring = 0.25f * sinf ((fx + fy) * 9.0f) * sinf ((fx - fy) * 7.0f);
                                         float noisefall = CLAMP (0.f, falloff + ring * 0.2f, 1.f);
                                         alpha = powf (noisefall, 1.5f);
-                                        float base = 0.3f + noisefall * 0.5f;
-                                        r = base * 0.85f + 0.15f;
-                                        g = base * 0.25f;
-                                        b = base * 0.15f;
+                                        float base = 0.35f + noisefall * 0.45f;
+                                        r = base * 0.8f + 0.2f;
+                                        g = base * 0.18f;
+                                        b = base * 0.14f;
                                 }
                                 break;
                         }
@@ -245,6 +270,7 @@ void R_InitDecals (void)
         Cvar_RegisterVariable (&r_decals_bullet_cvar);
         Cvar_RegisterVariable (&r_decals_lifetime_cvar);
         Cvar_RegisterVariable (&r_decals_max_cvar);
+        Cvar_RegisterVariable (&r_decals_debug_cvar);
 
         for (i = 0; i < DECAL_COUNT; i++)
                 R_GenerateDecalTexture ((decaltype_t)i);
@@ -255,6 +281,7 @@ void R_InitDecals (void)
 void R_ClearDecals (void)
 {
         memset (r_decals, 0, sizeof (r_decals));
+        memset (r_decal_death_spawned, 0, sizeof (r_decal_death_spawned));
         R_ClearDecalBatch ();
 }
 
@@ -262,6 +289,7 @@ void R_UpdateDecals (void)
 {
         int i, limit = R_GetDecalLimit ();
         double t = cl.time;
+        qboolean debug = r_decals_debug_cvar.value != 0.f;
 
         for (i = 0; i < MAX_DECALS; i++)
         {
@@ -269,7 +297,64 @@ void R_UpdateDecals (void)
                 if (!dec->active)
                         continue;
                 if (i >= limit || dec->die <= t || !dec->texture)
+                {
                         dec->active = false;
+                        continue;
+                }
+
+                {
+                        gltexture_t *desired = debug ? whitetexture : dec->base_texture;
+                        if (dec->texture != desired)
+                                dec->texture = desired;
+                }
+
+                if (debug)
+                {
+                        int v;
+                        for (v = 0; v < 4; v++)
+                        {
+                                dec->verts[v].color[0] = 1.f;
+                                dec->verts[v].color[1] = 1.f;
+                                dec->verts[v].color[2] = 1.f;
+                                dec->verts[v].color[3] = 1.f;
+                        }
+                        continue;
+                }
+
+                if (t - dec->last_light_update > DECAL_LIGHT_REFRESH)
+                {
+                        vec3_t sample;
+                        lightcache_t cache = dec->lightcache;
+                        VectorMA (dec->origin, DECAL_OFFSET * 2.f, dec->normal, sample);
+                        if (cl.worldmodel && R_LightPoint (sample, 0.f, &cache))
+                        {
+                                int v;
+                                VectorScale (lightcolor, 1.f / 200.f, dec->light_color);
+                                for (v = 0; v < 3; v++)
+                                        dec->light_color[v] = CLAMP (0.f, dec->light_color[v], 1.f);
+                                dec->lightcache = cache;
+                        }
+                        else
+                        {
+                                dec->light_color[0] = dec->light_color[1] = dec->light_color[2] = 0.2f;
+                        }
+
+                        {
+                                vec3_t shaded;
+                                int v;
+                                for (v = 0; v < 3; v++)
+                                        shaded[v] = CLAMP (0.f, dec->light_color[v] * dec->tint[v], 1.f);
+                                for (v = 0; v < 4; v++)
+                                {
+                                        dec->verts[v].color[0] = shaded[0];
+                                        dec->verts[v].color[1] = shaded[1];
+                                        dec->verts[v].color[2] = shaded[2];
+                                        dec->verts[v].color[3] = CLAMP (0.f, dec->tint[3], 1.f);
+                                }
+                        }
+
+                        dec->last_light_update = t;
+                }
         }
 }
 
@@ -498,7 +583,7 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         dec->verts[3].uv[0] = 1.f; dec->verts[3].uv[1] = 1.f;
 }
 
-static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_t type)
+static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_t type, const float *tint)
 {
         decal_t *dec;
 
@@ -509,13 +594,69 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         if (!dec)
                 return false;
 
-        dec->texture = r_decal_textures[type];
-        if (!dec->texture)
+        dec->base_texture = r_decal_textures[type];
+        if (!dec->base_texture)
                 return false;
+
+        dec->texture = dec->base_texture;
+        dec->type = type;
+        dec->radius = radius;
+        VectorCopy (geom->origin, dec->origin);
+        VectorCopy (geom->normal, dec->normal);
+        dec->lightcache.surfidx = 0;
+        dec->last_light_update = 0.0;
 
         dec->die = cl.time + R_GetDecalLifetime ();
         dec->active = true;
+        dec->tint[0] = tint ? tint[0] : 1.f;
+        dec->tint[1] = tint ? tint[1] : 1.f;
+        dec->tint[2] = tint ? tint[2] : 1.f;
+        dec->tint[3] = tint ? tint[3] : 1.f;
         R_AssignDecalVertices (dec, geom, radius);
+
+        {
+                vec3_t sample;
+                lightcache_t cache = dec->lightcache;
+                VectorMA (geom->origin, DECAL_OFFSET * 2.f, geom->normal, sample);
+                if (cl.worldmodel && R_LightPoint (sample, 0.f, &cache))
+                {
+                        int v;
+                        VectorScale (lightcolor, 1.f / 200.f, dec->light_color);
+                        for (v = 0; v < 3; v++)
+                                dec->light_color[v] = CLAMP (0.f, dec->light_color[v], 1.f);
+                        dec->lightcache = cache;
+                }
+                else
+                {
+                        dec->light_color[0] = dec->light_color[1] = dec->light_color[2] = 0.5f;
+                }
+
+                {
+                        vec3_t shaded;
+                        int v;
+                        for (v = 0; v < 3; v++)
+                                shaded[v] = CLAMP (0.f, dec->light_color[v] * dec->tint[v], 1.f);
+                        for (v = 0; v < 4; v++)
+                        {
+                                dec->verts[v].color[0] = shaded[0];
+                                dec->verts[v].color[1] = shaded[1];
+                                dec->verts[v].color[2] = shaded[2];
+                                dec->verts[v].color[3] = CLAMP (0.f, dec->tint[3], 1.f);
+                        }
+                }
+
+                dec->last_light_update = cl.time;
+        }
+
+        if (r_decals_debug_cvar.value)
+        {
+                const char *name = (type == DECAL_BULLET) ? "bullet" : "blood";
+                Con_Printf ("Decal[%s] origin=(%5.1f,%5.1f,%5.1f) normal=(%4.2f,%4.2f,%4.2f) radius=%.1f\n",
+                        name,
+                        geom->origin[0], geom->origin[1], geom->origin[2],
+                        geom->normal[0], geom->normal[1], geom->normal[2],
+                        radius);
+        }
         return true;
 }
 
@@ -523,6 +664,7 @@ void R_AddBulletDecal (const vec3_t point)
 {
         decalgeom_t geom;
         float radius;
+        const float tint[4] = {0.6f, 0.6f, 0.6f, 0.5f};
 
         if (!r_decals_cvar.value || !r_decals_bullet_cvar.value)
                 return;
@@ -531,10 +673,10 @@ void R_AddBulletDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (BULLET_DECAL_MIN_RADIUS, BULLET_DECAL_MAX_RADIUS);
-        R_CreateDecal (&geom, radius, DECAL_BULLET);
+        R_CreateDecal (&geom, radius, DECAL_BULLET, tint);
 }
 
-static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t preferred_normal, float maxdist, float min_z, decaltype_t type)
+static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t preferred_normal, float maxdist, float min_z, decaltype_t type, float radius_override, const float *tint)
 {
         decalgeom_t geom;
         if (!R_DecalProject (point, preferred_normal, maxdist, &geom))
@@ -545,7 +687,10 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
         if (min_z < 0.f && fabsf (geom.normal[2]) > BLOOD_WALL_THRESHOLD)
                 return false;
 
-        return R_CreateDecal (&geom, R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS), type);
+        {
+                float radius = radius_override > 0.f ? radius_override : R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
+                return R_CreateDecal (&geom, radius, type, tint);
+        }
 }
 
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
@@ -553,6 +698,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
         vec3_t preferred;
         vec3_t negpref;
         qboolean spawned = false;
+        const float tint[4] = {1.f, 1.f, 1.f, 0.75f};
 
         if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
                 return;
@@ -565,12 +711,12 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
         {
                         VectorNormalizeFast (preferred);
                         VectorScale (preferred, -1.f, negpref);
-                        spawned |= R_AddBloodDecalForDirection (point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD);
+                        spawned |= R_AddBloodDecalForDirection (point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
                         if (!spawned)
-                                spawned |= R_AddBloodDecalForDirection (point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD);
+                                spawned |= R_AddBloodDecalForDirection (point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
         }
 
-        R_AddBloodDecalForDirection (point, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD);
+        R_AddBloodDecalForDirection (point, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
 }
 
 void R_DrawDecals (qboolean showtris)
@@ -593,11 +739,11 @@ void R_DrawDecals (qboolean showtris)
                 {
                         qboolean dither = (softemu == SOFTEMU_COARSE && !showtris);
                         GL_BeginGroup ("Decals");
-                        GL_UseProgram (glprogs.sprites[dither]);
+                        GL_UseProgram (glprogs.decals[dither]);
                         if (showtris)
-                                GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2));
+                                GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
                         else
-                                GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2));
+                                GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
                         GL_PolygonOffset (OFFSET_DECAL);
                         drew = true;
                 }
@@ -618,4 +764,111 @@ void R_DrawDecals (qboolean showtris)
 void R_DrawDecals_ShowTris (void)
 {
         R_DrawDecals (true);
+}
+
+static qboolean R_FrameNameIsDeath (const char *name)
+{
+        char lower[sizeof(((maliasframedesc_t *)0)->name)];
+        size_t i;
+
+        if (!name)
+                return false;
+
+        for (i = 0; i < sizeof(lower) - 1 && name[i]; i++)
+                lower[i] = (char)tolower ((unsigned char)name[i]);
+        lower[i] = '\0';
+
+        if (strstr (lower, "dead"))
+                return true;
+        if (strstr (lower, "death"))
+                return true;
+        if (strstr (lower, "die"))
+                return true;
+        return false;
+}
+
+static void R_SpawnBloodPool (entity_t *ent)
+{
+        vec3_t base_point;
+        float large_radius = BLOOD_POOL_RADIUS;
+        const float pool_tint[4] = {1.f, 1.f, 1.f, 0.65f};
+        const float small_tint[4] = {1.f, 1.f, 1.f, 0.5f};
+        int small_count;
+        int spawned = 0;
+
+        if (!ent || !ent->model)
+                return;
+
+        VectorCopy (ent->origin, base_point);
+        if (ent->model)
+                base_point[2] += ent->model->mins[2];
+
+        if (R_AddBloodDecalForDirection (base_point, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, large_radius, pool_tint))
+                spawned++;
+
+        small_count = 5 + (rand () % 4);
+        while (small_count--)
+        {
+                vec3_t jitter = {base_point[0], base_point[1], base_point[2]};
+                float angle = ((float)rand () / (float)RAND_MAX) * (float)M_PI * 2.f;
+                float dist = R_RandomRange (BLOOD_POOL_SMALL_MIN, BLOOD_POOL_SMALL_MAX);
+                float radius = R_RandomRange (BLOOD_POOL_SMALL_MIN, BLOOD_POOL_SMALL_MAX);
+
+                jitter[0] += cosf (angle) * (BLOOD_POOL_JITTER + dist);
+                jitter[1] += sinf (angle) * (BLOOD_POOL_JITTER + dist);
+
+                if (R_AddBloodDecalForDirection (jitter, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, small_tint))
+                        spawned++;
+        }
+
+        if (r_decals_debug_cvar.value && spawned <= 0)
+        {
+                Con_Printf ("Decal[blood_pool] failed for entity at (%.1f, %.1f, %.1f)\n",
+                        ent->origin[0], ent->origin[1], ent->origin[2]);
+        }
+}
+
+void R_Decals_EntityFrameChanged (entity_t *ent, int prevframe, qboolean model_changed)
+{
+        int entnum;
+
+        if (!ent)
+                return;
+
+        entnum = (int)(ent - cl_entities);
+        if (entnum < 0 || entnum >= MAX_EDICTS)
+                return;
+
+        if (model_changed)
+                r_decal_death_spawned[entnum] = 0;
+
+        if (!ent->model || ent->model->type != mod_alias)
+        {
+                r_decal_death_spawned[entnum] = 0;
+                return;
+        }
+
+        if (ent->frame == prevframe)
+                return;
+
+        {
+                aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata (ent->model);
+                if (!hdr)
+                        return;
+                if (ent->frame < 0 || ent->frame >= hdr->numframes)
+                        return;
+
+                if (R_FrameNameIsDeath (hdr->frames[ent->frame].name))
+                {
+                        if (!r_decal_death_spawned[entnum])
+                        {
+                                R_SpawnBloodPool (ent);
+                                r_decal_death_spawned[entnum] = 1;
+                        }
+                }
+                else
+                {
+                        r_decal_death_spawned[entnum] = 0;
+                }
+        }
 }
