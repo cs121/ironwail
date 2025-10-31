@@ -25,7 +25,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ZLogBias;
         uint    NumLights;
         uint    PrevFrameValid;
-        uint    DeluxEnabled;
+        uint    DeluxEnabled;      // bit0: texture available, bit1: directional samples present
         uint    _Pad1;
 };
 

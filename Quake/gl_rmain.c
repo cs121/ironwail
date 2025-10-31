@@ -1758,8 +1758,17 @@ void R_SetupView (void)
                         !r_fullbright_cheatsafe && !r_lightmap_cheatsafe &&
                         cl.worldmodel && cl.worldmodel->deluxdata &&
                         deluxemap_texture;
+                qboolean has_directional = enable_delux && cl.worldmodel && cl.worldmodel->deluxfile;
+                unsigned int delux_flags = 0u;
 
-                r_framedata.delux_enabled = enable_delux ? 1 : 0;
+                if (enable_delux)
+                {
+                        delux_flags |= 1u; // texture + fallback normals available
+                        if (has_directional)
+                                delux_flags |= 2u; // real directional samples present
+                }
+
+                r_framedata.delux_enabled = delux_flags;
                 r_framedata._padding1 = 0;
         }
 
