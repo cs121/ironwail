@@ -13,6 +13,21 @@ Ironwail is a high-performance fork of the GLQuake descendant [QuakeSpasm](https
 - Performance boosts: GPU-driven culling, compute-based lightmap updates, reduced heap usage, faster loading on jumbo maps, and an automatic frame limiter when no map is loaded.
 - Quality-of-life: runs from Unicode paths and plays demanding maps like [Shibboleth](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html), [Raven Keep](https://www.quaddicted.com/reviews/ravenkeep.html), and [ad_tears](https://www.moddb.com/mods/arcane-dimensions) at high frame rates without manual `-heapsize` tuning.
 
+## Lighting controls
+
+Ironwail's renderer now exposes a handful of lighting CVars that can be tuned live via the console:
+
+| CVar | Default | Description |
+|:--|:--|:--|
+| `r_static_lightmap_mode` | `1` | Chooses between the classic `albedo * lightmap` path (`0`) and the modern blue-noise–dithered lightmap (`1`). Mode `0` is a strict fallback that bypasses smoothing, quantisation, half-Lambert shading, and gamma boosting. |
+| `r_half_lambert` | `1` | Enables Half-Lambert diffuse lighting on both the static lightmap and dynamic lights. Disable for traditional Lambert shading. |
+| `r_dynamic_dither` | `1` | Toggles animated blue-noise dithering for dynamic lights. When disabled, dynamic lights still quantise to the configured level without temporal jitter. |
+| `r_light_levels` | `8` | Number of quantisation steps applied before gamma (minimum `1`). Higher values reduce banding; `16` is a good target on modern GPUs. |
+| `r_gamma_boost` | `1.15` | Applies a gentle gamma lift (`1.0`–`1.2`) after all lighting contributions are accumulated. |
+| `r_noise_time` | `0` | Overrides the animated noise time when non-zero. Leave at the default `0` to drive the blue-noise animation from the engine clock. |
+
+Recommended modern defaults: `r_static_lightmap_mode 1`, `r_half_lambert 1`, `r_dynamic_dither 1`, `r_light_levels 16`, `r_gamma_boost 1.15`.
+
 ## Wren server runtime
 
 Ironwail now embeds the [Wren](https://wren.io) scripting VM to run server-side gameplay logic. The runtime sits next to the existing QuakeC VM; when a Wren hook is present it runs first, and QuakeC acts as a safety net if the hook is missing or explicitly asks for fallback.

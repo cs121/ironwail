@@ -108,6 +108,12 @@ extern	cvar_t	r_scale;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_lightmap_strength;
+extern	cvar_t	r_half_lambert;
+extern	cvar_t	r_static_lightmap_mode;
+extern	cvar_t	r_dynamic_dither;
+extern	cvar_t	r_light_levels;
+extern	cvar_t	r_gamma_boost;
+extern	cvar_t	r_noise_time;
 extern	cvar_t	r_alphasort;
 extern	cvar_t	r_rim_alias;
 extern	cvar_t	r_rim_world;
@@ -447,6 +453,12 @@ typedef struct gpuframedata_s {
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
+	int			half_lambert;
+	int			static_lightmap_mode;
+	int			dynamic_dither;
+	int			light_levels;
+	float	gamma_boost;
+	float	noise_time;
 	int			numlights;
 	int			prev_frame_valid;
 	int			delux_enabled;
