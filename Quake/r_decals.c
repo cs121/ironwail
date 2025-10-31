@@ -87,6 +87,8 @@ typedef struct decalgeom_s
         vec3_t  normal;
         vec3_t  sdir;
         vec3_t  tdir;
+        vec3_t  mins;
+        vec3_t  maxs;
 } decalgeom_t;
 
 static decal_t                 r_decals[MAX_DECALS];
@@ -421,6 +423,8 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         vec3_t best_origin = {0, 0, 0};
         vec3_t best_sdir = {0, 0, 0};
         vec3_t best_tdir = {0, 0, 0};
+        vec3_t best_mins = {0, 0, 0};
+        vec3_t best_maxs = {0, 0, 0};
         float best_score = -99999.f;
         float preferred_len = VectorLength (preferred_normal);
         int i;
@@ -516,6 +520,8 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
                         VectorCopy (normal, best_normal);
                         VectorCopy (sdir, best_sdir);
                         VectorCopy (tdir, best_tdir);
+                        VectorCopy (surf->mins, best_mins);
+                        VectorCopy (surf->maxs, best_maxs);
                 }
         }
 
@@ -529,6 +535,32 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         VectorNormalizeFast (out->sdir);
         VectorCopy (best_tdir, out->tdir);
         VectorNormalizeFast (out->tdir);
+        VectorCopy (best_mins, out->mins);
+        VectorCopy (best_maxs, out->maxs);
+
+        return true;
+}
+
+static qboolean R_DecalHasEdgeRoom (const decalgeom_t *geom, float radius)
+{
+        int axis;
+        float margin = radius + 1.0f;
+
+        for (axis = 0; axis < 3; axis++)
+        {
+                float span = geom->maxs[axis] - geom->mins[axis];
+
+                if (span <= 0.001f)
+                        continue;
+
+                {
+                        float center = geom->mins[axis] + span * 0.5f;
+                        float dist_to_edge = (span * 0.5f) - fabsf (geom->origin[axis] - center);
+
+                        if (dist_to_edge < margin)
+                                return false;
+                }
+        }
 
         return true;
 }
@@ -666,7 +698,7 @@ void R_AddBulletDecal (const vec3_t point)
 {
         decalgeom_t geom;
         float radius;
-        const float tint[4] = {0.6f, 0.6f, 0.6f, 0.8f};
+        const float tint[4] = {0.2f, 0.12f, 0.05f, 0.8f};
 
         if (!r_decals_cvar.value || !r_decals_bullet_cvar.value)
                 return;
@@ -675,6 +707,8 @@ void R_AddBulletDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (BULLET_DECAL_MIN_RADIUS, BULLET_DECAL_MAX_RADIUS);
+        if (!R_DecalHasEdgeRoom (&geom, radius))
+                return;
         R_CreateDecal (&geom, radius, DECAL_BULLET, tint);
 }
 
@@ -698,8 +732,10 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                 {
                         float base_radius = R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
                         float scale = R_RandomRange (1.f, 2.5f);
-                        radius = base_radius * scale;
+                        radius = base_radius * scale * 0.75f;
                 }
+                if (!R_DecalHasEdgeRoom (&geom, radius))
+                        return false;
                 return R_CreateDecal (&geom, radius, type, tint);
         }
 }
@@ -714,7 +750,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
         if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
                 return;
 
-        spawn_count = (rand () % 6) + 5;
+        spawn_count = (rand () % 4) + 3;
         for (i = 0; i < spawn_count; i++)
         {
                 vec3_t spawn_point;
