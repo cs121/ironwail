@@ -928,27 +928,74 @@ static byte Mod_BspxEncodeDeluxComponent (float value)
         return (byte) CLAMP (0, v, 255);
 }
 
-static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data, size_t length)
+static size_t Mod_BspxGuessSampleCount (size_t length)
 {
-        size_t samplecount = (loadmodel->numdeluxsamples > 0) ? (size_t)loadmodel->numdeluxsamples : 0;
-        size_t expected_bytes = samplecount * 3;
-        size_t expected_floats = samplecount * 3 * sizeof(float);
+        size_t count = 0;
 
-        if (samplecount == 0 || !data)
+        if (length % (3 * sizeof(float)) == 0)
+                count = length / (3 * sizeof(float));
+        else if (length % 3 == 0)
+                count = length / 3;
+
+        return count;
+}
+
+static qboolean Mod_BspxEnsureDeluxStorage (size_t samplecount, const char *lumpname)
+{
+        size_t expected_bytes;
+
+        if (samplecount == 0)
                 return false;
+
+        if (loadmodel->numdeluxsamples > 0 && (size_t)loadmodel->numdeluxsamples != samplecount)
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected sample count %zu (expected %d)\n",
+                        lumpname, samplecount, loadmodel->numdeluxsamples);
+                return false;
+        }
+
+        if (loadmodel->numdeluxsamples == 0)
+                loadmodel->numdeluxsamples = (int)samplecount;
+
+        expected_bytes = samplecount * 3;
 
         if (!loadmodel->deluxdata)
         {
-                if (!expected_bytes)
-                        return false;
                 loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
+                if (!loadmodel->deluxdata)
+                        return false;
+                memset (loadmodel->deluxdata, 0, expected_bytes);
         }
+
+        return true;
+}
+
+static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data, size_t length)
+{
+        const byte *payload = data;
+        size_t payload_length = length;
+        size_t samplecount = (loadmodel->numdeluxsamples > 0) ? (size_t)loadmodel->numdeluxsamples : 0;
+        size_t expected_bytes;
+        size_t expected_floats;
+
+        if (!data || length == 0)
+                return false;
 
         if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
         {
                 int version = LittleLong (((const int *)data)[1]);
-                const byte *payload = data + 8;
-                size_t payload_length = length - 8;
+
+                payload = data + 8;
+                payload_length = length - 8;
+
+                if (samplecount == 0)
+                        samplecount = Mod_BspxGuessSampleCount (payload_length);
+
+                if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
+                        return false;
+
+                expected_bytes = samplecount * 3;
+                expected_floats = samplecount * 3 * sizeof(float);
 
                 if (version == 2)
                 {
@@ -1016,38 +1063,91 @@ static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data,
                 Con_DPrintf2 ("BSPX lump %s has unknown QLIT version %d\n", lumpname, version);
                 return false;
         }
-
-        if (length == expected_bytes)
+        else
         {
-                memcpy (loadmodel->deluxdata, data, expected_bytes);
-                loadmodel->deluxfile = true;
-                return true;
-        }
+                if (samplecount == 0)
+                        samplecount = Mod_BspxGuessSampleCount (length);
 
-        if (length == expected_floats)
-        {
-                const float *src = (const float *)data;
-                byte *dst = loadmodel->deluxdata;
-                size_t count = samplecount;
+                if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
+                        return false;
 
-                for (size_t i = 0; i < count; ++i)
+                expected_bytes = samplecount * 3;
+                expected_floats = samplecount * 3 * sizeof(float);
+
+                if (length == expected_bytes)
                 {
-                        float nx = LittleFloat (src[i * 3 + 0]);
-                        float ny = LittleFloat (src[i * 3 + 1]);
-                        float nz = LittleFloat (src[i * 3 + 2]);
-
-                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
-                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
-                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                        memcpy (loadmodel->deluxdata, data, expected_bytes);
+                        loadmodel->deluxfile = true;
+                        return true;
                 }
 
-                loadmodel->deluxfile = true;
-                return true;
+                if (length == expected_floats)
+                {
+                        const float *src = (const float *)data;
+                        byte *dst = loadmodel->deluxdata;
+                        size_t count = samplecount;
+
+                        for (size_t i = 0; i < count; ++i)
+                        {
+                                float nx = LittleFloat (src[i * 3 + 0]);
+                                float ny = LittleFloat (src[i * 3 + 1]);
+                                float nz = LittleFloat (src[i * 3 + 2]);
+
+                                dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
+                                dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
+                                dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                        }
+
+                        loadmodel->deluxfile = true;
+                        return true;
+                }
         }
+
+        expected_bytes = (size_t)loadmodel->numdeluxsamples * 3;
+        expected_floats = expected_bytes * sizeof(float);
 
         Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected %zu or %zu)\n",
                 lumpname, length, expected_bytes, expected_floats);
         return false;
+}
+
+static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *data, size_t length)
+{
+        size_t samplecount;
+        size_t expected_bytes;
+
+        if (!data || length == 0)
+                return false;
+
+        samplecount = Mod_BspxGuessSampleCount (length);
+        if (samplecount == 0 || length != samplecount * 3)
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of 3 bytes)\n",
+                        lumpname, length);
+                return false;
+        }
+
+        if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
+                return false;
+
+        expected_bytes = samplecount * 3;
+
+        if (!loadmodel->lightdata)
+        {
+                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
+                if (!loadmodel->lightdata)
+                        return false;
+        }
+        else if ((size_t)loadmodel->numdeluxsamples * 3 != expected_bytes)
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu for existing lightdata\n",
+                        lumpname, length);
+                return false;
+        }
+
+        memcpy (loadmodel->lightdata, data, expected_bytes);
+        loadmodel->litfile = true;
+        return true;
 }
 
 static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *data, size_t length,
@@ -1233,6 +1333,14 @@ static void Mod_LoadBspx (const byte *buffer)
                         continue;
                 if (lumplen > max_payload - lumpofs)
                         continue;
+
+                if (!loadmodel->litfile &&
+                        (!q_strcasecmp (lumpname, "RGBLIGHTING") ||
+                         !q_strcasecmp (lumpname, "RGBLIGHTDATA") ||
+                         !q_strcasecmp (lumpname, "LIGHTINGRGB")))
+                {
+                        Mod_BspxImportRgbLighting (lumpname, buffer + lumpofs, lumplen);
+                }
 
                 if (!loadmodel->deluxfile &&
                         (!q_strcasecmp (lumpname, "LIGHTINGDIR") ||
@@ -2968,13 +3076,13 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
 	Mod_LoadEdges (&header->lumps[LUMP_EDGES], bsp2);
 	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
-	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
-	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
-	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
+        Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
+        Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
+        Mod_LoadBspx ((const byte *)buffer);
+        Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
-	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
-	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
-	Mod_LoadBspx ((const byte *)buffer);
+        Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
+        Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
 
 	if (mod->bspversion == BSPVERSION && external_vis.value && sv.modelname[0] && !q_strcasecmp(loadname, sv.name))
 	{
