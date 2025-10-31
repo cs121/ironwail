@@ -481,6 +481,7 @@ void R_Init (void)
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
 	R_InitParticles ();
+	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
@@ -638,20 +639,21 @@ void R_NewMap (void)
 	R_ClearEfrags ();
 	r_viewleaf = NULL;
 	R_ClearParticles ();
+	R_ClearDecals ();
 	VEC_CLEAR (r_pointfile);
 
 	GL_BuildLightmaps ();
-        GL_BuildBModelVertexBuffer ();
-        GL_BuildBModelMarkBuffers ();
+	GL_BuildBModelVertexBuffer ();
+	GL_BuildBModelMarkBuffers ();
         //ericw -- no longer load alias models into a VBO here, it's done in Mod_LoadAliasModel
 
-        r_framecount = 0; //johnfitz -- paranoid?
-        r_visframecount = 0; //johnfitz -- paranoid?
+	r_framecount = 0; //johnfitz -- paranoid?
+	r_visframecount = 0; //johnfitz -- paranoid?
 
 
-        Sky_NewMap (); //johnfitz -- skybox in worldspawn
-        Fog_NewMap (); //johnfitz -- global fog in worldspawn
-        R_ParseWorldspawn (); //ericw -- wateralpha, lavaalpha, telealpha, slimealpha in worldspawn
+	Sky_NewMap (); //johnfitz -- skybox in worldspawn
+	Fog_NewMap (); //johnfitz -- global fog in worldspawn
+	R_ParseWorldspawn (); //ericw -- wateralpha, lavaalpha, telealpha, slimealpha in worldspawn
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)

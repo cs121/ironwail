@@ -203,6 +203,7 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		R_AddBulletDecal (pos);
 		break;
 
 	case TE_EXPLOSION:			// rocket explosion
