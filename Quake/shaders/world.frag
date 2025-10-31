@@ -383,17 +383,17 @@ void main()
     }
 
     vec3 static_light_base = static_light;
-    int halfLambertEnabled = (HalfLambert != 0) && (StaticLightmapMode != 0);
+    bool halfLambertEnabled = (HalfLambert != 0) && (StaticLightmapMode != 0);
 
     float static_half_term = 1.0;
-    if (halfLambertEnabled != 0)
+    if (halfLambertEnabled)
     {
         float ndotl_static = dot(geom_normal, static_light_dir);
         static_half_term = clamp(ndotl_static * 0.5 + 0.5, 0.0, 1.0);
     }
     vec3 static_light_shaded = static_light * static_half_term;
 
-    vec3 static_total_source = (halfLambertEnabled != 0) ? static_light_shaded : static_light_base;
+    vec3 static_total_source = halfLambertEnabled ? static_light_shaded : static_light_base;
     vec3 total_light = clamp_preserving_hue(static_total_source, vec3(1.0));
     vec3 dynamic_light_total = vec3(0.0);
     vec3 rim_contrib = vec3(0.0);
@@ -449,7 +449,7 @@ void main()
                         vec3  ldir = L * Linv;
                         float ndotl_raw = dot(surface_normal, ldir);
                         float ndotl = max(ndotl_raw, 0.0);
-                        float diffuse_term = (halfLambertEnabled != 0) ? clamp(ndotl_raw * 0.5 + 0.5, 0.0, 1.0) : ndotl;
+                        float diffuse_term = halfLambertEnabled ? clamp(ndotl_raw * 0.5 + 0.5, 0.0, 1.0) : ndotl;
                         vec3  light_contrib = (attenuation * falloff) * l.color;
                         vec3  diffuse_contrib = light_contrib * diffuse_term;
 
@@ -522,7 +522,7 @@ void main()
     else
     {
         float levels = max(float(LightLevels), 1.0);
-        vec3 static_source = (halfLambertEnabled != 0) ? static_light_shaded : static_light_base;
+        vec3 static_source = halfLambertEnabled ? static_light_shaded : static_light_base;
         vec3 static_light_norm = clamp(static_source, 0.0, 1.0);
         vec3 static_smoothed = mix(static_light_norm, sqrt(static_light_norm), vec3(0.35));
         float static_noise = BLUE_NOISE_STATIC(lmuv);
