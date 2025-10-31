@@ -132,7 +132,7 @@ float NormalizeAngle (float degrees);
 float AngleDifference (float dega, float degb);
 float LerpAngle (float degfrom, float degto, float frac);
 
-void MatrixMultiply(float left[16], float right[16]);
+void MatrixMultiply(float left[16], const float right[16]);
 void RotationMatrix(float matrix[16], float angle, int axis);
 void TranslationMatrix(float matrix[16], float x, float y, float z);
 void ScaleMatrix(float matrix[16], float x, float y, float z);
