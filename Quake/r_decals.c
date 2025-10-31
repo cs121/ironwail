@@ -33,6 +33,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BULLET_DECAL_DISTANCE   12.f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
+#define BLOOD_DECAL_SPREAD      32.f
+#define BLOOD_DECAL_VERTICAL_SPREAD     16.f
 
 #define BULLET_DECAL_MIN_RADIUS 7.0f
 #define BULLET_DECAL_MAX_RADIUS 10.0f
@@ -688,36 +690,58 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                 return false;
 
         {
-                float radius = radius_override > 0.f ? radius_override : R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
+                float radius;
+
+                if (radius_override > 0.f)
+                        radius = radius_override;
+                else
+                {
+                        float base_radius = R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
+                        float scale = R_RandomRange (1.f, 2.5f);
+                        radius = base_radius * scale;
+                }
                 return R_CreateDecal (&geom, radius, type, tint);
         }
 }
 
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
-        vec3_t preferred;
-        vec3_t negpref;
         vec3_t up = {0.f, 0.f, 1.f};
-        qboolean spawned = false;
-        const float tint[4] = {1.f, 1.f, 1.f, 0.8f};
+        const float tint[4] = {0.5f, 0.05f, 0.05f, 0.85f};
+        int spawn_count;
+        int i;
 
         if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
                 return;
 
-        if ((rand () & 3) != 0)
-                return;
-
-        VectorCopy (dir, preferred);
-        if (VectorLengthSquared (preferred) > 0.01f)
+        spawn_count = (rand () % 6) + 5;
+        for (i = 0; i < spawn_count; i++)
         {
+                vec3_t spawn_point;
+                vec3_t preferred;
+                vec3_t negpref;
+                qboolean spawned = false;
+
+                VectorCopy (point, spawn_point);
+                spawn_point[0] += R_RandomRange (-BLOOD_DECAL_SPREAD, BLOOD_DECAL_SPREAD);
+                spawn_point[1] += R_RandomRange (-BLOOD_DECAL_SPREAD, BLOOD_DECAL_SPREAD);
+                spawn_point[2] += R_RandomRange (-BLOOD_DECAL_VERTICAL_SPREAD, BLOOD_DECAL_VERTICAL_SPREAD);
+
+                VectorCopy (dir, preferred);
+                if (VectorLengthSquared (preferred) > 0.01f)
+                {
+                        preferred[0] += R_RandomRange (-0.35f, 0.35f);
+                        preferred[1] += R_RandomRange (-0.35f, 0.35f);
+                        preferred[2] += R_RandomRange (-0.35f, 0.35f);
                         VectorNormalizeFast (preferred);
                         VectorScale (preferred, -1.f, negpref);
-                        spawned |= R_AddBloodDecalForDirection (point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
+                        spawned |= R_AddBloodDecalForDirection (spawn_point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
                         if (!spawned)
-                                spawned |= R_AddBloodDecalForDirection (point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
-        }
+                                spawned |= R_AddBloodDecalForDirection (spawn_point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
+                }
 
-        R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
+                R_AddBloodDecalForDirection (spawn_point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
+        }
 }
 
 void R_DrawDecals (qboolean showtris)
