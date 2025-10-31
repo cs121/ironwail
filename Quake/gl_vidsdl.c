@@ -1013,6 +1013,81 @@ qboolean GL_InitFunctions (const glfunc_t *funcs, qboolean required)
 GL_CheckExtensions
 ===============
 */
+static void GL_DisableBindless (const char *reason)
+{
+        if (!gl_bindless_able)
+                return;
+
+        gl_bindless_able = false;
+        Con_Printf ("Disabling bindless textures: %s\n", reason);
+}
+
+static void GL_VerifyBindlessSupport (void)
+{
+        GLuint          tex = 0;
+        GLuint64        handle = 0;
+        GLint           prev_active = GL_TEXTURE0;
+        GLint           prev_binding = 0;
+        GLenum          err;
+        static const unsigned pixel = 0xFFFFFFFFu;
+        qboolean        resident = false;
+
+        while (glGetError () != GL_NO_ERROR)
+                /**/;
+
+        glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+        GL_ActiveTextureFunc (GL_TEXTURE0);
+        glGetIntegerv (GL_TEXTURE_BINDING_2D, &prev_binding);
+
+        glGenTextures (1, &tex);
+        if (!tex)
+        {
+                GL_DisableBindless ("failed to allocate test texture");
+                goto cleanup;
+        }
+
+        glBindTexture (GL_TEXTURE_2D, tex);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+
+        handle = GL_GetTextureHandleARBFunc (tex);
+        err = glGetError ();
+        if (!handle || err != GL_NO_ERROR)
+        {
+                GL_DisableBindless ("driver returned an invalid texture handle");
+                goto cleanup;
+        }
+
+        GL_MakeTextureHandleResidentARBFunc (handle);
+        resident = true;
+        err = glGetError ();
+        if (err != GL_NO_ERROR)
+        {
+                GL_DisableBindless ("texture handle could not be made resident");
+                goto cleanup;
+        }
+
+        GL_MakeTextureHandleNonResidentARBFunc (handle);
+        resident = false;
+
+cleanup:
+        if (resident)
+                GL_MakeTextureHandleNonResidentARBFunc (handle);
+        if (tex)
+        {
+                GLuint restore = (prev_binding == (GLint)tex) ? 0u : (GLuint)prev_binding;
+                glBindTexture (GL_TEXTURE_2D, 0);
+                glDeleteTextures (1, &tex);
+                glBindTexture (GL_TEXTURE_2D, restore);
+        }
+        GL_ActiveTextureFunc (prev_active);
+        while (glGetError () != GL_NO_ERROR)
+                /**/;
+}
+
 static void GL_CheckExtensions (void)
 {
 	GL_InitFunctions (gl_core_functions, true);
@@ -1084,15 +1159,17 @@ static void GL_CheckExtensions (void)
 		GL_InitFunctions (gl_arb_multi_bind_functions, false)
 	;
 
-	gl_bindless_able =
-		!COM_CheckParm ("-nobindless") &&
-		GL_FindExtension ("GL_ARB_bindless_texture") &&
-		GL_FindExtension ("GL_ARB_shader_draw_parameters") &&
-		GL_InitFunctions (gl_arb_bindless_texture_functions, false)
-	;
+        gl_bindless_able =
+                !COM_CheckParm ("-nobindless") &&
+                GL_FindExtension ("GL_ARB_bindless_texture") &&
+                GL_FindExtension ("GL_ARB_shader_draw_parameters") &&
+                GL_InitFunctions (gl_arb_bindless_texture_functions, false)
+        ;
+        if (gl_bindless_able)
+                GL_VerifyBindlessSupport ();
 
-	gl_clipcontrol_able =
-		!COM_CheckParm ("-noclipcontrol") &&
+        gl_clipcontrol_able =
+                !COM_CheckParm ("-noclipcontrol") &&
 		GL_FindExtension ("GL_ARB_clip_control") &&
 		GL_InitFunctions (gl_arb_clip_control_functions, false)
 	;
