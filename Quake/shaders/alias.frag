@@ -112,6 +112,14 @@ float tri(float x)
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
+float saturate(float x){ return clamp(x, 0.0, 1.0); }
+
+float smoothstep01(float x)
+{
+        x = saturate(x);
+        return x * x * (3.0 - 2.0 * x);
+}
+
 float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir)
 {
         float d = dot(vertexnormal, dir);
@@ -136,9 +144,13 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
                 float radius_sq = radius * radius;
                 if (dist_sq >= radius_sq)
                         continue;
-                float dist = sqrt(dist_sq);
-                vec3 L = to_light * inversesqrt(max(dist_sq, 1e-8));
-                float attenuation = radius - dist;
+                float inv_dist = inversesqrt(max(dist_sq, 1e-8));
+                float dist = 1.0 / inv_dist;
+                float normalized = smoothstep01((radius - dist) / max(radius, 1e-4));
+                if (normalized <= 0.0)
+                        continue;
+                vec3 L = to_light * inv_dist;
+                float attenuation = normalized * radius;
                 float diffuse = max(dot(normal, L), 0.0);
                 float influence = max(diffuse, light.minlight);
                 accum += light.color * (attenuation * influence);
