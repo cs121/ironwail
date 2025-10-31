@@ -697,6 +697,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
         vec3_t preferred;
         vec3_t negpref;
+        vec3_t up = {0.f, 0.f, 1.f};
         qboolean spawned = false;
         const float tint[4] = {1.f, 1.f, 1.f, 0.75f};
 
@@ -716,7 +717,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
                                 spawned |= R_AddBloodDecalForDirection (point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
         }
 
-        R_AddBloodDecalForDirection (point, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
+        R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
 }
 
 void R_DrawDecals (qboolean showtris)
@@ -790,6 +791,7 @@ static qboolean R_FrameNameIsDeath (const char *name)
 static void R_SpawnBloodPool (entity_t *ent)
 {
         vec3_t base_point;
+        vec3_t up = {0.f, 0.f, 1.f};
         float large_radius = BLOOD_POOL_RADIUS;
         const float pool_tint[4] = {1.f, 1.f, 1.f, 0.65f};
         const float small_tint[4] = {1.f, 1.f, 1.f, 0.5f};
@@ -803,7 +805,7 @@ static void R_SpawnBloodPool (entity_t *ent)
         if (ent->model)
                 base_point[2] += ent->model->mins[2];
 
-        if (R_AddBloodDecalForDirection (base_point, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, large_radius, pool_tint))
+        if (R_AddBloodDecalForDirection (base_point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, large_radius, pool_tint))
                 spawned++;
 
         small_count = 5 + (rand () % 4);
@@ -817,7 +819,7 @@ static void R_SpawnBloodPool (entity_t *ent)
                 jitter[0] += cosf (angle) * (BLOOD_POOL_JITTER + dist);
                 jitter[1] += sinf (angle) * (BLOOD_POOL_JITTER + dist);
 
-                if (R_AddBloodDecalForDirection (jitter, (vec3_t){0.f, 0.f, 1.f}, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, small_tint))
+                if (R_AddBloodDecalForDirection (jitter, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, small_tint))
                         spawned++;
         }
 
