@@ -1169,6 +1169,13 @@ static void Mod_LoadBspx (const byte *buffer)
                 int filelen;
         } bspx_lump_t;
 
+        typedef struct bspx_parsed_lump_s
+        {
+                size_t offset;
+                size_t length;
+                char name[17];
+        } bspx_parsed_lump_t;
+
         const size_t footer_size = 8;
         size_t filesize = mod_bspx_filesize;
         size_t dirsize;
@@ -1176,6 +1183,8 @@ static void Mod_LoadBspx (const byte *buffer)
         const byte *directory;
         size_t max_payload;
         int numlumps;
+        bspx_parsed_lump_t *parsed_lumps = NULL;
+        int parsed_lump_count = 0;
 
         if (!buffer || filesize < footer_size)
                 return;
@@ -1207,6 +1216,9 @@ static void Mod_LoadBspx (const byte *buffer)
         numlumps = (int)(dirsize / sizeof(bspx_lump_t));
         max_payload = (size_t)(directory - buffer);
 
+        if (numlumps > 0)
+                parsed_lumps = (bspx_parsed_lump_t *) Z_Malloc (numlumps * sizeof (*parsed_lumps));
+
         for (int i = 0; i < numlumps; ++i)
         {
                 const bspx_lump_t *entry = ((const bspx_lump_t *)directory) + i;
@@ -1214,6 +1226,7 @@ static void Mod_LoadBspx (const byte *buffer)
                 size_t lumpofs, lumplen;
                 int raw_ofs = LittleLong (entry->fileofs);
                 int raw_len = LittleLong (entry->filelen);
+                qboolean overlaps = false;
 
                 memcpy (lumpname, entry->name, sizeof(entry->name));
                 lumpname[sizeof(entry->name)] = '\0';
@@ -1233,6 +1246,33 @@ static void Mod_LoadBspx (const byte *buffer)
                         continue;
                 if (lumplen > max_payload - lumpofs)
                         continue;
+
+                for (int j = 0; parsed_lumps && j < parsed_lump_count; ++j)
+                {
+                        size_t prev_start = parsed_lumps[j].offset;
+                        size_t prev_end = prev_start + parsed_lumps[j].length;
+                        size_t cur_end = lumpofs + lumplen;
+
+                        if (!(cur_end <= prev_start || prev_end <= lumpofs))
+                        {
+                                Con_DPrintf2 ("BSPX lump %s overlaps %s, skipping\n",
+                                        lumpname, parsed_lumps[j].name);
+                                overlaps = true;
+                                break;
+                        }
+                }
+
+                if (overlaps)
+                        continue;
+
+                if (parsed_lumps && parsed_lump_count < numlumps)
+                {
+                        parsed_lumps[parsed_lump_count].offset = lumpofs;
+                        parsed_lumps[parsed_lump_count].length = lumplen;
+                        q_strlcpy (parsed_lumps[parsed_lump_count].name, lumpname,
+                                sizeof (parsed_lumps[parsed_lump_count].name));
+                        ++parsed_lump_count;
+                }
 
                 if (!loadmodel->deluxfile &&
                         (!q_strcasecmp (lumpname, "LIGHTINGDIR") ||
@@ -1262,6 +1302,9 @@ static void Mod_LoadBspx (const byte *buffer)
                         }
                 }
         }
+
+        if (parsed_lumps)
+                Z_Free (parsed_lumps);
 }
 
 static void Mod_LoadLighting (lump_t *l)
