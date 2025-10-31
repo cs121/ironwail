@@ -325,7 +325,7 @@ void main()
     vec3 geom_normal = fastNorm(dn);
     vec3 surface_normal = geom_normal;
 
-    if (DeluxEnabled != 0u)
+    if ((DeluxEnabled & 1u) != 0u)
     {
         vec3 accum = vec3(0.0);
         float weight = 0.0;
@@ -353,9 +353,20 @@ void main()
         }
 
         if (weight > 0.0)
-            surface_normal = fastNorm(accum);
+        {
+            vec3 normalized = fastNorm(accum);
+            surface_normal = normalized;
+        }
         else
+        {
             surface_normal = dir0;
+        }
+    }
+
+    if ((DeluxEnabled & 2u) != 0u)
+    {
+        float lambert = max(dot(surface_normal, geom_normal), 0.0);
+        static_light *= lambert;
     }
 
     vec3 total_light = clamp_preserving_hue(static_light, vec3(1.0));

@@ -449,8 +449,8 @@ typedef struct gpuframedata_s {
 	float	zlogbias;
 	int			numlights;
 	int			prev_frame_valid;
-	int			delux_enabled;
-	int			_padding1;
+	unsigned int		delux_enabled;
+	unsigned int		_padding1;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
