@@ -548,10 +548,18 @@ static qboolean R_DecalHasEdgeRoom (const decalgeom_t *geom, float radius)
 
         for (axis = 0; axis < 3; axis++)
         {
-                if (geom->origin[axis] < geom->mins[axis] + margin)
-                        return false;
-                if (geom->origin[axis] > geom->maxs[axis] - margin)
-                        return false;
+                float span = geom->maxs[axis] - geom->mins[axis];
+
+                if (span <= 0.001f)
+                        continue;
+
+                {
+                        float center = geom->mins[axis] + span * 0.5f;
+                        float dist_to_edge = (span * 0.5f) - fabsf (geom->origin[axis] - center);
+
+                        if (dist_to_edge < margin)
+                                return false;
+                }
         }
 
         return true;
