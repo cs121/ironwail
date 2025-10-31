@@ -23,12 +23,6 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   DeltaTime;
         float   ZLogScale;
         float   ZLogBias;
-        int     HalfLambert;
-        int     StaticLightmapMode;
-        int     DynamicDither;
-        int     LightLevels;
-        float   GammaBoost;
-        float   NoiseTime;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    DeluxEnabled;

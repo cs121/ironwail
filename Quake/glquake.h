@@ -108,12 +108,6 @@ extern	cvar_t	r_scale;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_lightmap_strength;
-extern	cvar_t	r_half_lambert;
-extern	cvar_t	r_static_lightmap_mode;
-extern	cvar_t	r_dynamic_dither;
-extern	cvar_t	r_light_levels;
-extern	cvar_t	r_gamma_boost;
-extern	cvar_t	r_noise_time;
 extern	cvar_t	r_alphasort;
 extern	cvar_t	r_rim_alias;
 extern	cvar_t	r_rim_world;
@@ -438,7 +432,6 @@ typedef struct gpuframedata_s {
 	float	fogdata[4];
 	float	skyfogdata[4];
 	vec3_t	winddir;
-	float	winddir_pad;
 	float	windphase;
 	float	screendither;
 	float	texturedither;
@@ -448,23 +441,12 @@ typedef struct gpuframedata_s {
 	float	rim_world;
 	float	rim_exponent;
 	float	rim_pad0;
-	float	pad_eye0[2];
 	vec3_t	eyepos;
-	float	eyepos_pad;
 	float	time;
-	float	pad_prev_eye0[3];
 	vec3_t	prev_eyepos;
-	float	prev_eyepos_pad;
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
-	float	pad_after_z;
-	int			half_lambert;
-	int			static_lightmap_mode;
-	int			dynamic_dither;
-	int			light_levels;
-	float	gamma_boost;
-	float	noise_time;
 	int			numlights;
 	int			prev_frame_valid;
 	int			delux_enabled;
@@ -484,13 +466,6 @@ void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned ch
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
 void R_DrawParticles_ShowTris (void);
-void R_InitDecals (void);
-void R_ClearDecals (void);
-void R_UpdateDecals (void);
-void R_AddBulletDecal (const vec3_t point);
-void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
-void R_DrawDecals (qboolean showtris);
-void R_DrawDecals_ShowTris (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
 

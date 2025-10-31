@@ -201,12 +201,6 @@ cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
 cvar_t	r_lightmap_strength = { "r_lightmap_strength", "0.75", CVAR_ARCHIVE };
-cvar_t	r_half_lambert = { "r_half_lambert", "1", CVAR_ARCHIVE };
-cvar_t	r_static_lightmap_mode = { "r_static_lightmap_mode", "1", CVAR_ARCHIVE };
-cvar_t	r_dynamic_dither = { "r_dynamic_dither", "1", CVAR_ARCHIVE };
-cvar_t	r_light_levels = { "r_light_levels", "8", CVAR_ARCHIVE };
-cvar_t	r_gamma_boost = { "r_gamma_boost", "1.15", CVAR_ARCHIVE };
-cvar_t	r_noise_time = { "r_noise_time", "0", CVAR_NONE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
@@ -1600,7 +1594,6 @@ void R_SetFrustum (void)
 	memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
 	r_framedata.zlogscale = LIGHT_TILES_Z / (logzfar - logznear);
 	r_framedata.zlogbias = -r_framedata.zlogscale * logznear;
-	r_framedata.pad_after_z = 0.f;
 }
 
 /*
@@ -1757,24 +1750,6 @@ void R_SetupView (void)
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
                 r_framedata.rim_pad0 = 0.f;
-                r_framedata.pad_eye0[0] = 0.f;
-                r_framedata.pad_eye0[1] = 0.f;
-
-        int half_lambert = (int)(r_half_lambert.value != 0.f);
-        int static_mode = CLAMP(0, (int)Q_rint(r_static_lightmap_mode.value), 1);
-        int dynamic_dither = (int)(r_dynamic_dither.value != 0.f);
-        int light_levels = (int)Q_rint(r_light_levels.value);
-        light_levels = CLAMP(1, light_levels, 256);
-        float gamma_boost = r_gamma_boost.value;
-        if (gamma_boost < 1.0f) gamma_boost = 1.0f;
-        if (gamma_boost > 1.5f) gamma_boost = 1.5f;
-        float noise_time = r_noise_time.value != 0.f ? r_noise_time.value : (float)cl.time;
-        r_framedata.half_lambert = half_lambert;
-        r_framedata.static_lightmap_mode = static_mode;
-        r_framedata.dynamic_dither = dynamic_dither;
-        r_framedata.light_levels = light_levels;
-        r_framedata.gamma_boost = gamma_boost;
-        r_framedata.noise_time = noise_time;
         }
 
         {
@@ -1792,14 +1767,10 @@ void R_SetupView (void)
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
-	r_framedata.eyepos_pad = 0.f;
 	r_framedata.time = cl.time;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
-	r_framedata.pad_prev_eye0[0] = 0.f;
-	r_framedata.pad_prev_eye0[1] = 0.f;
-	r_framedata.pad_prev_eye0[2] = 0.f;
 
 	if (prev_valid)
 	{
@@ -1807,7 +1778,6 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
 		r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
 		r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
-		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = (float)prev_delta;
 		r_framedata.prev_frame_valid = 1;
 	}
@@ -1817,7 +1787,6 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
 		r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
 		r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
-		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = 0.f;
 		r_framedata.prev_frame_valid = 0;
 		r_prev_frame_valid = false;
@@ -2759,7 +2728,6 @@ void R_ShowTris (void)
 	}
 
 	R_DrawParticles_ShowTris ();
-	R_DrawDecals_ShowTris ();
 
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	GL_PolygonOffset (OFFSET_NONE);
@@ -2840,15 +2808,11 @@ void R_RenderScene (void)
 
 	Fog_EnableGFog (); //johnfitz
 
-	R_UpdateDecals ();
-
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-
-	R_DrawDecals (false);
 
 	R_DrawParticles (false);
 

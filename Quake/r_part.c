@@ -328,11 +328,6 @@ R_RunParticleEffect
 */
 void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count)
 {
-	if (color >= 67 && color <= 74 && count > 0)
-	{
-		R_AddBloodDecal (org, dir);
-	}
-
 	int			i, j;
 	particle_t	*p;
 
