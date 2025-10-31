@@ -475,6 +475,8 @@ void R_DrawDecals (qboolean showtris);
 void R_DrawDecals_ShowTris (void);
 void R_AddBulletDecal (const vec3_t point);
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
+void R_AddExplosionDecal (const vec3_t point);
+void R_AddGibDecal (const vec3_t point, int particle_count);
 void R_Decals_EntityFrameChanged (entity_t *ent, int prevframe, qboolean model_changed);
 
 void R_TranslatePlayerSkin (int playernum);
