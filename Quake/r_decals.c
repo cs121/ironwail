@@ -664,7 +664,7 @@ void R_AddBulletDecal (const vec3_t point)
 {
         decalgeom_t geom;
         float radius;
-        const float tint[4] = {0.6f, 0.6f, 0.6f, 0.5f};
+        const float tint[4] = {0.6f, 0.6f, 0.6f, 0.8f};
 
         if (!r_decals_cvar.value || !r_decals_bullet_cvar.value)
                 return;
@@ -699,7 +699,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
         vec3_t negpref;
         vec3_t up = {0.f, 0.f, 1.f};
         qboolean spawned = false;
-        const float tint[4] = {1.f, 1.f, 1.f, 0.75f};
+        const float tint[4] = {1.f, 1.f, 1.f, 0.8f};
 
         if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
                 return;
@@ -793,8 +793,8 @@ static void R_SpawnBloodPool (entity_t *ent)
         vec3_t base_point;
         vec3_t up = {0.f, 0.f, 1.f};
         float large_radius = BLOOD_POOL_RADIUS;
-        const float pool_tint[4] = {1.f, 1.f, 1.f, 0.65f};
-        const float small_tint[4] = {1.f, 1.f, 1.f, 0.5f};
+        const float pool_tint[4] = {1.f, 1.f, 1.f, 0.8f};
+        const float small_tint[4] = {1.f, 1.f, 1.f, 0.8f};
         int small_count;
         int spawned = 0;
 
