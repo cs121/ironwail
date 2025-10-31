@@ -33,13 +33,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BULLET_DECAL_DISTANCE   12.f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
-#define BLOOD_DECAL_SPREAD      32.f
+#define BLOOD_DECAL_SPREAD_RADIUS       48.f
 #define BLOOD_DECAL_VERTICAL_SPREAD     16.f
 
 #define BULLET_DECAL_MIN_RADIUS 7.0f
 #define BULLET_DECAL_MAX_RADIUS 10.0f
 #define BLOOD_DECAL_MIN_RADIUS  6.0f
 #define BLOOD_DECAL_MAX_RADIUS  12.0f
+
+#define BLOOD_DECAL_SIZE_SCALE  0.5625f
+
+#define EXPLOSION_DECAL_MIN_RADIUS       (BULLET_DECAL_MIN_RADIUS * 4.0f)
+#define EXPLOSION_DECAL_MAX_RADIUS       (BULLET_DECAL_MAX_RADIUS * 4.0f)
+
+#define GIB_DECAL_RADIUS         28.0f
+#define GIB_DECAL_PARTICLE_THRESHOLD    80
 
 #define BLOOD_POOL_RADIUS       22.0f
 #define BLOOD_POOL_JITTER       12.0f
@@ -54,6 +62,7 @@ typedef enum decaltype_e
 {
         DECAL_BULLET,
         DECAL_BLOOD,
+        DECAL_SCORCH,
         DECAL_COUNT
 } decaltype_t;
 
@@ -112,6 +121,8 @@ static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
 extern vec3_t lightcolor;
 
 static byte r_decal_death_spawned[MAX_EDICTS];
+static double r_last_gib_decal_time = -9999.0;
+static vec3_t r_last_gib_decal_origin = {0.f, 0.f, 0.f};
 
 static int R_GetDecalLimit (void)
 {
@@ -235,11 +246,28 @@ static void R_GenerateDecalTexture (decaltype_t type)
                                         float falloff = 1.0f - (dist / radius);
                                         float ring = 0.25f * sinf ((fx + fy) * 9.0f) * sinf ((fx - fy) * 7.0f);
                                         float noisefall = CLAMP (0.f, falloff + ring * 0.2f, 1.f);
-                                        alpha = powf (noisefall, 1.5f);
-                                        float base = 0.35f + noisefall * 0.45f;
-                                        r = base * 0.8f + 0.2f;
+                                        alpha = powf (noisefall, 1.6f);
+                                        float base = 0.15f + noisefall * 0.25f;
+                                        r = base * 0.9f;
                                         g = base * 0.18f;
-                                        b = base * 0.14f;
+                                        b = base * 0.16f;
+                                }
+                                break;
+                        }
+
+                        case DECAL_SCORCH:
+                        {
+                                const float radius = 0.9f;
+                                if (dist <= radius)
+                                {
+                                        float falloff = 1.0f - (dist / radius);
+                                        float ring = sinf ((fx * fx + fy * fy) * 6.0f) * 0.05f;
+                                        float shade = CLAMP (0.f, falloff + ring, 1.f);
+                                        alpha = powf (shade, 1.8f) * 0.85f;
+                                        float core = 0.15f + shade * 0.35f;
+                                        r = core * 0.4f;
+                                        g = core * 0.36f;
+                                        b = core * 0.32f;
                                 }
                                 break;
                         }
@@ -259,10 +287,21 @@ static void R_GenerateDecalTexture (decaltype_t type)
                 }
         }
 
-        r_decal_textures[type] = TexMgr_LoadImage (NULL,
-                (type == DECAL_BULLET) ? "decal_bullet" : "decal_blood",
-                DECAL_TEXTURE_SIZE, DECAL_TEXTURE_SIZE, SRC_RGBA, data, "", 0,
-                TEXPREF_ALPHA | TEXPREF_PERSIST | TEXPREF_CLAMP | TEXPREF_NOPICMIP);
+        {
+                const char *texname = "decal_generic";
+                switch (type)
+                {
+                case DECAL_BULLET: texname = "decal_bullet"; break;
+                case DECAL_BLOOD: texname = "decal_blood"; break;
+                case DECAL_SCORCH: texname = "decal_scorch"; break;
+                default: break;
+                }
+
+                r_decal_textures[type] = TexMgr_LoadImage (NULL,
+                        texname,
+                        DECAL_TEXTURE_SIZE, DECAL_TEXTURE_SIZE, SRC_RGBA, data, "", 0,
+                        TEXPREF_ALPHA | TEXPREF_PERSIST | TEXPREF_CLAMP | TEXPREF_NOPICMIP);
+        }
 }
 
 void R_InitDecals (void)
@@ -684,7 +723,11 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
 
         if (r_decals_debug_cvar.value)
         {
-                const char *name = (type == DECAL_BULLET) ? "bullet" : "blood";
+                const char *name = "blood";
+                if (type == DECAL_BULLET)
+                        name = "bullet";
+                else if (type == DECAL_SCORCH)
+                        name = "scorch";
                 Con_Printf ("Decal[%s] origin=(%5.1f,%5.1f,%5.1f) normal=(%4.2f,%4.2f,%4.2f) radius=%.1f\n",
                         name,
                         geom->origin[0], geom->origin[1], geom->origin[2],
@@ -712,6 +755,24 @@ void R_AddBulletDecal (const vec3_t point)
         R_CreateDecal (&geom, radius, DECAL_BULLET, tint);
 }
 
+void R_AddExplosionDecal (const vec3_t point)
+{
+        decalgeom_t geom;
+        float radius;
+        const float tint[4] = {0.32f, 0.29f, 0.26f, 0.78f};
+
+        if (!r_decals_cvar.value || !r_decals_bullet_cvar.value)
+                return;
+
+        if (!R_DecalProject (point, vec3_origin, DECAL_MAX_DISTANCE, &geom))
+                return;
+
+        radius = R_RandomRange (EXPLOSION_DECAL_MIN_RADIUS, EXPLOSION_DECAL_MAX_RADIUS);
+        if (!R_DecalHasEdgeRoom (&geom, radius))
+                return;
+        R_CreateDecal (&geom, radius, DECAL_SCORCH, tint);
+}
+
 static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t preferred_normal, float maxdist, float min_z, decaltype_t type, float radius_override, const float *tint)
 {
         decalgeom_t geom;
@@ -732,7 +793,7 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                 {
                         float base_radius = R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
                         float scale = R_RandomRange (1.f, 2.5f);
-                        radius = base_radius * scale * 0.75f;
+                        radius = base_radius * scale * BLOOD_DECAL_SIZE_SCALE;
                 }
                 if (!R_DecalHasEdgeRoom (&geom, radius))
                         return false;
@@ -743,7 +804,7 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
         vec3_t up = {0.f, 0.f, 1.f};
-        const float tint[4] = {0.5f, 0.05f, 0.05f, 0.85f};
+        const float tint[4] = {0.35f, 0.02f, 0.02f, 0.92f};
         int spawn_count;
         int i;
 
@@ -758,9 +819,12 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
                 vec3_t negpref;
                 qboolean spawned = false;
 
+                float spread_angle = R_RandomRange (0.f, (float)M_PI * 2.f);
+                float spread_dist = sqrtf (R_RandomRange (0.f, 1.f)) * BLOOD_DECAL_SPREAD_RADIUS;
+
                 VectorCopy (point, spawn_point);
-                spawn_point[0] += R_RandomRange (-BLOOD_DECAL_SPREAD, BLOOD_DECAL_SPREAD);
-                spawn_point[1] += R_RandomRange (-BLOOD_DECAL_SPREAD, BLOOD_DECAL_SPREAD);
+                spawn_point[0] += cosf (spread_angle) * spread_dist;
+                spawn_point[1] += sinf (spread_angle) * spread_dist;
                 spawn_point[2] += R_RandomRange (-BLOOD_DECAL_VERTICAL_SPREAD, BLOOD_DECAL_VERTICAL_SPREAD);
 
                 VectorCopy (dir, preferred);
@@ -777,6 +841,34 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
                 }
 
                 R_AddBloodDecalForDirection (spawn_point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
+        }
+}
+
+void R_AddGibDecal (const vec3_t point, int particle_count)
+{
+        vec3_t up = {0.f, 0.f, 1.f};
+        vec3_t delta;
+        float dist2;
+        const float tint[4] = {0.4f, 0.03f, 0.03f, 0.95f};
+
+        if (particle_count < GIB_DECAL_PARTICLE_THRESHOLD)
+                return;
+
+        if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
+                return;
+
+        if (cl.time - r_last_gib_decal_time < 0.15)
+        {
+                VectorSubtract (point, r_last_gib_decal_origin, delta);
+                dist2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+                if (dist2 < (24.f * 24.f))
+                        return;
+        }
+
+        if (R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, GIB_DECAL_RADIUS, tint))
+        {
+                r_last_gib_decal_time = cl.time;
+                VectorCopy (point, r_last_gib_decal_origin);
         }
 }
 
