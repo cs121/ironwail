@@ -518,11 +518,11 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	// draw it
 	//
 
-	if (r_fullbright_cheatsafe || showtris)
-		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
+    if (r_fullbright_cheatsafe || r_lightmap_cheatsafe || showtris)
+            lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
 
-	if (showtris)
-		entalpha = 1.f;
+        if (showtris)
+                entalpha = 1.f;
 
 	if (!R_Alias_CanAddToBatch (e))
 		R_FlushAliasInstances (showtris);
