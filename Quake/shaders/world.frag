@@ -393,7 +393,8 @@ void main()
     }
     vec3 static_light_shaded = static_light * static_half_term;
 
-    vec3 total_light = clamp_preserving_hue(static_light_base, vec3(1.0));
+    vec3 static_total_source = (halfLambertEnabled != 0) ? static_light_shaded : static_light_base;
+    vec3 total_light = clamp_preserving_hue(static_total_source, vec3(1.0));
     vec3 dynamic_light_total = vec3(0.0);
     vec3 rim_contrib = vec3(0.0);
     vec3 sun_contrib = vec3(0.0);
