@@ -78,12 +78,14 @@ static decalvertex_t     decal_batch[4 * MAX_DECALS];
 static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
+static qboolean          decal_batch_force_white = false;
 
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_lifetime_cvar = {"r_decals_lifetime", "20", CVAR_ARCHIVE};
 static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
+static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", CVAR_NONE};
 
 static int R_GetDecalLimit (void)
 {
@@ -114,6 +116,7 @@ static void R_ClearDecalBatch (void)
         decal_batch_count = 0;
         decal_batch_texture = NULL;
         decal_batch_showtris = false;
+        decal_batch_force_white = false;
 }
 
 static void R_FlushDecalBatch (void)
@@ -126,7 +129,7 @@ static void R_FlushDecalBatch (void)
 
         R_InitDecalIndices ();
 
-        GL_Bind (GL_TEXTURE0, decal_batch_showtris ? whitetexture : decal_batch_texture);
+        GL_Bind (GL_TEXTURE0, (decal_batch_showtris || decal_batch_force_white) ? whitetexture : decal_batch_texture);
 
         GL_Upload (GL_ARRAY_BUFFER, decal_batch, sizeof(decal_batch[0]) * decal_batch_count * 4, &buf, &ofs);
         GL_BindBuffer (GL_ARRAY_BUFFER, buf);
@@ -140,7 +143,7 @@ static void R_FlushDecalBatch (void)
         R_ClearDecalBatch ();
 }
 
-static void R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
+static void R_AppendDecalToBatch (decal_t *dec, qboolean showtris, qboolean force_white)
 {
         if (!dec->texture)
                 return;
@@ -149,13 +152,15 @@ static void R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
         {
                 decal_batch_texture = dec->texture;
                 decal_batch_showtris = showtris;
+                decal_batch_force_white = force_white;
         }
 
-        if (decal_batch_count == MAX_DECALS || decal_batch_texture != dec->texture || decal_batch_showtris != showtris)
+        if (decal_batch_count == MAX_DECALS || decal_batch_texture != dec->texture || decal_batch_showtris != showtris || decal_batch_force_white != force_white)
         {
                 R_FlushDecalBatch ();
                 decal_batch_texture = dec->texture;
                 decal_batch_showtris = showtris;
+                decal_batch_force_white = force_white;
         }
 
         if (decal_batch_count == MAX_DECALS)
@@ -245,6 +250,7 @@ void R_InitDecals (void)
         Cvar_RegisterVariable (&r_decals_bullet_cvar);
         Cvar_RegisterVariable (&r_decals_lifetime_cvar);
         Cvar_RegisterVariable (&r_decals_max_cvar);
+        Cvar_RegisterVariable (&r_decals_debug_cvar);
 
         for (i = 0; i < DECAL_COUNT; i++)
                 R_GenerateDecalTexture ((decaltype_t)i);
@@ -516,6 +522,16 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         dec->die = cl.time + R_GetDecalLifetime ();
         dec->active = true;
         R_AssignDecalVertices (dec, geom, radius);
+
+        if (r_decals_debug_cvar.value > 0.f)
+        {
+                const char *typename = (type == DECAL_BULLET) ? "bullet" : (type == DECAL_BLOOD) ? "blood" : "unknown";
+                Con_Printf ("[decals] created %s decal at (%.2f %.2f %.2f) normal (%.2f %.2f %.2f) radius %.2f\n",
+                        typename,
+                        geom->origin[0], geom->origin[1], geom->origin[2],
+                        geom->normal[0], geom->normal[1], geom->normal[2],
+                        radius);
+        }
         return true;
 }
 
@@ -602,7 +618,7 @@ void R_DrawDecals (qboolean showtris)
                         drew = true;
                 }
 
-                R_AppendDecalToBatch (dec, showtris);
+                R_AppendDecalToBatch (dec, showtris, (!showtris && r_decals_debug_cvar.value > 0.f));
         }
 
         if (drew)

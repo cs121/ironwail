@@ -478,6 +478,13 @@ void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned ch
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
 void R_DrawParticles_ShowTris (void);
+void R_InitDecals (void);
+void R_ClearDecals (void);
+void R_UpdateDecals (void);
+void R_AddBulletDecal (const vec3_t point);
+void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
+void R_DrawDecals (qboolean showtris);
+void R_DrawDecals_ShowTris (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
 
