@@ -201,6 +201,12 @@ cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
 cvar_t	r_lightmap_strength = { "r_lightmap_strength", "0.75", CVAR_ARCHIVE };
+cvar_t	r_half_lambert = { "r_half_lambert", "1", CVAR_ARCHIVE };
+cvar_t	r_static_lightmap_mode = { "r_static_lightmap_mode", "1", CVAR_ARCHIVE };
+cvar_t	r_dynamic_dither = { "r_dynamic_dither", "1", CVAR_ARCHIVE };
+cvar_t	r_light_levels = { "r_light_levels", "8", CVAR_ARCHIVE };
+cvar_t	r_gamma_boost = { "r_gamma_boost", "1.15", CVAR_ARCHIVE };
+cvar_t	r_noise_time = { "r_noise_time", "0", CVAR_NONE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
@@ -1750,6 +1756,22 @@ void R_SetupView (void)
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
                 r_framedata.rim_pad0 = 0.f;
+
+        int half_lambert = (int)(r_half_lambert.value != 0.f);
+        int static_mode = CLAMP(0, (int)Q_rint(r_static_lightmap_mode.value), 1);
+        int dynamic_dither = (int)(r_dynamic_dither.value != 0.f);
+        int light_levels = (int)Q_rint(r_light_levels.value);
+        light_levels = CLAMP(1, light_levels, 256);
+        float gamma_boost = r_gamma_boost.value;
+        if (gamma_boost < 1.0f) gamma_boost = 1.0f;
+        if (gamma_boost > 1.5f) gamma_boost = 1.5f;
+        float noise_time = r_noise_time.value != 0.f ? r_noise_time.value : (float)cl.time;
+        r_framedata.half_lambert = half_lambert;
+        r_framedata.static_lightmap_mode = static_mode;
+        r_framedata.dynamic_dither = dynamic_dither;
+        r_framedata.light_levels = light_levels;
+        r_framedata.gamma_boost = gamma_boost;
+        r_framedata.noise_time = noise_time;
         }
 
         {

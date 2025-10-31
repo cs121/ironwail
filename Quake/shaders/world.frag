@@ -91,6 +91,29 @@ float tri(float x)
     return x;
 }
 
+#if !defined(BLUE_NOISE_TABLE_DEFINED)
+const float BlueNoise8x8[64] = float[64](
+     0.0/64.0, 48.0/64.0, 12.0/64.0, 60.0/64.0,  3.0/64.0, 51.0/64.0, 15.0/64.0, 63.0/64.0,
+    32.0/64.0, 16.0/64.0, 44.0/64.0, 28.0/64.0, 35.0/64.0, 19.0/64.0, 47.0/64.0, 31.0/64.0,
+     8.0/64.0, 56.0/64.0,  4.0/64.0, 52.0/64.0, 11.0/64.0, 59.0/64.0,  7.0/64.0, 55.0/64.0,
+    40.0/64.0, 24.0/64.0, 36.0/64.0, 20.0/64.0, 43.0/64.0, 27.0/64.0, 39.0/64.0, 23.0/64.0,
+     2.0/64.0, 50.0/64.0, 14.0/64.0, 62.0/64.0,  1.0/64.0, 49.0/64.0, 13.0/64.0, 61.0/64.0,
+    34.0/64.0, 18.0/64.0, 46.0/64.0, 30.0/64.0, 33.0/64.0, 17.0/64.0, 45.0/64.0, 29.0/64.0,
+    10.0/64.0, 58.0/64.0,  6.0/64.0, 54.0/64.0,  9.0/64.0, 57.0/64.0,  5.0/64.0, 53.0/64.0,
+    42.0/64.0, 26.0/64.0, 38.0/64.0, 22.0/64.0, 41.0/64.0, 25.0/64.0, 37.0/64.0, 21.0/64.0
+);
+#define BLUE_NOISE_TABLE_DEFINED 1
+#endif
+
+float BlueNoiseValue(vec2 noiseCoord)
+{
+    vec2 wrapped = mod(floor(noiseCoord), 8.0);
+    int idx = int(wrapped.y) * 8 + int(wrapped.x);
+    return BlueNoise8x8[idx];
+}
+
+#define BLUE_NOISE_STATIC(uv) BlueNoiseValue((uv) * 8.0)
+
 #define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
@@ -318,6 +341,7 @@ void main()
     vec3 dn = cross(DFDX(in_pos), DFDY(in_pos));
     vec3 geom_normal = fastNorm(dn);
     vec3 surface_normal = geom_normal;
+    vec3 static_light_dir = geom_normal;
 
     if (DeluxEnabled != 0u)
     {
@@ -347,12 +371,32 @@ void main()
         }
 
         if (weight > 0.0)
+        {
             surface_normal = fastNorm(accum);
+            static_light_dir = surface_normal;
+        }
         else
+        {
             surface_normal = dir0;
+            static_light_dir = surface_normal;
+        }
     }
 
-    vec3 total_light = clamp_preserving_hue(static_light, vec3(1.0));
+    vec3 static_light_base = static_light;
+    int halfLambertEnabled = (HalfLambert != 0) && (StaticLightmapMode != 0);
+
+    float static_half_term = 1.0;
+    if (halfLambertEnabled != 0)
+    {
+        float ndotl_static = dot(geom_normal, static_light_dir);
+        static_half_term = clamp(ndotl_static * 0.5 + 0.5, 0.0, 1.0);
+    }
+    vec3 static_light_shaded = static_light * static_half_term;
+
+    vec3 total_light = clamp_preserving_hue(static_light_base, vec3(1.0));
+    vec3 dynamic_light_total = vec3(0.0);
+    vec3 rim_contrib = vec3(0.0);
+    vec3 sun_contrib = vec3(0.0);
     vec3 specular_light = vec3(0.0);
 
     vec3 to_eye = EyePos - in_pos;
@@ -402,8 +446,11 @@ void main()
 
                     if (attenuation > 0.0 && falloff > 0.0){
                         vec3  ldir = L * Linv;
-                        float ndotl = max(dot(surface_normal, ldir), 0.0);
+                        float ndotl_raw = dot(surface_normal, ldir);
+                        float ndotl = max(ndotl_raw, 0.0);
+                        float diffuse_term = (halfLambertEnabled != 0) ? clamp(ndotl_raw * 0.5 + 0.5, 0.0, 1.0) : ndotl;
                         vec3  light_contrib = (attenuation * falloff) * l.color;
+                        vec3  diffuse_contrib = light_contrib * diffuse_term;
 
                         if (ndotl > 0.0){
                             // Half-Vektor ohne sqrt: H = normalize(Ldir + V)
@@ -418,14 +465,17 @@ void main()
                                 specular_light += light_contrib * specTerm;
                             }
                         }
-                        dynamic_light += light_contrib;
+                        dynamic_light += diffuse_contrib;
                     }
                 }
             }
             // saturating Add (bleibt <= 1) with hue preservation
             vec3 dynamic_remaining = max(vec3(0.0), vec3(1.0) - total_light);
-            if (dynamic_remaining.x > 0.0 || dynamic_remaining.y > 0.0 || dynamic_remaining.z > 0.0)
-                total_light += clamp_preserving_hue(dynamic_light, dynamic_remaining);
+            if (dynamic_remaining.x > 0.0 || dynamic_remaining.y > 0.0 || dynamic_remaining.z > 0.0){
+                vec3 dynamic_added = clamp_preserving_hue(dynamic_light, dynamic_remaining);
+                total_light += dynamic_added;
+                dynamic_light_total += dynamic_added;
+            }
         }
     }
 
@@ -435,34 +485,81 @@ void main()
         float fres = pow(saturate(1.0 - ndv), RimExponent);
         vec3 rim = vec3(RimWorld * fres);
         vec3 rim_remaining = max(vec3(0.0), vec3(1.0) - total_light);
-        if (rim_remaining.x > 0.0 || rim_remaining.y > 0.0 || rim_remaining.z > 0.0)
-            total_light += clamp_preserving_hue(rim, rim_remaining);
+        if (rim_remaining.x > 0.0 || rim_remaining.y > 0.0 || rim_remaining.z > 0.0){
+            vec3 rim_added = clamp_preserving_hue(rim, rim_remaining);
+            total_light += rim_added;
+            rim_contrib += rim_added;
+        }
     }
 
     // Sun (deine Funktion bleibt Stub/kompatibel)
     vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
     vec3 sun_remaining = max(vec3(0.0), vec3(1.0) - total_light);
-    if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0)
-        total_light += clamp_preserving_hue(sun_light, sun_remaining);
+    if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0){
+        vec3 sun_added = clamp_preserving_hue(sun_light, sun_remaining);
+        total_light += sun_added;
+        sun_contrib += sun_added;
+    }
 
-#if DITHER >= 2
-    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(1.0));
-    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(1.0));
-#else
-    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(1.0));
-#endif
+    vec3 base_color = result.rgb;
+    vec3 lit_color;
+
+    if (StaticLightmapMode <= 0)
+    {
+        vec3 static_component = clamp_preserving_hue(static_light_base, vec3(1.0));
+        vec3 dynamic_component = clamp_preserving_hue(dynamic_light_total + rim_contrib + sun_contrib, vec3(1.0));
+
+        vec3 shaded = base_color * (static_component * Overbright);
+        shaded += base_color * (dynamic_component * Overbright);
 
 #if MODE != 1
-    result.rgb = mix(result.rgb, result.rgb * total_lightmap, result.a);
+        lit_color = mix(base_color, shaded, result.a);
 #else
-    result.rgb *= total_lightmap;
+        lit_color = shaded;
 #endif
+    }
+    else
+    {
+        float levels = max(float(LightLevels), 1.0);
+        vec3 static_source = (halfLambertEnabled != 0) ? static_light_shaded : static_light_base;
+        vec3 static_light_norm = clamp(static_source, 0.0, 1.0);
+        vec3 static_smoothed = mix(static_light_norm, sqrt(static_light_norm), vec3(0.35));
+        float static_noise = BLUE_NOISE_STATIC(lmuv);
+        vec3 static_quantized = floor(static_smoothed * levels + static_noise) / levels;
+        static_quantized = clamp(static_quantized, 0.0, 1.0);
 
+        vec3 dynamic_combined = clamp(dynamic_light_total + rim_contrib + sun_contrib, 0.0, 1.0);
+        vec2 time_offset = vec2(fract(NoiseTime * 0.5), fract(NoiseTime * 0.37));
+        float dynamic_noise = (DynamicDither != 0) ? BlueNoiseValue(lmuv * 8.0 + time_offset * 8.0) : 0.5;
+        vec3 dynamic_quantized = floor(dynamic_combined * levels + dynamic_noise) / levels;
+        dynamic_quantized = clamp(dynamic_quantized, 0.0, 1.0);
+
+        vec3 static_component = static_quantized * Overbright;
+        vec3 dynamic_component = dynamic_quantized * Overbright;
+
+        vec3 shaded = base_color * static_component;
+        shaded += base_color * dynamic_component;
+
+#if MODE != 1
+        lit_color = mix(base_color, shaded, result.a);
+#else
+        lit_color = shaded;
+#endif
+    }
+
+    result.rgb = lit_color;
     result.rgb += fullbright + emissive;
 
     // Specular clamp+Add
     vec3 spec_clamped = clamp_preserving_hue(specular_light, vec3(Overbright));
     result.rgb += spec_clamped * saturate(result.a);
+
+    if (StaticLightmapMode > 0)
+    {
+        float safeGamma = max(GammaBoost, 1.0e-3);
+        float invGamma = 1.0 / safeGamma;
+        result.rgb = pow(max(result.rgb, vec3(0.0)), vec3(invGamma));
+    }
 
     result = clamp(result, 0.0, 1.0);
     result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
