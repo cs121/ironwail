@@ -33,6 +33,7 @@ Unknown lumps are preserved as opaque data and trigger a one-time developer warn
 | `r_bspx_normals` | `1` | Allows renderer subsystems to consume BSPX normals. Decal projection uses them when this cvar is set. |
 | `r_bspx_lighting` | `1` | Allows colour lightmaps supplied by `RGBLIGHTING` to replace the grayscale BSP lump when no `.lit` file is present. |
 | `r_bspx_envmap` | `0` | Reserved flag for future environment mapping support. |
+| `debug_bspx` | `0` | When non-zero, prints detailed BSPX loading diagnostics (lump discovery, success/failure reports, and runtime summaries). |
 
 Changes to these CVars take effect on the next map load.
 
