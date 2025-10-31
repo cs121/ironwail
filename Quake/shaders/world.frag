@@ -390,7 +390,8 @@ void main()
                     Light l = Lights[ofs + uint(j)];
 
                     float dist = dot(l.origin, plane_n) - plane_w;
-                    float rad  = l.radius - abs(dist);
+                    float absdist = abs(dist);
+                    float rad  = l.radius - absdist;
                     float minl = l.minlight;
                     if (rad < minl) continue;
 
@@ -405,11 +406,12 @@ void main()
                     float minlight_span = max(rad - minl, 1e-4);
                     float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
                     float falloff     = smoothstep01((rad - sdist) / max(rad, 1e-4));
+                    float axialFalloff = smoothstep01((l.radius - absdist) / max(l.radius, 1e-4));
 
-                    if (attenuation > 0.0 && falloff > 0.0){
+                    if (attenuation > 0.0 && falloff > 0.0 && axialFalloff > 0.0){
                         vec3  ldir = L * Linv;
                         float ndotl = max(dot(surface_normal, ldir), 0.0);
-                        float intensity = attenuation * falloff;
+                        float intensity = attenuation * falloff * axialFalloff;
                         vec3  light_contrib = intensity * l.color;
 
                         if (ndotl > 0.0){
