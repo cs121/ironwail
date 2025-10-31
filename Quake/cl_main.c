@@ -117,6 +117,7 @@ void CL_ClearState (void)
 	//johnfitz
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
+	R_ClearDecals ();
 }
 
 /*

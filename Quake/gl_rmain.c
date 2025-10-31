@@ -2713,6 +2713,7 @@ void R_ShowTris (void)
 	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
 	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
 	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
+	R_DrawDecals_ShowTris ();
 
 	// viewmodel
 	if (R_IsViewModelVisible ())
@@ -2808,11 +2809,15 @@ void R_RenderScene (void)
 
 	Fog_EnableGFog (); //johnfitz
 
+	R_UpdateDecals ();
+
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+
+	R_DrawDecals (false);
 
 	R_DrawParticles (false);
 
