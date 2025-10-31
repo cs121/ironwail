@@ -1600,6 +1600,7 @@ void R_SetFrustum (void)
 	memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
 	r_framedata.zlogscale = LIGHT_TILES_Z / (logzfar - logznear);
 	r_framedata.zlogbias = -r_framedata.zlogscale * logznear;
+	r_framedata.pad_after_z = 0.f;
 }
 
 /*
@@ -1756,6 +1757,8 @@ void R_SetupView (void)
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
                 r_framedata.rim_pad0 = 0.f;
+                r_framedata.pad_eye0[0] = 0.f;
+                r_framedata.pad_eye0[1] = 0.f;
 
         int half_lambert = (int)(r_half_lambert.value != 0.f);
         int static_mode = CLAMP(0, (int)Q_rint(r_static_lightmap_mode.value), 1);
@@ -1789,10 +1792,14 @@ void R_SetupView (void)
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
+	r_framedata.eyepos_pad = 0.f;
 	r_framedata.time = cl.time;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
+	r_framedata.pad_prev_eye0[0] = 0.f;
+	r_framedata.pad_prev_eye0[1] = 0.f;
+	r_framedata.pad_prev_eye0[2] = 0.f;
 
 	if (prev_valid)
 	{
@@ -1800,6 +1807,7 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
 		r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
 		r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
+		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = (float)prev_delta;
 		r_framedata.prev_frame_valid = 1;
 	}
@@ -1809,6 +1817,7 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
 		r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
 		r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
+		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = 0.f;
 		r_framedata.prev_frame_valid = 0;
 		r_prev_frame_valid = false;

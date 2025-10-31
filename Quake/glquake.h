@@ -438,6 +438,7 @@ typedef struct gpuframedata_s {
 	float	fogdata[4];
 	float	skyfogdata[4];
 	vec3_t	winddir;
+	float	winddir_pad;
 	float	windphase;
 	float	screendither;
 	float	texturedither;
@@ -447,12 +448,17 @@ typedef struct gpuframedata_s {
 	float	rim_world;
 	float	rim_exponent;
 	float	rim_pad0;
+	float	pad_eye0[2];
 	vec3_t	eyepos;
+	float	eyepos_pad;
 	float	time;
+	float	pad_prev_eye0[3];
 	vec3_t	prev_eyepos;
+	float	prev_eyepos_pad;
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
+	float	pad_after_z;
 	int			half_lambert;
 	int			static_lightmap_mode;
 	int			dynamic_dither;

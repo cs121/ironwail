@@ -829,5 +829,6 @@ void Sky_SetupFrame (void)
 	r_framedata.winddir[0] =  dist * cp * sy;
 	r_framedata.winddir[1] =  dist * sp;
 	r_framedata.winddir[2] = -dist * cp * cy;
+	r_framedata.winddir_pad = 0.f;
 	r_framedata.windphase = phase;
 }
