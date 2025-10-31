@@ -184,6 +184,12 @@ layout(location=1) out vec4 out_velocity;
 float saturate(float x){ return clamp(x,0.0,1.0); }
 vec3  saturate(vec3 v){ return clamp(v,0.0,1.0); }
 
+float smoothstep01(float x)
+{
+    x = saturate(x);
+    return x * x * (3.0 - 2.0 * x);
+}
+
 vec3 clamp_preserving_hue(vec3 value, vec3 limit)
 {
     vec3 positive = max(value, vec3(0.0));
@@ -396,14 +402,15 @@ void main()
                     float Linv = inversesqrt(Llen2);
                     float sdist = 1.0 / Linv; // ≈ length(L)
 
-                    float minlight_span = rad - minl;
-                    float attenuation = saturate((minlight_span - sdist) * (1.0/16.0));
-                    float falloff     = saturate((rad - sdist) * (1.0/256.0));
+                    float minlight_span = max(rad - minl, 1e-4);
+                    float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
+                    float falloff     = smoothstep01((rad - sdist) / max(rad, 1e-4));
 
                     if (attenuation > 0.0 && falloff > 0.0){
                         vec3  ldir = L * Linv;
                         float ndotl = max(dot(surface_normal, ldir), 0.0);
-                        vec3  light_contrib = (attenuation * falloff) * l.color;
+                        float intensity = attenuation * falloff;
+                        vec3  light_contrib = intensity * l.color;
 
                         if (ndotl > 0.0){
                             // Half-Vektor ohne sqrt: H = normalize(Ldir + V)
@@ -423,9 +430,12 @@ void main()
                 }
             }
             // saturating Add (bleibt <= 1) with hue preservation
-            vec3 dynamic_remaining = max(vec3(0.0), vec3(1.0) - total_light);
-            if (dynamic_remaining.x > 0.0 || dynamic_remaining.y > 0.0 || dynamic_remaining.z > 0.0)
-                total_light += clamp_preserving_hue(dynamic_light, dynamic_remaining);
+            if (dynamic_light.x > 0.0 || dynamic_light.y > 0.0 || dynamic_light.z > 0.0)
+            {
+                float max_dynamic = max(Overbright, 1.0);
+                vec3  cap = vec3(max_dynamic);
+                total_light = clamp_preserving_hue(total_light + dynamic_light, cap);
+            }
         }
     }
 
