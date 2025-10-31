@@ -243,15 +243,22 @@ void R_PushDlights (void)
                         out->color[2] = l->color[2];
                         out->minlight = l->minlight;
                 }
+        }
 
-                dynamic_count = r_framedata.numlights;
+        dynamic_count = r_framedata.numlights;
 
-                if (cl.worldmodel)
+        if (cl.worldmodel)
+        {
+                if (cl.worldmodel->bspx_static_lights && static_light_count > 0)
                 {
                         R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
                                 cl.worldmodel->bspx_num_static_lights,
                                 (static_light_map_count > 0) ? static_light_index_map : NULL,
                                 static_light_map_count);
+                }
+
+                if (cl.worldmodel->bspx_static_shadow_lights && static_shadow_light_count > 0)
+                {
                         R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
                                 cl.worldmodel->bspx_num_static_shadow_lights,
                                 (static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
