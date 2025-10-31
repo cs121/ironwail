@@ -468,6 +468,14 @@ void R_DrawParticles (qboolean alpha);
 void R_DrawParticles_ShowTris (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
+void R_InitDecals (void);
+void R_ClearDecals (void);
+void R_UpdateDecals (void);
+void R_DrawDecals (qboolean showtris);
+void R_DrawDecals_ShowTris (void);
+void R_AddBulletDecal (const vec3_t point);
+void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
+void R_Decals_EntityFrameChanged (entity_t *ent, int prevframe, qboolean model_changed);
 
 void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
@@ -560,6 +568,7 @@ typedef struct glprogs_s {
 	GLuint		skyboxside[2];		// [dither]
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
 	GLuint		sprites[2];			// [dither]
+        GLuint          decals[2];                      // [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
 
