@@ -376,6 +376,12 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_lightmap_strength);
+	Cvar_RegisterVariable (&r_half_lambert);
+	Cvar_RegisterVariable (&r_static_lightmap_mode);
+	Cvar_RegisterVariable (&r_dynamic_dither);
+	Cvar_RegisterVariable (&r_light_levels);
+	Cvar_RegisterVariable (&r_gamma_boost);
+	Cvar_RegisterVariable (&r_noise_time);
 	Cvar_RegisterVariable (&r_dof);
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);
