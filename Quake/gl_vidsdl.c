@@ -1036,7 +1036,7 @@ static void GL_VerifyBindlessSupport (void)
                 /**/;
 
         glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-        glActiveTexture (GL_TEXTURE0);
+        GL_ActiveTextureFunc (GL_TEXTURE0);
         glGetIntegerv (GL_TEXTURE_BINDING_2D, &prev_binding);
 
         glGenTextures (1, &tex);
@@ -1083,7 +1083,7 @@ cleanup:
                 glDeleteTextures (1, &tex);
                 glBindTexture (GL_TEXTURE_2D, restore);
         }
-        glActiveTexture (prev_active);
+        GL_ActiveTextureFunc (prev_active);
         while (glGetError () != GL_NO_ERROR)
                 /**/;
 }
