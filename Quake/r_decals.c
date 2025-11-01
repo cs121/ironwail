@@ -33,9 +33,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BULLET_DECAL_DISTANCE   12.f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
-#define BLOOD_DECAL_SPREAD_RADIUS       48.f
-#define BLOOD_DECAL_VERTICAL_SPREAD     16.f
-
 #define BULLET_DECAL_MIN_RADIUS 7.0f
 #define BULLET_DECAL_MAX_RADIUS 10.0f
 #define BLOOD_DECAL_MIN_RADIUS  6.0f
@@ -57,6 +54,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DECAL_LIGHT_REFRESH     0.1
 
 #define BLOOD_WALL_THRESHOLD    0.65f
+
+#define BLOOD_CLUSTER_MIN               7
+#define BLOOD_CLUSTER_MAX               13
+#define BLOOD_PRIMARY_RADIUS_SCALE      1.35f
+#define BLOOD_SECONDARY_SCALE_MIN       0.65f
+#define BLOOD_SECONDARY_SCALE_MAX       1.1f
+#define BLOOD_SPRAY_CONE_ANGLE_DEG      35.f
+#define BLOOD_SPRAY_MIN_DISTANCE        6.f
+#define BLOOD_SPRAY_MAX_DISTANCE        56.f
+#define BLOOD_SPRAY_GRAVITY_FACTOR      0.32f
+#define BLOOD_SPRAY_LATERAL_JITTER      3.5f
 
 typedef enum decaltype_e
 {
@@ -611,6 +619,59 @@ static float R_RandomRange (float minval, float maxval)
         return minval + (maxval - minval) * ((float)rand () / (float)RAND_MAX);
 }
 
+static float R_ComputeBloodDecalRadius (float scale)
+{
+        float base_radius = R_RandomRange (BLOOD_DECAL_MIN_RADIUS, BLOOD_DECAL_MAX_RADIUS);
+        float random_scale = R_RandomRange (1.f, 2.5f);
+        float radius = base_radius * random_scale * BLOOD_DECAL_SIZE_SCALE;
+        if (scale > 0.f)
+                radius *= scale;
+        return radius;
+}
+
+static void R_RandomUnitVector (vec3_t out)
+{
+        float z = R_RandomRange (-1.f, 1.f);
+        float angle = R_RandomRange (0.f, (float)M_PI * 2.f);
+        float radius = sqrtf (q_max (0.f, 1.f - z * z));
+        out[0] = cosf (angle) * radius;
+        out[1] = sinf (angle) * radius;
+        out[2] = z;
+}
+
+static void R_RandomDirectionInCone (const vec3_t axis, float cone_angle_deg, vec3_t out)
+{
+        vec3_t norm_axis;
+        float axis_len = VectorLength (axis);
+
+        if (axis_len < 0.001f)
+        {
+                R_RandomUnitVector (out);
+                return;
+        }
+
+        VectorScale (axis, 1.f / axis_len, norm_axis);
+
+        {
+                vec3_t basis_u, basis_v;
+                float cone_angle = cone_angle_deg * ((float)M_PI / 180.f);
+                float cos_min = cosf (cone_angle);
+                float u = (float)rand () / (float)RAND_MAX;
+                float cos_theta = 1.f - u * (1.f - cos_min);
+                float sin_theta = sqrtf (q_max (0.f, 1.f - cos_theta * cos_theta));
+                float phi = R_RandomRange (0.f, (float)M_PI * 2.f);
+                vec3_t result;
+
+                R_BuildOrthonormalBasis (norm_axis, basis_u, basis_v);
+
+                VectorScale (norm_axis, cos_theta, result);
+                VectorMA (result, cosf (phi) * sin_theta, basis_u, result);
+                VectorMA (result, sinf (phi) * sin_theta, basis_v, result);
+                VectorNormalizeFast (result);
+                VectorCopy (result, out);
+        }
+}
+
 static double R_GetDecalLifetime (void)
 {
         return q_max (1.0, r_decals_lifetime_cvar.value);
@@ -773,7 +834,7 @@ void R_AddExplosionDecal (const vec3_t point)
         R_CreateDecal (&geom, radius, DECAL_SCORCH, tint);
 }
 
-static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t preferred_normal, float maxdist, float min_z, decaltype_t type, float radius_override, const float *tint)
+static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t preferred_normal, float maxdist, float min_z, decaltype_t type, float radius_override, const float *tint, decalgeom_t *out_geom)
 {
         decalgeom_t geom;
         if (!R_DecalProject (point, preferred_normal, maxdist, &geom))
@@ -797,6 +858,8 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                 }
                 if (!R_DecalHasEdgeRoom (&geom, radius))
                         return false;
+                if (out_geom)
+                        *out_geom = geom;
                 return R_CreateDecal (&geom, radius, type, tint);
         }
 }
@@ -804,43 +867,103 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
         vec3_t up = {0.f, 0.f, 1.f};
+        vec3_t down = {0.f, 0.f, -1.f};
         const float tint[4] = {0.35f, 0.02f, 0.02f, 0.92f};
+        vec3_t spray_axis = {0.f, 0.f, 1.f};
+        float dir_len2 = VectorLengthSquared (dir);
         int spawn_count;
         int i;
+        qboolean primary_spawned = false;
+        decalgeom_t primary_geom;
+        float primary_radius;
 
         if (!r_decals_cvar.value || !r_decals_blood_cvar.value)
                 return;
 
-        spawn_count = (rand () % 4) + 3;
+        if (dir_len2 > 0.001f)
+        {
+                VectorCopy (dir, spray_axis);
+                VectorNormalizeFast (spray_axis);
+        }
+
+        primary_radius = R_ComputeBloodDecalRadius (BLOOD_PRIMARY_RADIUS_SCALE);
+
+        if (dir_len2 > 0.001f)
+        {
+                vec3_t preferred;
+                vec3_t opposite;
+
+                VectorCopy (spray_axis, preferred);
+                VectorNormalizeFast (preferred);
+                VectorScale (preferred, -1.f, opposite);
+
+                primary_spawned = R_AddBloodDecalForDirection (point, opposite, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, primary_radius, tint, &primary_geom);
+                if (!primary_spawned)
+                        primary_spawned = R_AddBloodDecalForDirection (point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, primary_radius, tint, &primary_geom);
+        }
+
+        if (!primary_spawned)
+        {
+                primary_spawned = R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, primary_radius, tint, &primary_geom);
+                if (!primary_spawned)
+                        primary_spawned = R_AddBloodDecalForDirection (point, down, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, primary_radius, tint, &primary_geom);
+        }
+
+        if (primary_spawned && dir_len2 <= 0.001f)
+        {
+                VectorCopy (primary_geom.normal, spray_axis);
+                VectorNormalizeFast (spray_axis);
+        }
+
+        spawn_count = BLOOD_CLUSTER_MIN;
+        if (BLOOD_CLUSTER_MAX > BLOOD_CLUSTER_MIN)
+                spawn_count += rand () % (BLOOD_CLUSTER_MAX - BLOOD_CLUSTER_MIN + 1);
+
         for (i = 0; i < spawn_count; i++)
         {
+                vec3_t scatter_dir;
                 vec3_t spawn_point;
                 vec3_t preferred;
-                vec3_t negpref;
+                vec3_t opposite;
                 qboolean spawned = false;
+                float dist = R_RandomRange (BLOOD_SPRAY_MIN_DISTANCE, BLOOD_SPRAY_MAX_DISTANCE);
+                float radius_scale = R_RandomRange (BLOOD_SECONDARY_SCALE_MIN, BLOOD_SECONDARY_SCALE_MAX);
+                float radius = R_ComputeBloodDecalRadius (radius_scale);
+                float distance_span = BLOOD_SPRAY_MAX_DISTANCE - BLOOD_SPRAY_MIN_DISTANCE;
 
-                float spread_angle = R_RandomRange (0.f, (float)M_PI * 2.f);
-                float spread_dist = sqrtf (R_RandomRange (0.f, 1.f)) * BLOOD_DECAL_SPREAD_RADIUS;
-
-                VectorCopy (point, spawn_point);
-                spawn_point[0] += cosf (spread_angle) * spread_dist;
-                spawn_point[1] += sinf (spread_angle) * spread_dist;
-                spawn_point[2] += R_RandomRange (-BLOOD_DECAL_VERTICAL_SPREAD, BLOOD_DECAL_VERTICAL_SPREAD);
-
-                VectorCopy (dir, preferred);
-                if (VectorLengthSquared (preferred) > 0.01f)
+                if (distance_span > 1.f)
                 {
-                        preferred[0] += R_RandomRange (-0.35f, 0.35f);
-                        preferred[1] += R_RandomRange (-0.35f, 0.35f);
-                        preferred[2] += R_RandomRange (-0.35f, 0.35f);
-                        VectorNormalizeFast (preferred);
-                        VectorScale (preferred, -1.f, negpref);
-                        spawned |= R_AddBloodDecalForDirection (spawn_point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
-                        if (!spawned)
-                                spawned |= R_AddBloodDecalForDirection (spawn_point, negpref, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, 0.f, tint);
+                        float t = (dist - BLOOD_SPRAY_MIN_DISTANCE) / distance_span;
+                        float falloff = 1.f - CLAMP (0.f, t, 1.f);
+                        radius *= CLAMP (0.55f, falloff + R_RandomRange (-0.1f, 0.2f), 1.4f);
                 }
 
-                R_AddBloodDecalForDirection (spawn_point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, 0.f, tint);
+                R_RandomDirectionInCone (spray_axis, BLOOD_SPRAY_CONE_ANGLE_DEG, scatter_dir);
+
+                VectorCopy (point, spawn_point);
+                VectorMA (spawn_point, dist, scatter_dir, spawn_point);
+                spawn_point[0] += R_RandomRange (-BLOOD_SPRAY_LATERAL_JITTER, BLOOD_SPRAY_LATERAL_JITTER);
+                spawn_point[1] += R_RandomRange (-BLOOD_SPRAY_LATERAL_JITTER, BLOOD_SPRAY_LATERAL_JITTER);
+                spawn_point[2] += R_RandomRange (-BLOOD_SPRAY_LATERAL_JITTER * 0.35f, BLOOD_SPRAY_LATERAL_JITTER * 0.35f);
+                spawn_point[2] -= dist * BLOOD_SPRAY_GRAVITY_FACTOR * R_RandomRange (0.6f, 1.1f);
+
+                VectorCopy (scatter_dir, preferred);
+                if (VectorLengthSquared (preferred) > 0.001f)
+                {
+                        VectorNormalizeFast (preferred);
+                        VectorScale (preferred, -1.f, opposite);
+
+                        spawned |= R_AddBloodDecalForDirection (spawn_point, opposite, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, radius, tint, NULL);
+                        if (!spawned)
+                                spawned |= R_AddBloodDecalForDirection (spawn_point, preferred, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, radius, tint, NULL);
+                }
+
+                if (!spawned)
+                {
+                        spawned = R_AddBloodDecalForDirection (spawn_point, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, tint, NULL);
+                        if (!spawned)
+                                R_AddBloodDecalForDirection (spawn_point, down, WALL_BLOOD_DISTANCE, -1.f, DECAL_BLOOD, radius, tint, NULL);
+                }
         }
 }
 
@@ -865,7 +988,7 @@ void R_AddGibDecal (const vec3_t point, int particle_count)
                         return;
         }
 
-        if (R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, GIB_DECAL_RADIUS, tint))
+        if (R_AddBloodDecalForDirection (point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, GIB_DECAL_RADIUS, tint, NULL))
         {
                 r_last_gib_decal_time = cl.time;
                 VectorCopy (point, r_last_gib_decal_origin);
@@ -957,7 +1080,7 @@ static void R_SpawnBloodPool (entity_t *ent)
         if (ent->model)
                 base_point[2] += ent->model->mins[2];
 
-        if (R_AddBloodDecalForDirection (base_point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, large_radius, pool_tint))
+        if (R_AddBloodDecalForDirection (base_point, up, FLOOR_BLOOD_DISTANCE * 1.5f, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, large_radius, pool_tint, NULL))
                 spawned++;
 
         small_count = 5 + (rand () % 4);
@@ -971,7 +1094,7 @@ static void R_SpawnBloodPool (entity_t *ent)
                 jitter[0] += cosf (angle) * (BLOOD_POOL_JITTER + dist);
                 jitter[1] += sinf (angle) * (BLOOD_POOL_JITTER + dist);
 
-                if (R_AddBloodDecalForDirection (jitter, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, small_tint))
+                if (R_AddBloodDecalForDirection (jitter, up, FLOOR_BLOOD_DISTANCE, BLOOD_WALL_THRESHOLD, DECAL_BLOOD, radius, small_tint, NULL))
                         spawned++;
         }
 
