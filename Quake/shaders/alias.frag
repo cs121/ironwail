@@ -150,7 +150,10 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
                 if (normalized <= 0.0)
                         continue;
                 vec3 L = to_light * inv_dist;
-                float attenuation = normalized * radius;
+                float fade = normalized * normalized;
+                float inv_radius_sq = 1.0 / max(radius_sq, 1e-4);
+                float distance_falloff = 1.0 / (1.0 + dist_sq * inv_radius_sq);
+                float attenuation = fade * distance_falloff * radius;
                 float diffuse = max(dot(normal, L), 0.0);
                 float influence = max(diffuse, light.minlight);
                 accum += light.color * (attenuation * influence);
