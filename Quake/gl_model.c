@@ -60,6 +60,64 @@ typedef struct bspx_lump_s
         int filelen;
 } bspx_lump_t;
 
+static size_t Mod_BspxComputeVanillaEnd (const byte *buffer, size_t filesize)
+{
+        const dheader_t *header = (const dheader_t *)buffer;
+        size_t vanilla_end = 0;
+
+        if (!buffer || filesize < sizeof(*header))
+                return 0;
+
+        for (int i = 0; i < HEADER_LUMPS; ++i)
+        {
+                int ofs = header->lumps[i].fileofs;
+                int len = header->lumps[i].filelen;
+
+                if (ofs < 0 || len <= 0)
+                        continue;
+
+                size_t end = (size_t)ofs + (size_t)len;
+
+                if (end > vanilla_end && end <= filesize)
+                        vanilla_end = end;
+        }
+
+        return vanilla_end;
+}
+
+static size_t Mod_BspxDeterminePayloadBase (const byte *buffer, size_t filesize,
+        const byte *directory, int numlumps)
+{
+        size_t vanilla_end = Mod_BspxComputeVanillaEnd (buffer, filesize);
+        size_t min_offset = SIZE_MAX;
+
+        if (!directory || numlumps <= 0)
+                return 0;
+
+        for (int i = 0; i < numlumps; ++i)
+        {
+                const bspx_lump_t *entry = ((const bspx_lump_t *)directory) + i;
+                int raw_ofs = LittleLong (entry->fileofs);
+                int raw_len = LittleLong (entry->filelen);
+
+                if (raw_ofs < 0 || raw_len <= 0)
+                        continue;
+
+                size_t ofs = (size_t)raw_ofs;
+                if (ofs < min_offset)
+                        min_offset = ofs;
+        }
+
+        if (vanilla_end > 0 && vanilla_end < filesize && min_offset != SIZE_MAX && min_offset < vanilla_end)
+        {
+                if (vanilla_end > filesize)
+                        vanilla_end = filesize;
+                return vanilla_end;
+        }
+
+        return 0;
+}
+
 static void Mod_BspxDebugf (const char *fmt, ...)
 {
         if (debug_bspx.value <= 0.0f)
@@ -971,6 +1029,8 @@ static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize
         const byte *footer;
         const byte *directory;
         size_t max_payload;
+        size_t payload_base;
+        size_t payload_span;
         int numlumps;
 
         if (!buffer || filesize < footer_size)
@@ -993,6 +1053,10 @@ static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize
 
         numlumps = (int)(dirsize / sizeof(bspx_lump_t));
         max_payload = (size_t)(directory - buffer);
+        payload_base = Mod_BspxDeterminePayloadBase (buffer, filesize, directory, numlumps);
+        if (payload_base > max_payload)
+                payload_base = 0;
+        payload_span = (payload_base <= max_payload) ? (max_payload - payload_base) : 0;
 
         for (int i = 0; i < numlumps; ++i)
         {
@@ -1014,9 +1078,9 @@ static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize
                 lumpofs = (size_t)raw_ofs;
                 lumplen = (size_t)raw_len;
 
-                if (lumpofs > max_payload)
+                if (lumpofs > payload_span)
                         continue;
-                if (lumplen > max_payload - lumpofs)
+                if (lumplen > payload_span - lumpofs)
                         continue;
 
                 if (q_strcasecmp (lumpname, "RGBLIGHTING") &&
@@ -1028,7 +1092,7 @@ static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize
 
                 if (payload_length >= 8)
                 {
-                        const byte *lumpdata = buffer + lumpofs;
+                        const byte *lumpdata = buffer + payload_base + lumpofs;
 
                         if (lumpdata[0] == 'Q' && lumpdata[1] == 'L' && lumpdata[2] == 'I' && lumpdata[3] == 'T')
                         {
@@ -1512,6 +1576,8 @@ static void Mod_LoadBspx (const byte *buffer)
         const byte *footer;
         const byte *directory;
         size_t max_payload;
+        size_t payload_base;
+        size_t payload_span;
         int numlumps;
 
         if (!buffer || filesize < footer_size)
@@ -1543,6 +1609,10 @@ static void Mod_LoadBspx (const byte *buffer)
 
         numlumps = (int)(dirsize / sizeof(bspx_lump_t));
         max_payload = (size_t)(directory - buffer);
+        payload_base = Mod_BspxDeterminePayloadBase (buffer, filesize, directory, numlumps);
+        if (payload_base > max_payload)
+                payload_base = 0;
+        payload_span = (payload_base <= max_payload) ? (max_payload - payload_base) : 0;
 
         Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, dirsize);
 
@@ -1577,18 +1647,18 @@ static void Mod_LoadBspx (const byte *buffer)
                         continue;
                 }
 
-                if (lumpofs > max_payload)
+                if (lumpofs > payload_span)
                 {
                         Mod_BspxDebugf ("BSPX:     %s skipped (offset beyond payload)\n", lumpname);
                         continue;
                 }
-                if (lumplen > max_payload - lumpofs)
+                if (lumplen > payload_span - lumpofs)
                 {
                         Mod_BspxDebugf ("BSPX:     %s skipped (length overruns payload)\n", lumpname);
                         continue;
                 }
 
-                const byte *lumpdata = buffer + lumpofs;
+                const byte *lumpdata = buffer + payload_base + lumpofs;
 
                 if (!q_strcasecmp (lumpname, "RGBLIGHTING") ||
                         !q_strcasecmp (lumpname, "RGBLIGHTDATA") ||
