@@ -1810,6 +1810,7 @@ static void Mod_LoadLighting (lump_t *l)
                         {
                                 // FIX: Verbesserte Validierung mit Toleranz
                                 size_t actual_data_bytes = (size_t)(com_filesize - 8);
+                                size_t actual_samples = actual_data_bytes / 3;
 
                                 // Die .lit Datei muss ein Vielfaches von 3 sein (RGB)
                                 if (actual_data_bytes % 3 != 0)
@@ -1817,13 +1818,13 @@ static void Mod_LoadLighting (lump_t *l)
                                         Hunk_FreeToLowMark (mark);
                                         Con_Printf ("Invalid .lit file (%s data size not multiple of 3)\n", litfilename);
                                 }
-                                else if ((uint64_t)com_filesize == expected_lit_size && actual_data_bytes / 3 <= (size_t)INT_MAX)
+                                else if ((uint64_t)com_filesize == expected_lit_size && actual_samples <= (size_t)INT_MAX)
                                 {
                                         // Perfekte Übereinstimmung
                                         Con_DPrintf2 ("%s loaded\n", litfilename);
                                         loadmodel->lightdata = data + 8;
                                         loadmodel->litfile = true;
-                                        samplecount = (int)(actual_data_bytes / 3);
+                                        samplecount = (int)actual_samples;
                                         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                         return;
                                 }
@@ -1831,6 +1832,7 @@ static void Mod_LoadLighting (lump_t *l)
                                 {
                                         // Größe passt nicht - aber prüfe ob die .lit Datei trotzdem verwendbar ist
                                         // Manchmal stimmt die BSPX-Vorhersage nicht perfekt
+                                        qboolean lit_too_small = (expected_samples > 0 && actual_samples < expected_samples);
                                         Con_DWarning ("Size mismatch: %s is %" SDL_PRIs64 " bytes, expected %" SDL_PRIu64 "\n",
                                                 litfilename, com_filesize, expected_lit_size);
 
@@ -1841,19 +1843,27 @@ static void Mod_LoadLighting (lump_t *l)
                                         }
 
                                         // Verwende die tatsächliche Größe der .lit Datei
-                                        if (actual_data_bytes / 3 <= (size_t)INT_MAX)
+                                        if (actual_samples <= (size_t)INT_MAX && !lit_too_small)
                                         {
                                                 Con_DWarning ("  Using actual .lit file size anyway (%zu RGB samples)\n",
-                                                        actual_data_bytes / 3);
+                                                        actual_samples);
                                                 loadmodel->lightdata = data + 8;
                                                 loadmodel->litfile = true;
-                                                samplecount = (int)(actual_data_bytes / 3);
+                                                samplecount = (int)actual_samples;
                                                 Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                                 return;
                                         }
 
                                         Hunk_FreeToLowMark (mark);
-                                        Con_Printf ("Cannot load %s (size issues)\n", litfilename);
+                                        if (lit_too_small)
+                                        {
+                                                Con_DWarning ("  Ignoring %s: %zu samples is less than required %zu, falling back to BSP lighting\n",
+                                                        litfilename, actual_samples, expected_samples);
+                                        }
+                                        else
+                                        {
+                                                Con_Printf ("Cannot load %s (size issues)\n", litfilename);
+                                        }
                                 }
                         }
                         else
