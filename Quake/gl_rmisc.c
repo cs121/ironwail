@@ -164,42 +164,39 @@ static void R_InitCaustics(void)
         if (r_caustics_texture)
                 return;
 
-        unsigned *layers[R_CAUSTICS_TEXTURE_COUNT];
-        unsigned *layer_ptrs[R_CAUSTICS_TEXTURE_COUNT];
-        size_t pixels = (size_t)R_CAUSTICS_TEXTURE_SIZE * R_CAUSTICS_TEXTURE_SIZE;
+	size_t pixels_per_layer = (size_t)R_CAUSTICS_TEXTURE_SIZE * R_CAUSTICS_TEXTURE_SIZE;
+	size_t total_pixels = pixels_per_layer * R_CAUSTICS_TEXTURE_COUNT;
+	unsigned *layer_data = (unsigned *) Z_Malloc(total_pixels * sizeof(unsigned));
 
-        for (int i = 0; i < R_CAUSTICS_TEXTURE_COUNT; ++i)
-        {
-                layers[i] = (unsigned *) Z_Malloc(pixels * sizeof(unsigned));
-                R_BuildCausticLayer(layers[i], (float)i / (float)R_CAUSTICS_TEXTURE_COUNT);
-                layer_ptrs[i] = layers[i];
-        }
+	for (int i = 0; i < R_CAUSTICS_TEXTURE_COUNT; ++i)
+	{
+		unsigned *layer = layer_data + i * pixels_per_layer;
+		R_BuildCausticLayer(layer, (float)i / (float)R_CAUSTICS_TEXTURE_COUNT);
+	}
 
-        gltexture_t *tex = TexMgr_LoadImageEx(
-                NULL,
-                "procedural_caustics",
-                R_CAUSTICS_TEXTURE_SIZE,
-                R_CAUSTICS_TEXTURE_SIZE,
-                R_CAUSTICS_TEXTURE_COUNT,
-                SRC_RGBA,
-                (byte *) layer_ptrs,
-                "",
-                0,
-                TEXPREF_PERSIST | TEXPREF_LINEAR | TEXPREF_MIPMAP | TEXPREF_NOPICMIP | TEXPREF_ARRAY
-        );
+	gltexture_t *tex = TexMgr_LoadImageEx(
+		NULL,
+		"procedural_caustics",
+		R_CAUSTICS_TEXTURE_SIZE,
+		R_CAUSTICS_TEXTURE_SIZE,
+		R_CAUSTICS_TEXTURE_COUNT,
+		SRC_RGBA,
+		(byte *) layer_data,
+		"",
+		0,
+		TEXPREF_PERSIST | TEXPREF_LINEAR | TEXPREF_MIPMAP | TEXPREF_NOPICMIP | TEXPREF_ARRAY
+	);
 
-        if (!tex)
-        {
-                Con_DPrintf("R_InitCaustics: failed to create caustic texture
-");
-        }
-        else
-        {
-                r_caustics_texture = tex;
-        }
+	if (!tex)
+	{
+		Con_DPrintf("R_InitCaustics: failed to create caustic texture\n");
+	}
+	else
+	{
+		r_caustics_texture = tex;
+	}
 
-        for (int i = 0; i < R_CAUSTICS_TEXTURE_COUNT; ++i)
-                Z_Free(layers[i]);
+	Z_Free(layer_data);
 }
 
 

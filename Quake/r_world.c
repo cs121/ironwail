@@ -552,11 +552,13 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
                         numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
 
-                for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
-                {
-                        texture_t *t = model->textures[model->usedtextures[j]];
-                        R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
-                }
+		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
+		{
+			texture_t *t = model->textures[model->usedtextures[j]];
+			if (!t)
+				continue;
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
+		}
 
                 baseinst += numinst;
         }
@@ -638,7 +640,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 
         GL_Bind (GL_TEXTURE5, r_caustics_texture);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * count);
+        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
 
 	// generate drawcalls
 	for (i = 0, baseinst = 0; i < count; /**/)
@@ -658,6 +660,8 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 		for (j = model->texofs[TEXTYPE_FIRSTLIQUID]; j < model->texofs[TEXTYPE_LASTLIQUID+1]; j++)
 		{
 			texture_t *t = model->textures[model->usedtextures[j]];
+			if (!t)
+				continue;
 			if ((GL_WaterAlphaForEntityTextureType (e, t->type) < 1.f) != translucent)
 				continue;
 			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld);

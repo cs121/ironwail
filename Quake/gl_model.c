@@ -201,10 +201,12 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 	row = (model->numleafs+7)>>3;
 	if (mod_decompressed == NULL || row > mod_decompressed_capacity)
 	{
+		byte *new_buffer;
 		mod_decompressed_capacity = (row + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK;
-		mod_decompressed = (byte *) realloc (mod_decompressed, mod_decompressed_capacity);
-		if (!mod_decompressed)
+		new_buffer = (byte *) realloc (mod_decompressed, mod_decompressed_capacity);
+		if (!new_buffer)
 			Sys_Error ("Mod_DecompressVis: realloc() failed on %d bytes", mod_decompressed_capacity);
+		mod_decompressed = new_buffer;
 	}
 	out = mod_decompressed;
 	outend = mod_decompressed + row;
@@ -264,11 +266,13 @@ byte *Mod_NoVisPVS (qmodel_t *model)
 	pvsbytes = (pvsbytes + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
 	if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
 	{
+		byte *new_buffer;
 		mod_novis_capacity = pvsbytes;
-		mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
-		if (!mod_novis)
+		new_buffer = (byte *) realloc (mod_novis, mod_novis_capacity);
+		if (!new_buffer)
 			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
-		
+		mod_novis = new_buffer;
+
 		memset(mod_novis, 0xff, mod_novis_capacity);
 	}
 	return mod_novis;
