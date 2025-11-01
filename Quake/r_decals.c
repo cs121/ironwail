@@ -140,6 +140,7 @@ static decalvertex_t     decal_batch[4 * MAX_DECALS];
 static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
+static decal_t           *decal_draw_list[MAX_DECALS];
 
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
@@ -189,6 +190,8 @@ typedef struct decal_stats_s {
 static decal_pool_t decal_pool;
 static decal_grid_bucket_t decal_grid[DECAL_GRID_BUCKET_COUNT];
 static decal_stats_t decal_stats;
+
+static void R_BuildOrthonormalBasis (const vec3_t normal, vec3_t sdir, vec3_t tdir);
 
 static void R_PrintDecalStats (void)
 {
@@ -588,7 +591,7 @@ static qboolean R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
 
 static void R_GenerateDecalTexture (decaltype_t type)
 {
-        byte data[DECAL_TEXTURE_SIZE * DECAL_TEXTURE_SIZE * 4];
+        static byte data[DECAL_TEXTURE_SIZE * DECAL_TEXTURE_SIZE * 4];
         int x, y;
         const float inv = 1.0f / (DECAL_TEXTURE_SIZE - 1);
 
@@ -1444,7 +1447,6 @@ void R_AddGibDecal (const vec3_t point, int particle_count)
 
 void R_DrawDecals (qboolean showtris)
 {
-        decal_t *draw_list[MAX_DECALS];
         int draw_count = 0;
         int culled = 0;
         int i;
@@ -1499,7 +1501,7 @@ void R_DrawDecals (qboolean showtris)
                                 continue;
                         }
 
-                        draw_list[draw_count++] = dec;
+                        decal_draw_list[draw_count++] = dec;
                 }
         }
 
@@ -1515,7 +1517,7 @@ void R_DrawDecals (qboolean showtris)
                         culled++;
                         continue;
                 }
-                draw_list[draw_count++] = dec;
+                decal_draw_list[draw_count++] = dec;
         }
 
         if (!draw_count)
@@ -1526,7 +1528,7 @@ void R_DrawDecals (qboolean showtris)
                 return;
         }
 
-        R_SortDecalsByTexture (draw_list, draw_count);
+        R_SortDecalsByTexture (decal_draw_list, draw_count);
 
         {
                 qboolean dither = (softemu == SOFTEMU_COARSE && !showtris);
@@ -1545,7 +1547,7 @@ void R_DrawDecals (qboolean showtris)
 
                 for (i = 0; i < draw_count; i++)
                 {
-                        if (R_AppendDecalToBatch (draw_list[i], showtris))
+                        if (R_AppendDecalToBatch (decal_draw_list[i], showtris))
                                 batches++;
                         rendered++;
                 }
