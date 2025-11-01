@@ -1317,6 +1317,51 @@ static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *da
         return true;
 }
 
+static qboolean Mod_BspxImportLmOffsets (const char *lumpname, const byte *data, size_t length)
+{
+	int count;
+	int *offsets;
+
+	loadmodel->bspx_light_offset_count = 0;
+	loadmodel->bspx_light_offsets = NULL;
+
+	if (!data || length == 0)
+	{
+		Mod_BspxDebugf ("BSPX:     %s contains no light offsets\n", lumpname);
+		return true;
+	}
+
+	if (length % sizeof(int))
+	{
+		Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiple of %zu)\n",
+				lumpname, length, sizeof(int));
+		Mod_BspxDebugf ("BSPX:     %s rejected size %zu for light offsets\n", lumpname, length);
+		return false;
+	}
+
+	count = (int)(length / sizeof(int));
+	if (count <= 0)
+	{
+		Mod_BspxDebugf ("BSPX:     %s contains zero light offsets\n", lumpname);
+		return true;
+	}
+
+	offsets = (int *) Hunk_AllocName (count * sizeof(*offsets), lumpname);
+	if (!offsets)
+	{
+		Mod_BspxDebugf ("BSPX:     %s failed to allocate %d light offsets\n", lumpname, count);
+		return false;
+	}
+
+	for (int i = 0; i < count; ++i)
+		offsets[i] = LittleLong (((const int *)data)[i]);
+
+	loadmodel->bspx_light_offsets = offsets;
+	loadmodel->bspx_light_offset_count = count;
+	Mod_BspxDebugf ("BSPX:     %s imported %d light offsets\n", lumpname, count);
+	return true;
+}
+
 static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const byte *data, size_t length,
         int **out_indices, int *out_count)
 {
@@ -1503,13 +1548,19 @@ static void Mod_LoadBspx (const byte *buffer)
                                         &loadmodel->bspx_static_shadow_indices, &loadmodel->bspx_num_static_shadow_indices);
                         }
                 }
+                else if (!q_strcasecmp (lumpname, "LMOFFSET"))
+                {
+                        recognized = true;
+                        Mod_BspxImportLmOffsets (lumpname, lumpdata, lumplen);
+                }
 
                 if (!recognized)
                         Mod_BspxDebugf ("BSPX:     %s ignored (unhandled lump)\n", lumpname);
         }
-        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, static lights %d, static shadow lights %d, indices %d\n",
+        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d\n",
                 loadmodel->litfile ? "loaded" : "missing",
                 loadmodel->deluxfile ? "loaded" : "missing",
+                loadmodel->bspx_light_offset_count,
                 loadmodel->bspx_num_static_lights,
                 loadmodel->bspx_num_static_shadow_lights,
                 loadmodel->bspx_num_static_shadow_indices);
@@ -2058,6 +2109,14 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	loadmodel->surfaces = out;
 	loadmodel->numsurfaces = count;
 
+	if (loadmodel->bspx_light_offsets && loadmodel->bspx_light_offset_count != count)
+	{
+		Con_DPrintf2 ("BSPX LMOFFSET count mismatch (%d vs %d)\n",
+			loadmodel->bspx_light_offset_count, count);
+		if (loadmodel->bspx_light_offset_count > count)
+			loadmodel->bspx_light_offset_count = count;
+	}
+
 	for (surfnum=0 ; surfnum<count ; surfnum++, out++)
 	{
 		texture_t *texture;
@@ -2104,6 +2163,9 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	// lighting info
 		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake 
+
+                if (loadmodel->bspx_light_offsets && surfnum < loadmodel->bspx_light_offset_count)
+                        lofs = loadmodel->bspx_light_offsets[surfnum];
 
                 if (lofs == -1)
                 {
@@ -3179,6 +3241,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
         loadmodel->type = mod_brush;
         loadmodel->numdeluxsamples = 0;
+        loadmodel->bspx_light_offset_count = 0;
+        loadmodel->bspx_light_offsets = NULL;
         loadmodel->bspx_num_static_lights = 0;
         loadmodel->bspx_static_lights = NULL;
         loadmodel->bspx_num_static_shadow_lights = 0;

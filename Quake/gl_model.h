@@ -507,6 +507,9 @@ typedef struct qmodel_s
 	qboolean	deluxfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
 
+	int			bspx_light_offset_count;
+	int			*bspx_light_offsets;
+
 	int			bspx_num_static_lights;
 	bspx_static_light_t	*bspx_static_lights;
 	int			bspx_num_static_shadow_lights;
