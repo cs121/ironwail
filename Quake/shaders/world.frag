@@ -9,6 +9,8 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D DeluxTex;
 
+layout(binding=5) uniform sampler2DArray CausticsTex;
+
 #include "frame_uniforms.glsl"
 
 #define LIGHT_TILES_X 32
@@ -453,6 +455,60 @@ void main()
                 vec3  cap = vec3(max_dynamic);
                 total_light = clamp_preserving_hue(total_light + dynamic_light, cap);
             }
+        }
+    }
+
+    if (CausticsParams0.x > 0.0 && CausticsParams0.w > 0.5)
+    {
+        float layerCount = CausticsParams0.w;
+        float invLayerCount = CausticsParams1.x;
+        float speed = CausticsParams0.z;
+        float anim = Time * speed;
+        float frame = anim * layerCount;
+        float cycles = floor(frame * invLayerCount);
+        float wrapped = frame - layerCount * cycles;
+        float layer0 = floor(wrapped);
+        float blend = wrapped - layer0;
+        float layer1 = layer0 + 1.0;
+        if (layer1 >= layerCount)
+            layer1 -= layerCount;
+
+        vec2 worldXY = in_pos.xy * CausticsParams0.y;
+        vec2 offsetA = vec2(Time * 0.053, Time * 0.071);
+        vec2 offsetB = vec2(-Time * 0.041, Time * 0.029);
+        const mat2 rot = mat2(0.7660444, -0.6427876, 0.6427876, 0.7660444);
+
+        vec2 uvA = fract(worldXY + offsetA);
+        vec2 uvB = fract(rot * worldXY + offsetB);
+
+        float causticA0 = texture(CausticsTex, vec3(uvA, layer0)).r;
+        float causticA1 = texture(CausticsTex, vec3(uvA, layer1)).r;
+        float causticA = mix(causticA0, causticA1, blend);
+
+        float causticB0 = texture(CausticsTex, vec3(uvB, layer0)).r;
+        float causticB1 = texture(CausticsTex, vec3(uvB, layer1)).r;
+        float causticB = mix(causticB0, causticB1, blend);
+
+        float mixFactor = clamp(CausticsParams1.y, 0.0, 1.0);
+        float pattern = mix(causticA, causticB, mixFactor);
+        pattern = pow(clamp(pattern, 0.0, 1.0), 1.35);
+
+        float alignment = max(dot(surface_normal, vec3(0.0, 0.0, 1.0)), 0.0);
+        float normalPower = max(CausticsParams1.z, 0.001);
+        float orientation = pow(alignment, normalPower);
+        float caustic = pattern * orientation;
+
+        if (CausticsParams1.w > 0.0)
+        {
+            float depth = max(EyePos.z - in_pos.z, 0.0);
+            caustic *= exp(-depth * CausticsParams1.w);
+        }
+
+        vec3 causticLight = vec3(caustic * CausticsParams0.x);
+        if (causticLight.x > 0.0 || causticLight.y > 0.0 || causticLight.z > 0.0)
+        {
+            vec3 causticRemaining = max(vec3(0.0), vec3(1.0) - total_light);
+            total_light += clamp_preserving_hue(causticLight, causticRemaining);
         }
     }
 

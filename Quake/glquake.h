@@ -441,6 +441,8 @@ typedef struct gpuframedata_s {
 	float	rim_world;
 	float	rim_exponent;
 	float	rim_pad0;
+	float	caustics_params0[4];
+	float	caustics_params1[4];
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
@@ -455,6 +457,11 @@ typedef struct gpuframedata_s {
 
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
+
+#define R_CAUSTICS_TEXTURE_SIZE 128
+#define R_CAUSTICS_TEXTURE_COUNT 32
+
+extern gltexture_t *r_caustics_texture;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
