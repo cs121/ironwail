@@ -160,11 +160,7 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
                 vec3 local_pos = light.origin - plane_n * dist;
                 vec3 L = local_pos - world_pos;
                 float Llen2 = dot(L, L);
-                if (Llen2 <= 0.0)
-                        continue;
-
-                float Linv = inversesqrt(Llen2);
-                float sdist = 1.0 / Linv;
+                float sdist = sqrt(max(Llen2, 0.0));
 
                 float minlight_span = max(radial_radius - minlight, 1e-4);
                 float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
@@ -176,10 +172,13 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
                         continue;
 
                 float distance_sq = Llen2 + dist * dist;
+                if (distance_sq <= 0.0)
+                        continue;
                 float inv_radius_sq = 1.0 / max(radius * radius, 1e-4);
                 float distance_falloff = 1.0 / (1.0 + distance_sq * inv_radius_sq);
 
-                vec3 Ldir = L * Linv;
+                vec3 light_vec = L + plane_n * dist;
+                vec3 Ldir = light_vec * inversesqrt(distance_sq);
                 float diffuse = max(dot(plane_n, Ldir), 0.0);
                 float influence = max(diffuse, minlight);
                 float intensity = attenuation * falloff * axial_falloff * distance_falloff;
