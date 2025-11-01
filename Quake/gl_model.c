@@ -680,7 +680,11 @@ static void Mod_LoadTextures (lump_t *l)
 		}
 
 		byte *mtbase = (byte *)m + dataofs;
-		if (mtbase < lumpbase || mtbase + sizeof(*mt) > lumpend)
+		size_t header_size = sizeof(*mt);
+		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+			header_size = sizeof(miptex64_t);
+
+		if (mtbase < lumpbase || mtbase + header_size > lumpend)
 		{
 			Con_Warning ("Mod_LoadTextures: texture offset %d out of lump bounds in %s\n", dataofs, loadmodel->name);
 			loadmodel->textures[i] = NULL;
@@ -733,13 +737,32 @@ static void Mod_LoadTextures (lump_t *l)
 		// appears in the wild; e.g. jam2_tronyn.bsp (func_mapjam2),
 		// kellbase1.bsp (quoth), and can lead to a segfault if we read past
 		// the end of the .bsp file buffer
-		size_t available_bytes = (size_t)(lumpend - (byte *)(mt + 1));
-		if ((size_t)pixels > available_bytes)
+		const byte *src_pixels = (const byte *)(mt + 1);
+		const miptex64_t *mt64 = NULL;
+		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+		{
+			mt64 = (const miptex64_t *)mt;
+			src_pixels = (const byte *)(mt64 + 1);
+		}
+
+		size_t available_bytes = 0;
+		if (src_pixels >= lumpbase && src_pixels <= lumpend)
+			available_bytes = (size_t)(lumpend - src_pixels);
+
+		size_t copy_bytes = pixel_count;
+		if (copy_bytes > available_bytes)
 		{
 			Con_DPrintf("Texture %s extends past end of lump\n", mt->name);
-			if (available_bytes > INT_MAX)
-				available_bytes = INT_MAX;
-			pixels = (int)q_max(0L, (long)available_bytes);
+			copy_bytes = available_bytes;
+		}
+
+		byte *dst_pixels = (byte *)(tx + 1);
+		memset(dst_pixels, 0, pixels);
+		if (copy_bytes > 0)
+		{
+			if (copy_bytes > (size_t)pixels)
+				copy_bytes = (size_t)pixels;
+			memcpy(dst_pixels, src_pixels, copy_bytes);
 		}
 
 			tx->fullbright = NULL; //johnfitz
@@ -747,16 +770,8 @@ static void Mod_LoadTextures (lump_t *l)
 		tx->shift = 0;	// Q64 only
 		tx->type = Mod_TextureTypeFromName (tx->name);
 
-		if (loadmodel->bspversion != BSPVERSION_QUAKE64)
-		{
-			memcpy ( tx+1, mt+1, pixels);
-		}
-		else
-		{ // Q64 bsp
-			miptex64_t *mt64 = (miptex64_t *)mt;
+		if (loadmodel->bspversion == BSPVERSION_QUAKE64 && mt64)
 			tx->shift = LittleLong (mt64->shift);
-			memcpy ( tx+1, mt64+1, pixels);
-		}
 
 		if (!isDedicated) //no texture uploading for dedicated server
 		{
@@ -790,7 +805,7 @@ static void Mod_LoadTextures (lump_t *l)
 				else //use the texture from the bsp file
 				{
 					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
+					offset = (src_offset_t)src_pixels - (src_offset_t)mod_base;
 					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
 						SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
 				}
@@ -844,7 +859,7 @@ static void Mod_LoadTextures (lump_t *l)
 				else //use the texture from the bsp file
 				{
 					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
+					offset = (src_offset_t)src_pixels - (src_offset_t)mod_base;
 					if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
 					{
 						if (tx->type != TEXTYPE_CUTOUT)
