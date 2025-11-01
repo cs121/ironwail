@@ -48,6 +48,8 @@ cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 
 static byte	*mod_novis;
 static int	mod_novis_capacity;
+static byte	*mod_decompressed;
+static int	mod_decompressed_capacity;
 
 static size_t   mod_bspx_filesize;
 
@@ -258,32 +260,35 @@ Mod_DecompressVis
 */
 static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 {
-	static byte decompressed[MAX_MAP_LEAFS / 8];
-	byte *out = decompressed;
 	int row = (model->numleafs + 7) >> 3;
 
-	if (row > (int)sizeof(decompressed))
+	if (row <= 0)
+		row = 1;
+
+	if (!mod_decompressed || row > mod_decompressed_capacity)
 	{
-		if (!model->viswarn)
-		{
-			model->viswarn = true;
-			Con_Warning("Mod_DecompressVis: row size %d exceeds buffer (%zu) for model \"%s\"\n",
-				row, sizeof(decompressed), model->name);
-		}
-		row = sizeof(decompressed);
+		int new_capacity = row;
+		byte *newbuf = (byte *) realloc (mod_decompressed, new_capacity);
+		if (!newbuf)
+			Sys_Error ("Mod_DecompressVis: realloc() failed on %d bytes", new_capacity);
+		mod_decompressed = newbuf;
+		mod_decompressed_capacity = new_capacity;
 	}
+
+	byte *out = mod_decompressed;
+	size_t buffer_size = (size_t)mod_decompressed_capacity;
 
 	if (!in)
 	{
-		memset(decompressed, 0xff, row);
-		return decompressed;
+		memset(mod_decompressed, 0xff, row);
+		return mod_decompressed;
 	}
 
 	do
 	{
 		if (*in)
 		{
-			if (out - decompressed < row)
+			if (out - mod_decompressed < row)
 				*out++ = *in;
 			++in;
 			continue;
@@ -292,7 +297,7 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 		int c = in[1];
 		in += 2;
 
-		if ((size_t)(out - decompressed) + (size_t)c > sizeof(decompressed))
+		if ((size_t)(out - mod_decompressed) + (size_t)c > buffer_size)
 		{
 			if (!model->viswarn)
 			{
@@ -300,21 +305,21 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 				Con_Printf("Mod_DecompressVis: Output overflow for model \"%s\" (corrupt BSP?)\n", model->name);
 			}
 
-			size_t remaining = sizeof(decompressed) - (size_t)(out - decompressed);
+			size_t remaining = buffer_size - (size_t)(out - mod_decompressed);
 			memset(out, 0, remaining);
 			out += remaining;
 			break;
 		}
 
-		while (c-- && (out - decompressed) < row)
+		while (c-- && (out - mod_decompressed) < row)
 			*out++ = 0;
 	}
-	while ((out - decompressed) < row);
+	while ((out - mod_decompressed) < row);
 
-	if ((out - decompressed) < row)
-		memset(out, 0, row - (int)(out - decompressed));
+	if ((out - mod_decompressed) < row)
+		memset(out, 0, row - (int)(out - mod_decompressed));
 
-	return decompressed;
+	return mod_decompressed;
 }
 
 byte *Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model)
@@ -332,11 +337,14 @@ byte *Mod_NoVisPVS (qmodel_t *model)
 	pvsbytes = (pvsbytes + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
 	if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
 	{
-		mod_novis_capacity = pvsbytes;
-		mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
-		if (!mod_novis)
-			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
-		
+		int new_capacity = pvsbytes;
+		byte *newbuf = (byte *) realloc (mod_novis, new_capacity);
+		if (!newbuf)
+			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", new_capacity);
+
+		mod_novis = newbuf;
+		mod_novis_capacity = new_capacity;
+
 		memset(mod_novis, 0xff, mod_novis_capacity);
 	}
 	return mod_novis;
