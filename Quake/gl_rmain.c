@@ -27,8 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern gltexture_t *deluxemap_texture;
 
-extern gltexture_t *r_caustics_texture;
-
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -207,10 +205,6 @@ cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
 cvar_t	r_rim_exponent = { "r_rim_exponent", "4.0", CVAR_ARCHIVE };
-cvar_t	r_caustics = { "r_caustics", "1", CVAR_ARCHIVE };
-cvar_t	r_caustics_strength = { "r_caustics_strength", "0.6", CVAR_ARCHIVE };
-cvar_t	r_caustics_scale = { "r_caustics_scale", "0.035", CVAR_ARCHIVE };
-cvar_t	r_caustics_speed = { "r_caustics_speed", "0.8", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
@@ -1844,42 +1838,17 @@ void R_SetupView (void)
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
 
-	int viewer_contents = r_viewleaf ? r_viewleaf->contents : 0;
-	qboolean forced_underwater = M_ForcedUnderwater ();
-	qboolean viewer_underwater =
-		(viewer_contents == CONTENTS_WATER || viewer_contents == CONTENTS_SLIME) ||
-		cl.forceunderwater || forced_underwater;
-
-	{
-		float layer_count = (float)R_CAUSTICS_TEXTURE_COUNT;
-		float inv_layer_count = layer_count > 0.f ? 1.f / layer_count : 0.f;
-		float caustic_scale = q_max(0.001f, r_caustics_scale.value);
-		float caustic_speed = q_max(0.01f, r_caustics_speed.value);
-		float strength = 0.f;
-		if (viewer_underwater && r_caustics_texture && r_caustics.value > 0.f)
-			strength = q_max(0.f, r_caustics_strength.value);
-		r_framedata.caustics_params0[0] = strength;
-		r_framedata.caustics_params0[1] = caustic_scale;
-		r_framedata.caustics_params0[2] = caustic_speed;
-		r_framedata.caustics_params0[3] = layer_count;
-		r_framedata.caustics_params1[0] = inv_layer_count;
-		r_framedata.caustics_params1[1] = 0.35f;
-		r_framedata.caustics_params1[2] = 0.6f;
-		r_framedata.caustics_params1[3] = 0.f;
-	}
-
 	//johnfitz -- calculate r_fovx and r_fovy here
 	r_fovx = r_refdef.fov_x;
 	r_fovy = r_refdef.fov_y;
 	water_warp = false;
 	if (r_waterwarp.value)
 	{
-		qboolean warp_underwater =
-			(viewer_contents == CONTENTS_WATER || viewer_contents == CONTENTS_SLIME || viewer_contents == CONTENTS_LAVA) ||
-			cl.forceunderwater || forced_underwater;
-		if (warp_underwater)
+		int contents = Mod_PointInLeaf (r_origin, cl.worldmodel)->contents;
+		qboolean forced = M_ForcedUnderwater ();
+		if (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced)
 		{
-			double t = forced_underwater ? realtime : cl.time;
+			double t = forced ? realtime : cl.time;
 			if (r_waterwarp.value > 1.f)
 			{
 				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!

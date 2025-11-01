@@ -17,8 +17,6 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   RimWorld;
         float   RimExponent;
         float   _PadRim;
-        vec4    CausticsParams0;
-        vec4    CausticsParams1;
         vec3    EyePos;
         float   Time;
         vec3    PrevEyePos;
