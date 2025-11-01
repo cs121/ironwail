@@ -68,6 +68,7 @@ typedef struct aliasinstance_s {
 #define ALIAS_INSTANCE_FLAG_PLAYER                (1 << 2)
 #define ALIAS_INSTANCE_FLAG_FULLBRIGHT_HACK       (1 << 3)
 #define ALIAS_INSTANCE_FLAG_ITEM                  (1 << 4)
+#define ALIAS_INSTANCE_FLAG_FORCE_FULLBRIGHT      (1 << 5)
 
 struct ibuf_s {
 	int			count;
@@ -540,6 +541,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
                 instance->flags |= ALIAS_INSTANCE_FLAG_FULLBRIGHT_HACK;
         if (e->model->flags & EF_ROTATE)
                 instance->flags |= ALIAS_INSTANCE_FLAG_ITEM;
+        if (paliashdr->poseverttype == PV_IQM)
+                instance->flags |= ALIAS_INSTANCE_FLAG_FORCE_FULLBRIGHT;
 
 	{
 		float prev_model_matrix[16];

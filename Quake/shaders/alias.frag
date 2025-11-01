@@ -173,6 +173,7 @@ const int ALIAS_FLAG_VIEWMODEL = 1 << 1;
 const int ALIAS_FLAG_PLAYER = 1 << 2;
 const int ALIAS_FLAG_FULLBRIGHT_HACK = 1 << 3;
 const int ALIAS_FLAG_ITEM = 1 << 4;
+const int ALIAS_FLAG_FORCE_FULLBRIGHT = 1 << 5;
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
@@ -326,7 +327,7 @@ void main()
         vec3 shadedColor = mix(baseColor, baseColor * lighting, baseSample.a);
 #endif
 
-        if ((in_flags & ALIAS_FLAG_ITEM) != 0)
+        if (((in_flags & ALIAS_FLAG_ITEM) != 0) || ((in_flags & ALIAS_FLAG_FORCE_FULLBRIGHT) != 0))
                 shadedColor += fullbright;
         shadedColor += emissive;
         shadedColor = clamp(shadedColor, 0.0, 1.0);
