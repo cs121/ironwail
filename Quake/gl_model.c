@@ -47,9 +47,9 @@ cvar_t		debug_bspx = {"debug_bspx", "0", 0};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 
 static byte	*mod_novis;
-static int	mod_novis_capacity;
+static size_t	mod_novis_capacity;
 static byte	*mod_decompressed;
-static int	mod_decompressed_capacity;
+static size_t	mod_decompressed_capacity;
 
 static size_t   mod_bspx_filesize;
 
@@ -260,23 +260,23 @@ Mod_DecompressVis
 */
 static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 {
-	int row = (model->numleafs + 7) >> 3;
+	size_t row = ((size_t)model->numleafs + 7u) >> 3;
 
-	if (row <= 0)
+	if (row == 0)
 		row = 1;
 
 	if (!mod_decompressed || row > mod_decompressed_capacity)
 	{
-		int new_capacity = row;
+		size_t new_capacity = row;
 		byte *newbuf = (byte *) realloc (mod_decompressed, new_capacity);
 		if (!newbuf)
-			Sys_Error ("Mod_DecompressVis: realloc() failed on %d bytes", new_capacity);
+			Sys_Error ("Mod_DecompressVis: realloc() failed on %zu bytes", new_capacity);
 		mod_decompressed = newbuf;
 		mod_decompressed_capacity = new_capacity;
 	}
 
 	byte *out = mod_decompressed;
-	size_t buffer_size = (size_t)mod_decompressed_capacity;
+	size_t buffer_size = mod_decompressed_capacity;
 
 	if (!in)
 	{
@@ -286,18 +286,19 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 
 	do
 	{
+		size_t written = (size_t)(out - mod_decompressed);
 		if (*in)
 		{
-			if (out - mod_decompressed < row)
+			if (written < row)
 				*out++ = *in;
 			++in;
 			continue;
 		}
 
-		int c = in[1];
+		size_t run = in[1];
 		in += 2;
 
-		if ((size_t)(out - mod_decompressed) + (size_t)c > buffer_size)
+		if (written + run > buffer_size)
 		{
 			if (!model->viswarn)
 			{
@@ -305,19 +306,25 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 				Con_Printf("Mod_DecompressVis: Output overflow for model \"%s\" (corrupt BSP?)\n", model->name);
 			}
 
-			size_t remaining = buffer_size - (size_t)(out - mod_decompressed);
+			size_t remaining = buffer_size - written;
 			memset(out, 0, remaining);
 			out += remaining;
 			break;
 		}
 
-		while (c-- && (out - mod_decompressed) < row)
+		while (run > 0 && (size_t)(out - mod_decompressed) < row)
+		{
 			*out++ = 0;
+			--run;
+		}
 	}
-	while ((out - mod_decompressed) < row);
+	while ((size_t)(out - mod_decompressed) < row);
 
-	if ((out - mod_decompressed) < row)
-		memset(out, 0, row - (int)(out - mod_decompressed));
+	{
+		size_t written = (size_t)(out - mod_decompressed);
+		if (written < row)
+			memset(out, 0, row - written);
+	}
 
 	return mod_decompressed;
 }
@@ -331,23 +338,23 @@ byte *Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model)
 
 byte *Mod_NoVisPVS (qmodel_t *model)
 {
-	int pvsbytes;
- 
-	pvsbytes = (model->numleafs+7)>>3;
-	pvsbytes = (pvsbytes + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
-	if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
-	{
-		int new_capacity = pvsbytes;
-		byte *newbuf = (byte *) realloc (mod_novis, new_capacity);
-		if (!newbuf)
-			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", new_capacity);
+        size_t pvsbytes;
 
-		mod_novis = newbuf;
-		mod_novis_capacity = new_capacity;
+        pvsbytes = ((size_t)model->numleafs + 7u) >> 3;
+        pvsbytes = (pvsbytes + (size_t)VIS_ALIGN_MASK) & ~((size_t)VIS_ALIGN_MASK); // round up
+        if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
+        {
+                size_t new_capacity = pvsbytes;
+                byte *newbuf = (byte *) realloc (mod_novis, new_capacity);
+                if (!newbuf)
+                        Sys_Error ("Mod_NoVisPVS: realloc() failed on %zu bytes", new_capacity);
 
-		memset(mod_novis, 0xff, mod_novis_capacity);
-	}
-	return mod_novis;
+                mod_novis = newbuf;
+                mod_novis_capacity = new_capacity;
+
+                memset(mod_novis, 0xff, mod_novis_capacity);
+        }
+        return mod_novis;
 }
 
 /*
@@ -1057,8 +1064,14 @@ static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename
 
         Con_DPrintf2 ("%s and %s not found, synthesizing deluxemap\n", dlitfilename, luxfilename);
 
-        loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (samplecount * 3, dlitfilename);
-        memset (loadmodel->deluxdata, 0, samplecount * 3);
+        if (samplecount > INT_MAX / 3)
+                Sys_Error ("Mod_LoadDeluxemap: sample count overflow (%d)", samplecount);
+
+        {
+                size_t samplebytes = (size_t)samplecount * 3u;
+                loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill ((int)samplebytes, dlitfilename);
+                memset (loadmodel->deluxdata, 0, samplebytes);
+        }
 }
 
 static byte Mod_BspxEncodeDeluxComponent (float value)
@@ -2020,8 +2033,8 @@ static void Mod_InitFallbackDeluxemap (msurface_t *surf)
 {
         int style_count, i, count;
         int smax, tmax, facesize;
-        vec3_t normal;
-        byte encoded[3];
+        vec3_t normal = {0, 0, 0};
+        byte encoded[3] = {0, 0, 0};
         byte *dst;
 
         if (!surf->deluxsamples)
@@ -2188,11 +2201,23 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 		if (l->filelen % sizeof(*in))
 			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 
-		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+                count = l->filelen / sizeof(*in);
+                {
+                        size_t edge_count = (size_t)count + 1u;
+                        size_t alloc_bytes;
 
-		loadmodel->edges = out;
-		loadmodel->numedges = count;
+                        if (edge_count > (SIZE_MAX / sizeof(*out)))
+                                Sys_Error ("MOD_LoadBmodel: edge count overflow in %s", loadmodel->name);
+
+                        alloc_bytes = edge_count * sizeof(*out);
+                        if (alloc_bytes > (size_t)INT_MAX)
+                                Sys_Error ("MOD_LoadBmodel: edge allocation overflow in %s", loadmodel->name);
+
+                        out = (medge_t *) Hunk_AllocNameNoFill ((int)alloc_bytes, loadname);
+                }
+
+                loadmodel->edges = out;
+                loadmodel->numedges = count;
 
 		for (i=0 ; i<count ; i++, in++, out++)
 		{
@@ -2207,8 +2232,20 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 		if (l->filelen % sizeof(*in))
 			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 
-		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+                count = l->filelen / sizeof(*in);
+                {
+                        size_t edge_count = (size_t)count + 1u;
+                        size_t alloc_bytes;
+
+                        if (edge_count > (SIZE_MAX / sizeof(*out)))
+                                Sys_Error ("MOD_LoadBmodel: edge count overflow in %s", loadmodel->name);
+
+                        alloc_bytes = edge_count * sizeof(*out);
+                        if (alloc_bytes > (size_t)INT_MAX)
+                                Sys_Error ("MOD_LoadBmodel: edge allocation overflow in %s", loadmodel->name);
+
+                        out = (medge_t *) Hunk_AllocNameNoFill ((int)alloc_bytes, loadname);
+                }
 
 		loadmodel->edges = out;
 		loadmodel->numedges = count;
@@ -2285,14 +2322,13 @@ Fills in s->texturemins[] and s->extents[]
 */
 static void CalcSurfaceExtents (msurface_t *s)
 {
-	float	mins[2], maxs[2], val;
+	float	mins[2] = {FLT_MAX, FLT_MAX};
+	float	maxs[2] = {-FLT_MAX, -FLT_MAX};
+	float	val;
 	int		i,j, e;
 	mvertex_t	*v;
 	mtexinfo_t	*tex;
-	double	texvecs[2][4];
-
-	mins[0] = mins[1] = FLT_MAX;
-	maxs[0] = maxs[1] = -FLT_MAX;
+	double	texvecs[2][4] = {{0}};
 
 	tex = s->texinfo;
 
@@ -2373,7 +2409,7 @@ static void CalcSurfaceExtents (msurface_t *s)
 Mod_CalcSurfaceBounds -- johnfitz -- calculate bounding box for per-surface frustum culling
 =================
 */
-void Mod_CalcSurfaceBounds (msurface_t *s)
+static void Mod_CalcSurfaceBounds (msurface_t *s)
 {
 	int			i, e;
 	mvertex_t	*v;
@@ -3054,12 +3090,12 @@ static void Mod_FindUsedTextures (qmodel_t *mod)
 
 	mod->texofs [TEXTYPE_COUNT] = count;
 	mod->usedtextures = (int *) Hunk_Alloc (sizeof(mod->usedtextures[0]) * count);
-	for (i = 0; i < mod->numtextures; i++)
-	{
-		texture_t *t = mod->textures[i];
-		if (GetBit (inuse, i))
-			mod->usedtextures[ofs[t->type]++] = i;
-	}
+        for (i = 0; i < mod->numtextures; i++)
+        {
+                texture_t *t = mod->textures[i];
+                if (t && GetBit (inuse, i))
+                        mod->usedtextures[ofs[t->type]++] = i;
+        }
 
 	free (inuse);
 
@@ -3340,7 +3376,7 @@ RadiusFromBounds
 static float RadiusFromBounds (vec3_t mins, vec3_t maxs)
 {
 	int		i;
-	vec3_t	corner;
+	vec3_t	corner = {0, 0, 0};
 
 	for (i=0 ; i<3 ; i++)
 	{
@@ -4160,8 +4196,9 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 	unsigned int	*pair_keys;
 	size_t		maxverts, newnumverts;
 	trivertx_t	*converted;
-	float			mins[3], maxs[3];
-	double			radius2;
+	float			mins[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+	float			maxs[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+	double			radius2 = 0.0;
 	const char	*skinbase;
 	char			modeldir[MAX_QPATH];
 
@@ -4203,22 +4240,73 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 	filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 	if (filesize)
 	{
-		if ((size_t)ofs_end > filesize)
+		size_t ofs_end_sz = (size_t)ofs_end;
+
+		if (ofs_end_sz > filesize)
 			Sys_Error ("Mod_LoadMD2Model: %s has invalid end offset", mod->name);
-		if (numskins_raw > 0 && ((size_t)ofs_skins + (size_t)numskins_raw * 64 > filesize))
-			Sys_Error ("Mod_LoadMD2Model: %s skins exceed file size", mod->name);
-		if ((size_t)ofs_st + (size_t)numst * sizeof (md2_texcoord_t) > filesize)
-			Sys_Error ("Mod_LoadMD2Model: %s texcoords exceed file size", mod->name);
-		if ((size_t)ofs_tris + (size_t)numtris * sizeof (md2_triangle_t) > filesize)
-			Sys_Error ("Mod_LoadMD2Model: %s triangles exceed file size", mod->name);
-		if ((size_t)ofs_frames + (size_t)framesize * (size_t)numframes > filesize)
-			Sys_Error ("Mod_LoadMD2Model: %s frames exceed file size", mod->name);
+
+		if (numskins_raw > 0)
+		{
+			size_t skin_count = (size_t)numskins_raw;
+			if (skin_count > SIZE_MAX / 64u)
+				Sys_Error ("Mod_LoadMD2Model: %s skins exceed addressable size", mod->name);
+			size_t skin_offset = (size_t)ofs_skins;
+			size_t skin_bytes = skin_count * 64u;
+			if (skin_offset > filesize || skin_bytes > filesize - skin_offset)
+				Sys_Error ("Mod_LoadMD2Model: %s skins exceed file size", mod->name);
+		}
+
+		{
+			size_t st_count = (size_t)numst;
+			size_t st_size = sizeof (md2_texcoord_t);
+			if (st_count > SIZE_MAX / st_size)
+				Sys_Error ("Mod_LoadMD2Model: %s texcoords exceed addressable size", mod->name);
+			size_t st_offset = (size_t)ofs_st;
+			size_t st_bytes = st_count * st_size;
+			if (st_offset > filesize || st_bytes > filesize - st_offset)
+				Sys_Error ("Mod_LoadMD2Model: %s texcoords exceed file size", mod->name);
+		}
+
+		{
+			size_t tri_count = (size_t)numtris;
+			size_t tri_size = sizeof (md2_triangle_t);
+			if (tri_count > SIZE_MAX / tri_size)
+				Sys_Error ("Mod_LoadMD2Model: %s triangles exceed addressable size", mod->name);
+			size_t tri_offset = (size_t)ofs_tris;
+			size_t tri_bytes = tri_count * tri_size;
+			if (tri_offset > filesize || tri_bytes > filesize - tri_offset)
+				Sys_Error ("Mod_LoadMD2Model: %s triangles exceed file size", mod->name);
+		}
+
+		{
+			size_t frame_size = (size_t)framesize;
+			size_t frame_count = (size_t)numframes;
+			if (frame_count > SIZE_MAX / frame_size)
+				Sys_Error ("Mod_LoadMD2Model: %s frames exceed addressable size", mod->name);
+			size_t frame_offset = (size_t)ofs_frames;
+			size_t frame_bytes = frame_size * frame_count;
+			if (frame_offset > filesize || frame_bytes > filesize - frame_offset)
+				Sys_Error ("Mod_LoadMD2Model: %s frames exceed file size", mod->name);
+		}
 	}
 
 	start = Hunk_LowMark ();
 
-	size = sizeof (aliashdr_t) + (numframes - 1) * sizeof (pheader->frames[0]);
-	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
+	{
+		size_t header_size = sizeof (aliashdr_t);
+		size_t frame_struct_size = sizeof (((aliashdr_t *)0)->frames[0]);
+		size_t frame_count = (size_t)numframes;
+		size_t extra_frames = (frame_count > 0) ? (frame_count - 1) : 0;
+
+		if (extra_frames > 0 && extra_frames > (SIZE_MAX - header_size) / frame_struct_size)
+			Sys_Error ("Mod_LoadMD2Model: %s frame header size overflow", mod->name);
+
+		size = header_size + extra_frames * frame_struct_size;
+
+		if (size > (size_t)INT_MAX)
+			Sys_Error ("Mod_LoadMD2Model: %s frame header size overflow", mod->name);
+	}
+	pheader = (aliashdr_t *) Hunk_AllocName ((int)size, loadname);
 	memset (pheader, 0, size);
 
 	pheader->numframes = numframes;
@@ -4377,7 +4465,8 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 	{
 		md2_frame_t *frame = (md2_frame_t *) ((byte *)buffer + ofs_frames + (size_t)i * framesize);
 		md2_vertex_t *verts = (md2_vertex_t *) (frame + 1);
-		float fscale[3], ftrans[3];
+		float fscale[3] = {0.0f, 0.0f, 0.0f};
+		float ftrans[3] = {0.0f, 0.0f, 0.0f};
 
 		for (k = 0; k < 3; k++)
 		{
@@ -4387,7 +4476,7 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 
 		for (j = 0; j < numverts; j++)
 		{
-			float pos[3];
+			float pos[3] = {0.0f, 0.0f, 0.0f};
 			double dist2;
 
 			for (k = 0; k < 3; k++)
@@ -4429,7 +4518,8 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer)
 	{
 		md2_frame_t *frame = (md2_frame_t *) ((byte *)buffer + ofs_frames + (size_t)i * framesize);
 		md2_vertex_t *verts = (md2_vertex_t *) (frame + 1);
-		float fscale[3], ftrans[3];
+		float fscale[3] = {0.0f, 0.0f, 0.0f};
+		float ftrans[3] = {0.0f, 0.0f, 0.0f};
 		trivertx_t *outverts = converted + (size_t)i * newnumverts;
 		byte frame_min[3] = {255, 255, 255};
 		byte frame_max[3] = {0, 0, 0};
@@ -4555,11 +4645,17 @@ do {								\
 static void Mod_FloodFillSkin( byte *skin, int skinwidth, int skinheight )
 {
 	byte		fillcolor = *skin; // assume this is the pixel to fill
-	floodfill_t	fifo[FLOODFILL_FIFO_SIZE];
+	floodfill_t	*fifo;
 	int			inpt = 0, outpt = 0;
 	int			filledcolor = -1;
 	int			i;
 	int			safety = 0;
+
+	fifo = (floodfill_t *) malloc (sizeof (*fifo) * FLOODFILL_FIFO_SIZE);
+	if (!fifo)
+	{
+		Sys_Error ("Mod_FloodFillSkin: allocation failed");
+	}
 
 	if (filledcolor == -1)
 	{
@@ -4579,6 +4675,7 @@ static void Mod_FloodFillSkin( byte *skin, int skinwidth, int skinheight )
 	if ((fillcolor == filledcolor) || (fillcolor == 255))
 	{
 		//printf( "not filling skin from %d to %d\n", fillcolor, filledcolor );
+		free (fifo);
 		return;
 	}
 
@@ -4605,6 +4702,8 @@ static void Mod_FloodFillSkin( byte *skin, int skinwidth, int skinheight )
 		if (y < skinheight - 1)	FLOODFILL_STEP( skinwidth, 0, 1 );
 		skin[x + skinwidth * y] = fdc;
 	}
+
+	free (fifo);
 }
 
 /*
@@ -4767,8 +4866,8 @@ Mod_CalcAliasBounds -- johnfitz -- calculate bounds of alias model for nonrotate
 static void Mod_CalcAliasBounds (aliashdr_t *a)
 {
 	int			i,j,k;
-	float		dist, yawradius, radius;
-	vec3_t		v;
+	float		dist = 0.0f, yawradius = 0.0f, radius = 0.0f;
+	vec3_t		v = {0, 0, 0};
 
 	//clear out all data
 	for (i=0; i<3;i++)
@@ -4854,7 +4953,7 @@ static qboolean
 nameInList(const char *list, const char *name)
 {
 	const char *s;
-	char tmp[MAX_QPATH];
+	char tmp[MAX_QPATH] = {0};
 	int i;
 
 	s = list;
@@ -4927,7 +5026,6 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	stvert_t			*pinstverts;
 	dtriangle_t			*pintriangles;
 	int					version, numframes;
-	int					size;
 	daliasframetype_t	*pframetype;
 	daliasskintype_t	*pskintype;
 	int					start, end, total;
@@ -4964,9 +5062,26 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // allocate space for a working header, plus all the data except the frames,
 // skin and group info
 //
-	size	= sizeof(aliashdr_t) +
-		 (LittleLong (pinmodel->numframes) - 1) * sizeof (pheader->frames[0]);
-	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
+	int raw_numframes = LittleLong (pinmodel->numframes);
+	{
+		size_t frame_count = (raw_numframes > 0) ? (size_t)raw_numframes : 0;
+		size_t base_size = sizeof (aliashdr_t);
+		size_t frame_struct_size = sizeof (((aliashdr_t *)0)->frames[0]);
+		size_t extra_frames = (frame_count > 0) ? (frame_count - 1) : 0;
+		size_t allocsize = base_size;
+
+		if (extra_frames > 0)
+		{
+			if (extra_frames > (SIZE_MAX - base_size) / frame_struct_size)
+				Sys_Error ("Mod_LoadAliasModel: frame header overflow");
+			allocsize += extra_frames * frame_struct_size;
+		}
+
+		if (allocsize > (size_t)INT_MAX)
+			Sys_Error ("Mod_LoadAliasModel: frame header overflow");
+
+		pheader = (aliashdr_t *) Hunk_AllocName ((int)allocsize, loadname);
+	}
 
 //
 // endian-adjust and copy the data, starting with the alias model header
@@ -4996,7 +5111,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	else if (pheader->numtris > MAXALIASTRIS_QS && (developer.value || map_checks.value))
 		Con_Warning ("model %s triangle count of %d exceeds QS limit of %d\n", mod->name, pheader->numtris, MAXALIASTRIS_QS);
 
-	pheader->numframes = LittleLong (pinmodel->numframes);
+	pheader->numframes = raw_numframes;
 	numframes = pheader->numframes;
 	if (numframes < 1)
 		Sys_Error ("Mod_LoadAliasModel: Invalid # of frames: %d", numframes);
@@ -5109,8 +5224,9 @@ static void *Mod_LoadSpriteFrame (void * pin, mspriteframe_t **ppframe, int fram
 {
 	dspriteframe_t		*pinframe;
 	mspriteframe_t		*pspriteframe;
-	int					width, height, size, origin[2];
-	char				name[64];
+	int					width = 0, height = 0, size = 0;
+	int					origin[2] = {0, 0};
+	char				name[64] = {0};
 	src_offset_t			offset; //johnfitz
 
 	pinframe = (dspriteframe_t *)pin;
@@ -5164,22 +5280,46 @@ static void *Mod_LoadSpriteGroup (void * pin, mspriteframe_t **ppframe, int fram
 
 	pingroup = (dspritegroup_t *)pin;
 
-	numframes = LittleLong (pingroup->numframes);
-	if (type == SPR_ANGLED && numframes != 8)
-		Sys_Error ("Mod_LoadSpriteGroup: Bad # of frames: %d", numframes);
+        numframes = LittleLong (pingroup->numframes);
+        if (type == SPR_ANGLED && numframes != 8)
+                Sys_Error ("Mod_LoadSpriteGroup: Bad # of frames: %d", numframes);
+        if (numframes < 1)
+                Sys_Error ("Mod_LoadSpriteGroup: Bad # of frames: %d", numframes);
 
-	pspritegroup = (mspritegroup_t *) Hunk_AllocName (sizeof (mspritegroup_t) +
-				(numframes - 1) * sizeof (pspritegroup->frames[0]), loadname);
+        {
+                size_t frame_count = (size_t)numframes;
+                size_t base_size = sizeof (mspritegroup_t);
+                size_t frame_struct_size = sizeof (((mspritegroup_t *)0)->frames[0]);
+                size_t extra_frames = (frame_count > 0) ? (frame_count - 1) : 0;
+                size_t allocsize = base_size;
 
-	pspritegroup->numframes = numframes;
+                if (extra_frames > 0)
+                {
+                        if (extra_frames > (SIZE_MAX - base_size) / frame_struct_size)
+                                Sys_Error ("Mod_LoadSpriteGroup: frame header overflow");
+                        allocsize += extra_frames * frame_struct_size;
+                }
 
-	*ppframe = (mspriteframe_t *)pspritegroup;
+                if (allocsize > (size_t)INT_MAX)
+                        Sys_Error ("Mod_LoadSpriteGroup: frame header overflow");
 
-	pin_intervals = (dspriteinterval_t *)(pingroup + 1);
+                pspritegroup = (mspritegroup_t *) Hunk_AllocName ((int)allocsize, loadname);
+        }
 
-	poutintervals = (float *) Hunk_AllocName (numframes * sizeof (float), loadname);
+        pspritegroup->numframes = numframes;
 
-	pspritegroup->intervals = poutintervals;
+        *ppframe = (mspriteframe_t *)pspritegroup;
+
+        pin_intervals = (dspriteinterval_t *)(pingroup + 1);
+
+        {
+                size_t interval_bytes = (size_t)numframes * sizeof (float);
+                if (interval_bytes > (size_t)INT_MAX)
+                        Sys_Error ("Mod_LoadSpriteGroup: interval buffer overflow");
+                poutintervals = (float *) Hunk_AllocName ((int)interval_bytes, loadname);
+        }
+
+        pspritegroup->intervals = poutintervals;
 
 	for (i=0 ; i<numframes ; i++)
 	{
@@ -5214,7 +5354,6 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer)
 	dsprite_t			*pin;
 	msprite_t			*psprite;
 	int					numframes;
-	int					size;
 	dspriteframetype_t	*pframetype;
 
 	pin = (dsprite_t *)buffer;
@@ -5227,22 +5366,43 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer)
 
 	numframes = LittleLong (pin->numframes);
 
-	size = sizeof (msprite_t) + (numframes - 1) * sizeof (psprite->frames);
+	{
+		size_t frame_count = (size_t)numframes;
+		size_t base_size = sizeof (msprite_t);
+		size_t frame_struct_size = sizeof (((msprite_t *)0)->frames[0]);
+		size_t extra_frames = (frame_count > 0) ? (frame_count - 1) : 0;
+		size_t allocsize = base_size;
 
-	psprite = (msprite_t *) Hunk_AllocName (size, loadname);
+		if (extra_frames > 0)
+		{
+			if (extra_frames > (SIZE_MAX - base_size) / frame_struct_size)
+				Sys_Error ("Mod_LoadSpriteModel: frame header overflow");
+			allocsize += extra_frames * frame_struct_size;
+		}
+
+		if (allocsize > (size_t)INT_MAX)
+			Sys_Error ("Mod_LoadSpriteModel: frame header overflow");
+
+		psprite = (msprite_t *) Hunk_AllocName ((int)allocsize, loadname);
+	}
 
 	mod->cache.data = psprite;
 
 	psprite->type = LittleLong (pin->type);
-	psprite->maxwidth = LittleLong (pin->width);
-	psprite->maxheight = LittleLong (pin->height);
-	mod->synctype = (synctype_t) LittleLong (pin->synctype);
-	psprite->numframes = numframes;
+        psprite->maxwidth = LittleLong (pin->width);
+        psprite->maxheight = LittleLong (pin->height);
+        mod->synctype = (synctype_t) LittleLong (pin->synctype);
+        psprite->numframes = numframes;
 
-	mod->mins[0] = mod->mins[1] = -psprite->maxwidth/2;
-	mod->maxs[0] = mod->maxs[1] = psprite->maxwidth/2;
-	mod->mins[2] = -psprite->maxheight/2;
-	mod->maxs[2] = psprite->maxheight/2;
+        {
+                float half_width = (float)psprite->maxwidth * 0.5f;
+                float half_height = (float)psprite->maxheight * 0.5f;
+
+                mod->mins[0] = mod->mins[1] = -half_width;
+                mod->maxs[0] = mod->maxs[1] = half_width;
+                mod->mins[2] = -half_height;
+                mod->maxs[2] = half_height;
+        }
 
 //
 // load the frames
@@ -5540,6 +5700,12 @@ static void MD5_ComputeNormals(iqmvert_t *vert, size_t numverts, unsigned short 
 	vec3_t			*normals;
 	unsigned short	*weld;
 
+	if (numverts == 0 || numindexes == 0)
+		return;
+
+	if (numverts > SIZE_MAX / 2)
+		Sys_Error ("MD5_ComputeNormals: vertex count overflow (%zu)", numverts);
+
 	hashsize = numverts * 2;
 	hashmap = (int *) calloc (hashsize, sizeof (*hashmap));
 	weld = (unsigned short *) malloc (numverts * sizeof (*weld));
@@ -5583,7 +5749,9 @@ static void MD5_ComputeNormals(iqmvert_t *vert, size_t numverts, unsigned short 
 
 	for (t = 0; t < numindexes; t += 3)
 	{
-		vec3_t d1, d2, norm;
+		vec3_t d1 = {0, 0, 0};
+		vec3_t d2 = {0, 0, 0};
+		vec3_t norm = {0, 0, 0};
 		int i0 = weld[indexes[t+0]];
 		int i1 = weld[indexes[t+1]];
 		int i2 = weld[indexes[t+2]];
@@ -5756,10 +5924,10 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 		//okay, we have our raw info, unpack the actual bone info.
 		for (j = 0; j < ctx->numjoints; j++)
 		{
-			bonepose_t local;
+			bonepose_t local = {0};
 			vec3_t pos = {0,0,0};
 			static vec3_t scale = {1,1,1};
-			vec4_t quat = {0,0,0};
+			vec4_t quat = {0,0,0,0};
 			r = raw + ab[j].offset;
 			if (ab[j].flags & 1)	pos[0] = *r++;
 			if (ab[j].flags & 2)	pos[1] = *r++;
@@ -5840,9 +6008,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 	MD5EXPECT("{");
 	for (j = 0; j < numjoints; j++)
 	{
-		vec3_t pos;
+		vec3_t pos = {0, 0, 0};
 		static vec3_t scale = {1,1,1};
-		vec4_t quat;
+		vec4_t quat = {0, 0, 0, 0};
 		q_strlcpy(outbones[j].name, com_token, sizeof(outbones[j].name));	buffer = COM_Parse(buffer);
 		outbones[j].parent = MD5SINT();
 		if (outbones[j].parent < -1 && outbones[j].parent >= (int)numjoints)
@@ -5910,9 +6078,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 		//but we do so anyway, because rerelease compat.
 		for (surf->numskins = 0; surf->numskins < MAX_SKINS; surf->numskins++)
 		{
-			unsigned int fwidth, fheight, f;
+			unsigned int fwidth = 0, fheight = 0, f;
 			enum srcformat fmt = SRC_RGBA;
-			void *data;
+			void *data = NULL;
 			int mark = Hunk_LowMark ();
 			for (f = 0; f < countof(surf->gltextures[0]); f++)
 			{
@@ -5933,9 +6101,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
                                         }
                                         else
                                         {       //we found a 32bit base texture.
-                                                unsigned int ewidth, eheight;
+                                                unsigned int ewidth = 0, eheight = 0;
                                                 enum srcformat efmt = SRC_RGBA;
-                                               void *edata;
+                                               void *edata = NULL;
                                                int loadmark;
 
                                                 q_snprintf(emissivename, sizeof(emissivename), "progs/%s_%02u_%02u_emissive", com_token, surf->numskins, f);
@@ -5947,9 +6115,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 
                                                 if (!surf->fbtextures[surf->numskins][f])
                                                 {
-                                                        unsigned int glowwidth, glowheight;
+                                                        unsigned int glowwidth = 0, glowheight = 0;
                                                         enum srcformat glowfmt = SRC_RGBA;
-                                                        void *glowdata;
+                                                        void *glowdata = NULL;
 
                                                         q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_glow", com_token, surf->numskins, f);
                                                         loadmark = Hunk_LowMark ();
@@ -5960,9 +6128,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
                                                 }
                                                 if (!surf->fbtextures[surf->numskins][f])
                                                 {
-                                                        unsigned int lumawidth, lumaheight;
+                                                        unsigned int lumawidth = 0, lumaheight = 0;
                                                         enum srcformat lumafmt = SRC_RGBA;
-                                                        void *lumadata;
+                                                        void *lumadata = NULL;
 
                                                         q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_luma", com_token, surf->numskins, f);
                                                         loadmark = Hunk_LowMark ();
