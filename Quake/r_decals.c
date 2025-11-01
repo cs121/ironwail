@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <ctype.h>
 #include <string.h>
 
-#define MAX_DECALS                      256
+#define MAX_DECALS              16384
 #define DECAL_TEXTURE_SIZE      64
 #define DECAL_OFFSET            0.25f
 
@@ -33,23 +33,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BULLET_DECAL_DISTANCE   12.f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
-#define BULLET_DECAL_MIN_RADIUS 7.0f
-#define BULLET_DECAL_MAX_RADIUS 10.0f
-#define BLOOD_DECAL_MIN_RADIUS  6.0f
-#define BLOOD_DECAL_MAX_RADIUS  12.0f
+#define BULLET_DECAL_MIN_RADIUS 10.0f
+#define BULLET_DECAL_MAX_RADIUS 16.0f
+#define BLOOD_DECAL_MIN_RADIUS  12.0f
+#define BLOOD_DECAL_MAX_RADIUS  25.0f
 
 #define BLOOD_DECAL_SIZE_SCALE  0.5625f
 
-#define EXPLOSION_DECAL_MIN_RADIUS       (BULLET_DECAL_MIN_RADIUS * 4.0f)
-#define EXPLOSION_DECAL_MAX_RADIUS       (BULLET_DECAL_MAX_RADIUS * 4.0f)
+#define EXPLOSION_DECAL_MIN_RADIUS       (BULLET_DECAL_MIN_RADIUS * 10.0f)
+#define EXPLOSION_DECAL_MAX_RADIUS       (BULLET_DECAL_MAX_RADIUS * 10.0f)
 
-#define GIB_DECAL_RADIUS         28.0f
+#define GIB_DECAL_RADIUS         48.0f
 #define GIB_DECAL_PARTICLE_THRESHOLD    80
 
 #define BLOOD_POOL_RADIUS       22.0f
 #define BLOOD_POOL_JITTER       12.0f
-#define BLOOD_POOL_SMALL_MIN    6.0f
-#define BLOOD_POOL_SMALL_MAX    10.0f
+#define BLOOD_POOL_SMALL_MIN    20.0f
+#define BLOOD_POOL_SMALL_MAX    48.0f
 
 #define DECAL_LIGHT_REFRESH     0.1
 
@@ -122,7 +122,7 @@ static qboolean          decal_batch_showtris = false;
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
-static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
+static cvar_t    r_decals_max_cvar = {"r_decals_max", "4096", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
 
 extern vec3_t lightcolor;
