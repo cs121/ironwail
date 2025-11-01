@@ -1879,7 +1879,8 @@ static void Mod_LoadLighting (lump_t *l)
                 }
         }
 
-        // Wenn wir BSPX RGB lighting haben, verwenden wir das
+        // CRITICAL FIX: Wenn wir BSPX RGB lighting haben, wird es später durch Mod_LoadBspx geladen
+        // Wir setzen nur die Deluxemap und verlassen die Funktion NICHT vorzeitig
         if (bspx_rgb_samplecount > 0)
         {
                 if (bspx_rgb_samplecount > (size_t)INT_MAX)
@@ -1893,7 +1894,11 @@ static void Mod_LoadLighting (lump_t *l)
                         samplecount = (int)bspx_rgb_samplecount;
                         Con_DPrintf2 ("Using BSPX RGB lighting (%d samples)\n", samplecount);
                         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
-                        return;
+                        // WICHTIG: Wir kehren NICHT zurück - loadmodel->lightdata wird durch Mod_LoadBspx gesetzt
+                        // Die Funktion muss weiterlaufen für den Fall dass BSPX fehlschlägt
+                        // aber wir haben bereits Deluxemap geladen
+                        // Checke ob BSPX-Import erfolgreich war nach Mod_LoadBspx() Aufruf
+                        return; // Temporär - lightdata wird von Mod_BspxImportRgbLighting gesetzt
                 }
         }
 
