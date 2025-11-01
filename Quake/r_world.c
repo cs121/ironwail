@@ -30,6 +30,7 @@ extern cvar_t r_oit;
 
 extern gltexture_t *lightmap_texture;
 extern gltexture_t *deluxemap_texture;
+extern gltexture_t *r_caustics_texture;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -530,6 +531,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 GL_Bind (GL_TEXTURE3, NULL);
         }
 
+        GL_Bind (GL_TEXTURE5, r_caustics_texture);
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
 
@@ -634,6 +636,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
                 GL_Bind (GL_TEXTURE3, use_delux ? deluxemap_texture : NULL);
         }
 
+        GL_Bind (GL_TEXTURE5, r_caustics_texture);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * count);
 

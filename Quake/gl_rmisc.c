@@ -53,6 +53,10 @@ extern cvar_t r_alphasort;
 extern cvar_t r_oit;
 extern cvar_t r_dither;
 extern cvar_t r_dof;
+extern cvar_t r_caustics;
+extern cvar_t r_caustics_strength;
+extern cvar_t r_caustics_scale;
+extern cvar_t r_caustics_speed;
 extern cvar_t r_dof_autofocus;
 extern cvar_t r_dof_focus;
 extern cvar_t r_dof_range;
@@ -105,10 +109,99 @@ extern cvar_t r_simd;
 #endif
 qboolean use_simd;
 
+gltexture_t *r_caustics_texture;
+
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
 
 extern char r_showbboxes_filter_strings[MAXCMDLINE];
 extern qboolean r_showbboxes_filter_byindex;
+
+static float R_SampleCausticPattern(float x, float y, float time)
+{
+        const float angles[3] = { 0.0f, 2.09439510239f, 4.18879020479f };
+        float sum = 0.f;
+        float detail = 0.f;
+        for (int i = 0; i < 3; ++i)
+        {
+                float angle = angles[i];
+                float cs = cosf(angle);
+                float sn = sinf(angle);
+                float wave = sinf((x * cs + y * sn) * 3.5f + time * (1.3f + 0.45f * i));
+                float cross = sinf((x * -sn + y * cs) * 3.5f - time * (1.1f + 0.35f * i));
+                sum += wave;
+                detail += cross;
+        }
+        float base = sum * (1.f / 3.f);
+        float highlight = powf(q_max(0.f, 1.f - fabsf(base)), 3.f);
+        float fine = powf(q_max(0.f, 1.f - fabsf(detail * (1.f / 3.f))), 6.f);
+        return CLAMP(0.f, highlight + fine * 0.65f, 1.f);
+}
+
+static void R_BuildCausticLayer(unsigned *dst, float phase)
+{
+        const float scale = 4.5f;
+        const int size = R_CAUSTICS_TEXTURE_SIZE;
+        float time = phase * 6.28318530718f;
+        for (int y = 0; y < size; ++y)
+        {
+                for (int x = 0; x < size; ++x)
+                {
+                        float u = (x + 0.5f) / (float)size;
+                        float v = (y + 0.5f) / (float)size;
+                        float intensity = R_SampleCausticPattern(u * scale, v * scale, time);
+                        intensity = intensity * 0.85f + 0.1f;
+                        intensity = CLAMP(0.f, intensity, 1.f);
+                        unsigned value = (unsigned)(intensity * 255.f + 0.5f);
+                        dst[y * size + x] = (value) | (value << 8) | (value << 16) | 0xFF000000u;
+                }
+        }
+}
+
+static void R_InitCaustics(void)
+{
+        if (isDedicated)
+                return;
+        if (r_caustics_texture)
+                return;
+
+        unsigned *layers[R_CAUSTICS_TEXTURE_COUNT];
+        unsigned *layer_ptrs[R_CAUSTICS_TEXTURE_COUNT];
+        size_t pixels = (size_t)R_CAUSTICS_TEXTURE_SIZE * R_CAUSTICS_TEXTURE_SIZE;
+
+        for (int i = 0; i < R_CAUSTICS_TEXTURE_COUNT; ++i)
+        {
+                layers[i] = (unsigned *) Z_Malloc(pixels * sizeof(unsigned));
+                R_BuildCausticLayer(layers[i], (float)i / (float)R_CAUSTICS_TEXTURE_COUNT);
+                layer_ptrs[i] = layers[i];
+        }
+
+        gltexture_t *tex = TexMgr_LoadImageEx(
+                NULL,
+                "procedural_caustics",
+                R_CAUSTICS_TEXTURE_SIZE,
+                R_CAUSTICS_TEXTURE_SIZE,
+                R_CAUSTICS_TEXTURE_COUNT,
+                SRC_RGBA,
+                (byte *) layer_ptrs,
+                "",
+                0,
+                TEXPREF_PERSIST | TEXPREF_LINEAR | TEXPREF_MIPMAP | TEXPREF_NOPICMIP | TEXPREF_ARRAY
+        );
+
+        if (!tex)
+        {
+                Con_DPrintf("R_InitCaustics: failed to create caustic texture
+");
+        }
+        else
+        {
+                r_caustics_texture = tex;
+        }
+
+        for (int i = 0; i < R_CAUSTICS_TEXTURE_COUNT; ++i)
+                Z_Free(layers[i]);
+}
+
 
 /*
 ====================
@@ -380,6 +473,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);
 	Cvar_RegisterVariable (&r_rim_exponent);
+	Cvar_RegisterVariable (&r_caustics);
+	Cvar_RegisterVariable (&r_caustics_strength);
+	Cvar_RegisterVariable (&r_caustics_scale);
+	Cvar_RegisterVariable (&r_caustics_speed);
         Cvar_RegisterVariable (&r_dof_autofocus);
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
@@ -480,6 +577,7 @@ void R_Init (void)
 
 	Sky_Init (); //johnfitz
 	Fog_Init (); //johnfitz
+	R_InitCaustics ();
 }
 
 /*
