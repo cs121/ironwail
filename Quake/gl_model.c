@@ -1406,9 +1406,10 @@ static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *da
         if (!data || length == 0)
         {
                 Mod_BspxDebugf ("BSPX:     %s contains no static lights\n", lumpname);
-                return true;
+                return true;        // empty data is not an error
         }
 
+        // Determine format based on data size
         if (length % stride_with_intensity == 0)
         {
                 stride = stride_with_intensity;
@@ -1431,7 +1432,7 @@ static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *da
         if (count <= 0)
         {
                 Mod_BspxDebugf ("BSPX:     %s contains zero static lights\n", lumpname);
-                return true;
+                return true;        // empty data is not an error
         }
 
         lights = (bspx_static_light_t *) Hunk_AllocName (count * sizeof(*lights), lumpname);
@@ -1462,6 +1463,15 @@ static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *da
                         intensity = LittleFloat (src[7]);
 
                 lights[i].intensity = (intensity > 0.0f) ? intensity : 0.0f;
+
+                if (i == 0 && debug_bspx.value > 1.0f)
+                {
+                        Mod_BspxDebugf ("BSPX:     First light: pos=(%.1f,%.1f,%.1f) radius=%.1f color=(%.2f,%.2f,%.2f) intensity=%.2f\n",
+                                lights[i].origin[0], lights[i].origin[1], lights[i].origin[2],
+                                lights[i].radius,
+                                lights[i].color[0], lights[i].color[1], lights[i].color[2],
+                                lights[i].intensity);
+                }
         }
 
         *out_lights = lights;
@@ -1694,11 +1704,19 @@ static void Mod_LoadBspx (const byte *buffer)
                 else if (!q_strcasecmp (lumpname, "STATICSHADOWS") || !q_strcasecmp (lumpname, "STATIC_SHADOWS"))
                 {
                         recognized = true;
-                        if (!Mod_BspxImportStaticLights (lumpname, lumpdata, lumplen,
-                                        &loadmodel->bspx_static_shadow_lights, &loadmodel->bspx_num_static_shadow_lights))
+
+                        qboolean loaded_as_lights = Mod_BspxImportStaticLights (lumpname, lumpdata, lumplen,
+                                &loadmodel->bspx_static_shadow_lights, &loadmodel->bspx_num_static_shadow_lights);
+
+                        if (!loaded_as_lights)
                         {
                                 Mod_BspxImportStaticShadowIndices (lumpname, lumpdata, lumplen,
                                         &loadmodel->bspx_static_shadow_indices, &loadmodel->bspx_num_static_shadow_indices);
+                        }
+                        else
+                        {
+                                Mod_BspxDebugf ("BSPX:     %s loaded %d shadow lights\n",
+                                        lumpname, loadmodel->bspx_num_static_shadow_lights);
                         }
                 }
                 else if (!q_strcasecmp (lumpname, "LMOFFSET"))
@@ -1710,13 +1728,21 @@ static void Mod_LoadBspx (const byte *buffer)
                 if (!recognized)
                         Mod_BspxDebugf ("BSPX:     %s ignored (unhandled lump)\n", lumpname);
         }
-        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d\n",
+        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, shadow indices %d\n",
                 loadmodel->litfile ? "loaded" : "missing",
                 loadmodel->deluxfile ? "loaded" : "missing",
                 loadmodel->bspx_light_offset_count,
                 loadmodel->bspx_num_static_lights,
                 loadmodel->bspx_num_static_shadow_lights,
                 loadmodel->bspx_num_static_shadow_indices);
+
+        if (loadmodel->bspx_num_static_lights > 0 || loadmodel->bspx_num_static_shadow_lights > 0)
+        {
+                Con_DPrintf2 ("BSPX: %s has %d static lights and %d shadow lights\n",
+                        loadmodel->name,
+                        loadmodel->bspx_num_static_lights,
+                        loadmodel->bspx_num_static_shadow_lights);
+        }
 
 
 }
