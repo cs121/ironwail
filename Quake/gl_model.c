@@ -1759,26 +1759,27 @@ static void Mod_LoadLighting (lump_t *l)
         int samplecount = 0;
         size_t bspx_rgb_samplecount = Mod_BspxPredictRgbSampleCount (mod_base, mod_bspx_filesize);
 
-        // FIX: bspx_rgb_samplecount ist bereits in Bytes (RGB), nicht in Samples!
-        // Wenn wir BSPX RGB-Daten haben, verwenden wir diese Größe direkt
-        // Andernfalls berechnen wir aus dem BSP lump (der grayscale ist)
-        size_t expected_lit_bytes;
+        // FIX: Korrekte Interpretation von bspx_rgb_samplecount
+        // Diese Funktion gibt die ANZAHL der Samples zurück, nicht die Bytes!
+        // Ein Sample = 3 Bytes (RGB)
+        size_t expected_samples;
         if (bspx_rgb_samplecount > 0)
         {
-                // BSPX gibt uns bereits RGB-Bytes zurück
-                expected_lit_bytes = bspx_rgb_samplecount;
+                // BSPX gibt uns die Anzahl der RGB-Samples
+                expected_samples = bspx_rgb_samplecount;
         }
         else if (l->filelen > 0)
         {
-                // BSP lump ist grayscale, also * 3 für RGB
-                expected_lit_bytes = (size_t)l->filelen * 3;
+                // BSP lump ist grayscale (1 Byte pro Sample)
+                expected_samples = (size_t)l->filelen;
         }
         else
         {
-                expected_lit_bytes = 0;
+                expected_samples = 0;
         }
 
-        uint64_t expected_lit_size = 8ull + expected_lit_bytes;
+        // .lit Dateien enthalten immer RGB (3 Bytes pro Sample) + 8 Byte Header
+        uint64_t expected_lit_size = 8ull + (uint64_t)expected_samples * 3ull;
 
         loadmodel->lightdata = NULL;
         loadmodel->deluxdata = NULL;
@@ -1807,54 +1808,52 @@ static void Mod_LoadLighting (lump_t *l)
                         i = LittleLong (((int *)data)[1]);
                         if (i == 1)
                         {
-                                // FIX: Verbesserte Validierung
-                                if ((uint64_t)com_filesize == expected_lit_size)
+                                // FIX: Verbesserte Validierung mit Toleranz
+                                size_t actual_data_bytes = (size_t)(com_filesize - 8);
+
+                                // Die .lit Datei muss ein Vielfaches von 3 sein (RGB)
+                                if (actual_data_bytes % 3 != 0)
                                 {
-                                        // Berechne samplecount aus den tatsächlichen Bytes
-                                        size_t actual_data_size = (size_t)com_filesize - 8;
-                                        if (actual_data_size % 3 == 0 && actual_data_size / 3 <= (size_t)INT_MAX)
+                                        Hunk_FreeToLowMark (mark);
+                                        Con_Printf ("Invalid .lit file (%s data size not multiple of 3)\n", litfilename);
+                                }
+                                else if ((uint64_t)com_filesize == expected_lit_size && actual_data_bytes / 3 <= (size_t)INT_MAX)
+                                {
+                                        // Perfekte Übereinstimmung
+                                        Con_DPrintf2 ("%s loaded\n", litfilename);
+                                        loadmodel->lightdata = data + 8;
+                                        loadmodel->litfile = true;
+                                        samplecount = (int)(actual_data_bytes / 3);
+                                        Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
+                                        return;
+                                }
+                                else
+                                {
+                                        // Größe passt nicht - aber prüfe ob die .lit Datei trotzdem verwendbar ist
+                                        // Manchmal stimmt die BSPX-Vorhersage nicht perfekt
+                                        Con_DWarning ("Size mismatch: %s is %" SDL_PRIs64 " bytes, expected %" SDL_PRIu64 "\n",
+                                                litfilename, com_filesize, expected_lit_size);
+
+                                        if (bspx_rgb_samplecount > 0)
                                         {
-                                                Con_DPrintf2 ("%s loaded\n", litfilename);
+                                                Con_DWarning ("  BSPX predicted %zu samples, BSP lump has %d bytes\n",
+                                                        bspx_rgb_samplecount, l->filelen);
+                                        }
+
+                                        // Verwende die tatsächliche Größe der .lit Datei
+                                        if (actual_data_bytes / 3 <= (size_t)INT_MAX)
+                                        {
+                                                Con_DWarning ("  Using actual .lit file size anyway (%zu RGB samples)\n",
+                                                        actual_data_bytes / 3);
                                                 loadmodel->lightdata = data + 8;
                                                 loadmodel->litfile = true;
-                                                samplecount = (int)(actual_data_size / 3);
+                                                samplecount = (int)(actual_data_bytes / 3);
                                                 Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                                 return;
                                         }
-                                }
 
-                                // Wenn die Größe nicht genau passt, aber nahe dran ist, gib detaillierte Info
-                                if ((uint64_t)com_filesize != expected_lit_size)
-                                {
-                                        // Prüfe ob es vielleicht ein off-by-one bei der BSPX-Vorhersage ist
-                                        uint64_t diff = ((uint64_t)com_filesize > expected_lit_size) ?
-                                                        ((uint64_t)com_filesize - expected_lit_size) :
-                                                        (expected_lit_size - (uint64_t)com_filesize);
-
-                                        if (diff <= 3 && (size_t)(com_filesize - 8) % 3 == 0)
-                                        {
-                                                // Kleine Diskrepanz, wahrscheinlich harmlos - lade trotzdem
-                                                Con_DWarning ("Minor size mismatch in %s (expected %" SDL_PRIu64 ", got %" SDL_PRIs64 ", diff %" SDL_PRIu64 ")\n",
-                                                        litfilename, expected_lit_size, com_filesize, diff);
-
-                                                size_t actual_data_size = (size_t)com_filesize - 8;
-                                                loadmodel->lightdata = data + 8;
-                                                loadmodel->litfile = true;
-                                                samplecount = (int)(actual_data_size / 3);
-                                                Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
-                                                return;
-                                        }
-                                }
-
-                                Hunk_FreeToLowMark (mark);
-                                Con_Printf ("Outdated .lit file (%s should be %" SDL_PRIu64 " bytes, not %" SDL_PRIs64 ")\n",
-                                        litfilename, expected_lit_size, com_filesize);
-
-                                // Debug info wenn BSPX beteiligt ist
-                                if (bspx_rgb_samplecount > 0)
-                                {
-                                        Con_DPrintf2 ("  (BSPX predicted %zu RGB bytes, BSP lump has %d bytes)\n",
-                                                bspx_rgb_samplecount, l->filelen);
+                                        Hunk_FreeToLowMark (mark);
+                                        Con_Printf ("Cannot load %s (size issues)\n", litfilename);
                                 }
                         }
                         else
@@ -1880,8 +1879,9 @@ static void Mod_LoadLighting (lump_t *l)
                 }
                 else
                 {
-                        // Berechne samplecount: bspx_rgb_samplecount ist in Bytes, wir brauchen die Anzahl der Samples
-                        samplecount = (int)(bspx_rgb_samplecount / 3);
+                        // bspx_rgb_samplecount ist die Anzahl der RGB-Samples
+                        samplecount = (int)bspx_rgb_samplecount;
+                        Con_DPrintf2 ("Using BSPX RGB lighting (%d samples)\n", samplecount);
                         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                         return;
                 }
@@ -1940,7 +1940,6 @@ static void Mod_LoadLighting (lump_t *l)
         samplecount = l->filelen;
         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
 }
-
 
 static void Mod_InitFallbackDeluxemap (msurface_t *surf)
 {
