@@ -418,11 +418,15 @@ void main()
                     float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
                     float falloff     = smoothstep01((rad - sdist) / max(rad, 1e-4));
                     float axialFalloff = smoothstep01((l.radius - absdist) / max(l.radius, 1e-4));
+                    float distance_sq = Llen2 + dist * dist;
+                    float inv_radius_sq = 1.0 / max(l.radius * l.radius, 1e-4);
+                    float distance_falloff = 1.0 / (1.0 + distance_sq * inv_radius_sq);
+                    falloff *= falloff;
 
                     if (attenuation > 0.0 && falloff > 0.0 && axialFalloff > 0.0){
                         vec3  ldir = L * Linv;
                         float ndotl = max(dot(surface_normal, ldir), 0.0);
-                        float intensity = attenuation * falloff * axialFalloff;
+                        float intensity = attenuation * falloff * axialFalloff * distance_falloff;
                         vec3  light_contrib = intensity * l.color;
 
                         if (ndotl > 0.0){
