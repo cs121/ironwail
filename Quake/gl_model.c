@@ -267,7 +267,7 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 
 	if (!mod_decompressed || row > mod_decompressed_capacity)
 	{
-		size_t new_capacity = row;
+		size_t new_capacity = (row + (size_t)VIS_ALIGN_MASK) & ~((size_t)VIS_ALIGN_MASK);
 		byte *newbuf = (byte *) realloc (mod_decompressed, new_capacity);
 		if (!newbuf)
 			Sys_Error ("Mod_DecompressVis: realloc() failed on %zu bytes", new_capacity);
