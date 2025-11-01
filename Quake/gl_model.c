@@ -666,7 +666,10 @@ static void Mod_LoadTextures (lump_t *l)
 	{
 		m->dataofs[i] = LittleLong(m->dataofs[i]);
 		if (m->dataofs[i] == -1)
+		{
+			loadmodel->textures[i] = NULL;
 			continue;
+		}
 
 		int dataofs = m->dataofs[i];
 		if (dataofs < 0 || (size_t)l->filelen < sizeof(*mt) || (size_t)dataofs > (size_t)l->filelen - sizeof(*mt))
@@ -693,6 +696,7 @@ static void Mod_LoadTextures (lump_t *l)
 		if (mt->width <= 0 || mt->height <= 0)
 		{
 			Con_Warning ("Zero sized texture %s in %s!\n", mt->name, loadmodel->name);
+			loadmodel->textures[i] = NULL;
 			continue;
 		}
 
