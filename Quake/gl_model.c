@@ -53,6 +53,13 @@ static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
+typedef struct bspx_lump_s
+{
+        char name[16];
+        int fileofs;
+        int filelen;
+} bspx_lump_t;
+
 static void Mod_BspxDebugf (const char *fmt, ...)
 {
         if (debug_bspx.value <= 0.0f)
@@ -957,6 +964,89 @@ static size_t Mod_BspxGuessSampleCount (size_t length)
         return count;
 }
 
+static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize)
+{
+        const size_t footer_size = 8;
+        size_t dirsize;
+        const byte *footer;
+        const byte *directory;
+        size_t max_payload;
+        int numlumps;
+
+        if (!buffer || filesize < footer_size)
+                return 0;
+
+        footer = buffer + filesize - footer_size;
+        if (memcmp (footer, "BSPX", 4) != 0)
+                return 0;
+
+        dirsize = (size_t)LittleLong (((const int *)footer)[1]);
+        if (dirsize == 0 || dirsize > filesize - footer_size)
+                return 0;
+
+        directory = footer - dirsize;
+        if (directory < buffer)
+                return 0;
+
+        if (dirsize % sizeof(bspx_lump_t))
+                return 0;
+
+        numlumps = (int)(dirsize / sizeof(bspx_lump_t));
+        max_payload = (size_t)(directory - buffer);
+
+        for (int i = 0; i < numlumps; ++i)
+        {
+                const bspx_lump_t *entry = ((const bspx_lump_t *)directory) + i;
+                char lumpname[17];
+                size_t lumpofs, lumplen;
+                size_t payload_length;
+                int raw_ofs = LittleLong (entry->fileofs);
+                int raw_len = LittleLong (entry->filelen);
+
+                memcpy (lumpname, entry->name, sizeof(entry->name));
+                lumpname[sizeof(entry->name)] = '\0';
+                for (int j = (int)sizeof(entry->name) - 1; j >= 0 && (lumpname[j] == '\0' || lumpname[j] == ' '); --j)
+                        lumpname[j] = '\0';
+
+                if (raw_ofs < 0 || raw_len <= 0)
+                        continue;
+
+                lumpofs = (size_t)raw_ofs;
+                lumplen = (size_t)raw_len;
+
+                if (lumpofs > max_payload)
+                        continue;
+                if (lumplen > max_payload - lumpofs)
+                        continue;
+
+                if (q_strcasecmp (lumpname, "RGBLIGHTING") &&
+                        q_strcasecmp (lumpname, "RGBLIGHTDATA") &&
+                        q_strcasecmp (lumpname, "LIGHTINGRGB"))
+                        continue;
+
+                payload_length = lumplen;
+
+                if (payload_length >= 8)
+                {
+                        const byte *lumpdata = buffer + lumpofs;
+
+                        if (lumpdata[0] == 'Q' && lumpdata[1] == 'L' && lumpdata[2] == 'I' && lumpdata[3] == 'T')
+                        {
+                                int version = LittleLong (((const int *)lumpdata)[1]);
+
+                                if (version != 1)
+                                        continue;
+
+                                payload_length -= 8;
+                        }
+                }
+
+                return Mod_BspxGuessSampleCount (payload_length);
+        }
+
+        return 0;
+}
+
 static qboolean Mod_BspxEnsureDeluxStorage (size_t samplecount, const char *lumpname)
 {
         size_t expected_bytes;
@@ -1416,13 +1506,6 @@ static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const b
 
 static void Mod_LoadBspx (const byte *buffer)
 {
-        typedef struct bspx_lump_s
-        {
-                char name[16];
-                int fileofs;
-                int filelen;
-        } bspx_lump_t;
-
         const size_t footer_size = 8;
         size_t filesize = mod_bspx_filesize;
         size_t dirsize;
@@ -1578,6 +1661,10 @@ static void Mod_LoadLighting (lump_t *l)
         char luxfilename[MAX_OSPATH];
         unsigned int path_id;
         int samplecount = 0;
+        size_t bspx_rgb_samplecount = Mod_BspxPredictRgbSampleCount (mod_base, mod_bspx_filesize);
+        size_t expected_samples = (bspx_rgb_samplecount > 0) ? bspx_rgb_samplecount :
+                ((l->filelen > 0) ? (size_t) l->filelen : 0);
+        uint64_t expected_lit_size = 8ull + expected_samples * 3ull;
 
         loadmodel->lightdata = NULL;
         loadmodel->deluxdata = NULL;
@@ -1606,18 +1693,18 @@ static void Mod_LoadLighting (lump_t *l)
                         i = LittleLong (((int *)data)[1]);
                         if (i == 1)
                         {
-                                if (8 + l->filelen * 3 == com_filesize)
+                                if ((uint64_t)com_filesize == expected_lit_size && expected_samples <= (size_t)INT_MAX)
                                 {
                                         Con_DPrintf2 ("%s loaded\n", litfilename);
                                         loadmodel->lightdata = data + 8;
                                         loadmodel->litfile = true;
-                                        samplecount = l->filelen;
+                                        samplecount = (int)expected_samples;
                                         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                         return;
                                 }
                                 Hunk_FreeToLowMark (mark);
-                                Con_Printf ("Outdated .lit file (%s should be %u bytes, not %" SDL_PRIs64 ")\n",
-                                        litfilename, 8 + l->filelen * 3, com_filesize);
+                                Con_Printf ("Outdated .lit file (%s should be %" SDL_PRIu64 " bytes, not %" SDL_PRIs64 ")\n",
+                                        litfilename, expected_lit_size, com_filesize);
                         }
                         else
                         {
@@ -1629,6 +1716,20 @@ static void Mod_LoadLighting (lump_t *l)
                 {
                         Hunk_FreeToLowMark (mark);
                         Con_Printf ("Corrupt .lit file (old version?), ignoring\n");
+                }
+        }
+
+        if (bspx_rgb_samplecount > 0)
+        {
+                if (bspx_rgb_samplecount > (size_t)INT_MAX)
+                {
+                        Con_Printf ("BSPX RGB lighting sample count (%zu) exceeds engine limits, falling back to BSP data\n",
+                                bspx_rgb_samplecount);
+                }
+                else
+                {
+                        Mod_LoadDeluxemap (dlitfilename, luxfilename, (int)bspx_rgb_samplecount);
+                        return;
                 }
         }
 
