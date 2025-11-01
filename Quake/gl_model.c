@@ -49,9 +49,9 @@ cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 static byte	*mod_novis;
 static int	mod_novis_capacity;
 
-static byte	*mod_decompressed;
-static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
+
+extern gltexture_t *nulltexture;
 
 typedef struct bspx_lump_s
 {
@@ -258,60 +258,63 @@ Mod_DecompressVis
 */
 static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 {
-	int		c;
-	byte	*out;
-	byte	*outend;
-	int		row;
+	static byte decompressed[MAX_MAP_LEAFS / 8];
+	byte *out = decompressed;
+	int row = (model->numleafs + 7) >> 3;
 
-	row = (model->numleafs+7)>>3;
-	if (mod_decompressed == NULL || row > mod_decompressed_capacity)
+	if (row > (int)sizeof(decompressed))
 	{
-		mod_decompressed_capacity = (row + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK;
-		mod_decompressed = (byte *) realloc (mod_decompressed, mod_decompressed_capacity);
-		if (!mod_decompressed)
-			Sys_Error ("Mod_DecompressVis: realloc() failed on %d bytes", mod_decompressed_capacity);
+		if (!model->viswarn)
+		{
+			model->viswarn = true;
+			Con_Warning("Mod_DecompressVis: row size %d exceeds buffer (%zu) for model \"%s\"\n",
+				row, sizeof(decompressed), model->name);
+		}
+		row = sizeof(decompressed);
 	}
-	out = mod_decompressed;
-	outend = mod_decompressed + row;
 
 	if (!in)
-	{	// no vis info, so make all visible
-		while (row)
-		{
-			*out++ = 0xff;
-			row--;
-		}
-		return mod_decompressed;
+	{
+		memset(decompressed, 0xff, row);
+		return decompressed;
 	}
 
 	do
 	{
 		if (*in)
 		{
-			*out++ = *in++;
+			if (out - decompressed < row)
+				*out++ = *in;
+			++in;
 			continue;
 		}
 
-		c = in[1];
+		int c = in[1];
 		in += 2;
-		if (c > row - (out - mod_decompressed))
-			c = row - (out - mod_decompressed);	//now that we're dynamically allocating pvs buffers, we have to be more careful to avoid heap overflows with buggy maps.
-		while (c)
-		{
-			if (out == outend)
-			{
-				if(!model->viswarn) {
-					model->viswarn = true;
-					Con_Warning("Mod_DecompressVis: output overrun on model \"%s\"\n", model->name);
-				}
-				return mod_decompressed;
-			}
-			*out++ = 0;
-			c--;
-		}
-	} while (out - mod_decompressed < row);
 
-	return mod_decompressed;
+		if ((size_t)(out - decompressed) + (size_t)c > sizeof(decompressed))
+		{
+			if (!model->viswarn)
+			{
+				model->viswarn = true;
+				Con_Printf("Mod_DecompressVis: Output overflow for model \"%s\" (corrupt BSP?)\n", model->name);
+			}
+
+			size_t remaining = sizeof(decompressed) - (size_t)(out - decompressed);
+			memset(out, 0, remaining);
+			out += remaining;
+			break;
+		}
+
+		while (c-- && (out - decompressed) < row)
+			*out++ = 0;
+	}
+	while ((out - decompressed) < row);
+
+	if ((out - decompressed) < row)
+		memset(out, 0, row - (int)(out - decompressed));
+
+	return decompressed;
 }
 
 byte *Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model)
@@ -620,6 +623,8 @@ static void Mod_LoadTextures (lump_t *l)
 	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
 	byte		*data;
 	enum srcformat fmt;
+	const byte *lumpbase = NULL;
+	const byte *lumpend = NULL;
 //johnfitz
 
 	//johnfitz -- don't return early if no textures; still need to create dummy texture
@@ -632,6 +637,8 @@ static void Mod_LoadTextures (lump_t *l)
 	else
 	{
 		m = (dmiptexlump_t *)(mod_base + l->fileofs);
+		lumpbase = mod_base + l->fileofs;
+		lumpend = lumpbase + l->filelen;
 		m->nummiptex = LittleLong (m->nummiptex);
 		nummiptex = m->nummiptex;
 	}
@@ -645,13 +652,30 @@ static void Mod_LoadTextures (lump_t *l)
 		m->dataofs[i] = LittleLong(m->dataofs[i]);
 		if (m->dataofs[i] == -1)
 			continue;
-		mt = (miptex_t *)((byte *)m + m->dataofs[i]);
+
+		int dataofs = m->dataofs[i];
+		if (dataofs < 0 || (size_t)l->filelen < sizeof(*mt) || (size_t)dataofs > (size_t)l->filelen - sizeof(*mt))
+		{
+			Con_Warning ("Mod_LoadTextures: invalid texture offset %d in %s\n", dataofs, loadmodel->name);
+			loadmodel->textures[i] = NULL;
+			continue;
+		}
+
+		byte *mtbase = (byte *)m + dataofs;
+		if (mtbase < lumpbase || mtbase + sizeof(*mt) > lumpend)
+		{
+			Con_Warning ("Mod_LoadTextures: texture offset %d out of lump bounds in %s\n", dataofs, loadmodel->name);
+			loadmodel->textures[i] = NULL;
+			continue;
+		}
+
+		mt = (miptex_t *)mtbase;
 		mt->width = LittleLong (mt->width);
 		mt->height = LittleLong (mt->height);
 		for (j=0 ; j<MIPLEVELS ; j++)
 			mt->offsets[j] = LittleLong (mt->offsets[j]);
 
-		if (mt->width == 0 || mt->height == 0)
+		if (mt->width <= 0 || mt->height <= 0)
 		{
 			Con_Warning ("Zero sized texture %s in %s!\n", mt->name, loadmodel->name);
 			continue;
@@ -663,7 +687,14 @@ static void Mod_LoadTextures (lump_t *l)
 				Con_Warning ("Texture %s (%d x %d) is not 16 aligned\n", mt->name, mt->width, mt->height);
 		}
 
-		pixels = mt->width*mt->height; // only copy the first mip, the rest are auto-generated
+		size_t pixel_count = (size_t)mt->width * (size_t)mt->height; // only copy the first mip, the rest are auto-generated
+		if (pixel_count > INT_MAX)
+		{
+			Con_Warning ("Texture %s in %s is too large (%zu pixels)\n", mt->name, loadmodel->name, pixel_count);
+			loadmodel->textures[i] = NULL;
+			continue;
+		}
+		pixels = (int)pixel_count;
 		tx = (texture_t *) Hunk_AllocNameNoFill (sizeof(texture_t) +pixels, loadname );
 		// only clear the texture struct, not the pixel buffer following it
 		memset (tx, 0, sizeof (*tx));
@@ -683,10 +714,13 @@ static void Mod_LoadTextures (lump_t *l)
 		// appears in the wild; e.g. jam2_tronyn.bsp (func_mapjam2),
 		// kellbase1.bsp (quoth), and can lead to a segfault if we read past
 		// the end of the .bsp file buffer
-		if (((byte*)(mt+1) + pixels) > (mod_base + l->fileofs + l->filelen))
+		size_t available_bytes = (size_t)(lumpend - (byte *)(mt + 1));
+		if ((size_t)pixels > available_bytes)
 		{
 			Con_DPrintf("Texture %s extends past end of lump\n", mt->name);
-			pixels = q_max(0L, (long)((mod_base + l->fileofs + l->filelen) - (byte*)(mt+1)));
+			if (available_bytes > INT_MAX)
+				available_bytes = INT_MAX;
+			pixels = (int)q_max(0L, (long)available_bytes);
 		}
 
 			tx->fullbright = NULL; //johnfitz
@@ -847,15 +881,23 @@ static void Mod_LoadTextures (lump_t *l)
 		{
 			maxanim -= '0';
 			altmax = 0;
+			if (maxanim >= (int)countof(anims))
+				Sys_Error ("Too many animation frames for texture %s", tx->name);
 			anims[maxanim] = tx;
 			maxanim++;
+			if (maxanim > (int)countof(anims))
+				Sys_Error ("Too many animation frames for texture %s", tx->name);
 		}
 		else if (maxanim >= 'A' && maxanim <= 'J')
 		{
 			altmax = maxanim - 'A';
 			maxanim = 0;
+			if (altmax >= (int)countof(altanims))
+				Sys_Error ("Too many alternate animation frames for texture %s", tx->name);
 			altanims[altmax] = tx;
 			altmax++;
+			if (altmax > (int)countof(altanims))
+				Sys_Error ("Too many alternate animation frames for texture %s", tx->name);
 		}
 		else
 			Sys_Error ("Bad animating texture %s", tx->name);
@@ -874,16 +916,24 @@ static void Mod_LoadTextures (lump_t *l)
 			if (num >= '0' && num <= '9')
 			{
 				num -= '0';
+				if (num >= (int)countof(anims))
+					Sys_Error ("Too many animation frames for texture %s", tx->name);
 				anims[num] = tx2;
 				if (num+1 > maxanim)
 					maxanim = num + 1;
+				if (maxanim > (int)countof(anims))
+					Sys_Error ("Too many animation frames for texture %s", tx->name);
 			}
 			else if (num >= 'A' && num <= 'J')
 			{
 				num = num - 'A';
+				if (num >= (int)countof(altanims))
+					Sys_Error ("Too many alternate animation frames for texture %s", tx->name);
 				altanims[num] = tx2;
 				if (num+1 > altmax)
 					altmax = num+1;
+				if (altmax > (int)countof(altanims))
+					Sys_Error ("Too many alternate animation frames for texture %s", tx->name);
 			}
 			else
 				Sys_Error ("Bad animating texture %s", tx->name);
@@ -1052,6 +1102,8 @@ static size_t Mod_BspxPredictRgbSampleCount (const byte *buffer, size_t filesize
                 return 0;
 
         numlumps = (int)(dirsize / sizeof(bspx_lump_t));
+        if (numlumps <= 0 || numlumps > 1024)
+                return 0;
         max_payload = (size_t)(directory - buffer);
         payload_base = Mod_BspxDeterminePayloadBase (buffer, filesize, directory, numlumps);
         if (payload_base > max_payload)
@@ -3080,7 +3132,7 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 
 			//johnfitz -- bounds check
 			if (out->planenum < 0 || out->planenum >= loadmodel->numplanes)
-				Host_Error ("Mod_LoadClipnodes: planenum out of bounds");
+				Host_Error ("Mod_LoadClipnodes: planenum %d out of bounds (0-%d) in %s", out->planenum, loadmodel->numplanes - 1, loadmodel->name);
 			//johnfitz
 
 			out->children[0] = LittleLong(inl->children[0]);
@@ -3096,7 +3148,7 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 
 			//johnfitz -- bounds check
 			if (out->planenum < 0 || out->planenum >= loadmodel->numplanes)
-				Host_Error ("Mod_LoadClipnodes: planenum out of bounds");
+				Host_Error ("Mod_LoadClipnodes: planenum %d out of bounds (0-%d) in %s", out->planenum, loadmodel->numplanes - 1, loadmodel->name);
 			//johnfitz
 
 			//johnfitz -- support clipnodes > 32k
@@ -4499,6 +4551,7 @@ static void Mod_FloodFillSkin( byte *skin, int skinwidth, int skinheight )
 	int			inpt = 0, outpt = 0;
 	int			filledcolor = -1;
 	int			i;
+	int			safety = 0;
 
 	if (filledcolor == -1)
 	{
@@ -4526,6 +4579,12 @@ static void Mod_FloodFillSkin( byte *skin, int skinwidth, int skinheight )
 
 	while (outpt != inpt)
 	{
+		if (++safety > FLOODFILL_FIFO_SIZE * 2)
+		{
+			Con_Printf("Mod_FloodFillSkin: Aborted (possible infinite loop)\n");
+			break;
+		}
+
 		int			x = fifo[outpt].x, y = fifo[outpt].y;
 		int			fdc = filledcolor;
 		byte		*pos = &skin[x + skinwidth * y];
@@ -4603,6 +4662,14 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 				pheader->fbtextures[i][0] = NULL;
 			}
 
+		if (!pheader->gltextures[i][0])
+		{
+			Con_Printf("Mod_LoadAllSkins: Failed to load skin %d for %s, using nulltexture\n", i, loadmodel->name);
+			pheader->gltextures[i][0] = nulltexture;
+			pheader->fbtextures[i][0] = NULL;
+			pheader->emissivetextures[i][0] = NULL;
+		}
+
                         pheader->gltextures[i][3] = pheader->gltextures[i][2] = pheader->gltextures[i][1] = pheader->gltextures[i][0];
                         pheader->fbtextures[i][3] = pheader->fbtextures[i][2] = pheader->fbtextures[i][1] = pheader->fbtextures[i][0];
 			pheader->emissivetextures[i][0] = NULL;
@@ -4656,6 +4723,14 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
                                         SRC_INDEXED, (byte *)(pskintype), loadmodel->name, offset, texflags);
                                 pheader->fbtextures[i][j&3] = NULL;
 				pheader->emissivetextures[i][j&3] = NULL;
+				}
+
+				if (!pheader->gltextures[i][j&3])
+				{
+					Con_Printf("Mod_LoadAllSkins: Failed to load skin %d frame %d for %s, using nulltexture\n", i, j, loadmodel->name);
+					pheader->gltextures[i][j&3] = nulltexture;
+					pheader->fbtextures[i][j&3] = NULL;
+					pheader->emissivetextures[i][j&3] = NULL;
 				}
 				//johnfitz
 
@@ -5462,7 +5537,13 @@ static void MD5_ComputeNormals(iqmvert_t *vert, size_t numverts, unsigned short 
 	weld = (unsigned short *) malloc (numverts * sizeof (*weld));
 	normals = (vec3_t *) calloc (numverts, sizeof (vec3_t));
 	if (!hashmap || !weld || !normals)
-		Sys_Error ("MD5_ComputeNormals: out of memory (%u verts/%u tris)", (unsigned int)numverts, (unsigned int)(numindexes/3));
+	{
+		Con_Printf("MD5_ComputeNormals: memory allocation failed (%zu verts/%zu tris)\n", numverts, numindexes / 3);
+		free (normals);
+		free (weld);
+		free (hashmap);
+		return;
+	}
 
 	for (v = 0; v < numverts; v++)
 	{
