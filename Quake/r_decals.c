@@ -84,7 +84,7 @@ typedef struct decalvertex_s
 typedef struct decal_s
 {
         qboolean        active;
-        double          die;
+        double          spawn_time;
         gltexture_t     *texture;
         gltexture_t     *base_texture;
         decaltype_t     type;
@@ -122,7 +122,6 @@ static qboolean          decal_batch_showtris = false;
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
-static cvar_t    r_decals_lifetime_cvar = {"r_decals_lifetime", "20", CVAR_ARCHIVE};
 static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
 
@@ -131,10 +130,67 @@ extern vec3_t lightcolor;
 static byte r_decal_death_spawned[MAX_EDICTS];
 static double r_last_gib_decal_time = -9999.0;
 static vec3_t r_last_gib_decal_origin = {0.f, 0.f, 0.f};
+static int r_active_decal_count = 0;
 
 static int R_GetDecalLimit (void)
 {
         return CLAMP (0, (int) r_decals_max_cvar.value, MAX_DECALS);
+}
+
+static void R_DeactivateDecal (decal_t *dec)
+{
+        if (!dec || !dec->active)
+                return;
+
+        dec->active = false;
+        dec->texture = NULL;
+        dec->base_texture = NULL;
+        dec->last_light_update = 0.0;
+        dec->spawn_time = 0.0;
+
+        if (r_active_decal_count > 0)
+                r_active_decal_count--;
+}
+
+static void R_RemoveExcessDecals (int limit)
+{
+        int to_remove;
+
+        if (limit <= 0)
+        {
+                int i;
+                for (i = 0; i < MAX_DECALS; i++)
+                        R_DeactivateDecal (&r_decals[i]);
+                return;
+        }
+
+        if (r_active_decal_count <= limit)
+                return;
+
+        to_remove = r_active_decal_count - limit;
+        while (to_remove-- > 0)
+        {
+                decal_t *oldest = NULL;
+                double oldest_spawn = HUGE_VAL;
+                int i;
+
+                for (i = 0; i < MAX_DECALS; i++)
+                {
+                        decal_t *dec = &r_decals[i];
+                        if (!dec->active)
+                                continue;
+                        if (dec->spawn_time < oldest_spawn)
+                        {
+                                oldest_spawn = dec->spawn_time;
+                                oldest = dec;
+                        }
+                }
+
+                if (!oldest)
+                        break;
+
+                R_DeactivateDecal (oldest);
+        }
 }
 
 static void R_InitDecalIndices (void)
@@ -319,7 +375,6 @@ void R_InitDecals (void)
         Cvar_RegisterVariable (&r_decals_cvar);
         Cvar_RegisterVariable (&r_decals_blood_cvar);
         Cvar_RegisterVariable (&r_decals_bullet_cvar);
-        Cvar_RegisterVariable (&r_decals_lifetime_cvar);
         Cvar_RegisterVariable (&r_decals_max_cvar);
         Cvar_RegisterVariable (&r_decals_debug_cvar);
 
@@ -333,6 +388,7 @@ void R_ClearDecals (void)
 {
         memset (r_decals, 0, sizeof (r_decals));
         memset (r_decal_death_spawned, 0, sizeof (r_decal_death_spawned));
+        r_active_decal_count = 0;
         R_ClearDecalBatch ();
 }
 
@@ -342,14 +398,19 @@ void R_UpdateDecals (void)
         double t = cl.time;
         qboolean debug = r_decals_debug_cvar.value != 0.f;
 
+        R_RemoveExcessDecals (limit);
+
+        if (r_active_decal_count <= 0)
+                return;
+
         for (i = 0; i < MAX_DECALS; i++)
         {
                 decal_t *dec = &r_decals[i];
                 if (!dec->active)
                         continue;
-                if (i >= limit || dec->die <= t || !dec->texture)
+                if (!dec->texture)
                 {
-                        dec->active = false;
+                        R_DeactivateDecal (dec);
                         continue;
                 }
 
@@ -413,23 +474,46 @@ static decal_t *R_AllocDecal (void)
 {
         int i, limit = R_GetDecalLimit ();
         decal_t *oldest = NULL;
-        double oldest_die = HUGE_VAL;
+        double oldest_spawn = HUGE_VAL;
+        decal_t *inactive = NULL;
+        int active = 0;
 
         if (limit <= 0)
                 return NULL;
 
-        for (i = 0; i < limit; i++)
+        for (i = 0; i < MAX_DECALS; i++)
         {
                 decal_t *dec = &r_decals[i];
-                if (!dec->active)
-                        return dec;
-                if (dec->die < oldest_die)
+                if (dec->active)
                 {
-                        oldest_die = dec->die;
-                        oldest = dec;
+                        active++;
+                        if (dec->spawn_time < oldest_spawn)
+                        {
+                                oldest_spawn = dec->spawn_time;
+                                oldest = dec;
+                        }
+                }
+                else if (!inactive)
+                        inactive = dec;
+        }
+
+        if (active < limit && inactive)
+                return inactive;
+
+        if (active < limit && !inactive)
+                return oldest;
+
+        if (active >= limit)
+        {
+                if (oldest)
+                {
+                        R_DeactivateDecal (oldest);
+                        return oldest;
                 }
         }
 
+        if (inactive)
+                return inactive;
         return oldest;
 }
 
@@ -672,11 +756,6 @@ static void R_RandomDirectionInCone (const vec3_t axis, float cone_angle_deg, ve
         }
 }
 
-static double R_GetDecalLifetime (void)
-{
-        return q_max (1.0, r_decals_lifetime_cvar.value);
-}
-
 static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius)
 {
         vec3_t center, right, up;
@@ -732,6 +811,9 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         if (!dec->base_texture)
                 return false;
 
+        if (dec->active)
+                R_DeactivateDecal (dec);
+
         dec->texture = dec->base_texture;
         dec->type = type;
         dec->radius = radius;
@@ -739,9 +821,9 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         VectorCopy (geom->normal, dec->normal);
         dec->lightcache.surfidx = 0;
         dec->last_light_update = 0.0;
-
-        dec->die = cl.time + R_GetDecalLifetime ();
+        dec->spawn_time = cl.time;
         dec->active = true;
+        r_active_decal_count++;
         dec->tint[0] = tint ? tint[0] : 1.f;
         dec->tint[1] = tint ? tint[1] : 1.f;
         dec->tint[2] = tint ? tint[2] : 1.f;
@@ -1003,12 +1085,18 @@ void R_DrawDecals (qboolean showtris)
         if (!r_decals_cvar.value)
                 return;
 
+        if (r_active_decal_count <= 0)
+        {
+                R_ClearDecalBatch ();
+                return;
+        }
+
         for (i = 0; i < MAX_DECALS; i++)
         {
                 decal_t *dec = &r_decals[i];
                 if (!dec->active)
                         continue;
-                if (dec->die <= cl.time || !dec->texture)
+                if (!dec->texture)
                         continue;
 
                 if (!drew)
