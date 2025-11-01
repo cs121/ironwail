@@ -135,29 +135,58 @@ vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
         uint count = NumLights;
         if (count == 0u)
                 return accum;
+
+        float normal_len_sq = dot(normal, normal);
+        if (normal_len_sq <= 0.0)
+                return accum;
+
+        vec3 plane_n = normal * inversesqrt(normal_len_sq);
+        float plane_w = dot(world_pos, plane_n);
+
         for (uint i = 0u; i < count; ++i)
         {
                 Light light = Lights[i];
-                vec3 to_light = light.origin - world_pos;
-                float dist_sq = dot(to_light, to_light);
                 float radius = light.radius;
-                float radius_sq = radius * radius;
-                if (dist_sq >= radius_sq)
+                if (radius <= 0.0)
                         continue;
-                float inv_dist = inversesqrt(max(dist_sq, 1e-8));
-                float dist = 1.0 / inv_dist;
-                float normalized = smoothstep01((radius - dist) / max(radius, 1e-4));
-                if (normalized <= 0.0)
+
+                float dist = dot(light.origin, plane_n) - plane_w;
+                float absdist = abs(dist);
+                float radial_radius = radius - absdist;
+                float minlight = light.minlight;
+                if (radial_radius <= minlight)
                         continue;
-                vec3 L = to_light * inv_dist;
-                float fade = normalized * normalized;
-                float inv_radius_sq = 1.0 / max(radius_sq, 1e-4);
-                float distance_falloff = 1.0 / (1.0 + dist_sq * inv_radius_sq);
-                float attenuation = fade * distance_falloff * radius;
-                float diffuse = max(dot(normal, L), 0.0);
-                float influence = max(diffuse, light.minlight);
-                accum += light.color * (attenuation * influence);
+
+                vec3 local_pos = light.origin - plane_n * dist;
+                vec3 L = local_pos - world_pos;
+                float Llen2 = dot(L, L);
+                if (Llen2 <= 0.0)
+                        continue;
+
+                float Linv = inversesqrt(Llen2);
+                float sdist = 1.0 / Linv;
+
+                float minlight_span = max(radial_radius - minlight, 1e-4);
+                float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
+                float falloff = smoothstep01((radial_radius - sdist) / max(radial_radius, 1e-4));
+                float axial_falloff = smoothstep01((radius - absdist) / max(radius, 1e-4));
+                falloff *= falloff;
+
+                if (attenuation <= 0.0 || falloff <= 0.0 || axial_falloff <= 0.0)
+                        continue;
+
+                float distance_sq = Llen2 + dist * dist;
+                float inv_radius_sq = 1.0 / max(radius * radius, 1e-4);
+                float distance_falloff = 1.0 / (1.0 + distance_sq * inv_radius_sq);
+
+                vec3 Ldir = L * Linv;
+                float diffuse = max(dot(plane_n, Ldir), 0.0);
+                float influence = max(diffuse, minlight);
+                float intensity = attenuation * falloff * axial_falloff * distance_falloff;
+
+                accum += light.color * (intensity * influence);
         }
+
         return accum * (1.0 / 200.0);
 }
 
