@@ -1601,12 +1601,21 @@ static void Host_Status_f (void)
 	if (ipxAvailable)
 		print_fn ("ipx:     %s\n", my_ipx_address);
 	print_fn ("map:     %s\n", sv.name);
-	print_fn ("players: %i active (%i max)\n\n", net_activeconnections, svs.maxclients);
-	for (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)
-	{
-		if (!client->active)
-			continue;
-		seconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
+\t{
+\t\tint active = 0;
+\t\tfor (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)
+\t\t\tif (client->active)
+\t\t\t\tactive++;
+\t\tprint_fn ("players: %i active (%i max)\n\n", active, svs.maxclients);
+\t}
+\tfor (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)
+\t{
+\t\tif (!client->active)
+\t\t\tcontinue;
+\t\tif (client->isbot || !client->netconnection)
+\t\t\tseconds = 0;
+\t\telse
+\t\t\tseconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
 		minutes = seconds / 60;
 		if (minutes)
 		{
@@ -1617,8 +1626,11 @@ static void Host_Status_f (void)
 		}
 		else
 			hours = 0;
-		print_fn ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j+1, client->name, (int)client->edict->v.frags, hours, minutes, seconds);
-		print_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
+\t\tprint_fn ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j+1, client->name, (int)client->edict->v.frags, hours, minutes, seconds);
+\t\tif (client->isbot || !client->netconnection)
+\t\t\tprint_fn ("   BOT\n");
+\t\telse
+\t\t\tprint_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
 	}
 }
 
@@ -3130,8 +3142,8 @@ static void Host_Spawn_f (void)
                         PR_ExecuteProgram (pr_global_struct->ClientConnect);
                 }
 
-		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
-			Sys_Printf ("%s entered the game\n", host_client->name);
+\t\tif (host_client->netconnection && (Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
+\t\t\tSys_Printf ("%s entered the game\n", host_client->name);
 
 		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 	}

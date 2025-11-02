@@ -181,6 +181,8 @@ void SV_Init (void)
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
 
+	SV_Bot_Init ();
+
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
 
@@ -390,6 +392,10 @@ CLIENT SPAWNING
 
 static qboolean SV_IsLocalClient (client_t *client)
 {
+	if (client->isbot)
+		return true;
+	if (!client->netconnection)
+		return false;
 	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
@@ -476,7 +482,10 @@ void SV_ConnectClient (int clientnum)
 
 	client = svs.clients + clientnum;
 
-	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
+	{
+		const char *address = client->netconnection ? NET_QSocketGetAddressString (client->netconnection) : "BOT";
+		Con_DPrintf ("Client %s connected\n", address);
+	}
 
 	edictnum = clientnum+1;
 
@@ -1315,7 +1324,7 @@ void SV_UpdateToReliableMessages (void)
 		{
 			for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 			{
-				if (!client->active)
+				if (!client->active || client->isbot)
 					continue;
 				MSG_WriteByte (&client->message, svc_updatefrags);
 				MSG_WriteByte (&client->message, i);
@@ -1328,7 +1337,7 @@ void SV_UpdateToReliableMessages (void)
 
 	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 	{
-		if (!client->active)
+		if (!client->active || client->isbot)
 			continue;
 		SV_WriteStats (client);
 		SV_WriteUnderwaterOverride (client);
@@ -1379,6 +1388,8 @@ void SV_SendClientMessages (void)
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 	{
 		if (!host_client->active)
+			continue;
+		if (host_client->isbot)
 			continue;
 
 		if (host_client->spawned)
@@ -1949,6 +1960,7 @@ void SV_SpawnServer (const char *server)
 //
 	//memset (&sv, 0, sizeof(sv));
 	Host_ClearMemory ();
+	SV_Bot_Reset ();
 
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	if (developer.value || map_checks.value)

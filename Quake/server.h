@@ -133,6 +133,7 @@ typedef struct client_s
 	qboolean		dropasap;			// has been told to go to another level
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
+	qboolean		isbot;			// true if this client is controlled by the server
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
@@ -163,6 +164,11 @@ typedef struct client_s
 	char			*oldstats_s[MAX_CL_STATS];
 } client_t;
 
+// bot control helpers
+void SV_Bot_Init (void);
+void SV_Bot_Reset (void);
+void SV_Bot_RunFrame (client_t *client);
+void SV_Bot_ClientDisconnected (client_t *client);
 
 //=============================================================================
 
