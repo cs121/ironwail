@@ -37,6 +37,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define DECAL_MAX_DISTANCE      64.f
 #define BULLET_DECAL_DISTANCE   12.f
+#define DECAL_RADIUS_SCALE              1.5f
+#define DECAL_SPAWN_PROBABILITY 0.5f
+#define DECAL_SPREAD_JITTER             0.25f
+#define DECAL_OVERLAP_RADIUS_FACTOR 0.6f
+#define DECAL_OVERLAP_NORMAL_COS 0.8f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
 #define BULLET_DECAL_MIN_RADIUS 10.0f
@@ -85,6 +90,7 @@ typedef struct decalvertex_s
         vec3_t          pos;
         float           uv[2];
         float           color[4];
+        float           normal_spec[4];
 } decalvertex_t;
 
 typedef struct decal_s
@@ -147,6 +153,13 @@ static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_max_cvar = {"r_decals_max", "4096", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
+
+static const float r_decal_specular_strength[DECAL_COUNT] =
+{
+        0.2f,
+        0.7f,
+        0.15f
+};
 
 extern vec3_t lightcolor;
 
@@ -520,6 +533,7 @@ static void R_FlushDecalBatch (void)
         GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, pos));
         GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, uv));
         GL_VertexAttribPointerFunc (2, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, color));
+        GL_VertexAttribPointerFunc (3, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, normal_spec));
 
         GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indices, sizeof(decal_indices[0]) * decal_batch_count * 6, &buf, &ofs);
         GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
@@ -1028,6 +1042,11 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         return R_FindBestDecalSurface (point, preferred_normal, maxdist, out);
 }
 
+static qboolean R_DecalShouldSpawn (void)
+{
+        return ((float)rand () / (float)RAND_MAX) <= DECAL_SPAWN_PROBABILITY;
+}
+
 static qboolean R_DecalHasEdgeRoom (const decalgeom_t *geom, float radius)
 {
         int axis;
@@ -1057,6 +1076,83 @@ static float R_RandomRange (float minval, float maxval)
         if (maxval <= minval)
                 return minval;
         return minval + (maxval - minval) * ((float)rand () / (float)RAND_MAX);
+}
+
+static qboolean R_DecalOverlapsExisting (const decalgeom_t *geom, float radius)
+{
+        int min_cx = R_DecalGridCoord (geom->origin[0] - radius);
+        int max_cx = R_DecalGridCoord (geom->origin[0] + radius);
+        int min_cy = R_DecalGridCoord (geom->origin[1] - radius);
+        int max_cy = R_DecalGridCoord (geom->origin[1] + radius);
+        int min_cz = R_DecalGridCoord (geom->origin[2] - radius);
+        int max_cz = R_DecalGridCoord (geom->origin[2] + radius);
+        int cx, cy, cz;
+
+        for (cx = min_cx; cx <= max_cx; cx++)
+        for (cy = min_cy; cy <= max_cy; cy++)
+        for (cz = min_cz; cz <= max_cz; cz++)
+        {
+                decal_grid_bucket_t *bucket = R_DecalGridFind (cx, cy, cz, false);
+                int i;
+
+                if (!bucket || !bucket->used || bucket->cell.count <= 0)
+                        continue;
+
+                for (i = 0; i < bucket->cell.count; i++)
+                {
+                        int idx = bucket->cell.decals[i];
+                        decal_t *other;
+                        vec3_t delta;
+                        float dist;
+                        float combined_radius;
+                        float normal_dot;
+
+                        if (idx < 0 || idx >= MAX_DECALS)
+                                continue;
+
+                        other = &r_decals[idx];
+                        if (!other->active)
+                                continue;
+
+                        normal_dot = DotProduct (other->normal, geom->normal);
+                        if (normal_dot < DECAL_OVERLAP_NORMAL_COS)
+                                continue;
+
+                        VectorSubtract (other->origin, geom->origin, delta);
+                        dist = VectorLength (delta);
+                        combined_radius = (other->radius + radius) * DECAL_OVERLAP_RADIUS_FACTOR;
+                        if (dist < combined_radius)
+                                return true;
+                }
+        }
+
+        {
+                int i;
+
+                for (i = 0; i < MAX_DECALS; i++)
+                {
+                        decal_t *other = &r_decals[i];
+                        vec3_t delta;
+                        float dist;
+                        float combined_radius;
+                        float normal_dot;
+
+                        if (!other->active || other->grid_bucket >= 0)
+                                continue;
+
+                        normal_dot = DotProduct (other->normal, geom->normal);
+                        if (normal_dot < DECAL_OVERLAP_NORMAL_COS)
+                                continue;
+
+                        VectorSubtract (other->origin, geom->origin, delta);
+                        dist = VectorLength (delta);
+                        combined_radius = (other->radius + radius) * DECAL_OVERLAP_RADIUS_FACTOR;
+                        if (dist < combined_radius)
+                                return true;
+                }
+        }
+
+        return false;
 }
 
 static float R_ComputeBloodDecalRadius (float scale)
@@ -1112,7 +1208,7 @@ static void R_RandomDirectionInCone (const vec3_t axis, float cone_angle_deg, ve
         }
 }
 
-static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius)
+static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius, float specular)
 {
         vec3_t center, right, up;
         vec3_t sdir = {geom->sdir[0], geom->sdir[1], geom->sdir[2]};
@@ -1120,6 +1216,7 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         float angle = (float) rand () * (2.f * M_PI / (float) RAND_MAX);
         float c = cosf (angle), s = sinf (angle);
         vec3_t rs, rt;
+        vec3_t basis_s, basis_t;
         int i;
 
         for (i = 0; i < 3; i++)
@@ -1130,10 +1227,20 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         VectorNormalizeFast (rs);
         VectorNormalizeFast (rt);
 
+        VectorCopy (rs, basis_s);
+        VectorCopy (rt, basis_t);
+
         VectorScale (rs, radius, right);
         VectorScale (rt, radius, up);
 
         VectorMA (geom->origin, DECAL_OFFSET, geom->normal, center);
+
+        {
+                float jitter_s = R_RandomRange (-DECAL_SPREAD_JITTER, DECAL_SPREAD_JITTER);
+                float jitter_t = R_RandomRange (-DECAL_SPREAD_JITTER, DECAL_SPREAD_JITTER);
+                VectorMA (center, jitter_s * radius, basis_s, center);
+                VectorMA (center, jitter_t * radius, basis_t, center);
+        }
 
         VectorSubtract (center, right, dec->verts[0].pos);
         VectorSubtract (dec->verts[0].pos, up, dec->verts[0].pos);
@@ -1150,6 +1257,12 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         VectorAdd (center, right, dec->verts[3].pos);
         VectorSubtract (dec->verts[3].pos, up, dec->verts[3].pos);
         dec->verts[3].uv[0] = 1.f; dec->verts[3].uv[1] = 1.f;
+
+        for (i = 0; i < 4; i++)
+        {
+                VectorCopy (geom->normal, dec->verts[i].normal_spec);
+                dec->verts[i].normal_spec[3] = specular;
+        }
 }
 
 static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_t type, const float *tint)
@@ -1160,6 +1273,12 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
                 return false;
 
         if (!R_ValidateDecalGeometry (geom))
+                return false;
+
+        if (!R_DecalShouldSpawn ())
+                return false;
+
+        if (R_DecalOverlapsExisting (geom, radius))
                 return false;
 
         dec = R_AllocDecal ();
@@ -1193,7 +1312,13 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         dec->use_normal_map = false;
         dec->grid_bucket = -1;
         dec->grid_slot = -1;
-        R_AssignDecalVertices (dec, geom, radius);
+        {
+                float specular = 0.3f;
+                if (type >= 0 && type < DECAL_COUNT)
+                        specular = r_decal_specular_strength[type];
+                specular *= dec->base_alpha;
+                R_AssignDecalVertices (dec, geom, radius, specular);
+        }
 
         {
                 vec3_t sample;
@@ -1261,7 +1386,8 @@ void R_AddBulletDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (BULLET_DECAL_MIN_RADIUS, BULLET_DECAL_MAX_RADIUS);
-        if (!R_DecalHasEdgeRoom (&geom, radius))
+        radius *= DECAL_RADIUS_SCALE;
+        if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
                 return;
         R_CreateDecal (&geom, radius, DECAL_BULLET, tint);
 }
@@ -1279,7 +1405,8 @@ void R_AddExplosionDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (EXPLOSION_DECAL_MIN_RADIUS, EXPLOSION_DECAL_MAX_RADIUS);
-        if (!R_DecalHasEdgeRoom (&geom, radius))
+        radius *= DECAL_RADIUS_SCALE;
+        if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
                 return;
         R_CreateDecal (&geom, radius, DECAL_SCORCH, tint);
 }
@@ -1306,7 +1433,9 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                         float scale = R_RandomRange (1.f, 2.5f);
                         radius = base_radius * scale * BLOOD_DECAL_SIZE_SCALE;
                 }
-                if (!R_DecalHasEdgeRoom (&geom, radius))
+                radius *= DECAL_RADIUS_SCALE;
+
+                if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
                         return false;
                 if (out_geom)
                         *out_geom = geom;
@@ -1538,9 +1667,9 @@ void R_DrawDecals (qboolean showtris)
                 GL_BeginGroup ("Decals");
                 GL_UseProgram (glprogs.decals[dither]);
                 if (showtris)
-                        GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                        GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
                 else
-                        GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                        GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
                 GL_PolygonOffset (OFFSET_DECAL);
 
                 R_ClearDecalBatch ();
