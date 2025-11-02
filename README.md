@@ -63,4 +63,4 @@ Additional engine services (physics tracing, sound, networking, etc.) currently 
 
 Notes:
 1. Requirements are based on reported OpenGL capabilities; unexpected incompatibilities may still exist.
-2. macOS is currently unsupported because Ironwail targets OpenGL 4.3 for compute shaders, while Apple only provides OpenGL up to 4.1.
+2. macOS is currently unsupported because Ironwail targets OpenGL 4.6 for compute shaders, while Apple only provides OpenGL up to 4.1.
