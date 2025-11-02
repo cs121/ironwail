@@ -118,6 +118,7 @@ static GLushort          *decal_indices = NULL;
 static qboolean          decal_indices_init = false;
 
 static decalvertex_t     *decal_batch = NULL;
+static decal_t           **decal_draw_list = NULL;
 static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
@@ -195,6 +196,15 @@ static void R_ReserveDecalStorage (int desired)
                 if ((size_t)new_capacity > old_capacity)
                         memset (new_batch + old_capacity * 4, 0, ((size_t)new_capacity - old_capacity) * 4 * sizeof (*decal_batch));
                 decal_batch = new_batch;
+        }
+
+        {
+                decal_t **new_draw_list = (decal_t **) realloc (decal_draw_list, (size_t)new_capacity * sizeof (*decal_draw_list));
+                if (!new_draw_list)
+                        Sys_Error ("R_ReserveDecalStorage: failed to allocate %zu bytes for decal draw list", (size_t)new_capacity * sizeof (*decal_draw_list));
+                if ((size_t)new_capacity > old_capacity)
+                        memset (new_draw_list + old_capacity, 0, ((size_t)new_capacity - old_capacity) * sizeof (*decal_draw_list));
+                decal_draw_list = new_draw_list;
         }
 
         r_decal_capacity = new_capacity;
@@ -276,6 +286,22 @@ static void R_RemoveExcessDecals (int limit)
 
                 R_DeactivateDecal (oldest);
         }
+}
+
+static int R_CompareDecalTexture (const void *a, const void *b)
+{
+        const decal_t *const *da = (const decal_t *const *) a;
+        const decal_t *const *db = (const decal_t *const *) b;
+
+        if ((*da)->texture < (*db)->texture)
+                return -1;
+        if ((*da)->texture > (*db)->texture)
+                return 1;
+        if (*da < *db)
+                return -1;
+        if (*da > *db)
+                return 1;
+        return 0;
 }
 
 static void R_InitDecalIndices (void)
@@ -499,10 +525,18 @@ void R_UpdateDecals (void)
         double t = cl.time;
         qboolean debug = r_decals_debug_cvar.value != 0.f;
 
-        R_RemoveExcessDecals (limit);
+        if (limit <= 0)
+        {
+                R_RemoveExcessDecals (limit);
+                R_ClearDecalBatch ();
+                return;
+        }
 
         if (r_active_decal_count <= 0 || !r_decals || r_decal_capacity <= 0)
+        {
+                R_ClearDecalBatch ();
                 return;
+        }
 
         for (i = 0; i < r_decal_capacity; i++)
         {
@@ -951,7 +985,7 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         {
                 float spec = 0.f;
                 if (type == DECAL_BLOOD)
-                        spec = 0.5f * CLAMP (0.f, dec->tint[3], 1.f);
+                        spec = 0.2f * CLAMP (0.f, dec->tint[3], 1.f);
                 R_AssignDecalVertices (dec, geom, radius, spec);
         }
 
@@ -1205,12 +1239,13 @@ void R_AddGibDecal (const vec3_t point, int particle_count)
 void R_DrawDecals (qboolean showtris)
 {
         int i;
+        int draw_count = 0;
         qboolean drew = false;
 
         if (!r_decals_cvar.value)
                 return;
 
-        if (r_active_decal_count <= 0 || !r_decals || r_decal_capacity <= 0)
+        if (r_active_decal_count <= 0 || !r_decals || r_decal_capacity <= 0 || !decal_draw_list)
         {
                 R_ClearDecalBatch ();
                 return;
@@ -1223,6 +1258,20 @@ void R_DrawDecals (qboolean showtris)
                         continue;
                 if (!dec->texture)
                         continue;
+                decal_draw_list[draw_count++] = dec;
+        }
+
+        if (!draw_count)
+        {
+                R_ClearDecalBatch ();
+                return;
+        }
+
+        qsort (decal_draw_list, (size_t) draw_count, sizeof (decal_draw_list[0]), R_CompareDecalTexture);
+
+        for (i = 0; i < draw_count; i++)
+        {
+                decal_t *dec = decal_draw_list[i];
 
                 if (!drew)
                 {

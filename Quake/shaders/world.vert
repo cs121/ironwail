@@ -5,7 +5,6 @@
 	layout(location=0) uniform int DrawID;
 	#define DRAW_ID			DrawID
 #endif
-
 #include "frame_uniforms.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)
@@ -48,7 +47,9 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
+	float	specular;
 #if BINDLESS
+	float	pad;
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
@@ -131,6 +132,7 @@ layout(location=8) flat out float out_lmofs;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
+layout(location=13) flat out float out_specular;
 
 void main()
 {
@@ -165,6 +167,7 @@ void main()
 #else
 	out_alpha = instance.alpha < 0.0 ? 1.0 : instance.alpha;
 #endif
+	out_specular = call.specular;
 	out_styles.x = GetLightStyle(in_styles.x);
 	if (in_styles.y == 255)
 		out_styles.yzw = vec3(-1.);
