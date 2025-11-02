@@ -434,15 +434,12 @@ void SV_ClientPrintf (const char *fmt, ...)
 	va_list		argptr;
 	char		string[1024];
 
-\tif (host_client && host_client->isbot)
-\t\treturn;
+	va_start (argptr,fmt);
+	q_vsnprintf (string, sizeof(string), fmt,argptr);
+	va_end (argptr);
 
-        va_start (argptr,fmt);
-        q_vsnprintf (string, sizeof(string), fmt,argptr);
-        va_end (argptr);
-
-        MSG_WriteByte (&host_client->message, svc_print);
-        MSG_WriteString (&host_client->message, string);
+	MSG_WriteByte (&host_client->message, svc_print);
+	MSG_WriteString (&host_client->message, string);
 }
 
 /*
@@ -464,7 +461,7 @@ void SV_BroadcastPrintf (const char *fmt, ...)
 
 	for (i = 0; i < svs.maxclients; i++)
 	{
-                if (svs.clients[i].active && svs.clients[i].spawned && !svs.clients[i].isbot)
+		if (svs.clients[i].active && svs.clients[i].spawned)
 		{
 			MSG_WriteByte (&svs.clients[i].message, svc_print);
 			MSG_WriteString (&svs.clients[i].message, string);
@@ -509,7 +506,7 @@ void SV_DropClient (qboolean crash)
 	if (!crash)
 	{
 		// send any final messages (don't check for errors)
-		if (host_client->netconnection && NET_CanSendMessage (host_client->netconnection))
+		if (NET_CanSendMessage (host_client->netconnection))
 		{
 			MSG_WriteByte (&host_client->message, svc_disconnect);
 			NET_SendMessage (host_client->netconnection, &host_client->message);
@@ -554,13 +551,9 @@ void SV_DropClient (qboolean crash)
 		Sys_Printf ("Client %s removed\n",host_client->name);
 	}
 
-	// break the net connection
-	if (host_client->netconnection)
-	{
-		NET_Close (host_client->netconnection);
-		host_client->netconnection = NULL;
-	}
-	SV_Bot_ClientDisconnected (host_client);
+// break the net connection
+	NET_Close (host_client->netconnection);
+	host_client->netconnection = NULL;
 
 // free the client (the body stays around)
 	host_client->active = false;
@@ -568,11 +561,11 @@ void SV_DropClient (qboolean crash)
 	host_client->old_frags = -999999;
 	net_activeconnections--;
 
-	// send notification to all clients
+// send notification to all clients
 	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
 	{
-		if (!client->active || client->isbot)
-                        continue;
+		if (!client->active)
+			continue;
 		MSG_WriteByte (&client->message, svc_updatename);
 		MSG_WriteByte (&client->message, host_client - svs.clients);
 		MSG_WriteString (&client->message, "");

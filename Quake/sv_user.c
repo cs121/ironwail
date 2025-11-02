@@ -617,41 +617,31 @@ SV_RunClients
 */
 void SV_RunClients (void)
 {
-\tint\t\t\ti;
+	int				i;
 
-\tfor (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
-\t{
-\t\tif (!host_client->active)
-\t\t\tcontinue;
+	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
+	{
+		if (!host_client->active)
+			continue;
 
-\t\tsv_player = host_client->edict;
+		sv_player = host_client->edict;
 
-\t\tif (host_client->isbot)
-\t\t{
-\t\t\tif (!host_client->spawned)
-\t\t\t\tcontinue;
-\t\t\tSV_Bot_RunFrame (host_client);
-\t\t}
-\t\telse
-\t\t{
-\t\t\tif (!SV_ReadClientMessage ())
-\t\t\t{
-\t\t\t\tSV_DropClient (false);  // client misbehaved...
-\t\t\t\tcontinue;
-\t\t\t}
+		if (!SV_ReadClientMessage ())
+		{
+			SV_DropClient (false);	// client misbehaved...
+			continue;
+		}
 
-\t\t\tif (!host_client->spawned)
-\t\t\t{
-\t\t\t\t// clear client movement until a new packet is received
-\t\t\t\tmemset (&host_client->cmd, 0, sizeof(host_client->cmd));
-\t\t\t\tcontinue;
-\t\t\t}
-\t\t}
+		if (!host_client->spawned)
+		{
+		// clear client movement until a new packet is received
+			memset (&host_client->cmd, 0, sizeof(host_client->cmd));
+			continue;
+		}
 
-\t\t// always pause in single player if in console or menus
-\t\tif (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
-\t\t\tSV_ClientThink ();
-\t}
+// always pause in single player if in console or menus
+		if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
+			SV_ClientThink ();
+	}
 }
-
 
