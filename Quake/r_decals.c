@@ -24,43 +24,32 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include <ctype.h>
 #include <string.h>
-#include <math.h>
-#include <stdint.h>
 
-#define MAX_DECALS              16384
+#define MAX_DECALS                      256
 #define DECAL_TEXTURE_SIZE      64
 #define DECAL_OFFSET            0.25f
 
-#define DECAL_GRID_SIZE         256.0f
-#define DECAL_GRID_MAX_PER_CELL 32
-#define DECAL_GRID_BUCKET_COUNT 2048
-
 #define DECAL_MAX_DISTANCE      64.f
 #define BULLET_DECAL_DISTANCE   12.f
-#define DECAL_RADIUS_SCALE              1.5f
-#define DECAL_SPAWN_PROBABILITY 0.5f
-#define DECAL_SPREAD_JITTER             0.25f
-#define DECAL_OVERLAP_RADIUS_FACTOR 0.6f
-#define DECAL_OVERLAP_NORMAL_COS 0.8f
 #define WALL_BLOOD_DISTANCE     48.f
 #define FLOOR_BLOOD_DISTANCE    72.f
-#define BULLET_DECAL_MIN_RADIUS 10.0f
-#define BULLET_DECAL_MAX_RADIUS 16.0f
-#define BLOOD_DECAL_MIN_RADIUS  12.0f
-#define BLOOD_DECAL_MAX_RADIUS  25.0f
+#define BULLET_DECAL_MIN_RADIUS 7.0f
+#define BULLET_DECAL_MAX_RADIUS 10.0f
+#define BLOOD_DECAL_MIN_RADIUS  6.0f
+#define BLOOD_DECAL_MAX_RADIUS  12.0f
 
 #define BLOOD_DECAL_SIZE_SCALE  0.5625f
 
-#define EXPLOSION_DECAL_MIN_RADIUS       (BULLET_DECAL_MIN_RADIUS * 10.0f)
-#define EXPLOSION_DECAL_MAX_RADIUS       (BULLET_DECAL_MAX_RADIUS * 10.0f)
+#define EXPLOSION_DECAL_MIN_RADIUS       (BULLET_DECAL_MIN_RADIUS * 4.0f)
+#define EXPLOSION_DECAL_MAX_RADIUS       (BULLET_DECAL_MAX_RADIUS * 4.0f)
 
-#define GIB_DECAL_RADIUS         48.0f
+#define GIB_DECAL_RADIUS         28.0f
 #define GIB_DECAL_PARTICLE_THRESHOLD    80
 
 #define BLOOD_POOL_RADIUS       22.0f
 #define BLOOD_POOL_JITTER       12.0f
-#define BLOOD_POOL_SMALL_MIN    20.0f
-#define BLOOD_POOL_SMALL_MAX    48.0f
+#define BLOOD_POOL_SMALL_MIN    6.0f
+#define BLOOD_POOL_SMALL_MAX    10.0f
 
 #define DECAL_LIGHT_REFRESH     0.1
 
@@ -90,7 +79,6 @@ typedef struct decalvertex_s
         vec3_t          pos;
         float           uv[2];
         float           color[4];
-        float           normal_spec[4];
 } decalvertex_t;
 
 typedef struct decal_s
@@ -104,16 +92,10 @@ typedef struct decal_s
         vec3_t          origin;
         vec3_t          normal;
         float           tint[4];
-        float           base_alpha;
         vec3_t          light_color;
         lightcache_t    lightcache;
         double          last_light_update;
         decalvertex_t   verts[4];
-        gltexture_t     *normal_map;
-        qboolean        use_normal_map;
-        unsigned int    flags;
-        int             grid_bucket;
-        int             grid_slot;
 } decal_t;
 
 typedef struct decalgeom_s
@@ -126,16 +108,6 @@ typedef struct decalgeom_s
         vec3_t  maxs;
 } decalgeom_t;
 
-typedef struct decal_search_state_s
-{
-        vec3_t point;
-        vec3_t preferred_normal;
-        float preferred_len;
-        float maxdist;
-        float best_score;
-        decalgeom_t *geom;
-} decal_search_state_t;
-
 static decal_t                 r_decals[MAX_DECALS];
 static gltexture_t     *r_decal_textures[DECAL_COUNT];
 
@@ -146,20 +118,12 @@ static decalvertex_t     decal_batch[4 * MAX_DECALS];
 static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
-static decal_t           *decal_draw_list[MAX_DECALS];
 
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
-static cvar_t    r_decals_max_cvar = {"r_decals_max", "4096", CVAR_ARCHIVE};
+static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
-
-static const float r_decal_specular_strength[DECAL_COUNT] =
-{
-        0.2f,
-        0.7f,
-        0.15f
-};
 
 extern vec3_t lightcolor;
 
@@ -168,249 +132,24 @@ static double r_last_gib_decal_time = -9999.0;
 static vec3_t r_last_gib_decal_origin = {0.f, 0.f, 0.f};
 static int r_active_decal_count = 0;
 
-typedef enum {
-        DECAL_FLAG_ACTIVE        = (1u << 0),
-        DECAL_FLAG_NEEDS_UPDATE  = (1u << 1),
-        DECAL_FLAG_PERMANENT     = (1u << 2)
-} decal_flags_t;
-
-typedef struct decal_pool_s {
-        int free_list[MAX_DECALS];
-        int free_count;
-} decal_pool_t;
-
-typedef struct decal_grid_cell_s {
-        int decals[DECAL_GRID_MAX_PER_CELL];
-        int count;
-} decal_grid_cell_t;
-
-typedef struct decal_grid_bucket_s {
-        qboolean used;
-        qboolean ever_used;
-        int cell_x;
-        int cell_y;
-        int cell_z;
-        decal_grid_cell_t cell;
-} decal_grid_bucket_t;
-
-typedef struct decal_stats_s {
-        int total_spawned;
-        int total_culled;
-        int batch_count;
-        float avg_batch_size;
-} decal_stats_t;
-
-static decal_pool_t decal_pool;
-static decal_grid_bucket_t decal_grid[DECAL_GRID_BUCKET_COUNT];
-static decal_stats_t decal_stats;
-
-static void R_BuildOrthonormalBasis (const vec3_t normal, vec3_t sdir, vec3_t tdir);
-
-static void R_PrintDecalStats (void)
-{
-        Con_Printf ("Decals: %d active, %d batches, avg %.1f per batch\n",
-                r_active_decal_count,
-                decal_stats.batch_count,
-                decal_stats.avg_batch_size);
-}
-
 static int R_GetDecalLimit (void)
 {
         return CLAMP (0, (int) r_decals_max_cvar.value, MAX_DECALS);
 }
 
-static void R_InitDecalPool (void)
-{
-        int i;
-        decal_pool.free_count = MAX_DECALS;
-        for (i = 0; i < MAX_DECALS; i++)
-                decal_pool.free_list[i] = i;
-}
-
-static void R_ResetDecalGrid (void)
-{
-        memset (decal_grid, 0, sizeof (decal_grid));
-}
-
-static int R_DecalIndex (const decal_t *dec)
-{
-        if (!dec)
-                return -1;
-        return (int)(dec - r_decals);
-}
-
-static int R_DecalGridCoord (float value)
-{
-        return (int)floorf (value / DECAL_GRID_SIZE);
-}
-
-static uint32_t R_DecalGridHash (int cx, int cy, int cz)
-{
-        uint32_t x = (uint32_t)cx * 73856093u;
-        uint32_t y = (uint32_t)cy * 19349663u;
-        uint32_t z = (uint32_t)cz * 83492791u;
-        return (x ^ y ^ z) & (DECAL_GRID_BUCKET_COUNT - 1);
-}
-
-static decal_grid_bucket_t *R_DecalGridFind (int cx, int cy, int cz, qboolean create)
-{
-        uint32_t hash = R_DecalGridHash (cx, cy, cz);
-        uint32_t i;
-
-        for (i = 0; i < DECAL_GRID_BUCKET_COUNT; i++)
-        {
-                uint32_t idx = (hash + i) & (DECAL_GRID_BUCKET_COUNT - 1);
-                decal_grid_bucket_t *bucket = &decal_grid[idx];
-
-                if (bucket->used && bucket->cell_x == cx && bucket->cell_y == cy && bucket->cell_z == cz)
-                        return bucket;
-
-                if (!bucket->used)
-                {
-                        if (!bucket->ever_used)
-                        {
-                                if (!create)
-                                        return NULL;
-
-                                bucket->ever_used = true;
-                                bucket->used = true;
-                                bucket->cell_x = cx;
-                                bucket->cell_y = cy;
-                                bucket->cell_z = cz;
-                                bucket->cell.count = 0;
-                                return bucket;
-                        }
-
-                        if (create)
-                        {
-                                bucket->used = true;
-                                bucket->cell_x = cx;
-                                bucket->cell_y = cy;
-                                bucket->cell_z = cz;
-                                bucket->cell.count = 0;
-                                return bucket;
-                        }
-                }
-        }
-
-        return NULL;
-}
-
-static void R_DecalGridDetach (decal_t *dec)
-{
-        if (!dec)
-                return;
-
-        if (dec->grid_bucket < 0 || dec->grid_bucket >= DECAL_GRID_BUCKET_COUNT)
-        {
-                dec->grid_bucket = -1;
-                dec->grid_slot = -1;
-                return;
-        }
-
-        decal_grid_bucket_t *bucket = &decal_grid[dec->grid_bucket];
-        if (!bucket->used || dec->grid_slot < 0 || dec->grid_slot >= bucket->cell.count)
-        {
-                dec->grid_bucket = -1;
-                dec->grid_slot = -1;
-                return;
-        }
-
-        bucket->cell.count--;
-        if (dec->grid_slot < bucket->cell.count)
-        {
-                int moved = bucket->cell.decals[bucket->cell.count];
-                bucket->cell.decals[dec->grid_slot] = moved;
-                r_decals[moved].grid_slot = dec->grid_slot;
-        }
-        bucket->cell.decals[bucket->cell.count] = -1;
-
-        if (bucket->cell.count <= 0)
-                bucket->used = false;
-
-        dec->grid_bucket = -1;
-        dec->grid_slot = -1;
-}
-
-static void R_DecalGridAttach (decal_t *dec, int decal_index)
-{
-        int cx, cy, cz;
-        decal_grid_bucket_t *bucket;
-
-        if (!dec)
-                return;
-
-        cx = R_DecalGridCoord (dec->origin[0]);
-        cy = R_DecalGridCoord (dec->origin[1]);
-        cz = R_DecalGridCoord (dec->origin[2]);
-
-        bucket = R_DecalGridFind (cx, cy, cz, true);
-        if (!bucket)
-        {
-                dec->grid_bucket = -1;
-                dec->grid_slot = -1;
-                return;
-        }
-
-        if (bucket->cell.count >= DECAL_GRID_MAX_PER_CELL)
-        {
-                dec->grid_bucket = -1;
-                dec->grid_slot = -1;
-                return;
-        }
-
-        dec->grid_bucket = (int)(bucket - decal_grid);
-        dec->grid_slot = bucket->cell.count;
-        bucket->cell.decals[bucket->cell.count++] = decal_index;
-}
-
 static void R_DeactivateDecal (decal_t *dec)
 {
-        int index;
-
         if (!dec || !dec->active)
                 return;
-
-        index = R_DecalIndex (dec);
-
-        R_DecalGridDetach (dec);
 
         dec->active = false;
         dec->texture = NULL;
         dec->base_texture = NULL;
         dec->last_light_update = 0.0;
         dec->spawn_time = 0.0;
-        dec->base_alpha = 0.f;
-        dec->normal_map = NULL;
-        dec->use_normal_map = false;
-        dec->flags = 0;
 
         if (r_active_decal_count > 0)
                 r_active_decal_count--;
-
-        if (index >= 0 && decal_pool.free_count < MAX_DECALS)
-                decal_pool.free_list[decal_pool.free_count++] = index;
-}
-
-static decal_t *R_FindOldestDecal (void)
-{
-        double oldest_spawn = HUGE_VAL;
-        decal_t *oldest = NULL;
-        int i;
-
-        for (i = 0; i < MAX_DECALS; i++)
-        {
-                decal_t *dec = &r_decals[i];
-                if (!dec->active)
-                        continue;
-                if (dec->spawn_time < oldest_spawn)
-                {
-                        oldest_spawn = dec->spawn_time;
-                        oldest = dec;
-                }
-        }
-
-        return oldest;
 }
 
 static void R_RemoveExcessDecals (int limit)
@@ -431,37 +170,26 @@ static void R_RemoveExcessDecals (int limit)
         to_remove = r_active_decal_count - limit;
         while (to_remove-- > 0)
         {
-                decal_t *oldest = R_FindOldestDecal ();
+                decal_t *oldest = NULL;
+                double oldest_spawn = HUGE_VAL;
+                int i;
+
+                for (i = 0; i < MAX_DECALS; i++)
+                {
+                        decal_t *dec = &r_decals[i];
+                        if (!dec->active)
+                                continue;
+                        if (dec->spawn_time < oldest_spawn)
+                        {
+                                oldest_spawn = dec->spawn_time;
+                                oldest = dec;
+                        }
+                }
+
                 if (!oldest)
                         break;
+
                 R_DeactivateDecal (oldest);
-        }
-}
-
-static void R_UpdateDecalAlpha (decal_t *dec, double time)
-{
-        double age;
-        float fade_start = 30.0f;
-        float fade_duration = 10.0f;
-
-        if (!dec)
-                return;
-
-        age = time - dec->spawn_time;
-        if (age <= fade_start)
-        {
-                if (dec->tint[3] != dec->base_alpha)
-                {
-                        dec->tint[3] = dec->base_alpha;
-                        dec->flags |= DECAL_FLAG_NEEDS_UPDATE;
-                }
-                return;
-        }
-
-        {
-                float fade = 1.0f - CLAMP (0.f, (float)((age - fade_start) / fade_duration), 1.f);
-                dec->tint[3] = dec->base_alpha * fade;
-                dec->flags |= DECAL_FLAG_NEEDS_UPDATE;
         }
 }
 
@@ -491,31 +219,6 @@ static void R_ClearDecalBatch (void)
         decal_batch_showtris = false;
 }
 
-static qboolean R_DecalInFrustum (const decal_t *dec)
-{
-        vec3_t mins, maxs;
-        int i;
-
-        if (!dec)
-                return false;
-
-        VectorCopy (dec->verts[0].pos, mins);
-        VectorCopy (dec->verts[0].pos, maxs);
-
-        for (i = 1; i < 4; i++)
-        {
-                const float *pos = dec->verts[i].pos;
-                mins[0] = q_min (mins[0], pos[0]);
-                mins[1] = q_min (mins[1], pos[1]);
-                mins[2] = q_min (mins[2], pos[2]);
-                maxs[0] = q_max (maxs[0], pos[0]);
-                maxs[1] = q_max (maxs[1], pos[1]);
-                maxs[2] = q_max (maxs[2], pos[2]);
-        }
-
-        return !R_CullBox (mins, maxs);
-}
-
 static void R_FlushDecalBatch (void)
 {
         GLuint buf;
@@ -533,53 +236,18 @@ static void R_FlushDecalBatch (void)
         GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, pos));
         GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, uv));
         GL_VertexAttribPointerFunc (2, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, color));
-        GL_VertexAttribPointerFunc (3, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, normal_spec));
 
         GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indices, sizeof(decal_indices[0]) * decal_batch_count * 6, &buf, &ofs);
         GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-        if (GL_DrawElementsInstancedFunc)
-                GL_DrawElementsInstancedFunc (GL_TRIANGLES, decal_batch_count * 6, GL_UNSIGNED_SHORT, ofs, 1);
-        else
-                glDrawElements (GL_TRIANGLES, decal_batch_count * 6, GL_UNSIGNED_SHORT, ofs);
+        glDrawElements (GL_TRIANGLES, decal_batch_count * 6, GL_UNSIGNED_SHORT, ofs);
 
         R_ClearDecalBatch ();
 }
 
-static int R_CompareDecalsByTexture (const void *a, const void *b)
+static void R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
 {
-        const decal_t *const *da = (const decal_t *const *)a;
-        const decal_t *const *db = (const decal_t *const *)b;
-        intptr_t texdiff;
-
-        if (!da || !db)
-                return 0;
-
-        texdiff = (intptr_t)(*da)->texture - (intptr_t)(*db)->texture;
-        if (texdiff < 0)
-                return -1;
-        if (texdiff > 0)
-                return 1;
-
-        if ((*da)->spawn_time < (*db)->spawn_time)
-                return -1;
-        if ((*da)->spawn_time > (*db)->spawn_time)
-                return 1;
-        return 0;
-}
-
-static void R_SortDecalsByTexture (decal_t **list, int count)
-{
-        if (!list || count <= 1)
-                return;
-        qsort (list, count, sizeof (decal_t *), R_CompareDecalsByTexture);
-}
-
-static qboolean R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
-{
-        qboolean flushed = false;
-
         if (!dec->texture)
-                return false;
+                return;
 
         if (!decal_batch_count)
         {
@@ -592,20 +260,18 @@ static qboolean R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
                 R_FlushDecalBatch ();
                 decal_batch_texture = dec->texture;
                 decal_batch_showtris = showtris;
-                flushed = true;
         }
 
         if (decal_batch_count == MAX_DECALS)
-                return flushed;
+                return;
 
         memcpy (&decal_batch[decal_batch_count * 4], dec->verts, sizeof(dec->verts));
         decal_batch_count++;
-        return flushed;
 }
 
 static void R_GenerateDecalTexture (decaltype_t type)
 {
-        static byte data[DECAL_TEXTURE_SIZE * DECAL_TEXTURE_SIZE * 4];
+        byte data[DECAL_TEXTURE_SIZE * DECAL_TEXTURE_SIZE * 4];
         int x, y;
         const float inv = 1.0f / (DECAL_TEXTURE_SIZE - 1);
 
@@ -715,9 +381,6 @@ void R_InitDecals (void)
         for (i = 0; i < DECAL_COUNT; i++)
                 R_GenerateDecalTexture ((decaltype_t)i);
 
-        R_InitDecalPool ();
-        R_ResetDecalGrid ();
-        memset (&decal_stats, 0, sizeof (decal_stats));
         R_ClearDecals ();
 }
 
@@ -726,17 +389,6 @@ void R_ClearDecals (void)
         memset (r_decals, 0, sizeof (r_decals));
         memset (r_decal_death_spawned, 0, sizeof (r_decal_death_spawned));
         r_active_decal_count = 0;
-        R_InitDecalPool ();
-        R_ResetDecalGrid ();
-        memset (&decal_stats, 0, sizeof (decal_stats));
-        {
-                int i;
-                for (i = 0; i < MAX_DECALS; i++)
-                {
-                        r_decals[i].grid_bucket = -1;
-                        r_decals[i].grid_slot = -1;
-                }
-        }
         R_ClearDecalBatch ();
 }
 
@@ -762,8 +414,6 @@ void R_UpdateDecals (void)
                         continue;
                 }
 
-                R_UpdateDecalAlpha (dec, t);
-
                 {
                         gltexture_t *desired = debug ? whitetexture : dec->base_texture;
                         if (dec->texture != desired)
@@ -780,11 +430,10 @@ void R_UpdateDecals (void)
                                 dec->verts[v].color[2] = 1.f;
                                 dec->verts[v].color[3] = 1.f;
                         }
-                        dec->flags &= ~DECAL_FLAG_NEEDS_UPDATE;
                         continue;
                 }
 
-                if ((t - dec->last_light_update > DECAL_LIGHT_REFRESH) || (dec->flags & DECAL_FLAG_NEEDS_UPDATE))
+                if (t - dec->last_light_update > DECAL_LIGHT_REFRESH)
                 {
                         vec3_t sample;
                         lightcache_t cache = dec->lightcache;
@@ -817,201 +466,61 @@ void R_UpdateDecals (void)
                         }
 
                         dec->last_light_update = t;
-                        dec->flags &= ~DECAL_FLAG_NEEDS_UPDATE;
                 }
         }
 }
 
 static decal_t *R_AllocDecal (void)
 {
-        int limit = R_GetDecalLimit ();
+        int i, limit = R_GetDecalLimit ();
+        decal_t *oldest = NULL;
+        double oldest_spawn = HUGE_VAL;
+        decal_t *inactive = NULL;
+        int active = 0;
 
         if (limit <= 0)
                 return NULL;
 
-        if (r_active_decal_count >= limit)
-                R_RemoveExcessDecals (limit - 1);
-
-        if (decal_pool.free_count <= 0)
+        for (i = 0; i < MAX_DECALS; i++)
         {
-                decal_t *oldest = R_FindOldestDecal ();
-                if (oldest)
-                        R_DeactivateDecal (oldest);
+                decal_t *dec = &r_decals[i];
+                if (dec->active)
+                {
+                        active++;
+                        if (dec->spawn_time < oldest_spawn)
+                        {
+                                oldest_spawn = dec->spawn_time;
+                                oldest = dec;
+                        }
+                }
+                else if (!inactive)
+                        inactive = dec;
         }
 
-        if (decal_pool.free_count <= 0)
-                return NULL;
+        if (active < limit && inactive)
+                return inactive;
 
-        return &r_decals[decal_pool.free_list[--decal_pool.free_count]];
+        if (active < limit && !inactive)
+                return oldest;
+
+        if (active >= limit)
+        {
+                if (oldest)
+                {
+                        R_DeactivateDecal (oldest);
+                        return oldest;
+                }
+        }
+
+        if (inactive)
+                return inactive;
+        return oldest;
 }
 
 static qboolean R_SurfaceIsDecalable (const msurface_t *surf)
 {
         int flags = SURF_DRAWSKY | SURF_DRAWTURB | SURF_DRAWFENCE | SURF_DRAWTELE | SURF_DRAWLAVA | SURF_DRAWSLIME | SURF_DRAWWATER | SURF_DRAWSPRITE;
         return (surf->flags & flags) == 0;
-}
-
-static qboolean R_ValidateDecalGeometry (const decalgeom_t *geom)
-{
-        int axis;
-
-        if (!geom)
-                return false;
-
-        if (VectorLengthSquared (geom->normal) < 0.001f)
-                return false;
-
-        for (axis = 0; axis < 3; axis++)
-        {
-                if (isnan (geom->origin[axis]) || isnan (geom->normal[axis]))
-                        return false;
-        }
-
-        return true;
-}
-
-static void R_EvaluateDecalSurface (const msurface_t *surf, decal_search_state_t *state)
-{
-        vec3_t normal;
-        vec3_t origin;
-        mtexinfo_t *texinfo;
-        vec3_t sdir, tdir;
-        float plane_dist, d, score;
-
-        if (!surf || !state || !state->geom)
-                return;
-
-        if (!R_SurfaceIsDecalable (surf))
-                return;
-
-        VectorCopy (surf->plane->normal, normal);
-        plane_dist = surf->plane->dist;
-        if (surf->flags & SURF_PLANEBACK)
-        {
-                VectorScale (normal, -1.f, normal);
-                plane_dist = -plane_dist;
-        }
-
-        d = DotProduct (state->point, normal) - plane_dist;
-        if (fabsf (d) > state->maxdist)
-                return;
-
-        VectorMA (state->point, -d, normal, origin);
-
-        {
-                float margin = 4.f;
-                if (origin[0] < surf->mins[0] - margin || origin[0] > surf->maxs[0] + margin ||
-                        origin[1] < surf->mins[1] - margin || origin[1] > surf->maxs[1] + margin ||
-                        origin[2] < surf->mins[2] - margin || origin[2] > surf->maxs[2] + margin)
-                        return;
-        }
-
-        texinfo = surf->texinfo;
-        if (texinfo)
-        {
-                VectorSet (sdir, texinfo->vecs[0][0], texinfo->vecs[0][1], texinfo->vecs[0][2]);
-                VectorSet (tdir, texinfo->vecs[1][0], texinfo->vecs[1][1], texinfo->vecs[1][2]);
-
-                if (VectorLengthSquared (sdir) < 0.001f || VectorLengthSquared (tdir) < 0.001f)
-                        R_BuildOrthonormalBasis (normal, sdir, tdir);
-                else
-                {
-                        VectorMA (sdir, -DotProduct (sdir, normal), normal, sdir);
-                        VectorMA (tdir, -DotProduct (tdir, normal), normal, tdir);
-                        if (VectorLengthSquared (sdir) < 0.001f || VectorLengthSquared (tdir) < 0.001f)
-                                R_BuildOrthonormalBasis (normal, sdir, tdir);
-                        else
-                        {
-                                VectorNormalizeFast (sdir);
-                                VectorNormalizeFast (tdir);
-                                VectorMA (tdir, -DotProduct (tdir, sdir), sdir, tdir);
-                                VectorNormalizeFast (tdir);
-                                {
-                                        vec3_t cross;
-                                        CrossProduct (sdir, tdir, cross);
-                                        if (DotProduct (cross, normal) < 0.f)
-                                                VectorScale (tdir, -1.f, tdir);
-                                }
-                        }
-                }
-        }
-        else
-                R_BuildOrthonormalBasis (normal, sdir, tdir);
-
-        score = -fabsf (d);
-        if (state->preferred_len > 0.01f)
-        {
-                vec3_t pn;
-                VectorCopy (state->preferred_normal, pn);
-                VectorNormalizeFast (pn);
-                score += DotProduct (normal, pn) * 0.5f;
-        }
-
-        if (score > state->best_score)
-        {
-                state->best_score = score;
-                VectorCopy (origin, state->geom->origin);
-                VectorCopy (normal, state->geom->normal);
-                VectorNormalizeFast (state->geom->normal);
-                VectorCopy (sdir, state->geom->sdir);
-                VectorNormalizeFast (state->geom->sdir);
-                VectorCopy (tdir, state->geom->tdir);
-                VectorNormalizeFast (state->geom->tdir);
-                VectorCopy (surf->mins, state->geom->mins);
-                VectorCopy (surf->maxs, state->geom->maxs);
-        }
-}
-
-static void R_FindBestDecalSurfaceNode (mnode_t *node, decal_search_state_t *state)
-{
-        if (!node || !state || !state->geom)
-                return;
-
-        if (node->contents < 0)
-        {
-                mleaf_t *leaf = (mleaf_t *)node;
-                int i;
-
-                for (i = 0; i < leaf->nummarksurfaces; i++)
-                {
-                        int surf_index = leaf->firstmarksurface[i];
-                        if (surf_index < 0 || surf_index >= cl.worldmodel->numsurfaces)
-                                continue;
-                        R_EvaluateDecalSurface (&cl.worldmodel->surfaces[surf_index], state);
-                }
-                return;
-        }
-
-        {
-                float dist = DotProduct (state->point, node->plane->normal) - node->plane->dist;
-                mnode_t *front = node->children[dist >= 0.f ? 0 : 1];
-                mnode_t *back = node->children[dist >= 0.f ? 1 : 0];
-
-                if (front)
-                        R_FindBestDecalSurfaceNode (front, state);
-
-                if (back && fabsf (dist) <= state->maxdist)
-                        R_FindBestDecalSurfaceNode (back, state);
-        }
-}
-
-static qboolean R_FindBestDecalSurface (const vec3_t point, const vec3_t preferred_normal, float maxdist, decalgeom_t *out)
-{
-        decal_search_state_t state;
-
-        if (!out || !cl.worldmodel || !cl.worldmodel->nodes)
-                return false;
-
-        VectorCopy (point, state.point);
-        VectorCopy (preferred_normal, state.preferred_normal);
-        state.preferred_len = VectorLength (preferred_normal);
-        state.maxdist = maxdist;
-        state.best_score = -99999.f;
-        state.geom = out;
-
-        R_FindBestDecalSurfaceNode (cl.worldmodel->nodes, &state);
-
-        return state.best_score > -99999.f;
 }
 
 static void R_BuildOrthonormalBasis (const vec3_t normal, vec3_t sdir, vec3_t tdir)
@@ -1039,12 +548,128 @@ static void R_BuildOrthonormalBasis (const vec3_t normal, vec3_t sdir, vec3_t td
 
 static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_normal, float maxdist, decalgeom_t *out)
 {
-        return R_FindBestDecalSurface (point, preferred_normal, maxdist, out);
-}
+        mleaf_t *leaf;
+        msurface_t *best = NULL;
+        vec3_t best_normal = {0, 0, 0};
+        vec3_t best_origin = {0, 0, 0};
+        vec3_t best_sdir = {0, 0, 0};
+        vec3_t best_tdir = {0, 0, 0};
+        vec3_t best_mins = {0, 0, 0};
+        vec3_t best_maxs = {0, 0, 0};
+        float best_score = -99999.f;
+        float preferred_len = VectorLength (preferred_normal);
+        int i;
 
-static qboolean R_DecalShouldSpawn (void)
-{
-        return ((float)rand () / (float)RAND_MAX) <= DECAL_SPAWN_PROBABILITY;
+        if (!cl.worldmodel || !cl.worldmodel->numleafs)
+                return false;
+
+        vec3_t point_copy;
+        VectorCopy (point, point_copy);
+
+        leaf = Mod_PointInLeaf (point_copy, cl.worldmodel);
+        if (!leaf)
+                return false;
+
+        for (i = 0; i < leaf->nummarksurfaces; i++)
+        {
+                msurface_t *surf = &cl.worldmodel->surfaces[leaf->firstmarksurface[i]];
+                mtexinfo_t *texinfo;
+                vec3_t normal, sdir, tdir, origin;
+                float plane_dist, d, score;
+
+                if (!R_SurfaceIsDecalable (surf))
+                        continue;
+
+                VectorCopy (surf->plane->normal, normal);
+                plane_dist = surf->plane->dist;
+                if (surf->flags & SURF_PLANEBACK)
+                {
+                        VectorScale (normal, -1.f, normal);
+                        plane_dist = -plane_dist;
+                }
+
+                d = DotProduct (point, normal) - plane_dist;
+                if (fabsf (d) > maxdist)
+                        continue;
+
+                VectorMA (point, -d, normal, origin);
+
+                {
+                        float margin = 4.f;
+                        if (origin[0] < surf->mins[0] - margin || origin[0] > surf->maxs[0] + margin ||
+                                origin[1] < surf->mins[1] - margin || origin[1] > surf->maxs[1] + margin ||
+                                origin[2] < surf->mins[2] - margin || origin[2] > surf->maxs[2] + margin)
+                                continue;
+                }
+
+                texinfo = surf->texinfo;
+                if (texinfo)
+                {
+                        VectorSet (sdir, texinfo->vecs[0][0], texinfo->vecs[0][1], texinfo->vecs[0][2]);
+                        VectorSet (tdir, texinfo->vecs[1][0], texinfo->vecs[1][1], texinfo->vecs[1][2]);
+
+                        if (VectorLengthSquared (sdir) < 0.001f || VectorLengthSquared (tdir) < 0.001f)
+                                R_BuildOrthonormalBasis (normal, sdir, tdir);
+                        else
+                        {
+                                VectorMA (sdir, -DotProduct (sdir, normal), normal, sdir);
+                                VectorMA (tdir, -DotProduct (tdir, normal), normal, tdir);
+                                if (VectorLengthSquared (sdir) < 0.001f || VectorLengthSquared (tdir) < 0.001f)
+                                        R_BuildOrthonormalBasis (normal, sdir, tdir);
+                                else
+                                {
+                                        VectorNormalizeFast (sdir);
+                                        VectorNormalizeFast (tdir);
+                                        VectorMA (tdir, -DotProduct (tdir, sdir), sdir, tdir);
+                                        VectorNormalizeFast (tdir);
+                                        {
+                                                vec3_t cross;
+                                                CrossProduct (sdir, tdir, cross);
+                                                if (DotProduct (cross, normal) < 0.f)
+                                                        VectorScale (tdir, -1.f, tdir);
+                                        }
+                                }
+                        }
+                }
+                else
+                        R_BuildOrthonormalBasis (normal, sdir, tdir);
+
+                score = -fabsf (d);
+                if (preferred_len > 0.01f)
+                {
+                        vec3_t pn;
+                        VectorCopy (preferred_normal, pn);
+                        VectorNormalizeFast (pn);
+                        score += DotProduct (normal, pn) * 0.5f;
+                }
+
+                if (score > best_score)
+                {
+                        best_score = score;
+                        best = surf;
+                        VectorCopy (origin, best_origin);
+                        VectorCopy (normal, best_normal);
+                        VectorCopy (sdir, best_sdir);
+                        VectorCopy (tdir, best_tdir);
+                        VectorCopy (surf->mins, best_mins);
+                        VectorCopy (surf->maxs, best_maxs);
+                }
+        }
+
+        if (!best)
+                return false;
+
+        VectorCopy (best_origin, out->origin);
+        VectorCopy (best_normal, out->normal);
+        VectorNormalizeFast (out->normal);
+        VectorCopy (best_sdir, out->sdir);
+        VectorNormalizeFast (out->sdir);
+        VectorCopy (best_tdir, out->tdir);
+        VectorNormalizeFast (out->tdir);
+        VectorCopy (best_mins, out->mins);
+        VectorCopy (best_maxs, out->maxs);
+
+        return true;
 }
 
 static qboolean R_DecalHasEdgeRoom (const decalgeom_t *geom, float radius)
@@ -1076,83 +701,6 @@ static float R_RandomRange (float minval, float maxval)
         if (maxval <= minval)
                 return minval;
         return minval + (maxval - minval) * ((float)rand () / (float)RAND_MAX);
-}
-
-static qboolean R_DecalOverlapsExisting (const decalgeom_t *geom, float radius)
-{
-        int min_cx = R_DecalGridCoord (geom->origin[0] - radius);
-        int max_cx = R_DecalGridCoord (geom->origin[0] + radius);
-        int min_cy = R_DecalGridCoord (geom->origin[1] - radius);
-        int max_cy = R_DecalGridCoord (geom->origin[1] + radius);
-        int min_cz = R_DecalGridCoord (geom->origin[2] - radius);
-        int max_cz = R_DecalGridCoord (geom->origin[2] + radius);
-        int cx, cy, cz;
-
-        for (cx = min_cx; cx <= max_cx; cx++)
-        for (cy = min_cy; cy <= max_cy; cy++)
-        for (cz = min_cz; cz <= max_cz; cz++)
-        {
-                decal_grid_bucket_t *bucket = R_DecalGridFind (cx, cy, cz, false);
-                int i;
-
-                if (!bucket || !bucket->used || bucket->cell.count <= 0)
-                        continue;
-
-                for (i = 0; i < bucket->cell.count; i++)
-                {
-                        int idx = bucket->cell.decals[i];
-                        decal_t *other;
-                        vec3_t delta;
-                        float dist;
-                        float combined_radius;
-                        float normal_dot;
-
-                        if (idx < 0 || idx >= MAX_DECALS)
-                                continue;
-
-                        other = &r_decals[idx];
-                        if (!other->active)
-                                continue;
-
-                        normal_dot = DotProduct (other->normal, geom->normal);
-                        if (normal_dot < DECAL_OVERLAP_NORMAL_COS)
-                                continue;
-
-                        VectorSubtract (other->origin, geom->origin, delta);
-                        dist = VectorLength (delta);
-                        combined_radius = (other->radius + radius) * DECAL_OVERLAP_RADIUS_FACTOR;
-                        if (dist < combined_radius)
-                                return true;
-                }
-        }
-
-        {
-                int i;
-
-                for (i = 0; i < MAX_DECALS; i++)
-                {
-                        decal_t *other = &r_decals[i];
-                        vec3_t delta;
-                        float dist;
-                        float combined_radius;
-                        float normal_dot;
-
-                        if (!other->active || other->grid_bucket >= 0)
-                                continue;
-
-                        normal_dot = DotProduct (other->normal, geom->normal);
-                        if (normal_dot < DECAL_OVERLAP_NORMAL_COS)
-                                continue;
-
-                        VectorSubtract (other->origin, geom->origin, delta);
-                        dist = VectorLength (delta);
-                        combined_radius = (other->radius + radius) * DECAL_OVERLAP_RADIUS_FACTOR;
-                        if (dist < combined_radius)
-                                return true;
-                }
-        }
-
-        return false;
 }
 
 static float R_ComputeBloodDecalRadius (float scale)
@@ -1208,7 +756,7 @@ static void R_RandomDirectionInCone (const vec3_t axis, float cone_angle_deg, ve
         }
 }
 
-static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius, float specular)
+static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius)
 {
         vec3_t center, right, up;
         vec3_t sdir = {geom->sdir[0], geom->sdir[1], geom->sdir[2]};
@@ -1216,7 +764,6 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         float angle = (float) rand () * (2.f * M_PI / (float) RAND_MAX);
         float c = cosf (angle), s = sinf (angle);
         vec3_t rs, rt;
-        vec3_t basis_s, basis_t;
         int i;
 
         for (i = 0; i < 3; i++)
@@ -1227,20 +774,10 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         VectorNormalizeFast (rs);
         VectorNormalizeFast (rt);
 
-        VectorCopy (rs, basis_s);
-        VectorCopy (rt, basis_t);
-
         VectorScale (rs, radius, right);
         VectorScale (rt, radius, up);
 
         VectorMA (geom->origin, DECAL_OFFSET, geom->normal, center);
-
-        {
-                float jitter_s = R_RandomRange (-DECAL_SPREAD_JITTER, DECAL_SPREAD_JITTER);
-                float jitter_t = R_RandomRange (-DECAL_SPREAD_JITTER, DECAL_SPREAD_JITTER);
-                VectorMA (center, jitter_s * radius, basis_s, center);
-                VectorMA (center, jitter_t * radius, basis_t, center);
-        }
 
         VectorSubtract (center, right, dec->verts[0].pos);
         VectorSubtract (dec->verts[0].pos, up, dec->verts[0].pos);
@@ -1257,12 +794,6 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         VectorAdd (center, right, dec->verts[3].pos);
         VectorSubtract (dec->verts[3].pos, up, dec->verts[3].pos);
         dec->verts[3].uv[0] = 1.f; dec->verts[3].uv[1] = 1.f;
-
-        for (i = 0; i < 4; i++)
-        {
-                VectorCopy (geom->normal, dec->verts[i].normal_spec);
-                dec->verts[i].normal_spec[3] = specular;
-        }
 }
 
 static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_t type, const float *tint)
@@ -1270,15 +801,6 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         decal_t *dec;
 
         if (radius <= 0.f)
-                return false;
-
-        if (!R_ValidateDecalGeometry (geom))
-                return false;
-
-        if (!R_DecalShouldSpawn ())
-                return false;
-
-        if (R_DecalOverlapsExisting (geom, radius))
                 return false;
 
         dec = R_AllocDecal ();
@@ -1301,24 +823,12 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         dec->last_light_update = 0.0;
         dec->spawn_time = cl.time;
         dec->active = true;
-        dec->flags = DECAL_FLAG_ACTIVE | DECAL_FLAG_NEEDS_UPDATE;
         r_active_decal_count++;
         dec->tint[0] = tint ? tint[0] : 1.f;
         dec->tint[1] = tint ? tint[1] : 1.f;
         dec->tint[2] = tint ? tint[2] : 1.f;
         dec->tint[3] = tint ? tint[3] : 1.f;
-        dec->base_alpha = CLAMP (0.f, dec->tint[3], 1.f);
-        dec->normal_map = NULL;
-        dec->use_normal_map = false;
-        dec->grid_bucket = -1;
-        dec->grid_slot = -1;
-        {
-                float specular = 0.3f;
-                if (type >= 0 && type < DECAL_COUNT)
-                        specular = r_decal_specular_strength[type];
-                specular *= dec->base_alpha;
-                R_AssignDecalVertices (dec, geom, radius, specular);
-        }
+        R_AssignDecalVertices (dec, geom, radius);
 
         {
                 vec3_t sample;
@@ -1354,9 +864,6 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
                 dec->last_light_update = cl.time;
         }
 
-        R_DecalGridAttach (dec, R_DecalIndex (dec));
-        decal_stats.total_spawned++;
-
         if (r_decals_debug_cvar.value)
         {
                 const char *name = "blood";
@@ -1386,8 +893,7 @@ void R_AddBulletDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (BULLET_DECAL_MIN_RADIUS, BULLET_DECAL_MAX_RADIUS);
-        radius *= DECAL_RADIUS_SCALE;
-        if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
+        if (!R_DecalHasEdgeRoom (&geom, radius))
                 return;
         R_CreateDecal (&geom, radius, DECAL_BULLET, tint);
 }
@@ -1405,8 +911,7 @@ void R_AddExplosionDecal (const vec3_t point)
                 return;
 
         radius = R_RandomRange (EXPLOSION_DECAL_MIN_RADIUS, EXPLOSION_DECAL_MAX_RADIUS);
-        radius *= DECAL_RADIUS_SCALE;
-        if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
+        if (!R_DecalHasEdgeRoom (&geom, radius))
                 return;
         R_CreateDecal (&geom, radius, DECAL_SCORCH, tint);
 }
@@ -1433,9 +938,7 @@ static qboolean R_AddBloodDecalForDirection (const vec3_t point, const vec3_t pr
                         float scale = R_RandomRange (1.f, 2.5f);
                         radius = base_radius * scale * BLOOD_DECAL_SIZE_SCALE;
                 }
-                radius *= DECAL_RADIUS_SCALE;
-
-                if (!R_DecalHasEdgeRoom (&geom, radius * (1.f + DECAL_SPREAD_JITTER)))
+                if (!R_DecalHasEdgeRoom (&geom, radius))
                         return false;
                 if (out_geom)
                         *out_geom = geom;
@@ -1576,9 +1079,8 @@ void R_AddGibDecal (const vec3_t point, int particle_count)
 
 void R_DrawDecals (qboolean showtris)
 {
-        int draw_count = 0;
-        int culled = 0;
         int i;
+        qboolean drew = false;
 
         if (!r_decals_cvar.value)
                 return;
@@ -1589,117 +1091,38 @@ void R_DrawDecals (qboolean showtris)
                 return;
         }
 
-        for (i = 0; i < DECAL_GRID_BUCKET_COUNT; i++)
-        {
-                decal_grid_bucket_t *bucket = &decal_grid[i];
-                int j;
-
-                if (!bucket->used || bucket->cell.count <= 0)
-                        continue;
-
-                {
-                        vec3_t mins, maxs;
-                        mins[0] = bucket->cell_x * DECAL_GRID_SIZE;
-                        mins[1] = bucket->cell_y * DECAL_GRID_SIZE;
-                        mins[2] = bucket->cell_z * DECAL_GRID_SIZE;
-                        maxs[0] = mins[0] + DECAL_GRID_SIZE;
-                        maxs[1] = mins[1] + DECAL_GRID_SIZE;
-                        maxs[2] = mins[2] + DECAL_GRID_SIZE;
-
-                        if (R_CullBox (mins, maxs))
-                        {
-                                culled += bucket->cell.count;
-                                continue;
-                        }
-                }
-
-                for (j = 0; j < bucket->cell.count && draw_count < MAX_DECALS; j++)
-                {
-                        int idx = bucket->cell.decals[j];
-                        decal_t *dec;
-
-                        if (idx < 0 || idx >= MAX_DECALS)
-                                continue;
-
-                        dec = &r_decals[idx];
-                        if (!dec->active || !dec->texture)
-                                continue;
-                        if (!R_DecalInFrustum (dec))
-                        {
-                                culled++;
-                                continue;
-                        }
-
-                        decal_draw_list[draw_count++] = dec;
-                }
-        }
-
-        for (i = 0; i < MAX_DECALS && draw_count < MAX_DECALS; i++)
+        for (i = 0; i < MAX_DECALS; i++)
         {
                 decal_t *dec = &r_decals[i];
-                if (!dec->active || !dec->texture)
+                if (!dec->active)
                         continue;
-                if (dec->grid_bucket >= 0)
+                if (!dec->texture)
                         continue;
-                if (!R_DecalInFrustum (dec))
+
+                if (!drew)
                 {
-                        culled++;
-                        continue;
+                        qboolean dither = (softemu == SOFTEMU_COARSE && !showtris);
+                        GL_BeginGroup ("Decals");
+                        GL_UseProgram (glprogs.decals[dither]);
+                        if (showtris)
+                                GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                        else
+                                GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                        GL_PolygonOffset (OFFSET_DECAL);
+                        drew = true;
                 }
-                decal_draw_list[draw_count++] = dec;
+
+                R_AppendDecalToBatch (dec, showtris);
         }
 
-        if (!draw_count)
+        if (drew)
         {
-                decal_stats.batch_count = 0;
-                decal_stats.avg_batch_size = 0.0f;
-                R_ClearDecalBatch ();
-                return;
-        }
-
-        R_SortDecalsByTexture (decal_draw_list, draw_count);
-
-        {
-                qboolean dither = (softemu == SOFTEMU_COARSE && !showtris);
-                int batches = 0;
-                int rendered = 0;
-
-                GL_BeginGroup ("Decals");
-                GL_UseProgram (glprogs.decals[dither]);
-                if (showtris)
-                        GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
-                else
-                        GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
-                GL_PolygonOffset (OFFSET_DECAL);
-
-                R_ClearDecalBatch ();
-
-                for (i = 0; i < draw_count; i++)
-                {
-                        if (R_AppendDecalToBatch (decal_draw_list[i], showtris))
-                                batches++;
-                        rendered++;
-                }
-
-                if (decal_batch_count > 0)
-                {
-                        R_FlushDecalBatch ();
-                        batches++;
-                }
-                else
-                        R_ClearDecalBatch ();
-
+                R_FlushDecalBatch ();
                 GL_PolygonOffset (OFFSET_NONE);
                 GL_EndGroup ();
-
-                decal_stats.batch_count = batches;
-                decal_stats.avg_batch_size = batches > 0 ? (float)rendered / (float)batches : 0.0f;
         }
-
-        decal_stats.total_culled += culled;
-
-        if (r_decals_debug_cvar.value > 1.0f)
-                R_PrintDecalStats ();
+        else
+                R_ClearDecalBatch ();
 }
 
 void R_DrawDecals_ShowTris (void)
