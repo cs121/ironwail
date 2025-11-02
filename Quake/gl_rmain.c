@@ -102,79 +102,6 @@ static float GL_TemperedOverbright (float overbright)
 	return q_max (tempered, 1.f);
 }
 
-static void R_ComputeGodRaysDirection (float light_x, float light_y, float wall_angle,
-	float *out_dir_x, float *out_dir_y)
-{
-	const float center_x = 0.5f;
-	const float center_y = 0.5f;
-	const float min_length_sq = 1e-6f;
-
-	float delta_x = center_x - light_x;
-	float delta_y = center_y - light_y;
-	float delta_length_sq = delta_x * delta_x + delta_y * delta_y;
-
-	float normal_x;
-	float normal_y;
-
-	float horizontal_sign = (delta_x >= 0.f) ? 1.f : -1.f;
-	float vertical_sign = (delta_y >= 0.f) ? 1.f : -1.f;
-
-	if (delta_length_sq < min_length_sq)
-	{
-		normal_x = horizontal_sign;
-		normal_y = vertical_sign;
-
-		float normal_length_sq = normal_x * normal_x + normal_y * normal_y;
-		if (normal_length_sq > min_length_sq)
-		{
-			float inv_normal_length = 1.f / sqrtf (normal_length_sq);
-			normal_x *= inv_normal_length;
-			normal_y *= inv_normal_length;
-		}
-	}
-	else
-	{
-		float inv_delta_length = 1.f / sqrtf (delta_length_sq);
-		normal_x = delta_x * inv_delta_length;
-		normal_y = delta_y * inv_delta_length;
-	}
-
-	float tangent_x = -normal_y;
-	float tangent_y = normal_x;
-
-	if (tangent_y * vertical_sign < 0.f)
-	{
-		tangent_x = -tangent_x;
-		tangent_y = -tangent_y;
-	}
-
-	if (fabsf (tangent_y) < 1e-4f && tangent_x * horizontal_sign < 0.f)
-	{
-		tangent_x = -tangent_x;
-	}
-
-	float angle = q_min (90.f, q_max (0.f, wall_angle));
-	float angle_rad = DEG2RAD (angle);
-	float cos_a = cosf (angle_rad);
-	float sin_a = sinf (angle_rad);
-
-	float dir_x = normal_x * cos_a + tangent_x * sin_a;
-	float dir_y = normal_y * cos_a + tangent_y * sin_a;
-	float dir_length_sq = dir_x * dir_x + dir_y * dir_y;
-
-	if (dir_length_sq > min_length_sq)
-	{
-		float inv_dir_length = 1.f / sqrtf (dir_length_sq);
-		*out_dir_x = dir_x * inv_dir_length;
-		*out_dir_y = dir_y * inv_dir_length;
-	}
-	else
-	{
-		*out_dir_x = normal_x;
-		*out_dir_y = normal_y;
-	}
-}
-
 static qboolean MatrixInverse4x4(const float m[16], float out[16])
 {
     float inv[16];
@@ -315,17 +242,6 @@ cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
-cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
-cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
-cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
-cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.6", CVAR_ARCHIVE };
-cvar_t	r_godrays_density = { "r_godrays_density", "0.75", CVAR_ARCHIVE };
-cvar_t	r_godrays_decay = { "r_godrays_decay", "0.95", CVAR_ARCHIVE };
-cvar_t	r_godrays_weight = { "r_godrays_weight", "0.02", CVAR_ARCHIVE };
-cvar_t	r_godrays_samples = { "r_godrays_samples", "64", CVAR_ARCHIVE };
-cvar_t	r_godrays_softness = { "r_godrays_softness", "0.1", CVAR_ARCHIVE };
-cvar_t	r_godrays_mode = { "r_godrays_mode", "0", CVAR_ARCHIVE };
-cvar_t	r_godrays_wall_angle = { "r_godrays_wall_angle", "40", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -965,51 +881,6 @@ void GL_PostProcess (void)
                 GL_Uniform4fFunc (12, filmgrain_time, filmgrain_time_alt, 0.f, 0.f);
         }
 
-        {
-                float godrays_intensity = q_min (10.f, q_max (0.f, r_godrays.value));
-                float godrays_decay = q_min (0.999f, q_max (0.f, r_godrays_decay.value));
-                float godrays_weight = q_min (1.f, q_max (0.f, r_godrays_weight.value));
-                float godrays_density = q_min (4.f, q_max (0.f, r_godrays_density.value));
-                float godrays_samples = q_min (128.f, q_max (1.f, r_godrays_samples.value));
-                float godrays_softness = q_min (1.f, q_max (0.001f, r_godrays_softness.value));
-                float godrays_light_x = q_min (1.f, q_max (0.f, r_godrays_light_x.value));
-                float godrays_light_y = q_min (1.f, q_max (0.f, r_godrays_light_y.value));
-                float godrays_threshold = q_min (1.f, q_max (0.f, r_godrays_threshold.value));
-                int godrays_mode_value = (int)Q_rint (r_godrays_mode.value);
-                float godrays_dir_x = 0.f;
-                float godrays_dir_y = 0.f;
-                if (godrays_intensity > 0.f && godrays_weight > 0.f && godrays_density > 0.f)
-                {
-                        if (godrays_mode_value == 1)
-                        {
-                                float vertical_sign = (godrays_light_y <= 0.5f) ? 1.f : -1.f;
-                                godrays_dir_x = 0.f;
-                                godrays_dir_y = vertical_sign;
-                        }
-                        else if (godrays_mode_value <= 0)
-                        {
-                                R_ComputeGodRaysDirection (godrays_light_x, godrays_light_y,
-                                        r_godrays_wall_angle.value, &godrays_dir_x, &godrays_dir_y);
-                        }
-                }
-
-                GL_Uniform4fFunc (16,
-                        godrays_intensity > 0.f ? 1.f : 0.f,
-                        godrays_intensity,
-                        godrays_decay,
-                        godrays_weight);
-                GL_Uniform4fFunc (17,
-                        godrays_light_x,
-                        godrays_light_y,
-                        godrays_threshold,
-                        godrays_density);
-                GL_Uniform4fFunc (18,
-                        godrays_samples,
-                        godrays_softness,
-                        godrays_dir_x,
-                        godrays_dir_y);
-        }
-
         dof_enabled = R_DoFEnabled ();
 
         {
@@ -1075,7 +946,7 @@ void GL_PostProcess (void)
         }
 
         GL_UniformMatrix4fvFunc (15, 1, GL_FALSE, r_matproj);
-        GL_UniformMatrix4fvFunc (19, 1, GL_FALSE, r_matinvproj);
+        GL_UniformMatrix4fvFunc (16, 1, GL_FALSE, r_matinvproj);
 
         GL_Uniform4fFunc (13,
                 ssao_enabled ? 1.f : 0.f,
@@ -1087,10 +958,10 @@ void GL_PostProcess (void)
 	        ssao_power,
 	        0.f,
 	        0.f);
-	GL_Uniform4fFunc (20,
-	        ssao_debug ? 1.f : 0.f,
-	        0.f,
-	        0.f,
+        GL_Uniform4fFunc (17,
+                ssao_debug ? 1.f : 0.f,
+                0.f,
+                0.f,
 	        0.f);
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
@@ -1693,7 +1564,6 @@ qboolean GL_NeedsPostprocess (void)
 {
         if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur () || R_SSAOEnabled () || r_godrays.value > 0.f || r_ssao_debug.value > 0.f)
 		return true;
         return false;
 }
