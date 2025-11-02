@@ -816,7 +816,7 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
 
 static qboolean R_SurfacePointHasMargin (const msurface_t *surf, const vec3_t point, const vec3_t normal, float margin)
 {
-        const model_t *model = cl.worldmodel;
+        const qmodel_t *model = cl.worldmodel;
         const float epsilon = 0.25f;
         int i;
 
