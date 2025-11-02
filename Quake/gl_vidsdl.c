@@ -26,6 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
+#if R_SHADOWMAPS
+#include "r_shadows.h"
+#endif
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
 #else
@@ -1392,6 +1395,9 @@ void	VID_Shutdown (void)
 	if (vid_initialized)
 	{
 		R_ShutdownShadow ();
+#if R_SHADOWMAPS
+		R_ShutdownShadowMaps();
+#endif
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);
 		gl_context = NULL;
