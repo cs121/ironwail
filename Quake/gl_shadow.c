@@ -1,5 +1,8 @@
 #include "quakedef.h"
 #include "gl_shadow.h"
+#if R_SHADOWMAPS
+#include "r_shadows.h"
+#endif
 #include "gl_texmgr.h"
 
 #define SHADOW_POOL_SIZE 16
@@ -338,6 +341,10 @@ void R_ShadowSyncWorldLights(const gpulight_t *lights, int numlights)
         VectorCopy(src->color, dst->color);
         dst->intensity = 1.0f;
         dst->cube_tex = shadow_manager.fallback_cube_tex;
+
+#if R_SHADOWMAPS
+        R_UploadShadowMatrices(NULL, i); // TODO: upload per-light view-projection matrices.
+#endif
 
         ++count;
     }

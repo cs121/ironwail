@@ -24,6 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+#if R_SHADOWMAPS
+#include "r_shadows.h"
+#endif
+
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -451,6 +455,10 @@ void R_Init (void)
 	Cvar_SetCallback (&r_lavaalpha, R_SetLavaalpha_f);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
+
+#if R_SHADOWMAPS
+	R_InitShadowMaps();
+#endif
 
 	R_InitParticles ();
 	R_InitDecals ();

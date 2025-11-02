@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.7)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Misc/cmake/ExtractVersion.cmake)
 project(ironwail VERSION ${IRONWAIL_VERSION})
 
+option(R_SHADOWMAPS "Enable shadow map stubs" ON)
+
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
 
 if (WIN32)
@@ -42,6 +44,7 @@ target_include_directories(wren PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren
 target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
 
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
+list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
@@ -73,7 +76,7 @@ endif()
 
 add_executable(ironwail ${IWAIL_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
-target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
+target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/renderer ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
 target_link_libraries(ironwail PRIVATE wren)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
@@ -105,6 +108,11 @@ else()
 endif()
 
 target_compile_definitions(ironwail PRIVATE $<$<CONFIG:Debug>:DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1> USE_SDL2 USE_CODEC_WAVE)
+if (R_SHADOWMAPS)
+        target_compile_definitions(ironwail PRIVATE R_SHADOWMAPS=1)
+else()
+        target_compile_definitions(ironwail PRIVATE R_SHADOWMAPS=0)
+endif()
 if (MSVC)
 	target_compile_definitions(ironwail PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
 endif()
