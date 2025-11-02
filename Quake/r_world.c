@@ -23,8 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
-#include <ctype.h>
-#include <string.h>
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -147,48 +145,12 @@ Returns the water alpha to use for the entity and texture type combination.
 */
 float GL_WaterAlphaForEntityTextureType (entity_t *ent, textype_t type)
 {
-        float entalpha;
-        if (ent == NULL || ent->alpha == ENTALPHA_DEFAULT)
-                entalpha = GL_WaterAlphaForTextureType(type);
-        else
-                entalpha = ENTALPHA_DECODE(ent->alpha);
-        return entalpha;
-}
-
-static qboolean R_TextureNameContains (const texture_t *tex, const char *needle)
-{
-        size_t i;
-        size_t max = sizeof(((texture_t *)0)->name);
-        char lowered[sizeof(((texture_t *)0)->name) + 1];
-
-        if (!tex || !needle || !*needle)
-                return false;
-
-        for (i = 0; i < max; i++)
-        {
-                char c = tex->name[i];
-                lowered[i] = (char)tolower ((unsigned char)c);
-                if (!c)
-                {
-                        i++;
-                        break;
-                }
-        }
-
-        if (i > max)
-                i = max;
-        lowered[i] = '\0';
-
-        return strstr (lowered, needle) != NULL;
-}
-
-static float R_GetTextureSpecular (const texture_t *tex)
-{
-        if (!tex)
-                return 0.f;
-        if (R_TextureNameContains (tex, "metal"))
-                return 0.1f;
-        return 0.f;
+	float entalpha;
+	if (ent == NULL || ent->alpha == ENTALPHA_DEFAULT)
+		entalpha = GL_WaterAlphaForTextureType(type);
+	else
+		entalpha = ENTALPHA_DECODE(ent->alpha);
+	return entalpha;
 }
 
 typedef struct bmodel_gpu_instance_s {
@@ -201,8 +163,6 @@ typedef struct bmodel_gpu_instance_s {
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		specular;
-	GLfloat		pad;
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
@@ -211,7 +171,6 @@ typedef struct bmodel_bindless_gpu_call_s {
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		specular;
 	GLint		baseinstance;
 	GLint		padding;
 } bmodel_bound_gpu_call_t;
@@ -371,7 +330,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 {
 	GLuint		flags;
 	float		alpha;
-	float		specular;
 	gltexture_t	*tx, *fb, *em;
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
@@ -402,15 +360,12 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
-        specular = R_GetTextureSpecular (t);
 
 	if (gl_bindless_able)
 	{
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
-		call->specular = specular;
-		call->pad = 0.f;
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -421,7 +376,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
-		call->specular = specular;
 		call->baseinstance = first_instance;
 		call->padding = 0;
 		textures[0] = tx ? tx : greytexture;

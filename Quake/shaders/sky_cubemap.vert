@@ -19,9 +19,7 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
-	float	specular;
 #if BINDLESS
-	float	pad;
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;

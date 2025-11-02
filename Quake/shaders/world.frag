@@ -130,8 +130,6 @@ layout(location=10) flat in uvec2 in_samplers1;
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 
-layout(location=13) flat in float in_specular;
-
 #define OUT_COLOR out_fragcolor
 #if OIT
 vec4 OUT_COLOR;
@@ -374,8 +372,6 @@ void main()
     vec3 total_light = clamp_preserving_hue(static_light, vec3(1.0));
     vec3 specular_light = vec3(0.0);
 
-    float specScale = max(in_specular, 0.0);
-
     vec3 to_eye = EyePos - in_pos;
     float inv_view_len = fastInvLen(to_eye);
     vec3  view_dir = (inv_view_len>0.0) ? to_eye * inv_view_len : vec3(0.0,0.0,1.0);
@@ -441,11 +437,9 @@ void main()
                                 float hinv = inversesqrt(hl2);
                                 float ndoth = max(dot(surface_normal, h*hinv), 0.0);
 
-                                if (specScale > 0.0){
-                                    // schneller Specular mit fixer Power
-                                    float specTerm = specPow16(ndoth) * ndotl * (0.4); // SPECULAR_SCALE 0.4
-                                    specular_light += light_contrib * specTerm * specScale;
-                                }
+                                // schneller Specular mit fixer Power
+                                float specTerm = specPow16(ndoth) * ndotl * (0.4); // SPECULAR_SCALE 0.4
+                                specular_light += light_contrib * specTerm;
                             }
                         }
                         dynamic_light += light_contrib;
