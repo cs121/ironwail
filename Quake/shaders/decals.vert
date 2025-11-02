@@ -3,10 +3,12 @@
 layout(location=0) in vec3 in_pos;
 layout(location=1) in vec2 in_uv;
 layout(location=2) in vec4 in_color;
+layout(location=3) in vec4 in_normal_spec;
 
 layout(location=0) out vec2 out_uv;
 layout(location=1) out vec3 out_pos;
 layout(location=2) out vec4 out_color;
+layout(location=3) out vec4 out_normal_spec;
 
 void main()
 {
@@ -14,4 +16,5 @@ void main()
         out_pos = in_pos - EyePos;
         out_uv = in_uv;
         out_color = in_color;
+        out_normal_spec = in_normal_spec;
 }
