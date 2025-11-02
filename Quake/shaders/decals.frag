@@ -43,6 +43,8 @@ layout(binding=0) uniform sampler2D Tex;
 layout(location=0) in vec2 in_uv;
 layout(location=1) in vec3 in_pos;
 layout(location=2) in vec4 in_color;
+layout(location=3) in vec3 in_normal;
+layout(location=4) in float in_spec;
 
 layout(location=0) out vec4 out_fragcolor;
 layout(location=1) out vec4 out_velocity;
@@ -53,6 +55,27 @@ void main()
         vec4 result = texel * in_color;
         if (result.a < 0.01)
                 discard;
+        if (in_spec > 0.0)
+        {
+                float normal_len2 = dot(in_normal, in_normal);
+                float view_len2 = dot(in_pos, in_pos);
+                if (normal_len2 > 0.0 && view_len2 > 0.0)
+                {
+                        vec3 normal = in_normal * inversesqrt(normal_len2);
+                        vec3 view_dir = -in_pos * inversesqrt(view_len2);
+                        vec3 light_dir = normalize(vec3(0.25, 0.45, 1.0));
+                        vec3 half_vec = light_dir + view_dir;
+                        float half_len2 = dot(half_vec, half_vec);
+                        if (half_len2 > 0.0)
+                        {
+                                half_vec *= inversesqrt(half_len2);
+                                float ndoth = max(dot(normal, half_vec), 0.0);
+                                float spec_term = pow(ndoth, 24.0) * in_spec * result.a;
+                                vec3 spec_color = mix(result.rgb, vec3(1.0), 0.7);
+                                result.rgb = clamp(result.rgb + spec_term * spec_color, 0.0, 1.0);
+                        }
+                }
+        }
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;
         out_velocity = vec4(0.0);

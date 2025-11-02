@@ -24,8 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
 
-#define MAX_DECALS                      256
+static const int R_DECAL_INITIAL_CAPACITY = 256;
+static const int R_DECAL_CAP_MAX = 16384;
 #define DECAL_TEXTURE_SIZE      64
 #define DECAL_OFFSET            0.25f
 
@@ -60,11 +62,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BLOOD_PRIMARY_RADIUS_SCALE      1.35f
 #define BLOOD_SECONDARY_SCALE_MIN       0.65f
 #define BLOOD_SECONDARY_SCALE_MAX       1.1f
-#define BLOOD_SPRAY_CONE_ANGLE_DEG      35.f
+#define BLOOD_SPRAY_CONE_ANGLE_DEG      43.75f
 #define BLOOD_SPRAY_MIN_DISTANCE        6.f
 #define BLOOD_SPRAY_MAX_DISTANCE        56.f
 #define BLOOD_SPRAY_GRAVITY_FACTOR      0.32f
-#define BLOOD_SPRAY_LATERAL_JITTER      3.5f
+#define BLOOD_SPRAY_LATERAL_JITTER      4.375f
 
 typedef enum decaltype_e
 {
@@ -79,6 +81,7 @@ typedef struct decalvertex_s
         vec3_t          pos;
         float           uv[2];
         float           color[4];
+        float           normal_spec[4];
 } decalvertex_t;
 
 typedef struct decal_s
@@ -108,16 +111,17 @@ typedef struct decalgeom_s
         vec3_t  maxs;
 } decalgeom_t;
 
-static decal_t                 r_decals[MAX_DECALS];
+static decal_t                 *r_decals = NULL;
 static gltexture_t     *r_decal_textures[DECAL_COUNT];
 
-static GLushort          decal_indices[6 * MAX_DECALS];
+static GLushort          *decal_indices = NULL;
 static qboolean          decal_indices_init = false;
 
-static decalvertex_t     decal_batch[4 * MAX_DECALS];
+static decalvertex_t     *decal_batch = NULL;
 static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
+static int                       r_decal_capacity = 0;
 
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
@@ -132,9 +136,87 @@ static double r_last_gib_decal_time = -9999.0;
 static vec3_t r_last_gib_decal_origin = {0.f, 0.f, 0.f};
 static int r_active_decal_count = 0;
 
+static void R_ReserveDecalStorage (int desired)
+{
+        size_t old_capacity = (size_t) r_decal_capacity;
+        int new_capacity;
+
+        if (desired > R_DECAL_CAP_MAX)
+                desired = R_DECAL_CAP_MAX;
+
+        if (desired <= r_decal_capacity)
+                return;
+
+        if (r_decal_capacity <= 0)
+                new_capacity = R_DECAL_INITIAL_CAPACITY;
+        else
+                new_capacity = r_decal_capacity;
+
+        if (new_capacity <= 0)
+                new_capacity = R_DECAL_INITIAL_CAPACITY;
+
+        while (new_capacity < desired && new_capacity < R_DECAL_CAP_MAX)
+        {
+                int doubled = new_capacity * 2;
+                if (doubled <= new_capacity)
+                        break;
+                new_capacity = doubled;
+        }
+
+        if (new_capacity > R_DECAL_CAP_MAX)
+                new_capacity = R_DECAL_CAP_MAX;
+
+        if (new_capacity < desired)
+                new_capacity = desired;
+
+        {
+                decal_t *new_decals = (decal_t *) realloc (r_decals, (size_t)new_capacity * sizeof (*r_decals));
+                if (!new_decals)
+                        Sys_Error ("R_ReserveDecalStorage: failed to allocate %zu bytes for decals", (size_t)new_capacity * sizeof (*r_decals));
+                if ((size_t)new_capacity > old_capacity)
+                        memset (new_decals + old_capacity, 0, ((size_t)new_capacity - old_capacity) * sizeof (*r_decals));
+                r_decals = new_decals;
+        }
+
+        {
+                GLushort *new_indices = (GLushort *) realloc (decal_indices, (size_t)new_capacity * 6 * sizeof (*decal_indices));
+                if (!new_indices)
+                        Sys_Error ("R_ReserveDecalStorage: failed to allocate %zu bytes for indices", (size_t)new_capacity * 6 * sizeof (*decal_indices));
+                if ((size_t)new_capacity > old_capacity)
+                        memset (new_indices + old_capacity * 6, 0, ((size_t)new_capacity - old_capacity) * 6 * sizeof (*decal_indices));
+                decal_indices = new_indices;
+                decal_indices_init = false;
+        }
+
+        {
+                decalvertex_t *new_batch = (decalvertex_t *) realloc (decal_batch, (size_t)new_capacity * 4 * sizeof (*decal_batch));
+                if (!new_batch)
+                        Sys_Error ("R_ReserveDecalStorage: failed to allocate %zu bytes for decal batch", (size_t)new_capacity * 4 * sizeof (*decal_batch));
+                if ((size_t)new_capacity > old_capacity)
+                        memset (new_batch + old_capacity * 4, 0, ((size_t)new_capacity - old_capacity) * 4 * sizeof (*decal_batch));
+                decal_batch = new_batch;
+        }
+
+        r_decal_capacity = new_capacity;
+        decal_batch_count = 0;
+        decal_batch_texture = NULL;
+        decal_batch_showtris = false;
+}
+
 static int R_GetDecalLimit (void)
 {
-        return CLAMP (0, (int) r_decals_max_cvar.value, MAX_DECALS);
+        int desired = (int) CLAMP (0, r_decals_max_cvar.value, (float) R_DECAL_CAP_MAX);
+
+        if (r_decals_max_cvar.value > (float) R_DECAL_CAP_MAX)
+                Cvar_SetValueQuick (&r_decals_max_cvar, (float) R_DECAL_CAP_MAX);
+
+        if (desired > r_decal_capacity)
+                R_ReserveDecalStorage (desired);
+
+        if (r_decal_capacity <= 0)
+                return desired;
+
+        return CLAMP (0, desired, r_decal_capacity);
 }
 
 static void R_DeactivateDecal (decal_t *dec)
@@ -156,10 +238,13 @@ static void R_RemoveExcessDecals (int limit)
 {
         int to_remove;
 
+        if (!r_decals || r_decal_capacity <= 0)
+                return;
+
         if (limit <= 0)
         {
                 int i;
-                for (i = 0; i < MAX_DECALS; i++)
+                for (i = 0; i < r_decal_capacity; i++)
                         R_DeactivateDecal (&r_decals[i]);
                 return;
         }
@@ -174,7 +259,7 @@ static void R_RemoveExcessDecals (int limit)
                 double oldest_spawn = HUGE_VAL;
                 int i;
 
-                for (i = 0; i < MAX_DECALS; i++)
+                for (i = 0; i < r_decal_capacity; i++)
                 {
                         decal_t *dec = &r_decals[i];
                         if (!dec->active)
@@ -199,7 +284,10 @@ static void R_InitDecalIndices (void)
         if (decal_indices_init)
                 return;
 
-        for (i = 0; i < MAX_DECALS; i++)
+        if (!decal_indices || r_decal_capacity <= 0)
+                return;
+
+        for (i = 0; i < r_decal_capacity; i++)
         {
                 decal_indices[i*6 + 0] = i*4 + 0;
                 decal_indices[i*6 + 1] = i*4 + 1;
@@ -229,6 +317,12 @@ static void R_FlushDecalBatch (void)
 
         R_InitDecalIndices ();
 
+        if (!decal_batch || !decal_indices)
+        {
+                R_ClearDecalBatch ();
+                return;
+        }
+
         GL_Bind (GL_TEXTURE0, decal_batch_showtris ? whitetexture : decal_batch_texture);
 
         GL_Upload (GL_ARRAY_BUFFER, decal_batch, sizeof(decal_batch[0]) * decal_batch_count * 4, &buf, &ofs);
@@ -236,6 +330,7 @@ static void R_FlushDecalBatch (void)
         GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, pos));
         GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, uv));
         GL_VertexAttribPointerFunc (2, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, color));
+        GL_VertexAttribPointerFunc (3, 4, GL_FLOAT, GL_FALSE, sizeof(decal_batch[0]), ofs + offsetof(decalvertex_t, normal_spec));
 
         GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indices, sizeof(decal_indices[0]) * decal_batch_count * 6, &buf, &ofs);
         GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
@@ -249,20 +344,23 @@ static void R_AppendDecalToBatch (decal_t *dec, qboolean showtris)
         if (!dec->texture)
                 return;
 
+        if (!decal_batch || r_decal_capacity <= 0)
+                return;
+
         if (!decal_batch_count)
         {
                 decal_batch_texture = dec->texture;
                 decal_batch_showtris = showtris;
         }
 
-        if (decal_batch_count == MAX_DECALS || decal_batch_texture != dec->texture || decal_batch_showtris != showtris)
+        if (decal_batch_count == r_decal_capacity || decal_batch_texture != dec->texture || decal_batch_showtris != showtris)
         {
                 R_FlushDecalBatch ();
                 decal_batch_texture = dec->texture;
                 decal_batch_showtris = showtris;
         }
 
-        if (decal_batch_count == MAX_DECALS)
+        if (decal_batch_count == r_decal_capacity)
                 return;
 
         memcpy (&decal_batch[decal_batch_count * 4], dec->verts, sizeof(dec->verts));
@@ -378,6 +476,8 @@ void R_InitDecals (void)
         Cvar_RegisterVariable (&r_decals_max_cvar);
         Cvar_RegisterVariable (&r_decals_debug_cvar);
 
+        R_ReserveDecalStorage (R_DECAL_INITIAL_CAPACITY);
+
         for (i = 0; i < DECAL_COUNT; i++)
                 R_GenerateDecalTexture ((decaltype_t)i);
 
@@ -386,7 +486,8 @@ void R_InitDecals (void)
 
 void R_ClearDecals (void)
 {
-        memset (r_decals, 0, sizeof (r_decals));
+        if (r_decals && r_decal_capacity > 0)
+                memset (r_decals, 0, (size_t)r_decal_capacity * sizeof (*r_decals));
         memset (r_decal_death_spawned, 0, sizeof (r_decal_death_spawned));
         r_active_decal_count = 0;
         R_ClearDecalBatch ();
@@ -400,10 +501,10 @@ void R_UpdateDecals (void)
 
         R_RemoveExcessDecals (limit);
 
-        if (r_active_decal_count <= 0)
+        if (r_active_decal_count <= 0 || !r_decals || r_decal_capacity <= 0)
                 return;
 
-        for (i = 0; i < MAX_DECALS; i++)
+        for (i = 0; i < r_decal_capacity; i++)
         {
                 decal_t *dec = &r_decals[i];
                 if (!dec->active)
@@ -478,10 +579,10 @@ static decal_t *R_AllocDecal (void)
         decal_t *inactive = NULL;
         int active = 0;
 
-        if (limit <= 0)
+        if (limit <= 0 || !r_decals || r_decal_capacity <= 0)
                 return NULL;
 
-        for (i = 0; i < MAX_DECALS; i++)
+        for (i = 0; i < r_decal_capacity; i++)
         {
                 decal_t *dec = &r_decals[i];
                 if (dec->active)
@@ -756,7 +857,7 @@ static void R_RandomDirectionInCone (const vec3_t axis, float cone_angle_deg, ve
         }
 }
 
-static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius)
+static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float radius, float spec)
 {
         vec3_t center, right, up;
         vec3_t sdir = {geom->sdir[0], geom->sdir[1], geom->sdir[2]};
@@ -765,6 +866,7 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         float c = cosf (angle), s = sinf (angle);
         vec3_t rs, rt;
         int i;
+        vec3_t normal;
 
         for (i = 0; i < 3; i++)
         {
@@ -794,6 +896,24 @@ static void R_AssignDecalVertices (decal_t *dec, const decalgeom_t *geom, float 
         VectorAdd (center, right, dec->verts[3].pos);
         VectorSubtract (dec->verts[3].pos, up, dec->verts[3].pos);
         dec->verts[3].uv[0] = 1.f; dec->verts[3].uv[1] = 1.f;
+
+        VectorCopy (geom->normal, normal);
+        if (VectorLengthSquared (normal) > 0.0001f)
+                VectorNormalizeFast (normal);
+        else
+        {
+                normal[0] = 0.f;
+                normal[1] = 0.f;
+                normal[2] = 1.f;
+        }
+
+        for (i = 0; i < 4; i++)
+        {
+                dec->verts[i].normal_spec[0] = normal[0];
+                dec->verts[i].normal_spec[1] = normal[1];
+                dec->verts[i].normal_spec[2] = normal[2];
+                dec->verts[i].normal_spec[3] = spec;
+        }
 }
 
 static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_t type, const float *tint)
@@ -828,7 +948,12 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         dec->tint[1] = tint ? tint[1] : 1.f;
         dec->tint[2] = tint ? tint[2] : 1.f;
         dec->tint[3] = tint ? tint[3] : 1.f;
-        R_AssignDecalVertices (dec, geom, radius);
+        {
+                float spec = 0.f;
+                if (type == DECAL_BLOOD)
+                        spec = 0.5f * CLAMP (0.f, dec->tint[3], 1.f);
+                R_AssignDecalVertices (dec, geom, radius, spec);
+        }
 
         {
                 vec3_t sample;
@@ -1085,13 +1210,13 @@ void R_DrawDecals (qboolean showtris)
         if (!r_decals_cvar.value)
                 return;
 
-        if (r_active_decal_count <= 0)
+        if (r_active_decal_count <= 0 || !r_decals || r_decal_capacity <= 0)
         {
                 R_ClearDecalBatch ();
                 return;
         }
 
-        for (i = 0; i < MAX_DECALS; i++)
+        for (i = 0; i < r_decal_capacity; i++)
         {
                 decal_t *dec = &r_decals[i];
                 if (!dec->active)
@@ -1105,9 +1230,9 @@ void R_DrawDecals (qboolean showtris)
                         GL_BeginGroup ("Decals");
                         GL_UseProgram (glprogs.decals[dither]);
                         if (showtris)
-                                GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                                GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
                         else
-                                GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
+                                GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
                         GL_PolygonOffset (OFFSET_DECAL);
                         drew = true;
                 }
