@@ -109,6 +109,7 @@ typedef struct decalgeom_s
         vec3_t  tdir;
         vec3_t  mins;
         vec3_t  maxs;
+        msurface_t *surf;
 } decalgeom_t;
 
 static decal_t                 *r_decals = NULL;
@@ -123,6 +124,8 @@ static int                       decal_batch_count = 0;
 static gltexture_t       *decal_batch_texture = NULL;
 static qboolean          decal_batch_showtris = false;
 static int                       r_decal_capacity = 0;
+
+static qboolean R_SurfacePointHasMargin (const msurface_t *surf, const vec3_t point, const vec3_t normal, float margin);
 
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
@@ -737,6 +740,9 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
                                 continue;
                 }
 
+                if (!R_SurfacePointHasMargin (surf, origin, normal, 0.f))
+                        continue;
+
                 texinfo = surf->texinfo;
                 if (texinfo)
                 {
@@ -803,32 +809,66 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         VectorNormalizeFast (out->tdir);
         VectorCopy (best_mins, out->mins);
         VectorCopy (best_maxs, out->maxs);
+        out->surf = best;
+
+        return true;
+}
+
+static qboolean R_SurfacePointHasMargin (const msurface_t *surf, const vec3_t point, const vec3_t normal, float margin)
+{
+        const model_t *model = cl.worldmodel;
+        const float epsilon = 0.25f;
+        int i;
+
+        if (!model || !surf)
+                return false;
+
+        for (i = 0; i < surf->numedges; i++)
+        {
+                int surfedge = model->surfedges[surf->firstedge + i];
+                medge_t *edge;
+                mvertex_t *v0, *v1;
+                vec3_t edge_vec, edge_normal;
+                float edge_normal_len;
+                float dist;
+
+                if (surfedge >= 0)
+                {
+                        edge = &model->edges[surfedge];
+                        v0 = &model->vertexes[edge->v[0]];
+                        v1 = &model->vertexes[edge->v[1]];
+                }
+                else
+                {
+                        edge = &model->edges[-surfedge];
+                        v0 = &model->vertexes[edge->v[1]];
+                        v1 = &model->vertexes[edge->v[0]];
+                }
+
+                VectorSubtract (v1->position, v0->position, edge_vec);
+                CrossProduct (normal, edge_vec, edge_normal);
+                edge_normal_len = VectorLength (edge_normal);
+                if (edge_normal_len < 0.0001f)
+                        continue;
+
+                dist = DotProduct (point, edge_normal) - DotProduct (v0->position, edge_normal);
+                dist /= edge_normal_len;
+
+                if (dist + epsilon < margin)
+                        return false;
+        }
 
         return true;
 }
 
 static qboolean R_DecalHasEdgeRoom (const decalgeom_t *geom, float radius)
 {
-        int axis;
         float margin = radius + 1.0f;
 
-        for (axis = 0; axis < 3; axis++)
-        {
-                float span = geom->maxs[axis] - geom->mins[axis];
+        if (!geom->surf)
+                return false;
 
-                if (span <= 0.001f)
-                        continue;
-
-                {
-                        float center = geom->mins[axis] + span * 0.5f;
-                        float dist_to_edge = (span * 0.5f) - fabsf (geom->origin[axis] - center);
-
-                        if (dist_to_edge < margin)
-                                return false;
-                }
-        }
-
-        return true;
+        return R_SurfacePointHasMargin (geom->surf, geom->origin, geom->normal, margin);
 }
 
 static float R_RandomRange (float minval, float maxval)
