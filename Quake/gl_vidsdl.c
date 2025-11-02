@@ -49,7 +49,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define MAKE_GL_VERSION(major, minor)		(((major) << 16) | (minor))
 #define MIN_GL_VERSION_MAJOR				4
-#define MIN_GL_VERSION_MINOR				3
+#define MIN_GL_VERSION_MINOR				6
 #define MIN_GL_VERSION						MAKE_GL_VERSION(MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR)
 #define MIN_GL_VERSION_STR					QS_STRINGIFY(MIN_GL_VERSION_MAJOR)"."QS_STRINGIFY(MIN_GL_VERSION_MINOR)
 
