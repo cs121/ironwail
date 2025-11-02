@@ -854,6 +854,9 @@ static qboolean R_SurfacePointHasMargin (const msurface_t *surf, const vec3_t po
                 dist = DotProduct (point, edge_normal) - DotProduct (v0->position, edge_normal);
                 dist /= edge_normal_len;
 
+                if (surf->flags & SURF_PLANEBACK)
+                        dist = -dist;
+
                 if (dist + epsilon < margin)
                         return false;
         }
