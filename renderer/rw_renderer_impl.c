@@ -1,10 +1,11 @@
+#include "quakedef.h"
+
 #define RW_RENDERER_EXPORTS
-#include "renderer/rw_renderer.h"
+#include "rw_renderer.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#include "../Quake/quakedef.h"
 #include "../Quake/vid.h"
 #include "../Quake/glquake.h"
 #include "../Quake/draw.h"
