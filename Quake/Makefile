@@ -62,6 +62,8 @@ CFLAGS += -D_FILE_OFFSET_BITS=64
 CFLAGS += $(call check_gcc,-std=gnu11,)
 CFLAGS += $(call check_gcc,-Werror=format,)
 CFLAGS += $(CPUFLAGS)
+CFLAGS += -I../src
+CFLAGS += -DRW_RENDERER_DLL_READY=1 -DRW_RENDERER_LINK_STATIC=1
 CXXFLAGS = $(filter-out -std=gnu11,$(CFLAGS)) $(call check_cxx,-std=gnu++17,)
 ifneq ($(DEBUG),0)
 DFLAGS += -DDEBUG
@@ -277,9 +279,11 @@ OBJS = strlcat.o \
 	sv_move.o \
 	sv_phys.o \
 	sv_user.o \
-	world.o \
-	zone.o \
-	$(SYSOBJ_SYS) $(SYSOBJ_MAIN)
+        world.o \
+        zone.o \
+        $(SYSOBJ_SYS) $(SYSOBJ_MAIN) \
+        ../src/renderer/rw_renderer_impl.o \
+        ../src/renderer/rw_renderer_facade.o
 
 OBJDEPS := $(OBJS:%.o=%.d)
 OBJS += $(SYSOBJ_RES)
@@ -317,7 +321,7 @@ debug:
 	$(error Use "make DEBUG=1")
 
 clean: $(MAKEFILE)
-	$(RM) *.o *.d $(DEFAULT_TARGET)
+	$(RM) *.o *.d $(DEFAULT_TARGET) ../src/renderer/*.o ../src/renderer/*.d
 
 ifeq ($(HOST_OS),haiku)
 IW_APP_DIR=$(shell finddir B_APPS_DIRECTORY)/ironwail/

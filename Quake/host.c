@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "renderer/rw_renderer.h"
 #include "../wren_vm/wren_runtime.h"
 #include <setjmp.h>
 
@@ -59,6 +60,7 @@ client_t	*host_client;			// current client
 jmp_buf 	host_abortserver;
 
 byte		*host_colormap;
+static rw_renderer_t *host_renderer = NULL;
 float	host_netinterval;
 cvar_t	host_framerate = {"host_framerate","0",CVAR_NONE};	// set for slow motion
 cvar_t	host_speeds = {"host_speeds","0",CVAR_NONE};			// set for running times
@@ -1449,16 +1451,25 @@ void Host_Init (void)
 		if (!host_colormap)
 			Sys_Error ("Couldn't load gfx/colormap.lmp");
 
-		V_Init ();
-		Chase_Init ();
-		M_Init ();
-		VID_Init ();
-		IN_Init ();
-		TexMgr_Init (); //johnfitz
-		Draw_Init ();
-		SCR_Init ();
-		R_Init ();
-		S_Init ();
+                V_Init ();
+                Chase_Init ();
+                M_Init ();
+
+                host_renderer = rw_renderer_create ();
+                if (!host_renderer)
+                        Sys_Error ("Failed to allocate renderer state");
+
+                rw_renderer_set_active (host_renderer);
+
+                {
+                        rw_renderer_config_t renderer_cfg = rw_renderer_config_default ();
+                        renderer_cfg.backend = RW_RENDERER_BACKEND_OPENGL;
+                        if (rw_renderer_init (host_renderer, &renderer_cfg) != RW_OK)
+                                Sys_Error ("Renderer initialization failed");
+                }
+
+                IN_Init ();
+                S_Init ();
 		CDAudio_Init ();
 		BGM_Init();
 		Sbar_Init ();
@@ -1548,9 +1559,14 @@ void Host_Shutdown(void)
 		ExtraMaps_ShutDown ();
 		BGM_Shutdown();
 		CDAudio_Shutdown ();
-		S_Shutdown ();
-		IN_Shutdown ();
-		VID_Shutdown();
+                S_Shutdown ();
+                IN_Shutdown ();
+                if (host_renderer)
+                {
+                        rw_renderer_destroy (host_renderer);
+                        host_renderer = NULL;
+                        rw_renderer_set_active (NULL);
+                }
         }
 
         LOG_Close ();

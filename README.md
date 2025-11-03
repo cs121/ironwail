@@ -13,6 +13,17 @@ Ironwail is a high-performance fork of the GLQuake descendant [QuakeSpasm](https
 - Performance boosts: GPU-driven culling, compute-based lightmap updates, reduced heap usage, faster loading on jumbo maps, and an automatic frame limiter when no map is loaded.
 - Quality-of-life: runs from Unicode paths and plays demanding maps like [Shibboleth](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html), [Raven Keep](https://www.quaddicted.com/reviews/ravenkeep.html), and [ad_tears](https://www.moddb.com/mods/arcane-dimensions) at high frame rates without manual `-heapsize` tuning.
 
+## Renderer DLL preparation
+
+The renderer now exposes a C11 interface (`src/renderer/rw_renderer.h`) so the
+engine can eventually load it from a DLL/shared object. Today's builds still
+link everything statically with `RW_RENDERER_LINK_STATIC=1`; consumers interact
+with the renderer through opaque handles and façade helpers. Future dynamic
+loading work will flip `RW_RENDERER_LINK_DYNAMIC` and provide the external
+library without requiring additional refactors. See
+[`docs/renderer_dll_prep.md`](docs/renderer_dll_prep.md) for migration notes and
+available build flags.
+
 ## Wren server runtime
 
 Ironwail now embeds the [Wren](https://wren.io) scripting VM to run server-side gameplay logic. The runtime sits next to the existing QuakeC VM; when a Wren hook is present it runs first, and QuakeC acts as a safety net if the hook is missing or explicitly asks for fallback.
