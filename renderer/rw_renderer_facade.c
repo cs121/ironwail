@@ -1,4 +1,6 @@
-#include "renderer/rw_renderer.h"
+#include "quakedef.h"
+
+#include "rw_renderer.h"
 
 static rw_renderer_t *s_active_renderer = NULL;
 

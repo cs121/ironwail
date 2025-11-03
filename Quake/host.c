@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
-#include "renderer/rw_renderer.h"
+#include "../renderer/rw_renderer.h"
 #include "../wren_vm/wren_runtime.h"
 #include <setjmp.h>
 
