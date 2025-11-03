@@ -44,7 +44,15 @@ target_include_directories(wren PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren
 target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
 
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
-list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c)
+list(APPEND IWAIL_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/rw_renderer_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/rw_renderer_facade.c
+)
+
+add_library(rw_renderer_iface INTERFACE)
+target_include_directories(rw_renderer_iface INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(rw_renderer_iface INTERFACE RW_RENDERER_DLL_READY=1 RW_RENDERER_LINK_STATIC=1)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
@@ -76,8 +84,8 @@ endif()
 
 add_executable(ironwail ${IWAIL_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
-target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/renderer ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
-target_link_libraries(ironwail PRIVATE wren)
+target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/renderer ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
+target_link_libraries(ironwail PRIVATE rw_renderer_iface wren)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")

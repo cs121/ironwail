@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "steam.h"
+#include "renderer/rw_renderer.h"
 #include <time.h>
 
 /*
@@ -2093,7 +2094,7 @@ void SCR_UpdateScreen (void)
 		return;				// not initialized yet
 
 
-	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
+        rw_renderer_active_begin_frame (&glx, &gly, &glwidth, &glheight);
 
 	//
 	// determine size of refresh window
@@ -2171,6 +2172,7 @@ void SCR_UpdateScreen (void)
 
 	GL_EndGroup ();
 
-	GL_EndRendering ();
+        rw_renderer_active_end_frame ();
+        rw_renderer_active_present ();
 }
 
