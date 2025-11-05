@@ -1,14 +1,162 @@
-// Retro-minimal particle definitions for Ironwail
-// Keep parameters concise for a period-correct aesthetic.
+// =========================
+// Quake Standard TempEntities — retro-minimal
+// Stil: kurze Lebensdauer, wenige Partikel, klare Farben
+// =========================
 
-// Quick spark burst for impacts and hitscan effects
-// spawn_rate: via pointparticles count
-// lifetime: 0.35s, tight velocity for punchy look
-// base_vel: 140 ups, jitter 60
-// gravity: strong downward pull for arcade sparks
-// size: small bright pixels
-// color: warm arc flash
-// airfriction emulates quick slowdown before fade
+// Gunshot dust/puff (TE_GUNSHOT / TE_SPIKE impacts)
+effect te_gunshot
+    type smoke
+    count 1
+    color 150 150 150
+    size 5 9
+    velocity 30 20
+    gravity -10
+    airfriction 1.6
+    lifetime 0.35
+
+// Nail/Spike impact (TE_SPIKE)
+effect te_spike
+    type spark
+    count 1
+    color 255 220 120
+    size 2 1
+    velocity 120 60
+    gravity 500
+    airfriction 2
+    lifetime 0.30
+
+// Supernail impact (TE_SUPERSPIKE) — etwas kräftiger
+effect te_superspike
+    type spark
+    count 1
+    color 255 230 140
+    size 2 1
+    velocity 150 70
+    gravity 600
+    airfriction 2
+    lifetime 0.32
+
+// Wizard spike (TE_WIZSPIKE) — kaltes Magie-Funkeln
+effect te_wizspike
+    type spark
+    count 1
+    color 140 200 255
+    size 2 1
+    velocity 140 60
+    gravity 550
+    airfriction 2
+    lifetime 0.30
+
+// Knight spike (TE_KNIGHTSPIKE) — warm/bronze Funken
+effect te_knightspike
+    type spark
+    count 1
+    color 240 200 120
+    size 2 1
+    velocity 130 65
+    gravity 560
+    airfriction 2
+    lifetime 0.30
+
+// Blood (TE_BLOOD)
+effect te_blood
+    type spark
+    count 1
+    color 190 20 20
+    size 2 2
+    velocity 110 55
+    gravity 520
+    airfriction 1.2
+    lifetime 0.45
+
+// Explosion (TE_EXPLOSION) — kompakter Feuerkern + kurze Rauchfahne
+effect te_explosion
+    type spark
+    count 1
+    color 255 200 120
+    size 6 2
+    velocity 160 90
+    gravity 700
+    airfriction 2.2
+    lifetime 0.35
+
+// Tar Explosion (TE_TAREXPLOSION) — dunkler, öliger Rauchstoß
+effect te_tarexplosion
+    type smoke
+    count 1
+    color 80 70 60
+    size 10 14
+    velocity 100 60
+    gravity -10
+    airfriction 1.8
+    lifetime 0.55
+
+// Bright Explosion variant (TE_EXPLOSION2) — heller Blitz, kürzer
+effect te_explosion2
+    type spark
+    count 1
+    color 255 245 170
+    size 5 2
+    velocity 180 80
+    gravity 650
+    airfriction 2.4
+    lifetime 0.28
+
+// Teleport (TE_TELEPORT) — aufsteigende, kalte Nebel-Säule
+effect te_teleport
+    type smoke
+    count 1
+    color 150 160 200
+    size 8 12
+    velocity 60 40
+    gravity -40
+    airfriction 1.4
+    lifetime 0.6
+
+// Lava Splash (TE_LAVASPLASH) — heiße Tröpfchen/Funken
+effect te_lavasplash
+    type spark
+    count 1
+    color 255 140 60
+    size 2 1
+    velocity 200 100
+    gravity 900
+    airfriction 2.6
+    lifetime 0.35
+
+// Lightning beam (TE_LIGHTNING1) — neutraler Blitzstrahl
+effect te_lightning1
+    type beam
+    count 1
+    color 200 220 255
+    size 3 1
+    velocity 0 0
+    gravity 0
+    airfriction 0
+    lifetime 0.10
+
+// Lightning beam alternate (TE_LIGHTNING2) — kälter/blauer
+effect te_lightning2
+    type beam
+    count 1
+    color 160 200 255
+    size 3 1
+    velocity 0 0
+    gravity 0
+    airfriction 0
+    lifetime 0.10
+
+// Lightning beam ogre/vore (TE_LIGHTNING3) — wärmer/gelblicher
+effect te_lightning3
+    type beam
+    count 1
+    color 235 235 180
+    size 3 1
+    velocity 0 0
+    gravity 0
+    airfriction 0
+    lifetime 0.10
+
 
 effect fx_spark_min
     type spark
