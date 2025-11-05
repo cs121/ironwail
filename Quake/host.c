@@ -242,7 +242,7 @@ void	Host_FindMaxClients (void)
 			svs.maxclients = Q_atoi (com_argv[i+1]);
 		}
 		else
-			svs.maxclients = 16;
+			svs.maxclients = 8;
 	}
 	else
 		cls.state = ca_disconnected;
@@ -255,10 +255,10 @@ void	Host_FindMaxClients (void)
 		if (i != (com_argc - 1))
 			svs.maxclients = Q_atoi (com_argv[i+1]);
 		else
-			svs.maxclients = 16;
+			svs.maxclients = 8;
 	}
 	if (svs.maxclients < 1)
-		svs.maxclients = 16;
+		svs.maxclients = 8;
 	else if (svs.maxclients > MAX_SCOREBOARD)
 		svs.maxclients = MAX_SCOREBOARD;
 
@@ -1476,7 +1476,7 @@ void Host_Init (void)
 	host_hunklevel = Hunk_LowMark ();
 
 	host_initialized = true;
-	Con_Printf ("\n========= Game Initialized =========\n\n");
+	Con_Printf ("\n========= Quake Initialized =========\n\n");
 
 	if (!COM_CheckParm ("-nomapchecks") && Sys_IsStartedFromMapEditor ())
 	{

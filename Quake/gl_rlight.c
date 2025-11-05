@@ -19,84 +19,63 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// r_light.c -- optimized + debuggable edition
+// r_light.c
 
 #include "quakedef.h"
 #include "gl_shadow.h"
 
 enum
 {
-	BSPX_INDEX_MAP_CAP = MAX_DLIGHTS
+        BSPX_INDEX_MAP_CAP = MAX_DLIGHTS
 };
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 
-/* Optional compile-time guard to ensure std140-friendly size */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define STATIC_ASSERT _Static_assert
-#else
-#define STATIC_ASSERT(x, msg)
-#endif
-
-/* Small helpers */
-static inline qboolean nearly_equal (float a, float b, float eps) { return fabsf (a - b) < eps; }
-
-static inline qboolean light_eq (const gpulight_t* a, const gpulight_t* b)
-{
-	const float e = 0.01f;
-	return nearly_equal (a->pos[0], b->pos[0], e) &&
-		nearly_equal (a->pos[1], b->pos[1], e) &&
-		nearly_equal (a->pos[2], b->pos[2], e) &&
-		nearly_equal (a->radius, b->radius, e) &&
-		nearly_equal (a->color[0], b->color[0], 0.02f) &&
-		nearly_equal (a->color[1], b->color[1], 0.02f) &&
-		nearly_equal (a->color[2], b->color[2], 0.02f);
-}
-
 gpulightbuffer_t r_lightbuffer;
 
-static void R_FillGpuLightFromBspx (const bspx_static_light_t* src, gpulight_t* dst)
+static void R_FillGpuLightFromBspx (const bspx_static_light_t *src, gpulight_t *dst)
 {
-	float intensity = (src->intensity > 0.0f) ? src->intensity : 0.0f;
+        float intensity = (src->intensity > 0.0f) ? src->intensity : 0.0f;
 
-	VectorCopy (src->origin, dst->pos);
-	dst->radius = (src->radius > 0.0f) ? src->radius : 0.0f;
-	dst->color[0] = q_max (0.f, src->color[0] * intensity);
-	dst->color[1] = q_max (0.f, src->color[1] * intensity);
-	dst->color[2] = q_max (0.f, src->color[2] * intensity);
-	dst->minlight = 0.0f;
+        VectorCopy (src->origin, dst->pos);
+        dst->radius = (src->radius > 0.0f) ? src->radius : 0.0f;
+        dst->color[0] = q_max (0.f, src->color[0] * intensity);
+        dst->color[1] = q_max (0.f, src->color[1] * intensity);
+        dst->color[2] = q_max (0.f, src->color[2] * intensity);
+        dst->minlight = 0.0f;
 }
 
-static int R_AppendBspxLights (const bspx_static_light_t* lights, int count, int* index_map, int index_map_cap)
+static int R_AppendBspxLights (const bspx_static_light_t *lights, int count, int *index_map, int index_map_cap)
 {
-	int appended = 0;
+        int appended = 0;
 
-	if (!lights || count <= 0)
-		return 0;
+        if (!lights || count <= 0)
+                return 0;
 
-	if (index_map && index_map_cap > 0)
-	{
-		memset (index_map, -1, sizeof (int) * index_map_cap);
-	}
+        if (index_map && index_map_cap > 0)
+        {
+                for (int i = 0; i < index_map_cap; ++i)
+                        index_map[i] = -1;
+        }
 
-	for (int i = 0; i < count && r_framedata.numlights < MAX_DLIGHTS; ++i)
-	{
-		const bspx_static_light_t* src = &lights[i];
-		gpulight_t* dst;
+        for (int i = 0; i < count && r_framedata.numlights < MAX_DLIGHTS; ++i)
+        {
+                const bspx_static_light_t *src = &lights[i];
+                gpulight_t *dst;
 
-		if (src->radius <= 0.0f)
-			continue;
+                if (src->radius <= 0.0f)
+                        continue;
 
-		dst = &r_lightbuffer.lights[r_framedata.numlights++];
-		if (index_map && i < index_map_cap)
-			index_map[i] = r_framedata.numlights - 1;
-		R_FillGpuLightFromBspx (src, dst);
-		appended++;
-	}
+                dst = &r_lightbuffer.lights[r_framedata.numlights++];
+                if (index_map && i < index_map_cap)
+                        index_map[i] = r_framedata.numlights - 1;
+                R_FillGpuLightFromBspx (src, dst);
+                appended++;
+        }
 
-	return appended;
+        return appended;
 }
 
 /*
@@ -106,25 +85,20 @@ R_AnimateLight
 */
 void R_AnimateLight (void)
 {
-	int         i, j, k, n;
-	double      f, base;
+	int			i,j,k,n;
+	double		f,base;
 
-	// light animations
-	// 'm' is normal light, 'a' is no light, 'z' is double bright
+//
+// light animations
+// 'm' is normal light, 'a' is no light, 'z' is double bright
 	f = cl.time * 10.0;
-	base = floor (f);
+	base = floor(f);
 	i = (int)base;
 	f -= base;
 	if (!r_lerplightstyles.value)
 		f = 0.0;
 
-#if defined(q_bound)
-	f = q_bound (0.0, f, 1.0);
-#else
-	if (f < 0.0) f = 0.0; else if (f > 1.0) f = 1.0;
-#endif
-
-	for (j = 0; j < MAX_LIGHTSTYLES; j++)
+	for (j=0 ; j<MAX_LIGHTSTYLES ; j++)
 	{
 		if (!cl_lightstyle[j].length)
 		{
@@ -147,10 +121,10 @@ void R_AnimateLight (void)
 			n = cl_lightstyle[j].map[n] - 'a';
 		}
 		// only interpolate abrupt changes (e.g. flickering light in e1m1) if r_lerplightstyles >= 2
-		if (r_lerplightstyles.value < 2.f && abs (n - k) >= ('m' - 'a') / 2)
+		if (r_lerplightstyles.value < 2.f && abs(n - k) >= ('m' - 'a') / 2)
 			n = k;
-		d_lightstylevalue[j] = (int)(k * 22 + (n - k) * 22 * f);
-		r_lightbuffer.lightstyles[j] = (k + (n - k) * f) * (22.f / 256.f);
+		d_lightstylevalue[j] = (int)(k*22 + (n-k)*22*f);
+		r_lightbuffer.lightstyles[j] = (k + (n-k)*f) * (22.f/256.f);
 		//johnfitz
 	}
 
@@ -169,11 +143,9 @@ DYNAMIC LIGHTS
 static GLuint gl_lightclustertexture;
 
 typedef struct gpu_cluster_inputs_s {
-	float       transposed_proj[16];
-	float       view_matrix[16];
+	float		transposed_proj[16];
+	float		view_matrix[16];
 } gpu_cluster_inputs_t;
-
-STATIC_ASSERT (sizeof (gpu_cluster_inputs_t) % 16 == 0, "gpu_cluster_inputs_t must be multiple of 16 bytes");
 
 /*
 =============
@@ -199,10 +171,8 @@ GLLight_DeleteResources
 */
 void GLLight_DeleteResources (void)
 {
-	if (gl_lightclustertexture) {
-		glDeleteTextures (1, &gl_lightclustertexture);
-		gl_lightclustertexture = 0;
-	}
+	glDeleteTextures (1, &gl_lightclustertexture);
+	gl_lightclustertexture = 0;
 }
 
 /*
@@ -212,160 +182,165 @@ R_PushDlights
 */
 void R_PushDlights (void)
 {
-	int             i, j;
-	GLuint          buf;
-	GLbyte* ofs;
+	int				i, j;
+	GLuint			buf;
+	GLbyte			*ofs;
 	gpu_cluster_inputs_t cluster_inputs;
 
-	int dynamic_count = 0;
-	int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
-	int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
-	int static_light_map_count = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
-	int static_shadow_light_map_count = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
+        int dynamic_count = 0;
+        int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
+        int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
+        int static_light_map_count = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
+        int static_shadow_light_map_count = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
 
-	int static_light_index_map[BSPX_INDEX_MAP_CAP];
-	int static_shadow_light_index_map[BSPX_INDEX_MAP_CAP];
+        int static_light_index_map[BSPX_INDEX_MAP_CAP];
+        int static_shadow_light_index_map[BSPX_INDEX_MAP_CAP];
 
-	memset (static_light_index_map, -1, sizeof (static_light_index_map));
-	memset (static_shadow_light_index_map, -1, sizeof (static_shadow_light_index_map));
+        for (int i = 0; i < BSPX_INDEX_MAP_CAP; ++i)
+        {
+                static_light_index_map[i] = -1;
+                static_shadow_light_index_map[i] = -1;
+        }
 
-	r_framedata.numlights = 0;
-	dynamic_count = 0;
+        r_framedata.numlights = 0;
 
-	if (r_dynamic.value)
-	{
-		dlight_t* l;
-		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
-		{
-			qboolean cull = false;
+        if (r_dynamic.value)
+        {
+                dlight_t *l;
+                for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
+                {
+                        gpulight_t *out;
+                        qboolean cull = false;
 
-			if (l->spawn > cl.time) { l->die = 0.f; continue; }
-			if (l->die < cl.time || !l->radius) continue;
+                        if (l->spawn > cl.time)
+                        {
+                                l->die = 0.f;
+                                continue;
+                        }
 
-			// Frustum cull
-			for (j = 0; j < 4; j++)
-			{
-				mplane_t* p = &frustum[j];
-				if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
-				{
-					cull = true;
-					break;
-				}
-			}
-			if (cull) continue;
+                        if (l->die < cl.time || !l->radius)
+                                continue;
 
-			if (r_framedata.numlights >= MAX_DLIGHTS) break; // OOB-Schutz
+                        for (j = 0; j < 4; j++)
+                        {
+                                mplane_t *p = &frustum[j];
+                                if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
+                                {
+                                        cull = true;
+                                        break;
+                                }
+                        }
+                        if (cull)
+                                continue;
 
-			gpulight_t* out = &r_lightbuffer.lights[r_framedata.numlights++];
-			out->pos[0] = l->origin[0];
-			out->pos[1] = l->origin[1];
-			out->pos[2] = l->origin[2];
-			out->radius = l->radius;
-			out->color[0] = l->color[0];
-			out->color[1] = l->color[1];
-			out->color[2] = l->color[2];
-			out->minlight = l->minlight;
-		}
+                        out = &r_lightbuffer.lights[r_framedata.numlights++];
+                        out->pos[0]   = l->origin[0];
+                        out->pos[1]   = l->origin[1];
+                        out->pos[2]   = l->origin[2];
+                        out->radius   = l->radius;
+                        out->color[0] = l->color[0];
+                        out->color[1] = l->color[1];
+                        out->color[2] = l->color[2];
+                        out->minlight = l->minlight;
+                }
 
-		dynamic_count = r_framedata.numlights;
-	}
+                dynamic_count = r_framedata.numlights;
 
-	// Statische Lichter IMMER hinzufügen (unabhängig von r_dynamic)
-	if (cl.worldmodel)
-	{
-		R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
-			cl.worldmodel->bspx_num_static_lights,
-			(static_light_map_count > 0) ? static_light_index_map : NULL,
-			static_light_map_count);
-		R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
-			cl.worldmodel->bspx_num_static_shadow_lights,
-			(static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
-			static_shadow_light_map_count);
-	}
+                if (cl.worldmodel)
+                {
+                        R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
+                                cl.worldmodel->bspx_num_static_lights,
+                                (static_light_map_count > 0) ? static_light_index_map : NULL,
+                                static_light_map_count);
+                        R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
+                                cl.worldmodel->bspx_num_static_shadow_lights,
+                                (static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
+                                static_shadow_light_map_count);
+                }
+        }
 
-	// Shadow-Lichtliste zusammenstellen
-	if (cl.worldmodel &&
-		(cl.worldmodel->bspx_num_static_shadow_lights > 0 ||
-			cl.worldmodel->bspx_num_static_shadow_indices > 0))
-	{
-		gpulight_t shadow_lights[MAX_DLIGHTS];
-		int shadow_count = 0;
+        if (cl.worldmodel &&
+                (cl.worldmodel->bspx_num_static_shadow_lights > 0 ||
+                 cl.worldmodel->bspx_num_static_shadow_indices > 0))
+        {
+                gpulight_t shadow_lights[MAX_DLIGHTS];
+                int shadow_count = 0;
 
-		for (i = 0; i < dynamic_count && shadow_count < MAX_DLIGHTS; ++i)
-			shadow_lights[shadow_count++] = r_lightbuffer.lights[i];
+                for (i = 0; i < dynamic_count && shadow_count < MAX_DLIGHTS; ++i)
+                        shadow_lights[shadow_count++] = r_lightbuffer.lights[i];
 
-		if (cl.worldmodel->bspx_static_shadow_lights &&
-			cl.worldmodel->bspx_num_static_shadow_lights > 0)
-		{
-			int count = cl.worldmodel->bspx_num_static_shadow_lights;
+                if (cl.worldmodel->bspx_static_shadow_lights &&
+                        cl.worldmodel->bspx_num_static_shadow_lights > 0)
+                {
+                        int count = cl.worldmodel->bspx_num_static_shadow_lights;
 
-			for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
-			{
-				int mapped_index = (k < static_shadow_light_map_count) ?
-					static_shadow_light_index_map[k] : -1;
+                        for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
+                        {
+                                int mapped_index = (k < static_shadow_light_map_count) ?
+                                        static_shadow_light_index_map[k] : -1;
 
-				if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
-					continue;
+                                if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
+                                        continue;
 
-				// Duplikate vermeiden
-				qboolean duplicate = false;
-				for (int n = 0; n < shadow_count; ++n) {
-					if (light_eq (&shadow_lights[n], &r_lightbuffer.lights[mapped_index])) { duplicate = true; break; }
-				}
-				if (duplicate) continue;
+                                shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
+                        }
+                }
 
-				shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
-			}
-		}
+                if (cl.worldmodel->bspx_static_shadow_indices &&
+                        cl.worldmodel->bspx_num_static_shadow_indices > 0)
+                {
+                        const int *indices = cl.worldmodel->bspx_static_shadow_indices;
+                        int count = cl.worldmodel->bspx_num_static_shadow_indices;
+                        int maxlights = cl.worldmodel->bspx_num_static_lights;
 
-		if (cl.worldmodel->bspx_static_shadow_indices &&
-			cl.worldmodel->bspx_num_static_shadow_indices > 0)
-		{
-			const int* indices = cl.worldmodel->bspx_static_shadow_indices;
-			int count = cl.worldmodel->bspx_num_static_shadow_indices;
-			int maxlights = cl.worldmodel->bspx_num_static_lights;
+                        if (cl.worldmodel->bspx_static_lights && maxlights > 0)
+                        {
+                                for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
+                                {
+                                        int idx = indices[k];
+                                        qboolean duplicate = false;
 
-			if (cl.worldmodel->bspx_static_lights && maxlights > 0)
-			{
-				for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
-				{
-					int idx = indices[k];
-					qboolean duplicate = false;
+                                        if (idx < 0 || idx >= maxlights)
+                                                continue;
 
-					if (idx < 0 || idx >= maxlights)
-						continue;
+                                        if (static_light_map_count <= 0)
+                                                continue;
 
-					if (static_light_map_count <= 0)
-						continue;
+                                        int mapped_index = (idx < static_light_map_count) ?
+                                                static_light_index_map[idx] : -1;
 
-					int mapped_index = (idx < static_light_map_count) ?
-						static_light_index_map[idx] : -1;
+                                        if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
+                                                continue;
 
-					if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
-						continue;
+                                        for (int n = dynamic_count; n < shadow_count; ++n)
+                                        {
+                                                const gpulight_t *existing = &shadow_lights[n];
+                                                const gpulight_t *candidate = &r_lightbuffer.lights[mapped_index];
+                                                if (fabsf(existing->pos[0] - candidate->pos[0]) < 0.01f &&
+                                                    fabsf(existing->pos[1] - candidate->pos[1]) < 0.01f &&
+                                                    fabsf(existing->pos[2] - candidate->pos[2]) < 0.01f &&
+                                                    fabsf(existing->radius - candidate->radius) < 0.01f)
+                                                {
+                                                        duplicate = true;
+                                                        break;
+                                                }
+                                        }
+                                        if (duplicate)
+                                                continue;
 
-					for (int n = dynamic_count; n < shadow_count; ++n)
-					{
-						const gpulight_t* existing = &shadow_lights[n];
-						const gpulight_t* candidate = &r_lightbuffer.lights[mapped_index];
-						if (light_eq (existing, candidate)) { duplicate = true; break; }
-					}
-					if (duplicate)
-						continue;
+                                        shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
+                                }
+                        }
+                }
 
-					shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
-				}
-			}
-		}
+                R_ShadowSyncWorldLights (shadow_lights, shadow_count);
+        }
+        else
+        {
+                R_ShadowSyncWorldLights (r_lightbuffer.lights, r_framedata.numlights);
+        }
 
-		R_ShadowSyncWorldLights (shadow_lights, shadow_count);
-	}
-	else
-	{
-		R_ShadowSyncWorldLights (r_lightbuffer.lights, r_framedata.numlights);
-	}
-
-	GL_BeginGroup ("Light clustering");
+        GL_BeginGroup ("Light clustering");
 
 	R_UploadFrameData ();
 
@@ -375,9 +350,9 @@ void R_PushDlights (void)
 
 	GL_UseProgram (glprogs.cluster_lights);
 	GL_Upload (GL_UNIFORM_BUFFER, &cluster_inputs, sizeof (cluster_inputs), &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (cluster_inputs));
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr) ofs, sizeof (cluster_inputs));
 	GL_BindImageTextureFunc (0, gl_lightclustertexture, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RG32UI);
-	GL_DispatchComputeFunc ((LIGHT_TILES_X + 7) / 8, (LIGHT_TILES_Y + 7) / 8, LIGHT_TILES_Z);
+	GL_DispatchComputeFunc ((LIGHT_TILES_X+7)/8, (LIGHT_TILES_Y+7)/8, LIGHT_TILES_Z);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 	GL_BindImageTextureFunc (0, gl_lightclustertexture, 0, GL_TRUE, 0, GL_READ_ONLY, GL_RG32UI);
@@ -396,28 +371,28 @@ LIGHT SAMPLING
 
 vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
-static void InterpolateLightmap (vec3_t color, msurface_t* surf, int ds, int dt)
+static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 {
-	byte* lightmap;
+	byte *lightmap;
 	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
 	int scale;
-	line3 = ((surf->extents[0] >> 4) + 1) * 3;
+	line3 = ((surf->extents[0]>>4)+1)*3;
 
-	lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3; // LordHavoc: *3 for color
+	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
 
-	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != 255;maps++)
 	{
 		scale = d_lightstylevalue[surf->styles[maps]];
-		r00 += lightmap[0] * scale; g00 += lightmap[1] * scale; b00 += lightmap[2] * scale;
-		r01 += lightmap[3] * scale; g01 += lightmap[4] * scale; b01 += lightmap[5] * scale;
-		r10 += lightmap[line3 + 0] * scale; g10 += lightmap[line3 + 1] * scale; b10 += lightmap[line3 + 2] * scale;
-		r11 += lightmap[line3 + 3] * scale; g11 += lightmap[line3 + 4] * scale; b11 += lightmap[line3 + 5] * scale;
-		lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3; // LordHavoc: *3 for colored lighting
+		r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
+		r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
+		r10 += lightmap[line3+0] * scale; g10 += lightmap[line3+1] * scale; b10 += lightmap[line3+2] * scale;
+		r11 += lightmap[line3+3] * scale; g11 += lightmap[line3+4] * scale; b11 += lightmap[line3+5] * scale;
+		lightmap += ((surf->extents[0]>>4)+1) * ((surf->extents[1]>>4)+1)*3; // LordHavoc: *3 for colored lighting
 	}
 
-	color[0] = ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)) * (1.f / 256.f);
-	color[1] = ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)) * (1.f / 256.f);
-	color[2] = ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)) * (1.f / 256.f);
+	color[0] = ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)) * (1.f/256.f);
+	color[1] = ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)) * (1.f/256.f);
+	color[2] = ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)) * (1.f/256.f);
 }
 
 /*
@@ -425,16 +400,16 @@ static void InterpolateLightmap (vec3_t color, msurface_t* surf, int ds, int dt)
 RecursiveLightPoint -- johnfitz -- replaced entire function for lit support via lordhavoc
 =============
 */
-int RecursiveLightPoint (lightcache_t* cache, mnode_t* node, vec3_t rayorg, vec3_t start, vec3_t end, float* maxdist)
+int RecursiveLightPoint (lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist)
 {
-	float       front, back, frac;
-	vec3_t      mid;
+	float		front, back, frac;
+	vec3_t		mid;
 
 loc0:
 	if (node->contents < 0)
-		return false;       // didn't hit anything
+		return false;		// didn't hit anything
 
-	// calculate mid point
+// calculate mid point
 	if (node->plane->type < 3)
 	{
 		front = start[node->plane->type] - node->plane->dist;
@@ -442,47 +417,47 @@ loc0:
 	}
 	else
 	{
-		front = DotProduct (start, node->plane->normal) - node->plane->dist;
-		back = DotProduct (end, node->plane->normal) - node->plane->dist;
+		front = DotProduct(start, node->plane->normal) - node->plane->dist;
+		back = DotProduct(end, node->plane->normal) - node->plane->dist;
 	}
 
 	// LordHavoc: optimized recursion
 	if ((back < 0) == (front < 0))
-		//      return RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, end, maxdist);
+//		return RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, end, maxdist);
 	{
 		node = node->children[front < 0];
 		goto loc0;
 	}
 
-	frac = front / (front - back);
-	mid[0] = start[0] + (end[0] - start[0]) * frac;
-	mid[1] = start[1] + (end[1] - start[1]) * frac;
-	mid[2] = start[2] + (end[2] - start[2]) * frac;
+	frac = front / (front-back);
+	mid[0] = start[0] + (end[0] - start[0])*frac;
+	mid[1] = start[1] + (end[1] - start[1])*frac;
+	mid[2] = start[2] + (end[2] - start[2])*frac;
 
-	// go down front side
+// go down front side
 	if (RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, mid, maxdist))
-		return true;    // hit something
+		return true;	// hit something
 	else
 	{
 		unsigned int i;
 		int ds, dt;
-		msurface_t* surf;
-		// check for impact on this node
+		msurface_t *surf;
+	// check for impact on this node
 
 		surf = cl.worldmodel->surfaces + node->firstsurface;
-		for (i = 0; i < node->numsurfaces; i++, surf++)
+		for (i = 0;i < node->numsurfaces;i++, surf++)
 		{
 			float sfront, sback, dist;
 			vec3_t raydelta;
 
 			if (surf->flags & SURF_DRAWTILED)
-				continue;   // no lightmaps
+				continue;	// no lightmaps
 
-			// ericw -- added double casts to force 64-bit precision.
-			// Without them the zombie at the start of jam3_ericw.bsp was
-			// incorrectly being lit up in SSE builds.
-			ds = (int)((double)DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-			dt = (int)((double)DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+		// ericw -- added double casts to force 64-bit precision.
+		// Without them the zombie at the start of jam3_ericw.bsp was
+		// incorrectly being lit up in SSE builds.
+			ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+			dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
 
 			if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
 				continue;
@@ -500,11 +475,11 @@ loc0:
 			}
 			else
 			{
-				sfront = DotProduct (rayorg, surf->plane->normal) - surf->plane->dist;
-				sback = DotProduct (end, surf->plane->normal) - surf->plane->dist;
+				sfront = DotProduct(rayorg, surf->plane->normal) - surf->plane->dist;
+				sback = DotProduct(end, surf->plane->normal) - surf->plane->dist;
 			}
-			VectorSubtract (end, rayorg, raydelta);
-			dist = sfront / (sfront - sback) * VectorLength (raydelta);
+			VectorSubtract(end, rayorg, raydelta);
+			dist = sfront / (sfront - sback) * VectorLength(raydelta);
 
 			if (!surf->samples)
 			{
@@ -514,7 +489,7 @@ loc0:
 				// caused by overlapping surfaces with mixed lighting data.
 				const float nearby = 8.f;
 				dist += nearby;
-				*maxdist = q_min (*maxdist, dist);
+				*maxdist = q_min(*maxdist, dist);
 				continue;
 			}
 
@@ -532,7 +507,7 @@ loc0:
 			return true; // success
 		}
 
-		// go down back side
+	// go down back side
 		return RecursiveLightPoint (cache, node->children[front >= 0], rayorg, mid, end, maxdist);
 	}
 }
@@ -542,10 +517,10 @@ loc0:
 R_LightPoint -- johnfitz -- replaced entire function for lit support via lordhavoc
 =============
 */
-int R_LightPoint (vec3_t p, float ofs, lightcache_t* cache)
+int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 {
-	vec3_t      start, end;
-	float       maxdist = 8192.f; //johnfitz -- was 2048
+	vec3_t		start, end;
+	float		maxdist = 8192.f; //johnfitz -- was 2048
 
 	if (!cl.worldmodel->lightdata)
 	{
