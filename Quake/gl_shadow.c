@@ -1,8 +1,5 @@
 #include "quakedef.h"
 #include "gl_shadow.h"
-#if R_SHADOWMAPS
-#include "r_shadows.h"
-#endif
 #include "gl_texmgr.h"
 
 #define SHADOW_POOL_SIZE 16

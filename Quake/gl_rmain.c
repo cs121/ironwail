@@ -23,10 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-#if R_SHADOWMAPS
-#include "r_shadows.h"
-#endif
-
 #define NOISESCALE     (1.0f / 127.0f)
 
 extern gltexture_t *deluxemap_texture;
@@ -2957,20 +2953,6 @@ void R_RenderView (void)
 		glFinish ();
 
         R_SetupView (); //johnfitz -- this does everything that should be done once per frame
-#if R_SHADOWMAPS
-        if (r_shadows.value)
-                R_BeginShadowPass();
-#endif
-        R_RenderScene ();
-#if R_SHADOWMAPS
-        if (r_shadows.value)
-                R_EndShadowPass();
-#endif
-        R_WarpScaleView ();
-#if R_SHADOWMAPS
-        if (r_shadows.value)
-                R_DrawShadowDebug();
-#endif
 
 	r_frame_rendered_this_update = true;
 
