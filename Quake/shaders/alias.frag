@@ -363,7 +363,9 @@ void main()
         shadedColor += emissive;
         shadedColor = clamp(shadedColor, 0.0, 1.0);
 
-        vec4 result = vec4(shadedColor, in_color.a);
+	vec4 result = vec4(shadedColor, in_color.a);
+	if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
+		result.a = min(result.a, 0.5);
         float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
         fog = clamp(fog, 0.0, 1.0);
         result.rgb = mix(Fog.rgb, result.rgb, fog);

@@ -5900,8 +5900,10 @@ void M_Menu_GameOptions_f (void)
 	m_state = m_gameoptions;
 	m_entersound = true;
 	if (maxplayers == 0)
-		maxplayers = svs.maxclients;
+		maxplayers = svs.maxclientslimit;
 	if (maxplayers < 2)
+		maxplayers = svs.maxclientslimit;
+	if (maxplayers > svs.maxclientslimit)
 		maxplayers = svs.maxclientslimit;
 }
 

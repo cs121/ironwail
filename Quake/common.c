@@ -76,27 +76,6 @@ char	com_cmdline[CMDLINE_LENGTH];
 
 qboolean standard_quake = true, rogue, hipnotic, quake64;
 
-// this graphic needs to be in the pak file to use registered features
-static unsigned short pop[] =
-{
-	0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
-	0x0000,0x0000,0x6600,0x0000,0x0000,0x0000,0x6600,0x0000,
-	0x0000,0x0066,0x0000,0x0000,0x0000,0x0000,0x0067,0x0000,
-	0x0000,0x6665,0x0000,0x0000,0x0000,0x0000,0x0065,0x6600,
-	0x0063,0x6561,0x0000,0x0000,0x0000,0x0000,0x0061,0x6563,
-	0x0064,0x6561,0x0000,0x0000,0x0000,0x0000,0x0061,0x6564,
-	0x0064,0x6564,0x0000,0x6469,0x6969,0x6400,0x0064,0x6564,
-	0x0063,0x6568,0x6200,0x0064,0x6864,0x0000,0x6268,0x6563,
-	0x0000,0x6567,0x6963,0x0064,0x6764,0x0063,0x6967,0x6500,
-	0x0000,0x6266,0x6769,0x6a68,0x6768,0x6a69,0x6766,0x6200,
-	0x0000,0x0062,0x6566,0x6666,0x6666,0x6666,0x6562,0x0000,
-	0x0000,0x0000,0x0062,0x6364,0x6664,0x6362,0x0000,0x0000,
-	0x0000,0x0000,0x0000,0x0062,0x6662,0x0000,0x0000,0x0000,
-	0x0000,0x0000,0x0000,0x0061,0x6661,0x0000,0x0000,0x0000,
-	0x0000,0x0000,0x0000,0x0000,0x6500,0x0000,0x0000,0x0000,
-	0x0000,0x0000,0x0000,0x0000,0x6400,0x0000,0x0000,0x0000
-};
-
 /*
 
 All of Quake's data access is through a hierchal file system, but the contents
@@ -1485,49 +1464,18 @@ int COM_CheckParm (const char *parm)
 ================
 COM_CheckRegistered
 
-Looks for the pop.txt file and verifies it.
-Sets the "registered" cvar.
-Immediately exits out if an alternate game was attempted to be started without
-being registered.
+Ironwail always behaves like a registered install.  Skip the legacy pop.lmp
+verification and force the "registered" cvar so that all content and mods are
+available regardless of the installed data set.
 ================
 */
 static void COM_CheckRegistered (void)
 {
-	int		h;
-	unsigned short	check[128];
 	int		i;
-
-	COM_OpenFile("gfx/pop.lmp", &h, NULL);
-
-	if (h == -1)
-	{
-		Cvar_SetROM ("registered", "0");
-		Con_Printf ("Playing shareware version.\n");
-		if (com_modified)
-			Sys_Error ("You must have the registered version to use modified games.\n\n"
-				   "Basedir is: %s\n\n"
-				   "Check that this has an " GAMENAME " subdirectory containing pak0.pak and pak1.pak, "
-				   "or use the -basedir command-line option to specify another directory.",
-				   com_basedirs[0]);
-		return;
-	}
-
-	i = Sys_FileRead (h, check, sizeof(check));
-	COM_CloseFile (h);
-	if (i != (int) sizeof(check))
-		goto corrupt;
-
-	for (i = 0; i < 128; i++)
-	{
-		if (pop[i] != (unsigned short)BigShort (check[i]))
-		{ corrupt:
-			Sys_Error ("Corrupted data file.");
-		}
-	}
 
 	for (i = 0; com_cmdline[i]; i++)
 	{
-		if (com_cmdline[i]!= ' ')
+		if (com_cmdline[i] != ' ')
 			break;
 	}
 
