@@ -36,6 +36,8 @@ static int  ramp3[8] = { 0x6d, 0x6b, 6, 5, 4, 3 };
 particle_t* particles;
 int         r_numparticles, r_numactiveparticles;
 
+static particle_t* R_AllocParticle (void);
+
 static float uvscale;
 static float texturescalefactor; //johnfitz -- compensate for apparent size of different particle textures
 
@@ -735,7 +737,7 @@ static void R_SetParticleTexture_f (cvar_t* var)
 R_AllocParticle
 ===============
 */
-particle_t* R_AllocParticle (void)
+static particle_t* R_AllocParticle (void)
 {
         if (r_numactiveparticles < r_numparticles)
         {
