@@ -96,14 +96,20 @@ static float R_ParticleNoise (int x, int y, int seed)
         return (n & 0x00FFFFFFu) * (1.0f / 16777215.0f);
 }
 
+enum
+{
+        PARTICLE_ATLAS_WIDTH = PARTICLE_TEX_TILE_SIZE * NUM_PARTICLE_TEXTURES,
+        PARTICLE_ATLAS_HEIGHT = PARTICLE_TEX_TILE_SIZE
+};
+
 static void R_InitParticleAtlas (void)
 {
         if (particle_atlas)
                 return;
 
-        const int atlas_width = PARTICLE_TEX_TILE_SIZE * NUM_PARTICLE_TEXTURES;
-        const int atlas_height = PARTICLE_TEX_TILE_SIZE;
-        uint32_t data[atlas_width * atlas_height];
+        const int atlas_width = PARTICLE_ATLAS_WIDTH;
+        const int atlas_height = PARTICLE_ATLAS_HEIGHT;
+        uint32_t data[PARTICLE_ATLAS_WIDTH * PARTICLE_ATLAS_HEIGHT];
         int tex, y, x;
 
         for (tex = 0; tex < NUM_PARTICLE_TEXTURES; tex++)
