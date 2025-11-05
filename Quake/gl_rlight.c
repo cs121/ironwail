@@ -19,18 +19,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// r_light.c
+// r_light.c -- optimized + debuggable edition
 
 #include "quakedef.h"
 #include "gl_shadow.h"
-#include <string.h> // [CHG] for memcpy, memset
-#include <math.h>   // [CHG] for fabsf, modf
-
-// [CHG] small, centralized constants
-#define LIGHTCACHE_MOVE_EPS2     1.0f     // squared threshold for cache movement invalidation
-#define LIGHT_DUP_POS_EPS2       1e-4f
-#define LIGHT_DUP_RADIUS_EPS_REL 0.001f
-#define LIGHT_DUP_RADIUS_EPS_MIN 0.01f
 
 enum
 {
@@ -41,49 +33,65 @@ extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 
+/* Optional compile-time guard to ensure std140-friendly size */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define STATIC_ASSERT _Static_assert
+#else
+#define STATIC_ASSERT(x, msg)
+#endif
+
+/* Small helpers */
+static inline qboolean nearly_equal (float a, float b, float eps) { return fabsf (a - b) < eps; }
+
+static inline qboolean light_eq (const gpulight_t* a, const gpulight_t* b)
+{
+	const float e = 0.01f;
+	return nearly_equal (a->pos[0], b->pos[0], e) &&
+		nearly_equal (a->pos[1], b->pos[1], e) &&
+		nearly_equal (a->pos[2], b->pos[2], e) &&
+		nearly_equal (a->radius, b->radius, e) &&
+		nearly_equal (a->color[0], b->color[0], 0.02f) &&
+		nearly_equal (a->color[1], b->color[1], 0.02f) &&
+		nearly_equal (a->color[2], b->color[2], 0.02f);
+}
+
 gpulightbuffer_t r_lightbuffer;
 
 static void R_FillGpuLightFromBspx (const bspx_static_light_t* src, gpulight_t* dst)
 {
-	// [CHG] defensive checks
-	if (!src || !dst)
-		return;
-
-	const float intensity = q_max (0.0f, src->intensity);
+	float intensity = (src->intensity > 0.0f) ? src->intensity : 0.0f;
 
 	VectorCopy (src->origin, dst->pos);
-	dst->radius = q_max (0.0f, src->radius);
-	dst->color[0] = q_max (0.0f, src->color[0] * intensity);
-	dst->color[1] = q_max (0.0f, src->color[1] * intensity);
-	dst->color[2] = q_max (0.0f, src->color[2] * intensity);
+	dst->radius = (src->radius > 0.0f) ? src->radius : 0.0f;
+	dst->color[0] = q_max (0.f, src->color[0] * intensity);
+	dst->color[1] = q_max (0.f, src->color[1] * intensity);
+	dst->color[2] = q_max (0.f, src->color[2] * intensity);
 	dst->minlight = 0.0f;
 }
 
 static int R_AppendBspxLights (const bspx_static_light_t* lights, int count, int* index_map, int index_map_cap)
 {
+	int appended = 0;
+
 	if (!lights || count <= 0)
 		return 0;
 
-	int appended = 0;
-
-	// [CHG] initialize index map in one go
 	if (index_map && index_map_cap > 0)
-		memset (index_map, 0xff, sizeof (index_map[0]) * (size_t)index_map_cap);
+	{
+		memset (index_map, -1, sizeof (int) * index_map_cap);
+	}
 
-	for (int i = 0; i < count; ++i)
+	for (int i = 0; i < count && r_framedata.numlights < MAX_DLIGHTS; ++i)
 	{
 		const bspx_static_light_t* src = &lights[i];
+		gpulight_t* dst;
 
-		if (!src || src->radius <= 0.0f)
+		if (src->radius <= 0.0f)
 			continue;
 
-		if (r_framedata.numlights >= MAX_DLIGHTS)
-			break;
-
-		gpulight_t* dst = &r_lightbuffer.lights[r_framedata.numlights++];
+		dst = &r_lightbuffer.lights[r_framedata.numlights++];
 		if (index_map && i < index_map_cap)
 			index_map[i] = r_framedata.numlights - 1;
-
 		R_FillGpuLightFromBspx (src, dst);
 		appended++;
 	}
@@ -98,14 +106,23 @@ R_AnimateLight
 */
 void R_AnimateLight (void)
 {
-	int			j, k, n;
-	double		intpart;
-	double		pos_t = cl.time * 10.0;
+	int         i, j, k, n;
+	double      f, base;
 
-	// [CHG] modf avoids separate floor cast and subtraction
-	double f = modf (pos_t, &intpart);
+	// light animations
+	// 'm' is normal light, 'a' is no light, 'z' is double bright
+	f = cl.time * 10.0;
+	base = floor (f);
+	i = (int)base;
+	f -= base;
 	if (!r_lerplightstyles.value)
 		f = 0.0;
+
+#if defined(q_bound)
+	f = q_bound (0.0, f, 1.0);
+#else
+	if (f < 0.0) f = 0.0; else if (f > 1.0) f = 1.0;
+#endif
 
 	for (j = 0; j < MAX_LIGHTSTYLES; j++)
 	{
@@ -115,7 +132,6 @@ void R_AnimateLight (void)
 			r_lightbuffer.lightstyles[j] = 1.f;
 			continue;
 		}
-
 		//johnfitz -- r_flatlightstyles
 		if (r_flatlightstyles.value == 2)
 			k = n = cl_lightstyle[j].peak - 'a';
@@ -123,21 +139,19 @@ void R_AnimateLight (void)
 			k = n = cl_lightstyle[j].average - 'a';
 		else
 		{
-			const int len = cl_lightstyle[j].length;
-			const int idx0 = ((int)intpart) % len;
-			int idx1 = idx0 + 1;
-			if (idx1 == len) idx1 = 0;
-
-			k = cl_lightstyle[j].map[idx0] - 'a';
-			n = cl_lightstyle[j].map[idx1] - 'a';
+			k = i % cl_lightstyle[j].length;
+			n = k + 1;
+			if (n == cl_lightstyle[j].length)
+				n = 0;
+			k = cl_lightstyle[j].map[k] - 'a';
+			n = cl_lightstyle[j].map[n] - 'a';
 		}
-
-		// [CHG] only interpolate abrupt changes (e.g. flicker) if >= 2
+		// only interpolate abrupt changes (e.g. flickering light in e1m1) if r_lerplightstyles >= 2
 		if (r_lerplightstyles.value < 2.f && abs (n - k) >= ('m' - 'a') / 2)
 			n = k;
-
 		d_lightstylevalue[j] = (int)(k * 22 + (n - k) * 22 * f);
 		r_lightbuffer.lightstyles[j] = (k + (n - k) * f) * (22.f / 256.f);
+		//johnfitz
 	}
 
 	if (r_fullbright_cheatsafe)
@@ -155,9 +169,11 @@ DYNAMIC LIGHTS
 static GLuint gl_lightclustertexture;
 
 typedef struct gpu_cluster_inputs_s {
-	float		transposed_proj[16];
-	float		view_matrix[16];
+	float       transposed_proj[16];
+	float       view_matrix[16];
 } gpu_cluster_inputs_t;
+
+STATIC_ASSERT (sizeof (gpu_cluster_inputs_t) % 16 == 0, "gpu_cluster_inputs_t must be multiple of 16 bytes");
 
 /*
 =============
@@ -183,8 +199,7 @@ GLLight_DeleteResources
 */
 void GLLight_DeleteResources (void)
 {
-	if (gl_lightclustertexture)
-	{
+	if (gl_lightclustertexture) {
 		glDeleteTextures (1, &gl_lightclustertexture);
 		gl_lightclustertexture = 0;
 	}
@@ -197,49 +212,38 @@ R_PushDlights
 */
 void R_PushDlights (void)
 {
-	GLuint			buf;
+	int             i, j;
+	GLuint          buf;
 	GLbyte* ofs;
 	gpu_cluster_inputs_t cluster_inputs;
 
 	int dynamic_count = 0;
-
-	// [CHG] guard worldmodel-dependent counts
-	const qboolean have_world = (cl.worldmodel != NULL);
-	const int static_light_count = have_world ? cl.worldmodel->bspx_num_static_lights : 0;
-	const int static_shadow_light_count = have_world ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
-	const int static_light_map_cap = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
-	const int static_shadow_light_map_cap = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
+	int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
+	int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
+	int static_light_map_count = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
+	int static_shadow_light_map_count = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
 
 	int static_light_index_map[BSPX_INDEX_MAP_CAP];
 	int static_shadow_light_index_map[BSPX_INDEX_MAP_CAP];
 
-	for (int ii = 0; ii < BSPX_INDEX_MAP_CAP; ++ii)
-	{
-		static_light_index_map[ii] = -1;
-		static_shadow_light_index_map[ii] = -1;
-	}
+	memset (static_light_index_map, -1, sizeof (static_light_index_map));
+	memset (static_shadow_light_index_map, -1, sizeof (static_shadow_light_index_map));
 
 	r_framedata.numlights = 0;
+	dynamic_count = 0;
 
 	if (r_dynamic.value)
 	{
-		// [CHG] cull against frustum and lifetime; keep branchless early-outs
-		for (int i = 0; i < MAX_DLIGHTS; i++)
+		dlight_t* l;
+		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
 		{
-			dlight_t* l = &cl_dlights[i];
-			if (l->spawn > cl.time)
-			{
-				l->die = 0.f;
-				continue;
-			}
-			if (l->die < cl.time || !l->radius)
-				continue;
-
-			if (r_framedata.numlights >= MAX_DLIGHTS)
-				break; // prevent OOB writes
-
 			qboolean cull = false;
-			for (int j = 0; j < 4; j++)
+
+			if (l->spawn > cl.time) { l->die = 0.f; continue; }
+			if (l->die < cl.time || !l->radius) continue;
+
+			// Frustum cull
+			for (j = 0; j < 4; j++)
 			{
 				mplane_t* p = &frustum[j];
 				if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
@@ -248,8 +252,9 @@ void R_PushDlights (void)
 					break;
 				}
 			}
-			if (cull)
-				continue;
+			if (cull) continue;
+
+			if (r_framedata.numlights >= MAX_DLIGHTS) break; // OOB-Schutz
 
 			gpulight_t* out = &r_lightbuffer.lights[r_framedata.numlights++];
 			out->pos[0] = l->origin[0];
@@ -263,99 +268,92 @@ void R_PushDlights (void)
 		}
 
 		dynamic_count = r_framedata.numlights;
-
-		if (have_world)
-		{
-			R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
-				cl.worldmodel->bspx_num_static_lights,
-				(static_light_map_cap > 0) ? static_light_index_map : NULL,
-				static_light_map_cap);
-
-			R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
-				cl.worldmodel->bspx_num_static_shadow_lights,
-				(static_shadow_light_map_cap > 0) ? static_shadow_light_index_map : NULL,
-				static_shadow_light_map_cap);
-		}
 	}
 
-	if (have_world &&
+	// Statische Lichter IMMER hinzufügen (unabhängig von r_dynamic)
+	if (cl.worldmodel)
+	{
+		R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
+			cl.worldmodel->bspx_num_static_lights,
+			(static_light_map_count > 0) ? static_light_index_map : NULL,
+			static_light_map_count);
+		R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
+			cl.worldmodel->bspx_num_static_shadow_lights,
+			(static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
+			static_shadow_light_map_count);
+	}
+
+	// Shadow-Lichtliste zusammenstellen
+	if (cl.worldmodel &&
 		(cl.worldmodel->bspx_num_static_shadow_lights > 0 ||
 			cl.worldmodel->bspx_num_static_shadow_indices > 0))
 	{
 		gpulight_t shadow_lights[MAX_DLIGHTS];
 		int shadow_count = 0;
 
-		// [CHG] copy dynamic first
-		for (int i = 0; i < dynamic_count && shadow_count < MAX_DLIGHTS; ++i)
+		for (i = 0; i < dynamic_count && shadow_count < MAX_DLIGHTS; ++i)
 			shadow_lights[shadow_count++] = r_lightbuffer.lights[i];
 
-		// [CHG] then mapped static shadow lights
 		if (cl.worldmodel->bspx_static_shadow_lights &&
 			cl.worldmodel->bspx_num_static_shadow_lights > 0)
 		{
-			const int count = cl.worldmodel->bspx_num_static_shadow_lights;
+			int count = cl.worldmodel->bspx_num_static_shadow_lights;
+
 			for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
 			{
-				const int mapped_index = (k < static_shadow_light_map_cap) ?
+				int mapped_index = (k < static_shadow_light_map_count) ?
 					static_shadow_light_index_map[k] : -1;
 
 				if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
 					continue;
 
+				// Duplikate vermeiden
+				qboolean duplicate = false;
+				for (int n = 0; n < shadow_count; ++n) {
+					if (light_eq (&shadow_lights[n], &r_lightbuffer.lights[mapped_index])) { duplicate = true; break; }
+				}
+				if (duplicate) continue;
+
 				shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
 			}
 		}
 
-		// [CHG] explicit indices that refer into the non-shadow static lights
 		if (cl.worldmodel->bspx_static_shadow_indices &&
 			cl.worldmodel->bspx_num_static_shadow_indices > 0)
 		{
 			const int* indices = cl.worldmodel->bspx_static_shadow_indices;
-			const int count = cl.worldmodel->bspx_num_static_shadow_indices;
-			const int maxlights = cl.worldmodel->bspx_num_static_lights;
+			int count = cl.worldmodel->bspx_num_static_shadow_indices;
+			int maxlights = cl.worldmodel->bspx_num_static_lights;
 
 			if (cl.worldmodel->bspx_static_lights && maxlights > 0)
 			{
 				for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
 				{
-					const int idx = indices[k];
+					int idx = indices[k];
+					qboolean duplicate = false;
+
 					if (idx < 0 || idx >= maxlights)
 						continue;
 
-					if (static_light_map_cap <= 0)
+					if (static_light_map_count <= 0)
 						continue;
 
-					const int mapped_index = (idx < static_light_map_cap) ?
+					int mapped_index = (idx < static_light_map_count) ?
 						static_light_index_map[idx] : -1;
 
 					if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
 						continue;
 
-					// [CHG] duplicate suppression
-					qboolean duplicate = false;
 					for (int n = dynamic_count; n < shadow_count; ++n)
 					{
 						const gpulight_t* existing = &shadow_lights[n];
 						const gpulight_t* candidate = &r_lightbuffer.lights[mapped_index];
-
-						const float dx = existing->pos[0] - candidate->pos[0];
-						const float dy = existing->pos[1] - candidate->pos[1];
-						const float dz = existing->pos[2] - candidate->pos[2];
-						const float d2 = dx * dx + dy * dy + dz * dz;
-						const float rdiff = fabsf (existing->radius - candidate->radius);
-
-						if (d2 <= LIGHT_DUP_POS_EPS2 &&
-							rdiff <= q_max (LIGHT_DUP_RADIUS_EPS_MIN, LIGHT_DUP_RADIUS_EPS_REL * candidate->radius))
-						{
-							duplicate = true;
-							break;
-						}
+						if (light_eq (existing, candidate)) { duplicate = true; break; }
 					}
 					if (duplicate)
 						continue;
 
-					if (shadow_count < MAX_DLIGHTS)
-						shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
+					shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
 				}
 			}
 		}
@@ -371,8 +369,7 @@ void R_PushDlights (void)
 
 	R_UploadFrameData ();
 
-	// [CHG] compute transpose once
-	for (int i = 0; i < 16; i++)
+	for (i = 0; i < 16; i++)
 		cluster_inputs.transposed_proj[i] = r_matproj[((i & 3) << 2) | (i >> 2)];
 	memcpy (cluster_inputs.view_matrix, r_matview, 16 * sizeof (float));
 
@@ -401,18 +398,9 @@ vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
 static void InterpolateLightmap (vec3_t color, msurface_t* surf, int ds, int dt)
 {
-	// [CHG] defensive checks
-	if (!color || !surf || !surf->samples)
-	{
-		if (color) { color[0] = color[1] = color[2] = 0.f; }
-		return;
-	}
-
 	byte* lightmap;
-	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15;
-	int r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
+	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
 	int scale;
-
 	line3 = ((surf->extents[0] >> 4) + 1) * 3;
 
 	lightmap = surf->samples + ((dt >> 4) * ((surf->extents[0] >> 4) + 1) + (ds >> 4)) * 3; // LordHavoc: *3 for color
@@ -427,17 +415,9 @@ static void InterpolateLightmap (vec3_t color, msurface_t* surf, int ds, int dt)
 		lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3; // LordHavoc: *3 for colored lighting
 	}
 
-	// Bilinear in int, then scale
-	const int r0 = (((r01 - r00) * dsfrac) >> 4) + r00;
-	const int r1 = (((r11 - r10) * dsfrac) >> 4) + r10;
-	const int g0 = (((g01 - g00) * dsfrac) >> 4) + g00;
-	const int g1 = (((g11 - g10) * dsfrac) >> 4) + g10;
-	const int b0 = (((b01 - b00) * dsfrac) >> 4) + b00;
-	const int b1 = (((b11 - b10) * dsfrac) >> 4) + b10;
-
-	color[0] = (((r1 - r0) * dtfrac) >> 4) + r0; color[0] *= (1.f / 256.f);
-	color[1] = (((g1 - g0) * dtfrac) >> 4) + g0; color[1] *= (1.f / 256.f);
-	color[2] = (((b1 - b0) * dtfrac) >> 4) + b0; color[2] *= (1.f / 256.f);
+	color[0] = ((((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00)) * (1.f / 256.f);
+	color[1] = ((((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00)) * (1.f / 256.f);
+	color[2] = ((((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00)) * (1.f / 256.f);
 }
 
 /*
@@ -447,15 +427,12 @@ RecursiveLightPoint -- johnfitz -- replaced entire function for lit support via 
 */
 int RecursiveLightPoint (lightcache_t* cache, mnode_t* node, vec3_t rayorg, vec3_t start, vec3_t end, float* maxdist)
 {
-	if (!node)
-		return false;
-
-	float		front, back, frac;
-	vec3_t		mid;
+	float       front, back, frac;
+	vec3_t      mid;
 
 loc0:
 	if (node->contents < 0)
-		return false;		// didn't hit anything
+		return false;       // didn't hit anything
 
 	// calculate mid point
 	if (node->plane->type < 3)
@@ -471,9 +448,9 @@ loc0:
 
 	// LordHavoc: optimized recursion
 	if ((back < 0) == (front < 0))
+		//      return RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, end, maxdist);
 	{
 		node = node->children[front < 0];
-		if (!node) return false;
 		goto loc0;
 	}
 
@@ -484,14 +461,14 @@ loc0:
 
 	// go down front side
 	if (RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, mid, maxdist))
-		return true;	// hit something
+		return true;    // hit something
 	else
 	{
 		unsigned int i;
 		int ds, dt;
 		msurface_t* surf;
-
 		// check for impact on this node
+
 		surf = cl.worldmodel->surfaces + node->firstsurface;
 		for (i = 0; i < node->numsurfaces; i++, surf++)
 		{
@@ -499,7 +476,7 @@ loc0:
 			vec3_t raydelta;
 
 			if (surf->flags & SURF_DRAWTILED)
-				continue;	// no lightmaps
+				continue;   // no lightmaps
 
 			// ericw -- added double casts to force 64-bit precision.
 			// Without them the zombie at the start of jam3_ericw.bsp was
@@ -531,8 +508,10 @@ loc0:
 
 			if (!surf->samples)
 			{
-				// Wir haben eine surface, die lightmapped ist, aber keine Samples hat.
-				// Suche weiter nach einer nahegelegenen gültigen Surface, um schwarze Spots zu vermeiden.
+				// We hit a surface that is flagged as lightmapped, but doesn't have actual lightmap info.
+				// Instead of just returning black, we'll keep looking for nearby surfaces that do have valid samples.
+				// This fixes occasional pitch-black models in otherwise well-lit areas in DOTM (e.g. mge1m1, mge4m1)
+				// caused by overlapping surfaces with mixed lighting data.
 				const float nearby = 8.f;
 				dist += nearby;
 				*maxdist = q_min (*maxdist, dist);
@@ -541,7 +520,7 @@ loc0:
 
 			if (dist < *maxdist)
 			{
-				cache->surfidx = (int)(surf - cl.worldmodel->surfaces) + 1;
+				cache->surfidx = surf - cl.worldmodel->surfaces + 1;
 				cache->ds = ds;
 				cache->dt = dt;
 			}
@@ -565,14 +544,14 @@ R_LightPoint -- johnfitz -- replaced entire function for lit support via lordhav
 */
 int R_LightPoint (vec3_t p, float ofs, lightcache_t* cache)
 {
-	if (!cl.worldmodel || !cl.worldmodel->lightdata)
+	vec3_t      start, end;
+	float       maxdist = 8192.f; //johnfitz -- was 2048
+
+	if (!cl.worldmodel->lightdata)
 	{
 		lightcolor[0] = lightcolor[1] = lightcolor[2] = 255;
 		return 255;
 	}
-
-	vec3_t		start, end;
-	float		maxdist = 8192.f; //johnfitz -- was 2048
 
 	start[0] = p[0];
 	start[1] = p[1];
@@ -583,33 +562,19 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t* cache)
 
 	lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
 
-	if (!cache)
-	{
-		lightcache_t local = { 0 };
-		cache = &local;
-	}
-
 	if (cache->surfidx <= 0 // no cache or pitch black
-		|| cache->surfidx > cl.worldmodel->numsurfaces)
+		|| cache->surfidx > cl.worldmodel->numsurfaces
+		|| fabsf (cache->pos[0] - p[0]) >= 1.f
+		|| fabsf (cache->pos[1] - p[1]) >= 1.f
+		|| fabsf (cache->pos[2] - p[2]) >= 1.f)
 	{
 		cache->surfidx = 0;
 		VectorCopy (p, cache->pos);
 		RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
 	}
-	else
-	{
-		const float dx = cache->pos[0] - p[0];
-		const float dy = cache->pos[1] - p[1];
-		const float dz = cache->pos[2] - p[2];
-		if (dx * dx + dy * dy + dz * dz >= LIGHTCACHE_MOVE_EPS2) {
-			cache->surfidx = 0;
-			VectorCopy (p, cache->pos);
-			RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
-		}
-	}
 
 	if (cache->surfidx > 0)
 		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt);
 
-	return (int)((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+	return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
 }

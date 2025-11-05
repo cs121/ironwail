@@ -349,8 +349,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\wad.c" />
     <ClCompile Include="..\..\Quake\world.c" />
     <ClCompile Include="..\..\Quake\zone.c" />
-    <ClCompile Include="..\..\renderer\rw_renderer_facade.c" />
-    <ClCompile Include="..\..\renderer\rw_renderer_impl.c" />
     <ClCompile Include="..\..\wren_vm\wren_bindings.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
@@ -490,7 +488,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\world.h" />
     <ClInclude Include="..\..\Quake\wsaerror.h" />
     <ClInclude Include="..\..\Quake\zone.h" />
-    <ClInclude Include="..\..\renderer\rw_renderer.h" />
     <ClInclude Include="..\..\wren_vm\wren_bindings.h" />
     <ClInclude Include="..\..\wren_vm\wren_runtime.h" />
     <ClInclude Include="..\..\wren_vm\wren\include\wren.h" />

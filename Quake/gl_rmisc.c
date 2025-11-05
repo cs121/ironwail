@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "../renderer/rw_renderer.h"
 
 #if R_SHADOWMAPS
 #include "r_shadows.h"
@@ -663,12 +662,11 @@ void R_TimeRefresh_f (void)
 	start = Sys_DoubleTime ();
 	for (i = 0; i < 128; i++)
 	{
-                rw_renderer_active_begin_frame(&glx, &gly, &glwidth, &glheight);
+		GL_BeginRendering(&glx, &gly, &glwidth, &glheight);
 		r_refdef.viewangles[1] = i*(360.0/128.0);
                R_RenderView ();
                GL_PostProcess ();
-               rw_renderer_active_end_frame ();
-               rw_renderer_active_present ();
+               GL_EndRendering ();
 	}
 
 	glFinish ();
