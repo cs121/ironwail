@@ -183,3 +183,49 @@ effect fx_smoke_min
     gravity -20
     airfriction 1.5
     lifetime 0.8
+
+// --- Ironwail QC helpers -------------------------------------------------
+
+// Directional spray for bullet and gib blood.
+effect fx_blood_spray
+    type spark
+    count 1
+    color 200 30 30
+    size 2 4
+    velocity 140 80
+    gravity 650
+    airfriction 1.4
+    lifetime 0.45
+
+// Chunky embers used when bodies explode into pieces.
+effect fx_gib_chunk
+    type spark
+    count 1
+    color 255 120 60
+    size 3 2
+    velocity 150 90
+    gravity 900
+    airfriction 2.5
+    lifetime 0.35
+
+// Electrical flash for lightning gun impact points.
+effect fx_lightning_hit
+    type spark
+    count 1
+    color 180 210 255
+    size 2 2
+    velocity 220 120
+    gravity 500
+    airfriction 1.9
+    lifetime 0.28
+
+// Compact fiery burst for small explosions or barrels.
+effect fx_explosion_burst
+    type spark
+    count 1
+    color 255 200 120
+    size 6 3
+    velocity 190 110
+    gravity 780
+    airfriction 2.3
+    lifetime 0.42

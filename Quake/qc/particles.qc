@@ -6,6 +6,10 @@
 float FX_INVALID = -1;
 float FX_SPARK = -1;
 float FX_SMOKE = -1;
+float FX_BLOOD = -1;
+float FX_GIB = -1;
+float FX_LIGHTNING = -1;
+float FX_EXPLOSION = -1;
 
 float particles_supported = 0;
 
@@ -15,21 +19,31 @@ float particles_supported = 0;
 // float SVC_TEMPENTITY = 23;
 // float TE_GUNSHOT = 2;
 
+float(string name) Particles_FetchEffect =
+{
+    local float fx;
+    fx = particleeffectnum(name);
+    if (fx < 0)
+        return FX_INVALID;
+    return fx;
+};
+
 void() Particles_Init =
 {
+    particles_supported = 0;
+    FX_SPARK = FX_SMOKE = FX_BLOOD = FX_GIB = FX_LIGHTNING = FX_EXPLOSION = FX_INVALID;
+
     // Detect whether the engine exposes pointparticles/effectinfo
-    if (checkextension("DP_QC_POINTPARTICLES"))
-    {
-        particles_supported = 1;
-        FX_SPARK = particleeffectnum("fx_spark_min");
-        FX_SMOKE = particleeffectnum("fx_smoke_min");
-    }
-    else
-    {
-        particles_supported = 0;
-        FX_SPARK = FX_INVALID;
-        FX_SMOKE = FX_INVALID;
-    }
+    if (!checkextension("DP_QC_POINTPARTICLES"))
+        return;
+
+    particles_supported = 1;
+    FX_SPARK = Particles_FetchEffect("fx_spark_min");
+    FX_SMOKE = Particles_FetchEffect("fx_smoke_min");
+    FX_BLOOD = Particles_FetchEffect("fx_blood_spray");
+    FX_GIB = Particles_FetchEffect("fx_gib_chunk");
+    FX_LIGHTNING = Particles_FetchEffect("fx_lightning_hit");
+    FX_EXPLOSION = Particles_FetchEffect("fx_explosion_burst");
 };
 
 // Spawns point particles with optional directional bias.
@@ -66,13 +80,62 @@ void(float fx, vector org, float count) Particles_Burst =
     Particles_Point(fx, org, '0 0 0', count);
 };
 
-// --- Example usage --------------------------------------------------------
-void() Test_Spark =
+// Blood spray helper used by gib/death impacts.
+void(vector org, vector dir, float count) Particles_Blood =
 {
-    Particles_Point(FX_SPARK, self.origin, v_up, 8);
+    if (count < 1)
+        count = 1;
+
+    if (particles_supported && FX_BLOOD >= 0)
+    {
+        pointparticles(FX_BLOOD, org, dir, count);
+        return;
+    }
+
+    particle(org, dir, 73, count);
 };
 
-void() Test_SmokeBurst =
+// Gib chunk helper for secondary gore bursts.
+void(vector org, vector dir, float count) Particles_Gib =
 {
-    Particles_Burst(FX_SMOKE, self.origin, 12);
+    if (count < 1)
+        count = 1;
+
+    if (particles_supported && FX_GIB >= 0)
+    {
+        pointparticles(FX_GIB, org, dir, count);
+        return;
+    }
+
+    particle(org, dir, 0, count);
+};
+
+// Concentrated sparks for lightning gun contacts.
+void(vector org, float count) Particles_LightningHit =
+{
+    if (count < 1)
+        count = 1;
+
+    if (particles_supported && FX_LIGHTNING >= 0)
+    {
+        pointparticles(FX_LIGHTNING, org, '0 0 200', count);
+        return;
+    }
+
+    particle(org, '0 0 100', 225, count);
+};
+
+// Fiery burst used for barrels and small explosions.
+void(vector org, float count) Particles_ExplosionBurst =
+{
+    if (count < 1)
+        count = 1;
+
+    if (particles_supported && FX_EXPLOSION >= 0)
+    {
+        pointparticles(FX_EXPLOSION, org, '0 0 0', count);
+        return;
+    }
+
+    particle(org, '0 0 0', 75, count);
 };

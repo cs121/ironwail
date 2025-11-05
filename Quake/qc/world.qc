@@ -191,14 +191,16 @@ float startingserverflags;
  
 void() worldspawn =
 {
-	startingserverflags = serverflags;
-	lastspawn = world;
-	InitBodyQueue ();
+        startingserverflags = serverflags;
+        lastspawn = world;
+        InitBodyQueue ();
 
-	// custom map attributes
-	if (self.model == "maps/e1m8.bsp")
-		cvar_set ("sv_gravity", "100");
-	else
+        Particles_Init();
+
+        // custom map attributes
+        if (self.model == "maps/e1m8.bsp")
+                cvar_set ("sv_gravity", "100");
+        else
 		cvar_set ("sv_gravity", "800");
 
 	// the area based ambient sounds MUST be the first precache_sounds
