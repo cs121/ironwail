@@ -13,55 +13,81 @@ effect te_gunshot
     count 18
     color 150 150 150
     alpha 0.6
+    alpha2 0.0
     size 10 22
-    velocity 36 26
+    sizeincrease 15.3 26.2
+    velocity 10.0 62.0
+    velocityjitter 13.0
     gravity -12
     airfriction 1.7
     lifetime 0.55
+    spawnradius 3.3
 
+    glow 0.05
 effect te_spike
     type spark
     count 18
     color 255 220 120
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 140 80
+    sizeincrease 0.0 0.0
+    velocity 60.0 220.0
+    velocityjitter 40.0
     gravity 520
     airfriction 2
     lifetime 0.42
+    spawnradius 0.6
 
+    glow 0.35
 effect te_superspike
     type spark
     count 24
     color 255 230 140
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 170 90
+    sizeincrease 0.0 0.0
+    velocity 80.0 260.0
+    velocityjitter 45.0
     gravity 620
     airfriction 2
     lifetime 0.46
+    spawnradius 0.6
 
+    glow 0.35
 effect te_wizspike
     type spark
     count 21
     color 140 200 255
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 160 80
+    sizeincrease 0.0 0.0
+    velocity 80.0 240.0
+    velocityjitter 40.0
     gravity 560
     airfriction 2
     lifetime 0.42
+    spawnradius 0.6
 
+    glow 0.35
 effect te_knightspike
     type spark
     count 21
     color 240 200 120
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 150 85
+    sizeincrease 0.0 0.0
+    velocity 65.0 235.0
+    velocityjitter 42.5
     gravity 570
     airfriction 2
     lifetime 0.42
+    spawnradius 0.6
+
+    glow 0.35
 
 // ----------------------
 // BLOOD (×3 zusätzlich, halbtransparent)
@@ -70,11 +96,15 @@ effect te_blood
     count 72              // vorher 24 → jetzt ×3
     color 190 20 20
     alpha 0.5
+    alpha2 0.0
     size 4 6
-    velocity 130 70
+    sizeincrease 2.3 4.0
+    velocity 60.0 200.0
+    velocityjitter 35.0
     gravity 540
     airfriction 1.3
     lifetime 0.60
+    spawnradius 0.9
 
 // ----------------------
 // EXPLOSIONS (3 Layer)
@@ -86,11 +116,17 @@ effect te_explosion_core
     count 18
     color 255 245 210
     alpha 0.6
+    alpha2 0.0
     size 16 8
-    velocity 240 140
+    sizeincrease 0.0 0.0
+    velocity 100.0 380.0
+    velocityjitter 70.0
     gravity 710
     airfriction 2.2
     lifetime 0.20
+    spawnradius 1.2
+
+    glow 0.35
 
 // TE_EXPLOSION — Layer 2: MID (gelb, mehr Menge, größerer Radius)
 effect te_explosion_mid
@@ -98,11 +134,17 @@ effect te_explosion_mid
     count 28
     color 255 225 150
     alpha 0.6
+    alpha2 0.0
     size 14 7
-    velocity 260 160
+    sizeincrease 0.0 0.0
+    velocity 100.0 420.0
+    velocityjitter 80.0
     gravity 720
     airfriction 2.3
     lifetime 0.38
+    spawnradius 1.1
+
+    glow 0.35
 
 // TE_EXPLOSION — Layer 3: OUTER (rötlich-gelb, größte Menge & Radius)
 effect te_explosion_outer
@@ -110,11 +152,17 @@ effect te_explosion_outer
     count 40
     color 255 190 110
     alpha 0.6
+    alpha2 0.0
     size 12 8
-    velocity 290 190
+    sizeincrease 0.0 0.0
+    velocity 100.0 480.0
+    velocityjitter 95.0
     gravity 740
     airfriction 2.4
     lifetime 0.52
+    spawnradius 1.2
+
+    glow 0.35
 
 // TE_EXPLOSION2 (helle Variante) — ebenfalls 3 Layer
 
@@ -123,33 +171,49 @@ effect te_explosion2_core
     count 16
     color 255 250 220
     alpha 0.6
+    alpha2 0.0
     size 14 7
-    velocity 260 150
+    sizeincrease 0.0 0.0
+    velocity 110.0 410.0
+    velocityjitter 75.0
     gravity 650
     airfriction 2.4
     lifetime 0.16
+    spawnradius 1.1
 
+    glow 0.35
 effect te_explosion2_mid
     type spark
     count 26
     color 255 240 170
     alpha 0.6
+    alpha2 0.0
     size 12 6
-    velocity 280 170
+    sizeincrease 0.0 0.0
+    velocity 110.0 450.0
+    velocityjitter 85.0
     gravity 660
     airfriction 2.5
     lifetime 0.30
+    spawnradius 0.9
 
+    glow 0.35
 effect te_explosion2_outer
     type spark
     count 38
     color 255 210 130
     alpha 0.6
+    alpha2 0.0
     size 10 6
-    velocity 305 195
+    sizeincrease 0.0 0.0
+    velocity 110.0 500.0
+    velocityjitter 97.5
     gravity 680
     airfriction 2.6
     lifetime 0.44
+    spawnradius 0.9
+
+    glow 0.35
 
 // Optional: dunkler Rauchstoß der Teer-Explosion bleibt einteilig,
 // aber transparent — falls du hier auch 3 Layer willst, sag Bescheid.
@@ -158,11 +222,17 @@ effect te_tarexplosion
     count 30
     color 80 70 60
     alpha 0.6
+    alpha2 0.0
     size 24 36
-    velocity 120 80
+    sizeincrease 10.5 18.0
+    velocity 40.0 200.0
+    velocityjitter 40.0
     gravity -12
     airfriction 1.9
     lifetime 0.80
+    spawnradius 5.4
+
+    glow 0.35
 
 // ----------------------
 // TELEPORT / LAVA / BEAMS
@@ -173,46 +243,69 @@ effect te_teleport
     count 27
     color 150 160 200
     alpha 0.6
+    alpha2 0.0
     size 16 28
-    velocity 70 50
+    sizeincrease 9.9 16.9
+    velocity 20.0 120.0
+    velocityjitter 25.0
     gravity -44
     airfriction 1.5
     lifetime 0.85
+    spawnradius 4.2
 
+    glow 0.05
 effect te_lavasplash
     type spark
     count 36
     color 255 140 60
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 230 120
+    sizeincrease 0.0 0.0
+    velocity 110.0 350.0
+    velocityjitter 60.0
     gravity 920
     airfriction 2.6
     lifetime 0.48
+    spawnradius 0.6
 
+    glow 0.35
 effect te_lightning1
     type beam
     count 1
     color 200 220 255
     alpha 0.6
+    alpha2 0.0
     size 6 2
+    sizeincrease 0.0 0.0
     lifetime 0.14
+    spawnradius 0.3
 
+    glow 0.50
 effect te_lightning2
     type beam
     count 1
     color 160 200 255
     alpha 0.6
+    alpha2 0.0
     size 6 2
+    sizeincrease 0.0 0.0
     lifetime 0.14
+    spawnradius 0.3
 
+    glow 0.50
 effect te_lightning3
     type beam
     count 1
     color 235 235 180
     alpha 0.6
+    alpha2 0.0
     size 6 2
+    sizeincrease 0.0 0.0
     lifetime 0.14
+    spawnradius 0.3
+
+    glow 0.50
 
 // ----------------------
 // MINIMAL SMOKE/SPARK
@@ -223,22 +316,33 @@ effect fx_smoke_min
     count 18
     color 160 160 160
     alpha 0.6
+    alpha2 0.0
     size 12 28
-    velocity 46 26
+    sizeincrease 11.2 19.2
+    velocity 20.0 72.0
+    velocityjitter 13.0
     gravity -22
     airfriction 1.6
     lifetime 1.00
+    spawnradius 4.2
 
+    glow 0.05
 effect fx_spark_min
     type spark
     count 18
     color 255 220 120
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 160 80
+    sizeincrease 0.0 0.0
+    velocity 80.0 240.0
+    velocityjitter 40.0
     gravity 610
     airfriction 2
     lifetime 0.45
+    spawnradius 0.6
+
+    glow 0.35
 
 // ----------------------
 // BLOOD HELPERS (×3 & transparent)
@@ -248,11 +352,17 @@ effect fx_blood_spray
     count 90             // vorher 30 → jetzt ×3
     color 200 30 30
     alpha 0.5
+    alpha2 0.0
     size 4 10
-    velocity 160 100
+    sizeincrease 6.8 11.6
+    velocity 60.0 260.0
+    velocityjitter 50.0
     gravity 660
     airfriction 1.5
     lifetime 0.62
+    spawnradius 1.5
+
+    glow 0.35
 
 # Grobe Gibb-Glut
 effect fx_gib_chunk
@@ -260,11 +370,17 @@ effect fx_gib_chunk
     count 27
     color 255 120 60
     alpha 0.6
+    alpha2 0.0
     size 6 6
-    velocity 170 110
+    sizeincrease 0.0 0.0
+    velocity 60.0 280.0
+    velocityjitter 55.0
     gravity 920
     airfriction 2.5
     lifetime 0.50
+    spawnradius 0.9
+
+    glow 0.35
 
 # Lightning-Impact-Funken
 effect fx_lightning_hit
@@ -272,11 +388,17 @@ effect fx_lightning_hit
     count 24
     color 180 210 255
     alpha 0.6
+    alpha2 0.0
     size 4 4
-    velocity 240 140
+    sizeincrease 0.0 0.0
+    velocity 100.0 380.0
+    velocityjitter 70.0
     gravity 520
     airfriction 1.9
     lifetime 0.40
+    spawnradius 0.6
+
+    glow 0.35
 
 # Kompakter Explo-Burst (Sekundäreffekt – kann zusätzlich zu den 3 Layern getriggert werden)
 effect fx_explosion_burst
@@ -284,8 +406,13 @@ effect fx_explosion_burst
     count 36
     color 255 200 120
     alpha 0.6
+    alpha2 0.0
     size 12 8
-    velocity 210 130
+    sizeincrease 0.0 0.0
+    velocity 80.0 340.0
+    velocityjitter 65.0
     gravity 790
     airfriction 2.4
     lifetime 0.56
+    spawnradius 1.2
+    glow 0.35
