@@ -1564,7 +1564,6 @@ qboolean GL_NeedsPostprocess (void)
 {
         if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
-		return true;
         return false;
 }
 
@@ -2952,7 +2951,10 @@ void R_RenderView (void)
 	else if (gl_finish.value)
 		glFinish ();
 
-        R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+
+	R_RenderScene ();
+	R_WarpScaleView ();
 
 	r_frame_rendered_this_update = true;
 
