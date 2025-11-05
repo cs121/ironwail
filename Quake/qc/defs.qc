@@ -774,6 +774,9 @@ void draw_worldtext( string s, vector origin, float size, float lifetime, float 
 void draw_sphere( vector origin, float radius, float colormap, float lifetime, float depthtest ) = #0:ex_draw_sphere;
 void draw_cylinder( vector origin, float halfHeight, float radius, float colormap, float lifetime, float depthtest ) = #0:ex_draw_cylinder;
 
+float( string effectname ) particleeffectnum = #0:particleeffectnum;
+void( float effectnum, vector origin, vector direction, float count ) pointparticles = #0:pointparticles;
+
 // Bot functions that return a value based on "BOT_GOAL_<X>", depending on the status of the goal.
 float bot_movetopoint( entity bot, vector point ) = #0:ex_bot_movetopoint;
 float bot_followentity( entity bot, entity goal ) = #0:ex_bot_followentity;

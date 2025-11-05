@@ -136,7 +136,7 @@ SpawnBlood
 */
 void(vector org, vector vel, float damage) SpawnBlood =
 {
-	particle (org, vel*0.1, 73, damage*2);
+        Particles_Blood(org, vel*0.1, damage*2);
 };
 
 /*
@@ -160,7 +160,7 @@ SpawnChunk
 */
 void(vector org, vector vel) SpawnChunk =
 {
-	particle (org, vel*0.02, 0, 10);
+        Particles_Gib(org, vel*0.02, 10);
 };
 
 /*
@@ -451,13 +451,13 @@ void(vector p1, vector p2, entity from, float damage) LightningDamage =
 
 	e1 = e2 = world;
 
-	traceline (p1, p2, FALSE, self);
-	if (trace_ent.takedamage)
-	{
-		particle (trace_endpos, '0 0 100', 225, damage*4);
-		T_Damage (trace_ent, from, from, damage);
-		if (self.classname == "player")
-		{
+        traceline (p1, p2, FALSE, self);
+        if (trace_ent.takedamage)
+        {
+                Particles_LightningHit(trace_endpos, damage*4);
+                T_Damage (trace_ent, from, from, damage);
+                if (self.classname == "player")
+                {
 			if (other.classname == "player")
 				trace_ent.velocity_z = trace_ent.velocity_z + 400;
 		}
@@ -465,21 +465,21 @@ void(vector p1, vector p2, entity from, float damage) LightningDamage =
 
 	e1 = trace_ent;
 
-	traceline (p1 + f, p2 + f, FALSE, self);
-	if (trace_ent != e1 && trace_ent.takedamage)
-	{
-		particle (trace_endpos, '0 0 100', 225, damage*4);
-		T_Damage (trace_ent, from, from, damage);
-	}
+        traceline (p1 + f, p2 + f, FALSE, self);
+        if (trace_ent != e1 && trace_ent.takedamage)
+        {
+                Particles_LightningHit(trace_endpos, damage*4);
+                T_Damage (trace_ent, from, from, damage);
+        }
 
 	e2 = trace_ent;
 
-	traceline (p1 - f, p2 - f, FALSE, self);
-	if (trace_ent != e1 && trace_ent != e2 && trace_ent.takedamage)
-	{
-		particle (trace_endpos, '0 0 100', 225, damage*4);
-		T_Damage (trace_ent, from, from, damage);
-	}
+        traceline (p1 - f, p2 - f, FALSE, self);
+        if (trace_ent != e1 && trace_ent != e2 && trace_ent.takedamage)
+        {
+                Particles_LightningHit(trace_endpos, damage*4);
+                T_Damage (trace_ent, from, from, damage);
+        }
 };
 
 
