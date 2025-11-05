@@ -579,6 +579,36 @@ static void PF_particle (void)
 	SV_StartParticle (org, dir, color, count);
 }
 
+static void PF_particleeffectnum (void)
+{
+	const char *name = G_STRING (OFS_PARM0);
+	int index = -1;
+
+	if (name && *name && R_Effectinfo_Active ())
+		index = R_Effectinfo_Index (name);
+
+	G_FLOAT (OFS_RETURN) = (float)index;
+}
+
+static void PF_pointparticles (void)
+{
+	int	effect = (int)G_FLOAT (OFS_PARM0);
+	vec3_t	org;
+	vec3_t	dir;
+	float	count = G_FLOAT (OFS_PARM3);
+
+	if (!R_Effectinfo_Active ())
+		return;
+
+	VectorCopy (G_VECTOR (OFS_PARM1), org);
+	VectorCopy (G_VECTOR (OFS_PARM2), dir);
+
+	if (effect < 0)
+		return;
+
+	R_Effectinfo_SpawnIndex (effect, org, dir, count);
+}
+
 
 /*
 =================
@@ -3320,6 +3350,8 @@ builtindef_t pr_builtindefs[] =
 	{"localcmd",				PF_BOTH(PF_localcmd),			46},
 	{"nextent",					PF_SSQC(PF_nextent),			47},
 	{"particle",				PF_SSQC(PF_particle),			48},
+	{"particleeffectnum",		PF_SSQC(PF_particleeffectnum),		400,	DP_QC_POINTPARTICLES},
+	{"pointparticles",		PF_SSQC(PF_pointparticles),		401,	DP_QC_POINTPARTICLES},
 	{"ChangeYaw",				PF_SSQC(PF_changeyaw),			49},
 	{"vectoangles",				PF_BOTH(PF_vectoangles),		51},
 

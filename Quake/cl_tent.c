@@ -148,7 +148,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 20, 30);
+		if (!R_Effectinfo_SpawnName ("te_wizspike", pos, vec3_origin, 1.f))
+			R_RunParticleEffect (pos, vec3_origin, 20, 30);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
 		break;
 
@@ -156,7 +157,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 226, 20);
+		if (!R_Effectinfo_SpawnName ("te_knightspike", pos, vec3_origin, 1.f))
+			R_RunParticleEffect (pos, vec3_origin, 226, 20);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
 		break;
 
@@ -164,7 +166,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 10);
+		if (!R_Effectinfo_SpawnName ("te_spike", pos, vec3_origin, 1.f))
+			R_RunParticleEffect (pos, vec3_origin, 0, 10);
 		R_AddBulletDecal (pos);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -183,7 +186,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (!R_Effectinfo_SpawnName ("te_superspike", pos, vec3_origin, 1.f))
+			R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		R_AddBulletDecal (pos);
 
 		if ( rand() % 5 )
@@ -199,20 +203,27 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
-
 	case TE_GUNSHOT:			// bullet hitting wall
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (!R_Effectinfo_SpawnName ("te_gunshot", pos, vec3_origin, 1.f))
+			R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		R_AddBulletDecal (pos);
 		break;
-
 	case TE_EXPLOSION:			// rocket explosion
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_ParticleExplosion (pos);
+		if (R_Effectinfo_SpawnName ("te_explosion_core", pos, vec3_origin, 1.f))
+		{
+			R_Effectinfo_SpawnName ("te_explosion_mid", pos, vec3_origin, 1.f);
+			R_Effectinfo_SpawnName ("te_explosion_outer", pos, vec3_origin, 1.f);
+		}
+		else
+		{
+			R_ParticleExplosion (pos);
+		}
 		R_AddExplosionDecal (pos);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
@@ -227,7 +238,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_BlobExplosion (pos);
+		if (!R_Effectinfo_SpawnName ("te_tarexplosion", pos, vec3_origin, 1.f))
+			R_BlobExplosion (pos);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -254,14 +266,16 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_LavaSplash (pos);
+		if (!R_Effectinfo_SpawnName ("te_lavasplash", pos, vec3_origin, 1.f))
+			R_LavaSplash (pos);
 		break;
 
 	case TE_TELEPORT:
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_TeleportSplash (pos);
+		if (!R_Effectinfo_SpawnName ("te_teleport", pos, vec3_origin, 1.f))
+			R_TeleportSplash (pos);
 		break;
 
 	case TE_EXPLOSION2:				// color mapped explosion
@@ -270,7 +284,15 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
-		R_ParticleExplosion2 (pos, colorStart, colorLength);
+		if (R_Effectinfo_SpawnName ("te_explosion2_core", pos, vec3_origin, 1.f))
+		{
+			R_Effectinfo_SpawnName ("te_explosion2_mid", pos, vec3_origin, 1.f);
+			R_Effectinfo_SpawnName ("te_explosion2_outer", pos, vec3_origin, 1.f);
+		}
+		else
+		{
+			R_ParticleExplosion2 (pos, colorStart, colorLength);
+		}
 		R_AddExplosionDecal (pos);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);

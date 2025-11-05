@@ -61,6 +61,18 @@ typedef struct particle_s
 	float		die;
 	vec3_t		vel;
 	float		ramp;
+	vec3_t		accel;
+	vec3_t		custom_color;
+	float		size;
+	float		size_vel;
+	float		alpha_start;
+	float		alpha_end;
+	float		alpha_power;
+	float		airfriction;
+	float		glow;
+	byte		texture;
+	byte		custom;
+	byte		pad[2];
 } particle_t;
 
 
@@ -466,6 +478,10 @@ void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned ch
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
 void R_DrawParticles_ShowTris (void);
+int R_Effectinfo_Index (const char *name);
+qboolean R_Effectinfo_SpawnIndex (int index, const vec3_t org, const vec3_t dir, float count);
+qboolean R_Effectinfo_SpawnName (const char *name, const vec3_t org, const vec3_t dir, float count);
+qboolean R_Effectinfo_Active (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
 void R_InitDecals (void);
