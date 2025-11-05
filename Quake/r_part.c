@@ -178,24 +178,24 @@ static int R_Effectinfo_TextureForShape (effectshape_t shape)
 
 static effectshape_t R_Effectinfo_ParseShape (const char* token)
 {
-        if (!Q_strcasecmp (token, "smoke"))
+        if (!q_strcasecmp (token, "smoke"))
                 return EFFECT_SHAPE_SMOKE;
-        if (!Q_strcasecmp (token, "spark"))
+        if (!q_strcasecmp (token, "spark"))
                 return EFFECT_SHAPE_SPARK;
-        if (!Q_strcasecmp (token, "beam"))
+        if (!q_strcasecmp (token, "beam"))
                 return EFFECT_SHAPE_BEAM;
         return EFFECT_SHAPE_GENERIC;
 }
 
 static int R_Effectinfo_ParseTexture (const char* token)
 {
-        if (!Q_strcasecmp (token, "soft"))
+        if (!q_strcasecmp (token, "soft"))
                 return PARTICLE_TEX_SOFT;
-        if (!Q_strcasecmp (token, "glow"))
+        if (!q_strcasecmp (token, "glow"))
                 return PARTICLE_TEX_GLOW;
-        if (!Q_strcasecmp (token, "smoke"))
+        if (!q_strcasecmp (token, "smoke"))
                 return PARTICLE_TEX_SMOKE;
-        if (!Q_strcasecmp (token, "streak"))
+        if (!q_strcasecmp (token, "streak"))
                 return PARTICLE_TEX_STREAK;
         return -1;
 }
@@ -207,7 +207,7 @@ static const effectinfo_t* R_Effectinfo_Find (const char* name)
                 return NULL;
         for (i = 0; i < num_effectinfos; ++i)
         {
-                if (!Q_strcasecmp (effectinfos[i].name, name))
+                if (!q_strcasecmp (effectinfos[i].name, name))
                         return &effectinfos[i];
         }
         return NULL;
@@ -223,7 +223,7 @@ static void R_Effectinfo_Load (void)
 
         R_Effectinfo_Clear ();
 
-        text = (char*)COM_LoadFile ("effectinfo.txt", LOADFILE_MALLOC, NULL);
+        text = (char*)COM_LoadMallocFile ("effectinfo.txt", NULL);
         if (!text)
         {
                 Con_Printf ("effectinfo.txt not found, using legacy particles\n");
@@ -238,7 +238,7 @@ static void R_Effectinfo_Load (void)
                 if (!com_token[0])
                         break;
 
-                if (!Q_strcasecmp (com_token, "effect"))
+                if (!q_strcasecmp (com_token, "effect"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -261,7 +261,7 @@ static void R_Effectinfo_Load (void)
                         current = &effectinfos[num_effectinfos++];
                         memset (current, 0, sizeof (*current));
                         R_Effectinfo_SetDefaults (current);
-                        Q_strncpyz (current->name, com_token, sizeof (current->name));
+                        q_strlcpy (current->name, com_token, sizeof (current->name));
                         effectinfo_active = true;
                         continue;
                 }
@@ -269,7 +269,7 @@ static void R_Effectinfo_Load (void)
                 if (!current)
                         continue;
 
-                if (!Q_strcasecmp (com_token, "type"))
+                if (!q_strcasecmp (com_token, "type"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -281,7 +281,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "count"))
+                if (!q_strcasecmp (com_token, "count"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -293,7 +293,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "color"))
+                if (!q_strcasecmp (com_token, "color"))
                 {
                         int c;
                         for (c = 0; c < 3; c++)
@@ -308,7 +308,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "alpha"))
+                if (!q_strcasecmp (com_token, "alpha"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -318,7 +318,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "alpha2"))
+                if (!q_strcasecmp (com_token, "alpha2"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -328,7 +328,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "fade"))
+                if (!q_strcasecmp (com_token, "fade"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -340,7 +340,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "size"))
+                if (!q_strcasecmp (com_token, "size"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -355,7 +355,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "sizeincrease"))
+                if (!q_strcasecmp (com_token, "sizeincrease"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -370,7 +370,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "velocity"))
+                if (!q_strcasecmp (com_token, "velocity"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -385,7 +385,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "velocityjitter"))
+                if (!q_strcasecmp (com_token, "velocityjitter"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -395,7 +395,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "gravity"))
+                if (!q_strcasecmp (com_token, "gravity"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -405,7 +405,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "airfriction"))
+                if (!q_strcasecmp (com_token, "airfriction"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -417,7 +417,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "lifetime"))
+                if (!q_strcasecmp (com_token, "lifetime"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -429,7 +429,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "spawnradius"))
+                if (!q_strcasecmp (com_token, "spawnradius"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -441,7 +441,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "glow"))
+                if (!q_strcasecmp (com_token, "glow"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -452,7 +452,7 @@ static void R_Effectinfo_Load (void)
                         continue;
                 }
 
-                if (!Q_strcasecmp (com_token, "texture"))
+                if (!q_strcasecmp (com_token, "texture"))
                 {
                         next = COM_Parse (data);
                         if (!next)
@@ -467,7 +467,7 @@ static void R_Effectinfo_Load (void)
 
         if (effectinfo_active)
         {
-                Q_strncpyz (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
+                q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
                 Con_Printf ("Loaded %d particle effects from %s\n", num_effectinfos, effectinfo_source);
         }
         else
@@ -1577,7 +1577,7 @@ int R_Effectinfo_Index (const char *name)
         for (i = 0; i < num_effectinfos; ++i)
         {
                 fx = &effectinfos[i];
-                if (!Q_strcasecmp (fx->name, name))
+                if (!q_strcasecmp (fx->name, name))
                         return i;
         }
 
