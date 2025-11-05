@@ -1,0 +1,37 @@
+// Retro-minimal particle definitions for Ironwail
+// Keep parameters concise for a period-correct aesthetic.
+
+// Quick spark burst for impacts and hitscan effects
+// spawn_rate: via pointparticles count
+// lifetime: 0.35s, tight velocity for punchy look
+// base_vel: 140 ups, jitter 60
+// gravity: strong downward pull for arcade sparks
+// size: small bright pixels
+// color: warm arc flash
+// airfriction emulates quick slowdown before fade
+
+effect fx_spark_min
+    type spark
+    count 1
+    color 255 220 120
+    size 2 1
+    velocity 140 60
+    gravity 600
+    airfriction 2
+    lifetime 0.35
+
+// Soft lingering puff for bullet impacts or vents
+// base_vel: gentle upward drift, jitter for variability
+// gravity: slight negative lift keeps smoke afloat
+// color: neutral mid-grey for general use
+// size: starts compact, expands as it fades
+
+effect fx_smoke_min
+    type smoke
+    count 1
+    color 160 160 160
+    size 6 12
+    velocity 40 20
+    gravity -20
+    airfriction 1.5
+    lifetime 0.8
