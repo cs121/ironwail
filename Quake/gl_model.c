@@ -311,10 +311,22 @@ void Mod_ResetAll (void)
 	mod_numknown = 0;
 }
 
+static qboolean Mod_TryResolvedName (const char *candidate, char *resolved, size_t resolved_size)
+{
+        if (COM_FileExists (candidate, NULL))
+        {
+                q_strlcpy (resolved, candidate, resolved_size);
+                return true;
+        }
+
+        return false;
+}
+
 static void Mod_ResolveModelName (const char *name, char *resolved, size_t resolved_size)
 {
         const char *ext;
         static const char * const model_exts[] = {"md5", "md2", "mdl"};
+        char base[MAX_QPATH];
         size_t i;
 
         if (!resolved_size)
@@ -333,25 +345,29 @@ static void Mod_ResolveModelName (const char *name, char *resolved, size_t resol
         }
 
         ext = COM_FileGetExtension (name);
-        if (ext[0])
+
+        if (ext[0] && q_strcasecmp (ext, "md5") && q_strcasecmp (ext, "md2") && q_strcasecmp (ext, "mdl"))
         {
                 q_strlcpy (resolved, name, resolved_size);
                 return;
         }
 
+        if (!COM_StripModelExtension (name, base, sizeof(base)))
+                q_strlcpy (base, name, sizeof(base));
+
         for (i = 0; i < countof(model_exts); i++)
         {
                 char candidate[MAX_QPATH];
 
-                q_snprintf (candidate, sizeof(candidate), "%s.%s", name, model_exts[i]);
-                if (COM_FileExists (candidate, NULL))
-                {
-                        q_strlcpy (resolved, candidate, resolved_size);
+                q_snprintf (candidate, sizeof(candidate), "%s.%s", base, model_exts[i]);
+                if (Mod_TryResolvedName (candidate, resolved, resolved_size))
                         return;
-                }
         }
 
-        q_snprintf (resolved, resolved_size, "%s.mdl", name);
+        if (ext[0])
+                q_snprintf (resolved, resolved_size, "%s.%s", base, ext);
+        else
+                q_snprintf (resolved, resolved_size, "%s.mdl", base);
 }
 
 /*
