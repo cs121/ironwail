@@ -148,6 +148,7 @@ typedef struct client_s
 	edict_t			*edict;				// EDICT_NUM(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
+	qboolean		isbot;				// true if this client is a local bot
 
 	float			ping_times[NUM_PING_TIMES];
 	int				num_pings;			// ping_times[num_pings%NUM_PING_TIMES]
@@ -306,5 +307,10 @@ void SV_CheckForNewClients (void);
 void SV_RunClients (void);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
+
+void SV_Bot_Init (void);
+void SV_Bot_Reset (void);
+void SV_Bot_RunFrame (client_t *client);
+void SV_Bot_ClientDisconnected (client_t *client);
 
 #endif	/* QUAKE_SERVER_H */

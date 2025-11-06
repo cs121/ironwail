@@ -181,6 +181,8 @@ void SV_Init (void)
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
 
+	SV_Bot_Init ();
+
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
 
@@ -476,7 +478,10 @@ void SV_ConnectClient (int clientnum)
 
 	client = svs.clients + clientnum;
 
-	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
+	if (client->netconnection)
+		Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
+	else
+		Con_DPrintf ("Bot client connected (slot %d)\n", clientnum + 1);
 
 	edictnum = clientnum+1;
 
@@ -1381,6 +1386,15 @@ void SV_SendClientMessages (void)
 		if (!host_client->active)
 			continue;
 
+		if (host_client->isbot)
+		{
+			SZ_Clear (&host_client->message);
+			host_client->last_message = realtime;
+			if (host_client->sendsignon == PRESPAWN_FLUSH)
+				host_client->sendsignon = PRESPAWN_DONE;
+			continue;
+		}
+
 		if (host_client->spawned)
 		{
 			if (!SV_SendClientDatagram (host_client))
@@ -1958,6 +1972,8 @@ void SV_SpawnServer (const char *server)
 //
 	//memset (&sv, 0, sizeof(sv));
 	Host_ClearMemory ();
+
+	SV_Bot_Reset ();
 
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	if (developer.value || map_checks.value)
