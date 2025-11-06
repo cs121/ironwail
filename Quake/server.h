@@ -294,6 +294,8 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 void SV_ClientPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
 void SV_BroadcastPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
 
+void SV_ConnectClient (int clientnum);
+
 void SV_Physics (void);
 
 qboolean SV_CheckBottom (edict_t *ent);
