@@ -358,7 +358,15 @@ static float R_GetDynamicDoFFocus (float fallback)
 	trace.fraction = 1.f;
 	VectorCopy (end, trace.endpos);
 
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
+	hull_t *world_hull = &cl.worldmodel->hulls[0];
+
+	if (!world_hull->clipnodes || !world_hull->planes || world_hull->firstclipnode < 0 || world_hull->lastclipnode < world_hull->firstclipnode)
+	{
+		r_dof_autofocus_initialized = false;
+		return fallback;
+	}
+
+	SV_RecursiveHullCheck (world_hull, world_hull->firstclipnode, 0.f, 1.f, r_origin, end, &trace);
 
 	if (trace.allsolid || trace.fraction <= 0.f)
 		target = fallback;
