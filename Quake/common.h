@@ -108,6 +108,9 @@ GENERIC_TYPES (IMPL_GENERIC_FUNCS, NO_COMMA)
 	 (x) > (_maxval) ? (_maxval) : (x))
 #endif
 
+#define q_clamp(value, _minval, _maxval)      CLAMP((_minval), (value), (_maxval))
+#define clamp(value, _minval, _maxval)        CLAMP((_minval), (value), (_maxval))
+
 #define LERP(a, b, t) ((a) + ((b)-(a))*(t))
 
 #define countof(arr) (sizeof(arr) / sizeof(arr[0]))

@@ -81,6 +81,9 @@ do\
 
 void VectorAngles (const vec3_t forward, vec3_t angles); //johnfitz
 
+void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal );
+void PerpendicularVector( vec3_t dst, const vec3_t src );
+
 void VectorMA (const vec3_t veca, float scale, const vec3_t vecb, vec3_t vecc);
 void VectorLerp (const vec3_t veca, const vec3_t vecb, float frac, vec3_t dst);
 
