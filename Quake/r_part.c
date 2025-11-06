@@ -25,6 +25,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t sv_gravity;
 
+static int R_PointContentsSafe (vec3_t p)
+{
+        if (cl.worldmodel)
+        {
+                mleaf_t *leaf = Mod_PointInLeaf (p, cl.worldmodel);
+                if (leaf)
+                {
+                        int cont = leaf->contents;
+                        if (cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN)
+                                cont = CONTENTS_WATER;
+                        return cont;
+                }
+        }
+
+        if (sv.worldmodel)
+                return SV_PointContents (p);
+
+        return CONTENTS_EMPTY;
+}
+
 #define MAX_PARTICLES            16384   // default max # of particles at one
 //  time
 #define ABSOLUTE_MIN_PARTICLES   512     // no fewer than this no matter what's
@@ -1135,7 +1155,7 @@ static qboolean R_Effectinfo_SpawnEmitter (const effect_emitter_t* emit, const v
 
                         if (emit->underwater_only || emit->notunderwater)
                         {
-                                int contents = SV_PointContents (spawn_org);
+                                int contents = R_PointContentsSafe (spawn_org);
                                 qboolean in_liquid = (contents <= CONTENTS_WATER);
                                 if ((emit->underwater_only && !in_liquid) || (emit->notunderwater && in_liquid))
                                         continue;
@@ -2048,7 +2068,7 @@ void CL_RunParticles (void)
                         vel[1] += p->accel[1] * frametime;
                         vel[2] += p->accel[2] * frametime;
 
-                        contents = SV_PointContents (p->org);
+                        contents = R_PointContentsSafe (p->org);
                         in_liquid = (contents <= CONTENTS_WATER);
                         if (in_liquid && ext->liquidfriction > 0.f)
                                 friction = ext->liquidfriction;
