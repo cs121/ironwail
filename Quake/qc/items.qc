@@ -300,8 +300,8 @@ void() item_armor1 =
 	self.touch = armor_touch;
 	self.armortype = 0.3;
 	self.armorvalue = 100;
-	precache_model ("progs/armor.mdl");
-	setmodel (self, "progs/armor.mdl");
+	precache_model ("progs/armor");
+	setmodel (self, "progs/armor");
 	self.skin = 0;
 	setsize (self, '-16 -16 0', '16 16 56');
 	StartItem ();
@@ -315,8 +315,8 @@ void() item_armor2 =
 	self.touch = armor_touch;
 	self.armortype = 0.6;
 	self.armorvalue = 150;
-	precache_model ("progs/armor.mdl");
-	setmodel (self, "progs/armor.mdl");
+	precache_model ("progs/armor");
+	setmodel (self, "progs/armor");
 	self.skin = 1;
 	setsize (self, '-16 -16 0', '16 16 56');
 	StartItem ();
@@ -330,8 +330,8 @@ void() item_armorInv =
 	self.touch = armor_touch;
 	self.armortype = 0.8;
 	self.armorvalue = 200;
-	precache_model ("progs/armor.mdl");
-	setmodel (self, "progs/armor.mdl");
+	precache_model ("progs/armor");
+	setmodel (self, "progs/armor");
 	self.skin = 2;
 	setsize (self, '-16 -16 0', '16 16 56');
 	StartItem ();
@@ -568,8 +568,8 @@ QUAKED weapon_supershotgun (0 .5 .8) (-16 -16 0) (16 16 32)
 */
 void() weapon_supershotgun =
 {
-	precache_model ("progs/g_shot.mdl");
-	setmodel (self, "progs/g_shot.mdl");
+	precache_model ("progs/g_shot");
+	setmodel (self, "progs/g_shot");
 	self.weapon = IT_SUPER_SHOTGUN;
 	self.netname = "$qc_double_shotgun";
 	self.touch = weapon_touch;
@@ -582,8 +582,8 @@ void() weapon_supershotgun =
 
 void() weapon_nailgun =
 {
-	precache_model ("progs/g_nail.mdl");
-	setmodel (self, "progs/g_nail.mdl");
+	precache_model ("progs/g_nail");
+	setmodel (self, "progs/g_nail");
 	self.weapon = IT_NAILGUN;
 	self.netname = "$qc_nailgun";
 	self.touch = weapon_touch;
@@ -596,8 +596,8 @@ void() weapon_nailgun =
 
 void() weapon_supernailgun =
 {
-	precache_model ("progs/g_nail2.mdl");
-	setmodel (self, "progs/g_nail2.mdl");
+	precache_model ("progs/g_nail2");
+	setmodel (self, "progs/g_nail2");
 	self.weapon = IT_SUPER_NAILGUN;
 	self.netname = "$qc_super_nailgun";
 	self.touch = weapon_touch;
@@ -610,8 +610,8 @@ void() weapon_supernailgun =
 
 void() weapon_grenadelauncher =
 {
-	precache_model ("progs/g_rock.mdl");
-	setmodel (self, "progs/g_rock.mdl");
+	precache_model ("progs/g_rock");
+	setmodel (self, "progs/g_rock");
 	self.weapon = IT_GRENADE_LAUNCHER;
 	self.netname = "$qc_grenade_launcher";
 	self.touch = weapon_touch;
@@ -624,8 +624,8 @@ void() weapon_grenadelauncher =
 
 void() weapon_rocketlauncher =
 {
-	precache_model ("progs/g_rock2.mdl");
-	setmodel (self, "progs/g_rock2.mdl");
+	precache_model ("progs/g_rock2");
+	setmodel (self, "progs/g_rock2");
 	self.weapon = IT_ROCKET_LAUNCHER;
 	self.netname = "$qc_rocket_launcher";
 	self.touch = weapon_touch;
@@ -639,8 +639,8 @@ void() weapon_rocketlauncher =
 
 void() weapon_lightning =
 {
-	precache_model ("progs/g_light.mdl");
-	setmodel (self, "progs/g_light.mdl");
+	precache_model ("progs/g_light");
+	setmodel (self, "progs/g_light");
 	self.weapon = IT_LIGHTNING;
 	self.netname = "$qc_thunderbolt";
 	self.touch = weapon_touch;
@@ -1003,20 +1003,20 @@ void() item_key1 =
 {
 	if (world.worldtype == WORLDTYPE_MEDIEVAL)
 	{
-		precache_model ("progs/w_s_key.mdl");
-		setmodel (self, "progs/w_s_key.mdl");
+		precache_model ("progs/w_s_key");
+		setmodel (self, "progs/w_s_key");
 		self.netname = "$qc_silver_key";
 	}
 	else if (world.worldtype == WORLDTYPE_METAL)
 	{
-		precache_model ("progs/m_s_key.mdl");
-		setmodel (self, "progs/m_s_key.mdl");
+		precache_model ("progs/m_s_key");
+		setmodel (self, "progs/m_s_key");
 		self.netname = "$qc_silver_runekey";
 	}
 	else if (world.worldtype == WORLDTYPE_BASE)
 	{
-		precache_model2 ("progs/b_s_key.mdl");
-		setmodel (self, "progs/b_s_key.mdl");
+		precache_model2 ("progs/b_s_key");
+		setmodel (self, "progs/b_s_key");
 		self.netname = "$qc_silver_keycard";
 	}
 
@@ -1042,22 +1042,22 @@ void() item_key2 =
 {
 	if (world.worldtype == WORLDTYPE_MEDIEVAL)
 	{
-		precache_model ("progs/w_g_key.mdl");
-		setmodel (self, "progs/w_g_key.mdl");
+		precache_model ("progs/w_g_key");
+		setmodel (self, "progs/w_g_key");
 		self.netname = "$qc_gold_key";
 	}
 
 	if (world.worldtype == WORLDTYPE_METAL)
 	{
-		precache_model ("progs/m_g_key.mdl");
-		setmodel (self, "progs/m_g_key.mdl");
+		precache_model ("progs/m_g_key");
+		setmodel (self, "progs/m_g_key");
 		self.netname = "$qc_gold_runekey";
 	}
 
 	if (world.worldtype == WORLDTYPE_BASE)
 	{
-		precache_model2 ("progs/b_g_key.mdl");
-		setmodel (self, "progs/b_g_key.mdl");
+		precache_model2 ("progs/b_g_key");
+		setmodel (self, "progs/b_g_key");
 		self.netname = "$qc_gold_keycard";
 	}
 
@@ -1115,26 +1115,26 @@ void() item_sigil =
 
 	if (self.spawnflags & 1)
 	{
-		precache_model ("progs/end1.mdl");
-		setmodel (self, "progs/end1.mdl");
+		precache_model ("progs/end1");
+		setmodel (self, "progs/end1");
 	}
 
 	if (self.spawnflags & 2)
 	{
-		precache_model2 ("progs/end2.mdl");
-		setmodel (self, "progs/end2.mdl");
+		precache_model2 ("progs/end2");
+		setmodel (self, "progs/end2");
 	}
 
 	if (self.spawnflags & 4)
 	{
-		precache_model2 ("progs/end3.mdl");
-		setmodel (self, "progs/end3.mdl");
+		precache_model2 ("progs/end3");
+		setmodel (self, "progs/end3");
 	}
 
 	if (self.spawnflags & 8)
 	{
-		precache_model2 ("progs/end4.mdl");
-		setmodel (self, "progs/end4.mdl");
+		precache_model2 ("progs/end4");
+		setmodel (self, "progs/end4");
 	}
 	
 	self.touch = sigil_touch;
@@ -1220,12 +1220,12 @@ void() item_artifact_invulnerability =
 {
 	self.touch = powerup_touch;
 
-	precache_model ("progs/invulner.mdl");
+	precache_model ("progs/invulner");
 	precache_sound ("items/protect.wav");
 	precache_sound ("items/protect2.wav");
 	precache_sound ("items/protect3.wav");
 	self.noise = "items/protect.wav";
-	setmodel (self, "progs/invulner.mdl");
+	setmodel (self, "progs/invulner");
 	self.netname = "$qc_pentagram_of_protection";
 	self.items = IT_INVULNERABILITY;
 	setsize (self, '-16 -16 -24', '16 16 32');
@@ -1239,11 +1239,11 @@ void() item_artifact_envirosuit =
 {
 	self.touch = powerup_touch;
 
-	precache_model ("progs/suit.mdl");
+	precache_model ("progs/suit");
 	precache_sound ("items/suit.wav");
 	precache_sound ("items/suit2.wav");
 	self.noise = "items/suit.wav";
-	setmodel (self, "progs/suit.mdl");
+	setmodel (self, "progs/suit");
 	self.netname = "$qc_biosuit";
 	self.items = IT_SUIT;
 	setsize (self, '-16 -16 -24', '16 16 32');
@@ -1258,12 +1258,12 @@ void() item_artifact_invisibility =
 {
 	self.touch = powerup_touch;
 
-	precache_model ("progs/invisibl.mdl");
+	precache_model ("progs/invisibl");
 	precache_sound ("items/inv1.wav");
 	precache_sound ("items/inv2.wav");
 	precache_sound ("items/inv3.wav");
 	self.noise = "items/inv1.wav";
-	setmodel (self, "progs/invisibl.mdl");
+	setmodel (self, "progs/invisibl");
 	self.netname = "$qc_ring_of_shadows";
 	self.items = IT_INVISIBILITY;
 	setsize (self, '-16 -16 -24', '16 16 32');
@@ -1278,12 +1278,12 @@ void() item_artifact_super_damage =
 {
 	self.touch = powerup_touch;
 
-	precache_model ("progs/quaddama.mdl");
+	precache_model ("progs/quaddama");
 	precache_sound ("items/damage.wav");
 	precache_sound ("items/damage2.wav");
 	precache_sound ("items/damage3.wav");
 	self.noise = "items/damage.wav";
-	setmodel (self, "progs/quaddama.mdl");
+	setmodel (self, "progs/quaddama");
 	self.netname = "$qc_quad_damage";
 	self.items = IT_QUAD;
 	setsize (self, '-16 -16 -24', '16 16 32');
@@ -1474,7 +1474,7 @@ void() DropBackpack =
 	item.flags = FL_ITEM;
 	item.solid = SOLID_TRIGGER;
 	item.movetype = MOVETYPE_TOSS;
-	setmodel (item, "progs/backpack.mdl");
+	setmodel (item, "progs/backpack");
 	setsize (item, '-16 -16 0', '16 16 56');
 	item.touch = BackpackTouch;
 	

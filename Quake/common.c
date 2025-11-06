@@ -1126,8 +1126,33 @@ void COM_StripExtension (const char *in, char *out, size_t outsize)
 		if (out[length] == '/' || out[length] == '\\')
 			return;	/* no extension */
 	}
-	if (length > 0)
-		out[length] = '\0';
+        if (length > 0)
+                out[length] = '\0';
+}
+
+qboolean COM_StripModelExtension (const char *in, char *out, size_t outsize)
+{
+        const char      *ext;
+        char            *dot;
+
+        if (!outsize)
+                return false;
+
+        if (in != out)
+                q_strlcpy (out, in, outsize);
+
+        ext = COM_FileGetExtension (out);
+        if (!ext[0])
+                return false;
+
+        if (q_strcasecmp (ext, "md5") && q_strcasecmp (ext, "md2") && q_strcasecmp (ext, "mdl"))
+                return false;
+
+        dot = strrchr (out, '.');
+        if (dot)
+                *dot = '\0';
+
+        return true;
 }
 
 /*

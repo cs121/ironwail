@@ -209,7 +209,7 @@ void() monster_tarbaby =
 		return;
 	}
 	
-	precache_model2 ("progs/tarbaby.mdl");
+	precache_model2 ("progs/tarbaby");
 
 	precache_sound2 ("blob/death1.wav");
 	precache_sound2 ("blob/hit1.wav");
@@ -219,7 +219,7 @@ void() monster_tarbaby =
 	self.solid = SOLID_SLIDEBOX;
 	self.movetype = MOVETYPE_STEP;
 
-	setmodel (self, "progs/tarbaby.mdl");
+	setmodel (self, "progs/tarbaby");
 
 	self.noise = "blob/sight1.wav";
 	self.netname = "$qc_spawn";

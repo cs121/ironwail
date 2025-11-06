@@ -307,14 +307,21 @@ static void PF_setmodel (void)
 	const char	*m, **check;
 	qmodel_t	*mod;
 	edict_t		*e;
+	char		normalized_model[MAX_QPATH];
+	char		normalized_precache[MAX_QPATH];
 
 	e = G_EDICT(OFS_PARM0);
 	m = G_STRING(OFS_PARM1);
+
+	COM_StripModelExtension (m, normalized_model, sizeof(normalized_model));
 
 // check to see if model was properly precached
 	for (i = 0, check = sv.model_precache; *check; i++, check++)
 	{
 		if (!strcmp(*check, m))
+			break;
+		COM_StripModelExtension (*check, normalized_precache, sizeof(normalized_precache));
+		if (!strcmp(normalized_precache, normalized_model))
 			break;
 	}
 
@@ -1174,6 +1181,8 @@ static void PF_precache_model (void)
 {
 	const char	*s;
 	int		i;
+	char		normalized_request[MAX_QPATH];
+	char		normalized_precache[MAX_QPATH];
 
 	if (sv.state != ss_loading)
 		PR_RunError ("PF_Precache_*: Precache can only be done in spawn functions");
@@ -1181,6 +1190,8 @@ static void PF_precache_model (void)
 	s = G_STRING(OFS_PARM0);
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
+
+	COM_StripModelExtension (s, normalized_request, sizeof(normalized_request));
 
 	for (i = 0; i < MAX_MODELS; i++)
 	{
@@ -1191,6 +1202,9 @@ static void PF_precache_model (void)
 			return;
 		}
 		if (!strcmp(sv.model_precache[i], s))
+			return;
+		COM_StripModelExtension (sv.model_precache[i], normalized_precache, sizeof(normalized_precache));
+		if (!strcmp(normalized_precache, normalized_request))
 			return;
 	}
 	PR_RunError ("PF_precache_model: overflow");

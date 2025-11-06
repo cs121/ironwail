@@ -1516,13 +1516,22 @@ SV_ModelIndex
 int SV_ModelIndex (const char *name)
 {
 	int		i;
+	char		normalized_request[MAX_QPATH];
+	char		normalized_precache[MAX_QPATH];
 
 	if (!name || !name[0])
 		return 0;
 
+	COM_StripModelExtension (name, normalized_request, sizeof(normalized_request));
+
 	for (i=0 ; i<MAX_MODELS && sv.model_precache[i] ; i++)
+	{
 		if (!strcmp(sv.model_precache[i], name))
 			return i;
+		COM_StripModelExtension (sv.model_precache[i], normalized_precache, sizeof(normalized_precache));
+		if (!strcmp(normalized_precache, normalized_request))
+			return i;
+	}
 	if (i==MAX_MODELS || !sv.model_precache[i])
 		Sys_Error ("SV_ModelIndex: model %s not precached", name);
 	return i;
@@ -1559,7 +1568,7 @@ void SV_CreateBaseline (void)
 		if (entnum > 0 && entnum <= svs.maxclients)
 		{
 			svent->baseline.colormap = entnum;
-			svent->baseline.modelindex = SV_ModelIndex("progs/player.mdl");
+			svent->baseline.modelindex = SV_ModelIndex("progs/player");
 			svent->baseline.alpha = ENTALPHA_DEFAULT; //johnfitz -- alpha support
 			svent->baseline.scale = ENTSCALE_DEFAULT;
 		}

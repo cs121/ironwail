@@ -311,6 +311,43 @@ void Mod_ResetAll (void)
 	mod_numknown = 0;
 }
 
+static void Mod_ResolveModelName (const char *name, char *resolved, size_t resolved_size)
+{
+        const char *ext;
+        static const char * const model_exts[] = {"md5", "md2", "mdl"};
+        size_t i;
+
+        if (!resolved_size)
+                return;
+
+        if (!name[0])
+        {
+                resolved[0] = '\0';
+                return;
+        }
+
+        ext = COM_FileGetExtension (name);
+        if (ext[0])
+        {
+                q_strlcpy (resolved, name, resolved_size);
+                return;
+        }
+
+        for (i = 0; i < countof(model_exts); i++)
+        {
+                char candidate[MAX_QPATH];
+
+                q_snprintf (candidate, sizeof(candidate), "%s.%s", name, model_exts[i]);
+                if (COM_FileExists (candidate, NULL))
+                {
+                        q_strlcpy (resolved, candidate, resolved_size);
+                        return;
+                }
+        }
+
+        q_snprintf (resolved, resolved_size, "%s.mdl", name);
+}
+
 /*
 ==================
 Mod_FindName
@@ -355,8 +392,10 @@ Mod_TouchModel
 void Mod_TouchModel (const char *name)
 {
 	qmodel_t	*mod;
+	char		resolved[MAX_QPATH];
 
-	mod = Mod_FindName (name);
+	Mod_ResolveModelName (name, resolved, sizeof(resolved));
+	mod = Mod_FindName (resolved);
 
 	if (!mod->needload)
 	{
@@ -456,8 +495,10 @@ Loads in a model for the given name
 qmodel_t *Mod_ForName (const char *name, qboolean crash)
 {
 	qmodel_t	*mod;
+	char		resolved[MAX_QPATH];
 
-	mod = Mod_FindName (name);
+	Mod_ResolveModelName (name, resolved, sizeof(resolved));
+	mod = Mod_FindName (resolved);
 
 	return Mod_LoadModel (mod, crash);
 }
