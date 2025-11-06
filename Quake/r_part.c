@@ -152,6 +152,7 @@ particle_t* particles;
 int         r_numparticles, r_numactiveparticles;
 
 static particle_dp_t         particle_dp[MAX_PARTICLES];
+static cvar_t        r_particles_pool = { "r_particles_pool", "16384", CVAR_ARCHIVE };
 
 #define MAX_EFFECTINFO               256
 #define MAX_EFFECT_EMITTERS          1024
@@ -1444,9 +1445,47 @@ R_AllocParticle
 */
 static particle_t* R_AllocParticle (void)
 {
+        int idx;
+
+        if (r_numparticles <= 0)
+                return NULL;
+
         if (r_numactiveparticles < r_numparticles)
         {
-                int idx = r_numactiveparticles++;
+                idx = r_numactiveparticles++;
+        }
+        else
+        {
+                double now = cl.time;
+                float best_remaining = 0.f;
+                int best_idx = -1;
+                int i;
+
+                for (i = 0; i < r_numactiveparticles; i++)
+                {
+                        particle_t *candidate = &particles[i];
+                        float remaining = candidate->die - (float)now;
+
+                        if (remaining <= 0.f)
+                        {
+                                best_idx = i;
+                                break;
+                        }
+
+                        if (best_idx < 0 || remaining < best_remaining)
+                        {
+                                best_idx = i;
+                                best_remaining = remaining;
+                        }
+                }
+
+                if (best_idx < 0)
+                        best_idx = 0;
+
+                idx = best_idx;
+        }
+
+        {
                 particle_t* p = &particles[idx];
                 particle_dp_t* ext = &particle_dp[idx];
                 p->spawn = cl.time;
@@ -1467,7 +1506,6 @@ static particle_t* R_AllocParticle (void)
                 memset (ext, 0, sizeof (*ext));
                 return p;
         }
-        return NULL;
 }
 
 /*
@@ -1477,24 +1515,33 @@ R_InitParticles
 */
 void R_InitParticles (void)
 {
-	int     i;
+        int     i;
+        int     pool_size;
 
-	i = COM_CheckParm ("-particles");
+        Cvar_RegisterVariable (&r_particles_pool);
 
-	if (i && i < com_argc - 1)
-	{
-		r_numparticles = atoi (com_argv[i + 1]);
-		if (r_numparticles < ABSOLUTE_MIN_PARTICLES)
-			r_numparticles = ABSOLUTE_MIN_PARTICLES;
-	}
-	else
-	{
-		r_numparticles = MAX_PARTICLES;
-	}
+        pool_size = (int)CLAMP ((float)ABSOLUTE_MIN_PARTICLES, r_particles_pool.value, (float)MAX_PARTICLES);
 
-	particles = (particle_t*)
-		Hunk_AllocName (r_numparticles * sizeof (particle_t), "particles");
-	r_numactiveparticles = 0;
+        i = COM_CheckParm ("-particles");
+
+        if (i && i < com_argc - 1)
+        {
+                pool_size = atoi (com_argv[i + 1]);
+                if (pool_size < ABSOLUTE_MIN_PARTICLES)
+                        pool_size = ABSOLUTE_MIN_PARTICLES;
+        }
+        if (pool_size > MAX_PARTICLES)
+                pool_size = MAX_PARTICLES;
+
+        Cvar_SetValueQuick (&r_particles_pool, (float)pool_size);
+
+        r_numparticles = pool_size;
+
+        particles = (particle_t*)
+                Hunk_AllocName (r_numparticles * sizeof (particle_t), "particles");
+        memset (particles, 0, (size_t)r_numparticles * sizeof (*particles));
+        memset (particle_dp, 0, (size_t)r_numparticles * sizeof (*particle_dp));
+        r_numactiveparticles = 0;
 
         Cvar_RegisterVariable (&r_particles); //johnfitz
         Cvar_RegisterVariable (&r_particles_debug);
