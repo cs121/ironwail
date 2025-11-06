@@ -168,8 +168,11 @@ static particle_t* R_AllocParticle (void);
 static float uvscale;
 static float texturescalefactor; //johnfitz -- compensate for apparent size of different particle textures
 
-// Hinweis: texturescalefactor wird später * 0.375f skaliert.
-// Das entspricht 1.5f (Billboard-Kompensation) * 0.25f (Quad-Partikel-Grundgröße).
+// Hinweis: p->size entspricht Quake-Welteinheiten. Der texturescalefactor dient
+// ausschließlich dazu, kleine Anpassungen für verschiedene Texturtypen
+// vorzunehmen. Eine zusätzliche pauschale Quad-Skalierung findet nicht mehr
+// statt, damit effectinfo-Größenwerten direkt der erwarteten Partikelgröße
+// entsprechen.
 
 #define PARTICLE_TEX_TILE_SIZE          32
 #define PARTICLE_ATLAS_COLS             8
@@ -2078,7 +2081,7 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
         particle_t* p;
         int i;
         qboolean oit = (!showtris && blend == EFFECT_BLEND_ALPHA && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
-        const float size_factor = texturescalefactor * 0.25f;
+        const float size_factor = texturescalefactor;
 
         GL_UseProgram (glprogs.particles[oit][dither]);
         GL_Uniform3fFunc (0, uvscale, 0.f, 0.f);
