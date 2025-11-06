@@ -326,6 +326,12 @@ static void Mod_ResolveModelName (const char *name, char *resolved, size_t resol
                 return;
         }
 
+        if (name[0] == '*')
+        {
+                q_strlcpy (resolved, name, resolved_size);
+                return;
+        }
+
         ext = COM_FileGetExtension (name);
         if (ext[0])
         {
