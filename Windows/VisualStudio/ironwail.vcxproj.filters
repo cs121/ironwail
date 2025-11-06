@@ -225,6 +225,9 @@
     <ClCompile Include="..\..\Quake\sv_main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\sv_bot.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\sv_move.c">
       <Filter>Source Files</Filter>
     </ClCompile>
