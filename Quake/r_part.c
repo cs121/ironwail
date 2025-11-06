@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "image.h"
 
 extern cvar_t sv_gravity;
 
@@ -1304,134 +1305,176 @@ enum
 
 static void R_InitParticleAtlas (void)
 {
-	if (particle_atlas)
-		return;
+        if (particle_atlas)
+                return;
 
-	const int atlas_width = PARTICLE_ATLAS_WIDTH;
-	const int atlas_height = PARTICLE_ATLAS_HEIGHT;
-	// RGBA8, byte-orientiert → unabhängig von Endianness
-	byte data[PARTICLE_ATLAS_WIDTH * PARTICLE_ATLAS_HEIGHT * 4];
-	int tex, y, x;
+        const int atlas_width = PARTICLE_ATLAS_WIDTH;
+        const int atlas_height = PARTICLE_ATLAS_HEIGHT;
 
-	for (tex = 0; tex < NUM_PARTICLE_TEXTURES; tex++)
-	{
-                for (y = 0; y < PARTICLE_TEX_TILE_SIZE; y++)
+        {
+                int mark = Hunk_LowMark ();
+                int ext_width = 0;
+                int ext_height = 0;
+                enum srcformat ext_fmt = SRC_RGBA;
+                byte* ext_data = Image_LoadImage ("particles/particlefont", &ext_width, &ext_height, &ext_fmt);
+
+                if (ext_data)
                 {
-                        for (x = 0; x < PARTICLE_TEX_TILE_SIZE; x++)
+                        if (ext_fmt == SRC_RGBA && ext_width == atlas_width && ext_height == atlas_height)
                         {
-                                int atlas_x = tex * PARTICLE_TEX_TILE_SIZE + x;
-                                float u = ((float)x + 0.5f) / (float)PARTICLE_TEX_TILE_SIZE - 0.5f;
-                                float v = ((float)y + 0.5f) / (float)PARTICLE_TEX_TILE_SIZE - 0.5f;
-                                float radius = sqrtf (u * u + v * v);
-                                float alpha = 0.0f;
-                                float intensity;
-                                int group = tex / 8;
-                                int variant = tex % 8;
-
-                                switch (group)
-                                {
-                                case 0: // soft glows
-                                {
-                                        float falloff = q_max (0.f, 1.f - radius * (1.2f + 0.08f * variant));
-                                        float noise = R_ParticleNoise (x, y, 17 + tex * 13);
-                                        alpha = powf (falloff, 1.3f + 0.1f * variant) * (0.85f + 0.15f * noise);
-                                        break;
-                                }
-
-                                case 1: // smoke
-                                {
-                                        float base = q_max (0.f, 1.f - radius * 1.35f);
-                                        float noise1 = R_ParticleNoise (x, y, 37 + tex * 19);
-                                        float noise2 = R_ParticleNoise (x, y, 61 + tex * 7);
-                                        alpha = powf (base, 1.9f) * (0.6f + 0.4f * noise1);
-                                        alpha += 0.25f * (noise2 - 0.5f) * base;
-                                        break;
-                                }
-
-                                case 2: // fire
-                                {
-                                        float stretch = 1.2f + 0.05f * variant;
-                                        float flame = q_max (0.f, 1.f - sqrtf (u * u + (v * stretch) * (v * stretch)) * 1.3f);
-                                        float bias = clamp (1.0f - (v + 0.4f), 0.0f, 1.0f);
-                                        float noise = R_ParticleNoise (x, y, 79 + tex * 11);
-                                        alpha = powf (flame, 2.1f) * (0.65f + 0.35f * noise) * bias;
-                                        break;
-                                }
-
-                                case 3: // sparks & beams
-                                {
-                                        float line = expf (-powf (v * (4.0f + variant * 0.6f), 2.0f));
-                                        float taper = q_max (0.f, 1.f - fabsf (u) * (0.8f + 0.12f * variant));
-                                        alpha = powf (line * taper, 1.1f);
-                                        break;
-                                }
-
-                                case 4: // bubbles
-                                {
-                                        float shell = expf (-powf ((radius - 0.32f) * (6.0f + variant), 2.0f));
-                                        float center = q_max (0.f, 1.f - radius * 2.2f);
-                                        alpha = q_min (1.f, shell * 0.75f + center * 0.25f);
-                                        break;
-                                }
-
-                                case 5: // blood splats
-                                {
-                                        float base = q_max (0.f, 1.f - radius * 1.45f);
-                                        float noise = R_ParticleNoise (x, y, 113 + tex * 17);
-                                        float noise2 = R_ParticleNoise (x, y, 167 + tex * 9);
-                                        alpha = powf (base, 1.05f + 0.08f * variant) * (0.7f + 0.3f * noise);
-                                        alpha += 0.2f * (noise2 - 0.5f) * base;
-                                        break;
-                                }
-
-                                case 6: // decals
-                                {
-                                        float ring = q_max (0.f, 1.f - powf (radius * 1.1f, 3.5f));
-                                        float noise = R_ParticleNoise (x, y, 191 + tex * 5);
-                                        alpha = ring * (0.9f + 0.1f * noise);
-                                        break;
-                                }
-
-                                default: // energy / noise
-                                {
-                                        float base = q_max (0.f, 1.f - radius * 1.15f);
-                                        float swirl = sinf ((u * (3.0f + variant) - v * (2.5f + variant)) * 5.0f);
-                                        float noise = R_ParticleNoise (x, y, 223 + tex * 3);
-                                        alpha = clamp (base * (0.55f + 0.45f * noise) + fabsf (swirl) * 0.15f, 0.f, 1.f);
-                                        break;
-                                }
-                                }
-
-                                alpha = q_clamp (alpha, 0.f, 1.f);
-                                intensity = alpha;
-
-                                const byte r = (byte)q_min (255, (int)(intensity * 255.f + 0.5f));
-                                const byte g = r;
-                                const byte b = r;
-                                const byte a = (byte)q_min (255, (int)(alpha * 255.f + 0.5f));
-
-                                const int pix = (y * atlas_width + atlas_x) * 4;
-                                data[pix + 0] = r;
-                                data[pix + 1] = g;
-                                data[pix + 2] = b;
-                                data[pix + 3] = a;
+                                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+                                        ext_width, ext_height, 1, ext_fmt,
+                                        ext_data, "particles/particlefont", 0,
+                                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                        }
+                        else
+                        {
+                                Con_Printf ("R_InitParticleAtlas: particles/particlefont has unexpected dimensions (%dx%d) or format\n",
+                                        ext_width, ext_height);
                         }
                 }
-	}
 
-	particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
-		atlas_width, atlas_height, 1, SRC_RGBA,
-		(byte*)data, "", 0,
-		TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                Hunk_FreeToLowMark (mark);
+        }
 
-	if (!particle_atlas) {
-		Con_Printf ("R_InitParticleAtlas: failed to create particle atlas\n");
-	}
+        if (!particle_atlas)
+        {
+                // RGBA8, byte-orientiert → unabhängig von Endianness
+                byte data[PARTICLE_ATLAS_WIDTH * PARTICLE_ATLAS_HEIGHT * 4];
+                int tex, y, x;
 
-	particle_atlas_tile_width = 1.0f / (float)NUM_PARTICLE_TEXTURES;
-	particle_atlas_tile_height = 1.0f;
-	particle_atlas_tile_margin = 0.5f / (float)PARTICLE_TEX_TILE_SIZE;
+                for (tex = 0; tex < NUM_PARTICLE_TEXTURES; tex++)
+                {
+                        for (y = 0; y < PARTICLE_TEX_TILE_SIZE; y++)
+                        {
+                                for (x = 0; x < PARTICLE_TEX_TILE_SIZE; x++)
+                                {
+                                        int atlas_x = tex * PARTICLE_TEX_TILE_SIZE + x;
+                                        int atlas_y = y;
+                                        float u = (float)x / (float)(PARTICLE_TEX_TILE_SIZE - 1);
+                                        float v = (float)y / (float)(PARTICLE_TEX_TILE_SIZE - 1);
+                                        float center_u = u - 0.5f;
+                                        float center_v = v - 0.5f;
+                                        float radius = sqrtf (center_u * center_u + center_v * center_v);
+                                        float intensity = 0.f;
+                                        float alpha = 0.f;
+                                        int variant = tex % PARTICLE_ATLAS_COLS;
+
+                                        switch (tex / PARTICLE_ATLAS_COLS)
+                                        {
+                                        case 0: // soft particles
+                                        {
+                                                float base = q_max (0.f, 1.f - radius * (1.0f + 0.12f * variant));
+                                                float noise = R_ParticleNoise (x, y, 43 + tex * 97);
+                                                float spike = sinf (radius * (10.f + variant * 2.f));
+                                                intensity = powf (base, 1.1f + 0.2f * variant);
+                                                alpha = q_clamp (intensity * (0.9f + 0.1f * noise) + spike * 0.03f, 0.f, 1.f);
+                                                break;
+                                        }
+
+                                        case 1: // glows / energy
+                                        {
+                                                float base = q_max (0.f, 1.f - radius * (0.85f + 0.12f * variant));
+                                                float swirl = sinf ((u * (3.0f + variant) - v * (2.5f + variant)) * 4.0f);
+                                                float noise = R_ParticleNoise (x, y, 59 + tex * 53);
+                                                intensity = base * (0.4f + 0.6f * noise) + fabsf (swirl) * 0.2f;
+                                                alpha = q_min (1.f, intensity * (0.8f + 0.2f * noise));
+                                                break;
+                                        }
+
+                                        case 2: // smoke / steam
+                                        {
+                                                float base = q_max (0.f, 1.f - radius * (0.95f + 0.1f * variant));
+                                                float noise = R_ParticleNoise (x, y, 73 + tex * 79);
+                                                float noise2 = R_ParticleNoise (x, y, 89 + tex * 31);
+                                                intensity = powf (base, 1.6f + 0.15f * variant) * (0.75f + 0.25f * noise);
+                                                alpha = intensity * (0.85f + 0.15f * noise2);
+                                                break;
+                                        }
+
+                                        case 3: // streaks / trails
+                                        {
+                                                float streak = q_max (0.f, 1.f - fabsf (u - 0.5f) * (18.f + 2.f * variant));
+                                                float noise = R_ParticleNoise (x, y, 101 + tex * 47);
+                                                float noise2 = R_ParticleNoise (x, y, 107 + tex * 13);
+                                                intensity = powf (streak, 2.0f) * (0.75f + 0.25f * noise);
+                                                alpha = intensity * (0.8f + 0.2f * noise2);
+                                                break;
+                                        }
+
+                                        case 4: // sparks
+                                        {
+                                                float spark = q_max (0.f, 1.f - radius * (1.2f + 0.1f * variant));
+                                                float noise = R_ParticleNoise (x, y, 109 + tex * 23);
+                                                float noise2 = R_ParticleNoise (x, y, 127 + tex * 11);
+                                                intensity = powf (spark, 0.8f + 0.1f * variant) * (0.6f + 0.4f * noise);
+                                                alpha = intensity * (0.7f + 0.3f * noise2);
+                                                break;
+                                        }
+
+                                        case 5: // blood splats
+                                        {
+                                                float base = q_max (0.f, 1.f - radius * 1.45f);
+                                                float noise = R_ParticleNoise (x, y, 113 + tex * 17);
+                                                float noise2 = R_ParticleNoise (x, y, 167 + tex * 9);
+                                                alpha = powf (base, 1.05f + 0.08f * variant) * (0.7f + 0.3f * noise);
+                                                alpha += 0.2f * (noise2 - 0.5f) * base;
+                                                break;
+                                        }
+
+                                        case 6: // decals
+                                        {
+                                                float ring = q_max (0.f, 1.f - powf (radius * 1.1f, 3.5f));
+                                                float noise = R_ParticleNoise (x, y, 191 + tex * 5);
+                                                alpha = ring * (0.9f + 0.1f * noise);
+                                                break;
+                                        }
+
+                                        default: // energy / noise
+                                        {
+                                                float base = q_max (0.f, 1.f - radius * 1.15f);
+                                                float swirl = sinf ((u * (3.0f + variant) - v * (2.5f + variant)) * 5.0f);
+                                                float noise = R_ParticleNoise (x, y, 223 + tex * 3);
+                                                alpha = clamp (base * (0.55f + 0.45f * noise) + fabsf (swirl) * 0.15f, 0.f, 1.f);
+                                                break;
+                                        }
+                                        }
+
+                                        alpha = q_clamp (alpha, 0.f, 1.f);
+                                        intensity = alpha;
+
+                                        const byte r = (byte)q_min (255, (int)(intensity * 255.f + 0.5f));
+                                        const byte g = r;
+                                        const byte b = r;
+                                        const byte a = (byte)q_min (255, (int)(alpha * 255.f + 0.5f));
+
+                                        const int pix = (y * atlas_width + atlas_x) * 4;
+                                        data[pix + 0] = r;
+                                        data[pix + 1] = g;
+                                        data[pix + 2] = b;
+                                        data[pix + 3] = a;
+                                }
+                        }
+                }
+
+                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+                        atlas_width, atlas_height, 1, SRC_RGBA,
+                        (byte*)data, "", 0,
+                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+
+                if (!particle_atlas) {
+                        Con_Printf ("R_InitParticleAtlas: failed to create particle atlas\n");
+                }
+        }
+
+        if (particle_atlas)
+        {
+                particle_atlas_tile_width = 1.0f / (float)NUM_PARTICLE_TEXTURES;
+                particle_atlas_tile_height = 1.0f;
+                particle_atlas_tile_margin = 0.5f / (float)PARTICLE_TEX_TILE_SIZE;
+        }
 }
+
 
 /*
 ===============
