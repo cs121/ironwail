@@ -1109,27 +1109,33 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 
 	if (diff & GLS_MASK_BLEND)
 	{
-		switch (mask & GLS_MASK_BLEND)
-		{
-			default:
-			case GLS_BLEND_OPAQUE:
-				glBlendFunc(GL_ONE, GL_ZERO);
-				break;
-			case GLS_BLEND_ALPHA_OIT:
-				if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
-				{
-					GL_BlendFunciFunc(0, GL_ONE, GL_ONE); // accum
-					GL_BlendFunciFunc(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
-					break;
-				}
-				// fallthrough!
-			case GLS_BLEND_ALPHA:
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-				break;
-			case GLS_BLEND_MULTIPLY:
-				glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-				break;
-		}
+                switch (mask & GLS_MASK_BLEND)
+                {
+                        default:
+                        case GLS_BLEND_OPAQUE:
+                                glBlendFunc(GL_ONE, GL_ZERO);
+                                break;
+                        case GLS_BLEND_ALPHA_OIT:
+                                if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
+                                {
+                                        GL_BlendFunciFunc(0, GL_ONE, GL_ONE); // accum
+                                        GL_BlendFunciFunc(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
+                                        break;
+                                }
+                                // fallthrough!
+                        case GLS_BLEND_ALPHA:
+                                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                                break;
+                        case GLS_BLEND_ADD:
+                                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                                break;
+                        case GLS_BLEND_INVMOD:
+                                glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+                                break;
+                        case GLS_BLEND_MULTIPLY:
+                                glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+                                break;
+                }
 	}
 
 	if (diff & GLS_MASK_CULL)
