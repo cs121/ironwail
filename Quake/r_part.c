@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+extern cvar_t sv_gravity;
+
 #define MAX_PARTICLES            16384   // default max # of particles at one
 //  time
 #define ABSOLUTE_MIN_PARTICLES   512     // no fewer than this no matter what's
@@ -1864,8 +1866,6 @@ void CL_RunParticles (void)
 	particle_t* p;
 	int             i, cur, active;
 	float           time1, time2, time3, dvel, frametime, grav;
-	extern  cvar_t  sv_gravity;
-
 	frametime = cl.time - cl.oldtime;
 	time3 = frametime * 15;
 	time2 = frametime * 10;
@@ -1932,7 +1932,7 @@ void CL_RunParticles (void)
                                         }
                                         else
                                         {
-                                                float backoff = VectorDot (vel, trace.plane.normal);
+                                                float backoff = DotProduct (vel, trace.plane.normal);
                                                 backoff *= (1.f + ext->bounce);
                                                 vel[0] -= backoff * trace.plane.normal[0];
                                                 vel[1] -= backoff * trace.plane.normal[1];
