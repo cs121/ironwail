@@ -17,78 +17,6 @@
     See file, 'COPYING', for details.
 */
 
-// ---- Particle effects from effectinfo.txt (DarkPlaces) ----
-float particleeffectnum(string name);
-void pointparticles(float effectnum, vector org, vector vel, float count);
-// Replaced undefined built-in trailparticles with our own trail follower
-.float trail_effectnum; // on helper entity
-.vector trail_lastorg;  // on helper entity
-void(entity ent, float effectnum) FX_AttachTrail;
-void() FX_TrailFollow;
-
-float FX_MUZZLE_SMOKE, FX_MUZZLE_SPARKS;
-
-// ---- Trail helper implementation (no engine builtin required) ----
-void() FX_TrailFollow =
-{
-	// self is the helper that follows self.owner and spawns particles between last and current positions
-	if (!self.owner)
-	{
-		remove(self);
-		return;
-	}
-
-	local vector from, to, delta, dir, pos;
-	local float dist, step, t;
-
-	from = self.trail_lastorg;
-	to = self.owner.origin;
-	delta = to - from;
-	dist = vlen(delta);
-
-	if (dist > 0)
-	{
-		dir = normalize(delta);
-		step = 12; // spawn every ~12 units along the path
-		t = 0;
-		while (t < dist)
-		{
-			pos = from + dir * t;
-			pointparticles(self.trail_effectnum, pos, '0 0 0', 1);
-			t = t + step;
-		}
-	}
-
-	self.trail_lastorg = to;
-	self.nextthink = time + 0.05;
-	self.think = FX_TrailFollow;
-};
-
-void(entity ent, float effectnum) FX_AttachTrail =
-{
-	local entity fx;
-	fx = spawn();
-	fx.classname = "fx_trail";
-	fx.owner = ent;
-	fx.trail_effectnum = effectnum;
-	fx.trail_lastorg = ent.origin;
-	fx.think = FX_TrailFollow;
-	fx.nextthink = time + 0.05;
-};
-
-float FX_ROCKET_TRAIL_SMOKE, FX_ROCKET_TRAIL_EMBERS;
-float FX_GRENADE_TRAIL, FX_NAIL_TRAIL;
-float FX_IMPACT_STONE, FX_BLOOD_MIST;
-float FX_SPARK_SHOWER, FX_DUST_CLOUD;
-float FX_LIGHTNING_RESIDUAL;
-
-// helper: spawn a point effect at a position with optional velocity
-void(vector org, vector vel, float fx, float count) FX_Point =
-{
-    if (fx) pointparticles(fx, org, vel, count);
-};
-
-
 void (entity targ, entity inflictor, entity attacker, float damage) T_Damage;
 void () player_run;
 void(entity bomb, entity attacker, float rad, entity ignore) T_RadiusDamage;
@@ -99,20 +27,7 @@ void() SuperDamageSound;
 // called by worldspawn
 void() W_Precache =
 {
-	
-    // particle effects
-    FX_MUZZLE_SMOKE = particleeffectnum("fx_muzzle_smoke");
-    FX_MUZZLE_SPARKS = particleeffectnum("fx_muzzle_sparks");
-    FX_ROCKET_TRAIL_SMOKE = particleeffectnum("fx_rocket_trail_smoke");
-    FX_ROCKET_TRAIL_EMBERS = particleeffectnum("fx_rocket_trail_embers");
-    FX_GRENADE_TRAIL = particleeffectnum("fx_grenade_trail");
-    FX_NAIL_TRAIL = particleeffectnum("fx_nail_trail");
-    FX_IMPACT_STONE = particleeffectnum("fx_impact_stone");
-    FX_BLOOD_MIST = particleeffectnum("fx_blood_mist");
-    FX_SPARK_SHOWER = particleeffectnum("fx_spark_shower");
-    FX_DUST_CLOUD = particleeffectnum("fx_dust_cloud");
-    FX_LIGHTNING_RESIDUAL = particleeffectnum("fx_lightning_residual");
-precache_sound ("weapons/r_exp3.wav");	// new rocket explosion
+	precache_sound ("weapons/r_exp3.wav");	// new rocket explosion
 	precache_sound ("weapons/rocket1i.wav");	// spike gun
 	precache_sound ("weapons/sgun1.wav");
 	precache_sound ("weapons/guncock.wav");	// player shotgun
@@ -317,10 +232,7 @@ void(float damage, vector dir) TraceAttack =
 	{
 		SpawnBlood (org, vel*0.2, damage);
 		AddMultiDamage (trace_ent, damage);
-	
-		// stone impact effect
-		FX_Point(self.origin, '0 0 0', FX_IMPACT_STONE, 1);
-}
+	}
 	else
 	{
 		WriteByte (MSG_BROADCAST, SVC_TEMPENTITY);
@@ -372,15 +284,7 @@ void() W_FireShotgun =
 {
 	local vector dir;
 
-	sound (self, CHAN_WEAPON, "weapons/guncock.wav", 1, ATTN_NORM);
-    // muzzle effects
-    makevectors (self.v_angle);
-    {
-        vector muzzle = self.origin + v_forward*18 + v_right*2 + '0 0 16';
-        FX_Point(muzzle, v_forward*80, FX_MUZZLE_SMOKE, 1);
-        FX_Point(muzzle, v_forward*120, FX_MUZZLE_SPARKS, 1);
-    }
-	
+	sound (self, CHAN_WEAPON, "weapons/guncock.wav", 1, ATTN_NORM);	
 	//stuffcmd (self, "vibrate tactile/weapons/guncock.bnvib");
 
 	self.punchangle_x = -2;
@@ -406,15 +310,7 @@ void() W_FireSuperShotgun =
 		return;
 	}
 		
-	sound (self ,CHAN_WEAPON, "weapons/shotgn2.wav", 1, ATTN_NORM);
-    // muzzle effects
-    makevectors (self.v_angle);
-    {
-        vector muzzle = self.origin + v_forward*18 + v_right*2 + '0 0 16';
-        FX_Point(muzzle, v_forward*80, FX_MUZZLE_SMOKE, 1);
-        FX_Point(muzzle, v_forward*120, FX_MUZZLE_SPARKS, 1);
-    }
-	
+	sound (self ,CHAN_WEAPON, "weapons/shotgn2.wav", 1, ATTN_NORM);	
 	//stuffcmd (self, "vibrate tactile/weapons/shotgn2.bnvib");
 
 	self.punchangle_x = -4;
@@ -484,12 +380,7 @@ void() T_MissileTouch =
 	WriteCoord (MSG_BROADCAST, self.origin_y);
 	WriteCoord (MSG_BROADCAST, self.origin_z);
 
-	
-    // explosion debris/sparks particle burst
-    FX_Point(self.origin, '0 0 0', FX_SPARK_SHOWER, 1);
-    FX_Point(self.origin, '0 0 0', FX_DUST_CLOUD, 1);
-
-BecomeExplosion ();
+	BecomeExplosion ();
 };
 
 
@@ -516,11 +407,7 @@ void() W_FireRocket =
 	missile.solid = SOLID_BBOX;
 	missile.classname = "missile";
 		
-	
-    // attach rocket trail
-    FX_AttachTrail(missile, FX_ROCKET_TRAIL_SMOKE);
-    FX_AttachTrail(missile, FX_ROCKET_TRAIL_EMBERS);
-// set missile speed	
+	// set missile speed	
 	makevectors (self.v_angle);
 	missile.velocity = aim(self, 1000);
 	missile.velocity = missile.velocity * 1000;
@@ -699,9 +586,6 @@ void() W_FireGrenade =
 	missile.solid = SOLID_BBOX;
 	missile.classname = "grenade";
 		
-
-    // attach grenade smoke puffs
-    FX_AttachTrail(missile, FX_GRENADE_TRAIL);
 // set missile speed	
 
 	makevectors (self.v_angle);
@@ -758,10 +642,7 @@ void(vector org, vector dir) launch_spike =
 	newmis.think = SUB_Remove;
 	newmis.nextthink = time + 6;
 	setmodel (newmis, "progs/spike.mdl");
-	
-	// attach nail trail
-	FX_AttachTrail(newmis, FX_NAIL_TRAIL);
-setsize (newmis, VEC_ORIGIN, VEC_ORIGIN);		
+	setsize (newmis, VEC_ORIGIN, VEC_ORIGIN);		
 	setorigin (newmis, org);
 
 	newmis.velocity = dir * 1000;
@@ -831,10 +712,7 @@ void() spike_touch =
 	if (other.takedamage)
 	{
 		spawn_touchblood (9);
-		
-		// blood mist effect
-		FX_Point(self.origin, '0 0 0', FX_BLOOD_MIST, 1);
-T_Damage (other, self, self.owner, 9);
+		T_Damage (other, self, self.owner, 9);
 	}
 
 	else
