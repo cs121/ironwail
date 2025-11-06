@@ -45,8 +45,8 @@ if not defined MSBUILD (
   exit /b 2
 )
 
-echo [2/6] Build "%SLN%" (Release x64)...
-"%MSBUILD%" "%SLN%" /t:Build /p:Configuration=Release;Platform=x64 /m /v:m
+echo [2/6] Clean + Build "%SLN%" (Release x64)...
+"%MSBUILD%" "%SLN%" /t:Clean;Build /p:Configuration=Release;Platform=x64 /m /v:m
 if errorlevel 1 (
   echo [ERROR] Build fehlgeschlagen.
   exit /b 3
