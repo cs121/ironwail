@@ -505,7 +505,9 @@ void SV_DropClient (qboolean crash)
 	int		i;
 	client_t *client;
 
-	if (!crash)
+    	SV_Bot_ClientDisconnected (host_client);
+
+	if (!crash && host_client->netconnection)
 	{
 		// send any final messages (don't check for errors)
 		if (NET_CanSendMessage (host_client->netconnection))
@@ -554,14 +556,18 @@ void SV_DropClient (qboolean crash)
 	}
 
 // break the net connection
-	NET_Close (host_client->netconnection);
-	host_client->netconnection = NULL;
+	if (host_client->netconnection)
+	{
+		NET_Close (host_client->netconnection);
+		host_client->netconnection = NULL;
+	}
 
 // free the client (the body stays around)
 	host_client->active = false;
 	host_client->name[0] = 0;
 	host_client->old_frags = -999999;
-	net_activeconnections--;
+	if (!host_client->isbot && net_activeconnections > 0)
+		net_activeconnections--;
 
 // send notification to all clients
 	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
