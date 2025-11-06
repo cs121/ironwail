@@ -200,12 +200,15 @@ static qboolean SV_Bot_SpawnOne (void)
 	client_t *saved_client;
 	edict_t *saved_player;
 	cmd_source_t saved_source;
+	qcvm_t *oldqcvm = NULL;
+	qboolean pushed_vm = false;
+	qboolean success = false;
 	int slot;
 
 	if (!sv.active || sv.state != ss_active)
 	{
 		Con_Printf ("Cannot spawn bot: server is not active.\n");
-		return false;
+		goto cleanup;
 	}
 
 	for (slot = 0; slot < svs.maxclients; slot++)
@@ -217,8 +220,11 @@ static qboolean SV_Bot_SpawnOne (void)
 	if (slot == svs.maxclients)
 	{
 		Con_Printf ("No free client slots for bot.\n");
-		return false;
+		goto cleanup;
 	}
+
+	PR_PushQCVM (&sv.qcvm, &oldqcvm);
+	pushed_vm = true;
 
 	client = &svs.clients[slot];
 	client->netconnection = NULL;
@@ -270,7 +276,13 @@ static qboolean SV_Bot_SpawnOne (void)
 
 	SV_BroadcastPrintf ("%s has spawned.\n", client->name);
 
-	return true;
+	success = true;
+
+cleanup:
+	if (pushed_vm)
+		PR_PopQCVM (oldqcvm);
+
+	return success;
 }
 
 static qboolean SV_Bot_RemoveOne (void)
