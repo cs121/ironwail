@@ -272,7 +272,7 @@ void() sham_magic3     =[      $magic3,       sham_magic4    ] {
 	ai_face();
 	self.owner = spawn();
 	o = self.owner;
-	setmodel (o, "progs/s_light.mdl");
+	setmodel (o, "progs/s_light");
 	setorigin (o, self.origin);
 	o.angles = self.angles;
 	o.nextthink = time + 0.7;
@@ -365,10 +365,10 @@ void() sham_die =
 	if (self.health < -60)
 	{
 		sound (self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
-		ThrowHead ("progs/h_shams.mdl", self.health);
-		ThrowGib ("progs/gib1.mdl", self.health);
-		ThrowGib ("progs/gib2.mdl", self.health);
-		ThrowGib ("progs/gib3.mdl", self.health);
+		ThrowHead ("progs/h_shams", self.health);
+		ThrowGib ("progs/gib1", self.health);
+		ThrowGib ("progs/gib2", self.health);
+		ThrowGib ("progs/gib3", self.health);
 		return;
 	}
 
@@ -390,10 +390,10 @@ void() monster_shambler =
 		return;
 	}
 
-	precache_model ("progs/shambler.mdl");
-	precache_model ("progs/s_light.mdl");
-	precache_model ("progs/h_shams.mdl");
-	precache_model ("progs/bolt.mdl");
+	precache_model ("progs/shambler");
+	precache_model ("progs/s_light");
+	precache_model ("progs/h_shams");
+	precache_model ("progs/bolt");
 	
 	precache_sound ("shambler/sattck1.wav");
 	precache_sound ("shambler/sboom.wav");
@@ -407,7 +407,7 @@ void() monster_shambler =
 
 	self.solid = SOLID_SLIDEBOX;
 	self.movetype = MOVETYPE_STEP;
-	setmodel (self, "progs/shambler.mdl");
+	setmodel (self, "progs/shambler");
 	
 	self.noise = "shambler/ssight.wav";
 	self.netname = "$qc_shambler";

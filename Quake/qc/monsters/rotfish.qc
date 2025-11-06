@@ -187,7 +187,7 @@ void() monster_fish =
 		return;
 	}
 	
-	precache_model2 ("progs/fish.mdl");
+	precache_model2 ("progs/fish");
 
 	precache_sound2 ("fish/death.wav");
 	precache_sound2 ("fish/bite.wav");
@@ -196,7 +196,7 @@ void() monster_fish =
 	self.solid = SOLID_SLIDEBOX;
 	self.movetype = MOVETYPE_STEP;
 
-	setmodel (self, "progs/fish.mdl");
+	setmodel (self, "progs/fish");
 
 	self.netname = "$qc_rotfish";
 	self.noise = "fish/idle.wav";

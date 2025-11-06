@@ -259,7 +259,7 @@ void(vector p) boss_missile =
 
 	launch_spike (org, vec);
 	newmis.classname = "chthon_lavaball";
-	setmodel (newmis, "progs/lavaball.mdl");
+	setmodel (newmis, "progs/lavaball");
 	newmis.avelocity = '200 100 300';
 	setsize (newmis, VEC_ORIGIN, VEC_ORIGIN);		
 	newmis.velocity = vec*300;
@@ -278,7 +278,7 @@ void() boss_awake =
 	self.movetype = MOVETYPE_STEP;
 	self.takedamage = DAMAGE_NO;
 	
-	setmodel (self, "progs/boss.mdl");
+	setmodel (self, "progs/boss");
 
 	self.netname = "$qc_chthon";
 	self.killstring = "$qc_ks_chthon";
@@ -314,8 +314,8 @@ void() monster_boss =
 		return;
 	}
 
-	precache_model ("progs/boss.mdl");
-	precache_model ("progs/lavaball.mdl");
+	precache_model ("progs/boss");
+	precache_model ("progs/lavaball");
 
 	precache_sound ("weapons/rocket1i.wav");
 	precache_sound ("boss1/out1.wav");

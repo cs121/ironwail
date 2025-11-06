@@ -140,8 +140,8 @@ Default style is 0
 */
 void() light_torch_small_walltorch =
 {
-	precache_model ("progs/flame.mdl");
-	setmodel (self, "progs/flame.mdl");
+	precache_model ("progs/flame");
+	setmodel (self, "progs/flame");
 	FireAmbient ();
 	makestatic (self);
 };
@@ -151,8 +151,8 @@ Large yellow flame ball
 */
 void() light_flame_large_yellow =
 {
-	precache_model ("progs/flame2.mdl");
-	setmodel (self, "progs/flame2.mdl");
+	precache_model ("progs/flame2");
+	setmodel (self, "progs/flame2");
 	self.frame = 1;
 	FireAmbient ();
 	makestatic (self);
@@ -163,8 +163,8 @@ Small yellow flame ball
 */
 void() light_flame_small_yellow =
 {
-	precache_model ("progs/flame2.mdl");
-	setmodel (self, "progs/flame2.mdl");
+	precache_model ("progs/flame2");
+	setmodel (self, "progs/flame2");
 	FireAmbient ();
 	makestatic (self);
 };
@@ -174,8 +174,8 @@ Small white flame ball
 */
 void() light_flame_small_white =
 {
-	precache_model ("progs/flame2.mdl");
-	setmodel (self, "progs/flame2.mdl");
+	precache_model ("progs/flame2");
+	setmodel (self, "progs/flame2");
 	FireAmbient ();
 	makestatic (self);
 };
@@ -191,7 +191,7 @@ void() fire_fly;
 void() fire_touch;
 void() misc_fireball =
 {	
-	precache_model ("progs/lavaball.mdl");
+	precache_model ("progs/lavaball");
 	self.classname = "fireball";
 	self.nextthink = time + (random() * 5);
 	self.think = fire_fly;
@@ -214,7 +214,7 @@ void() fire_fly =
 	fireball.velocity_y = (random() * 100) - 50;
 	fireball.velocity_z = self.speed + (random() * 200);
 	fireball.classname = "fireball";
-	setmodel (fireball, "progs/lavaball.mdl");
+	setmodel (fireball, "progs/lavaball");
 	setsize (fireball, '0 0 0', '0 0 0');
 	setorigin (fireball, self.origin);
 	fireball.nextthink = time + 5;
@@ -352,7 +352,7 @@ void() trap_spikeshooter =
 
 	if (self.spawnflags & SPAWNFLAG_LASER)
 	{
-		precache_model2 ("progs/laser.mdl");
+		precache_model2 ("progs/laser");
 		
 		precache_sound2 ("enforcer/enfire.wav");
 		precache_sound2 ("enforcer/enfstop.wav");
@@ -516,8 +516,8 @@ void() viewthing =
 {
 	self.movetype = MOVETYPE_NONE;
 	self.solid = SOLID_NOT;
-	precache_model ("progs/player.mdl");
-	setmodel (self, "progs/player.mdl");
+	precache_model ("progs/player");
+	setmodel (self, "progs/player");
 };
 
 

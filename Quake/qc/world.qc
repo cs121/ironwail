@@ -277,39 +277,39 @@ void() worldspawn =
 	precache_sound ("misc/water1.wav");			// swimming
 	precache_sound ("misc/water2.wav");			// swimming
 
-	precache_model ("progs/player.mdl");
-	precache_model ("progs/eyes.mdl");
-	precache_model ("progs/h_player.mdl");
-	precache_model ("progs/gib1.mdl");
-	precache_model ("progs/gib2.mdl");
-	precache_model ("progs/gib3.mdl");
+	precache_model ("progs/player");
+	precache_model ("progs/eyes");
+	precache_model ("progs/h_player");
+	precache_model ("progs/gib1");
+	precache_model ("progs/gib2");
+	precache_model ("progs/gib3");
 
 	precache_model ("progs/s_bubble.spr");	// drowning bubbles
 	precache_model ("progs/s_explod.spr");	// sprite explosion
 
-	precache_model ("progs/v_axe.mdl");
-	precache_model ("progs/v_shot.mdl");
-	precache_model ("progs/v_nail.mdl");
-	precache_model ("progs/v_rock.mdl");
-	precache_model ("progs/v_shot2.mdl");
-	precache_model ("progs/v_nail2.mdl");
-	precache_model ("progs/v_rock2.mdl");
+	precache_model ("progs/v_axe");
+	precache_model ("progs/v_shot");
+	precache_model ("progs/v_nail");
+	precache_model ("progs/v_rock");
+	precache_model ("progs/v_shot2");
+	precache_model ("progs/v_nail2");
+	precache_model ("progs/v_rock2");
 
-	precache_model ("progs/bolt.mdl");		// for lightning gun
-	precache_model ("progs/bolt2.mdl");		// for lightning gun
-	precache_model ("progs/bolt3.mdl");		// for boss shock
-	precache_model ("progs/lavaball.mdl");	// for testing
+	precache_model ("progs/bolt");		// for lightning gun
+	precache_model ("progs/bolt2");		// for lightning gun
+	precache_model ("progs/bolt3");		// for boss shock
+	precache_model ("progs/lavaball");	// for testing
 	
-	precache_model ("progs/missile.mdl");
-	precache_model ("progs/grenade.mdl");
-	precache_model ("progs/spike.mdl");
-	precache_model ("progs/s_spike.mdl");
+	precache_model ("progs/missile");
+	precache_model ("progs/grenade");
+	precache_model ("progs/spike");
+	precache_model ("progs/s_spike");
 
-	precache_model ("progs/backpack.mdl");
+	precache_model ("progs/backpack");
 
-	precache_model ("progs/zom_gib.mdl");
+	precache_model ("progs/zom_gib");
 
-	precache_model ("progs/v_light.mdl");
+	precache_model ("progs/v_light");
 	
 
 //

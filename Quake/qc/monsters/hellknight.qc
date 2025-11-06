@@ -93,7 +93,7 @@ void(float offset) hknight_shot =
 	
 	launch_spike (org, vec);
 	newmis.classname = "knight_spike";
-	setmodel (newmis, "progs/k_spike.mdl");
+	setmodel (newmis, "progs/k_spike");
 	setsize (newmis, VEC_ORIGIN, VEC_ORIGIN);		
 	newmis.velocity = vec*300;
 	if (cvar("pr_checkextension"))
@@ -238,10 +238,10 @@ void() hknight_die =
 	if (self.health < -40)
 	{
 		sound (self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
-		ThrowHead ("progs/h_hellkn.mdl", self.health);
-		ThrowGib ("progs/gib1.mdl", self.health);
-		ThrowGib ("progs/gib2.mdl", self.health);
-		ThrowGib ("progs/gib3.mdl", self.health);
+		ThrowHead ("progs/h_hellkn", self.health);
+		ThrowGib ("progs/gib1", self.health);
+		ThrowGib ("progs/gib2", self.health);
+		ThrowGib ("progs/gib3", self.health);
 		return;
 	}
 
@@ -443,9 +443,9 @@ void() monster_hell_knight =
 		return;
 	}
 
-	precache_model2 ("progs/hknight.mdl");
-	precache_model2 ("progs/k_spike.mdl");
-	precache_model2 ("progs/h_hellkn.mdl");
+	precache_model2 ("progs/hknight");
+	precache_model2 ("progs/k_spike");
+	precache_model2 ("progs/h_hellkn");
 
 	
 	precache_sound2 ("hknight/attack1.wav");
@@ -463,7 +463,7 @@ void() monster_hell_knight =
 	self.solid = SOLID_SLIDEBOX;
 	self.movetype = MOVETYPE_STEP;
 
-	setmodel (self, "progs/hknight.mdl");
+	setmodel (self, "progs/hknight");
 
 	self.noise = "hknight/sight1.wav";
 	self.netname = "$qc_death_knight";

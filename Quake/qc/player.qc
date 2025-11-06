@@ -556,10 +556,10 @@ void(string gibname, float dm) ThrowHead =
 
 void() GibPlayer =
 {
-	ThrowHead ("progs/h_player.mdl", self.health);
-	ThrowGib ("progs/gib1.mdl", self.health);
-	ThrowGib ("progs/gib2.mdl", self.health);
-	ThrowGib ("progs/gib3.mdl", self.health);
+	ThrowHead ("progs/h_player", self.health);
+	ThrowGib ("progs/gib1", self.health);
+	ThrowGib ("progs/gib2", self.health);
+	ThrowGib ("progs/gib3", self.health);
 
 	self.deadflag = DEAD_DEAD;
 
@@ -640,7 +640,7 @@ void() PlayerDie =
 void() set_suicide_frame =
 {	// used by klill command and diconnect command
 
-	if (self.model != "progs/player.mdl")
+	if (self.model != "progs/player")
 		return;	// allready gibbed
 
 	self.frame = $deatha11;

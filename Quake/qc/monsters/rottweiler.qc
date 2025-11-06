@@ -255,10 +255,10 @@ void() dog_die =
 	if (self.health < -35)
 	{
 		sound (self, CHAN_VOICE, "player/udeath.wav", 1, ATTN_NORM);
-		ThrowGib ("progs/gib3.mdl", self.health);
-		ThrowGib ("progs/gib3.mdl", self.health);
-		ThrowGib ("progs/gib3.mdl", self.health);
-		ThrowHead ("progs/h_dog.mdl", self.health);
+		ThrowGib ("progs/gib3", self.health);
+		ThrowGib ("progs/gib3", self.health);
+		ThrowGib ("progs/gib3", self.health);
+		ThrowHead ("progs/h_dog", self.health);
 		return;
 	}
 
@@ -352,8 +352,8 @@ void() monster_dog =
 		remove(self);
 		return;
 	}
-	precache_model ("progs/h_dog.mdl");
-	precache_model ("progs/dog.mdl");
+	precache_model ("progs/h_dog");
+	precache_model ("progs/dog");
 
 	precache_sound ("dog/dattack1.wav");
 	precache_sound ("dog/ddeath.wav");
@@ -364,7 +364,7 @@ void() monster_dog =
 	self.solid = SOLID_SLIDEBOX;
 	self.movetype = MOVETYPE_STEP;
 
-	setmodel (self, "progs/dog.mdl");
+	setmodel (self, "progs/dog");
 
 	self.noise = "dog/dsight.wav";	
 	self.netname = "$qc_rottweiler";
