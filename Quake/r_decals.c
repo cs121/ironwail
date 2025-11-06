@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <string.h>
 #include <stdlib.h>
 
-static const int R_DECAL_INITIAL_CAPACITY = 256;
 static const int R_DECAL_CAP_MAX = 16384;
 #define DECAL_TEXTURE_SIZE      64
 #define DECAL_OFFSET            0.25f
@@ -129,6 +128,7 @@ static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
+static cvar_t    r_decals_pool_cvar = {"r_decals_pool", "4096", CVAR_ARCHIVE};
 
 extern vec3_t lightcolor;
 
@@ -137,10 +137,32 @@ static double r_last_gib_decal_time = -9999.0;
 static vec3_t r_last_gib_decal_origin = {0.f, 0.f, 0.f};
 static int r_active_decal_count = 0;
 
+static int R_GetDecalPoolCapacity (void)
+{
+        int pool = (int)r_decals_pool_cvar.value;
+
+        if (pool < 0)
+                pool = 0;
+        if (pool > R_DECAL_CAP_MAX)
+                pool = R_DECAL_CAP_MAX;
+
+        return pool;
+}
+
 static void R_ReserveDecalStorage (int desired)
 {
         size_t old_capacity = (size_t) r_decal_capacity;
         int new_capacity;
+        int pool_limit = R_GetDecalPoolCapacity ();
+
+        if (desired > pool_limit)
+                desired = pool_limit;
+
+        if (desired <= 0)
+        {
+                r_decal_capacity = 0;
+                return;
+        }
 
         if (desired > R_DECAL_CAP_MAX)
                 desired = R_DECAL_CAP_MAX;
@@ -149,12 +171,12 @@ static void R_ReserveDecalStorage (int desired)
                 return;
 
         if (r_decal_capacity <= 0)
-                new_capacity = R_DECAL_INITIAL_CAPACITY;
+                new_capacity = desired;
         else
                 new_capacity = r_decal_capacity;
 
         if (new_capacity <= 0)
-                new_capacity = R_DECAL_INITIAL_CAPACITY;
+                new_capacity = desired;
 
         while (new_capacity < desired && new_capacity < R_DECAL_CAP_MAX)
         {
@@ -216,6 +238,10 @@ static void R_ReserveDecalStorage (int desired)
 static int R_GetDecalLimit (void)
 {
         int desired = (int) CLAMP (0, r_decals_max_cvar.value, (float) R_DECAL_CAP_MAX);
+        int pool_limit = R_GetDecalPoolCapacity ();
+
+        if (desired > pool_limit)
+                desired = pool_limit;
 
         if (r_decals_max_cvar.value > (float) R_DECAL_CAP_MAX)
                 Cvar_SetValueQuick (&r_decals_max_cvar, (float) R_DECAL_CAP_MAX);
@@ -495,14 +521,19 @@ static void R_GenerateDecalTexture (decaltype_t type)
 void R_InitDecals (void)
 {
         int i;
+        int pool_capacity;
 
         Cvar_RegisterVariable (&r_decals_cvar);
         Cvar_RegisterVariable (&r_decals_blood_cvar);
         Cvar_RegisterVariable (&r_decals_bullet_cvar);
         Cvar_RegisterVariable (&r_decals_max_cvar);
         Cvar_RegisterVariable (&r_decals_debug_cvar);
+        Cvar_RegisterVariable (&r_decals_pool_cvar);
 
-        R_ReserveDecalStorage (R_DECAL_INITIAL_CAPACITY);
+        pool_capacity = R_GetDecalPoolCapacity ();
+
+        if (pool_capacity > 0)
+                R_ReserveDecalStorage (pool_capacity);
 
         for (i = 0; i < DECAL_COUNT; i++)
                 R_GenerateDecalTexture ((decaltype_t)i);
