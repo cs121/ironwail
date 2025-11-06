@@ -163,6 +163,8 @@ static int                   num_effect_emitters;
 static qboolean              effectinfo_active;
 static char                  effectinfo_source[MAX_OSPATH];
 
+static cvar_t        r_particles_debug = { "r_particles_debug", "0", 0 };
+
 static particle_t* R_AllocParticle (void);
 
 static float uvscale;
@@ -263,6 +265,88 @@ static effectinfo_t* R_Effectinfo_GetOrCreate (const char* name)
         def->num_emitters = 0;
         effectinfo_active = true;
         return def;
+}
+
+static const char* R_Effectinfo_TypeName (effecttype_t type)
+{
+        static const char* names[] =
+        {
+                "alphastatic",
+                "static",
+                "spark",
+                "beam",
+                "bubble",
+                "blood",
+                "smoke",
+                "decal",
+                "entity",
+                "generic"
+        };
+        if ((unsigned)type < Q_COUNTOF (names))
+                return names[(int)type];
+        return "unknown";
+}
+
+static const char* R_Effectinfo_BlendName (effectblend_t blend)
+{
+        switch (blend)
+        {
+        case EFFECT_BLEND_DEFAULT:       return "default";
+        case EFFECT_BLEND_ALPHA:         return "alpha";
+        case EFFECT_BLEND_ADD:           return "add";
+        case EFFECT_BLEND_INVMOD:        return "invmod";
+        default:                         return "unknown";
+        }
+}
+
+static const char* R_Effectinfo_OrientName (effectorient_t orient)
+{
+        switch (orient)
+        {
+        case EFFECT_ORIENT_DEFAULT:      return "default";
+        case EFFECT_ORIENT_BILLBOARD:    return "billboard";
+        case EFFECT_ORIENT_ORIENTED:     return "oriented";
+        case EFFECT_ORIENT_BEAM:         return "beam";
+        case EFFECT_ORIENT_SPARK:        return "spark";
+        default:                         return "unknown";
+        }
+}
+
+static void R_Effectinfo_DebugPrintLoaded (void)
+{
+        int i, j;
+
+        if (!r_particles_debug.value)
+                return;
+
+        Con_Printf ("effectinfo debug: %d effects (%d emitters) loaded from %s\n",
+                num_effectinfos, num_effect_emitters,
+                effectinfo_source[0] ? effectinfo_source : "effectinfo.txt");
+
+        for (i = 0; i < num_effectinfos; ++i)
+        {
+                const effectinfo_t* def = &effect_defs[i];
+                Con_Printf ("  %2d: %s (%d emitters)\n", i, def->name[0] ? def->name : "<unnamed>", def->num_emitters);
+                for (j = 0; j < def->num_emitters; ++j)
+                {
+                        const effect_emitter_t* emit = &effect_emitters[def->first_emitter + j];
+                        Con_Printf ("      emitter %d: type=%s blend=%s orient=%s count=%d scale=%.2f tex=%d-%d size=%.1f-%.1f time=%.2f-%.2f alpha=%.2f-%.2f\n",
+                                j,
+                                R_Effectinfo_TypeName (emit->type),
+                                R_Effectinfo_BlendName (emit->blend),
+                                R_Effectinfo_OrientName (emit->orient),
+                                emit->count,
+                                emit->count_scale,
+                                emit->tex_min,
+                                emit->tex_max,
+                                emit->size_min,
+                                emit->size_max,
+                                emit->time_min,
+                                emit->time_max,
+                                emit->alpha_min,
+                                emit->alpha_max);
+                }
+        }
 }
 
 static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
@@ -935,6 +1019,7 @@ static void R_Effectinfo_Load (void)
         R_Effectinfo_FinalizeEmitters ();
         q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
         Con_Printf ("Loaded %d particle effects (%d emitters) from %s\n", num_effectinfos, num_effect_emitters, effectinfo_source);
+        R_Effectinfo_DebugPrintLoaded ();
 }
 
 static void R_Effectinfo_BuildBasis (const vec3_t dir, vec3_t forward, vec3_t right, vec3_t up)
@@ -1142,8 +1227,19 @@ static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t 
         int i;
         qboolean spawned = false;
 
-        if (!def || def->num_emitters <= 0)
+        if (!def)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: attempted to spawn a NULL particle effect\n");
                 return false;
+        }
+
+        if (def->num_emitters <= 0)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: particle effect '%s' has no emitters\n", def->name);
+                return false;
+        }
 
         for (i = 0; i < def->num_emitters; ++i)
         {
@@ -1151,6 +1247,9 @@ static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t 
                 if (R_Effectinfo_SpawnEmitter (emit, org, dir, count_scale))
                         spawned = true;
         }
+
+        if (!spawned && r_particles_debug.value)
+                Con_Printf ("effectinfo debug: particle effect '%s' produced no particles\n", def->name);
 
         return spawned;
 }
@@ -1397,7 +1496,8 @@ void R_InitParticles (void)
 		Hunk_AllocName (r_numparticles * sizeof (particle_t), "particles");
 	r_numactiveparticles = 0;
 
-	Cvar_RegisterVariable (&r_particles); //johnfitz
+        Cvar_RegisterVariable (&r_particles); //johnfitz
+        Cvar_RegisterVariable (&r_particles_debug);
         Cvar_SetCallback (&r_particles, R_SetParticleTexture_f);
         R_SetParticleTexture_f (&r_particles); // set default
 
@@ -2369,17 +2469,45 @@ int R_Effectinfo_Index (const char *name)
 qboolean R_Effectinfo_SpawnIndex (int index, const vec3_t org, const vec3_t dir, float count)
 {
         if (!effectinfo_active)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: attempted to spawn effect index %d but effectinfo is inactive\n", index);
                 return false;
+        }
         if (index < 0 || index >= num_effectinfos)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: particle effect index %d is out of range (max %d)\n", index, num_effectinfos > 0 ? num_effectinfos - 1 : 0);
                 return false;
+        }
         return R_Effectinfo_SpawnEffect (&effect_defs[index], org, dir, count);
 }
 
 qboolean R_Effectinfo_SpawnName (const char *name, const vec3_t org, const vec3_t dir, float count)
 {
-        effectinfo_t *def = R_Effectinfo_FindDef (name);
-        if (!def)
+        effectinfo_t *def;
+
+        if (!effectinfo_active)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: attempted to spawn effect '%s' but effectinfo is inactive\n", name ? name : "(null)");
                 return false;
+        }
+
+        if (!name || !*name)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: attempted to spawn effect with empty name\n");
+                return false;
+        }
+
+        def = R_Effectinfo_FindDef (name);
+        if (!def)
+        {
+                if (r_particles_debug.value)
+                        Con_Printf ("effectinfo debug: particle effect '%s' not found in %s\n", name, effectinfo_source[0] ? effectinfo_source : "effectinfo.txt");
+                return false;
+        }
         return R_Effectinfo_SpawnEffect (def, org, dir, count);
 }
 
