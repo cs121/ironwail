@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "renderer/r_iwshader.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -460,8 +461,16 @@ void R_Init (void)
 	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
-	Sky_Init (); //johnfitz
-	Fog_Init (); //johnfitz
+        Sky_Init (); //johnfitz
+        Fog_Init (); //johnfitz
+
+        IW_ShaderSystem_Init ();
+        if (com_gamedir[0])
+        {
+                char shaderdir[MAX_OSPATH];
+                q_snprintf (shaderdir, sizeof(shaderdir), "%s/shaders", com_gamedir);
+                IW_LoadShaderDirectory (shaderdir);
+        }
 }
 
 /*

@@ -45,6 +45,9 @@ target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
 
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c)
+list(APPEND IWAIL_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
