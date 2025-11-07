@@ -187,6 +187,94 @@ static char                  effectinfo_source[MAX_OSPATH];
 
 static cvar_t        r_particles_debug = { "r_particles_debug", "0", 0 };
 
+typedef enum effectnameindex_s
+{
+        EFFECT_NONE,
+        EFFECT_TE_GUNSHOT,
+        EFFECT_TE_GUNSHOTQUAD,
+        EFFECT_TE_SPIKE,
+        EFFECT_TE_SPIKEQUAD,
+        EFFECT_TE_SUPERSPIKE,
+        EFFECT_TE_SUPERSPIKEQUAD,
+        EFFECT_TE_WIZSPIKE,
+        EFFECT_TE_KNIGHTSPIKE,
+        EFFECT_TE_EXPLOSION,
+        EFFECT_TE_EXPLOSIONQUAD,
+        EFFECT_TE_TAREXPLOSION,
+        EFFECT_TE_TELEPORT,
+        EFFECT_TE_LAVASPLASH,
+        EFFECT_TE_SMALLFLASH,
+        EFFECT_TE_FLAMEJET,
+        EFFECT_EF_FLAME,
+        EFFECT_TE_BLOOD,
+        EFFECT_TE_SPARK,
+        EFFECT_TE_PLASMABURN,
+        EFFECT_TE_TEI_G3,
+        EFFECT_TE_TEI_SMOKE,
+        EFFECT_TE_TEI_BIGEXPLOSION,
+        EFFECT_TE_TEI_PLASMAHIT,
+        EFFECT_EF_STARDUST,
+        EFFECT_TR_ROCKET,
+        EFFECT_TR_GRENADE,
+        EFFECT_TR_BLOOD,
+        EFFECT_TR_WIZSPIKE,
+        EFFECT_TR_SLIGHTBLOOD,
+        EFFECT_TR_KNIGHTSPIKE,
+        EFFECT_TR_VORESPIKE,
+        EFFECT_TR_NEHAHRASMOKE,
+        EFFECT_TR_NEXUIZPLASMA,
+        EFFECT_TR_GLOWTRAIL,
+        EFFECT_SVC_PARTICLE,
+        EFFECT_TOTAL
+} effectnameindex_t;
+
+static const char *const effect_index_names[EFFECT_TOTAL] =
+{
+        "",
+        "TE_GUNSHOT",
+        "TE_GUNSHOTQUAD",
+        "TE_SPIKE",
+        "TE_SPIKEQUAD",
+        "TE_SUPERSPIKE",
+        "TE_SUPERSPIKEQUAD",
+        "TE_WIZSPIKE",
+        "TE_KNIGHTSPIKE",
+        "TE_EXPLOSION",
+        "TE_EXPLOSIONQUAD",
+        "TE_TAREXPLOSION",
+        "TE_TELEPORT",
+        "TE_LAVASPLASH",
+        "TE_SMALLFLASH",
+        "TE_FLAMEJET",
+        "EF_FLAME",
+        "TE_BLOOD",
+        "TE_SPARK",
+        "TE_PLASMABURN",
+        "TE_TEI_G3",
+        "TE_TEI_SMOKE",
+        "TE_TEI_BIGEXPLOSION",
+        "TE_TEI_PLASMAHIT",
+        "EF_STARDUST",
+        "TR_ROCKET",
+        "TR_GRENADE",
+        "TR_BLOOD",
+        "TR_WIZSPIKE",
+        "TR_SLIGHTBLOOD",
+        "TR_KNIGHTSPIKE",
+        "TR_VORESPIKE",
+        "TR_NEHAHRASMOKE",
+        "TR_NEXUIZPLASMA",
+        "TR_GLOWTRAIL",
+        "SVC_PARTICLE"
+};
+
+static const char* R_ParticleEffect_NameForIndex (int index)
+{
+        if (index < 0 || index >= EFFECT_TOTAL)
+                return NULL;
+        return effect_index_names[index];
+}
+
 static particle_t* R_AllocParticle (void);
 
 static float uvscale;
@@ -1601,22 +1689,22 @@ R_SetParticleTexture_f -- johnfitz
 */
 static void R_SetParticleTexture_f (cvar_t* var)
 {
-	switch ((int)(r_particles.value))
-	{
-	case 1:
-		uvscale = 1.0f;
-		texturescalefactor = 1.27f;
-		break;
-	case 2:
-		uvscale = 0.25f;
-		texturescalefactor = 1.0f;
-		break;
-	default:
-		// robuster Default (entspricht Modus 2 / moderne Quad-Partikel)
-		uvscale = 0.25f;
-		texturescalefactor = 1.0f;
-		break;
-	}
+        switch ((int)(r_particles.value))
+        {
+        case 1:
+                uvscale = 1.0f;
+                texturescalefactor = 1.27f;
+                break;
+        case 2:
+                uvscale = 0.25f;
+                texturescalefactor = 1.0f;
+                break;
+        default:
+                // robuster Default (entspricht Modus 2 / moderne Quad-Partikel)
+                uvscale = 0.25f;
+                texturescalefactor = 1.0f;
+                break;
+        }
 }
 
 /*
@@ -1803,7 +1891,124 @@ R_ClearParticles
 */
 void R_ClearParticles (void)
 {
-	r_numactiveparticles = 0;
+        r_numactiveparticles = 0;
+}
+
+static void R_ParticleEffect_ComputeCenter (const vec3_t mins, const vec3_t maxs, vec3_t center)
+{
+        center[0] = 0.5f * (mins[0] + maxs[0]);
+        center[1] = 0.5f * (mins[1] + maxs[1]);
+        center[2] = 0.5f * (mins[2] + maxs[2]);
+}
+
+static void R_ParticleEffect_ComputeDir (const vec3_t mins, const vec3_t maxs, const vec3_t velmins, const vec3_t velmaxs, vec3_t dir)
+{
+        vec3_t delta;
+
+        VectorSubtract (maxs, mins, delta);
+        if (VectorLength (delta) > 0.0001f)
+        {
+                VectorCopy (delta, dir);
+                return;
+        }
+
+        dir[0] = 0.5f * (velmins[0] + velmaxs[0]);
+        dir[1] = 0.5f * (velmins[1] + velmaxs[1]);
+        dir[2] = 0.5f * (velmins[2] + velmaxs[2]);
+}
+
+static qboolean R_ParticleEffect_TryEffectinfo (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs)
+{
+        const char* name;
+        vec3_t org;
+        vec3_t dir;
+
+        if (!R_Effectinfo_Active ())
+                return false;
+
+        name = R_ParticleEffect_NameForIndex (effectindex);
+        if (!name || !*name)
+                return false;
+
+        R_ParticleEffect_ComputeCenter (originmins, originmaxs, org);
+        R_ParticleEffect_ComputeDir (originmins, originmaxs, velocitymins, velocitymaxs, dir);
+
+        return R_Effectinfo_SpawnName (name, org, dir, pcount);
+}
+
+static void R_ParticleEffect_Fallback (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, int palettecolor)
+{
+        vec3_t org;
+        vec3_t dir;
+
+        R_ParticleEffect_ComputeCenter (originmins, originmaxs, org);
+        R_ParticleEffect_ComputeDir (originmins, originmaxs, velocitymins, velocitymaxs, dir);
+
+        switch (effectindex)
+        {
+        case EFFECT_TR_ROCKET:
+        case EFFECT_TR_GRENADE:
+        case EFFECT_TR_BLOOD:
+        case EFFECT_TR_WIZSPIKE:
+        case EFFECT_TR_SLIGHTBLOOD:
+        case EFFECT_TR_KNIGHTSPIKE:
+        case EFFECT_TR_VORESPIKE:
+        {
+                vec3_t start;
+                vec3_t end;
+                int trailtype = 0;
+
+                switch (effectindex)
+                {
+                case EFFECT_TR_ROCKET: trailtype = 0; break;
+                case EFFECT_TR_GRENADE: trailtype = 1; break;
+                case EFFECT_TR_BLOOD: trailtype = 2; break;
+                case EFFECT_TR_WIZSPIKE: trailtype = 3; break;
+                case EFFECT_TR_SLIGHTBLOOD: trailtype = 4; break;
+                case EFFECT_TR_KNIGHTSPIKE: trailtype = 5; break;
+                case EFFECT_TR_VORESPIKE: trailtype = 6; break;
+                default: trailtype = 0; break;
+                }
+
+                VectorCopy (originmins, start);
+                VectorCopy (originmaxs, end);
+                R_RocketTrail (start, end, trailtype);
+                return;
+        }
+        case EFFECT_TE_EXPLOSION:
+        case EFFECT_TE_EXPLOSIONQUAD:
+        case EFFECT_TE_TAREXPLOSION:
+                R_ParticleExplosion (org);
+                return;
+        case EFFECT_TE_LAVASPLASH:
+                R_LavaSplash (org);
+                return;
+        case EFFECT_TE_TELEPORT:
+                R_TeleportSplash (org);
+                return;
+        default:
+                break;
+        }
+
+        R_RunParticleEffect (org, dir, palettecolor, (int)pcount);
+}
+
+static void R_ParticleEffect_Internal (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, entity_t *ent, int palettecolor)
+{
+        (void)ent;
+
+        if (effectindex <= EFFECT_NONE)
+                return;
+
+        if (R_ParticleEffect_TryEffectinfo (effectindex, pcount, originmins, originmaxs, velocitymins, velocitymaxs))
+                return;
+
+        R_ParticleEffect_Fallback (effectindex, pcount, originmins, originmaxs, velocitymins, velocitymaxs, palettecolor);
+}
+
+void R_ParticleEffect (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, entity_t *ent, int palettecolor)
+{
+        R_ParticleEffect_Internal (effectindex, pcount, originmins, originmaxs, velocitymins, velocitymaxs, ent, palettecolor);
 }
 
 /*
@@ -1825,12 +2030,24 @@ void R_ParseParticleEffect (void)
 	msgcount = MSG_ReadByte ();
 	color = MSG_ReadByte ();
 
-	if (msgcount == 255)
-		count = 1024;
-	else
-		count = msgcount;
+        if (msgcount == 255)
+                count = 1024;
+        else
+                count = msgcount;
 
-	R_RunParticleEffect (org, dir, color, count);
+        {
+                vec3_t originmins;
+                vec3_t originmaxs;
+                vec3_t velocitymins;
+                vec3_t velocitymaxs;
+
+                VectorCopy (org, originmins);
+                VectorCopy (org, originmaxs);
+                VectorCopy (dir, velocitymins);
+                VectorCopy (dir, velocitymaxs);
+
+                R_ParticleEffect (EFFECT_SVC_PARTICLE, (float)count, originmins, originmaxs, velocitymins, velocitymaxs, NULL, color);
+        }
 }
 
 /*
