@@ -223,10 +223,11 @@ GLOBJS = \
 	r_world.o \
 	gl_screen.o \
 	gl_shaders.o \
-	gl_sky.o \
-	gl_warp.o \
-	$(SYSOBJ_GL_VID) \
-	gl_draw.o \
+        gl_sky.o \
+        gl_warp.o \
+        r_iwshader.o \
+        $(SYSOBJ_GL_VID) \
+        gl_draw.o \
 	image.o \
 	gl_texmgr.o \
 	gl_mesh.o \
@@ -260,6 +261,7 @@ OBJS = strlcat.o \
         wad.o \
         cmd.o \
         common.o \
+        common/com_iwtext.o \
         steam.o \
 	json.o \
 	miniz.o \

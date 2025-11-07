@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "renderer/r_iwshader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -331,6 +332,22 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	GLuint		flags;
 	float		alpha;
 	gltexture_t	*tx, *fb, *em;
+
+	if (t && t->gltexture)
+	{
+		const char *material_name = NULL;
+		if (t->gltexture->source_file[0])
+			material_name = t->gltexture->source_file;
+		else if (t->gltexture->name[0])
+			material_name = t->gltexture->name;
+		else if (t->name[0])
+			material_name = t->name;
+		IW_MaterialForTexture (material_name);
+	}
+	else
+	{
+		IW_MaterialForTexture (NULL);
+	}
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
