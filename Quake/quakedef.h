@@ -253,6 +253,10 @@ typedef struct
 #include "cmd.h"
 #include "crc.h"
 
+#ifndef dpsnprintf
+#define dpsnprintf q_snprintf
+#endif
+
 #include "platform.h"
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
