@@ -3,6 +3,7 @@
 #include "render.h"
 #include "../common/com_iwtext.h"
 #include "r_iwshader.h"
+#include "q_ctype.h"
 
 #define IW_MAX_MATERIALS 512
 
@@ -96,16 +97,16 @@ static void IW_CopyTokenText(const iwtxtToken_t *token, char *dst, size_t size)
 
 static qboolean IW_ParseBlendFactor(const char *text, iwBlendFactor_t *out)
 {
-    if (!Q_strcasecmp(text, "zero")) { *out = IW_SRC_ZERO; return true; }
-    if (!Q_strcasecmp(text, "one")) { *out = IW_SRC_ONE; return true; }
-    if (!Q_strcasecmp(text, "src_color")) { *out = IW_SRC_SRC_COLOR; return true; }
-    if (!Q_strcasecmp(text, "one_minus_src_color")) { *out = IW_SRC_ONE_MINUS_SRC_COLOR; return true; }
-    if (!Q_strcasecmp(text, "dst_color")) { *out = IW_SRC_DST_COLOR; return true; }
-    if (!Q_strcasecmp(text, "one_minus_dst_color")) { *out = IW_SRC_ONE_MINUS_DST_COLOR; return true; }
-    if (!Q_strcasecmp(text, "src_alpha")) { *out = IW_SRC_SRC_ALPHA; return true; }
-    if (!Q_strcasecmp(text, "one_minus_src_alpha")) { *out = IW_SRC_ONE_MINUS_SRC_ALPHA; return true; }
-    if (!Q_strcasecmp(text, "dst_alpha")) { *out = IW_SRC_DST_ALPHA; return true; }
-    if (!Q_strcasecmp(text, "one_minus_dst_alpha")) { *out = IW_SRC_ONE_MINUS_DST_ALPHA; return true; }
+    if (!q_strcasecmp(text, "zero")) { *out = IW_SRC_ZERO; return true; }
+    if (!q_strcasecmp(text, "one")) { *out = IW_SRC_ONE; return true; }
+    if (!q_strcasecmp(text, "src_color")) { *out = IW_SRC_SRC_COLOR; return true; }
+    if (!q_strcasecmp(text, "one_minus_src_color")) { *out = IW_SRC_ONE_MINUS_SRC_COLOR; return true; }
+    if (!q_strcasecmp(text, "dst_color")) { *out = IW_SRC_DST_COLOR; return true; }
+    if (!q_strcasecmp(text, "one_minus_dst_color")) { *out = IW_SRC_ONE_MINUS_DST_COLOR; return true; }
+    if (!q_strcasecmp(text, "src_alpha")) { *out = IW_SRC_SRC_ALPHA; return true; }
+    if (!q_strcasecmp(text, "one_minus_src_alpha")) { *out = IW_SRC_ONE_MINUS_SRC_ALPHA; return true; }
+    if (!q_strcasecmp(text, "dst_alpha")) { *out = IW_SRC_DST_ALPHA; return true; }
+    if (!q_strcasecmp(text, "one_minus_dst_alpha")) { *out = IW_SRC_ONE_MINUS_DST_ALPHA; return true; }
     return false;
 }
 
