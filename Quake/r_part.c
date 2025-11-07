@@ -237,7 +237,8 @@ static const particleappearance_t particle_appearance_default = { 1.f, 0.f, 1.f,
 static gltexture_t* particle_atlas;
 static float particle_atlas_tile_width;
 static float particle_atlas_tile_height;
-static float particle_atlas_tile_margin;
+static float particle_atlas_tile_margin_u;
+static float particle_atlas_tile_margin_v;
 
 
 static float R_Effectinfo_Random (float min, float max)
@@ -1369,9 +1370,26 @@ static float R_ParticleNoise (int x, int y, int seed)
 
 enum
 {
-	PARTICLE_ATLAS_WIDTH = PARTICLE_TEX_TILE_SIZE * NUM_PARTICLE_TEXTURES,
-	PARTICLE_ATLAS_HEIGHT = PARTICLE_TEX_TILE_SIZE
+        PARTICLE_ATLAS_WIDTH = PARTICLE_TEX_TILE_SIZE * NUM_PARTICLE_TEXTURES,
+        PARTICLE_ATLAS_HEIGHT = PARTICLE_TEX_TILE_SIZE
 };
+
+static void R_ParticleAtlas_SetMetrics (int atlas_width, int atlas_height, int tile_width_px, int tile_height_px)
+{
+        if (atlas_width <= 0 || atlas_height <= 0 || tile_width_px <= 0 || tile_height_px <= 0)
+        {
+                particle_atlas_tile_width = 1.0f / (float)NUM_PARTICLE_TEXTURES;
+                particle_atlas_tile_height = 1.0f;
+                particle_atlas_tile_margin_u = 0.5f / (float)PARTICLE_TEX_TILE_SIZE;
+                particle_atlas_tile_margin_v = particle_atlas_tile_margin_u;
+                return;
+        }
+
+        particle_atlas_tile_width = (float)tile_width_px / (float)atlas_width;
+        particle_atlas_tile_height = (float)tile_height_px / (float)atlas_height;
+        particle_atlas_tile_margin_u = 0.5f / (float)tile_width_px;
+        particle_atlas_tile_margin_v = 0.5f / (float)tile_height_px;
+}
 
 static void R_InitParticleAtlas (void)
 {
@@ -1380,6 +1398,9 @@ static void R_InitParticleAtlas (void)
 
         const int atlas_width = PARTICLE_ATLAS_WIDTH;
         const int atlas_height = PARTICLE_ATLAS_HEIGHT;
+        const int default_tile_px = PARTICLE_TEX_TILE_SIZE;
+
+        R_ParticleAtlas_SetMetrics (atlas_width, atlas_height, default_tile_px, default_tile_px);
 
         {
                 int mark = Hunk_LowMark ();
@@ -1390,17 +1411,47 @@ static void R_InitParticleAtlas (void)
 
                 if (ext_data)
                 {
-                        if (ext_fmt == SRC_RGBA && ext_width == atlas_width && ext_height == atlas_height)
+                        qboolean format_ok = (ext_fmt == SRC_RGBA || ext_fmt == SRC_INDEXED);
+                        if (!format_ok)
                         {
-                                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
-                                        ext_width, ext_height, 1, ext_fmt,
-                                        ext_data, "particles/particlefont", 0,
-                                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                                Con_Printf ("R_InitParticleAtlas: particles/particlefont uses unsupported format %d\n", (int)ext_fmt);
+                        }
+                        else if (ext_width <= 0 || ext_height <= 0)
+                        {
+                                Con_Printf ("R_InitParticleAtlas: particles/particlefont has invalid size (%dx%d)\n", ext_width, ext_height);
                         }
                         else
                         {
-                                Con_Printf ("R_InitParticleAtlas: particles/particlefont has unexpected dimensions (%dx%d) or format\n",
-                                        ext_width, ext_height);
+                                int tile_px = ext_height;
+                                if (tile_px <= 0 || (ext_width % tile_px) != 0)
+                                {
+                                        Con_Printf ("R_InitParticleAtlas: particles/particlefont width %d is not a multiple of tile height %d\n",
+                                                ext_width, tile_px);
+                                }
+                                else
+                                {
+                                        int tiles_available = ext_width / tile_px;
+                                        if (tiles_available < NUM_PARTICLE_TEXTURES)
+                                        {
+                                                Con_Printf ("R_InitParticleAtlas: particles/particlefont only provides %d tiles, need at least %d\n",
+                                                        tiles_available, NUM_PARTICLE_TEXTURES);
+                                        }
+                                        else
+                                        {
+                                                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+                                                        ext_width, ext_height, 1, ext_fmt,
+                                                        ext_data, "particles/particlefont", 0,
+                                                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                                                if (particle_atlas)
+                                                {
+                                                        R_ParticleAtlas_SetMetrics (ext_width, ext_height, tile_px, tile_px);
+                                                }
+                                                else
+                                                {
+                                                        Con_Printf ("R_InitParticleAtlas: failed to upload particles/particlefont texture\n");
+                                                }
+                                        }
+                                }
                         }
                 }
 
@@ -1535,13 +1586,10 @@ static void R_InitParticleAtlas (void)
                 if (!particle_atlas) {
                         Con_Printf ("R_InitParticleAtlas: failed to create particle atlas\n");
                 }
-        }
-
-        if (particle_atlas)
-        {
-                particle_atlas_tile_width = 1.0f / (float)NUM_PARTICLE_TEXTURES;
-                particle_atlas_tile_height = 1.0f;
-                particle_atlas_tile_margin = 0.5f / (float)PARTICLE_TEX_TILE_SIZE;
+                else
+                {
+                        R_ParticleAtlas_SetMetrics (atlas_width, atlas_height, default_tile_px, default_tile_px);
+                }
         }
 }
 
@@ -1681,8 +1729,7 @@ void R_InitParticles (void)
         Cvar_SetCallback (&r_particles, R_SetParticleTexture_f);
         R_SetParticleTexture_f (&r_particles); // set default
 
-        Cmd_AddCommand ("cl_particles_reloadeffects", R_Particles_ReloadEffects_f,
-                "reload particle effect definitions from effectinfo files");
+        Cmd_AddCommand ("cl_particles_reloadeffects", R_Particles_ReloadEffects_f);
 
         R_InitParticleAtlas ();
         R_Particles_LoadEffectInfo (NULL);
@@ -2372,7 +2419,7 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
         if (particle_atlas)
         {
                 GL_Bind (GL_TEXTURE0, particle_atlas);
-                GL_Uniform4fFunc (1, particle_atlas_tile_width, particle_atlas_tile_height, particle_atlas_tile_margin, particle_atlas_tile_margin);
+                GL_Uniform4fFunc (1, particle_atlas_tile_width, particle_atlas_tile_height, particle_atlas_tile_margin_u, particle_atlas_tile_margin_v);
         }
         else
         {
