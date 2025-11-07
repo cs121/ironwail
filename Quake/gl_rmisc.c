@@ -616,6 +616,7 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 	R_ClearDecals ();
+	R_Particles_LoadEffectInfo (NULL);
 	VEC_CLEAR (r_pointfile);
 
 	GL_BuildLightmaps ();
