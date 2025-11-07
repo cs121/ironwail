@@ -1936,6 +1936,255 @@ static qboolean R_ParticleEffect_TryEffectinfo (int effectindex, float pcount, c
         return R_Effectinfo_SpawnName (name, org, dir, pcount);
 }
 
+static int R_ParticleEffect_CountFromFloat (float value)
+{
+        int count = (int)value;
+        if (count < 1 && value > 0.f)
+                count = 1;
+        return count;
+}
+
+static void R_ParticleEffect_Sparks (const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, float sparkcount)
+{
+        int i;
+        int count = R_ParticleEffect_CountFromFloat (sparkcount);
+
+        if (count <= 0)
+                return;
+
+        for (i = 0; i < count; ++i)
+        {
+                particle_t *p = R_AllocParticle ();
+                particle_dp_t *ext;
+                int idx;
+                float life;
+
+                if (!p)
+                        return;
+
+                idx = (int)(p - particles);
+                ext = &particle_dp[idx];
+
+                p->custom = 1;
+                life = R_Effectinfo_Random (0.25f, 0.45f);
+                p->die = p->spawn + life;
+
+                p->alpha_start = 1.f;
+                p->alpha_end = 0.f;
+                p->alpha_power = 1.f;
+                ext->alpha_mode = EFFECT_ALPHA_LERP;
+
+                p->size = 0.6f;
+                p->size_vel = -0.2f;
+                ext->size_y = 0.6f;
+                ext->blend = EFFECT_BLEND_ADD;
+                ext->orient = EFFECT_ORIENT_SPARK;
+                ext->stretch = 1.0f;
+                ext->bounce = -1.f;
+
+                p->texture = PARTICLE_TEX_GLOW;
+                p->glow = 0.5f;
+                p->airfriction = 1.5f;
+
+                VectorSet (p->custom_color,
+                        R_Effectinfo_Random (0.45f, 0.65f),
+                        R_Effectinfo_Random (0.5f, 0.75f),
+                        1.0f);
+
+                p->org[0] = R_Effectinfo_Random (originmins[0], originmaxs[0]) + R_Effectinfo_CRandom (2.f);
+                p->org[1] = R_Effectinfo_Random (originmins[1], originmaxs[1]) + R_Effectinfo_CRandom (2.f);
+                p->org[2] = R_Effectinfo_Random (originmins[2], originmaxs[2]) + R_Effectinfo_CRandom (2.f);
+
+                p->vel[0] = R_Effectinfo_Random (velocitymins[0], velocitymaxs[0]) + R_Effectinfo_CRandom (48.f);
+                p->vel[1] = R_Effectinfo_Random (velocitymins[1], velocitymaxs[1]) + R_Effectinfo_CRandom (48.f);
+                p->vel[2] = R_Effectinfo_Random (velocitymins[2], velocitymaxs[2]) - sv_gravity.value * 0.1f;
+
+                VectorClear (p->accel);
+                p->accel[2] = -sv_gravity.value * 0.5f;
+        }
+}
+
+static void R_ParticleEffect_Smoke (const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, float smokecount)
+{
+        int i;
+        int count = R_ParticleEffect_CountFromFloat (smokecount);
+
+        if (count <= 0)
+                return;
+
+        for (i = 0; i < count; ++i)
+        {
+                particle_t *p = R_AllocParticle ();
+                particle_dp_t *ext;
+                int idx;
+                float life;
+                float grey;
+
+                if (!p)
+                        return;
+
+                idx = (int)(p - particles);
+                ext = &particle_dp[idx];
+
+                p->custom = 1;
+                life = R_Effectinfo_Random (0.8f, 1.4f);
+                p->die = p->spawn + life;
+
+                p->alpha_start = 0.55f;
+                p->alpha_end = 0.f;
+                p->alpha_power = 1.4f;
+                ext->alpha_mode = EFFECT_ALPHA_LERP;
+
+                p->size = R_Effectinfo_Random (2.0f, 3.5f);
+                p->size_vel = R_Effectinfo_Random (1.1f, 2.0f);
+                ext->size_y = p->size;
+                ext->blend = EFFECT_BLEND_ADD;
+                ext->orient = EFFECT_ORIENT_BILLBOARD;
+                ext->stretch = 0.f;
+                ext->bounce = -1.f;
+
+                p->texture = PARTICLE_TEX_SMOKE;
+                p->glow = 0.f;
+                p->airfriction = 0.5f;
+
+                grey = R_Effectinfo_Random (0.12f, 0.2f);
+                VectorSet (p->custom_color, grey, grey, grey);
+
+                p->org[0] = R_Effectinfo_Random (originmins[0], originmaxs[0]) + R_Effectinfo_CRandom (2.f);
+                p->org[1] = R_Effectinfo_Random (originmins[1], originmaxs[1]) + R_Effectinfo_CRandom (2.f);
+                p->org[2] = R_Effectinfo_Random (originmins[2], originmaxs[2]) + R_Effectinfo_CRandom (2.f);
+
+                p->vel[0] = R_Effectinfo_Random (velocitymins[0], velocitymaxs[0]) + R_Effectinfo_CRandom (24.f);
+                p->vel[1] = R_Effectinfo_Random (velocitymins[1], velocitymaxs[1]) + R_Effectinfo_CRandom (24.f);
+                p->vel[2] = R_Effectinfo_Random (velocitymins[2], velocitymaxs[2]) + R_Effectinfo_Random (15.f, 45.f);
+
+                VectorClear (p->accel);
+                p->accel[2] = -sv_gravity.value * 0.15f;
+        }
+}
+
+static void R_ParticleEffect_Blood (const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, float bloodcount)
+{
+        int i;
+        int count = R_ParticleEffect_CountFromFloat (bloodcount);
+
+        if (count <= 0)
+                return;
+
+        for (i = 0; i < count; ++i)
+        {
+                particle_t *p = R_AllocParticle ();
+                particle_dp_t *ext;
+                int idx;
+                float life;
+
+                if (!p)
+                        return;
+
+                idx = (int)(p - particles);
+                ext = &particle_dp[idx];
+
+                p->custom = 1;
+                life = R_Effectinfo_Random (0.7f, 1.3f);
+                p->die = p->spawn + life;
+
+                p->alpha_start = 0.9f;
+                p->alpha_end = 0.f;
+                p->alpha_power = 1.1f;
+                ext->alpha_mode = EFFECT_ALPHA_LERP;
+
+                p->size = R_Effectinfo_Random (5.5f, 8.0f);
+                p->size_vel = -R_Effectinfo_Random (0.8f, 1.4f);
+                ext->size_y = p->size;
+                ext->blend = EFFECT_BLEND_INVMOD;
+                ext->orient = EFFECT_ORIENT_BILLBOARD;
+                ext->stretch = 0.f;
+                ext->bounce = 0.25f;
+                ext->liquidfriction = 6.0f;
+                ext->leave_decal = true;
+
+                p->texture = PARTICLE_TEX_SOFT;
+                p->glow = 0.f;
+                p->airfriction = 0.8f;
+
+                VectorSet (p->custom_color,
+                        R_Effectinfo_Random (0.55f, 0.75f),
+                        R_Effectinfo_Random (0.05f, 0.12f),
+                        R_Effectinfo_Random (0.05f, 0.12f));
+
+                p->org[0] = R_Effectinfo_Random (originmins[0], originmaxs[0]) + R_Effectinfo_CRandom (3.f);
+                p->org[1] = R_Effectinfo_Random (originmins[1], originmaxs[1]) + R_Effectinfo_CRandom (3.f);
+                p->org[2] = R_Effectinfo_Random (originmins[2], originmaxs[2]) + R_Effectinfo_CRandom (3.f);
+
+                p->vel[0] = R_Effectinfo_Random (velocitymins[0], velocitymaxs[0]) + R_Effectinfo_CRandom (60.f);
+                p->vel[1] = R_Effectinfo_Random (velocitymins[1], velocitymaxs[1]) + R_Effectinfo_CRandom (60.f);
+                p->vel[2] = R_Effectinfo_Random (velocitymins[2], velocitymaxs[2]) - R_Effectinfo_Random (30.f, 90.f);
+
+                VectorClear (p->accel);
+                p->accel[2] = -sv_gravity.value;
+        }
+}
+
+static void R_ParticleEffect_FlameJet (const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, float flamecount)
+{
+        int i;
+        int count = R_ParticleEffect_CountFromFloat (flamecount);
+
+        if (count <= 0)
+                return;
+
+        for (i = 0; i < count; ++i)
+        {
+                particle_t *p = R_AllocParticle ();
+                particle_dp_t *ext;
+                int idx;
+                float life;
+
+                if (!p)
+                        return;
+
+                idx = (int)(p - particles);
+                ext = &particle_dp[idx];
+
+                p->custom = 1;
+                life = R_Effectinfo_Random (0.5f, 0.9f);
+                p->die = p->spawn + life;
+
+                p->alpha_start = 0.85f;
+                p->alpha_end = 0.f;
+                p->alpha_power = 1.f;
+                ext->alpha_mode = EFFECT_ALPHA_LERP;
+
+                p->size = R_Effectinfo_Random (3.0f, 5.0f);
+                p->size_vel = R_Effectinfo_Random (2.0f, 3.0f);
+                ext->size_y = p->size;
+                ext->blend = EFFECT_BLEND_ADD;
+                ext->orient = EFFECT_ORIENT_BILLBOARD;
+                ext->stretch = 0.f;
+                ext->bounce = -1.f;
+
+                p->texture = PARTICLE_TEX_GLOW;
+                p->glow = 0.6f;
+                p->airfriction = 0.4f;
+
+                VectorSet (p->custom_color,
+                        R_Effectinfo_Random (0.8f, 1.0f),
+                        R_Effectinfo_Random (0.3f, 0.6f),
+                        R_Effectinfo_Random (0.05f, 0.15f));
+
+                p->org[0] = R_Effectinfo_Random (originmins[0], originmaxs[0]) + R_Effectinfo_CRandom (2.f);
+                p->org[1] = R_Effectinfo_Random (originmins[1], originmaxs[1]) + R_Effectinfo_CRandom (2.f);
+                p->org[2] = R_Effectinfo_Random (originmins[2], originmaxs[2]) + R_Effectinfo_CRandom (2.f);
+
+                p->vel[0] = R_Effectinfo_Random (velocitymins[0], velocitymaxs[0]) + R_Effectinfo_CRandom (24.f);
+                p->vel[1] = R_Effectinfo_Random (velocitymins[1], velocitymaxs[1]) + R_Effectinfo_CRandom (24.f);
+                p->vel[2] = R_Effectinfo_Random (velocitymins[2], velocitymaxs[2]) + R_Effectinfo_Random (50.f, 120.f);
+
+                VectorClear (p->accel);
+                p->accel[2] = -sv_gravity.value * 0.05f;
+        }
+}
+
 static void R_ParticleEffect_Fallback (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, int palettecolor)
 {
         vec3_t org;
@@ -1946,6 +2195,21 @@ static void R_ParticleEffect_Fallback (int effectindex, float pcount, const vec3
 
         switch (effectindex)
         {
+        case EFFECT_TE_GUNSHOT:
+        case EFFECT_TE_GUNSHOTQUAD:
+                R_ParticleEffect_Smoke (originmins, originmaxs, velocitymins, velocitymaxs, 4.f * pcount);
+                R_ParticleEffect_Sparks (originmins, originmaxs, velocitymins, velocitymaxs, 20.f * pcount);
+                return;
+        case EFFECT_TE_SPIKE:
+        case EFFECT_TE_SPIKEQUAD:
+                R_ParticleEffect_Smoke (originmins, originmaxs, velocitymins, velocitymaxs, 4.f * pcount);
+                R_ParticleEffect_Sparks (originmins, originmaxs, velocitymins, velocitymaxs, 15.f * pcount);
+                return;
+        case EFFECT_TE_SUPERSPIKE:
+        case EFFECT_TE_SUPERSPIKEQUAD:
+                R_ParticleEffect_Smoke (originmins, originmaxs, velocitymins, velocitymaxs, 8.f * pcount);
+                R_ParticleEffect_Sparks (originmins, originmaxs, velocitymins, velocitymaxs, 30.f * pcount);
+                return;
         case EFFECT_TR_ROCKET:
         case EFFECT_TR_GRENADE:
         case EFFECT_TR_BLOOD:
@@ -1975,6 +2239,10 @@ static void R_ParticleEffect_Fallback (int effectindex, float pcount, const vec3
                 R_RocketTrail (start, end, trailtype);
                 return;
         }
+        case EFFECT_TE_BLOOD:
+                R_ParticleEffect_Blood (originmins, originmaxs, velocitymins, velocitymaxs, pcount * 0.5f + 1.f);
+                R_AddGibDecal (org, R_ParticleEffect_CountFromFloat (pcount));
+                return;
         case EFFECT_TE_EXPLOSION:
         case EFFECT_TE_EXPLOSIONQUAD:
         case EFFECT_TE_TAREXPLOSION:
@@ -1985,6 +2253,16 @@ static void R_ParticleEffect_Fallback (int effectindex, float pcount, const vec3
                 return;
         case EFFECT_TE_TELEPORT:
                 R_TeleportSplash (org);
+                return;
+        case EFFECT_TE_SPARK:
+                R_ParticleEffect_Sparks (originmins, originmaxs, velocitymins, velocitymaxs, pcount);
+                return;
+        case EFFECT_TE_PLASMABURN:
+                R_ParticleEffect_Sparks (originmins, originmaxs, velocitymins, velocitymaxs, q_max (1.f, pcount * 0.5f));
+                R_ParticleEffect_Smoke (originmins, originmaxs, velocitymins, velocitymaxs, pcount);
+                return;
+        case EFFECT_TE_FLAMEJET:
+                R_ParticleEffect_FlameJet (originmins, originmaxs, velocitymins, velocitymaxs, q_max (1.f, pcount));
                 return;
         default:
                 break;
