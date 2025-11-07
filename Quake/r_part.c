@@ -1510,34 +1510,88 @@ static void R_InitParticleAtlas (void)
                         }
                         else
                         {
-                                int tile_px = ext_height;
-                                if (tile_px <= 0 || (ext_width % tile_px) != 0)
+                                int tile_width_px = 0;
+                                int tile_height_px = 0;
+                                int tiles_available = 0;
+                                qboolean layout_ok = false;
+
+                                // Preferred layout: grid with PARTICLE_ATLAS_COLS x PARTICLE_ATLAS_ROWS square tiles.
+                                if (ext_height % PARTICLE_ATLAS_ROWS == 0)
                                 {
-                                        Con_Printf ("R_InitParticleAtlas: particles/particlefont width %d is not a multiple of tile height %d\n",
-                                                ext_width, tile_px);
+                                        int candidate_tile = ext_height / PARTICLE_ATLAS_ROWS;
+                                        if (candidate_tile > 0 && (ext_width % candidate_tile) == 0)
+                                        {
+                                                int tiles_x = ext_width / candidate_tile;
+                                                int tiles_y = ext_height / candidate_tile;
+                                                tiles_available = tiles_x * tiles_y;
+
+                                                if (tiles_x > 0 && tiles_y > 0 && tiles_available >= NUM_PARTICLE_TEXTURES)
+                                                {
+                                                        tile_width_px = candidate_tile;
+                                                        tile_height_px = candidate_tile;
+                                                        layout_ok = true;
+                                                }
+                                        }
                                 }
-                                else
+
+                                // Legacy layout: single row of square tiles.
+                                if (!layout_ok)
                                 {
-                                        int tiles_available = ext_width / tile_px;
-                                        if (tiles_available < NUM_PARTICLE_TEXTURES)
+                                        int candidate_tile = ext_height;
+                                        if (candidate_tile > 0 && (ext_width % candidate_tile) == 0)
+                                        {
+                                                int tiles_x = ext_width / candidate_tile;
+                                                int tiles_y = 1;
+                                                tiles_available = tiles_x * tiles_y;
+
+                                                if (tiles_x > 0 && tiles_available >= NUM_PARTICLE_TEXTURES)
+                                                {
+                                                        tile_width_px = candidate_tile;
+                                                        tile_height_px = candidate_tile;
+                                                        layout_ok = true;
+                                                }
+                                        }
+                                }
+
+                                if (!layout_ok)
+                                {
+                                        if (tiles_available > 0 && tiles_available < NUM_PARTICLE_TEXTURES)
                                         {
                                                 Con_Printf ("R_InitParticleAtlas: particles/particlefont only provides %d tiles, need at least %d\n",
                                                         tiles_available, NUM_PARTICLE_TEXTURES);
                                         }
+                                        else if (ext_height > 0 && (ext_width % ext_height) != 0)
+                                        {
+                                                int expected_tile = ext_height;
+                                                if (ext_height % PARTICLE_ATLAS_ROWS == 0)
+                                                {
+                                                        int candidate_tile = ext_height / PARTICLE_ATLAS_ROWS;
+                                                        if (candidate_tile > 0)
+                                                                expected_tile = candidate_tile;
+                                                }
+
+                                                Con_Printf ("R_InitParticleAtlas: particles/particlefont width %d is not a multiple of tile width %d\n",
+                                                        ext_width, expected_tile);
+                                        }
                                         else
                                         {
-                                                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
-                                                        ext_width, ext_height, 1, ext_fmt,
-                                                        ext_data, "particles/particlefont", 0,
-                                                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
-                                                if (particle_atlas)
-                                                {
-                                                        R_ParticleAtlas_SetMetrics (ext_width, ext_height, tile_px, tile_px);
-                                                }
-                                                else
-                                                {
-                                                        Con_Printf ("R_InitParticleAtlas: failed to upload particles/particlefont texture\n");
-                                                }
+                                                Con_Printf ("R_InitParticleAtlas: particles/particlefont has incompatible layout (%dx%d)\n",
+                                                        ext_width, ext_height);
+                                        }
+                                }
+                                else
+                                {
+                                        particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+                                                ext_width, ext_height, 1, ext_fmt,
+                                                ext_data, "particles/particlefont", 0,
+                                                TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                                        if (particle_atlas)
+                                        {
+                                                R_ParticleAtlas_SetMetrics (ext_width, ext_height, tile_width_px, tile_height_px);
+                                        }
+                                        else
+                                        {
+                                                Con_Printf ("R_InitParticleAtlas: failed to upload particles/particlefont texture\n");
                                         }
                                 }
                         }
