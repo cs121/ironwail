@@ -124,14 +124,20 @@ void main()
         out_pos = worldPos - EyePos;
 
         float textureIndex = in_params.y;
-        float tileCount = AtlasInfo.x > 0.0 ? 1.0 / AtlasInfo.x : 1.0;
-        textureIndex = clamp(textureIndex, 0.0, max(tileCount - 1.0, 0.0));
+        float columns = AtlasInfo.x > 0.0 ? 1.0 / AtlasInfo.x : 1.0;
+        float rows = AtlasInfo.y > 0.0 ? 1.0 / AtlasInfo.y : 1.0;
+        float totalTiles = columns * rows;
+        textureIndex = clamp(textureIndex, 0.0, max(totalTiles - 1.0, 0.0));
 
         vec2 uv01 = uvCorner;
         uv01 = (uv01 - 0.5) * uvScale + 0.5;
         vec2 margin = vec2(AtlasInfo.z, AtlasInfo.w);
         uv01 = clamp(uv01, margin, vec2(1.0) - margin);
-        vec2 uv = vec2(textureIndex * AtlasInfo.x, 0.0) + uv01 * vec2(AtlasInfo.x, AtlasInfo.y);
+        float column = columns > 0.0 ? mod(textureIndex, columns) : 0.0;
+        float row = columns > 0.0 ? floor(textureIndex / columns) : 0.0;
+        row = rows > 0.0 ? clamp(row, 0.0, rows - 1.0) : 0.0;
+        vec2 base = vec2(column * AtlasInfo.x, row * AtlasInfo.y);
+        vec2 uv = base + uv01 * vec2(AtlasInfo.x, AtlasInfo.y);
 
         out_uv = uv;
         out_color = in_color;
