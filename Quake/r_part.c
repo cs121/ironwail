@@ -114,8 +114,9 @@ typedef struct effect_emitter_s
         effectblend_t   blend;
         effectorient_t  orient;
         effectalphamode_t alpha_mode;
-        int             count;
-        float           count_scale;
+        float           count_absolute;
+        float           count_multiplier;
+        double          count_accumulator;
         vec3_t          color_min;
         vec3_t          color_max;
         int             tex_min;
@@ -135,6 +136,7 @@ typedef struct effect_emitter_s
         float           airfriction;
         float           liquidfriction;
         float           trail_spacing;
+        float           trail_distance_accum;
         vec3_t          origin_offset;
         vec3_t          origin_rel;
         vec3_t          origin_jitter;
@@ -147,6 +149,23 @@ typedef struct effect_emitter_s
         float           rotate_start_max;
         float           rotate_speed_min;
         float           rotate_speed_max;
+        float           light_radius_start;
+        float           light_radius_fade;
+        float           light_time;
+        vec3_t          light_color;
+        qboolean        light_shadow;
+        int             light_cubemap;
+        float           light_corona_scale;
+        float           light_corona_alpha;
+        vec3_t          stain_color_min;
+        vec3_t          stain_color_max;
+        float           stain_alpha_min;
+        float           stain_alpha_max;
+        float           stain_size_min;
+        float           stain_size_max;
+        int             stain_tex_min;
+        int             stain_tex_max;
+        qboolean        stainless;
         qboolean        underwater_only;
         qboolean        notunderwater;
         qboolean        leave_decal;
@@ -445,13 +464,13 @@ static void R_Effectinfo_DebugPrintLoaded (void)
                 for (j = 0; j < def->num_emitters; ++j)
                 {
                         const effect_emitter_t* emit = &effect_emitters[def->first_emitter + j];
-                        Con_Printf ("      emitter %d: type=%s blend=%s orient=%s count=%d scale=%.2f tex=%d-%d size=%.1f-%.1f time=%.2f-%.2f alpha=%.2f-%.2f\n",
+                        Con_Printf ("      emitter %d: type=%s blend=%s orient=%s countabs=%.2f countmul=%.2f tex=%d-%d size=%.1f-%.1f time=%.2f-%.2f alpha=%.2f-%.2f\n",
                                 j,
                                 R_Effectinfo_TypeName (emit->type),
                                 R_Effectinfo_BlendName (emit->blend),
                                 R_Effectinfo_OrientName (emit->orient),
-                                emit->count,
-                                emit->count_scale,
+                                emit->count_absolute,
+                                emit->count_multiplier,
                                 emit->tex_min,
                                 emit->tex_max,
                                 emit->size_min,
@@ -475,8 +494,9 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         emit->blend = EFFECT_BLEND_DEFAULT;
         emit->orient = EFFECT_ORIENT_DEFAULT;
         emit->alpha_mode = EFFECT_ALPHA_FADERATE;
-        emit->count = 1;
-        emit->count_scale = 1.f;
+        emit->count_absolute = 0.f;
+        emit->count_multiplier = 0.f;
+        emit->count_accumulator = 0.0;
         VectorSet (emit->color_min, 1.f, 1.f, 1.f);
         VectorSet (emit->color_max, 1.f, 1.f, 1.f);
         emit->tex_min = 0;
@@ -496,6 +516,7 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         emit->airfriction = 0.f;
         emit->liquidfriction = 0.f;
         emit->trail_spacing = 0.f;
+        emit->trail_distance_accum = 0.f;
         VectorClear (emit->origin_offset);
         VectorClear (emit->origin_rel);
         VectorClear (emit->origin_jitter);
@@ -508,6 +529,23 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         emit->rotate_start_max = 0.f;
         emit->rotate_speed_min = 0.f;
         emit->rotate_speed_max = 0.f;
+        emit->light_radius_start = 0.f;
+        emit->light_radius_fade = 0.f;
+        emit->light_time = 0.f;
+        VectorSet (emit->light_color, 1.f, 1.f, 1.f);
+        emit->light_shadow = true;
+        emit->light_cubemap = 0;
+        emit->light_corona_scale = 1.f;
+        emit->light_corona_alpha = 0.25f;
+        VectorClear (emit->stain_color_min);
+        VectorClear (emit->stain_color_max);
+        emit->stain_alpha_min = 0.f;
+        emit->stain_alpha_max = 0.f;
+        emit->stain_size_min = 0.f;
+        emit->stain_size_max = 0.f;
+        emit->stain_tex_min = -1;
+        emit->stain_tex_max = -1;
+        emit->stainless = false;
         emit->underwater_only = false;
         emit->notunderwater = false;
         emit->leave_decal = false;
@@ -619,15 +657,15 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
         case EFFECT_TYPE_SMOKE:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 8;
-                        emit->tex_max = 15;
+                        emit->tex_min = 0;
+                        emit->tex_max = 7;
                 }
                 break;
         case EFFECT_TYPE_SPARK:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 24;
-                        emit->tex_max = 31;
+                        emit->tex_min = 33;
+                        emit->tex_max = 59;
                 }
                 if (!emit->sizey_explicit)
                 {
@@ -640,8 +678,8 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
         case EFFECT_TYPE_BEAM:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 24;
-                        emit->tex_max = 31;
+                        emit->tex_min = 60;
+                        emit->tex_max = 60;
                 }
                 if (!emit->sizey_explicit)
                 {
@@ -652,8 +690,8 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
         case EFFECT_TYPE_BUBBLE:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 32;
-                        emit->tex_max = 39;
+                        emit->tex_min = 62;
+                        emit->tex_max = 62;
                 }
                 emit->underwater_only = true;
                 break;
@@ -663,8 +701,8 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
                         emit->blend = EFFECT_BLEND_INVMOD;
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 40;
-                        emit->tex_max = 47;
+                        emit->tex_min = 24;
+                        emit->tex_max = 31;
                 }
                 break;
         case EFFECT_TYPE_ENTITY:
@@ -673,16 +711,16 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
         case EFFECT_TYPE_DECAL:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 48;
-                        emit->tex_max = 55;
+                        emit->tex_min = 8;
+                        emit->tex_max = 15;
                 }
                 emit->leave_decal = true;
                 break;
         default:
                 if (!emit->tex_explicit)
                 {
-                        emit->tex_min = 0;
-                        emit->tex_max = 7;
+                        emit->tex_min = 63;
+                        emit->tex_max = 63;
                 }
                 break;
         }
@@ -924,9 +962,17 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
 
                 if (!q_strcasecmp (com_token, "count"))
                 {
-                        int count;
-                        if (R_Effectinfo_ParseInt (&data, &count))
-                                current_emitter->count = q_max (1, count);
+                        float value;
+                        if (R_Effectinfo_ParseFloat (&data, &value))
+                                current_emitter->count_multiplier = value;
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "countabsolute"))
+                {
+                        float value;
+                        if (R_Effectinfo_ParseFloat (&data, &value))
+                                current_emitter->count_absolute = q_max (0.f, value);
                         continue;
                 }
 
@@ -1099,6 +1145,50 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                         continue;
                 }
 
+                if (!q_strcasecmp (com_token, "lightradius"))
+                {
+                        R_Effectinfo_ParseFloat (&data, &current_emitter->light_radius_start);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lightradiusfade"))
+                {
+                        R_Effectinfo_ParseFloat (&data, &current_emitter->light_radius_fade);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lighttime"))
+                {
+                        R_Effectinfo_ParseFloat (&data, &current_emitter->light_time);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lightcolor"))
+                {
+                        R_Effectinfo_ParseVec3 (&data, current_emitter->light_color);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lightshadow"))
+                {
+                        float shadow;
+                        if (R_Effectinfo_ParseFloat (&data, &shadow))
+                                current_emitter->light_shadow = (shadow != 0.f);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lightcubemapnum"))
+                {
+                        R_Effectinfo_ParseInt (&data, &current_emitter->light_cubemap);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lightcorona"))
+                {
+                        R_Effectinfo_ParseFloatPair (&data, &current_emitter->light_corona_scale, &current_emitter->light_corona_alpha);
+                        continue;
+                }
+
                 if (!q_strcasecmp (com_token, "underwater"))
                 {
                         current_emitter->underwater_only = true;
@@ -1114,12 +1204,75 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                 if (!q_strcasecmp (com_token, "trailspacing"))
                 {
                         R_Effectinfo_ParseFloat (&data, &current_emitter->trail_spacing);
+                        if (current_emitter->trail_spacing < 0.f)
+                                current_emitter->trail_spacing = 0.f;
                         continue;
                 }
 
                 if (!q_strcasecmp (com_token, "stretchfactor"))
                 {
                         R_Effectinfo_ParseFloat (&data, &current_emitter->stretch);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "staincolor"))
+                {
+                        vec3_t minc, maxc;
+                        const char* before = data;
+                        const char* next = COM_Parse (data);
+                        if (!next || !com_token[0] || !R_Effectinfo_ParseHexColor (com_token, minc))
+                        {
+                                data = before;
+                                continue;
+                        }
+
+                        data = next;
+                        before = data;
+                        next = COM_Parse (data);
+                        if (!next || !com_token[0] || !R_Effectinfo_ParseHexColor (com_token, maxc))
+                        {
+                                data = before;
+                                VectorCopy (minc, current_emitter->stain_color_min);
+                                VectorCopy (minc, current_emitter->stain_color_max);
+                        }
+                        else
+                        {
+                                data = next;
+                                VectorCopy (minc, current_emitter->stain_color_min);
+                                VectorCopy (maxc, current_emitter->stain_color_max);
+                        }
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "stainalpha"))
+                {
+                        R_Effectinfo_ParseFloatPair (&data, &current_emitter->stain_alpha_min, &current_emitter->stain_alpha_max);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "stainsize"))
+                {
+                        R_Effectinfo_ParseFloatPair (&data, &current_emitter->stain_size_min, &current_emitter->stain_size_max);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "staintex"))
+                {
+                        R_Effectinfo_ParseIntPair (&data, &current_emitter->stain_tex_min, &current_emitter->stain_tex_max);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "stainless"))
+                {
+                        current_emitter->stainless = true;
+                        current_emitter->stain_tex_min = -2;
+                        current_emitter->stain_tex_max = -2;
+                        VectorSet (current_emitter->stain_color_min, 1.f, 1.f, 1.f);
+                        VectorSet (current_emitter->stain_color_max, 1.f, 1.f, 1.f);
+                        current_emitter->stain_alpha_min = 1.f;
+                        current_emitter->stain_alpha_max = 1.f;
+                        current_emitter->stain_size_min = 2.f;
+                        current_emitter->stain_size_max = 2.f;
                         continue;
                 }
 
@@ -1232,175 +1385,260 @@ static void R_Particles_ReloadEffects_f (void)
         R_Particles_LoadEffectInfo (custom && *custom ? custom : NULL);
 }
 
-static qboolean R_Effectinfo_SpawnEmitter (const effect_emitter_t* emit, const vec3_t org, const vec3_t dir, float count_scale)
+static qboolean R_Effectinfo_SpawnParticleInstance (const effect_emitter_t* emit, const vec3_t base_org, const vec3_t dir, const vec3_t forward, const vec3_t right, const vec3_t up)
 {
-        int spawned = 0;
-        float spawn_total;
+        vec3_t spawn_org;
+        vec3_t velocity;
+        particle_t* p;
+        particle_dp_t* ext;
+        int idx;
+        float lifetime;
+        float size_x, size_y;
+        float alpha;
+
+        VectorCopy (base_org, spawn_org);
+
+        if (!VectorCompare (emit->origin_offset, vec3_origin))
+                VectorAdd (spawn_org, emit->origin_offset, spawn_org);
+
+        if (!VectorCompare (emit->origin_rel, vec3_origin))
+        {
+                vec3_t rel;
+                rel[0] = forward[0] * emit->origin_rel[0] + right[0] * emit->origin_rel[1] + up[0] * emit->origin_rel[2];
+                rel[1] = forward[1] * emit->origin_rel[0] + right[1] * emit->origin_rel[1] + up[1] * emit->origin_rel[2];
+                rel[2] = forward[2] * emit->origin_rel[0] + right[2] * emit->origin_rel[1] + up[2] * emit->origin_rel[2];
+                VectorAdd (spawn_org, rel, spawn_org);
+        }
+
+        if (!VectorCompare (emit->origin_jitter, vec3_origin))
+        {
+                spawn_org[0] += R_Effectinfo_CRandom (emit->origin_jitter[0]);
+                spawn_org[1] += R_Effectinfo_CRandom (emit->origin_jitter[1]);
+                spawn_org[2] += R_Effectinfo_CRandom (emit->origin_jitter[2]);
+        }
+
+        VectorCopy (dir, velocity);
+        if (emit->velocity_multiplier != 0.f)
+                VectorScale (velocity, emit->velocity_multiplier, velocity);
+
+        if (!VectorCompare (emit->velocity_offset, vec3_origin))
+                VectorAdd (velocity, emit->velocity_offset, velocity);
+
+        if (!VectorCompare (emit->velocity_rel, vec3_origin))
+        {
+                vec3_t rel;
+                rel[0] = forward[0] * emit->velocity_rel[0] + right[0] * emit->velocity_rel[1] + up[0] * emit->velocity_rel[2];
+                rel[1] = forward[1] * emit->velocity_rel[0] + right[1] * emit->velocity_rel[1] + up[1] * emit->velocity_rel[2];
+                rel[2] = forward[2] * emit->velocity_rel[0] + right[2] * emit->velocity_rel[1] + up[2] * emit->velocity_rel[2];
+                VectorAdd (velocity, rel, velocity);
+        }
+
+        if (!VectorCompare (emit->velocity_jitter, vec3_origin))
+        {
+                velocity[0] += R_Effectinfo_CRandom (emit->velocity_jitter[0]);
+                velocity[1] += R_Effectinfo_CRandom (emit->velocity_jitter[1]);
+                velocity[2] += R_Effectinfo_CRandom (emit->velocity_jitter[2]);
+        }
+
+        if (emit->underwater_only || emit->notunderwater)
+        {
+                int contents = R_PointContentsSafe (spawn_org);
+                qboolean in_liquid = (contents <= CONTENTS_WATER);
+                if ((emit->underwater_only && !in_liquid) || (emit->notunderwater && in_liquid))
+                        return false;
+        }
+
+        p = R_AllocParticle ();
+        if (!p)
+                return false;
+
+        idx = (int)(p - particles);
+        ext = &particle_dp[idx];
+        memset (ext, 0, sizeof (*ext));
+
+        p->custom = 1;
+        p->type = pt_static;
+        p->spawn = cl.time;
+
+        lifetime = R_Effectinfo_Random (emit->time_min, emit->time_max);
+        if (lifetime <= 0.01f)
+                lifetime = 0.01f;
+        p->die = p->spawn + lifetime;
+
+        VectorCopy (spawn_org, p->org);
+
+        VectorClear (p->accel);
+        if (emit->gravity != 0.f)
+                p->accel[2] = -emit->gravity * sv_gravity.value;
+
+        VectorCopy (velocity, p->vel);
+
+        size_x = R_Effectinfo_Random (emit->size_min, emit->size_max);
+        size_x = q_max (0.01f, size_x);
+        size_y = R_Effectinfo_Random (emit->sizey_min, emit->sizey_max);
+        size_y = q_max (0.01f, size_y);
+        p->size = size_x;
+        p->size_vel = emit->size_increase;
+        ext->size_y = size_y;
+
+        alpha = R_Effectinfo_Random (emit->alpha_min, emit->alpha_max);
+        alpha = q_clamp (alpha, 0.f, 1.f);
+        ext->alpha_current = alpha;
+        ext->alpha_decay = q_max (0.f, emit->alpha_fade);
+        ext->alpha_mode = emit->alpha_mode;
+        p->alpha_start = alpha;
+        p->alpha_end = 0.f;
+        p->alpha_power = 1.f;
+
+        p->airfriction = emit->airfriction;
+        ext->liquidfriction = emit->liquidfriction;
+        ext->bounce = emit->bounce;
+        ext->stretch = emit->stretch;
+        ext->blend = emit->blend;
+        ext->orient = emit->orient;
+        ext->kill_on_draw = emit->kill_on_draw;
+        ext->underwater_only = emit->underwater_only;
+        ext->notunderwater = emit->notunderwater;
+        ext->leave_decal = emit->leave_decal;
+
+        ext->rotation = DEG2RAD (R_Effectinfo_Random (emit->rotate_start_min, emit->rotate_start_max));
+        ext->spin = DEG2RAD (R_Effectinfo_Random (emit->rotate_speed_min, emit->rotate_speed_max));
+
+        p->glow = 0.f;
+        p->color = 0;
+        p->ramp = 0.f;
+
+        VectorSet (p->custom_color,
+                q_clamp (R_Effectinfo_Random (emit->color_min[0], emit->color_max[0]), 0.f, 1.f),
+                q_clamp (R_Effectinfo_Random (emit->color_min[1], emit->color_max[1]), 0.f, 1.f),
+                q_clamp (R_Effectinfo_Random (emit->color_min[2], emit->color_max[2]), 0.f, 1.f));
+
+        {
+                int tex_index = R_Effectinfo_ClampTexture (emit->tex_min);
+                int tmax = R_Effectinfo_ClampTexture (emit->tex_max);
+                if (tmax < tex_index)
+                        tmax = tex_index;
+                if (tmax > tex_index)
+                        tex_index += rand () % (tmax - tex_index + 1);
+                p->texture = (byte)tex_index;
+        }
+
+        return true;
+}
+
+static qboolean R_Effectinfo_SpawnEmitter (effect_emitter_t* emit, const vec3_t org, const vec3_t dir, float count_scale)
+{
+        qboolean spawned = false;
         vec3_t forward, right, up;
 
         if (!emit)
                 return false;
 
-        spawn_total = (emit->count > 0) ? (float)emit->count : 1.f;
-        if (count_scale > 0.f)
-                spawn_total *= count_scale;
-        if (spawn_total <= 0.f)
-                return false;
+        R_Effectinfo_BuildBasis (dir, forward, right, up);
 
         {
-                int total = (int)floorf (spawn_total);
-                float frac = spawn_total - (float)total;
-                if (frac > 0.f && R_Effectinfo_Random (0.f, 1.f) < frac)
-                        total++;
-                if (total <= 0)
-                        total = 1;
+                float path_len = VectorLength (dir);
+                vec3_t dir_norm;
+                vec3_t start;
+                VectorCopy (dir, dir_norm);
+                if (path_len > 0.0001f)
+                        VectorScale (dir_norm, 1.f / path_len, dir_norm);
+                else
+                        VectorClear (dir_norm);
 
-                R_Effectinfo_BuildBasis (dir, forward, right, up);
+                VectorMA (org, -0.5f, dir, start);
 
-                while (total-- > 0)
+                if (emit->trail_spacing > 0.f && path_len > 0.0001f)
                 {
-                        vec3_t spawn_org;
-                        vec3_t velocity;
-                        float lifetime;
-                        float size_x, size_y;
-                        float alpha;
-                        int tex_index;
-                        particle_t* p;
-                        particle_dp_t* ext;
-                        int idx;
+                        float distance_before = emit->trail_distance_accum;
+                        float total_distance = distance_before + path_len;
+                        int steps = (int)floorf (total_distance / emit->trail_spacing);
+                        int i;
 
-                        VectorCopy (org, spawn_org);
-
-                        if (!VectorCompare (emit->origin_offset, vec3_origin))
-                                VectorAdd (spawn_org, emit->origin_offset, spawn_org);
-
-                        if (!VectorCompare (emit->origin_rel, vec3_origin))
+                        if (steps > 0)
                         {
-                                vec3_t rel;
-                                rel[0] = forward[0] * emit->origin_rel[0] + right[0] * emit->origin_rel[1] + up[0] * emit->origin_rel[2];
-                                rel[1] = forward[1] * emit->origin_rel[0] + right[1] * emit->origin_rel[1] + up[1] * emit->origin_rel[2];
-                                rel[2] = forward[2] * emit->origin_rel[0] + right[2] * emit->origin_rel[1] + up[2] * emit->origin_rel[2];
-                                VectorAdd (spawn_org, rel, spawn_org);
+                                for (i = 0; i < steps; ++i)
+                                {
+                                        float dist_along = emit->trail_spacing * (float)(i + 1) - distance_before;
+                                        vec3_t base_org;
+
+                                        if (dist_along < 0.f)
+                                                dist_along = 0.f;
+                                        if (dist_along > path_len)
+                                                dist_along = path_len;
+
+                                        VectorMA (start, dist_along, dir_norm, base_org);
+                                        if (R_Effectinfo_SpawnParticleInstance (emit, base_org, dir, forward, right, up))
+                                                spawned = true;
+                                }
                         }
 
-                        if (!VectorCompare (emit->origin_jitter, vec3_origin))
-                        {
-                                spawn_org[0] += R_Effectinfo_CRandom (emit->origin_jitter[0]);
-                                spawn_org[1] += R_Effectinfo_CRandom (emit->origin_jitter[1]);
-                                spawn_org[2] += R_Effectinfo_CRandom (emit->origin_jitter[2]);
-                        }
-
-                        VectorCopy (dir, velocity);
-                        if (emit->velocity_multiplier != 0.f)
-                                VectorScale (velocity, emit->velocity_multiplier, velocity);
-
-                        if (!VectorCompare (emit->velocity_offset, vec3_origin))
-                                VectorAdd (velocity, emit->velocity_offset, velocity);
-
-                        if (!VectorCompare (emit->velocity_rel, vec3_origin))
-                        {
-                                vec3_t rel;
-                                rel[0] = forward[0] * emit->velocity_rel[0] + right[0] * emit->velocity_rel[1] + up[0] * emit->velocity_rel[2];
-                                rel[1] = forward[1] * emit->velocity_rel[0] + right[1] * emit->velocity_rel[1] + up[1] * emit->velocity_rel[2];
-                                rel[2] = forward[2] * emit->velocity_rel[0] + right[2] * emit->velocity_rel[1] + up[2] * emit->velocity_rel[2];
-                                VectorAdd (velocity, rel, velocity);
-                        }
-
-                        if (!VectorCompare (emit->velocity_jitter, vec3_origin))
-                        {
-                                velocity[0] += R_Effectinfo_CRandom (emit->velocity_jitter[0]);
-                                velocity[1] += R_Effectinfo_CRandom (emit->velocity_jitter[1]);
-                                velocity[2] += R_Effectinfo_CRandom (emit->velocity_jitter[2]);
-                        }
-
-                        if (emit->underwater_only || emit->notunderwater)
-                        {
-                                int contents = R_PointContentsSafe (spawn_org);
-                                qboolean in_liquid = (contents <= CONTENTS_WATER);
-                                if ((emit->underwater_only && !in_liquid) || (emit->notunderwater && in_liquid))
-                                        continue;
-                        }
-
-                        p = R_AllocParticle ();
-                        if (!p)
-                                break;
-
-                        idx = (int)(p - particles);
-                        ext = &particle_dp[idx];
-                        memset (ext, 0, sizeof (*ext));
-
-                        p->custom = 1;
-                        p->type = pt_static;
-                        p->spawn = cl.time;
-
-                        lifetime = R_Effectinfo_Random (emit->time_min, emit->time_max);
-                        if (lifetime <= 0.01f)
-                                lifetime = 0.01f;
-                        p->die = p->spawn + lifetime;
-
-                        VectorCopy (spawn_org, p->org);
-
-                        VectorClear (p->accel);
-                        if (emit->gravity != 0.f)
-                                p->accel[2] = -emit->gravity * sv_gravity.value;
-
-                        VectorCopy (velocity, p->vel);
-
-                        size_x = R_Effectinfo_Random (emit->size_min, emit->size_max);
-                        size_x = q_max (0.01f, size_x);
-                        size_y = R_Effectinfo_Random (emit->sizey_min, emit->sizey_max);
-                        size_y = q_max (0.01f, size_y);
-                        p->size = size_x;
-                        p->size_vel = emit->size_increase;
-                        ext->size_y = size_y;
-
-                        alpha = R_Effectinfo_Random (emit->alpha_min, emit->alpha_max);
-                        alpha = q_clamp (alpha, 0.f, 1.f);
-                        ext->alpha_current = alpha;
-                        ext->alpha_decay = q_max (0.f, emit->alpha_fade);
-                        ext->alpha_mode = emit->alpha_mode;
-                        p->alpha_start = alpha;
-                        p->alpha_end = 0.f;
-                        p->alpha_power = 1.f;
-
-                        p->airfriction = emit->airfriction;
-                        ext->liquidfriction = emit->liquidfriction;
-                        ext->bounce = emit->bounce;
-                        ext->stretch = emit->stretch;
-                        ext->blend = emit->blend;
-                        ext->orient = emit->orient;
-                        ext->kill_on_draw = emit->kill_on_draw;
-                        ext->underwater_only = emit->underwater_only;
-                        ext->notunderwater = emit->notunderwater;
-                        ext->leave_decal = emit->leave_decal;
-
-                        ext->rotation = DEG2RAD (R_Effectinfo_Random (emit->rotate_start_min, emit->rotate_start_max));
-                        ext->spin = DEG2RAD (R_Effectinfo_Random (emit->rotate_speed_min, emit->rotate_speed_max));
-
-                        p->glow = 0.f;
-                        p->color = 0;
-                        p->ramp = 0.f;
-
-                        VectorSet (p->custom_color,
-                                q_clamp (R_Effectinfo_Random (emit->color_min[0], emit->color_max[0]), 0.f, 1.f),
-                                q_clamp (R_Effectinfo_Random (emit->color_min[1], emit->color_max[1]), 0.f, 1.f),
-                                q_clamp (R_Effectinfo_Random (emit->color_min[2], emit->color_max[2]), 0.f, 1.f));
-
-                        tex_index = R_Effectinfo_ClampTexture (emit->tex_min);
-                        {
-                                int tmax = R_Effectinfo_ClampTexture (emit->tex_max);
-                                if (tmax < tex_index)
-                                        tmax = tex_index;
-                                if (tmax > tex_index)
-                                        tex_index += rand () % (tmax - tex_index + 1);
-                        }
-                        p->texture = (byte)tex_index;
-
-                        spawned++;
+                        emit->trail_distance_accum = total_distance - (float)steps * emit->trail_spacing;
+                }
+                else
+                {
+                        emit->trail_distance_accum = 0.f;
                 }
         }
 
-        return (spawned > 0);
+        {
+                double total = emit->count_accumulator + emit->count_absolute;
+                int base_count;
+                int i;
+
+                if (count_scale > 0.f)
+                        total += (double)count_scale * emit->count_multiplier;
+
+                if (total < 0.0)
+                        total = 0.0;
+
+                base_count = (int)floor (total);
+                emit->count_accumulator = total - (double)base_count;
+
+                if (emit->count_accumulator > 0.0001 && R_Effectinfo_Random (0.f, 1.f) < emit->count_accumulator)
+                {
+                        base_count++;
+                        emit->count_accumulator -= 1.0;
+                }
+
+                if (emit->count_accumulator < 0.0)
+                        emit->count_accumulator = 0.0;
+
+                for (i = 0; i < base_count; ++i)
+                {
+                        if (R_Effectinfo_SpawnParticleInstance (emit, org, dir, forward, right, up))
+                                spawned = true;
+                }
+        }
+
+        if (emit->light_radius_start > 0.f)
+        {
+                dlight_t* dl = CL_AllocDlight (0);
+                if (dl)
+                {
+                        VectorCopy (org, dl->origin);
+                        dl->radius = emit->light_radius_start;
+                        dl->color[0] = emit->light_color[0];
+                        dl->color[1] = emit->light_color[1];
+                        dl->color[2] = emit->light_color[2];
+                        dl->minlight = 0.f;
+                        if (emit->light_time > 0.f)
+                                dl->die = cl.time + emit->light_time;
+                        else if (emit->light_radius_fade > 0.f)
+                                dl->die = cl.time + emit->light_radius_start / emit->light_radius_fade;
+                        else
+                                dl->die = cl.time + 0.1f;
+                        if (emit->light_radius_fade > 0.f)
+                                dl->decay = emit->light_radius_fade;
+                        else if (dl->die > cl.time)
+                                dl->decay = emit->light_radius_start / (dl->die - cl.time);
+                        else
+                                dl->decay = 0.f;
+                        spawned = true;
+                }
+        }
+
+        return spawned;
 }
 
 static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t org, const vec3_t dir, float count_scale)
@@ -1424,7 +1662,7 @@ static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t 
 
         for (i = 0; i < def->num_emitters; ++i)
         {
-                const effect_emitter_t* emit = &effect_emitters[def->first_emitter + i];
+                effect_emitter_t* emit = &effect_emitters[def->first_emitter + i];
                 if (R_Effectinfo_SpawnEmitter (emit, org, dir, count_scale))
                         spawned = true;
         }
@@ -1435,7 +1673,7 @@ static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t 
         return spawned;
 }
 
-cvar_t  r_particles = { "r_particles","2", CVAR_ARCHIVE }; //johnfitz
+cvar_t  r_particles = { "r_particles","1", CVAR_ARCHIVE };
 
 typedef struct particlevert_t {
         vec3_t      pos;
@@ -1743,22 +1981,15 @@ R_SetParticleTexture_f -- johnfitz
 */
 static void R_SetParticleTexture_f (cvar_t* var)
 {
-        switch ((int)(r_particles.value))
-        {
-        case 1:
-                uvscale = 1.0f;
-                texturescalefactor = 1.27f;
-                break;
-        case 2:
-                uvscale = 0.25f;
-                texturescalefactor = 1.0f;
-                break;
-        default:
-                // robuster Default (entspricht Modus 2 / moderne Quad-Partikel)
-                uvscale = 0.25f;
-                texturescalefactor = 1.0f;
-                break;
-        }
+        (void)var;
+
+        if (r_particles.value < 0.f)
+                Cvar_SetValueQuick (&r_particles, 0.f);
+        else if (r_particles.value > 1.f)
+                Cvar_SetValueQuick (&r_particles, 1.f);
+
+        uvscale = 0.25f;
+        texturescalefactor = 1.0f;
 }
 
 /*
