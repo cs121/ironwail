@@ -129,6 +129,8 @@ void R_AddStaticModels (const byte *vis);
 
 void R_NewMap (void);
 
+void R_Particles_LoadEffectInfo (const char *customfile);
+
 
 void R_ParseParticleEffect (void);
 void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count);

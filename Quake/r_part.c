@@ -277,7 +277,11 @@ static effectinfo_t* R_Effectinfo_GetOrCreate (const char* name)
 {
         effectinfo_t* def = R_Effectinfo_FindDef (name);
         if (def)
+        {
+                def->first_emitter = num_effect_emitters;
+                def->num_emitters = 0;
                 return def;
+        }
         if (num_effectinfos >= MAX_EFFECTINFO)
                 return NULL;
         def = &effect_defs[num_effectinfos++];
@@ -701,9 +705,38 @@ static void R_Effectinfo_FinalizeEmitters (void)
         }
 }
 
-static void R_Effectinfo_Load (void)
+
+static void R_Effectinfo_BuildBasis (const vec3_t dir, vec3_t forward, vec3_t right, vec3_t up)
 {
-        char* text;
+        float len = VectorLength (dir);
+        if (len > 0.0001f)
+        {
+                VectorScale (dir, 1.f / len, forward);
+        }
+        else
+        {
+                forward[0] = 0.f;
+                forward[1] = 0.f;
+                forward[2] = 1.f;
+        }
+
+        PerpendicularVector (right, forward);
+        VectorNormalize (right);
+        CrossProduct (forward, right, up);
+        VectorNormalize (up);
+}
+
+static int R_Effectinfo_ClampTexture (int index)
+{
+        if (index < 0)
+                return 0;
+        if (index >= NUM_PARTICLE_TEXTURES)
+                return NUM_PARTICLE_TEXTURES - 1;
+        return index;
+}
+
+static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
+{
         const char* data;
         const char* next;
         effectinfo_t* current_def = NULL;
@@ -711,14 +744,10 @@ static void R_Effectinfo_Load (void)
         qboolean warned_def_limit = false;
         qboolean warned_emit_limit = false;
 
-        R_Effectinfo_Clear ();
-
-        text = (char*)COM_LoadMallocFile ("effectinfo.txt", NULL);
         if (!text)
-        {
-                Con_Printf ("effectinfo.txt not found, using legacy particles\n");
-                return;
-        }
+                return false;
+
+        (void)source;
 
         data = text;
         while ((next = COM_Parse (data)) != NULL)
@@ -814,7 +843,6 @@ static void R_Effectinfo_Load (void)
 
                 if (!q_strcasecmp (com_token, "color"))
                 {
-                        const char* before = data;
                         next = COM_Parse (data);
                         if (!next)
                                 break;
@@ -1030,47 +1058,89 @@ static void R_Effectinfo_Load (void)
                 }
         }
 
+        return effectinfo_active;
+}
+
+static qboolean R_Effectinfo_LoadFile (const char* filename)
+{
+        char* text;
+        qboolean result;
+
+        if (!filename || !*filename)
+                return false;
+
+        text = (char*)COM_LoadMallocFile (filename, NULL);
+        if (!text)
+                return false;
+
+        result = R_Effectinfo_ParseText (text, filename);
         free (text);
 
-        if (!effectinfo_active)
+        return result;
+}
+
+void R_Particles_LoadEffectInfo (const char* customfile)
+{
+        char basefile[MAX_QPATH];
+        char mapfile[MAX_QPATH];
+        qboolean loaded = false;
+        qboolean loaded_map = false;
+
+        R_Effectinfo_Clear ();
+
+        if (customfile && *customfile)
         {
-                Con_Printf ("effectinfo.txt present but empty, using legacy particles\n");
+                loaded = R_Effectinfo_LoadFile (customfile);
+                if (loaded)
+                        q_strlcpy (effectinfo_source, customfile, sizeof (effectinfo_source));
+        }
+        else
+        {
+                loaded = R_Effectinfo_LoadFile ("effectinfo.txt");
+                if (loaded)
+                        q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
+
+                if (cl.worldmodel && cl.worldmodel->name[0])
+                {
+                        COM_StripExtension (cl.worldmodel->name, basefile, sizeof (basefile));
+                        dpsnprintf (mapfile, sizeof (mapfile), "%s_effectinfo.txt", basefile);
+                        loaded_map = R_Effectinfo_LoadFile (mapfile);
+                }
+        }
+
+        if (!loaded && !loaded_map)
+        {
+                effectinfo_active = false;
+                effectinfo_source[0] = '\0';
+                Con_Printf ("effectinfo.txt not found, using legacy particles\n");
                 return;
         }
 
         R_Effectinfo_FinalizeEmitters ();
-        q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
-        Con_Printf ("Loaded %d particle effects (%d emitters) from %s\n", num_effectinfos, num_effect_emitters, effectinfo_source);
-        R_Effectinfo_DebugPrintLoaded ();
-}
 
-static void R_Effectinfo_BuildBasis (const vec3_t dir, vec3_t forward, vec3_t right, vec3_t up)
-{
-        float len = VectorLength (dir);
-        if (len > 0.0001f)
+        if (loaded && loaded_map)
         {
-                VectorScale (dir, 1.f / len, forward);
+                Con_Printf ("Loaded %d particle effects (%d emitters) from %s and %s\n",
+                        num_effectinfos, num_effect_emitters,
+                        effectinfo_source[0] ? effectinfo_source : "effectinfo.txt",
+                        mapfile);
         }
         else
         {
-                forward[0] = 0.f;
-                forward[1] = 0.f;
-                forward[2] = 1.f;
+                const char* src = loaded ? effectinfo_source : mapfile;
+                Con_Printf ("Loaded %d particle effects (%d emitters) from %s\n",
+                        num_effectinfos, num_effect_emitters, src);
+                if (!loaded && loaded_map)
+                        q_strlcpy (effectinfo_source, mapfile, sizeof (effectinfo_source));
         }
 
-        PerpendicularVector (right, forward);
-        VectorNormalize (right);
-        CrossProduct (forward, right, up);
-        VectorNormalize (up);
+        R_Effectinfo_DebugPrintLoaded ();
 }
 
-static int R_Effectinfo_ClampTexture (int index)
+static void R_Particles_ReloadEffects_f (void)
 {
-        if (index < 0)
-                return 0;
-        if (index >= NUM_PARTICLE_TEXTURES)
-                return NUM_PARTICLE_TEXTURES - 1;
-        return index;
+        const char* custom = (Cmd_Argc () > 1) ? Cmd_Argv (1) : NULL;
+        R_Particles_LoadEffectInfo (custom && *custom ? custom : NULL);
 }
 
 static qboolean R_Effectinfo_SpawnEmitter (const effect_emitter_t* emit, const vec3_t org, const vec3_t dir, float count_scale)
@@ -1611,8 +1681,11 @@ void R_InitParticles (void)
         Cvar_SetCallback (&r_particles, R_SetParticleTexture_f);
         R_SetParticleTexture_f (&r_particles); // set default
 
+        Cmd_AddCommand ("cl_particles_reloadeffects", R_Particles_ReloadEffects_f,
+                "reload particle effect definitions from effectinfo files");
+
         R_InitParticleAtlas ();
-        R_Effectinfo_Load ();
+        R_Particles_LoadEffectInfo (NULL);
 }
 
 /*
