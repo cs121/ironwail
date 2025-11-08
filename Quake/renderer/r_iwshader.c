@@ -95,6 +95,26 @@ static void IW_CopyTokenText(const iwtxtToken_t *token, char *dst, size_t size)
     dst[n] = '\0';
 }
 
+static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *token)
+{
+    if (!IWTXT_NextToken(parser, token))
+        return false;
+    if (token->type != IWTXT_TOKEN_NUMBER)
+        return false;
+    *out = (float)token->number;
+    return true;
+}
+
+static qboolean IW_ReadInt(iwtxtParser_t *parser, int *out, iwtxtToken_t *token)
+{
+    if (!IWTXT_NextToken(parser, token))
+        return false;
+    if (token->type != IWTXT_TOKEN_NUMBER)
+        return false;
+    *out = (int)token->number;
+    return true;
+}
+
 static qboolean IW_ParseBlendFactor(const char *text, iwBlendFactor_t *out)
 {
     if (!q_strcasecmp(text, "zero")) { *out = IW_SRC_ZERO; return true; }
@@ -195,26 +215,6 @@ static qboolean IW_ParseWave(iwtxtParser_t *parser, iwWave_t *wave, const char *
         return false;
     }
 
-    return true;
-}
-
-static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *token)
-{
-    if (!IWTXT_NextToken(parser, token))
-        return false;
-    if (token->type != IWTXT_TOKEN_NUMBER)
-        return false;
-    *out = (float)token->number;
-    return true;
-}
-
-static qboolean IW_ReadInt(iwtxtParser_t *parser, int *out, iwtxtToken_t *token)
-{
-    if (!IWTXT_NextToken(parser, token))
-        return false;
-    if (token->type != IWTXT_TOKEN_NUMBER)
-        return false;
-    *out = (int)token->number;
     return true;
 }
 
