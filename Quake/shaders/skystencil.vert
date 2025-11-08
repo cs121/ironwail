@@ -29,6 +29,9 @@ struct Call
 #endif // BINDLESS
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
+        vec4    emissive_matrix;
+        vec4    emissive_translate;
+        vec4    emissive_color;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,

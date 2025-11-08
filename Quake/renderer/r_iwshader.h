@@ -185,6 +185,7 @@ const iwMaterial_t* IW_FindMaterial(const char* materialName);
 const iwMaterial_t* IW_MaterialForTexture(const char* textureName);
 
 void IW_TexMatrixIdentity(iwTexMatrix_t* out);
+qboolean IW_StageTexMatrix(const iwStage_t* stage, float time, iwTexMatrix_t* out);
 qboolean IW_MaterialTexMatrix(const iwMaterial_t* material, float time, iwTexMatrix_t* out);
 
 void IW_DumpMaterials(const char* outPath);

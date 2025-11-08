@@ -23,7 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "gl_texmgr.h"
 #include "renderer/r_iwshader.h"
+
+#include <math.h>
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -169,6 +172,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	emissive;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
+	float		emissive_matrix[4];
+	float		emissive_translate[4];
+	float		emissive_color[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -178,6 +184,9 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLint		padding;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
+	float		emissive_matrix[4];
+	float		emissive_translate[4];
+	float		emissive_color[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -326,6 +335,85 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
 
+static gltexture_t *R_IWShader_FindTextureForPath(const texture_t *base, const char *path)
+{
+        gltexture_t *tex = NULL;
+
+        if (!path || !*path)
+                return base ? base->gltexture : NULL;
+
+        if (path[0] == '$')
+        {
+                if (!q_strcasecmp(path, "$white"))
+                        return whitetexture;
+                if (!q_strcasecmp(path, "$black"))
+                        return blacktexture;
+                if (!q_strcasecmp(path, "$grey") || !q_strcasecmp(path, "$gray"))
+                        return greytexture;
+                return base ? base->gltexture : NULL;
+        }
+
+        qmodel_t *owner = (base && base->gltexture) ? base->gltexture->owner : NULL;
+        if (owner)
+        {
+                char full_name[MAX_OSPATH];
+                q_snprintf(full_name, sizeof(full_name), "%s:%s", owner->name, path);
+                tex = TexMgr_FindTexture(owner, full_name);
+                if (!tex)
+                        tex = TexMgr_FindTexture(owner, path);
+                if (!tex && owner->textures)
+                {
+                        for (int i = 0; i < owner->numtextures; ++i)
+                        {
+                                texture_t *other = owner->textures[i];
+                                if (!other || !other->gltexture)
+                                        continue;
+                                if (!q_strcasecmp(other->name, path))
+                                        return other->gltexture;
+                        }
+                }
+        }
+
+        if (!tex)
+                tex = TexMgr_FindTexture(NULL, path);
+        if (!tex && base)
+                tex = base->gltexture;
+        return tex;
+}
+
+static gltexture_t *R_IWShader_FindStageTexture(const texture_t *base, const iwStage_t *stage, float time)
+{
+        if (!stage)
+                return base ? base->gltexture : NULL;
+
+        const char *path = stage->mapPath;
+        if (stage->animMap && stage->numAnimFrames > 0)
+        {
+                float fps = stage->animFps != 0.f ? fabsf(stage->animFps) : 1.f;
+                int frame = (int)floor(time * fps);
+                frame %= stage->numAnimFrames;
+                if (frame < 0)
+                        frame += stage->numAnimFrames;
+                if (frame >= 0 && frame < stage->numAnimFrames)
+                        path = stage->animPaths[frame];
+        }
+
+        return R_IWShader_FindTextureForPath(base, path);
+}
+
+static void R_IWShader_EmissiveColor(const iwStage_t *stage, float color[3])
+{
+        color[0] = color[1] = color[2] = 1.f;
+        if (!stage)
+                return;
+        if (stage->rgbgen == IW_RGB_CONST)
+        {
+                color[0] = stage->rgbConst[0];
+                color[1] = stage->rgbConst[1];
+                color[2] = stage->rgbConst[2];
+        }
+}
+
 /*
 =============
 R_AddBModelCall
@@ -338,8 +426,14 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         gltexture_t     *tx, *fb, *em;
         const iwMaterial_t *material = NULL;
         iwTexMatrix_t   tex_matrix;
+        iwTexMatrix_t   emissive_matrix;
+        float           emissive_color[3];
+        const iwStage_t *emissive_stage = NULL;
+        float           material_alpha = -1.f;
 
         IW_TexMatrixIdentity (&tex_matrix);
+        IW_TexMatrixIdentity (&emissive_matrix);
+        R_IWShader_EmissiveColor (NULL, emissive_color);
 
         if (t && t->gltexture)
         {
@@ -360,7 +454,25 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         }
 
         if (material)
+        {
                 IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
+                if (material->numStages > 0)
+                {
+                        const iwStage_t *base_stage = &material->stages[0];
+                        if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
+                            base_stage->alphagen == IW_A_CONST)
+                                material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
+                }
+
+                for (int s = 0; s < material->numStages; ++s)
+                {
+                        const iwStage_t *stage = &material->stages[s];
+                        if (!stage->emissive)
+                                continue;
+                        emissive_stage = stage;
+                        break;
+                }
+        }
 
         if (num_bmodel_calls == MAX_BMODEL_DRAWS)
                 R_FlushBModelCalls ();
@@ -381,6 +493,15 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 em = NULL;
         }
 
+        if (emissive_stage)
+        {
+                gltexture_t *stage_tex = R_IWShader_FindStageTexture(t, emissive_stage, r_framedata.time);
+                if (stage_tex)
+                        em = stage_tex;
+                R_IWShader_EmissiveColor(emissive_stage, emissive_color);
+                IW_StageTexMatrix(emissive_stage, r_framedata.time, &emissive_matrix);
+        }
+
         if (!gl_zfix.value || map_checks.value)
                 zfix = 0;
 
@@ -390,6 +511,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
+        if (material_alpha >= 0.f)
+                alpha = material_alpha;
 
         if (gl_bindless_able)
         {
@@ -404,6 +527,15 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[1] = tex_matrix.translate[1];
                 call->tcmod_translate[2] = 0.f;
                 call->tcmod_translate[3] = 0.f;
+                memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
+                call->emissive_translate[0] = emissive_matrix.translate[0];
+                call->emissive_translate[1] = emissive_matrix.translate[1];
+                call->emissive_translate[2] = 0.f;
+                call->emissive_translate[3] = 0.f;
+                call->emissive_color[0] = emissive_color[0];
+                call->emissive_color[1] = emissive_color[1];
+                call->emissive_color[2] = emissive_color[2];
+                call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
         }
         else
         {
@@ -418,6 +550,15 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[1] = tex_matrix.translate[1];
                 call->tcmod_translate[2] = 0.f;
                 call->tcmod_translate[3] = 0.f;
+                memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
+                call->emissive_translate[0] = emissive_matrix.translate[0];
+                call->emissive_translate[1] = emissive_matrix.translate[1];
+                call->emissive_translate[2] = 0.f;
+                call->emissive_translate[3] = 0.f;
+                call->emissive_color[0] = emissive_color[0];
+                call->emissive_color[1] = emissive_color[1];
+                call->emissive_color[2] = emissive_color[2];
+                call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
                 textures[0] = tx ? tx : greytexture;
                 textures[1] = fb ? fb : blacktexture;
                 textures[2] = em ? em : blacktexture;
