@@ -62,8 +62,13 @@ static qboolean IWTXT_ParseNumber(const char *text, size_t len, double *out)
 qboolean IWTXT_LoadFile(const char *path, char **outBuf, int *outLen)
 {
     byte *data = COM_LoadMallocFile(path, NULL);
+
     if (!data)
-        return false;
+    {
+        data = COM_LoadMallocFile_TextMode_OSPath(path, NULL);
+        if (!data)
+            return false;
+    }
 
     if (outLen)
         *outLen = (int)strlen((const char *)data);
