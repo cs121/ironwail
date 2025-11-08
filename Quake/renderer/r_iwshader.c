@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <math.h>
 
 #define IW_MAX_MATERIALS 512
 
@@ -1428,6 +1429,116 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
     }
 
     return iw_last_material;
+}
+
+void IW_TexMatrixIdentity(iwTexMatrix_t *out)
+{
+    if (!out)
+        return;
+
+    out->matrix[0] = 1.f;
+    out->matrix[1] = 0.f;
+    out->matrix[2] = 0.f;
+    out->matrix[3] = 1.f;
+    out->translate[0] = 0.f;
+    out->translate[1] = 0.f;
+}
+
+static void IW_CombineTexMatrix(float matrix[4], float translate[2], const float opMatrix[4], const float opTranslate[2])
+{
+    const float m0 = matrix[0];
+    const float m1 = matrix[1];
+    const float m2 = matrix[2];
+    const float m3 = matrix[3];
+    const float t0 = translate[0];
+    const float t1 = translate[1];
+
+    matrix[0] = opMatrix[0] * m0 + opMatrix[1] * m2;
+    matrix[1] = opMatrix[0] * m1 + opMatrix[1] * m3;
+    matrix[2] = opMatrix[2] * m0 + opMatrix[3] * m2;
+    matrix[3] = opMatrix[2] * m1 + opMatrix[3] * m3;
+    translate[0] = opMatrix[0] * t0 + opMatrix[1] * t1 + opTranslate[0];
+    translate[1] = opMatrix[2] * t0 + opMatrix[3] * t1 + opTranslate[1];
+}
+
+qboolean IW_MaterialTexMatrix(const iwMaterial_t *material, float time, iwTexMatrix_t *out)
+{
+    if (!out)
+        return false;
+
+    IW_TexMatrixIdentity(out);
+
+    if (!material || material->numStages <= 0)
+        return false;
+
+    const iwStage_t *stage = &material->stages[0];
+    if (stage->numTCMods <= 0)
+        return false;
+    if (stage->tcAlign != IW_TC_ALIGN_OBJECT)
+        return false;
+    if (stage->animMap && stage->numAnimFrames > 0)
+        return false;
+
+    float matrix[4] = { 1.f, 0.f, 0.f, 1.f };
+    float translate[2] = { 0.f, 0.f };
+    qboolean modified = false;
+
+    for (int i = 0; i < stage->numTCMods; ++i)
+    {
+        const iwTCMod_t *tc = &stage->tcmods[i];
+        float opMatrix[4] = { 1.f, 0.f, 0.f, 1.f };
+        float opTranslate[2] = { 0.f, 0.f };
+
+        switch (tc->op)
+        {
+        case IW_TC_SCROLL:
+            opTranslate[0] = tc->a * time;
+            opTranslate[1] = tc->b * time;
+            if (tc->a != 0.f || tc->b != 0.f)
+                modified = true;
+            break;
+
+        case IW_TC_SCALE:
+            opMatrix[0] = tc->a;
+            opMatrix[3] = tc->b;
+            if (tc->a != 1.f || tc->b != 1.f)
+                modified = true;
+            break;
+
+        case IW_TC_ROTATE:
+        {
+            float angle = DEG2RAD(tc->a * time);
+            float s = sinf(angle);
+            float c = cosf(angle);
+            opMatrix[0] = c;
+            opMatrix[1] = -s;
+            opMatrix[2] = s;
+            opMatrix[3] = c;
+            opTranslate[0] = 0.5f - 0.5f * c + 0.5f * s;
+            opTranslate[1] = 0.5f - 0.5f * s - 0.5f * c;
+            if (fabsf(s) > 1e-6f || fabsf(c - 1.f) > 1e-6f)
+                modified = true;
+            break;
+        }
+
+        case IW_TC_TRANSLATE:
+            opTranslate[0] = tc->a;
+            opTranslate[1] = tc->b;
+            if (tc->a != 0.f || tc->b != 0.f)
+                modified = true;
+            break;
+
+        default:
+            return false;
+        }
+
+        IW_CombineTexMatrix(matrix, translate, opMatrix, opTranslate);
+    }
+
+    memcpy(out->matrix, matrix, sizeof(matrix));
+    out->translate[0] = translate[0];
+    out->translate[1] = translate[1];
+    return modified;
 }
 
 void IW_DumpMaterials(const char *outPath)
