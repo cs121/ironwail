@@ -267,9 +267,57 @@ Scrap_Compatible
 */
 qboolean Scrap_Compatible (unsigned int texflags)
 {
-	unsigned int required = TEXPREF_PAD;
-	unsigned int unsupported = TEXPREF_MIPMAP | TEXPREF_NEAREST | TEXPREF_LINEAR;
-	return (texflags & required) == required && (texflags & unsupported) == 0;
+        unsigned int required = TEXPREF_PAD;
+        unsigned int unsupported = TEXPREF_MIPMAP | TEXPREF_NEAREST | TEXPREF_LINEAR;
+        return (texflags & required) == required && (texflags & unsupported) == 0;
+}
+
+static qboolean Draw_LoadExternalPic (const char *path, unsigned int texflags, qpic_t *out)
+{
+        char stripped[MAX_QPATH];
+        char texpath[MAX_QPATH];
+        byte *data;
+        int mark;
+        int width, height;
+        enum srcformat fmt;
+        glpic_t gl;
+
+        COM_StripExtension (path, stripped, sizeof(stripped));
+        if (!stripped[0])
+                return false;
+
+        q_snprintf (texpath, sizeof(texpath), "textures/%s", stripped);
+
+        mark = Hunk_LowMark ();
+        data = Image_LoadImage (texpath, &width, &height, &fmt);
+        if (!data)
+        {
+                Hunk_FreeToLowMark (mark);
+                return false;
+        }
+
+        out->width = width;
+        out->height = height;
+
+        gl.gltexture = TexMgr_LoadImage (NULL, path, width, height, fmt, data, texpath, 0, texflags);
+        gl.sl = 0;
+        gl.tl = 0;
+        if (texflags & TEXPREF_PAD)
+        {
+                gl.sh = (float)width / (float)TexMgr_PadConditional (width);
+                gl.th = (float)height / (float)TexMgr_PadConditional (height);
+        }
+        else
+        {
+                gl.sh = 1;
+                gl.th = 1;
+        }
+
+        memcpy (out->data, &gl, sizeof(glpic_t));
+
+        Hunk_FreeToLowMark (mark);
+
+        return true;
 }
 
 /*
@@ -295,12 +343,19 @@ qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 	if (menu_numcachepics == MAX_CACHED_PICS)
 		Sys_Error ("menu_numcachepics == MAX_CACHED_PICS");
 
-	p = (qpic_t *) W_GetLumpName (name, &info);
-	if (!p)
-	{
-		Con_SafePrintf ("W_GetLumpName: %s not found\n", name);
-		return pic_nul; //johnfitz
-	}
+        if (Draw_LoadExternalPic (va("gfx/%s", name), texflags, &pic->pic))
+        {
+                strcpy (pic->name, name);
+                menu_numcachepics++;
+                return &pic->pic;
+        }
+
+        p = (qpic_t *) W_GetLumpName (name, &info);
+        if (!p)
+        {
+                Con_SafePrintf ("W_GetLumpName: %s not found\n", name);
+                return pic_nul; //johnfitz
+        }
 	if (info->type != TYP_QPIC) {Con_SafePrintf ("Draw_PicFromWad: lump \"%s\" is not a qpic\n", name); return pic_nul;}
 	if ((size_t)info->size < sizeof(int)*2) {Con_SafePrintf ("Draw_PicFromWad: pic \"%s\" is too small for its qpic header (%u bytes)\n", name, info->size); return pic_nul;}
 	if ((size_t)info->size < sizeof(int)*2+p->width*p->height) {Con_SafePrintf ("Draw_PicFromWad: pic \"%s\" truncated (%u*%u requires %u at least bytes)\n", name, p->width,p->height, 8+p->width*p->height); return pic_nul;}
@@ -333,12 +388,12 @@ qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 		gl.th = (texflags&TEXPREF_PAD)?(float)p->height/(float)TexMgr_PadConditional(p->height):1; //johnfitz
 	}
 
-	menu_numcachepics++;
-	strcpy (pic->name, name);
-	pic->pic = *p;
-	memcpy (pic->pic.data, &gl, sizeof(glpic_t));
+        strcpy (pic->name, name);
+        pic->pic = *p;
+        memcpy (pic->pic.data, &gl, sizeof(glpic_t));
+        menu_numcachepics++;
 
-	return &pic->pic;
+        return &pic->pic;
 }
 
 qpic_t *Draw_PicFromWad (const char *name)
@@ -354,7 +409,7 @@ Draw_CachePic
 qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 {
 	cachepic_t	*pic;
-	int			i, x, y;
+	int			 i, x, y;
 	qpic_t		*dat;
 	glpic_t		gl;
 
@@ -365,8 +420,15 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 	}
 	if (menu_numcachepics == MAX_CACHED_PICS)
 		Sys_Error ("menu_numcachepics == MAX_CACHED_PICS");
-	menu_numcachepics++;
-	strcpy (pic->name, path);
+
+	pic = &menu_cachepics[menu_numcachepics];
+
+	if (Draw_LoadExternalPic (path, texflags, &pic->pic))
+	{
+		strcpy (pic->name, path);
+		menu_numcachepics++;
+		return &pic->pic;
+	}
 
 //
 // load the pic from disk
@@ -397,7 +459,7 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 	else
 	{
 		gl.gltexture = TexMgr_LoadImage (NULL, path, dat->width, dat->height, SRC_INDEXED, dat->data, path,
-										  sizeof(int)*2, texflags); //johnfitz -- TexMgr
+						sizeof(int)*2, texflags); //johnfitz -- TexMgr
 		gl.sl = 0;
 		gl.sh = (float)dat->width/(float)TexMgr_PadConditional(dat->width); //johnfitz
 		gl.tl = 0;
@@ -407,8 +469,12 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 	free (dat);
 	memcpy (pic->pic.data, &gl, sizeof(glpic_t));
 
+	strcpy (pic->name, path);
+	menu_numcachepics++;
+
 	return &pic->pic;
 }
+
 
 qpic_t	*Draw_CachePic (const char *path)
 {
