@@ -53,8 +53,9 @@ static qboolean IWTXT_ParseNumber(const char *text, size_t len, double *out)
 
     char *endptr;
     double value = strtod(temp, &endptr);
-    if (endptr == temp)
+    if (endptr == temp || *endptr != '\0')
         return false;
+
     *out = value;
     return true;
 }
