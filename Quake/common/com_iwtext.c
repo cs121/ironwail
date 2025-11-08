@@ -26,9 +26,13 @@ static void IWTXT_SkipWhitespace(iwtxtParser_t *parser)
         }
         if (c == '#')
         {
-            while (parser->cursor < parser->end && *parser->cursor != '\n')
-                parser->cursor++;
-            continue;
+            char next = (parser->cursor + 1) < parser->end ? parser->cursor[1] : '\0';
+            if (!next || q_isspace((unsigned char) next))
+            {
+                while (parser->cursor < parser->end && *parser->cursor != '\n')
+                    parser->cursor++;
+                continue;
+            }
         }
         if (c == '/')
         {
@@ -165,8 +169,6 @@ static qboolean IWTXT_InternalNext(iwtxtParser_t *parser, iwtxtToken_t *out)
     {
         c = *parser->cursor;
         if (c == '\r' || c == '\n' || c == '\t' || c == ' ' || c == '\f' || c == '\v' || c == '{' || c == '}')
-            break;
-        if (c == '#')
             break;
         if (c == '/')
         {
