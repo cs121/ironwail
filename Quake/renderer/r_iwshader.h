@@ -26,6 +26,7 @@ typedef enum {
     IW_BLEND_ADD,
     IW_BLEND_MUL,
     IW_BLEND_PREMUL,
+    IW_BLEND_ADD_ALPHA,
     IW_BLEND_CUSTOM
 } iwBlendMode_t;
 
@@ -41,25 +42,53 @@ typedef enum {
     IW_RGB_VERTEX = 0,
     IW_RGB_CONST,
     IW_RGB_IDENTITY,
-    IW_RGB_ENTITY
+    IW_RGB_ENTITY,
+    IW_RGB_WAVE
 } iwRGBGen_t;
 
 typedef enum {
     IW_A_VERTEX = 0,
     IW_A_CONST,
-    IW_A_MASK
+    IW_A_MASK,
+    IW_A_ENTITY,
+    IW_A_WAVE
 } iwAlphaGen_t;
 
 typedef enum {
     IW_TC_SCROLL = 0,
     IW_TC_SCALE,
     IW_TC_ROTATE,
-    IW_TC_ENVMAP
+    IW_TC_ENVMAP,
+    IW_TC_STRETCH,
+    IW_TC_TURB
 } iwTCOp_t;
+
+typedef enum {
+    IW_WAVE_SIN = 0,
+    IW_WAVE_TRIANGLE,
+    IW_WAVE_SQUARE,
+    IW_WAVE_SAW
+} iwWaveFunc_t;
+
+typedef struct {
+    iwWaveFunc_t func;
+    float base;
+    float amplitude;
+    float phase;
+    float frequency;
+} iwWave_t;
+
+typedef enum {
+    IW_CHANNEL_R = 0,
+    IW_CHANNEL_G,
+    IW_CHANNEL_B,
+    IW_CHANNEL_A
+} iwChannel_t;
 
 typedef struct {
     iwTCOp_t op;
     float a, b;
+    iwWave_t wave;
 } iwTCMod_t;
 
 typedef struct {
@@ -69,8 +98,11 @@ typedef struct {
     iwBlendFactor_t src, dst;
     iwRGBGen_t rgbgen;
     float rgbConst[3];
+    iwWave_t rgbWave;
     iwAlphaGen_t alphagen;
     float aConst;
+    iwWave_t alphaWave;
+    iwChannel_t mask;
     int emissive;
     int numTCMods;
     iwTCMod_t tcmods[IW_MAX_TCMODS];
