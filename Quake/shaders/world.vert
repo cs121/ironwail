@@ -56,6 +56,8 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
+        vec4    tcmod_matrix;
+        vec4    tcmod_translate;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -155,7 +157,10 @@ void main()
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_pos = world_pos;
-	out_uv = in_uv.xy;
+	vec2 base_uv = in_uv.xy;
+        vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
+                                    dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
+        out_uv = transformed_uv;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);

@@ -166,6 +166,11 @@ typedef struct {
     iwStage_t stages[IW_MAX_STAGES];
 } iwMaterial_t;
 
+typedef struct {
+    float matrix[4];
+    float translate[2];
+} iwTexMatrix_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -178,6 +183,9 @@ void IW_LoadShaderDirectory(const char* dir);
 const iwMaterial_t* IW_FindMaterial(const char* materialName);
 
 const iwMaterial_t* IW_MaterialForTexture(const char* textureName);
+
+void IW_TexMatrixIdentity(iwTexMatrix_t* out);
+qboolean IW_MaterialTexMatrix(const iwMaterial_t* material, float time, iwTexMatrix_t* out);
 
 void IW_DumpMaterials(const char* outPath);
 

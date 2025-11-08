@@ -27,6 +27,8 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
+        vec4    tcmod_matrix;
+        vec4    tcmod_translate;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -107,7 +109,10 @@ void main()
         out_curr_clip = curr_clip;
         out_prev_clip = prev_clip;
         out_flags = call.flags;
-        out_uv = in_uv.xy;
+        vec2 base_uv = in_uv.xy;
+        vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
+                                    dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
+        out_uv = transformed_uv;
         out_pos = world_pos - EyePos;
         out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS

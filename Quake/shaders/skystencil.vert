@@ -27,6 +27,8 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
+        vec4    tcmod_matrix;
+        vec4    tcmod_translate;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,

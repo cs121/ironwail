@@ -167,6 +167,8 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
+	float		tcmod_matrix[4];
+	float		tcmod_translate[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -174,6 +176,8 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		alpha;
 	GLint		baseinstance;
 	GLint		padding;
+	float		tcmod_matrix[4];
+	float		tcmod_translate[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -329,49 +333,56 @@ R_AddBModelCall
 */
 static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix)
 {
-	GLuint		flags;
-	float		alpha;
-	gltexture_t	*tx, *fb, *em;
+        GLuint          flags;
+        float           alpha;
+        gltexture_t     *tx, *fb, *em;
+        const iwMaterial_t *material = NULL;
+        iwTexMatrix_t   tex_matrix;
 
-	if (t && t->gltexture)
-	{
-		const char *material_name = NULL;
+        IW_TexMatrixIdentity (&tex_matrix);
 
-		if (t->name[0])
-			material_name = t->name;
-		else if (t->gltexture->name[0])
-			material_name = t->gltexture->name;
-		else if (t->gltexture->source_file[0])
-			material_name = t->gltexture->source_file;
+        if (t && t->gltexture)
+        {
+                const char *material_name = NULL;
 
-		IW_MaterialForTexture (material_name);
-	}
-	else
-	{
-		IW_MaterialForTexture (NULL);
-	}
+                if (t->name[0])
+                        material_name = t->name;
+                else if (t->gltexture->name[0])
+                        material_name = t->gltexture->name;
+                else if (t->gltexture->source_file[0])
+                        material_name = t->gltexture->source_file;
 
-	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
-		R_FlushBModelCalls ();
+                material = IW_MaterialForTexture (material_name);
+        }
+        else
+        {
+                material = IW_MaterialForTexture (NULL);
+        }
 
-	if (t)
-	{
-		tx = t->gltexture;
-		fb = t->fullbright;
-		em = t->emissive;
-		if (r_lightmap_cheatsafe)
-			tx = fb = em = NULL;
-		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
-			fb = NULL;
-	}
-	else
-	{
-		tx = fb = whitetexture;
-		em = NULL;
-	}
+        if (material)
+                IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
 
-	if (!gl_zfix.value || map_checks.value)
-		zfix = 0;
+        if (num_bmodel_calls == MAX_BMODEL_DRAWS)
+                R_FlushBModelCalls ();
+
+        if (t)
+        {
+                tx = t->gltexture;
+                fb = t->fullbright;
+                em = t->emissive;
+                if (r_lightmap_cheatsafe)
+                        tx = fb = em = NULL;
+                if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
+                        fb = NULL;
+        }
+        else
+        {
+                tx = fb = whitetexture;
+                em = NULL;
+        }
+
+        if (!gl_zfix.value || map_checks.value)
+                zfix = 0;
 
         flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
         if (em != NULL)
@@ -380,35 +391,46 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 flags |= CALLFLAG_ALPHA_TEST;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
 
-	if (gl_bindless_able)
-	{
-		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
-		call->flags = flags;
-		call->alpha = alpha;
-		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
-		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
-		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-	}
-	else
-	{
-		bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
-		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
-		call->flags = flags;
-		call->alpha = alpha;
-		call->baseinstance = first_instance;
-		call->padding = 0;
-		textures[0] = tx ? tx : greytexture;
-		textures[1] = fb ? fb : blacktexture;
-		textures[2] = em ? em : blacktexture;
-	}
+        if (gl_bindless_able)
+        {
+                bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
+                call->flags = flags;
+                call->alpha = alpha;
+                call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
+                call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
+                call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+                memcpy (call->tcmod_matrix, tex_matrix.matrix, sizeof (tex_matrix.matrix));
+                call->tcmod_translate[0] = tex_matrix.translate[0];
+                call->tcmod_translate[1] = tex_matrix.translate[1];
+                call->tcmod_translate[2] = 0.f;
+                call->tcmod_translate[3] = 0.f;
+        }
+        else
+        {
+                bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
+                gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
+                call->flags = flags;
+                call->alpha = alpha;
+                call->baseinstance = first_instance;
+                call->padding = 0;
+                memcpy (call->tcmod_matrix, tex_matrix.matrix, sizeof (tex_matrix.matrix));
+                call->tcmod_translate[0] = tex_matrix.translate[0];
+                call->tcmod_translate[1] = tex_matrix.translate[1];
+                call->tcmod_translate[2] = 0.f;
+                call->tcmod_translate[3] = 0.f;
+                textures[0] = tx ? tx : greytexture;
+                textures[1] = fb ? fb : blacktexture;
+                textures[2] = em ? em : blacktexture;
+        }
 
-	SDL_assert (num_instances > 0);
-	SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
-	bmodel_call_remap[num_bmodel_calls].src = index;
-	bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);
+        SDL_assert (num_instances > 0);
+        SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
+        bmodel_call_remap[num_bmodel_calls].src = index;
+        bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);
 
-	++num_bmodel_calls;
+        ++num_bmodel_calls;
 }
+
 
 /*
 =============
