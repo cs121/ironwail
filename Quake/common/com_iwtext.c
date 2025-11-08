@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "q_ctype.h"
 #include "com_iwtext.h"
 
 static void IWTXT_SkipWhitespace(iwtxtParser_t *parser)
