@@ -95,6 +95,23 @@ static void IW_CopyTokenText(const iwtxtToken_t *token, char *dst, size_t size)
     dst[n] = '\0';
 }
 
+static qboolean IW_IsStageKeyword(const char *keyword)
+{
+    static const char *const stageKeywords[] = {
+        "map", "blend", "mask", "rgbgen", "alphagen", "tcmod",
+        "tcscale", "tcoffset", "tcalign", "depthwrite", "depthtest",
+        "colormask", "emissive", "clamp", "animmap", "alpha2coverage",
+        NULL
+    };
+
+    for (int i = 0; stageKeywords[i]; ++i)
+    {
+        if (!strcmp(stageKeywords[i], keyword))
+            return true;
+    }
+    return false;
+}
+
 static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *token)
 {
     if (!IWTXT_NextToken(parser, token))
@@ -181,6 +198,75 @@ static const char *IW_ChannelName(iwChannel_t channel)
     return "a";
 }
 
+static qboolean IW_ParseColorMask(const char *text, iwColorMask_t *out)
+{
+    if (!q_strcasecmp(text, "rgba")) { *out = IW_COLORMASK_RGBA; return true; }
+    if (!q_strcasecmp(text, "rgb")) { *out = IW_COLORMASK_RGB; return true; }
+    if (!q_strcasecmp(text, "a")) { *out = IW_COLORMASK_A; return true; }
+    if (!q_strcasecmp(text, "none")) { *out = IW_COLORMASK_NONE; return true; }
+    return false;
+}
+
+static const char *IW_ColorMaskName(iwColorMask_t mask)
+{
+    switch (mask)
+    {
+    case IW_COLORMASK_RGBA: return "rgba";
+    case IW_COLORMASK_RGB: return "rgb";
+    case IW_COLORMASK_A: return "a";
+    case IW_COLORMASK_NONE: return "none";
+    default: break;
+    }
+    if (mask == IW_COLORMASK_NONE)
+        return "none";
+    return "rgba";
+}
+
+static const char *IW_TCAlignName(iwTCAlign_t align)
+{
+    switch (align)
+    {
+    case IW_TC_ALIGN_WORLD: return "world";
+    case IW_TC_ALIGN_SCREEN: return "screen";
+    case IW_TC_ALIGN_OBJECT:
+    default:
+        return "object";
+    }
+}
+
+typedef struct
+{
+    const char *name;
+    unsigned int flag;
+} iwSurfaceParmDef_t;
+
+static const iwSurfaceParmDef_t iw_surfaceparms[] = {
+    { "sky", IW_SURF_SKY },
+    { "water", IW_SURF_WATER },
+    { "slime", IW_SURF_SLIME },
+    { "lava", IW_SURF_LAVA },
+    { "nonsolid", IW_SURF_NONSOLID },
+    { "ladder", IW_SURF_LADDER },
+    { "slick", IW_SURF_SLICK },
+    { "nodraw", IW_SURF_NODRAW },
+    { "lightmapped", IW_SURF_LIGHTMAPPED },
+    { "fullbright", IW_SURF_FULLBRIGHT }
+};
+
+static qboolean IW_ParseSurfaceParm(const char *text, unsigned int *flags)
+{
+    for (size_t i = 0; i < Q_COUNTOF(iw_surfaceparms); ++i)
+    {
+        if (!q_strcasecmp(text, iw_surfaceparms[i].name))
+        {
+            *flags |= iw_surfaceparms[i].flag;
+            return true;
+        }
+    }
+    return false;
+}
+
+
 static qboolean IW_ParseWave(iwtxtParser_t *parser, iwWave_t *wave, const char *filename, const iwtxtToken_t *modeToken)
 {
     iwtxtToken_t token;
@@ -261,6 +347,15 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->alphaWave.frequency = 1.f;
     stage->mask = IW_CHANNEL_A;
     stage->emissive = 0;
+    stage->depthWrite = IW_DEPTHWRITE_AUTO;
+    stage->depthTest = 1;
+    stage->colorMask = IW_COLORMASK_RGBA;
+    stage->tcAlign = IW_TC_ALIGN_OBJECT;
+    stage->tcAlignExplicit = 0;
+    stage->alphaToCoverage = 0;
+    stage->animMap = 0;
+    stage->animFps = 0.f;
+    stage->numAnimFrames = 0;
     stage->clamp = 0;
     stage->numTCMods = 0;
 }
@@ -308,6 +403,15 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
             return false;
         }
     }
+    else if (!strcmp(op, "translate"))
+    {
+        tc->op = IW_TC_TRANSLATE;
+        if (!IW_ReadFloat(parser, &tc->a, &token) || !IW_ReadFloat(parser, &tc->b, &token))
+        {
+            IW_LogWarning(filename, token.line, token.column, "tcmod translate requires two floats");
+            return false;
+        }
+    }
     else if (!strcmp(op, "stretch"))
     {
         tc->op = IW_TC_STRETCH;
@@ -347,6 +451,8 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
     {
         tc->op = IW_TC_ENVMAP;
         tc->a = tc->b = 0.f;
+        if (!stage->tcAlignExplicit)
+            stage->tcAlign = IW_TC_ALIGN_WORLD;
     }
     else
     {
@@ -398,6 +504,9 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             for (size_t i = 0; stage.mapPath[i]; ++i)
                 if (stage.mapPath[i] == '\\')
                     stage.mapPath[i] = '/';
+            stage.animMap = 0;
+            stage.numAnimFrames = 0;
+            stage.animFps = 0.f;
         }
         else if (!strcmp(keyword, "blend"))
         {
@@ -415,18 +524,26 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             if (!strcmp(mode, "alpha"))
             {
                 stage.blendMode = IW_BLEND_ALPHA;
+                stage.src = IW_SRC_SRC_ALPHA;
+                stage.dst = IW_SRC_ONE_MINUS_SRC_ALPHA;
             }
             else if (!strcmp(mode, "add"))
             {
                 stage.blendMode = IW_BLEND_ADD;
+                stage.src = IW_SRC_ONE;
+                stage.dst = IW_SRC_ONE;
             }
             else if (!strcmp(mode, "mul"))
             {
                 stage.blendMode = IW_BLEND_MUL;
+                stage.src = IW_SRC_DST_COLOR;
+                stage.dst = IW_SRC_ZERO;
             }
             else if (!strcmp(mode, "premul"))
             {
                 stage.blendMode = IW_BLEND_PREMUL;
+                stage.src = IW_SRC_ONE;
+                stage.dst = IW_SRC_ONE_MINUS_SRC_ALPHA;
             }
             else if (!strcmp(mode, "add_alpha"))
             {
@@ -596,6 +713,80 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             if (!IW_ParseTCMod(parser, &stage, &token, filename) && strict)
                 return false;
         }
+        else if (!strcmp(keyword, "tcscale"))
+        {
+            if (stage.numTCMods >= IW_MAX_TCMODS)
+            {
+                IW_LogWarning(filename, token.line, token.column, "too many tcmods (max %d)", IW_MAX_TCMODS);
+                if (strict)
+                    return false;
+                continue;
+            }
+            float su, sv;
+            iwtxtToken_t value;
+            if (!IW_ReadFloat(parser, &su, &value) || !IW_ReadFloat(parser, &sv, &value))
+            {
+                IW_LogWarning(filename, value.line, value.column, "tcscale requires two floats");
+                if (strict)
+                    return false;
+                continue;
+            }
+            iwTCMod_t *tc = &stage.tcmods[stage.numTCMods++];
+            memset(tc, 0, sizeof(*tc));
+            tc->op = IW_TC_SCALE;
+            tc->a = su;
+            tc->b = sv;
+        }
+        else if (!strcmp(keyword, "tcoffset"))
+        {
+            if (stage.numTCMods >= IW_MAX_TCMODS)
+            {
+                IW_LogWarning(filename, token.line, token.column, "too many tcmods (max %d)", IW_MAX_TCMODS);
+                if (strict)
+                    return false;
+                continue;
+            }
+            float ou, ov;
+            iwtxtToken_t value;
+            if (!IW_ReadFloat(parser, &ou, &value) || !IW_ReadFloat(parser, &ov, &value))
+            {
+                IW_LogWarning(filename, value.line, value.column, "tcoffset requires two floats");
+                if (strict)
+                    return false;
+                continue;
+            }
+            iwTCMod_t *tc = &stage.tcmods[stage.numTCMods++];
+            memset(tc, 0, sizeof(*tc));
+            tc->op = IW_TC_TRANSLATE;
+            tc->a = ou;
+            tc->b = ov;
+        }
+        else if (!strcmp(keyword, "tcalign"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, token.line, token.column, "tcalign requires a value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            char mode[16];
+            IW_CopyTokenLower(&token, mode, sizeof(mode));
+            if (!strcmp(mode, "world"))
+                stage.tcAlign = IW_TC_ALIGN_WORLD;
+            else if (!strcmp(mode, "object"))
+                stage.tcAlign = IW_TC_ALIGN_OBJECT;
+            else if (!strcmp(mode, "screen"))
+                stage.tcAlign = IW_TC_ALIGN_SCREEN;
+            else
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown tcalign '%s'", mode);
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.tcAlignExplicit = 1;
+        }
         else if (!strcmp(keyword, "emissive"))
         {
             int value;
@@ -619,6 +810,142 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 continue;
             }
             stage.clamp = value ? 1 : 0;
+        }
+        else if (!strcmp(keyword, "depthwrite"))
+        {
+            int value;
+            iwtxtToken_t valueToken;
+            if (!IW_ReadInt(parser, &value, &valueToken))
+            {
+                IW_LogWarning(filename, valueToken.line, valueToken.column, "depthwrite requires 0 or 1");
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.depthWrite = value ? 1 : 0;
+        }
+        else if (!strcmp(keyword, "depthtest"))
+        {
+            iwtxtToken_t valueToken;
+            if (!IWTXT_NextToken(parser, &valueToken))
+            {
+                IW_LogWarning(filename, token.line, token.column, "depthtest requires a value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            if (valueToken.type == IWTXT_TOKEN_STRING)
+            {
+                char mode[16];
+                IW_CopyTokenLower(&valueToken, mode, sizeof(mode));
+                if (!strcmp(mode, "on"))
+                    stage.depthTest = 1;
+                else if (!strcmp(mode, "off"))
+                    stage.depthTest = 0;
+                else
+                {
+                    IW_LogWarning(filename, valueToken.line, valueToken.column, "unknown depthtest '%s'", mode);
+                    if (strict)
+                        return false;
+                }
+            }
+            else if (valueToken.type == IWTXT_TOKEN_NUMBER)
+            {
+                stage.depthTest = (valueToken.number != 0.0);
+            }
+            else
+            {
+                IW_LogWarning(filename, valueToken.line, valueToken.column, "depthtest requires on/off");
+                if (strict)
+                    return false;
+            }
+        }
+        else if (!strcmp(keyword, "colormask"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, token.line, token.column, "colormask requires a value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            char maskStr[16];
+            IW_CopyTokenLower(&token, maskStr, sizeof(maskStr));
+            if (!IW_ParseColorMask(maskStr, &stage.colorMask))
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown colormask '%s'", maskStr);
+                if (strict)
+                    return false;
+            }
+        }
+        else if (!strcmp(keyword, "animmap"))
+        {
+            iwtxtToken_t value;
+            if (!IW_ReadFloat(parser, &stage.animFps, &value))
+            {
+                IW_LogWarning(filename, value.line, value.column, "animmap requires an fps value");
+                if (strict)
+                    return false;
+                stage.animMap = 0;
+                continue;
+            }
+            int baseLine = value.line;
+            int baseColumn = value.column;
+            stage.animMap = 1;
+            stage.numAnimFrames = 0;
+
+            while (IWTXT_PeekToken(parser, &value))
+            {
+                if (value.type != IWTXT_TOKEN_STRING)
+                    break;
+
+                char lower[32];
+                IW_CopyTokenLower(&value, lower, sizeof(lower));
+                if (IW_IsStageKeyword(lower))
+                    break;
+
+                if (!IWTXT_NextToken(parser, &value))
+                    break;
+
+                if (stage.numAnimFrames >= IW_MAX_ANIM_FRAMES)
+                {
+                    IW_LogWarning(filename, value.line, value.column, "too many animmap frames (max %d)", IW_MAX_ANIM_FRAMES);
+                    if (strict)
+                        return false;
+                    continue;
+                }
+
+                IW_CopyTokenText(&value, stage.animPaths[stage.numAnimFrames], sizeof(stage.animPaths[0]));
+                for (size_t i = 0; stage.animPaths[stage.numAnimFrames][i]; ++i)
+                    if (stage.animPaths[stage.numAnimFrames][i] == '\\')
+                        stage.animPaths[stage.numAnimFrames][i] = '/';
+                stage.numAnimFrames++;
+            }
+
+            if (stage.numAnimFrames == 0)
+            {
+                IW_LogWarning(filename, baseLine, baseColumn, "animmap requires at least one frame");
+                if (strict)
+                    return false;
+                stage.animMap = 0;
+            }
+            else
+            {
+                q_strlcpy(stage.mapPath, stage.animPaths[0], sizeof(stage.mapPath));
+            }
+        }
+        else if (!strcmp(keyword, "alpha2coverage"))
+        {
+            int value;
+            iwtxtToken_t valueToken;
+            if (!IW_ReadInt(parser, &value, &valueToken))
+            {
+                IW_LogWarning(filename, valueToken.line, valueToken.column, "alpha2coverage requires 0 or 1");
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.alphaToCoverage = value ? 1 : 0;
         }
         else
         {
@@ -670,13 +997,33 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
     else if (!strcmp(keyword, "sort"))
     {
         iwtxtToken_t value;
-        if (!IWTXT_NextToken(parser, &value) || value.type != IWTXT_TOKEN_STRING)
+        if (!IWTXT_NextToken(parser, &value))
+        {
+            IW_LogWarning(filename, token->line, token->column, "sort requires a value");
+            return false;
+        }
+
+        if (value.type == IWTXT_TOKEN_NUMBER)
+        {
+            int bucket = (int)value.number;
+            if (bucket < 0)
+                bucket = 0;
+            if (bucket > 9)
+                bucket = 9;
+            material->sort = IW_SORT_CUSTOM;
+            material->sortValue = bucket;
+            return true;
+        }
+
+        if (value.type != IWTXT_TOKEN_STRING)
         {
             IW_LogWarning(filename, value.line, value.column, "sort requires a value");
             return false;
         }
+
         char mode[16];
         IW_CopyTokenLower(&value, mode, sizeof(mode));
+        material->sortValue = -1;
         if (!strcmp(mode, "opaque"))
             material->sort = IW_SORT_OPAQUE;
         else if (!strcmp(mode, "alpha"))
@@ -689,6 +1036,77 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
             material->sort = IW_SORT_SKY;
         else
             IW_LogWarning(filename, value.line, value.column, "unknown sort '%s'", mode);
+        return true;
+    }
+    else if (!strcmp(keyword, "qer_editorimage"))
+    {
+        iwtxtToken_t value;
+        if (!IWTXT_NextToken(parser, &value) || value.type != IWTXT_TOKEN_STRING)
+        {
+            IW_LogWarning(filename, value.line, value.column, "qer_editorimage requires a path");
+            return false;
+        }
+        IW_CopyTokenText(&value, material->editorImage, sizeof(material->editorImage));
+        for (size_t i = 0; material->editorImage[i]; ++i)
+            if (material->editorImage[i] == '\\')
+                material->editorImage[i] = '/';
+        return true;
+    }
+    else if (!strcmp(keyword, "surfaceparm"))
+    {
+        iwtxtToken_t value;
+        if (!IWTXT_NextToken(parser, &value) || value.type != IWTXT_TOKEN_STRING)
+        {
+            IW_LogWarning(filename, value.line, value.column, "surfaceparm requires a value");
+            return false;
+        }
+        char parm[32];
+        IW_CopyTokenLower(&value, parm, sizeof(parm));
+        if (!IW_ParseSurfaceParm(parm, &material->surfaceFlags))
+        {
+            IW_LogWarning(filename, value.line, value.column, "unknown surfaceparm '%s'", parm);
+            return false;
+        }
+        return true;
+    }
+    else if (!strcmp(keyword, "polygonoffset"))
+    {
+        iwtxtToken_t value;
+        if (!IWTXT_NextToken(parser, &value))
+        {
+            IW_LogWarning(filename, token->line, token->column, "polygonoffset requires a value");
+            return false;
+        }
+        if (value.type == IWTXT_TOKEN_STRING)
+        {
+            char mode[8];
+            IW_CopyTokenLower(&value, mode, sizeof(mode));
+            if (!strcmp(mode, "on"))
+                material->polygonOffset = 1;
+            else if (!strcmp(mode, "off"))
+                material->polygonOffset = 0;
+            else
+                IW_LogWarning(filename, value.line, value.column, "unknown polygonoffset '%s'", mode);
+        }
+        else if (value.type == IWTXT_TOKEN_NUMBER)
+        {
+            material->polygonOffset = (value.number != 0.0);
+        }
+        else
+        {
+            IW_LogWarning(filename, value.line, value.column, "polygonoffset requires on/off");
+        }
+        return true;
+    }
+    else if (!strcmp(keyword, "detail"))
+    {
+        iwtxtToken_t value;
+        if (!IW_ReadInt(parser, &material->detail, &value))
+        {
+            IW_LogWarning(filename, value.line, value.column, "detail requires 0 or 1");
+            material->detail = 0;
+        }
+        material->detail = material->detail ? 1 : 0;
         return true;
     }
     else if (!strcmp(keyword, "strict"))
@@ -738,6 +1156,7 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
     iwMaterial_t material;
     memset(&material, 0, sizeof(material));
     material.sort = IW_SORT_OPAQUE;
+    material.sortValue = -1;
     material.cull = IW_CULL_BACK;
     material.strict = 0;
     material.numStages = 0;
@@ -981,7 +1400,11 @@ void IW_DumpMaterials(const char *outPath)
             const char *cull = mat->cull == IW_CULL_FRONT ? "front" : "none";
             fprintf(f, "    cull %s\n", cull);
         }
-        if (mat->sort != IW_SORT_OPAQUE)
+        if (mat->sort == IW_SORT_CUSTOM && mat->sortValue >= 0)
+        {
+            fprintf(f, "    sort %d\n", mat->sortValue);
+        }
+        else if (mat->sort != IW_SORT_OPAQUE)
         {
             const char *sort = "opaque";
             switch (mat->sort)
@@ -994,6 +1417,17 @@ void IW_DumpMaterials(const char *outPath)
             }
             fprintf(f, "    sort %s\n", sort);
         }
+        if (mat->editorImage[0])
+            fprintf(f, "    qer_editorimage %s\n", mat->editorImage);
+        for (size_t sp = 0; sp < Q_COUNTOF(iw_surfaceparms); ++sp)
+        {
+            if (mat->surfaceFlags & iw_surfaceparms[sp].flag)
+                fprintf(f, "    surfaceparm %s\n", iw_surfaceparms[sp].name);
+        }
+        if (mat->polygonOffset)
+            fprintf(f, "    polygonoffset on\n");
+        if (mat->detail)
+            fprintf(f, "    detail 1\n");
         if (mat->strict)
             fprintf(f, "    strict 1\n");
 
@@ -1001,7 +1435,17 @@ void IW_DumpMaterials(const char *outPath)
         {
             const iwStage_t *stage = &mat->stages[s];
             fprintf(f, "    stage {\n");
-            fprintf(f, "        map %s\n", stage->mapPath);
+            if (stage->animMap && stage->numAnimFrames > 0)
+            {
+                fprintf(f, "        animmap %g", stage->animFps);
+                for (int a = 0; a < stage->numAnimFrames; ++a)
+                    fprintf(f, " %s", stage->animPaths[a]);
+                fprintf(f, "\n");
+            }
+            else
+            {
+                fprintf(f, "        map %s\n", stage->mapPath);
+            }
             switch (stage->blendMode)
             {
             case IW_BLEND_ALPHA: fprintf(f, "        blend alpha\n"); break;
@@ -1018,6 +1462,10 @@ void IW_DumpMaterials(const char *outPath)
             default:
                 break;
             }
+            if (stage->depthWrite != IW_DEPTHWRITE_AUTO)
+                fprintf(f, "        depthwrite %d\n", stage->depthWrite ? 1 : 0);
+            if (!stage->depthTest)
+                fprintf(f, "        depthtest off\n");
             switch (stage->rgbgen)
             {
             case IW_RGB_VERTEX:
@@ -1062,6 +1510,12 @@ void IW_DumpMaterials(const char *outPath)
                 fprintf(f, "        emissive 1\n");
             if (stage->clamp)
                 fprintf(f, "        clamp 1\n");
+            if (stage->tcAlignExplicit || stage->tcAlign != IW_TC_ALIGN_OBJECT)
+                fprintf(f, "        tcalign %s\n", IW_TCAlignName(stage->tcAlign));
+            if (stage->colorMask != IW_COLORMASK_RGBA)
+                fprintf(f, "        colormask %s\n", IW_ColorMaskName(stage->colorMask));
+            if (stage->alphaToCoverage)
+                fprintf(f, "        alpha2coverage 1\n");
             for (int t = 0; t < stage->numTCMods; ++t)
             {
                 const iwTCMod_t *tc = &stage->tcmods[t];
@@ -1075,6 +1529,9 @@ void IW_DumpMaterials(const char *outPath)
                     break;
                 case IW_TC_ROTATE:
                     fprintf(f, "        tcmod rotate %g\n", tc->a);
+                    break;
+                case IW_TC_TRANSLATE:
+                    fprintf(f, "        tcmod translate %g %g\n", tc->a, tc->b);
                     break;
                 case IW_TC_STRETCH:
                     fprintf(f, "        tcmod stretch %s %g %g %g %g\n", IW_WaveFuncName(tc->wave.func), tc->wave.base, tc->wave.amplitude, tc->wave.phase, tc->wave.frequency);
