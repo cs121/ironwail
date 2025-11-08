@@ -1,0 +1,240 @@
+# Ironwail Quake (id1) — Base Pack Shader File
+# Coverage: common liquids, lights, teleporter, torches, simple metal glow.
+# Notes:
+# - If your WAD uses different base names (e.g., WATER vs WATER1), duplicate and rename blocks.
+# - For +0/+1 animated sequences, ensure all frames exist; adjust fps as desired.
+# - Emissive stages render additively and bypass lightmap modulation.
+
+# ----------------------
+# WATER (star-prefixed)
+# ----------------------
+shader *water1
+{
+    sort additive
+    stage {
+        animmap 6 *water1 *water2 *water3 *water4
+        tcmod scroll 0.02 0.00
+        rgbgen const 0.5 0.7 1.0
+        blend add
+        emissive 1
+    }
+}
+
+shader *water2 { stage { map *water2 } }
+shader *water3 { stage { map *water3 } }
+shader *water4 { stage { map *water4 } }
+
+# ----------------------
+# SLIME (star-prefixed)
+# ----------------------
+shader *slime1
+{
+    sort additive
+    stage {
+        animmap 6 *slime1 *slime2 *slime3 *slime4
+        tcmod scroll 0.015 0.0
+        rgbgen const 0.4 1.0 0.4
+        blend add
+        emissive 1
+    }
+}
+
+shader *slime2 { stage { map *slime2 } }
+shader *slime3 { stage { map *slime3 } }
+shader *slime4 { stage { map *slime4 } }
+
+# ----------------------
+# LAVA (star-prefixed)
+# ----------------------
+shader *lava1
+{
+    sort additive
+    stage {
+        animmap 8 *lava1 *lava2 *lava3 *lava4
+        tcmod scroll 0.01 0.0
+        rgbgen const 1.0 0.5 0.2
+        blend add
+        emissive 1
+    }
+}
+
+shader *lava2 { stage { map *lava2 } }
+shader *lava3 { stage { map *lava3 } }
+shader *lava4 { stage { map *lava4 } }
+
+# ----------------------
+# TELEPORTER (star-prefixed)
+# ----------------------
+shader *teleport
+{
+    sort additive
+    stage {
+        map *teleport
+        tcmod rotate 25
+        rgbgen const 0.8 0.2 1.0
+        blend add
+        emissive 1
+    }
+}
+
+# ----------------------
+# WATER (animated +0/+1 form)
+# Duplicate for WATER2/WATER3 if needed.
+# ----------------------
+shader +0WATER1
+{
+    sort additive
+    stage {
+        animmap 6 +0WATER1 +1WATER1 +2WATER1 +3WATER1
+        tcmod scroll 0.02 0.00
+        rgbgen const 0.5 0.7 1.0
+        blend add
+        emissive 1
+    }
+}
+shader +1WATER1 { stage { map +1WATER1 } }
+shader +2WATER1 { stage { map +2WATER1 } }
+shader +3WATER1 { stage { map +3WATER1 } }
+
+# ----------------------
+# SLIME (animated +0/+1 form)
+# ----------------------
+shader +0SLIME1
+{
+    sort additive
+    stage {
+        animmap 6 +0SLIME1 +1SLIME1 +2SLIME1 +3SLIME1
+        tcmod scroll 0.015 0.00
+        rgbgen const 0.4 1.0 0.4
+        blend add
+        emissive 1
+    }
+}
+shader +1SLIME1 { stage { map +1SLIME1 } }
+shader +2SLIME1 { stage { map +2SLIME1 } }
+shader +3SLIME1 { stage { map +3SLIME1 } }
+
+# ----------------------
+# LAVA (animated +0/+1 form)
+# ----------------------
+shader +0LAVA1
+{
+    sort additive
+    stage {
+        animmap 8 +0LAVA1 +1LAVA1 +2LAVA1 +3LAVA1
+        tcmod scroll 0.01 0.00
+        rgbgen const 1.0 0.5 0.2
+        blend add
+        emissive 1
+    }
+}
+shader +1LAVA1 { stage { map +1LAVA1 } }
+shader +2LAVA1 { stage { map +2LAVA1 } }
+shader +3LAVA1 { stage { map +3LAVA1 } }
+
+# ----------------------
+# Lights / Panels (common names)
+# These may vary per WAD; duplicate & rename as needed.
+# ----------------------
+shader light1
+{
+    sort additive
+    stage { map light1 }
+    stage {
+        map light1
+        rgbgen const 1 1 0.8
+        blend add
+        emissive 1
+    }
+}
+
+shader light2
+{
+    sort additive
+    stage { map light2 }
+    stage {
+        map light2
+        rgbgen const 1 0.9 0.5
+        blend add
+        emissive 1
+    }
+}
+
+# ----------------------
+# Torches / Flames
+# ----------------------
+shader flame1
+{
+    sort additive
+    stage { map flame1 }
+    stage {
+        map flame1
+        rgbgen const 1.0 0.6 0.2
+        blend add
+        emissive 1
+    }
+}
+
+shader flame2
+{
+    sort additive
+    stage { map flame2 }
+    stage {
+        map flame2
+        rgbgen const 1.0 0.6 0.2
+        blend add
+        emissive 1
+    }
+}
+
+# ----------------------
+# Computer panels (generic glow overlay)
+# ----------------------
+shader comp1
+{
+    stage { map comp1 }
+    stage {
+        map comp1
+        rgbgen const 0.4 0.9 1.0
+        blend add
+        emissive 1
+    }
+}
+
+shader comp2
+{
+    stage { map comp2 }
+    stage {
+        map comp2
+        rgbgen const 0.4 0.9 1.0
+        blend add
+        emissive 1
+    }
+}
+
+# ----------------------
+# Teleporter variant by ID (TELE1, TELE2)
+# ----------------------
+shader tele1
+{
+    sort additive
+    stage {
+        map tele1
+        tcmod rotate 25
+        rgbgen const 0.8 0.2 1.0
+        blend add
+        emissive 1
+    }
+}
+
+shader tele2
+{
+    sort additive
+    stage {
+        map tele2
+        tcmod rotate 25
+        rgbgen const 0.8 0.2 1.0
+        blend add
+        emissive 1
+    }
+}
