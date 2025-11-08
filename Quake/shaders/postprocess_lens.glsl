@@ -23,20 +23,24 @@ void ApplyPlanarLens(inout vec3 color, vec2 uv, vec2 invTexSize, vec2 viewMin, v
         float radius2 = radius * radius;
         float radius4 = radius2 * radius2;
 
-        float curvature = distortionCoeff * (radius2 + 0.5 * radius4);
-        vec2 distortion = centered * curvature * intensity;
-        vec2 distortedUV = clamp(uv + distortion, viewMin, viewMax);
+        float distortionStrength = distortionCoeff * intensity;
+        float curvature = distortionStrength * (0.4 * radius2 + 0.1 * radius4);
+        vec2 distortion = centered * curvature;
+        vec2 distortionUV = distortion * viewSize;
+        vec2 distortedUV = clamp(uv + distortionUV, viewMin, viewMax);
         vec3 distortedColor = texture(GammaTexture, distortedUV).rgb;
 
-        vec2 aberrationDir = centered * (0.6 + 0.4 * radius2);
+        vec2 aberrationDir = centered * (0.25 + 0.25 * radius2);
+        vec2 aberrationOffset = aberrationDir * distortionStrength * viewSize;
         vec3 aberrationColor;
-        aberrationColor.r = texture(GammaTexture, clamp(uv + aberrationDir * 0.75 * intensity + invTexSize * 0.5, viewMin, viewMax)).r;
-        aberrationColor.g = texture(GammaTexture, clamp(uv + aberrationDir * 0.55 * intensity, viewMin, viewMax)).g;
-        aberrationColor.b = texture(GammaTexture, clamp(uv - aberrationDir * 0.65 * intensity, viewMin, viewMax)).b;
+        aberrationColor.r = texture(GammaTexture, clamp(uv + aberrationOffset * 0.75 + invTexSize * 0.5, viewMin, viewMax)).r;
+        aberrationColor.g = texture(GammaTexture, clamp(uv + aberrationOffset * 0.55, viewMin, viewMax)).g;
+        aberrationColor.b = texture(GammaTexture, clamp(uv - aberrationOffset * 0.65, viewMin, viewMax)).b;
 
         float halo = haloStrength * smoothstep(0.35, 1.05, radius);
-        vec2 haloOffset = -centered * (0.25 + 0.5 * radius2);
-        vec3 haloColor = texture(GammaTexture, clamp(uv + haloOffset * intensity, viewMin, viewMax)).rgb;
+        vec2 haloOffset = -centered * (0.2 + 0.35 * radius2);
+        vec2 haloOffsetUV = haloOffset * distortionStrength * viewSize;
+        vec3 haloColor = texture(GammaTexture, clamp(uv + haloOffsetUV, viewMin, viewMax)).rgb;
 
         vec3 result = mix(color, distortedColor, intensity * 0.6);
         result = mix(result, aberrationColor, intensity * 0.35);
