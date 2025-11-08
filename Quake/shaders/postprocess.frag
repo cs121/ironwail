@@ -97,8 +97,8 @@ void main()
         if (inView)
         {
                 ApplyVignette(color.rgb, uv, viewMin, viewMax, texSize);
-                ApplyPlanarLens(color.rgb, uv, invTexSize, viewMin, viewMax);
                 ApplyChromaticAberration(color.rgb, uv, invTexSize, viewMin, viewMax);
+                ApplyPlanarLens(color.rgb, uv, invTexSize, viewMin, viewMax);
         }
 
         out_fragcolor = color;
