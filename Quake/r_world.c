@@ -336,12 +336,14 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	if (t && t->gltexture)
 	{
 		const char *material_name = NULL;
-		if (t->gltexture->source_file[0])
-			material_name = t->gltexture->source_file;
+
+		if (t->name[0])
+			material_name = t->name;
 		else if (t->gltexture->name[0])
 			material_name = t->gltexture->name;
-		else if (t->name[0])
-			material_name = t->name;
+		else if (t->gltexture->source_file[0])
+			material_name = t->gltexture->source_file;
+
 		IW_MaterialForTexture (material_name);
 	}
 	else
