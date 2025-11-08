@@ -2161,16 +2161,21 @@ static qpic_t *DrawQC_CachePic(const char *picname, unsigned int flags)
 	if (flags & PICFLAG_MIPMAP)
 		texflags |= TEXPREF_MIPMAP;
 
+	//prefer external pics before wad lookups
+	qcpics[i].pic = Draw_TryCachePic(picname, texflags);
+
 	//try to load it from a wad if applicable.
 	//the extra gfx/ crap is because DP insists on it for wad images. and its a nightmare to get things working in all engines if we don't accept that quirk too.
-	if (flags & PICFLAG_WAD)
-		qcpics[i].pic = Draw_PicFromWad2 (picname + (strncmp(picname, "gfx/", 4)?0:4), texflags);
-	else if (!strncmp(picname, "gfx/", 4) && !strchr(picname+4, '.'))
-		qcpics[i].pic = Draw_PicFromWad2(picname+4, texflags);
-
-	//okay, not a wad pic, try and load a lmp/tga/etc
 	if (!qcpics[i].pic)
-		qcpics[i].pic = Draw_TryCachePic(picname, texflags);
+	{
+		if (flags & PICFLAG_WAD)
+			qcpics[i].pic = Draw_PicFromWad2 (picname + (strncmp(picname, "gfx/", 4)?0:4), texflags);
+		else if (!strncmp(picname, "gfx/", 4) && !strchr(picname+4, '.'))
+			qcpics[i].pic = Draw_PicFromWad2(picname+4, texflags);
+
+		if (!qcpics[i].pic)
+			qcpics[i].pic = Draw_TryCachePic(picname, texflags);
+	}
 
 	if (i == numqcpics)
 		numqcpics++;
