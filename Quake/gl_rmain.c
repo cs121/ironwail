@@ -238,6 +238,7 @@ cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
+cvar_t	r_lens_planar = { "r_lens_planar", "0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
@@ -786,6 +787,7 @@ void GL_PostProcess (void)
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
+	float lens_intensity = q_min (1.f, q_max (0.f, r_lens_planar.value));
 	float bloom_intensity = q_max (0.f, r_bloom.value);
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
@@ -877,6 +879,12 @@ void GL_PostProcess (void)
                 q_max (0.f, r_chromatic_aberration.value),
                 0.f,
                 0.f);
+
+        GL_Uniform4fFunc (18,
+                lens_intensity,
+                0.045f,
+                0.35f,
+                0.12f);
 
         {
                 float filmgrain_intensity = q_max (0.f, r_filmgrain.value);

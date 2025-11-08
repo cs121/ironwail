@@ -26,12 +26,14 @@ layout(location=14) uniform vec4 SSAOParams1; // x: samples, y: power, zw: reser
 layout(location=15) uniform mat4 ProjectionMatrix;
 layout(location=16) uniform mat4 InverseProjectionMatrix;
 layout(location=17) uniform vec4 DebugParams; // x: SSAO debug, yzw: reserved
+layout(location=18) uniform vec4 LensParams0; // x: intensity, y: distortion, z: halo strength, w: tint strength
 
 #include "postprocess_common.glsl"
 #include "postprocess_ssao.glsl"
 #include "postprocess_motion_blur.glsl"
 #include "postprocess_dof.glsl"
 #include "postprocess_vignette.glsl"
+#include "postprocess_lens.glsl"
 #include "postprocess_chromatic.glsl"
 #include "postprocess_hdr.glsl"
 
@@ -95,6 +97,7 @@ void main()
         if (inView)
         {
                 ApplyVignette(color.rgb, uv, viewMin, viewMax, texSize);
+                ApplyPlanarLens(color.rgb, uv, invTexSize, viewMin, viewMax);
                 ApplyChromaticAberration(color.rgb, uv, invTexSize, viewMin, viewMax);
         }
 

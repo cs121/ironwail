@@ -77,6 +77,7 @@ extern cvar_t r_vignette_color_g;
 extern cvar_t r_vignette_color_b;
 extern cvar_t r_vignette_blend_mode;
 extern cvar_t r_vignette_noise;
+extern cvar_t r_lens_planar;
 extern cvar_t r_chromatic_aberration;
 extern cvar_t r_filmgrain;
 extern cvar_t r_filmgrain_size;
@@ -400,6 +401,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_vignette_color_b);
 	Cvar_RegisterVariable (&r_vignette_blend_mode);
 	Cvar_RegisterVariable (&r_vignette_noise);
+	Cvar_RegisterVariable (&r_lens_planar);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
         Cvar_RegisterVariable (&r_filmgrain);
         Cvar_RegisterVariable (&r_filmgrain_size);
