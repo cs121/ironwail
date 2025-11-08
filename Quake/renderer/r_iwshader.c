@@ -1346,7 +1346,7 @@ void IW_LoadShaderDirectory(const char *dir)
         q_strlcpy(path, base, sizeof(path));
         q_strlcat(path, find->name, sizeof(path));
 
-        if (r_iwshader_debug_cvar.value)
+        if ((int) r_iwshader_debug_cvar.value == 1)
             Con_Printf("iwshader: loading %s\n", path);
 
         int addedMaterials = IW_ParseShaderFile(path);
@@ -1418,7 +1418,7 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
     else
         q_strlcpy(iw_last_texture_display, textureName, sizeof(iw_last_texture_display));
 
-    if (textureName && *textureName)
+    if (textureName && *textureName && (int) r_iwshader_debug_cvar.value == 1)
     {
         const char *displayName = iw_last_texture_display[0] ? iw_last_texture_display : textureName;
         if (iw_last_material)
