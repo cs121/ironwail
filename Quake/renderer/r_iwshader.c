@@ -1217,7 +1217,10 @@ static void IW_ParseShaderFile(const char *path)
     char *buffer;
     int length;
     if (!IWTXT_LoadFile(path, &buffer, &length))
+    {
+        Con_Warning("iwshader: failed to load %s\n", path);
         return;
+    }
 
     iwtxtParser_t parser;
     IWTXT_Init(&parser, buffer, length, path);
@@ -1321,6 +1324,10 @@ void IW_LoadShaderDirectory(const char *dir)
         char path[MAX_OSPATH];
         q_strlcpy(path, base, sizeof(path));
         q_strlcat(path, find->name, sizeof(path));
+
+        if (r_iwshader_debug_cvar.value)
+            Con_Printf("iwshader: loading %s\n", path);
+
         IW_ParseShaderFile(path);
     }
 }
