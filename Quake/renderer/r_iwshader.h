@@ -1,17 +1,21 @@
 #pragma once
 #include <stdint.h>
 
-#define IW_MAX_STAGES   4
-#define IW_MAX_TCMODS   4
-#define IW_MAX_NAME     96
-#define IW_MAX_PATH     96
+#define IW_MAX_STAGES       4
+#define IW_MAX_TCMODS       4
+#define IW_MAX_NAME         96
+#define IW_MAX_PATH         96
+#define IW_MAX_ANIM_FRAMES  16
+
+#define IW_DEPTHWRITE_AUTO  (-1)
 
 typedef enum {
     IW_SORT_OPAQUE = 0,
     IW_SORT_ALPHA,
     IW_SORT_ADDITIVE,
     IW_SORT_DECAL,
-    IW_SORT_SKY
+    IW_SORT_SKY,
+    IW_SORT_CUSTOM
 } iwSort_t;
 
 typedef enum {
@@ -58,10 +62,17 @@ typedef enum {
     IW_TC_SCROLL = 0,
     IW_TC_SCALE,
     IW_TC_ROTATE,
+    IW_TC_TRANSLATE,
     IW_TC_ENVMAP,
     IW_TC_STRETCH,
     IW_TC_TURB
 } iwTCOp_t;
+
+typedef enum {
+    IW_TC_ALIGN_OBJECT = 0,
+    IW_TC_ALIGN_WORLD,
+    IW_TC_ALIGN_SCREEN
+} iwTCAlign_t;
 
 typedef enum {
     IW_WAVE_SIN = 0,
@@ -85,6 +96,29 @@ typedef enum {
     IW_CHANNEL_A
 } iwChannel_t;
 
+typedef enum {
+    IW_COLORMASK_NONE = 0,
+    IW_COLORMASK_R = 1 << 0,
+    IW_COLORMASK_G = 1 << 1,
+    IW_COLORMASK_B = 1 << 2,
+    IW_COLORMASK_A = 1 << 3,
+    IW_COLORMASK_RGB = IW_COLORMASK_R | IW_COLORMASK_G | IW_COLORMASK_B,
+    IW_COLORMASK_RGBA = IW_COLORMASK_RGB | IW_COLORMASK_A
+} iwColorMask_t;
+
+typedef enum {
+    IW_SURF_SKY        = 1 << 0,
+    IW_SURF_WATER      = 1 << 1,
+    IW_SURF_SLIME      = 1 << 2,
+    IW_SURF_LAVA       = 1 << 3,
+    IW_SURF_NONSOLID   = 1 << 4,
+    IW_SURF_LADDER     = 1 << 5,
+    IW_SURF_SLICK      = 1 << 6,
+    IW_SURF_NODRAW     = 1 << 7,
+    IW_SURF_LIGHTMAPPED= 1 << 8,
+    IW_SURF_FULLBRIGHT = 1 << 9
+} iwSurfaceFlags_t;
+
 typedef struct {
     iwTCOp_t op;
     float a, b;
@@ -104,6 +138,16 @@ typedef struct {
     iwWave_t alphaWave;
     iwChannel_t mask;
     int emissive;
+    int depthWrite;
+    int depthTest;
+    iwColorMask_t colorMask;
+    iwTCAlign_t tcAlign;
+    int tcAlignExplicit;
+    int alphaToCoverage;
+    int animMap;
+    float animFps;
+    int numAnimFrames;
+    char animPaths[IW_MAX_ANIM_FRAMES][IW_MAX_PATH];
     int numTCMods;
     iwTCMod_t tcmods[IW_MAX_TCMODS];
 } iwStage_t;
@@ -111,7 +155,12 @@ typedef struct {
 typedef struct {
     char name[IW_MAX_NAME];
     iwSort_t sort;
+    int sortValue;
     iwCull_t cull;
+    unsigned int surfaceFlags;
+    int polygonOffset;
+    int detail;
+    char editorImage[IW_MAX_PATH];
     int strict;
     int numStages;
     iwStage_t stages[IW_MAX_STAGES];
