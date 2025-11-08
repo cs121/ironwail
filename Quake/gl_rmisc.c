@@ -468,8 +468,11 @@ void R_Init (void)
         if (com_gamedir[0])
         {
                 char shaderdir[MAX_OSPATH];
+
                 q_snprintf (shaderdir, sizeof(shaderdir), "%s/shaders", com_gamedir);
                 IW_LoadShaderDirectory (shaderdir);
+
+                IW_LoadShaderDirectory (com_gamedir);
         }
 }
 
