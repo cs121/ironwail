@@ -110,6 +110,94 @@ static qboolean IW_ParseBlendFactor(const char *text, iwBlendFactor_t *out)
     return false;
 }
 
+static const char *IW_BlendFactorName(iwBlendFactor_t factor)
+{
+    switch (factor)
+    {
+    case IW_SRC_ZERO: return "zero";
+    case IW_SRC_ONE: return "one";
+    case IW_SRC_SRC_COLOR: return "src_color";
+    case IW_SRC_ONE_MINUS_SRC_COLOR: return "one_minus_src_color";
+    case IW_SRC_DST_COLOR: return "dst_color";
+    case IW_SRC_ONE_MINUS_DST_COLOR: return "one_minus_dst_color";
+    case IW_SRC_SRC_ALPHA: return "src_alpha";
+    case IW_SRC_ONE_MINUS_SRC_ALPHA: return "one_minus_src_alpha";
+    case IW_SRC_DST_ALPHA: return "dst_alpha";
+    case IW_SRC_ONE_MINUS_DST_ALPHA: return "one_minus_dst_alpha";
+    }
+    return "zero";
+}
+
+static qboolean IW_ParseWaveFunc(const char *text, iwWaveFunc_t *out)
+{
+    if (!q_strcasecmp(text, "sin")) { *out = IW_WAVE_SIN; return true; }
+    if (!q_strcasecmp(text, "triangle")) { *out = IW_WAVE_TRIANGLE; return true; }
+    if (!q_strcasecmp(text, "square")) { *out = IW_WAVE_SQUARE; return true; }
+    if (!q_strcasecmp(text, "saw")) { *out = IW_WAVE_SAW; return true; }
+    return false;
+}
+
+static const char *IW_WaveFuncName(iwWaveFunc_t func)
+{
+    switch (func)
+    {
+    case IW_WAVE_SIN: return "sin";
+    case IW_WAVE_TRIANGLE: return "triangle";
+    case IW_WAVE_SQUARE: return "square";
+    case IW_WAVE_SAW: return "saw";
+    }
+    return "sin";
+}
+
+static const char *IW_ChannelName(iwChannel_t channel)
+{
+    switch (channel)
+    {
+    case IW_CHANNEL_R: return "r";
+    case IW_CHANNEL_G: return "g";
+    case IW_CHANNEL_B: return "b";
+    case IW_CHANNEL_A: return "a";
+    }
+    return "a";
+}
+
+static qboolean IW_ParseWave(iwtxtParser_t *parser, iwWave_t *wave, const char *filename, const iwtxtToken_t *modeToken)
+{
+    iwtxtToken_t token;
+    if (!IWTXT_NextToken(parser, &token))
+    {
+        int line = modeToken ? modeToken->line : 0;
+        int column = modeToken ? modeToken->column : 0;
+        IW_LogWarning(filename, line, column, "wave requires a function");
+        return false;
+    }
+
+    if (token.type != IWTXT_TOKEN_STRING)
+    {
+        IW_LogWarning(filename, token.line, token.column, "wave requires a function");
+        return false;
+    }
+
+    char func[16];
+    IW_CopyTokenLower(&token, func, sizeof(func));
+    if (!IW_ParseWaveFunc(func, &wave->func))
+    {
+        IW_LogWarning(filename, token.line, token.column, "unknown wave func '%s'", func);
+        return false;
+    }
+
+    if (!IW_ReadFloat(parser, &wave->base, &token) ||
+        !IW_ReadFloat(parser, &wave->amplitude, &token) ||
+        !IW_ReadFloat(parser, &wave->phase, &token) ||
+        !IW_ReadFloat(parser, &wave->frequency, &token))
+    {
+        IW_LogWarning(filename, token.line, token.column, "wave requires base amplitude phase frequency");
+        return false;
+    }
+
+    return true;
+}
+
 static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *token)
 {
     if (!IWTXT_NextToken(parser, token))
@@ -159,8 +247,19 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->dst = IW_SRC_ZERO;
     stage->rgbgen = IW_RGB_VERTEX;
     stage->rgbConst[0] = stage->rgbConst[1] = stage->rgbConst[2] = 1.f;
+    stage->rgbWave.func = IW_WAVE_SIN;
+    stage->rgbWave.base = 1.f;
+    stage->rgbWave.amplitude = 0.f;
+    stage->rgbWave.phase = 0.f;
+    stage->rgbWave.frequency = 1.f;
     stage->alphagen = IW_A_VERTEX;
     stage->aConst = 1.f;
+    stage->alphaWave.func = IW_WAVE_SIN;
+    stage->alphaWave.base = 1.f;
+    stage->alphaWave.amplitude = 0.f;
+    stage->alphaWave.phase = 0.f;
+    stage->alphaWave.frequency = 1.f;
+    stage->mask = IW_CHANNEL_A;
     stage->emissive = 0;
     stage->clamp = 0;
     stage->numTCMods = 0;
@@ -206,6 +305,41 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
         if (!IW_ReadFloat(parser, &tc->a, &token))
         {
             IW_LogWarning(filename, token.line, token.column, "tcmod rotate requires a float");
+            return false;
+        }
+    }
+    else if (!strcmp(op, "stretch"))
+    {
+        tc->op = IW_TC_STRETCH;
+        if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+        {
+            IW_LogWarning(filename, token.line, token.column, "tcmod stretch requires a function");
+            return false;
+        }
+
+        char func[16];
+        IW_CopyTokenLower(&token, func, sizeof(func));
+        if (!IW_ParseWaveFunc(func, &tc->wave.func))
+        {
+            IW_LogWarning(filename, token.line, token.column, "unknown stretch func '%s'", func);
+            return false;
+        }
+
+        if (!IW_ReadFloat(parser, &tc->wave.base, &token) ||
+            !IW_ReadFloat(parser, &tc->wave.amplitude, &token) ||
+            !IW_ReadFloat(parser, &tc->wave.phase, &token) ||
+            !IW_ReadFloat(parser, &tc->wave.frequency, &token))
+        {
+            IW_LogWarning(filename, token.line, token.column, "tcmod stretch requires base amplitude phase frequency");
+            return false;
+        }
+    }
+    else if (!strcmp(op, "turb"))
+    {
+        tc->op = IW_TC_TURB;
+        if (!IW_ReadFloat(parser, &tc->a, &token) || !IW_ReadFloat(parser, &tc->b, &token))
+        {
+            IW_LogWarning(filename, token.line, token.column, "tcmod turb requires amplitude and frequency");
             return false;
         }
     }
@@ -294,6 +428,12 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             {
                 stage.blendMode = IW_BLEND_PREMUL;
             }
+            else if (!strcmp(mode, "add_alpha"))
+            {
+                stage.blendMode = IW_BLEND_ADD_ALPHA;
+                stage.src = IW_SRC_SRC_ALPHA;
+                stage.dst = IW_SRC_ONE;
+            }
             else
             {
                 char srcbuf[32], dstbuf[32];
@@ -347,6 +487,20 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                         return false;
                 }
             }
+            else if (!strcmp(mode, "entity"))
+            {
+                stage.rgbgen = IW_RGB_ENTITY;
+            }
+            else if (!strcmp(mode, "wave"))
+            {
+                stage.rgbgen = IW_RGB_WAVE;
+                if (!IW_ParseWave(parser, &stage.rgbWave, filename, &token))
+                {
+                    if (strict)
+                        return false;
+                    stage.rgbgen = IW_RGB_VERTEX;
+                }
+            }
             else
             {
                 IW_LogWarning(filename, token.line, token.column, "unknown rgbgen '%s'", mode);
@@ -383,9 +537,49 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                         return false;
                 }
             }
+            else if (!strcmp(mode, "entity"))
+            {
+                stage.alphagen = IW_A_ENTITY;
+            }
+            else if (!strcmp(mode, "wave"))
+            {
+                stage.alphagen = IW_A_WAVE;
+                if (!IW_ParseWave(parser, &stage.alphaWave, filename, &token))
+                {
+                    if (strict)
+                        return false;
+                    stage.alphagen = IW_A_VERTEX;
+                }
+            }
             else
             {
                 IW_LogWarning(filename, token.line, token.column, "unknown alphagen '%s'", mode);
+                if (strict)
+                    return false;
+            }
+        }
+        else if (!strcmp(keyword, "mask"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, token.line, token.column, "mask requires a channel");
+                if (strict)
+                    return false;
+                continue;
+            }
+            char channel[8];
+            IW_CopyTokenLower(&token, channel, sizeof(channel));
+            if (!strcmp(channel, "r"))
+                stage.mask = IW_CHANNEL_R;
+            else if (!strcmp(channel, "g"))
+                stage.mask = IW_CHANNEL_G;
+            else if (!strcmp(channel, "b"))
+                stage.mask = IW_CHANNEL_B;
+            else if (!strcmp(channel, "a"))
+                stage.mask = IW_CHANNEL_A;
+            else
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown mask channel '%s'", channel);
                 if (strict)
                     return false;
             }
@@ -814,8 +1008,12 @@ void IW_DumpMaterials(const char *outPath)
             case IW_BLEND_ADD: fprintf(f, "        blend add\n"); break;
             case IW_BLEND_MUL: fprintf(f, "        blend mul\n"); break;
             case IW_BLEND_PREMUL: fprintf(f, "        blend premul\n"); break;
+            case IW_BLEND_ADD_ALPHA: fprintf(f, "        blend add_alpha\n"); break;
             case IW_BLEND_CUSTOM:
-                fprintf(f, "        blend %d %d\n", stage->src, stage->dst);
+                if (stage->src == IW_SRC_SRC_ALPHA && stage->dst == IW_SRC_ONE)
+                    fprintf(f, "        blend add_alpha\n");
+                else
+                    fprintf(f, "        blend %s %s\n", IW_BlendFactorName(stage->src), IW_BlendFactorName(stage->dst));
                 break;
             default:
                 break;
@@ -831,6 +1029,12 @@ void IW_DumpMaterials(const char *outPath)
             case IW_RGB_IDENTITY:
                 fprintf(f, "        rgbgen identity\n");
                 break;
+            case IW_RGB_ENTITY:
+                fprintf(f, "        rgbgen entity\n");
+                break;
+            case IW_RGB_WAVE:
+                fprintf(f, "        rgbgen wave %s %g %g %g %g\n", IW_WaveFuncName(stage->rgbWave.func), stage->rgbWave.base, stage->rgbWave.amplitude, stage->rgbWave.phase, stage->rgbWave.frequency);
+                break;
             default:
                 break;
             }
@@ -845,7 +1049,15 @@ void IW_DumpMaterials(const char *outPath)
             case IW_A_MASK:
                 fprintf(f, "        alphagen mask\n");
                 break;
+            case IW_A_ENTITY:
+                fprintf(f, "        alphagen entity\n");
+                break;
+            case IW_A_WAVE:
+                fprintf(f, "        alphagen wave %s %g %g %g %g\n", IW_WaveFuncName(stage->alphaWave.func), stage->alphaWave.base, stage->alphaWave.amplitude, stage->alphaWave.phase, stage->alphaWave.frequency);
+                break;
             }
+            if (stage->mask != IW_CHANNEL_A)
+                fprintf(f, "        mask %s\n", IW_ChannelName(stage->mask));
             if (stage->emissive)
                 fprintf(f, "        emissive 1\n");
             if (stage->clamp)
@@ -863,6 +1075,12 @@ void IW_DumpMaterials(const char *outPath)
                     break;
                 case IW_TC_ROTATE:
                     fprintf(f, "        tcmod rotate %g\n", tc->a);
+                    break;
+                case IW_TC_STRETCH:
+                    fprintf(f, "        tcmod stretch %s %g %g %g %g\n", IW_WaveFuncName(tc->wave.func), tc->wave.base, tc->wave.amplitude, tc->wave.phase, tc->wave.frequency);
+                    break;
+                case IW_TC_TURB:
+                    fprintf(f, "        tcmod turb %g %g\n", tc->a, tc->b);
                     break;
                 case IW_TC_ENVMAP:
                     fprintf(f, "        tcmod envmap\n");
