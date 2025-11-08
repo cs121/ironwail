@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-#define IW_MAX_STAGES       4
+#define IW_MAX_STAGES       8
 #define IW_MAX_TCMODS       4
 #define IW_MAX_NAME         96
 #define IW_MAX_PATH         96
