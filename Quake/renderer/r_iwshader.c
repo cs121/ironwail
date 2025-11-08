@@ -8,8 +8,11 @@
 #include <errno.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 #define IW_MAX_MATERIALS 512
+
+static char *IW_PreprocessShaderText(const char *input, int length, int *outLength);
 
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
 static cvar_t r_iwshader_strict_cvar = { "r_iwshader_strict", "0", CVAR_NONE };
@@ -1257,6 +1260,13 @@ static int IW_ParseShaderFile(const char *path)
         return -1;
     }
 
+    char *processed = IW_PreprocessShaderText(buffer, length, &length);
+    if (processed)
+    {
+        IWTXT_Free(buffer);
+        buffer = processed;
+    }
+
     iwtxtParser_t parser;
     IWTXT_Init(&parser, buffer, length, path);
 
@@ -1811,3 +1821,278 @@ qboolean IW_DebugOverlayText(char *buffer, size_t bufferSize)
     return true;
 }
 
+#define IW_MAX_MACROS 64
+#define IW_MACRO_NAME 64
+
+typedef struct
+{
+    char name[IW_MACRO_NAME];
+    char *value;
+} iwShaderMacro_t;
+
+static void IW_FreeShaderMacros(iwShaderMacro_t *macros, int count)
+{
+    if (!macros)
+        return;
+
+    for (int i = 0; i < count; ++i)
+    {
+        free(macros[i].value);
+        macros[i].value = NULL;
+    }
+}
+
+static qboolean IW_IsMacroBoundaryChar(char c)
+{
+    if (c == '\0')
+        return true;
+    if (q_isspace((unsigned char) c))
+        return true;
+    switch (c)
+    {
+    case '{': case '}':
+    case '(': case ')':
+    case '[': case ']':
+    case ',': case ';':
+    case ':': case '+':
+    case '-': case '*':
+    case '/': case '\r':
+    case '\n': case '\t':
+        return true;
+    default:
+        break;
+    }
+    return false;
+}
+
+static qboolean IW_EnsureOutputCapacity(char **buffer, size_t *capacity, size_t needed)
+{
+    if (needed <= *capacity)
+        return true;
+
+    size_t newCapacity = *capacity ? *capacity : 256;
+    while (newCapacity < needed)
+        newCapacity *= 2;
+
+    char *newBuffer = (char *)realloc(*buffer, newCapacity);
+    if (!newBuffer)
+        return false;
+
+    *buffer = newBuffer;
+    *capacity = newCapacity;
+    return true;
+}
+
+static void IW_PreprocessCopyRange(char **outBuf, size_t *outLen, size_t *outCap, const char *start, size_t length)
+{
+    if (!length)
+        return;
+
+    if (!IW_EnsureOutputCapacity(outBuf, outCap, *outLen + length + 1))
+        return;
+
+    memcpy(*outBuf + *outLen, start, length);
+    *outLen += length;
+}
+
+static void IW_PreprocessAppendChar(char **outBuf, size_t *outLen, size_t *outCap, char c)
+{
+    if (!IW_EnsureOutputCapacity(outBuf, outCap, *outLen + 2))
+        return;
+
+    (*outBuf)[(*outLen)++] = c;
+}
+
+static char *IW_PreprocessShaderText(const char *input, int length, int *outLength)
+{
+    if (!input || length <= 0)
+        return NULL;
+
+    iwShaderMacro_t macros[IW_MAX_MACROS];
+    memset(macros, 0, sizeof(macros));
+    int macroCount = 0;
+
+    char *output = NULL;
+    size_t outLen = 0;
+    size_t outCap = 0;
+
+    const char *cursor = input;
+    const char *end = input + length;
+
+    while (cursor < end)
+    {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        while (lineEnd < end && *lineEnd != '\n')
+            lineEnd++;
+
+        const char *lineNext = lineEnd;
+        if (lineNext < end)
+            lineNext++;
+
+        const char *lineTrimEnd = lineEnd;
+        if (lineTrimEnd > lineStart && lineTrimEnd[-1] == '\r')
+            lineTrimEnd--;
+
+        const char *trim = lineStart;
+        while (trim < lineTrimEnd && q_isspace((unsigned char) *trim) && *trim != '\n')
+            trim++;
+
+        qboolean consumed = false;
+        if (trim < lineTrimEnd && *trim == '#')
+        {
+            const char *directive = trim + 1;
+            while (directive < lineTrimEnd && q_isspace((unsigned char) *directive))
+                directive++;
+
+            if ((lineTrimEnd - directive) >= 6 && !q_strncasecmp(directive, "define", 6) &&
+                (directive + 6 == lineTrimEnd || q_isspace((unsigned char) directive[6])))
+            {
+                directive += 6;
+                while (directive < lineTrimEnd && q_isspace((unsigned char) *directive))
+                    directive++;
+
+                const char *nameStart = directive;
+                while (directive < lineTrimEnd && (q_isalnum((unsigned char) *directive) || *directive == '_' || *directive == '#'))
+                    directive++;
+
+                size_t nameLen = (size_t)(directive - nameStart);
+                while (directive < lineTrimEnd && q_isspace((unsigned char) *directive))
+                    directive++;
+
+                const char *valueStart = directive;
+                const char *valueEnd = lineTrimEnd;
+                while (valueEnd > valueStart && q_isspace((unsigned char) valueEnd[-1]))
+                    valueEnd--;
+
+                if (nameLen > 0)
+                {
+                    char nameBuffer[IW_MACRO_NAME];
+                    size_t copyLen = q_min(nameLen, sizeof(nameBuffer) - 1);
+                    memcpy(nameBuffer, nameStart, copyLen);
+                    nameBuffer[copyLen] = '\0';
+
+                    int macroIndex = -1;
+                    for (int i = 0; i < macroCount; ++i)
+                    {
+                        if (!strcmp(macros[i].name, nameBuffer))
+                        {
+                            macroIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (macroIndex == -1)
+                    {
+                        if (macroCount >= IW_MAX_MACROS)
+                        {
+                            consumed = true;
+                            goto preprocess_next_line;
+                        }
+                        macroIndex = macroCount++;
+                    }
+
+                    iwShaderMacro_t *macro = &macros[macroIndex];
+                    q_strlcpy(macro->name, nameBuffer, sizeof(macro->name));
+
+                    free(macro->value);
+                    size_t valueLen = (size_t)(valueEnd - valueStart);
+                    macro->value = (char *)malloc(valueLen + 1);
+                    if (macro->value)
+                    {
+                        memcpy(macro->value, valueStart, valueLen);
+                        macro->value[valueLen] = '\0';
+                    }
+                }
+
+                consumed = true;
+            }
+        }
+
+preprocess_next_line:
+        if (!consumed)
+        {
+            const char *lineCursor = lineStart;
+            while (lineCursor < lineTrimEnd)
+            {
+                char ch = *lineCursor;
+
+                if (ch == '\r')
+                {
+                    lineCursor++;
+                    continue;
+                }
+
+                if (ch == '/' && (lineCursor + 1) < lineTrimEnd && lineCursor[1] == '/')
+                {
+                    IW_PreprocessCopyRange(&output, &outLen, &outCap, lineCursor, (size_t)(lineTrimEnd - lineCursor));
+                    lineCursor = lineTrimEnd;
+                    break;
+                }
+
+                if (ch == '"')
+                {
+                    IW_PreprocessAppendChar(&output, &outLen, &outCap, ch);
+                    lineCursor++;
+                    while (lineCursor < lineTrimEnd)
+                    {
+                        char qch = *lineCursor;
+                        IW_PreprocessAppendChar(&output, &outLen, &outCap, qch);
+                        lineCursor++;
+                        if (qch == '"')
+                            break;
+                    }
+                    continue;
+                }
+
+                qboolean replaced = false;
+                for (int i = 0; i < macroCount; ++i)
+                {
+                    size_t macroNameLen = strlen(macros[i].name);
+                    if (macroNameLen == 0)
+                        continue;
+                    if ((size_t)(lineTrimEnd - lineCursor) < macroNameLen)
+                        continue;
+                    if (strncmp(lineCursor, macros[i].name, macroNameLen) != 0)
+                        continue;
+
+                    char prev = (lineCursor == lineStart) ? '\0' : lineCursor[-1];
+                    char next = (lineCursor + macroNameLen < lineTrimEnd) ? lineCursor[macroNameLen] : '\0';
+                    if (!IW_IsMacroBoundaryChar(prev) || !IW_IsMacroBoundaryChar(next))
+                        continue;
+
+                    size_t valueLen = macros[i].value ? strlen(macros[i].value) : 0;
+                    IW_PreprocessCopyRange(&output, &outLen, &outCap, macros[i].value ? macros[i].value : "", valueLen);
+                    lineCursor += macroNameLen;
+                    replaced = true;
+                    break;
+                }
+
+                if (replaced)
+                    continue;
+
+                IW_PreprocessAppendChar(&output, &outLen, &outCap, ch);
+                lineCursor++;
+            }
+        }
+
+        if (lineEnd < end)
+            IW_PreprocessAppendChar(&output, &outLen, &outCap, '\n');
+
+        cursor = lineNext;
+    }
+
+    IW_FreeShaderMacros(macros, macroCount);
+
+    if (!IW_EnsureOutputCapacity(&output, &outCap, outLen + 1))
+    {
+        free(output);
+        return NULL;
+    }
+
+    output[outLen] = '\0';
+    if (outLength)
+        *outLength = (int)outLen;
+
+    return output;
+}
