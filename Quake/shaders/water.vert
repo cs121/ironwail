@@ -29,6 +29,9 @@ struct Call
 #endif // BINDLESS
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
+        vec4    emissive_matrix;
+        vec4    emissive_translate;
+        vec4    emissive_color;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -96,6 +99,9 @@ layout(location=3) out vec3 out_pos;
 layout(location=6) noperspective out vec4 out_curr_clip;
 layout(location=7) noperspective out vec4 out_prev_clip;
 
+layout(location=8) out vec2 out_emissive_uv;
+layout(location=9) flat out vec3 out_emissive_color;
+
 void main()
 {
         Call call = call_data[DRAW_ID];
@@ -113,6 +119,9 @@ void main()
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
                                     dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
         out_uv = transformed_uv;
+        vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
+                                dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
+        out_emissive_uv = emissive_uv;
         out_pos = world_pos - EyePos;
         out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS
@@ -123,4 +132,5 @@ void main()
                 out_samplers0.zw = out_samplers0.xy;
         out_samplers1.xy = call.emhandle;
 #endif
+        out_emissive_color = call.emissive_color.xyz;
 }

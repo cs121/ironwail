@@ -1461,22 +1461,16 @@ static void IW_CombineTexMatrix(float matrix[4], float translate[2], const float
     translate[1] = opMatrix[2] * t0 + opMatrix[3] * t1 + opTranslate[1];
 }
 
-qboolean IW_MaterialTexMatrix(const iwMaterial_t *material, float time, iwTexMatrix_t *out)
+static qboolean IW_StageTexMatrixInternal(const iwStage_t *stage, float time, iwTexMatrix_t *out)
 {
-    if (!out)
+    if (!stage || !out)
         return false;
 
     IW_TexMatrixIdentity(out);
 
-    if (!material || material->numStages <= 0)
-        return false;
-
-    const iwStage_t *stage = &material->stages[0];
     if (stage->numTCMods <= 0)
         return false;
     if (stage->tcAlign != IW_TC_ALIGN_OBJECT)
-        return false;
-    if (stage->animMap && stage->numAnimFrames > 0)
         return false;
 
     float matrix[4] = { 1.f, 0.f, 0.f, 1.f };
@@ -1539,6 +1533,23 @@ qboolean IW_MaterialTexMatrix(const iwMaterial_t *material, float time, iwTexMat
     out->translate[0] = translate[0];
     out->translate[1] = translate[1];
     return modified;
+}
+
+qboolean IW_StageTexMatrix(const iwStage_t *stage, float time, iwTexMatrix_t *out)
+{
+    return IW_StageTexMatrixInternal(stage, time, out);
+}
+
+qboolean IW_MaterialTexMatrix(const iwMaterial_t *material, float time, iwTexMatrix_t *out)
+{
+    if (!material || material->numStages <= 0 || !out)
+    {
+        if (out)
+            IW_TexMatrixIdentity(out);
+        return false;
+    }
+
+    return IW_StageTexMatrixInternal(&material->stages[0], time, out);
 }
 
 void IW_DumpMaterials(const char *outPath)

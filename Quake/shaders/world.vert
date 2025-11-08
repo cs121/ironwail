@@ -58,6 +58,9 @@ struct Call
 #endif // BINDLESS
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
+        vec4    emissive_matrix;
+        vec4    emissive_translate;
+        vec4    emissive_color;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -133,6 +136,8 @@ layout(location=8) flat out float out_lmofs;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
+layout(location=13) out vec2 out_emissive_uv;
+layout(location=14) flat out vec3 out_emissive_color;
 
 void main()
 {
@@ -161,6 +166,9 @@ void main()
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
                                     dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
         out_uv = transformed_uv;
+        vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
+                                dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
+        out_emissive_uv = emissive_uv;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
@@ -193,4 +201,5 @@ void main()
 		out_samplers0.zw = out_samplers0.xy;
 	out_samplers1.xy = call.emhandle;
 #endif
+        out_emissive_color = call.emissive_color.xyz;
 }

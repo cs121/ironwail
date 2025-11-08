@@ -129,6 +129,8 @@ layout(location=10) flat in uvec2 in_samplers1;
 #endif
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
+layout(location=13) in vec2 in_emissive_uv;
+layout(location=14) flat in vec3 in_emissive_color;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -266,13 +268,13 @@ void main()
     }
     if ((in_flags & CF_USE_EMISSIVE) != 0u){
         sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
-        emissive = texture(EmissiveSampler, uv).rgb;
+        emissive = texture(EmissiveSampler, in_emissive_uv).rgb * in_emissive_color;
     }
 #else
     if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
         fullbright = texture(FullbrightTex, uv).rgb;
     if ((in_flags & CF_USE_EMISSIVE) != 0u)
-        emissive = texture(EmissiveTex, uv).rgb;
+        emissive = texture(EmissiveTex, in_emissive_uv).rgb * in_emissive_color;
 #endif
 
     // Textur: kleinere negative LOD-Bias nur wenn DITHER aktiv
