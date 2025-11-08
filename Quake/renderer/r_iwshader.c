@@ -22,6 +22,7 @@ typedef struct
 {
     iwMaterial_t material;
     char normalized[IW_MAX_NAME];
+    qboolean broken;
 } iwMaterialEntry_t;
 
 static iwMaterialEntry_t iw_materials[IW_MAX_MATERIALS];
@@ -31,6 +32,8 @@ static qboolean iw_initialized;
 static const iwMaterial_t *iw_last_material;
 static char iw_last_texture[IW_MAX_PATH];
 static char iw_last_texture_display[IW_MAX_PATH];
+static qboolean iw_last_material_broken;
+static const char *iw_last_broken_name;
 
 static void IW_LogWarning(const char *file, int line, int column, const char *fmt, ...)
 {
@@ -1129,7 +1132,7 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
     return false;
 }
 
-static void IW_RegisterMaterial(const iwMaterial_t *material)
+static void IW_RegisterMaterial(const iwMaterial_t *material, qboolean broken)
 {
     char normalized[IW_MAX_NAME];
     if (!IW_NormalizeName(material->name, normalized, sizeof(normalized), false))
@@ -1139,7 +1142,10 @@ static void IW_RegisterMaterial(const iwMaterial_t *material)
     {
         if (!strcmp(iw_materials[i].normalized, normalized))
         {
+            if (!iw_materials[i].broken && broken)
+                Con_Warning("iwshader: shader '%s' has errors and will be ignored\n", material->name);
             iw_materials[i].material = *material;
+            iw_materials[i].broken = broken;
             return;
         }
     }
@@ -1151,7 +1157,10 @@ static void IW_RegisterMaterial(const iwMaterial_t *material)
     }
 
     iw_materials[iw_num_materials].material = *material;
+    iw_materials[iw_num_materials].broken = broken;
     q_strlcpy(iw_materials[iw_num_materials].normalized, normalized, sizeof(normalized));
+    if (broken)
+        Con_Warning("iwshader: shader '%s' has errors and will be ignored\n", material->name);
     iw_num_materials++;
 }
 
@@ -1165,6 +1174,7 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
     material.strict = 0;
     material.numStages = 0;
     IW_CopyTokenText(nameToken, material.name, sizeof(material.name));
+    qboolean materialValid = true;
 
     iwtxtToken_t token;
     if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_SYMBOL || token.length != 1 || token.text[0] != '{')
@@ -1188,20 +1198,27 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
                 {
                     IW_LogWarning(filename, token.line, token.column, "expected '{' after stage");
                     IW_SkipBraces(parser);
+                    materialValid = false;
                     continue;
                 }
                 qboolean strict = material.strict || (r_iwshader_strict_cvar.value != 0.f);
                 if (!IW_ParseStage(parser, &material, filename, strict))
+                {
+                    materialValid = false;
                     continue;
+                }
             }
             else
             {
-                IW_ParseGlobalKey(parser, &material, keyword, &token, filename);
+                qboolean strictGlobal = material.strict || (r_iwshader_strict_cvar.value != 0.f);
+                if (!IW_ParseGlobalKey(parser, &material, keyword, &token, filename) && strictGlobal)
+                    materialValid = false;
             }
         }
         else
         {
             IW_LogWarning(filename, token.line, token.column, "unexpected token in shader");
+            materialValid = false;
         }
     }
 
@@ -1213,7 +1230,7 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
         material.numStages = 1;
     }
 
-    IW_RegisterMaterial(&material);
+    IW_RegisterMaterial(&material, !materialValid);
 }
 
 static int IW_ParseShaderFile(const char *path)
@@ -1291,6 +1308,8 @@ void IW_ShaderSystem_Init(void)
     iw_last_material = NULL;
     iw_last_texture[0] = '\0';
     iw_last_texture_display[0] = '\0';
+    iw_last_material_broken = false;
+    iw_last_broken_name = NULL;
     iw_initialized = true;
 }
 
@@ -1309,6 +1328,8 @@ void IW_ShaderSystem_Shutdown(void)
     iw_last_material = NULL;
     iw_last_texture[0] = '\0';
     iw_last_texture_display[0] = '\0';
+    iw_last_material_broken = false;
+    iw_last_broken_name = NULL;
     iw_initialized = false;
 }
 
@@ -1365,28 +1386,26 @@ void IW_LoadShaderDirectory(const char *dir)
     }
 }
 
+static const iwMaterialEntry_t *IW_FindMaterialEntryNormalized(const char *name)
+{
+    for (int i = 0; i < iw_num_materials; ++i)
+    {
+        if (!strcmp(iw_materials[i].normalized, name))
+            return &iw_materials[i];
+    }
+    return NULL;
+}
+
 const iwMaterial_t *IW_FindMaterial(const char *materialName)
 {
     char normalized[IW_MAX_NAME];
     if (!IW_NormalizeName(materialName, normalized, sizeof(normalized), false))
         return NULL;
 
-    for (int i = 0; i < iw_num_materials; ++i)
-    {
-        if (!strcmp(iw_materials[i].normalized, normalized))
-            return &iw_materials[i].material;
-    }
-    return NULL;
-}
-
-static const iwMaterial_t *IW_FindMaterialNormalized(const char *name)
-{
-    for (int i = 0; i < iw_num_materials; ++i)
-    {
-        if (!strcmp(iw_materials[i].normalized, name))
-            return &iw_materials[i].material;
-    }
-    return NULL;
+    const iwMaterialEntry_t *entry = IW_FindMaterialEntryNormalized(normalized);
+    if (!entry || entry->broken)
+        return NULL;
+    return &entry->material;
 }
 
 const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
@@ -1394,6 +1413,8 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
     iw_last_material = NULL;
     iw_last_texture[0] = '\0';
     iw_last_texture_display[0] = '\0';
+    iw_last_material_broken = false;
+    iw_last_broken_name = NULL;
 
     if (!iw_initialized || !r_iwshader_cvar.value)
         return NULL;
@@ -1404,14 +1425,28 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
     q_strlcpy(iw_last_texture, textureName, sizeof(iw_last_texture));
 
     char normalized[IW_MAX_NAME];
+    const iwMaterialEntry_t *entry = NULL;
     if (IW_NormalizeName(textureName, normalized, sizeof(normalized), false))
     {
-        iw_last_material = IW_FindMaterialNormalized(normalized);
+        entry = IW_FindMaterialEntryNormalized(normalized);
     }
 
-    if (!iw_last_material && IW_NormalizeName(textureName, normalized, sizeof(normalized), true))
+    if (!entry && IW_NormalizeName(textureName, normalized, sizeof(normalized), true))
     {
-        iw_last_material = IW_FindMaterialNormalized(normalized);
+        entry = IW_FindMaterialEntryNormalized(normalized);
+    }
+
+    if (entry)
+    {
+        if (entry->broken)
+        {
+            iw_last_material_broken = true;
+            iw_last_broken_name = entry->material.name[0] ? entry->material.name : NULL;
+        }
+        else
+        {
+            iw_last_material = &entry->material;
+        }
     }
 
     if (IW_NormalizeName(textureName, iw_last_texture_display, sizeof(iw_last_texture_display), true))
@@ -1424,8 +1459,13 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
         const char *displayName = iw_last_texture_display[0] ? iw_last_texture_display : textureName;
         if (iw_last_material)
             Con_Printf("iwshader: applied material '%s' to texture '%s'\n", iw_last_material->name, displayName);
-        else
-            Con_Printf("iwshader: no material applied to texture '%s'\n", displayName);
+        else if (iw_last_material_broken)
+        {
+            if (iw_last_broken_name && *iw_last_broken_name)
+                Con_Printf("iwshader: shader '%s' for texture '%s' is invalid\n", iw_last_broken_name, displayName);
+            else
+                Con_Printf("iwshader: shader for texture '%s' is invalid\n", displayName);
+        }
     }
 
     return iw_last_material;
@@ -1561,8 +1601,11 @@ void IW_DumpMaterials(const char *outPath)
         return;
     }
 
+    int written = 0;
     for (int i = 0; i < iw_num_materials; ++i)
     {
+        if (iw_materials[i].broken)
+            continue;
         const iwMaterial_t *mat = &iw_materials[i].material;
         fprintf(f, "shader %s\n{\n", mat->name);
         if (mat->cull != IW_CULL_BACK)
@@ -1717,10 +1760,11 @@ void IW_DumpMaterials(const char *outPath)
             fprintf(f, "    }\n");
         }
         fprintf(f, "}\n\n");
+        ++written;
     }
 
     fclose(f);
-    Con_Printf("iwshader: wrote %d materials to %s\n", iw_num_materials, outPath);
+    Con_Printf("iwshader: wrote %d materials to %s\n", written, outPath);
 }
 
 static void IW_DumpMaterials_f(void)
@@ -1755,8 +1799,15 @@ qboolean IW_DebugOverlayText(char *buffer, size_t bufferSize)
         return false;
     if (iw_last_material)
         q_snprintf(buffer, bufferSize, "iwshader: %s -> %s", tex, iw_last_material->name);
+    else if (iw_last_material_broken)
+    {
+        if (iw_last_broken_name && *iw_last_broken_name)
+            q_snprintf(buffer, bufferSize, "iwshader: %s (shader '%s' invalid)", tex, iw_last_broken_name);
+        else
+            q_snprintf(buffer, bufferSize, "iwshader: %s (shader invalid)", tex);
+    }
     else
-        q_snprintf(buffer, bufferSize, "iwshader: %s (no material)", tex);
+        return false;
     return true;
 }
 
