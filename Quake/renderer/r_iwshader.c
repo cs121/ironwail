@@ -5,6 +5,9 @@
 #include "r_iwshader.h"
 #include "q_ctype.h"
 
+#include <errno.h>
+#include <string.h>
+
 #define IW_MAX_MATERIALS 512
 
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
@@ -1216,8 +1219,25 @@ static void IW_ParseShaderFile(const char *path)
 {
     char *buffer;
     int length;
+    errno = 0;
     if (!IWTXT_LoadFile(path, &buffer, &length))
+    {
+        const char *reason = NULL;
+        if (errno)
+        {
+            reason = strerror(errno);
+        }
+        else if (!(Sys_FileType(path) & FS_ENT_FILE))
+        {
+            reason = "file not found";
+        }
+
+        if (reason)
+            Con_Warning("iwshader: failed to load %s: %s\n", path, reason);
+        else
+            Con_Warning("iwshader: failed to load %s\n", path);
         return;
+    }
 
     iwtxtParser_t parser;
     IWTXT_Init(&parser, buffer, length, path);
@@ -1321,6 +1341,10 @@ void IW_LoadShaderDirectory(const char *dir)
         char path[MAX_OSPATH];
         q_strlcpy(path, base, sizeof(path));
         q_strlcat(path, find->name, sizeof(path));
+
+        if (r_iwshader_debug_cvar.value)
+            Con_Printf("iwshader: loading %s\n", path);
+
         IW_ParseShaderFile(path);
     }
 }
