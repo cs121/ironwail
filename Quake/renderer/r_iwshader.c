@@ -1215,7 +1215,7 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
     IW_RegisterMaterial(&material);
 }
 
-static void IW_ParseShaderFile(const char *path)
+static int IW_ParseShaderFile(const char *path)
 {
     char *buffer;
     int length;
@@ -1236,11 +1236,13 @@ static void IW_ParseShaderFile(const char *path)
             Con_Warning("iwshader: failed to load %s: %s\n", path, reason);
         else
             Con_Warning("iwshader: failed to load %s\n", path);
-        return;
+        return -1;
     }
 
     iwtxtParser_t parser;
     IWTXT_Init(&parser, buffer, length, path);
+
+    int previousMaterialCount = iw_num_materials;
 
     iwtxtToken_t token;
     while (IWTXT_NextToken(&parser, &token))
@@ -1270,6 +1272,8 @@ static void IW_ParseShaderFile(const char *path)
     }
 
     IWTXT_Free(buffer);
+
+    return iw_num_materials - previousMaterialCount;
 }
 
 void IW_ShaderSystem_Init(void)
@@ -1345,7 +1349,18 @@ void IW_LoadShaderDirectory(const char *dir)
         if (r_iwshader_debug_cvar.value)
             Con_Printf("iwshader: loading %s\n", path);
 
-        IW_ParseShaderFile(path);
+        int addedMaterials = IW_ParseShaderFile(path);
+        if (addedMaterials >= 0)
+        {
+            if (addedMaterials > 0)
+            {
+                Con_Printf("iwshader: loaded %s (%d material%s)\n", path, addedMaterials, addedMaterials == 1 ? "" : "s");
+            }
+            else
+            {
+                Con_Printf("iwshader: loaded %s (no materials)\n", path);
+            }
+        }
     }
 }
 
@@ -1402,6 +1417,15 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
         ;
     else
         q_strlcpy(iw_last_texture_display, textureName, sizeof(iw_last_texture_display));
+
+    if (textureName && *textureName)
+    {
+        const char *displayName = iw_last_texture_display[0] ? iw_last_texture_display : textureName;
+        if (iw_last_material)
+            Con_Printf("iwshader: applied material '%s' to texture '%s'\n", iw_last_material->name, displayName);
+        else
+            Con_Printf("iwshader: no material applied to texture '%s'\n", displayName);
+    }
 
     return iw_last_material;
 }
