@@ -12,6 +12,54 @@
 
 #define IW_MAX_MATERIALS 512
 
+#if defined(_WIN32)
+#if defined(MAX_PATH)
+#define IW_WINDOWS_MAX_PATH MAX_PATH
+#elif defined(_MAX_PATH)
+#define IW_WINDOWS_MAX_PATH _MAX_PATH
+#else
+#define IW_WINDOWS_MAX_PATH 260
+#endif
+
+static size_t IW_WindowsUtf8CharCount(const char *text)
+{
+    size_t count = 0;
+
+    if (!text)
+        return 0;
+
+    while (*text)
+    {
+        unsigned char c = (unsigned char) *text;
+        size_t advance = 1;
+
+        if ((c & 0x80) == 0x00)
+        {
+            advance = 1;
+        }
+        else if ((c & 0xE0) == 0xC0 && text[1] && (text[1] & 0xC0) == 0x80)
+        {
+            advance = 2;
+        }
+        else if ((c & 0xF0) == 0xE0 && text[1] && text[2] &&
+                 (text[1] & 0xC0) == 0x80 && (text[2] & 0xC0) == 0x80)
+        {
+            advance = 3;
+        }
+        else if ((c & 0xF8) == 0xF0 && text[1] && text[2] && text[3] &&
+                 (text[1] & 0xC0) == 0x80 && (text[2] & 0xC0) == 0x80 && (text[3] & 0xC0) == 0x80)
+        {
+            advance = 4;
+        }
+
+        text += advance;
+        ++count;
+    }
+
+    return count;
+}
+#endif
+
 static char *IW_PreprocessShaderText(const char *input, int length, int *outLength);
 
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
@@ -1368,6 +1416,15 @@ void IW_LoadShaderDirectory(const char *dir)
         }
     }
 
+#if defined(_WIN32)
+    const size_t extLen = strlen("iwshader");
+    if (IW_WindowsUtf8CharCount(base) + 3 + extLen + 1 > IW_WINDOWS_MAX_PATH)
+    {
+        Con_Warning("iwshader: shader directory '%s' path is too long; skipping\n", base);
+        return;
+    }
+#endif
+
     find = Sys_FindFirst(base, "iwshader");
     for (; find; find = Sys_FindNext(find))
     {
@@ -1377,6 +1434,14 @@ void IW_LoadShaderDirectory(const char *dir)
         char path[MAX_OSPATH];
         q_strlcpy(path, base, sizeof(path));
         q_strlcat(path, find->name, sizeof(path));
+
+#if defined(_WIN32)
+        if (IW_WindowsUtf8CharCount(path) + 1 > IW_WINDOWS_MAX_PATH)
+        {
+            Con_Warning("iwshader: skipping '%s' because the path exceeds Windows limits\n", path);
+            continue;
+        }
+#endif
 
         if ((int) r_iwshader_debug_cvar.value == 1)
             Con_Printf("iwshader: loading %s\n", path);
