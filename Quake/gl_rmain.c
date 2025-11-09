@@ -1728,8 +1728,24 @@ void R_SetupView (void)
                 r_framedata._padding1 = 0;
         }
 
+        int render_width = r_refdef.vrect.width;
+        int render_height = r_refdef.vrect.height;
+        if (r_refdef.scale > 0)
+        {
+                render_width /= r_refdef.scale;
+                render_height /= r_refdef.scale;
+        }
+        if (render_width <= 0)
+                render_width = 1;
+        if (render_height <= 0)
+                render_height = 1;
+        r_framedata.screentex_scale[0] = 1.f / (float)render_width;
+        r_framedata.screentex_scale[1] = 1.f / (float)render_height;
+        r_framedata.screentex_scale[2] = (float)render_width;
+        r_framedata.screentex_scale[3] = (float)render_height;
+
         r_framecount++;
-	r_framedata.eyepos[0] = r_refdef.vieworg[0];
+        r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
 	r_framedata.time = cl.time;
