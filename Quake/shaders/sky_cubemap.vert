@@ -1,10 +1,8 @@
 #if BINDLESS
 	#extension GL_ARB_shader_draw_parameters : require
-	#define DRAW_ID			gl_DrawIDARB
-#else
-	layout(location=0) uniform int DrawID;
-	#define DRAW_ID			DrawID
 #endif
+layout(location=0) uniform int DrawID;
+#define DRAW_ID			DrawID
 
 #include "frame_uniforms.glsl"
 
@@ -50,7 +48,7 @@ const uint TCGEN_SCREEN = 2u;
 
 bool ScreenViewportValid()
 {
-        return Frame.ScreenTexScale.z > 0.0 && Frame.ScreenTexScale.w > 0.0;
+        return ScreenTexScale.z > 0.0 && ScreenTexScale.w > 0.0;
 }
 
 vec2 EvaluateBaseUV(uint mode, vec4 basis0, vec4 basis1, vec3 world_pos, vec4 clip_pos, vec2 object_uv)
@@ -64,7 +62,7 @@ vec2 EvaluateBaseUV(uint mode, vec4 basis0, vec4 basis1, vec3 world_pos, vec4 cl
         {
                 vec2 screen01 = clip_pos.xy / clip_pos.w * 0.5 + 0.5;
                 if (ScreenViewportValid())
-                        return screen01 * Frame.ScreenTexScale.zw;
+                        return screen01 * ScreenTexScale.zw;
                 return screen01;
         }
         return object_uv;
@@ -73,7 +71,7 @@ vec2 EvaluateBaseUV(uint mode, vec4 basis0, vec4 basis1, vec3 world_pos, vec4 cl
 vec2 FinalizeUV(uint mode, vec2 uv)
 {
         if (mode == TCGEN_SCREEN && ScreenViewportValid())
-                return uv * Frame.ScreenTexScale.xy;
+                return uv * ScreenTexScale.xy;
         return uv;
 }
 
