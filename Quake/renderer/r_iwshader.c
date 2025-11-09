@@ -1899,6 +1899,20 @@ qboolean IW_DebugOverlayText(char *buffer, size_t bufferSize)
     return true;
 }
 
+void IW_Debugf(const char *fmt, ...)
+{
+    if ((int) r_iwshader_debug_cvar.value < 2)
+        return;
+
+    char msg[512];
+    va_list args;
+    va_start(args, fmt);
+    q_vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+
+    Con_Printf("iwshader: %s\n", msg);
+}
+
 #define IW_MAX_MACROS 64
 #define IW_MACRO_NAME 64
 

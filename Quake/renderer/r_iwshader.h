@@ -194,6 +194,7 @@ void IW_DumpMaterials(const char* outPath);
 const iwMaterial_t* IW_DebugLastMaterial(void);
 const char* IW_DebugLastTexture(void);
 qboolean IW_DebugOverlayText(char* buffer, size_t bufferSize);
+void IW_Debugf(const char* fmt, ...) FUNC_PRINTF(1, 2);
 
 #ifdef __cplusplus
 }

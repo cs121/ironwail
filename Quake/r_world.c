@@ -209,8 +209,72 @@ static union {
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
+static iwCull_t				bmodel_call_cull[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+
+typedef struct
+{
+	GLboolean	enabled;
+	GLint		mode;
+} r_cull_state_t;
+
+static void R_PushCullState(r_cull_state_t *state)
+{
+	if (!state)
+		return;
+
+	state->enabled = glIsEnabled(GL_CULL_FACE);
+	if (state->enabled)
+	{
+		GLint mode = GL_BACK;
+		glGetIntegerv(GL_CULL_FACE_MODE, &mode);
+		state->mode = mode;
+	}
+	else
+	{
+		state->mode = GL_BACK;
+	}
+}
+
+static void R_SetCullState(iwCull_t cull)
+{
+	switch (cull)
+	{
+	case IW_CULL_FRONT:
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_FRONT);
+		break;
+
+	case IW_CULL_NONE:
+		glDisable(GL_CULL_FACE);
+		break;
+
+	case IW_CULL_BACK:
+	default:
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_BACK);
+		break;
+	}
+
+	IW_Debugf("Cull=%d", (int)cull);
+}
+
+static void R_PopCullState(const r_cull_state_t *state)
+{
+	if (!state)
+		return;
+
+	if (state->enabled)
+	{
+		glEnable(GL_CULL_FACE);
+		glCullFace(state->mode);
+	}
+	else
+	{
+		glDisable(GL_CULL_FACE);
+	}
+}
 
 /*
 =============
@@ -315,7 +379,25 @@ static void R_FlushBModelCalls (void)
 	{
 		GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_calls.bindless.params, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls, &buf, &ofs);
 		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
-		GL_MultiDrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)dstcmdofs, num_bmodel_calls, sizeof (bmodel_draw_indirect_t));
+		const GLsizei stride = sizeof (bmodel_draw_indirect_t);
+		for (int i = 0; i < num_bmodel_calls; )
+		{
+			iwCull_t cull = bmodel_call_cull[i];
+			int count = 1;
+			while (i + count < num_bmodel_calls && bmodel_call_cull[i + count] == cull)
+				++count;
+
+			r_cull_state_t guard;
+			R_PushCullState(&guard);
+			R_SetCullState(cull);
+
+			const size_t offset = dstcmdofs + (size_t)i * (size_t)stride;
+			const void *indirect = (const void *)(uintptr_t)offset;
+			GL_MultiDrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, indirect, count, stride);
+
+			R_PopCullState(&guard);
+			i += count;
+		}
 	}
 	else
 	{
@@ -326,10 +408,17 @@ static void R_FlushBModelCalls (void)
 
 		for (i = 0; i < num_bmodel_calls; i++)
 		{
+			r_cull_state_t guard;
+			R_PushCullState(&guard);
+			R_SetCullState(bmodel_call_cull[i]);
+
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
 			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
-			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
+			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
+			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
+
+			R_PopCullState(&guard);
 		}
 	}
 
@@ -437,6 +526,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           emissive_color[3];
         const iwStage_t *emissive_stage = NULL;
         float           material_alpha = -1.f;
+        iwCull_t        cull = IW_CULL_BACK;
         float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
         float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
         unsigned int    tc_feature_flags = 0u;
@@ -466,6 +556,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (material)
         {
                 IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
+                cull = material->cull;
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
@@ -613,6 +704,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
         SDL_assert (num_instances > 0);
         SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
+        bmodel_call_cull[num_bmodel_calls] = cull;
         bmodel_call_remap[num_bmodel_calls].src = index;
         bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);
 
