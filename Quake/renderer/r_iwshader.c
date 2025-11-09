@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #define IW_MAX_MATERIALS 512
 
@@ -86,6 +87,24 @@ static char iw_last_texture_display[IW_MAX_PATH];
 static qboolean iw_last_material_broken;
 static const char *iw_last_broken_name;
 
+typedef struct
+{
+    char queue[32];
+    qboolean hasQueue;
+    qboolean hasDepth;
+    qboolean depthTest;
+    qboolean depthWrite;
+    iwColorMask_t colorMask;
+    qboolean hasColorMask;
+    iwCull_t cullMode;
+    qboolean hasCull;
+    qboolean polygonOffsetEnabled;
+    float polygonOffsetFactor;
+    float polygonOffsetUnits;
+} iwDebugState_t;
+
+static iwDebugState_t iw_last_debug_state;
+
 static void IW_LogWarning(const char *file, int line, int column, const char *fmt, ...)
 {
     char msg[512];
@@ -96,6 +115,20 @@ static void IW_LogWarning(const char *file, int line, int column, const char *fm
     va_end(args);
 
     Con_Printf("iwshader: %s:%d:%d: %s\n", file ? file : "<unknown>", line, column, msg);
+}
+
+void IW_Debugf(const char *fmt, ...)
+{
+    if ((int)r_iwshader_debug_cvar.value < 2)
+        return;
+
+    char msg[512];
+    va_list args;
+    va_start(args, fmt);
+    q_vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+
+    Con_Printf("iwshader: %s\n", msg);
 }
 
 static qboolean IW_NormalizeName(const char *input, char *output, size_t size, qboolean drop_extension)
@@ -1135,20 +1168,43 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
             IW_LogWarning(filename, token->line, token->column, "polygonoffset requires a value");
             return false;
         }
+
+        iwPolygonOffset_t *po = &material->polygonOffset;
+        po->enabled = 0;
+        po->factor = 0.f;
+        po->units = 0.f;
+
         if (value.type == IWTXT_TOKEN_STRING)
         {
             char mode[8];
             IW_CopyTokenLower(&value, mode, sizeof(mode));
             if (!strcmp(mode, "on"))
-                material->polygonOffset = 1;
+            {
+                po->enabled = 1;
+                po->factor = 1.f;
+                po->units = 1.f;
+            }
             else if (!strcmp(mode, "off"))
-                material->polygonOffset = 0;
+            {
+                po->enabled = 0;
+            }
             else
+            {
                 IW_LogWarning(filename, value.line, value.column, "unknown polygonoffset '%s'", mode);
+            }
         }
         else if (value.type == IWTXT_TOKEN_NUMBER)
         {
-            material->polygonOffset = (value.number != 0.0);
+            po->enabled = (value.number != 0.0);
+            po->factor = (float)value.number;
+            po->units = 1.f;
+
+            iwtxtToken_t next;
+            if (IWTXT_PeekToken(parser, &next) && next.type == IWTXT_TOKEN_NUMBER)
+            {
+                IWTXT_NextToken(parser, &next);
+                po->units = (float)next.number;
+            }
         }
         else
         {
@@ -1368,6 +1424,7 @@ void IW_ShaderSystem_Init(void)
     iw_last_texture_display[0] = '\0';
     iw_last_material_broken = false;
     iw_last_broken_name = NULL;
+    memset(&iw_last_debug_state, 0, sizeof(iw_last_debug_state));
     iw_initialized = true;
 }
 
@@ -1388,6 +1445,7 @@ void IW_ShaderSystem_Shutdown(void)
     iw_last_texture_display[0] = '\0';
     iw_last_material_broken = false;
     iw_last_broken_name = NULL;
+    memset(&iw_last_debug_state, 0, sizeof(iw_last_debug_state));
     iw_initialized = false;
 }
 
@@ -1490,6 +1548,7 @@ const iwMaterial_t *IW_MaterialForTexture(const char *textureName)
     iw_last_texture_display[0] = '\0';
     iw_last_material_broken = false;
     iw_last_broken_name = NULL;
+    memset(&iw_last_debug_state, 0, sizeof(iw_last_debug_state));
 
     if (!iw_initialized || !r_iwshader_cvar.value)
         return NULL;
@@ -1712,8 +1771,13 @@ void IW_DumpMaterials(const char *outPath)
             if (mat->surfaceFlags & iw_surfaceparms[sp].flag)
                 fprintf(f, "    surfaceparm %s\n", iw_surfaceparms[sp].name);
         }
-        if (mat->polygonOffset)
-            fprintf(f, "    polygonoffset on\n");
+        if (mat->polygonOffset.enabled)
+        {
+            if (fabsf(mat->polygonOffset.factor - 1.f) < 1e-6f && fabsf(mat->polygonOffset.units - 1.f) < 1e-6f)
+                fprintf(f, "    polygonoffset on\n");
+            else
+                fprintf(f, "    polygonoffset %g %g\n", mat->polygonOffset.factor, mat->polygonOffset.units);
+        }
         if (mat->detail)
             fprintf(f, "    detail 1\n");
         if (mat->strict)
@@ -1873,7 +1937,87 @@ qboolean IW_DebugOverlayText(char *buffer, size_t bufferSize)
     if (!tex)
         return false;
     if (iw_last_material)
-        q_snprintf(buffer, bufferSize, "iwshader: %s -> %s", tex, iw_last_material->name);
+    {
+        char extras[160];
+        extras[0] = '\0';
+
+        char sortInfo[32];
+        sortInfo[0] = '\0';
+        const char *sortName = "opaque";
+        switch (iw_last_material->sort)
+        {
+        case IW_SORT_ALPHA:
+            sortName = "alpha";
+            break;
+        case IW_SORT_ADDITIVE:
+            sortName = "additive";
+            break;
+        case IW_SORT_DECAL:
+            sortName = "decal";
+            break;
+        case IW_SORT_SKY:
+            sortName = "sky";
+            break;
+        case IW_SORT_CUSTOM:
+            sortName = "custom";
+            break;
+        default:
+            break;
+        }
+        if (iw_last_material->sort == IW_SORT_CUSTOM && iw_last_material->sortValue >= 0)
+            q_snprintf(sortInfo, sizeof(sortInfo), "%s/%d", sortName, iw_last_material->sortValue);
+        else if (iw_last_material->sortValue >= 0)
+            q_snprintf(sortInfo, sizeof(sortInfo), "%s/%d", sortName, iw_last_material->sortValue);
+        else
+            q_snprintf(sortInfo, sizeof(sortInfo), "%s", sortName);
+
+        if (sortInfo[0])
+        {
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%ssort=%s", extras[0] ? " " : "", sortInfo);
+        }
+
+        if (iw_last_debug_state.hasQueue)
+        {
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%squeue=%s", extras[0] ? " " : "", iw_last_debug_state.queue);
+        }
+        if (iw_last_debug_state.hasDepth)
+        {
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%sdepthtest=%s depthwrite=%s", extras[0] ? " " : "",
+                iw_last_debug_state.depthTest ? "on" : "off",
+                iw_last_debug_state.depthWrite ? "on" : "off");
+        }
+        if (iw_last_debug_state.hasColorMask)
+        {
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%scolormask=%s", extras[0] ? " " : "",
+                IW_ColorMaskName(iw_last_debug_state.colorMask));
+        }
+        if (iw_last_debug_state.hasCull)
+        {
+            const char *cull = "back";
+            if (iw_last_debug_state.cullMode == IW_CULL_FRONT)
+                cull = "front";
+            else if (iw_last_debug_state.cullMode == IW_CULL_NONE)
+                cull = "none";
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%scull=%s", extras[0] ? " " : "", cull);
+        }
+        if (iw_last_debug_state.polygonOffsetEnabled)
+        {
+            q_snprintf(extras + strlen(extras), sizeof(extras) - strlen(extras),
+                "%spolygonoffset=%g,%g", extras[0] ? " " : "",
+                iw_last_debug_state.polygonOffsetFactor,
+                iw_last_debug_state.polygonOffsetUnits);
+        }
+
+        if (extras[0])
+            q_snprintf(buffer, bufferSize, "iwshader: %s -> %s (%s)", tex, iw_last_material->name, extras);
+        else
+            q_snprintf(buffer, bufferSize, "iwshader: %s -> %s", tex, iw_last_material->name);
+    }
     else if (iw_last_material_broken)
     {
         if (iw_last_broken_name && *iw_last_broken_name)
@@ -1884,6 +2028,37 @@ qboolean IW_DebugOverlayText(char *buffer, size_t bufferSize)
     else
         return false;
     return true;
+}
+
+void IW_DebugSetMaterialState(const iwMaterial_t *material, const char *queue,
+    qboolean depthTest, qboolean depthWrite, iwColorMask_t colorMask,
+    iwCull_t cullMode, qboolean polygonOffsetEnabled, float polygonOffsetFactor,
+    float polygonOffsetUnits)
+{
+    if (!material || material != iw_last_material)
+        return;
+
+    memset(&iw_last_debug_state, 0, sizeof(iw_last_debug_state));
+
+    if (queue && *queue)
+    {
+        q_strlcpy(iw_last_debug_state.queue, queue, sizeof(iw_last_debug_state.queue));
+        iw_last_debug_state.hasQueue = true;
+    }
+
+    iw_last_debug_state.depthTest = depthTest ? true : false;
+    iw_last_debug_state.depthWrite = depthWrite ? true : false;
+    iw_last_debug_state.hasDepth = true;
+
+    iw_last_debug_state.colorMask = colorMask;
+    iw_last_debug_state.hasColorMask = true;
+
+    iw_last_debug_state.cullMode = cullMode;
+    iw_last_debug_state.hasCull = true;
+
+    iw_last_debug_state.polygonOffsetEnabled = polygonOffsetEnabled;
+    iw_last_debug_state.polygonOffsetFactor = polygonOffsetFactor;
+    iw_last_debug_state.polygonOffsetUnits = polygonOffsetUnits;
 }
 
 #define IW_MAX_MACROS 64
