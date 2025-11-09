@@ -261,6 +261,12 @@ float		v_blend[4];		// rgba 0.0 - 1.0; see note in V_PolyBlend for more info
 
 //johnfitz -- deleted BuildGammaTable(), V_CheckGamma(), gammatable[], and ramps[][]
 
+static vec3_t v_last_damage_dir;
+static double v_last_damage_time;
+static qboolean v_last_damage_dir_valid;
+static qboolean v_death_view_active;
+static vec3_t v_death_view_angles;
+
 /*
 ============
 V_ResetEffects
@@ -269,10 +275,12 @@ V_ResetEffects
 void V_ResetEffects (void)
 {
 	cshift_empty.percent = 0;
-	memset (v_blend, 0, sizeof (v_blend));
-	v_dmg_time = 0.f;
-	v_dmg_roll = 0.f;
-	v_dmg_pitch = 0.f;
+        memset (v_blend, 0, sizeof (v_blend));
+        v_dmg_time = 0.f;
+        v_dmg_roll = 0.f;
+        v_dmg_pitch = 0.f;
+        v_last_damage_dir_valid = false;
+        v_death_view_active = false;
 }
 
 /*
@@ -289,6 +297,7 @@ void V_ParseDamage (void)
 	entity_t	*ent;
 	float	side;
 	float	count;
+	float	dirLength;
 
 	armor = MSG_ReadByte ();
 	blood = MSG_ReadByte ();
@@ -332,7 +341,18 @@ void V_ParseDamage (void)
 	ent = &cl_entities[cl.viewentity];
 
 	VectorSubtract (from, ent->origin, from);
-	VectorNormalize (from);
+	dirLength = VectorNormalize (from);
+
+	if (dirLength > 0.f)
+	{
+		VectorCopy (from, v_last_damage_dir);
+		v_last_damage_dir_valid = true;
+		v_last_damage_time = cl.time;
+	}
+	else
+	{
+		v_last_damage_dir_valid = false;
+	}
 
 	AngleVectors (ent->angles, forward, right, up);
 
@@ -796,6 +816,24 @@ void V_CalcRefdef (void)
 	r_refdef.vieworg[2] += 1.0/32;
 
 	VectorCopy (cl.viewangles, r_refdef.viewangles);
+
+	if (cl.stats[STAT_HEALTH] <= 0)
+	{
+		if (!v_death_view_active)
+		{
+			if (v_last_damage_dir_valid && (cl.time - v_last_damage_time) <= 1.0)
+				VectorAngles (v_last_damage_dir, v_death_view_angles);
+			else
+				VectorCopy (r_refdef.viewangles, v_death_view_angles);
+			v_death_view_active = true;
+		}
+		r_refdef.viewangles[PITCH] = v_death_view_angles[PITCH];
+		r_refdef.viewangles[YAW] = v_death_view_angles[YAW];
+	}
+	else
+	{
+		v_death_view_active = false;
+	}
 	V_CalcViewRoll ();
 	V_AddIdle ();
 

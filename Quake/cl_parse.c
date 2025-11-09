@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "render.h"
+#include "renderer/r_iwshader.h"
 
 const char *svc_strings[] =
 {
@@ -398,14 +400,18 @@ void CL_ParseServerInfo (void)
 // now we try to load everything else until a cache allocation fails
 //
 
-	// copy the naked name of the map file to the cl structure -- O.S
-	COM_StripExtension (COM_SkipPath(model_precache[1]), cl.mapname, sizeof(cl.mapname));
+        // copy the naked name of the map file to the cl structure -- O.S
+        COM_StripExtension (COM_SkipPath(model_precache[1]), cl.mapname, sizeof(cl.mapname));
 
-	for (i = 1; i < nummodels; i++)
-	{
-		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
-		if (cl.model_precache[i] == NULL)
-		{
+        IW_ShaderSystem_PrepareForGameDir (com_gamedir);
+        if (nummodels > 1 && model_precache[1][0])
+                R_Particles_LoadEffectInfoForMap (NULL, model_precache[1]);
+
+        for (i = 1; i < nummodels; i++)
+        {
+                cl.model_precache[i] = Mod_ForName (model_precache[i], false);
+                if (cl.model_precache[i] == NULL)
+                {
 			Host_Error ("Model %s not found", model_precache[i]);
 		}
 		CL_KeepaliveMessage ();

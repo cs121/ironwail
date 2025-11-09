@@ -1321,7 +1321,7 @@ static qboolean R_Effectinfo_LoadFile (const char* filename)
         return result;
 }
 
-void R_Particles_LoadEffectInfo (const char* customfile)
+void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* worldmodelname)
 {
         char basefile[MAX_QPATH];
         char mapfile[MAX_QPATH];
@@ -1338,13 +1338,22 @@ void R_Particles_LoadEffectInfo (const char* customfile)
         }
         else
         {
+                const char* mapname = worldmodelname;
+
                 loaded = R_Effectinfo_LoadFile ("effectinfo.txt");
                 if (loaded)
                         q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
 
-                if (cl.worldmodel && cl.worldmodel->name[0])
+                if (!mapname || !*mapname)
                 {
-                        COM_StripExtension (cl.worldmodel->name, basefile, sizeof (basefile));
+                        if (cl.worldmodel && cl.worldmodel->name[0])
+                                mapname = cl.worldmodel->name;
+                }
+
+                mapfile[0] = '\0';
+                if (mapname && *mapname)
+                {
+                        COM_StripExtension (mapname, basefile, sizeof (basefile));
                         dpsnprintf (mapfile, sizeof (mapfile), "%s_effectinfo.txt", basefile);
                         loaded_map = R_Effectinfo_LoadFile (mapfile);
                 }
@@ -1377,6 +1386,11 @@ void R_Particles_LoadEffectInfo (const char* customfile)
         }
 
         R_Effectinfo_DebugPrintLoaded ();
+}
+
+void R_Particles_LoadEffectInfo (const char* customfile)
+{
+        R_Particles_LoadEffectInfoForMap (customfile, NULL);
 }
 
 static void R_Particles_ReloadEffects_f (void)

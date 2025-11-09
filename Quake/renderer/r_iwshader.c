@@ -85,6 +85,17 @@ static char iw_last_texture[IW_MAX_PATH];
 static char iw_last_texture_display[IW_MAX_PATH];
 static qboolean iw_last_material_broken;
 static const char *iw_last_broken_name;
+static char iw_loaded_gamedir[MAX_OSPATH];
+
+static void IW_ResetState(void)
+{
+    iw_num_materials = 0;
+    iw_last_material = NULL;
+    iw_last_texture[0] = '\0';
+    iw_last_texture_display[0] = '\0';
+    iw_last_material_broken = false;
+    iw_last_broken_name = NULL;
+}
 
 static void IW_LogWarning(const char *file, int line, int column, const char *fmt, ...)
 {
@@ -1383,12 +1394,8 @@ void IW_ShaderSystem_Init(void)
     Cvar_RegisterVariable(&r_iwshader_debug_cvar);
     iwshader_dump_cmd = Cmd_AddCommand("r_iwshader_dump", IW_DumpMaterials_f);
 
-    iw_num_materials = 0;
-    iw_last_material = NULL;
-    iw_last_texture[0] = '\0';
-    iw_last_texture_display[0] = '\0';
-    iw_last_material_broken = false;
-    iw_last_broken_name = NULL;
+    IW_ResetState();
+    iw_loaded_gamedir[0] = '\0';
     iw_initialized = true;
 }
 
@@ -1403,13 +1410,9 @@ void IW_ShaderSystem_Shutdown(void)
         iwshader_dump_cmd = NULL;
     }
 
-    iw_num_materials = 0;
-    iw_last_material = NULL;
-    iw_last_texture[0] = '\0';
-    iw_last_texture_display[0] = '\0';
-    iw_last_material_broken = false;
-    iw_last_broken_name = NULL;
+    IW_ResetState();
     iw_initialized = false;
+    iw_loaded_gamedir[0] = '\0';
 }
 
 void IW_LoadShaderDirectory(const char *dir)
@@ -1480,6 +1483,27 @@ void IW_LoadShaderDirectory(const char *dir)
             }
         }
     }
+}
+
+void IW_ShaderSystem_PrepareForGameDir(const char *gamedir)
+{
+    char shaderdir[MAX_OSPATH];
+
+    if (!iw_initialized || !r_iwshader_cvar.value)
+        return;
+
+    if (!gamedir || !*gamedir)
+        return;
+
+    if (iw_loaded_gamedir[0] && !strcmp(iw_loaded_gamedir, gamedir))
+        return;
+
+    IW_ResetState();
+    q_strlcpy(iw_loaded_gamedir, gamedir, sizeof(iw_loaded_gamedir));
+
+    q_snprintf(shaderdir, sizeof(shaderdir), "%s/shaders", gamedir);
+    IW_LoadShaderDirectory(shaderdir);
+    IW_LoadShaderDirectory(gamedir);
 }
 
 static const iwMaterialEntry_t *IW_FindMaterialEntryNormalized(const char *name)

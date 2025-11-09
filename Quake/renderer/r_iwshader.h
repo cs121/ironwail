@@ -180,6 +180,8 @@ extern "C" {
 void IW_ShaderSystem_Init(void);
 void IW_ShaderSystem_Shutdown(void);
 
+void IW_ShaderSystem_PrepareForGameDir(const char* gamedir);
+
 void IW_LoadShaderDirectory(const char* dir);
 
 const iwMaterial_t* IW_FindMaterial(const char* materialName);
