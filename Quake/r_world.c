@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "renderer/r_iwshader.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -201,12 +202,134 @@ static union {
 	} bindless;
 	struct {
 		bmodel_bound_gpu_call_t		params[MAX_BMODEL_DRAWS];
-		gltexture_t					*textures[MAX_BMODEL_DRAWS][3];
+		gltexture_t						*textures[MAX_BMODEL_DRAWS][3];
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
-static int							num_bmodel_calls;
-static GLuint						bmodel_batch_program;
+static int								num_bmodel_calls;
+static GLuint							bmodel_batch_program;
+
+typedef enum {
+	BMODEL_QUEUE_OPAQUE = 0,
+	BMODEL_QUEUE_DECAL,
+	BMODEL_QUEUE_ALPHA_TEST,
+	BMODEL_QUEUE_TRANSLUCENT,
+	BMODEL_QUEUE_OVERLAY,
+	BMODEL_QUEUE_COUNT
+} bmodel_queue_t;
+
+static const char *const bmodel_queue_names[BMODEL_QUEUE_COUNT] = {
+	"OPAQUE",
+	"DECAL",
+	"ALPHA_TEST",
+	"TRANSLUCENT",
+	"OVERLAY"
+};
+
+typedef struct {
+	unsigned				cullMask;
+	iwCull_t				cullMode;
+	qboolean			depthTest;
+	qboolean			depthWrite;
+	qboolean			colorMaskEnabled;
+	GLboolean		colorMask[4];
+	iwColorMask_t	colorMaskBits;
+	qboolean			polygonOffsetEnabled;
+	float				polygonOffsetFactor;
+	float				polygonOffsetUnits;
+	qboolean			clampDiffuse;
+	qboolean			clampEmissive;
+	bmodel_queue_t	queue;
+	float				sortKey;
+	int					sortValue;
+	const iwMaterial_t	*material;
+} bmodel_cpu_call_t;
+
+static bmodel_cpu_call_t bmodel_cpu_calls[MAX_BMODEL_DRAWS];
+static int				bmodel_call_order[MAX_BMODEL_DRAWS];
+static qboolean	bmodel_calls_require_bound;
+
+static int R_CompareBModelCalls(const void *a, const void *b)
+{
+        int ia = *(const int *)a;
+        int ib = *(const int *)b;
+        const bmodel_cpu_call_t *ca = &bmodel_cpu_calls[ia];
+        const bmodel_cpu_call_t *cb = &bmodel_cpu_calls[ib];
+
+        if (ca->queue != cb->queue)
+                return (ca->queue < cb->queue) ? -1 : 1;
+
+        if (ca->queue == BMODEL_QUEUE_TRANSLUCENT)
+        {
+                if (ca->sortKey > cb->sortKey)
+                        return -1;
+                if (ca->sortKey < cb->sortKey)
+                        return 1;
+        }
+        else if (ca->sortValue != cb->sortValue)
+        {
+                return (ca->sortValue < cb->sortValue) ? -1 : 1;
+        }
+
+        if (ia < ib)
+                return -1;
+        if (ia > ib)
+                return 1;
+        return 0;
+}
+
+static void R_SortBModelCalls(void)
+{
+        if (num_bmodel_calls <= 1)
+                return;
+
+        for (int i = 0; i < num_bmodel_calls; ++i)
+                bmodel_call_order[i] = i;
+
+        qsort(bmodel_call_order, num_bmodel_calls, sizeof(bmodel_call_order[0]), R_CompareBModelCalls);
+
+        qboolean changed = false;
+        for (int i = 0; i < num_bmodel_calls; ++i)
+        {
+                if (bmodel_call_order[i] != i)
+                {
+                        changed = true;
+                        break;
+                }
+        }
+
+        if (!changed)
+                return;
+
+        static bmodel_bindless_gpu_call_t bindless_tmp[MAX_BMODEL_DRAWS];
+        static bmodel_bound_gpu_call_t bound_tmp[MAX_BMODEL_DRAWS];
+        static gltexture_t *textures_tmp[MAX_BMODEL_DRAWS][3];
+        static bmodel_gpu_call_remap_t remap_tmp[MAX_BMODEL_DRAWS];
+        static bmodel_cpu_call_t cpu_tmp[MAX_BMODEL_DRAWS];
+
+        for (int i = 0; i < num_bmodel_calls; ++i)
+        {
+                int src = bmodel_call_order[i];
+                bindless_tmp[i] = bmodel_calls.bindless.params[src];
+                bound_tmp[i] = bmodel_calls.bound.params[src];
+                for (int t = 0; t < 3; ++t)
+                        textures_tmp[i][t] = bmodel_calls.bound.textures[src][t];
+                remap_tmp[i] = bmodel_call_remap[src];
+                cpu_tmp[i] = bmodel_cpu_calls[src];
+        }
+
+        for (int i = 0; i < num_bmodel_calls; ++i)
+        {
+                bmodel_calls.bindless.params[i] = bindless_tmp[i];
+                bmodel_calls.bound.params[i] = bound_tmp[i];
+                for (int t = 0; t < 3; ++t)
+                        bmodel_calls.bound.textures[i][t] = textures_tmp[i][t];
+                bmodel_call_remap[i] = remap_tmp[i];
+                bmodel_cpu_calls[i] = cpu_tmp[i];
+        }
+}
+
+
 
 /*
 =============
@@ -270,8 +393,9 @@ R_ResetBModelCalls
 */
 static void R_ResetBModelCalls (GLuint program)
 {
-	bmodel_batch_program = program;
-	num_bmodel_calls = 0;
+        bmodel_batch_program = program;
+        num_bmodel_calls = 0;
+        bmodel_calls_require_bound = false;
 }
 
 /*
@@ -281,56 +405,165 @@ R_FlushBModelCalls
 */
 static void R_FlushBModelCalls (void)
 {
-	GLuint	cmdbuf, buf;
-	GLbyte	*ofs;
-	size_t	dstcmdofs;
+        GLuint  cmdbuf, buf;
+        GLbyte  *ofs;
+        size_t  dstcmdofs;
 
-	if (!num_bmodel_calls)
-		return;
+        if (!num_bmodel_calls)
+                return;
 
-	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
+        R_SortBModelCalls();
 
-	GL_UseProgram (glprogs.gather_indirect);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 5, gl_bmodel_indirect_buffer, 0, gl_bmodel_indirect_buffer_size);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, cmdbuf, dstcmdofs, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls);
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_call_remap, sizeof (bmodel_call_remap[0]) * num_bmodel_calls, &buf, &ofs);
-	GL_BindBufferRange  (GL_SHADER_STORAGE_BUFFER, 7, buf, (GLintptr)ofs, sizeof (bmodel_call_remap[0]) * num_bmodel_calls);
-	GL_DispatchComputeFunc ((num_bmodel_calls + 63) / 64, 1, 1);
-	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
+        qboolean use_bindless = gl_bindless_able && !bmodel_calls_require_bound;
 
-	GL_UseProgram (bmodel_batch_program);
-	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
-	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
-	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
-	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, pos));
-	GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
-	GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
-	GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
+        GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
 
-	if (gl_bindless_able)
-	{
-		GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_calls.bindless.params, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls, &buf, &ofs);
-		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
-		GL_MultiDrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)dstcmdofs, num_bmodel_calls, sizeof (bmodel_draw_indirect_t));
-	}
-	else
-	{
-		int i;
+        GL_UseProgram (glprogs.gather_indirect);
+        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 5, gl_bmodel_indirect_buffer, 0, gl_bmodel_indirect_buffer_size);
+        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, cmdbuf, dstcmdofs, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls);
+        GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_call_remap, sizeof (bmodel_call_remap[0]) * num_bmodel_calls, &buf, &ofs);
+        GL_BindBufferRange  (GL_SHADER_STORAGE_BUFFER, 7, buf, (GLintptr)ofs, sizeof (bmodel_call_remap[0]) * num_bmodel_calls);
+        GL_DispatchComputeFunc ((num_bmodel_calls + 63) / 64, 1, 1);
+        GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
 
-		GL_Upload (GL_SHADER_STORAGE_BUFFER, &bmodel_calls.bound.params, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls, &buf, &ofs);
-		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls);
+        GL_UseProgram (bmodel_batch_program);
+        GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
+        GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
+        GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
+        GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, pos));
+        GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
+        GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
+        GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
 
-		for (i = 0; i < num_bmodel_calls; i++)
-		{
-			GL_Uniform1iFunc (0, i);
-			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
-			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
-			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
-		}
-	}
+        if (use_bindless)
+        {
+                GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_calls.bindless.params, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls, &buf, &ofs);
+                GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
+        }
+        else
+        {
+                GL_Upload (GL_SHADER_STORAGE_BUFFER, &bmodel_calls.bound.params, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls, &buf, &ofs);
+                GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls);
+        }
 
-	num_bmodel_calls = 0;
+        for (int i = 0; i < num_bmodel_calls; ++i)
+        {
+                bmodel_cpu_call_t *cpu = &bmodel_cpu_calls[i];
+
+                unsigned prev_state = glstate;
+                unsigned desired_state = (prev_state & ~(GLS_MASK_CULL | GLS_NO_ZTEST | GLS_NO_ZWRITE));
+                desired_state = (desired_state & ~GLS_MASK_CULL) | cpu->cullMask;
+                if (!cpu->depthTest)
+                        desired_state |= GLS_NO_ZTEST;
+                else
+                        desired_state &= ~GLS_NO_ZTEST;
+                if (!cpu->depthWrite)
+                        desired_state |= GLS_NO_ZWRITE;
+                else
+                        desired_state &= ~GLS_NO_ZWRITE;
+
+                if (desired_state != glstate)
+                        GL_SetState (desired_state);
+
+                GLboolean prev_mask[4];
+                GL_GetColorMask (prev_mask);
+                qboolean restore_color = false;
+                if (cpu->colorMaskEnabled)
+                {
+                        GL_SetColorMask (cpu->colorMask[0], cpu->colorMask[1], cpu->colorMask[2], cpu->colorMask[3]);
+                        restore_color = true;
+                }
+                else if (!(prev_mask[0] && prev_mask[1] && prev_mask[2] && prev_mask[3]))
+                {
+                        GL_SetColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                        restore_color = true;
+                }
+
+                qboolean prev_poly_enabled;
+                float prev_poly_factor, prev_poly_units;
+                GL_GetPolygonOffset (&prev_poly_enabled, &prev_poly_factor, &prev_poly_units);
+                qboolean restore_poly = false;
+                if (cpu->polygonOffsetEnabled)
+                {
+                        if (!prev_poly_enabled || prev_poly_factor != cpu->polygonOffsetFactor || prev_poly_units != cpu->polygonOffsetUnits)
+                                GL_SetPolygonOffset (true, cpu->polygonOffsetFactor, cpu->polygonOffsetUnits);
+                        restore_poly = true;
+                }
+                else if (prev_poly_enabled)
+                {
+                        GL_SetPolygonOffset (false, 0.f, 0.f);
+                        restore_poly = true;
+                }
+
+                GLint diffuse_wrap[2] = {0, 0};
+                GLint emissive_wrap[2] = {0, 0};
+                qboolean restore_diffuse_wrap = false;
+                qboolean restore_emissive_wrap = false;
+
+                if (!use_bindless)
+                {
+                        gltexture_t **textures = bmodel_calls.bound.textures[i];
+                        gltexture_t *diffuse = textures[0] ? textures[0] : greytexture;
+                        gltexture_t *fullbright = textures[1] ? textures[1] : blacktexture;
+                        gltexture_t *emissive = textures[2] ? textures[2] : blacktexture;
+
+                        GL_Bind (GL_TEXTURE0, diffuse);
+                        GL_Bind (GL_TEXTURE1, fullbright);
+                        GL_Bind (GL_TEXTURE4, emissive);
+
+                        if (cpu->clampDiffuse && diffuse)
+                        {
+                                glGetTexParameteriv (diffuse->target, GL_TEXTURE_WRAP_S, &diffuse_wrap[0]);
+                                glGetTexParameteriv (diffuse->target, GL_TEXTURE_WRAP_T, &diffuse_wrap[1]);
+                                glTexParameteri (diffuse->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                                glTexParameteri (diffuse->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                                restore_diffuse_wrap = true;
+                        }
+
+                        if (cpu->clampEmissive && emissive)
+                        {
+                                glGetTexParameteriv (emissive->target, GL_TEXTURE_WRAP_S, &emissive_wrap[0]);
+                                glGetTexParameteriv (emissive->target, GL_TEXTURE_WRAP_T, &emissive_wrap[1]);
+                                glTexParameteri (emissive->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                                glTexParameteri (emissive->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                                restore_emissive_wrap = true;
+                        }
+                }
+
+                GL_Uniform1iFunc (0, i);
+
+                GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT,
+                        (const GLvoid *)(dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t)));
+
+                if (!use_bindless)
+                {
+                        gltexture_t **textures = bmodel_calls.bound.textures[i];
+                        gltexture_t *diffuse = textures[0] ? textures[0] : greytexture;
+                        gltexture_t *emissive = textures[2] ? textures[2] : blacktexture;
+
+                        if (restore_diffuse_wrap && diffuse)
+                        {
+                                glTexParameteri (diffuse->target, GL_TEXTURE_WRAP_S, diffuse_wrap[0]);
+                                glTexParameteri (diffuse->target, GL_TEXTURE_WRAP_T, diffuse_wrap[1]);
+                        }
+                        if (restore_emissive_wrap && emissive)
+                        {
+                                glTexParameteri (emissive->target, GL_TEXTURE_WRAP_S, emissive_wrap[0]);
+                                glTexParameteri (emissive->target, GL_TEXTURE_WRAP_T, emissive_wrap[1]);
+                        }
+                }
+
+                if (restore_poly)
+                        GL_SetPolygonOffset (prev_poly_enabled, prev_poly_factor, prev_poly_units);
+                if (restore_color)
+                        GL_SetColorMask (prev_mask[0], prev_mask[1], prev_mask[2], prev_mask[3]);
+                if (glstate != prev_state)
+                        GL_SetState (prev_state);
+        }
+
+        num_bmodel_calls = 0;
 }
+
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
@@ -414,12 +647,22 @@ static void R_IWShader_EmissiveColor(const iwStage_t *stage, float color[3])
         }
 }
 
+typedef enum
+{
+        BP_SOLID,
+        BP_ALPHATEST,
+        BP_SKYLAYERS,
+        BP_SKYCUBEMAP,
+        BP_SKYSTENCIL,
+        BP_SHOWTRIS,
+} brushpass_t;
+
 /*
 =============
 R_AddBModelCall
 =============
 */
-static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix)
+static void R_AddBModelCall (brushpass_t pass, qboolean translucent_pass, int index, int first_instance, int num_instances, texture_t *t, qboolean zfix, entity_t *base_entity)
 {
         GLuint          flags;
         float           alpha;
@@ -428,6 +671,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         iwTexMatrix_t   tex_matrix;
         iwTexMatrix_t   emissive_matrix;
         float           emissive_color[3];
+        const iwStage_t *base_stage = NULL;
         const iwStage_t *emissive_stage = NULL;
         float           material_alpha = -1.f;
 
@@ -458,7 +702,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
                 if (material->numStages > 0)
                 {
-                        const iwStage_t *base_stage = &material->stages[0];
+                        base_stage = &material->stages[0];
                         if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
                             base_stage->alphagen == IW_A_CONST)
                                 material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
@@ -564,6 +808,128 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 textures[2] = em ? em : blacktexture;
         }
 
+        iwColorMask_t mask = base_stage ? base_stage->colorMask : IW_COLORMASK_RGBA;
+        qboolean colorMaskEnabled = (mask != IW_COLORMASK_RGBA);
+        GLboolean maskValues[4] = {
+                (mask & IW_COLORMASK_R) != 0,
+                (mask & IW_COLORMASK_G) != 0,
+                (mask & IW_COLORMASK_B) != 0,
+                (mask & IW_COLORMASK_A) != 0
+        };
+
+        qboolean clampDiffuse = base_stage && base_stage->clamp;
+        qboolean clampEmissive = emissive_stage && emissive_stage->clamp;
+        if (clampDiffuse || clampEmissive)
+                bmodel_calls_require_bound = true;
+
+        iwCull_t cullMode = material ? material->cull : IW_CULL_BACK;
+        unsigned cullMask = GLS_CULL_BACK;
+        if (cullMode == IW_CULL_FRONT)
+                cullMask = GLS_CULL_FRONT;
+        else if (cullMode == IW_CULL_NONE)
+                cullMask = GLS_CULL_NONE;
+
+        bmodel_queue_t queue = BMODEL_QUEUE_OPAQUE;
+        if (pass == BP_SKYLAYERS || pass == BP_SKYCUBEMAP || pass == BP_SKYSTENCIL)
+                queue = BMODEL_QUEUE_OVERLAY;
+        else if (translucent_pass)
+                queue = BMODEL_QUEUE_TRANSLUCENT;
+        else if (flags & CALLFLAG_ALPHA_TEST)
+                queue = BMODEL_QUEUE_ALPHA_TEST;
+
+        if (material)
+        {
+                switch (material->sort)
+                {
+                case IW_SORT_DECAL:
+                        queue = BMODEL_QUEUE_DECAL;
+                        break;
+                case IW_SORT_ALPHA:
+                case IW_SORT_ADDITIVE:
+                        queue = BMODEL_QUEUE_TRANSLUCENT;
+                        break;
+                case IW_SORT_SKY:
+                        queue = BMODEL_QUEUE_OVERLAY;
+                        break;
+                case IW_SORT_CUSTOM:
+                        if (material->sortValue >= 0)
+                        {
+                                int bucket = material->sortValue;
+                                if (bucket < 0)
+                                        bucket = 0;
+                                if (bucket >= BMODEL_QUEUE_COUNT)
+                                        bucket = BMODEL_QUEUE_COUNT - 1;
+                                queue = (bmodel_queue_t)bucket;
+                        }
+                        break;
+                default:
+                        break;
+                }
+        }
+
+        qboolean depthTest = base_stage ? (base_stage->depthTest != 0) : true;
+        qboolean defaultDepthWrite = (queue != BMODEL_QUEUE_TRANSLUCENT);
+        qboolean depthWrite;
+        if (base_stage)
+        {
+                if (base_stage->depthWrite == IW_DEPTHWRITE_AUTO)
+                        depthWrite = defaultDepthWrite;
+                else
+                        depthWrite = base_stage->depthWrite != 0;
+        }
+        else
+        {
+                depthWrite = defaultDepthWrite;
+        }
+
+        qboolean polygonOffsetEnabled = material && material->polygonOffset.enabled;
+        float polygonOffsetFactor = polygonOffsetEnabled ? material->polygonOffset.factor : 0.f;
+        float polygonOffsetUnits = polygonOffsetEnabled ? material->polygonOffset.units : 0.f;
+
+        int sortValue = 0;
+        if (material && material->sortValue >= 0)
+                sortValue = material->sortValue;
+
+        float sortKey = 0.f;
+        if (queue == BMODEL_QUEUE_TRANSLUCENT && base_entity)
+        {
+                vec3_t diff;
+                VectorSubtract (base_entity->origin, r_refdef.vieworg, diff);
+                sortKey = DotProduct (diff, diff);
+        }
+        else
+        {
+                sortKey = (float)sortValue;
+        }
+
+        if (material)
+        {
+                IW_Debugf ("Cull=%d", material->cull);
+                IW_DebugSetMaterialState (material, bmodel_queue_names[queue], depthTest, depthWrite,
+                        mask, cullMode, polygonOffsetEnabled, polygonOffsetFactor, polygonOffsetUnits);
+        }
+
+        bmodel_cpu_call_t *cpu = &bmodel_cpu_calls[num_bmodel_calls];
+        cpu->cullMask = cullMask;
+        cpu->cullMode = cullMode;
+        cpu->depthTest = depthTest;
+        cpu->depthWrite = depthWrite;
+        cpu->colorMaskEnabled = colorMaskEnabled;
+        cpu->colorMaskBits = mask;
+        cpu->colorMask[0] = maskValues[0];
+        cpu->colorMask[1] = maskValues[1];
+        cpu->colorMask[2] = maskValues[2];
+        cpu->colorMask[3] = maskValues[3];
+        cpu->polygonOffsetEnabled = polygonOffsetEnabled;
+        cpu->polygonOffsetFactor = polygonOffsetFactor;
+        cpu->polygonOffsetUnits = polygonOffsetUnits;
+        cpu->clampDiffuse = clampDiffuse;
+        cpu->clampEmissive = clampEmissive;
+        cpu->queue = queue;
+        cpu->sortKey = sortKey;
+        cpu->sortValue = sortValue;
+        cpu->material = material;
+
         SDL_assert (num_instances > 0);
         SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
         bmodel_call_remap[num_bmodel_calls].src = index;
@@ -603,15 +969,6 @@ static GLuint R_ChooseBModelProgram (qboolean oit, qboolean alphatest)
 			return glprogs.world[oit][0][alphatest];
 	}
 }
-
-typedef enum {
-        BP_SOLID,
-        BP_ALPHATEST,
-        BP_SKYLAYERS,
-        BP_SKYCUBEMAP,
-        BP_SKYSTENCIL,
-        BP_SHOWTRIS,
-} brushpass_t;
 
 /*
 =============
@@ -735,7 +1092,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
                 {
                         texture_t *t = model->textures[model->usedtextures[j]];
-                        R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
+                        R_AddBModelCall (pass, translucent, model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix, e);
                 }
 
                 baseinst += numinst;
@@ -839,7 +1196,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 			texture_t *t = model->textures[model->usedtextures[j]];
 			if ((GL_WaterAlphaForEntityTextureType (e, t->type) < 1.f) != translucent)
 				continue;
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld);
+			R_AddBModelCall (BP_SOLID, translucent, model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld, e);
 		}
 
 		baseinst += numinst;

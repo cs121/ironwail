@@ -92,6 +92,10 @@ float gl_max_anisotropy; //johnfitz
 int gl_stencilbits;
 
 unsigned glstate;
+static GLboolean gl_color_mask_state[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+static qboolean gl_polygon_offset_enabled_state = false;
+static float gl_polygon_offset_factor_state = 0.f;
+static float gl_polygon_offset_units_state = 0.f;
 GLint ssbo_align;
 GLint ubo_align;
 static GLuint globalvao;
@@ -1106,7 +1110,7 @@ GL_SetStateEx
 */
 static void GL_SetStateEx (unsigned mask, unsigned force)
 {
-	unsigned diff = (mask ^ glstate) | force;
+        unsigned diff = (mask ^ glstate) | force;
 
 	if (diff & GLS_MASK_BLEND)
 	{
@@ -1211,7 +1215,63 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		}
 	}
 
-	glstate = mask;
+        glstate = mask;
+}
+
+void GL_GetColorMask(GLboolean mask[4])
+{
+        if (!mask)
+                return;
+        memcpy(mask, gl_color_mask_state, sizeof(gl_color_mask_state));
+}
+
+void GL_SetColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
+{
+        if (gl_color_mask_state[0] == r &&
+            gl_color_mask_state[1] == g &&
+            gl_color_mask_state[2] == b &&
+            gl_color_mask_state[3] == a)
+                return;
+
+        glColorMask(r, g, b, a);
+        gl_color_mask_state[0] = r;
+        gl_color_mask_state[1] = g;
+        gl_color_mask_state[2] = b;
+        gl_color_mask_state[3] = a;
+}
+
+void GL_GetPolygonOffset(qboolean *enabled, float *factor, float *units)
+{
+        if (enabled)
+                *enabled = gl_polygon_offset_enabled_state;
+        if (factor)
+                *factor = gl_polygon_offset_factor_state;
+        if (units)
+                *units = gl_polygon_offset_units_state;
+}
+
+void GL_SetPolygonOffset(qboolean enable, float factor, float units)
+{
+        if (enable)
+        {
+                if (!gl_polygon_offset_enabled_state)
+                        glEnable(GL_POLYGON_OFFSET_FILL);
+                if (!gl_polygon_offset_enabled_state ||
+                    gl_polygon_offset_factor_state != factor ||
+                    gl_polygon_offset_units_state != units)
+                        glPolygonOffset(factor, units);
+                gl_polygon_offset_enabled_state = true;
+                gl_polygon_offset_factor_state = factor;
+                gl_polygon_offset_units_state = units;
+        }
+        else
+        {
+                if (gl_polygon_offset_enabled_state)
+                        glDisable(GL_POLYGON_OFFSET_FILL);
+                gl_polygon_offset_enabled_state = false;
+                gl_polygon_offset_factor_state = factor;
+                gl_polygon_offset_units_state = units;
+        }
 }
 
 /*
@@ -1221,7 +1281,7 @@ GL_SetState
 */
 void GL_SetState (unsigned mask)
 {
-	GL_SetStateEx (mask, 0);
+        GL_SetStateEx (mask, 0);
 }
 
 /*
@@ -1231,7 +1291,9 @@ GL_ResetState
 */
 void GL_ResetState (void)
 {
-	GL_SetStateEx (GLS_DEFAULT_STATE, ~0u);
+        GL_SetStateEx (GLS_DEFAULT_STATE, ~0u);
+        GL_SetColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        GL_SetPolygonOffset(false, 0.f, 0.f);
 }
 
 /*
@@ -1256,8 +1318,10 @@ static void GL_SetupState (void)
 		glDepthFunc (GL_LEQUAL);
 	}
 	glFrontFace (GL_CW); //johnfitz -- glquake used CCW with backwards culling -- let's do it right
-	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	GL_DepthRange (ZRANGE_FULL); //johnfitz -- moved here becuase gl_ztrick is gone.
+        glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+        GL_DepthRange (ZRANGE_FULL); //johnfitz -- moved here becuase gl_ztrick is gone.
+        GL_SetColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        GL_SetPolygonOffset(false, 0.f, 0.f);
 	glEnable (GL_BLEND);
 	glEnable (GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	glEnable (GL_SAMPLE_SHADING);
