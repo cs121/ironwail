@@ -647,6 +647,16 @@ static void R_IWShader_EmissiveColor(const iwStage_t *stage, float color[3])
         }
 }
 
+typedef enum
+{
+        BP_SOLID,
+        BP_ALPHATEST,
+        BP_SKYLAYERS,
+        BP_SKYCUBEMAP,
+        BP_SKYSTENCIL,
+        BP_SHOWTRIS,
+} brushpass_t;
+
 /*
 =============
 R_AddBModelCall
@@ -959,15 +969,6 @@ static GLuint R_ChooseBModelProgram (qboolean oit, qboolean alphatest)
 			return glprogs.world[oit][0][alphatest];
 	}
 }
-
-typedef enum {
-        BP_SOLID,
-        BP_ALPHATEST,
-        BP_SKYLAYERS,
-        BP_SKYCUBEMAP,
-        BP_SKYSTENCIL,
-        BP_SHOWTRIS,
-} brushpass_t;
 
 /*
 =============
