@@ -126,7 +126,6 @@ static int                       r_decal_capacity = 0;
 static cvar_t    r_decals_cvar = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_blood_cvar = {"r_decals_blood", "1", CVAR_ARCHIVE};
 static cvar_t    r_decals_bullet_cvar = {"r_decals_bullet", "1", CVAR_ARCHIVE};
-static cvar_t    r_decals_max_cvar = {"r_decals_max", "128", CVAR_ARCHIVE};
 static cvar_t    r_decals_debug_cvar = {"r_decals_debug", "0", 0};
 static cvar_t    r_decals_pool_cvar = {"r_decals_pool", "4096", CVAR_ARCHIVE};
 
@@ -237,22 +236,15 @@ static void R_ReserveDecalStorage (int desired)
 
 static int R_GetDecalLimit (void)
 {
-        int desired = (int) CLAMP (0, r_decals_max_cvar.value, (float) R_DECAL_CAP_MAX);
         int pool_limit = R_GetDecalPoolCapacity ();
 
-        if (desired > pool_limit)
-                desired = pool_limit;
-
-        if (r_decals_max_cvar.value > (float) R_DECAL_CAP_MAX)
-                Cvar_SetValueQuick (&r_decals_max_cvar, (float) R_DECAL_CAP_MAX);
-
-        if (desired > r_decal_capacity)
-                R_ReserveDecalStorage (desired);
+        if (pool_limit > r_decal_capacity)
+                R_ReserveDecalStorage (pool_limit);
 
         if (r_decal_capacity <= 0)
-                return desired;
+                return pool_limit;
 
-        return CLAMP (0, desired, r_decal_capacity);
+        return CLAMP (0, pool_limit, r_decal_capacity);
 }
 
 static void R_DeactivateDecal (decal_t *dec)
@@ -526,7 +518,6 @@ void R_InitDecals (void)
         Cvar_RegisterVariable (&r_decals_cvar);
         Cvar_RegisterVariable (&r_decals_blood_cvar);
         Cvar_RegisterVariable (&r_decals_bullet_cvar);
-        Cvar_RegisterVariable (&r_decals_max_cvar);
         Cvar_RegisterVariable (&r_decals_debug_cvar);
         Cvar_RegisterVariable (&r_decals_pool_cvar);
 
