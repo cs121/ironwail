@@ -30,6 +30,8 @@ const int ORIENT_ORIENTED = 1;
 const int ORIENT_BEAM = 2;
 const int ORIENT_SPARK = 3;
 
+const float GLOW_INV_SCALE = 1.0 / 32.0;
+
 void main()
 {
         uvec2 flipsign = uvec2(gl_VertexID, gl_VertexID >> 1) << 31;
@@ -141,7 +143,7 @@ void main()
 
         out_uv = uv;
         out_color = in_color;
-        out_params = vec4(in_params.x * (1.0 / 255.0), uvScale, float(orient), 0.0);
+        out_params = vec4(in_params.x * GLOW_INV_SCALE, uvScale, float(orient), 0.0);
         out_corner = fadeCorner;
 #if OIT
         out_color.a *= 0.9;

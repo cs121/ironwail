@@ -1697,6 +1697,8 @@ typedef struct particlevert_t {
         GLfloat     custom[4];
 } particlevert_t;
 
+#define PARTICLE_GLOW_SCALE     32.f
+
 static particlevert_t partverts[MAX_PARTICLES];
 static int numpartverts = 0;
 
@@ -3301,7 +3303,7 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
                         }
 
                         alphaval = q_clamp (alphaval, 0.f, 1.f);
-                        glow = q_clamp (p->glow, 0.f, 1.f);
+                        glow = q_max (0.f, p->glow);
                         texindex = (p->texture >= 0 && p->texture < NUM_PARTICLE_TEXTURES) ? p->texture : PARTICLE_TEX_SOFT;
                         size_x = q_max (0.01f, p->size);
                         size_y = q_max (0.01f, ext->size_y);
@@ -3325,7 +3327,7 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
 
                         alphaval = appearance->alpha_start + (appearance->alpha_end - appearance->alpha_start) * fade;
                         alphaval = q_clamp (alphaval, 0.f, 1.f);
-                        glow = q_clamp (appearance->glow, 0.f, 1.f);
+                        glow = q_max (0.f, appearance->glow);
                         texindex = (appearance->texture >= 0 && appearance->texture < NUM_PARTICLE_TEXTURES) ? appearance->texture : PARTICLE_TEX_SOFT;
                         size_x = q_max (0.05f, p->size);
                         size_y = size_x;
@@ -3356,14 +3358,14 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
                         v->color[1] = (GLubyte)q_min (255, (int)(p->custom_color[1] * 255.f + 0.5f));
                         v->color[2] = (GLubyte)q_min (255, (int)(p->custom_color[2] * 255.f + 0.5f));
                         alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
-                        glowbyte = (GLubyte)q_min (255, (int)(glow * 255.f + 0.5f));
+                        glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
                         v->color[3] = alphabyte;
                 }
                 else
                 {
                         GLubyte* c = (GLubyte*)&d_8to24table[(int)p->color];
                         alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
-                        glowbyte = (GLubyte)q_min (255, (int)(glow * 255.f + 0.5f));
+                        glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
                         v->color[0] = c[0];
                         v->color[1] = c[1];
                         v->color[2] = c[2];
