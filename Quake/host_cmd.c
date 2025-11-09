@@ -1606,7 +1606,14 @@ static void Host_Status_f (void)
 	{
 		if (!client->active)
 			continue;
-		seconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
+                double connect_time;
+                const char *address;
+
+                connect_time = client->netconnection ?
+                        NET_QSocketGetTime(client->netconnection) : net_time;
+                address = client->netconnection ?
+                        NET_QSocketGetAddressString(client->netconnection) : "BOT";
+                seconds = (int)(net_time - connect_time);
 		minutes = seconds / 60;
 		if (minutes)
 		{
@@ -1618,7 +1625,7 @@ static void Host_Status_f (void)
 		else
 			hours = 0;
 		print_fn ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j+1, client->name, (int)client->edict->v.frags, hours, minutes, seconds);
-		print_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
+                print_fn ("   %s\n", address);
 	}
 }
 
@@ -3130,8 +3137,12 @@ static void Host_Spawn_f (void)
                         PR_ExecuteProgram (pr_global_struct->ClientConnect);
                 }
 
-		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
-			Sys_Printf ("%s entered the game\n", host_client->name);
+                double connect_time;
+
+                connect_time = host_client->netconnection ?
+                        NET_QSocketGetTime(host_client->netconnection) : Sys_DoubleTime();
+                if ((Sys_DoubleTime() - connect_time) <= qcvm->time)
+                        Sys_Printf ("%s entered the game\n", host_client->name);
 
 		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 	}
