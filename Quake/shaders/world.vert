@@ -58,6 +58,8 @@ struct Call
 #endif // BINDLESS
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
+        vec4    tcmod_params0;
+        vec4    tcmod_params1;
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;
@@ -67,7 +69,10 @@ const uint
 	CF_USE_FULLBRIGHT = 2u,
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
-	CF_ALPHA_TEST = 16u
+	CF_ALPHA_TEST = 16u,
+	CF_TC_STRETCH = 32u,
+	CF_TC_TURB = 64u,
+	CF_TC_ENVMAP = 128u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
@@ -138,6 +143,48 @@ layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec2 out_emissive_uv;
 layout(location=14) flat out vec3 out_emissive_color;
+layout(location=15) flat out vec4 out_stage_params1;
+
+float EvaluateWave(vec4 params, int func)
+{
+        float base = params.x;
+        float amplitude = params.y;
+        float phase = params.z;
+        float frequency = params.w;
+        float cycle = Time * frequency + phase / 360.0;
+        float wave = 0.0;
+        const float TAU = 6.28318530718;
+
+        if (func == 0)
+        {
+                float angle = cycle * TAU;
+                wave = sin(angle);
+        }
+        else if (func == 1)
+        {
+                float f = fract(cycle);
+                wave = (abs(f * 2.0 - 1.0) * 2.0) - 1.0;
+        }
+        else if (func == 2)
+        {
+                float angle = cycle * TAU;
+                wave = sign(sin(angle));
+                if (wave == 0.0)
+                        wave = 1.0;
+        }
+        else if (func == 3)
+        {
+                float f = fract(cycle);
+                wave = f * 2.0 - 1.0;
+        }
+        else
+        {
+                float angle = cycle * TAU;
+                wave = sin(angle);
+        }
+
+        return base + amplitude * wave;
+}
 
 void main()
 {
@@ -164,7 +211,22 @@ void main()
 	out_pos = world_pos;
 	vec2 base_uv = in_uv.xy;
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
-                                    dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
+       dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
+        if ((call.flags & CF_TC_STRETCH) != 0u)
+        {
+                int func = int(call.tcmod_params1.w + 0.5);
+                float scale = EvaluateWave(call.tcmod_params0, func);
+                transformed_uv = (transformed_uv - 0.5) * scale + 0.5;
+        }
+        if ((call.flags & CF_TC_TURB) != 0u)
+        {
+                float amp = call.tcmod_params1.x;
+                float freq = call.tcmod_params1.y;
+                const vec2 turbScale = vec2(0.125, 0.125);
+                float angle = Time * freq * 6.28318530718 + dot(world_pos.xy, turbScale);
+                float offset = sin(angle) * amp;
+                transformed_uv += vec2(offset);
+        }
         out_uv = transformed_uv;
         vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
                                 dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
@@ -202,4 +264,5 @@ void main()
 	out_samplers1.xy = call.emhandle;
 #endif
         out_emissive_color = call.emissive_color.xyz;
+        out_stage_params1 = call.tcmod_params1;
 }

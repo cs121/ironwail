@@ -29,6 +29,8 @@ struct Call
 #endif // BINDLESS
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
+        vec4    tcmod_params0;
+        vec4    tcmod_params1;
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;
@@ -37,7 +39,10 @@ const uint
 	CF_USE_POLYGON_OFFSET = 1u,
 	CF_USE_FULLBRIGHT = 2u,
 	CF_NOLIGHTMAP = 4u,
-	CF_USE_EMISSIVE = 8u
+	CF_USE_EMISSIVE = 8u,
+	CF_TC_STRETCH = 32u,
+	CF_TC_TURB = 64u,
+	CF_TC_ENVMAP = 128u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
