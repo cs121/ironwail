@@ -158,6 +158,22 @@ float GL_WaterAlphaForEntityTextureType (entity_t *ent, textype_t type)
 	return entalpha;
 }
 
+static void R_IWShader_FillTCGenInfo(const iwStage_t *stage, GLuint *mode, float basis0[4], float basis1[4])
+{
+        iwTCAlign_t align = stage ? stage->tcAlign : IW_TC_ALIGN_OBJECT;
+        *mode = (GLuint) align;
+        if (align == IW_TC_ALIGN_WORLD)
+        {
+                basis0[0] = 1.f; basis0[1] = 0.f; basis0[2] = 0.f; basis0[3] = 0.f;
+                basis1[0] = 0.f; basis1[1] = 1.f; basis1[2] = 0.f; basis1[3] = 0.f;
+        }
+        else
+        {
+                basis0[0] = basis0[1] = basis0[2] = basis0[3] = 0.f;
+                basis1[0] = basis1[1] = basis1[2] = basis1[3] = 0.f;
+        }
+}
+
 typedef struct bmodel_gpu_instance_s {
 	float		world[12];	// world matrix (transposed mat4x3)
 	float		prev_world[12];	// previous world matrix (transposed mat4x3)
@@ -166,28 +182,38 @@ typedef struct bmodel_gpu_instance_s {
 } bmodel_gpu_instance_t;
 
 typedef struct bmodel_bindless_gpu_call_s {
-	GLuint		flags;
-	GLfloat		alpha;
-	GLuint64	texture;
-	GLuint64	fullbright;
-	GLuint64	emissive;
-	float		tcmod_matrix[4];
-	float		tcmod_translate[4];
-	float		emissive_matrix[4];
-	float		emissive_translate[4];
-	float		emissive_color[4];
+        GLuint          flags;
+        GLfloat         alpha;
+        GLuint64        texture;
+        GLuint64        fullbright;
+        GLuint64        emissive;
+        GLuint          tcgen_mode[4];
+        float           tcgen_basis0[4];
+        float           tcgen_basis1[4];
+        float           emissive_tcgen_basis0[4];
+        float           emissive_tcgen_basis1[4];
+        float           tcmod_matrix[4];
+        float           tcmod_translate[4];
+        float           emissive_matrix[4];
+        float           emissive_translate[4];
+        float           emissive_color[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
-	GLuint		flags;
-	GLfloat		alpha;
-	GLint		baseinstance;
-	GLint		padding;
-	float		tcmod_matrix[4];
-	float		tcmod_translate[4];
-	float		emissive_matrix[4];
-	float		emissive_translate[4];
-	float		emissive_color[4];
+        GLuint          flags;
+        GLfloat         alpha;
+        GLint           baseinstance;
+        GLint           padding;
+        GLuint          tcgen_mode[4];
+        float           tcgen_basis0[4];
+        float           tcgen_basis1[4];
+        float           emissive_tcgen_basis0[4];
+        float           emissive_tcgen_basis1[4];
+        float           tcmod_matrix[4];
+        float           tcmod_translate[4];
+        float           emissive_matrix[4];
+        float           emissive_translate[4];
+        float           emissive_color[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -758,6 +784,14 @@ static void R_AddBModelCall (brushpass_t pass, qboolean translucent_pass, int in
         if (material_alpha >= 0.f)
                 alpha = material_alpha;
 
+        GLuint base_tcgen_mode, emissive_tcgen_mode;
+        float base_tcgen_basis0[4];
+        float base_tcgen_basis1[4];
+        float emissive_tcgen_basis0[4];
+        float emissive_tcgen_basis1[4];
+        R_IWShader_FillTCGenInfo(base_stage, &base_tcgen_mode, base_tcgen_basis0, base_tcgen_basis1);
+        R_IWShader_FillTCGenInfo(emissive_stage, &emissive_tcgen_mode, emissive_tcgen_basis0, emissive_tcgen_basis1);
+
         if (gl_bindless_able)
         {
                 bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
@@ -766,6 +800,14 @@ static void R_AddBModelCall (brushpass_t pass, qboolean translucent_pass, int in
                 call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
                 call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
                 call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+                call->tcgen_mode[0] = base_tcgen_mode;
+                call->tcgen_mode[1] = emissive_tcgen_mode;
+                call->tcgen_mode[2] = 0u;
+                call->tcgen_mode[3] = 0u;
+                memcpy (call->tcgen_basis0, base_tcgen_basis0, sizeof (base_tcgen_basis0));
+                memcpy (call->tcgen_basis1, base_tcgen_basis1, sizeof (base_tcgen_basis1));
+                memcpy (call->emissive_tcgen_basis0, emissive_tcgen_basis0, sizeof (emissive_tcgen_basis0));
+                memcpy (call->emissive_tcgen_basis1, emissive_tcgen_basis1, sizeof (emissive_tcgen_basis1));
                 memcpy (call->tcmod_matrix, tex_matrix.matrix, sizeof (tex_matrix.matrix));
                 call->tcmod_translate[0] = tex_matrix.translate[0];
                 call->tcmod_translate[1] = tex_matrix.translate[1];
@@ -789,6 +831,14 @@ static void R_AddBModelCall (brushpass_t pass, qboolean translucent_pass, int in
                 call->alpha = alpha;
                 call->baseinstance = first_instance;
                 call->padding = 0;
+                call->tcgen_mode[0] = base_tcgen_mode;
+                call->tcgen_mode[1] = emissive_tcgen_mode;
+                call->tcgen_mode[2] = 0u;
+                call->tcgen_mode[3] = 0u;
+                memcpy (call->tcgen_basis0, base_tcgen_basis0, sizeof (base_tcgen_basis0));
+                memcpy (call->tcgen_basis1, base_tcgen_basis1, sizeof (base_tcgen_basis1));
+                memcpy (call->emissive_tcgen_basis0, emissive_tcgen_basis0, sizeof (emissive_tcgen_basis0));
+                memcpy (call->emissive_tcgen_basis1, emissive_tcgen_basis1, sizeof (emissive_tcgen_basis1));
                 memcpy (call->tcmod_matrix, tex_matrix.matrix, sizeof (tex_matrix.matrix));
                 call->tcmod_translate[0] = tex_matrix.translate[0];
                 call->tcmod_translate[1] = tex_matrix.translate[1];

@@ -9,6 +9,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    SkyFog;
         vec3    WindDir;
         float   WindPhase;
+        vec4    ScreenTexScale;
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
