@@ -755,7 +755,7 @@ typedef struct unixfindfile_s {
 	findfile_t		base;
 	DIR				*handle;
 	struct dirent	*data;
-	char			filter[8];
+	char			filter[32];
 } unixfindfile_t;
 
 static void Sys_FillFindData (unixfindfile_t *find)
@@ -789,7 +789,10 @@ findfile_t *Sys_FindFirst (const char *dir, const char *ext)
 		++ext;
 
 	if (Q_strlen (ext) >= countof (ret->filter))
-		Sys_Error ("Sys_FindFirst: extension too long '%s'", ext);
+	{
+		Sys_Printf ("Sys_FindFirst: extension too long '%s'\n", ext);
+		return NULL;
+	}
 
 	handle = opendir (dir);
 	if (!handle)
