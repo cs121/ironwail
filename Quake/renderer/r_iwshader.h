@@ -137,6 +137,7 @@ typedef struct {
     float aConst;
     iwWave_t alphaWave;
     iwChannel_t mask;
+    int maskExplicit;
     int emissive;
     int depthWrite;
     int depthTest;

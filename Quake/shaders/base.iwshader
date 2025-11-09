@@ -14,6 +14,8 @@ shader *water1
     stage {
         animmap 6 *water1 *water2 *water3 *water4
         tcmod scroll 0.02 0.00
+        tcmod stretch sin 1 0.08 0 0.4
+        tcmod turb 0.025 0.6
         rgbgen const 0.5 0.7 1.0
         blend add
         emissive 1
@@ -33,6 +35,8 @@ shader *slime1
     stage {
         animmap 6 *slime1 *slime2 *slime3 *slime4
         tcmod scroll 0.015 0.0
+        tcmod stretch sin 1 0.06 0 0.35
+        tcmod turb 0.02 0.55
         rgbgen const 0.4 1.0 0.4
         blend add
         emissive 1
@@ -87,6 +91,8 @@ shader +0WATER1
     stage {
         animmap 6 +0WATER1 +1WATER1 +2WATER1 +3WATER1
         tcmod scroll 0.02 0.00
+        tcmod stretch sin 1 0.08 0 0.4
+        tcmod turb 0.025 0.6
         rgbgen const 0.5 0.7 1.0
         blend add
         emissive 1
@@ -105,6 +111,8 @@ shader +0SLIME1
     stage {
         animmap 6 +0SLIME1 +1SLIME1 +2SLIME1 +3SLIME1
         tcmod scroll 0.015 0.00
+        tcmod stretch sin 1 0.06 0 0.35
+        tcmod turb 0.02 0.55
         rgbgen const 0.4 1.0 0.4
         blend add
         emissive 1

@@ -44,7 +44,10 @@ const uint
     CF_USE_FULLBRIGHT = 2u,
     CF_NOLIGHTMAP = 4u,
     CF_USE_EMISSIVE = 8u,
-    CF_ALPHA_TEST = 16u
+    CF_ALPHA_TEST = 16u,
+    CF_TC_STRETCH = 32u,
+    CF_TC_TURB = 64u,
+    CF_TC_ENVMAP = 128u
 ;
 
 // ALU-only 16x16 Bayer matrix
@@ -131,6 +134,7 @@ layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec2 in_emissive_uv;
 layout(location=14) flat in vec3 in_emissive_color;
+layout(location=15) flat in vec4 in_stage_params1;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -285,6 +289,32 @@ void main()
 #else
     vec4 result = texture(Tex, uv);
 #endif
+
+    float maskIndex = in_stage_params1.z;
+    if (maskIndex >= 0.0)
+    {
+        int maskChannel = int(maskIndex + 0.5);
+        if (maskChannel == 0)
+        {
+            result.g = 0.0;
+            result.b = 0.0;
+        }
+        else if (maskChannel == 1)
+        {
+            result.r = 0.0;
+            result.b = 0.0;
+        }
+        else if (maskChannel == 2)
+        {
+            result.r = 0.0;
+            result.g = 0.0;
+        }
+        else if (maskChannel == 3)
+        {
+            result.rgb = vec3(1.0);
+            result.a = clamp(result.a, 0.0, 1.0);
+        }
+    }
 
 #if MODE == 1
   #if USE_BRANCHLESS_ALPHA
@@ -492,6 +522,22 @@ void main()
     // Specular clamp+Add
     vec3 spec_clamped = clamp_preserving_hue(specular_light, vec3(Overbright));
     result.rgb += spec_clamped * saturate(result.a);
+
+    if ((in_flags & CF_TC_ENVMAP) != 0u)
+    {
+        vec3 view_dir = normalize(EyePos - in_pos);
+        vec3 normal = normalize(surface_normal);
+        vec3 reflect_dir = reflect(-view_dir, normal);
+        vec2 env_uv = reflect_dir.xy * 0.5 + 0.5;
+#if DITHER >= 2
+        vec3 env_color = texture(Tex, env_uv, -1.0).rgb;
+#elif DITHER
+        vec3 env_color = texture(Tex, env_uv, -0.5).rgb;
+#else
+        vec3 env_color = texture(Tex, env_uv).rgb;
+#endif
+        result.rgb = clamp(result.rgb + env_color, 0.0, 1.0);
+    }
 
     result = clamp(result, 0.0, 1.0);
     result.rgb = ApplyFog(result.rgb, in_pos - EyePos);

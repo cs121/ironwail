@@ -172,6 +172,8 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	emissive;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
+	float		tcmod_params0[4];
+	float		tcmod_params1[4];
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
@@ -184,6 +186,8 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLint		padding;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
+	float		tcmod_params0[4];
+	float		tcmod_params1[4];
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
@@ -334,6 +338,9 @@ static void R_FlushBModelCalls (void)
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
+#define CALLFLAG_TC_STRETCH      (1u << 5)
+#define CALLFLAG_TC_TURB         (1u << 6)
+#define CALLFLAG_TC_ENVMAP       (1u << 7)
 
 static gltexture_t *R_IWShader_FindTextureForPath(const texture_t *base, const char *path)
 {
@@ -430,6 +437,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           emissive_color[3];
         const iwStage_t *emissive_stage = NULL;
         float           material_alpha = -1.f;
+        float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
+        float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
+        unsigned int    tc_feature_flags = 0u;
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
@@ -462,6 +472,38 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                         if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
                             base_stage->alphagen == IW_A_CONST)
                                 material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
+
+                        if (base_stage->maskExplicit)
+                                base_tcmod_params1[2] = (float)base_stage->mask;
+
+                        for (int tc = 0; tc < base_stage->numTCMods; ++tc)
+                        {
+                                const iwTCMod_t *mod = &base_stage->tcmods[tc];
+                                switch (mod->op)
+                                {
+                                case IW_TC_STRETCH:
+                                        tc_feature_flags |= CALLFLAG_TC_STRETCH;
+                                        base_tcmod_params0[0] = mod->wave.base;
+                                        base_tcmod_params0[1] = mod->wave.amplitude;
+                                        base_tcmod_params0[2] = mod->wave.phase;
+                                        base_tcmod_params0[3] = mod->wave.frequency;
+                                        base_tcmod_params1[3] = (float)mod->wave.func;
+                                        break;
+
+                                case IW_TC_TURB:
+                                        tc_feature_flags |= CALLFLAG_TC_TURB;
+                                        base_tcmod_params1[0] = mod->a;
+                                        base_tcmod_params1[1] = mod->b;
+                                        break;
+
+                                case IW_TC_ENVMAP:
+                                        tc_feature_flags |= CALLFLAG_TC_ENVMAP;
+                                        break;
+
+                                default:
+                                        break;
+                                }
+                        }
                 }
 
                 for (int s = 0; s < material->numStages; ++s)
@@ -510,6 +552,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 flags |= CALLFLAG_EMISSIVE;
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
+        flags |= tc_feature_flags;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
         if (material_alpha >= 0.f)
                 alpha = material_alpha;
@@ -527,6 +570,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[1] = tex_matrix.translate[1];
                 call->tcmod_translate[2] = 0.f;
                 call->tcmod_translate[3] = 0.f;
+                memcpy (call->tcmod_params0, base_tcmod_params0, sizeof (base_tcmod_params0));
+                memcpy (call->tcmod_params1, base_tcmod_params1, sizeof (base_tcmod_params1));
                 memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
                 call->emissive_translate[0] = emissive_matrix.translate[0];
                 call->emissive_translate[1] = emissive_matrix.translate[1];
@@ -550,6 +595,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[1] = tex_matrix.translate[1];
                 call->tcmod_translate[2] = 0.f;
                 call->tcmod_translate[3] = 0.f;
+                memcpy (call->tcmod_params0, base_tcmod_params0, sizeof (base_tcmod_params0));
+                memcpy (call->tcmod_params1, base_tcmod_params1, sizeof (base_tcmod_params1));
                 memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
                 call->emissive_translate[0] = emissive_matrix.translate[0];
                 call->emissive_translate[1] = emissive_matrix.translate[1];

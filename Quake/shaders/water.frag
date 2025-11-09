@@ -20,7 +20,10 @@ const uint
         CF_USE_FULLBRIGHT = 2u,
         CF_NOLIGHTMAP = 4u,
         CF_USE_EMISSIVE = 8u,
-        CF_ALPHA_TEST = 16u
+        CF_ALPHA_TEST = 16u,
+        CF_TC_STRETCH = 32u,
+        CF_TC_TURB = 64u,
+        CF_TC_ENVMAP = 128u
 ;
 
 // ALU-only 16x16 Bayer matrix
@@ -93,6 +96,7 @@ layout(location=6) noperspective in vec4 in_curr_clip;
 layout(location=7) noperspective in vec4 in_prev_clip;
 layout(location=8) in vec2 in_emissive_uv;
 layout(location=9) flat in vec3 in_emissive_color;
+layout(location=10) flat in vec4 in_stage_params1;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -157,6 +161,31 @@ void main()
                 emissive = texture(EmissiveTex, in_emissive_uv).rgb * in_emissive_color;
 #endif
         vec4 result = texture(Tex, uv);
+        float maskIndex = in_stage_params1.z;
+        if (maskIndex >= 0.0)
+        {
+                int maskChannel = int(maskIndex + 0.5);
+                if (maskChannel == 0)
+                {
+                        result.g = 0.0;
+                        result.b = 0.0;
+                }
+                else if (maskChannel == 1)
+                {
+                        result.r = 0.0;
+                        result.b = 0.0;
+                }
+                else if (maskChannel == 2)
+                {
+                        result.r = 0.0;
+                        result.g = 0.0;
+                }
+                else if (maskChannel == 3)
+                {
+                        result.rgb = vec3(1.0);
+                        result.a = clamp(result.a, 0.0, 1.0);
+                }
+        }
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);

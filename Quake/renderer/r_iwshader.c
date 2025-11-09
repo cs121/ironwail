@@ -404,6 +404,7 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->alphaWave.phase = 0.f;
     stage->alphaWave.frequency = 1.f;
     stage->mask = IW_CHANNEL_A;
+    stage->maskExplicit = 0;
     stage->emissive = 0;
     stage->depthWrite = IW_DEPTHWRITE_AUTO;
     stage->depthTest = 1;
@@ -745,13 +746,25 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             char channel[8];
             IW_CopyTokenLower(&token, channel, sizeof(channel));
             if (!strcmp(channel, "r"))
+            {
                 stage.mask = IW_CHANNEL_R;
+                stage.maskExplicit = 1;
+            }
             else if (!strcmp(channel, "g"))
+            {
                 stage.mask = IW_CHANNEL_G;
+                stage.maskExplicit = 1;
+            }
             else if (!strcmp(channel, "b"))
+            {
                 stage.mask = IW_CHANNEL_B;
+                stage.maskExplicit = 1;
+            }
             else if (!strcmp(channel, "a"))
+            {
                 stage.mask = IW_CHANNEL_A;
+                stage.maskExplicit = 1;
+            }
             else
             {
                 IW_LogWarning(filename, token.line, token.column, "unknown mask channel '%s'", channel);
@@ -1792,7 +1805,7 @@ void IW_DumpMaterials(const char *outPath)
                 fprintf(f, "        alphagen wave %s %g %g %g %g\n", IW_WaveFuncName(stage->alphaWave.func), stage->alphaWave.base, stage->alphaWave.amplitude, stage->alphaWave.phase, stage->alphaWave.frequency);
                 break;
             }
-            if (stage->mask != IW_CHANNEL_A)
+            if (stage->maskExplicit)
                 fprintf(f, "        mask %s\n", IW_ChannelName(stage->mask));
             if (stage->emissive)
                 fprintf(f, "        emissive 1\n");
