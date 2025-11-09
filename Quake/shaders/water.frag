@@ -188,6 +188,33 @@ void main()
         }
         result.rgb += fullbright;
         result.rgb += emissive;
+
+        if ((in_flags & CF_TC_ENVMAP) != 0u)
+        {
+                vec3 dpdx = dFdx(in_pos);
+                vec3 dpdy = dFdy(in_pos);
+                vec3 normal = cross(dpdx, dpdy);
+                float normal_len2 = dot(normal, normal);
+                if (normal_len2 <= 1.0e-8)
+                        normal = vec3(0.0, 0.0, 1.0);
+                else
+                        normal *= inversesqrt(normal_len2);
+
+                vec3 view_vec = -in_pos;
+                float view_len2 = dot(view_vec, view_vec);
+                vec3 view_dir = view_len2 > 0.0 ? view_vec * inversesqrt(view_len2) : vec3(0.0, 0.0, 1.0);
+                vec3 reflect_dir = reflect(-view_dir, normal);
+                vec2 env_uv = reflect_dir.xy * 0.5 + 0.5;
+#if DITHER >= 2
+                vec3 env_color = texture(Tex, env_uv, -1.0).rgb;
+#elif DITHER
+                vec3 env_color = texture(Tex, env_uv, -0.5).rgb;
+#else
+                vec3 env_color = texture(Tex, env_uv).rgb;
+#endif
+                result.rgb = clamp(result.rgb + env_color, 0.0, 1.0);
+        }
+
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos);
         result.a *= in_alpha;

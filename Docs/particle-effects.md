@@ -20,7 +20,7 @@ This document summarizes how to work with the system from both the asset and Qua
   * `airfriction` – exponential damping factor.
   * `lifetime` – seconds a particle lives.
   * `spawnradius` – random point jitter around the origin.
-  * `glow` – bloom intensity multiplier.
+  * `glow` – bloom intensity multiplier (values above 1.0 are supported for extra punch).
   * `texture` (`soft`, `glow`, `smoke`, `streak`) – overrides the automatic texture.
 * On startup the engine reports the number of effects loaded:
   * `Loaded N particle effects from effectinfo.txt`
