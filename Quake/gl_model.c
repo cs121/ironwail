@@ -3404,10 +3404,11 @@ visdone:
 //
 // set up the submodels (FIXME: this is confusing)
 //
-	if (mod->numsubmodels > 1)
-		mod->nummodelsurfaces = mod->submodels[1].firstface;
-	else
-		mod->nummodelsurfaces = mod->numsurfaces;
+    if (mod->numsubmodels > 1)
+        mod->nummodelsurfaces = mod->submodels[1].firstface;
+    else
+        mod->nummodelsurfaces = mod->numsurfaces;
+    mod->firstmodelsurface = 0;
 	mod->sortkey = (CRC_Block (mod->name, strlen(mod->name)) & MODSORT_MODELMASK) << MODSORT_FRAMEBITS;
 	Mod_FindUsedTextures (mod);
 
