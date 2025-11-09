@@ -141,6 +141,7 @@ typedef struct {
     int emissive;
     int depthWrite;
     int depthTest;
+    int depthTestExplicit;
     iwColorMask_t colorMask;
     iwTCAlign_t tcAlign;
     int tcAlignExplicit;
