@@ -467,15 +467,7 @@ void R_Init (void)
         Fog_Init (); //johnfitz
 
         IW_ShaderSystem_Init ();
-        if (com_gamedir[0])
-        {
-                char shaderdir[MAX_OSPATH];
-
-                q_snprintf (shaderdir, sizeof(shaderdir), "%s/shaders", com_gamedir);
-                IW_LoadShaderDirectory (shaderdir);
-
-                IW_LoadShaderDirectory (com_gamedir);
-        }
+        IW_ShaderSystem_PrepareForGameDir (com_gamedir);
 }
 
 /*

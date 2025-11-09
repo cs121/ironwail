@@ -130,6 +130,7 @@ void R_AddStaticModels (const byte *vis);
 void R_NewMap (void);
 
 void R_Particles_LoadEffectInfo (const char *customfile);
+void R_Particles_LoadEffectInfoForMap (const char *customfile, const char *worldmodelname);
 
 
 void R_ParseParticleEffect (void);
