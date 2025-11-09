@@ -153,18 +153,12 @@ typedef struct {
 } iwStage_t;
 
 typedef struct {
-    int enabled;
-    float factor;
-    float units;
-} iwPolygonOffset_t;
-
-typedef struct {
     char name[IW_MAX_NAME];
     iwSort_t sort;
     int sortValue;
     iwCull_t cull;
     unsigned int surfaceFlags;
-    iwPolygonOffset_t polygonOffset;
+    int polygonOffset;
     int detail;
     char editorImage[IW_MAX_PATH];
     int strict;
@@ -199,11 +193,6 @@ void IW_DumpMaterials(const char* outPath);
 const iwMaterial_t* IW_DebugLastMaterial(void);
 const char* IW_DebugLastTexture(void);
 qboolean IW_DebugOverlayText(char* buffer, size_t bufferSize);
-void IW_Debugf(const char *fmt, ...);
-void IW_DebugSetMaterialState(const iwMaterial_t *material, const char *queue,
-    qboolean depthTest, qboolean depthWrite, iwColorMask_t colorMask,
-    iwCull_t cullMode, qboolean polygonOffsetEnabled, float polygonOffsetFactor,
-    float polygonOffsetUnits);
 
 #ifdef __cplusplus
 }

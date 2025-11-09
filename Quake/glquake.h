@@ -319,10 +319,6 @@ typedef enum {
 extern unsigned glstate;
 void GL_SetState (unsigned mask);
 void GL_ResetState (void);
-void GL_GetColorMask(GLboolean mask[4]);
-void GL_SetColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a);
-void GL_GetPolygonOffset(qboolean *enabled, float *factor, float *units);
-void GL_SetPolygonOffset(qboolean enable, float factor, float units);
 
 extern GLint ssbo_align; // SSBO alignment - 1
 extern GLint ubo_align; // UBO alignment - 1
