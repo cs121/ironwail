@@ -392,7 +392,9 @@ CLIENT SPAWNING
 
 static qboolean SV_IsLocalClient (client_t *client)
 {
-	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
+        if (!client->netconnection)
+                return false;
+        return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
 /*
