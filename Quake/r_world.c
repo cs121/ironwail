@@ -227,6 +227,9 @@ typedef struct
         GLboolean       writeMask;
 } r_depth_state_t;
 
+static void R_PushDepthState(r_depth_state_t *state);
+static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state);
+static void R_PopDepthState(const r_depth_state_t *state);
 
 static void R_PushCullState(r_cull_state_t *state)
 {
@@ -428,8 +431,8 @@ static void R_FlushBModelCalls (void)
 			r_cull_state_t guard;
 			R_PushCullState(&guard);
 			R_SetCullState(bmodel_call_cull[i]);
-                        r_depth_state_t depthGuard;
-                        qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
+			r_depth_state_t depthGuard;
+			qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
 
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
@@ -437,10 +440,15 @@ static void R_FlushBModelCalls (void)
 			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
 
-                        if (depthChanged)
-                                R_PopDepthState(&depthGuard);
+			if (depthChanged)
+				R_PopDepthState(&depthGuard);
 			R_PopCullState(&guard);
 		}
+
+	}
+
+	num_bmodel_calls = 0;
+}
 
 static void R_PushDepthState(r_depth_state_t *state)
 {
@@ -489,11 +497,6 @@ static void R_PopDepthState(const r_depth_state_t *state)
                 glDisable(GL_DEPTH_TEST);
 
         glDepthMask(state->writeMask ? GL_TRUE : GL_FALSE);
-}
-
-	}
-
-	num_bmodel_calls = 0;
 }
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
