@@ -1,8 +1,10 @@
 #if BINDLESS
 	#extension GL_ARB_shader_draw_parameters : require
+	#define DRAW_ID			gl_DrawIDARB
+#else
+	layout(location=0) uniform int DrawID;
+	#define DRAW_ID			DrawID
 #endif
-layout(location=0) uniform int DrawID;
-#define DRAW_ID			DrawID
 
 #include "frame_uniforms.glsl"
 
@@ -25,11 +27,6 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-        uvec4   tcgen_mode;
-        vec4    tcgen_basis0;
-        vec4    tcgen_basis1;
-        vec4    emissive_tcgen_basis0;
-        vec4    emissive_tcgen_basis1;
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
         vec4    emissive_matrix;
@@ -43,38 +40,6 @@ const uint
 	CF_USE_EMISSIVE = 8u,
 	CF_ALPHA_TEST = 16u
 ;
-const uint TCGEN_OBJECT = 0u;
-const uint TCGEN_WORLD = 1u;
-const uint TCGEN_SCREEN = 2u;
-
-bool ScreenViewportValid()
-{
-        return ScreenTexScale.z > 0.0 && ScreenTexScale.w > 0.0;
-}
-
-vec2 EvaluateBaseUV(uint mode, vec4 basis0, vec4 basis1, vec3 world_pos, vec4 clip_pos, vec2 object_uv)
-{
-        if (mode == TCGEN_WORLD)
-        {
-                return vec2(dot(basis0.xyz, world_pos) + basis0.w,
-                            dot(basis1.xyz, world_pos) + basis1.w);
-        }
-        if (mode == TCGEN_SCREEN)
-        {
-                vec2 screen01 = clip_pos.xy / clip_pos.w * 0.5 + 0.5;
-                if (ScreenViewportValid())
-                        return screen01 * ScreenTexScale.zw;
-                return screen01;
-        }
-        return object_uv;
-}
-
-vec2 FinalizeUV(uint mode, vec2 uv)
-{
-        if (mode == TCGEN_SCREEN && ScreenViewportValid())
-                return uv * ScreenTexScale.xy;
-        return uv;
-}
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -150,16 +115,13 @@ void main()
         out_curr_clip = curr_clip;
         out_prev_clip = prev_clip;
         out_flags = call.flags;
-	vec2 base_uv = EvaluateBaseUV(call.tcgen_mode.x, call.tcgen_basis0, call.tcgen_basis1, world_pos, curr_clip, in_uv.xy);
+        vec2 base_uv = in_uv.xy;
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
                                     dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
-        vec2 final_uv = FinalizeUV(call.tcgen_mode.x, transformed_uv);
-        out_uv = final_uv;
-        vec2 emissive_base = EvaluateBaseUV(call.tcgen_mode.y, call.emissive_tcgen_basis0,
-                                            call.emissive_tcgen_basis1, world_pos, curr_clip, in_uv.xy);
-        vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, emissive_base),
-                                dot(call.emissive_matrix.zw, emissive_base)) + call.emissive_translate.xy;
-        out_emissive_uv = FinalizeUV(call.tcgen_mode.y, emissive_uv);
+        out_uv = transformed_uv;
+        vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
+                                dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
+        out_emissive_uv = emissive_uv;
         out_pos = world_pos - EyePos;
         out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS

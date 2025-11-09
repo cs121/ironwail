@@ -451,7 +451,6 @@ typedef struct gpuframedata_s {
 	float	skyfogdata[4];
 	vec3_t	winddir;
 	float	windphase;
-	float	screentex_scale[4];
 	float	screendither;
 	float	texturedither;
 	float	overbright;

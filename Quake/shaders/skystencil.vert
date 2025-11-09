@@ -1,8 +1,10 @@
 #if BINDLESS
 	#extension GL_ARB_shader_draw_parameters : require
+	#define DRAW_ID			gl_DrawIDARB
+#else
+	layout(location=0) uniform int DrawID;
+	#define DRAW_ID			DrawID
 #endif
-layout(location=0) uniform int DrawID;
-#define DRAW_ID			DrawID
 
 #include "frame_uniforms.glsl"
 
@@ -25,11 +27,6 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-        uvec4   tcgen_mode;
-        vec4    tcgen_basis0;
-        vec4    tcgen_basis1;
-        vec4    emissive_tcgen_basis0;
-        vec4    emissive_tcgen_basis1;
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
         vec4    emissive_matrix;
@@ -42,9 +39,6 @@ const uint
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u
 ;
-const uint TCGEN_OBJECT = 0u;
-const uint TCGEN_WORLD = 1u;
-const uint TCGEN_SCREEN = 2u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
