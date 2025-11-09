@@ -212,9 +212,6 @@ static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static iwCull_t				bmodel_call_cull[MAX_BMODEL_DRAWS];
 static GLbyte                           bmodel_call_depth_test[MAX_BMODEL_DRAWS];
 static GLbyte                           bmodel_call_depth_write[MAX_BMODEL_DRAWS];
-static GLbyte                           bmodel_call_blend_enabled[MAX_BMODEL_DRAWS];
-static GLenum                           bmodel_call_blend_src[MAX_BMODEL_DRAWS];
-static GLenum                           bmodel_call_blend_dst[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
 
@@ -233,17 +230,6 @@ typedef struct
 static void R_PushDepthState(r_depth_state_t *state);
 static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state);
 static void R_PopDepthState(const r_depth_state_t *state);
-
-typedef struct
-{
-	GLboolean	enabled;
-	GLint		src;
-	GLint		dst;
-} r_blend_state_t;
-
-static void R_PushBlendState(r_blend_state_t *state);
-static void R_SetBlendState(GLboolean enable, GLenum src, GLenum dst);
-static void R_PopBlendState(const r_blend_state_t *state);
 
 static void R_PushCullState(r_cull_state_t *state)
 {
@@ -411,26 +397,17 @@ static void R_FlushBModelCalls (void)
 			iwCull_t cull = bmodel_call_cull[i];
                         GLbyte depthTest = bmodel_call_depth_test[i];
                         GLbyte depthWrite = bmodel_call_depth_write[i];
-                        GLbyte blendEnable = bmodel_call_blend_enabled[i];
-                        GLenum blendSrc = bmodel_call_blend_src[i];
-                        GLenum blendDst = bmodel_call_blend_dst[i];
 			int count = 1;
                         while (i + count < num_bmodel_calls && bmodel_call_cull[i + count] == cull &&
                                bmodel_call_depth_test[i + count] == depthTest &&
-                               bmodel_call_depth_write[i + count] == depthWrite &&
-                               bmodel_call_blend_enabled[i + count] == blendEnable &&
-                               (!blendEnable || (bmodel_call_blend_src[i + count] == blendSrc &&
-                                                  bmodel_call_blend_dst[i + count] == blendDst)))
-                                ++count;
+                               bmodel_call_depth_write[i + count] == depthWrite)
+				++count;
 
 			r_cull_state_t guard;
 			R_PushCullState(&guard);
 			R_SetCullState(cull);
                         r_depth_state_t depthGuard;
                         qboolean depthChanged = R_ApplyDepthState(depthTest, depthWrite, &depthGuard);
-                        r_blend_state_t blendGuard;
-                        R_PushBlendState(&blendGuard);
-                        R_SetBlendState(blendEnable ? GL_TRUE : GL_FALSE, blendSrc, blendDst);
 
 			const size_t offset = dstcmdofs + (size_t)i * (size_t)stride;
 			const void *indirect = (const void *)(uintptr_t)offset;
@@ -438,7 +415,6 @@ static void R_FlushBModelCalls (void)
 
                         if (depthChanged)
                                 R_PopDepthState(&depthGuard);
-			R_PopBlendState(&blendGuard);
 			R_PopCullState(&guard);
 			i += count;
 		}
@@ -452,26 +428,23 @@ static void R_FlushBModelCalls (void)
 
 		for (i = 0; i < num_bmodel_calls; i++)
 		{
-				r_cull_state_t guard;
-				R_PushCullState(&guard);
-				R_SetCullState(bmodel_call_cull[i]);
-				r_blend_state_t blendGuard;
-				R_PushBlendState(&blendGuard);
-				R_SetBlendState(bmodel_call_blend_enabled[i] ? GL_TRUE : GL_FALSE,
-						bmodel_call_blend_src[i], bmodel_call_blend_dst[i]);
-				r_depth_state_t depthGuard;
-				qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
+			r_cull_state_t guard;
+			R_PushCullState(&guard);
+			R_SetCullState(bmodel_call_cull[i]);
+			r_depth_state_t depthGuard;
+			qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
 
-				GL_Uniform1iFunc (0, i);
-				GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
-				GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
-				const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
-				GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
-				R_PopBlendState(&blendGuard);
-				if (depthChanged)
-						R_PopDepthState(&depthGuard);
-				R_PopCullState(&guard);
+			GL_Uniform1iFunc (0, i);
+			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
+			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
+			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
+			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
+
+			if (depthChanged)
+				R_PopDepthState(&depthGuard);
+			R_PopCullState(&guard);
 		}
+
 	}
 
 	num_bmodel_calls = 0;
@@ -524,49 +497,6 @@ static void R_PopDepthState(const r_depth_state_t *state)
                 glDisable(GL_DEPTH_TEST);
 
         glDepthMask(state->writeMask ? GL_TRUE : GL_FALSE);
-}
-
-static void R_PushBlendState(r_blend_state_t *state)
-{
-	if (!state)
-		return;
-
-	state->enabled = glIsEnabled(GL_BLEND);
-#ifdef GL_BLEND_SRC_RGB
-	glGetIntegerv(GL_BLEND_SRC_RGB, &state->src);
-	glGetIntegerv(GL_BLEND_DST_RGB, &state->dst);
-#else
-	glGetIntegerv(GL_BLEND_SRC, &state->src);
-	glGetIntegerv(GL_BLEND_DST, &state->dst);
-#endif
-}
-
-static void R_SetBlendState(GLboolean enable, GLenum src, GLenum dst)
-{
-	if (enable)
-	{
-		glEnable(GL_BLEND);
-		glBlendFunc(src, dst);
-	}
-	else
-	{
-		glDisable(GL_BLEND);
-		glBlendFunc(src, dst);
-	}
-
-	IW_Debugf("blend=%s (%d,%d)", enable ? "on" : "off", (int)src, (int)dst);
-}
-
-static void R_PopBlendState(const r_blend_state_t *state)
-{
-	if (!state)
-		return;
-
-	if (state->enabled)
-		glEnable(GL_BLEND);
-	else
-		glDisable(GL_BLEND);
-	glBlendFunc(state->src, state->dst);
 }
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
@@ -641,108 +571,17 @@ static gltexture_t *R_IWShader_FindStageTexture(const texture_t *base, const iwS
         return R_IWShader_FindTextureForPath(base, path);
 }
 
-static float R_IWShader_EvaluateWave(const iwWave_t *wave, float time)
-{
-        if (!wave)
-                return 0.f;
-
-        const float base = wave->base;
-        const float amplitude = wave->amplitude;
-        const float phase = wave->phase;
-        const float frequency = wave->frequency;
-        const float tau = 6.28318530718f;
-        float cycle = time * frequency + phase / 360.f;
-        float value = 0.f;
-
-        switch (wave->func)
-        {
-        case IW_WAVE_SIN:
-                value = sinf(cycle * tau);
-                break;
-        case IW_WAVE_TRIANGLE:
-        {
-                float f = cycle - floorf(cycle);
-                value = (fabsf(f * 2.f - 1.f) * 2.f) - 1.f;
-                break;
-        }
-        case IW_WAVE_SQUARE:
-                value = sinf(cycle * tau) >= 0.f ? 1.f : -1.f;
-                break;
-        case IW_WAVE_SAW:
-        default:
-                value = (cycle - floorf(cycle)) * 2.f - 1.f;
-                break;
-        }
-
-        return base + amplitude * value;
-}
-
-static float R_IWShader_EvaluateAlphaGen(const iwStage_t *stage, float time)
-{
-        if (!stage)
-                return -1.f;
-
-        switch (stage->alphagen)
-        {
-        case IW_A_CONST:
-                return stage->aConst;
-        case IW_A_WAVE:
-                return R_IWShader_EvaluateWave(&stage->alphaWave, time);
-        default:
-                break;
-        }
-        return -1.f;
-}
-
-static GLenum R_IWShader_BlendFactorToGL(iwBlendFactor_t factor)
-{
-        switch (factor)
-        {
-        case IW_SRC_ZERO: return GL_ZERO;
-        case IW_SRC_ONE: return GL_ONE;
-        case IW_SRC_SRC_COLOR: return GL_SRC_COLOR;
-        case IW_SRC_ONE_MINUS_SRC_COLOR: return GL_ONE_MINUS_SRC_COLOR;
-        case IW_SRC_DST_COLOR: return GL_DST_COLOR;
-        case IW_SRC_ONE_MINUS_DST_COLOR: return GL_ONE_MINUS_DST_COLOR;
-        case IW_SRC_SRC_ALPHA: return GL_SRC_ALPHA;
-        case IW_SRC_ONE_MINUS_SRC_ALPHA: return GL_ONE_MINUS_SRC_ALPHA;
-        case IW_SRC_DST_ALPHA: return GL_DST_ALPHA;
-        case IW_SRC_ONE_MINUS_DST_ALPHA: return GL_ONE_MINUS_DST_ALPHA;
-        default: return GL_ONE;
-        }
-}
-
 static void R_IWShader_EmissiveColor(const iwStage_t *stage, float color[3])
 {
         color[0] = color[1] = color[2] = 1.f;
         if (!stage)
                 return;
-
-        switch (stage->rgbgen)
+        if (stage->rgbgen == IW_RGB_CONST)
         {
-        case IW_RGB_CONST:
                 color[0] = stage->rgbConst[0];
                 color[1] = stage->rgbConst[1];
                 color[2] = stage->rgbConst[2];
-                break;
-        case IW_RGB_WAVE:
-        {
-                float value = R_IWShader_EvaluateWave(&stage->rgbWave, r_framedata.time);
-                color[0] = stage->rgbConst[0] * value;
-                color[1] = stage->rgbConst[1] * value;
-                color[2] = stage->rgbConst[2] * value;
-                break;
         }
-        case IW_RGB_IDENTITY:
-        case IW_RGB_VERTEX:
-        case IW_RGB_ENTITY:
-        default:
-                break;
-        }
-
-        color[0] = q_clamp(color[0], 0.f, 1.f);
-        color[1] = q_clamp(color[1], 0.f, 1.f);
-        color[2] = q_clamp(color[2], 0.f, 1.f);
 }
 
 /*
@@ -767,11 +606,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         unsigned int    tc_feature_flags = 0u;
         GLbyte           depthTestOverride = -1;
         GLbyte           depthWriteOverride = -1;
-
-        GLboolean       stageBlendEnabled = GL_FALSE;
-        GLenum          stageBlendSrc = GL_ONE;
-        GLenum          stageBlendDst = GL_ZERO;
-        qboolean        baseStageDefined = false;
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
@@ -802,22 +636,13 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
-                        baseStageDefined = true;
                         if (base_stage->depthTestExplicit)
                                 depthTestOverride = base_stage->depthTest ? 1 : 0;
                         if (base_stage->depthWrite != IW_DEPTHWRITE_AUTO)
                                 depthWriteOverride = base_stage->depthWrite ? 1 : 0;
-                        if (base_stage->blendMode != IW_BLEND_NONE)
-                        {
-                                stageBlendEnabled = GL_TRUE;
-                                stageBlendSrc = R_IWShader_BlendFactorToGL(base_stage->src);
-                                stageBlendDst = R_IWShader_BlendFactorToGL(base_stage->dst);
-                        }
-
-                        float stageAlpha = R_IWShader_EvaluateAlphaGen(base_stage, r_framedata.time);
-                        if (stageAlpha >= 0.f &&
-                            (base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA))
-                                material_alpha = q_clamp(stageAlpha, 0.f, 1.f);
+                        if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
+                            base_stage->alphagen == IW_A_CONST)
+                                material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
 
                         if (base_stage->maskExplicit)
                                 base_tcmod_params1[2] = (float)base_stage->mask;
@@ -899,25 +724,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
         flags |= tc_feature_flags;
-        if (baseStageDefined && depthWriteOverride < 0)
-        {
-                if (stageBlendEnabled)
-                {
-                        qboolean alphatest = (flags & CALLFLAG_ALPHA_TEST) != 0;
-                        depthWriteOverride = alphatest ? 1 : 0;
-                }
-                else
-                {
-                        depthWriteOverride = 1;
-                }
-        }
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
         if (material_alpha >= 0.f)
                 alpha = material_alpha;
-
-        bmodel_call_blend_enabled[num_bmodel_calls] = stageBlendEnabled ? 1 : 0;
-        bmodel_call_blend_src[num_bmodel_calls] = stageBlendSrc;
-        bmodel_call_blend_dst[num_bmodel_calls] = stageBlendDst;
 
         if (gl_bindless_able)
         {
