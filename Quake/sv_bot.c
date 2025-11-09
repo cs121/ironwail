@@ -284,7 +284,7 @@ static edict_t *SV_Bot_FindGoal (edict_t *self, bot_priority_t priority)
 	int best_rank = -1;
 	int i;
 
-	for (i = svs.maxclients + 1; i < sv.num_edicts; i++)
+	for (i = svs.maxclients + 1; i < qcvm->num_edicts; i++)
 	{
 		edict_t *ent = EDICT_NUM (i);
 		const char *classname;
@@ -493,16 +493,15 @@ static void SV_Bot_MaybeChat (client_t *client, sv_bot_state_t *state)
 
 	now = qcvm->time;
 	if (now < state->next_chat_time)
-	return;
+		return;
 	if (SV_Bot_Frand () > 0.1f)
 	{
-	state->next_chat_time = now + 5.0 + SV_Bot_Frand () * 10.0;
-	return;
+		state->next_chat_time = now + 5.0 + SV_Bot_Frand () * 10.0;
+		return;
 	}
 
 	line = rand () % state->profile->chat_count;
-	SV_BroadcastPrintf ("%s: %s
-", client->name, state->profile->chat_lines[line]);
+	SV_BroadcastPrintf ("%s: %s\n", client->name, state->profile->chat_lines[line]);
 	state->next_chat_time = now + 20.0 + SV_Bot_Frand () * 25.0;
 }
 
@@ -766,7 +765,6 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	VectorCopy (self->v.v_angle, cmd->viewangles);
 }
 
-}
 
 static qboolean SV_Bot_SpawnOne (void)
 {
