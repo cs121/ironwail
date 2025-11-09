@@ -210,6 +210,8 @@ static union {
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static iwCull_t				bmodel_call_cull[MAX_BMODEL_DRAWS];
+static GLbyte                           bmodel_call_depth_test[MAX_BMODEL_DRAWS];
+static GLbyte                           bmodel_call_depth_write[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
 
@@ -218,6 +220,16 @@ typedef struct
 	GLboolean	enabled;
 	GLint		mode;
 } r_cull_state_t;
+
+typedef struct
+{
+        GLboolean       testEnabled;
+        GLboolean       writeMask;
+} r_depth_state_t;
+
+static void R_PushDepthState(r_depth_state_t *state);
+static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state);
+static void R_PopDepthState(const r_depth_state_t *state);
 
 static void R_PushCullState(r_cull_state_t *state)
 {
@@ -383,18 +395,26 @@ static void R_FlushBModelCalls (void)
 		for (int i = 0; i < num_bmodel_calls; )
 		{
 			iwCull_t cull = bmodel_call_cull[i];
+                        GLbyte depthTest = bmodel_call_depth_test[i];
+                        GLbyte depthWrite = bmodel_call_depth_write[i];
 			int count = 1;
-			while (i + count < num_bmodel_calls && bmodel_call_cull[i + count] == cull)
+                        while (i + count < num_bmodel_calls && bmodel_call_cull[i + count] == cull &&
+                               bmodel_call_depth_test[i + count] == depthTest &&
+                               bmodel_call_depth_write[i + count] == depthWrite)
 				++count;
 
 			r_cull_state_t guard;
 			R_PushCullState(&guard);
 			R_SetCullState(cull);
+                        r_depth_state_t depthGuard;
+                        qboolean depthChanged = R_ApplyDepthState(depthTest, depthWrite, &depthGuard);
 
 			const size_t offset = dstcmdofs + (size_t)i * (size_t)stride;
 			const void *indirect = (const void *)(uintptr_t)offset;
 			GL_MultiDrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, indirect, count, stride);
 
+                        if (depthChanged)
+                                R_PopDepthState(&depthGuard);
 			R_PopCullState(&guard);
 			i += count;
 		}
@@ -411,6 +431,8 @@ static void R_FlushBModelCalls (void)
 			r_cull_state_t guard;
 			R_PushCullState(&guard);
 			R_SetCullState(bmodel_call_cull[i]);
+			r_depth_state_t depthGuard;
+			qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
 
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
@@ -418,11 +440,63 @@ static void R_FlushBModelCalls (void)
 			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
 
+			if (depthChanged)
+				R_PopDepthState(&depthGuard);
 			R_PopCullState(&guard);
 		}
+
 	}
 
 	num_bmodel_calls = 0;
+}
+
+static void R_PushDepthState(r_depth_state_t *state)
+{
+        if (!state)
+                return;
+
+        state->testEnabled = glIsEnabled(GL_DEPTH_TEST);
+        GLboolean mask = GL_TRUE;
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &mask);
+        state->writeMask = mask;
+}
+
+static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state)
+{
+        if (depthTestOverride < 0 && depthWriteOverride < 0)
+                return false;
+
+        R_PushDepthState(state);
+
+        if (depthTestOverride >= 0)
+        {
+                if (depthTestOverride)
+                        glEnable(GL_DEPTH_TEST);
+                else
+                        glDisable(GL_DEPTH_TEST);
+        }
+
+        if (depthWriteOverride >= 0)
+                glDepthMask(depthWriteOverride ? GL_TRUE : GL_FALSE);
+
+        const char *depthTestStr = ((depthTestOverride >= 0 ? depthTestOverride : state->testEnabled) ? "on" : "off");
+        const char *depthWriteStr = ((depthWriteOverride >= 0 ? depthWriteOverride : state->writeMask) ? "on" : "off");
+        IW_Debugf("depthtest=%s, depthwrite=%s", depthTestStr, depthWriteStr);
+
+        return true;
+}
+
+static void R_PopDepthState(const r_depth_state_t *state)
+{
+        if (!state)
+                return;
+
+        if (state->testEnabled)
+                glEnable(GL_DEPTH_TEST);
+        else
+                glDisable(GL_DEPTH_TEST);
+
+        glDepthMask(state->writeMask ? GL_TRUE : GL_FALSE);
 }
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
@@ -530,6 +604,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
         float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
         unsigned int    tc_feature_flags = 0u;
+        GLbyte           depthTestOverride = -1;
+        GLbyte           depthWriteOverride = -1;
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
@@ -560,6 +636,10 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
+                        if (base_stage->depthTestExplicit)
+                                depthTestOverride = base_stage->depthTest ? 1 : 0;
+                        if (base_stage->depthWrite != IW_DEPTHWRITE_AUTO)
+                                depthWriteOverride = base_stage->depthWrite ? 1 : 0;
                         if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
                             base_stage->alphagen == IW_A_CONST)
                                 material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
@@ -704,6 +784,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
         SDL_assert (num_instances > 0);
         SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
+        bmodel_call_depth_test[num_bmodel_calls] = depthTestOverride;
+        bmodel_call_depth_write[num_bmodel_calls] = depthWriteOverride;
         bmodel_call_cull[num_bmodel_calls] = cull;
         bmodel_call_remap[num_bmodel_calls].src = index;
         bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);

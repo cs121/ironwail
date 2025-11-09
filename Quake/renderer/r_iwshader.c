@@ -408,6 +408,7 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->emissive = 0;
     stage->depthWrite = IW_DEPTHWRITE_AUTO;
     stage->depthTest = 1;
+    stage->depthTestExplicit = 0;
     stage->colorMask = IW_COLORMASK_RGBA;
     stage->tcAlign = IW_TC_ALIGN_OBJECT;
     stage->tcAlignExplicit = 0;
@@ -910,9 +911,15 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 char mode[16];
                 IW_CopyTokenLower(&valueToken, mode, sizeof(mode));
                 if (!strcmp(mode, "on"))
+                {
                     stage.depthTest = 1;
+                    stage.depthTestExplicit = 1;
+                }
                 else if (!strcmp(mode, "off"))
+                {
                     stage.depthTest = 0;
+                    stage.depthTestExplicit = 1;
+                }
                 else
                 {
                     IW_LogWarning(filename, valueToken.line, valueToken.column, "unknown depthtest '%s'", mode);
@@ -923,6 +930,7 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             else if (valueToken.type == IWTXT_TOKEN_NUMBER)
             {
                 stage.depthTest = (valueToken.number != 0.0);
+                stage.depthTestExplicit = 1;
             }
             else
             {
