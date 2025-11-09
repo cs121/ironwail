@@ -1644,8 +1644,6 @@ static qboolean IW_StageTexMatrixInternal(const iwStage_t *stage, float time, iw
 
     if (stage->numTCMods <= 0)
         return false;
-    if (stage->tcAlign != IW_TC_ALIGN_OBJECT)
-        return false;
 
     float matrix[4] = { 1.f, 0.f, 0.f, 1.f };
     float translate[2] = { 0.f, 0.f };
@@ -1798,6 +1796,19 @@ void IW_DumpMaterials(const char *outPath)
             {
                 fprintf(f, "        map %s\n", stage->mapPath);
             }
+
+            iwTexMatrix_t dumpMatrix;
+            IW_TexMatrixIdentity(&dumpMatrix);
+            IW_StageTexMatrix(stage, 0.f, &dumpMatrix);
+            float m00 = dumpMatrix.matrix[0];
+            float m01 = dumpMatrix.matrix[1];
+            float m10 = dumpMatrix.matrix[2];
+            float m11 = dumpMatrix.matrix[3];
+            float tx = dumpMatrix.translate[0];
+            float ty = dumpMatrix.translate[1];
+            fprintf(f,
+                "        // tcmod_matrix [%g %g %g; %g %g %g; 0 0 1]\n",
+                m00, m01, tx, m10, m11, ty);
             switch (stage->blendMode)
             {
             case IW_BLEND_ALPHA: fprintf(f, "        blend alpha\n"); break;

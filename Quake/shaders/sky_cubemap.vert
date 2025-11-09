@@ -27,6 +27,11 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
+        uvec4   tcgen_mode;
+        vec4    tcgen_basis0;
+        vec4    tcgen_basis1;
+        vec4    emissive_tcgen_basis0;
+        vec4    emissive_tcgen_basis1;
         vec4    tcmod_matrix;
         vec4    tcmod_translate;
         vec4    emissive_matrix;
@@ -39,6 +44,38 @@ const uint
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u
 ;
+const uint TCGEN_OBJECT = 0u;
+const uint TCGEN_WORLD = 1u;
+const uint TCGEN_SCREEN = 2u;
+
+bool ScreenViewportValid()
+{
+        return Frame.ScreenTexScale.z > 0.0 && Frame.ScreenTexScale.w > 0.0;
+}
+
+vec2 EvaluateBaseUV(uint mode, vec4 basis0, vec4 basis1, vec3 world_pos, vec4 clip_pos, vec2 object_uv)
+{
+        if (mode == TCGEN_WORLD)
+        {
+                return vec2(dot(basis0.xyz, world_pos) + basis0.w,
+                            dot(basis1.xyz, world_pos) + basis1.w);
+        }
+        if (mode == TCGEN_SCREEN)
+        {
+                vec2 screen01 = clip_pos.xy / clip_pos.w * 0.5 + 0.5;
+                if (ScreenViewportValid())
+                        return screen01 * Frame.ScreenTexScale.zw;
+                return screen01;
+        }
+        return object_uv;
+}
+
+vec2 FinalizeUV(uint mode, vec2 uv)
+{
+        if (mode == TCGEN_SCREEN && ScreenViewportValid())
+                return uv * Frame.ScreenTexScale.xy;
+        return uv;
+}
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
