@@ -36,6 +36,8 @@ extern cvar_t r_oit;
 extern gltexture_t *lightmap_texture;
 extern gltexture_t *deluxemap_texture;
 
+#define MAX_EFFECT_STAGES 4
+
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
 extern GLuint gl_bmodel_ibo;
@@ -191,6 +193,17 @@ typedef struct bmodel_bindless_gpu_call_s {
 	float		env_params0[4];
 	float		env_params1[4];
 	float		env_params2[4];
+	float		effect_info[4];
+	float		effect_matrix[MAX_EFFECT_STAGES][4];
+	float		effect_translate[MAX_EFFECT_STAGES][4];
+	float		effect_color[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params0[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params1[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params2[MAX_EFFECT_STAGES][4];
+	float		effect_tcmod_params0[MAX_EFFECT_STAGES][4];
+	float		effect_tcmod_params1[MAX_EFFECT_STAGES][4];
+	float		effect_flags[MAX_EFFECT_STAGES][4];
+	GLuint64	effect_handles[MAX_EFFECT_STAGES];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -215,6 +228,16 @@ typedef struct bmodel_bound_gpu_call_s {
 	float		env_params0[4];
 	float		env_params1[4];
 	float		env_params2[4];
+	float		effect_info[4];
+	float		effect_matrix[MAX_EFFECT_STAGES][4];
+	float		effect_translate[MAX_EFFECT_STAGES][4];
+	float		effect_color[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params0[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params1[MAX_EFFECT_STAGES][4];
+	float		effect_alpha_params2[MAX_EFFECT_STAGES][4];
+	float		effect_tcmod_params0[MAX_EFFECT_STAGES][4];
+	float		effect_tcmod_params1[MAX_EFFECT_STAGES][4];
+	float		effect_flags[MAX_EFFECT_STAGES][4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -229,7 +252,7 @@ static union {
 	} bindless;
 	struct {
 		bmodel_bound_gpu_call_t		params[MAX_BMODEL_DRAWS];
-		gltexture_t					*textures[MAX_BMODEL_DRAWS][4];
+		gltexture_t					*textures[MAX_BMODEL_DRAWS][4 + MAX_EFFECT_STAGES];
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
@@ -626,6 +649,7 @@ static void R_FlushBModelCalls (void)
                 GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
                 GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
                 GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][3]);
+                GL_BindTextures (6, MAX_EFFECT_STAGES, &bmodel_calls.bound.textures[i][4]);
 			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
 
@@ -747,6 +771,7 @@ static void R_PopDepthState(const r_depth_state_t *state)
 #define CALLFLAG_TC_TURB         (1u << 6)
 #define CALLFLAG_TC_ENVMAP       (1u << 7)
 #define CALLFLAG_CUSTOM_FOG      (1u << 8)
+#define CALLFLAG_EFFECTS         (1u << 9)
 
 typedef struct
 {
@@ -1050,6 +1075,29 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           env_params0[4] = { 1.f, 1.f, 1.f, 0.f };
         float           env_params1[4] = { 1.f, 0.f, 0.f, 1.f };
         float           env_params2[4] = { (float)IW_WAVE_SIN, (float)IW_RGB_IDENTITY, (float)IW_BLEND_NONE, 0.f };
+        float           effect_info[4] = { 0.f, 0.f, 0.f, 0.f };
+        float           effect_matrix[MAX_EFFECT_STAGES][4];
+        float           effect_translate[MAX_EFFECT_STAGES][4];
+        float           effect_color[MAX_EFFECT_STAGES][4];
+        float           effect_alpha_params0[MAX_EFFECT_STAGES][4];
+        float           effect_alpha_params1[MAX_EFFECT_STAGES][4];
+        float           effect_alpha_params2[MAX_EFFECT_STAGES][4];
+        float           effect_tcmod_params0[MAX_EFFECT_STAGES][4];
+        float           effect_tcmod_params1[MAX_EFFECT_STAGES][4];
+        float           effect_flags_array[MAX_EFFECT_STAGES][4];
+        gltexture_t     *effect_textures[MAX_EFFECT_STAGES] = { NULL };
+        GLuint64        effect_handles[MAX_EFFECT_STAGES] = { 0 };
+        int             effect_stage_count = 0;
+
+        memset(effect_matrix, 0, sizeof(effect_matrix));
+        memset(effect_translate, 0, sizeof(effect_translate));
+        memset(effect_color, 0, sizeof(effect_color));
+        memset(effect_alpha_params0, 0, sizeof(effect_alpha_params0));
+        memset(effect_alpha_params1, 0, sizeof(effect_alpha_params1));
+        memset(effect_alpha_params2, 0, sizeof(effect_alpha_params2));
+        memset(effect_tcmod_params0, 0, sizeof(effect_tcmod_params0));
+        memset(effect_tcmod_params1, 0, sizeof(effect_tcmod_params1));
+        memset(effect_flags_array, 0, sizeof(effect_flags_array));
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
@@ -1076,39 +1124,164 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
         if (material)
         {
-                if (material->numStages > 0)
-                {
-                        for (int s = 0; s < material->numStages; ++s)
-                        {
-                                const iwStage_t *stage = &material->stages[s];
-                                qboolean wantsEnv = (stage->mapType == IW_MAP_CUBEMAP);
-                                if (!wantsEnv && stage->tcGen[0] && q_strcasestr(stage->tcGen, "environment"))
-                                        wantsEnv = true;
-                                if (!wantsEnv)
-                                {
-                                        for (int tc = 0; tc < stage->numTCMods; ++tc)
-                                        {
-                                                if (stage->tcmods[tc].op == IW_TC_ENVMAP)
-                                                {
-                                                        wantsEnv = true;
-                                                        break;
-                                                }
-                                        }
-                                }
-                                if (wantsEnv)
-                                {
-                                        env_stage = stage;
-                                        break;
-                                }
-                        }
-                }
-
-                IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
                 cull = material->cull;
                 has_material_fog = R_IWShader_GetFogColor(material, fog_color, 0);
+                IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
+
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
+
+                        for (int s = 0; s < material->numStages; ++s)
+                        {
+                                const iwStage_t *stage = &material->stages[s];
+                                if (!stage)
+                                        continue;
+                                if (!emissive_stage && stage->emissive)
+                                        emissive_stage = stage;
+
+                                if (!env_stage)
+                                {
+                                        qboolean wantsEnv = (stage->mapType == IW_MAP_CUBEMAP);
+                                        if (!wantsEnv && stage->tcGen[0] && q_strcasestr(stage->tcGen, "environment"))
+                                                wantsEnv = true;
+                                        if (!wantsEnv)
+                                        {
+                                                for (int tc = 0; tc < stage->numTCMods; ++tc)
+                                                {
+                                                        if (stage->tcmods[tc].op == IW_TC_ENVMAP)
+                                                        {
+                                                                wantsEnv = true;
+                                                                break;
+                                                        }
+                                                }
+                                        }
+                                        if (wantsEnv)
+                                                env_stage = stage;
+                                }
+                        }
+
+                        if (material->numStages > 1)
+                        {
+                                for (int s = 1; s < material->numStages && effect_stage_count < MAX_EFFECT_STAGES; ++s)
+                                {
+                                        const iwStage_t *stage = &material->stages[s];
+                                        if (!stage || stage == emissive_stage || stage == env_stage)
+                                                continue;
+                                        if (stage->mapType == IW_MAP_CUBEMAP)
+                                                continue;
+                                        if (stage->blendMode != IW_BLEND_ADD && stage->blendMode != IW_BLEND_ADD_ALPHA && stage->blendMode != IW_BLEND_PREMUL)
+                                                continue;
+                                        if (stage->rgbgen != IW_RGB_CONST && stage->rgbgen != IW_RGB_IDENTITY)
+                                                continue;
+
+                                        gltexture_t *stage_tex = R_IWShader_FindStageTexture(t, stage, r_framedata.time);
+                                        if (!stage_tex)
+                                                stage_tex = blacktexture;
+
+                                        float local_matrix[4] = { 1.f, 0.f, 0.f, 1.f };
+                                        float local_translate[4] = { 0.f, 0.f, 0.f, 0.f };
+                                        float local_color[4] = { 1.f, 1.f, 1.f, 1.f };
+                                        float local_alpha0[4] = { 0.f, 1.f, stage->alphaWave.base, stage->alphaWave.amplitude };
+                                        float local_alpha1[4] = { stage->alphaWave.phase, stage->alphaWave.frequency, stage->maskExplicit ? (float)stage->mask : -1.f, (float)stage->alphaWave.func };
+                                        float local_alpha2[4] = { (float)stage->alphaFuncMode, q_clamp(stage->alphaFuncRef, 0.f, 1.f), 0.f, stage->alphaToCoverage ? 1.f : 0.f };
+                                        float local_tc0[4] = { 1.f, 0.f, 0.f, 0.f };
+                                        float local_tc1[4] = { 0.f, 0.f, stage->maskExplicit ? (float)stage->mask : -1.f, (float)IW_WAVE_SIN };
+                                        iwTexMatrix_t stage_matrix;
+                                        IW_TexMatrixIdentity(&stage_matrix);
+                                        if (IW_StageTexMatrix(stage, r_framedata.time, &stage_matrix))
+                                        {
+                                                local_matrix[0] = stage_matrix.matrix[0];
+                                                local_matrix[1] = stage_matrix.matrix[1];
+                                                local_matrix[2] = stage_matrix.matrix[2];
+                                                local_matrix[3] = stage_matrix.matrix[3];
+                                                local_translate[0] = stage_matrix.translate[0];
+                                                local_translate[1] = stage_matrix.translate[1];
+                                        }
+                                        unsigned int stageFlags = 0u;
+                                        for (int tc = 0; tc < stage->numTCMods; ++tc)
+                                        {
+                                                const iwTCMod_t *mod = &stage->tcmods[tc];
+                                                switch (mod->op)
+                                                {
+                                                case IW_TC_STRETCH:
+                                                        stageFlags |= CALLFLAG_TC_STRETCH;
+                                                        local_tc0[0] = mod->wave.base;
+                                                        local_tc0[1] = mod->wave.amplitude;
+                                                        local_tc0[2] = mod->wave.phase;
+                                                        local_tc0[3] = mod->wave.frequency;
+                                                        local_tc1[3] = (float)mod->wave.func;
+                                                        break;
+
+                                                case IW_TC_TURB:
+                                                        stageFlags |= CALLFLAG_TC_TURB;
+                                                        local_tc1[0] = mod->a;
+                                                        local_tc1[1] = mod->b;
+                                                        break;
+
+                                                case IW_TC_ENVMAP:
+                                                        stageFlags |= CALLFLAG_TC_ENVMAP;
+                                                        break;
+
+                                                default:
+                                                        break;
+                                                }
+                                        }
+                                        if ((stageFlags & CALLFLAG_TC_ENVMAP) != 0u)
+                                                continue;
+                                        switch (stage->alphagen)
+                                        {
+                                        case IW_A_CONST:
+                                                local_alpha0[0] = 1.f;
+                                                local_alpha0[1] = q_clamp(stage->aConst, 0.f, 1.f);
+                                                break;
+                                        case IW_A_ENTITY:
+                                                local_alpha0[0] = 2.f;
+                                                break;
+                                        case IW_A_WAVE:
+                                                local_alpha0[0] = 3.f;
+                                                break;
+                                        case IW_A_MASK:
+                                                local_alpha0[0] = 4.f;
+                                                break;
+                                        default:
+                                                local_alpha0[0] = 0.f;
+                                                break;
+                                        }
+                                        if (stage->rgbgen == IW_RGB_CONST)
+                                        {
+                                                local_color[0] = stage->rgbConst[0];
+                                                local_color[1] = stage->rgbConst[1];
+                                                local_color[2] = stage->rgbConst[2];
+                                        }
+
+                                        int idx = effect_stage_count;
+                                        effect_textures[idx] = stage_tex ? stage_tex : blacktexture;
+                                        effect_handles[idx] = (stage_tex && stage_tex->bindless_handle) ? stage_tex->bindless_handle : (blacktexture ? blacktexture->bindless_handle : 0);
+                                        memcpy(effect_matrix[idx], local_matrix, sizeof(local_matrix));
+                                        memcpy(effect_translate[idx], local_translate, sizeof(local_translate));
+                                        memcpy(effect_color[idx], local_color, sizeof(local_color));
+                                        memcpy(effect_alpha_params0[idx], local_alpha0, sizeof(local_alpha0));
+                                        memcpy(effect_alpha_params1[idx], local_alpha1, sizeof(local_alpha1));
+                                        memcpy(effect_alpha_params2[idx], local_alpha2, sizeof(local_alpha2));
+                                        memcpy(effect_tcmod_params0[idx], local_tc0, sizeof(local_tc0));
+                                        memcpy(effect_tcmod_params1[idx], local_tc1, sizeof(local_tc1));
+                                        effect_flags_array[idx][0] = (float)stageFlags;
+                                        effect_flags_array[idx][1] = (float)stage->blendMode;
+                                        ++effect_stage_count;
+                                }
+                        }
+
+                        effect_info[0] = (float)effect_stage_count;
+
+                        for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
+                        {
+                                if (!effect_textures[i])
+                                        effect_textures[i] = blacktexture;
+                                if (effect_handles[i] == 0 && blacktexture)
+                                        effect_handles[i] = blacktexture->bindless_handle;
+                        }
+
                         tcgen_params[0] = (float)base_stage->tcGenMode;
                         tcgen_params[1] = (float)base_stage->tcAlign;
                         tcgen_s[0] = base_stage->tcGenVectors[0][0];
@@ -1276,17 +1449,17 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                         if (!env_stage)
                                 tc_feature_flags &= ~CALLFLAG_TC_ENVMAP;
                 }
-
-                for (int s = 0; s < material->numStages; ++s)
+        }
+        else
+        {
+                for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
                 {
-                        const iwStage_t *stage = &material->stages[s];
-                        if (!stage->emissive)
-                                continue;
-                        emissive_stage = stage;
-                        break;
+                        if (!effect_textures[i])
+                                effect_textures[i] = blacktexture;
+                        if (effect_handles[i] == 0 && blacktexture)
+                                effect_handles[i] = blacktexture->bindless_handle;
                 }
         }
-
         if (!stageAlphaTest && t && t->type == TEXTYPE_CUTOUT)
         {
                 stageAlphaTest = true;
@@ -1301,7 +1474,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
         if (num_bmodel_calls == MAX_BMODEL_DRAWS)
                 R_FlushBModelCalls ();
-
         if (t)
         {
                 tx = t->gltexture;
@@ -1331,6 +1503,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 zfix = 0;
 
         flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
+        if (effect_stage_count > 0)
+                flags |= CALLFLAG_EFFECTS;
         if (em != NULL)
                 flags |= CALLFLAG_EMISSIVE;
         if (stageAlphaTest)
@@ -1375,6 +1549,18 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 memcpy (call->env_params0, env_params0, sizeof (env_params0));
                 memcpy (call->env_params1, env_params1, sizeof (env_params1));
                 memcpy (call->env_params2, env_params2, sizeof (env_params2));
+                memcpy (call->effect_info, effect_info, sizeof (effect_info));
+                memcpy (call->effect_matrix, effect_matrix, sizeof (effect_matrix));
+                memcpy (call->effect_translate, effect_translate, sizeof (effect_translate));
+                memcpy (call->effect_color, effect_color, sizeof (effect_color));
+                memcpy (call->effect_alpha_params0, effect_alpha_params0, sizeof (effect_alpha_params0));
+                memcpy (call->effect_alpha_params1, effect_alpha_params1, sizeof (effect_alpha_params1));
+                memcpy (call->effect_alpha_params2, effect_alpha_params2, sizeof (effect_alpha_params2));
+                memcpy (call->effect_tcmod_params0, effect_tcmod_params0, sizeof (effect_tcmod_params0));
+                memcpy (call->effect_tcmod_params1, effect_tcmod_params1, sizeof (effect_tcmod_params1));
+                memcpy (call->effect_flags, effect_flags_array, sizeof (effect_flags_array));
+                for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
+                        call->effect_handles[i] = effect_handles[i];
         }
         else
         {
@@ -1410,10 +1596,22 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 memcpy (call->env_params0, env_params0, sizeof (env_params0));
                 memcpy (call->env_params1, env_params1, sizeof (env_params1));
                 memcpy (call->env_params2, env_params2, sizeof (env_params2));
+                memcpy (call->effect_info, effect_info, sizeof (effect_info));
+                memcpy (call->effect_matrix, effect_matrix, sizeof (effect_matrix));
+                memcpy (call->effect_translate, effect_translate, sizeof (effect_translate));
+                memcpy (call->effect_color, effect_color, sizeof (effect_color));
+                memcpy (call->effect_alpha_params0, effect_alpha_params0, sizeof (effect_alpha_params0));
+                memcpy (call->effect_alpha_params1, effect_alpha_params1, sizeof (effect_alpha_params1));
+                memcpy (call->effect_alpha_params2, effect_alpha_params2, sizeof (effect_alpha_params2));
+                memcpy (call->effect_tcmod_params0, effect_tcmod_params0, sizeof (effect_tcmod_params0));
+                memcpy (call->effect_tcmod_params1, effect_tcmod_params1, sizeof (effect_tcmod_params1));
+                memcpy (call->effect_flags, effect_flags_array, sizeof (effect_flags_array));
                 textures[0] = tx ? tx : greytexture;
                 textures[1] = fb ? fb : blacktexture;
                 textures[2] = em ? em : blacktexture;
                 textures[3] = env ? env : blacktexture;
+                for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
+                        textures[4 + i] = effect_textures[i] ? effect_textures[i] : blacktexture;
         }
 
         SDL_assert (num_instances > 0);

@@ -16,6 +16,7 @@ layout(binding=3) uniform sampler2D DeluxTex;
 #define LIGHT_TILES_Y 16
 #define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
+#define MAX_EFFECT_STAGES 4
 
 struct Light
 {
@@ -49,8 +50,59 @@ const uint
     CF_TC_STRETCH = 32u,
     CF_TC_TURB = 64u,
     CF_TC_ENVMAP = 128u,
-    CF_CUSTOM_FOG = 256u
+    CF_CUSTOM_FOG = 256u,
+    CF_EFFECTS = 512u
 ;
+
+struct Call
+{
+    uint    flags;
+    float   wateralpha;
+#if BINDLESS
+    uvec2   txhandle;
+    uvec2   fbhandle;
+    uvec2   emhandle;
+    uvec2   envhandle;
+#else
+    int             baseinstance;
+    int             padding;
+#endif
+    vec4    tcmod_matrix;
+    vec4    tcmod_translate;
+    vec4    tcmod_params0;
+    vec4    tcmod_params1;
+    vec4    tcgen_params;
+    vec4    tcgen_s;
+    vec4    tcgen_t;
+    vec4    emissive_matrix;
+    vec4    emissive_translate;
+    vec4    emissive_color;
+    vec4    fog_color;
+    vec4    alpha_params0;
+    vec4    alpha_params1;
+    vec4    alpha_params2;
+    vec4    env_params0;
+    vec4    env_params1;
+    vec4    env_params2;
+    vec4    effect_info;
+    vec4    effect_matrix[MAX_EFFECT_STAGES];
+    vec4    effect_translate[MAX_EFFECT_STAGES];
+    vec4    effect_color[MAX_EFFECT_STAGES];
+    vec4    effect_alpha_params0[MAX_EFFECT_STAGES];
+    vec4    effect_alpha_params1[MAX_EFFECT_STAGES];
+    vec4    effect_alpha_params2[MAX_EFFECT_STAGES];
+    vec4    effect_tcmod_params0[MAX_EFFECT_STAGES];
+    vec4    effect_tcmod_params1[MAX_EFFECT_STAGES];
+    vec4    effect_flags[MAX_EFFECT_STAGES];
+#if BINDLESS
+    uvec2   effect_handles[MAX_EFFECT_STAGES];
+#endif
+};
+
+layout(std430, binding=1) restrict readonly buffer CallBuffer
+{
+    Call call_data[];
+};
 
 const int IW_RGB_VERTEX   = 0;
 const int IW_RGB_CONST    = 1;
@@ -186,6 +238,36 @@ float SampleMaskChannel(vec4 texel, int maskChannel)
     return texel.a;
 }
 
+vec4 ApplyColorMask(vec4 texel, float maskIndex)
+{
+    if (maskIndex < 0.0)
+        return texel;
+
+    int maskChannel = int(maskIndex + 0.5);
+    if (maskChannel == 0)
+    {
+        texel.g = 0.0;
+        texel.b = 0.0;
+    }
+    else if (maskChannel == 1)
+    {
+        texel.r = 0.0;
+        texel.b = 0.0;
+    }
+    else if (maskChannel == 2)
+    {
+        texel.r = 0.0;
+        texel.g = 0.0;
+    }
+    else if (maskChannel == 3)
+    {
+        texel.rgb = vec3(1.0);
+        texel.a = clamp(texel.a, 0.0, 1.0);
+    }
+
+    return texel;
+}
+
 float ComputeStageAlpha(vec4 texel, vec4 params0, vec4 params1)
 {
     int type = int(params0.x + 0.5);
@@ -293,6 +375,11 @@ layout(location=19) flat in vec4 in_fog_color;
 layout(location=21) flat in vec4 in_env_params0;
 layout(location=22) flat in vec4 in_env_params1;
 layout(location=23) flat in vec4 in_env_params2;
+layout(location=24) flat in int in_call_index;
+layout(location=25) in vec2 in_effect_uv[MAX_EFFECT_STAGES];
+#if !BINDLESS
+layout(binding=6) uniform sampler2D EffectTex[MAX_EFFECT_STAGES];
+#endif
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -414,6 +501,7 @@ float specPow16(float x){
 // Ersetze die Normalberechnung & Lichtakkumulation im Hauptteil:
 void main()
 {
+    Call call = call_data[in_call_index];
     vec3 fullbright = vec3(0.);
     vec3 emissive   = vec3(0.);
     vec2 uv = in_uv;
@@ -448,31 +536,7 @@ void main()
     vec4 result = texture(Tex, uv);
 #endif
 
-    float maskIndex = in_stage_params1.z;
-    if (maskIndex >= 0.0)
-    {
-        int maskChannel = int(maskIndex + 0.5);
-        if (maskChannel == 0)
-        {
-            result.g = 0.0;
-            result.b = 0.0;
-        }
-        else if (maskChannel == 1)
-        {
-            result.r = 0.0;
-            result.b = 0.0;
-        }
-        else if (maskChannel == 2)
-        {
-            result.r = 0.0;
-            result.g = 0.0;
-        }
-        else if (maskChannel == 3)
-        {
-            result.rgb = vec3(1.0);
-            result.a = clamp(result.a, 0.0, 1.0);
-        }
-    }
+    result = ApplyColorMask(result, in_stage_params1.z);
 
     float baseAlpha = clamp(in_alpha, 0.0, 1.0);
     float stageAlpha = ComputeStageAlpha(result, in_alpha_params0, in_alpha_params1);
@@ -676,6 +740,41 @@ void main()
 #else
     result.rgb *= total_lightmap;
 #endif
+
+    int effect_count = int(call.effect_info.x + 0.5);
+    if ((call.flags & CF_EFFECTS) == 0u)
+        effect_count = 0;
+    effect_count = clamp(effect_count, 0, MAX_EFFECT_STAGES);
+    for (int i = 0; i < effect_count; ++i)
+    {
+#if BINDLESS
+        vec4 effect_texel = texture(sampler2D(call.effect_handles[i]), in_effect_uv[i]);
+#else
+        vec4 effect_texel = texture(EffectTex[i], in_effect_uv[i]);
+#endif
+        effect_texel = ApplyColorMask(effect_texel, call.effect_tcmod_params1[i].z);
+        float stageAlpha = ComputeStageAlpha(effect_texel, call.effect_alpha_params0[i], call.effect_alpha_params1[i]);
+        vec4 alpha_ctrl = call.effect_alpha_params2[i];
+        if (alpha_ctrl.z > 0.5)
+        {
+            int alphaFunc = int(alpha_ctrl.x + 0.5);
+            float alphaRef = clamp(alpha_ctrl.y, 0.0, 1.0);
+            if (!AlphaTestPass(stageAlpha, alphaFunc, alphaRef))
+                continue;
+        }
+        float finalStageAlpha = clamp(stageAlpha, 0.0, 1.0);
+        vec3 stage_rgb = effect_texel.rgb * call.effect_color[i].rgb;
+        int blendMode = int(call.effect_flags[i].y + 0.5);
+        if (blendMode == IW_BLEND_PREMUL)
+        {
+            vec3 premul_rgb = stage_rgb * finalStageAlpha;
+            result.rgb = premul_rgb + result.rgb * (1.0 - finalStageAlpha);
+        }
+        else
+        {
+            result.rgb += stage_rgb * finalStageAlpha;
+        }
+    }
 
     result.rgb += fullbright + emissive;
 

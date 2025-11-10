@@ -8,6 +8,8 @@
 
 #include "frame_uniforms.glsl"
 
+#define MAX_EFFECT_STAGES 4
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
 	float fog = exp2(-Fog.w * dot(p, p));
@@ -45,6 +47,19 @@ struct Call
 	vec4	env_params0;
 	vec4	env_params1;
 	vec4	env_params2;
+	vec4	effect_info;
+	vec4	effect_matrix[MAX_EFFECT_STAGES];
+	vec4	effect_translate[MAX_EFFECT_STAGES];
+	vec4	effect_color[MAX_EFFECT_STAGES];
+	vec4	effect_alpha_params0[MAX_EFFECT_STAGES];
+	vec4	effect_alpha_params1[MAX_EFFECT_STAGES];
+	vec4	effect_alpha_params2[MAX_EFFECT_STAGES];
+	vec4	effect_tcmod_params0[MAX_EFFECT_STAGES];
+	vec4	effect_tcmod_params1[MAX_EFFECT_STAGES];
+	vec4	effect_flags[MAX_EFFECT_STAGES];
+#if BINDLESS
+	uvec2	effect_handles[MAX_EFFECT_STAGES];
+#endif
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,

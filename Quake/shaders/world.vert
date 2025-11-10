@@ -19,6 +19,7 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 #define LIGHT_TILES_Y 16
 #define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
+#define MAX_EFFECT_STAGES 4
 
 struct Light
 {
@@ -74,6 +75,19 @@ struct Call
         vec4    env_params0;
         vec4    env_params1;
         vec4    env_params2;
+        vec4    effect_info;
+        vec4    effect_matrix[MAX_EFFECT_STAGES];
+        vec4    effect_translate[MAX_EFFECT_STAGES];
+        vec4    effect_color[MAX_EFFECT_STAGES];
+        vec4    effect_alpha_params0[MAX_EFFECT_STAGES];
+        vec4    effect_alpha_params1[MAX_EFFECT_STAGES];
+        vec4    effect_alpha_params2[MAX_EFFECT_STAGES];
+        vec4    effect_tcmod_params0[MAX_EFFECT_STAGES];
+        vec4    effect_tcmod_params1[MAX_EFFECT_STAGES];
+        vec4    effect_flags[MAX_EFFECT_STAGES];
+#if BINDLESS
+        uvec2   effect_handles[MAX_EFFECT_STAGES];
+#endif
 };
 const uint
         CF_USE_POLYGON_OFFSET = 1u,
@@ -84,7 +98,8 @@ const uint
 	CF_TC_STRETCH = 32u,
 	CF_TC_TURB = 64u,
 	CF_TC_ENVMAP = 128u,
-        CF_CUSTOM_FOG = 256u
+        CF_CUSTOM_FOG = 256u,
+        CF_EFFECTS = 512u
 ;
 
 const int IW_TCGEN_BASE        = 0;
@@ -173,6 +188,8 @@ layout(location=19) flat out vec4 out_fog_color;
 layout(location=21) flat out vec4 out_env_params0;
 layout(location=22) flat out vec4 out_env_params1;
 layout(location=23) flat out vec4 out_env_params2;
+layout(location=24) flat out int out_call_index;
+layout(location=25) out vec2 out_effect_uv[MAX_EFFECT_STAGES];
 
 float EvaluateWave(vec4 params, int func)
 {
@@ -280,6 +297,8 @@ void main()
                 base_uv = ndc * 0.5 + 0.5;
         }
 
+        vec2 stage_base_uv = base_uv;
+        const vec2 turbScale = vec2(0.125, 0.125);
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
         dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
         if ((call.flags & CF_TC_STRETCH) != 0u)
@@ -292,12 +311,42 @@ void main()
         {
                 float amp = call.tcmod_params1.x;
                 float freq = call.tcmod_params1.y;
-                const vec2 turbScale = vec2(0.125, 0.125);
                 float angle = Time * freq * 6.28318530718 + dot(world_pos.xy, turbScale);
                 float offset = sin(angle) * amp;
                 transformed_uv += vec2(offset);
         }
         out_uv = transformed_uv;
+        out_call_index = DRAW_ID;
+        int effect_count = int(call.effect_info.x + 0.5);
+        if ((call.flags & CF_EFFECTS) == 0u)
+                effect_count = 0;
+        effect_count = clamp(effect_count, 0, MAX_EFFECT_STAGES);
+        for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
+        {
+                vec2 effect_uv = stage_base_uv;
+                if (i < effect_count)
+                {
+                        vec4 mat = call.effect_matrix[i];
+                        vec4 trans = call.effect_translate[i];
+                        effect_uv = vec2(dot(mat.xy, effect_uv), dot(mat.zw, effect_uv)) + trans.xy;
+                        uint stageFlags = uint(call.effect_flags[i].x + 0.5);
+                        if ((stageFlags & CF_TC_STRETCH) != 0u)
+                        {
+                                int func = int(call.effect_tcmod_params1[i].w + 0.5);
+                                float scale = EvaluateWave(call.effect_tcmod_params0[i], func);
+                                effect_uv = (effect_uv - 0.5) * scale + 0.5;
+                        }
+                        if ((stageFlags & CF_TC_TURB) != 0u)
+                        {
+                                float amp = call.effect_tcmod_params1[i].x;
+                                float freq = call.effect_tcmod_params1[i].y;
+                                                float angle = Time * freq * 6.28318530718 + dot(world_pos.xy, turbScale);
+                                float offset = sin(angle) * amp;
+                                effect_uv += vec2(offset);
+                        }
+                }
+                out_effect_uv[i] = effect_uv;
+        }
         vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
                                 dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
         out_emissive_uv = emissive_uv;
