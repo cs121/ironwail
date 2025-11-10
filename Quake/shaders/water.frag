@@ -77,12 +77,112 @@ float tri(float x)
 
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
-	const float EPS = 1e-6;
-	float inv_curr_w = abs(curr_clip.w) > EPS ? 1.0 / curr_clip.w : 0.0;
-	float inv_prev_w = abs(prev_clip.w) > EPS ? 1.0 / prev_clip.w : 0.0;
-	vec2 curr_ndc = curr_clip.xy * inv_curr_w;
-	vec2 prev_ndc = prev_clip.xy * inv_prev_w;
-	return (curr_ndc - prev_ndc) * 0.5;
+        const float EPS = 1e-6;
+        float inv_curr_w = abs(curr_clip.w) > EPS ? 1.0 / curr_clip.w : 0.0;
+        float inv_prev_w = abs(prev_clip.w) > EPS ? 1.0 / prev_clip.w : 0.0;
+        vec2 curr_ndc = curr_clip.xy * inv_curr_w;
+        vec2 prev_ndc = prev_clip.xy * inv_prev_w;
+        return (curr_ndc - prev_ndc) * 0.5;
+}
+
+float EvaluateWave(vec4 params, int func)
+{
+        float base = params.x;
+        float amplitude = params.y;
+        float phase = params.z;
+        float frequency = params.w;
+        float cycle = Time * frequency + phase / 360.0;
+        float wave = 0.0;
+        const float TAU = 6.28318530718;
+
+        if (func == 0)
+        {
+                float angle = cycle * TAU;
+                wave = sin(angle);
+        }
+        else if (func == 1)
+        {
+                float f = fract(cycle);
+                wave = (abs(f * 2.0 - 1.0) * 2.0) - 1.0;
+        }
+        else if (func == 2)
+        {
+                float angle = cycle * TAU;
+                wave = sign(sin(angle));
+                if (wave == 0.0)
+                        wave = 1.0;
+        }
+        else if (func == 3)
+        {
+                float f = fract(cycle);
+                wave = f * 2.0 - 1.0;
+        }
+        else
+        {
+                float angle = cycle * TAU;
+                wave = sin(angle);
+        }
+
+        return base + amplitude * wave;
+}
+
+float SampleMaskChannel(vec4 texel, int maskChannel)
+{
+        if (maskChannel == 0)
+                return texel.r;
+        if (maskChannel == 1)
+                return texel.g;
+        if (maskChannel == 2)
+                return texel.b;
+        return texel.a;
+}
+
+float ComputeStageAlpha(vec4 texel, vec4 params0, vec4 params1)
+{
+        int type = int(params0.x + 0.5);
+        if (type == 1)
+                return clamp(params0.y, 0.0, 1.0);
+        if (type == 2)
+                return 1.0;
+        if (type == 3)
+        {
+                vec4 waveParams = vec4(params0.z, params0.w, params1.x, params1.y);
+                int func = int(params1.w + 0.5);
+                return clamp(EvaluateWave(waveParams, func), 0.0, 1.0);
+        }
+        if (type == 4)
+        {
+                int maskChannel = int(params1.z + 0.5);
+                return clamp(SampleMaskChannel(texel, maskChannel), 0.0, 1.0);
+        }
+
+        return clamp(texel.a, 0.0, 1.0);
+}
+
+bool AlphaTestPass(float alpha, int func, float ref)
+{
+        const float EPS = 1.0e-4;
+        switch (func)
+        {
+        case 1:
+                return false;
+        case 2:
+                return alpha < ref;
+        case 3:
+                return abs(alpha - ref) <= EPS;
+        case 4:
+                return alpha <= ref;
+        case 5:
+                return alpha > ref;
+        case 6:
+                return abs(alpha - ref) > EPS;
+        case 7:
+                return alpha >= ref;
+        case 8:
+                return true;
+        default:
+                return true;
+        }
 }
 
 layout(location=0) flat in uint in_flags;
@@ -98,7 +198,10 @@ layout(location=7) noperspective in vec4 in_prev_clip;
 layout(location=8) in vec2 in_emissive_uv;
 layout(location=9) flat in vec3 in_emissive_color;
 layout(location=10) flat in vec4 in_stage_params1;
-layout(location=11) flat in vec4 in_fog_color;
+layout(location=11) flat in vec4 in_alpha_params0;
+layout(location=12) flat in vec4 in_alpha_params1;
+layout(location=13) flat in vec4 in_alpha_params2;
+layout(location=14) flat in vec4 in_fog_color;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -182,12 +285,25 @@ void main()
                         result.r = 0.0;
                         result.g = 0.0;
                 }
-                else if (maskChannel == 3)
-                {
-                        result.rgb = vec3(1.0);
-                        result.a = clamp(result.a, 0.0, 1.0);
-                }
+        else if (maskChannel == 3)
+        {
+                result.rgb = vec3(1.0);
+                result.a = clamp(result.a, 0.0, 1.0);
         }
+    }
+
+    float baseAlpha = clamp(in_alpha, 0.0, 1.0);
+    float stageAlpha = ComputeStageAlpha(result, in_alpha_params0, in_alpha_params1);
+    if (in_alpha_params2.z > 0.5)
+    {
+            int alphaFunc = int(in_alpha_params2.x + 0.5);
+            float alphaRef = clamp(in_alpha_params2.y, 0.0, 1.0);
+            if (!AlphaTestPass(stageAlpha, alphaFunc, alphaRef))
+                    discard;
+    }
+    float finalAlpha = clamp(baseAlpha * stageAlpha, 0.0, 1.0);
+    result.a = finalAlpha;
+
         result.rgb += fullbright;
         result.rgb += emissive;
 
@@ -220,7 +336,7 @@ void main()
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         vec4 fogData = ((in_flags & CF_CUSTOM_FOG) != 0u) ? in_fog_color : Fog;
         result.rgb = ApplyFog(result.rgb, in_pos, fogData);
-        result.a *= in_alpha;
+        result.a = finalAlpha;
         out_fragcolor = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
