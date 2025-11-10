@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #define IW_MAX_MATERIALS 512
 
@@ -65,9 +66,16 @@ static char *IW_PreprocessShaderText(const char *input, int length, int *outLeng
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
 static cvar_t r_iwshader_strict_cvar = { "r_iwshader_strict", "0", CVAR_NONE };
 static cvar_t r_iwshader_debug_cvar = { "r_iwshader_debug", "0", CVAR_NONE };
+static cvar_t iw_maxStages_cvar = { "iw_maxStages", "16", CVAR_NONE };
+static cvar_t iw_maxTcmodsPerStage_cvar = { "iw_maxTcmodsPerStage", "8", CVAR_NONE };
+static cvar_t iw_maxAnimFrames_cvar = { "iw_maxAnimFrames", "64", CVAR_NONE };
 
 static cmd_function_t *iwshader_dump_cmd;
 static void IW_DumpMaterials_f(void);
+
+static qboolean iw_warned_stage_limit;
+static qboolean iw_warned_tcmod_limit;
+static qboolean iw_warned_anim_limit;
 
 typedef struct
 {
@@ -107,6 +115,58 @@ static void IW_LogWarning(const char *file, int line, int column, const char *fm
     va_end(args);
 
     Con_Printf("iwshader: %s:%d:%d: %s\n", file ? file : "<unknown>", line, column, msg);
+}
+
+static void IW_ParseWarn(const char *file, const iwtxtToken_t *token, const char *fmt, ...)
+{
+    char msg[512];
+    va_list args;
+    va_start(args, fmt);
+    q_vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+
+    const int line = token ? token->line : 0;
+    const int column = token ? token->column : 0;
+    IW_LogWarning(file, line, column, "%s", msg);
+}
+
+static int IW_ClampLimit(const cvar_t *cvar, int minValue, int hardcap, qboolean *warned, const char *name)
+{
+    int value = (int)Q_rint(cvar ? cvar->value : 0.f);
+    if (value < minValue)
+        value = minValue;
+
+    if (value > hardcap)
+    {
+        if (!*warned)
+        {
+            Con_Warning("iwshader: %s=%d exceeds hard cap %d; clamping\n", name, value, hardcap);
+        }
+        *warned = true;
+        value = hardcap;
+    }
+    else
+    {
+        *warned = false;
+    }
+
+    assert(value <= hardcap);
+    return value;
+}
+
+static int IW_GetMaxStages(void)
+{
+    return IW_ClampLimit(&iw_maxStages_cvar, 1, IW_MAX_STAGES, &iw_warned_stage_limit, "iw_maxStages");
+}
+
+static int IW_GetMaxTCMods(void)
+{
+    return IW_ClampLimit(&iw_maxTcmodsPerStage_cvar, 0, IW_MAX_TCMODS, &iw_warned_tcmod_limit, "iw_maxTcmodsPerStage");
+}
+
+static int IW_GetMaxAnimFrames(void)
+{
+    return IW_ClampLimit(&iw_maxAnimFrames_cvar, 0, IW_MAX_ANIM_FRAMES, &iw_warned_anim_limit, "iw_maxAnimFrames");
 }
 
 static qboolean IW_NormalizeName(const char *input, char *output, size_t size, qboolean drop_extension)
@@ -232,6 +292,69 @@ static const char *IW_BlendFactorName(iwBlendFactor_t factor)
     case IW_SRC_ONE_MINUS_DST_ALPHA: return "one_minus_dst_alpha";
     }
     return "zero";
+}
+
+static const char *IW_BlendModeName(iwBlendMode_t mode)
+{
+    switch (mode)
+    {
+    case IW_BLEND_NONE: return "none";
+    case IW_BLEND_ALPHA: return "alpha";
+    case IW_BLEND_ADD: return "add";
+    case IW_BLEND_MUL: return "mul";
+    case IW_BLEND_PREMUL: return "premul";
+    case IW_BLEND_ADD_ALPHA: return "add_alpha";
+    case IW_BLEND_CUSTOM: return "custom";
+    }
+    return "none";
+}
+
+static void IW_FormatBlendDescription(const iwStage_t *stage, char *buffer, size_t size)
+{
+    if (!buffer || size == 0)
+        return;
+
+    if (!stage || stage->blendMode == IW_BLEND_NONE)
+    {
+        q_strlcpy(buffer, "disabled", size);
+        return;
+    }
+
+    const char *modeName = IW_BlendModeName(stage->blendMode);
+    const char *src = IW_BlendFactorName(stage->src);
+    const char *dst = IW_BlendFactorName(stage->dst);
+
+    if (stage->blendMode == IW_BLEND_CUSTOM)
+        q_snprintf(buffer, size, "%s/%s", src, dst);
+    else
+        q_snprintf(buffer, size, "%s (%s/%s)", modeName, src, dst);
+}
+
+static const char *IW_DepthWriteName(int depthWrite)
+{
+    if (depthWrite == IW_DEPTHWRITE_AUTO)
+        return "auto";
+    return depthWrite ? "on" : "off";
+}
+
+static void IW_FormatDepthTestDescription(const iwStage_t *stage, qboolean materialScope, char *buffer, size_t size)
+{
+    if (!buffer || size == 0)
+        return;
+
+    if (!stage)
+    {
+        q_strlcpy(buffer, "default", size);
+        return;
+    }
+
+    const char *state = stage->depthTest ? "on" : "off";
+    if (stage->depthTestExplicit)
+        q_snprintf(buffer, size, "%s (explicit)", state);
+    else if (materialScope)
+        q_snprintf(buffer, size, "%s (default)", state);
+    else
+        q_snprintf(buffer, size, "%s", state);
 }
 
 static qboolean IW_ParseWaveFunc(const char *text, iwWaveFunc_t *out)
@@ -436,14 +559,14 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
     char op[16];
     IW_CopyTokenLower(firstToken, op, sizeof(op));
 
-    if (stage->numTCMods >= IW_MAX_TCMODS)
-    {
-        IW_LogWarning(filename, firstToken->line, firstToken->column, "too many tcmods (max %d)", IW_MAX_TCMODS);
-        IW_SkipBraces(parser);
-        return false;
-    }
+    const int tcmodLimit = IW_GetMaxTCMods();
+    assert(tcmodLimit <= IW_MAX_TCMODS);
+    const qboolean store = stage->numTCMods < tcmodLimit;
+    if (!store)
+        IW_ParseWarn(filename, firstToken, "too many tcmods (limit %d)", tcmodLimit);
 
-    iwTCMod_t *tc = &stage->tcmods[stage->numTCMods];
+    iwTCMod_t temp;
+    iwTCMod_t *tc = store ? &stage->tcmods[stage->numTCMods] : &temp;
     memset(tc, 0, sizeof(*tc));
 
     iwtxtToken_t token;
@@ -522,7 +645,7 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
     {
         tc->op = IW_TC_ENVMAP;
         tc->a = tc->b = 0.f;
-        if (!stage->tcAlignExplicit)
+        if (store && !stage->tcAlignExplicit)
             stage->tcAlign = IW_TC_ALIGN_WORLD;
     }
     else
@@ -531,11 +654,12 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
         return false;
     }
 
-    stage->numTCMods++;
+    if (store)
+        stage->numTCMods++;
     return true;
 }
 
-static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, const char *filename, qboolean strict)
+static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, const iwtxtToken_t *stageToken, const char *filename, qboolean strict)
 {
     iwStage_t stage;
     IW_SetStageDefaults(&stage);
@@ -798,13 +922,6 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
         }
         else if (!strcmp(keyword, "tcscale"))
         {
-            if (stage.numTCMods >= IW_MAX_TCMODS)
-            {
-                IW_LogWarning(filename, token.line, token.column, "too many tcmods (max %d)", IW_MAX_TCMODS);
-                if (strict)
-                    return false;
-                continue;
-            }
             float su, sv;
             iwtxtToken_t value;
             if (!IW_ReadFloat(parser, &su, &value) || !IW_ReadFloat(parser, &sv, &value))
@@ -812,6 +929,13 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 IW_LogWarning(filename, value.line, value.column, "tcscale requires two floats");
                 if (strict)
                     return false;
+                continue;
+            }
+            const int tcmodLimit = IW_GetMaxTCMods();
+            assert(tcmodLimit <= IW_MAX_TCMODS);
+            if (stage.numTCMods >= tcmodLimit)
+            {
+                IW_ParseWarn(filename, &token, "too many tcmods (limit %d)", tcmodLimit);
                 continue;
             }
             iwTCMod_t *tc = &stage.tcmods[stage.numTCMods++];
@@ -822,13 +946,6 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
         }
         else if (!strcmp(keyword, "tcoffset"))
         {
-            if (stage.numTCMods >= IW_MAX_TCMODS)
-            {
-                IW_LogWarning(filename, token.line, token.column, "too many tcmods (max %d)", IW_MAX_TCMODS);
-                if (strict)
-                    return false;
-                continue;
-            }
             float ou, ov;
             iwtxtToken_t value;
             if (!IW_ReadFloat(parser, &ou, &value) || !IW_ReadFloat(parser, &ov, &value))
@@ -836,6 +953,13 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 IW_LogWarning(filename, value.line, value.column, "tcoffset requires two floats");
                 if (strict)
                     return false;
+                continue;
+            }
+            const int tcmodLimit = IW_GetMaxTCMods();
+            assert(tcmodLimit <= IW_MAX_TCMODS);
+            if (stage.numTCMods >= tcmodLimit)
+            {
+                IW_ParseWarn(filename, &token, "too many tcmods (limit %d)", tcmodLimit);
                 continue;
             }
             iwTCMod_t *tc = &stage.tcmods[stage.numTCMods++];
@@ -997,11 +1121,11 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 if (!IWTXT_NextToken(parser, &value))
                     break;
 
-                if (stage.numAnimFrames >= IW_MAX_ANIM_FRAMES)
+                const int animLimit = IW_GetMaxAnimFrames();
+                assert(animLimit <= IW_MAX_ANIM_FRAMES);
+                if (stage.numAnimFrames >= animLimit)
                 {
-                    IW_LogWarning(filename, value.line, value.column, "too many animmap frames (max %d)", IW_MAX_ANIM_FRAMES);
-                    if (strict)
-                        return false;
+                    IW_ParseWarn(filename, &value, "too many animmap frames (limit %d)", animLimit);
                     continue;
                 }
 
@@ -1039,25 +1163,26 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
         }
         else
         {
-            IW_LogWarning(filename, token.line, token.column, "unknown stage keyword '%s'", keyword);
-            if (strict)
-            {
-                IW_SkipBraces(parser);
-                return false;
-            }
+            IW_ParseWarn(filename, &token, "unknown stage keyword '%s'", keyword);
             valid = false;
         }
     }
 
-    if (!valid && strict)
-        return false;
-
-    if (material->numStages >= IW_MAX_STAGES)
+    if (!valid)
     {
-        IW_LogWarning(filename, token.line, token.column, "too many stages (max %d)", IW_MAX_STAGES);
-        return false;
+        IW_ParseWarn(filename, stageToken, "stage skipped due to errors");
+        return true;
     }
 
+    const int stageLimit = IW_GetMaxStages();
+    assert(stageLimit <= IW_MAX_STAGES);
+    if (material->numStages >= stageLimit)
+    {
+        IW_ParseWarn(filename, stageToken, "too many stages (limit %d)", stageLimit);
+        return true;
+    }
+
+    assert(material->numStages < IW_MAX_STAGES);
     material->stages[material->numStages++] = stage;
     return true;
 }
@@ -1211,8 +1336,8 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
         return true;
     }
 
-    IW_LogWarning(filename, token->line, token->column, "unknown keyword '%s'", keyword);
-    return false;
+    IW_ParseWarn(filename, token, "unknown keyword '%s'", keyword);
+    return true;
 }
 
 static void IW_RegisterMaterial(const iwMaterial_t *material, qboolean broken)
@@ -1285,7 +1410,8 @@ static void IW_ParseShaderDefinition(iwtxtParser_t *parser, const iwtxtToken_t *
                     continue;
                 }
                 qboolean strict = material.strict || (r_iwshader_strict_cvar.value != 0.f);
-                if (!IW_ParseStage(parser, &material, filename, strict))
+                iwtxtToken_t stageToken = token;
+                if (!IW_ParseStage(parser, &material, &stageToken, filename, strict))
                 {
                     materialValid = false;
                     continue;
@@ -1392,6 +1518,9 @@ void IW_ShaderSystem_Init(void)
     Cvar_RegisterVariable(&r_iwshader_cvar);
     Cvar_RegisterVariable(&r_iwshader_strict_cvar);
     Cvar_RegisterVariable(&r_iwshader_debug_cvar);
+    Cvar_RegisterVariable(&iw_maxStages_cvar);
+    Cvar_RegisterVariable(&iw_maxTcmodsPerStage_cvar);
+    Cvar_RegisterVariable(&iw_maxAnimFrames_cvar);
     iwshader_dump_cmd = Cmd_AddCommand("r_iwshader_dump", IW_DumpMaterials_f);
 
     IW_ResetState();
@@ -1764,6 +1893,29 @@ void IW_DumpMaterials(const char *outPath)
         if (mat->strict)
             fprintf(f, "    strict 1\n");
 
+        const iwStage_t *baseStage = mat->numStages > 0 ? &mat->stages[0] : NULL;
+        char materialBlendDesc[64];
+        char materialDepthTestDesc[64];
+        IW_FormatBlendDescription(baseStage, materialBlendDesc, sizeof(materialBlendDesc));
+        IW_FormatDepthTestDescription(baseStage, true, materialDepthTestDesc, sizeof(materialDepthTestDesc));
+        const char *materialDepthWriteDesc = IW_DepthWriteName(baseStage ? baseStage->depthWrite : IW_DEPTHWRITE_AUTO);
+        int emissiveIndex = -1;
+        for (int s = 0; s < mat->numStages; ++s)
+        {
+            if (mat->stages[s].emissive)
+            {
+                emissiveIndex = s;
+                break;
+            }
+        }
+        char emissiveBuffer[16];
+        if (emissiveIndex >= 0)
+            q_snprintf(emissiveBuffer, sizeof(emissiveBuffer), "%d", emissiveIndex);
+        else
+            q_strlcpy(emissiveBuffer, "none", sizeof(emissiveBuffer));
+        fprintf(f, "    // runtime: blend=%s depthWrite=%s depthTest=%s emissiveStage=%s\n",
+                materialBlendDesc, materialDepthWriteDesc, materialDepthTestDesc, emissiveBuffer);
+
         for (int s = 0; s < mat->numStages; ++s)
         {
             const iwStage_t *stage = &mat->stages[s];
@@ -1849,6 +2001,15 @@ void IW_DumpMaterials(const char *outPath)
                 fprintf(f, "        colormask %s\n", IW_ColorMaskName(stage->colorMask));
             if (stage->alphaToCoverage)
                 fprintf(f, "        alpha2coverage 1\n");
+            char stageBlendDesc[64];
+            char stageDepthTestDesc[64];
+            IW_FormatBlendDescription(stage, stageBlendDesc, sizeof(stageBlendDesc));
+            IW_FormatDepthTestDescription(stage, false, stageDepthTestDesc, sizeof(stageDepthTestDesc));
+            const char *stageDepthWriteDesc = IW_DepthWriteName(stage->depthWrite);
+            const char *alpha2CoverageDesc = stage->alphaToCoverage ? "on" : "off";
+            const char *emissiveDesc = stage->emissive ? "yes" : "no";
+            fprintf(f, "        // runtime: blend=%s depthWrite=%s depthTest=%s alphaToCoverage=%s emissive=%s\n",
+                    stageBlendDesc, stageDepthWriteDesc, stageDepthTestDesc, alpha2CoverageDesc, emissiveDesc);
             for (int t = 0; t < stage->numTCMods; ++t)
             {
                 const iwTCMod_t *tc = &stage->tcmods[t];

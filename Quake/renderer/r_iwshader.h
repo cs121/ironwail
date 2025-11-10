@@ -1,11 +1,11 @@
 #pragma once
 #include <stdint.h>
 
-#define IW_MAX_STAGES       8
-#define IW_MAX_TCMODS       4
+#define IW_MAX_STAGES       16
+#define IW_MAX_TCMODS       8
 #define IW_MAX_NAME         96
 #define IW_MAX_PATH         96
-#define IW_MAX_ANIM_FRAMES  16
+#define IW_MAX_ANIM_FRAMES  64
 
 #define IW_DEPTHWRITE_AUTO  (-1)
 
