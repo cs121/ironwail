@@ -6,6 +6,11 @@
 #define IW_MAX_NAME         96
 #define IW_MAX_PATH         96
 #define IW_MAX_ANIM_FRAMES  64
+#define IW_MAX_Q3MAP_DIRECTIVES 32
+#define IW_MAX_DEFORM_COMMANDS 16
+#define IW_MAX_DIRECTIVE_TEXT 192
+#define IW_MAX_STAGE_CONDITION 96
+#define IW_MAX_TCGEN_TEXT   96
 
 #define IW_DEPTHWRITE_AUTO  (-1)
 
@@ -75,6 +80,24 @@ typedef enum {
 } iwTCAlign_t;
 
 typedef enum {
+    IW_MAP_TEXTURE2D = 0,
+    IW_MAP_CLAMP2D,
+    IW_MAP_CUBEMAP,
+    IW_MAP_LIGHTMAP,
+    IW_MAP_PROCEDURAL_WHITE,
+    IW_MAP_PROCEDURAL_BLACK
+} iwMapType_t;
+
+typedef struct {
+    float color[3];
+    float depthForOpaque;
+    float density;
+    int hasColor;
+    int hasDepthForOpaque;
+    int hasDensity;
+} iwFogParms_t;
+
+typedef enum {
     IW_WAVE_SIN = 0,
     IW_WAVE_TRIANGLE,
     IW_WAVE_SQUARE,
@@ -128,6 +151,8 @@ typedef struct {
 typedef struct {
     char mapPath[IW_MAX_PATH];
     int clamp;
+    int isClamp;
+    iwMapType_t mapType;
     iwBlendMode_t blendMode;
     iwBlendFactor_t src, dst;
     iwRGBGen_t rgbgen;
@@ -145,6 +170,12 @@ typedef struct {
     iwColorMask_t colorMask;
     iwTCAlign_t tcAlign;
     int tcAlignExplicit;
+    char tcGen[IW_MAX_TCGEN_TEXT];
+    char alphaFunc[32];
+    char depthFunc[32];
+    char stageCondition[IW_MAX_STAGE_CONDITION];
+    iwFogParms_t fogParms;
+    int hasFogParms;
     int alphaToCoverage;
     int animMap;
     float animFps;
@@ -152,6 +183,9 @@ typedef struct {
     char animPaths[IW_MAX_ANIM_FRAMES][IW_MAX_PATH];
     int numTCMods;
     iwTCMod_t tcmods[IW_MAX_TCMODS];
+    char normalMap[IW_MAX_PATH];
+    char glossMap[IW_MAX_PATH];
+    float specularScale;
 } iwStage_t;
 
 typedef struct {
@@ -164,6 +198,19 @@ typedef struct {
     int detail;
     char editorImage[IW_MAX_PATH];
     int strict;
+    char fogShader[IW_MAX_PATH];
+    int hasFog;
+    iwFogParms_t fogParms;
+    int hasFogParms;
+    int portal;
+    int hasSkyParms;
+    char skyParms[3][IW_MAX_PATH];
+    float tessSize;
+    int hasTessSize;
+    int numQ3MapDirectives;
+    char q3mapDirectives[IW_MAX_Q3MAP_DIRECTIVES][IW_MAX_DIRECTIVE_TEXT];
+    int numDeformVertexes;
+    char deformVertexes[IW_MAX_DEFORM_COMMANDS][IW_MAX_DIRECTIVE_TEXT];
     int numStages;
     iwStage_t stages[IW_MAX_STAGES];
 } iwMaterial_t;
@@ -198,6 +245,10 @@ const iwMaterial_t* IW_DebugLastMaterial(void);
 const char* IW_DebugLastTexture(void);
 qboolean IW_DebugOverlayText(char* buffer, size_t bufferSize);
 void IW_Debugf(const char* fmt, ...) FUNC_PRINTF(1, 2);
+
+#ifdef IW_BUILD_TESTS
+qboolean IW_ParseShaderTextForTesting(const char *text, iwMaterial_t *outMaterial);
+#endif
 
 #ifdef __cplusplus
 }

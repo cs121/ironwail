@@ -224,12 +224,122 @@ static void IW_CopyTokenText(const iwtxtToken_t *token, char *dst, size_t size)
     dst[n] = '\0';
 }
 
+static void IW_AppendTokenText(const iwtxtToken_t *token, char *buffer, size_t size)
+{
+    if (!token || !buffer || size == 0)
+        return;
+
+    char temp[IW_MAX_DIRECTIVE_TEXT];
+    IW_CopyTokenText(token, temp, sizeof(temp));
+    if (buffer[0])
+        q_strlcat(buffer, " ", size);
+    q_strlcat(buffer, temp, size);
+}
+
+static void IW_CollectLineTokens(iwtxtParser_t *parser, int line, char *buffer, size_t size, qboolean stopAtStageKeyword)
+{
+    if (!parser || !buffer || size == 0)
+        return;
+
+    iwtxtToken_t tok;
+    while (IWTXT_PeekToken(parser, &tok))
+    {
+        if (tok.type == IWTXT_TOKEN_EOF)
+            break;
+        if (tok.type == IWTXT_TOKEN_SYMBOL && tok.length == 1 && tok.text[0] == '}')
+            break;
+        if (tok.line != line)
+            break;
+        if (stopAtStageKeyword && tok.type == IWTXT_TOKEN_STRING)
+        {
+            char lower[32];
+            IW_CopyTokenLower(&tok, lower, sizeof(lower));
+            if (IW_IsStageKeyword(lower))
+                break;
+        }
+        if (!IWTXT_NextToken(parser, &tok))
+            break;
+        IW_AppendTokenText(&tok, buffer, size);
+    }
+}
+
+static void IW_SetStageMapPath(iwStage_t *stage, const iwtxtToken_t *token, iwMapType_t defaultType)
+{
+    if (!stage || !token)
+        return;
+
+    IW_CopyTokenText(token, stage->mapPath, sizeof(stage->mapPath));
+    for (size_t i = 0; stage->mapPath[i]; ++i)
+        if (stage->mapPath[i] == '\\')
+            stage->mapPath[i] = '/';
+
+    stage->animMap = 0;
+    stage->numAnimFrames = 0;
+    stage->animFps = 0.f;
+    stage->mapType = defaultType;
+    if (!q_strcasecmp(stage->mapPath, "$lightmap"))
+        stage->mapType = IW_MAP_LIGHTMAP;
+    else if (!q_strcasecmp(stage->mapPath, "$white"))
+        stage->mapType = IW_MAP_PROCEDURAL_WHITE;
+    else if (!q_strcasecmp(stage->mapPath, "$black"))
+        stage->mapType = IW_MAP_PROCEDURAL_BLACK;
+    stage->isClamp = (defaultType == IW_MAP_CLAMP2D);
+}
+
+static qboolean IW_ParseFogParmsValues(iwtxtParser_t *parser, iwFogParms_t *out, const char *filename, const iwtxtToken_t *token)
+{
+    if (!parser || !out)
+        return false;
+
+    iwFogParms_t result;
+    memset(&result, 0, sizeof(result));
+
+    iwtxtToken_t value;
+    if (IWTXT_PeekToken(parser, &value) && value.type == IWTXT_TOKEN_SYMBOL && value.length == 1 && value.text[0] == '(')
+        IWTXT_NextToken(parser, &value);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!IW_ReadFloat(parser, &result.color[i], &value))
+        {
+            if (token)
+                IW_LogWarning(filename, token->line, token->column, "fogparms requires color components");
+            else
+                IW_LogWarning(filename, value.line, value.column, "fogparms requires color components");
+            return false;
+        }
+    }
+    result.hasColor = 1;
+
+    if (IWTXT_PeekToken(parser, &value) && value.type == IWTXT_TOKEN_SYMBOL && value.length == 1 && value.text[0] == ')')
+        IWTXT_NextToken(parser, &value);
+
+    if (IWTXT_PeekToken(parser, &value) && value.type == IWTXT_TOKEN_NUMBER)
+    {
+        result.depthForOpaque = (float)value.number;
+        result.hasDepthForOpaque = 1;
+        IWTXT_NextToken(parser, &value);
+
+        if (IWTXT_PeekToken(parser, &value) && value.type == IWTXT_TOKEN_NUMBER)
+        {
+            result.density = (float)value.number;
+            result.hasDensity = 1;
+            IWTXT_NextToken(parser, &value);
+        }
+    }
+
+    *out = result;
+    return true;
+}
+
 static qboolean IW_IsStageKeyword(const char *keyword)
 {
     static const char *const stageKeywords[] = {
         "map", "blend", "mask", "rgbgen", "alphagen", "tcmod",
         "tcscale", "tcoffset", "tcalign", "depthwrite", "depthtest",
         "colormask", "emissive", "clamp", "animmap", "alpha2coverage",
+        "tcgen", "alphafunc", "depthfunc", "clampmap", "cubemap",
+        "glossmap", "normalmap", "specular", "if", "endif", "fogparms",
         NULL
     };
 
@@ -520,6 +630,7 @@ static void IW_SetStageDefaults(iwStage_t *stage)
 {
     memset(stage, 0, sizeof(*stage));
     q_strlcpy(stage->mapPath, "$white", sizeof(stage->mapPath));
+    stage->mapType = IW_MAP_PROCEDURAL_WHITE;
     stage->blendMode = IW_BLEND_NONE;
     stage->src = IW_SRC_ONE;
     stage->dst = IW_SRC_ZERO;
@@ -546,12 +657,21 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->colorMask = IW_COLORMASK_RGBA;
     stage->tcAlign = IW_TC_ALIGN_OBJECT;
     stage->tcAlignExplicit = 0;
+    stage->tcGen[0] = '\0';
+    stage->alphaFunc[0] = '\0';
+    stage->depthFunc[0] = '\0';
+    stage->stageCondition[0] = '\0';
+    stage->hasFogParms = 0;
     stage->alphaToCoverage = 0;
     stage->animMap = 0;
     stage->animFps = 0.f;
     stage->numAnimFrames = 0;
     stage->clamp = 0;
+    stage->isClamp = 0;
     stage->numTCMods = 0;
+    stage->normalMap[0] = '\0';
+    stage->glossMap[0] = '\0';
+    stage->specularScale = 1.f;
 }
 
 static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwtxtToken_t *firstToken, const char *filename)
@@ -695,13 +815,7 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                     return false;
                 continue;
             }
-            IW_CopyTokenText(&token, stage.mapPath, sizeof(stage.mapPath));
-            for (size_t i = 0; stage.mapPath[i]; ++i)
-                if (stage.mapPath[i] == '\\')
-                    stage.mapPath[i] = '/';
-            stage.animMap = 0;
-            stage.numAnimFrames = 0;
-            stage.animFps = 0.f;
+            IW_SetStageMapPath(&stage, &token, IW_MAP_TEXTURE2D);
         }
         else if (!strcmp(keyword, "blend"))
         {
@@ -1018,6 +1132,28 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             }
             stage.clamp = value ? 1 : 0;
         }
+        else if (!strcmp(keyword, "clampmap"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type == IWTXT_TOKEN_SYMBOL)
+            {
+                IW_LogWarning(filename, token.line, token.column, "clampmap requires a texture path");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_SetStageMapPath(&stage, &token, IW_MAP_CLAMP2D);
+        }
+        else if (!strcmp(keyword, "cubemap"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type == IWTXT_TOKEN_SYMBOL)
+            {
+                IW_LogWarning(filename, token.line, token.column, "cubemap requires a texture path");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_SetStageMapPath(&stage, &token, IW_MAP_CUBEMAP);
+        }
         else if (!strcmp(keyword, "depthwrite"))
         {
             int value;
@@ -1146,6 +1282,8 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
             else
             {
                 q_strlcpy(stage.mapPath, stage.animPaths[0], sizeof(stage.mapPath));
+                stage.mapType = IW_MAP_TEXTURE2D;
+                stage.isClamp = 0;
             }
         }
         else if (!strcmp(keyword, "alpha2coverage"))
@@ -1160,6 +1298,110 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 continue;
             }
             stage.alphaToCoverage = value ? 1 : 0;
+        }
+        else if (!strcmp(keyword, "tcgen"))
+        {
+            if (!IWTXT_NextToken(parser, &token))
+            {
+                IW_LogWarning(filename, token.line, token.column, "tcgen requires arguments");
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.tcGen[0] = '\0';
+            IW_CopyTokenText(&token, stage.tcGen, sizeof(stage.tcGen));
+            IW_CollectLineTokens(parser, token.line, stage.tcGen, sizeof(stage.tcGen), true);
+        }
+        else if (!strcmp(keyword, "alphafunc"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, token.line, token.column, "alphafunc requires a value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_CopyTokenLower(&token, stage.alphaFunc, sizeof(stage.alphaFunc));
+        }
+        else if (!strcmp(keyword, "depthfunc"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, token.line, token.column, "depthfunc requires a value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_CopyTokenLower(&token, stage.depthFunc, sizeof(stage.depthFunc));
+        }
+        else if (!strcmp(keyword, "normalmap"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type == IWTXT_TOKEN_SYMBOL)
+            {
+                IW_LogWarning(filename, token.line, token.column, "normalmap requires a texture path");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_CopyTokenText(&token, stage.normalMap, sizeof(stage.normalMap));
+            for (size_t i = 0; stage.normalMap[i]; ++i)
+                if (stage.normalMap[i] == '\\')
+                    stage.normalMap[i] = '/';
+        }
+        else if (!strcmp(keyword, "glossmap"))
+        {
+            if (!IWTXT_NextToken(parser, &token) || token.type == IWTXT_TOKEN_SYMBOL)
+            {
+                IW_LogWarning(filename, token.line, token.column, "glossmap requires a texture path");
+                if (strict)
+                    return false;
+                continue;
+            }
+            IW_CopyTokenText(&token, stage.glossMap, sizeof(stage.glossMap));
+            for (size_t i = 0; stage.glossMap[i]; ++i)
+                if (stage.glossMap[i] == '\\')
+                    stage.glossMap[i] = '/';
+        }
+        else if (!strcmp(keyword, "specular"))
+        {
+            float value;
+            iwtxtToken_t valueToken;
+            if (!IW_ReadFloat(parser, &value, &valueToken))
+            {
+                IW_LogWarning(filename, token.line, token.column, "specular requires a float value");
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.specularScale = value;
+        }
+        else if (!strcmp(keyword, "if"))
+        {
+            if (!IWTXT_NextToken(parser, &token))
+            {
+                IW_LogWarning(filename, token.line, token.column, "if requires a condition");
+                if (strict)
+                    return false;
+                continue;
+            }
+            stage.stageCondition[0] = '\0';
+            IW_CopyTokenText(&token, stage.stageCondition, sizeof(stage.stageCondition));
+            IW_CollectLineTokens(parser, token.line, stage.stageCondition, sizeof(stage.stageCondition), true);
+        }
+        else if (!strcmp(keyword, "endif"))
+        {
+            /* marker keyword - no action needed */
+        }
+        else if (!strcmp(keyword, "fogparms"))
+        {
+            if (!IW_ParseFogParmsValues(parser, &stage.fogParms, filename, &token))
+            {
+                if (strict)
+                    return false;
+                stage.hasFogParms = 0;
+                continue;
+            }
+            stage.hasFogParms = 1;
         }
         else
         {
@@ -1333,6 +1575,142 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
             material->strict = 0;
         }
         material->strict = material->strict ? 1 : 0;
+        return true;
+    }
+    else if (!strcmp(keyword, "fog"))
+    {
+        iwtxtToken_t value;
+        if (!IWTXT_NextToken(parser, &value))
+        {
+            IW_LogWarning(filename, token->line, token->column, "fog requires a shader name");
+            return false;
+        }
+        if (value.type != IWTXT_TOKEN_STRING)
+        {
+            IW_LogWarning(filename, value.line, value.column, "fog requires a shader name");
+            return false;
+        }
+        IW_CopyTokenText(&value, material->fogShader, sizeof(material->fogShader));
+        for (size_t i = 0; material->fogShader[i]; ++i)
+            if (material->fogShader[i] == '\\')
+                material->fogShader[i] = '/';
+        material->hasFog = 1;
+        return true;
+    }
+    else if (!strcmp(keyword, "fogparms"))
+    {
+        if (!IW_ParseFogParmsValues(parser, &material->fogParms, filename, token))
+            return false;
+        material->hasFogParms = 1;
+        return true;
+    }
+    else if (!strcmp(keyword, "deformvertexes"))
+    {
+        char directive[IW_MAX_DIRECTIVE_TEXT];
+        directive[0] = '\0';
+        IW_CopyTokenText(token, directive, sizeof(directive));
+        iwtxtToken_t value;
+        if (IWTXT_PeekToken(parser, &value) && value.line == token->line && !(value.type == IWTXT_TOKEN_SYMBOL && value.length == 1 && value.text[0] == '}'))
+        {
+            if (IWTXT_NextToken(parser, &value))
+            {
+                IW_AppendTokenText(&value, directive, sizeof(directive));
+                IW_CollectLineTokens(parser, value.line, directive, sizeof(directive), false);
+            }
+        }
+        if (material->numDeformVertexes >= IW_MAX_DEFORM_COMMANDS)
+        {
+            IW_ParseWarn(filename, token, "too many deformvertexes directives (limit %d)", IW_MAX_DEFORM_COMMANDS);
+            return true;
+        }
+        q_strlcpy(material->deformVertexes[material->numDeformVertexes++], directive, sizeof(material->deformVertexes[0]));
+        return true;
+    }
+    else if (!strncmp(keyword, "q3map", 5))
+    {
+        char directive[IW_MAX_DIRECTIVE_TEXT];
+        directive[0] = '\0';
+        IW_CopyTokenText(token, directive, sizeof(directive));
+        iwtxtToken_t value;
+        if (IWTXT_PeekToken(parser, &value) && value.line == token->line && !(value.type == IWTXT_TOKEN_SYMBOL && value.length == 1 && value.text[0] == '}'))
+        {
+            if (IWTXT_NextToken(parser, &value))
+            {
+                IW_AppendTokenText(&value, directive, sizeof(directive));
+                IW_CollectLineTokens(parser, value.line, directive, sizeof(directive), false);
+            }
+        }
+        if (material->numQ3MapDirectives >= IW_MAX_Q3MAP_DIRECTIVES)
+        {
+            IW_ParseWarn(filename, token, "too many q3map directives (limit %d)", IW_MAX_Q3MAP_DIRECTIVES);
+            return true;
+        }
+        q_strlcpy(material->q3mapDirectives[material->numQ3MapDirectives++], directive, sizeof(material->q3mapDirectives[0]));
+        return true;
+    }
+    else if (!strcmp(keyword, "tesssize"))
+    {
+        float value;
+        iwtxtToken_t valueToken;
+        if (!IW_ReadFloat(parser, &value, &valueToken))
+        {
+            IW_LogWarning(filename, token->line, token->column, "tesssize requires a float value");
+            return false;
+        }
+        material->tessSize = value;
+        material->hasTessSize = 1;
+        return true;
+    }
+    else if (!strcmp(keyword, "portal"))
+    {
+        material->portal = 1;
+        iwtxtToken_t value;
+        if (IWTXT_PeekToken(parser, &value) && value.line == token->line)
+        {
+            if (value.type == IWTXT_TOKEN_NUMBER)
+            {
+                IWTXT_NextToken(parser, &value);
+                material->portal = (value.number != 0.0);
+            }
+            else if (value.type == IWTXT_TOKEN_STRING)
+            {
+                char val[16];
+                IW_CopyTokenLower(&value, val, sizeof(val));
+                if (!strcmp(val, "on") || !strcmp(val, "1"))
+                {
+                    IWTXT_NextToken(parser, &value);
+                    material->portal = 1;
+                }
+                else if (!strcmp(val, "off") || !strcmp(val, "0"))
+                {
+                    IWTXT_NextToken(parser, &value);
+                    material->portal = 0;
+                }
+            }
+        }
+        return true;
+    }
+    else if (!strcmp(keyword, "skyparms"))
+    {
+        iwtxtToken_t value;
+        for (int i = 0; i < 3; ++i)
+        {
+            if (!IWTXT_NextToken(parser, &value))
+            {
+                IW_LogWarning(filename, token->line, token->column, "skyparms requires three strings");
+                return false;
+            }
+            if (value.type != IWTXT_TOKEN_STRING)
+            {
+                IW_LogWarning(filename, value.line, value.column, "skyparms requires three strings");
+                return false;
+            }
+            IW_CopyTokenText(&value, material->skyParms[i], sizeof(material->skyParms[i]));
+            for (size_t c = 0; material->skyParms[i][c]; ++c)
+                if (material->skyParms[i][c] == '\\')
+                    material->skyParms[i][c] = '/';
+        }
+        material->hasSkyParms = 1;
         return true;
     }
 
@@ -1892,6 +2270,27 @@ void IW_DumpMaterials(const char *outPath)
             fprintf(f, "    detail 1\n");
         if (mat->strict)
             fprintf(f, "    strict 1\n");
+        if (mat->hasFog)
+            fprintf(f, "    fog %s\n", mat->fogShader);
+        if (mat->hasFogParms && mat->fogParms.hasColor)
+        {
+            fprintf(f, "    fogparms ( %g %g %g )", mat->fogParms.color[0], mat->fogParms.color[1], mat->fogParms.color[2]);
+            if (mat->fogParms.hasDepthForOpaque)
+                fprintf(f, " %g", mat->fogParms.depthForOpaque);
+            if (mat->fogParms.hasDensity)
+                fprintf(f, " %g", mat->fogParms.density);
+            fprintf(f, "\n");
+        }
+        if (mat->hasTessSize)
+            fprintf(f, "    tesssize %g\n", mat->tessSize);
+        if (mat->portal)
+            fprintf(f, "    portal %d\n", mat->portal);
+        if (mat->hasSkyParms)
+            fprintf(f, "    skyparms %s %s %s\n", mat->skyParms[0], mat->skyParms[1], mat->skyParms[2]);
+        for (int q = 0; q < mat->numQ3MapDirectives; ++q)
+            fprintf(f, "    %s\n", mat->q3mapDirectives[q]);
+        for (int d = 0; d < mat->numDeformVertexes; ++d)
+            fprintf(f, "    %s\n", mat->deformVertexes[d]);
 
         const iwStage_t *baseStage = mat->numStages > 0 ? &mat->stages[0] : NULL;
         char materialBlendDesc[64];
@@ -1929,8 +2328,15 @@ void IW_DumpMaterials(const char *outPath)
             }
             else
             {
-                fprintf(f, "        map %s\n", stage->mapPath);
+                const char *mapKeyword = "map";
+                if (stage->mapType == IW_MAP_CLAMP2D && stage->isClamp)
+                    mapKeyword = "clampmap";
+                else if (stage->mapType == IW_MAP_CUBEMAP)
+                    mapKeyword = "cubeMap";
+                fprintf(f, "        %s %s\n", mapKeyword, stage->mapPath);
             }
+            if (stage->tcGen[0])
+                fprintf(f, "        tcgen %s\n", stage->tcGen);
             switch (stage->blendMode)
             {
             case IW_BLEND_ALPHA: fprintf(f, "        blend alpha\n"); break;
@@ -1951,6 +2357,8 @@ void IW_DumpMaterials(const char *outPath)
                 fprintf(f, "        depthwrite %d\n", stage->depthWrite ? 1 : 0);
             if (!stage->depthTest)
                 fprintf(f, "        depthtest off\n");
+            if (stage->depthFunc[0])
+                fprintf(f, "        depthfunc %s\n", stage->depthFunc);
             switch (stage->rgbgen)
             {
             case IW_RGB_VERTEX:
@@ -1995,10 +2403,29 @@ void IW_DumpMaterials(const char *outPath)
                 fprintf(f, "        emissive 1\n");
             if (stage->clamp)
                 fprintf(f, "        clamp 1\n");
+            if (stage->alphaFunc[0])
+                fprintf(f, "        alphafunc %s\n", stage->alphaFunc);
             if (stage->tcAlignExplicit || stage->tcAlign != IW_TC_ALIGN_OBJECT)
                 fprintf(f, "        tcalign %s\n", IW_TCAlignName(stage->tcAlign));
             if (stage->colorMask != IW_COLORMASK_RGBA)
                 fprintf(f, "        colormask %s\n", IW_ColorMaskName(stage->colorMask));
+            if (stage->normalMap[0])
+                fprintf(f, "        normalmap %s\n", stage->normalMap);
+            if (stage->glossMap[0])
+                fprintf(f, "        glossmap %s\n", stage->glossMap);
+            if (fabsf(stage->specularScale - 1.f) > 1e-6f)
+                fprintf(f, "        specular %g\n", stage->specularScale);
+            if (stage->hasFogParms && stage->fogParms.hasColor)
+            {
+                fprintf(f, "        fogparms ( %g %g %g )", stage->fogParms.color[0], stage->fogParms.color[1], stage->fogParms.color[2]);
+                if (stage->fogParms.hasDepthForOpaque)
+                    fprintf(f, " %g", stage->fogParms.depthForOpaque);
+                if (stage->fogParms.hasDensity)
+                    fprintf(f, " %g", stage->fogParms.density);
+                fprintf(f, "\n");
+            }
+            if (stage->stageCondition[0])
+                fprintf(f, "        // condition: %s\n", stage->stageCondition);
             if (stage->alphaToCoverage)
                 fprintf(f, "        alpha2coverage 1\n");
             char stageBlendDesc[64];
@@ -2105,6 +2532,47 @@ void IW_Debugf(const char *fmt, ...)
 
     Con_Printf("iwshader: %s\n", msg);
 }
+
+#ifdef IW_BUILD_TESTS
+qboolean IW_ParseShaderTextForTesting(const char *text, iwMaterial_t *outMaterial)
+{
+    if (!text || !outMaterial)
+        return false;
+
+    iwtxtParser_t parser;
+    IWTXT_Init(&parser, text, (int)strlen(text), "<memory>");
+
+    iwtxtToken_t token;
+    while (IWTXT_NextToken(&parser, &token))
+    {
+        if (token.type == IWTXT_TOKEN_EOF)
+            break;
+        if (token.type != IWTXT_TOKEN_STRING)
+            continue;
+
+        char keyword[32];
+        IW_CopyTokenLower(&token, keyword, sizeof(keyword));
+        if (!strcmp(keyword, "shader"))
+        {
+            iwtxtToken_t nameToken;
+            if (!IWTXT_NextToken(&parser, &nameToken) || nameToken.type != IWTXT_TOKEN_STRING)
+                return false;
+
+            IW_ResetState();
+            IW_ParseShaderDefinition(&parser, &nameToken, "<memory>");
+            if (iw_num_materials <= 0)
+                return false;
+
+            iwMaterial_t parsed = iw_materials[iw_num_materials - 1].material;
+            IW_ResetState();
+            *outMaterial = parsed;
+            return true;
+        }
+    }
+
+    return false;
+}
+#endif
 
 #define IW_MAX_MACROS 64
 #define IW_MACRO_NAME 64

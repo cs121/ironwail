@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.7)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Misc/cmake/ExtractVersion.cmake)
 project(ironwail VERSION ${IRONWAIL_VERSION})
 
+enable_testing()
+
 option(R_SHADOWMAPS "Enable shadow map stubs" ON)
 
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
@@ -169,11 +171,30 @@ if (PC_MIKMOD_FOUND OR PC_MODPLUG_FOUND OR PC_XMP_FOUND)
     target_compile_definitions(ironwail PRIVATE USE_CODEC_UMX)
 endif()
 
+add_executable(iwshader_parser_test
+    tests/iwshader_parser_test.c
+    tests/iwshader_test_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c)
+
+target_include_directories(iwshader_parser_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer)
+
+target_compile_definitions(iwshader_parser_test PRIVATE IW_BUILD_TESTS)
+
+if (UNIX)
+    target_link_libraries(iwshader_parser_test PRIVATE m)
+endif()
+
+add_test(NAME iwshader_parser_test COMMAND iwshader_parser_test)
+
 if (WIN32)
-	#Copy DLL dependencies to output folder
-	add_custom_command(TARGET ironwail POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail> $<TARGET_FILE_DIR:ironwail>
-		COMMAND_EXPAND_LISTS)
+        #Copy DLL dependencies to output folder
+        add_custom_command(TARGET ironwail POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail> $<TARGET_FILE_DIR:ironwail>
+                COMMAND_EXPAND_LISTS)
 
 	#VORBISFILE and OPUSFILE both use the libogg-0.dll
 	if (OGG_DLL AND (PC_VORBISFILE_FOUND OR PC_OPUSFILE_FOUND))
