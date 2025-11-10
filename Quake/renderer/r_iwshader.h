@@ -98,6 +98,13 @@ typedef enum {
 } iwTCOp_t;
 
 typedef enum {
+    IW_TCGEN_BASE = 0,
+    IW_TCGEN_LIGHTMAP,
+    IW_TCGEN_ENVIRONMENT,
+    IW_TCGEN_VECTOR
+} iwTCGenMode_t;
+
+typedef enum {
     IW_TC_ALIGN_OBJECT = 0,
     IW_TC_ALIGN_WORLD,
     IW_TC_ALIGN_SCREEN
@@ -193,9 +200,11 @@ typedef struct {
     int depthTest;
     int depthTestExplicit;
     iwColorMask_t colorMask;
+    iwTCGenMode_t tcGenMode;
     iwTCAlign_t tcAlign;
     int tcAlignExplicit;
     char tcGen[IW_MAX_TCGEN_TEXT];
+    float tcGenVectors[2][3];
     char alphaFunc[32];
     iwAlphaFunc_t alphaFuncMode;
     float alphaFuncRef;
@@ -268,6 +277,7 @@ const iwMaterial_t* IW_MaterialForTexture(const char* textureName);
 void IW_TexMatrixIdentity(iwTexMatrix_t* out);
 qboolean IW_StageTexMatrix(const iwStage_t* stage, float time, iwTexMatrix_t* out);
 qboolean IW_MaterialTexMatrix(const iwMaterial_t* material, float time, iwTexMatrix_t* out);
+float IW_GetAnimRate(void);
 
 void IW_DumpMaterials(const char* outPath);
 

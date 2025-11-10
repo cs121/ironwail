@@ -79,6 +79,13 @@ int main(void)
     assert(stage0->isClamp);
     assert(strcmp(stage0->mapPath, "textures/dp/diffuse.tga") == 0);
     assert(strcmp(stage0->tcGen, "vector ( 1 0 0 ) ( 0 1 0 )") == 0);
+    assert(stage0->tcGenMode == IW_TCGEN_VECTOR);
+    expect_float(stage0->tcGenVectors[0][0], 1.0f);
+    expect_float(stage0->tcGenVectors[0][1], 0.0f);
+    expect_float(stage0->tcGenVectors[0][2], 0.0f);
+    expect_float(stage0->tcGenVectors[1][0], 0.0f);
+    expect_float(stage0->tcGenVectors[1][1], 1.0f);
+    expect_float(stage0->tcGenVectors[1][2], 0.0f);
     assert(strcmp(stage0->depthFunc, "equal") == 0);
     assert(strcmp(stage0->alphaFunc, "gequal") == 0);
     assert(strcmp(stage0->normalMap, "textures/dp/normal.tga") == 0);

@@ -178,6 +178,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	float		tcmod_translate[4];
 	float		tcmod_params0[4];
 	float		tcmod_params1[4];
+	float		tcgen_params[4];
+	float		tcgen_s[4];
+	float		tcgen_t[4];
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
@@ -199,6 +202,9 @@ typedef struct bmodel_bound_gpu_call_s {
 	float		tcmod_translate[4];
 	float		tcmod_params0[4];
 	float		tcmod_params1[4];
+	float		tcgen_params[4];
+	float		tcgen_s[4];
+	float		tcgen_t[4];
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
@@ -921,6 +927,9 @@ static gltexture_t *R_IWShader_FindStageTexture(const texture_t *base, const iwS
         if (stage->animMap && stage->numAnimFrames > 0)
         {
                 float fps = stage->animFps != 0.f ? fabsf(stage->animFps) : 1.f;
+                fps *= IW_GetAnimRate();
+                if (fps <= 0.f)
+                        fps = 1.f;
                 int frame = (int)floor(time * fps);
                 frame %= stage->numAnimFrames;
                 if (frame < 0)
@@ -1021,6 +1030,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         iwCull_t        cull = IW_CULL_BACK;
         float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
         float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
+        float           tcgen_params[4] = { (float)IW_TCGEN_BASE, (float)IW_TC_ALIGN_OBJECT, 0.f, 0.f };
+        float           tcgen_s[4] = { 1.f, 0.f, 0.f, 0.f };
+        float           tcgen_t[4] = { 0.f, 1.f, 0.f, 0.f };
         unsigned int    tc_feature_flags = 0u;
         GLbyte           depthTestOverride = -1;
         GLbyte           depthWriteOverride = -1;
@@ -1097,6 +1109,14 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
+                        tcgen_params[0] = (float)base_stage->tcGenMode;
+                        tcgen_params[1] = (float)base_stage->tcAlign;
+                        tcgen_s[0] = base_stage->tcGenVectors[0][0];
+                        tcgen_s[1] = base_stage->tcGenVectors[0][1];
+                        tcgen_s[2] = base_stage->tcGenVectors[0][2];
+                        tcgen_t[0] = base_stage->tcGenVectors[1][0];
+                        tcgen_t[1] = base_stage->tcGenVectors[1][1];
+                        tcgen_t[2] = base_stage->tcGenVectors[1][2];
                         if (base_stage->depthTestExplicit)
                                 depthTestOverride = base_stage->depthTest ? 1 : 0;
                         if (base_stage->depthWrite != IW_DEPTHWRITE_AUTO)
@@ -1336,6 +1356,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[3] = 0.f;
                 memcpy (call->tcmod_params0, base_tcmod_params0, sizeof (base_tcmod_params0));
                 memcpy (call->tcmod_params1, base_tcmod_params1, sizeof (base_tcmod_params1));
+                memcpy (call->tcgen_params, tcgen_params, sizeof (tcgen_params));
+                memcpy (call->tcgen_s, tcgen_s, sizeof (tcgen_s));
+                memcpy (call->tcgen_t, tcgen_t, sizeof (tcgen_t));
                 memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
                 call->emissive_translate[0] = emissive_matrix.translate[0];
                 call->emissive_translate[1] = emissive_matrix.translate[1];
@@ -1368,6 +1391,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->tcmod_translate[3] = 0.f;
                 memcpy (call->tcmod_params0, base_tcmod_params0, sizeof (base_tcmod_params0));
                 memcpy (call->tcmod_params1, base_tcmod_params1, sizeof (base_tcmod_params1));
+                memcpy (call->tcgen_params, tcgen_params, sizeof (tcgen_params));
+                memcpy (call->tcgen_s, tcgen_s, sizeof (tcgen_s));
+                memcpy (call->tcgen_t, tcgen_t, sizeof (tcgen_t));
                 memcpy (call->emissive_matrix, emissive_matrix.matrix, sizeof (emissive_matrix.matrix));
                 call->emissive_translate[0] = emissive_matrix.translate[0];
                 call->emissive_translate[1] = emissive_matrix.translate[1];

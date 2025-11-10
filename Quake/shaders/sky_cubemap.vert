@@ -32,6 +32,9 @@ struct Call
         vec4    tcmod_translate;
         vec4    tcmod_params0;
         vec4    tcmod_params1;
+        vec4    tcgen_params;
+        vec4    tcgen_s;
+        vec4    tcgen_t;
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;

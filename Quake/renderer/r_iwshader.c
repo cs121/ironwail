@@ -68,6 +68,7 @@ static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *to
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
 static cvar_t r_iwshader_strict_cvar = { "r_iwshader_strict", "0", CVAR_NONE };
 static cvar_t r_iwshader_debug_cvar = { "r_iwshader_debug", "0", CVAR_NONE };
+static cvar_t r_iwshader_animrate_cvar = { "r_iwshader_animrate", "1", CVAR_NONE };
 static cvar_t iw_maxStages_cvar = { "iw_maxStages", "16", CVAR_NONE };
 static cvar_t iw_maxTcmodsPerStage_cvar = { "iw_maxTcmodsPerStage", "8", CVAR_NONE };
 static cvar_t iw_maxAnimFrames_cvar = { "iw_maxAnimFrames", "64", CVAR_NONE };
@@ -840,9 +841,16 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->depthTest = 1;
     stage->depthTestExplicit = 0;
     stage->colorMask = IW_COLORMASK_RGBA;
+    stage->tcGenMode = IW_TCGEN_BASE;
     stage->tcAlign = IW_TC_ALIGN_OBJECT;
     stage->tcAlignExplicit = 0;
     stage->tcGen[0] = '\0';
+    stage->tcGenVectors[0][0] = 1.f;
+    stage->tcGenVectors[0][1] = 0.f;
+    stage->tcGenVectors[0][2] = 0.f;
+    stage->tcGenVectors[1][0] = 0.f;
+    stage->tcGenVectors[1][1] = 1.f;
+    stage->tcGenVectors[1][2] = 0.f;
     stage->alphaFunc[0] = '\0';
     stage->alphaFuncMode = IW_ALPHA_FUNC_DISABLED;
     stage->alphaFuncRef = 0.f;
@@ -967,6 +975,57 @@ static qboolean IW_ParseTCMod(iwtxtParser_t *parser, iwStage_t *stage, const iwt
     if (store)
         stage->numTCMods++;
     return true;
+}
+
+static qboolean IW_ParseTCGenVector(iwtxtParser_t *parser, float out[3], const char *filename, const iwtxtToken_t *modeToken)
+{
+    if (!parser || !out)
+        return false;
+
+    iwtxtToken_t token;
+    if (!IWTXT_NextToken(parser, &token))
+    {
+        int line = modeToken ? modeToken->line : 0;
+        int column = modeToken ? modeToken->column : 0;
+        IW_LogWarning(filename, line, column, "tcgen vector requires three floats");
+        return false;
+    }
+
+    if (token.type == IWTXT_TOKEN_SYMBOL && token.length == 1 && token.text[0] == '(')
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            if (!IW_ReadFloat(parser, &out[i], &token))
+            {
+                IW_LogWarning(filename, token.line, token.column, "tcgen vector requires three floats");
+                return false;
+            }
+        }
+
+        if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_SYMBOL || token.length != 1 || token.text[0] != ')')
+        {
+            IW_LogWarning(filename, token.line, token.column, "tcgen vector requires ')'");
+            return false;
+        }
+        return true;
+    }
+
+    if (token.type == IWTXT_TOKEN_NUMBER)
+    {
+        out[0] = token.number;
+        for (int i = 1; i < 3; ++i)
+        {
+            if (!IW_ReadFloat(parser, &out[i], &token))
+            {
+                IW_LogWarning(filename, token.line, token.column, "tcgen vector requires three floats");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    IW_LogWarning(filename, token.line, token.column, "tcgen vector requires three floats");
+    return false;
 }
 
 static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, const iwtxtToken_t *stageToken, const char *filename, qboolean strict)
@@ -1497,16 +1556,61 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
         }
         else if (!strcmp(keyword, "tcgen"))
         {
-            if (!IWTXT_NextToken(parser, &token))
+            if (!IWTXT_NextToken(parser, &token) || token.type != IWTXT_TOKEN_STRING)
             {
-                IW_LogWarning(filename, token.line, token.column, "tcgen requires arguments");
+                IW_LogWarning(filename, token.line, token.column, "tcgen requires a mode");
                 if (strict)
                     return false;
                 continue;
             }
-            stage.tcGen[0] = '\0';
-            IW_CopyTokenText(&token, stage.tcGen, sizeof(stage.tcGen));
-            IW_CollectLineTokens(parser, token.line, stage.tcGen, sizeof(stage.tcGen), true);
+
+            char mode[32];
+            IW_CopyTokenLower(&token, mode, sizeof(mode));
+            if (!strcmp(mode, "base"))
+            {
+                stage.tcGenMode = IW_TCGEN_BASE;
+                q_strlcpy(stage.tcGen, "base", sizeof(stage.tcGen));
+            }
+            else if (!strcmp(mode, "lightmap"))
+            {
+                stage.tcGenMode = IW_TCGEN_LIGHTMAP;
+                q_strlcpy(stage.tcGen, "lightmap", sizeof(stage.tcGen));
+            }
+            else if (!strcmp(mode, "environment"))
+            {
+                stage.tcGenMode = IW_TCGEN_ENVIRONMENT;
+                q_strlcpy(stage.tcGen, "environment", sizeof(stage.tcGen));
+            }
+            else if (!strcmp(mode, "vector"))
+            {
+                float row0[3];
+                float row1[3];
+                if (!IW_ParseTCGenVector(parser, row0, filename, &token) ||
+                    !IW_ParseTCGenVector(parser, row1, filename, &token))
+                {
+                    stage.tcGenMode = IW_TCGEN_BASE;
+                    stage.tcGen[0] = '\0';
+                    if (strict)
+                        return false;
+                    continue;
+                }
+                stage.tcGenMode = IW_TCGEN_VECTOR;
+                stage.tcGenVectors[0][0] = row0[0];
+                stage.tcGenVectors[0][1] = row0[1];
+                stage.tcGenVectors[0][2] = row0[2];
+                stage.tcGenVectors[1][0] = row1[0];
+                stage.tcGenVectors[1][1] = row1[1];
+                stage.tcGenVectors[1][2] = row1[2];
+                q_snprintf(stage.tcGen, sizeof(stage.tcGen),
+                           "vector ( %g %g %g ) ( %g %g %g )",
+                           row0[0], row0[1], row0[2], row1[0], row1[1], row1[2]);
+            }
+            else
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown tcgen '%s'", mode);
+                if (strict)
+                    return false;
+            }
         }
         else if (!strcmp(keyword, "alphafunc"))
         {
@@ -2158,6 +2262,7 @@ void IW_ShaderSystem_Init(void)
     Cvar_RegisterVariable(&r_iwshader_cvar);
     Cvar_RegisterVariable(&r_iwshader_strict_cvar);
     Cvar_RegisterVariable(&r_iwshader_debug_cvar);
+    Cvar_RegisterVariable(&r_iwshader_animrate_cvar);
     Cvar_RegisterVariable(&iw_maxStages_cvar);
     Cvar_RegisterVariable(&iw_maxTcmodsPerStage_cvar);
     Cvar_RegisterVariable(&iw_maxAnimFrames_cvar);
@@ -2399,8 +2504,6 @@ static qboolean IW_StageTexMatrixInternal(const iwStage_t *stage, float time, iw
 
     if (stage->numTCMods <= 0)
         return false;
-    if (stage->tcAlign != IW_TC_ALIGN_OBJECT)
-        return false;
 
     float matrix[4] = { 1.f, 0.f, 0.f, 1.f };
     float translate[2] = { 0.f, 0.f };
@@ -2479,6 +2582,14 @@ qboolean IW_MaterialTexMatrix(const iwMaterial_t *material, float time, iwTexMat
     }
 
     return IW_StageTexMatrixInternal(&material->stages[0], time, out);
+}
+
+float IW_GetAnimRate(void)
+{
+    float rate = fabsf(r_iwshader_animrate_cvar.value);
+    if (rate <= 0.f)
+        rate = 1.f;
+    return rate;
 }
 
 void IW_DumpMaterials(const char *outPath)
