@@ -52,6 +52,7 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	envhandle;
 #else
 	int		baseinstance;
 	int		padding;
@@ -67,6 +68,9 @@ struct Call
         vec4    alpha_params0;
         vec4    alpha_params1;
         vec4    alpha_params2;
+        vec4    env_params0;
+        vec4    env_params1;
+        vec4    env_params2;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -141,8 +145,9 @@ layout(location=6) noperspective out vec2 out_coord;
 layout(location=7) flat out vec4 out_styles;
 layout(location=8) flat out float out_lmofs;
 #if BINDLESS
-	layout(location=9) flat out uvec4 out_samplers0;
+        layout(location=9) flat out uvec4 out_samplers0;
         layout(location=10) flat out uvec2 out_samplers1;
+        layout(location=20) flat out uvec2 out_samplers2;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
@@ -153,6 +158,9 @@ layout(location=16) flat out vec4 out_alpha_params0;
 layout(location=17) flat out vec4 out_alpha_params1;
 layout(location=18) flat out vec4 out_alpha_params2;
 layout(location=19) flat out vec4 out_fog_color;
+layout(location=21) flat out vec4 out_env_params0;
+layout(location=22) flat out vec4 out_env_params1;
+layout(location=23) flat out vec4 out_env_params2;
 
 float EvaluateWave(vec4 params, int func)
 {
@@ -265,17 +273,21 @@ void main()
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
 #if BINDLESS
-	out_samplers0.xy = call.txhandle;
-	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
-		out_samplers0.zw = call.fbhandle;
-	else
-		out_samplers0.zw = out_samplers0.xy;
-	out_samplers1.xy = call.emhandle;
+        out_samplers0.xy = call.txhandle;
+        if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
+                out_samplers0.zw = call.fbhandle;
+        else
+                out_samplers0.zw = out_samplers0.xy;
+        out_samplers1.xy = call.emhandle;
+        out_samplers2.xy = call.envhandle;
 #endif
         out_emissive_color = call.emissive_color.xyz;
         out_stage_params1 = call.tcmod_params1;
         out_alpha_params0 = call.alpha_params0;
         out_alpha_params1 = call.alpha_params1;
         out_alpha_params2 = call.alpha_params2;
+        out_env_params0 = call.env_params0;
+        out_env_params1 = call.env_params1;
+        out_env_params2 = call.env_params2;
         out_fog_color = call.fog_color;
 }
