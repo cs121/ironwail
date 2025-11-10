@@ -35,6 +35,9 @@ struct Call
         vec4    emissive_translate;
         vec4    emissive_color;
         vec4    fog_color;
+        vec4    alpha_params0;
+        vec4    alpha_params1;
+        vec4    alpha_params2;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,

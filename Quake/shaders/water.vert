@@ -35,6 +35,9 @@ struct Call
         vec4    emissive_translate;
         vec4    emissive_color;
         vec4    fog_color;
+        vec4    alpha_params0;
+        vec4    alpha_params1;
+        vec4    alpha_params2;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -109,7 +112,10 @@ layout(location=7) noperspective out vec4 out_prev_clip;
 layout(location=8) out vec2 out_emissive_uv;
 layout(location=9) flat out vec3 out_emissive_color;
 layout(location=10) flat out vec4 out_stage_params1;
-layout(location=11) flat out vec4 out_fog_color;
+layout(location=11) flat out vec4 out_alpha_params0;
+layout(location=12) flat out vec4 out_alpha_params1;
+layout(location=13) flat out vec4 out_alpha_params2;
+layout(location=14) flat out vec4 out_fog_color;
 
 float EvaluateWave(vec4 params, int func)
 {
@@ -199,6 +205,9 @@ void main()
 #endif
         out_emissive_color = call.emissive_color.xyz;
         out_stage_params1 = call.tcmod_params1;
+        out_alpha_params0 = call.alpha_params0;
+        out_alpha_params1 = call.alpha_params1;
+        out_alpha_params2 = call.alpha_params2;
         out_fog_color = call.fog_color;
 }
 

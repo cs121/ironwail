@@ -373,18 +373,199 @@ static qboolean IW_ReadInt(iwtxtParser_t *parser, int *out, iwtxtToken_t *token)
     return true;
 }
 
+static float IW_NormalizeAlphaRef(double value)
+{
+    float ref = (float)value;
+    if (ref > 1.f)
+        ref = ref / 255.f;
+    return q_clamp(ref, 0.f, 1.f);
+}
+
+static qboolean IW_ParseAlphaFuncDigits(const char *text, float *outRef)
+{
+    if (!text || !*text)
+        return false;
+
+    char *endptr = NULL;
+    double value = strtod(text, &endptr);
+    if (!endptr || endptr == text)
+        return false;
+
+    *outRef = IW_NormalizeAlphaRef(value);
+    return true;
+}
+
+static qboolean IW_ParseAlphaFuncToken(const char *text, iwAlphaFunc_t *func, float *ref, qboolean *needsValue)
+{
+    if (!text || !func || !ref || !needsValue)
+        return false;
+
+    *needsValue = false;
+
+    if (!q_strcasecmp(text, "always"))
+    {
+        *func = IW_ALPHA_FUNC_ALWAYS;
+        *ref = 0.f;
+        return true;
+    }
+    if (!q_strcasecmp(text, "never"))
+    {
+        *func = IW_ALPHA_FUNC_NEVER;
+        *ref = 0.f;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "gt", 2))
+    {
+        *func = IW_ALPHA_FUNC_GREATER;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "ge", 2))
+    {
+        *func = IW_ALPHA_FUNC_GEQUAL;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "lt", 2))
+    {
+        *func = IW_ALPHA_FUNC_LESS;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "le", 2))
+    {
+        *func = IW_ALPHA_FUNC_LEQUAL;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "eq", 2))
+    {
+        *func = IW_ALPHA_FUNC_EQUAL;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strncasecmp(text, "ne", 2))
+    {
+        *func = IW_ALPHA_FUNC_NOTEQUAL;
+        if (!IW_ParseAlphaFuncDigits(text + 2, ref))
+            *needsValue = true;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "greater"))
+    {
+        *func = IW_ALPHA_FUNC_GREATER;
+        *ref = 0.f;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "gequal"))
+    {
+        *func = IW_ALPHA_FUNC_GEQUAL;
+        *ref = 0.5f;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "less"))
+    {
+        *func = IW_ALPHA_FUNC_LESS;
+        *ref = 0.5f;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "lequal"))
+    {
+        *func = IW_ALPHA_FUNC_LEQUAL;
+        *ref = 0.5f;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "equal"))
+    {
+        *func = IW_ALPHA_FUNC_EQUAL;
+        *ref = 0.5f;
+        return true;
+    }
+
+    if (!q_strcasecmp(text, "notequal"))
+    {
+        *func = IW_ALPHA_FUNC_NOTEQUAL;
+        *ref = 0.5f;
+        return true;
+    }
+
+    return false;
+}
+
+static qboolean IW_ParseDepthFunc(const char *text, iwDepthFunc_t *out)
+{
+    if (!text || !out)
+        return false;
+
+    if (!q_strcasecmp(text, "never")) { *out = IW_DEPTHFUNC_NEVER; return true; }
+    if (!q_strcasecmp(text, "less")) { *out = IW_DEPTHFUNC_LESS; return true; }
+    if (!q_strcasecmp(text, "equal")) { *out = IW_DEPTHFUNC_EQUAL; return true; }
+    if (!q_strcasecmp(text, "lequal")) { *out = IW_DEPTHFUNC_LEQUAL; return true; }
+    if (!q_strcasecmp(text, "greater")) { *out = IW_DEPTHFUNC_GREATER; return true; }
+    if (!q_strcasecmp(text, "notequal")) { *out = IW_DEPTHFUNC_NOTEQUAL; return true; }
+    if (!q_strcasecmp(text, "gequal")) { *out = IW_DEPTHFUNC_GEQUAL; return true; }
+    if (!q_strcasecmp(text, "always")) { *out = IW_DEPTHFUNC_ALWAYS; return true; }
+
+    return false;
+}
+
+static void IW_NormalizeBlendToken(const char *text, char *out, size_t size)
+{
+    if (!text || !out || size == 0)
+        return;
+
+    size_t j = 0;
+    if ((text[0] == 'g' || text[0] == 'G') && (text[1] == 'l' || text[1] == 'L'))
+    {
+        if (text[2] == '_')
+            text += 3;
+        else
+            text += 2;
+    }
+
+    for (; *text && j + 1 < size; ++text)
+    {
+        if (*text == '_')
+            continue;
+        out[j++] = (char) q_tolower((unsigned char) *text);
+    }
+    out[j] = '\0';
+}
+
 static qboolean IW_ParseBlendFactor(const char *text, iwBlendFactor_t *out)
 {
-    if (!q_strcasecmp(text, "zero")) { *out = IW_SRC_ZERO; return true; }
-    if (!q_strcasecmp(text, "one")) { *out = IW_SRC_ONE; return true; }
-    if (!q_strcasecmp(text, "src_color")) { *out = IW_SRC_SRC_COLOR; return true; }
-    if (!q_strcasecmp(text, "one_minus_src_color")) { *out = IW_SRC_ONE_MINUS_SRC_COLOR; return true; }
-    if (!q_strcasecmp(text, "dst_color")) { *out = IW_SRC_DST_COLOR; return true; }
-    if (!q_strcasecmp(text, "one_minus_dst_color")) { *out = IW_SRC_ONE_MINUS_DST_COLOR; return true; }
-    if (!q_strcasecmp(text, "src_alpha")) { *out = IW_SRC_SRC_ALPHA; return true; }
-    if (!q_strcasecmp(text, "one_minus_src_alpha")) { *out = IW_SRC_ONE_MINUS_SRC_ALPHA; return true; }
-    if (!q_strcasecmp(text, "dst_alpha")) { *out = IW_SRC_DST_ALPHA; return true; }
-    if (!q_strcasecmp(text, "one_minus_dst_alpha")) { *out = IW_SRC_ONE_MINUS_DST_ALPHA; return true; }
+    if (!text || !out)
+        return false;
+
+    char normalized[32];
+    IW_NormalizeBlendToken(text, normalized, sizeof(normalized));
+
+    if (!strcmp(normalized, "zero")) { *out = IW_SRC_ZERO; return true; }
+    if (!strcmp(normalized, "one")) { *out = IW_SRC_ONE; return true; }
+    if (!strcmp(normalized, "srccolor")) { *out = IW_SRC_SRC_COLOR; return true; }
+    if (!strcmp(normalized, "oneminussrccolor")) { *out = IW_SRC_ONE_MINUS_SRC_COLOR; return true; }
+    if (!strcmp(normalized, "dstcolor")) { *out = IW_SRC_DST_COLOR; return true; }
+    if (!strcmp(normalized, "oneminusdstcolor")) { *out = IW_SRC_ONE_MINUS_DST_COLOR; return true; }
+    if (!strcmp(normalized, "srcalpha")) { *out = IW_SRC_SRC_ALPHA; return true; }
+    if (!strcmp(normalized, "oneminussrcalpha")) { *out = IW_SRC_ONE_MINUS_SRC_ALPHA; return true; }
+    if (!strcmp(normalized, "dstalpha")) { *out = IW_SRC_DST_ALPHA; return true; }
+    if (!strcmp(normalized, "oneminusdstalpha")) { *out = IW_SRC_ONE_MINUS_DST_ALPHA; return true; }
     return false;
 }
 
@@ -661,7 +842,12 @@ static void IW_SetStageDefaults(iwStage_t *stage)
     stage->tcAlignExplicit = 0;
     stage->tcGen[0] = '\0';
     stage->alphaFunc[0] = '\0';
+    stage->alphaFuncMode = IW_ALPHA_FUNC_DISABLED;
+    stage->alphaFuncRef = 0.f;
+    stage->alphaFuncExplicit = 0;
     stage->depthFunc[0] = '\0';
+    stage->depthFuncMode = IW_DEPTHFUNC_DEFAULT;
+    stage->depthFuncExplicit = 0;
     stage->stageCondition[0] = '\0';
     stage->hasFogParms = 0;
     stage->alphaToCoverage = 0;
@@ -845,6 +1031,12 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 stage.dst = IW_SRC_ONE;
             }
             else if (!strcmp(mode, "mul"))
+            {
+                stage.blendMode = IW_BLEND_MUL;
+                stage.src = IW_SRC_DST_COLOR;
+                stage.dst = IW_SRC_ZERO;
+            }
+            else if (!strcmp(mode, "filter"))
             {
                 stage.blendMode = IW_BLEND_MUL;
                 stage.src = IW_SRC_DST_COLOR;
@@ -1323,7 +1515,64 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                     return false;
                 continue;
             }
-            IW_CopyTokenLower(&token, stage.alphaFunc, sizeof(stage.alphaFunc));
+
+            char funcToken[32];
+            IW_CopyTokenLower(&token, funcToken, sizeof(funcToken));
+            q_strlcpy(stage.alphaFunc, funcToken, sizeof(stage.alphaFunc));
+
+            qboolean needsValue = false;
+            float ref = 0.f;
+            if (!IW_ParseAlphaFuncToken(funcToken, &stage.alphaFuncMode, &ref, &needsValue))
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown alphafunc '%s'", funcToken);
+                stage.alphaFuncMode = IW_ALPHA_FUNC_DISABLED;
+                stage.alphaFuncRef = 0.f;
+                stage.alphaFuncExplicit = 0;
+                stage.alphaFunc[0] = '\0';
+                if (strict)
+                    return false;
+                continue;
+            }
+
+            stage.alphaFuncRef = ref;
+            stage.alphaFuncExplicit = 1;
+
+            if (needsValue)
+            {
+                iwtxtToken_t valueToken;
+                if (!IWTXT_NextToken(parser, &valueToken) || valueToken.type != IWTXT_TOKEN_NUMBER)
+                {
+                    IW_LogWarning(filename, token.line, token.column, "alphafunc requires a numeric value");
+                    stage.alphaFuncMode = IW_ALPHA_FUNC_DISABLED;
+                    stage.alphaFuncRef = 0.f;
+                    stage.alphaFuncExplicit = 0;
+                    stage.alphaFunc[0] = '\0';
+                    if (strict)
+                        return false;
+                    continue;
+                }
+
+                stage.alphaFuncRef = IW_NormalizeAlphaRef(valueToken.number);
+                char valueText[32];
+                IW_CopyTokenText(&valueToken, valueText, sizeof(valueText));
+                q_strlcat(stage.alphaFunc, " ", sizeof(stage.alphaFunc));
+                q_strlcat(stage.alphaFunc, valueText, sizeof(stage.alphaFunc));
+            }
+            else
+            {
+                iwtxtToken_t peek;
+                if (IWTXT_PeekToken(parser, &peek) && peek.type == IWTXT_TOKEN_NUMBER)
+                {
+                    if (IWTXT_NextToken(parser, &peek))
+                    {
+                        stage.alphaFuncRef = IW_NormalizeAlphaRef(peek.number);
+                        char valueText[32];
+                        IW_CopyTokenText(&peek, valueText, sizeof(valueText));
+                        q_strlcat(stage.alphaFunc, " ", sizeof(stage.alphaFunc));
+                        q_strlcat(stage.alphaFunc, valueText, sizeof(stage.alphaFunc));
+                    }
+                }
+            }
         }
         else if (!strcmp(keyword, "depthfunc"))
         {
@@ -1335,6 +1584,15 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
                 continue;
             }
             IW_CopyTokenLower(&token, stage.depthFunc, sizeof(stage.depthFunc));
+            stage.depthFuncExplicit = 1;
+            if (!IW_ParseDepthFunc(stage.depthFunc, &stage.depthFuncMode))
+            {
+                IW_LogWarning(filename, token.line, token.column, "unknown depthfunc '%s'", stage.depthFunc);
+                stage.depthFuncMode = IW_DEPTHFUNC_DEFAULT;
+                stage.depthFuncExplicit = 0;
+                if (strict)
+                    return false;
+            }
         }
         else if (!strcmp(keyword, "normalmap"))
         {
