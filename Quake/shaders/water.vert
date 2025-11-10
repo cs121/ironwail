@@ -32,6 +32,9 @@ struct Call
         vec4    tcmod_translate;
         vec4    tcmod_params0;
         vec4    tcmod_params1;
+        vec4    tcgen_params;
+        vec4    tcgen_s;
+        vec4    tcgen_t;
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;
@@ -44,16 +47,25 @@ struct Call
 	vec4	env_params2;
 };
 const uint
-	CF_USE_POLYGON_OFFSET = 1u,
-	CF_USE_FULLBRIGHT = 2u,
-	CF_NOLIGHTMAP = 4u,
+        CF_USE_POLYGON_OFFSET = 1u,
+        CF_USE_FULLBRIGHT = 2u,
+        CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
 	CF_ALPHA_TEST = 16u,
 	CF_TC_STRETCH = 32u,
 	CF_TC_TURB = 64u,
 	CF_TC_ENVMAP = 128u,
-	CF_CUSTOM_FOG = 256u
+        CF_CUSTOM_FOG = 256u
 ;
+
+const int IW_TCGEN_BASE        = 0;
+const int IW_TCGEN_LIGHTMAP    = 1;
+const int IW_TCGEN_ENVIRONMENT = 2;
+const int IW_TCGEN_VECTOR      = 3;
+
+const int IW_TC_ALIGN_OBJECT = 0;
+const int IW_TC_ALIGN_WORLD  = 1;
+const int IW_TC_ALIGN_SCREEN = 2;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -175,9 +187,50 @@ void main()
         out_curr_clip = curr_clip;
         out_prev_clip = prev_clip;
         out_flags = call.flags;
+        int tcGenMode = int(call.tcgen_params.x + 0.5);
+        int tcAlignMode = int(call.tcgen_params.y + 0.5);
         vec2 base_uv = in_uv.xy;
+
+        if (tcGenMode == IW_TCGEN_LIGHTMAP)
+        {
+                base_uv = in_uv.zw;
+        }
+        else if (tcGenMode == IW_TCGEN_VECTOR)
+        {
+                base_uv = vec2(dot(call.tcgen_s.xyz, world_pos) + call.tcgen_s.w,
+                                dot(call.tcgen_t.xyz, world_pos) + call.tcgen_t.w);
+        }
+        else if (tcGenMode == IW_TCGEN_ENVIRONMENT)
+        {
+                vec3 normal = call.tcgen_s.xyz;
+                float len = length(normal);
+                if (len < 1e-4)
+                        normal = vec3(0.0, 0.0, 1.0);
+                else
+                        normal /= len;
+                vec3 view_dir = normalize(world_pos - EyePos);
+                vec3 reflect_dir = reflect(view_dir, normal);
+                float denom = 2.0 * sqrt(reflect_dir.x * reflect_dir.x + reflect_dir.y * reflect_dir.y + (reflect_dir.z + 1.0) * (reflect_dir.z + 1.0));
+                if (denom > 1e-5)
+                        base_uv = reflect_dir.xy / denom + 0.5;
+                else
+                        base_uv = reflect_dir.xy * 0.5 + 0.5;
+        }
+
+        if (tcAlignMode == IW_TC_ALIGN_WORLD && tcGenMode != IW_TCGEN_VECTOR)
+        {
+                base_uv = vec2(dot(call.tcgen_s.xyz, world_pos) + call.tcgen_s.w,
+                                dot(call.tcgen_t.xyz, world_pos) + call.tcgen_t.w);
+        }
+        else if (tcAlignMode == IW_TC_ALIGN_SCREEN)
+        {
+                float inv_w = abs(curr_clip.w) > 1e-6 ? 1.0 / curr_clip.w : 0.0;
+                vec2 ndc = curr_clip.xy * inv_w;
+                base_uv = ndc * 0.5 + 0.5;
+        }
+
         vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
-       dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
+        dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
         if ((call.flags & CF_TC_STRETCH) != 0u)
         {
                 int func = int(call.tcmod_params1.w + 0.5);
