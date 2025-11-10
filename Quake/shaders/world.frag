@@ -32,11 +32,11 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
 
 layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
 
-vec3 ApplyFog(vec3 clr, vec3 p)
+vec3 ApplyFog(vec3 clr, vec3 p, vec4 fogData)
 {
-    float fog = exp2(-Fog.w * dot(p, p));
+    float fog = exp2(-fogData.w * dot(p, p));
     fog = clamp(fog, 0.0, 1.0);
-    return mix(Fog.rgb, clr, fog);
+    return mix(fogData.rgb, clr, fog);
 }
 
 const uint
@@ -47,7 +47,8 @@ const uint
     CF_ALPHA_TEST = 16u,
     CF_TC_STRETCH = 32u,
     CF_TC_TURB = 64u,
-    CF_TC_ENVMAP = 128u
+    CF_TC_ENVMAP = 128u,
+    CF_CUSTOM_FOG = 256u
 ;
 
 // ALU-only 16x16 Bayer matrix
@@ -135,6 +136,7 @@ layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec2 in_emissive_uv;
 layout(location=14) flat in vec3 in_emissive_color;
 layout(location=15) flat in vec4 in_stage_params1;
+layout(location=16) flat in vec4 in_fog_color;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -540,7 +542,8 @@ void main()
     }
 
     result = clamp(result, 0.0, 1.0);
-    result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
+    vec4 fogData = ((in_flags & CF_CUSTOM_FOG) != 0u) ? in_fog_color : Fog;
+    result.rgb = ApplyFog(result.rgb, in_pos - EyePos, fogData);
 
     result.a = in_alpha;
 

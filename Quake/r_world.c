@@ -177,6 +177,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
+	float		fog_color[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -191,6 +192,7 @@ typedef struct bmodel_bound_gpu_call_s {
 	float		emissive_matrix[4];
 	float		emissive_translate[4];
 	float		emissive_color[4];
+	float		fog_color[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -504,6 +506,7 @@ static void R_PopDepthState(const r_depth_state_t *state)
 #define CALLFLAG_TC_STRETCH      (1u << 5)
 #define CALLFLAG_TC_TURB         (1u << 6)
 #define CALLFLAG_TC_ENVMAP       (1u << 7)
+#define CALLFLAG_CUSTOM_FOG      (1u << 8)
 
 static gltexture_t *R_IWShader_FindTextureForPath(const texture_t *base, const char *path)
 {
@@ -584,6 +587,58 @@ static void R_IWShader_EmissiveColor(const iwStage_t *stage, float color[3])
         }
 }
 
+static qboolean R_IWShader_FogFromParms(const iwFogParms_t *parms, float fog_color[4])
+{
+        if (!parms || !parms->hasColor)
+                return false;
+
+        float density = 0.f;
+        if (parms->hasDensity)
+        {
+                density = parms->density;
+        }
+        else if (parms->hasDepthForOpaque && parms->depthForOpaque > 0.f)
+        {
+                density = 1.f / parms->depthForOpaque;
+        }
+        else
+        {
+                return false;
+        }
+
+        density = fabsf(density);
+        fog_color[0] = q_clamp(parms->color[0], 0.f, 1.f);
+        fog_color[1] = q_clamp(parms->color[1], 0.f, 1.f);
+        fog_color[2] = q_clamp(parms->color[2], 0.f, 1.f);
+        fog_color[3] = density * density;
+        return fog_color[3] > 0.f;
+}
+
+static qboolean R_IWShader_GetFogColor(const iwMaterial_t *material, float fog_color[4], int depth)
+{
+        if (!material || depth > 4)
+                return false;
+
+        if (material->hasFogParms && R_IWShader_FogFromParms(&material->fogParms, fog_color))
+                return true;
+
+        for (int i = 0; i < material->numStages; ++i)
+        {
+                const iwStage_t *stage = &material->stages[i];
+                if (stage->hasFogParms && R_IWShader_FogFromParms(&stage->fogParms, fog_color))
+                        return true;
+        }
+
+        if (material->hasFog && material->fogShader[0])
+        {
+                const iwMaterial_t *fog_material = IW_FindMaterial(material->fogShader);
+                if (fog_material && fog_material != material)
+                        return R_IWShader_GetFogColor(fog_material, fog_color, depth + 1);
+        }
+
+        return false;
+}
+
 /*
 =============
 R_AddBModelCall
@@ -598,6 +653,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         iwTexMatrix_t   tex_matrix;
         iwTexMatrix_t   emissive_matrix;
         float           emissive_color[3];
+        float           fog_color[4] = { 0.f, 0.f, 0.f, 0.f };
+        qboolean        has_material_fog = false;
         const iwStage_t *emissive_stage = NULL;
         float           material_alpha = -1.f;
         iwCull_t        cull = IW_CULL_BACK;
@@ -633,6 +690,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         {
                 IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
                 cull = material->cull;
+                has_material_fog = R_IWShader_GetFogColor(material, fog_color, 0);
                 if (material->numStages > 0)
                 {
                         const iwStage_t *base_stage = &material->stages[0];
@@ -724,6 +782,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (t && t->type == TEXTYPE_CUTOUT)
                 flags |= CALLFLAG_ALPHA_TEST;
         flags |= tc_feature_flags;
+        if (has_material_fog)
+                flags |= CALLFLAG_CUSTOM_FOG;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
         if (material_alpha >= 0.f)
                 alpha = material_alpha;
@@ -752,6 +812,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->emissive_color[1] = emissive_color[1];
                 call->emissive_color[2] = emissive_color[2];
                 call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
+                memcpy (call->fog_color, fog_color, sizeof (fog_color));
         }
         else
         {
@@ -777,6 +838,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->emissive_color[1] = emissive_color[1];
                 call->emissive_color[2] = emissive_color[2];
                 call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
+                memcpy (call->fog_color, fog_color, sizeof (fog_color));
                 textures[0] = tx ? tx : greytexture;
                 textures[1] = fb ? fb : blacktexture;
                 textures[2] = em ? em : blacktexture;

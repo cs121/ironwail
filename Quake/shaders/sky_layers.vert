@@ -34,6 +34,7 @@ struct Call
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;
+        vec4    fog_color;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -42,7 +43,8 @@ const uint
 	CF_USE_EMISSIVE = 8u,
 	CF_TC_STRETCH = 32u,
 	CF_TC_TURB = 64u,
-	CF_TC_ENVMAP = 128u
+	CF_TC_ENVMAP = 128u,
+	CF_CUSTOM_FOG = 256u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
