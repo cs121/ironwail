@@ -4,6 +4,7 @@
         layout(binding=0) uniform sampler2D Tex;
         layout(binding=1) uniform sampler2D FullbrightTex;
         layout(binding=4) uniform sampler2D EmissiveTex;
+        layout(binding=5) uniform samplerCube EnvTex;
 #endif
 
 layout(binding=2) uniform sampler2D LMTex;
@@ -50,6 +51,25 @@ const uint
     CF_TC_ENVMAP = 128u,
     CF_CUSTOM_FOG = 256u
 ;
+
+const int IW_RGB_VERTEX   = 0;
+const int IW_RGB_CONST    = 1;
+const int IW_RGB_IDENTITY = 2;
+const int IW_RGB_ENTITY   = 3;
+const int IW_RGB_WAVE     = 4;
+
+const int IW_BLEND_NONE      = 0;
+const int IW_BLEND_ALPHA     = 1;
+const int IW_BLEND_ADD       = 2;
+const int IW_BLEND_MUL       = 3;
+const int IW_BLEND_PREMUL    = 4;
+const int IW_BLEND_ADD_ALPHA = 5;
+
+const int IW_WAVE_SIN      = 0;
+const int IW_WAVE_TRIANGLE = 1;
+const int IW_WAVE_SQUARE   = 2;
+const int IW_WAVE_SAW      = 3;
+const int IW_WAVE_FRESNEL  = 4;
 
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -214,6 +234,35 @@ bool AlphaTestPass(float alpha, int func, float ref)
     }
 }
 
+vec3 ApplyEnvBlend(vec3 baseColor, vec3 envColor, float amount, int blendMode)
+{
+    float alpha = clamp(amount, 0.0, 1.0);
+    vec3 blended = baseColor;
+
+    switch (blendMode)
+    {
+    case IW_BLEND_NONE:
+    case IW_BLEND_ALPHA:
+        blended = mix(baseColor, envColor, alpha);
+        break;
+    case IW_BLEND_ADD:
+        blended = clamp(baseColor + envColor * amount, 0.0, 1.0);
+        break;
+    case IW_BLEND_MUL:
+        blended = baseColor * mix(vec3(1.0), envColor, alpha);
+        break;
+    case IW_BLEND_PREMUL:
+    case IW_BLEND_ADD_ALPHA:
+        blended = clamp(baseColor + envColor * alpha, 0.0, 1.0);
+        break;
+    default:
+        blended = mix(baseColor, envColor, alpha);
+        break;
+    }
+
+    return blended;
+}
+
 layout(location=0) flat in uint in_flags;
 layout(location=1) flat in float in_alpha;
 layout(location=2) in vec3 in_pos;
@@ -230,6 +279,7 @@ layout(location=8) flat in float in_lmofs;
 #if BINDLESS
 layout(location=9) flat in uvec4 in_samplers0;
 layout(location=10) flat in uvec2 in_samplers1;
+layout(location=20) flat in uvec2 in_samplers2;
 #endif
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
@@ -240,6 +290,9 @@ layout(location=16) flat in vec4 in_alpha_params0;
 layout(location=17) flat in vec4 in_alpha_params1;
 layout(location=18) flat in vec4 in_alpha_params2;
 layout(location=19) flat in vec4 in_fog_color;
+layout(location=21) flat in vec4 in_env_params0;
+layout(location=22) flat in vec4 in_env_params1;
+layout(location=23) flat in vec4 in_env_params2;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -632,18 +685,53 @@ void main()
 
     if ((in_flags & CF_TC_ENVMAP) != 0u)
     {
-        vec3 view_dir = normalize(EyePos - in_pos);
-        vec3 normal = normalize(surface_normal);
-        vec3 reflect_dir = reflect(-view_dir, normal);
-        vec2 env_uv = reflect_dir.xy * 0.5 + 0.5;
-#if DITHER >= 2
-        vec3 env_color = texture(Tex, env_uv, -1.0).rgb;
-#elif DITHER
-        vec3 env_color = texture(Tex, env_uv, -0.5).rgb;
+#if BINDLESS
+        samplerCube EnvSampler = samplerCube(in_samplers2.xy);
 #else
-        vec3 env_color = texture(Tex, env_uv).rgb;
+        samplerCube EnvSampler = EnvTex;
 #endif
-        result.rgb = clamp(result.rgb + env_color, 0.0, 1.0);
+        vec3 normal = fastNorm(surface_normal);
+        vec3 reflect_dir = reflect(-view_dir, normal);
+        vec3 env_sample = texture(EnvSampler, reflect_dir).rgb;
+
+        vec3 env_tint = in_env_params0.rgb;
+        float env_amount = max(in_env_params0.w, 0.0);
+        int rgbGen = int(in_env_params2.y + 0.5);
+        int waveFunc = int(in_env_params2.x + 0.5);
+
+        if (rgbGen == IW_RGB_IDENTITY || rgbGen == IW_RGB_VERTEX || rgbGen == IW_RGB_ENTITY)
+        {
+            env_tint = vec3(1.0);
+        }
+        else if (rgbGen != IW_RGB_CONST && rgbGen != IW_RGB_WAVE)
+        {
+            env_tint = vec3(1.0);
+        }
+
+        if (rgbGen == IW_RGB_WAVE)
+        {
+            float wave_value;
+            if (waveFunc == IW_WAVE_FRESNEL)
+            {
+                float ndv = clamp(dot(normal, view_dir), 0.0, 1.0);
+                float inv_ndv = 1.0 - ndv;
+                float fresnel_power = in_env_params1.z;
+                if (fresnel_power <= 0.0)
+                    fresnel_power = 5.0;
+                float fresnel = pow(clamp(inv_ndv, 0.0, 1.0), fresnel_power);
+                wave_value = clamp(in_env_params1.x + in_env_params1.y * fresnel, 0.0, 1.0);
+            }
+            else
+            {
+                vec4 wave_params = vec4(in_env_params1.x, in_env_params1.y, in_env_params1.z, in_env_params1.w);
+                wave_value = clamp(EvaluateWave(wave_params, waveFunc), 0.0, 1.0);
+            }
+            env_amount *= wave_value;
+        }
+
+        vec3 env_color = env_sample * env_tint;
+        int blendMode = int(in_env_params2.z + 0.5);
+        result.rgb = ApplyEnvBlend(result.rgb, env_color, env_amount, blendMode);
     }
 
     result = clamp(result, 0.0, 1.0);

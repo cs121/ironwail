@@ -656,6 +656,7 @@ static qboolean IW_ParseWaveFunc(const char *text, iwWaveFunc_t *out)
     if (!q_strcasecmp(text, "triangle")) { *out = IW_WAVE_TRIANGLE; return true; }
     if (!q_strcasecmp(text, "square")) { *out = IW_WAVE_SQUARE; return true; }
     if (!q_strcasecmp(text, "saw")) { *out = IW_WAVE_SAW; return true; }
+    if (!q_strcasecmp(text, "fresnel")) { *out = IW_WAVE_FRESNEL; return true; }
     return false;
 }
 
@@ -667,6 +668,7 @@ static const char *IW_WaveFuncName(iwWaveFunc_t func)
     case IW_WAVE_TRIANGLE: return "triangle";
     case IW_WAVE_SQUARE: return "square";
     case IW_WAVE_SAW: return "saw";
+    case IW_WAVE_FRESNEL: return "fresnel";
     }
     return "sin";
 }
