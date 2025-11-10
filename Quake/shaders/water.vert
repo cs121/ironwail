@@ -34,6 +34,7 @@ struct Call
         vec4    emissive_matrix;
         vec4    emissive_translate;
         vec4    emissive_color;
+        vec4    fog_color;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -43,7 +44,8 @@ const uint
 	CF_ALPHA_TEST = 16u,
 	CF_TC_STRETCH = 32u,
 	CF_TC_TURB = 64u,
-	CF_TC_ENVMAP = 128u
+	CF_TC_ENVMAP = 128u,
+	CF_CUSTOM_FOG = 256u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
@@ -107,6 +109,7 @@ layout(location=7) noperspective out vec4 out_prev_clip;
 layout(location=8) out vec2 out_emissive_uv;
 layout(location=9) flat out vec3 out_emissive_color;
 layout(location=10) flat out vec4 out_stage_params1;
+layout(location=11) flat out vec4 out_fog_color;
 
 float EvaluateWave(vec4 params, int func)
 {
@@ -196,5 +199,6 @@ void main()
 #endif
         out_emissive_color = call.emissive_color.xyz;
         out_stage_params1 = call.tcmod_params1;
+        out_fog_color = call.fog_color;
 }
 
