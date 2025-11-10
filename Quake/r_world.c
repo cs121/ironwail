@@ -172,6 +172,8 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	fullbright;
 	GLuint64	emissive;
 	GLuint64	envmap;
+	GLuint		padding0;
+	GLuint		padding1;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
 	float		tcmod_params0[4];
