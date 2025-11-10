@@ -519,7 +519,7 @@ static void R_FlushBModelCalls (void)
 
                         if (currentColorMask != colorMask)
                         {
-                                glColorMaski(0,
+                                GL_ColorMaskiFunc(0,
                                              (colorMask & 1) ? GL_TRUE : GL_FALSE,
                                              (colorMask & 2) ? GL_TRUE : GL_FALSE,
                                              (colorMask & 4) ? GL_TRUE : GL_FALSE,
@@ -579,7 +579,7 @@ static void R_FlushBModelCalls (void)
 
                 if (currentColorMask != colorMask)
                 {
-                        glColorMaski(0,
+                        GL_ColorMaskiFunc(0,
                                      (colorMask & 1) ? GL_TRUE : GL_FALSE,
                                      (colorMask & 2) ? GL_TRUE : GL_FALSE,
                                      (colorMask & 4) ? GL_TRUE : GL_FALSE,
@@ -621,7 +621,7 @@ static void R_FlushBModelCalls (void)
 
         if (currentColorMask != initialMaskBits)
         {
-                glColorMaski(0,
+                GL_ColorMaskiFunc(0,
                              (initialMaskBits & 1) ? GL_TRUE : GL_FALSE,
                              (initialMaskBits & 2) ? GL_TRUE : GL_FALSE,
                              (initialMaskBits & 4) ? GL_TRUE : GL_FALSE,
@@ -632,7 +632,7 @@ static void R_FlushBModelCalls (void)
         if (currentBlendSrcRGB != initialBlendSrcRGB || currentBlendDstRGB != initialBlendDstRGB ||
             currentBlendSrcAlpha != initialBlendSrcAlpha || currentBlendDstAlpha != initialBlendDstAlpha)
         {
-                glBlendFuncSeparate(initialBlendSrcRGB, initialBlendDstRGB,
+                GL_BlendFuncSeparateFunc(initialBlendSrcRGB, initialBlendDstRGB,
                                      initialBlendSrcAlpha, initialBlendDstAlpha);
                 currentBlendSrcRGB = initialBlendSrcRGB;
                 currentBlendDstRGB = initialBlendDstRGB;

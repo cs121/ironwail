@@ -211,6 +211,8 @@ extern	const char	*gl_version;
 	x(void,			BlitFramebuffer, (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter))\
 	x(void,			DrawBuffers, (GLsizei n, const GLenum *bufs))\
 	x(void,			ClearBufferfv, (GLenum buffer, GLint drawbuffer, const GLfloat *value))\
+	x(void,			ColorMaski, (GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a))\
+	x(void,			BlendFuncSeparate, (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha))\
 	x(void,			BlendFunci, (GLuint buf, GLenum sfactor, GLenum dfactor))\
 	x(void,			DebugMessageCallback, (GLDEBUGPROC callback, const void *userParam))\
 	x(void,			ObjectLabel, (GLenum identifier, GLuint name, GLsizei length, const GLchar *label))\
