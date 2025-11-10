@@ -62,6 +62,8 @@ static size_t IW_WindowsUtf8CharCount(const char *text)
 #endif
 
 static char *IW_PreprocessShaderText(const char *input, int length, int *outLength);
+static qboolean IW_IsStageKeyword(const char *keyword);
+static qboolean IW_ReadFloat(iwtxtParser_t *parser, float *out, iwtxtToken_t *token);
 
 static cvar_t r_iwshader_cvar = { "r_iwshader", "1", CVAR_ARCHIVE };
 static cvar_t r_iwshader_strict_cvar = { "r_iwshader_strict", "0", CVAR_NONE };
