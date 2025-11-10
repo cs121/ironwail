@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_texmgr.h"
 #include "renderer/r_iwshader.h"
+#include "image.h"
 
 #include <math.h>
 
@@ -170,6 +171,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
+	GLuint64	envmap;
+	GLuint		padding0;
+	GLuint		padding1;
 	float		tcmod_matrix[4];
 	float		tcmod_translate[4];
 	float		tcmod_params0[4];
@@ -181,6 +185,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	float		alpha_params0[4];
 	float		alpha_params1[4];
 	float		alpha_params2[4];
+	float		env_params0[4];
+	float		env_params1[4];
+	float		env_params2[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -199,6 +206,9 @@ typedef struct bmodel_bound_gpu_call_s {
 	float		alpha_params0[4];
 	float		alpha_params1[4];
 	float		alpha_params2[4];
+	float		env_params0[4];
+	float		env_params1[4];
+	float		env_params2[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -213,7 +223,7 @@ static union {
 	} bindless;
 	struct {
 		bmodel_bound_gpu_call_t		params[MAX_BMODEL_DRAWS];
-		gltexture_t					*textures[MAX_BMODEL_DRAWS][3];
+		gltexture_t					*textures[MAX_BMODEL_DRAWS][4];
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
@@ -609,6 +619,7 @@ static void R_FlushBModelCalls (void)
                 GL_Uniform1iFunc (0, i);
                 GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
                 GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
+                GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][3]);
 			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
 
@@ -731,6 +742,130 @@ static void R_PopDepthState(const r_depth_state_t *state)
 #define CALLFLAG_TC_ENVMAP       (1u << 7)
 #define CALLFLAG_CUSTOM_FOG      (1u << 8)
 
+typedef struct
+{
+        const char      *suffix[6];
+        int             remap[6];
+        qboolean        insert_underscore;
+} iw_cubemap_pattern_t;
+
+static gltexture_t *R_IWShader_LoadCubeMapTexture(const texture_t *base, const char *path)
+{
+        static const iw_cubemap_pattern_t patterns[] = {
+                {{"px", "nx", "py", "ny", "pz", "nz"}, {0, 1, 2, 3, 4, 5}, true},
+                {{"posx", "negx", "posy", "negy", "posz", "negz"}, {0, 1, 2, 3, 4, 5}, true},
+                {{"right", "left", "front", "back", "up", "down"}, {0, 1, 2, 3, 4, 5}, true},
+                {{"rt", "bk", "lf", "ft", "up", "dn"}, {3, 1, 4, 5, 0, 2}, true},
+                {{"_px", "_nx", "_py", "_ny", "_pz", "_nz"}, {0, 1, 2, 3, 4, 5}, false}
+        };
+
+        if (!path || !*path)
+                return NULL;
+
+        qmodel_t *owner = (base && base->gltexture) ? base->gltexture->owner : NULL;
+        gltexture_t *existing = TexMgr_FindTexture(owner, path);
+        if (!existing)
+                existing = TexMgr_FindTexture(NULL, path);
+        if (existing)
+                return existing;
+
+        char base_name[MAX_QPATH];
+        q_strlcpy(base_name, path, sizeof(base_name));
+        char *slash = strrchr(base_name, '/');
+        char *dot = strrchr(base_name, '.');
+        if (dot && (!slash || dot > slash))
+                *dot = '\0';
+
+        for (size_t pattern_index = 0; pattern_index < Q_COUNTOF(patterns); ++pattern_index)
+        {
+                const iw_cubemap_pattern_t *pattern = &patterns[pattern_index];
+                int attempt_mark = Hunk_LowMark();
+                byte *faces[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
+                int face_width = 0;
+                int face_height = 0;
+                qboolean success = true;
+
+                for (int i = 0; i < 6; ++i)
+                {
+                        char face_path[MAX_QPATH];
+                        const char *suffix = pattern->suffix[i];
+                        if (!suffix)
+                        {
+                                success = false;
+                                break;
+                        }
+
+                        if (pattern->insert_underscore)
+                        {
+                                size_t len = strlen(base_name);
+                                const char *connector = "_";
+                                if (len > 0)
+                                {
+                                        char last = base_name[len - 1];
+                                        if (last == '_' || last == '-' || last == '/')
+                                                connector = "";
+                                }
+                                q_snprintf(face_path, sizeof(face_path), "%s%s%s", base_name, connector, suffix);
+                        }
+                        else
+                        {
+                                q_snprintf(face_path, sizeof(face_path), "%s%s", base_name, suffix);
+                        }
+
+                        enum srcformat fmt;
+                        int width = 0;
+                        int height = 0;
+                        byte *data = Image_LoadImage(face_path, &width, &height, &fmt);
+                        if (!data || fmt != SRC_RGBA || width <= 0 || height <= 0 || width != height)
+                        {
+                                success = false;
+                                break;
+                        }
+                        if (i == 0)
+                        {
+                                face_width = width;
+                                face_height = height;
+                        }
+                        else if (width != face_width || height != face_height)
+                        {
+                                success = false;
+                                break;
+                        }
+                        faces[i] = data;
+                }
+
+                if (success)
+                {
+                        byte **ordered = (byte **)Hunk_AllocNoFill(sizeof(byte *) * 6);
+                        for (int i = 0; i < 6; ++i)
+                        {
+                                int src = pattern->remap[i];
+                                if (src < 0 || src >= 6 || !faces[src])
+                                {
+                                        success = false;
+                                        break;
+                                }
+                                ordered[i] = faces[src];
+                        }
+
+                        if (success)
+                        {
+                                unsigned flags = TEXPREF_CUBEMAP | TEXPREF_NOPICMIP | TEXPREF_MIPMAP | TEXPREF_ALPHA;
+                                if (gl_bindless_able)
+                                        flags |= TEXPREF_BINDLESS;
+                                gltexture_t *cubemap = TexMgr_LoadImageEx(owner, path, face_width, face_height, 1,
+                                                                           SRC_RGBA, (byte *)ordered, "", 0, flags);
+                                Hunk_FreeToLowMark(attempt_mark);
+                                return cubemap;
+                        }
+                }
+
+                Hunk_FreeToLowMark(attempt_mark);
+        }
+
+        return NULL;
+}
+
 static gltexture_t *R_IWShader_FindTextureForPath(const texture_t *base, const char *path)
 {
         gltexture_t *tex = NULL;
@@ -793,6 +928,9 @@ static gltexture_t *R_IWShader_FindStageTexture(const texture_t *base, const iwS
                 if (frame >= 0 && frame < stage->numAnimFrames)
                         path = stage->animPaths[frame];
         }
+
+        if (stage->mapType == IW_MAP_CUBEMAP)
+                return R_IWShader_LoadCubeMapTexture(base, path);
 
         return R_IWShader_FindTextureForPath(base, path);
 }
@@ -871,7 +1009,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 {
         GLuint          flags;
         float           alpha;
-        gltexture_t     *tx, *fb, *em;
+        gltexture_t     *tx, *fb, *em, *env;
         const iwMaterial_t *material = NULL;
         iwTexMatrix_t   tex_matrix;
         iwTexMatrix_t   emissive_matrix;
@@ -879,6 +1017,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           fog_color[4] = { 0.f, 0.f, 0.f, 0.f };
         qboolean        has_material_fog = false;
         const iwStage_t *emissive_stage = NULL;
+        const iwStage_t *env_stage = NULL;
         iwCull_t        cull = IW_CULL_BACK;
         float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
         float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
@@ -896,10 +1035,14 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         qboolean        stageAlphaTest = false;
         iwAlphaFunc_t   stageAlphaFuncMode = IW_ALPHA_FUNC_DISABLED;
         float           stageAlphaFuncRef = 0.f;
+        float           env_params0[4] = { 1.f, 1.f, 1.f, 0.f };
+        float           env_params1[4] = { 1.f, 0.f, 0.f, 1.f };
+        float           env_params2[4] = { (float)IW_WAVE_SIN, (float)IW_RGB_IDENTITY, (float)IW_BLEND_NONE, 0.f };
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
         R_IWShader_EmissiveColor (NULL, emissive_color);
+        env = NULL;
 
         if (t && t->gltexture)
         {
@@ -921,6 +1064,33 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
         if (material)
         {
+                if (material->numStages > 0)
+                {
+                        for (int s = 0; s < material->numStages; ++s)
+                        {
+                                const iwStage_t *stage = &material->stages[s];
+                                qboolean wantsEnv = (stage->mapType == IW_MAP_CUBEMAP);
+                                if (!wantsEnv && stage->tcGen[0] && q_strcasestr(stage->tcGen, "environment"))
+                                        wantsEnv = true;
+                                if (!wantsEnv)
+                                {
+                                        for (int tc = 0; tc < stage->numTCMods; ++tc)
+                                        {
+                                                if (stage->tcmods[tc].op == IW_TC_ENVMAP)
+                                                {
+                                                        wantsEnv = true;
+                                                        break;
+                                                }
+                                        }
+                                }
+                                if (wantsEnv)
+                                {
+                                        env_stage = stage;
+                                        break;
+                                }
+                        }
+                }
+
                 IW_MaterialTexMatrix (material, r_framedata.time, &tex_matrix);
                 cull = material->cull;
                 has_material_fog = R_IWShader_GetFogColor(material, fog_color, 0);
@@ -1057,6 +1227,34 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                                         break;
                                 }
                         }
+
+                        if (env_stage)
+                        {
+                                gltexture_t *candidate = R_IWShader_FindStageTexture(t, env_stage, r_framedata.time);
+                                if (candidate && candidate->target == GL_TEXTURE_CUBE_MAP)
+                                {
+                                        env = candidate;
+                                        env_params0[0] = env_stage->rgbConst[0];
+                                        env_params0[1] = env_stage->rgbConst[1];
+                                        env_params0[2] = env_stage->rgbConst[2];
+                                        env_params0[3] = q_max(env_stage->specularScale, 0.f);
+                                        env_params1[0] = env_stage->rgbWave.base;
+                                        env_params1[1] = env_stage->rgbWave.amplitude;
+                                        env_params1[2] = env_stage->rgbWave.phase;
+                                        env_params1[3] = env_stage->rgbWave.frequency;
+                                        env_params2[0] = (float)env_stage->rgbWave.func;
+                                        env_params2[1] = (float)env_stage->rgbgen;
+                                        env_params2[2] = (float)env_stage->blendMode;
+                                        tc_feature_flags |= CALLFLAG_TC_ENVMAP;
+                                }
+                                else
+                                {
+                                        env_stage = NULL;
+                                }
+                        }
+
+                        if (!env_stage)
+                                tc_feature_flags &= ~CALLFLAG_TC_ENVMAP;
                 }
 
                 for (int s = 0; s < material->numStages; ++s)
@@ -1130,6 +1328,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
                 call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
                 call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+                call->envmap = env ? env->bindless_handle : 0;
                 memcpy (call->tcmod_matrix, tex_matrix.matrix, sizeof (tex_matrix.matrix));
                 call->tcmod_translate[0] = tex_matrix.translate[0];
                 call->tcmod_translate[1] = tex_matrix.translate[1];
@@ -1150,6 +1349,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 memcpy (call->alpha_params0, alpha_params0, sizeof (alpha_params0));
                 memcpy (call->alpha_params1, alpha_params1, sizeof (alpha_params1));
                 memcpy (call->alpha_params2, alpha_params2, sizeof (alpha_params2));
+                memcpy (call->env_params0, env_params0, sizeof (env_params0));
+                memcpy (call->env_params1, env_params1, sizeof (env_params1));
+                memcpy (call->env_params2, env_params2, sizeof (env_params2));
         }
         else
         {
@@ -1179,9 +1381,13 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 memcpy (call->alpha_params0, alpha_params0, sizeof (alpha_params0));
                 memcpy (call->alpha_params1, alpha_params1, sizeof (alpha_params1));
                 memcpy (call->alpha_params2, alpha_params2, sizeof (alpha_params2));
+                memcpy (call->env_params0, env_params0, sizeof (env_params0));
+                memcpy (call->env_params1, env_params1, sizeof (env_params1));
+                memcpy (call->env_params2, env_params2, sizeof (env_params2));
                 textures[0] = tx ? tx : greytexture;
                 textures[1] = fb ? fb : blacktexture;
                 textures[2] = em ? em : blacktexture;
+                textures[3] = env ? env : blacktexture;
         }
 
         SDL_assert (num_instances > 0);

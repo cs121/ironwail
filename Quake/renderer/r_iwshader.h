@@ -125,7 +125,8 @@ typedef enum {
     IW_WAVE_SIN = 0,
     IW_WAVE_TRIANGLE,
     IW_WAVE_SQUARE,
-    IW_WAVE_SAW
+    IW_WAVE_SAW,
+    IW_WAVE_FRESNEL
 } iwWaveFunc_t;
 
 typedef struct {

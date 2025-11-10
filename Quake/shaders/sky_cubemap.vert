@@ -23,6 +23,7 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	envhandle;
 #else
 	int		baseinstance;
 	int		padding;
@@ -38,6 +39,9 @@ struct Call
         vec4    alpha_params0;
         vec4    alpha_params1;
         vec4    alpha_params2;
+	vec4	env_params0;
+	vec4	env_params1;
+	vec4	env_params2;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
