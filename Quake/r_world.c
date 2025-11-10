@@ -178,6 +178,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	float		emissive_translate[4];
 	float		emissive_color[4];
 	float		fog_color[4];
+	float		alpha_params0[4];
+	float		alpha_params1[4];
+	float		alpha_params2[4];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -193,6 +196,9 @@ typedef struct bmodel_bound_gpu_call_s {
 	float		emissive_translate[4];
 	float		emissive_color[4];
 	float		fog_color[4];
+	float		alpha_params0[4];
+	float		alpha_params1[4];
+	float		alpha_params2[4];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -214,8 +220,66 @@ static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static iwCull_t				bmodel_call_cull[MAX_BMODEL_DRAWS];
 static GLbyte                           bmodel_call_depth_test[MAX_BMODEL_DRAWS];
 static GLbyte                           bmodel_call_depth_write[MAX_BMODEL_DRAWS];
+static GLbyte                           bmodel_call_depth_func_override[MAX_BMODEL_DRAWS];
+static GLint                            bmodel_call_depth_func[MAX_BMODEL_DRAWS];
+static GLboolean                        bmodel_call_blend_enable[MAX_BMODEL_DRAWS];
+static GLenum                           bmodel_call_blend_src[MAX_BMODEL_DRAWS];
+static GLenum                           bmodel_call_blend_dst[MAX_BMODEL_DRAWS];
+static GLubyte                           bmodel_call_color_mask[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+
+static GLboolean                        bmodel_initial_blend_enabled;
+static GLint                            bmodel_initial_blend_src_rgb;
+static GLint                            bmodel_initial_blend_dst_rgb;
+static GLint                            bmodel_initial_blend_src_alpha;
+static GLint                            bmodel_initial_blend_dst_alpha;
+static GLubyte                          bmodel_initial_color_mask_bits;
+
+static GLenum IW_BlendFactorToGL(iwBlendFactor_t factor)
+{
+        switch (factor)
+        {
+        case IW_SRC_ZERO: return GL_ZERO;
+        case IW_SRC_ONE: return GL_ONE;
+        case IW_SRC_SRC_COLOR: return GL_SRC_COLOR;
+        case IW_SRC_ONE_MINUS_SRC_COLOR: return GL_ONE_MINUS_SRC_COLOR;
+        case IW_SRC_DST_COLOR: return GL_DST_COLOR;
+        case IW_SRC_ONE_MINUS_DST_COLOR: return GL_ONE_MINUS_DST_COLOR;
+        case IW_SRC_SRC_ALPHA: return GL_SRC_ALPHA;
+        case IW_SRC_ONE_MINUS_SRC_ALPHA: return GL_ONE_MINUS_SRC_ALPHA;
+        case IW_SRC_DST_ALPHA: return GL_DST_ALPHA;
+        case IW_SRC_ONE_MINUS_DST_ALPHA: return GL_ONE_MINUS_DST_ALPHA;
+        default: return GL_ONE;
+        }
+}
+
+static GLenum IW_DepthFuncToGL(iwDepthFunc_t func)
+{
+        switch (func)
+        {
+        case IW_DEPTHFUNC_NEVER: return GL_NEVER;
+        case IW_DEPTHFUNC_LESS: return GL_LESS;
+        case IW_DEPTHFUNC_EQUAL: return GL_EQUAL;
+        case IW_DEPTHFUNC_LEQUAL: return GL_LEQUAL;
+        case IW_DEPTHFUNC_GREATER: return GL_GREATER;
+        case IW_DEPTHFUNC_NOTEQUAL: return GL_NOTEQUAL;
+        case IW_DEPTHFUNC_GEQUAL: return GL_GEQUAL;
+        case IW_DEPTHFUNC_ALWAYS: return GL_ALWAYS;
+        case IW_DEPTHFUNC_DEFAULT: return GL_LEQUAL;
+        default: return GL_LEQUAL;
+        }
+}
+
+static GLubyte IW_ColorMaskBits(iwColorMask_t mask)
+{
+        GLubyte bits = 0;
+        if (mask & IW_COLORMASK_R) bits |= 1;
+        if (mask & IW_COLORMASK_G) bits |= 2;
+        if (mask & IW_COLORMASK_B) bits |= 4;
+        if (mask & IW_COLORMASK_A) bits |= 8;
+        return bits;
+}
 
 typedef struct
 {
@@ -227,10 +291,11 @@ typedef struct
 {
         GLboolean       testEnabled;
         GLboolean       writeMask;
+        GLint           func;
 } r_depth_state_t;
 
 static void R_PushDepthState(r_depth_state_t *state);
-static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state);
+static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, GLint depthFuncOverride, r_depth_state_t *state);
 static void R_PopDepthState(const r_depth_state_t *state);
 
 static void R_PushCullState(r_cull_state_t *state)
@@ -352,8 +417,26 @@ R_ResetBModelCalls
 */
 static void R_ResetBModelCalls (GLuint program)
 {
-	bmodel_batch_program = program;
-	num_bmodel_calls = 0;
+        bmodel_batch_program = program;
+
+        bmodel_initial_blend_enabled = glIsEnabled(GL_BLEND);
+        bmodel_initial_blend_src_rgb = GL_ONE;
+        bmodel_initial_blend_dst_rgb = GL_ZERO;
+        bmodel_initial_blend_src_alpha = GL_ONE;
+        bmodel_initial_blend_dst_alpha = GL_ZERO;
+        glGetIntegerv(GL_BLEND_SRC_RGB, &bmodel_initial_blend_src_rgb);
+        glGetIntegerv(GL_BLEND_DST_RGB, &bmodel_initial_blend_dst_rgb);
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &bmodel_initial_blend_src_alpha);
+        glGetIntegerv(GL_BLEND_DST_ALPHA, &bmodel_initial_blend_dst_alpha);
+
+        GLboolean maskValues[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+        glGetBooleanv(GL_COLOR_WRITEMASK, maskValues);
+        bmodel_initial_color_mask_bits = (maskValues[0] ? 1 : 0) |
+                                         (maskValues[1] ? 2 : 0) |
+                                         (maskValues[2] ? 4 : 0) |
+                                         (maskValues[3] ? 8 : 0);
+
+        num_bmodel_calls = 0;
 }
 
 /*
@@ -367,8 +450,21 @@ static void R_FlushBModelCalls (void)
 	GLbyte	*ofs;
 	size_t	dstcmdofs;
 
-	if (!num_bmodel_calls)
-		return;
+        if (!num_bmodel_calls)
+                return;
+
+        GLboolean initialBlendEnabled = bmodel_initial_blend_enabled;
+        GLint initialBlendSrcRGB = bmodel_initial_blend_src_rgb;
+        GLint initialBlendDstRGB = bmodel_initial_blend_dst_rgb;
+        GLint initialBlendSrcAlpha = bmodel_initial_blend_src_alpha;
+        GLint initialBlendDstAlpha = bmodel_initial_blend_dst_alpha;
+        GLboolean currentBlendEnabled = initialBlendEnabled;
+        GLint currentBlendSrcRGB = initialBlendSrcRGB;
+        GLint currentBlendDstRGB = initialBlendDstRGB;
+        GLint currentBlendSrcAlpha = initialBlendSrcAlpha;
+        GLint currentBlendDstAlpha = initialBlendDstAlpha;
+        GLubyte initialMaskBits = bmodel_initial_color_mask_bits;
+        GLubyte currentColorMask = initialMaskBits;
 
 	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
 
@@ -396,20 +492,59 @@ static void R_FlushBModelCalls (void)
 		const GLsizei stride = sizeof (bmodel_draw_indirect_t);
 		for (int i = 0; i < num_bmodel_calls; )
 		{
-			iwCull_t cull = bmodel_call_cull[i];
+                iwCull_t cull = bmodel_call_cull[i];
                         GLbyte depthTest = bmodel_call_depth_test[i];
                         GLbyte depthWrite = bmodel_call_depth_write[i];
-			int count = 1;
+                GLint depthFunc = bmodel_call_depth_func_override[i] ? (GLint)bmodel_call_depth_func[i] : -1;
+                GLboolean blendEnable = bmodel_call_blend_enable[i];
+                GLenum blendSrc = bmodel_call_blend_src[i];
+                GLenum blendDst = bmodel_call_blend_dst[i];
+                GLubyte colorMask = bmodel_call_color_mask[i];
+                int count = 1;
                         while (i + count < num_bmodel_calls && bmodel_call_cull[i + count] == cull &&
                                bmodel_call_depth_test[i + count] == depthTest &&
-                               bmodel_call_depth_write[i + count] == depthWrite)
-				++count;
+                               bmodel_call_depth_write[i + count] == depthWrite &&
+                               (bmodel_call_depth_func_override[i + count] ? (GLint)bmodel_call_depth_func[i + count] : -1) == depthFunc &&
+                               bmodel_call_blend_enable[i + count] == blendEnable &&
+                               bmodel_call_blend_src[i + count] == blendSrc &&
+                               bmodel_call_blend_dst[i + count] == blendDst &&
+                               bmodel_call_color_mask[i + count] == colorMask)
+                                ++count;
 
 			r_cull_state_t guard;
 			R_PushCullState(&guard);
 			R_SetCullState(cull);
                         r_depth_state_t depthGuard;
-                        qboolean depthChanged = R_ApplyDepthState(depthTest, depthWrite, &depthGuard);
+                        qboolean depthChanged = R_ApplyDepthState(depthTest, depthWrite, depthFunc, &depthGuard);
+
+                        if (currentColorMask != colorMask)
+                        {
+                                GL_ColorMaskiFunc(0,
+                                             (colorMask & 1) ? GL_TRUE : GL_FALSE,
+                                             (colorMask & 2) ? GL_TRUE : GL_FALSE,
+                                             (colorMask & 4) ? GL_TRUE : GL_FALSE,
+                                             (colorMask & 8) ? GL_TRUE : GL_FALSE);
+                                currentColorMask = colorMask;
+                        }
+
+                        if (currentBlendEnabled != blendEnable)
+                        {
+                                if (blendEnable)
+                                        glEnable(GL_BLEND);
+                                else
+                                        glDisable(GL_BLEND);
+                                currentBlendEnabled = blendEnable;
+                        }
+
+                        if (currentBlendSrcRGB != (GLint)blendSrc || currentBlendDstRGB != (GLint)blendDst ||
+                            currentBlendSrcAlpha != (GLint)blendSrc || currentBlendDstAlpha != (GLint)blendDst)
+                        {
+                                glBlendFunc(blendSrc, blendDst);
+                                currentBlendSrcRGB = (GLint)blendSrc;
+                                currentBlendDstRGB = (GLint)blendDst;
+                                currentBlendSrcAlpha = (GLint)blendSrc;
+                                currentBlendDstAlpha = (GLint)blendDst;
+                        }
 
 			const size_t offset = dstcmdofs + (size_t)i * (size_t)stride;
 			const void *indirect = (const void *)(uintptr_t)offset;
@@ -428,17 +563,52 @@ static void R_FlushBModelCalls (void)
 		GL_Upload (GL_SHADER_STORAGE_BUFFER, &bmodel_calls.bound.params, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls, &buf, &ofs);
 		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls);
 
-		for (i = 0; i < num_bmodel_calls; i++)
-		{
-			r_cull_state_t guard;
-			R_PushCullState(&guard);
-			R_SetCullState(bmodel_call_cull[i]);
-			r_depth_state_t depthGuard;
-			qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i], &depthGuard);
+        for (i = 0; i < num_bmodel_calls; i++)
+        {
+                GLboolean blendEnable = bmodel_call_blend_enable[i];
+                GLenum blendSrc = bmodel_call_blend_src[i];
+                GLenum blendDst = bmodel_call_blend_dst[i];
+                GLubyte colorMask = bmodel_call_color_mask[i];
+                GLint depthFunc = bmodel_call_depth_func_override[i] ? (GLint)bmodel_call_depth_func[i] : -1;
+                r_cull_state_t guard;
+                R_PushCullState(&guard);
+                R_SetCullState(bmodel_call_cull[i]);
+                r_depth_state_t depthGuard;
+                qboolean depthChanged = R_ApplyDepthState(bmodel_call_depth_test[i], bmodel_call_depth_write[i],
+                        depthFunc, &depthGuard);
 
-			GL_Uniform1iFunc (0, i);
-			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
-			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
+                if (currentColorMask != colorMask)
+                {
+                        GL_ColorMaskiFunc(0,
+                                     (colorMask & 1) ? GL_TRUE : GL_FALSE,
+                                     (colorMask & 2) ? GL_TRUE : GL_FALSE,
+                                     (colorMask & 4) ? GL_TRUE : GL_FALSE,
+                                     (colorMask & 8) ? GL_TRUE : GL_FALSE);
+                        currentColorMask = colorMask;
+                }
+
+                if (currentBlendEnabled != blendEnable)
+                {
+                        if (blendEnable)
+                                glEnable(GL_BLEND);
+                        else
+                                glDisable(GL_BLEND);
+                        currentBlendEnabled = blendEnable;
+                }
+
+                if (currentBlendSrcRGB != (GLint)blendSrc || currentBlendDstRGB != (GLint)blendDst ||
+                    currentBlendSrcAlpha != (GLint)blendSrc || currentBlendDstAlpha != (GLint)blendDst)
+                {
+                        glBlendFunc(blendSrc, blendDst);
+                        currentBlendSrcRGB = (GLint)blendSrc;
+                        currentBlendDstRGB = (GLint)blendDst;
+                        currentBlendSrcAlpha = (GLint)blendSrc;
+                        currentBlendDstAlpha = (GLint)blendDst;
+                }
+
+                GL_Uniform1iFunc (0, i);
+                GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
+                GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
 			const size_t offset = dstcmdofs + (size_t)i * sizeof (bmodel_draw_indirect_t);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)(uintptr_t)offset);
 
@@ -447,9 +617,39 @@ static void R_FlushBModelCalls (void)
 			R_PopCullState(&guard);
 		}
 
-	}
+        }
 
-	num_bmodel_calls = 0;
+        if (currentColorMask != initialMaskBits)
+        {
+                GL_ColorMaskiFunc(0,
+                             (initialMaskBits & 1) ? GL_TRUE : GL_FALSE,
+                             (initialMaskBits & 2) ? GL_TRUE : GL_FALSE,
+                             (initialMaskBits & 4) ? GL_TRUE : GL_FALSE,
+                             (initialMaskBits & 8) ? GL_TRUE : GL_FALSE);
+                currentColorMask = initialMaskBits;
+        }
+
+        if (currentBlendSrcRGB != initialBlendSrcRGB || currentBlendDstRGB != initialBlendDstRGB ||
+            currentBlendSrcAlpha != initialBlendSrcAlpha || currentBlendDstAlpha != initialBlendDstAlpha)
+        {
+                GL_BlendFuncSeparateFunc(initialBlendSrcRGB, initialBlendDstRGB,
+                                     initialBlendSrcAlpha, initialBlendDstAlpha);
+                currentBlendSrcRGB = initialBlendSrcRGB;
+                currentBlendDstRGB = initialBlendDstRGB;
+                currentBlendSrcAlpha = initialBlendSrcAlpha;
+                currentBlendDstAlpha = initialBlendDstAlpha;
+        }
+
+        if (currentBlendEnabled != initialBlendEnabled)
+        {
+                if (initialBlendEnabled)
+                        glEnable(GL_BLEND);
+                else
+                        glDisable(GL_BLEND);
+                currentBlendEnabled = initialBlendEnabled;
+        }
+
+        num_bmodel_calls = 0;
 }
 
 static void R_PushDepthState(r_depth_state_t *state)
@@ -461,11 +661,14 @@ static void R_PushDepthState(r_depth_state_t *state)
         GLboolean mask = GL_TRUE;
         glGetBooleanv(GL_DEPTH_WRITEMASK, &mask);
         state->writeMask = mask;
+        GLint func = GL_LEQUAL;
+        glGetIntegerv(GL_DEPTH_FUNC, &func);
+        state->func = func;
 }
 
-static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, r_depth_state_t *state)
+static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOverride, GLint depthFuncOverride, r_depth_state_t *state)
 {
-        if (depthTestOverride < 0 && depthWriteOverride < 0)
+        if (depthTestOverride < 0 && depthWriteOverride < 0 && depthFuncOverride < 0)
                 return false;
 
         R_PushDepthState(state);
@@ -481,9 +684,28 @@ static qboolean R_ApplyDepthState(GLbyte depthTestOverride, GLbyte depthWriteOve
         if (depthWriteOverride >= 0)
                 glDepthMask(depthWriteOverride ? GL_TRUE : GL_FALSE);
 
+        if (depthFuncOverride >= 0)
+                glDepthFunc((GLenum)depthFuncOverride);
+
         const char *depthTestStr = ((depthTestOverride >= 0 ? depthTestOverride : state->testEnabled) ? "on" : "off");
         const char *depthWriteStr = ((depthWriteOverride >= 0 ? depthWriteOverride : state->writeMask) ? "on" : "off");
-        IW_Debugf("depthtest=%s, depthwrite=%s", depthTestStr, depthWriteStr);
+        GLenum func = (depthFuncOverride >= 0) ? (GLenum)depthFuncOverride : (GLenum)state->func;
+        const char *depthFuncStr;
+        switch (func)
+        {
+        case GL_NEVER: depthFuncStr = "never"; break;
+        case GL_LESS: depthFuncStr = "less"; break;
+        case GL_EQUAL: depthFuncStr = "equal"; break;
+        case GL_LEQUAL: depthFuncStr = "lequal"; break;
+        case GL_GREATER: depthFuncStr = "greater"; break;
+        case GL_NOTEQUAL: depthFuncStr = "notequal"; break;
+        case GL_GEQUAL: depthFuncStr = "gequal"; break;
+        case GL_ALWAYS:
+        default:
+                depthFuncStr = "always";
+                break;
+        }
+        IW_Debugf("depthtest=%s, depthwrite=%s, depthfunc=%s", depthTestStr, depthWriteStr, depthFuncStr);
 
         return true;
 }
@@ -499,6 +721,7 @@ static void R_PopDepthState(const r_depth_state_t *state)
                 glDisable(GL_DEPTH_TEST);
 
         glDepthMask(state->writeMask ? GL_TRUE : GL_FALSE);
+        glDepthFunc((GLenum)state->func);
 }
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
@@ -656,13 +879,23 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         float           fog_color[4] = { 0.f, 0.f, 0.f, 0.f };
         qboolean        has_material_fog = false;
         const iwStage_t *emissive_stage = NULL;
-        float           material_alpha = -1.f;
         iwCull_t        cull = IW_CULL_BACK;
         float           base_tcmod_params0[4] = { 1.f, 0.f, 0.f, 0.f };
         float           base_tcmod_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
         unsigned int    tc_feature_flags = 0u;
         GLbyte           depthTestOverride = -1;
         GLbyte           depthWriteOverride = -1;
+        GLboolean       stageBlendEnabled = GL_FALSE;
+        GLenum          stageBlendSrc = GL_ONE;
+        GLenum          stageBlendDst = GL_ZERO;
+        GLint           stageDepthFunc = -1;
+        GLubyte         stageColorMaskBits = IW_ColorMaskBits(IW_COLORMASK_RGBA);
+        float           alpha_params0[4] = { 0.f, 1.f, 0.f, 0.f };
+        float           alpha_params1[4] = { 0.f, 0.f, -1.f, (float)IW_WAVE_SIN };
+        float           alpha_params2[4] = { (float)IW_ALPHA_FUNC_DISABLED, 0.f, 0.f, 0.f };
+        qboolean        stageAlphaTest = false;
+        iwAlphaFunc_t   stageAlphaFuncMode = IW_ALPHA_FUNC_DISABLED;
+        float           stageAlphaFuncRef = 0.f;
 
         IW_TexMatrixIdentity (&tex_matrix);
         IW_TexMatrixIdentity (&emissive_matrix);
@@ -698,9 +931,100 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                                 depthTestOverride = base_stage->depthTest ? 1 : 0;
                         if (base_stage->depthWrite != IW_DEPTHWRITE_AUTO)
                                 depthWriteOverride = base_stage->depthWrite ? 1 : 0;
-                        if ((base_stage->blendMode == IW_BLEND_ALPHA || base_stage->blendMode == IW_BLEND_ADD_ALPHA) &&
-                            base_stage->alphagen == IW_A_CONST)
-                                material_alpha = q_clamp(base_stage->aConst, 0.f, 1.f);
+                        if (base_stage->depthFuncExplicit && base_stage->depthFuncMode != IW_DEPTHFUNC_DEFAULT)
+                                stageDepthFunc = IW_DepthFuncToGL(base_stage->depthFuncMode);
+
+                        switch (base_stage->blendMode)
+                        {
+                        case IW_BLEND_ALPHA:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = GL_SRC_ALPHA;
+                                stageBlendDst = GL_ONE_MINUS_SRC_ALPHA;
+                                break;
+
+                        case IW_BLEND_ADD:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = GL_ONE;
+                                stageBlendDst = GL_ONE;
+                                break;
+
+                        case IW_BLEND_MUL:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = GL_DST_COLOR;
+                                stageBlendDst = GL_ZERO;
+                                break;
+
+                        case IW_BLEND_PREMUL:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = GL_ONE;
+                                stageBlendDst = GL_ONE_MINUS_SRC_ALPHA;
+                                break;
+
+                        case IW_BLEND_ADD_ALPHA:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = GL_SRC_ALPHA;
+                                stageBlendDst = GL_ONE;
+                                break;
+
+                        case IW_BLEND_CUSTOM:
+                                stageBlendEnabled = GL_TRUE;
+                                stageBlendSrc = IW_BlendFactorToGL(base_stage->src);
+                                stageBlendDst = IW_BlendFactorToGL(base_stage->dst);
+                                break;
+
+                        default:
+                                stageBlendEnabled = GL_FALSE;
+                                stageBlendSrc = GL_ONE;
+                                stageBlendDst = GL_ZERO;
+                                break;
+                        }
+
+                        stageColorMaskBits = IW_ColorMaskBits(base_stage->colorMask);
+
+                        alpha_params0[0] = 0.f;
+                        alpha_params0[1] = 1.f;
+                        alpha_params0[2] = base_stage->alphaWave.base;
+                        alpha_params0[3] = base_stage->alphaWave.amplitude;
+                        alpha_params1[0] = base_stage->alphaWave.phase;
+                        alpha_params1[1] = base_stage->alphaWave.frequency;
+                        alpha_params1[2] = (float)base_stage->mask;
+                        alpha_params1[3] = (float)base_stage->alphaWave.func;
+
+                        switch (base_stage->alphagen)
+                        {
+                        case IW_A_CONST:
+                                alpha_params0[0] = 1.f;
+                                alpha_params0[1] = q_clamp(base_stage->aConst, 0.f, 1.f);
+                                break;
+
+                        case IW_A_ENTITY:
+                                alpha_params0[0] = 2.f;
+                                break;
+
+                        case IW_A_WAVE:
+                                alpha_params0[0] = 3.f;
+                                break;
+
+                        case IW_A_MASK:
+                                alpha_params0[0] = 4.f;
+                                break;
+
+                        default:
+                                alpha_params0[0] = 0.f;
+                                break;
+                        }
+
+                        stageAlphaFuncMode = base_stage->alphaFuncMode;
+                        stageAlphaFuncRef = q_clamp(base_stage->alphaFuncRef, 0.f, 1.f);
+                        if (stageAlphaFuncMode != IW_ALPHA_FUNC_DISABLED && stageAlphaFuncMode != IW_ALPHA_FUNC_ALWAYS)
+                                stageAlphaTest = true;
+                        else
+                                stageAlphaTest = (stageAlphaFuncMode == IW_ALPHA_FUNC_NEVER);
+
+                        alpha_params2[0] = (float)stageAlphaFuncMode;
+                        alpha_params2[1] = stageAlphaFuncRef;
+                        alpha_params2[2] = stageAlphaTest ? 1.f : 0.f;
+                        alpha_params2[3] = base_stage->alphaToCoverage ? 1.f : 0.f;
 
                         if (base_stage->maskExplicit)
                                 base_tcmod_params1[2] = (float)base_stage->mask;
@@ -745,6 +1069,18 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 }
         }
 
+        if (!stageAlphaTest && t && t->type == TEXTYPE_CUTOUT)
+        {
+                stageAlphaTest = true;
+                stageAlphaFuncMode = IW_ALPHA_FUNC_GEQUAL;
+                stageAlphaFuncRef = 2.f / 3.f;
+        }
+
+        stageAlphaFuncRef = q_clamp(stageAlphaFuncRef, 0.f, 1.f);
+        alpha_params2[0] = (float)stageAlphaFuncMode;
+        alpha_params2[1] = stageAlphaFuncRef;
+        alpha_params2[2] = stageAlphaTest ? 1.f : 0.f;
+
         if (num_bmodel_calls == MAX_BMODEL_DRAWS)
                 R_FlushBModelCalls ();
 
@@ -779,14 +1115,12 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
         if (em != NULL)
                 flags |= CALLFLAG_EMISSIVE;
-        if (t && t->type == TEXTYPE_CUTOUT)
+        if (stageAlphaTest)
                 flags |= CALLFLAG_ALPHA_TEST;
         flags |= tc_feature_flags;
         if (has_material_fog)
                 flags |= CALLFLAG_CUSTOM_FOG;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
-        if (material_alpha >= 0.f)
-                alpha = material_alpha;
 
         if (gl_bindless_able)
         {
@@ -813,6 +1147,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->emissive_color[2] = emissive_color[2];
                 call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
                 memcpy (call->fog_color, fog_color, sizeof (fog_color));
+                memcpy (call->alpha_params0, alpha_params0, sizeof (alpha_params0));
+                memcpy (call->alpha_params1, alpha_params1, sizeof (alpha_params1));
+                memcpy (call->alpha_params2, alpha_params2, sizeof (alpha_params2));
         }
         else
         {
@@ -839,6 +1176,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 call->emissive_color[2] = emissive_color[2];
                 call->emissive_color[3] = (flags & CALLFLAG_EMISSIVE) ? 1.f : 0.f;
                 memcpy (call->fog_color, fog_color, sizeof (fog_color));
+                memcpy (call->alpha_params0, alpha_params0, sizeof (alpha_params0));
+                memcpy (call->alpha_params1, alpha_params1, sizeof (alpha_params1));
+                memcpy (call->alpha_params2, alpha_params2, sizeof (alpha_params2));
                 textures[0] = tx ? tx : greytexture;
                 textures[1] = fb ? fb : blacktexture;
                 textures[2] = em ? em : blacktexture;
@@ -848,6 +1188,12 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
         bmodel_call_depth_test[num_bmodel_calls] = depthTestOverride;
         bmodel_call_depth_write[num_bmodel_calls] = depthWriteOverride;
+        bmodel_call_depth_func_override[num_bmodel_calls] = (stageDepthFunc >= 0) ? 1 : 0;
+        bmodel_call_depth_func[num_bmodel_calls] = (stageDepthFunc >= 0) ? stageDepthFunc : GL_LEQUAL;
+        bmodel_call_blend_enable[num_bmodel_calls] = stageBlendEnabled;
+        bmodel_call_blend_src[num_bmodel_calls] = stageBlendSrc;
+        bmodel_call_blend_dst[num_bmodel_calls] = stageBlendDst;
+        bmodel_call_color_mask[num_bmodel_calls] = stageColorMaskBits;
         bmodel_call_cull[num_bmodel_calls] = cull;
         bmodel_call_remap[num_bmodel_calls].src = index;
         bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);

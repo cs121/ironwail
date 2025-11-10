@@ -64,6 +64,30 @@ typedef enum {
 } iwAlphaGen_t;
 
 typedef enum {
+    IW_ALPHA_FUNC_DISABLED = 0,
+    IW_ALPHA_FUNC_NEVER,
+    IW_ALPHA_FUNC_LESS,
+    IW_ALPHA_FUNC_EQUAL,
+    IW_ALPHA_FUNC_LEQUAL,
+    IW_ALPHA_FUNC_GREATER,
+    IW_ALPHA_FUNC_NOTEQUAL,
+    IW_ALPHA_FUNC_GEQUAL,
+    IW_ALPHA_FUNC_ALWAYS
+} iwAlphaFunc_t;
+
+typedef enum {
+    IW_DEPTHFUNC_DEFAULT = -1,
+    IW_DEPTHFUNC_NEVER = 0,
+    IW_DEPTHFUNC_LESS,
+    IW_DEPTHFUNC_EQUAL,
+    IW_DEPTHFUNC_LEQUAL,
+    IW_DEPTHFUNC_GREATER,
+    IW_DEPTHFUNC_NOTEQUAL,
+    IW_DEPTHFUNC_GEQUAL,
+    IW_DEPTHFUNC_ALWAYS
+} iwDepthFunc_t;
+
+typedef enum {
     IW_TC_SCROLL = 0,
     IW_TC_SCALE,
     IW_TC_ROTATE,
@@ -172,7 +196,12 @@ typedef struct {
     int tcAlignExplicit;
     char tcGen[IW_MAX_TCGEN_TEXT];
     char alphaFunc[32];
+    iwAlphaFunc_t alphaFuncMode;
+    float alphaFuncRef;
+    int alphaFuncExplicit;
     char depthFunc[32];
+    iwDepthFunc_t depthFuncMode;
+    int depthFuncExplicit;
     char stageCondition[IW_MAX_STAGE_CONDITION];
     iwFogParms_t fogParms;
     int hasFogParms;
