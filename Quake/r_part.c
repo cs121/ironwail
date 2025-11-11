@@ -1838,7 +1838,8 @@ static void R_InitParticleAtlas (void)
                                         particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
                                                 ext_width, ext_height, 1, ext_fmt,
                                                 ext_data, "particles/particlefont", 0,
-                                                TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                                                TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP |
+                                                TEXPREF_ALPHA);
                                         if (particle_atlas)
                                         {
                                                 R_ParticleAtlas_SetMetrics (ext_width, ext_height, tile_width_px, tile_height_px);
@@ -1974,10 +1975,11 @@ static void R_InitParticleAtlas (void)
                         }
                 }
 
-                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
-                        atlas_width, atlas_height, 1, SRC_RGBA,
-                        (byte*)data, "", 0,
-                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+		particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+			atlas_width, atlas_height, 1, SRC_RGBA,
+			(byte*)data, "", 0,
+			TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP |
+			TEXPREF_ALPHA);
 
                 if (!particle_atlas) {
                         Con_Printf ("R_InitParticleAtlas: failed to create particle atlas\n");
@@ -3343,32 +3345,66 @@ static void R_DrawParticles_Pass (effectblend_t blend, qboolean showtris, qboole
                 VectorCopy (p->org, v->pos);
                 VectorCopy (p->vel, v->vel);
 
-                if (showtris)
                 {
-                        v->color[0] = 255;
-                        v->color[1] = 255;
-                        v->color[2] = 255;
-                        v->color[3] = 255;
-                        alphabyte = 255;
-                        glowbyte = 0;
-                }
-                else if (p->custom)
-                {
-                        v->color[0] = (GLubyte)q_min (255, (int)(p->custom_color[0] * 255.f + 0.5f));
-                        v->color[1] = (GLubyte)q_min (255, (int)(p->custom_color[1] * 255.f + 0.5f));
-                        v->color[2] = (GLubyte)q_min (255, (int)(p->custom_color[2] * 255.f + 0.5f));
-                        alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
-                        glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
-                        v->color[3] = alphabyte;
-                }
-                else
-                {
-                        GLubyte* c = (GLubyte*)&d_8to24table[(int)p->color];
-                        alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
-                        glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
-                        v->color[0] = c[0];
-                        v->color[1] = c[1];
-                        v->color[2] = c[2];
+                        qboolean collapse_alpha = (!showtris &&
+                                (particle_blend == EFFECT_BLEND_ADD || particle_blend == EFFECT_BLEND_INVMOD));
+
+                        if (showtris)
+                        {
+                                v->color[0] = 255;
+                                v->color[1] = 255;
+                                v->color[2] = 255;
+                                alphabyte = 255;
+                                glowbyte = 0;
+                        }
+                        else if (p->custom)
+                        {
+                                float r = q_clamp (p->custom_color[0], 0.f, 1.f);
+                                float g = q_clamp (p->custom_color[1], 0.f, 1.f);
+                                float b = q_clamp (p->custom_color[2], 0.f, 1.f);
+
+                                if (collapse_alpha)
+                                {
+                                        r *= alphaval;
+                                        g *= alphaval;
+                                        b *= alphaval;
+                                        alphabyte = 255;
+                                }
+                                else
+                                {
+                                        alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
+                                }
+
+                                glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
+                                v->color[0] = (GLubyte)q_min (255, (int)(r * 255.f + 0.5f));
+                                v->color[1] = (GLubyte)q_min (255, (int)(g * 255.f + 0.5f));
+                                v->color[2] = (GLubyte)q_min (255, (int)(b * 255.f + 0.5f));
+                        }
+                        else
+                        {
+                                GLubyte* c = (GLubyte*)&d_8to24table[(int)p->color];
+
+                                if (collapse_alpha)
+                                {
+                                        int r = (int)(c[0] * alphaval + 0.5f);
+                                        int g = (int)(c[1] * alphaval + 0.5f);
+                                        int b = (int)(c[2] * alphaval + 0.5f);
+                                        v->color[0] = (GLubyte)q_min (255, r);
+                                        v->color[1] = (GLubyte)q_min (255, g);
+                                        v->color[2] = (GLubyte)q_min (255, b);
+                                        alphabyte = 255;
+                                }
+                                else
+                                {
+                                        v->color[0] = c[0];
+                                        v->color[1] = c[1];
+                                        v->color[2] = c[2];
+                                        alphabyte = (GLubyte)q_min (255, (int)(alphaval * 255.f + 0.5f));
+                                }
+
+                                glowbyte = (GLubyte)q_min (255, (int)(glow * PARTICLE_GLOW_SCALE + 0.5f));
+                        }
+
                         v->color[3] = alphabyte;
                 }
 
