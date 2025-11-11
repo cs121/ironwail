@@ -143,7 +143,7 @@ void main()
 
         out_uv = uv;
         out_color = in_color;
-        out_params = vec4(in_params.x * GLOW_INV_SCALE, uvScale, float(orient), 0.0);
+        out_params = vec4(in_params.x * GLOW_INV_SCALE, uvScale, float(orient), in_params.w);
         out_corner = fadeCorner;
 #if OIT
         out_color.a *= 0.9;

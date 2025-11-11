@@ -65,7 +65,7 @@ layout(location=4) in vec2 in_corner;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
-	vec4 OUT_COLOR;
+        vec4 OUT_COLOR;
 	layout(location=0) out vec4 out_accum;
 	layout(location=1) out float out_reveal;
 
@@ -98,18 +98,27 @@ layout(location=4) in vec2 in_corner;
 
 	#define main main_body
 #else
-	layout(location=0) out vec4 OUT_COLOR;
-	layout(location=1) out vec4 out_velocity;
+        layout(location=0) out vec4 OUT_COLOR;
+        layout(location=1) out vec4 out_velocity;
 #endif // OIT
+
+const int BLEND_ALPHA = 0;
+const int BLEND_ADD = 1;
+const int BLEND_INVMOD = 2;
 
 void main()
 {
-	vec4 texel = texture(ParticleAtlas, in_uv);
-	vec4 color = in_color * texel;
+        vec4 texel = texture(ParticleAtlas, in_uv);
+        int blend = int(in_params.w + 0.5);
+        if (blend == BLEND_ADD || blend == BLEND_INVMOD)
+        {
+                texel.a = 1.0;
+        }
+        vec4 color = in_color * texel;
 #if !OIT
-	out_velocity = vec4(0.0);
+        out_velocity = vec4(0.0);
 #endif
-	float glow = in_params.x;
+        float glow = in_params.x;
 	color.rgb *= (1.0 + glow);
 	color.rgb = ApplyFog(color.rgb, in_pos);
 	float radius = length(in_corner * in_params.y);
