@@ -1,0 +1,350 @@
+// =============================
+// DarkPlaces effectinfo for Quake temp entities
+// Tailored for 8x8 particlefont atlas as provided
+// =============================
+
+// atlas reference
+// 0–7: smoke, 8–15: decal, 16–23: inverted splatter, 24–31: blood
+// 32: transparent, 33–59: squares/rects, 60: lightning, 61: droplet, 62: bubble, 63: soft circle
+
+// -----------------------------
+// TE_GUNSHOT  (bullet impact puff)
+// -----------------------------
+effect te_gunshot
+    notunderwater
+    type smoke
+    count 1
+    tex 0 7
+    color 0x9a9a9a 0xffffff
+    alpha 64 160 256
+    size 5 9
+    sizeincrease 6
+    originjitter 2 2 2
+    velocityjitter 20 20 20
+    gravity -5
+    airfriction 1.4
+
+effect te_gunshot
+    notunderwater
+    type spark
+    count 3
+    tex 33 45
+    color 0xffdd88 0xfff6c2
+    alpha 160 220 200
+    size 1 2
+    velocityjitter 140 80 140
+    gravity 300
+    airfriction 2
+
+
+// -----------------------------
+// TE_SPIKE  (nail impact)
+// -----------------------------
+effect te_spike
+    notunderwater
+    type spark
+    count 4
+    tex 33 50
+    color 0xffe080 0xffffff
+    alpha 160 240 220
+    size 1 2
+    velocityjitter 180 120 180
+    gravity 400
+    airfriction 2.2
+
+effect te_spike
+    notunderwater
+    type smoke
+    count 1
+    tex 0 7
+    color 0x8a8a8a 0xdedede
+    alpha 64 140 256
+    size 4 7
+    sizeincrease 4
+    originjitter 1 1 1
+    velocityjitter 12 12 12
+    gravity -5
+    airfriction 1.4
+
+
+// -----------------------------
+// TE_SUPERSPIKE
+// -----------------------------
+effect te_superspike
+    notunderwater
+    type spark
+    count 6
+    tex 33 55
+    color 0xffe080 0xffffff
+    alpha 180 255 220
+    size 1 3
+    velocityjitter 220 160 220
+    gravity 420
+    airfriction 2.2
+
+effect te_superspike
+    notunderwater
+    type smoke
+    count 2
+    tex 0 7
+    color 0x8a8a8a 0xdedede
+    alpha 80 160 256
+    size 5 9
+    sizeincrease 6
+    originjitter 2 2 2
+    velocityjitter 16 16 16
+    gravity -5
+    airfriction 1.4
+
+
+// -----------------------------
+// TE_WIZSPIKE (Vore wizard green bolt impact)
+// -----------------------------
+effect te_wizspike
+    notunderwater
+    type static
+    count 8
+    tex 33 45
+    color 0x6fff00 0xfdff00
+    alpha 128 255 256
+    originjitter 8 8 8
+    velocityjitter 32 32 32
+    size 6 10
+    gravity 1
+    bounce 1
+    sizeincrease 2
+    liquidfriction 10
+
+
+// -----------------------------
+// TE_KNIGHTSPIKE (red/orange impact)
+// -----------------------------
+effect te_knightspike
+    notunderwater
+    type spark
+    count 8
+    tex 33 48
+    color 0xff6611 0xffcc66
+    alpha 160 255 220
+    size 1 3
+    velocityjitter 200 140 200
+    gravity 380
+    airfriction 2
+
+effect te_knightspike
+    notunderwater
+    type smoke
+    count 1
+    tex 8 15
+    color 0x5a2a00 0x7a4a10
+    alpha 80 150 256
+    size 5 9
+    sizeincrease 4
+    gravity -5
+    airfriction 1.2
+
+
+// -----------------------------
+// TE_BLOOD
+// -----------------------------
+effect te_blood
+    type smoke
+    count 1
+    tex 24 31
+    color 0xaa0000 0xff4040
+    alpha 160 255 256
+    size 4 7
+    gravity 500
+    bounce 0.2
+    airfriction 1.8
+    velocityjitter 60 40 60
+    originjitter 2 2 2
+
+effect te_blood
+    type smoke
+    count 1
+    tex 16 23
+    color 0x880000 0xcc2020
+    alpha 120 220 256
+    size 3 6
+    gravity 520
+    airfriction 1.9
+
+
+// -----------------------------
+// TE_EXPLOSION  (three-layer)
+// -----------------------------
+effect te_explosion
+    notunderwater
+    type static
+    count 1
+    tex 63
+    color 0xffe8b0 0xffffff
+    alpha 220 255 180
+    size 24 28
+    sizeincrease -8
+    velocityjitter 4 4 4
+
+effect te_explosion
+    notunderwater
+    type spark
+    count 22
+    tex 33 59
+    color 0xffc070 0xfff0c0
+    alpha 180 255 200
+    size 1 3
+    velocityjitter 360 260 360
+    gravity 420
+    airfriction 2.4
+
+effect te_explosion
+    notunderwater
+    type smoke
+    count 9
+    tex 0 7
+    color 0x6e6e6e 0xaaaaaa
+    alpha 120 210 300
+    size 10 16
+    sizeincrease 12
+    gravity -12
+    airfriction 1.3
+
+
+// -----------------------------
+// TE_TAREXPLOSION (lava-ish)
+// -----------------------------
+effect te_tarexplosion
+    type static
+    count 1
+    tex 63
+    color 0xffa040 0xfff2b0
+    alpha 220 255 200
+    size 20 26
+    sizeincrease -6
+    velocityjitter 4 4 4
+
+effect te_tarexplosion
+    type spark
+    count 16
+    tex 33 59
+    color 0xff6a00 0xffe060
+    alpha 180 255 220
+    size 1 3
+    velocityjitter 320 240 320
+    gravity 420
+    airfriction 2.2
+
+effect te_tarexplosion
+    type smoke
+    count 8
+    tex 8 15
+    color 0x8a3a00 0xaa6a20
+    alpha 120 210 300
+    size 9 14
+    sizeincrease 11
+    gravity -6
+    airfriction 1.2
+
+
+// -----------------------------
+// TE_LAVASPLASH
+// -----------------------------
+effect te_lavasplash
+    notunderwater
+    type spark
+    count 50
+    tex 33 59
+    color 0xff5a00 0xffe070
+    alpha 160 240 200
+    size 1 2
+    velocityjitter 240 200 240
+    gravity 500
+    airfriction 1.6
+
+effect te_lavasplash
+    type smoke
+    count 12
+    tex 8 15
+    color 0x7a2a00 0xaa5a20
+    alpha 120 200 300
+    size 6 10
+    sizeincrease 8
+    gravity -4
+    airfriction 1.2
+
+
+// -----------------------------
+// TE_TELEPORT
+// -----------------------------
+effect te_teleport
+    type static
+    count 6
+    tex 63
+    color 0x9a60ff 0xd0b0ff
+    alpha 160 255 240
+    size 10 14
+    sizeincrease 18
+    originjitter 6 6 6
+    velocityjitter 6 6 6
+    gravity -20
+    airfriction 1.0
+
+effect te_teleport
+    type smoke
+    count 10
+    tex 0 7
+    color 0x6a40d0 0xa080ff
+    alpha 100 180 280
+    size 6 10
+    sizeincrease 10
+    gravity -10
+    airfriction 1.1
+
+
+// -----------------------------
+// TE_LIGHTNING SPARKLE (optional around impacts)
+// -----------------------------
+effect te_lightning_spark
+    notunderwater
+    type spark
+    count 12
+    tex 60
+    color 0x9ee8ff 0xffffff
+    alpha 160 255 220
+    size 2 3
+    velocityjitter 220 160 220
+    gravity 320
+    airfriction 2.0
+
+
+// -----------------------------
+// Underwater bubbles (generic helper)
+// -----------------------------
+effect te_bubble
+    underwater
+    type smoke
+    count 3
+    tex 62
+    color 0xffffff 0xffffff
+    alpha 120 200 240
+    size 3 5
+    sizeincrease 2
+    velocityjitter 10 10 30
+    gravity -60
+    liquidfriction 4
+
+
+// -----------------------------
+// Fallback tracer (mods)
+// -----------------------------
+effect te_tracer
+    notunderwater
+    type spark
+    count 1
+    tex 33 59
+    color 0xfff6c2 0xffffff
+    alpha 180 255 160
+    size 1 2
+    velocityjitter 40 20 40
+    gravity 0
+    airfriction 2.0
