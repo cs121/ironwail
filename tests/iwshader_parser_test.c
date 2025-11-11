@@ -110,5 +110,26 @@ int main(void)
     assert(stage2->mapType == IW_MAP_CUBEMAP);
     assert(strcmp(stage2->mapPath, "env/dp/sky") == 0);
 
+    static const char *emissive_text =
+        "shader tests/emissive_forms\n"
+        "{\n"
+        "    stage {\n"
+        "        emissive\n"
+        "    }\n"
+        "    stage {\n"
+        "        emissive off\n"
+        "    }\n"
+        "    stage {\n"
+        "        emissive yes\n"
+        "    }\n"
+        "}\n";
+
+    iwMaterial_t emissive_material;
+    assert(IW_ParseShaderTextForTesting(emissive_text, &emissive_material));
+    assert(emissive_material.numStages == 3);
+    assert(emissive_material.stages[0].emissive == 1);
+    assert(emissive_material.stages[1].emissive == 0);
+    assert(emissive_material.stages[2].emissive == 1);
+
     return 0;
 }

@@ -374,6 +374,56 @@ static qboolean IW_ReadInt(iwtxtParser_t *parser, int *out, iwtxtToken_t *token)
     return true;
 }
 
+static qboolean IW_ParseBoolToken(const iwtxtToken_t *token, int *out)
+{
+    if (!token || !out)
+        return false;
+
+    if (token->type == IWTXT_TOKEN_NUMBER)
+    {
+        *out = token->number != 0;
+        return true;
+    }
+
+    if (token->type == IWTXT_TOKEN_STRING)
+    {
+        char lower[16];
+        IW_CopyTokenLower(token, lower, sizeof(lower));
+
+        if (!strcmp(lower, "on") || !strcmp(lower, "true") || !strcmp(lower, "yes"))
+        {
+            *out = 1;
+            return true;
+        }
+        if (!strcmp(lower, "off") || !strcmp(lower, "false") || !strcmp(lower, "no"))
+        {
+            *out = 0;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static qboolean IW_IsStageValueBoundary(const iwtxtToken_t *token)
+{
+    if (!token)
+        return true;
+
+    if (token->type == IWTXT_TOKEN_SYMBOL && token->length == 1 && token->text[0] == '}')
+        return true;
+
+    if (token->type == IWTXT_TOKEN_STRING)
+    {
+        char lower[32];
+        IW_CopyTokenLower(token, lower, sizeof(lower));
+        if (IW_IsStageKeyword(lower))
+            return true;
+    }
+
+    return false;
+}
+
 static float IW_NormalizeAlphaRef(double value)
 {
     float ref = (float)value;
@@ -1365,13 +1415,19 @@ static qboolean IW_ParseStage(iwtxtParser_t *parser, iwMaterial_t *material, con
         }
         else if (!strcmp(keyword, "emissive"))
         {
-            int value;
-            if (!IW_ReadInt(parser, &value, &token))
+            int value = 1;
+            iwtxtToken_t valueToken;
+            if (IWTXT_PeekToken(parser, &valueToken) && !IW_IsStageValueBoundary(&valueToken))
             {
-                IW_LogWarning(filename, token.line, token.column, "emissive requires 0 or 1");
-                if (strict)
-                    return false;
-                continue;
+                IWTXT_NextToken(parser, &valueToken);
+                if (!IW_ParseBoolToken(&valueToken, &value))
+                {
+                    IW_LogWarning(filename, valueToken.line, valueToken.column,
+                            "emissive requires 0/1, on/off, yes/no, or true/false");
+                    if (strict)
+                        return false;
+                    continue;
+                }
             }
             stage.emissive = value ? 1 : 0;
         }
