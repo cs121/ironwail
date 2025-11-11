@@ -109,10 +109,15 @@ const int BLEND_INVMOD = 2;
 void main()
 {
         vec4 texel = texture(ParticleAtlas, in_uv);
+        float coverage = max(texel.a, max(texel.r, max(texel.g, texel.b)));
         int blend = int(in_params.w + 0.5);
         if (blend == BLEND_ADD || blend == BLEND_INVMOD)
         {
                 texel.a = 1.0;
+        }
+        else
+        {
+                texel.a = coverage;
         }
         vec4 color = in_color * texel;
 #if !OIT
