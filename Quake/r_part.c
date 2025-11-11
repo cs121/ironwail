@@ -1838,7 +1838,8 @@ static void R_InitParticleAtlas (void)
                                         particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
                                                 ext_width, ext_height, 1, ext_fmt,
                                                 ext_data, "particles/particlefont", 0,
-                                                TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+                                                TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP |
+                                                TEXPREF_ALPHA);
                                         if (particle_atlas)
                                         {
                                                 R_ParticleAtlas_SetMetrics (ext_width, ext_height, tile_width_px, tile_height_px);
@@ -1974,10 +1975,11 @@ static void R_InitParticleAtlas (void)
                         }
                 }
 
-                particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
-                        atlas_width, atlas_height, 1, SRC_RGBA,
-                        (byte*)data, "", 0,
-                        TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP);
+		particle_atlas = TexMgr_LoadImageEx (NULL, "particles/atlas",
+			atlas_width, atlas_height, 1, SRC_RGBA,
+			(byte*)data, "", 0,
+			TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST | TEXPREF_CLAMP |
+			TEXPREF_ALPHA);
 
                 if (!particle_atlas) {
                         Con_Printf ("R_InitParticleAtlas: failed to create particle atlas\n");
