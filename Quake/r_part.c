@@ -57,6 +57,9 @@ typedef enum
         EFFECT_TYPE_STATIC,
         EFFECT_TYPE_SPARK,
         EFFECT_TYPE_BEAM,
+        EFFECT_TYPE_RAIN,
+        EFFECT_TYPE_RAINDECAL,
+        EFFECT_TYPE_SNOW,
         EFFECT_TYPE_BUBBLE,
         EFFECT_TYPE_BLOOD,
         EFFECT_TYPE_SMOKE,
@@ -102,6 +105,9 @@ typedef struct particle_dp_s
         float           spin;
         float           bounce;
         float           liquidfriction;
+        effecttype_t    effect_type;
+        double          next_think;
+        qboolean        force_nearest;
         qboolean        kill_on_draw;
         qboolean        underwater_only;
         qboolean        notunderwater;
@@ -170,6 +176,7 @@ typedef struct effect_emitter_s
         qboolean        notunderwater;
         qboolean        leave_decal;
         qboolean        kill_on_draw;
+        qboolean        force_nearest;
         qboolean        blend_explicit;
         qboolean        orient_explicit;
         qboolean        alpha_explicit;
@@ -409,6 +416,9 @@ static const char* R_Effectinfo_TypeName (effecttype_t type)
                 "static",
                 "spark",
                 "beam",
+                "rain",
+                "raindecal",
+                "snow",
                 "bubble",
                 "blood",
                 "smoke",
@@ -550,6 +560,7 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         emit->notunderwater = false;
         emit->leave_decal = false;
         emit->kill_on_draw = false;
+        emit->force_nearest = false;
         emit->blend_explicit = false;
         emit->orient_explicit = false;
         emit->alpha_explicit = false;
@@ -571,6 +582,12 @@ static effecttype_t R_Effectinfo_ParseType (const char* token)
                 return EFFECT_TYPE_SPARK;
         if (!q_strcasecmp (token, "beam"))
                 return EFFECT_TYPE_BEAM;
+        if (!q_strcasecmp (token, "rain"))
+                return EFFECT_TYPE_RAIN;
+        if (!q_strcasecmp (token, "raindecal"))
+                return EFFECT_TYPE_RAINDECAL;
+        if (!q_strcasecmp (token, "snow"))
+                return EFFECT_TYPE_SNOW;
         if (!q_strcasecmp (token, "bubble"))
                 return EFFECT_TYPE_BUBBLE;
         if (!q_strcasecmp (token, "blood"))
@@ -615,6 +632,8 @@ static effectblend_t R_Effectinfo_DefaultBlend (effecttype_t type)
         case EFFECT_TYPE_STATIC:
         case EFFECT_TYPE_SPARK:
         case EFFECT_TYPE_BEAM:
+        case EFFECT_TYPE_RAIN:
+        case EFFECT_TYPE_RAINDECAL:
                 return EFFECT_BLEND_ADD;
         case EFFECT_TYPE_BLOOD:
         case EFFECT_TYPE_DECAL:
@@ -629,10 +648,12 @@ static effectorient_t R_Effectinfo_DefaultOrient (effecttype_t type)
         switch (type)
         {
         case EFFECT_TYPE_SPARK:
+        case EFFECT_TYPE_RAIN:
                 return EFFECT_ORIENT_SPARK;
         case EFFECT_TYPE_BEAM:
                 return EFFECT_ORIENT_BEAM;
         case EFFECT_TYPE_DECAL:
+        case EFFECT_TYPE_RAINDECAL:
                 return EFFECT_ORIENT_ORIENTED;
         default:
                 return EFFECT_ORIENT_BILLBOARD;
@@ -675,6 +696,30 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
                 if (emit->stretch == 1.f)
                         emit->stretch = 1.5f;
                 break;
+        case EFFECT_TYPE_RAIN:
+                if (!emit->tex_explicit)
+                {
+                        emit->tex_min = 33;
+                        emit->tex_max = 59;
+                }
+                if (!emit->sizey_explicit)
+                {
+                        emit->sizey_min = emit->size_min * 0.25f;
+                        emit->sizey_max = emit->size_max * 0.25f;
+                }
+                if (emit->stretch == 1.f)
+                        emit->stretch = 1.5f;
+                emit->notunderwater = true;
+                emit->bounce = 0.f;
+                break;
+        case EFFECT_TYPE_RAINDECAL:
+                if (!emit->tex_explicit)
+                {
+                        emit->tex_min = 63;
+                        emit->tex_max = 63;
+                }
+                emit->notunderwater = true;
+                break;
         case EFFECT_TYPE_BEAM:
                 if (!emit->tex_explicit)
                 {
@@ -704,6 +749,15 @@ static void R_Effectinfo_ApplyTypeDefaults (effect_emitter_t* emit)
                         emit->tex_min = 24;
                         emit->tex_max = 31;
                 }
+                break;
+        case EFFECT_TYPE_SNOW:
+                if (!emit->tex_explicit)
+                {
+                        emit->tex_min = 63;
+                        emit->tex_max = 63;
+                }
+                emit->notunderwater = true;
+                emit->bounce = 0.f;
                 break;
         case EFFECT_TYPE_ENTITY:
                 emit->kill_on_draw = true;
@@ -1298,6 +1352,12 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                         }
                         continue;
                 }
+
+                if (!q_strcasecmp (com_token, "forcenearest"))
+                {
+                        current_emitter->force_nearest = true;
+                        continue;
+                }
         }
 
         return effectinfo_active;
@@ -1510,6 +1570,9 @@ static qboolean R_Effectinfo_SpawnParticleInstance (const effect_emitter_t* emit
         ext->stretch = emit->stretch;
         ext->blend = emit->blend;
         ext->orient = emit->orient;
+        ext->effect_type = emit->type;
+        ext->next_think = cl.time;
+        ext->force_nearest = emit->force_nearest;
         ext->kill_on_draw = emit->kill_on_draw;
         ext->underwater_only = emit->underwater_only;
         ext->notunderwater = emit->notunderwater;
@@ -3075,6 +3138,20 @@ void CL_RunParticles (void)
                                                 }
                                         }
                                 }
+                        }
+
+                        switch (ext->effect_type)
+                        {
+                        case EFFECT_TYPE_SNOW:
+                                if (cl.time >= ext->next_think)
+                                {
+                                        ext->next_think = cl.time + R_Effectinfo_Random (0.0f, 0.3f);
+                                        vel[0] = vel[0] * 0.9f + R_Effectinfo_CRandom (32.f);
+                                        vel[1] = vel[1] * 0.9f + R_Effectinfo_CRandom (32.f);
+                                }
+                                break;
+                        default:
+                                break;
                         }
 
                         VectorCopy (neworg, p->org);
