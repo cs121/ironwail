@@ -698,3 +698,38 @@ lightradius 200
 lighttime 0
 lightcolor 1 0.7 0.3
 
+// -------------------------------------------------
+// Weather examples: rain streak, splash, gentle snow
+// -------------------------------------------------
+
+effect WEATHER_RAIN
+count 48
+type rain
+color 0x6a7cff 0xa2b9ff
+size 0.25 0.35
+alpha 160 224 256
+gravity 1.5
+velocityoffset 0 0 -180
+velocityjitter 6 6 20
+notunderwater
+
+effect WEATHER_RAIN_SPLASH
+countabsolute 1
+type raindecal
+color 0x3a4cff 0x9ab6ff
+size 1.5 2.0
+alpha 180 220 320
+time 0.2 0.4
+notunderwater
+
+effect WEATHER_SNOW
+count 60
+type snow
+color 0xf4f8ff 0xffffff
+size 0.9 1.4
+alpha 96 160 240
+gravity 0.2
+velocityoffset 0 0 -15
+velocityjitter 6 6 4
+notunderwater
+
