@@ -2800,6 +2800,9 @@ void R_RenderScene (void)
 
 	R_EndTranslucency ();
 
+	if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
+		R_DrawParticles_PostOIT ();
+
 	R_ShowTris (); //johnfitz
 
 	R_ShowBoundingBoxes (); //johnfitz

@@ -3773,6 +3773,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 {
         extern cvar_t r_particles;
         qboolean dither;
+        qboolean oit_alpha_pass;
 
         if (!r_particles.value)
                 return;
@@ -3786,6 +3787,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
         GL_BeginGroup ("Particles");
 
         dither = (softemu == SOFTEMU_COARSE && !showtris);
+        oit_alpha_pass = (!showtris && alpha && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
 
         if (showtris)
         {
@@ -3794,8 +3796,11 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
         else
         {
                 R_DrawParticles_Pass (EFFECT_BLEND_ALPHA, false, dither);
-                R_DrawParticles_Pass (EFFECT_BLEND_ADD, false, dither);
-                R_DrawParticles_Pass (EFFECT_BLEND_INVMOD, false, dither);
+                if (!oit_alpha_pass)
+                {
+                        R_DrawParticles_Pass (EFFECT_BLEND_ADD, false, dither);
+                        R_DrawParticles_Pass (EFFECT_BLEND_INVMOD, false, dither);
+                }
         }
 
         GL_EndGroup ();
@@ -3808,7 +3813,31 @@ R_DrawParticles -- johnfitz -- moved all non-drawing code to CL_RunParticles
 */
 void R_DrawParticles (qboolean alpha)
 {
-	R_DrawParticles_Real (alpha, false);
+        R_DrawParticles_Real (alpha, false);
+}
+
+void R_DrawParticles_PostOIT (void)
+{
+        extern cvar_t r_particles;
+        qboolean dither;
+
+        if (R_GetEffectiveAlphaMode () != ALPHAMODE_OIT)
+                return;
+
+        if (!r_particles.value)
+                return;
+
+        if (!r_numactiveparticles)
+                return;
+
+        dither = (softemu == SOFTEMU_COARSE);
+
+        GL_BeginGroup ("Particles");
+
+        R_DrawParticles_Pass (EFFECT_BLEND_ADD, false, dither);
+        R_DrawParticles_Pass (EFFECT_BLEND_INVMOD, false, dither);
+
+        GL_EndGroup ();
 }
 /*
 ===============
