@@ -481,6 +481,7 @@ void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned ch
 
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
+void R_DrawParticles_PostOIT (void);
 void R_DrawParticles_ShowTris (void);
 int R_Effectinfo_Index (const char *name);
 qboolean R_Effectinfo_SpawnIndex (int index, const vec3_t org, const vec3_t dir, float count);
