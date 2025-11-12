@@ -150,6 +150,9 @@ typedef struct effect_emitter_s
         vec3_t          velocity_rel;
         vec3_t          velocity_jitter;
         float           velocity_multiplier;
+        float           velocity_min;
+        float           velocity_max;
+        float           spawn_radius;
         float           stretch;
         float           rotate_start_min;
         float           rotate_start_max;
@@ -180,8 +183,16 @@ typedef struct effect_emitter_s
         qboolean        blend_explicit;
         qboolean        orient_explicit;
         qboolean        alpha_explicit;
+        qboolean        alpha2_explicit;
+        qboolean        glow_explicit;
+        qboolean        velocity_explicit;
         qboolean        sizey_explicit;
         qboolean        tex_explicit;
+        float           alpha2_min;
+        float           alpha2_max;
+        float           alpha_power;
+        float           glow_min;
+        float           glow_max;
 } effect_emitter_t;
 
 typedef struct effectinfo_s
@@ -534,6 +545,10 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         VectorClear (emit->velocity_rel);
         VectorClear (emit->velocity_jitter);
         emit->velocity_multiplier = 1.f;
+        emit->velocity_min = 0.f;
+        emit->velocity_max = 0.f;
+        emit->velocity_explicit = false;
+        emit->spawn_radius = 0.f;
         emit->stretch = 1.f;
         emit->rotate_start_min = 0.f;
         emit->rotate_start_max = 0.f;
@@ -564,8 +579,15 @@ static effect_emitter_t* R_Effectinfo_NewEmitter (effectinfo_t* def)
         emit->blend_explicit = false;
         emit->orient_explicit = false;
         emit->alpha_explicit = false;
+        emit->alpha2_explicit = false;
+        emit->glow_explicit = false;
         emit->sizey_explicit = false;
         emit->tex_explicit = false;
+        emit->alpha2_min = 0.f;
+        emit->alpha2_max = 0.f;
+        emit->alpha_power = 1.f;
+        emit->glow_min = 0.f;
+        emit->glow_max = 0.f;
         if (def->num_emitters == 0)
                 def->first_emitter = (int)(emit - effect_emitters);
         def->num_emitters++;
@@ -1112,6 +1134,41 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                         continue;
                 }
 
+                if (!q_strcasecmp (com_token, "alpha2"))
+                {
+                        float amin, amax;
+                        if (R_Effectinfo_ParseFloatPair (&data, &amin, &amax))
+                        {
+                                if (amax < amin)
+                                {
+                                        float tmp = amin;
+                                        amin = amax;
+                                        amax = tmp;
+                                }
+                        }
+                        else if (R_Effectinfo_ParseFloat (&data, &amin))
+                        {
+                                amax = amin;
+                        }
+                        else
+                        {
+                                continue;
+                        }
+
+                        current_emitter->alpha2_min = amin * (1.f / 256.f);
+                        current_emitter->alpha2_max = amax * (1.f / 256.f);
+                        current_emitter->alpha2_explicit = true;
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "fade"))
+                {
+                        float power;
+                        if (R_Effectinfo_ParseFloat (&data, &power))
+                                current_emitter->alpha_power = (power > 0.f) ? power : 1.f;
+                        continue;
+                }
+
                 if (!q_strcasecmp (com_token, "time"))
                 {
                         float tmin, tmax;
@@ -1119,6 +1176,22 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                         {
                                 current_emitter->time_min = q_max (0.01f, tmin);
                                 current_emitter->time_max = q_max (current_emitter->time_min, tmax);
+                        }
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "lifetime"))
+                {
+                        float tmin, tmax;
+                        if (R_Effectinfo_ParseFloatPair (&data, &tmin, &tmax))
+                        {
+                                current_emitter->time_min = q_max (0.01f, tmin);
+                                current_emitter->time_max = q_max (current_emitter->time_min, tmax);
+                        }
+                        else if (R_Effectinfo_ParseFloat (&data, &tmin))
+                        {
+                                current_emitter->time_min = q_max (0.01f, tmin);
+                                current_emitter->time_max = current_emitter->time_min;
                         }
                         continue;
                 }
@@ -1173,6 +1246,14 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                         continue;
                 }
 
+                if (!q_strcasecmp (com_token, "spawnradius"))
+                {
+                        float radius;
+                        if (R_Effectinfo_ParseFloat (&data, &radius))
+                                current_emitter->spawn_radius = q_max (0.f, radius);
+                        continue;
+                }
+
                 if (!q_strcasecmp (com_token, "velocityoffset"))
                 {
                         R_Effectinfo_ParseVec3 (&data, current_emitter->velocity_offset);
@@ -1188,6 +1269,33 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                 if (!q_strcasecmp (com_token, "velocityjitter"))
                 {
                         R_Effectinfo_ParseVec3 (&data, current_emitter->velocity_jitter);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "velocity"))
+                {
+                        float vmin, vmax;
+                        if (R_Effectinfo_ParseFloatPair (&data, &vmin, &vmax))
+                        {
+                                if (vmax < vmin)
+                                {
+                                        float tmp = vmin;
+                                        vmin = vmax;
+                                        vmax = tmp;
+                                }
+                        }
+                        else if (R_Effectinfo_ParseFloat (&data, &vmin))
+                        {
+                                vmax = vmin;
+                        }
+                        else
+                        {
+                                continue;
+                        }
+
+                        current_emitter->velocity_min = vmin;
+                        current_emitter->velocity_max = vmax;
+                        current_emitter->velocity_explicit = true;
                         continue;
                 }
 
@@ -1220,6 +1328,33 @@ static qboolean R_Effectinfo_ParseText (const char* text, const char* source)
                 if (!q_strcasecmp (com_token, "lightcolor"))
                 {
                         R_Effectinfo_ParseVec3 (&data, current_emitter->light_color);
+                        continue;
+                }
+
+                if (!q_strcasecmp (com_token, "glow"))
+                {
+                        float gmin, gmax;
+                        if (R_Effectinfo_ParseFloatPair (&data, &gmin, &gmax))
+                        {
+                                if (gmax < gmin)
+                                {
+                                        float tmp = gmin;
+                                        gmin = gmax;
+                                        gmax = tmp;
+                                }
+                        }
+                        else if (R_Effectinfo_ParseFloat (&data, &gmin))
+                        {
+                                gmax = gmin;
+                        }
+                        else
+                        {
+                                continue;
+                        }
+
+                        current_emitter->glow_min = gmin;
+                        current_emitter->glow_max = gmax;
+                        current_emitter->glow_explicit = true;
                         continue;
                 }
 
@@ -1491,9 +1626,79 @@ static qboolean R_Effectinfo_SpawnParticleInstance (const effect_emitter_t* emit
                 spawn_org[2] += R_Effectinfo_CRandom (emit->origin_jitter[2]);
         }
 
-        VectorCopy (dir, velocity);
-        if (emit->velocity_multiplier != 0.f)
-                VectorScale (velocity, emit->velocity_multiplier, velocity);
+        if (emit->spawn_radius > 0.f)
+        {
+                vec3_t radial;
+                int attempt;
+                for (attempt = 0; attempt < 8; ++attempt)
+                {
+                        float len;
+                        radial[0] = R_Effectinfo_CRandom (1.f);
+                        radial[1] = R_Effectinfo_CRandom (1.f);
+                        radial[2] = R_Effectinfo_CRandom (1.f);
+                        len = VectorLength (radial);
+                        if (len > 0.0001f)
+                        {
+                                float dist = emit->spawn_radius * powf (R_Effectinfo_Random (0.f, 1.f), 1.f / 3.f);
+                                VectorScale (radial, dist / len, radial);
+                                VectorAdd (spawn_org, radial, spawn_org);
+                                break;
+                        }
+                }
+                if (attempt == 8)
+                {
+                        spawn_org[0] += R_Effectinfo_CRandom (emit->spawn_radius);
+                        spawn_org[1] += R_Effectinfo_CRandom (emit->spawn_radius);
+                        spawn_org[2] += R_Effectinfo_CRandom (emit->spawn_radius);
+                }
+        }
+
+        {
+                vec3_t velocity_dir;
+                float base_len = VectorLength (dir);
+                float speed;
+                int attempt;
+
+                if (base_len > 0.0001f)
+                {
+                        VectorCopy (dir, velocity_dir);
+                        VectorScale (velocity_dir, 1.f / base_len, velocity_dir);
+                }
+                else
+                {
+                        for (attempt = 0; attempt < 8; ++attempt)
+                        {
+                                float len;
+                                velocity_dir[0] = R_Effectinfo_CRandom (1.f);
+                                velocity_dir[1] = R_Effectinfo_CRandom (1.f);
+                                velocity_dir[2] = R_Effectinfo_CRandom (1.f);
+                                len = VectorLength (velocity_dir);
+                                if (len > 0.0001f)
+                                {
+                                        VectorScale (velocity_dir, 1.f / len, velocity_dir);
+                                        break;
+                                }
+                        }
+                        if (attempt == 8)
+                                VectorSet (velocity_dir, 0.f, 0.f, 1.f);
+                }
+
+                if (emit->velocity_explicit)
+                {
+                        float vmin = q_min (emit->velocity_min, emit->velocity_max);
+                        float vmax = q_max (emit->velocity_min, emit->velocity_max);
+                        speed = R_Effectinfo_Random (vmin, vmax);
+                }
+                else
+                {
+                        speed = base_len;
+                }
+
+                if (emit->velocity_multiplier != 0.f)
+                        speed *= emit->velocity_multiplier;
+
+                VectorScale (velocity_dir, speed, velocity);
+        }
 
         if (!VectorCompare (emit->velocity_offset, vec3_origin))
                 VectorAdd (velocity, emit->velocity_offset, velocity);
@@ -1558,11 +1763,24 @@ static qboolean R_Effectinfo_SpawnParticleInstance (const effect_emitter_t* emit
         alpha = R_Effectinfo_Random (emit->alpha_min, emit->alpha_max);
         alpha = q_clamp (alpha, 0.f, 1.f);
         ext->alpha_current = alpha;
-        ext->alpha_decay = q_max (0.f, emit->alpha_fade);
-        ext->alpha_mode = emit->alpha_mode;
-        p->alpha_start = alpha;
-        p->alpha_end = 0.f;
-        p->alpha_power = 1.f;
+        if (emit->alpha2_explicit)
+        {
+                float alpha2 = R_Effectinfo_Random (emit->alpha2_min, emit->alpha2_max);
+                alpha2 = q_clamp (alpha2, 0.f, 1.f);
+                ext->alpha_mode = EFFECT_ALPHA_LERP;
+                ext->alpha_decay = 0.f;
+                p->alpha_start = alpha;
+                p->alpha_end = alpha2;
+                p->alpha_power = (emit->alpha_power > 0.f) ? emit->alpha_power : 1.f;
+        }
+        else
+        {
+                ext->alpha_decay = q_max (0.f, emit->alpha_fade);
+                ext->alpha_mode = emit->alpha_mode;
+                p->alpha_start = alpha;
+                p->alpha_end = 0.f;
+                p->alpha_power = 1.f;
+        }
 
         p->airfriction = emit->airfriction;
         ext->liquidfriction = emit->liquidfriction;
@@ -1581,7 +1799,15 @@ static qboolean R_Effectinfo_SpawnParticleInstance (const effect_emitter_t* emit
         ext->rotation = DEG2RAD (R_Effectinfo_Random (emit->rotate_start_min, emit->rotate_start_max));
         ext->spin = DEG2RAD (R_Effectinfo_Random (emit->rotate_speed_min, emit->rotate_speed_max));
 
-        p->glow = 0.f;
+        if (emit->glow_explicit)
+        {
+                float glow = R_Effectinfo_Random (emit->glow_min, emit->glow_max);
+                p->glow = q_max (0.f, glow);
+        }
+        else
+        {
+                p->glow = 0.f;
+        }
         p->color = 0;
         p->ramp = 0.f;
 
