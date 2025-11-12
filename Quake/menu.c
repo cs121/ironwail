@@ -2961,8 +2961,8 @@ static const char *VID_Menu_GetParticlesDesc (void)
 	switch ((int)r_particles.value)
 	{
 	case 0: return "Off";
-	case 1: return "glQuake";
-	case 2: return "Classic";
+	case 1: return "Classic";
+	case 2: return "DarkPlaces";
 	default: return "";
 	}
 }
