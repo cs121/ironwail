@@ -25,6 +25,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "image.h"
 
 extern cvar_t sv_gravity;
+extern cvar_t r_particles;
+
+static int R_Particles_ModeFromValue (float value);
+static int R_Particles_GetMode (void);
+static qboolean R_Particles_UseEffectinfo (void);
 
 static int R_PointContentsSafe (vec3_t p)
 {
@@ -1523,6 +1528,12 @@ void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* world
         qboolean loaded = false;
         qboolean loaded_map = false;
 
+        if (!R_Particles_UseEffectinfo ())
+        {
+                R_Effectinfo_Clear ();
+                return;
+        }
+
         R_Effectinfo_Clear ();
 
         if (customfile && *customfile)
@@ -1978,6 +1989,29 @@ static qboolean R_Effectinfo_SpawnEffect (const effectinfo_t* def, const vec3_t 
 
 cvar_t  r_particles = { "r_particles","1", CVAR_ARCHIVE };
 
+static int R_Particles_ModeFromValue (float value)
+{
+        int mode = (int)value;
+
+        if (mode < 0)
+                mode = 0;
+        else if (mode > 2)
+                mode = 2;
+
+        return mode;
+}
+
+static int R_Particles_GetMode (void)
+{
+        return R_Particles_ModeFromValue (r_particles.value);
+}
+
+static qboolean R_Particles_UseEffectinfo (void)
+{
+        return R_Particles_GetMode () == 2;
+}
+
+
 typedef struct particlevert_t {
         vec3_t      pos;
         vec3_t      vel;
@@ -2288,15 +2322,22 @@ R_SetParticleTexture_f -- johnfitz
 */
 static void R_SetParticleTexture_f (cvar_t* var)
 {
+        int mode;
+
         (void)var;
 
-        if (r_particles.value < 0.f)
-                Cvar_SetValueQuick (&r_particles, 0.f);
-        else if (r_particles.value > 1.f)
-                Cvar_SetValueQuick (&r_particles, 1.f);
+        mode = R_Particles_ModeFromValue (r_particles.value);
+        if (r_particles.value != (float)mode)
+        {
+                Cvar_SetValueQuick (&r_particles, (float)mode);
+                return;
+        }
 
         uvscale = 0.25f;
         texturescalefactor = 1.0f;
+
+        if (mode == 2 && !R_Effectinfo_Active ())
+                R_Particles_LoadEffectInfo (NULL);
 }
 
 /*
@@ -3784,7 +3825,7 @@ int R_Effectinfo_Index (const char *name)
         effectinfo_t *def;
         int i;
 
-        if (!effectinfo_active || !name || !*name)
+        if (!R_Effectinfo_Active () || !name || !*name)
                 return -1;
 
         for (i = 0; i < num_effectinfos; ++i)
@@ -3799,7 +3840,7 @@ int R_Effectinfo_Index (const char *name)
 
 qboolean R_Effectinfo_SpawnIndex (int index, const vec3_t org, const vec3_t dir, float count)
 {
-        if (!effectinfo_active)
+        if (!R_Effectinfo_Active ())
         {
                 if (r_particles_debug.value)
                         Con_Printf ("effectinfo debug: attempted to spawn effect index %d but effectinfo is inactive\n", index);
@@ -3818,7 +3859,7 @@ qboolean R_Effectinfo_SpawnName (const char *name, const vec3_t org, const vec3_
 {
         effectinfo_t *def;
 
-        if (!effectinfo_active)
+        if (!R_Effectinfo_Active ())
         {
                 if (r_particles_debug.value)
                         Con_Printf ("effectinfo debug: attempted to spawn effect '%s' but effectinfo is inactive\n", name ? name : "(null)");
@@ -3844,5 +3885,8 @@ qboolean R_Effectinfo_SpawnName (const char *name, const vec3_t org, const vec3_
 
 qboolean R_Effectinfo_Active (void)
 {
-        return effectinfo_active;
+        if (!effectinfo_active)
+                return false;
+
+        return R_Particles_UseEffectinfo ();
 }
