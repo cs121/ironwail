@@ -1,6 +1,8 @@
 #include "quakedef.h"
 #include "q_ctype.h"
 
+#include <float.h>
+
 extern edict_t *sv_player;
 
 static cvar_t sv_bot_spawn = {"sv_bot_spawn", "0", CVAR_NONE};
@@ -96,6 +98,12 @@ typedef struct bot_profile_s
 	char		chat_lines[MAX_BOT_CHAT_LINES][MAX_BOT_CHAT_LENGTH];
 } bot_profile_t;
 
+#define BOT_MAX_WAYPOINTS			256
+#define BOT_MAX_PATH_LENGTH		 64
+#define BOT_MAX_NODES			(BOT_MAX_WAYPOINTS + 2)
+#define BOT_WALL_CHECK_INTERVAL 0.4
+#define BOT_ROCKET_MIN_SAFE_DIST		160.0f
+
 typedef struct
 {
 	qboolean		active;
@@ -120,6 +128,11 @@ typedef struct
 	double		enemy_last_visible_time;
 	double		next_jump_check_time;
 	qboolean		aim_initialized;
+	double		next_wall_check_time;
+	double		next_path_recalc_time;
+	edict_t		*path_nodes[BOT_MAX_PATH_LENGTH];
+	int			path_length;
+	int			path_index;
 } sv_bot_state_t;
 
 static sv_bot_state_t sv_bot_states[MAX_SCOREBOARD];
@@ -132,11 +145,285 @@ static bot_skill_settings_t bot_skill_settings[MAX_BOT_SKILLS];
 static int bot_skill_settings_count = 0;
 static qboolean bot_skill_settings_loaded = false;
 
+typedef struct
+{
+        edict_t         *edict;
+} bot_waypoint_entry_t;
+
+static bot_waypoint_entry_t bot_waypoints[BOT_MAX_WAYPOINTS];
+static int bot_waypoint_count = 0;
+static qboolean bot_waypoints_initialized = false;
+
 
 
 static float SV_Bot_Frand (void)
 {
-	return (float)rand () / (float)RAND_MAX;
+        return (float)rand () / (float)RAND_MAX;
+}
+
+static qboolean SV_Bot_IsPickupWaypoint (const edict_t *ent)
+{
+        const char *classname;
+
+        if (!ent || ent->free || !ent->v.classname)
+                return false;
+
+        classname = PR_GetString (ent->v.classname);
+        if (!classname || !classname[0])
+                return false;
+
+        if (!q_strncasecmp (classname, "weapon_", 7))
+                return true;
+        if (!q_strncasecmp (classname, "item_", 5))
+                return true;
+        if (!q_strncasecmp (classname, "ammo_", 5))
+                return true;
+
+        return false;
+}
+
+static void SV_Bot_BuildWaypointList (void)
+{
+        int i;
+
+        bot_waypoint_count = 0;
+
+        for (i = svs.maxclients + 1; i < qcvm->num_edicts && bot_waypoint_count < BOT_MAX_WAYPOINTS; i++)
+        {
+                edict_t *ent = EDICT_NUM (i);
+
+                if (!SV_Bot_IsPickupWaypoint (ent))
+                        continue;
+
+                bot_waypoints[bot_waypoint_count].edict = ent;
+                bot_waypoint_count++;
+        }
+
+        bot_waypoints_initialized = true;
+}
+
+static void SV_Bot_EnsureWaypoints (void)
+{
+        int i;
+
+        if (!bot_waypoints_initialized)
+        {
+                SV_Bot_BuildWaypointList ();
+                return;
+        }
+
+        for (i = 0; i < bot_waypoint_count; i++)
+        {
+                if (!bot_waypoints[i].edict || bot_waypoints[i].edict->free)
+                {
+                        bot_waypoints_initialized = false;
+                        SV_Bot_BuildWaypointList ();
+                        break;
+                }
+        }
+}
+
+static void SV_Bot_GetNodePosition (const edict_t *ent, vec3_t out)
+{
+        if (!ent)
+        {
+                VectorClear (out);
+                return;
+        }
+
+        VectorCopy (ent->v.origin, out);
+        if (ent->v.view_ofs[2] != 0.0f)
+                out[2] += ent->v.view_ofs[2];
+        else
+                out[2] += 16.0f;
+}
+
+static qboolean SV_Bot_CanTravelBetween (edict_t *from, edict_t *to, edict_t *ignore)
+{
+        vec3_t start, end;
+        trace_t trace;
+
+        if (!from || !to)
+                return false;
+
+        SV_Bot_GetNodePosition (from, start);
+        SV_Bot_GetNodePosition (to, end);
+
+        trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, ignore);
+        return trace.fraction >= 0.99f || trace.ent == to;
+}
+
+static qboolean SV_Bot_BuildWaypointPath (edict_t *self, edict_t *goal, edict_t **out_path, int *out_length)
+{
+        edict_t *nodes[BOT_MAX_NODES];
+        int node_count = 0;
+        int start_index = 0;
+        int goal_index;
+        int queue[BOT_MAX_NODES];
+        int prev[BOT_MAX_NODES];
+        qboolean visited[BOT_MAX_NODES];
+        int head = 0;
+        int tail = 0;
+        int i;
+
+        if (!self || !goal || !out_path || !out_length)
+                return false;
+
+        nodes[node_count++] = self;
+
+        for (i = 0; i < bot_waypoint_count && node_count < BOT_MAX_NODES - 1; i++)
+        {
+            edict_t *wp = bot_waypoints[i].edict;
+
+            if (!wp || wp->free || wp == goal)
+                    continue;
+
+            nodes[node_count++] = wp;
+        }
+
+        nodes[node_count++] = goal;
+        goal_index = node_count - 1;
+
+        for (i = 0; i < node_count; i++)
+        {
+                prev[i] = -1;
+                visited[i] = false;
+        }
+
+        visited[start_index] = true;
+        queue[tail++] = start_index;
+
+        while (head < tail)
+        {
+                int current = queue[head++];
+                if (current == goal_index)
+                        break;
+
+                for (i = 0; i < node_count; i++)
+                {
+                        if (visited[i] || i == current)
+                                continue;
+                        if (!SV_Bot_CanTravelBetween (nodes[current], nodes[i], self))
+                                continue;
+
+                        visited[i] = true;
+                        prev[i] = current;
+                        if (tail < BOT_MAX_NODES)
+                                queue[tail++] = i;
+                        if (i == goal_index)
+                                break;
+                }
+        }
+
+        if (!visited[goal_index])
+                return false;
+
+        {
+                int order[BOT_MAX_PATH_LENGTH];
+                int order_length = 0;
+                int idx = goal_index;
+
+                while (idx != start_index && order_length < BOT_MAX_PATH_LENGTH)
+                {
+                        order[order_length++] = idx;
+                        idx = prev[idx];
+                        if (idx < 0)
+                                break;
+                }
+
+                if (idx != start_index)
+                        return false;
+
+                *out_length = 0;
+                while (order_length > 0)
+                {
+                        int node_index = order[--order_length];
+
+                        if (*out_length >= BOT_MAX_PATH_LENGTH)
+                                return false;
+
+                        out_path[(*out_length)++] = nodes[node_index];
+                }
+        }
+
+        return *out_length > 0;
+}
+
+static void SV_Bot_ClearPath (sv_bot_state_t *state)
+{
+        if (!state)
+                return;
+
+        state->path_length = 0;
+        state->path_index = 0;
+}
+
+static qboolean SV_Bot_RecalculatePath (edict_t *self, sv_bot_state_t *state, double now)
+{
+        edict_t *goal;
+        edict_t *path[BOT_MAX_PATH_LENGTH];
+        int length = 0;
+        int i;
+
+        if (!self || !state)
+                return false;
+
+        goal = state->goal_edict;
+        state->path_length = 0;
+        state->path_index = 0;
+        state->next_path_recalc_time = now + 1.0;
+
+        if (!goal)
+                return false;
+
+        SV_Bot_EnsureWaypoints ();
+
+        if (!SV_Bot_BuildWaypointPath (self, goal, path, &length))
+                return false;
+
+        if (length <= 0)
+                return false;
+
+        for (i = 0; i < length && i < BOT_MAX_PATH_LENGTH; i++)
+                state->path_nodes[i] = path[i];
+
+        state->path_length = length;
+        state->path_index = 0;
+        state->next_path_recalc_time = now + 0.5;
+
+        return true;
+}
+
+static void SV_Bot_UpdatePathProgress (edict_t *self, sv_bot_state_t *state)
+{
+        if (!self || !state || state->path_length <= 0)
+                return;
+
+        while (state->path_index < state->path_length)
+        {
+                edict_t *target = state->path_nodes[state->path_index];
+
+                if (!target || target->free)
+                {
+                        state->path_length = 0;
+                        state->path_index = 0;
+                        return;
+                }
+
+                if (SV_Bot_Distance (target->v.origin, self->v.origin) <= 64.0f)
+                {
+                        state->path_index++;
+                        continue;
+                }
+
+                break;
+        }
+
+        if (state->path_index >= state->path_length)
+        {
+                state->path_length = 0;
+                state->path_index = 0;
+        }
 }
 
 static void SV_Bot_ResetProfiles (void)
@@ -719,9 +1006,9 @@ static void SV_Bot_UpdateAimAngles (edict_t *self, sv_bot_state_t *state, const 
 
 static int SV_Bot_WeaponBitForClassname (const char *classname, int *out_rank)
 {
-	struct weapon_map_s
-	{
-		const char *classname;
+        struct weapon_map_s
+        {
+                const char *classname;
 		int bit;
 		int rank;
 	};
@@ -747,14 +1034,124 @@ static int SV_Bot_WeaponBitForClassname (const char *classname, int *out_rank)
 		}
 	}
 
-	return 0;
+        return 0;
+}
+
+static qboolean SV_Bot_HasAmmoForWeapon (edict_t *self, int weapon_bit)
+{
+        if (!self)
+                return false;
+
+        switch (weapon_bit)
+        {
+        case IT_LIGHTNING:
+                return self->v.ammo_cells > 0;
+        case IT_ROCKET_LAUNCHER:
+        case IT_GRENADE_LAUNCHER:
+                return self->v.ammo_rockets > 0;
+        case IT_SUPER_NAILGUN:
+        case IT_NAILGUN:
+                return self->v.ammo_nails > 0;
+        case IT_SUPER_SHOTGUN:
+        case IT_SHOTGUN:
+                return self->v.ammo_shells > 0;
+        case IT_AXE:
+                return true;
+        default:
+                return true;
+        }
+}
+
+static void SV_Bot_SelectBestWeapon (edict_t *self, edict_t *enemy)
+{
+        static const struct weapon_choice_s
+        {
+                int bit;
+                int impulse;
+        } choices[] =
+        {
+                { IT_LIGHTNING, 8 },
+                { IT_ROCKET_LAUNCHER, 7 },
+                { IT_GRENADE_LAUNCHER, 6 },
+                { IT_SUPER_NAILGUN, 5 },
+                { IT_NAILGUN, 4 },
+                { IT_SUPER_SHOTGUN, 3 },
+                { IT_SHOTGUN, 2 },
+                { IT_AXE, 1 },
+        };
+        int items;
+        float enemy_dist = FLT_MAX;
+        int desired_bit = 0;
+        int desired_impulse = 0;
+        size_t i;
+
+        if (!self)
+                return;
+
+        items = (int)self->v.items;
+        if (enemy)
+                enemy_dist = SV_Bot_Distance (enemy->v.origin, self->v.origin);
+
+        for (i = 0; i < sizeof(choices)/sizeof(choices[0]); i++)
+        {
+                int bit = choices[i].bit;
+                int impulse = choices[i].impulse;
+
+                if (!(items & bit))
+                        continue;
+                if (!SV_Bot_HasAmmoForWeapon (self, bit))
+                        continue;
+                if (bit == IT_ROCKET_LAUNCHER && enemy && enemy_dist < BOT_ROCKET_MIN_SAFE_DIST)
+                        continue;
+
+                desired_bit = bit;
+                desired_impulse = impulse;
+                break;
+        }
+
+        if (!desired_bit)
+        {
+                for (i = 0; i < sizeof(choices)/sizeof(choices[0]); i++)
+                {
+                        int bit = choices[i].bit;
+                        int impulse = choices[i].impulse;
+
+                        if (!(items & bit))
+                                continue;
+                        if (!SV_Bot_HasAmmoForWeapon (self, bit))
+                                continue;
+
+                        desired_bit = bit;
+                        desired_impulse = impulse;
+                        break;
+                }
+        }
+
+        if (!desired_bit)
+        {
+                for (i = 0; i < sizeof(choices)/sizeof(choices[0]); i++)
+                {
+                        int bit = choices[i].bit;
+                        int impulse = choices[i].impulse;
+
+                        if (!(items & bit))
+                                continue;
+
+                        desired_bit = bit;
+                        desired_impulse = impulse;
+                        break;
+                }
+        }
+
+        if (desired_bit && (int)self->v.weapon != desired_bit)
+                self->v.impulse = desired_impulse;
 }
 
 static edict_t *SV_Bot_FindGoal (edict_t *self, bot_priority_t priority)
 {
-	edict_t *best = NULL;
-	float best_dist = 0.0f;
-	int best_rank = -1;
+        edict_t *best = NULL;
+        float best_dist = 0.0f;
+        int best_rank = -1;
 	int i;
 
 	for (i = svs.maxclients + 1; i < qcvm->num_edicts; i++)
@@ -879,65 +1276,75 @@ static void SV_Bot_UpdateGoal (edict_t *self, sv_bot_state_t *state, bot_priorit
 	if (!state)
 	return;
 
-	if (priority == BOT_PRIORITY_NONE)
-	{
-	state->goal_edict = NULL;
-	state->goal_priority = BOT_PRIORITY_NONE;
-	state->goal_best_dist = 0.0f;
-	return;
-	}
+        if (priority == BOT_PRIORITY_NONE)
+        {
+        state->goal_edict = NULL;
+        state->goal_priority = BOT_PRIORITY_NONE;
+        state->goal_best_dist = 0.0f;
+        SV_Bot_ClearPath (state);
+        return;
+        }
 
-	if (state->goal_priority != priority || !SV_Bot_GoalStillValid (state->goal_edict, priority, self))
-	{
-	goal = SV_Bot_FindGoal (self, priority);
-	state->goal_edict = goal;
-	state->goal_priority = priority;
-	if (goal)
-	{
-	state->goal_best_dist = SV_Bot_Distance (goal->v.origin, self->v.origin);
-	state->goal_last_progress_time = now;
-	}
-	else
-	{
-	state->goal_best_dist = 0.0f;
-	}
-	}
+        if (state->goal_priority != priority || !SV_Bot_GoalStillValid (state->goal_edict, priority, self))
+        {
+        goal = SV_Bot_FindGoal (self, priority);
+        state->goal_edict = goal;
+        state->goal_priority = priority;
+        SV_Bot_ClearPath (state);
+        if (goal)
+        {
+        state->goal_best_dist = SV_Bot_Distance (goal->v.origin, self->v.origin);
+        state->goal_last_progress_time = now;
+        SV_Bot_RecalculatePath (self, state, now);
+        }
+        else
+        {
+        state->goal_best_dist = 0.0f;
+        }
+        }
+        else if (state->goal_edict && state->path_length <= 0 && now >= state->next_path_recalc_time)
+        {
+        SV_Bot_RecalculatePath (self, state, now);
+        }
 }
 
 static void SV_Bot_CheckGoalProgress (edict_t *self, sv_bot_state_t *state, double now)
 {
-	float dist;
+        float dist;
 
-	if (!state || !state->goal_edict)
-	return;
+        if (!state || !state->goal_edict)
+        return;
 
-	if (!SV_Bot_GoalStillValid (state->goal_edict, state->goal_priority, self))
-	{
-	state->goal_edict = NULL;
-	state->goal_priority = BOT_PRIORITY_NONE;
-	return;
-	}
+        if (!SV_Bot_GoalStillValid (state->goal_edict, state->goal_priority, self))
+        {
+        state->goal_edict = NULL;
+        state->goal_priority = BOT_PRIORITY_NONE;
+        SV_Bot_ClearPath (state);
+        return;
+        }
 
-	dist = SV_Bot_Distance (state->goal_edict->v.origin, self->v.origin);
-	if (dist < 48.0f)
-	{
-	state->goal_edict = NULL;
-	state->goal_priority = BOT_PRIORITY_NONE;
-	state->goal_best_dist = 0.0f;
-	return;
-	}
+        dist = SV_Bot_Distance (state->goal_edict->v.origin, self->v.origin);
+        if (dist < 48.0f)
+        {
+        state->goal_edict = NULL;
+        state->goal_priority = BOT_PRIORITY_NONE;
+        state->goal_best_dist = 0.0f;
+        SV_Bot_ClearPath (state);
+        return;
+        }
 
-	if (dist < state->goal_best_dist - 16.0f)
-	{
-	state->goal_best_dist = dist;
-	state->goal_last_progress_time = now;
-	}
-	else if (now - state->goal_last_progress_time > 3.0)
-	{
-	state->goal_edict = NULL;
-	state->goal_priority = BOT_PRIORITY_NONE;
-	state->next_wander_time = 0.0;
-	}
+        if (dist < state->goal_best_dist - 16.0f)
+        {
+        state->goal_best_dist = dist;
+        state->goal_last_progress_time = now;
+        }
+        else if (now - state->goal_last_progress_time > 3.0)
+        {
+        state->goal_edict = NULL;
+        state->goal_priority = BOT_PRIORITY_NONE;
+        state->next_wander_time = 0.0;
+        SV_Bot_ClearPath (state);
+        }
 }
 
 static qboolean SV_Bot_CanSeeTarget (edict_t *self, edict_t *target)
@@ -1019,25 +1426,73 @@ void SV_Bot_Reset (void)
         }
         bot_name_counter = 1;
         SV_Bot_ResetProfiles ();
+        bot_waypoint_count = 0;
+        bot_waypoints_initialized = false;
 }
 
 static void SV_Bot_PickWanderDirection (sv_bot_state_t *state)
 {
-	float yaw = (float)(rand () % 360);
-	float radians = yaw * (float)M_PI / 180.0f;
-	vec3_t dir = { (float)cos (radians), (float)sin (radians), 0.0f };
+        float yaw = (float)(rand () % 360);
+        float radians = yaw * (float)M_PI / 180.0f;
+        vec3_t dir = { (float)cos (radians), (float)sin (radians), 0.0f };
 
 	VectorNormalize (dir);
 	VectorCopy (dir, state->wander_dir);
 	state->wander_yaw = yaw;
-	state->next_wander_time = qcvm->time + 2.0 + ((float)(rand () & 255) / 255.0f) * 4.0f;
+        state->next_wander_time = qcvm->time + 2.0 + ((float)(rand () & 255) / 255.0f) * 4.0f;
+}
+
+static void SV_Bot_CheckForObstacles (edict_t *self, sv_bot_state_t *state, edict_t *move_target, double now)
+{
+        vec3_t dir;
+        vec3_t start, end;
+        float length;
+        trace_t trace;
+
+        if (!self || !state)
+                return;
+
+        if (now < state->next_wall_check_time)
+                return;
+
+        if (move_target)
+                VectorSubtract (move_target->v.origin, self->v.origin, dir);
+        else
+                VectorCopy (state->wander_dir, dir);
+
+        length = VectorNormalize (dir);
+        if (length <= 0.0f)
+        {
+                state->next_wall_check_time = now + BOT_WALL_CHECK_INTERVAL;
+                return;
+        }
+
+        VectorCopy (self->v.origin, start);
+        start[2] += (self->v.view_ofs[2] != 0.0f) ? self->v.view_ofs[2] : 16.0f;
+        VectorMA (start, 48.0f, dir, end);
+
+        trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
+        state->next_wall_check_time = now + BOT_WALL_CHECK_INTERVAL;
+
+        if (trace.fraction < 0.3f)
+        {
+                if (state->goal_edict)
+                {
+                        state->next_path_recalc_time = now;
+                        SV_Bot_RecalculatePath (self, state, now);
+                }
+                else
+                {
+                        SV_Bot_PickWanderDirection (state);
+                }
+        }
 }
 
 static qboolean SV_Bot_NameExists (const char *name)
 {
-	int i;
+        int i;
 
-	for (i = 0; i < svs.maxclients; i++)
+        for (i = 0; i < svs.maxclients; i++)
 	{
 		if (!svs.clients[i].active)
 			continue;
@@ -1157,28 +1612,31 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	double now = qcvm->time;
 	float skill = state ? state->skill : 1.0f;
 	const bot_skill_settings_t *settings = state ? state->settings : NULL;
-	bot_priority_t priority = BOT_PRIORITY_NONE;
-	edict_t *goal = NULL;
-	vec3_t delta;
-	vec3_t base_angles;
-	qboolean have_base_angles = false;
+        bot_priority_t priority = BOT_PRIORITY_NONE;
+        edict_t *goal = NULL;
+        edict_t *move_target = NULL;
+        vec3_t delta;
+        vec3_t base_angles;
+        qboolean have_base_angles = false;
 
 	if (!self || self->free)
 		return;
 
-	enemy = SV_Bot_FindTarget (client, state, true);
-	if (!enemy)
-		enemy = SV_Bot_FindTarget (client, state, false);
+        enemy = SV_Bot_FindTarget (client, state, true);
+        if (!enemy)
+                enemy = SV_Bot_FindTarget (client, state, false);
 
-	memset (cmd, 0, sizeof(*cmd));
-	self->v.button0 = 0;
-	self->v.button2 = 0;
+        SV_Bot_SelectBestWeapon (self, enemy ? enemy->edict : NULL);
 
-	if (state)
-	{
-		if (now - state->last_stuck_time > 1.0)
-		{
-			VectorSubtract (self->v.origin, state->last_position, delta);
+        memset (cmd, 0, sizeof(*cmd));
+        self->v.button0 = 0;
+        self->v.button2 = 0;
+
+        if (state)
+        {
+                if (now - state->last_stuck_time > 1.0)
+                {
+                        VectorSubtract (self->v.origin, state->last_position, delta);
 			if (VectorLength (delta) < 16.0f)
 			{
 				state->next_wander_time = 0.0;
@@ -1194,44 +1652,75 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	{
 		priority = SV_Bot_EvaluateNeeds (self, settings);
 		SV_Bot_UpdateGoal (self, state, priority, now);
-		SV_Bot_CheckGoalProgress (self, state, now);
-		goal = state->goal_edict;
+                SV_Bot_CheckGoalProgress (self, state, now);
+                goal = state->goal_edict;
 
-		if (!goal && state->next_wander_time <= now)
-			SV_Bot_PickWanderDirection (state);
-	}
+                if (!goal && state->next_wander_time <= now)
+                        SV_Bot_PickWanderDirection (state);
+        }
 
-	if (enemy && state && settings && !settings->behaviors.allow_grab_items_in_combat)
-	{
-		priority = BOT_PRIORITY_NONE;
-		state->goal_edict = NULL;
-		state->goal_priority = BOT_PRIORITY_NONE;
-		goal = NULL;
-	}
+        if (state)
+                SV_Bot_UpdatePathProgress (self, state);
 
-	if (goal)
-	{
-		vec3_t dir;
-		float dist;
+        if (enemy && state && settings && !settings->behaviors.allow_grab_items_in_combat)
+        {
+                priority = BOT_PRIORITY_NONE;
+                state->goal_edict = NULL;
+                state->goal_priority = BOT_PRIORITY_NONE;
+                SV_Bot_ClearPath (state);
+                goal = NULL;
+        }
 
-		VectorSubtract (goal->v.origin, self->v.origin, dir);
-		dist = VectorLength (dir);
-		if (dist > 0)
-			VectorScale (dir, 1.0f / dist, dir);
-		else
-			VectorClear (dir);
+        if (goal && state)
+        {
+                if (state->path_length > 0 && state->path_index < state->path_length)
+                {
+                        move_target = state->path_nodes[state->path_index];
+                        if (!move_target || move_target->free)
+                        {
+                                move_target = NULL;
+                                state->next_path_recalc_time = now;
+                        }
 
-		VectorAngles (dir, base_angles);
-		base_angles[PITCH] = 0.0f;
-		have_base_angles = true;
+                        if (!move_target && now >= state->next_path_recalc_time)
+                        {
+                                if (SV_Bot_RecalculatePath (self, state, now))
+                                        move_target = state->path_nodes[state->path_index];
+                        }
+                }
+                else if (now >= state->next_path_recalc_time)
+                {
+                        if (SV_Bot_RecalculatePath (self, state, now))
+                                move_target = state->path_nodes[state->path_index];
+                }
+        }
 
-		cmd->forwardmove = SV_Bot_ClampMoveValue (160.0f + 60.0f * (skill - 1.0f), settings);
-		if (dist > 120.0f)
-			cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 120.0f : -120.0f, settings);
-	}
-	else if (state)
-	{
-		VectorAngles (state->wander_dir, base_angles);
+        if (!move_target)
+                move_target = goal;
+
+        if (move_target)
+        {
+                vec3_t dir;
+                float dist;
+
+                VectorSubtract (move_target->v.origin, self->v.origin, dir);
+                dist = VectorLength (dir);
+                if (dist > 0)
+                        VectorScale (dir, 1.0f / dist, dir);
+                else
+                        VectorClear (dir);
+
+                VectorAngles (dir, base_angles);
+                base_angles[PITCH] = 0.0f;
+                have_base_angles = true;
+
+                cmd->forwardmove = SV_Bot_ClampMoveValue (160.0f + 60.0f * (skill - 1.0f), settings);
+                if (dist > 120.0f)
+                        cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 120.0f : -120.0f, settings);
+        }
+        else if (state)
+        {
+                VectorAngles (state->wander_dir, base_angles);
 		have_base_angles = true;
 		cmd->forwardmove = SV_Bot_ClampMoveValue (150.0f + 50.0f * skill, settings);
 		if (SV_Bot_Frand () > 0.5f)
@@ -1353,19 +1842,22 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 			state->next_jump_check_time = now + ((settings->movement.jump_cooldown > 0.0f) ? settings->movement.jump_cooldown : 0.5f);
 		}
 
-		if (settings && !settings->behaviors.allow_combat)
-		{
-			cmd->sidemove = SV_Bot_ClampMoveValue (cmd->sidemove * 0.5f, settings);
-			cmd->forwardmove = SV_Bot_ClampMoveValue (cmd->forwardmove * 0.5f, settings);
-		}
-	}
-	else if (have_base_angles)
-	{
-		SV_Bot_UpdateAimAngles (self, state, base_angles, now);
-	}
+                if (settings && !settings->behaviors.allow_combat)
+                {
+                        cmd->sidemove = SV_Bot_ClampMoveValue (cmd->sidemove * 0.5f, settings);
+                        cmd->forwardmove = SV_Bot_ClampMoveValue (cmd->forwardmove * 0.5f, settings);
+                }
+        }
+        else if (have_base_angles)
+        {
+                SV_Bot_UpdateAimAngles (self, state, base_angles, now);
+        }
 
-	if (!enemy && state)
-		state->enemy_slot = -1;
+        if (state)
+                SV_Bot_CheckForObstacles (self, state, move_target, now);
+
+        if (!enemy && state)
+                state->enemy_slot = -1;
 
 	if (self->v.waterlevel >= 2)
 		cmd->upmove = 200.0f;
