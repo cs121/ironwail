@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "q_ctype.h"
 
 extern edict_t *sv_player;
 
