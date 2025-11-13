@@ -470,7 +470,7 @@ static void SV_Bot_LoadSkillSettings (void)
         {
                 if (!SV_Bot_ParseSkillSettings (buffer))
                         SV_Bot_AddFallbackSkillSettings ();
-                Z_Free (buffer);
+                free (buffer);
         }
         else
         {
@@ -629,9 +629,9 @@ static void SV_Bot_LoadProfiles (void)
 
 	if (buffer)
 	{
-		if (!SV_Bot_ParseProfiles (buffer))
-			SV_Bot_AddFallbackProfiles ();
-		Z_Free (buffer);
+                if (!SV_Bot_ParseProfiles (buffer))
+                        SV_Bot_AddFallbackProfiles ();
+                free (buffer);
 	}
 	else
 	{
