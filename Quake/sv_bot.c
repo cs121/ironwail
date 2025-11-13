@@ -155,6 +155,9 @@ static int bot_waypoint_count = 0;
 static qboolean bot_waypoints_initialized = false;
 
 
+static float SV_Bot_Distance (const vec3_t a, const vec3_t b);
+
+
 
 static float SV_Bot_Frand (void)
 {
