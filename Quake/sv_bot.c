@@ -1,13 +1,81 @@
 #include "quakedef.h"
+#include "q_ctype.h"
 
 extern edict_t *sv_player;
 
 static cvar_t sv_bot_spawn = {"sv_bot_spawn", "0", CVAR_NONE};
 static cvar_t sv_bot_remove = {"sv_bot_remove", "0", CVAR_NONE};
+static cvar_t sv_bot_difficulty = {"sv_bot_difficulty", "medium", CVAR_NONE};
 
 #define MAX_BOT_CHAT_LINES			8
 #define MAX_BOT_CHAT_LENGTH			96
 #define MAX_BOT_PROFILES			32
+#define MAX_BOT_SKILLS			8
+
+typedef struct bot_skill_aiming_s
+{
+	float		max_acceleration;
+	float		spring_stiffness;
+	float		damping;
+	float		velocity_offset;
+	float		modifier_max_angle;
+	float		modifier_apply_time;
+	float		modifier_accel_scalar;
+	float		modifier_spring_scalar;
+	float		modifier_damping_scalar;
+} bot_skill_aiming_t;
+
+typedef struct bot_skill_behaviors_s
+{
+	qboolean	allow_combat;
+	qboolean	allow_grab_items_in_combat;
+	qboolean	allow_melee;
+	qboolean	allow_check_six;
+	qboolean	allow_grab_items;
+	qboolean	allow_grab_power_items;
+	qboolean	defer_power_items_to_humans;
+	float		min_respawn_time;
+	float		max_respawn_time;
+} bot_skill_behaviors_t;
+
+typedef struct bot_skill_movement_s
+{
+	qboolean	allow_jumping_in_combat;
+	float		jump_chance;
+	float		jump_cooldown;
+	qboolean	walk_only;
+} bot_skill_movement_t;
+
+typedef struct bot_skill_senses_s
+{
+	float		sight_time;
+	float		sight_decay_time;
+	float		invis_enemy_sight_scalar;
+	float		max_invis_enemy_sight_dist;
+	float		fov_angle;
+	float		forget_non_vis_enemy_time;
+	float		sound_range;
+	float		sound_time;
+	float		sound_decay_time;
+	float		sound_persist_time;
+} bot_skill_senses_t;
+
+typedef struct bot_skill_weapons_s
+{
+	float		sight_time;
+	float		decay_time;
+	float		fov_angle;
+} bot_skill_weapons_t;
+
+typedef struct bot_skill_settings_s
+{
+	char		name[32];
+	bot_skill_aiming_t		aiming;
+	bot_skill_behaviors_t	behaviors;
+	bot_skill_movement_t	movement;
+	bot_skill_senses_t		senses;
+	bot_skill_weapons_t		weapons;
+} bot_skill_settings_t;
 
 typedef enum
 {
@@ -38,11 +106,20 @@ typedef struct
 	vec3_t		last_position;
 	const bot_profile_t	*profile;
 	float		skill;
+	const bot_skill_settings_t *settings;
+	vec3_t		aim_angles;
+	vec3_t		aim_velocity;
+	double		aim_modifier_end_time;
 	bot_priority_t	goal_priority;
 	edict_t		*goal_edict;
 	float		goal_best_dist;
 	double		goal_last_progress_time;
 	double		next_chat_time;
+	int			enemy_slot;
+	double		enemy_first_seen_time;
+	double		enemy_last_visible_time;
+	double		next_jump_check_time;
+	qboolean		aim_initialized;
 } sv_bot_state_t;
 
 static sv_bot_state_t sv_bot_states[MAX_SCOREBOARD];
@@ -51,6 +128,9 @@ static bot_profile_t bot_profiles[MAX_BOT_PROFILES];
 static int bot_profile_count = 0;
 static int bot_profile_cursor = 0;
 static qboolean bot_profiles_loaded = false;
+static bot_skill_settings_t bot_skill_settings[MAX_BOT_SKILLS];
+static int bot_skill_settings_count = 0;
+static qboolean bot_skill_settings_loaded = false;
 
 
 
@@ -77,41 +157,373 @@ static void SV_Bot_AddProfile (const bot_profile_t *profile)
 
 static void SV_Bot_AddFallbackProfiles (void)
 {
-	bot_profile_t profile;
+        bot_profile_t profile;
 
-	memset (&profile, 0, sizeof(profile));
-	q_strlcpy (profile.name, "Ranger", sizeof(profile.name));
-	profile.topcolor = 4;
-	profile.bottomcolor = 12;
-	profile.skin = 0;
-	profile.skill = 1.2f;
-	profile.chat_count = 3;
-	q_strlcpy (profile.chat_lines[0], "Ready to frag.", sizeof(profile.chat_lines[0]));
-	q_strlcpy (profile.chat_lines[1], "Keep moving!", sizeof(profile.chat_lines[1]));
-	q_strlcpy (profile.chat_lines[2], "No escape for you.", sizeof(profile.chat_lines[2]));
-	SV_Bot_AddProfile (&profile);
+        memset (&profile, 0, sizeof(profile));
+        q_strlcpy (profile.name, "Ranger", sizeof(profile.name));
+        profile.topcolor = 4;
+        profile.bottomcolor = 12;
+        profile.skin = 0;
+        profile.skill = 1.2f;
+        profile.chat_count = 3;
+        q_strlcpy (profile.chat_lines[0], "Ready to frag.", sizeof(profile.chat_lines[0]));
+        q_strlcpy (profile.chat_lines[1], "Keep moving!", sizeof(profile.chat_lines[1]));
+        q_strlcpy (profile.chat_lines[2], "No escape for you.", sizeof(profile.chat_lines[2]));
+        SV_Bot_AddProfile (&profile);
 
-	memset (&profile, 0, sizeof(profile));
-	q_strlcpy (profile.name, "Hunter", sizeof(profile.name));
-	profile.topcolor = 13;
-	profile.bottomcolor = 3;
-	profile.skin = 1;
-	profile.skill = 1.4f;
-	profile.chat_count = 2;
-	q_strlcpy (profile.chat_lines[0], "The hunt never stops.", sizeof(profile.chat_lines[0]));
-	q_strlcpy (profile.chat_lines[1], "Lock and load.", sizeof(profile.chat_lines[1]));
-	SV_Bot_AddProfile (&profile);
+        memset (&profile, 0, sizeof(profile));
+        q_strlcpy (profile.name, "Hunter", sizeof(profile.name));
+        profile.topcolor = 13;
+        profile.bottomcolor = 3;
+        profile.skin = 1;
+        profile.skill = 1.4f;
+        profile.chat_count = 2;
+        q_strlcpy (profile.chat_lines[0], "The hunt never stops.", sizeof(profile.chat_lines[0]));
+        q_strlcpy (profile.chat_lines[1], "Lock and load.", sizeof(profile.chat_lines[1]));
+        SV_Bot_AddProfile (&profile);
 
-	memset (&profile, 0, sizeof(profile));
-	q_strlcpy (profile.name, "Visor", sizeof(profile.name));
-	profile.topcolor = 8;
-	profile.bottomcolor = 2;
-	profile.skin = 2;
-	profile.skill = 0.9f;
-	profile.chat_count = 2;
-	q_strlcpy (profile.chat_lines[0], "Systems calibrated.", sizeof(profile.chat_lines[0]));
-	q_strlcpy (profile.chat_lines[1], "Target acquired.", sizeof(profile.chat_lines[1]));
-	SV_Bot_AddProfile (&profile);
+        memset (&profile, 0, sizeof(profile));
+        q_strlcpy (profile.name, "Visor", sizeof(profile.name));
+        profile.topcolor = 8;
+        profile.bottomcolor = 2;
+        profile.skin = 2;
+        profile.skill = 0.9f;
+        profile.chat_count = 2;
+        q_strlcpy (profile.chat_lines[0], "Systems calibrated.", sizeof(profile.chat_lines[0]));
+        q_strlcpy (profile.chat_lines[1], "Target acquired.", sizeof(profile.chat_lines[1]));
+        SV_Bot_AddProfile (&profile);
+}
+
+static qboolean SV_Bot_ParseBool (const char *token)
+{
+        if (!token)
+                return false;
+        if (!q_strcasecmp (token, "true") || !q_strcasecmp (token, "1") || !q_strcasecmp (token, "yes") || !q_strcasecmp (token, "on"))
+                return true;
+        return false;
+}
+
+static void SV_Bot_DefaultSkillSettings (bot_skill_settings_t *settings, const char *name)
+{
+        memset (settings, 0, sizeof(*settings));
+        if (name)
+                q_strlcpy (settings->name, name, sizeof(settings->name));
+        settings->aiming.max_acceleration = 200.0f;
+        settings->aiming.spring_stiffness = 40.0f;
+        settings->aiming.damping = 5.0f;
+        settings->aiming.modifier_max_angle = 45.0f;
+        settings->aiming.modifier_apply_time = 0.5f;
+        settings->aiming.modifier_accel_scalar = 1.0f;
+        settings->aiming.modifier_spring_scalar = 1.0f;
+        settings->aiming.modifier_damping_scalar = 1.0f;
+
+        settings->behaviors.allow_combat = true;
+        settings->behaviors.allow_check_six = true;
+        settings->behaviors.allow_grab_items = true;
+        settings->behaviors.allow_grab_power_items = true;
+        settings->behaviors.defer_power_items_to_humans = true;
+        settings->behaviors.min_respawn_time = 1.0f;
+        settings->behaviors.max_respawn_time = 2.0f;
+
+        settings->movement.allow_jumping_in_combat = true;
+        settings->movement.jump_cooldown = 1.0f;
+
+        settings->senses.fov_angle = 140.0f;
+        settings->senses.sound_range = 512.0f;
+        settings->senses.sound_time = 0.4f;
+        settings->senses.sound_decay_time = 2.0f;
+        settings->senses.sound_persist_time = 0.3f;
+        settings->senses.forget_non_vis_enemy_time = 2.0f;
+
+        settings->weapons.sight_time = 0.2f;
+        settings->weapons.decay_time = 1.0f;
+        settings->weapons.fov_angle = 45.0f;
+}
+
+static qboolean SV_Bot_SetSkillField (bot_skill_settings_t *settings, const char *key, const char *value)
+{
+        if (!settings || !key || !value)
+                return false;
+
+#define BOT_SET_FLOAT(_field) settings->_field = (float)atof (value)
+#define BOT_SET_BOOL(_field) settings->_field = SV_Bot_ParseBool (value)
+
+        if (!q_strcasecmp (key, "aiming.max_acceleration"))
+        { BOT_SET_FLOAT (aiming.max_acceleration); return true; }
+        if (!q_strcasecmp (key, "aiming.spring_stiffness"))
+        { BOT_SET_FLOAT (aiming.spring_stiffness); return true; }
+        if (!q_strcasecmp (key, "aiming.damping"))
+        { BOT_SET_FLOAT (aiming.damping); return true; }
+        if (!q_strcasecmp (key, "aiming.velocity_offset"))
+        { BOT_SET_FLOAT (aiming.velocity_offset); return true; }
+        if (!q_strcasecmp (key, "aiming.modifier.max_angle"))
+        { BOT_SET_FLOAT (aiming.modifier_max_angle); return true; }
+        if (!q_strcasecmp (key, "aiming.modifier.apply_time"))
+        { BOT_SET_FLOAT (aiming.modifier_apply_time); return true; }
+        if (!q_strcasecmp (key, "aiming.modifier.accel_scalar"))
+        { BOT_SET_FLOAT (aiming.modifier_accel_scalar); return true; }
+        if (!q_strcasecmp (key, "aiming.modifier.spring_scalar"))
+        { BOT_SET_FLOAT (aiming.modifier_spring_scalar); return true; }
+        if (!q_strcasecmp (key, "aiming.modifier.damping_scalar"))
+        { BOT_SET_FLOAT (aiming.modifier_damping_scalar); return true; }
+
+        if (!q_strcasecmp (key, "behaviors.allow_combat"))
+        { BOT_SET_BOOL (behaviors.allow_combat); return true; }
+        if (!q_strcasecmp (key, "behaviors.allow_grab_items_in_combat"))
+        { BOT_SET_BOOL (behaviors.allow_grab_items_in_combat); return true; }
+        if (!q_strcasecmp (key, "behaviors.allow_melee"))
+        { BOT_SET_BOOL (behaviors.allow_melee); return true; }
+        if (!q_strcasecmp (key, "behaviors.allow_check_six"))
+        { BOT_SET_BOOL (behaviors.allow_check_six); return true; }
+        if (!q_strcasecmp (key, "behaviors.allow_grab_items"))
+        { BOT_SET_BOOL (behaviors.allow_grab_items); return true; }
+        if (!q_strcasecmp (key, "behaviors.allow_grab_power_items"))
+        { BOT_SET_BOOL (behaviors.allow_grab_power_items); return true; }
+        if (!q_strcasecmp (key, "behaviors.defer_power_items_to_humans"))
+        { BOT_SET_BOOL (behaviors.defer_power_items_to_humans); return true; }
+        if (!q_strcasecmp (key, "behaviors.min_respawn_time"))
+        { BOT_SET_FLOAT (behaviors.min_respawn_time); return true; }
+        if (!q_strcasecmp (key, "behaviors.max_respawn_time"))
+        { BOT_SET_FLOAT (behaviors.max_respawn_time); return true; }
+
+        if (!q_strcasecmp (key, "movement.allow_jumping_in_combat"))
+        { BOT_SET_BOOL (movement.allow_jumping_in_combat); return true; }
+        if (!q_strcasecmp (key, "movement.jump_chance"))
+        {
+                float chance = (float)atof (value);
+                settings->movement.jump_chance = CLAMP (0.0f, chance, 100.0f);
+                return true;
+        }
+        if (!q_strcasecmp (key, "movement.jump_cooldown"))
+        {
+                float cooldown = (float)atof (value);
+                settings->movement.jump_cooldown = (cooldown < 0.0f) ? 0.0f : cooldown;
+                return true;
+        }
+        if (!q_strcasecmp (key, "movement.walk_only"))
+        { BOT_SET_BOOL (movement.walk_only); return true; }
+
+        if (!q_strcasecmp (key, "senses.sight_time"))
+        { BOT_SET_FLOAT (senses.sight_time); return true; }
+        if (!q_strcasecmp (key, "senses.sight_decay_time"))
+        { BOT_SET_FLOAT (senses.sight_decay_time); return true; }
+        if (!q_strcasecmp (key, "senses.invis_enemy_sight_scalar"))
+        { BOT_SET_FLOAT (senses.invis_enemy_sight_scalar); return true; }
+        if (!q_strcasecmp (key, "senses.max_invis_enemy_sight_dist"))
+        { BOT_SET_FLOAT (senses.max_invis_enemy_sight_dist); return true; }
+        if (!q_strcasecmp (key, "senses.fov_angle"))
+        { BOT_SET_FLOAT (senses.fov_angle); return true; }
+        if (!q_strcasecmp (key, "senses.forget_non_vis_enemy_time"))
+        { BOT_SET_FLOAT (senses.forget_non_vis_enemy_time); return true; }
+        if (!q_strcasecmp (key, "senses.sound_range"))
+        { BOT_SET_FLOAT (senses.sound_range); return true; }
+        if (!q_strcasecmp (key, "senses.sound_time"))
+        { BOT_SET_FLOAT (senses.sound_time); return true; }
+        if (!q_strcasecmp (key, "senses.sound_decay_time"))
+        { BOT_SET_FLOAT (senses.sound_decay_time); return true; }
+        if (!q_strcasecmp (key, "senses.sound_persist_time"))
+        { BOT_SET_FLOAT (senses.sound_persist_time); return true; }
+
+        if (!q_strcasecmp (key, "weapons.sight_time"))
+        { BOT_SET_FLOAT (weapons.sight_time); return true; }
+        if (!q_strcasecmp (key, "weapons.decay_time"))
+        { BOT_SET_FLOAT (weapons.decay_time); return true; }
+        if (!q_strcasecmp (key, "weapons.fov_angle"))
+        { BOT_SET_FLOAT (weapons.fov_angle); return true; }
+
+#undef BOT_SET_FLOAT
+#undef BOT_SET_BOOL
+
+        return false;
+}
+
+static void SV_Bot_AddSkillSettings (const bot_skill_settings_t *settings)
+{
+        if (!settings || !settings->name[0])
+                return;
+
+        {
+                int i;
+
+                for (i = 0; i < bot_skill_settings_count; i++)
+                {
+                        if (!q_strcasecmp (bot_skill_settings[i].name, settings->name))
+                        {
+                                bot_skill_settings[i] = *settings;
+                                return;
+                        }
+                }
+        }
+
+        if (bot_skill_settings_count >= MAX_BOT_SKILLS)
+        {
+                Con_Printf ("Too many bot skill presets, ignoring '%s'.\n", settings->name);
+                return;
+        }
+
+        bot_skill_settings[bot_skill_settings_count++] = *settings;
+}
+
+static void SV_Bot_AddFallbackSkillSettings (void)
+{
+        bot_skill_settings_t settings;
+
+        SV_Bot_DefaultSkillSettings (&settings, "medium");
+        settings.aiming.max_acceleration = 315.0f;
+        settings.aiming.spring_stiffness = 80.0f;
+        settings.aiming.damping = 15.0f;
+        settings.aiming.velocity_offset = -0.15f;
+        settings.aiming.modifier_max_angle = 40.0f;
+        settings.aiming.modifier_apply_time = 1.0f;
+        settings.aiming.modifier_accel_scalar = 1.1f;
+        settings.aiming.modifier_spring_scalar = 1.1f;
+        settings.aiming.modifier_damping_scalar = 1.1f;
+
+        settings.behaviors.allow_grab_items_in_combat = false;
+        settings.behaviors.allow_melee = true;
+        settings.behaviors.min_respawn_time = 0.9f;
+        settings.behaviors.max_respawn_time = 1.5f;
+
+        settings.movement.allow_jumping_in_combat = true;
+        settings.movement.jump_chance = 25.0f;
+        settings.movement.jump_cooldown = 1.0f;
+        settings.movement.walk_only = false;
+
+        settings.senses.sight_time = 0.25f;
+        settings.senses.sight_decay_time = 0.4f;
+        settings.senses.invis_enemy_sight_scalar = 2.0f;
+        settings.senses.max_invis_enemy_sight_dist = 384.0f;
+        settings.senses.fov_angle = 140.0f;
+        settings.senses.sound_range = 768.0f;
+        settings.senses.sound_time = 0.3f;
+        settings.senses.sound_decay_time = 3.0f;
+        settings.senses.sound_persist_time = 0.5f;
+
+        settings.weapons.sight_time = 0.15f;
+        settings.weapons.decay_time = 2.0f;
+        settings.weapons.fov_angle = 30.0f;
+
+        SV_Bot_AddSkillSettings (&settings);
+}
+
+static qboolean SV_Bot_ParseSkillSettings (const char *data)
+{
+        bot_skill_settings_t settings;
+        char key[64];
+        qboolean parsed_any = false;
+
+        while ((data = COM_Parse (data)) != NULL)
+        {
+                if (q_strcasecmp (com_token, "skill"))
+                        continue;
+
+                data = COM_Parse (data);
+                if (!data)
+                        break;
+
+                SV_Bot_DefaultSkillSettings (&settings, com_token);
+
+                data = COM_Parse (data);
+                if (!data || com_token[0] != '{')
+                        break;
+
+                for (;;)
+                {
+                        data = COM_Parse (data);
+                        if (!data)
+                                break;
+                        if (com_token[0] == '}')
+                        {
+                                SV_Bot_AddSkillSettings (&settings);
+                                parsed_any = true;
+                                break;
+                        }
+
+                        q_strlcpy (key, com_token, sizeof(key));
+                        data = COM_Parse (data);
+                        if (!data)
+                                break;
+
+                        if (!SV_Bot_SetSkillField (&settings, key, com_token))
+                                Con_Printf ("Unknown bot skill field '%s' for '%s'.\n", key, settings.name);
+                }
+        }
+
+        return parsed_any;
+}
+
+static void SV_Bot_LoadSkillSettings (void)
+{
+        char *buffer = NULL;
+
+        if (bot_skill_settings_loaded)
+                return;
+
+        bot_skill_settings_loaded = true;
+        bot_skill_settings_count = 0;
+
+        buffer = (char *)COM_LoadMallocFile ("bots/settings_PC.txt", NULL);
+        if (!buffer)
+                buffer = (char *)COM_LoadMallocFile ("config/bots/settings_PC.txt", NULL);
+
+        if (buffer)
+        {
+                if (!SV_Bot_ParseSkillSettings (buffer))
+                        SV_Bot_AddFallbackSkillSettings ();
+                Z_Free (buffer);
+        }
+        else
+        {
+                SV_Bot_AddFallbackSkillSettings ();
+        }
+}
+
+static const bot_skill_settings_t *SV_Bot_FindSkillSettings (const char *name)
+{
+        int i;
+
+        if (!name || !*name)
+                return NULL;
+
+        for (i = 0; i < bot_skill_settings_count; i++)
+        {
+                if (!q_strcasecmp (name, bot_skill_settings[i].name))
+                        return &bot_skill_settings[i];
+        }
+
+        return NULL;
+}
+
+static const bot_skill_settings_t *SV_Bot_GetSkillSettingsByIndex (int index)
+{
+        if (index < 0 || index >= bot_skill_settings_count)
+                return NULL;
+        return &bot_skill_settings[index];
+}
+
+static const bot_skill_settings_t *SV_Bot_GetSkillSettings (const char *name)
+{
+        const bot_skill_settings_t *settings;
+
+        if (!bot_skill_settings_loaded)
+                SV_Bot_LoadSkillSettings ();
+
+        if (!bot_skill_settings_count)
+                return NULL;
+
+        settings = SV_Bot_FindSkillSettings (name);
+        if (settings)
+                return settings;
+
+        if (name && *name && q_isdigit (name[0]))
+        {
+                int index = atoi (name);
+                settings = SV_Bot_GetSkillSettingsByIndex (index);
+                if (settings)
+                        return settings;
+        }
+
+        return &bot_skill_settings[0];
 }
 
 static qboolean SV_Bot_ParseProfiles (const char *data)
@@ -244,6 +656,67 @@ static float SV_Bot_Distance (const vec3_t a, const vec3_t b)
 	return VectorLength (delta);
 }
 
+static float SV_Bot_ClampMoveValue (float value, const bot_skill_settings_t *settings)
+{
+	float limit = (settings && settings->movement.walk_only) ? 140.0f : 320.0f;
+	return CLAMP (-limit, value, limit);
+}
+
+static void SV_Bot_UpdateAimAngles (edict_t *self, sv_bot_state_t *state, const vec3_t desired_angles, double now)
+{
+	const bot_skill_settings_t *settings = state ? state->settings : NULL;
+	float dt;
+	int axis;
+
+	if (!self)
+		return;
+
+	if (!settings || !state)
+	{
+		VectorCopy (desired_angles, self->v.v_angle);
+		return;
+	}
+
+	if (!state->aim_initialized)
+	{
+		VectorCopy (self->v.v_angle, state->aim_angles);
+		VectorClear (state->aim_velocity);
+		state->aim_initialized = true;
+	}
+
+	dt = (float)CLAMP (0.001, host_frametime, 0.1);
+	if (dt <= 0.0f)
+		dt = 0.01f;
+
+	for (axis = 0; axis < 2; axis++)
+	{
+		float stiffness = settings->aiming.spring_stiffness;
+		float damping = settings->aiming.damping;
+		float max_accel = settings->aiming.max_acceleration;
+		float error = AngleDifference (desired_angles[axis], state->aim_angles[axis]);
+		float accel;
+
+		if (settings->aiming.modifier_apply_time > 0.0f && fabsf (error) > settings->aiming.modifier_max_angle)
+			state->aim_modifier_end_time = now + settings->aiming.modifier_apply_time;
+
+		if (state->aim_modifier_end_time > now)
+		{
+			stiffness *= settings->aiming.modifier_spring_scalar;
+			damping *= settings->aiming.modifier_damping_scalar;
+			max_accel *= settings->aiming.modifier_accel_scalar;
+		}
+
+		accel = stiffness * error - damping * state->aim_velocity[axis];
+		accel = CLAMP (-max_accel, accel, max_accel);
+		state->aim_velocity[axis] += accel * dt;
+		state->aim_angles[axis] = NormalizeAngle (state->aim_angles[axis] + state->aim_velocity[axis] * dt);
+	}
+
+	state->aim_angles[PITCH] = CLAMP (-70.0f, state->aim_angles[PITCH], 70.0f);
+	state->aim_angles[YAW] = NormalizeAngle (state->aim_angles[YAW]);
+	VectorCopy (state->aim_angles, self->v.v_angle);
+}
+
 static int SV_Bot_WeaponBitForClassname (const char *classname, int *out_rank)
 {
 	struct weapon_map_s
@@ -340,13 +813,16 @@ static edict_t *SV_Bot_FindGoal (edict_t *self, bot_priority_t priority)
 	return best;
 }
 
-static bot_priority_t SV_Bot_EvaluateNeeds (const edict_t *self)
+static bot_priority_t SV_Bot_EvaluateNeeds (const edict_t *self, const bot_skill_settings_t *settings)
 {
 	qboolean needs_weapon = false;
 	qboolean needs_health = false;
 	qboolean needs_armor = false;
 	int items = (int)self->v.items;
 	int weapon = (int)self->v.weapon;
+
+	if (settings && !settings->behaviors.allow_grab_items)
+		return BOT_PRIORITY_NONE;
 
 	if (!(items & (IT_SUPER_SHOTGUN | IT_NAILGUN | IT_SUPER_NAILGUN | IT_GRENADE_LAUNCHER | IT_ROCKET_LAUNCHER | IT_LIGHTNING)))
 		needs_weapon = true;
@@ -513,9 +989,34 @@ static sv_bot_state_t *SV_BotStateForClient (const client_t *client)
 	return &sv_bot_states[index];
 }
 
+static void SV_Bot_RefreshSettingsForState (sv_bot_state_t *state)
+{
+        const bot_skill_settings_t *desired;
+
+        if (!state)
+                return;
+
+        desired = SV_Bot_GetSkillSettings (sv_bot_difficulty.string);
+        if (!desired && bot_skill_settings_count > 0)
+                desired = &bot_skill_settings[0];
+
+        if (state->settings != desired)
+        {
+                state->settings = desired;
+                state->aim_initialized = false;
+                VectorClear (state->aim_velocity);
+                state->aim_modifier_end_time = 0.0;
+        }
+}
+
 void SV_Bot_Reset (void)
 {
+        int i;
         memset (sv_bot_states, 0, sizeof(sv_bot_states));
+        for (i = 0; i < (int)(sizeof(sv_bot_states) / sizeof(sv_bot_states[0])); i++)
+        {
+                sv_bot_states[i].enemy_slot = -1;
+        }
         bot_name_counter = 1;
         SV_Bot_ResetProfiles ();
 }
@@ -583,18 +1084,32 @@ static void SV_Bot_AssignName (client_t *client, const char *preferred)
         q_strlcpy (client->name, name, sizeof(client->name));
 }
 
-static client_t *SV_Bot_FindTarget (client_t *bot, qboolean prefer_players)
+static client_t *SV_Bot_FindTarget (client_t *bot, sv_bot_state_t *state, qboolean prefer_players)
 {
 	client_t *best = NULL;
 	float best_dist = 0.0f;
 	int i;
 	edict_t *self = bot->edict;
+	const bot_skill_settings_t *settings = state ? state->settings : NULL;
+	float fov = settings ? settings->senses.fov_angle : 180.0f;
+	float half_fov = CLAMP (0.0f, fov * 0.5f, 179.0f);
+	float cos_half_fov = (float)cos (half_fov * (float)M_PI / 180.0f);
+	float sound_range = settings ? settings->senses.sound_range : 0.0f;
+	vec3_t forward;
+
+	if (!self)
+		return NULL;
+
+	AngleVectors (self->v.v_angle, forward, NULL, NULL);
 
 	for (i = 0; i < svs.maxclients; i++)
 	{
 		client_t *candidate = &svs.clients[i];
 		vec3_t delta;
 		float dist;
+		vec3_t dir;
+		float dot;
+		qboolean in_fov = true;
 
 		if (!candidate->active || !candidate->spawned)
 			continue;
@@ -609,6 +1124,20 @@ static client_t *SV_Bot_FindTarget (client_t *bot, qboolean prefer_players)
 
 		VectorSubtract (candidate->edict->v.origin, self->v.origin, delta);
 		dist = VectorLength (delta);
+
+		if (dist <= 0.0f)
+			continue;
+
+		VectorScale (delta, 1.0f / dist, dir);
+		dot = DotProduct (forward, dir);
+		if (cos_half_fov > -0.99f)
+			in_fov = dot >= cos_half_fov;
+
+		if (!in_fov)
+		{
+			if (sound_range <= 0.0f || dist > sound_range)
+				continue;
+		}
 
 		if (!best || dist < best_dist)
 		{
@@ -627,6 +1156,7 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	client_t *enemy;
 	double now = qcvm->time;
 	float skill = state ? state->skill : 1.0f;
+	const bot_skill_settings_t *settings = state ? state->settings : NULL;
 	bot_priority_t priority = BOT_PRIORITY_NONE;
 	edict_t *goal = NULL;
 	vec3_t delta;
@@ -636,9 +1166,9 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	if (!self || self->free)
 		return;
 
-	enemy = SV_Bot_FindTarget (client, true);
+	enemy = SV_Bot_FindTarget (client, state, true);
 	if (!enemy)
-		enemy = SV_Bot_FindTarget (client, false);
+		enemy = SV_Bot_FindTarget (client, state, false);
 
 	memset (cmd, 0, sizeof(*cmd));
 	self->v.button0 = 0;
@@ -662,13 +1192,21 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 
 	if (state)
 	{
-		priority = SV_Bot_EvaluateNeeds (self);
+		priority = SV_Bot_EvaluateNeeds (self, settings);
 		SV_Bot_UpdateGoal (self, state, priority, now);
 		SV_Bot_CheckGoalProgress (self, state, now);
 		goal = state->goal_edict;
 
 		if (!goal && state->next_wander_time <= now)
 			SV_Bot_PickWanderDirection (state);
+	}
+
+	if (enemy && state && settings && !settings->behaviors.allow_grab_items_in_combat)
+	{
+		priority = BOT_PRIORITY_NONE;
+		state->goal_edict = NULL;
+		state->goal_priority = BOT_PRIORITY_NONE;
+		goal = NULL;
 	}
 
 	if (goal)
@@ -687,77 +1225,147 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 		base_angles[PITCH] = 0.0f;
 		have_base_angles = true;
 
-		cmd->forwardmove = 160.0f + 60.0f * (skill - 1.0f);
+		cmd->forwardmove = SV_Bot_ClampMoveValue (160.0f + 60.0f * (skill - 1.0f), settings);
 		if (dist > 120.0f)
-			cmd->sidemove = (SV_Bot_Frand () > 0.5f) ? 120.0f : -120.0f;
+			cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 120.0f : -120.0f, settings);
 	}
 	else if (state)
 	{
 		VectorAngles (state->wander_dir, base_angles);
 		have_base_angles = true;
-		cmd->forwardmove = 150.0f + 50.0f * skill;
+		cmd->forwardmove = SV_Bot_ClampMoveValue (150.0f + 50.0f * skill, settings);
 		if (SV_Bot_Frand () > 0.5f)
-			cmd->sidemove = (SV_Bot_Frand () > 0.5f) ? 80.0f : -80.0f;
+			cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 80.0f : -80.0f, settings);
 	}
 
 	if (enemy)
 	{
+		vec3_t target_origin;
 		vec3_t dir;
-		vec3_t angles;
+		vec3_t desired_angles;
 		float dist;
 		qboolean can_shoot;
+		float attack_range = 420.0f + skill * 220.0f;
+		float weapon_fov = settings ? settings->weapons.fov_angle : 45.0f;
+		qboolean aim_aligned;
+		double sight_delay = settings ? settings->weapons.sight_time : 0.2f;
+		double decay_time = settings ? settings->weapons.decay_time : 1.0f;
+		double time_since_visible = 0.0;
+		qboolean allow_attack = true;
 
-		VectorSubtract (enemy->edict->v.origin, self->v.origin, dir);
+		VectorCopy (enemy->edict->v.origin, target_origin);
+		if (settings)
+			VectorMA (target_origin, settings->aiming.velocity_offset, enemy->edict->v.velocity, target_origin);
+
+		VectorSubtract (target_origin, self->v.origin, dir);
 		dist = VectorLength (dir);
 		if (dist > 0)
 			VectorScale (dir, 1.0f / dist, dir);
 		else
 			VectorClear (dir);
 
-		VectorAngles (dir, angles);
-		angles[PITCH] = CLAMP (-60.0f, angles[PITCH], 60.0f);
+		VectorAngles (dir, desired_angles);
+		desired_angles[PITCH] = CLAMP (-60.0f, desired_angles[PITCH], 60.0f);
 
+		if (state)
 		{
-			float jitter = CLAMP (0.0f, 1.5f - skill, 1.5f) * 6.0f;
-			angles[YAW] += (SV_Bot_Frand () * 2.0f - 1.0f) * jitter;
-			angles[PITCH] += (SV_Bot_Frand () * 2.0f - 1.0f) * (jitter * 0.5f);
+			int enemy_index = (int)(enemy - svs.clients);
+			if (state->enemy_slot != enemy_index)
+			{
+				state->enemy_slot = enemy_index;
+				state->enemy_first_seen_time = now;
+				state->enemy_last_visible_time = now;
+			}
 		}
 
-		VectorCopy (angles, self->v.v_angle);
+		SV_Bot_UpdateAimAngles (self, state, desired_angles, now);
+
 		can_shoot = SV_Bot_CanSeeTarget (self, enemy->edict);
+		if (state && can_shoot)
+			state->enemy_last_visible_time = now;
+
+		if (state)
+			time_since_visible = now - state->enemy_last_visible_time;
+
+		if (state && settings && settings->senses.forget_non_vis_enemy_time > 0.0f && time_since_visible > settings->senses.forget_non_vis_enemy_time)
+			state->enemy_first_seen_time = now;
 
 		if (priority != BOT_PRIORITY_NONE)
 		{
 			if (dist < 200.0f)
 			{
-				cmd->forwardmove = -220.0f;
-				cmd->sidemove = (SV_Bot_Frand () > 0.5f) ? 200.0f : -200.0f;
+				cmd->forwardmove = SV_Bot_ClampMoveValue (-220.0f, settings);
+				cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 200.0f : -200.0f, settings);
 				if (can_shoot && dist < 180.0f)
 					self->v.button0 = 1;
 			}
 		}
 		else
 		{
-			float attack_range = 420.0f + skill * 220.0f;
+			float yaw_delta;
+			float pitch_delta;
+
+			if (settings && !settings->behaviors.allow_combat)
+				attack_range *= 0.7f;
 
 			if (!goal)
 			{
 				if (dist > 160.0f)
-					cmd->forwardmove = 220.0f;
+					cmd->forwardmove = SV_Bot_ClampMoveValue (220.0f, settings);
 				else if (dist < 90.0f)
-					cmd->forwardmove = -150.0f;
+					cmd->forwardmove = SV_Bot_ClampMoveValue (-150.0f, settings);
 				if (dist > 80.0f)
-					cmd->sidemove = (SV_Bot_Frand () > 0.5f) ? 140.0f : -140.0f;
+					cmd->sidemove = SV_Bot_ClampMoveValue ((SV_Bot_Frand () > 0.5f) ? 140.0f : -140.0f, settings);
 			}
 
-			if (can_shoot && dist < attack_range)
+			yaw_delta = fabsf (AngleDifference (desired_angles[YAW], self->v.v_angle[YAW]));
+			pitch_delta = fabsf (AngleDifference (desired_angles[PITCH], self->v.v_angle[PITCH]));
+			aim_aligned = yaw_delta <= weapon_fov * 0.5f && pitch_delta <= weapon_fov * 0.5f;
+
+			if (state)
+			{
+				double seen_time = now - state->enemy_first_seen_time;
+
+				allow_attack = seen_time >= sight_delay;
+				if (!can_shoot && time_since_visible > decay_time)
+					allow_attack = false;
+
+				if (settings && !settings->behaviors.allow_melee)
+				{
+					int weapon_id = (int)self->v.weapon;
+					if (weapon_id == IT_AXE)
+						allow_attack = false;
+				}
+
+				if (allow_attack && aim_aligned && ((can_shoot && dist < attack_range) || (!can_shoot && time_since_visible <= decay_time)))
+					self->v.button0 = 1;
+			}
+			else if (aim_aligned && can_shoot && dist < attack_range)
+			{
 				self->v.button0 = 1;
+			}
+		}
+
+		if (state && settings && settings->movement.allow_jumping_in_combat && now >= state->next_jump_check_time)
+		{
+			if (settings->movement.jump_chance > 0.0f && SV_Bot_Frand () * 100.0f < settings->movement.jump_chance)
+				cmd->upmove = 200.0f;
+			state->next_jump_check_time = now + ((settings->movement.jump_cooldown > 0.0f) ? settings->movement.jump_cooldown : 0.5f);
+		}
+
+		if (settings && !settings->behaviors.allow_combat)
+		{
+			cmd->sidemove = SV_Bot_ClampMoveValue (cmd->sidemove * 0.5f, settings);
+			cmd->forwardmove = SV_Bot_ClampMoveValue (cmd->forwardmove * 0.5f, settings);
 		}
 	}
 	else if (have_base_angles)
 	{
-		VectorCopy (base_angles, self->v.v_angle);
+		SV_Bot_UpdateAimAngles (self, state, base_angles, now);
 	}
+
+	if (!enemy && state)
+		state->enemy_slot = -1;
 
 	if (self->v.waterlevel >= 2)
 		cmd->upmove = 200.0f;
@@ -856,6 +1464,14 @@ static qboolean SV_Bot_SpawnOne (void)
                 VectorCopy (client->edict->v.origin, state->last_position);
                 state->last_stuck_time = qcvm->time;
                 state->next_wander_time = 0.0;
+                state->enemy_slot = -1;
+                SV_Bot_RefreshSettingsForState (state);
+                if (!state->settings && bot_skill_settings_count > 0)
+                        state->settings = &bot_skill_settings[0];
+                VectorClear (state->aim_velocity);
+                state->aim_modifier_end_time = 0.0;
+                state->aim_initialized = false;
+                state->next_jump_check_time = 0.0;
         }
 
 	MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
@@ -951,8 +1567,10 @@ void SV_Bot_Init (void)
 {
 	Cvar_RegisterVariable (&sv_bot_spawn);
 	Cvar_RegisterVariable (&sv_bot_remove);
+	Cvar_RegisterVariable (&sv_bot_difficulty);
 	Cvar_SetCallback (&sv_bot_spawn, SV_BotSpawn_cvar);
 	Cvar_SetCallback (&sv_bot_remove, SV_BotRemove_cvar);
+	SV_Bot_LoadSkillSettings ();
 	SV_Bot_Reset ();
 }
 
@@ -966,6 +1584,9 @@ void SV_Bot_RunFrame (client_t *client)
         state = SV_BotStateForClient (client);
         if (!client->spawned)
                 return;
+
+        if (state)
+                SV_Bot_RefreshSettingsForState (state);
 
         SV_Bot_UpdateMovement (client, state);
         SV_Bot_MaybeChat (client, state);
