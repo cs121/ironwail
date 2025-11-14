@@ -201,13 +201,13 @@ cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
 cvar_t	r_lightmap_strength = { "r_lightmap_strength", "0.75", CVAR_ARCHIVE };
-cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
+cvar_t	r_dof = { "r_dof", "1", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
 cvar_t	r_rim_exponent = { "r_rim_exponent", "4.0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
-cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
-cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
+cvar_t	r_dof_range = { "r_dof_range", "512", CVAR_ARCHIVE };
+cvar_t	r_dof_strength = { "r_dof_strength", "3", CVAR_ARCHIVE };
 cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
@@ -217,10 +217,10 @@ cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE
 cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
-cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
+cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
-cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
-cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
+cvar_t	r_bloom = { "r_bloom", "1", CVAR_ARCHIVE };
+cvar_t	r_bloom_threshold = { "r_bloom_threshold", "0.5", CVAR_ARCHIVE };
 cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_NONE };
 cvar_t	r_ssao_radius = { "r_ssao_radius", "32", CVAR_ARCHIVE };
@@ -229,9 +229,9 @@ cvar_t	r_ssao_intensity = { "r_ssao_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_power = { "r_ssao_power", "1.5", CVAR_ARCHIVE };
 cvar_t	r_ssao_samples = { "r_ssao_samples", "16", CVAR_ARCHIVE };
 
-cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
+cvar_t	r_vignette = { "r_vignette", "0.25", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
-cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "2.5", CVAR_ARCHIVE };
 cvar_t	r_vignette_falloff = { "r_vignette_falloff", "2.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_r = { "r_vignette_color_r", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
@@ -239,12 +239,12 @@ cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_lens_planar = { "r_lens_planar", "0", CVAR_ARCHIVE };
-cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
+cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "1", CVAR_ARCHIVE };
+cvar_t	r_filmgrain = { "r_filmgrain", "0.05", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
+cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -272,7 +272,8 @@ cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=en
 cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
 cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
 cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
-cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
+#cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
+cvar_t	r_noshadow_list = { "r_noshadow_list", "", CVAR_NONE };
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;

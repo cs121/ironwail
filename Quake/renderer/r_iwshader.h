@@ -6,7 +6,6 @@
 #define IW_MAX_NAME         96
 #define IW_MAX_PATH         96
 #define IW_MAX_ANIM_FRAMES  64
-#define IW_MAX_Q3MAP_DIRECTIVES 32
 #define IW_MAX_DEFORM_COMMANDS 16
 #define IW_MAX_DIRECTIVE_TEXT 192
 #define IW_MAX_STAGE_CONDITION 96
@@ -246,8 +245,6 @@ typedef struct {
     char skyParms[3][IW_MAX_PATH];
     float tessSize;
     int hasTessSize;
-    int numQ3MapDirectives;
-    char q3mapDirectives[IW_MAX_Q3MAP_DIRECTIVES][IW_MAX_DIRECTIVE_TEXT];
     int numDeformVertexes;
     char deformVertexes[IW_MAX_DEFORM_COMMANDS][IW_MAX_DIRECTIVE_TEXT];
     int numStages;

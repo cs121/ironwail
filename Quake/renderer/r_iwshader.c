@@ -2062,12 +2062,6 @@ static qboolean IW_ParseGlobalKey(iwtxtParser_t *parser, iwMaterial_t *material,
                 IW_CollectLineTokens(parser, value.line, directive, sizeof(directive), false);
             }
         }
-        if (material->numQ3MapDirectives >= IW_MAX_Q3MAP_DIRECTIVES)
-        {
-            IW_ParseWarn(filename, token, "too many q3map directives (limit %d)", IW_MAX_Q3MAP_DIRECTIVES);
-            return true;
-        }
-        q_strlcpy(material->q3mapDirectives[material->numQ3MapDirectives++], directive, sizeof(material->q3mapDirectives[0]));
         return true;
     }
     else if (!strcmp(keyword, "tesssize"))
@@ -2716,8 +2710,6 @@ void IW_DumpMaterials(const char *outPath)
             fprintf(f, "    portal %d\n", mat->portal);
         if (mat->hasSkyParms)
             fprintf(f, "    skyparms %s %s %s\n", mat->skyParms[0], mat->skyParms[1], mat->skyParms[2]);
-        for (int q = 0; q < mat->numQ3MapDirectives; ++q)
-            fprintf(f, "    %s\n", mat->q3mapDirectives[q]);
         for (int d = 0; d < mat->numDeformVertexes; ++d)
             fprintf(f, "    %s\n", mat->deformVertexes[d]);
 
