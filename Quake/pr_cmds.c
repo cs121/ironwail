@@ -855,10 +855,13 @@ static int PF_newcheckclient (int check)
 	pvsbytes = (sv.worldmodel->numleafs+7)>>3;
 	if (checkpvs == NULL || pvsbytes > checkpvs_capacity)
 	{
+		byte *newbuffer;
+
 		checkpvs_capacity = pvsbytes;
-		checkpvs = (byte *) realloc (checkpvs, checkpvs_capacity);
-		if (!checkpvs)
+		newbuffer = (byte *) realloc (checkpvs, checkpvs_capacity);
+		if (!newbuffer)
 			Sys_Error ("PF_newcheckclient: realloc() failed on %d bytes", checkpvs_capacity);
+		checkpvs = newbuffer;
 	}
 	memcpy (checkpvs, pvs, pvsbytes);
 
@@ -2101,12 +2104,14 @@ static void PF_cl_playerkey_f(void)
 }
 
 
-static struct
+typedef struct qcpic_cache_s
 {
-	char name[MAX_QPATH];
-	unsigned int flags;
-	qpic_t *pic;
-} *qcpics;
+        char name[MAX_QPATH];
+        unsigned int flags;
+        qpic_t *pic;
+} qcpic_cache_t;
+
+static qcpic_cache_t *qcpics;
 static size_t numqcpics;
 static size_t maxqcpics;
 void PR_ReloadPics(qboolean purge)
@@ -2147,8 +2152,17 @@ static qpic_t *DrawQC_CachePic(const char *picname, unsigned int flags)
 
 	if (i+1 > maxqcpics)
 	{
-		maxqcpics = i + 32;
-		qcpics = realloc(qcpics, maxqcpics * sizeof(*qcpics));
+		size_t newmax = i + 32;
+		qcpic_cache_t *newbuffer = (qcpic_cache_t *)realloc(qcpics, newmax * sizeof(*qcpics));
+
+		if (!newbuffer)
+			Sys_Error ("DrawQC_CachePic: realloc() failed on %zu bytes", newmax * sizeof(*qcpics));
+
+		if (newmax > maxqcpics)
+			memset(newbuffer + maxqcpics, 0, (newmax - maxqcpics) * sizeof(*qcpics));
+
+		qcpics = newbuffer;
+		maxqcpics = newmax;
 	}
 
 	strcpy(qcpics[i].name, picname);
@@ -3153,11 +3167,12 @@ static int tokenizeqc(const char *str, qboolean dpfuckage)
 {
 	//FIXME: if dpfuckage, then we should handle punctuation specially, as well as /*.
 	const char *start = str;
-	while(qctoken_count > 0)
-	{
-		qctoken_count--;
-		free(qctoken[qctoken_count].token);
-	}
+        while(qctoken_count > 0)
+        {
+                qctoken_count--;
+                free(qctoken[qctoken_count].token);
+                qctoken[qctoken_count].token = NULL;
+        }
 	qctoken_count = 0;
 	while (qctoken_count < MAXQCTOKENS)
 	{
