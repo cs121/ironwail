@@ -1007,7 +1007,7 @@ static qboolean R_CreateDecal (const decalgeom_t *geom, float radius, decaltype_
         {
                 float spec = 0.f;
                 if (type == DECAL_BLOOD)
-                        spec = 0.2f * CLAMP (0.f, dec->tint[3], 1.f);
+                        spec = 0.1f * CLAMP (0.f, dec->tint[3], 1.f);
                 R_AssignDecalVertices (dec, geom, radius, spec);
         }
 

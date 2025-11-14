@@ -2768,7 +2768,9 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+        alphamode_t alphamode = R_GetEffectiveAlphaMode ();
+
+        R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 
 	R_Clear ();
 
@@ -2790,18 +2792,22 @@ void R_RenderScene (void)
 
 	R_DrawWater (false);
 
-	R_BeginTranslucency ();
+        R_BeginTranslucency ();
 
-	R_DrawWater (true);
+        R_DrawWater (true);
 
-	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+        if (alphamode == ALPHAMODE_OIT)
+                R_DrawParticles (true);
 
-	R_DrawParticles (true);
+        R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 
-	R_EndTranslucency ();
+        if (alphamode != ALPHAMODE_OIT)
+                R_DrawParticles (true);
 
-	if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
-		R_DrawParticles_PostOIT ();
+        R_EndTranslucency ();
+
+        if (alphamode == ALPHAMODE_OIT)
+                R_DrawParticles_PostOIT ();
 
 	R_ShowTris (); //johnfitz
 
