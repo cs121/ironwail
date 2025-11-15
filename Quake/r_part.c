@@ -227,6 +227,13 @@ static int                   num_effect_emitters;
 static qboolean              effectinfo_active;
 static char                  effectinfo_source[MAX_OSPATH];
 
+static effectinfo_t          base_effect_defs[MAX_EFFECTINFO];
+static effect_emitter_t      base_effect_emitters[MAX_EFFECT_EMITTERS];
+static int                   base_num_effectinfos;
+static int                   base_num_effect_emitters;
+static qboolean              base_effectinfo_loaded;
+static qboolean              effectinfo_force_reload;
+
 static cvar_t        r_particles_debug = { "r_particles_debug", "0", 0 };
 
 typedef enum effectnameindex_s
@@ -389,6 +396,42 @@ static void R_Effectinfo_Clear (void)
         num_effect_emitters = 0;
         effectinfo_active = false;
         effectinfo_source[0] = '\0';
+}
+
+static void R_Effectinfo_CacheBaseDefinitions (void)
+{
+        base_num_effectinfos = num_effectinfos;
+        base_num_effect_emitters = num_effect_emitters;
+
+        if (base_num_effectinfos > 0)
+                memcpy (base_effect_defs, effect_defs,
+                        (size_t)base_num_effectinfos * sizeof (*base_effect_defs));
+        if (base_num_effect_emitters > 0)
+                memcpy (base_effect_emitters, effect_emitters,
+                        (size_t)base_num_effect_emitters * sizeof (*base_effect_emitters));
+
+        base_effectinfo_loaded = effectinfo_active;
+}
+
+static qboolean R_Effectinfo_RestoreBaseDefinitions (void)
+{
+        if (!base_effectinfo_loaded)
+                return false;
+
+        num_effectinfos = base_num_effectinfos;
+        num_effect_emitters = base_num_effect_emitters;
+
+        if (base_num_effectinfos > 0)
+                memcpy (effect_defs, base_effect_defs,
+                        (size_t)base_num_effectinfos * sizeof (*effect_defs));
+        if (base_num_effect_emitters > 0)
+                memcpy (effect_emitters, base_effect_emitters,
+                        (size_t)base_num_effect_emitters * sizeof (*effect_emitters));
+
+        effectinfo_active = base_effectinfo_loaded;
+        q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
+
+        return base_effectinfo_loaded;
 }
 
 static effectinfo_t* R_Effectinfo_FindDef (const char* name)
@@ -1527,6 +1570,13 @@ void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* world
         char mapfile[MAX_QPATH];
         qboolean loaded = false;
         qboolean loaded_map = false;
+        const qboolean force_reload = effectinfo_force_reload;
+
+        effectinfo_force_reload = false;
+        mapfile[0] = '\0';
+
+        if (!force_reload && !customfile && !worldmodelname && cl.worldmodel && R_Effectinfo_Active ())
+                return;
 
         if (!R_Particles_UseEffectinfo ())
         {
@@ -1546,9 +1596,21 @@ void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* world
         {
                 const char* mapname = worldmodelname;
 
-                loaded = R_Effectinfo_LoadFile ("effectinfo.txt");
-                if (loaded)
-                        q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
+                if (!force_reload)
+                        loaded = R_Effectinfo_RestoreBaseDefinitions ();
+
+                if (!loaded)
+                {
+                        loaded = R_Effectinfo_LoadFile ("effectinfo.txt");
+                        if (loaded)
+                        {
+                                q_strlcpy (effectinfo_source, "effectinfo.txt", sizeof (effectinfo_source));
+                                R_Effectinfo_CacheBaseDefinitions ();
+                        }
+                }
+
+                if (!loaded && force_reload && base_effectinfo_loaded)
+                        loaded = R_Effectinfo_RestoreBaseDefinitions ();
 
                 if (!mapname || !*mapname)
                 {
@@ -1556,13 +1618,15 @@ void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* world
                                 mapname = cl.worldmodel->name;
                 }
 
-                mapfile[0] = '\0';
                 if (mapname && *mapname)
                 {
                         COM_StripExtension (mapname, basefile, sizeof (basefile));
                         dpsnprintf (mapfile, sizeof (mapfile), "%s_effectinfo.txt", basefile);
                         loaded_map = R_Effectinfo_LoadFile (mapfile);
                 }
+
+                if (!loaded && loaded_map)
+                        q_strlcpy (effectinfo_source, mapfile, sizeof (effectinfo_source));
         }
 
         if (!loaded && !loaded_map)
@@ -1587,8 +1651,6 @@ void R_Particles_LoadEffectInfoForMap (const char* customfile, const char* world
                 const char* src = loaded ? effectinfo_source : mapfile;
                 Con_Printf ("Loaded %d particle effects (%d emitters) from %s\n",
                         num_effectinfos, num_effect_emitters, src);
-                if (!loaded && loaded_map)
-                        q_strlcpy (effectinfo_source, mapfile, sizeof (effectinfo_source));
         }
 
         R_Effectinfo_DebugPrintLoaded ();
@@ -1602,6 +1664,7 @@ void R_Particles_LoadEffectInfo (const char* customfile)
 static void R_Particles_ReloadEffects_f (void)
 {
         const char* custom = (Cmd_Argc () > 1) ? Cmd_Argv (1) : NULL;
+        effectinfo_force_reload = true;
         R_Particles_LoadEffectInfo (custom && *custom ? custom : NULL);
 }
 
