@@ -312,6 +312,7 @@ void SV_SpawnServer (const char *server);
 
 void SV_Bot_Init (void);
 void SV_Bot_Reset (void);
+void SV_Bot_LoadNavigation (const char *mapname);
 void SV_Bot_RunFrame (client_t *client);
 void SV_Bot_ClientDisconnected (client_t *client);
 
