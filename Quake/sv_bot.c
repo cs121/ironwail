@@ -2,6 +2,8 @@
 #include "q_ctype.h"
 
 #include <float.h>
+#include <limits.h>
+#include <stdint.h>
 
 extern edict_t *sv_player;
 
@@ -106,6 +108,92 @@ typedef struct bot_profile_s
 
 typedef struct
 {
+	edict_t		*edict;
+	vec3_t		position;
+	float		radius;
+} bot_path_node_t;
+
+typedef struct
+{
+	vec3_t		origin;
+	float		radius;
+	unsigned int	first_link;
+	unsigned int	link_count;
+	unsigned int	flags;
+} bot_nav_node_t;
+
+typedef struct
+{
+	unsigned int	to;
+	unsigned int	type;
+	unsigned int	hint_index;
+	float		cost;
+} bot_nav_link_t;
+
+typedef struct
+{
+	vec3_t		points[4];
+	int		point_count;
+} bot_nav_hint_t;
+
+typedef struct
+{
+	bot_nav_node_t	*nodes;
+	bot_nav_link_t	*links;
+	bot_nav_hint_t	*hints;
+	int		node_count;
+	int		link_count;
+	int		hint_count;
+} bot_nav_mesh_t;
+
+static bot_nav_mesh_t bot_nav_mesh;
+
+typedef struct
+{
+	const byte		*data;
+	size_t		size;
+	size_t		offset;
+	qboolean		error;
+} bot_nav_reader_t;
+
+static void SV_Bot_NavReadBytes (bot_nav_reader_t *reader, void *dest, size_t count)
+{
+	if (!reader || reader->offset + count > reader->size)
+	{
+		if (dest && count > 0)
+			memset (dest, 0, count);
+		if (reader)
+			reader->error = true;
+		return;
+	}
+	if (count > 0 && dest)
+		memcpy (dest, reader->data + reader->offset, count);
+	reader->offset += count;
+}
+
+static unsigned int SV_Bot_NavReadU32 (bot_nav_reader_t *reader)
+{
+	unsigned int value = 0;
+	SV_Bot_NavReadBytes (reader, &value, sizeof(value));
+	return LittleLong ((int)value);
+}
+
+static unsigned short SV_Bot_NavReadU16 (bot_nav_reader_t *reader)
+{
+	unsigned short value = 0;
+	SV_Bot_NavReadBytes (reader, &value, sizeof(value));
+	return LittleShort ((short)value);
+}
+
+static float SV_Bot_NavReadFloat (bot_nav_reader_t *reader)
+{
+	float value = 0.0f;
+	SV_Bot_NavReadBytes (reader, &value, sizeof(value));
+	return LittleFloat (value);
+}
+
+typedef struct
+{
 	qboolean		active;
 	vec3_t		wander_dir;
 	float		wander_yaw;
@@ -130,7 +218,7 @@ typedef struct
 	qboolean		aim_initialized;
 	double		next_wall_check_time;
 	double		next_path_recalc_time;
-	edict_t		*path_nodes[BOT_MAX_PATH_LENGTH];
+	bot_path_node_t	path_nodes[BOT_MAX_PATH_LENGTH];
 	int			path_length;
 	int			path_index;
 } sv_bot_state_t;
@@ -154,6 +242,616 @@ static bot_waypoint_entry_t bot_waypoints[BOT_MAX_WAYPOINTS];
 static int bot_waypoint_count = 0;
 static qboolean bot_waypoints_initialized = false;
 
+
+
+static void SV_Bot_FreeNavMesh (void)
+{
+	if (bot_nav_mesh.nodes)
+	{
+		Z_Free (bot_nav_mesh.nodes);
+		bot_nav_mesh.nodes = NULL;
+	}
+	if (bot_nav_mesh.links)
+	{
+		Z_Free (bot_nav_mesh.links);
+		bot_nav_mesh.links = NULL;
+	}
+	if (bot_nav_mesh.hints)
+	{
+		Z_Free (bot_nav_mesh.hints);
+		bot_nav_mesh.hints = NULL;
+	}
+	bot_nav_mesh.node_count = 0;
+	bot_nav_mesh.link_count = 0;
+	bot_nav_mesh.hint_count = 0;
+}
+
+static qboolean SV_Bot_HasNavMesh (void)
+{
+	return bot_nav_mesh.node_count > 0 && bot_nav_mesh.nodes && bot_nav_mesh.links;
+}
+
+static qboolean SV_Bot_ParseNavFile (const byte *data, size_t size, const char *source)
+{
+	bot_nav_reader_t reader;
+	char magic[4];
+	unsigned int version;
+	unsigned int base_version;
+	unsigned int node_count;
+	unsigned int link_count;
+	unsigned int hint_count;
+	unsigned int entity_count = 0;
+	qboolean is_nav3 = false;
+	qboolean use_wide_indices = false;
+	qboolean radius_is_float = false;
+	qboolean flags_are_u32 = false;
+	qboolean link_types_are_u32 = false;
+	qboolean hint_indices_are_u32 = false;
+	unsigned int i;
+	float z_offset;
+
+	if (!data || size < 16)
+		return false;
+
+	reader.data = data;
+	reader.size = size;
+	reader.offset = 0;
+	reader.error = false;
+
+	SV_Bot_NavReadBytes (&reader, magic, sizeof(magic));
+	if (reader.error)
+		return false;
+	if (memcmp (magic, "NAV2", sizeof(magic)) == 0)
+	{
+		is_nav3 = false;
+	}
+	else if (memcmp (magic, "NAV3", sizeof(magic)) == 0)
+	{
+		is_nav3 = true;
+	}
+	else
+	{
+		return false;
+	}
+
+	version = SV_Bot_NavReadU32 (&reader);
+	base_version = version;
+	if (reader.error)
+		return false;
+	if (is_nav3)
+	{
+		if (base_version < 2 || base_version > 6)
+			return false;
+		version = base_version;
+		use_wide_indices = true;
+		radius_is_float = true;
+		flags_are_u32 = true;
+		link_types_are_u32 = true;
+		hint_indices_are_u32 = true;
+	}
+	else
+	{
+		if (version < 12 || version > 21)
+			return false;
+		if (version >= 18)
+		{
+			use_wide_indices = true;
+			radius_is_float = true;
+			flags_are_u32 = true;
+			link_types_are_u32 = true;
+			hint_indices_are_u32 = true;
+		}
+	}
+       if (!hint_indices_are_u32)
+               hint_indices_are_u32 = use_wide_indices;
+
+	node_count = SV_Bot_NavReadU32 (&reader);
+	link_count = SV_Bot_NavReadU32 (&reader);
+	hint_count = SV_Bot_NavReadU32 (&reader);
+	if (reader.error)
+		return false;
+	if (node_count == 0 || link_count == 0)
+		return false;
+	if (node_count > (unsigned int)INT_MAX || link_count > (unsigned int)INT_MAX || hint_count > (unsigned int)INT_MAX)
+		return false;
+	if (node_count > 131072 || link_count > 1048576 || hint_count > 262144)
+		return false;
+
+	if (!is_nav3 && version >= 16)
+	{
+		(void) SV_Bot_NavReadFloat (&reader);
+		if (reader.error)
+			return false;
+	}
+
+	if (node_count > 0 && node_count > SIZE_MAX / sizeof(*bot_nav_mesh.nodes))
+		return false;
+	if (link_count > 0 && link_count > SIZE_MAX / sizeof(*bot_nav_mesh.links))
+		return false;
+	if (hint_count > 0 && hint_count > SIZE_MAX / sizeof(*bot_nav_mesh.hints))
+		return false;
+
+	bot_nav_mesh.nodes = (bot_nav_node_t *) Z_Malloc (node_count * sizeof(*bot_nav_mesh.nodes));
+	bot_nav_mesh.links = (bot_nav_link_t *) Z_Malloc (link_count * sizeof(*bot_nav_mesh.links));
+	bot_nav_mesh.hints = hint_count ? (bot_nav_hint_t *) Z_Malloc (hint_count * sizeof(*bot_nav_mesh.hints)) : NULL;
+	bot_nav_mesh.node_count = (int) node_count;
+	bot_nav_mesh.link_count = (int) link_count;
+	bot_nav_mesh.hint_count = (int) hint_count;
+
+	memset (bot_nav_mesh.nodes, 0, node_count * sizeof(*bot_nav_mesh.nodes));
+	memset (bot_nav_mesh.links, 0, link_count * sizeof(*bot_nav_mesh.links));
+	if (bot_nav_mesh.hints)
+		memset (bot_nav_mesh.hints, 0, hint_count * sizeof(*bot_nav_mesh.hints));
+
+	for (i = 0; i < node_count; i++)
+	{
+		unsigned int flags = flags_are_u32 ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		unsigned int link_total = use_wide_indices ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		unsigned int first_link = use_wide_indices ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		float radius = radius_is_float ? SV_Bot_NavReadFloat (&reader) : (float) SV_Bot_NavReadU16 (&reader);
+		if (reader.error)
+			goto nav_fail;
+		if (first_link > link_count || first_link + link_total > link_count)
+			goto nav_fail;
+		bot_nav_mesh.nodes[i].flags = flags;
+		bot_nav_mesh.nodes[i].first_link = first_link;
+		bot_nav_mesh.nodes[i].link_count = link_total;
+		bot_nav_mesh.nodes[i].radius = (radius > 0.0f) ? radius : 0.0f;
+	}
+
+	z_offset = is_nav3 ? 0.0f : 24.0f;
+
+	for (i = 0; i < node_count; i++)
+	{
+		bot_nav_mesh.nodes[i].origin[0] = SV_Bot_NavReadFloat (&reader);
+		bot_nav_mesh.nodes[i].origin[1] = SV_Bot_NavReadFloat (&reader);
+		bot_nav_mesh.nodes[i].origin[2] = SV_Bot_NavReadFloat (&reader) + z_offset;
+		if (reader.error)
+			goto nav_fail;
+	}
+
+	for (i = 0; i < link_count; i++)
+	{
+		unsigned int to = use_wide_indices ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		unsigned int type = link_types_are_u32 ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		unsigned int hint = hint_indices_are_u32 ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+		if (reader.error)
+			goto nav_fail;
+		bot_nav_mesh.links[i].to = to;
+		bot_nav_mesh.links[i].type = type;
+		bot_nav_mesh.links[i].hint_index = (hint < hint_count) ? hint : 0xffffffffu;
+		bot_nav_mesh.links[i].cost = 0.0f;
+	}
+
+	for (i = 0; i < hint_count; i++)
+	{
+		int j;
+		for (j = 0; j < 3; j++)
+		{
+			bot_nav_mesh.hints[i].points[j][0] = SV_Bot_NavReadFloat (&reader);
+			bot_nav_mesh.hints[i].points[j][1] = SV_Bot_NavReadFloat (&reader);
+			bot_nav_mesh.hints[i].points[j][2] = SV_Bot_NavReadFloat (&reader);
+		}
+		bot_nav_mesh.hints[i].point_count = 3;
+		if (is_nav3 && base_version >= 6)
+		{
+			bot_nav_mesh.hints[i].points[3][0] = SV_Bot_NavReadFloat (&reader);
+			bot_nav_mesh.hints[i].points[3][1] = SV_Bot_NavReadFloat (&reader);
+			bot_nav_mesh.hints[i].points[3][2] = SV_Bot_NavReadFloat (&reader);
+			bot_nav_mesh.hints[i].point_count = 4;
+		}
+		if (reader.error)
+			goto nav_fail;
+	}
+
+	if (!is_nav3 && reader.size - reader.offset >= sizeof(unsigned int))
+	{
+		entity_count = SV_Bot_NavReadU32 (&reader);
+		if (reader.error)
+			goto nav_fail;
+		for (i = 0; i < entity_count; i++)
+		{
+			unsigned int link = use_wide_indices ? SV_Bot_NavReadU32 (&reader) : (unsigned int) SV_Bot_NavReadU16 (&reader);
+			float ignore;
+			if (reader.error)
+				goto nav_fail;
+			if (link >= link_count)
+				goto nav_fail;
+			ignore = SV_Bot_NavReadFloat (&reader);
+			ignore = SV_Bot_NavReadFloat (&reader);
+			ignore = SV_Bot_NavReadFloat (&reader);
+			ignore = SV_Bot_NavReadFloat (&reader);
+			ignore = SV_Bot_NavReadFloat (&reader);
+			ignore = SV_Bot_NavReadFloat (&reader);
+			(void)ignore;
+			if (reader.error)
+				goto nav_fail;
+			if (version == 14)
+			{
+				SV_Bot_NavReadU32 (&reader);
+				SV_Bot_NavReadU32 (&reader);
+			}
+			else if (version >= 15)
+			{
+				SV_Bot_NavReadU32 (&reader);
+			}
+			if (reader.error)
+				goto nav_fail;
+		}
+	}
+
+	for (i = 0; i < node_count; i++)
+	{
+		unsigned int j;
+		bot_nav_node_t *node = &bot_nav_mesh.nodes[i];
+		for (j = 0; j < node->link_count; j++)
+		{
+			unsigned int link_index = node->first_link + j;
+			vec3_t delta;
+			bot_nav_link_t *link;
+			if (link_index >= (unsigned int) bot_nav_mesh.link_count)
+				goto nav_fail;
+			link = &bot_nav_mesh.links[link_index];
+			if (link->to >= node_count)
+				goto nav_fail;
+			VectorSubtract (bot_nav_mesh.nodes[link->to].origin, node->origin, delta);
+			link->cost = VectorLength (delta);
+			if (link->cost <= 0.0f)
+				link->cost = 1.0f;
+		}
+	}
+
+	if (reader.error)
+		goto nav_fail;
+
+	return true;
+
+nav_fail:
+	SV_Bot_FreeNavMesh ();
+	return false;
+}
+
+static qboolean SV_Bot_LoadNavMeshFromPath (const char *path)
+{
+	byte *buffer;
+	size_t size;
+	qboolean result;
+
+	buffer = COM_LoadMallocFile (path, NULL);
+	if (!buffer)
+		return false;
+
+	size = (com_filesize > 0) ? (size_t) com_filesize : 0;
+	if (size == 0)
+	{
+		free (buffer);
+		return false;
+	}
+
+	result = SV_Bot_ParseNavFile (buffer, size, path);
+	free (buffer);
+	if (result)
+	{
+		Con_Printf ("Loaded navigation mesh from %s (%d nodes, %d links)\n", path, bot_nav_mesh.node_count, bot_nav_mesh.link_count);
+	}
+	return result;
+}
+
+void SV_Bot_LoadNavigation (const char *mapname)
+{
+	static const char *patterns[] =
+	{
+		"maps/%s.nav2",
+		"maps/%s.nav",
+		"data/%s.nav2",
+		"data/%s.nav",
+		"bots/navigation/%s.nav2",
+		"bots/navigation/%s.nav"
+	};
+	int i;
+
+	SV_Bot_FreeNavMesh ();
+
+	if (!mapname || !*mapname)
+		return;
+
+	for (i = 0; i < (int)(sizeof(patterns) / sizeof(patterns[0])); i++)
+	{
+		char path[MAX_QPATH];
+		q_snprintf (path, sizeof(path), patterns[i], mapname);
+		if (SV_Bot_LoadNavMeshFromPath (path))
+			return;
+	}
+}
+
+static void SV_Bot_InitPathNode (bot_path_node_t *node)
+{
+	if (!node)
+		return;
+	node->edict = NULL;
+	VectorClear (node->position);
+	node->radius = 0.0f;
+}
+
+static void SV_Bot_PathNodeFromEdict (bot_path_node_t *node, edict_t *ent)
+{
+	if (!node)
+		return;
+	node->edict = ent;
+	if (ent && !ent->free)
+		VectorCopy (ent->v.origin, node->position);
+	else
+		VectorClear (node->position);
+	node->radius = 64.0f;
+}
+
+static void SV_Bot_PathNodeFromNav (bot_path_node_t *node, const bot_nav_node_t *nav)
+{
+	if (!node)
+		return;
+	node->edict = NULL;
+	if (nav)
+	{
+		VectorCopy (nav->origin, node->position);
+		node->radius = (nav->radius > 0.0f) ? nav->radius : 64.0f;
+	}
+	else
+	{
+		VectorClear (node->position);
+		node->radius = 64.0f;
+	}
+}
+
+static void SV_Bot_PathNodeOrigin (const bot_path_node_t *node, vec3_t out)
+{
+	if (!node)
+	{
+		VectorClear (out);
+		return;
+	}
+	if (node->edict && !node->edict->free)
+		VectorCopy (node->edict->v.origin, out);
+	else
+		VectorCopy (node->position, out);
+}
+
+static float SV_Bot_PathNodeRadius (const bot_path_node_t *node)
+{
+	if (!node)
+		return 0.0f;
+	if (node->radius > 0.0f)
+		return node->radius;
+	return 64.0f;
+}
+
+static int SV_Bot_FindClosestNavNode (const vec3_t pos, edict_t *ignore)
+{
+	int best = -1;
+	float best_score = FLT_MAX;
+	int fallback = -1;
+	float fallback_score = FLT_MAX;
+	int i;
+
+	if (!SV_Bot_HasNavMesh ())
+		return -1;
+
+	for (i = 0; i < bot_nav_mesh.node_count; i++)
+	{
+		const bot_nav_node_t *node = &bot_nav_mesh.nodes[i];
+		vec3_t delta;
+		float dist2;
+		float radius = (node->radius > 0.0f) ? node->radius : 32.0f;
+		float score;
+
+		VectorSubtract (node->origin, pos, delta);
+		dist2 = DotProduct (delta, delta);
+		score = dist2;
+		if (radius > 0.0f)
+		{
+			float radius2 = radius * radius;
+			if (dist2 <= radius2)
+				score = dist2 - radius2;
+		}
+
+		if (score < fallback_score)
+		{
+			fallback_score = score;
+			fallback = i;
+		}
+
+		if (score >= best_score)
+			continue;
+
+		if (radius > 0.0f && dist2 > radius * radius)
+		{
+			trace_t trace = SV_Move (pos, vec3_origin, vec3_origin, node->origin, MOVE_NOMONSTERS, ignore);
+			if (trace.fraction < 0.99f)
+				continue;
+		}
+
+		best_score = score;
+		best = i;
+	}
+
+	return (best >= 0) ? best : fallback;
+}
+
+static qboolean SV_Bot_BuildNavPath (edict_t *self, edict_t *goal, bot_path_node_t *out_path, int *out_length)
+{
+	float *g_cost = NULL;
+	float *f_cost = NULL;
+	int *came_from = NULL;
+	int *open_list = NULL;
+	qboolean *in_open = NULL;
+	qboolean *closed = NULL;
+	int open_count = 0;
+	int start_node;
+	int goal_node;
+	int node_count;
+	int i;
+	qboolean success = false;
+
+	if (!self || !goal || !out_path || !out_length)
+		return false;
+	if (!SV_Bot_HasNavMesh ())
+		return false;
+
+	node_count = bot_nav_mesh.node_count;
+	if (node_count <= 0)
+		return false;
+
+	start_node = SV_Bot_FindClosestNavNode (self->v.origin, self);
+	goal_node = SV_Bot_FindClosestNavNode (goal->v.origin, goal);
+	if (start_node < 0 || goal_node < 0)
+		return false;
+	if (start_node == goal_node)
+	{
+		*out_length = 0;
+		return true;
+	}
+
+	g_cost = (float *) malloc (node_count * sizeof(*g_cost));
+	f_cost = (float *) malloc (node_count * sizeof(*f_cost));
+	came_from = (int *) malloc (node_count * sizeof(*came_from));
+	open_list = (int *) malloc (node_count * sizeof(*open_list));
+	in_open = (qboolean *) malloc (node_count * sizeof(*in_open));
+	closed = (qboolean *) malloc (node_count * sizeof(*closed));
+	if (!g_cost || !f_cost || !came_from || !open_list || !in_open || !closed)
+		goto nav_cleanup;
+
+	for (i = 0; i < node_count; i++)
+	{
+		g_cost[i] = FLT_MAX;
+		f_cost[i] = FLT_MAX;
+		came_from[i] = -1;
+		in_open[i] = false;
+		closed[i] = false;
+	}
+
+	g_cost[start_node] = 0.0f;
+	{
+		vec3_t diff;
+		VectorSubtract (bot_nav_mesh.nodes[start_node].origin, bot_nav_mesh.nodes[goal_node].origin, diff);
+		f_cost[start_node] = VectorLength (diff);
+	}
+	open_list[open_count++] = start_node;
+	in_open[start_node] = true;
+
+        while (open_count > 0)
+        {
+                int best_pos = 0;
+                int current = open_list[0];
+                float best_f = f_cost[current];
+                int j;
+
+                for (j = 1; j < open_count; j++)
+                {
+                        int node = open_list[j];
+                        if (f_cost[node] < best_f)
+                        {
+                                best_f = f_cost[node];
+				current = node;
+				best_pos = j;
+			}
+		}
+
+		open_count--;
+		open_list[best_pos] = open_list[open_count];
+		in_open[current] = false;
+
+		if (current == goal_node)
+		{
+			success = true;
+			break;
+		}
+
+                closed[current] = true;
+
+                for (unsigned int link_offset = 0; link_offset < bot_nav_mesh.nodes[current].link_count; link_offset++)
+                {
+                        unsigned int link_index = bot_nav_mesh.nodes[current].first_link + link_offset;
+                        const bot_nav_link_t *link;
+                        int neighbor;
+                        float step;
+                        float tentative_g;
+                        vec3_t diff;
+
+			if (link_index >= (unsigned int) bot_nav_mesh.link_count)
+				continue;
+			link = &bot_nav_mesh.links[link_index];
+			if (link->to >= (unsigned int) node_count)
+				continue;
+			neighbor = (int) link->to;
+			if (closed[neighbor])
+				continue;
+
+			step = (link->cost > 0.0f) ? link->cost : 1.0f;
+			tentative_g = g_cost[current] + step;
+			if (tentative_g >= g_cost[neighbor])
+				continue;
+
+			came_from[neighbor] = current;
+			g_cost[neighbor] = tentative_g;
+			VectorSubtract (bot_nav_mesh.nodes[neighbor].origin, bot_nav_mesh.nodes[goal_node].origin, diff);
+			f_cost[neighbor] = tentative_g + VectorLength (diff);
+
+			if (!in_open[neighbor])
+			{
+				if (open_count >= node_count)
+				{
+					success = false;
+					goto nav_cleanup;
+				}
+				open_list[open_count++] = neighbor;
+				in_open[neighbor] = true;
+			}
+		}
+	}
+
+	if (!success)
+		goto nav_cleanup;
+
+	{
+		int order[BOT_MAX_PATH_LENGTH];
+		int order_length = 0;
+		int current = goal_node;
+
+		while (current != start_node && order_length < BOT_MAX_PATH_LENGTH)
+		{
+			order[order_length++] = current;
+			current = came_from[current];
+			if (current < 0)
+			{
+				success = false;
+				goto nav_cleanup;
+			}
+		}
+
+		*out_length = 0;
+		while (order_length > 0)
+		{
+			int node_index = order[--order_length];
+			if (*out_length >= BOT_MAX_PATH_LENGTH)
+			{
+				success = false;
+				goto nav_cleanup;
+			}
+			SV_Bot_PathNodeFromNav (&out_path[*out_length], &bot_nav_mesh.nodes[node_index]);
+			(*out_length)++;
+		}
+	}
+
+	success = true;
+
+nav_cleanup:
+	if (g_cost) free (g_cost);
+	if (f_cost) free (f_cost);
+	if (came_from) free (came_from);
+	if (open_list) free (open_list);
+	if (in_open) free (in_open);
+	if (closed) free (closed);
+	return success;
+}
 
 static float SV_Bot_Distance (const vec3_t a, const vec3_t b);
 
@@ -363,10 +1061,10 @@ static void SV_Bot_ClearPath (sv_bot_state_t *state)
 
 static qboolean SV_Bot_RecalculatePath (edict_t *self, sv_bot_state_t *state, double now)
 {
-        edict_t *goal;
-        edict_t *path[BOT_MAX_PATH_LENGTH];
+        bot_path_node_t path[BOT_MAX_PATH_LENGTH];
         int length = 0;
         int i;
+        edict_t *goal;
 
         if (!self || !state)
                 return false;
@@ -379,15 +1077,42 @@ static qboolean SV_Bot_RecalculatePath (edict_t *self, sv_bot_state_t *state, do
         if (!goal)
                 return false;
 
-        SV_Bot_EnsureWaypoints ();
+        if (SV_Bot_HasNavMesh () && SV_Bot_BuildNavPath (self, goal, path, &length))
+        {
+                /* path already filled */
+        }
+        else
+        {
+                edict_t *way_path[BOT_MAX_PATH_LENGTH];
+                int way_length = 0;
 
-        if (!SV_Bot_BuildWaypointPath (self, goal, path, &length))
-                return false;
+                SV_Bot_EnsureWaypoints ();
 
-        if (length <= 0)
-                return false;
+                if (!SV_Bot_BuildWaypointPath (self, goal, way_path, &way_length))
+                        return false;
 
-        for (i = 0; i < length && i < BOT_MAX_PATH_LENGTH; i++)
+                length = 0;
+                for (i = 0; i < way_length && i < BOT_MAX_PATH_LENGTH; i++)
+                {
+                        SV_Bot_PathNodeFromEdict (&path[length], way_path[i]);
+                        length++;
+                }
+        }
+
+        if (length < BOT_MAX_PATH_LENGTH)
+        {
+                bot_path_node_t goal_node;
+                SV_Bot_PathNodeFromEdict (&goal_node, goal);
+                if (length == 0 || path[length - 1].edict != goal)
+                        path[length++] = goal_node;
+                else
+                        path[length - 1] = goal_node;
+        }
+
+        if (length > BOT_MAX_PATH_LENGTH)
+                length = BOT_MAX_PATH_LENGTH;
+
+        for (i = 0; i < length; i++)
                 state->path_nodes[i] = path[i];
 
         state->path_length = length;
@@ -404,16 +1129,23 @@ static void SV_Bot_UpdatePathProgress (edict_t *self, sv_bot_state_t *state)
 
         while (state->path_index < state->path_length)
         {
-                edict_t *target = state->path_nodes[state->path_index];
+                const bot_path_node_t *target = &state->path_nodes[state->path_index];
+                vec3_t target_origin;
+                float radius;
 
-                if (!target || target->free)
+                if (target->edict && target->edict->free)
                 {
                         state->path_length = 0;
                         state->path_index = 0;
                         return;
                 }
 
-                if (SV_Bot_Distance (target->v.origin, self->v.origin) <= 64.0f)
+                SV_Bot_PathNodeOrigin (target, target_origin);
+                radius = SV_Bot_PathNodeRadius (target);
+                if (radius <= 0.0f)
+                        radius = 64.0f;
+
+                if (SV_Bot_Distance (target_origin, self->v.origin) <= radius)
                 {
                         state->path_index++;
                         continue;
@@ -1422,6 +2154,7 @@ static void SV_Bot_RefreshSettingsForState (sv_bot_state_t *state)
 void SV_Bot_Reset (void)
 {
         int i;
+        SV_Bot_FreeNavMesh ();
         memset (sv_bot_states, 0, sizeof(sv_bot_states));
         for (i = 0; i < (int)(sizeof(sv_bot_states) / sizeof(sv_bot_states[0])); i++)
         {
@@ -1445,7 +2178,7 @@ static void SV_Bot_PickWanderDirection (sv_bot_state_t *state)
         state->next_wander_time = qcvm->time + 2.0 + ((float)(rand () & 255) / 255.0f) * 4.0f;
 }
 
-static void SV_Bot_CheckForObstacles (edict_t *self, sv_bot_state_t *state, edict_t *move_target, double now)
+static void SV_Bot_CheckForObstacles (edict_t *self, sv_bot_state_t *state, const bot_path_node_t *move_target, double now)
 {
         vec3_t dir;
         vec3_t start, end;
@@ -1459,9 +2192,15 @@ static void SV_Bot_CheckForObstacles (edict_t *self, sv_bot_state_t *state, edic
                 return;
 
         if (move_target)
-                VectorSubtract (move_target->v.origin, self->v.origin, dir);
+        {
+                vec3_t target_origin;
+                SV_Bot_PathNodeOrigin (move_target, target_origin);
+                VectorSubtract (target_origin, self->v.origin, dir);
+        }
         else
+        {
                 VectorCopy (state->wander_dir, dir);
+        }
 
         length = VectorNormalize (dir);
         if (length <= 0.0f)
@@ -1617,13 +2356,16 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 	const bot_skill_settings_t *settings = state ? state->settings : NULL;
         bot_priority_t priority = BOT_PRIORITY_NONE;
         edict_t *goal = NULL;
-        edict_t *move_target = NULL;
+        const bot_path_node_t *move_target = NULL;
+        bot_path_node_t goal_node;
         vec3_t delta;
         vec3_t base_angles;
         qboolean have_base_angles = false;
 
-	if (!self || self->free)
-		return;
+        SV_Bot_InitPathNode (&goal_node);
+
+        if (!self || self->free)
+                return;
 
         enemy = SV_Bot_FindTarget (client, state, true);
         if (!enemy)
@@ -1678,35 +2420,44 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
         {
                 if (state->path_length > 0 && state->path_index < state->path_length)
                 {
-                        move_target = state->path_nodes[state->path_index];
-                        if (!move_target || move_target->free)
+                        const bot_path_node_t *candidate = &state->path_nodes[state->path_index];
+
+                        if (candidate->edict && candidate->edict->free)
                         {
-                                move_target = NULL;
                                 state->next_path_recalc_time = now;
+                        }
+                        else
+                        {
+                                move_target = candidate;
                         }
 
                         if (!move_target && now >= state->next_path_recalc_time)
                         {
-                                if (SV_Bot_RecalculatePath (self, state, now))
-                                        move_target = state->path_nodes[state->path_index];
+                                if (SV_Bot_RecalculatePath (self, state, now) && state->path_length > 0 && state->path_index < state->path_length)
+                                        move_target = &state->path_nodes[state->path_index];
                         }
                 }
                 else if (now >= state->next_path_recalc_time)
                 {
-                        if (SV_Bot_RecalculatePath (self, state, now))
-                                move_target = state->path_nodes[state->path_index];
+                        if (SV_Bot_RecalculatePath (self, state, now) && state->path_length > 0 && state->path_index < state->path_length)
+                                move_target = &state->path_nodes[state->path_index];
                 }
         }
 
-        if (!move_target)
-                move_target = goal;
+        if (!move_target && goal)
+        {
+                SV_Bot_PathNodeFromEdict (&goal_node, goal);
+                move_target = &goal_node;
+        }
 
         if (move_target)
         {
                 vec3_t dir;
                 float dist;
+                vec3_t target_origin;
 
-                VectorSubtract (move_target->v.origin, self->v.origin, dir);
+                SV_Bot_PathNodeOrigin (move_target, target_origin);
+                VectorSubtract (target_origin, self->v.origin, dir);
                 dist = VectorLength (dir);
                 if (dist > 0)
                         VectorScale (dir, 1.0f / dist, dir);
