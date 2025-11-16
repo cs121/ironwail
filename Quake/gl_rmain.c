@@ -267,6 +267,7 @@ cvar_t	r_showbboxes_think = { "r_showbboxes_think", "0", CVAR_NONE }; // 0=show 
 cvar_t	r_showbboxes_health = { "r_showbboxes_health", "0", CVAR_NONE }; // 0=show all; 1=healthy only; -1=non-healthy only
 cvar_t	r_showbboxes_links = { "r_showbboxes_links", "3", CVAR_NONE }; // 0=off; 1=outgoing only; 2=incoming only; 3=incoming+outgoing
 cvar_t	r_showbboxes_targets = { "r_showbboxes_targets", "1", CVAR_NONE };
+cvar_t	bot_debug = { "bot_debug", "0", CVAR_NONE };
 cvar_t	r_showfields = { "r_showfields", "0", CVAR_NONE };
 cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=entity pos; 1=bottom-right
 cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
@@ -2128,18 +2129,49 @@ static const uint16_t boxidx[12 * 2] = { 0,1, 0,2, 0,4, 1,3, 1,5, 2,3, 2,6, 3,7,
 
 static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 {
-	int i;
-	debugvert_t v[8];
+        int i;
+        debugvert_t v[8];
 
-	for (i = 0; i < 8; i++)
-	{
-		v[i].pos[0] = i & 1 ? mins[0] : maxs[0];
-		v[i].pos[1] = i & 2 ? mins[1] : maxs[1];
-		v[i].pos[2] = i & 4 ? mins[2] : maxs[2];
-		v[i].color = color;
-	}
+        for (i = 0; i < 8; i++)
+        {
+                v[i].pos[0] = i & 1 ? mins[0] : maxs[0];
+                v[i].pos[1] = i & 2 ? mins[1] : maxs[1];
+                v[i].pos[2] = i & 4 ? mins[2] : maxs[2];
+                v[i].color = color;
+        }
 
-	R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
+        R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
+}
+
+static void R_EmitDiamond (const vec3_t origin, float size, uint32_t color)
+{
+        static const uint16_t diamond_idx[] = {
+                0, 1, 0, 2, 0, 3, 0, 4, 1, 2, 2, 3, 3, 4, 4, 1, 5, 1, 5, 2, 5, 3, 5, 4
+        };
+        debugvert_t v[6];
+        float clamped = max (size, 4.0f);
+
+        VectorCopy (origin, v[0].pos);
+        v[0].pos[2] += clamped;
+        VectorCopy (origin, v[1].pos);
+        v[1].pos[0] += clamped;
+        VectorCopy (origin, v[2].pos);
+        v[2].pos[1] += clamped;
+        VectorCopy (origin, v[3].pos);
+        v[3].pos[0] -= clamped;
+        VectorCopy (origin, v[4].pos);
+        v[4].pos[1] -= clamped;
+        VectorCopy (origin, v[5].pos);
+        v[5].pos[2] -= clamped;
+
+        v[0].color = color;
+        v[1].color = color;
+        v[2].color = color;
+        v[3].color = color;
+        v[4].color = color;
+        v[5].color = color;
+
+        R_AddDebugGeometry (v, countof (v), diamond_idx, countof (diamond_idx));
 }
 
 /*
@@ -2565,11 +2597,52 @@ static void R_ShowBoundingBoxes (void)
 	PR_SwitchQCVM (NULL);
 	PR_SwitchQCVM (oldvm);
 
-	R_FlushDebugGeometry ();
+        R_FlushDebugGeometry ();
 
-	Sbar_Changed (); //so we don't get dots collecting on the statusbar
+        Sbar_Changed (); //so we don't get dots collecting on the statusbar
 
-	GL_EndGroup ();
+        GL_EndGroup ();
+}
+
+static void R_ShowBotDebug (void)
+{
+        bot_debug_waypoint_t waypoints[BOT_DEBUG_MAX_WAYPOINTS];
+        qcvm_t *oldvm;
+        int count;
+        int i;
+
+        if (bot_debug.value <= 0.0f || cl.maxclients > 1 || !r_drawentities.value || !sv.active)
+                return;
+
+        GL_BeginGroup ("Bot debug");
+
+        R_SetDebugGeometryZTest (false);
+
+        oldvm = qcvm;
+        PR_SwitchQCVM (NULL);
+        PR_SwitchQCVM (&sv.qcvm);
+
+        count = SV_Bot_GetDebugWaypoints (waypoints, BOT_DEBUG_MAX_WAYPOINTS);
+
+        for (i = 0; i < count; i++)
+        {
+                uint32_t color = 0x7f7f7f7f;
+                float size = max (8.0f, waypoints[i].radius * 0.5f);
+
+                if (waypoints[i].unreachable)
+                        color = 0x7f0000ff;
+                else if (waypoints[i].is_target)
+                        color = 0x7f00ff00;
+
+                R_EmitDiamond (waypoints[i].origin, size, color);
+        }
+
+        R_FlushDebugGeometry ();
+
+        PR_SwitchQCVM (NULL);
+        PR_SwitchQCVM (oldvm);
+
+        GL_EndGroup ();
 }
 
 /*
@@ -2811,11 +2884,13 @@ void R_RenderScene (void)
         if (alphamode == ALPHAMODE_OIT)
                 R_DrawParticles_PostOIT ();
 
-	R_ShowTris (); //johnfitz
+        R_ShowTris (); //johnfitz
 
-	R_ShowBoundingBoxes (); //johnfitz
+        R_ShowBoundingBoxes (); //johnfitz
 
-	R_ShowPointFile ();
+        R_ShowBotDebug ();
+
+        R_ShowPointFile ();
 }
 
 /*
