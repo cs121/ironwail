@@ -2624,14 +2624,14 @@ static void R_ShowBotDebug (void)
 
         count = SV_Bot_GetDebugWaypoints (waypoints, BOT_DEBUG_MAX_WAYPOINTS);
 
-		for (i = 0; i < count; i++)
-		{
-			uint32_t color = 0x7f7f7f7f;
-			float size = q_max (8.0f, waypoints[i].radius * 0.5f);
+                for (i = 0; i < count; i++)
+                {
+                        uint32_t color = waypoints[i].from_nav_file ? 0x7fff0000 : 0x7fffffff;
+                        float size = q_max (8.0f, waypoints[i].radius * 0.5f);
 
-			if (waypoints[i].unreachable)
-				color = 0x7f0000ff;
-			else if (waypoints[i].is_target)
+                        if (waypoints[i].unreachable)
+                                color = 0x7f0000ff;
+                        else if (waypoints[i].is_target)
 				color = 0x7f00ff00;
 
                 R_EmitDiamond (waypoints[i].origin, size, color);

@@ -2105,6 +2105,7 @@ int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints)
                         continue;
 
                 info = &out[count];
+                info->from_nav_file = SV_Bot_HasNavMesh ();
                 SV_Bot_GetNodePosition (wp, info->origin);
                 VectorSubtract (wp->v.maxs, wp->v.mins, extents);
 
