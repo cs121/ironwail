@@ -324,6 +324,7 @@ typedef struct bot_debug_waypoint_s
         float           radius;
         qboolean        is_target;
         qboolean        unreachable;
+        qboolean        from_nav_file;
 } bot_debug_waypoint_t;
 
 int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints);
