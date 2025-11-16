@@ -934,6 +934,8 @@ static void SV_Bot_EnsureWaypoints (void)
         }
 }
 
+static qboolean SV_Bot_BuildWaypointPath (edict_t *self, edict_t *goal, edict_t **out_path, int *out_length);
+
 static qboolean SV_Bot_WaypointReachable (client_t *bot, edict_t *waypoint)
 {
         bot_path_node_t path[BOT_MAX_PATH_LENGTH];
@@ -2221,7 +2223,11 @@ int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints)
                 VectorSubtract (wp->v.maxs, wp->v.mins, extents);
 
                 for (j = 0; j < 3; j++)
-                        radius = max (radius, fabsf (extents[j]) * 0.5f);
+                {
+                        float extent_radius = fabsf (extents[j]) * 0.5f;
+                        if (extent_radius > radius)
+                                radius = extent_radius;
+                }
 
                 info->radius = (radius > 0.0f) ? radius : 16.0f;
                 info->is_target = false;
