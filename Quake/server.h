@@ -316,4 +316,16 @@ void SV_Bot_LoadNavigation (const char *mapname);
 void SV_Bot_RunFrame (client_t *client);
 void SV_Bot_ClientDisconnected (client_t *client);
 
+#define BOT_DEBUG_MAX_WAYPOINTS 256
+
+typedef struct bot_debug_waypoint_s
+{
+        vec3_t          origin;
+        float           radius;
+        qboolean        is_target;
+        qboolean        unreachable;
+} bot_debug_waypoint_t;
+
+int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints);
+
 #endif	/* QUAKE_SERVER_H */
