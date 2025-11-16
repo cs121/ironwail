@@ -659,15 +659,21 @@ static int SV_Bot_FindClosestNavNode (const vec3_t pos, edict_t *ignore)
 			fallback = i;
 		}
 
-		if (score >= best_score)
-			continue;
+                if (score >= best_score)
+                        continue;
 
-		if (radius > 0.0f && dist2 > radius * radius)
-		{
-			trace_t trace = SV_Move (pos, vec3_origin, vec3_origin, node->origin, MOVE_NOMONSTERS, ignore);
-			if (trace.fraction < 0.99f)
-				continue;
-		}
+                if (radius > 0.0f && dist2 > radius * radius)
+                {
+                        vec3_t start;
+                        vec3_t end;
+                        trace_t trace;
+
+                        VectorCopy (pos, start);
+                        VectorCopy (node->origin, end);
+                        trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, ignore);
+                        if (trace.fraction < 0.99f)
+                                continue;
+                }
 
 		best_score = score;
 		best = i;
