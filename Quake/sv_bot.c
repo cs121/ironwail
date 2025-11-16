@@ -83,10 +83,11 @@ typedef struct bot_skill_settings_s
 
 typedef enum
 {
-	BOT_PRIORITY_NONE = 0,
-	BOT_PRIORITY_WEAPON,
-	BOT_PRIORITY_HEALTH,
-	BOT_PRIORITY_ARMOR
+        BOT_PRIORITY_NONE = 0,
+        BOT_PRIORITY_WEAPON,
+        BOT_PRIORITY_HEALTH,
+        BOT_PRIORITY_ARMOR,
+        BOT_PRIORITY_ENEMY
 } bot_priority_t;
 
 typedef struct bot_profile_s
@@ -1869,7 +1870,7 @@ static bot_priority_t SV_Bot_EvaluateNeeds (const edict_t *self, const bot_skill
 
 static qboolean SV_Bot_GoalStillValid (edict_t *goal, bot_priority_t priority, const edict_t *self)
 {
-	const char *classname;
+        const char *classname;
 
 	if (!goal || goal->free || goal->v.solid == SOLID_NOT)
 		return false;
@@ -1880,41 +1881,68 @@ static qboolean SV_Bot_GoalStillValid (edict_t *goal, bot_priority_t priority, c
 	if (!classname[0])
 		return false;
 
-	switch (priority)
-	{
-	case BOT_PRIORITY_WEAPON:
-	return true;
-	case BOT_PRIORITY_HEALTH:
-	return !q_strcasecmp (classname, "item_health");
-	case BOT_PRIORITY_ARMOR:
-	return !q_strcasecmp (classname, "item_armor1") || !q_strcasecmp (classname, "item_armor2") || !q_strcasecmp (classname, "item_armorInv");
-	default:
-	break;
-	}
+        switch (priority)
+        {
+        case BOT_PRIORITY_WEAPON:
+                return true;
+        case BOT_PRIORITY_HEALTH:
+                return !q_strcasecmp (classname, "item_health");
+        case BOT_PRIORITY_ARMOR:
+                return !q_strcasecmp (classname, "item_armor1") || !q_strcasecmp (classname, "item_armor2") || !q_strcasecmp (classname, "item_armorInv");
+        case BOT_PRIORITY_ENEMY:
+                return !goal->free && goal->v.takedamage;
+        default:
+                break;
+        }
 
 	return false;
 }
 
-static void SV_Bot_UpdateGoal (edict_t *self, sv_bot_state_t *state, bot_priority_t priority, double now)
+static void SV_Bot_UpdateGoal (edict_t *self, sv_bot_state_t *state, bot_priority_t priority, edict_t *enemy, double now)
 {
-	edict_t *goal;
+        edict_t *goal;
 
-	if (!state)
-	return;
+        if (!state)
+                return;
 
         if (priority == BOT_PRIORITY_NONE)
         {
-        state->goal_edict = NULL;
-        state->goal_priority = BOT_PRIORITY_NONE;
-        state->goal_best_dist = 0.0f;
-        SV_Bot_ClearPath (state);
-        return;
+                state->goal_edict = NULL;
+                state->goal_priority = BOT_PRIORITY_NONE;
+                state->goal_best_dist = 0.0f;
+                SV_Bot_ClearPath (state);
+                return;
+        }
+
+        if (priority == BOT_PRIORITY_ENEMY)
+        {
+                if (!enemy || enemy->free)
+                {
+                        state->goal_edict = NULL;
+                        state->goal_priority = BOT_PRIORITY_NONE;
+                        state->goal_best_dist = 0.0f;
+                        SV_Bot_ClearPath (state);
+                        return;
+                }
+
+                goal = enemy;
+                if (state->goal_priority != BOT_PRIORITY_ENEMY || state->goal_edict != goal)
+                {
+                        state->goal_edict = goal;
+                        state->goal_priority = BOT_PRIORITY_ENEMY;
+                        state->goal_best_dist = SV_Bot_Distance (goal->v.origin, self->v.origin);
+                        state->goal_last_progress_time = now;
+                        SV_Bot_ClearPath (state);
+                }
+                if (state->path_length <= 0 || now >= state->next_path_recalc_time)
+                        SV_Bot_RecalculatePath (self, state, now);
+                return;
         }
 
         if (state->goal_priority != priority || !SV_Bot_GoalStillValid (state->goal_edict, priority, self))
         {
-        goal = SV_Bot_FindGoal (self, priority);
-        state->goal_edict = goal;
+                goal = SV_Bot_FindGoal (self, priority);
+                state->goal_edict = goal;
         state->goal_priority = priority;
         SV_Bot_ClearPath (state);
         if (goal)
@@ -1939,37 +1967,40 @@ static void SV_Bot_CheckGoalProgress (edict_t *self, sv_bot_state_t *state, doub
         float dist;
 
         if (!state || !state->goal_edict)
-        return;
+                return;
+
+        if (state->goal_priority == BOT_PRIORITY_ENEMY)
+                return;
 
         if (!SV_Bot_GoalStillValid (state->goal_edict, state->goal_priority, self))
         {
-        state->goal_edict = NULL;
-        state->goal_priority = BOT_PRIORITY_NONE;
-        SV_Bot_ClearPath (state);
-        return;
+                state->goal_edict = NULL;
+                state->goal_priority = BOT_PRIORITY_NONE;
+                SV_Bot_ClearPath (state);
+                return;
         }
 
         dist = SV_Bot_Distance (state->goal_edict->v.origin, self->v.origin);
         if (dist < 48.0f)
         {
-        state->goal_edict = NULL;
-        state->goal_priority = BOT_PRIORITY_NONE;
-        state->goal_best_dist = 0.0f;
-        SV_Bot_ClearPath (state);
-        return;
+                state->goal_edict = NULL;
+                state->goal_priority = BOT_PRIORITY_NONE;
+                state->goal_best_dist = 0.0f;
+                SV_Bot_ClearPath (state);
+                return;
         }
 
         if (dist < state->goal_best_dist - 16.0f)
         {
-        state->goal_best_dist = dist;
-        state->goal_last_progress_time = now;
+                state->goal_best_dist = dist;
+                state->goal_last_progress_time = now;
         }
         else if (now - state->goal_last_progress_time > 3.0)
         {
-        state->goal_edict = NULL;
-        state->goal_priority = BOT_PRIORITY_NONE;
-        state->next_wander_time = 0.0;
-        SV_Bot_ClearPath (state);
+                state->goal_edict = NULL;
+                state->goal_priority = BOT_PRIORITY_NONE;
+                state->next_wander_time = 0.0;
+                SV_Bot_ClearPath (state);
         }
 }
 
@@ -2353,10 +2384,15 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 		}
 	}
 
-	if (state)
-	{
-		priority = SV_Bot_EvaluateNeeds (self, settings);
-		SV_Bot_UpdateGoal (self, state, priority, now);
+        if (state)
+        {
+                priority = SV_Bot_EvaluateNeeds (self, settings);
+                if (enemy && settings && !settings->behaviors.allow_grab_items_in_combat)
+                        priority = BOT_PRIORITY_NONE;
+                if (priority == BOT_PRIORITY_NONE && enemy)
+                        priority = BOT_PRIORITY_ENEMY;
+
+                SV_Bot_UpdateGoal (self, state, priority, enemy ? enemy->edict : NULL, now);
                 SV_Bot_CheckGoalProgress (self, state, now);
                 goal = state->goal_edict;
 
@@ -2366,15 +2402,6 @@ static void SV_Bot_UpdateMovement (client_t *client, sv_bot_state_t *state)
 
         if (state)
                 SV_Bot_UpdatePathProgress (self, state);
-
-        if (enemy && state && settings && !settings->behaviors.allow_grab_items_in_combat)
-        {
-                priority = BOT_PRIORITY_NONE;
-                state->goal_edict = NULL;
-                state->goal_priority = BOT_PRIORITY_NONE;
-                SV_Bot_ClearPath (state);
-                goal = NULL;
-        }
 
         if (goal && state)
         {
