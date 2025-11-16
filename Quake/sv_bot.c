@@ -934,156 +934,30 @@ static void SV_Bot_EnsureWaypoints (void)
         }
 }
 
-static qboolean SV_Bot_BuildWaypointPath (edict_t *self, edict_t *goal, edict_t **out_path, int *out_length);
-
 static qboolean SV_Bot_WaypointReachable (client_t *bot, edict_t *waypoint)
 {
-        bot_path_node_t path[BOT_MAX_PATH_LENGTH];
-        int path_length = 0;
+	bot_path_node_t path[BOT_MAX_PATH_LENGTH];
+	int path_length = 0;
 
-        if (!bot || !bot->edict || bot->edict->free || !waypoint || waypoint->free)
-                return false;
+	if (!bot || !bot->edict || bot->edict->free || !waypoint || waypoint->free)
+		return false;
 
-        if (SV_Bot_HasNavMesh () && SV_Bot_BuildNavPath (bot->edict, waypoint, path, &path_length))
-                return path_length > 0;
-
-        {
-                edict_t *way_path[BOT_MAX_PATH_LENGTH];
-                int way_length = 0;
-
-                SV_Bot_EnsureWaypoints ();
-
-                if (!SV_Bot_BuildWaypointPath (bot->edict, waypoint, way_path, &way_length))
-                        return false;
-
-                return way_length > 0;
-        }
+	return SV_Bot_HasNavMesh () && SV_Bot_BuildNavPath (bot->edict, waypoint, path, &path_length) && path_length > 0;
 }
 
 static void SV_Bot_GetNodePosition (const edict_t *ent, vec3_t out)
 {
-        if (!ent)
-        {
-                VectorClear (out);
-                return;
-        }
+	if (!ent)
+	{
+		VectorClear (out);
+		return;
+	}
 
-        VectorCopy (ent->v.origin, out);
-        if (ent->v.view_ofs[2] != 0.0f)
-                out[2] += ent->v.view_ofs[2];
-        else
-                out[2] += 16.0f;
-}
-
-static qboolean SV_Bot_CanTravelBetween (edict_t *from, edict_t *to, edict_t *ignore)
-{
-        vec3_t start, end;
-        trace_t trace;
-
-        if (!from || !to)
-                return false;
-
-        SV_Bot_GetNodePosition (from, start);
-        SV_Bot_GetNodePosition (to, end);
-
-        trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, ignore);
-        return trace.fraction >= 0.99f || trace.ent == to;
-}
-
-static qboolean SV_Bot_BuildWaypointPath (edict_t *self, edict_t *goal, edict_t **out_path, int *out_length)
-{
-        edict_t *nodes[BOT_MAX_NODES];
-        int node_count = 0;
-        int start_index = 0;
-        int goal_index;
-        int queue[BOT_MAX_NODES];
-        int prev[BOT_MAX_NODES];
-        qboolean visited[BOT_MAX_NODES];
-        int head = 0;
-        int tail = 0;
-        int i;
-
-        if (!self || !goal || !out_path || !out_length)
-                return false;
-
-        nodes[node_count++] = self;
-
-        for (i = 0; i < bot_waypoint_count && node_count < BOT_MAX_NODES - 1; i++)
-        {
-            edict_t *wp = bot_waypoints[i].edict;
-
-            if (!wp || wp->free || wp == goal)
-                    continue;
-
-            nodes[node_count++] = wp;
-        }
-
-        nodes[node_count++] = goal;
-        goal_index = node_count - 1;
-
-        for (i = 0; i < node_count; i++)
-        {
-                prev[i] = -1;
-                visited[i] = false;
-        }
-
-        visited[start_index] = true;
-        queue[tail++] = start_index;
-
-        while (head < tail)
-        {
-                int current = queue[head++];
-                if (current == goal_index)
-                        break;
-
-                for (i = 0; i < node_count; i++)
-                {
-                        if (visited[i] || i == current)
-                                continue;
-                        if (!SV_Bot_CanTravelBetween (nodes[current], nodes[i], self))
-                                continue;
-
-                        visited[i] = true;
-                        prev[i] = current;
-                        if (tail < BOT_MAX_NODES)
-                                queue[tail++] = i;
-                        if (i == goal_index)
-                                break;
-                }
-        }
-
-        if (!visited[goal_index])
-                return false;
-
-        {
-                int order[BOT_MAX_PATH_LENGTH];
-                int order_length = 0;
-                int idx = goal_index;
-
-                while (idx != start_index && order_length < BOT_MAX_PATH_LENGTH)
-                {
-                        order[order_length++] = idx;
-                        idx = prev[idx];
-                        if (idx < 0)
-                                break;
-                }
-
-                if (idx != start_index)
-                        return false;
-
-                *out_length = 0;
-                while (order_length > 0)
-                {
-                        int node_index = order[--order_length];
-
-                        if (*out_length >= BOT_MAX_PATH_LENGTH)
-                                return false;
-
-                        out_path[(*out_length)++] = nodes[node_index];
-                }
-        }
-
-        return *out_length > 0;
+	VectorCopy (ent->v.origin, out);
+	if (ent->v.view_ofs[2] != 0.0f)
+		out[2] += ent->v.view_ofs[2];
+	else
+		out[2] += 16.0f;
 }
 
 static void SV_Bot_ClearPath (sv_bot_state_t *state)
@@ -1102,38 +976,19 @@ static qboolean SV_Bot_RecalculatePath (edict_t *self, sv_bot_state_t *state, do
         int i;
         edict_t *goal;
 
-        if (!self || !state)
-                return false;
+	if (!self || !state)
+		return false;
 
-        goal = state->goal_edict;
-        state->path_length = 0;
-        state->path_index = 0;
-        state->next_path_recalc_time = now + 1.0;
+	goal = state->goal_edict;
+	state->path_length = 0;
+	state->path_index = 0;
+	state->next_path_recalc_time = now + 1.0;
 
-        if (!goal)
-                return false;
+	if (!goal)
+		return false;
 
-        if (SV_Bot_HasNavMesh () && SV_Bot_BuildNavPath (self, goal, path, &length))
-        {
-                /* path already filled */
-        }
-        else
-        {
-                edict_t *way_path[BOT_MAX_PATH_LENGTH];
-                int way_length = 0;
-
-                SV_Bot_EnsureWaypoints ();
-
-                if (!SV_Bot_BuildWaypointPath (self, goal, way_path, &way_length))
-                        return false;
-
-                length = 0;
-                for (i = 0; i < way_length && i < BOT_MAX_PATH_LENGTH; i++)
-                {
-                        SV_Bot_PathNodeFromEdict (&path[length], way_path[i]);
-                        length++;
-                }
-        }
+	if (!SV_Bot_HasNavMesh () || !SV_Bot_BuildNavPath (self, goal, path, &length))
+		return false;
 
         if (length < BOT_MAX_PATH_LENGTH)
         {
