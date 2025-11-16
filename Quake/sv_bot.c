@@ -530,11 +530,11 @@ static qboolean SV_Bot_LoadNavMeshFromPath (const char *path)
 
 	result = SV_Bot_ParseNavFile (buffer, size, path);
 	free (buffer);
-	if (result)
-	{
-		Con_Printf ("Loaded navigation mesh from %s (%d nodes, %d links)\n", path, bot_nav_mesh.node_count, bot_nav_mesh.link_count);
-	}
-	return result;
+        if (result)
+        {
+                Con_Printf ("Using bot navigation file: %s (%d nodes, %d links)\n", path, bot_nav_mesh.node_count, bot_nav_mesh.link_count);
+        }
+        return result;
 }
 
 void SV_Bot_LoadNavigation (const char *mapname)
@@ -555,13 +555,15 @@ void SV_Bot_LoadNavigation (const char *mapname)
 	if (!mapname || !*mapname)
 		return;
 
-	for (i = 0; i < (int)(sizeof(patterns) / sizeof(patterns[0])); i++)
-	{
-		char path[MAX_QPATH];
-		q_snprintf (path, sizeof(path), patterns[i], mapname);
-		if (SV_Bot_LoadNavMeshFromPath (path))
-			return;
-	}
+        for (i = 0; i < (int)(sizeof(patterns) / sizeof(patterns[0])); i++)
+        {
+                char path[MAX_QPATH];
+                q_snprintf (path, sizeof(path), patterns[i], mapname);
+                if (SV_Bot_LoadNavMeshFromPath (path))
+                        return;
+        }
+
+        Con_Printf ("No bot navigation file present for %s\n", mapname);
 }
 
 static void SV_Bot_InitPathNode (bot_path_node_t *node)
