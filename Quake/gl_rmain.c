@@ -2611,8 +2611,8 @@ static void R_ShowBotDebug (void)
         int count;
         int i;
 
-        if (bot_debug.value <= 0.0f || cl.maxclients > 1 || !r_drawentities.value || !sv.active)
-                return;
+	if (bot_debug.value <= 0.0f || !r_drawentities.value || !sv.active)
+		return;
 
         GL_BeginGroup ("Bot debug");
 
