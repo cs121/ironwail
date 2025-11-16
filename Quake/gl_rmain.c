@@ -2149,7 +2149,7 @@ static void R_EmitDiamond (const vec3_t origin, float size, uint32_t color)
                 0, 1, 0, 2, 0, 3, 0, 4, 1, 2, 2, 3, 3, 4, 4, 1, 5, 1, 5, 2, 5, 3, 5, 4
         };
         debugvert_t v[6];
-        float clamped = max (size, 4.0f);
+        float clamped = size < 4.0f ? 4.0f : size;
 
         VectorCopy (origin, v[0].pos);
         v[0].pos[2] += clamped;
