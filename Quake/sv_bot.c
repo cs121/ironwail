@@ -242,6 +242,8 @@ static bot_waypoint_entry_t bot_waypoints[BOT_MAX_WAYPOINTS];
 static int bot_waypoint_count = 0;
 static qboolean bot_waypoints_initialized = false;
 
+static qboolean SV_Bot_WaypointReachable (client_t *bot, edict_t *waypoint);
+
 
 
 static void SV_Bot_FreeNavMesh (void)
@@ -929,6 +931,32 @@ static void SV_Bot_EnsureWaypoints (void)
                         SV_Bot_BuildWaypointList ();
                         break;
                 }
+        }
+}
+
+static qboolean SV_Bot_BuildWaypointPath (edict_t *self, edict_t *goal, edict_t **out_path, int *out_length);
+
+static qboolean SV_Bot_WaypointReachable (client_t *bot, edict_t *waypoint)
+{
+        bot_path_node_t path[BOT_MAX_PATH_LENGTH];
+        int path_length = 0;
+
+        if (!bot || !bot->edict || bot->edict->free || !waypoint || waypoint->free)
+                return false;
+
+        if (SV_Bot_HasNavMesh () && SV_Bot_BuildNavPath (bot->edict, waypoint, path, &path_length))
+                return path_length > 0;
+
+        {
+                edict_t *way_path[BOT_MAX_PATH_LENGTH];
+                int way_length = 0;
+
+                SV_Bot_EnsureWaypoints ();
+
+                if (!SV_Bot_BuildWaypointPath (bot->edict, waypoint, way_path, &way_length))
+                        return false;
+
+                return way_length > 0;
         }
 }
 
@@ -2157,6 +2185,75 @@ static void SV_Bot_RefreshSettingsForState (sv_bot_state_t *state)
                 VectorClear (state->aim_velocity);
                 state->aim_modifier_end_time = 0.0;
         }
+}
+
+int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints)
+{
+        int i, j;
+        int count = 0;
+        int bot_count = 0;
+
+        if (!out || max_waypoints <= 0 || !sv.active)
+                return 0;
+
+        SV_Bot_EnsureWaypoints ();
+
+        for (i = 0; i < svs.maxclients; i++)
+        {
+                client_t *bot = &svs.clients[i];
+                if (!bot->active || !bot->spawned || !bot->isbot || !bot->edict || bot->edict->free)
+                        continue;
+
+                bot_count++;
+        }
+
+        for (i = 0; i < bot_waypoint_count && count < max_waypoints; i++)
+        {
+                edict_t *wp = bot_waypoints[i].edict;
+                bot_debug_waypoint_t *info;
+                vec3_t extents;
+                float radius = 0.0f;
+                qboolean reachable = (bot_count == 0);
+
+                if (!wp || wp->free)
+                        continue;
+
+                info = &out[count];
+                SV_Bot_GetNodePosition (wp, info->origin);
+                VectorSubtract (wp->v.maxs, wp->v.mins, extents);
+
+                for (j = 0; j < 3; j++)
+                {
+                        float extent_radius = fabsf (extents[j]) * 0.5f;
+                        if (extent_radius > radius)
+                                radius = extent_radius;
+                }
+
+                info->radius = (radius > 0.0f) ? radius : 16.0f;
+                info->is_target = false;
+
+                for (j = 0; j < svs.maxclients; j++)
+                {
+                        client_t *bot = &svs.clients[j];
+                        sv_bot_state_t *state = &sv_bot_states[j];
+
+                        if (!bot->active || !bot->spawned || !bot->isbot || !bot->edict || bot->edict->free)
+                                continue;
+                        if (!state || !state->active)
+                                continue;
+
+                        if (state->goal_edict == wp)
+                                info->is_target = true;
+
+                        if (!reachable && SV_Bot_WaypointReachable (bot, wp))
+                                reachable = true;
+                }
+
+                info->unreachable = !reachable;
+                count++;
+        }
+
+        return count;
 }
 
 void SV_Bot_Reset (void)
