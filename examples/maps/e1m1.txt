@@ -1,0 +1,276 @@
+Dateiformat: BSP2 + BSPX
+
+Header (Offset 0x00):
+
+Magic: BSP2 (Bytes: 42 53 50 32)
+
+Kein separates Versions-Int – das Feld, das bei Q1 29 wäre, ist hier eben die Magic BSP2.
+
+Danach kommen 15 klassische Quake-Lumps (Offset/Länge-Paare).
+
+Zusätzlich ab Offset 0x001B8D58:
+
+Magic: BSPX
+
+Version: 3
+
+Danach eine kleine BSPX-Lump-Tabelle + drei zusätzliche Lumps.
+
+👉 Fazit:
+Die Datei ist ein Quake-BSP2 (erweiterte Indizes / Limits) mit einem BSPX-Block hinten dran, der zusätzliche Beleuchtungsdaten enthält.
+
+2️⃣ Klassische BSP2-Lumps (BSP-Teil)
+
+Ich liste die Lumps inkl. abgeleiteten Strukturen/Anzahlen:
+
+🧱 2.1 Übersicht
+Index	Name	Offset	Größe	Info (abgeleitet)
+0	Entities	1,185,376	31,587	370 Entities
+1	Planes	124	29,280	1,464 Planes (20 Byte/Plane)
+2	MipTex	1,216,964	588,692	82 Texturen (klassisches MipTex-Format)
+3	Vertices	110,628	83,940	6,995 Vertices (3×float, 12 Byte)
+4	Visibility	1,136,464	48,911	PVS-Daten
+5	Nodes	194,568	150,744	6,281 Nodes (24 Byte, klassisch)
+6	TexInfo	345,312	13,120	410 TexInfos
+7	Faces	358,432	193,508	6,911 Faces à 28 Byte (BSP2-Layout)
+8	Lightmap	912,176	224,288	Helligkeits-Luxels (1 Byte/Luxel)
+9	Clipnodes	551,940	89,304	11,163 Clipnodes (8 Byte/Clipnode)
+10	Leaves	29,404	81,224	BSP2-Leafs (erweiterte Größe, 44/52/88 B)
+11	MarkSurfaces	641,244	33,156	16,578 Marks (2 Byte/Eintrag)
+12	Edges	790,944	117,520	29,380 Edges (4 Byte)
+13	SurfEdges	674,400	116,544	29,136 SurfEdges (4 Byte)
+14	Models	908,464	3,712	58 Models à 64 Byte
+2.2 Geometrie & Bounds
+
+Vertices (Lump 3):
+
+Anzahl: 6,995
+
+Bounds (aus den Vertices):
+
+mins: (-592, -416, -592)
+
+maxs: (1504, 3064, 272)
+
+Model 0 (worldspawn-Model):
+
+Struct-Größe: 64 Byte, Layout:
+
+mins[3] = (-607, -431, -607)
+
+maxs[3] = (1519, 3071, 287)
+
+origin[3] = (0, 0, 0)
+
+headnode[4] = (0, 0, 3959, 0)
+
+visleafs = 1344
+
+firstface = 0
+
+numfaces = 6387
+
+Alle Models zusammen:
+
+Summe numfaces: 6,911 → passt exakt zur Faces-Lump-Größe (193,508 / 28 = 6,911).
+
+Daraus:
+Klassischer Quake-BSP-Aufbau, aber mit BSP2-Face-Struktur (28 Byte) wegen 32-bit Indizes.
+
+2.3 Entities (Lump 0)
+
+Entities-Lump ist klassisch textbasiert, 370 Entities, z. B.:
+
+Worldspawn:
+
+"message" "the Slipgate Complex"
+"wad" "gfx/base.wad"
+"classname" "worldspawn"
+"sounds" "6"
+"worldtype" "2"
+"_ambient" "18"
+"_minlight" "6"
+"_sunlight" "70"
+"_sunlight_color" "0.85 0.72 0.58"
+"_sun_mangle" "45 120 0"
+"fog" "0.03 0.08 0.11 0.18"
+
+
+👉 Das verrät:
+
+Kompiliert mit ericw-tools (oder etwas Kompatiblem):
+
+_sunlight, _sunlight_color, _sun_mangle
+
+_minlight, _ambient
+
+fog (Farbe + Dichte)
+
+Klassischer E1M1-Content, aber modern beleuchtet.
+
+Classname-Verteilung (Top):
+
+light: 190
+
+monster_army: 34
+
+func_door: 14
+
+item_health: 14
+
+path_corner: 14
+
+trigger_once: 10
+
+monster_dog: 8
+
+etc.
+
+Kurzstatistik:
+
+Monsters: 42 (alle monster_*)
+
+Items: 30 (item_*)
+
+Trigger: 26 (trigger_*)
+
+Info-Entities: info_player_start, info_player_deathmatch, info_player_coop, info_intermission, info_teleport_destination etc.
+
+2.4 Texturen (MipTex-Lump 2)
+
+numtextures = 82
+
+MipTex-Format wie in Quake:
+
+4 Byte nummiptex
+
+Liste von Offsets
+
+Dann pro Textur: Name (16 Byte), Mip Info, Rohdaten
+
+Beispiele aus der Textur-Liste:
+
+slipbotsd
+
++0slipbot
+
+slipside
+
+sliplite
+
+sfloor4_2
+
+tech08_1
+
+tech04_3
+
+tlight02
+
+*water0
+
+*slime0
+
+*teleport
+
+etc.
+
+👉 Klassisches Slipgate-/Tech-Baukasten-Set für E1M1, plus animierte Texturen (+0/+1, *water, etc.).
+
+3️⃣ Beleuchtung: LIGHTMAP + BSPX-Lumps
+3.1 Klassischer LIGHTMAP-Lump (8)
+
+Größe: 224.288 Bytes
+
+Das ist der Standard-Quake-Light-Lump:
+
+1 Byte pro Luxel (Helligkeit)
+
+Alle Lightmaps hintereinander gepackt.
+
+3.2 BSPX-Block
+
+Ab Offset 0x001B8D58 (dezimal 1.805.656):
+
+Magic: BSPX
+
+Version: 3
+
+Dann 3 Einträge à 24-Byte-Name + 2×4-Byte (Offset, Länge):
+
+BSPX-Lumps:
+
+LIGHTINGDIR
+
+Offset: 1,805,760
+
+Länge: 672,864 Bytes
+
+RGBLIGHTING
+
+Offset: 2,478,624
+
+Länge: 672,864 Bytes
+
+LIGHTGRID_OCTREE
+
+Offset: 3,151,488
+
+Länge: 2,022,868 Bytes
+
+3.3 Zusammenhang LIGHTMAP / RGBLIGHTING / LIGHTINGDIR
+
+Check:
+
+LIGHTMAP: 224,288 Bytes
+
+RGBLIGHTING: 672,864 Bytes
+
+LIGHTINGDIR: 672,864 Bytes
+
+👉 672,864 = 3 × 224,288
+
+Daraus folgt sehr wahrscheinlich:
+
+Anzahl Luxels = 224,288
+
+LIGHTMAP: 1 Byte pro Luxel (Intensity)
+
+RGBLIGHTING: 3 Bytes pro Luxel (R,G,B) → 24-Bit-RGB
+
+LIGHTINGDIR: 3 Bytes pro Luxel (komprimierte Normal / Richtung)
+
+Also genau das, was du erwartest:
+
+Klassischer Quake-Lichtlump + BSPX-Erweiterungen für RGB-Licht und Richtungsinformationen pro Luxel.
+
+Kein LIGHTING_E5BGR9 in dieser Datei – also 8-Bit per Channel, kein HDR-Format.
+
+3.4 LIGHTGRID_OCTREE
+
+Lump 3 im BSPX-Block:
+
+Name: LIGHTGRID_OCTREE
+
+Größe: 2.022.868 Bytes
+
+Aus den ersten paar Floats:
+
+Bei Offset des Lumps:
+
+cellsize ≈ (16.0, 16.0, 16.0)
+
+mins ≈ (-592.0, -416.0, -592.0)
+
+Das passt perfekt zu den Vertex-Bounds der Map → es gibt einen 3D-Lichtgrid über die Welt mit 16-Unit-Zellen, als Oktree organisiert.
+
+👉 Vermutlich Aufbau:
+
+Header mit:
+
+Zellgröße
+
+Welt-Mins
+
+diverse Counts etc.
+
+Danach Oktree-Knoten/Blätter + Sampledaten (RGB + evtl. Lichtdir o.ä.)
