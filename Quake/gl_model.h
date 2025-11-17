@@ -510,6 +510,11 @@ typedef struct qmodel_s
 	int				numdeluxsamples;
 	char		*entities;
 
+	const byte	*bspx_lightgrid_octree;
+	size_t		bspx_lightgrid_octree_length;
+	const byte	*bspx_lightgrids;
+	size_t		bspx_lightgrids_length;
+
 	qboolean	litfile;
 	qboolean	deluxfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
