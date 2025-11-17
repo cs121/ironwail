@@ -151,10 +151,9 @@ static void Mod_LoadExternalBspx (void)
         qfileofs_t saved_filesize;
         size_t saved_bspx_size;
 
-        if (!COM_StripExtension (loadmodel->name, bspxname, sizeof(bspxname)))
-                return;
+	COM_StripExtension (loadmodel->name, bspxname, sizeof(bspxname));
 
-        q_strlcat (bspxname, ".bspx", sizeof(bspxname));
+	q_strlcat (bspxname, ".bspx", sizeof(bspxname));
 
         if (!q_strcasecmp (bspxname, loadmodel->name))
                 return;
