@@ -1762,7 +1762,7 @@ static void Mod_LoadBspx (const byte *buffer)
         }
 
         directory = (const bspx_lump_t *)(header_ptr - entry_size * (size_t)numlumps);
-        payload_limit = (size_t)(directory - buffer);
+payload_limit = (size_t)((const byte *)directory - buffer);
 
         Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, (size_t)numlumps * entry_size);
 
