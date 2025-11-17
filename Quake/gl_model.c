@@ -53,6 +53,80 @@ static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
+static size_t Mod_BspLumpElementSize (int lump_index, int bsp2)
+{
+	switch (lump_index)
+	{
+	case LUMP_PLANES: return sizeof(dplane_t);
+	case LUMP_VERTEXES: return sizeof(dvertex_t);
+	case LUMP_EDGES: return bsp2 ? sizeof(dledge_t) : sizeof(dsedge_t);
+	case LUMP_SURFEDGES: return sizeof(int);
+	case LUMP_FACES: return bsp2 ? sizeof(dlface_t) : sizeof(dsface_t);
+	case LUMP_MARKSURFACES: return bsp2 ? sizeof(unsigned int) : sizeof(unsigned short);
+	case LUMP_NODES: return (bsp2 == 2) ? sizeof(dl2node_t) : (bsp2 ? sizeof(dl1node_t) : sizeof(dsnode_t));
+	case LUMP_TEXINFO: return sizeof(texinfo_t);
+	case LUMP_LEAFS: return (bsp2 == 2) ? sizeof(dl2leaf_t) : (bsp2 ? sizeof(dl1leaf_t) : sizeof(dsleaf_t));
+	case LUMP_CLIPNODES: return bsp2 ? sizeof(dlclipnode_t) : sizeof(dsclipnode_t);
+	case LUMP_MODELS: return sizeof(dmodel_t);
+	default: return 0; // variable sized lumps
+	}
+}
+
+static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *out_header)
+{
+	int bsp2;
+	const dheader_t *raw_header;
+
+	if (filesize < sizeof(dheader_t))
+		Sys_Error ("Mod_LoadBrushModel: %s is not a valid BSP (truncated header)", loadmodel->name);
+
+	raw_header = (const dheader_t *)buffer;
+	out_header->version = LittleLong (raw_header->version);
+
+	switch(out_header->version)
+	{
+	case BSPVERSION:
+	case BSPVERSION30:
+	case BSPVERSION_QUAKE64:
+		bsp2 = false;
+		break;
+	case BSP2VERSION_2PSB:
+		bsp2 = 1;
+		break;
+	case BSP2VERSION_BSP2:
+		bsp2 = 2;
+		break;
+	default:
+		Sys_Error ("Mod_LoadBrushModel: %s has unsupported or missing BSP version (%i)", loadmodel->name, out_header->version);
+		bsp2 = false; // not reached
+	}
+
+	for (int i = 0; i < HEADER_LUMPS; ++i)
+	{
+		const int raw_ofs = LittleLong (raw_header->lumps[i].fileofs);
+		const int raw_len = LittleLong (raw_header->lumps[i].filelen);
+		const size_t elemsize = Mod_BspLumpElementSize (i, bsp2);
+		size_t lumpofs, lumplen;
+
+		if (raw_ofs < 0 || raw_len < 0)
+			Sys_Error ("Mod_LoadBrushModel: %s has invalid lump %d offset/length", loadmodel->name, i);
+
+		lumpofs = (size_t)raw_ofs;
+		lumplen = (size_t)raw_len;
+
+		if (lumpofs > filesize || lumplen > filesize - lumpofs)
+			Sys_Error ("Mod_LoadBrushModel: %s lump %d (ofs %d len %d) is outside file bounds", loadmodel->name, i, raw_ofs, raw_len);
+
+		if (elemsize && (lumplen % elemsize))
+			Sys_Error ("Mod_LoadBrushModel: %s has misaligned lump %d (len %zu, element %zu)", loadmodel->name, i, lumplen, elemsize);
+
+		out_header->lumps[i].fileofs = raw_ofs;
+		out_header->lumps[i].filelen = raw_len;
+	}
+
+	return bsp2;
+}
+
 static void Mod_BspxDebugf (const char *fmt, ...)
 {
         if (debug_bspx.value <= 0.0f)
@@ -1485,6 +1559,12 @@ static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const b
 
 static void Mod_LoadBspx (const byte *buffer)
 {
+        typedef struct bspx_header_s
+        {
+                char id[4];
+                int numlumps;
+        } bspx_header_t;
+
         typedef struct bspx_lump_s
         {
                 char name[16];
@@ -1492,49 +1572,65 @@ static void Mod_LoadBspx (const byte *buffer)
                 int filelen;
         } bspx_lump_t;
 
-        const size_t footer_size = 8;
-        size_t filesize = mod_bspx_filesize;
-        size_t dirsize;
-        const byte *footer;
-        const byte *directory;
-        size_t max_payload;
+        const size_t header_size = sizeof(bspx_header_t);
+        const size_t entry_size = sizeof(bspx_lump_t);
+        const size_t filesize = mod_bspx_filesize;
+        const byte *header_ptr = NULL;
+        const bspx_header_t *raw_header;
+        const bspx_lump_t *directory;
+        size_t payload_limit;
+        size_t scan_window;
         int numlumps;
+        int stored = 0;
 
-        if (!buffer || filesize < footer_size)
+        loadmodel->bspx_num_entries = 0;
+        loadmodel->bspx_entries = NULL;
+
+        if (!buffer || filesize < header_size)
                 return;
 
-        footer = buffer + filesize - footer_size;
-        if (memcmp (footer, "BSPX", 4) != 0)
-                return;
-
-        dirsize = (size_t)LittleLong (((const int *)footer)[1]);
-        if (dirsize == 0 || dirsize > filesize - footer_size)
+        scan_window = q_min (filesize, (size_t)4096);
+        for (size_t offset = 0; offset + header_size <= scan_window; ++offset)
         {
-                Con_DPrintf2 ("Invalid BSPX directory size %zu\n", dirsize);
+                const byte *candidate = buffer + filesize - header_size - offset;
+                if (candidate < buffer)
+                        break;
+                if (memcmp (candidate, "BSPX", 4) == 0)
+                {
+                        header_ptr = candidate;
+                        break;
+                }
+        }
+
+        if (!header_ptr)
+                return;
+
+        raw_header = (const bspx_header_t *)header_ptr;
+        numlumps = LittleLong (raw_header->numlumps);
+        if (numlumps <= 0)
+        {
+                Con_DPrintf2 ("Invalid BSPX directory entry count %d\n", numlumps);
                 return;
         }
 
-        directory = footer - dirsize;
-        if (directory < buffer)
+        if ((size_t)(header_ptr - buffer) < entry_size * (size_t)numlumps)
         {
                 Con_DPrintf2 ("BSPX directory points outside file\n");
                 return;
         }
 
-        if (dirsize % sizeof(bspx_lump_t))
-        {
-                Con_DPrintf2 ("BSPX directory size %zu is not aligned\n", dirsize);
+        directory = (const bspx_lump_t *)(header_ptr - entry_size * (size_t)numlumps);
+        payload_limit = (size_t)(directory - buffer);
+
+        Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, (size_t)numlumps * entry_size);
+
+        loadmodel->bspx_entries = (bspx_entry_t *) Hunk_AllocName (numlumps * sizeof(*loadmodel->bspx_entries), "BSPXLUMPS");
+        if (!loadmodel->bspx_entries)
                 return;
-        }
-
-        numlumps = (int)(dirsize / sizeof(bspx_lump_t));
-        max_payload = (size_t)(directory - buffer);
-
-        Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, dirsize);
 
         for (int i = 0; i < numlumps; ++i)
         {
-                const bspx_lump_t *entry = ((const bspx_lump_t *)directory) + i;
+                const bspx_lump_t *entry = directory + i;
                 char lumpname[17];
                 size_t lumpofs, lumplen;
                 int raw_ofs = LittleLong (entry->fileofs);
@@ -1563,18 +1659,20 @@ static void Mod_LoadBspx (const byte *buffer)
                         continue;
                 }
 
-                if (lumpofs > max_payload)
+                if (lumpofs > payload_limit)
                 {
                         Mod_BspxDebugf ("BSPX:     %s skipped (offset beyond payload)\n", lumpname);
                         continue;
                 }
-                if (lumplen > max_payload - lumpofs)
+                if (lumplen > payload_limit - lumpofs)
                 {
                         Mod_BspxDebugf ("BSPX:     %s skipped (length overruns payload)\n", lumpname);
                         continue;
                 }
 
-                const byte *lumpdata = buffer + lumpofs;
+                q_strlcpy (loadmodel->bspx_entries[stored].name, lumpname, sizeof(loadmodel->bspx_entries[stored].name));
+                loadmodel->bspx_entries[stored].data = buffer + lumpofs;
+                loadmodel->bspx_entries[stored].length = lumplen;
 
                 if (!q_strcasecmp (lumpname, "RGBLIGHTING") ||
                         !q_strcasecmp (lumpname, "RGBLIGHTDATA") ||
@@ -1584,7 +1682,7 @@ static void Mod_LoadBspx (const byte *buffer)
                         if (loadmodel->litfile)
                                 Mod_BspxDebugf ("BSPX:     %s ignored (existing light data)\n", lumpname);
                         else
-                                Mod_BspxImportRgbLighting (lumpname, lumpdata, lumplen);
+                                Mod_BspxImportRgbLighting (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
                 }
                 else if (!q_strcasecmp (lumpname, "LIGHTINGDIR") ||
                         !q_strcasecmp (lumpname, "DELUXEMAP") ||
@@ -1599,44 +1697,48 @@ static void Mod_LoadBspx (const byte *buffer)
                         if (loadmodel->deluxfile)
                                 Mod_BspxDebugf ("BSPX:     %s ignored (existing deluxemap)\n", lumpname);
                         else
-                                Mod_BspxImportDeluxemap (lumpname, lumpdata, lumplen);
+                                Mod_BspxImportDeluxemap (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
                 }
                 else if (!q_strcasecmp (lumpname, "STATICLIGHTS") || !q_strcasecmp (lumpname, "STATIC_LIGHTS"))
                 {
                         recognized = true;
-                        Mod_BspxImportStaticLights (lumpname, lumpdata, lumplen,
+                        Mod_BspxImportStaticLights (lumpname, loadmodel->bspx_entries[stored].data, lumplen,
                                 &loadmodel->bspx_static_lights, &loadmodel->bspx_num_static_lights);
                 }
                 else if (!q_strcasecmp (lumpname, "STATICSHADOWS") || !q_strcasecmp (lumpname, "STATIC_SHADOWS"))
                 {
                         recognized = true;
-                        if (!Mod_BspxImportStaticLights (lumpname, lumpdata, lumplen,
+                        if (!Mod_BspxImportStaticLights (lumpname, loadmodel->bspx_entries[stored].data, lumplen,
                                         &loadmodel->bspx_static_shadow_lights, &loadmodel->bspx_num_static_shadow_lights))
                         {
-                                Mod_BspxImportStaticShadowIndices (lumpname, lumpdata, lumplen,
+                                Mod_BspxImportStaticShadowIndices (lumpname, loadmodel->bspx_entries[stored].data, lumplen,
                                         &loadmodel->bspx_static_shadow_indices, &loadmodel->bspx_num_static_shadow_indices);
                         }
                 }
                 else if (!q_strcasecmp (lumpname, "LMOFFSET"))
                 {
                         recognized = true;
-                        Mod_BspxImportLmOffsets (lumpname, lumpdata, lumplen);
+                        Mod_BspxImportLmOffsets (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
                 }
 
                 if (!recognized)
                         Mod_BspxDebugf ("BSPX:     %s ignored (unhandled lump)\n", lumpname);
+
+                ++stored;
         }
-        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d\n",
+
+        loadmodel->bspx_num_entries = stored;
+        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d, map entries %d\n",
                 loadmodel->litfile ? "loaded" : "missing",
                 loadmodel->deluxfile ? "loaded" : "missing",
                 loadmodel->bspx_light_offset_count,
                 loadmodel->bspx_num_static_lights,
                 loadmodel->bspx_num_static_shadow_lights,
-                loadmodel->bspx_num_static_shadow_indices);
+                loadmodel->bspx_num_static_shadow_indices,
+                loadmodel->bspx_num_entries);
 
 
 }
-
 static void Mod_LoadLighting (lump_t *l)
 {
         int i, mark;
@@ -3304,71 +3406,54 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 {
 	int			i, j;
 	int			bsp2;
-	dheader_t	*header;
+	dheader_t	 header;
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 
-        loadmodel->type = mod_brush;
-        loadmodel->numdeluxsamples = 0;
-        loadmodel->bspx_light_offset_count = 0;
-        loadmodel->bspx_light_offsets = NULL;
-        loadmodel->bspx_num_static_lights = 0;
-        loadmodel->bspx_static_lights = NULL;
-        loadmodel->bspx_num_static_shadow_lights = 0;
-        loadmodel->bspx_static_shadow_lights = NULL;
-        loadmodel->bspx_num_static_shadow_indices = 0;
-        loadmodel->bspx_static_shadow_indices = NULL;
-        mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
+	loadmodel->type = mod_brush;
+	loadmodel->numdeluxsamples = 0;
+	loadmodel->bspx_light_offset_count = 0;
+	loadmodel->bspx_light_offsets = NULL;
+	loadmodel->bspx_num_static_lights = 0;
+	loadmodel->bspx_static_lights = NULL;
+	loadmodel->bspx_num_static_shadow_lights = 0;
+	loadmodel->bspx_static_shadow_lights = NULL;
+	loadmodel->bspx_num_static_shadow_indices = 0;
+	loadmodel->bspx_static_shadow_indices = NULL;
+	loadmodel->bspx_num_entries = 0;
+	loadmodel->bspx_entries = NULL;
+	mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 
-	header = (dheader_t *)buffer;
+	if (!mod_bspx_filesize)
+		Sys_Error ("Mod_LoadBrushModel: %s has unknown file size", mod->name);
 
-	mod->bspversion = LittleLong (header->version);
-
-	switch(mod->bspversion)
-	{
-	case BSPVERSION:
-		bsp2 = false;
-		break;
-	case BSP2VERSION_2PSB:
-		bsp2 = 1;	//first iteration
-		break;
-	case BSP2VERSION_BSP2:
-		bsp2 = 2;	//sanitised revision
-		break;
-	case BSPVERSION_QUAKE64:
-		bsp2 = false;
-		break;
-	default:
-		Sys_Error ("Mod_LoadBrushModel: %s has unsupported version number (%i)", mod->name, mod->bspversion);
-		break;
-	}
+	bsp2 = Mod_ParseBspHeader ((const byte *)buffer, mod_bspx_filesize, &header);
+	mod->bspversion = header.version;
 
 // swap all the lumps
-	mod_base = (byte *)header;
-
-	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
-		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
+	mod_base = (byte *)buffer;
 
 	if (debug_bspx.value > 0.0f)
 	{
 		Mod_BspxDebugf ("BSPX: loading %s (version %d, %zu bytes)\n",
 			loadmodel->name, mod->bspversion, mod_bspx_filesize);
 		Mod_BspxDebugf ("BSPX:   lighting lump ofs %d len %d\n",
-			header->lumps[LUMP_LIGHTING].fileofs, header->lumps[LUMP_LIGHTING].filelen);
+			header.lumps[LUMP_LIGHTING].fileofs, header.lumps[LUMP_LIGHTING].filelen);
 	}
 
 // load into heap
 
-	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
-	Mod_LoadEdges (&header->lumps[LUMP_EDGES], bsp2);
-	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
-        Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
-        Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
+	Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
+	Mod_LoadEdges (&header.lumps[LUMP_EDGES], bsp2);
+	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
+        Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
+        Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
         Mod_LoadBspx ((const byte *)buffer);
-        Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
-	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
-        Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
-        Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
+        Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
+	Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
+        Mod_LoadFaces (&header.lumps[LUMP_FACES], bsp2);
+        Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
+
 
 	if (mod->bspversion == BSPVERSION && external_vis.value && sv.modelname[0] && !q_strcasecmp(loadname, sv.name))
 	{
@@ -3393,13 +3478,13 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		}
 	}
 
-	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
-	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+	Mod_LoadVisibility (&header.lumps[LUMP_VISIBILITY]);
+	Mod_LoadLeafs (&header.lumps[LUMP_LEAFS], bsp2);
 visdone:
-	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
-	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
-	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
-	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
+	Mod_LoadNodes (&header.lumps[LUMP_NODES], bsp2);
+	Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
+	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);
+	Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
 
 	Mod_MakeHull0 ();
 

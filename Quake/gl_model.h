@@ -374,6 +374,13 @@ typedef struct bspx_static_light_s
         float   intensity;
 } bspx_static_light_t;
 
+typedef struct bspx_entry_s
+{
+        char    name[17];
+        const byte *data;
+        size_t  length;
+} bspx_entry_t;
+
 #define	MAXALIASVERTS		0x7fff //16-bit index buffer + onseam duplication
 #define	MAXALIASVERTS_QS	2000 //johnfitz -- was 1024
 #define	MAXALIASFRAMES		1024 //spike -- was 256
@@ -516,6 +523,9 @@ typedef struct qmodel_s
 	bspx_static_light_t	*bspx_static_shadow_lights;
 	int			bspx_num_static_shadow_indices;
 	int			*bspx_static_shadow_indices;
+	int			bspx_num_entries;
+	bspx_entry_t	*bspx_entries;
+
 
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
