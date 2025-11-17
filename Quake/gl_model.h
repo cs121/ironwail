@@ -376,7 +376,7 @@ typedef struct bspx_static_light_s
 
 typedef struct bspx_entry_s
 {
-        char    name[17];
+        char    name[25];
         const byte *data;
         size_t  length;
 } bspx_entry_t;
