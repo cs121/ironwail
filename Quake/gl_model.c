@@ -1746,7 +1746,7 @@ static void Mod_LoadBspx (const byte *buffer)
 
         typedef struct bspx_lump_s
         {
-                char name[16];
+                char name[24];
                 int fileofs;
                 int filelen;
         } bspx_lump_t;
@@ -1817,7 +1817,7 @@ static void Mod_LoadBspx (const byte *buffer)
         for (int i = 0; i < numlumps; ++i)
         {
                 const bspx_lump_t *entry = directory + i;
-                char lumpname[17];
+                char lumpname[25];
                 size_t lumpofs, lumplen;
                 int raw_ofs = LittleLong (entry->fileofs);
                 int raw_len = LittleLong (entry->filelen);
