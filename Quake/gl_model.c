@@ -45,6 +45,7 @@ static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 cvar_t		debug_bspx = {"debug_bspx", "0", 0};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
+extern cvar_t			r_lightgrid_debug;
 
 static byte	*mod_novis;
 static int	mod_novis_capacity;
@@ -129,8 +130,8 @@ static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *o
 
 static void Mod_BspxDebugf (const char *fmt, ...)
 {
-        if (debug_bspx.value <= 0.0f)
-                return;
+	if (debug_bspx.value <= 0.0f && r_lightgrid_debug.value <= 0.0f)
+		return;
 
         char buffer[1024];
         va_list argptr;
@@ -191,6 +192,7 @@ void Mod_Init (void)
 	Cvar_RegisterVariable (&external_vis);
 	Cvar_RegisterVariable (&external_ents);
 	Cvar_RegisterVariable (&debug_bspx);
+	Cvar_RegisterVariable (&r_lightgrid_debug);
 	Cvar_RegisterVariable (&r_md5);
 	Cvar_SetCallback (&r_md5, R_MD5_f);
 
