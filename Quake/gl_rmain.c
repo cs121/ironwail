@@ -267,6 +267,7 @@ cvar_t	r_showbboxes_think = { "r_showbboxes_think", "0", CVAR_NONE }; // 0=show 
 cvar_t	r_showbboxes_health = { "r_showbboxes_health", "0", CVAR_NONE }; // 0=show all; 1=healthy only; -1=non-healthy only
 cvar_t	r_showbboxes_links = { "r_showbboxes_links", "3", CVAR_NONE }; // 0=off; 1=outgoing only; 2=incoming only; 3=incoming+outgoing
 cvar_t	r_showbboxes_targets = { "r_showbboxes_targets", "1", CVAR_NONE };
+cvar_t	r_lightgrid_debug = { "r_lightgrid_debug", "0", CVAR_NONE };
 cvar_t	bot_debug = { "bot_debug", "0", CVAR_NONE };
 cvar_t	r_showfields = { "r_showfields", "0", CVAR_NONE };
 cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=entity pos; 1=bottom-right
@@ -2604,6 +2605,85 @@ static void R_ShowBoundingBoxes (void)
         GL_EndGroup ();
 }
 
+#define R_LIGHTGRID_MAX_BOXES 2048
+
+static void R_ShowLightgridDebug (void)
+{
+	static const qmodel_t *logged_model = NULL;
+	const qmodel_t *world = cl.worldmodel;
+
+	if (r_lightgrid_debug.value <= 0.f)
+	{
+		logged_model = NULL;
+		return;
+	}
+
+	if (!world)
+		return;
+
+	if (world != logged_model)
+		logged_model = NULL;
+
+	if (!world->bspx_lightgrid_octree || !world->bspx_lightgrids)
+	{
+		if (!logged_model)
+			Con_Printf ("r_lightgrid_debug: no BSPX lightgrid data for %s\n", world->name);
+		logged_model = world;
+		return;
+	}
+
+	const size_t stride = sizeof(float) * 6;
+	const size_t octree_bytes = world->bspx_lightgrid_octree_length;
+	if (octree_bytes < stride || (octree_bytes % stride))
+	{
+		if (!logged_model)
+			Con_Printf ("r_lightgrid_debug: unsupported lightgrid octree layout (%zu bytes)\n", octree_bytes);
+		logged_model = world;
+		return;
+	}
+
+	size_t total_boxes = octree_bytes / stride;
+	size_t requested = (r_lightgrid_debug.value > 1.f) ? (size_t)r_lightgrid_debug.value : total_boxes;
+	size_t draw_boxes = (total_boxes < requested) ? total_boxes : requested;
+	if (draw_boxes > R_LIGHTGRID_MAX_BOXES)
+		draw_boxes = R_LIGHTGRID_MAX_BOXES;
+
+	if (!logged_model)
+	{
+		Con_Printf ("r_lightgrid_debug: visualizing %zu of %zu octree bounds\n", draw_boxes, total_boxes);
+		if (draw_boxes < total_boxes)
+			Con_Printf ("r_lightgrid_debug: increase the cvar value to inspect more nodes\n");
+		logged_model = world;
+	}
+
+	GL_BeginGroup ("Lightgrid debug");
+
+	R_SetDebugGeometryZTest (false);
+
+	const float *src = (const float *)world->bspx_lightgrid_octree;
+	for (size_t i = 0; i < draw_boxes; ++i)
+	{
+		vec3_t mins, maxs;
+
+		for (int j = 0; j < 3; ++j)
+		{
+			mins[j] = LittleFloat (src[i * 6 + j]);
+			maxs[j] = LittleFloat (src[i * 6 + 3 + j]);
+			if (maxs[j] < mins[j])
+			{
+				const float tmp = mins[j];
+				mins[j] = maxs[j];
+				maxs[j] = tmp;
+			}
+		}
+
+		R_EmitWireBox (mins, maxs, 0x5f00ffff);
+	}
+
+	R_FlushDebugGeometry ();
+	GL_EndGroup ();
+}
+
 static void R_ShowBotDebug (void)
 {
         bot_debug_waypoint_t waypoints[BOT_DEBUG_MAX_WAYPOINTS];
@@ -2885,6 +2965,8 @@ void R_RenderScene (void)
                 R_DrawParticles_PostOIT ();
 
         R_ShowTris (); //johnfitz
+
+        R_ShowLightgridDebug ();
 
         R_ShowBoundingBoxes (); //johnfitz
 
