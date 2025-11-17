@@ -1088,6 +1088,23 @@ static byte Mod_BspxEncodeDeluxComponent (float value)
         return (byte) CLAMP (0, v, 255);
 }
 
+static byte Mod_BspxConvertE5Bgr9Component (uint32_t mantissa, uint32_t exponent)
+{
+        float scale = ldexp (1.0f, (int)exponent - 24);
+        int value = (int) Q_rint ((float)mantissa * scale * 128.0f);
+        return (byte) CLAMP (0, value, 255);
+}
+
+static void Mod_BspxDecodeE5Bgr9Sample (uint32_t packed, byte *dst)
+{
+        uint32_t value = (uint32_t) LittleLong ((int)packed);
+        uint32_t exponent = value >> 27;
+
+        dst[2] = Mod_BspxConvertE5Bgr9Component (value & 0x1ffu, exponent);
+        dst[1] = Mod_BspxConvertE5Bgr9Component ((value >> 9) & 0x1ffu, exponent);
+        dst[0] = Mod_BspxConvertE5Bgr9Component ((value >> 18) & 0x1ffu, exponent);
+}
+
 static size_t Mod_BspxGuessSampleCount (size_t length)
 {
         size_t count = 0;
@@ -1373,6 +1390,102 @@ static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *dat
         return true;
 }
 
+static qboolean Mod_BspxImportE5Bgr9Lighting (const char *lumpname, const byte *data, size_t length)
+{
+        const byte *payload = data;
+        size_t payload_length = length;
+        size_t samplecount;
+        size_t expected_bytes;
+        qboolean had_header = false;
+
+        if (!data || length == 0)
+        {
+                Mod_BspxDebugf ("BSPX:     %s has no payload\n", lumpname);
+                return false;
+        }
+
+        if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+        {
+            int version = LittleLong (((const int *)data)[1]);
+
+            had_header = true;
+            payload = data + 8;
+            payload_length = length - 8;
+
+            if (version != 1)
+            {
+                    Con_DPrintf2 ("BSPX lump %s has unsupported QLIT version %d\n", lumpname, version);
+                    Mod_BspxDebugf ("BSPX:     %s has unsupported QLIT version %d\n", lumpname, version);
+                    return false;
+            }
+        }
+
+        if (payload_length % sizeof(uint32_t))
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of 4 bytes)\n",
+                        lumpname, payload_length);
+                Mod_BspxDebugf ("BSPX:     %s size %zu is not a multiple of 4 bytes\n", lumpname, payload_length);
+                return false;
+        }
+
+        samplecount = payload_length / sizeof(uint32_t);
+        if (samplecount == 0)
+        {
+                Mod_BspxDebugf ("BSPX:     %s contains zero E5BGR9 samples\n", lumpname);
+                return false;
+        }
+
+        if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
+        {
+                Mod_BspxDebugf ("BSPX:     %s rejected due to deluxemap storage mismatch\n", lumpname);
+                return false;
+        }
+
+        expected_bytes = samplecount * 3;
+
+        if (!loadmodel->lightdata)
+        {
+                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
+                if (!loadmodel->lightdata)
+                {
+                        Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for lightdata\n", lumpname, expected_bytes);
+                        return false;
+                }
+        }
+        else
+        {
+                size_t existing_bytes = (size_t)loadmodel->numdeluxsamples * 3;
+
+                if (existing_bytes != expected_bytes)
+                {
+                        Con_DPrintf2 ("BSPX lump %s has unexpected size %zu for existing lightdata\n",
+                                lumpname, payload_length);
+                        Mod_BspxDebugf ("BSPX:     %s expected %zu bytes but have %zu\n",
+                                lumpname, expected_bytes, existing_bytes);
+                        return false;
+                }
+        }
+
+        if (loadmodel->litfile)
+        {
+                Mod_BspxDebugf ("BSPX:     %s ignored (existing light data)\n", lumpname);
+                return false;
+        }
+
+        {
+                const uint32_t *src = (const uint32_t *)payload;
+                byte *dst = loadmodel->lightdata;
+
+                for (size_t i = 0; i < samplecount; ++i, dst += 3)
+                        Mod_BspxDecodeE5Bgr9Sample (src[i], dst);
+        }
+
+        loadmodel->litfile = true;
+        Mod_BspxDebugf ("BSPX:     %s imported %zu RGB samples%s (E5BGR9)\n",
+                lumpname, samplecount, had_header ? " (QLIT)" : "");
+        return true;
+}
+
 static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *data, size_t length,
         bspx_static_light_t **out_lights, int *out_count)
 {
@@ -1557,6 +1670,35 @@ static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const b
         return true;
 }
 
+static qboolean Mod_BspxStoreLightgridBlob (const char *lumpname, const byte *data, size_t length,
+        const char *label, const byte **out_data, size_t *out_length)
+{
+        if (!out_data || !out_length)
+        {
+                Mod_BspxDebugf ("BSPX:     %s skipped (invalid lightgrid storage)\n", lumpname);
+                return false;
+        }
+
+        if (!data || length == 0)
+        {
+                *out_data = NULL;
+                *out_length = 0;
+                Mod_BspxDebugf ("BSPX:     %s contains no %s data\n", lumpname, label);
+                return true;
+        }
+
+        if (*out_data)
+        {
+                Mod_BspxDebugf ("BSPX:     %s ignored (existing %s data)\n", lumpname, label);
+                return false;
+        }
+
+        *out_data = data;
+        *out_length = length;
+        Mod_BspxDebugf ("BSPX:     %s stored %zu bytes of %s data\n", lumpname, length, label);
+        return true;
+}
+
 static void Mod_LoadBspx (const byte *buffer)
 {
         typedef struct bspx_header_s
@@ -1684,6 +1826,11 @@ static void Mod_LoadBspx (const byte *buffer)
                         else
                                 Mod_BspxImportRgbLighting (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
                 }
+                else if (!q_strcasecmp (lumpname, "LIGHTING_E5BGR9"))
+                {
+                        recognized = true;
+                        Mod_BspxImportE5Bgr9Lighting (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
+                }
                 else if (!q_strcasecmp (lumpname, "LIGHTINGDIR") ||
                         !q_strcasecmp (lumpname, "DELUXEMAP") ||
                         !q_strcasecmp (lumpname, "DELUXDATA") ||
@@ -1720,6 +1867,18 @@ static void Mod_LoadBspx (const byte *buffer)
                         recognized = true;
                         Mod_BspxImportLmOffsets (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
                 }
+                else if (!q_strcasecmp (lumpname, "LIGHTGRID_OCTREE"))
+                {
+                        recognized = true;
+                        Mod_BspxStoreLightgridBlob (lumpname, loadmodel->bspx_entries[stored].data, lumplen,
+                                "light grid octree", &loadmodel->bspx_lightgrid_octree, &loadmodel->bspx_lightgrid_octree_length);
+                }
+                else if (!q_strcasecmp (lumpname, "LIGHTGRIDS"))
+                {
+                        recognized = true;
+                        Mod_BspxStoreLightgridBlob (lumpname, loadmodel->bspx_entries[stored].data, lumplen,
+                                "light grids", &loadmodel->bspx_lightgrids, &loadmodel->bspx_lightgrids_length);
+                }
 
                 if (!recognized)
                         Mod_BspxDebugf ("BSPX:     %s ignored (unhandled lump)\n", lumpname);
@@ -1728,13 +1887,15 @@ static void Mod_LoadBspx (const byte *buffer)
         }
 
         loadmodel->bspx_num_entries = stored;
-        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d, map entries %d\n",
+        Mod_BspxDebugf ("BSPX: summary -- lightdata %s, deluxemap %s, offsets %d, static lights %d, static shadow lights %d, indices %d, lightgrid %s, lightgrids %s, map entries %d\n",
                 loadmodel->litfile ? "loaded" : "missing",
                 loadmodel->deluxfile ? "loaded" : "missing",
                 loadmodel->bspx_light_offset_count,
                 loadmodel->bspx_num_static_lights,
                 loadmodel->bspx_num_static_shadow_lights,
                 loadmodel->bspx_num_static_shadow_indices,
+                loadmodel->bspx_lightgrid_octree ? "loaded" : "missing",
+                loadmodel->bspx_lightgrids ? "loaded" : "missing",
                 loadmodel->bspx_num_entries);
 
 
@@ -3416,13 +3577,17 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	loadmodel->bspx_light_offsets = NULL;
 	loadmodel->bspx_num_static_lights = 0;
 	loadmodel->bspx_static_lights = NULL;
-	loadmodel->bspx_num_static_shadow_lights = 0;
-	loadmodel->bspx_static_shadow_lights = NULL;
-	loadmodel->bspx_num_static_shadow_indices = 0;
-	loadmodel->bspx_static_shadow_indices = NULL;
-	loadmodel->bspx_num_entries = 0;
-	loadmodel->bspx_entries = NULL;
-	mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
+        loadmodel->bspx_num_static_shadow_lights = 0;
+        loadmodel->bspx_static_shadow_lights = NULL;
+        loadmodel->bspx_num_static_shadow_indices = 0;
+        loadmodel->bspx_static_shadow_indices = NULL;
+        loadmodel->bspx_num_entries = 0;
+        loadmodel->bspx_entries = NULL;
+        loadmodel->bspx_lightgrid_octree = NULL;
+        loadmodel->bspx_lightgrid_octree_length = 0;
+        loadmodel->bspx_lightgrids = NULL;
+        loadmodel->bspx_lightgrids_length = 0;
+        mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 
 	if (!mod_bspx_filesize)
 		Sys_Error ("Mod_LoadBrushModel: %s has unknown file size", mod->name);
