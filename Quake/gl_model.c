@@ -1768,7 +1768,14 @@ static void Mod_LoadBspx (const byte *buffer)
         if (!buffer || filesize < header_size)
                 return;
 
-        scan_window = q_min (filesize, (size_t)4096);
+        /*
+        ** Some maps place the BSPX header far from the end of the file (e.g. companion
+        ** lighting data appended after large BSP lumps). Searching only the last few
+        ** kilobytes misses these headers and prevents the BSPX lumps from loading. Scan
+        ** the entire file instead while still walking backwards from the end so we find
+        ** the last occurrence of the magic string.
+        */
+        scan_window = filesize;
         for (size_t offset = 0; offset + header_size <= scan_window; ++offset)
         {
                 const byte *candidate = buffer + filesize - header_size - offset;
