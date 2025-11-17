@@ -1720,7 +1720,7 @@ static void Mod_LoadBspx (const byte *buffer)
         const byte *header_ptr = NULL;
         const bspx_header_t *raw_header;
         const bspx_lump_t *directory;
-        size_t payload_limit;
+        size_t header_offset;
         size_t scan_window;
         int numlumps;
         int stored = 0;
@@ -1762,7 +1762,7 @@ static void Mod_LoadBspx (const byte *buffer)
         }
 
         directory = (const bspx_lump_t *)(header_ptr - entry_size * (size_t)numlumps);
-payload_limit = (size_t)((const byte *)directory - buffer);
+        header_offset = (size_t)(header_ptr - buffer);
 
         Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, (size_t)numlumps * entry_size);
 
@@ -1801,15 +1801,19 @@ payload_limit = (size_t)((const byte *)directory - buffer);
                         continue;
                 }
 
-                if (lumpofs > payload_limit)
+                if (lumpofs > filesize || lumplen > filesize - lumpofs)
                 {
-                        Mod_BspxDebugf ("BSPX:     %s skipped (offset beyond payload)\n", lumpname);
-                        continue;
-                }
-                if (lumplen > payload_limit - lumpofs)
-                {
-                        Mod_BspxDebugf ("BSPX:     %s skipped (length overruns payload)\n", lumpname);
-                        continue;
+                        size_t rel_ofs = header_offset + lumpofs;
+
+                        if (rel_ofs > filesize || lumplen > filesize - rel_ofs)
+                        {
+                                Mod_BspxDebugf ("BSPX:     %s skipped (offset/length outside file)\n", lumpname);
+                                continue;
+                        }
+
+                        Mod_BspxDebugf ("BSPX:     %s interpreting offset relative to BSPX header (%zu -> %zu)\n",
+                                lumpname, lumpofs, rel_ofs);
+                        lumpofs = rel_ofs;
                 }
 
                 q_strlcpy (loadmodel->bspx_entries[stored].name, lumpname, sizeof(loadmodel->bspx_entries[stored].name));
