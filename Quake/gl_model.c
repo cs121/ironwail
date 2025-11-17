@@ -130,8 +130,8 @@ static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *o
 
 static void Mod_BspxDebugf (const char *fmt, ...)
 {
-	if (debug_bspx.value <= 0.0f && r_lightgrid_debug.value <= 0.0f)
-		return;
+        if (debug_bspx.value <= 0.0f && r_lightgrid_debug.value <= 0.0f)
+                return;
 
         char buffer[1024];
         va_list argptr;
@@ -141,6 +141,41 @@ static void Mod_BspxDebugf (const char *fmt, ...)
         va_end (argptr);
 
         Con_Printf ("%s", buffer);
+}
+
+static void Mod_LoadExternalBspx (void)
+{
+        char bspxname[MAX_QPATH];
+        byte *buffer;
+        unsigned int path_id;
+        qfileofs_t saved_filesize;
+        size_t saved_bspx_size;
+
+	COM_StripExtension (loadmodel->name, bspxname, sizeof(bspxname));
+
+	q_strlcat (bspxname, ".bspx", sizeof(bspxname));
+
+        if (!q_strcasecmp (bspxname, loadmodel->name))
+                return;
+
+        buffer = COM_LoadMallocFile (bspxname, &path_id);
+        if (!buffer)
+                return;
+
+        saved_filesize = com_filesize;
+        saved_bspx_size = mod_bspx_filesize;
+
+        if (com_filesize > 0)
+        {
+                mod_bspx_filesize = (size_t)com_filesize;
+                Mod_BspxDebugf ("BSPX: loading %s companion (%zu bytes)\n", bspxname, mod_bspx_filesize);
+                Mod_LoadBspx ((const byte *)buffer);
+        }
+
+        mod_bspx_filesize = saved_bspx_size;
+        com_filesize = saved_filesize;
+
+        free (buffer);
 }
 
 #define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
@@ -3614,14 +3649,15 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
 // load into heap
 
-	Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
-	Mod_LoadEdges (&header.lumps[LUMP_EDGES], bsp2);
-	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
+        Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
+        Mod_LoadEdges (&header.lumps[LUMP_EDGES], bsp2);
+        Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
         Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
         Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
         Mod_LoadBspx ((const byte *)buffer);
+        Mod_LoadExternalBspx ();
         Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
-	Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
+        Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
         Mod_LoadFaces (&header.lumps[LUMP_FACES], bsp2);
         Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
 
