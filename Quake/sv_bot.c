@@ -873,43 +873,9 @@ static float SV_Bot_Frand (void)
         return (float)rand () / (float)RAND_MAX;
 }
 
-static qboolean SV_Bot_IsPickupWaypoint (const edict_t *ent)
-{
-        const char *classname;
-
-        if (!ent || ent->free || !ent->v.classname)
-                return false;
-
-        classname = PR_GetString (ent->v.classname);
-        if (!classname || !classname[0])
-                return false;
-
-        if (!q_strncasecmp (classname, "weapon_", 7))
-                return true;
-        if (!q_strncasecmp (classname, "item_", 5))
-                return true;
-        if (!q_strncasecmp (classname, "ammo_", 5))
-                return true;
-
-        return false;
-}
-
 static void SV_Bot_BuildWaypointList (void)
 {
-        int i;
-
         bot_waypoint_count = 0;
-
-        for (i = svs.maxclients + 1; i < qcvm->num_edicts && bot_waypoint_count < BOT_MAX_WAYPOINTS; i++)
-        {
-                edict_t *ent = EDICT_NUM (i);
-
-                if (!SV_Bot_IsPickupWaypoint (ent))
-                        continue;
-
-                bot_waypoints[bot_waypoint_count].edict = ent;
-                bot_waypoint_count++;
-        }
 
         bot_waypoints_initialized = true;
 }
