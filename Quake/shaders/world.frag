@@ -728,11 +728,13 @@ void main()
     if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0)
         total_light += clamp_preserving_hue(sun_light, sun_remaining);
 
+    vec3 total_light_clamped = clamp_preserving_hue(total_light, vec3(Overbright));
+
 #if DITHER >= 2
-    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(1.0));
-    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(1.0));
+    vec3 total_light_unit = total_light_clamped / Overbright;
+    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(Overbright));
 #else
-    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(1.0));
+    vec3 total_lightmap = total_light_clamped;
 #endif
 
 #if MODE != 1
