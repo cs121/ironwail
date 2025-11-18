@@ -33,6 +33,7 @@ extern cvar_t gl_fullbrights;
 extern cvar_t gl_farclip;
 extern cvar_t gl_overbright_models;
 extern cvar_t r_overbrightbits;
+extern cvar_t r_mapoverbrightbits;
 extern cvar_t r_waterwarp;
 extern cvar_t r_oldskyleaf;
 extern cvar_t r_drawworld;
@@ -404,11 +405,13 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_vignette_noise);
 	Cvar_RegisterVariable (&r_lens_planar);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
-        Cvar_RegisterVariable (&r_filmgrain);
-        Cvar_RegisterVariable (&r_filmgrain_size);
-        Cvar_RegisterVariable (&r_filmgrain_strength);
-        Cvar_RegisterVariable (&r_overbrightbits);
+	Cvar_RegisterVariable (&r_filmgrain);
+	Cvar_RegisterVariable (&r_filmgrain_size);
+	Cvar_RegisterVariable (&r_filmgrain_strength);
+	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
+	Cvar_RegisterVariable (&r_mapoverbrightbits);
+	Cvar_SetCallback (&r_mapoverbrightbits, R_OverbrightBits_f);
 
 	Cvar_RegisterVariable (&gl_finish);
 	Cvar_RegisterVariable (&gl_clear);
