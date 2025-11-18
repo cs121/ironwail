@@ -356,6 +356,7 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_deluxemaps);
         Cvar_RegisterVariable (&r_dynamic);
+	Cvar_RegisterVariable (&r_dynamic_light_clamp);
 	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
 	Cvar_RegisterVariable (&r_simd);

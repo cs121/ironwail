@@ -12,6 +12,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
+        float   DynamicLightClamp;
         float   LightmapStrength;
         float   RimAlias;
         float   RimWorld;

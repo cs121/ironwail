@@ -705,7 +705,7 @@ void main()
             // saturating Add (bleibt <= 1) with hue preservation
             if (dynamic_light.x > 0.0 || dynamic_light.y > 0.0 || dynamic_light.z > 0.0)
             {
-                float max_dynamic = max(Overbright, 1.0);
+                float max_dynamic = DynamicLightClamp;
                 vec3  cap = vec3(max_dynamic);
                 total_light = clamp_preserving_hue(total_light + dynamic_light, cap);
             }

@@ -115,6 +115,7 @@ extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_litwater;
 extern	cvar_t	r_deluxemaps;
 extern	cvar_t	r_dynamic;
+extern	cvar_t	r_dynamic_light_clamp;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
 
@@ -452,6 +453,7 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
+	float	dynamic_light_clamp;
 	float	lightmap_strength;
 	float	rim_alias;
 	float	rim_world;
