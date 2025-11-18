@@ -575,6 +575,7 @@ void main()
     }
 
     static_light *= LightmapStrength;
+    static_light *= MapOverbright;
 
     // schnellere Flächennormalen aus Derivaten
     vec3 dn = cross(DFDX(in_pos), DFDY(in_pos));
@@ -728,7 +729,7 @@ void main()
     if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0)
         total_light += clamp_preserving_hue(sun_light, sun_remaining);
 
-    vec3 total_light_clamped = clamp_preserving_hue(total_light, vec3(Overbright));
+    vec3 total_light_clamped = max(total_light, vec3(0.0));
 
 #if DITHER >= 2
     vec3 total_light_unit = total_light_clamped / Overbright;
@@ -835,6 +836,7 @@ void main()
         result.rgb = ApplyEnvBlend(result.rgb, env_color, env_amount, blendMode);
     }
 
+    result.rgb *= Overbright;
     result = clamp(result, 0.0, 1.0);
     vec4 fogData = ((in_flags & CF_CUSTOM_FOG) != 0u) ? in_fog_color : Fog;
     result.rgb = ApplyFog(result.rgb, in_pos - EyePos, fogData);

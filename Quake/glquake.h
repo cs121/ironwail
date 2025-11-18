@@ -453,6 +453,8 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
+	float	map_overbright;
+	float	identity_light;
 	float	dynamic_light_clamp;
 	float	lightmap_strength;
 	float	rim_alias;
