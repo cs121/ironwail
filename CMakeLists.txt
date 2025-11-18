@@ -47,9 +47,6 @@ target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
 
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
 list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c)
-list(APPEND IWAIL_SRC
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
@@ -174,13 +171,11 @@ endif()
 add_executable(iwshader_parser_test
     tests/iwshader_parser_test.c
     tests/iwshader_test_stubs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/r_iwshader.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/com_iwtext.c)
 
 target_include_directories(iwshader_parser_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quake)
 
 target_compile_definitions(iwshader_parser_test PRIVATE IW_BUILD_TESTS)
 

@@ -1,7 +1,7 @@
 #include "quakedef.h"
 #include "glquake.h"
 #include "render.h"
-#include "../common/com_iwtext.h"
+#include "com_iwtext.h"
 #include "r_iwshader.h"
 #include "q_ctype.h"
 

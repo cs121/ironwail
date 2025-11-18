@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "renderer/r_iwshader.h"
+#include "r_iwshader.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -381,7 +381,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
-	Cvar_RegisterVariable (&r_lightmap_strength);
 	Cvar_RegisterVariable (&r_dof);
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);

@@ -120,7 +120,6 @@ extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
 
 extern	cvar_t	r_oit;
-extern	cvar_t	r_lightmap_strength;
 extern	cvar_t	r_alphasort;
 extern	cvar_t	r_rim_alias;
 extern	cvar_t	r_rim_world;
@@ -456,7 +455,6 @@ typedef struct gpuframedata_s {
 	float	map_overbright;
 	float	identity_light;
 	float	dynamic_light_clamp;
-	float	lightmap_strength;
 	float	rim_alias;
 	float	rim_world;
 	float	rim_exponent;
