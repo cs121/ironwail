@@ -1792,10 +1792,14 @@ static void Mod_LoadBspx (const byte *buffer)
                         continue;
 
                 header_offset = (size_t)(candidate - buffer);
-                if (header_offset < entry_size * (size_t)numlumps)
+
+                if (header_offset > filesize - header_size)
                         continue;
 
-                directory = (const bspx_lump_t *)(candidate - entry_size * (size_t)numlumps);
+                if ((size_t)numlumps > (filesize - header_offset - header_size) / entry_size)
+                        continue;
+
+                directory = (const bspx_lump_t *)(candidate + header_size);
                 header_ptr = candidate;
                 break;
         }
