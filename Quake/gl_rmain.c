@@ -245,6 +245,7 @@ cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
+cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "2", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -1688,8 +1689,14 @@ void R_SetupView (void)
 	R_AnimateLight ();
 
 	{
-		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-		float overbright = (float)(1 << overbright_bits);
+		int map_overbright_bits;
+
+		if (!strcmp (r_mapoverbrightbits.string, r_mapoverbrightbits.default_string))
+			map_overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
+		else
+			map_overbright_bits = CLAMP (0, (int)Q_rint (r_mapoverbrightbits.value), 3);
+
+		float overbright = (float)(1 << map_overbright_bits);
 
 		if (overbright > 1.f)
 		{
@@ -1709,8 +1716,8 @@ void R_SetupView (void)
 		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
-                r_framedata.rim_pad0 = 0.f;
-        }
+		r_framedata.rim_pad0 = 0.f;
+	}
 
         {
                 qboolean enable_delux =
