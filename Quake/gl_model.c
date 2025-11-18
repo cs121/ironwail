@@ -643,11 +643,17 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
         default:
                 Mod_LoadBrushModel (mod, buf);
                 break;
-	}
+        }
 
-	free (buf);
+        if (crash && mod->type == mod_ext_invalid)
+        {
+                Host_Error ("Mod_LoadModel: couldn't load %s", mod->name);
+                return NULL;
+        }
 
-	return mod;
+        free (buf);
+
+        return mod;
 }
 
 /*
