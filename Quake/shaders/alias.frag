@@ -33,9 +33,6 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _FrameScreenDither;
         float   _FrameTextureDither;
         float   _FrameOverbright;
-        float   _FrameMapOverbright;
-        float   _FrameIdentityLight;
-        float   _FrameDynamicLightClamp;
         float   _FrameLightmapStrength;
         float   _FrameRimAlias;
         float   _FrameRimWorld;
@@ -311,9 +308,8 @@ void main()
         }
         lighting = max(lighting, vec3(0.0));
 
-float mapOverbright = _FrameMapOverbright;
-uint overbrightFlag = mapOverbright > 1.0 ? 1u : 0u;
-bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overbrightFlag == 0u;
+        uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;
+        bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overbrightFlag == 0u;
 
         if (useFullbrightHack)
         {
@@ -354,8 +350,7 @@ bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overb
                 }
         }
 
-lighting = max(lighting, vec3(0.0));
-lighting *= _FrameIdentityLight;
+        lighting = ldexp(lighting, ivec3(int(overbrightFlag)));
 
 #if ALPHATEST
         vec3 shadedColor = baseColor * lighting;
@@ -363,11 +358,10 @@ lighting *= _FrameIdentityLight;
         vec3 shadedColor = mix(baseColor, baseColor * lighting, baseSample.a);
 #endif
 
-if (((in_flags & ALIAS_FLAG_ITEM) != 0) || ((in_flags & ALIAS_FLAG_FORCE_FULLBRIGHT) != 0))
-shadedColor += fullbright;
-shadedColor += emissive;
-shadedColor *= _FrameOverbright;
-shadedColor = clamp(shadedColor, 0.0, 1.0);
+        if (((in_flags & ALIAS_FLAG_ITEM) != 0) || ((in_flags & ALIAS_FLAG_FORCE_FULLBRIGHT) != 0))
+                shadedColor += fullbright;
+        shadedColor += emissive;
+        shadedColor = clamp(shadedColor, 0.0, 1.0);
 
 	vec4 result = vec4(shadedColor, in_color.a);
 	if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)

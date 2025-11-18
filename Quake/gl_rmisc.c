@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "r_iwshader.h"
+#include "renderer/r_iwshader.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -32,7 +32,6 @@ extern cvar_t r_lerplightstyles;
 extern cvar_t gl_fullbrights;
 extern cvar_t gl_farclip;
 extern cvar_t gl_overbright_models;
-extern cvar_t r_mapoverbrightbits;
 extern cvar_t r_overbrightbits;
 extern cvar_t r_waterwarp;
 extern cvar_t r_oldskyleaf;
@@ -308,21 +307,9 @@ R_OverbrightBits_f
 */
 static void R_OverbrightBits_f (cvar_t *var)
 {
-int value = CLAMP (0, (int)Q_rint (var->value), 2);
-if (value != (int)var->value)
-Cvar_SetValueQuick (var, (float)value);
-}
-
-/*
-====================
-R_MapOverbrightBits_f
-====================
-*/
-static void R_MapOverbrightBits_f (cvar_t *var)
-{
-int value = CLAMP (0, (int)Q_rint (var->value), 2);
-if (value != (int)var->value)
-Cvar_SetValueQuick (var, (float)value);
+	int value = CLAMP (0, (int)Q_rint (var->value), 3);
+	if (value != (int)var->value)
+		Cvar_SetValueQuick (var, (float)value);
 }
 
 /*
@@ -369,7 +356,6 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_deluxemaps);
         Cvar_RegisterVariable (&r_dynamic);
-	Cvar_RegisterVariable (&r_dynamic_light_clamp);
 	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
 	Cvar_RegisterVariable (&r_simd);
@@ -381,6 +367,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
+	Cvar_RegisterVariable (&r_lightmap_strength);
 	Cvar_RegisterVariable (&r_dof);
 	Cvar_RegisterVariable (&r_rim_alias);
 	Cvar_RegisterVariable (&r_rim_world);
@@ -417,15 +404,13 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_vignette_noise);
 	Cvar_RegisterVariable (&r_lens_planar);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
-Cvar_RegisterVariable (&r_filmgrain);
-Cvar_RegisterVariable (&r_filmgrain_size);
-Cvar_RegisterVariable (&r_filmgrain_strength);
-Cvar_RegisterVariable (&r_mapoverbrightbits);
-Cvar_RegisterVariable (&r_overbrightbits);
-Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
-Cvar_SetCallback (&r_mapoverbrightbits, R_MapOverbrightBits_f);
+        Cvar_RegisterVariable (&r_filmgrain);
+        Cvar_RegisterVariable (&r_filmgrain_size);
+        Cvar_RegisterVariable (&r_filmgrain_strength);
+        Cvar_RegisterVariable (&r_overbrightbits);
+	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
-Cvar_RegisterVariable (&gl_finish);
+	Cvar_RegisterVariable (&gl_finish);
 	Cvar_RegisterVariable (&gl_clear);
 	Cvar_RegisterVariable (&gl_polyblend);
 	Cvar_RegisterVariable (&gl_playermip);

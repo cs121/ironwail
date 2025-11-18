@@ -575,7 +575,6 @@ void main()
     }
 
     static_light *= LightmapStrength;
-    static_light *= MapOverbright;
 
     // schnellere Flächennormalen aus Derivaten
     vec3 dn = cross(DFDX(in_pos), DFDY(in_pos));
@@ -706,7 +705,7 @@ void main()
             // saturating Add (bleibt <= 1) with hue preservation
             if (dynamic_light.x > 0.0 || dynamic_light.y > 0.0 || dynamic_light.z > 0.0)
             {
-                float max_dynamic = DynamicLightClamp;
+                float max_dynamic = max(Overbright, 1.0);
                 vec3  cap = vec3(max_dynamic);
                 total_light = clamp_preserving_hue(total_light + dynamic_light, cap);
             }
@@ -729,13 +728,11 @@ void main()
     if (sun_remaining.x > 0.0 || sun_remaining.y > 0.0 || sun_remaining.z > 0.0)
         total_light += clamp_preserving_hue(sun_light, sun_remaining);
 
-    vec3 total_light_clamped = max(total_light, vec3(0.0));
-
 #if DITHER >= 2
-    vec3 total_light_unit = total_light_clamped / Overbright;
-    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(Overbright));
+    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(1.0));
+    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(1.0));
 #else
-    vec3 total_lightmap = total_light_clamped;
+    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(1.0));
 #endif
 
 #if MODE != 1
@@ -836,7 +833,6 @@ void main()
         result.rgb = ApplyEnvBlend(result.rgb, env_color, env_amount, blendMode);
     }
 
-    result.rgb *= Overbright;
     result = clamp(result, 0.0, 1.0);
     vec4 fogData = ((in_flags & CF_CUSTOM_FOG) != 0u) ? in_fog_color : Fog;
     result.rgb = ApplyFog(result.rgb, in_pos - EyePos, fogData);

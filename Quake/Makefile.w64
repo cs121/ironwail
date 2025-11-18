@@ -261,7 +261,7 @@ OBJS = strlcat.o \
         wad.o \
         cmd.o \
         common.o \
-        com_iwtext.o \
+        common/com_iwtext.o \
         steam.o \
 	json.o \
 	miniz.o \
