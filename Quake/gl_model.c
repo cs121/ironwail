@@ -605,7 +605,33 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
         case IDPOLYHEADER:
                 Mod_LoadAliasModel (mod, buf);
                 break;
-
+	//Spike -- added checks for a few other model types.
+	//this is useful because of the number of models with renamed extensions.
+	//that and its hard to test the extension stuff when this was crashing.
+	case (('R'<<0)+('A'<<8)+('P'<<16)+('O'<<24)):	//h2mp
+		Con_Warning("%s is a hexen2-missionpack model, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
+	case (('I'<<0)+('D'<<8)+('P'<<16)+('3'<<24)):	//md3
+		Con_Warning("%s is an md3, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
+	case (('I'<<0)+('N'<<8)+('T'<<16)+('E'<<24)):	//iqm
+		Con_Warning("%s is an iqm, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
+	case (('D'<<0)+('A'<<8)+('R'<<16)+('K'<<24)):	//dpm
+		Con_Warning("%s is an dpm, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
+	case (('A'<<0)+('C'<<8)+('T'<<16)+('R'<<24)):	//psk
+		Con_Warning("%s is a psk, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
+	case (('I'<<0)+('B'<<8)+('S'<<16)+('P'<<24)):	//q2/q3bsp
+		Con_Warning("%s is a q2/q3bsp, and is thus not supported\n", mod->name);
+		mod->type = mod_ext_invalid;
+		break;
         case IDMD2HEADER:
                 Mod_LoadMD2Model (mod, buf);
                 break;
@@ -652,6 +678,80 @@ qmodel_t *Mod_ForName (const char *name, qboolean crash)
 */
 
 static byte	*mod_base;
+
+typedef struct {
+    char lumpname[24]; // up to 23 chars, zero-padded
+    int fileofs;  // from file start
+    int filelen;
+} bspx_lump_t;
+typedef struct {
+    char id[4];  // 'BSPX'
+    int numlumps;
+	bspx_lump_t lumps[1];
+} bspx_header_t;
+static char *bspxbase;
+static bspx_header_t *bspxheader;
+//supported lumps:
+//RGBLIGHTING (.lit)
+//unsupported lumps ('documented' elsewhere):
+//BRUSHLIST (because hulls suck)
+//LIGHTINGDIR (.lux)
+//LMSHIFT (.lit2)
+//LMOFFSET (.lit2)
+//LMSTYLE (.lit2)
+static void *Q1BSPX_FindLump(char *lumpname, int *lumpsize)
+{
+	int i;
+	*lumpsize = 0;
+	if (!bspxheader)
+		return NULL;
+
+	for (i = 0; i < bspxheader->numlumps; i++)
+	{
+		if (!strncmp(bspxheader->lumps[i].lumpname, lumpname, 24))
+		{
+			*lumpsize = bspxheader->lumps[i].filelen;
+			return bspxbase + bspxheader->lumps[i].fileofs;
+		}
+	}
+	return NULL;
+}
+static void Q1BSPX_Setup(qmodel_t *mod, char *filebase, unsigned int filelen, lump_t *lumps, int numlumps)
+{
+	int i;
+	int offs = 0;
+	bspx_header_t *h;
+
+	bspxbase = filebase;
+	bspxheader = NULL;
+
+	for (i = 0; i < numlumps; i++, lumps++)
+	{
+		if (offs < lumps->fileofs + lumps->filelen)
+			offs = lumps->fileofs + lumps->filelen;
+	}
+	offs = (offs + 3) & ~3;
+	if (offs + sizeof(*bspxheader) > filelen)
+		return; /*no space for it*/
+	h = (bspx_header_t*)(filebase + offs);
+
+	i = LittleLong(h->numlumps);
+	/*verify the header*/
+	if (!strncmp(h->id, "BSPX", 4) ||
+		i < 0 ||
+		offs + sizeof(*h) + sizeof(h->lumps[0])*(i-1) > filelen)
+		return;
+	h->numlumps = i;
+	while(i-->0)
+	{
+		h->lumps[i].fileofs = LittleLong(h->lumps[i].fileofs);
+		h->lumps[i].filelen = LittleLong(h->lumps[i].filelen);
+		if ((unsigned int)h->lumps[i].fileofs + (unsigned int)h->lumps[i].filelen > filelen)
+			return;
+	}
+
+	bspxheader = h;
+}
 
 /*
 =================
