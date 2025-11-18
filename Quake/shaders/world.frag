@@ -625,7 +625,7 @@ void main()
         static_light *= lambert;
     }
 
-    vec3 total_light = clamp_preserving_hue(static_light, vec3(1.0));
+    vec3 total_light = clamp_preserving_hue(static_light, vec3(Overbright));
     vec3 specular_light = vec3(0.0);
 
     vec3 to_eye = EyePos - in_pos;
@@ -729,10 +729,12 @@ void main()
         total_light += clamp_preserving_hue(sun_light, sun_remaining);
 
 #if DITHER >= 2
-    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(1.0));
-    vec3 total_lightmap = clamp_preserving_hue(floor(total_light_unit * 63.0 + 0.5) * (Overbright/63.0), vec3(1.0));
+    vec3 total_light_unit = clamp_preserving_hue(total_light, vec3(Overbright));
+    vec3 total_lightmap = clamp_preserving_hue(
+        floor(total_light_unit * (63.0 / Overbright) + 0.5) * (Overbright / 63.0),
+        vec3(Overbright));
 #else
-    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(1.0));
+    vec3 total_lightmap = clamp_preserving_hue(total_light * Overbright, vec3(Overbright));
 #endif
 
 #if MODE != 1
