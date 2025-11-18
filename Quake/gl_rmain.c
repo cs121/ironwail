@@ -228,8 +228,8 @@ cvar_t	r_filmgrain = { "r_filmgrain", "0.05", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "2", CVAR_ARCHIVE };
-cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
+cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "0", CVAR_ARCHIVE };
+cvar_t	r_overbrightbits = { "r_overbrightbits", "0", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
