@@ -54,24 +54,6 @@ static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
-static size_t Mod_BspLumpElementSize (int lump_index, int bsp2)
-{
-	switch (lump_index)
-	{
-	case LUMP_PLANES: return sizeof(dplane_t);
-	case LUMP_VERTEXES: return sizeof(dvertex_t);
-	case LUMP_EDGES: return bsp2 ? sizeof(dledge_t) : sizeof(dsedge_t);
-	case LUMP_SURFEDGES: return sizeof(int);
-	case LUMP_FACES: return bsp2 ? sizeof(dlface_t) : sizeof(dsface_t);
-	case LUMP_MARKSURFACES: return bsp2 ? sizeof(unsigned int) : sizeof(unsigned short);
-	case LUMP_NODES: return (bsp2 == 2) ? sizeof(dl2node_t) : (bsp2 ? sizeof(dl1node_t) : sizeof(dsnode_t));
-	case LUMP_TEXINFO: return sizeof(texinfo_t);
-	case LUMP_LEAFS: return (bsp2 == 2) ? sizeof(dl2leaf_t) : (bsp2 ? sizeof(dl1leaf_t) : sizeof(dsleaf_t));
-	case LUMP_CLIPNODES: return bsp2 ? sizeof(dlclipnode_t) : sizeof(dsclipnode_t);
-	case LUMP_MODELS: return sizeof(dmodel_t);
-	default: return 0; // variable sized lumps
-	}
-}
 
 static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *out_header)
 {
@@ -302,7 +284,7 @@ mleaf_t *Mod_PointInLeaf (vec3_t p, qmodel_t *model)
 Mod_DecompressVis
 ===================
 */
-static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
+byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 {
 	int		c;
 	byte	*out;
@@ -685,6 +667,7 @@ qmodel_t *Mod_ForName (const char *name, qboolean crash)
 
 static byte	*mod_base;
 
+
 typedef struct {
     char lumpname[24]; // up to 23 chars, zero-padded
     int fileofs;  // from file start
@@ -1054,7 +1037,7 @@ static void Mod_LoadTextures (lump_t *l)
 		if (!tx || tx->name[0] != '+')
 			continue;
 		if (tx->anim_next)
-			continue;	// already sequenced
+			continue;	// allready sequenced
 
 	// find the number of frames in the animation
 		memset (anims, 0, sizeof(anims));
@@ -1147,595 +1130,72 @@ static void Mod_LoadTextures (lump_t *l)
 Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
 =================
 */
-static qboolean Mod_LoadDeluxemapFile (const char *filename, int samplecount, int expected_version, const char *filekind)
+void Mod_LoadLighting (lump_t *l)
 {
-        int mark;
-        byte *data;
-        unsigned int path_id;
-        size_t expected;
-
-        if (!filename || !filename[0])
-                return false;
-
-        expected = (size_t)samplecount * 3;
-        mark = Hunk_LowMark ();
-        data = (byte *) COM_LoadHunkFile (filename, &path_id);
-        if (!data)
-        {
-                Hunk_FreeToLowMark (mark);
-                return false;
-        }
-
-        if (path_id < loadmodel->path_id)
-        {
-                Hunk_FreeToLowMark (mark);
-                Con_DPrintf ("ignored %s from a gamedir with lower priority\n", filename);
-                return false;
-        }
-
-        if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-        {
-                int version = LittleLong (((int *)data)[1]);
-                if (version == expected_version)
-                {
-                        uint64_t expected_total = 8 + (uint64_t)expected;
-                        if (expected_total == (uint64_t)com_filesize)
-                        {
-                                Con_DPrintf2 ("%s loaded\n", filename);
-                                loadmodel->deluxdata = data + 8;
-                                loadmodel->deluxfile = true;
-                                return true;
-                        }
-
-                        Hunk_FreeToLowMark (mark);
-                        Con_Printf ("Mismatched %s file (%s should be %" SDL_PRIu64 " bytes, not %" SDL_PRIs64 ")\n",
-                                filekind, filename, expected_total, com_filesize);
-                        return false;
-                }
-
-                Hunk_FreeToLowMark (mark);
-                Con_Printf ("Unknown %s file version (%d)\n", filekind, version);
-                return false;
-        }
-
-        Hunk_FreeToLowMark (mark);
-        Con_Printf ("Corrupt %s file (old version?), ignoring\n", filekind);
-        return false;
-}
-
-static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename, int samplecount)
-{
-        loadmodel->deluxdata = NULL;
-        loadmodel->deluxfile = false;
-        loadmodel->numdeluxsamples = (samplecount > 0) ? samplecount : 0;
-
-        if (samplecount <= 0)
-                return;
-
-        if (Mod_LoadDeluxemapFile (dlitfilename, samplecount, 2, ".dlit"))
-                return;
-
-        if (Mod_LoadDeluxemapFile (luxfilename, samplecount, 1, ".lux"))
-                return;
-
-        Con_DPrintf2 ("%s and %s not found, synthesizing deluxemap\n", dlitfilename, luxfilename);
-
-        loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (samplecount * 3, dlitfilename);
-        memset (loadmodel->deluxdata, 0, samplecount * 3);
-}
-
-static byte Mod_BspxEncodeDeluxComponent (float value)
-{
-        float c = CLAMP (-1.0f, value, 1.0f);
-        int v = (int) Q_rint ((c * 0.5f + 0.5f) * 255.0f);
-        return (byte) CLAMP (0, v, 255);
-}
-
-static byte Mod_BspxConvertE5Bgr9Component (uint32_t mantissa, uint32_t exponent)
-{
-        float scale = ldexp (1.0f, (int)exponent - 24);
-        int value = (int) Q_rint ((float)mantissa * scale * 128.0f);
-        return (byte) CLAMP (0, value, 255);
-}
-
-static void Mod_BspxDecodeE5Bgr9Sample (uint32_t packed, byte *dst)
-{
-        uint32_t value = (uint32_t) LittleLong ((int)packed);
-        uint32_t exponent = value >> 27;
-
-        dst[2] = Mod_BspxConvertE5Bgr9Component (value & 0x1ffu, exponent);
-        dst[1] = Mod_BspxConvertE5Bgr9Component ((value >> 9) & 0x1ffu, exponent);
-        dst[0] = Mod_BspxConvertE5Bgr9Component ((value >> 18) & 0x1ffu, exponent);
-}
-
-static size_t Mod_BspxGuessSampleCount (size_t length)
-{
-        size_t count = 0;
-
-        if (length % (3 * sizeof(float)) == 0)
-                count = length / (3 * sizeof(float));
-        else if (length % 3 == 0)
-                count = length / 3;
-
-        return count;
-}
-
-static qboolean Mod_BspxEnsureDeluxStorage (size_t samplecount, const char *lumpname)
-{
-        size_t expected_bytes;
-
-        if (samplecount == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s reported zero samples\n", lumpname);
-                return false;
-        }
-
-        if (loadmodel->numdeluxsamples > 0 && (size_t)loadmodel->numdeluxsamples != samplecount)
-        {
-                Con_DPrintf2 ("BSPX lump %s has unexpected sample count %zu (expected %d)\n",
-                        lumpname, samplecount, loadmodel->numdeluxsamples);
-                Mod_BspxDebugf ("BSPX:     %s sample count mismatch (%zu vs %d)\n",
-                        lumpname, samplecount, loadmodel->numdeluxsamples);
-                return false;
-        }
-
-        if (loadmodel->numdeluxsamples == 0)
-                loadmodel->numdeluxsamples = (int)samplecount;
-
-        expected_bytes = samplecount * 3;
-
-        if (!loadmodel->deluxdata)
-        {
-                loadmodel->deluxdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
-                if (!loadmodel->deluxdata)
-                {
-                        Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for deluxemap\n", lumpname, expected_bytes);
-                        return false;
-                }
-                memset (loadmodel->deluxdata, 0, expected_bytes);
-        }
-
-        return true;
-}
-
-static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data, size_t length)
-{
-        const byte *payload = data;
-        size_t payload_length = length;
-        size_t samplecount = (loadmodel->numdeluxsamples > 0) ? (size_t)loadmodel->numdeluxsamples : 0;
-        size_t expected_bytes;
-        size_t expected_floats;
-        qboolean from_qlit = false;
-
-        if (!data || length == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s has no payload\n", lumpname);
-                return false;
-        }
-
-        if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-        {
-                int version = LittleLong (((const int *)data)[1]);
-
-                from_qlit = true;
-                payload = data + 8;
-                payload_length = length - 8;
-
-                if (samplecount == 0)
-                        samplecount = Mod_BspxGuessSampleCount (payload_length);
-
-                if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
-                        return false;
-
-                expected_bytes = samplecount * 3;
-                expected_floats = samplecount * 3 * sizeof(float);
-
-                if (version == 2)
-                {
-                        if (payload_length == expected_bytes)
-                        {
-                                memcpy (loadmodel->deluxdata, payload, expected_bytes);
-                                loadmodel->deluxfile = true;
-                                Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (QLIT bytes)\n", lumpname, samplecount);
-                                return true;
-                        }
-
-                        if (payload_length == expected_floats)
-                        {
-                                const float *src = (const float *)payload;
-                                byte *dst = loadmodel->deluxdata;
-                                size_t count = samplecount;
-
-                                for (size_t i = 0; i < count; ++i)
-                                {
-                                        float nx = LittleFloat (src[i * 3 + 0]);
-                                        float ny = LittleFloat (src[i * 3 + 1]);
-                                        float nz = LittleFloat (src[i * 3 + 2]);
-
-                                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
-                                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
-                                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
-                                }
-
-                                loadmodel->deluxfile = true;
-                                Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (QLIT floats)\n", lumpname, samplecount);
-                                return true;
-                        }
-
-                        Con_DPrintf2 ("BSPX lump %s has unexpected version 2 size %zu (expected %zu or %zu)\n",
-                                lumpname, payload_length, expected_bytes, expected_floats);
-                        Mod_BspxDebugf ("BSPX:     %s rejected QLIT v2 size %zu (expected %zu or %zu)\n",
-                                lumpname, payload_length, expected_bytes, expected_floats);
-                        return false;
-                }
-
-                if (version == 1)
-                {
-                        if (payload_length == expected_floats)
-                        {
-                                const float *src = (const float *)payload;
-                                byte *dst = loadmodel->deluxdata;
-                                size_t count = samplecount;
-
-                                for (size_t i = 0; i < count; ++i)
-                                {
-                                        float nx = LittleFloat (src[i * 3 + 0]);
-                                        float ny = LittleFloat (src[i * 3 + 1]);
-                                        float nz = LittleFloat (src[i * 3 + 2]);
-
-                                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
-                                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
-                                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
-                                }
-
-                                loadmodel->deluxfile = true;
-                                Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (QLIT v1 floats)\n", lumpname, samplecount);
-                                return true;
-                        }
-
-                        Con_DPrintf2 ("BSPX lump %s has unexpected version 1 size %zu (expected %zu)\n",
-                                lumpname, payload_length, expected_floats);
-                        Mod_BspxDebugf ("BSPX:     %s rejected QLIT v1 size %zu (expected %zu)\n",
-                                lumpname, payload_length, expected_floats);
-                        return false;
-                }
-
-                Con_DPrintf2 ("BSPX lump %s has unknown QLIT version %d\n", lumpname, version);
-                Mod_BspxDebugf ("BSPX:     %s has unknown QLIT version %d\n", lumpname, version);
-                return false;
-        }
-        else
-        {
-                if (samplecount == 0)
-                        samplecount = Mod_BspxGuessSampleCount (length);
-
-                if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
-                        return false;
-
-                expected_bytes = samplecount * 3;
-                expected_floats = samplecount * 3 * sizeof(float);
-
-                if (length == expected_bytes)
-                {
-                        memcpy (loadmodel->deluxdata, data, expected_bytes);
-                        loadmodel->deluxfile = true;
-                        Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (raw bytes)\n", lumpname, samplecount);
-                        return true;
-                }
-
-                if (length == expected_floats)
-                {
-                        const float *src = (const float *)data;
-                        byte *dst = loadmodel->deluxdata;
-                        size_t count = samplecount;
-
-                        for (size_t i = 0; i < count; ++i)
-                        {
-                                float nx = LittleFloat (src[i * 3 + 0]);
-                                float ny = LittleFloat (src[i * 3 + 1]);
-                                float nz = LittleFloat (src[i * 3 + 2]);
-
-                                dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
-                                dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
-                                dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
-                        }
-
-                        loadmodel->deluxfile = true;
-                        Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (raw floats)\n", lumpname, samplecount);
-                        return true;
-                }
-        }
-
-        expected_bytes = (size_t)loadmodel->numdeluxsamples * 3;
-        expected_floats = expected_bytes * sizeof(float);
-
-        Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected %zu or %zu)\n",
-                lumpname, length, expected_bytes, expected_floats);
-        Mod_BspxDebugf ("BSPX:     %s rejected size %zu (expected %zu or %zu)\n",
-                lumpname, length, expected_bytes, expected_floats);
-        return false;
-}
-
-static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *data, size_t length)
-{
-        const byte *payload = data;
-        size_t payload_length = length;
-        size_t samplecount;
-        size_t expected_bytes;
-        qboolean had_header = false;
-
-        if (!data || length == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s has no payload\n", lumpname);
-                return false;
-        }
-
-        if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-        {
-                int version = LittleLong (((const int *)data)[1]);
-
-                had_header = true;
-                payload = data + 8;
-                payload_length = length - 8;
-
-                if (version != 1)
-                {
-                        Con_DPrintf2 ("BSPX lump %s has unsupported QLIT version %d\n", lumpname, version);
-                        Mod_BspxDebugf ("BSPX:     %s has unsupported QLIT version %d\n", lumpname, version);
-                        return false;
-                }
-        }
-
-        samplecount = Mod_BspxGuessSampleCount (payload_length);
-        if (samplecount == 0 || payload_length != samplecount * 3)
-        {
-                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of 3 bytes)\n",
-                        lumpname, payload_length);
-                Mod_BspxDebugf ("BSPX:     %s size %zu is not a multiple of 3 bytes\n", lumpname, payload_length);
-                return false;
-        }
-
-        if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
-        {
-                Mod_BspxDebugf ("BSPX:     %s rejected due to deluxemap storage mismatch\n", lumpname);
-                return false;
-        }
-
-        expected_bytes = samplecount * 3;
-
-        if (!loadmodel->lightdata)
-        {
-                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
-                if (!loadmodel->lightdata)
-                {
-                        Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for lightdata\n", lumpname, expected_bytes);
-                        return false;
-                }
-        }
-        else
-        {
-                size_t existing_bytes = (size_t)loadmodel->numdeluxsamples * 3;
-
-                if (existing_bytes != expected_bytes)
-                {
-                        Con_DPrintf2 ("BSPX lump %s has unexpected size %zu for existing lightdata\n",
-                                lumpname, payload_length);
-                        Mod_BspxDebugf ("BSPX:     %s expected %zu bytes but have %zu\n",
-                                lumpname, expected_bytes, existing_bytes);
-                        return false;
-                }
-        }
-
-        memcpy (loadmodel->lightdata, payload, expected_bytes);
-        loadmodel->litfile = true;
-        Mod_BspxDebugf ("BSPX:     %s imported %zu RGB samples%s\n",
-                lumpname, samplecount, had_header ? " (QLIT)" : "");
-        return true;
-}
-
-static qboolean Mod_BspxImportE5Bgr9Lighting (const char *lumpname, const byte *data, size_t length)
-{
-        const byte *payload = data;
-        size_t payload_length = length;
-        size_t samplecount;
-        size_t expected_bytes;
-        qboolean had_header = false;
-
-        if (!data || length == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s has no payload\n", lumpname);
-                return false;
-        }
-
-        if (length >= 8 && data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-        {
-            int version = LittleLong (((const int *)data)[1]);
-
-            had_header = true;
-            payload = data + 8;
-            payload_length = length - 8;
-
-            if (version != 1)
-            {
-                    Con_DPrintf2 ("BSPX lump %s has unsupported QLIT version %d\n", lumpname, version);
-                    Mod_BspxDebugf ("BSPX:     %s has unsupported QLIT version %d\n", lumpname, version);
-                    return false;
-            }
-        }
-
-        if (payload_length % sizeof(uint32_t))
-        {
-                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of 4 bytes)\n",
-                        lumpname, payload_length);
-                Mod_BspxDebugf ("BSPX:     %s size %zu is not a multiple of 4 bytes\n", lumpname, payload_length);
-                return false;
-        }
-
-        samplecount = payload_length / sizeof(uint32_t);
-        if (samplecount == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s contains zero E5BGR9 samples\n", lumpname);
-                return false;
-        }
-
-        if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
-        {
-                Mod_BspxDebugf ("BSPX:     %s rejected due to deluxemap storage mismatch\n", lumpname);
-                return false;
-        }
-
-        expected_bytes = samplecount * 3;
-
-        if (!loadmodel->lightdata)
-        {
-                loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (expected_bytes, loadname);
-                if (!loadmodel->lightdata)
-                {
-                        Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for lightdata\n", lumpname, expected_bytes);
-                        return false;
-                }
-        }
-        else
-        {
-                size_t existing_bytes = (size_t)loadmodel->numdeluxsamples * 3;
-
-                if (existing_bytes != expected_bytes)
-                {
-                        Con_DPrintf2 ("BSPX lump %s has unexpected size %zu for existing lightdata\n",
-                                lumpname, payload_length);
-                        Mod_BspxDebugf ("BSPX:     %s expected %zu bytes but have %zu\n",
-                                lumpname, expected_bytes, existing_bytes);
-                        return false;
-                }
-        }
-
-        if (loadmodel->litfile)
-        {
-                Mod_BspxDebugf ("BSPX:     %s ignored (existing light data)\n", lumpname);
-                return false;
-        }
-
-        {
-                const uint32_t *src = (const uint32_t *)payload;
-                byte *dst = loadmodel->lightdata;
-
-                for (size_t i = 0; i < samplecount; ++i, dst += 3)
-                        Mod_BspxDecodeE5Bgr9Sample (src[i], dst);
-        }
-
-        loadmodel->litfile = true;
-        Mod_BspxDebugf ("BSPX:     %s imported %zu RGB samples%s (E5BGR9)\n",
-                lumpname, samplecount, had_header ? " (QLIT)" : "");
-        return true;
-}
-
-static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *data, size_t length,
-        bspx_static_light_t **out_lights, int *out_count)
-{
-        const size_t stride_with_intensity = sizeof(float) * 8;
-        const size_t stride_without_intensity = sizeof(float) * 7;
-        size_t stride = 0;
-        qboolean has_intensity = true;
-        int count;
-        bspx_static_light_t *lights;
-
-        if (!out_lights || !out_count)
-        {
-                Mod_BspxDebugf ("BSPX:     %s skipped (invalid output pointers)\n", lumpname);
-                return false;
-        }
-
-        *out_lights = NULL;
-        *out_count = 0;
-
-        if (!data || length == 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s contains no static lights\n", lumpname);
-                return true;
-        }
-
-        if (length % stride_with_intensity == 0)
-        {
-                stride = stride_with_intensity;
-                has_intensity = true;
-        }
-        else if (length % stride_without_intensity == 0)
-        {
-                stride = stride_without_intensity;
-                has_intensity = false;
-        }
-        else
-        {
-                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of %zu or %zu)\n",
-                        lumpname, length, stride_with_intensity, stride_without_intensity);
-                Mod_BspxDebugf ("BSPX:     %s rejected size %zu for static lights\n", lumpname, length);
-                return false;
-        }
-
-        count = (int)(length / stride);
-        if (count <= 0)
-        {
-                Mod_BspxDebugf ("BSPX:     %s contains zero static lights\n", lumpname);
-                return true;
-        }
-
-        lights = (bspx_static_light_t *) Hunk_AllocName (count * sizeof(*lights), lumpname);
-        if (!lights)
-        {
-                Mod_BspxDebugf ("BSPX:     %s failed to allocate %d static lights\n", lumpname, count);
-                return false;
-        }
-
-        for (int i = 0; i < count; ++i)
-        {
-                const float *src = (const float *)(data + i * stride);
-                float intensity = 1.0f;
-
-                lights[i].origin[0] = LittleFloat (src[0]);
-                lights[i].origin[1] = LittleFloat (src[1]);
-                lights[i].origin[2] = LittleFloat (src[2]);
-
-                lights[i].radius = LittleFloat (src[3]);
-                if (lights[i].radius < 0.0f)
-                        lights[i].radius = 0.0f;
-
-                lights[i].color[0] = LittleFloat (src[4]);
-                lights[i].color[1] = LittleFloat (src[5]);
-                lights[i].color[2] = LittleFloat (src[6]);
-
-                if (has_intensity)
-                        intensity = LittleFloat (src[7]);
-
-                lights[i].intensity = (intensity > 0.0f) ? intensity : 0.0f;
-        }
-
-        *out_lights = lights;
-        *out_count = count;
-        Mod_BspxDebugf ("BSPX:     %s imported %d static lights%s\n",
-                lumpname, count, has_intensity ? " (with intensity)" : "");
-        return true;
-}
-
-static qboolean Mod_BspxImportLmOffsets (const char *lumpname, const byte *data, size_t length)
-{
-	int count;
-	int *offsets;
-
-	loadmodel->bspx_light_offset_count = 0;
-	loadmodel->bspx_light_offsets = NULL;
-
-	if (!data || length == 0)
+	int i, mark;
+	byte *in, *out, *data;
+	byte d;
+	char litfilename[MAX_OSPATH];
+	unsigned int path_id;
+	int	bspxsize;
+
+	loadmodel->lightdata = NULL;
+	// LordHavoc: check for a .lit file
+	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
+	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
+	q_strlcat(litfilename, ".lit", sizeof(litfilename));
+	mark = Hunk_LowMark();
+	data = (byte*) COM_LoadHunkFile (litfilename, &path_id);
+	if (data)
 	{
-		Mod_BspxDebugf ("BSPX:     %s contains no light offsets\n", lumpname);
-		return true;
+		// use lit file only from the same gamedir as the map
+		// itself or from a searchpath with higher priority.
+		if (path_id < loadmodel->path_id)
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
+		}
+		else
+		if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
+		{
+			i = LittleLong(((int *)data)[1]);
+			if (i == 1)
+			{
+				Con_DPrintf("%s loaded\n", litfilename);
+				loadmodel->lightdata = data + 8;
+				return;
+			}
+			else
+			{
+				Hunk_FreeToLowMark(mark);
+				Con_Printf("Unknown .lit file version (%d)\n", i);
+			}
+		}
+		else
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
+		}
 	}
-
-	if (length % sizeof(int))
+	// LordHavoc: no .lit found, expand the white lighting data to color
+	if (!l->filelen)
+		return;
+	loadmodel->lightdata = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
+	if (loadmodel->lightdata && bspxsize == l->filelen*3)
+		Con_DPrintf("bspx lighting loaded\n");
+	else
 	{
-		Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiple of %zu)\n",
-				lumpname, length, sizeof(int));
-		Mod_BspxDebugf ("BSPX:     %s rejected size %zu for light offsets\n", lumpname, length);
-		return false;
+		loadmodel->lightdata = (byte *) Hunk_AllocName ( l->filelen*3, litfilename);
+		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
+		out = loadmodel->lightdata;
+		memcpy (in, mod_base + l->fileofs, l->filelen);
+		for (i = 0;i < l->filelen;i++)
+		{
+			d = *in++;
+			*out++ = d;
+			*out++ = d;
+			*out++ = d;
+		}
 	}
 
 	count = (int)(length / sizeof(int));
@@ -2222,7 +1682,7 @@ static void Mod_InitFallbackDeluxemap (msurface_t *surf)
 Mod_LoadVisibility
 =================
 */
-static void Mod_LoadVisibility (lump_t *l)
+void Mod_LoadVisibility (lump_t *l)
 {
 	loadmodel->viswarn = false;
 	if (!l->filelen)
@@ -2230,7 +1690,7 @@ static void Mod_LoadVisibility (lump_t *l)
 		loadmodel->visdata = NULL;
 		return;
 	}
-	loadmodel->visdata = (byte *) Hunk_AllocNameNoFill ( l->filelen, loadname);
+	loadmodel->visdata = (byte *) Hunk_AllocName ( l->filelen, loadname);
 	memcpy (loadmodel->visdata, mod_base + l->fileofs, l->filelen);
 }
 
@@ -2240,7 +1700,7 @@ static void Mod_LoadVisibility (lump_t *l)
 Mod_LoadEntities
 =================
 */
-static void Mod_LoadEntities (lump_t *l)
+void Mod_LoadEntities (lump_t *l)
 {
 	char	basemapname[MAX_QPATH];
 	char	entfilename[MAX_QPATH];
@@ -2294,7 +1754,7 @@ _load_embedded:
 		loadmodel->entities = NULL;
 		return;
 	}
-	loadmodel->entities = (char *) Hunk_AllocNameNoFill ( l->filelen, loadname);
+	loadmodel->entities = (char *) Hunk_AllocName ( l->filelen, loadname);
 	memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
 }
 
@@ -2304,7 +1764,7 @@ _load_embedded:
 Mod_LoadVertexes
 =================
 */
-static void Mod_LoadVertexes (lump_t *l)
+void Mod_LoadVertexes (lump_t *l)
 {
 	dvertex_t	*in;
 	mvertex_t	*out;
@@ -2314,7 +1774,7 @@ static void Mod_LoadVertexes (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (mvertex_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (mvertex_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	loadmodel->vertexes = out;
 	loadmodel->numvertexes = count;
@@ -2332,7 +1792,7 @@ static void Mod_LoadVertexes (lump_t *l)
 Mod_LoadEdges
 =================
 */
-static void Mod_LoadEdges (lump_t *l, int bsp2)
+void Mod_LoadEdges (lump_t *l, int bsp2)
 {
 	medge_t *out;
 	int 	i, count;
@@ -2345,7 +1805,7 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 
 		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+		out = (medge_t *) Hunk_AllocName ( (count + 1) * sizeof(*out), loadname);
 
 		loadmodel->edges = out;
 		loadmodel->numedges = count;
@@ -2364,7 +1824,7 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 
 		count = l->filelen / sizeof(*in);
-		out = (medge_t *) Hunk_AllocNameNoFill ( (count + 1) * sizeof(*out), loadname);
+		out = (medge_t *) Hunk_AllocName ( (count + 1) * sizeof(*out), loadname);
 
 		loadmodel->edges = out;
 		loadmodel->numedges = count;
@@ -2382,7 +1842,7 @@ static void Mod_LoadEdges (lump_t *l, int bsp2)
 Mod_LoadTexinfo
 =================
 */
-static void Mod_LoadTexinfo (lump_t *l)
+void Mod_LoadTexinfo (lump_t *l)
 {
 	texinfo_t *in;
 	mtexinfo_t *out;
@@ -2393,7 +1853,7 @@ static void Mod_LoadTexinfo (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (mtexinfo_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (mtexinfo_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	loadmodel->texinfo = out;
 	loadmodel->numtexinfo = count;
@@ -2405,6 +1865,23 @@ static void Mod_LoadTexinfo (lump_t *l)
 			out->vecs[0][j] = LittleFloat (in->vecs[0][j]);
 			out->vecs[1][j] = LittleFloat (in->vecs[1][j]);
 		}
+		len1 = VectorLength (out->vecs[0]);
+		len2 = VectorLength (out->vecs[1]);
+		len1 = (len1 + len2)/2;
+		if (len1 < 0.32)
+			out->mipadjust = 4;
+		else if (len1 < 0.49)
+			out->mipadjust = 3;
+		else if (len1 < 0.99)
+			out->mipadjust = 2;
+		else
+			out->mipadjust = 1;
+#if 0
+		if (len1 + len2 < 0.001)
+			out->mipadjust = 1;		// don't crash
+		else
+			out->mipadjust = 1 / floor((len1+len2)/2 + 0.1);
+#endif
 
 		miptex = LittleLong (in->miptex);
 		out->flags = LittleLong (in->flags);
@@ -2413,15 +1890,15 @@ static void Mod_LoadTexinfo (lump_t *l)
 		if (miptex >= loadmodel->numtextures-1 || !loadmodel->textures[miptex])
 		{
 			if (out->flags & TEX_SPECIAL)
-				out->texnum = loadmodel->numtextures-1;
+				out->texture = loadmodel->textures[loadmodel->numtextures-1];
 			else
-				out->texnum = loadmodel->numtextures-2;
+				out->texture = loadmodel->textures[loadmodel->numtextures-2];
 			out->flags |= TEX_MISSING;
 			missing++;
 		}
 		else
 		{
-			out->texnum = miptex;
+			out->texture = loadmodel->textures[miptex];
 		}
 		//johnfitz
 	}
@@ -2439,7 +1916,7 @@ CalcSurfaceExtents
 Fills in s->texturemins[] and s->extents[]
 ================
 */
-static void CalcSurfaceExtents (msurface_t *s)
+void CalcSurfaceExtents (msurface_t *s)
 {
 	float	mins[2], maxs[2], val;
 	int		i,j, e;
@@ -2513,14 +1990,61 @@ static void CalcSurfaceExtents (msurface_t *s)
 
 	for (i=0 ; i<2 ; i++)
 	{
-		int bmin = 16 * (int) floor (mins[i]/16);
-		int bmax = 16 * (int) ceil (maxs[i]/16);
+		bmins[i] = floor(mins[i]/16);
+		bmaxs[i] = ceil(maxs[i]/16);
 
-		s->texturemins[i] = bmin;
-		s->extents[i] = bmax - bmin;
+		s->texturemins[i] = bmins[i] * 16;
+		s->extents[i] = (bmaxs[i] - bmins[i]) * 16;
 
 		if ( !(tex->flags & TEX_SPECIAL) && s->extents[i] > 2000) //johnfitz -- was 512 in glquake, 256 in winquake
 			Sys_Error ("Bad surface extents");
+	}
+}
+
+/*
+================
+Mod_PolyForUnlitSurface -- johnfitz -- creates polys for unlightmapped surfaces (sky and water)
+
+TODO: merge this into BuildSurfaceDisplayList?
+================
+*/
+void Mod_PolyForUnlitSurface (msurface_t *fa)
+{
+	vec3_t		verts[64];
+	int			numverts, i, lindex;
+	float		*vec;
+	glpoly_t	*poly;
+	float		texscale;
+
+	if (fa->flags & (SURF_DRAWTURB | SURF_DRAWSKY))
+		texscale = (1.0/128.0); //warp animation repeats every 128
+	else
+		texscale = (1.0/32.0); //to match r_notexture_mip
+
+	// convert edges back to a normal polygon
+	numverts = 0;
+	for (i=0 ; i<fa->numedges ; i++)
+	{
+		lindex = loadmodel->surfedges[fa->firstedge + i];
+
+		if (lindex > 0)
+			vec = loadmodel->vertexes[loadmodel->edges[lindex].v[0]].position;
+		else
+			vec = loadmodel->vertexes[loadmodel->edges[-lindex].v[1]].position;
+		VectorCopy (vec, verts[numverts]);
+		numverts++;
+	}
+
+	//create the poly
+	poly = (glpoly_t *) Hunk_Alloc (sizeof(glpoly_t) + (numverts-4) * VERTEXSIZE*sizeof(float));
+	poly->next = NULL;
+	fa->polys = poly;
+	poly->numverts = numverts;
+	for (i=0, vec=(float *)verts; i<numverts; i++, vec+= 3)
+	{
+		VectorCopy (vec, poly->verts[i]);
+		poly->verts[i][3] = DotProduct(vec, fa->texinfo->vecs[0]) * texscale;
+		poly->verts[i][4] = DotProduct(vec, fa->texinfo->vecs[1]) * texscale;
 	}
 }
 
@@ -2560,7 +2084,7 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 Mod_LoadFaces
 =================
 */
-static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
+void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 {
 	dsface_t	*ins;
 	dlface_t	*inl;
@@ -2649,68 +2173,33 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake 
 
-                if (loadmodel->bspx_light_offsets && surfnum < loadmodel->bspx_light_offset_count)
-                        lofs = loadmodel->bspx_light_offsets[surfnum];
-
-                if (lofs == -1)
-                {
-                        out->samples = NULL;
-                        out->deluxsamples = NULL;
-                }
-                else
-                {
-                        size_t sampleofs;
-
-#ifdef BSP29_VALVE
-                        sampleofs = (loadmodel->bspversion == BSPVERSION_VALVE) ? (size_t)lofs : (size_t)lofs * 3;
-#else
-                        sampleofs = (size_t)lofs * 3;
-#endif
-
-                        out->samples = loadmodel->lightdata + sampleofs; //johnfitz -- lit support via lordhavoc (was "+ i")
-                        if (loadmodel->deluxdata)
-                        {
-                                out->deluxsamples = loadmodel->deluxdata + sampleofs;
-                                if (!loadmodel->deluxfile)
-                                        Mod_InitFallbackDeluxemap (out);
-                        }
-                        else
-                        {
-                                out->deluxsamples = NULL;
-                        }
-                }
-
-		texture = loadmodel->textures[out->texinfo->texnum];
-
-		if (texture->type == TEXTYPE_SKY)
+		//johnfitz -- this section rewritten
+		if (!q_strncasecmp(out->texinfo->texture->name,"sky",3)) // sky surface //also note -- was Q_strncmp, changed to match qbsp
 		{
 			out->flags |= (SURF_DRAWSKY | SURF_DRAWTILED);
+			Mod_PolyForUnlitSurface (out); //no more subdivision
 		}
-		else if (TEXTYPE_ISLIQUID (texture->type))
+		else if (out->texinfo->texture->name[0] == '*') // warp surface
 		{
-			out->flags |= SURF_DRAWTURB;
-			if (out->texinfo->flags & TEX_SPECIAL)
-				out->flags |= SURF_DRAWTILED;
-			else if (out->samples && !loadmodel->haslitwater)
-			{
-				Con_DPrintf ("Map has lit water\n");
-				loadmodel->haslitwater = true;
-			}
+			out->flags |= (SURF_DRAWTURB | SURF_DRAWTILED);
 
-			if (texture->type == TEXTYPE_LAVA)
+		// detect special liquid types
+			if (!strncmp (out->texinfo->texture->name, "*lava", 5))
 				out->flags |= SURF_DRAWLAVA;
-			else if (texture->type == TEXTYPE_SLIME)
+			else if (!strncmp (out->texinfo->texture->name, "*slime", 6))
 				out->flags |= SURF_DRAWSLIME;
-			else if (texture->type == TEXTYPE_TELE)
+			else if (!strncmp (out->texinfo->texture->name, "*tele", 5))
 				out->flags |= SURF_DRAWTELE;
-			else
-				out->flags |= SURF_DRAWWATER;
+			else out->flags |= SURF_DRAWWATER;
+
+			Mod_PolyForUnlitSurface (out);
+			GL_SubdivideSurface (out);
 		}
-		else if (texture->type == TEXTYPE_CUTOUT)
+		else if (out->texinfo->texture->name[0] == '{') // ericw -- fence textures
 		{
 			out->flags |= SURF_DRAWFENCE;
 		}
-		else if (out->texinfo->flags & TEX_MISSING)
+		else if (out->texinfo->flags & TEX_MISSING) // texture is missing from bsp
 		{
 			if (out->samples) //lightmapped
 			{
@@ -2719,6 +2208,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			else // not lightmapped
 			{
 				out->flags |= (SURF_NOTEXTURE | SURF_DRAWTILED);
+				Mod_PolyForUnlitSurface (out);
 			}
 		}
 		//johnfitz
@@ -2731,7 +2221,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 Mod_SetParent
 =================
 */
-static void Mod_SetParent (mnode_t *node, mnode_t *parent)
+void Mod_SetParent (mnode_t *node, mnode_t *parent)
 {
 	node->parent = parent;
 	if (node->contents < 0)
@@ -2745,7 +2235,7 @@ static void Mod_SetParent (mnode_t *node, mnode_t *parent)
 Mod_LoadNodes
 =================
 */
-static void Mod_LoadNodes_S (lump_t *l)
+void Mod_LoadNodes_S (lump_t *l)
 {
 	int			i, j, count, p;
 	dsnode_t	*in;
@@ -2801,7 +2291,7 @@ static void Mod_LoadNodes_S (lump_t *l)
 	}
 }
 
-static void Mod_LoadNodes_L1 (lump_t *l)
+void Mod_LoadNodes_L1 (lump_t *l)
 {
 	int			i, j, count, p;
 	dl1node_t	*in;
@@ -2853,7 +2343,7 @@ static void Mod_LoadNodes_L1 (lump_t *l)
 	}
 }
 
-static void Mod_LoadNodes_L2 (lump_t *l)
+void Mod_LoadNodes_L2 (lump_t *l)
 {
 	int			i, j, count, p;
 	dl2node_t	*in;
@@ -2905,7 +2395,7 @@ static void Mod_LoadNodes_L2 (lump_t *l)
 	}
 }
 
-static void Mod_LoadNodes (lump_t *l, int bsp2)
+void Mod_LoadNodes (lump_t *l, int bsp2)
 {
 	if (bsp2 == 2)
 		Mod_LoadNodes_L2(l);
@@ -2917,7 +2407,7 @@ static void Mod_LoadNodes (lump_t *l, int bsp2)
 	Mod_SetParent (loadmodel->nodes, NULL);	// sets nodes and leafs
 }
 
-static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
+void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
 {
 	mleaf_t		*out;
 	int			i, j, count, p;
@@ -2929,7 +2419,7 @@ static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
 
 	//johnfitz
 	if (count > 32767)
-		Host_Error ("Mod_LoadLeafs: %i leafs exceeds limit of 32767.", count);
+		Host_Error ("Mod_LoadLeafs: %i leafs exceeds limit of 32767.\n", count);
 	//johnfitz
 
 	loadmodel->leafs = out;
@@ -2954,6 +2444,7 @@ static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
 			out->compressed_vis = NULL;
 		else
 			out->compressed_vis = loadmodel->visdata + p;
+		out->efrags = NULL;
 
 		for (j=0 ; j<4 ; j++)
 			out->ambient_sound_level[j] = in->ambient_level[j];
@@ -2962,7 +2453,7 @@ static void Mod_ProcessLeafs_S (dsleaf_t *in, int filelen)
 	}
 }
 
-static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
+void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
 {
 	mleaf_t		*out;
 	int			i, j, count, p;
@@ -2973,6 +2464,10 @@ static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
 	count = filelen / sizeof(*in);
 
 	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), loadname);
+
+
+	if (count > MAX_MAP_LEAFS)
+		Host_Error ("Mod_LoadLeafs: %i leafs exceeds limit of %i.\n", count, MAX_MAP_LEAFS);
 
 	loadmodel->leafs = out;
 	loadmodel->numleafs = count;
@@ -2996,6 +2491,7 @@ static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
 			out->compressed_vis = NULL;
 		else
 			out->compressed_vis = loadmodel->visdata + p;
+		out->efrags = NULL;
 
 		for (j=0 ; j<4 ; j++)
 			out->ambient_sound_level[j] = in->ambient_level[j];
@@ -3004,7 +2500,7 @@ static void Mod_ProcessLeafs_L1 (dl1leaf_t *in, int filelen)
 	}
 }
 
-static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
+void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
 {
 	mleaf_t		*out;
 	int			i, j, count, p;
@@ -3015,6 +2511,10 @@ static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
 	count = filelen / sizeof(*in);
 
 	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), loadname);
+
+
+	if (count > MAX_MAP_LEAFS)
+		Host_Error ("Mod_LoadLeafs: %i leafs exceeds limit of %i.\n", count, MAX_MAP_LEAFS);
 
 	loadmodel->leafs = out;
 	loadmodel->numleafs = count;
@@ -3038,6 +2538,7 @@ static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
 			out->compressed_vis = NULL;
 		else
 			out->compressed_vis = loadmodel->visdata + p;
+		out->efrags = NULL;
 
 		for (j=0 ; j<4 ; j++)
 			out->ambient_sound_level[j] = in->ambient_level[j];
@@ -3051,7 +2552,7 @@ static void Mod_ProcessLeafs_L2 (dl2leaf_t *in, int filelen)
 Mod_LoadLeafs
 =================
 */
-static void Mod_LoadLeafs (lump_t *l, int bsp2)
+void Mod_LoadLeafs (lump_t *l, int bsp2)
 {
 	void *in = (void *)(mod_base + l->fileofs);
 
@@ -3227,7 +2728,7 @@ static void Mod_FindUsedTextures (qmodel_t *mod)
 Mod_LoadClipnodes
 =================
 */
-static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
+void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 {
 	dsclipnode_t *ins;
 	dlclipnode_t *inl;
@@ -3254,7 +2755,10 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 
 		count = l->filelen / sizeof(*ins);
 	}
-	out = (mclipnode_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	if (count)
+		out = (mclipnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+	else
+		out = NULL;	//will use rnodes.
 
 	//johnfitz -- warn about exceeding old limits
 	if (count > 32767 && !bsp2)
@@ -3310,10 +2814,10 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 		{
 			out->planenum = LittleLong(ins->planenum);
 
-			//johnfitz -- bounds check
-			if (out->planenum < 0 || out->planenum >= loadmodel->numplanes)
-				Host_Error ("Mod_LoadClipnodes: planenum out of bounds");
-			//johnfitz
+		//johnfitz -- bounds check
+		if (out->planenum < 0 || out->planenum >= loadmodel->numplanes)
+			Host_Error ("Mod_LoadClipnodes: planenum out of bounds");
+		//johnfitz
 
 			//johnfitz -- support clipnodes > 32k
 			out->children[0] = (unsigned short)LittleShort(ins->children[0]);
@@ -3335,7 +2839,7 @@ Mod_MakeHull0
 Duplicate the drawing hull structure as a clipping hull
 =================
 */
-static void Mod_MakeHull0 (void)
+void Mod_MakeHull0 (void)
 {
 	mnode_t		*in, *child;
 	mclipnode_t *out; //johnfitz -- was dclipnode_t
@@ -3346,7 +2850,7 @@ static void Mod_MakeHull0 (void)
 
 	in = loadmodel->nodes;
 	count = loadmodel->numnodes;
-	out = (mclipnode_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (mclipnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	hull->clipnodes = out;
 	hull->firstclipnode = 0;
@@ -3365,6 +2869,26 @@ static void Mod_MakeHull0 (void)
 				out->children[j] = child - loadmodel->nodes;
 		}
 	}
+
+	//if qbsp was run with -noclip, make sure the extra hulls use the rnodes instead of the missing clipnodes
+	//this won't 'fix' it, but it will stop it from crashing if it was just quickly built for debugging or whatever.
+	if (!loadmodel->hulls[1].clipnodes)
+	{	//hulls will be point-sized.
+		//bias that point so that its mid,mid,bottom instead of at the absmin or origin. this will retain view offsets.
+		loadmodel->hulls[1].clip_maxs[2] -= loadmodel->hulls[1].clip_mins[2];
+		loadmodel->hulls[1].clip_mins[2] = 0;
+		loadmodel->hulls[1].clipnodes = hull->clipnodes;
+		loadmodel->hulls[1].firstclipnode = hull->firstclipnode;
+		loadmodel->hulls[1].lastclipnode = hull->lastclipnode;
+	}
+	if (!loadmodel->hulls[2].clipnodes)
+	{
+		loadmodel->hulls[2].clip_maxs[2] -= loadmodel->hulls[2].clip_mins[2];
+		loadmodel->hulls[2].clip_mins[2] = 0;
+		loadmodel->hulls[2].clipnodes = loadmodel->hulls[1].clipnodes;
+		loadmodel->hulls[2].firstclipnode = loadmodel->hulls[1].firstclipnode;
+		loadmodel->hulls[2].lastclipnode = loadmodel->hulls[1].lastclipnode;
+	}
 }
 
 /*
@@ -3372,10 +2896,10 @@ static void Mod_MakeHull0 (void)
 Mod_LoadMarksurfaces
 =================
 */
-static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
+void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 {
 	int		i, j, count;
-	int		*out;
+	msurface_t **out;
 	if (bsp2)
 	{
 		unsigned int *in = (unsigned int *)(mod_base + l->fileofs);
@@ -3384,7 +2908,7 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 			Host_Error ("Mod_LoadMarksurfaces: funny lump size in %s",loadmodel->name);
 
 		count = l->filelen / sizeof(*in);
-		out = (int*)Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+		out = (msurface_t **)Hunk_AllocName ( count*sizeof(*out), loadname);
 
 		loadmodel->marksurfaces = out;
 		loadmodel->nummarksurfaces = count;
@@ -3394,7 +2918,7 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 			j = LittleLong(in[i]);
 			if (j >= loadmodel->numsurfaces)
 				Host_Error ("Mod_LoadMarksurfaces: bad surface number");
-			out[i] = j;
+			out[i] = loadmodel->surfaces + j;
 		}
 	}
 	else
@@ -3405,7 +2929,7 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 			Host_Error ("Mod_LoadMarksurfaces: funny lump size in %s",loadmodel->name);
 
 		count = l->filelen / sizeof(*in);
-		out = (int*)Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+		out = (msurface_t **)Hunk_AllocName ( count*sizeof(*out), loadname);
 
 		loadmodel->marksurfaces = out;
 		loadmodel->nummarksurfaces = count;
@@ -3420,7 +2944,7 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 			j = (unsigned short)LittleShort(in[i]); //johnfitz -- explicit cast as unsigned short
 			if (j >= loadmodel->numsurfaces)
 				Sys_Error ("Mod_LoadMarksurfaces: bad surface number");
-			out[i] = j;
+			out[i] = loadmodel->surfaces + j;
 		}
 	}
 }
@@ -3430,7 +2954,7 @@ static void Mod_LoadMarksurfaces (lump_t *l, int bsp2)
 Mod_LoadSurfedges
 =================
 */
-static void Mod_LoadSurfedges (lump_t *l)
+void Mod_LoadSurfedges (lump_t *l)
 {
 	int		i, count;
 	int		*in, *out;
@@ -3439,7 +2963,7 @@ static void Mod_LoadSurfedges (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (int *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (int *) Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	loadmodel->surfedges = out;
 	loadmodel->numsurfedges = count;
@@ -3454,7 +2978,7 @@ static void Mod_LoadSurfedges (lump_t *l)
 Mod_LoadPlanes
 =================
 */
-static void Mod_LoadPlanes (lump_t *l)
+void Mod_LoadPlanes (lump_t *l)
 {
 	int			i, j;
 	mplane_t	*out;
@@ -3466,7 +2990,7 @@ static void Mod_LoadPlanes (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (mplane_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (mplane_t *) Hunk_AllocName ( count*2*sizeof(*out), loadname);
 
 	loadmodel->planes = out;
 	loadmodel->numplanes = count;
@@ -3493,7 +3017,7 @@ static void Mod_LoadPlanes (lump_t *l)
 RadiusFromBounds
 =================
 */
-static float RadiusFromBounds (vec3_t mins, vec3_t maxs)
+float RadiusFromBounds (vec3_t mins, vec3_t maxs)
 {
 	int		i;
 	vec3_t	corner;
@@ -3511,7 +3035,7 @@ static float RadiusFromBounds (vec3_t mins, vec3_t maxs)
 Mod_LoadSubmodels
 =================
 */
-static void Mod_LoadSubmodels (lump_t *l)
+void Mod_LoadSubmodels (lump_t *l)
 {
 	dmodel_t	*in;
 	dmodel_t	*out;
@@ -3521,7 +3045,7 @@ static void Mod_LoadSubmodels (lump_t *l)
 	if (l->filelen % sizeof(*in))
 		Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 	count = l->filelen / sizeof(*in);
-	out = (dmodel_t *) Hunk_AllocNameNoFill ( count*sizeof(*out), loadname);
+	out = (dmodel_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	loadmodel->submodels = out;
 	loadmodel->numsubmodels = count;
@@ -3544,6 +3068,9 @@ static void Mod_LoadSubmodels (lump_t *l)
 	// johnfitz -- check world visleafs -- adapted from bjp
 	out = loadmodel->submodels;
 
+	if (out->visleafs > MAX_MAP_LEAFS)
+		Sys_Error ("Mod_LoadSubmodels: too many visleafs (%d, max = %d) in %s", out->visleafs, MAX_MAP_LEAFS, loadmodel->name);
+
 	if (out->visleafs > 8192)
 		Con_DWarning ("%i visleafs exceeds standard limit of 8192.\n", out->visleafs);
 	//johnfitz
@@ -3561,8 +3088,7 @@ Therefore, the bounding box of the hull can be constructed entirely
 from axial planes found in the clipnodes for that hull.
 =================
 */
-#if 0 /* disabled for now -- see in Mod_SetupSubmodels()  */
-static void Mod_BoundsFromClipNode (qmodel_t *mod, int hull, int nodenum)
+void Mod_BoundsFromClipNode (qmodel_t *mod, int hull, int nodenum)
 {
 	mplane_t	*plane;
 	mclipnode_t	*node;
@@ -3601,215 +3127,72 @@ static void Mod_BoundsFromClipNode (qmodel_t *mod, int hull, int nodenum)
 	Mod_BoundsFromClipNode (mod, hull, node->children[0]);
 	Mod_BoundsFromClipNode (mod, hull, node->children[1]);
 }
-#endif /* #if 0 */
-
-/* EXTERNAL VIS FILE SUPPORT:
- */
-typedef struct vispatch_s
-{
-	char	mapname[32];
-	int	filelen;	// length of data after header (VIS+Leafs)
-} vispatch_t;
-#define VISPATCH_HEADER_LEN 36
-
-static FILE *Mod_FindVisibilityExternal(void)
-{
-	vispatch_t header;
-	char visfilename[MAX_QPATH];
-	const char* shortname;
-	unsigned int path_id;
-	FILE *f;
-	long pos;
-	size_t r;
-
-	q_snprintf(visfilename, sizeof(visfilename), "maps/%s.vis", loadname);
-	if (COM_FOpenFile(visfilename, &f, &path_id) < 0)
-	{
-		Con_DPrintf("%s not found, trying ", visfilename);
-		q_snprintf(visfilename, sizeof(visfilename), "%s.vis", COM_SkipPath(com_gamedir));
-		Con_DPrintf("%s\n", visfilename);
-		if (COM_FOpenFile(visfilename, &f, &path_id) < 0)
-		{
-			Con_DPrintf("external vis not found\n");
-			return NULL;
-		}
-	}
-	if (path_id < loadmodel->path_id)
-	{
-		fclose(f);
-		Con_DPrintf("ignored %s from a gamedir with lower priority\n", visfilename);
-		return NULL;
-	}
-
-	Con_DPrintf("Found external VIS %s\n", visfilename);
-
-	shortname = COM_SkipPath(loadmodel->name);
-	pos = 0;
-	while ((r = fread(&header, 1, VISPATCH_HEADER_LEN, f)) == VISPATCH_HEADER_LEN)
-	{
-		header.filelen = LittleLong(header.filelen);
-		if (header.filelen <= 0) {	/* bad entry -- don't trust the rest. */
-			fclose(f);
-			return NULL;
-		}
-		if (!q_strcasecmp(header.mapname, shortname))
-			break;
-		pos += header.filelen + VISPATCH_HEADER_LEN;
-		fseek(f, pos, SEEK_SET);
-	}
-	if (r != VISPATCH_HEADER_LEN) {
-		fclose(f);
-		Con_DPrintf("%s not found in %s\n", shortname, visfilename);
-		return NULL;
-	}
-
-	return f;
-}
-
-static byte *Mod_LoadVisibilityExternal(FILE* f)
-{
-	int		mark, filelen;
-	byte*	visdata;
-
-	filelen = 0;
-	if (fread(&filelen, 4, 1, f) != 1)
-		return NULL;
-	filelen = LittleLong(filelen);
-	if (filelen <= 0) return NULL;
-	Con_DPrintf("...%d bytes visibility data\n", filelen);
-	mark = Hunk_LowMark ();
-	visdata = (byte *) Hunk_AllocNameNoFill (filelen, "EXT_VIS");
-	if (!fread(visdata, filelen, 1, f))
-	{
-		Hunk_FreeToLowMark (mark);
-		return NULL;
-	}
-	return visdata;
-}
-
-static void Mod_LoadLeafsExternal(FILE* f)
-{
-	int		mark, filelen;
-	void*	in;
-
-	filelen = 0;
-	if (fread(&filelen, 4, 1, f) != 1)
-	{
-		Con_Warning ("Couldn't read external leaf data length\n");
-		return;
-	}
-	filelen = LittleLong(filelen);
-	if (filelen <= 0) return;
-	Con_DPrintf("...%d bytes leaf data\n", filelen);
-	mark = Hunk_LowMark ();
-	in = Hunk_AllocNameNoFill (filelen, "EXT_LEAF");
-	if (!fread(in, filelen, 1, f))
-	{
-		Hunk_FreeToLowMark (mark);
-		return;
-	}
-	Mod_ProcessLeafs_S((dsleaf_t *)in, filelen);
-}
 
 /*
 =================
 Mod_LoadBrushModel
 =================
 */
-static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
+void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 {
 	int			i, j;
 	int			bsp2;
-	dheader_t	 header;
+	dheader_t	*header;
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 
 	loadmodel->type = mod_brush;
-	loadmodel->numdeluxsamples = 0;
-	loadmodel->bspx_light_offset_count = 0;
-	loadmodel->bspx_light_offsets = NULL;
-	loadmodel->bspx_num_static_lights = 0;
-	loadmodel->bspx_static_lights = NULL;
-        loadmodel->bspx_num_static_shadow_lights = 0;
-        loadmodel->bspx_static_shadow_lights = NULL;
-        loadmodel->bspx_num_static_shadow_indices = 0;
-        loadmodel->bspx_static_shadow_indices = NULL;
-        loadmodel->bspx_num_entries = 0;
-        loadmodel->bspx_entries = NULL;
-        loadmodel->bspx_lightgrid_octree = NULL;
-        loadmodel->bspx_lightgrid_octree_length = 0;
-        loadmodel->bspx_lightgrids = NULL;
-        loadmodel->bspx_lightgrids_length = 0;
-        mod_bspx_filesize = (com_filesize > 0) ? (size_t)com_filesize : 0;
 
-	if (!mod_bspx_filesize)
-		Sys_Error ("Mod_LoadBrushModel: %s has unknown file size", mod->name);
+	header = (dheader_t *)buffer;
 
-	bsp2 = Mod_ParseBspHeader ((const byte *)buffer, mod_bspx_filesize, &header);
-	mod->bspversion = header.version;
+	mod->bspversion = LittleLong (header->version);
+
+	switch(mod->bspversion)
+	{
+	case BSPVERSION:
+		bsp2 = false;
+		break;
+	case BSP2VERSION_2PSB:
+		bsp2 = 1;	//first iteration
+		break;
+	case BSP2VERSION_BSP2:
+		bsp2 = 2;	//sanitised revision
+		break;
+	default:
+		loadmodel->type = mod_ext_invalid;
+		Con_Warning ("Mod_LoadBrushModel: %s has wrong version number (%i should be %i)\n", mod->name, mod->bspversion, BSPVERSION);
+		return;
+	}
 
 // swap all the lumps
-	mod_base = (byte *)buffer;
+	mod_base = (byte *)header;
 
-	if (debug_bspx.value > 0.0f)
-	{
-		Mod_BspxDebugf ("BSPX: loading %s (version %d, %zu bytes)\n",
-			loadmodel->name, mod->bspversion, mod_bspx_filesize);
-		Mod_BspxDebugf ("BSPX:   lighting lump ofs %d len %d\n",
-			header.lumps[LUMP_LIGHTING].fileofs, header.lumps[LUMP_LIGHTING].filelen);
-	}
+	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
+		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
+
+	Q1BSPX_Setup(mod, buffer, com_filesize, header->lumps, HEADER_LUMPS);
 
 // load into heap
 
-        Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
-        Mod_LoadEdges (&header.lumps[LUMP_EDGES], bsp2);
-        Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
-        Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
-        Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
-        Mod_LoadBspx ((const byte *)buffer);
-        Mod_LoadExternalBspx ();
-        Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
-        Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
-        Mod_LoadFaces (&header.lumps[LUMP_FACES], bsp2);
-        Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
-
-
-	if (mod->bspversion == BSPVERSION && external_vis.value && sv.modelname[0] && !q_strcasecmp(loadname, sv.name))
-	{
-		FILE* fvis;
-		Con_DPrintf("trying to open external vis file\n");
-		fvis = Mod_FindVisibilityExternal();
-		if (fvis) {
-			int mark = Hunk_LowMark();
-			loadmodel->leafs = NULL;
-			loadmodel->numleafs = 0;
-			Con_DPrintf("found valid external .vis file for map\n");
-			loadmodel->visdata = Mod_LoadVisibilityExternal(fvis);
-			if (loadmodel->visdata) {
-				Mod_LoadLeafsExternal(fvis);
-			}
-			fclose(fvis);
-			if (loadmodel->visdata && loadmodel->leafs && loadmodel->numleafs) {
-				goto visdone;
-			}
-			Hunk_FreeToLowMark(mark);
-			Con_DPrintf("External VIS data failed, using standard vis.\n");
-		}
-	}
-
-	Mod_LoadVisibility (&header.lumps[LUMP_VISIBILITY]);
-	Mod_LoadLeafs (&header.lumps[LUMP_LEAFS], bsp2);
-visdone:
-	Mod_LoadNodes (&header.lumps[LUMP_NODES], bsp2);
-	Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
-	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);
-	Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
+	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
+	Mod_LoadEdges (&header->lumps[LUMP_EDGES], bsp2);
+	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
+	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
+	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
+	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
+	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
+	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
+	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
+	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
+	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
+	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
+	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
+	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
 
 	Mod_MakeHull0 ();
 
 	mod->numframes = 2;		// regular and alternate animation
-
-	Mod_CheckWaterVis ();
 
 //
 // set up the submodels (FIXME: this is confusing)
@@ -3833,7 +3216,10 @@ visdone:
 		for (j=1 ; j<MAX_MAP_HULLS ; j++)
 		{
 			mod->hulls[j].firstclipnode = bm->headnode[j];
-			mod->hulls[j].lastclipnode = mod->numclipnodes-1;
+			if (mod->hulls[j].clipnodes == mod->hulls[0].clipnodes)
+				mod->hulls[j].lastclipnode = mod->hulls[0].lastclipnode;
+			else
+				mod->hulls[j].lastclipnode = mod->numclipnodes-1;
 		}
 
 		mod->firstmodelsurface = bm->firstface;
@@ -3869,7 +3255,7 @@ visdone:
 
 		if (i < mod->numsubmodels-1)
 		{	// duplicate the basic information
-			char	name[12];
+			char	name[10];
 
 			sprintf (name, "*%i", i+1);
 			loadmodel = Mod_FindName (name);
