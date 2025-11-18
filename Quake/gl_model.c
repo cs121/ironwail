@@ -55,6 +55,39 @@ static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
 
+static size_t Mod_BspLumpElementSize (int lump, int bsp2)
+{
+	(void) bsp2;
+
+	switch (lump)
+	{
+	case LUMP_PLANES:
+		return sizeof(dplane_t);
+	case LUMP_VERTEXES:
+		return sizeof(dvertex_t);
+	case LUMP_NODES:
+		return sizeof(dnode_t);
+	case LUMP_TEXINFO:
+		return sizeof(texinfo_t);
+	case LUMP_FACES:
+		return sizeof(dface_t);
+	case LUMP_CLIPNODES:
+		return sizeof(dclipnode_t);
+	case LUMP_LEAFS:
+		return sizeof(dleaf_t);
+	case LUMP_MARKSURFACES:
+		return sizeof(unsigned short);
+	case LUMP_EDGES:
+		return sizeof(dedge_t);
+	case LUMP_SURFEDGES:
+		return sizeof(int);
+	case LUMP_MODELS:
+		return sizeof(dmodel_t);
+	default:
+		return 0;
+	}
+}
+
 static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *out_header)
 {
 	int bsp2;
@@ -1125,100 +1158,46 @@ static void Mod_LoadTextures (lump_t *l)
 	}
 }
 
-/*
-=================
-Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
-=================
-*/
-void Mod_LoadLighting (lump_t *l)
+static qboolean Mod_BspxImportLmOffsets (const char *lumpname, const byte *data, size_t length)
 {
-	int i, mark;
-	byte *in, *out, *data;
-	byte d;
-	char litfilename[MAX_OSPATH];
-	unsigned int path_id;
-	int	bspxsize;
+        int count;
+        int *offsets;
 
-	loadmodel->lightdata = NULL;
-	// LordHavoc: check for a .lit file
-	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
-	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
-	q_strlcat(litfilename, ".lit", sizeof(litfilename));
-	mark = Hunk_LowMark();
-	data = (byte*) COM_LoadHunkFile (litfilename, &path_id);
-	if (data)
-	{
-		// use lit file only from the same gamedir as the map
-		// itself or from a searchpath with higher priority.
-		if (path_id < loadmodel->path_id)
-		{
-			Hunk_FreeToLowMark(mark);
-			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
-		}
-		else
-		if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
-		{
-			i = LittleLong(((int *)data)[1]);
-			if (i == 1)
-			{
-				Con_DPrintf("%s loaded\n", litfilename);
-				loadmodel->lightdata = data + 8;
-				return;
-			}
-			else
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Unknown .lit file version (%d)\n", i);
-			}
-		}
-		else
-		{
-			Hunk_FreeToLowMark(mark);
-			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
-		}
-	}
-	// LordHavoc: no .lit found, expand the white lighting data to color
-	if (!l->filelen)
-		return;
-	loadmodel->lightdata = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
-	if (loadmodel->lightdata && bspxsize == l->filelen*3)
-		Con_DPrintf("bspx lighting loaded\n");
-	else
-	{
-		loadmodel->lightdata = (byte *) Hunk_AllocName ( l->filelen*3, litfilename);
-		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
-		out = loadmodel->lightdata;
-		memcpy (in, mod_base + l->fileofs, l->filelen);
-		for (i = 0;i < l->filelen;i++)
-		{
-			d = *in++;
-			*out++ = d;
-			*out++ = d;
-			*out++ = d;
-		}
-	}
+        if (!data || length == 0)
+        {
+                Mod_BspxDebugf ("BSPX:     %s contains no light offsets\n", lumpname);
+                return true;
+        }
 
-	count = (int)(length / sizeof(int));
-	if (count <= 0)
-	{
-		Mod_BspxDebugf ("BSPX:     %s contains zero light offsets\n", lumpname);
-		return true;
-	}
+        if (length % sizeof(int))
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiple of %zu)\n",
+                        lumpname, length, sizeof(int));
+                Mod_BspxDebugf ("BSPX:     %s rejected size %zu for light offsets\n", lumpname, length);
+                return false;
+        }
 
-	offsets = (int *) Hunk_AllocName (count * sizeof(*offsets), lumpname);
-	if (!offsets)
-	{
-		Mod_BspxDebugf ("BSPX:     %s failed to allocate %d light offsets\n", lumpname, count);
-		return false;
-	}
+        count = (int)(length / sizeof(int));
+        if (count <= 0)
+        {
+                Mod_BspxDebugf ("BSPX:     %s contains zero light offsets\n", lumpname);
+                return true;
+        }
 
-	for (int i = 0; i < count; ++i)
-		offsets[i] = LittleLong (((const int *)data)[i]);
+        offsets = (int *) Hunk_AllocName (count * sizeof(*offsets), lumpname);
+        if (!offsets)
+        {
+                Mod_BspxDebugf ("BSPX:     %s failed to allocate %d light offsets\n", lumpname, count);
+                return false;
+        }
 
-	loadmodel->bspx_light_offsets = offsets;
-	loadmodel->bspx_light_offset_count = count;
-	Mod_BspxDebugf ("BSPX:     %s imported %d light offsets\n", lumpname, count);
-	return true;
+        for (int i = 0; i < count; ++i)
+                offsets[i] = LittleLong (((const int *)data)[i]);
+
+        loadmodel->bspx_light_offsets = offsets;
+        loadmodel->bspx_light_offset_count = count;
+        Mod_BspxDebugf ("BSPX:     %s imported %d light offsets\n", lumpname, count);
+        return true;
 }
 
 static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const byte *data, size_t length,
@@ -1847,6 +1826,7 @@ void Mod_LoadTexinfo (lump_t *l)
 	texinfo_t *in;
 	mtexinfo_t *out;
 	int	i, j, count, miptex;
+	float	len1, len2;
 	int missing = 0; //johnfitz
 
 	in = (texinfo_t *)(mod_base + l->fileofs);
