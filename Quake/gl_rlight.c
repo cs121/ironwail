@@ -393,6 +393,8 @@ static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 	color[0] = ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)) * (1.f/256.f);
 	color[1] = ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)) * (1.f/256.f);
 	color[2] = ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)) * (1.f/256.f);
+
+	VectorScale (color, r_framedata.map_overbright, color);
 }
 
 /*

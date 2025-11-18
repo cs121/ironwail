@@ -86,22 +86,6 @@ static float GL_ConsoleVisibility (void)
 	return CLAMP (0.f, scr_con_current / height, 1.f);
 }
 
-static float GL_TemperedOverbright (float overbright)
-{
-	if (overbright <= 1.f)
-		return 1.f;
-
-	/*
-	* Compress the raw 2^n scaling so the boost favours highlights over the
-	* rest of the scene.  A sub-linear exponent keeps very bright areas hot
-	* while easing off on mid and dark tones to avoid washing out the image.
-	*/
-	const float exponent = 0.75f;
-	float tempered = powf (overbright, exponent);
-
-	return q_max (tempered, 1.f);
-}
-
 static qboolean MatrixInverse4x4(const float m[16], float out[16])
 {
     float inv[16];
@@ -245,6 +229,7 @@ cvar_t	r_filmgrain = { "r_filmgrain", "0.05", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "2", CVAR_ARCHIVE };
 cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
@@ -1689,36 +1674,27 @@ void R_SetupView (void)
 	R_AnimateLight ();
 
 	{
-                int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-                float overbright = (float)(1 << overbright_bits);
+		int map_overbright_bits = CLAMP (0, (int)Q_rint (r_mapoverbrightbits.value), 2);
+		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 2);
+		float map_overbright = (float)(1 << map_overbright_bits);
+		float overbright = (float)(1 << overbright_bits);
 
-                if (overbright > 1.f)
-                {
-			overbright = GL_TemperedOverbright (overbright);
+		r_framedata.map_overbright = map_overbright;
+		r_framedata.identity_light = 1.f / map_overbright;
+		r_framedata.overbright = overbright;
+		float dynamic_light_clamp = r_dynamic_light_clamp.value;
+		if (dynamic_light_clamp <= 0.f)
+		dynamic_light_clamp = q_max (map_overbright, 1.f);
+		else
+		dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
 
-			float console_vis = GL_ConsoleVisibility ();
-			if (console_vis > 0.f)
-			{
-				float compensated = 1.f + (overbright - 1.f) * (1.f - console_vis);
-				overbright = compensated;
-                        }
-                }
-
-
-                r_framedata.overbright = overbright;
-                float dynamic_light_clamp = r_dynamic_light_clamp.value;
-                if (dynamic_light_clamp <= 0.f)
-                        dynamic_light_clamp = q_max (overbright, 1.f);
-                else
-                        dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
-
-                r_framedata.dynamic_light_clamp = dynamic_light_clamp;
-                r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
-                r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
-                r_framedata.rim_world = q_max(0.f, r_rim_world.value);
-                r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
-                r_framedata.rim_pad0 = 0.f;
-        }
+		r_framedata.dynamic_light_clamp = dynamic_light_clamp;
+		r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
+		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
+		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
+		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
+		r_framedata.rim_pad0 = 0.f;
+		}
 
         {
                 qboolean enable_delux =
