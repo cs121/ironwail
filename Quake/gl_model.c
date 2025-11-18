@@ -1755,11 +1755,11 @@ static void Mod_LoadBspx (const byte *buffer)
         const size_t entry_size = sizeof(bspx_lump_t);
         const size_t filesize = mod_bspx_filesize;
         const byte *header_ptr = NULL;
-        const bspx_header_t *raw_header;
-        const bspx_lump_t *directory;
-        size_t header_offset;
+        const bspx_header_t *raw_header = NULL;
+        const bspx_lump_t *directory = NULL;
+        size_t header_offset = 0;
         size_t scan_window;
-        int numlumps;
+        int numlumps = 0;
         int stored = 0;
 
         loadmodel->bspx_num_entries = 0;
@@ -1779,34 +1779,29 @@ static void Mod_LoadBspx (const byte *buffer)
         for (size_t offset = 0; offset + header_size <= scan_window; ++offset)
         {
                 const byte *candidate = buffer + filesize - header_size - offset;
+
                 if (candidate < buffer)
                         break;
-                if (memcmp (candidate, "BSPX", 4) == 0)
-                {
-                        header_ptr = candidate;
-                        break;
-                }
+                if (memcmp (candidate, "BSPX", 4))
+                        continue;
+
+                raw_header = (const bspx_header_t *)candidate;
+                numlumps = LittleLong (raw_header->numlumps);
+
+                if (numlumps <= 0)
+                        continue;
+
+                header_offset = (size_t)(candidate - buffer);
+                if (header_offset < entry_size * (size_t)numlumps)
+                        continue;
+
+                directory = (const bspx_lump_t *)(candidate - entry_size * (size_t)numlumps);
+                header_ptr = candidate;
+                break;
         }
 
         if (!header_ptr)
                 return;
-
-        raw_header = (const bspx_header_t *)header_ptr;
-        numlumps = LittleLong (raw_header->numlumps);
-        if (numlumps <= 0)
-        {
-                Con_DPrintf2 ("Invalid BSPX directory entry count %d\n", numlumps);
-                return;
-        }
-
-        if ((size_t)(header_ptr - buffer) < entry_size * (size_t)numlumps)
-        {
-                Con_DPrintf2 ("BSPX directory points outside file\n");
-                return;
-        }
-
-        directory = (const bspx_lump_t *)(header_ptr - entry_size * (size_t)numlumps);
-        header_offset = (size_t)(header_ptr - buffer);
 
         Mod_BspxDebugf ("BSPX: directory has %d lumps (%zu bytes)\n", numlumps, (size_t)numlumps * entry_size);
 
