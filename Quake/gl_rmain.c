@@ -185,7 +185,6 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_strength = { "r_lightmap_strength", "0.75", CVAR_ARCHIVE };
 cvar_t	r_dof = { "r_dof", "1", CVAR_ARCHIVE };
 cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
 cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
@@ -1682,14 +1681,13 @@ void R_SetupView (void)
 		r_framedata.map_overbright = map_overbright;
 		r_framedata.identity_light = 1.f / map_overbright;
 		r_framedata.overbright = overbright;
-		float dynamic_light_clamp = r_dynamic_light_clamp.value;
-		if (dynamic_light_clamp <= 0.f)
-		dynamic_light_clamp = q_max (map_overbright, 1.f);
-		else
-		dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
+                float dynamic_light_clamp = r_dynamic_light_clamp.value;
+                if (dynamic_light_clamp <= 0.f)
+                        dynamic_light_clamp = q_max (map_overbright, 1.f);
+                else
+                        dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
 
-		r_framedata.dynamic_light_clamp = dynamic_light_clamp;
-		r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
+                r_framedata.dynamic_light_clamp = dynamic_light_clamp;
 		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);

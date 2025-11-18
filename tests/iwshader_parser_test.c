@@ -1,4 +1,4 @@
-#include "Quake/renderer/r_iwshader.h"
+#include "Quake/r_iwshader.h"
 
 #include <assert.h>
 #include <math.h>

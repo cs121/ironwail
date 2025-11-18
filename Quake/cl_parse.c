@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 #include "render.h"
-#include "renderer/r_iwshader.h"
+#include "r_iwshader.h"
 
 const char *svc_strings[] =
 {
