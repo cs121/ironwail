@@ -455,6 +455,7 @@ typedef struct gpuframedata_s {
 	float	map_overbright;
 	float	identity_light;
 	float	dynamic_light_clamp;
+	float	lightmap_strength;
 	float	rim_alias;
 	float	rim_world;
 	float	rim_exponent;

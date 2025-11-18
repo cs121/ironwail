@@ -1688,6 +1688,7 @@ void R_SetupView (void)
                         dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
 
                 r_framedata.dynamic_light_clamp = dynamic_light_clamp;
+		r_framedata.lightmap_strength = 1.f;
 		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
 		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
 		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
