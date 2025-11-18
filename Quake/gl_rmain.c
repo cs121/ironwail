@@ -193,6 +193,7 @@ cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_deluxemaps = { "r_deluxemaps", "1", CVAR_ARCHIVE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
+cvar_t	r_dynamic_light_clamp = { "r_dynamic_light_clamp", "0", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -1688,11 +1689,11 @@ void R_SetupView (void)
 	R_AnimateLight ();
 
 	{
-		int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
-		float overbright = (float)(1 << overbright_bits);
+                int overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
+                float overbright = (float)(1 << overbright_bits);
 
-		if (overbright > 1.f)
-		{
+                if (overbright > 1.f)
+                {
 			overbright = GL_TemperedOverbright (overbright);
 
 			float console_vis = GL_ConsoleVisibility ();
@@ -1700,15 +1701,22 @@ void R_SetupView (void)
 			{
 				float compensated = 1.f + (overbright - 1.f) * (1.f - console_vis);
 				overbright = compensated;
-			}
-		}
+                        }
+                }
 
 
-		r_framedata.overbright = overbright;
-		r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
-		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
-		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
-		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
+                r_framedata.overbright = overbright;
+                float dynamic_light_clamp = r_dynamic_light_clamp.value;
+                if (dynamic_light_clamp <= 0.f)
+                        dynamic_light_clamp = q_max (overbright, 1.f);
+                else
+                        dynamic_light_clamp = q_max (dynamic_light_clamp, 0.f);
+
+                r_framedata.dynamic_light_clamp = dynamic_light_clamp;
+                r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
+                r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
+                r_framedata.rim_world = q_max(0.f, r_rim_world.value);
+                r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
                 r_framedata.rim_pad0 = 0.f;
         }
 

@@ -33,6 +33,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   _FrameScreenDither;
         float   _FrameTextureDither;
         float   _FrameOverbright;
+        float   _FrameDynamicLightClamp;
         float   _FrameLightmapStrength;
         float   _FrameRimAlias;
         float   _FrameRimWorld;
