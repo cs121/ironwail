@@ -100,6 +100,17 @@ typedef struct texture_s
 	struct texture_s	*alternate_anims;	// bmodels in frmae 1 use these
 } texture_t;
 
+#define VERTEXSIZE      7
+
+typedef struct glpoly_s
+{
+        struct  glpoly_s        *next;
+        int                                     numverts;
+        float                           verts[4][VERTEXSIZE];      // variable sized
+} glpoly_t;
+
+typedef struct efrag_s efrag_t;
+
 
 #define	SURF_PLANEBACK		2
 #define	SURF_DRAWSKY		4
@@ -126,6 +137,8 @@ typedef struct
 	float		vecs[2][4];
 	int			texnum;
 	int			flags;
+	int			mipadjust;
+	texture_t	*texture;
 } mtexinfo_t;
 
 typedef struct glvert_s {
@@ -141,6 +154,8 @@ typedef struct msurface_s
 	float		mins[3];		// johnfitz -- for frustum culling
 	float		maxs[3];		// johnfitz -- for frustum culling
 	int			flags;
+
+	glpoly_t		*polys;
 
 	int			vbo_firstvert;		// index of this surface's first vert in the VBO
 	int			firstedge;			// look up in model->surfedges[], negative numbers
@@ -191,7 +206,9 @@ typedef struct mleaf_s
 // leaf specific
 	byte		*compressed_vis;
 
-	int			*firstmarksurface;
+	efrag_t		*efrags;
+
+	msurface_t			**firstmarksurface;
 	int			nummarksurfaces;
 	int			key;			// BSP sequence number for leaf's contents
 	byte		ambient_sound_level[NUM_AMBIENTS];
@@ -494,7 +511,7 @@ typedef struct qmodel_s
 	mclipnode_t	*clipnodes; //johnfitz -- was dclipnode_t
 
 	int			nummarksurfaces;
-	int			*marksurfaces;
+	msurface_t			**marksurfaces;
 
 	hull_t		hulls[MAX_MAP_HULLS];
 
