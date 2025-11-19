@@ -308,7 +308,8 @@ R_OverbrightBits_f
 */
 static void R_OverbrightBits_f (cvar_t *var)
 {
-	int value = CLAMP (0, (int)Q_rint (var->value), 3);
+	int min_value = (var == &r_mapoverbrightbits) ? -1 : 0;
+	int value = CLAMP (min_value, (int)Q_rint (var->value), 3);
 	if (value != (int)var->value)
 		Cvar_SetValueQuick (var, (float)value);
 }
