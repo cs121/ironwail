@@ -1605,6 +1605,8 @@ static void Mod_LoadBspx (const byte *buffer)
 
 
 }
+static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename, int samplecount);
+
 static void Mod_LoadLighting (lump_t *l)
 {
         int i, mark;
@@ -1721,6 +1723,47 @@ static void Mod_LoadLighting (lump_t *l)
 
         samplecount = l->filelen;
         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
+}
+
+
+static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename, int samplecount)
+{
+        unsigned int path_id;
+        byte *data;
+        int expected_size;
+        qboolean loaded_lux = true;
+
+        loadmodel->deluxdata = NULL;
+        loadmodel->deluxfile = false;
+        loadmodel->numdeluxsamples = 0;
+
+        if (samplecount <= 0)
+                return;
+
+        expected_size = samplecount * 3;
+
+        // Prefer .lux, fall back to .dlit
+        data = (byte *) COM_LoadHunkFile (luxfilename, &path_id);
+        if (!data)
+        {
+                loaded_lux = false;
+                data = (byte *) COM_LoadHunkFile (dlitfilename, &path_id);
+        }
+
+        if (data)
+        {
+                if (com_filesize == expected_size)
+                {
+                        loadmodel->deluxdata = data;
+                        loadmodel->deluxfile = true;
+                        loadmodel->numdeluxsamples = samplecount;
+                        Con_DPrintf2 ("deluxemap %s loaded\n", loaded_lux ? luxfilename : dlitfilename);
+                        return;
+                }
+
+                Con_Printf ("Ignoring deluxemap with unexpected size (%s should be %d bytes, not %" SDL_PRIs64 ")\n",
+                        loaded_lux ? luxfilename : dlitfilename, expected_size, com_filesize);
+        }
 }
 
 
@@ -2226,9 +2269,8 @@ void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			loadmodel->bspx_light_offset_count = count;
 	}
 
-	for (surfnum=0 ; surfnum<count ; surfnum++, out++)
-	{
-		texture_t *texture;
+        for (surfnum=0 ; surfnum<count ; surfnum++, out++)
+        {
 		if (bsp2)
 		{
 			out->firstedge = LittleLong(inl->firstedge);
