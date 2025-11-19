@@ -946,7 +946,7 @@ void GL_BuildBModelMarkBuffers (void)
 		for (j = 0; j < leaf->nummarksurfaces; j++)
 		{
 			mark[sum + j].packedleafsky = packedleafsky;
-			mark[sum + j].surfindex = leaf->firstmarksurface[j];
+			mark[sum + j].surfindex = (GLuint) (leaf->firstmarksurface[j] - cl.worldmodel->surfaces);
 		}
 		qsort (mark + sum, j, sizeof (*mark), CompareMarkSurface);
 		sum += j;
