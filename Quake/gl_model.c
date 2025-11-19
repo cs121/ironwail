@@ -57,35 +57,37 @@ static size_t   mod_bspx_filesize;
 
 static size_t Mod_BspLumpElementSize (int lump, int bsp2)
 {
-	(void) bsp2;
-
-	switch (lump)
-	{
-	case LUMP_PLANES:
-		return sizeof(dplane_t);
-	case LUMP_VERTEXES:
-		return sizeof(dvertex_t);
-	case LUMP_NODES:
-		return sizeof(dnode_t);
-	case LUMP_TEXINFO:
-		return sizeof(texinfo_t);
-	case LUMP_FACES:
-		return sizeof(dface_t);
-	case LUMP_CLIPNODES:
-		return sizeof(dclipnode_t);
-	case LUMP_LEAFS:
-		return sizeof(dleaf_t);
-	case LUMP_MARKSURFACES:
-		return sizeof(unsigned short);
-	case LUMP_EDGES:
-		return sizeof(dedge_t);
-	case LUMP_SURFEDGES:
-		return sizeof(int);
-	case LUMP_MODELS:
-		return sizeof(dmodel_t);
-	default:
-		return 0;
-	}
+       switch (lump)
+       {
+       case LUMP_PLANES:
+               return sizeof(dplane_t);
+       case LUMP_VERTEXES:
+               return sizeof(dvertex_t);
+       case LUMP_NODES:
+               if (!bsp2)
+                       return sizeof(dsnode_t);
+               return (bsp2 == 1) ? sizeof(dl1node_t) : sizeof(dl2node_t);
+       case LUMP_TEXINFO:
+               return sizeof(texinfo_t);
+       case LUMP_FACES:
+               return bsp2 ? sizeof(dlface_t) : sizeof(dsface_t);
+       case LUMP_CLIPNODES:
+               return bsp2 ? sizeof(dlclipnode_t) : sizeof(dsclipnode_t);
+       case LUMP_LEAFS:
+               if (!bsp2)
+                       return sizeof(dsleaf_t);
+               return (bsp2 == 1) ? sizeof(dl1leaf_t) : sizeof(dl2leaf_t);
+       case LUMP_MARKSURFACES:
+               return bsp2 ? sizeof(unsigned int) : sizeof(unsigned short);
+       case LUMP_EDGES:
+               return bsp2 ? sizeof(dledge_t) : sizeof(dsedge_t);
+       case LUMP_SURFEDGES:
+               return sizeof(int);
+       case LUMP_MODELS:
+               return sizeof(dmodel_t);
+       default:
+               return 0;
+       }
 }
 
 static int Mod_ParseBspHeader (const byte *buffer, size_t filesize, dheader_t *out_header)
@@ -1201,7 +1203,7 @@ static qboolean Mod_BspxImportLmOffsets (const char *lumpname, const byte *data,
 }
 
 static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const byte *data, size_t length,
-        int **out_indices, int *out_count)
+       int **out_indices, int *out_count)
 {
         int count;
         int *indices;
@@ -1250,6 +1252,117 @@ static qboolean Mod_BspxImportStaticShadowIndices (const char *lumpname, const b
         *out_count = count;
         Mod_BspxDebugf ("BSPX:     %s imported %d shadow indices\n", lumpname, count);
         return true;
+}
+
+static qboolean Mod_BspxImportStaticLights (const char *lumpname, const byte *data, size_t length,
+       bspx_static_light_t **out_lights, int *out_count)
+{
+       int count;
+       bspx_static_light_t *lights;
+
+       if (!out_lights || !out_count)
+       {
+               Mod_BspxDebugf ("BSPX:     %s skipped (invalid light outputs)\n", lumpname);
+               return false;
+       }
+
+       *out_lights = NULL;
+       *out_count = 0;
+
+       if (!data || length == 0)
+       {
+               Mod_BspxDebugf ("BSPX:     %s contains no static lights\n", lumpname);
+               return true;
+       }
+
+       if (length % sizeof(bspx_static_light_t))
+       {
+               Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiple of %zu)\n",
+                       lumpname, length, sizeof(bspx_static_light_t));
+               Mod_BspxDebugf ("BSPX:     %s rejected size %zu for static lights\n", lumpname, length);
+               return false;
+       }
+
+       count = (int)(length / sizeof(bspx_static_light_t));
+       if (count <= 0)
+       {
+               Mod_BspxDebugf ("BSPX:     %s contains zero static lights\n", lumpname);
+               return true;
+       }
+
+       lights = (bspx_static_light_t *) Hunk_AllocName (count * sizeof(*lights), lumpname);
+       if (!lights)
+       {
+               Mod_BspxDebugf ("BSPX:     %s failed to allocate %d static lights\n", lumpname, count);
+               return false;
+       }
+
+       for (int i = 0; i < count; ++i)
+       {
+               const bspx_static_light_t *src = ((const bspx_static_light_t *)data) + i;
+               lights[i].origin[0] = LittleFloat (src->origin[0]);
+               lights[i].origin[1] = LittleFloat (src->origin[1]);
+               lights[i].origin[2] = LittleFloat (src->origin[2]);
+               lights[i].radius = LittleFloat (src->radius);
+               lights[i].color[0] = LittleFloat (src->color[0]);
+               lights[i].color[1] = LittleFloat (src->color[1]);
+               lights[i].color[2] = LittleFloat (src->color[2]);
+               lights[i].intensity = LittleFloat (src->intensity);
+       }
+
+       *out_lights = lights;
+       *out_count = count;
+       Mod_BspxDebugf ("BSPX:     %s imported %d static lights\n", lumpname, count);
+       return true;
+}
+
+static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *data, size_t length)
+{
+       if (!data || length == 0)
+       {
+               Mod_BspxDebugf ("BSPX:     %s contains no rgb lighting\n", lumpname);
+               return true;
+       }
+
+       loadmodel->lightdata = (byte *) Hunk_AllocName (length, lumpname);
+       if (!loadmodel->lightdata)
+       {
+               Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for rgb lighting\n", lumpname, length);
+               return false;
+       }
+
+       memcpy (loadmodel->lightdata, data, length);
+       loadmodel->litfile = true;
+       Mod_BspxDebugf ("BSPX:     %s imported rgb lighting (%zu bytes)\n", lumpname, length);
+       return true;
+}
+
+static qboolean Mod_BspxImportE5Bgr9Lighting (const char *lumpname, const byte *data, size_t length)
+{
+       // Treat the packed lighting payload as opaque and store it for later use.
+       return Mod_BspxImportRgbLighting (lumpname, data, length);
+}
+
+static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data, size_t length)
+{
+       if (!data || length == 0)
+       {
+               Mod_BspxDebugf ("BSPX:     %s contains no deluxemap data\n", lumpname);
+               return true;
+       }
+
+       loadmodel->deluxdata = (byte *) Hunk_AllocName (length, lumpname);
+       if (!loadmodel->deluxdata)
+       {
+               Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes for deluxemap\n", lumpname, length);
+               return false;
+       }
+
+       memcpy (loadmodel->deluxdata, data, length);
+       loadmodel->deluxfile = true;
+       loadmodel->numdeluxsamples = (int)length;
+       Mod_BspxDebugf ("BSPX:     %s imported deluxemap (%zu bytes)\n", lumpname, length);
+       return true;
 }
 
 static qboolean Mod_BspxStoreLightgridBlob (const char *lumpname, const byte *data, size_t length,
@@ -1900,6 +2013,7 @@ void CalcSurfaceExtents (msurface_t *s)
 {
 	float	mins[2], maxs[2], val;
 	int		i,j, e;
+	int		bmins[2], bmaxs[2];
 	mvertex_t	*v;
 	mtexinfo_t	*tex;
 	double	texvecs[2][4];
@@ -1988,6 +2102,12 @@ Mod_PolyForUnlitSurface -- johnfitz -- creates polys for unlightmapped surfaces 
 TODO: merge this into BuildSurfaceDisplayList?
 ================
 */
+static void GL_SubdivideSurface (msurface_t *fa)
+{
+	// Subdivision is not required for current usage; keep placeholder to satisfy builds.
+	(void) fa;
+}
+
 void Mod_PolyForUnlitSurface (msurface_t *fa)
 {
 	vec3_t		verts[64];
