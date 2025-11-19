@@ -1605,6 +1605,8 @@ static void Mod_LoadBspx (const byte *buffer)
 
 
 }
+static void Mod_LoadDeluxemap (const char *dlitfilename, const char *luxfilename, int samplecount);
+
 static void Mod_LoadLighting (lump_t *l)
 {
         int i, mark;
