@@ -2700,7 +2700,7 @@ static void Mod_CheckWaterVis(void)
 			//this check is somewhat risky, but we should be able to get away with it.
 			for (contenttype = 0, j = 0; j < leaf->nummarksurfaces; j++)
 			{
-				surf = &loadmodel->surfaces[leaf->firstmarksurface[j]];
+				surf = leaf->firstmarksurface[j];
 				if (surf->flags & (SURF_DRAWWATER|SURF_DRAWTELE))
 				{
 					contenttype = surf->flags & (SURF_DRAWWATER|SURF_DRAWTELE);
