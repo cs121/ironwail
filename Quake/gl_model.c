@@ -54,6 +54,22 @@ static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
+static const byte *Mod_BspxCopyLump (const char *lumpname, const byte *data, size_t length)
+{
+        if (!data || length == 0)
+                return NULL;
+
+	byte *copy = (byte *)Hunk_AllocName (length, "BSPXDATA");
+	if (!copy)
+	{
+		Mod_BspxDebugf ("BSPX:     %s failed to allocate %zu bytes\n", lumpname, length);
+		return NULL;
+	}
+
+	memcpy (copy, data, length);
+	return copy;
+}
+
 static size_t Mod_BspLumpElementSize (int lump_index, int bsp2)
 {
 	switch (lump_index)
@@ -1859,8 +1875,13 @@ static void Mod_LoadBspx (const byte *buffer)
                         lumpofs = rel_ofs;
                 }
 
+                const byte *lumpdata = lumplen ? Mod_BspxCopyLump (lumpname, buffer + lumpofs, lumplen) : NULL;
+
+                if (lumplen && !lumpdata)
+                        continue;
+
                 q_strlcpy (loadmodel->bspx_entries[stored].name, lumpname, sizeof(loadmodel->bspx_entries[stored].name));
-                loadmodel->bspx_entries[stored].data = buffer + lumpofs;
+                loadmodel->bspx_entries[stored].data = lumpdata;
                 loadmodel->bspx_entries[stored].length = lumplen;
 
                 if (!q_strcasecmp (lumpname, "RGBLIGHTING") ||
