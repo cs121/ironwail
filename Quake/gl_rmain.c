@@ -245,7 +245,7 @@ cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
-cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "-1", CVAR_ARCHIVE };
+cvar_t	r_mapoverbrightbits = { "r_mapoverbrightbits", "2", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -1691,7 +1691,7 @@ void R_SetupView (void)
 	{
 		int map_overbright_bits;
 
-		if (r_mapoverbrightbits.value < 0.f)
+		if (!strcmp (r_mapoverbrightbits.string, r_mapoverbrightbits.default_string))
 			map_overbright_bits = CLAMP (0, (int)Q_rint (r_overbrightbits.value), 3);
 		else
 			map_overbright_bits = CLAMP (0, (int)Q_rint (r_mapoverbrightbits.value), 3);

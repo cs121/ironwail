@@ -126,7 +126,7 @@ void R_MarkSurfaces (void)
 	// TODO: loop through all water surfs and use distance to leaf cullbox
 	nearwaterportal = false;
 	for (i=0; i < r_viewleaf->nummarksurfaces; i++)
-		if (r_viewleaf->firstmarksurface[i]->flags & SURF_DRAWTURB)
+		if (cl.worldmodel->surfaces[r_viewleaf->firstmarksurface[i]].flags & SURF_DRAWTURB)
 			nearwaterportal = true;
 
 	// choose vis data

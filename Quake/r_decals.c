@@ -727,9 +727,9 @@ static qboolean R_DecalProject (const vec3_t point, const vec3_t preferred_norma
         if (!leaf)
                 return false;
 
-	for (i = 0; i < leaf->nummarksurfaces; i++)
-	{
-		msurface_t *surf = leaf->firstmarksurface[i];
+        for (i = 0; i < leaf->nummarksurfaces; i++)
+        {
+                msurface_t *surf = &cl.worldmodel->surfaces[leaf->firstmarksurface[i]];
                 mtexinfo_t *texinfo;
                 vec3_t normal, sdir, tdir, origin;
                 float plane_dist, d, score;
