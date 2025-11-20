@@ -1058,17 +1058,22 @@ static void Mod_LoadTextures (lump_t *l)
 Mod_LoadLighting -- johnfitz -- replaced with lit support code via lordhavoc
 =================
 */
+static byte Mod_BspxEncodeDeluxComponent (float value);
 static qboolean Mod_LoadDeluxemapFile (const char *filename, int samplecount, int expected_version, const char *filekind)
 {
         int mark;
         byte *data;
         unsigned int path_id;
         size_t expected;
+        size_t expected_bytes;
+        size_t expected_floats;
 
         if (!filename || !filename[0])
                 return false;
 
         expected = (size_t)samplecount * 3;
+        expected_bytes = 8 + expected;
+        expected_floats = 8 + expected * sizeof(float);
         mark = Hunk_LowMark ();
         data = (byte *) COM_LoadHunkFile (filename, &path_id);
         if (!data)
@@ -1087,10 +1092,9 @@ static qboolean Mod_LoadDeluxemapFile (const char *filename, int samplecount, in
         if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
         {
                 int version = LittleLong (((int *)data)[1]);
-                if (version == expected_version)
+                if (version == expected_version || (expected_version == 2 && version == 1))
                 {
-                        uint64_t expected_total = 8 + (uint64_t)expected;
-                        if (expected_total == (uint64_t)com_filesize)
+                        if ((uint64_t)expected_bytes == (uint64_t)com_filesize)
                         {
                                 Con_DPrintf2 ("%s loaded\n", filename);
                                 loadmodel->deluxdata = data + 8;
@@ -1098,9 +1102,31 @@ static qboolean Mod_LoadDeluxemapFile (const char *filename, int samplecount, in
                                 return true;
                         }
 
+                        if ((uint64_t)expected_floats == (uint64_t)com_filesize)
+                        {
+                                const float *src = (const float *)(data + 8);
+                                byte *dst = data + 8;
+
+                                for (size_t i = 0, count = expected / 3; i < count; ++i)
+                                {
+                                        float nx = LittleFloat (src[i * 3 + 0]);
+                                        float ny = LittleFloat (src[i * 3 + 1]);
+                                        float nz = LittleFloat (src[i * 3 + 2]);
+
+                                        dst[i * 3 + 0] = Mod_BspxEncodeDeluxComponent (nx);
+                                        dst[i * 3 + 1] = Mod_BspxEncodeDeluxComponent (ny);
+                                        dst[i * 3 + 2] = Mod_BspxEncodeDeluxComponent (nz);
+                                }
+
+                                loadmodel->deluxdata = dst;
+                                loadmodel->deluxfile = true;
+                                Con_DPrintf2 ("%s loaded (float payload)\n", filename);
+                                return true;
+                        }
+
                         Hunk_FreeToLowMark (mark);
-                        Con_Printf ("Mismatched %s file (%s should be %" SDL_PRIu64 " bytes, not %" SDL_PRIs64 ")\n",
-                                filekind, filename, expected_total, com_filesize);
+                        Con_Printf ("Mismatched %s file (%s should be %zu or %zu bytes, not %" SDL_PRIs64 ")\n",
+                                filekind, filename, expected_bytes, expected_floats, com_filesize);
                         return false;
                 }
 
@@ -1282,6 +1308,14 @@ static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data,
 
                 if (version == 1)
                 {
+                        if (payload_length == expected_bytes)
+                        {
+                                memcpy (loadmodel->deluxdata, payload, expected_bytes);
+                                loadmodel->deluxfile = true;
+                                Mod_BspxDebugf ("BSPX:     %s imported %zu delux samples (QLIT v1 bytes)\n", lumpname, samplecount);
+                                return true;
+                        }
+
                         if (payload_length == expected_floats)
                         {
                                 const float *src = (const float *)payload;
@@ -1304,10 +1338,10 @@ static qboolean Mod_BspxImportDeluxemap (const char *lumpname, const byte *data,
                                 return true;
                         }
 
-                        Con_DPrintf2 ("BSPX lump %s has unexpected version 1 size %zu (expected %zu)\n",
-                                lumpname, payload_length, expected_floats);
-                        Mod_BspxDebugf ("BSPX:     %s rejected QLIT v1 size %zu (expected %zu)\n",
-                                lumpname, payload_length, expected_floats);
+                        Con_DPrintf2 ("BSPX lump %s has unexpected version 1 size %zu (expected %zu or %zu)\n",
+                                lumpname, payload_length, expected_bytes, expected_floats);
+                        Mod_BspxDebugf ("BSPX:     %s rejected QLIT v1 size %zu (expected %zu or %zu)\n",
+                                lumpname, payload_length, expected_bytes, expected_floats);
                         return false;
                 }
 
