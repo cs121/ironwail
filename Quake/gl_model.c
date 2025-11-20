@@ -2050,9 +2050,9 @@ static void Mod_LoadLighting (lump_t *l)
 #endif
 
         loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (l->filelen * 3, litfilename);
-        in = loadmodel->lightdata + l->filelen * 2;
+        in = mod_base + l->fileofs;
         out = loadmodel->lightdata;
-        memcpy (in, mod_base + l->fileofs, l->filelen);
+
         for (i = 0; i < l->filelen; i++)
         {
                 d = *in++;
