@@ -38,6 +38,7 @@ static void Mod_LoadMD2Model (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static void Mod_LoadBspx (const byte *buffer);
+static void Mod_BspxDebugf (const char *fmt, ...);
 
 static void Mod_Print (void);
 
