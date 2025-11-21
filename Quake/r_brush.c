@@ -714,8 +714,8 @@ void GL_BuildBModelVertexBuffer (void)
 	int			i, j, k;
 	qmodel_t	*m;
 	glvert_t	*varray;
-	float		lmscalex = 1.f / 16.f / lightmap_width;
-	float		lmscaley = 1.f / 16.f / lightmap_height;
+	float		lmscalex = 1.f / lightmap_width;
+	float		lmscaley = 1.f / lightmap_height;
 
 // ask GL for a name for our VBO
 	GL_DeleteBuffer (gl_bmodel_vbo);
@@ -830,16 +830,14 @@ void GL_BuildBModelVertexBuffer (void)
 					//
 					// lightmap texture coordinates
 					//
-					s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-					s -= fa->texturemins[0];
-					s += (fa->light_s + lm->xofs) * 16;
-					s += 8;
+					s = DotProduct (vec, fa->lmvecs[0]) + fa->lmvecs[0][3];
+					s += (fa->light_s + lm->xofs);
+					s += 0.5f;
 					s *= lmscalex;
 
-					t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-					t -= fa->texturemins[1];
-					t += (fa->light_t + lm->yofs) * 16;
-					t += 8;
+					t = DotProduct (vec, fa->lmvecs[1]) + fa->lmvecs[1][3];
+					t += (fa->light_t + lm->yofs);
+					t += 0.5f;
 					t *= lmscaley;
 
 					vert->st[2] = s;
