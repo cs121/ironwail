@@ -148,6 +148,8 @@ typedef struct msurface_s
 
 	short		lightmaptexturenum;
 	short		extents[2];
+	vec4_t		lmvecs[2];
+	float		lmvecscale[2];
 	short		light_s, light_t;	// gl lightmap coordinates
 
 	byte		styles[MAXLIGHTMAPS];
@@ -506,6 +508,7 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
+	size_t		lightdatasize;
 	byte		*deluxdata;
 	int				numdeluxsamples;
 	char		*entities;

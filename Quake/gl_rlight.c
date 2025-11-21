@@ -456,17 +456,19 @@ loc0:
 		// ericw -- added double casts to force 64-bit precision.
 		// Without them the zombie at the start of jam3_ericw.bsp was
 		// incorrectly being lit up in SSE builds.
-			ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
-			dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+			double dsfrac = DoublePrecisionDotProduct (mid, surf->lmvecs[0]) + surf->lmvecs[0][3];
+			double dtfrac = DoublePrecisionDotProduct (mid, surf->lmvecs[1]) + surf->lmvecs[1][3];
+			int surfwidth = (surf->extents[0] >> 4);
+			int surfheight = (surf->extents[1] >> 4);
 
-			if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
+			if (dsfrac < 0 || dtfrac < 0)
 				continue;
 
-			ds -= surf->texturemins[0];
-			dt -= surf->texturemins[1];
-
-			if (ds > surf->extents[0] || dt > surf->extents[1])
+			if (dsfrac > surfwidth || dtfrac > surfheight)
 				continue;
+
+			ds = (int) (dsfrac * 16.0);
+			dt = (int) (dtfrac * 16.0);
 
 			if (surf->plane->type < 3)
 			{

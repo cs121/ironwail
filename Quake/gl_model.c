@@ -55,6 +55,21 @@ static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 static size_t   mod_bspx_filesize;
 
+static const bspx_entry_t *Mod_BspxFindEntry (const char *lumpname)
+{
+	if (!lumpname || !loadmodel->bspx_entries)
+		return NULL;
+
+	for (int i = 0; i < loadmodel->bspx_num_entries; ++i)
+	{
+		const bspx_entry_t *entry = &loadmodel->bspx_entries[i];
+		if (!q_strcasecmp (entry->name, lumpname))
+			return entry;
+	}
+
+	return NULL;
+}
+
 static const byte *Mod_BspxCopyLump (const char *lumpname, const byte *data, size_t length)
 {
         if (!data || length == 0)
@@ -1497,6 +1512,7 @@ static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *dat
 
         memcpy (loadmodel->lightdata, payload, expected_bytes);
         loadmodel->litfile = true;
+        loadmodel->lightdatasize = expected_bytes;
         Mod_BspxDebugf ("BSPX:     %s imported %zu RGB samples%s\n",
                 lumpname, samplecount, had_header ? " (QLIT)" : "");
         return true;
@@ -1593,6 +1609,7 @@ static qboolean Mod_BspxImportE5Bgr9Lighting (const char *lumpname, const byte *
         }
 
         loadmodel->litfile = true;
+        loadmodel->lightdatasize = expected_bytes;
         Mod_BspxDebugf ("BSPX:     %s imported %zu RGB samples%s (E5BGR9)\n",
                 lumpname, samplecount, had_header ? " (QLIT)" : "");
         return true;
@@ -2041,6 +2058,7 @@ static void Mod_LoadLighting (lump_t *l)
 
         loadmodel->lightdata = NULL;
         loadmodel->deluxdata = NULL;
+        loadmodel->lightdatasize = 0;
         loadmodel->litfile = false;
         loadmodel->deluxfile = false;
 
@@ -2072,6 +2090,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         loadmodel->lightdata = data + 8;
                                         loadmodel->litfile = true;
                                         samplecount = l->filelen;
+                                        loadmodel->lightdatasize = samplecount * 3;
                                         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                                         return;
                                 }
@@ -2115,6 +2134,7 @@ static void Mod_LoadLighting (lump_t *l)
                 }
 
                 samplecount = l->filelen / 2;
+                loadmodel->lightdatasize = samplecount * 3;
                 Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                 return;
         }
@@ -2125,6 +2145,7 @@ static void Mod_LoadLighting (lump_t *l)
                 loadmodel->lightdata = (byte *) Hunk_AllocNameNoFill (l->filelen, litfilename);
                 memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
                 samplecount = l->filelen / 3;
+                loadmodel->lightdatasize = l->filelen;
                 Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
                 return;
         }
@@ -2143,6 +2164,7 @@ static void Mod_LoadLighting (lump_t *l)
         }
 
         samplecount = l->filelen;
+        loadmodel->lightdatasize = samplecount * 3;
         Mod_LoadDeluxemap (dlitfilename, luxfilename, samplecount);
 }
 
@@ -2486,17 +2508,33 @@ static void CalcSurfaceExtents (msurface_t *s)
 		}
 	}
 
-	for (i=0 ; i<2 ; i++)
-	{
-		int bmin = 16 * (int) floor (mins[i]/16);
-		int bmax = 16 * (int) ceil (maxs[i]/16);
+        for (i=0 ; i<2 ; i++)
+        {
+                int bmin = 16 * (int) floor (mins[i]/16);
+                int bmax = 16 * (int) ceil (maxs[i]/16);
 
-		s->texturemins[i] = bmin;
-		s->extents[i] = bmax - bmin;
+                s->texturemins[i] = bmin;
+                s->extents[i] = bmax - bmin;
 
-		if ( !(tex->flags & TEX_SPECIAL) && s->extents[i] > 2000) //johnfitz -- was 512 in glquake, 256 in winquake
-			Sys_Error ("Bad surface extents");
-	}
+                if ( !(tex->flags & TEX_SPECIAL) && s->extents[i] > 2000) //johnfitz -- was 512 in glquake, 256 in winquake
+                        Sys_Error ("Bad surface extents");
+        }
+
+        for (i = 0; i < 2; i++)
+        {
+                const float inv_scale = 1.0f / 16.0f;
+                float len;
+
+                s->lmvecs[i][0] = s->texinfo->vecs[i][0] * inv_scale;
+                s->lmvecs[i][1] = s->texinfo->vecs[i][1] * inv_scale;
+                s->lmvecs[i][2] = s->texinfo->vecs[i][2] * inv_scale;
+                s->lmvecs[i][3] = (s->texinfo->vecs[i][3] - s->texturemins[i]) * inv_scale;
+
+                len = sqrtf (s->lmvecs[i][0] * s->lmvecs[i][0]
+                        + s->lmvecs[i][1] * s->lmvecs[i][1]
+                        + s->lmvecs[i][2] * s->lmvecs[i][2]);
+                s->lmvecscale[i] = (len != 0.f) ? 1.0f / len : 0.f;
+        }
 }
 
 /*
@@ -2541,7 +2579,8 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	dlface_t	*inl;
 	msurface_t 	*out;
 	int			i, count, surfnum, lofs;
-	int			planenum, side, texinfon;
+	int			planenum, side, texinfon, facestyles;
+	const struct decoupled_lm_info_s *decoupledlm = NULL;
 
 	if (bsp2)
 	{
@@ -2559,6 +2598,10 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			Sys_Error ("MOD_LoadBmodel: funny lump size in %s",loadmodel->name);
 		count = l->filelen / sizeof(*ins);
 	}
+	const bspx_entry_t *decoupled_entry = Mod_BspxFindEntry ("DECOUPLED_LM");
+	if (decoupled_entry && decoupled_entry->length == (size_t) count * sizeof(struct decoupled_lm_info_s))
+		decoupledlm = (const struct decoupled_lm_info_s *) decoupled_entry->data;
+
 	out = (msurface_t *)Hunk_AllocName ( count*sizeof(*out), loadname);
 
 	//johnfitz -- warn mappers about exceeding old limits
@@ -2616,46 +2659,98 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 		out->texinfo = loadmodel->texinfo + texinfon;
 
-		CalcSurfaceExtents (out);
+		if (decoupledlm)
+		{
+			const struct decoupled_lm_info_s *lm_info = &decoupledlm[surfnum];
+			int lm_width = q_max (1, (int) LittleShort (lm_info->lmsize[0]));
+			int lm_height = q_max (1, (int) LittleShort (lm_info->lmsize[1]));
+
+			lofs = LittleLong (lm_info->lmoffset);
+			out->texturemins[0] = out->texturemins[1] = 0;
+			out->extents[0] = (lm_width - 1) << 4;
+			out->extents[1] = (lm_height - 1) << 4;
+
+			for (i = 0; i < 4; i++)
+			{
+				out->lmvecs[0][i] = LittleFloat (lm_info->lmvecs[0][i]);
+				out->lmvecs[1][i] = LittleFloat (lm_info->lmvecs[1][i]);
+			}
+
+			for (i = 0; i < 2; i++)
+			{
+				float len = sqrtf (out->lmvecs[i][0] * out->lmvecs[i][0]
+					+ out->lmvecs[i][1] * out->lmvecs[i][1]
+					+ out->lmvecs[i][2] * out->lmvecs[i][2]);
+				out->lmvecscale[i] = (len != 0.f) ? 1.0f / len : 0.f;
+			}
+		}
+		else
+		{
+			CalcSurfaceExtents (out);
+		}
 
 		Mod_CalcSurfaceBounds (out); //johnfitz -- for per-surface frustum culling
 
 	// lighting info
 		if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake 
+			lofs /= 2; // Q64 samples are 16bits instead 8 in normal Quake
 
-                if (loadmodel->bspx_light_offsets && surfnum < loadmodel->bspx_light_offset_count)
-                        lofs = loadmodel->bspx_light_offsets[surfnum];
+		if (loadmodel->bspx_light_offsets && surfnum < loadmodel->bspx_light_offset_count)
+			lofs = loadmodel->bspx_light_offsets[surfnum];
 
-                if (lofs == -1)
-                {
-                        out->samples = NULL;
-                        out->deluxsamples = NULL;
-                }
-                else
-                {
-                        size_t sampleofs;
+		facestyles = 0;
+		while (facestyles < MAXLIGHTMAPS && out->styles[facestyles] != 255)
+			++facestyles;
+		if (facestyles == 0)
+			facestyles = 1;
+
+		if (lofs == -1)
+		{
+			out->samples = NULL;
+			out->deluxsamples = NULL;
+		}
+		else
+		{
+			size_t sampleofs;
+			size_t facesize = ((size_t)(out->extents[0]>>4) + 1) * ((size_t)(out->extents[1]>>4) + 1);
 
 #ifdef BSP29_VALVE
-                        sampleofs = (loadmodel->bspversion == BSPVERSION_VALVE) ? (size_t)lofs : (size_t)lofs * 3;
+			sampleofs = (loadmodel->bspversion == BSPVERSION_VALVE) ? (size_t)lofs : (size_t)lofs * 3;
 #else
-                        sampleofs = (size_t)lofs * 3;
+			sampleofs = (size_t)lofs * 3;
 #endif
 
-                        out->samples = loadmodel->lightdata + sampleofs; //johnfitz -- lit support via lordhavoc (was "+ i")
-                        if (loadmodel->deluxdata)
-                        {
-                                out->deluxsamples = loadmodel->deluxdata + sampleofs;
-                                if (!loadmodel->deluxfile)
-                                        Mod_InitFallbackDeluxemap (out);
-                        }
-                        else
-                        {
-                                out->deluxsamples = NULL;
-                        }
-                }
+			if (loadmodel->lightdatasize && sampleofs + facesize * (size_t) facestyles * 3 > loadmodel->lightdatasize)
+			{
+				out->samples = NULL;
+				out->deluxsamples = NULL;
+			}
+			else
+			{
+				out->samples = loadmodel->lightdata + sampleofs; //johnfitz -- lit support via lordhavoc (was "+ i")
+				if (loadmodel->deluxdata)
+				{
+					size_t deluxbytes = (size_t)loadmodel->numdeluxsamples * 3;
 
-		texture = loadmodel->textures[out->texinfo->texnum];
+					if (deluxbytes == 0 || sampleofs + facesize * (size_t) facestyles * 3 > deluxbytes)
+					{
+						out->deluxsamples = NULL;
+					}
+					else
+					{
+						out->deluxsamples = loadmodel->deluxdata + sampleofs;
+						if (!loadmodel->deluxfile)
+							Mod_InitFallbackDeluxemap (out);
+					}
+				}
+				else
+				{
+					out->deluxsamples = NULL;
+				}
+			}
+		}
+
+texture = loadmodel->textures[out->texinfo->texnum];
 
 		if (texture->type == TEXTYPE_SKY)
 		{
@@ -3699,10 +3794,11 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 
-	loadmodel->type = mod_brush;
-	loadmodel->numdeluxsamples = 0;
-	loadmodel->bspx_light_offset_count = 0;
-	loadmodel->bspx_light_offsets = NULL;
+        loadmodel->type = mod_brush;
+        loadmodel->numdeluxsamples = 0;
+        loadmodel->lightdatasize = 0;
+        loadmodel->bspx_light_offset_count = 0;
+        loadmodel->bspx_light_offsets = NULL;
 	loadmodel->bspx_num_static_lights = 0;
 	loadmodel->bspx_static_lights = NULL;
         loadmodel->bspx_num_static_shadow_lights = 0;
