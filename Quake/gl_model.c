@@ -1407,6 +1407,7 @@ static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *dat
         size_t payload_length = length;
         size_t samplecount;
         size_t expected_bytes;
+        size_t expected_samples = (loadmodel->numdeluxsamples > 0) ? (size_t)loadmodel->numdeluxsamples : 0;
         qboolean had_header = false;
 
         if (!data || length == 0)
@@ -1432,7 +1433,13 @@ static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *dat
         }
 
         samplecount = Mod_BspxGuessSampleCount (payload_length);
-        if (samplecount == 0 || payload_length != samplecount * 3)
+        if (samplecount == 0 && expected_samples > 0)
+                samplecount = expected_samples;
+
+        if (samplecount == 0 && payload_length >= 3)
+                samplecount = payload_length / 3;
+
+        if (samplecount == 0)
         {
                 Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (expected multiples of 3 bytes)\n",
                         lumpname, payload_length);
@@ -1440,13 +1447,30 @@ static qboolean Mod_BspxImportRgbLighting (const char *lumpname, const byte *dat
                 return false;
         }
 
+        expected_bytes = samplecount * 3;
+
+        if (payload_length < expected_bytes)
+        {
+                Con_DPrintf2 ("BSPX lump %s has insufficient data %zu (expected %zu bytes)\n",
+                        lumpname, payload_length, expected_bytes);
+                Mod_BspxDebugf ("BSPX:     %s size %zu is smaller than expected %zu bytes\n",
+                        lumpname, payload_length, expected_bytes);
+                return false;
+        }
+
+        if (payload_length != expected_bytes)
+        {
+                Con_DPrintf2 ("BSPX lump %s has unexpected size %zu (using %zu bytes)\n",
+                        lumpname, payload_length, expected_bytes);
+                Mod_BspxDebugf ("BSPX:     %s size %zu adjusted to %zu bytes\n",
+                        lumpname, payload_length, expected_bytes);
+        }
+
         if (!Mod_BspxEnsureDeluxStorage (samplecount, lumpname))
         {
                 Mod_BspxDebugf ("BSPX:     %s rejected due to deluxemap storage mismatch\n", lumpname);
                 return false;
         }
-
-        expected_bytes = samplecount * 3;
 
         if (!loadmodel->lightdata)
         {
@@ -1945,9 +1969,10 @@ static void Mod_LoadBspx (const byte *buffer)
                 {
                         recognized = true;
                         if (loadmodel->deluxfile)
-                                Mod_BspxDebugf ("BSPX:     %s ignored (existing deluxemap)\n", lumpname);
-                        else
-                                Mod_BspxImportDeluxemap (lumpname, loadmodel->bspx_entries[stored].data, lumplen);
+                                Mod_BspxDebugf ("BSPX:     %s replacing existing deluxemap\n", lumpname);
+
+                        if (!Mod_BspxImportDeluxemap (lumpname, loadmodel->bspx_entries[stored].data, lumplen))
+                                Mod_BspxDebugf ("BSPX:     %s failed to import (keeping existing deluxemap)\n", lumpname);
                 }
                 else if (!q_strcasecmp (lumpname, "STATICLIGHTS") || !q_strcasecmp (lumpname, "STATIC_LIGHTS"))
                 {
