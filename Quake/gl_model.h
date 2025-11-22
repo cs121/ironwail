@@ -26,6 +26,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "modelgen.h"
 #include "spritegn.h"
 
+// forward declarations
+typedef struct efrag_s efrag_t;
+typedef struct mmodel_s mmodel_t;
+
 /*
 
 d*_t structures are on-disk representations
@@ -87,6 +91,15 @@ typedef struct texture_s
 	struct texture_s	*anim_next;		// in the animation sequence
 	struct texture_s	*alternate_anims;	// bmodels in frmae 1 use these
 } texture_t;
+
+
+typedef struct efrag_s
+{
+        struct mleaf_s  *leaf;
+        struct efrag_s  *nextleaf;
+        struct entity_s *entity;
+        struct efrag_s  *nextentity;
+} efrag_t;
 
 
 #define	SURF_PLANEBACK		2
@@ -454,6 +467,16 @@ typedef enum {mod_brush, mod_sprite, mod_alias, mod_ext_invalid} modtype_t;
 #define MOD_EMITFORWARDS 4096	//particle effect is emitted forwards, rather than downwards. why down? good question.
 //spike
 #define MOD_HDRLIGHTING (1u<<13)	//spike -- light samples are in e5bgr9 format. int aligned.
+
+
+typedef struct mmodel_s
+{
+        vec3_t  mins, maxs;
+        vec3_t  origin;
+        int     headnode[MAX_MAP_HULLS];
+        int     visleafs;
+        int     firstface, numfaces;
+} mmodel_t;
 
 typedef struct qmodel_s
 {
