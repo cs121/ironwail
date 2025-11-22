@@ -78,20 +78,35 @@ typedef enum {
 	chain_model = 1
 } texchain_t;
 
+typedef enum textype_e {
+        TEXTYPE_DEFAULT = 0,
+        TEXTYPE_CUTOUT,
+        TEXTYPE_SKY,
+        TEXTYPE_WATER,
+        TEXTYPE_SLIME,
+        TEXTYPE_LAVA,
+        TEXTYPE_TELE,
+
+        TEXTYPE_COUNT,
+
+        TEXTYPE_FIRSTLIQUID = TEXTYPE_WATER,
+        TEXTYPE_LASTLIQUID = TEXTYPE_TELE,
+} textype_t;
+
 typedef struct texture_s
 {
-	char				name[16];
-	unsigned			width, height;
-	unsigned			shift;		// Q64
-	struct gltexture_s	*gltexture; //johnfitz -- pointer to gltexture
-	struct gltexture_s	*fullbright; //johnfitz -- fullbright mask texture
-	struct msurface_s	*texturechains[2];	// for texture chains
-	int					anim_total;				// total tenths in sequence ( 0 = no)
-	int					anim_min, anim_max;		// time for this frame min <=time< max
-	struct texture_s	*anim_next;		// in the animation sequence
-	struct texture_s	*alternate_anims;	// bmodels in frmae 1 use these
+        char                            name[16];
+        unsigned                        width, height;
+        unsigned                        shift;          // Q64
+        struct gltexture_s      *gltexture; //johnfitz -- pointer to gltexture
+        struct gltexture_s      *fullbright; //johnfitz -- fullbright mask texture
+        struct msurface_s       *texturechains[2];      // for texture chains
+        int                                     anim_total;                             // total tenths in sequence ( 0 = no)
+        int                                     anim_min, anim_max;             // time for this frame min <=time< max
+        struct texture_s        *anim_next;             // in the animation sequence
+        struct texture_s        *alternate_anims;       // bmodels in frmae 1 use these
+        textype_t                        type;
 } texture_t;
-
 
 typedef struct efrag_s
 {
@@ -557,6 +572,12 @@ typedef struct qmodel_s
 
 	int			numtextures;
 	texture_t	**textures;
+
+	int			*usedtextures;
+	int			texofs[TEXTYPE_COUNT + 1];
+	int			firstcmd;
+	qboolean	haslitwater;
+	byte		*deluxdata;
 
 	byte		*visdata;
 	void		*lightgrid;
