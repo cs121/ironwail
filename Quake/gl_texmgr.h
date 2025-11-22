@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //gl_texmgr.h -- fitzquake's texture manager. manages opengl texture images
 
+typedef struct qmodel_s qmodel_t;
+
 typedef enum
 {
 	TEXPREF_NONE			= 0x0000,
