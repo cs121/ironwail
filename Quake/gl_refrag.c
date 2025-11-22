@@ -186,12 +186,12 @@ void R_AddStaticModels (const byte *vis)
 		int half = count / 2;
 		int shift = 0;
 
-		// make sure we don't overflow the sort key
-		while (maxleaf > MODSORT_BITS)
-		{
-			maxleaf >>= 1;
-			shift++;
-		}
+// make sure we don't overflow the sort key
+while (maxleaf > MODSORT_MASK)
+{
+maxleaf >>= 1;
+shift++;
+}
 
 		for (i = 0, j = count - 1; i < half; i++, j--)
 		{

@@ -460,6 +460,15 @@ extern	trivertx_t		*poseverts_mdl[MAXALIASFRAMES];
 //
 
 typedef enum {mod_brush, mod_sprite, mod_alias, mod_ext_invalid} modtype_t;
+#define mod_numtypes (mod_ext_invalid + 1)
+
+typedef struct bspx_static_light_s
+{
+        vec3_t          origin;
+        float           radius;
+        vec3_t          color;
+        float           intensity;
+} bspx_static_light_t;
 
 //Spike -- these are misnamed/ambiguous.
 #define	EF_ROCKET	1			// leave a trail
@@ -584,6 +593,12 @@ typedef struct qmodel_s
 	byte		*lightdata;
 	size_t		lightdatasamples;
 	char		*entities;
+	const bspx_static_light_t	*bspx_static_lights;
+	int			bspx_num_static_lights;
+	const bspx_static_light_t	*bspx_static_shadow_lights;
+	int			bspx_num_static_shadow_lights;
+	const int		*bspx_static_shadow_indices;
+	int			bspx_num_static_shadow_indices;
 
 	qboolean	viswarn; // for Mod_DecompressVis()
 
