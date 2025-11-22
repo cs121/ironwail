@@ -58,6 +58,7 @@ void Cache_Flush_f (cvar_t* var); // woods #loadskins
 
 cvar_t	scr_concolor = {"scr_concolor", "", CVAR_ARCHIVE}; // woods #concolor
 cvar_t	scr_conback = {"scr_conback", "", CVAR_ARCHIVE}; // woods #conback
+cvar_t	gl_subdivide_size = {"gl_subdivide_size", "128", CVAR_ARCHIVE};
 
 extern cvar_t	r_fastturb; // woods #fastturb
 
@@ -81,9 +82,9 @@ Console_Color_Completion_f -- woods #iwtabcomplete
 */
 static void Console_Color_Completion_f(cvar_t* cvar, const char* partial)
 {
-	Con_AddToTabList("0x000000", partial, "black", NULL); // #demolistsort add arg
-	Con_AddToTabList("0x1e1e1e", partial, "dark grey", NULL); // #demolistsort add arg
-	Con_AddToTabList("0x2c190c", partial, "quake brown", NULL); // #demolistsort add arg
+	Con_AddToTabList("0x000000", partial, "black"); // #demolistsort add arg
+	Con_AddToTabList("0x1e1e1e", partial, "dark grey"); // #demolistsort add arg
+	Con_AddToTabList("0x2c190c", partial, "quake brown"); // #demolistsort add arg
 
 	return;
 }

@@ -722,4 +722,7 @@ void GL_PostProcess (void);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 
+#define MODSORT_BITS 16
+#define MODSORT_MASK ((1 << MODSORT_BITS) - 1)
 #endif	/* GLQUAKE_H */
+
