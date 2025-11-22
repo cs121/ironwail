@@ -37,6 +37,7 @@ void Mod_LoadMD3Model (qmodel_t *mod, void *buffer);
 void Mod_LoadMD5MeshModel (qmodel_t *mod, void *buffer);
 void Mod_LoadIQMModel (qmodel_t *mod, const void *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
+static void Mod_BuildTextureTypes (qmodel_t *mod);
 
 static void Mod_Print (void);
 
@@ -1131,6 +1132,52 @@ static void Mod_LoadTextures (lump_t *l)
 				tx2->alternate_anims = anims[0];
 		}
 	}
+}
+
+static void Mod_BuildTextureTypes (qmodel_t *mod)
+{
+        int counts[TEXTYPE_COUNT] = {0};
+        int cursors[TEXTYPE_COUNT];
+        int i;
+
+        // classify textures; default to the generic type for now
+        for (i = 0; i < mod->numtextures; i++)
+        {
+                texture_t *tex = mod->textures[i];
+                if (!tex)
+                        continue;
+
+                tex->type = TEXTYPE_DEFAULT;
+                counts[tex->type]++;
+        }
+
+        mod->texofs[0] = 0;
+        for (i = 1; i < TEXTYPE_COUNT; i++)
+        {
+                mod->texofs[i] = mod->texofs[i - 1] + counts[i - 1];
+        }
+        mod->texofs[TEXTYPE_COUNT] = mod->texofs[TEXTYPE_COUNT - 1] + counts[TEXTYPE_COUNT - 1];
+
+        if (mod->texofs[TEXTYPE_COUNT] <= 0)
+        {
+                mod->usedtextures = NULL;
+                return;
+        }
+
+        memset (cursors, 0, sizeof(cursors));
+        mod->usedtextures = (int *) Hunk_AllocName (mod->texofs[TEXTYPE_COUNT] * sizeof(int), loadname);
+
+        for (i = 0; i < mod->numtextures; i++)
+        {
+                texture_t *tex = mod->textures[i];
+                int type;
+
+                if (!tex)
+                        continue;
+
+                type = tex->type;
+                mod->usedtextures[mod->texofs[type] + cursors[type]++] = i;
+        }
 }
 
 /*
@@ -2966,6 +3013,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadEdges (&header->lumps[LUMP_EDGES], bsp2);
 	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
 	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
+	Mod_BuildTextureTypes (mod);
 	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
 	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
