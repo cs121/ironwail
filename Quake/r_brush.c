@@ -646,16 +646,22 @@ void GL_BuildBModelVertexBuffer (void)
 	{
 		m = cl.model_precache[j];
 		if (!m || m->name[0] == '*' || m->type != mod_brush)
-			continue;
+		continue;
 
 		for (i = 0; i < m->numsurfaces; i++)
 		{
-			msurface_t	*fa = &m->surfaces[i];
-			texture_t	*texture = m->textures[fa->texinfo->texnum];
-			glvert_t	*vert = &varray[varray_index];
-			float		texscalex, texscaley, useofs, lmofs;
-			medge_t		*r_pedge;
-			lightmap_t	*lm;
+			msurface_t      *fa = &m->surfaces[i];
+			texture_t       *texture = m->textures[fa->texinfo->texnum];
+			glvert_t        *vert = &varray[varray_index];
+			float           texscalex, texscaley, useofs, lmofs;
+			medge_t         *r_pedge;
+			lightmap_t      *lm;
+			vec3_t          surfnormal;
+
+                        if (fa->flags & SURF_PLANEBACK)
+                                VectorScale (fa->plane->normal, -1, surfnormal);
+                        else
+                                VectorCopy (fa->plane->normal, surfnormal);
 
 			if (fa->flags & SURF_DRAWTILED)
 			{
@@ -691,21 +697,29 @@ void GL_BuildBModelVertexBuffer (void)
 
 			for (k = 0; k < fa->numedges; k++, vert++)
 			{
-				float	*vec;
-				float	s, t;
-				int		lindex;
+				float   *vec;
+				float   s, t;
+				int             lindex;
+				int             vertindex;
 
 				lindex = m->surfedges[fa->firstedge + k];
 				if (lindex > 0)
 				{
 					r_pedge = &m->edges[lindex];
-					vec = m->vertexes[r_pedge->v[0]].position;
+					vertindex = r_pedge->v[0];
+					vec = m->vertexes[vertindex].position;
 				}
 				else
 				{
 					r_pedge = &m->edges[-lindex];
-					vec = m->vertexes[r_pedge->v[1]].position;
+					vertindex = r_pedge->v[1];
+					vec = m->vertexes[vertindex].position;
 				}
+
+				VectorCopy (vec, vert->pos);
+				VectorCopy (surfnormal, vert->normal);
+				if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
+					VectorCopy (m->vertexes[vertindex].normal, vert->normal);
 
 				s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;
 				s *= texscalex;
@@ -713,35 +727,34 @@ void GL_BuildBModelVertexBuffer (void)
 				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3] * useofs;
 				t *= texscaley;
 
-				VectorCopy (vec, vert->pos);
 				vert->st[0] = s;
 				vert->st[1] = t;
 
-				if (!(fa->flags & SURF_DRAWTILED))
+			if (!(fa->flags & SURF_DRAWTILED))
+			{
+				// match old BuildSurfaceDisplayList
+
+				// Q64 RERELEASE texture shift
+				if (texture->shift > 0)
 				{
-					// match old BuildSurfaceDisplayList
+					vert->st[0] /= (2 * texture->shift);
+					vert->st[1] /= (2 * texture->shift);
+				}
 
-					// Q64 RERELEASE texture shift
-					if (texture->shift > 0)
-					{
-						vert->st[0] /= (2 * texture->shift);
-						vert->st[1] /= (2 * texture->shift);
-					}
+				//
+				// lightmap texture coordinates
+				//
+				s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
+				s -= fa->texturemins[0];
+				s += (fa->light_s + lm->xofs) * 16;
+				s += 8;
+				s *= lmscalex;
 
-					//
-					// lightmap texture coordinates
-					//
-					s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-					s -= fa->texturemins[0];
-					s += (fa->light_s + lm->xofs) * 16;
-					s += 8;
-					s *= lmscalex;
-
-					t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-					t -= fa->texturemins[1];
-					t += (fa->light_t + lm->yofs) * 16;
-					t += 8;
-					t *= lmscaley;
+				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
+				t -= fa->texturemins[1];
+				t += (fa->light_t + lm->yofs) * 16;
+				t += 8;
+				t *= lmscaley;
 
                                         vert->st[2] = s;
                                         vert->st[3] = t;
@@ -759,12 +772,12 @@ void GL_BuildBModelVertexBuffer (void)
                                 else
                                 {
                                         // first lightmap texel is fullbright
-					vert->st[2] = 0.5f / lightmap_width;
-					vert->st[3] = 0.5f / lightmap_height;
-					vert->lmofs = 0.f;
-					vert->styles = ~0u;
-				}
+				vert->st[2] = 0.5f / lightmap_width;
+				vert->st[3] = 0.5f / lightmap_height;
+				vert->lmofs = 0.f;
+				vert->styles = ~0u;
 			}
+		}
 		}
 	}
 
