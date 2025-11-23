@@ -27,7 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
-#define INVALID_LIGHTSTYLE     255
 
 
 static qmodel_t*	loadmodel;
@@ -1587,10 +1586,11 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	int			i, count, surfnum, lofs, shift;
 	int			planenum, side, texinfon;
 
-	unsigned char *lmshift = NULL, defaultshift = 4;
-	unsigned int *lmoffset = NULL;
-	unsigned char *lmstyle8 = NULL, stylesperface = 4;
-	unsigned short *lmstyle16 = NULL;
+        unsigned char *lmshift = NULL, defaultshift = 4;
+        unsigned int *lmoffset = NULL;
+        unsigned char *lmstyle8 = NULL;
+        unsigned short *lmstyle16 = NULL;
+        int stylesperface = 4;
 	int lumpsize;
 	char scalebuf[16];
 	int facestyles;
@@ -1712,7 +1712,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			side = LittleShort(ins->side);
 			texinfon = LittleShort (ins->texinfo);
 			for (i=0 ; i<MAXLIGHTMAPS ; i++)
-				out->styles[i] = ins->styles[i];
+				out->styles[i] = ((ins->styles[i]==INVALID_LIGHTSTYLE_OLD)?INVALID_LIGHTSTYLE:ins->styles[i]);
 			lofs = LittleLong(ins->lightofs);
 			ins++;
 		}
@@ -1722,18 +1722,24 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			shift = lmshift[surfnum];
 		if (lmoffset)
 			lofs = LittleLong(lmoffset[surfnum]);
-		if (lmstyle16)
-			for (i=0 ; i<stylesperface ; i++)
-				out->styles[i] = lmstyle16[surfnum*stylesperface+i];
-		else if (lmstyle8)
-			for (i=0 ; i<stylesperface ; i++)
-			{
-				out->styles[i] = lmstyle8[surfnum*stylesperface+i];
-				if (out->styles[i] == INVALID_LIGHTSTYLE_OLD)
-					out->styles[i] = INVALID_LIGHTSTYLE;
-			}
-		for ( ; i<MAXLIGHTMAPS ; i++)
-			out->styles[i] = INVALID_LIGHTSTYLE;
+                if (lmstyle16)
+                {
+                        int copystyles = q_min(stylesperface, MAXLIGHTMAPS);
+                        for (i=0 ; i<copystyles ; i++)
+                                out->styles[i] = lmstyle16[surfnum*stylesperface+i];
+                }
+                else if (lmstyle8)
+                {
+                        int copystyles = q_min(stylesperface, MAXLIGHTMAPS);
+                        for (i=0 ; i<copystyles ; i++)
+                        {
+                                out->styles[i] = lmstyle8[surfnum*stylesperface+i];
+                                if (out->styles[i] == INVALID_LIGHTSTYLE_OLD)
+                                        out->styles[i] = INVALID_LIGHTSTYLE;
+                        }
+                }
+                for ( ; i<MAXLIGHTMAPS ; i++)
+                        out->styles[i] = INVALID_LIGHTSTYLE;
 
 		out->flags = 0;
 		if (out->numedges < 3)

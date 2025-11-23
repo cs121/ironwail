@@ -212,6 +212,14 @@ LIGHT SAMPLING
 
 vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
+static inline int LightStyleValue (unsigned short style)
+{
+	if (style < 256)
+		return d_lightstylevalue[style];
+
+	return d_lightstylevalue[0];
+}
+
 static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 {
 	byte *lightmap;
@@ -221,9 +229,9 @@ static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
 
 	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
 
-	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != 255;maps++)
+	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE;maps++)
 	{
-		scale = d_lightstylevalue[surf->styles[maps]];
+		scale = LightStyleValue(surf->styles[maps]);
 		r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
 		r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
 		r10 += lightmap[line3+0] * scale; g10 += lightmap[line3+1] * scale; b10 += lightmap[line3+2] * scale;
