@@ -682,8 +682,8 @@ Mod_TextureTypeFromName
 */
 static textype_t Mod_TextureTypeFromName (const char *texname)
 {
-	if (texname[0] == '*')
-	{
+        if (texname[0] == '*')
+        {
 		if (!strncmp (texname + 1, "lava",  4))	return TEXTYPE_LAVA;
 		if (!strncmp (texname + 1, "slime", 5))	return TEXTYPE_SLIME;
 		if (!strncmp (texname + 1, "tele",  4))	return TEXTYPE_TELE;
@@ -696,7 +696,42 @@ static textype_t Mod_TextureTypeFromName (const char *texname)
 	if (!q_strncasecmp (texname,"sky",3))
 		return TEXTYPE_SKY;
 
-	return TEXTYPE_DEFAULT;
+        return TEXTYPE_DEFAULT;
+}
+
+/*
+=================
+Mod_LoadEmissiveMap
+=================
+*/
+static gltexture_t *Mod_LoadEmissiveMap (qmodel_t *mod, const char *basename, int texflags)
+{
+        char emissivename[MAX_OSPATH];
+        int mark = Hunk_LowMark();
+        void *data;
+        int width, height;
+        enum srcformat fmt;
+        gltexture_t *tex = NULL;
+
+        q_snprintf (emissivename, sizeof(emissivename), "%s_emissive", basename);
+        data = Image_LoadImage (emissivename, &width, &height, &fmt);
+        if (!data)
+        {
+                q_snprintf (emissivename, sizeof(emissivename), "%s_glow", basename);
+                data = Image_LoadImage (emissivename, &width, &height, &fmt);
+        }
+        if (!data)
+        {
+                q_snprintf (emissivename, sizeof(emissivename), "%s_luma", basename);
+                data = Image_LoadImage (emissivename, &width, &height, &fmt);
+        }
+
+        if (data)
+                tex = TexMgr_LoadImage (mod, emissivename, width, height, fmt, data, emissivename, 0, texflags);
+
+        Hunk_FreeToLowMark (mark);
+
+        return tex;
 }
 
 /*
@@ -828,29 +863,31 @@ static void Mod_LoadTextures (lump_t *l)
 				{
 					q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
 					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				}
+                                }
 
-				//now load whatever we found
-				if (data) //load external image
-				{
-					q_strlcpy (texturename, filename, sizeof(texturename));
-					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
-						fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-				}
-				else //use the texture from the bsp file
+                                //now load whatever we found
+                                if (data) //load external image
+                                {
+                                        q_strlcpy (texturename, filename, sizeof(texturename));
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
+                                                fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                }
+                                else //use the texture from the bsp file
 				{
 					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
 					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
 					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-						SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-				}
+                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                }
 
-				Hunk_FreeToLowMark (mark);
-				if (malloced)
-					free(data);
-			}
-			else //regular texture
-			{
+                                tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+
+                                Hunk_FreeToLowMark (mark);
+                                if (malloced)
+                                        free(data);
+                        }
+                        else //regular texture
+                        {
 				int	extraflags = TEXPREF_BINDLESS;
 				if (tx->type == TEXTYPE_CUTOUT)
 					extraflags |= TEXPREF_ALPHA;
@@ -867,31 +904,17 @@ static void Mod_LoadTextures (lump_t *l)
 					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
 				}
 
-				//now load whatever we found
-				if (data) //load external image
-				{
-					char filename2[MAX_OSPATH];
-					tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
-						fmt, data, filename, 0, TEXPREF_MIPMAP | extraflags );
-
-					//now try to load glow/luma image from the same place
-					Hunk_FreeToLowMark (mark);
-					q_snprintf (filename2, sizeof(filename2), "%s_glow", filename);
-					data = Image_LoadImage (filename2, &fwidth, &fheight, &fmt);
-					if (!data)
-					{
-						q_snprintf (filename2, sizeof(filename2), "%s_luma", filename);
-						data = Image_LoadImage (filename2, &fwidth, &fheight, &fmt);
-					}
-
-					if (data)
-						tx->fullbright = TexMgr_LoadImage (loadmodel, filename2, fwidth, fheight,
-							fmt, data, filename2, 0, TEXPREF_MIPMAP | extraflags );
-				}
-				else //use the texture from the bsp file
-				{
-					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
+                                //now load whatever we found
+                                if (data) //load external image
+                                {
+                                        char filename2[MAX_OSPATH];
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
+                                                fmt, data, filename, 0, TEXPREF_MIPMAP | extraflags );
+                                }
+                                else //use the texture from the bsp file
+                                {
+                                        q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
+                                        offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
 					if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
 					{
 						if (tx->type != TEXTYPE_CUTOUT)
@@ -912,12 +935,13 @@ static void Mod_LoadTextures (lump_t *l)
 					{
 						tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
 							SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
-					}
-				}
-				if (malloced)
-					free(data);
-				Hunk_FreeToLowMark (mark);
-			}
+                                        }
+                                }
+                                tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | extraflags);
+                                if (malloced)
+                                        free(data);
+                                Hunk_FreeToLowMark (mark);
+                        }
 		}
 		//johnfitz
 	}
@@ -3580,8 +3604,9 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 				pheader->fbtextures[i][0] = NULL;
 			}
 
-			pheader->gltextures[i][3] = pheader->gltextures[i][2] = pheader->gltextures[i][1] = pheader->gltextures[i][0];
-			pheader->fbtextures[i][3] = pheader->fbtextures[i][2] = pheader->fbtextures[i][1] = pheader->fbtextures[i][0];
+                        pheader->gltextures[i][3] = pheader->gltextures[i][2] = pheader->gltextures[i][1] = pheader->gltextures[i][0];
+                        pheader->fbtextures[i][3] = pheader->fbtextures[i][2] = pheader->fbtextures[i][1] = pheader->fbtextures[i][0];
+                        pheader->emissivetextures[i][3] = pheader->emissivetextures[i][2] = pheader->emissivetextures[i][1] = pheader->emissivetextures[i][0];
 			//johnfitz
 
 			pskintype = (daliasskintype_t *)((byte *)(pskintype+1) + size);
@@ -3633,12 +3658,17 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype)
 				//johnfitz
 
 				pskintype = (daliasskintype_t *)((byte *)(pskintype) + size);
-			}
-			k = j;
-			for (/**/; j < 4; j++)
-				pheader->gltextures[i][j&3] = pheader->gltextures[i][j - k];
-		}
-	}
+                        }
+                        k = j;
+                        for (/**/; j < 4; j++)
+                                pheader->gltextures[i][j&3] = pheader->gltextures[i][j - k];
+                        {
+                                int m;
+                                for (m = k; m < 4; m++)
+                                        pheader->emissivetextures[i][m&3] = pheader->emissivetextures[i][m - k];
+                        }
+                }
+        }
 
 	return (void *)pskintype;
 }
@@ -3853,6 +3883,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	size	= sizeof(aliashdr_t) +
 		 (LittleLong (pinmodel->numframes) - 1) * sizeof (pheader->frames[0]);
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
+	memset (pheader->emissivetextures, 0, sizeof(pheader->emissivetextures));
 
 //
 // endian-adjust and copy the data, starting with the alias model header
@@ -4711,11 +4742,12 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 	MD5Anim_Begin(&anim, fname);
 	buffer = COM_Parse(buffer);
 
-	hdrsize = sizeof(*outhdr) - sizeof(outhdr->frames);
-	hdrsize += sizeof(outhdr->frames)*anim.numposes;
-	outhdr = (aliashdr_t *) Hunk_Alloc(hdrsize*numjoints);
-	outbones = (boneinfo_t *) Hunk_Alloc(sizeof(*outbones)*numjoints);
-	outposes = (bonepose_t *) Z_Malloc(sizeof(*outposes)*numjoints);
+        hdrsize = sizeof(*outhdr) - sizeof(outhdr->frames);
+        hdrsize += sizeof(outhdr->frames)*anim.numposes;
+        outhdr = (aliashdr_t *) Hunk_Alloc(hdrsize*numjoints);
+        memset (outhdr, 0, hdrsize * numjoints);
+        outbones = (boneinfo_t *) Hunk_Alloc(sizeof(*outbones)*numjoints);
+        outposes = (bonepose_t *) Z_Malloc(sizeof(*outposes)*numjoints);
 
 	MD5EXPECT("{");
 	for (j = 0; j < numjoints; j++)
@@ -4802,8 +4834,9 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 				//now load whatever we found
 				if (data) //load external image
 				{
-					surf->gltextures[surf->numskins][f] = TexMgr_LoadImage (mod, texname, fwidth, fheight, fmt, data, texname, 0, TEXPREF_ALPHA|TEXPREF_NOBRIGHT|TEXPREF_MIPMAP );
-					surf->fbtextures[surf->numskins][f] = NULL;
+                                       surf->gltextures[surf->numskins][f] = TexMgr_LoadImage (mod, texname, fwidth, fheight, fmt, data, texname, 0, TEXPREF_ALPHA|TEXPREF_NOBRIGHT|TEXPREF_MIPMAP );
+                                       surf->fbtextures[surf->numskins][f] = NULL;
+                                       surf->emissivetextures[surf->numskins][f] = NULL;
 					if (fmt == SRC_INDEXED)
 					{	//8bit base texture. use it for fullbrights.
 						if (Mod_CheckFullbrights (data, fwidth*fheight))
@@ -4811,16 +4844,16 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 					}
 					else
 					{	//we found a 32bit base texture.
-						if (!surf->fbtextures[surf->numskins][f])
-						{
-							q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_glow", com_token, surf->numskins, f);
-							surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
-						}
-						if (!surf->fbtextures[surf->numskins][f])
-						{
-							q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_luma", com_token, surf->numskins, f);
-							surf->fbtextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
-						}
+                                               if (!surf->emissivetextures[surf->numskins][f])
+                                               {
+                                                       q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_glow", com_token, surf->numskins, f);
+                                                       surf->emissivetextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
+                                               }
+                                               if (!surf->emissivetextures[surf->numskins][f])
+                                               {
+                                                       q_snprintf(texname, sizeof(texname), "progs/%s_%02u_%02u_luma", com_token, surf->numskins, f);
+                                                       surf->emissivetextures[surf->numskins][f] = TexMgr_LoadImage(mod, texname, surf->skinwidth, surf->skinheight, SRC_RGBA, NULL, texname, 0, TEXPREF_MIPMAP);
+                                               }
 					}
 
 					//now try to load glow/luma image from the same place
@@ -4833,22 +4866,26 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 				break;	//no images loaded...
 
 			//this stuff is hideous.
-			if (f < 2)
-			{
-				surf->gltextures[surf->numskins][1] = surf->gltextures[surf->numskins][0];
-				surf->fbtextures[surf->numskins][1] = surf->fbtextures[surf->numskins][0];
-			}
+                        if (f < 2)
+                        {
+                                surf->gltextures[surf->numskins][1] = surf->gltextures[surf->numskins][0];
+                                surf->fbtextures[surf->numskins][1] = surf->fbtextures[surf->numskins][0];
+                                surf->emissivetextures[surf->numskins][1] = surf->emissivetextures[surf->numskins][0];
+                        }
 			if (f == 3)
 				Con_Warning("progs/%s_%02u_##: 3 skinframes found...\n", com_token, surf->numskins);
-			if (f < 4)
-			{
-				surf->gltextures[surf->numskins][3] = surf->gltextures[surf->numskins][1];
-				surf->gltextures[surf->numskins][2] = surf->gltextures[surf->numskins][0];
+                        if (f < 4)
+                        {
+                                surf->gltextures[surf->numskins][3] = surf->gltextures[surf->numskins][1];
+                                surf->gltextures[surf->numskins][2] = surf->gltextures[surf->numskins][0];
 
-				surf->fbtextures[surf->numskins][3] = surf->fbtextures[surf->numskins][1];
-				surf->fbtextures[surf->numskins][2] = surf->fbtextures[surf->numskins][0];
-			}
-		}
+                                surf->fbtextures[surf->numskins][3] = surf->fbtextures[surf->numskins][1];
+                                surf->fbtextures[surf->numskins][2] = surf->fbtextures[surf->numskins][0];
+
+                                surf->emissivetextures[surf->numskins][3] = surf->emissivetextures[surf->numskins][1];
+                                surf->emissivetextures[surf->numskins][2] = surf->emissivetextures[surf->numskins][0];
+                        }
+                }
 		surf->skinwidth = surf->gltextures[0][0]?surf->gltextures[0][0]->width:1;
 		surf->skinheight = surf->gltextures[0][0]?surf->gltextures[0][0]->height:1;
 		buffer = COM_Parse(buffer);
