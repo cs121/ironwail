@@ -29,7 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define INVALID_LIGHTSTYLE_OLD 255
 #define INVALID_LIGHTSTYLE     255
 
-struct decoupled_lm_info_s;
 
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
@@ -1520,7 +1519,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	int lumpsize;
 	char scalebuf[16];
 	int facestyles;
-	struct decoupled_lm_info_s *decoupledlm = NULL;
+        unsigned char *decoupledlm = NULL;
 
 	if (bsp2)
 	{
@@ -1547,8 +1546,8 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 	if (!mod_ignorelmscale.value)
 	{
-		decoupledlm = Q1BSPX_FindLump("DECOUPLED_LM", &lumpsize); //RGB packed data
-		if (decoupledlm && lumpsize == count*sizeof(*decoupledlm))
+                decoupledlm = Q1BSPX_FindLump("DECOUPLED_LM", &lumpsize); //RGB packed data
+                if (decoupledlm && lumpsize >= count)
 		{	//basically stomps over the lmshift+lmoffset stuff above. lmstyle/lmstyle16+lit/hdr+lux info is still needed
 			lmshift = NULL;
 			lmoffset = NULL;
