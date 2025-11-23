@@ -154,6 +154,7 @@ typedef struct msurface_s
 
 	unsigned short	styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
+	byte		*luxsamples;		// surface-space light directions
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
@@ -493,7 +494,9 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
+	byte		*lightdirdata;
 	int			lightdatasamples;
+	int			lightdirsamples;
 	char		*entities;
 
 	qboolean	litfile;

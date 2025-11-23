@@ -485,10 +485,10 @@ static int bspx_lump_usage_count;
 //LMSHIFT (.lit2)
 //LMOFFSET (LMSHIFT helper)
 //LMSTYLE (LMSHIFT helper)
+//LIGHTINGDIR (.lux)
 
 //unsupported lumps ('documented' elsewhere):
 //BRUSHLIST (because hulls suck)
-//LIGHTINGDIR (.lux)
 //LIGHTING_E5BGR9 (hdr lighting)
 //VERTEXNORMALS (smooth shading with dlights/rtlights)
 static void Q1BSPX_ResetUsage(void)
@@ -1020,6 +1020,8 @@ static void Mod_LoadLighting (lump_t *l)
 
 	loadmodel->lightdata = NULL;
 	loadmodel->lightdatasamples = 0;
+	loadmodel->lightdirdata = NULL;
+	loadmodel->lightdirsamples = 0;
 	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
 	// LordHavoc: check for a .lit file
@@ -1077,7 +1079,7 @@ static void Mod_LoadLighting (lump_t *l)
 					Con_DPrintf2("%s loaded (ldr)\n", litfilename);
 					loadmodel->lightdata = data + 8;
 					loadmodel->lightdatasamples = l->filelen;
-					return;
+					goto loadlightdir;
 				}
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*3, (unsigned)com_filesize);
@@ -1092,7 +1094,7 @@ static void Mod_LoadLighting (lump_t *l)
 					loadmodel->flags |= MOD_HDRLIGHTING;
 					for (i = 0; i < loadmodel->lightdatasamples; i++)
 						((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
-					return;
+					goto loadlightdir;
 				}
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*4, (unsigned)com_filesize);
@@ -1111,7 +1113,7 @@ static void Mod_LoadLighting (lump_t *l)
 	}
 	// LordHavoc: no .lit found, expand the white lighting data to color
 	if (!l->filelen)
-		return;
+		goto loadlightdir;
 
 	// Quake64 bsp lighmap data
 	if (loadmodel->bspversion == BSPVERSION_QUAKE64)
@@ -1133,7 +1135,7 @@ static void Mod_LoadLighting (lump_t *l)
 			*out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
 			*out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
 		}
-		return;
+		goto loadlightdir;
 	}
 
         if (gl_loadlitfiles.value > 0) // woods #loadlits
@@ -1149,7 +1151,7 @@ static void Mod_LoadLighting (lump_t *l)
                         Con_DPrintf("bspx hdr lighting loaded\n");
                         for (i = 0; i < loadmodel->lightdatasamples; i++)    // native endian...
                                 ((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
-                        return;
+                        goto loadlightdir;
                 }
                 in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
                 if (in && (!l->filelen || (bspxsize && bspxsize == l->filelen * 3)))
@@ -1159,7 +1161,7 @@ static void Mod_LoadLighting (lump_t *l)
                         memcpy(loadmodel->lightdata, in, bspxsize);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
                         Con_DPrintf("bspx ldr lighting loaded\n");
-                        return;
+                        goto loadlightdir;
                 }
         }
 	else {
@@ -1180,11 +1182,38 @@ static void Mod_LoadLighting (lump_t *l)
 			*out++ = d;
 			*out++ = d;
 		}
-		return;
+		goto loadlightdir;
 	}
+
+
+loadlightdir:
+        in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
+        if (in && bspxsize > 0)
+        {
+                int samples = bspxsize / 3;
+                int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
+
+                if (bspxsize % 3)
+                {
+                        Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+                        Con_DWarning("LIGHTINGDIR lump size %d is not a multiple of 3 bytes\n", bspxsize);
+                }
+                else if (expected_samples && samples != expected_samples)
+                {
+                        Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+                        Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
+                }
+                else
+                {
+                        loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
+                        loadmodel->lightdirsamples = samples;
+                        memcpy(loadmodel->lightdirdata, in, bspxsize);
+                        Q1BSPX_MarkUsed("LIGHTINGDIR");
+                        Con_DPrintf("bspx light directions loaded\n");
+                }
+        }
+        return;
 }
-
-
 /*
 =================
 Mod_LoadVisibility
@@ -1763,19 +1792,30 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 		for (facestyles = 0 ; facestyles<MAXLIGHTMAPS && out->styles[facestyles] != INVALID_LIGHTSTYLE ; facestyles++)
 			;	//count the styles so we can bound-check properly.
 		if (lofs == -1)
+		{
 			out->samples = NULL;
+			out->luxsamples = NULL;
+		}
 		else
 		{
 			int smax = (out->extents[0] >> 4) + 1;
 			int tmax = (out->extents[1] >> 4) + 1;
+			int facesamples = facestyles * smax * tmax;
 
 			// use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
-			if (lofs + facestyles * smax * tmax > loadmodel->lightdatasamples)
+			if (lofs + facesamples > loadmodel->lightdatasamples)
 				out->samples = NULL; //corrupt...
 			else if (loadmodel->flags & MOD_HDRLIGHTING)
 				out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned
 			else
 				out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+
+			if (loadmodel->lightdirdata && lofs + facesamples <= loadmodel->lightdirsamples)
+				out->luxsamples = loadmodel->lightdirdata + (lofs * 3);
+			else if (loadmodel->lightdirdata && loadmodel->lightdirsamples)
+				Con_DWarning("LIGHTINGDIR data too small for face %d\n", surfnum);
+			else
+				out->luxsamples = NULL;
 		}
 
 		texture = loadmodel->textures[out->texinfo->texnum];
