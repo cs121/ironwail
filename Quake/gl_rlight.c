@@ -22,61 +22,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
-#include "gl_shadow.h"
-
-enum
-{
-        BSPX_INDEX_MAP_CAP = MAX_DLIGHTS
-};
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 
 gpulightbuffer_t r_lightbuffer;
-
-static void R_FillGpuLightFromBspx (const bspx_static_light_t *src, gpulight_t *dst)
-{
-        float intensity = (src->intensity > 0.0f) ? src->intensity : 0.0f;
-
-        VectorCopy (src->origin, dst->pos);
-        dst->radius = (src->radius > 0.0f) ? src->radius : 0.0f;
-        dst->color[0] = q_max (0.f, src->color[0] * intensity);
-        dst->color[1] = q_max (0.f, src->color[1] * intensity);
-        dst->color[2] = q_max (0.f, src->color[2] * intensity);
-        dst->minlight = 0.0f;
-}
-
-static int R_AppendBspxLights (const bspx_static_light_t *lights, int count, int *index_map, int index_map_cap)
-{
-        int appended = 0;
-
-        if (!lights || count <= 0)
-                return 0;
-
-        if (index_map && index_map_cap > 0)
-        {
-                for (int i = 0; i < index_map_cap; ++i)
-                        index_map[i] = -1;
-        }
-
-        for (int i = 0; i < count && r_framedata.numlights < MAX_DLIGHTS; ++i)
-        {
-                const bspx_static_light_t *src = &lights[i];
-                gpulight_t *dst;
-
-                if (src->radius <= 0.0f)
-                        continue;
-
-                dst = &r_lightbuffer.lights[r_framedata.numlights++];
-                if (index_map && i < index_map_cap)
-                        index_map[i] = r_framedata.numlights - 1;
-                R_FillGpuLightFromBspx (src, dst);
-                appended++;
-        }
-
-        return appended;
-}
 
 /*
 ==================
@@ -187,160 +138,50 @@ void R_PushDlights (void)
 	GLbyte			*ofs;
 	gpu_cluster_inputs_t cluster_inputs;
 
-        int dynamic_count = 0;
-        int static_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_lights : 0;
-        int static_shadow_light_count = cl.worldmodel ? cl.worldmodel->bspx_num_static_shadow_lights : 0;
-        int static_light_map_count = q_min (static_light_count, BSPX_INDEX_MAP_CAP);
-        int static_shadow_light_map_count = q_min (static_shadow_light_count, BSPX_INDEX_MAP_CAP);
+	r_framedata.numlights = 0;
 
-        int static_light_index_map[BSPX_INDEX_MAP_CAP];
-        int static_shadow_light_index_map[BSPX_INDEX_MAP_CAP];
+	if (r_dynamic.value)
+	{
+		dlight_t *l;
+		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
+		{
+			gpulight_t *out;
+			qboolean cull = false;
 
-        for (int i = 0; i < BSPX_INDEX_MAP_CAP; ++i)
-        {
-                static_light_index_map[i] = -1;
-                static_shadow_light_index_map[i] = -1;
-        }
+			if (l->spawn > cl.time)
+			{
+				l->die = 0.f;
+				continue;
+			}
 
-        r_framedata.numlights = 0;
+			if (l->die < cl.time || !l->radius)
+				continue;
 
-        if (r_dynamic.value)
-        {
-                dlight_t *l;
-                for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
-                {
-                        gpulight_t *out;
-                        qboolean cull = false;
+			for (j = 0; j < 4; j++)
+			{
+				mplane_t *p = &frustum[j];
+				if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
+				{
+					cull = true;
+					break;
+				}
+			}
+			if (cull)
+				continue;
 
-                        if (l->spawn > cl.time)
-                        {
-                                l->die = 0.f;
-                                continue;
-                        }
+			out = &r_lightbuffer.lights[r_framedata.numlights++];
+			out->pos[0]   = l->origin[0];
+			out->pos[1]   = l->origin[1];
+			out->pos[2]   = l->origin[2];
+			out->radius   = l->radius;
+			out->color[0] = l->color[0];
+			out->color[1] = l->color[1];
+			out->color[2] = l->color[2];
+			out->minlight = l->minlight;
+		}
+	}
 
-                        if (l->die < cl.time || !l->radius)
-                                continue;
-
-                        for (j = 0; j < 4; j++)
-                        {
-                                mplane_t *p = &frustum[j];
-                                if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
-                                {
-                                        cull = true;
-                                        break;
-                                }
-                        }
-                        if (cull)
-                                continue;
-
-                        out = &r_lightbuffer.lights[r_framedata.numlights++];
-                        out->pos[0]   = l->origin[0];
-                        out->pos[1]   = l->origin[1];
-                        out->pos[2]   = l->origin[2];
-                        out->radius   = l->radius;
-                        out->color[0] = l->color[0];
-                        out->color[1] = l->color[1];
-                        out->color[2] = l->color[2];
-                        out->minlight = l->minlight;
-                }
-
-                dynamic_count = r_framedata.numlights;
-
-                if (cl.worldmodel)
-                {
-                        R_AppendBspxLights (cl.worldmodel->bspx_static_lights,
-                                cl.worldmodel->bspx_num_static_lights,
-                                (static_light_map_count > 0) ? static_light_index_map : NULL,
-                                static_light_map_count);
-                        R_AppendBspxLights (cl.worldmodel->bspx_static_shadow_lights,
-                                cl.worldmodel->bspx_num_static_shadow_lights,
-                                (static_shadow_light_map_count > 0) ? static_shadow_light_index_map : NULL,
-                                static_shadow_light_map_count);
-                }
-        }
-
-        if (cl.worldmodel &&
-                (cl.worldmodel->bspx_num_static_shadow_lights > 0 ||
-                 cl.worldmodel->bspx_num_static_shadow_indices > 0))
-        {
-                gpulight_t shadow_lights[MAX_DLIGHTS];
-                int shadow_count = 0;
-
-                for (i = 0; i < dynamic_count && shadow_count < MAX_DLIGHTS; ++i)
-                        shadow_lights[shadow_count++] = r_lightbuffer.lights[i];
-
-                if (cl.worldmodel->bspx_static_shadow_lights &&
-                        cl.worldmodel->bspx_num_static_shadow_lights > 0)
-                {
-                        int count = cl.worldmodel->bspx_num_static_shadow_lights;
-
-                        for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
-                        {
-                                int mapped_index = (k < static_shadow_light_map_count) ?
-                                        static_shadow_light_index_map[k] : -1;
-
-                                if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
-                                        continue;
-
-                                shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
-                        }
-                }
-
-                if (cl.worldmodel->bspx_static_shadow_indices &&
-                        cl.worldmodel->bspx_num_static_shadow_indices > 0)
-                {
-                        const int *indices = cl.worldmodel->bspx_static_shadow_indices;
-                        int count = cl.worldmodel->bspx_num_static_shadow_indices;
-                        int maxlights = cl.worldmodel->bspx_num_static_lights;
-
-                        if (cl.worldmodel->bspx_static_lights && maxlights > 0)
-                        {
-                                for (int k = 0; k < count && shadow_count < MAX_DLIGHTS; ++k)
-                                {
-                                        int idx = indices[k];
-                                        qboolean duplicate = false;
-
-                                        if (idx < 0 || idx >= maxlights)
-                                                continue;
-
-                                        if (static_light_map_count <= 0)
-                                                continue;
-
-                                        int mapped_index = (idx < static_light_map_count) ?
-                                                static_light_index_map[idx] : -1;
-
-                                        if (mapped_index < 0 || mapped_index >= r_framedata.numlights)
-                                                continue;
-
-                                        for (int n = dynamic_count; n < shadow_count; ++n)
-                                        {
-                                                const gpulight_t *existing = &shadow_lights[n];
-                                                const gpulight_t *candidate = &r_lightbuffer.lights[mapped_index];
-                                                if (fabsf(existing->pos[0] - candidate->pos[0]) < 0.01f &&
-                                                    fabsf(existing->pos[1] - candidate->pos[1]) < 0.01f &&
-                                                    fabsf(existing->pos[2] - candidate->pos[2]) < 0.01f &&
-                                                    fabsf(existing->radius - candidate->radius) < 0.01f)
-                                                {
-                                                        duplicate = true;
-                                                        break;
-                                                }
-                                        }
-                                        if (duplicate)
-                                                continue;
-
-                                        shadow_lights[shadow_count++] = r_lightbuffer.lights[mapped_index];
-                                }
-                        }
-                }
-
-                R_ShadowSyncWorldLights (shadow_lights, shadow_count);
-        }
-        else
-        {
-                R_ShadowSyncWorldLights (r_lightbuffer.lights, r_framedata.numlights);
-        }
-
-        GL_BeginGroup ("Light clustering");
+	GL_BeginGroup ("Light clustering");
 
 	R_UploadFrameData ();
 
@@ -456,19 +297,17 @@ loc0:
 		// ericw -- added double casts to force 64-bit precision.
 		// Without them the zombie at the start of jam3_ericw.bsp was
 		// incorrectly being lit up in SSE builds.
-			double dsfrac = DoublePrecisionDotProduct (mid, surf->lmvecs[0]) + surf->lmvecs[0][3];
-			double dtfrac = DoublePrecisionDotProduct (mid, surf->lmvecs[1]) + surf->lmvecs[1][3];
-			int surfwidth = (surf->extents[0] >> 4);
-			int surfheight = (surf->extents[1] >> 4);
+			ds = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+			dt = (int) ((double) DoublePrecisionDotProduct (mid, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
 
-			if (dsfrac < 0 || dtfrac < 0)
+			if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
 				continue;
 
-			if (dsfrac > surfwidth || dtfrac > surfheight)
-				continue;
+			ds -= surf->texturemins[0];
+			dt -= surf->texturemins[1];
 
-			ds = (int) (dsfrac * 16.0);
-			dt = (int) (dtfrac * 16.0);
+			if (ds > surf->extents[0] || dt > surf->extents[1])
+				continue;
 
 			if (surf->plane->type < 3)
 			{

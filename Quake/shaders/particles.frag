@@ -13,10 +13,10 @@ float bayer01(ivec2 coord)
 	coord &= 15;
 	coord.y ^= coord.x;
 	uint v = uint(coord.y | (coord.x << 8));	// 0  0  0  0 | x3 x2 x1 x0 |  0  0  0  0 | y3 y2 y1 y0
-	v = (v ^ (v << 2)) & 0x3333;							// 0  0 x3 x2 |  0  0 x1 x0 |  0  0 y3 y2 |  0  0 y1 y0
-	v = (v ^ (v << 1)) & 0x5555;							// 0 x3  0 x2 |  0 x1  0 x0 |  0 y3  0 y2 |  0 y1  0 y0
-	v |= v >> 7;										// 0 x3  0 x2 |  0 x1  0 x0 | x3 y3 x2 y2 | x1 y1 x0 y0
-	v = bitfieldReverse(v) >> 24;						// 0  0  0  0 |  0  0  0  0 | y0 x0 y1 x1 | y2 x2 y3 x3
+	v = (v ^ (v << 2)) & 0x3333;				// 0  0 x3 x2 |  0  0 x1 x0 |  0  0 y3 y2 |  0  0 y1 y0
+	v = (v ^ (v << 1)) & 0x5555;				// 0 x3  0 x2 |  0 x1  0 x0 |  0 y3  0 y2 |  0 y1  0 y0
+	v |= v >> 7;								// 0 x3  0 x2 |  0 x1  0 x0 | x3 y3 x2 y2 | x1 y1 x0 y0
+	v = bitfieldReverse(v) >> 24;				// 0  0  0  0 |  0  0  0  0 | y0 x0 y1 x1 | y2 x2 y3 x3
 	return float(v) * (1.0/256.0);
 }
 
@@ -26,7 +26,7 @@ float bayer(ivec2 coord)
 }
 
 // Hash without Sine
-// https://www.shadertoy.com/view/4djSRW
+// https://www.shadertoy.com/view/4djSRW 
 float whitenoise01(vec2 p)
 {
 	vec3 p3 = fract(vec3(p.xyx) * .1031);
@@ -41,7 +41,7 @@ float whitenoise(vec2 p)
 
 // Convert uniform distribution to triangle-shaped distribution
 // Input in [0..1], output in [-1..1]
-// Based on https://www.shadertoy.com/view/4t2SDh
+// Based on https://www.shadertoy.com/view/4t2SDh 
 float tri(float x)
 {
 	float orig = x * 2.0 - 1.0;
@@ -55,17 +55,13 @@ float tri(float x)
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
-layout(binding=0) uniform sampler2D ParticleAtlas;
-
 layout(location=0) in vec2 in_uv;
 layout(location=1) in vec4 in_color;
 layout(location=2) in vec3 in_pos;
-layout(location=3) in vec4 in_params;
-layout(location=4) in vec2 in_corner;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
-        vec4 OUT_COLOR;
+	vec4 OUT_COLOR;
 	layout(location=0) out vec4 out_accum;
 	layout(location=1) out float out_reveal;
 
@@ -98,46 +94,28 @@ layout(location=4) in vec2 in_corner;
 
 	#define main main_body
 #else
-        layout(location=0) out vec4 OUT_COLOR;
+	layout(location=0) out vec4 OUT_COLOR;
         layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
-const int BLEND_ALPHA = 0;
-const int BLEND_ADD = 1;
-const int BLEND_INVMOD = 2;
-
 void main()
 {
-        vec4 texel = texture(ParticleAtlas, in_uv);
-        float coverage = max(texel.a, max(texel.r, max(texel.g, texel.b)));
-        int blend = int(in_params.w + 0.5);
-        if (blend == BLEND_ADD || blend == BLEND_INVMOD)
-        {
-                texel.a = 1.0;
-        }
-        else
-        {
-                texel.a = coverage;
-        }
-        vec4 color = in_color * texel;
+	out_fragcolor = in_color;
 #if !OIT
         out_velocity = vec4(0.0);
 #endif
-        float glow = in_params.x;
-	color.rgb *= (1.0 + glow);
-	color.rgb = ApplyFog(color.rgb, in_pos);
-	float radius = length(in_corner * in_params.y);
+	out_fragcolor.rgb = ApplyFog(out_fragcolor.rgb, in_pos);
+	float radius = length(in_uv);
 	float pixel = fwidth(radius);
-	color.a *= clamp((1. - radius) / pixel, 0., 1.);
+	out_fragcolor.a *= clamp((1. - radius) / pixel, 0., 1.);
 #if DITHER
 	if (Fog.w > 0.)
 	{
-		color.rgb = sqrt(color.rgb);
-		color.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
-		color.rgb *= color.rgb;
+		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
+		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
+		out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
-	color.rgb += SUPPRESS_BANDING() * ScreenDither;
+	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
-	out_fragcolor = color;
 }

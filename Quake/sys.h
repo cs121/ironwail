@@ -83,7 +83,6 @@ void Sys_FileClose (int handle);
 void Sys_FileSeek (int handle, int position);
 int Sys_FileRead (int handle, void *dest, int count);
 int Sys_FileWrite (int handle,const void *data, int count);
-int Sys_FileOpenMemory (void *data, size_t length);
 qboolean Sys_FileExists (const char *path);
 qboolean Sys_GetFileTime (const char *path, time_t *out);
 void Sys_mkdir (const char *path);
@@ -92,7 +91,6 @@ int Sys_fseek (FILE *file, qfileofs_t ofs, int origin);
 qfileofs_t Sys_ftell (FILE *file);
 int Sys_remove (const char *path);
 int Sys_rename (const char *oldname, const char *newname);
-FILE *Sys_TempFile (void);
 
 typedef enum {
 	FA_DIRECTORY	= 1 << 0,

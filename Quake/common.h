@@ -108,9 +108,6 @@ GENERIC_TYPES (IMPL_GENERIC_FUNCS, NO_COMMA)
 	 (x) > (_maxval) ? (_maxval) : (x))
 #endif
 
-#define q_clamp(value, _minval, _maxval)      CLAMP((_minval), (value), (_maxval))
-#define clamp(value, _minval, _maxval)        CLAMP((_minval), (value), (_maxval))
-
 #define LERP(a, b, t) ((a) + ((b)-(a))*(t))
 
 #define countof(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -262,7 +259,6 @@ float Q_atof (const char *str);
 
 
 #include "strl_fn.h"
-#include "miniz.h"
 
 /* locale-insensitive strcasecmp replacement functions: */
 extern int q_strcasecmp (const char * s1, const char * s2);
@@ -329,7 +325,6 @@ void COM_SwitchGame (const char *paths);
 const char *COM_SkipPath (const char *pathname);
 const char *COM_SkipSpace (const char *str);
 void COM_StripExtension (const char *in, char *out, size_t outsize);
-qboolean COM_StripModelExtension (const char *in, char *out, size_t outsize);
 void COM_FileBase (const char *in, char *out, size_t outsize);
 void COM_AddExtension (char *path, const char *extension, size_t len);
 #if 0 /* COM_DefaultExtension can be dangerous */
@@ -380,14 +375,7 @@ typedef struct
 {
 	char	name[MAX_QPATH];
 	int		filepos, filelen;
-	int		zip_index;
 } packfile_t;
-
-typedef enum
-{
-	PACKTYPE_PAK,
-	PACKTYPE_PK3
-} packtype_t;
 
 typedef struct pack_s
 {
@@ -395,8 +383,6 @@ typedef struct pack_s
 	int		handle;
 	int		numfiles;
 	packfile_t	*files;
-	packtype_t	type;
-	mz_zip_archive	*zip;
 } pack_t;
 
 typedef struct searchpath_s

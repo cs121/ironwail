@@ -138,7 +138,7 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 	}
 
 	q_snprintf (header, sizeof (header),
-		"#version 460\n"
+		"#version 430\n"
 		"\n"
 		"#define BINDLESS %d\n"
 		"#define REVERSED_Z %d\n",
@@ -536,7 +536,6 @@ void GL_CreateShaders (void)
                 glprogs.skylayers[dither] = GL_CreateProgram (GLSL_PATH("sky_layers.vert"), GLSL_PATH("sky_layers.frag"), "sky layers|DITHER %d", dither);
                 glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
                 glprogs.sprites[dither] = GL_CreateProgram (GLSL_PATH("sprites.vert"), GLSL_PATH("sprites.frag"), "sprites|DITHER %d", dither);
-                glprogs.decals[dither] = GL_CreateProgram (GLSL_PATH("decals.vert"), GLSL_PATH("decals.frag"), "decals|DITHER %d", dither);
         }
         glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 

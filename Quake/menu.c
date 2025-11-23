@@ -66,10 +66,6 @@ extern cvar_t r_alphasort;
 extern cvar_t r_md5;
 extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
-extern cvar_t r_dof;
-extern cvar_t r_dof_strength;
-extern cvar_t r_filmgrain;
-extern cvar_t r_motionblur;
 extern cvar_t snd_waterfx;
 extern cvar_t joy_deadzone_look;
 extern cvar_t joy_deadzone_move;
@@ -2965,8 +2961,8 @@ static const char *VID_Menu_GetParticlesDesc (void)
 	switch ((int)r_particles.value)
 	{
 	case 0: return "Off";
-	case 1: return "Classic";
-	case 2: return "DarkPlaces";
+	case 1: return "glQuake";
+	case 2: return "Classic";
 	default: return "";
 	}
 }
@@ -3177,12 +3173,8 @@ void M_Menu_Gamepad_f (void)
 		item (SPACER,					"")								\
 		item (OPT_ALPHAMODE,			"Transparency")					\
 		item (OPT_PARTICLES,			"Particles")					\
-		item (OPT_DOF,				"Depth of Field")				\
-		item (OPT_FILMGRAIN,			"Film Grain")					\
-		item (OPT_MOTIONBLUR,			"Motion Blur")				\
 		item (OPT_WATERWARP,			"Underwater FX")				\
 		item (OPT_DLIGHTS,				"Dynamic Lights")				\
-		item (OPT_IWSHADER,			"Material Shaders")			\
 	end_menu ()															\
 	begin_menu (INTERFACE_OPTIONS, m_interface, TITLE("Interface"))		\
 		item (OPT_UISCALE,				"Scale")						\
@@ -3358,26 +3350,6 @@ struct
 
 qboolean slider_grab;
 float target_scale_frac;
-
-static cvar_t *M_GetIWShaderCvar (void)
-{
-        static cvar_t *cached;
-
-        if (!cached)
-                cached = Cvar_FindVar ("r_iwshader");
-
-        return cached;
-}
-
-static qboolean M_IWShaderEnabled (void)
-{
-        cvar_t *cvar = M_GetIWShaderCvar ();
-
-        if (cvar)
-                return cvar->value != 0.f;
-
-        return Cvar_VariableValue ("r_iwshader") != 0.0;
-}
 
 void M_Options_SelectMods (void)
 {
@@ -3894,15 +3866,6 @@ void M_AdjustSliders (int dir)
 	case OPT_PARTICLES:
 		Cvar_SetValueQuick (&r_particles, (int)(q_max (r_particles.value, 0.f) + 3 + dir) % 3);
 		break;
-	case OPT_DOF:
-		Cvar_SetValueQuick (&r_dof, r_dof.value > 0.f ? 0.f : 1.f);
-		break;
-	case OPT_FILMGRAIN:
-		Cvar_SetValueQuick (&r_filmgrain, CLAMP (0.f, r_filmgrain.value + dir * 0.1f, 1.f));
-		break;
-	case OPT_MOTIONBLUR:
-		Cvar_SetValueQuick (&r_motionblur, CLAMP (0.f, r_motionblur.value + dir * 0.1f, 1.f));
-		break;
 	case OPT_WATERWARP:
 		Cvar_SetValueQuick (&r_waterwarp, (int)(q_max (r_waterwarp.value, 0.f) + 3 + dir) % 3);
 		break;
@@ -3911,15 +3874,6 @@ void M_AdjustSliders (int dir)
 		break;
         case OPT_DLIGHTS:
                 Cbuf_AddText ("toggle r_dynamic\n");
-                break;
-        case OPT_IWSHADER:
-        {
-                cvar_t *iwshader = M_GetIWShaderCvar ();
-                if (iwshader)
-                        Cvar_SetValueQuick (iwshader, iwshader->value ? 0.f : 1.f);
-                else
-                        Cbuf_AddText ("toggle r_iwshader\n");
-        }
                 break;
 	case OPT_SOFTEMU:
 		Cvar_SetValueQuick (&r_softemu, (int)(q_max (r_softemu.value, 0.f) + 4 + dir) % 4);
@@ -4132,12 +4086,6 @@ qboolean M_SetSliderValue (int option, float f)
 	case OPT_FSAA:
 		f = Exp2f (floor (f * Log2f (framebufs.max_samples) + 0.5f));
 		Cvar_SetValueQuick (&vid_fsaa, CLAMP (1, (int)f, framebufs.max_samples));
-		return true;
-	case OPT_FILMGRAIN:
-		Cvar_SetValueQuick (&r_filmgrain, f);
-		return true;
-	case OPT_MOTIONBLUR:
-		Cvar_SetValueQuick (&r_motionblur, f);
 		return true;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = f * 10.f + 1.f;
@@ -4535,23 +4483,6 @@ static void M_Options_DrawItem (int y, int item)
 	case OPT_PARTICLES:
 		M_Print (x, y, VID_Menu_GetParticlesDesc ());
 		break;
-	case OPT_DOF:
-		M_DrawCheckbox (x, y, (r_dof.value > 0.f) && (r_dof_strength.value > 0.f));
-		break;
-	case OPT_FILMGRAIN:
-		{
-			float intensity = CLAMP (0.f, r_filmgrain.value, 1.f);
-			const char *label = intensity > 0.f ? va ("%.0f%%", intensity * 100.f) : "Off";
-			M_DrawSlider (x, y, intensity, label);
-		}
-		break;
-	case OPT_MOTIONBLUR:
-		{
-			float strength = CLAMP (0.f, r_motionblur.value, 1.f);
-			const char *label = strength > 0.f ? va ("%.0f%%", strength * 100.f) : "Off";
-			M_DrawSlider (x, y, strength, label);
-		}
-		break;
 	case OPT_WATERWARP:
 		M_Print (x, y, VID_Menu_GetWaterWarpDesc ());
 		break;
@@ -4560,9 +4491,6 @@ static void M_Options_DrawItem (int y, int item)
 		break;
         case OPT_DLIGHTS:
                 M_DrawCheckbox (x, y, r_dynamic.value);
-                break;
-        case OPT_IWSHADER:
-                M_DrawCheckbox (x, y, M_IWShaderEnabled ());
                 break;
 	case OPT_SOFTEMU:
 		M_Print (x, y, VID_Menu_GetSoftEmuDesc ());
@@ -5972,10 +5900,8 @@ void M_Menu_GameOptions_f (void)
 	m_state = m_gameoptions;
 	m_entersound = true;
 	if (maxplayers == 0)
-		maxplayers = svs.maxclientslimit;
+		maxplayers = svs.maxclients;
 	if (maxplayers < 2)
-		maxplayers = svs.maxclientslimit;
-	if (maxplayers > svs.maxclientslimit)
 		maxplayers = svs.maxclientslimit;
 }
 

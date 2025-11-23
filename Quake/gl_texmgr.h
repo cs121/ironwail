@@ -24,8 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //gl_texmgr.h -- fitzquake's texture manager. manages opengl texture images
 
-typedef struct qmodel_s qmodel_t;
-
 typedef enum
 {
 	TEXPREF_NONE			= 0x0000,
@@ -50,7 +48,7 @@ typedef enum
 	TEXPREF_HASALPHA		= (TEXPREF_ALPHA|TEXPREF_ALPHABRIGHT), // texture has alpha channel
 } textureflags_t;
 
-enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_DELUXMAP};
+enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA};
 
 typedef uintptr_t src_offset_t;
 

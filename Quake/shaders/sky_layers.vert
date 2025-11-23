@@ -8,8 +8,6 @@
 
 #include "frame_uniforms.glsl"
 
-#define MAX_EFFECT_STAGES 4
-
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
 	float fog = exp2(-Fog.w * dot(p, p));
@@ -25,51 +23,16 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
-	uvec2	envhandle;
 #else
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-        vec4    tcmod_matrix;
-        vec4    tcmod_translate;
-        vec4    tcmod_params0;
-        vec4    tcmod_params1;
-        vec4    tcgen_params;
-        vec4    tcgen_s;
-        vec4    tcgen_t;
-        vec4    emissive_matrix;
-        vec4    emissive_translate;
-        vec4    emissive_color;
-        vec4    fog_color;
-        vec4    alpha_params0;
-        vec4    alpha_params1;
-        vec4    alpha_params2;
-	vec4	env_params0;
-	vec4	env_params1;
-	vec4	env_params2;
-	vec4	effect_info;
-	vec4	effect_matrix[MAX_EFFECT_STAGES];
-	vec4	effect_translate[MAX_EFFECT_STAGES];
-	vec4	effect_color[MAX_EFFECT_STAGES];
-	vec4	effect_alpha_params0[MAX_EFFECT_STAGES];
-	vec4	effect_alpha_params1[MAX_EFFECT_STAGES];
-	vec4	effect_alpha_params2[MAX_EFFECT_STAGES];
-	vec4	effect_tcmod_params0[MAX_EFFECT_STAGES];
-	vec4	effect_tcmod_params1[MAX_EFFECT_STAGES];
-	vec4	effect_flags[MAX_EFFECT_STAGES];
-#if BINDLESS
-	uvec2	effect_handles[MAX_EFFECT_STAGES];
-#endif
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
 	CF_USE_FULLBRIGHT = 2u,
 	CF_NOLIGHTMAP = 4u,
-	CF_USE_EMISSIVE = 8u,
-	CF_TC_STRETCH = 32u,
-	CF_TC_TURB = 64u,
-	CF_TC_ENVMAP = 128u,
-	CF_CUSTOM_FOG = 256u
+	CF_USE_EMISSIVE = 8u
 ;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer

@@ -26,8 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
-#include "render.h"
-#include "renderer/r_iwshader.h"
 
 const char *svc_strings[] =
 {
@@ -400,18 +398,14 @@ void CL_ParseServerInfo (void)
 // now we try to load everything else until a cache allocation fails
 //
 
-        // copy the naked name of the map file to the cl structure -- O.S
-        COM_StripExtension (COM_SkipPath(model_precache[1]), cl.mapname, sizeof(cl.mapname));
+	// copy the naked name of the map file to the cl structure -- O.S
+	COM_StripExtension (COM_SkipPath(model_precache[1]), cl.mapname, sizeof(cl.mapname));
 
-        IW_ShaderSystem_PrepareForGameDir (com_gamedir);
-        if (nummodels > 1 && model_precache[1][0])
-                R_Particles_LoadEffectInfoForMap (NULL, model_precache[1]);
-
-        for (i = 1; i < nummodels; i++)
-        {
-                cl.model_precache[i] = Mod_ForName (model_precache[i], false);
-                if (cl.model_precache[i] == NULL)
-                {
+	for (i = 1; i < nummodels; i++)
+	{
+		cl.model_precache[i] = Mod_ForName (model_precache[i], false);
+		if (cl.model_precache[i] == NULL)
+		{
 			Host_Error ("Model %s not found", model_precache[i]);
 		}
 		CL_KeepaliveMessage ();
@@ -466,7 +460,6 @@ void CL_ParseUpdate (int bits)
 	int		num;
 	int		skin;
 	int		prevframe;
-	qboolean	model_changed;
 
 	if (cls.signon == SIGNONS - 1)
 	{	// first update is the final signon stage
@@ -583,14 +576,14 @@ void CL_ParseUpdate (int bits)
 		ent->msg_angles[0][2] = ent->baseline.angles[2];
 
 	//johnfitz -- lerping for movetype_step entities
-        if (bits & U_STEP)
-        {
-                ent->lerpflags |= LERP_MOVESTEP;
-                ent->forcelink = true;
-        }
-        else
-                ent->lerpflags &= ~LERP_MOVESTEP;
-        //johnfitz
+	if (bits & U_STEP)
+	{
+		ent->lerpflags |= LERP_MOVESTEP;
+		ent->forcelink = true;
+	}
+	else
+		ent->lerpflags &= ~LERP_MOVESTEP;
+	//johnfitz
 
 	//johnfitz -- PROTOCOL_FITZQUAKE and PROTOCOL_NEHAHRA
 	if (cl.protocol == PROTOCOL_FITZQUAKE || cl.protocol == PROTOCOL_RMQ)
@@ -641,11 +634,10 @@ void CL_ParseUpdate (int bits)
 	//johnfitz
 
 	//johnfitz -- moved here from above
-        model = cl.model_precache[modnum];
-        model_changed = (model != ent->model);
-        if (model != ent->model)
-        {
-                ent->model = model;
+	model = cl.model_precache[modnum];
+	if (model != ent->model)
+	{
+		ent->model = model;
 	// automatic animation (torches, etc) can be either all together
 	// or randomized
 		if (model)
@@ -659,16 +651,14 @@ void CL_ParseUpdate (int bits)
 		}
 		else
 			forcelink = true;	// hack to make null model players work
-                if (num > 0 && num <= cl.maxclients)
-                        R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
+		if (num > 0 && num <= cl.maxclients)
+			R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
 
 		ent->lerpflags |= LERP_RESETANIM; //johnfitz -- don't lerp animation across model changes
 	}
 	//johnfitz
 	else if (model && model->synctype == ST_FRAMETIME && ent->frame != prevframe)
 		ent->syncbase = -cl.time;
-
-	R_Decals_EntityFrameChanged (ent, prevframe, model_changed);
 
 	if ( forcelink )
 	{	// didn't have an update last message

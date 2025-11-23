@@ -307,21 +307,14 @@ static void PF_setmodel (void)
 	const char	*m, **check;
 	qmodel_t	*mod;
 	edict_t		*e;
-	char		normalized_model[MAX_QPATH];
-	char		normalized_precache[MAX_QPATH];
 
 	e = G_EDICT(OFS_PARM0);
 	m = G_STRING(OFS_PARM1);
-
-	COM_StripModelExtension (m, normalized_model, sizeof(normalized_model));
 
 // check to see if model was properly precached
 	for (i = 0, check = sv.model_precache; *check; i++, check++)
 	{
 		if (!strcmp(*check, m))
-			break;
-		COM_StripModelExtension (*check, normalized_precache, sizeof(normalized_precache));
-		if (!strcmp(normalized_precache, normalized_model))
 			break;
 	}
 
@@ -586,36 +579,6 @@ static void PF_particle (void)
 	SV_StartParticle (org, dir, color, count);
 }
 
-static void PF_particleeffectnum (void)
-{
-	const char *name = G_STRING (OFS_PARM0);
-	int index = -1;
-
-	if (name && *name && R_Effectinfo_Active ())
-		index = R_Effectinfo_Index (name);
-
-	G_FLOAT (OFS_RETURN) = (float)index;
-}
-
-static void PF_pointparticles (void)
-{
-	int	effect = (int)G_FLOAT (OFS_PARM0);
-	vec3_t	org;
-	vec3_t	dir;
-	float	count = G_FLOAT (OFS_PARM3);
-
-	if (!R_Effectinfo_Active ())
-		return;
-
-	VectorCopy (G_VECTOR (OFS_PARM1), org);
-	VectorCopy (G_VECTOR (OFS_PARM2), dir);
-
-	if (effect < 0)
-		return;
-
-	R_Effectinfo_SpawnIndex (effect, org, dir, count);
-}
-
 
 /*
 =================
@@ -855,13 +818,10 @@ static int PF_newcheckclient (int check)
 	pvsbytes = (sv.worldmodel->numleafs+7)>>3;
 	if (checkpvs == NULL || pvsbytes > checkpvs_capacity)
 	{
-		byte *newbuffer;
-
 		checkpvs_capacity = pvsbytes;
-		newbuffer = (byte *) realloc (checkpvs, checkpvs_capacity);
-		if (!newbuffer)
+		checkpvs = (byte *) realloc (checkpvs, checkpvs_capacity);
+		if (!checkpvs)
 			Sys_Error ("PF_newcheckclient: realloc() failed on %d bytes", checkpvs_capacity);
-		checkpvs = newbuffer;
 	}
 	memcpy (checkpvs, pvs, pvsbytes);
 
@@ -1184,8 +1144,6 @@ static void PF_precache_model (void)
 {
 	const char	*s;
 	int		i;
-	char		normalized_request[MAX_QPATH];
-	char		normalized_precache[MAX_QPATH];
 
 	if (sv.state != ss_loading)
 		PR_RunError ("PF_Precache_*: Precache can only be done in spawn functions");
@@ -1193,8 +1151,6 @@ static void PF_precache_model (void)
 	s = G_STRING(OFS_PARM0);
 	G_INT(OFS_RETURN) = G_INT(OFS_PARM0);
 	PR_CheckEmptyString (s);
-
-	COM_StripModelExtension (s, normalized_request, sizeof(normalized_request));
 
 	for (i = 0; i < MAX_MODELS; i++)
 	{
@@ -1205,9 +1161,6 @@ static void PF_precache_model (void)
 			return;
 		}
 		if (!strcmp(sv.model_precache[i], s))
-			return;
-		COM_StripModelExtension (sv.model_precache[i], normalized_precache, sizeof(normalized_precache));
-		if (!strcmp(normalized_precache, normalized_request))
 			return;
 	}
 	PR_RunError ("PF_precache_model: overflow");
@@ -2104,14 +2057,12 @@ static void PF_cl_playerkey_f(void)
 }
 
 
-typedef struct qcpic_cache_s
+static struct
 {
-        char name[MAX_QPATH];
-        unsigned int flags;
-        qpic_t *pic;
-} qcpic_cache_t;
-
-static qcpic_cache_t *qcpics;
+	char name[MAX_QPATH];
+	unsigned int flags;
+	qpic_t *pic;
+} *qcpics;
 static size_t numqcpics;
 static size_t maxqcpics;
 void PR_ReloadPics(qboolean purge)
@@ -2152,17 +2103,8 @@ static qpic_t *DrawQC_CachePic(const char *picname, unsigned int flags)
 
 	if (i+1 > maxqcpics)
 	{
-		size_t newmax = i + 32;
-		qcpic_cache_t *newbuffer = (qcpic_cache_t *)realloc(qcpics, newmax * sizeof(*qcpics));
-
-		if (!newbuffer)
-			Sys_Error ("DrawQC_CachePic: realloc() failed on %zu bytes", newmax * sizeof(*qcpics));
-
-		if (newmax > maxqcpics)
-			memset(newbuffer + maxqcpics, 0, (newmax - maxqcpics) * sizeof(*qcpics));
-
-		qcpics = newbuffer;
-		maxqcpics = newmax;
+		maxqcpics = i + 32;
+		qcpics = realloc(qcpics, maxqcpics * sizeof(*qcpics));
 	}
 
 	strcpy(qcpics[i].name, picname);
@@ -2175,21 +2117,16 @@ static qpic_t *DrawQC_CachePic(const char *picname, unsigned int flags)
 	if (flags & PICFLAG_MIPMAP)
 		texflags |= TEXPREF_MIPMAP;
 
-	//prefer external pics before wad lookups
-	qcpics[i].pic = Draw_TryCachePic(picname, texflags);
-
 	//try to load it from a wad if applicable.
 	//the extra gfx/ crap is because DP insists on it for wad images. and its a nightmare to get things working in all engines if we don't accept that quirk too.
-	if (!qcpics[i].pic)
-	{
-		if (flags & PICFLAG_WAD)
-			qcpics[i].pic = Draw_PicFromWad2 (picname + (strncmp(picname, "gfx/", 4)?0:4), texflags);
-		else if (!strncmp(picname, "gfx/", 4) && !strchr(picname+4, '.'))
-			qcpics[i].pic = Draw_PicFromWad2(picname+4, texflags);
+	if (flags & PICFLAG_WAD)
+		qcpics[i].pic = Draw_PicFromWad2 (picname + (strncmp(picname, "gfx/", 4)?0:4), texflags);
+	else if (!strncmp(picname, "gfx/", 4) && !strchr(picname+4, '.'))
+		qcpics[i].pic = Draw_PicFromWad2(picname+4, texflags);
 
-		if (!qcpics[i].pic)
-			qcpics[i].pic = Draw_TryCachePic(picname, texflags);
-	}
+	//okay, not a wad pic, try and load a lmp/tga/etc
+	if (!qcpics[i].pic)
+		qcpics[i].pic = Draw_TryCachePic(picname, texflags);
 
 	if (i == numqcpics)
 		numqcpics++;
@@ -3167,12 +3104,11 @@ static int tokenizeqc(const char *str, qboolean dpfuckage)
 {
 	//FIXME: if dpfuckage, then we should handle punctuation specially, as well as /*.
 	const char *start = str;
-        while(qctoken_count > 0)
-        {
-                qctoken_count--;
-                free(qctoken[qctoken_count].token);
-                qctoken[qctoken_count].token = NULL;
-        }
+	while(qctoken_count > 0)
+	{
+		qctoken_count--;
+		free(qctoken[qctoken_count].token);
+	}
 	qctoken_count = 0;
 	while (qctoken_count < MAXQCTOKENS)
 	{
@@ -3384,8 +3320,6 @@ builtindef_t pr_builtindefs[] =
 	{"localcmd",				PF_BOTH(PF_localcmd),			46},
 	{"nextent",					PF_SSQC(PF_nextent),			47},
 	{"particle",				PF_SSQC(PF_particle),			48},
-	{"particleeffectnum",		PF_SSQC(PF_particleeffectnum),		400,	DP_QC_POINTPARTICLES},
-	{"pointparticles",		PF_SSQC(PF_pointparticles),		401,	DP_QC_POINTPARTICLES},
 	{"ChangeYaw",				PF_SSQC(PF_changeyaw),			49},
 	{"vectoangles",				PF_BOTH(PF_vectoangles),		51},
 

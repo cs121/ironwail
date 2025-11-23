@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
-#include "../wren_vm/wren_runtime.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -180,8 +179,6 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
-
-	SV_Bot_Init ();
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -392,9 +389,7 @@ CLIENT SPAWNING
 
 static qboolean SV_IsLocalClient (client_t *client)
 {
-        if (!client->netconnection)
-                return false;
-        return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
+	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
 /*
@@ -480,10 +475,7 @@ void SV_ConnectClient (int clientnum)
 
 	client = svs.clients + clientnum;
 
-	if (client->netconnection)
-		Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
-	else
-		Con_DPrintf ("Bot client connected (slot %d)\n", clientnum + 1);
+	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
 
 	edictnum = clientnum+1;
 
@@ -1388,15 +1380,6 @@ void SV_SendClientMessages (void)
 		if (!host_client->active)
 			continue;
 
-		if (host_client->isbot)
-		{
-			SZ_Clear (&host_client->message);
-			host_client->last_message = realtime;
-			if (host_client->sendsignon == PRESPAWN_FLUSH)
-				host_client->sendsignon = PRESPAWN_DONE;
-			continue;
-		}
-
 		if (host_client->spawned)
 		{
 			if (!SV_SendClientDatagram (host_client))
@@ -1532,22 +1515,13 @@ SV_ModelIndex
 int SV_ModelIndex (const char *name)
 {
 	int		i;
-	char		normalized_request[MAX_QPATH];
-	char		normalized_precache[MAX_QPATH];
 
 	if (!name || !name[0])
 		return 0;
 
-	COM_StripModelExtension (name, normalized_request, sizeof(normalized_request));
-
 	for (i=0 ; i<MAX_MODELS && sv.model_precache[i] ; i++)
-	{
 		if (!strcmp(sv.model_precache[i], name))
 			return i;
-		COM_StripModelExtension (sv.model_precache[i], normalized_precache, sizeof(normalized_precache));
-		if (!strcmp(normalized_precache, normalized_request))
-			return i;
-	}
 	if (i==MAX_MODELS || !sv.model_precache[i])
 		Sys_Error ("SV_ModelIndex: model %s not precached", name);
 	return i;
@@ -1584,7 +1558,7 @@ void SV_CreateBaseline (void)
 		if (entnum > 0 && entnum <= svs.maxclients)
 		{
 			svent->baseline.colormap = entnum;
-			svent->baseline.modelindex = SV_ModelIndex("progs/player");
+			svent->baseline.modelindex = SV_ModelIndex("progs/player.mdl");
 			svent->baseline.alpha = ENTALPHA_DEFAULT; //johnfitz -- alpha support
 			svent->baseline.scale = ENTSCALE_DEFAULT;
 		}
@@ -1975,8 +1949,6 @@ void SV_SpawnServer (const char *server)
 	//memset (&sv, 0, sizeof(sv));
 	Host_ClearMemory ();
 
-	SV_Bot_Reset ();
-
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	if (developer.value || map_checks.value)
 		sv.mapchecks.active = true;
@@ -2030,17 +2002,14 @@ void SV_SpawnServer (const char *server)
 
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	q_snprintf (sv.modelname, sizeof(sv.modelname), "maps/%s.bsp", server);
-        sv.worldmodel = Mod_ForName (sv.modelname, false);
-        if (!sv.worldmodel)
-        {
-                Con_Printf ("Couldn't spawn server %s\n", sv.modelname);
-                sv.active = false;
-                return;
-        }
-        SV_Bot_LoadNavigation (server);
-        sv.models[1] = sv.worldmodel;
-
-        WRENVM_ResetForNewServer(server, sv.worldmodel->entities);
+	sv.worldmodel = Mod_ForName (sv.modelname, false);
+	if (!sv.worldmodel)
+	{
+		Con_Printf ("Couldn't spawn server %s\n", sv.modelname);
+		sv.active = false;
+		return;
+	}
+	sv.models[1] = sv.worldmodel;
 
 //
 // clear world interaction links
@@ -2076,25 +2045,7 @@ void SV_SpawnServer (const char *server)
 // serverflags are for cross level information (sigils)
 	pr_global_struct->serverflags = svs.serverflags;
 
-        {
-                wrenvm_call_result_t spawn_result = WRENVM_CallSpawnEntities();
-                if (spawn_result == WRENV_CALL_OK)
-                {
-                        // handled by Wren, nothing else to do.
-                }
-                else if (spawn_result == WRENV_CALL_ERROR || (spawn_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
-                {
-                        Con_Printf("Wren spawnEntities failed%s; falling back to QuakeC\n",
-                                (spawn_result == WRENV_CALL_MISSING) ? " (missing)" : "");
-                        if (spawn_result == WRENV_CALL_ERROR)
-                                Con_Printf("Wren runtime error during spawnEntities.\n");
-                        ED_LoadFromFile (sv.worldmodel->entities);
-                }
-                else
-                {
-                        ED_LoadFromFile (sv.worldmodel->entities);
-                }
-        }
+	ED_LoadFromFile (sv.worldmodel->entities);
 
 	sv.active = true;
 

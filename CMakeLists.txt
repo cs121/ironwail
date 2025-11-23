@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.7)
 include(${CMAKE_CURRENT_SOURCE_DIR}/Misc/cmake/ExtractVersion.cmake)
 project(ironwail VERSION ${IRONWAIL_VERSION})
 
-enable_testing()
-
-option(R_SHADOWMAPS "Enable shadow map stubs" ON)
-
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
 
 if (WIN32)
@@ -35,21 +31,6 @@ if (WIN32)
 endif()
 
 file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp")
-
-file(GLOB WREN_CORE_SRC CONFIGURE_DEPENDS "wren_vm/wren/vm/*.c")
-file(GLOB WREN_OPT_SRC CONFIGURE_DEPENDS "wren_vm/wren/optional/*.c")
-set(WREN_SRC ${WREN_CORE_SRC} ${WREN_OPT_SRC})
-
-add_library(wren STATIC ${WREN_SRC})
-target_include_directories(wren PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
-target_include_directories(wren PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/optional)
-target_compile_definitions(wren PUBLIC WREN_OPT_META=1 WREN_OPT_RANDOM=1)
-
-list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_runtime.c ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren_bindings.c)
-list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/renderer/r_shadows.c)
-list(APPEND IWAIL_SRC
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c)
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
@@ -81,8 +62,6 @@ endif()
 
 add_executable(ironwail ${IWAIL_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
-target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/renderer ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm ${CMAKE_CURRENT_SOURCE_DIR}/wren_vm/wren/include)
-target_link_libraries(ironwail PRIVATE wren)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")
@@ -113,11 +92,6 @@ else()
 endif()
 
 target_compile_definitions(ironwail PRIVATE $<$<CONFIG:Debug>:DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1> USE_SDL2 USE_CODEC_WAVE)
-if (R_SHADOWMAPS)
-        target_compile_definitions(ironwail PRIVATE R_SHADOWMAPS=1)
-else()
-        target_compile_definitions(ironwail PRIVATE R_SHADOWMAPS=0)
-endif()
 if (MSVC)
 	target_compile_definitions(ironwail PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
 endif()
@@ -171,30 +145,11 @@ if (PC_MIKMOD_FOUND OR PC_MODPLUG_FOUND OR PC_XMP_FOUND)
     target_compile_definitions(ironwail PRIVATE USE_CODEC_UMX)
 endif()
 
-add_executable(iwshader_parser_test
-    tests/iwshader_parser_test.c
-    tests/iwshader_test_stubs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer/r_iwshader.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common/com_iwtext.c)
-
-target_include_directories(iwshader_parser_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer)
-
-target_compile_definitions(iwshader_parser_test PRIVATE IW_BUILD_TESTS)
-
-if (UNIX)
-    target_link_libraries(iwshader_parser_test PRIVATE m)
-endif()
-
-add_test(NAME iwshader_parser_test COMMAND iwshader_parser_test)
-
 if (WIN32)
-        #Copy DLL dependencies to output folder
-        add_custom_command(TARGET ironwail POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail> $<TARGET_FILE_DIR:ironwail>
-                COMMAND_EXPAND_LISTS)
+	#Copy DLL dependencies to output folder
+	add_custom_command(TARGET ironwail POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:ironwail> $<TARGET_FILE_DIR:ironwail>
+		COMMAND_EXPAND_LISTS)
 
 	#VORBISFILE and OPUSFILE both use the libogg-0.dll
 	if (OGG_DLL AND (PC_VORBISFILE_FOUND OR PC_OPUSFILE_FOUND))

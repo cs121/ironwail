@@ -52,23 +52,23 @@ void GL_MakeAliasModelDisplayLists (qmodel_t *aliasmodel, aliashdr_t *paliashdr)
 	aliasmesh_t *desc;
 
 	// first, copy the verts onto the hunk
-verts = (trivertx_t *) Hunk_AllocNoFill (paliashdr->nummorphposes * paliashdr->numverts * sizeof(trivertx_t));
-paliashdr->vertexes = (byte *)verts - (byte *)paliashdr;
-for (i=0 ; i<paliashdr->nummorphposes ; i++)
-for (j=0 ; j<paliashdr->numverts ; j++)
-verts[i*paliashdr->numverts + j] = poseverts_mdl[i][j];
+	verts = (trivertx_t *) Hunk_AllocNoFill (paliashdr->numposes * paliashdr->numverts * sizeof(trivertx_t));
+	paliashdr->vertexes = (byte *)verts - (byte *)paliashdr;
+	for (i=0 ; i<paliashdr->numposes ; i++)
+		for (j=0 ; j<paliashdr->numverts ; j++)
+			verts[i*paliashdr->numverts + j] = poseverts[i][j];
 
 	// there can never be more than this number of verts and we just put them all on the hunk
 	// (each vertex can be used twice, once with the original UVs and once with the seam adjustment)
-desc = (aliasmesh_t *) Hunk_Alloc (sizeof (aliasmesh_t) * paliashdr->numverts * 2);
+	desc = (aliasmesh_t *) Hunk_Alloc (sizeof (aliasmesh_t) * pheader->numverts * 2);
 
 	// there will always be this number of indexes
-indexes = (unsigned short *) Hunk_Alloc (sizeof (unsigned short) * paliashdr->numtris * 3);
+	indexes = (unsigned short *) Hunk_Alloc (sizeof (unsigned short) * pheader->numtris * 3);
 
-paliashdr->indexes = (intptr_t) indexes - (intptr_t) paliashdr;
-paliashdr->meshdesc = (intptr_t) desc - (intptr_t) paliashdr;
-paliashdr->numindexes = 0;
-paliashdr->numverts_vbo = 0;
+	pheader->indexes = (intptr_t) indexes - (intptr_t) pheader;
+	pheader->meshdesc = (intptr_t) desc - (intptr_t) pheader;
+	pheader->numindexes = 0;
+	pheader->numverts_vbo = 0;
 
 	mark = Hunk_LowMark ();
 
@@ -76,7 +76,7 @@ paliashdr->numverts_vbo = 0;
 	// each value is the final index + 1, or 0 if the corresponding vertex hasn't been emitted yet
 	remap = (unsigned short *) Hunk_Alloc (paliashdr->numverts * 2 * sizeof (remap[0]));
 
-for (i = 0; i < paliashdr->numtris; i++)
+	for (i = 0; i < pheader->numtris; i++)
 	{
 		for (j = 0; j < 3; j++)
 		{
@@ -101,23 +101,23 @@ for (i = 0; i < paliashdr->numtris; i++)
 				if (v & 1)
 					s += paliashdr->skinwidth / 2;
 
-desc[paliashdr->numverts_vbo].vertindex = vertindex;
-desc[paliashdr->numverts_vbo].st[0] = s;
-desc[paliashdr->numverts_vbo].st[1] = t;
+				desc[pheader->numverts_vbo].vertindex = vertindex;
+				desc[pheader->numverts_vbo].st[0] = s;
+				desc[pheader->numverts_vbo].st[1] = t;
 
-remap[v] = ++paliashdr->numverts_vbo;
-}
+				remap[v] = ++pheader->numverts_vbo;
+			}
 
-// emit index
-indexes[paliashdr->numindexes++] = remap[v] - 1;
-}
-}
+			// emit index
+			indexes[pheader->numindexes++] = remap[v] - 1;
+		}
+	}
 
 	// free temporary data
 	Hunk_FreeToLowMark (mark);
 
 	// upload immediately
-GLMesh_LoadVertexBuffer (aliasmodel, paliashdr);
+	GLMesh_LoadVertexBuffer (aliasmodel, pheader);
 }
 
 /*
@@ -153,10 +153,10 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 		switch(hdr->poseverttype)
 		{
 		case PV_QUAKE1:
-			totalvbosize += (hdr->nummorphposes * hdr->numverts_vbo * sizeof (meshxyz_t)); // ericw -- what RMQEngine called nummeshframes is called nummorphposes in QuakeSpasm
+			totalvbosize += (hdr->numposes * hdr->numverts_vbo * sizeof (meshxyz_t)); // ericw -- what RMQEngine called nummeshframes is called numposes in QuakeSpasm
 			break;
 		case PV_IQM:
-			totalvbosize += (hdr->nummorphposes * hdr->numverts_vbo * sizeof (iqmvert_t));
+			totalvbosize += (hdr->numposes * hdr->numverts_vbo * sizeof (iqmvert_t));
 			animsize += hdr->numboneposes * hdr->numbones * sizeof (bonepose_t);
 			break;
 		default:
@@ -222,7 +222,7 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 		switch(hdr->poseverttype)
 		{
 		case PV_QUAKE1:
-			for (f = 0; f < hdr->nummorphposes; f++) // ericw -- what RMQEngine called nummeshframes is called nummorphposes in QuakeSpasm
+			for (f = 0; f < hdr->numposes; f++) // ericw -- what RMQEngine called nummeshframes is called numposes in QuakeSpasm
 			{
 				int v;
 				meshxyz_t *xyz = (meshxyz_t *) (vbodata + vertofs);
@@ -249,7 +249,7 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 			}
 			break;
 		case PV_IQM:
-			for (f = 0; f < hdr->nummorphposes; f++) // ericw -- what RMQEngine called nummeshframes is called nummorphposes in QuakeSpasm
+			for (f = 0; f < hdr->numposes; f++) // ericw -- what RMQEngine called nummeshframes is called numposes in QuakeSpasm
 			{
 				int v;
 				iqmvert_t *xyz = (iqmvert_t *) (vbodata + vertofs);

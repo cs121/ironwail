@@ -22,48 +22,6 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad3;
 	InstanceData instances[];
 };
-layout(std140, binding=0) uniform FrameDataUBO
-{
-        mat4    _FrameViewProj;
-        mat4    _FramePrevViewProj;
-        vec4    _FrameFog;
-        vec4    _FrameSkyFog;
-        vec3    _FrameWindDir;
-        float   _FrameWindPhase;
-        float   _FrameScreenDither;
-        float   _FrameTextureDither;
-        float   _FrameOverbright;
-        float   _FrameLightmapStrength;
-        float   _FrameRimAlias;
-        float   _FrameRimWorld;
-        float   _FrameRimExponent;
-        float   _FramePadRim;
-        vec3    _FrameEyePos;
-        float   _FrameTime;
-        vec3    _FramePrevEyePos;
-        float   _FrameDeltaTime;
-        float   _FrameZLogScale;
-        float   _FrameZLogBias;
-        uint    NumLights;
-        uint    _FramePrevFrameValid;
-        uint    _FramePad1;
-        uint    _FramePad2;
-};
-
-struct Light
-{
-        vec3    origin;
-        float   radius;
-        vec3    color;
-        float   minlight;
-};
-
-layout(std430, binding=0) restrict readonly buffer LightBuffer
-{
-        float   LightStyles[64];
-        Light   Lights[];
-};
-
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
 {
@@ -101,93 +59,16 @@ float whitenoise(vec2 p)
 // Based on https://www.shadertoy.com/view/4t2SDh 
 float tri(float x)
 {
-        float orig = x * 2.0 - 1.0;
-        uint signbit = floatBitsToUint(orig) & 0x80000000u;
-        x = sqrt(abs(orig)) - 1.;
-        x = uintBitsToFloat(floatBitsToUint(x) ^ signbit);
-        return x;
+	float orig = x * 2.0 - 1.0;
+	uint signbit = floatBitsToUint(orig) & 0x80000000u;
+	x = sqrt(abs(orig)) - 1.;
+	x = uintBitsToFloat(floatBitsToUint(x) ^ signbit);
+	return x;
 }
 
 #define DITHER_NOISE(uv) tri(bayer01(ivec2(uv)))
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
-
-float saturate(float x){ return clamp(x, 0.0, 1.0); }
-
-float smoothstep01(float x)
-{
-        x = saturate(x);
-        return x * x * (3.0 - 2.0 * x);
-}
-
-float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir)
-{
-        float d = dot(vertexnormal, dir);
-        if (d < 0.0)
-                return 1.0 + d * (13.0 / 44.0);
-        else
-                return 1.0 + d;
-}
-
-vec3 ComputeDynamicLights(vec3 world_pos, vec3 normal)
-{
-        vec3 accum = vec3(0.0);
-        uint count = NumLights;
-        if (count == 0u)
-                return accum;
-
-        float normal_len_sq = dot(normal, normal);
-        if (normal_len_sq <= 0.0)
-                return accum;
-
-        vec3 plane_n = normal * inversesqrt(normal_len_sq);
-        float plane_w = dot(world_pos, plane_n);
-
-        for (uint i = 0u; i < count; ++i)
-        {
-                Light light = Lights[i];
-                float radius = light.radius;
-                if (radius <= 0.0)
-                        continue;
-
-                float dist = dot(light.origin, plane_n) - plane_w;
-                float absdist = abs(dist);
-                float radial_radius = radius - absdist;
-                float minlight = light.minlight;
-                if (radial_radius <= minlight)
-                        continue;
-
-                vec3 local_pos = light.origin - plane_n * dist;
-                vec3 L = local_pos - world_pos;
-                float Llen2 = dot(L, L);
-                float sdist = sqrt(max(Llen2, 0.0));
-
-                float minlight_span = max(radial_radius - minlight, 1e-4);
-                float attenuation = smoothstep01((minlight_span - sdist) / minlight_span);
-                float falloff = smoothstep01((radial_radius - sdist) / max(radial_radius, 1e-4));
-                float axial_falloff = smoothstep01((radius - absdist) / max(radius, 1e-4));
-                falloff *= falloff;
-
-                if (attenuation <= 0.0 || falloff <= 0.0 || axial_falloff <= 0.0)
-                        continue;
-
-                float distance_sq = Llen2 + dist * dist;
-                if (distance_sq <= 0.0)
-                        continue;
-                float inv_radius_sq = 1.0 / max(radius * radius, 1e-4);
-                float distance_falloff = 1.0 / (1.0 + distance_sq * inv_radius_sq);
-
-                vec3 light_vec = L + plane_n * dist;
-                vec3 Ldir = light_vec * inversesqrt(distance_sq);
-                float diffuse = max(dot(plane_n, Ldir), 0.0);
-                float influence = max(diffuse, minlight);
-                float intensity = attenuation * falloff * axial_falloff * distance_falloff;
-
-                accum += light.color * (intensity * influence);
-        }
-
-        return accum * (1.0 / 200.0);
-}
 
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
@@ -200,11 +81,6 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 }
 
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
-const int ALIAS_FLAG_VIEWMODEL = 1 << 1;
-const int ALIAS_FLAG_PLAYER = 1 << 2;
-const int ALIAS_FLAG_FULLBRIGHT_HACK = 1 << 3;
-const int ALIAS_FLAG_ITEM = 1 << 4;
-const int ALIAS_FLAG_FORCE_FULLBRIGHT = 1 << 5;
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
@@ -220,10 +96,6 @@ layout(location=2) in vec3 in_pos;
 layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
-layout(location=6) in vec3 in_world_pos;
-layout(location=7) in vec3 in_world_normal;
-layout(location=8) in vec3 in_local_normal;
-layout(location=9) flat in vec3 in_shadevector;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -270,15 +142,18 @@ void main()
         vec3 emissive = vec3(0.0);
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
-        vec4 baseSample = textureLod(Tex, uv, 0.);
+        vec4 result = textureLod(Tex, uv, 0.);
 #else
-        vec4 baseSample = texture(Tex, uv);
+        vec4 result = texture(Tex, uv);
 #endif
 #if ALPHATEST
-        if (baseSample.a < 0.666)
-                discard;
+	if (result.a < 0.666)
+		discard;
+	result.rgb *= in_color.rgb;
+#else
+	result.rgb = mix(result.rgb, result.rgb * in_color.rgb, result.a);
 #endif
-        vec3 baseColor = baseSample.rgb;
+	result.a = in_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
         vec3 fullbright;
 #if MODE == 2
         fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
@@ -287,89 +162,13 @@ void main()
         fullbright = texture(FullbrightTex, uv).rgb;
         emissive = texture(EmissiveTex, uv).rgb;
 #endif
-        vec3 localNormal = normalize(in_local_normal);
-        vec3 shadevector = normalize(in_shadevector);
-        float shade = r_avertexnormal_dot(localNormal, shadevector);
-        vec3 lighting = (in_color.rgb * _FrameLightmapStrength) * shade;
-        vec3 worldNormal = in_world_normal;
-        if (dot(worldNormal, worldNormal) > 0.0)
-                worldNormal = normalize(worldNormal);
-        else
-                worldNormal = vec3(0.0, 0.0, 1.0);
-        lighting += ComputeDynamicLights(in_world_pos, worldNormal);
-        if (_FrameRimAlias > 0.0)
-        {
-                vec3 to_eye = EyePos - in_world_pos;
-                float inv_len = inversesqrt(max(dot(to_eye, to_eye), 1e-8));
-                vec3 view_dir = to_eye * inv_len;
-                float ndotv = max(dot(worldNormal, view_dir), 0.0);
-                float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), _FrameRimExponent);
-                lighting += vec3(_FrameRimAlias * fresnel);
-        }
-        lighting = max(lighting, vec3(0.0));
-
-        uint overbrightFlag = floatBitsToUint(Fog.w) >> 31u;
-        bool useFullbrightHack = ((in_flags & ALIAS_FLAG_FULLBRIGHT_HACK) != 0) && overbrightFlag == 0u;
-
-        if (useFullbrightHack)
-        {
-                lighting = vec3(256.0 / 200.0);
-        }
-        else
-        {
-                float sum = lighting.x + lighting.y + lighting.z;
-                if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
-                {
-                        const float minSum = 72.0 / 200.0;
-                        if (sum < minSum)
-                        {
-                                float add = (minSum - sum) / 3.0;
-                                lighting += vec3(add);
-                                sum = minSum;
-                        }
-                }
-                else if ((in_flags & ALIAS_FLAG_PLAYER) != 0)
-                {
-                        const float minSum = 24.0 / 200.0;
-                        if (sum < minSum)
-                        {
-                                float add = (minSum - sum) / 3.0;
-                                lighting += vec3(add);
-                                sum = minSum;
-                        }
-                }
-                if (overbrightFlag != 0u)
-                {
-                        const float maxSum = 288.0 / 200.0;
-                        if (sum > maxSum)
-                        {
-                                float scale = maxSum / sum;
-                                lighting *= scale;
-                                sum = maxSum;
-                        }
-                }
-        }
-
-        lighting = ldexp(lighting, ivec3(int(overbrightFlag)));
-
-#if ALPHATEST
-        vec3 shadedColor = baseColor * lighting;
-#else
-        vec3 shadedColor = mix(baseColor, baseColor * lighting, baseSample.a);
-#endif
-
-        if (((in_flags & ALIAS_FLAG_ITEM) != 0) || ((in_flags & ALIAS_FLAG_FORCE_FULLBRIGHT) != 0))
-                shadedColor += fullbright;
-        shadedColor += emissive;
-        shadedColor = clamp(shadedColor, 0.0, 1.0);
-
-	vec4 result = vec4(shadedColor, in_color.a);
-	if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
-		result.a = min(result.a, 0.5);
+        result.rgb += fullbright;
+        result.rgb += emissive;
+        result.rgb = clamp(result.rgb, 0.0, 1.0);
         float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
-        fog = clamp(fog, 0.0, 1.0);
-        result.rgb = mix(Fog.rgb, result.rgb, fog);
-        out_fragcolor = result;
+	fog = clamp(fog, 0.0, 1.0);
+	result.rgb = mix(Fog.rgb, result.rgb, fog);
+	out_fragcolor = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
         float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;

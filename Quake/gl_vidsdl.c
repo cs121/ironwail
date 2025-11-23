@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_vidsdl.c -- SDL GL vid component
 
 #include "quakedef.h"
-#include "renderer/r_iwshader.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
@@ -47,7 +46,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define MAKE_GL_VERSION(major, minor)		(((major) << 16) | (minor))
 #define MIN_GL_VERSION_MAJOR				4
-#define MIN_GL_VERSION_MINOR				6
+#define MIN_GL_VERSION_MINOR				3
 #define MIN_GL_VERSION						MAKE_GL_VERSION(MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR)
 #define MIN_GL_VERSION_STR					QS_STRINGIFY(MIN_GL_VERSION_MAJOR)"."QS_STRINGIFY(MIN_GL_VERSION_MINOR)
 
@@ -1110,33 +1109,27 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 
 	if (diff & GLS_MASK_BLEND)
 	{
-                switch (mask & GLS_MASK_BLEND)
-                {
-                        default:
-                        case GLS_BLEND_OPAQUE:
-                                glBlendFunc(GL_ONE, GL_ZERO);
-                                break;
-                        case GLS_BLEND_ALPHA_OIT:
-                                if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
-                                {
-                                        GL_BlendFunciFunc(0, GL_ONE, GL_ONE); // accum
-                                        GL_BlendFunciFunc(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
-                                        break;
-                                }
-                                // fallthrough!
-                        case GLS_BLEND_ALPHA:
-                                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                                break;
-                        case GLS_BLEND_ADD:
-                                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-                                break;
-                        case GLS_BLEND_INVMOD:
-                                glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
-                                break;
-                        case GLS_BLEND_MULTIPLY:
-                                glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-                                break;
-                }
+		switch (mask & GLS_MASK_BLEND)
+		{
+			default:
+			case GLS_BLEND_OPAQUE:
+				glBlendFunc(GL_ONE, GL_ZERO);
+				break;
+			case GLS_BLEND_ALPHA_OIT:
+				if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
+				{
+					GL_BlendFunciFunc(0, GL_ONE, GL_ONE); // accum
+					GL_BlendFunciFunc(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
+					break;
+				}
+				// fallthrough!
+			case GLS_BLEND_ALPHA:
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				break;
+			case GLS_BLEND_MULTIPLY:
+				glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+				break;
+		}
 	}
 
 	if (diff & GLS_MASK_CULL)
@@ -1398,11 +1391,7 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
-		IW_ShaderSystem_Shutdown ();
 		R_ShutdownShadow ();
-#if R_SHADOWMAPS
-		R_ShutdownShadowMaps();
-#endif
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);
 		gl_context = NULL;

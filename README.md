@@ -1,66 +1,36 @@
-# Ironwail
+# What's this?
+A fork of the popular GLQuake descendant [QuakeSpasm](https://sourceforge.net/projects/quakespasm/) with a focus on high performance instead of maximum compatibility, with a few extra features sprinkled on top.
 
-Ironwail is a high-performance fork of the GLQuake descendant [QuakeSpasm](https://sourceforge.net/projects/quakespasm/). It keeps the familiar QuakeSpasm gameplay while moving heavy lifting to the GPU (culling, lightmap updates, instancing, compute shaders, persistent buffer mapping, indirect multi-draw, bindless textures) so big modern maps stay smooth even on older hardware. The renderer is decoupled from the server using code from [QSS](https://github.com/Shpoike/Quakespasm/) via [vkQuake](https://github.com/Novum/vkQuake) to avoid physics issues at high frame rates.
+## Does performance still matter, though? I'm getting 1000 fps in QS on e1m1
+On most maps performance is indeed not much of a concern on a modern system. In recent years, however, some mappers have tried more ambitious/unconventional designs with poly counts far exceeding those of the original id Software levels from 25 years ago. It's also not uncommon for players of such an old game to be using hardware that is maybe not the latest and greatest, struggling on complex maps when using traditional renderers. By moving work from the CPU to the GPU (culling, lightmap updates) and taking advantage of more modern OpenGL features (instancing, compute shaders, persistent buffer mapping, indirect multi-draw, bindless textures), this fork is capable of handling even the [most](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html) [demanding](https://www.quaddicted.com/forum/viewtopic.php?id=1171) [maps](https://www.quaddicted.com/reviews/ravenkeep.html) at very high framerates. To avoid physics issues the renderer is also decoupled from the server (using code from [QSS](https://github.com/Shpoike/Quakespasm/), via [vkQuake](https://github.com/Novum/vkQuake)).
 
-## Quick start
-1. Purchase and install [Quake on Steam](https://store.steampowered.com/app/2310/QUAKE/).
-2. Download the [latest Ironwail release](https://github.com/andrei-drexler/ironwail/releases/latest) and unzip it into a folder that is not already a Quake installation.
-3. Launch Ironwail to play the original campaign, the 2021 re-release, and any add-ons you've already downloaded. Use the new *Mods* menu to switch between installed content instantly.
-
-## Highlights
-- UI upgrades: mouse support, in-game key binding for weapons, extra video and gameplay options that apply instantly.
-- Visual polish: alternative HUD styles (including Q64-inspired layouts), real-time palettization with optional dithering, classic underwater warp, lightmapped liquids, colored lightmaps with optional directional deluxemaps for smoother shading, configurable Quake 3-style lightmap overbrightening, lightstyle interpolation, higher color/depth precision, and improved z-fighting workarounds.
-- Performance boosts: GPU-driven culling, compute-based lightmap updates, reduced heap usage, faster loading on jumbo maps, and an automatic frame limiter when no map is loaded.
-- Quality-of-life: runs from Unicode paths and plays demanding maps like [Shibboleth](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html), [Raven Keep](https://www.quaddicted.com/reviews/ravenkeep.html), and [ad_tears](https://www.moddb.com/mods/arcane-dimensions) at high frame rates without manual `-heapsize` tuning.
-
-## Wren server runtime
-
-Ironwail now embeds the [Wren](https://wren.io) scripting VM to run server-side gameplay logic. The runtime sits next to the existing QuakeC VM; when a Wren hook is present it runs first, and QuakeC acts as a safety net if the hook is missing or explicitly asks for fallback.
-
-### Lifecycle
-
-1. The engine boots the Wren VM during `Host_Init`, unless `-nowren` is passed on the command line.
-2. `Game.init()` executes once per server lifetime.
-3. Each time a map loads, `WRENVM_ResetForNewServer()` points the runtime at the current entity lump and `Game.spawnEntities()` runs. If it throws `"NotImplemented"` or is absent, `ED_LoadFromFile()` restores QuakeC spawning.
-4. Every physics tick calls `Game.startFrame(dt)` before the QuakeC `StartFrame` hook. Returning normally keeps control in Wren; aborting with `"NotImplemented"` or omitting the method falls back to QuakeC.
-5. Player session changes trigger `Game.clientConnect(id)` and `Game.clientDisconnect(id)` with identical fallbacks.
-6. Save/Load flows call `Game.onSave()` and `Game.onLoad()` so Wren code can persist custom state. If a strict build (`-wrenstrict`) reports an error the save is cancelled.
-
-### Engine API (subset)
-
-| Class | Member | Notes |
-|:--|:--|:--|
-| `Engine` | `time` | Current server time in seconds. |
-| `Engine` | `setSkill(value)`, `getSkill()` | Mirrors the Quake `skill` cvar; changes propagate to both VMs. |
-| `Engine` | `spawnFromMap()` | Parses the BSP entity lump through QuakeC for compatibility. |
-| `Engine` | `randf()`, `randi(max)`, `crandom()` | Deterministic PRNG identical to QuakeC builtins. |
-| `Entity` | `spawn()` | Wraps `ED_Alloc` and returns a live entity handle. |
-| `Entity` | `origin`, `angles`, `velocity` | Vector properties read/write Quake entity fields. |
-| `Entity` | `model`, `solid`, `movetype`, `health`, `takedamage` | Scalar property accessors. |
-| `Entity` | `remove()`, `link()` | Manage entity lifetime and BSP linking. |
-
-Additional engine services (physics tracing, sound, networking, etc.) currently raise `NotImplemented` so QuakeC continues to execute unchanged. Extending the binding surface is straightforward: add the foreign method in `wren_vm/wren_bindings.c` and the matching declaration in your Wren module.
-
-### Fallback rules
-
-- Hooks missing in Wren or aborting with `Fiber.abort("NotImplemented")` immediately defer to the QuakeC VM.
-- Runtime errors inside a hook trigger the QuakeC fallback and print a diagnostic. With `-wrenstrict` the error is treated as fatal and the fallback is suppressed.
-- Passing `-nowren` disables the Wren VM entirely; `-wrenstrict` enforces that every hook must be implemented successfully.
-
-### Migration notes
-
-- Scripts live under `<mod>/scripts/` and are imported via `import "q/…"`. For example the default stub resides at `game/scripts/game.wren` and is loaded as `import "q/game"`.
-- Existing QuakeC mods keep working: any hook not reimplemented in Wren will continue to execute as before.
-- Use the stub `Game` implementation as a starting point. Replace `Engine.spawnFromMap()` once individual entities have been ported. During migration, `-wrenstrict` helps catch forgotten fallbacks.
+## Bonus features
+- ability to play the [2021 release content](https://store.steampowered.com/app/2310/QUAKE/) with zero setup: if you have [Quake](https://store.steampowered.com/app/2310/QUAKE/) on [Steam](https://store.steampowered.com/app/2310/QUAKE/), you can unzip the [latest Ironwail release](https://github.com/andrei-drexler/ironwail/releases/latest) in any folder (that doesn't already contain a valid Quake installation) and simply run the executable to play the game, including any add-ons you have already downloaded
+- new *Mods* menu, for quick access to any add-ons you've already installed
+- ability to change weapon key bindings using the UI, not just the console
+- ability to use the mouse to control the UI
+- alternative HUD styles based on the Q64 layout (classic one is still available, of course)
+- real-time palettization (with optional dithering) for a more authentic look
+- classic underwater warp effect
+- more options exposed in the UI, most of them taking effect instantly (no vid_restart needed)
+- support for lightmapped liquid surfaces
+- configurable Quake 3-style lightmap overbrightening via `r_overbrightbits`
+- lightstyle interpolation (e.g. smoothly pulsating lighting in [ad_tears](https://www.moddb.com/mods/arcane-dimensions))
+- reduced heap usage (e.g. you can play [tershib/shib1_drake](https://www.quaddicted.com/reviews/ter_shibboleth_drake_redux.html) and [peril/tavistock](https://www.quaddicted.com/forum/viewtopic.php?id=1171) without using -heapsize on the command line)
+- reduced loading time for jumbo maps
+- slightly higher color/depth buffer precision to avoid banding/z-fighting artifacts
+- a more precise ~hack~work-around for the z-fighting issues present in the original levels
+- capped framerate when no map is loaded
+- ability to run the game from a folder containing Unicode characters
 
 ## System requirements
 
 | | Minimum GPU | Recommended GPU |
 |:--|:--|:--|
 |NVIDIA|GeForce GT 420 ("Fermi" 2010)|GeForce GT 630 or newer ("Kepler" 2012)|
-|AMD|Radeon HD 5450 ("TeraScale 2" 2009)|Radeon HD 7700 series or newer ("GCN" 2012)|
+|AMD|Radeon HD 5450 ("TeraScale 2" 2009) |Radeon HD 7700 series or newer ("GCN" 2012)|
 |Intel|HD Graphics 4200 ("Haswell" 2012)|HD Graphics 620 ("Kaby Lake" 2016) or newer|
 
 Notes:
-1. Requirements are based on reported OpenGL capabilities; unexpected incompatibilities may still exist.
-2. macOS is currently unsupported because Ironwail targets OpenGL 4.6 for compute shaders, while Apple only provides OpenGL up to 4.1.
+1) These requirements might not be 100% accurate since they are based solely on reported OpenGL capabilities. There could still be unforeseen compatibility issues.
+2) Mac OS is not supported at this time due to the use of OpenGL 4.3 (for compute shaders), since Apple has deprecated OpenGL after version 4.1.
