@@ -115,6 +115,8 @@ typedef struct texture_s
 #define SURF_DRAWTELE		0x1000
 #define SURF_DRAWWATER		0x2000
 
+#define INVALID_LIGHTSTYLE	((unsigned short)0xffff)
+
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct
 {
@@ -150,7 +152,7 @@ typedef struct msurface_s
 	short		extents[2];
 	short		light_s, light_t;	// gl lightmap coordinates
 
-	byte		styles[MAXLIGHTMAPS];
+	unsigned short	styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
 
 	int			texturemins[2];
