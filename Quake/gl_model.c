@@ -548,13 +548,13 @@ static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 			continue;
 		}
 
-                // RGBE uses a shared exponent with an 8-bit mantissa per channel.
-                // Scale directly by the exponent bias; the mantissa is already in
-                // [0, 255] which matches the engine's 8-bit lightmap range.
-                float scale = ldexpf(1.0f, exponent - 128);
-		dst[0] = CLAMP(0, (int)(0.5f + src[0] * scale), 255);
-		dst[1] = CLAMP(0, (int)(0.5f + src[1] * scale), 255);
-		dst[2] = CLAMP(0, (int)(0.5f + src[2] * scale), 255);
+// RGBE stores mantissas in the 0-255 range with a shared exponent.
+// Convert to 8-bit lightmap values by first normalizing the mantissa
+// (divide by 256) and then scaling by the biased exponent.
+float scale = ldexpf(255.0f, exponent - (128 + 8));
+dst[0] = CLAMP(0, (int)(0.5f + src[0] * scale), 255);
+dst[1] = CLAMP(0, (int)(0.5f + src[1] * scale), 255);
+dst[2] = CLAMP(0, (int)(0.5f + src[2] * scale), 255);
 	}
 }
 static void Q1BSPX_MarkUsed(const char *lumpname)
