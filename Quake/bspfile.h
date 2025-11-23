@@ -257,6 +257,7 @@ typedef struct texinfo_s
 } texinfo_t;
 #define	TEX_SPECIAL		1		// sky or slime, no lightmap or 256 subdivision
 #define TEX_MISSING		2		// johnfitz -- this texinfo does not have a texture
+#define     TEX_VERTEXNORMALS       0x800   // bspx smooth shading
 
 // note that edge 0 is never used, because negative edge nums are used for
 // counterclockwise use of the edge in a face

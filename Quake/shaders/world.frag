@@ -126,6 +126,7 @@ layout(location=8) flat in float in_lmofs;
 #endif
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
+layout(location=13) in vec3 in_normal;
 
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -311,11 +312,21 @@ void main()
                 }
         }
 
-        vec3 surface_normal = vec3(0.0, 0.0, 1.0);
-        vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-        float surface_normal_len = length(surface_normal_vec);
+        vec3 surface_normal = in_normal;
+        float surface_normal_len = length(surface_normal);
         if (surface_normal_len > 0.0)
-                surface_normal = surface_normal_vec / surface_normal_len;
+                surface_normal /= surface_normal_len;
+        else
+        {
+                vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+                float geom_len = length(surface_normal_vec);
+                if (geom_len > 0.0)
+                        surface_normal = surface_normal_vec / geom_len;
+                else
+                        surface_normal = vec3(0.0, 0.0, 1.0);
+        }
+        if (!gl_FrontFacing)
+                surface_normal = -surface_normal;
         vec3 total_light = clamp(static_light, 0.0, 1.0);
         vec3 specular_light = vec3(0.0);
         vec3 to_eye = EyePos - in_pos;
