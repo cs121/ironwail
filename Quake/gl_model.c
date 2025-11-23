@@ -907,7 +907,6 @@ static void Mod_LoadTextures (lump_t *l)
                                 //now load whatever we found
                                 if (data) //load external image
                                 {
-                                        char filename2[MAX_OSPATH];
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
                                                 fmt, data, filename, 0, TEXPREF_MIPMAP | extraflags );
                                 }
