@@ -1602,6 +1602,10 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	for (surfnum=0 ; surfnum<count ; surfnum++, out++)
 	{
 		texture_t *texture;
+
+		// initialize to avoid garbage when a BSP provides fewer than MAXLIGHTMAPS styles
+		for (i=0 ; i<MAXLIGHTMAPS ; i++)
+			out->styles[i] = INVALID_LIGHTSTYLE;
 		if (bsp2)
 		{	//32bit datatypes
 			out->firstedge = LittleLong(inl->firstedge);
