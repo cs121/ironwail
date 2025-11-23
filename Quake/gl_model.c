@@ -1672,12 +1672,19 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			;	//count the styles so we can bound-check properly.
 		if (lofs == -1)
 			out->samples = NULL;
-		else if (lofs+facestyles*((out->extents[0])+1)*((out->extents[1])+1) > loadmodel->lightdatasamples)
-			out->samples = NULL; //corrupt...
-		else if (loadmodel->flags & MOD_HDRLIGHTING)
-			out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned
 		else
-			out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+		{
+			int smax = (out->extents[0] >> 4) + 1;
+			int tmax = (out->extents[1] >> 4) + 1;
+
+			// use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
+			if (lofs + facestyles * smax * tmax > loadmodel->lightdatasamples)
+				out->samples = NULL; //corrupt...
+			else if (loadmodel->flags & MOD_HDRLIGHTING)
+				out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned
+			else
+				out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
+		}
 
 		texture = loadmodel->textures[out->texinfo->texnum];
 
