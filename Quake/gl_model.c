@@ -1816,6 +1816,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 		//johnfitz
 	}
 }
+}
 
 
 /*
