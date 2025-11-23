@@ -658,10 +658,10 @@ void GL_BuildBModelVertexBuffer (void)
 			lightmap_t      *lm;
 			vec3_t          surfnormal;
 
-			if (fa->flags & SURF_PLANEBACK)
-				VectorNegate(fa->plane->normal, surfnormal);
-			else
-				VectorCopy(fa->plane->normal, surfnormal);
+                        if (fa->flags & SURF_PLANEBACK)
+                                VectorScale (fa->plane->normal, -1, surfnormal);
+                        else
+                                VectorCopy (fa->plane->normal, surfnormal);
 
 			if (fa->flags & SURF_DRAWTILED)
 			{
