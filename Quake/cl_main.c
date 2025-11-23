@@ -500,6 +500,59 @@ static void CL_RocketTrail (entity_t *ent, int type)
 
 /*
 ===============
+CL_SetDlightColorForEntity
+
+Tint dynamic lights to better match their source.
+===============
+*/
+static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
+{
+        const char *name;
+
+        if (!dl || !ent || !ent->model)
+                return;
+
+        name = ent->model->name;
+
+        if (ent->model->flags & EF_TRACER3)
+        {
+                dl->color[0] = 0.60f; dl->color[1] = 0.25f; dl->color[2] = 0.80f;
+                return;
+        }
+
+        if (ent->model->flags & EF_TRACER2)
+        {
+                dl->color[0] = 0.95f; dl->color[1] = 0.55f; dl->color[2] = 0.20f;
+                return;
+        }
+
+        if (ent->model->flags & EF_TRACER)
+        {
+                dl->color[0] = 0.30f; dl->color[1] = 0.85f; dl->color[2] = 0.30f;
+                return;
+        }
+
+        if (name && q_strcasestr (name, "lava"))
+        {
+                dl->color[0] = 1.00f; dl->color[1] = 0.40f; dl->color[2] = 0.10f;
+                return;
+        }
+
+        if (name && q_strcasestr (name, "wiz"))
+        {
+                dl->color[0] = 0.30f; dl->color[1] = 0.85f; dl->color[2] = 0.30f;
+                return;
+        }
+
+        if (name && (q_strcasestr (name, "missile") || q_strcasestr (name, "rocket")))
+        {
+                dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+                return;
+        }
+}
+
+/*
+===============
 CL_RelinkEntities
 ===============
 */
@@ -620,10 +673,11 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
-			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->minlight = 32;
-			dl->die = cl.time + 0.1;
+                        VectorMA (dl->origin, 18, fv, dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->minlight = 32;
+                        dl->die = cl.time + 0.1;
+                        CL_SetDlightColorForEntity (dl, ent);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
@@ -638,18 +692,20 @@ void CL_RelinkEntities (void)
 		if (ent->effects & EF_BRIGHTLIGHT)
 		{
 			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->origin[2] += 16;
-			dl->radius = 400 + (rand()&31);
-			dl->die = cl.time + 0.001;
-		}
-		if (ent->effects & EF_DIMLIGHT)
-		{
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->die = cl.time + 0.001;
-		}
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->origin[2] += 16;
+                        dl->radius = 400 + (rand()&31);
+                        dl->die = cl.time + 0.001;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
+                if (ent->effects & EF_DIMLIGHT)
+                {
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->die = cl.time + 0.001;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
 		if (ent->effects & EF_QEX_QUADLIGHT)
 		{
 			dl = CL_AllocDlight (i);
@@ -681,12 +737,13 @@ void CL_RelinkEntities (void)
 			CL_RocketTrail (ent, 5);
 		else if (ent->model->flags & EF_ROCKET)
 		{
-			CL_RocketTrail (ent, 0);
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin, dl->origin);
-			dl->radius = 200;
-			dl->die = cl.time + 0.01;
-		}
+                        CL_RocketTrail (ent, 0);
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin, dl->origin);
+                        dl->radius = 200;
+                        dl->die = cl.time + 0.01;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
 		else if (ent->model->flags & EF_GRENADE)
 			CL_RocketTrail (ent, 1);
 		else if (ent->model->flags & EF_TRACER3)
