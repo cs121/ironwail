@@ -521,21 +521,41 @@ static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
 
 static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
-        int i;
+	for (int i = 0; i < samples; i++)
+	{
+		unsigned int packed = LittleLong(src[i]);
+		unsigned int exponent = packed >> 27;
+		float scale = ldexpf(1.0f, (int)exponent - 24);
+		int r = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
+		int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
+		int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
 
-        for (i = 0; i < samples; i++)
-        {
-                unsigned int packed = LittleLong(src[i]);
-                unsigned int exponent = packed >> 27;
-                float scale = ldexpf(1.0f, (int)exponent - 24);
-                int r = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
-                int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
-                int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
+		*dst++ = CLAMP(0, r, 255);
+		*dst++ = CLAMP(0, g, 255);
+		*dst++ = CLAMP(0, b, 255);
+	}
+}
 
-                *dst++ = CLAMP(0, r, 255);
-                *dst++ = CLAMP(0, g, 255);
-                *dst++ = CLAMP(0, b, 255);
-        }
+static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
+{
+	for (int i = 0; i < samples; i++, dst += 3, src += 4)
+	{
+		int exponent = src[3];
+
+		if (!exponent)
+		{
+			dst[0] = dst[1] = dst[2] = 0;
+			continue;
+		}
+
+// RGBE stores mantissas in the 0-255 range with a shared exponent.
+// Convert to 8-bit lightmap values by first normalizing the mantissa
+// (divide by 256) and then scaling by the biased exponent.
+float scale = ldexpf(255.0f, exponent - (128 + 8));
+dst[0] = CLAMP(0, (int)(0.5f + src[0] * scale), 255);
+dst[1] = CLAMP(0, (int)(0.5f + src[1] * scale), 255);
+dst[2] = CLAMP(0, (int)(0.5f + src[2] * scale), 255);
+	}
 }
 static void Q1BSPX_MarkUsed(const char *lumpname)
 {
@@ -1131,14 +1151,12 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				if (8+l->filelen*4 == com_filesize)
 				{
-                                        Con_DPrintf2("%s loaded (hdr)\n", litfilename);
-                                        loadmodel->lightdata = data + 8;
-                                        loadmodel->lightdatasamples = l->filelen;
-                                        loadmodel->flags |= MOD_HDRLIGHTING;
-                                        loadmodel->litfile = true;
-                                        for (i = 0; i < loadmodel->lightdatasamples; i++)
-                                                ((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
-                                        goto loadlightdir;
+					Con_DPrintf2("%s loaded (hdr)\n", litfilename);
+					Mod_DecodeRgbeLighting(data, data + 8, l->filelen);
+					loadmodel->lightdata = data;
+					loadmodel->lightdatasamples = l->filelen;
+					loadmodel->litfile = true;
+					goto loadlightdir;
 				}
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*4, (unsigned)com_filesize);
