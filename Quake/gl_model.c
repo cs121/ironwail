@@ -482,6 +482,7 @@ static bspx_lump_usage_t bspx_lump_usage[MAX_BSPX_LUMP_USAGE];
 static int bspx_lump_usage_count;
 //supported lumps:
 //RGBLIGHTING (.lit)
+//LIGHTING_E5BGR9 (hdr lighting)
 //LMSHIFT (.lit2)
 //LMOFFSET (LMSHIFT helper)
 //LMSTYLE (LMSHIFT helper)
@@ -490,7 +491,6 @@ static int bspx_lump_usage_count;
 
 //unsupported lumps ('documented' elsewhere):
 //BRUSHLIST (because hulls suck)
-//LIGHTING_E5BGR9 (hdr lighting)
 static void Q1BSPX_ResetUsage(void)
 {
         bspx_lump_usage_count = 0;
@@ -517,6 +517,25 @@ static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
                         return &bspx_lump_usage[i];
         }
         return NULL;
+}
+
+static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
+{
+        int i;
+
+        for (i = 0; i < samples; i++)
+        {
+                unsigned int packed = LittleLong(src[i]);
+                unsigned int exponent = packed >> 27;
+                float scale = ldexpf(1.0f, (int)exponent - 24);
+                int r = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
+                int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
+                int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
+
+                *dst++ = bound(0, r, 255);
+                *dst++ = bound(0, g, 255);
+                *dst++ = bound(0, b, 255);
+        }
 }
 static void Q1BSPX_MarkUsed(const char *lumpname)
 {
@@ -1143,14 +1162,12 @@ static void Mod_LoadLighting (lump_t *l)
                 in = Q1BSPX_FindLump("LIGHTING_E5BGR9", &bspxsize);
                 if (in && (!l->filelen || (bspxsize && bspxsize == l->filelen * 4)))
                 {
-                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
-                        loadmodel->lightdatasamples = bspxsize / 4;
-                        memcpy(loadmodel->lightdata, in, bspxsize);
-                        loadmodel->flags |= MOD_HDRLIGHTING;
+                        int samples = bspxsize / 4;
+                        loadmodel->lightdata = (byte*)Hunk_AllocName(samples * 3, litfilename);
+                        loadmodel->lightdatasamples = samples;
+                        Q1BSPX_DecodeE5BGR9Lighting(loadmodel->lightdata, (const unsigned int *)in, samples);
                         Q1BSPX_MarkUsed("LIGHTING_E5BGR9");
-                        Con_DPrintf("bspx hdr lighting loaded\n");
-                        for (i = 0; i < loadmodel->lightdatasamples; i++)    // native endian...
-                                ((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
+                        Con_DPrintf("bspx hdr lighting loaded (E5BGR9)\n");
                         goto loadlightdir;
                 }
                 in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
