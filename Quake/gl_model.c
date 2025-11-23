@@ -704,7 +704,7 @@ static textype_t Mod_TextureTypeFromName (const char *texname)
 Mod_LoadEmissiveMap
 =================
 */
-static gltexture_t *Mod_LoadEmissiveMap (model_t *mod, const char *basename, int texflags)
+static gltexture_t *Mod_LoadEmissiveMap (qmodel_t *mod, const char *basename, int texflags)
 {
         char emissivename[MAX_OSPATH];
         int mark = Hunk_LowMark();
