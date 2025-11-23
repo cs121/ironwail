@@ -532,9 +532,9 @@ static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int 
                 int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
                 int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
 
-                *dst++ = bound(0, r, 255);
-                *dst++ = bound(0, g, 255);
-                *dst++ = bound(0, b, 255);
+                *dst++ = CLAMP(0, r, 255);
+                *dst++ = CLAMP(0, g, 255);
+                *dst++ = CLAMP(0, b, 255);
         }
 }
 static void Q1BSPX_MarkUsed(const char *lumpname)
