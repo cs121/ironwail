@@ -26,6 +26,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+#define INVALID_LIGHTSTYLE_OLD 255
+#define INVALID_LIGHTSTYLE     255
+
+
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
 
@@ -34,11 +38,16 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
+static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
+static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 
 static void Mod_Print (void);
 
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
+static cvar_t	gl_loadlitfiles = {"gl_loadlitfiles", "1", CVAR_ARCHIVE};
+static cvar_t	external_lits_dir = {"external_lits_dir", "", CVAR_ARCHIVE};
+static cvar_t	mod_ignorelmscale = {"mod_ignorelmscale", "0", 0};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 
 static byte	*mod_novis;
@@ -93,9 +102,12 @@ Mod_Init
 */
 void Mod_Init (void)
 {
-	Cvar_RegisterVariable (&external_vis);
-	Cvar_RegisterVariable (&external_ents);
-	Cvar_RegisterVariable (&r_md5);
+        Cvar_RegisterVariable (&external_vis);
+        Cvar_RegisterVariable (&external_ents);
+        Cvar_RegisterVariable (&gl_loadlitfiles);
+        Cvar_RegisterVariable (&external_lits_dir);
+        Cvar_RegisterVariable (&mod_ignorelmscale);
+        Cvar_RegisterVariable (&r_md5);
 	Cvar_SetCallback (&r_md5, R_MD5_f);
 
 	Cmd_AddCommand ("mcache", Mod_Print);
@@ -498,13 +510,16 @@ static void Q1BSPX_Setup(qmodel_t *mod, char *filebase, unsigned int filelen, lu
 	bspxbase = filebase;
 	bspxheader = NULL;
 
-	for (i = 0; i < numlumps; i++, lumps++)
-	{
-		if ((lumps->fileofs & 3) && i != LUMP_ENTITIES)
-			misaligned = true;
-		if (offs < lumps->fileofs + lumps->filelen)
-			offs = lumps->fileofs + lumps->filelen;
-	}
+        for (i = 0; i < numlumps; i++, lumps++)
+        {
+                if ((lumps->fileofs & 3) && i != LUMP_ENTITIES)
+                        misaligned = true;
+                {
+                        unsigned int lump_end = (unsigned int)lumps->fileofs + (unsigned int)lumps->filelen;
+                        if (offs < lump_end)
+                                offs = lump_end;
+                }
+        }
 	if (misaligned)
 		Con_DWarning("%s contains misaligned lumps\n", mod->name);
 	offs = (offs + 3) & ~3;
@@ -614,6 +629,7 @@ static void Mod_LoadTextures (lump_t *l)
 	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
 	byte		*data;
 	enum srcformat fmt;
+	qboolean	malloced;
 //johnfitz
 
 	//johnfitz -- don't return early if no textures; still need to create dummy texture
@@ -700,6 +716,7 @@ static void Mod_LoadTextures (lump_t *l)
 		}
 
 		//johnfitz -- lots of changes
+		malloced = false;
 		if (!isDedicated) //no texture uploading for dedicated server
 		{
 			if (tx->type == TEXTYPE_SKY)
@@ -930,6 +947,8 @@ static void Mod_LoadLighting (lump_t *l)
 	int	bspxsize;
 
 	loadmodel->lightdata = NULL;
+	loadmodel->lightdatasamples = 0;
+	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
@@ -1033,7 +1052,7 @@ static void Mod_LoadLighting (lump_t *l)
 		in = mod_base + l->fileofs;
 		out = loadmodel->lightdata;
 
-		for (unsigned int i = 0;i < (l->filelen / 2) ;i++)
+                for (unsigned int i = 0; i < (unsigned int)(l->filelen / 2); i++)
 		{
 			q64_b0 = *in++;
 			q64_b1 = *in++;
@@ -1080,7 +1099,7 @@ static void Mod_LoadLighting (lump_t *l)
 		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
 		out = loadmodel->lightdata;
 		memcpy (in, mod_base + l->fileofs, l->filelen);
-		for (unsigned int i = 0;i < l->filelen;i++)
+                for (unsigned int i = 0; i < (unsigned int)l->filelen; i++)
 		{
 			d = *in++;
 			*out++ = d;
@@ -1171,6 +1190,48 @@ _load_embedded:
 	}
 	loadmodel->entities = (char *) Hunk_AllocNameNoFill ( l->filelen, loadname);
 	memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
+}
+
+static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize)
+{
+	const char *data;
+
+	if (!mod || !mod->entities || !key || !value || valuesize == 0)
+		return false;
+
+	data = COM_Parse (mod->entities);
+	if (!data || com_token[0] != '{')
+		return false;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data || !com_token[0])
+			return false;
+		if (com_token[0] == '}')
+			return false;
+
+		if (!strcmp (com_token, "classname"))
+		{
+			data = COM_Parse (data);
+			if (!data || strcmp (com_token, "worldspawn"))
+				return false;
+			continue;
+		}
+
+		if (!strcmp (com_token, key))
+		{
+			data = COM_Parse (data);
+			if (!data)
+				return false;
+			q_strlcpy (value, com_token, valuesize);
+			return true;
+		}
+
+		data = COM_Parse (data);
+		if (!data)
+			return false;
+	}
 }
 
 
@@ -1320,8 +1381,6 @@ static void CalcSurfaceExtents (msurface_t *s)
 	int		i,j, e;
 	mvertex_t	*v;
 	mtexinfo_t	*tex;
-	int		bmins[2], bmaxs[2];
-	int lmscale;
 	double	texvecs[2][4];
 
 	mins[0] = mins[1] = FLT_MAX;
@@ -1388,7 +1447,6 @@ static void CalcSurfaceExtents (msurface_t *s)
 		}
 	}
 
-	lmscale = 1<<lmshift;
 
 	for (i=0 ; i<2 ; i++)
 	{
@@ -1434,6 +1492,13 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 	}
 }
 
+static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
+{
+	(void)mod;
+	(void)lump;
+	(void)lumpsize;
+}
+
 /*
 =================
 Mod_LoadFaces
@@ -1454,7 +1519,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	int lumpsize;
 	char scalebuf[16];
 	int facestyles;
-	struct decoupled_lm_info_s *decoupledlm = NULL;
+        unsigned char *decoupledlm = NULL;
 
 	if (bsp2)
 	{
@@ -1481,8 +1546,8 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 	if (!mod_ignorelmscale.value)
 	{
-		decoupledlm = Q1BSPX_FindLump("DECOUPLED_LM", &lumpsize); //RGB packed data
-		if (decoupledlm && lumpsize == count*sizeof(*decoupledlm))
+                decoupledlm = Q1BSPX_FindLump("DECOUPLED_LM", &lumpsize); //RGB packed data
+                if (decoupledlm && lumpsize >= count)
 		{	//basically stomps over the lmshift+lmoffset stuff above. lmstyle/lmstyle16+lit/hdr+lux info is still needed
 			lmshift = NULL;
 			lmoffset = NULL;
