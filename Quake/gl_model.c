@@ -1118,11 +1118,12 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				if (8+l->filelen*3 == com_filesize)
 				{
-					Con_DPrintf2("%s loaded (ldr)\n", litfilename);
-					loadmodel->lightdata = data + 8;
-					loadmodel->lightdatasamples = l->filelen;
-					goto loadlightdir;
-				}
+                                        Con_DPrintf2("%s loaded (ldr)\n", litfilename);
+                                        loadmodel->lightdata = data + 8;
+                                        loadmodel->lightdatasamples = l->filelen;
+                                        loadmodel->litfile = true;
+                                        goto loadlightdir;
+                                }
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*3, (unsigned)com_filesize);
 			}
@@ -1130,13 +1131,14 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				if (8+l->filelen*4 == com_filesize)
 				{
-					Con_DPrintf2("%s loaded (hdr)\n", litfilename);
-					loadmodel->lightdata = data + 8;
-					loadmodel->lightdatasamples = l->filelen;
-					loadmodel->flags |= MOD_HDRLIGHTING;
-					for (i = 0; i < loadmodel->lightdatasamples; i++)
-						((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
-					goto loadlightdir;
+                                        Con_DPrintf2("%s loaded (hdr)\n", litfilename);
+                                        loadmodel->lightdata = data + 8;
+                                        loadmodel->lightdatasamples = l->filelen;
+                                        loadmodel->flags |= MOD_HDRLIGHTING;
+                                        loadmodel->litfile = true;
+                                        for (i = 0; i < loadmodel->lightdatasamples; i++)
+                                                ((int*)loadmodel->lightdata)[i] = LittleLong(((int*)loadmodel->lightdata)[i]);
+                                        goto loadlightdir;
 				}
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*4, (unsigned)com_filesize);
@@ -1160,13 +1162,14 @@ static void Mod_LoadLighting (lump_t *l)
 	// Quake64 bsp lighmap data
 	if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 	{
-		// RGB lightmap samples are packed in 16bits.
-		// RRRRR GGGGG BBBBBB
+                // RGB lightmap samples are packed in 16bits.
+                // RRRRR GGGGG BBBBBB
 
-		loadmodel->lightdata = (byte *) Hunk_AllocName ( (l->filelen / 2)*3, litfilename);
-		loadmodel->lightdatasamples = (l->filelen / 2);
-		in = mod_base + l->fileofs;
-		out = loadmodel->lightdata;
+                loadmodel->lightdata = (byte *) Hunk_AllocName ( (l->filelen / 2)*3, litfilename);
+                loadmodel->lightdatasamples = (l->filelen / 2);
+                loadmodel->litfile = true;
+                in = mod_base + l->fileofs;
+                out = loadmodel->lightdata;
 
                 for (unsigned int i = 0; i < (unsigned int)(l->filelen / 2); i++)
 		{
@@ -1188,6 +1191,7 @@ static void Mod_LoadLighting (lump_t *l)
                         int samples = bspxsize / 4;
                         loadmodel->lightdata = (byte*)Hunk_AllocName(samples * 3, litfilename);
                         loadmodel->lightdatasamples = samples;
+                        loadmodel->litfile = true;
                         Q1BSPX_DecodeE5BGR9Lighting(loadmodel->lightdata, (const unsigned int *)in, samples);
                         Q1BSPX_MarkUsed("LIGHTING_E5BGR9");
                         Con_DPrintf("bspx hdr lighting loaded (E5BGR9)\n");
@@ -1198,6 +1202,7 @@ static void Mod_LoadLighting (lump_t *l)
                 {
                         loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
                         loadmodel->lightdatasamples = bspxsize / 3;
+                        loadmodel->litfile = true;
                         memcpy(loadmodel->lightdata, in, bspxsize);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
                         Con_DPrintf("bspx ldr lighting loaded\n");
