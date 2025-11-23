@@ -548,8 +548,10 @@ static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 			continue;
 		}
 
-		// RGBE uses a shared exponent with an 8-bit mantissa per channel.
-		float scale = ldexpf(1.0f, exponent - (128 + 8));
+                // RGBE uses a shared exponent with an 8-bit mantissa per channel.
+                // Scale directly by the exponent bias; the mantissa is already in
+                // [0, 255] which matches the engine's 8-bit lightmap range.
+                float scale = ldexpf(1.0f, exponent - 128);
 		dst[0] = CLAMP(0, (int)(0.5f + src[0] * scale), 255);
 		dst[1] = CLAMP(0, (int)(0.5f + src[1] * scale), 255);
 		dst[2] = CLAMP(0, (int)(0.5f + src[2] * scale), 255);
