@@ -105,11 +105,18 @@ vec3 TransformPrev(vec3 p, Instance instance)
 {
 	return TransformPosition(p, instance.prev_mat);
 }
+vec3 TransformDirection(vec3 n, Instance instance)
+{
+        mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
+        return (world * vec4(n, 0.0)).xyz;
+}
+
 
 layout(location=0) in vec3 in_pos;
 layout(location=1) in vec4 in_uv;
 layout(location=2) in float in_lmofs;
 layout(location=3) in ivec4 in_styles;
+layout(location=4) in vec3 in_normal;
 
 
 layout(location=0) flat out uint out_flags;
@@ -131,6 +138,7 @@ layout(location=8) flat out float out_lmofs;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
+layout(location=13) out vec3 out_normal;
 
 void main()
 {
@@ -138,6 +146,7 @@ void main()
 	int instance_id = GET_INSTANCE_ID(call);
 	Instance instance = instance_data[instance_id];
 	vec3 world_pos = Transform(in_pos, instance);
+        vec3 world_normal = TransformDirection(in_normal, instance);
 	vec3 prev_world_pos = TransformPrev(in_pos, instance);
 	vec4 curr_clip = ViewProj * vec4(world_pos, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_pos, 1.0);
@@ -155,6 +164,7 @@ void main()
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_pos = world_pos;
+        out_normal = normalize(world_normal);
 	out_uv = in_uv.xy;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;

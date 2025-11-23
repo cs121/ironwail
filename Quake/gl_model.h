@@ -49,6 +49,7 @@ BRUSH MODELS
 typedef struct
 {
 	vec3_t		position;
+	vec3_t		normal;
 } mvertex_t;
 
 #define	SIDE_FRONT	0
@@ -132,6 +133,7 @@ typedef struct
 
 typedef struct glvert_s {
 	vec3_t		pos;
+	vec3_t		normal;
 	float		st[4];
 	float		lmofs;
 	unsigned	styles;

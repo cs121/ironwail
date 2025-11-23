@@ -486,11 +486,11 @@ static int bspx_lump_usage_count;
 //LMOFFSET (LMSHIFT helper)
 //LMSTYLE (LMSHIFT helper)
 //LIGHTINGDIR (.lux)
+//VERTEXNORMALS (smooth shading with dlights/rtlights)
 
 //unsupported lumps ('documented' elsewhere):
 //BRUSHLIST (because hulls suck)
 //LIGHTING_E5BGR9 (hdr lighting)
-//VERTEXNORMALS (smooth shading with dlights/rtlights)
 static void Q1BSPX_ResetUsage(void)
 {
         bspx_lump_usage_count = 0;
@@ -1345,9 +1345,13 @@ Mod_LoadVertexes
 */
 static void Mod_LoadVertexes (lump_t *l)
 {
-	dvertex_t	*in;
-	mvertex_t	*out;
+	dvertex_t		*in;
+	mvertex_t		*out;
 	int			i, count;
+	int			bspxsize;
+	const float	*normal_in = NULL;
+
+	loadmodel->vertexes = NULL;
 
 	in = (dvertex_t *)(mod_base + l->fileofs);
 	if (l->filelen % sizeof(*in))
@@ -1358,11 +1362,34 @@ static void Mod_LoadVertexes (lump_t *l)
 	loadmodel->vertexes = out;
 	loadmodel->numvertexes = count;
 
+	{
+		void *normal_lump = Q1BSPX_FindLump("VERTEXNORMALS", &bspxsize);
+		if (normal_lump)
+		{
+			if (bspxsize == count * sizeof(vec3_t))
+			{
+				Q1BSPX_MarkUsed("VERTEXNORMALS");
+				normal_in = (const float *)normal_lump;
+			}
+			else
+				Q1BSPX_MarkUnsupported("VERTEXNORMALS");
+		}
+	}
+
 	for (i=0 ; i<count ; i++, in++, out++)
 	{
 		out->position[0] = LittleFloat (in->point[0]);
 		out->position[1] = LittleFloat (in->point[1]);
 		out->position[2] = LittleFloat (in->point[2]);
+
+		if (normal_in)
+		{
+			out->normal[0] = LittleFloat (*normal_in++);
+			out->normal[1] = LittleFloat (*normal_in++);
+			out->normal[2] = LittleFloat (*normal_in++);
+		}
+		else
+			VectorClear(out->normal);
 	}
 }
 
