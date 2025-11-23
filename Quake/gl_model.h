@@ -380,7 +380,7 @@ extern	trivertx_t			*poseverts[MAXALIASFRAMES];
 // Whole model
 //
 
-typedef enum {mod_brush, mod_alias, mod_sprite, mod_numtypes} modtype_t;
+typedef enum {mod_brush, mod_alias, mod_sprite, mod_ext_invalid, mod_numtypes} modtype_t;
 
 #define	EF_ROCKET	1			// leave a trail
 #define	EF_GRENADE	2			// leave a trail
@@ -396,6 +396,7 @@ typedef enum {mod_brush, mod_alias, mod_sprite, mod_numtypes} modtype_t;
 #define	MOD_NOLERP		256		//don't lerp when animating
 #define	MOD_NOSHADOW	512		//don't cast a shadow
 #define	MOD_FBRIGHTHACK	1024	//when fullbrights are disabled, use a hack to render this model brighter
+#define	MOD_HDRLIGHTING	2048
 //johnfitz
 
 //
@@ -490,6 +491,7 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
+	int			lightdatasamples;
 	char		*entities;
 
 	qboolean	litfile;
