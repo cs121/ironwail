@@ -748,6 +748,7 @@ void GL_BuildBModelVertexBuffer (void)
                                         vert->lmofs = lmofs;
                                         {
                                                 unsigned char packedstyles[4];
+                                                int map;
 
                                                 for (map = 0; map < MAXLIGHTMAPS; map++)
                                                         packedstyles[map] = (fa->styles[map] > 255) ? 255 : fa->styles[map];
