@@ -2111,9 +2111,143 @@ static void Mod_LoadFaces (lump_t *l)
         }
 }
 
+static void Mod_SetParent (mnode_t *node, mnode_t *parent)
+{
+        node->parent = parent;
+
+        if (node->contents < 0)
+                return;
+
+        Mod_SetParent (node->children[0], node);
+        Mod_SetParent (node->children[1], node);
+}
+
+static void Mod_LoadNodes_S (lump_t *l)
+{
+        dsnode_t        *in;
+        mnode_t         *out;
+        int                     i, j, count, p;
+
+        if (l->filelen % sizeof(*in))
+                Sys_Error ("Mod_LoadNodes: funny lump size in %s", loadmodel->name);
+        count = l->filelen / sizeof(*in);
+        in = (dsnode_t *)(mod_base + l->fileofs);
+        out = (mnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+
+        loadmodel->nodes = out;
+        loadmodel->numnodes = count;
+
+        for (i=0 ; i<count ; i++, in++, out++)
+        {
+                out->contents = 0;
+
+                for (j=0 ; j<3 ; j++)
+                {
+                        out->minmaxs[j] = LittleShort (in->mins[j]);
+                        out->minmaxs[3+j] = LittleShort (in->maxs[j]);
+                }
+
+                out->plane = loadmodel->planes + LittleLong(in->planenum);
+
+                for (j=0 ; j<2 ; j++)
+                {
+                        p = LittleShort (in->children[j]);
+                        if (p >= 0)
+                                out->children[j] = loadmodel->nodes + p;
+                        else
+                                out->children[j] = (mnode_t *)(loadmodel->leafs + (-1 - p));
+                }
+
+                out->firstsurface = (unsigned short)LittleShort(in->firstface);
+                out->numsurfaces = (unsigned short)LittleShort(in->numfaces);
+        }
+}
+
+static void Mod_LoadNodes_L1 (lump_t *l)
+{
+        dl1node_t       *in;
+        mnode_t         *out;
+        int                     i, j, count, p;
+
+        if (l->filelen % sizeof(*in))
+                Sys_Error ("Mod_LoadNodes: funny lump size in %s", loadmodel->name);
+        count = l->filelen / sizeof(*in);
+        in = (dl1node_t *)(mod_base + l->fileofs);
+        out = (mnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+
+        loadmodel->nodes = out;
+        loadmodel->numnodes = count;
+
+        for (i=0 ; i<count ; i++, in++, out++)
+        {
+                out->contents = 0;
+
+                for (j=0 ; j<3 ; j++)
+                {
+                        out->minmaxs[j] = LittleShort (in->mins[j]);
+                        out->minmaxs[3+j] = LittleShort (in->maxs[j]);
+                }
+
+                out->plane = loadmodel->planes + LittleLong(in->planenum);
+
+                for (j=0 ; j<2 ; j++)
+                {
+                        p = LittleLong (in->children[j]);
+                        if (p >= 0)
+                                out->children[j] = loadmodel->nodes + p;
+                        else
+                                out->children[j] = (mnode_t *)(loadmodel->leafs + (-1 - p));
+                }
+
+                out->firstsurface = LittleLong(in->firstface);
+                out->numsurfaces = LittleLong(in->numfaces);
+        }
+}
+
+static void Mod_LoadNodes_L2 (lump_t *l)
+{
+        dl2node_t       *in;
+        mnode_t         *out;
+        int                     i, j, count, p;
+
+        if (l->filelen % sizeof(*in))
+                Sys_Error ("Mod_LoadNodes: funny lump size in %s", loadmodel->name);
+        count = l->filelen / sizeof(*in);
+        in = (dl2node_t *)(mod_base + l->fileofs);
+        out = (mnode_t *) Hunk_AllocName ( count*sizeof(*out), loadname);
+
+        loadmodel->nodes = out;
+        loadmodel->numnodes = count;
+
+        for (i=0 ; i<count ; i++, in++, out++)
+        {
+                out->contents = 0;
+
+                for (j=0 ; j<3 ; j++)
+                {
+                        out->minmaxs[j] = LittleFloat (in->mins[j]);
+                        out->minmaxs[3+j] = LittleFloat (in->maxs[j]);
+                }
+
+                out->plane = loadmodel->planes + LittleLong(in->planenum);
+
+                for (j=0 ; j<2 ; j++)
+                {
+                        p = LittleLong (in->children[j]);
+                        if (p >= 0)
+                                out->children[j] = loadmodel->nodes + p;
+                        else
+                                out->children[j] = (mnode_t *)(loadmodel->leafs + (-1 - p));
+                }
+
+                out->firstsurface = LittleLong(in->firstface);
+                out->numsurfaces = LittleLong(in->numfaces);
+        }
+}
+
 static void Mod_LoadNodes (lump_t *l, int bsp2)
 {
-	if (bsp2 == 2)
+        if (bsp2 == 2)
 		Mod_LoadNodes_L2(l);
 	else if (bsp2)
 		Mod_LoadNodes_L1(l);
