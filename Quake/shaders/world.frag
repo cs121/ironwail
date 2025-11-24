@@ -419,6 +419,12 @@ void main()
         result.rgb += emissive;
         vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
         result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
+        if (RimWorld > 0.0)
+        {
+                float rim = 1.0 - max(dot(surface_normal, view_dir), 0.0);
+                rim *= rim;
+                result.rgb += rim * RimWorld * result.rgb;
+        }
         result = clamp(result, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 
