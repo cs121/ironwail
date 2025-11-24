@@ -197,6 +197,8 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
+cvar_t	r_rim_world = { "r_rim_world", "0", CVAR_ARCHIVE };
+cvar_t	r_rim_models = { "r_rim_models", "0", CVAR_ARCHIVE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
@@ -1533,7 +1535,11 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
-		r_framedata._padding0 = 0.f;
+		r_framedata.rim_world = q_max (0.f, r_rim_world.value);
+		r_framedata.rim_models = q_max (0.f, r_rim_models.value);
+		r_framedata._padding0[0] = 0.f;
+		r_framedata._padding0[1] = 0.f;
+		r_framedata._padding0[2] = 0.f;
 	}
 
 	r_framecount++;

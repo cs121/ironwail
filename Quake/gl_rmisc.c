@@ -52,6 +52,8 @@ extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
 extern cvar_t r_oit;
 extern cvar_t r_dither;
+extern cvar_t r_rim_world;
+extern cvar_t r_rim_models;
 extern cvar_t r_dof;
 extern cvar_t r_dof_autofocus;
 extern cvar_t r_dof_focus;
@@ -349,12 +351,14 @@ void R_Init (void)
 #endif
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_pos);
-	Cvar_RegisterVariable (&r_alphasort);
-	Cvar_RegisterVariable (&r_oit);
-	Cvar_RegisterVariable (&r_dither);
-	Cvar_RegisterVariable (&r_dof);
+        Cvar_RegisterVariable (&r_alphasort);
+        Cvar_RegisterVariable (&r_oit);
+        Cvar_RegisterVariable (&r_dither);
+        Cvar_RegisterVariable (&r_rim_world);
+        Cvar_RegisterVariable (&r_rim_models);
+        Cvar_RegisterVariable (&r_dof);
         Cvar_RegisterVariable (&r_dof_autofocus);
-	Cvar_RegisterVariable (&r_dof_focus);
+        Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
 	Cvar_RegisterVariable (&r_dof_strength);
         Cvar_RegisterVariable (&r_motionblur);
