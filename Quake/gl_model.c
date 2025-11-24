@@ -561,10 +561,10 @@ static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int 
 	{
 		unsigned int packed = LittleLong(src[i]);
 		unsigned int exponent = packed >> 27;
-		float scale = ldexpf(1.0f, (int)exponent - 24);
-		int r = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
+		float scale = exponent ? ldexpf(1.0f, (int)exponent - 24) : 0.0f;
+		int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
 		int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
-		int b = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
+		int r = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
 
 		*dst++ = CLAMP(0, r, 255);
 		*dst++ = CLAMP(0, g, 255);
