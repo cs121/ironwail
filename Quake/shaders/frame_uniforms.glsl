@@ -12,7 +12,12 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
+        float   RimWorld;
+        float   RimModels;
         float   _Pad0;
+        float   _Pad1;
+        float   _Pad2;
+        float   _Pad3;
         vec3    EyePos;
         float   Time;
         vec3    PrevEyePos;
@@ -21,8 +26,8 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ZLogBias;
         uint    NumLights;
         uint    PrevFrameValid;
-        uint    _Pad1;
-        uint    _Pad2;
+        uint    _Pad4;
+        uint    _Pad5;
 };
 
 #endif // FRAME_UNIFORMS_GLSL
