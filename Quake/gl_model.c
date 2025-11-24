@@ -1386,17 +1386,22 @@ static void Mod_LoadLighting (lump_t *l)
                         Con_DPrintf("bspx hdr lighting loaded (E5BGR9)\n");
                         goto loadlightdir;
                 }
-                in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
-                if (in && (!l->filelen || (bspxsize && bspxsize == l->filelen * 3)))
-                {
-                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
-                        loadmodel->lightdatasamples = bspxsize / 3;
-                        loadmodel->litfile = true;
-                        memcpy(loadmodel->lightdata, in, bspxsize);
-                        Q1BSPX_MarkUsed("RGBLIGHTING");
-                        Con_DPrintf("bspx ldr lighting loaded\n");
-                        goto loadlightdir;
-                }
+				in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
+				if (in && (bspxsize % 3 == 0))
+{
+					int samples = bspxsize / 3;
+
+					loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
+					loadmodel->lightdatasamples = samples;
+					loadmodel->litfile = true;
+
+					memcpy(loadmodel->lightdata, in, bspxsize);
+					Q1BSPX_MarkUsed("RGBLIGHTING");
+
+					Con_DPrintf("bspx ldr lighting loaded (%d samples)\n", samples);
+					goto loadlightdir;
+				}
+
         }
 	else {
 		Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
