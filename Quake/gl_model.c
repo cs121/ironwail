@@ -477,6 +477,7 @@ typedef struct {
     size_t           face_styles_offset;
     size_t           face_lightofs_offset;
     qboolean         is_bsp2;
+    qboolean         is_bsp29;
 } bsp_loader_t;
 
 static bsp_loader_t bsp_loader;
@@ -491,8 +492,15 @@ typedef struct {
     int numlumps;
         bspx_lump_t lumps[1];
 } bspx_header_t;
-static char *bspxbase;
-static bspx_header_t *bspxheader;
+typedef struct
+{
+        lump_t          lumps[HEADER_LUMPS];
+        size_t          header_size;
+        qboolean        has_bspx_header;
+        qboolean        is_bsp2;
+        qboolean        is_bsp29;
+        int                     bspversion;
+} bsp_header_info_t;
 typedef struct
 {
         char lumpname[sizeof(((bspx_lump_t *)0)->lumpname) + 1];
@@ -518,15 +526,14 @@ static void Q1BSPX_ResetUsage(void)
         bspx_lump_usage_count = 0;
         memset(bspx_lump_usage, 0, sizeof(bspx_lump_usage));
 }
-static void Q1BSPX_RecordLumps(bspx_header_t *h)
+static void Q1BSPX_RecordEntries(qmodel_t *mod)
 {
         int i;
 
-        bspx_lump_usage_count = q_min(h->numlumps, MAX_BSPX_LUMP_USAGE);
+        bspx_lump_usage_count = q_min(mod->bspx_entries_count, MAX_BSPX_LUMP_USAGE);
         for (i = 0; i < bspx_lump_usage_count; i++)
         {
-                memcpy(bspx_lump_usage[i].lumpname, h->lumps[i].lumpname, sizeof(h->lumps[i].lumpname));
-                bspx_lump_usage[i].lumpname[sizeof(h->lumps[i].lumpname)] = '\0';
+                q_strlcpy(bspx_lump_usage[i].lumpname, mod->bspx_entries[i].name, sizeof(bspx_lump_usage[i].lumpname));
         }
 }
 static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
@@ -541,10 +548,17 @@ static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
         return NULL;
 }
 
+static qboolean Q1BSPX_IsProcessed(const char *lumpname)
+{
+        bspx_lump_usage_t *usage = Q1BSPX_FindUsage(lumpname);
+
+        return usage && (usage->used || usage->unsupported);
+}
+
 static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
-	for (int i = 0; i < samples; i++)
-	{
+        for (int i = 0; i < samples; i++)
+        {
 		unsigned int packed = LittleLong(src[i]);
 		unsigned int exponent = packed >> 27;
 		float scale = ldexpf(1.0f, (int)exponent - 24);
@@ -597,7 +611,7 @@ static void Q1BSPX_LogUsage(const char *modelname)
 {
         int i;
 
-        if (!bspxheader || !bspx_lump_usage_count)
+        if (!loadmodel || !loadmodel->bspx_entries_count || !bspx_lump_usage_count)
         {
                 Con_Printf("%s: no BSPX lumps present\n", modelname);
                 return;
@@ -614,70 +628,205 @@ static void Q1BSPX_LogUsage(const char *modelname)
                         Con_Printf("  %s: present (not used)\n", bspx_lump_usage[i].lumpname);
         }
 }
-static void *Q1BSPX_FindLump(char *lumpname, int *lumpsize)
+static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
 {
         int i;
         *lumpsize = 0;
-        if (!bspxheader)
-		return NULL;
+        if (!loadmodel || !loadmodel->bspx_entries)
+                return NULL;
 
-	for (i = 0; i < bspxheader->numlumps; i++)
-	{
-		if (!strncmp(bspxheader->lumps[i].lumpname, lumpname, 24))
-		{
-			*lumpsize = bspxheader->lumps[i].filelen;
-			return bspxbase + bspxheader->lumps[i].fileofs;
-		}
-	}
-	return NULL;
-}
-static void Q1BSPX_Setup(qmodel_t *mod, char *filebase, unsigned int filelen, lump_t *lumps, int numlumps)
-{
-        int i;
-        unsigned int offs = 0;
-        bspx_header_t *h;
-        qboolean misaligned = false;
-
-        Q1BSPX_ResetUsage();
-        bspxbase = filebase;
-        bspxheader = NULL;
-
-        for (i = 0; i < numlumps; i++, lumps++)
+        for (i = 0; i < loadmodel->bspx_entries_count; i++)
         {
-                if ((lumps->fileofs & 3) && i != LUMP_ENTITIES)
-                        misaligned = true;
+                const bspx_entry_t *entry = &loadmodel->bspx_entries[i];
+
+                if (!strncmp(entry->name, lumpname, sizeof(entry->name)))
                 {
-                        unsigned int lump_end = (unsigned int)lumps->fileofs + (unsigned int)lumps->filelen;
-                        if (offs < lump_end)
-                                offs = lump_end;
+                        *lumpsize = entry->size;
+                        return mod_base + entry->offset;
                 }
         }
-	if (misaligned)
-		Con_DWarning("%s contains misaligned lumps\n", mod->name);
-	offs = (offs + 3) & ~3;
-	if (offs + sizeof(*bspxheader) > filelen)
-		return; /*no space for it*/
-	h = (bspx_header_t*)(filebase + offs);
+        return NULL;
+}
 
-	i = LittleLong(h->numlumps);
-	/*verify the header*/
-	if (strncmp(h->id, "BSPX", 4) ||
-		i < 0 ||
-		offs + sizeof(*h) + sizeof(h->lumps[0])*(i-1) > filelen)
-		return;
-	h->numlumps = i;
-        while(i-->0)
+static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
+{
+        size_t  offs = 0;
+        int             i;
+
+        if (misaligned)
+                *misaligned = false;
+
+        for (i = 0; i < numlumps; i++)
         {
-                h->lumps[i].fileofs = LittleLong(h->lumps[i].fileofs);
-                h->lumps[i].filelen = LittleLong(h->lumps[i].filelen);
-                if (h->lumps[i].fileofs & 3)
-			Con_DWarning("%s contains misaligned bspx limp %s\n", mod->name, h->lumps[i].lumpname);
-		if ((unsigned int)h->lumps[i].fileofs + (unsigned int)h->lumps[i].filelen > filelen)
-                        return;
+                if (misaligned && (lumps[i].fileofs & 3) && i != LUMP_ENTITIES)
+                        *misaligned = true;
+
+                offs = q_max(offs, (size_t)lumps[i].fileofs + (size_t)lumps[i].filelen);
         }
 
-        bspxheader = h;
-        Q1BSPX_RecordLumps(h);
+        return (offs + 3) & ~((size_t)3);
+}
+
+static qboolean Mod_ParseBSPHeader(const byte *buffer, size_t length, bsp_header_info_t *out)
+{
+        const lump_t *raw_lumps;
+        size_t lump_start = sizeof(int);
+        int version;
+        int i;
+
+        memset(out, 0, sizeof(*out));
+
+        if (length < sizeof(int))
+                return false;
+
+        if (length >= 8 && !strncmp((const char *)buffer, "IBSP", 4))
+        {
+                version = LittleLong(*(int *)(buffer + sizeof(int)));
+                lump_start = sizeof(int) * 2;
+        }
+        else if (length >= 8 && !strncmp((const char *)buffer, "BSP2X", 5))
+        {
+                version = LittleLong(*(int *)(buffer + sizeof(int)));
+                lump_start = sizeof(int) * 2;
+                out->has_bspx_header = true;
+        }
+        else
+        {
+                version = LittleLong(*(int *)buffer);
+        }
+
+        out->bspversion = version;
+        out->is_bsp2 = (version == BSP2VERSION_2PSB || version == BSP2VERSION_BSP2);
+        out->is_bsp29 = (version == BSPVERSION || version == BSPVERSION_QUAKE64);
+
+        if (length < lump_start + sizeof(lump_t) * HEADER_LUMPS)
+                return false;
+
+        raw_lumps = (const lump_t *)(buffer + lump_start);
+        for (i = 0; i < HEADER_LUMPS; i++)
+        {
+                out->lumps[i].fileofs = LittleLong(raw_lumps[i].fileofs);
+                out->lumps[i].filelen = LittleLong(raw_lumps[i].filelen);
+        }
+        out->header_size = lump_start;
+
+        return true;
+}
+
+static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen)
+{
+        size_t                  offs;
+        size_t                  header_offset;
+        const bspx_header_t     *h = NULL;
+        qboolean                misaligned = false;
+        int                             i, numlumps;
+
+        Q1BSPX_ResetUsage();
+        mod->bspx_entries = NULL;
+        mod->bspx_entries_count = 0;
+
+        offs = Mod_FindEndOfStandardLumps(header->lumps, HEADER_LUMPS, &misaligned);
+        header_offset = offs;
+
+        if (misaligned)
+                Con_DWarning("%s contains misaligned lumps\n", mod->name);
+
+        if (offs + sizeof(*h) <= filelen)
+        {
+                const char *candidate = (const char *)mod_base + offs;
+
+                if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
+                        h = (const bspx_header_t *)candidate;
+        }
+
+        if (!h && header->has_bspx_header && header->header_size + sizeof(*h) <= filelen)
+        {
+                const char *candidate = (const char *)mod_base + header->header_size;
+
+                if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
+                {
+                        h = (const bspx_header_t *)candidate;
+                        header_offset = header->header_size;
+                }
+        }
+
+        if (!h)
+                return false;
+
+        numlumps = LittleLong(h->numlumps);
+        if (numlumps <= 0)
+                return false;
+
+        if (header_offset + sizeof(*h) + sizeof(h->lumps[0]) * (numlumps - 1) > filelen)
+                return false;
+
+        for (i = 0; i < numlumps; i++)
+        {
+                int fileofs = LittleLong(h->lumps[i].fileofs);
+                int filelen_lump = LittleLong(h->lumps[i].filelen);
+
+                if (fileofs & 3)
+                        Con_DWarning("%s contains misaligned bspx lump %s\n", mod->name, h->lumps[i].lumpname);
+
+                if ((unsigned int)fileofs + (unsigned int)filelen_lump > filelen)
+                        return false;
+        }
+
+        mod->bspx_entries = (bspx_entry_t *)Hunk_AllocName(numlumps * sizeof(bspx_entry_t), loadname);
+        mod->bspx_entries_count = numlumps;
+
+        for (i = 0; i < numlumps; i++)
+        {
+                mod->bspx_entries[i].offset = LittleLong(h->lumps[i].fileofs);
+                mod->bspx_entries[i].size = LittleLong(h->lumps[i].filelen);
+                q_strlcpy(mod->bspx_entries[i].name, h->lumps[i].lumpname, sizeof(mod->bspx_entries[i].name));
+        }
+
+        Q1BSPX_RecordEntries(mod);
+
+        return true;
+}
+
+typedef void (*bspx_handler_t)(qmodel_t *mod, void *data, int size);
+typedef struct
+{
+        const char *name;
+        bspx_handler_t handler;
+} bspx_handler_reg_t;
+
+static void Mod_DispatchBSPXLumps(qmodel_t *mod)
+{
+        static const bspx_handler_reg_t bspx_handlers[] = {
+                { "LGHTGRID", BSPX_LightGridLoad },
+                { "LIGHTGRID", BSPX_LightGridLoad },
+                { NULL, NULL }
+        };
+        int i;
+
+        if (!mod->bspx_entries_count)
+                return;
+
+        for (i = 0; i < mod->bspx_entries_count; i++)
+        {
+                const bspx_entry_t *entry = &mod->bspx_entries[i];
+                const bspx_handler_reg_t *handler;
+
+                if (Q1BSPX_IsProcessed(entry->name))
+                        continue;
+
+                for (handler = bspx_handlers; handler->handler; handler++)
+                {
+                        if (!strncmp(entry->name, handler->name, strlen(handler->name)))
+                        {
+                                handler->handler(mod, mod_base + entry->offset, entry->size);
+                                Q1BSPX_MarkUsed(entry->name);
+                                break;
+                        }
+                }
+
+                if (!handler->handler)
+                        Q1BSPX_MarkUnsupported(entry->name);
+        }
 }
 
 /*
@@ -1521,8 +1670,10 @@ static void Mod_LoadEdges (lump_t *l)
         }
 }
 
-static void Mod_SetupBspLoader(int bsp2_version)
+static void Mod_SetupBspLoader(qboolean bsp2_version, qboolean bsp29)
 {
+        bsp_loader.is_bsp29 = bsp29;
+
         if (bsp2_version)
         {
                 bsp_loader.is_bsp2 = true;
@@ -2795,16 +2946,22 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 {
 	int			i, j;
 	int			bsp2;
-	dheader_t	*header;
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
+	bsp_header_info_t header;
 
 	loadmodel->type = mod_brush;
 
-	header = (dheader_t *)buffer;
+	mod_base = (byte *)buffer;
 
-	mod->bspversion = LittleLong (header->version);
+	if (!Mod_ParseBSPHeader(buffer, (size_t)com_filesize, &header))
+	{
+		loadmodel->type = mod_ext_invalid;
+		Con_Warning("Mod_LoadBrushModel: %s has unsupported header\n", mod->name);
+		return;
+	}
 
+	mod->bspversion = header.bspversion;
 	switch(mod->bspversion)
 	{
 	case BSPVERSION:
@@ -2825,28 +2982,23 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		return;
 	}
 
-// swap all the lumps
-	mod_base = (byte *)header;
+	Mod_ParseBSPXDirectory(mod, &header, com_filesize);
 
-	for (i = 0; i < (int) sizeof(dheader_t) / 4; i++)
-		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
+	// load into heap
 
-	Q1BSPX_Setup(mod, buffer, com_filesize, header->lumps, HEADER_LUMPS);
+	Mod_SetupBspLoader(header.is_bsp2, header.is_bsp29);
 
-// load into heap
+	Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
+	Mod_LoadEdges (&header.lumps[LUMP_EDGES]);
+	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
+	Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
+	Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
+	Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
+	Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
+	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
+	Mod_LoadFaces (&header.lumps[LUMP_FACES]);
+	Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
 
-        Mod_SetupBspLoader(bsp2);
-
-        Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
-        Mod_LoadEdges (&header->lumps[LUMP_EDGES]);
-	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);
-	Mod_LoadTextures (&header->lumps[LUMP_TEXTURES]);
-	Mod_LoadLighting (&header->lumps[LUMP_LIGHTING]);
-	Mod_LoadPlanes (&header->lumps[LUMP_PLANES]);
-	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
-	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
-        Mod_LoadFaces (&header->lumps[LUMP_FACES]);
-	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
 
 	if (mod->bspversion == BSPVERSION && external_vis.value/* && sv.modelname[0] && !q_strcasecmp(loadname, sv.name)*/) // woods allow vis load online
 	{
@@ -2871,12 +3023,12 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		}
 	}
 
-	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
-	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+	Mod_LoadVisibility (&header.lumps[LUMP_VISIBILITY]);
+	Mod_LoadLeafs (&header.lumps[LUMP_LEAFS], bsp2);
 visdone:
-	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
-	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
-	Mod_LoadSubmodels (&header->lumps[LUMP_MODELS]);
+	Mod_LoadNodes (&header.lumps[LUMP_NODES], bsp2);
+	Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
+	Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
 
 	Mod_MakeHull0 ();
 
@@ -2884,6 +3036,7 @@ visdone:
 
 	Mod_CheckWaterVis();
 
+	Mod_DispatchBSPXLumps(mod);
 	Q1BSPX_LogUsage(mod->name);
 
 //
