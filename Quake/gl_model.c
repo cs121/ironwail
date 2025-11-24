@@ -557,14 +557,14 @@ static qboolean Q1BSPX_IsProcessed(const char *lumpname)
 
 static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
-        for (int i = 0; i < samples; i++)
-        {
+	for (int i = 0; i < samples; i++)
+	{
 		unsigned int packed = LittleLong(src[i]);
 		unsigned int exponent = packed >> 27;
 		float scale = ldexpf(1.0f, (int)exponent - 24);
-		int r = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
+		int r = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
 		int g = (int)(0.5f + ((packed >> 9) & 0x1ff) * scale * 255.0f);
-		int b = (int)(0.5f + (packed & 0x1ff) * scale * 255.0f);
+		int b = (int)(0.5f + ((packed >> 18) & 0x1ff) * scale * 255.0f);
 
 		*dst++ = CLAMP(0, r, 255);
 		*dst++ = CLAMP(0, g, 255);
@@ -1348,34 +1348,10 @@ static void Mod_LoadLighting (lump_t *l)
 	if (!l->filelen)
 		goto loadlightdir;
 
-	// Quake64 bsp lighmap data
-	if (loadmodel->bspversion == BSPVERSION_QUAKE64)
-	{
-                // RGB lightmap samples are packed in 16bits.
-                // RRRRR GGGGG BBBBBB
-
-                loadmodel->lightdata = (byte *) Hunk_AllocName ( (l->filelen / 2)*3, litfilename);
-                loadmodel->lightdatasamples = (l->filelen / 2);
-                loadmodel->litfile = true;
-                in = mod_base + l->fileofs;
-                out = loadmodel->lightdata;
-
-                for (unsigned int i = 0; i < (unsigned int)(l->filelen / 2); i++)
-		{
-			q64_b0 = *in++;
-			q64_b1 = *in++;
-
-			*out++ = q64_b0 & 0xf8;/* 0b11111000 */
-			*out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
-			*out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
-		}
-		goto loadlightdir;
-	}
-
         if (gl_loadlitfiles.value > 0) // woods #loadlits
         {
                 in = Q1BSPX_FindLump("LIGHTING_E5BGR9", &bspxsize);
-                if (in && (!l->filelen || (bspxsize && bspxsize == l->filelen * 4)))
+                if (in && bspxsize && (bspxsize % 4 == 0))
                 {
                         int samples = bspxsize / 4;
                         loadmodel->lightdata = (byte*)Hunk_AllocName(samples * 3, litfilename);
@@ -1386,26 +1362,61 @@ static void Mod_LoadLighting (lump_t *l)
                         Con_DPrintf("bspx hdr lighting loaded (E5BGR9)\n");
                         goto loadlightdir;
                 }
-				in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
-				if (in && (bspxsize % 3 == 0))
-{
-					int samples = bspxsize / 3;
+                else if (in)
+                {
+                        Q1BSPX_MarkUnsupported("LIGHTING_E5BGR9");
+                        Con_DWarning("LIGHTING_E5BGR9 lump size %d is not a multiple of 4 bytes\n", bspxsize);
+                }
 
-					loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
-					loadmodel->lightdatasamples = samples;
-					loadmodel->litfile = true;
+                in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
+                if (in && (bspxsize % 3 == 0))
+                {
+                        int samples = bspxsize / 3;
 
-					memcpy(loadmodel->lightdata, in, bspxsize);
-					Q1BSPX_MarkUsed("RGBLIGHTING");
+                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
+                        loadmodel->lightdatasamples = samples;
+                        loadmodel->litfile = true;
 
-					Con_DPrintf("bspx ldr lighting loaded (%d samples)\n", samples);
-					goto loadlightdir;
-				}
+                        memcpy(loadmodel->lightdata, in, bspxsize);
+                        Q1BSPX_MarkUsed("RGBLIGHTING");
+
+                        Con_DPrintf("bspx ldr lighting loaded (%d samples)\n", samples);
+                        goto loadlightdir;
+                }
+                else if (in)
+                {
+                        Q1BSPX_MarkUnsupported("RGBLIGHTING");
+                        Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspxsize);
+                }
 
         }
-	else {
-		Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
-	}
+        else {
+                Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
+        }
+
+        // Quake64 bsp lighmap data
+        if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+        {
+                // RGB lightmap samples are packed in 16bits.
+                // RRRRR GGGGG BBBBBB
+
+                loadmodel->lightdata = (byte *) Hunk_AllocName ( (l->filelen / 2)*3, litfilename);
+                loadmodel->lightdatasamples = (l->filelen / 2);
+                loadmodel->litfile = true;
+                in = mod_base + l->fileofs;
+                out = loadmodel->lightdata;
+
+                for (unsigned int i = 0; i < (unsigned int)(l->filelen / 2); i++)
+                {
+                        q64_b0 = *in++;
+                        q64_b1 = *in++;
+
+                        *out++ = q64_b0 & 0xf8;/* 0b11111000 */
+                        *out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
+                        *out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
+                }
+                goto loadlightdir;
+        }
 
 	if (l->filelen)
 	{
@@ -1426,32 +1437,30 @@ static void Mod_LoadLighting (lump_t *l)
 
 
 loadlightdir:
-        in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
-        if (in && bspxsize > 0)
-        {
-                int samples = bspxsize / 3;
-                int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
+	in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
+	if (in && bspxsize > 0)
+	{
+		int samples = bspxsize / 3;
+		int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
 
-                if (bspxsize % 3)
-                {
-                        Q1BSPX_MarkUnsupported("LIGHTINGDIR");
-                        Con_DWarning("LIGHTINGDIR lump size %d is not a multiple of 3 bytes\n", bspxsize);
-                }
-                else if (expected_samples && samples != expected_samples)
-                {
-                        Q1BSPX_MarkUnsupported("LIGHTINGDIR");
-                        Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
-                }
-                else
-                {
-                        loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
-                        loadmodel->lightdirsamples = samples;
-                        memcpy(loadmodel->lightdirdata, in, bspxsize);
-                        Q1BSPX_MarkUsed("LIGHTINGDIR");
-                        Con_DPrintf("bspx light directions loaded\n");
-                }
-        }
-        return;
+		if (bspxsize % 3)
+		{
+			Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+			Con_DWarning("LIGHTINGDIR lump size %d is not a multiple of 3 bytes\n", bspxsize);
+		}
+		else
+		{
+			if (expected_samples && samples != expected_samples)
+				Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
+
+			loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
+			loadmodel->lightdirsamples = samples;
+			memcpy(loadmodel->lightdirdata, in, bspxsize);
+			Q1BSPX_MarkUsed("LIGHTINGDIR");
+			Con_DPrintf("bspx light directions loaded\n");
+		}
+	}
+	return;
 }
 /*
 =================
