@@ -943,16 +943,8 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, client->name);
 		MSG_WriteLong(&net_message, client->colors);
 		MSG_WriteLong(&net_message, (int)client->edict->v.frags);
-                if (client->netconnection)
-                {
-                        MSG_WriteLong(&net_message, (int)(net_time - client->netconnection->connecttime));
-                        MSG_WriteString(&net_message, client->netconnection->address);
-                }
-                else
-                {
-                        MSG_WriteLong(&net_message, 0);
-                        MSG_WriteString(&net_message, "BOT");
-                }
+		MSG_WriteLong(&net_message, (int)(net_time - client->netconnection->connecttime));
+		MSG_WriteString(&net_message, client->netconnection->address);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
 		SZ_Clear(&net_message);

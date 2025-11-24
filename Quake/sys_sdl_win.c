@@ -53,8 +53,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <errno.h>
 #include <io.h>
 #include <direct.h>
-#include <stdlib.h>
-#include <string.h>
 
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
@@ -71,30 +69,7 @@ qboolean		isDedicated;
 static HANDLE		hinput, houtput;
 
 #define	MAX_HANDLES		32	/* johnfitz -- was 10 */
-
-typedef enum
-{
-	SYS_HANDLE_NONE = 0,
-	SYS_HANDLE_FILE,
-	SYS_HANDLE_MEMORY
-} sys_handle_type_t;
-
-typedef struct
-{
-	sys_handle_type_t		type;
-	union
-	{
-		FILE		*file;
-		struct
-		{
-			byte		*data;
-			size_t	length;
-			size_t	position;
-		} mem;
-	} u;
-} sys_handle_t;
-
-static sys_handle_t		sys_handles[MAX_HANDLES];
+static FILE		*sys_handles[MAX_HANDLES];
 
 static double rcp_counter_freq;
 
@@ -104,7 +79,7 @@ static int findhandle (void)
 
 	for (i = 1; i < MAX_HANDLES; i++)
 	{
-		if (sys_handles[i].type == SYS_HANDLE_NONE)
+		if (!sys_handles[i])
 			return i;
 	}
 	Sys_Error ("out of handles");
@@ -228,8 +203,7 @@ qfileofs_t Sys_FileOpenRead (const char *path, int *hndl)
 	}
 	else
 	{
-		sys_handles[i].type = SYS_HANDLE_FILE;
-		sys_handles[i].u.file = f;
+		sys_handles[i] = f;
 		*hndl = i;
 		retval = Sys_filelength(f);
 	}
@@ -248,96 +222,29 @@ int Sys_FileOpenWrite (const char *path)
 	if (!f)
 		Sys_Error ("Error opening %s: %s", path, strerror(errno));
 
-	sys_handles[i].type = SYS_HANDLE_FILE;
-	sys_handles[i].u.file = f;
+	sys_handles[i] = f;
 	return i;
 }
 
 void Sys_FileClose (int handle)
 {
-	sys_handle_t *sh = &sys_handles[handle];
-
-	switch (sh->type)
-	{
-	case SYS_HANDLE_FILE:
-		fclose (sh->u.file);
-		break;
-	case SYS_HANDLE_MEMORY:
-		free (sh->u.mem.data);
-		break;
-	case SYS_HANDLE_NONE:
-		break;
-	}
-
-	sh->type = SYS_HANDLE_NONE;
+	fclose (sys_handles[handle]);
+	sys_handles[handle] = NULL;
 }
 
 void Sys_FileSeek (int handle, int position)
 {
-	sys_handle_t *sh = &sys_handles[handle];
-
-	if (sh->type == SYS_HANDLE_FILE)
-	{
-		fseek (sh->u.file, position, SEEK_SET);
-		return;
-	}
-
-	if (sh->type == SYS_HANDLE_MEMORY)
-	{
-		if (position < 0)
-			position = 0;
-		if ((size_t) position > sh->u.mem.length)
-			sh->u.mem.position = sh->u.mem.length;
-		else
-			sh->u.mem.position = (size_t) position;
-	}
+	fseek (sys_handles[handle], position, SEEK_SET);
 }
 
 int Sys_FileRead (int handle, void *dest, int count)
 {
-	sys_handle_t *sh = &sys_handles[handle];
-
-	if (sh->type == SYS_HANDLE_FILE)
-		return fread (dest, 1, count, sh->u.file);
-
-	if (sh->type == SYS_HANDLE_MEMORY)
-	{
-		size_t remaining = sh->u.mem.length - sh->u.mem.position;
-		if ((size_t) count > remaining)
-			count = (int) remaining;
-		memcpy (dest, sh->u.mem.data + sh->u.mem.position, count);
-		sh->u.mem.position += (size_t) count;
-		return count;
-	}
-
-	return 0;
+	return fread (dest, 1, count, sys_handles[handle]);
 }
 
 int Sys_FileWrite (int handle, const void *data, int count)
 {
-	sys_handle_t *sh = &sys_handles[handle];
-
-	if (sh->type != SYS_HANDLE_FILE)
-		Sys_Error ("Sys_FileWrite: invalid handle type");
-
-	return fwrite (data, 1, count, sh->u.file);
-}
-
-int Sys_FileOpenMemory (void *data, size_t length)
-{
-	int handle = findhandle ();
-
-	sys_handles[handle].type = SYS_HANDLE_MEMORY;
-	sys_handles[handle].u.mem.data = (byte *) data;
-	sys_handles[handle].u.mem.length = length;
-	sys_handles[handle].u.mem.position = 0;
-
-	return handle;
-}
-
-FILE *Sys_TempFile (void)
-{
-	return tmpfile ();
+	return fwrite (data, 1, count, sys_handles[handle]);
 }
 
 #ifndef INVALID_FILE_ATTRIBUTES

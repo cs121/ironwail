@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
-#include "renderer/r_iwshader.h"
 #include "steam.h"
 #include <time.h>
 
@@ -1019,17 +1018,6 @@ void SCR_DrawDevStats (void)
 
 	sprintf (str, "GL upload|%4iK %4iK", dev_stats.gpu_upload/1024, dev_peakstats.gpu_upload/1024);
 	Draw_String (x, (y++)*8-x, str);
-}
-
-static void SCR_DrawIWShaderDebug (void)
-{
-	char buffer[256];
-
-	if (!IW_DebugOverlayText (buffer, sizeof(buffer)))
-		return;
-
-	GL_SetCanvas (CANVAS_DEFAULT);
-	Draw_String (8, 8, buffer);
 }
 
 /*
@@ -2169,7 +2157,6 @@ void SCR_UpdateScreen (void)
 		SCR_CheckDrawCenterString ();
 		Sbar_Draw ();
 		SCR_DrawDevStats (); //johnfitz
-		SCR_DrawIWShaderDebug ();
 		SCR_DrawClock (); //johnfitz
 		SCR_DrawDemoControls ();
 		SCR_DrawSpeed ();

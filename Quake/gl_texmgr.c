@@ -534,7 +534,7 @@ TexMgr_CanCompress
 */
 static qboolean TexMgr_CanCompress (gltexture_t *glt)
 {
-    return glt->source_format != SRC_LIGHTMAP && glt->source_format != SRC_DELUXMAP && (glt->flags & TEXPREF_PERSIST) == 0;
+	return glt->source_format != SRC_LIGHTMAP && (glt->flags & TEXPREF_PERSIST) == 0;
 }
 
 /*
@@ -1458,22 +1458,13 @@ TexMgr_LoadLightmap -- handles lightmap data
 */
 static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 {
-        // upload it
-        glt->compression = 1;
-        GL_Bind (GL_TEXTURE0, glt);
-        GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	// upload it
+	glt->compression = 1;
+	GL_Bind (GL_TEXTURE0, glt);
+	GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
 
-        // set filter modes
-        TexMgr_SetFilterModes (glt);
-}
-
-static void TexMgr_LoadDeluxemap (gltexture_t *glt, byte *data)
-{
-        glt->compression = 1;
-        GL_Bind (GL_TEXTURE0, glt);
-        GL_TexImage (glt, 0, GL_RGB8, glt->width, glt->height, GL_RGB, GL_UNSIGNED_BYTE, data);
-
-        TexMgr_SetFilterModes (glt);
+	// set filter modes
+	TexMgr_SetFilterModes (glt);
 }
 
 /*
@@ -1503,15 +1494,12 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 		case SRC_INDEXED:
 			crc = CRC_Block(data, width * height * depth);
 			break;
-                case SRC_LIGHTMAP:
-                        crc = CRC_Block(data, width * height * depth * lightmap_bytes);
-                        break;
-                case SRC_DELUXMAP:
-                        crc = CRC_Block(data, width * height * depth * deluxemap_bytes);
-                        break;
-                case SRC_RGBA:
-                        crc = CRC_Block(data, width * height * depth * 4);
-                        break;
+		case SRC_LIGHTMAP:
+			crc = CRC_Block(data, width * height * depth * lightmap_bytes);
+			break;
+		case SRC_RGBA:
+			crc = CRC_Block(data, width * height * depth * 4);
+			break;
 		default: /* not reachable but avoids compiler warnings */
 			crc = 0;
 			break;
@@ -1555,16 +1543,13 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 	case SRC_INDEXED:
 		TexMgr_LoadImage8 (glt, data);
 		break;
-        case SRC_LIGHTMAP:
-                TexMgr_LoadLightmap (glt, data);
-                break;
-        case SRC_DELUXMAP:
-                TexMgr_LoadDeluxemap (glt, data);
-                break;
-        case SRC_RGBA:
-                TexMgr_LoadImage32 (glt, (unsigned *)data);
-                break;
-        }
+	case SRC_LIGHTMAP:
+		TexMgr_LoadLightmap (glt, data);
+		break;
+	case SRC_RGBA:
+		TexMgr_LoadImage32 (glt, (unsigned *)data);
+		break;
+	}
 
 	GL_ObjectLabelFunc (GL_TEXTURE, glt->texnum, -1, glt->name);
 	if (flags & TEXPREF_BINDLESS && gl_bindless_able)
@@ -1624,15 +1609,12 @@ void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants)
 		fseek (f, glt->source_offset, SEEK_CUR);
 		size = glt->source_width * glt->source_height;
 		/* should be SRC_INDEXED, but no harm being paranoid:  */
-                if (glt->source_format == SRC_RGBA) {
-                        size *= 4;
-                }
-                else if (glt->source_format == SRC_LIGHTMAP) {
-                        size *= lightmap_bytes;
-                }
-                else if (glt->source_format == SRC_DELUXMAP) {
-                        size *= deluxemap_bytes;
-                }
+		if (glt->source_format == SRC_RGBA) {
+			size *= 4;
+		}
+		else if (glt->source_format == SRC_LIGHTMAP) {
+			size *= lightmap_bytes;
+		}
 		data = (byte *) Hunk_AllocNoFill (size);
 		sz = (int) fread (data, 1, size, f);
 		fclose (f);
@@ -1724,16 +1706,13 @@ invalid:	Con_Printf ("TexMgr_ReloadImage: invalid source for %s\n", glt->name);
 	case SRC_INDEXED:
 		TexMgr_LoadImage8 (glt, data);
 		break;
-        case SRC_LIGHTMAP:
-                TexMgr_LoadLightmap (glt, data);
-                break;
-        case SRC_DELUXMAP:
-                TexMgr_LoadDeluxemap (glt, data);
-                break;
-        case SRC_RGBA:
-                TexMgr_LoadImage32 (glt, (unsigned *)data);
-                break;
-        }
+	case SRC_LIGHTMAP:
+		TexMgr_LoadLightmap (glt, data);
+		break;
+	case SRC_RGBA:
+		TexMgr_LoadImage32 (glt, (unsigned *)data);
+		break;
+	}
 
 	GL_ObjectLabelFunc (GL_TEXTURE, glt->texnum, -1, glt->name);
 	if (glt->flags & TEXPREF_BINDLESS && gl_bindless_able)

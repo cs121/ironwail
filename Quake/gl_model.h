@@ -49,6 +49,7 @@ BRUSH MODELS
 typedef struct
 {
 	vec3_t		position;
+	vec3_t		normal;
 } mvertex_t;
 
 #define	SIDE_FRONT	0
@@ -115,6 +116,8 @@ typedef struct texture_s
 #define SURF_DRAWTELE		0x1000
 #define SURF_DRAWWATER		0x2000
 
+#define INVALID_LIGHTSTYLE	((unsigned short)0xffff)
+
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct
 {
@@ -130,6 +133,7 @@ typedef struct
 
 typedef struct glvert_s {
 	vec3_t		pos;
+	vec3_t		normal;
 	float		st[4];
 	float		lmofs;
 	unsigned	styles;
@@ -150,9 +154,9 @@ typedef struct msurface_s
 	short		extents[2];
 	short		light_s, light_t;	// gl lightmap coordinates
 
-	byte		styles[MAXLIGHTMAPS];
+	unsigned short	styles[MAXLIGHTMAPS];
 	byte		*samples;			// [numstyles*surfsize]
-	byte		*deluxsamples;		// [numstyles*surfsize]
+	byte		*luxsamples;		// surface-space light directions
 
 	int			texturemins[2];
 	mtexinfo_t	*texinfo;
@@ -361,25 +365,10 @@ typedef struct
 } bonepose_t; //pose data for a single bone.
 typedef struct
 {
-        int parent; //-1 for a root bone
-        char name[32];
-        bonepose_t inverse;
+	int parent; //-1 for a root bone
+	char name[32];
+	bonepose_t inverse;
 } boneinfo_t;
-
-typedef struct bspx_static_light_s
-{
-        vec3_t  origin;
-        float   radius;
-        vec3_t  color;
-        float   intensity;
-} bspx_static_light_t;
-
-typedef struct bspx_entry_s
-{
-        char    name[25];
-        const byte *data;
-        size_t  length;
-} bspx_entry_t;
 
 #define	MAXALIASVERTS		0x7fff //16-bit index buffer + onseam duplication
 #define	MAXALIASVERTS_QS	2000 //johnfitz -- was 1024
@@ -396,7 +385,7 @@ extern	trivertx_t			*poseverts[MAXALIASFRAMES];
 // Whole model
 //
 
-typedef enum {mod_brush, mod_alias, mod_sprite, mod_numtypes} modtype_t;
+typedef enum {mod_brush, mod_alias, mod_sprite, mod_ext_invalid, mod_numtypes} modtype_t;
 
 #define	EF_ROCKET	1			// leave a trail
 #define	EF_GRENADE	2			// leave a trail
@@ -412,6 +401,7 @@ typedef enum {mod_brush, mod_alias, mod_sprite, mod_numtypes} modtype_t;
 #define	MOD_NOLERP		256		//don't lerp when animating
 #define	MOD_NOSHADOW	512		//don't cast a shadow
 #define	MOD_FBRIGHTHACK	1024	//when fullbrights are disabled, use a hack to render this model brighter
+#define	MOD_HDRLIGHTING	2048
 //johnfitz
 
 //
@@ -506,31 +496,13 @@ typedef struct qmodel_s
 
 	byte		*visdata;
 	byte		*lightdata;
-	byte		*deluxdata;
-	int				numdeluxsamples;
+	byte		*lightdirdata;
+	int			lightdatasamples;
+	int			lightdirsamples;
 	char		*entities;
 
-	const byte	*bspx_lightgrid_octree;
-	size_t		bspx_lightgrid_octree_length;
-	const byte	*bspx_lightgrids;
-	size_t		bspx_lightgrids_length;
-
 	qboolean	litfile;
-	qboolean	deluxfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
-
-	int			bspx_light_offset_count;
-	int			*bspx_light_offsets;
-
-	int			bspx_num_static_lights;
-	bspx_static_light_t	*bspx_static_lights;
-	int			bspx_num_static_shadow_lights;
-	bspx_static_light_t	*bspx_static_shadow_lights;
-	int			bspx_num_static_shadow_indices;
-	int			*bspx_static_shadow_indices;
-	int			bspx_num_entries;
-	bspx_entry_t	*bspx_entries;
-
 
 	int			bspversion;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.

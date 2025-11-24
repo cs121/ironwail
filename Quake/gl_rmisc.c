@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "renderer/r_iwshader.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -42,7 +41,6 @@ extern cvar_t r_showbboxes_think;
 extern cvar_t r_showbboxes_health;
 extern cvar_t r_showbboxes_links;
 extern cvar_t r_showbboxes_targets;
-extern cvar_t bot_debug;
 extern cvar_t r_showfields;
 extern cvar_t r_showfields_align;
 extern cvar_t r_lerpmodels;
@@ -78,19 +76,7 @@ extern cvar_t r_vignette_color_g;
 extern cvar_t r_vignette_color_b;
 extern cvar_t r_vignette_blend_mode;
 extern cvar_t r_vignette_noise;
-extern cvar_t r_lens_planar;
 extern cvar_t r_chromatic_aberration;
-extern cvar_t r_filmgrain;
-extern cvar_t r_filmgrain_size;
-extern cvar_t r_ssao;
-extern cvar_t r_ssao_debug;
-extern cvar_t r_ssao_radius;
-extern cvar_t r_ssao_bias;
-extern cvar_t r_ssao_intensity;
-extern cvar_t r_ssao_power;
-extern cvar_t r_ssao_samples;
-
-extern cvar_t r_filmgrain_strength;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -351,11 +337,10 @@ void R_Init (void)
         Cvar_RegisterVariable (&r_fullbright);
         Cvar_RegisterVariable (&r_drawentities);
         Cvar_RegisterVariable (&r_drawviewmodel);
-        Cvar_RegisterVariable (&r_wateralpha);
-        Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
-        Cvar_RegisterVariable (&r_litwater);
-        Cvar_RegisterVariable (&r_deluxemaps);
-        Cvar_RegisterVariable (&r_dynamic);
+	Cvar_RegisterVariable (&r_wateralpha);
+	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
+	Cvar_RegisterVariable (&r_litwater);
+	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
 	Cvar_RegisterVariable (&r_simd);
@@ -367,11 +352,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
 	Cvar_RegisterVariable (&r_dither);
-	Cvar_RegisterVariable (&r_lightmap_strength);
 	Cvar_RegisterVariable (&r_dof);
-	Cvar_RegisterVariable (&r_rim_alias);
-	Cvar_RegisterVariable (&r_rim_world);
-	Cvar_RegisterVariable (&r_rim_exponent);
         Cvar_RegisterVariable (&r_dof_autofocus);
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
@@ -386,13 +367,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_tonemap_exposure);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
-	Cvar_RegisterVariable (&r_ssao);
-	Cvar_RegisterVariable (&r_ssao_debug);
-	Cvar_RegisterVariable (&r_ssao_radius);
-	Cvar_RegisterVariable (&r_ssao_bias);
-	Cvar_RegisterVariable (&r_ssao_intensity);
-	Cvar_RegisterVariable (&r_ssao_power);
-	Cvar_RegisterVariable (&r_ssao_samples);
 	Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
 	Cvar_RegisterVariable (&r_vignette_radius_outer);
@@ -402,12 +376,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_vignette_color_b);
 	Cvar_RegisterVariable (&r_vignette_blend_mode);
 	Cvar_RegisterVariable (&r_vignette_noise);
-	Cvar_RegisterVariable (&r_lens_planar);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
-        Cvar_RegisterVariable (&r_filmgrain);
-        Cvar_RegisterVariable (&r_filmgrain_size);
-        Cvar_RegisterVariable (&r_filmgrain_strength);
-        Cvar_RegisterVariable (&r_overbrightbits);
+	Cvar_RegisterVariable (&r_overbrightbits);
 	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
 	Cvar_RegisterVariable (&gl_finish);
@@ -425,15 +395,14 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_oldskyleaf);
 	Cvar_RegisterVariable (&r_drawworld);
 	Cvar_RegisterVariable (&r_showtris);
-        Cvar_RegisterVariable (&r_showbboxes);
-        Cvar_RegisterVariable (&r_showbboxes_think);
-        Cvar_RegisterVariable (&r_showbboxes_health);
-        Cvar_RegisterVariable (&r_showbboxes_links);
-        Cvar_RegisterVariable (&r_showbboxes_targets);
-        Cvar_RegisterVariable (&bot_debug);
-        Cvar_RegisterVariable (&r_showfields);
-        Cvar_RegisterVariable (&r_showfields_align);
-        Cvar_RegisterVariable (&gl_farclip);
+	Cvar_RegisterVariable (&r_showbboxes);
+	Cvar_RegisterVariable (&r_showbboxes_think);
+	Cvar_RegisterVariable (&r_showbboxes_health);
+	Cvar_RegisterVariable (&r_showbboxes_links);
+	Cvar_RegisterVariable (&r_showbboxes_targets);
+	Cvar_RegisterVariable (&r_showfields);
+	Cvar_RegisterVariable (&r_showfields_align);
+	Cvar_RegisterVariable (&gl_farclip);
 	Cvar_RegisterVariable (&gl_fullbrights);
 	Cvar_RegisterVariable (&gl_lightmap_atlas_size);
 	Cvar_SetCallback (&gl_lightmap_atlas_size, GL_OnLightmapAtlasSizeChanged);
@@ -457,19 +426,11 @@ void R_Init (void)
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
-#if R_SHADOWMAPS
-	R_InitShadowMaps();
-#endif
-
 	R_InitParticles ();
-	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
-        Sky_Init (); //johnfitz
-        Fog_Init (); //johnfitz
-
-        IW_ShaderSystem_Init ();
-        IW_ShaderSystem_PrepareForGameDir (com_gamedir);
+	Sky_Init (); //johnfitz
+	Fog_Init (); //johnfitz
 }
 
 /*
@@ -623,9 +584,6 @@ void R_NewMap (void)
 	R_ClearEfrags ();
 	r_viewleaf = NULL;
 	R_ClearParticles ();
-	R_ClearDecals ();
-	if (!R_Effectinfo_Active ())
-		R_Particles_LoadEffectInfo (NULL);
 	VEC_CLEAR (r_pointfile);
 
 	GL_BuildLightmaps ();
@@ -1141,7 +1099,6 @@ void GL_ReserveDeviceMemory (GLenum target, size_t numbytes, GLuint *outbuf, siz
 	frameres_device_offset += numbytes;
 }
 
-#ifndef GL_SHADOW_IMPLEMENTED
 void R_InitShadow (void)
 {
 }
@@ -1153,4 +1110,3 @@ void R_ShutdownShadow (void)
 void R_ResizeShadowMapIfNeeded (void)
 {
 }
-#endif

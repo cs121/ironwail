@@ -626,11 +626,7 @@ void SV_RunClients (void)
 
 		sv_player = host_client->edict;
 
-		if (host_client->isbot)
-		{
-			SV_Bot_RunFrame (host_client);
-		}
-		else if (!SV_ReadClientMessage ())
+		if (!SV_ReadClientMessage ())
 		{
 			SV_DropClient (false);	// client misbehaved...
 			continue;

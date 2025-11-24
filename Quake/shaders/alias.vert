@@ -81,24 +81,20 @@ float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH
 }
 
 #if MODE == 2
-        layout(location=0) noperspective out vec2 out_texcoord;
+	layout(location=0) noperspective out vec2 out_texcoord;
 #else
-        layout(location=0) out vec2 out_texcoord;
+	layout(location=0) out vec2 out_texcoord;
 #endif
 layout(location=1) out vec4 out_color;
 layout(location=2) out vec3 out_pos;
 layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
-layout(location=6) out vec3 out_world_pos;
-layout(location=7) out vec3 out_world_normal;
-layout(location=8) out vec3 out_local_normal;
-layout(location=9) flat out vec3 out_shadevector;
 
 void main()
 {
-        InstanceData inst = instances[gl_InstanceID];
-        out_texcoord = in_uv;
+	InstanceData inst = instances[gl_InstanceID];
+	out_texcoord = in_uv;
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
 	vec3 local_vert = mix(pose1.pos, pose2.pos, inst.Blend);
@@ -106,29 +102,20 @@ void main()
 	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
-        vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
-        vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
-        gl_Position = curr_clip;
-        out_curr_clip = curr_clip;
-        out_prev_clip = prev_clip;
-        out_flags = inst.Flags;
-        out_pos = world_vert - EyePos;
-        out_world_pos = world_vert;
-        // transform world X and Z axes to local space
-        vec3 basisX = normalize(worldmatrix[0].xyz);
-        vec3 basisY = normalize(worldmatrix[1].xyz);
-        vec3 basisZ = normalize(worldmatrix[2].xyz);
-        mat3 rotation = mat3(basisX, basisY, basisZ);
-        mat3 orientation = transpose(rotation);
-        vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
-        vec3 local_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-        vec3 world_normal = rotation * local_normal;
-        if (dot(world_normal, world_normal) > 0.0)
-                world_normal = normalize(world_normal);
-        else
-                world_normal = basisZ;
-        out_world_normal = world_normal;
-        out_local_normal = local_normal;
-        out_shadevector = shadevector;
-        out_color = vec4(inst.LightColor.rgb, inst.LightColor.w);
+	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
+	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
+	gl_Position = curr_clip;
+	out_curr_clip = curr_clip;
+	out_prev_clip = prev_clip;
+	out_flags = inst.Flags;
+	out_pos = world_vert - EyePos;
+	// transform world X and Z axes to local space
+	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
+	orientation = transpose(orientation);
+	vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
+	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
+	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
+	out_color = clamp(inst.LightColor * vec4(vec3(mix(dot1, dot2, inst.Blend)), 1.0), 0.0, 1.0);
+	uint overbright = floatBitsToUint(Fog.w) >> 31;
+	out_color.rgb = ldexp(out_color.rgb, ivec3(overbright));
 }

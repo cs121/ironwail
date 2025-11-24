@@ -23,24 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-extern unsigned int d_8to24table[256];
-
-static void CL_SetDlightColor (dlight_t *dl, float r, float g, float b)
-{
-	dl->color[0] = r;
-	dl->color[1] = g;
-	dl->color[2] = b;
-}
-
-static void CL_SetDlightColorFromPalette (dlight_t *dl, int index)
-{
-	const byte *rgba;
-
-	index = CLAMP (0, index, 255);
-	rgba = (const byte *) &d_8to24table[index];
-	CL_SetDlightColor (dl, rgba[0] * (1.0f / 255.0f), rgba[1] * (1.0f / 255.0f), rgba[2] * (1.0f / 255.0f));
-}
-
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
 beam_t		cl_beams[MAX_BEAMS];
@@ -148,8 +130,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_wizspike", pos, vec3_origin, 1.f))
-			R_RunParticleEffect (pos, vec3_origin, 20, 30);
+		R_RunParticleEffect (pos, vec3_origin, 20, 30);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
 		break;
 
@@ -157,8 +138,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_knightspike", pos, vec3_origin, 1.f))
-			R_RunParticleEffect (pos, vec3_origin, 226, 20);
+		R_RunParticleEffect (pos, vec3_origin, 226, 20);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
 		break;
 
@@ -166,9 +146,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_spike", pos, vec3_origin, 1.f))
-			R_RunParticleEffect (pos, vec3_origin, 0, 10);
-		R_AddBulletDecal (pos);
+		R_RunParticleEffect (pos, vec3_origin, 0, 10);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -186,9 +164,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_superspike", pos, vec3_origin, 1.f))
-			R_RunParticleEffect (pos, vec3_origin, 0, 20);
-		R_AddBulletDecal (pos);
+		R_RunParticleEffect (pos, vec3_origin, 0, 20);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -203,34 +179,24 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
+
 	case TE_GUNSHOT:			// bullet hitting wall
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_gunshot", pos, vec3_origin, 1.f))
-			R_RunParticleEffect (pos, vec3_origin, 0, 20);
-		R_AddBulletDecal (pos);
+		R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		break;
+
 	case TE_EXPLOSION:			// rocket explosion
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (R_Effectinfo_SpawnName ("te_explosion_core", pos, vec3_origin, 1.f))
-		{
-			R_Effectinfo_SpawnName ("te_explosion_mid", pos, vec3_origin, 1.f);
-			R_Effectinfo_SpawnName ("te_explosion_outer", pos, vec3_origin, 1.f);
-		}
-		else
-		{
-			R_ParticleExplosion (pos);
-		}
-		R_AddExplosionDecal (pos);
+		R_ParticleExplosion (pos);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
-		CL_SetDlightColor (dl, 1.0f, 0.36f, 0.10f);
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -238,8 +204,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_tarexplosion", pos, vec3_origin, 1.f))
-			R_BlobExplosion (pos);
+		R_BlobExplosion (pos);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -266,16 +231,14 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_lavasplash", pos, vec3_origin, 1.f))
-			R_LavaSplash (pos);
+		R_LavaSplash (pos);
 		break;
 
 	case TE_TELEPORT:
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		if (!R_Effectinfo_SpawnName ("te_teleport", pos, vec3_origin, 1.f))
-			R_TeleportSplash (pos);
+		R_TeleportSplash (pos);
 		break;
 
 	case TE_EXPLOSION2:				// color mapped explosion
@@ -284,25 +247,12 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
-		if (R_Effectinfo_SpawnName ("te_explosion2_core", pos, vec3_origin, 1.f))
-		{
-			R_Effectinfo_SpawnName ("te_explosion2_mid", pos, vec3_origin, 1.f);
-			R_Effectinfo_SpawnName ("te_explosion2_outer", pos, vec3_origin, 1.f);
-		}
-		else
-		{
-			R_ParticleExplosion2 (pos, colorStart, colorLength);
-		}
-		R_AddExplosionDecal (pos);
+		R_ParticleExplosion2 (pos, colorStart, colorLength);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
-		if (colorLength > 0)
-			CL_SetDlightColorFromPalette (dl, colorStart + (colorLength >> 1));
-		else
-			CL_SetDlightColor (dl, 1.0f, 0.36f, 0.10f);
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 

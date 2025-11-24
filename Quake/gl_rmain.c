@@ -25,8 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define NOISESCALE     (1.0f / 127.0f)
 
-extern gltexture_t *deluxemap_texture;
-
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -191,7 +189,6 @@ cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
 cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
-cvar_t	r_deluxemaps = { "r_deluxemaps", "1", CVAR_ARCHIVE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
@@ -200,14 +197,10 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
-cvar_t	r_lightmap_strength = { "r_lightmap_strength", "0.75", CVAR_ARCHIVE };
-cvar_t	r_dof = { "r_dof", "1", CVAR_ARCHIVE };
-cvar_t	r_rim_alias = { "r_rim_alias", "0.25", CVAR_ARCHIVE };
-cvar_t	r_rim_world = { "r_rim_world", "0.15", CVAR_ARCHIVE };
-cvar_t	r_rim_exponent = { "r_rim_exponent", "4.0", CVAR_ARCHIVE };
+cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
-cvar_t	r_dof_range = { "r_dof_range", "512", CVAR_ARCHIVE };
-cvar_t	r_dof_strength = { "r_dof_strength", "3", CVAR_ARCHIVE };
+cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
+cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
 cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
@@ -217,34 +210,23 @@ cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE
 cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
-cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
+cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
-cvar_t	r_bloom = { "r_bloom", "1", CVAR_ARCHIVE };
-cvar_t	r_bloom_threshold = { "r_bloom_threshold", "0.5", CVAR_ARCHIVE };
-cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
-cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_NONE };
-cvar_t	r_ssao_radius = { "r_ssao_radius", "32", CVAR_ARCHIVE };
-cvar_t	r_ssao_bias = { "r_ssao_bias", "0.01", CVAR_ARCHIVE };
-cvar_t	r_ssao_intensity = { "r_ssao_intensity", "1.0", CVAR_ARCHIVE };
-cvar_t	r_ssao_power = { "r_ssao_power", "1.5", CVAR_ARCHIVE };
-cvar_t	r_ssao_samples = { "r_ssao_samples", "16", CVAR_ARCHIVE };
+cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
+cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_vignette = { "r_vignette", "0.25", CVAR_ARCHIVE };
+cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
-cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "2.5", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
 cvar_t	r_vignette_falloff = { "r_vignette_falloff", "2.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_r = { "r_vignette_color_r", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
-cvar_t	r_lens_planar = { "r_lens_planar", "0", CVAR_ARCHIVE };
-cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "1", CVAR_ARCHIVE };
-cvar_t	r_filmgrain = { "r_filmgrain", "0.05", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_size = { "r_filmgrain_size", "3.0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_strength = { "r_filmgrain_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 
-cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
+cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -267,16 +249,12 @@ cvar_t	r_showbboxes_think = { "r_showbboxes_think", "0", CVAR_NONE }; // 0=show 
 cvar_t	r_showbboxes_health = { "r_showbboxes_health", "0", CVAR_NONE }; // 0=show all; 1=healthy only; -1=non-healthy only
 cvar_t	r_showbboxes_links = { "r_showbboxes_links", "3", CVAR_NONE }; // 0=off; 1=outgoing only; 2=incoming only; 3=incoming+outgoing
 cvar_t	r_showbboxes_targets = { "r_showbboxes_targets", "1", CVAR_NONE };
-cvar_t	r_lightgrid_debug = { "r_lightgrid_debug", "0", CVAR_NONE };
-cvar_t	bot_debug = { "bot_debug", "0", CVAR_NONE };
 cvar_t	r_showfields = { "r_showfields", "0", CVAR_NONE };
 cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=entity pos; 1=bottom-right
 cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
 cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
 cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
-// Legacy default list kept for reference; actual defaults are defined below.
-//cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
-cvar_t	r_noshadow_list = { "r_noshadow_list", "", CVAR_NONE };
+cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
@@ -305,21 +283,6 @@ static qboolean R_DoFEnabled (void)
 	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
-static qboolean R_SSAOEnabled (void)
-{
-	if (r_ssao.value <= 0.f)
-		return false;
-	if (r_ssao_intensity.value <= 0.f)
-		return false;
-	if (r_ssao_samples.value <= 0.f)
-		return false;
-	if (r_ssao_radius.value <= 0.f)
-		return false;
-	if (!framebufs.composite.depth_stencil_tex)
-		return false;
-	return true;
-}
-
 static qboolean r_dof_autofocus_initialized = false;
 static float r_dof_autofocus_value = 0.f;
 
@@ -327,11 +290,8 @@ static float R_GetDynamicDoFFocus (float fallback)
 {
 	trace_t trace;
 	vec3_t end;
-	vec3_t delta;
-	vec3_t rcpdelta;
 	float range;
 	float target;
-	float best_fraction;
 
 	if (r_dof_autofocus.value <= 0.f)
 	{
@@ -350,71 +310,17 @@ static float R_GetDynamicDoFFocus (float fallback)
 		range = 8192.f;
 
 	VectorMA (r_origin, range, vpn, end);
-        VectorSubtract (end, r_origin, delta);
-        for (int i = 0; i < 3; i++)
-        {
-                if (fabsf (delta[i]) > 1e-6f)
-                        rcpdelta[i] = 1.f / delta[i];
-                else
-                        rcpdelta[i] = 1e30f;
-        }
 
 	memset (&trace, 0, sizeof (trace));
 	trace.fraction = 1.f;
 	VectorCopy (end, trace.endpos);
 
-	hull_t *world_hull = &cl.worldmodel->hulls[0];
-
-	if (!world_hull->clipnodes || !world_hull->planes || world_hull->firstclipnode < 0 || world_hull->lastclipnode < world_hull->firstclipnode)
-	{
-		r_dof_autofocus_initialized = false;
-		return fallback;
-	}
-
-	SV_RecursiveHullCheck (world_hull, world_hull->firstclipnode, 0.f, 1.f, r_origin, end, &trace);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
 
 	if (trace.allsolid || trace.fraction <= 0.f)
 		target = fallback;
 	else
 		target = q_max (trace.fraction * range, 0.f);
-
-	best_fraction = trace.fraction;
-	if (best_fraction < 0.f)
-		best_fraction = 0.f;
-	else if (best_fraction > 1.f)
-		best_fraction = 1.f;
-
-	if (!trace.allsolid && trace.fraction > 0.f)
-	{
-		vec3_t mins, maxs;
-
-		for (int i = 0; i < cl_numvisedicts; ++i)
-		{
-			entity_t *ent = cl_visedicts[i];
-			qmodel_t *model;
-			float frac;
-
-			if (!ent || ent == &cl.viewent)
-				continue;
-
-			model = ent->model;
-			if (!model || model == cl.worldmodel)
-				continue;
-			if (ent->alpha == ENTALPHA_ZERO)
-				continue;
-			if (model->type != mod_alias && model->type != mod_brush)
-				continue;
-
-			R_GetEntityBounds (ent, mins, maxs);
-			if (!RayVsBox (r_origin, rcpdelta, mins, maxs, &frac))
-				continue;
-			if (frac <= 0.f || frac >= best_fraction)
-				continue;
-
-			best_fraction = frac;
-			target = q_max (best_fraction * range, 0.f);
-		}
-	}
 
 	if (!r_dof_autofocus_initialized)
 	{
@@ -776,13 +682,6 @@ void GL_PostProcess (void)
         float motion_min_velocity;
         float motion_depth_threshold;
         int motion_max_samples;
-        qboolean ssao_enabled;
-        qboolean ssao_debug;
-        float ssao_radius;
-        float ssao_bias;
-        float ssao_intensity;
-        float ssao_power;
-        int ssao_samples;
         if (!GL_NeedsPostprocess ())
                 return;
 
@@ -791,7 +690,6 @@ void GL_PostProcess (void)
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
-	float lens_intensity = q_min (1.f, q_max (0.f, r_lens_planar.value));
 	float bloom_intensity = q_max (0.f, r_bloom.value);
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
@@ -838,20 +736,6 @@ void GL_PostProcess (void)
         }
         motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
-        ssao_radius = q_max (0.f, r_ssao_radius.value);
-        ssao_bias = q_max (0.f, r_ssao_bias.value);
-        ssao_intensity = q_max (0.f, r_ssao_intensity.value);
-        ssao_power = q_max (0.f, r_ssao_power.value);
-        ssao_samples = (int)Q_rint (r_ssao_samples.value);
-        if (ssao_samples < 0)
-                ssao_samples = 0;
-        if (ssao_samples > 64)
-                ssao_samples = 64;
-        ssao_enabled = R_SSAOEnabled ();
-        ssao_debug = (r_ssao_debug.value > 0.f);
-        if (ssao_samples <= 0 || ssao_radius <= 0.f || ssao_intensity <= 0.f)
-                ssao_enabled = false;
-
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 
@@ -884,65 +768,26 @@ void GL_PostProcess (void)
                 0.f,
                 0.f);
 
-        GL_Uniform4fFunc (18,
-                lens_intensity,
-                0.045f,
-                0.35f,
-                0.12f);
-
-        {
-                float filmgrain_intensity = q_max (0.f, r_filmgrain.value);
-                filmgrain_intensity = q_min (1.f, filmgrain_intensity);
-                float filmgrain_size = q_max (1.f, r_filmgrain_size.value);
-                float filmgrain_strength = q_max (0.f, r_filmgrain_strength.value);
-                float filmgrain_time = (float)cl.time;
-                float filmgrain_time_alt = (float)(cl.time * 1.37);
-                GL_Uniform4fFunc (11, filmgrain_intensity, filmgrain_size, filmgrain_strength, 0.f);
-                GL_Uniform4fFunc (12, filmgrain_time, filmgrain_time_alt, 0.f, 0.f);
-        }
-
         dof_enabled = R_DoFEnabled ();
 
         {
                 float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
-                float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
-                float view_size_x = r_refdef.vrect.width / (float)vid.width;
-                float view_size_y = r_refdef.vrect.height / (float)vid.height;
-                float inv_scale_x = 1.f;
-                float inv_scale_y = 1.f;
+		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
+		float view_size_x = r_refdef.vrect.width / (float)vid.width;
+		float view_size_y = r_refdef.vrect.height / (float)vid.height;
+		float inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
 
-                if (r_refdef.scale > 0)
-                {
-                        int render_width = r_refdef.vrect.width / r_refdef.scale;
-                        int render_height = r_refdef.vrect.height / r_refdef.scale;
-
-                        if (render_width < 1)
-                                render_width = 1;
-                        if (render_height < 1)
-                                render_height = 1;
-
-                        if (r_refdef.vrect.width > 0)
-                                inv_scale_x = (float)render_width / (float)r_refdef.vrect.width;
-                        if (r_refdef.vrect.height > 0)
-                                inv_scale_y = (float)render_height / (float)r_refdef.vrect.height;
-                }
-
-                GL_Uniform4fFunc (3,
-                        view_min_x,
-                        view_min_y,
-                        view_min_x + view_size_x,
-                        view_min_y + view_size_y);
-                GL_Uniform4fFunc (4, inv_scale_x, inv_scale_y, 0.f, 0.f);
+		GL_Uniform4fFunc (3,
+			view_min_x,
+			view_min_y,
+			view_min_x + view_size_x,
+			view_min_y + view_size_y);
+                GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
         }
 
         depth_texture = 0;
-        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_enabled || ssao_debug))
+        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
                 depth_texture = framebufs.composite.depth_stencil_tex;
-        if (!depth_texture)
-        {
-                ssao_enabled = false;
-                ssao_debug = false;
-        }
         GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
         if (dof_enabled)
@@ -964,25 +809,6 @@ void GL_PostProcess (void)
                 GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
                 GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
         }
-
-        GL_UniformMatrix4fvFunc (15, 1, GL_FALSE, r_matproj);
-        GL_UniformMatrix4fvFunc (16, 1, GL_FALSE, r_matinvproj);
-
-        GL_Uniform4fFunc (13,
-                ssao_enabled ? 1.f : 0.f,
-                ssao_radius,
-                ssao_bias,
-	        ssao_intensity);
-	GL_Uniform4fFunc (14,
-	        (float)ssao_samples,
-	        ssao_power,
-	        0.f,
-	        0.f);
-        GL_Uniform4fFunc (17,
-                ssao_debug ? 1.f : 0.f,
-                0.f,
-                0.f,
-	        0.f);
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
@@ -1584,6 +1410,8 @@ qboolean GL_NeedsPostprocess (void)
 {
         if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
+        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
+                return true;
         return false;
 }
 
@@ -1705,34 +1533,10 @@ void R_SetupView (void)
 
 
 		r_framedata.overbright = overbright;
-		r_framedata.lightmap_strength = q_max(0.f, r_lightmap_strength.value);
-		r_framedata.rim_alias = q_max(0.f, r_rim_alias.value);
-		r_framedata.rim_world = q_max(0.f, r_rim_world.value);
-		r_framedata.rim_exponent = q_max(0.5f, r_rim_exponent.value);
-                r_framedata.rim_pad0 = 0.f;
-        }
+		r_framedata._padding0 = 0.f;
+	}
 
-        {
-                qboolean enable_delux =
-                        (r_deluxemaps.value > 0.f) &&
-                        !r_fullbright_cheatsafe && !r_lightmap_cheatsafe &&
-                        cl.worldmodel && cl.worldmodel->deluxdata &&
-                        deluxemap_texture;
-                qboolean has_directional = enable_delux && cl.worldmodel && cl.worldmodel->deluxfile;
-                unsigned int delux_flags = 0u;
-
-                if (enable_delux)
-                {
-                        delux_flags |= 1u; // texture + fallback normals available
-                        if (has_directional)
-                                delux_flags |= 2u; // real directional samples present
-                }
-
-                r_framedata.delux_enabled = delux_flags;
-                r_framedata._padding1 = 0;
-        }
-
-        r_framecount++;
+	r_framecount++;
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
@@ -2130,49 +1934,18 @@ static const uint16_t boxidx[12 * 2] = { 0,1, 0,2, 0,4, 1,3, 1,5, 2,3, 2,6, 3,7,
 
 static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 {
-        int i;
-        debugvert_t v[8];
+	int i;
+	debugvert_t v[8];
 
-        for (i = 0; i < 8; i++)
-        {
-                v[i].pos[0] = i & 1 ? mins[0] : maxs[0];
-                v[i].pos[1] = i & 2 ? mins[1] : maxs[1];
-                v[i].pos[2] = i & 4 ? mins[2] : maxs[2];
-                v[i].color = color;
-        }
+	for (i = 0; i < 8; i++)
+	{
+		v[i].pos[0] = i & 1 ? mins[0] : maxs[0];
+		v[i].pos[1] = i & 2 ? mins[1] : maxs[1];
+		v[i].pos[2] = i & 4 ? mins[2] : maxs[2];
+		v[i].color = color;
+	}
 
-        R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
-}
-
-static void R_EmitDiamond (const vec3_t origin, float size, uint32_t color)
-{
-        static const uint16_t diamond_idx[] = {
-                0, 1, 0, 2, 0, 3, 0, 4, 1, 2, 2, 3, 3, 4, 4, 1, 5, 1, 5, 2, 5, 3, 5, 4
-        };
-        debugvert_t v[6];
-        float clamped = size < 4.0f ? 4.0f : size;
-
-        VectorCopy (origin, v[0].pos);
-        v[0].pos[2] += clamped;
-        VectorCopy (origin, v[1].pos);
-        v[1].pos[0] += clamped;
-        VectorCopy (origin, v[2].pos);
-        v[2].pos[1] += clamped;
-        VectorCopy (origin, v[3].pos);
-        v[3].pos[0] -= clamped;
-        VectorCopy (origin, v[4].pos);
-        v[4].pos[1] -= clamped;
-        VectorCopy (origin, v[5].pos);
-        v[5].pos[2] -= clamped;
-
-        v[0].color = color;
-        v[1].color = color;
-        v[2].color = color;
-        v[3].color = color;
-        v[4].color = color;
-        v[5].color = color;
-
-        R_AddDebugGeometry (v, countof (v), diamond_idx, countof (diamond_idx));
+	R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
 }
 
 /*
@@ -2598,131 +2371,11 @@ static void R_ShowBoundingBoxes (void)
 	PR_SwitchQCVM (NULL);
 	PR_SwitchQCVM (oldvm);
 
-        R_FlushDebugGeometry ();
-
-        Sbar_Changed (); //so we don't get dots collecting on the statusbar
-
-        GL_EndGroup ();
-}
-
-#define R_LIGHTGRID_MAX_BOXES 2048
-
-static void R_ShowLightgridDebug (void)
-{
-	static const qmodel_t *logged_model = NULL;
-	const qmodel_t *world = cl.worldmodel;
-
-	if (r_lightgrid_debug.value <= 0.f)
-	{
-		logged_model = NULL;
-		return;
-	}
-
-	if (!world)
-		return;
-
-	if (world != logged_model)
-		logged_model = NULL;
-
-	if (!world->bspx_lightgrid_octree || !world->bspx_lightgrids)
-	{
-		if (!logged_model)
-			Con_Printf ("r_lightgrid_debug: no BSPX lightgrid data for %s\n", world->name);
-		logged_model = world;
-		return;
-	}
-
-	const size_t stride = sizeof(float) * 6;
-	const size_t octree_bytes = world->bspx_lightgrid_octree_length;
-	if (octree_bytes < stride || (octree_bytes % stride))
-	{
-		if (!logged_model)
-			Con_Printf ("r_lightgrid_debug: unsupported lightgrid octree layout (%zu bytes)\n", octree_bytes);
-		logged_model = world;
-		return;
-	}
-
-	size_t total_boxes = octree_bytes / stride;
-	size_t requested = (r_lightgrid_debug.value > 1.f) ? (size_t)r_lightgrid_debug.value : total_boxes;
-	size_t draw_boxes = (total_boxes < requested) ? total_boxes : requested;
-	if (draw_boxes > R_LIGHTGRID_MAX_BOXES)
-		draw_boxes = R_LIGHTGRID_MAX_BOXES;
-
-	if (!logged_model)
-	{
-		Con_Printf ("r_lightgrid_debug: visualizing %zu of %zu octree bounds\n", draw_boxes, total_boxes);
-		if (draw_boxes < total_boxes)
-			Con_Printf ("r_lightgrid_debug: increase the cvar value to inspect more nodes\n");
-		logged_model = world;
-	}
-
-	GL_BeginGroup ("Lightgrid debug");
-
-	R_SetDebugGeometryZTest (false);
-
-	const float *src = (const float *)world->bspx_lightgrid_octree;
-	for (size_t i = 0; i < draw_boxes; ++i)
-	{
-		vec3_t mins, maxs;
-
-		for (int j = 0; j < 3; ++j)
-		{
-			mins[j] = LittleFloat (src[i * 6 + j]);
-			maxs[j] = LittleFloat (src[i * 6 + 3 + j]);
-			if (maxs[j] < mins[j])
-			{
-				const float tmp = mins[j];
-				mins[j] = maxs[j];
-				maxs[j] = tmp;
-			}
-		}
-
-		R_EmitWireBox (mins, maxs, 0x5f00ffff);
-	}
-
 	R_FlushDebugGeometry ();
+
+	Sbar_Changed (); //so we don't get dots collecting on the statusbar
+
 	GL_EndGroup ();
-}
-
-static void R_ShowBotDebug (void)
-{
-        bot_debug_waypoint_t waypoints[BOT_DEBUG_MAX_WAYPOINTS];
-        qcvm_t *oldvm;
-        int count;
-        int i;
-
-	if (bot_debug.value <= 0.0f || !r_drawentities.value || !sv.active)
-		return;
-
-        GL_BeginGroup ("Bot debug");
-
-        R_SetDebugGeometryZTest (false);
-
-        oldvm = qcvm;
-        PR_SwitchQCVM (NULL);
-        PR_SwitchQCVM (&sv.qcvm);
-
-        count = SV_Bot_GetDebugWaypoints (waypoints, BOT_DEBUG_MAX_WAYPOINTS);
-
-                for (i = 0; i < count; i++)
-                {
-                        uint32_t color = waypoints[i].from_nav_file ? 0x7fff0000 : 0x7fffffff;
-                        float size = q_max (8.0f, waypoints[i].radius * 0.5f);
-
-                        if (waypoints[i].unreachable)
-                                color = 0x7f0000ff;
-                        else if (waypoints[i].is_target)
-				color = 0x7f00ff00;
-
-                R_EmitDiamond (waypoints[i].origin, size, color);
-        }
-
-        R_FlushDebugGeometry ();
-
-        PR_SwitchQCVM (NULL);
-        PR_SwitchQCVM (oldvm);
-
-        GL_EndGroup ();
 }
 
 /*
@@ -2833,7 +2486,6 @@ void R_ShowTris (void)
 	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
 	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
 	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
-	R_DrawDecals_ShowTris ();
 
 	// viewmodel
 	if (R_IsViewModelVisible ())
@@ -2923,15 +2575,11 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-        alphamode_t alphamode = R_GetEffectiveAlphaMode ();
-
-        R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 
 	R_Clear ();
 
 	Fog_EnableGFog (); //johnfitz
-
-	R_UpdateDecals ();
 
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
@@ -2939,40 +2587,27 @@ void R_RenderScene (void)
 
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 
-	R_DrawDecals (false);
-
 	R_DrawParticles (false);
 
 	Sky_DrawSky (); //johnfitz
 
 	R_DrawWater (false);
 
-        R_BeginTranslucency ();
+	R_BeginTranslucency ();
 
-        R_DrawWater (true);
+	R_DrawWater (true);
 
-        if (alphamode == ALPHAMODE_OIT)
-                R_DrawParticles (true);
+	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 
-        R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+	R_DrawParticles (true);
 
-        if (alphamode != ALPHAMODE_OIT)
-                R_DrawParticles (true);
+	R_EndTranslucency ();
 
-        R_EndTranslucency ();
+	R_ShowTris (); //johnfitz
 
-        if (alphamode == ALPHAMODE_OIT)
-                R_DrawParticles_PostOIT ();
+	R_ShowBoundingBoxes (); //johnfitz
 
-        R_ShowTris (); //johnfitz
-
-        R_ShowLightgridDebug ();
-
-        R_ShowBoundingBoxes (); //johnfitz
-
-        R_ShowBotDebug ();
-
-        R_ShowPointFile ();
+	R_ShowPointFile ();
 }
 
 /*
@@ -3005,7 +2640,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || R_SSAOEnabled () || r_ssao_debug.value > 0.f);
+        need_depth_resolve = (fbodest == framebufs.composite.fbo) && R_DoFEnabled ();
 
 	if (msaa)
 	{
@@ -3136,7 +2771,6 @@ void R_RenderView (void)
 		glFinish ();
 
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
-
 	R_RenderScene ();
 	R_WarpScaleView ();
 

@@ -117,7 +117,6 @@ void CL_ClearState (void)
 	//johnfitz
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
-	R_ClearDecals ();
 }
 
 /*
@@ -314,42 +313,7 @@ CL_IsPlayerEnt
 */
 qboolean CL_IsPlayerEnt (const entity_t *ent)
 {
-        return PTR_IN_RANGE (ent, cl_entities + 1, cl_entities + 1 + cl.maxclients);
-}
-
-static void CL_SetDlightColor (dlight_t *dl, float r, float g, float b)
-{
-        dl->color[0] = r;
-        dl->color[1] = g;
-        dl->color[2] = b;
-}
-
-static void CL_ColorDlightForEntity (const entity_t *ent, dlight_t *dl)
-{
-        const char *modelname;
-
-        if (!ent || !ent->model)
-                return;
-
-        modelname = ent->model->name;
-        if (!modelname || !*modelname)
-                return;
-
-        if (q_strcasestr (modelname, "flame") ||
-            q_strcasestr (modelname, "torch") ||
-            q_strcasestr (modelname, "braz") ||
-            q_strcasestr (modelname, "lava"))
-        {
-                CL_SetDlightColor (dl, 1.0f, 0.38f, 0.12f);
-                return;
-        }
-
-        if (q_strcasestr (modelname, "missile") ||
-            q_strcasestr (modelname, "rocket"))
-        {
-                CL_SetDlightColor (dl, 1.0f, 0.34f, 0.10f);
-                return;
-        }
+	return PTR_IN_RANGE (ent, cl_entities + 1, cl_entities + 1 + cl.maxclients);
 }
 
 /*
@@ -536,6 +500,59 @@ static void CL_RocketTrail (entity_t *ent, int type)
 
 /*
 ===============
+CL_SetDlightColorForEntity
+
+Tint dynamic lights to better match their source.
+===============
+*/
+static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
+{
+        const char *name;
+
+        if (!dl || !ent || !ent->model)
+                return;
+
+        name = ent->model->name;
+
+        if (ent->model->flags & EF_TRACER3)
+        {
+                dl->color[0] = 0.60f; dl->color[1] = 0.25f; dl->color[2] = 0.80f;
+                return;
+        }
+
+        if (ent->model->flags & EF_TRACER2)
+        {
+                dl->color[0] = 0.95f; dl->color[1] = 0.55f; dl->color[2] = 0.20f;
+                return;
+        }
+
+        if (ent->model->flags & EF_TRACER)
+        {
+                dl->color[0] = 0.30f; dl->color[1] = 0.85f; dl->color[2] = 0.30f;
+                return;
+        }
+
+        if (name && q_strcasestr (name, "lava"))
+        {
+                dl->color[0] = 1.00f; dl->color[1] = 0.40f; dl->color[2] = 0.10f;
+                return;
+        }
+
+        if (name && q_strcasestr (name, "wiz"))
+        {
+                dl->color[0] = 0.30f; dl->color[1] = 0.85f; dl->color[2] = 0.30f;
+                return;
+        }
+
+        if (name && (q_strcasestr (name, "missile") || q_strcasestr (name, "rocket")))
+        {
+                dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+                return;
+        }
+}
+
+/*
+===============
 CL_RelinkEntities
 ===============
 */
@@ -656,11 +673,11 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
-			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->minlight = 32;
-			dl->die = cl.time + 0.1;
-			CL_SetDlightColor (dl, 1.0f, 0.56f, 0.28f);
+                        VectorMA (dl->origin, 18, fv, dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->minlight = 32;
+                        dl->die = cl.time + 0.1;
+                        CL_SetDlightColorForEntity (dl, ent);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
@@ -675,20 +692,20 @@ void CL_RelinkEntities (void)
 		if (ent->effects & EF_BRIGHTLIGHT)
 		{
 			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->origin[2] += 16;
-			dl->radius = 400 + (rand()&31);
-			dl->die = cl.time + 0.001;
-			CL_ColorDlightForEntity (ent, dl);
-		}
-		if (ent->effects & EF_DIMLIGHT)
-		{
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->die = cl.time + 0.001;
-			CL_ColorDlightForEntity (ent, dl);
-		}
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->origin[2] += 16;
+                        dl->radius = 400 + (rand()&31);
+                        dl->die = cl.time + 0.001;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
+                if (ent->effects & EF_DIMLIGHT)
+                {
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->die = cl.time + 0.001;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
 		if (ent->effects & EF_QEX_QUADLIGHT)
 		{
 			dl = CL_AllocDlight (i);
@@ -720,13 +737,13 @@ void CL_RelinkEntities (void)
 			CL_RocketTrail (ent, 5);
 		else if (ent->model->flags & EF_ROCKET)
 		{
-			CL_RocketTrail (ent, 0);
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin, dl->origin);
-			dl->radius = 200;
-			dl->die = cl.time + 0.01;
-			CL_SetDlightColor (dl, 1.0f, 0.34f, 0.10f);
-		}
+                        CL_RocketTrail (ent, 0);
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin, dl->origin);
+                        dl->radius = 200;
+                        dl->die = cl.time + 0.01;
+                        CL_SetDlightColorForEntity (dl, ent);
+                }
 		else if (ent->model->flags & EF_GRENADE)
 			CL_RocketTrail (ent, 1);
 		else if (ent->model->flags & EF_TRACER3)

@@ -129,12 +129,8 @@ void R_AddStaticModels (const byte *vis);
 
 void R_NewMap (void);
 
-void R_Particles_LoadEffectInfo (const char *customfile);
-void R_Particles_LoadEffectInfoForMap (const char *customfile, const char *worldmodelname);
-
 
 void R_ParseParticleEffect (void);
-void R_ParticleEffect (int effectindex, float pcount, const vec3_t originmins, const vec3_t originmaxs, const vec3_t velocitymins, const vec3_t velocitymaxs, entity_t *ent, int palettecolor);
 void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count);
 void R_RocketTrail (vec3_t start, vec3_t end, int type);
 void R_EntityParticles (entity_t *ent);

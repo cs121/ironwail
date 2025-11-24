@@ -61,18 +61,6 @@ typedef struct particle_s
 	float		die;
 	vec3_t		vel;
 	float		ramp;
-	vec3_t		accel;
-	vec3_t		custom_color;
-	float		size;
-	float		size_vel;
-	float		alpha_start;
-	float		alpha_end;
-	float		alpha_power;
-	float		airfriction;
-	float		glow;
-	byte		texture;
-	byte		custom;
-	byte		pad[2];
 } particle_t;
 
 
@@ -113,17 +101,12 @@ extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_litwater;
-extern	cvar_t	r_deluxemaps;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
 
 extern	cvar_t	r_oit;
-extern	cvar_t	r_lightmap_strength;
 extern	cvar_t	r_alphasort;
-extern	cvar_t	r_rim_alias;
-extern	cvar_t	r_rim_world;
-extern	cvar_t	r_rim_exponent;
 
 extern	cvar_t	gl_clear;
 extern	cvar_t	gl_polyblend;
@@ -201,18 +184,12 @@ extern	const char	*gl_version;
 	x(void,			BindFramebuffer, (GLenum target, GLuint framebuffer))\
 	x(void,			GenFramebuffers, (GLsizei n, GLuint *framebuffers))\
 	x(void,			DeleteFramebuffers, (GLsizei n, const GLuint *framebuffers))\
-	x(void,			BindRenderbuffer, (GLenum target, GLuint renderbuffer))\
-	x(void,			GenRenderbuffers, (GLsizei n, GLuint *renderbuffers))\
-	x(void,			DeleteRenderbuffers, (GLsizei n, const GLuint *renderbuffers))\
-	x(void,			RenderbufferStorage, (GLenum target, GLenum internalformat, GLsizei width, GLsizei height))\
 	x(void,			FramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level))\
 	x(void,			FramebufferTextureLayer, (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer))\
 	x(GLenum,		CheckFramebufferStatus, (GLenum target))\
 	x(void,			BlitFramebuffer, (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter))\
 	x(void,			DrawBuffers, (GLsizei n, const GLenum *bufs))\
 	x(void,			ClearBufferfv, (GLenum buffer, GLint drawbuffer, const GLfloat *value))\
-	x(void,			ColorMaski, (GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a))\
-	x(void,			BlendFuncSeparate, (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha))\
 	x(void,			BlendFunci, (GLuint buf, GLenum sfactor, GLenum dfactor))\
 	x(void,			DebugMessageCallback, (GLDEBUGPROC callback, const void *userParam))\
 	x(void,			ObjectLabel, (GLenum identifier, GLuint name, GLsizei length, const GLchar *label))\
@@ -297,18 +274,16 @@ typedef enum {
 	GLS_BLEND_OPAQUE			= 0 << 2,
 	GLS_BLEND_ALPHA				= 1 << 2,
 	GLS_BLEND_ALPHA_OIT			= 2 << 2,
-	GLS_BLEND_ADD				= 3 << 2,
-	GLS_BLEND_INVMOD			= 4 << 2,
-	GLS_BLEND_MULTIPLY			= 5 << 2,
-	GLS_MASK_BLEND				= 7 << 2,
+	GLS_BLEND_MULTIPLY			= 3 << 2,
+	GLS_MASK_BLEND				= 3 << 2,
 
-	GLS_CULL_BACK				= 0 << 5,
-	GLS_CULL_NONE				= 1 << 5,
-	GLS_CULL_FRONT				= 2 << 5,
-	GLS_MASK_CULL				= 3 << 5,
+	GLS_CULL_BACK				= 0 << 4,
+	GLS_CULL_NONE				= 1 << 4,
+	GLS_CULL_FRONT				= 2 << 4,
+	GLS_MASK_CULL				= 3 << 4,
 
 	GLS_ATTRIBS_BITS			= 3,
-	GLS_ATTRIBS_SHIFT			= 7,
+	GLS_ATTRIBS_SHIFT			= 6,
 	GLS_ATTRIBS_MAXCOUNT		= (1 << GLS_ATTRIBS_BITS) - 1,
 	GLS_MASK_ATTRIBS			= GLS_ATTRIBS_MAXCOUNT << GLS_ATTRIBS_SHIFT,
 
@@ -389,7 +364,7 @@ extern overflowtimes_t dev_overflows; //this stores the last time overflow messa
 #define CONSOLE_RESPAM_TIME 3 // seconds between repeated warning messages
 
 //johnfitz -- moved here from r_brush.c
-extern int gl_lightmap_format, lightmap_bytes, deluxemap_bytes;
+extern int gl_lightmap_format, lightmap_bytes;
 extern int lightmap_block_width, lightmap_block_height;
 extern cvar_t gl_lightmap_atlas_size;
 void GL_OnLightmapAtlasSizeChanged (cvar_t *var);
@@ -452,11 +427,7 @@ typedef struct gpuframedata_s {
 	float	screendither;
 	float	texturedither;
 	float	overbright;
-	float	lightmap_strength;
-	float	rim_alias;
-	float	rim_world;
-	float	rim_exponent;
-	float	rim_pad0;
+	float	_padding0;
 	vec3_t	eyepos;
 	float	time;
 	vec3_t	prev_eyepos;
@@ -465,8 +436,8 @@ typedef struct gpuframedata_s {
 	float	zlogbias;
 	int			numlights;
 	int			prev_frame_valid;
-	unsigned int		delux_enabled;
-	unsigned int		_padding1;
+	int			_padding1;
+	int			_padding2;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
@@ -481,24 +452,9 @@ void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned ch
 
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
-void R_DrawParticles_PostOIT (void);
 void R_DrawParticles_ShowTris (void);
-int R_Effectinfo_Index (const char *name);
-qboolean R_Effectinfo_SpawnIndex (int index, const vec3_t org, const vec3_t dir, float count);
-qboolean R_Effectinfo_SpawnName (const char *name, const vec3_t org, const vec3_t dir, float count);
-qboolean R_Effectinfo_Active (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
-void R_InitDecals (void);
-void R_ClearDecals (void);
-void R_UpdateDecals (void);
-void R_DrawDecals (qboolean showtris);
-void R_DrawDecals_ShowTris (void);
-void R_AddBulletDecal (const vec3_t point);
-void R_AddBloodDecal (const vec3_t point, const vec3_t dir);
-void R_AddExplosionDecal (const vec3_t point);
-void R_AddGibDecal (const vec3_t point, int particle_count);
-void R_Decals_EntityFrameChanged (entity_t *ent, int prevframe, qboolean model_changed);
 
 void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
@@ -591,7 +547,6 @@ typedef struct glprogs_s {
 	GLuint		skyboxside[2];		// [dither]
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
 	GLuint		sprites[2];			// [dither]
-        GLuint          decals[2];                      // [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
 

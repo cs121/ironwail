@@ -25,7 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
-#include "../wren_vm/wren_runtime.h"
 #include <setjmp.h>
 
 /*
@@ -265,8 +264,6 @@ void	Host_FindMaxClients (void)
 	svs.maxclientslimit = svs.maxclients;
 	if (svs.maxclientslimit < 4)
 		svs.maxclientslimit = 4;
-	if (svs.maxclientslimit < MAX_SCOREBOARD)
-		svs.maxclientslimit = MAX_SCOREBOARD;
 	svs.clients = (struct client_s *) Hunk_AllocName (svs.maxclientslimit*sizeof(client_t), "clients");
 
 	if (svs.maxclients > 1)
@@ -364,6 +361,7 @@ void Host_InitLocal (void)
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
 
         Host_InitCommands ();
+        Q3Shader_Init ();
 
         Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_speeds);
@@ -505,9 +503,7 @@ void SV_DropClient (qboolean crash)
 	int		i;
 	client_t *client;
 
-    	SV_Bot_ClientDisconnected (host_client);
-
-	if (!crash && host_client->netconnection)
+	if (!crash)
 	{
 		// send any final messages (don't check for errors)
 		if (NET_CanSendMessage (host_client->netconnection))
@@ -525,28 +521,7 @@ void SV_DropClient (qboolean crash)
 			PR_SwitchQCVM(&sv.qcvm);
 			saveSelf = pr_global_struct->self;
 			pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
-                        if (WRENVM_IsEnabled())
-                        {
-                                int client_id = (int)(host_client - svs.clients);
-                                wrenvm_call_result_t disc_result = WRENVM_CallClientDisconnect(client_id);
-                                if (disc_result == WRENV_CALL_OK)
-                                {
-                                        // handled in Wren
-                                }
-                                else if (disc_result == WRENV_CALL_ERROR || (disc_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
-                                {
-                                        Con_Printf("Wren clientDisconnect failed; using QuakeC fallback\n");
-                                        PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
-                                }
-                                else
-                                {
-                                        PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
-                                }
-                        }
-                        else
-                        {
-                                PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
-                        }
+			PR_ExecuteProgram (pr_global_struct->ClientDisconnect);
 			pr_global_struct->self = saveSelf;
 			PR_SwitchQCVM(NULL);
 			PR_SwitchQCVM(oldvm);
@@ -556,18 +531,14 @@ void SV_DropClient (qboolean crash)
 	}
 
 // break the net connection
-	if (host_client->netconnection)
-	{
-		NET_Close (host_client->netconnection);
-		host_client->netconnection = NULL;
-	}
+	NET_Close (host_client->netconnection);
+	host_client->netconnection = NULL;
 
 // free the client (the body stays around)
 	host_client->active = false;
 	host_client->name[0] = 0;
 	host_client->old_frags = -999999;
-	if (!host_client->isbot && net_activeconnections > 0)
-		net_activeconnections--;
+	net_activeconnections--;
 
 // send notification to all clients
 	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
@@ -1136,15 +1107,9 @@ static void CL_LoadCSProgs (void)
 		    (PR_LoadProgs ("progs.dat", false) && qcvm->extfuncs.CSQC_DrawHud))
 		{
 			qcvm->max_edicts = CLAMP (MIN_EDICTS, (int)max_edicts.value, MAX_EDICTS);
-                        qcvm->edicts = (edict_t *)malloc (qcvm->max_edicts * qcvm->edict_size);
-                        if (!qcvm->edicts)
-                        {
-                                PR_ClearProgs (qcvm);
-                                PR_SwitchQCVM (NULL);
-                                return;
-                        }
+			qcvm->edicts = (edict_t *)malloc (qcvm->max_edicts * qcvm->edict_size);
 			qcvm->num_edicts = qcvm->reserved_edicts = 1;
-                        memset (qcvm->edicts, 0, qcvm->num_edicts * qcvm->edict_size);
+			memset (qcvm->edicts, 0, qcvm->num_edicts * qcvm->edict_size);
 
 			if (!qcvm->extfuncs.CSQC_DrawHud)
 			{ // no simplecsqc entry points... abort entirely!
@@ -1244,7 +1209,7 @@ void _Host_Frame (double time)
 		return;			// something bad happened, or the server disconnected
 
 // keep the random time dependent
-        (void)rand ();
+	rand ();
 
 // decide the simulation time
 	accumtime += host_netinterval?CLAMP(0.0, time, 0.2):0.0;	//for renderer/server isolation
@@ -1445,8 +1410,7 @@ void Host_Init (void)
 	PR_Init ();
 	Mod_Init ();
 	NET_Init ();
-        SV_Init ();
-        WRENVM_InitSystem();
+	SV_Init ();
 
 	Con_Printf ("Exe: " __TIME__ " " __DATE__ " (%s %d-bit)\n", SDL_GetPlatform (), (int)sizeof(void*)*8);
 	Con_Printf ("%4.1f megabyte heap\n", host_parms->memsize/ (1024*1024.0));
@@ -1536,8 +1500,7 @@ void Host_Shutdown(void)
 // keep Con_Printf from trying to update the screen
 	scr_disabled_for_loading = true;
 
-        Steam_Shutdown ();
-        WRENVM_ShutdownSystem();
+	Steam_Shutdown ();
 
 	AsyncQueue_Destroy (&async_queue);
 
@@ -1564,5 +1527,6 @@ void Host_Shutdown(void)
         LOG_Close ();
 
         LOC_Shutdown ();
+        Q3Shader_Shutdown ();
 }
 

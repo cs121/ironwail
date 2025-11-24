@@ -35,7 +35,6 @@ int     lightmap_block_height = 256;
 
 int		gl_lightmap_format;
 int		lightmap_bytes;
-int		deluxemap_bytes;
 
 typedef struct {
 	qboolean		reverse;
@@ -52,9 +51,7 @@ msurface_t		**lit_surfs;
 int				*lit_surf_order[2];
 int				num_lightmap_samples;
 unsigned		*lightmap_data;
-byte		*deluxemap_data;
 gltexture_t		*lightmap_texture;
-gltexture_t		*deluxemap_texture;
 int				lightmap_width;
 int				lightmap_height;
 
@@ -249,9 +246,9 @@ GL_NumLightmapTaps
 */
 static int GL_NumLightmapTaps (const msurface_t *surf)
 {
-	if (surf->styles[1] == 255)
+	if (surf->styles[1] == INVALID_LIGHTSTYLE)
 		return 1;
-	if (surf->styles[2] == 255)
+	if (surf->styles[2] == INVALID_LIGHTSTYLE)
 		return 2;
 	return 3;
 }
@@ -270,14 +267,8 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	byte		*src;
 	unsigned	*dst;
 	int			s, t, facesize;
-	const byte	*dirsrc;
-	byte		*dstdir;
-	int			tap_count;
-	int			dir_stride;
-	qboolean	use_fallback;
-	byte		fallback[3];
 
-	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == 255)
+	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == INVALID_LIGHTSTYLE)
 		return;
 
 	lm = &lightmaps[surf->lightmaptexturenum];
@@ -290,13 +281,13 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	src = surf->samples;
 	dst = lightmap_data + yofs * lightmap_width + xofs;
 
-	if (surf->styles[1] == 255) // single lightstyle
+	if (surf->styles[1] == INVALID_LIGHTSTYLE) // single lightstyle
 	{
 		for (t = 0; t < tmax; t++, dst += lightmap_width)
 			for (s = 0; s < smax; s++, src += 3)
 				dst[s] = src[0] | (src[1] << 8) | (src[2] << 16) | 0xff000000u;
 	}
-	else if (surf->styles[2] == 255) // 2 lightstyles
+	else if (surf->styles[2] == INVALID_LIGHTSTYLE) // 2 lightstyles
 	{
 		for (t = 0; t < tmax; t++, dst += lightmap_width)
 		{
@@ -315,7 +306,7 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 			{
 				const byte *mapsrc = src;
 				unsigned r = 0, g = 0, b = 0;
-				for (map = 0; map < 4 && surf->styles[map] != 255; map++, mapsrc += facesize)
+				for (map = 0; map < 4 && surf->styles[map] != INVALID_LIGHTSTYLE; map++, mapsrc += facesize)
 				{
 					r |= mapsrc[0] << (map << 3);
 					g |= mapsrc[1] << (map << 3);
@@ -324,59 +315,6 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 				dst[s           ] = r;
 				dst[s + smax    ] = g;
 				dst[s + smax * 2] = b;
-			}
-		}
-	}
-
-	if (!deluxemap_data)
-		return;
-
-	tap_count = GL_NumLightmapTaps (surf);
-	dir_stride = lightmap_width * deluxemap_bytes;
-	dirsrc = surf->deluxsamples;
-	use_fallback = (dirsrc == NULL);
-
-	if (use_fallback)
-	{
-		vec3_t normal;
-		int component;
-
-		VectorCopy (surf->plane->normal, normal);
-		if (surf->flags & SURF_PLANEBACK)
-			VectorNegate (normal, normal);
-
-		for (component = 0; component < 3; component++)
-		{
-			float c = CLAMP (-1.0f, normal[component], 1.0f);
-			int v = (int) Q_rint ((c * 0.5f + 0.5f) * 255.0f);
-			fallback[component] = (byte) CLAMP (0, v, 255);
-		}
-	}
-
-	for (t = 0; t < tmax; t++)
-	{
-		int row_index = yofs + t;
-		dstdir = deluxemap_data + row_index * dir_stride + xofs * deluxemap_bytes;
-
-		for (s = 0; s < smax; s++)
-		{
-			int texel_index = t * smax + s;
-			for (map = 0; map < tap_count; map++)
-			{
-				byte *pixel = dstdir + (s + map * smax) * deluxemap_bytes;
-				if (!use_fallback)
-				{
-					const byte *srcdir = dirsrc + map * facesize + texel_index * 3;
-					pixel[0] = srcdir[0];
-					pixel[1] = srcdir[1];
-					pixel[2] = srcdir[2];
-				}
-				else
-				{
-					pixel[0] = fallback[0];
-					pixel[1] = fallback[1];
-					pixel[2] = fallback[2];
-				}
 			}
 		}
 	}
@@ -394,11 +332,6 @@ static void GL_FreeLightmapData (void)
 		free (lightmap_data);
 		lightmap_data = NULL;
 	}
-	if (deluxemap_data)
-	{
-		free (deluxemap_data);
-		deluxemap_data = NULL;
-	}
 	if (lightmaps)
 	{
 		free (lightmaps);
@@ -408,7 +341,6 @@ static void GL_FreeLightmapData (void)
 	VEC_CLEAR (lit_surfs);
 
 	lightmap_texture = NULL; // freed by the texture manager
-	deluxemap_texture = NULL; // freed by the texture manager
 	last_lightmap_allocated = 0;
 	lightmap_count = 0;
 	lightmap_width = 0;
@@ -561,7 +493,6 @@ void GL_BuildLightmaps (void)
 	default:
 		Sys_Error ("GL_BuildLightmaps: bad lightmap format");
 	}
-	deluxemap_bytes = 3;
 
 	lightmap_block_width = lightmap_block_height = GL_SanitizeAtlasSize ((int)gl_lightmap_atlas_size.value);
 	// allocate lightmap blocks
@@ -593,24 +524,6 @@ void GL_BuildLightmaps (void)
 	if (!lightmap_data)
 		Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_data)));
 
-	if (cl.worldmodel->deluxdata)
-	{
-		deluxemap_data = (byte *) malloc (lmsize * deluxemap_bytes);
-		if (!deluxemap_data)
-			Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * deluxemap_bytes));
-		for (i = 0; i < lmsize; i++)
-		{
-			byte *dst = deluxemap_data + i * deluxemap_bytes;
-			dst[0] = 128;
-			dst[1] = 128;
-			dst[2] = 255;
-		}
-	}
-	else
-	{
-		deluxemap_data = NULL;
-	}
-
 	// compute offsets for each lightmap block
 	for (i=0; i<lightmap_count; i++)
 	{
@@ -636,18 +549,6 @@ void GL_BuildLightmaps (void)
 			SRC_LIGHTMAP, (byte *)lightmap_data, "", (src_offset_t)lightmap_data,
 			TEXPREF_ALPHA | TEXPREF_LINEAR | TEXPREF_NOPICMIP
 		);
-	if (deluxemap_data)
-	{
-		deluxemap_texture =
-			TexMgr_LoadImage (cl.worldmodel, "deluxemap", lightmap_width, lightmap_height,
-				SRC_DELUXMAP, deluxemap_data, "", (src_offset_t)deluxemap_data,
-				TEXPREF_LINEAR | TEXPREF_NOPICMIP
-			);
-	}
-	else
-	{
-		deluxemap_texture = NULL;
-	}
 
 	//johnfitz -- warn about exceeding old limits
 	//GLQuake limit was 64 textures of 128x128. Estimate how many 128x128 textures we would need
@@ -745,16 +646,22 @@ void GL_BuildBModelVertexBuffer (void)
 	{
 		m = cl.model_precache[j];
 		if (!m || m->name[0] == '*' || m->type != mod_brush)
-			continue;
+		continue;
 
 		for (i = 0; i < m->numsurfaces; i++)
 		{
-			msurface_t	*fa = &m->surfaces[i];
-			texture_t	*texture = m->textures[fa->texinfo->texnum];
-			glvert_t	*vert = &varray[varray_index];
-			float		texscalex, texscaley, useofs, lmofs;
-			medge_t		*r_pedge;
-			lightmap_t	*lm;
+			msurface_t      *fa = &m->surfaces[i];
+			texture_t       *texture = m->textures[fa->texinfo->texnum];
+			glvert_t        *vert = &varray[varray_index];
+			float           texscalex, texscaley, useofs, lmofs;
+			medge_t         *r_pedge;
+			lightmap_t      *lm;
+			vec3_t          surfnormal;
+
+                        if (fa->flags & SURF_PLANEBACK)
+                                VectorScale (fa->plane->normal, -1, surfnormal);
+                        else
+                                VectorCopy (fa->plane->normal, surfnormal);
 
 			if (fa->flags & SURF_DRAWTILED)
 			{
@@ -790,21 +697,29 @@ void GL_BuildBModelVertexBuffer (void)
 
 			for (k = 0; k < fa->numedges; k++, vert++)
 			{
-				float	*vec;
-				float	s, t;
-				int		lindex;
+				float   *vec;
+				float   s, t;
+				int             lindex;
+				int             vertindex;
 
 				lindex = m->surfedges[fa->firstedge + k];
 				if (lindex > 0)
 				{
 					r_pedge = &m->edges[lindex];
-					vec = m->vertexes[r_pedge->v[0]].position;
+					vertindex = r_pedge->v[0];
+					vec = m->vertexes[vertindex].position;
 				}
 				else
 				{
 					r_pedge = &m->edges[-lindex];
-					vec = m->vertexes[r_pedge->v[1]].position;
+					vertindex = r_pedge->v[1];
+					vec = m->vertexes[vertindex].position;
 				}
+
+				VectorCopy (vec, vert->pos);
+				VectorCopy (surfnormal, vert->normal);
+				if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
+					VectorCopy (m->vertexes[vertindex].normal, vert->normal);
 
 				s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;
 				s *= texscalex;
@@ -812,50 +727,57 @@ void GL_BuildBModelVertexBuffer (void)
 				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3] * useofs;
 				t *= texscaley;
 
-				VectorCopy (vec, vert->pos);
 				vert->st[0] = s;
 				vert->st[1] = t;
 
-				if (!(fa->flags & SURF_DRAWTILED))
+			if (!(fa->flags & SURF_DRAWTILED))
+			{
+				// match old BuildSurfaceDisplayList
+
+				// Q64 RERELEASE texture shift
+				if (texture->shift > 0)
 				{
-					// match old BuildSurfaceDisplayList
-
-					// Q64 RERELEASE texture shift
-					if (texture->shift > 0)
-					{
-						vert->st[0] /= (2 * texture->shift);
-						vert->st[1] /= (2 * texture->shift);
-					}
-
-					//
-					// lightmap texture coordinates
-					//
-					s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-					s -= fa->texturemins[0];
-					s += (fa->light_s + lm->xofs) * 16;
-					s += 8;
-					s *= lmscalex;
-
-					t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-					t -= fa->texturemins[1];
-					t += (fa->light_t + lm->yofs) * 16;
-					t += 8;
-					t *= lmscaley;
-
-					vert->st[2] = s;
-					vert->st[3] = t;
-					vert->lmofs = lmofs;
-					vert->styles = fa->styles[0] | (fa->styles[1] << 8) | (fa->styles[2] << 16) | (fa->styles[3] << 24);
+					vert->st[0] /= (2 * texture->shift);
+					vert->st[1] /= (2 * texture->shift);
 				}
-				else
-				{
-					// first lightmap texel is fullbright
-					vert->st[2] = 0.5f / lightmap_width;
-					vert->st[3] = 0.5f / lightmap_height;
-					vert->lmofs = 0.f;
-					vert->styles = ~0u;
-				}
+
+				//
+				// lightmap texture coordinates
+				//
+				s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
+				s -= fa->texturemins[0];
+				s += (fa->light_s + lm->xofs) * 16;
+				s += 8;
+				s *= lmscalex;
+
+				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
+				t -= fa->texturemins[1];
+				t += (fa->light_t + lm->yofs) * 16;
+				t += 8;
+				t *= lmscaley;
+
+                                        vert->st[2] = s;
+                                        vert->st[3] = t;
+                                        vert->lmofs = lmofs;
+                                        {
+                                                unsigned char packedstyles[4];
+                                                int map;
+
+                                                for (map = 0; map < MAXLIGHTMAPS; map++)
+                                                        packedstyles[map] = (fa->styles[map] > 255) ? 255 : fa->styles[map];
+
+                                                vert->styles = packedstyles[0] | (packedstyles[1] << 8) | (packedstyles[2] << 16) | (packedstyles[3] << 24);
+                                        }
+                                }
+                                else
+                                {
+                                        // first lightmap texel is fullbright
+				vert->st[2] = 0.5f / lightmap_width;
+				vert->st[3] = 0.5f / lightmap_height;
+				vert->lmofs = 0.f;
+				vert->styles = ~0u;
 			}
+		}
 		}
 	}
 

@@ -242,6 +242,7 @@ typedef struct
 
 #include "sys.h"
 #include "common.h"
+#include "q3shader.h"
 #include "bspfile.h"
 #include "zone.h"
 #include "mathlib.h"
@@ -252,10 +253,6 @@ typedef struct
 
 #include "cmd.h"
 #include "crc.h"
-
-#ifndef dpsnprintf
-#define dpsnprintf q_snprintf
-#endif
 
 #include "platform.h"
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)

@@ -59,8 +59,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define BSPVERSION	29
 
-// Half-Life variant that keeps the classic structure layout
-#define BSPVERSION30	30
+// Quake III BSP
+#define Q3BSP_IDENT            (('I' << 0) | ('B' << 8) | ('S' << 16) | ('P' << 24))
+#define Q3BSP_VERSION          46
 
 /* RMQ support (2PSB). 32bits instead of shorts for all but bbox sizes (which
  * still use shorts) */
@@ -96,6 +97,34 @@ typedef struct
 #define	LUMP_MODELS		14
 
 #define	HEADER_LUMPS	15
+
+// Quake III BSP header layout
+#define Q3_HEADER_LUMPS        17
+
+#define Q3_LUMP_ENTITIES       0
+#define Q3_LUMP_TEXTURES       1
+#define Q3_LUMP_PLANES         2
+#define Q3_LUMP_NODES          3
+#define Q3_LUMP_LEAFS          4
+#define Q3_LUMP_LEAFFACES      5
+#define Q3_LUMP_LEAFBRUSHES    6
+#define Q3_LUMP_MODELS         7
+#define Q3_LUMP_BRUSHES        8
+#define Q3_LUMP_BRUSHSIDES     9
+#define Q3_LUMP_DRAWVERTS      10
+#define Q3_LUMP_DRAWINDEXES    11
+#define Q3_LUMP_FOGS           12
+#define Q3_LUMP_SURFACES       13
+#define Q3_LUMP_LIGHTMAPS      14
+#define Q3_LUMP_LIGHTVOLS      15
+#define Q3_LUMP_VISIBILITY     16
+
+typedef struct
+{
+        int             ident;
+        int             version;
+        lump_t          lumps[Q3_HEADER_LUMPS];
+} q3_dheader_t;
 
 typedef struct
 {
@@ -228,6 +257,7 @@ typedef struct texinfo_s
 } texinfo_t;
 #define	TEX_SPECIAL		1		// sky or slime, no lightmap or 256 subdivision
 #define TEX_MISSING		2		// johnfitz -- this texinfo does not have a texture
+#define     TEX_VERTEXNORMALS       0x800   // bspx smooth shading
 
 // note that edge 0 is never used, because negative edge nums are used for
 // counterclockwise use of the edge in a face

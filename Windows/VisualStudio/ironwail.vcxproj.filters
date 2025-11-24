@@ -45,9 +45,6 @@
     <ClCompile Include="..\..\Quake\common.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\common\com_iwtext.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\console.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -75,9 +72,6 @@
     <ClCompile Include="..\..\Quake\gl_rlight.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\gl_shadow.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\gl_rmain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -103,6 +97,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\host_cmd.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\q3shader.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\image.c">
@@ -162,9 +159,6 @@
     <ClCompile Include="..\..\Quake\r_brush.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\r_decals.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\r_part.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -172,9 +166,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\r_world.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Quake\renderer\r_iwshader.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sbar.c">
@@ -231,9 +222,6 @@
     <ClCompile Include="..\..\Quake\sv_main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\sv_bot.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\sv_move.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -261,9 +249,6 @@
     <ClCompile Include="..\..\Quake\gl_shaders.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\renderer\r_shadows.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\steam.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -286,39 +271,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\snd_mpg123.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren_bindings.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren_runtime.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\optional\wren_opt_meta.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\optional\wren_opt_random.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_compiler.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_core.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_debug.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_primitive.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_utils.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_value.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\wren_vm\wren\vm\wren_vm.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -348,9 +300,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\common.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Quake\common\com_iwtext.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\console.h">
@@ -437,6 +386,9 @@
     <ClInclude Include="..\..\Quake\protocol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Quake\q3shader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Quake\q_stdinc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -449,16 +401,10 @@
     <ClInclude Include="..\..\Quake\render.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\renderer\r_iwshader.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\Quake\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\sbar.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\renderer\r_shadows.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\screen.h">
@@ -543,15 +489,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\jsmn.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\wren_vm\wren_bindings.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\wren_vm\wren_runtime.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\wren_vm\wren\include\wren.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

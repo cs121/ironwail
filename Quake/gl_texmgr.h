@@ -48,7 +48,7 @@ typedef enum
 	TEXPREF_HASALPHA		= (TEXPREF_ALPHA|TEXPREF_ALPHABRIGHT), // texture has alpha channel
 } textureflags_t;
 
-enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_DELUXMAP};
+enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA};
 
 typedef uintptr_t src_offset_t;
 

@@ -148,7 +148,6 @@ typedef struct client_s
 	edict_t			*edict;				// EDICT_NUM(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
-	qboolean		isbot;				// true if this client is a local bot
 
 	float			ping_times[NUM_PING_TIMES];
 	int				num_pings;			// ping_times[num_pings%NUM_PING_TIMES]
@@ -294,8 +293,6 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 void SV_ClientPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
 void SV_BroadcastPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
 
-void SV_ConnectClient (int clientnum);
-
 void SV_Physics (void);
 
 qboolean SV_CheckBottom (edict_t *ent);
@@ -309,24 +306,5 @@ void SV_CheckForNewClients (void);
 void SV_RunClients (void);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
-
-void SV_Bot_Init (void);
-void SV_Bot_Reset (void);
-void SV_Bot_LoadNavigation (const char *mapname);
-void SV_Bot_RunFrame (client_t *client);
-void SV_Bot_ClientDisconnected (client_t *client);
-
-#define BOT_DEBUG_MAX_WAYPOINTS 256
-
-typedef struct bot_debug_waypoint_s
-{
-        vec3_t          origin;
-        float           radius;
-        qboolean        is_target;
-        qboolean        unreachable;
-        qboolean        from_nav_file;
-} bot_debug_waypoint_t;
-
-int SV_Bot_GetDebugWaypoints (bot_debug_waypoint_t *out, int max_waypoints);
 
 #endif	/* QUAKE_SERVER_H */

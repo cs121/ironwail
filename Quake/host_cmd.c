@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "json.h"
-#include "../wren_vm/wren_runtime.h"
 #include <time.h>
 #ifndef WITHOUT_CURL
 #include <curl/curl.h>
@@ -1606,14 +1605,7 @@ static void Host_Status_f (void)
 	{
 		if (!client->active)
 			continue;
-                double connect_time;
-                const char *address;
-
-                connect_time = client->netconnection ?
-                        NET_QSocketGetTime(client->netconnection) : net_time;
-                address = client->netconnection ?
-                        NET_QSocketGetAddressString(client->netconnection) : "BOT";
-                seconds = (int)(net_time - connect_time);
+		seconds = (int)(net_time - NET_QSocketGetTime(client->netconnection));
 		minutes = seconds / 60;
 		if (minutes)
 		{
@@ -1625,7 +1617,7 @@ static void Host_Status_f (void)
 		else
 			hours = 0;
 		print_fn ("#%-2u %-16.16s  %3i  %2i:%02i:%02i\n", j+1, client->name, (int)client->edict->v.frags, hours, minutes, seconds);
-                print_fn ("   %s\n", address);
+		print_fn ("   %s\n", NET_QSocketGetAddressString(client->netconnection));
 	}
 }
 
@@ -2452,22 +2444,11 @@ static void Host_Savegame_f (void)
 	}
 
 	f = Sys_fopen (name, "w");
-        if (!f)
-        {
-                Con_Printf ("ERROR: couldn't open.\n");
-                return;
-        }
-
-        if (WRENVM_IsEnabled())
-        {
-                wrenvm_call_result_t save_result = WRENVM_CallOnSave();
-                if (save_result == WRENV_CALL_ERROR && WRENVM_IsStrict())
-                {
-                        Con_Printf("Wren onSave failed; aborting save.\n");
-                        fclose (f);
-                        return;
-                }
-        }
+	if (!f)
+	{
+		Con_Printf ("ERROR: couldn't open.\n");
+		return;
+	}
 
 	SDL_LockMutex (save_mutex);
 	while (save_pending)
@@ -2709,18 +2690,9 @@ static void Host_Loadgame_f (void)
 	for (i = 0; i < NUM_SPAWN_PARMS; i++)
 		svs.clients->spawn_parms[i] = spawn_parms[i];
 
-        PR_SwitchQCVM(NULL);
+	PR_SwitchQCVM(NULL);
 
-        if (WRENVM_IsEnabled())
-        {
-                wrenvm_call_result_t load_result = WRENVM_CallOnLoad();
-                if (load_result == WRENV_CALL_ERROR && WRENVM_IsStrict())
-                {
-                        Con_Printf("Wren onLoad failed.\n");
-                }
-        }
-
-        q_strlcpy (sv.lastsave, relname, sizeof (sv.lastsave));
+	q_strlcpy (sv.lastsave, relname, sizeof (sv.lastsave));
 
 	if (cls.state != ca_dedicated)
 	{
@@ -3114,35 +3086,10 @@ static void Host_Spawn_f (void)
 		// call the spawn function
 		pr_global_struct->time = qcvm->time;
 		pr_global_struct->self = EDICT_TO_PROG(sv_player);
-                if (WRENVM_IsEnabled())
-                {
-                        int client_id = (int)(host_client - svs.clients);
-                        wrenvm_call_result_t client_result = WRENVM_CallClientConnect(client_id);
-                        if (client_result == WRENV_CALL_OK)
-                        {
-                                // handled in Wren
-                        }
-                        else if (client_result == WRENV_CALL_ERROR || (client_result == WRENV_CALL_MISSING && WRENVM_IsStrict()))
-                        {
-                                Con_Printf("Wren clientConnect failed; using QuakeC fallback\n");
-                                PR_ExecuteProgram (pr_global_struct->ClientConnect);
-                        }
-                        else
-                        {
-                                PR_ExecuteProgram (pr_global_struct->ClientConnect);
-                        }
-                }
-                else
-                {
-                        PR_ExecuteProgram (pr_global_struct->ClientConnect);
-                }
+		PR_ExecuteProgram (pr_global_struct->ClientConnect);
 
-                double connect_time;
-
-                connect_time = host_client->netconnection ?
-                        NET_QSocketGetTime(host_client->netconnection) : Sys_DoubleTime();
-                if ((Sys_DoubleTime() - connect_time) <= qcvm->time)
-                        Sys_Printf ("%s entered the game\n", host_client->name);
+		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
+			Sys_Printf ("%s entered the game\n", host_client->name);
 
 		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 	}
@@ -3689,6 +3636,217 @@ static void Host_Viewprev_f (void)
 	PrintFrameName (m, e->v.frame);
 }
 
+static const char *Host_Q3ShaderCullToString (q3shader_cullmode_t mode)
+{
+        switch (mode)
+        {
+        default:
+        case Q3CULL_BACK:     return "back";
+        case Q3CULL_FRONT:    return "front";
+        case Q3CULL_TWOSIDED: return "twosided";
+        }
+}
+
+static void Host_Q3ShaderPrintDirective (const q3shader_directive_t *directive, int indent)
+{
+        size_t          i, argc;
+        char            line[1024];
+
+        if (!directive)
+                return;
+
+        q_snprintf (line, sizeof (line), "%*s%s", indent, "", directive->name);
+
+        argc = Q3ShaderDirective_ArgCount (directive);
+        for (i = 0; i < argc; ++i)
+        {
+                q_strlcat (line, " ", sizeof (line));
+                q_strlcat (line, Q3ShaderDirective_GetArg (directive, i), sizeof (line));
+        }
+
+        Con_Printf ("%s\n", line);
+}
+
+static void Host_Q3ShaderClear_f (void)
+{
+        size_t count = Q3Shader_Count ();
+        Q3Shader_Clear ();
+        Con_Printf ("Cleared %zu shader%s\n", count, PLURAL(count));
+}
+
+static void Host_Q3ShaderLoad_f (void)
+{
+        int argc = Cmd_Argc ();
+        int i;
+
+        if (argc < 2)
+        {
+                Con_Printf ("Usage: q3shader_load <file> [file ...]\n");
+                return;
+        }
+
+        for (i = 1; i < argc; ++i)
+        {
+                const char *path = Cmd_Argv (i);
+                int loaded = Q3Shader_LoadFile (path);
+                if (loaded >= 0)
+                        Con_Printf ("Loaded %d shader%s from %s\n", loaded, PLURAL(loaded), path);
+                else
+                        Con_Printf ("Failed to load shaders from %s\n", path);
+        }
+}
+
+static void Host_Q3ShaderLoadAll_f (void)
+{
+        int files_succeeded = 0;
+        int files_failed = 0;
+        int shaders_loaded = Q3Shader_LoadAll (&files_succeeded, &files_failed);
+        int files_total = files_succeeded + files_failed;
+
+        if (!files_total)
+        {
+                Con_Printf ("No Quake III shader files found under scripts/.\n");
+                return;
+        }
+
+        Con_Printf ("Processed %d shader file%s (%d succeeded, %d failed), %d shader%s loaded.\n",
+                files_total, PLURAL(files_total),
+                files_succeeded, files_failed,
+                shaders_loaded, PLURAL(shaders_loaded));
+}
+
+static void Host_Q3ShaderList_f (void)
+{
+        size_t count = Q3Shader_Count ();
+        size_t i;
+
+        if (!count)
+        {
+                Con_Printf ("No Quake III shaders loaded. Use q3shader_load first.\n");
+                return;
+        }
+
+        Con_Printf ("%zu shader%s loaded:\n", count, PLURAL(count));
+        for (i = 0; i < count; ++i)
+        {
+                const q3shader_t *shader = Q3Shader_GetByIndex (i);
+                size_t stages = Q3ShaderStage_Count (shader);
+                Con_Printf ("  %s (%zu stage%s)\n", shader->name ? shader->name : "<unnamed>", stages, PLURAL(stages));
+        }
+}
+
+static void Host_Q3ShaderInfo_f (void)
+{
+        const q3shader_t *shader;
+        const char      *name;
+        size_t           i;
+        char             buffer[512];
+
+        if (Cmd_Argc () < 2)
+        {
+                Con_Printf ("Usage: q3shader_info <name>\n");
+                return;
+        }
+
+        name = Cmd_Argv (1);
+        shader = Q3Shader_Find (name);
+        if (!shader)
+        {
+                Con_Printf ("Shader '%s' is not loaded.\n", name);
+                return;
+        }
+
+        Con_Printf ("Shader: %s\n", shader->name ? shader->name : name);
+        if (shader->source_file && shader->source_file[0])
+                Con_Printf ("  source: %s\n", shader->source_file);
+
+        Q3Shader_DescribeSurfaceParms (shader, buffer, sizeof (buffer));
+        Con_Printf ("  surfaceparms: %s\n", buffer);
+        Con_Printf ("  cull: %s\n", Host_Q3ShaderCullToString (Q3Shader_GetCullMode (shader)));
+
+        if (shader->qer_editorimage)
+                Con_Printf ("  qer_editorimage: %s\n", shader->qer_editorimage);
+        if (shader->qer_trans >= 0.0f)
+                Con_Printf ("  qer_trans: %.3f\n", shader->qer_trans);
+        if (shader->q3map_surfacelight != 0.0f)
+                Con_Printf ("  q3map_surfacelight: %.1f\n", shader->q3map_surfacelight);
+        if (shader->q3map_lightimage)
+                Con_Printf ("  q3map_lightimage: %s\n", shader->q3map_lightimage);
+
+        if (Q3Shader_DirectiveCount (shader))
+        {
+                Con_Printf ("  directives:\n");
+                for (i = 0; i < Q3Shader_DirectiveCount (shader); ++i)
+                        Host_Q3ShaderPrintDirective (Q3Shader_GetDirective (shader, i), 4);
+        }
+
+        if (Q3ShaderStage_Count (shader))
+        {
+                size_t stage_index;
+                Con_Printf ("  stages (%zu):\n", Q3ShaderStage_Count (shader));
+                for (stage_index = 0; stage_index < Q3ShaderStage_Count (shader); ++stage_index)
+                {
+                        const q3shader_stage_t *stage = Q3Shader_GetStage (shader, stage_index);
+                        size_t anim_count, tcmod_count;
+
+                        Con_Printf ("    stage %zu:\n", stage_index + 1);
+                        if (stage->map)
+                                Con_Printf ("      map: %s\n", stage->map);
+                        if (stage->clampmap)
+                                Con_Printf ("      clampmap: %s\n", stage->clampmap);
+
+                        anim_count = Q3ShaderStage_GetAnimMapCount (stage);
+                        if (anim_count)
+                        {
+                                size_t j;
+                                q_snprintf (buffer, sizeof (buffer), "      animMap %.3f", Q3ShaderStage_GetAnimFrequency (stage));
+                                for (j = 0; j < anim_count; ++j)
+                                {
+                                        q_strlcat (buffer, " ", sizeof (buffer));
+                                        q_strlcat (buffer, Q3ShaderStage_GetAnimMap (stage, j), sizeof (buffer));
+                                }
+                                Con_Printf ("%s\n", buffer);
+                        }
+
+                        if (stage->depthwrite)
+                                Con_Printf ("      depthWrite\n");
+                        if (stage->blendfunc_src || stage->blendfunc_dst)
+                                Con_Printf ("      blendFunc: %s%s%s\n",
+                                        stage->blendfunc_src ? stage->blendfunc_src : "<none>",
+                                        stage->blendfunc_dst ? " " : "",
+                                        stage->blendfunc_dst ? stage->blendfunc_dst : "");
+                        if (stage->alphaFunc)
+                                Con_Printf ("      alphaFunc: %s\n", stage->alphaFunc);
+                        if (stage->rgbGen)
+                                Con_Printf ("      rgbGen: %s\n", stage->rgbGen);
+                        if (stage->alphaGen)
+                                Con_Printf ("      alphaGen: %s\n", stage->alphaGen);
+                        if (stage->tcGen)
+                                Con_Printf ("      tcGen: %s\n", stage->tcGen);
+
+                        tcmod_count = Q3ShaderStage_GetTcModCount (stage);
+                        if (tcmod_count)
+                        {
+                                size_t j;
+                                q_strlcpy (buffer, "      tcMod", sizeof (buffer));
+                                for (j = 0; j < tcmod_count; ++j)
+                                {
+                                        q_strlcat (buffer, " ", sizeof (buffer));
+                                        q_strlcat (buffer, Q3ShaderStage_GetTcMod (stage, j), sizeof (buffer));
+                                }
+                                Con_Printf ("%s\n", buffer);
+                        }
+
+                        if (Q3ShaderStage_DirectiveCount (stage))
+                        {
+                                size_t j;
+                                Con_Printf ("      directives:\n");
+                                for (j = 0; j < Q3ShaderStage_DirectiveCount (stage); ++j)
+                                        Host_Q3ShaderPrintDirective (Q3ShaderStage_GetDirective (stage, j), 8);
+                        }
+                }
+        }
+}
 /*
 ===============================================================================
 
@@ -3802,6 +3960,12 @@ void Host_InitCommands (void)
         Cmd_AddCommand ("skies", Host_Skies_f); //ericw
         Cmd_AddCommand ("mapname", Host_Mapname_f); //johnfitz
         Cmd_AddCommand ("randmap", Host_Randmap_f); //ericw
+        Cmd_AddCommand ("q3shader_load", Host_Q3ShaderLoad_f);
+        Cmd_AddCommand ("q3shader_loadall", Host_Q3ShaderLoadAll_f);
+        Cmd_AddCommand ("q3shader_list", Host_Q3ShaderList_f);
+        Cmd_AddCommand ("q3shader_info", Host_Q3ShaderInfo_f);
+        Cmd_AddCommand ("q3shader_clear", Host_Q3ShaderClear_f);
+
         Cmd_AddCommand_ClientCommand ("status", Host_Status_f);
 	Cmd_AddCommand ("quit", Host_Quit_f);
 	Cmd_AddCommand_ClientCommand ("god", Host_God_f);

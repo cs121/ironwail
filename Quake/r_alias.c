@@ -62,13 +62,8 @@ typedef struct aliasinstance_s {
 	int32_t		flags;
 } aliasinstance_t;
 
-#define ALIAS_INSTANCE_FLAG_NONE                  0
-#define ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR        (1 << 0)
-#define ALIAS_INSTANCE_FLAG_VIEWMODEL             (1 << 1)
-#define ALIAS_INSTANCE_FLAG_PLAYER                (1 << 2)
-#define ALIAS_INSTANCE_FLAG_FULLBRIGHT_HACK       (1 << 3)
-#define ALIAS_INSTANCE_FLAG_ITEM                  (1 << 4)
-#define ALIAS_INSTANCE_FLAG_FORCE_FULLBRIGHT      (1 << 5)
+#define ALIAS_INSTANCE_FLAG_NONE          0
+#define ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR (1 << 0)
 
 struct ibuf_s {
 	int			count;
@@ -230,17 +225,71 @@ void R_SetupEntityTransform (entity_t *e, lerpdata_t *lerpdata)
 R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritten
 =================
 */
-void R_SetupAliasLighting (entity_t     *e)
+void R_SetupAliasLighting (entity_t	*e)
 {
-        // if the initial trace is completely black, try again from above
-        // this helps with models whose origin is slightly below ground level
-        // (e.g. some of the candles in the DOTM start map)
-        if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-                R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+	vec3_t		dist;
+	float		add;
+	int			i;
+
+	// if the initial trace is completely black, try again from above
+	// this helps with models whose origin is slightly below ground level
+	// (e.g. some of the candles in the DOTM start map)
+	if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+
+	//add dlights
+	for (i=0; i<r_framedata.numlights; i++)
+	{
+		gpulight_t *l = &r_lightbuffer.lights[i];
+		VectorSubtract (e->origin, l->pos, dist);
+		add = DotProduct (dist, dist);
+		if (l->radius * l->radius > add)
+			VectorMA (lightcolor, l->radius - sqrtf (add), l->color, lightcolor);
+	}
+
+	// minimum light value on gun (24)
+	if (e == &cl.viewent)
+	{
+		add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+		if (add > 0.0f)
+		{
+			add *= 1.0f / 3.0f;
+			lightcolor[0] += add;
+			lightcolor[1] += add;
+			lightcolor[2] += add;
+		}
+	}
+
+	// minimum light value on players (8)
+	if (e > cl_entities && e <= cl_entities + cl.maxclients)
+	{
+		add = 24.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+		if (add > 0.0f)
+		{
+			add *= 1.0f / 3.0f;
+			lightcolor[0] += add;
+			lightcolor[1] += add;
+			lightcolor[2] += add;
+		}
+	}
+
+	// clamp lighting so it doesn't overbright as much (96)
+	if (gl_overbright_models.value)
+	{
+		add = lightcolor[0] + lightcolor[1] + lightcolor[2];
+		if (add > 288.0f)
+			VectorScale(lightcolor, 288.0f / add, lightcolor);
+	}
+	//hack up the brightness when fullbrights but no overbrights (256)
+	else if (e->model->flags & MOD_FBRIGHTHACK && gl_fullbrights.value)
+	{
+		lightcolor[0] = 256.0f;
+		lightcolor[1] = 256.0f;
+		lightcolor[2] = 256.0f;
+	}
 
         VectorScale (lightcolor, 1.0f / 200.0f, lightcolor);
 }
-
 
 /*
 =================
@@ -501,20 +550,6 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	rs_aliaspolys += paliashdr->numtris;
 	R_SetupAliasLighting (e);
 
-        // Viewmodel muzzle flashes look wrong when shaded using the ambient
-        // lighting at the player's position (typically pitch black in dark
-        // areas).  In the original software renderer the muzzle flash pixels
-        // are effectively fullbright, so replicate that behaviour by forcing a
-        // strong light contribution when the view model is drawing a muzzle
-        // flash frame.  MD5/IQM versions of player and monster models also rely
-        // on this behaviour for their muzzle flash attachments, so give them
-        // the same treatment.
-        if (e->effects & EF_MUZZLEFLASH)
-        {
-                if (e == &cl.viewent || paliashdr->poseverttype == PV_IQM)
-                        lightcolor[0] = lightcolor[1] = lightcolor[2] = 256.0f / 200.0f;
-        }
-
 	//
 	// draw it
 	//
@@ -531,18 +566,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	if (!ibuf.count)
 		ibuf.ent = e;
 
-        instance = &ibuf.inst[ibuf.count++];
-        instance->flags = ALIAS_INSTANCE_FLAG_NONE;
-        if (e == &cl.viewent)
-                instance->flags |= ALIAS_INSTANCE_FLAG_VIEWMODEL;
-        if (e > cl_entities && e <= cl_entities + cl.maxclients)
-                instance->flags |= ALIAS_INSTANCE_FLAG_PLAYER;
-        if ((e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value && !gl_overbright_models.value)
-                instance->flags |= ALIAS_INSTANCE_FLAG_FULLBRIGHT_HACK;
-        if (e->model->flags & EF_ROTATE)
-                instance->flags |= ALIAS_INSTANCE_FLAG_ITEM;
-        if (paliashdr->poseverttype == PV_IQM)
-                instance->flags |= ALIAS_INSTANCE_FLAG_FORCE_FULLBRIGHT;
+	instance = &ibuf.inst[ibuf.count++];
+	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
 
 	{
 		float prev_model_matrix[16];

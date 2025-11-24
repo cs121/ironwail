@@ -19,7 +19,6 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 #define LIGHT_TILES_Y 16
 #define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
-#define MAX_EFFECT_STAGES 4
 
 struct Light
 {
@@ -53,63 +52,18 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
-	uvec2	envhandle;
 #else
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-        vec4    tcmod_matrix;
-        vec4    tcmod_translate;
-        vec4    tcmod_params0;
-        vec4    tcmod_params1;
-        vec4    tcgen_params;
-        vec4    tcgen_s;
-        vec4    tcgen_t;
-        vec4    emissive_matrix;
-        vec4    emissive_translate;
-        vec4    emissive_color;
-        vec4    fog_color;
-        vec4    alpha_params0;
-        vec4    alpha_params1;
-        vec4    alpha_params2;
-        vec4    env_params0;
-        vec4    env_params1;
-        vec4    env_params2;
-        vec4    effect_info;
-        vec4    effect_matrix[MAX_EFFECT_STAGES];
-        vec4    effect_translate[MAX_EFFECT_STAGES];
-        vec4    effect_color[MAX_EFFECT_STAGES];
-        vec4    effect_alpha_params0[MAX_EFFECT_STAGES];
-        vec4    effect_alpha_params1[MAX_EFFECT_STAGES];
-        vec4    effect_alpha_params2[MAX_EFFECT_STAGES];
-        vec4    effect_tcmod_params0[MAX_EFFECT_STAGES];
-        vec4    effect_tcmod_params1[MAX_EFFECT_STAGES];
-        vec4    effect_flags[MAX_EFFECT_STAGES];
-#if BINDLESS
-        uvec2   effect_handles[MAX_EFFECT_STAGES];
-#endif
 };
 const uint
-        CF_USE_POLYGON_OFFSET = 1u,
-        CF_USE_FULLBRIGHT = 2u,
-        CF_NOLIGHTMAP = 4u,
+	CF_USE_POLYGON_OFFSET = 1u,
+	CF_USE_FULLBRIGHT = 2u,
+	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
-	CF_ALPHA_TEST = 16u,
-	CF_TC_STRETCH = 32u,
-	CF_TC_TURB = 64u,
-	CF_TC_ENVMAP = 128u,
-        CF_CUSTOM_FOG = 256u,
-        CF_EFFECTS = 512u
+	CF_ALPHA_TEST = 16u
 ;
-
-const int IW_TCGEN_BASE        = 0;
-const int IW_TCGEN_LIGHTMAP    = 1;
-const int IW_TCGEN_ENVIRONMENT = 2;
-const int IW_TCGEN_VECTOR      = 3;
-
-const int IW_TC_ALIGN_OBJECT = 0;
-const int IW_TC_ALIGN_WORLD  = 1;
-const int IW_TC_ALIGN_SCREEN = 2;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -151,11 +105,18 @@ vec3 TransformPrev(vec3 p, Instance instance)
 {
 	return TransformPosition(p, instance.prev_mat);
 }
+vec3 TransformDirection(vec3 n, Instance instance)
+{
+        mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
+        return (world * vec4(n, 0.0)).xyz;
+}
+
 
 layout(location=0) in vec3 in_pos;
 layout(location=1) in vec4 in_uv;
 layout(location=2) in float in_lmofs;
 layout(location=3) in ivec4 in_styles;
+layout(location=4) in vec3 in_normal;
 
 
 layout(location=0) flat out uint out_flags;
@@ -172,65 +133,12 @@ layout(location=6) noperspective out vec2 out_coord;
 layout(location=7) flat out vec4 out_styles;
 layout(location=8) flat out float out_lmofs;
 #if BINDLESS
-        layout(location=9) flat out uvec4 out_samplers0;
+	layout(location=9) flat out uvec4 out_samplers0;
         layout(location=10) flat out uvec2 out_samplers1;
-        layout(location=20) flat out uvec2 out_samplers2;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
-layout(location=13) out vec2 out_emissive_uv;
-layout(location=14) flat out vec3 out_emissive_color;
-layout(location=15) flat out vec4 out_stage_params1;
-layout(location=16) flat out vec4 out_alpha_params0;
-layout(location=17) flat out vec4 out_alpha_params1;
-layout(location=18) flat out vec4 out_alpha_params2;
-layout(location=19) flat out vec4 out_fog_color;
-layout(location=21) flat out vec4 out_env_params0;
-layout(location=22) flat out vec4 out_env_params1;
-layout(location=23) flat out vec4 out_env_params2;
-layout(location=24) flat out int out_call_index;
-layout(location=25) out vec2 out_effect_uv[MAX_EFFECT_STAGES];
-
-float EvaluateWave(vec4 params, int func)
-{
-        float base = params.x;
-        float amplitude = params.y;
-        float phase = params.z;
-        float frequency = params.w;
-        float cycle = Time * frequency + phase / 360.0;
-        float wave = 0.0;
-        const float TAU = 6.28318530718;
-
-        if (func == 0)
-        {
-                float angle = cycle * TAU;
-                wave = sin(angle);
-        }
-        else if (func == 1)
-        {
-                float f = fract(cycle);
-                wave = (abs(f * 2.0 - 1.0) * 2.0) - 1.0;
-        }
-        else if (func == 2)
-        {
-                float angle = cycle * TAU;
-                wave = sign(sin(angle));
-                if (wave == 0.0)
-                        wave = 1.0;
-        }
-        else if (func == 3)
-        {
-                float f = fract(cycle);
-                wave = f * 2.0 - 1.0;
-        }
-        else
-        {
-                float angle = cycle * TAU;
-                wave = sin(angle);
-        }
-
-        return base + amplitude * wave;
-}
+layout(location=13) out vec3 out_normal;
 
 void main()
 {
@@ -238,6 +146,7 @@ void main()
 	int instance_id = GET_INSTANCE_ID(call);
 	Instance instance = instance_data[instance_id];
 	vec3 world_pos = Transform(in_pos, instance);
+        vec3 world_normal = TransformDirection(in_normal, instance);
 	vec3 prev_world_pos = TransformPrev(in_pos, instance);
 	vec4 curr_clip = ViewProj * vec4(world_pos, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_pos, 1.0);
@@ -255,101 +164,8 @@ void main()
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_pos = world_pos;
-        int tcGenMode = int(call.tcgen_params.x + 0.5);
-        int tcAlignMode = int(call.tcgen_params.y + 0.5);
-        vec2 base_uv = in_uv.xy;
-
-        if (tcGenMode == IW_TCGEN_LIGHTMAP)
-        {
-                base_uv = in_uv.zw;
-        }
-        else if (tcGenMode == IW_TCGEN_VECTOR)
-        {
-                base_uv = vec2(dot(call.tcgen_s.xyz, world_pos) + call.tcgen_s.w,
-                                dot(call.tcgen_t.xyz, world_pos) + call.tcgen_t.w);
-        }
-        else if (tcGenMode == IW_TCGEN_ENVIRONMENT)
-        {
-                vec3 normal = call.tcgen_s.xyz;
-                float len = length(normal);
-                if (len < 1e-4)
-                        normal = vec3(0.0, 0.0, 1.0);
-                else
-                        normal /= len;
-                vec3 view_dir = normalize(world_pos - EyePos);
-                vec3 reflect_dir = reflect(view_dir, normal);
-                float denom = 2.0 * sqrt(reflect_dir.x * reflect_dir.x + reflect_dir.y * reflect_dir.y + (reflect_dir.z + 1.0) * (reflect_dir.z + 1.0));
-                if (denom > 1e-5)
-                        base_uv = reflect_dir.xy / denom + 0.5;
-                else
-                        base_uv = reflect_dir.xy * 0.5 + 0.5;
-        }
-
-        if (tcAlignMode == IW_TC_ALIGN_WORLD && tcGenMode != IW_TCGEN_VECTOR)
-        {
-                base_uv = vec2(dot(call.tcgen_s.xyz, world_pos) + call.tcgen_s.w,
-                                dot(call.tcgen_t.xyz, world_pos) + call.tcgen_t.w);
-        }
-        else if (tcAlignMode == IW_TC_ALIGN_SCREEN)
-        {
-                float inv_w = abs(curr_clip.w) > 1e-6 ? 1.0 / curr_clip.w : 0.0;
-                vec2 ndc = curr_clip.xy * inv_w;
-                base_uv = ndc * 0.5 + 0.5;
-        }
-
-        vec2 stage_base_uv = base_uv;
-        const vec2 turbScale = vec2(0.125, 0.125);
-        vec2 transformed_uv = vec2(dot(call.tcmod_matrix.xy, base_uv),
-        dot(call.tcmod_matrix.zw, base_uv)) + call.tcmod_translate.xy;
-        if ((call.flags & CF_TC_STRETCH) != 0u)
-        {
-                int func = int(call.tcmod_params1.w + 0.5);
-                float scale = EvaluateWave(call.tcmod_params0, func);
-                transformed_uv = (transformed_uv - 0.5) * scale + 0.5;
-        }
-        if ((call.flags & CF_TC_TURB) != 0u)
-        {
-                float amp = call.tcmod_params1.x;
-                float freq = call.tcmod_params1.y;
-                float angle = Time * freq * 6.28318530718 + dot(world_pos.xy, turbScale);
-                float offset = sin(angle) * amp;
-                transformed_uv += vec2(offset);
-        }
-        out_uv = transformed_uv;
-        out_call_index = DRAW_ID;
-        int effect_count = int(call.effect_info.x + 0.5);
-        if ((call.flags & CF_EFFECTS) == 0u)
-                effect_count = 0;
-        effect_count = clamp(effect_count, 0, MAX_EFFECT_STAGES);
-        for (int i = 0; i < MAX_EFFECT_STAGES; ++i)
-        {
-                vec2 effect_uv = stage_base_uv;
-                if (i < effect_count)
-                {
-                        vec4 mat = call.effect_matrix[i];
-                        vec4 trans = call.effect_translate[i];
-                        effect_uv = vec2(dot(mat.xy, effect_uv), dot(mat.zw, effect_uv)) + trans.xy;
-                        uint stageFlags = uint(call.effect_flags[i].x + 0.5);
-                        if ((stageFlags & CF_TC_STRETCH) != 0u)
-                        {
-                                int func = int(call.effect_tcmod_params1[i].w + 0.5);
-                                float scale = EvaluateWave(call.effect_tcmod_params0[i], func);
-                                effect_uv = (effect_uv - 0.5) * scale + 0.5;
-                        }
-                        if ((stageFlags & CF_TC_TURB) != 0u)
-                        {
-                                float amp = call.effect_tcmod_params1[i].x;
-                                float freq = call.effect_tcmod_params1[i].y;
-                                                float angle = Time * freq * 6.28318530718 + dot(world_pos.xy, turbScale);
-                                float offset = sin(angle) * amp;
-                                effect_uv += vec2(offset);
-                        }
-                }
-                out_effect_uv[i] = effect_uv;
-        }
-        vec2 emissive_uv = vec2(dot(call.emissive_matrix.xy, base_uv),
-                                dot(call.emissive_matrix.zw, base_uv)) + call.emissive_translate.xy;
-        out_emissive_uv = emissive_uv;
+        out_normal = normalize(world_normal);
+	out_uv = in_uv.xy;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
@@ -375,21 +191,11 @@ void main()
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
 #if BINDLESS
-        out_samplers0.xy = call.txhandle;
-        if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
-                out_samplers0.zw = call.fbhandle;
-        else
-                out_samplers0.zw = out_samplers0.xy;
-        out_samplers1.xy = call.emhandle;
-        out_samplers2.xy = call.envhandle;
+	out_samplers0.xy = call.txhandle;
+	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
+		out_samplers0.zw = call.fbhandle;
+	else
+		out_samplers0.zw = out_samplers0.xy;
+	out_samplers1.xy = call.emhandle;
 #endif
-        out_emissive_color = call.emissive_color.xyz;
-        out_stage_params1 = call.tcmod_params1;
-        out_alpha_params0 = call.alpha_params0;
-        out_alpha_params1 = call.alpha_params1;
-        out_alpha_params2 = call.alpha_params2;
-        out_env_params0 = call.env_params0;
-        out_env_params1 = call.env_params1;
-        out_env_params2 = call.env_params2;
-        out_fog_color = call.fog_color;
 }

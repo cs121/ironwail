@@ -12,11 +12,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ScreenDither;
         float   TextureDither;
         float   Overbright;
-        float   LightmapStrength;
-        float   RimAlias;
-        float   RimWorld;
-        float   RimExponent;
-        float   _PadRim;
+        float   _Pad0;
         vec3    EyePos;
         float   Time;
         vec3    PrevEyePos;
@@ -25,8 +21,8 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ZLogBias;
         uint    NumLights;
         uint    PrevFrameValid;
-        uint    DeluxEnabled;      // bit0: texture available, bit1: directional samples present
         uint    _Pad1;
+        uint    _Pad2;
 };
 
 #endif // FRAME_UNIFORMS_GLSL

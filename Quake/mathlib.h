@@ -59,7 +59,6 @@ static inline int IS_NAN (float x) {
 #define VectorSubtract(a,b,dst)			do {(dst)[0]=(a)[0]-(b)[0];(dst)[1]=(a)[1]-(b)[1];(dst)[2]=(a)[2]-(b)[2];} while (0)
 #define VectorAdd(a,b,dst)				do {(dst)[0]=(a)[0]+(b)[0];(dst)[1]=(a)[1]+(b)[1];(dst)[2]=(a)[2]+(b)[2];} while (0)
 #define VectorCopy(src,dst)				do {(dst)[0]=(src)[0];(dst)[1]=(src)[1];(dst)[2]=(src)[2];} while (0)
-#define VectorNegate(src,dst)				do {(dst)[0]=-(src)[0];(dst)[1]=-(src)[1];(dst)[2]=-(src)[2];} while (0)
 #define VectorSet(v,x,y,z)				do {(v)[0]=(x);(v)[1]=(y);(v)[2]=(z);} while (0)
 #define VectorClear(v)                             do {(v)[0] = (v)[1] = (v)[2] = 0.f;} while (0)
 #define VectorLengthSquared(v)			DotProduct(v,v)
@@ -80,9 +79,6 @@ do\
 } while (0)
 
 void VectorAngles (const vec3_t forward, vec3_t angles); //johnfitz
-
-void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal );
-void PerpendicularVector( vec3_t dst, const vec3_t src );
 
 void VectorMA (const vec3_t veca, float scale, const vec3_t vecb, vec3_t vecc);
 void VectorLerp (const vec3_t veca, const vec3_t vecb, float frac, vec3_t dst);
