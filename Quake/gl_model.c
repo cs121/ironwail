@@ -557,53 +557,55 @@ static qboolean Q1BSPX_IsProcessed(const char *lumpname)
 
 static void Q1BSPX_DecodeE5BGR9Lighting (byte* dst, const unsigned int* src, int samples)
 {
-	for (int i = 0; i < samples; i++)
-	{
-		uint32_t packed = LittleLong (src[i]);
+        for (int i = 0; i < samples; i++)
+        {
+                uint32_t packed = LittleLong (src[i]);
 
-		int e = packed >> 27;            // 5-bit exponent
-		int b = packed & 0x1ff;  // 9-bit
-		int g = (packed >> 9) & 0x1ff;  // 9-bit
-		int r = (packed >> 18) & 0x1ff;  // 9-bit
+                int e = packed >> 27;            // 5-bit exponent
+                int b = packed & 0x1ff;  // 9-bit
+                int g = (packed >> 9) & 0x1ff;  // 9-bit
+                int r = (packed >> 18) & 0x1ff;  // 9-bit
 
-		// correct scale
-		float scale = exp2f ((float)e); // mantissa * 2^e
+                if (!e)
+                {
+                        dst[0] = dst[1] = dst[2] = 0;
+                        dst += 3;
+                        continue;
+                }
 
-		const float mantissa_scale = 1.0f / 511.0f;
-		float R = r * scale * mantissa_scale;
-		float G = g * scale * mantissa_scale;
-		float B = b * scale * mantissa_scale;
+                // shared exponent with bias 15, 9-bit mantissas without implicit leading 1
+                float scale = ldexpf (1.0f, e - 24); // (mantissa/512) * 2^(e-15)
 
-		// clamp to 8-bit LDR
-		dst[0] = (unsigned char)CLAMP (0, (int)(R * 255.0f), 255);
-		dst[1] = (unsigned char)CLAMP (0, (int)(G * 255.0f), 255);
-		dst[2] = (unsigned char)CLAMP (0, (int)(B * 255.0f), 255);
-		dst += 3;
-	}
+                float R = r * scale;
+                float G = g * scale;
+                float B = b * scale;
+
+                // clamp to 8-bit LDR
+                dst[0] = (unsigned char)CLAMP (0, (int)(R * 255.0f), 255);
+                dst[1] = (unsigned char)CLAMP (0, (int)(G * 255.0f), 255);
+                dst[2] = (unsigned char)CLAMP (0, (int)(B * 255.0f), 255);
+                dst += 3;
+        }
 }
 
 
 static void Mod_DecodeRgbeLighting (byte* dst, const byte* src, int samples)
 {
-	for (int i = 0; i < samples; i++, dst += 3, src += 4)
+        for (int i = 0; i < samples; i++, dst += 3, src += 4)
 	{
 		int e = src[3];
-		if (!e)
-		{
-			dst[0] = dst[1] = dst[2] = 0;
-			continue;
-		}
+                if (!e)
+                {
+                        dst[0] = dst[1] = dst[2] = 0;
+                        continue;
+                }
 
-		float scale = exp2f ((float)(e - 128)); // correct exponent scaling
+                float scale = ldexpf (1.0f, e - 136); // (mantissa/256) * 2^(e-128)
 
-		float R = (src[0] / 256.0f) * scale;
-		float G = (src[1] / 256.0f) * scale;
-		float B = (src[2] / 256.0f) * scale;
-
-		dst[0] = (unsigned char)CLAMP (0, (int)(R * 255.0f), 255);
-		dst[1] = (unsigned char)CLAMP (0, (int)(G * 255.0f), 255);
-		dst[2] = (unsigned char)CLAMP (0, (int)(B * 255.0f), 255);
-	}
+                dst[0] = (unsigned char)CLAMP (0, (int)(src[0] * scale * 255.0f), 255);
+                dst[1] = (unsigned char)CLAMP (0, (int)(src[1] * scale * 255.0f), 255);
+                dst[2] = (unsigned char)CLAMP (0, (int)(src[2] * scale * 255.0f), 255);
+        }
 }
 
 static void Q1BSPX_MarkUsed(const char *lumpname)
@@ -2137,6 +2139,8 @@ static void Mod_LoadFaces (lump_t *l)
                         int tmax = (out->extents[1] >> 4) + 1;
                         int facesamples = facestyles * smax * tmax;
 
+                        out->luxsamples = NULL; // LIGHTINGDIR is loaded but intentionally unused
+
                         // use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
                         if (lofs + facesamples > loadmodel->lightdatasamples)
                                 out->samples = NULL; //corrupt...
@@ -2145,12 +2149,8 @@ static void Mod_LoadFaces (lump_t *l)
                         else
                                 out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
 
-                        if (loadmodel->lightdirdata && lofs + facesamples <= loadmodel->lightdirsamples)
-                                out->luxsamples = loadmodel->lightdirdata + (lofs * 3);
-                        else if (loadmodel->lightdirdata && loadmodel->lightdirsamples)
+                        if (loadmodel->lightdirdata && lofs + facesamples > loadmodel->lightdirsamples)
                                 Con_DWarning("LIGHTINGDIR data too small for face %d\n", surfnum);
-                        else
-                                out->luxsamples = NULL;
                 }
 
                 texture = loadmodel->textures[out->texinfo->texnum];
