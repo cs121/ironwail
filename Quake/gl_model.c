@@ -555,56 +555,50 @@ static qboolean Q1BSPX_IsProcessed(const char *lumpname)
         return usage && (usage->used || usage->unsupported);
 }
 
-static void Q1BSPX_DecodeE5BGR9Lighting (byte* dst, const unsigned int* src, int samples)
+static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
         for (int i = 0; i < samples; i++)
         {
-                uint32_t packed = LittleLong (src[i]);
+                uint32_t packed = LittleLong(src[i]);
 
-                int e = packed >> 27;            // 5-bit exponent
-                int b = packed & 0x1ff;  // 9-bit
-                int g = (packed >> 9) & 0x1ff;  // 9-bit
-                int r = (packed >> 18) & 0x1ff;  // 9-bit
+                int e = packed >> 27;
+                int b = packed & 0x1ff;
+                int g = (packed >> 9) & 0x1ff;
+                int r = (packed >> 18) & 0x1ff;
 
-                if (!e)
-                {
-                        dst[0] = dst[1] = dst[2] = 0;
-                        dst += 3;
-                        continue;
-                }
-
-                // shared exponent with bias 15, 9-bit mantissas without implicit leading 1
-                float scale = ldexpf (1.0f, e - 24); // (mantissa/512) * 2^(e-15)
+                float scale = exp2f((float)e) / 512.0f;
 
                 float R = r * scale;
                 float G = g * scale;
                 float B = b * scale;
 
-                // clamp to 8-bit LDR
-                dst[0] = (unsigned char)CLAMP (0, (int)(R * 255.0f), 255);
-                dst[1] = (unsigned char)CLAMP (0, (int)(G * 255.0f), 255);
-                dst[2] = (unsigned char)CLAMP (0, (int)(B * 255.0f), 255);
+                dst[0] = (unsigned char)CLAMP(0, (int)(R * 255.0f), 255);
+                dst[1] = (unsigned char)CLAMP(0, (int)(G * 255.0f), 255);
+                dst[2] = (unsigned char)CLAMP(0, (int)(B * 255.0f), 255);
                 dst += 3;
         }
 }
 
-
-static void Mod_DecodeRgbeLighting (byte* dst, const byte* src, int samples)
+static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 {
         for (int i = 0; i < samples; i++, dst += 3, src += 4)
-	{
-		int e = src[3];
+        {
+                int e = src[3];
                 if (!e)
                 {
                         dst[0] = dst[1] = dst[2] = 0;
                         continue;
                 }
 
-                float scale = ldexpf (1.0f, e - 136); // (mantissa/256) * 2^(e-128)
+                float scale = exp2f((float)(e - 128));
 
-                dst[0] = (unsigned char)CLAMP (0, (int)(src[0] * scale * 255.0f), 255);
-                dst[1] = (unsigned char)CLAMP (0, (int)(src[1] * scale * 255.0f), 255);
-                dst[2] = (unsigned char)CLAMP (0, (int)(src[2] * scale * 255.0f), 255);
+                float R = (src[0] / 256.0f) * scale;
+                float G = (src[1] / 256.0f) * scale;
+                float B = (src[2] / 256.0f) * scale;
+
+                dst[0] = CLAMP(0, (int)(R * 255.0f), 255);
+                dst[1] = CLAMP(0, (int)(G * 255.0f), 255);
+                dst[2] = CLAMP(0, (int)(B * 255.0f), 255);
         }
 }
 
@@ -1497,14 +1491,14 @@ loadlightdir:
 				sample_count_ok = false;
 			}
 
-			if (sample_count_ok)
-			{
-				loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
-				loadmodel->lightdirsamples = samples;
-				memcpy(loadmodel->lightdirdata, in, bspxsize);
-				Q1BSPX_MarkUsed("LIGHTINGDIR");
-				Con_Printf("loaded BSPX light directions (%d samples)\n", samples);
-			}
+                        if (sample_count_ok)
+                        {
+                                // QuakeSpasm-like: ignore LIGHTINGDIR completely
+                                loadmodel->lightdirdata = NULL;
+                                loadmodel->lightdirsamples = 0;
+                                Q1BSPX_MarkUsed("LIGHTINGDIR");
+                                Con_DPrintf("LIGHTINGDIR ignored (QS mode)\n");
+                        }
 			else
 				Q1BSPX_MarkUnsupported("LIGHTINGDIR");
 		}
