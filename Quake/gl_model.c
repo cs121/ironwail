@@ -567,11 +567,12 @@ static void Q1BSPX_DecodeE5BGR9Lighting (byte* dst, const unsigned int* src, int
 		int r = (packed >> 18) & 0x1ff;  // 9-bit
 
 		// correct scale
-		float scale = exp2f ((float)e) / 512.0f; // = mantissa / 512 * 2^e
+		float scale = exp2f ((float)e); // mantissa * 2^e
 
-		float R = r * scale;
-		float G = g * scale;
-		float B = b * scale;
+		const float mantissa_scale = 1.0f / 511.0f;
+		float R = r * scale * mantissa_scale;
+		float G = g * scale * mantissa_scale;
+		float B = b * scale * mantissa_scale;
 
 		// clamp to 8-bit LDR
 		dst[0] = (unsigned char)CLAMP (0, (int)(R * 255.0f), 255);
@@ -1479,6 +1480,7 @@ loadlightdir:
 	{
 		int samples = bspxsize / 3;
 		int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
+		qboolean sample_count_ok = true;
 
 		if (bspxsize % 3)
 		{
@@ -1488,13 +1490,21 @@ loadlightdir:
 		else
 		{
 			if (expected_samples && samples != expected_samples)
+			{
 				Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
+				sample_count_ok = false;
+			}
 
-			loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
-			loadmodel->lightdirsamples = samples;
-			memcpy(loadmodel->lightdirdata, in, bspxsize);
-			Q1BSPX_MarkUsed("LIGHTINGDIR");
-                        Con_Printf("loaded BSPX light directions (%d samples)\n", samples);
+			if (sample_count_ok)
+			{
+				loadmodel->lightdirdata = (byte *)Hunk_AllocName(bspxsize, litfilename);
+				loadmodel->lightdirsamples = samples;
+				memcpy(loadmodel->lightdirdata, in, bspxsize);
+				Q1BSPX_MarkUsed("LIGHTINGDIR");
+				Con_Printf("loaded BSPX light directions (%d samples)\n", samples);
+			}
+			else
+				Q1BSPX_MarkUnsupported("LIGHTINGDIR");
 		}
 	}
 	return;
