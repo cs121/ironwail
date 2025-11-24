@@ -616,17 +616,16 @@ static void Q1BSPX_LogUsage(const char *modelname)
                 Con_Printf("%s: no BSPX lumps present\n", modelname);
                 return;
         }
-
-        Con_Printf("%s BSPX lumps:\n", modelname);
-        for (i = 0; i < bspx_lump_usage_count; i++)
-        {
-                if (bspx_lump_usage[i].used)
-                        Con_Printf("  %s: used\n", bspx_lump_usage[i].lumpname);
-                else if (bspx_lump_usage[i].unsupported)
-                        Con_Printf("  %s: present (not implemented)\n", bspx_lump_usage[i].lumpname);
-                else
-                        Con_Printf("  %s: present (not used)\n", bspx_lump_usage[i].lumpname);
-        }
+	Con_Printf("%s BSPX lumps:\n", modelname);
+	for (i = 0; i < bspx_lump_usage_count; i++)
+	{
+		if (bspx_lump_usage[i].used)
+			Con_Printf("  %s: used\n", bspx_lump_usage[i].lumpname);
+		else if (bspx_lump_usage[i].unsupported)
+			Con_Printf("  %s: present (unsupported)\n", bspx_lump_usage[i].lumpname);
+		else
+			Con_Printf("  %s: present (not used)\n", bspx_lump_usage[i].lumpname);
+	}
 }
 static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
 {
@@ -1248,6 +1247,7 @@ static void Mod_LoadLighting (lump_t *l)
 	byte *in, *out, *data;
 	byte d, q64_b0, q64_b1;
 	char litfilename[MAX_OSPATH];
+	const char *lighting_source;
 	unsigned int path_id;
 	int	bspxsize;
 
@@ -1261,6 +1261,7 @@ static void Mod_LoadLighting (lump_t *l)
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
 	q_strlcat(litfilename, ".lit", sizeof(litfilename));
+	lighting_source = litfilename;
 	mark = Hunk_LowMark();
 	data = NULL;
 
@@ -1285,12 +1286,17 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				Con_DPrintf2("trying to load %s\n", altlitfilename);
 				data = (byte*)COM_LoadHunkFile(altlitfilename, &path_id);
+				if (data)
+					lighting_source = altlitfilename;
 			}
 		}
 
 		// Load standard .lit file if no external data loaded
 		if (!data)
+		{
 			data = (byte*)COM_LoadHunkFile(litfilename, &path_id);
+			lighting_source = litfilename;
+		}
 	}
 	if (data)
 	{
@@ -1299,7 +1305,7 @@ static void Mod_LoadLighting (lump_t *l)
 		if (path_id < loadmodel->path_id)
 		{
 			Hunk_FreeToLowMark(mark);
-			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
+			Con_DPrintf("ignored %s from a gamedir with lower priority\n", lighting_source);
 		}
 		else
 		if (data[0] == 'Q' && data[1] == 'L' && data[2] == 'I' && data[3] == 'T')
@@ -1309,20 +1315,20 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				if (8+l->filelen*3 == com_filesize)
 				{
-                                        Con_DPrintf2("%s loaded (ldr)\n", litfilename);
-                                        loadmodel->lightdata = data + 8;
-                                        loadmodel->lightdatasamples = l->filelen;
-                                        loadmodel->litfile = true;
-                                        goto loadlightdir;
+					Con_Printf("loaded %s lighting (ldr)\n", lighting_source);
+					loadmodel->lightdata = data + 8;
+					loadmodel->lightdatasamples = l->filelen;
+					loadmodel->litfile = true;
+					goto loadlightdir;
                                 }
 				Hunk_FreeToLowMark(mark);
-				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*3, (unsigned)com_filesize);
+				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", lighting_source, 8+l->filelen*3, (unsigned)com_filesize);
 			}
 			else if (i == 0x10001)
 			{
 				if (8+l->filelen*4 == com_filesize)
 				{
-					Con_DPrintf2("%s loaded (hdr)\n", litfilename);
+					Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
 					Mod_DecodeRgbeLighting(data, data + 8, l->filelen);
 					loadmodel->lightdata = data;
 					loadmodel->lightdatasamples = l->filelen;
@@ -1330,7 +1336,7 @@ static void Mod_LoadLighting (lump_t *l)
 					goto loadlightdir;
 				}
 				Hunk_FreeToLowMark(mark);
-				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", litfilename, 8+l->filelen*4, (unsigned)com_filesize);
+				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", lighting_source, 8+l->filelen*4, (unsigned)com_filesize);
 			}
 			else
 			{
@@ -1359,7 +1365,7 @@ static void Mod_LoadLighting (lump_t *l)
                         loadmodel->litfile = true;
                         Q1BSPX_DecodeE5BGR9Lighting(loadmodel->lightdata, (const unsigned int *)in, samples);
                         Q1BSPX_MarkUsed("LIGHTING_E5BGR9");
-                        Con_DPrintf("bspx hdr lighting loaded (E5BGR9)\n");
+					Con_Printf("loaded BSPX HDR lighting (E5BGR9)\n");
                         goto loadlightdir;
                 }
                 else if (in)
@@ -1380,7 +1386,7 @@ static void Mod_LoadLighting (lump_t *l)
                         memcpy(loadmodel->lightdata, in, bspxsize);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
 
-                        Con_DPrintf("bspx ldr lighting loaded (%d samples)\n", samples);
+					Con_Printf("loaded BSPX lighting (%d samples)\n", samples);
                         goto loadlightdir;
                 }
                 else if (in)
@@ -1457,7 +1463,7 @@ loadlightdir:
 			loadmodel->lightdirsamples = samples;
 			memcpy(loadmodel->lightdirdata, in, bspxsize);
 			Q1BSPX_MarkUsed("LIGHTINGDIR");
-			Con_DPrintf("bspx light directions loaded\n");
+                        Con_Printf("loaded BSPX light directions (%d samples)\n", samples);
 		}
 	}
 	return;
