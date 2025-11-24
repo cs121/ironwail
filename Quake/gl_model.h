@@ -420,6 +420,13 @@ enum
 	MODSORT_ALIAS_ALPHATEST		= 1 << (MODSORT_BITS - 1),
 };
 
+typedef struct
+{
+	char		name[24];
+	int		offset;
+	int		size;
+} bspx_entry_t;
+
 typedef struct qmodel_s
 {
 	char		name[MAX_QPATH];
@@ -505,6 +512,8 @@ typedef struct qmodel_s
 	qboolean	viswarn; // for Mod_DecompressVis()
 
 	int			bspversion;
+	int			bspx_entries_count;
+	bspx_entry_t	*bspx_entries;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
 	qboolean	haslitwater;
 
