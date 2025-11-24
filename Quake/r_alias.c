@@ -76,9 +76,7 @@ struct ibuf_s {
 		float	_pad;
 		vec4_t	fog;
 		float	dither;
-		float	rim_world;
-		float	rim_models;
-		float	_padding;
+		float	_padding[3];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -360,13 +358,10 @@ void R_FlushAliasInstances (qboolean showtris)
 	// use fog density sign bit as overbright flag
 	ibuf.global.fog[3] =
 		gl_overbright_models.value ?
-				-fabs (r_framedata.fogdata[3]) :
-				fabs (r_framedata.fogdata[3])
+			-fabs (r_framedata.fogdata[3]) :
+			 fabs (r_framedata.fogdata[3])
 	;
 	ibuf.global.dither = r_framedata.screendither;
-	ibuf.global.rim_world = r_framedata.rim_world;
-	ibuf.global.rim_models = r_framedata.rim_models;
-	ibuf.global._padding = 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);

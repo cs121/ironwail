@@ -197,8 +197,6 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
-cvar_t	r_rim_world = { "r_rim_world", "0", CVAR_ARCHIVE };
-cvar_t	r_rim_models = { "r_rim_models", "0", CVAR_ARCHIVE };
 cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
@@ -1533,26 +1531,16 @@ void R_SetupView (void)
 			}
 		}
 
+
 		r_framedata.overbright = overbright;
-		r_framedata.rim_world = q_max (0.f, r_rim_world.value);
-		r_framedata.rim_models = q_max (0.f, r_rim_models.value);
-		r_framedata._pad0 = 0.f;
-		r_framedata._pad1 = 0.f;
-		r_framedata._pad2 = 0.f;
-		r_framedata._pad3 = 0.f;
-		r_framedata._pad4[0] = 0.f;
-		r_framedata._pad4[1] = 0.f;
+		r_framedata._padding0 = 0.f;
 	}
 
 	r_framecount++;
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
-	r_framedata.eyepos_pad = 0.f;
 	r_framedata.time = cl.time;
-	r_framedata._pad5[0] = 0.f;
-	r_framedata._pad5[1] = 0.f;
-	r_framedata._pad5[2] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
@@ -1563,7 +1551,6 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
 		r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
 		r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
-		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = (float)prev_delta;
 		r_framedata.prev_frame_valid = 1;
 	}
@@ -1573,15 +1560,10 @@ void R_SetupView (void)
 		r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
 		r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
 		r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
-		r_framedata.prev_eyepos_pad = 0.f;
 		r_framedata.delta_time = 0.f;
 		r_framedata.prev_frame_valid = 0;
 		r_prev_frame_valid = false;
 	}
-
-	r_framedata._pad6 = 0;
-	r_framedata._pad7 = 0;
-	r_framedata._pad8 = 0;
 
 	if (softemu == SOFTEMU_COARSE)
 	{

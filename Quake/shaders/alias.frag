@@ -17,9 +17,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
-	float	RimWorld;
-	float	RimModels;
 	float	_Pad1;
+	float	_Pad2;
+	float	_Pad3;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -96,7 +96,6 @@ layout(location=2) in vec3 in_pos;
 layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
-layout(location=6) in vec3 in_normal;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -165,22 +164,6 @@ void main()
 #endif
         result.rgb += fullbright;
         result.rgb += emissive;
-        if (RimModels > 0.0)
-        {
-                vec3 normal = in_normal;
-                float normal_len = length(normal);
-                if (normal_len > 0.0)
-                        normal /= normal_len;
-                vec3 view_dir = -in_pos;
-                float view_len = length(view_dir);
-                if (view_len > 0.0)
-                        view_dir /= view_len;
-                else
-                        view_dir = vec3(0.0, 0.0, 1.0);
-                float rim = 1.0 - max(dot(normal, view_dir), 0.0);
-                rim *= rim;
-                result.rgb += rim * RimModels * result.rgb;
-        }
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
 	fog = clamp(fog, 0.0, 1.0);

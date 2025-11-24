@@ -17,9 +17,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
-	float	RimWorld;
-	float	RimModels;
 	float	_Pad1;
+	float	_Pad2;
+	float	_Pad3;
 	InstanceData instances[];
 };
 
@@ -90,7 +90,6 @@ layout(location=2) out vec3 out_pos;
 layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
-layout(location=6) out vec3 out_normal;
 
 void main()
 {
@@ -103,7 +102,6 @@ void main()
 	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
-	vec3 blended_normal = normalize(mat3(worldmatrix) * mix(pose1.nor, pose2.nor, inst.Blend));
 	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
 	gl_Position = curr_clip;
@@ -111,7 +109,6 @@ void main()
 	out_prev_clip = prev_clip;
 	out_flags = inst.Flags;
 	out_pos = world_vert - EyePos;
-	out_normal = blended_normal;
 	// transform world X and Z axes to local space
 	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
 	orientation = transpose(orientation);
