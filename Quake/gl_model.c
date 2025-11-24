@@ -574,24 +574,27 @@ static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int 
 
 static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 {
-	for (int i = 0; i < samples; i++, dst += 3, src += 4)
-	{
-		int exponent = src[3];
+       for (int i = 0; i < samples; i++, dst += 3, src += 4)
+       {
+               int e = src[3];
 
-		if (!exponent)
-		{
-			dst[0] = dst[1] = dst[2] = 0;
-			continue;
-		}
+               if (e == 0)
+               {
+                       dst[0] = dst[1] = dst[2] = 0;
+                       continue;
+               }
 
-// RGBE stores mantissas in the 0-255 range with a shared exponent.
-// Convert to 8-bit lightmap values by first normalizing the mantissa
-// (divide by 256) and then scaling by the biased exponent.
-float scale = ldexpf(255.0f, exponent - (128 + 8));
-dst[0] = CLAMP(0, (int)(0.5f + src[0] * scale), 255);
-dst[1] = CLAMP(0, (int)(0.5f + src[1] * scale), 255);
-dst[2] = CLAMP(0, (int)(0.5f + src[2] * scale), 255);
-	}
+               float scale = ldexpf(1.0f, e - (128 + 8));  // 2^(e-136)
+
+               float r = src[0] * scale;
+               float g = src[1] * scale;
+               float b = src[2] * scale;
+
+               // clamp to 0–255
+               dst[0] = (unsigned char)CLAMP(0, (int)(r * 255.0f), 255);
+               dst[1] = (unsigned char)CLAMP(0, (int)(g * 255.0f), 255);
+               dst[2] = (unsigned char)CLAMP(0, (int)(b * 255.0f), 255);
+       }
 }
 static void Q1BSPX_MarkUsed(const char *lumpname)
 {
@@ -1326,15 +1329,34 @@ static void Mod_LoadLighting (lump_t *l)
 			}
 			else if (i == 0x10001)
 			{
-				if (8+l->filelen*4 == com_filesize)
-				{
-					Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
-					Mod_DecodeRgbeLighting(data, data + 8, l->filelen);
-					loadmodel->lightdata = data;
-					loadmodel->lightdatasamples = l->filelen;
-					loadmodel->litfile = true;
-					goto loadlightdir;
-				}
+                                if (8+l->filelen*4 == com_filesize)
+                                {
+                                        byte *rgbe = (byte *)malloc(l->filelen * 4);
+                                        byte *decoded = NULL;
+
+                                        if (!rgbe)
+                                        {
+                                                Hunk_FreeToLowMark(mark);
+                                                Sys_Error("Mod_LoadLighting: failed to allocate %d bytes for hdr temp buffer",
+                                                        l->filelen * 4);
+                                        }
+
+                                        memcpy(rgbe, data + 8, l->filelen * 4);
+                                        Hunk_FreeToLowMark(mark);
+
+                                        decoded = (byte *)Hunk_AllocName(l->filelen * 3, litfilename);
+
+                                        Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
+                                        Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen);
+
+                                        free(rgbe);
+
+                                        loadmodel->lightdata = decoded;
+                                        loadmodel->lightdatasamples = l->filelen;
+                                        loadmodel->litfile = true;
+
+                                        goto loadlightdir;
+                                }
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Outdated .lit file (%s should be %u bytes, not %u)\n", lighting_source, 8+l->filelen*4, (unsigned)com_filesize);
 			}
