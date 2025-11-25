@@ -500,7 +500,7 @@ static void CL_RocketTrail (entity_t *ent, int type)
 
 /*
 ===============
-CL_SetDlightColorForEntity
+			CL_SetDlightColorForEntity
 
 Tint dynamic lights to better match their source.
 ===============
@@ -532,15 +532,21 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
                 return;
         }
 
+        if (name && (q_strcasestr (name, "acid") || q_strcasestr (name, "spit")))
+        {
+                dl->color[0] = 0.20f; dl->color[1] = 0.95f; dl->color[2] = 0.20f;
+                return;
+        }
+
         if (name && q_strcasestr (name, "lava"))
         {
-                dl->color[0] = 1.00f; dl->color[1] = 0.40f; dl->color[2] = 0.10f;
+                dl->color[0] = 1.00f; dl->color[1] = 0.15f; dl->color[2] = 0.05f;
                 return;
         }
 
         if (name && q_strcasestr (name, "wiz"))
         {
-                dl->color[0] = 0.30f; dl->color[1] = 0.85f; dl->color[2] = 0.30f;
+                dl->color[0] = 0.20f; dl->color[1] = 0.95f; dl->color[2] = 0.20f;
                 return;
         }
 
@@ -673,11 +679,12 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
-                        VectorMA (dl->origin, 18, fv, dl->origin);
-                        dl->radius = 200 + (rand()&31);
-                        dl->minlight = 32;
-                        dl->die = cl.time + 0.1;
-                        CL_SetDlightColorForEntity (dl, ent);
+			VectorMA (dl->origin, 18, fv, dl->origin);
+			dl->radius = 200 + (rand()&31);
+			dl->minlight = 32;
+			dl->die = cl.time + 0.1;
+			dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+			CL_SetDlightColorForEntity (dl, ent);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
