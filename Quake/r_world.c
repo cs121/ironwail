@@ -29,6 +29,8 @@ extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
 extern gltexture_t *lightmap_texture;
+extern gltexture_t *lightmap_dir_texture;
+extern cvar_t r_lightingdir;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -510,12 +512,13 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 
         R_ResetBModelCalls (program);
         GL_SetState (state);
-        if (pass <= BP_ALPHATEST)
-        {
-                GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-        }
-        else if (pass == BP_SKYCUBEMAP)
-                GL_Bind (GL_TEXTURE2, skybox->cubemap);
+if (pass <= BP_ALPHATEST)
+{
+GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+}
+else if (pass == BP_SKYCUBEMAP)
+GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -610,11 +613,12 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	else
 		program = glprogs.water[oit][softemu == SOFTEMU_COARSE];
 
-	R_ResetBModelCalls (program);
-	GL_SetState (state);
-	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+R_ResetBModelCalls (program);
+GL_SetState (state);
+GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
+GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * count);
 
 	// generate drawcalls

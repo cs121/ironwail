@@ -25,6 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "glquake.h"
 
+extern cvar_t r_lightmap_mipmaps;
+extern cvar_t r_lightmap16f;
+extern cvar_t r_lightmap_linear;
+
 typedef struct {
 	GLenum		id;
 	int			ratio;
@@ -1458,13 +1462,47 @@ TexMgr_LoadLightmap -- handles lightmap data
 */
 static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 {
+	qboolean use_mipmaps = (r_lightmap_mipmaps.value > 0.f) && (glt->flags & TEXPREF_MIPMAP);
+	qboolean use_half = (r_lightmap16f.value > 0.f) && (!strstr(glt->name, "lightmap_dir"));
+
 	// upload it
 	glt->compression = 1;
 	GL_Bind (GL_TEXTURE0, glt);
-	GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	if (use_half)
+	{
+		size_t pixels = (size_t)glt->width * glt->height * 4;
+		GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
+		if (!float_data)
+			Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
+		for (size_t idx = 0; idx < pixels; idx++)
+			float_data[idx] = data[idx] * (1.0f / 255.0f);
+		GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
+		free (float_data);
+	}
+	else
+	{
+		GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	}
+
+#ifdef GL_EXT_texture_sRGB_decode
+	if (r_lightmap_linear.value > 0.f)
+		glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
+#endif
 
 	// set filter modes
 	TexMgr_SetFilterModes (glt);
+
+	if (use_mipmaps)
+	{
+		GL_GenerateMipmapFunc (glt->target);
+		glTexParameteri (glt->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri (glt->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+	else
+	{
+		glTexParameteri (glt->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri (glt->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
 }
 
 /*

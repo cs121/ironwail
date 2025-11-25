@@ -1,11 +1,12 @@
 #if BINDLESS
 	#extension GL_ARB_bindless_texture : require
 #else
-	layout(binding=0) uniform sampler2D Tex;
-	layout(binding=1) uniform sampler2D FullbrightTex;
+        layout(binding=0) uniform sampler2D Tex;
+        layout(binding=1) uniform sampler2D FullbrightTex;
         layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
 layout(binding=2) uniform sampler2D LMTex;
+layout(binding=3) uniform sampler2D LMTexDir;
 #include "frame_uniforms.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)
@@ -30,7 +31,7 @@ struct Light
 
 layout(std430, binding=0) restrict readonly buffer LightBuffer
 {
-	float	LightStyles[64];
+	vec2	LightStyles[64];
 	Light	Lights[];
 };
 
@@ -38,7 +39,7 @@ float GetLightStyle(int index)
 {
 	float result;
 	if (index < 64)
-		result = LightStyles[index];
+		result = mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w);
 	else
 		result = 1.0;
 	return result;
@@ -176,6 +177,20 @@ float tri(float x)
 #define SCREEN_SPACE_NOISE() DITHER_NOISE(floor(gl_FragCoord.xy)+0.5)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
+vec4 SampleLightmap(vec2 uv)
+{
+	vec4 lm = texture(LMTex, uv);
+	if (LightmapParams.x > 0.5)
+		lm = pow(lm, vec4(2.2));
+	return lm;
+}
+
+vec3 SampleLightmapDir(vec2 uv)
+{
+	vec3 dir = texture(LMTexDir, uv).xyz * 2.0 - 1.0;
+	return normalize(dir);
+}
+
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
 	const float EPS = 1e-6;
@@ -287,13 +302,13 @@ void main()
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.;
 	lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
 #endif // DITHER
-	vec4 lm0 = textureLod(LMTex, lmuv, 0.);
+        vec4 lm0 = SampleLightmap(lmuv);
         vec3 static_light;
         if (in_styles.y < 0.) // single style fast path
                 static_light = in_styles.x * lm0.xyz;
         else
         {
-                vec4 lm1 = textureLod(LMTex, vec2(lmuv.x + in_lmofs, lmuv.y), 0.);
+                vec4 lm1 = SampleLightmap(vec2(lmuv.x + in_lmofs, lmuv.y));
                 if (in_styles.z < 0.) // 2 styles
                 {
                         static_light =
@@ -302,7 +317,7 @@ void main()
                 }
                 else // 3 or 4 lightstyles
                 {
-                        vec4 lm2 = textureLod(LMTex, vec2(lmuv.x + in_lmofs * 2., lmuv.y), 0.);
+                        vec4 lm2 = SampleLightmap(vec2(lmuv.x + in_lmofs * 2., lmuv.y));
                         static_light = vec3
                         (
                                 dot(in_styles, lm0),
@@ -310,6 +325,13 @@ void main()
                                 dot(in_styles, lm2)
                         );
                 }
+        }
+
+        if (LightmapParams.z > 0.5)
+        {
+                vec3 dir = SampleLightmapDir(lmuv);
+                float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
+                static_light *= ndl;
         }
 
         vec3 surface_normal = in_normal;
@@ -419,6 +441,8 @@ void main()
         result.rgb += emissive;
         vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
         result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
+        if (LightmapParams.y > 0.5)
+                result.rgb = result.rgb / (vec3(1.0) + result.rgb);
         result = clamp(result, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 

@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define NOISESCALE     (1.0f / 127.0f)
 
+extern gltexture_t *lightmap_dir_texture;
+
 qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
@@ -187,6 +189,10 @@ cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
 cvar_t	r_pos = { "r_pos","0",CVAR_NONE };
 cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
 cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
+cvar_t	r_lightmap_linear = { "r_lightmap_linear", "1", CVAR_ARCHIVE };
+cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
+cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
+cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -1532,15 +1538,19 @@ void R_SetupView (void)
 		}
 
 
-		r_framedata.overbright = overbright;
-		r_framedata._padding0 = 0.f;
-	}
+r_framedata.overbright = overbright;
+r_framedata._padding0 = 0.f;
+}
 
 	r_framecount++;
 	r_framedata.eyepos[0] = r_refdef.vieworg[0];
 	r_framedata.eyepos[1] = r_refdef.vieworg[1];
 	r_framedata.eyepos[2] = r_refdef.vieworg[2];
 	r_framedata.time = cl.time;
+	r_framedata.lightmap_params[0] = r_lightmap_linear.value > 0.f ? 1.f : 0.f;
+	r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
+	r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
+	r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
