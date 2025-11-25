@@ -8,13 +8,6 @@
 
 #include "frame_uniforms.glsl"
 
-vec3 ApplyFog(vec3 clr, vec3 p)
-{
-        float fog = exp2(-Fog.w * dot(p, p));
-        fog = clamp(fog, 0.0, 1.0);
-        return mix(Fog.rgb, clr, fog);
-}
-
 const uint
         CF_USE_POLYGON_OFFSET = 1u,
         CF_USE_FULLBRIGHT = 2u,
@@ -158,8 +151,11 @@ void main()
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
-        result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
-        result.a *= in_alpha;
+        float fog = exp2(-Fog.w * dot(in_pos - EyePos, in_pos - EyePos));
+        fog = clamp(fog, 0.0, 1.0);
+
+        result.rgb = mix(Fog.rgb, result.rgb, fog);
+        result.a *= in_alpha * fog;
         out_fragcolor = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
