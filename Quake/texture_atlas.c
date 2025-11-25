@@ -223,9 +223,24 @@ void Atlas_SaveJSON(const char *mapname)
 
 void Atlas_OnMapStart(const char *mapname)
 {
-	Atlas_Build(mapname);
-	Atlas_SavePNG(mapname);
-	Atlas_SaveJSON(mapname);
+        char dirname[MAX_OSPATH];
+        char png_path[MAX_OSPATH];
+        char json_path[MAX_OSPATH];
+
+        q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
+        q_snprintf(png_path, sizeof(png_path), "%s/%s_atlas.png", dirname, mapname ? mapname : "map");
+        q_snprintf(json_path, sizeof(json_path), "%s/%s_atlas.json", dirname, mapname ? mapname : "map");
+
+        if (Sys_FileExists(png_path) && Sys_FileExists(json_path))
+        {
+                Con_Printf("Atlas_OnMapStart: loading existing texture atlas for %s\n", mapname ? mapname : "<unknown>");
+                return;
+        }
+
+        Con_Printf("Atlas_OnMapStart: writing texture atlas for %s\n", mapname ? mapname : "<unknown>");
+        Atlas_Build(mapname);
+        Atlas_SavePNG(mapname);
+        Atlas_SaveJSON(mapname);
 }
 
 /*
