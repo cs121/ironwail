@@ -2591,9 +2591,13 @@ void R_RenderScene (void)
 
 	R_Clear ();
 
-	Fog_EnableGFog (); //johnfitz
+Fog_EnableGFog (); //johnfitz
 
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+// Upload frame data after fog has been set up to ensure fog parameters
+// are available to all draw calls, even when light clustering is skipped.
+R_UploadFrameData ();
+
+R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
