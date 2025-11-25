@@ -722,9 +722,9 @@ void Sky_DrawSkyBox (void)
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2));
 
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matviewproj);
-	GL_Uniform3fvFunc (1, 1, r_refdef.vieworg);
-	GL_Uniform4fvFunc (2, 1, fog);
-	GL_Uniform1fFunc (3, r_framedata.screendither);
+        GL_Uniform3fvFunc (1, 1, r_refdef.vieworg);
+        GL_Uniform4fvFunc (2, 1, fog);
+        GL_Uniform1fFunc (3, r_framedata.dither[0]);
 
 	for (i = 0; i < 6; i++)
 	{
@@ -826,8 +826,8 @@ void Sky_SetupFrame (void)
 
 	phase -= floor (phase) + 0.5; // [-0.5, 0.5)
 
-	r_framedata.winddir[0] =  dist * cp * sy;
-	r_framedata.winddir[1] =  dist * sp;
-	r_framedata.winddir[2] = -dist * cp * cy;
-	r_framedata.windphase = phase;
+        r_framedata.wind[0] =  dist * cp * sy;
+        r_framedata.wind[1] =  dist * sp;
+        r_framedata.wind[2] = -dist * cp * cy;
+        r_framedata.wind[3] = phase;
 }

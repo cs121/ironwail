@@ -1385,9 +1385,9 @@ void R_SetFrustum (void)
 
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
-	memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
-	r_framedata.zlogscale = LIGHT_TILES_Z / (logzfar - logznear);
-	r_framedata.zlogbias = -r_framedata.zlogscale * logznear;
+        memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
+        r_framedata.zparams[0] = LIGHT_TILES_Z / (logzfar - logznear);
+        r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
 }
 
 /*
@@ -1537,16 +1537,15 @@ void R_SetupView (void)
 			}
 		}
 
-
-r_framedata.overbright = overbright;
-r_framedata._padding0 = 0.f;
+        r_framedata.dither[2] = overbright;
+        r_framedata.dither[3] = 0.f;
 }
 
 	r_framecount++;
-	r_framedata.eyepos[0] = r_refdef.vieworg[0];
-	r_framedata.eyepos[1] = r_refdef.vieworg[1];
-	r_framedata.eyepos[2] = r_refdef.vieworg[2];
-	r_framedata.time = cl.time;
+        r_framedata.eye[0] = r_refdef.vieworg[0];
+        r_framedata.eye[1] = r_refdef.vieworg[1];
+        r_framedata.eye[2] = r_refdef.vieworg[2];
+        r_framedata.eye[3] = cl.time;
 	r_framedata.lightmap_params[0] = r_lightmap_linear.value > 0.f ? 1.f : 0.f;
 	r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
 	r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
@@ -1558,44 +1557,44 @@ r_framedata._padding0 = 0.f;
 	if (prev_valid)
 	{
 		memcpy (r_framedata.prev_viewproj, r_prev_matviewproj, sizeof (r_prev_matviewproj));
-		r_framedata.prev_eyepos[0] = r_prev_vieworg[0];
-		r_framedata.prev_eyepos[1] = r_prev_vieworg[1];
-		r_framedata.prev_eyepos[2] = r_prev_vieworg[2];
-		r_framedata.delta_time = (float)prev_delta;
+                r_framedata.prev_eye[0] = r_prev_vieworg[0];
+                r_framedata.prev_eye[1] = r_prev_vieworg[1];
+                r_framedata.prev_eye[2] = r_prev_vieworg[2];
+                r_framedata.prev_eye[3] = (float)prev_delta;
 		r_framedata.prev_frame_valid = 1;
 	}
 	else
 	{
 		memcpy (r_framedata.prev_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
-		r_framedata.prev_eyepos[0] = r_refdef.vieworg[0];
-		r_framedata.prev_eyepos[1] = r_refdef.vieworg[1];
-		r_framedata.prev_eyepos[2] = r_refdef.vieworg[2];
-		r_framedata.delta_time = 0.f;
+                r_framedata.prev_eye[0] = r_refdef.vieworg[0];
+                r_framedata.prev_eye[1] = r_refdef.vieworg[1];
+                r_framedata.prev_eye[2] = r_refdef.vieworg[2];
+                r_framedata.prev_eye[3] = 0.f;
 		r_framedata.prev_frame_valid = 0;
 		r_prev_frame_valid = false;
 	}
 
 	if (softemu == SOFTEMU_COARSE)
 	{
-		r_framedata.screendither = NOISESCALE * r_dither.value * r_softemu_dither_screen.value;
-		r_framedata.texturedither = NOISESCALE * r_dither.value * r_softemu_dither_texture.value;
+                r_framedata.dither[0] = NOISESCALE * r_dither.value * r_softemu_dither_screen.value;
+                r_framedata.dither[1] = NOISESCALE * r_dither.value * r_softemu_dither_texture.value;
 
 		// r_fullbright replaces the actual lightmap texture with a 2x2 50% grey one.
 		// Since texture-space dithering is applied on a scale of 1/16 of a lightmap texel,
 		// this would lead to massively overscaled dithering patterns, so we disable
 		// texture-space dithering in this case.
-		if (r_fullbright_cheatsafe)
-			r_framedata.texturedither = 0.f;
+                if (r_fullbright_cheatsafe)
+                        r_framedata.dither[1] = 0.f;
 	}
 	else if (softemu == SOFTEMU_OFF)
 	{
-		r_framedata.screendither = r_dither.value * (1.f / 255.f);
-		r_framedata.texturedither = 0.f;
+                r_framedata.dither[0] = r_dither.value * (1.f / 255.f);
+                r_framedata.dither[1] = 0.f;
 	}
 	else // FINE (screen-space dithering applied during postprocessing), or BANDED (no dithering)
 	{
-		r_framedata.screendither = 0.f;
-		r_framedata.texturedither = 0.f;
+                r_framedata.dither[0] = 0.f;
+                r_framedata.dither[1] = 0.f;
 	}
 
 	Fog_SetupFrame (); //johnfitz
