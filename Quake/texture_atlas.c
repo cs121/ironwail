@@ -4,7 +4,7 @@
 
 #include "quakedef.h"
 #include "texture_atlas.h"
-#include "stb_image_write.h"
+#include "image.h"
 
 static world_atlas_t g_world_atlas;
 
@@ -96,16 +96,23 @@ void Atlas_RegisterTexture(const char *name, int w, int h, const unsigned char *
 
 void Atlas_Build(const char *mapname)
 {
-	int i;
-	int x = 0, y = 0, row_h = 0;
+        int i;
+        int x = 0, y = 0, row_h = 0;
 
-	if (g_world_atlas.texture_count == 0)
-		return;
+        if (g_world_atlas.texture_count == 0)
+                return;
 
-	if (g_world_atlas.pixels)
-	{
-		free(g_world_atlas.pixels);
-		g_world_atlas.pixels = NULL;
+        g_world_atlas.built = 0;
+
+        if (g_world_atlas.atlas_w <= 0)
+                g_world_atlas.atlas_w = ATLAS_SIZE;
+        if (g_world_atlas.atlas_h <= 0)
+                g_world_atlas.atlas_h = ATLAS_SIZE;
+
+        if (g_world_atlas.pixels)
+        {
+                free(g_world_atlas.pixels);
+                g_world_atlas.pixels = NULL;
 	}
 
 	g_world_atlas.pixels = (unsigned char *) calloc(1, g_world_atlas.atlas_w * g_world_atlas.atlas_h * 4);
@@ -166,7 +173,7 @@ void Atlas_SavePNG(const char *mapname)
 
 	q_snprintf(filename, sizeof(filename), "%s/%s_atlas.png", dirname, mapname ? mapname : "map");
 
-	stbi_write_png(filename, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 4, g_world_atlas.pixels, g_world_atlas.atlas_w * 4);
+        Image_WritePNG(filename, g_world_atlas.pixels, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 32, false);
 	Con_Printf("Atlas_SavePNG: wrote %s\n", filename);
 }
 
@@ -235,4 +242,8 @@ void Atlas_OnMapStart(const char *mapname)
  * In Mod_LoadBrushModel():
  * // === Build CPU Atlas for this map ===
  * // Atlas_OnMapStart(loadmodel->name);
+ *
+ * In R_LoadExternalTexture():
+ * // === Texture Atlas Hook ===
+ * // Atlas_RegisterTexture(texture_name, width, height, rgba);
  */
