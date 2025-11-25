@@ -180,7 +180,7 @@ float tri(float x)
 vec4 SampleLightmap(vec2 uv)
 {
 	vec4 lm = texture(LMTex, uv);
-	if (LightmapParams.x > 0.5)
+	if (LightmapParams.x <= 0.5)
 		lm = pow(lm, vec4(2.2));
 	return lm;
 }
@@ -296,6 +296,14 @@ void main()
 	if (result.a < 0.666)
 		discard;
 #endif
+
+	bool linear_lightmaps = LightmapParams.x > 0.5;
+	if (linear_lightmaps)
+	{
+		result.rgb = pow(result.rgb, vec3(2.2));
+		fullbright = pow(fullbright, vec3(2.2));
+		emissive = pow(emissive, vec3(2.2));
+	}
 
 	vec2 lmuv = in_lmuv;
 #if DITHER
@@ -445,6 +453,9 @@ void main()
                 result.rgb = result.rgb / (vec3(1.0) + result.rgb);
         result = clamp(result, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
+
+        if (linear_lightmaps)
+                result.rgb = pow(result.rgb, vec3(1.0 / 2.2));
 
         result.a = in_alpha; // FIXME: This will make almost transparent things cut holes though heavy fog
         out_fragcolor = result;
