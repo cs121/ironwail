@@ -263,12 +263,13 @@ OBJS = strlcat.o \
         common.o \
         q3shader.o \
         steam.o \
-	json.o \
-	miniz.o \
-	crc.o \
-	cvar.o \
-	cfgfile.o \
-	host.o \
+        json.o \
+        texture_atlas.o \
+        miniz.o \
+        crc.o \
+        cvar.o \
+        cfgfile.o \
+        host.o \
 	host_cmd.o \
 	mathlib.o \
 	pr_cmds.o \
