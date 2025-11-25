@@ -4,7 +4,7 @@
 
 #include "quakedef.h"
 #include "texture_atlas.h"
-#include "stb_image_write.h"
+#include "image.h"
 
 static world_atlas_t g_world_atlas;
 
@@ -173,7 +173,7 @@ void Atlas_SavePNG(const char *mapname)
 
 	q_snprintf(filename, sizeof(filename), "%s/%s_atlas.png", dirname, mapname ? mapname : "map");
 
-	stbi_write_png(filename, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 4, g_world_atlas.pixels, g_world_atlas.atlas_w * 4);
+        Image_WritePNG(filename, g_world_atlas.pixels, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 32, false);
 	Con_Printf("Atlas_SavePNG: wrote %s\n", filename);
 }
 
