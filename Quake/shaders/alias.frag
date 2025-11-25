@@ -37,7 +37,14 @@ float bayer01(ivec2 coord)
 
 float bayer(ivec2 coord)
 {
-	return bayer01(coord) - 0.5;
+        return bayer01(coord) - 0.5;
+}
+
+vec3 ApplyFog(vec3 clr, vec3 p)
+{
+        float fog = exp2(-Fog.w * dot(p, p));
+        fog = clamp(fog, 0.0, 1.0);
+        return mix(Fog.rgb, clr, fog);
 }
 
 // Hash without Sine
@@ -165,10 +172,8 @@ void main()
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
-        float fog = exp2(abs(Fog.w) * -dot(in_pos, in_pos));
-	fog = clamp(fog, 0.0, 1.0);
-	result.rgb = mix(Fog.rgb, result.rgb, fog);
-	out_fragcolor = result;
+        result.rgb = ApplyFog(result.rgb, in_pos);
+        out_fragcolor = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
         float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
