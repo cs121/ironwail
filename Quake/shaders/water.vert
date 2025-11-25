@@ -108,7 +108,7 @@ void main()
         out_prev_clip = prev_clip;
         out_flags = call.flags;
         out_uv = in_uv.xy;
-        out_pos = world_pos - EyePos;
+        out_pos = world_pos;
         out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS
         out_samplers0.xy = call.txhandle;
