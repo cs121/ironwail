@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "texture_atlas.h"
 #include <setjmp.h>
 
 /*
@@ -1421,13 +1422,14 @@ void Host_Init (void)
 		if (!host_colormap)
 			Sys_Error ("Couldn't load gfx/colormap.lmp");
 
-		V_Init ();
-		Chase_Init ();
-		M_Init ();
-		VID_Init ();
-		IN_Init ();
-		TexMgr_Init (); //johnfitz
-		Draw_Init ();
+                V_Init ();
+                Chase_Init ();
+                M_Init ();
+                VID_Init ();
+                IN_Init ();
+                TexMgr_Init (); //johnfitz
+                Atlas_Init ();
+                Draw_Init ();
 		SCR_Init ();
 		R_Init ();
 		S_Init ();
