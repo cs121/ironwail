@@ -4059,7 +4059,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 		COM_StripExtension (mod->name, path, sizeof (path));
 		COM_AddExtension (path, ".md5mesh", sizeof (path));
 
-		if (COM_FileExists (path, &md5_path_id) && md5_path_id >= mod->path_id)
+		if (COM_FileExists (path, &md5_path_id))
 		{
 			char *md5buffer = (char *) COM_LoadMallocFile (path, NULL);
 			if (md5buffer)
