@@ -160,9 +160,9 @@ R_SetupEntityTransform -- johnfitz -- set up transform part of lerpdata
 */
 void R_SetupEntityTransform (entity_t *e, lerpdata_t *lerpdata)
 {
-	float blend;
-	vec3_t d;
-	int i;
+	float           blend;
+	vec3_t          d;
+	unsigned int    i;
 
 	// if LERP_RESETMOVE, kill any lerps in progress
 	if (e->lerpflags & LERP_RESETMOVE)
@@ -229,7 +229,7 @@ void R_SetupAliasLighting (entity_t	*e)
 {
 	vec3_t		dist;
 	float		add;
-	int			i;
+	unsigned int	 i;
 
 	// if the initial trace is completely black, try again from above
 	// this helps with models whose origin is slightly below ground level
