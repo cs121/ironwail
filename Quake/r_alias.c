@@ -361,7 +361,7 @@ void R_FlushAliasInstances (qboolean showtris)
 			-fabs (r_framedata.fogdata[3]) :
 			 fabs (r_framedata.fogdata[3])
 	;
-	ibuf.global.dither = r_framedata.screendither;
+    ibuf.global.dither = r_framedata.dither[0];
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);

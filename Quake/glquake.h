@@ -418,34 +418,21 @@ typedef struct gpulightbuffer_s {
 } gpulightbuffer_t;
 
 typedef struct gpuframedata_s {
-	// Padding fields are used to match the std140 layout in frame_uniforms.glsl.
-	float	viewproj[16];
-	float	prev_viewproj[16];
-	float	fogdata[4];
-	float	skyfogdata[4];
-	vec3_t	winddir;
-	float	_padding_winddir;
-	float	windphase;
-	float	screendither;
-	float	texturedither;
-	float	overbright;
-	float	_padding0;
-	float	_padding_eyepos[3];
-	vec3_t	eyepos;
-	float	_padding_time;
-	float	time;
-	float	_padding_preveye[3];
-	vec3_t	prev_eyepos;
-	float	_padding_delta;
-	float	delta_time;
-	float	zlogscale;
-	float	zlogbias;
-	float	_padding_lightmap;
-	float	lightmap_params[4];
-	int				 numlights;
-	int				 prev_frame_valid;
-	int				 _padding1;
-	int				 _padding2;
+        // Fields are grouped into vec4-aligned blocks to match the std140 layout in frame_uniforms.glsl.
+        float           viewproj[16];
+        float           prev_viewproj[16];
+        float           fogdata[4];
+        float           skyfogdata[4];
+        vec4_t          wind;           // xyz: winddir, w: windphase
+        vec4_t          dither;         // x: screen, y: texture, z: overbright, w: padding
+        vec4_t          eye;            // xyz: eyepos, w: time
+        vec4_t          prev_eye;       // xyz: prev_eyepos, w: delta_time
+        vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
+        float           lightmap_params[4];
+        unsigned int    numlights;
+        unsigned int    prev_frame_valid;
+        unsigned int    _padding1;
+        unsigned int    _padding2;
 } gpuframedata_t;
 
 extern gpulightbuffer_t r_lightbuffer;
