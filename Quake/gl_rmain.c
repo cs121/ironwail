@@ -1404,6 +1404,9 @@ qboolean GL_NeedsSceneEffects (void)
         if (GL_ShouldApplyMotionBlur ())
                 return true;
 
+        if (R_DoFEnabled ())
+                return true;
+
         return false;
 }
 

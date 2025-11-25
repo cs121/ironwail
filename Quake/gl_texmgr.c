@@ -1485,8 +1485,8 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	}
 
 #ifdef GL_EXT_texture_sRGB_decode
-	if (r_lightmap_linear.value > 0.f)
-		glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
+        glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT,
+                        r_lightmap_linear.value > 0.f ? GL_SKIP_DECODE_EXT : GL_DECODE_EXT);
 #endif
 
 	// set filter modes
