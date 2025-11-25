@@ -27,6 +27,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
+extern cvar_t r_lightmap_mipmaps;
+extern cvar_t r_lightingdir;
 
 cvar_t gl_lightmap_atlas_size = { "gl_lightmap_atlas_size", "1024", CVAR_ARCHIVE };
 
@@ -35,6 +37,7 @@ int     lightmap_block_height = 256;
 
 int		gl_lightmap_format;
 int		lightmap_bytes;
+static const int	lightmap_padding = 2;
 
 typedef struct {
 	qboolean		reverse;
@@ -52,6 +55,8 @@ int				*lit_surf_order[2];
 int				num_lightmap_samples;
 unsigned		*lightmap_data;
 gltexture_t		*lightmap_texture;
+unsigned		*lightmap_dir_data;
+gltexture_t		*lightmap_dir_texture;
 int				lightmap_width;
 int				lightmap_height;
 
@@ -255,69 +260,143 @@ static int GL_NumLightmapTaps (const msurface_t *surf)
 
 /*
 ========================
+	GL_ExtendLightmapBorders
+========================
+*/
+static void GL_ExtendLightmapBorders (unsigned *dst, int stride, int width, int height)
+{
+	int t, p;
+	unsigned *row0 = dst;
+	unsigned *rowN = dst + (height - 1) * stride;
+
+	for (p = 1; p <= lightmap_padding; p++)
+	{
+		memcpy (row0 - p * stride, row0, width * sizeof (*row0));
+		memcpy (rowN + p * stride, rowN, width * sizeof (*rowN));
+	}
+
+	for (t = -lightmap_padding; t < height + lightmap_padding; t++)
+	{
+		unsigned *row = dst + t * stride;
+		unsigned left = row[0];
+		unsigned right = row[width - 1];
+
+		for (p = 1; p <= lightmap_padding; p++)
+		{
+			row[-p] = left;
+			row[width - 1 + p] = right;
+		}
+}
+}
+
+/*
+========================
 GL_FillSurfaceLightmap
 ========================
 */
 static void GL_FillSurfaceLightmap (msurface_t *surf)
 {
-	lightmap_t	*lm;
-	int			smax, tmax;
-	int			xofs, yofs;
-	int			map;
-	byte		*src;
-	unsigned	*dst;
-	int			s, t, facesize;
-
-	if (!cl.worldmodel->lightdata || !surf->samples || surf->styles[0] == INVALID_LIGHTSTYLE)
-		return;
+	const byte		*samples, *luxsamples;
+	lightmap_t		*lm;
+	int			smax, tmax, taps, style_count;
+	int			xofs, yofs, rowstride;
+	unsigned	*dst, *luxdst;
+	int			s, t;
+	int			facesize;
 
 	lm = &lightmaps[surf->lightmaptexturenum];
 	smax = (surf->extents[0]>>4)+1;
 	tmax = (surf->extents[1]>>4)+1;
+	taps = GL_NumLightmapTaps (surf);
 	xofs = lm->xofs + surf->light_s;
 	yofs = lm->yofs + surf->light_t;
+	rowstride = lightmap_width;
 	facesize = smax * tmax * 3;
 
-	src = surf->samples;
-	dst = lightmap_data + yofs * lightmap_width + xofs;
+	samples = surf->samples;
+	luxsamples = surf->luxsamples;
+	dst = lightmap_data + yofs * rowstride + xofs;
+	luxdst = lightmap_dir_data ? lightmap_dir_data + yofs * rowstride + xofs : NULL;
 
-	if (surf->styles[1] == INVALID_LIGHTSTYLE) // single lightstyle
+	if (!cl.worldmodel->lightdata || !samples || surf->styles[0] == INVALID_LIGHTSTYLE)
 	{
-		for (t = 0; t < tmax; t++, dst += lightmap_width)
-			for (s = 0; s < smax; s++, src += 3)
-				dst[s] = src[0] | (src[1] << 8) | (src[2] << 16) | 0xff000000u;
-	}
-	else if (surf->styles[2] == INVALID_LIGHTSTYLE) // 2 lightstyles
-	{
-		for (t = 0; t < tmax; t++, dst += lightmap_width)
+		if (luxdst)
 		{
-			for (s = 0; s < smax; s++, src += 3)
+			unsigned dir = 0x7f7f7fff;
+			for (t = 0; t < tmax; t++)
 			{
-				dst[s       ] = src[0           ] | (src[1           ] << 8) | (src[2           ] << 16) | 0xff000000u;
-				dst[s + smax] = src[0 + facesize] | (src[1 + facesize] << 8) | (src[2 + facesize] << 16) | 0xff000000u;
+				unsigned *luxrow = luxdst + t * rowstride;
+				for (s = 0; s < smax; s++)
+					for (int tap = 0; tap < taps; tap++)
+						luxrow[s + tap * smax] = dir;
 			}
+			GL_ExtendLightmapBorders (luxdst, rowstride, smax * taps, tmax);
 		}
+		return;
 	}
-	else // 3 or 4 lightstyles
+
+	style_count = 0;
+	while (style_count < 4 && surf->styles[style_count] != INVALID_LIGHTSTYLE)
+		style_count++;
+
+	for (t = 0; t < tmax; t++)
 	{
-		for (t = 0; t < tmax; t++, dst += lightmap_width)
+		unsigned *row = dst + t * rowstride;
+		unsigned *luxrow = luxdst ? luxdst + t * rowstride : NULL;
+		for (s = 0; s < smax; s++)
 		{
-			for (s = 0; s < smax; s++, src += 3)
+			int idx = (t * smax + s) * 3;
+			const byte *pix = samples + idx;
+
+			switch (taps)
 			{
-				const byte *mapsrc = src;
+			case 1:
+				row[s] = pix[0] | (pix[1] << 8) | (pix[2] << 16) | 0xff000000u;
+				break;
+
+			case 2:
+			{
+				const byte *pix1 = samples + facesize + idx;
+				row[s] = pix[0] | (pix[1] << 8) | (pix[2] << 16) | 0xff000000u;
+				row[s + smax] = pix1[0] | (pix1[1] << 8) | (pix1[2] << 16) | 0xff000000u;
+				break;
+			}
+
+			default:
+			{
 				unsigned r = 0, g = 0, b = 0;
-				for (map = 0; map < 4 && surf->styles[map] != INVALID_LIGHTSTYLE; map++, mapsrc += facesize)
+				int map;
+				for (map = 0; map < style_count; map++)
 				{
+					const byte *mapsrc = samples + map * facesize + idx;
 					r |= mapsrc[0] << (map << 3);
 					g |= mapsrc[1] << (map << 3);
 					b |= mapsrc[2] << (map << 3);
 				}
-				dst[s           ] = r;
-				dst[s + smax    ] = g;
-				dst[s + smax * 2] = b;
+				row[s] = r;
+				row[s + smax] = g;
+				row[s + smax * 2] = b;
+				break;
+			}
+			}
+
+			if (luxrow)
+			{
+				unsigned dir = 0x7f7f7fff;
+				if (luxsamples)
+				{
+					const byte *lux = luxsamples + idx;
+					dir = lux[0] | (lux[1] << 8) | (lux[2] << 16) | 0xff000000u;
+				}
+				for (int tap = 0; tap < taps; tap++)
+					luxrow[s + tap * smax] = dir;
 			}
 		}
 	}
+
+	GL_ExtendLightmapBorders (dst, rowstride, smax * taps, tmax);
+	if (luxdst)
+		GL_ExtendLightmapBorders (luxdst, rowstride, smax * taps, tmax);
 }
 
 /*
@@ -327,23 +406,29 @@ GL_FreeLightmapData
 */
 static void GL_FreeLightmapData (void)
 {
-	if (lightmap_data)
-	{
-		free (lightmap_data);
-		lightmap_data = NULL;
-	}
-	if (lightmaps)
-	{
-		free (lightmaps);
-		lightmaps = NULL;
-	}
+        if (lightmap_data)
+        {
+                free (lightmap_data);
+                lightmap_data = NULL;
+        }
+        if (lightmap_dir_data)
+        {
+                free (lightmap_dir_data);
+                lightmap_dir_data = NULL;
+        }
+        if (lightmaps)
+        {
+                free (lightmaps);
+                lightmaps = NULL;
+        }
 
-	VEC_CLEAR (lit_surfs);
+        VEC_CLEAR (lit_surfs);
 
-	lightmap_texture = NULL; // freed by the texture manager
-	last_lightmap_allocated = 0;
-	lightmap_count = 0;
-	lightmap_width = 0;
+        lightmap_texture = NULL; // freed by the texture manager
+        lightmap_dir_texture = NULL;
+        last_lightmap_allocated = 0;
+        lightmap_count = 0;
+        lightmap_width = 0;
 	lightmap_height = 0;
 	num_lightmap_samples = 0;
 }
@@ -391,7 +476,11 @@ static void GL_PackLitSurfaces (void)
 		}
 	}
 
-	blacklm = AllocBlock (maxblack[0]+1, maxblack[1]+1, &blackofs[0], &blackofs[1]);
+	int black_w = maxblack[0] + 1 + lightmap_padding * 2;
+	int black_h = maxblack[1] + 1 + lightmap_padding * 2;
+	blacklm = AllocBlock (black_w, black_h, &blackofs[0], &blackofs[1]);
+	blackofs[0] += lightmap_padding;
+	blackofs[1] += lightmap_padding;
 
 	if (VEC_SIZE (lit_surfs) == 0)
 		return;
@@ -441,17 +530,22 @@ static void GL_PackLitSurfaces (void)
 	// pack surfaces in sort order
 	for (i = 0, j = VEC_SIZE (lit_surfs); i < j; i++)
 	{
-		int smax, tmax;
+		int smax, tmax, taps, data_width, alloc_w, alloc_h;
 
 		surf = lit_surfs[lit_surf_order[0][i]];
 		smax = (surf->extents[0]>>4)+1;
 		tmax = (surf->extents[1]>>4)+1;
-		smax *= GL_NumLightmapTaps (surf);
-		num_lightmap_samples += smax * tmax;
+		taps = GL_NumLightmapTaps (surf);
+		data_width = smax * taps;
+		alloc_w = data_width + lightmap_padding * 2;
+		alloc_h = tmax + lightmap_padding * 2;
+		num_lightmap_samples += data_width * tmax;
 
 		if (surf->samples)
 		{
-			surf->lightmaptexturenum = AllocBlock (smax, tmax, &surf->light_s, &surf->light_t);
+			surf->lightmaptexturenum = AllocBlock (alloc_w, alloc_h, &surf->light_s, &surf->light_t);
+			surf->light_s += lightmap_padding;
+			surf->light_t += lightmap_padding;
 		}
 		else
 		{
@@ -474,12 +568,15 @@ void GL_BuildLightmaps (void)
 {
 	int			i, j, xblocks, yblocks, lmsize;
 	lightmap_t	*lm;
+	qboolean	use_lightdir;
+	unsigned	tex_flags;
 
 	r_framecount = 1; // no dlightcache
 
 	//Spike -- wipe out all the lightmap data (johnfitz -- the gltexture objects were already freed by Mod_ClearAll)
 	GL_FreeLightmapData ();
 
+	use_lightdir = (r_lightingdir.value > 0.f) && cl.worldmodel->lightdirdata;
 	gl_lightmap_format = GL_RGBA;//FIXME: hardcoded for now!
 
 	switch (gl_lightmap_format)
@@ -524,6 +621,13 @@ void GL_BuildLightmaps (void)
 	if (!lightmap_data)
 		Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_data)));
 
+	if (use_lightdir)
+	{
+		lightmap_dir_data = (unsigned *) calloc (lmsize, sizeof (*lightmap_dir_data));
+		if (!lightmap_dir_data)
+			Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_dir_data)));
+	}
+
 	// compute offsets for each lightmap block
 	for (i=0; i<lightmap_count; i++)
 	{
@@ -534,21 +638,46 @@ void GL_BuildLightmaps (void)
 
 	// fill reserved texel
 	lightmap_data[0] = 0xff808080u;
+	if (lightmap_dir_data)
+		lightmap_dir_data[0] = 0x7f7f7fff;
 
 	// unlit map? fill with 50% grey
 	if (!cl.worldmodel->lightdata)
+	{
 		for (i = 1; i < lmsize; i++)
+		{
 			lightmap_data[i] = 0xff808080u;
+			if (lightmap_dir_data)
+				lightmap_dir_data[i] = 0x7f7f7fff;
+		}
+	}
 
 	// fill lightmap samples
 	for (i = 0, j = VEC_SIZE (lit_surfs); i < j; i++)
 		GL_FillSurfaceLightmap (lit_surfs[i]);
 
+	tex_flags = TEXPREF_ALPHA | TEXPREF_LINEAR;
+	if (r_lightmap_mipmaps.value > 0.f)
+		tex_flags |= TEXPREF_MIPMAP;
+	else
+		tex_flags |= TEXPREF_NOPICMIP;
+
 	lightmap_texture =
 		TexMgr_LoadImage (cl.worldmodel, "lightmap", lightmap_width, lightmap_height,
 			SRC_LIGHTMAP, (byte *)lightmap_data, "", (src_offset_t)lightmap_data,
-			TEXPREF_ALPHA | TEXPREF_LINEAR | TEXPREF_NOPICMIP
+			tex_flags
 		);
+
+	if (lightmap_dir_data)
+	{
+		lightmap_dir_texture =
+			TexMgr_LoadImage (cl.worldmodel, "lightmap_dir", lightmap_width, lightmap_height,
+				SRC_LIGHTMAP, (byte *)lightmap_dir_data, "", (src_offset_t)lightmap_dir_data,
+				tex_flags
+			);
+	}
+	else
+		lightmap_dir_texture = NULL;
 
 	//johnfitz -- warn about exceeding old limits
 	//GLQuake limit was 64 textures of 128x128. Estimate how many 128x128 textures we would need

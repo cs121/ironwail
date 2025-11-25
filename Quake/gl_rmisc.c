@@ -47,6 +47,10 @@ extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
 extern cvar_t r_nolerp_list;
 extern cvar_t r_noshadow_list;
+extern cvar_t r_lightmap_linear;
+extern cvar_t r_lightmap_mipmaps;
+extern cvar_t r_lightmap16f;
+extern cvar_t r_lightingdir;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
@@ -332,11 +336,15 @@ void R_Init (void)
 		cmd->completion = R_ShowbboxesFilter_Completion_f;
 	Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
-        Cvar_RegisterVariable (&r_norefresh);
-        Cvar_RegisterVariable (&r_lightmap);
-        Cvar_RegisterVariable (&r_fullbright);
-        Cvar_RegisterVariable (&r_drawentities);
-        Cvar_RegisterVariable (&r_drawviewmodel);
+Cvar_RegisterVariable (&r_norefresh);
+Cvar_RegisterVariable (&r_lightmap);
+Cvar_RegisterVariable (&r_lightmap_linear);
+Cvar_RegisterVariable (&r_lightmap_mipmaps);
+Cvar_RegisterVariable (&r_lightmap16f);
+Cvar_RegisterVariable (&r_lightingdir);
+Cvar_RegisterVariable (&r_fullbright);
+Cvar_RegisterVariable (&r_drawentities);
+Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
 	Cvar_RegisterVariable (&r_litwater);

@@ -28,6 +28,7 @@ extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 
 gpulightbuffer_t r_lightbuffer;
+float r_lightstyle_framefrac;
 
 /*
 ==================
@@ -45,18 +46,20 @@ void R_AnimateLight (void)
 	f = cl.time * 10.0;
 	base = floor(f);
 	i = (int)base;
-	f -= base;
-	if (!r_lerplightstyles.value)
-		f = 0.0;
+        f -= base;
+        if (!r_lerplightstyles.value)
+                f = 0.0;
+        r_lightstyle_framefrac = (float)f;
 
 	for (j=0 ; j<MAX_LIGHTSTYLES ; j++)
 	{
 		if (!cl_lightstyle[j].length)
 		{
-			d_lightstylevalue[j] = 256;
-			r_lightbuffer.lightstyles[j] = 1.f;
-			continue;
-		}
+                        d_lightstylevalue[j] = 256;
+                        r_lightbuffer.lightstyles[j * 2 + 0] = 1.f;
+                        r_lightbuffer.lightstyles[j * 2 + 1] = 1.f;
+                        continue;
+                }
 		//johnfitz -- r_flatlightstyles
 		if (r_flatlightstyles.value == 2)
 			k = n = cl_lightstyle[j].peak - 'a';
@@ -74,10 +77,11 @@ void R_AnimateLight (void)
 		// only interpolate abrupt changes (e.g. flickering light in e1m1) if r_lerplightstyles >= 2
 		if (r_lerplightstyles.value < 2.f && abs(n - k) >= ('m' - 'a') / 2)
 			n = k;
-		d_lightstylevalue[j] = (int)(k*22 + (n-k)*22*f);
-		r_lightbuffer.lightstyles[j] = (k + (n-k)*f) * (22.f/256.f);
-		//johnfitz
-	}
+                d_lightstylevalue[j] = (int)(k*22 + (n-k)*22*f);
+                r_lightbuffer.lightstyles[j * 2 + 0] = k * (22.f/256.f);
+                r_lightbuffer.lightstyles[j * 2 + 1] = n * (22.f/256.f);
+                //johnfitz
+        }
 
 	if (r_fullbright_cheatsafe)
 		r_lightbuffer.lightstyles[0] = 1.f;

@@ -68,7 +68,7 @@ R_MD5_f -- called when r_md5 changes
 ===============
 */
 static void R_MD5_f (cvar_t *cvar)
-{
+			{
 	int			i;
 	qmodel_t	*mod;
 
@@ -100,7 +100,7 @@ Mod_Init
 ===============
 */
 void Mod_Init (void)
-{
+				{
         Cvar_RegisterVariable (&external_vis);
         Cvar_RegisterVariable (&external_ents);
         Cvar_RegisterVariable (&gl_loadlitfiles);
@@ -130,7 +130,7 @@ Caches the data if needed
 ===============
 */
 void *Mod_Extradata (qmodel_t *mod)
-{
+				{
 	void	*r;
 
 	r = Cache_Check (&mod->cache);
@@ -1491,14 +1491,13 @@ loadlightdir:
 				sample_count_ok = false;
 			}
 
-                        if (sample_count_ok)
-                        {
-                                // QuakeSpasm-like: ignore LIGHTINGDIR completely
-                                loadmodel->lightdirdata = NULL;
-                                loadmodel->lightdirsamples = 0;
-                                Q1BSPX_MarkUsed("LIGHTINGDIR");
-                                Con_DPrintf("LIGHTINGDIR ignored (QS mode)\n");
-                        }
+			if (sample_count_ok)
+			{
+				loadmodel->lightdirdata = (byte *) Hunk_AllocNameNoFill (bspxsize, litfilename);
+				loadmodel->lightdirsamples = samples;
+				memcpy (loadmodel->lightdirdata, in, bspxsize);
+				Q1BSPX_MarkUsed("LIGHTINGDIR");
+			}
 			else
 				Q1BSPX_MarkUnsupported("LIGHTINGDIR");
 		}
@@ -2127,25 +2126,29 @@ static void Mod_LoadFaces (lump_t *l)
                         out->samples = NULL;
                         out->luxsamples = NULL;
                 }
-                else
-                {
-                        int smax = (out->extents[0] >> 4) + 1;
-                        int tmax = (out->extents[1] >> 4) + 1;
-                        int facesamples = facestyles * smax * tmax;
+			else
+			{
+				int smax = (out->extents[0] >> 4) + 1;
+				int tmax = (out->extents[1] >> 4) + 1;
+				int facesamples = facestyles * smax * tmax;
 
-                        out->luxsamples = NULL; // LIGHTINGDIR is loaded but intentionally unused
+				// use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
+				if (lofs + facesamples > loadmodel->lightdatasamples)
+				out->samples = NULL; //corrupt...
+				else if (loadmodel->flags & MOD_HDRLIGHTING)
+				out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned
+				else
+				out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
 
-                        // use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
-                        if (lofs + facesamples > loadmodel->lightdatasamples)
-                                out->samples = NULL; //corrupt...
-                        else if (loadmodel->flags & MOD_HDRLIGHTING)
-                                out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned
-                        else
-                                out->samples = loadmodel->lightdata + (lofs * 3); //johnfitz -- lit support via lordhavoc (was "+ i")
-
-                        if (loadmodel->lightdirdata && lofs + facesamples > loadmodel->lightdirsamples)
-                                Con_DWarning("LIGHTINGDIR data too small for face %d\n", surfnum);
-                }
+				out->luxsamples = NULL;
+				if (loadmodel->lightdirdata)
+				{
+					if (lofs + facesamples > loadmodel->lightdirsamples)
+						Con_DWarning("LIGHTINGDIR data too small for face %d\n", surfnum);
+					else
+						out->luxsamples = loadmodel->lightdirdata + (lofs * 3);
+				}
+			}
 
                 texture = loadmodel->textures[out->texinfo->texnum];
 

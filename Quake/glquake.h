@@ -413,7 +413,7 @@ typedef struct gpulight_s {
 } gpulight_t;
 
 typedef struct gpulightbuffer_s {
-	float		lightstyles[MAX_LIGHTSTYLES];
+	float		lightstyles[MAX_LIGHTSTYLES * 2];
 	gpulight_t	lights[MAX_DLIGHTS];
 } gpulightbuffer_t;
 
@@ -434,6 +434,7 @@ typedef struct gpuframedata_s {
 	float	delta_time;
 	float	zlogscale;
 	float	zlogbias;
+	float	lightmap_params[4];
 	int			numlights;
 	int			prev_frame_valid;
 	int			_padding1;
@@ -442,6 +443,7 @@ typedef struct gpuframedata_s {
 
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
+extern float r_lightstyle_framefrac;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);

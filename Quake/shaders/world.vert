@@ -30,7 +30,7 @@ struct Light
 
 layout(std430, binding=0) restrict readonly buffer LightBuffer
 {
-	float	LightStyles[64];
+	vec2	LightStyles[64];
 	Light	Lights[];
 };
 
@@ -38,7 +38,7 @@ float GetLightStyle(int index)
 {
 	float result;
 	if (index < 64)
-		result = LightStyles[index];
+		result = mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w);
 	else
 		result = 1.0;
 	return result;
