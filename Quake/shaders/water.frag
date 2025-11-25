@@ -158,7 +158,7 @@ void main()
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
-        result.rgb = ApplyFog(result.rgb, in_pos);
+        result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
         result.a *= in_alpha;
         out_fragcolor = result;
 #if !OIT
