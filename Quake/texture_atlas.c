@@ -3,6 +3,7 @@
  */
 
 #include "quakedef.h"
+#include "q_ctype.h"
 #include "texture_atlas.h"
 
 #define STB_IMAGE_IMPLEMENTATION
