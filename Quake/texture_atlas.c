@@ -30,15 +30,31 @@ static const atlas_rect_t atlas_null_rect = {0, 0, 0, 0, 0};
 static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_size)
 {
     size_t len;
+    const char *start;
 
-    q_strlcpy(out, name ? name : "", out_size);
+    if (!name)
+    {
+        out[0] = '\0';
+        return;
+    }
 
+    // ignore leading whitespace so atlas entries don't need to match stray padding
+    for (start = name; *start == ' ' || *start == '\t' || *start == '\r' || *start == '\n'; ++start)
+        ;
+
+    q_strlcpy(out, start, out_size);
+
+    // trim trailing whitespace
     len = strlen(out);
     while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '\t' || out[len - 1] == '\r' || out[len - 1] == '\n'))
     {
         out[len - 1] = '\0';
         --len;
     }
+
+    // normalize to lowercase so atlas lookups are consistent on case-sensitive filesystems
+    for (size_t i = 0; i < len; ++i)
+        out[i] = q_tolower(out[i]);
 }
 
 static const char *Atlas_SkipWhitespace(const char *p, const char *end)
