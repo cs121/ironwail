@@ -90,7 +90,7 @@ static qboolean Atlas_ParseStringField(const char *obj_start, const char *obj_en
     if (!value_end || value_end > obj_end)
         return false;
 
-    q_strlcpy(out, value_start, min((size_t)(value_end - value_start) + 1, out_size));
+    q_strlcpy(out, value_start, q_min((size_t)(value_end - value_start) + 1, out_size));
     return true;
 }
 
@@ -223,7 +223,7 @@ static qboolean Atlas_LoadJSON(const char *path)
     }
 
     ok = Atlas_ParseJSON(json, (size_t)len);
-    Q_free(json);
+    free(json);
     return ok;
 }
 
@@ -247,7 +247,7 @@ static qboolean Atlas_LoadPNG(const char *path)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas_width, atlas_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
-    Q_free(pixels);
+    free(pixels);
 
     memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
     atlas_gltexture.target = GL_TEXTURE_2D;
