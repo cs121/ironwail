@@ -168,6 +168,9 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
+	GLfloat	atlas_uv[4];
+	GLfloat	orig_size[2];
+	GLfloat	offset[2];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -175,6 +178,9 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		alpha;
 	GLint		baseinstance;
 	GLint		padding;
+	GLfloat		atlas_uv[4];
+	GLfloat		orig_size[2];
+	GLfloat		offset[2];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -335,19 +341,45 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	float		alpha;
 	gltexture_t	*tx, *fb, *em;
 
-	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
-		R_FlushBModelCalls ();
+	atlas_rect_t	atlas_rect;
+	float		atlas_uv[4];
+	float		orig_size[2];
+	float		offset[2];
+
+        if (num_bmodel_calls == MAX_BMODEL_DRAWS)
+                R_FlushBModelCalls ();
+
+        atlas_rect = atlas_null_rect;
+        atlas_uv[0] = 0.f;
+        atlas_uv[1] = 0.f;
+        atlas_uv[2] = 1.f;
+        atlas_uv[3] = 1.f;
+        orig_size[0] = 1.f;
+        orig_size[1] = 1.f;
+        offset[0] = 0.f;
+        offset[1] = 0.f;
 
         if (t)
         {
                 tx = t->gltexture;
                 fb = t->fullbright;
                 em = t->emissive;
-                if (Atlas_TextureExists(t->name))
+                atlas_rect = Atlas_GetUV(t->name);
+                if (atlas_rect.exists)
                 {
                         const gltexture_t *atlas_tex = Atlas_GetGLTextureStruct();
                         if (atlas_tex)
                                 tx = (gltexture_t *)atlas_tex;
+                        atlas_uv[0] = atlas_rect.u1;
+                        atlas_uv[1] = atlas_rect.v1;
+                        atlas_uv[2] = atlas_rect.u2 - atlas_rect.u1;
+                        atlas_uv[3] = atlas_rect.v2 - atlas_rect.v1;
+                }
+                if (t->gltexture && atlas_rect.exists)
+                {
+                        gltexture_t *glt = t->gltexture;
+                        orig_size[0] = glt->source_width ? (float)glt->source_width : (float)glt->width;
+                        orig_size[1] = glt->source_height ? (float)glt->source_height : (float)glt->height;
                 }
                 if (r_lightmap_cheatsafe)
                         tx = fb = em = NULL;
@@ -370,27 +402,33 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
                 flags |= CALLFLAG_ALPHA_TEST;
         alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
 
-	if (gl_bindless_able)
-	{
-		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
-		call->flags = flags;
-		call->alpha = alpha;
-		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
-		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
-		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-	}
-	else
-	{
-		bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
-		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
-		call->flags = flags;
-		call->alpha = alpha;
-		call->baseinstance = first_instance;
-		call->padding = 0;
-		textures[0] = tx ? tx : greytexture;
-		textures[1] = fb ? fb : blacktexture;
-		textures[2] = em ? em : blacktexture;
-	}
+        if (gl_bindless_able)
+        {
+                bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
+                call->flags = flags;
+                call->alpha = alpha;
+                call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
+                call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
+                call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+                memcpy(call->atlas_uv, atlas_uv, sizeof(atlas_uv));
+                memcpy(call->orig_size, orig_size, sizeof(orig_size));
+                memcpy(call->offset, offset, sizeof(offset));
+        }
+        else
+        {
+                bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
+                gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
+                call->flags = flags;
+                call->alpha = alpha;
+                call->baseinstance = first_instance;
+                call->padding = 0;
+                memcpy(call->atlas_uv, atlas_uv, sizeof(atlas_uv));
+                memcpy(call->orig_size, orig_size, sizeof(orig_size));
+                memcpy(call->offset, offset, sizeof(offset));
+                textures[0] = tx ? tx : greytexture;
+                textures[1] = fb ? fb : blacktexture;
+                textures[2] = em ? em : blacktexture;
+        }
 
 	SDL_assert (num_instances > 0);
 	SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);

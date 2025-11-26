@@ -56,6 +56,9 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
+        vec4    atlas_uv;
+        vec2    orig_size;
+        vec2    offset;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -133,12 +136,15 @@ layout(location=6) noperspective out vec2 out_coord;
 layout(location=7) flat out vec4 out_styles;
 layout(location=8) flat out float out_lmofs;
 #if BINDLESS
-	layout(location=9) flat out uvec4 out_samplers0;
+layout(location=9) flat out uvec4 out_samplers0;
         layout(location=10) flat out uvec2 out_samplers1;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
+layout(location=14) flat out vec4 out_atlas_uv;
+layout(location=15) flat out vec2 out_orig_size;
+layout(location=16) flat out vec2 out_offset;
 
 void main()
 {
@@ -191,11 +197,14 @@ void main()
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
 #if BINDLESS
-	out_samplers0.xy = call.txhandle;
-	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
-		out_samplers0.zw = call.fbhandle;
-	else
-		out_samplers0.zw = out_samplers0.xy;
-	out_samplers1.xy = call.emhandle;
+        out_samplers0.xy = call.txhandle;
+        if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
+                out_samplers0.zw = call.fbhandle;
+        else
+                out_samplers0.zw = out_samplers0.xy;
+        out_samplers1.xy = call.emhandle;
 #endif
+        out_atlas_uv = call.atlas_uv;
+        out_orig_size = call.orig_size;
+        out_offset = call.offset;
 }

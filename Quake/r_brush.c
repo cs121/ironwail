@@ -798,8 +798,8 @@ void GL_BuildBModelVertexBuffer (void)
                         atlas_rect = Atlas_GetUV(texture ? texture->name : NULL);
                         use_atlas = atlas_rect.exists != 0;
 
-			if (fa->flags & SURF_DRAWTILED)
-			{
+                        if (fa->flags & SURF_DRAWTILED)
+                        {
 				// match old Mod_PolyForUnlitSurface
 				if (fa->flags & (SURF_DRAWTURB | SURF_DRAWSKY))
 					texscalex = 1.f / 128.f; //warp animation repeats every 128
@@ -823,9 +823,16 @@ void GL_BuildBModelVertexBuffer (void)
 					texscaley = 1.f / texture->height;
 					useofs = 1.f;
 				}
-				lm = &lightmaps[fa->lightmaptexturenum];
-				lmofs = ((fa->extents[0]>>4)+1) / (float)lightmap_width;
-			}
+                                lm = &lightmaps[fa->lightmaptexturenum];
+                                lmofs = ((fa->extents[0]>>4)+1) / (float)lightmap_width;
+                        }
+
+                        if (use_atlas)
+                        {
+                                texscalex = 1.f;
+                                texscaley = 1.f;
+                                useofs = 1.f;
+                        }
 
 			fa->vbo_firstvert = varray_index;
 			varray_index += fa->numedges;
@@ -913,13 +920,6 @@ void GL_BuildBModelVertexBuffer (void)
                                 vert->styles = ~0u;
                         }
 
-                        if (use_atlas)
-                        {
-                                const float du = atlas_rect.u2 - atlas_rect.u1;
-                                const float dv = atlas_rect.v2 - atlas_rect.v1;
-                                vert->st[0] = atlas_rect.u1 + vert->st[0] * du;
-                                vert->st[1] = atlas_rect.v1 + vert->st[1] * dv;
-                        }
                 }
                 }
         }

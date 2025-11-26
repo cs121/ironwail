@@ -22,6 +22,8 @@ typedef struct atlas_entry_s {
     char name[64];
     atlas_rect_t rect;
     qboolean logged;
+    int offset_x;
+    int offset_y;
 } atlas_entry_t;
 
 static atlas_entry_t atlas_entries[ATLAS_MAX_TEXTURES];
@@ -374,6 +376,11 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         entry->rect.exists = 1;
         entry->logged = false;
 
+        entry->offset_x = 0;
+        entry->offset_y = 0;
+        Atlas_ParseIntField(obj_start, obj_end, "ox", &entry->offset_x);
+        Atlas_ParseIntField(obj_start, obj_end, "oy", &entry->offset_y);
+
         cursor = obj_end + 1;
     }
 
@@ -531,6 +538,7 @@ typedef struct atlas_build_entry_s
     char name[64];
     int width, height;
     int x, y;
+    int offset_x, offset_y;
     byte *rgba;
 } atlas_build_entry_t;
 
@@ -711,8 +719,9 @@ static qboolean Atlas_WriteJSON(const char *path, const atlas_build_entry_t *ent
     for (i = 0; i < count; ++i)
     {
         const atlas_build_entry_t *e = &entries[i];
-        fprintf(f, "        {\"name\":\"%s\",\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d}%s\n",
-            e->name, e->x, e->y, e->width, e->height, (i == count - 1) ? "" : ",");
+        fprintf(f,
+            "        {\"name\":\"%s\",\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"ox\":%d,\"oy\":%d}%s\n",
+            e->name, e->x, e->y, e->width, e->height, e->offset_x, e->offset_y, (i == count - 1) ? "" : ",");
     }
 
     fprintf(f, "    ]\n");
@@ -881,6 +890,17 @@ atlas_rect_t Atlas_GetUV(const char *name)
         return atlas_null_rect;
 
     Atlas_NormalizeTextureName(name, normalized, sizeof(normalized));
+    // remove leading special chars for better matching
+    if (normalized[0] == '*' || normalized[0] == '+' || normalized[0] == '-')
+        memmove(normalized, normalized + 1, strlen(normalized));
+
+    // strip directory components
+    {
+        char *slash = strrchr(normalized, '/');
+        if (slash)
+            memmove(normalized, slash + 1, strlen(slash + 1) + 1);
+    }
+
     if (!normalized[0])
         return atlas_null_rect;
 
@@ -894,6 +914,15 @@ atlas_rect_t Atlas_GetUV(const char *name)
                 atlas_entries[i].logged = true;
             }
             return atlas_entries[i].rect;
+        }
+    }
+
+    {
+        static qboolean warned = false;
+        if (!warned)
+        {
+            Con_Printf("Atlas: WARNING: texture '%s' missing in atlas\n", normalized);
+            warned = true;
         }
     }
 
