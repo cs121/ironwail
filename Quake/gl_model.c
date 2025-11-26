@@ -3185,8 +3185,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	char		mapbase[MAX_QPATH];
 
 	loadmodel->type = mod_brush;
-	if (!isDedicated && loadmodel->name[0] != "*")
-		Atlas_Reset();
+        if (!isDedicated && loadmodel->name[0] != '*')
+                Atlas_Reset();
 
 	mod_base = (byte *)buffer;
 
@@ -3274,10 +3274,10 @@ visdone:
 
 	Mod_DispatchBSPXLumps(mod);
 	Q1BSPX_LogUsage(mod->name);
-	if (!isDedicated && loadmodel->name[0] != "*")
-	{
-		COM_FileBase (loadmodel->name, mapbase, sizeof(mapbase));
-		Atlas_OnMapStart(mapbase);
+        if (!isDedicated && loadmodel->name[0] != '*')
+        {
+                COM_FileBase (loadmodel->name, mapbase, sizeof(mapbase));
+                Atlas_OnMapStart(mapbase);
 	}
 
 
