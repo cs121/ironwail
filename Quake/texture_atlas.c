@@ -4,6 +4,10 @@
 
 #include "quakedef.h"
 #include "texture_atlas.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_PNG
 #include "stb_image.h"
 
 static qboolean atlas_enabled = false;
