@@ -5,6 +5,7 @@
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "texture_atlas.h"
+#include "gl_model.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
@@ -27,6 +28,18 @@ static atlas_entry_t atlas_entries[ATLAS_MAX_TEXTURES];
 static int atlas_entry_count = 0;
 
 static const atlas_rect_t atlas_null_rect = {0, 0, 0, 0, 0};
+static qboolean atlas_missing_for_map = false;
+static qboolean atlas_attempted_build = false;
+static char atlas_missing_basename[MAX_QPATH];
+
+extern cvar_t gl_fullbrights;
+extern unsigned int d_8to24table_opaque[256];
+extern unsigned int d_8to24table_alphabright[256];
+extern unsigned int d_8to24table_fbright[256];
+extern unsigned int d_8to24table_fbright_fence[256];
+extern unsigned int d_8to24table_nobright[256];
+extern unsigned int d_8to24table_nobright_fence[256];
+extern unsigned int d_8to24table_conchars[256];
 
 static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_size)
 {
@@ -142,6 +155,123 @@ static void Atlas_LogMissing(void)
         Con_Printf("Texture atlas not loaded; falling back to legacy textures\n");
 }
 
+static const unsigned int *Atlas_SelectPalette(const gltexture_t *glt)
+{
+    if (glt->flags & TEXPREF_ALPHABRIGHT)
+        return gl_fullbrights.value ? d_8to24table_alphabright : d_8to24table_opaque;
+
+    if (glt->flags & TEXPREF_FULLBRIGHT)
+        return (glt->flags & TEXPREF_ALPHA) ? d_8to24table_fbright_fence : d_8to24table_fbright;
+
+    if ((glt->flags & TEXPREF_NOBRIGHT) && gl_fullbrights.value)
+        return (glt->flags & TEXPREF_ALPHA) ? d_8to24table_nobright_fence : d_8to24table_nobright;
+
+    if (glt->flags & TEXPREF_CONCHARS)
+        return d_8to24table_conchars;
+
+    return d_8to24table;
+}
+
+static void Atlas_AlphaEdgeFix(byte *data, int width, int height)
+{
+    int i, j, n = 0, b, c[3] = {0, 0, 0};
+    int lastrow, thisrow, nextrow, lastpix, thispix, nextpix;
+    byte *dest = data;
+
+    if (!data)
+        return;
+
+    for (i = 0; i < height; i++)
+    {
+        lastrow = width * 4 * ((i == 0) ? height-1 : i-1);
+        thisrow = width * 4 * i;
+        nextrow = width * 4 * ((i == height-1) ? 0 : i+1);
+
+        for (j = 0; j < width; j++, dest += 4)
+        {
+            if (dest[3])
+                continue;
+
+            n = b = 0;
+            c[0] = c[1] = c[2] = 0;
+
+            lastpix = thispix = nextpix = j * 4;
+            if (j == 0)
+                lastpix = (width-1) * 4;
+            else
+                lastpix -= 4;
+            if (j == width-1)
+                nextpix = 0;
+            else
+                nextpix += 4;
+
+            if ((b = data[lastrow + lastpix + 3]))
+            {
+                c[0] += data[lastrow + lastpix + 0];
+                c[1] += data[lastrow + lastpix + 1];
+                c[2] += data[lastrow + lastpix + 2];
+                n++;
+            }
+            if ((b = data[lastrow + thispix + 3]))
+            {
+                c[0] += data[lastrow + thispix + 0];
+                c[1] += data[lastrow + thispix + 1];
+                c[2] += data[lastrow + thispix + 2];
+                n++;
+            }
+            if ((b = data[lastrow + nextpix + 3]))
+            {
+                c[0] += data[lastrow + nextpix + 0];
+                c[1] += data[lastrow + nextpix + 1];
+                c[2] += data[lastrow + nextpix + 2];
+                n++;
+            }
+            if ((b = data[thisrow + lastpix + 3]))
+            {
+                c[0] += data[thisrow + lastpix + 0];
+                c[1] += data[thisrow + lastpix + 1];
+                c[2] += data[thisrow + lastpix + 2];
+                n++;
+            }
+            if ((b = data[thisrow + nextpix + 3]))
+            {
+                c[0] += data[thisrow + nextpix + 0];
+                c[1] += data[thisrow + nextpix + 1];
+                c[2] += data[thisrow + nextpix + 2];
+                n++;
+            }
+            if ((b = data[nextrow + lastpix + 3]))
+            {
+                c[0] += data[nextrow + lastpix + 0];
+                c[1] += data[nextrow + lastpix + 1];
+                c[2] += data[nextrow + lastpix + 2];
+                n++;
+            }
+            if ((b = data[nextrow + thispix + 3]))
+            {
+                c[0] += data[nextrow + thispix + 0];
+                c[1] += data[nextrow + thispix + 1];
+                c[2] += data[nextrow + thispix + 2];
+                n++;
+            }
+            if ((b = data[nextrow + nextpix + 3]))
+            {
+                c[0] += data[nextrow + nextpix + 0];
+                c[1] += data[nextrow + nextpix + 1];
+                c[2] += data[nextrow + nextpix + 2];
+                n++;
+            }
+
+            if (!n)
+                continue;
+
+            dest[0] = (byte) (c[0] / n);
+            dest[1] = (byte) (c[1] / n);
+            dest[2] = (byte) (c[2] / n);
+        }
+    }
+}
+
 static void Atlas_DeleteGLTexture(void)
 {
     if (atlas_gltexture.bindless_handle && GL_MakeTextureHandleNonResidentARBFunc)
@@ -169,6 +299,9 @@ void Atlas_Invalidate(void)
     Atlas_ClearEntries();
     atlas_width = atlas_height = 0;
     atlas_enabled = false;
+    atlas_missing_for_map = false;
+    atlas_attempted_build = false;
+    atlas_missing_basename[0] = '\0';
 }
 
 static qboolean Atlas_ParseJSON(const char *json, size_t len)
@@ -332,12 +465,16 @@ int Atlas_LoadForMap(const char *mapname)
     if (!basename[0])
         return 0;
 
+    q_strlcpy(atlas_missing_basename, basename, sizeof(atlas_missing_basename));
+    atlas_attempted_build = false;
+
     q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
     q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
 
     if (!Sys_FileExists(png_path) || !Sys_FileExists(json_path))
     {
         Atlas_LogMissing();
+        atlas_missing_for_map = true;
         return 0;
     }
 
@@ -349,9 +486,356 @@ int Atlas_LoadForMap(const char *mapname)
         return 0;
     }
 
+    atlas_missing_for_map = false;
     atlas_enabled = true;
     Con_DPrintf("Atlas_LoadForMap: atlas ready (%dx%d, %d entries)\n", atlas_width, atlas_height, atlas_entry_count);
     return 1;
+}
+
+typedef struct atlas_build_entry_s
+{
+    char name[64];
+    int width, height;
+    int x, y;
+    byte *rgba;
+} atlas_build_entry_t;
+
+static int Atlas_NextPowerOfTwo(int value)
+{
+    int result = 1;
+    while (result < value)
+        result <<= 1;
+    return result;
+}
+
+static byte *Atlas_CopyIndexed(const byte *src, int width, int height, const gltexture_t *glt)
+{
+    const unsigned int *palette = Atlas_SelectPalette(glt);
+    size_t total = (size_t)width * height;
+    byte *rgba = (byte *)malloc(total * 4);
+
+    if (!rgba)
+        return NULL;
+
+    for (size_t i = 0; i < total; ++i)
+    {
+        unsigned int color = palette[src[i]];
+        rgba[i * 4 + 0] = (byte)(color);
+        rgba[i * 4 + 1] = (byte)(color >> 8);
+        rgba[i * 4 + 2] = (byte)(color >> 16);
+        rgba[i * 4 + 3] = (byte)(color >> 24);
+    }
+
+    if (glt->flags & TEXPREF_ALPHA)
+        Atlas_AlphaEdgeFix(rgba, width, height);
+
+    return rgba;
+}
+
+static byte *Atlas_CopyRGBA(const byte *src, int width, int height)
+{
+    size_t total = (size_t)width * height * 4;
+    byte *rgba = (byte *)malloc(total);
+    if (rgba)
+        memcpy(rgba, src, total);
+    return rgba;
+}
+
+static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *height, enum srcformat *fmt_out)
+{
+    int mark = Hunk_LowMark();
+    byte *raw = NULL;
+    enum srcformat fmt = glt->source_format;
+    size_t bytes_per_pixel = (fmt == SRC_RGBA) ? 4 : 1;
+    size_t expected_size;
+
+    *width = glt->source_width ? glt->source_width : glt->width;
+    *height = glt->source_height ? glt->source_height : glt->height;
+    expected_size = (size_t)(*width) * (*height) * bytes_per_pixel;
+
+    if (glt->source_file[0] && glt->source_offset)
+    {
+        FILE *f;
+
+        if (COM_FOpenFile(glt->source_file, &f, NULL) >= 0 && f && expected_size > 0)
+        {
+            raw = (byte *)malloc(expected_size);
+            fseek(f, glt->source_offset, SEEK_CUR);
+            if (!raw || fread(raw, 1, expected_size, f) != expected_size)
+            {
+                free(raw);
+                raw = NULL;
+                fclose(f);
+                Hunk_FreeToLowMark(mark);
+                return NULL;
+            }
+            fclose(f);
+        }
+    }
+    else if (glt->source_file[0])
+    {
+        byte *loaded = Image_LoadImage(glt->source_file, width, height, &fmt);
+        if (loaded)
+        {
+            expected_size = (size_t)(*width) * (*height) * ((fmt == SRC_RGBA) ? 4 : 1);
+            raw = (byte *)malloc(expected_size);
+            if (raw)
+                memcpy(raw, loaded, expected_size);
+        }
+    }
+    else if (glt->source_offset)
+    {
+        if (expected_size > 0)
+        {
+            raw = (byte *)malloc(expected_size);
+            if (raw)
+                memcpy(raw, (const void *)glt->source_offset, expected_size);
+        }
+    }
+
+    if (fmt_out)
+        *fmt_out = fmt;
+
+    Hunk_FreeToLowMark(mark);
+    return raw;
+}
+
+static byte *Atlas_ExtractTexture(const gltexture_t *glt, int *width, int *height)
+{
+    enum srcformat fmt = SRC_INDEXED;
+    byte *source = Atlas_ReadTextureSource(glt, width, height, &fmt);
+    byte *rgba = NULL;
+
+    if (!source || *width <= 0 || *height <= 0)
+    {
+        free(source);
+        return NULL;
+    }
+
+    if (fmt == SRC_RGBA)
+        rgba = Atlas_CopyRGBA(source, *width, *height);
+    else if (fmt == SRC_INDEXED)
+        rgba = Atlas_CopyIndexed(source, *width, *height, glt);
+
+    if (source != (byte *)glt->source_offset)
+        free(source);
+
+    return rgba;
+}
+
+static int Atlas_SortEntries(const void *a, const void *b)
+{
+    const atlas_build_entry_t *ea = (const atlas_build_entry_t *)a;
+    const atlas_build_entry_t *eb = (const atlas_build_entry_t *)b;
+    return eb->height - ea->height;
+}
+
+static qboolean Atlas_PackEntries(atlas_build_entry_t *entries, int count, int atlas_size)
+{
+    int x = 0, y = 0, row_height = 0;
+    int i;
+
+    for (i = 0; i < count; ++i)
+    {
+        atlas_build_entry_t *e = &entries[i];
+        if (e->width > atlas_size || e->height > atlas_size)
+            return false;
+
+        if (x + e->width > atlas_size)
+        {
+            x = 0;
+            y += row_height;
+            row_height = 0;
+        }
+
+        if (y + e->height > atlas_size)
+            return false;
+
+        e->x = x;
+        e->y = y;
+        x += e->width;
+        if (e->height > row_height)
+            row_height = e->height;
+    }
+
+    return true;
+}
+
+static qboolean Atlas_WriteJSON(const char *path, const atlas_build_entry_t *entries, int count, int width, int height)
+{
+    FILE *f = fopen(path, "wb");
+    int i;
+
+    if (!f)
+        return false;
+
+    fprintf(f, "{\n");
+    fprintf(f, "    \"atlas_width\": %d,\n", width);
+    fprintf(f, "    \"atlas_height\": %d,\n", height);
+    fprintf(f, "    \"textures\": [\n");
+
+    for (i = 0; i < count; ++i)
+    {
+        const atlas_build_entry_t *e = &entries[i];
+        fprintf(f, "        {\"name\":\"%s\",\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d}%s\n",
+            e->name, e->x, e->y, e->width, e->height, (i == count - 1) ? "" : ",");
+    }
+
+    fprintf(f, "    ]\n");
+    fprintf(f, "}\n");
+    fclose(f);
+    return true;
+}
+
+static qboolean Atlas_WritePNGFile(const char *path, const byte *data, int width, int height)
+{
+    const char *relative = path;
+    size_t prefix = strlen(com_gamedir);
+
+    if (!strncmp(path, com_gamedir, prefix) && path[prefix] == '/')
+        relative = path + prefix + 1;
+
+    return Image_WritePNG(relative, (byte *)data, width, height, 32, true);
+}
+
+void Atlas_CreateFromFallbacks(qmodel_t *model)
+{
+    atlas_build_entry_t *entries = NULL;
+    int entry_count = 0;
+    int max_dim = 0;
+    int atlas_size;
+    int i;
+    char basename[MAX_QPATH];
+    char png_path[MAX_OSPATH];
+    char json_path[MAX_OSPATH];
+    byte *atlas_pixels = NULL;
+
+    if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated)
+        return;
+
+    Atlas_NormalizeMapName(model->name, basename, sizeof(basename));
+    if (q_strcasecmp(basename, atlas_missing_basename))
+        return;
+
+    atlas_attempted_build = true;
+
+    entries = (atlas_build_entry_t *)calloc((size_t)model->numtextures, sizeof(*entries));
+    if (!entries)
+        return;
+
+    for (i = 0; i < model->numtextures; ++i)
+    {
+        texture_t *tx = model->textures[i];
+        gltexture_t *glt;
+        char normalized[sizeof(entries->name)];
+
+        if (!tx || !tx->name[0])
+            continue;
+
+        if (i >= model->numtextures - 2)
+            continue;
+
+        glt = tx->gltexture;
+        if (!glt)
+            continue;
+
+        Atlas_NormalizeTextureName(tx->name, normalized, sizeof(normalized));
+        if (!normalized[0])
+            continue;
+
+        // skip duplicates
+        {
+            int j;
+            qboolean duplicate = false;
+            for (j = 0; j < entry_count; ++j)
+            {
+                if (!q_strcasecmp(entries[j].name, normalized))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate)
+                continue;
+        }
+
+        entries[entry_count].rgba = Atlas_ExtractTexture(glt, &entries[entry_count].width, &entries[entry_count].height);
+        if (!entries[entry_count].rgba)
+            continue;
+
+        q_strlcpy(entries[entry_count].name, normalized, sizeof(entries[entry_count].name));
+        entries[entry_count].x = entries[entry_count].y = 0;
+        max_dim = q_max(max_dim, entries[entry_count].width);
+        max_dim = q_max(max_dim, entries[entry_count].height);
+        ++entry_count;
+
+        if (entry_count >= ATLAS_MAX_TEXTURES)
+            break;
+    }
+
+    if (entry_count == 0 || max_dim == 0)
+        goto cleanup;
+
+    qsort(entries, entry_count, sizeof(*entries), Atlas_SortEntries);
+
+    atlas_size = Atlas_NextPowerOfTwo(max_dim);
+    while (!Atlas_PackEntries(entries, entry_count, atlas_size))
+    {
+        if (atlas_size >= gl_max_texture_size)
+        {
+            Con_Printf("Failed to create atlas for %s: textures too large (>%d)\n", basename, gl_max_texture_size);
+            goto cleanup;
+        }
+        atlas_size <<= 1;
+    }
+
+    atlas_pixels = (byte *)calloc((size_t)atlas_size * atlas_size * 4, 1);
+    if (!atlas_pixels)
+        goto cleanup;
+
+    for (i = 0; i < entry_count; ++i)
+    {
+        atlas_build_entry_t *e = &entries[i];
+        int row;
+        for (row = 0; row < e->height; ++row)
+        {
+            byte *dst = atlas_pixels + ((size_t)(e->y + row) * atlas_size + e->x) * 4;
+            const byte *src = e->rgba + (size_t)row * e->width * 4;
+            memcpy(dst, src, (size_t)e->width * 4);
+        }
+    }
+
+    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
+    q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
+
+    COM_CreatePath(png_path);
+    COM_CreatePath(json_path);
+
+    if (!Atlas_WritePNGFile(png_path, atlas_pixels, atlas_size, atlas_size))
+    {
+        Con_Printf("Failed to write atlas texture to %s\n", png_path);
+        goto cleanup;
+    }
+
+    if (!Atlas_WriteJSON(json_path, entries, entry_count, atlas_size, atlas_size))
+    {
+        Con_Printf("Failed to write atlas description to %s\n", json_path);
+        goto cleanup;
+    }
+
+    Con_Printf("Created fallback atlas for %s with %d textures (%dx%d)\n", basename, entry_count, atlas_size, atlas_size);
+    atlas_missing_for_map = false;
+    Atlas_LoadForMap(model->name);
+
+cleanup:
+    if (entries)
+    {
+        for (i = 0; i < entry_count; ++i)
+            free(entries[i].rgba);
+        free(entries);
+    }
+
+    free(atlas_pixels);
 }
 
 atlas_rect_t Atlas_GetUV(const char *name)
