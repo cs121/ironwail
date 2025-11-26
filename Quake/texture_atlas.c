@@ -438,7 +438,13 @@ static qboolean Atlas_LoadPNG(const char *path)
     atlas_gltexture.texnum = atlas_gl_id;
     atlas_gltexture.width = (unsigned short)atlas_width;
     atlas_gltexture.height = (unsigned short)atlas_height;
-    atlas_gltexture.flags = TEXPREF_BINDLESS;
+    atlas_gltexture.depth = 1;
+    atlas_gltexture.compression = 1;
+    atlas_gltexture.flags = TEXPREF_BINDLESS | TEXPREF_CLAMP;
+    q_strlcpy(atlas_gltexture.name, "__atlas", sizeof(atlas_gltexture.name));
+    atlas_gltexture.source_format = SRC_RGBA;
+    atlas_gltexture.source_width = (unsigned int)atlas_width;
+    atlas_gltexture.source_height = (unsigned int)atlas_height;
 
     if (gl_bindless_able && GL_GetTextureHandleARBFunc && GL_MakeTextureHandleResidentARBFunc)
     {
