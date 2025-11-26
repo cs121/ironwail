@@ -3142,11 +3142,10 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 	bsp_header_info_t header;
-	int		atlas_loaded = 0;
 
         loadmodel->type = mod_brush;
         if (!isDedicated && loadmodel->name[0] != '*')
-                atlas_loaded = Atlas_LoadForMap(loadmodel->name);
+                Atlas_LoadForMap(loadmodel->name);
 
 	mod_base = (byte *)buffer;
 
@@ -3235,7 +3234,7 @@ visdone:
         Mod_DispatchBSPXLumps(mod);
         Q1BSPX_LogUsage(mod->name);
 
-        (void)atlas_loaded;
+        Atlas_CreateFromFallbacks(mod);
 
 //
 // set up the submodels (FIXME: this is confusing)
