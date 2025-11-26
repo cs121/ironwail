@@ -382,17 +382,19 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
 
 static qboolean Atlas_LoadJSON(const char *path)
 {
-    long len = 0;
-    char *json = (char *)COM_LoadMallocFile_TextMode_OSPath(path, &len);
+    byte *json = NULL;
+    long len;
     qboolean ok;
 
+    json = COM_LoadMallocFile(path, NULL);
     if (!json)
     {
         Con_DPrintf("Atlas_LoadJSON: could not open %s\n", path);
         return false;
     }
 
-    ok = Atlas_ParseJSON(json, (size_t)len);
+    len = com_filesize;
+    ok = Atlas_ParseJSON((char *)json, (size_t)len);
     free(json);
     return ok;
 }
@@ -401,11 +403,23 @@ static qboolean Atlas_LoadPNG(const char *path)
 {
     int channels = 0;
     unsigned char *pixels;
+    byte *data;
+    long len;
 
-    pixels = stbi_load(path, &atlas_width, &atlas_height, &channels, 4);
-    if (!pixels)
+    data = COM_LoadMallocFile(path, NULL);
+    if (!data)
     {
         Con_DPrintf("Atlas_LoadPNG: failed to load %s\n", path);
+        return false;
+    }
+
+    len = com_filesize;
+    pixels = stbi_load_from_memory(data, (int)len, &atlas_width, &atlas_height, &channels, 4);
+    free(data);
+
+    if (!pixels)
+    {
+        Con_DPrintf("Atlas_LoadPNG: failed to decode %s\n", path);
         return false;
     }
 
@@ -468,10 +482,10 @@ int Atlas_LoadForMap(const char *mapname)
     q_strlcpy(atlas_missing_basename, basename, sizeof(atlas_missing_basename));
     atlas_attempted_build = false;
 
-    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
-    q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
+    q_snprintf(png_path, sizeof(png_path), "atlas/%s_atlas.png", basename);
+    q_snprintf(json_path, sizeof(json_path), "atlas/%s_atlas.json", basename);
 
-    if (!Sys_FileExists(png_path) || !Sys_FileExists(json_path))
+    if (!COM_FileExists(png_path, NULL) || !COM_FileExists(json_path, NULL))
     {
         Atlas_LogMissing();
         atlas_missing_for_map = true;
