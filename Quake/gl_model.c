@@ -1004,7 +1004,8 @@ static void Mod_LoadTextures (lump_t *l)
 		memset (tx, 0, sizeof (*tx));
 		loadmodel->textures[i] = tx;
 
-		memcpy (tx->name, mt->name, sizeof(tx->name));
+                // ensure texture names are always null-terminated so atlas lookups work
+                q_strlcpy (tx->name, mt->name, sizeof(tx->name));
 		if (!tx->name[0])
 		{
 			q_snprintf (tx->name, sizeof(tx->name), "unnamed%d", i);
