@@ -383,6 +383,7 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
 static qboolean Atlas_LoadJSON(const char *path)
 {
     byte *json = NULL;
+    char *terminated = NULL;
     long len;
     qboolean ok;
 
@@ -394,7 +395,18 @@ static qboolean Atlas_LoadJSON(const char *path)
     }
 
     len = com_filesize;
-    ok = Atlas_ParseJSON((char *)json, (size_t)len);
+    terminated = (char *)malloc((size_t)len + 1);
+    if (!terminated)
+    {
+        free(json);
+        return false;
+    }
+
+    memcpy(terminated, json, (size_t)len);
+    terminated[len] = '\0';
+
+    ok = Atlas_ParseJSON(terminated, (size_t)len);
+    free(terminated);
     free(json);
     return ok;
 }
@@ -503,6 +515,8 @@ int Atlas_LoadForMap(const char *mapname)
     if (!Atlas_LoadPNG(png_path) || !Atlas_LoadJSON(json_path))
     {
         Atlas_Invalidate();
+        Atlas_LogMissing();
+        atlas_missing_for_map = true;
         return 0;
     }
 
