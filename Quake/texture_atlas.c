@@ -164,6 +164,7 @@ void Atlas_SavePNG(const char *mapname)
 {
 	char dirname[MAX_OSPATH];
 	char filename[MAX_OSPATH];
+	char fullpath[MAX_OSPATH];
 
 	if (!g_world_atlas.built || !g_world_atlas.pixels)
 		return;
@@ -171,10 +172,13 @@ void Atlas_SavePNG(const char *mapname)
 	q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
 	Sys_mkdir(dirname);
 
-	q_snprintf(filename, sizeof(filename), "%s/%s_atlas.png", dirname, mapname ? mapname : "map");
+	q_snprintf(filename, sizeof(filename), "atlas_dump/%s_atlas.png", mapname ? mapname : "map");
+	q_snprintf(fullpath, sizeof(fullpath), "%s/%s", com_gamedir, filename);
 
-        Image_WritePNG(filename, g_world_atlas.pixels, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 32, false);
-	Con_Printf("Atlas_SavePNG: wrote %s\n", filename);
+	if (!Image_WritePNG(filename, g_world_atlas.pixels, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 32, false))
+		Con_Printf("Atlas_SavePNG: failed to write %s\n", fullpath);
+	else
+		Con_Printf("Atlas_SavePNG: wrote %s\n", fullpath);
 }
 
 void Atlas_SaveJSON(const char *mapname)
@@ -223,25 +227,34 @@ void Atlas_SaveJSON(const char *mapname)
 
 void Atlas_OnMapStart(const char *mapname)
 {
-        char dirname[MAX_OSPATH];
-        char png_path[MAX_OSPATH];
-        char json_path[MAX_OSPATH];
+	char dirname[MAX_OSPATH];
+	char png_path[MAX_OSPATH];
+	char json_path[MAX_OSPATH];
+	char png_relative[MAX_OSPATH];
+	const char *basename;
 
-        q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
-        q_snprintf(png_path, sizeof(png_path), "%s/%s_atlas.png", dirname, mapname ? mapname : "map");
-        q_snprintf(json_path, sizeof(json_path), "%s/%s_atlas.json", dirname, mapname ? mapname : "map");
+	if (!mapname || mapname[0] == '*')
+		return;
 
-        if (Sys_FileExists(png_path) && Sys_FileExists(json_path))
-        {
-                Con_Printf("Atlas_OnMapStart: loading existing texture atlas for %s\n", mapname ? mapname : "<unknown>");
-                return;
-        }
+	basename = mapname ? mapname : "map";
 
-        Con_Printf("Atlas_OnMapStart: writing texture atlas for %s\n", mapname ? mapname : "<unknown>");
-        Atlas_Build(mapname);
-        Atlas_SavePNG(mapname);
-        Atlas_SaveJSON(mapname);
+	q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
+	q_snprintf(png_relative, sizeof(png_relative), "atlas_dump/%s_atlas.png", basename);
+	q_snprintf(png_path, sizeof(png_path), "%s/%s", com_gamedir, png_relative);
+	q_snprintf(json_path, sizeof(json_path), "%s/%s_atlas.json", dirname, basename);
+
+	if (Sys_FileExists(png_path) && Sys_FileExists(json_path))
+	{
+		Con_Printf("Atlas_OnMapStart: loading existing texture atlas for %s\n", mapname ? mapname : "<unknown>");
+		return;
+	}
+
+	Con_Printf("Atlas_OnMapStart: writing texture atlas for %s\n", mapname ? mapname : "<unknown>");
+	Atlas_Build(mapname);
+	Atlas_SavePNG(mapname);
+	Atlas_SaveJSON(mapname);
 }
+
 
 /*
  * Engine Integration Snippets (for reference)
