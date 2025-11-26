@@ -139,7 +139,7 @@ static void Atlas_ClearEntries(void)
 static void Atlas_LogMissing(void)
 {
     if (!atlas_enabled)
-        Con_DPrintf("Texture atlas not loaded; falling back to legacy textures\n");
+        Con_Printf("Texture atlas not loaded; falling back to legacy textures\n");
 }
 
 static void Atlas_DeleteGLTexture(void)
@@ -299,6 +299,8 @@ static qboolean Atlas_LoadPNG(const char *path)
         GL_MakeTextureHandleResidentARBFunc(atlas_gltexture.bindless_handle);
     }
 
+    Con_DPrintf("Atlas_LoadPNG: loaded %s (%dx%d, channels=%d)\n", path, atlas_width, atlas_height, channels);
+
     return true;
 }
 
@@ -348,6 +350,7 @@ int Atlas_LoadForMap(const char *mapname)
     }
 
     atlas_enabled = true;
+    Con_DPrintf("Atlas_LoadForMap: atlas ready (%dx%d, %d entries)\n", atlas_width, atlas_height, atlas_entry_count);
     return 1;
 }
 
