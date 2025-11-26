@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <limits.h>
 
 #include "quakedef.h"
+#include "texture_atlas.h"
 
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
 extern cvar_t r_lightmap_mipmaps;
@@ -777,20 +778,25 @@ void GL_BuildBModelVertexBuffer (void)
 		if (!m || m->name[0] == '*' || m->type != mod_brush)
 		continue;
 
-		for (i = 0; i < m->numsurfaces; i++)
-		{
-			msurface_t      *fa = &m->surfaces[i];
-			texture_t       *texture = m->textures[fa->texinfo->texnum];
-			glvert_t        *vert = &varray[varray_index];
-			float           texscalex, texscaley, useofs, lmofs;
-			medge_t         *r_pedge;
-			lightmap_t      *lm;
-			vec3_t          surfnormal;
+                for (i = 0; i < m->numsurfaces; i++)
+                {
+                        msurface_t      *fa = &m->surfaces[i];
+                        texture_t       *texture = m->textures[fa->texinfo->texnum];
+                        glvert_t        *vert = &varray[varray_index];
+                        float           texscalex, texscaley, useofs, lmofs;
+                        medge_t         *r_pedge;
+                        lightmap_t      *lm;
+                        vec3_t          surfnormal;
+                        atlas_rect_t    atlas_rect;
+                        qboolean        use_atlas;
 
                         if (fa->flags & SURF_PLANEBACK)
                                 VectorScale (fa->plane->normal, -1, surfnormal);
                         else
                                 VectorCopy (fa->plane->normal, surfnormal);
+
+                        atlas_rect = Atlas_GetUV(texture ? texture->name : NULL);
+                        use_atlas = atlas_rect.exists != 0;
 
 			if (fa->flags & SURF_DRAWTILED)
 			{
@@ -856,11 +862,11 @@ void GL_BuildBModelVertexBuffer (void)
 				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3] * useofs;
 				t *= texscaley;
 
-				vert->st[0] = s;
-				vert->st[1] = t;
+                                vert->st[0] = s;
+                                vert->st[1] = t;
 
-			if (!(fa->flags & SURF_DRAWTILED))
-			{
+                        if (!(fa->flags & SURF_DRAWTILED))
+                        {
 				// match old BuildSurfaceDisplayList
 
 				// Q64 RERELEASE texture shift
@@ -901,14 +907,22 @@ void GL_BuildBModelVertexBuffer (void)
                                 else
                                 {
                                         // first lightmap texel is fullbright
-				vert->st[2] = 0.5f / lightmap_width;
-				vert->st[3] = 0.5f / lightmap_height;
-				vert->lmofs = 0.f;
-				vert->styles = ~0u;
-			}
-		}
-		}
-	}
+                                        vert->st[2] = 0.5f / lightmap_width;
+                                vert->st[3] = 0.5f / lightmap_height;
+                                vert->lmofs = 0.f;
+                                vert->styles = ~0u;
+                        }
+
+                        if (use_atlas)
+                        {
+                                const float du = atlas_rect.u2 - atlas_rect.u1;
+                                const float dv = atlas_rect.v2 - atlas_rect.v1;
+                                vert->st[0] = atlas_rect.u1 + vert->st[0] * du;
+                                vert->st[1] = atlas_rect.v1 + vert->st[1] * dv;
+                        }
+                }
+                }
+        }
 
 // upload to GPU
 	gl_bmodel_vbo_size = varray_bytes;
