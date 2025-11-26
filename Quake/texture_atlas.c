@@ -19,12 +19,27 @@ static int atlas_height = 0;
 typedef struct atlas_entry_s {
     char name[64];
     atlas_rect_t rect;
+    qboolean logged;
 } atlas_entry_t;
 
 static atlas_entry_t atlas_entries[ATLAS_MAX_TEXTURES];
 static int atlas_entry_count = 0;
 
 static const atlas_rect_t atlas_null_rect = {0, 0, 0, 0, 0};
+
+static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_size)
+{
+    size_t len;
+
+    q_strlcpy(out, name ? name : "", out_size);
+
+    len = strlen(out);
+    while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '\t' || out[len - 1] == '\r' || out[len - 1] == '\n'))
+    {
+        out[len - 1] = '\0';
+        --len;
+    }
+}
 
 static const char *Atlas_SkipWhitespace(const char *p, const char *end)
 {
@@ -201,12 +216,13 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         }
 
         entry = &atlas_entries[atlas_entry_count++];
-        q_strlcpy(entry->name, name, sizeof(entry->name));
+        Atlas_NormalizeTextureName(name, entry->name, sizeof(entry->name));
         entry->rect.u1 = (float)x / (float)atlas_width;
         entry->rect.v1 = (float)y / (float)atlas_height;
         entry->rect.u2 = (float)(x + w) / (float)atlas_width;
         entry->rect.v2 = (float)(y + h) / (float)atlas_height;
         entry->rect.exists = 1;
+        entry->logged = false;
 
         cursor = obj_end + 1;
     }
@@ -321,14 +337,26 @@ int Atlas_LoadForMap(const char *mapname)
 atlas_rect_t Atlas_GetUV(const char *name)
 {
     int i;
+    char normalized[sizeof(atlas_entries[0].name)];
 
     if (!atlas_enabled || !name)
         return atlas_null_rect;
 
+    Atlas_NormalizeTextureName(name, normalized, sizeof(normalized));
+    if (!normalized[0])
+        return atlas_null_rect;
+
     for (i = 0; i < atlas_entry_count; i++)
     {
-        if (!q_strcasecmp(atlas_entries[i].name, name))
+        if (!q_strcasecmp(atlas_entries[i].name, normalized))
+        {
+            if (!atlas_entries[i].logged)
+            {
+                Con_Printf("Atlas: mapped texture %s to atlas entry\n", normalized);
+                atlas_entries[i].logged = true;
+            }
             return atlas_entries[i].rect;
+        }
     }
 
     return atlas_null_rect;
