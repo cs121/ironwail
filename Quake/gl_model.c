@@ -56,44 +56,6 @@ static int	mod_novis_capacity;
 static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
 
-static void Mod_RegisterTextureAtlasEntry (const char *name, int width, int height, enum srcformat fmt, const byte *data)
-{
-        size_t i, pixels;
-        unsigned char *rgba;
-
-        if (isDedicated || !name || !data || width <= 0 || height <= 0)
-                return;
-
-        if (fmt == SRC_RGBA)
-        {
-                Atlas_RegisterTexture(name, width, height, data);
-                return;
-        }
-
-        if (fmt != SRC_INDEXED)
-                return;
-
-        pixels = (size_t) width * (size_t) height;
-        rgba = (unsigned char *) malloc(pixels * 4);
-        if (!rgba)
-        {
-                Con_Printf("Mod_RegisterTextureAtlasEntry: out of memory registering %s\n", name);
-                return;
-        }
-
-        for (i = 0; i < pixels; i++)
-        {
-                unsigned int color = d_8to24table[data[i]];
-                rgba[i * 4 + 0] = ((byte *) &color)[0];
-                rgba[i * 4 + 1] = ((byte *) &color)[1];
-                rgba[i * 4 + 2] = ((byte *) &color)[2];
-                rgba[i * 4 + 3] = ((byte *) &color)[3];
-        }
-
-        Atlas_RegisterTexture(name, width, height, rgba);
-        free(rgba);
-}
-
 #define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
 static qmodel_t	mod_known[MAX_MOD_KNOWN];
 static int		mod_numknown;
@@ -1108,7 +1070,6 @@ static void Mod_LoadTextures (lump_t *l)
                                         q_strlcpy (texturename, filename, sizeof(texturename));
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
                                                 fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-                                        Mod_RegisterTextureAtlasEntry(tx->name, fwidth, fheight, fmt, data);
                                 }
                                 else //use the texture from the bsp file
                                 {
@@ -1147,7 +1108,6 @@ static void Mod_LoadTextures (lump_t *l)
                                 {
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
                                                 fmt, data, filename, 0, TEXPREF_MIPMAP | extraflags );
-					Mod_RegisterTextureAtlasEntry(tx->name, fwidth, fheight, fmt, data);
                                 }
                                 else //use the texture from the bsp file
                                 {
@@ -1174,7 +1134,6 @@ static void Mod_LoadTextures (lump_t *l)
 						tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
 							SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
                                         }
-					Mod_RegisterTextureAtlasEntry(tx->name, tx->width, tx->height, SRC_INDEXED, (byte *)(tx+1));
                                 }
                                 tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | extraflags);
                                 if (malloced)
@@ -3182,11 +3141,11 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 	bsp_header_info_t header;
-	char		mapbase[MAX_QPATH];
+	int		atlas_loaded = 0;
 
-	loadmodel->type = mod_brush;
+        loadmodel->type = mod_brush;
         if (!isDedicated && loadmodel->name[0] != '*')
-                Atlas_Reset();
+                atlas_loaded = Atlas_LoadForMap(loadmodel->name);
 
 	mod_base = (byte *)buffer;
 
@@ -3270,16 +3229,12 @@ visdone:
 
 	mod->numframes = 2;		// regular and alternate animation
 
-	Mod_CheckWaterVis();
+        Mod_CheckWaterVis();
 
-	Mod_DispatchBSPXLumps(mod);
-	Q1BSPX_LogUsage(mod->name);
-        if (!isDedicated && loadmodel->name[0] != '*')
-        {
-                COM_FileBase (loadmodel->name, mapbase, sizeof(mapbase));
-                Atlas_OnMapStart(mapbase);
-	}
+        Mod_DispatchBSPXLumps(mod);
+        Q1BSPX_LogUsage(mod->name);
 
+        (void)atlas_loaded;
 
 //
 // set up the submodels (FIXME: this is confusing)

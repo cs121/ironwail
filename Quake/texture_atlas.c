@@ -1,277 +1,352 @@
 /*
- * CPU Texture Atlas Generator
+ * Texture atlas loading for maps
  */
 
 #include "quakedef.h"
 #include "texture_atlas.h"
-#include "image.h"
+#include "stb_image.h"
 
-static world_atlas_t g_world_atlas;
+static qboolean atlas_enabled = false;
+static GLuint atlas_gl_id = 0;
+static gltexture_t atlas_gltexture;
+static int atlas_width = 0;
+static int atlas_height = 0;
 
-static void Atlas_FreeTextures(void)
+typedef struct atlas_entry_s {
+    char name[64];
+    atlas_rect_t rect;
+} atlas_entry_t;
+
+static atlas_entry_t atlas_entries[ATLAS_MAX_TEXTURES];
+static int atlas_entry_count = 0;
+
+static const atlas_rect_t atlas_null_rect = {0, 0, 0, 0, 0};
+
+static const char *Atlas_SkipWhitespace(const char *p, const char *end)
 {
-	int i;
-	for (i = 0; i < g_world_atlas.texture_count; i++)
-	{
-		if (g_world_atlas.textures[i].rgba)
-		{
-			free(g_world_atlas.textures[i].rgba);
-			g_world_atlas.textures[i].rgba = NULL;
-		}
-	}
+    while (p < end && (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t'))
+        ++p;
+    return p;
 }
 
-static void Atlas_BlitTexture(int dst_x, int dst_y, const atlas_texture_t *tex)
+static const char *Atlas_FindInRange(const char *start, const char *end, const char *needle)
 {
-	int x, y;
-	unsigned char *dst = g_world_atlas.pixels + ((dst_y * g_world_atlas.atlas_w) + dst_x) * 4;
+    size_t len = strlen(needle);
+    const char *p;
 
-	for (y = 0; y < tex->height; y++)
-	{
-		unsigned char *dst_row = dst + y * g_world_atlas.atlas_w * 4;
-		const unsigned char *src_row = tex->rgba + y * tex->width * 4;
-		for (x = 0; x < tex->width; x++)
-		{
-			int di = x * 4;
-			int si = x * 4;
-			dst_row[di + 0] = src_row[si + 0];
-			dst_row[di + 1] = src_row[si + 1];
-			dst_row[di + 2] = src_row[si + 2];
-			dst_row[di + 3] = src_row[si + 3];
-		}
-	}
+    if (end <= start || len == 0)
+        return NULL;
+
+    for (p = start; p + len <= end; ++p)
+    {
+        if (memcmp(p, needle, len) == 0)
+            return p;
+    }
+
+    return NULL;
+}
+
+static qboolean Atlas_ParseIntField(const char *obj_start, const char *obj_end, const char *key, int *out)
+{
+    char pattern[64];
+    const char *pos;
+
+    q_snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    pos = Atlas_FindInRange(obj_start, obj_end, pattern);
+    if (!pos)
+        return false;
+
+    pos = strchr(pos + strlen(pattern), ':');
+    if (!pos || pos >= obj_end)
+        return false;
+
+    pos = Atlas_SkipWhitespace(pos + 1, obj_end);
+    *out = (int)strtol(pos, NULL, 10);
+    return true;
+}
+
+static qboolean Atlas_ParseStringField(const char *obj_start, const char *obj_end, const char *key, char *out, size_t out_size)
+{
+    char pattern[64];
+    const char *pos;
+    const char *value_start;
+    const char *value_end;
+
+    q_snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    pos = Atlas_FindInRange(obj_start, obj_end, pattern);
+    if (!pos)
+        return false;
+
+    pos = strchr(pos + strlen(pattern), ':');
+    if (!pos || pos >= obj_end)
+        return false;
+
+    value_start = strchr(pos + 1, '\"');
+    if (!value_start || value_start >= obj_end)
+        return false;
+    ++value_start;
+
+    value_end = strchr(value_start, '\"');
+    if (!value_end || value_end > obj_end)
+        return false;
+
+    q_strlcpy(out, value_start, min((size_t)(value_end - value_start) + 1, out_size));
+    return true;
+}
+
+static void Atlas_ClearEntries(void)
+{
+    atlas_entry_count = 0;
+    memset(atlas_entries, 0, sizeof(atlas_entries));
+}
+
+static void Atlas_LogMissing(void)
+{
+    if (!atlas_enabled)
+        Con_DPrintf("Texture atlas not loaded; falling back to legacy textures\n");
+}
+
+static void Atlas_DeleteGLTexture(void)
+{
+    if (atlas_gltexture.bindless_handle && GL_MakeTextureHandleNonResidentARBFunc)
+    {
+        GL_MakeTextureHandleNonResidentARBFunc(atlas_gltexture.bindless_handle);
+        atlas_gltexture.bindless_handle = 0;
+    }
+
+    if (atlas_gl_id)
+    {
+        GL_DeleteNativeTexture(atlas_gl_id);
+        atlas_gl_id = 0;
+    }
+    memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
 }
 
 void Atlas_Init(void)
 {
-	memset(&g_world_atlas, 0, sizeof(g_world_atlas));
-	g_world_atlas.atlas_w = ATLAS_SIZE;
-	g_world_atlas.atlas_h = ATLAS_SIZE;
+    Atlas_Invalidate();
 }
 
-void Atlas_Reset(void)
+void Atlas_Invalidate(void)
 {
-	Atlas_FreeTextures();
-	if (g_world_atlas.pixels)
-	{
-		free(g_world_atlas.pixels);
-		g_world_atlas.pixels = NULL;
-	}
-	memset(g_world_atlas.textures, 0, sizeof(g_world_atlas.textures));
-	memset(g_world_atlas.rects, 0, sizeof(g_world_atlas.rects));
-	g_world_atlas.texture_count = 0;
-	g_world_atlas.built = 0;
+    Atlas_DeleteGLTexture();
+    Atlas_ClearEntries();
+    atlas_width = atlas_height = 0;
+    atlas_enabled = false;
 }
 
-void Atlas_RegisterTexture(const char *name, int w, int h, const unsigned char *rgba)
+static qboolean Atlas_ParseJSON(const char *json, size_t len)
 {
-	atlas_texture_t *tex;
-	int size;
+    const char *end = json + len;
+    const char *textures_block;
+    const char *cursor;
+    int width = 0, height = 0;
 
-	if (!name || !rgba)
-		return;
+    if (!Atlas_ParseIntField(json, end, "atlas_width", &width) || !Atlas_ParseIntField(json, end, "atlas_height", &height))
+    {
+        Con_Printf("Atlas_ParseJSON: missing atlas dimensions\n");
+        return false;
+    }
 
-	if (g_world_atlas.texture_count >= ATLAS_MAX_TEXTURES)
-	{
-		Con_Printf("Atlas_RegisterTexture: max textures reached\n");
-		return;
-	}
+    atlas_width = width;
+    atlas_height = height;
 
-	tex = &g_world_atlas.textures[g_world_atlas.texture_count];
-	q_strlcpy(tex->name, name, sizeof(tex->name));
-	tex->width = w;
-	tex->height = h;
+    textures_block = Atlas_FindInRange(json, end, "\"textures\"");
+    if (!textures_block)
+    {
+        Con_Printf("Atlas_ParseJSON: missing textures array\n");
+        return false;
+    }
 
-	size = w * h * 4;
-	tex->rgba = (unsigned char *) malloc(size);
-	if (!tex->rgba)
-	{
-		Con_Printf("Atlas_RegisterTexture: out of memory\n");
-		return;
-	}
+    cursor = strchr(textures_block, '[');
+    if (!cursor)
+    {
+        Con_Printf("Atlas_ParseJSON: malformed textures array\n");
+        return false;
+    }
 
-	memcpy(tex->rgba, rgba, size);
-	g_world_atlas.texture_count++;
-}
+    while (cursor && cursor < end)
+    {
+        const char *obj_start = strchr(cursor, '{');
+        const char *obj_end;
+        atlas_entry_t *entry;
+        int x, y, w, h;
+        char name[64];
 
-void Atlas_Build(const char *mapname)
-{
-        int i;
-        int x = 0, y = 0, row_h = 0;
+        if (!obj_start)
+            break;
 
-        if (g_world_atlas.texture_count == 0)
-                return;
+        obj_end = strchr(obj_start, '}');
+        if (!obj_end)
+            break;
 
-        g_world_atlas.built = 0;
-
-        if (g_world_atlas.atlas_w <= 0)
-                g_world_atlas.atlas_w = ATLAS_SIZE;
-        if (g_world_atlas.atlas_h <= 0)
-                g_world_atlas.atlas_h = ATLAS_SIZE;
-
-        if (g_world_atlas.pixels)
+        if (atlas_entry_count >= ATLAS_MAX_TEXTURES)
         {
-                free(g_world_atlas.pixels);
-                g_world_atlas.pixels = NULL;
-	}
+            Con_Printf("Atlas_ParseJSON: too many atlas entries (max %d)\n", ATLAS_MAX_TEXTURES);
+            return false;
+        }
 
-	g_world_atlas.pixels = (unsigned char *) calloc(1, g_world_atlas.atlas_w * g_world_atlas.atlas_h * 4);
-	if (!g_world_atlas.pixels)
-	{
-		Con_Printf("Atlas_Build: failed to allocate atlas buffer\n");
-		return;
-	}
+        if (!Atlas_ParseStringField(obj_start, obj_end, "name", name, sizeof(name)) ||
+            !Atlas_ParseIntField(obj_start, obj_end, "x", &x) ||
+            !Atlas_ParseIntField(obj_start, obj_end, "y", &y) ||
+            !Atlas_ParseIntField(obj_start, obj_end, "w", &w) ||
+            !Atlas_ParseIntField(obj_start, obj_end, "h", &h))
+        {
+            Con_Printf("Atlas_ParseJSON: malformed texture entry\n");
+            return false;
+        }
 
-	for (i = 0; i < g_world_atlas.texture_count; i++)
-	{
-		atlas_texture_t *tex = &g_world_atlas.textures[i];
-		atlas_rect_t *rect = &g_world_atlas.rects[i];
+        entry = &atlas_entries[atlas_entry_count++];
+        q_strlcpy(entry->name, name, sizeof(entry->name));
+        entry->rect.u1 = (float)x / (float)atlas_width;
+        entry->rect.v1 = (float)y / (float)atlas_height;
+        entry->rect.u2 = (float)(x + w) / (float)atlas_width;
+        entry->rect.v2 = (float)(y + h) / (float)atlas_height;
+        entry->rect.exists = 1;
 
-		if (tex->width <= 0 || tex->height <= 0)
-			continue;
+        cursor = obj_end + 1;
+    }
 
-		if (x + tex->width > g_world_atlas.atlas_w)
-		{
-			x = 0;
-			y += row_h;
-			row_h = 0;
-		}
-
-		if (y + tex->height > g_world_atlas.atlas_h)
-		{
-			Con_Printf("Atlas_Build: texture '%s' does not fit in atlas\n", tex->name);
-			continue;
-		}
-
-		rect->x = x;
-		rect->y = y;
-		rect->w = tex->width;
-		rect->h = tex->height;
-
-		Atlas_BlitTexture(x, y, tex);
-
-		x += tex->width;
-		if (tex->height > row_h)
-			row_h = tex->height;
-	}
-
-	g_world_atlas.built = 1;
-
-	Con_Printf("Atlas_Build: built atlas for %s (%d textures)\n", mapname ? mapname : "<unknown>", g_world_atlas.texture_count);
+    return atlas_entry_count > 0;
 }
 
-void Atlas_SavePNG(const char *mapname)
+static qboolean Atlas_LoadJSON(const char *path)
 {
-	char dirname[MAX_OSPATH];
-	char filename[MAX_OSPATH];
-	char fullpath[MAX_OSPATH];
+    long len = 0;
+    char *json = (char *)COM_LoadMallocFile_TextMode_OSPath(path, &len);
+    qboolean ok;
 
-	if (!g_world_atlas.built || !g_world_atlas.pixels)
-		return;
+    if (!json)
+    {
+        Con_DPrintf("Atlas_LoadJSON: could not open %s\n", path);
+        return false;
+    }
 
-	q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
-	Sys_mkdir(dirname);
-
-	q_snprintf(filename, sizeof(filename), "atlas_dump/%s_atlas.png", mapname ? mapname : "map");
-	q_snprintf(fullpath, sizeof(fullpath), "%s/%s", com_gamedir, filename);
-
-	if (!Image_WritePNG(filename, g_world_atlas.pixels, g_world_atlas.atlas_w, g_world_atlas.atlas_h, 32, false))
-		Con_Printf("Atlas_SavePNG: failed to write %s\n", fullpath);
-	else
-		Con_Printf("Atlas_SavePNG: wrote %s\n", fullpath);
+    ok = Atlas_ParseJSON(json, (size_t)len);
+    Q_free(json);
+    return ok;
 }
 
-void Atlas_SaveJSON(const char *mapname)
+static qboolean Atlas_LoadPNG(const char *path)
 {
-    char dirname[MAX_OSPATH];
-    char filename[MAX_OSPATH];
-    FILE *f;
+    int channels = 0;
+    unsigned char *pixels;
+
+    pixels = stbi_load(path, &atlas_width, &atlas_height, &channels, 4);
+    if (!pixels)
+    {
+        Con_DPrintf("Atlas_LoadPNG: failed to load %s\n", path);
+        return false;
+    }
+
+    glGenTextures(1, &atlas_gl_id);
+    glBindTexture(GL_TEXTURE_2D, atlas_gl_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas_width, atlas_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+    Q_free(pixels);
+
+    memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
+    atlas_gltexture.target = GL_TEXTURE_2D;
+    atlas_gltexture.texnum = atlas_gl_id;
+    atlas_gltexture.width = (unsigned short)atlas_width;
+    atlas_gltexture.height = (unsigned short)atlas_height;
+    atlas_gltexture.flags = TEXPREF_BINDLESS;
+
+    if (gl_bindless_able && GL_GetTextureHandleARBFunc && GL_MakeTextureHandleResidentARBFunc)
+    {
+        atlas_gltexture.bindless_handle = GL_GetTextureHandleARBFunc(atlas_gl_id);
+        GL_MakeTextureHandleResidentARBFunc(atlas_gltexture.bindless_handle);
+    }
+
+    return true;
+}
+
+static void Atlas_NormalizeMapName(const char *mapname, char *out, size_t out_size)
+{
+    char base[MAX_QPATH];
+    if (!mapname)
+    {
+        out[0] = '\0';
+        return;
+    }
+
+    COM_FileBase(mapname, base, sizeof(base));
+    q_strlcpy(out, base, out_size);
+}
+
+int Atlas_LoadForMap(const char *mapname)
+{
+    char basename[MAX_QPATH];
+    char png_path[MAX_OSPATH];
+    char json_path[MAX_OSPATH];
+
+    Atlas_Invalidate();
+
+    if (isDedicated)
+        return 0;
+
+    Atlas_NormalizeMapName(mapname, basename, sizeof(basename));
+    if (!basename[0])
+        return 0;
+
+    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
+    q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
+
+    if (!Sys_FileExists(png_path) || !Sys_FileExists(json_path))
+    {
+        Atlas_LogMissing();
+        return 0;
+    }
+
+    Con_Printf("Atlas_LoadForMap: loading atlas for %s\n", basename);
+
+    if (!Atlas_LoadPNG(png_path) || !Atlas_LoadJSON(json_path))
+    {
+        Atlas_Invalidate();
+        return 0;
+    }
+
+    atlas_enabled = true;
+    return 1;
+}
+
+atlas_rect_t Atlas_GetUV(const char *name)
+{
     int i;
 
-    if (!g_world_atlas.built)
-        return;
+    if (!atlas_enabled || !name)
+        return atlas_null_rect;
 
-    q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
-    Sys_mkdir(dirname);
-
-    q_snprintf(filename, sizeof(filename), "%s/%s_atlas.json", dirname, mapname ? mapname : "map");
-
-    f = fopen(filename, "w");
-    if (!f)
+    for (i = 0; i < atlas_entry_count; i++)
     {
-        Con_Printf("Atlas_SaveJSON: failed to open %s\n", filename);
-        return;
+        if (!q_strcasecmp(atlas_entries[i].name, name))
+            return atlas_entries[i].rect;
     }
 
-    fprintf(f, "{\n");
-    fprintf(f, "  \"atlas_width\": %d,\n", g_world_atlas.atlas_w);
-    fprintf(f, "  \"atlas_height\": %d,\n", g_world_atlas.atlas_h);
-    fprintf(f, "  \"textures\": [\n");
-
-    for (i = 0; i < g_world_atlas.texture_count; i++)
-    {
-        atlas_texture_t *tex = &g_world_atlas.textures[i];
-        atlas_rect_t *rect = &g_world_atlas.rects[i];
-        fprintf(f, "    { \"name\": \"%s\", \"x\": %d, \"y\": %d, \"w\": %d, \"h\": %d }%s\n",
-            tex->name,
-            rect->x, rect->y, rect->w, rect->h,
-            (i + 1 < g_world_atlas.texture_count) ? "," : "");
-    }
-
-    fprintf(f, "  ]\n");
-    fprintf(f, "}\n");
-
-    fclose(f);
-    Con_Printf("Atlas_SaveJSON: wrote %s\n", filename);
+    return atlas_null_rect;
 }
 
-void Atlas_OnMapStart(const char *mapname)
+int Atlas_TextureExists(const char *name)
 {
-	char dirname[MAX_OSPATH];
-	char png_path[MAX_OSPATH];
-	char json_path[MAX_OSPATH];
-	char png_relative[MAX_OSPATH];
-	const char *basename;
-
-	if (!mapname || mapname[0] == '*')
-		return;
-
-	basename = mapname ? mapname : "map";
-
-	q_snprintf(dirname, sizeof(dirname), "%s/atlas_dump", com_gamedir);
-	q_snprintf(png_relative, sizeof(png_relative), "atlas_dump/%s_atlas.png", basename);
-	q_snprintf(png_path, sizeof(png_path), "%s/%s", com_gamedir, png_relative);
-	q_snprintf(json_path, sizeof(json_path), "%s/%s_atlas.json", dirname, basename);
-
-	if (Sys_FileExists(png_path) && Sys_FileExists(json_path))
-	{
-		Con_Printf("Atlas_OnMapStart: loading existing texture atlas for %s\n", mapname ? mapname : "<unknown>");
-		return;
-	}
-
-	Con_Printf("Atlas_OnMapStart: writing texture atlas for %s\n", mapname ? mapname : "<unknown>");
-	Atlas_Build(mapname);
-	Atlas_SavePNG(mapname);
-	Atlas_SaveJSON(mapname);
+    atlas_rect_t r = Atlas_GetUV(name);
+    return r.exists;
 }
 
+GLuint Atlas_GetGLTexture(void)
+{
+    if (!atlas_enabled)
+        return 0;
+    return atlas_gl_id;
+}
 
-/*
- * Engine Integration Snippets (for reference)
- *
- * In GL_LoadTexture():
- * // === Texture Atlas Hook ===
- * // Atlas_RegisterTexture(name, width, height, rgba_buffer);
- *
- * In BSP-MIPTEX Load:
- * // === Texture Atlas Hook ===
- * // Atlas_RegisterTexture(mip->name, w, h, rgba);
- *
- * In Mod_LoadBrushModel():
- * // === Build CPU Atlas for this map ===
- * // Atlas_OnMapStart(loadmodel->name);
- *
- * In R_LoadExternalTexture():
- * // === Texture Atlas Hook ===
- * // Atlas_RegisterTexture(texture_name, width, height, rgba);
- */
+const gltexture_t *Atlas_GetGLTextureStruct(void)
+{
+    if (!atlas_enabled)
+        return NULL;
+    return &atlas_gltexture;
+}
+
