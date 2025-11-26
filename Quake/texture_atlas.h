@@ -2,40 +2,23 @@
 #define TEXTURE_ATLAS_H
 
 #include "quakedef.h"
+#include "gl_texmgr.h"
 
 #define ATLAS_MAX_TEXTURES 4096
-#define ATLAS_SIZE 4096
-
-typedef struct atlas_texture_s {
-    char name[64];
-    int width;
-    int height;
-    unsigned char *rgba; // 4x8-bit
-} atlas_texture_t;
 
 typedef struct atlas_rect_s {
-    int x, y, w, h;
+    float u1, v1, u2, v2;
+    int exists; // 1 = im atlas
 } atlas_rect_t;
 
-typedef struct world_atlas_s {
-    atlas_texture_t textures[ATLAS_MAX_TEXTURES];
-    atlas_rect_t rects[ATLAS_MAX_TEXTURES];
-
-    int texture_count;
-
-    int atlas_w;
-    int atlas_h;
-
-    unsigned char *pixels; // size atlas_w * atlas_h * 4
-    int built;
-} world_atlas_t;
-
 void Atlas_Init(void);
-void Atlas_Reset(void);
-void Atlas_RegisterTexture(const char *name, int w, int h, const unsigned char *rgba);
-void Atlas_Build(const char *mapname);
-void Atlas_SavePNG(const char *mapname);
-void Atlas_SaveJSON(const char *mapname);
-void Atlas_OnMapStart(const char *mapname);
+int Atlas_LoadForMap(const char *mapname);
+void Atlas_Invalidate(void);
+atlas_rect_t Atlas_GetUV(const char *name);
+int Atlas_TextureExists(const char *name);
+GLuint Atlas_GetGLTexture(void);
+
+// Internal helper for render code
+const gltexture_t *Atlas_GetGLTextureStruct(void);
 
 #endif // TEXTURE_ATLAS_H

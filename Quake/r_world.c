@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "texture_atlas.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -337,16 +338,22 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
 
-	if (t)
-	{
-		tx = t->gltexture;
-		fb = t->fullbright;
-		em = t->emissive;
-		if (r_lightmap_cheatsafe)
-			tx = fb = em = NULL;
-		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
-			fb = NULL;
-	}
+        if (t)
+        {
+                tx = t->gltexture;
+                fb = t->fullbright;
+                em = t->emissive;
+                if (Atlas_TextureExists(t->name))
+                {
+                        const gltexture_t *atlas_tex = Atlas_GetGLTextureStruct();
+                        if (atlas_tex)
+                                tx = (gltexture_t *)atlas_tex;
+                }
+                if (r_lightmap_cheatsafe)
+                        tx = fb = em = NULL;
+                if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
+                        fb = NULL;
+        }
 	else
 	{
 		tx = fb = whitetexture;
