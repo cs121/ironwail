@@ -2,6 +2,7 @@
  * Texture atlas loading for maps
  */
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -189,6 +190,63 @@ static void Atlas_LogMissing(void)
 {
     if (!atlas_enabled)
         Con_Printf("Texture atlas not loaded; falling back to legacy textures\n");
+}
+
+static bool Atlas_ReadFile(const char *path, uint8_t **out_data, size_t *out_size)
+{
+    FILE *f;
+    long len;
+    size_t size;
+
+    if (!path || !out_data || !out_size)
+        return false;
+
+    *out_data = NULL;
+    *out_size = 0;
+
+    f = fopen(path, "rb");
+    if (!f)
+        return false;
+
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return false;
+    }
+
+    len = ftell(f);
+    if (len < 0)
+    {
+        fclose(f);
+        return false;
+    }
+
+    size = (size_t)len;
+
+    if (fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return false;
+    }
+
+    *out_data = (uint8_t *)malloc(size ? size : 1);
+    if (!*out_data)
+    {
+        fclose(f);
+        return false;
+    }
+
+    if (size > 0 && fread(*out_data, 1, size, f) != size)
+    {
+        free(*out_data);
+        *out_data = NULL;
+        fclose(f);
+        return false;
+    }
+
+    fclose(f);
+    *out_size = size;
+    return true;
 }
 
 static const unsigned int *Atlas_SelectPalette(const gltexture_t *glt)
@@ -1149,6 +1207,65 @@ bool SaveAtlasAsDDS(const char *output_path, const uint8_t *rgba_pixels, int wid
     fclose(f);
     free(compressed);
     return true;
+}
+
+bool PackAtlasContainer(const char *atlas_path, const char *json_path, const char *dds_path)
+{
+    uint8_t *json_data = NULL;
+    uint8_t *dds_data = NULL;
+    size_t json_size = 0;
+    size_t dds_size = 0;
+    uint8_t header[16] = {0};
+    uint32_t json_offset = (uint32_t)sizeof(header);
+    uint32_t dds_offset;
+    FILE *f = NULL;
+
+    if (!atlas_path || !json_path || !dds_path)
+        return false;
+
+    if (!Atlas_ReadFile(json_path, &json_data, &json_size))
+        goto fail;
+
+    if (json_size > UINT32_MAX - json_offset)
+        goto fail;
+
+    dds_offset = json_offset + (uint32_t)json_size;
+
+    if (!Atlas_ReadFile(dds_path, &dds_data, &dds_size))
+        goto fail;
+
+    if (dds_size > UINT32_MAX - dds_offset)
+        goto fail;
+
+    memcpy(header, "ATLAS01", 7);
+    header[7] = 1; // version
+    memcpy(header + 8, &json_offset, sizeof(json_offset));
+    memcpy(header + 12, &dds_offset, sizeof(dds_offset));
+
+    f = fopen(atlas_path, "wb");
+    if (!f)
+        goto fail;
+
+    if (fwrite(header, 1, sizeof(header), f) != sizeof(header))
+        goto fail;
+
+    if (json_size && fwrite(json_data, 1, json_size, f) != json_size)
+        goto fail;
+
+    if (dds_size && fwrite(dds_data, 1, dds_size, f) != dds_size)
+        goto fail;
+
+    fclose(f);
+    free(json_data);
+    free(dds_data);
+    return true;
+
+fail:
+    if (f)
+        fclose(f);
+    free(json_data);
+    free(dds_data);
+    return false;
 }
 
 void Atlas_CreateFromFallbacks(qmodel_t *model)
