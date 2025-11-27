@@ -96,6 +96,9 @@ layout(location=3) out vec3 out_pos;
 #endif
 layout(location=6) noperspective out vec4 out_curr_clip;
 layout(location=7) noperspective out vec4 out_prev_clip;
+layout(location=8) flat out vec4 out_atlas_uv;
+layout(location=9) flat out vec2 out_orig_size;
+layout(location=10) flat out vec2 out_offset;
 
 void main()
 {
@@ -121,4 +124,7 @@ void main()
                 out_samplers0.zw = out_samplers0.xy;
         out_samplers1.xy = call.emhandle;
 #endif
+        out_atlas_uv = call.atlas_uv;
+        out_orig_size = call.orig_size;
+        out_offset = call.offset;
 }
