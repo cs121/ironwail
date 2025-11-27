@@ -33,6 +33,7 @@ static const atlas_rect_t atlas_null_rect = {0, 0, 0, 0, 0};
 static qboolean atlas_missing_for_map = false;
 static qboolean atlas_attempted_build = false;
 static char atlas_missing_basename[MAX_QPATH];
+static cvar_t atlas_use_original_dimensions = {"atlas_use_original_dimensions", "1", CVAR_NONE};
 
 extern cvar_t gl_fullbrights;
 extern unsigned int d_8to24table_opaque[256];
@@ -318,6 +319,7 @@ static void Atlas_DeleteGLTexture(void)
 
 void Atlas_Init(void)
 {
+    Cvar_RegisterVariable(&atlas_use_original_dimensions);
     Atlas_Invalidate();
 }
 
@@ -718,7 +720,39 @@ static byte *Atlas_CopyRGBA(const byte *src, int width, int height)
     return rgba;
 }
 
-static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *height, enum srcformat *fmt_out)
+static qboolean Atlas_SelectDimensions(const gltexture_t *glt, int *width, int *height, qboolean *using_gl_dims)
+{
+    qboolean prefer_source = atlas_use_original_dimensions.value != 0.0f;
+
+    *using_gl_dims = false;
+
+    if (prefer_source)
+    {
+        if (glt->source_width == 0 || glt->source_height == 0)
+        {
+            Con_Printf("Atlas: ERROR: missing source dimensions for %s\n", glt->name);
+            return false;
+        }
+
+        *width = (int)glt->source_width;
+        *height = (int)glt->source_height;
+        return true;
+    }
+
+    *width = glt->width;
+    *height = glt->height;
+    *using_gl_dims = true;
+
+    if (*width <= 0 || *height <= 0)
+    {
+        Con_Printf("Atlas: ERROR: invalid GL dimensions for %s (%d x %d)\n", glt->name, *width, *height);
+        return false;
+    }
+
+    return true;
+}
+
+static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *height, enum srcformat *fmt_out, qboolean *used_gl_dims)
 {
     int mark = Hunk_LowMark();
     byte *raw = NULL;
@@ -726,8 +760,19 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
     size_t bytes_per_pixel = (fmt == SRC_RGBA) ? 4 : 1;
     size_t expected_size;
 
-    *width = glt->source_width ? glt->source_width : glt->width;
-    *height = glt->source_height ? glt->source_height : glt->height;
+    if (!Atlas_SelectDimensions(glt, width, height, used_gl_dims))
+    {
+        Hunk_FreeToLowMark(mark);
+        return NULL;
+    }
+
+    if (*width <= 0 || *height <= 0)
+    {
+        Con_Printf("Atlas: ERROR: zero dimension for %s\n", glt->name);
+        Hunk_FreeToLowMark(mark);
+        return NULL;
+    }
+
     expected_size = (size_t)(*width) * (*height) * bytes_per_pixel;
 
     if (glt->source_file[0] && glt->source_offset)
@@ -743,10 +788,12 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
                 free(raw);
                 raw = NULL;
                 fclose(f);
-                Hunk_FreeToLowMark(mark);
-                return NULL;
             }
             fclose(f);
+        }
+        else
+        {
+            Con_Printf("Atlas: ERROR: failed to open source file %s\n", glt->source_file);
         }
     }
     else if (glt->source_file[0])
@@ -759,6 +806,10 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
             if (raw)
                 memcpy(raw, loaded, expected_size);
         }
+        else
+        {
+            Con_Printf("Atlas: ERROR: could not load %s for atlas\n", glt->source_file);
+        }
     }
     else if (glt->source_offset)
     {
@@ -768,6 +819,13 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
             if (raw)
                 memcpy(raw, (const void *)glt->source_offset, expected_size);
         }
+    }
+
+    if (!raw)
+    {
+        Con_Printf("Atlas: ERROR: missing pixel data for %s\n", glt->name);
+        Hunk_FreeToLowMark(mark);
+        return NULL;
     }
 
     if (fmt_out)
@@ -780,7 +838,8 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
 static byte *Atlas_ExtractTexture(const gltexture_t *glt, int *width, int *height)
 {
     enum srcformat fmt = SRC_INDEXED;
-    byte *source = Atlas_ReadTextureSource(glt, width, height, &fmt);
+    qboolean used_gl_dims = false;
+    byte *source = Atlas_ReadTextureSource(glt, width, height, &fmt, &used_gl_dims);
     byte *rgba = NULL;
 
     if (!source || *width <= 0 || *height <= 0)
@@ -788,6 +847,17 @@ static byte *Atlas_ExtractTexture(const gltexture_t *glt, int *width, int *heigh
         free(source);
         return NULL;
     }
+
+    if (glt->source_width && glt->source_height && ((int)glt->source_width != glt->width || (int)glt->source_height != glt->height))
+        Con_Printf("Atlas: GL resampled %s; using disk dimensions %ux%u\n", glt->name, glt->source_width, glt->source_height);
+
+    if (glt->width != *width || glt->height != *height)
+        Con_Printf("Atlas: dimension mismatch: file=%dx%d vs GL=%dx%d for %s\n", *width, *height, glt->width, glt->height, glt->name);
+
+    if (used_gl_dims)
+        Con_Printf("Atlas: warning: using GL dimensions for %s (atlas_use_original_dimensions=0)\n", glt->name);
+
+    Con_Printf("Atlas: %s (%dx%d src, %dx%d gl)\n", glt->name, *width, *height, glt->width, glt->height);
 
     if (fmt == SRC_RGBA)
         rgba = Atlas_CopyRGBA(source, *width, *height);
@@ -805,6 +875,27 @@ static int Atlas_SortEntries(const void *a, const void *b)
     const atlas_build_entry_t *ea = (const atlas_build_entry_t *)a;
     const atlas_build_entry_t *eb = (const atlas_build_entry_t *)b;
     return eb->height - ea->height;
+}
+
+static int Atlas_FilterInvalidEntries(atlas_build_entry_t *entries, int count)
+{
+    int i, out = 0;
+
+    for (i = 0; i < count; ++i)
+    {
+        if (!entries[i].rgba || entries[i].width <= 0 || entries[i].height <= 0)
+        {
+            Con_Printf("Atlas: ERROR: skipping invalid entry '%s' (w=%d h=%d data=%p)\n", entries[i].name, entries[i].width, entries[i].height, (void *)entries[i].rgba);
+            free(entries[i].rgba);
+            continue;
+        }
+
+        if (out != i)
+            entries[out] = entries[i];
+        ++out;
+    }
+
+    return out;
 }
 
 static qboolean Atlas_PackEntries(atlas_build_entry_t *entries, int count, int atlas_size)
@@ -967,6 +1058,21 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     {
         Con_Printf("Atlas_CreateFromFallbacks: no entries found for '%s'\n", basename);
         goto cleanup;
+    }
+
+    entry_count = Atlas_FilterInvalidEntries(entries, entry_count);
+
+    if (entry_count == 0)
+    {
+        Con_Printf("Atlas_CreateFromFallbacks: all entries invalid for '%s'\n", basename);
+        goto cleanup;
+    }
+
+    max_dim = 0;
+    for (i = 0; i < entry_count; ++i)
+    {
+        max_dim = q_max(max_dim, entries[i].width);
+        max_dim = q_max(max_dim, entries[i].height);
     }
 
     qsort(entries, entry_count, sizeof(*entries), Atlas_SortEntries);
