@@ -2,6 +2,7 @@
 #define TEXTURE_ATLAS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "quakedef.h"
@@ -13,6 +14,15 @@ typedef struct atlas_rect_s {
     float u1, v1, u2, v2;
     int exists; // 1 = im atlas
 } atlas_rect_t;
+
+typedef struct AtlasInfo_s {
+    char *json_blob;
+    size_t json_size;
+    GLuint texnum;
+    int width;
+    int height;
+    int has_mips;
+} AtlasInfo;
 
 struct qmodel_s;
 
@@ -29,5 +39,6 @@ const gltexture_t *Atlas_GetGLTextureStruct(void);
 
 bool SaveAtlasAsDDS(const char *output_path, const uint8_t *rgba_pixels, int width, int height, bool has_alpha);
 bool PackAtlasContainer(const char *atlas_path, const char *json_path, const char *dds_path);
+bool LoadAtlasContainer(const char *atlas_path, AtlasInfo *out);
 
 #endif // TEXTURE_ATLAS_H

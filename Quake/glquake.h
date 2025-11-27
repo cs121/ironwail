@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef GLQUAKE_H
 #define GLQUAKE_H
 
+#include <stddef.h>
+
 void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
 void GL_Set2D (void);
@@ -651,6 +653,7 @@ void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
 
 GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips);
+GLuint GL_LoadDDS_Memory (const uint8_t *data, size_t size, int *w, int *h, int *has_mips);
 GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips);
 
 void GL_BindBuffer (GLenum target, GLuint buffer);

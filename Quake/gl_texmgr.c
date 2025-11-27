@@ -2322,109 +2322,132 @@ static qboolean DDS_ParseFormat (uint32_t fourcc, uint32_t dxgi_format, GLenum *
                 return false;
         }
 
-        if (out_format)
-                *out_format = format;
-        if (block_size)
-                *block_size = block;
+	if (out_format)
+		*out_format = format;
+	if (block_size)
+		*block_size = block;
 
-        return block != 0;
+	return block != 0;
+}
+
+static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int *h, int *has_mips)
+{
+	dds_header_t header;
+	dds_header_dxt10_t dx10;
+	uint32_t fourcc;
+	uint32_t width, height, mipmaps;
+	int block_size = 0;
+	GLenum format = GL_RGBA8;
+	GLuint texnum = 0;
+	size_t remaining = size;
+
+	if (!data || size < sizeof(header) + 4)
+		return 0;
+
+	if (memcmp (data, "DDS ", 4))
+		return 0;
+
+	data += 4;
+	remaining -= 4;
+
+	if (remaining < sizeof(header))
+		return 0;
+
+	memcpy (&header, data, sizeof(header));
+	data += sizeof(header);
+	remaining -= sizeof(header);
+
+	if (LittleLong (header.size) != sizeof(header) || LittleLong (header.ddspf.size) != sizeof(header.ddspf))
+		return 0;
+
+	width = LittleLong (header.width);
+	height = LittleLong (header.height);
+	mipmaps = LittleLong (header.mipMapCount);
+	fourcc = LittleLong (header.ddspf.fourCC);
+
+	if (!width || !height)
+		return 0;
+
+	memset (&dx10, 0, sizeof(dx10));
+	if (fourcc == DDS_FOURCC('D','X','1','0'))
+	{
+		if (remaining < sizeof(dx10))
+			return 0;
+
+		memcpy (&dx10, data, sizeof(dx10));
+		data += sizeof(dx10);
+		remaining -= sizeof(dx10);
+
+		dx10.dxgiFormat = LittleLong (dx10.dxgiFormat);
+		dx10.resourceDimension = LittleLong (dx10.resourceDimension);
+		dx10.arraySize = LittleLong (dx10.arraySize);
+
+		if (dx10.resourceDimension != 3 || dx10.arraySize != 1)
+			return 0;
+	}
+
+	if (!DDS_ParseFormat (fourcc, dx10.dxgiFormat, &format, &block_size))
+		return 0;
+
+	mipmaps = mipmaps ? mipmaps : 1;
+
+	glGenTextures (1, &texnum);
+	glBindTexture (GL_TEXTURE_2D, texnum);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mipmaps - 1);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+
+	for (uint32_t level = 0, lw = width, lh = height; level < mipmaps; level++, lw = max (1u, lw >> 1), lh = max (1u, lh >> 1))
+	{
+		size_t level_size = ((lw + 3) / 4) * ((lh + 3) / 4) * (size_t)block_size;
+
+		if (level_size > remaining)
+			goto fail;
+
+		glCompressedTexImage2D (GL_TEXTURE_2D, level, format, lw, lh, 0, (GLsizei)level_size, data);
+		data += level_size;
+		remaining -= level_size;
+	}
+
+	if (w)
+		*w = width;
+	if (h)
+		*h = height;
+	if (has_mips)
+		*has_mips = (mipmaps > 1);
+
+	return texnum;
+
+fail:
+	if (texnum)
+		GL_DeleteTexturesFunc (1, &texnum);
+	return 0;
 }
 
 GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips)
 {
-        FILE *f;
-        char magic[4];
-        dds_header_t header;
-        dds_header_dxt10_t dx10;
-        uint32_t fourcc;
-        uint32_t width, height, mipmaps;
-        int block_size = 0;
-        GLenum format = GL_RGBA8;
-        GLuint texnum = 0;
+	byte *filebuf = NULL;
+	int len;
+	GLuint texnum;
 
-        if (!path || !*path)
-                return 0;
+	if (!path || !*path)
+		return 0;
 
-        if (COM_FOpenFile (path, &f, NULL) < 0 || !f)
-                return 0;
+	len = COM_LoadMallocFile (path, (void **)&filebuf);
+	if (len <= 0 || !filebuf)
+		return 0;
 
-        if (fread (magic, 1, sizeof(magic), f) != sizeof(magic) || memcmp (magic, "DDS ", sizeof(magic)))
-                goto fail;
+	texnum = GL_LoadDDS_Memory ((const uint8_t *)filebuf, (size_t)len, w, h, has_mips);
+	COM_FreeFile (filebuf);
+	return texnum;
+}
 
-        if (fread (&header, 1, sizeof(header), f) != sizeof(header))
-                goto fail;
-
-        if (LittleLong (header.size) != sizeof(header) || LittleLong (header.ddspf.size) != sizeof(header.ddspf))
-                goto fail;
-
-        width = LittleLong (header.width);
-        height = LittleLong (header.height);
-        mipmaps = LittleLong (header.mipMapCount);
-        fourcc = LittleLong (header.ddspf.fourCC);
-
-        if (!width || !height)
-                goto fail;
-
-        memset (&dx10, 0, sizeof(dx10));
-        if (fourcc == DDS_FOURCC('D','X','1','0'))
-        {
-                if (fread (&dx10, 1, sizeof(dx10), f) != sizeof(dx10))
-                        goto fail;
-
-                dx10.dxgiFormat = LittleLong (dx10.dxgiFormat);
-                dx10.resourceDimension = LittleLong (dx10.resourceDimension);
-                dx10.arraySize = LittleLong (dx10.arraySize);
-
-                if (dx10.resourceDimension != 3 || dx10.arraySize != 1)
-                        goto fail;
-        }
-
-        if (!DDS_ParseFormat (fourcc, dx10.dxgiFormat, &format, &block_size))
-                goto fail;
-
-        mipmaps = mipmaps ? mipmaps : 1;
-
-        glGenTextures (1, &texnum);
-        glBindTexture (GL_TEXTURE_2D, texnum);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mipmaps - 1);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-
-        for (uint32_t level = 0, lw = width, lh = height; level < mipmaps; level++, lw = max (1u, lw >> 1), lh = max (1u, lh >> 1))
-        {
-                size_t level_size = ((lw + 3) / 4) * ((lh + 3) / 4) * (size_t)block_size;
-                byte *data = (byte *)malloc (level_size);
-
-                if (!data)
-                        goto fail;
-                if (fread (data, 1, level_size, f) != level_size)
-                {
-                        free (data);
-                        goto fail;
-                }
-
-                glCompressedTexImage2D (GL_TEXTURE_2D, level, format, lw, lh, 0, (GLsizei)level_size, data);
-                free (data);
-        }
-
-        if (w)
-                *w = width;
-        if (h)
-                *h = height;
-        if (has_mips)
-                *has_mips = (mipmaps > 1);
-
-        fclose (f);
-        return texnum;
-
-fail:
-        if (texnum)
-                GL_DeleteTexturesFunc (1, &texnum);
-        fclose (f);
-        return 0;
+GLuint GL_LoadDDS_Memory (const uint8_t *data, size_t size, int *w, int *h, int *has_mips)
+{
+	return GL_LoadDDS_Internal (data, size, w, h, has_mips);
 }
 
 static int GL_CalcMipCount (int width, int height)
