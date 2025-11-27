@@ -47,6 +47,7 @@ static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_s
 {
     size_t len;
     const char *start;
+    const char *slash;
 
     if (!name)
     {
@@ -59,6 +60,15 @@ static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_s
         ;
 
     q_strlcpy(out, start, out_size);
+
+    // strip leading special characters like *water, +anim, -alternate
+    while (out[0] == '*' || out[0] == '+' || out[0] == '-')
+        memmove(out, out + 1, strlen(out));
+
+    // strip directory components so atlas entries match basename
+    slash = strrchr(out, '/');
+    if (slash)
+        memmove(out, slash + 1, strlen(slash + 1) + 1);
 
     // trim trailing whitespace
     len = strlen(out);
@@ -371,8 +381,8 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         Atlas_NormalizeTextureName(name, entry->name, sizeof(entry->name));
         entry->rect.u1 = (float)x / (float)atlas_width;
         entry->rect.v1 = (float)y / (float)atlas_height;
-        entry->rect.u2 = (float)(x + w) / (float)atlas_width;
-        entry->rect.v2 = (float)(y + h) / (float)atlas_height;
+        entry->rect.u2 = (float)w / (float)atlas_width;
+        entry->rect.v2 = (float)h / (float)atlas_height;
         entry->rect.exists = 1;
         entry->logged = false;
 
@@ -890,17 +900,6 @@ atlas_rect_t Atlas_GetUV(const char *name)
         return atlas_null_rect;
 
     Atlas_NormalizeTextureName(name, normalized, sizeof(normalized));
-    // remove leading special chars for better matching
-    if (normalized[0] == '*' || normalized[0] == '+' || normalized[0] == '-')
-        memmove(normalized, normalized + 1, strlen(normalized));
-
-    // strip directory components
-    {
-        char *slash = strrchr(normalized, '/');
-        if (slash)
-            memmove(normalized, slash + 1, strlen(slash + 1) + 1);
-    }
-
     if (!normalized[0])
         return atlas_null_rect;
 

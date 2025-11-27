@@ -84,6 +84,9 @@ layout(location=3) in vec3 in_pos;
 #endif
 layout(location=6) noperspective in vec4 in_curr_clip;
 layout(location=7) noperspective in vec4 in_prev_clip;
+layout(location=8) flat in vec4 in_atlas_uv;
+layout(location=9) flat in vec2 in_orig_size;
+layout(location=10) flat in vec2 in_offset;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -128,26 +131,31 @@ void main()
 {
         vec3 fullbright = vec3(0.0);
         vec3 emissive = vec3(0.0);
-        vec2 uv = in_uv * 2.0 + 0.125 * sin(in_uv.yx * (3.14159265 * 2.0) + Time);
+        vec2 uv = in_uv;
+        uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
+        uv += in_offset;
+        vec2 atlas_size = max(in_orig_size, vec2(1.0));
+        vec2 texnorm = uv / atlas_size;
+        vec2 atlas_uv = in_atlas_uv.xy + texnorm * in_atlas_uv.zw;
 #if BINDLESS
         sampler2D Tex = sampler2D(in_samplers0.xy);
         if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
         {
                 sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
-                fullbright = texture(FullbrightTex, uv).rgb;
+                fullbright = texture(FullbrightTex, atlas_uv).rgb;
         }
         if ((in_flags & CF_USE_EMISSIVE) != 0u)
         {
                 sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
-                emissive = texture(EmissiveSampler, uv).rgb;
+                emissive = texture(EmissiveSampler, atlas_uv).rgb;
         }
 #else
         if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
-                fullbright = texture(FullbrightTex, uv).rgb;
+                fullbright = texture(FullbrightTex, atlas_uv).rgb;
         if ((in_flags & CF_USE_EMISSIVE) != 0u)
-                emissive = texture(EmissiveTex, uv).rgb;
+                emissive = texture(EmissiveTex, atlas_uv).rgb;
 #endif
-        vec4 result = texture(Tex, uv);
+        vec4 result = texture(Tex, atlas_uv);
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
