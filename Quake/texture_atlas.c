@@ -1268,6 +1268,87 @@ fail:
     return false;
 }
 
+bool LoadAtlasContainer(const char *atlas_path, AtlasInfo *out)
+{
+    uint8_t *data = NULL;
+    uint8_t *dds_copy = NULL;
+    char *json_copy = NULL;
+    size_t size = 0;
+    uint32_t json_offset = 0;
+    uint32_t dds_offset = 0;
+    size_t json_size;
+    size_t dds_size;
+    GLuint texnum = 0;
+    int width = 0;
+    int height = 0;
+    int has_mips = 0;
+    bool ok = false;
+
+    if (!atlas_path || !out)
+        return false;
+
+    memset(out, 0, sizeof(*out));
+
+    if (!Atlas_ReadFile(atlas_path, &data, &size))
+        return false;
+
+    if (size < 16)
+        goto fail;
+
+    if (memcmp(data, "ATLAS01", 7) != 0 || data[7] != 1)
+        goto fail;
+
+    memcpy(&json_offset, data + 8, sizeof(json_offset));
+    memcpy(&dds_offset, data + 12, sizeof(dds_offset));
+
+    json_offset = LittleLong(json_offset);
+    dds_offset = LittleLong(dds_offset);
+
+    if (json_offset < 16 || json_offset > size || dds_offset > size || json_offset > dds_offset)
+        goto fail;
+
+    json_size = (size_t)(dds_offset - json_offset);
+    dds_size = size - dds_offset;
+
+    json_copy = (char *)malloc(json_size + 1);
+    if (!json_copy)
+        goto fail;
+
+    if (json_size)
+        memcpy(json_copy, data + json_offset, json_size);
+    json_copy[json_size] = '\0';
+
+    dds_copy = (uint8_t *)malloc(dds_size ? dds_size : 1);
+    if (!dds_copy)
+        goto fail;
+
+    if (dds_size)
+        memcpy(dds_copy, data + dds_offset, dds_size);
+
+    texnum = GL_LoadDDS_Memory(dds_copy, dds_size, &width, &height, &has_mips);
+
+    if (!texnum)
+        goto fail;
+
+    out->json_blob = json_copy;
+    out->json_size = json_size;
+    out->texnum = texnum;
+    out->width = width;
+    out->height = height;
+    out->has_mips = has_mips;
+    ok = true;
+
+fail:
+    free(dds_copy);
+    free(data);
+    if (!ok)
+    {
+        free(json_copy);
+    }
+
+    return ok;
+}
+
 void Atlas_CreateFromFallbacks(qmodel_t *model)
 {
     atlas_build_entry_t *entries = NULL;
