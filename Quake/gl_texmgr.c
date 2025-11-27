@@ -100,6 +100,63 @@ static GLuint gl_samplers[NUM_GLMODES * 2]; // x2: nomip + mip
 
 texfilter_t gl_texfilter;
 
+static qboolean TexMgr_ReadImageHeader (const char *filename, unsigned int *width, unsigned int *height)
+{
+        FILE *f;
+        const char *ext;
+        unsigned char header[40];
+        unsigned int w = 0, h = 0;
+
+        if (!filename || !*filename)
+                return false;
+
+        ext = strrchr(filename, '.');
+        if (!ext || !ext[1])
+                return false;
+        ext++;
+
+        if (COM_FOpenFile (filename, &f, NULL) < 0 || !f)
+                return false;
+
+        if (!q_strcasecmp(ext, "png"))
+        {
+                if (fread(header, 1, 24, f) == 24)
+                {
+                        static const unsigned char sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+                        if (!memcmp(header, sig, sizeof(sig)))
+                        {
+                                w = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+                                h = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                        }
+                }
+        }
+        else if (!q_strcasecmp(ext, "tga"))
+        {
+                if (fread(header, 1, 18, f) == 18)
+                {
+                        w = (unsigned int)(header[12] | (header[13] << 8));
+                        h = (unsigned int)(header[14] | (header[15] << 8));
+                }
+        }
+        else if (!q_strcasecmp(ext, "wal"))
+        {
+                if (fread(header, 1, sizeof(header), f) == sizeof(header))
+                {
+                        w = (unsigned int)(header[32] | (header[33] << 8) | (header[34] << 16) | (header[35] << 24));
+                        h = (unsigned int)(header[36] | (header[37] << 8) | (header[38] << 16) | (header[39] << 24));
+                }
+        }
+
+        fclose(f);
+
+        if (width)
+                *width = w;
+        if (height)
+                *height = h;
+
+        return w > 0 && h > 0;
+}
+
 
 /*
 ===============
@@ -1558,20 +1615,33 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 		glt->target = GL_TEXTURE_2D_ARRAY;
 	else
 		glt->target = GL_TEXTURE_2D;
-	q_strlcpy (glt->name, name, sizeof(glt->name));
-	glt->width = width;
-	glt->height = height;
-	glt->depth = depth;
-	glt->compression = 1;
-	glt->flags = flags;
-	glt->shirt = -1;
-	glt->pants = -1;
-	q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
-	glt->source_offset = source_offset;
-	glt->source_format = format;
-	glt->source_width = width;
-	glt->source_height = height;
-	glt->source_crc = crc;
+        q_strlcpy (glt->name, name, sizeof(glt->name));
+        glt->width = width;
+        glt->height = height;
+        glt->depth = depth;
+        glt->compression = 1;
+        glt->flags = flags;
+        glt->shirt = -1;
+        glt->pants = -1;
+        q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
+        glt->source_offset = source_offset;
+        glt->source_format = format;
+        glt->source_width = 0;
+        glt->source_height = 0;
+        {
+                unsigned int header_w = 0, header_h = 0;
+
+                if (source_file && source_file[0] && TexMgr_ReadImageHeader(source_file, &header_w, &header_h))
+                {
+                        glt->source_width = header_w;
+                        glt->source_height = header_h;
+                }
+                if (!glt->source_width)
+                        glt->source_width = width;
+                if (!glt->source_height)
+                        glt->source_height = height;
+        }
+        glt->source_crc = crc;
 
 	//upload it
 	mark = Hunk_LowMark();
