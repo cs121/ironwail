@@ -131,11 +131,10 @@ void main()
 {
         vec3 fullbright = vec3(0.0);
         vec3 emissive = vec3(0.0);
-        vec2 uv = in_uv;
-        uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
-        uv += in_offset;
-        vec2 atlas_size = max(in_orig_size, vec2(1.0));
-        vec2 texnorm = uv / atlas_size;
+        vec2 world_uv = in_uv;
+        world_uv = world_uv * 2.0 + 0.125 * sin(world_uv.yx * (3.14159265 * 2.0) + Time);
+        world_uv += in_offset;
+        vec2 texnorm = world_uv / in_orig_size;
         vec2 atlas_uv = in_atlas_uv.xy + texnorm * in_atlas_uv.zw;
 #if BINDLESS
         sampler2D Tex = sampler2D(in_samplers0.xy);
