@@ -48,6 +48,7 @@ static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_s
     size_t len;
     const char *start;
     const char *slash;
+    char original[MAX_QPATH];
 
     if (!name)
     {
@@ -55,11 +56,17 @@ static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_s
         return;
     }
 
+    q_strlcpy(original, name, sizeof(original));
+
     // ignore leading whitespace so atlas entries don't need to match stray padding
-    for (start = name; *start == ' ' || *start == '\t' || *start == '\r' || *start == '\n'; ++start)
+    for (start = name; q_isspace((int)*start); ++start)
         ;
 
     q_strlcpy(out, start, out_size);
+
+    // normalize to lowercase immediately so extensions and directories match
+    for (size_t i = 0; out[i]; ++i)
+        out[i] = q_tolower(out[i]);
 
     // strip leading special characters like *water, +anim, -alternate
     while (out[0] == '*' || out[0] == '+' || out[0] == '-')
@@ -72,15 +79,24 @@ static void Atlas_NormalizeTextureName(const char *name, char *out, size_t out_s
 
     // trim trailing whitespace
     len = strlen(out);
-    while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '\t' || out[len - 1] == '\r' || out[len - 1] == '\n'))
+    while (len > 0 && q_isspace((int)out[len - 1]))
     {
         out[len - 1] = '\0';
         --len;
     }
 
-    // normalize to lowercase so atlas lookups are consistent on case-sensitive filesystems
-    for (size_t i = 0; i < len; ++i)
-        out[i] = q_tolower(out[i]);
+    // strip common extensions
+    if (len >= 4)
+    {
+        if (!q_strcasecmp(out + len - 4, ".tga") || !q_strcasecmp(out + len - 4, ".png") ||
+            !q_strcasecmp(out + len - 4, ".wal") || !q_strcasecmp(out + len - 4, ".bmp"))
+        {
+            out[len - 4] = '\0';
+        }
+    }
+
+    if (q_strcasecmp(original, out))
+        Con_DPrintf("Atlas: normalized '%s' -> '%s'\n", original, out);
 }
 
 static const char *Atlas_SkipWhitespace(const char *p, const char *end)
@@ -322,6 +338,9 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
     const char *textures_block;
     const char *cursor;
     int width = 0, height = 0;
+    int parsed_entries = 0;
+
+    Con_Printf("Atlas_ParseJSON: starting (%zu bytes)\n", len);
 
     if (!Atlas_ParseIntField(json, end, "atlas_width", &width) || !Atlas_ParseIntField(json, end, "atlas_height", &height))
     {
@@ -329,8 +348,16 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         return false;
     }
 
+    if (width <= 0 || height <= 0)
+    {
+        Con_Printf("Atlas_ParseJSON: invalid atlas dimensions (%d x %d)\n", width, height);
+        return false;
+    }
+
     atlas_width = width;
     atlas_height = height;
+
+    Con_DPrintf("Atlas_ParseJSON: atlas dimensions %d x %d\n", atlas_width, atlas_height);
 
     textures_block = Atlas_FindInRange(json, end, "\"textures\"");
     if (!textures_block)
@@ -367,14 +394,28 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
             return false;
         }
 
-        if (!Atlas_ParseStringField(obj_start, obj_end, "name", name, sizeof(name)) ||
-            !Atlas_ParseIntField(obj_start, obj_end, "x", &x) ||
+        if (!Atlas_ParseStringField(obj_start, obj_end, "name", name, sizeof(name)))
+        {
+            Con_Printf("Atlas_ParseJSON: malformed texture entry (missing name)\n");
+            cursor = obj_end + 1;
+            continue;
+        }
+
+        if (!Atlas_ParseIntField(obj_start, obj_end, "x", &x) ||
             !Atlas_ParseIntField(obj_start, obj_end, "y", &y) ||
             !Atlas_ParseIntField(obj_start, obj_end, "w", &w) ||
             !Atlas_ParseIntField(obj_start, obj_end, "h", &h))
         {
-            Con_Printf("Atlas_ParseJSON: malformed texture entry\n");
-            return false;
+            Con_Printf("Atlas_ParseJSON: malformed texture entry for '%s' (coords missing)\n", name);
+            cursor = obj_end + 1;
+            continue;
+        }
+
+        if (w <= 0 || h <= 0)
+        {
+            Con_Printf("Atlas_ParseJSON: invalid rect size for '%s' (%d x %d)\n", name, w, h);
+            cursor = obj_end + 1;
+            continue;
         }
 
         entry = &atlas_entries[atlas_entry_count++];
@@ -385,6 +426,8 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         entry->rect.v1 = (float)y / (float)atlas_height;
         entry->rect.u2 = (float)w / (float)atlas_width;   // width_norm
         entry->rect.v2 = (float)h / (float)atlas_height;  // height_norm
+        if (entry->rect.u2 == 0 || entry->rect.v2 == 0)
+            Con_Printf("Atlas_ParseJSON: WARNING: zero-size rect for '%s' (u2=%f, v2=%f)\n", entry->name, entry->rect.u2, entry->rect.v2);
         entry->rect.exists = 1;
         entry->logged = false;
 
@@ -393,10 +436,22 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
         Atlas_ParseIntField(obj_start, obj_end, "ox", &entry->offset_x);
         Atlas_ParseIntField(obj_start, obj_end, "oy", &entry->offset_y);
 
+        ++parsed_entries;
+        Con_DPrintf("Atlas_ParseJSON: added entry '%s' x=%d y=%d w=%d h=%d\n", entry->name, x, y, w, h);
+
         cursor = obj_end + 1;
     }
 
-    return atlas_entry_count > 0;
+    Con_DPrintf("Atlas_ParseJSON: reached end of file\n");
+
+    if (parsed_entries == 0)
+    {
+        Con_Printf("Atlas_ParseJSON: no valid textures parsed\n");
+        return false;
+    }
+
+    Con_Printf("Atlas_ParseJSON: parsed %d entries\n", parsed_entries);
+    return true;
 }
 
 static qboolean Atlas_LoadJSON(const char *path)
@@ -425,6 +480,8 @@ static qboolean Atlas_LoadJSON(const char *path)
     terminated[len] = '\0';
 
     ok = Atlas_ParseJSON(terminated, (size_t)len);
+    if (!ok)
+        Con_Printf("Atlas_LoadJSON: failed to parse %s\n", path);
     free(terminated);
     free(json);
     return ok;
@@ -519,27 +576,93 @@ int Atlas_LoadForMap(const char *mapname)
     q_strlcpy(atlas_missing_basename, basename, sizeof(atlas_missing_basename));
     atlas_attempted_build = false;
 
+    Con_Printf("Atlas_LoadForMap: checking '%s'\n", basename);
+
     q_snprintf(png_path, sizeof(png_path), "atlas/%s_atlas.png", basename);
     q_snprintf(json_path, sizeof(json_path), "atlas/%s_atlas.json", basename);
 
-    if (!COM_FileExists(png_path, NULL) || !COM_FileExists(json_path, NULL))
     {
-        Atlas_LogMissing();
-        atlas_missing_for_map = true;
-        return 0;
+        qboolean png_exists = COM_FileExists(png_path, NULL);
+        qboolean json_exists = COM_FileExists(json_path, NULL);
+        Con_DPrintf("Atlas_LoadForMap: PNG %s\n", png_exists ? "found" : "missing");
+        Con_DPrintf("Atlas_LoadForMap: JSON %s\n", json_exists ? "found" : "missing");
+
+        if (png_exists && !json_exists)
+        {
+            findfile_t *find;
+            char corrected[MAX_OSPATH];
+            qboolean corrected_case = false;
+            char expected[MAX_QPATH];
+
+            q_snprintf(expected, sizeof(expected), "%s_atlas.json", basename);
+
+            for (find = Sys_FindFirst("atlas", "json"); find; find = Sys_FindNext(find))
+            {
+                if (find->attribs & FA_DIRECTORY)
+                    continue;
+                if (!q_strcasecmp(find->name, expected))
+                {
+                    if (q_strcmp(find->name, expected))
+                    {
+                        q_snprintf(corrected, sizeof(corrected), "atlas/%s", find->name);
+                        Con_Printf("Atlas: case mismatch corrected: using '%s'\n", corrected);
+                        q_strlcpy(json_path, corrected, sizeof(json_path));
+                        corrected_case = true;
+                    }
+                    break;
+                }
+            }
+            if (find)
+                Sys_FindClose(find);
+
+            if (!json_exists && corrected_case == false)
+            {
+                Con_Printf("Atlas: JSON missing but PNG exists – INVALID ATLAS\n");
+                Atlas_LogMissing();
+                atlas_missing_for_map = false;
+                return 0;
+            }
+        }
+        else if (!png_exists && json_exists)
+        {
+            Con_Printf("Atlas: PNG missing but JSON exists – INVALID ATLAS\n");
+            Atlas_LogMissing();
+            atlas_missing_for_map = false;
+            return 0;
+        }
+        else if (!png_exists && !json_exists)
+        {
+            Con_Printf("Atlas: atlas files missing for '%s'\n", basename);
+            Atlas_LogMissing();
+            atlas_missing_for_map = true;
+            return 0;
+        }
     }
 
     Con_Printf("Atlas_LoadForMap: loading atlas for %s\n", basename);
 
-    if (!Atlas_LoadPNG(png_path) || !Atlas_LoadJSON(json_path))
     {
-        Atlas_Invalidate();
-        Atlas_LogMissing();
-        atlas_missing_for_map = true;
-        return 0;
+        qboolean png_loaded = Atlas_LoadPNG(png_path);
+        qboolean json_loaded = Atlas_LoadJSON(json_path);
+
+        if (!png_loaded || !json_loaded)
+        {
+            Atlas_Invalidate();
+            Atlas_LogMissing();
+            atlas_missing_for_map = (!png_loaded && !json_loaded);
+            if (!atlas_missing_for_map)
+                Con_Printf("Atlas: atlas load aborted due to partial failure (png=%d, json=%d)\n", png_loaded, json_loaded);
+            return 0;
+        }
     }
 
     atlas_missing_for_map = false;
+    if (atlas_width <= 0 || atlas_height <= 0)
+    {
+        Con_Printf("Atlas: ERROR: invalid atlas size (%d x %d); disabling atlas\n", atlas_width, atlas_height);
+        Atlas_Invalidate();
+        return 0;
+    }
     atlas_enabled = true;
     Con_DPrintf("Atlas_LoadForMap: atlas ready (%dx%d, %d entries)\n", atlas_width, atlas_height, atlas_entry_count);
     return 1;
@@ -775,6 +898,17 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
 
     atlas_attempted_build = true;
 
+    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
+    q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
+
+    if (COM_FileExists(png_path, NULL) || COM_FileExists(json_path, NULL))
+    {
+        Con_Printf("Atlas_CreateFromFallbacks: skipping build; atlas already exists for '%s'\n", basename);
+        return;
+    }
+
+    Con_Printf("Atlas_CreateFromFallbacks: building fallback atlas for '%s'\n", basename);
+
     entries = (atlas_build_entry_t *)calloc((size_t)model->numtextures, sizeof(*entries));
     if (!entries)
         return;
@@ -830,7 +964,10 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     }
 
     if (entry_count == 0 || max_dim == 0)
+    {
+        Con_Printf("Atlas_CreateFromFallbacks: no entries found for '%s'\n", basename);
         goto cleanup;
+    }
 
     qsort(entries, entry_count, sizeof(*entries), Atlas_SortEntries);
 
@@ -847,7 +984,10 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
 
     atlas_pixels = (byte *)calloc((size_t)atlas_size * atlas_size * 4, 1);
     if (!atlas_pixels)
+    {
+        Con_Printf("Atlas_CreateFromFallbacks: failed to allocate atlas pixels for '%s'\n", basename);
         goto cleanup;
+    }
 
     for (i = 0; i < entry_count; ++i)
     {
@@ -860,9 +1000,6 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
             memcpy(dst, src, (size_t)e->width * 4);
         }
     }
-
-    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
-    q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
 
     COM_CreatePath(png_path);
     COM_CreatePath(json_path);
@@ -898,6 +1035,7 @@ atlas_rect_t Atlas_GetUV(const char *name)
 {
     int i;
     char normalized[sizeof(atlas_entries[0].name)];
+    static qboolean missing_warned = false;
 
     if (!atlas_enabled || !name)
         return atlas_null_rect;
@@ -915,16 +1053,17 @@ atlas_rect_t Atlas_GetUV(const char *name)
                 Con_Printf("Atlas: mapped texture %s to atlas entry\n", normalized);
                 atlas_entries[i].logged = true;
             }
+            if (atlas_entries[i].rect.u2 == 0 || atlas_entries[i].rect.v2 == 0)
+                Con_Printf("Atlas: ERROR: zero-size UV rect for '%s' \xe2\x86\x92 stretching likely\n", normalized);
             return atlas_entries[i].rect;
         }
     }
 
     {
-        static qboolean warned = false;
-        if (!warned)
+        if (!missing_warned)
         {
-            Con_Printf("Atlas: WARNING: texture '%s' missing in atlas\n", normalized);
-            warned = true;
+            Con_Printf("Atlas: warning: texture '%s' missing (UV=0, fallback)\n", normalized);
+            missing_warned = true;
         }
     }
 
