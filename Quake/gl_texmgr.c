@@ -2315,19 +2315,23 @@ static qboolean DDS_ParseFormat (uint32_t fourcc, uint32_t dxgi_format, GLenum *
                         block = 16;
                         break;
                 default:
-                        return false;
+                        goto unsupported;
                 }
                 break;
         default:
-                return false;
+                goto unsupported;
         }
 
-	if (out_format)
-		*out_format = format;
-	if (block_size)
-		*block_size = block;
+        if (out_format)
+                *out_format = format;
+        if (block_size)
+                *block_size = block;
 
-	return block != 0;
+        return block != 0;
+
+unsupported:
+        Con_Printf("[DDS] Unsupported DDS format (fourcc=0x%08x, dxgi=%u)\n", fourcc, dxgi_format);
+        return false;
 }
 
 static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int *h, int *has_mips)

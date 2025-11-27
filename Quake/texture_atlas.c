@@ -43,6 +43,8 @@ static qboolean atlas_attempted_build = false;
 static char atlas_missing_basename[MAX_QPATH];
 static cvar_t atlas_use_original_dimensions = {"atlas_use_original_dimensions", "1", CVAR_NONE};
 
+static qboolean Atlas_ParseJSONBuffer(const char *json, size_t len);
+
 extern cvar_t gl_fullbrights;
 extern unsigned int d_8to24table_opaque[256];
 extern unsigned int d_8to24table_alphabright[256];
@@ -521,10 +523,61 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
     return true;
 }
 
+static qboolean Atlas_ParseJSONBuffer(const char *json, size_t len)
+{
+    char *terminated;
+    qboolean ok;
+
+    if (!json || !len)
+        return false;
+
+    terminated = (char *)malloc(len + 1);
+    if (!terminated)
+        return false;
+
+    memcpy(terminated, json, len);
+    terminated[len] = '\0';
+
+    ok = Atlas_ParseJSON(terminated, len);
+    free(terminated);
+    return ok;
+}
+
+static void Atlas_SetupGLTexture(GLuint texnum, int width, int height, int has_mips, qboolean compressed, const char *label)
+{
+    atlas_gl_id = texnum;
+    atlas_width = width;
+    atlas_height = height;
+
+    glBindTexture(GL_TEXTURE_2D, atlas_gl_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
+    atlas_gltexture.target = GL_TEXTURE_2D;
+    atlas_gltexture.texnum = atlas_gl_id;
+    atlas_gltexture.width = (unsigned short)atlas_width;
+    atlas_gltexture.height = (unsigned short)atlas_height;
+    atlas_gltexture.depth = 1;
+    atlas_gltexture.compression = compressed ? 1 : 0;
+    atlas_gltexture.flags = TEXPREF_BINDLESS | TEXPREF_CLAMP;
+    q_strlcpy(atlas_gltexture.name, "__atlas", sizeof(atlas_gltexture.name));
+    atlas_gltexture.source_format = SRC_RGBA;
+    atlas_gltexture.source_width = (unsigned int)atlas_width;
+    atlas_gltexture.source_height = (unsigned int)atlas_height;
+
+    if (gl_bindless_able && GL_GetTextureHandleARBFunc && GL_MakeTextureHandleResidentARBFunc)
+    {
+        atlas_gltexture.bindless_handle = GL_GetTextureHandleARBFunc(atlas_gl_id);
+        GL_MakeTextureHandleResidentARBFunc(atlas_gltexture.bindless_handle);
+    }
+
+    Con_Printf("[ATLAS] Loaded DDS atlas: %s (%dx%d, mips=%d)\n", label ? label : atlas_gltexture.name, atlas_width, atlas_height, has_mips);
+}
+
 static qboolean Atlas_LoadJSON(const char *path)
 {
     byte *json = NULL;
-    char *terminated = NULL;
     long len;
     qboolean ok;
 
@@ -536,20 +589,9 @@ static qboolean Atlas_LoadJSON(const char *path)
     }
 
     len = com_filesize;
-    terminated = (char *)malloc((size_t)len + 1);
-    if (!terminated)
-    {
-        free(json);
-        return false;
-    }
-
-    memcpy(terminated, json, (size_t)len);
-    terminated[len] = '\0';
-
-    ok = Atlas_ParseJSON(terminated, (size_t)len);
+    ok = Atlas_ParseJSONBuffer((const char *)json, (size_t)len);
     if (!ok)
         Con_Printf("Atlas_LoadJSON: failed to parse %s\n", path);
-    free(terminated);
     free(json);
     return ok;
 }
@@ -565,30 +607,7 @@ static qboolean Atlas_LoadDDS(const char *path)
         return false;
     }
 
-    glBindTexture(GL_TEXTURE_2D, atlas_gl_id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
-    atlas_gltexture.target = GL_TEXTURE_2D;
-    atlas_gltexture.texnum = atlas_gl_id;
-    atlas_gltexture.width = (unsigned short)atlas_width;
-    atlas_gltexture.height = (unsigned short)atlas_height;
-    atlas_gltexture.depth = 1;
-    atlas_gltexture.compression = 1;
-    atlas_gltexture.flags = TEXPREF_BINDLESS | TEXPREF_CLAMP;
-    q_strlcpy(atlas_gltexture.name, "__atlas", sizeof(atlas_gltexture.name));
-    atlas_gltexture.source_format = SRC_RGBA;
-    atlas_gltexture.source_width = (unsigned int)atlas_width;
-    atlas_gltexture.source_height = (unsigned int)atlas_height;
-
-    if (gl_bindless_able && GL_GetTextureHandleARBFunc && GL_MakeTextureHandleResidentARBFunc)
-    {
-        atlas_gltexture.bindless_handle = GL_GetTextureHandleARBFunc(atlas_gl_id);
-        GL_MakeTextureHandleResidentARBFunc(atlas_gltexture.bindless_handle);
-    }
-
-    Con_DPrintf("Atlas_LoadDDS: loaded %s (%dx%d, mips=%d)\n", path, atlas_width, atlas_height, has_mips);
+    Atlas_SetupGLTexture(atlas_gl_id, atlas_width, atlas_height, has_mips, true, path);
 
     return true;
 }
@@ -667,7 +686,7 @@ static void Atlas_NormalizeMapName(const char *mapname, char *out, size_t out_si
 int Atlas_LoadForMap(const char *mapname)
 {
     char basename[MAX_QPATH];
-    char dds_path[MAX_OSPATH];
+    char container_path[MAX_OSPATH];
     char png_path[MAX_OSPATH];
     char json_path[MAX_OSPATH];
 
@@ -685,19 +704,57 @@ int Atlas_LoadForMap(const char *mapname)
 
     Con_Printf("Atlas_LoadForMap: checking '%s'\n", basename);
 
-    q_snprintf(dds_path, sizeof(dds_path), "atlas/%s_atlas.dds", basename);
+    q_snprintf(container_path, sizeof(container_path), "atlas/%s.atlas", basename);
     q_snprintf(png_path, sizeof(png_path), "atlas/%s_atlas.png", basename);
     q_snprintf(json_path, sizeof(json_path), "atlas/%s_atlas.json", basename);
 
+    if (COM_FileExists(container_path, NULL))
     {
-        qboolean dds_exists = COM_FileExists(dds_path, NULL);
+        AtlasInfo info;
+        qboolean json_ok;
+
+        Con_Printf("[ATLAS] Using container: %s\n", container_path);
+
+        if (!LoadAtlasContainer(container_path, &info))
+        {
+            Con_Printf("Atlas: failed to load atlas container %s\n", container_path);
+        }
+        else
+        {
+            json_ok = Atlas_ParseJSONBuffer(info.json_blob, info.json_size);
+            free(info.json_blob);
+
+            if (!json_ok)
+            {
+                Con_Printf("Atlas: failed to parse JSON from container %s\n", container_path);
+                GL_DeleteNativeTexture(info.texnum);
+            }
+            else
+            {
+                Atlas_SetupGLTexture(info.texnum, info.width, info.height, info.has_mips, true, container_path);
+                atlas_missing_for_map = false;
+                if (atlas_width <= 0 || atlas_height <= 0)
+                {
+                    Con_Printf("Atlas: ERROR: invalid atlas size (%d x %d); disabling atlas\n", atlas_width, atlas_height);
+                    Atlas_Invalidate();
+                    return 0;
+                }
+                atlas_enabled = true;
+                Con_DPrintf("Atlas_LoadForMap: atlas ready (%dx%d, %d entries)\n", atlas_width, atlas_height, atlas_entry_count);
+                return 1;
+            }
+        }
+
+        // if container load failed, try legacy assets below
+    }
+
+    {
         qboolean png_exists = COM_FileExists(png_path, NULL);
         qboolean json_exists = COM_FileExists(json_path, NULL);
-        Con_DPrintf("Atlas_LoadForMap: DDS %s\n", dds_exists ? "found" : "missing");
         Con_DPrintf("Atlas_LoadForMap: PNG %s\n", png_exists ? "found" : "missing");
         Con_DPrintf("Atlas_LoadForMap: JSON %s\n", json_exists ? "found" : "missing");
 
-        if ((dds_exists || png_exists) && !json_exists)
+        if (png_exists && !json_exists)
         {
             findfile_t *find;
             char corrected[MAX_OSPATH];
@@ -733,14 +790,14 @@ int Atlas_LoadForMap(const char *mapname)
                 return 0;
             }
         }
-        else if (!dds_exists && !png_exists && json_exists)
+        else if (!png_exists && json_exists)
         {
             Con_Printf("Atlas: texture missing but JSON exists – INVALID ATLAS\n");
             Atlas_LogMissing();
             atlas_missing_for_map = false;
             return 0;
         }
-        else if (!dds_exists && !png_exists && !json_exists)
+        else if (!png_exists && !json_exists)
         {
             Con_Printf("Atlas: atlas files missing for '%s'\n", basename);
             Atlas_LogMissing();
@@ -753,23 +810,20 @@ int Atlas_LoadForMap(const char *mapname)
 
     {
         qboolean png_loaded = false;
-        qboolean dds_loaded = false;
         qboolean json_loaded;
 
-        if (COM_FileExists(dds_path, NULL))
-            dds_loaded = Atlas_LoadDDS(dds_path);
-        else if (COM_FileExists(png_path, NULL))
+        if (COM_FileExists(png_path, NULL))
             png_loaded = Atlas_LoadPNG(png_path);
 
         json_loaded = Atlas_LoadJSON(json_path);
 
-        if (!(dds_loaded || png_loaded) || !json_loaded)
+        if (!png_loaded || !json_loaded)
         {
             Atlas_Invalidate();
             Atlas_LogMissing();
-            atlas_missing_for_map = (!dds_loaded && !png_loaded && !json_loaded);
+            atlas_missing_for_map = (!png_loaded && !json_loaded);
             if (!atlas_missing_for_map)
-                Con_Printf("Atlas: atlas load aborted due to partial failure (dds=%d, png=%d, json=%d)\n", dds_loaded, png_loaded, json_loaded);
+                Con_Printf("Atlas: atlas load aborted due to partial failure (png=%d, json=%d)\n", png_loaded, json_loaded);
             return 0;
         }
     }
