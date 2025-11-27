@@ -1,6 +1,9 @@
 #ifndef TEXTURE_ATLAS_H
 #define TEXTURE_ATLAS_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "quakedef.h"
 #include "gl_texmgr.h"
 
@@ -23,5 +26,7 @@ GLuint Atlas_GetGLTexture(void);
 
 // Internal helper for render code
 const gltexture_t *Atlas_GetGLTextureStruct(void);
+
+bool SaveAtlasAsDDS(const char *output_path, const uint8_t *rgba_pixels, int width, int height, bool has_alpha);
 
 #endif // TEXTURE_ATLAS_H

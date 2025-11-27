@@ -2,6 +2,9 @@
  * Texture atlas loading for maps
  */
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "quakedef.h"
 #include "q_ctype.h"
 #include "texture_atlas.h"
@@ -11,6 +14,10 @@
 #define STB_IMAGE_STATIC
 #define STBI_ONLY_PNG
 #include "stb_image.h"
+
+#define STB_DXT_IMPLEMENTATION
+#define STB_DXT_STATIC
+#include "stb_dxt.h"
 
 static qboolean atlas_enabled = false;
 static GLuint atlas_gl_id = 0;
@@ -489,6 +496,45 @@ static qboolean Atlas_LoadJSON(const char *path)
     return ok;
 }
 
+static qboolean Atlas_LoadDDS(const char *path)
+{
+    int has_mips = 0;
+
+    atlas_gl_id = GL_LoadDDS(path, &atlas_width, &atlas_height, &has_mips);
+    if (!atlas_gl_id)
+    {
+        Con_DPrintf("Atlas_LoadDDS: failed to load %s\n", path);
+        return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, atlas_gl_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
+    atlas_gltexture.target = GL_TEXTURE_2D;
+    atlas_gltexture.texnum = atlas_gl_id;
+    atlas_gltexture.width = (unsigned short)atlas_width;
+    atlas_gltexture.height = (unsigned short)atlas_height;
+    atlas_gltexture.depth = 1;
+    atlas_gltexture.compression = 1;
+    atlas_gltexture.flags = TEXPREF_BINDLESS | TEXPREF_CLAMP;
+    q_strlcpy(atlas_gltexture.name, "__atlas", sizeof(atlas_gltexture.name));
+    atlas_gltexture.source_format = SRC_RGBA;
+    atlas_gltexture.source_width = (unsigned int)atlas_width;
+    atlas_gltexture.source_height = (unsigned int)atlas_height;
+
+    if (gl_bindless_able && GL_GetTextureHandleARBFunc && GL_MakeTextureHandleResidentARBFunc)
+    {
+        atlas_gltexture.bindless_handle = GL_GetTextureHandleARBFunc(atlas_gl_id);
+        GL_MakeTextureHandleResidentARBFunc(atlas_gltexture.bindless_handle);
+    }
+
+    Con_DPrintf("Atlas_LoadDDS: loaded %s (%dx%d, mips=%d)\n", path, atlas_width, atlas_height, has_mips);
+
+    return true;
+}
+
 static qboolean Atlas_LoadPNG(const char *path)
 {
     int channels = 0;
@@ -563,6 +609,7 @@ static void Atlas_NormalizeMapName(const char *mapname, char *out, size_t out_si
 int Atlas_LoadForMap(const char *mapname)
 {
     char basename[MAX_QPATH];
+    char dds_path[MAX_OSPATH];
     char png_path[MAX_OSPATH];
     char json_path[MAX_OSPATH];
 
@@ -580,16 +627,19 @@ int Atlas_LoadForMap(const char *mapname)
 
     Con_Printf("Atlas_LoadForMap: checking '%s'\n", basename);
 
+    q_snprintf(dds_path, sizeof(dds_path), "atlas/%s_atlas.dds", basename);
     q_snprintf(png_path, sizeof(png_path), "atlas/%s_atlas.png", basename);
     q_snprintf(json_path, sizeof(json_path), "atlas/%s_atlas.json", basename);
 
     {
+        qboolean dds_exists = COM_FileExists(dds_path, NULL);
         qboolean png_exists = COM_FileExists(png_path, NULL);
         qboolean json_exists = COM_FileExists(json_path, NULL);
+        Con_DPrintf("Atlas_LoadForMap: DDS %s\n", dds_exists ? "found" : "missing");
         Con_DPrintf("Atlas_LoadForMap: PNG %s\n", png_exists ? "found" : "missing");
         Con_DPrintf("Atlas_LoadForMap: JSON %s\n", json_exists ? "found" : "missing");
 
-        if (png_exists && !json_exists)
+        if ((dds_exists || png_exists) && !json_exists)
         {
             findfile_t *find;
             char corrected[MAX_OSPATH];
@@ -619,20 +669,20 @@ int Atlas_LoadForMap(const char *mapname)
 
             if (!json_exists && corrected_case == false)
             {
-                Con_Printf("Atlas: JSON missing but PNG exists – INVALID ATLAS\n");
+                Con_Printf("Atlas: JSON missing but texture exists – INVALID ATLAS\n");
                 Atlas_LogMissing();
                 atlas_missing_for_map = false;
                 return 0;
             }
         }
-        else if (!png_exists && json_exists)
+        else if (!dds_exists && !png_exists && json_exists)
         {
-            Con_Printf("Atlas: PNG missing but JSON exists – INVALID ATLAS\n");
+            Con_Printf("Atlas: texture missing but JSON exists – INVALID ATLAS\n");
             Atlas_LogMissing();
             atlas_missing_for_map = false;
             return 0;
         }
-        else if (!png_exists && !json_exists)
+        else if (!dds_exists && !png_exists && !json_exists)
         {
             Con_Printf("Atlas: atlas files missing for '%s'\n", basename);
             Atlas_LogMissing();
@@ -644,16 +694,24 @@ int Atlas_LoadForMap(const char *mapname)
     Con_Printf("Atlas_LoadForMap: loading atlas for %s\n", basename);
 
     {
-        qboolean png_loaded = Atlas_LoadPNG(png_path);
-        qboolean json_loaded = Atlas_LoadJSON(json_path);
+        qboolean png_loaded = false;
+        qboolean dds_loaded = false;
+        qboolean json_loaded;
 
-        if (!png_loaded || !json_loaded)
+        if (COM_FileExists(dds_path, NULL))
+            dds_loaded = Atlas_LoadDDS(dds_path);
+        else if (COM_FileExists(png_path, NULL))
+            png_loaded = Atlas_LoadPNG(png_path);
+
+        json_loaded = Atlas_LoadJSON(json_path);
+
+        if (!(dds_loaded || png_loaded) || !json_loaded)
         {
             Atlas_Invalidate();
             Atlas_LogMissing();
-            atlas_missing_for_map = (!png_loaded && !json_loaded);
+            atlas_missing_for_map = (!dds_loaded && !png_loaded && !json_loaded);
             if (!atlas_missing_for_map)
-                Con_Printf("Atlas: atlas load aborted due to partial failure (png=%d, json=%d)\n", png_loaded, json_loaded);
+                Con_Printf("Atlas: atlas load aborted due to partial failure (dds=%d, png=%d, json=%d)\n", dds_loaded, png_loaded, json_loaded);
             return 0;
         }
     }
@@ -957,15 +1015,140 @@ static qboolean Atlas_WriteJSON(const char *path, const atlas_build_entry_t *ent
     return true;
 }
 
-static qboolean Atlas_WritePNGFile(const char *path, const byte *data, int width, int height)
+static qboolean Atlas_HasAlpha(const byte *data, int width, int height)
 {
-    const char *relative = path;
-    size_t prefix = strlen(com_gamedir);
+    size_t total = (size_t)width * height;
 
-    if (!strncmp(path, com_gamedir, prefix) && path[prefix] == '/')
-        relative = path + prefix + 1;
+    for (size_t i = 0; i < total; ++i)
+        if (data[i * 4 + 3] != 255)
+            return true;
 
-    return Image_WritePNG(relative, (byte *)data, width, height, 32, true);
+    return false;
+}
+
+typedef struct dds_pixelformat_s
+{
+    uint32_t size;
+    uint32_t flags;
+    uint32_t fourCC;
+    uint32_t rgbBitCount;
+    uint32_t rBitMask;
+    uint32_t gBitMask;
+    uint32_t bBitMask;
+    uint32_t aBitMask;
+} dds_pixelformat_t;
+
+typedef struct dds_header_s
+{
+    uint32_t size;
+    uint32_t flags;
+    uint32_t height;
+    uint32_t width;
+    uint32_t pitchOrLinearSize;
+    uint32_t depth;
+    uint32_t mipMapCount;
+    uint32_t reserved1[11];
+    dds_pixelformat_t ddspf;
+    uint32_t caps;
+    uint32_t caps2;
+    uint32_t caps3;
+    uint32_t caps4;
+    uint32_t reserved2;
+} dds_header_t;
+
+#define DDS_FOURCC(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+
+bool SaveAtlasAsDDS(const char *output_path, const uint8_t *rgba_pixels, int width, int height, bool has_alpha)
+{
+    static const uint32_t DDS_MAGIC = 0x20534444; // "DDS "
+    static const uint32_t DDSD_CAPS = 0x1;
+    static const uint32_t DDSD_HEIGHT = 0x2;
+    static const uint32_t DDSD_WIDTH = 0x4;
+    static const uint32_t DDSD_PIXELFORMAT = 0x1000;
+    static const uint32_t DDSD_LINEARSIZE = 0x80000;
+    static const uint32_t DDSCAPS_TEXTURE = 0x1000;
+    static const uint32_t DDPF_FOURCC = 0x4;
+    const uint32_t fourcc = has_alpha ? DDS_FOURCC('D','X','T','5') : DDS_FOURCC('D','X','T','1');
+    const int block_size = has_alpha ? 16 : 8;
+    const int blocks_x = (width + 3) / 4;
+    const int blocks_y = (height + 3) / 4;
+    const size_t compressed_size = (size_t)blocks_x * blocks_y * (size_t)block_size;
+    uint8_t *compressed = NULL;
+    FILE *f = NULL;
+
+    if (!output_path || !rgba_pixels || width <= 0 || height <= 0)
+        return false;
+
+    compressed = (uint8_t *)malloc(compressed_size);
+    if (!compressed)
+        return false;
+
+    for (int by = 0; by < blocks_y; ++by)
+    {
+        for (int bx = 0; bx < blocks_x; ++bx)
+        {
+            uint8_t block[16 * 4];
+
+            for (int py = 0; py < 4; ++py)
+            {
+                for (int px = 0; px < 4; ++px)
+                {
+                    int sx = bx * 4 + px;
+                    int sy = by * 4 + py;
+                    uint8_t *dst = &block[(py * 4 + px) * 4];
+
+                    if (sx < width && sy < height)
+                    {
+                        const uint8_t *src = &rgba_pixels[(size_t)(sy * width + sx) * 4];
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
+                        dst[3] = src[3];
+                    }
+                    else
+                    {
+                        dst[0] = dst[1] = dst[2] = 0;
+                        dst[3] = 255;
+                    }
+                }
+            }
+
+            stb_compress_dxt_block(compressed + ((by * blocks_x + bx) * block_size), block, has_alpha ? 1 : 0, STB_DXT_HIGHQUAL);
+        }
+    }
+
+    dds_header_t header;
+    memset(&header, 0, sizeof(header));
+    header.size = LittleLong(sizeof(header));
+    header.flags = LittleLong(DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_LINEARSIZE);
+    header.height = LittleLong((uint32_t)height);
+    header.width = LittleLong((uint32_t)width);
+    header.pitchOrLinearSize = LittleLong((uint32_t)compressed_size);
+    header.mipMapCount = LittleLong(1);
+    header.ddspf.size = LittleLong((uint32_t)sizeof(header.ddspf));
+    header.ddspf.flags = LittleLong(DDPF_FOURCC);
+    header.ddspf.fourCC = LittleLong(fourcc);
+    header.caps = LittleLong(DDSCAPS_TEXTURE);
+
+    f = fopen(output_path, "wb");
+    if (!f)
+    {
+        free(compressed);
+        return false;
+    }
+
+    if (fwrite(&DDS_MAGIC, 1, sizeof(DDS_MAGIC), f) != sizeof(DDS_MAGIC)
+        || fwrite(&header, 1, sizeof(header), f) != sizeof(header)
+        || fwrite(compressed, 1, compressed_size, f) != compressed_size)
+    {
+        fclose(f);
+        free(compressed);
+        return false;
+    }
+
+    fclose(f);
+    free(compressed);
+    return true;
 }
 
 void Atlas_CreateFromFallbacks(qmodel_t *model)
@@ -976,9 +1159,10 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     int atlas_size;
     int i;
     char basename[MAX_QPATH];
-    char png_path[MAX_OSPATH];
+    char dds_path[MAX_OSPATH];
     char json_path[MAX_OSPATH];
     byte *atlas_pixels = NULL;
+    qboolean has_alpha = false;
 
     if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated)
         return;
@@ -989,10 +1173,10 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
 
     atlas_attempted_build = true;
 
-    q_snprintf(png_path, sizeof(png_path), "%s/atlas/%s_atlas.png", com_gamedir, basename);
+    q_snprintf(dds_path, sizeof(dds_path), "%s/atlas/%s_atlas.dds", com_gamedir, basename);
     q_snprintf(json_path, sizeof(json_path), "%s/atlas/%s_atlas.json", com_gamedir, basename);
 
-    if (COM_FileExists(png_path, NULL) || COM_FileExists(json_path, NULL))
+    if (COM_FileExists(dds_path, NULL) || COM_FileExists(json_path, NULL))
     {
         Con_Printf("Atlas_CreateFromFallbacks: skipping build; atlas already exists for '%s'\n", basename);
         return;
@@ -1107,12 +1291,14 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
         }
     }
 
-    COM_CreatePath(png_path);
+    COM_CreatePath(dds_path);
     COM_CreatePath(json_path);
 
-    if (!Atlas_WritePNGFile(png_path, atlas_pixels, atlas_size, atlas_size))
+    has_alpha = Atlas_HasAlpha(atlas_pixels, atlas_size, atlas_size);
+
+    if (!SaveAtlasAsDDS(dds_path, atlas_pixels, atlas_size, atlas_size, has_alpha))
     {
-        Con_Printf("Failed to write atlas texture to %s\n", png_path);
+        Con_Printf("Failed to write atlas texture to %s\n", dds_path);
         goto cleanup;
     }
 
