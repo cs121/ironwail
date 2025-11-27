@@ -650,6 +650,9 @@ void Sky_LoadSkyBox (const char *name);
 void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
 
+GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips);
+GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips);
+
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
 void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count, const GLuint *buffers, const GLintptr *offsets, const GLsizeiptr *sizes);
