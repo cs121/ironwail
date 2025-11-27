@@ -349,7 +349,11 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
         if (num_bmodel_calls == MAX_BMODEL_DRAWS)
                 R_FlushBModelCalls ();
 
-        atlas_rect = atlas_null_rect;
+        atlas_rect.u1 = 0.f;
+        atlas_rect.v1 = 0.f;
+        atlas_rect.u2 = 0.f;
+        atlas_rect.v2 = 0.f;
+        atlas_rect.exists = 0;
         atlas_uv[0] = 0.f;
         atlas_uv[1] = 0.f;
         atlas_uv[2] = 1.f;
