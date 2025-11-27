@@ -379,10 +379,12 @@ static qboolean Atlas_ParseJSON(const char *json, size_t len)
 
         entry = &atlas_entries[atlas_entry_count++];
         Atlas_NormalizeTextureName(name, entry->name, sizeof(entry->name));
+
+        // Option B: store origin + normalized size, not absolute end coordinates
         entry->rect.u1 = (float)x / (float)atlas_width;
         entry->rect.v1 = (float)y / (float)atlas_height;
-        entry->rect.u2 = (float)w / (float)atlas_width;
-        entry->rect.v2 = (float)h / (float)atlas_height;
+        entry->rect.u2 = (float)w / (float)atlas_width;   // width_norm
+        entry->rect.v2 = (float)h / (float)atlas_height;  // height_norm
         entry->rect.exists = 1;
         entry->logged = false;
 
@@ -729,6 +731,7 @@ static qboolean Atlas_WriteJSON(const char *path, const atlas_build_entry_t *ent
     for (i = 0; i < count; ++i)
     {
         const atlas_build_entry_t *e = &entries[i];
+        // Option B: JSON stays in pixels; normalization happens when parsing
         fprintf(f,
             "        {\"name\":\"%s\",\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"ox\":%d,\"oy\":%d}%s\n",
             e->name, e->x, e->y, e->width, e->height, e->offset_x, e->offset_y, (i == count - 1) ? "" : ",");
