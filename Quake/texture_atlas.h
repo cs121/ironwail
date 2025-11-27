@@ -28,5 +28,6 @@ GLuint Atlas_GetGLTexture(void);
 const gltexture_t *Atlas_GetGLTextureStruct(void);
 
 bool SaveAtlasAsDDS(const char *output_path, const uint8_t *rgba_pixels, int width, int height, bool has_alpha);
+bool PackAtlasContainer(const char *atlas_path, const char *json_path, const char *dds_path);
 
 #endif // TEXTURE_ATLAS_H
