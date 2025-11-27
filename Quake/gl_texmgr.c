@@ -104,7 +104,7 @@ static qboolean TexMgr_ReadImageHeader (const char *filename, unsigned int *widt
 {
         FILE *f;
         const char *ext;
-        unsigned char header[40];
+        unsigned char header[128];
         unsigned int w = 0, h = 0;
 
         if (!filename || !*filename)
@@ -138,9 +138,21 @@ static qboolean TexMgr_ReadImageHeader (const char *filename, unsigned int *widt
                         h = (unsigned int)(header[14] | (header[15] << 8));
                 }
         }
+        else if (!q_strcasecmp(ext, "dds"))
+        {
+                if (fread(header, 1, 128, f) == 128)
+                {
+                        static const unsigned char sig[4] = {'D', 'D', 'S', ' '};
+                        if (!memcmp(header, sig, sizeof(sig)))
+                        {
+                                w = (unsigned int)(header[16] | (header[17] << 8) | (header[18] << 16) | (header[19] << 24));
+                                h = (unsigned int)(header[12] | (header[13] << 8) | (header[14] << 16) | (header[15] << 24));
+                        }
+                }
+        }
         else if (!q_strcasecmp(ext, "wal"))
         {
-                if (fread(header, 1, sizeof(header), f) == sizeof(header))
+                if (fread(header, 1, 40, f) == 40)
                 {
                         w = (unsigned int)(header[32] | (header[33] << 8) | (header[34] << 16) | (header[35] << 24));
                         h = (unsigned int)(header[36] | (header[37] << 8) | (header[38] << 16) | (header[39] << 24));

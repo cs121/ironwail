@@ -105,7 +105,7 @@ returns a pointer to hunk allocated RGBA data
 */
 byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat *fmt)
 {
-	static const char *const stbi_formats[] = {"png", "tga", "jpg", NULL};
+        static const char *const stbi_formats[] = {"dds", "png", "tga", "jpg", NULL};
 	FILE	*f;
 	int		i;
 
@@ -124,9 +124,9 @@ byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat
 				memcpy (hunkdata, data, numbytes);
 				free (data);
 				data = hunkdata;
-				*fmt = SRC_RGBA;
-				if ((developer.value || map_checks.value) && strcmp (ext, "tga") != 0)
-					Con_Warning ("%s not supported by QS, consider tga\n", loadfilename);
+                                *fmt = SRC_RGBA;
+                                if ((developer.value || map_checks.value) && strcmp (ext, "tga") != 0 && strcmp (ext, "dds") != 0)
+                                        Con_Warning ("%s not supported by QS, consider tga\n", loadfilename);
 			}
 			else
 				Con_Warning ("couldn't load %s (%s)\n", loadfilename, stbi_failure_reason ());
