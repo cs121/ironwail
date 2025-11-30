@@ -3234,8 +3234,6 @@ visdone:
         Mod_DispatchBSPXLumps(mod);
         Q1BSPX_LogUsage(mod->name);
 
-        Atlas_CreateFromFallbacks(mod);
-
 //
 // set up the submodels (FIXME: this is confusing)
 //

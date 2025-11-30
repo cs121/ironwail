@@ -27,6 +27,8 @@ static gltexture_t atlas_gltexture;
 static int atlas_width = 0;
 static int atlas_height = 0;
 
+cvar_t r_use_textureatlas = {"r_use_textureatlas", "1", CVAR_ARCHIVE};
+
 typedef struct atlas_entry_s {
     char name[64];
     atlas_rect_t rect;
@@ -43,6 +45,9 @@ static qboolean atlas_missing_for_map = false;
 static qboolean atlas_attempted_build = false;
 static char atlas_missing_basename[MAX_QPATH];
 static cvar_t atlas_use_original_dimensions = {"atlas_use_original_dimensions", "1", CVAR_NONE};
+
+static void Atlas_OnUseChanged(cvar_t *var);
+static void Atlas_BuildTextureAtlas_f(void);
 
 static qboolean Atlas_ParseJSONBuffer(const char *json, size_t len);
 
@@ -385,9 +390,53 @@ static void Atlas_DeleteGLTexture(void)
     memset(&atlas_gltexture, 0, sizeof(atlas_gltexture));
 }
 
+static void Atlas_OnUseChanged(cvar_t *var)
+{
+    if (var->value == 0.0f)
+    {
+        Atlas_Invalidate();
+        return;
+    }
+
+    if (isDedicated)
+        return;
+
+    if (cl.worldmodel)
+        Atlas_LoadForMap(cl.worldmodel->name);
+}
+
+static void Atlas_BuildTextureAtlas_f(void)
+{
+    if (isDedicated)
+    {
+        Con_Printf("Texture atlas building is unavailable on dedicated servers.\n");
+        return;
+    }
+
+    if (!cl.worldmodel || !cl.worldmodel->name[0])
+    {
+        Con_Printf("No map is currently loaded.\n");
+        return;
+    }
+
+    if (r_use_textureatlas.value == 0.0f)
+        Con_Printf("r_use_textureatlas is 0; atlas will not be used until it is enabled.\n");
+
+    if (!atlas_missing_for_map)
+    {
+        Con_Printf("Atlas files already exist or have not been marked missing for '%s'.\n", cl.worldmodel->name);
+        return;
+    }
+
+    Atlas_CreateFromFallbacks(cl.worldmodel);
+}
+
 void Atlas_Init(void)
 {
+    Cvar_RegisterVariable(&r_use_textureatlas);
+    Cvar_SetCallback(&r_use_textureatlas, Atlas_OnUseChanged);
     Cvar_RegisterVariable(&atlas_use_original_dimensions);
+    Cmd_AddCommand("r_buildtextureatlas", Atlas_BuildTextureAtlas_f);
     Atlas_Invalidate();
 }
 
@@ -694,6 +743,9 @@ int Atlas_LoadForMap(const char *mapname)
     Atlas_Invalidate();
 
     if (isDedicated)
+        return 0;
+
+    if (r_use_textureatlas.value == 0.0f)
         return 0;
 
     Atlas_NormalizeMapName(mapname, basename, sizeof(basename));
@@ -1417,7 +1469,7 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     byte *atlas_pixels = NULL;
     qboolean has_alpha = false;
 
-    if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated)
+    if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated || r_use_textureatlas.value == 0.0f)
         return;
 
     Atlas_NormalizeMapName(model->name, basename, sizeof(basename));
