@@ -2446,7 +2446,7 @@ GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips)
 	len = (size_t)com_filesize;
 
 	texnum = GL_LoadDDS_Memory ((const uint8_t *)filebuf, (size_t)len, w, h, has_mips);
-	COM_FreeFile (filebuf);
+        free (filebuf);
 	return texnum;
 }
 
@@ -2502,7 +2502,7 @@ GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips)
 	len = (size_t)com_filesize;
 
 	pixels = stbi_load_from_memory (filebuf, (int)len, &width, &height, NULL, 4);
-	COM_FreeFile (filebuf);
+        free (filebuf);
 	if (!pixels)
 		return 0;
 
