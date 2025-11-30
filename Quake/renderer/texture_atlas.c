@@ -25,6 +25,11 @@ static GLuint atlas_gl_id = 0;
 static gltexture_t atlas_gltexture;
 static int atlas_width = 0;
 static int atlas_height = 0;
+static qboolean atlas_force_build = false;
+static cvar_t gl_texture_atlas = {"gl_texture_atlas", "0", CVAR_ARCHIVE};
+
+static void Atlas_BuildCommand_f(void);
+static void Atlas_OnToggle(cvar_t *var);
 
 typedef struct atlas_entry_s {
     char name[64];
@@ -386,7 +391,10 @@ static void Atlas_DeleteGLTexture(void)
 
 void Atlas_Init(void)
 {
+    Cvar_RegisterVariable(&gl_texture_atlas);
+    Cvar_SetCallback(&gl_texture_atlas, Atlas_OnToggle);
     Cvar_RegisterVariable(&atlas_use_original_dimensions);
+    Cmd_AddCommand("atlas_build", Atlas_BuildCommand_f);
     Atlas_Invalidate();
 }
 
@@ -399,6 +407,13 @@ void Atlas_Invalidate(void)
     atlas_missing_for_map = false;
     atlas_attempted_build = false;
     atlas_missing_basename[0] = '\0';
+    atlas_force_build = false;
+}
+
+static void Atlas_OnToggle(cvar_t *var)
+{
+    if (var && var->value == 0.0f)
+        Atlas_Invalidate();
 }
 
 static qboolean Atlas_ParseJSON(const char *json, size_t len)
@@ -692,7 +707,7 @@ int Atlas_LoadForMap(const char *mapname)
 
     Atlas_Invalidate();
 
-    if (isDedicated)
+    if (isDedicated || gl_texture_atlas.value == 0.0f)
         return 0;
 
     Atlas_NormalizeMapName(mapname, basename, sizeof(basename));
@@ -1416,12 +1431,16 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     byte *atlas_pixels = NULL;
     qboolean has_alpha = false;
 
-    if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated)
+    if (!gl_texture_atlas.value || !model || isDedicated)
+        return;
+
+    if (!atlas_force_build && (atlas_attempted_build || !atlas_missing_for_map))
         return;
 
     Atlas_NormalizeMapName(model->name, basename, sizeof(basename));
-    if (q_strcasecmp(basename, atlas_missing_basename))
+    if (!atlas_force_build && q_strcasecmp(basename, atlas_missing_basename))
         return;
+    atlas_force_build = false;
 
     atlas_attempted_build = true;
 
@@ -1573,6 +1592,36 @@ cleanup:
     }
 
     free(atlas_pixels);
+}
+
+static void Atlas_BuildCommand_f(void)
+{
+    if (isDedicated)
+    {
+        Con_Printf("Atlas building is not available on dedicated servers\n");
+        return;
+    }
+
+    if (gl_texture_atlas.value == 0.0f)
+    {
+        Con_Printf("Enable gl_texture_atlas before building a texture atlas\n");
+        return;
+    }
+
+    if (!cl.worldmodel)
+    {
+        Con_Printf("Atlas: no worldmodel loaded\n");
+        return;
+    }
+
+    if (atlas_enabled)
+    {
+        Con_Printf("Atlas already loaded for '%s'\n", cl.worldmodel->name);
+        return;
+    }
+
+    atlas_force_build = true;
+    Atlas_CreateFromFallbacks(cl.worldmodel);
 }
 
 atlas_rect_t Atlas_GetUV(const char *name)
