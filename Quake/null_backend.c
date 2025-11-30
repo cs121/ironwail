@@ -17,11 +17,9 @@ static void Null_EndFrame(void)
 {
 }
 
-static texture_handle_t Null_CreateTexture(int width, int height, const void *pixels)
+static texture_handle_t Null_CreateTexture(const texture_desc_t *desc)
 {
-    (void)width;
-    (void)height;
-    (void)pixels;
+    (void)desc;
 
     return 0;
 }

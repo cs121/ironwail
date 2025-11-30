@@ -7,6 +7,13 @@ typedef uint32_t texture_handle_t;
 typedef uint32_t shader_handle_t;
 typedef uint32_t mesh_handle_t;
 
+typedef struct texture_desc_s {
+    int width;
+    int height;
+    int format;
+    const void *pixels;
+} texture_desc_t;
+
 struct draw_surf_s;
 typedef struct draw_surf_s draw_surf_t;
 
@@ -21,7 +28,7 @@ struct render_backend_s {
     void (*BeginFrame)(void);
     void (*EndFrame)(void);
 
-    texture_handle_t (*CreateTexture)(int width, int height, const void *pixels);
+    texture_handle_t (*CreateTexture)(const texture_desc_t *desc);
     void (*DestroyTexture)(texture_handle_t handle);
 
     shader_handle_t (*CreateShader)(const char *vertex_source, const char *fragment_source);
