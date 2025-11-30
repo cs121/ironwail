@@ -5,6 +5,7 @@
 #endif
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "renderer_backend.h"
 
@@ -21,6 +22,15 @@ typedef struct mesh_s {
 static mesh_t *mesh_pool;
 static size_t mesh_pool_count;
 static size_t mesh_pool_capacity;
+
+typedef struct shader_s {
+    GLuint program;
+    qboolean used;
+} shader_t;
+
+static shader_t *shader_pool;
+static size_t shader_pool_count;
+static size_t shader_pool_capacity;
 
 qboolean RB_Init(void)
 {
@@ -61,20 +71,183 @@ void RB_DestroyTexture(texture_handle_t handle)
     glDeleteTextures(1, &texture);
 }
 
-shader_handle_t RB_CreateShader(const char *vertex_source, const char *fragment_source)
+static void RB_LogShaderError(GLuint object, qboolean is_program)
 {
-    (void)vertex_source;
-    (void)fragment_source;
+    GLint log_length = 0;
 
-    printf("create shader placeholder\n");
-    return 0;
+    if (is_program)
+        glGetProgramiv(object, GL_INFO_LOG_LENGTH, &log_length);
+    else
+        glGetShaderiv(object, GL_INFO_LOG_LENGTH, &log_length);
+
+    if (log_length > 1)
+    {
+        char *log = malloc((size_t)log_length);
+
+        if (log)
+        {
+            if (is_program)
+                glGetProgramInfoLog(object, log_length, NULL, log);
+            else
+                glGetShaderInfoLog(object, log_length, NULL, log);
+
+            printf("GL shader error: %s\n", log);
+            free(log);
+        }
+    }
+}
+
+static GLuint RB_CompileShader(GLenum type, const char *source)
+{
+    GLuint shader = glCreateShader(type);
+    GLint status = 0;
+
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+
+    if (!status)
+    {
+        RB_LogShaderError(shader, false);
+        glDeleteShader(shader);
+        return 0;
+    }
+
+    return shader;
+}
+
+static GLuint RB_LinkProgram(GLuint vertex_shader, GLuint fragment_shader)
+{
+    GLuint program = glCreateProgram();
+    GLint status = 0;
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+
+    if (!status)
+    {
+        RB_LogShaderError(program, true);
+        glDeleteProgram(program);
+        return 0;
+    }
+
+    return program;
+}
+
+static shader_t *RB_AllocateShaderSlot(size_t *out_index)
+{
+    size_t index;
+
+    for (index = 0; index < shader_pool_count; ++index)
+    {
+        if (!shader_pool[index].used)
+        {
+            shader_pool[index].used = true;
+            *out_index = index;
+            return &shader_pool[index];
+        }
+    }
+
+    if (shader_pool_count == shader_pool_capacity)
+    {
+        size_t new_capacity = shader_pool_capacity ? shader_pool_capacity * 2 : 16;
+        shader_t *new_pool = realloc(shader_pool, new_capacity * sizeof(shader_t));
+
+        if (!new_pool)
+            return NULL;
+
+        shader_pool = new_pool;
+        shader_pool_capacity = new_capacity;
+    }
+
+    index = shader_pool_count++;
+    shader_pool[index].used = true;
+    *out_index = index;
+
+    return &shader_pool[index];
+}
+
+shader_handle_t RB_CreateShader(const shader_desc_t *desc)
+{
+    GLuint vertex_shader;
+    GLuint fragment_shader;
+    GLuint program;
+    shader_t *shader;
+    size_t shader_index;
+    int i;
+
+    vertex_shader = RB_CompileShader(GL_VERTEX_SHADER, desc->vertex_source);
+    if (!vertex_shader)
+        return 0;
+
+    fragment_shader = RB_CompileShader(GL_FRAGMENT_SHADER, desc->fragment_source);
+    if (!fragment_shader)
+    {
+        glDeleteShader(vertex_shader);
+        return 0;
+    }
+
+    program = RB_LinkProgram(vertex_shader, fragment_shader);
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    if (!program)
+        return 0;
+
+    shader = RB_AllocateShaderSlot(&shader_index);
+    if (!shader)
+    {
+        glDeleteProgram(program);
+        return 0;
+    }
+
+    shader->program = program;
+
+    glUseProgram(program);
+
+    for (i = 0; i < desc->uniform_count; ++i)
+    {
+        GLint location = glGetUniformLocation(program, desc->uniforms[i].name);
+
+        if (location == -1)
+            printf("Warning: uniform '%s' not found in shader\n", desc->uniforms[i].name);
+    }
+
+    for (i = 0; i < desc->sampler_count; ++i)
+    {
+        GLint location = glGetUniformLocation(program, desc->samplers[i].name);
+
+        if (location == -1)
+        {
+            printf("Warning: sampler '%s' not found in shader\n", desc->samplers[i].name);
+            continue;
+        }
+
+        glUniform1i(location, desc->samplers[i].texture_unit);
+    }
+
+    return (shader_handle_t)(shader_index + 1);
 }
 
 void RB_DestroyShader(shader_handle_t handle)
 {
-    (void)handle;
+    size_t index;
+    shader_t *shader;
 
-    printf("destroy shader placeholder\n");
+    if (handle == 0)
+        return;
+
+    index = handle - 1;
+
+    if (index >= shader_pool_count || !shader_pool[index].used)
+        return;
+
+    shader = &shader_pool[index];
+
+    glDeleteProgram(shader->program);
+    shader->used = false;
 }
 
 static mesh_t *RB_AllocateMeshSlot(size_t *out_index)

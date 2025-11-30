@@ -29,10 +29,9 @@ static void Null_DestroyTexture(texture_handle_t handle)
     (void)handle;
 }
 
-static shader_handle_t Null_CreateShader(const char *vertex_source, const char *fragment_source)
+static shader_handle_t Null_CreateShader(const shader_desc_t *desc)
 {
-    (void)vertex_source;
-    (void)fragment_source;
+    (void)desc;
 
     return 0;
 }
