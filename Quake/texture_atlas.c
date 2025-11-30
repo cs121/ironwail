@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "quakedef.h"
 #include "q_ctype.h"
@@ -763,34 +764,34 @@ int Atlas_LoadForMap(const char *mapname)
 
             q_snprintf(expected, sizeof(expected), "%s_atlas.json", basename);
 
-            for (find = Sys_FindFirst("atlas", "json"); find; find = Sys_FindNext(find))
-            {
-                if (find->attribs & FA_DIRECTORY)
-                    continue;
-                if (!q_strcasecmp(find->name, expected))
-                {
-                    if (q_strcmp(find->name, expected))
-                    {
-                        q_snprintf(corrected, sizeof(corrected), "atlas/%s", find->name);
-                        Con_Printf("Atlas: case mismatch corrected: using '%s'\n", corrected);
-                        q_strlcpy(json_path, corrected, sizeof(json_path));
-                        corrected_case = true;
-                    }
-                    break;
-                }
-            }
-            if (find)
-                Sys_FindClose(find);
+			for (find = Sys_FindFirst("atlas", "json"); find; find = Sys_FindNext(find))
+			{
+				if (find->attribs & FA_DIRECTORY)
+					continue;
+				if (!q_strcasecmp(find->name, expected))
+				{
+					if (strcmp(find->name, expected))
+					{
+						q_snprintf(corrected, sizeof(corrected), "atlas/%s", find->name);
+						Con_Printf("Atlas: case mismatch corrected: using '%s'\n", corrected);
+						q_strlcpy(json_path, corrected, sizeof(json_path));
+						corrected_case = true;
+					}
+					break;
+				}
+			}
+			if (find)
+				Sys_FindClose(find);
 
-            if (!json_exists && corrected_case == false)
-            {
-                Con_Printf("Atlas: JSON missing but texture exists – INVALID ATLAS\n");
-                Atlas_LogMissing();
-                atlas_missing_for_map = false;
-                return 0;
-            }
-        }
-        else if (!png_exists && json_exists)
+			if (!json_exists && corrected_case == false)
+			{
+				Con_Printf("Atlas: JSON missing but texture exists – INVALID ATLAS\n");
+				Atlas_LogMissing();
+				atlas_missing_for_map = false;
+				return 0;
+			}
+		}
+		else if (!png_exists && json_exists)
         {
             Con_Printf("Atlas: texture missing but JSON exists – INVALID ATLAS\n");
             Atlas_LogMissing();
