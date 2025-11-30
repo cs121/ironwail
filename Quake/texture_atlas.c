@@ -422,12 +422,6 @@ static void Atlas_BuildTextureAtlas_f(void)
     if (r_use_textureatlas.value == 0.0f)
         Con_Printf("r_use_textureatlas is 0; atlas will not be used until it is enabled.\n");
 
-    if (!atlas_missing_for_map)
-    {
-        Con_Printf("Atlas files already exist or have not been marked missing for '%s'.\n", cl.worldmodel->name);
-        return;
-    }
-
     Atlas_CreateFromFallbacks(cl.worldmodel);
 }
 
@@ -1469,11 +1463,13 @@ void Atlas_CreateFromFallbacks(qmodel_t *model)
     byte *atlas_pixels = NULL;
     qboolean has_alpha = false;
 
-    if (!atlas_missing_for_map || atlas_attempted_build || !model || isDedicated || r_use_textureatlas.value == 0.0f)
+    if (atlas_attempted_build || !model || isDedicated)
         return;
 
     Atlas_NormalizeMapName(model->name, basename, sizeof(basename));
-    if (q_strcasecmp(basename, atlas_missing_basename))
+    if (!atlas_missing_basename[0])
+        q_strlcpy(atlas_missing_basename, basename, sizeof(atlas_missing_basename));
+    else if (q_strcasecmp(basename, atlas_missing_basename))
         return;
 
     atlas_attempted_build = true;
