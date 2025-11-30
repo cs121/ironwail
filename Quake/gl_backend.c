@@ -1,4 +1,8 @@
-#include <stdio.h>
+#if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
+#include <SDL2/SDL_opengl.h>
+#else
+#include "SDL_opengl.h"
+#endif
 
 #include "renderer_backend.h"
 
@@ -25,21 +29,22 @@ void RB_EndFrame(void)
     printf("end frame placeholder\n");
 }
 
-texture_handle_t RB_CreateTexture(int width, int height, const void *pixels)
+texture_handle_t RB_CreateTexture(const texture_desc_t *desc)
 {
-    (void)width;
-    (void)height;
-    (void)pixels;
+    GLuint texture = 0;
 
-    printf("create texture placeholder\n");
-    return 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, desc->format, desc->width, desc->height, 0, desc->format, GL_UNSIGNED_BYTE, desc->pixels);
+
+    return (texture_handle_t)texture;
 }
 
 void RB_DestroyTexture(texture_handle_t handle)
 {
-    (void)handle;
+    GLuint texture = (GLuint)handle;
 
-    printf("destroy texture placeholder\n");
+    glDeleteTextures(1, &texture);
 }
 
 shader_handle_t RB_CreateShader(const char *vertex_source, const char *fragment_source)
