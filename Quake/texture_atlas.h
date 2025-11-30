@@ -10,6 +10,8 @@
 
 #define ATLAS_MAX_TEXTURES 4096
 
+extern cvar_t r_use_textureatlas;
+
 typedef struct atlas_rect_s {
     float u1, v1, u2, v2;
     int exists; // 1 = im atlas
