@@ -385,18 +385,16 @@ void RB_DestroyMesh(mesh_handle_t handle)
     mesh->used = false;
 }
 
-void RB_BeginPass(struct render_pass_s *pass)
+void RB_BeginPass(const pass_info_t *info)
 {
-    (void)pass;
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)info->target);
 
-    printf("begin pass placeholder\n");
+    glClearColor(info->clear_color[0], info->clear_color[1], info->clear_color[2], info->clear_color[3]);
+    glClear(info->clear_flags);
 }
 
-void RB_EndPass(struct render_pass_s *pass)
+void RB_EndPass(void)
 {
-    (void)pass;
-
-    printf("end pass placeholder\n");
 }
 
 void RB_SetMaterial(struct material_s *material)
