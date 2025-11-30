@@ -7,6 +7,25 @@ typedef uint32_t texture_handle_t;
 typedef uint32_t shader_handle_t;
 typedef uint32_t mesh_handle_t;
 
+typedef struct shader_uniform_def_s {
+    const char *name;
+    int type;
+} shader_uniform_def_t;
+
+typedef struct shader_sampler_binding_s {
+    const char *name;
+    int texture_unit;
+} shader_sampler_binding_t;
+
+typedef struct shader_desc_s {
+    const char *vertex_source;
+    const char *fragment_source;
+    const shader_uniform_def_t *uniforms;
+    int uniform_count;
+    const shader_sampler_binding_t *samplers;
+    int sampler_count;
+} shader_desc_t;
+
 typedef struct texture_desc_s {
     int width;
     int height;
@@ -40,7 +59,7 @@ struct render_backend_s {
     texture_handle_t (*CreateTexture)(const texture_desc_t *desc);
     void (*DestroyTexture)(texture_handle_t handle);
 
-    shader_handle_t (*CreateShader)(const char *vertex_source, const char *fragment_source);
+    shader_handle_t (*CreateShader)(const shader_desc_t *desc);
     void (*DestroyShader)(shader_handle_t handle);
 
     mesh_handle_t (*CreateMesh)(const mesh_desc_t *desc);
