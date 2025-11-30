@@ -42,12 +42,9 @@ static void Null_DestroyShader(shader_handle_t handle)
     (void)handle;
 }
 
-static mesh_handle_t Null_CreateMesh(const void *vertex_data, size_t vertex_count, const void *index_data, size_t index_count)
+static mesh_handle_t Null_CreateMesh(const mesh_desc_t *desc)
 {
-    (void)vertex_data;
-    (void)vertex_count;
-    (void)index_data;
-    (void)index_count;
+    (void)desc;
 
     return 0;
 }

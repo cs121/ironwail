@@ -14,6 +14,15 @@ typedef struct texture_desc_s {
     const void *pixels;
 } texture_desc_t;
 
+typedef struct mesh_desc_s {
+    float *positions;
+    float *normals;
+    float *uvs;
+    int *indices;
+    int vertex_count;
+    int index_count;
+} mesh_desc_t;
+
 struct draw_surf_s;
 typedef struct draw_surf_s draw_surf_t;
 
@@ -34,7 +43,7 @@ struct render_backend_s {
     shader_handle_t (*CreateShader)(const char *vertex_source, const char *fragment_source);
     void (*DestroyShader)(shader_handle_t handle);
 
-    mesh_handle_t (*CreateMesh)(const void *vertex_data, size_t vertex_count, const void *index_data, size_t index_count);
+    mesh_handle_t (*CreateMesh)(const mesh_desc_t *desc);
     void (*DestroyMesh)(mesh_handle_t handle);
 
     void (*BeginPass)(struct render_pass_s *pass);

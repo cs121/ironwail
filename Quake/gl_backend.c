@@ -4,9 +4,23 @@
 #include "SDL_opengl.h"
 #endif
 
+#include <stdlib.h>
+
 #include "renderer_backend.h"
 
 typedef struct render_backend_s render_backend_t;
+
+typedef struct mesh_s {
+    GLuint vao;
+    GLuint vbo;
+    GLuint ibo;
+    int vertex_count;
+    qboolean used;
+} mesh_t;
+
+static mesh_t *mesh_pool;
+static size_t mesh_pool_count;
+static size_t mesh_pool_capacity;
 
 qboolean RB_Init(void)
 {
@@ -63,22 +77,139 @@ void RB_DestroyShader(shader_handle_t handle)
     printf("destroy shader placeholder\n");
 }
 
-mesh_handle_t RB_CreateMesh(const void *vertex_data, size_t vertex_count, const void *index_data, size_t index_count)
+static mesh_t *RB_AllocateMeshSlot(size_t *out_index)
 {
-    (void)vertex_data;
-    (void)vertex_count;
-    (void)index_data;
-    (void)index_count;
+    size_t index;
 
-    printf("create mesh placeholder\n");
-    return 0;
+    for (index = 0; index < mesh_pool_count; ++index)
+    {
+        if (!mesh_pool[index].used)
+        {
+            mesh_pool[index].used = true;
+            *out_index = index;
+            return &mesh_pool[index];
+        }
+    }
+
+    if (mesh_pool_count == mesh_pool_capacity)
+    {
+        size_t new_capacity = mesh_pool_capacity ? mesh_pool_capacity * 2 : 16;
+        mesh_t *new_pool = realloc(mesh_pool, new_capacity * sizeof(mesh_t));
+
+        if (!new_pool)
+            return NULL;
+
+        mesh_pool = new_pool;
+        mesh_pool_capacity = new_capacity;
+    }
+
+    index = mesh_pool_count++;
+    mesh_pool[index].used = true;
+    *out_index = index;
+
+    return &mesh_pool[index];
+}
+
+mesh_handle_t RB_CreateMesh(const mesh_desc_t *desc)
+{
+    const size_t floats_per_vertex = 8; // position (3) + normal (3) + uv (2)
+    size_t vertex_buffer_size;
+    float *vertex_buffer;
+    GLuint vao = 0;
+    GLuint vbo = 0;
+    GLuint ibo = 0;
+    mesh_t *mesh;
+    size_t mesh_index;
+    int i;
+
+    if (!desc || desc->vertex_count <= 0 || desc->index_count <= 0 || !desc->positions || !desc->indices)
+        return 0;
+
+    vertex_buffer_size = (size_t)desc->vertex_count * floats_per_vertex;
+    vertex_buffer = malloc(vertex_buffer_size * sizeof(float));
+
+    if (!vertex_buffer)
+        return 0;
+
+    for (i = 0; i < desc->vertex_count; ++i)
+    {
+        const float *position = desc->positions + i * 3;
+        const float *normal = desc->normals ? desc->normals + i * 3 : NULL;
+        const float *uv = desc->uvs ? desc->uvs + i * 2 : NULL;
+        size_t base = (size_t)i * floats_per_vertex;
+
+        vertex_buffer[base + 0] = position[0];
+        vertex_buffer[base + 1] = position[1];
+        vertex_buffer[base + 2] = position[2];
+
+        vertex_buffer[base + 3] = normal ? normal[0] : 0.0f;
+        vertex_buffer[base + 4] = normal ? normal[1] : 0.0f;
+        vertex_buffer[base + 5] = normal ? normal[2] : 0.0f;
+
+        vertex_buffer[base + 6] = uv ? uv[0] : 0.0f;
+        vertex_buffer[base + 7] = uv ? uv[1] : 0.0f;
+    }
+
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_buffer_size * sizeof(float), vertex_buffer, GL_STATIC_DRAW);
+
+    glGenBuffers(1, &ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (size_t)desc->index_count * sizeof(int), desc->indices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, (GLsizei)(floats_per_vertex * sizeof(float)), (void *)(uintptr_t)0);
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, (GLsizei)(floats_per_vertex * sizeof(float)), (void *)(uintptr_t)(3 * sizeof(float)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, (GLsizei)(floats_per_vertex * sizeof(float)), (void *)(uintptr_t)(6 * sizeof(float)));
+
+    free(vertex_buffer);
+
+    mesh = RB_AllocateMeshSlot(&mesh_index);
+
+    if (!mesh)
+    {
+        glDeleteBuffers(1, &vbo);
+        glDeleteBuffers(1, &ibo);
+        glDeleteVertexArrays(1, &vao);
+        return 0;
+    }
+
+    mesh->vao = vao;
+    mesh->vbo = vbo;
+    mesh->ibo = ibo;
+    mesh->vertex_count = desc->vertex_count;
+
+    return (mesh_handle_t)(mesh_index + 1);
 }
 
 void RB_DestroyMesh(mesh_handle_t handle)
 {
-    (void)handle;
+    size_t index;
+    mesh_t *mesh;
 
-    printf("destroy mesh placeholder\n");
+    if (handle == 0)
+        return;
+
+    index = handle - 1;
+
+    if (index >= mesh_pool_count || !mesh_pool[index].used)
+        return;
+
+    mesh = &mesh_pool[index];
+
+    glDeleteBuffers(1, &mesh->vbo);
+    glDeleteBuffers(1, &mesh->ibo);
+    glDeleteVertexArrays(1, &mesh->vao);
+
+    mesh->used = false;
 }
 
 void RB_BeginPass(struct render_pass_s *pass)
