@@ -82,9 +82,9 @@ static void Null_SetViewport(int x, int y, int width, int height)
     (void)height;
 }
 
-static void Null_DrawSurface(mesh_handle_t mesh)
+static void Null_DrawSurface(const draw_surf_t *surface)
 {
-    (void)mesh;
+    (void)surface;
 }
 
 static render_backend_t null_backend = {

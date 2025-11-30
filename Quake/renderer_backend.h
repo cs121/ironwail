@@ -7,6 +7,9 @@ typedef uint32_t texture_handle_t;
 typedef uint32_t shader_handle_t;
 typedef uint32_t mesh_handle_t;
 
+struct draw_surf_s;
+typedef struct draw_surf_s draw_surf_t;
+
 struct material_s;
 struct render_pass_s;
 
@@ -33,7 +36,7 @@ struct render_backend_s {
     void (*SetMaterial)(struct material_s *material);
     void (*SetViewport)(int x, int y, int width, int height);
 
-    void (*DrawSurface)(mesh_handle_t mesh);
+    void (*DrawSurface)(const draw_surf_t *surface);
 };
 
 extern struct render_backend_s *rb;
