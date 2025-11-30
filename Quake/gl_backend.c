@@ -107,9 +107,9 @@ void RB_SetViewport(int x, int y, int width, int height)
     printf("set viewport placeholder\n");
 }
 
-void RB_DrawSurface(mesh_handle_t mesh)
+void RB_DrawSurface(const draw_surf_t *surface)
 {
-    (void)mesh;
+    (void)surface;
 
     printf("draw surface placeholder\n");
 }
