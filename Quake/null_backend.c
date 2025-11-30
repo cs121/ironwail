@@ -53,14 +53,13 @@ static void Null_DestroyMesh(mesh_handle_t handle)
     (void)handle;
 }
 
-static void Null_BeginPass(struct render_pass_s *pass)
+static void Null_BeginPass(const pass_info_t *info)
 {
-    (void)pass;
+    (void)info;
 }
 
-static void Null_EndPass(struct render_pass_s *pass)
+static void Null_EndPass(void)
 {
-    (void)pass;
 }
 
 static void Null_SetMaterial(struct material_s *material)

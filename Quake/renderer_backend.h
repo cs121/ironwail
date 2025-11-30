@@ -3,9 +3,24 @@
 
 #include "q_stdinc.h"
 
+#if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
+#include <SDL2/SDL_opengl.h>
+#else
+#include "SDL_opengl.h"
+#endif
+
 typedef uint32_t texture_handle_t;
 typedef uint32_t shader_handle_t;
 typedef uint32_t mesh_handle_t;
+typedef uint32_t framebuffer_handle_t;
+
+typedef vec4_t vec4;
+
+typedef struct pass_info_s {
+    GLenum clear_flags;
+    vec4 clear_color;
+    framebuffer_handle_t target;
+} pass_info_t;
 
 typedef struct shader_uniform_def_s {
     const char *name;
@@ -46,8 +61,6 @@ struct draw_surf_s;
 typedef struct draw_surf_s draw_surf_t;
 
 struct material_s;
-struct render_pass_s;
-
 typedef struct render_backend_s render_backend_t;
 
 struct render_backend_s {
@@ -65,8 +78,8 @@ struct render_backend_s {
     mesh_handle_t (*CreateMesh)(const mesh_desc_t *desc);
     void (*DestroyMesh)(mesh_handle_t handle);
 
-    void (*BeginPass)(struct render_pass_s *pass);
-    void (*EndPass)(struct render_pass_s *pass);
+    void (*BeginPass)(const pass_info_t *info);
+    void (*EndPass)(void);
 
     void (*SetMaterial)(struct material_s *material);
     void (*SetViewport)(int x, int y, int width, int height);
