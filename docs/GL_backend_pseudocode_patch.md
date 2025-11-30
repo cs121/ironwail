@@ -2,6 +2,37 @@
 
 Dieser Patch beschreibt in Pseudocode, wie die Renderer-Initialisierung und die Ersetzung direkter OpenGL-Aufrufe auf das neue Backend-Interface angepasst werden. Die Beispiele zeigen nur die ersten typischen Stellen in den genannten Dateien.
 
+## 0. Frame-Ablauf auf das Backend umstellen
+
+Der klassische 2D-Switch per `GL_Set2D()` entfällt. Stattdessen strukturiert das Backend die einzelnen Render-Passes. Ein typischer Frame-Aufbau wird damit von
+
+```c
+GL_Set2D();
+R_DrawWorld();
+R_DrawEntities();
+R_DrawParticles();
+```
+
+zu folgendem Muster:
+
+```c
+rb->BeginFrame();
+
+rb->BeginPass(&world_pass);
+R_DrawWorld();             // erzeugt DrawSurfaces
+R_FlushDrawSurfaces();
+rb->EndPass();
+
+rb->BeginPass(&entity_pass);
+R_DrawEntities();
+R_FlushDrawSurfaces();
+rb->EndPass();
+
+rb->EndFrame();
+```
+
+Jeder Pass sammelt Draw-Surfaces, die erst beim `R_FlushDrawSurfaces()` an das Backend übergeben werden. Weitere Passes (z. B. für Partikel oder Post-Processing) folgen demselben Schema.
+
 ## 1. Renderer-Init anpassen
 
 ```c
