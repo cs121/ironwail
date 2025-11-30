@@ -59,7 +59,6 @@ CFLAGS += -D_FILE_OFFSET_BITS=64
 CFLAGS += $(call check_gcc,-std=gnu11,)
 CFLAGS += $(call check_gcc,-Werror=format,)
 CFLAGS += $(CPUFLAGS)
-CFLAGS += -I. -Irenderer -Isound -Inetwork
 CXXFLAGS = $(filter-out -std=gnu11,$(CFLAGS)) $(call check_cxx,-std=gnu++17,)
 ifneq ($(DEBUG),0)
 DFLAGS += -DDEBUG
@@ -199,70 +198,66 @@ MAKEFILE := $(lastword $(MAKEFILE_LIST))
 # objects
 # ---------------------------
 
-RENDERER_DIR := renderer
-SOUND_DIR := sound
-NETWORK_DIR := network
-
-MUSIC_OBJS= $(SOUND_DIR)/bgmusic.o \
-        $(SOUND_DIR)/snd_codec.o \
-        $(SOUND_DIR)/snd_flac.o \
-        $(SOUND_DIR)/snd_wave.o \
-        $(SOUND_DIR)/snd_vorbis.o \
-        $(SOUND_DIR)/snd_opus.o \
-        $(SOUND_DIR)/$(mp3_obj).o \
-        $(SOUND_DIR)/snd_mp3tag.o \
-        $(SOUND_DIR)/snd_mikmod.o \
-        $(SOUND_DIR)/snd_modplug.o \
-        $(SOUND_DIR)/snd_xmp.o \
-        $(SOUND_DIR)/snd_umx.o
-COMOBJ_SND = $(SOUND_DIR)/snd_dma.o $(SOUND_DIR)/snd_mix.o $(SOUND_DIR)/snd_mem.o $(MUSIC_OBJS)
-SYSOBJ_SND = $(SOUND_DIR)/snd_sdl.o
-SYSOBJ_CDA = $(SOUND_DIR)/cd_null.o
+MUSIC_OBJS= bgmusic.o \
+	snd_codec.o \
+	snd_flac.o \
+	snd_wave.o \
+	snd_vorbis.o \
+	snd_opus.o \
+	$(mp3_obj).o \
+	snd_mp3tag.o \
+	snd_mikmod.o \
+	snd_modplug.o \
+	snd_xmp.o \
+	snd_umx.o
+COMOBJ_SND = snd_dma.o snd_mix.o snd_mem.o $(MUSIC_OBJS)
+SYSOBJ_SND = snd_sdl.o
+SYSOBJ_CDA = cd_null.o
 SYSOBJ_INPUT = in_sdl.o
-SYSOBJ_GL_VID= $(RENDERER_DIR)/gl_vidsdl.o
-SYSOBJ_NET = $(NETWORK_DIR)/net_win.o $(NETWORK_DIR)/net_wins.o $(NETWORK_DIR)/net_wipx.o
+SYSOBJ_GL_VID= gl_vidsdl.o
+SYSOBJ_NET = net_win.o net_wins.o net_wipx.o
 SYSOBJ_SYS = pl_win.o sys_sdl_win.o
 SYSOBJ_MAIN= main_sdl.o
 SYSOBJ_RES = QuakeSpasm.res
 
 GLOBJS = \
-        $(RENDERER_DIR)/gl_refrag.o \
-        $(RENDERER_DIR)/gl_rlight.o \
-        $(RENDERER_DIR)/gl_rmain.o \
-        $(RENDERER_DIR)/gl_fog.o \
-        $(RENDERER_DIR)/gl_rmisc.o \
-        $(RENDERER_DIR)/r_part.o \
-        $(RENDERER_DIR)/r_world.o \
-        $(RENDERER_DIR)/gl_screen.o \
-        $(RENDERER_DIR)/gl_shaders.o \
-        $(RENDERER_DIR)/gl_sky.o \
-        $(RENDERER_DIR)/gl_warp.o \
-        $(SYSOBJ_GL_VID) \
-        $(RENDERER_DIR)/gl_draw.o \
-        $(RENDERER_DIR)/image.o \
-        $(RENDERER_DIR)/gl_texmgr.o \
-        $(RENDERER_DIR)/gl_mesh.o \
-        $(RENDERER_DIR)/r_sprite.o \
-        $(RENDERER_DIR)/r_alias.o \
-        $(RENDERER_DIR)/r_brush.o \
-        $(RENDERER_DIR)/gl_model.o
+	gl_refrag.o \
+	gl_rlight.o \
+	gl_rmain.o \
+	gl_fog.o \
+	gl_rmisc.o \
+	r_part.o \
+	r_world.o \
+	gl_screen.o \
+	gl_shaders.o \
+	gl_sky.o \
+	gl_warp.o \
+	$(SYSOBJ_GL_VID) \
+	gl_draw.o \
+	image.o \
+	gl_texmgr.o \
+	gl_mesh.o \
+	r_sprite.o \
+	r_alias.o \
+	r_brush.o \
+	gl_model.o
 
 OBJS = strlcat.o \
 	strlcpy.o \
 	$(GLOBJS) \
-        $(SYSOBJ_INPUT) \
-        $(COMOBJ_SND) \
-        $(SYSOBJ_SND) \
-        $(SYSOBJ_CDA) \
-        $(SYSOBJ_NET) \
-        $(NETWORK_DIR)/net_dgrm.o \
-        $(NETWORK_DIR)/net_loop.o \
-        $(NETWORK_DIR)/net_main.o \
-        chase.o \
-        cl_demo.o \
-        cl_input.o \
-        cl_main.o \
-        cl_parse.o \
+	$(SYSOBJ_INPUT) \
+	$(COMOBJ_SND) \
+	$(SYSOBJ_SND) \
+	$(SYSOBJ_CDA) \
+	$(SYSOBJ_NET) \
+	net_dgrm.o \
+	net_loop.o \
+	net_main.o \
+	chase.o \
+	cl_demo.o \
+	cl_input.o \
+	cl_main.o \
+	cl_parse.o \
 	cl_tent.o \
 	console.o \
 	keys.o \
@@ -272,14 +267,13 @@ OBJS = strlcat.o \
         wad.o \
         cmd.o \
         common.o \
-        $(RENDERER_DIR)/q3shader.o \
+        q3shader.o \
         steam.o \
-        json.o \
-        $(RENDERER_DIR)/texture_atlas.o \
-        miniz.o \
-        crc.o \
-        cvar.o \
-        cfgfile.o \
+	json.o \
+	miniz.o \
+	crc.o \
+	cvar.o \
+	cfgfile.o \
 	host.o \
 	host_cmd.o \
 	mathlib.o \
@@ -333,7 +327,7 @@ debug:
 	$(error Use "make DEBUG=1")
 
 clean: $(MAKEFILE)
-        $(RM) *.o *.d *.res $(RENDERER_DIR)/*.o $(RENDERER_DIR)/*.d $(SOUND_DIR)/*.o $(SOUND_DIR)/*.d $(NETWORK_DIR)/*.o $(NETWORK_DIR)/*.d $(DEFAULT_TARGET)
+	$(RM) *.o *.d *.res $(DEFAULT_TARGET)
 
 #---------------------------------------------------------------
 # include dependencies (if not running 'clean' target)
