@@ -1030,11 +1030,25 @@ static byte *Atlas_ReadTextureSource(const gltexture_t *glt, int *width, int *he
     }
     else if (glt->source_offset)
     {
+        const byte *src = (const byte *)glt->source_offset;
+
+        /*
+         * Brush textures keep their miptex header and mip levels together in
+         * memory.  The base pixel data starts at offsets[0], so copy from that
+         * location instead of the beginning of the struct to avoid treating
+         * the header as image data.
+         */
+        if (glt->source_format == SRC_INDEXED)
+        {
+            const miptex_t *mt = (const miptex_t *)glt->source_offset;
+            src += mt->offsets[0];
+        }
+
         if (expected_size > 0)
         {
             raw = (byte *)malloc(expected_size);
             if (raw)
-                memcpy(raw, (const void *)glt->source_offset, expected_size);
+                memcpy(raw, src, expected_size);
         }
     }
 
