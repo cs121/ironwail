@@ -2404,7 +2404,7 @@ static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
 
-	for (uint32_t level = 0, lw = width, lh = height; level < mipmaps; level++, lw = max (1u, lw >> 1), lh = max (1u, lh >> 1))
+	for (uint32_t level = 0, lw = width, lh = height; level < mipmaps; level++, lw = q_max (1u, lw >> 1), lh = q_max (1u, lh >> 1))
 	{
 		size_t level_size = ((lw + 3) / 4) * ((lh + 3) / 4) * (size_t)block_size;
 
@@ -2427,22 +2427,23 @@ static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int
 
 fail:
 	if (texnum)
-		GL_DeleteTexturesFunc (1, &texnum);
+		glDeleteTextures (1, &texnum);
 	return 0;
 }
 
 GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips)
 {
 	byte *filebuf = NULL;
-	int len;
+	size_t len;
 	GLuint texnum;
 
 	if (!path || !*path)
 		return 0;
 
-	len = COM_LoadMallocFile (path, (void **)&filebuf);
-	if (len <= 0 || !filebuf)
+	filebuf = COM_LoadMallocFile (path, NULL);
+	if (!filebuf)
 		return 0;
+	len = (size_t)com_filesize;
 
 	texnum = GL_LoadDDS_Memory ((const uint8_t *)filebuf, (size_t)len, w, h, has_mips);
 	COM_FreeFile (filebuf);
@@ -2457,7 +2458,7 @@ GLuint GL_LoadDDS_Memory (const uint8_t *data, size_t size, int *w, int *h, int 
 static int GL_CalcMipCount (int width, int height)
 {
         int levels = 1;
-        int max_dim = max (width, height);
+        int max_dim = q_max (width, height);
 
         while (max_dim > 1)
         {
@@ -2470,61 +2471,62 @@ static int GL_CalcMipCount (int width, int height)
 
 GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips)
 {
-        const char *ext;
-        GLuint texnum;
-        int width, height, mip_levels;
-        int len;
-        byte *filebuf;
-        stbi_uc *pixels;
+	const char *ext;
+	GLuint texnum;
+	int width, height, mip_levels;
+	size_t len;
+	byte *filebuf;
+	stbi_uc *pixels;
 
-        if (!filename || !*filename)
-                return 0;
+	if (!filename || !*filename)
+		return 0;
 
-        ext = strrchr (filename, '.');
-        if (ext)
-                ext++;
+	ext = strrchr (filename, '.');
+	if (ext)
+		ext++;
 
-        if (ext && !q_strcasecmp (ext, "dds"))
-        {
-                texnum = GL_LoadDDS (filename, w, h, has_mips);
-                if (texnum)
-                        return texnum;
-                Con_DPrintf ("GL_LoadTexture: failed to load %s as DDS, falling back\n", filename);
-        }
+	if (ext && !q_strcasecmp (ext, "dds"))
+	{
+		texnum = GL_LoadDDS (filename, w, h, has_mips);
+		if (texnum)
+			return texnum;
+		Con_DPrintf ("GL_LoadTexture: failed to load %s as DDS, falling back\n", filename);
+	}
 
-        if (!ext || (q_strcasecmp (ext, "png") && q_strcasecmp (ext, "tga")))
-                return 0;
+	if (!ext || (q_strcasecmp (ext, "png") && q_strcasecmp (ext, "tga")))
+		return 0;
 
-        len = COM_LoadMallocFile (filename, (void **)&filebuf);
-        if (!filebuf)
-                return 0;
+	filebuf = COM_LoadMallocFile (filename, NULL);
+	if (!filebuf)
+		return 0;
+	len = (size_t)com_filesize;
 
-        pixels = stbi_load_from_memory (filebuf, len, &width, &height, NULL, 4);
-        COM_FreeFile (filebuf);
-        if (!pixels)
-                return 0;
+	pixels = stbi_load_from_memory (filebuf, (int)len, &width, &height, NULL, 4);
+	COM_FreeFile (filebuf);
+	if (!pixels)
+		return 0;
 
-        mip_levels = GL_CalcMipCount (width, height);
-        glGenTextures (1, &texnum);
-        glBindTexture (GL_TEXTURE_2D, texnum);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	mip_levels = GL_CalcMipCount (width, height);
+	glGenTextures (1, &texnum);
+	glBindTexture (GL_TEXTURE_2D, texnum);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 
-        glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        glGenerateMipmap (GL_TEXTURE_2D);
+	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	GL_GenerateMipmapFunc (GL_TEXTURE_2D);
 
-        stbi_image_free (pixels);
+	stbi_image_free (pixels);
 
-        if (w)
-                *w = width;
-        if (h)
-                *h = height;
-        if (has_mips)
-                *has_mips = 1;
+	if (w)
+		*w = width;
+	if (h)
+		*h = height;
+	if (has_mips)
+		*has_mips = 1;
 
-        return texnum;
+	return texnum;
 }
