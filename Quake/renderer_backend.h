@@ -10,6 +10,8 @@ typedef uint32_t mesh_handle_t;
 struct material_s;
 struct render_pass_s;
 
+typedef struct render_backend_s render_backend_t;
+
 struct render_backend_s {
     qboolean (*Init)(void);
     void (*Shutdown)(void);
@@ -35,5 +37,7 @@ struct render_backend_s {
 };
 
 extern struct render_backend_s *rb;
+
+render_backend_t *Null_GetBackend(void);
 
 #endif // RENDERER_BACKEND_H
