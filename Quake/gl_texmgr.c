@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
-#include "stb_image.h"
 
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
@@ -100,75 +99,6 @@ static int glmode_idx = 2; /* nearest with linear mips */
 static GLuint gl_samplers[NUM_GLMODES * 2]; // x2: nomip + mip
 
 texfilter_t gl_texfilter;
-
-static qboolean TexMgr_ReadImageHeader (const char *filename, unsigned int *width, unsigned int *height)
-{
-        FILE *f;
-        const char *ext;
-        unsigned char header[128];
-        unsigned int w = 0, h = 0;
-
-        if (!filename || !*filename)
-                return false;
-
-        ext = strrchr(filename, '.');
-        if (!ext || !ext[1])
-                return false;
-        ext++;
-
-        if (COM_FOpenFile (filename, &f, NULL) < 0 || !f)
-                return false;
-
-        if (!q_strcasecmp(ext, "png"))
-        {
-                if (fread(header, 1, 24, f) == 24)
-                {
-                        static const unsigned char sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
-                        if (!memcmp(header, sig, sizeof(sig)))
-                        {
-                                w = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
-                                h = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
-                        }
-                }
-        }
-        else if (!q_strcasecmp(ext, "tga"))
-        {
-                if (fread(header, 1, 18, f) == 18)
-                {
-                        w = (unsigned int)(header[12] | (header[13] << 8));
-                        h = (unsigned int)(header[14] | (header[15] << 8));
-                }
-        }
-        else if (!q_strcasecmp(ext, "dds"))
-        {
-                if (fread(header, 1, 128, f) == 128)
-                {
-                        static const unsigned char sig[4] = {'D', 'D', 'S', ' '};
-                        if (!memcmp(header, sig, sizeof(sig)))
-                        {
-                                w = (unsigned int)(header[16] | (header[17] << 8) | (header[18] << 16) | (header[19] << 24));
-                                h = (unsigned int)(header[12] | (header[13] << 8) | (header[14] << 16) | (header[15] << 24));
-                        }
-                }
-        }
-        else if (!q_strcasecmp(ext, "wal"))
-        {
-                if (fread(header, 1, 40, f) == 40)
-                {
-                        w = (unsigned int)(header[32] | (header[33] << 8) | (header[34] << 16) | (header[35] << 24));
-                        h = (unsigned int)(header[36] | (header[37] << 8) | (header[38] << 16) | (header[39] << 24));
-                }
-        }
-
-        fclose(f);
-
-        if (width)
-                *width = w;
-        if (height)
-                *height = h;
-
-        return w > 0 && h > 0;
-}
 
 
 /*
@@ -1628,33 +1558,20 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 		glt->target = GL_TEXTURE_2D_ARRAY;
 	else
 		glt->target = GL_TEXTURE_2D;
-        q_strlcpy (glt->name, name, sizeof(glt->name));
-        glt->width = width;
-        glt->height = height;
-        glt->depth = depth;
-        glt->compression = 1;
-        glt->flags = flags;
-        glt->shirt = -1;
-        glt->pants = -1;
-        q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
-        glt->source_offset = source_offset;
-        glt->source_format = format;
-        glt->source_width = 0;
-        glt->source_height = 0;
-        {
-                unsigned int header_w = 0, header_h = 0;
-
-                if (source_file && source_file[0] && TexMgr_ReadImageHeader(source_file, &header_w, &header_h))
-                {
-                        glt->source_width = header_w;
-                        glt->source_height = header_h;
-                }
-                if (!glt->source_width)
-                        glt->source_width = width;
-                if (!glt->source_height)
-                        glt->source_height = height;
-        }
-        glt->source_crc = crc;
+	q_strlcpy (glt->name, name, sizeof(glt->name));
+	glt->width = width;
+	glt->height = height;
+	glt->depth = depth;
+	glt->compression = 1;
+	glt->flags = flags;
+	glt->shirt = -1;
+	glt->pants = -1;
+	q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
+	glt->source_offset = source_offset;
+	glt->source_format = format;
+	glt->source_width = width;
+	glt->source_height = height;
+	glt->source_crc = crc;
 
 	//upload it
 	mark = Hunk_LowMark();
@@ -2184,7 +2101,7 @@ Returns index of palette buffer to use:
 */
 int GLPalette_Postprocess (void)
 {
-const float *blend;
+	const float *blend;
 	
 	if (!softemu)
 		return 0;
@@ -2219,317 +2136,5 @@ const float *blend;
 
 	GL_EndGroup ();
 
-        return 1;
-}
-
-//
-// DDS loading helpers
-//
-
-#define DDS_FOURCC(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
-
-typedef struct dds_pixelformat_s
-{
-        uint32_t        size;
-        uint32_t        flags;
-        uint32_t        fourCC;
-        uint32_t        rgbBitCount;
-        uint32_t        rBitMask;
-        uint32_t        gBitMask;
-        uint32_t        bBitMask;
-        uint32_t        aBitMask;
-} dds_pixelformat_t;
-
-typedef struct dds_header_s
-{
-        uint32_t        size;
-        uint32_t        flags;
-        uint32_t        height;
-        uint32_t        width;
-        uint32_t        pitchOrLinearSize;
-        uint32_t        depth;
-        uint32_t        mipMapCount;
-        uint32_t        reserved1[11];
-        dds_pixelformat_t       ddspf;
-        uint32_t        caps;
-        uint32_t        caps2;
-        uint32_t        caps3;
-        uint32_t        caps4;
-        uint32_t        reserved2;
-} dds_header_t;
-
-typedef struct dds_header_dxt10_s
-{
-        uint32_t        dxgiFormat;
-        uint32_t        resourceDimension;
-        uint32_t        miscFlag;
-        uint32_t        arraySize;
-        uint32_t        miscFlags2;
-} dds_header_dxt10_t;
-
-static qboolean DDS_ParseFormat (uint32_t fourcc, uint32_t dxgi_format, GLenum *out_format, int *block_size)
-{
-        GLenum format = GL_RGBA8;
-        int block = 0;
-
-        switch (fourcc)
-        {
-        case DDS_FOURCC('D','X','T','1'):
-                format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
-                block = 8;
-                break;
-        case DDS_FOURCC('D','X','T','3'):
-                format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
-                block = 16;
-                break;
-        case DDS_FOURCC('D','X','T','5'):
-                format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-                block = 16;
-                break;
-        case DDS_FOURCC('A','T','I','2'):
-        case DDS_FOURCC('B','C','5',' '):
-                format = GL_COMPRESSED_RG_RGTC2;
-                block = 16;
-                break;
-        case DDS_FOURCC('D','X','1','0'):
-                switch (dxgi_format)
-                {
-                case 71: // DXGI_FORMAT_BC1_UNORM
-                        format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
-                        block = 8;
-                        break;
-                case 74: // DXGI_FORMAT_BC2_UNORM
-                        format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
-                        block = 16;
-                        break;
-                case 77: // DXGI_FORMAT_BC3_UNORM
-                        format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-                        block = 16;
-                        break;
-                case 83: // DXGI_FORMAT_BC5_UNORM
-                        format = GL_COMPRESSED_RG_RGTC2;
-                        block = 16;
-                        break;
-                case 98: // DXGI_FORMAT_BC7_UNORM
-                        format = GL_COMPRESSED_RGBA_BPTC_UNORM;
-                        block = 16;
-                        break;
-                default:
-                        goto unsupported;
-                }
-                break;
-        default:
-                goto unsupported;
-        }
-
-        if (out_format)
-                *out_format = format;
-        if (block_size)
-                *block_size = block;
-
-        return block != 0;
-
-unsupported:
-        Con_Printf("[DDS] Unsupported DDS format (fourcc=0x%08x, dxgi=%u)\n", fourcc, dxgi_format);
-        return false;
-}
-
-static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int *h, int *has_mips)
-{
-	dds_header_t header;
-	dds_header_dxt10_t dx10;
-	uint32_t fourcc;
-	uint32_t width, height, mipmaps;
-	int block_size = 0;
-	GLenum format = GL_RGBA8;
-	GLuint texnum = 0;
-	size_t remaining = size;
-
-	if (!data || size < sizeof(header) + 4)
-		return 0;
-
-	if (memcmp (data, "DDS ", 4))
-		return 0;
-
-	data += 4;
-	remaining -= 4;
-
-	if (remaining < sizeof(header))
-		return 0;
-
-	memcpy (&header, data, sizeof(header));
-	data += sizeof(header);
-	remaining -= sizeof(header);
-
-	if (LittleLong (header.size) != sizeof(header) || LittleLong (header.ddspf.size) != sizeof(header.ddspf))
-		return 0;
-
-	width = LittleLong (header.width);
-	height = LittleLong (header.height);
-	mipmaps = LittleLong (header.mipMapCount);
-	fourcc = LittleLong (header.ddspf.fourCC);
-
-	if (!width || !height)
-		return 0;
-
-	memset (&dx10, 0, sizeof(dx10));
-	if (fourcc == DDS_FOURCC('D','X','1','0'))
-	{
-		if (remaining < sizeof(dx10))
-			return 0;
-
-		memcpy (&dx10, data, sizeof(dx10));
-		data += sizeof(dx10);
-		remaining -= sizeof(dx10);
-
-		dx10.dxgiFormat = LittleLong (dx10.dxgiFormat);
-		dx10.resourceDimension = LittleLong (dx10.resourceDimension);
-		dx10.arraySize = LittleLong (dx10.arraySize);
-
-		if (dx10.resourceDimension != 3 || dx10.arraySize != 1)
-			return 0;
-	}
-
-	if (!DDS_ParseFormat (fourcc, dx10.dxgiFormat, &format, &block_size))
-		return 0;
-
-	mipmaps = mipmaps ? mipmaps : 1;
-
-	glGenTextures (1, &texnum);
-	glBindTexture (GL_TEXTURE_2D, texnum);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mipmaps - 1);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-
-	for (uint32_t level = 0, lw = width, lh = height; level < mipmaps; level++, lw = q_max (1u, lw >> 1), lh = q_max (1u, lh >> 1))
-	{
-		size_t level_size = ((lw + 3) / 4) * ((lh + 3) / 4) * (size_t)block_size;
-
-		if (level_size > remaining)
-			goto fail;
-
-                if (!GL_CompressedTexImage2DFunc)
-                        goto fail;
-
-                GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, level, format, lw, lh, 0, (GLsizei)level_size, data);
-		data += level_size;
-		remaining -= level_size;
-	}
-
-	if (w)
-		*w = width;
-	if (h)
-		*h = height;
-	if (has_mips)
-		*has_mips = (mipmaps > 1);
-
-	return texnum;
-
-fail:
-	if (texnum)
-		glDeleteTextures (1, &texnum);
-	return 0;
-}
-
-GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips)
-{
-	byte *filebuf = NULL;
-	size_t len;
-	GLuint texnum;
-
-	if (!path || !*path)
-		return 0;
-
-	filebuf = COM_LoadMallocFile (path, NULL);
-	if (!filebuf)
-		return 0;
-	len = (size_t)com_filesize;
-
-	texnum = GL_LoadDDS_Memory ((const uint8_t *)filebuf, (size_t)len, w, h, has_mips);
-        free (filebuf);
-	return texnum;
-}
-
-GLuint GL_LoadDDS_Memory (const uint8_t *data, size_t size, int *w, int *h, int *has_mips)
-{
-	return GL_LoadDDS_Internal (data, size, w, h, has_mips);
-}
-
-static int GL_CalcMipCount (int width, int height)
-{
-        int levels = 1;
-        int max_dim = q_max (width, height);
-
-        while (max_dim > 1)
-        {
-                max_dim >>= 1;
-                levels++;
-        }
-
-        return levels;
-}
-
-GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips)
-{
-	const char *ext;
-	GLuint texnum;
-	int width, height, mip_levels;
-	size_t len;
-	byte *filebuf;
-	stbi_uc *pixels;
-
-	if (!filename || !*filename)
-		return 0;
-
-	ext = strrchr (filename, '.');
-	if (ext)
-		ext++;
-
-	if (ext && !q_strcasecmp (ext, "dds"))
-	{
-		texnum = GL_LoadDDS (filename, w, h, has_mips);
-		if (texnum)
-			return texnum;
-		Con_DPrintf ("GL_LoadTexture: failed to load %s as DDS, falling back\n", filename);
-	}
-
-	if (!ext || (q_strcasecmp (ext, "png") && q_strcasecmp (ext, "tga")))
-		return 0;
-
-	filebuf = COM_LoadMallocFile (filename, NULL);
-	if (!filebuf)
-		return 0;
-	len = (size_t)com_filesize;
-
-	pixels = stbi_load_from_memory (filebuf, (int)len, &width, &height, NULL, 4);
-        free (filebuf);
-	if (!pixels)
-		return 0;
-
-	mip_levels = GL_CalcMipCount (width, height);
-	glGenTextures (1, &texnum);
-	glBindTexture (GL_TEXTURE_2D, texnum);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-
-	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	GL_GenerateMipmapFunc (GL_TEXTURE_2D);
-
-	stbi_image_free (pixels);
-
-	if (w)
-		*w = width;
-	if (h)
-		*h = height;
-	if (has_mips)
-		*has_mips = 1;
-
-	return texnum;
+	return 1;
 }

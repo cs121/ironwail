@@ -25,7 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
-#include "texture_atlas.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
 
@@ -258,6 +257,7 @@ byte *Mod_NoVisPVS (qmodel_t *model)
 		mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
 		if (!mod_novis)
 			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
+		
 		memset(mod_novis, 0xff, mod_novis_capacity);
 	}
 	return mod_novis;
@@ -1004,8 +1004,7 @@ static void Mod_LoadTextures (lump_t *l)
 		memset (tx, 0, sizeof (*tx));
 		loadmodel->textures[i] = tx;
 
-                // ensure texture names are always null-terminated so atlas lookups work
-                q_strlcpy (tx->name, mt->name, sizeof(tx->name));
+		memcpy (tx->name, mt->name, sizeof(tx->name));
 		if (!tx->name[0])
 		{
 			q_snprintf (tx->name, sizeof(tx->name), "unnamed%d", i);
@@ -1073,10 +1072,10 @@ static void Mod_LoadTextures (lump_t *l)
                                                 fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
                                 }
                                 else //use the texture from the bsp file
-                                {
-                                        q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-                                        offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+				{
+					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
+					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
+					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
                                                 SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
                                 }
 
@@ -3143,9 +3142,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	float		radius; //johnfitz
 	bsp_header_info_t header;
 
-        loadmodel->type = mod_brush;
-        if (!isDedicated && loadmodel->name[0] != '*')
-                Atlas_LoadForMap(loadmodel->name);
+	loadmodel->type = mod_brush;
 
 	mod_base = (byte *)buffer;
 
@@ -3229,10 +3226,10 @@ visdone:
 
 	mod->numframes = 2;		// regular and alternate animation
 
-        Mod_CheckWaterVis();
+	Mod_CheckWaterVis();
 
-        Mod_DispatchBSPXLumps(mod);
-        Q1BSPX_LogUsage(mod->name);
+	Mod_DispatchBSPXLumps(mod);
+	Q1BSPX_LogUsage(mod->name);
 
 //
 // set up the submodels (FIXME: this is confusing)

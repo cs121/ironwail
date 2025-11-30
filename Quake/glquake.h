@@ -24,8 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef GLQUAKE_H
 #define GLQUAKE_H
 
-#include <stddef.h>
-
 void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
 void GL_Set2D (void);
@@ -201,7 +199,6 @@ extern	const char	*gl_version;
 	x(void,			TexStorage2D, (GLenum target, GLsizei levels, GLenum internalFormat, GLsizei width, GLsizei height))\
 	x(void,			TexStorage3D, (GLenum target, GLsizei levels, GLenum internalFormat, GLsizei width, GLsizei height, GLsizei depth))\
 	x(void,			TexStorage2DMultisample, (GLenum target, GLsizei samples, GLenum internalFormat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations))\
-	x(void,			CompressedTexImage2D, (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *data))\
 	x(void,			MinSampleShading, (GLfloat value))\
 	x(void,			TexImage3D, (GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels))\
 	x(void,			TexSubImage3D, (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels))\
@@ -652,10 +649,6 @@ void Sky_LoadTextureQ64 (qmodel_t *m, texture_t *mt);
 void Sky_LoadSkyBox (const char *name);
 void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
-
-GLuint GL_LoadDDS (const char *path, int *w, int *h, int *has_mips);
-GLuint GL_LoadDDS_Memory (const uint8_t *data, size_t size, int *w, int *h, int *has_mips);
-GLuint GL_LoadTexture (const char *filename, int *w, int *h, int *has_mips);
 
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);

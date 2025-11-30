@@ -58,9 +58,6 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-        vec4    atlas_uv;
-        vec2    orig_size;
-        vec2    offset;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
@@ -131,9 +128,6 @@ layout(location=8) flat in float in_lmofs;
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
-layout(location=14) flat in vec4 in_atlas_uv;
-layout(location=15) flat in vec2 in_orig_size;
-layout(location=16) flat in vec2 in_offset;
 
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -267,38 +261,36 @@ void main()
 	out_fragcolor = vec4(0.5 + 0.5 * normalize(cross(dFdx(in_pos), dFdy(in_pos))), 0.75);
 	return;
 #endif
-        vec3 fullbright = vec3(0.);
+	vec3 fullbright = vec3(0.);
         vec3 emissive = vec3(0.);
-        vec2 world_uv = in_uv.xy;
-        world_uv += in_offset;
-
-        vec2 texnorm = world_uv / in_orig_size;
-
-        vec2 atlas_uv = in_atlas_uv.xy + texnorm * in_atlas_uv.zw;
+	vec2 uv = in_uv;
+#if MODE == 2
+	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
+#endif
 #if BINDLESS
         sampler2D Tex = sampler2D(in_samplers0.xy);
         if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
         {
                 sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
-                fullbright = texture(FullbrightTex, atlas_uv).rgb;
+                fullbright = texture(FullbrightTex, uv).rgb;
         }
         if ((in_flags & CF_USE_EMISSIVE) != 0u)
         {
                 sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
-                emissive = texture(EmissiveSampler, atlas_uv).rgb;
+                emissive = texture(EmissiveSampler, uv).rgb;
         }
 #else
         if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
-                fullbright = texture(FullbrightTex, atlas_uv).rgb;
+                fullbright = texture(FullbrightTex, uv).rgb;
         if ((in_flags & CF_USE_EMISSIVE) != 0u)
-                emissive = texture(EmissiveTex, atlas_uv).rgb;
+                emissive = texture(EmissiveTex, uv).rgb;
 #endif
 #if DITHER >= 2
-        vec4 result = texture(Tex, atlas_uv, -1.0);
+	vec4 result = texture(Tex, uv, -1.0);
 #elif DITHER
-        vec4 result = texture(Tex, atlas_uv, -0.5);
+	vec4 result = texture(Tex, uv, -0.5);
 #else
-        vec4 result = texture(Tex, atlas_uv);
+	vec4 result = texture(Tex, uv);
 #endif
 #if MODE == 1
 	if (result.a < 0.666)

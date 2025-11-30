@@ -273,9 +273,6 @@
     <ClCompile Include="..\..\Quake\snd_mpg123.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\texture_atlas.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Quake\anorm_dots.h">
@@ -477,9 +474,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\zone.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Quake\texture_atlas.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\gl_shaders.h">

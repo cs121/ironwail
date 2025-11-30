@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
-#include "texture_atlas.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -168,9 +167,6 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
-	GLfloat	atlas_uv[4];
-	GLfloat	orig_size[2];
-	GLfloat	offset[2];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -178,9 +174,6 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		alpha;
 	GLint		baseinstance;
 	GLint		padding;
-	GLfloat		atlas_uv[4];
-	GLfloat		orig_size[2];
-	GLfloat		offset[2];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -335,81 +328,20 @@ static void R_FlushBModelCalls (void)
 R_AddBModelCall
 =============
 */
-static void R_AddBModelCall (qmodel_t *model, int usedtex_index, int first_instance, int num_instances, texture_t *t, qboolean zfix)
+static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix)
 {
 	GLuint		flags;
 	float		alpha;
 	gltexture_t	*tx, *fb, *em;
-	int		texnum;
-
-	atlas_rect_t	atlas_rect;
-	float		atlas_uv[4];
-	float		orig_size[2];
-	float		offset[2];
-
-	int		draw_index;
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
-
-	draw_index = model->firstcmd + usedtex_index;
-	texnum = model->usedtextures[usedtex_index];
-
-        atlas_rect.u1 = 0.f;
-        atlas_rect.v1 = 0.f;
-        atlas_rect.u2 = 0.f;
-        atlas_rect.v2 = 0.f;
-        atlas_rect.exists = 0;
-        atlas_uv[0] = 0.f;
-        atlas_uv[1] = 0.f;
-        atlas_uv[2] = 1.f;
-        atlas_uv[3] = 1.f;
-        orig_size[0] = 1.f;
-        orig_size[1] = 1.f;
-        offset[0] = 0.f;
-        offset[1] = 0.f;
-
-        if (model && model->surfaces)
-        {
-                msurface_t *surf = model->surfaces + model->firstmodelsurface;
-                for (int i = 0; i < model->nummodelsurfaces; ++i, ++surf)
-                {
-                        if (surf->texinfo && surf->texinfo->texnum == texnum)
-                        {
-                                offset[0] = surf->texinfo->vecs[0][3];
-                                offset[1] = surf->texinfo->vecs[1][3];
-                                break;
-                        }
-                }
-        }
 
 	if (t)
 	{
 		tx = t->gltexture;
 		fb = t->fullbright;
 		em = t->emissive;
-		atlas_rect = Atlas_GetUV(t->name);
-		if (atlas_rect.exists)
-		{
-			const gltexture_t *atlas_tex = Atlas_GetGLTextureStruct();
-			if (atlas_tex)
-				tx = (gltexture_t *)atlas_tex;
-			atlas_uv[0] = atlas_rect.u1;
-			atlas_uv[1] = atlas_rect.v1;
-			atlas_uv[2] = atlas_rect.u2;
-			atlas_uv[3] = atlas_rect.v2;
-		}
-		if (t->gltexture)
-		{
-			gltexture_t *glt = t->gltexture;
-			orig_size[0] = glt->source_width ? (float)glt->source_width : (float)glt->width;
-			orig_size[1] = glt->source_height ? (float)glt->source_height : (float)glt->height;
-		}
-		else if (tx)
-		{
-			orig_size[0] = (float)tx->width;
-			orig_size[1] = (float)tx->height;
-		}
 		if (r_lightmap_cheatsafe)
 			tx = fb = em = NULL;
 		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
@@ -424,12 +356,12 @@ static void R_AddBModelCall (qmodel_t *model, int usedtex_index, int first_insta
 	if (!gl_zfix.value || map_checks.value)
 		zfix = 0;
 
-	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
-	if (em != NULL)
-		flags |= CALLFLAG_EMISSIVE;
-	if (t && t->type == TEXTYPE_CUTOUT)
-		flags |= CALLFLAG_ALPHA_TEST;
-	alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
+        flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
+        if (em != NULL)
+                flags |= CALLFLAG_EMISSIVE;
+        if (t && t->type == TEXTYPE_CUTOUT)
+                flags |= CALLFLAG_ALPHA_TEST;
+        alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
 
 	if (gl_bindless_able)
 	{
@@ -439,9 +371,6 @@ static void R_AddBModelCall (qmodel_t *model, int usedtex_index, int first_insta
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		memcpy(call->atlas_uv, atlas_uv, sizeof(atlas_uv));
-		memcpy(call->orig_size, orig_size, sizeof(orig_size));
-		memcpy(call->offset, offset, sizeof(offset));
 	}
 	else
 	{
@@ -451,9 +380,6 @@ static void R_AddBModelCall (qmodel_t *model, int usedtex_index, int first_insta
 		call->alpha = alpha;
 		call->baseinstance = first_instance;
 		call->padding = 0;
-		memcpy(call->atlas_uv, atlas_uv, sizeof(atlas_uv));
-		memcpy(call->orig_size, orig_size, sizeof(orig_size));
-		memcpy(call->offset, offset, sizeof(offset));
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
 		textures[2] = em ? em : blacktexture;
@@ -461,7 +387,7 @@ static void R_AddBModelCall (qmodel_t *model, int usedtex_index, int first_insta
 
 	SDL_assert (num_instances > 0);
 	SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
-	bmodel_call_remap[num_bmodel_calls].src = draw_index;
+	bmodel_call_remap[num_bmodel_calls].src = index;
 	bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);
 
 	++num_bmodel_calls;
@@ -617,7 +543,7 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
                 for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
                 {
                         texture_t *t = model->textures[model->usedtextures[j]];
-                        R_AddBModelCall (model, j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
+                        R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
                 }
 
                 baseinst += numinst;
@@ -715,8 +641,8 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			texture_t *t = model->textures[model->usedtextures[j]];
 			if ((GL_WaterAlphaForEntityTextureType (e, t->type) < 1.f) != translucent)
 				continue;
-                        R_AddBModelCall (model, j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld);
-                }
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld);
+		}
 
 		baseinst += numinst;
 	}

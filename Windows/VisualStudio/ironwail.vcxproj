@@ -344,7 +344,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sys_sdl_win.c" />
-    <ClCompile Include="..\..\Quake\texture_atlas.c" />
     <ClCompile Include="..\..\Quake\view.c" />
     <ClCompile Include="..\..\Quake\wad.c" />
     <ClCompile Include="..\..\Quake\world.c" />
@@ -423,7 +422,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\world.h" />
     <ClInclude Include="..\..\Quake\wsaerror.h" />
     <ClInclude Include="..\..\Quake\zone.h" />
-    <ClInclude Include="..\..\Quake\texture_atlas.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\QuakeSpasm.rc" />

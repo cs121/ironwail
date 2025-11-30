@@ -27,9 +27,6 @@ struct Call
 	int		baseinstance;
 	int		padding;
 #endif // BINDLESS
-	vec4	atlas_uv;
-	vec2	orig_size;
-	vec2	offset;
 };
 const uint
 	CF_USE_POLYGON_OFFSET = 1u,
