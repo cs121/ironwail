@@ -33,7 +33,6 @@ static byte *Image_LoadLMP (FILE *f, int *width, int *height);
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_STATIC
 #define STBI_NO_BMP
 #define STBI_NO_PSD
 #define STBI_NO_GIF

@@ -2411,7 +2411,10 @@ static GLuint GL_LoadDDS_Internal (const uint8_t *data, size_t size, int *w, int
 		if (level_size > remaining)
 			goto fail;
 
-		glCompressedTexImage2D (GL_TEXTURE_2D, level, format, lw, lh, 0, (GLsizei)level_size, data);
+                if (!GL_CompressedTexImage2DFunc)
+                        goto fail;
+
+                GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, level, format, lw, lh, 0, (GLsizei)level_size, data);
 		data += level_size;
 		remaining -= level_size;
 	}
