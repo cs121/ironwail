@@ -2099,6 +2099,12 @@ byte *COM_LoadMallocFile (const char *path, unsigned int *path_id)
 	return COM_LoadFile (path, LOADFILE_MALLOC, path_id);
 }
 
+void COM_FreeFile (void *buffer)
+{
+	if (buffer)
+		free (buffer);
+}
+
 byte *COM_LoadMallocFile_TextMode_OSPath (const char *path, long *len_out)
 {
 	FILE	*f;
