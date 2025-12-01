@@ -1,3 +1,5 @@
+#include "quakedef.h"
+
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL_opengl.h>
 #else
