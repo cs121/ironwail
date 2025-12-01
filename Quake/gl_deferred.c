@@ -473,8 +473,11 @@ void R_Deferred_Composite(void)
     glUseProgram(composite_program);
     glBindVertexArray(composite_vao);
 
+    const qboolean msaa = framebufs.scene.samples > 1;
+    GLuint forward_color = msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex;
+
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, R_GBuffer_GetAlbedoTexture());
+    glBindTexture(GL_TEXTURE_2D, forward_color);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, framebufs.composite.color_tex);
 
