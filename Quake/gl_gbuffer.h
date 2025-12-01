@@ -22,5 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void R_GBuffer_Init(int width, int height);
 void R_GBuffer_Shutdown(void);
+void R_GBuffer_Begin(void);
+void R_GBuffer_End(void);
 
 #endif /* GL_GBUFFER_H */
