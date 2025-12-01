@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "renderer_backend.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -335,6 +336,10 @@ void R_Init (void)
 	if (cmd)
 		cmd->completion = R_ShowbboxesFilter_Completion_f;
 	Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
+
+	rb = GL_GetBackend ();
+	if (!rb || !rb->Init || !rb->Init ())
+		Sys_Error ("Failed to initialize render backend");
 
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
