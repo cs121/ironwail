@@ -247,7 +247,7 @@ static void Skywind_Load_f (void)
 		skybox->wind_pitch = fmod (atof (com_token) + 90.0, 180.0) - 90.0;
 
 done:
-        Z_Free (buf);
+	free (buf);
 }
 
 /*

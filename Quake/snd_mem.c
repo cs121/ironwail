@@ -123,38 +123,38 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	}
 
 	info = GetWavinfo (s->name, data, com_filesize);
-        if (info.channels != 1)
-        {
-                Z_Free (data);
-                Con_Printf ("%s is a stereo sample\n",s->name);
-                return NULL;
-        }
+	if (info.channels != 1)
+	{
+		free (data);
+		Con_Printf ("%s is a stereo sample\n",s->name);
+		return NULL;
+	}
 
-        if (info.width != 1 && info.width != 2)
-        {
-                Z_Free (data);
-                Con_Printf("%s is not 8 or 16 bit\n", s->name);
-                return NULL;
-        }
+	if (info.width != 1 && info.width != 2)
+	{
+		free (data);
+		Con_Printf("%s is not 8 or 16 bit\n", s->name);
+		return NULL;
+	}
 
 	stepscale = (float)info.rate / shm->speed;
 	len = info.samples / stepscale;
 
 	len = len * info.width * info.channels;
 
-        if (info.samples == 0 || len == 0)
-        {
-                Z_Free (data);
-                Con_Printf("%s has zero samples\n", s->name);
-                return NULL;
-        }
+	if (info.samples == 0 || len == 0)
+	{
+		free (data);
+		Con_Printf("%s has zero samples\n", s->name);
+		return NULL;
+	}
 
-        sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
-        if (!sc)
-        {
-                Z_Free (data);
-                return NULL;
-        }
+	sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
+	if (!sc)
+	{
+		free (data);
+		return NULL;
+	}
 
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;
@@ -164,7 +164,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
 
-        Z_Free (data);
+	free (data);
 
 	return sc;
 }

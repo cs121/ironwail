@@ -30,7 +30,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 static qmodel_t*	loadmodel;
-static qboolean	loadmodel_is_map;
 static char	loadname[32];	// for hunk tags
 
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
@@ -39,11 +38,6 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
-
-static qboolean Mod_IsMapBSP (const char *name)
-{
-        return !q_strncasecmp(name, "maps/", 5) || !q_strncasecmp(name, "maps\\", 5);
-}
 static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 
 static void Mod_Print (void);
@@ -408,7 +402,6 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	COM_FileBase (mod->name, loadname, sizeof(loadname));
 
 	loadmodel = mod;
-	loadmodel_is_map = false;
 
 //
 // fill it in
@@ -433,7 +426,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 	}
 
-        Z_Free (buf);
+	free (buf);
 
 	return mod;
 }
@@ -645,22 +638,22 @@ static void Q1BSPX_LogUsage(const char *modelname)
 }
 static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
 {
-	int i;
-	*lumpsize = 0;
-	if (!loadmodel || !loadmodel_is_map || !loadmodel->bspx_entries)
-		return NULL;
+        int i;
+        *lumpsize = 0;
+        if (!loadmodel || !loadmodel->bspx_entries)
+                return NULL;
 
-	for (i = 0; i < loadmodel->bspx_entries_count; i++)
-	{
-		const bspx_entry_t *entry = &loadmodel->bspx_entries[i];
+        for (i = 0; i < loadmodel->bspx_entries_count; i++)
+        {
+                const bspx_entry_t *entry = &loadmodel->bspx_entries[i];
 
-		if (!strncmp(entry->name, lumpname, sizeof(entry->name)))
-		{
-			*lumpsize = entry->size;
-			return mod_base + entry->offset;
-		}
-	}
-	return NULL;
+                if (!strncmp(entry->name, lumpname, sizeof(entry->name)))
+                {
+                        *lumpsize = entry->size;
+                        return mod_base + entry->offset;
+                }
+        }
+        return NULL;
 }
 
 static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
@@ -739,9 +732,6 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         Q1BSPX_ResetUsage();
         mod->bspx_entries = NULL;
         mod->bspx_entries_count = 0;
-
-        if (!loadmodel_is_map)
-                return false;
 
         offs = Mod_FindEndOfStandardLumps(header->lumps, HEADER_LUMPS, &misaligned);
         header_offset = offs;
@@ -3153,7 +3143,6 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	bsp_header_info_t header;
 
 	loadmodel->type = mod_brush;
-	loadmodel_is_map = Mod_IsMapBSP(mod->name);
 
 	mod_base = (byte *)buffer;
 
@@ -4076,10 +4065,10 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 			if (md5buffer)
 			{
 				Mod_LoadMD5MeshModel (mod, md5buffer);
-                                Z_Free (md5buffer);
-                                return;
-                        }
-                }
+				free (md5buffer);
+				return;
+			}
+		}
 	}
 
 //
@@ -4789,7 +4778,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 
 	if (!buffer)
 	{
-                Z_Free(ctx->animfile);
+		free(ctx->animfile);
 		return;
 	}
 
@@ -4906,7 +4895,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 	Z_Free(raw);
 	Z_Free(ab);
 	free(frameposes);
-        Z_Free(ctx->animfile);
+	free(ctx->animfile);
 }
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 {

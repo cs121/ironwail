@@ -181,7 +181,7 @@ int Q3Shader_LoadFile (const char *path)
                 count++;
         }
 
-        Z_Free (buffer);
+        free (buffer);
         return count;
 }
 

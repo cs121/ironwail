@@ -22,9 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
-#include "draw_surface.h"
-#include "gl_deferred.h"
-#include "gl_gbuffer.h"
 
 #define NOISESCALE     (1.0f / 127.0f)
 
@@ -68,7 +65,7 @@ typedef struct framesetup_s
 
 static framesetup_t framesetup;
 
-const float r_identity_mat4[16] = {
+static const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
 		0.f, 1.f, 0.f, 0.f,
 		0.f, 0.f, 1.f, 0.f,
@@ -523,8 +520,8 @@ void GL_CreateFrameBuffers (void)
 	/* resolved scene framebuffer (color only) */
 	if (framebufs.scene.samples > 1)
 	{
-		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
-		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
+	framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
+	framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
 		{
 			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
@@ -545,10 +542,8 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
-
-	R_GBuffer_Init (vid.width, vid.height);
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+        GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
 }
 
 /*
@@ -558,8 +553,6 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
-	R_GBuffer_Shutdown ();
-
 	GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
@@ -1823,132 +1816,45 @@ static uint16_t		debugidx[MAX_DEBUG_IDX];
 static int			numdebugverts = 0;
 static int			numdebugidx = 0;
 static qboolean		debugztest = false;
-static shader_handle_t	debug_shader = 0;
 
-static const char *debug_vert_src =
-		"#version 330 core\n"
-		"layout(location = 0) in vec3 in_pos;\n"
-		"layout(location = 1) in vec3 in_color;\n"
-		"uniform mat4 u_model;\n"
-		"uniform mat4 u_viewproj;\n"
-		"out vec3 v_color;\n"
-		"void main() {\n"
-		"    v_color = in_color;\n"
-		"    gl_Position = u_viewproj * u_model * vec4(in_pos, 1.0);\n"
-		"}\n";
-
-static const char *debug_frag_src =
-"#version 330 core\n"
-"in vec3 v_color;\n"
-"out vec4 frag_color;\n"
-"void main() {\n"
-"    frag_color = vec4(v_color, 1.0);\n"
-"}\n";
-
-static void R_InitDebugShader (void)
-{
-		shader_desc_t desc;
-		static const shader_uniform_def_t uniforms[] = {
-				{ "u_model", 0 },
-				{ "u_viewproj", 0 }
-		};
-
-		if (debug_shader || !rb || !rb->CreateShader)
-				return;
-
-		memset (&desc, 0, sizeof (desc));
-		desc.vertex_source = debug_vert_src;
-		desc.fragment_source = debug_frag_src;
-		desc.uniforms = uniforms;
-		desc.uniform_count = countof (uniforms);
-
-		debug_shader = rb->CreateShader (&desc);
-}
-
-static mesh_handle_t R_CreateDebugMesh (void)
-{
-		float *positions;
-		float *colors;
-		int *indices;
-		mesh_handle_t mesh;
-		int i;
-
-		if (!rb || !rb->CreateMesh || numdebugverts <= 0 || numdebugidx <= 0)
-				return 0;
-
-		positions = (float *) malloc ((size_t)numdebugverts * 3 * sizeof (float));
-		colors = (float *) malloc ((size_t)numdebugverts * 3 * sizeof (float));
-		indices = (int *) malloc ((size_t)numdebugidx * sizeof (int));
-		if (!positions || !colors || !indices)
-		{
-				free (positions);
-				free (colors);
-				free (indices);
-				return 0;
-		}
-
-		for (i = 0; i < numdebugverts; ++i)
-		{
-				uint32_t color = debugverts[i].color;
-				positions[i * 3 + 0] = debugverts[i].pos[0];
-				positions[i * 3 + 1] = debugverts[i].pos[1];
-				positions[i * 3 + 2] = debugverts[i].pos[2];
-
-				colors[i * 3 + 0] = (float)(color & 0xff) / 255.f;
-				colors[i * 3 + 1] = (float)((color >> 8) & 0xff) / 255.f;
-				colors[i * 3 + 2] = (float)((color >> 16) & 0xff) / 255.f;
-		}
-
-		for (i = 0; i < numdebugidx; ++i)
-				indices[i] = (int)debugidx[i];
-
-		{
-				mesh_desc_t desc = { 0 };
-
-				desc.positions = positions;
-				desc.normals = colors;
-				desc.uvs = NULL;
-				desc.indices = indices;
-				desc.vertex_count = numdebugverts;
-				desc.index_count = numdebugidx;
-
-				mesh = rb->CreateMesh (&desc);
-		}
-
-		free (positions);
-		free (colors);
-		free (indices);
-
-		return mesh;
-}
-
+/*
+================
+R_FlushDebugGeometry
+================
+*/
 static void R_FlushDebugGeometry (void)
 {
-                if (numdebugverts && numdebugidx && rb)
-                {
-                                mesh_handle_t mesh;
-                                draw_surf_t ds = { 0 };
+	if (numdebugverts && numdebugidx)
+	{
+		GLuint	buf;
+		GLbyte* ofs;
+		unsigned int state;
 
-                                R_InitDebugShader ();
-                                mesh = R_CreateDebugMesh ();
-                                if (mesh)
-                                {
-                                                ds.shader = debug_shader;
-                                                ds.mesh = mesh;
-                                                memcpy (ds.model_matrix, r_identity_mat4, sizeof (ds.model_matrix));
-                                                ds.first_index = 0;
-                                                ds.index_count = numdebugidx;
-                                                R_SubmitDrawSurface (&ds);
-                                                R_FlushDrawSurfaces ();
-                                                if (rb->DestroyMesh)
-                                                                rb->DestroyMesh (mesh);
-                                }
-                }
+		GL_UseProgram (glprogs.debug3d);
+		state = GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2);
+		if (!debugztest)
+			state |= GLS_NO_ZTEST;
+		GL_SetState (state);
 
-                numdebugverts = 0;
-                numdebugidx = 0;
+		GL_Upload (GL_ARRAY_BUFFER, debugverts, sizeof (debugverts[0]) * numdebugverts, &buf, &ofs);
+		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
+		GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (debugverts[0]), ofs + offsetof (debugvert_t, pos));
+		GL_VertexAttribPointerFunc (1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof (debugverts[0]), ofs + offsetof (debugvert_t, color));
+
+		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, debugidx, sizeof (debugidx[0]) * numdebugidx, &buf, &ofs);
+		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
+		glDrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
+	}
+
+	numdebugverts = 0;
+	numdebugidx = 0;
 }
 
+/*
+================
+R_SetDebugGeometryZTest
+================
+*/
 static void R_SetDebugGeometryZTest (qboolean ztest)
 {
 	if (debugztest == ztest)
@@ -2681,76 +2587,43 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-        R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 
-        R_GBuffer_Begin ();
+	R_Clear ();
 
-        R_Clear ();
+Fog_EnableGFog (); //johnfitz
 
-        Fog_EnableGFog (); //johnfitz
+// Upload frame data after fog has been set up to ensure fog parameters
+// are available to all draw calls, even when light clustering is skipped.
+R_UploadFrameData ();
 
-        // Upload frame data after fog has been set up to ensure fog parameters
-        // are available to all draw calls, even when light clustering is skipped.
-        R_UploadFrameData ();
+R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
-        R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
-        S_ExtraUpdate (); // don't let sound get messed up if going slow
+	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 
-        R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	R_DrawParticles (false);
 
-        R_DrawParticles (false);
+	Sky_DrawSky (); //johnfitz
 
-        Sky_DrawSky (); //johnfitz
+	R_DrawWater (false);
 
-        R_DrawWater (false);
+	R_BeginTranslucency ();
 
-        R_BeginTranslucency ();
+	R_DrawWater (true);
 
-        R_DrawWater (true);
+	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 
-        R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+	R_DrawParticles (true);
 
-        R_DrawParticles (true);
+	R_EndTranslucency ();
 
-        R_EndTranslucency ();
+	R_ShowTris (); //johnfitz
 
-        R_GBuffer_End ();
+	R_ShowBoundingBoxes (); //johnfitz
 
-        GL_BeginGroup ("Deferred lighting");
-
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
-        glDrawBuffer (GL_COLOR_ATTACHMENT0);
-        glReadBuffer (GL_COLOR_ATTACHMENT0);
-        glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
-        glClearColor (0.f, 0.f, 0.f, 0.f);
-        glDepthMask (GL_TRUE);
-        glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        R_Deferred_LightPass ();
-
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
-        if (framesetup.scene_fbo)
-        {
-                glDrawBuffer (GL_COLOR_ATTACHMENT0);
-                glReadBuffer (GL_COLOR_ATTACHMENT0);
-        }
-        else
-        {
-                glDrawBuffer (GL_BACK);
-                glReadBuffer (GL_BACK);
-        }
-        glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
-
-        R_Deferred_Composite ();
-
-        GL_EndGroup ();
-
-        R_ShowTris (); //johnfitz
-
-        R_ShowBoundingBoxes (); //johnfitz
-
-        R_ShowPointFile ();
+	R_ShowPointFile ();
 }
 
 /*
