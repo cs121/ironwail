@@ -94,7 +94,16 @@ static GLuint R_Deferred_Compile(GLenum type, const char *source)
     GLuint shader = GL_CreateShaderFunc(type);
     GL_ShaderSourceFunc(shader, 1, &source, NULL);
     GL_CompileShaderFunc(shader);
-    R_Deferred_LogShader(shader, false);
+
+    GLint compiled = GL_FALSE;
+    GL_GetShaderivFunc(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled)
+    {
+        R_Deferred_LogShader(shader, false);
+        GL_DeleteShaderFunc(shader);
+        return 0;
+    }
+
     return shader;
 }
 
@@ -152,19 +161,42 @@ static qboolean R_Deferred_CreateProgram(void)
         "}\n";
 
     GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
+    if (!vs)
+        return false;
+
     GLuint fs = R_Deferred_Compile(GL_FRAGMENT_SHADER, fs_source);
+    if (!fs)
+    {
+        GL_DeleteShaderFunc(vs);
+        return false;
+    }
 
     deferred_program = GL_CreateProgramFunc();
+    if (!deferred_program)
+    {
+        GL_DeleteShaderFunc(vs);
+        GL_DeleteShaderFunc(fs);
+        return false;
+    }
+
     GL_AttachShaderFunc(deferred_program, vs);
     GL_AttachShaderFunc(deferred_program, fs);
     GL_LinkProgramFunc(deferred_program);
-    R_Deferred_LogShader(deferred_program, true);
+
+    GLint linked = GL_FALSE;
+    GL_GetProgramivFunc(deferred_program, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        R_Deferred_LogShader(deferred_program, true);
+        GL_DeleteProgramFunc(deferred_program);
+        deferred_program = 0;
+        GL_DeleteShaderFunc(vs);
+        GL_DeleteShaderFunc(fs);
+        return false;
+    }
 
     GL_DeleteShaderFunc(vs);
     GL_DeleteShaderFunc(fs);
-
-    if (!deferred_program)
-        return false;
 
     GL_UseProgramFunc(deferred_program);
     GL_Uniform1iFunc(GL_GetUniformLocationFunc(deferred_program, "uAlbedo"), 0);
@@ -412,20 +444,48 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
     }
 
     GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
+    if (!vs)
+    {
+        Z_Free(fs_source);
+        return false;
+    }
+
     GLuint fs = R_Deferred_Compile(GL_FRAGMENT_SHADER, fs_source);
+    if (!fs)
+    {
+        GL_DeleteShaderFunc(vs);
+        Z_Free(fs_source);
+        return false;
+    }
 
     composite_program = GL_CreateProgramFunc();
+    if (!composite_program)
+    {
+        GL_DeleteShaderFunc(vs);
+        GL_DeleteShaderFunc(fs);
+        Z_Free(fs_source);
+        return false;
+    }
     GL_AttachShaderFunc(composite_program, vs);
     GL_AttachShaderFunc(composite_program, fs);
     GL_LinkProgramFunc(composite_program);
-    R_Deferred_LogShader(composite_program, true);
+
+    GLint linked = GL_FALSE;
+    GL_GetProgramivFunc(composite_program, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        R_Deferred_LogShader(composite_program, true);
+        GL_DeleteProgramFunc(composite_program);
+        composite_program = 0;
+        GL_DeleteShaderFunc(vs);
+        GL_DeleteShaderFunc(fs);
+        Z_Free(fs_source);
+        return false;
+    }
 
     GL_DeleteShaderFunc(vs);
     GL_DeleteShaderFunc(fs);
     Z_Free(fs_source);
-
-    if (!composite_program)
-        return false;
 
     GL_UseProgramFunc(composite_program);
     GL_Uniform1iFunc(GL_GetUniformLocationFunc(composite_program, "u_ForwardColor"), 0);
