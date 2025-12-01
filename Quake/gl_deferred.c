@@ -36,6 +36,9 @@ static GLuint deferred_vao;
 static GLuint deferred_vbo;
 static GLuint deferred_ebo;
 static GLsizei deferred_index_count;
+static GLuint composite_program;
+static GLuint composite_vao;
+static GLuint composite_vbo;
 
 static GLint loc_viewproj;
 static GLint loc_inv_viewproj;
@@ -380,4 +383,100 @@ void R_Deferred_LightPass(void)
     glDisable(GL_BLEND);
     glUseProgram(0);
     glBindVertexArray(0);
+}
+
+static qboolean R_Deferred_CreateCompositeProgram(void)
+{
+    const char *vs_source =
+        "#version 330 core\n"
+        "layout(location = 0) in vec2 aPosition;\n"
+        "layout(location = 1) in vec2 aTexCoord;\n"
+        "out vec2 vTexCoord;\n"
+        "void main() {\n"
+        "    vTexCoord = aTexCoord;\n"
+        "    gl_Position = vec4(aPosition, 0.0, 1.0);\n"
+        "}\n";
+
+    char *fs_source = (char *)COM_LoadMallocFile("shaders/deferred_composite.frag", NULL);
+    if (!fs_source)
+    {
+        Con_Printf("Failed to load deferred composite shader\n");
+        return false;
+    }
+
+    GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
+    GLuint fs = R_Deferred_Compile(GL_FRAGMENT_SHADER, fs_source);
+
+    composite_program = glCreateProgram();
+    glAttachShader(composite_program, vs);
+    glAttachShader(composite_program, fs);
+    glLinkProgram(composite_program);
+    R_Deferred_LogShader(composite_program, true);
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    Z_Free(fs_source);
+
+    if (!composite_program)
+        return false;
+
+    glUseProgram(composite_program);
+    glUniform1i(glGetUniformLocation(composite_program, "u_ForwardColor"), 0);
+    glUniform1i(glGetUniformLocation(composite_program, "u_DeferredLight"), 1);
+
+    return true;
+}
+
+static void R_Deferred_CreateCompositeQuad(void)
+{
+    const float vertices[] = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+        -1.0f,  1.0f, 0.0f, 1.0f,
+         1.0f,  1.0f, 1.0f, 1.0f,
+    };
+
+    glGenVertexArrays(1, &composite_vao);
+    glBindVertexArray(composite_vao);
+
+    glGenBuffers(1, &composite_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, composite_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)(2 * sizeof(float)));
+
+    glBindVertexArray(0);
+}
+
+static qboolean R_Deferred_EnsureComposite(void)
+{
+    if (!composite_program)
+    {
+        if (!R_Deferred_CreateCompositeProgram())
+            return false;
+    }
+
+    if (!composite_vao)
+        R_Deferred_CreateCompositeQuad();
+
+    return composite_program != 0 && composite_vao != 0;
+}
+
+void R_Deferred_Composite(void)
+{
+    if (!R_Deferred_EnsureComposite())
+        return;
+
+    glUseProgram(composite_program);
+    glBindVertexArray(composite_vao);
+
+    glDisable(GL_DEPTH_TEST);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glEnable(GL_DEPTH_TEST);
+
+    glBindVertexArray(0);
+    glUseProgram(0);
 }
