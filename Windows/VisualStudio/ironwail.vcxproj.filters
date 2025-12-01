@@ -60,6 +60,9 @@
     <ClCompile Include="..\..\Quake\gl_draw.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\gl_backend.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\gl_gbuffer.c">
       <Filter>Source Files</Filter>
     </ClCompile>
