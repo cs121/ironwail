@@ -361,9 +361,8 @@ void Host_InitLocal (void)
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
 
         Host_InitCommands ();
-        Q3Shader_Init ();
 
-        Cvar_RegisterVariable (&host_framerate);
+    Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_speeds);
 	Cvar_RegisterVariable (&host_maxfps); //johnfitz
 	Cvar_SetCallback (&host_maxfps, Max_Fps_f);
@@ -1515,7 +1514,7 @@ void Host_Shutdown(void)
         if (cls.state != ca_dedicated)
 	{
 		if (con_initialized)
-			History_Shutdown ();
+		History_Shutdown ();
 		ExtraMaps_ShutDown ();
 		BGM_Shutdown();
 		CDAudio_Shutdown ();
@@ -1525,8 +1524,6 @@ void Host_Shutdown(void)
         }
 
         LOG_Close ();
-
         LOC_Shutdown ();
-        Q3Shader_Shutdown ();
 }
 

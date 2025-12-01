@@ -3466,35 +3466,6 @@ static qboolean Mod_LoadMapDescription_Q1 (char *desc, size_t maxchars, FILE *f,
                         header.lumps[LUMP_ENTITIES].fileofs, header.lumps[LUMP_ENTITIES].filelen);
 }
 
-static qboolean Mod_LoadMapDescription_Q3 (char *desc, size_t maxchars, FILE *f, int filesize)
-{
-        q3_dheader_t    header;
-        int             i;
-
-        if (filesize <= (int) sizeof (header))
-                return false;
-
-        header.ident = Q3BSP_IDENT;
-
-        if (fread (&header.version, sizeof (header.version), 1, f) != 1)
-                return false;
-        header.version = LittleLong (header.version);
-        if (header.version != Q3BSP_VERSION)
-                return false;
-
-        if (fread (header.lumps, sizeof (header.lumps), 1, f) != 1)
-                return false;
-
-        for (i = 0; i < Q3_HEADER_LUMPS; i++)
-        {
-                header.lumps[i].fileofs = LittleLong (header.lumps[i].fileofs);
-                header.lumps[i].filelen = LittleLong (header.lumps[i].filelen);
-        }
-
-        return Mod_LoadMapDescription_ReadEntityLump (desc, maxchars, f, filesize,
-                        header.lumps[Q3_LUMP_ENTITIES].fileofs, header.lumps[Q3_LUMP_ENTITIES].filelen);
-}
-
 /*
 =================
 Mod_LoadMapDescription
@@ -3535,19 +3506,12 @@ qboolean Mod_LoadMapDescription (char *desc, size_t maxchars, const char *map)
 
         ident = LittleLong (ident);
 
-        if (ident == Q3BSP_IDENT)
-        {
-                ret = Mod_LoadMapDescription_Q3 (desc, maxchars, f, filesize);
-        }
-        else
-        {
                 if (fseek (f, 0, SEEK_SET))
                 {
                         fclose (f);
                         return false;
                 }
                 ret = Mod_LoadMapDescription_Q1 (desc, maxchars, f, filesize);
-        }
 
         fclose (f);
         return ret;
