@@ -316,10 +316,10 @@ static qboolean R_Deferred_Invert(const float m[16], float out[16])
               + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
 
     det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
-    if (det == 0.0f)
+    if (fabsf(det) < 1e-8f)
         return false;
 
-    det = 1.0f / det;
+    det = 1.f / det;
 
     for (int i = 0; i < 16; i++)
         out[i] = inv[i] * det;
