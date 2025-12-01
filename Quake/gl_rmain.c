@@ -68,7 +68,7 @@ typedef struct framesetup_s
 
 static framesetup_t framesetup;
 
-static const float r_identity_mat4[16] = {
+const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
 		0.f, 1.f, 0.f, 0.f,
 		0.f, 0.f, 1.f, 0.f,
