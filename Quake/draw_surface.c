@@ -1,3 +1,5 @@
+#include "quakedef.h"
+
 #include "draw_surface.h"
 
 #define MAX_DRAW_SURFACES 8192
