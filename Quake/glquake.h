@@ -398,6 +398,7 @@ void Fog_Init (void);
 extern float r_matview[16];
 extern float r_matproj[16];
 extern float r_matviewproj[16];
+extern const float r_identity_mat4[16];
 
 void R_NewGame (void);
 
