@@ -115,6 +115,17 @@ void R_GBuffer_Begin(void)
 void R_GBuffer_End(void)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, forward_fbo);
+
+    if (forward_fbo)
+    {
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
+    else
+    {
+        glDrawBuffer(GL_BACK);
+        glReadBuffer(GL_BACK);
+    }
 }
 
 GLuint R_GBuffer_GetAlbedoTexture(void)

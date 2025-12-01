@@ -473,6 +473,11 @@ void R_Deferred_Composite(void)
     glUseProgram(composite_program);
     glBindVertexArray(composite_vao);
 
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, R_GBuffer_GetAlbedoTexture());
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, framebufs.composite.color_tex);
+
     glDisable(GL_DEPTH_TEST);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glEnable(GL_DEPTH_TEST);

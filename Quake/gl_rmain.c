@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "draw_surface.h"
+#include "gl_deferred.h"
+#include "gl_gbuffer.h"
 
 #define NOISESCALE     (1.0f / 127.0f)
 
@@ -521,8 +523,8 @@ void GL_CreateFrameBuffers (void)
 	/* resolved scene framebuffer (color only) */
 	if (framebufs.scene.samples > 1)
 	{
-	framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
-	framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
+		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
+		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
 		{
 			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
@@ -543,8 +545,10 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-        GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
+
+	R_GBuffer_Init (vid.width, vid.height);
 }
 
 /*
@@ -554,6 +558,8 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
+	R_GBuffer_Shutdown ();
+
 	GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
@@ -2675,43 +2681,76 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+        R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 
-	R_Clear ();
+        R_GBuffer_Begin ();
 
-Fog_EnableGFog (); //johnfitz
+        R_Clear ();
 
-// Upload frame data after fog has been set up to ensure fog parameters
-// are available to all draw calls, even when light clustering is skipped.
-R_UploadFrameData ();
+        Fog_EnableGFog (); //johnfitz
 
-R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+        // Upload frame data after fog has been set up to ensure fog parameters
+        // are available to all draw calls, even when light clustering is skipped.
+        R_UploadFrameData ();
 
-	S_ExtraUpdate (); // don't let sound get messed up if going slow
+        R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
-	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+        S_ExtraUpdate (); // don't let sound get messed up if going slow
 
-	R_DrawParticles (false);
+        R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 
-	Sky_DrawSky (); //johnfitz
+        R_DrawParticles (false);
 
-	R_DrawWater (false);
+        Sky_DrawSky (); //johnfitz
 
-	R_BeginTranslucency ();
+        R_DrawWater (false);
 
-	R_DrawWater (true);
+        R_BeginTranslucency ();
 
-	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+        R_DrawWater (true);
 
-	R_DrawParticles (true);
+        R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 
-	R_EndTranslucency ();
+        R_DrawParticles (true);
 
-	R_ShowTris (); //johnfitz
+        R_EndTranslucency ();
 
-	R_ShowBoundingBoxes (); //johnfitz
+        R_GBuffer_End ();
 
-	R_ShowPointFile ();
+        GL_BeginGroup ("Deferred lighting");
+
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+        glDrawBuffer (GL_COLOR_ATTACHMENT0);
+        glReadBuffer (GL_COLOR_ATTACHMENT0);
+        glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
+        glClearColor (0.f, 0.f, 0.f, 0.f);
+        glDepthMask (GL_TRUE);
+        glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        R_Deferred_LightPass ();
+
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
+        if (framesetup.scene_fbo)
+        {
+                glDrawBuffer (GL_COLOR_ATTACHMENT0);
+                glReadBuffer (GL_COLOR_ATTACHMENT0);
+        }
+        else
+        {
+                glDrawBuffer (GL_BACK);
+                glReadBuffer (GL_BACK);
+        }
+        glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
+
+        R_Deferred_Composite ();
+
+        GL_EndGroup ();
+
+        R_ShowTris (); //johnfitz
+
+        R_ShowBoundingBoxes (); //johnfitz
+
+        R_ShowPointFile ();
 }
 
 /*
