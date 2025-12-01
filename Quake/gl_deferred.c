@@ -17,18 +17,12 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-#define GL_GLEXT_PROTOTYPES 1
-#if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
-#include <SDL2/SDL_opengl.h>
-#else
-#include "SDL_opengl.h"
-#endif
+#include "quakedef.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "quakedef.h"
 #include "gl_deferred.h"
 #include "gl_gbuffer.h"
 
