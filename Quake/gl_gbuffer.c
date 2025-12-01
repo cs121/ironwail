@@ -17,6 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+#define GL_GLEXT_PROTOTYPES 1
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL_opengl.h>
 #else
@@ -86,20 +87,20 @@ void R_GBuffer_Init(int width, int height)
     gbuffer_normal_spec = R_GBuffer_CreateTexture(width, height, GL_RGBA16F, GL_RGBA, GL_FLOAT);
     gbuffer_depth = R_GBuffer_CreateTexture(width, height, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT);
 
-    glGenFramebuffers(1, &gbuffer_fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo);
+    GL_GenFramebuffersFunc(1, &gbuffer_fbo);
+    GL_BindFramebufferFunc(GL_FRAMEBUFFER, gbuffer_fbo);
 
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gbuffer_albedo, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gbuffer_normal_spec, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gbuffer_depth, 0);
+    GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gbuffer_albedo, 0);
+    GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gbuffer_normal_spec, 0);
+    GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gbuffer_depth, 0);
 
-    glDrawBuffers(2, draw_buffers);
+    GL_DrawBuffersFunc(2, draw_buffers);
 
-    status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    status = GL_CheckFramebufferStatusFunc(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
         Sys_Error("R_GBuffer_Init: framebuffer incomplete (0x%X)", status);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    GL_BindFramebufferFunc(GL_FRAMEBUFFER, 0);
 }
 
 void R_GBuffer_Begin(void)
@@ -108,8 +109,8 @@ void R_GBuffer_Begin(void)
 
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, (GLint *)&forward_fbo);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo);
-    glDrawBuffers(2, draw_buffers);
+    GL_BindFramebufferFunc(GL_FRAMEBUFFER, gbuffer_fbo);
+    GL_DrawBuffersFunc(2, draw_buffers);
 
     glEnable(GL_DEPTH_TEST);
 
@@ -120,7 +121,7 @@ void R_GBuffer_Begin(void)
 
 void R_GBuffer_End(void)
 {
-    glBindFramebuffer(GL_FRAMEBUFFER, forward_fbo);
+    GL_BindFramebufferFunc(GL_FRAMEBUFFER, forward_fbo);
 
     if (forward_fbo)
     {
