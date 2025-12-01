@@ -24,6 +24,7 @@ static GLuint gbuffer_fbo = 0;
 static GLuint gbuffer_albedo = 0;
 static GLuint gbuffer_normal_spec = 0;
 static GLuint gbuffer_depth = 0;
+static GLuint forward_fbo = 0;
 
 static GLuint R_GBuffer_CreateTexture(int width, int height, GLenum internal_format, GLenum format, GLenum type)
 {
@@ -93,4 +94,25 @@ void R_GBuffer_Init(int width, int height)
         Sys_Error("R_GBuffer_Init: framebuffer incomplete (0x%X)", status);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void R_GBuffer_Begin(void)
+{
+    GLenum draw_buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, (GLint *)&forward_fbo);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo);
+    glDrawBuffers(2, draw_buffers);
+
+    glEnable(GL_DEPTH_TEST);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearDepth(1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+void R_GBuffer_End(void)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, forward_fbo);
 }
