@@ -90,5 +90,6 @@ struct render_backend_s {
 extern struct render_backend_s *rb;
 
 render_backend_t *Null_GetBackend(void);
+render_backend_t *GL_GetBackend(void);
 
 #endif // RENDERER_BACKEND_H
