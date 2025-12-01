@@ -42,7 +42,7 @@ float bayer(ivec2 coord)
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-Fog.w * dot(p, p));
+        float fog = exp2(-abs(Fog.w) * dot(p, p));
         fog = clamp(fog, 0.0, 1.0);
         return mix(Fog.rgb, clr, fog);
 }
