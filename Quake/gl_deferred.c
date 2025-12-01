@@ -440,7 +440,7 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
     GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
     if (!vs)
     {
-        free(fs_source);
+        Z_Free(fs_source);
         return false;
     }
 
@@ -448,7 +448,7 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
     if (!fs)
     {
         GL_DeleteShaderFunc(vs);
-        free(fs_source);
+        Z_Free(fs_source);
         return false;
     }
 
@@ -457,7 +457,7 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
     {
         GL_DeleteShaderFunc(vs);
         GL_DeleteShaderFunc(fs);
-        free(fs_source);
+        Z_Free(fs_source);
         return false;
     }
     GL_AttachShaderFunc(composite_program, vs);
@@ -473,13 +473,13 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
         composite_program = 0;
         GL_DeleteShaderFunc(vs);
         GL_DeleteShaderFunc(fs);
-        free(fs_source);
+        Z_Free(fs_source);
         return false;
     }
 
     GL_DeleteShaderFunc(vs);
     GL_DeleteShaderFunc(fs);
-    free(fs_source);
+    Z_Free(fs_source);
 
     GL_UseProgramFunc(composite_program);
     GL_Uniform1iFunc(GL_GetUniformLocationFunc(composite_program, "u_ForwardColor"), 0);

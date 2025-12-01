@@ -256,7 +256,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                         if (!_newbuf)                                                  \
                         {                                                              \
                                 free (result);                                         \
-                                free (source);                                         \
+                                Z_Free (source);                                       \
                                 Sys_Error ("GL_LoadShaderFile: realloc failed for %s", path); \
                         }                                                              \
                         result = _newbuf;                                              \
@@ -308,7 +308,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                                         if (include_len >= sizeof (include_path))
                                         {
                                                 free (result);
-                                                free (source);
+                                                Z_Free (source);
                                                 Sys_Error ("GL_LoadShaderFile: include path too long in %s", path);
                                         }
 
@@ -330,7 +330,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                                         if (q_strlcat (full_path, include_path, sizeof (full_path)) >= sizeof (full_path))
                                         {
                                                 free (result);
-                                                free (source);
+                                                Z_Free (source);
                                                 Sys_Error ("GL_LoadShaderFile: include path overflow in %s", path);
                                         }
 
@@ -354,7 +354,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 
 #undef APPEND_STR
 
-        free (source);
+        Z_Free (source);
 
         shader_cache[shader_cache_count].data = result;
         q_strlcpy (shader_cache[shader_cache_count].path, path, sizeof (shader_cache[shader_cache_count].path));
