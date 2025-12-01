@@ -17,18 +17,9 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-#ifndef GL_GBUFFER_H
-#define GL_GBUFFER_H
+#ifndef GL_DEFERRED_H
+#define GL_DEFERRED_H
 
-#include "glquake.h"
+void R_Deferred_LightPass(void);
 
-void R_GBuffer_Init(int width, int height);
-void R_GBuffer_Shutdown(void);
-void R_GBuffer_Begin(void);
-void R_GBuffer_End(void);
-
-GLuint R_GBuffer_GetAlbedoTexture(void);
-GLuint R_GBuffer_GetNormalSpecTexture(void);
-GLuint R_GBuffer_GetDepthTexture(void);
-
-#endif /* GL_GBUFFER_H */
+#endif /* GL_DEFERRED_H */
