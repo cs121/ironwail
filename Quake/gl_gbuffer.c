@@ -116,3 +116,18 @@ void R_GBuffer_End(void)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, forward_fbo);
 }
+
+GLuint R_GBuffer_GetAlbedoTexture(void)
+{
+    return gbuffer_albedo;
+}
+
+GLuint R_GBuffer_GetNormalSpecTexture(void)
+{
+    return gbuffer_normal_spec;
+}
+
+GLuint R_GBuffer_GetDepthTexture(void)
+{
+    return gbuffer_depth;
+}
