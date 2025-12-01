@@ -3,11 +3,10 @@
 
 #include "renderer_backend.h"
 
-typedef struct material_s material_t;
 typedef float matrix4x4_t[16];
 
 typedef struct draw_surf_s {
-    material_t *material;
+    shader_handle_t shader;
     mesh_handle_t mesh;
     matrix4x4_t model_matrix;
     int first_index;
