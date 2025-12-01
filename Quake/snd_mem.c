@@ -149,12 +149,12 @@ sfxcache_t *S_LoadSound (sfx_t *s)
                 return NULL;
         }
 
-	sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
-	if (!sc)
-	{
-		free (data);
-		return NULL;
-	}
+        sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
+        if (!sc)
+        {
+                Z_Free (data);
+                return NULL;
+        }
 
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;
@@ -164,7 +164,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
 
-	free (data);
+        Z_Free (data);
 
 	return sc;
 }
