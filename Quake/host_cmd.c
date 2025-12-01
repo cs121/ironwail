@@ -1138,8 +1138,8 @@ static void Modlist_Add (const char *name)
 		if (mapdb)
 		{
 			qboolean is_base_mapdb = !com_searchpaths || path_id < com_searchpaths->path_id;
-			json_t *json = JSON_Parse (mapdb);
-			free (mapdb);
+                        json_t *json = JSON_Parse (mapdb);
+                        Z_Free (mapdb);
 			if (json)
 			{
 				const jsonentry_t *episodes = JSON_Find (json->root, "episodes", JSON_ARRAY);

@@ -75,8 +75,8 @@ void W_LoadWadFile (void) //johnfitz -- filename is now hard-coded for honesty
 
 	//johnfitz -- modified to use malloc
 	//TODO: use cache_alloc
-	if (wad_base)
-		free (wad_base);
+        if (wad_base)
+                Z_Free (wad_base);
 	wad_base = COM_LoadMallocFile (filename, NULL);
 	if (!wad_base)
 		Sys_Error ("W_LoadWadFile: couldn't load %s\n\n"

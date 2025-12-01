@@ -636,7 +636,7 @@ static qboolean Atlas_LoadJSON(const char *path)
     ok = Atlas_ParseJSONBuffer((const char *)json, (size_t)len);
     if (!ok)
         Con_Printf("Atlas_LoadJSON: failed to parse %s\n", path);
-    free(json);
+    Z_Free(json);
     return ok;
 }
 
@@ -672,7 +672,7 @@ static qboolean Atlas_LoadPNG(const char *path)
 
     len = com_filesize;
     pixels = stbi_load_from_memory(data, (int)len, &atlas_width, &atlas_height, &channels, 4);
-    free(data);
+    Z_Free(data);
 
     if (!pixels)
     {

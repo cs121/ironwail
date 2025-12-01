@@ -433,7 +433,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 	}
 
-	free (buf);
+        Z_Free (buf);
 
 	return mod;
 }
@@ -4076,10 +4076,10 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 			if (md5buffer)
 			{
 				Mod_LoadMD5MeshModel (mod, md5buffer);
-				free (md5buffer);
-				return;
-			}
-		}
+                                Z_Free (md5buffer);
+                                return;
+                        }
+                }
 	}
 
 //
@@ -4789,7 +4789,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 
 	if (!buffer)
 	{
-		free(ctx->animfile);
+                Z_Free(ctx->animfile);
 		return;
 	}
 
@@ -4906,7 +4906,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 	Z_Free(raw);
 	Z_Free(ab);
 	free(frameposes);
-	free(ctx->animfile);
+        Z_Free(ctx->animfile);
 }
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 {
