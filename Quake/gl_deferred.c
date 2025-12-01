@@ -17,6 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+#define GL_GLEXT_PROTOTYPES 1
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL_opengl.h>
 #else
@@ -60,18 +61,18 @@ static void R_Deferred_LogShader(GLuint object, qboolean is_program)
     GLint status = 0;
 
     if (is_program)
-        glGetProgramiv(object, GL_LINK_STATUS, &status);
+        GL_GetProgramivFunc(object, GL_LINK_STATUS, &status);
     else
-        glGetShaderiv(object, GL_COMPILE_STATUS, &status);
+        GL_GetShaderivFunc(object, GL_COMPILE_STATUS, &status);
 
     if (status)
         return;
 
     GLint log_length = 0;
     if (is_program)
-        glGetProgramiv(object, GL_INFO_LOG_LENGTH, &log_length);
+        GL_GetProgramivFunc(object, GL_INFO_LOG_LENGTH, &log_length);
     else
-        glGetShaderiv(object, GL_INFO_LOG_LENGTH, &log_length);
+        GL_GetShaderivFunc(object, GL_INFO_LOG_LENGTH, &log_length);
 
     if (log_length > 1)
     {
@@ -79,9 +80,9 @@ static void R_Deferred_LogShader(GLuint object, qboolean is_program)
         if (log)
         {
             if (is_program)
-                glGetProgramInfoLog(object, log_length, NULL, log);
+                GL_GetProgramInfoLogFunc(object, log_length, NULL, log);
             else
-                glGetShaderInfoLog(object, log_length, NULL, log);
+                GL_GetShaderInfoLogFunc(object, log_length, NULL, log);
             Con_Printf("Deferred shader error: %s\n", log);
             free(log);
         }
@@ -90,9 +91,9 @@ static void R_Deferred_LogShader(GLuint object, qboolean is_program)
 
 static GLuint R_Deferred_Compile(GLenum type, const char *source)
 {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, NULL);
-    glCompileShader(shader);
+    GLuint shader = GL_CreateShaderFunc(type);
+    GL_ShaderSourceFunc(shader, 1, &source, NULL);
+    GL_CompileShaderFunc(shader);
     R_Deferred_LogShader(shader, false);
     return shader;
 }
@@ -153,31 +154,31 @@ static qboolean R_Deferred_CreateProgram(void)
     GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
     GLuint fs = R_Deferred_Compile(GL_FRAGMENT_SHADER, fs_source);
 
-    deferred_program = glCreateProgram();
-    glAttachShader(deferred_program, vs);
-    glAttachShader(deferred_program, fs);
-    glLinkProgram(deferred_program);
+    deferred_program = GL_CreateProgramFunc();
+    GL_AttachShaderFunc(deferred_program, vs);
+    GL_AttachShaderFunc(deferred_program, fs);
+    GL_LinkProgramFunc(deferred_program);
     R_Deferred_LogShader(deferred_program, true);
 
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    GL_DeleteShaderFunc(vs);
+    GL_DeleteShaderFunc(fs);
 
     if (!deferred_program)
         return false;
 
-    glUseProgram(deferred_program);
-    glUniform1i(glGetUniformLocation(deferred_program, "uAlbedo"), 0);
-    glUniform1i(glGetUniformLocation(deferred_program, "uNormalSpec"), 1);
-    glUniform1i(glGetUniformLocation(deferred_program, "uDepth"), 2);
+    GL_UseProgramFunc(deferred_program);
+    GL_Uniform1iFunc(GL_GetUniformLocationFunc(deferred_program, "uAlbedo"), 0);
+    GL_Uniform1iFunc(GL_GetUniformLocationFunc(deferred_program, "uNormalSpec"), 1);
+    GL_Uniform1iFunc(GL_GetUniformLocationFunc(deferred_program, "uDepth"), 2);
 
-    loc_viewproj = glGetUniformLocation(deferred_program, "uViewProj");
-    loc_inv_viewproj = glGetUniformLocation(deferred_program, "uInvViewProj");
-    loc_light_pos = glGetUniformLocation(deferred_program, "uLightPos");
-    loc_light_color = glGetUniformLocation(deferred_program, "uLightColor");
-    loc_light_radius = glGetUniformLocation(deferred_program, "uLightRadius");
-    loc_camera_pos = glGetUniformLocation(deferred_program, "uCameraPos");
-    loc_screen_size = glGetUniformLocation(deferred_program, "uScreenSize");
-    loc_spec_power = glGetUniformLocation(deferred_program, "uSpecPower");
+    loc_viewproj = GL_GetUniformLocationFunc(deferred_program, "uViewProj");
+    loc_inv_viewproj = GL_GetUniformLocationFunc(deferred_program, "uInvViewProj");
+    loc_light_pos = GL_GetUniformLocationFunc(deferred_program, "uLightPos");
+    loc_light_color = GL_GetUniformLocationFunc(deferred_program, "uLightColor");
+    loc_light_radius = GL_GetUniformLocationFunc(deferred_program, "uLightRadius");
+    loc_camera_pos = GL_GetUniformLocationFunc(deferred_program, "uCameraPos");
+    loc_screen_size = GL_GetUniformLocationFunc(deferred_program, "uScreenSize");
+    loc_spec_power = GL_GetUniformLocationFunc(deferred_program, "uSpecPower");
 
     return true;
 }
@@ -239,21 +240,21 @@ static void R_Deferred_CreateSphere(void)
 
     deferred_index_count = (GLsizei)index_count;
 
-    glGenVertexArrays(1, &deferred_vao);
-    glBindVertexArray(deferred_vao);
+    GL_GenVertexArraysFunc(1, &deferred_vao);
+    GL_BindVertexArrayFunc(deferred_vao);
 
-    glGenBuffers(1, &deferred_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, deferred_vbo);
-    glBufferData(GL_ARRAY_BUFFER, (size_t)vertex_count * 3 * sizeof(float), vertices, GL_STATIC_DRAW);
+    GL_GenBuffersFunc(1, &deferred_vbo);
+    GL_BindBufferFunc(GL_ARRAY_BUFFER, deferred_vbo);
+    GL_BufferDataFunc(GL_ARRAY_BUFFER, (size_t)vertex_count * 3 * sizeof(float), vertices, GL_STATIC_DRAW);
 
-    glGenBuffers(1, &deferred_ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, deferred_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (size_t)index_count * sizeof(GLuint), indices, GL_STATIC_DRAW);
+    GL_GenBuffersFunc(1, &deferred_ebo);
+    GL_BindBufferFunc(GL_ELEMENT_ARRAY_BUFFER, deferred_ebo);
+    GL_BufferDataFunc(GL_ELEMENT_ARRAY_BUFFER, (size_t)index_count * sizeof(GLuint), indices, GL_STATIC_DRAW);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)(uintptr_t)0);
+    GL_EnableVertexAttribArrayFunc(0);
+    GL_VertexAttribPointerFunc(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)(uintptr_t)0);
 
-    glBindVertexArray(0);
+    GL_BindVertexArrayFunc(0);
 
     free(vertices);
     free(indices);
@@ -336,8 +337,8 @@ static void R_Deferred_SetMatrices(void)
     if (!R_Deferred_Invert(viewproj, inv_viewproj))
         memcpy(inv_viewproj, r_identity_mat4, sizeof(inv_viewproj));
 
-    glUniformMatrix4fv(loc_viewproj, 1, GL_FALSE, viewproj);
-    glUniformMatrix4fv(loc_inv_viewproj, 1, GL_FALSE, inv_viewproj);
+    GL_UniformMatrix4fvFunc(loc_viewproj, 1, GL_FALSE, viewproj);
+    GL_UniformMatrix4fvFunc(loc_inv_viewproj, 1, GL_FALSE, inv_viewproj);
 }
 
 void R_Deferred_LightPass(void)
@@ -348,19 +349,19 @@ void R_Deferred_LightPass(void)
     if (!R_Deferred_EnsureResources())
         return;
 
-    glUseProgram(deferred_program);
-    glBindVertexArray(deferred_vao);
+    GL_UseProgramFunc(deferred_program);
+    GL_BindVertexArrayFunc(deferred_vao);
 
-    glActiveTexture(GL_TEXTURE0);
+    GL_ActiveTextureFunc(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, R_GBuffer_GetAlbedoTexture());
-    glActiveTexture(GL_TEXTURE1);
+    GL_ActiveTextureFunc(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, R_GBuffer_GetNormalSpecTexture());
-    glActiveTexture(GL_TEXTURE2);
+    GL_ActiveTextureFunc(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, R_GBuffer_GetDepthTexture());
 
-    glUniform2f(loc_screen_size, (float)glwidth, (float)glheight);
-    glUniform3fv(loc_camera_pos, 1, r_origin);
-    glUniform1f(loc_spec_power, 32.0f);
+    GL_Uniform2fFunc(loc_screen_size, (float)glwidth, (float)glheight);
+    GL_Uniform3fvFunc(loc_camera_pos, 1, r_origin);
+    GL_Uniform1fFunc(loc_spec_power, 32.0f);
     R_Deferred_SetMatrices();
 
     glEnable(GL_BLEND);
@@ -378,17 +379,17 @@ void R_Deferred_LightPass(void)
         if (dl->die < cl.time || dl->radius <= 0.0f)
             continue;
 
-        glUniform3fv(loc_light_pos, 1, dl->origin);
-        glUniform3fv(loc_light_color, 1, dl->color);
-        glUniform1f(loc_light_radius, dl->radius);
+        GL_Uniform3fvFunc(loc_light_pos, 1, dl->origin);
+        GL_Uniform3fvFunc(loc_light_color, 1, dl->color);
+        GL_Uniform1fFunc(loc_light_radius, dl->radius);
         glDrawElements(GL_TRIANGLES, deferred_index_count, GL_UNSIGNED_INT, (void *)(uintptr_t)0);
     }
 
     glDepthMask(GL_TRUE);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
-    glUseProgram(0);
-    glBindVertexArray(0);
+    GL_UseProgramFunc(0);
+    GL_BindVertexArrayFunc(0);
 }
 
 static qboolean R_Deferred_CreateCompositeProgram(void)
@@ -413,22 +414,22 @@ static qboolean R_Deferred_CreateCompositeProgram(void)
     GLuint vs = R_Deferred_Compile(GL_VERTEX_SHADER, vs_source);
     GLuint fs = R_Deferred_Compile(GL_FRAGMENT_SHADER, fs_source);
 
-    composite_program = glCreateProgram();
-    glAttachShader(composite_program, vs);
-    glAttachShader(composite_program, fs);
-    glLinkProgram(composite_program);
+    composite_program = GL_CreateProgramFunc();
+    GL_AttachShaderFunc(composite_program, vs);
+    GL_AttachShaderFunc(composite_program, fs);
+    GL_LinkProgramFunc(composite_program);
     R_Deferred_LogShader(composite_program, true);
 
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    GL_DeleteShaderFunc(vs);
+    GL_DeleteShaderFunc(fs);
     Z_Free(fs_source);
 
     if (!composite_program)
         return false;
 
-    glUseProgram(composite_program);
-    glUniform1i(glGetUniformLocation(composite_program, "u_ForwardColor"), 0);
-    glUniform1i(glGetUniformLocation(composite_program, "u_DeferredLight"), 1);
+    GL_UseProgramFunc(composite_program);
+    GL_Uniform1iFunc(GL_GetUniformLocationFunc(composite_program, "u_ForwardColor"), 0);
+    GL_Uniform1iFunc(GL_GetUniformLocationFunc(composite_program, "u_DeferredLight"), 1);
 
     return true;
 }
@@ -442,19 +443,19 @@ static void R_Deferred_CreateCompositeQuad(void)
          1.0f,  1.0f, 1.0f, 1.0f,
     };
 
-    glGenVertexArrays(1, &composite_vao);
-    glBindVertexArray(composite_vao);
+    GL_GenVertexArraysFunc(1, &composite_vao);
+    GL_BindVertexArrayFunc(composite_vao);
 
-    glGenBuffers(1, &composite_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, composite_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    GL_GenBuffersFunc(1, &composite_vbo);
+    GL_BindBufferFunc(GL_ARRAY_BUFFER, composite_vbo);
+    GL_BufferDataFunc(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)(2 * sizeof(float)));
+    GL_EnableVertexAttribArrayFunc(0);
+    GL_VertexAttribPointerFunc(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)0);
+    GL_EnableVertexAttribArrayFunc(1);
+    GL_VertexAttribPointerFunc(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(uintptr_t)(2 * sizeof(float)));
 
-    glBindVertexArray(0);
+    GL_BindVertexArrayFunc(0);
 }
 
 static qboolean R_Deferred_EnsureComposite(void)
@@ -476,21 +477,21 @@ void R_Deferred_Composite(void)
     if (!R_Deferred_EnsureComposite())
         return;
 
-    glUseProgram(composite_program);
-    glBindVertexArray(composite_vao);
+    GL_UseProgramFunc(composite_program);
+    GL_BindVertexArrayFunc(composite_vao);
 
     const qboolean msaa = framebufs.scene.samples > 1;
     GLuint forward_color = msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex;
 
-    glActiveTexture(GL_TEXTURE0);
+    GL_ActiveTextureFunc(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, forward_color);
-    glActiveTexture(GL_TEXTURE1);
+    GL_ActiveTextureFunc(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, framebufs.composite.color_tex);
 
     glDisable(GL_DEPTH_TEST);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glEnable(GL_DEPTH_TEST);
 
-    glBindVertexArray(0);
-    glUseProgram(0);
+    GL_BindVertexArrayFunc(0);
+    GL_UseProgramFunc(0);
 }
