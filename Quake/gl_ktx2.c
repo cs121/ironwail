@@ -3,7 +3,6 @@
 #include "gl_ktx2.h"
 #include "gl_texmgr.h"
 #include "basisu_transcoder.h"
-#include "miniz.h"
 
 static const uint8_t KTX2_MAGIC[12] = {
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
@@ -146,33 +145,6 @@ qboolean KTX2_IsValid(const uint8_t *data, size_t size)
     return KTX2_ParseHeader(&hdr, data, size);
 }
 
-static qboolean KTX2_DecompressLevel(const uint8_t *src, size_t src_size, uint8_t **out_buf, size_t *out_size, size_t expected)
-{
-    size_t out_bytes;
-
-    if (!src || !out_buf || !out_size)
-        return false;
-
-    *out_buf = (uint8_t *)malloc(expected);
-    if (!*out_buf)
-    {
-        KTX2_LogError("failed at step decompress: out of memory");
-        return false;
-    }
-
-    out_bytes = tinfl_decompress_mem_to_mem(*out_buf, expected, src, src_size, 0);
-    if (out_bytes == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED)
-    {
-        KTX2_LogError("failed at step decompress: tinfl error");
-        free(*out_buf);
-        *out_buf = NULL;
-        return false;
-    }
-
-    *out_size = out_bytes;
-    return true;
-}
-
 qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const ktx2_header_t *hdr, ktx2_decoded_image_t *out)
 {
     int i;
@@ -192,6 +164,24 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
     memset(out, 0, sizeof(*out));
     basisu_transcoder_init();
 
+    if (hdr->supercompression != 0 && hdr->supercompression != 1)
+    {
+        KTX2_LogError("failed at step init: unsupported supercompression scheme %llu", (unsigned long long)hdr->supercompression);
+        return false;
+    }
+
+    if (hdr->supercompression == 1 && hdr->sgd_length == 0)
+    {
+        KTX2_LogError("failed at step init: BasisLZ supercompression requires supercompression global data");
+        return false;
+    }
+
+    if (hdr->sgd_length && (hdr->sgd_offset > filesize || hdr->sgd_length > filesize - hdr->sgd_offset))
+    {
+        KTX2_LogError("failed at step init: supercompression global data out of bounds");
+        return false;
+    }
+
     if (hdr->level_count <= 0)
     {
         KTX2_LogError("failed at step init: no mip levels");
@@ -200,13 +190,17 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
 
     out->mip_count = hdr->level_count;
 
+    /* BasisLZ uses the supercompression global data blob; UASTC does not. */
+    const uint8_t *sgd_data = hdr->sgd_length ? filedata + hdr->sgd_offset : NULL;
+    size_t sgd_size = hdr->sgd_length ? (size_t)hdr->sgd_length : 0;
+
     for (i = 0; i < hdr->level_count; ++i)
     {
         const uint64_t offset = hdr->levels[i].offset;
         const uint64_t length = hdr->levels[i].length;
-        const uint64_t uncompressed = hdr->levels[i].uncompressed_length;
         uint8_t *level_data = NULL;
         size_t level_size = 0;
+        qboolean level_owned = false;
         qboolean is_uastc = (hdr->supercompression == 0);
         int width = (int)max(1U, hdr->width >> i);
         int height = (int)max(1U, hdr->height >> i);
@@ -229,16 +223,7 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
             return false;
         }
 
-        if (hdr->supercompression == 1)
-        {
-            size_t target = (size_t)(uncompressed ? uncompressed : length);
-            if (!KTX2_DecompressLevel(filedata + offset, (size_t)length, &level_data, &level_size, target))
-            {
-                KTX2_FreeDecodedImage(out);
-                return false;
-            }
-        }
-        else
+        if (hdr->supercompression == 0)
         {
             level_size = (size_t)length;
             level_data = (uint8_t *)malloc(level_size);
@@ -249,17 +234,26 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
                 return false;
             }
             memcpy(level_data, filedata + offset, level_size);
+            level_owned = true;
+        }
+        else
+        {
+            /* BASISLZ: hand the supercompressed payload and global tables to the transcoder. */
+            level_size = (size_t)length;
+            level_data = (uint8_t *)(filedata + offset);
         }
 
-        if (!basisu_transcoder_transcode_image_level(level_data, level_size, is_uastc, (uint32_t)i, (uint32_t)width, (uint32_t)height, out->mip_data[i], out->mip_size[i]))
+        if (!basisu_transcoder_transcode_image_level(level_data, level_size, is_uastc, sgd_data, sgd_size, (uint32_t)i, (uint32_t)width, (uint32_t)height, out->mip_data[i], out->mip_size[i]))
         {
             KTX2_LogError("failed at step transcode: level %d", i);
-            free(level_data);
+            if (level_owned)
+                free(level_data);
             KTX2_FreeDecodedImage(out);
             return false;
         }
 
-        free(level_data);
+        if (level_owned)
+            free(level_data);
     }
 
     KTX2_LogInfo("Transcoded %d mip levels to RGBA8", out->mip_count);
