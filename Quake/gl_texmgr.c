@@ -736,6 +736,31 @@ static void SetColor (uint32_t *dst, byte r, byte g, byte b, byte a)
 	((byte*)dst)[3] = a;
 }
 
+static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
+{
+	size_t pixel_count;
+	byte *bytes;
+
+	if (q_strcasecmp (glt->source_file, WADFILENAME))
+		return;
+
+	pixel_count = (size_t) glt->width * glt->height * glt->depth;
+	bytes = (byte *) data;
+
+	for (size_t i = 0; i < pixel_count; ++i, bytes += 4)
+	{
+		for (int c = 0; c < 3; ++c)
+		{
+			float linear = powf (bytes[c] * (1.0f / 255.0f), 2.2f) * 255.0f + 0.5f;
+			if (linear < 0.0f)
+				linear = 0.0f;
+			else if (linear > 255.0f)
+				linear = 255.0f;
+			bytes[c] = (byte) linear;
+		}
+	}
+}
+
 /*
 =================
 TexMgr_LoadPalette -- johnfitz -- was VID_SetPalette, moved here, renamed, rewritten
@@ -1300,6 +1325,8 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
 	int	miplevel, mipwidth, mipheight, picmip;
 	glformat_t internalformat;
 	qboolean compress;
+
+	TexMgr_LinearizeWadPixels (glt, data);
 
 	// mipmap down
 	picmip = (glt->flags & TEXPREF_NOPICMIP) ? 0 : q_max((int)gl_picmip.value, 0);
