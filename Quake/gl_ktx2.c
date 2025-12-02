@@ -201,8 +201,8 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
         size_t level_size = 0;
         qboolean level_owned = false;
         qboolean is_uastc = (hdr->supercompression == 0);
-        int width = (int)max(1U, hdr->width >> i);
-        int height = (int)max(1U, hdr->height >> i);
+        int width = (int)q_max(1U, hdr->width >> i);
+        int height = (int)q_max(1U, hdr->height >> i);
 
         if (offset > filesize || length > filesize - offset)
         {
@@ -355,20 +355,22 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
 void KTX2_LogInfo(const char *fmt, ...)
 {
     va_list argptr;
+    char msg[1024];
+
     va_start(argptr, fmt);
-    Con_Printf("KTX2-INFO: ");
-    Con_VPrintf(fmt, argptr);
-    Con_Printf("\n");
+    q_vsnprintf(msg, sizeof(msg), fmt, argptr);
+    Con_Printf("KTX2-INFO: %s\n", msg);
     va_end(argptr);
 }
 
 void KTX2_LogError(const char *fmt, ...)
 {
     va_list argptr;
+    char msg[1024];
+
     va_start(argptr, fmt);
-    Con_Printf("KTX2-ERROR: ");
-    Con_VPrintf(fmt, argptr);
-    Con_Printf("\n");
+    q_vsnprintf(msg, sizeof(msg), fmt, argptr);
+    Con_Printf("KTX2-ERROR: %s\n", msg);
     va_end(argptr);
 }
 
