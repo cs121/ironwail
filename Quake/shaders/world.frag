@@ -404,15 +404,17 @@ void main()
                                         if (rad < minlight)
                                                 continue;
                                         vec3 local_pos = l.origin - plane.xyz * dist;
-                                        minlight = rad - minlight;
                                         vec3 light_vec = local_pos - in_pos;
                                         float surface_dist = length(light_vec);
-                                        float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
-                                        float normalized_dist = surface_dist / rad;
-                                        float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-                                        vec3 light_contrib = attenuation * falloff * l.color;
+                                        float distance_to_light = length(l.origin - in_pos);
+
+                                        float normalized_dist = clamp(distance_to_light / rad, 0.0, 1.0);
+                                        float attenuation = pow(1.0 - normalized_dist, 2.0);
+                                        float attenuation_floor = (minlight > 0.0 && rad > 0.0) ? minlight / rad : 0.0;
+                                        attenuation = clamp(max(attenuation, attenuation_floor), 0.0, 1.0);
+                                        vec3 light_contrib = attenuation * l.color;
                                         dynamic_light += light_contrib;
-                                        if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+                                        if (attenuation > 0.0 && surface_dist > 0.0)
                                         {
                                                 vec3 light_dir = light_vec / surface_dist;
                                                 float ndotl = max(dot(surface_normal, light_dir), 0.0);
