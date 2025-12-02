@@ -223,17 +223,18 @@ GLOBJS = \
 	r_part.o \
 	r_world.o \
 	gl_screen.o \
-	gl_shaders.o \
-	gl_sky.o \
-	gl_warp.o \
-	$(SYSOBJ_GL_VID) \
-	gl_draw.o \
-	image.o \
-	gl_texmgr.o \
-	gl_mesh.o \
-	r_sprite.o \
-	r_alias.o \
-	r_brush.o \
+gl_shaders.o \
+gl_sky.o \
+gl_warp.o \
+$(SYSOBJ_GL_VID) \
+gl_draw.o \
+image.o \
+gl_texmgr.o \
+bc7enc.o \
+gl_mesh.o \
+r_sprite.o \
+r_alias.o \
+r_brush.o \
 	gl_model.o
 
 OBJS = strlcat.o \
@@ -284,6 +285,10 @@ OBJS = strlcat.o \
 
 OBJDEPS := $(OBJS:%.o=%.d)
 OBJS += $(SYSOBJ_RES)
+
+bc7enc.o: bc7enc.c bc7enc.h $(MAKEFILE)
+	@echo "Compiling $<" && \
+	$(CXX) $(DFLAGS) -c $(CXXFLAGS) $(SDL_CFLAGS) -o $@ $<
 
 # ---------------------------
 # targets / rules
