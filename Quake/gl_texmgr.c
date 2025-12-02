@@ -1838,11 +1838,13 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 	glt->shirt = -1;
 	glt->pants = -1;
 	q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
-	glt->source_offset = source_offset;
-	glt->source_format = format;
-	glt->source_width = width;
-	glt->source_height = height;
-	glt->source_crc = crc;
+        glt->source_offset = source_offset;
+        glt->source_format = format;
+        glt->source_width = width;
+        glt->source_height = height;
+        glt->source_crc = crc;
+        glt->mipmap = 0;
+        glt->internal_format = 0;
 
 	//upload it
 	mark = Hunk_LowMark();

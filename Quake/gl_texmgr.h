@@ -76,6 +76,8 @@ typedef struct gltexture_s {
 	signed char			pants; //0-13 pants color, or -1 if never colormapped
 //used for rendering
 	int			visframe; //matches r_framecount if texture was bound this frame
+	int			mipmap; //number of mip levels uploaded (0 = unknown)
+	GLenum		internal_format; //GL internal format used for upload
 } gltexture_t;
 
 extern gltexture_t *notexture;
