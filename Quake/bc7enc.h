@@ -17,6 +17,7 @@ extern "C" {
 #define BC7ENC_MAX_UBER_LEVEL (4)
 
 struct color_rgba { uint8_t m_c[4]; };
+typedef struct color_rgba color_rgba;
 
 typedef struct bc7enc_compress_block_params
 {
