@@ -242,20 +242,30 @@ void R_SetupAliasLighting (entity_t	*e)
 		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
 	//add dlights
-	for (i=0; i<r_framedata.numlights; i++)
-	{
-		gpulight_t *l = &r_lightbuffer.lights[i];
-		VectorSubtract (e->origin, l->pos, dist);
-		add = DotProduct (dist, dist);
-		if (l->radius * l->radius > add)
-			VectorMA (lightcolor, l->radius - sqrtf (add), l->color, lightcolor);
-	}
+       for (i=0; i<r_framedata.numlights; i++)
+       {
+               gpulight_t *l = &r_lightbuffer.lights[i];
+               VectorSubtract (e->origin, l->pos, dist);
+               add = DotProduct (dist, dist);
+               if (l->radius * l->radius > add)
+                       VectorMA (lightcolor, l->radius - sqrtf (add), l->color, lightcolor);
+       }
 
-	// minimum light value on gun (24)
-	if (e == &cl.viewent)
-	{
-		add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
-		if (add > 0.0f)
+        // viewmodel lighting is typically darker because world lights aren't placed for a free camera
+        if (e == &cl.viewent)
+        {
+                for (i = 0; i < 3; i++)
+                {
+                        const float L = lightcolor[i];
+                        lightcolor[i] = fmaxf (L * 1.5f, L + 40.0f);
+                }
+        }
+
+        // minimum light value on gun (24)
+        if (e == &cl.viewent)
+        {
+                add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+                if (add > 0.0f)
 		{
 			add *= 1.0f / 3.0f;
 			lightcolor[0] += add;
