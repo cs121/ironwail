@@ -78,10 +78,12 @@ struct ibuf_s {
 		float	dither;
 		float	overbright;
 		float	half_lambert;
-		float	_padding[2]; // keep std430 layout in sync with InstanceBuffer in alias shaders
+		float	_padding[5]; // keep std430 layout in sync with InstanceBuffer in alias shaders
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
+
+COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
 
 /*
 =================
