@@ -18,105 +18,105 @@ extern "C" {
 
 struct color_rgba { uint8_t m_c[4]; };
 
-struct bc7enc_compress_block_params
+typedef struct bc7enc_compress_block_params
 {
-	uint32_t m_mode_mask;
+        uint32_t m_mode_mask;
 
-	// m_max_partitions may range from 0 (disables mode 1) to BC7ENC_MAX_PARTITIONS. The higher this value, the slower the compressor, but the higher the quality.
-	uint32_t m_max_partitions;
-	
-	// Relative RGBA or YCbCrA weights.
-	uint32_t m_weights[4];
-	
-	// m_uber_level may range from 0 to BC7ENC_MAX_UBER_LEVEL. The higher this value, the slower the compressor, but the higher the quality.
-	uint32_t m_uber_level;
+        // m_max_partitions may range from 0 (disables mode 1) to BC7ENC_MAX_PARTITIONS. The higher this value, the slower the compressor, but the higher the quality.
+        uint32_t m_max_partitions;
 
-	// If m_perceptual is true, colorspace error is computed in YCbCr space, otherwise RGB.
-	bool m_perceptual;
+        // Relative RGBA or YCbCrA weights.
+        uint32_t m_weights[4];
 
-	// Set m_try_least_squares to false for slightly faster/lower quality compression.
-	bool m_try_least_squares;
-	
-	// When m_mode17_partition_estimation_filterbank, the mode1 partition estimator skips lesser used partition patterns unless they are strongly predicted to be potentially useful.
-	// There's a slight loss in quality with this enabled (around .08 dB RGB PSNR or .05 dB Y PSNR), but up to a 11% gain in speed depending on the other settings.
-	bool m_mode17_partition_estimation_filterbank;
+        // m_uber_level may range from 0 to BC7ENC_MAX_UBER_LEVEL. The higher this value, the slower the compressor, but the higher the quality.
+        uint32_t m_uber_level;
 
-	bool m_force_alpha;
+        // If m_perceptual is true, colorspace error is computed in YCbCr space, otherwise RGB.
+        bool m_perceptual;
 
-	bool m_force_selectors;
-	uint8_t m_selectors[16];
+        // Set m_try_least_squares to false for slightly faster/lower quality compression.
+        bool m_try_least_squares;
 
-	bool m_quant_mode6_endpoints;
-	bool m_bias_mode1_pbits;
+        // When m_mode17_partition_estimation_filterbank, the mode1 partition estimator skips lesser used partition patterns unless they are strongly predicted to be potentially useful.
+        // There's a slight loss in quality with this enabled (around .08 dB RGB PSNR or .05 dB Y PSNR), but up to a 11% gain in speed depending on the other settings.
+        bool m_mode17_partition_estimation_filterbank;
 
-	float m_pbit1_weight;
+        bool m_force_alpha;
 
-	float m_mode1_error_weight;
-	float m_mode5_error_weight;
-	float m_mode6_error_weight;
-	float m_mode7_error_weight;
+        bool m_force_selectors;
+        uint8_t m_selectors[16];
 
-	float m_low_frequency_partition_weight;
+        bool m_quant_mode6_endpoints;
+        bool m_bias_mode1_pbits;
 
-	void clear()
-	{
-		memset(this, 0, sizeof(*this));
-	}
+        float m_pbit1_weight;
 
-	void print()
-	{
-		printf("Mode mask: 0x%X\n", m_mode_mask);
-		printf("Max partitions: %u\n", m_max_partitions);
-		printf("Weights: %u %u %u %u\n", m_weights[0], m_weights[1], m_weights[2], m_weights[3]);
-		printf("Uber level: %u\n", m_uber_level);
-		printf("Perceptual: %u\n", m_perceptual);
-		printf("Try least squares: %u\n", m_try_least_squares);
-		printf("Mode 1/7 partition estimation filterbank: %u\n", m_mode17_partition_estimation_filterbank);
-		printf("Force alpha: %u\n", m_force_alpha);
-		printf("Quant mode 6 endpoints: %u\n", m_quant_mode6_endpoints);
-		printf("Bias mode 1 p-bits: %u\n", m_bias_mode1_pbits);
-		printf("p-bit 1 weight: %f\n", m_pbit1_weight);
-		printf("Mode error weights: %f %f %f %f\n", m_mode1_error_weight, m_mode5_error_weight, m_mode6_error_weight, m_mode7_error_weight);
-		printf("Low frequency partition weight: %f\n", m_low_frequency_partition_weight);
-	}
-};
+        float m_mode1_error_weight;
+        float m_mode5_error_weight;
+        float m_mode6_error_weight;
+        float m_mode7_error_weight;
 
-inline void bc7enc_compress_block_params_init_linear_weights(bc7enc_compress_block_params *p)
+        float m_low_frequency_partition_weight;
+} bc7enc_compress_block_params;
+
+static inline void bc7enc_compress_block_params_clear(bc7enc_compress_block_params *p)
 {
-	p->m_perceptual = false;
-	p->m_weights[0] = 1;
-	p->m_weights[1] = 1;
-	p->m_weights[2] = 1;
-	p->m_weights[3] = 1;
+        memset(p, 0, sizeof(*p));
 }
 
-inline void bc7enc_compress_block_params_init_perceptual_weights(bc7enc_compress_block_params *p)
+static inline void bc7enc_compress_block_params_print(const bc7enc_compress_block_params *p)
 {
-	p->m_perceptual = true;
-	p->m_weights[0] = 128;
-	p->m_weights[1] = 64;
-	p->m_weights[2] = 16;
-	p->m_weights[3] = 32;
+        printf("Mode mask: 0x%X\n", p->m_mode_mask);
+        printf("Max partitions: %u\n", p->m_max_partitions);
+        printf("Weights: %u %u %u %u\n", p->m_weights[0], p->m_weights[1], p->m_weights[2], p->m_weights[3]);
+        printf("Uber level: %u\n", p->m_uber_level);
+        printf("Perceptual: %u\n", p->m_perceptual);
+        printf("Try least squares: %u\n", p->m_try_least_squares);
+        printf("Mode 1/7 partition estimation filterbank: %u\n", p->m_mode17_partition_estimation_filterbank);
+        printf("Force alpha: %u\n", p->m_force_alpha);
+        printf("Quant mode 6 endpoints: %u\n", p->m_quant_mode6_endpoints);
+        printf("Bias mode 1 p-bits: %u\n", p->m_bias_mode1_pbits);
+        printf("p-bit 1 weight: %f\n", p->m_pbit1_weight);
+        printf("Mode error weights: %f %f %f %f\n", p->m_mode1_error_weight, p->m_mode5_error_weight, p->m_mode6_error_weight, p->m_mode7_error_weight);
+        printf("Low frequency partition weight: %f\n", p->m_low_frequency_partition_weight);
 }
 
-inline void bc7enc_compress_block_params_init(bc7enc_compress_block_params *p)
+static inline void bc7enc_compress_block_params_init_linear_weights(bc7enc_compress_block_params *p)
 {
-	p->m_mode_mask = UINT32_MAX;
-	p->m_max_partitions = BC7ENC_MAX_PARTITIONS;
-	p->m_try_least_squares = true;
-	p->m_mode17_partition_estimation_filterbank = true;
-	p->m_uber_level = 0;
-	p->m_force_selectors = false;
-	p->m_force_alpha = false;
-	p->m_quant_mode6_endpoints = false;
-	p->m_bias_mode1_pbits = false;
-	p->m_pbit1_weight = 1.0f;
-	p->m_mode1_error_weight = 1.0f;
-	p->m_mode5_error_weight = 1.0f;
-	p->m_mode6_error_weight = 1.0f;
-	p->m_mode7_error_weight = 1.0f;
-	p->m_low_frequency_partition_weight = 1.0f;
-	bc7enc_compress_block_params_init_perceptual_weights(p);
+        p->m_perceptual = false;
+        p->m_weights[0] = 1;
+        p->m_weights[1] = 1;
+        p->m_weights[2] = 1;
+        p->m_weights[3] = 1;
+}
+
+static inline void bc7enc_compress_block_params_init_perceptual_weights(bc7enc_compress_block_params *p)
+{
+        p->m_perceptual = true;
+        p->m_weights[0] = 128;
+        p->m_weights[1] = 64;
+        p->m_weights[2] = 16;
+        p->m_weights[3] = 32;
+}
+
+static inline void bc7enc_compress_block_params_init(bc7enc_compress_block_params *p)
+{
+        p->m_mode_mask = UINT32_MAX;
+        p->m_max_partitions = BC7ENC_MAX_PARTITIONS;
+        p->m_try_least_squares = true;
+        p->m_mode17_partition_estimation_filterbank = true;
+        p->m_uber_level = 0;
+        p->m_force_selectors = false;
+        p->m_force_alpha = false;
+        p->m_quant_mode6_endpoints = false;
+        p->m_bias_mode1_pbits = false;
+        p->m_pbit1_weight = 1.0f;
+        p->m_mode1_error_weight = 1.0f;
+        p->m_mode5_error_weight = 1.0f;
+        p->m_mode6_error_weight = 1.0f;
+        p->m_mode7_error_weight = 1.0f;
+        p->m_low_frequency_partition_weight = 1.0f;
+        bc7enc_compress_block_params_init_perceptual_weights(p);
 }
 
 // bc7enc_compress_block_init() MUST be called before calling bc7enc_compress_block() (or you'll get artifacts).
