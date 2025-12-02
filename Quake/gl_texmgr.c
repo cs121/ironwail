@@ -1634,7 +1634,7 @@ GLuint TexMgr_LoadDDS (const char *path)
 	for (level = 0; level < mip_levels; level++)
 	{
 	size_t level_size = Dds_CalcLevelSize(&format, level_width, level_height);
-	glCompressedTexImage2D (GL_TEXTURE_2D, level, format.internal_format, level_width, level_height, 0, (GLsizei) level_size, file_buffer + offset);
+        GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, level, format.internal_format, level_width, level_height, 0, (GLsizei) level_size, file_buffer + offset);
 
 	offset += level_size;
 	if (level_width > 1)
