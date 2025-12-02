@@ -1079,7 +1079,9 @@ static void Mod_LoadTextures (lump_t *l)
                                                 SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
                                 }
 
-                                tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+					tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+					if (!tx->emissive && tx->type == TEXTYPE_LAVA)
+						tx->emissive = lavaemissivetexture;
 
                                 Hunk_FreeToLowMark (mark);
                                 if (malloced)
