@@ -406,9 +406,8 @@ void main()
                                         vec3 local_pos = l.origin - plane.xyz * dist;
                                         vec3 light_vec = local_pos - in_pos;
                                         float surface_dist = length(light_vec);
-                                        float distance_to_light = length(l.origin - in_pos);
 
-                                        float normalized_dist = clamp(distance_to_light / rad, 0.0, 1.0);
+                                        float normalized_dist = clamp(surface_dist / rad, 0.0, 1.0);
                                         float attenuation = pow(1.0 - normalized_dist, 2.0);
                                         float attenuation_floor = (minlight > 0.0 && rad > 0.0) ? minlight / rad : 0.0;
                                         attenuation = clamp(max(attenuation, attenuation_floor), 0.0, 1.0);
