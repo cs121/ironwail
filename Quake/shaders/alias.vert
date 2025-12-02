@@ -17,9 +17,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	ModelHalfLambert;
 	float	_Pad1;
 	float	_Pad2;
-	float	_Pad3;
 	InstanceData instances[];
 };
 
@@ -73,6 +73,8 @@ struct PoseVertex
 float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH 
 {
 	float d = dot(vertexnormal, dir);
+	if (ModelHalfLambert > 0.5)
+		return max(d, 0.0) * 0.5 + 0.5;
 	// wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
 	if (d < 0.0)
 		return 1.0 + d * (13.0 / 44.0);

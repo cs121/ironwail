@@ -17,9 +17,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	ModelHalfLambert;
 	float	_Pad1;
 	float	_Pad2;
-	float	_Pad3;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
