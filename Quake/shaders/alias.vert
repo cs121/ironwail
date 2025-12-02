@@ -17,6 +17,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
 	float	_Pad2;
@@ -112,12 +113,11 @@ void main()
 	out_flags = inst.Flags;
 	out_pos = world_vert - EyePos;
 	// transform world X and Z axes to local space
-	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
-	orientation = transpose(orientation);
-	vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
-	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
-	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
-	out_color = clamp(inst.LightColor * vec4(vec3(mix(dot1, dot2, inst.Blend)), 1.0), 0.0, 1.0);
-	uint overbright = floatBitsToUint(Fog.w) >> 31;
-	out_color.rgb = ldexp(out_color.rgb, ivec3(overbright));
+        mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
+        orientation = transpose(orientation);
+        vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
+        float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
+        float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
+        float lighting = mix(dot1, dot2, inst.Blend);
+        out_color = clamp(inst.LightColor * vec4(vec3(lighting * Overbright), 1.0), 0.0, Overbright);
 }

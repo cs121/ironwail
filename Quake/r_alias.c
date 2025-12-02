@@ -76,8 +76,9 @@ struct ibuf_s {
 		float	_pad;
 		vec4_t	fog;
 		float	dither;
+		float	overbright;
 		float	half_lambert;
-		float	_padding[2];
+		float	_padding[1];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -352,18 +353,19 @@ void R_FlushAliasInstances (qboolean showtris)
 		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 	GL_SetState (state);
 
-	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
-	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
-	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
-	// use fog density sign bit as overbright flag
-	ibuf.global.fog[3] =
-		gl_overbright_models.value ?
-			-fabs (r_framedata.fogdata[3]) :
-			 fabs (r_framedata.fogdata[3])
-	;
-	ibuf.global.dither = r_framedata.dither[0];
-	ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
+memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+// use fog density sign bit as overbright flag
+ibuf.global.fog[3] =
+gl_overbright_models.value ?
+-fabs (r_framedata.fogdata[3]) :
+ fabs (r_framedata.fogdata[3])
+;
+ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
+ibuf.global.dither = r_framedata.dither[0];
+ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);

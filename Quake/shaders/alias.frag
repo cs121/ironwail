@@ -17,6 +17,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
+	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
 	float	_Pad2;
