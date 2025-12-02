@@ -1,6 +1,7 @@
 #include "quakedef.h"
 #include "gl_local.h"
 #include "gl_ktx2.h"
+#include "gl_texmgr.h"
 #include "basisu_transcoder.h"
 #include "miniz.h"
 
@@ -267,11 +268,98 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
 
 gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t size)
 {
-    (void)name;
-    (void)data;
-    (void)size;
-    KTX2_LogInfo("R_LoadKTX2Texture: Phase 3: decoded on CPU, no GPU upload yet");
-    return NULL;
+    ktx2_header_t hdr;
+    ktx2_decoded_image_t decoded;
+    gltexture_t *tex;
+    GLenum gl_internal_format = GL_RGBA8;
+    qboolean use_compressed = false;
+    int i;
+
+    memset(&decoded, 0, sizeof(decoded));
+
+    if (!KTX2_ParseHeader(&hdr, data, size))
+        return NULL;
+
+    if (!KTX2_TranscodeToRGBA(data, size, &hdr, &decoded))
+    {
+        KTX2_FreeDecodedImage(&decoded);
+        return NULL;
+    }
+
+    tex = TexMgr_NewTexture();
+    if (!tex)
+    {
+        KTX2_FreeDecodedImage(&decoded);
+        return NULL;
+    }
+
+    if (hdr.supercompression == 0)
+        gl_internal_format = GL_COMPRESSED_RGBA_BPTC_UNORM;
+    else if (hdr.supercompression == 1)
+        gl_internal_format = GL_COMPRESSED_RGB8_ETC2;
+
+    if (decoded.mip_count > 0)
+    {
+        size_t expected_rgba = (size_t)decoded.width[0] * (size_t)decoded.height[0] * 4u;
+        if (decoded.mip_size[0] == expected_rgba)
+            gl_internal_format = GL_RGBA8;
+    }
+
+    use_compressed = (gl_internal_format != GL_RGBA8);
+
+    tex->owner = NULL;
+    tex->target = GL_TEXTURE_2D;
+    q_strlcpy(tex->name, name, sizeof(tex->name));
+    tex->width = (unsigned short)decoded.width[0];
+    tex->height = (unsigned short)decoded.height[0];
+    tex->depth = 1;
+    tex->compression = 1;
+    tex->flags = TEXPREF_MIPMAP;
+    tex->source_file[0] = '\0';
+    tex->source_offset = 0;
+    tex->source_format = SRC_RGBA;
+    tex->source_width = decoded.width[0];
+    tex->source_height = decoded.height[0];
+    tex->source_crc = 0;
+    tex->shirt = -1;
+    tex->pants = -1;
+    tex->visframe = 0;
+    tex->mipmap = decoded.mip_count;
+    tex->internal_format = gl_internal_format;
+
+    glBindTexture(GL_TEXTURE_2D, tex->texnum);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    for (i = 0; i < decoded.mip_count; i++)
+    {
+        int w = decoded.width[i];
+        int h = decoded.height[i];
+
+        KTX2_LogInfo("Upload mip %d: %dx%d (%zu bytes)", i, w, h, decoded.mip_size[i]);
+
+        if (use_compressed)
+        {
+            glCompressedTexImage2D(GL_TEXTURE_2D, i, gl_internal_format, w, h, 0, decoded.mip_size[i], decoded.mip_data[i]);
+        }
+        else
+        {
+            glTexImage2D(GL_TEXTURE_2D, i, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, decoded.mip_data[i]);
+        }
+    }
+
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR)
+            KTX2_LogError("GL upload failed: 0x%x", err);
+    }
+
+    KTX2_FreeDecodedImage(&decoded);
+
+    KTX2_LogInfo("Finished uploading KTX2 texture '%s' (%dx%d, mips=%d)", name, tex->width, tex->height, tex->mipmap);
+    return tex;
 }
 
 void KTX2_LogInfo(const char *fmt, ...)

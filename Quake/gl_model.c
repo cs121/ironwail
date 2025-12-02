@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
+#include "gl_ktx2.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
 
@@ -933,6 +934,34 @@ static gltexture_t *Mod_LoadEmissiveMap (qmodel_t *mod, const char *basename, in
         return tex;
 }
 
+static gltexture_t *Mod_LoadKTX2Texture(const char *name)
+{
+        byte *rawbuf;
+        qfileofs_t filesize;
+        gltexture_t *gltex;
+        char ktx2path[MAX_OSPATH];
+
+        q_snprintf(ktx2path, sizeof(ktx2path), "%s.ktx2", name);
+        rawbuf = COM_LoadMallocFile(ktx2path, NULL);
+        filesize = com_filesize;
+        if (!rawbuf)
+                return NULL;
+
+        if (COM_HasExtension(ktx2path, ".ktx2"))
+        {
+                gltex = R_LoadKTX2Texture(ktx2path, rawbuf, (size_t)filesize);
+                if (gltex)
+                {
+                        free(rawbuf);
+                        return gltex;
+                }
+                Con_Printf("KTX2 load failed, falling back.\n");
+        }
+
+        free(rawbuf);
+        return NULL;
+}
+
 /*
 =================
 Mod_LoadTextures
@@ -953,6 +982,7 @@ static void Mod_LoadTextures (lump_t *l)
 	int			mark, fwidth, fheight;
 	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
 	byte		*data;
+	gltexture_t	*ktx2tex;
 	enum srcformat fmt;
 	qboolean	malloced;
 //johnfitz
@@ -1040,73 +1070,102 @@ static void Mod_LoadTextures (lump_t *l)
 			memcpy ( tx+1, mt64+1, pixels);
 		}
 
-		//johnfitz -- lots of changes
-		malloced = false;
-		if (!isDedicated) //no texture uploading for dedicated server
-		{
-			if (tx->type == TEXTYPE_SKY)
-			{
-				if (loadmodel->bspversion == BSPVERSION_QUAKE64)
+                //johnfitz -- lots of changes
+                malloced = false;
+                ktx2tex = NULL;
+                if (!isDedicated) //no texture uploading for dedicated server
+                {
+                        if (tx->type == TEXTYPE_SKY)
+                        {
+                                if (loadmodel->bspversion == BSPVERSION_QUAKE64)
 					Sky_LoadTextureQ64 (loadmodel, tx);
 				else
 					Sky_LoadTexture (loadmodel, tx);
 			}
-			else if (TEXTYPE_ISLIQUID (tx->type))
-			{
-				//external textures -- first look in "textures/mapname/" then look in "textures/"
-				mark = Hunk_LowMark();
-				COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
-				q_snprintf (filename, sizeof(filename), "textures/%s/#%s", mapname, tx->name+1); //this also replaces the '*' with a '#'
-				data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				if (!data)
-				{
-					q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
-					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                        else if (TEXTYPE_ISLIQUID (tx->type))
+                        {
+                                //external textures -- first look in "textures/mapname/" then look in "textures/"
+                                mark = Hunk_LowMark();
+                                COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
+                                q_snprintf (filename, sizeof(filename), "textures/%s/#%s", mapname, tx->name+1); //this also replaces the '*' with a '#'
+                                ktx2tex = Mod_LoadKTX2Texture (filename);
+                                data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                if (!ktx2tex && !data)
+                                {
+                                        q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
+                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        if (!ktx2tex)
+                                                data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                 }
 
                                 //now load whatever we found
-                                if (data) //load external image
+                                if (ktx2tex)
                                 {
-                                        q_strlcpy (texturename, filename, sizeof(texturename));
-                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, fwidth, fheight,
-                                                fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                        tx->gltexture = ktx2tex;
+                                }
+                                else if (data) //load external image
+                                {
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
+                                                fmt, data, filename, 0, TEXPREF_MIPMAP | TEXPREF_BINDLESS );
                                 }
                                 else //use the texture from the bsp file
-				{
-					q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-					offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-					tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                {
+                                        q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
+                                        offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
+                                        if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
+                                        {
+                                                if (tx->type != TEXTYPE_CUTOUT)
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | TEXPREF_BINDLESS);
+                                                }
+                                                else
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | TEXPREF_BINDLESS);
+                                                        q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
+                                                        tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | TEXPREF_BINDLESS);
+                                                }
+                                        }
+                                        else
+                                        {
+                                                tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                        SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                        }
                                 }
-
-					tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-					if (!tx->emissive && tx->type == TEXTYPE_LAVA)
-						tx->emissive = lavaemissivetexture;
-
-                                Hunk_FreeToLowMark (mark);
+                                tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
                                 if (malloced)
                                         free(data);
+                                Hunk_FreeToLowMark (mark);
                         }
                         else //regular texture
                         {
-				int	extraflags = TEXPREF_BINDLESS;
-				if (tx->type == TEXTYPE_CUTOUT)
-					extraflags |= TEXPREF_ALPHA;
-				// ericw
+                                int     extraflags = TEXPREF_BINDLESS;
+                                if (tx->type == TEXTYPE_CUTOUT)
+                                        extraflags |= TEXPREF_ALPHA;
+                                // ericw
 
-				//external textures -- first look in "textures/mapname/" then look in "textures/"
-				mark = Hunk_LowMark ();
-				COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
-				q_snprintf (filename, sizeof(filename), "textures/%s/%s", mapname, tx->name);
-				data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				if (!data)
-				{
-					q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
-					data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
-				}
+                                //external textures -- first look in "textures/mapname/" then look in "textures/"
+                                mark = Hunk_LowMark ();
+                                COM_StripExtension (loadmodel->name + 5, mapname, sizeof(mapname));
+                                q_snprintf (filename, sizeof(filename), "textures/%s/%s", mapname, tx->name);
+                                ktx2tex = Mod_LoadKTX2Texture (filename);
+                                data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                if (!ktx2tex && !data)
+                                {
+                                        q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
+                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        if (!ktx2tex)
+                                                data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
+                                }
 
                                 //now load whatever we found
-                                if (data) //load external image
+                                if (ktx2tex)
+                                {
+                                        tx->gltexture = ktx2tex;
+                                }
+                                else if (data) //load external image
                                 {
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, filename, fwidth, fheight,
                                                 fmt, data, filename, 0, TEXPREF_MIPMAP | extraflags );
@@ -1115,26 +1174,26 @@ static void Mod_LoadTextures (lump_t *l)
                                 {
                                         q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
                                         offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-					if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
-					{
-						if (tx->type != TEXTYPE_CUTOUT)
-						{
-							tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | extraflags);
-						}
-						else
-						{
-							tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | extraflags);
-							q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
-							tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-								SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | extraflags);
-						}
-					}
-					else
-					{
-						tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-							SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
+                                        if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
+                                        {
+                                                if (tx->type != TEXTYPE_CUTOUT)
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | extraflags);
+                                                }
+                                                else
+                                                {
+                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | extraflags);
+                                                        q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
+                                                        tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | extraflags);
+                                                }
+                                        }
+                                        else
+                                        {
+                                                tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                        SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
                                         }
                                 }
                                 tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | extraflags);
@@ -1142,9 +1201,9 @@ static void Mod_LoadTextures (lump_t *l)
                                         free(data);
                                 Hunk_FreeToLowMark (mark);
                         }
-		}
-		//johnfitz
-	}
+                }
+                //johnfitz
+        }
 
 	//johnfitz -- last 2 slots in array should be filled with dummy textures
 	loadmodel->textures[loadmodel->numtextures-2] = r_notexture_mip; //for lightmapped surfs
