@@ -40,11 +40,18 @@ float bayer(ivec2 coord)
         return bayer01(coord) - 0.5;
 }
 
+float FogNoise(vec2 worldPos)
+{
+	return fract(sin(dot(worldPos, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-abs(Fog.w) * dot(p, p));
-        fog = clamp(fog, 0.0, 1.0);
-        return mix(Fog.rgb, clr, fog);
+	float fog = exp2(-abs(Fog.w) * dot(p, p));
+	float noise = FogNoise((p + EyePos).xy);
+	fog *= mix(0.8, 1.2, noise);
+	fog = clamp(fog, 0.0, 1.0);
+	return mix(Fog.rgb, clr, fog);
 }
 
 // Hash without Sine
