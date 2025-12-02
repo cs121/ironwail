@@ -115,6 +115,7 @@ layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), z: screen-space darken strength, w: screen-space darken depth range
+layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -406,6 +407,23 @@ void main()
                                 float blend = clamp(chromaticAmount * lenDir, 0.0, 1.0);
                                 color.rgb = mix(color.rgb, aberrated, blend);
                         }
+                }
+
+                float teleportFade = clamp(TeleportParams.x, 0.0, 1.0);
+                float teleportBlur = max(TeleportParams.y, 0.0);
+                if (teleportFade > 0.0)
+                {
+                        if (teleportBlur > 0.0)
+                        {
+                                vec2 blurOffset = teleportBlur * invTexSize;
+                                vec3 blurAccum = color.rgb;
+                                blurAccum += texture(GammaTexture, clamp(uv + vec2(blurOffset.x, 0.0), viewMin, viewMax)).rgb;
+                                blurAccum += texture(GammaTexture, clamp(uv - vec2(blurOffset.x, 0.0), viewMin, viewMax)).rgb;
+                                blurAccum += texture(GammaTexture, clamp(uv + vec2(0.0, blurOffset.y), viewMin, viewMax)).rgb;
+                                blurAccum += texture(GammaTexture, clamp(uv - vec2(0.0, blurOffset.y), viewMin, viewMax)).rgb;
+                                color.rgb = blurAccum * 0.2;
+                        }
+                        color.rgb += vec3(0.5, 0.3, 1.0) * teleportFade;
                 }
         }
 

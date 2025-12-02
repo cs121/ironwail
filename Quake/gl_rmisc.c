@@ -83,6 +83,8 @@ extern cvar_t r_vignette_noise;
 extern cvar_t r_chromatic_aberration;
 extern cvar_t r_screendarken;
 extern cvar_t r_screendarken_depth;
+extern cvar_t r_teleportfx;
+extern cvar_t r_teleportfx_time;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -389,7 +391,9 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
 	Cvar_RegisterVariable (&r_screendarken);
 	Cvar_RegisterVariable (&r_screendarken_depth);
-	Cvar_RegisterVariable (&r_overbrightbits);
+	Cvar_RegisterVariable (&r_teleportfx);
+	Cvar_RegisterVariable (&r_teleportfx_time);
+        Cvar_RegisterVariable (&r_overbrightbits);
         Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
 	Cvar_RegisterVariable (&gl_finish);
