@@ -253,10 +253,14 @@ R_SetWateralpha_f -- ericw
 */
 static void R_SetWateralpha_f (cvar_t *var)
 {
-		if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWWATER) && var->value < 1)
+	float alpha = CLAMP(0.f, var->value, 1.f);
+	if (alpha != var->value)
+		Cvar_SetValueQuick (var, alpha);
+
+	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWWATER) && alpha < 1)
 				Con_Warning("Map does not appear to be water-vised\n");
-	map_wateralpha = var->value;
-	map_fallbackalpha = var->value;
+	map_wateralpha = alpha;
+	map_fallbackalpha = alpha;
 }
 
 /*
@@ -266,9 +270,13 @@ R_SetLavaalpha_f -- ericw
 */
 static void R_SetLavaalpha_f (cvar_t *var)
 {
-		if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWLAVA) && var->value && var->value < 1)
+	float alpha = CLAMP(0.f, var->value, 1.f);
+	if (alpha != var->value)
+		Cvar_SetValueQuick (var, alpha);
+
+	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWLAVA) && alpha && alpha < 1)
 				Con_Warning("Map does not appear to be lava-vised\n");
-	map_lavaalpha = var->value;
+	map_lavaalpha = alpha;
 }
 
 /*
@@ -278,9 +286,13 @@ R_SetTelealpha_f -- ericw
 */
 static void R_SetTelealpha_f (cvar_t *var)
 {
-		if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWTELE) && var->value && var->value < 1)
+	float alpha = CLAMP(0.f, var->value, 1.f);
+	if (alpha != var->value)
+		Cvar_SetValueQuick (var, alpha);
+
+	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWTELE) && alpha&& alpha < 1)
 				Con_Warning("Map does not appear to be tele-vised\n");
-	map_telealpha = var->value;
+	map_telealpha = alpha;
 }
 
 /*
@@ -290,9 +302,13 @@ R_SetSlimealpha_f -- ericw
 */
 static void R_SetSlimealpha_f (cvar_t *var)
 {
-	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWSLIME) && var->value && var->value < 1)
-		Con_Warning("Map does not appear to be slime-vised\n");
-	map_slimealpha = var->value;
+	float alpha = CLAMP(0.f, var->value, 1.f);
+	if (alpha != var->value)
+		Cvar_SetValueQuick (var, alpha);
+
+	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWSLIME) && alpha && alpha < 1)
+			Con_Warning("Map does not appear to be slime-vised\n");
+	map_slimealpha = alpha;
 }
 
 /*
@@ -544,7 +560,7 @@ static void R_ParseWorldspawn (void)
 	map_wateralpha = (cl.worldmodel->contentstransparent&SURF_DRAWWATER)?r_wateralpha.value:1;
 	map_lavaalpha = (cl.worldmodel->contentstransparent&SURF_DRAWLAVA)?r_lavaalpha.value:1;
 	map_telealpha = (cl.worldmodel->contentstransparent&SURF_DRAWTELE)?r_telealpha.value:1;
-		map_slimealpha = (cl.worldmodel->contentstransparent&SURF_DRAWSLIME)?r_slimealpha.value:1;
+	map_slimealpha = (cl.worldmodel->contentstransparent&SURF_DRAWSLIME)?r_slimealpha.value:1;
 
 	data = COM_Parse(cl.worldmodel->entities);
 	if (!data)
@@ -570,19 +586,25 @@ static void R_ParseWorldspawn (void)
 			return; // error
                 q_strlcpy(value, com_token, sizeof(value));
 
-                if (!strcmp("wateralpha", key))
-                        map_wateralpha = atof(value);
+if (!strcmp("wateralpha", key))
+map_wateralpha = atof(value);
 
-                if (!strcmp("lavaalpha", key))
-                        map_lavaalpha = atof(value);
+if (!strcmp("lavaalpha", key))
+map_lavaalpha = atof(value);
 
-                if (!strcmp("telealpha", key))
-                        map_telealpha = atof(value);
+if (!strcmp("telealpha", key))
+map_telealpha = atof(value);
 
-                if (!strcmp("slimealpha", key))
-                                map_slimealpha = atof(value);
+if (!strcmp("slimealpha", key))
+map_slimealpha = atof(value);
 
-        }
+}
+
+map_fallbackalpha = CLAMP(0.f, map_fallbackalpha, 1.f);
+map_wateralpha = CLAMP(0.f, map_wateralpha, 1.f);
+map_lavaalpha = CLAMP(0.f, map_lavaalpha, 1.f);
+map_telealpha = CLAMP(0.f, map_telealpha, 1.f);
+map_slimealpha = CLAMP(0.f, map_slimealpha, 1.f);
 
 }
 
