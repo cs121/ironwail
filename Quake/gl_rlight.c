@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
+extern byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
