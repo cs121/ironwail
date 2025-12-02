@@ -135,7 +135,7 @@ static qboolean KTX2_ParseHeader(ktx2_header_t *out, const uint8_t *data, size_t
     }
 
     out->valid = true;
-    KTX2_LogInfo("KTX2: %ux%u, mips=%u, supercompression=%llu",
+    KTX2_LogInfo("KTX2: %ux%u, mips=%u, supercompression=%llu (header validated)",
                  out->width, out->height, out->mip_count, (unsigned long long)out->supercompression);
     return true;
 }
