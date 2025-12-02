@@ -395,18 +395,21 @@ void main()
 					mask ^= 1u << j;
 					Light l = Lights[ofs + j];
 					// mimics R_AddDynamicLights, up to a point
-					float rad = l.radius;
-					float dist = dot(l.origin, plane.xyz) - plane.w;
-					rad -= abs(dist);
-					float minlight = l.minlight;
-					if (rad < minlight)
-						continue;
+                                        float rad = l.radius;
+                                        float dist = dot(l.origin, plane.xyz) - plane.w;
+                                        rad -= abs(dist);
+                                        float minlight = l.minlight;
+                                        if (rad <= 0.0)
+                                                continue;
+                                        if (rad < minlight)
+                                                continue;
                                         vec3 local_pos = l.origin - plane.xyz * dist;
                                         minlight = rad - minlight;
                                         vec3 light_vec = local_pos - in_pos;
                                         float surface_dist = length(light_vec);
                                         float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
-                                        float falloff = max(0., rad - surface_dist) / 256.;
+                                        float normalized_dist = surface_dist / rad;
+                                        float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
                                         vec3 light_contrib = attenuation * falloff * l.color;
                                         dynamic_light += light_contrib;
                                         if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
