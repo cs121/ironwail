@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
@@ -103,157 +102,6 @@ typedef struct gpu_cluster_inputs_s {
 	float		view_matrix[16];
 } gpu_cluster_inputs_t;
 
-static msurface_t **visSurfaces = NULL;
-static int visSurfacesCapacity = 0;
-static int numVisSurfaces = 0;
-static int visSurfacesFrame = -1;
-static int *visSurfaceMarks = NULL;
-
-static qboolean SphereIntersectsFrustum (const vec3_t origin, float radius)
-{
-	int i;
-	for (i = 0; i < 4; i++)
-	{
-		mplane_t *p = &frustum[i];
-		if (DotProduct (p->normal, origin) - p->dist + radius < 0.f)
-			return false;
-	}
-
-	return true;
-}
-
-static float VectorDistance (const vec3_t a, const vec3_t b)
-{
-	vec3_t delta;
-	VectorSubtract (a, b, delta);
-	return VectorLength (delta);
-}
-
-static qboolean SphereIntersectsAABB (const vec3_t origin, float radius, const float mins[3], const float maxs[3])
-{
-	float dist2 = 0.f;
-	float radius2 = radius * radius;
-	int i;
-
-	for (i = 0; i < 3; i++)
-	{
-		float d = 0.f;
-		if (origin[i] < mins[i])
-			d = mins[i] - origin[i];
-		else if (origin[i] > maxs[i])
-			d = origin[i] - maxs[i];
-		dist2 += d * d;
-		if (dist2 > radius2)
-			return false;
-	}
-
-	return dist2 <= radius2;
-}
-
-static qboolean Mod_LeafInPVS (mleaf_t *viewleaf, mleaf_t *leaf)
-{
-	int leafindex;
-	byte *vis;
-
-	if (!leaf)
-		return false;
-
-	if (r_novis.value || !viewleaf || viewleaf->contents == CONTENTS_SOLID || viewleaf->contents == CONTENTS_SKY)
-		return true;
-
-	vis = Mod_LeafPVS (viewleaf, cl.worldmodel);
-	leafindex = (int)(leaf - cl.worldmodel->leafs) - 1;
-	if (leafindex < 0 || leafindex >= cl.worldmodel->numleafs)
-		return false;
-
-	return (vis[leafindex >> 3] & (1 << (leafindex & 7))) != 0;
-}
-
-static void EnsureVisSurfaceCapacity (int required)
-{
-	if (required <= visSurfacesCapacity)
-		return;
-
-	visSurfaces = (msurface_t **) realloc (visSurfaces, required * sizeof (*visSurfaces));
-	visSurfaceMarks = (int *) realloc (visSurfaceMarks, required * sizeof (*visSurfaceMarks));
-	if (required > visSurfacesCapacity)
-	{
-		int diff = required - visSurfacesCapacity;
-		memset (visSurfaceMarks + visSurfacesCapacity, 0, diff * sizeof (*visSurfaceMarks));
-	}
-
-	visSurfacesCapacity = required;
-}
-
-static void BuildVisibleSurfaceList (void)
-{
-        int i, j;
-        mleaf_t *leaf;
-        byte *vis;
-        qboolean nearwaterportal = false;
-
-        if (visSurfacesFrame == r_framecount)
-                return;
-
-        visSurfacesFrame = r_framecount;
-        numVisSurfaces = 0;
-
-        if (!cl.worldmodel)
-                return;
-
-        EnsureVisSurfaceCapacity (cl.worldmodel->numsurfaces);
-
-        if (r_viewleaf)
-        {
-                for (i = 0; i < r_viewleaf->nummarksurfaces; i++)
-                {
-                        if (cl.worldmodel->surfaces[r_viewleaf->firstmarksurface[i]].flags & SURF_DRAWTURB)
-                        {
-                                nearwaterportal = true;
-                                break;
-                        }
-                }
-        }
-
-        if (r_novis.value || !r_viewleaf || r_viewleaf->contents == CONTENTS_SOLID || r_viewleaf->contents == CONTENTS_SKY)
-                vis = Mod_NoVisPVS (cl.worldmodel);
-        else if (nearwaterportal)
-                vis = SV_FatPVS (r_origin, cl.worldmodel);
-        else
-                vis = Mod_LeafPVS (r_viewleaf, cl.worldmodel);
-
-        for (i = 0, leaf = cl.worldmodel->leafs + 1; i < cl.worldmodel->numleafs; i++, leaf++)
-        {
-                if (!(vis[i >> 3] & (1 << (i & 7))))
-                        continue;
-
-                for (j = 0; j < leaf->nummarksurfaces; j++)
-                {
-                        int surfindex = leaf->firstmarksurface[j];
-                        if (visSurfaceMarks[surfindex] == visSurfacesFrame)
-                                continue;
-                        visSurfaceMarks[surfindex] = visSurfacesFrame;
-                        visSurfaces[numVisSurfaces++] = &cl.worldmodel->surfaces[surfindex];
-                }
-        }
-}
-
-static qboolean LightAffectsVisibleWorld (vec3_t origin, float radius)
-{
-	int i;
-
-	BuildVisibleSurfaceList ();
-
-	for (i = 0; i < numVisSurfaces; i++)
-	{
-		msurface_t *surf = visSurfaces[i];
-		if (SphereIntersectsAABB (origin, radius, surf->mins, surf->maxs))
-			return true;
-	}
-
-	return false;
-}
-
 const vec3_t *R_GetDynamicLightTemperature (int type)
 {
 	static const vec3_t temps[DLIGHT_MAX_TYPES] = {
@@ -307,41 +155,40 @@ R_PushDlights
 */
 void R_PushDlights (void)
 {
-        int                             i;
-        GLuint                  buf;
-        GLbyte                  *ofs;
-        gpu_cluster_inputs_t cluster_inputs;
+	int				i, j;
+	GLuint			buf;
+	GLbyte			*ofs;
+	gpu_cluster_inputs_t cluster_inputs;
 
-        r_framedata.numlights = 0;
+	r_framedata.numlights = 0;
 
-        if (r_dynamic.value)
-        {
-                dlight_t *l;
-                for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
-                {
-                        gpulight_t *out;
-                        mleaf_t *lightleaf;
+	if (r_dynamic.value)
+	{
+		dlight_t *l;
+		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
+		{
+			gpulight_t *out;
+			qboolean cull = false;
 
-                        if (l->spawn > cl.time)
-                        {
-                                l->die = 0.f;
-                                continue;
-                        }
+			if (l->spawn > cl.time)
+			{
+				l->die = 0.f;
+				continue;
+			}
 
-                        if (l->die < cl.time || !l->radius)
-                                continue;
+			if (l->die < cl.time || !l->radius)
+				continue;
 
-                        if (!SphereIntersectsFrustum (l->origin, l->radius))
-                                continue;
-
-                        if (VectorDistance (l->origin, r_refdef.vieworg) > l->radius * 1.2f)
-                                continue;
-
-                        lightleaf = Mod_PointInLeaf (l->origin, cl.worldmodel);
-                        if (!Mod_LeafInPVS (r_viewleaf, lightleaf))
-                                continue;
-
-                        if (!LightAffectsVisibleWorld (l->origin, l->radius))
+			for (j = 0; j < 4; j++)
+			{
+				mplane_t *p = &frustum[j];
+				if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
+				{
+					cull = true;
+					break;
+				}
+			}
+                        if (cull)
                                 continue;
 
                         out = &r_lightbuffer.lights[r_framedata.numlights++];
@@ -366,7 +213,7 @@ void R_PushDlights (void)
                 }
         }
 
-        GL_BeginGroup ("Light clustering");
+	GL_BeginGroup ("Light clustering");
 
 	R_UploadFrameData ();
 
