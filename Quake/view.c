@@ -851,7 +851,7 @@ void V_CalcRefdef (void)
 	view->colormap = vid.colormap;
 	view->scale = ENTSCALE_DEFAULT;
 
-//johnfitz -- v_gunkick
+	//johnfitz -- v_gunkick
 	if (v_gunkick.value == 1) //original quake kick
 		VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 	if (v_gunkick.value == 2) //lerped kick
@@ -865,7 +865,16 @@ void V_CalcRefdef (void)
 		r_refdef.viewangles[1] += v_punchangles[1][1] + (v_punchangles[0][1] - v_punchangles[1][1]) * punchblend;
 		r_refdef.viewangles[2] += v_punchangles[1][2] + (v_punchangles[0][2] - v_punchangles[1][2]) * punchblend;
 	}
-//johnfitz
+	if (v_gunkick.value == 3) //modern style kick
+	{
+		float recoil = cl.punchangle[PITCH];
+		float recoil_bob = recoil * 0.3f;
+
+		r_refdef.viewangles[PITCH] -= recoil * 0.5f;
+		r_refdef.vieworg[2] += recoil_bob;
+		view->origin[2] += recoil_bob;
+	}
+	//johnfitz
 
 // smooth out stair step ups
 	if (!noclip_anglehack && cl.onground && ent->origin[2] - oldz > 0) //johnfitz -- added exception for noclip

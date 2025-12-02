@@ -3775,7 +3775,7 @@ void M_AdjustSliders (int dir)
 		break;
 
 	case OPT_RECOIL:	// gun kick
-		Cvar_SetValueQuick (&v_gunkick, ((int) q_max (v_gunkick.value, 0.f) + 3 + dir) % 3);
+		Cvar_SetValueQuick (&v_gunkick, ((int) q_max (v_gunkick.value, 0.f) + 4 + dir) % 4);
 		break;
 
 	case OPT_FLASHALPHA:	// flash intensity
@@ -4381,7 +4381,9 @@ static void M_Options_DrawItem (int y, int item)
 		break;
 
 	case OPT_RECOIL:
-		if ((int)v_gunkick.value == 2)
+		if ((int)v_gunkick.value == 3)
+			M_Print (x, y, "Modern");
+		else if ((int)v_gunkick.value == 2)
 			M_Print (x, y, "Smooth");
 		else if ((int)v_gunkick.value == 1)
 			M_Print (x, y, "Classic");
