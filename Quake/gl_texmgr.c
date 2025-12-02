@@ -25,6 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "glquake.h"
 
+#ifndef GL_COMPRESSED_RED_GREEN_RGTC2
+#define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
+#endif
+
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightmap_linear;

@@ -331,6 +331,7 @@ void COM_AddExtension (char *path, const char *extension, size_t len);
 void COM_DefaultExtension (char *path, const char *extension, size_t len);
 #endif
 const char *COM_FileGetExtension (const char *in); /* doesn't return NULL */
+qboolean COM_HasExtension (const char *path, const char *extension);
 void COM_ExtractExtension (const char *in, char *out, size_t outsize);
 char *COM_TempSuffix (unsigned seq);
 void COM_CreatePath (char *path);
