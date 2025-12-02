@@ -59,6 +59,10 @@ GLint			gl_max_texture_size;
 static float	lodbias;
 softemu_t		softemu;
 
+static GLuint lightmap_upload_pbo = 0;
+static GLsizeiptr lightmap_upload_pbo_size = 0;
+static byte *lightmap_upload_ptr = NULL;
+
 #define	MAX_GLTEXTURES	4096
 static int numgltextures;
 static gltexture_t	*active_gltextures, *free_gltextures;
@@ -1722,8 +1726,55 @@ static void TexMgr_LoadImage8 (gltexture_t *glt, byte *data)
 			TexMgr_PadEdgeFixH (data, glt->source_width, glt->source_height);
 	}
 
-	// upload it
-	TexMgr_LoadImage32 (glt, (unsigned *)data);
+        // upload it
+        TexMgr_LoadImage32 (glt, (unsigned *)data);
+}
+
+static void TexMgr_DestroyLightmapUploadBuffer (void)
+{
+	if (!lightmap_upload_pbo)
+	        return;
+
+	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+	if (lightmap_upload_ptr)
+	        GL_UnmapBufferFunc (GL_PIXEL_UNPACK_BUFFER);
+	lightmap_upload_ptr = NULL;
+
+	GL_DeleteBuffer (lightmap_upload_pbo);
+	lightmap_upload_pbo = 0;
+	lightmap_upload_pbo_size = 0;
+
+	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
+static qboolean TexMgr_EnsureLightmapUploadBuffer (GLsizeiptr size)
+{
+	GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+
+	if (!gl_buffer_storage_able)
+	        return false;
+
+	if (lightmap_upload_pbo && size > lightmap_upload_pbo_size)
+	        TexMgr_DestroyLightmapUploadBuffer ();
+
+	if (!lightmap_upload_pbo)
+	{
+	        GL_GenBuffersFunc (1, &lightmap_upload_pbo);
+	        lightmap_upload_pbo_size = size;
+	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+	        GL_ObjectLabelFunc (GL_BUFFER, lightmap_upload_pbo, -1, "lightmap upload");
+	        GL_BufferStorageFunc (GL_PIXEL_UNPACK_BUFFER, size, NULL, flags);
+	        lightmap_upload_ptr = (byte *) GL_MapBufferRangeFunc (GL_PIXEL_UNPACK_BUFFER, 0, size, flags);
+	        if (!lightmap_upload_ptr)
+	        {
+	                TexMgr_DestroyLightmapUploadBuffer ();
+	                return false;
+	        }
+	}
+	else
+	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+
+	return lightmap_upload_ptr != NULL;
 }
 
 /*
@@ -1741,18 +1792,27 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	GL_Bind (GL_TEXTURE0, glt);
 	if (use_half)
 	{
-		size_t pixels = (size_t)glt->width * glt->height * 4;
-		GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
-		if (!float_data)
-			Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
-		for (size_t idx = 0; idx < pixels; idx++)
-			float_data[idx] = data[idx] * (1.0f / 255.0f);
-		GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
-		free (float_data);
+	        size_t pixels = (size_t)glt->width * glt->height * 4;
+	        GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
+	        if (!float_data)
+	                Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
+	        for (size_t idx = 0; idx < pixels; idx++)
+	                float_data[idx] = data[idx] * (1.0f / 255.0f);
+	        GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
+	        free (float_data);
 	}
 	else
 	{
-		GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	        GLsizeiptr upload_size = (GLsizeiptr) glt->width * glt->height * 4;
+	        if (TexMgr_EnsureLightmapUploadBuffer (upload_size))
+	        {
+	                glTexImage2D (glt->target, 0, GL_RGBA8, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, NULL);
+	                memcpy (lightmap_upload_ptr, data, upload_size);
+	                glTexSubImage2D (glt->target, 0, 0, 0, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, (const GLvoid *) 0);
+	                GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
+	        }
+	        else
+	                GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
 	}
 
 #ifdef GL_EXT_texture_sRGB_decode
