@@ -366,10 +366,11 @@ dlight_t *CL_AllocDlight (int key)
 			{
 				memset (dl, 0, sizeof(*dl));
 				dl->key = key;
-				dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-				dl->spawn = cl.time - 0.001;
-				return dl;
-			}
+                                dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
+                                dl->type = DLIGHT_DEFAULT;
+                                dl->spawn = cl.time - 0.001;
+                                return dl;
+                        }
 		}
 	}
 
@@ -378,21 +379,23 @@ dlight_t *CL_AllocDlight (int key)
 	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
 	{
 		if (dl->die < cl.time || dl->spawn > cl.time)
-		{
-			memset (dl, 0, sizeof(*dl));
-			dl->key = key;
-			dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-			dl->spawn = cl.time - 0.001;
-			return dl;
-		}
-	}
+                {
+                        memset (dl, 0, sizeof(*dl));
+                        dl->key = key;
+                        dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
+                        dl->type = DLIGHT_DEFAULT;
+                        dl->spawn = cl.time - 0.001;
+                        return dl;
+                }
+        }
 
-	dl = &cl_dlights[0];
-	memset (dl, 0, sizeof(*dl));
-	dl->key = key;
-	dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-	dl->spawn = cl.time - 0.001;
-	return dl;
+        dl = &cl_dlights[0];
+        memset (dl, 0, sizeof(*dl));
+        dl->key = key;
+        dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
+        dl->type = DLIGHT_DEFAULT;
+        dl->spawn = cl.time - 0.001;
+        return dl;
 }
 
 
@@ -554,6 +557,7 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
         if (name && (q_strcasestr (name, "missile") || q_strcasestr (name, "rocket")))
         {
                 dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+                dl->type = DLIGHT_ROCKET;
                 return;
         }
 }
@@ -757,9 +761,10 @@ void CL_RelinkEntities (void)
                         VectorCopy (ent->origin, dl->origin);
                         dl->radius = 200;
                         dl->die = cl.time + 0.01;
+                        dl->type = DLIGHT_ROCKET;
                         CL_SetDlightColorForEntity (dl, ent);
                 }
-		else if (ent->model->flags & EF_GRENADE)
+                else if (ent->model->flags & EF_GRENADE)
 			CL_RocketTrail (ent, 1);
 		else if (ent->model->flags & EF_TRACER3)
 			CL_RocketTrail (ent, 6);

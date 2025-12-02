@@ -66,6 +66,17 @@ extern cshift_t		cshift_empty;
 #define	SIGNONS		4			// signon messages to receive before connected
 
 #define	MAX_DLIGHTS		64 //johnfitz -- was 32
+typedef enum
+{
+	DLIGHT_DEFAULT = 0,
+	DLIGHT_ROCKET,
+	DLIGHT_PLASMA,
+	DLIGHT_LIGHTNING,
+	DLIGHT_EXPLOSION,
+	DLIGHT_TORCH,
+	DLIGHT_TELEPORT,
+	DLIGHT_MAX_TYPES
+} dlighttype_t;
 typedef struct
 {
 	vec3_t	origin;
@@ -76,6 +87,7 @@ typedef struct
 	float	minlight;			// don't add when contributing less
 	int		key;
 	vec3_t	color;				//johnfitz -- lit support via lordhavoc
+	dlighttype_t type;
 } dlight_t;
 
 

@@ -198,8 +198,9 @@ void CL_ParseTEnt (void)
                 dl->color[0] = 1.00f; dl->color[1] = 0.50f; dl->color[2] = 0.25f;
                 dl->die = cl.time + 0.5;
                 dl->decay = 300;
+                dl->type = DLIGHT_EXPLOSION;
                 S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-		break;
+                break;
 
 	case TE_TAREXPLOSION:			// tarbaby explosion
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
@@ -249,13 +250,14 @@ void CL_ParseTEnt (void)
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
 		R_ParticleExplosion2 (pos, colorStart, colorLength);
-		dl = CL_AllocDlight (0);
-		VectorCopy (pos, dl->origin);
-		dl->radius = 350;
-		dl->die = cl.time + 0.5;
-		dl->decay = 300;
-		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-		break;
+                dl = CL_AllocDlight (0);
+                VectorCopy (pos, dl->origin);
+                dl->radius = 350;
+                dl->die = cl.time + 0.5;
+                dl->decay = 300;
+                dl->type = DLIGHT_EXPLOSION;
+                S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+                break;
 
 	default:
 		Sys_Error ("CL_ParseTEnt: bad type");
