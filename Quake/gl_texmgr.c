@@ -75,14 +75,14 @@ static gltexture_t	*active_gltextures, *free_gltextures;
 gltexture_t		*notexture, *nulltexture, *whitetexture, *greytexture, *blacktexture;
 gltexture_t		*lavaemissivetexture;
 
-unsigned int d_8to24table_opaque[256];			//standard palette with alpha 255 for all colors
-unsigned int d_8to24table[256];					//standard palette, 255 is transparent
-unsigned int d_8to24table_fbright[256];			//fullbright palette, 0-223 are black (for additive blending)
-unsigned int d_8to24table_alphabright[256];		//palette with lighting mask in alpha channel (0=fullbright, 255=lit)
-unsigned int d_8to24table_fbright_fence[256];	//fullbright palette, for fence textures
-unsigned int d_8to24table_nobright[256];		//nobright palette, 224-255 are black (for additive blending)
-unsigned int d_8to24table_nobright_fence[256];	//nobright palette, for fence textures
-unsigned int d_8to24table_conchars[256];		//conchars palette, 0 and 255 are transparent
+	unsigned int d_8to24table_opaque[256];			//standard palette with alpha 255 for all colors
+	unsigned int d_8to24table[256];					//standard palette, 255 is transparent
+	unsigned int d_8to24table_fbright[256];			//fullbright palette, 0-223 are black (for additive blending)
+	unsigned int d_8to24table_alphabright[256];		//palette with lighting mask in alpha channel (0=fullbright, 255=lit)
+	unsigned int d_8to24table_fbright_fence[256];	//fullbright palette, for fence textures
+	unsigned int d_8to24table_nobright[256];		//nobright palette, 224-255 are black (for additive blending)
+	unsigned int d_8to24table_nobright_fence[256];	//nobright palette, for fence textures
+	unsigned int d_8to24table_conchars[256];		//conchars palette, 0 and 255 are transparent
 
 uint32_t is_fullbright[256/32];
 
@@ -953,7 +953,7 @@ Cvar_RegisterVariable (&r_softemu_mdl_warp);
 TexMgr_Pad -- return smallest power of two greater than or equal to s
 ================
 */
-int TexMgr_Pad (int s)
+	int TexMgr_Pad (int s)
 {
 	int i;
 	for (i = 1; i < s; i<<=1)
@@ -966,7 +966,7 @@ int TexMgr_Pad (int s)
 TexMgr_SafeTextureSize -- return a size with hardware and user prefs in mind
 ===============
 */
-int TexMgr_SafeTextureSize (int s)
+	int TexMgr_SafeTextureSize (int s)
 {
 	int p = (int)gl_max_size.value;
 	if (p > 0) {
@@ -982,7 +982,7 @@ int TexMgr_SafeTextureSize (int s)
 TexMgr_PadConditional -- only pad if a texture of that size would be padded. (used for tex coords)
 ================
 */
-int TexMgr_PadConditional (int s)
+	int TexMgr_PadConditional (int s)
 {
 	if (s < TexMgr_SafeTextureSize(s))
 		return TexMgr_Pad(s);
@@ -1372,7 +1372,7 @@ static qboolean TexMgr_UploadBC7 (gltexture_t *glt, unsigned *data)
 	int miplevel = 0;
 	int mipwidth = glt->width;
 	int mipheight = glt->height;
-	byte *level_data = (byte *) data;
+	unsigned *level_data = data;
 	const qboolean use_mipmaps = (glt->flags & TEXPREF_MIPMAP) != 0;
 	const qboolean srgb = (glt->flags & TEXPREF_SRGB) != 0;
 	GLenum internal_format = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
@@ -1384,24 +1384,24 @@ static qboolean TexMgr_UploadBC7 (gltexture_t *glt, unsigned *data)
 		uint8_t *bc7_blocks = NULL;
 		size_t bc7_size = 0;
 
-		if (!TexMgr_CompressLevelToBC7 (level_data, mipwidth, mipheight, srgb, &bc7_blocks, &bc7_size))
-			return false;
+		if (!TexMgr_CompressLevelToBC7 ((byte *) level_data, mipwidth, mipheight, srgb, &bc7_blocks, &bc7_size))
+		return false;
 
 		GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, miplevel, internal_format, mipwidth, mipheight, 0, (GLsizei) bc7_size, bc7_blocks);
 		free (bc7_blocks);
 
 		if (!use_mipmaps || (mipwidth == 1 && mipheight == 1))
-			break;
+		break;
 
 		if (mipheight > 1)
 		{
-			TexMgr_MipMapH (level_data, mipwidth, mipheight, glt->depth);
-			mipheight >>= 1;
+		TexMgr_MipMapH (level_data, mipwidth, mipheight, glt->depth);
+		mipheight >>= 1;
 		}
 		if (mipwidth > 1)
 		{
-			TexMgr_MipMapW (level_data, mipwidth, mipheight, glt->depth);
-			mipwidth >>= 1;
+		TexMgr_MipMapW (level_data, mipwidth, mipheight, glt->depth);
+		mipwidth >>= 1;
 		}
 
 		miplevel++;
@@ -1417,7 +1417,7 @@ GL_TexImage -- calls glTexImage2D/3D based on texture type
 static void GL_TexImage (gltexture_t *glt, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels)
 {
 const GLvoid **images = (const GLvoid **)pixels; // for arrays/cubemaps "pixels" is actually an array of pointers
-unsigned int i;
+	unsigned int i;
 
 	switch (glt->target)
 	{
@@ -2642,7 +2642,7 @@ Returns index of palette buffer to use:
 1 = postprocessed palette
 ================
 */
-int GLPalette_Postprocess (void)
+	int GLPalette_Postprocess (void)
 {
 	const float *blend;
 	
