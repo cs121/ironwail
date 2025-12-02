@@ -186,40 +186,55 @@ static void EnsureVisSurfaceCapacity (int required)
 
 static void BuildVisibleSurfaceList (void)
 {
-	int i, j;
-	mleaf_t *leaf;
-	byte *vis;
+        int i, j;
+        mleaf_t *leaf;
+        byte *vis;
+        qboolean nearwaterportal = false;
 
-	if (visSurfacesFrame == r_framecount)
-		return;
+        if (visSurfacesFrame == r_framecount)
+                return;
 
-	visSurfacesFrame = r_framecount;
-	numVisSurfaces = 0;
+        visSurfacesFrame = r_framecount;
+        numVisSurfaces = 0;
 
-	if (!cl.worldmodel)
-		return;
+        if (!cl.worldmodel)
+                return;
 
-	EnsureVisSurfaceCapacity (cl.worldmodel->numsurfaces);
+        EnsureVisSurfaceCapacity (cl.worldmodel->numsurfaces);
 
-	if (r_novis.value || !r_viewleaf || r_viewleaf->contents == CONTENTS_SOLID || r_viewleaf->contents == CONTENTS_SKY)
-		vis = Mod_NoVisPVS (cl.worldmodel);
-	else
-		vis = Mod_LeafPVS (r_viewleaf, cl.worldmodel);
+        if (r_viewleaf)
+        {
+                for (i = 0; i < r_viewleaf->nummarksurfaces; i++)
+                {
+                        if (cl.worldmodel->surfaces[r_viewleaf->firstmarksurface[i]].flags & SURF_DRAWTURB)
+                        {
+                                nearwaterportal = true;
+                                break;
+                        }
+                }
+        }
 
-	for (i = 0, leaf = cl.worldmodel->leafs + 1; i < cl.worldmodel->numleafs; i++, leaf++)
-	{
-		if (!(vis[i >> 3] & (1 << (i & 7))))
-			continue;
+        if (r_novis.value || !r_viewleaf || r_viewleaf->contents == CONTENTS_SOLID || r_viewleaf->contents == CONTENTS_SKY)
+                vis = Mod_NoVisPVS (cl.worldmodel);
+        else if (nearwaterportal)
+                vis = SV_FatPVS (r_origin, cl.worldmodel);
+        else
+                vis = Mod_LeafPVS (r_viewleaf, cl.worldmodel);
 
-		for (j = 0; j < leaf->nummarksurfaces; j++)
-		{
-			int surfindex = leaf->firstmarksurface[j];
-			if (visSurfaceMarks[surfindex] == visSurfacesFrame)
-				continue;
-			visSurfaceMarks[surfindex] = visSurfacesFrame;
-			visSurfaces[numVisSurfaces++] = &cl.worldmodel->surfaces[surfindex];
-		}
-	}
+        for (i = 0, leaf = cl.worldmodel->leafs + 1; i < cl.worldmodel->numleafs; i++, leaf++)
+        {
+                if (!(vis[i >> 3] & (1 << (i & 7))))
+                        continue;
+
+                for (j = 0; j < leaf->nummarksurfaces; j++)
+                {
+                        int surfindex = leaf->firstmarksurface[j];
+                        if (visSurfaceMarks[surfindex] == visSurfacesFrame)
+                                continue;
+                        visSurfaceMarks[surfindex] = visSurfacesFrame;
+                        visSurfaces[numVisSurfaces++] = &cl.worldmodel->surfaces[surfindex];
+                }
+        }
 }
 
 static qboolean LightAffectsVisibleWorld (vec3_t origin, float radius)
