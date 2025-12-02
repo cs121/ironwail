@@ -1009,6 +1009,12 @@ void S_UnblockSound (void)
 	}
 }
 
+qboolean S_IsSoundBlocked (void)
+{
+	return snd_blocked > 0;
+}
+
+
 /*
 ===============================================================================
 

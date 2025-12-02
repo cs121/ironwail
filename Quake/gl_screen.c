@@ -1891,6 +1891,8 @@ void SCR_BeginLoadingPlaque (void)
 	if (cls.signon != SIGNONS)
 		return;
 
+	Host_BeginAssetLoading ();
+
 // redraw with no console and the loading plaque
 	if (key_dest != key_console)
 	{
@@ -1918,6 +1920,7 @@ SCR_EndLoadingPlaque
 */
 void SCR_EndLoadingPlaque (void)
 {
+	Host_EndAssetLoading ();
 	scr_disabled_for_loading = false;
 	Con_ClearNotify ();
 }

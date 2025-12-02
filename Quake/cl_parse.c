@@ -292,6 +292,8 @@ void CL_ParseServerInfo (void)
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
+	Host_BeginAssetLoading ();
+
 // ericw -- bring up loading plaque for map changes within a demo.
 //          it will be hidden in CL_SignonReply.
 	if (cls.demoplayback)
@@ -434,6 +436,8 @@ void CL_ParseServerInfo (void)
 	noclip_anglehack = false;		// noclip is turned off at start
 
 	warn_about_nehahra_protocol = true; //johnfitz -- warn about nehahra protocol hack once per server connection
+
+	Host_EndAssetLoading ();
 
 //johnfitz -- reset developer stats
 	memset(&dev_stats, 0, sizeof(dev_stats));

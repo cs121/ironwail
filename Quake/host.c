@@ -51,6 +51,11 @@ int		host_framecount;
 
 int		host_hunklevel;
 
+static int		host_assetloading_depth;
+static qboolean	host_assetloading_sound_blocked;
+static qboolean	host_assetloading_was_demopaused;
+static qboolean	host_assetloading_was_demoplayback;
+
 int		minimum_memory;
 
 client_t	*host_client;			// current client
@@ -97,6 +102,49 @@ cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
 
 devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
+
+
+/*
+================
+Host_BeginAssetLoading
+================
+*/
+void Host_BeginAssetLoading (void)
+{
+	if (host_assetloading_depth++ > 0)
+		return;
+
+	host_assetloading_sound_blocked = S_IsSoundBlocked ();
+	host_assetloading_was_demoplayback = cls.demoplayback;
+	host_assetloading_was_demopaused = cls.demopaused;
+
+	if (!host_assetloading_sound_blocked)
+		S_BlockSound ();
+
+	if (cls.demoplayback)
+		cls.demopaused = true;
+}
+
+/*
+================
+Host_EndAssetLoading
+================
+*/
+void Host_EndAssetLoading (void)
+{
+	if (host_assetloading_depth == 0)
+		return;
+
+	host_assetloading_depth--;
+	if (host_assetloading_depth > 0)
+		return;
+
+	if (!host_assetloading_sound_blocked)
+		S_UnblockSound ();
+
+	if (host_assetloading_was_demoplayback && cls.demoplayback)
+		cls.demopaused = host_assetloading_was_demopaused;
+}
 
 /*
 ================
