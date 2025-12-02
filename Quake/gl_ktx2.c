@@ -287,19 +287,23 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
         return NULL;
     }
 
-    if (hdr.supercompression == 0)
-        gl_internal_format = GL_COMPRESSED_RGBA_BPTC_UNORM;
-    else if (hdr.supercompression == 1)
-        gl_internal_format = GL_COMPRESSED_RGB8_ETC2;
-
-    if (decoded.mip_count > 0)
-    {
-        size_t expected_rgba = (size_t)decoded.width[0] * (size_t)decoded.height[0] * 4u;
-        if (decoded.mip_size[0] == expected_rgba)
-            gl_internal_format = GL_RGBA8;
-    }
-
+    /* KTX2_TranscodeToRGBA() currently produces RGBA8 payloads, so upload uncompressed. */
     use_compressed = (gl_internal_format != GL_RGBA8);
+
+    if (use_compressed)
+    {
+        for (i = 0; i < decoded.mip_count; i++)
+        {
+            size_t expected_rgba = (size_t)decoded.width[i] * (size_t)decoded.height[i] * 4u;
+            if (decoded.mip_size[i] == expected_rgba)
+            {
+                KTX2_LogError("expected compressed payload for mip %d but got %zu bytes (RGBA8), falling back to uncompressed upload", i, decoded.mip_size[i]);
+                gl_internal_format = GL_RGBA8;
+                use_compressed = false;
+                break;
+            }
+        }
+    }
 
     tex->owner = NULL;
     tex->target = GL_TEXTURE_2D;
@@ -307,7 +311,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
     tex->width = (unsigned short)decoded.width[0];
     tex->height = (unsigned short)decoded.height[0];
     tex->depth = 1;
-    tex->compression = 1;
+    tex->compression = use_compressed ? 4 : 1;
     tex->flags = TEXPREF_MIPMAP;
     tex->source_file[0] = '\0';
     tex->source_offset = 0;
@@ -334,14 +338,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
 
         KTX2_LogInfo("Upload mip %d: %dx%d (%zu bytes)", i, w, h, decoded.mip_size[i]);
 
-        if (use_compressed)
-        {
-            glCompressedTexImage2D(GL_TEXTURE_2D, i, gl_internal_format, w, h, 0, decoded.mip_size[i], decoded.mip_data[i]);
-        }
-        else
-        {
-            glTexImage2D(GL_TEXTURE_2D, i, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, decoded.mip_data[i]);
-        }
+        glTexImage2D(GL_TEXTURE_2D, i, gl_internal_format, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, decoded.mip_data[i]);
     }
 
     {
