@@ -928,6 +928,23 @@ static int CompareMarkSurface (const void *pa, const void *pb)
 	return sb->numedges - sa->numedges;
 }
 
+static bmodel_gpu_surf_t *surfsort_array;
+
+static int CompareBModelSurface (const void *pa, const void *pb)
+{
+	const int ia = *(const int *) pa;
+	const int ib = *(const int *) pb;
+	const bmodel_gpu_surf_t *sa = &surfsort_array[ia];
+	const bmodel_gpu_surf_t *sb = &surfsort_array[ib];
+
+	if (sa->texnum != sb->texnum)
+		return (int) sa->texnum - (int) sb->texnum;
+	if (sa->lightmap != sb->lightmap)
+		return (int) sa->lightmap - (int) sb->lightmap;
+
+	return (int) sa->plane[3] - (int) sb->plane[3];
+}
+
 /*
 ===============
 GL_BuildBModelMarkBuffers
@@ -942,7 +959,10 @@ void GL_BuildBModelMarkBuffers (void)
 	bmodel_gpu_marksurf_t *mark;
 	bmodel_draw_indirect_t *cmds;
 	bmodel_gpu_surf_t *surfs;
+	bmodel_gpu_surf_t *sorted_surfs;
 	GLuint		*minverts;
+	int			*surfindices;
+	int			*surfremap;
 
 	if (!cl.worldmodel)
 		return;
@@ -986,6 +1006,12 @@ void GL_BuildBModelMarkBuffers (void)
 	minverts = (GLuint *) malloc (sizeof(minverts[0]) * numtex);
 	if (!minverts)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d base verts)", numtex);
+	surfindices = (int *) malloc (sizeof(surfindices[0]) * cl.worldmodel->numsurfaces);
+	if (!surfindices)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d surf indices)", cl.worldmodel->numsurfaces);
+	surfremap = (int *) malloc (sizeof(surfremap[0]) * cl.worldmodel->numsurfaces);
+	if (!surfremap)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d surf remap entries)", cl.worldmodel->numsurfaces);
 	for (i = 0; i < numtex; i++)
 		minverts[i] = UINT_MAX;
 
@@ -1027,6 +1053,29 @@ void GL_BuildBModelMarkBuffers (void)
 		dst->lightmap = (GLuint) src->lightmaptexturenum;
 		dst->firstvert = src->vbo_firstvert;
 	}
+
+	for (i = 0; i < cl.worldmodel->numsurfaces; i++)
+		surfindices[i] = i;
+
+	surfsort_array = surfs;
+	qsort (surfindices, cl.worldmodel->numsurfaces, sizeof(surfindices[0]), CompareBModelSurface);
+
+	sorted_surfs = (bmodel_gpu_surf_t *) malloc (sizeof(sorted_surfs[0]) * cl.worldmodel->numsurfaces);
+	if (!sorted_surfs)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d sorted surfs)", cl.worldmodel->numsurfaces);
+
+	for (i = 0; i < cl.worldmodel->numsurfaces; i++)
+	{
+		int oldidx = surfindices[i];
+		sorted_surfs[i] = surfs[oldidx];
+		surfremap[oldidx] = i;
+	}
+
+	for (i = 0; i < nummark; i++)
+		mark[i].surfindex = surfremap[mark[i].surfindex];
+
+	free (surfs);
+	surfs = sorted_surfs;
 
 	// count triangles for each model texture
 	for (j = 1 ; j < MAX_MODELS; j++)
@@ -1114,6 +1163,8 @@ void GL_BuildBModelMarkBuffers (void)
 	// free cpu-side arrays
 	free (texidx);
 	free (surfs);
+	free (surfremap);
+	free (surfindices);
 	free (mark);
 	free (idx);
 	free (minverts);
