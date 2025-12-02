@@ -231,6 +231,8 @@ cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
+cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
+cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -688,6 +690,9 @@ void GL_PostProcess (void)
         float motion_min_velocity;
         float motion_depth_threshold;
         int motion_max_samples;
+        qboolean screen_darken_enabled;
+        float screen_darken_strength;
+        float screen_darken_depth;
         if (!GL_NeedsPostprocess ())
                 return;
 
@@ -696,9 +701,12 @@ void GL_PostProcess (void)
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
-	float bloom_intensity = q_max (0.f, r_bloom.value);
-	float exposure = q_max (0.f, r_tonemap_exposure.value);
-	float tonemap_mode = q_max (0.f, r_tonemap.value);
+        float bloom_intensity = q_max (0.f, r_bloom.value);
+        float exposure = q_max (0.f, r_tonemap_exposure.value);
+        float tonemap_mode = q_max (0.f, r_tonemap.value);
+        screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
+        screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
+        screen_darken_enabled = (screen_darken_strength > 0.f);
         GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
         if (framebufs.bloom.pingpong_tex[0])
                 bloom_texture = framebufs.bloom.pingpong_tex[0];
@@ -771,8 +779,8 @@ void GL_PostProcess (void)
         GL_Uniform4fFunc (10,
                 q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
                 q_max (0.f, r_chromatic_aberration.value),
-                0.f,
-                0.f);
+                screen_darken_strength,
+                screen_darken_depth);
 
         dof_enabled = R_DoFEnabled ();
 
@@ -792,7 +800,7 @@ void GL_PostProcess (void)
         }
 
         depth_texture = 0;
-        if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
+        if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
                 depth_texture = framebufs.composite.depth_stencil_tex;
         GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
