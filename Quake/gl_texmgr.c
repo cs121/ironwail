@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "bc7enc.h"
 
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
 #define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
@@ -51,6 +52,7 @@ cvar_t			r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_
 cvar_t			r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
 cvar_t			r_softemu_dither_screen = {"r_softemu_dither_screen", "1.0", CVAR_ARCHIVE};
 cvar_t			r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
+cvar_t			r_bc7_compress = {"r_bc7_compress", "0", CVAR_ARCHIVE};
 
 static cvar_t	gl_max_size = {"gl_max_size", "0", CVAR_NONE};
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
@@ -899,19 +901,20 @@ void TexMgr_Init (void)
 	// palette
 	TexMgr_LoadPalette ();
 
-	Cvar_RegisterVariable (&gl_max_size);
-	Cvar_RegisterVariable (&gl_picmip);
-	gl_texturemode.string = glmodes[glmode_idx].name;
-	Cvar_RegisterVariable (&gl_texturemode);
-	Cvar_SetCallback (&gl_texturemode, &TexMgr_TextureMode_f);
-	Cvar_SetCompletion (&gl_texturemode, &TexMgr_TextureMode_Completion_f);
-	Cvar_RegisterVariable (&gl_lodbias);
-	Cvar_SetCallback (&gl_lodbias, TexMgr_LodBias_f);
-	Cvar_RegisterVariable (&r_softemu);
-	Cvar_SetCallback (&r_softemu, TexMgr_SoftEmu_f);
-	Cvar_RegisterVariable (&r_softemu_lightmap_banding);
-	Cvar_SetCallback (&r_softemu_lightmap_banding, TexMgr_SoftEmu_f);
-	Cvar_RegisterVariable (&r_softemu_mdl_warp);
+Cvar_RegisterVariable (&gl_max_size);
+Cvar_RegisterVariable (&gl_picmip);
+gl_texturemode.string = glmodes[glmode_idx].name;
+Cvar_RegisterVariable (&gl_texturemode);
+Cvar_SetCallback (&gl_texturemode, &TexMgr_TextureMode_f);
+Cvar_SetCompletion (&gl_texturemode, &TexMgr_TextureMode_Completion_f);
+Cvar_RegisterVariable (&gl_lodbias);
+Cvar_SetCallback (&gl_lodbias, TexMgr_LodBias_f);
+Cvar_RegisterVariable (&r_bc7_compress);
+Cvar_RegisterVariable (&r_softemu);
+Cvar_SetCallback (&r_softemu, TexMgr_SoftEmu_f);
+Cvar_RegisterVariable (&r_softemu_lightmap_banding);
+Cvar_SetCallback (&r_softemu_lightmap_banding, TexMgr_SoftEmu_f);
+Cvar_RegisterVariable (&r_softemu_mdl_warp);
 	Cvar_RegisterVariable (&r_softemu_dither_screen);
 	Cvar_RegisterVariable (&r_softemu_dither_texture);
 	Cmd_AddCommand ("gl_describetexturemodes", &TexMgr_DescribeTextureModes_f);
@@ -1030,8 +1033,9 @@ static unsigned *TexMgr_MipMapW (unsigned *data, int width, int height, int dept
 		out[3] = (in[3] + in[7] + 1)>>1;
 	}
 
-	return data;
+			return data;
 }
+
 
 /*
 ================
@@ -1267,25 +1271,144 @@ TexMgr_PadImageH -- return image with height padded up to power-of-two dimention
 */
 static byte *TexMgr_PadImageH (byte *in, int width, int height, byte padbyte)
 {
-	int i, srcpix, dstpix;
-	byte *data, *out;
+        int i, srcpix, dstpix;
+        byte *data, *out;
 
-	if (height == TexMgr_Pad(height))
-		return in;
+        if (height == TexMgr_Pad(height))
+                return in;
 
-	srcpix = width * height;
-	dstpix = width * TexMgr_Pad(height);
+        srcpix = width * height;
+        dstpix = width * TexMgr_Pad(height);
 
-	out = data = (byte *) Hunk_AllocNoFill(dstpix);
+        out = data = (byte *) Hunk_AllocNoFill(dstpix);
 
-	for (i = 0; i < srcpix; i++)
-		*out++ = *in++;
-	for (     ; i < dstpix; i++)
-		*out++ = padbyte;
+        for (i = 0; i < srcpix; i++)
+                *out++ = *in++;
+        for (     ; i < dstpix; i++)
+                *out++ = padbyte;
 
-	return data;
+        return data;
 }
 
+static void BC7_Compress (const uint8_t *rgba, int width, int height, uint8_t *out_blocks, qboolean srgb)
+{
+	int blocks_w, blocks_h, bx, by, x, y;
+	static qboolean bc7_initialized;
+	static bc7enc_compress_block_params base_params;
+
+	if (width <= 0 || height <= 0)
+		return;
+
+	if (!bc7_initialized)
+	{
+		bc7enc_compress_block_init ();
+		bc7enc_compress_block_params_init (&base_params);
+		base_params.m_uber_level = BC7ENC_MAX_UBER_LEVEL;
+		base_params.m_mode_mask = UINT32_MAX;
+		base_params.m_max_partitions = BC7ENC_MAX_PARTITIONS;
+		bc7_initialized = true;
+	}
+
+	blocks_w = (width + 3) / 4;
+	blocks_h = (height + 3) / 4;
+
+	for (by = 0; by < blocks_h; by++)
+	{
+		for (bx = 0; bx < blocks_w; bx++)
+		{
+			color_rgba block_pixels[16];
+			bc7enc_compress_block_params params = base_params;
+
+			if (srgb)
+				bc7enc_compress_block_params_init_perceptual_weights (&params);
+			else
+				bc7enc_compress_block_params_init_linear_weights (&params);
+
+			for (y = 0; y < 4; y++)
+			{
+				int sy = (by * 4 + y);
+				if (sy >= height)
+					sy = height - 1;
+
+				for (x = 0; x < 4; x++)
+				{
+					int sx = (bx * 4 + x);
+					const uint8_t *src;
+
+					if (sx >= width)
+						sx = width - 1;
+
+					src = rgba + (sy * width + sx) * 4;
+					block_pixels[y * 4 + x].m_c[0] = src[0];
+					block_pixels[y * 4 + x].m_c[1] = src[1];
+					block_pixels[y * 4 + x].m_c[2] = src[2];
+					block_pixels[y * 4 + x].m_c[3] = src[3];
+				}
+			}
+
+			bc7enc_compress_block (out_blocks + ((by * blocks_w + bx) * BC7ENC_BLOCK_SIZE), block_pixels, &params);
+		}
+	}
+}
+
+static qboolean TexMgr_CompressLevelToBC7 (const byte *rgba, int width, int height, qboolean srgb, uint8_t **out_blocks, size_t *out_size)
+{
+	size_t blocks_w, blocks_h, block_count;
+
+	blocks_w = (size_t) ((width + 3) / 4);
+	blocks_h = (size_t) ((height + 3) / 4);
+	block_count = blocks_w * blocks_h;
+	*out_size = block_count * BC7ENC_BLOCK_SIZE;
+	*out_blocks = (uint8_t *) malloc (*out_size);
+	if (!*out_blocks)
+		return false;
+
+	BC7_Compress (rgba, width, height, *out_blocks, srgb);
+	return true;
+}
+
+static qboolean TexMgr_UploadBC7 (gltexture_t *glt, unsigned *data)
+{
+	int miplevel = 0;
+	int mipwidth = glt->width;
+	int mipheight = glt->height;
+	byte *level_data = (byte *) data;
+	const qboolean use_mipmaps = (glt->flags & TEXPREF_MIPMAP) != 0;
+	const qboolean srgb = (glt->flags & TEXPREF_SRGB) != 0;
+	GLenum internal_format = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
+
+	GL_Bind (GL_TEXTURE0, glt);
+
+	for (;;)
+	{
+		uint8_t *bc7_blocks = NULL;
+		size_t bc7_size = 0;
+
+		if (!TexMgr_CompressLevelToBC7 (level_data, mipwidth, mipheight, srgb, &bc7_blocks, &bc7_size))
+			return false;
+
+		GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, miplevel, internal_format, mipwidth, mipheight, 0, (GLsizei) bc7_size, bc7_blocks);
+		free (bc7_blocks);
+
+		if (!use_mipmaps || (mipwidth == 1 && mipheight == 1))
+			break;
+
+		if (mipheight > 1)
+		{
+			TexMgr_MipMapH (level_data, mipwidth, mipheight, glt->depth);
+			mipheight >>= 1;
+		}
+		if (mipwidth > 1)
+		{
+			TexMgr_MipMapW (level_data, mipwidth, mipheight, glt->depth);
+			mipwidth >>= 1;
+		}
+
+		miplevel++;
+	}
+
+	return true;
+}
 /*
 ================
 GL_TexImage -- calls glTexImage2D/3D based on texture type
@@ -1326,81 +1449,125 @@ TexMgr_LoadImage32 -- handles 32bit source data
 */
 static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
 {
-	int	miplevel, mipwidth, mipheight, picmip;
-	glformat_t internalformat;
-	qboolean compress;
+        int     miplevel, mipwidth, mipheight, picmip;
+        glformat_t internalformat;
+        qboolean compress, bc7_uploaded;
+        qboolean bc7_requested;
+        qboolean srgb;
+        unsigned *base_copy = NULL;
+        size_t base_pixels = 0;
 
-	TexMgr_LinearizeWadPixels (glt, data);
+        TexMgr_LinearizeWadPixels (glt, data);
+        srgb = (glt->flags & TEXPREF_SRGB) != 0;
 
-	// mipmap down
-	picmip = (glt->flags & TEXPREF_NOPICMIP) ? 0 : q_max((int)gl_picmip.value, 0);
-	mipwidth = TexMgr_SafeTextureSize (glt->width >> picmip);
-	mipheight = TexMgr_SafeTextureSize (glt->height >> picmip);
-	while ((int) glt->height > mipheight)
-	{
-		TexMgr_MipMapH (data, glt->width, glt->height, glt->depth);
-		glt->height >>= 1;
-		if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
-			TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
-	}
-	while ((int) glt->width > mipwidth)
-	{
-		TexMgr_MipMapW (data, glt->width, glt->height, glt->depth);
-		glt->width >>= 1;
-		if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
-			TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
-	}
+        // mipmap down
+        picmip = (glt->flags & TEXPREF_NOPICMIP) ? 0 : q_max((int)gl_picmip.value, 0);
+        mipwidth = TexMgr_SafeTextureSize (glt->width >> picmip);
+        mipheight = TexMgr_SafeTextureSize (glt->height >> picmip);
+        while ((int) glt->height > mipheight)
+        {
+                TexMgr_MipMapH (data, glt->width, glt->height, glt->depth);
+                glt->height >>= 1;
+                if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
+                        TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
+        }
+        while ((int) glt->width > mipwidth)
+        {
+                TexMgr_MipMapW (data, glt->width, glt->height, glt->depth);
+                glt->width >>= 1;
+                if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
+                        TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
+        }
 
-	// upload
-	compress = gl_compress_textures.value && TexMgr_CanCompress (glt);
+        // upload
+        bc7_requested = (r_bc7_compress.value != 0) && glt->target == GL_TEXTURE_2D && glt->depth == 1;
+        compress = gl_compress_textures.value && TexMgr_CanCompress (glt);
         internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[compress].alpha : glformats[compress].solid;
 
 #ifdef GL_SRGB8
-        if (glt->flags & TEXPREF_SRGB)
+        if (srgb)
                 internalformat.id = (glt->flags & TEXPREF_HASALPHA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
 #endif
 
-        glt->compression = internalformat.ratio;
-        glt->internal_format = internalformat.id;
-        GL_Bind (GL_TEXTURE0, glt);
-        GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        bc7_uploaded = false;
+        if (bc7_requested)
+        {
+                base_pixels = (size_t) glt->width * glt->height * glt->depth;
+                if (base_pixels)
+                {
+                        base_copy = (unsigned *) malloc (base_pixels * sizeof (*base_copy));
+                        if (!base_copy)
+                                bc7_requested = false;
+                        else
+                                memcpy (base_copy, data, base_pixels * sizeof (*base_copy));
+                }
+
+                if (bc7_requested)
+                {
+                        glt->compression = 4;
+                        glt->internal_format = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
+                        bc7_uploaded = TexMgr_UploadBC7 (glt, data);
+                        if (!bc7_uploaded && base_copy)
+                                memcpy (data, base_copy, base_pixels * sizeof (*base_copy));
+                }
+        }
+        if (base_copy)
+                free (base_copy);
+
+        if (bc7_requested && !bc7_uploaded)
+        {
+                internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[0].alpha : glformats[0].solid;
+
+#ifdef GL_SRGB8
+                if (srgb)
+                        internalformat.id = (glt->flags & TEXPREF_HASALPHA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
+#endif
+        }
+
+        if (!bc7_uploaded)
+        {
+                glt->compression = internalformat.ratio;
+                glt->internal_format = internalformat.id;
+                GL_Bind (GL_TEXTURE0, glt);
+                GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+                // upload mipmaps
+                if (glt->flags & TEXPREF_MIPMAP)
+                {
+                        if (glt->flags & (TEXPREF_CUBEMAP|TEXPREF_ARRAY))
+                        {
+                                GL_GenerateMipmapFunc (glt->target);
+                        }
+                        else
+                        {
+                                mipwidth = glt->width;
+                                mipheight = glt->height;
+
+                                for (miplevel=1; mipwidth > 1 || mipheight > 1; miplevel++)
+                                {
+                                        if (mipheight > 1)
+                                        {
+                                                TexMgr_MipMapH (data, mipwidth, mipheight, glt->depth);
+                                                mipheight >>= 1;
+                                        }
+                                        if (mipwidth > 1)
+                                        {
+                                                TexMgr_MipMapW (data, mipwidth, mipheight, glt->depth);
+                                                mipwidth >>= 1;
+                                        }
+                                        GL_TexImage (glt, miplevel, internalformat.id, mipwidth, mipheight, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                                }
+                        }
+                }
+        }
 
 #ifdef GL_EXT_texture_sRGB_decode
-        if (glt->flags & TEXPREF_SRGB)
+        if (srgb)
                 glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
 #endif
 
-	// upload mipmaps
-	if (glt->flags & TEXPREF_MIPMAP)
-	{
-		if (glt->flags & (TEXPREF_CUBEMAP|TEXPREF_ARRAY))
-		{
-			GL_GenerateMipmapFunc (glt->target);
-		}
-		else
-		{
-			mipwidth = glt->width;
-			mipheight = glt->height;
-
-			for (miplevel=1; mipwidth > 1 || mipheight > 1; miplevel++)
-			{
-				if (mipheight > 1)
-				{
-					TexMgr_MipMapH (data, mipwidth, mipheight, glt->depth);
-					mipheight >>= 1;
-				}
-				if (mipwidth > 1)
-				{
-					TexMgr_MipMapW (data, mipwidth, mipheight, glt->depth);
-					mipwidth >>= 1;
-				}
-				GL_TexImage (glt, miplevel, internalformat.id, mipwidth, mipheight, GL_RGBA, GL_UNSIGNED_BYTE, data);
-			}
-		}
-	}
-
-// set filter modes
-TexMgr_SetFilterModes (glt);
+        // set filter modes
+        TexMgr_SetFilterModes (glt);
 }
 
 /*

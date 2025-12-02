@@ -32,6 +32,8 @@ endif()
 
 file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp")
 
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/bc7enc.c PROPERTIES LANGUAGE CXX)
+
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
 
