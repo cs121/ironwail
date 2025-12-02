@@ -1353,10 +1353,22 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
 
 	// upload
 	compress = gl_compress_textures.value && TexMgr_CanCompress (glt);
-	internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[compress].alpha : glformats[compress].solid;
-	glt->compression = internalformat.ratio;
-	GL_Bind (GL_TEXTURE0, glt);
-	GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[compress].alpha : glformats[compress].solid;
+
+#ifdef GL_SRGB8
+        if (glt->flags & TEXPREF_SRGB)
+                internalformat.id = (glt->flags & TEXPREF_HASALPHA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
+#endif
+
+        glt->compression = internalformat.ratio;
+        glt->internal_format = internalformat.id;
+        GL_Bind (GL_TEXTURE0, glt);
+        GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+#ifdef GL_EXT_texture_sRGB_decode
+        if (glt->flags & TEXPREF_SRGB)
+                glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
+#endif
 
 	// upload mipmaps
 	if (glt->flags & TEXPREF_MIPMAP)
