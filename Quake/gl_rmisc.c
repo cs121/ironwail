@@ -81,6 +81,8 @@ extern cvar_t r_vignette_color_b;
 extern cvar_t r_vignette_blend_mode;
 extern cvar_t r_vignette_noise;
 extern cvar_t r_chromatic_aberration;
+extern cvar_t r_screendarken;
+extern cvar_t r_screendarken_depth;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -385,8 +387,10 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_vignette_blend_mode);
 	Cvar_RegisterVariable (&r_vignette_noise);
 	Cvar_RegisterVariable (&r_chromatic_aberration);
+	Cvar_RegisterVariable (&r_screendarken);
+	Cvar_RegisterVariable (&r_screendarken_depth);
 	Cvar_RegisterVariable (&r_overbrightbits);
-	Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
+        Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 
 	Cvar_RegisterVariable (&gl_finish);
 	Cvar_RegisterVariable (&gl_clear);
