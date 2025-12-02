@@ -1164,6 +1164,28 @@ const char *COM_FileGetExtension (const char *in)
 
 /*
 ============
+COM_HasExtension
+============
+*/
+qboolean COM_HasExtension (const char *path, const char *extension)
+{
+	const char *path_ext;
+
+	if (!path || !extension)
+		return false;
+
+	path_ext = COM_FileGetExtension (path);
+	if (!*path_ext)
+		return false;
+
+	if (*extension == '.')
+		++extension;
+
+	return !q_strcasecmp (path_ext, extension);
+}
+
+/*
+============
 COM_ExtractExtension
 ============
 */
