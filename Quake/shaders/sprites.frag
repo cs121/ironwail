@@ -56,6 +56,7 @@ float tri(float x)
 #define SUPPRESS_BANDING() bayer(ivec2(gl_FragCoord.xy))
 
 layout(binding=0) uniform sampler2D Tex;
+uniform float coreStrength = 1.2;
 
 layout(location=0) in vec2 in_uv;
 layout(location=1) in vec3 in_pos;
@@ -65,11 +66,16 @@ layout(location=1) out vec4 out_velocity;
 
 void main()
 {
-	vec4 result = texture(Tex, in_uv);
-	if (result.a < 0.666)
-		discard;
-	result.rgb = ApplyFog(result.rgb, in_pos);
-	out_fragcolor = result;
+        vec4 result = texture(Tex, in_uv);
+        if (result.a < 0.666)
+                discard;
+
+        float d = length(in_uv - vec2(0.5));
+        float core = 1.0 + (1.0 - d) * coreStrength;
+        result.rgb *= core;
+
+        result.rgb = ApplyFog(result.rgb, in_pos);
+        out_fragcolor = result;
         out_velocity = vec4(0.0);
 #if DITHER
 	if (Fog.w > 0.)
