@@ -277,22 +277,23 @@ void R_SetupAliasLighting (entity_t	*e)
 		}
 	}
 
-	// clamp lighting so it doesn't overbright as much (96)
-	if (gl_overbright_models.value)
-	{
-		add = lightcolor[0] + lightcolor[1] + lightcolor[2];
-		if (add > 288.0f)
-			VectorScale(lightcolor, 288.0f / add, lightcolor);
-	}
-	//hack up the brightness when fullbrights but no overbrights (256)
-	else if (e->model->flags & MOD_FBRIGHTHACK && gl_fullbrights.value)
-	{
-		lightcolor[0] = 256.0f;
-		lightcolor[1] = 256.0f;
-		lightcolor[2] = 256.0f;
-	}
+        //hack up the brightness when fullbrights but no overbrights (256)
+        if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
+        {
+                lightcolor[0] = 256.0f;
+                lightcolor[1] = 256.0f;
+                lightcolor[2] = 256.0f;
+        }
 
-        VectorScale (lightcolor, 1.0f / 200.0f, lightcolor);
+        const float overbright = gl_overbright_models.value ? 2.0f : 1.0f;
+
+        for (i = 0; i < 3; i++)
+        {
+                float L = lightcolor[i] * (1.0f / 256.0f);
+                L = fminf(L * overbright, 1.0f);
+                L = powf(L, 1.0f / 2.2f);
+                lightcolor[i] = L;
+        }
 }
 
 /*

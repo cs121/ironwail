@@ -45,6 +45,8 @@ typedef enum
 	TEXPREF_ALPHABRIGHT		= 0x4000,	// use palette with lighting mask in alpha channel (0=fullbright, 1=lit)
 	TEXPREF_CLAMP			= 0x8000,	// clamp UVs
 
+	TEXPREF_SRGB			= 0x10000,	// upload texture in sRGB format
+
 	TEXPREF_HASALPHA		= (TEXPREF_ALPHA|TEXPREF_ALPHABRIGHT), // texture has alpha channel
 } textureflags_t;
 
