@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove; //johnfitz
+extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
 
@@ -76,7 +76,8 @@ struct ibuf_s {
 		float	_pad;
 		vec4_t	fog;
 		float	dither;
-		float	_padding[3];
+		float	half_lambert;
+		float	_padding[2];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -361,7 +362,8 @@ void R_FlushAliasInstances (qboolean showtris)
 			-fabs (r_framedata.fogdata[3]) :
 			 fabs (r_framedata.fogdata[3])
 	;
-    ibuf.global.dither = r_framedata.dither[0];
+	ibuf.global.dither = r_framedata.dither[0];
+	ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
