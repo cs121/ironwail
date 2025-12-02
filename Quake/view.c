@@ -47,6 +47,7 @@ cvar_t	v_kicktime = {"v_kicktime", "0.5", CVAR_NONE};
 cvar_t	v_kickroll = {"v_kickroll", "0.6", CVAR_NONE};
 cvar_t	v_kickpitch = {"v_kickpitch", "0.6", CVAR_NONE};
 cvar_t	v_gunkick = {"v_gunkick", "2", CVAR_ARCHIVE}; //johnfitz
+cvar_t	v_gunsway = {"v_gunsway", "0", CVAR_ARCHIVE};
 
 cvar_t	v_iyaw_cycle = {"v_iyaw_cycle", "2", CVAR_NONE};
 cvar_t	v_iroll_cycle = {"v_iroll_cycle", "0.5", CVAR_NONE};
@@ -700,6 +701,24 @@ void V_AddIdle (void)
 }
 
 
+static void V_AddGunSway (entity_t *view)
+{
+	float sway;
+
+	if (!v_gunsway.value)
+		return;
+
+	sway = sin(cl.time * 2.0f) * 0.5f;
+	view->origin[1] += sway;
+
+	if (v_gunsway.value >= 2)
+	{
+		view->origin[0] += cl.viewangles[YAW] * 0.01f;
+		view->origin[1] += cl.viewangles[PITCH] * 0.01f;
+	}
+}
+
+
 /*
 ==============
 V_CalcViewRoll
@@ -876,7 +895,9 @@ void V_CalcRefdef (void)
 	}
 	//johnfitz
 
-// smooth out stair step ups
+	V_AddGunSway (view);
+
+	// smooth out stair step ups
 	if (!noclip_anglehack && cl.onground && ent->origin[2] - oldz > 0) //johnfitz -- added exception for noclip
 	//FIXME: noclip_anglehack is set on the server, so in a nonlocal game this won't work.
 	{
@@ -1020,6 +1041,7 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_kickroll);
 	Cvar_RegisterVariable (&v_kickpitch);
 	Cvar_RegisterVariable (&v_gunkick); //johnfitz
+	Cvar_RegisterVariable (&v_gunsway);
 
 	Cvar_RegisterVariable (&r_viewmodel_quake); //MarkV
 }
