@@ -1260,8 +1260,8 @@ GL_TexImage -- calls glTexImage2D/3D based on texture type
 */
 static void GL_TexImage (gltexture_t *glt, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels)
 {
-	const GLvoid **images = (const GLvoid **)pixels; // for arrays/cubemaps "pixels" is actually an array of pointers
-	unsigned int i;
+const GLvoid **images = (const GLvoid **)pixels; // for arrays/cubemaps "pixels" is actually an array of pointers
+unsigned int i;
 
 	switch (glt->target)
 	{
@@ -1352,8 +1352,276 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
 		}
 	}
 
-	// set filter modes
-	TexMgr_SetFilterModes (glt);
+// set filter modes
+TexMgr_SetFilterModes (glt);
+}
+
+/*
+================================================================================
+
+        DDS LOADER
+
+================================================================================
+*/
+
+typedef struct dds_pixel_format_s
+{
+uint32_t        size;
+uint32_t        flags;
+uint32_t        four_cc;
+uint32_t        rgb_bit_count;
+uint32_t        r_bitmask;
+uint32_t        g_bitmask;
+uint32_t        b_bitmask;
+uint32_t        a_bitmask;
+} dds_pixel_format_t;
+
+typedef struct dds_header_s
+{
+uint32_t        size;
+uint32_t        flags;
+uint32_t        height;
+uint32_t        width;
+uint32_t        pitch_or_linear_size;
+uint32_t        depth;
+uint32_t        mip_map_count;
+uint32_t        reserved1[11];
+dds_pixel_format_t      ddspf;
+uint32_t        caps;
+uint32_t        caps2;
+uint32_t        caps3;
+uint32_t        caps4;
+uint32_t        reserved2;
+} dds_header_t;
+
+typedef struct dds_header_dx10_s
+{
+uint32_t        dxgi_format;
+uint32_t        resource_dimension;
+uint32_t        misc_flag;
+uint32_t        array_size;
+uint32_t        misc_flags2;
+} dds_header_dx10_t;
+
+#define DDS_MAGIC                       ((' ' << 24) | ('S' << 16) | ('D' << 8) | 'D')
+#define DDS_FOURCC_DX10                 (('0' << 24) | ('1' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_DXT1                 (('1' << 24) | ('T' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_DXT5                 (('5' << 24) | ('T' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_BC5                  ((' ' << 24) | ('5' << 16) | ('C' << 8) | 'B')
+#define DDS_FOURCC_ATI2                 (('2' << 24) | ('I' << 16) | ('T' << 8) | 'A')
+
+#define DDSCAPS2_CUBEMAP                0x00000200
+#define DDSCAPS2_VOLUME                 0x00200000
+
+enum dxgi_format
+{
+DXGI_FORMAT_BC1_TYPELESS           = 70,
+DXGI_FORMAT_BC1_UNORM              = 71,
+DXGI_FORMAT_BC1_UNORM_SRGB         = 72,
+DXGI_FORMAT_BC3_TYPELESS           = 76,
+DXGI_FORMAT_BC3_UNORM              = 77,
+DXGI_FORMAT_BC3_UNORM_SRGB         = 78,
+DXGI_FORMAT_BC5_TYPELESS           = 82,
+DXGI_FORMAT_BC5_UNORM              = 83,
+DXGI_FORMAT_BC5_SNORM              = 84,
+DXGI_FORMAT_BC7_TYPELESS           = 96,
+DXGI_FORMAT_BC7_UNORM              = 98,
+DXGI_FORMAT_BC7_UNORM_SRGB         = 99,
+};
+
+enum dxgi_resource_dimension
+{
+DXGI_RESOURCE_DIMENSION_UNKNOWN    = 0,
+DXGI_RESOURCE_DIMENSION_BUFFER     = 1,
+DXGI_RESOURCE_DIMENSION_TEXTURE1D  = 2,
+DXGI_RESOURCE_DIMENSION_TEXTURE2D  = 3,
+DXGI_RESOURCE_DIMENSION_TEXTURE3D  = 4,
+};
+
+typedef struct dds_format_info_s
+{
+GLenum          internal_format;
+uint32_t        block_size;
+} dds_format_info_t;
+
+static qboolean Dds_DetermineFormat(const dds_header_t *header, const dds_header_dx10_t *dx10, dds_format_info_t *out)
+{
+	uint32_t four_cc = header->ddspf.four_cc;
+
+	if (dx10)
+	{
+	switch (dx10->dxgi_format)
+	{
+	case DXGI_FORMAT_BC1_TYPELESS:
+	case DXGI_FORMAT_BC1_UNORM:
+	case DXGI_FORMAT_BC1_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+	out->block_size = 8;
+	return true;
+
+	case DXGI_FORMAT_BC3_TYPELESS:
+	case DXGI_FORMAT_BC3_UNORM:
+	case DXGI_FORMAT_BC3_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+	out->block_size = 16;
+	return true;
+
+	case DXGI_FORMAT_BC5_TYPELESS:
+	case DXGI_FORMAT_BC5_UNORM:
+	case DXGI_FORMAT_BC5_SNORM:
+	out->internal_format = GL_COMPRESSED_RED_GREEN_RGTC2;
+	out->block_size = 16;
+	return true;
+
+	case DXGI_FORMAT_BC7_TYPELESS:
+	case DXGI_FORMAT_BC7_UNORM:
+	case DXGI_FORMAT_BC7_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_BPTC_UNORM;
+	out->block_size = 16;
+	return true;
+	}
+	}
+
+	switch (four_cc)
+	{
+	case DDS_FOURCC_DXT1:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+	out->block_size = 8;
+	return true;
+
+	case DDS_FOURCC_DXT5:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+	out->block_size = 16;
+	return true;
+
+	case DDS_FOURCC_ATI2:
+	case DDS_FOURCC_BC5:
+	out->internal_format = GL_COMPRESSED_RED_GREEN_RGTC2;
+	out->block_size = 16;
+	return true;
+	}
+
+	return false;
+}
+
+static size_t Dds_CalcLevelSize(const dds_format_info_t *format, uint32_t width, uint32_t height)
+{
+	uint32_t blocks_w = q_max(1U, (width + 3) / 4);
+	uint32_t blocks_h = q_max(1U, (height + 3) / 4);
+
+	return (size_t) blocks_w * blocks_h * format->block_size;
+}
+
+GLuint TexMgr_LoadDDS (const char *path)
+{
+	dds_header_t header;
+	dds_header_dx10_t dx10_header;
+	dds_header_dx10_t *dx10 = NULL;
+	dds_format_info_t format;
+	byte *file_buffer = NULL;
+	qfileofs_t file_size;
+	size_t data_offset;
+	uint32_t mip_levels;
+	uint32_t width, height;
+	GLuint texnum = 0;
+	unsigned int path_id;
+
+	file_buffer = COM_LoadMallocFile (path, &path_id);
+	file_size = com_filesize;
+	if (!file_buffer || file_size < (qfileofs_t) (4 + sizeof(dds_header_t)))
+	goto fail;
+
+	if (memcmp (file_buffer, "DDS ", 4) != 0)
+	goto fail;
+
+	memcpy (&header, file_buffer + 4, sizeof(header));
+	if (header.size != sizeof(dds_header_t) || header.ddspf.size != sizeof(dds_pixel_format_t))
+	goto fail;
+
+	if (!header.width || !header.height)
+	goto fail;
+
+	if (header.caps2 & (DDSCAPS2_CUBEMAP | DDSCAPS2_VOLUME))
+	goto fail; // only 2D textures are supported
+
+	data_offset = 4 + sizeof(dds_header_t);
+	if (header.ddspf.four_cc == DDS_FOURCC_DX10)
+	{
+	if (file_size < (qfileofs_t) (data_offset + sizeof(dds_header_dx10_t)))
+	goto fail;
+
+	memcpy (&dx10_header, file_buffer + data_offset, sizeof(dx10_header));
+	if (dx10_header.resource_dimension != DXGI_RESOURCE_DIMENSION_TEXTURE2D || dx10_header.array_size == 0)
+	goto fail;
+
+	dx10 = &dx10_header;
+	data_offset += sizeof(dds_header_dx10_t);
+	}
+
+	if (!Dds_DetermineFormat(&header, dx10, &format))
+	goto fail;
+
+	mip_levels = header.mip_map_count ? header.mip_map_count : 1;
+	width = header.width;
+	height = header.height;
+
+	// Validate that the file contains enough data for all mip levels
+	{
+	size_t offset = data_offset;
+	uint32_t level_width = width;
+	uint32_t level_height = height;
+	uint32_t level;
+
+	for (level = 0; level < mip_levels; level++)
+	{
+	size_t level_size = Dds_CalcLevelSize(&format, level_width, level_height);
+	if (offset + level_size > (size_t) file_size)
+	goto fail;
+
+	offset += level_size;
+	if (level_width > 1)
+	level_width >>= 1;
+	if (level_height > 1)
+	level_height >>= 1;
+	}
+	}
+
+	glGenTextures (1, &texnum);
+	glBindTexture (GL_TEXTURE_2D, texnum);
+	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+
+	{
+	size_t offset = data_offset;
+	uint32_t level_width = width;
+	uint32_t level_height = height;
+	uint32_t level;
+
+	for (level = 0; level < mip_levels; level++)
+	{
+	size_t level_size = Dds_CalcLevelSize(&format, level_width, level_height);
+	glCompressedTexImage2D (GL_TEXTURE_2D, level, format.internal_format, level_width, level_height, 0, (GLsizei) level_size, file_buffer + offset);
+
+	offset += level_size;
+	if (level_width > 1)
+	level_width >>= 1;
+	if (level_height > 1)
+	level_height >>= 1;
+	}
+	}
+
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
+
+	free (file_buffer);
+	return texnum;
+
+	fail:
+	if (texnum)
+	glDeleteTextures (1, &texnum);
+	if (file_buffer)
+	free (file_buffer);
+	return 0;
 }
 
 /*
