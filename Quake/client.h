@@ -201,6 +201,7 @@ typedef struct
 
 	float		viewheight;
 	float		crouch;			// local amount for smoothing stepups
+	double		teleport_fx_time;		// time when the last teleport effect should start
 
 	qboolean	paused;			// send over by server
 	qboolean	onground;

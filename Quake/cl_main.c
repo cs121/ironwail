@@ -245,6 +245,7 @@ void CL_SignonReply (void)
 		SCR_EndLoadingPlaque ();		// allow normal screen updates
 		break;
 	}
+
 }
 
 /*
@@ -570,6 +571,7 @@ void CL_RelinkEntities (void)
 	vec3_t		delta;
 	float		bobjrotate;
 	dlight_t	*dl;
+	qboolean		viewentity_teleported = false;
 
 // determine partial update time
 	frac = CL_LerpPoint ();
@@ -604,6 +606,8 @@ void CL_RelinkEntities (void)
 // start on the entity after the world
 	for (i=1,ent=cl_entities+1 ; i<cl.num_entities ; i++,ent++)
 	{
+		qboolean teleported = false;
+
 		if (!ent->model)
 		{	// empty slot
 			
@@ -638,6 +642,7 @@ void CL_RelinkEntities (void)
 				{
 					f = 1;		// assume a teleportation, not a motion
 					ent->lerpflags |= LERP_RESETMOVE; //johnfitz -- don't lerp teleports
+					teleported = true;
 				}
 			}
 
@@ -662,6 +667,9 @@ void CL_RelinkEntities (void)
 
 		if (ent->forcelink || ent->lerpflags & LERP_RESETMOVE)
 			CL_ResetTrail (ent);
+
+		if (ent == &cl_entities[cl.viewentity] && teleported)
+			viewentity_teleported = true;
 
 // rotate binary objects locally
 		if (ent->model->flags & EF_ROTATE)
@@ -769,6 +777,9 @@ void CL_RelinkEntities (void)
 			cl_numvisedicts++;
 		}
 	}
+
+	if (viewentity_teleported)
+		cl.teleport_fx_time = cl.time;
 }
 
 

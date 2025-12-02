@@ -233,6 +233,8 @@ cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
 cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
 cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
+cvar_t	r_teleportfx = { "r_teleportfx", "1", CVAR_ARCHIVE };
+cvar_t	r_teleportfx_time = { "r_teleportfx_time", "0.35", CVAR_ARCHIVE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
 
@@ -693,6 +695,8 @@ void GL_PostProcess (void)
         qboolean screen_darken_enabled;
         float screen_darken_strength;
         float screen_darken_depth;
+        float teleport_fade;
+        float teleport_blur;
         if (!GL_NeedsPostprocess ())
                 return;
 
@@ -707,6 +711,20 @@ void GL_PostProcess (void)
         screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
         screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
         screen_darken_enabled = (screen_darken_strength > 0.f);
+        teleport_fade = 0.f;
+        teleport_blur = 0.f;
+        {
+                float teleport_duration = q_max (0.f, r_teleportfx_time.value);
+                if (r_teleportfx.value > 0.f && teleport_duration > 0.f && cl.teleport_fx_time > 0.0)
+                {
+                        double teleport_elapsed = cl.time - cl.teleport_fx_time;
+                        if (teleport_elapsed >= 0.0 && teleport_elapsed < teleport_duration)
+                        {
+                                teleport_fade = 1.f - (float)(teleport_elapsed / teleport_duration);
+                                teleport_blur = teleport_fade * 2.f;
+                        }
+                }
+        }
         GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
         if (framebufs.bloom.pingpong_tex[0])
                 bloom_texture = framebufs.bloom.pingpong_tex[0];
@@ -781,6 +799,7 @@ void GL_PostProcess (void)
                 q_max (0.f, r_chromatic_aberration.value),
                 screen_darken_strength,
                 screen_darken_depth);
+        GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 
         dof_enabled = R_DoFEnabled ();
 
