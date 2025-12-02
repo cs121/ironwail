@@ -83,6 +83,7 @@ extern gltexture_t *nulltexture;
 extern gltexture_t *whitetexture;
 extern gltexture_t *greytexture;
 extern gltexture_t *blacktexture;
+extern gltexture_t *lavaemissivetexture;
 
 extern GLuint gl_palette_lut;
 extern GLuint gl_palette_buffer[2];
