@@ -1,5 +1,4 @@
 #include "quakedef.h"
-#include "gl_local.h"
 #include "gl_ktx2.h"
 #include "gl_texmgr.h"
 #include "basisu_transcoder.h"
