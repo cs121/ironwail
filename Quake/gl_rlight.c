@@ -102,6 +102,24 @@ typedef struct gpu_cluster_inputs_s {
 	float		view_matrix[16];
 } gpu_cluster_inputs_t;
 
+const vec3_t *R_GetDynamicLightTemperature (int type)
+{
+	static const vec3_t temps[DLIGHT_MAX_TYPES] = {
+		{ 1.0f, 1.0f, 1.0f }, // default
+		{ 1.25f, 0.90f, 0.65f }, // rocket
+		{ 1.30f, 1.10f, 1.50f }, // plasma
+		{ 0.60f, 0.75f, 1.40f }, // lightning
+		{ 1.30f, 1.00f, 0.50f }, // explosion
+		{ 1.30f, 1.10f, 0.80f }, // torch
+		{ 1.00f, 0.60f, 1.50f }, // teleport
+	};
+
+	if (type < 0 || type >= DLIGHT_MAX_TYPES)
+		type = DLIGHT_DEFAULT;
+
+	return &temps[type];
+}
+
 /*
 =============
 GLLight_CreateResources
@@ -170,20 +188,30 @@ void R_PushDlights (void)
 					break;
 				}
 			}
-			if (cull)
-				continue;
+                        if (cull)
+                                continue;
 
-			out = &r_lightbuffer.lights[r_framedata.numlights++];
-			out->pos[0]   = l->origin[0];
-			out->pos[1]   = l->origin[1];
-			out->pos[2]   = l->origin[2];
-			out->radius   = l->radius;
-			out->color[0] = l->color[0];
-			out->color[1] = l->color[1];
-			out->color[2] = l->color[2];
-			out->minlight = l->minlight;
-		}
-	}
+                        out = &r_lightbuffer.lights[r_framedata.numlights++];
+                        const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
+                        float radiusFactor = q_min (1.f, q_max (l->radius / 350.f, 0.2f));
+                        float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
+                        vec3_t finalcolor;
+                        finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
+                        finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
+                        finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
+                        finalcolor[0] *= flicker;
+                        finalcolor[1] *= flicker;
+                        finalcolor[2] *= flicker;
+                        out->pos[0]   = l->origin[0];
+                        out->pos[1]   = l->origin[1];
+                        out->pos[2]   = l->origin[2];
+                        out->radius   = l->radius;
+                        out->color[0] = finalcolor[0];
+                        out->color[1] = finalcolor[1];
+                        out->color[2] = finalcolor[2];
+                        out->minlight = l->minlight;
+                }
+        }
 
 	GL_BeginGroup ("Light clustering");
 
