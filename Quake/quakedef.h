@@ -411,6 +411,8 @@ void Host_Frame (double time);
 void Host_Quit_f (void);
 void Host_ClientCommands (const char *fmt, ...) FUNC_PRINTF(1,2);
 void Host_ShutdownServer (qboolean crash);
+void Host_BeginAssetLoading (void);
+void Host_EndAssetLoading (void);
 void Host_WriteConfiguration (void);
 void Host_Resetdemos (void);
 

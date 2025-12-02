@@ -102,6 +102,7 @@ void S_ExtraUpdate (void);
 
 void S_BlockSound (void);
 void S_UnblockSound (void);
+qboolean S_IsSoundBlocked (void);
 
 sfx_t *S_PrecacheSound (const char *sample);
 void S_TouchSound (const char *sample);

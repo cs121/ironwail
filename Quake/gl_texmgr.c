@@ -561,6 +561,8 @@ void TexMgr_CompressTextures_f (cvar_t *var)
 {
 	gltexture_t	*glt;
 
+	Host_BeginAssetLoading ();
+
 	Con_SafePrintf ("Using %s textures\n", var->value ? "compressed" : "uncompressed");
 
 	// In an attempt to reduce VRAM fragmentation, instead of unloading and reloading
@@ -572,6 +574,8 @@ void TexMgr_CompressTextures_f (cvar_t *var)
 	for (glt = active_gltextures; glt; glt = glt->next)
 		if (TexMgr_CanCompress (glt))
 			TexMgr_ReloadImage (glt, -1, -1);
+
+	Host_EndAssetLoading ();
 }
 
 /*
