@@ -34,9 +34,13 @@ float bayer(ivec2 coord)
         return bayer01(coord) - 0.5;
 }
 
+const float FOG_NOISE_SCALE = 0.02;
+
 float FogNoise(vec2 worldPos)
 {
-	return fract(sin(dot(worldPos, vec2(12.9898, 78.233))) * 43758.5453);
+	vec2 p = worldPos * FOG_NOISE_SCALE;
+	float n = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+	return smoothstep(0.25, 0.75, n);
 }
 
 // Hash without Sine
@@ -158,7 +162,7 @@ void main()
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 	float fog = exp2(-Fog.w * dot(in_pos - EyePos, in_pos - EyePos));
 	float noise = FogNoise(in_pos.xy);
-	fog *= mix(0.8, 1.2, noise);
+	fog *= mix(0.9, 1.1, noise);
 	fog = clamp(fog, 0.0, 1.0);
 
         result.rgb = mix(Fog.rgb, result.rgb, fog);
