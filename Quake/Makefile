@@ -215,12 +215,11 @@ SYSOBJ_SYS = pl_linux.o sys_sdl_unix.o
 SYSOBJ_MAIN= main_sdl.o
 
 GLOBJS = \
-gl_refrag.o \
-gl_rlight.o \
-gl_lightgrid.o \
-gl_rmain.o \
-gl_fog.o \
-gl_rmisc.o \
+	gl_refrag.o \
+	gl_rlight.o \
+	gl_rmain.o \
+	gl_fog.o \
+	gl_rmisc.o \
 	r_part.o \
 	r_world.o \
 	gl_screen.o \

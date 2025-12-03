@@ -406,12 +406,6 @@ void R_NewGame (void);
 #define LIGHT_TILES_Y			16
 #define LIGHT_TILES_Z			32
 
-typedef struct vec3_s {
-        float   x;
-        float   y;
-        float   z;
-} vec3;
-
 typedef struct gpulight_s {
 	float	pos[3];
 	float	radius;
@@ -452,7 +446,6 @@ qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
 qboolean R_CullModelForEntity (entity_t *e);
 void R_GetEntityBounds (const entity_t *e, vec3_t mins, vec3_t maxs);
 void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned char scale);
-vec3 R_ComputeSceneAmbient (void);
 
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
@@ -564,12 +557,6 @@ typedef struct glprogs_s {
 } glprogs_t;
 
 extern glprogs_t glprogs;
-
-typedef struct model_program_s {
-	int                     u_halfLambertStrength;
-} model_program_t;
-
-extern model_program_t model_program;
 
 void GL_UseProgram (GLuint program);
 void GL_ClearCachedProgram (void);

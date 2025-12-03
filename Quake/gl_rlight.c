@@ -255,26 +255,10 @@ LIGHT SAMPLING
 
 vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
-vec3 R_ComputeSceneAmbient (void)
-{
-        vec3 ambient = {0.5f, 0.5f, 0.5f};
-
-        if (cl.worldmodel && cl.worldmodel->lightdata)
-        {
-                float level = r_lightbuffer.lightstyles[0] * (1.0f / 256.0f);
-                level = CLAMP (0.0f, level, 1.0f);
-                ambient.x = level;
-                ambient.y = level;
-                ambient.z = level;
-        }
-
-        return ambient;
-}
-
 static inline int LightStyleValue (unsigned short style)
 {
-        if (style < 256)
-                return d_lightstylevalue[style];
+	if (style < 256)
+		return d_lightstylevalue[style];
 
 	return d_lightstylevalue[0];
 }

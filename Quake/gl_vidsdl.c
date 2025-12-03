@@ -153,7 +153,6 @@ cvar_t		vid_saveresize = {"vid_saveresize", "0", CVAR_ARCHIVE};
 
 cvar_t		vid_gamma = {"gamma", "1", CVAR_ARCHIVE}; //johnfitz -- moved here from view.c
 cvar_t		vid_contrast = {"contrast", "1", CVAR_ARCHIVE}; //QuakeSpasm, MarkV
-cvar_t		vid_saturation = {"saturation", "1", CVAR_ARCHIVE};
 
 void TexMgr_Anisotropy_f (cvar_t *var);
 void TexMgr_CompressTextures_f (cvar_t *var);
@@ -247,10 +246,9 @@ VID_Gamma_Init -- call on init
 */
 static void VID_Gamma_Init (void)
 {
-        Cvar_RegisterVariable (&vid_gamma);
-        Cvar_SetCallback (&vid_gamma, VID_Gamma_f);
-        Cvar_RegisterVariable (&vid_contrast);
-        Cvar_RegisterVariable (&vid_saturation);
+	Cvar_RegisterVariable (&vid_gamma);
+	Cvar_SetCallback (&vid_gamma, VID_Gamma_f);
+	Cvar_RegisterVariable (&vid_contrast);
 }
 
 /*

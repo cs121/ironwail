@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
-#include "gl_lightgrid.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -459,11 +458,10 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_scale);
 	Cvar_SetCallback (&r_lavaalpha, R_SetLavaalpha_f);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
-        Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
+	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
-        Lightgrid_Init ();
-        R_InitParticles ();
-        R_SetClearColor_f (&r_clearcolor); //johnfitz
+	R_InitParticles ();
+	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
 	Fog_Init (); //johnfitz
@@ -640,9 +638,6 @@ void R_NewMap (void)
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, lavaalpha, telealpha, slimealpha in worldspawn
-
-        if (!Lightgrid_Get ())
-                Lightgrid_BuildFallback ();
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)

@@ -23,12 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
-#include "gl_lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
-extern cvar_t r_lightgrid;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -38,7 +36,6 @@ const float	r_avertexnormals[NUMVERTEXNORMALS][3] = {
 };
 
 extern vec3_t	lightcolor; //johnfitz -- replaces "float shadelight" for lit support
-static const float halfLambertStrength = 1.0f;
 
 static float	entalpha; //johnfitz
 
@@ -244,25 +241,13 @@ void R_SetupAliasLighting (entity_t     *e)
 	vec3_t		dlightcolor = {0.f, 0.f, 0.f};
 	vec3_t		ambientcolor;
 
-        if (r_lightgrid.value && Lightgrid_Get ())
-        {
-                vec3_t sample_color, sample_dir;
-                int j;
-                Lightgrid_Sample (e->origin, sample_color, sample_dir);
-                for (j = 0; j < 3; j++)
-                        lightcolor[j] = sample_color[j] * 256.0f;
-                VectorCopy (lightcolor, ambientcolor);
-        }
-        else
-        {
-                // if the initial trace is completely black, try again from above
-                // this helps with models whose origin is slightly below ground level
-                // (e.g. some of the candles in the DOTM start map)
-                if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-                        R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+	// if the initial trace is completely black, try again from above
+	// this helps with models whose origin is slightly below ground level
+	// (e.g. some of the candles in the DOTM start map)
+	if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
-                VectorCopy (lightcolor, ambientcolor);
-        }
+	VectorCopy (lightcolor, ambientcolor);
 
 	//add dlights
 	for (i=0; i<r_framedata.numlights; i++)
@@ -324,13 +309,13 @@ void R_SetupAliasLighting (entity_t     *e)
 		}
 	}
 
-        //hack up the brightness when fullbrights are enabled (256)
-        if ((e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
-        {
-                lightcolor[0] = 256.0f;
-                lightcolor[1] = 256.0f;
-                lightcolor[2] = 256.0f;
-                VectorCopy (lightcolor, ambientcolor);
+	//hack up the brightness when fullbrights but no overbrights (256)
+	if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
+	{
+		lightcolor[0] = 256.0f;
+		lightcolor[1] = 256.0f;
+		lightcolor[2] = 256.0f;
+		VectorCopy (lightcolor, ambientcolor);
 		VectorClear (dlightcolor);
 	}
 
@@ -397,50 +382,45 @@ void R_FlushAliasInstances (qboolean showtris)
 
 	alphatest = model->flags & MF_HOLEY ? 1 : 0;
 	translucent = !ENTALPHA_OPAQUE (ibuf.ent->alpha);
-        oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
-        switch (softemu)
-        {
-        case SOFTEMU_BANDED:
-                mode = r_softemu_mdl_warp.value != 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
+	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
+	switch (softemu)
+	{
+	case SOFTEMU_BANDED:
+		mode = r_softemu_mdl_warp.value != 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
 		break;
 	case SOFTEMU_COARSE:
 		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_DITHER;
 		break;
-        default:
-                mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
-                break;
-        }
-        GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+	default:
+		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
+		break;
+	}
+	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 
-        {
-                if (model_program.u_halfLambertStrength >= 0)
-                        GL_Uniform1fFunc (model_program.u_halfLambertStrength, halfLambertStrength);
-        }
+	if (md5)
+		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+	else
+		state = GLS_CULL_BACK | GLS_ATTRIBS(1);
 
-        if (md5)
-                state = GLS_CULL_BACK | GLS_ATTRIBS(5);
-        else
-                state = GLS_CULL_BACK | GLS_ATTRIBS(1);
+	if (!translucent)
+		state |= GLS_BLEND_OPAQUE;
+	else
+		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
+	GL_SetState (state);
 
-        if (!translucent)
-                state |= GLS_BLEND_OPAQUE;
-        else
-                state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
-        GL_SetState (state);
-
-        memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
-        memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
-        memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-        memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
-        // use fog density sign bit as overbright flag
-        ibuf.global.fog[3] =
-                gl_overbright_models.value ?
-                        -fabs (r_framedata.fogdata[3]) :
-                         fabs (r_framedata.fogdata[3])
-                ;
-        ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
-        ibuf.global.dither = r_framedata.dither[0];
-        ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
+memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+// use fog density sign bit as overbright flag
+ibuf.global.fog[3] =
+gl_overbright_models.value ?
+-fabs (r_framedata.fogdata[3]) :
+ fabs (r_framedata.fogdata[3])
+;
+ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
+ibuf.global.dither = r_framedata.dither[0];
+ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -696,8 +676,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         instance->alpha = entalpha;
         if (e == &cl.viewent)
                 instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
-		instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+        if (!q_strncmp (e->model->name, "progs/bolt", 10))
+                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;

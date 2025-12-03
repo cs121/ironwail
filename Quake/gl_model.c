@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_ktx2.h"
-#include "gl_lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
 
@@ -512,7 +511,6 @@ typedef struct
 #define MAX_BSPX_LUMP_USAGE 256
 static bspx_lump_usage_t bspx_lump_usage[MAX_BSPX_LUMP_USAGE];
 static int bspx_lump_usage_count;
-static qboolean bspx_lightgrid_found;
 //supported lumps:
 //RGBLIGHTING (.lit)
 //LIGHTING_E5BGR9 (hdr lighting)
@@ -528,7 +526,6 @@ static void Q1BSPX_ResetUsage(void)
 {
         bspx_lump_usage_count = 0;
         memset(bspx_lump_usage, 0, sizeof(bspx_lump_usage));
-        bspx_lightgrid_found = false;
 }
 static void Q1BSPX_RecordEntries(qmodel_t *mod)
 {
@@ -839,9 +836,6 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
                 if (!handler->handler)
                         Q1BSPX_MarkUnsupported(entry->name);
         }
-
-        if (!bspx_lightgrid_found && mod == loadmodel)
-                Con_Printf("BSPX: LIGHTGRID missing, using fallback.\\n");
 }
 
 /*
@@ -2016,23 +2010,9 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 
 static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
-        (void)mod;
-
-        bspx_lightgrid_found = true;
-
-        if (!Lightgrid_LoadFromBSPX (lump, lumpsize))
-        {
-                Con_Printf("BSPX: LIGHTGRID is corrupted, falling back.\n");
-                return;
-        }
-
-        {
-                const lightgrid_t *lg = Lightgrid_Get ();
-                if (lg)
-                        Con_Printf("BSPX: LIGHTGRID found (%dx%dx%d, cell %.1f)\n", lg->nx, lg->ny, lg->nz, lg->cellsize);
-        }
-
-        Con_Printf("BSPX: Lightgrid loaded successfully.\n");
+	(void)mod;
+	(void)lump;
+	(void)lumpsize;
 }
 
 /*

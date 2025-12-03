@@ -2524,7 +2524,6 @@ static unsigned int cached_palette[256];
 static softemu_metric_t cached_softemu_metric = SOFTEMU_METRIC_INVALID;
 static float cached_gamma;
 static float cached_contrast;
-static float cached_saturation;
 static vec4_t cached_blendcolor;
 
 /*
@@ -2534,12 +2533,11 @@ GLPalette_DeleteResources
 */
 static void GLPalette_InvalidateRemapped (void)
 {
-        int i;
-        cached_gamma = -1.f;
-        cached_contrast = -1.f;
-        cached_saturation = -1.f;
-        for (i = 0; i < 4; i++)
-                cached_blendcolor[i] = -1.f;
+	int i;
+	cached_gamma = -1.f;
+	cached_contrast = -1.f;
+	for (i = 0; i < 4; i++)
+		cached_blendcolor[i] = -1.f;
 }
 
 /*
@@ -2658,33 +2656,27 @@ Returns index of palette buffer to use:
 	blend = (v_blend[3] && gl_polyblend.value) ? v_blend : vec4_origin;
 
 	/* can we use the original palette? */
-        if (vid_gamma.value == 1.f &&
-                vid_contrast.value == 1.f &&
-                vid_saturation.value == 1.f &&
-                blend[3] == 0.f)
-                return 0;
+	if (vid_gamma.value == 1.f &&
+		vid_contrast.value == 1.f &&
+		blend[3] == 0.f)
+		return 0;
 
 	/* no change since last time? */
-        if (cached_gamma == vid_gamma.value &&
-                cached_contrast == vid_contrast.value &&
-                cached_saturation == vid_saturation.value &&
-                memcmp (cached_blendcolor, blend, 4 * sizeof (float)) == 0)
-                return 1;
+	if (cached_gamma == vid_gamma.value &&
+		cached_contrast == vid_contrast.value &&
+		memcmp (cached_blendcolor, blend, 4 * sizeof (float)) == 0)
+		return 1;
 
-        cached_gamma = vid_gamma.value;
-        cached_contrast = vid_contrast.value;
-        cached_saturation = vid_saturation.value;
-        memcpy (cached_blendcolor, blend, 4 * sizeof (float));
+	cached_gamma = vid_gamma.value;
+	cached_contrast = vid_contrast.value;
+	memcpy (cached_blendcolor, blend, 4 * sizeof (float));
 
 	GL_BeginGroup ("Postprocess palette");
 
 	GL_UseProgram (glprogs.palette_postprocess);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_palette_buffer[1], 0, 256 * sizeof (GLuint));
-        GL_Uniform3fFunc (0,
-                vid_gamma.value,
-                CLAMP (1.0f, vid_contrast.value, 2.0f),
-                CLAMP (0.0f, vid_saturation.value, 2.0f));
+	GL_Uniform2fFunc (0, vid_gamma.value, CLAMP (1.0f, vid_contrast.value, 2.0f));
 	GL_Uniform4fvFunc (1, 1, blend);
 	GL_DispatchComputeFunc (256/64, 1, 1);
 	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
