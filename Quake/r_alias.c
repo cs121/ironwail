@@ -56,6 +56,8 @@ typedef struct aliasinstance_s {
 	float		prev_worldmatrix[12];
 	vec3_t		lightcolor;
 	float		alpha;
+	vec3_t		dlightcolor;
+	float		_pad0;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -64,6 +66,7 @@ typedef struct aliasinstance_s {
 
 #define ALIAS_INSTANCE_FLAG_NONE          0
 #define ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR (1 << 0)
+#define ALIAS_INSTANCE_FLAG_VIEWMODEL     (1 << 1)
 
 struct ibuf_s {
 	int			count;
@@ -229,11 +232,13 @@ void R_SetupEntityTransform (entity_t *e, lerpdata_t *lerpdata)
 R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritten
 =================
 */
-void R_SetupAliasLighting (entity_t	*e)
+void R_SetupAliasLighting (entity_t     *e)
 {
 	vec3_t		dist;
 	float		add;
-	unsigned int	 i;
+	unsigned int	i;
+	vec3_t		dlightcolor = {0.f, 0.f, 0.f};
+	vec3_t		ambientcolor;
 
 	// if the initial trace is completely black, try again from above
 	// this helps with models whose origin is slightly below ground level
@@ -241,36 +246,49 @@ void R_SetupAliasLighting (entity_t	*e)
 	if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
 		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
+	VectorCopy (lightcolor, ambientcolor);
+
 	//add dlights
-       for (i=0; i<r_framedata.numlights; i++)
-       {
-               gpulight_t *l = &r_lightbuffer.lights[i];
-               VectorSubtract (e->origin, l->pos, dist);
-               add = DotProduct (dist, dist);
-               if (l->radius * l->radius > add)
-                       VectorMA (lightcolor, l->radius - sqrtf (add), l->color, lightcolor);
-       }
+	for (i=0; i<r_framedata.numlights; i++)
+	{
+		gpulight_t *l = &r_lightbuffer.lights[i];
+		VectorSubtract (e->origin, l->pos, dist);
+		add = DotProduct (dist, dist);
+		if (l->radius * l->radius > add)
+		{
+			const float intensity = l->radius - sqrtf (add);
+			VectorMA (lightcolor, intensity, l->color, lightcolor);
+			VectorMA (dlightcolor, intensity, l->color, dlightcolor);
+		}
+	}
 
-        // viewmodel lighting is typically darker because world lights aren't placed for a free camera
-        if (e == &cl.viewent)
-        {
-                for (i = 0; i < 3; i++)
-                {
-                        const float L = lightcolor[i];
-                        lightcolor[i] = fmaxf (L * 1.5f, L + 40.0f);
-                }
-        }
+	// viewmodel lighting is typically darker because world lights aren't placed for a free camera
+	if (e == &cl.viewent)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			const float L = lightcolor[i];
+			const float new_L = fmaxf (L * 1.5f, L + 40.0f);
+			const float scale = L > 0.0f ? new_L / L : 0.0f;
+			ambientcolor[i] *= scale;
+			dlightcolor[i] *= scale;
+			lightcolor[i] = new_L;
+		}
+	}
 
-        // minimum light value on gun (24)
-        if (e == &cl.viewent)
-        {
-                add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
-                if (add > 0.0f)
+	// minimum light value on gun (24)
+	if (e == &cl.viewent)
+	{
+		add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+		if (add > 0.0f)
 		{
 			add *= 1.0f / 3.0f;
 			lightcolor[0] += add;
 			lightcolor[1] += add;
 			lightcolor[2] += add;
+			ambientcolor[0] += add;
+			ambientcolor[1] += add;
+			ambientcolor[2] += add;
 		}
 	}
 
@@ -284,26 +302,49 @@ void R_SetupAliasLighting (entity_t	*e)
 			lightcolor[0] += add;
 			lightcolor[1] += add;
 			lightcolor[2] += add;
+			ambientcolor[0] += add;
+			ambientcolor[1] += add;
+			ambientcolor[2] += add;
 		}
 	}
 
-        //hack up the brightness when fullbrights but no overbrights (256)
-        if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
-        {
-                lightcolor[0] = 256.0f;
-                lightcolor[1] = 256.0f;
-                lightcolor[2] = 256.0f;
-        }
+	//hack up the brightness when fullbrights but no overbrights (256)
+	if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
+	{
+		lightcolor[0] = 256.0f;
+		lightcolor[1] = 256.0f;
+		lightcolor[2] = 256.0f;
+		VectorCopy (lightcolor, ambientcolor);
+		VectorClear (dlightcolor);
+	}
 
-        const float overbright = gl_overbright_models.value ? 2.0f : 1.0f;
+	const float overbright = gl_overbright_models.value ? 2.0f : 1.0f;
 
-        for (i = 0; i < 3; i++)
-        {
-                float L = lightcolor[i] * (1.0f / 256.0f);
-                L = fminf(L * overbright, 1.0f);
-                L = powf(L, 1.0f / 2.2f);
-                lightcolor[i] = L;
-        }
+	{
+		vec3_t pre_total;
+		vec3_t post_total;
+		VectorAdd (ambientcolor, dlightcolor, pre_total);
+		for (i = 0; i < 3; i++)
+		{
+			float L = pre_total[i] * (1.0f / 256.0f);
+			L = fminf(L * overbright, 1.0f);
+			L = powf(L, 1.0f / 2.2f);
+			post_total[i] = L;
+		}
+
+		for (i = 0; i < 3; i++)
+		{
+			const float total = pre_total[i];
+			const float ambient_ratio = total > 0.0f ? ambientcolor[i] / total : 0.0f;
+			const float dlight_ratio = total > 0.0f ? dlightcolor[i] / total : 0.0f;
+			ambientcolor[i] = post_total[i] * ambient_ratio;
+			dlightcolor[i] = post_total[i] * dlight_ratio;
+			lightcolor[i] = post_total[i];
+		}
+	}
+
+	VectorCopy (ambientcolor, e->lightcache.ambientcolor);
+	VectorCopy (dlightcolor, e->lightcache.dlightcolor);
 }
 
 /*
@@ -572,7 +613,11 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	//
 
 	if (r_fullbright_cheatsafe || showtris)
+	{
 		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
+		VectorCopy (lightcolor, e->lightcache.ambientcolor);
+		VectorClear (e->lightcache.dlightcolor);
+	}
 
 	if (showtris)
 		entalpha = 1.f;
@@ -625,12 +670,11 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	e->motion_blur_prev_frame = r_framecount;
 	e->motion_blur_prev_valid = true;
 
-	instance->lightcolor[0] = lightcolor[0];
-	instance->lightcolor[1] = lightcolor[1];
-	instance->lightcolor[2] = lightcolor[2];
+	VectorCopy (lightcolor, instance->lightcolor);
+	VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
 	instance->alpha = entalpha;
 	if (e == &cl.viewent)
-		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR;
+		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;
