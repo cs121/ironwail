@@ -23,10 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
+extern cvar_t r_lightgrid;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -242,13 +244,25 @@ void R_SetupAliasLighting (entity_t     *e)
 	vec3_t		dlightcolor = {0.f, 0.f, 0.f};
 	vec3_t		ambientcolor;
 
-	// if the initial trace is completely black, try again from above
-	// this helps with models whose origin is slightly below ground level
-	// (e.g. some of the candles in the DOTM start map)
-	if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+        if (r_lightgrid.value && Lightgrid_Get ())
+        {
+                vec3_t sample_color, sample_dir;
+                int j;
+                Lightgrid_Sample (e->origin, sample_color, sample_dir);
+                for (j = 0; j < 3; j++)
+                        lightcolor[j] = sample_color[j] * 256.0f;
+                VectorCopy (lightcolor, ambientcolor);
+        }
+        else
+        {
+                // if the initial trace is completely black, try again from above
+                // this helps with models whose origin is slightly below ground level
+                // (e.g. some of the candles in the DOTM start map)
+                if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+                        R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
-	VectorCopy (lightcolor, ambientcolor);
+                VectorCopy (lightcolor, ambientcolor);
+        }
 
 	//add dlights
 	for (i=0; i<r_framedata.numlights; i++)
