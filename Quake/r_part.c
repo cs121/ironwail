@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -725,16 +726,25 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 		v = &partverts[numpartverts++];
 		VectorCopy (p->org, v->pos);
 
-		//johnfitz -- particle transparency and fade out
-		c = showtris ? color : (GLubyte *) &d_8to24table[(int)p->color];
-		*(uint32_t*)&v->color = *(uint32_t*)c;
-		v->color[0] = c[0];
-		v->color[1] = c[1];
-		v->color[2] = c[2];
-		//alpha = CLAMP(0, p->die + 0.5 - cl.time, 1);
-		v->color[3] = c[3]; //(int)(alpha * 255);
-		//johnfitz
-	}
+                //johnfitz -- particle transparency and fade out
+                c = showtris ? color : (GLubyte *) &d_8to24table[(int)p->color];
+                *(uint32_t*)&v->color = *(uint32_t*)c;
+                v->color[0] = c[0];
+                v->color[1] = c[1];
+                v->color[2] = c[2];
+                //alpha = CLAMP(0, p->die + 0.5 - cl.time, 1);
+                v->color[3] = c[3]; //(int)(alpha * 255);
+                //johnfitz
+
+                if (r_lightgrid.value && Lightgrid_Get ())
+                {
+                        vec3_t sample_color, sample_dir;
+                        Lightgrid_Sample (p->org, sample_color, sample_dir);
+                        v->color[0] = (GLubyte)CLAMP (0, (int)(v->color[0] * sample_color[0]), 255);
+                        v->color[1] = (GLubyte)CLAMP (0, (int)(v->color[1] * sample_color[1]), 255);
+                        v->color[2] = (GLubyte)CLAMP (0, (int)(v->color[2] * sample_color[2]), 255);
+                }
+        }
 
 	R_FlushParticleBatch ();
 

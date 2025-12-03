@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 #define NOISESCALE     (1.0f / 127.0f)
 
@@ -2424,17 +2425,66 @@ R_ShowPointFile
 */
 static void R_ShowPointFile (void)
 {
-	size_t i;
+        size_t i;
 
-	if (VEC_SIZE (r_pointfile) == 0)
-		return;
+        if (VEC_SIZE (r_pointfile) == 0)
+                return;
 
-	GL_BeginGroup ("Point file");
-	R_SetDebugGeometryZTest (true);
-	for (i = 1; i < VEC_SIZE (r_pointfile); i++)
-		R_EmitArrow (r_pointfile[i - 1], r_pointfile[i], 0xff3f3f7f);
-	R_FlushDebugGeometry ();
-	GL_EndGroup ();
+        GL_BeginGroup ("Point file");
+        R_SetDebugGeometryZTest (true);
+        for (i = 1; i < VEC_SIZE (r_pointfile); i++)
+                R_EmitArrow (r_pointfile[i - 1], r_pointfile[i], 0xff3f3f7f);
+        R_FlushDebugGeometry ();
+        GL_EndGroup ();
+}
+
+static void R_ShowLightgrid (void)
+{
+        const lightgrid_t *lg;
+        int x, y, z;
+
+        if (!r_lightgrid_debug.value)
+                return;
+
+        lg = Lightgrid_Get ();
+        if (!lg)
+                return;
+
+        GL_BeginGroup ("Lightgrid");
+        R_SetDebugGeometryZTest (false);
+
+        for (z = 0; z < lg->nz; z++)
+        {
+                for (y = 0; y < lg->ny; y++)
+                {
+                        for (x = 0; x < lg->nx; x++)
+                        {
+                                const lightgrid_cell_t *cell = &lg->cells[(z * lg->ny + y) * lg->nx + x];
+                                vec3_t mins, maxs;
+                                uint32_t color;
+                                int r, g, b, a;
+
+                                mins[0] = lg->mins[0] + x * lg->cellsize;
+                                mins[1] = lg->mins[1] + y * lg->cellsize;
+                                mins[2] = lg->mins[2] + z * lg->cellsize;
+
+                                maxs[0] = mins[0] + lg->cellsize;
+                                maxs[1] = mins[1] + lg->cellsize;
+                                maxs[2] = mins[2] + lg->cellsize;
+
+                                r = CLAMP (0, (int)(cell->color[0] * 255.f), 255);
+                                g = CLAMP (0, (int)(cell->color[1] * 255.f), 255);
+                                b = CLAMP (0, (int)(cell->color[2] * 255.f), 255);
+                                a = 127;
+                                color = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+
+                                R_EmitWireBox (mins, maxs, color);
+                        }
+                }
+        }
+
+        R_FlushDebugGeometry ();
+        GL_EndGroup ();
 }
 
 /*
@@ -2646,13 +2696,15 @@ void R_RenderScene (void)
 
 	R_EndTranslucency ();
 
-	R_ShowTris (); //johnfitz
+        R_ShowTris (); //johnfitz
 
-	R_ShowBoundingBoxes (); //johnfitz
+        R_ShowBoundingBoxes (); //johnfitz
 
-	R_ShowPointFile ();
+        R_ShowPointFile ();
 
-	Fog_DisableGFog (); // Leave fog disabled for 2D overlays
+        R_ShowLightgrid ();
+
+        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 }
 
 /*
