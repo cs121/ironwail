@@ -116,6 +116,7 @@ layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), z: screen-space darken strength, w: screen-space darken depth range
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
+layout(location=12) uniform float Saturation;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -449,6 +450,8 @@ void main()
         float exposure = max(HDRParams.y, 0.0);
         float tonemapMode = HDRParams.z;
         vec3 combined = (hdrColor + bloomColor) * exposure * contrast;
+        float luma = dot(combined, vec3(0.2126, 0.7152, 0.0722));
+        combined = mix(vec3(luma), combined, clamp(Saturation, 0.0, 2.0));
         combined = max(combined, vec3(0.0));
         vec3 mapped;
         if (tonemapMode > 0.5)

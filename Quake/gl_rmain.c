@@ -781,8 +781,9 @@ void GL_PostProcess (void)
         GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
         GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
-	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
-		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
+        if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
+                GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
+        GL_Uniform1fFunc (12, q_min (2.f, q_max (0.f, vid_saturation.value)));
         GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
         GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
         GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
@@ -1446,7 +1447,7 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-        if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+        if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || vid_saturation.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
                 return true;
         if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
                 return true;

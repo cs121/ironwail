@@ -3133,6 +3133,7 @@ void M_Menu_Gamepad_f (void)
 		item (OPT_PREVIEW,				"Live Preview")					\
 		item (OPT_GAMMA,				"Brightness")					\
 		item (OPT_CONTRAST,				"Contrast")						\
+                item (OPT_SATURATION,                           "Saturation")                                   \
 		item (OPT_VIDEO,				"Display")						\
 		item (OPT_GRAPHICS,				"Graphics")						\
 		item (OPT_INTERFACE,			"Interface")					\
@@ -3471,12 +3472,13 @@ static void M_Options_Preview (int id)
 	{
 		if (id < GRAPHICS_OPTIONS_BEGIN || id >= GRAPHICS_OPTIONS_END)
 		{
-			switch (id)
-			{
-			case OPT_GAMMA:
-			case OPT_CONTRAST:
-			case OPT_UISCALE:
-			case OPT_HUDSTYLE:
+                        switch (id)
+                        {
+                        case OPT_GAMMA:
+                        case OPT_CONTRAST:
+                        case OPT_SATURATION:
+                        case OPT_UISCALE:
+                        case OPT_HUDSTYLE:
 			case OPT_SBALPHA:
 			case OPT_HUDLEVEL:
 			case OPT_CONALPHA:
@@ -3678,6 +3680,12 @@ void M_AdjustSliders (int dir)
 		if (f < 1)	f = 1;
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrast", f);
+		break;
+	case OPT_SATURATION:	// saturation
+		f = vid_saturation.value + dir * 0.1f;
+		if (f < 0)	f = 0;
+		else if (f > 2)	f = 2;
+		Cvar_SetValue ("saturation", f);
 		break;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = sensitivity.value + dir * 0.5;
@@ -4075,6 +4083,9 @@ qboolean M_SetSliderValue (int option, float f)
 		f += 1.f;
 		Cvar_SetValue ("contrast", f);
 		return true;
+	case OPT_SATURATION:	// saturation
+		Cvar_SetValue ("saturation", f * 2.f);
+		return true;
 	case OPT_RENDERSCALE:
 		f = floor (1 + f * (vid.maxscale - 1) + 0.5);
 		Cvar_SetValueQuick (&r_scale, f);
@@ -4319,15 +4330,20 @@ static void M_Options_DrawItem (int y, int item)
 		M_DrawSlider (x, y, r, va ("%.0f", 10.f * r));
 		break;
 
-	case OPT_CONTRAST:
-		r = vid_contrast.value - 1.0;
-		M_DrawSlider (x, y, r, va ("%.0f", 10.f * r));
-		break;
-	
-	case OPT_MOUSESPEED:
-		r = (sensitivity.value - 1)/10;
-		M_DrawSlider (x, y, r, va ("%.1f", sensitivity.value));
-		break;
+        case OPT_CONTRAST:
+                r = vid_contrast.value - 1.0;
+                M_DrawSlider (x, y, r, va ("%.0f", 10.f * r));
+                break;
+
+        case OPT_SATURATION:
+                r = vid_saturation.value * 0.5f;
+                M_DrawSlider (x, y, r, va ("%.0f%%", vid_saturation.value * 100.f));
+                break;
+
+        case OPT_MOUSESPEED:
+                r = (sensitivity.value - 1)/10;
+                M_DrawSlider (x, y, r, va ("%.1f", sensitivity.value));
+                break;
 
 	case OPT_SBALPHA:
 		r = (1.0 - scr_sbaralpha.value) ; // scr_sbaralpha range is 1.0 to 0.0
