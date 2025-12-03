@@ -90,6 +90,7 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
+const int ALIAS_FLAG_LIGHTNING = 4;
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
@@ -173,6 +174,13 @@ void main()
 #endif
         result.rgb += fullbright;
         result.rgb += emissive;
+
+        if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
+        {
+                float d = clamp(length(in_texcoord - 0.5) * 2.0, 0.0, 1.0);
+                float ghost = pow(1.0 - d, 3.0) * 0.2;
+                result.rgb += ghost * vec3(0.5, 0.7, 1.3);
+        }
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;

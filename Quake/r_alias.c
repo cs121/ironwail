@@ -64,9 +64,10 @@ typedef struct aliasinstance_s {
 	int32_t		flags;
 } aliasinstance_t;
 
-#define ALIAS_INSTANCE_FLAG_NONE          0
+#define ALIAS_INSTANCE_FLAG_NONE           0
 #define ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR (1 << 0)
-#define ALIAS_INSTANCE_FLAG_VIEWMODEL     (1 << 1)
+#define ALIAS_INSTANCE_FLAG_VIEWMODEL      (1 << 1)
+#define ALIAS_INSTANCE_FLAG_LIGHTNING      (1 << 2)
 
 struct ibuf_s {
 	int			count;
@@ -670,14 +671,16 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	e->motion_blur_prev_frame = r_framecount;
 	e->motion_blur_prev_valid = true;
 
-	VectorCopy (lightcolor, instance->lightcolor);
-	VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
-	instance->alpha = entalpha;
-	if (e == &cl.viewent)
-		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-	instance->pose1 = lerpdata.pose1;
-	instance->pose2 = lerpdata.pose2;
-	instance->blend = lerpdata.blend;
+        VectorCopy (lightcolor, instance->lightcolor);
+        VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
+        instance->alpha = entalpha;
+        if (e == &cl.viewent)
+                instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
+        if (!q_strncmp (e->model->name, "progs/bolt", 10))
+                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+        instance->pose1 = lerpdata.pose1;
+        instance->pose2 = lerpdata.pose2;
+        instance->blend = lerpdata.blend;
 
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
