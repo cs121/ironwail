@@ -471,13 +471,13 @@ void main()
 				}
 			}
 			
-			total_light += clamp(dynamic_light, 0.0, 1.0 - total_light);
-		}
-	}
+                        total_light += clamp(dynamic_light, vec3(0.0), 1.0 - total_light);
+                }
+        }
 
-	// Sun Light
-	vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
-	total_light += clamp(sun_light, 0.0, 1.0 - total_light);
+        // Sun Light
+        vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
+        total_light += clamp(sun_light, vec3(0.0), 1.0 - total_light);
 
 	// ========================================================================
 	// FINAL LIGHTING COMPOSITION
