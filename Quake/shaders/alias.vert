@@ -155,5 +155,5 @@ void main()
 	bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
 	vec3 final_color = is_viewmodel ? (ambient + dlight) : (inst.LightColor.rgb * lighting * Overbright);
 	
-	out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
+    out_color = clamp(vec4(final_color, inst.LightColor.a), vec4(0.0), vec4(Overbright));
 }
