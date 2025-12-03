@@ -712,8 +712,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         instance->alpha = entalpha;
         if (e == &cl.viewent)
                 instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-        if (!q_strncmp (e->model->name, "progs/bolt", 10))
-                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
+		instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
