@@ -37,6 +37,7 @@ static shader_cache_t shader_cache[128];
 static int shader_cache_count;
 
 glprogs_t glprogs;
+model_program_t model_program;
 static GLuint gl_programs[128];
 static GLuint gl_current_program;
 static int gl_num_programs;
@@ -545,6 +546,14 @@ void GL_CreateShaders (void)
                                 for (md5 = 0; md5 < 2; md5++)
                                         glprogs.alias[oit][mode][alphatest][md5] =
                                                 GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
+
+        memset (&model_program, 0, sizeof (model_program));
+        model_program.u_rimColor = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "rimColor");
+        model_program.u_rimStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "rimStrength");
+        model_program.u_halfLambertStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "halfLambertStrength");
+        model_program.u_viewmodelRimColor = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "viewmodelRimColor");
+        model_program.u_viewmodelRimStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "viewmodelRimStrength");
+        model_program.u_isViewmodel = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "isViewmodel");
 
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
 

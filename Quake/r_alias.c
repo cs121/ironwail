@@ -36,6 +36,9 @@ const float	r_avertexnormals[NUMVERTEXNORMALS][3] = {
 };
 
 extern vec3_t	lightcolor; //johnfitz -- replaces "float shadelight" for lit support
+static const float rimStrength = 0.35f;
+static const float halfLambertStrength = 1.0f;
+static const float viewmodelRimStrength = 0.45f;
 
 static float	entalpha; //johnfitz
 
@@ -382,25 +385,58 @@ void R_FlushAliasInstances (qboolean showtris)
 
 	alphatest = model->flags & MF_HOLEY ? 1 : 0;
 	translucent = !ENTALPHA_OPAQUE (ibuf.ent->alpha);
-	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
-	switch (softemu)
-	{
-	case SOFTEMU_BANDED:
-		mode = r_softemu_mdl_warp.value != 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
+        oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
+        switch (softemu)
+        {
+        case SOFTEMU_BANDED:
+                mode = r_softemu_mdl_warp.value != 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
 		break;
 	case SOFTEMU_COARSE:
 		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_DITHER;
 		break;
-	default:
-		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
-		break;
-	}
-	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+        default:
+                mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
+                break;
+        }
+        GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 
-	if (md5)
-		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
-	else
-		state = GLS_CULL_BACK | GLS_ATTRIBS(1);
+        {
+                vec3 ambient = R_ComputeSceneAmbient ();
+                vec3_t rimColor;
+                vec3_t viewmodelRimColor;
+                qboolean is_viewmodel = (ibuf.inst[0].flags & ALIAS_INSTANCE_FLAG_VIEWMODEL) != 0;
+
+                rimColor[0] = ambient.x * 0.7f + 0.3f;
+                rimColor[1] = ambient.y * 0.7f + 0.3f;
+                rimColor[2] = ambient.z * 0.7f + 0.3f;
+                VectorCopy (rimColor, viewmodelRimColor);
+
+                if (model_program.u_rimColor >= 0)
+                        GL_Uniform3fvFunc (model_program.u_rimColor, 1, rimColor);
+                if (model_program.u_rimStrength >= 0)
+                        GL_Uniform1fFunc (model_program.u_rimStrength, rimStrength);
+                if (model_program.u_halfLambertStrength >= 0)
+                        GL_Uniform1fFunc (model_program.u_halfLambertStrength, halfLambertStrength);
+
+                if (is_viewmodel)
+                {
+                        if (model_program.u_isViewmodel >= 0)
+                                GL_Uniform1iFunc (model_program.u_isViewmodel, 1);
+                        if (model_program.u_viewmodelRimColor >= 0)
+                                GL_Uniform3fvFunc (model_program.u_viewmodelRimColor, 1, viewmodelRimColor);
+                        if (model_program.u_viewmodelRimStrength >= 0)
+                                GL_Uniform1fFunc (model_program.u_viewmodelRimStrength, viewmodelRimStrength);
+                }
+                else if (model_program.u_isViewmodel >= 0)
+                {
+                        GL_Uniform1iFunc (model_program.u_isViewmodel, 0);
+                }
+        }
+
+        if (md5)
+                state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+        else
+                state = GLS_CULL_BACK | GLS_ATTRIBS(1);
 
 	if (!translucent)
 		state |= GLS_BLEND_OPAQUE;
