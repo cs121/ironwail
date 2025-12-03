@@ -71,16 +71,14 @@ struct PoseVertex
 
 #endif // MD5
 
-float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH 
+float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH, blended with half-lambert
 {
-	float d = dot(vertexnormal, dir);
-	if (ModelHalfLambert > 0.5)
-		return max(d, 0.0) * 0.5 + 0.5;
-	// wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
-	if (d < 0.0)
-		return 1.0 + d * (13.0 / 44.0);
-	else
-		return 1.0 + d;
+        float d = dot(vertexnormal, dir);
+        float halfLambert = max(d, 0.0) * 0.5 + 0.5;
+        // wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
+        float quakeShade = d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
+        float halfLambertMix = clamp(ModelHalfLambert, 0.0, 1.0);
+        return mix(quakeShade, halfLambert, halfLambertMix);
 }
 
 #if MODE == 2
@@ -120,16 +118,17 @@ void main()
         vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
-        float lighting = mix(dot1, dot2, inst.Blend);
+        float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
         vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
         mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
         vec3 world_normal = normalize(world_orientation * blended_normal);
         vec3 view_dir = normalize(-out_pos);
         float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
-        vec3 dlight = inst.DLightColor.rgb * (lighting * Overbright);
-        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0)) * (lighting * (Overbright * 0.5));
-        vec3 viewmodel_color = ambient + dlight + vec3(rim);
+        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
+        vec3 litDlight = inst.DLightColor.rgb * (lighting * Overbright);
+        vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 final_color = is_viewmodel ? viewmodel_color : inst.LightColor.rgb * (lighting * Overbright);
+        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
         out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
 }
