@@ -127,7 +127,8 @@ void main()
         mat3 normalMatrix = world_orientation;
         vNormal = normalize(normalMatrix * blended_normal);
         vec3 dlight = inst.DLightColor.rgb * (lighting * Overbright);
-        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0)) * (lighting * (Overbright * 0.5));
+        // Use the full ambient contribution for viewmodels so they don't render noticeably darker.
+        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0)) * (lighting * Overbright);
         vec3 viewmodel_color = ambient + dlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? viewmodel_color : inst.LightColor.rgb * (lighting * Overbright);
