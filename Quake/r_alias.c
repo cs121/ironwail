@@ -324,13 +324,13 @@ void R_SetupAliasLighting (entity_t     *e)
 		}
 	}
 
-	//hack up the brightness when fullbrights but no overbrights (256)
-	if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
-	{
-		lightcolor[0] = 256.0f;
-		lightcolor[1] = 256.0f;
-		lightcolor[2] = 256.0f;
-		VectorCopy (lightcolor, ambientcolor);
+        //hack up the brightness when fullbrights are enabled (256)
+        if ((e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
+        {
+                lightcolor[0] = 256.0f;
+                lightcolor[1] = 256.0f;
+                lightcolor[2] = 256.0f;
+                VectorCopy (lightcolor, ambientcolor);
 		VectorClear (dlightcolor);
 	}
 
