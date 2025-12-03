@@ -127,7 +127,8 @@ void main()
         mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
         vec3 world_normal = normalize(world_orientation * blended_normal);
         vec3 view_dir = normalize(-out_pos);
-        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+        float ndv = max(dot(world_normal, view_dir), 0.0);
+        float rim = smoothstep(0.2, 0.8, 1.0 - ndv) * 0.25;
         mat3 normalMatrix = world_orientation;
         vNormal = normalize(normalMatrix * blended_normal);
         vViewDir = normalize(EyePos - world_vert);
