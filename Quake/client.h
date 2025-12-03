@@ -412,6 +412,7 @@ void V_StopPitchDrift (void);
 
 void V_RenderView (void);
 void V_ParseDamage (void);
+void V_AddExplosionVibration (const vec3_t origin);
 void V_SetContentsColor (int contents);
 
 //

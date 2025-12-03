@@ -187,40 +187,42 @@ void CL_ParseTEnt (void)
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		break;
 
-	case TE_EXPLOSION:			// rocket explosion
+	case TE_EXPLOSION:                      // rocket explosion
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-                R_ParticleExplosion (pos);
-                dl = CL_AllocDlight (0);
-                VectorCopy (pos, dl->origin);
-                dl->radius = 350;
-                dl->baseradius = dl->radius;
-                dl->color[0] = 1.00f; dl->color[1] = 0.50f; dl->color[2] = 0.25f;
-                dl->die = cl.time + 0.5;
-                dl->decay = 300;
-                dl->type = DLIGHT_EXPLOSION;
-                S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-                break;
+		V_AddExplosionVibration (pos);
+		R_ParticleExplosion (pos);
+		dl = CL_AllocDlight (0);
+		VectorCopy (pos, dl->origin);
+		dl->radius = 350;
+		dl->baseradius = dl->radius;
+		dl->color[0] = 1.00f; dl->color[1] = 0.50f; dl->color[2] = 0.25f;
+		dl->die = cl.time + 0.5;
+		dl->decay = 300;
+		dl->type = DLIGHT_EXPLOSION;
+		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+		break;
 
-	case TE_TAREXPLOSION:			// tarbaby explosion
+	case TE_TAREXPLOSION:                   // tarbaby explosion
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-                R_BlobExplosion (pos);
+		V_AddExplosionVibration (pos);
+		R_BlobExplosion (pos);
 
-                S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-                break;
+		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+		break;
 
-	case TE_LIGHTNING1:				// lightning bolts
+	case TE_LIGHTNING1:			     // lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt.mdl", true));
 		break;
 
-	case TE_LIGHTNING2:				// lightning bolts
+	case TE_LIGHTNING2:			     // lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt2.mdl", true));
 		break;
 
-	case TE_LIGHTNING3:				// lightning bolts
+	case TE_LIGHTNING3:			     // lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt3.mdl", true));
 		break;
 
@@ -248,6 +250,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
+		V_AddExplosionVibration (pos);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
                 R_ParticleExplosion2 (pos, colorStart, colorLength);

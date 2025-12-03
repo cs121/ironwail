@@ -49,6 +49,8 @@ cvar_t	v_kickpitch = {"v_kickpitch", "0.6", CVAR_NONE};
 cvar_t	v_gunkick = {"v_gunkick", "2", CVAR_ARCHIVE}; //johnfitz
 cvar_t	v_gunsway = {"v_gunsway", "0", CVAR_ARCHIVE};
 
+cvar_t	v_explosionvibration = {"v_explosionvibration", "1", CVAR_ARCHIVE};
+
 cvar_t	v_iyaw_cycle = {"v_iyaw_cycle", "2", CVAR_NONE};
 cvar_t	v_iroll_cycle = {"v_iroll_cycle", "0.5", CVAR_NONE};
 cvar_t	v_ipitch_cycle = {"v_ipitch_cycle", "1", CVAR_NONE};
@@ -257,6 +259,11 @@ static cshift_t cshift_slime = { {0,25,5}, 150 };
 static cshift_t cshift_lava = { {255,80,0}, 150 };
 
 static float v_dmg_time, v_dmg_roll, v_dmg_pitch;
+static float v_explosion_vibration_time;
+static float v_explosion_vibration_strength;
+
+static const float V_EXPLOSION_VIBRATION_DURATION = 0.25f;
+static const float V_EXPLOSION_VIBRATION_FREQUENCY = 40.0f;
 
 float		v_blend[4];		// rgba 0.0 - 1.0; see note in V_PolyBlend for more info
 
@@ -274,6 +281,8 @@ void V_ResetEffects (void)
 	v_dmg_time = 0.f;
 	v_dmg_roll = 0.f;
 	v_dmg_pitch = 0.f;
+	v_explosion_vibration_time = 0.f;
+	v_explosion_vibration_strength = 0.f;
 }
 
 /*
@@ -345,6 +354,33 @@ void V_ParseDamage (void)
 
 	v_dmg_time = v_kicktime.value;
 }
+
+
+void V_AddExplosionVibration (const vec3_t origin)
+{
+	vec3_t delta;
+	float distance;
+	float strength;
+	entity_t *ent;
+
+	if (!v_explosionvibration.value)
+		return;
+
+	ent = &cl_entities[cl.viewentity];
+
+	VectorCopy (ent->origin, delta);
+	delta[2] += cl.viewheight;
+	VectorSubtract (origin, delta, delta);
+
+	distance = VectorLength (delta);
+	strength = 2.0f * expf (-distance * 0.01f);
+	if (strength < 0.01f)
+		return;
+
+	v_explosion_vibration_strength = q_max (v_explosion_vibration_strength, strength);
+	v_explosion_vibration_time = V_EXPLOSION_VIBRATION_DURATION;
+}
+
 
 
 /*
@@ -895,6 +931,19 @@ void V_CalcRefdef (void)
 	}
 	//johnfitz
 
+	if (v_explosion_vibration_time > 0.f)
+	{
+		float decay = v_explosion_vibration_time / V_EXPLOSION_VIBRATION_DURATION;
+		float pitch_vibration = sinf (cl.time * V_EXPLOSION_VIBRATION_FREQUENCY) * v_explosion_vibration_strength * decay;
+		r_refdef.viewangles[PITCH] -= pitch_vibration;
+		v_explosion_vibration_time -= cl.time - cl.oldtime;
+		if (v_explosion_vibration_time < 0.f)
+		{
+			v_explosion_vibration_time = 0.f;
+			v_explosion_vibration_strength = 0.f;
+		}
+	}
+
 	V_AddGunSway (view);
 
 	// smooth out stair step ups
@@ -1042,6 +1091,7 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_kickpitch);
 	Cvar_RegisterVariable (&v_gunkick); //johnfitz
 	Cvar_RegisterVariable (&v_gunsway);
+	Cvar_RegisterVariable (&v_explosionvibration);
 
 	Cvar_RegisterVariable (&r_viewmodel_quake); //MarkV
 }
