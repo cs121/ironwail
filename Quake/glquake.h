@@ -566,12 +566,7 @@ typedef struct glprogs_s {
 extern glprogs_t glprogs;
 
 typedef struct model_program_s {
-        int                     u_rimColor;
-        int                     u_rimStrength;
-        int                     u_halfLambertStrength;
-        int                     u_viewmodelRimColor;
-        int                     u_viewmodelRimStrength;
-        int                     u_isViewmodel;
+	int                     u_halfLambertStrength;
 } model_program_t;
 
 extern model_program_t model_program;
