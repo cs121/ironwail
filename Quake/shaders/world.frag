@@ -383,6 +383,7 @@ void main()
 			total_light = vec3(ivec3((cluster_idx + 1) * 0x45d9f3b) >> ivec3(0, 8, 16) & 255) / 255.0;
 #endif // SHOW_ACTIVE_LIGHT_CLUSTERS
                         vec3 dynamic_light = vec3(0.);
+                        float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 			vec4 plane;
 			plane.xyz = surface_normal;
 			plane.w = dot(in_pos, plane.xyz);
@@ -410,7 +411,7 @@ void main()
                                         float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
                                         float normalized_dist = surface_dist / rad;
                                         float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-                                        vec3 light_contrib = attenuation * falloff * l.color;
+                                        vec3 light_contrib = attenuation * falloff * l.color * dynamic_light_noise;
                                         dynamic_light += light_contrib;
                                         if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
                                         {
