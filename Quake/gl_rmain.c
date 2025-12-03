@@ -2505,16 +2505,15 @@ R_ShowTris -- johnfitz
 */
 void R_ShowTris (void)
 {
-	int* ofs;
-	entity_t** entlist = cl_sorted_visedicts;
+        int* ofs;
+        entity_t** entlist = cl_sorted_visedicts;
 
-	if (r_showtris.value < 1 || r_showtris.value > 2 || cl.maxclients > 1)
-		return;
+        if (r_showtris.value < 1 || r_showtris.value > 2 || cl.maxclients > 1)
+                return;
 
-	GL_BeginGroup ("Show tris");
+        GL_BeginGroup ("Show tris");
 
-	Fog_DisableGFog (); //johnfitz
-	R_UploadFrameData ();
+        R_UploadFrameData ();
 
 	if (r_showtris.value == 1)
 		GL_DepthRange (ZRANGE_NEAR);
@@ -2615,44 +2614,40 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-
+	
 	R_Clear ();
-
-	Fog_EnableGFog (); //johnfitz
-
+	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-
+	
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
-
+	
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
-
+	
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-
+	
 	R_DrawParticles (false);
-
+	
 	Sky_DrawSky (); //johnfitz
-
+	
 	R_DrawWater (false);
-
+	
 	R_BeginTranslucency ();
-
+	
 	R_DrawWater (true);
-
+	
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
-
+	
 	R_DrawParticles (true);
-
+	
 	R_EndTranslucency ();
-
+	
 	R_ShowTris (); //johnfitz
-
+	
 	R_ShowBoundingBoxes (); //johnfitz
-
+	
 	R_ShowPointFile ();
-
-	Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 }
 
 /*
@@ -2812,12 +2807,14 @@ void R_RenderView (void)
 		rs_brushpolys = rs_aliaspolys = rs_skypolys =
 			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
 	}
-	else if (gl_finish.value)
-		glFinish ();
+        else if (gl_finish.value)
+                glFinish ();
 
-	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
-	R_RenderScene ();
-	R_WarpScaleView ();
+        R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+        Fog_EnableGFog ();
+        R_RenderScene ();
+        R_WarpScaleView ();
+        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 
 	r_frame_rendered_this_update = true;
 
