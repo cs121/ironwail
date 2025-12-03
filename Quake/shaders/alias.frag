@@ -95,17 +95,25 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
+uniform vec3 lightDir;
+uniform vec3 rimColor;
+uniform float rimStrength;
+uniform bool isViewmodel;
+uniform vec3 viewmodelRimColor;
+uniform float viewmodelRimStrength;
 
 #if MODE == 2
-	layout(location=0) noperspective in vec2 in_texcoord;
+        layout(location=0) noperspective in vec2 in_texcoord;
 #else
-	layout(location=0) in vec2 in_texcoord;
+        layout(location=0) in vec2 in_texcoord;
 #endif
 layout(location=1) in vec4 in_color;
 layout(location=2) in vec3 in_pos;
 layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
+layout(location=6) in vec3 vNormal;
+layout(location=7) in vec3 vViewDir;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -157,9 +165,9 @@ void main()
         vec4 result = texture(Tex, uv);
 #endif
 #if ALPHATEST
-	if (result.a < 0.666)
-		discard;
-	result.rgb *= in_color.rgb;
+        if (result.a < 0.666)
+                discard;
+        result.rgb *= in_color.rgb;
 #else
 	result.rgb = mix(result.rgb, result.rgb * in_color.rgb, result.a);
 #endif
@@ -172,6 +180,13 @@ void main()
         fullbright = texture(FullbrightTex, uv).rgb;
         emissive = texture(EmissiveTex, uv).rgb;
 #endif
+        vec3 normal = normalize(vNormal);
+        vec3 viewDir = normalize(vViewDir);
+        vec3 diffuse = result.rgb;
+        float ndotl = max(dot(normal, lightDir), 0.0);
+        float hLambert = pow(ndotl * 0.5 + 0.5, 1.3);
+        diffuse *= hLambert;
+        result.rgb = diffuse;
         result.rgb += fullbright;
         result.rgb += emissive;
 
@@ -181,6 +196,11 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
+        float rim = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+        if (isViewmodel)
+                result.rgb += viewmodelRimColor * rim * viewmodelRimStrength;
+        else
+                result.rgb += rimColor * rim * rimStrength;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;

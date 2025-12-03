@@ -93,6 +93,8 @@ layout(location=2) out vec3 out_pos;
 layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
+layout(location=6) out vec3 vNormal;
+layout(location=7) out vec3 vViewDir;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -126,6 +128,9 @@ void main()
         vec3 world_normal = normalize(world_orientation * blended_normal);
         vec3 view_dir = normalize(-out_pos);
         float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+        mat3 normalMatrix = world_orientation;
+        vNormal = normalize(normalMatrix * blended_normal);
+        vViewDir = normalize(EyePos - world_vert);
         vec3 dlight = inst.DLightColor.rgb * (lighting * Overbright);
         vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0)) * (lighting * (Overbright * 0.5));
         vec3 viewmodel_color = ambient + dlight + vec3(rim);
