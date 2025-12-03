@@ -1628,7 +1628,6 @@ void R_SetupView (void)
                 r_framedata.dither[1] = 0.f;
 	}
 
-	Fog_SetupFrame (); //johnfitz
 	Sky_SetupFrame ();
 
 	// build the transformation matrix for the given view angles
@@ -2619,13 +2618,13 @@ void R_RenderScene (void)
 
 	R_Clear ();
 
-Fog_EnableGFog (); //johnfitz
+	Fog_EnableGFog (); //johnfitz
 
-// Upload frame data after fog has been set up to ensure fog parameters
-// are available to all draw calls, even when light clustering is skipped.
-R_UploadFrameData ();
+	// Upload frame data after fog has been set up to ensure fog parameters
+	// are available to all draw calls, even when light clustering is skipped.
+	R_UploadFrameData ();
 
-R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
@@ -2652,6 +2651,8 @@ R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_ShowBoundingBoxes (); //johnfitz
 
 	R_ShowPointFile ();
+
+	Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 }
 
 /*
