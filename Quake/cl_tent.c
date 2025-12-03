@@ -191,10 +191,11 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_ParticleExplosion (pos);
+                R_ParticleExplosion (pos);
                 dl = CL_AllocDlight (0);
                 VectorCopy (pos, dl->origin);
                 dl->radius = 350;
+                dl->baseradius = dl->radius;
                 dl->color[0] = 1.00f; dl->color[1] = 0.50f; dl->color[2] = 0.25f;
                 dl->die = cl.time + 0.5;
                 dl->decay = 300;
@@ -206,10 +207,10 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_BlobExplosion (pos);
+                R_BlobExplosion (pos);
 
-		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-		break;
+                S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+                break;
 
 	case TE_LIGHTNING1:				// lightning bolts
 		CL_ParseBeam (Mod_ForName("progs/bolt.mdl", true));
@@ -249,10 +250,11 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
-		R_ParticleExplosion2 (pos, colorStart, colorLength);
+                R_ParticleExplosion2 (pos, colorStart, colorLength);
                 dl = CL_AllocDlight (0);
                 VectorCopy (pos, dl->origin);
                 dl->radius = 350;
+                dl->baseradius = dl->radius;
                 dl->die = cl.time + 0.5;
                 dl->decay = 300;
                 dl->type = DLIGHT_EXPLOSION;

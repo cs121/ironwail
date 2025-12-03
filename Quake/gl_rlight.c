@@ -168,32 +168,37 @@ void R_PushDlights (void)
 		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
 		{
 			gpulight_t *out;
-			qboolean cull = false;
+                        qboolean cull = false;
+                        float radius;
 
-			if (l->spawn > cl.time)
-			{
-				l->die = 0.f;
-				continue;
-			}
+                        if (l->spawn > cl.time)
+                        {
+                                l->die = 0.f;
+                                continue;
+                        }
 
-			if (l->die < cl.time || !l->radius)
-				continue;
+                        if (l->die < cl.time || !l->baseradius)
+                                continue;
 
-			for (j = 0; j < 4; j++)
-			{
-				mplane_t *p = &frustum[j];
-				if (DotProduct (p->normal, l->origin) - p->dist + l->radius < 0.f)
-				{
-					cull = true;
-					break;
-				}
-			}
+                        radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
+                        radius = q_max (radius, 0.f);
+                        l->radius = radius;
+
+                        for (j = 0; j < 4; j++)
+                        {
+                                mplane_t *p = &frustum[j];
+                                if (DotProduct (p->normal, l->origin) - p->dist + radius < 0.f)
+                                {
+                                        cull = true;
+                                        break;
+                                }
+                        }
                         if (cull)
                                 continue;
 
                         out = &r_lightbuffer.lights[r_framedata.numlights++];
                         const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
-                        float radiusFactor = q_min (1.f, q_max (l->radius / 350.f, 0.2f));
+                        float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
                         float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
                         vec3_t finalcolor;
                         finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
@@ -211,7 +216,7 @@ void R_PushDlights (void)
                         out->pos[0]   = l->origin[0];
                         out->pos[1]   = l->origin[1];
                         out->pos[2]   = l->origin[2];
-                        out->radius   = l->radius;
+                        out->radius   = radius;
                         out->color[0] = finalcolor[0];
                         out->color[1] = finalcolor[1];
                         out->color[2] = finalcolor[2];
