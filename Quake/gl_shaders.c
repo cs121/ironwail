@@ -547,13 +547,8 @@ void GL_CreateShaders (void)
                                         glprogs.alias[oit][mode][alphatest][md5] =
                                                 GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
 
-        memset (&model_program, 0, sizeof (model_program));
-        model_program.u_rimColor = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "rimColor");
-        model_program.u_rimStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "rimStrength");
-        model_program.u_halfLambertStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "halfLambertStrength");
-        model_program.u_viewmodelRimColor = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "viewmodelRimColor");
-        model_program.u_viewmodelRimStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "viewmodelRimStrength");
-        model_program.u_isViewmodel = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "isViewmodel");
+memset (&model_program, 0, sizeof (model_program));
+model_program.u_halfLambertStrength = GL_GetUniformLocationFunc (glprogs.alias[0][ALIASSHADER_STANDARD][0][0], "halfLambertStrength");
 
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
 

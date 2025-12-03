@@ -89,18 +89,12 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 }
 
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
-const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 uniform vec3 lightDir;
-uniform vec3 rimColor;
-uniform float rimStrength;
-uniform bool isViewmodel;
-uniform vec3 viewmodelRimColor;
-uniform float viewmodelRimStrength;
 
 #if MODE == 2
         layout(location=0) noperspective in vec2 in_texcoord;
@@ -113,7 +107,6 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 vNormal;
-layout(location=7) in vec3 vViewDir;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -181,7 +174,6 @@ void main()
         emissive = texture(EmissiveTex, uv).rgb;
 #endif
         vec3 normal = normalize(vNormal);
-        vec3 viewDir = normalize(vViewDir);
         vec3 diffuse = result.rgb;
         float ndotl = max(dot(normal, lightDir), 0.0);
         float hLambert = pow(ndotl * 0.5 + 0.5, 1.3);
@@ -196,15 +188,6 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
-        float ndv = max(dot(normal, viewDir), 0.0);
-        float viewFacing = clamp(1.0 - ndv, 0.0, 1.0);
-        float rimMask = smoothstep(0.05, 0.65, viewFacing);
-        float rim = pow(viewFacing, 2.0) * rimMask;
-        rim *= (1.0 - ndotl * 0.4);
-        if (isViewmodel)
-                result.rgb += viewmodelRimColor * rim * viewmodelRimStrength;
-        else
-                result.rgb += rimColor * rim * rimStrength;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;

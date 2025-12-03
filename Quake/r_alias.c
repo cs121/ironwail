@@ -36,9 +36,7 @@ const float	r_avertexnormals[NUMVERTEXNORMALS][3] = {
 };
 
 extern vec3_t	lightcolor; //johnfitz -- replaces "float shadelight" for lit support
-static const float rimStrength = 0.25f;
 static const float halfLambertStrength = 1.0f;
-static const float viewmodelRimStrength = 0.35f;
 
 static float	entalpha; //johnfitz
 
@@ -401,36 +399,8 @@ void R_FlushAliasInstances (qboolean showtris)
         GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 
         {
-                vec3 ambient = R_ComputeSceneAmbient ();
-                vec3_t rimColor;
-                vec3_t viewmodelRimColor;
-                qboolean is_viewmodel = (ibuf.inst[0].flags & ALIAS_INSTANCE_FLAG_VIEWMODEL) != 0;
-
-                rimColor[0] = ambient.x * 0.7f + 0.3f;
-                rimColor[1] = ambient.y * 0.7f + 0.3f;
-                rimColor[2] = ambient.z * 0.7f + 0.3f;
-                VectorCopy (rimColor, viewmodelRimColor);
-
-                if (model_program.u_rimColor >= 0)
-                        GL_Uniform3fvFunc (model_program.u_rimColor, 1, rimColor);
-                if (model_program.u_rimStrength >= 0)
-                        GL_Uniform1fFunc (model_program.u_rimStrength, rimStrength);
                 if (model_program.u_halfLambertStrength >= 0)
                         GL_Uniform1fFunc (model_program.u_halfLambertStrength, halfLambertStrength);
-
-                if (is_viewmodel)
-                {
-                        if (model_program.u_isViewmodel >= 0)
-                                GL_Uniform1iFunc (model_program.u_isViewmodel, 1);
-                        if (model_program.u_viewmodelRimColor >= 0)
-                                GL_Uniform3fvFunc (model_program.u_viewmodelRimColor, 1, viewmodelRimColor);
-                        if (model_program.u_viewmodelRimStrength >= 0)
-                                GL_Uniform1fFunc (model_program.u_viewmodelRimStrength, viewmodelRimStrength);
-                }
-                else if (model_program.u_isViewmodel >= 0)
-                {
-                        GL_Uniform1iFunc (model_program.u_isViewmodel, 0);
-                }
         }
 
         if (md5)
@@ -438,25 +408,25 @@ void R_FlushAliasInstances (qboolean showtris)
         else
                 state = GLS_CULL_BACK | GLS_ATTRIBS(1);
 
-	if (!translucent)
-		state |= GLS_BLEND_OPAQUE;
-	else
-		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
-	GL_SetState (state);
+        if (!translucent)
+                state |= GLS_BLEND_OPAQUE;
+        else
+                state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
+        GL_SetState (state);
 
-memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
-memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
-memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
-// use fog density sign bit as overbright flag
-ibuf.global.fog[3] =
-gl_overbright_models.value ?
--fabs (r_framedata.fogdata[3]) :
- fabs (r_framedata.fogdata[3])
-;
-ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
-ibuf.global.dither = r_framedata.dither[0];
-ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
+        memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+        memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+        memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+        memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+        // use fog density sign bit as overbright flag
+        ibuf.global.fog[3] =
+                gl_overbright_models.value ?
+                        -fabs (r_framedata.fogdata[3]) :
+                         fabs (r_framedata.fogdata[3])
+                ;
+        ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
+        ibuf.global.dither = r_framedata.dither[0];
+        ibuf.global.half_lambert = r_model_halflambert.value > 0.f ? 1.f : 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
