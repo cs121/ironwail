@@ -483,10 +483,10 @@ void main()
 	// FINAL LIGHTING COMPOSITION
 	// ========================================================================
 #if DITHER >= 2
-	vec3 clamped_light = clamp(total_light, 0.0, 1.0);
-	vec3 total_lightmap = clamp(floor(clamped_light * 63.0 + 0.5) * (Overbright / 63.0), 0.0, Overbright);
+    vec3 clamped_light = clamp(total_light, vec3(0.0), vec3(1.0));
+    vec3 total_lightmap = clamp(floor(clamped_light * 63.0 + 0.5) * (Overbright / 63.0), vec3(0.0), vec3(Overbright));
 #else
-	vec3 total_lightmap = clamp(total_light * Overbright, 0.0, Overbright);
+    vec3 total_lightmap = clamp(total_light * Overbright, vec3(0.0), vec3(Overbright));
 #endif
 
 #if MODE != 1
@@ -497,7 +497,7 @@ void main()
 
 	result.rgb += fullbright;
 	result.rgb += emissive;
-	result.rgb += clamp(specular_light, 0.0, Overbright) * clamp(result.a, 0.0, 1.0);
+    result.rgb += clamp(specular_light, vec3(0.0), vec3(Overbright)) * clamp(result.a, 0.0, 1.0);
 
 	// Tonemapping
 	if (LightmapParams.y > 0.5)
