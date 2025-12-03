@@ -698,13 +698,19 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
-                        VectorMA (dl->origin, 18, fv, dl->origin);
-                        dl->radius = 200 + (rand()&31);
-                        dl->baseradius = dl->radius;
-                        dl->minlight = 32;
-                        dl->die = cl.time + 0.1;
-                        dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
-                        CL_SetDlightColorForEntity (dl, ent);
+			VectorMA (dl->origin, 18, fv, dl->origin);
+			dl->radius = 200 + (rand()&31);
+			dl->baseradius = dl->radius;
+			dl->minlight = 32;
+			dl->die = cl.time + 0.1;
+			dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+			// Give muzzle flashes a per-shot color flicker for a punchier look.
+			{
+				float flicker = (float) sin (cl.time * 30.0 + dl->flicker_seed);
+				dl->color[0] *= 1.0f + flicker * 0.05f;
+				dl->color[1] *= 1.0f - flicker * 0.03f;
+			}
+			CL_SetDlightColorForEntity (dl, ent);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
