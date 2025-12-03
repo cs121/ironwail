@@ -3,6 +3,7 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
+	vec4	DLightColor; // xyz=DLightColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -88,6 +89,7 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 }
 
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
+const int ALIAS_FLAG_VIEWMODEL = 2;
 
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;

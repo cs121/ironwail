@@ -3,6 +3,7 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
+	vec4	DLightColor; // xyz=DLightColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -93,6 +94,8 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 
+const int ALIAS_FLAG_VIEWMODEL = 2;
+
 void main()
 {
 	InstanceData inst = instances[gl_InstanceID];
@@ -118,5 +121,15 @@ void main()
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = mix(dot1, dot2, inst.Blend);
-        out_color = clamp(inst.LightColor * vec4(vec3(lighting * Overbright), 1.0), 0.0, Overbright);
+        vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
+        mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
+        vec3 world_normal = normalize(world_orientation * blended_normal);
+        vec3 view_dir = normalize(-out_pos);
+        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+        vec3 dlight = inst.DLightColor.rgb * (lighting * Overbright);
+        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0)) * (lighting * (Overbright * 0.5));
+        vec3 viewmodel_color = ambient + dlight + vec3(rim);
+        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
+        vec3 final_color = is_viewmodel ? viewmodel_color : inst.LightColor.rgb * (lighting * Overbright);
+        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
 }
