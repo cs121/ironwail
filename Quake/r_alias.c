@@ -36,9 +36,9 @@ const float	r_avertexnormals[NUMVERTEXNORMALS][3] = {
 };
 
 extern vec3_t	lightcolor; //johnfitz -- replaces "float shadelight" for lit support
-static const float rimStrength = 0.2f;
+static const float rimStrength = 0.25f;
 static const float halfLambertStrength = 1.0f;
-static const float viewmodelRimStrength = 0.45f;
+static const float viewmodelRimStrength = 0.35f;
 
 static float	entalpha; //johnfitz
 

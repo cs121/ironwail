@@ -197,8 +197,10 @@ void main()
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
         float ndv = max(dot(normal, viewDir), 0.0);
-        float rim = smoothstep(0.2, 0.8, 1.0 - ndv);
-        rim *= rim;
+        float viewFacing = clamp(1.0 - ndv, 0.0, 1.0);
+        float rimMask = smoothstep(0.05, 0.65, viewFacing);
+        float rim = pow(viewFacing, 2.0) * rimMask;
+        rim *= (1.0 - ndotl * 0.4);
         if (isViewmodel)
                 result.rgb += viewmodelRimColor * rim * viewmodelRimStrength;
         else
