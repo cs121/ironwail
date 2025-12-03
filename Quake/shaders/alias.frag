@@ -196,7 +196,9 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
-        float rim = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+        float ndv = max(dot(normal, viewDir), 0.0);
+        float rim = smoothstep(0.2, 0.8, 1.0 - ndv);
+        rim *= rim;
         if (isViewmodel)
                 result.rgb += viewmodelRimColor * rim * viewmodelRimStrength;
         else
