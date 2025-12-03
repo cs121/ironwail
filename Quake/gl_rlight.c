@@ -202,6 +202,12 @@ void R_PushDlights (void)
                         finalcolor[0] *= flicker;
                         finalcolor[1] *= flicker;
                         finalcolor[2] *= flicker;
+                        if (l->type == DLIGHT_TORCH)
+                        {
+                                float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;
+                                finalcolor[0] *= 1.0f + colorshift;
+                                finalcolor[1] *= 1.0f - colorshift;
+                        }
                         out->pos[0]   = l->origin[0];
                         out->pos[1]   = l->origin[1];
                         out->pos[2]   = l->origin[2];
