@@ -81,12 +81,14 @@ typedef struct
 {
 	vec3_t	origin;
 	float	radius;
+	float	baseradius;
 	float	spawn;				// stop lighting before this time
 	float	die;				// stop lighting after this time
 	float	decay;				// drop this each second
 	float	minlight;			// don't add when contributing less
 	int		key;
 	vec3_t	color;				//johnfitz -- lit support via lordhavoc
+	float	flicker_seed;
 	dlighttype_t type;
 } dlight_t;
 

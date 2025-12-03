@@ -360,31 +360,33 @@ dlight_t *CL_AllocDlight (int key)
 	if (key)
 	{
 		dl = cl_dlights;
-		for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
-		{
-			if (dl->key == key)
-			{
-				memset (dl, 0, sizeof(*dl));
-				dl->key = key;
+                for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+                {
+                        if (dl->key == key)
+                        {
+                                memset (dl, 0, sizeof(*dl));
+                                dl->key = key;
                                 dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
                                 dl->type = DLIGHT_DEFAULT;
                                 dl->spawn = cl.time - 0.001;
+                                dl->flicker_seed = (float) rand ();
                                 return dl;
                         }
-		}
-	}
+                }
+        }
 
 // then look for anything else
 	dl = cl_dlights;
 	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
 	{
-		if (dl->die < cl.time || dl->spawn > cl.time)
+                if (dl->die < cl.time || dl->spawn > cl.time)
                 {
                         memset (dl, 0, sizeof(*dl));
                         dl->key = key;
                         dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
                         dl->type = DLIGHT_DEFAULT;
                         dl->spawn = cl.time - 0.001;
+                        dl->flicker_seed = (float) rand ();
                         return dl;
                 }
         }
@@ -395,6 +397,7 @@ dlight_t *CL_AllocDlight (int key)
         dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
         dl->type = DLIGHT_DEFAULT;
         dl->spawn = cl.time - 0.001;
+        dl->flicker_seed = (float) rand ();
         return dl;
 }
 
@@ -413,16 +416,20 @@ void CL_DecayLights (void)
 
 	time = cl.time - cl.oldtime;
 
-	dl = cl_dlights;
-	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
-	{
-		if (dl->die < cl.time || dl->spawn > cl.time || !dl->radius)
-			continue;
+        dl = cl_dlights;
+        for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
+        {
+                if (dl->die < cl.time || dl->spawn > cl.time || !dl->baseradius)
+                        continue;
 
-		dl->radius -= time*dl->decay;
-		if (dl->radius < 0)
-			dl->radius = 0;
-	}
+                dl->baseradius -= time*dl->decay;
+                if (dl->baseradius < 0)
+                        dl->baseradius = 0;
+
+                dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
+                if (dl->radius < 0)
+                        dl->radius = 0;
+        }
 }
 
 
@@ -691,12 +698,13 @@ void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 
-			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->minlight = 32;
-			dl->die = cl.time + 0.1;
-			dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
-			CL_SetDlightColorForEntity (dl, ent);
+                        VectorMA (dl->origin, 18, fv, dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->baseradius = dl->radius;
+                        dl->minlight = 32;
+                        dl->die = cl.time + 0.1;
+                        dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+                        CL_SetDlightColorForEntity (dl, ent);
 
 			//johnfitz -- assume muzzle flash accompanied by muzzle flare, which looks bad when lerped
 			if (r_lerpmodels.value != 2)
@@ -708,12 +716,13 @@ void CL_RelinkEntities (void)
 			}
 			//johnfitz
 		}
-		if (ent->effects & EF_BRIGHTLIGHT)
-		{
-			dl = CL_AllocDlight (i);
+                if (ent->effects & EF_BRIGHTLIGHT)
+                {
+                        dl = CL_AllocDlight (i);
                         VectorCopy (ent->origin,  dl->origin);
                         dl->origin[2] += 16;
                         dl->radius = 400 + (rand()&31);
+                        dl->baseradius = dl->radius;
                         dl->die = cl.time + 0.001;
                         CL_SetDlightColorForEntity (dl, ent);
                 }
@@ -722,29 +731,32 @@ void CL_RelinkEntities (void)
                         dl = CL_AllocDlight (i);
                         VectorCopy (ent->origin,  dl->origin);
                         dl->radius = 200 + (rand()&31);
+                        dl->baseradius = dl->radius;
                         dl->die = cl.time + 0.001;
                         CL_SetDlightColorForEntity (dl, ent);
                 }
-		if (ent->effects & EF_QEX_QUADLIGHT)
-		{
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->die = cl.time + 0.001;
-			dl->color[0] = 0.25f;
-			dl->color[1] = 0.25f;
-			dl->color[2] = 1.0f;
-		}
-		if (ent->effects & EF_QEX_PENTALIGHT)
-		{
-			dl = CL_AllocDlight (i);
-			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand()&31);
-			dl->die = cl.time + 0.001;
-			dl->color[0] = 1.0f;
-			dl->color[1] = 0.25f;
-			dl->color[2] = 0.25f;
-		}
+                if (ent->effects & EF_QEX_QUADLIGHT)
+                {
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->baseradius = dl->radius;
+                        dl->die = cl.time + 0.001;
+                        dl->color[0] = 0.25f;
+                        dl->color[1] = 0.25f;
+                        dl->color[2] = 1.0f;
+                }
+                if (ent->effects & EF_QEX_PENTALIGHT)
+                {
+                        dl = CL_AllocDlight (i);
+                        VectorCopy (ent->origin,  dl->origin);
+                        dl->radius = 200 + (rand()&31);
+                        dl->baseradius = dl->radius;
+                        dl->die = cl.time + 0.001;
+                        dl->color[0] = 1.0f;
+                        dl->color[1] = 0.25f;
+                        dl->color[2] = 0.25f;
+                }
 
 		if (ent->model->flags & EF_GIB)
 			CL_RocketTrail (ent, 2);
@@ -754,12 +766,13 @@ void CL_RelinkEntities (void)
 			CL_RocketTrail (ent, 3);
 		else if (ent->model->flags & EF_TRACER2)
 			CL_RocketTrail (ent, 5);
-		else if (ent->model->flags & EF_ROCKET)
-		{
+                else if (ent->model->flags & EF_ROCKET)
+                {
                         CL_RocketTrail (ent, 0);
                         dl = CL_AllocDlight (i);
                         VectorCopy (ent->origin, dl->origin);
                         dl->radius = 200;
+                        dl->baseradius = dl->radius;
                         dl->die = cl.time + 0.01;
                         dl->type = DLIGHT_ROCKET;
                         CL_SetDlightColorForEntity (dl, ent);
@@ -848,10 +861,10 @@ int CL_ReadFromServer (void)
 	dev_stats.beams = num_beams;
 	dev_peakstats.beams = q_max(num_beams, dev_peakstats.beams);
 
-	//dlights
-	for (i=0, l=cl_dlights ; i<MAX_DLIGHTS ; i++, l++)
-		if (l->die >= cl.time && l->spawn <= cl.time && l->radius)
-			num_dlights++;
+        //dlights
+        for (i=0, l=cl_dlights ; i<MAX_DLIGHTS ; i++, l++)
+                if (l->die >= cl.time && l->spawn <= cl.time && l->baseradius)
+                        num_dlights++;
 	if (num_dlights > 32 && dev_peakstats.dlights <= 32)
 		Con_DWarning ("%i dlights exceeded standard limit of 32 (max = %d).\n", num_dlights, MAX_DLIGHTS);
 	dev_stats.dlights = num_dlights;
