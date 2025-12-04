@@ -145,7 +145,7 @@ static qboolean MatrixInverse4x4(const float m[16], float out[16])
 
     det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
     if (fabsf(det) < 1e-8f)
-        return false;
+	return false;
 
     det = 1.f / det;
     for (int i = 0; i < 16; ++i)
@@ -193,6 +193,7 @@ cvar_t	r_lightmap_linear = { "r_lightmap_linear", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
+cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -669,143 +670,211 @@ static GLuint GL_GenerateBloomTexture (void)
 static qboolean GL_ShouldApplyMotionBlur (void)
 {
 	if (r_motionblur.value <= 0.f)
-		return false;
+	return false;
 
 	return GL_ConsoleVisibility () <= 0.f;
 }
 
+static void GL_PostProcessFallback (void)
+{
+	int width = glwidth;
+	int height = glheight;
+	size_t numpixels = (size_t)width * (size_t)height;
+	size_t bufsize = numpixels * 4;
+	byte *pixels;
+
+	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
+		return;
+
+	pixels = (byte *)malloc (bufsize);
+	if (!pixels)
+		return;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	glPixelStorei (GL_PACK_ALIGNMENT, 1);
+	glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glReadBuffer (GL_BACK);
+	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+
+	float sat = r_saturation.value;
+	for (size_t i = 0; i < numpixels; ++i)
+	{
+		float color[3] = {
+			pixels[i * 4 + 0] * (1.f / 255.f),
+			pixels[i * 4 + 1] * (1.f / 255.f),
+			pixels[i * 4 + 2] * (1.f / 255.f)
+		};
+		float l = color[0] * 0.299f + color[1] * 0.587f + color[2] * 0.114f;
+		color[0] = l + (color[0] - l) * sat;
+		color[1] = l + (color[1] - l) * sat;
+		color[2] = l + (color[2] - l) * sat;
+		pixels[i * 4 + 0] = (byte)CLAMP (0, (int)Q_rint (color[0] * 255.f), 255);
+		pixels[i * 4 + 1] = (byte)CLAMP (0, (int)Q_rint (color[1] * 255.f), 255);
+		pixels[i * 4 + 2] = (byte)CLAMP (0, (int)Q_rint (color[2] * 255.f), 255);
+	}
+
+	glDisable (GL_DEPTH_TEST);
+	glDisable (GL_BLEND);
+	glUseProgram (0);
+	glMatrixMode (GL_PROJECTION);
+	glPushMatrix ();
+	glLoadIdentity ();
+	glOrtho (0, width, 0, height, -1, 1);
+	glMatrixMode (GL_MODELVIEW);
+	glPushMatrix ();
+	glLoadIdentity ();
+	glRasterPos2i (0, 0);
+	glDrawPixels (width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glPopMatrix ();
+	glMatrixMode (GL_PROJECTION);
+	glPopMatrix ();
+	glMatrixMode (GL_MODELVIEW);
+
+	free (pixels);
+}
+
 
 void GL_PostProcess (void)
-{
+	{
 	int palidx, variant;
 	float dither;
 	qboolean dof_enabled;
 	float dof_focus, dof_range, dof_strength;
 	float dof_znear, dof_zfar;
-        qboolean motion_enabled;
-        qboolean msaa;
-        GLuint velocity_texture;
-        GLuint depth_texture;
-        float motion_strength;
-        float motion_shutter;
-        float motion_effective_shutter;
-        float motion_max_radius;
-        float motion_min_velocity;
-        float motion_depth_threshold;
-        int motion_max_samples;
-        qboolean screen_darken_enabled;
-        float screen_darken_strength;
-        float screen_darken_depth;
-        float teleport_fade;
-        float teleport_blur;
-        if (!GL_NeedsPostprocess ())
-                return;
+	qboolean motion_enabled;
+	qboolean msaa;
+	GLuint velocity_texture;
+	GLuint depth_texture;
+	float motion_strength;
+	float motion_shutter;
+	float motion_effective_shutter;
+	float motion_max_radius;
+	float motion_min_velocity;
+	float motion_depth_threshold;
+	int motion_max_samples;
+	qboolean screen_darken_enabled;
+	float screen_darken_strength;
+	float screen_darken_depth;
+	float teleport_fade;
+	float teleport_blur;
+	r_saturation.value = bound (0.0f, r_saturation.value, 2.0f);
+	if (!GL_NeedsPostprocess ())
+		return;
 
-        GL_BeginGroup ("Postprocess");
+	GL_BeginGroup ("Postprocess");
 
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
-        float bloom_intensity = q_max (0.f, r_bloom.value);
-        float exposure = q_max (0.f, r_tonemap_exposure.value);
-        float tonemap_mode = q_max (0.f, r_tonemap.value);
-        screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
-        screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
-        screen_darken_enabled = (screen_darken_strength > 0.f);
-        teleport_fade = 0.f;
-        teleport_blur = 0.f;
-        {
-                float teleport_duration = q_max (0.f, r_teleportfx_time.value);
-                if (r_teleportfx.value > 0.f && teleport_duration > 0.f && cl.teleport_fx_time > 0.0)
-                {
-                        double teleport_elapsed = cl.time - cl.teleport_fx_time;
-                        if (teleport_elapsed >= 0.0 && teleport_elapsed < teleport_duration)
-                        {
-                                teleport_fade = 1.f - (float)(teleport_elapsed / teleport_duration);
-                                teleport_blur = teleport_fade * 2.f;
-                        }
-                }
-        }
-        GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
-        if (framebufs.bloom.pingpong_tex[0])
-                bloom_texture = framebufs.bloom.pingpong_tex[0];
-        if (bloom_intensity > 0.f)
-                bloom_texture = GL_GenerateBloomTexture ();
+	float bloom_intensity = q_max (0.f, r_bloom.value);
+	float exposure = q_max (0.f, r_tonemap_exposure.value);
+	float tonemap_mode = q_max (0.f, r_tonemap.value);
+	screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
+	screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
+	screen_darken_enabled = (screen_darken_strength > 0.f);
+	teleport_fade = 0.f;
+	teleport_blur = 0.f;
+	{
+		float teleport_duration = q_max (0.f, r_teleportfx_time.value);
+		if (r_teleportfx.value > 0.f && teleport_duration > 0.f && cl.teleport_fx_time > 0.0)
+		{
+			double teleport_elapsed = cl.time - cl.teleport_fx_time;
+			if (teleport_elapsed >= 0.0 && teleport_elapsed < teleport_duration)
+			{
+				teleport_fade = 1.f - (float)(teleport_elapsed / teleport_duration);
+				teleport_blur = teleport_fade * 2.f;
+			}
+		}
+	}
+	GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
+	if (framebufs.bloom.pingpong_tex[0])
+		bloom_texture = framebufs.bloom.pingpong_tex[0];
+	if (bloom_intensity > 0.f)
+		bloom_texture = GL_GenerateBloomTexture ();
 
-        msaa = framebufs.scene.samples > 1;
-        motion_strength = q_max (0.f, r_motionblur.value);
-        if (!GL_ShouldApplyMotionBlur ())
-                motion_strength = 0.f;
-        motion_shutter = q_max (0.f, r_motionblur_shutter.value);
-        motion_effective_shutter = motion_strength * motion_shutter;
-        if (motion_effective_shutter > 0.f && r_prev_frame_valid)
-        {
-                double frame_delta = cl.time - r_prev_frame_time;
-                if (frame_delta > 0.0)
-                {
-                        const double reference_delta = 1.0 / 60.0;
-                        float frame_scale = (float)(reference_delta / frame_delta);
-                        frame_scale = q_min (4.f, q_max (1.f, frame_scale));
-                        motion_effective_shutter *= frame_scale;
-                }
-        }
-        motion_max_radius = q_max (0.f, r_motionblur_maxradiuspixels.value);
-        motion_min_velocity = q_max (0.f, r_motionblur_minvelocity.value);
-        motion_depth_threshold = q_max (0.f, r_motionblur_depththreshold.value);
-        motion_max_samples = (int)Q_rint (r_motionblur_maxsamples.value);
-        if (motion_max_samples < 0)
-                motion_max_samples = 0;
-        if (motion_max_samples > 64)
-                motion_max_samples = 64;
-        velocity_texture = 0;
-        if (framebufs.scene.velocity_tex)
-        {
-                velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-                if (framesetup.scene_fbo != framebufs.scene.fbo)
-                {
-                        // The scene FBO was not used this frame, so the velocity attachment still holds stale data.
-                        velocity_texture = 0;
-                }
-        }
-        motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
+	msaa = framebufs.scene.samples > 1;
+	motion_strength = q_max (0.f, r_motionblur.value);
+	if (!GL_ShouldApplyMotionBlur ())
+		motion_strength = 0.f;
+	motion_shutter = q_max (0.f, r_motionblur_shutter.value);
+	motion_effective_shutter = motion_strength * motion_shutter;
+	if (motion_effective_shutter > 0.f && r_prev_frame_valid)
+	{
+		double frame_delta = cl.time - r_prev_frame_time;
+		if (frame_delta > 0.0)
+		{
+			const double reference_delta = 1.0 / 60.0;
+			float frame_scale = (float)(reference_delta / frame_delta);
+			frame_scale = q_min (4.f, q_max (1.f, frame_scale));
+			motion_effective_shutter *= frame_scale;
+		}
+	}
+	motion_max_radius = q_max (0.f, r_motionblur_maxradiuspixels.value);
+	motion_min_velocity = q_max (0.f, r_motionblur_minvelocity.value);
+	motion_depth_threshold = q_max (0.f, r_motionblur_depththreshold.value);
+	motion_max_samples = (int)Q_rint (r_motionblur_maxsamples.value);
+	if (motion_max_samples < 0)
+		motion_max_samples = 0;
+	if (motion_max_samples > 64)
+		motion_max_samples = 64;
+	velocity_texture = 0;
+	if (framebufs.scene.velocity_tex)
+	{
+		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+		if (framesetup.scene_fbo != framebufs.scene.fbo)
+		{
+			// The scene FBO was not used this frame, so the velocity attachment still holds stale data.
+			velocity_texture = 0;
+		}
+	}
+	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 
 	variant = q_min ((int)softemu, 2);
-        GL_UseProgram (glprogs.postprocess[variant]);
+	if (!glprogs.postprocess[variant])
+	{
+		GL_PostProcessFallback ();
+		GL_EndGroup ();
+		return;
+	}
+	GL_UseProgram (glprogs.postprocess[variant]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
-        GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
-        GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
-        GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
+	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
+	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
-        GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
-        GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
-        GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
-        GL_Uniform4fFunc (8,
-                q_min (1.f, q_max (0.f, r_vignette.value)),
-                q_max (0.f, r_vignette_radius_inner.value),
-                q_max (0.f, r_vignette_radius_outer.value),
-                q_max (0.001f, r_vignette_falloff.value));
-        GL_Uniform4fFunc (9,
-                q_min (1.f, q_max (0.f, r_vignette_color_r.value)),
-                q_min (1.f, q_max (0.f, r_vignette_color_g.value)),
-                q_min (1.f, q_max (0.f, r_vignette_color_b.value)),
-                q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
-        GL_Uniform4fFunc (10,
-                q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
-                q_max (0.f, r_chromatic_aberration.value),
-                screen_darken_strength,
-                screen_darken_depth);
-        GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
+	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
+	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
+	GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
+	GL_Uniform4fFunc (8,
+		q_min (1.f, q_max (0.f, r_vignette.value)),
+		q_max (0.f, r_vignette_radius_inner.value),
+		q_max (0.f, r_vignette_radius_outer.value),
+		q_max (0.001f, r_vignette_falloff.value));
+	GL_Uniform4fFunc (9,
+		q_min (1.f, q_max (0.f, r_vignette_color_r.value)),
+		q_min (1.f, q_max (0.f, r_vignette_color_g.value)),
+		q_min (1.f, q_max (0.f, r_vignette_color_b.value)),
+		q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
+	GL_Uniform4fFunc (10,
+	q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
+	q_max (0.f, r_chromatic_aberration.value),
+	screen_darken_strength,
+	screen_darken_depth);
+	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
+	GL_Uniform1fFunc (12, r_saturation.value);
 
-        dof_enabled = R_DoFEnabled ();
+	dof_enabled = R_DoFEnabled ();
 
-        {
-                float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
+	{
+		float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
 		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
 		float view_size_x = r_refdef.vrect.width / (float)vid.width;
 		float view_size_y = r_refdef.vrect.height / (float)vid.height;
@@ -816,33 +885,33 @@ void GL_PostProcess (void)
 			view_min_y,
 			view_min_x + view_size_x,
 			view_min_y + view_size_y);
-                GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
-        }
+		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
+	}
 
-        depth_texture = 0;
-        if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
-                depth_texture = framebufs.composite.depth_stencil_tex;
-        GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
+	depth_texture = 0;
+	if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f)))
+		depth_texture = framebufs.composite.depth_stencil_tex;
+	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
-        if (dof_enabled)
-        {
-                dof_focus = q_max (0.f, r_dof_focus.value);
-                dof_focus = R_GetDynamicDoFFocus (dof_focus);
-                dof_range = q_max (0.f, r_dof_range.value);
-                dof_strength = q_max (0.f, r_dof_strength.value);
-                dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
-                dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
-                GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
-                GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
-        }
-        else
-        {
-                r_dof_autofocus_initialized = false;
-                dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
-                dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
-                GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
-                GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
-        }
+	if (dof_enabled)
+	{
+		dof_focus = q_max (0.f, r_dof_focus.value);
+		dof_focus = R_GetDynamicDoFFocus (dof_focus);
+		dof_range = q_max (0.f, r_dof_range.value);
+		dof_strength = q_max (0.f, r_dof_strength.value);
+		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+		GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
+		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+	}
+	else
+	{
+		r_dof_autofocus_initialized = false;
+		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
+		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
+		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
+	}
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
@@ -881,7 +950,7 @@ qboolean R_CullBox (vec3_t emins, vec3_t emaxs)
 		float radius = absnormal[0] * extents[0] + absnormal[1] * extents[1] + absnormal[2] * extents[2];
 
 		if (signed_distance < -radius)
-			return true;
+		return true;
 	}
 
 	return false;
@@ -1427,15 +1496,15 @@ GL_NeedsSceneEffects
 qboolean GL_NeedsSceneEffects (void)
 {
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
-                return true;
+		return true;
 
         if (GL_ShouldApplyMotionBlur ())
-                return true;
+		return true;
 
         if (R_DoFEnabled ())
-                return true;
+		return true;
 
-        return false;
+	return false;
 }
 
 /*
@@ -1445,11 +1514,13 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-        if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
-                return true;
-        if (r_tonemap.value > 0.f || r_bloom.value > 0.f || GL_ShouldApplyMotionBlur ())
-                return true;
-        return false;
+	float saturation = bound (0.0f, r_saturation.value, 2.0f);
+	r_saturation.value = saturation;
+	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+		return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
+		return true;
+	return false;
 }
 
 /*
@@ -1791,17 +1862,17 @@ static qboolean R_IsViewModelVisible (void)
 {
 	entity_t* e = &cl.viewent;
 	if (!r_drawviewmodel.value || !r_drawentities.value || chase_active.value || scr_viewsize.value >= 130)
-		return false;
+	return false;
 
 	if (cl.items & IT_INVISIBILITY || cl.stats[STAT_HEALTH] <= 0)
-		return false;
+	return false;
 
 	if (!e->model)
-		return false;
+	return false;
 
 	//johnfitz -- this fixes a crash
 	if (e->model->type != mod_alias)
-		return false;
+	return false;
 
 	return true;
 }
@@ -2131,7 +2202,7 @@ static qboolean R_ShowBoundingBoxesFilter (edict_t* ed)
 		if (filter_cache.filters[i].is_index)
 		{
 			if (!strcmp (entnum, filter_cache.filters[i].str + 1))
-				return true;
+		return true;
 			continue;
 		}
 
@@ -2141,12 +2212,12 @@ static qboolean R_ShowBoundingBoxesFilter (edict_t* ed)
 		if (filter_cache.filters[i].is_exact)
 		{
 			if (!strcmp (classname, filter_cache.filters[i].str + 1))
-				return true;
+		return true;
 			continue;
 		}
 
 		if (strstr (classname, filter_cache.filters[i].str) != NULL)
-			return true;
+		return true;
 	}
 
 	return false;

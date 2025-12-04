@@ -116,6 +116,7 @@ layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), z: screen-space darken strength, w: screen-space darken depth range
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
+layout(location=12) uniform float u_saturation;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -425,9 +426,12 @@ void main()
                         }
                         color.rgb += vec3(0.5, 0.3, 1.0) * teleportFade;
                 }
-        }
+                }
 
-        out_fragcolor = color;
+                float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                color.rgb = mix(vec3(luma), color.rgb, u_saturation);
+
+                out_fragcolor = color;
 #if PALETTIZE == 1
                 vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
                 out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
