@@ -2978,6 +2978,34 @@ static void Host_Kill_f (void)
 
 /*
 ==================
+Host_BotSpawn_f
+==================
+*/
+static void Host_BotSpawn_f (void)
+{
+	dfunction_t *func;
+
+	if (!sv.active || sv.state != ss_active)
+	{
+		Con_Printf ("botspawn is only available while a server is active\n");
+		return;
+	}
+
+	func = PR_FindFunction ("botspawn");
+	if (!func)
+	{
+		Con_Printf ("botspawn QC entry point not found\n");
+		return;
+	}
+
+	pr_global_struct->time = qcvm->time;
+	pr_global_struct->self = EDICT_TO_PROG(cmd_source == src_command ? qcvm->edicts : sv_player);
+
+	PR_ExecuteProgram (func - qcvm->functions);
+}
+
+/*
+==================
 Host_Pause_f
 ==================
 */
@@ -3749,10 +3777,11 @@ void Host_InitCommands (void)
         Cmd_AddCommand ("mapname", Host_Mapname_f); //johnfitz
         Cmd_AddCommand ("randmap", Host_Randmap_f); //ericw
         Cmd_AddCommand_ClientCommand ("status", Host_Status_f);
-	Cmd_AddCommand ("quit", Host_Quit_f);
-	Cmd_AddCommand_ClientCommand ("god", Host_God_f);
-	Cmd_AddCommand_ClientCommand ("notarget", Host_Notarget_f);
-	Cmd_AddCommand_ClientCommand ("fly", Host_Fly_f);
+        Cmd_AddCommand ("quit", Host_Quit_f);
+        Cmd_AddCommand_ClientCommand ("god", Host_God_f);
+        Cmd_AddCommand_ClientCommand ("notarget", Host_Notarget_f);
+        Cmd_AddCommand_ClientCommand ("fly", Host_Fly_f);
+        Cmd_AddCommand_ClientCommand ("botspawn", Host_BotSpawn_f);
 	Cmd_AddCommand ("map", Host_Map_f);
 	Cmd_AddCommand ("restart", Host_Restart_f);
 	Cmd_AddCommand ("changelevel", Host_Changelevel_f);
