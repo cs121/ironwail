@@ -1411,6 +1411,7 @@ void M_SinglePlayer_Key (int key)
 			Cbuf_AddText ("maxplayers 1\n");
 			Cbuf_AddText ("deathmatch 0\n"); //johnfitz
 			Cbuf_AddText ("coop 0\n"); //johnfitz
+			Cbuf_AddText ("bloodhound 0\n");
 			Cbuf_AddText ("campaign 1\n");
 			Cbuf_AddText ("map start\n");
 			break;
@@ -2203,6 +2204,7 @@ void M_Skill_Key (int key)
 			Cbuf_AddText ("maxplayers 1\n");
 			Cbuf_AddText ("deathmatch 0\n"); //johnfitz
 			Cbuf_AddText ("coop 0\n"); //johnfitz
+			Cbuf_AddText ("bloodhound 0\n");
 			Cbuf_AddText ("campaign 0\n");
 			Cbuf_AddText (va ("map \"%s\"\n", m_skill_mapname));
 		}
@@ -5907,6 +5909,48 @@ void M_Menu_GameOptions_f (void)
 		maxplayers = svs.maxclientslimit;
 }
 
+typedef enum
+{
+	GAMETYPE_DEATHMATCH,
+	GAMETYPE_COOPERATIVE,
+	GAMETYPE_BLOODHOUND
+} gametype_t;
+
+static gametype_t M_GameOptions_CurrentGametype (void)
+{
+	if (bloodhound.value)
+		return GAMETYPE_BLOODHOUND;
+	if (coop.value)
+		return GAMETYPE_COOPERATIVE;
+
+	return GAMETYPE_DEATHMATCH;
+}
+
+static void M_GameOptions_SetGametype (gametype_t type)
+{
+	switch (type)
+	{
+	case GAMETYPE_COOPERATIVE:
+		Cvar_Set ("coop", "1");
+		Cvar_Set ("deathmatch", "0");
+		Cvar_Set ("bloodhound", "0");
+		break;
+
+	case GAMETYPE_BLOODHOUND:
+		Cvar_Set ("coop", "0");
+		Cvar_Set ("deathmatch", "1");
+		Cvar_Set ("bloodhound", "1");
+		break;
+
+	case GAMETYPE_DEATHMATCH:
+	default:
+		Cvar_Set ("coop", "0");
+		Cvar_Set ("deathmatch", "1");
+		Cvar_Set ("bloodhound", "0");
+		break;
+	}
+}
+
 
 int gameoptions_cursor_table[] = {40, 56, 64, 72, 80, 88, 96, 112, 120};
 #define	NUM_GAMEOPTIONS	9
@@ -5928,10 +5972,19 @@ void M_GameOptions_Draw (void)
 	M_Print (160, 56, va("%i", maxplayers) );
 
 	M_Print (0, 64, "        Game Type");
-	if (coop.value)
+	switch (M_GameOptions_CurrentGametype ())
+	{
+	case GAMETYPE_COOPERATIVE:
 		M_Print (160, 64, "Cooperative");
-	else
+		break;
+	case GAMETYPE_BLOODHOUND:
+		M_Print (160, 64, "Bloodhound");
+		break;
+	case GAMETYPE_DEATHMATCH:
+	default:
 		M_Print (160, 64, "Deathmatch");
+		break;
+	}
 
 	M_Print (0, 72, "        Teamplay");
 	if (rogue)
@@ -6057,7 +6110,15 @@ void M_NetStart_Change (int dir)
 		break;
 
 	case 2:
-		Cvar_Set ("coop", coop.value ? "0" : "1");
+	{
+		int type = M_GameOptions_CurrentGametype () + dir;
+		if (type > GAMETYPE_BLOODHOUND)
+			type = GAMETYPE_DEATHMATCH;
+		else if (type < GAMETYPE_DEATHMATCH)
+			type = GAMETYPE_BLOODHOUND;
+	
+		M_GameOptions_SetGametype ((gametype_t) type);
+	}
 		break;
 
 	case 3:
