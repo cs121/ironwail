@@ -717,7 +717,7 @@ static void GL_PostProcessFallback (void)
 
 	glDisable (GL_DEPTH_TEST);
 	glDisable (GL_BLEND);
-	glUseProgram (0);
+        GL_UseProgram (0);
 	glMatrixMode (GL_PROJECTION);
 	glPushMatrix ();
 	glLoadIdentity ();
@@ -759,7 +759,7 @@ void GL_PostProcess (void)
 	float screen_darken_depth;
 	float teleport_fade;
 	float teleport_blur;
-	r_saturation.value = bound (0.0f, r_saturation.value, 2.0f);
+        r_saturation.value = CLAMP (0.0f, r_saturation.value, 2.0f);
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -1514,7 +1514,7 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	float saturation = bound (0.0f, r_saturation.value, 2.0f);
+        float saturation = CLAMP (0.0f, r_saturation.value, 2.0f);
 	r_saturation.value = saturation;
 	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
