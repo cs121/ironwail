@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Quake/quakedef.h"
+#include "quakedef.h"
 
 // BSPX lightgrid probe decoded from octree lightgrid data
 typedef struct lightgrid_probe_s {
