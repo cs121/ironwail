@@ -2540,6 +2540,8 @@ static void R_ShowPointFile (void)
 	GL_EndGroup ();
 }
 
+static int r_lightgrid_debug_warn_frame = -1;
+
 static void R_ShowLightgridDebug (void)
 {
 	const lightgrid_t *lg;
@@ -2551,7 +2553,23 @@ static void R_ShowLightgridDebug (void)
 
 	lg = Lightgrid_Get ();
 	if (!lg || !lg->probes || lg->cellsize <= 0.f)
+	{
+		if (r_lightgrid_debug_warn_frame != r_framecount)
+		{
+			const char *reason = "unknown";
+
+			if (!lg)
+				reason = "no lightgrid is loaded";
+			else if (!lg->probes)
+				reason = "lightgrid has no probes";
+			else if (lg->cellsize <= 0.f)
+				reason = "lightgrid cell size is invalid";
+
+			Con_Printf ("r_lightgrid_debug: %s\n", reason);
+			r_lightgrid_debug_warn_frame = r_framecount;
+		}
 		return;
+	}
 
 	GL_BeginGroup ("Lightgrid debug");
 

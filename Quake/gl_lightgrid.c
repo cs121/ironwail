@@ -331,6 +331,9 @@ void Lightgrid_BuildFallback (void)
 
 const lightgrid_t *Lightgrid_Get (void)
 {
-    return current_lightgrid;
+    if (current_lightgrid)
+        return current_lightgrid;
+
+    return cl.lightgrid;
 }
 
