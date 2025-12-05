@@ -7,22 +7,7 @@
 #pragma once
 
 #include "quakedef.h"
-
-typedef struct lightgrid_cell_s
-{
-    vec3_t  color;
-    vec3_t  dir;
-    float   intensity;
-} lightgrid_cell_t;
-
-typedef struct lightgrid_s
-{
-    int             nx, ny, nz;
-    float           cellsize;
-    vec3_t          mins, maxs;
-    lightgrid_cell_t *cells;
-    qboolean        valid;
-} lightgrid_t;
+#include "../common/lightgrid.h"
 
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_debug;
