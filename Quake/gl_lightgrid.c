@@ -8,7 +8,7 @@ Copyright (C) 2024 Ironwail developers
 
 extern vec3_t lightcolor;
 
-static lightgrid_t current_lightgrid;
+static lightgrid_t *current_lightgrid;
 
 cvar_t  r_lightgrid = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t  r_lightgrid_debug = { "r_lightgrid_debug", "0", CVAR_NONE };
@@ -27,17 +27,8 @@ void Lightgrid_Shutdown (void)
 
 void Lightgrid_Clear (void)
 {
-    if (current_lightgrid.cells)
-    {
-        Z_Free (current_lightgrid.cells);
-        current_lightgrid.cells = NULL;
-    }
-
-    current_lightgrid.nx = current_lightgrid.ny = current_lightgrid.nz = 0;
-    current_lightgrid.cellsize = 0.f;
-    VectorClear (current_lightgrid.mins);
-    VectorClear (current_lightgrid.maxs);
-    current_lightgrid.valid = false;
+    Lightgrid_Free (current_lightgrid);
+    current_lightgrid = NULL;
 }
 
 static qboolean Lightgrid_ValidateBSPX (int nx, int ny, int nz, int datasize)
@@ -61,7 +52,7 @@ qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len)
     float cellsize;
     vec3_t mins, maxs;
     int count, i;
-    lightgrid_cell_t *cells;
+    lightgrid_t *lg;
 
     Lightgrid_Clear ();
 
@@ -87,8 +78,11 @@ qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len)
         maxs[i] = LittleFloat (maxs[i]);
     }
 
+    lg = Lightgrid_Alloc (nx, ny, nz, cellsize, mins, maxs);
+    if (!lg)
+        return false;
+
     count = nx * ny * nz;
-    cells = (lightgrid_cell_t *)Z_Malloc (count * sizeof(lightgrid_cell_t));
 
     data += sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t) * 2;
     for (i = 0; i < count; i++)
@@ -110,20 +104,13 @@ qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len)
         dir[2] = LittleFloat (dir[2]);
         intensity = LittleFloat (intensity);
 
-        VectorCopy (color, cells[i].color);
-        VectorCopy (dir, cells[i].dir);
-        VectorNormalize (cells[i].dir);
-        cells[i].intensity = intensity;
+        VectorCopy (color, lg->probes[i].rgb);
+        VectorCopy (dir, lg->probes[i].dir);
+        VectorNormalize (lg->probes[i].dir);
+        lg->probes[i].intensity = intensity;
     }
 
-    current_lightgrid.nx = nx;
-    current_lightgrid.ny = ny;
-    current_lightgrid.nz = nz;
-    current_lightgrid.cellsize = cellsize;
-    VectorCopy (mins, current_lightgrid.mins);
-    VectorCopy (maxs, current_lightgrid.maxs);
-    current_lightgrid.cells = cells;
-    current_lightgrid.valid = true;
+    current_lightgrid = lg;
 
     return true;
 }
@@ -131,17 +118,17 @@ qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len)
 static void Lightgrid_ClampPos (const vec3_t pos, vec3_t out)
 {
     VectorCopy (pos, out);
-    if (!current_lightgrid.valid)
+    if (!current_lightgrid)
         return;
 
-    out[0] = CLAMP (current_lightgrid.mins[0], out[0], current_lightgrid.maxs[0]);
-    out[1] = CLAMP (current_lightgrid.mins[1], out[1], current_lightgrid.maxs[1]);
-    out[2] = CLAMP (current_lightgrid.mins[2], out[2], current_lightgrid.maxs[2]);
+    out[0] = CLAMP (current_lightgrid->mins[0], out[0], current_lightgrid->maxs[0]);
+    out[1] = CLAMP (current_lightgrid->mins[1], out[1], current_lightgrid->maxs[1]);
+    out[2] = CLAMP (current_lightgrid->mins[2], out[2], current_lightgrid->maxs[2]);
 }
 
-static lightgrid_cell_t *Lightgrid_At (int x, int y, int z)
+static lightgrid_probe_t *Lightgrid_At (int x, int y, int z)
 {
-    return &current_lightgrid.cells[(z * current_lightgrid.ny + y) * current_lightgrid.nx + x];
+    return &current_lightgrid->probes[(z * current_lightgrid->ny + y) * current_lightgrid->nx + x];
 }
 
 static void Lightgrid_DefaultSample (vec3_t out_color, vec3_t out_dir)
@@ -156,11 +143,11 @@ void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
     vec3_t p;
     float fx, fy, fz;
     int x0, y0, z0, x1, y1, z1;
-    lightgrid_cell_t *c000, *c100, *c010, *c110, *c001, *c101, *c011, *c111;
+    lightgrid_probe_t *c000, *c100, *c010, *c110, *c001, *c101, *c011, *c111;
     vec3_t color = {1.f, 1.f, 1.f};
     vec3_t dir = {0.f, 0.f, 1.f};
 
-    if (!current_lightgrid.valid || !r_lightgrid.value)
+    if (!current_lightgrid || !r_lightgrid.value)
     {
         Lightgrid_DefaultSample (out_color, out_dir);
         return;
@@ -168,17 +155,17 @@ void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 
     Lightgrid_ClampPos (pos, p);
 
-    fx = (p[0] - current_lightgrid.mins[0]) / current_lightgrid.cellsize;
-    fy = (p[1] - current_lightgrid.mins[1]) / current_lightgrid.cellsize;
-    fz = (p[2] - current_lightgrid.mins[2]) / current_lightgrid.cellsize;
+    fx = (p[0] - current_lightgrid->mins[0]) / current_lightgrid->cellsize;
+    fy = (p[1] - current_lightgrid->mins[1]) / current_lightgrid->cellsize;
+    fz = (p[2] - current_lightgrid->mins[2]) / current_lightgrid->cellsize;
 
-    x0 = CLAMP (0, (int)floorf (fx), current_lightgrid.nx - 1);
-    y0 = CLAMP (0, (int)floorf (fy), current_lightgrid.ny - 1);
-    z0 = CLAMP (0, (int)floorf (fz), current_lightgrid.nz - 1);
+    x0 = CLAMP (0, (int)floorf (fx), current_lightgrid->nx - 1);
+    y0 = CLAMP (0, (int)floorf (fy), current_lightgrid->ny - 1);
+    z0 = CLAMP (0, (int)floorf (fz), current_lightgrid->nz - 1);
 
-    x1 = q_min (x0 + 1, current_lightgrid.nx - 1);
-    y1 = q_min (y0 + 1, current_lightgrid.ny - 1);
-    z1 = q_min (z0 + 1, current_lightgrid.nz - 1);
+    x1 = q_min (x0 + 1, current_lightgrid->nx - 1);
+    y1 = q_min (y0 + 1, current_lightgrid->ny - 1);
+    z1 = q_min (z0 + 1, current_lightgrid->nz - 1);
 
     fx -= floorf (fx);
     fy -= floorf (fy);
@@ -197,10 +184,10 @@ void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
         vec3_t c00, c10, c01, c11, c0, c1;
         vec3_t d00, d10, d01, d11, d0, d1;
 
-        VectorLerp (c000->color, c100->color, fx, c00);
-        VectorLerp (c010->color, c110->color, fx, c10);
-        VectorLerp (c001->color, c101->color, fx, c01);
-        VectorLerp (c011->color, c111->color, fx, c11);
+        VectorLerp (c000->rgb, c100->rgb, fx, c00);
+        VectorLerp (c010->rgb, c110->rgb, fx, c10);
+        VectorLerp (c001->rgb, c101->rgb, fx, c01);
+        VectorLerp (c011->rgb, c111->rgb, fx, c11);
 
         VectorLerp (c00, c10, fy, c0);
         VectorLerp (c01, c11, fy, c1);
@@ -288,13 +275,12 @@ void Lightgrid_BuildFallback (void)
 
     Lightgrid_Clear ();
 
-    current_lightgrid.nx = nx;
-    current_lightgrid.ny = ny;
-    current_lightgrid.nz = nz;
-    current_lightgrid.cellsize = cellsize;
-    VectorCopy (mins, current_lightgrid.mins);
-    VectorCopy (maxs, current_lightgrid.maxs);
-    current_lightgrid.cells = (lightgrid_cell_t *)Z_Malloc ((size_t)nx * ny * nz * sizeof(lightgrid_cell_t));
+    current_lightgrid = Lightgrid_Alloc (nx, ny, nz, cellsize, mins, maxs);
+    if (!current_lightgrid)
+    {
+        Con_Printf ("Lightgrid fallback: failed to allocate grid\n");
+        return;
+    }
 
     for (z = 0; z < nz; z++)
     {
@@ -303,7 +289,7 @@ void Lightgrid_BuildFallback (void)
             for (x = 0; x < nx; x++)
             {
                 vec3_t pos;
-                lightgrid_cell_t *cell = Lightgrid_At (x, y, z);
+                lightgrid_probe_t *cell = Lightgrid_At (x, y, z);
                 vec3_t dirsum = {0.f, 0.f, 0.f};
                 float baseintensity;
                 lightcache_t cache = {0};
@@ -313,13 +299,13 @@ void Lightgrid_BuildFallback (void)
                 pos[2] = mins[2] + (z + 0.5f) * cellsize;
 
                 R_LightPoint (pos, 0.f, &cache);
-                cell->color[0] = lightcolor[0] * (1.f / 255.f);
-                cell->color[1] = lightcolor[1] * (1.f / 255.f);
-                cell->color[2] = lightcolor[2] * (1.f / 255.f);
+                cell->rgb[0] = lightcolor[0] * (1.f / 255.f);
+                cell->rgb[1] = lightcolor[1] * (1.f / 255.f);
+                cell->rgb[2] = lightcolor[2] * (1.f / 255.f);
 
-                baseintensity = (cell->color[0] + cell->color[1] + cell->color[2]) * (1.f / 3.f);
+                baseintensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) * (1.f / 3.f);
 
-                Lightgrid_AddDlights (pos, cell->color, dirsum);
+                Lightgrid_AddDlights (pos, cell->rgb, dirsum);
 
                 {
                     vec3_t up = {0.f, 0.f, 1.f};
@@ -340,13 +326,11 @@ void Lightgrid_BuildFallback (void)
         }
     }
 
-    current_lightgrid.valid = true;
-
     Con_Printf ("Lightgrid fallback: done (%dx%dx%d)\n", nx, ny, nz);
 }
 
 const lightgrid_t *Lightgrid_Get (void)
 {
-    return current_lightgrid.valid ? &current_lightgrid : NULL;
+    return current_lightgrid;
 }
 
