@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
+extern cvar_t r_lightgrid;
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
@@ -414,9 +415,29 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 {
 	vec3_t		start, end;
 	float		maxdist = 8192.f; //johnfitz -- was 2048
+	const lightgrid_probe_t *probe = NULL;
+
+	cache->lightgrid_has_sample = false;
+	cache->lightgrid_intensity = 0.f;
+	VectorClear (cache->lightgrid_color);
+	VectorClear (cache->lightgrid_dir);
+
+	if (r_lightgrid.value)
+		probe = R_GetLightgridSample (p);
 
 	if (!cl.worldmodel->lightdata)
 	{
+		if (probe)
+		{
+			VectorCopy (probe->dir, cache->lightgrid_dir);
+			VectorCopy (probe->rgb, cache->lightgrid_color);
+			cache->lightgrid_intensity = probe->intensity;
+			cache->lightgrid_has_sample = true;
+
+			VectorScale (cache->lightgrid_color, cache->lightgrid_intensity * 255.f, lightcolor);
+			return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+		}
+
 		lightcolor[0] = lightcolor[1] = lightcolor[2] = 255;
 		return 255;
 	}
@@ -444,6 +465,22 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 	if (cache->surfidx > 0)
 		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt);
 
+	if (!probe && r_lightgrid.value)
+		probe = R_GetLightgridSample (p);
+
+	if (probe)
+	{
+		vec3_t gridcolor;
+
+		VectorCopy (probe->dir, cache->lightgrid_dir);
+		VectorCopy (probe->rgb, cache->lightgrid_color);
+		cache->lightgrid_intensity = probe->intensity;
+		cache->lightgrid_has_sample = true;
+
+		VectorScale (cache->lightgrid_color, cache->lightgrid_intensity * 255.f, gridcolor);
+		VectorAdd (lightcolor, gridcolor, lightcolor);
+	}
+
 	return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
 }
 
@@ -452,7 +489,7 @@ const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
         lightgrid_t *lg = cl.lightgrid;
         int x, y, z;
 
-        if (!lg || !lg->probes || lg->cellsize <= 0.f)
+        if (!r_lightgrid.value || !lg || !lg->probes || lg->cellsize <= 0.f)
                 return NULL;
 
         x = (int)floorf((pos[0] - lg->mins[0]) / lg->cellsize);

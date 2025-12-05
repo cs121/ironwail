@@ -23,10 +23,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
+extern cvar_t r_lightgrid;
+extern cvar_t r_lightgrid_debug;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -88,6 +91,75 @@ struct ibuf_s {
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
+
+static int r_lightgrid_debug_frame = -1;
+
+static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add, const vec3_t dlight_add, float dir_dot)
+{
+        if (!r_lightgrid_debug.value)
+                return;
+
+        if (r_lightgrid_debug_frame == r_framecount)
+                return;
+
+        r_lightgrid_debug_frame = r_framecount;
+
+        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) intensity=%.2f dir=(%.2f %.2f %.2f) dir_dot=%.2f ambient_add=(%.1f %.1f %.1f) dlight_add=(%.1f %.1f %.1f)\n",
+                e->model ? e->model->name : "<no model>",
+                e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
+                e->lightcache.lightgrid_intensity,
+                e->lightcache.lightgrid_dir[0], e->lightcache.lightgrid_dir[1], e->lightcache.lightgrid_dir[2],
+                dir_dot,
+                ambient_add[0], ambient_add[1], ambient_add[2],
+                dlight_add[0], dlight_add[1], dlight_add[2]);
+}
+
+static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, vec3_t dlightcolor)
+{
+        vec3_t          gridcolor;
+        vec3_t          forward, right, up, shadevector;
+        float           dir_dot;
+
+        if (!r_lightgrid.value || !e->lightcache.lightgrid_has_sample)
+                return;
+
+        VectorScale (e->lightcache.lightgrid_color, e->lightcache.lightgrid_intensity * 255.f, gridcolor);
+        if (gridcolor[0] == 0.f && gridcolor[1] == 0.f && gridcolor[2] == 0.f)
+                return;
+
+        AngleVectors (e->angles, forward, right, up);
+        VectorAdd (forward, up, shadevector);
+        if (VectorNormalize (shadevector) == 0.f)
+        {
+                shadevector[0] = 0.f;
+                shadevector[1] = 0.f;
+                shadevector[2] = 1.f;
+        }
+
+        dir_dot = CLAMP (0.f, DotProduct (e->lightcache.lightgrid_dir, shadevector), 1.f);
+
+        {
+                vec3_t ambient_add;
+                vec3_t dlight_add;
+                for (int i = 0; i < 3; i++)
+                {
+                        float directional = gridcolor[i] * dir_dot;
+                        float ambient = gridcolor[i] - directional;
+
+                        ambientcolor[i] -= gridcolor[i];
+                        if (ambientcolor[i] < 0.f)
+                                ambientcolor[i] = 0.f;
+
+                        ambientcolor[i] += ambient;
+                        dlightcolor[i] += directional;
+
+                        ambient_add[i] = ambient;
+                        dlight_add[i] = directional;
+                }
+
+                R_DebugLightgridSample (e, ambient_add, dlight_add, dir_dot);
+        }
+}
 
 /*
 =================
@@ -248,6 +320,8 @@ void R_SetupAliasLighting (entity_t     *e)
 		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
 	VectorCopy (lightcolor, ambientcolor);
+
+	R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
 
 	//add dlights
 	for (i=0; i<r_framedata.numlights; i++)
@@ -613,12 +687,16 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	// draw it
 	//
 
-	if (r_fullbright_cheatsafe || showtris)
-	{
-		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
-		VectorCopy (lightcolor, e->lightcache.ambientcolor);
-		VectorClear (e->lightcache.dlightcolor);
-	}
+        if (r_fullbright_cheatsafe || showtris)
+        {
+                lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
+                VectorCopy (lightcolor, e->lightcache.ambientcolor);
+                VectorClear (e->lightcache.dlightcolor);
+                e->lightcache.lightgrid_has_sample = false;
+                e->lightcache.lightgrid_intensity = 0.f;
+                VectorClear (e->lightcache.lightgrid_color);
+                VectorClear (e->lightcache.lightgrid_dir);
+        }
 
 	if (showtris)
 		entalpha = 1.f;
