@@ -256,13 +256,14 @@ OBJS = strlcat.o \
 	cl_tent.o \
 	console.o \
 	keys.o \
-        menu.o \
-        sbar.o \
+	menu.o \
+	sbar.o \
 	view.o \
-        wad.o \
-        cmd.o \
-        common.o \
-        q3shader.o \
+	wad.o \
+	cmd.o \
+	common.o \
+	../common/lightgrid.o \
+	q3shader.o \
         steam.o \
 	json.o \
 	miniz.o \

@@ -32,6 +32,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //=============================================================================
 
+typedef struct lightgrid_probe_s lightgrid_probe_t;
+typedef struct lightgrid_s lightgrid_t;
+
 typedef struct lightcache_s {
 	int					surfidx; // < 0: black surface; == 0: no cache; > 0: 1+index of surface
 	vec3_t				pos;
@@ -141,6 +144,8 @@ void R_ParticleExplosion (vec3_t org);
 void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength);
 void R_LavaSplash (vec3_t org);
 void R_TeleportSplash (vec3_t org);
+const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos);
+
 
 void R_PushDlights (void);
 

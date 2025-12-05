@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
+#include "../common/lightgrid.h"
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
@@ -444,4 +445,23 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt);
 
 	return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+}
+
+const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
+{
+        lightgrid_t *lg = cl.lightgrid;
+        int x, y, z;
+
+        if (!lg || !lg->probes || lg->cellsize <= 0.f)
+                return NULL;
+
+        x = (int)floorf((pos[0] - lg->mins[0]) / lg->cellsize);
+        y = (int)floorf((pos[1] - lg->mins[1]) / lg->cellsize);
+        z = (int)floorf((pos[2] - lg->mins[2]) / lg->cellsize);
+
+        x = CLAMP(0, x, lg->nx - 1);
+        y = CLAMP(0, y, lg->ny - 1);
+        z = CLAMP(0, z, lg->nz - 1);
+
+        return &lg->probes[(z * lg->ny + y) * lg->nx + x];
 }
