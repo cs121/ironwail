@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -349,14 +350,16 @@ R_Init
 */
 void R_Init (void)
 {
-	cmd_function_t *cmd;
+        cmd_function_t *cmd;
 
-	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
-	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
-	cmd = Cmd_AddCommand ("r_showbboxes_filter", R_ShowbboxesFilter_f);
-	if (cmd)
-		cmd->completion = R_ShowbboxesFilter_Completion_f;
-	Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
+        Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
+        Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
+        cmd = Cmd_AddCommand ("r_showbboxes_filter", R_ShowbboxesFilter_f);
+        if (cmd)
+                cmd->completion = R_ShowbboxesFilter_Completion_f;
+        Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
+
+        Lightgrid_Init ();
 
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
