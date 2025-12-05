@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
+#include "gl_lightgrid.h"
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
 #else
@@ -1391,6 +1392,7 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
+		Lightgrid_Shutdown ();
 		R_ShutdownShadow ();
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);
