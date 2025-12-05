@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 #define NOISESCALE     (1.0f / 127.0f)
 
@@ -2002,8 +2003,8 @@ R_EmitLine
 */
 static void R_EmitLine (const vec3_t a, const vec3_t b, uint32_t color)
 {
-	debugvert_t verts[2];
-	uint16_t idx[2];
+        debugvert_t verts[2];
+        uint16_t idx[2];
 
 	VectorCopy (a, verts[0].pos);
 	VectorCopy (b, verts[1].pos);
@@ -2022,17 +2023,26 @@ R_EmitWirePoint -- johnfitz -- draws a wireframe cross shape for point entities
 */
 static void R_EmitWirePoint (const vec3_t origin, uint32_t color)
 {
-	const float Size = 8.f;
-	int i;
-	for (i = 0; i < 3; i++)
-	{
-		vec3_t a, b;
-		VectorCopy (origin, a);
-		VectorCopy (origin, b);
-		a[i] -= Size;
-		b[i] += Size;
-		R_EmitLine (a, b, color);
-	}
+        const float Size = 8.f;
+        int i;
+        for (i = 0; i < 3; i++)
+        {
+                vec3_t a, b;
+                VectorCopy (origin, a);
+                VectorCopy (origin, b);
+                a[i] -= Size;
+                b[i] += Size;
+                R_EmitLine (a, b, color);
+        }
+}
+
+static uint32_t R_PackDebugColor (const vec3_t color)
+{
+	const int r = (int)CLAMP (0, Q_rint (color[0] * 255.f), 255);
+	const int g = (int)CLAMP (0, Q_rint (color[1] * 255.f), 255);
+	const int b = (int)CLAMP (0, Q_rint (color[2] * 255.f), 255);
+
+	return (uint32_t)(0xff << 24 | r << 16 | g << 8 | b);
 }
 
 /*
@@ -2055,7 +2065,29 @@ static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
 		v[i].color = color;
 	}
 
-	R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
+        R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
+}
+
+static void R_EmitDiamond (const vec3_t center, float radius, uint32_t color)
+{
+	debugvert_t v[6];
+	uint16_t idx[] = {
+		0, 2, 0, 3, 0, 4, 0, 5,
+		1, 2, 1, 3, 1, 4, 1, 5,
+		2, 4, 2, 5, 3, 4, 3, 5
+	};
+
+	VectorSet (v[0].pos, center[0] + radius, center[1], center[2]);
+	VectorSet (v[1].pos, center[0] - radius, center[1], center[2]);
+	VectorSet (v[2].pos, center[0], center[1] + radius, center[2]);
+	VectorSet (v[3].pos, center[0], center[1] - radius, center[2]);
+	VectorSet (v[4].pos, center[0], center[1], center[2] + radius);
+	VectorSet (v[5].pos, center[0], center[1], center[2] - radius);
+
+	for (size_t i = 0; i < countof (v); i++)
+		v[i].color = color;
+
+	R_AddDebugGeometry (v, countof (v), idx, countof (idx));
 }
 
 /*
@@ -2508,6 +2540,52 @@ static void R_ShowPointFile (void)
 	GL_EndGroup ();
 }
 
+static void R_ShowLightgridDebug (void)
+{
+	const lightgrid_t *lg;
+	vec3_t rgb;
+	float radius;
+
+	if (r_lightgrid_debug.value <= 0.f)
+		return;
+
+	lg = Lightgrid_Get ();
+	if (!lg || !lg->probes || lg->cellsize <= 0.f)
+		return;
+
+	GL_BeginGroup ("Lightgrid debug");
+
+	R_SetDebugGeometryZTest (true);
+
+	radius = q_max (2.f, lg->cellsize * 0.125f);
+	for (int z = 0; z < lg->nz; z++)
+	{
+		for (int y = 0; y < lg->ny; y++)
+		{
+			for (int x = 0; x < lg->nx; x++)
+			{
+				const lightgrid_probe_t *probe = &lg->probes[(z * lg->ny + y) * lg->nx + x];
+				vec3_t center;
+
+				VectorScale (probe->rgb, probe->intensity, rgb);
+				if (rgb[0] <= 0.f && rgb[1] <= 0.f && rgb[2] <= 0.f)
+					continue;
+
+				VectorSet (center,
+					lg->mins[0] + (x + 0.5f) * lg->cellsize,
+					lg->mins[1] + (y + 0.5f) * lg->cellsize,
+					lg->mins[2] + (z + 0.5f) * lg->cellsize);
+
+				R_EmitDiamond (center, radius, R_PackDebugColor (rgb));
+			}
+		}
+	}
+
+	R_FlushDebugGeometry ();
+
+	GL_EndGroup ();
+}
+
 /*
 ===============
 Collinear
@@ -2714,11 +2792,13 @@ void R_RenderScene (void)
 	
 	R_EndTranslucency ();
 	
-	R_ShowTris (); //johnfitz
-	
-	R_ShowBoundingBoxes (); //johnfitz
-	
-	R_ShowPointFile ();
+        R_ShowTris (); //johnfitz
+
+        R_ShowBoundingBoxes (); //johnfitz
+
+        R_ShowPointFile ();
+
+        R_ShowLightgridDebug ();
 }
 
 /*

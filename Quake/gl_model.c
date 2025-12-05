@@ -807,6 +807,7 @@ typedef struct
 static void Mod_DispatchBSPXLumps(qmodel_t *mod)
 {
         static const bspx_handler_reg_t bspx_handlers[] = {
+                { "LIGHTRID", BSPX_LightGridLoad },
                 { "LGHTGRID", BSPX_LightGridLoad },
                 { "LIGHTGRID", BSPX_LightGridLoad },
                 { NULL, NULL }
