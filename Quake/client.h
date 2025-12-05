@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // client.h
 
+#include "../common/lightgrid.h"
+
 typedef struct
 {
 	int		length;
@@ -250,6 +252,7 @@ typedef struct
 
 // refresh related state
 	struct qmodel_s	*worldmodel;	// cl_entitites[0].model
+	lightgrid_t	*lightgrid;
 	int			num_efrags;
 	int			num_entities;	// held in cl_entities array
 	int			num_statics;	// held in cl_staticentities array

@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "bgmusic.h"
+#include "../common/lightgrid.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -74,11 +75,12 @@ extern vec3_t	v_punchangles[2];
 
 void CL_FreeState(void)
 {
-	int i;
-	for (i = 0; i < MAX_CL_STATS; i++)
-		free (cl.statss[i]);
-	PR_ClearProgs (&cl.qcvm);
-	memset (&cl, 0, sizeof(cl));
+        int i;
+        for (i = 0; i < MAX_CL_STATS; i++)
+                free (cl.statss[i]);
+        Lightgrid_Free(cl.lightgrid);
+        PR_ClearProgs (&cl.qcvm);
+        memset (&cl, 0, sizeof(cl));
 }
 
 /*

@@ -31,6 +31,7 @@ if (WIN32)
 endif()
 
 file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp")
+file(GLOB COMMON_SRC CONFIGURE_DEPENDS "common/*.c" "common/*.h")
 
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/bc7enc.c PROPERTIES LANGUAGE CXX)
 
@@ -62,7 +63,7 @@ elseif (PC_MAD_FOUND)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/snd_mpg123.c)
 endif()
 
-add_executable(ironwail ${IWAIL_SRC})
+add_executable(ironwail ${IWAIL_SRC} ${COMMON_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)

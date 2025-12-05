@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_ktx2.h"
+#include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
 
@@ -487,11 +488,11 @@ typedef struct {
     char lumpname[24]; // up to 23 chars, zero-padded
     int fileofs;  // from file start
     int filelen;
-} bspx_lump_t;
+} bspx_lump_disk_t;
 typedef struct {
     char id[4];  // 'BSPX'
     int numlumps;
-        bspx_lump_t lumps[1];
+        bspx_lump_disk_t lumps[1];
 } bspx_header_t;
 typedef struct
 {
@@ -504,7 +505,7 @@ typedef struct
 } bsp_header_info_t;
 typedef struct
 {
-        char lumpname[sizeof(((bspx_lump_t *)0)->lumpname) + 1];
+        char lumpname[sizeof(((bspx_lump_disk_t *)0)->lumpname) + 1];
         qboolean used;
         qboolean unsupported;
 } bspx_lump_usage_t;
@@ -543,7 +544,7 @@ static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
 
         for (i = 0; i < bspx_lump_usage_count; i++)
         {
-                if (!strncmp(bspx_lump_usage[i].lumpname, lumpname, sizeof(((bspx_lump_t *)0)->lumpname)))
+                if (!strncmp(bspx_lump_usage[i].lumpname, lumpname, sizeof(((bspx_lump_disk_t *)0)->lumpname)))
                         return &bspx_lump_usage[i];
         }
         return NULL;
@@ -796,7 +797,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         return true;
 }
 
-typedef void (*bspx_handler_t)(qmodel_t *mod, void *data, int size);
+typedef qboolean (*bspx_handler_t)(qmodel_t *mod, void *data, int size);
 typedef struct
 {
         const char *name;
@@ -819,6 +820,7 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
         {
                 const bspx_entry_t *entry = &mod->bspx_entries[i];
                 const bspx_handler_reg_t *handler;
+                qboolean handled = false;
 
                 if (Q1BSPX_IsProcessed(entry->name))
                         continue;
@@ -827,13 +829,16 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
                 {
                         if (!strncmp(entry->name, handler->name, strlen(handler->name)))
                         {
-                                handler->handler(mod, mod_base + entry->offset, entry->size);
-                                Q1BSPX_MarkUsed(entry->name);
+                                handled = true;
+                                if (handler->handler(mod, mod_base + entry->offset, entry->size))
+                                        Q1BSPX_MarkUsed(entry->name);
+                                else
+                                        Q1BSPX_MarkUnsupported(entry->name);
                                 break;
                         }
                 }
 
-                if (!handler->handler)
+                if (!handled)
                         Q1BSPX_MarkUnsupported(entry->name);
         }
 }
@@ -874,6 +879,7 @@ static qboolean Mod_CheckAnimTextureArrayQ64(texture_t *anims[], int numTex)
 	}
 	return true;
 }
+
 
 /*
 ================
@@ -2008,12 +2014,31 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 	}
 }
 
-static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
+static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
+	lightgrid_t *lg;
+	bspx_lump_t l;
+
 	(void)mod;
-	(void)lump;
-	(void)lumpsize;
+
+	Lightgrid_Free(cl.lightgrid);
+	cl.lightgrid = NULL;
+
+	if (!lump || lumpsize <= 0)
+		return false;
+
+	l.data = lump;
+	l.size = (size_t)lumpsize;
+
+	lg = Lightgrid_LoadFromBSPX_Octree(&l);
+	if (!lg)
+		return false;
+
+	cl.lightgrid = lg;
+
+	return true;
 }
+
 
 /*
 =================
@@ -4486,6 +4511,7 @@ static qboolean MD5_ParseCheck(const char *s, const char **buffer)
 	*buffer = COM_Parse(*buffer);
 	return true;
 }
+
 static size_t MD5_ParseUInt(const char **buffer)
 {
 	size_t i = strtoull(com_token, NULL, 0);
