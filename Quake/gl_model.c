@@ -40,7 +40,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
-static void BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
+static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 
 static void Mod_Print (void);
 
