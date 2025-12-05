@@ -99,6 +99,9 @@
     <ClCompile Include="..\..\Quake\gl_warp.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\common\lightgrid.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\host.c">
       <Filter>Source Files</Filter>
     </ClCompile>
