@@ -127,7 +127,9 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
         if (gridcolor[0] == 0.f && gridcolor[1] == 0.f && gridcolor[2] == 0.f)
                 return;
 
-        AngleVectors (e->angles, forward, right, up);
+        vec3_t angles;
+        VectorCopy (e->angles, angles);
+        AngleVectors (angles, forward, right, up);
         VectorAdd (forward, up, shadevector);
         if (VectorNormalize (shadevector) == 0.f)
         {

@@ -1,3 +1,4 @@
+#include "../Quake/quakedef.h"
 #include "lightgrid.h"
 
 #define LIGHTGRID_MAGIC 0x4c475244u /* 'LGRD' */
