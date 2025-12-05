@@ -82,6 +82,7 @@ void VectorAngles (const vec3_t forward, vec3_t angles); //johnfitz
 
 void VectorMA (const vec3_t veca, float scale, const vec3_t vecb, vec3_t vecc);
 void VectorLerp (const vec3_t veca, const vec3_t vecb, float frac, vec3_t dst);
+void VectorAverage (const vec3_t veca, const vec3_t vecb, vec3_t dst);
 
 vec_t _DotProduct (const vec3_t v1, const vec3_t v2);
 void _VectorSubtract (const vec3_t veca, const vec3_t vecb, vec3_t out);
