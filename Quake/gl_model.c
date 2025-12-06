@@ -41,6 +41,7 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
+void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 
 static void Mod_Print (void);
 
@@ -656,6 +657,30 @@ static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
                 }
         }
         return NULL;
+}
+
+void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size)
+{
+        int expected_size;
+        byte *memptr;
+
+        if (!mod || !mod->lightdatasize)
+                return;
+
+        expected_size = mod->lightdatasize * 3;
+
+        if (size != expected_size)
+                return;
+
+        memptr = (byte *)Hunk_AllocName(size, loadname);
+        memcpy(memptr, buffer, size);
+
+        mod->lightdata_rgb = memptr;
+        mod->lightdata_rgb_size = size;
+        mod->has_lightdata_rgb = true;
+
+        Con_Printf("BSPX: loaded RGBLIGHTING (%d bytes)\n", size);
+        Q1BSPX_MarkUsed("RGBLIGHTING");
 }
 
 static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
@@ -1332,6 +1357,10 @@ static void Mod_LoadLighting (lump_t *l)
 	loadmodel->lightdatasamples = 0;
 	loadmodel->lightdirdata = NULL;
 	loadmodel->lightdirsamples = 0;
+	loadmodel->lightdata_rgb = NULL;
+	loadmodel->lightdata_rgb_size = 0;
+	loadmodel->has_lightdata_rgb = false;
+	loadmodel->lightdatasize = l->filelen;
 	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
 	// LordHavoc: check for a .lit file
@@ -3274,6 +3303,16 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
 	Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
 	Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
+	{
+		void *lump;
+		int lumpsize;
+
+		lump = Q1BSPX_FindLump("RGBLIGHTING", &lumpsize);
+		if (lump && lumpsize > 0)
+		{
+			Mod_LoadRGBLightingBSPX(mod, lump, lumpsize);
+		}
+	}
 	Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
 	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
