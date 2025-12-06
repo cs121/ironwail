@@ -483,6 +483,9 @@ typedef struct qmodel_s
 
 	int			numsurfaces;
 	msurface_t	*surfaces;
+	vec3_t		*facenormals;		// array of per-surface normals
+	int			facenormals_count;	// number of normals (must match numsurfaces)
+	qboolean	has_facenormals;
 
 	int			numsurfedges;
 	int			*surfedges;
