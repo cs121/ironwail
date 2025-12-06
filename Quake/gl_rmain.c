@@ -194,6 +194,7 @@ cvar_t	r_lightmap_linear = { "r_lightmap_linear", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
+cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };

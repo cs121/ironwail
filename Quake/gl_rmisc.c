@@ -367,6 +367,7 @@ Cvar_RegisterVariable (&r_lightmap_linear);
 Cvar_RegisterVariable (&r_lightmap_mipmaps);
 Cvar_RegisterVariable (&r_lightmap16f);
 Cvar_RegisterVariable (&r_lightingdir);
+Cvar_RegisterVariable (&r_rgblighting_enable);
 Cvar_RegisterVariable (&r_fullbright);
 Cvar_RegisterVariable (&r_drawentities);
 Cvar_RegisterVariable (&r_drawviewmodel);

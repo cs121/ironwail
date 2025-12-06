@@ -504,12 +504,16 @@ typedef struct qmodel_s
 	byte		*visdata;
 	byte		*lightdata;
 	byte		*lightdirdata;
+	byte		*lightdata_rgb;
 	int			lightdatasamples;
 	int			lightdirsamples;
+	int			lightdatasize;
+	int			lightdata_rgb_size;
 	char		*entities;
 
 	qboolean	litfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
+	qboolean	has_lightdata_rgb;
 
 	int			bspversion;
 	int			bspx_entries_count;

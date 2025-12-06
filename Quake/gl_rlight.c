@@ -28,6 +28,7 @@ extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 extern cvar_t r_lightgrid;
+extern cvar_t r_rgblighting_enable;
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
@@ -265,14 +266,43 @@ static inline int LightStyleValue (unsigned short style)
 	return d_lightstylevalue[0];
 }
 
-static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
+static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
 {
-	byte *lightmap;
+	const byte *lightmap;
+	const byte *samples;
 	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
 	int scale;
 	line3 = ((surf->extents[0]>>4)+1)*3;
 
-	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
+	if (!surf->samples)
+	{
+		VectorClear(color);
+		return;
+	}
+
+	samples = surf->samples;
+
+	if (use_rgb)
+	{
+		qmodel_t *model = cl.worldmodel;
+
+		if (model && model->lightdata && model->lightdata_rgb)
+		{
+			const int bytes_per_sample = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
+			const ptrdiff_t offset = samples - model->lightdata;
+
+			if (bytes_per_sample > 0 && offset >= 0 && (offset % bytes_per_sample) == 0)
+			{
+				const size_t sample_offset = (size_t)offset / (size_t)bytes_per_sample;
+				const size_t rgb_offset = sample_offset * 3;
+
+				if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+					samples = model->lightdata_rgb + rgb_offset;
+			}
+		}
+	}
+
+	lightmap = samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
 
 	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE;maps++)
 	{
@@ -416,6 +446,7 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 	vec3_t		start, end;
 	float		maxdist = 8192.f; //johnfitz -- was 2048
 	const lightgrid_probe_t *probe = NULL;
+	qboolean	use_rgblight = false;
 
 	cache->lightgrid_has_sample = false;
 	cache->lightgrid_intensity = 0.f;
@@ -424,6 +455,9 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 
 	if (r_lightgrid.value)
 		probe = R_GetLightgridSample (p);
+
+	if (cl.worldmodel->has_lightdata_rgb && r_rgblighting_enable.value)
+		use_rgblight = true;
 
 	if (!cl.worldmodel->lightdata)
 	{
@@ -463,7 +497,7 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 	}
 
 	if (cache->surfidx > 0)
-		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt);
+		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
 
 	if (!probe && r_lightgrid.value)
 		probe = R_GetLightgridSample (p);
