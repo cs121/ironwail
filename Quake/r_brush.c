@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightingdir;
+extern cvar_t r_facenormals_enable;
 
 cvar_t gl_lightmap_atlas_size = { "gl_lightmap_atlas_size", "1024", CVAR_ARCHIVE };
 
@@ -787,7 +788,9 @@ void GL_BuildBModelVertexBuffer (void)
 			lightmap_t      *lm;
 			vec3_t          surfnormal;
 
-                        if (fa->flags & SURF_PLANEBACK)
+                        if (r_facenormals_enable.value && m->has_facenormals && i < m->facenormals_count)
+                                VectorCopy (m->facenormals[i], surfnormal);
+                        else if (fa->flags & SURF_PLANEBACK)
                                 VectorScale (fa->plane->normal, -1, surfnormal);
                         else
                                 VectorCopy (fa->plane->normal, surfnormal);

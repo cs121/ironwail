@@ -42,6 +42,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
+void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
 static void Mod_Print (void);
 
@@ -413,6 +414,10 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 // call the apropriate loader
 	mod->needload = false;
 
+	mod->facenormals = NULL;
+	mod->facenormals_count = 0;
+	mod->has_facenormals = false;
+
 	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
 	switch (mod_type)
 	{
@@ -681,6 +686,37 @@ void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size)
 
         Con_Printf("BSPX: loaded RGBLIGHTING (%d bytes)\n", size);
         Q1BSPX_MarkUsed("RGBLIGHTING");
+}
+
+void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size)
+{
+        int expected_size;
+        vec3_t *memptr;
+        int i;
+
+        if (!mod)
+                return;
+
+        expected_size = mod->numsurfaces * (int)sizeof(vec3_t);
+
+        if (size != expected_size)
+        {
+                Con_Warning("BSPX: FACENORMALS size mismatch (%d bytes, expected %d)\n", size, expected_size);
+                return;
+        }
+
+        memptr = (vec3_t *)Hunk_Alloc(size);
+        memcpy(memptr, buffer, size);
+
+        for (i = 0; i < mod->numsurfaces; i++)
+                VectorNormalize(memptr[i]);
+
+        mod->facenormals = memptr;
+        mod->facenormals_count = mod->numsurfaces;
+        mod->has_facenormals = true;
+
+        Con_Printf("BSPX: loaded FACENORMALS (%d normals)\n", mod->facenormals_count);
+        Q1BSPX_MarkUsed("FACENORMALS");
 }
 
 static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
@@ -3319,6 +3355,16 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadFaces (&header.lumps[LUMP_FACES]);
 	Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
 
+	{
+		void *lump;
+		int lumpsize;
+
+		lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
+		if (lump && lumpsize > 0)
+			Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
+		else
+			Con_DPrintf("BSPX: no FACENORMALS lump found\n");
+	}
 
 	if (mod->bspversion == BSPVERSION && external_vis.value/* && sv.modelname[0] && !q_strcasecmp(loadname, sv.name)*/) // woods allow vis load online
 	{

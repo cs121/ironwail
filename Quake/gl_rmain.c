@@ -255,6 +255,7 @@ cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
 cvar_t	gl_overbright_models = { "gl_overbright_models", "1", CVAR_ARCHIVE };
 cvar_t	r_model_halflambert = { "r_model_halflambert", "0", CVAR_ARCHIVE };
+cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
 cvar_t	r_drawworld = { "r_drawworld", "1", CVAR_NONE };
 cvar_t	r_showtris = { "r_showtris", "0", CVAR_NONE };
