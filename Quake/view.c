@@ -767,7 +767,7 @@ static void V_AddWeaponWhip (entity_t *view)
 	float dt;
 	float velz;
 
-    scale = q_max(0.f, v_weaponwhip.value);
+	scale = q_max(0.f, v_weaponwhip.value);
 	if (scale == 0.f)
 	{
 		was_onground = cl.onground;
@@ -779,12 +779,12 @@ static void V_AddWeaponWhip (entity_t *view)
 	velz = cl.velocity[2];
 
 	if (was_onground && !cl.onground && velz > 0.f)
-		vertical_velocity -= velz * 0.01f * scale;
+		vertical_offset -= velz * 0.01f * scale;
 
 	if (!was_onground && cl.onground)
 	{
 		float impact = fabs(previous_velz);
-		vertical_velocity -= impact * 0.008f * scale;
+		vertical_offset -= impact * 0.008f * scale;
 	}
 
 	vertical_velocity -= vertical_offset * 25.f * dt;
