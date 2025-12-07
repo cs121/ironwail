@@ -427,6 +427,12 @@ typedef struct
 	int		size;
 } bspx_entry_t;
 
+typedef struct bspx_header_s
+{
+        int                     numlumps;
+        const bspx_entry_t      *lumps;
+} bspx_header_t;
+
 typedef struct qmodel_s
 {
 	char		name[MAX_QPATH];
@@ -521,6 +527,7 @@ typedef struct qmodel_s
 	int			bspversion;
 	int			bspx_entries_count;
 	bspx_entry_t	*bspx_entries;
+	bspx_header_t	*bspx_header;
 	int			contentstransparent;	//spike -- added this so we can disable glitchy wateralpha where its not supported.
 	qboolean	haslitwater;
 

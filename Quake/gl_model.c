@@ -499,7 +499,7 @@ typedef struct {
     char id[4];  // 'BSPX'
     int numlumps;
         bspx_lump_disk_t lumps[1];
-} bspx_header_t;
+} bspx_header_disk_t;
 typedef struct
 {
         lump_t          lumps[HEADER_LUMPS];
@@ -509,6 +509,8 @@ typedef struct
         qboolean        is_bsp29;
         int                     bspversion;
 } bsp_header_info_t;
+static bspx_header_t *BSPX_Setup(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen);
+static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lumpname, size_t *lumpsize);
 typedef struct
 {
         char lumpname[sizeof(((bspx_lump_disk_t *)0)->lumpname) + 1];
@@ -646,22 +648,15 @@ static void Q1BSPX_LogUsage(const char *modelname)
 }
 static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize)
 {
-        int i;
-        *lumpsize = 0;
-        if (!loadmodel || !loadmodel->bspx_entries)
-                return NULL;
+        size_t size = 0;
+        void *data;
 
-        for (i = 0; i < loadmodel->bspx_entries_count; i++)
-        {
-                const bspx_entry_t *entry = &loadmodel->bspx_entries[i];
+        data = BSPX_FindLump(loadmodel ? loadmodel->bspx_header : NULL, mod_base, lumpname, &size);
 
-                if (!strncmp(entry->name, lumpname, sizeof(entry->name)))
-                {
-                        *lumpsize = entry->size;
-                        return mod_base + entry->offset;
-                }
-        }
-        return NULL;
+        if (lumpsize)
+                *lumpsize = (int)size;
+
+        return data;
 }
 
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size)
@@ -788,13 +783,14 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
 {
         size_t                  offs;
         size_t                  header_offset;
-        const bspx_header_t     *h = NULL;
+        const bspx_header_disk_t        *h = NULL;
         qboolean                misaligned = false;
         int                             i, numlumps;
 
         Q1BSPX_ResetUsage();
         mod->bspx_entries = NULL;
         mod->bspx_entries_count = 0;
+        mod->bspx_header = NULL;
 
         offs = Mod_FindEndOfStandardLumps(header->lumps, HEADER_LUMPS, &misaligned);
         header_offset = offs;
@@ -807,7 +803,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 const char *candidate = (const char *)mod_base + offs;
 
                 if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
-                        h = (const bspx_header_t *)candidate;
+                        h = (const bspx_header_disk_t *)candidate;
         }
 
         if (!h && header->has_bspx_header && header->header_size + sizeof(*h) <= filelen)
@@ -816,7 +812,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
 
                 if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
                 {
-                        h = (const bspx_header_t *)candidate;
+                        h = (const bspx_header_disk_t *)candidate;
                         header_offset = header->header_size;
                 }
         }
@@ -856,6 +852,46 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         Q1BSPX_RecordEntries(mod);
 
         return true;
+}
+
+static bspx_header_t *BSPX_Setup(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen)
+{
+        if (!Mod_ParseBSPXDirectory(mod, header, filelen))
+                return NULL;
+
+        if (!mod->bspx_entries_count)
+                return NULL;
+
+        bspx_header_t *out = (bspx_header_t *)Hunk_AllocName(sizeof(*out), loadname);
+        out->numlumps = mod->bspx_entries_count;
+        out->lumps = mod->bspx_entries;
+        return out;
+}
+
+static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lumpname, size_t *lumpsize)
+{
+        int i;
+
+        if (lumpsize)
+                *lumpsize = 0;
+
+        if (!bspxheader || !bspxheader->lumps || !bspxheader->numlumps)
+                return NULL;
+
+        for (i = 0; i < bspxheader->numlumps; i++)
+        {
+                const bspx_entry_t *entry = &bspxheader->lumps[i];
+
+                if (strncmp(entry->name, lumpname, sizeof(entry->name)))
+                        continue;
+
+                if (lumpsize)
+                        *lumpsize = entry->size;
+
+                return (byte *)base + entry->offset;
+        }
+
+        return NULL;
 }
 
 typedef qboolean (*bspx_handler_t)(qmodel_t *mod, void *data, int size);
@@ -3299,6 +3335,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	dmodel_t 	*bm;
 	float		radius; //johnfitz
 	bsp_header_info_t header;
+	bspx_header_t	*bspx;
 
 	loadmodel->type = mod_brush;
 
@@ -3332,7 +3369,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		return;
 	}
 
-	Mod_ParseBSPXDirectory(mod, &header, com_filesize);
+	bspx = BSPX_Setup(mod, &header, com_filesize);
+	mod->bspx_header = bspx;
 
 	// load into heap
 
