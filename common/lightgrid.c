@@ -299,15 +299,40 @@ typedef struct bspxlg_ctx_s {
     const byte *data;
     size_t ofs;
     size_t size;
+    qboolean error;
 } bspxlg_ctx_t;
 
 #define BSPXLG_NODE_LEAF 0x80000000u
 
+static qboolean BSPXLG_CheckAdvance(bspxlg_ctx_t *ctx, size_t amount)
+{
+    if (ctx->error)
+        return false;
+
+    if (amount > ctx->size - ctx->ofs)
+    {
+        ctx->error = true;
+        return false;
+    }
+
+    ctx->ofs += amount;
+    return true;
+}
+
+static qboolean BSPXLG_MulSize(size_t a, size_t b, size_t *out)
+{
+    if (a && b > SIZE_MAX / a)
+        return false;
+
+    *out = a * b;
+    return true;
+}
+
 static byte BSPXLG_ReadByte(bspxlg_ctx_t *ctx)
 {
-    if (ctx->ofs >= ctx->size)
+    if (ctx->error || ctx->ofs >= ctx->size)
     {
-        ctx->ofs++;
+        ctx->error = true;
         return 0;
     }
 
@@ -345,15 +370,15 @@ static void BSPXLG_FreeGrid(bspxlg_grid_t *grid)
 
 static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
 {
-    bspxlg_ctx_t ctx = { .data = (const byte *)l->data, .ofs = 0u, .size = l->size };
-    bspxlg_grid_t *grid;
-    bspxlg_sample_t *samples;
-    unsigned int nodestart;
+    bspxlg_ctx_t ctx = { .data = (const byte *)l->data, .ofs = 0u, .size = l->size, .error = false };
+    bspxlg_grid_t *grid = NULL;
+    bspxlg_sample_t *samples = NULL;
+    size_t nodestart;
 
     vec3_t step;
     vec3_t gridscale;
     unsigned int numstyles, numnodes, numleafs, rootnode;
-    unsigned int leafsamps = 0;
+    size_t leafsamps = 0;
 
     if (!l || !l->data || l->size <= 0)
         return NULL;
@@ -374,47 +399,76 @@ static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
     (void)numstyles;
     rootnode = (unsigned int)BSPXLG_ReadInt(&ctx);
     numnodes = (unsigned int)BSPXLG_ReadInt(&ctx);
-    nodestart = (unsigned int)ctx.ofs;
+    nodestart = ctx.ofs;
 
-    ctx.ofs += (3 + 8) * sizeof(int) * numnodes;
+    {
+        size_t node_block_bytes;
+        if (!BSPXLG_MulSize((size_t)(3 + 8) * sizeof(int), numnodes, &node_block_bytes) || !BSPXLG_CheckAdvance(&ctx, node_block_bytes))
+            ctx.error = true;
+    }
     numleafs = (unsigned int)BSPXLG_ReadInt(&ctx);
 
     for (unsigned int i = 0; i < numleafs; i++)
     {
-        unsigned int lsz[3];
-        unsigned int total;
-        unsigned int ms = 1;
+        size_t lsz[3];
+        size_t total;
+        size_t ms = 1;
         for (int j = 0; j < 3; j++)
             BSPXLG_ReadInt(&ctx);
         for (int j = 0; j < 3; j++)
             lsz[j] = (unsigned int)BSPXLG_ReadInt(&ctx);
 
-        total = lsz[0] * lsz[1] * lsz[2];
+        {
+            size_t tmp;
+            if (!BSPXLG_MulSize(lsz[0], lsz[1], &tmp) || !BSPXLG_MulSize(tmp, lsz[2], &tmp))
+            {
+                ctx.error = true;
+                break;
+            }
+            total = tmp;
+        }
 
-        for (unsigned int j = 0; j < total; j++)
+        for (size_t j = 0; j < total; j++)
         {
             byte s = BSPXLG_ReadByte(&ctx);
             if (s == 255)
                 continue;
             if (ms < s)
                 ms = s;
-            ctx.ofs += s * 4u;
+            if (!BSPXLG_CheckAdvance(&ctx, (size_t)s * 4u))
+                break;
         }
 
-        if (total > 0 && ms > UINT_MAX / total)
-            return NULL;
+        if (ctx.error)
+            break;
+
+        if (total > 0 && ms > SIZE_MAX / total)
+        {
+            ctx.error = true;
+            break;
+        }
 
         leafsamps += total * ms;
     }
 
-    grid = (bspxlg_grid_t *)Z_Malloc(sizeof(*grid));
-    if (!grid)
-        return NULL;
+    if (ctx.error)
+        goto fail;
 
-    memset(grid, 0, sizeof(*grid));
-    grid->nodes = (bspxlg_node_t *)Z_Malloc(sizeof(*grid->nodes) * numnodes);
-    grid->leafs = (bspxlg_leaf_t *)Z_Malloc(sizeof(*grid->leafs) * numleafs);
-    samples = (bspxlg_sample_t *)Z_Malloc(sizeof(*samples) * leafsamps);
+    {
+        size_t node_bytes, leaf_bytes, sample_bytes;
+        if (!BSPXLG_MulSize(sizeof(*grid->nodes), numnodes, &node_bytes) ||
+            !BSPXLG_MulSize(sizeof(*grid->leafs), numleafs, &leaf_bytes) || !BSPXLG_MulSize(sizeof(*samples), leafsamps, &sample_bytes))
+            goto fail;
+
+        grid = (bspxlg_grid_t *)Z_Malloc(sizeof(*grid));
+        if (!grid)
+            goto fail;
+
+        memset(grid, 0, sizeof(*grid));
+        grid->nodes = (bspxlg_node_t *)Z_Malloc(node_bytes);
+        grid->leafs = (bspxlg_leaf_t *)Z_Malloc(leaf_bytes);
+        samples = (bspxlg_sample_t *)Z_Malloc(sample_bytes);
+    }
 
     if (!grid->nodes || !grid->leafs || !samples)
     {
@@ -448,33 +502,45 @@ static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
 
     for (unsigned int i = 0; i < numleafs; i++)
     {
-        unsigned int total;
-        unsigned int ms = 1;
+        size_t total;
+        size_t ms = 1;
 
         for (int j = 0; j < 3; j++)
             grid->leafs[i].mins[j] = BSPXLG_ReadInt(&ctx);
         for (int j = 0; j < 3; j++)
             grid->leafs[i].size[j] = BSPXLG_ReadInt(&ctx);
 
-        total = (unsigned int)(grid->leafs[i].size[0] * grid->leafs[i].size[1] * grid->leafs[i].size[2]);
+        {
+            size_t tmp;
+            if (!BSPXLG_MulSize((size_t)grid->leafs[i].size[0], (size_t)grid->leafs[i].size[1], &tmp) ||
+                !BSPXLG_MulSize(tmp, (size_t)grid->leafs[i].size[2], &total))
+            {
+                ctx.error = true;
+                break;
+            }
+        }
         grid->leafs[i].rgbvalues = samples;
 
         {
             size_t leafdataofs = ctx.ofs;
-            for (unsigned int j = 0; j < total; j++)
+            for (size_t j = 0; j < total; j++)
             {
                 byte s = BSPXLG_ReadByte(&ctx);
                 if (s == 0xff)
                     continue;
                 if (ms < s)
                     ms = s;
-                ctx.ofs += s * 4u;
+                if (!BSPXLG_CheckAdvance(&ctx, (size_t)s * 4u))
+                    break;
             }
             grid->leafs[i].numstyles = (unsigned char)ms;
             ctx.ofs = leafdataofs;
         }
 
-        while (total-- > 0)
+        if (ctx.error)
+            break;
+
+        for (size_t remaining = total; remaining-- > 0; )
         {
             byte s = BSPXLG_ReadByte(&ctx);
             if (s == 0xff)
@@ -498,7 +564,7 @@ static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
                     samples[k].rgb[2] = BSPXLG_ReadByte(&ctx);
                 }
             }
-            for (unsigned int k = s; k < ms; k++)
+            for (size_t k = s; k < ms; k++)
             {
                 samples[k].style = k ? (byte)~0u : 0;
                 samples[k].rgb[0] = samples[k].rgb[1] = samples[k].rgb[2] = 0;
@@ -508,13 +574,26 @@ static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
         }
     }
 
-    if (ctx.ofs != ctx.size)
+    if (ctx.error || ctx.ofs != ctx.size)
     {
         BSPXLG_FreeGrid(grid);
         return NULL;
     }
 
     return grid;
+
+fail:
+    if (grid)
+    {
+        grid->samples = samples;
+        BSPXLG_FreeGrid(grid);
+    }
+    else if (samples)
+    {
+        Z_Free(samples);
+    }
+
+    return NULL;
 }
 
 static float BSPXLG_SingleValue(const bspxlg_grid_t *grid, int x, int y, int z, float w, vec3_t res_diffuse)
