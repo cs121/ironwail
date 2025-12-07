@@ -779,12 +779,16 @@ static void V_AddWeaponWhip (entity_t *view)
 	velz = cl.velocity[2];
 
 	if (was_onground && !cl.onground && velz > 0.f)
-		vertical_offset -= velz * 0.01f * scale;
+	{
+		float jump_impulse = velz * 0.004f * scale;
+		vertical_velocity += jump_impulse;
+	}
 
 	if (!was_onground && cl.onground)
 	{
 		float impact = fabs(previous_velz);
-		vertical_offset -= impact * 0.008f * scale;
+		float landing_impulse = q_min(impact * 0.005f, 6.f) * scale;
+		vertical_velocity -= landing_impulse;
 	}
 
 	vertical_velocity -= vertical_offset * 25.f * dt;
