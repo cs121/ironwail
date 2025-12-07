@@ -328,7 +328,7 @@ static void R_FlushBModelCalls (void)
 R_AddBModelCall
 =============
 */
-static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix)
+static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix, float alpha_override)
 {
 	GLuint		flags;
 	float		alpha;
@@ -356,12 +356,23 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	if (!gl_zfix.value || map_checks.value)
 		zfix = 0;
 
-        flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
-        if (em != NULL)
-                flags |= CALLFLAG_EMISSIVE;
-        if (t && t->type == TEXTYPE_CUTOUT)
-                flags |= CALLFLAG_ALPHA_TEST;
-        alpha = t ? GL_WaterAlphaForTextureType (t->type) : 1.f;
+	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
+	if (em != NULL)
+		flags |= CALLFLAG_EMISSIVE;
+	if (t && t->type == TEXTYPE_CUTOUT)
+		flags |= CALLFLAG_ALPHA_TEST;
+	
+	if (t)
+	{
+		if (alpha_override >= 0.f)
+			alpha = alpha_override;
+		else
+			alpha = GL_WaterAlphaForTextureType (t->type);
+	}
+	else
+	{
+		alpha = 1.f;
+	}
 
 	if (gl_bindless_able)
 	{
@@ -540,13 +551,13 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
                 for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
                         numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
 
-                for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
-                {
-                        texture_t *t = model->textures[model->usedtextures[j]];
-                        R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix);
-                }
-
-                baseinst += numinst;
+		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
+		{
+			texture_t *t = model->textures[model->usedtextures[j]];
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix, -1);
+		}
+		
+		baseinst += numinst;
         }
 
         R_FlushBModelCalls ();
@@ -639,9 +650,10 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 		for (j = model->texofs[TEXTYPE_FIRSTLIQUID]; j < model->texofs[TEXTYPE_LASTLIQUID+1]; j++)
 		{
 			texture_t *t = model->textures[model->usedtextures[j]];
-			if ((GL_WaterAlphaForEntityTextureType (e, t->type) < 1.f) != translucent)
+			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
+			if ((alpha < 1.f) != translucent)
 				continue;
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld);
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld, alpha);
 		}
 
 		baseinst += numinst;
