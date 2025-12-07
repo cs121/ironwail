@@ -33,6 +33,8 @@ typedef struct
 	char	map[MAX_STYLESTRING];
 	char	average; //johnfitz
 	char	peak; //johnfitz
+	vec3_t	colours; // FTE extended lightstyles
+	int		colourkey;
 } lightstyle_t;
 
 typedef struct
@@ -329,6 +331,7 @@ extern	client_state_t	cl;
 
 // FIXME, allocate dynamically
 extern	entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
+extern	int			cl_max_lightstyles;
 extern	lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 extern	dlight_t		cl_dlights[MAX_DLIGHTS];
 extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];

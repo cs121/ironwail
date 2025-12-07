@@ -60,6 +60,7 @@ client_state_t	cl;
 // FIXME: put these on hunk?
 entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
+int					cl_max_lightstyles = MAX_LIGHTSTYLES;
 dlight_t		cl_dlights[MAX_DLIGHTS];
 
 entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
@@ -110,6 +111,7 @@ void CL_ClearState (void)
 // clear other arrays
 	memset (cl_dlights, 0, sizeof(cl_dlights));
 	memset (cl_lightstyle, 0, sizeof(cl_lightstyle));
+	cl_max_lightstyles = MAX_LIGHTSTYLES;
 	memset (cl_temp_entities, 0, sizeof(cl_temp_entities));
 	memset (cl_beams, 0, sizeof(cl_beams));
 
