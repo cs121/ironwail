@@ -49,6 +49,8 @@ cvar_t	v_kickpitch = {"v_kickpitch", "0.6", CVAR_NONE};
 cvar_t	v_gunkick = {"v_gunkick", "2", CVAR_ARCHIVE}; //johnfitz
 cvar_t	v_gunsway = {"v_gunsway", "0", CVAR_ARCHIVE};
 
+cvar_t	v_weaponwhip = {"v_weaponwhip", "1", CVAR_ARCHIVE};
+
 cvar_t	v_explosionvibration = {"v_explosionvibration", "1", CVAR_ARCHIVE};
 
 cvar_t	v_iyaw_cycle = {"v_iyaw_cycle", "2", CVAR_NONE};
@@ -755,6 +757,49 @@ static void V_AddGunSway (entity_t *view)
 }
 
 
+static void V_AddWeaponWhip (entity_t *view)
+{
+	static qboolean was_onground = true;
+	static float vertical_offset = 0.f;
+	static float vertical_velocity = 0.f;
+	static float previous_velz = 0.f;
+	float scale;
+	float dt;
+	float velz;
+
+	scale = max(0.f, v_weaponwhip.value);
+	if (scale == 0.f)
+	{
+		was_onground = cl.onground;
+		previous_velz = cl.velocity[2];
+		return;
+	}
+
+	dt = host_frametime;
+	velz = cl.velocity[2];
+
+	if (was_onground && !cl.onground && velz > 0.f)
+		vertical_velocity -= velz * 0.01f * scale;
+
+	if (!was_onground && cl.onground)
+	{
+		float impact = fabs(previous_velz);
+		vertical_velocity -= impact * 0.008f * scale;
+	}
+
+	vertical_velocity -= vertical_offset * 25.f * dt;
+	vertical_velocity -= vertical_velocity * 8.f * dt;
+
+	vertical_offset += vertical_velocity * dt;
+
+	view->origin[2] += vertical_offset;
+	view->angles[PITCH] -= vertical_offset * 0.7f;
+
+	was_onground = cl.onground;
+	previous_velz = velz;
+}
+
+
 /*
 ==============
 V_CalcViewRoll
@@ -944,6 +989,7 @@ void V_CalcRefdef (void)
 		}
 	}
 
+	V_AddWeaponWhip (view);
 	V_AddGunSway (view);
 
 	// smooth out stair step ups
@@ -1091,6 +1137,7 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_kickpitch);
 	Cvar_RegisterVariable (&v_gunkick); //johnfitz
 	Cvar_RegisterVariable (&v_gunsway);
+	Cvar_RegisterVariable (&v_weaponwhip);
 	Cvar_RegisterVariable (&v_explosionvibration);
 
 	Cvar_RegisterVariable (&r_viewmodel_quake); //MarkV
