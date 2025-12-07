@@ -2196,13 +2196,17 @@ static void Mod_LoadFaces (lump_t *l)
                                 Q1BSPX_MarkUsed("LMSTYLE");
                 }
 
-				{
-					void* lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
+                {
+                        void* lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
 
-					if (lglump && lumpsize > 0)
-						Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
-						BSPX_LightGridLoad (loadmodel, lglump, lumpsize);
-				}
+                        if (lglump && lumpsize > 0)
+                        {
+                                if (BSPX_LightGridLoad (loadmodel, lglump, lumpsize))
+                                        Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
+                                else
+                                        Q1BSPX_MarkUnsupported ("LIGHTGRID_OCTREE");
+                        }
+                }
 
         }
 
