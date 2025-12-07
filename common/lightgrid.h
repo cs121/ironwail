@@ -24,4 +24,5 @@ typedef struct bspx_lump_s {
 
 lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_t mins, const vec3_t maxs);
 lightgrid_t *Lightgrid_LoadFromBSPX_Octree(const bspx_lump_t *l);
+lightgrid_t *Lightgrid_LoadFromBSPX_FTE(const bspx_lump_t *l);
 void Lightgrid_Free(lightgrid_t *lg);

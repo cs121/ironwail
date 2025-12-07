@@ -2159,7 +2159,9 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 	l.data = lump;
 	l.size = (size_t)lumpsize;
 
-	lg = Lightgrid_LoadFromBSPX_Octree(&l);
+    lg = Lightgrid_LoadFromBSPX_FTE(&l);
+    if (!lg)
+        lg = Lightgrid_LoadFromBSPX_Octree(&l);
 	if (!lg)
 		return false;
 
