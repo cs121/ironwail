@@ -361,11 +361,11 @@ static void BSPXLG_FreeGrid(bspxlg_grid_t *grid)
     if (!grid)
         return;
 
-    Z_Free(grid->samples);
-    Z_Free(grid->leafs);
-    Z_Free(grid->nodes);
+    free(grid->samples);
+    free(grid->leafs);
+    free(grid->nodes);
 
-    Z_Free(grid);
+    free(grid);
 }
 
 static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
@@ -460,21 +460,20 @@ static bspxlg_grid_t *BSPXLG_Load(const bspx_lump_t *l)
             !BSPXLG_MulSize(sizeof(*grid->leafs), numleafs, &leaf_bytes) || !BSPXLG_MulSize(sizeof(*samples), leafsamps, &sample_bytes))
             goto fail;
 
-        grid = (bspxlg_grid_t *)Z_Malloc(sizeof(*grid));
+        grid = (bspxlg_grid_t *)calloc(1, sizeof(*grid));
         if (!grid)
             goto fail;
 
-        memset(grid, 0, sizeof(*grid));
-        grid->nodes = (bspxlg_node_t *)Z_Malloc(node_bytes);
-        grid->leafs = (bspxlg_leaf_t *)Z_Malloc(leaf_bytes);
-        samples = (bspxlg_sample_t *)Z_Malloc(sample_bytes);
+        grid->nodes = (bspxlg_node_t *)calloc(numnodes, sizeof(*grid->nodes));
+        grid->leafs = (bspxlg_leaf_t *)calloc(numleafs, sizeof(*grid->leafs));
+        samples = (bspxlg_sample_t *)calloc(leafsamps, sizeof(*samples));
     }
 
     if (!grid->nodes || !grid->leafs || !samples)
     {
         BSPXLG_FreeGrid(grid);
         if (samples)
-            Z_Free(samples);
+            free(samples);
         return NULL;
     }
 
@@ -590,7 +589,7 @@ fail:
     }
     else if (samples)
     {
-        Z_Free(samples);
+        free(samples);
     }
 
     return NULL;
