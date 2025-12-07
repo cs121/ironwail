@@ -1451,6 +1451,7 @@ static void Mod_LoadLighting (lump_t *l)
 	const char *lighting_source;
 	unsigned int path_id;
 	int	bspxsize;
+	qboolean bspx_dlit;
 
 	loadmodel->lightdata = NULL;
 	loadmodel->lightdatasamples = 0;
@@ -1462,6 +1463,7 @@ static void Mod_LoadLighting (lump_t *l)
 	loadmodel->lightdatasize = l->filelen;
 	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
+	bspx_dlit = Q1BSPX_IsProcessed("DLIT");
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -1624,6 +1626,43 @@ static void Mod_LoadLighting (lump_t *l)
                 Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
         }
 
+        if (bspx_dlit && l->filelen && !loadmodel->lightdata)
+        {
+                int samples = l->filelen / 6;
+
+                if (l->filelen % 6)
+                {
+                        Q1BSPX_MarkUnsupported("DLIT");
+                        Con_DWarning("DLIT lump size %d is not a multiple of 6 bytes\n", l->filelen);
+                }
+                else
+                {
+                        byte *luxout;
+
+                        loadmodel->lightdata = (byte *)Hunk_AllocName(samples * 3, litfilename);
+                        loadmodel->lightdatasamples = samples;
+                        loadmodel->lightdirdata = (byte *)Hunk_AllocName(samples * 3, litfilename);
+                        loadmodel->lightdirsamples = samples;
+                        in = mod_base + l->fileofs;
+                        out = loadmodel->lightdata;
+                        luxout = loadmodel->lightdirdata;
+
+                        for (int sample = 0; sample < samples; sample++)
+                        {
+                                *out++ = *in++;
+                                *out++ = *in++;
+                                *out++ = *in++;
+
+                                *luxout++ = *in++;
+                                *luxout++ = *in++;
+                                *luxout++ = *in++;
+                        }
+
+                        Q1BSPX_MarkUsed("DLIT");
+                        goto loadlightdir;
+                }
+        }
+
         // Quake64 bsp lighmap data
         if (loadmodel->bspversion == BSPVERSION_QUAKE64)
         {
@@ -1667,35 +1706,38 @@ static void Mod_LoadLighting (lump_t *l)
 
 
 loadlightdir:
-	in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
-	if (in && bspxsize > 0)
+	if (!loadmodel->lightdirdata)
 	{
-		int samples = bspxsize / 3;
-		int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
-		qboolean sample_count_ok = true;
-
-		if (bspxsize % 3)
+		in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
+		if (in && bspxsize > 0)
 		{
-			Q1BSPX_MarkUnsupported("LIGHTINGDIR");
-			Con_DWarning("LIGHTINGDIR lump size %d is not a multiple of 3 bytes\n", bspxsize);
-		}
-		else
-		{
-			if (expected_samples && samples != expected_samples)
-			{
-				Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
-				sample_count_ok = false;
-			}
+			int samples = bspxsize / 3;
+			int expected_samples = loadmodel->lightdatasamples ? loadmodel->lightdatasamples : l->filelen;
+			qboolean sample_count_ok = true;
 
-			if (sample_count_ok)
+			if (bspxsize % 3)
 			{
-				loadmodel->lightdirdata = (byte *) Hunk_AllocNameNoFill (bspxsize, litfilename);
-				loadmodel->lightdirsamples = samples;
-				memcpy (loadmodel->lightdirdata, in, bspxsize);
-				Q1BSPX_MarkUsed("LIGHTINGDIR");
+				Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+				Con_DWarning("LIGHTINGDIR lump size %d is not a multiple of 3 bytes\n", bspxsize);
 			}
 			else
-				Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+			{
+				if (expected_samples && samples != expected_samples)
+				{
+					Con_DWarning("LIGHTINGDIR lump has %d samples, expected %d\n", samples, expected_samples);
+					sample_count_ok = false;
+				}
+
+				if (sample_count_ok)
+				{
+					loadmodel->lightdirdata = (byte *) Hunk_AllocNameNoFill (bspxsize, litfilename);
+					loadmodel->lightdirsamples = samples;
+					memcpy (loadmodel->lightdirdata, in, bspxsize);
+					Q1BSPX_MarkUsed("LIGHTINGDIR");
+				}
+				else
+					Q1BSPX_MarkUnsupported("LIGHTINGDIR");
+			}
 		}
 	}
 	return;
