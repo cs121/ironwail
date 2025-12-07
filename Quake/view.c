@@ -759,13 +759,16 @@ static void V_AddGunSway (entity_t *view)
 
 static void V_AddWeaponWhip (entity_t *view)
 {
-	static qboolean was_onground = true;
-	static float vertical_offset = 0.f;
-	static float vertical_velocity = 0.f;
-	static float previous_velz = 0.f;
-	float scale;
-	float dt;
-	float velz;
+        entity_t *player;
+        static qboolean was_onground = true;
+        static float vertical_offset = 0.f;
+        static float vertical_velocity = 0.f;
+        static float previous_velz = 0.f;
+        float scale;
+        float dt;
+        float velz;
+
+        player = &cl_entities[cl.viewentity];
 
 	scale = q_max(0.f, v_weaponwhip.value);
 	if (scale == 0.f)
@@ -776,7 +779,20 @@ static void V_AddWeaponWhip (entity_t *view)
 	}
 
 	dt = host_frametime;
-	velz = cl.velocity[2];
+        velz = cl.velocity[2];
+
+        if (fabsf(velz) < 1.f)
+        {
+                double msg_dt = cl.mtime[0] - cl.mtime[1];
+
+                if (msg_dt > 0)
+                {
+                        float msg_velz = (player->msg_origins[0][2] - player->msg_origins[1][2]) / msg_dt;
+
+                        if (fabsf(msg_velz) > fabsf(velz))
+                                velz = msg_velz;
+                }
+        }
 
 	if (was_onground && !cl.onground && velz > 0.f)
 	{
