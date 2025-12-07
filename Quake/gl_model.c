@@ -894,6 +894,26 @@ static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lu
         return NULL;
 }
 
+static qboolean BSPX_MarkKnown(qmodel_t *mod, void *data, int size)
+{
+        return true;
+}
+
+static qboolean BSPX_ApplyLumpOverride(const char *lumpname, lump_t *target)
+{
+        size_t          size;
+        void            *data;
+
+        data = BSPX_FindLump(loadmodel ? loadmodel->bspx_header : NULL, mod_base, lumpname, &size);
+        if (!data || !size)
+                return false;
+
+        target->fileofs = (int)((byte *)data - mod_base);
+        target->filelen = (int)size;
+        Q1BSPX_MarkUsed(lumpname);
+        return true;
+}
+
 typedef qboolean (*bspx_handler_t)(qmodel_t *mod, void *data, int size);
 typedef struct
 {
@@ -907,6 +927,13 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
                 { "LIGHTRID", BSPX_LightGridLoad },
                 { "LGHTGRID", BSPX_LightGridLoad },
                 { "LIGHTGRID", BSPX_LightGridLoad },
+                { "CUBEMAPS", BSPX_MarkKnown },
+                { "MATERIALS", BSPX_MarkKnown },
+                { "DECALS", BSPX_MarkKnown },
+                { "MAPSCRIPTS", BSPX_MarkKnown },
+                { "QC_EMBED", BSPX_MarkKnown },
+                { "BSPX_SURFPROPS", BSPX_MarkKnown },
+                { "BSPX_MODELNAMES", BSPX_MarkKnown },
                 { NULL, NULL }
         };
         int i;
@@ -3369,12 +3396,32 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		return;
 	}
 
-	bspx = BSPX_Setup(mod, &header, com_filesize);
-	mod->bspx_header = bspx;
+        bspx = BSPX_Setup(mod, &header, com_filesize);
+        mod->bspx_header = bspx;
 
-	// load into heap
+        if (bspx)
+        {
+                BSPX_ApplyLumpOverride("BSPX_VERTS", &header.lumps[LUMP_VERTEXES]);
+                BSPX_ApplyLumpOverride("BSPX_FACES", &header.lumps[LUMP_FACES]);
 
-	Mod_SetupBspLoader(header.is_bsp2, header.is_bsp29);
+                BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
+                BSPX_ApplyLumpOverride("DLIT", &header.lumps[LUMP_LIGHTING]);
+                BSPX_ApplyLumpOverride("RGBLIGHTING", &header.lumps[LUMP_LIGHTING]);
+
+                BSPX_ApplyLumpOverride("BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES]);
+
+                BSPX_ApplyLumpOverride("BSPX_MODELS", &header.lumps[LUMP_MODELS]);
+
+                if (!BSPX_ApplyLumpOverride("VISX", &header.lumps[LUMP_VISIBILITY]))
+                {
+                        if (!BSPX_ApplyLumpOverride("PVS2", &header.lumps[LUMP_VISIBILITY]))
+                                BSPX_ApplyLumpOverride("PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY]);
+                }
+        }
+
+        // load into heap
+
+        Mod_SetupBspLoader(header.is_bsp2, header.is_bsp29);
 
 	Mod_LoadVertexes (&header.lumps[LUMP_VERTEXES]);
 	Mod_LoadEdges (&header.lumps[LUMP_EDGES]);
