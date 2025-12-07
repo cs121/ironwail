@@ -137,17 +137,14 @@ lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_
     if (total > SIZE_MAX / sizeof(lightgrid_probe_t))
         return NULL;
 
-    lightgrid_t *lg = (lightgrid_t *)Z_Malloc(sizeof(lightgrid_t));
+    lightgrid_t *lg = (lightgrid_t *)Hunk_AllocName(sizeof(lightgrid_t), "lightgrid");
     if (!lg)
         return NULL;
 
     memset(lg, 0, sizeof(*lg));
-    lg->probes = (lightgrid_probe_t *)Z_Malloc(total * sizeof(lightgrid_probe_t));
+    lg->probes = (lightgrid_probe_t *)Hunk_AllocName(total * sizeof(lightgrid_probe_t), "lightgrid_probes");
     if (!lg->probes)
-    {
-        Z_Free(lg);
         return NULL;
-    }
 
     lg->nx = nx;
     lg->ny = ny;
@@ -163,11 +160,6 @@ void Lightgrid_Free(lightgrid_t *lg)
 {
     if (!lg)
         return;
-
-    if (lg->probes)
-        Z_Free(lg->probes);
-
-    Z_Free(lg);
 }
 
 lightgrid_t *Lightgrid_LoadFromBSPX_Octree(const bspx_lump_t *l)
