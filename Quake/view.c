@@ -767,7 +767,7 @@ static void V_AddWeaponWhip (entity_t *view)
 	float dt;
 	float velz;
 
-	scale = max(0.f, v_weaponwhip.value);
+    scale = q_max(0.f, v_weaponwhip.value);
 	if (scale == 0.f)
 	{
 		was_onground = cl.onground;
