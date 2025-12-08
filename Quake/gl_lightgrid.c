@@ -4,6 +4,7 @@ Copyright (C) 2024 Ironwail developers
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include "gl_model.h"
 #include "glquake.h"
 
 extern vec3_t lightcolor;
@@ -222,6 +223,52 @@ static float Lightgrid_CellsizeForBounds (const vec3_t mins, const vec3_t maxs)
     return cellsize;
 }
 
+lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw)
+{
+    lightgrid_t *lg;
+    vec3_t mins, maxs;
+    size_t count;
+
+    if (!raw || !raw->cells || raw->cellSize <= 0.f)
+        return NULL;
+
+    if (raw->nx <= 0 || raw->ny <= 0 || raw->nz <= 0)
+        return NULL;
+
+    count = (size_t)raw->nx * (size_t)raw->ny * (size_t)raw->nz;
+    if (!count || count > (SIZE_MAX / sizeof(lightgrid_probe_t)))
+        return NULL;
+
+    VectorCopy (raw->origin, mins);
+    VectorCopy (raw->origin, maxs);
+    maxs[0] += raw->cellSize * raw->nx;
+    maxs[1] += raw->cellSize * raw->ny;
+    maxs[2] += raw->cellSize * raw->nz;
+
+    lg = Lightgrid_Alloc (raw->nx, raw->ny, raw->nz, raw->cellSize, mins, maxs);
+    if (!lg)
+        return NULL;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        const lightcell_t *cell = &raw->cells[i];
+        vec3_t dir;
+
+        VectorCopy (cell->rgb, lg->probes[i].rgb);
+        VectorCopy (cell->dir, dir);
+        if (VectorNormalize (dir) == 0.f)
+        {
+            dir[0] = dir[1] = 0.f;
+            dir[2] = 1.f;
+        }
+
+        VectorCopy (dir, lg->probes[i].dir);
+        lg->probes[i].intensity = cell->intensity;
+    }
+
+    return lg;
+}
+
 static void Lightgrid_AddDlights (const vec3_t pos, vec3_t color, vec3_t dirsum)
 {
     int i;
@@ -251,20 +298,18 @@ static void Lightgrid_AddDlights (const vec3_t pos, vec3_t color, vec3_t dirsum)
     }
 }
 
-void Lightgrid_BuildFallback (void)
+lightgrid_raw_t *Lightgrid_GenerateRaw (const qmodel_t *model)
 {
     vec3_t mins, maxs, size;
     float cellsize;
     int nx, ny, nz;
     int x, y, z;
 
-    if (!cl.worldmodel)
-        return;
+    if (!model)
+        return NULL;
 
-    Con_Printf ("Lightgrid fallback: building interpolated grid...\n");
-
-    VectorCopy (cl.worldmodel->mins, mins);
-    VectorCopy (cl.worldmodel->maxs, maxs);
+    VectorCopy (model->mins, mins);
+    VectorCopy (model->maxs, maxs);
     VectorSubtract (maxs, mins, size);
 
     cellsize = Lightgrid_CellsizeForBounds (mins, maxs);
@@ -273,14 +318,22 @@ void Lightgrid_BuildFallback (void)
     ny = q_max (1, q_min (32, (int)ceilf (size[1] / cellsize)));
     nz = q_max (1, q_min (32, (int)ceilf (size[2] / cellsize)));
 
-    Lightgrid_Clear ();
+    lightgrid_raw_t *raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
+    if (!raw)
+        return NULL;
 
-    current_lightgrid = Lightgrid_Alloc (nx, ny, nz, cellsize, mins, maxs);
-    if (!current_lightgrid)
-    {
-        Con_Printf ("Lightgrid fallback: failed to allocate grid\n");
-        return;
-    }
+    memset (raw, 0, sizeof(*raw));
+
+    const size_t count = (size_t)nx * (size_t)ny * (size_t)nz;
+    raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells");
+    if (!raw->cells)
+        return NULL;
+
+    raw->nx = nx;
+    raw->ny = ny;
+    raw->nz = nz;
+    raw->cellSize = cellsize;
+    VectorCopy (mins, raw->origin);
 
     for (z = 0; z < nz; z++)
     {
@@ -289,7 +342,7 @@ void Lightgrid_BuildFallback (void)
             for (x = 0; x < nx; x++)
             {
                 vec3_t pos;
-                lightgrid_probe_t *cell = Lightgrid_At (x, y, z);
+                lightcell_t *cell = &raw->cells[(z * ny + y) * nx + x];
                 vec3_t dirsum = {0.f, 0.f, 0.f};
                 float baseintensity;
                 lightcache_t cache = {0};
@@ -326,7 +379,40 @@ void Lightgrid_BuildFallback (void)
         }
     }
 
-    Con_Printf ("Lightgrid fallback: done (%dx%dx%d)\n", nx, ny, nz);
+    return raw;
+}
+
+void Lightgrid_BuildFallback (void)
+{
+    lightgrid_t *lg;
+    lightgrid_raw_t *raw;
+
+    if (!cl.worldmodel)
+        return;
+
+    Con_Printf ("Lightgrid fallback: building interpolated grid...\n");
+
+    raw = Lightgrid_GenerateRaw (cl.worldmodel);
+    if (!raw)
+    {
+        Con_Printf ("Lightgrid fallback: failed to allocate grid\n");
+        return;
+    }
+
+    cl.worldmodel->lightgrid_raw = raw;
+
+    Lightgrid_Clear ();
+    lg = Lightgrid_FromRaw (raw);
+    if (!lg)
+    {
+        Con_Printf ("Lightgrid fallback: failed to upload grid\n");
+        return;
+    }
+
+    current_lightgrid = lg;
+    cl.lightgrid = lg;
+
+    Con_Printf ("Lightgrid fallback: done (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
 }
 
 const lightgrid_t *Lightgrid_Get (void)
