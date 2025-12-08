@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_ktx2.h"
+#include "gl_lightgrid.h"
 #include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
@@ -41,6 +42,7 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
+static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
@@ -2185,6 +2187,91 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 	}
 }
 
+
+static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size)
+{
+	const size_t header_size = sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t);
+	const size_t cell_size = sizeof(vec3_t) * 2 + sizeof(float);
+	lightgrid_raw_t *raw;
+	lightgrid_t *lg;
+	int nx, ny, nz;
+	float cellsize;
+	vec3_t origin;
+	size_t count, expected;
+	const float *cells_in;
+
+	if (!data || size < (int)header_size)
+		return false;
+
+	nx = LittleLong (((int *)data)[0]);
+	ny = LittleLong (((int *)data)[1]);
+	nz = LittleLong (((int *)data)[2]);
+
+	if (nx <= 0 || ny <= 0 || nz <= 0)
+		return false;
+
+	count = (size_t)nx * (size_t)ny * (size_t)nz;
+	if (!count || count > (SIZE_MAX / sizeof(lightcell_t)))
+		return false;
+
+	expected = header_size + cell_size * count;
+	if ((size_t)size < expected)
+		return false;
+
+	memcpy (&cellsize, (byte *)data + sizeof(int) * 3, sizeof(float));
+	cellsize = LittleFloat (cellsize);
+	if (cellsize <= 0.f)
+		return false;
+	memcpy (origin, (byte *)data + sizeof(int) * 3 + sizeof(float), sizeof(vec3_t));
+	origin[0] = LittleFloat (origin[0]);
+	origin[1] = LittleFloat (origin[1]);
+	origin[2] = LittleFloat (origin[2]);
+
+	raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
+	if (!raw)
+		return false;
+
+	memset (raw, 0, sizeof(*raw));
+	raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells");
+	if (!raw->cells)
+		return false;
+
+	raw->nx = nx;
+	raw->ny = ny;
+	raw->nz = nz;
+	raw->cellSize = cellsize;
+	VectorCopy (origin, raw->origin);
+
+	cells_in = (const float *)((byte *)data + header_size);
+	for (size_t i = 0; i < count; i++)
+	{
+		lightcell_t *cell = &raw->cells[i];
+
+		cell->rgb[0] = LittleFloat (cells_in[0]);
+		cell->rgb[1] = LittleFloat (cells_in[1]);
+		cell->rgb[2] = LittleFloat (cells_in[2]);
+		cell->dir[0] = LittleFloat (cells_in[3]);
+		cell->dir[1] = LittleFloat (cells_in[4]);
+		cell->dir[2] = LittleFloat (cells_in[5]);
+		cell->intensity = LittleFloat (cells_in[6]);
+
+		cells_in += 7;
+	}
+
+	mod->lightgrid_raw = raw;
+
+	Lightgrid_Clear ();
+	lg = Lightgrid_FromRaw (raw);
+	if (!lg)
+		return false;
+
+	cl.lightgrid = lg;
+
+	Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", nx, ny, nz);
+
+	return true;
+}
+
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
 	lightgrid_t *lg;
@@ -2287,35 +2374,77 @@ static void Mod_LoadFaces (lump_t *l)
                                 }
                         }
                 }
-                lmstyle16 = Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
-                stylesperface = lumpsize/(sizeof(*lmstyle16)*count);
-                if (lumpsize != sizeof(*lmstyle16)*stylesperface*count)
-                        lmstyle16 = NULL;
-                else
-                        Q1BSPX_MarkUsed("LMSTYLE16");
-                if (!lmstyle16)
-                {
-                        lmstyle8 = Q1BSPX_FindLump("LMSTYLE", &lumpsize);
-                        stylesperface = lumpsize/(sizeof(*lmstyle8)*count);
-                        if (lumpsize != sizeof(*lmstyle8)*stylesperface*count)
-                                lmstyle8 = NULL;
-                        else
-                                Q1BSPX_MarkUsed("LMSTYLE");
-                }
+                		lmstyle16 = Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
+		stylesperface = lumpsize/(sizeof(*lmstyle16)*count);
+		if (lumpsize != sizeof(*lmstyle16)*stylesperface*count)
+			lmstyle16 = NULL;
+		else
+			Q1BSPX_MarkUsed("LMSTYLE16");
+		if (!lmstyle16)
+		{
+			lmstyle8 = Q1BSPX_FindLump("LMSTYLE", &lumpsize);
+			stylesperface = lumpsize/(sizeof(*lmstyle8)*count);
+			if (lumpsize != sizeof(*lmstyle8)*stylesperface*count)
+				lmstyle8 = NULL;
+			else
+				Q1BSPX_MarkUsed("LMSTYLE");
+		}
 
-                {
-                        void* lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
+		{
+			qboolean have_lightgrid = false;
+			lightgrid_t *lg;
+			void* lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
 
-                        if (lglump && lumpsize > 0)
-                        {
-                                if (BSPX_LightGridLoad (loadmodel, lglump, lumpsize))
-                                        Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
-                                else
-                                        Q1BSPX_MarkUnsupported ("LIGHTGRID_OCTREE");
-                        }
-                }
+			if (lglump && lumpsize > 0)
+			{
+				if (LightgridRAW_Load (loadmodel, lglump, lumpsize))
+				{
+					Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
+					have_lightgrid = true;
+				}
+				else
+				{
+					Q1BSPX_MarkUnsupported ("LIGHTGRID_RAW");
+				}
+			}
 
-        }
+			if (!have_lightgrid)
+			{
+				lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
+
+				if (lglump && lumpsize > 0)
+				{
+					if (BSPX_LightGridLoad (loadmodel, lglump, lumpsize))
+					{
+						Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
+						have_lightgrid = true;
+					}
+					else
+					{
+						Q1BSPX_MarkUnsupported ("LIGHTGRID_OCTREE");
+					}
+				}
+			}
+
+			if (!have_lightgrid)
+			{
+				lightgrid_raw_t *generated = Lightgrid_GenerateRaw (loadmodel);
+
+				if (generated)
+				{
+					loadmodel->lightgrid_raw = generated;
+
+					Lightgrid_Clear ();
+					lg = Lightgrid_FromRaw (generated);
+					if (lg)
+					{
+						cl.lightgrid = lg;
+						have_lightgrid = true;
+					}
+				}
+			}
+
+		}
 
 
         loadmodel->surfaces = out;

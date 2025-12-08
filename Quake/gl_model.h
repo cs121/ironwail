@@ -427,6 +427,21 @@ typedef struct
 	int		size;
 } bspx_entry_t;
 
+typedef struct lightcell_s
+{
+	vec3_t rgb;
+	vec3_t dir;
+	float intensity;
+} lightcell_t;
+
+typedef struct lightgrid_raw_s
+{
+	int nx, ny, nz;
+	float cellSize;
+	vec3_t origin;       // world-space min corner
+	lightcell_t *cells;  // array of nx*ny*nz
+} lightgrid_raw_t;
+
 typedef struct bspx_header_s
 {
         int                     numlumps;
@@ -523,6 +538,7 @@ typedef struct qmodel_s
 	qboolean	litfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
 	qboolean	has_lightdata_rgb;
+	lightgrid_raw_t *lightgrid_raw;
 
 	int			bspversion;
 	int			bspx_entries_count;
