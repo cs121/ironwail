@@ -52,6 +52,14 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
 static void Mod_Print (void);
 
+// Forward declarations für Lightgrid-Funktionen
+void Lightgrid_Clear(void);
+lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw);
+void Lightgrid_SetSource(const char *source);
+const lightgrid_t *Lightgrid_Get(void);
+const char *Lightgrid_GetSource(void);
+void Lightgrid_Free(lightgrid_t *lg);
+
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 static cvar_t	gl_loadlitfiles = {"gl_loadlitfiles", "1", CVAR_ARCHIVE};
@@ -2422,6 +2430,17 @@ static int LightgridRAW_CollectLights (qmodel_t *mod, lightgrid_static_light_t *
         return count;
 }
 
+// TraceLine helper function - einfache Implementation
+static void TraceLine(vec3_t start, vec3_t end, vec3_t impact)
+{
+	// Einfache Implementation - kopiert nur das Ende
+	VectorCopy(end, impact);
+
+	// TODO: Hier sollte eine echte Collision-Detection implementiert werden
+	// die prüft, ob die Linie durch Geometrie blockiert wird
+	// Möglicherweise mit SV_RecursiveHullCheck oder ähnlich
+}
+
 static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_static_light_t *lights, int num_lights, const vec3_t pos, lightcell_t *cell)
 {
         int i;
@@ -2889,7 +2908,7 @@ static void Mod_LoadFaces (lump_t *l)
         int                     i, count, surfnum, lofs, shift;
         int                     planenum, side, texinfon;
 
-        unsigned char *lmshift = NULL, defaultshift = 4;
+        unsigned char *lmshift = NULL, defaultshift = 4; // Standardwert: 16 texels per luxel (2^4)
         unsigned int *lmoffset = NULL;
         unsigned char *lmstyle8 = NULL;
         unsigned short *lmstyle16 = NULL;
@@ -3005,7 +3024,7 @@ static void Mod_LoadFaces (lump_t *l)
 
 			if (!have_lightgrid)
 			{
-				lightgrid_raw_t *generated = Lightgrid_GenerateRaw (loadmodel);
+				lightgrid_raw_t *generated = LightgridRAW_Generate (loadmodel, 128.f, 128.f, 128.f);
 
 				if (generated)
 				{
