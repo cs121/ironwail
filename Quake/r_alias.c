@@ -92,17 +92,27 @@ struct ibuf_s {
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
 
-static int r_lightgrid_debug_frame = -1;
+static qboolean r_lightgrid_debug_sample_reported = false;
+static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 
 static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add, const vec3_t dlight_add, float dir_dot)
 {
         if (!r_lightgrid_debug.value)
+        {
+                r_lightgrid_debug_sample_reported = false;
+                return;
+        }
+
+        if (cl.worldmodel != r_lightgrid_debug_last_world)
+        {
+                r_lightgrid_debug_sample_reported = false;
+                r_lightgrid_debug_last_world = cl.worldmodel;
+        }
+
+        if (r_lightgrid_debug_sample_reported)
                 return;
 
-        if (r_lightgrid_debug_frame == r_framecount)
-                return;
-
-        r_lightgrid_debug_frame = r_framecount;
+        r_lightgrid_debug_sample_reported = true;
 
         Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) intensity=%.2f dir=(%.2f %.2f %.2f) dir_dot=%.2f ambient_add=(%.1f %.1f %.1f) dlight_add=(%.1f %.1f %.1f)\n",
                 e->model ? e->model->name : "<no model>",
