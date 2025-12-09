@@ -429,6 +429,11 @@ float GetClampedLogFraction (float val, float minval, float maxval)
 	return CLAMP (0.f, val, 1.f);
 }
 
+float Lerp (float minval, float maxval, float t)
+{
+	return minval + (maxval - minval) * t;
+}
+
 float LogLerp (float minval, float maxval, float t)
 {
 	return minval * exp (t * log (maxval / minval));

@@ -107,6 +107,7 @@ float Log2f (float val);
 float Exp2f (float val);
 float GetLogFraction (float val, float minval, float maxval);
 float GetClampedLogFraction (float val, float minval, float maxval);
+float Lerp (float minval, float maxval, float t);
 float LogLerp (float minval, float maxval, float t);
 
 float EaseInOut (float t);
