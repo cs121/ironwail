@@ -24,4 +24,6 @@ lightgrid_raw_t *Lightgrid_GenerateRaw (const struct qmodel_s *model);
 void Lightgrid_BuildFallback (void);
 void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
 const lightgrid_t *Lightgrid_Get (void);
+void Lightgrid_SetSource (const char *name);
+const char *Lightgrid_GetSource (void);
 
