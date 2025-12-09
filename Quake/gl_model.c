@@ -2813,7 +2813,7 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
         cell_size = sizeof(float) * 7;
         total_size = header_size + cell_size * count;
 
-        buffer = (byte *)Z_Malloc (total_size);
+        buffer = (byte *)malloc (total_size);
         if (!buffer)
                 return false;
 
@@ -2868,7 +2868,7 @@ qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut)
 
         if (!BSPX_WriteLump (bspxOut, "LIGHTGRID_RAW", buffer, total_size))
         {
-                Z_Free (buffer);
+                free (buffer);
                 return false;
         }
 
@@ -2902,7 +2902,7 @@ static void Lightgrid_Save_f (void)
         else
                 Con_Printf ("Failed to write %s\n", outpath);
 
-        Z_Free (filebuffer);
+        free (filebuffer);
 }
 
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
