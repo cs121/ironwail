@@ -43,6 +43,10 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size);
+static void Lightgrid_Info_f (void);
+static void Lightgrid_Dump_f (void);
+static void Lightgrid_Generate_f (void);
+static void Lightgrid_Save_f (void);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
@@ -2437,16 +2441,17 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
         for (i = 0; i < num_lights; i++)
         {
                 const lightgrid_static_light_t *l = &lights[i];
-                vec3_t delta, impact;
+                vec3_t delta, impact, pos_copy;
                 float dist, weight;
 
-                VectorSubtract (pos, l->origin, delta);
+                VectorCopy (pos, pos_copy);
+                VectorSubtract (pos_copy, l->origin, delta);
                 dist = VectorLength (delta);
 
                 if (dist > l->radius)
                         continue;
 
-                TraceLine (l->origin, (vec3_t *)pos, impact);
+                TraceLine (l->origin, pos_copy, impact);
                 VectorSubtract (pos, impact, delta);
                 if (VectorLength (delta) > 1.f)
                         continue;
@@ -2731,7 +2736,7 @@ static void Lightgrid_Save_f (void)
                 return;
         }
 
-        COM_StripExtension (mod->name, outpath);
+        COM_StripExtension (mod->name, outpath, sizeof(outpath));
         q_strlcat (outpath, ".bspx", sizeof(outpath));
 
         if (COM_WriteFile_OSPath (outpath, filebuffer, filesize))
