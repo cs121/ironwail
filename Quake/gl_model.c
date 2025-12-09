@@ -116,6 +116,9 @@ void Mod_Init (void)
         Cvar_SetCallback (&r_md5, R_MD5_f);
 
         Cmd_AddCommand ("mcache", Mod_Print);
+        Cmd_AddCommand ("lightgrid_info", Lightgrid_Info_f);
+        Cmd_AddCommand ("lightgrid_dump", Lightgrid_Dump_f);
+        Cmd_AddCommand ("lightgrid_generate", Lightgrid_Generate_f);
         Cmd_AddCommand ("lightgrid_save", Lightgrid_Save_f);
 
         //johnfitz -- create notexture miptex
@@ -2443,11 +2446,7 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
                 if (dist > l->radius)
                         continue;
 
-                {
-                        vec3_t start;
-                        VectorCopy (l->origin, start);
-                        TraceLine (start, (vec3_t *)pos, impact);
-                }
+                TraceLine (l->origin, (vec3_t *)pos, impact);
                 VectorSubtract (pos, impact, delta);
                 if (VectorLength (delta) > 1.f)
                         continue;
@@ -2485,13 +2484,16 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
         if (!mod)
                 return NULL;
 
-        (void)cellY;
-        (void)cellZ;
-
         VectorCopy (mod->mins, mins);
         VectorCopy (mod->maxs, maxs);
 
-        cellsize = (cellX > 0.f) ? cellX : 128.f;
+        cellsize = cellX;
+        if (cellsize <= 0.f && cellY > 0.f)
+                cellsize = cellY;
+        if (cellsize <= 0.f && cellZ > 0.f)
+                cellsize = cellZ;
+        if (cellsize <= 0.f)
+                cellsize = 128.f;
         nx = (int)ceilf ((maxs[0] - mins[0]) / cellsize);
         ny = (int)ceilf ((maxs[1] - mins[1]) / cellsize);
         nz = (int)ceilf ((maxs[2] - mins[2]) / cellsize);
@@ -2743,8 +2745,8 @@ static void Lightgrid_Save_f (void)
 
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
-	lightgrid_t *lg;
-	bspx_lump_t l;
+        lightgrid_t *lg;
+        bspx_lump_t l;
 
 	(void)mod;
 
@@ -2766,6 +2768,104 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 	cl.lightgrid = lg;
 
 	return true;
+}
+
+static void Lightgrid_Info_f (void)
+{
+        const lightgrid_t *lg = Lightgrid_Get ();
+
+        if (!lg)
+        {
+                Con_Printf ("No lightgrid loaded\n");
+                return;
+        }
+
+        {
+                size_t count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
+                double mem_mb = (double)(count * sizeof(lightgrid_probe_t)) / (1024.0 * 1024.0);
+
+                Con_Printf ("Lightgrid: %dx%dx%d cells, cell size %.1f\n", lg->nx, lg->ny, lg->nz, lg->cellsize);
+                Con_Printf ("Memory usage: %.2f MB\n", mem_mb);
+                Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
+        }
+}
+
+static void Lightgrid_Dump_f (void)
+{
+        const lightgrid_t *lg = Lightgrid_Get ();
+        int argc = Cmd_Argc ();
+
+        if (argc < 4)
+        {
+                Con_Printf ("Usage: lightgrid_dump <x> <y> <z>\n");
+                return;
+        }
+
+        if (!lg || !lg->probes)
+        {
+                Con_Printf ("No lightgrid loaded\n");
+                return;
+        }
+
+        {
+                int x = atoi (Cmd_Argv (1));
+                int y = atoi (Cmd_Argv (2));
+                int z = atoi (Cmd_Argv (3));
+
+                if (x < 0 || x >= lg->nx || y < 0 || y >= lg->ny || z < 0 || z >= lg->nz)
+                {
+                        Con_Printf ("Cell out of range (max %d %d %d)\n", lg->nx - 1, lg->ny - 1, lg->nz - 1);
+                        return;
+                }
+
+                {
+                        const lightgrid_probe_t *probe = &lg->probes[(z * lg->ny + y) * lg->nx + x];
+                        Con_Printf ("Cell [%d %d %d]: rgb=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f) intensity=%.3f\n",
+                                x, y, z,
+                                probe->rgb[0], probe->rgb[1], probe->rgb[2],
+                                probe->dir[0], probe->dir[1], probe->dir[2],
+                                probe->intensity);
+                }
+        }
+}
+
+static void Lightgrid_Generate_f (void)
+{
+        qmodel_t *mod = cl.worldmodel;
+        float cellsize = 128.f;
+        lightgrid_raw_t *raw;
+        lightgrid_t *lg;
+
+        if (Cmd_Argc () >= 2)
+        {
+                cellsize = atof (Cmd_Argv (1));
+                if (cellsize <= 0.f)
+                        cellsize = 128.f;
+        }
+
+        if (!mod)
+        {
+                Con_Printf ("No worldmodel loaded\n");
+                return;
+        }
+
+        raw = LightgridRAW_Generate (mod, cellsize, cellsize, cellsize);
+        if (!raw)
+        {
+                Con_Printf ("Failed to generate RAW lightgrid\n");
+                return;
+        }
+
+        Lightgrid_Clear ();
+        lg = Lightgrid_FromRaw (raw);
+        if (!lg)
+        {
+                Con_Printf ("Failed to convert RAW lightgrid\n");
+                return;
+        }
+
+        Lightgrid_SetSource ("GENERATED");
+        cl.lightgrid = lg;
 }
 
 
@@ -2903,15 +3003,16 @@ static void Mod_LoadFaces (lump_t *l)
 				{
 					loadmodel->lightgrid_raw = generated;
 
-					Lightgrid_Clear ();
-					lg = Lightgrid_FromRaw (generated);
-					if (lg)
-					{
-						cl.lightgrid = lg;
-						have_lightgrid = true;
-					}
-				}
-			}
+                                        Lightgrid_Clear ();
+                                        lg = Lightgrid_FromRaw (generated);
+                                        if (lg)
+                                        {
+                                                cl.lightgrid = lg;
+                                                Lightgrid_SetSource ("GENERATED");
+                                                have_lightgrid = true;
+                                        }
+                                }
+                        }
 
 		}
 

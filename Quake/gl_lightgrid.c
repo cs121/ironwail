@@ -10,6 +10,7 @@ Copyright (C) 2024 Ironwail developers
 extern vec3_t lightcolor;
 
 static lightgrid_t *current_lightgrid;
+static char lightgrid_source[16] = "NONE";
 
 cvar_t  r_lightgrid = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t  r_lightgrid_debug = { "r_lightgrid_debug", "0", CVAR_NONE };
@@ -30,6 +31,7 @@ void Lightgrid_Clear (void)
 {
     Lightgrid_Free (current_lightgrid);
     current_lightgrid = NULL;
+    q_strlcpy (lightgrid_source, "NONE", sizeof(lightgrid_source));
 }
 
 static qboolean Lightgrid_ValidateBSPX (int nx, int ny, int nz, int datasize)
@@ -112,6 +114,7 @@ qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len)
     }
 
     current_lightgrid = lg;
+    q_strlcpy (lightgrid_source, "OCTREE", sizeof(lightgrid_source));
 
     return true;
 }
@@ -266,7 +269,22 @@ lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw)
         lg->probes[i].intensity = cell->intensity;
     }
 
+    q_strlcpy (lightgrid_source, "RAW", sizeof(lightgrid_source));
+
     return lg;
+}
+
+void Lightgrid_SetSource (const char *name)
+{
+    if (name && name[0])
+        q_strlcpy (lightgrid_source, name, sizeof(lightgrid_source));
+    else
+        q_strlcpy (lightgrid_source, "UNKNOWN", sizeof(lightgrid_source));
+}
+
+const char *Lightgrid_GetSource (void)
+{
+    return lightgrid_source;
 }
 
 static void Lightgrid_AddDlights (const vec3_t pos, vec3_t color, vec3_t dirsum)
