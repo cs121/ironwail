@@ -9,6 +9,8 @@ typedef struct lightgrid_probe_s {
     float intensity;
 } lightgrid_probe_t;
 
+#define LIGHTGRID_STANDARD_CELLSIZE 16.f
+
 typedef struct lightgrid_s {
     int nx, ny, nz;
     float cellsize;

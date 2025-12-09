@@ -216,14 +216,9 @@ void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 
 static float Lightgrid_CellsizeForBounds (const vec3_t mins, const vec3_t maxs)
 {
-    vec3_t size;
-    float cellsize;
-
-    VectorSubtract (maxs, mins, size);
-    cellsize = q_max (size[0], q_max (size[1], size[2])) / 32.f;
-    if (cellsize < 16.f)
-        cellsize = 16.f;
-    return cellsize;
+    (void)mins;
+    (void)maxs;
+    return LIGHTGRID_STANDARD_CELLSIZE;
 }
 
 lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw)

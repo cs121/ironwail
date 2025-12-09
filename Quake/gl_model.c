@@ -42,7 +42,7 @@ static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
-static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size);
+static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const char *source_path);
 static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size_t *out_size);
 static void Lightgrid_Info_f (void);
 static void Lightgrid_Dump_f (void);
@@ -2205,15 +2205,161 @@ void Mod_CalcSurfaceBounds (msurface_t *s)
 }
 
 
-static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size)
+static qboolean Lightgrid_SampleProbeAtPos (const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
 {
-	const size_t header_size = sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t);
-	const size_t cell_size = sizeof(vec3_t) * 2 + sizeof(float);
-	lightgrid_raw_t *raw;
-	lightgrid_t *lg;
-	int nx, ny, nz;
-	float cellsize;
-	vec3_t origin;
+        float fx, fy, fz;
+        int x0, x1, y0, y1, z0, z1;
+        lightgrid_probe_t const *c000, *c100, *c010, *c110, *c001, *c101, *c011, *c111;
+
+        if (!lg || !lg->probes || !out_probe || lg->cellsize <= 0.f)
+                return false;
+
+        if (pos[0] < lg->mins[0] || pos[1] < lg->mins[1] || pos[2] < lg->mins[2]
+                || pos[0] > lg->maxs[0] || pos[1] > lg->maxs[1] || pos[2] > lg->maxs[2])
+        {
+                return false;
+        }
+
+        fx = (pos[0] - lg->mins[0]) / lg->cellsize;
+        fy = (pos[1] - lg->mins[1]) / lg->cellsize;
+        fz = (pos[2] - lg->mins[2]) / lg->cellsize;
+
+        x0 = CLAMP (0, (int)floorf (fx), lg->nx - 1);
+        y0 = CLAMP (0, (int)floorf (fy), lg->ny - 1);
+        z0 = CLAMP (0, (int)floorf (fz), lg->nz - 1);
+
+        x1 = q_min (x0 + 1, lg->nx - 1);
+        y1 = q_min (y0 + 1, lg->ny - 1);
+        z1 = q_min (z0 + 1, lg->nz - 1);
+
+        fx -= x0;
+        fy -= y0;
+        fz -= z0;
+
+        c000 = &lg->probes[(z0 * lg->ny + y0) * lg->nx + x0];
+        c100 = &lg->probes[(z0 * lg->ny + y0) * lg->nx + x1];
+        c010 = &lg->probes[(z0 * lg->ny + y1) * lg->nx + x0];
+        c110 = &lg->probes[(z0 * lg->ny + y1) * lg->nx + x1];
+        c001 = &lg->probes[(z1 * lg->ny + y0) * lg->nx + x0];
+        c101 = &lg->probes[(z1 * lg->ny + y0) * lg->nx + x1];
+        c011 = &lg->probes[(z1 * lg->ny + y1) * lg->nx + x0];
+        c111 = &lg->probes[(z1 * lg->ny + y1) * lg->nx + x1];
+
+        for (int i = 0; i < 3; i++)
+        {
+                float c00, c10, c01, c11, c0, c1;
+
+                c00 = Lerp (c000->rgb[i], c100->rgb[i], fx);
+                c10 = Lerp (c010->rgb[i], c110->rgb[i], fx);
+                c01 = Lerp (c001->rgb[i], c101->rgb[i], fx);
+                c11 = Lerp (c011->rgb[i], c111->rgb[i], fx);
+
+                c0 = Lerp (c00, c10, fy);
+                c1 = Lerp (c01, c11, fy);
+
+                out_probe->rgb[i] = Lerp (c0, c1, fz);
+        }
+
+        out_probe->intensity = Lerp (
+                Lerp (Lerp (c000->intensity, c100->intensity, fx), Lerp (c010->intensity, c110->intensity, fx), fy),
+                Lerp (Lerp (c001->intensity, c101->intensity, fx), Lerp (c011->intensity, c111->intensity, fx), fy),
+                fz);
+
+        {
+                vec3_t d00, d10, d01, d11, d0, d1, dir;
+
+                VectorLerp (c000->dir, c100->dir, fx, d00);
+                VectorLerp (c010->dir, c110->dir, fx, d10);
+                VectorLerp (c001->dir, c101->dir, fx, d01);
+                VectorLerp (c011->dir, c111->dir, fx, d11);
+
+                VectorLerp (d00, d10, fy, d0);
+                VectorLerp (d01, d11, fy, d1);
+
+                VectorLerp (d0, d1, fz, dir);
+                if (VectorNormalize (dir) == 0.f)
+                        VectorSet (dir, 0.f, 0.f, 1.f);
+
+                VectorCopy (dir, out_probe->dir);
+        }
+
+        return true;
+}
+
+static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float target_cellsize)
+{
+        lightgrid_raw_t *raw;
+        vec3_t size;
+        int nx, ny, nz;
+
+        if (!src || target_cellsize <= 0.f)
+                return NULL;
+
+        VectorSubtract (src->maxs, src->mins, size);
+
+        nx = q_max (1, q_min (32, (int)ceilf (size[0] / target_cellsize)));
+        ny = q_max (1, q_min (32, (int)ceilf (size[1] / target_cellsize)));
+        nz = q_max (1, q_min (32, (int)ceilf (size[2] / target_cellsize)));
+
+        raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw_resampled");
+        if (!raw)
+                return NULL;
+
+        memset (raw, 0, sizeof(*raw));
+
+        const size_t count = (size_t)nx * (size_t)ny * (size_t)nz;
+        raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells_resampled");
+        if (!raw->cells)
+                return NULL;
+
+        raw->nx = nx;
+        raw->ny = ny;
+        raw->nz = nz;
+        raw->cellSize = target_cellsize;
+        VectorCopy (src->mins, raw->origin);
+
+        for (int z = 0; z < nz; z++)
+        {
+                for (int y = 0; y < ny; y++)
+                {
+                        for (int x = 0; x < nx; x++)
+                        {
+                                const size_t idx = (size_t)(z * ny + y) * (size_t)nx + (size_t)x;
+                                lightcell_t *cell = &raw->cells[idx];
+                                vec3_t pos;
+                                lightgrid_probe_t probe;
+
+                                pos[0] = raw->origin[0] + (x + 0.5f) * target_cellsize;
+                                pos[1] = raw->origin[1] + (y + 0.5f) * target_cellsize;
+                                pos[2] = raw->origin[2] + (z + 0.5f) * target_cellsize;
+
+                                if (!Lightgrid_SampleProbeAtPos (src, pos, &probe))
+                                {
+                                        VectorClear (cell->rgb);
+                                        VectorSet (cell->dir, 0.f, 0.f, 1.f);
+                                        cell->intensity = 0.f;
+                                        continue;
+                                }
+
+                                VectorCopy (probe.rgb, cell->rgb);
+                                VectorCopy (probe.dir, cell->dir);
+                                cell->intensity = probe.intensity;
+                        }
+                }
+        }
+
+        return raw;
+}
+
+static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const char *source_path)
+{
+        const size_t header_size = sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t);
+        const size_t cell_size = sizeof(vec3_t) * 2 + sizeof(float);
+        lightgrid_raw_t *raw;
+        lightgrid_t *lg;
+        int nx, ny, nz;
+        float cellsize;
+        vec3_t origin;
 	size_t count, expected;
 	const float *cells_in;
 
@@ -2256,8 +2402,8 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size)
 	raw->nx = nx;
 	raw->ny = ny;
 	raw->nz = nz;
-	raw->cellSize = cellsize;
-	VectorCopy (origin, raw->origin);
+        raw->cellSize = cellsize;
+        VectorCopy (origin, raw->origin);
 
 	cells_in = (const float *)((byte *)data + header_size);
 	for (size_t i = 0; i < count; i++)
@@ -2275,18 +2421,57 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size)
 		cells_in += 7;
 	}
 
-	mod->lightgrid_raw = raw;
+        Lightgrid_Clear ();
+        lg = Lightgrid_FromRaw (raw);
+        if (!lg)
+                return false;
 
-	Lightgrid_Clear ();
-	lg = Lightgrid_FromRaw (raw);
-	if (!lg)
-		return false;
+        if (fabsf (cellsize - LIGHTGRID_STANDARD_CELLSIZE) > 0.01f)
+        {
+                lightgrid_raw_t *resampled_raw;
+                lightgrid_t *resampled_lg;
 
-	cl.lightgrid = lg;
+                resampled_raw = LightgridRAW_FromGrid (lg, LIGHTGRID_STANDARD_CELLSIZE);
+                if (resampled_raw)
+                {
+                        resampled_lg = Lightgrid_FromRaw (resampled_raw);
+                        if (resampled_lg)
+                        {
+                                raw = resampled_raw;
+                                lg = resampled_lg;
 
-	Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", nx, ny, nz);
+                                Con_Printf ("Resampled LIGHTGRID_RAW from cell size %.1f to %.1f (%dx%dx%d)\n",
+                                        cellsize, LIGHTGRID_STANDARD_CELLSIZE, raw->nx, raw->ny, raw->nz);
 
-	return true;
+                                if (source_path && source_path[0])
+                                {
+                                        byte *out_buffer;
+                                        size_t out_size;
+                                        lightgrid_raw_t *prev_raw = mod->lightgrid_raw;
+
+                                        mod->lightgrid_raw = raw;
+
+                                        if (LightgridRAW_BuildBuffer (mod, &out_buffer, &out_size))
+                                        {
+                                                if (COM_WriteFile_OSPath (source_path, out_buffer, out_size))
+                                                        Con_Printf ("Updated %s with resampled LIGHTGRID_RAW\n", source_path);
+                                                else
+                                                        Con_Warning ("Failed to update %s with resampled LIGHTGRID_RAW\n", source_path);
+                                                Z_Free (out_buffer);
+                                        }
+
+                                        mod->lightgrid_raw = prev_raw;
+                                }
+                        }
+                }
+        }
+
+        mod->lightgrid_raw = raw;
+        cl.lightgrid = lg;
+
+        Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
+
+        return true;
 }
 
 typedef struct lightgrid_static_light_s
@@ -2515,13 +2700,9 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
         VectorCopy (mod->mins, mins);
         VectorCopy (mod->maxs, maxs);
 
-        cellsize = cellX;
-        if (cellsize <= 0.f && cellY > 0.f)
-                cellsize = cellY;
-        if (cellsize <= 0.f && cellZ > 0.f)
-                cellsize = cellZ;
-        if (cellsize <= 0.f)
-                cellsize = 128.f;
+        (void)cellY;
+        (void)cellZ;
+        cellsize = LIGHTGRID_STANDARD_CELLSIZE;
         nx = (int)ceilf ((maxs[0] - mins[0]) / cellsize);
         ny = (int)ceilf ((maxs[1] - mins[1]) / cellsize);
         nz = (int)ceilf ((maxs[2] - mins[2]) / cellsize);
@@ -2622,7 +2803,7 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
 
         raw = mod->lightgrid_raw;
         if (!raw)
-                raw = LightgridRAW_Generate (mod, 128.f, 128.f, 128.f);
+                raw = LightgridRAW_Generate (mod, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE);
 
         if (!raw)
                 return false;
@@ -2648,6 +2829,9 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
         for (size_t i = 0; i < count; i++)
         {
                 const lightcell_t *cell = &raw->cells[i];
+                int x = i % raw->nx;
+                int y = (int)((i / raw->nx) % raw->ny);
+                int z = (int)(i / ((size_t)raw->nx * (size_t)raw->ny));
                 cell_out[0] = LittleFloat (cell->rgb[0]);
                 cell_out[1] = LittleFloat (cell->rgb[1]);
                 cell_out[2] = LittleFloat (cell->rgb[2]);
@@ -2655,6 +2839,12 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
                 cell_out[4] = LittleFloat (cell->dir[1]);
                 cell_out[5] = LittleFloat (cell->dir[2]);
                 cell_out[6] = LittleFloat (cell->intensity);
+
+                Con_DPrintf ("lightgrid cell (%d, %d, %d): rgb=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f) intensity=%.3f\n",
+                        x, y, z,
+                        cell->rgb[0], cell->rgb[1], cell->rgb[2],
+                        cell->dir[0], cell->dir[1], cell->dir[2],
+                        cell->intensity);
 
                 cell_out += 7;
         }
@@ -2804,16 +2994,8 @@ static void Lightgrid_Dump_f (void)
 static void Lightgrid_Generate_f (void)
 {
         qmodel_t *mod = cl.worldmodel;
-        float cellsize = 128.f;
         lightgrid_raw_t *raw;
         lightgrid_t *lg;
-
-        if (Cmd_Argc () >= 2)
-        {
-                cellsize = atof (Cmd_Argv (1));
-                if (cellsize <= 0.f)
-                        cellsize = 128.f;
-        }
 
         if (!mod)
         {
@@ -2821,7 +3003,7 @@ static void Lightgrid_Generate_f (void)
                 return;
         }
 
-        raw = LightgridRAW_Generate (mod, cellsize, cellsize, cellsize);
+        raw = LightgridRAW_Generate (mod, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE);
         if (!raw)
         {
                 Con_Printf ("Failed to generate RAW lightgrid\n");
@@ -2947,7 +3129,7 @@ static void Mod_LoadFaces (lump_t *l)
                         if (lightgridbuf)
                         {
                                 lightgridsize = com_filesize;
-                                if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize))
+                                if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize, lightgridpath))
                                 {
                                         Lightgrid_SetSource (lightgridpath);
                                         have_lightgrid = true;
@@ -2960,16 +3142,16 @@ static void Mod_LoadFaces (lump_t *l)
 
                         if (lglump && lumpsize > 0 && !have_lightgrid)
                         {
-                                if (LightgridRAW_Load (loadmodel, lglump, lumpsize))
+                                if (LightgridRAW_Load (loadmodel, lglump, lumpsize, NULL))
                                 {
                                         Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
-					have_lightgrid = true;
-				}
-				else
-				{
-					Q1BSPX_MarkUnsupported ("LIGHTGRID_RAW");
-				}
-			}
+                                        have_lightgrid = true;
+                                }
+                                else
+                                {
+                                        Q1BSPX_MarkUnsupported ("LIGHTGRID_RAW");
+                                }
+                        }
 
 			if (!have_lightgrid)
 			{
