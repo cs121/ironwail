@@ -3159,6 +3159,7 @@ static void Mod_LoadFaces (lump_t *l)
                 }
         }
 }
+}
 
 static void Mod_SetParent (mnode_t *node, mnode_t *parent)
 {
