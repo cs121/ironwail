@@ -2451,7 +2451,10 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
                 if (dist > l->radius)
                         continue;
 
-                TraceLine (l->origin, pos_copy, impact);
+                vec3_t light_origin;
+
+                VectorCopy (l->origin, light_origin);
+                TraceLine (light_origin, pos_copy, impact);
                 VectorSubtract (pos, impact, delta);
                 if (VectorLength (delta) > 1.f)
                         continue;
