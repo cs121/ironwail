@@ -436,11 +436,24 @@ typedef struct lightcell_s
 
 typedef struct lightgrid_raw_s
 {
-	int nx, ny, nz;
-	float cellSize;
-	vec3_t origin;       // world-space min corner
-	lightcell_t *cells;  // array of nx*ny*nz
+        int nx, ny, nz;
+        float cellSize;
+        vec3_t origin;       // world-space min corner
+        lightcell_t *cells;  // array of nx*ny*nz
 } lightgrid_raw_t;
+
+typedef struct bspx_lump_out_s
+{
+        char name[sizeof(((bspx_entry_t *)0)->name)];
+        byte *data;
+        size_t size;
+} bspx_lump_out_t;
+
+typedef struct bspx_s
+{
+        bspx_lump_out_t *lumps;
+        int count;
+} bspx_t;
 
 typedef struct bspx_header_s
 {
@@ -580,5 +593,8 @@ byte	*Mod_NoVisPVS (qmodel_t *model);
 void Mod_SetExtraFlags (qmodel_t *mod);
 size_t Mod_SanitizeMapDescription (char *dst, size_t dstsize, const char *src);
 qboolean Mod_LoadMapDescription (char *desc, size_t maxchars, const char *map);
+
+lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, float cellZ);
+qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut);
 
 #endif	/* GL_MODEL_H */
