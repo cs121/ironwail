@@ -43,6 +43,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size);
+static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size_t *out_size);
 static void Lightgrid_Info_f (void);
 static void Lightgrid_Dump_f (void);
 static void Lightgrid_Generate_f (void);
@@ -2606,7 +2607,7 @@ static qboolean BSPX_WriteLump (bspx_t *bspxOut, const char *name, byte *buffer,
         return true;
 }
 
-qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut)
+static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size_t *out_size)
 {
         lightgrid_raw_t *raw;
         size_t header_size;
@@ -2616,7 +2617,7 @@ qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut)
         float *cell_out;
         size_t count;
 
-        if (!mod || !bspxOut)
+        if (!mod || !out_buffer || !out_size)
                 return false;
 
         raw = mod->lightgrid_raw;
@@ -2658,80 +2659,34 @@ qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut)
                 cell_out += 7;
         }
 
-        return BSPX_WriteLump (bspxOut, "LIGHTGRID_RAW", buffer, total_size);
+        *out_buffer = buffer;
+        *out_size = total_size;
+
+        return true;
 }
 
-static void BSPX_FreeOutput (bspx_t *bspx)
+qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut)
 {
-        int i;
-
-        if (!bspx)
-                return;
-
-        for (i = 0; i < bspx->count; i++)
-        {
-                if (bspx->lumps[i].data)
-                        Z_Free (bspx->lumps[i].data);
-        }
-
-        if (bspx->lumps)
-                Z_Free (bspx->lumps);
-
-        memset (bspx, 0, sizeof(*bspx));
-}
-
-static byte *BSPX_BuildFile (const bspx_t *bspx, size_t *out_size)
-{
-        size_t header_size;
-        size_t offset;
         byte *buffer;
-        bspx_header_disk_t *header;
-        int i;
+        size_t total_size;
 
-        if (!bspx || bspx->count <= 0)
-                return NULL;
+        if (!mod || !bspxOut)
+                return false;
 
-        header_size = sizeof(bspx_header_disk_t) + sizeof(bspx_lump_disk_t) * (size_t)(bspx->count - 1);
-        offset = header_size;
+        if (!LightgridRAW_BuildBuffer (mod, &buffer, &total_size))
+                return false;
 
-        for (i = 0; i < bspx->count; i++)
-                offset += bspx->lumps[i].size;
-
-        buffer = (byte *)Z_Malloc (offset);
-        if (!buffer)
-                return NULL;
-
-        header = (bspx_header_disk_t *)buffer;
-        header->id[0] = 'B';
-        header->id[1] = 'S';
-        header->id[2] = 'P';
-        header->id[3] = 'X';
-        header->numlumps = LittleLong (bspx->count);
-
-        offset = header_size;
-        for (i = 0; i < bspx->count; i++)
+        if (!BSPX_WriteLump (bspxOut, "LIGHTGRID_RAW", buffer, total_size))
         {
-                bspx_lump_disk_t *lump = &header->lumps[i];
-                const bspx_lump_out_t *src = &bspx->lumps[i];
-
-                memset (lump->lumpname, 0, sizeof(lump->lumpname));
-                q_strlcpy (lump->lumpname, src->name, sizeof(lump->lumpname));
-                lump->fileofs = LittleLong ((int)offset);
-                lump->filelen = LittleLong ((int)src->size);
-
-                memcpy (buffer + offset, src->data, src->size);
-                offset += src->size;
+                Z_Free (buffer);
+                return false;
         }
 
-        if (out_size)
-                *out_size = offset;
-
-        return buffer;
+        return true;
 }
 
 static void Lightgrid_Save_f (void)
 {
-        bspx_t bspx = {0};
         byte *filebuffer;
         size_t filesize;
         char outpath[MAX_OSPATH];
@@ -2743,31 +2698,21 @@ static void Lightgrid_Save_f (void)
                 return;
         }
 
-        if (!LightgridRAW_Write (mod, &bspx))
+        if (!LightgridRAW_BuildBuffer (mod, &filebuffer, &filesize))
         {
                 Con_Printf ("Failed to build LIGHTGRID_RAW data\n");
-                BSPX_FreeOutput (&bspx);
-                return;
-        }
-
-        filebuffer = BSPX_BuildFile (&bspx, &filesize);
-        if (!filebuffer)
-        {
-                Con_Printf ("Failed to assemble BSPX buffer\n");
-                BSPX_FreeOutput (&bspx);
                 return;
         }
 
         COM_StripExtension (mod->name, outpath, sizeof(outpath));
-        q_strlcat (outpath, ".bspx", sizeof(outpath));
+        q_strlcat (outpath, ".lightgrid", sizeof(outpath));
 
         if (COM_WriteFile_OSPath (outpath, filebuffer, filesize))
-                Con_Printf ("LIGHTGRID_RAW saved (%.2f MB)\n", filesize / (1024.0f * 1024.0f));
+                Con_Printf ("LIGHTGRID_RAW saved to %s (%.2f MB)\n", outpath, filesize / (1024.0f * 1024.0f));
         else
                 Con_Printf ("Failed to write %s\n", outpath);
 
         Z_Free (filebuffer);
-        BSPX_FreeOutput (&bspx);
 }
 
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
@@ -2986,16 +2931,38 @@ static void Mod_LoadFaces (lump_t *l)
 				Q1BSPX_MarkUsed("LMSTYLE");
 		}
 
-		{
-			qboolean have_lightgrid = false;
-			lightgrid_t *lg;
-			void* lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
+                {
+                        qboolean have_lightgrid = false;
+                        lightgrid_t *lg;
+                        char lightgridpath[MAX_QPATH];
+                        unsigned int lightgrid_path_id;
+                        byte *lightgridbuf;
+                        int lightgridsize;
+                        void* lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
 
-			if (lglump && lumpsize > 0)
-			{
-				if (LightgridRAW_Load (loadmodel, lglump, lumpsize))
-				{
-					Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
+                        COM_StripExtension(loadmodel->name, lightgridpath, sizeof(lightgridpath));
+                        q_strlcat (lightgridpath, ".lightgrid", sizeof(lightgridpath));
+
+                        lightgridbuf = COM_LoadMallocFile (lightgridpath, &lightgrid_path_id);
+                        if (lightgridbuf)
+                        {
+                                lightgridsize = com_filesize;
+                                if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize))
+                                {
+                                        Lightgrid_SetSource (lightgridpath);
+                                        have_lightgrid = true;
+                                }
+                                else
+                                        Con_Warning ("Failed to load %s\n", lightgridpath);
+
+                                free (lightgridbuf);
+                        }
+
+                        if (lglump && lumpsize > 0 && !have_lightgrid)
+                        {
+                                if (LightgridRAW_Load (loadmodel, lglump, lumpsize))
+                                {
+                                        Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
 					have_lightgrid = true;
 				}
 				else
