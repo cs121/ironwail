@@ -3143,13 +3143,16 @@ static void Mod_LoadFaces (lump_t *l)
 
 static void Mod_SetParent (mnode_t *node, mnode_t *parent)
 {
-        node->parent = parent;
+		if (!node)
+			return;
 
-        if (node->contents < 0)
-                return;
+		node->parent = parent;
 
-        Mod_SetParent (node->children[0], node);
-        Mod_SetParent (node->children[1], node);
+		if (node->contents < 0)
+			return;
+
+		Mod_SetParent (node->children[0], node);
+		Mod_SetParent (node->children[1], node);
 }
 
 static void Mod_LoadNodes_S (lump_t *l)
