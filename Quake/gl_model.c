@@ -2625,11 +2625,16 @@ static qboolean LightgridRAW_TraceLine(const qmodel_t *mod, const vec3_t start, 
         if (impact)
                 VectorCopy (end, impact);
 
-        if (!mod || !mod->hulls)
-                return true;
+	if (!mod || !mod->hulls)
+		return true;
 
-        memset (&trace, 0, sizeof(trace));
-        SV_RecursiveHullCheck (mod->hulls, 0, 0, 1, start, end, &trace);
+	memset (&trace, 0, sizeof(trace));
+
+	vec3_t mutable_start, mutable_end;
+	VectorCopy (start, mutable_start);
+	VectorCopy (end, mutable_end);
+
+	SV_RecursiveHullCheck (mod->hulls, 0, 0, 1, mutable_start, mutable_end, &trace);
 
         if (impact)
                 VectorCopy (trace.endpos, impact);
