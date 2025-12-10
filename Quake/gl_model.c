@@ -2690,7 +2690,7 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
 	lightcache_t cache = {0};
 
 	/* Seed with baked BSP lighting so we always capture existing lightmaps */
-	R_LightPoint (pos, 0.f, &cache);
+        R_LightPoint (mod, pos, 0.f, &cache);
 	cell->rgb[0] = lightcolor[0] * (1.f / 255.f);
 	cell->rgb[1] = lightcolor[1] * (1.f / 255.f);
 	cell->rgb[2] = lightcolor[2] * (1.f / 255.f);

@@ -351,7 +351,7 @@ static inline int LightStyleValue (unsigned short style)
 	return d_lightstylevalue[0];
 }
 
-static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
+static void InterpolateLightmap (qmodel_t *model, vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
 {
 	const byte *lightmap;
 	const byte *samples;
@@ -367,23 +367,18 @@ static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt,
 
 	samples = surf->samples;
 
-	if (use_rgb)
+	if (use_rgb && model && model->lightdata && model->lightdata_rgb)
 	{
-		qmodel_t *model = cl.worldmodel;
+		const int bytes_per_sample = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
+		const ptrdiff_t offset = samples - model->lightdata;
 
-		if (model && model->lightdata && model->lightdata_rgb)
+		if (bytes_per_sample > 0 && offset >= 0 && (offset % bytes_per_sample) == 0)
 		{
-			const int bytes_per_sample = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
-			const ptrdiff_t offset = samples - model->lightdata;
+			const size_t sample_offset = (size_t)offset / (size_t)bytes_per_sample;
+			const size_t rgb_offset = sample_offset * 3;
 
-			if (bytes_per_sample > 0 && offset >= 0 && (offset % bytes_per_sample) == 0)
-			{
-				const size_t sample_offset = (size_t)offset / (size_t)bytes_per_sample;
-				const size_t rgb_offset = sample_offset * 3;
-
-				if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
-					samples = model->lightdata_rgb + rgb_offset;
-			}
+			if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+				samples = model->lightdata_rgb + rgb_offset;
 		}
 	}
 
@@ -409,7 +404,7 @@ static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt,
 RecursiveLightPoint -- johnfitz -- replaced entire function for lit support via lordhavoc
 =============
 */
-int RecursiveLightPoint (lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist)
+int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist)
 {
 	float		front, back, frac;
 	vec3_t		mid;
@@ -432,7 +427,7 @@ loc0:
 
 	// LordHavoc: optimized recursion
 	if ((back < 0) == (front < 0))
-//		return RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, end, maxdist);
+//		return RecursiveLightPoint (model, cache, node->children[front < 0], rayorg, start, end, maxdist);
 	{
 		node = node->children[front < 0];
 		goto loc0;
@@ -444,7 +439,7 @@ loc0:
 	mid[2] = start[2] + (end[2] - start[2])*frac;
 
 // go down front side
-	if (RecursiveLightPoint (cache, node->children[front < 0], rayorg, start, mid, maxdist))
+	if (RecursiveLightPoint (model, cache, node->children[front < 0], rayorg, start, mid, maxdist))
 		return true;	// hit something
 	else
 	{
@@ -453,7 +448,7 @@ loc0:
 		msurface_t *surf;
 	// check for impact on this node
 
-		surf = cl.worldmodel->surfaces + node->firstsurface;
+		surf = model->surfaces + node->firstsurface;
 		for (i = 0;i < node->numsurfaces;i++, surf++)
 		{
 			float sfront, sback, dist;
@@ -504,7 +499,7 @@ loc0:
 
 			if (dist < *maxdist)
 			{
-				cache->surfidx = surf - cl.worldmodel->surfaces + 1;
+				cache->surfidx = surf - model->surfaces + 1;
 				cache->ds = ds;
 				cache->dt = dt;
 			}
@@ -517,7 +512,7 @@ loc0:
 		}
 
 	// go down back side
-		return RecursiveLightPoint (cache, node->children[front >= 0], rayorg, mid, end, maxdist);
+		return RecursiveLightPoint (model, cache, node->children[front >= 0], rayorg, mid, end, maxdist);
 	}
 }
 
@@ -526,7 +521,7 @@ loc0:
 R_LightPoint -- johnfitz -- replaced entire function for lit support via lordhavoc
 =============
 */
-int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
+int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
 {
         vec3_t          start, end;
         float           maxdist = 8192.f; //johnfitz -- was 2048
@@ -560,10 +555,10 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
                 return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
         }
 
-        if (cl.worldmodel->has_lightdata_rgb && r_rgblighting_enable.value)
+        if (model && model->has_lightdata_rgb && r_rgblighting_enable.value)
                 use_rgblight = true;
 
-        if (!cl.worldmodel->lightdata)
+        if (!model || !model->lightdata)
         {
                 lightcolor[0] = lightcolor[1] = lightcolor[2] = 255;
                 return 255;
@@ -579,18 +574,18 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
         lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
 
         if (cache->surfidx <= 0 // no cache or pitch black
-                || cache->surfidx > cl.worldmodel->numsurfaces
+                || (model && cache->surfidx > model->numsurfaces)
                 || fabsf (cache->pos[0] - p[0]) >= 1.f
                 || fabsf (cache->pos[1] - p[1]) >= 1.f
                 || fabsf (cache->pos[2] - p[2]) >= 1.f)
         {
                 cache->surfidx = 0;
                 VectorCopy (p, cache->pos);
-                RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
+                RecursiveLightPoint (model, cache, model->nodes, start, start, end, &maxdist);
         }
 
         if (cache->surfidx > 0)
-                InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
+                InterpolateLightmap (model, lightcolor, model->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
 
         return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
 }
