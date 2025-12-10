@@ -2299,7 +2299,7 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
 
         nx = q_max (1, q_min (32, (int)ceilf (size[0] / target_cellsize)));
         ny = q_max (1, q_min (32, (int)ceilf (size[1] / target_cellsize)));
-        nz = q_max (1, q_min (32, (int)ceilf (size[2] / target_cellsize)));
+        nz = q_max (1, q_min (64, (int)ceilf (size[2] / target_cellsize)));
 
         raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw_resampled");
         if (!raw)
@@ -2308,6 +2308,8 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
         memset (raw, 0, sizeof(*raw));
 
         const size_t count = (size_t)nx * (size_t)ny * (size_t)nz;
+        if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
+                return NULL;
         raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells_resampled");
         if (!raw->cells)
                 return NULL;
@@ -2712,6 +2714,11 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
         nz = q_max (1, nz);
 
         count = (size_t)nx * (size_t)ny * (size_t)nz;
+        if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
+        {
+                Con_Warning ("lightgrid too large to generate (%dx%dx%d)\n", nx, ny, nz);
+                return NULL;
+        }
 
         raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
         if (!raw)
