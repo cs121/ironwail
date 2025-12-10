@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "../common/lightgrid.h"
 #include "gl_lightgrid.h"
+#include <float.h>
+#include <math.h>
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
@@ -34,6 +36,17 @@ extern cvar_t r_rgblighting_enable;
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
+
+static qboolean R_IsFinite (float v)
+{
+#if defined(_MSC_VER)
+        return _finite(v) != 0;
+#else
+        return isfinite(v);
+#endif
+}
+
+int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist);
 static qboolean R_LightgridEnabledInternal (const lightgrid_t *lg)
 {
         if (r_lightgrid.value <= 0.f)
@@ -424,7 +437,7 @@ static void R_ClampSampleColor(vec3_t color)
 {
         for (int i = 0; i < 3; i++)
         {
-                if (!q_isfinite(color[i]) || color[i] < 0.f)
+                if (!R_IsFinite(color[i]) || color[i] < 0.f)
                         color[i] = 0.f;
         }
 
