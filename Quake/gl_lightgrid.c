@@ -378,7 +378,7 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     int ny = q_max(1, q_min(64, (int)ceilf(size[1] / cellSize)));
     int nz = q_max(1, q_min(64, (int)ceilf(size[2] / cellSize)));
 
-    lightgrid_raw_t *raw =
+        lightgrid_raw_t *raw =
         (lightgrid_raw_t*)Hunk_AllocName(sizeof(*raw), "lightgrid_raw");
     memset(raw, 0, sizeof(*raw));
 
@@ -404,6 +404,13 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
             mins[2] + (z + 0.5f) * cellSize
         };
 
+        vec3_t jitter = {
+            (Lightgrid_Random01() * 4.f) - 2.f,
+            (Lightgrid_Random01() * 4.f) - 2.f,
+            (Lightgrid_Random01() * 4.f) - 2.f
+        };
+        VectorAdd(pos, jitter, pos);
+
         if (r_generate_lightgrid_test.value > 0.f)
         {
             Lightgrid_FillRandomCell(cell);
@@ -417,7 +424,7 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         cell->rgb[1] = lightcolor[1] * (1.f/255.f);
         cell->rgb[2] = lightcolor[2] * (1.f/255.f);
 
-        float base = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) / 3.f;
+        float base = DotProduct(cell->rgb, (vec3_t){0.299f, 0.587f, 0.114f});
 
         vec3_t dirsum = {0,0,0};
         Lightgrid_AddDlights(pos, cell->rgb, dirsum);
@@ -425,7 +432,8 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         vec3_t up = {0,0,1};
         VectorMA(dirsum, base, up, dirsum);
 
-        if (VectorNormalize(dirsum) == 0)
+        float dirlen = VectorNormalize(dirsum);
+        if (dirlen < 1e-6f || !q_isfinite(dirlen))
             VectorSet(cell->dir,0,0,1);
         else
             VectorCopy(dirsum, cell->dir);

@@ -353,50 +353,139 @@ static inline int LightStyleValue (unsigned short style)
 
 static void InterpolateLightmap (qmodel_t *model, vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
 {
-	const byte *lightmap;
-	const byte *samples;
-	int maps, line3, dsfrac = ds & 15, dtfrac = dt & 15, r00 = 0, g00 = 0, b00 = 0, r01 = 0, g01 = 0, b01 = 0, r10 = 0, g10 = 0, b10 = 0, r11 = 0, g11 = 0, b11 = 0;
-	int scale;
-	line3 = ((surf->extents[0]>>4)+1)*3;
+        const byte *samples;
+        int smax, tmax;
+        int dsfrac = ds & 15, dtfrac = dt & 15;
+        float fsfrac = dsfrac * (1.f / 16.f);
+        float ftfrac = dtfrac * (1.f / 16.f);
+        int bytes_per_pixel;
 
-	if (!surf->samples)
-	{
-		VectorClear(color);
-		return;
-	}
+        if (!surf->samples)
+        {
+                VectorClear(color);
+                return;
+        }
 
-	samples = surf->samples;
+        samples = surf->samples;
+        bytes_per_pixel = (model && (model->flags & MOD_HDRLIGHTING)) ? 4 : 3;
 
-	if (use_rgb && model && model->lightdata && model->lightdata_rgb)
-	{
-		const int bytes_per_sample = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
-		const ptrdiff_t offset = samples - model->lightdata;
+        if (use_rgb && model && model->lightdata && model->lightdata_rgb)
+        {
+                const int bytes_per_sample = bytes_per_pixel;
+                const ptrdiff_t offset = samples - model->lightdata;
 
-		if (bytes_per_sample > 0 && offset >= 0 && (offset % bytes_per_sample) == 0)
-		{
-			const size_t sample_offset = (size_t)offset / (size_t)bytes_per_sample;
-			const size_t rgb_offset = sample_offset * 3;
+                if (bytes_per_sample > 0 && offset >= 0 && (offset % bytes_per_sample) == 0)
+                {
+                        const size_t sample_offset = (size_t)offset / (size_t)bytes_per_sample;
+                        const size_t rgb_offset = sample_offset * 3;
 
-			if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
-				samples = model->lightdata_rgb + rgb_offset;
-		}
-	}
+                        if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+                        {
+                                samples = model->lightdata_rgb + rgb_offset;
+                                bytes_per_pixel = 3;
+                        }
+                }
+        }
 
-	lightmap = samples + ((dt>>4) * ((surf->extents[0]>>4)+1) + (ds>>4))*3; // LordHavoc: *3 for color
+        smax = (surf->extents[0] >> 4) + 1;
+        tmax = (surf->extents[1] >> 4) + 1;
 
-	for (maps = 0;maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE;maps++)
-	{
-		scale = LightStyleValue(surf->styles[maps]);
-		r00 += lightmap[      0] * scale; g00 += lightmap[      1] * scale; b00 += lightmap[      2] * scale;
-		r01 += lightmap[      3] * scale; g01 += lightmap[      4] * scale; b01 += lightmap[      5] * scale;
-		r10 += lightmap[line3+0] * scale; g10 += lightmap[line3+1] * scale; b10 += lightmap[line3+2] * scale;
-		r11 += lightmap[line3+3] * scale; g11 += lightmap[line3+4] * scale; b11 += lightmap[line3+5] * scale;
-		lightmap += ((surf->extents[0]>>4)+1) * ((surf->extents[1]>>4)+1)*3; // LordHavoc: *3 for colored lighting
-	}
+        const int s0 = ds >> 4;
+        const int t0 = dt >> 4;
+        const int stride = smax * bytes_per_pixel;
+        const int facesize = smax * tmax * bytes_per_pixel;
 
-	color[0] = ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)) * (1.f/256.f);
-	color[1] = ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)) * (1.f/256.f);
-	color[2] = ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)) * (1.f/256.f);
+        VectorClear(color);
+
+        for (int maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE; maps++)
+        {
+                const float scale = LightStyleValue(surf->styles[maps]) * (1.f / 256.f);
+                const byte *lightmap = samples + facesize * maps;
+
+                const byte *row0 = lightmap + t0 * stride;
+                const byte *row1 = (t0 + 1 < tmax) ? row0 + stride : row0;
+                const byte *col00 = row0 + s0 * bytes_per_pixel;
+                const byte *col01 = (s0 + 1 < smax) ? col00 + bytes_per_pixel : col00;
+                const byte *col10 = row1 + s0 * bytes_per_pixel;
+                const byte *col11 = (s0 + 1 < smax) ? col10 + bytes_per_pixel : col10;
+
+                float w00 = (1.f - fsfrac) * (1.f - ftfrac);
+                float w01 = fsfrac * (1.f - ftfrac);
+                float w10 = (1.f - fsfrac) * ftfrac;
+                float w11 = fsfrac * ftfrac;
+
+                color[0] += scale * (w00 * col00[0] + w01 * col01[0] + w10 * col10[0] + w11 * col11[0]);
+                color[1] += scale * (w00 * col00[1] + w01 * col01[1] + w10 * col10[1] + w11 * col11[1]);
+                color[2] += scale * (w00 * col00[2] + w01 * col01[2] + w10 * col10[2] + w11 * col11[2]);
+        }
+}
+
+static void R_ClampSampleColor(vec3_t color)
+{
+        for (int i = 0; i < 3; i++)
+        {
+                if (!q_isfinite(color[i]) || color[i] < 0.f)
+                        color[i] = 0.f;
+        }
+
+        if (VectorLength(color) < 1e-6f)
+                VectorClear(color);
+}
+
+static qboolean R_AdjustPointForLeaf (qmodel_t *model, vec3_t point)
+{
+        mleaf_t *leaf;
+
+        for (int i = 0; i < 8; i++)
+        {
+                leaf = Mod_PointInLeaf (point, model);
+
+                if (!leaf || leaf->contents != CONTENTS_SOLID)
+                        return true;
+
+                point[2] += 1.f;
+        }
+
+        return leaf && leaf->contents != CONTENTS_SOLID;
+}
+
+static void R_SamplePointInternal (qmodel_t *model, const vec3_t pos, float ofs, qboolean use_rgblight, lightcache_t *cache, vec3_t out_color)
+{
+        vec3_t start, end;
+        float maxdist = 8192.f;
+        lightcache_t local_cache;
+
+        if (!cache)
+        {
+                memset (&local_cache, 0, sizeof(local_cache));
+                cache = &local_cache;
+        }
+
+        start[0] = pos[0];
+        start[1] = pos[1];
+        start[2] = pos[2] + ofs;
+        end[0] = start[0];
+        end[1] = start[1];
+        end[2] = start[2] - maxdist;
+
+        VectorClear (out_color);
+
+        if (cache->surfidx <= 0 // no cache or pitch black
+                || (model && cache->surfidx > model->numsurfaces)
+                || fabsf (cache->pos[0] - pos[0]) >= 1.f
+                || fabsf (cache->pos[1] - pos[1]) >= 1.f
+                || fabsf (cache->pos[2] - pos[2]) >= 1.f)
+        {
+                cache->surfidx = 0;
+                VectorCopy (pos, cache->pos);
+                RecursiveLightPoint (model, cache, model->nodes, start, start, end, &maxdist);
+        }
+
+        if (cache->surfidx > 0)
+        {
+                InterpolateLightmap (model, out_color, model->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
+                R_ClampSampleColor (out_color);
+        }
 }
 
 /*
@@ -523,8 +612,6 @@ R_LightPoint -- johnfitz -- replaced entire function for lit support via lordhav
 */
 int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
 {
-        vec3_t          start, end;
-        float           maxdist = 8192.f; //johnfitz -- was 2048
         qboolean        use_rgblight = false;
         qboolean        lightgrid_active;
 
@@ -564,28 +651,75 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
                 return 255;
         }
 
-        start[0] = p[0];
-        start[1] = p[1];
-        start[2] = p[2] + ofs;
-        end[0] = start[0];
-        end[1] = start[1];
-        end[2] = start[2] - maxdist;
+        vec3_t sample_pos;
+        VectorCopy (p, sample_pos);
 
-        lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
-
-        if (cache->surfidx <= 0 // no cache or pitch black
-                || (model && cache->surfidx > model->numsurfaces)
-                || fabsf (cache->pos[0] - p[0]) >= 1.f
-                || fabsf (cache->pos[1] - p[1]) >= 1.f
-                || fabsf (cache->pos[2] - p[2]) >= 1.f)
+        if (!R_AdjustPointForLeaf (model, sample_pos))
         {
-                cache->surfidx = 0;
-                VectorCopy (p, cache->pos);
-                RecursiveLightPoint (model, cache, model->nodes, start, start, end, &maxdist);
+                const float ambient = 0.04f * 255.f;
+                VectorSet (lightcolor, ambient, ambient, ambient);
+                cache->surfidx = -1;
+                VectorCopy (sample_pos, cache->pos);
+                R_ClampSampleColor (lightcolor);
+                return (int)ambient;
         }
 
-        if (cache->surfidx > 0)
-                InterpolateLightmap (model, lightcolor, model->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
+        R_SamplePointInternal (model, sample_pos, ofs, use_rgblight, cache, lightcolor);
+
+        const vec3_t fallback_offsets[] = {
+                { 0.f, 0.f, 0.f }, { 2.f, 0.f, 0.f }, { -2.f, 0.f, 0.f }, { 0.f, 2.f, 0.f }, { 0.f, -2.f, 0.f },
+                { 0.f, 0.f, 2.f }, { 0.f, 0.f, -2.f }, { 4.f, 4.f, 0.f }, { -4.f, -4.f, 0.f }, { 0.f, 4.f, 4.f }
+        };
+
+        float intensity = (lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.f / (3.f * 255.f));
+
+        if (intensity < 0.001f)
+        {
+                vec3_t accum = {0, 0, 0};
+                int hits = 0;
+
+                for (size_t i = 0; i < sizeof(fallback_offsets) / sizeof(fallback_offsets[0]); i++)
+                {
+                        vec3_t test;
+                        VectorAdd (sample_pos, fallback_offsets[i], test);
+
+                        if (!R_AdjustPointForLeaf (model, test))
+                                continue;
+
+                        vec3_t temp_color;
+                        lightcache_t temp_cache = {0};
+                        R_SamplePointInternal (model, test, ofs, use_rgblight, &temp_cache, temp_color);
+
+                        if (VectorLength (temp_color) > 0.f)
+                        {
+                                VectorAdd (accum, temp_color, accum);
+                                hits++;
+                        }
+                }
+
+                if (hits > 0)
+                {
+                        VectorScale (accum, 1.f / (float)hits, lightcolor);
+                        intensity = (lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.f / (3.f * 255.f));
+                }
+        }
+
+        if (intensity > 0.f && intensity < 0.015f)
+        {
+                vec3_t raised;
+                VectorCopy (sample_pos, raised);
+                raised[2] += 4.f;
+
+                if (R_AdjustPointForLeaf (model, raised))
+                {
+                        vec3_t above_color;
+                        lightcache_t temp_cache = {0};
+                        R_SamplePointInternal (model, raised, ofs, use_rgblight, &temp_cache, above_color);
+                        VectorMA (lightcolor, 0.2f, above_color, lightcolor);
+                }
+        }
+
+        R_ClampSampleColor (lightcolor);
 
         return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
 }
