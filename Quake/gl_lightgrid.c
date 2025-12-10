@@ -515,14 +515,16 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
 
         if (r_lightgrid_surface_weight.value != 0.f && cache.surfidx > 0 && cache.surfidx <= model->numsurfaces)
         {
-            const msurface_t *surf = &model->surfaces[cache.surfidx - 1];
-            vec3_t center;
-            for (int i = 0; i < 3; i++)
-                center[i] = 0.5f * (surf->mins[i] + surf->maxs[i]);
+                const msurface_t *surf = &model->surfaces[cache.surfidx - 1];
+                vec3_t center;
+                for (int i = 0; i < 3; i++)
+                        center[i] = 0.5f * (surf->mins[i] + surf->maxs[i]);
 
-            float dist = VectorDistance(pos, center);
-            float weight = 1.f / (1.f + dist);
-            VectorScale(lightmap, weight, lightmap);
+                vec3_t delta;
+                VectorSubtract(pos, center, delta);
+                float dist = VectorLength(delta);
+                float weight = 1.f / (1.f + dist);
+                VectorScale(lightmap, weight, lightmap);
         }
 
         VectorClear(cell->rgb);
