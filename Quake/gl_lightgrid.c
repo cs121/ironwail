@@ -213,18 +213,20 @@ static void Lightgrid_DefaultSample(vec3_t out_color, vec3_t out_dir)
     VectorSet(out_dir, 0,0,1);
 }
 
-static lightgrid_probe_t *Lightgrid_At(int x, int y, int z)
+static const lightgrid_probe_t *Lightgrid_At(const lightgrid_t *lg, int x, int y, int z)
 {
-    return &current_lightgrid->probes[
-        (size_t)z * current_lightgrid->ny * current_lightgrid->nx +
-        (size_t)y * current_lightgrid->nx +
+    return &lg->probes[
+        (size_t)z * lg->ny * lg->nx +
+        (size_t)y * lg->nx +
         x
     ];
 }
 
 void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 {
-    if (!current_lightgrid || !r_lightgrid.value)
+    const lightgrid_t *lg = Lightgrid_Get();
+
+    if (!lg || !lg->probes || lg->cellsize <= 0.f || !r_lightgrid.value)
     {
         Lightgrid_DefaultSample(out_color, out_dir);
         return;
@@ -234,32 +236,32 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
     VectorCopy(pos, p);
 
     for (int i = 0; i < 3; i++)
-        p[i] = CLAMP(current_lightgrid->mins[i], p[i], current_lightgrid->maxs[i]);
+        p[i] = CLAMP(lg->mins[i], p[i], lg->maxs[i]);
 
-    float fx = (p[0] - current_lightgrid->mins[0]) / current_lightgrid->cellsize;
-    float fy = (p[1] - current_lightgrid->mins[1]) / current_lightgrid->cellsize;
-    float fz = (p[2] - current_lightgrid->mins[2]) / current_lightgrid->cellsize;
+    float fx = (p[0] - lg->mins[0]) / lg->cellsize;
+    float fy = (p[1] - lg->mins[1]) / lg->cellsize;
+    float fz = (p[2] - lg->mins[2]) / lg->cellsize;
 
-    int x0 = CLAMP(0, (int)floorf(fx), current_lightgrid->nx - 1);
-    int y0 = CLAMP(0, (int)floorf(fy), current_lightgrid->ny - 1);
-    int z0 = CLAMP(0, (int)floorf(fz), current_lightgrid->nz - 1);
+    int x0 = CLAMP(0, (int)floorf(fx), lg->nx - 1);
+    int y0 = CLAMP(0, (int)floorf(fy), lg->ny - 1);
+    int z0 = CLAMP(0, (int)floorf(fz), lg->nz - 1);
 
-    int x1 = q_min(x0 + 1, current_lightgrid->nx - 1);
-    int y1 = q_min(y0 + 1, current_lightgrid->ny - 1);
-    int z1 = q_min(z0 + 1, current_lightgrid->nz - 1);
+    int x1 = q_min(x0 + 1, lg->nx - 1);
+    int y1 = q_min(y0 + 1, lg->ny - 1);
+    int z1 = q_min(z0 + 1, lg->nz - 1);
 
     fx -= floorf(fx);
     fy -= floorf(fy);
     fz -= floorf(fz);
 
-    lightgrid_probe_t *c000 = Lightgrid_At(x0,y0,z0);
-    lightgrid_probe_t *c100 = Lightgrid_At(x1,y0,z0);
-    lightgrid_probe_t *c010 = Lightgrid_At(x0,y1,z0);
-    lightgrid_probe_t *c110 = Lightgrid_At(x1,y1,z0);
-    lightgrid_probe_t *c001 = Lightgrid_At(x0,y0,z1);
-    lightgrid_probe_t *c101 = Lightgrid_At(x1,y0,z1);
-    lightgrid_probe_t *c011 = Lightgrid_At(x0,y1,z1);
-    lightgrid_probe_t *c111 = Lightgrid_At(x1,y1,z1);
+    const lightgrid_probe_t *c000 = Lightgrid_At(lg, x0, y0, z0);
+    const lightgrid_probe_t *c100 = Lightgrid_At(lg, x1, y0, z0);
+    const lightgrid_probe_t *c010 = Lightgrid_At(lg, x0, y1, z0);
+    const lightgrid_probe_t *c110 = Lightgrid_At(lg, x1, y1, z0);
+    const lightgrid_probe_t *c001 = Lightgrid_At(lg, x0, y0, z1);
+    const lightgrid_probe_t *c101 = Lightgrid_At(lg, x1, y0, z1);
+    const lightgrid_probe_t *c011 = Lightgrid_At(lg, x0, y1, z1);
+    const lightgrid_probe_t *c111 = Lightgrid_At(lg, x1, y1, z1);
 
     vec3_t rgb000,rgb100,rgb010,rgb110,rgb001,rgb101,rgb011,rgb111;
     vec3_t dir000,dir100,dir010,dir110,dir001,dir101,dir011,dir111;
