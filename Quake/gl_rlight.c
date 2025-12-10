@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "../common/lightgrid.h"
+#include "gl_lightgrid.h"
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
@@ -520,7 +521,7 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
 {
-        lightgrid_t *lg = cl.lightgrid;
+        const lightgrid_t *lg = Lightgrid_Get ();
         int x, y, z;
 
         if (!r_lightgrid.value || !lg || !lg->probes || lg->cellsize <= 0.f)

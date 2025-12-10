@@ -2686,6 +2686,22 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
         }
 }
 
+static float LightgridRAW_Random01 (void)
+{
+        return rand () * (1.f / (float)RAND_MAX);
+}
+
+static void LightgridRAW_FillTestCell (lightcell_t *cell)
+{
+        cell->rgb[0] = LightgridRAW_Random01 ();
+        cell->rgb[1] = LightgridRAW_Random01 ();
+        cell->rgb[2] = LightgridRAW_Random01 ();
+
+        cell->dir[0] = cell->dir[1] = 0.f;
+        cell->dir[2] = 1.f;
+        cell->intensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) * (1.f / 3.f);
+}
+
 lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, float cellZ)
 {
         vec3_t mins, maxs;
@@ -2750,6 +2766,12 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
                                 pos[0] = mins[0] + (x + 0.5f) * cellsize;
                                 pos[1] = mins[1] + (y + 0.5f) * cellsize;
                                 pos[2] = mins[2] + (z + 0.5f) * cellsize;
+
+                                if (r_generate_lightgrid_test.value > 0.f)
+                                {
+                                        LightgridRAW_FillTestCell (cell);
+                                        continue;
+                                }
 
                                 LightgridRAW_ComputeLightingAtPoint (mod, lights, num_lights, pos, cell);
                         }
