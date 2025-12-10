@@ -518,7 +518,9 @@ void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);
 
 int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache);
-void R_LightgridLighting (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
+qboolean R_LightgridEnabled (void);
+void R_LightgridLighting (const vec3_t pos, vec3_t out_color);
+void R_LightgridLightingDir (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 
 #define WORLDSHADER_SOLID		0
