@@ -2620,23 +2620,60 @@ static int LightgridRAW_CollectLights (qmodel_t *mod, lightgrid_static_light_t *
         return count;
 }
 
-static qboolean LightgridRAW_TraceLine(const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
+static qboolean Lightgrid_ModelHasNodeTree (const qmodel_t *mod)
+{
+        return mod && mod->nodes && mod->numnodes > 0 && mod->leafs && mod->numleafs > 0 && mod->planes && mod->numplanes > 0 &&
+                mod->hulls[0].clipnodes && mod->hulls[0].planes;
+}
+
+#define LIGHTGRID_TRACE_CACHE_SIZE 1024
+#define LIGHTGRID_TRACE_CACHE_GRANULARITY 64.f
+
+typedef struct lightgrid_trace_cache_entry_s
+{
+        vec3_t quantized_start;
+        vec3_t quantized_end;
+        vec3_t impact;
+        qboolean unobstructed;
+} lightgrid_trace_cache_entry_t;
+
+static lightgrid_trace_cache_entry_t lightgrid_trace_cache[LIGHTGRID_TRACE_CACHE_SIZE];
+static int lightgrid_trace_cache_count;
+static qboolean lightgrid_trace_enabled;
+
+static void LightgridRAW_ResetTraceCache (void)
+{
+        lightgrid_trace_cache_count = 0;
+        lightgrid_trace_enabled = false;
+}
+
+static void LightgridRAW_Quantize (const vec3_t in, vec3_t out)
+{
+        for (int i = 0; i < 3; i++)
+                out[i] = floorf (in[i] * (1.f / LIGHTGRID_TRACE_CACHE_GRANULARITY));
+}
+
+static qboolean LightgridRAW_TraceLineInternal (const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
 {
         trace_t trace;
+
+        if (!Lightgrid_ModelHasNodeTree (mod))
+        {
+                if (impact)
+                        VectorCopy (end, impact);
+                return true;
+        }
 
         if (impact)
                 VectorCopy (end, impact);
 
-	if (!mod || !mod->hulls)
-		return true;
+        memset (&trace, 0, sizeof(trace));
 
-	memset (&trace, 0, sizeof(trace));
+        vec3_t mutable_start, mutable_end;
+        VectorCopy (start, mutable_start);
+        VectorCopy (end, mutable_end);
 
-	vec3_t mutable_start, mutable_end;
-	VectorCopy (start, mutable_start);
-	VectorCopy (end, mutable_end);
-
-	SV_RecursiveHullCheck (mod->hulls, 0, 0, 1, mutable_start, mutable_end, &trace);
+        SV_RecursiveHullCheck (mod->hulls, 0, 0, 1, mutable_start, mutable_end, &trace);
 
         if (impact)
                 VectorCopy (trace.endpos, impact);
@@ -2645,6 +2682,52 @@ static qboolean LightgridRAW_TraceLine(const qmodel_t *mod, const vec3_t start, 
         VectorSubtract (end, trace.endpos, delta);
         return VectorLength (delta) < 1.f;
 }
+
+static qboolean LightgridRAW_TraceLine (const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
+{
+        vec3_t qstart, qend;
+
+        LightgridRAW_Quantize (start, qstart);
+        LightgridRAW_Quantize (end, qend);
+
+        for (int i = 0; i < lightgrid_trace_cache_count; i++)
+        {
+                const lightgrid_trace_cache_entry_t *entry = &lightgrid_trace_cache[i];
+
+                if (!VectorCompare (entry->quantized_start, qstart) || !VectorCompare (entry->quantized_end, qend))
+                        continue;
+
+                if (impact)
+                        VectorCopy (entry->impact, impact);
+
+                return entry->unobstructed;
+        }
+
+        if (!lightgrid_trace_enabled)
+        {
+                if (impact)
+                        VectorCopy (end, impact);
+                return true;
+        }
+
+        const qboolean unobstructed = LightgridRAW_TraceLineInternal (mod, start, end, impact);
+
+        if (lightgrid_trace_cache_count < LIGHTGRID_TRACE_CACHE_SIZE)
+        {
+                lightgrid_trace_cache_entry_t *entry = &lightgrid_trace_cache[lightgrid_trace_cache_count++];
+
+                VectorCopy (qstart, entry->quantized_start);
+                VectorCopy (qend, entry->quantized_end);
+                entry->unobstructed = unobstructed;
+                if (impact)
+                        VectorCopy (impact, entry->impact);
+                else
+                        VectorCopy (end, entry->impact);
+        }
+
+        return unobstructed;
+}
+
 
 static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos, vec3_t rgb, vec3_t dirsum)
 {
@@ -2663,7 +2746,7 @@ static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos
                         continue;
 
                 vec3_t impact;
-                if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
+                if (lightgrid_trace_enabled && !LightgridRAW_TraceLine (mod, l->origin, pos, impact))
                         continue;
 
                 VectorSubtract (pos, impact, delta);
@@ -2685,19 +2768,27 @@ static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos
 
 static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_static_light_t *lights, int num_lights, vec3_t pos, lightcell_t *cell)
 {
-	int i;
-	vec3_t dirsum = {0.f, 0.f, 0.f};
-	lightcache_t cache = {0};
+        int i;
+        vec3_t dirsum = {0.f, 0.f, 0.f};
+        lightcache_t cache = {0};
+        const qboolean can_trace_bsp = lightgrid_trace_enabled && Lightgrid_ModelHasNodeTree (mod);
 
-	/* Seed with baked BSP lighting so we always capture existing lightmaps */
-        R_LightPoint (mod, pos, 0.f, &cache);
-	cell->rgb[0] = lightcolor[0] * (1.f / 255.f);
-	cell->rgb[1] = lightcolor[1] * (1.f / 255.f);
-	cell->rgb[2] = lightcolor[2] * (1.f / 255.f);
+        /* Seed with baked BSP lighting so we always capture existing lightmaps */
+        if (can_trace_bsp)
+        {
+                R_LightPoint (mod, pos, 0.f, &cache);
+                cell->rgb[0] = lightcolor[0] * (1.f / 255.f);
+                cell->rgb[1] = lightcolor[1] * (1.f / 255.f);
+                cell->rgb[2] = lightcolor[2] * (1.f / 255.f);
+        }
+        else
+        {
+                VectorClear (cell->rgb);
+        }
 
-	/* Preserve the baked sample and build on top of it with static/dynamic lights */
-	VectorClear (cell->dir);
-	cell->intensity = 0.f;
+        /* Preserve the baked sample and build on top of it with static/dynamic lights */
+        VectorClear (cell->dir);
+        cell->intensity = 0.f;
 
 	if (!mod)
 	{
@@ -2713,13 +2804,13 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
 		float dist, weight;
 
 		VectorSubtract (pos, l->origin, delta);
-		dist = VectorLength (delta);
+                dist = VectorLength (delta);
 
-		if (dist > l->radius)
-			continue;
+                if (dist > l->radius)
+                        continue;
 
-		if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
-			continue;
+                if (can_trace_bsp && !LightgridRAW_TraceLine (mod, l->origin, pos, impact))
+                        continue;
 
 		VectorSubtract (pos, impact, delta);
 		if (VectorLength (delta) > 1.f)
@@ -2771,18 +2862,23 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
 	size_t count;
 	lightgrid_raw_t *raw = NULL;
 	lightgrid_static_light_t *lights = NULL;
-	int num_lights;
-	float saved_r_lightgrid;
-	float saved_r_lightgrid_force;
+        int num_lights;
+        float saved_r_lightgrid;
+        float saved_r_lightgrid_force;
 
-	if (!mod)
-		return NULL;
+        if (!mod)
+                return NULL;
 
-	/* Ensure BSP sampling isn't polluted by an active lightgrid */
-	saved_r_lightgrid = r_lightgrid.value;
-	saved_r_lightgrid_force = r_lightgrid_force.value;
-	r_lightgrid.value = 0.f;
-	r_lightgrid_force.value = 0.f;
+        LightgridRAW_ResetTraceCache ();
+        lightgrid_trace_enabled = Lightgrid_ModelHasNodeTree (mod);
+        if (!lightgrid_trace_enabled)
+                Con_DPrintf ("Lightgrid generation: BSP node data missing, falling back to lightdata-only sampling\n");
+
+        /* Ensure BSP sampling isn't polluted by an active lightgrid */
+        saved_r_lightgrid = r_lightgrid.value;
+        saved_r_lightgrid_force = r_lightgrid_force.value;
+        r_lightgrid.value = 0.f;
+        r_lightgrid_force.value = 0.f;
 
 	VectorCopy (mod->mins, mins);
 	VectorCopy (mod->maxs, maxs);
@@ -2855,10 +2951,11 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
 	Con_Printf ("Generated RAW lightgrid (%dx%dx%d)\n", nx, ny, nz);
 
 restore_state:
-	r_lightgrid.value = saved_r_lightgrid;
-	r_lightgrid_force.value = saved_r_lightgrid_force;
+        LightgridRAW_ResetTraceCache ();
+        r_lightgrid.value = saved_r_lightgrid;
+        r_lightgrid_force.value = saved_r_lightgrid_force;
 
-	return raw;
+        return raw;
 }
 
 static qboolean BSPX_WriteLump (bspx_t *bspxOut, const char *name, byte *buffer, size_t size)
@@ -3133,6 +3230,106 @@ static void Lightgrid_Generate_f (void)
 }
 
 
+static void Mod_LoadLightgrid (qmodel_t *mod)
+{
+        qboolean have_lightgrid = false;
+        lightgrid_t *lg;
+        char lightgridpath[MAX_QPATH];
+        unsigned int lightgrid_path_id;
+        byte *lightgridbuf;
+        int lightgridsize;
+        void *lglump;
+        int lumpsize;
+
+        if (!mod || mod->type != mod_brush)
+                return;
+
+        lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
+
+        COM_StripExtension (mod->name, lightgridpath, sizeof(lightgridpath));
+        q_strlcat (lightgridpath, ".lightgrid", sizeof(lightgridpath));
+
+        lightgridbuf = COM_LoadMallocFile (lightgridpath, &lightgrid_path_id);
+        if (lightgridbuf)
+        {
+                lightgridsize = com_filesize;
+
+                // Only load lightgrid files from the same or higher-priority gamedir as the map
+                if (lightgrid_path_id < mod->path_id)
+                {
+                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", lightgridpath);
+                }
+                else if (LightgridRAW_Load (mod, lightgridbuf, lightgridsize, lightgridpath))
+                {
+                        Lightgrid_SetSource (lightgridpath);
+                        have_lightgrid = true;
+                }
+                else
+                {
+                        Con_Warning ("Failed to load %s\n", lightgridpath);
+                }
+
+                free (lightgridbuf);
+        }
+
+        if (lglump && lumpsize > 0 && !have_lightgrid)
+        {
+                if (LightgridRAW_Load (mod, lglump, lumpsize, NULL))
+                {
+                        Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
+                        have_lightgrid = true;
+                }
+                else
+                {
+                        Q1BSPX_MarkUnsupported ("LIGHTGRID_RAW");
+                }
+        }
+
+        if (!have_lightgrid)
+        {
+                lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
+
+                if (lglump && lumpsize > 0)
+                {
+                        if (BSPX_LightGridLoad (mod, lglump, lumpsize))
+                        {
+                                Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
+                                have_lightgrid = true;
+                        }
+                        else
+                        {
+                                Q1BSPX_MarkUnsupported ("LIGHTGRID_OCTREE");
+                        }
+                }
+        }
+
+        if (!have_lightgrid)
+        {
+                if (!Lightgrid_ModelHasNodeTree (mod))
+                {
+                        Con_DPrintf ("Skipping lightgrid generation for %s: BSP nodes unavailable\n", mod->name);
+                        return;
+                }
+
+                lightgrid_raw_t *generated = LightgridRAW_Generate (mod, 128.f, 128.f, 128.f);
+
+                if (generated)
+                {
+                        mod->lightgrid_raw = generated;
+
+                        Lightgrid_Clear ();
+                        lg = Lightgrid_FromRaw (generated);
+                        if (lg)
+                        {
+                                cl.lightgrid = lg;
+                                Lightgrid_SetSource ("GENERATED");
+                                have_lightgrid = true;
+                        }
+                }
+        }
+}
+
+
 /*
 =================
 Mod_LoadFaces
@@ -3222,94 +3419,6 @@ static void Mod_LoadFaces (lump_t *l)
 			else
 				Q1BSPX_MarkUsed("LMSTYLE");
 		}
-
-                {
-                        qboolean have_lightgrid = false;
-                        lightgrid_t *lg;
-                        char lightgridpath[MAX_QPATH];
-                        unsigned int lightgrid_path_id;
-                        byte *lightgridbuf;
-                        int lightgridsize;
-                        void* lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
-
-                        COM_StripExtension(loadmodel->name, lightgridpath, sizeof(lightgridpath));
-                        q_strlcat (lightgridpath, ".lightgrid", sizeof(lightgridpath));
-
-                        lightgridbuf = COM_LoadMallocFile (lightgridpath, &lightgrid_path_id);
-                        if (lightgridbuf)
-                        {
-                                lightgridsize = com_filesize;
-
-                                // Only load lightgrid files from the same or higher-priority gamedir as the map
-                                if (lightgrid_path_id < loadmodel->path_id)
-                                {
-                                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", lightgridpath);
-                                }
-                                else if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize, lightgridpath))
-                                {
-                                        Lightgrid_SetSource (lightgridpath);
-                                        have_lightgrid = true;
-                                }
-                                else
-                                {
-                                        Con_Warning ("Failed to load %s\n", lightgridpath);
-                                }
-
-                                free (lightgridbuf);
-                        }
-
-                        if (lglump && lumpsize > 0 && !have_lightgrid)
-                        {
-                                if (LightgridRAW_Load (loadmodel, lglump, lumpsize, NULL))
-                                {
-                                        Q1BSPX_MarkUsed ("LIGHTGRID_RAW");
-                                        have_lightgrid = true;
-                                }
-                                else
-                                {
-                                        Q1BSPX_MarkUnsupported ("LIGHTGRID_RAW");
-                                }
-                        }
-
-			if (!have_lightgrid)
-			{
-				lglump = Q1BSPX_FindLump ("LIGHTGRID_OCTREE", &lumpsize);
-
-				if (lglump && lumpsize > 0)
-				{
-					if (BSPX_LightGridLoad (loadmodel, lglump, lumpsize))
-					{
-						Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
-						have_lightgrid = true;
-					}
-					else
-					{
-						Q1BSPX_MarkUnsupported ("LIGHTGRID_OCTREE");
-					}
-				}
-			}
-
-			if (!have_lightgrid)
-			{
-				lightgrid_raw_t *generated = LightgridRAW_Generate (loadmodel, 128.f, 128.f, 128.f);
-
-				if (generated)
-				{
-					loadmodel->lightgrid_raw = generated;
-
-                                        Lightgrid_Clear ();
-                                        lg = Lightgrid_FromRaw (generated);
-                                        if (lg)
-                                        {
-                                                cl.lightgrid = lg;
-                                                Lightgrid_SetSource ("GENERATED");
-                                                have_lightgrid = true;
-                                        }
-                                }
-                        }
-
-		}
-
 
         loadmodel->surfaces = out;
         loadmodel->numsurfaces = count;
@@ -4522,11 +4631,13 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadVisibility (&header.lumps[LUMP_VISIBILITY]);
 	Mod_LoadLeafs (&header.lumps[LUMP_LEAFS], bsp2);
 visdone:
-	Mod_LoadNodes (&header.lumps[LUMP_NODES], bsp2);
-	Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
-	Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
+        Mod_LoadNodes (&header.lumps[LUMP_NODES], bsp2);
+        Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
+        Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
 
-	Mod_MakeHull0 ();
+        Mod_LoadLightgrid (mod);
+
+        Mod_MakeHull0 ();
 
 	mod->numframes = 2;		// regular and alternate animation
 
