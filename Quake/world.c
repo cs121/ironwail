@@ -556,8 +556,8 @@ SV_HullPointContents
 int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
 {
 	float		d;
-	mclipnode_t	*node; //johnfitz -- was dclipnode_t
-	mplane_t	*plane;
+	const mclipnode_t	*node; //johnfitz -- was dclipnode_t
+	const mplane_t	*plane;
 
 	while (num >= 0)
 	{
@@ -638,10 +638,10 @@ SV_RecursiveHullCheck
 
 ==================
 */
-qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace)
+qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace)
 {
-	mclipnode_t	*node; //johnfitz -- was dclipnode_t
-	mplane_t	*plane;
+	const mclipnode_t	*node; //johnfitz -- was dclipnode_t
+	const mplane_t	*plane;
 	float		t1, t2;
 	float		frac;
 	int			i;
