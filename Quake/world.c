@@ -45,7 +45,7 @@ typedef struct
 } moveclip_t;
 
 
-int SV_HullPointContents (hull_t *hull, int num, vec3_t p);
+int SV_HullPointContents (const hull_t *hull, int num, vec3_t p);
 
 /*
 ===============================================================================
@@ -553,7 +553,7 @@ SV_HullPointContents
 
 ==================
 */
-int SV_HullPointContents (hull_t *hull, int num, vec3_t p)
+int SV_HullPointContents (const hull_t *hull, int num, vec3_t p)
 {
 	float		d;
 	const mclipnode_t	*node; //johnfitz -- was dclipnode_t
