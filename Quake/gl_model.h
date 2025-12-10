@@ -428,11 +428,18 @@ typedef struct
 	int		size;
 } bspx_entry_t;
 
+typedef struct sh9_color_s
+{
+        vec3_t c[9];
+} sh9_color_t;
+
 typedef struct lightcell_s
 {
-	vec3_t rgb;
-	vec3_t dir;
-	float intensity;
+        vec3_t rgb;
+        vec3_t dir;
+        float intensity;
+        sh9_color_t sh;
+        qboolean sh_valid;
 } lightcell_t;
 
 typedef struct lightgrid_raw_s
@@ -441,6 +448,7 @@ typedef struct lightgrid_raw_s
         float cellSize;
         vec3_t origin;       // world-space min corner
         lightcell_t *cells;  // array of nx*ny*nz
+        qboolean has_sh9;
 } lightgrid_raw_t;
 
 typedef struct bspx_lump_out_s

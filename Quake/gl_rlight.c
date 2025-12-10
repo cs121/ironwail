@@ -433,6 +433,34 @@ static void InterpolateLightmap (qmodel_t *model, vec3_t color, msurface_t *surf
         }
 }
 
+static void R_SurfaceFallbackColor(const qmodel_t *model, const msurface_t *surf, vec3_t out)
+{
+        const texture_t *tex = NULL;
+
+        if (model && surf && surf->texinfo && surf->texinfo->texnum >= 0 && surf->texinfo->texnum < model->numtextures)
+                tex = model->textures[surf->texinfo->texnum];
+
+        VectorSet(out, 127.f, 127.f, 127.f);
+
+        if (!tex)
+                return;
+
+        switch (tex->type)
+        {
+        case TEXTYPE_LAVA:
+                VectorSet(out, 255.f, 128.f, 32.f);
+                break;
+        case TEXTYPE_SLIME:
+                VectorSet(out, 64.f, 200.f, 96.f);
+                break;
+        case TEXTYPE_WATER:
+                VectorSet(out, 64.f, 96.f, 196.f);
+                break;
+        default:
+                break;
+        }
+}
+
 static void R_ClampSampleColor(vec3_t color)
 {
         for (int i = 0; i < 3; i++)
@@ -499,6 +527,80 @@ static void R_SamplePointInternal (qmodel_t *model, const vec3_t pos, float ofs,
                 InterpolateLightmap (model, out_color, model->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
                 R_ClampSampleColor (out_color);
         }
+}
+
+qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb)
+{
+        qmodel_t *model = cl.worldmodel;
+        qboolean use_rgblight;
+        qboolean found = false;
+        float best_dist = FLT_MAX;
+
+        VectorClear(out_rgb);
+
+        if (!model || !model->lightdata)
+                return false;
+
+        use_rgblight = model->has_lightdata_rgb && r_rgblighting_enable.value;
+
+        mleaf_t *leaf = Mod_PointInLeaf(pos, model);
+        if (!leaf || leaf->contents == CONTENTS_SOLID)
+                return false;
+
+        for (int i = 0; i < leaf->nummarksurfaces; i++)
+        {
+                msurface_t *surf = &model->surfaces[leaf->firstmarksurface[i]];
+
+                if (!surf->texinfo || (surf->flags & SURF_DRAWTILED))
+                        continue;
+
+                const float pdist = DotProduct(pos, surf->plane->normal) - surf->plane->dist;
+                if (fabsf(pdist) > 8.f)
+                        continue;
+
+                int ds = (int)((double)DoublePrecisionDotProduct(pos, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3]);
+                int dt = (int)((double)DoublePrecisionDotProduct(pos, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3]);
+
+                if (ds < surf->texturemins[0] || dt < surf->texturemins[1])
+                        continue;
+
+                ds -= surf->texturemins[0];
+                dt -= surf->texturemins[1];
+
+                if (ds > surf->extents[0] || dt > surf->extents[1])
+                        continue;
+
+                vec3_t color;
+                if (surf->samples)
+                {
+                        InterpolateLightmap(model, color, surf, ds, dt, use_rgblight);
+                }
+                else
+                {
+                        R_SurfaceFallbackColor(model, surf, color);
+                }
+
+                if (!VectorLength(color))
+                        continue;
+
+                const float adist = fabsf(pdist);
+                if (adist < best_dist)
+                {
+                        VectorCopy(color, out_rgb);
+                        best_dist = adist;
+                        found = true;
+                }
+        }
+
+        if (found)
+        {
+                VectorScale(out_rgb, 1.f / 255.f, out_rgb);
+                return true;
+        }
+
+        R_SurfaceFallbackColor(model, NULL, out_rgb);
+        VectorScale(out_rgb, 1.f / 255.f, out_rgb);
+        return false;
 }
 
 /*

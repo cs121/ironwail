@@ -23,6 +23,12 @@ cvar_t r_lightgrid            = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_lightgrid_debug      = { "r_lightgrid_debug", "0", CVAR_NONE };
 cvar_t r_lightgrid_force      = { "r_lightgrid_force", "0", CVAR_ARCHIVE };
 cvar_t r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
+cvar_t r_lightgrid_weight_direct = { "r_lightgrid_weight_direct", "0.3", CVAR_ARCHIVE };
+cvar_t r_lightgrid_weight_lightmap = { "r_lightgrid_weight_lightmap", "1", CVAR_ARCHIVE };
+cvar_t r_lightgrid_surface_weight = { "r_lightgrid_surface_weight", "0", CVAR_ARCHIVE };
+cvar_t r_lightgrid_bounce_factor = { "r_lightgrid_bounce_factor", "0.5", CVAR_ARCHIVE };
+cvar_t r_lightgrid_bounce_rays = { "r_lightgrid_bounce_rays", "16", CVAR_ARCHIVE };
+cvar_t r_lightgrid_sh9 = { "r_lightgrid_sh9", "0", CVAR_ARCHIVE };
 
 static qboolean R_IsFinite (float v)
 {
@@ -50,6 +56,12 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_debug);
     Cvar_RegisterVariable(&r_lightgrid_force);
     Cvar_RegisterVariable(&r_generate_lightgrid_test);
+    Cvar_RegisterVariable(&r_lightgrid_weight_direct);
+    Cvar_RegisterVariable(&r_lightgrid_weight_lightmap);
+    Cvar_RegisterVariable(&r_lightgrid_surface_weight);
+    Cvar_RegisterVariable(&r_lightgrid_bounce_factor);
+    Cvar_RegisterVariable(&r_lightgrid_bounce_rays);
+    Cvar_RegisterVariable(&r_lightgrid_sh9);
     Lightgrid_Clear();
 }
 
@@ -342,6 +354,57 @@ static float Lightgrid_Random01(void)
     return (float)rand() / (float)RAND_MAX;
 }
 
+static void Lightgrid_RandomHemisphereDir(vec3_t out)
+{
+    const float u = Lightgrid_Random01();
+    const float v = Lightgrid_Random01();
+    const float phi = 2.f * (float)M_PI * u;
+    const float cos_theta = v;
+    const float sin_theta = sqrtf(q_max(0.f, 1.f - cos_theta * cos_theta));
+
+    out[0] = cosf(phi) * sin_theta;
+    out[1] = sinf(phi) * sin_theta;
+    out[2] = fabsf(cos_theta);
+}
+
+static qboolean Lightgrid_TraceLine(const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
+{
+    trace_t trace;
+
+    if (!mod || !mod->hulls || !mod->hulls[0].planes)
+    {
+        if (impact)
+            VectorCopy(end, impact);
+        return true;
+    }
+
+    if (impact)
+        VectorCopy(end, impact);
+
+    memset(&trace, 0, sizeof(trace));
+
+    vec3_t mutable_start, mutable_end;
+    VectorCopy(start, mutable_start);
+    VectorCopy(end, mutable_end);
+
+    SV_RecursiveHullCheck(mod->hulls, 0, 0, 1, mutable_start, mutable_end, &trace);
+
+    if (impact)
+        VectorCopy(trace.endpos, impact);
+
+    vec3_t delta;
+    VectorSubtract(end, trace.endpos, delta);
+    return VectorLength(delta) < 1.f;
+}
+
+void SH9_EncodeDirectional(vec3_t dir, vec3_t rgb, sh9_color_t *out)
+{
+    // Stub for future SH9 encoding implementation.
+    (void)dir;
+    (void)rgb;
+    (void)out;
+}
+
 static void Lightgrid_FillRandomCell(lightcell_t *cell)
 {
     cell->rgb[0] = Lightgrid_Random01();
@@ -350,6 +413,8 @@ static void Lightgrid_FillRandomCell(lightcell_t *cell)
 
     VectorSet(cell->dir,0,0,1);
     cell->intensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) / 3.f;
+    memset(&cell->sh, 0, sizeof(cell->sh));
+    cell->sh_valid = false;
 }
 
 /* =====================================================================
@@ -397,6 +462,7 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     raw->ny = ny;
     raw->nz = nz;
     raw->cellSize = cellSize;
+    raw->has_sh9 = (r_lightgrid_sh9.value != 0.f);
     VectorCopy(mins, raw->origin);
 
     size_t count = (size_t)nx * ny * nz;
@@ -423,6 +489,10 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         VectorAdd(pos, jitter, pos);
 
         static const vec3_t luminance_weights = {0.299f, 0.587f, 0.114f};
+        const qboolean sh_enabled = r_lightgrid_sh9.value != 0.f;
+
+        memset(&cell->sh, 0, sizeof(cell->sh));
+        cell->sh_valid = sh_enabled;
 
         if (r_generate_lightgrid_test.value > 0.f)
         {
@@ -431,18 +501,75 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         }
 
         lightcache_t cache = {0};
+        vec3_t direct = {0, 0, 0};
+        vec3_t lightmap = {0, 0, 0};
+        vec3_t dirsum = {0,0,0};
+
         R_LightPoint((qmodel_t *)model, pos, 0.f, &cache);
 
-        cell->rgb[0] = lightcolor[0] * (1.f/255.f);
-        cell->rgb[1] = lightcolor[1] * (1.f/255.f);
-        cell->rgb[2] = lightcolor[2] * (1.f/255.f);
+        direct[0] = lightcolor[0] * (1.f/255.f);
+        direct[1] = lightcolor[1] * (1.f/255.f);
+        direct[2] = lightcolor[2] * (1.f/255.f);
 
-        float base = DotProduct(cell->rgb, luminance_weights);
+        R_SampleLightmapAtPoint(pos, lightmap);
 
-        vec3_t dirsum = {0,0,0};
+        if (r_lightgrid_surface_weight.value != 0.f && cache.surfidx > 0 && cache.surfidx <= model->numsurfaces)
+        {
+            const msurface_t *surf = &model->surfaces[cache.surfidx - 1];
+            vec3_t center;
+            for (int i = 0; i < 3; i++)
+                center[i] = 0.5f * (surf->mins[i] + surf->maxs[i]);
+
+            float dist = VectorDistance(pos, center);
+            float weight = 1.f / (1.f + dist);
+            VectorScale(lightmap, weight, lightmap);
+        }
+
+        VectorClear(cell->rgb);
+        VectorMA(cell->rgb, r_lightgrid_weight_direct.value, direct, cell->rgb);
+        VectorMA(cell->rgb, r_lightgrid_weight_lightmap.value, lightmap, cell->rgb);
+
         Lightgrid_AddDlights(pos, cell->rgb, dirsum);
 
+        /* Second bounce approximation */
+        const int bounce_rays = q_max(0, (int)r_lightgrid_bounce_rays.value);
+        if (bounce_rays > 0 && r_lightgrid_bounce_factor.value > 0.f)
+        {
+            vec3_t bounce_accum = {0, 0, 0};
+            const float bounce_scale = r_lightgrid_bounce_factor.value / (float)bounce_rays;
+            for (int i = 0; i < bounce_rays; i++)
+            {
+                vec3_t raydir;
+                Lightgrid_RandomHemisphereDir(raydir);
+
+                vec3_t end;
+                VectorMA(pos, 512.f, raydir, end);
+
+                vec3_t impact;
+                qboolean unobstructed = Lightgrid_TraceLine((qmodel_t *)model, pos, end, impact);
+                if (unobstructed)
+                    continue;
+
+                vec3_t hit_color;
+                if (R_SampleLightmapAtPoint(impact, hit_color))
+                {
+                    VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
+
+                    if (sh_enabled)
+                    {
+                        sh9_color_t coeff = {{{0}}};
+                        SH9_EncodeDirectional(raydir, hit_color, &coeff);
+                        for (int c = 0; c < 9; c++)
+                            VectorAdd(cell->sh.c[c], coeff.c[c], cell->sh.c[c]);
+                    }
+                }
+            }
+
+            VectorAdd(cell->rgb, bounce_accum, cell->rgb);
+        }
+
         vec3_t up = {0,0,1};
+        float base = DotProduct(cell->rgb, luminance_weights);
         VectorMA(dirsum, base, up, dirsum);
 
         float dirlen = VectorNormalize(dirsum);
