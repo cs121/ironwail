@@ -2297,8 +2297,8 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
 
         VectorSubtract (src->maxs, src->mins, size);
 
-        nx = q_max (1, q_min (32, (int)ceilf (size[0] / target_cellsize)));
-        ny = q_max (1, q_min (32, (int)ceilf (size[1] / target_cellsize)));
+        nx = q_max (1, q_min (64, (int)ceilf (size[0] / target_cellsize)));
+        ny = q_max (1, q_min (64, (int)ceilf (size[1] / target_cellsize)));
         nz = q_max (1, q_min (64, (int)ceilf (size[2] / target_cellsize)));
 
         raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw_resampled");
@@ -2618,15 +2618,62 @@ static int LightgridRAW_CollectLights (qmodel_t *mod, lightgrid_static_light_t *
         return count;
 }
 
-// TraceLine helper function - einfache Implementation
-static void TraceLine(vec3_t start, vec3_t end, vec3_t impact)
+static qboolean LightgridRAW_TraceLine(const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
 {
-	// Einfache Implementation - kopiert nur das Ende
-	VectorCopy(end, impact);
+        trace_t trace;
 
-	// TODO: Hier sollte eine echte Collision-Detection implementiert werden
-	// die prüft, ob die Linie durch Geometrie blockiert wird
-	// Möglicherweise mit SV_RecursiveHullCheck oder ähnlich
+        if (impact)
+                VectorCopy (end, impact);
+
+        if (!mod || !mod->hulls)
+                return true;
+
+        memset (&trace, 0, sizeof(trace));
+        SV_RecursiveHullCheck (mod->hulls, 0, 0, 1, start, end, &trace);
+
+        if (impact)
+                VectorCopy (trace.endpos, impact);
+
+        vec3_t delta;
+        VectorSubtract (end, trace.endpos, delta);
+        return VectorLength (delta) < 1.f;
+}
+
+static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos, vec3_t rgb, vec3_t dirsum)
+{
+        for (int i = 0; i < MAX_DLIGHTS; i++)
+        {
+                const dlight_t *l = &cl_dlights[i];
+
+                if (l->die <= cl.time || (!l->radius && !l->minlight))
+                        continue;
+
+                vec3_t delta;
+                VectorSubtract (pos, l->origin, delta);
+
+                float dist2 = DotProduct (delta, delta);
+                if (dist2 >= l->radius * l->radius)
+                        continue;
+
+                vec3_t impact;
+                if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
+                        continue;
+
+                VectorSubtract (pos, impact, delta);
+                if (VectorLength (delta) > 1.f)
+                        continue;
+
+                float add = l->radius - sqrtf (dist2);
+                if (add <= l->minlight)
+                        continue;
+
+                float scale = add * (1.f / 256.f);
+                VectorMA (rgb, scale, l->color, rgb);
+
+                VectorSubtract (pos, l->origin, delta);
+                if (VectorNormalize (delta) > 0)
+                        VectorMA (dirsum, add, delta, dirsum);
+        }
 }
 
 static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_static_light_t *lights, int num_lights, const vec3_t pos, lightcell_t *cell)
@@ -2648,20 +2695,18 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
         for (i = 0; i < num_lights; i++)
         {
                 const lightgrid_static_light_t *l = &lights[i];
-                vec3_t delta, impact, pos_copy;
+                vec3_t delta, impact;
                 float dist, weight;
 
-                VectorCopy (pos, pos_copy);
-                VectorSubtract (pos_copy, l->origin, delta);
+                VectorSubtract (pos, l->origin, delta);
                 dist = VectorLength (delta);
 
                 if (dist > l->radius)
                         continue;
 
-                vec3_t light_origin;
+                if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
+                        continue;
 
-                VectorCopy (l->origin, light_origin);
-                TraceLine (light_origin, pos_copy, impact);
                 VectorSubtract (pos, impact, delta);
                 if (VectorLength (delta) > 1.f)
                         continue;
@@ -2673,6 +2718,8 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
                 if (VectorNormalize (delta) > 0.f)
                         VectorMA (dirsum, weight, delta, dirsum);
         }
+
+        LightgridRAW_AddDynamicLights (mod, pos, cell->rgb, dirsum);
 
         cell->intensity = VectorLength (cell->rgb);
         if (VectorNormalize (dirsum) > 0.f)
@@ -2721,13 +2768,9 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
         (void)cellY;
         (void)cellZ;
         cellsize = LIGHTGRID_STANDARD_CELLSIZE;
-        nx = (int)ceilf ((maxs[0] - mins[0]) / cellsize);
-        ny = (int)ceilf ((maxs[1] - mins[1]) / cellsize);
-        nz = (int)ceilf ((maxs[2] - mins[2]) / cellsize);
-
-        nx = q_max (1, nx);
-        ny = q_max (1, ny);
-        nz = q_max (1, nz);
+        nx = q_max (1, q_min (64, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
+        ny = q_max (1, q_min (64, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
+        nz = q_max (1, q_min (64, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
 
         count = (size_t)nx * (size_t)ny * (size_t)nz;
         if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))

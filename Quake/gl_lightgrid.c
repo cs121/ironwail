@@ -355,9 +355,9 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
 
     const float cellSize = LIGHTGRID_STANDARD_CELLSIZE;
 
-    int nx = q_max(1, q_min(32, (int)ceilf(size[0] / cellSize)));
-    int ny = q_max(1, q_min(32, (int)ceilf(size[1] / cellSize)));
-    int nz = q_max(1, q_min(32, (int)ceilf(size[2] / cellSize)));
+    int nx = q_max(1, q_min(64, (int)ceilf(size[0] / cellSize)));
+    int ny = q_max(1, q_min(64, (int)ceilf(size[1] / cellSize)));
+    int nz = q_max(1, q_min(64, (int)ceilf(size[2] / cellSize)));
 
     lightgrid_raw_t *raw =
         (lightgrid_raw_t*)Hunk_AllocName(sizeof(*raw), "lightgrid_raw");
