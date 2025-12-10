@@ -325,33 +325,58 @@ void R_SetupAliasLighting (entity_t     *e)
         unsigned int    i;
         vec3_t          dlightcolor = {0.f, 0.f, 0.f};
         vec3_t          ambientcolor;
-        vec3_t          dyn_add;
+        vec3_t          dyn_add = {0.f, 0.f, 0.f};
         qboolean        used_lightgrid = false;
+        qboolean        base_from_lightgrid = false;
 
-        // if the initial trace is completely black, try again from above
-        // this helps with models whose origin is slightly below ground level
-        // (e.g. some of the candles in the DOTM start map)
-        if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-                R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
-
-        VectorCopy (lightcolor, ambientcolor);
-        VectorClear (dyn_add);
-
-        if ((r_lightgrid.value || r_lightgrid_force.value) && e->lightcache.lightgrid_has_sample)
+        if (Lightgrid_Get () && (r_lightgrid.value || r_lightgrid_force.value))
         {
                 vec3_t lg_color, lg_dir;
 
-                R_LightgridLighting (e->origin, lg_color, lg_dir);
+                Lightgrid_Sample (e->origin, lg_color, lg_dir);
+                VectorScale (lg_color, 255.0f, lg_color);
 
-                for (i = 0; i < 3; i++)
-                        dyn_add[i] = fmaxf (lightcolor[i] - lg_color[i], 0.f);
+                VectorCopy (lg_color, lightcolor);
+                R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
 
                 VectorCopy (lg_color, ambientcolor);
+                VectorSubtract (lightcolor, ambientcolor, dlightcolor);
+
                 VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
                 VectorCopy (lg_color, e->lightcache.lightgrid_color);
                 e->lightcache.lightgrid_intensity = 1.f;
+                e->lightcache.lightgrid_has_sample = true;
 
                 used_lightgrid = true;
+                base_from_lightgrid = true;
+        }
+
+        if (!base_from_lightgrid)
+        {
+                // if the initial trace is completely black, try again from above
+                // this helps with models whose origin is slightly below ground level
+                // (e.g. some of the candles in the DOTM start map)
+                if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+                        R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+
+                VectorCopy (lightcolor, ambientcolor);
+
+                if ((r_lightgrid.value || r_lightgrid_force.value) && e->lightcache.lightgrid_has_sample)
+                {
+                        vec3_t lg_color, lg_dir;
+
+                        R_LightgridLighting (e->origin, lg_color, lg_dir);
+
+                        for (i = 0; i < 3; i++)
+                                dyn_add[i] = fmaxf (lightcolor[i] - lg_color[i], 0.f);
+
+                        VectorCopy (lg_color, ambientcolor);
+                        VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
+                        VectorCopy (lg_color, e->lightcache.lightgrid_color);
+                        e->lightcache.lightgrid_intensity = 1.f;
+
+                        used_lightgrid = true;
+                }
         }
 
         R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
