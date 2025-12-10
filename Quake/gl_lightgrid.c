@@ -187,29 +187,57 @@ void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
     c111 = Lightgrid_At (x1, y1, z1);
 
     {
-        vec3_t c00, c10, c01, c11, c0, c1;
-        vec3_t d00, d10, d01, d11, d0, d1;
+    vec3_t c00, c10, c01, c11, c0, c1;
+    vec3_t d00, d10, d01, d11, d0, d1;
 
-        VectorLerp (c000->rgb, c100->rgb, fx, c00);
-        VectorLerp (c010->rgb, c110->rgb, fx, c10);
-        VectorLerp (c001->rgb, c101->rgb, fx, c01);
-        VectorLerp (c011->rgb, c111->rgb, fx, c11);
+    vec3_t rgb000, rgb100, rgb010, rgb110, rgb001, rgb101, rgb011, rgb111;
+    vec3_t dir000, dir100, dir010, dir110, dir001, dir101, dir011, dir111;
 
-        VectorLerp (c00, c10, fy, c0);
-        VectorLerp (c01, c11, fy, c1);
+    // Pre-scale the RGB and direction values by probe intensity so that
+    // brighter probes have a proportionally larger influence on the
+    // trilinear result.
+    VectorScale (c000->rgb, c000->intensity, rgb000);
+    VectorScale (c100->rgb, c100->intensity, rgb100);
+    VectorScale (c010->rgb, c010->intensity, rgb010);
+    VectorScale (c110->rgb, c110->intensity, rgb110);
+    VectorScale (c001->rgb, c001->intensity, rgb001);
+    VectorScale (c101->rgb, c101->intensity, rgb101);
+    VectorScale (c011->rgb, c011->intensity, rgb011);
+    VectorScale (c111->rgb, c111->intensity, rgb111);
 
-        VectorLerp (c0, c1, fz, color);
+    VectorScale (c000->dir, c000->intensity, dir000);
+    VectorScale (c100->dir, c100->intensity, dir100);
+    VectorScale (c010->dir, c010->intensity, dir010);
+    VectorScale (c110->dir, c110->intensity, dir110);
+    VectorScale (c001->dir, c001->intensity, dir001);
+    VectorScale (c101->dir, c101->intensity, dir101);
+    VectorScale (c011->dir, c011->intensity, dir011);
+    VectorScale (c111->dir, c111->intensity, dir111);
 
-        VectorLerp (c000->dir, c100->dir, fx, d00);
-        VectorLerp (c010->dir, c110->dir, fx, d10);
-        VectorLerp (c001->dir, c101->dir, fx, d01);
-        VectorLerp (c011->dir, c111->dir, fx, d11);
+    VectorLerp (rgb000, rgb100, fx, c00);
+    VectorLerp (rgb010, rgb110, fx, c10);
+    VectorLerp (rgb001, rgb101, fx, c01);
+    VectorLerp (rgb011, rgb111, fx, c11);
 
-        VectorLerp (d00, d10, fy, d0);
-        VectorLerp (d01, d11, fy, d1);
+    VectorLerp (c00, c10, fy, c0);
+    VectorLerp (c01, c11, fy, c1);
 
-        VectorLerp (d0, d1, fz, dir);
-        VectorNormalize (dir);
+    VectorLerp (c0, c1, fz, color);
+
+    VectorLerp (dir000, dir100, fx, d00);
+    VectorLerp (dir010, dir110, fx, d10);
+    VectorLerp (dir001, dir101, fx, d01);
+    VectorLerp (dir011, dir111, fx, d11);
+
+    VectorLerp (d00, d10, fy, d0);
+    VectorLerp (d01, d11, fy, d1);
+
+    VectorLerp (d0, d1, fz, dir);
+    if (VectorNormalize (dir) == 0.f)
+    {
+        dir[0] = dir[1] = 0.f;
+        dir[2] = 1.f;
+    }
     }
 
     VectorCopy (color, out_color);
