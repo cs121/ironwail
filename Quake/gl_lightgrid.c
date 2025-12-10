@@ -411,7 +411,7 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         }
 
         lightcache_t cache = {0};
-        R_LightPoint(pos, 0.f, &cache);
+        R_LightPoint((qmodel_t *)model, pos, 0.f, &cache);
 
         cell->rgb[0] = lightcolor[0] * (1.f/255.f);
         cell->rgb[1] = lightcolor[1] * (1.f/255.f);

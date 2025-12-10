@@ -517,7 +517,7 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *hdr);
 void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);
 
-int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache);
+int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache);
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color);
 void R_LightgridLightingDir (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
