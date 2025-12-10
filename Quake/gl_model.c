@@ -2808,9 +2808,15 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
         if (!mod || !out_buffer || !out_size)
                 return false;
 
-        raw = mod->lightgrid_raw;
-        if (!raw)
-                raw = LightgridRAW_Generate (mod, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE);
+	raw = mod->lightgrid_raw;
+	if (!raw && cl.lightgrid)
+	{
+		raw = LightgridRAW_FromGrid (cl.lightgrid, LIGHTGRID_STANDARD_CELLSIZE);
+		if (raw)
+			mod->lightgrid_raw = raw;
+	}
+	if (!raw)
+		raw = LightgridRAW_Generate (mod, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE, LIGHTGRID_STANDARD_CELLSIZE);
 
         if (!raw)
                 return false;
