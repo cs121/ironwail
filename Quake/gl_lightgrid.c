@@ -14,11 +14,13 @@ static char lightgrid_source[16] = "NONE";
 
 cvar_t  r_lightgrid = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t  r_lightgrid_debug = { "r_lightgrid_debug", "0", CVAR_NONE };
+cvar_t  r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
 
 void Lightgrid_Init (void)
 {
     Cvar_RegisterVariable (&r_lightgrid);
     Cvar_RegisterVariable (&r_lightgrid_debug);
+    Cvar_RegisterVariable (&r_generate_lightgrid_test);
     Lightgrid_Clear ();
 }
 
@@ -311,6 +313,23 @@ static void Lightgrid_AddDlights (const vec3_t pos, vec3_t color, vec3_t dirsum)
     }
 }
 
+static float Lightgrid_Random01 (void)
+{
+    return rand () * (1.f / (float)RAND_MAX);
+}
+
+static void Lightgrid_FillRandomCell (lightcell_t *cell)
+{
+    cell->rgb[0] = Lightgrid_Random01 ();
+    cell->rgb[1] = Lightgrid_Random01 ();
+    cell->rgb[2] = Lightgrid_Random01 ();
+
+    cell->dir[0] = cell->dir[1] = 0.f;
+    cell->dir[2] = 1.f;
+
+    cell->intensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) * (1.f / 3.f);
+}
+
 lightgrid_raw_t *Lightgrid_GenerateRaw (const qmodel_t *model)
 {
     vec3_t mins, maxs, size;
@@ -363,6 +382,12 @@ lightgrid_raw_t *Lightgrid_GenerateRaw (const qmodel_t *model)
                 pos[0] = mins[0] + (x + 0.5f) * cellsize;
                 pos[1] = mins[1] + (y + 0.5f) * cellsize;
                 pos[2] = mins[2] + (z + 0.5f) * cellsize;
+
+                if (r_generate_lightgrid_test.value > 0.f)
+                {
+                    Lightgrid_FillRandomCell (cell);
+                    continue;
+                }
 
                 R_LightPoint (pos, 0.f, &cache);
                 cell->rgb[0] = lightcolor[0] * (1.f / 255.f);

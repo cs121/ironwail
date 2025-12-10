@@ -14,6 +14,7 @@ typedef struct lightgrid_raw_s lightgrid_raw_t;
 
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_debug;
+extern cvar_t r_generate_lightgrid_test;
 
 void Lightgrid_Init (void);
 void Lightgrid_Shutdown (void);
