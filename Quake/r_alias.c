@@ -131,7 +131,7 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
         vec3_t          forward, right, up, shadevector;
         float           dir_dot;
 
-        if (!r_lightgrid.value || !e->lightcache.lightgrid_has_sample)
+        if (!R_LightgridEnabled () || !e->lightcache.lightgrid_has_sample)
                 return;
 
         VectorScale (e->lightcache.lightgrid_color, e->lightcache.lightgrid_intensity * 255.f, gridcolor);
@@ -329,17 +329,17 @@ void R_SetupAliasLighting (entity_t     *e)
         qboolean        used_lightgrid = false;
         qboolean        base_from_lightgrid = false;
 
-        if (Lightgrid_Get () && (r_lightgrid.value || r_lightgrid_force.value))
+        if (R_LightgridEnabled ())
         {
-                vec3_t lg_color, lg_dir;
+                vec3_t lg_color, lg_dir, lg_color255;
 
-                Lightgrid_Sample (e->origin, lg_color, lg_dir);
-                VectorScale (lg_color, 255.0f, lg_color);
+                R_LightgridLightingDir (e->origin, lg_color, lg_dir);
+                VectorScale (lg_color, 255.0f, lg_color255);
 
-                VectorCopy (lg_color, lightcolor);
+                VectorCopy (lg_color255, lightcolor);
                 R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
 
-                VectorCopy (lg_color, ambientcolor);
+                VectorCopy (lg_color255, ambientcolor);
                 VectorSubtract (lightcolor, ambientcolor, dlightcolor);
 
                 VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
@@ -361,16 +361,17 @@ void R_SetupAliasLighting (entity_t     *e)
 
                 VectorCopy (lightcolor, ambientcolor);
 
-                if ((r_lightgrid.value || r_lightgrid_force.value) && e->lightcache.lightgrid_has_sample)
+                if (R_LightgridEnabled () && e->lightcache.lightgrid_has_sample)
                 {
-                        vec3_t lg_color, lg_dir;
+                        vec3_t lg_color, lg_dir, lg_color255;
 
-                        R_LightgridLighting (e->origin, lg_color, lg_dir);
+                        R_LightgridLightingDir (e->origin, lg_color, lg_dir);
+                        VectorScale (lg_color, 255.0f, lg_color255);
 
                         for (i = 0; i < 3; i++)
-                                dyn_add[i] = fmaxf (lightcolor[i] - lg_color[i], 0.f);
+                                dyn_add[i] = fmaxf (lightcolor[i] - lg_color255[i], 0.f);
 
-                        VectorCopy (lg_color, ambientcolor);
+                        VectorCopy (lg_color255, ambientcolor);
                         VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
                         VectorCopy (lg_color, e->lightcache.lightgrid_color);
                         e->lightcache.lightgrid_intensity = 1.f;

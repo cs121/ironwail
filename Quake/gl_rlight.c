@@ -34,6 +34,16 @@ extern cvar_t r_rgblighting_enable;
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
+static qboolean R_LightgridEnabledInternal (const lightgrid_t *lg)
+{
+        if (r_lightgrid.value <= 0.f)
+                return false;
+
+        if (lg && lg->probes && lg->cellsize > 0.f)
+                return true;
+
+        return r_lightgrid_force.value > 0.f;
+}
 
 /*
 ==================
@@ -262,14 +272,36 @@ vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
 /*
 ==================
+R_LightgridEnabled
+==================
+*/
+qboolean R_LightgridEnabled (void)
+{
+        return R_LightgridEnabledInternal (Lightgrid_Get ());
+}
+
+/*
+==================
 R_LightgridLighting
 ==================
 */
-void R_LightgridLighting (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+void R_LightgridLighting (const vec3_t pos, vec3_t out_color)
+{
+        vec3_t dummy_dir;
+
+        R_LightgridLightingDir (pos, out_color, dummy_dir);
+}
+
+/*
+==================
+R_LightgridLightingDir
+==================
+*/
+void R_LightgridLightingDir (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 {
         const lightgrid_t *lg = Lightgrid_Get ();
 
-        if (!lg || (!r_lightgrid.value && !r_lightgrid_force.value))
+        if (!R_LightgridEnabledInternal (lg))
         {
                 VectorClear (out_color);
                 VectorSet (out_dir, 0.f, 0.f, 1.f);
@@ -277,9 +309,6 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
         }
 
         Lightgrid_Sample (pos, out_color, out_dir);
-
-        // convert to 0-255 range expected by the renderer
-        VectorScale (out_color, 255.f, out_color);
 }
 
 /*
@@ -509,15 +538,16 @@ int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
         VectorClear (cache->lightgrid_color);
         VectorClear (cache->lightgrid_dir);
 
-        lightgrid_active = (Lightgrid_Get () != NULL) && (r_lightgrid.value || r_lightgrid_force.value);
+        lightgrid_active = R_LightgridEnabled ();
 
         if (lightgrid_active)
         {
-                vec3_t lg_color, lg_dir;
+                vec3_t lg_color, lg_dir, lg_color255;
 
-                R_LightgridLighting (p, lg_color, lg_dir);
+                R_LightgridLightingDir (p, lg_color, lg_dir);
+                VectorScale (lg_color, 255.f, lg_color255);
 
-                VectorCopy (lg_color, lightcolor);
+                VectorCopy (lg_color255, lightcolor);
                 R_AddDynamicLights_Lightgrid (p, lightcolor);
 
                 cache->surfidx = 0;
@@ -570,7 +600,10 @@ const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
         const lightgrid_t *lg = Lightgrid_Get ();
         int x, y, z;
 
-        if (!r_lightgrid.value || !lg || !lg->probes || lg->cellsize <= 0.f)
+        if (!lg || !lg->probes || lg->cellsize <= 0.f)
+                return NULL;
+
+        if (!R_LightgridEnabledInternal (lg))
                 return NULL;
 
         x = (int)floorf((pos[0] - lg->mins[0]) / lg->cellsize);

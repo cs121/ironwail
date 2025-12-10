@@ -1655,7 +1655,7 @@ void R_SetupView (void)
         r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
-        r_framedata.lightgrid_params[0] = (Lightgrid_Get () != NULL && (r_lightgrid.value || r_lightgrid_force.value)) ? 1.f : 0.f;
+        r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = 0.f;
         r_framedata.lightgrid_params[2] = 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
