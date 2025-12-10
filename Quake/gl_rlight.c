@@ -29,6 +29,7 @@ extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 extern cvar_t r_lightgrid;
+extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
 
 gpulightbuffer_t r_lightbuffer;
@@ -259,6 +260,60 @@ LIGHT SAMPLING
 
 vec3_t lightcolor; //johnfitz -- lit support via lordhavoc
 
+/*
+==================
+R_LightgridLighting
+==================
+*/
+void R_LightgridLighting (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+{
+        const lightgrid_t *lg = Lightgrid_Get ();
+
+        if (!lg || (!r_lightgrid.value && !r_lightgrid_force.value))
+        {
+                VectorClear (out_color);
+                VectorSet (out_dir, 0.f, 0.f, 1.f);
+                return;
+        }
+
+        Lightgrid_Sample (pos, out_color, out_dir);
+
+        // convert to 0-255 range expected by the renderer
+        VectorScale (out_color, 255.f, out_color);
+}
+
+/*
+==================
+R_AddDynamicLights_Lightgrid
+==================
+*/
+void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
+{
+        int i;
+
+        if (!r_dynamic.value)
+                return;
+
+        for (i = 0; i < MAX_DLIGHTS; i++)
+        {
+                const dlight_t *l = &cl_dlights[i];
+                vec3_t dist;
+                float add;
+
+                if (l->die < cl.time || l->spawn > cl.time || !l->baseradius)
+                        continue;
+
+                VectorSubtract (pos, l->origin, dist);
+                add = l->radius - VectorLength (dist);
+
+                if (add <= l->minlight)
+                        continue;
+
+                add -= l->minlight;
+                VectorMA (lightcolor, add, l->color, lightcolor);
+        }
+}
+
 static inline int LightStyleValue (unsigned short style)
 {
 	if (style < 256)
@@ -444,79 +499,70 @@ R_LightPoint -- johnfitz -- replaced entire function for lit support via lordhav
 */
 int R_LightPoint (vec3_t p, float ofs, lightcache_t *cache)
 {
-	vec3_t		start, end;
-	float		maxdist = 8192.f; //johnfitz -- was 2048
-	const lightgrid_probe_t *probe = NULL;
-	qboolean	use_rgblight = false;
+        vec3_t          start, end;
+        float           maxdist = 8192.f; //johnfitz -- was 2048
+        qboolean        use_rgblight = false;
+        qboolean        lightgrid_active;
 
-	cache->lightgrid_has_sample = false;
-	cache->lightgrid_intensity = 0.f;
-	VectorClear (cache->lightgrid_color);
-	VectorClear (cache->lightgrid_dir);
+        cache->lightgrid_has_sample = false;
+        cache->lightgrid_intensity = 0.f;
+        VectorClear (cache->lightgrid_color);
+        VectorClear (cache->lightgrid_dir);
 
-	if (r_lightgrid.value)
-		probe = R_GetLightgridSample (p);
+        lightgrid_active = (Lightgrid_Get () != NULL) && (r_lightgrid.value || r_lightgrid_force.value);
 
-	if (cl.worldmodel->has_lightdata_rgb && r_rgblighting_enable.value)
-		use_rgblight = true;
+        if (lightgrid_active)
+        {
+                vec3_t lg_color, lg_dir;
 
-	if (!cl.worldmodel->lightdata)
-	{
-		if (probe)
-		{
-			VectorCopy (probe->dir, cache->lightgrid_dir);
-			VectorCopy (probe->rgb, cache->lightgrid_color);
-			cache->lightgrid_intensity = probe->intensity;
-			cache->lightgrid_has_sample = true;
+                R_LightgridLighting (p, lg_color, lg_dir);
 
-			VectorScale (cache->lightgrid_color, cache->lightgrid_intensity * 255.f, lightcolor);
-			return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
-		}
+                VectorCopy (lg_color, lightcolor);
+                R_AddDynamicLights_Lightgrid (p, lightcolor);
 
-		lightcolor[0] = lightcolor[1] = lightcolor[2] = 255;
-		return 255;
-	}
+                cache->surfidx = 0;
+                VectorCopy (p, cache->pos);
+                cache->lightgrid_has_sample = true;
+                cache->lightgrid_intensity = 1.f;
+                VectorCopy (lg_color, cache->lightgrid_color);
+                VectorCopy (lg_dir, cache->lightgrid_dir);
 
-	start[0] = p[0];
-	start[1] = p[1];
-	start[2] = p[2] + ofs;
-	end[0] = start[0];
-	end[1] = start[1];
-	end[2] = start[2] - maxdist;
+                return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+        }
 
-	lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
+        if (cl.worldmodel->has_lightdata_rgb && r_rgblighting_enable.value)
+                use_rgblight = true;
 
-	if (cache->surfidx <= 0 // no cache or pitch black
-		|| cache->surfidx > cl.worldmodel->numsurfaces
-		|| fabsf (cache->pos[0] - p[0]) >= 1.f
-		|| fabsf (cache->pos[1] - p[1]) >= 1.f
-		|| fabsf (cache->pos[2] - p[2]) >= 1.f)
-	{
-		cache->surfidx = 0;
-		VectorCopy (p, cache->pos);
-		RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
-	}
+        if (!cl.worldmodel->lightdata)
+        {
+                lightcolor[0] = lightcolor[1] = lightcolor[2] = 255;
+                return 255;
+        }
 
-	if (cache->surfidx > 0)
-		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
+        start[0] = p[0];
+        start[1] = p[1];
+        start[2] = p[2] + ofs;
+        end[0] = start[0];
+        end[1] = start[1];
+        end[2] = start[2] - maxdist;
 
-	if (!probe && r_lightgrid.value)
-		probe = R_GetLightgridSample (p);
+        lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
 
-	if (probe)
-	{
-		vec3_t gridcolor;
+        if (cache->surfidx <= 0 // no cache or pitch black
+                || cache->surfidx > cl.worldmodel->numsurfaces
+                || fabsf (cache->pos[0] - p[0]) >= 1.f
+                || fabsf (cache->pos[1] - p[1]) >= 1.f
+                || fabsf (cache->pos[2] - p[2]) >= 1.f)
+        {
+                cache->surfidx = 0;
+                VectorCopy (p, cache->pos);
+                RecursiveLightPoint (cache, cl.worldmodel->nodes, start, start, end, &maxdist);
+        }
 
-		VectorCopy (probe->dir, cache->lightgrid_dir);
-		VectorCopy (probe->rgb, cache->lightgrid_color);
-		cache->lightgrid_intensity = probe->intensity;
-		cache->lightgrid_has_sample = true;
+        if (cache->surfidx > 0)
+                InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
 
-		VectorScale (cache->lightgrid_color, cache->lightgrid_intensity * 255.f, gridcolor);
-		VectorAdd (lightcolor, gridcolor, lightcolor);
-	}
-
-	return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+        return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
 }
 
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)

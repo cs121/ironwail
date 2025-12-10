@@ -29,6 +29,7 @@ extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
+extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
 
 //up to 16 color translated skins
@@ -319,37 +320,67 @@ R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritt
 */
 void R_SetupAliasLighting (entity_t     *e)
 {
-	vec3_t		dist;
-	float		add;
-	unsigned int	i;
-	vec3_t		dlightcolor = {0.f, 0.f, 0.f};
-	vec3_t		ambientcolor;
+        vec3_t          dist;
+        float           add;
+        unsigned int    i;
+        vec3_t          dlightcolor = {0.f, 0.f, 0.f};
+        vec3_t          ambientcolor;
+        vec3_t          dyn_add;
+        qboolean        used_lightgrid = false;
 
-	// if the initial trace is completely black, try again from above
-	// this helps with models whose origin is slightly below ground level
-	// (e.g. some of the candles in the DOTM start map)
-	if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
-		R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
+        // if the initial trace is completely black, try again from above
+        // this helps with models whose origin is slightly below ground level
+        // (e.g. some of the candles in the DOTM start map)
+        if (!R_LightPoint (e->origin, 0.f, &e->lightcache))
+                R_LightPoint (e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
 
-	VectorCopy (lightcolor, ambientcolor);
+        VectorCopy (lightcolor, ambientcolor);
+        VectorClear (dyn_add);
 
-	R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
+        if ((r_lightgrid.value || r_lightgrid_force.value) && e->lightcache.lightgrid_has_sample)
+        {
+                vec3_t lg_color, lg_dir;
 
-	//add dlights
-	for (i=0; i<r_framedata.numlights; i++)
-	{
-		gpulight_t *l = &r_lightbuffer.lights[i];
-		VectorSubtract (e->origin, l->pos, dist);
-		add = DotProduct (dist, dist);
-		if (l->radius * l->radius > add)
-		{
-			const float intensity = l->radius - sqrtf (add);
-			VectorMA (lightcolor, intensity, l->color, lightcolor);
-			VectorMA (dlightcolor, intensity, l->color, dlightcolor);
-		}
-	}
+                R_LightgridLighting (e->origin, lg_color, lg_dir);
 
-	// viewmodel lighting is typically darker because world lights aren't placed for a free camera
+                for (i = 0; i < 3; i++)
+                        dyn_add[i] = fmaxf (lightcolor[i] - lg_color[i], 0.f);
+
+                VectorCopy (lg_color, ambientcolor);
+                VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
+                VectorCopy (lg_color, e->lightcache.lightgrid_color);
+                e->lightcache.lightgrid_intensity = 1.f;
+
+                used_lightgrid = true;
+        }
+
+        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
+
+        if (used_lightgrid)
+        {
+                for (i = 0; i < 3; i++)
+                {
+                        dlightcolor[i] += dyn_add[i];
+                }
+        }
+        else
+        {
+                //add dlights
+                for (i=0; i<r_framedata.numlights; i++)
+                {
+                        gpulight_t *l = &r_lightbuffer.lights[i];
+                        VectorSubtract (e->origin, l->pos, dist);
+                        add = DotProduct (dist, dist);
+                        if (l->radius * l->radius > add)
+                        {
+                                const float intensity = l->radius - sqrtf (add);
+                                VectorMA (lightcolor, intensity, l->color, lightcolor);
+                                VectorMA (dlightcolor, intensity, l->color, dlightcolor);
+                        }
+                }
+        }
+
+        // viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)
 	{
 		for (i = 0; i < 3; i++)
