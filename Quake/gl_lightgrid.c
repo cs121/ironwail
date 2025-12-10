@@ -19,6 +19,7 @@ static char lightgrid_source[16] = "NONE";
 
 cvar_t r_lightgrid            = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_lightgrid_debug      = { "r_lightgrid_debug", "0", CVAR_NONE };
+cvar_t r_lightgrid_force      = { "r_lightgrid_force", "0", CVAR_ARCHIVE };
 cvar_t r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
 
 /* =====================================================================
@@ -36,6 +37,7 @@ void Lightgrid_Init(void)
 {
     Cvar_RegisterVariable(&r_lightgrid);
     Cvar_RegisterVariable(&r_lightgrid_debug);
+    Cvar_RegisterVariable(&r_lightgrid_force);
     Cvar_RegisterVariable(&r_generate_lightgrid_test);
     Lightgrid_Clear();
 }
