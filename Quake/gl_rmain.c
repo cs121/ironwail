@@ -1651,10 +1651,14 @@ void R_SetupView (void)
         r_framedata.eye[1] = r_refdef.vieworg[1];
         r_framedata.eye[2] = r_refdef.vieworg[2];
         r_framedata.eye[3] = cl.time;
-	r_framedata.lightmap_params[0] = r_lightmap_linear.value > 0.f ? 1.f : 0.f;
-	r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
-	r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
-	r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
+        r_framedata.lightmap_params[0] = r_lightmap_linear.value > 0.f ? 1.f : 0.f;
+        r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
+        r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
+        r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
+        r_framedata.lightgrid_params[0] = (Lightgrid_Get () != NULL && (r_lightgrid.value || r_lightgrid_force.value)) ? 1.f : 0.f;
+        r_framedata.lightgrid_params[1] = 0.f;
+        r_framedata.lightgrid_params[2] = 0.f;
+        r_framedata.lightgrid_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;

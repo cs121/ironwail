@@ -128,6 +128,7 @@ layout(location=8) flat in float in_lmofs;
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
+layout(location=14) in vec3 in_lightgrid;
 
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -334,6 +335,9 @@ void main()
                         );
                 }
         }
+
+        vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
+        static_light *= lightgrid;
 
         if (LightmapParams.z > 0.5)
         {

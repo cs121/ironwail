@@ -290,10 +290,11 @@ static void R_FlushBModelCalls (void)
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
 	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, pos));
-	GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
-	GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
-	GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
+        GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
+        GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
+        GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
         GL_VertexAttribPointerFunc (4, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, normal));
+        GL_VertexAttribPointerFunc (5, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lightgrid));
 
 	if (gl_bindless_able)
 	{
@@ -515,7 +516,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         if (!totalinst)
                 return;
 
-        state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+        state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
@@ -612,7 +613,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	GL_BeginGroup (translucent ? "Water (translucent)" : "Water (opaque)");
 
 	// setup state
-	state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+        state = GLS_CULL_BACK | GLS_ATTRIBS(6);
 	if (translucent)
 		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 	else

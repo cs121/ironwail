@@ -20,6 +20,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         float   ZLogScale;
         float   ZLogBias;
         vec4    LightmapParams;
+        vec4    LightgridParams;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    _Pad1;
