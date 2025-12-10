@@ -35,6 +35,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
 
+extern vec3_t lightcolor;
+
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
@@ -2683,61 +2685,67 @@ static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos
 
 static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_static_light_t *lights, int num_lights, const vec3_t pos, lightcell_t *cell)
 {
-        int i;
-        vec3_t dirsum = {0.f, 0.f, 0.f};
+	int i;
+	vec3_t dirsum = {0.f, 0.f, 0.f};
+	lightcache_t cache = {0};
 
-        VectorClear (cell->rgb);
-        VectorClear (cell->dir);
-        cell->intensity = 0.f;
+	/* Seed with baked BSP lighting so we always capture existing lightmaps */
+	R_LightPoint (pos, 0.f, &cache);
+	cell->rgb[0] = lightcolor[0] * (1.f / 255.f);
+	cell->rgb[1] = lightcolor[1] * (1.f / 255.f);
+	cell->rgb[2] = lightcolor[2] * (1.f / 255.f);
 
-        if (!mod || !lights || num_lights <= 0)
-        {
-                cell->dir[0] = cell->dir[1] = 0.f;
-                cell->dir[2] = 1.f;
-                return;
-        }
+	/* Preserve the baked sample and build on top of it with static/dynamic lights */
+	VectorClear (cell->dir);
+	cell->intensity = 0.f;
 
-        for (i = 0; i < num_lights; i++)
-        {
-                const lightgrid_static_light_t *l = &lights[i];
-                vec3_t delta, impact;
-                float dist, weight;
+	if (!mod)
+	{
+		cell->dir[0] = cell->dir[1] = 0.f;
+		cell->dir[2] = 1.f;
+		return;
+	}
 
-                VectorSubtract (pos, l->origin, delta);
-                dist = VectorLength (delta);
+for (i = 0; i < num_lights; i++)
+{
+	const lightgrid_static_light_t *l = &lights[i];
+	vec3_t delta, impact;
+	float dist, weight;
 
-                if (dist > l->radius)
-                        continue;
+	VectorSubtract (pos, l->origin, delta);
+	dist = VectorLength (delta);
 
-                if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
-                        continue;
+	if (dist > l->radius)
+	continue;
 
-                VectorSubtract (pos, impact, delta);
-                if (VectorLength (delta) > 1.f)
-                        continue;
+	if (!LightgridRAW_TraceLine (mod, l->origin, pos, impact))
+	continue;
 
-                weight = 1.f - (dist / l->radius);
-                VectorMA (cell->rgb, weight, l->color, cell->rgb);
+	VectorSubtract (pos, impact, delta);
+	if (VectorLength (delta) > 1.f)
+	continue;
 
-                VectorSubtract (pos, l->origin, delta);
-                if (VectorNormalize (delta) > 0.f)
-                        VectorMA (dirsum, weight, delta, dirsum);
-        }
+	weight = 1.f - (dist / l->radius);
+	VectorMA (cell->rgb, weight, l->color, cell->rgb);
 
-        LightgridRAW_AddDynamicLights (mod, pos, cell->rgb, dirsum);
-
-        cell->intensity = VectorLength (cell->rgb);
-        if (VectorNormalize (dirsum) > 0.f)
-        {
-                VectorCopy (dirsum, cell->dir);
-        }
-        else
-        {
-                cell->dir[0] = cell->dir[1] = 0.f;
-                cell->dir[2] = 1.f;
-        }
+	VectorSubtract (pos, l->origin, delta);
+	if (VectorNormalize (delta) > 0.f)
+	VectorMA (dirsum, weight, delta, dirsum);
 }
 
+LightgridRAW_AddDynamicLights (mod, pos, cell->rgb, dirsum);
+
+cell->intensity = VectorLength (cell->rgb);
+if (VectorNormalize (dirsum) > 0.f)
+{
+VectorCopy (dirsum, cell->dir);
+}
+else
+{
+cell->dir[0] = cell->dir[1] = 0.f;
+cell->dir[2] = 1.f;
+}
+}
 static float LightgridRAW_Random01 (void)
 {
         return rand () * (1.f / (float)RAND_MAX);
@@ -2755,87 +2763,102 @@ static void LightgridRAW_FillTestCell (lightcell_t *cell)
 }
 
 lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, float cellZ)
+	{
+		vec3_t mins, maxs;
+		float cellsize;
+		int nx, ny, nz;
+		size_t count;
+		lightgrid_raw_t *raw = NULL;
+		lightgrid_static_light_t *lights = NULL;
+		int num_lights;
+		float saved_r_lightgrid;
+		float saved_r_lightgrid_force;
+
+		if (!mod)
+		return NULL;
+
+		/* Ensure BSP sampling isn't polluted by an active lightgrid */
+		saved_r_lightgrid = r_lightgrid.value;
+		saved_r_lightgrid_force = r_lightgrid_force.value;
+		r_lightgrid.value = 0.f;
+		r_lightgrid_force.value = 0.f;
+
+		VectorCopy (mod->mins, mins);
+		VectorCopy (mod->maxs, maxs);
+
+		(void)cellY;
+		(void)cellZ;
+		cellsize = LIGHTGRID_STANDARD_CELLSIZE;
+		nx = q_max (1, q_min (64, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
+		ny = q_max (1, q_min (64, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
+		nz = q_max (1, q_min (64, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
+
+		count = (size_t)nx * (size_t)ny * (size_t)nz;
+		if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
+		{
+			Con_Warning ("lightgrid too large to generate (%dx%dx%d)\n", nx, ny, nz);
+			raw = NULL;
+			goto restore_state;
+		}
+
+	raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
+	if (!raw)
+	goto restore_state;
+
+	memset (raw, 0, sizeof(*raw));
+
+	raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells");
+	if (!raw->cells)
+	{
+		raw = NULL;
+		goto restore_state;
+	}
+
+raw->nx = nx;
+raw->ny = ny;
+raw->nz = nz;
+raw->cellSize = cellsize;
+VectorCopy (mins, raw->origin);
+
+num_lights = LightgridRAW_CollectLights (mod, &lights);
+
+for (int z = 0; z < nz; z++)
 {
-        vec3_t mins, maxs;
-        float cellsize;
-        int nx, ny, nz;
-        size_t count;
-        lightgrid_raw_t *raw;
-        lightgrid_static_light_t *lights = NULL;
-        int num_lights;
+	for (int y = 0; y < ny; y++)
+	{
+		for (int x = 0; x < nx; x++)
+		{
+			vec3_t pos;
+			lightcell_t *cell = &raw->cells[(z * ny + y) * nx + x];
 
-        if (!mod)
-                return NULL;
+			pos[0] = mins[0] + (x + 0.5f) * cellsize;
+			pos[1] = mins[1] + (y + 0.5f) * cellsize;
+			pos[2] = mins[2] + (z + 0.5f) * cellsize;
 
-        VectorCopy (mod->mins, mins);
-        VectorCopy (mod->maxs, maxs);
+			if (r_generate_lightgrid_test.value > 0.f)
+			{
+				LightgridRAW_FillTestCell (cell);
+				continue;
+			}
 
-        (void)cellY;
-        (void)cellZ;
-        cellsize = LIGHTGRID_STANDARD_CELLSIZE;
-        nx = q_max (1, q_min (64, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
-        ny = q_max (1, q_min (64, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
-        nz = q_max (1, q_min (64, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
-
-        count = (size_t)nx * (size_t)ny * (size_t)nz;
-        if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
-        {
-                Con_Warning ("lightgrid too large to generate (%dx%dx%d)\n", nx, ny, nz);
-                return NULL;
-        }
-
-        raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
-        if (!raw)
-                return NULL;
-
-        memset (raw, 0, sizeof(*raw));
-
-        raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells");
-        if (!raw->cells)
-                return NULL;
-
-        raw->nx = nx;
-        raw->ny = ny;
-        raw->nz = nz;
-        raw->cellSize = cellsize;
-        VectorCopy (mins, raw->origin);
-
-        num_lights = LightgridRAW_CollectLights (mod, &lights);
-
-        for (int z = 0; z < nz; z++)
-        {
-                for (int y = 0; y < ny; y++)
-                {
-                        for (int x = 0; x < nx; x++)
-                        {
-                                vec3_t pos;
-                                lightcell_t *cell = &raw->cells[(z * ny + y) * nx + x];
-
-                                pos[0] = mins[0] + (x + 0.5f) * cellsize;
-                                pos[1] = mins[1] + (y + 0.5f) * cellsize;
-                                pos[2] = mins[2] + (z + 0.5f) * cellsize;
-
-                                if (r_generate_lightgrid_test.value > 0.f)
-                                {
-                                        LightgridRAW_FillTestCell (cell);
-                                        continue;
-                                }
-
-                                LightgridRAW_ComputeLightingAtPoint (mod, lights, num_lights, pos, cell);
-                        }
-                }
-        }
-
-        if (lights)
-                Z_Free (lights);
-
-        mod->lightgrid_raw = raw;
-
-        Con_Printf ("Generated RAW lightgrid (%dx%dx%d)\n", nx, ny, nz);
-
-        return raw;
+		LightgridRAW_ComputeLightingAtPoint (mod, lights, num_lights, pos, cell);
+	}
+}
 }
 
+if (lights)
+Z_Free (lights);
+
+mod->lightgrid_raw = raw;
+
+Con_Printf ("Generated RAW lightgrid (%dx%dx%d)
+
+restore_state:
+r_lightgrid.value = saved_r_lightgrid;
+r_lightgrid_force.value = saved_r_lightgrid_force;
+
+return raw;
+}
 static qboolean BSPX_WriteLump (bspx_t *bspxOut, const char *name, byte *buffer, size_t size)
 {
         bspx_lump_out_t *lumps;
