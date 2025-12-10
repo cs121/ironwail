@@ -543,7 +543,9 @@ qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb)
 
         use_rgblight = model->has_lightdata_rgb && r_rgblighting_enable.value;
 
-        mleaf_t *leaf = Mod_PointInLeaf(pos, model);
+        vec3_t pos_copy;
+        VectorCopy(pos, pos_copy);
+        mleaf_t *leaf = Mod_PointInLeaf(pos_copy, model);
         if (!leaf || leaf->contents == CONTENTS_SOLID)
                 return false;
 
