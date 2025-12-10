@@ -431,6 +431,7 @@ typedef struct gpuframedata_s {
         vec4_t          prev_eye;       // xyz: prev_eyepos, w: delta_time
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
+        vec4_t          lightgrid_params; // x: enabled, yzw: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;

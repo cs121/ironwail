@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <limits.h>
 
 #include "quakedef.h"
+#include "gl_lightgrid.h"
 
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
 extern cvar_t r_lightmap_mipmaps;
@@ -836,11 +837,11 @@ void GL_BuildBModelVertexBuffer (void)
 
 				lindex = m->surfedges[fa->firstedge + k];
 				if (lindex > 0)
-				{
-					r_pedge = &m->edges[lindex];
-					vertindex = r_pedge->v[0];
-					vec = m->vertexes[vertindex].position;
-				}
+                                {
+                                        r_pedge = &m->edges[lindex];
+                                        vertindex = r_pedge->v[0];
+                                        vec = m->vertexes[vertindex].position;
+                                }
 				else
 				{
 					r_pedge = &m->edges[-lindex];
@@ -848,13 +849,20 @@ void GL_BuildBModelVertexBuffer (void)
 					vec = m->vertexes[vertindex].position;
 				}
 
-				VectorCopy (vec, vert->pos);
-				VectorCopy (surfnormal, vert->normal);
-				if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
-					VectorCopy (m->vertexes[vertindex].normal, vert->normal);
+                                VectorCopy (vec, vert->pos);
+                                VectorCopy (surfnormal, vert->normal);
+                                if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
+                                        VectorCopy (m->vertexes[vertindex].normal, vert->normal);
 
-				s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;
-				s *= texscalex;
+                                {
+                                        vec3_t lg_color, lg_dir;
+
+                                        Lightgrid_Sample (vec, lg_color, lg_dir);
+                                        VectorCopy (lg_color, vert->lightgrid);
+                                }
+
+                                s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;
+                                s *= texscalex;
 
 				t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3] * useofs;
 				t *= texscaley;

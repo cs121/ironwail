@@ -117,6 +117,7 @@ layout(location=1) in vec4 in_uv;
 layout(location=2) in float in_lmofs;
 layout(location=3) in ivec4 in_styles;
 layout(location=4) in vec3 in_normal;
+layout(location=5) in vec3 in_lightgrid;
 
 
 layout(location=0) flat out uint out_flags;
@@ -139,6 +140,7 @@ layout(location=8) flat out float out_lmofs;
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
+layout(location=14) out vec3 out_lightgrid;
 
 void main()
 {
@@ -161,11 +163,12 @@ void main()
 		prev_clip.z += ZBIAS;
 	}
 	gl_Position = curr_clip;
-	out_curr_clip = curr_clip;
-	out_prev_clip = prev_clip;
-	out_pos = world_pos;
+        out_curr_clip = curr_clip;
+        out_prev_clip = prev_clip;
+        out_pos = world_pos;
         out_normal = normalize(world_normal);
-	out_uv = in_uv.xy;
+        out_lightgrid = in_lightgrid;
+        out_uv = in_uv.xy;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);

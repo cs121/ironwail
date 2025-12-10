@@ -134,6 +134,7 @@ typedef struct
 typedef struct glvert_s {
 	vec3_t		pos;
 	vec3_t		normal;
+	vec3_t		lightgrid;
 	float		st[4];
 	float		lmofs;
 	unsigned	styles;
