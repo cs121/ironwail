@@ -2886,6 +2886,7 @@ static void Lightgrid_Save_f (void)
 {
         byte *filebuffer;
         size_t filesize;
+        char relpath[MAX_QPATH];
         char outpath[MAX_OSPATH];
         qmodel_t *mod = cl.worldmodel;
 
@@ -2901,13 +2902,14 @@ static void Lightgrid_Save_f (void)
                 return;
         }
 
-        COM_StripExtension (mod->name, outpath, sizeof(outpath));
-        q_strlcat (outpath, ".lightgrid", sizeof(outpath));
+        COM_StripExtension (mod->name, relpath, sizeof(relpath));
+        q_strlcat (relpath, ".lightgrid", sizeof(relpath));
+        q_snprintf (outpath, sizeof(outpath), "%s/%s", com_gamedir, relpath);
 
         if (COM_WriteFile_OSPath (outpath, filebuffer, filesize))
-                Con_Printf ("LIGHTGRID_RAW saved to %s (%.2f MB)\n", outpath, filesize / (1024.0f * 1024.0f));
+                Con_Printf ("LIGHTGRID_RAW saved to %s (%.2f MB)\n", relpath, filesize / (1024.0f * 1024.0f));
         else
-                Con_Printf ("Failed to write %s\n", outpath);
+                Con_Printf ("Failed to write %s\n", relpath);
 
         free (filebuffer);
 }
@@ -3136,13 +3138,21 @@ static void Mod_LoadFaces (lump_t *l)
                         if (lightgridbuf)
                         {
                                 lightgridsize = com_filesize;
-                                if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize, lightgridpath))
+
+                                // Only load lightgrid files from the same or higher-priority gamedir as the map
+                                if (lightgrid_path_id < loadmodel->path_id)
+                                {
+                                        Con_DPrintf ("ignored %s from a gamedir with lower priority\n", lightgridpath);
+                                }
+                                else if (LightgridRAW_Load (loadmodel, lightgridbuf, lightgridsize, lightgridpath))
                                 {
                                         Lightgrid_SetSource (lightgridpath);
                                         have_lightgrid = true;
                                 }
                                 else
+                                {
                                         Con_Warning ("Failed to load %s\n", lightgridpath);
+                                }
 
                                 free (lightgridbuf);
                         }
