@@ -350,6 +350,23 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     if (!model)
         return NULL;
 
+    /*
+     * Disable any currently loaded lightgrid while we bake a new one so that
+     * sampling uses the actual BSP light data instead of feeding back the
+     * existing (and possibly empty) grid. Otherwise R_LightPoint() would hit
+     * the active lightgrid path and return the default white sample, producing
+     * blank probes.
+     */
+    lightgrid_t *saved_current = current_lightgrid;
+    lightgrid_t *saved_cl      = cl.lightgrid;
+    float saved_r_lightgrid    = r_lightgrid.value;
+    float saved_r_lightgrid_force = r_lightgrid_force.value;
+
+    current_lightgrid = NULL;
+    cl.lightgrid      = NULL;
+    r_lightgrid.value = 0.f;
+    r_lightgrid_force.value = 0.f;
+
     vec3_t mins, maxs, size;
     VectorCopy(model->mins, mins);
     VectorCopy(model->maxs, maxs);
@@ -415,6 +432,12 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
 
         cell->intensity = base;
     }
+
+    /* Restore previous lightgrid state */
+    r_lightgrid.value = saved_r_lightgrid;
+    r_lightgrid_force.value = saved_r_lightgrid_force;
+    current_lightgrid = saved_current;
+    cl.lightgrid      = saved_cl;
 
     return raw;
 }
