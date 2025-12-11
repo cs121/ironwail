@@ -58,7 +58,7 @@ void Lightgrid_Free(lightgrid_t *lg)
         return;
 }
 
-static qboolean Lightgrid_ReadV2Header(const lightgrid_v2_header_t *hdr, int *nx, int *ny, int *nz, float *cellsize, vec3_t origin)
+static qboolean Lightgrid_ReadV2Header(const lightgrid_v2_header_t *hdr, int *nx, int *ny, int *nz, float *cellsize, vec3_t origin, uint32_t *components)
 {
     if (LittleLong(hdr->magic) != LIGHTGRID_MAGIC)
         return false;
@@ -70,6 +70,7 @@ static qboolean Lightgrid_ReadV2Header(const lightgrid_v2_header_t *hdr, int *nx
     *ny = LittleLong(hdr->ny);
     *nz = LittleLong(hdr->nz);
     *cellsize = LittleFloat(hdr->cellsize);
+    *components = LittleLong(hdr->components);
 
     origin[0] = LittleFloat(hdr->origin[0]);
     origin[1] = LittleFloat(hdr->origin[1]);
@@ -99,7 +100,9 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
     float cellsize;
     vec3_t origin;
 
-    if (!Lightgrid_ReadV2Header(hdr, &nx, &ny, &nz, &cellsize, origin))
+    uint32_t components = 0;
+
+    if (!Lightgrid_ReadV2Header(hdr, &nx, &ny, &nz, &cellsize, origin, &components))
     {
         free(buffer);
         return NULL;
@@ -140,7 +143,30 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
         return NULL;
     }
 
-    const qboolean has_ao = (floats_per_probe == 8);
+    const uint32_t required_components = LIGHTGRID_COMPONENT_RGB | LIGHTGRID_COMPONENT_DIR | LIGHTGRID_COMPONENT_INTENSITY;
+    const uint32_t known_components = required_components | LIGHTGRID_COMPONENT_AO;
+    const uint32_t unknown_components = components & ~(known_components | LIGHTGRID_COMPONENT_SH9_FLAG);
+
+    if (components && (components & required_components) != required_components)
+    {
+        free(buffer);
+        return NULL;
+    }
+
+    if (unknown_components)
+        Con_DPrintf("Lightgrid V2: ignoring unknown component flags 0x%x\n", unknown_components);
+
+    const qboolean has_ao = components ? ((components & LIGHTGRID_COMPONENT_AO) != 0) : (floats_per_probe == 8);
+
+    if (components)
+    {
+        const size_t expected_floats = 7 + (has_ao ? 1 : 0);
+        if (expected_floats != floats_per_probe)
+        {
+            free(buffer);
+            return NULL;
+        }
+    }
     const float *probe_data = (const float *)(buffer + header_size);
 
     lightgrid_t *lg = Lightgrid_Alloc(nx, ny, nz, cellsize, mins, maxs);
@@ -266,6 +292,7 @@ static qboolean Lightgrid_KTX2ReadMetadata(const uint8_t *data, const lightgrid_
 {
     qboolean have_cellsize = false;
     qboolean have_origin = false;
+    qboolean have_sh9 = false;
     size_t offset = 0;
 
     if (!hdr->kvd_length)
@@ -304,9 +331,16 @@ static qboolean Lightgrid_KTX2ReadMetadata(const uint8_t *data, const lightgrid_
             origin[2] = LittleFloat(v[2]);
             have_origin = true;
         }
+        else if (!have_sh9 && !q_strcasecmp(key, "LGRID_SH9"))
+        {
+            have_sh9 = true;
+        }
 
         offset += 4 + padded;
     }
+
+    if (have_sh9)
+        Con_DPrintf("Lightgrid KTX2: detected LGRID_SH9 metadata (ignored for now)\n");
 
     return have_cellsize && have_origin;
 }
@@ -465,6 +499,13 @@ lightgrid_t *Lightgrid_LoadKTX2(const char *path)
     return lg;
 }
 
+// Placeholder for future Lightgrid V3 loader.
+lightgrid_t *Lightgrid_LoadV3(const char *path)
+{
+    (void)path;
+    return NULL;
+}
+
 lightgrid_t *Lightgrid_LoadExternal(const char *path)
 {
     if (!path)
@@ -474,6 +515,7 @@ lightgrid_t *Lightgrid_LoadExternal(const char *path)
     static lightgrid_loader_fn loaders[] = {
         Lightgrid_LoadV2,
         Lightgrid_LoadKTX2,
+        Lightgrid_LoadV3,
         NULL
     };
 
