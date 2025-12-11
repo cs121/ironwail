@@ -3171,16 +3171,26 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
         lightgrid_t *lg;
         bspx_lump_t l;
 
-	(void)mod;
+        (void)mod;
 
-	Lightgrid_Free(cl.lightgrid);
-	cl.lightgrid = NULL;
+        Lightgrid_Free(cl.lightgrid);
+        cl.lightgrid = NULL;
 
-	if (!lump || lumpsize <= 0)
-		return false;
+#if USE_KTX2_LIGHTGRID
+        if (r_lightgrid_ktx_enable.value)
+        {
+                char base[MAX_QPATH];
+                COM_StripExtension(mod->name, base, sizeof(base));
+                if (Lightgrid_LoadFromKTX2(COM_SkipPath(base)))
+                        return true;
+        }
+#endif
 
-	l.data = lump;
-	l.size = (size_t)lumpsize;
+        if (!lump || lumpsize <= 0)
+                return false;
+
+        l.data = lump;
+        l.size = (size_t)lumpsize;
 
     lg = Lightgrid_LoadFromBSPX_FTE(&l);
     if (!lg)

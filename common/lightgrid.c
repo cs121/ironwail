@@ -153,6 +153,10 @@ lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_
     VectorCopy(mins, lg->mins);
     VectorCopy(maxs, lg->maxs);
 
+    lg->source = LIGHTGRID_SRC_NONE;
+    lg->tex_color3d = 0;
+    lg->tex_dir3d = 0;
+
     return lg;
 }
 

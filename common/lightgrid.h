@@ -21,7 +21,18 @@ typedef struct lightgrid_s {
     vec3_t mins, maxs;
 
     lightgrid_probe_t *probes; // size = nx*ny*nz
+
+    int source; // enum lightgrid_source_e
+    unsigned int tex_color3d;
+    unsigned int tex_dir3d;
 } lightgrid_t;
+
+typedef enum lightgrid_source_e {
+    LIGHTGRID_SRC_NONE = 0,
+    LIGHTGRID_SRC_OCTREE,
+    LIGHTGRID_SRC_RAW,
+    LIGHTGRID_SRC_KTX2
+} lightgrid_source_t;
 
 typedef struct bspx_lump_s {
     const void *data;
