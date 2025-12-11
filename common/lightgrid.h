@@ -33,6 +33,7 @@ typedef struct lightgrid_s {
 
 typedef enum lightgrid_source_e {
     LIGHTGRID_SRC_NONE = 0,
+    LIGHTGRID_SRC_V2,
     LIGHTGRID_SRC_OCTREE,
     LIGHTGRID_SRC_RAW,
     LIGHTGRID_SRC_KTX2
@@ -40,5 +41,6 @@ typedef enum lightgrid_source_e {
 
 lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_t mins, const vec3_t maxs);
 lightgrid_t *Lightgrid_LoadV2(const char *path);
+lightgrid_t *Lightgrid_LoadKTX2(const char *path);
 lightgrid_t *Lightgrid_LoadExternal(const char *path);
 void Lightgrid_Free(lightgrid_t *lg);

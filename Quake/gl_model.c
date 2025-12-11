@@ -3534,9 +3534,9 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 	if (!lg)
 		return false;
 
-	cl.lightgrid = lg;
+        Lightgrid_Set (lg);
 
-	return true;
+        return true;
 }
 
 static void Lightgrid_Info_f (void)

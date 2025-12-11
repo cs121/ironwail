@@ -30,6 +30,8 @@ extern cvar_t r_lightgrid_ktx_prefer;
 void Lightgrid_Init (void);
 void Lightgrid_Shutdown (void);
 void Lightgrid_Clear (void);
+void Lightgrid_Set (lightgrid_t *lg);
+void Lightgrid_UploadToGPU (lightgrid_t *lg);
 lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw);
 lightgrid_raw_t *Lightgrid_GenerateRaw (const struct qmodel_s *model);
 void Lightgrid_BuildFallback (void);
