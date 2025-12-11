@@ -428,6 +428,44 @@ typedef struct
 	int		size;
 } bspx_entry_t;
 
+// LIGHTGRID_RAW header/encoding definitions
+#define LIGHTGRID_RAW_MAGIC             0x4447524Lu // 'LGRD'
+#define LIGHTGRID_RAW_VERSION_1         1u          // Legacy: kein Header mit Magic
+#define LIGHTGRID_RAW_VERSION_2         2u          // Neuer Header mit Magic
+
+typedef enum lightgrid_raw_encoding_e
+{
+        LIGHTGRID_RAW_ENCODING_FLOAT32 = 0u,
+        LIGHTGRID_RAW_ENCODING_FLOAT16 = 1u,
+} lightgrid_raw_encoding_t;
+
+typedef enum lightgrid_raw_component_e
+{
+        LIGHTGRID_RAW_COMPONENT_RGB      = (1u << 0),
+        LIGHTGRID_RAW_COMPONENT_DIR      = (1u << 1),
+        LIGHTGRID_RAW_COMPONENT_INTENSITY= (1u << 2),
+        LIGHTGRID_RAW_COMPONENT_AO       = (1u << 3),
+        LIGHTGRID_RAW_COMPONENT_EMISSIVE = (1u << 4),
+        LIGHTGRID_RAW_COMPONENT_SH9      = (1u << 5),
+} lightgrid_raw_component_t;
+
+#define LIGHTGRID_RAW_COMPONENTS_BASE (LIGHTGRID_RAW_COMPONENT_RGB | LIGHTGRID_RAW_COMPONENT_DIR | LIGHTGRID_RAW_COMPONENT_INTENSITY)
+
+typedef struct lightgrid_raw_header_s
+{
+        unsigned int magic;
+        unsigned int version;
+        unsigned int flags;
+        unsigned int components;
+        unsigned int encoding;
+        unsigned int sh_order;
+        unsigned int sh_coeffs;
+        unsigned int reserved[5];
+        int nx, ny, nz;
+        float cellSize;
+        vec3_t origin;       // world-space min corner
+} lightgrid_raw_header_t;
+
 typedef struct sh9_color_s
 {
         vec3_t c[9];
@@ -438,6 +476,8 @@ typedef struct lightcell_s
         vec3_t rgb;
         vec3_t dir;
         float intensity;
+        float ao;
+        float emissive;
         sh9_color_t sh;
         qboolean sh_valid;
 } lightcell_t;
