@@ -3528,7 +3528,7 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 #endif
 
 	COM_StripExtension(mod->name, path, sizeof(path));
-	COM_DefaultExtension(path, ".lgrd");
+COM_DefaultExtension(path, ".lgrd", sizeof(path));
 
 	lg = Lightgrid_LoadExternal(path);
 	if (!lg)
