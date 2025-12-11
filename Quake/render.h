@@ -32,7 +32,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //=============================================================================
 
-typedef struct lightgrid_probe_s lightgrid_probe_t;
+typedef struct lightcell_s lightcell_t;
+typedef lightcell_t lightgrid_probe_t;
 typedef struct lightgrid_s lightgrid_t;
 
 typedef struct lightcache_s {
