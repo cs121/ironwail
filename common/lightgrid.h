@@ -11,6 +11,8 @@ typedef struct lightcell_s {
     vec3_t dir;
     float intensity;
     float ao;
+    float emissive;
+    qboolean sh_valid;
     sh9_color_t *sh9; // NULL unless Lightgrid V3 allocates it
 } lightcell_t;
 typedef lightcell_t lightgrid_probe_t;
