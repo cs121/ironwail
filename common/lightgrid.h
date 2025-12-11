@@ -18,10 +18,10 @@ typedef struct lightcell_s {
 typedef lightcell_t lightgrid_probe_t;
 
 #define LIGHTGRID_STANDARD_CELLSIZE 32.f
-#define LIGHTGRID_MAX_NX 64
-#define LIGHTGRID_MAX_NY 64
-#define LIGHTGRID_MAX_NZ 128
-#define LIGHTGRID_MAX_CELLS (512 * 1024)
+#define LIGHTGRID_MAX_NX 128
+#define LIGHTGRID_MAX_NY 128
+#define LIGHTGRID_MAX_NZ 256
+#define LIGHTGRID_MAX_CELLS (4 * 1024 * 1024)
 
 typedef struct lightgrid_s {
     int nx, ny, nz;
