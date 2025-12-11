@@ -197,170 +197,6 @@ static float LightgridRAW_HalfToFloat(unsigned short h)
 }
 
 /* =====================================================================
-   BSPX Loader
-   ===================================================================== */
-
-qboolean Lightgrid_LoadFromBSPX(void *bspx_data, int bspx_len)
-{
-    if (!bspx_data || bspx_len <= 0)
-        return false;
-
-    Lightgrid_Clear();
-
-    const byte *payload = (const byte *)bspx_data;
-    size_t payload_size = (size_t)bspx_len;
-    size_t header_size = sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t);
-    unsigned int version = LIGHTGRID_RAW_VERSION_1;
-    unsigned int components = LIGHTGRID_RAW_COMPONENTS_BASE;
-    unsigned int encoding = LIGHTGRID_RAW_ENCODING_FLOAT32;
-    int nx = 0, ny = 0, nz = 0;
-    float cellSize = 0.f;
-    vec3_t origin = {0.f, 0.f, 0.f};
-
-    if (payload_size >= sizeof(lightgrid_raw_header_t))
-    {
-        const lightgrid_raw_header_t *hdr = (const lightgrid_raw_header_t *)payload;
-        if (LittleLong(hdr->magic) == LIGHTGRID_RAW_MAGIC)
-        {
-            version = LittleLong(hdr->version);
-            if (version != LIGHTGRID_RAW_VERSION_2)
-                return false;
-
-            components = LittleLong(hdr->components);
-            encoding = LittleLong(hdr->encoding);
-            nx = LittleLong(hdr->nx);
-            ny = LittleLong(hdr->ny);
-            nz = LittleLong(hdr->nz);
-            cellSize = LittleFloat(hdr->cellSize);
-            VectorCopy(hdr->origin, origin);
-            origin[0] = LittleFloat(origin[0]);
-            origin[1] = LittleFloat(origin[1]);
-            origin[2] = LittleFloat(origin[2]);
-            header_size = sizeof(*hdr);
-        }
-    }
-
-    if (version == LIGHTGRID_RAW_VERSION_1)
-    {
-        if (payload_size < header_size)
-            return false;
-
-        nx = LittleLong(((int *)payload)[0]);
-        ny = LittleLong(((int *)payload)[1]);
-        nz = LittleLong(((int *)payload)[2]);
-
-        cellSize = LG_FLittle(payload + sizeof(int) * 3);
-        memcpy(origin, payload + sizeof(int) * 3 + sizeof(float), sizeof(vec3_t));
-        origin[0] = LittleFloat(origin[0]);
-        origin[1] = LittleFloat(origin[1]);
-        origin[2] = LittleFloat(origin[2]);
-    }
-
-    if (nx <= 0 || ny <= 0 || nz <= 0)
-        return false;
-
-    if (cellSize <= 0.f)
-        return false;
-
-    if (version == LIGHTGRID_RAW_VERSION_2 &&
-        (components & LIGHTGRID_RAW_COMPONENTS_BASE) != LIGHTGRID_RAW_COMPONENTS_BASE)
-        return false;
-
-    size_t count = (size_t)nx * (size_t)ny * (size_t)nz;
-    if (!count || count > LIGHTGRID_MAX_CELLS || count > SIZE_MAX / sizeof(lightcell_t))
-        return false;
-
-    if (payload_size < header_size)
-        return false;
-    payload_size -= header_size;
-
-    const size_t cell_stride = (version == LIGHTGRID_RAW_VERSION_1)
-        ? sizeof(vec3_t) * 2 + sizeof(float)
-        : LightgridRAW_CellSizeBytes(components, encoding);
-    if (!cell_stride || payload_size < cell_stride * count)
-        return false;
-
-    lightgrid_raw_t *raw = (lightgrid_raw_t *)Z_Malloc(sizeof(*raw));
-    if (!raw)
-        return false;
-    memset(raw, 0, sizeof(*raw));
-
-    raw->cells = (lightcell_t *)Z_Malloc(count * sizeof(lightcell_t));
-    if (!raw->cells)
-    {
-        Z_Free(raw);
-        return false;
-    }
-
-    raw->nx = nx;
-    raw->ny = ny;
-    raw->nz = nz;
-    raw->cellSize = cellSize;
-    VectorCopy(origin, raw->origin);
-
-    const byte *cell_bytes = payload + header_size;
-    for (size_t i = 0; i < count; i++)
-    {
-        lightcell_t *cell = &raw->cells[i];
-        const byte *component_ptr = cell_bytes;
-
-        cell->ao = 1.f;
-        cell->emissive = 0.f;
-        cell->sh_valid = false;
-
-#define READ_COMPONENT_FLOAT(out)                     \
-        do {                                          \
-            if (encoding == LIGHTGRID_RAW_ENCODING_FLOAT16) \
-            {                                         \
-                unsigned short half;                  \
-                memcpy(&half, component_ptr, sizeof(half)); \
-                half = LittleShort(half);             \
-                out = LightgridRAW_HalfToFloat(half); \
-                component_ptr += sizeof(unsigned short); \
-            }                                         \
-            else                                      \
-            {                                         \
-                memcpy(&out, component_ptr, sizeof(float)); \
-                out = LittleFloat(out);               \
-                component_ptr += sizeof(float);       \
-            }                                         \
-        } while (0)
-
-        READ_COMPONENT_FLOAT(cell->rgb[0]);
-        READ_COMPONENT_FLOAT(cell->rgb[1]);
-        READ_COMPONENT_FLOAT(cell->rgb[2]);
-        READ_COMPONENT_FLOAT(cell->dir[0]);
-        READ_COMPONENT_FLOAT(cell->dir[1]);
-        READ_COMPONENT_FLOAT(cell->dir[2]);
-        READ_COMPONENT_FLOAT(cell->intensity);
-
-        if (components & LIGHTGRID_RAW_COMPONENT_AO)
-            READ_COMPONENT_FLOAT(cell->ao);
-
-        if (components & LIGHTGRID_RAW_COMPONENT_EMISSIVE)
-            READ_COMPONENT_FLOAT(cell->emissive);
-
-        cell_bytes += cell_stride;
-#undef READ_COMPONENT_FLOAT
-    }
-
-    lightgrid_t *lg = Lightgrid_FromRaw(raw);
-
-    Z_Free(raw->cells);
-    Z_Free(raw);
-
-    if (!lg)
-        return false;
-
-    current_lightgrid = lg;
-    cl.lightgrid      = lg;
-    lg->source        = LIGHTGRID_SRC_OCTREE;
-    q_strlcpy(lightgrid_source, "OCTREE", sizeof(lightgrid_source));
-
-    return true;
-}
-
-/* =====================================================================
    KTX2 loader/export helpers
    ===================================================================== */
 
@@ -651,7 +487,7 @@ qboolean Lightgrid_LoadFromKTX2(const char *mapname)
     {
         const float *c = &color_payload[i * 4];
         const float *d = &dir_payload[i * 4];
-        lightgrid_probe_t *p = &lg->probes[i];
+        lightcell_t *p = &lg->probes[i];
 
         VectorCopy(c, p->rgb);
         p->intensity = c[3];
@@ -707,7 +543,7 @@ qboolean Lightgrid_ExportToKTX2(const lightgrid_t *grid, const char *mapname)
 
     for (size_t i = 0; i < count; i++)
     {
-        const lightgrid_probe_t *p = &grid->probes[i];
+        const lightcell_t *p = &grid->probes[i];
         float *c = &color_payload[i * 4];
         float *d = &dir_payload[i * 4];
 
@@ -789,7 +625,7 @@ lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw)
 
         VectorCopy(dir, lg->probes[i].dir);
         lg->probes[i].intensity = cell->intensity;
-        lg->probes[i].emissive = cell->emissive;
+        lg->probes[i].ao = cell->ao;
     }
 
     lg->source = LIGHTGRID_SRC_RAW;
@@ -807,7 +643,7 @@ static void Lightgrid_DefaultSample(vec3_t out_color, vec3_t out_dir)
     VectorSet(out_dir, 0,0,1);
 }
 
-static const lightgrid_probe_t *Lightgrid_At(const lightgrid_t *lg, int x, int y, int z)
+static const lightcell_t *Lightgrid_At(const lightgrid_t *lg, int x, int y, int z)
 {
     return &lg->probes[
         (size_t)z * lg->ny * lg->nx +
@@ -848,14 +684,14 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
     fy -= floorf(fy);
     fz -= floorf(fz);
 
-    const lightgrid_probe_t *c000 = Lightgrid_At(lg, x0, y0, z0);
-    const lightgrid_probe_t *c100 = Lightgrid_At(lg, x1, y0, z0);
-    const lightgrid_probe_t *c010 = Lightgrid_At(lg, x0, y1, z0);
-    const lightgrid_probe_t *c110 = Lightgrid_At(lg, x1, y1, z0);
-    const lightgrid_probe_t *c001 = Lightgrid_At(lg, x0, y0, z1);
-    const lightgrid_probe_t *c101 = Lightgrid_At(lg, x1, y0, z1);
-    const lightgrid_probe_t *c011 = Lightgrid_At(lg, x0, y1, z1);
-    const lightgrid_probe_t *c111 = Lightgrid_At(lg, x1, y1, z1);
+    const lightcell_t *c000 = Lightgrid_At(lg, x0, y0, z0);
+    const lightcell_t *c100 = Lightgrid_At(lg, x1, y0, z0);
+    const lightcell_t *c010 = Lightgrid_At(lg, x0, y1, z0);
+    const lightcell_t *c110 = Lightgrid_At(lg, x1, y1, z0);
+    const lightcell_t *c001 = Lightgrid_At(lg, x0, y0, z1);
+    const lightcell_t *c101 = Lightgrid_At(lg, x1, y0, z1);
+    const lightcell_t *c011 = Lightgrid_At(lg, x0, y1, z1);
+    const lightcell_t *c111 = Lightgrid_At(lg, x1, y1, z1);
 
     vec3_t rgb000,rgb100,rgb010,rgb110,rgb001,rgb101,rgb011,rgb111;
     vec3_t dir000,dir100,dir010,dir110,dir001,dir101,dir011,dir111;
@@ -985,9 +821,6 @@ static void Lightgrid_FillRandomCell(lightcell_t *cell)
     VectorSet(cell->dir,0,0,1);
     cell->intensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) / 3.f;
     cell->ao = 1.f;
-    cell->emissive = 0.f;
-    memset(&cell->sh, 0, sizeof(cell->sh));
-    cell->sh_valid = false;
 }
 
 /* =====================================================================
@@ -1047,7 +880,6 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     raw->ny = ny;
     raw->nz = nz;
     raw->cellSize = cellSize;
-    raw->has_sh9 = (r_lightgrid_sh9.value != 0.f);
     VectorCopy(mins, raw->origin);
 
     size_t count = (size_t)nx * ny * nz;
@@ -1074,10 +906,9 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         VectorAdd(pos, jitter, pos);
 
         static const vec3_t luminance_weights = {0.299f, 0.587f, 0.114f};
-        const qboolean sh_enabled = r_lightgrid_sh9.value != 0.f;
 
-        memset(&cell->sh, 0, sizeof(cell->sh));
-        cell->sh_valid = sh_enabled;
+        cell->ao = 0.f;
+
 
         if (r_generate_lightgrid_test.value > 0.f)
         {
@@ -1141,14 +972,6 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                 if (R_SampleLightmapAtPoint(impact, hit_color))
                 {
                     VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
-
-                    if (sh_enabled)
-                    {
-                        sh9_color_t coeff = {{{0}}};
-                        SH9_EncodeDirectional(raydir, hit_color, &coeff);
-                        for (int c = 0; c < 9; c++)
-                            VectorAdd(cell->sh.c[c], coeff.c[c], cell->sh.c[c]);
-                    }
                 }
             }
 

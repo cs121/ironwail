@@ -30,7 +30,6 @@ extern cvar_t r_lightgrid_ktx_prefer;
 void Lightgrid_Init (void);
 void Lightgrid_Shutdown (void);
 void Lightgrid_Clear (void);
-qboolean Lightgrid_LoadFromBSPX (void *bspx_data, int bspx_len);
 lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw);
 lightgrid_raw_t *Lightgrid_GenerateRaw (const struct qmodel_s *model);
 void Lightgrid_BuildFallback (void);

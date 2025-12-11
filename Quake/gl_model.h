@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "modelgen.h"
 #include "spritegn.h"
+#include "../common/lightgrid.h"
 
 /*
 
@@ -94,7 +95,6 @@ typedef struct texture_s
 	textype_t			type;
 	struct gltexture_s	*gltexture; //johnfitz -- pointer to gltexture
 	struct gltexture_s	*fullbright; //johnfitz -- fullbright mask texture
-	struct gltexture_s	*emissive;   // emissive texture map (Quake 3 style glow)
 	int					anim_total;				// total tenths in sequence ( 0 = no)
 	int					anim_min, anim_max;		// time for this frame min <=time< max
 	struct texture_s	*anim_next;		// in the animation sequence
@@ -347,7 +347,6 @@ typedef struct {
 	} poseverttype;	//spike
 	struct gltexture_s	*gltextures[MAX_SKINS][4]; //johnfitz
 	struct gltexture_s	*fbtextures[MAX_SKINS][4]; //johnfitz
-	struct gltexture_s	*emissivetextures[MAX_SKINS][4];
 	int					texels[MAX_SKINS];	// only for player skins
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
@@ -471,16 +470,6 @@ typedef struct sh9_color_s
         vec3_t c[9];
 } sh9_color_t;
 
-typedef struct lightcell_s
-{
-        vec3_t rgb;
-        vec3_t dir;
-        float intensity;
-        float ao;
-        float emissive;
-        sh9_color_t sh;
-        qboolean sh_valid;
-} lightcell_t;
 
 typedef struct lightgrid_raw_s
 {
@@ -488,7 +477,6 @@ typedef struct lightgrid_raw_s
         float cellSize;
         vec3_t origin;       // world-space min corner
         lightcell_t *cells;  // array of nx*ny*nz
-        qboolean has_sh9;
 } lightgrid_raw_t;
 
 typedef struct bspx_lump_out_s
