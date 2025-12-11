@@ -421,6 +421,13 @@ static void Lightgrid_FillRandomCell(lightcell_t *cell)
    RAW Lightgrid generator (fallback)
    ===================================================================== */
 
+static void Lightgrid_ComputeDims(const vec3_t size, float cellSize, int *nx, int *ny, int *nz)
+{
+    *nx = q_max(1, q_min(LIGHTGRID_MAX_NX, (int)ceilf(size[0] / cellSize)));
+    *ny = q_max(1, q_min(LIGHTGRID_MAX_NY, (int)ceilf(size[1] / cellSize)));
+    *nz = q_max(1, q_min(LIGHTGRID_MAX_NZ, (int)ceilf(size[2] / cellSize)));
+}
+
 lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
 {
     if (!model)
@@ -448,11 +455,16 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     VectorCopy(model->maxs, maxs);
     VectorSubtract(maxs, mins, size);
 
-    const float cellSize = LIGHTGRID_STANDARD_CELLSIZE;
+    float cellSize = LIGHTGRID_STANDARD_CELLSIZE;
 
-    int nx = q_max(1, q_min(LIGHTGRID_MAX_NX, (int)ceilf(size[0] / cellSize)));
-    int ny = q_max(1, q_min(LIGHTGRID_MAX_NY, (int)ceilf(size[1] / cellSize)));
-    int nz = q_max(1, q_min(LIGHTGRID_MAX_NZ, (int)ceilf(size[2] / cellSize)));
+    int nx, ny, nz;
+    Lightgrid_ComputeDims(size, cellSize, &nx, &ny, &nz);
+
+    while ((size_t)nx * ny * nz > LIGHTGRID_MAX_CELLS)
+    {
+        cellSize *= 2.f;
+        Lightgrid_ComputeDims(size, cellSize, &nx, &ny, &nz);
+    }
 
         lightgrid_raw_t *raw =
         (lightgrid_raw_t*)Hunk_AllocName(sizeof(*raw), "lightgrid_raw");
