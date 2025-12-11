@@ -111,20 +111,89 @@ static float LG_FLittle(const void *p)
     return LittleFloat(f);
 }
 
-static qboolean Lightgrid_ValidateBSPX(int nx, int ny, int nz, int datasize)
+static size_t LightgridRAW_ComponentCount(unsigned int components)
 {
-    if (nx <= 0 || ny <= 0 || nz <= 0)
-        return false;
+    size_t count = 0;
 
-    size_t count = (size_t)nx * ny * nz;
+    if (components & LIGHTGRID_RAW_COMPONENT_RGB)
+        count += 3;
+    if (components & LIGHTGRID_RAW_COMPONENT_DIR)
+        count += 3;
+    if (components & LIGHTGRID_RAW_COMPONENT_INTENSITY)
+        count += 1;
+    if (components & LIGHTGRID_RAW_COMPONENT_AO)
+        count += 1;
+    if (components & LIGHTGRID_RAW_COMPONENT_EMISSIVE)
+        count += 1;
 
-    size_t expect =
-        sizeof(int)*3 +
-        sizeof(float) +
-        sizeof(vec3_t)*2 +
-        count * (sizeof(vec3_t)*2 + sizeof(float));
+    if (components & LIGHTGRID_RAW_COMPONENT_SH9)
+        return 0; // Not implemented yet
 
-    return (size_t)datasize == expect;
+    return count;
+}
+
+static size_t LightgridRAW_CellSizeBytes(unsigned int components, unsigned int encoding)
+{
+    size_t component_count = LightgridRAW_ComponentCount(components);
+    size_t component_size;
+
+    if (!component_count)
+        return 0;
+
+    switch (encoding)
+    {
+    case LIGHTGRID_RAW_ENCODING_FLOAT32:
+        component_size = sizeof(float);
+        break;
+    case LIGHTGRID_RAW_ENCODING_FLOAT16:
+        component_size = sizeof(unsigned short);
+        break;
+    default:
+        return 0;
+    }
+
+    return component_count * component_size;
+}
+
+static float LightgridRAW_HalfToFloat(unsigned short h)
+{
+    unsigned int sign = (unsigned int)(h & 0x8000) << 16;
+    unsigned int exp = (h >> 10) & 0x1f;
+    unsigned int mant = h & 0x3ff;
+    unsigned int f;
+
+    if (exp == 0)
+    {
+        if (mant == 0)
+        {
+            f = sign;
+        }
+        else
+        {
+            exp = 1;
+            while ((mant & 0x400) == 0)
+            {
+                mant <<= 1;
+                exp--;
+            }
+            mant &= ~0x400;
+            exp += (127 - 15);
+            mant <<= 13;
+            f = sign | (exp << 23) | mant;
+        }
+    }
+    else if (exp == 31)
+    {
+        f = sign | 0x7f800000 | (mant << 13);
+    }
+    else
+    {
+        exp = exp + (127 - 15);
+        mant = mant << 13;
+        f = sign | (exp << 23) | mant;
+    }
+
+    return *((float *)&f);
 }
 
 /* =====================================================================
@@ -138,62 +207,150 @@ qboolean Lightgrid_LoadFromBSPX(void *bspx_data, int bspx_len)
 
     Lightgrid_Clear();
 
-    if ((size_t)bspx_len < sizeof(int)*3 + sizeof(float) + sizeof(vec3_t)*2)
-        return false;
+    const byte *payload = (const byte *)bspx_data;
+    size_t payload_size = (size_t)bspx_len;
+    size_t header_size = sizeof(int) * 3 + sizeof(float) + sizeof(vec3_t);
+    unsigned int version = LIGHTGRID_RAW_VERSION_1;
+    unsigned int components = LIGHTGRID_RAW_COMPONENTS_BASE;
+    unsigned int encoding = LIGHTGRID_RAW_ENCODING_FLOAT32;
+    int nx = 0, ny = 0, nz = 0;
+    float cellSize = 0.f;
+    vec3_t origin = {0.f, 0.f, 0.f};
 
-    byte *data = (byte*)bspx_data;
-
-    int nx = LittleLong(((int*)data)[0]);
-    int ny = LittleLong(((int*)data)[1]);
-    int nz = LittleLong(((int*)data)[2]);
-
-    if (!Lightgrid_ValidateBSPX(nx, ny, nz, bspx_len))
-        return false;
-
-    float cellSize = LG_FLittle(data + sizeof(int)*3);
-
-    vec3_t mins, maxs;
-    float *fmins = (float*)(data + sizeof(int)*3 + sizeof(float));
-    float *fmaxs = (float*)(data + sizeof(int)*3 + sizeof(float) + sizeof(vec3_t));
-
-    for (int i = 0; i < 3; i++)
+    if (payload_size >= sizeof(lightgrid_raw_header_t))
     {
-        mins[i] = LittleFloat(fmins[i]);
-        maxs[i] = LittleFloat(fmaxs[i]);
+        const lightgrid_raw_header_t *hdr = (const lightgrid_raw_header_t *)payload;
+        if (LittleLong(hdr->magic) == LIGHTGRID_RAW_MAGIC)
+        {
+            version = LittleLong(hdr->version);
+            if (version != LIGHTGRID_RAW_VERSION_2)
+                return false;
+
+            components = LittleLong(hdr->components);
+            encoding = LittleLong(hdr->encoding);
+            nx = LittleLong(hdr->nx);
+            ny = LittleLong(hdr->ny);
+            nz = LittleLong(hdr->nz);
+            cellSize = LittleFloat(hdr->cellSize);
+            VectorCopy(hdr->origin, origin);
+            origin[0] = LittleFloat(origin[0]);
+            origin[1] = LittleFloat(origin[1]);
+            origin[2] = LittleFloat(origin[2]);
+            header_size = sizeof(*hdr);
+        }
     }
 
-    lightgrid_t *lg = Lightgrid_Alloc(nx, ny, nz, cellSize, mins, maxs);
+    if (version == LIGHTGRID_RAW_VERSION_1)
+    {
+        if (payload_size < header_size)
+            return false;
+
+        nx = LittleLong(((int *)payload)[0]);
+        ny = LittleLong(((int *)payload)[1]);
+        nz = LittleLong(((int *)payload)[2]);
+
+        cellSize = LG_FLittle(payload + sizeof(int) * 3);
+        memcpy(origin, payload + sizeof(int) * 3 + sizeof(float), sizeof(vec3_t));
+        origin[0] = LittleFloat(origin[0]);
+        origin[1] = LittleFloat(origin[1]);
+        origin[2] = LittleFloat(origin[2]);
+    }
+
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return false;
+
+    if (cellSize <= 0.f)
+        return false;
+
+    if (version == LIGHTGRID_RAW_VERSION_2 &&
+        (components & LIGHTGRID_RAW_COMPONENTS_BASE) != LIGHTGRID_RAW_COMPONENTS_BASE)
+        return false;
+
+    size_t count = (size_t)nx * (size_t)ny * (size_t)nz;
+    if (!count || count > LIGHTGRID_MAX_CELLS || count > SIZE_MAX / sizeof(lightcell_t))
+        return false;
+
+    if (payload_size < header_size)
+        return false;
+    payload_size -= header_size;
+
+    const size_t cell_stride = (version == LIGHTGRID_RAW_VERSION_1)
+        ? sizeof(vec3_t) * 2 + sizeof(float)
+        : LightgridRAW_CellSizeBytes(components, encoding);
+    if (!cell_stride || payload_size < cell_stride * count)
+        return false;
+
+    lightgrid_raw_t *raw = (lightgrid_raw_t *)Z_Malloc(sizeof(*raw));
+    if (!raw)
+        return false;
+    memset(raw, 0, sizeof(*raw));
+
+    raw->cells = (lightcell_t *)Z_Malloc(count * sizeof(lightcell_t));
+    if (!raw->cells)
+    {
+        Z_Free(raw);
+        return false;
+    }
+
+    raw->nx = nx;
+    raw->ny = ny;
+    raw->nz = nz;
+    raw->cellSize = cellSize;
+    VectorCopy(origin, raw->origin);
+
+    const byte *cell_bytes = payload + header_size;
+    for (size_t i = 0; i < count; i++)
+    {
+        lightcell_t *cell = &raw->cells[i];
+        const byte *component_ptr = cell_bytes;
+
+        cell->ao = 1.f;
+        cell->emissive = 0.f;
+        cell->sh_valid = false;
+
+#define READ_COMPONENT_FLOAT(out)                     \
+        do {                                          \
+            if (encoding == LIGHTGRID_RAW_ENCODING_FLOAT16) \
+            {                                         \
+                unsigned short half;                  \
+                memcpy(&half, component_ptr, sizeof(half)); \
+                half = LittleShort(half);             \
+                out = LightgridRAW_HalfToFloat(half); \
+                component_ptr += sizeof(unsigned short); \
+            }                                         \
+            else                                      \
+            {                                         \
+                memcpy(&out, component_ptr, sizeof(float)); \
+                out = LittleFloat(out);               \
+                component_ptr += sizeof(float);       \
+            }                                         \
+        } while (0)
+
+        READ_COMPONENT_FLOAT(cell->rgb[0]);
+        READ_COMPONENT_FLOAT(cell->rgb[1]);
+        READ_COMPONENT_FLOAT(cell->rgb[2]);
+        READ_COMPONENT_FLOAT(cell->dir[0]);
+        READ_COMPONENT_FLOAT(cell->dir[1]);
+        READ_COMPONENT_FLOAT(cell->dir[2]);
+        READ_COMPONENT_FLOAT(cell->intensity);
+
+        if (components & LIGHTGRID_RAW_COMPONENT_AO)
+            READ_COMPONENT_FLOAT(cell->ao);
+
+        if (components & LIGHTGRID_RAW_COMPONENT_EMISSIVE)
+            READ_COMPONENT_FLOAT(cell->emissive);
+
+        cell_bytes += cell_stride;
+#undef READ_COMPONENT_FLOAT
+    }
+
+    lightgrid_t *lg = Lightgrid_FromRaw(raw);
+
+    Z_Free(raw->cells);
+    Z_Free(raw);
+
     if (!lg)
         return false;
-
-    int count = nx * ny * nz;
-    data += sizeof(int)*3 + sizeof(float) + sizeof(vec3_t)*2;
-
-    for (int i = 0; i < count; i++)
-    {
-        float col[3], dir[3], intensity;
-
-        col[0] = LG_FLittle(data + 0);
-        col[1] = LG_FLittle(data + 4);
-        col[2] = LG_FLittle(data + 8);
-        data += sizeof(vec3_t);
-
-        dir[0] = LG_FLittle(data + 0);
-        dir[1] = LG_FLittle(data + 4);
-        dir[2] = LG_FLittle(data + 8);
-        data += sizeof(vec3_t);
-
-        memcpy(&intensity, data, sizeof(float));
-        intensity = LittleFloat(intensity);
-        data += sizeof(float);
-
-        VectorCopy(col, lg->probes[i].rgb);
-        VectorCopy(dir, lg->probes[i].dir);
-        lg->probes[i].intensity = intensity;
-
-        if (VectorNormalize(lg->probes[i].dir) == 0)
-            VectorSet(lg->probes[i].dir, 0,0,1);
-    }
 
     current_lightgrid = lg;
     cl.lightgrid      = lg;
@@ -826,6 +983,8 @@ static void Lightgrid_FillRandomCell(lightcell_t *cell)
 
     VectorSet(cell->dir,0,0,1);
     cell->intensity = (cell->rgb[0] + cell->rgb[1] + cell->rgb[2]) / 3.f;
+    cell->ao = 1.f;
+    cell->emissive = 0.f;
     memset(&cell->sh, 0, sizeof(cell->sh));
     cell->sh_valid = false;
 }
