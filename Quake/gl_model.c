@@ -3508,33 +3508,29 @@ static void Lightgrid_Save_f (void)
 
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
-        lightgrid_t *lg;
-        bspx_lump_t l;
+	lightgrid_t *lg;
+	char path[MAX_QPATH];
 
-        (void)mod;
+	(void)lump;
+	(void)lumpsize;
 
-        Lightgrid_Free(cl.lightgrid);
-        cl.lightgrid = NULL;
+	Lightgrid_Free(cl.lightgrid);
+	cl.lightgrid = NULL;
 
 #if USE_KTX2_LIGHTGRID
-        if (r_lightgrid_ktx_enable.value)
-        {
-                char base[MAX_QPATH];
-                COM_StripExtension(mod->name, base, sizeof(base));
-                if (Lightgrid_LoadFromKTX2(COM_SkipPath(base)))
-                        return true;
-        }
+	if (r_lightgrid_ktx_enable.value)
+	{
+		char base[MAX_QPATH];
+		COM_StripExtension(mod->name, base, sizeof(base));
+		if (Lightgrid_LoadFromKTX2(COM_SkipPath(base)))
+			return true;
+	}
 #endif
 
-        if (!lump || lumpsize <= 0)
-                return false;
+	COM_StripExtension(mod->name, path, sizeof(path));
+	COM_DefaultExtension(path, ".lgrd");
 
-        l.data = lump;
-        l.size = (size_t)lumpsize;
-
-    lg = Lightgrid_LoadFromBSPX_FTE(&l);
-    if (!lg)
-        lg = Lightgrid_LoadFromBSPX_Octree(&l);
+	lg = Lightgrid_LoadExternal(path);
 	if (!lg)
 		return false;
 
