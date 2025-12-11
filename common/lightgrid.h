@@ -2,12 +2,16 @@
 
 #include "quakedef.h"
 
+typedef struct sh9_color_s {
+    vec3_t c[9];
+} sh9_color_t;
+
 typedef struct lightcell_s {
     vec3_t rgb;
     vec3_t dir;
     float intensity;
     float ao;
-    // placeholder for future SH9
+    sh9_color_t *sh9; // NULL unless Lightgrid V3 allocates it
 } lightcell_t;
 typedef lightcell_t lightgrid_probe_t;
 
@@ -31,6 +35,14 @@ typedef struct lightgrid_s {
     GLuint tex_ao;
 } lightgrid_t;
 
+typedef enum lightgrid_component_e {
+    LIGHTGRID_COMPONENT_RGB = (1u << 0),
+    LIGHTGRID_COMPONENT_DIR = (1u << 1),
+    LIGHTGRID_COMPONENT_INTENSITY = (1u << 2),
+    LIGHTGRID_COMPONENT_AO = (1u << 3),
+    LIGHTGRID_COMPONENT_SH9_FLAG = (1u << 8) // Future V3 SH9 data
+} lightgrid_component_t;
+
 typedef enum lightgrid_source_e {
     LIGHTGRID_SRC_NONE = 0,
     LIGHTGRID_SRC_V2,
@@ -42,5 +54,6 @@ typedef enum lightgrid_source_e {
 lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_t mins, const vec3_t maxs);
 lightgrid_t *Lightgrid_LoadV2(const char *path);
 lightgrid_t *Lightgrid_LoadKTX2(const char *path);
+lightgrid_t *Lightgrid_LoadV3(const char *path);
 lightgrid_t *Lightgrid_LoadExternal(const char *path);
 void Lightgrid_Free(lightgrid_t *lg);

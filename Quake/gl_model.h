@@ -465,12 +465,6 @@ typedef struct lightgrid_raw_header_s
         vec3_t origin;       // world-space min corner
 } lightgrid_raw_header_t;
 
-typedef struct sh9_color_s
-{
-        vec3_t c[9];
-} sh9_color_t;
-
-
 typedef struct lightgrid_raw_s
 {
         int nx, ny, nz;
