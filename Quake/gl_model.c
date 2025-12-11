@@ -3219,20 +3219,43 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
         r_lightgrid.value = 0.f;
         r_lightgrid_force.value = 0.f;
 
-	VectorCopy (mod->mins, mins);
-	VectorCopy (mod->maxs, maxs);
+        VectorCopy (mod->mins, mins);
+        VectorCopy (mod->maxs, maxs);
 
-	(void)cellY;
-	(void)cellZ;
-	cellsize = LIGHTGRID_STANDARD_CELLSIZE;
-        nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
-        ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
-        nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
+        /*
+         * The caller passes the desired cell sizes, but we historically ignored them
+         * and always used LIGHTGRID_STANDARD_CELLSIZE. Honour the request while also
+         * clamping the number of cells so generation does not explode on large maps.
+         *
+         * This mirrors the logic used by the runtime fallback in gl_lightgrid.c to
+         * ensure we stay below LIGHTGRID_MAX_CELLS instead of spinning forever when
+         * the grid would be too dense.
+         */
+        cellsize = cellX;
+        (void)cellY;
+        (void)cellZ;
+        {
+                vec3_t size;
 
-	count = (size_t)nx * (size_t)ny * (size_t)nz;
-	if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
-	{
-		Con_Warning ("lightgrid too large to generate (%dx%dx%d)\n", nx, ny, nz);
+                VectorSubtract (maxs, mins, size);
+
+                nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf (size[0] / cellsize)));
+                ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf (size[1] / cellsize)));
+                nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf (size[2] / cellsize)));
+
+                while ((size_t)nx * (size_t)ny * (size_t)nz > LIGHTGRID_MAX_CELLS)
+                {
+                        cellsize *= 2.f;
+                        nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf (size[0] / cellsize)));
+                        ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf (size[1] / cellsize)));
+                        nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf (size[2] / cellsize)));
+                }
+        }
+
+        count = (size_t)nx * (size_t)ny * (size_t)nz;
+        if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
+        {
+                Con_Warning ("lightgrid too large to generate (%dx%dx%d)\n", nx, ny, nz);
 		raw = NULL;
 		goto restore_state;
 	}
