@@ -789,6 +789,7 @@ lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw)
 
         VectorCopy(dir, lg->probes[i].dir);
         lg->probes[i].intensity = cell->intensity;
+        lg->probes[i].emissive = cell->emissive;
     }
 
     lg->source = LIGHTGRID_SRC_RAW;

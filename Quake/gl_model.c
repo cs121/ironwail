@@ -2374,6 +2374,11 @@ static qboolean Lightgrid_SampleProbeAtPos (const lightgrid_t *lg, const vec3_t 
                 Lerp (Lerp (c001->intensity, c101->intensity, fx), Lerp (c011->intensity, c111->intensity, fx), fy),
                 fz);
 
+        out_probe->emissive = Lerp (
+                Lerp (Lerp (c000->emissive, c100->emissive, fx), Lerp (c010->emissive, c110->emissive, fx), fy),
+                Lerp (Lerp (c001->emissive, c101->emissive, fx), Lerp (c011->emissive, c111->emissive, fx), fy),
+                fz);
+
         {
                 vec3_t d00, d10, d01, d11, d0, d1, dir;
 
@@ -2458,7 +2463,7 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
                                 VectorCopy (probe.dir, cell->dir);
                                 cell->intensity = probe.intensity;
                                 cell->ao = 1.f;
-                                cell->emissive = 0.f;
+                                cell->emissive = probe.emissive;
                         }
                 }
         }
@@ -3018,6 +3023,79 @@ static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos
         }
 }
 
+static qboolean LightgridRAW_TextureIsEmissive (const texture_t *tx)
+{
+        if (!tx)
+                return false;
+
+        if (tx->emissive)
+                return true;
+
+        if (q_strcasestr (tx->name, "lava") || q_strcasestr (tx->name, "light") || q_strcasestr (tx->name, "glow"))
+                return true;
+
+        return false;
+}
+
+static float LightgridRAW_DistanceToSurface (const msurface_t *surf, const vec3_t pos)
+{
+        float dx = 0.f, dy = 0.f, dz = 0.f;
+
+        if (!surf)
+                return FLT_MAX;
+
+        if (pos[0] < surf->mins[0])
+                dx = surf->mins[0] - pos[0];
+        else if (pos[0] > surf->maxs[0])
+                dx = pos[0] - surf->maxs[0];
+
+        if (pos[1] < surf->mins[1])
+                dy = surf->mins[1] - pos[1];
+        else if (pos[1] > surf->maxs[1])
+                dy = pos[1] - surf->maxs[1];
+
+        if (pos[2] < surf->mins[2])
+                dz = surf->mins[2] - pos[2];
+        else if (pos[2] > surf->maxs[2])
+                dz = pos[2] - surf->maxs[2];
+
+        return sqrtf (dx * dx + dy * dy + dz * dz);
+}
+
+static float LightgridRAW_EstimateEmissive (qmodel_t *mod, const vec3_t pos)
+{
+        float emissive = 0.f;
+        const float radius = 128.f;
+
+        if (!mod || !mod->surfaces || !mod->textures || mod->numsurfaces <= 0)
+                return emissive;
+
+        for (int i = 0; i < mod->numsurfaces; i++)
+        {
+                const msurface_t *surf = &mod->surfaces[i];
+                const mtexinfo_t *info = surf->texinfo;
+                texture_t *tx;
+                float dist, strength;
+
+                if (!info || info->texnum < 0 || info->texnum >= mod->numtextures)
+                        continue;
+
+                tx = mod->textures[info->texnum];
+                if (!LightgridRAW_TextureIsEmissive (tx))
+                        continue;
+
+                dist = LightgridRAW_DistanceToSurface (surf, pos);
+                if (dist >= radius)
+                        continue;
+
+                strength = 1.f - (dist / radius);
+                if (strength > emissive)
+                        emissive = strength;
+        }
+
+        return emissive;
+}
+
 static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_static_light_t *lights, int num_lights, vec3_t pos, lightcell_t *cell)
 {
         int i;
@@ -3045,11 +3123,12 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
         /* Preserve the baked sample and build on top of it with static/dynamic lights */
         VectorClear (cell->dir);
         cell->intensity = 0.f;
+        cell->emissive = 0.f;
 
-	if (!mod)
-	{
-		cell->dir[0] = cell->dir[1] = 0.f;
-		cell->dir[2] = 1.f;
+        if (!mod)
+        {
+                cell->dir[0] = cell->dir[1] = 0.f;
+                cell->dir[2] = 1.f;
 		return;
 	}
 
@@ -3087,11 +3166,13 @@ static void LightgridRAW_ComputeLightingAtPoint (qmodel_t *mod, const lightgrid_
 	{
 		VectorCopy (dirsum, cell->dir);
 	}
-	else
-	{
-		cell->dir[0] = cell->dir[1] = 0.f;
-		cell->dir[2] = 1.f;
-	}
+        else
+        {
+                cell->dir[0] = cell->dir[1] = 0.f;
+                cell->dir[2] = 1.f;
+        }
+
+        cell->emissive = LightgridRAW_EstimateEmissive (mod, pos);
 }
 
 static float LightgridRAW_Random01 (void)
@@ -3254,8 +3335,8 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
         byte *buffer;
         byte *cell_out;
         size_t count;
-        const unsigned int components = LIGHTGRID_RAW_COMPONENTS_BASE;
-        const unsigned int encoding = LIGHTGRID_RAW_ENCODING_FLOAT16;
+        const unsigned int components = LIGHTGRID_RAW_COMPONENTS_BASE | LIGHTGRID_RAW_COMPONENT_EMISSIVE;
+        const unsigned int encoding = LIGHTGRID_RAW_ENCODING_FLOAT32;
 
         if (!mod || !out_buffer || !out_size)
                 return false;
@@ -3288,8 +3369,11 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
         memset (hdr, 0, header_size);
         hdr->magic = LittleLong (LIGHTGRID_RAW_MAGIC);
         hdr->version = LittleLong (LIGHTGRID_RAW_VERSION_2);
+        hdr->flags = LittleLong (0u);
         hdr->components = LittleLong (components);
         hdr->encoding = LittleLong (encoding);
+        hdr->sh_order = LittleLong (0u);
+        hdr->sh_coeffs = LittleLong (0u);
         hdr->nx = LittleLong (raw->nx);
         hdr->ny = LittleLong (raw->ny);
         hdr->nz = LittleLong (raw->nz);
@@ -3330,6 +3414,7 @@ static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size
                 WRITE_COMPONENT_FLOAT (cell->dir[1]);
                 WRITE_COMPONENT_FLOAT (cell->dir[2]);
                 WRITE_COMPONENT_FLOAT (cell->intensity);
+                WRITE_COMPONENT_FLOAT (cell->emissive);
 
                 Con_DPrintf ("lightgrid cell (%d, %d, %d): rgb=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f) intensity=%.3f\n",
                         x, y, z,
