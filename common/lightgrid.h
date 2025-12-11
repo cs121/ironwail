@@ -7,6 +7,7 @@ typedef struct lightgrid_probe_s {
     float rgb[3];
     float dir[3];
     float intensity;
+    float emissive;
 } lightgrid_probe_t;
 
 #define LIGHTGRID_STANDARD_CELLSIZE 32.f
