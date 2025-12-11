@@ -82,22 +82,103 @@ void Lightgrid_Shutdown(void)
 
 void Lightgrid_Clear(void)
 {
+    GLuint tex[4];
+    int tex_count = 0;
+
     if (current_lightgrid)
     {
-#if USE_KTX2_LIGHTGRID
-        if (current_lightgrid->tex_color3d || current_lightgrid->tex_dir3d)
-        {
-            GLuint tex[2] = { current_lightgrid->tex_color3d, current_lightgrid->tex_dir3d };
-            glDeleteTextures(2, tex);
-            current_lightgrid->tex_color3d = 0;
-            current_lightgrid->tex_dir3d = 0;
-        }
-#endif
+        if (current_lightgrid->tex_color3d)
+            tex[tex_count++] = current_lightgrid->tex_color3d;
+        if (current_lightgrid->tex_dir3d)
+            tex[tex_count++] = current_lightgrid->tex_dir3d;
+        if (current_lightgrid->tex_intensity)
+            tex[tex_count++] = current_lightgrid->tex_intensity;
+        if (current_lightgrid->tex_ao)
+            tex[tex_count++] = current_lightgrid->tex_ao;
+
+        if (tex_count)
+            glDeleteTextures(tex_count, tex);
+
+        current_lightgrid->tex_color3d = 0;
+        current_lightgrid->tex_dir3d = 0;
+        current_lightgrid->tex_intensity = 0;
+        current_lightgrid->tex_ao = 0;
 
         Lightgrid_Free(current_lightgrid);
     }
+
     current_lightgrid = NULL;
+    cl.lightgrid = NULL;
     q_strlcpy(lightgrid_source, "NONE", sizeof(lightgrid_source));
+}
+
+static void Lightgrid_UploadTexture3D(GLuint *tex, GLenum internal_format, GLenum format, const float *payload, int nx, int ny, int nz)
+{
+    if (!*tex)
+        glGenTextures(1, tex);
+
+    glBindTexture(GL_TEXTURE_3D, *tex);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    GL_TexImage3DFunc(GL_TEXTURE_3D, 0, internal_format, nx, ny, nz, 0, format, GL_FLOAT, payload);
+}
+
+void Lightgrid_UploadToGPU(lightgrid_t *lg)
+{
+    float *color_payload = NULL;
+    float *dir_payload = NULL;
+    float *intensity_payload = NULL;
+    float *ao_payload = NULL;
+    size_t count;
+
+    if (!lg)
+        return;
+
+    count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
+    if (count == 0 || count > LIGHTGRID_MAX_CELLS)
+        return;
+
+    color_payload = (float *)malloc(count * 3 * sizeof(float));
+    dir_payload = (float *)malloc(count * 3 * sizeof(float));
+    intensity_payload = (float *)malloc(count * sizeof(float));
+    ao_payload = (float *)malloc(count * sizeof(float));
+
+    if (!color_payload || !dir_payload || !intensity_payload || !ao_payload)
+        goto done;
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const lightcell_t *cell = &lg->probes[i];
+
+        color_payload[i * 3 + 0] = cell->rgb[0];
+        color_payload[i * 3 + 1] = cell->rgb[1];
+        color_payload[i * 3 + 2] = cell->rgb[2];
+
+        dir_payload[i * 3 + 0] = cell->dir[0];
+        dir_payload[i * 3 + 1] = cell->dir[1];
+        dir_payload[i * 3 + 2] = cell->dir[2];
+
+        intensity_payload[i] = cell->intensity;
+        ao_payload[i] = cell->ao;
+    }
+
+    Lightgrid_UploadTexture3D(&lg->tex_color3d, GL_RGB16F, GL_RGB, color_payload, lg->nx, lg->ny, lg->nz);
+    Lightgrid_UploadTexture3D(&lg->tex_dir3d, GL_RGB16F, GL_RGB, dir_payload, lg->nx, lg->ny, lg->nz);
+    Lightgrid_UploadTexture3D(&lg->tex_intensity, GL_R16F, GL_RED, intensity_payload, lg->nx, lg->ny, lg->nz);
+    Lightgrid_UploadTexture3D(&lg->tex_ao, GL_R16F, GL_RED, ao_payload, lg->nx, lg->ny, lg->nz);
+
+done:
+    if (color_payload)
+        free(color_payload);
+    if (dir_payload)
+        free(dir_payload);
+    if (intensity_payload)
+        free(intensity_payload);
+    if (ao_payload)
+        free(ao_payload);
 }
 
 /* =====================================================================
@@ -430,20 +511,6 @@ static qboolean Lightgrid_LoadKTXPayload(const char *path, int nx, int ny, int n
     return true;
 }
 
-static void Lightgrid_Upload3D(GLuint *tex, const float *payload, int nx, int ny, int nz)
-{
-    if (!*tex)
-        glGenTextures(1, tex);
-
-    glBindTexture(GL_TEXTURE_3D, *tex);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    GL_TexImage3DFunc(GL_TEXTURE_3D, 0, GL_RGBA32F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, payload);
-}
-
 qboolean Lightgrid_LoadFromKTX2(const char *mapname)
 {
     lightgrid_meta_t meta;
@@ -496,13 +563,9 @@ qboolean Lightgrid_LoadFromKTX2(const char *mapname)
             VectorSet(p->dir, 0, 0, 1);
     }
 
-    Lightgrid_Upload3D(&lg->tex_color3d, color_payload, meta.nx, meta.ny, meta.nz);
-    Lightgrid_Upload3D(&lg->tex_dir3d, dir_payload, meta.nx, meta.ny, meta.nz);
-
-    current_lightgrid = lg;
-    cl.lightgrid = lg;
     lg->source = LIGHTGRID_SRC_KTX2;
-    q_strlcpy(lightgrid_source, "KTX2", sizeof(lightgrid_source));
+
+    Lightgrid_Set(lg);
 
     free(color_payload);
     free(dir_payload);
@@ -1029,8 +1092,7 @@ void Lightgrid_BuildFallback(void)
         return;
     }
 
-    current_lightgrid = lg;
-    cl.lightgrid      = lg;
+    Lightgrid_Set(lg);
 
 #if USE_KTX2_LIGHTGRID
     if (r_lightgrid_ktx_enable.value && r_lightgrid_ktx_export.value)
@@ -1079,6 +1141,38 @@ static void Lightgrid_AddDlights(const vec3_t pos, vec3_t color, vec3_t dirsum)
 /* =====================================================================
    Public API
    ===================================================================== */
+
+void Lightgrid_Set(lightgrid_t *lg)
+{
+    Lightgrid_Clear();
+
+    if (!lg)
+        return;
+
+    Lightgrid_UploadToGPU(lg);
+
+    current_lightgrid = lg;
+    cl.lightgrid = lg;
+
+    switch (lg->source)
+    {
+    case LIGHTGRID_SRC_KTX2:
+        q_strlcpy(lightgrid_source, "KTX2", sizeof(lightgrid_source));
+        break;
+    case LIGHTGRID_SRC_V2:
+        q_strlcpy(lightgrid_source, "V2", sizeof(lightgrid_source));
+        break;
+    case LIGHTGRID_SRC_OCTREE:
+        q_strlcpy(lightgrid_source, "OCTREE", sizeof(lightgrid_source));
+        break;
+    case LIGHTGRID_SRC_RAW:
+        q_strlcpy(lightgrid_source, "RAW", sizeof(lightgrid_source));
+        break;
+    default:
+        q_strlcpy(lightgrid_source, "UNKNOWN", sizeof(lightgrid_source));
+        break;
+    }
+}
 
 const lightgrid_t *Lightgrid_Get(void)
 {
