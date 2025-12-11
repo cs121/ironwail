@@ -18,6 +18,47 @@ typedef struct lightgrid_v2_header_s
     vec3_t origin;
 } lightgrid_v2_header_t;
 
+static float LightgridRAW_HalfToFloat(unsigned short h)
+{
+    unsigned int sign = (unsigned int)(h & 0x8000) << 16;
+    unsigned int exp = (h >> 10) & 0x1f;
+    unsigned int mant = h & 0x3ff;
+    unsigned int f;
+
+    if (exp == 0)
+    {
+        if (mant == 0)
+        {
+            f = sign;
+        }
+        else
+        {
+            exp = 1;
+            while ((mant & 0x400) == 0)
+            {
+                mant <<= 1;
+                exp--;
+            }
+            mant &= ~0x400;
+            exp += (127 - 15);
+            mant <<= 13;
+            f = sign | (exp << 23) | mant;
+        }
+    }
+    else if (exp == 31)
+    {
+        f = sign | 0x7f800000 | (mant << 13);
+    }
+    else
+    {
+        exp = exp + (127 - 15);
+        mant = mant << 13;
+        f = sign | (exp << 23) | mant;
+    }
+
+    return *((float *)&f);
+}
+
 lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_t mins, const vec3_t maxs)
 {
     if (nx <= 0 || ny <= 0 || nz <= 0)
