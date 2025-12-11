@@ -23,6 +23,9 @@ extern cvar_t r_lightgrid_surface_weight;
 extern cvar_t r_lightgrid_bounce_factor;
 extern cvar_t r_lightgrid_bounce_rays;
 extern cvar_t r_lightgrid_sh9;
+extern cvar_t r_lightgrid_ktx_enable;
+extern cvar_t r_lightgrid_ktx_export;
+extern cvar_t r_lightgrid_ktx_prefer;
 
 void Lightgrid_Init (void);
 void Lightgrid_Shutdown (void);
@@ -36,4 +39,9 @@ const lightgrid_t *Lightgrid_Get (void);
 void Lightgrid_SetSource (const char *name);
 const char *Lightgrid_GetSource (void);
 void SH9_EncodeDirectional(vec3_t dir, vec3_t rgb, sh9_color_t *out);
+
+#if USE_KTX2_LIGHTGRID
+qboolean Lightgrid_LoadFromKTX2(const char *mapname);
+qboolean Lightgrid_ExportToKTX2(const lightgrid_t *grid, const char *mapname);
+#endif
 

@@ -29,6 +29,11 @@ cvar_t r_lightgrid_surface_weight = { "r_lightgrid_surface_weight", "0", CVAR_AR
 cvar_t r_lightgrid_bounce_factor = { "r_lightgrid_bounce_factor", "0.5", CVAR_ARCHIVE };
 cvar_t r_lightgrid_bounce_rays = { "r_lightgrid_bounce_rays", "16", CVAR_ARCHIVE };
 cvar_t r_lightgrid_sh9 = { "r_lightgrid_sh9", "0", CVAR_ARCHIVE };
+#if USE_KTX2_LIGHTGRID
+cvar_t r_lightgrid_ktx_enable = { "r_lightgrid_ktx_enable", "1", CVAR_ARCHIVE };
+cvar_t r_lightgrid_ktx_export = { "r_lightgrid_ktx_export", "0", CVAR_ARCHIVE };
+cvar_t r_lightgrid_ktx_prefer = { "r_lightgrid_ktx_prefer", "0", CVAR_ARCHIVE };
+#endif
 
 static qboolean R_IsFinite (float v)
 {
@@ -62,6 +67,11 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_bounce_factor);
     Cvar_RegisterVariable(&r_lightgrid_bounce_rays);
     Cvar_RegisterVariable(&r_lightgrid_sh9);
+#if USE_KTX2_LIGHTGRID
+    Cvar_RegisterVariable(&r_lightgrid_ktx_enable);
+    Cvar_RegisterVariable(&r_lightgrid_ktx_export);
+    Cvar_RegisterVariable(&r_lightgrid_ktx_prefer);
+#endif
     Lightgrid_Clear();
 }
 
@@ -72,7 +82,20 @@ void Lightgrid_Shutdown(void)
 
 void Lightgrid_Clear(void)
 {
-    Lightgrid_Free(current_lightgrid);
+    if (current_lightgrid)
+    {
+#if USE_KTX2_LIGHTGRID
+        if (current_lightgrid->tex_color3d || current_lightgrid->tex_dir3d)
+        {
+            GLuint tex[2] = { current_lightgrid->tex_color3d, current_lightgrid->tex_dir3d };
+            glDeleteTextures(2, tex);
+            current_lightgrid->tex_color3d = 0;
+            current_lightgrid->tex_dir3d = 0;
+        }
+#endif
+
+        Lightgrid_Free(current_lightgrid);
+    }
     current_lightgrid = NULL;
     q_strlcpy(lightgrid_source, "NONE", sizeof(lightgrid_source));
 }
@@ -174,10 +197,399 @@ qboolean Lightgrid_LoadFromBSPX(void *bspx_data, int bspx_len)
 
     current_lightgrid = lg;
     cl.lightgrid      = lg;
+    lg->source        = LIGHTGRID_SRC_OCTREE;
     q_strlcpy(lightgrid_source, "OCTREE", sizeof(lightgrid_source));
 
     return true;
 }
+
+/* =====================================================================
+   KTX2 loader/export helpers
+   ===================================================================== */
+
+#if USE_KTX2_LIGHTGRID
+
+typedef struct lightgrid_meta_s {
+    int32_t nx, ny, nz;
+    float cellsize;
+    vec3_t mins;
+    vec3_t maxs;
+} lightgrid_meta_t;
+
+typedef struct {
+    uint32_t width, height, depth;
+    uint32_t level_count;
+    uint64_t dfd_offset, dfd_length;
+    uint64_t kvd_offset, kvd_length;
+    uint64_t sgd_offset, sgd_length;
+    uint32_t vkformat;
+    struct {
+        uint64_t offset;
+        uint64_t length;
+        uint64_t uncompressed;
+    } levels[8];
+} lightgrid_ktx2_header_t;
+
+static uint32_t LG_ReadU32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint64_t LG_ReadU64(const uint8_t *p)
+{
+    return (uint64_t)p[0] | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) |
+           ((uint64_t)p[3] << 24) | ((uint64_t)p[4] << 32) |
+           ((uint64_t)p[5] << 40) | ((uint64_t)p[6] << 48) |
+           ((uint64_t)p[7] << 56);
+}
+
+static void LG_WriteU32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+}
+
+static void LG_WriteU64(uint8_t *p, uint64_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+    p[4] = (uint8_t)((v >> 32) & 0xff);
+    p[5] = (uint8_t)((v >> 40) & 0xff);
+    p[6] = (uint8_t)((v >> 48) & 0xff);
+    p[7] = (uint8_t)((v >> 56) & 0xff);
+}
+
+static qboolean Lightgrid_ParseKTX2(const uint8_t *data, size_t size, lightgrid_ktx2_header_t *out)
+{
+    static const uint8_t magic[12] = {0xAB, 'K', 'T', 'X', ' ', '2', '0', 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
+    const size_t header_size = 100;
+    const size_t level_index_size = sizeof(uint64_t) * 3;
+    size_t level_table_size;
+
+    if (!data || size < header_size)
+        return false;
+
+    if (memcmp(data, magic, sizeof(magic)) != 0)
+        return false;
+
+    memset(out, 0, sizeof(*out));
+
+    out->vkformat = LG_ReadU32(data + 12);
+    /* typeSize is ignored (data assumed tightly packed float32) */
+    out->width = LG_ReadU32(data + 12 + 4 * 2);
+    out->height = LG_ReadU32(data + 12 + 4 * 3);
+    out->depth = LG_ReadU32(data + 12 + 4 * 4);
+    out->level_count = LG_ReadU32(data + 12 + 4 * 7);
+
+    out->dfd_offset = LG_ReadU64(data + 12 + 4 * 8);
+    out->dfd_length = LG_ReadU64(data + 12 + 4 * 8 + 8 * 1);
+    out->kvd_offset = LG_ReadU64(data + 12 + 4 * 8 + 8 * 2);
+    out->kvd_length = LG_ReadU64(data + 12 + 4 * 8 + 8 * 3);
+    out->sgd_offset = LG_ReadU64(data + 12 + 4 * 8 + 8 * 4);
+    out->sgd_length = LG_ReadU64(data + 12 + 4 * 8 + 8 * 5);
+
+    if (out->level_count == 0 || out->level_count > (int)(sizeof(out->levels) / sizeof(out->levels[0])))
+        return false;
+
+    level_table_size = out->level_count * level_index_size;
+    if (header_size + level_table_size > size)
+        return false;
+
+    for (uint32_t i = 0; i < out->level_count; i++)
+    {
+        const uint8_t *entry = data + header_size + i * level_index_size;
+        uint64_t off = LG_ReadU64(entry + 0);
+        uint64_t len = LG_ReadU64(entry + 8);
+        uint64_t uncompressed = LG_ReadU64(entry + 16);
+
+        if (off > size || len > size - off)
+            return false;
+
+        out->levels[i].offset = off;
+        out->levels[i].length = len;
+        out->levels[i].uncompressed = uncompressed;
+    }
+
+    return true;
+}
+
+static qboolean Lightgrid_WriteKTX2(const char *path, const float *payload, size_t payload_floats, int nx, int ny, int nz)
+{
+    const size_t header_size = 100;
+    const size_t level_index_size = sizeof(uint64_t) * 3;
+    const size_t level_count = 1;
+    const size_t level_table_size = level_count * level_index_size;
+    size_t data_offset = header_size + level_table_size;
+    const size_t payload_bytes = payload_floats * sizeof(float);
+    size_t total_size;
+    uint8_t *buffer;
+
+    data_offset = (data_offset + 7) & ~((size_t)7); /* align payload to 8 bytes */
+    total_size = data_offset + payload_bytes;
+
+    buffer = (uint8_t *)malloc(total_size);
+    if (!buffer)
+        return false;
+
+    memset(buffer, 0, total_size);
+
+    /* Magic */
+    {
+        static const uint8_t magic[12] = {0xAB, 'K', 'T', 'X', ' ', '2', '0', 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
+        memcpy(buffer, magic, sizeof(magic));
+    }
+
+    LG_WriteU32(buffer + 12, 109); /* vkFormat = VK_FORMAT_R32G32B32A32_SFLOAT */
+    LG_WriteU32(buffer + 16, 4);   /* typeSize */
+    LG_WriteU32(buffer + 20, (uint32_t)nx);
+    LG_WriteU32(buffer + 24, (uint32_t)ny);
+    LG_WriteU32(buffer + 28, (uint32_t)nz);
+    LG_WriteU32(buffer + 32, 1); /* layerCount */
+    LG_WriteU32(buffer + 36, 1); /* faceCount */
+    LG_WriteU32(buffer + 40, 1); /* levelCount */
+
+    /* supercompression + data/metadata offsets are zero */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 0, 0); /* supercompressionScheme */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 1, 0); /* dfdByteOffset */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 2, 0); /* dfdByteLength */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 3, 0); /* kvdByteOffset */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 4, 0); /* kvdByteLength */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 5, 0); /* sgdByteOffset */
+    LG_WriteU64(buffer + 12 + 4 * 8 + 8 * 6, 0); /* sgdByteLength */
+
+    /* Level index */
+    LG_WriteU64(buffer + header_size + 0, data_offset);
+    LG_WriteU64(buffer + header_size + 8, payload_bytes);
+    LG_WriteU64(buffer + header_size + 16, payload_bytes);
+
+    memcpy(buffer + data_offset, payload, payload_bytes);
+
+    if (!COM_WriteFile_OSPath(path, buffer, total_size))
+    {
+        free(buffer);
+        return false;
+    }
+
+    free(buffer);
+    return true;
+}
+
+static qboolean Lightgrid_LoadMetadata(const char *mapname, lightgrid_meta_t *meta)
+{
+    char path[MAX_OSPATH];
+    byte *buf;
+
+    q_snprintf(path, sizeof(path), "maps/%s_lightgrid_meta.bin", mapname);
+    buf = COM_LoadMallocFile(path, NULL);
+    if (!buf)
+        return false;
+
+    if (com_filesize < (int)sizeof(*meta))
+    {
+        free(buf);
+        return false;
+    }
+
+    memcpy(meta, buf, sizeof(*meta));
+    free(buf);
+    return true;
+}
+
+static qboolean Lightgrid_LoadKTXPayload(const char *path, int nx, int ny, int nz, float *out, size_t float_count)
+{
+    byte *buf = COM_LoadMallocFile(path, NULL);
+    lightgrid_ktx2_header_t hdr;
+    size_t expected_bytes = float_count * sizeof(float);
+
+    if (!buf)
+        return false;
+
+    if (!Lightgrid_ParseKTX2(buf, (size_t)com_filesize, &hdr))
+    {
+        free(buf);
+        return false;
+    }
+
+    if (hdr.vkformat != 109 /* VK_FORMAT_R32G32B32A32_SFLOAT */)
+    {
+        free(buf);
+        return false;
+    }
+
+    if (hdr.width != (uint32_t)nx || hdr.height != (uint32_t)ny || hdr.depth != (uint32_t)nz || hdr.level_count != 1)
+    {
+        free(buf);
+        return false;
+    }
+
+    if (hdr.levels[0].length < expected_bytes)
+    {
+        free(buf);
+        return false;
+    }
+
+    memcpy(out, buf + hdr.levels[0].offset, expected_bytes);
+    free(buf);
+    return true;
+}
+
+static void Lightgrid_Upload3D(GLuint *tex, const float *payload, int nx, int ny, int nz)
+{
+    if (!*tex)
+        glGenTextures(1, tex);
+
+    glBindTexture(GL_TEXTURE_3D, *tex);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, payload);
+}
+
+qboolean Lightgrid_LoadFromKTX2(const char *mapname)
+{
+    lightgrid_meta_t meta;
+    lightgrid_t *lg;
+    size_t count;
+    size_t payload_floats;
+    float *color_payload = NULL;
+    float *dir_payload = NULL;
+    char color_path[MAX_OSPATH];
+    char dir_path[MAX_OSPATH];
+
+    if (!mapname || !mapname[0])
+        return false;
+
+    if (!Lightgrid_LoadMetadata(mapname, &meta))
+        return false;
+
+    count = (size_t)meta.nx * (size_t)meta.ny * (size_t)meta.nz;
+    if (count == 0 || count > LIGHTGRID_MAX_CELLS)
+        return false;
+
+    payload_floats = count * 4;
+    color_payload = (float *)malloc(payload_floats * sizeof(float));
+    dir_payload = (float *)malloc(payload_floats * sizeof(float));
+    if (!color_payload || !dir_payload)
+        goto fail;
+
+    q_snprintf(color_path, sizeof(color_path), "maps/%s_lightgrid_color.ktx2", mapname);
+    q_snprintf(dir_path, sizeof(dir_path), "maps/%s_lightgrid_dir.ktx2", mapname);
+
+    if (!Lightgrid_LoadKTXPayload(color_path, meta.nx, meta.ny, meta.nz, color_payload, payload_floats))
+        goto fail;
+    if (!Lightgrid_LoadKTXPayload(dir_path, meta.nx, meta.ny, meta.nz, dir_payload, payload_floats))
+        goto fail;
+
+    lg = Lightgrid_Alloc(meta.nx, meta.ny, meta.nz, meta.cellsize, meta.mins, meta.maxs);
+    if (!lg)
+        goto fail;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        const float *c = &color_payload[i * 4];
+        const float *d = &dir_payload[i * 4];
+        lightgrid_probe_t *p = &lg->probes[i];
+
+        VectorCopy(c, p->rgb);
+        p->intensity = c[3];
+        VectorCopy(d, p->dir);
+        if (VectorNormalize(p->dir) == 0)
+            VectorSet(p->dir, 0, 0, 1);
+    }
+
+    Lightgrid_Upload3D(&lg->tex_color3d, color_payload, meta.nx, meta.ny, meta.nz);
+    Lightgrid_Upload3D(&lg->tex_dir3d, dir_payload, meta.nx, meta.ny, meta.nz);
+
+    current_lightgrid = lg;
+    cl.lightgrid = lg;
+    lg->source = LIGHTGRID_SRC_KTX2;
+    q_strlcpy(lightgrid_source, "KTX2", sizeof(lightgrid_source));
+
+    free(color_payload);
+    free(dir_payload);
+    Con_Printf("Loaded KTX2 lightgrid for %s (%dx%dx%d)\n", mapname, meta.nx, meta.ny, meta.nz);
+    return true;
+
+fail:
+    if (color_payload)
+        free(color_payload);
+    if (dir_payload)
+        free(dir_payload);
+    return false;
+}
+
+qboolean Lightgrid_ExportToKTX2(const lightgrid_t *grid, const char *mapname)
+{
+    lightgrid_meta_t meta;
+    size_t count, payload_floats;
+    float *color_payload = NULL;
+    float *dir_payload = NULL;
+    char color_path[MAX_OSPATH];
+    char dir_path[MAX_OSPATH];
+    char meta_path[MAX_OSPATH];
+    qboolean ok = false;
+
+    if (!grid || !mapname || !mapname[0])
+        return false;
+
+    count = (size_t)grid->nx * (size_t)grid->ny * (size_t)grid->nz;
+    if (count == 0)
+        return false;
+
+    payload_floats = count * 4;
+    color_payload = (float *)malloc(payload_floats * sizeof(float));
+    dir_payload = (float *)malloc(payload_floats * sizeof(float));
+    if (!color_payload || !dir_payload)
+        goto cleanup;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        const lightgrid_probe_t *p = &grid->probes[i];
+        float *c = &color_payload[i * 4];
+        float *d = &dir_payload[i * 4];
+
+        VectorCopy(p->rgb, c);
+        c[3] = p->intensity;
+        VectorCopy(p->dir, d);
+        d[3] = 0.0f;
+    }
+
+    q_snprintf(color_path, sizeof(color_path), "%s/maps/%s_lightgrid_color.ktx2", com_gamedir, mapname);
+    q_snprintf(dir_path, sizeof(dir_path), "%s/maps/%s_lightgrid_dir.ktx2", com_gamedir, mapname);
+    q_snprintf(meta_path, sizeof(meta_path), "%s/maps/%s_lightgrid_meta.bin", com_gamedir, mapname);
+
+    if (!Lightgrid_WriteKTX2(color_path, color_payload, payload_floats, grid->nx, grid->ny, grid->nz))
+        goto cleanup;
+    if (!Lightgrid_WriteKTX2(dir_path, dir_payload, payload_floats, grid->nx, grid->ny, grid->nz))
+        goto cleanup;
+
+    meta.nx = grid->nx;
+    meta.ny = grid->ny;
+    meta.nz = grid->nz;
+    meta.cellsize = grid->cellsize;
+    VectorCopy(grid->mins, meta.mins);
+    VectorCopy(grid->maxs, meta.maxs);
+
+    if (!COM_WriteFile_OSPath(meta_path, &meta, sizeof(meta)))
+        goto cleanup;
+
+    Con_Printf("Exported KTX2 lightgrid for %s (%dx%dx%d)\n", mapname, grid->nx, grid->ny, grid->nz);
+    ok = true;
+
+cleanup:
+    if (color_payload)
+        free(color_payload);
+    if (dir_payload)
+        free(dir_payload);
+    return ok;
+}
+#endif
 
 /* =====================================================================
    RAW -> Lightgrid Converter (used by fallback)
@@ -222,6 +634,7 @@ lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw)
         lg->probes[i].intensity = cell->intensity;
     }
 
+    lg->source = LIGHTGRID_SRC_RAW;
     q_strlcpy(lightgrid_source, "RAW", sizeof(lightgrid_source));
     return lg;
 }
@@ -636,6 +1049,15 @@ void Lightgrid_BuildFallback(void)
     current_lightgrid = lg;
     cl.lightgrid      = lg;
 
+#if USE_KTX2_LIGHTGRID
+    if (r_lightgrid_ktx_enable.value && r_lightgrid_ktx_export.value)
+    {
+        char mapname[MAX_QPATH];
+        COM_StripExtension(cl.worldmodel->name, mapname, sizeof(mapname));
+        Lightgrid_ExportToKTX2(lg, COM_SkipPath(mapname));
+    }
+#endif
+
     Con_Printf("fallback done (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
 }
 
@@ -685,6 +1107,18 @@ void Lightgrid_SetSource(const char *name)
     if (name && name[0])
          q_strlcpy(lightgrid_source, name, sizeof(lightgrid_source));
     else q_strlcpy(lightgrid_source, "UNKNOWN", sizeof(lightgrid_source));
+
+    if (current_lightgrid)
+    {
+        if (name && !q_strcasecmp(name, "KTX2"))
+            current_lightgrid->source = LIGHTGRID_SRC_KTX2;
+        else if (name && !q_strcasecmp(name, "RAW"))
+            current_lightgrid->source = LIGHTGRID_SRC_RAW;
+        else if (name && !q_strcasecmp(name, "OCTREE"))
+            current_lightgrid->source = LIGHTGRID_SRC_OCTREE;
+        else
+            current_lightgrid->source = LIGHTGRID_SRC_NONE;
+    }
 }
 
 const char *Lightgrid_GetSource(void)
