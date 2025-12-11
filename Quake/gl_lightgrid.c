@@ -605,7 +605,7 @@ static void Lightgrid_Upload3D(GLuint *tex, const float *payload, int nx, int ny
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, payload);
+    GL_TexImage3DFunc(GL_TEXTURE_3D, 0, GL_RGBA32F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, payload);
 }
 
 qboolean Lightgrid_LoadFromKTX2(const char *mapname)
