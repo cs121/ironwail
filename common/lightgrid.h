@@ -10,6 +10,9 @@ typedef struct lightgrid_probe_s {
 } lightgrid_probe_t;
 
 #define LIGHTGRID_STANDARD_CELLSIZE 64.f
+#define LIGHTGRID_MAX_NX 32
+#define LIGHTGRID_MAX_NY 32
+#define LIGHTGRID_MAX_NZ 64
 
 typedef struct lightgrid_s {
     int nx, ny, nz;

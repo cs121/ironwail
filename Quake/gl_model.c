@@ -2299,9 +2299,9 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
 
         VectorSubtract (src->maxs, src->mins, size);
 
-        nx = q_max (1, q_min (64, (int)ceilf (size[0] / target_cellsize)));
-        ny = q_max (1, q_min (64, (int)ceilf (size[1] / target_cellsize)));
-        nz = q_max (1, q_min (64, (int)ceilf (size[2] / target_cellsize)));
+        nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf (size[0] / target_cellsize)));
+        ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf (size[1] / target_cellsize)));
+        nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf (size[2] / target_cellsize)));
 
         raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw_resampled");
         if (!raw)
@@ -2353,6 +2353,48 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
         }
 
         return raw;
+}
+
+static void LightgridRAW_ExpectedDims (const qmodel_t *mod, int *out_nx, int *out_ny, int *out_nz)
+{
+        if (!mod)
+                return;
+
+        const float cellsize = LIGHTGRID_STANDARD_CELLSIZE;
+        int nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf ((mod->maxs[0] - mod->mins[0]) / cellsize)));
+        int ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf ((mod->maxs[1] - mod->mins[1]) / cellsize)));
+        int nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf ((mod->maxs[2] - mod->mins[2]) / cellsize)));
+
+        if (out_nx)
+                *out_nx = nx;
+        if (out_ny)
+                *out_ny = ny;
+        if (out_nz)
+                *out_nz = nz;
+}
+
+static qboolean LightgridRAW_MatchesModel (const qmodel_t *mod, const lightgrid_raw_t *raw)
+{
+        int expected_nx = 0, expected_ny = 0, expected_nz = 0;
+
+        if (!mod || !raw)
+                return false;
+
+        LightgridRAW_ExpectedDims (mod, &expected_nx, &expected_ny, &expected_nz);
+
+        if (raw->nx != expected_nx || raw->ny != expected_ny || raw->nz != expected_nz)
+                return false;
+
+        if (fabsf (raw->cellSize - LIGHTGRID_STANDARD_CELLSIZE) > 0.01f)
+                return false;
+
+        for (int i = 0; i < 3; i++)
+        {
+                if (fabsf (raw->origin[i] - mod->mins[i]) > 0.5f)
+                        return false;
+        }
+
+        return true;
 }
 
 static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const char *source_path)
@@ -2468,6 +2510,18 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
                                 }
                         }
                 }
+        }
+
+        int expected_nx, expected_ny, expected_nz;
+        LightgridRAW_ExpectedDims (mod, &expected_nx, &expected_ny, &expected_nz);
+
+        if (!LightgridRAW_MatchesModel (mod, raw))
+        {
+                Con_Warning ("Discarded %s: expected lightgrid %dx%dx%d with cell size %.1f and origin (%.0f %.0f %.0f)\n",
+                        source_path && source_path[0] ? source_path : "external lightgrid",
+                        expected_nx, expected_ny, expected_nz, LIGHTGRID_STANDARD_CELLSIZE,
+                        mod->mins[0], mod->mins[1], mod->mins[2]);
+                return false;
         }
 
         mod->lightgrid_raw = raw;
@@ -2886,9 +2940,9 @@ lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, 
 	(void)cellY;
 	(void)cellZ;
 	cellsize = LIGHTGRID_STANDARD_CELLSIZE;
-	nx = q_max (1, q_min (64, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
-	ny = q_max (1, q_min (64, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
-	nz = q_max (1, q_min (64, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
+        nx = q_max (1, q_min (LIGHTGRID_MAX_NX, (int)ceilf ((maxs[0] - mins[0]) / cellsize)));
+        ny = q_max (1, q_min (LIGHTGRID_MAX_NY, (int)ceilf ((maxs[1] - mins[1]) / cellsize)));
+        nz = q_max (1, q_min (LIGHTGRID_MAX_NZ, (int)ceilf ((maxs[2] - mins[2]) / cellsize)));
 
 	count = (size_t)nx * (size_t)ny * (size_t)nz;
 	if (count == 0 || count > SIZE_MAX / sizeof(lightcell_t))
