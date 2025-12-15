@@ -4913,6 +4913,8 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	float		radius; //johnfitz
 	bsp_header_info_t header;
 	bspx_header_t	*bspx;
+	const int submodel_index = (mod->name[0] == '*') ? atoi(mod->name + 1) : 0;
+	const qboolean is_main_model = (submodel_index == 0);
 
 	loadmodel->type = mod_brush;
 
@@ -4946,27 +4948,36 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		return;
 	}
 
-        bspx = BSPX_Setup(mod, &header, com_filesize);
-        mod->bspx_header = bspx;
-
-        if (bspx)
+        if (is_main_model)
         {
-                BSPX_ApplyLumpOverride("BSPX_VERTS", &header.lumps[LUMP_VERTEXES]);
-                BSPX_ApplyLumpOverride("BSPX_FACES", &header.lumps[LUMP_FACES]);
+                bspx = BSPX_Setup(mod, &header, com_filesize);
+                mod->bspx_header = bspx;
 
-                BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
-                BSPX_ApplyLumpOverride("DLIT", &header.lumps[LUMP_LIGHTING]);
-                BSPX_ApplyLumpOverride("RGBLIGHTING", &header.lumps[LUMP_LIGHTING]);
-
-                BSPX_ApplyLumpOverride("BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES]);
-
-                BSPX_ApplyLumpOverride("BSPX_MODELS", &header.lumps[LUMP_MODELS]);
-
-                if (!BSPX_ApplyLumpOverride("VISX", &header.lumps[LUMP_VISIBILITY]))
+                if (bspx)
                 {
-                        if (!BSPX_ApplyLumpOverride("PVS2", &header.lumps[LUMP_VISIBILITY]))
-                                BSPX_ApplyLumpOverride("PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY]);
+                        BSPX_ApplyLumpOverride("BSPX_VERTS", &header.lumps[LUMP_VERTEXES]);
+                        BSPX_ApplyLumpOverride("BSPX_FACES", &header.lumps[LUMP_FACES]);
+
+                        BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
+                        BSPX_ApplyLumpOverride("DLIT", &header.lumps[LUMP_LIGHTING]);
+                        BSPX_ApplyLumpOverride("RGBLIGHTING", &header.lumps[LUMP_LIGHTING]);
+
+                        BSPX_ApplyLumpOverride("BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES]);
+
+                        BSPX_ApplyLumpOverride("BSPX_MODELS", &header.lumps[LUMP_MODELS]);
+
+                        if (!BSPX_ApplyLumpOverride("VISX", &header.lumps[LUMP_VISIBILITY]))
+                        {
+                                if (!BSPX_ApplyLumpOverride("PVS2", &header.lumps[LUMP_VISIBILITY]))
+                                        BSPX_ApplyLumpOverride("PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY]);
+                        }
                 }
+        }
+        else
+        {
+                mod->bspx_entries = NULL;
+                mod->bspx_entries_count = 0;
+                mod->bspx_header = NULL;
         }
 
         // load into heap
@@ -4978,6 +4989,7 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
 	Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
 	Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
+	if (is_main_model)
 	{
 		void *lump;
 		int lumpsize;
@@ -4993,17 +5005,17 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
 	Mod_LoadFaces (&header.lumps[LUMP_FACES]);
 	Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
+        if (is_main_model)
+        {
+                void *lump;
+                int lumpsize;
 
-	{
-		void *lump;
-		int lumpsize;
-
-		lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
-		if (lump && lumpsize > 0)
-			Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
-		else
-			Con_DPrintf("BSPX: no FACENORMALS lump found\n");
-	}
+                lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
+                if (lump && lumpsize > 0)
+                        Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
+                else
+                        Con_DPrintf("BSPX: no FACENORMALS lump found\n");
+        }
 
 	if (mod->bspversion == BSPVERSION && external_vis.value/* && sv.modelname[0] && !q_strcasecmp(loadname, sv.name)*/) // woods allow vis load online
 	{
@@ -5035,7 +5047,8 @@ visdone:
         Mod_LoadClipnodes (&header.lumps[LUMP_CLIPNODES], bsp2);
         Mod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
 
-        Mod_LoadLightgrid (mod);
+        if (is_main_model)
+                Mod_LoadLightgrid (mod);
 
         Mod_MakeHull0 ();
 
@@ -5043,8 +5056,11 @@ visdone:
 
 	Mod_CheckWaterVis();
 
-	Mod_DispatchBSPXLumps(mod);
-	Q1BSPX_LogUsage(mod->name);
+	if (is_main_model)
+	{
+		Mod_DispatchBSPXLumps(mod);
+		Q1BSPX_LogUsage(mod->name);
+	}
 
 //
 // set up the submodels (FIXME: this is confusing)
