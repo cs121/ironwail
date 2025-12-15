@@ -18,6 +18,8 @@ typedef struct lightgrid_v2_header_s
     vec3_t origin;
 } lightgrid_v2_header_t;
 
+static lightgrid_t *Lightgrid_LoadV2FromBufferInternal(const uint8_t *buffer, size_t buffer_size);
+
 static float LightgridRAW_HalfToFloat(unsigned short h)
 {
     unsigned int sign = (unsigned int)(h & 0x8000) << 16;
@@ -130,11 +132,24 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
         return NULL;
 
     const size_t buffer_size = (size_t)com_filesize;
-    if (buffer_size < sizeof(lightgrid_v2_header_t))
-    {
-        free(buffer);
+    lightgrid_t *lg = Lightgrid_LoadV2FromBufferInternal(buffer, buffer_size);
+
+    free(buffer);
+    return lg;
+}
+
+lightgrid_t *Lightgrid_LoadV2FromMemory(const void *data, size_t size)
+{
+    if (!data || size == 0)
         return NULL;
-    }
+
+    return Lightgrid_LoadV2FromBufferInternal((const uint8_t *)data, size);
+}
+
+static lightgrid_t *Lightgrid_LoadV2FromBufferInternal(const uint8_t *buffer, size_t buffer_size)
+{
+    if (!buffer || buffer_size < sizeof(lightgrid_v2_header_t))
+        return NULL;
 
     const lightgrid_v2_header_t *hdr = (const lightgrid_v2_header_t *)buffer;
     int nx, ny, nz;
@@ -144,16 +159,10 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
     uint32_t components = 0;
 
     if (!Lightgrid_ReadV2Header(hdr, &nx, &ny, &nz, &cellsize, origin, &components))
-    {
-        free(buffer);
         return NULL;
-    }
 
     if (cellsize <= 0.f)
-    {
-        free(buffer);
         return NULL;
-    }
 
     vec3_t mins, maxs;
     VectorCopy(origin, mins);
@@ -162,37 +171,25 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
     maxs[2] = origin[2] + cellsize * nz;
 
     if (nx <= 0 || ny <= 0 || nz <= 0)
-    {
-        free(buffer);
         return NULL;
-    }
 
     const size_t probe_count = (size_t)nx * ny * nz;
     const size_t header_size = sizeof(lightgrid_v2_header_t);
     const size_t payload_bytes = buffer_size - header_size;
 
     if (probe_count == 0 || payload_bytes == 0)
-    {
-        free(buffer);
         return NULL;
-    }
 
     const size_t floats_per_probe = payload_bytes / (sizeof(float) * probe_count);
     if (payload_bytes % (sizeof(float) * probe_count) != 0 || (floats_per_probe != 7 && floats_per_probe != 8))
-    {
-        free(buffer);
         return NULL;
-    }
 
     const uint32_t required_components = LIGHTGRID_COMPONENT_RGB | LIGHTGRID_COMPONENT_DIR | LIGHTGRID_COMPONENT_INTENSITY;
     const uint32_t known_components = required_components | LIGHTGRID_COMPONENT_AO;
     const uint32_t unknown_components = components & ~(known_components | LIGHTGRID_COMPONENT_SH9_FLAG);
 
     if (components && (components & required_components) != required_components)
-    {
-        free(buffer);
         return NULL;
-    }
 
     if (unknown_components)
         Con_DPrintf("Lightgrid V2: ignoring unknown component flags 0x%x\n", unknown_components);
@@ -203,19 +200,13 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
     {
         const size_t expected_floats = 7 + (has_ao ? 1 : 0);
         if (expected_floats != floats_per_probe)
-        {
-            free(buffer);
             return NULL;
-        }
     }
     const float *probe_data = (const float *)(buffer + header_size);
 
     lightgrid_t *lg = Lightgrid_Alloc(nx, ny, nz, cellsize, mins, maxs);
     if (!lg)
-    {
-        free(buffer);
         return NULL;
-    }
 
     for (size_t i = 0; i < probe_count; i++)
     {
@@ -242,7 +233,6 @@ lightgrid_t *Lightgrid_LoadV2(const char *path)
 
     lg->source = LIGHTGRID_SRC_V2;
 
-    free(buffer);
     return lg;
 }
 
