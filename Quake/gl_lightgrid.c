@@ -28,6 +28,8 @@ cvar_t r_lightgrid_weight_lightmap = { "r_lightgrid_weight_lightmap", "1", CVAR_
 cvar_t r_lightgrid_surface_weight = { "r_lightgrid_surface_weight", "0", CVAR_ARCHIVE };
 cvar_t r_lightgrid_bounce_factor = { "r_lightgrid_bounce_factor", "0.5", CVAR_ARCHIVE };
 cvar_t r_lightgrid_bounce_rays = { "r_lightgrid_bounce_rays", "16", CVAR_ARCHIVE };
+cvar_t r_lightgrid_bounce_maxdist = { "r_lightgrid_bounce_maxdist", "512", CVAR_ARCHIVE };
+cvar_t r_lightgrid_bounce_loss = { "r_lightgrid_bounce_loss", "1", CVAR_ARCHIVE };
 cvar_t r_lightgrid_sh9 = { "r_lightgrid_sh9", "0", CVAR_ARCHIVE };
 #if USE_KTX2_LIGHTGRID
 cvar_t r_lightgrid_ktx_enable = { "r_lightgrid_ktx_enable", "1", CVAR_ARCHIVE };
@@ -66,6 +68,8 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_surface_weight);
     Cvar_RegisterVariable(&r_lightgrid_bounce_factor);
     Cvar_RegisterVariable(&r_lightgrid_bounce_rays);
+    Cvar_RegisterVariable(&r_lightgrid_bounce_maxdist);
+    Cvar_RegisterVariable(&r_lightgrid_bounce_loss);
     Cvar_RegisterVariable(&r_lightgrid_sh9);
 #if USE_KTX2_LIGHTGRID
     Cvar_RegisterVariable(&r_lightgrid_ktx_enable);
@@ -1008,7 +1012,8 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     const float surface_weight   = r_lightgrid_surface_weight.value;
     const int bounce_rays        = q_max(0, (int)r_lightgrid_bounce_rays.value);
     const float bounce_factor    = r_lightgrid_bounce_factor.value;
-    const float bounce_scale     = (bounce_rays > 0) ? (bounce_factor / (float)bounce_rays) : 0.f;
+    const float bounce_maxdist   = q_max(1.f, r_lightgrid_bounce_maxdist.value);
+    const float bounce_loss      = q_max(0.f, r_lightgrid_bounce_loss.value);
 
     const size_t jitter_count = ARRAYSIZE(lightgrid_probe_jitter);
     const float jitter_scale   = 1.f; /* Keep previous distribution range */
@@ -1181,7 +1186,8 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                             const vec3_t *raydir = Lightgrid_GetBounceDir(i, bounce_rays);
 
                             vec3_t end;
-                            VectorMA(pos, 512.f, *raydir, end);
+                            const float adaptive_dist = q_min(bounce_maxdist, cellSize * 8.f + base_luma * bounce_maxdist);
+                            VectorMA(pos, adaptive_dist, *raydir, end);
 
                             vec3_t impact;
                             qboolean unobstructed = Lightgrid_TraceLine((qmodel_t *)model, pos, end, impact);
@@ -1192,11 +1198,32 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                             vec3_t hit_dir;
                             if (R_SampleLightmapAndDeluxemapAtPoint(impact, hit_color, hit_dir))
                             {
-                                VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
-                                const float hit_luma = DotProduct(hit_color, luminance_weights) * bounce_scale;
-                                if (hit_luma > 0.f && VectorLength(hit_dir) > 0.f)
-                                    VectorMA(dirsum, hit_luma, hit_dir, dirsum);
-                                residual -= bounce_scale;
+                                const float hit_luma = DotProduct(hit_color, luminance_weights);
+                                const float ray_energy = residual / (float)(bounce_rays - i);
+
+                                float normal_factor = 1.f;
+                                if (VectorLength(hit_dir) > 0.f)
+                                {
+                                    vec3_t normalized_dir;
+                                    VectorCopy(hit_dir, normalized_dir);
+                                    VectorNormalize(normalized_dir);
+
+                                    vec3_t incoming;
+                                    VectorScale(*raydir, -1.f, incoming);
+                                    normal_factor = q_max(0.f, DotProduct(normalized_dir, incoming));
+                                }
+
+                                const float contribution = ray_energy * normal_factor;
+                                if (contribution > 0.f)
+                                {
+                                    VectorMA(bounce_accum, contribution, hit_color, bounce_accum);
+
+                                    if (hit_luma > 0.f && VectorLength(hit_dir) > 0.f)
+                                        VectorMA(dirsum, hit_luma * contribution, hit_dir, dirsum);
+
+                                    const float reflected = hit_luma * contribution * bounce_loss;
+                                    residual = q_max(0.f, residual - reflected);
+                                }
                             }
                         }
 
