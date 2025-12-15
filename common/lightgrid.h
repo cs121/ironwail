@@ -55,6 +55,7 @@ typedef enum lightgrid_source_e {
 
 lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_t mins, const vec3_t maxs);
 lightgrid_t *Lightgrid_LoadV2(const char *path);
+lightgrid_t *Lightgrid_LoadV2FromMemory(const void *data, size_t size);
 lightgrid_t *Lightgrid_LoadKTX2(const char *path);
 lightgrid_t *Lightgrid_LoadV3(const char *path);
 lightgrid_t *Lightgrid_LoadExternal(const char *path);

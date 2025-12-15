@@ -3508,33 +3508,54 @@ static void Lightgrid_Save_f (void)
 
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
 {
-	lightgrid_t *lg;
-	char path[MAX_QPATH];
+        lightgrid_raw_t *raw;
+        lightgrid_t *lg;
 
-	(void)lump;
-	(void)lumpsize;
+        Lightgrid_Free(cl.lightgrid);
+        cl.lightgrid = NULL;
 
-	Lightgrid_Free(cl.lightgrid);
-	cl.lightgrid = NULL;
+        if (lump && lumpsize > 0)
+        {
+                lg = Lightgrid_LoadV2FromMemory(lump, (size_t)lumpsize);
+                if (lg)
+                {
+                        raw = LightgridRAW_FromGrid (lg, LIGHTGRID_STANDARD_CELLSIZE);
+                        if (!raw)
+                                return false;
+
+                        mod->lightgrid_raw = raw;
+
+                        lg = Lightgrid_FromRaw(raw);
+                        if (!lg)
+                                return false;
+
+                        Lightgrid_Set (lg);
+
+                        return true;
+                }
+        }
 
 #if USE_KTX2_LIGHTGRID
-	if (r_lightgrid_ktx_enable.value)
-	{
-		char base[MAX_QPATH];
-		COM_StripExtension(mod->name, base, sizeof(base));
-		if (Lightgrid_LoadFromKTX2(COM_SkipPath(base)))
-			return true;
-	}
+        if (r_lightgrid_ktx_enable.value)
+        {
+                char base[MAX_QPATH];
+                COM_StripExtension(mod->name, base, sizeof(base));
+                if (Lightgrid_LoadFromKTX2(COM_SkipPath(base)))
+                        return true;
+        }
 #endif
 
-	COM_StripExtension(mod->name, path, sizeof(path));
-COM_DefaultExtension(path, ".lgrd", sizeof(path));
+        {
+                char path[MAX_QPATH];
+                COM_StripExtension(mod->name, path, sizeof(path));
+                COM_DefaultExtension(path, ".lgrd", sizeof(path));
 
-	lg = Lightgrid_LoadExternal(path);
-	if (!lg)
-		return false;
+                lg = Lightgrid_LoadExternal(path);
+                if (!lg)
+                        return false;
 
-        Lightgrid_Set (lg);
+                Lightgrid_Set (lg);
+        }
 
         return true;
 }
