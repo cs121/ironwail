@@ -824,17 +824,52 @@ static float Lightgrid_Random01(void)
     return (float)rand() / (float)RAND_MAX;
 }
 
-static void Lightgrid_RandomHemisphereDir(vec3_t out)
-{
-    const float u = Lightgrid_Random01();
-    const float v = Lightgrid_Random01();
-    const float phi = 2.f * (float)M_PI * u;
-    const float cos_theta = v;
-    const float sin_theta = sqrtf(q_max(0.f, 1.f - cos_theta * cos_theta));
+/*
+ * Low-discrepancy bounce directions and probe jitter offsets. These are reused
+ * for every probe to avoid repeated random number generation while still
+ * producing stable, well distributed samples.
+ */
+static const vec3_t lightgrid_probe_jitter[] = {
+    {-1.5f, -0.5f,  1.0f},
+    { 0.5f,  1.5f, -1.0f},
+    { 1.5f, -1.0f,  0.5f},
+    {-0.5f,  0.5f, -1.5f},
+    {-1.0f, -1.5f,  0.5f},
+    { 1.0f,  0.5f,  1.5f},
+    {-0.5f,  1.0f, -0.5f},
+    { 1.5f, -0.5f,  1.0f},
+};
 
-    out[0] = cosf(phi) * sin_theta;
-    out[1] = sinf(phi) * sin_theta;
-    out[2] = fabsf(cos_theta);
+static const vec3_t lightgrid_bounce_dirs[] = {
+    { 0.5257311f,  0.0000000f,  0.8506508f},
+    {-0.5257311f,  0.0000000f,  0.8506508f},
+    { 0.1624598f,  0.5000000f,  0.8506508f},
+    { 0.1624598f, -0.5000000f,  0.8506508f},
+    {-0.1624598f,  0.5000000f,  0.8506508f},
+    {-0.1624598f, -0.5000000f,  0.8506508f},
+    { 0.6881909f,  0.4999999f,  0.5257310f},
+    { 0.6881909f, -0.4999999f,  0.5257310f},
+    {-0.6881909f,  0.4999999f,  0.5257310f},
+    {-0.6881909f, -0.4999999f,  0.5257310f},
+    { 0.9510565f,  0.0000000f,  0.3090170f},
+    {-0.9510565f,  0.0000000f,  0.3090170f},
+    { 0.4253254f,  0.8506508f,  0.3090170f},
+    { 0.4253254f, -0.8506508f,  0.3090170f},
+    {-0.4253254f,  0.8506508f,  0.3090170f},
+    {-0.4253254f, -0.8506508f,  0.3090170f},
+    { 0.5877852f,  0.8090169f,  0.0000000f},
+    { 0.5877852f, -0.8090169f,  0.0000000f},
+    {-0.5877852f,  0.8090169f,  0.0000000f},
+    {-0.5877852f, -0.8090169f,  0.0000000f},
+    { 0.0000000f,  0.0000000f,  1.0000000f},
+};
+
+static const vec3_t *Lightgrid_GetBounceDir(int index, int count)
+{
+    if (count <= 0)
+        return &lightgrid_bounce_dirs[0];
+
+    return &lightgrid_bounce_dirs[index % q_min(count, (int)ARRAYSIZE(lightgrid_bounce_dirs))];
 }
 
 static qboolean Lightgrid_TraceLine(const qmodel_t *mod, const vec3_t start, const vec3_t end, vec3_t impact)
@@ -902,6 +937,8 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     if (!model)
         return NULL;
 
+    static const vec3_t luminance_weights = {0.299f, 0.587f, 0.114f};
+
     /*
      * Disable any currently loaded lightgrid while we bake a new one so that
      * sampling uses the actual BSP light data instead of feeding back the
@@ -949,109 +986,192 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
     raw->cells =
         (lightcell_t*)Hunk_AllocName(count * sizeof(lightcell_t), "lightgrid_cells");
 
-    for (int z = 0; z < nz; z++)
-    for (int y = 0; y < ny; y++)
-    for (int x = 0; x < nx; x++)
+    /*
+     * Cache for lightmap sampling and direct traces. The lightcache_t already
+     * avoids redundant BSP walks when queries happen within 1 unit, and we
+     * extend that reuse across neighboring probes by keeping it outside the
+     * inner loop.
+     */
+    lightcache_t direct_cache = {0};
+    struct
     {
-        lightcell_t *cell = &raw->cells[(z * ny + y) * nx + x];
+        mleaf_t *leaf;
+        vec3_t pos;
+        vec3_t color;
+        qboolean valid;
+    } lightmap_cache = {0};
 
-        vec3_t pos = {
-            mins[0] + (x + 0.5f) * cellSize,
-            mins[1] + (y + 0.5f) * cellSize,
-            mins[2] + (z + 0.5f) * cellSize
-        };
+    const float weight_direct    = r_lightgrid_weight_direct.value;
+    const float weight_lightmap  = r_lightgrid_weight_lightmap.value;
+    const float surface_weight   = r_lightgrid_surface_weight.value;
+    const int bounce_rays        = q_max(0, (int)r_lightgrid_bounce_rays.value);
+    const float bounce_factor    = r_lightgrid_bounce_factor.value;
+    const float bounce_scale     = (bounce_rays > 0) ? (bounce_factor / (float)bounce_rays) : 0.f;
 
-        vec3_t jitter = {
-            (Lightgrid_Random01() * 4.f) - 2.f,
-            (Lightgrid_Random01() * 4.f) - 2.f,
-            (Lightgrid_Random01() * 4.f) - 2.f
-        };
-        VectorAdd(pos, jitter, pos);
+    const size_t jitter_count = ARRAYSIZE(lightgrid_probe_jitter);
+    const float jitter_scale   = 1.f; /* Keep previous distribution range */
 
-        static const vec3_t luminance_weights = {0.299f, 0.587f, 0.114f};
-
-        cell->ao = 0.f;
-
-
-        if (r_generate_lightgrid_test.value > 0.f)
+    for (int z = 0; z < nz; z++)
+    {
+        const float base_z = mins[2] + (z + 0.5f) * cellSize;
+        for (int y = 0; y < ny; y++)
         {
-            Lightgrid_FillRandomCell(cell);
-            continue;
-        }
-
-        lightcache_t cache = {0};
-        vec3_t direct = {0, 0, 0};
-        vec3_t lightmap = {0, 0, 0};
-        vec3_t dirsum = {0,0,0};
-
-        R_LightPoint((qmodel_t *)model, pos, 0.f, &cache);
-
-        direct[0] = lightcolor[0] * (1.f/255.f);
-        direct[1] = lightcolor[1] * (1.f/255.f);
-        direct[2] = lightcolor[2] * (1.f/255.f);
-
-        R_SampleLightmapAtPoint(pos, lightmap);
-
-        if (r_lightgrid_surface_weight.value != 0.f && cache.surfidx > 0 && cache.surfidx <= model->numsurfaces)
-        {
-                const msurface_t *surf = &model->surfaces[cache.surfidx - 1];
-                vec3_t center;
-                for (int i = 0; i < 3; i++)
-                        center[i] = 0.5f * (surf->mins[i] + surf->maxs[i]);
-
-                vec3_t delta;
-                VectorSubtract(pos, center, delta);
-                float dist = VectorLength(delta);
-                float weight = 1.f / (1.f + dist);
-                VectorScale(lightmap, weight, lightmap);
-        }
-
-        VectorClear(cell->rgb);
-        VectorMA(cell->rgb, r_lightgrid_weight_direct.value, direct, cell->rgb);
-        VectorMA(cell->rgb, r_lightgrid_weight_lightmap.value, lightmap, cell->rgb);
-
-        Lightgrid_AddDlights(pos, cell->rgb, dirsum);
-
-        /* Second bounce approximation */
-        const int bounce_rays = q_max(0, (int)r_lightgrid_bounce_rays.value);
-        if (bounce_rays > 0 && r_lightgrid_bounce_factor.value > 0.f)
-        {
-            vec3_t bounce_accum = {0, 0, 0};
-            const float bounce_scale = r_lightgrid_bounce_factor.value / (float)bounce_rays;
-            for (int i = 0; i < bounce_rays; i++)
+            const float base_y = mins[1] + (y + 0.5f) * cellSize;
+            for (int x = 0; x < nx; x++)
             {
-                vec3_t raydir;
-                Lightgrid_RandomHemisphereDir(raydir);
+                const size_t linear_index = (size_t)(z * ny + y) * nx + x;
+                lightcell_t *cell = &raw->cells[linear_index];
 
-                vec3_t end;
-                VectorMA(pos, 512.f, raydir, end);
+                const vec3_t *jitter = &lightgrid_probe_jitter[linear_index % jitter_count];
+                vec3_t pos = {
+                    mins[0] + (x + 0.5f) * cellSize + (*jitter)[0] * jitter_scale,
+                    base_y + (*jitter)[1] * jitter_scale,
+                    base_z + (*jitter)[2] * jitter_scale
+                };
 
-                vec3_t impact;
-                qboolean unobstructed = Lightgrid_TraceLine((qmodel_t *)model, pos, end, impact);
-                if (unobstructed)
-                    continue;
+                cell->ao = 0.f;
 
-                vec3_t hit_color;
-                if (R_SampleLightmapAtPoint(impact, hit_color))
+                if (r_generate_lightgrid_test.value > 0.f)
                 {
-                    VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
+                    Lightgrid_FillRandomCell(cell);
+                    continue;
                 }
+
+                vec3_t direct = {0, 0, 0};
+                vec3_t lightmap = {0, 0, 0};
+                vec3_t dirsum = {0,0,0};
+
+                vec3_t pos_copy;
+                VectorCopy(pos, pos_copy);
+                mleaf_t *leaf = Mod_PointInLeaf(pos_copy, (qmodel_t *)model);
+                if (!leaf || leaf->contents == CONTENTS_SOLID)
+                {
+                    VectorSet(cell->rgb, 0, 0, 0);
+                    VectorSet(cell->dir, 0, 0, 1);
+                    cell->intensity = 0.f;
+                    continue;
+                }
+
+                /*
+                 * Lightmap sampling: reuse previous result when the probe is
+                 * inside the same leaf and only slightly offset. This avoids
+                 * re-walking the surface list for tightly packed probes.
+                 */
+                qboolean lightmap_found = false;
+                if (lightmap_cache.valid && lightmap_cache.leaf == leaf)
+                {
+                    vec3_t delta;
+                    VectorSubtract(pos, lightmap_cache.pos, delta);
+                    if (DotProduct(delta, delta) < 0.0625f)
+                    {
+                        VectorCopy(lightmap_cache.color, lightmap);
+                        lightmap_found = true;
+                    }
+                }
+
+                if (!lightmap_found)
+                {
+                    lightmap_found = R_SampleLightmapAtPoint(pos, lightmap);
+                    if (lightmap_found)
+                    {
+                        VectorCopy(lightmap, lightmap_cache.color);
+                        VectorCopy(pos, lightmap_cache.pos);
+                        lightmap_cache.leaf = leaf;
+                        lightmap_cache.valid = true;
+                    }
+                }
+
+                if (weight_direct > 0.f || surface_weight != 0.f)
+                {
+                    /*
+                     * Avoid redundant R_LightPoint() when the lightmap already
+                     * gave us a surface-adjacent color. Fall back to the
+                     * lightmap value as the "direct" component in that case.
+                     */
+                    if (lightmap_found && weight_direct <= 0.f)
+                        direct_cache.surfidx = 0;
+                    if (!lightmap_found || weight_direct > 0.f)
+                        R_LightPoint((qmodel_t *)model, pos, 0.f, &direct_cache);
+
+                    if (lightmap_found && direct_cache.surfidx <= 0)
+                    {
+                        VectorCopy(lightmap, direct);
+                    }
+                    else
+                    {
+                        direct[0] = lightcolor[0] * (1.f/255.f);
+                        direct[1] = lightcolor[1] * (1.f/255.f);
+                        direct[2] = lightcolor[2] * (1.f/255.f);
+                    }
+
+                    if (surface_weight != 0.f && direct_cache.surfidx > 0 && direct_cache.surfidx <= model->numsurfaces)
+                    {
+                        const msurface_t *surf = &model->surfaces[direct_cache.surfidx - 1];
+                        vec3_t center;
+                        for (int i = 0; i < 3; i++)
+                            center[i] = 0.5f * (surf->mins[i] + surf->maxs[i]);
+
+                        vec3_t delta;
+                        VectorSubtract(pos, center, delta);
+                        const float dist2 = DotProduct(delta, delta);
+                        const float weight = 1.f / (1.f + sqrtf(dist2));
+                        VectorScale(lightmap, weight, lightmap);
+                    }
+                }
+
+                VectorClear(cell->rgb);
+                if (weight_direct > 0.f)
+                    VectorMA(cell->rgb, weight_direct, direct, cell->rgb);
+                if (weight_lightmap > 0.f)
+                    VectorMA(cell->rgb, weight_lightmap, lightmap, cell->rgb);
+
+                Lightgrid_AddDlights(pos, cell->rgb, dirsum);
+
+                /* Second bounce approximation */
+                if (bounce_rays > 0 && bounce_factor > 0.f)
+                {
+                    const float base_luma = DotProduct(cell->rgb, luminance_weights);
+                    if (base_luma > 0.001f)
+                    {
+                        vec3_t bounce_accum = {0, 0, 0};
+                        float residual = bounce_factor;
+                        for (int i = 0; i < bounce_rays && residual > 0.001f; i++)
+                        {
+                            const vec3_t *raydir = Lightgrid_GetBounceDir(i, bounce_rays);
+
+                            vec3_t end;
+                            VectorMA(pos, 512.f, *raydir, end);
+
+                            vec3_t impact;
+                            qboolean unobstructed = Lightgrid_TraceLine((qmodel_t *)model, pos, end, impact);
+                            if (unobstructed)
+                                continue;
+
+                            vec3_t hit_color;
+                            if (R_SampleLightmapAtPoint(impact, hit_color))
+                            {
+                                VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
+                                residual -= bounce_scale;
+                            }
+                        }
+
+                        VectorAdd(cell->rgb, bounce_accum, cell->rgb);
+                    }
+                }
+
+                const float base = DotProduct(cell->rgb, luminance_weights);
+                vec3_t up = {0,0,1};
+                VectorMA(dirsum, base, up, dirsum);
+
+                const float dirlen = VectorNormalize(dirsum);
+                if (dirlen < 1e-6f || !R_IsFinite(dirlen))
+                    VectorSet(cell->dir,0,0,1);
+                else
+                    VectorCopy(dirsum, cell->dir);
+
+                cell->intensity = base;
             }
-
-            VectorAdd(cell->rgb, bounce_accum, cell->rgb);
         }
-
-        vec3_t up = {0,0,1};
-        float base = DotProduct(cell->rgb, luminance_weights);
-        VectorMA(dirsum, base, up, dirsum);
-
-        float dirlen = VectorNormalize(dirsum);
-        if (dirlen < 1e-6f || !R_IsFinite(dirlen))
-            VectorSet(cell->dir,0,0,1);
-        else
-            VectorCopy(dirsum, cell->dir);
-
-        cell->intensity = base;
     }
 
     /* Restore previous lightgrid state */
