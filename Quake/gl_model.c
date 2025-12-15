@@ -43,6 +43,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
+static qboolean Mod_IsInlineSubmodel (const qmodel_t *mod);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
 static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const char *source_path);
 static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size_t *out_size);
@@ -182,6 +183,11 @@ static int	mod_novis_capacity;
 
 static byte	*mod_decompressed;
 static int	mod_decompressed_capacity;
+
+static qboolean Mod_IsInlineSubmodel (const qmodel_t *mod)
+{
+	return (mod && mod->name[0] == '*');
+}
 
 #define	MAX_MOD_KNOWN	4096 /*johnfitz -- was 512 */
 static qmodel_t	mod_known[MAX_MOD_KNOWN];
@@ -984,16 +990,19 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
 
 static bspx_header_t *BSPX_Setup(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen)
 {
-        if (!Mod_ParseBSPXDirectory(mod, header, filelen))
-                return NULL;
+	if (Mod_IsInlineSubmodel(mod))
+		return NULL;
 
-        if (!mod->bspx_entries_count)
-                return NULL;
+	if (!Mod_ParseBSPXDirectory(mod, header, filelen))
+		return NULL;
 
-        bspx_header_t *out = (bspx_header_t *)Hunk_AllocName(sizeof(*out), loadname);
-        out->numlumps = mod->bspx_entries_count;
-        out->lumps = mod->bspx_entries;
-        return out;
+	if (!mod->bspx_entries_count)
+		return NULL;
+
+	bspx_header_t *out = (bspx_header_t *)Hunk_AllocName(sizeof(*out), loadname);
+	out->numlumps = mod->bspx_entries_count;
+	out->lumps = mod->bspx_entries;
+	return out;
 }
 
 static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lumpname, size_t *lumpsize)
@@ -3195,17 +3204,20 @@ static void LightgridRAW_FillTestCell (lightcell_t *cell)
 
 lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, float cellZ)
 {
+	if (Mod_IsInlineSubmodel(mod))
+		return NULL;
+
 	vec3_t mins, maxs;
 	float cellsize;
 	int nx, ny, nz;
 	size_t count;
 	lightgrid_raw_t *raw = NULL;
 	lightgrid_static_light_t *lights = NULL;
-        int num_lights;
-        float saved_r_lightgrid;
-        float saved_r_lightgrid_force;
+	int num_lights;
+	float saved_r_lightgrid;
+	float saved_r_lightgrid_force;
 
-        if (!mod)
+	if (!mod)
                 return NULL;
 
         LightgridRAW_ResetTraceCache ();
@@ -3653,19 +3665,22 @@ static void Lightgrid_Generate_f (void)
 
 static void Mod_LoadLightgrid (qmodel_t *mod)
 {
-        qboolean have_lightgrid = false;
-        lightgrid_t *lg;
-        char lightgridpath[MAX_QPATH];
-        unsigned int lightgrid_path_id;
-        byte *lightgridbuf;
-        int lightgridsize;
-        void *lglump;
-        int lumpsize;
+	qboolean have_lightgrid = false;
+	lightgrid_t *lg;
+	char lightgridpath[MAX_QPATH];
+	unsigned int lightgrid_path_id;
+	byte *lightgridbuf;
+	int lightgridsize;
+	void *lglump;
+	int lumpsize;
 
-        if (!mod || mod->type != mod_brush)
-                return;
+	if (Mod_IsInlineSubmodel(mod))
+		return;
 
-        lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
+	if (!mod || mod->type != mod_brush)
+		return;
+
+	lglump = Q1BSPX_FindLump ("LIGHTGRID_RAW", &lumpsize);
 
         COM_StripExtension (mod->name, lightgridpath, sizeof(lightgridpath));
         q_strlcat (lightgridpath, ".lightgrid", sizeof(lightgridpath));
