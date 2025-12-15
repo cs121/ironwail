@@ -585,6 +585,7 @@ typedef struct qmodel_s
 	qboolean	viswarn; // for Mod_DecompressVis()
 	qboolean	has_lightdata_rgb;
 	lightgrid_raw_t *lightgrid_raw;
+	lightgrid_octree_t *lightgrid_octree;
 
 	int			bspversion;
 	int			bspx_entries_count;

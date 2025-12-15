@@ -36,6 +36,7 @@ lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw);
 lightgrid_raw_t *Lightgrid_GenerateRaw (const struct qmodel_s *model);
 void Lightgrid_BuildFallback (void);
 void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
+qboolean Lightgrid_SampleProbe (const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe);
 const lightgrid_t *Lightgrid_Get (void);
 void Lightgrid_SetSource (const char *name);
 const char *Lightgrid_GetSource (void);
