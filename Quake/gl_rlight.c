@@ -400,9 +400,9 @@ vec3_t lux01 = {col01[0] * to_signed - 1.f, col01[1] * to_signed - 1.f, col01[2]
 vec3_t lux11 = {col11[0] * to_signed - 1.f, col11[1] * to_signed - 1.f, col11[2] * to_signed - 1.f};
 
 vec3_t top, bottom;
-VectorLerp(lux00, fsfrac, lux10, top);
-VectorLerp(lux01, fsfrac, lux11, bottom);
-VectorLerp(top, ftfrac, bottom, out_dir);
+VectorLerp(lux00, lux10, fsfrac, top);
+VectorLerp(lux01, lux11, fsfrac, bottom);
+VectorLerp(top, bottom, ftfrac, out_dir);
 
 const float len = VectorNormalize(out_dir);
 if (len < 1e-6f || !R_IsFinite(len))
