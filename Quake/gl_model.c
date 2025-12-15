@@ -47,6 +47,7 @@ static qboolean Mod_IsInlineSubmodel (const qmodel_t *mod);
 static qboolean Mod_IsExternalBrushModel (const qmodel_t *mod);
 static qboolean Mod_ShouldSkipBrushExtras (const qmodel_t *mod);
 static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize);
+static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size);
 static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const char *source_path);
 static qboolean LightgridRAW_BuildBuffer (qmodel_t *mod, byte **out_buffer, size_t *out_size);
 static void Lightgrid_Info_f (void);
@@ -2765,6 +2766,161 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         return true;
 }
 
+
+static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
+{
+	const lightgrid_octree_header_t *hdr;
+	const lightgrid_octree_disk_node_t *disk_nodes;
+	lightgrid_octree_t *oct;
+	lightgrid_t *lg;
+	vec3_t mins, maxs;
+	uint32_t version, flags, nodes_offset, leaves_offset, leaf_stride;
+	uint32_t node_count, leaf_count, root_node;
+	size_t nodes_size, leaves_size;
+	const byte *payload;
+
+	if (!mod || !data || size < (int)sizeof(lightgrid_octree_header_t))
+		return false;
+
+	payload = (const byte *)data;
+	hdr = (const lightgrid_octree_header_t *)payload;
+
+	if (LittleLong (hdr->magic) != LIGHTGRID_OCTREE_MAGIC)
+		return false;
+
+	version = LittleLong (hdr->version);
+	if (version != LIGHTGRID_OCTREE_VERSION_1)
+		return false;
+
+	flags = LittleLong (hdr->flags);
+	if ((flags & LIGHTGRID_OCTREE_FLAG_FLOAT32) == 0)
+		return false;
+
+	root_node = LittleLong (hdr->root_node);
+	node_count = LittleLong (hdr->node_count);
+	leaf_count = LittleLong (hdr->leaf_count);
+	nodes_offset = LittleLong (hdr->nodes_offset);
+	leaves_offset = LittleLong (hdr->leaves_offset);
+	leaf_stride = LittleLong (hdr->leaf_stride);
+
+	if (!node_count || !leaf_count)
+		return false;
+
+	if (root_node >= node_count)
+		return false;
+
+	if ((nodes_offset & 3u) || (leaves_offset & 3u) || (leaf_stride & 3u))
+		return false;
+
+	if (nodes_offset > leaves_offset)
+		return false;
+
+	if (leaf_stride < sizeof(lightgrid_octree_disk_leaf_t))
+		return false;
+
+	if ((size_t)node_count > SIZE_MAX / sizeof(lightgrid_octree_disk_node_t))
+		return false;
+	nodes_size = (size_t)node_count * sizeof(lightgrid_octree_disk_node_t);
+	if (nodes_offset + nodes_size > (size_t)size)
+		return false;
+
+	if ((size_t)leaf_count > SIZE_MAX / (size_t)leaf_stride)
+		return false;
+	leaves_size = (size_t)leaf_count * (size_t)leaf_stride;
+	if ((size_t)leaves_offset + leaves_size > (size_t)size)
+		return false;
+
+	mins[0] = LittleFloat (hdr->mins[0]);
+	mins[1] = LittleFloat (hdr->mins[1]);
+	mins[2] = LittleFloat (hdr->mins[2]);
+	maxs[0] = LittleFloat (hdr->maxs[0]);
+	maxs[1] = LittleFloat (hdr->maxs[1]);
+	maxs[2] = LittleFloat (hdr->maxs[2]);
+
+	for (int i = 0; i < 3; i++)
+	{
+		if (!isfinite (mins[i]) || !isfinite (maxs[i]) || mins[i] > maxs[i])
+			return false;
+	}
+
+	disk_nodes = (const lightgrid_octree_disk_node_t *)(payload + nodes_offset);
+	for (size_t i = 0; i < node_count; i++)
+	{
+		for (int c = 0; c < 8; c++)
+		{
+			uint32_t child = LittleLong (disk_nodes[i].child[c]);
+
+			if (child == LIGHTGRID_OCTREE_CHILD_EMPTY)
+				continue;
+			if (child & LIGHTGRID_OCTREE_CHILD_LEAF)
+			{
+				uint32_t leaf_idx = child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
+				if (leaf_idx >= leaf_count)
+					return false;
+			}
+			else if (child >= node_count)
+			{
+				return false;
+			}
+		}
+	}
+
+	oct = (lightgrid_octree_t *)Hunk_AllocName (sizeof(*oct), "lgoctree");
+	if (!oct)
+		return false;
+
+	memset (oct, 0, sizeof(*oct));
+	VectorCopy (mins, oct->mins);
+	VectorCopy (maxs, oct->maxs);
+	oct->flags = flags;
+	oct->root_node = root_node;
+	oct->node_count = node_count;
+	oct->leaf_count = leaf_count;
+
+	oct->nodes = (lightgrid_octree_node_t *)Hunk_AllocName (node_count * sizeof(lightgrid_octree_node_t), "lgoctnodes");
+	oct->leaves = (lightgrid_octree_leaf_t *)Hunk_AllocName (leaf_count * sizeof(lightgrid_octree_leaf_t), "lgoctleaf");
+	if (!oct->nodes || !oct->leaves)
+		return false;
+
+	for (size_t i = 0; i < node_count; i++)
+	{
+		for (int c = 0; c < 8; c++)
+			oct->nodes[i].child[c] = LittleLong (disk_nodes[i].child[c]);
+	}
+
+	for (size_t i = 0; i < leaf_count; i++)
+	{
+		const lightgrid_octree_disk_leaf_t *src = (const lightgrid_octree_disk_leaf_t *)(payload + leaves_offset + i * leaf_stride);
+		lightgrid_octree_leaf_t *dst = &oct->leaves[i];
+
+		dst->rgb[0] = LittleFloat (src->rgb[0]);
+		dst->rgb[1] = LittleFloat (src->rgb[1]);
+		dst->rgb[2] = LittleFloat (src->rgb[2]);
+		dst->dir[0] = LittleFloat (src->dir[0]);
+		dst->dir[1] = LittleFloat (src->dir[1]);
+		dst->dir[2] = LittleFloat (src->dir[2]);
+		dst->intensity = LittleFloat (src->intensity);
+	}
+
+	mod->lightgrid_octree = oct;
+
+	lg = (lightgrid_t *)Hunk_AllocName (sizeof(*lg), "lightgrid");
+	if (!lg)
+		return false;
+
+	memset (lg, 0, sizeof(*lg));
+	lg->backend = LIGHTGRID_BACKEND_OCTREE;
+	lg->octree = oct;
+	lg->source = LIGHTGRID_SRC_OCTREE;
+	VectorCopy (mins, lg->mins);
+	VectorCopy (maxs, lg->maxs);
+
+	Lightgrid_Set (lg);
+
+	Con_Printf ("Loaded LIGHTGRID_OCTREE (%zu nodes, %zu leaves)\n", oct->node_count, oct->leaf_count);
+
+	return true;
+}
 typedef struct lightgrid_static_light_s
 {
         vec3_t origin;
@@ -3593,29 +3749,53 @@ static qboolean BSPX_LightGridLoad (qmodel_t *mod, void *lump, int lumpsize)
         return true;
 }
 
+
+
 static void Lightgrid_Info_f (void)
 {
-        const lightgrid_t *lg = Lightgrid_Get ();
+	const lightgrid_t *lg = Lightgrid_Get ();
 
-        if (!lg)
-        {
-                Con_Printf ("No lightgrid loaded\n");
-                return;
-        }
+	if (!lg)
+	{
+		Con_Printf ("No lightgrid loaded\n");
+		return;
+	}
 
-        {
-                size_t count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
-                double mem_mb = (double)(count * sizeof(lightgrid_probe_t)) / (1024.0 * 1024.0);
+	switch (lg->backend)
+	{
+	case LIGHTGRID_BACKEND_OCTREE:
+	{
+		const lightgrid_octree_t *oct = lg->octree;
 
-                Con_Printf ("Lightgrid: %dx%dx%d cells, cell size %.1f\n", lg->nx, lg->ny, lg->nz, lg->cellsize);
-                Con_Printf ("Memory usage: %.2f MB\n", mem_mb);
-                Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
-        }
+		if (!oct)
+		{
+			Con_Printf ("No lightgrid loaded\n");
+			return;
+		}
+
+		Con_Printf ("Lightgrid (octree): %zu nodes, %zu leaves\n", oct->node_count, oct->leaf_count);
+		Con_Printf ("Bounds: mins (%.1f %.1f %.1f) maxs (%.1f %.1f %.1f)\n",
+			oct->mins[0], oct->mins[1], oct->mins[2], oct->maxs[0], oct->maxs[1], oct->maxs[2]);
+		Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
+		break;
+	}
+
+	case LIGHTGRID_BACKEND_RAW:
+	default:
+	{
+		size_t count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
+		double mem_mb = (double)(count * sizeof(lightgrid_probe_t)) / (1024.0 * 1024.0);
+
+		Con_Printf ("Lightgrid: %dx%dx%d cells, cell size %.1f\n", lg->nx, lg->ny, lg->nz, lg->cellsize);
+		Con_Printf ("Memory usage: %.2f MB\n", mem_mb);
+		Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
+		break;
+	}
+	}
 }
-
 static void Lightgrid_Dump_f (void)
 {
-        const lightgrid_t *lg = Lightgrid_Get ();
+const lightgrid_t *lg = Lightgrid_Get ();
         int argc = Cmd_Argc ();
 
         if (argc < 4)
@@ -3748,7 +3928,7 @@ static void Mod_LoadLightgrid (qmodel_t *mod)
 
                 if (lglump && lumpsize > 0)
                 {
-                        if (BSPX_LightGridLoad (mod, lglump, lumpsize))
+                        if (LightgridOctree_LoadBSPX (mod, lglump, lumpsize))
                         {
                                 Q1BSPX_MarkUsed ("LIGHTGRID_OCTREE");
                                 have_lightgrid = true;

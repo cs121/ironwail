@@ -141,6 +141,9 @@ void Lightgrid_UploadToGPU(lightgrid_t *lg)
     if (!lg)
         return;
 
+    if (lg->backend != LIGHTGRID_BACKEND_RAW || !lg->probes)
+        return;
+
     count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
     if (count == 0 || count > LIGHTGRID_MAX_CELLS)
         return;
@@ -710,24 +713,14 @@ static void Lightgrid_DefaultSample(vec3_t out_color, vec3_t out_dir)
     VectorSet(out_dir, 0,0,1);
 }
 
-static const lightcell_t *Lightgrid_At(const lightgrid_t *lg, int x, int y, int z)
+static qboolean Lightgrid_SampleRawProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
 {
-    return &lg->probes[
-        (size_t)z * lg->ny * lg->nx +
-        (size_t)y * lg->nx +
-        x
-    ];
-}
+    float fx, fy, fz;
+    int x0, x1, y0, y1, z0, z1;
+    const lightcell_t *c000, *c100, *c010, *c110, *c001, *c101, *c011, *c111;
 
-void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
-{
-    const lightgrid_t *lg = Lightgrid_Get();
-
-    if (!lg || !lg->probes || lg->cellsize <= 0.f || !r_lightgrid.value)
-    {
-        Lightgrid_DefaultSample(out_color, out_dir);
-        return;
-    }
+    if (!lg || !lg->probes || !out_probe || lg->cellsize <= 0.f)
+        return false;
 
     vec3_t p;
     VectorCopy(pos, p);
@@ -735,88 +728,198 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
     for (int i = 0; i < 3; i++)
         p[i] = CLAMP(lg->mins[i], p[i], lg->maxs[i]);
 
-    float fx = (p[0] - lg->mins[0]) / lg->cellsize;
-    float fy = (p[1] - lg->mins[1]) / lg->cellsize;
-    float fz = (p[2] - lg->mins[2]) / lg->cellsize;
+    fx = (p[0] - lg->mins[0]) / lg->cellsize;
+    fy = (p[1] - lg->mins[1]) / lg->cellsize;
+    fz = (p[2] - lg->mins[2]) / lg->cellsize;
 
-    int x0 = CLAMP(0, (int)floorf(fx), lg->nx - 1);
-    int y0 = CLAMP(0, (int)floorf(fy), lg->ny - 1);
-    int z0 = CLAMP(0, (int)floorf(fz), lg->nz - 1);
+    x0 = CLAMP(0, (int)floorf(fx), lg->nx - 1);
+    y0 = CLAMP(0, (int)floorf(fy), lg->ny - 1);
+    z0 = CLAMP(0, (int)floorf(fz), lg->nz - 1);
 
-    int x1 = q_min(x0 + 1, lg->nx - 1);
-    int y1 = q_min(y0 + 1, lg->ny - 1);
-    int z1 = q_min(z0 + 1, lg->nz - 1);
+    x1 = q_min(x0 + 1, lg->nx - 1);
+    y1 = q_min(y0 + 1, lg->ny - 1);
+    z1 = q_min(z0 + 1, lg->nz - 1);
 
     fx -= floorf(fx);
     fy -= floorf(fy);
     fz -= floorf(fz);
 
-    const lightcell_t *c000 = Lightgrid_At(lg, x0, y0, z0);
-    const lightcell_t *c100 = Lightgrid_At(lg, x1, y0, z0);
-    const lightcell_t *c010 = Lightgrid_At(lg, x0, y1, z0);
-    const lightcell_t *c110 = Lightgrid_At(lg, x1, y1, z0);
-    const lightcell_t *c001 = Lightgrid_At(lg, x0, y0, z1);
-    const lightcell_t *c101 = Lightgrid_At(lg, x1, y0, z1);
-    const lightcell_t *c011 = Lightgrid_At(lg, x0, y1, z1);
-    const lightcell_t *c111 = Lightgrid_At(lg, x1, y1, z1);
+    c000 = &lg->probes[(z0 * lg->ny + y0) * lg->nx + x0];
+    c100 = &lg->probes[(z0 * lg->ny + y0) * lg->nx + x1];
+    c010 = &lg->probes[(z0 * lg->ny + y1) * lg->nx + x0];
+    c110 = &lg->probes[(z0 * lg->ny + y1) * lg->nx + x1];
+    c001 = &lg->probes[(z1 * lg->ny + y0) * lg->nx + x0];
+    c101 = &lg->probes[(z1 * lg->ny + y0) * lg->nx + x1];
+    c011 = &lg->probes[(z1 * lg->ny + y1) * lg->nx + x0];
+    c111 = &lg->probes[(z1 * lg->ny + y1) * lg->nx + x1];
 
-    vec3_t rgb000,rgb100,rgb010,rgb110,rgb001,rgb101,rgb011,rgb111;
-    vec3_t dir000,dir100,dir010,dir110,dir001,dir101,dir011,dir111;
-    vec3_t c00,c10,c01,c11,c0,c1,c;
-    vec3_t d00,d10,d01,d11,d0,d1,d;
+    for (int i = 0; i < 3; i++)
+    {
+        float c00, c10, c01, c11, c0, c1;
 
-    #define PREMUL(dst, p) \
-        VectorScale(p->rgb, p->intensity, dst)
+        c00 = Lerp(c000->rgb[i], c100->rgb[i], fx);
+        c10 = Lerp(c010->rgb[i], c110->rgb[i], fx);
+        c01 = Lerp(c001->rgb[i], c101->rgb[i], fx);
+        c11 = Lerp(c011->rgb[i], c111->rgb[i], fx);
 
-    PREMUL(rgb000, c000);
-    PREMUL(rgb100, c100);
-    PREMUL(rgb010, c010);
-    PREMUL(rgb110, c110);
-    PREMUL(rgb001, c001);
-    PREMUL(rgb101, c101);
-    PREMUL(rgb011, c011);
-    PREMUL(rgb111, c111);
+        c0 = Lerp(c00, c10, fy);
+        c1 = Lerp(c01, c11, fy);
 
-    #undef PREMUL
+        out_probe->rgb[i] = Lerp(c0, c1, fz);
+    }
 
-    #define PREMUL_DIR(dst,p) VectorScale(p->dir, p->intensity, dst)
+    out_probe->intensity = Lerp(
+        Lerp(Lerp(c000->intensity, c100->intensity, fx), Lerp(c010->intensity, c110->intensity, fx), fy),
+        Lerp(Lerp(c001->intensity, c101->intensity, fx), Lerp(c011->intensity, c111->intensity, fx), fy),
+        fz);
 
-    PREMUL_DIR(dir000, c000);
-    PREMUL_DIR(dir100, c100);
-    PREMUL_DIR(dir010, c010);
-    PREMUL_DIR(dir110, c110);
-    PREMUL_DIR(dir001, c001);
-    PREMUL_DIR(dir101, c101);
-    PREMUL_DIR(dir011, c011);
-    PREMUL_DIR(dir111, c111);
+    out_probe->emissive = Lerp(
+        Lerp(Lerp(c000->emissive, c100->emissive, fx), Lerp(c010->emissive, c110->emissive, fx), fy),
+        Lerp(Lerp(c001->emissive, c101->emissive, fx), Lerp(c011->emissive, c111->emissive, fx), fy),
+        fz);
 
-    #undef PREMUL_DIR
+    out_probe->ao = Lerp(
+        Lerp(Lerp(c000->ao, c100->ao, fx), Lerp(c010->ao, c110->ao, fx), fy),
+        Lerp(Lerp(c001->ao, c101->ao, fx), Lerp(c011->ao, c111->ao, fx), fy),
+        fz);
 
-    VectorLerp(rgb000, rgb100, fx, c00);
-    VectorLerp(rgb010, rgb110, fx, c10);
-    VectorLerp(rgb001, rgb101, fx, c01);
-    VectorLerp(rgb011, rgb111, fx, c11);
+    {
+        vec3_t d00, d10, d01, d11, d0, d1, dir;
 
-    VectorLerp(c00, c10, fy, c0);
-    VectorLerp(c01, c11, fy, c1);
+#define PREMUL_DIR(dst,p) VectorScale((p)->dir, (p)->intensity, (dst))
+        PREMUL_DIR(d00, c000);
+        PREMUL_DIR(d10, c010);
+        PREMUL_DIR(d01, c001);
+        PREMUL_DIR(d11, c011);
+#undef PREMUL_DIR
 
-    VectorLerp(c0, c1, fz, c);
+        VectorLerp(d00, d10, fx, d0);
+        VectorLerp(d01, d11, fx, d1);
 
-    VectorLerp(dir000, dir100, fx, d00);
-    VectorLerp(dir010, dir110, fx, d10);
-    VectorLerp(dir001, dir101, fx, d01);
-    VectorLerp(dir011, dir111, fx, d11);
+        VectorLerp(d0, d1, fz, dir);
+        if (VectorNormalize(dir) == 0.f)
+            VectorSet(dir, 0.f, 0.f, 1.f);
 
-    VectorLerp(d00, d10, fy, d0);
-    VectorLerp(d01, d11, fy, d1);
+        VectorCopy(dir, out_probe->dir);
+    }
 
-    VectorLerp(d0, d1, fz, d);
+    out_probe->sh_valid = false;
+    out_probe->sh9 = NULL;
 
-    if (VectorNormalize(d) == 0)
-        VectorSet(d,0,0,1);
+    return true;
+}
 
-    VectorCopy(c, out_color);
-    VectorCopy(d, out_dir);
+static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
+{
+    const lightgrid_octree_t *oct = lg ? lg->octree : NULL;
+    vec3_t node_mins, node_maxs, center;
+    size_t steps = 0;
+    uint32_t node_index;
+    const lightgrid_octree_node_t *node;
+    const lightgrid_octree_leaf_t *leaf = NULL;
+
+    if (!oct || !out_probe)
+        return false;
+
+    VectorCopy(oct->mins, node_mins);
+    VectorCopy(oct->maxs, node_maxs);
+
+    VectorCopy(pos, center);
+    for (int i = 0; i < 3; i++)
+        center[i] = CLAMP(node_mins[i], center[i], node_maxs[i]);
+
+    node_index = oct->root_node;
+
+    while (steps < oct->node_count)
+    {
+        node = &oct->nodes[node_index];
+
+        VectorLerp(node_mins, node_maxs, 0.5f, center);
+
+        int child = 0;
+        if (pos[0] >= center[0]) child |= 1;
+        if (pos[1] >= center[1]) child |= 2;
+        if (pos[2] >= center[2]) child |= 4;
+
+        uint32_t raw_child = node->child[child];
+
+        if (raw_child == LIGHTGRID_OCTREE_CHILD_EMPTY)
+            break;
+
+        if (raw_child & LIGHTGRID_OCTREE_CHILD_LEAF)
+        {
+            uint32_t leaf_index = raw_child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
+            if (leaf_index >= oct->leaf_count)
+                return false;
+            leaf = &oct->leaves[leaf_index];
+            break;
+        }
+
+        if (raw_child >= oct->node_count)
+            return false;
+
+        /* descend into child node */
+        if (pos[0] >= center[0])
+            node_mins[0] = center[0];
+        else
+            node_maxs[0] = center[0];
+        if (pos[1] >= center[1])
+            node_mins[1] = center[1];
+        else
+            node_maxs[1] = center[1];
+        if (pos[2] >= center[2])
+            node_mins[2] = center[2];
+        else
+            node_maxs[2] = center[2];
+
+        node_index = raw_child;
+        steps++;
+    }
+
+    if (!leaf)
+        return false;
+
+    VectorCopy(leaf->rgb, out_probe->rgb);
+    VectorCopy(leaf->dir, out_probe->dir);
+    if (VectorNormalize(out_probe->dir) == 0.f)
+        VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
+    out_probe->intensity = leaf->intensity;
+    out_probe->ao = 0.f;
+    out_probe->emissive = 0.f;
+    out_probe->sh_valid = false;
+    out_probe->sh9 = NULL;
+    return true;
+}
+
+qboolean Lightgrid_SampleProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
+{
+    if (!lg || !out_probe || !r_lightgrid.value)
+        return false;
+
+    switch (lg->backend)
+    {
+    case LIGHTGRID_BACKEND_OCTREE:
+        return Lightgrid_SampleOctreeProbe(lg, pos, out_probe);
+    case LIGHTGRID_BACKEND_RAW:
+        return Lightgrid_SampleRawProbe(lg, pos, out_probe);
+    default:
+        return false;
+    }
+}
+
+void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+{
+    const lightgrid_t *lg = Lightgrid_Get();
+    lightgrid_probe_t probe;
+
+    if (!Lightgrid_SampleProbe(lg, pos, &probe))
+    {
+        Lightgrid_DefaultSample(out_color, out_dir);
+        return;
+    }
+
+    VectorScale(probe.rgb, probe.intensity, out_color);
+    VectorCopy(probe.dir, out_dir);
 }
 
 /* =====================================================================

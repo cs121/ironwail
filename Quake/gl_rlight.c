@@ -913,22 +913,14 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
 
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
 {
+        static lightgrid_probe_t probe;
         const lightgrid_t *lg = Lightgrid_Get ();
-        int x, y, z;
-
-        if (!lg || !lg->probes || lg->cellsize <= 0.f)
-                return NULL;
 
         if (!R_LightgridEnabledInternal (lg))
                 return NULL;
 
-        x = (int)floorf((pos[0] - lg->mins[0]) / lg->cellsize);
-        y = (int)floorf((pos[1] - lg->mins[1]) / lg->cellsize);
-        z = (int)floorf((pos[2] - lg->mins[2]) / lg->cellsize);
+        if (!Lightgrid_SampleProbe (lg, pos, &probe))
+                return NULL;
 
-        x = CLAMP(0, x, lg->nx - 1);
-        y = CLAMP(0, y, lg->ny - 1);
-        z = CLAMP(0, z, lg->nz - 1);
-
-        return &lg->probes[(z * lg->ny + y) * lg->nx + x];
+        return &probe;
 }

@@ -75,6 +75,7 @@ lightgrid_t *Lightgrid_Alloc(int nx, int ny, int nz, float cellsize, const vec3_
         return NULL;
 
     memset(lg, 0, sizeof(*lg));
+    lg->backend = LIGHTGRID_BACKEND_RAW;
     lg->probes = (lightcell_t *)Hunk_AllocName(total * sizeof(lightcell_t), "lightgrid_probes");
     if (!lg->probes)
         return NULL;
