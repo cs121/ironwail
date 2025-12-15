@@ -358,17 +358,67 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 
 static inline int LightStyleValue (unsigned short style)
 {
-	if (style < 256)
-		return d_lightstylevalue[style];
+if (style < 256)
+return d_lightstylevalue[style];
 
-	return d_lightstylevalue[0];
+return d_lightstylevalue[0];
+}
+
+static qboolean SampleDeluxemapDir(const qmodel_t *model, const msurface_t *surf, int ds, int dt, vec3_t out_dir)
+{
+const byte *samples;
+int smax, tmax;
+int dsfrac = ds & 15, dtfrac = dt & 15;
+float fsfrac = dsfrac * (1.f / 16.f);
+float ftfrac = dtfrac * (1.f / 16.f);
+const float to_signed = 2.f * (1.f / 255.f);
+
+if (!model || !model->lightdirdata || !surf || !surf->luxsamples)
+{
+VectorClear(out_dir);
+return false;
+}
+
+samples = surf->luxsamples;
+smax = (surf->extents[0] >> 4) + 1;
+tmax = (surf->extents[1] >> 4) + 1;
+
+const int s0 = ds >> 4;
+const int t0 = dt >> 4;
+const int stride = smax * 3;
+
+const byte *row0 = samples + t0 * stride;
+const byte *row1 = (t0 + 1 < tmax) ? row0 + stride : row0;
+const byte *col00 = row0 + s0 * 3;
+const byte *col10 = (s0 + 1 < smax) ? col00 + 3 : col00;
+const byte *col01 = row1 + s0 * 3;
+const byte *col11 = (s0 + 1 < smax) ? col01 + 3 : col01;
+
+vec3_t lux00 = {col00[0] * to_signed - 1.f, col00[1] * to_signed - 1.f, col00[2] * to_signed - 1.f};
+vec3_t lux10 = {col10[0] * to_signed - 1.f, col10[1] * to_signed - 1.f, col10[2] * to_signed - 1.f};
+vec3_t lux01 = {col01[0] * to_signed - 1.f, col01[1] * to_signed - 1.f, col01[2] * to_signed - 1.f};
+vec3_t lux11 = {col11[0] * to_signed - 1.f, col11[1] * to_signed - 1.f, col11[2] * to_signed - 1.f};
+
+vec3_t top, bottom;
+VectorLerp(lux00, fsfrac, lux10, top);
+VectorLerp(lux01, fsfrac, lux11, bottom);
+VectorLerp(top, ftfrac, bottom, out_dir);
+
+const float len = VectorNormalize(out_dir);
+if (len < 1e-6f || !R_IsFinite(len))
+{
+VectorClear(out_dir);
+return false;
+}
+
+return true;
 }
 
 static void InterpolateLightmap (qmodel_t *model, vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
 {
-        const byte *samples;
-        int smax, tmax;
-        int dsfrac = ds & 15, dtfrac = dt & 15;
+const byte *samples;
+int smax, tmax;
+int dsfrac = ds & 15, dtfrac = dt & 15;
         float fsfrac = dsfrac * (1.f / 16.f);
         float ftfrac = dtfrac * (1.f / 16.f);
         int bytes_per_pixel;
@@ -526,32 +576,35 @@ static void R_SamplePointInternal (qmodel_t *model, const vec3_t pos, float ofs,
         {
                 InterpolateLightmap (model, out_color, model->surfaces + cache->surfidx - 1, cache->ds, cache->dt, use_rgblight);
                 R_ClampSampleColor (out_color);
-        }
+}
 }
 
-qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb)
+static qboolean R_SampleLightmapAtPointInternal(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir, qboolean want_dir)
 {
-        qmodel_t *model = cl.worldmodel;
-        qboolean use_rgblight;
-        qboolean found = false;
-        float best_dist = FLT_MAX;
+qmodel_t *model = cl.worldmodel;
+qboolean use_rgblight;
+qboolean found = false;
+qboolean dir_valid = false;
+float best_dist = FLT_MAX;
 
-        VectorClear(out_rgb);
+VectorClear(out_rgb);
+if (out_dir)
+VectorClear(out_dir);
 
-        if (!model || !model->lightdata)
-                return false;
+if (!model || !model->lightdata)
+return false;
 
         use_rgblight = model->has_lightdata_rgb && r_rgblighting_enable.value;
 
         vec3_t pos_copy;
         VectorCopy(pos, pos_copy);
         mleaf_t *leaf = Mod_PointInLeaf(pos_copy, model);
-        if (!leaf || leaf->contents == CONTENTS_SOLID)
-                return false;
+if (!leaf || leaf->contents == CONTENTS_SOLID)
+return false;
 
-        for (int i = 0; i < leaf->nummarksurfaces; i++)
-        {
-                msurface_t *surf = &model->surfaces[leaf->firstmarksurface[i]];
+for (int i = 0; i < leaf->nummarksurfaces; i++)
+{
+msurface_t *surf = &model->surfaces[leaf->firstmarksurface[i]];
 
                 if (!surf->texinfo || (surf->flags & SURF_DRAWTILED))
                         continue;
@@ -569,40 +622,57 @@ qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb)
                 ds -= surf->texturemins[0];
                 dt -= surf->texturemins[1];
 
-                if (ds > surf->extents[0] || dt > surf->extents[1])
-                        continue;
+if (ds > surf->extents[0] || dt > surf->extents[1])
+continue;
 
-                vec3_t color;
-                if (surf->samples)
-                {
-                        InterpolateLightmap(model, color, surf, ds, dt, use_rgblight);
-                }
-                else
-                {
-                        R_SurfaceFallbackColor(model, surf, color);
-                }
+vec3_t color;
+if (surf->samples)
+{
+InterpolateLightmap(model, color, surf, ds, dt, use_rgblight);
+}
+else
+{
+R_SurfaceFallbackColor(model, surf, color);
+}
 
-                if (!VectorLength(color))
-                        continue;
+if (!VectorLength(color))
+continue;
 
-                const float adist = fabsf(pdist);
-                if (adist < best_dist)
-                {
-                        VectorCopy(color, out_rgb);
-                        best_dist = adist;
-                        found = true;
-                }
-        }
+const float adist = fabsf(pdist);
+if (adist < best_dist)
+{
+VectorCopy(color, out_rgb);
+best_dist = adist;
+found = true;
 
-        if (found)
-        {
-                VectorScale(out_rgb, 1.f / 255.f, out_rgb);
-                return true;
-        }
+if (want_dir && out_dir && surf->luxsamples)
+dir_valid = SampleDeluxemapDir(model, surf, ds, dt, out_dir);
+}
+}
 
-        R_SurfaceFallbackColor(model, NULL, out_rgb);
-        VectorScale(out_rgb, 1.f / 255.f, out_rgb);
-        return false;
+if (found)
+{
+VectorScale(out_rgb, 1.f / 255.f, out_rgb);
+if (want_dir && out_dir && !dir_valid)
+VectorClear(out_dir);
+return true;
+}
+
+R_SurfaceFallbackColor(model, NULL, out_rgb);
+VectorScale(out_rgb, 1.f / 255.f, out_rgb);
+if (want_dir && out_dir)
+VectorClear(out_dir);
+return false;
+}
+
+qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb)
+{
+return R_SampleLightmapAtPointInternal(pos, out_rgb, NULL, false);
+}
+
+qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir)
+{
+return R_SampleLightmapAtPointInternal(pos, out_rgb, out_dir, true);
 }
 
 /*

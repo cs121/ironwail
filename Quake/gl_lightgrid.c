@@ -998,7 +998,9 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
         mleaf_t *leaf;
         vec3_t pos;
         vec3_t color;
+        vec3_t dir;
         qboolean valid;
+        qboolean dir_valid;
     } lightmap_cache = {0};
 
     const float weight_direct    = r_lightgrid_weight_direct.value;
@@ -1039,6 +1041,8 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
 
                 vec3_t direct = {0, 0, 0};
                 vec3_t lightmap = {0, 0, 0};
+                vec3_t lightmap_dir = {0, 0, 0};
+                qboolean lightmap_dir_valid = false;
                 vec3_t dirsum = {0,0,0};
 
                 vec3_t pos_copy;
@@ -1065,19 +1069,24 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                     if (DotProduct(delta, delta) < 0.0625f)
                     {
                         VectorCopy(lightmap_cache.color, lightmap);
+                        VectorCopy(lightmap_cache.dir, lightmap_dir);
+                        lightmap_dir_valid = lightmap_cache.dir_valid;
                         lightmap_found = true;
                     }
                 }
 
                 if (!lightmap_found)
                 {
-                    lightmap_found = R_SampleLightmapAtPoint(pos, lightmap);
+                    lightmap_found = R_SampleLightmapAndDeluxemapAtPoint(pos, lightmap, lightmap_dir);
+                    lightmap_dir_valid = VectorLength(lightmap_dir) > 0.f;
                     if (lightmap_found)
                     {
                         VectorCopy(lightmap, lightmap_cache.color);
                         VectorCopy(pos, lightmap_cache.pos);
                         lightmap_cache.leaf = leaf;
                         lightmap_cache.valid = true;
+                        VectorCopy(lightmap_dir, lightmap_cache.dir);
+                        lightmap_cache.dir_valid = lightmap_dir_valid;
                     }
                 }
 
@@ -1125,6 +1134,38 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                 if (weight_lightmap > 0.f)
                     VectorMA(cell->rgb, weight_lightmap, lightmap, cell->rgb);
 
+                if (weight_lightmap > 0.f && lightmap_dir_valid)
+                {
+                    const float lm_luma = DotProduct(lightmap, luminance_weights) * weight_lightmap;
+                    if (lm_luma > 0.f)
+                        VectorMA(dirsum, lm_luma, lightmap_dir, dirsum);
+                }
+
+                if (weight_direct > 0.f)
+                {
+                    vec3_t direct_dir;
+                    qboolean direct_dir_valid = false;
+
+                    if (lightmap_dir_valid)
+                    {
+                        VectorCopy(lightmap_dir, direct_dir);
+                        direct_dir_valid = true;
+                    }
+                    else
+                    {
+                        vec3_t unused_color;
+                        if (R_SampleLightmapAndDeluxemapAtPoint(pos, unused_color, direct_dir))
+                            direct_dir_valid = VectorLength(direct_dir) > 0.f;
+                    }
+
+                    if (direct_dir_valid)
+                    {
+                        const float dir_luma = DotProduct(direct, luminance_weights) * weight_direct;
+                        if (dir_luma > 0.f)
+                            VectorMA(dirsum, dir_luma, direct_dir, dirsum);
+                    }
+                }
+
                 Lightgrid_AddDlights(pos, cell->rgb, dirsum);
 
                 /* Second bounce approximation */
@@ -1148,9 +1189,13 @@ lightgrid_raw_t *Lightgrid_GenerateRaw(const struct qmodel_s *model)
                                 continue;
 
                             vec3_t hit_color;
-                            if (R_SampleLightmapAtPoint(impact, hit_color))
+                            vec3_t hit_dir;
+                            if (R_SampleLightmapAndDeluxemapAtPoint(impact, hit_color, hit_dir))
                             {
                                 VectorMA(bounce_accum, bounce_scale, hit_color, bounce_accum);
+                                const float hit_luma = DotProduct(hit_color, luminance_weights) * bounce_scale;
+                                if (hit_luma > 0.f && VectorLength(hit_dir) > 0.f)
+                                    VectorMA(dirsum, hit_luma, hit_dir, dirsum);
                                 residual -= bounce_scale;
                             }
                         }
