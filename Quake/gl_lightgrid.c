@@ -18,9 +18,12 @@ extern vec3_t lightcolor;
 
 static lightgrid_t *current_lightgrid = NULL;
 static char lightgrid_source[16] = "NONE";
+static char lightgrid_backend_value[16] = "NONE";
 
 cvar_t r_lightgrid            = { "r_lightgrid", "1", CVAR_ARCHIVE };
+cvar_t r_lightgrid_backend    = { "r_lightgrid_backend", "NONE", CVAR_ROM };
 cvar_t r_lightgrid_debug      = { "r_lightgrid_debug", "0", CVAR_NONE };
+cvar_t r_lightgrid_octree_debug = { "r_lightgrid_octree_debug", "0", CVAR_NONE };
 cvar_t r_lightgrid_force      = { "r_lightgrid_force", "0", CVAR_ARCHIVE };
 cvar_t r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
 cvar_t r_lightgrid_weight_direct = { "r_lightgrid_weight_direct", "0.3", CVAR_ARCHIVE };
@@ -52,6 +55,12 @@ static qboolean R_IsFinite (float v)
 static void  Lightgrid_AddDlights(const vec3_t pos, vec3_t color, vec3_t dirsum);
 static float Lightgrid_Random01(void);
 static void  Lightgrid_FillRandomCell(lightcell_t *cell);
+static void  Lightgrid_Dump_f(void);
+static void  Lightgrid_UpdateBackendCvar(lightgrid_backend_t backend);
+static void  Lightgrid_LogBackendUsage(const lightgrid_t *lg);
+static const char *Lightgrid_BackendName(lightgrid_backend_t backend);
+static size_t Lightgrid_BackendBytes(const lightgrid_t *lg);
+static int   Lightgrid_OctreeDepth(const lightgrid_octree_t *oct);
 
 /* =====================================================================
    Init / Shutdown
@@ -60,7 +69,9 @@ static void  Lightgrid_FillRandomCell(lightcell_t *cell);
 void Lightgrid_Init(void)
 {
     Cvar_RegisterVariable(&r_lightgrid);
+    Cvar_RegisterVariable(&r_lightgrid_backend);
     Cvar_RegisterVariable(&r_lightgrid_debug);
+    Cvar_RegisterVariable(&r_lightgrid_octree_debug);
     Cvar_RegisterVariable(&r_lightgrid_force);
     Cvar_RegisterVariable(&r_generate_lightgrid_test);
     Cvar_RegisterVariable(&r_lightgrid_weight_direct);
@@ -76,6 +87,8 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_ktx_export);
     Cvar_RegisterVariable(&r_lightgrid_ktx_prefer);
 #endif
+    Cmd_AddCommand("lightgrid_dump", Lightgrid_Dump_f);
+
     Lightgrid_Clear();
 }
 
@@ -114,6 +127,7 @@ void Lightgrid_Clear(void)
     current_lightgrid = NULL;
     cl.lightgrid = NULL;
     q_strlcpy(lightgrid_source, "NONE", sizeof(lightgrid_source));
+    Lightgrid_UpdateBackendCvar(LIGHTGRID_BACKEND_NONE);
 }
 
 static void Lightgrid_UploadTexture3D(GLuint *tex, GLenum internal_format, GLenum format, const float *payload, int nx, int ny, int nz)
@@ -141,6 +155,10 @@ void Lightgrid_UploadToGPU(lightgrid_t *lg)
     if (!lg)
         return;
 
+    /*
+     * OCTREE stays CPU-only for now (Option A from the design note) to
+     * avoid churn in the GPU sampling path. Keep the existing RAW upload.
+     */
     if (lg->backend != LIGHTGRID_BACKEND_RAW || !lg->probes)
         return;
 
@@ -186,6 +204,266 @@ done:
         free(intensity_payload);
     if (ao_payload)
         free(ao_payload);
+}
+
+/* =====================================================================
+   Backend helpers
+   ===================================================================== */
+
+static const char *Lightgrid_BackendName(lightgrid_backend_t backend)
+{
+    switch (backend)
+    {
+    case LIGHTGRID_BACKEND_RAW:    return "RAW";
+    case LIGHTGRID_BACKEND_OCTREE: return "OCTREE";
+    default:                       return "NONE";
+    }
+}
+
+static void Lightgrid_UpdateBackendCvar(lightgrid_backend_t backend)
+{
+    q_strlcpy(lightgrid_backend_value, Lightgrid_BackendName(backend), sizeof(lightgrid_backend_value));
+    Cvar_SetROM("r_lightgrid_backend", lightgrid_backend_value);
+}
+
+static size_t Lightgrid_BackendBytes(const lightgrid_t *lg)
+{
+    if (!lg)
+        return 0;
+
+    switch (lg->backend)
+    {
+    case LIGHTGRID_BACKEND_RAW:
+    {
+        size_t count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
+        if (!lg->probes)
+            return 0;
+        return count * sizeof(*lg->probes);
+    }
+    case LIGHTGRID_BACKEND_OCTREE:
+        if (!lg->octree)
+            return 0;
+        return lg->octree->node_count * sizeof(*lg->octree->nodes) +
+               lg->octree->leaf_count * sizeof(*lg->octree->leaves);
+    default:
+        return 0;
+    }
+}
+
+static qboolean Lightgrid_ValidateLeaf(const lightgrid_octree_leaf_t *leaf, size_t leaf_index, qboolean verbose)
+{
+    if (!leaf)
+        return false;
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (!R_IsFinite(leaf->rgb[i]) || !R_IsFinite(leaf->dir[i]))
+        {
+            if (verbose)
+                Con_Printf("LIGHTGRID_OCTREE leaf %zu has non-finite payload\n", leaf_index);
+            return false;
+        }
+    }
+
+    if (!R_IsFinite(leaf->intensity) || leaf->intensity < 0.f)
+    {
+        if (verbose)
+            Con_Printf("LIGHTGRID_OCTREE leaf %zu has invalid intensity\n", leaf_index);
+        return false;
+    }
+
+    return true;
+}
+
+qboolean Lightgrid_ValidateOctree(const lightgrid_octree_t *oct, qboolean verbose)
+{
+    if (!oct)
+        return false;
+
+    if (!oct->node_count || !oct->leaf_count)
+    {
+        if (verbose)
+            Con_Printf("LIGHTGRID_OCTREE missing nodes or leaves\n");
+        return false;
+    }
+
+    if (oct->root_node >= oct->node_count)
+    {
+        if (verbose)
+            Con_Printf("LIGHTGRID_OCTREE root %u outside node count %zu\n", oct->root_node, oct->node_count);
+        return false;
+    }
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (!R_IsFinite(oct->mins[i]) || !R_IsFinite(oct->maxs[i]) || oct->mins[i] > oct->maxs[i])
+        {
+            if (verbose)
+                Con_Printf("LIGHTGRID_OCTREE invalid bounds [%f %f] axis %d\n", oct->mins[i], oct->maxs[i], i);
+            return false;
+        }
+    }
+
+    if (!oct->nodes || !oct->leaves)
+        return false;
+
+    for (size_t i = 0; i < oct->node_count; i++)
+    {
+        for (int c = 0; c < 8; c++)
+        {
+            uint32_t child = oct->nodes[i].child[c];
+            if (child == LIGHTGRID_OCTREE_CHILD_EMPTY)
+                continue;
+
+            if (child & LIGHTGRID_OCTREE_CHILD_LEAF)
+            {
+                uint32_t leaf_index = child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
+                if (leaf_index >= oct->leaf_count)
+                {
+                    if (verbose)
+                        Con_Printf("LIGHTGRID_OCTREE node %zu child %d references leaf %u >= %zu\n", i, c, leaf_index, oct->leaf_count);
+                    return false;
+                }
+            }
+            else if (child >= oct->node_count)
+            {
+                if (verbose)
+                    Con_Printf("LIGHTGRID_OCTREE node %zu child %d references node %u >= %zu\n", i, c, child, oct->node_count);
+                return false;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < oct->leaf_count; i++)
+    {
+        if (!Lightgrid_ValidateLeaf(&oct->leaves[i], i, verbose))
+            return false;
+    }
+
+    if (verbose)
+        Con_Printf("LIGHTGRID_OCTREE validated (%zu nodes, %zu leaves)\n", oct->node_count, oct->leaf_count);
+
+    return true;
+}
+
+static int Lightgrid_OctreeDepth(const lightgrid_octree_t *oct)
+{
+    int max_depth = 0;
+
+    if (!oct || !oct->nodes || !oct->node_count)
+        return 0;
+
+    size_t stack_size = oct->node_count;
+    uint32_t *node_stack = (uint32_t *)malloc(stack_size * sizeof(uint32_t));
+    int *depth_stack = (int *)malloc(stack_size * sizeof(int));
+
+    if (!node_stack || !depth_stack)
+        goto done;
+
+    size_t top = 0;
+    node_stack[top] = oct->root_node;
+    depth_stack[top] = 1;
+    top++;
+
+    while (top > 0)
+    {
+        top--;
+        uint32_t node_index = node_stack[top];
+        int depth = depth_stack[top];
+        max_depth = q_max(max_depth, depth);
+
+        const lightgrid_octree_node_t *node = &oct->nodes[node_index];
+        for (int c = 0; c < 8; c++)
+        {
+            uint32_t child = node->child[c];
+            if (child == LIGHTGRID_OCTREE_CHILD_EMPTY || (child & LIGHTGRID_OCTREE_CHILD_LEAF))
+                continue;
+
+            if (child < oct->node_count && top < stack_size)
+            {
+                node_stack[top] = child;
+                depth_stack[top] = depth + 1;
+                top++;
+            }
+        }
+    }
+
+done:
+    if (node_stack)
+        free(node_stack);
+    if (depth_stack)
+        free(depth_stack);
+
+    return max_depth;
+}
+
+static void Lightgrid_LogBackendUsage(const lightgrid_t *lg)
+{
+    const char *name = Lightgrid_BackendName(lg ? lg->backend : LIGHTGRID_BACKEND_NONE);
+    double mem_mb = Lightgrid_BackendBytes(lg) / (1024.0 * 1024.0);
+
+    switch (lg ? lg->backend : LIGHTGRID_BACKEND_NONE)
+    {
+    case LIGHTGRID_BACKEND_RAW:
+        Con_Printf("Lightgrid backend: %s (%dx%dx%d, %.2f MB)\n", name, lg->nx, lg->ny, lg->nz, mem_mb);
+        break;
+    case LIGHTGRID_BACKEND_OCTREE:
+        Con_Printf("Lightgrid backend: %s (%zu nodes, %zu leaves, %.2f MB)\n", name,
+            lg->octree ? lg->octree->node_count : 0,
+            lg->octree ? lg->octree->leaf_count : 0,
+            mem_mb);
+        break;
+    default:
+        Con_Printf("Lightgrid backend: %s (0.00 MB)\n", name);
+        break;
+    }
+}
+
+static void Lightgrid_DumpOctree(const lightgrid_octree_t *oct)
+{
+    if (!oct)
+    {
+        Con_Printf("No LIGHTGRID_OCTREE present\n");
+        return;
+    }
+
+    int depth = Lightgrid_OctreeDepth(oct);
+    Con_Printf("LIGHTGRID_OCTREE: %zu nodes, %zu leaves, depth %d, flags 0x%08x\n",
+        oct->node_count, oct->leaf_count, depth, oct->flags);
+    Con_Printf(" bounds: mins(%.1f %.1f %.1f) maxs(%.1f %.1f %.1f)\n",
+        oct->mins[0], oct->mins[1], oct->mins[2],
+        oct->maxs[0], oct->maxs[1], oct->maxs[2]);
+    Con_Printf(" payload: float32 rgb+dir+intensity\n");
+
+    if (r_lightgrid_octree_debug.value > 0.f)
+        Lightgrid_ValidateOctree(oct, true);
+}
+
+static void Lightgrid_Dump_f(void)
+{
+    const lightgrid_t *lg = Lightgrid_Get();
+
+    if (!lg)
+    {
+        Con_Printf("No lightgrid loaded\n");
+        return;
+    }
+
+    Con_Printf("Active backend: %s\n", Lightgrid_BackendName(lg->backend));
+
+    switch (lg->backend)
+    {
+    case LIGHTGRID_BACKEND_RAW:
+        Con_Printf("LIGHTGRID_RAW: %dx%dx%d cell %.1f origin(%.1f %.1f %.1f)\n",
+            lg->nx, lg->ny, lg->nz, lg->cellsize, lg->mins[0], lg->mins[1], lg->mins[2]);
+        break;
+    case LIGHTGRID_BACKEND_OCTREE:
+        Lightgrid_DumpOctree(lg->octree);
+        break;
+    default:
+        Con_Printf("No backend information available\n");
+        break;
+    }
 }
 
 /* =====================================================================
@@ -821,12 +1099,16 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
     if (!oct || !out_probe)
         return false;
 
+    for (int i = 0; i < 3; i++)
+    {
+        if (pos[i] < oct->mins[i] || pos[i] > oct->maxs[i])
+            return false; // Let caller fall back (RAW clamps instead)
+    }
+
     VectorCopy(oct->mins, node_mins);
     VectorCopy(oct->maxs, node_maxs);
 
     VectorCopy(pos, center);
-    for (int i = 0; i < 3; i++)
-        center[i] = CLAMP(node_mins[i], center[i], node_maxs[i]);
 
     node_index = oct->root_node;
 
@@ -1448,6 +1730,7 @@ void Lightgrid_Set(lightgrid_t *lg)
 
     current_lightgrid = lg;
     cl.lightgrid = lg;
+    Lightgrid_UpdateBackendCvar(lg->backend);
 
     switch (lg->source)
     {
@@ -1467,6 +1750,8 @@ void Lightgrid_Set(lightgrid_t *lg)
         q_strlcpy(lightgrid_source, "UNKNOWN", sizeof(lightgrid_source));
         break;
     }
+
+    Lightgrid_LogBackendUsage(lg);
 }
 
 const lightgrid_t *Lightgrid_Get(void)

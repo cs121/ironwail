@@ -2888,25 +2888,28 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 			oct->nodes[i].child[c] = LittleLong (disk_nodes[i].child[c]);
 	}
 
-	for (size_t i = 0; i < leaf_count; i++)
-	{
-		const lightgrid_octree_disk_leaf_t *src = (const lightgrid_octree_disk_leaf_t *)(payload + leaves_offset + i * leaf_stride);
-		lightgrid_octree_leaf_t *dst = &oct->leaves[i];
+        for (size_t i = 0; i < leaf_count; i++)
+        {
+                const lightgrid_octree_disk_leaf_t *src = (const lightgrid_octree_disk_leaf_t *)(payload + leaves_offset + i * leaf_stride);
+                lightgrid_octree_leaf_t *dst = &oct->leaves[i];
 
 		dst->rgb[0] = LittleFloat (src->rgb[0]);
 		dst->rgb[1] = LittleFloat (src->rgb[1]);
 		dst->rgb[2] = LittleFloat (src->rgb[2]);
 		dst->dir[0] = LittleFloat (src->dir[0]);
 		dst->dir[1] = LittleFloat (src->dir[1]);
-		dst->dir[2] = LittleFloat (src->dir[2]);
-		dst->intensity = LittleFloat (src->intensity);
-	}
+                dst->dir[2] = LittleFloat (src->dir[2]);
+                dst->intensity = LittleFloat (src->intensity);
+        }
 
-	mod->lightgrid_octree = oct;
+        if (!Lightgrid_ValidateOctree (oct, r_lightgrid_octree_debug.value > 0.f))
+                return false;
 
-	lg = (lightgrid_t *)Hunk_AllocName (sizeof(*lg), "lightgrid");
-	if (!lg)
-		return false;
+        mod->lightgrid_octree = oct;
+
+        lg = (lightgrid_t *)Hunk_AllocName (sizeof(*lg), "lightgrid");
+        if (!lg)
+                return false;
 
 	memset (lg, 0, sizeof(*lg));
 	lg->backend = LIGHTGRID_BACKEND_OCTREE;

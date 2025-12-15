@@ -14,7 +14,9 @@ typedef struct sh9_color_s sh9_color_t;
 typedef struct lightgrid_raw_s lightgrid_raw_t;
 
 extern cvar_t r_lightgrid;
+extern cvar_t r_lightgrid_backend;
 extern cvar_t r_lightgrid_debug;
+extern cvar_t r_lightgrid_octree_debug;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_generate_lightgrid_test;
 extern cvar_t r_lightgrid_weight_direct;
@@ -35,6 +37,7 @@ void Lightgrid_UploadToGPU (lightgrid_t *lg);
 lightgrid_t *Lightgrid_FromRaw (const lightgrid_raw_t *raw);
 lightgrid_raw_t *Lightgrid_GenerateRaw (const struct qmodel_s *model);
 void Lightgrid_BuildFallback (void);
+qboolean Lightgrid_ValidateOctree (const lightgrid_octree_t *oct, qboolean verbose);
 void Lightgrid_Sample (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
 qboolean Lightgrid_SampleProbe (const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe);
 const lightgrid_t *Lightgrid_Get (void);
