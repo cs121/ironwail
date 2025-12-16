@@ -2701,7 +2701,6 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
 #undef READ_COMPONENT_FLOAT
         }
 
-        Lightgrid_Clear ();
         lg = Lightgrid_FromRaw (raw);
         if (!lg)
                 return false;
@@ -2759,7 +2758,7 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         }
 
         mod->lightgrid_raw = raw;
-        cl.lightgrid = lg;
+        Lightgrid_Set (lg);
 
         Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
 
