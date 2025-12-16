@@ -2563,9 +2563,13 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         unsigned int encoding = LIGHTGRID_RAW_ENCODING_FLOAT32;
         unsigned int version = LIGHTGRID_RAW_VERSION_1;
         size_t payload_size = (size_t)size;
+	const char *fail_reason = NULL;
+
+#define LIGHTGRIDRAW_FAIL(msg) do { fail_reason = (msg); goto fail; } while (0)
+
 
         if (!data || size <= 0)
-                return false;
+                LIGHTGRIDRAW_FAIL ("missing data");
 
         if ((size_t)size >= sizeof(lightgrid_raw_header_t))
         {
@@ -2574,7 +2578,7 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
                 {
                         version = LittleLong (hdr->version);
                         if (version != LIGHTGRID_RAW_VERSION_2)
-                                return false;
+                                LIGHTGRIDRAW_FAIL ("unsupported LIGHTGRID_RAW version");
 
                         components = LittleLong (hdr->components);
                         encoding = LittleLong (hdr->encoding);
@@ -2593,7 +2597,7 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         if (version == LIGHTGRID_RAW_VERSION_1)
         {
                 if (payload_size < header_size)
-                        return false;
+                        LIGHTGRIDRAW_FAIL ("truncated LIGHTGRID_RAW header");
 
                 nx = LittleLong (((int *)payload)[0]);
                 ny = LittleLong (((int *)payload)[1]);
@@ -2608,42 +2612,42 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         }
 
         if (nx <= 0 || ny <= 0 || nz <= 0)
-                return false;
+                LIGHTGRIDRAW_FAIL ("invalid dimensions");
 
         count = (size_t)nx * (size_t)ny * (size_t)nz;
         if (!count || count > (SIZE_MAX / sizeof(lightcell_t)))
-                return false;
+                LIGHTGRIDRAW_FAIL ("overflow calculating lightgrid cell count");
 
         if (cellsize <= 0.f)
-                return false;
+                LIGHTGRIDRAW_FAIL ("invalid cell size");
 
         if (version == LIGHTGRID_RAW_VERSION_2 &&
                 (components & LIGHTGRID_RAW_COMPONENTS_BASE) != LIGHTGRID_RAW_COMPONENTS_BASE)
-                return false;
+                LIGHTGRIDRAW_FAIL ("missing required base components");
 
         const size_t cell_size = (version == LIGHTGRID_RAW_VERSION_1)
                 ? sizeof(vec3_t) * 2 + sizeof(float)
                 : LightgridRAW_CellSizeBytes (components, encoding);
 
         if (!cell_size)
-                return false;
+                LIGHTGRIDRAW_FAIL ("unsupported LIGHTGRID_RAW encoding/components");
 
         if (payload_size < header_size)
-                return false;
+                LIGHTGRIDRAW_FAIL ("payload shorter than header");
         payload_size -= header_size;
 
         expected = cell_size * count;
         if (payload_size < expected)
-                return false;
+                LIGHTGRIDRAW_FAIL ("payload shorter than expected lightgrid data");
 
         raw = (lightgrid_raw_t *)Hunk_AllocName (sizeof(*raw), "lightgrid_raw");
         if (!raw)
-                return false;
+                LIGHTGRIDRAW_FAIL ("failed to allocate lightgrid_raw");
 
         memset (raw, 0, sizeof(*raw));
         raw->cells = (lightcell_t *)Hunk_AllocName (count * sizeof(lightcell_t), "lightgrid_cells");
         if (!raw->cells)
-                return false;
+                LIGHTGRIDRAW_FAIL ("failed to allocate lightgrid cells");
 
         raw->nx = nx;
         raw->ny = ny;
@@ -2708,7 +2712,7 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
 
         lg = Lightgrid_FromRaw (raw);
         if (!lg)
-                return false;
+                LIGHTGRIDRAW_FAIL ("Lightgrid_FromRaw returned NULL");
 
         if (fabsf (cellsize - LIGHTGRID_STANDARD_CELLSIZE) > 0.01f)
         {
@@ -2750,24 +2754,35 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
                 }
         }
 
-        int expected_nx, expected_ny, expected_nz;
-        LightgridRAW_ExpectedDims (mod, &expected_nx, &expected_ny, &expected_nz);
+	int expected_nx, expected_ny, expected_nz;
+	LightgridRAW_ExpectedDims (mod, &expected_nx, &expected_ny, &expected_nz);
 
-        if (!LightgridRAW_MatchesModel (mod, raw))
-        {
-                Con_Warning ("Discarded %s: expected lightgrid %dx%dx%d with cell size %.1f and origin (%.0f %.0f %.0f)\n",
-                        source_path && source_path[0] ? source_path : "external lightgrid",
-                        expected_nx, expected_ny, expected_nz, LIGHTGRID_STANDARD_CELLSIZE,
-                        mod->mins[0], mod->mins[1], mod->mins[2]);
-                return false;
-        }
+	if (!LightgridRAW_MatchesModel (mod, raw))
+	{
+		Con_Warning ("Discarded %s: expected lightgrid %dx%dx%d with cell size %.1f and origin (%.0f %.0f %.0f)\n",
+			source_path && source_path[0] ? source_path : "external lightgrid",
+			expected_nx, expected_ny, expected_nz, LIGHTGRID_STANDARD_CELLSIZE,
+			mod->mins[0], mod->mins[1], mod->mins[2]);
+		LIGHTGRIDRAW_FAIL ("lightgrid did not match model");
+	}
 
-        mod->lightgrid_raw = raw;
-        Lightgrid_Set (lg);
+	mod->lightgrid_raw = raw;
+	Lightgrid_Set (lg);
 
-        Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
+	Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
 
-        return true;
+	return true;
+
+fail:
+	Con_DPrintf ("LIGHTGRID_RAW: failed to load %s: %s (version %u, dims %dx%dx%d, cell size %.1f, origin (%.0f %.0f %.0f), components 0x%x, encoding %u)\n",
+		source_path && source_path[0] ? source_path : "unknown source",
+		fail_reason ? fail_reason : "unknown error",
+		version, nx, ny, nz, cellsize,
+		origin[0], origin[1], origin[2], components, encoding);
+	return false;
+
+	#undef LIGHTGRIDRAW_FAIL
+
 }
 
 static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path)
