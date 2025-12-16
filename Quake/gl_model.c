@@ -2759,11 +2759,12 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
 
 	if (!LightgridRAW_MatchesModel (mod, raw))
 	{
-		Con_Warning ("Discarded %s: expected lightgrid %dx%dx%d with cell size %.1f and origin (%.0f %.0f %.0f)\n",
+		Con_Warning ("Loaded %s with mismatched bounds: expected %dx%dx%d @ %.1f origin (%.0f %.0f %.0f), got %dx%dx%d @ %.1f origin (%.0f %.0f %.0f)\n",
 			source_path && source_path[0] ? source_path : "external lightgrid",
 			expected_nx, expected_ny, expected_nz, LIGHTGRID_STANDARD_CELLSIZE,
-			mod->mins[0], mod->mins[1], mod->mins[2]);
-		LIGHTGRIDRAW_FAIL ("lightgrid did not match model");
+			mod->mins[0], mod->mins[1], mod->mins[2],
+			raw->nx, raw->ny, raw->nz, raw->cellSize,
+			raw->origin[0], raw->origin[1], raw->origin[2]);
 	}
 
 	mod->lightgrid_raw = raw;
