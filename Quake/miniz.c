@@ -1,4 +1,5 @@
 #include "miniz.h"
+#include <stdio.h>
 
 /**************************************************************************
  *
@@ -1487,9 +1488,85 @@ static mz_bool mz_zip_reader_end_internal(mz_zip_archive *pZip, mz_bool set_last
     return status;
 }
 
+static size_t mz_zip_file_read(void *pOpaque, mz_uint64 file_ofs, void *pBuf, size_t n)
+{
+    FILE *pFile = (FILE *)pOpaque;
+
+    if (!pFile)
+        return 0;
+
+#if defined(_WIN32)
+    if (_fseeki64(pFile, file_ofs, SEEK_SET))
+        return 0;
+#else
+    if (fseeko(pFile, (off_t)file_ofs, SEEK_SET))
+        return 0;
+#endif
+
+    return fread(pBuf, 1, n, pFile);
+}
+
+static mz_bool mz_zip_file_needs_keepalive(void *pOpaque)
+{
+    (void)pOpaque;
+    return MZ_FALSE;
+}
+
 mz_bool mz_zip_reader_end(mz_zip_archive *pZip)
 {
-    return mz_zip_reader_end_internal(pZip, MZ_TRUE);
+    mz_bool status = mz_zip_reader_end_internal(pZip, MZ_TRUE);
+
+    if (pZip && pZip->m_pRead == mz_zip_file_read && pZip->m_pIO_opaque)
+    {
+        fclose((FILE *)pZip->m_pIO_opaque);
+        pZip->m_pIO_opaque = NULL;
+    }
+
+    return status;
+}
+mz_bool mz_zip_reader_init_file(mz_zip_archive *pZip, const char *pFilename, mz_uint flags)
+{
+    FILE *pFile;
+    mz_uint64 file_size;
+
+    if ((!pZip) || (!pFilename))
+        return MZ_FALSE;
+
+    pFile = fopen(pFilename, "rb");
+    if (!pFile)
+        return mz_zip_set_error(pZip, MZ_ZIP_FILE_OPEN_FAILED);
+
+#if defined(_WIN32)
+    if (_fseeki64(pFile, 0, SEEK_END))
+    {
+        fclose(pFile);
+        return mz_zip_set_error(pZip, MZ_ZIP_FILE_OPEN_FAILED);
+    }
+    file_size = _ftelli64(pFile);
+    if (_fseeki64(pFile, 0, SEEK_SET))
+    {
+        fclose(pFile);
+        return mz_zip_set_error(pZip, MZ_ZIP_FILE_OPEN_FAILED);
+    }
+#else
+    if (fseeko(pFile, 0, SEEK_END))
+    {
+        fclose(pFile);
+        return mz_zip_set_error(pZip, MZ_ZIP_FILE_OPEN_FAILED);
+    }
+    file_size = (mz_uint64)ftello(pFile);
+    if (fseeko(pFile, 0, SEEK_SET))
+    {
+        fclose(pFile);
+        return mz_zip_set_error(pZip, MZ_ZIP_FILE_OPEN_FAILED);
+    }
+#endif
+
+    pZip->m_pIO_opaque = pFile;
+    pZip->m_pRead = mz_zip_file_read;
+    pZip->m_pNeeds_keepalive = mz_zip_file_needs_keepalive;
+
+    return mz_zip_reader_init(pZip, file_size, flags);
 }
 mz_bool mz_zip_reader_init(mz_zip_archive *pZip, mz_uint64 size, mz_uint flags)
 {

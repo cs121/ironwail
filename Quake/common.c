@@ -47,7 +47,7 @@ qboolean		fitzmode;
 
 static void COM_Path_f (void);
 static qboolean		COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size);
-static int QDECL COM_Pk3Compare (const void *a, const void *b);
+static int COM_Pk3Compare (const void *a, const void *b);
 
 // if a packfile directory differs from this, it is assumed to be hacked
 #define PAK0_COUNT		339	/* id1/pak0.pak - v1.0x */
@@ -1949,7 +1949,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 					if (handle)
 					{
 						*handle = Sys_FileOpenTmp (extracted, extracted_size);
-						mz_free (extracted);
+MZ_FREE (extracted);
 						if (*handle == -1)
 						{
 							com_filesize = -1;
@@ -1961,7 +1961,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 					else if (file)
 					{ /* open a new temporary file on the zip entry */
 						*file = Sys_fopen_tmp (extracted, extracted_size);
-						mz_free (extracted);
+MZ_FREE (extracted);
 						if (!*file)
 						{
 							com_filesize = -1;
@@ -2509,7 +2509,7 @@ static void COM_AddEnginePak (void)
 	com_modified = modified;
 }
 
-static int QDECL COM_Pk3Compare (const void *a, const void *b)
+static int COM_Pk3Compare (const void *a, const void *b)
 {
         const char *left = *(const char *const *) a;
         const char *right = *(const char *const *) b;

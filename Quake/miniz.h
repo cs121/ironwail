@@ -649,6 +649,8 @@ typedef struct
 /* Inits a ZIP archive reader. */
 /* These functions read and validate the archive's central directory. */
 MINIZ_EXPORT mz_bool mz_zip_reader_init(mz_zip_archive *pZip, mz_uint64 size, mz_uint flags);
+/* Convenience helper to initialize a reader against a stdio-backed file. */
+MINIZ_EXPORT mz_bool mz_zip_reader_init_file(mz_zip_archive *pZip, const char *pFilename, mz_uint flags);
 
 /* Ends archive reading, freeing all allocations, and closing the input archive file if mz_zip_reader_init_file() was used. */
 MINIZ_EXPORT mz_bool mz_zip_reader_end(mz_zip_archive *pZip);
