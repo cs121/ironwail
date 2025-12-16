@@ -144,6 +144,11 @@ qboolean KTX2_IsValid(const uint8_t *data, size_t size)
     return KTX2_ParseHeader(&hdr, data, size);
 }
 
+qboolean KTX2_ParseHeaderPublic(ktx2_header_t *out, const uint8_t *data, size_t size)
+{
+    return KTX2_ParseHeader(out, data, size);
+}
+
 qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const ktx2_header_t *hdr, ktx2_decoded_image_t *out)
 {
     int i;
