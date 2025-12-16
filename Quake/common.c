@@ -46,6 +46,8 @@ static qboolean		com_modified;	// set true if using non-id files
 qboolean		fitzmode;
 
 static void COM_Path_f (void);
+static qboolean		COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size);
+static int QDECL COM_Pk3Compare (const void *a, const void *b);
 
 // if a packfile directory differs from this, it is assumed to be hacked
 #define PAK0_COUNT		339	/* id1/pak0.pak - v1.0x */
