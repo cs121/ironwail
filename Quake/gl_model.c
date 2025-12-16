@@ -54,6 +54,8 @@ static void Lightgrid_Info_f (void);
 static void Lightgrid_Dump_f (void);
 static void Lightgrid_Generate_f (void);
 static void Lightgrid_Save_f (void);
+static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path);
+static void Mod_LoadLightgridRaw_f (cvar_t *var);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
@@ -179,6 +181,7 @@ static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 static cvar_t	gl_loadlitfiles = {"gl_loadlitfiles", "1", CVAR_ARCHIVE};
 static cvar_t	external_lits_dir = {"external_lits_dir", "", CVAR_ARCHIVE};
 static cvar_t	mod_ignorelmscale = {"mod_ignorelmscale", "0", 0};
+cvar_t			load_lightgrid_raw = {"load_lightgrid_raw", "", CVAR_NONE};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 
 static byte	*mod_novis;
@@ -263,7 +266,9 @@ void Mod_Init (void)
         Cvar_RegisterVariable (&external_lits_dir);
         Cvar_RegisterVariable (&mod_ignorelmscale);
         Cvar_RegisterVariable (&r_md5);
+        Cvar_RegisterVariable (&load_lightgrid_raw);
         Cvar_SetCallback (&r_md5, R_MD5_f);
+        Cvar_SetCallback (&load_lightgrid_raw, Mod_LoadLightgridRaw_f);
 
         Cmd_AddCommand ("mcache", Mod_Print);
         Cmd_AddCommand ("lightgrid_info", Lightgrid_Info_f);
@@ -2763,6 +2768,61 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
         Con_Printf ("Loaded LIGHTGRID_RAW (%dx%dx%d)\n", raw->nx, raw->ny, raw->nz);
 
         return true;
+}
+
+static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path)
+{
+        byte *buffer;
+        int size;
+        qboolean ok;
+
+        if (!mod || !path || !path[0])
+                return false;
+
+        buffer = COM_LoadMallocFile (path, NULL);
+        if (!buffer)
+        {
+                Con_Printf ("load_lightgrid_raw: couldn't load %s\n", path);
+                return false;
+        }
+
+        size = com_filesize;
+        ok = LightgridRAW_Load (mod, buffer, size, path);
+        if (!ok)
+                Con_Warning ("load_lightgrid_raw: failed to consume %s\n", path);
+
+        free (buffer);
+        return ok;
+}
+
+static void Mod_LoadLightgridRaw_f (cvar_t *var)
+{
+        static qboolean resetting = false;
+        const char *path;
+
+        if (resetting)
+                return;
+
+        if (!var || !var->string || !var->string[0])
+                return;
+
+        if (!cl.worldmodel)
+        {
+                Con_Printf ("load_lightgrid_raw: no map loaded\n");
+        }
+        else if (cl.worldmodel->type != mod_brush)
+        {
+                Con_Printf ("load_lightgrid_raw: worldmodel is not a brush model\n");
+        }
+        else
+        {
+                path = var->string;
+                Mod_LoadLightgridRawFromPath (cl.worldmodel, path);
+        }
+
+        resetting = true;
+        Cvar_Set (var->name, "");
+        resetting = false;
 }
 
 
