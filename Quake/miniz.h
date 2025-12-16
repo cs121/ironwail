@@ -178,6 +178,11 @@
 #define MINIZ_NO_ARCHIVE_WRITING_APIS
 #endif
 
+/* ironwail relies on the archive reader helpers (e.g. mz_zip_reader_get_num_files)
+   for loading ZIP-based content, so ensure the archive APIs stay enabled even if
+   a build system tries to disable them globally. */
+#undef MINIZ_NO_ARCHIVE_APIS
+
 #if defined(__TINYC__) && (defined(__linux) || defined(__linux__))
 /* TODO: Work around "error: include file 'sys\utime.h' when compiling with tcc on Linux */
 #define MINIZ_NO_TIME
