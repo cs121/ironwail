@@ -84,6 +84,8 @@ void Sys_FileSeek (int handle, int position);
 int Sys_FileRead (int handle, void *dest, int count);
 int Sys_FileWrite (int handle,const void *data, int count);
 qboolean Sys_FileExists (const char *path);
+int Sys_FileOpenTmp (const void *data, size_t length);
+FILE *Sys_fopen_tmp (const void *data, size_t length);
 qboolean Sys_GetFileTime (const char *path, time_t *out);
 void Sys_mkdir (const char *path);
 FILE *Sys_fopen (const char *path, const char *mode);

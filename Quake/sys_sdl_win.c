@@ -226,6 +226,42 @@ int Sys_FileOpenWrite (const char *path)
 	return i;
 }
 
+int Sys_FileOpenTmp (const void *data, size_t length)
+{
+	int handle = findhandle ();
+	FILE *f = tmpfile ();
+
+	if (!f)
+		return -1;
+
+	if (length && fwrite (data, 1, length, f) != length)
+	{
+		fclose (f);
+		return -1;
+	}
+
+	rewind (f);
+	sys_handles[handle] = f;
+	return handle;
+}
+
+FILE *Sys_fopen_tmp (const void *data, size_t length)
+{
+	FILE *f = tmpfile ();
+
+	if (!f)
+		return NULL;
+
+	if (length && fwrite (data, 1, length, f) != length)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	rewind (f);
+	return f;
+}
+
 void Sys_FileClose (int handle)
 {
 	fclose (sys_handles[handle]);
