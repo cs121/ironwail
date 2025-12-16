@@ -45,6 +45,7 @@ typedef struct {
 } ktx2_header_t;
 
 qboolean KTX2_IsValid(const uint8_t *data, size_t size);
+qboolean KTX2_ParseHeaderPublic(ktx2_header_t *out, const uint8_t *data, size_t size);
 gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t size);
 void KTX2_LogInfo(const char *fmt, ...);
 void KTX2_LogError(const char *fmt, ...);
