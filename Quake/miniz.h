@@ -666,7 +666,14 @@ MINIZ_EXPORT mz_zip_mode mz_zip_get_mode(mz_zip_archive *pZip);
 MINIZ_EXPORT mz_zip_type mz_zip_get_type(mz_zip_archive *pZip);
 
 /* Returns the total number of files in the archive. */
-MINIZ_EXPORT mz_uint mz_zip_reader_get_num_files(mz_zip_archive *pZip);
+/* Provide an inline definition so callers don't depend on the object file
+ * when only the reader helpers are required (helps avoid missing symbol
+ * errors in builds that accidentally drop miniz.c).
+ */
+static inline mz_uint mz_zip_reader_get_num_files(mz_zip_archive *pZip)
+{
+    return pZip ? pZip->m_total_files : 0;
+}
 
 MINIZ_EXPORT mz_uint64 mz_zip_get_archive_size(mz_zip_archive *pZip);
 MINIZ_EXPORT MZ_FILE *mz_zip_get_cfile(mz_zip_archive *pZip);
