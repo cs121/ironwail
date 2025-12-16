@@ -134,7 +134,8 @@
    If all macros here are defined the only functionality remaining will be CRC-32 and adler-32. */
 
 /* Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O. */
-#define MINIZ_NO_STDIO
+/* Disabled: ironwail needs stdio-backed ZIP helpers such as mz_zip_reader_init_file(). */
+/* #define MINIZ_NO_STDIO */
 
 /* If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or */
 /* get/set file times, and the C run-time funcs that get/set times won't be called. */
