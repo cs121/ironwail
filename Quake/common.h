@@ -382,6 +382,8 @@ typedef struct pack_s
 	int		handle;
 	int		numfiles;
 	packfile_t	*files;
+	qboolean	is_pk3;
+	void		*zip;
 } pack_t;
 
 typedef struct searchpath_s

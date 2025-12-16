@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "steam.h"
 #include <time.h>
 #include <errno.h>
+#include <limits.h>
 #include "miniz.h"
 #include "unicode_translit.h"
 
@@ -1912,34 +1913,95 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 		if (search->pack)	/* look through all the pak file elements */
 		{
 			pak = search->pack;
-			for (i = 0; i < pak->numfiles; i++)
+			if (pak->is_pk3)
 			{
-				if (strcmp(pak->files[i].name, filename) != 0)
-					continue;
-				// found it!
-				com_filesize = pak->files[i].filelen;
-				file_from_pak = 1;
-				if (path_id)
-					*path_id = search->path_id;
-				if (handle)
+				for (i = 0; i < pak->numfiles; i++)
 				{
-					*handle = pak->handle;
-					Sys_FileSeek (pak->handle, pak->files[i].filepos);
-					return com_filesize;
+					size_t extracted_size;
+					void *extracted;
+
+					if (q_strcasecmp (pak->files[i].name, filename) != 0)
+						continue;
+
+					com_filesize = pak->files[i].filelen;
+					file_from_pak = 1;
+					if (path_id)
+						*path_id = search->path_id;
+
+					if (!handle && !file)
+						return com_filesize;
+
+					if (!COM_ExtractZipEntry (pak, pak->files[i].filepos, &extracted, &extracted_size))
+					{
+						if (handle)
+							*handle = -1;
+						if (file)
+							*file = NULL;
+						com_filesize = -1;
+						Con_Printf ("Failed to extract %s from %s\n", filename, pak->filename);
+						return com_filesize;
+					}
+
+					com_filesize = (int) extracted_size;
+
+					if (handle)
+					{
+						*handle = Sys_FileOpenTmp (extracted, extracted_size);
+						mz_free (extracted);
+						if (*handle == -1)
+						{
+							com_filesize = -1;
+							return com_filesize;
+						}
+
+						return com_filesize;
+					}
+					else if (file)
+					{ /* open a new temporary file on the zip entry */
+						*file = Sys_fopen_tmp (extracted, extracted_size);
+						mz_free (extracted);
+						if (!*file)
+						{
+							com_filesize = -1;
+							return com_filesize;
+						}
+
+						return com_filesize;
+					}
 				}
-				else if (file)
-				{ /* open a new file on the pakfile */
-					*file = Sys_fopen (pak->filename, "rb");
-					if (*file)
-						fseek (*file, pak->files[i].filepos, SEEK_SET);
-					return com_filesize;
-				}
-				else /* for COM_FileExists() */
+			}
+			else
+			{
+				for (i = 0; i < pak->numfiles; i++)
 				{
-					return com_filesize;
+					if (strcmp(pak->files[i].name, filename) != 0)
+						continue;
+					// found it!
+					com_filesize = pak->files[i].filelen;
+					file_from_pak = 1;
+					if (path_id)
+						*path_id = search->path_id;
+					if (handle)
+					{
+						*handle = pak->handle;
+						Sys_FileSeek (pak->handle, pak->files[i].filepos);
+						return com_filesize;
+					}
+					else if (file)
+					{ /* open a new file on the pakfile */
+						*file = Sys_fopen (pak->filename, "rb");
+						if (*file)
+							fseek (*file, pak->files[i].filepos, SEEK_SET);
+						return com_filesize;
+					}
+					else /* for COM_FileExists() */
+					{
+						return com_filesize;
+					}
 				}
 			}
 		}
+
 		else	/* check a file in the directory tree */
 		{
 			if (!registered.value)
@@ -2298,14 +2360,91 @@ static pack_t *COM_LoadPackFile (const char *packfile)
 		newfiles[i].filelen = LittleLong(info[i].filelen);
 	}
 
-	pack = (pack_t *) Z_Malloc (sizeof (pack_t));
-	q_strlcpy (pack->filename, packfile, sizeof(pack->filename));
-	pack->handle = packhandle;
-	pack->numfiles = numpackfiles;
-	pack->files = newfiles;
+        pack = (pack_t *) Z_Malloc (sizeof (pack_t));
+        q_strlcpy (pack->filename, packfile, sizeof(pack->filename));
+        pack->handle = packhandle;
+        pack->numfiles = numpackfiles;
+        pack->files = newfiles;
+        pack->is_pk3 = false;
+        pack->zip = NULL;
 
-	//Sys_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
-	return pack;
+        //Sys_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
+        return pack;
+}
+
+static pack_t *COM_LoadZipFile (const char *zipfile)
+{
+        mz_zip_archive *zip;
+        mz_zip_archive_file_stat file_stat;
+        int numfiles, added, i;
+        packfile_t *newfiles;
+        pack_t *pack;
+
+        zip = (mz_zip_archive *) Z_Malloc (sizeof (*zip));
+        memset (zip, 0, sizeof (*zip));
+
+        if (!mz_zip_reader_init_file (zip, zipfile, 0))
+        {
+                Z_Free (zip);
+                return NULL;
+        }
+
+        numfiles = (int) mz_zip_reader_get_num_files (zip);
+        if (numfiles <= 0)
+        {
+                mz_zip_reader_end (zip);
+                Z_Free (zip);
+                return NULL;
+        }
+
+        newfiles = (packfile_t *) Z_Malloc (numfiles * sizeof (packfile_t));
+
+        for (i = 0, added = 0; i < numfiles; i++)
+        {
+                if (!mz_zip_reader_file_stat (zip, i, &file_stat))
+                        continue;
+                if (file_stat.m_is_directory)
+                        continue;
+                if (file_stat.m_uncomp_size > INT_MAX)
+                {
+                        Con_Warning ("Ignoring oversized file %s in %s\n", file_stat.m_filename, zipfile);
+                        continue;
+                }
+
+                q_strlcpy (newfiles[added].name, file_stat.m_filename, sizeof (newfiles[added].name));
+                newfiles[added].filepos = i;
+                newfiles[added].filelen = (int) file_stat.m_uncomp_size;
+                added++;
+        }
+
+        if (!added)
+        {
+                mz_zip_reader_end (zip);
+                Z_Free (newfiles);
+                Z_Free (zip);
+                return NULL;
+        }
+
+        pack = (pack_t *) Z_Malloc (sizeof (pack_t));
+        q_strlcpy (pack->filename, zipfile, sizeof (pack->filename));
+        pack->handle = -1;
+        pack->numfiles = added;
+        pack->files = newfiles;
+        pack->is_pk3 = true;
+        pack->zip = zip;
+
+        return pack;
+}
+
+static qboolean COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size)
+{
+        mz_zip_archive *zip = (mz_zip_archive *) pack->zip;
+
+        if (!zip)
+                return false;
+
+        *out_data = mz_zip_reader_extract_to_heap (zip, file_index, out_size, 0);
+        return *out_data != NULL;
 }
 
 const char *COM_GetGameNames(qboolean full)
@@ -2368,6 +2507,66 @@ static void COM_AddEnginePak (void)
 	com_modified = modified;
 }
 
+static int QDECL COM_Pk3Compare (const void *a, const void *b)
+{
+        const char *left = *(const char *const *) a;
+        const char *right = *(const char *const *) b;
+
+        return q_strcasecmp (left, right);
+}
+
+static void COM_AddPk3Files (const char *gamedir, unsigned int path_id)
+{
+        char **pk3files = NULL;
+        size_t numpk3 = 0, maxpk3 = 0;
+        findfile_t *find;
+
+        for (find = Sys_FindFirst (gamedir, NULL); find; find = Sys_FindNext (find))
+        {
+                const char *ext;
+
+                if (find->attribs & FA_DIRECTORY)
+                        continue;
+
+                ext = COM_FileGetExtension (find->name);
+                if (!ext || q_strcasecmp (ext, "pk3"))
+                        continue;
+
+                if (numpk3 == maxpk3)
+                {
+                        maxpk3 = maxpk3 ? maxpk3 * 2 : 8;
+                        pk3files = (char **) (pk3files ? Z_Realloc (pk3files, maxpk3 * sizeof (char *)) : Z_Malloc (maxpk3 * sizeof (char *)));
+                }
+
+                pk3files[numpk3] = (char *) Z_Malloc (MAX_OSPATH);
+                q_snprintf (pk3files[numpk3], MAX_OSPATH, "%s/%s", gamedir, find->name);
+                numpk3++;
+        }
+
+        if (numpk3 > 1)
+                qsort (pk3files, numpk3, sizeof (char *), COM_Pk3Compare);
+
+        while (numpk3--)
+        {
+                pack_t *pak = COM_LoadZipFile (pk3files[numpk3]);
+
+                if (pak)
+                {
+                        searchpath_t *search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
+                        search->path_id = path_id;
+                        search->pack = pak;
+                        search->next = com_searchpaths;
+                        com_searchpaths = search;
+                        com_modified = true;
+                }
+
+                Z_Free (pk3files[numpk3]);
+        }
+
+        if (pk3files)
+                Z_Free (pk3files);
+}
+
 /*
 =================
 COM_AddGameDirectory -- johnfitz -- modified based on topaz's tutorial
@@ -2418,11 +2617,11 @@ void COM_AddGameDirectory (const char *dir)
 		search->next = com_searchpaths;
 		com_searchpaths = search;
 
-		// add any pak files in the format pak0.pak pak1.pak, ...
-		for (i = 0; ; i++)
-		{
-			q_snprintf (pakfile, sizeof(pakfile), "%s/pak%i.pak", com_gamedir, i);
-			pak = COM_LoadPackFile (pakfile);
+                // add any pak files in the format pak0.pak pak1.pak, ...
+                for (i = 0; ; i++)
+                {
+                        q_snprintf (pakfile, sizeof(pakfile), "%s/pak%i.pak", com_gamedir, i);
+                        pak = COM_LoadPackFile (pakfile);
 			if (!pak)
 				break;
 
@@ -2432,11 +2631,13 @@ void COM_AddGameDirectory (const char *dir)
 			search->next = com_searchpaths;
 			com_searchpaths = search;
 
-			// add engine pak after pak0.pak
-			if (i == 0 && j == 0 && path_id == 1u && !fitzmode)
-				COM_AddEnginePak ();
-		}
-	}
+                        // add engine pak after pak0.pak
+                        if (i == 0 && j == 0 && path_id == 1u && !fitzmode)
+                                COM_AddEnginePak ();
+                }
+
+                COM_AddPk3Files (com_gamedir, path_id);
+        }
 }
 
 void COM_ResetGameDirectories(const char *newgamedirs)
@@ -2444,16 +2645,25 @@ void COM_ResetGameDirectories(const char *newgamedirs)
 	const char *newpath, *path;
 	searchpath_t *search;
 	//Kill the extra game if it is loaded
-	while (com_searchpaths != com_base_searchpaths)
-	{
-		if (com_searchpaths->pack)
-		{
-			Sys_FileClose (com_searchpaths->pack->handle);
-			Z_Free (com_searchpaths->pack->files);
-			Z_Free (com_searchpaths->pack);
-		}
-		search = com_searchpaths->next;
-		Z_Free (com_searchpaths);
+        while (com_searchpaths != com_base_searchpaths)
+        {
+                if (com_searchpaths->pack)
+                {
+                        if (com_searchpaths->pack->is_pk3)
+                        {
+                                if (com_searchpaths->pack->zip)
+                                        mz_zip_reader_end ((mz_zip_archive *) com_searchpaths->pack->zip);
+                                Z_Free (com_searchpaths->pack->zip);
+                        }
+                        else
+                        {
+                                Sys_FileClose (com_searchpaths->pack->handle);
+                        }
+                        Z_Free (com_searchpaths->pack->files);
+                        Z_Free (com_searchpaths->pack);
+                }
+                search = com_searchpaths->next;
+                Z_Free (com_searchpaths);
 		com_searchpaths = search;
 	}
 	hipnotic = false;
