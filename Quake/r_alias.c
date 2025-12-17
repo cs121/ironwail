@@ -96,7 +96,7 @@ COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 
-static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add, const vec3_t dlight_add, float dir_dot)
+static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
 {
         if (!r_lightgrid_debug.value)
         {
@@ -115,62 +115,38 @@ static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add,
 
         r_lightgrid_debug_sample_reported = true;
 
-        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) intensity=%.2f dir=(%.2f %.2f %.2f) dir_dot=%.2f ambient_add=(%.1f %.1f %.1f) dlight_add=(%.1f %.1f %.1f)\n",
+        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_add=(%.1f %.1f %.1f)\n",
                 e->model ? e->model->name : "<no model>",
                 e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
-                e->lightcache.lightgrid_intensity,
-                e->lightcache.lightgrid_dir[0], e->lightcache.lightgrid_dir[1], e->lightcache.lightgrid_dir[2],
-                dir_dot,
-                ambient_add[0], ambient_add[1], ambient_add[2],
-                dlight_add[0], dlight_add[1], dlight_add[2]);
+                e->lightcache.lightgrid_ao,
+                ambient_add[0], ambient_add[1], ambient_add[2]);
 }
 
 static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, vec3_t dlightcolor)
 {
         vec3_t          gridcolor;
-        vec3_t          forward, right, up, shadevector;
-        float           dir_dot;
 
         if (!R_LightgridEnabled () || !e->lightcache.lightgrid_has_sample)
                 return;
 
-        VectorScale (e->lightcache.lightgrid_color, e->lightcache.lightgrid_intensity * 255.f, gridcolor);
+        VectorScale (e->lightcache.lightgrid_color, e->lightcache.lightgrid_ao * 255.f, gridcolor);
         if (gridcolor[0] == 0.f && gridcolor[1] == 0.f && gridcolor[2] == 0.f)
                 return;
 
-        vec3_t angles;
-        VectorCopy (e->angles, angles);
-        AngleVectors (angles, forward, right, up);
-        VectorAdd (forward, up, shadevector);
-        if (VectorNormalize (shadevector) == 0.f)
-        {
-                shadevector[0] = 0.f;
-                shadevector[1] = 0.f;
-                shadevector[2] = 1.f;
-        }
-
-        dir_dot = CLAMP (0.f, DotProduct (e->lightcache.lightgrid_dir, shadevector), 1.f);
-
         {
                 vec3_t ambient_add;
-                vec3_t dlight_add;
                 for (int i = 0; i < 3; i++)
                 {
-                        float directional = gridcolor[i] * dir_dot;
-                        float ambient = gridcolor[i] - directional;
-
                         ambientcolor[i] -= gridcolor[i];
                         if (ambientcolor[i] < 0.f)
                                 ambientcolor[i] = 0.f;
 
-                        ambientcolor[i] += ambient;
-                        dlightcolor[i] += directional;
+                        ambientcolor[i] += gridcolor[i];
 
-                        ambient_add[i] = ambient;
-                        dlight_add[i] = directional;
+                        ambient_add[i] = gridcolor[i];
                 }
 
-                R_DebugLightgridSample (e, ambient_add, dlight_add, dir_dot);
+                R_DebugLightgridSample (e, ambient_add);
         }
 }
 
@@ -328,12 +304,13 @@ void R_SetupAliasLighting (entity_t     *e)
         vec3_t          dyn_add = {0.f, 0.f, 0.f};
         qboolean        used_lightgrid = false;
         qboolean        base_from_lightgrid = false;
+        float           lg_ao = 1.f;
 
         if (R_LightgridEnabled ())
         {
-                vec3_t lg_color, lg_dir, lg_color255;
+                vec3_t lg_color, lg_color255;
 
-                R_LightgridLightingDir (e->origin, lg_color, lg_dir);
+                R_LightgridLighting (e->origin, lg_color, &lg_ao);
                 VectorScale (lg_color, 255.0f, lg_color255);
 
                 VectorCopy (lg_color255, lightcolor);
@@ -342,9 +319,8 @@ void R_SetupAliasLighting (entity_t     *e)
                 VectorCopy (lg_color255, ambientcolor);
                 VectorSubtract (lightcolor, ambientcolor, dlightcolor);
 
-                VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
                 VectorCopy (lg_color, e->lightcache.lightgrid_color);
-                e->lightcache.lightgrid_intensity = 1.f;
+                e->lightcache.lightgrid_ao = lg_ao;
                 e->lightcache.lightgrid_has_sample = true;
 
                 used_lightgrid = true;
@@ -363,18 +339,17 @@ void R_SetupAliasLighting (entity_t     *e)
 
                 if (R_LightgridEnabled () && e->lightcache.lightgrid_has_sample)
                 {
-                        vec3_t lg_color, lg_dir, lg_color255;
+                        vec3_t lg_color, lg_color255;
 
-                        R_LightgridLightingDir (e->origin, lg_color, lg_dir);
+                        R_LightgridLighting (e->origin, lg_color, &lg_ao);
                         VectorScale (lg_color, 255.0f, lg_color255);
 
                         for (i = 0; i < 3; i++)
                                 dyn_add[i] = fmaxf (lightcolor[i] - lg_color255[i], 0.f);
 
                         VectorCopy (lg_color255, ambientcolor);
-                        VectorCopy (lg_dir, e->lightcache.lightgrid_dir);
                         VectorCopy (lg_color, e->lightcache.lightgrid_color);
-                        e->lightcache.lightgrid_intensity = 1.f;
+                        e->lightcache.lightgrid_ao = lg_ao;
 
                         used_lightgrid = true;
                 }
@@ -762,9 +737,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
                 VectorCopy (lightcolor, e->lightcache.ambientcolor);
                 VectorClear (e->lightcache.dlightcolor);
                 e->lightcache.lightgrid_has_sample = false;
-                e->lightcache.lightgrid_intensity = 0.f;
+                e->lightcache.lightgrid_ao = 0.f;
                 VectorClear (e->lightcache.lightgrid_color);
-                VectorClear (e->lightcache.lightgrid_dir);
         }
 
 	if (showtris)

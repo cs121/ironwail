@@ -1002,17 +1002,10 @@ lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw)
     for (size_t i = 0; i < count; i++)
     {
         const lightcell_t *cell = &raw->cells[i];
-        vec3_t dir;
 
         VectorCopy(cell->rgb, lg->probes[i].rgb);
-
-        VectorCopy(cell->dir, dir);
-        if (VectorNormalize(dir) == 0)
-            VectorSet(dir, 0,0,1);
-
-        VectorCopy(dir, lg->probes[i].dir);
-        lg->probes[i].intensity = cell->intensity;
         lg->probes[i].ao = cell->ao;
+        lg->probes[i].emissive = cell->emissive;
     }
 
     lg->source = LIGHTGRID_SRC_RAW;
@@ -1024,10 +1017,11 @@ lightgrid_t *Lightgrid_FromRaw(const lightgrid_raw_t *raw)
    Sampling
    ===================================================================== */
 
-static void Lightgrid_DefaultSample(vec3_t out_color, vec3_t out_dir)
+static void Lightgrid_DefaultSample(vec3_t out_color, float *out_ao)
 {
     VectorSet(out_color, 1,1,1);
-    VectorSet(out_dir, 0,0,1);
+    if (out_ao)
+        *out_ao = 1.f;
 }
 
 static qboolean Lightgrid_SampleRawProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
@@ -1085,11 +1079,6 @@ static qboolean Lightgrid_SampleRawProbe(const lightgrid_t *lg, const vec3_t pos
         out_probe->rgb[i] = Lerp(c0, c1, fz);
     }
 
-    out_probe->intensity = Lerp(
-        Lerp(Lerp(c000->intensity, c100->intensity, fx), Lerp(c010->intensity, c110->intensity, fx), fy),
-        Lerp(Lerp(c001->intensity, c101->intensity, fx), Lerp(c011->intensity, c111->intensity, fx), fy),
-        fz);
-
     out_probe->emissive = Lerp(
         Lerp(Lerp(c000->emissive, c100->emissive, fx), Lerp(c010->emissive, c110->emissive, fx), fy),
         Lerp(Lerp(c001->emissive, c101->emissive, fx), Lerp(c011->emissive, c111->emissive, fx), fy),
@@ -1099,26 +1088,6 @@ static qboolean Lightgrid_SampleRawProbe(const lightgrid_t *lg, const vec3_t pos
         Lerp(Lerp(c000->ao, c100->ao, fx), Lerp(c010->ao, c110->ao, fx), fy),
         Lerp(Lerp(c001->ao, c101->ao, fx), Lerp(c011->ao, c111->ao, fx), fy),
         fz);
-
-    {
-        vec3_t d00, d10, d01, d11, d0, d1, dir;
-
-#define PREMUL_DIR(dst,p) VectorScale((p)->dir, (p)->intensity, (dst))
-        PREMUL_DIR(d00, c000);
-        PREMUL_DIR(d10, c010);
-        PREMUL_DIR(d01, c001);
-        PREMUL_DIR(d11, c011);
-#undef PREMUL_DIR
-
-        VectorLerp(d00, d10, fx, d0);
-        VectorLerp(d01, d11, fx, d1);
-
-        VectorLerp(d0, d1, fz, dir);
-        if (VectorNormalize(dir) == 0.f)
-            VectorSet(dir, 0.f, 0.f, 1.f);
-
-        VectorCopy(dir, out_probe->dir);
-    }
 
     out_probe->sh_valid = false;
     out_probe->sh9 = NULL;
@@ -1153,8 +1122,6 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
         if (node_index & LIGHTGRID_OCTREE_FLAG_OCCLUDED)
         {
             VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
-            VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
-            out_probe->intensity = 0.f;
             out_probe->ao = 0.f;
             out_probe->emissive = 0.f;
             out_probe->sh_valid = false;
@@ -1201,8 +1168,6 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
     if (set->occluded)
     {
         VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
-        VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
-        out_probe->intensity = 0.f;
         out_probe->ao = 0.f;
         out_probe->emissive = 0.f;
         out_probe->sh_valid = false;
@@ -1228,16 +1193,13 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
         out_probe->rgb[0] = chosen->color[0] / 255.0f;
         out_probe->rgb[1] = chosen->color[1] / 255.0f;
         out_probe->rgb[2] = chosen->color[2] / 255.0f;
-        out_probe->intensity = q_max(q_max(out_probe->rgb[0], out_probe->rgb[1]), out_probe->rgb[2]);
     }
     else
     {
         VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
-        out_probe->intensity = 0.f;
     }
 
-    VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
-    out_probe->ao = 0.f;
+    out_probe->ao = 1.f;
     out_probe->emissive = 0.f;
     out_probe->sh_valid = false;
     out_probe->sh9 = NULL;
@@ -1260,19 +1222,20 @@ qboolean Lightgrid_SampleProbe(const lightgrid_t *lg, const vec3_t pos, lightgri
     }
 }
 
-void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, float *out_ao)
 {
     const lightgrid_t *lg = Lightgrid_Get();
     lightgrid_probe_t probe;
 
     if (!Lightgrid_SampleProbe(lg, pos, &probe))
     {
-        Lightgrid_DefaultSample(out_color, out_dir);
+        Lightgrid_DefaultSample(out_color, out_ao);
         return;
     }
 
-    VectorScale(probe.rgb, probe.intensity, out_color);
-    VectorCopy(probe.dir, out_dir);
+    VectorCopy(probe.rgb, out_color);
+    if (out_ao)
+        *out_ao = probe.ao;
 }
 
 /* =====================================================================

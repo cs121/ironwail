@@ -43,9 +43,8 @@ typedef struct lightcache_s {
 	short				dt;
 	vec3_t				ambientcolor;
 	vec3_t				dlightcolor;
-	vec3_t				lightgrid_dir;
 	vec3_t				lightgrid_color;
-	float				lightgrid_intensity;
+	float				lightgrid_ao;
 	qboolean		lightgrid_has_sample;
 } lightcache_t;
 
