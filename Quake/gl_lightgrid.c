@@ -24,7 +24,9 @@ cvar_t r_lightgrid            = { "r_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_lightgrid_backend    = { "r_lightgrid_backend", "NONE", CVAR_ROM };
 cvar_t r_lightgrid_debug      = { "r_lightgrid_debug", "0", CVAR_NONE };
 cvar_t r_lightgrid_octree_debug = { "r_lightgrid_octree_debug", "0", CVAR_NONE };
+cvar_t r_lightgrid_style      = { "r_lightgrid_style", "0", CVAR_ARCHIVE };
 cvar_t r_lightgrid_force      = { "r_lightgrid_force", "0", CVAR_ARCHIVE };
+cvar_t r_lightgrid_apply_world = { "r_lightgrid_apply_world", "0", CVAR_ARCHIVE };
 cvar_t r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
 cvar_t r_lightgrid_weight_direct = { "r_lightgrid_weight_direct", "0.3", CVAR_ARCHIVE };
 cvar_t r_lightgrid_weight_lightmap = { "r_lightgrid_weight_lightmap", "1", CVAR_ARCHIVE };
@@ -58,6 +60,7 @@ static void  Lightgrid_FillRandomCell(lightcell_t *cell);
 static void  Lightgrid_Dump_f(void);
 static void  Lightgrid_UpdateBackendCvar(lightgrid_backend_t backend);
 static void  Lightgrid_LogBackendUsage(const lightgrid_t *lg);
+static void  Lightgrid_LogStats(const lightgrid_t *lg);
 static const char *Lightgrid_BackendName(lightgrid_backend_t backend);
 static size_t Lightgrid_BackendBytes(const lightgrid_t *lg);
 static int   Lightgrid_OctreeDepth(const lightgrid_octree_t *oct);
@@ -72,7 +75,9 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_backend);
     Cvar_RegisterVariable(&r_lightgrid_debug);
     Cvar_RegisterVariable(&r_lightgrid_octree_debug);
+    Cvar_RegisterVariable(&r_lightgrid_style);
     Cvar_RegisterVariable(&r_lightgrid_force);
+    Cvar_RegisterVariable(&r_lightgrid_apply_world);
     Cvar_RegisterVariable(&r_generate_lightgrid_test);
     Cvar_RegisterVariable(&r_lightgrid_weight_direct);
     Cvar_RegisterVariable(&r_lightgrid_weight_lightmap);
@@ -220,6 +225,54 @@ static const char *Lightgrid_BackendName(lightgrid_backend_t backend)
     }
 }
 
+typedef struct lightgrid_stats_s
+{
+    vec3_t min_rgb;
+    vec3_t max_rgb;
+    vec3_t sum_rgb;
+    float min_ao;
+    float max_ao;
+    float sum_ao;
+    size_t count;
+    size_t occluded;
+} lightgrid_stats_t;
+
+static void Lightgrid_StatsInit(lightgrid_stats_t *stats)
+{
+    if (!stats)
+        return;
+
+    VectorSet(stats->min_rgb, FLT_MAX, FLT_MAX, FLT_MAX);
+    VectorSet(stats->max_rgb, -FLT_MAX, -FLT_MAX, -FLT_MAX);
+    VectorClear(stats->sum_rgb);
+    stats->min_ao = FLT_MAX;
+    stats->max_ao = -FLT_MAX;
+    stats->sum_ao = 0.f;
+    stats->count = 0;
+    stats->occluded = 0;
+}
+
+static void Lightgrid_StatsAccum(lightgrid_stats_t *stats, const vec3_t rgb, float ao, qboolean occluded)
+{
+    if (!stats)
+        return;
+
+    stats->count++;
+    if (occluded)
+        stats->occluded++;
+
+    for (int i = 0; i < 3; i++)
+    {
+        stats->min_rgb[i] = q_min(stats->min_rgb[i], rgb[i]);
+        stats->max_rgb[i] = q_max(stats->max_rgb[i], rgb[i]);
+        stats->sum_rgb[i] += rgb[i];
+    }
+
+    stats->min_ao = q_min(stats->min_ao, ao);
+    stats->max_ao = q_max(stats->max_ao, ao);
+    stats->sum_ao += ao;
+}
+
 static void Lightgrid_UpdateBackendCvar(lightgrid_backend_t backend)
 {
     q_strlcpy(lightgrid_backend_value, Lightgrid_BackendName(backend), sizeof(lightgrid_backend_value));
@@ -260,6 +313,23 @@ static size_t Lightgrid_BackendBytes(const lightgrid_t *lg)
     default:
         return 0;
     }
+}
+
+static const lightgrid_octree_sample_t *Lightgrid_SelectOctreeSample(const lightgrid_octree_sampleset_t *set)
+{
+    if (!set || set->occluded || !set->used_samples)
+        return NULL;
+
+    const int preferred = q_max(0, (int)r_lightgrid_style.value);
+
+    for (uint8_t i = 0; i < set->used_samples; i++)
+    {
+        const lightgrid_octree_sample_t *candidate = &set->samples[i];
+        if (candidate->style == preferred)
+            return candidate;
+    }
+
+    return &set->samples[0];
 }
 
 static qboolean Lightgrid_ValidateLeaf(const lightgrid_octree_t *oct, const lightgrid_octree_leaf_t *leaf, size_t leaf_index, qboolean verbose)
@@ -455,6 +525,93 @@ static void Lightgrid_LogBackendUsage(const lightgrid_t *lg)
         Con_Printf("Lightgrid backend: %s (0.00 MB)\n", name);
         break;
     }
+}
+
+static void Lightgrid_LogStats(const lightgrid_t *lg)
+{
+    lightgrid_stats_t stats;
+    Lightgrid_StatsInit(&stats);
+
+    if (!lg)
+        return;
+
+    switch (lg->backend)
+    {
+    case LIGHTGRID_BACKEND_RAW:
+    {
+        size_t count = (size_t)lg->nx * (size_t)lg->ny * (size_t)lg->nz;
+        if (!lg->probes || !count)
+            break;
+
+        Con_Printf("LIGHTGRID_RAW header: %dx%dx%d cell %.3f origin(%.3f %.3f %.3f)\n",
+            lg->nx, lg->ny, lg->nz, lg->cellsize, lg->mins[0], lg->mins[1], lg->mins[2]);
+
+        for (size_t i = 0; i < count; i++)
+        {
+            const lightcell_t *cell = &lg->probes[i];
+            Lightgrid_StatsAccum(&stats, cell->rgb, cell->ao, false);
+        }
+        break;
+    }
+    case LIGHTGRID_BACKEND_OCTREE:
+    {
+        if (!lg->octree || !lg->octree->leaves)
+            break;
+
+        Con_Printf("LIGHTGRID_OCTREE header: dist(%.3f %.3f %.3f) size(%d %d %d) mins(%.3f %.3f %.3f) styles %u\n",
+            lg->octree->header.grid_dist[0], lg->octree->header.grid_dist[1], lg->octree->header.grid_dist[2],
+            lg->octree->header.grid_size[0], lg->octree->header.grid_size[1], lg->octree->header.grid_size[2],
+            lg->octree->header.grid_mins[0], lg->octree->header.grid_mins[1], lg->octree->header.grid_mins[2],
+            lg->octree->header.num_styles);
+
+        for (size_t leaf_index = 0; leaf_index < lg->octree->leaf_count; leaf_index++)
+        {
+            const lightgrid_octree_leaf_t *leaf = &lg->octree->leaves[leaf_index];
+            if (!leaf->samples)
+                continue;
+
+            size_t sample_count = (size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)leaf->size[2];
+            for (size_t i = 0; i < sample_count; i++)
+            {
+                const lightgrid_octree_sampleset_t *set = &leaf->samples[i];
+                const lightgrid_octree_sample_t *sample = Lightgrid_SelectOctreeSample(set);
+                vec3_t rgb = {0, 0, 0};
+                float ao = 0.f;
+
+                if (sample)
+                {
+                    rgb[0] = sample->color[0] / 255.0f;
+                    rgb[1] = sample->color[1] / 255.0f;
+                    rgb[2] = sample->color[2] / 255.0f;
+                    ao = 1.f;
+                }
+                Lightgrid_StatsAccum(&stats, rgb, ao, set->occluded);
+            }
+        }
+        break;
+    }
+    default:
+        return;
+    }
+
+    if (!stats.count)
+        return;
+
+    vec3_t avg_rgb;
+    VectorCopy(stats.sum_rgb, avg_rgb);
+    for (int i = 0; i < 3; i++)
+        avg_rgb[i] /= (float)stats.count;
+
+    const float avg_ao = stats.sum_ao / (float)stats.count;
+    const float occluded_pct = (stats.count > 0) ? (100.f * (float)stats.occluded / (float)stats.count) : 0.f;
+
+    Con_Printf("Lightgrid stats: samples=%zu occluded=%.2f%%\n", stats.count, occluded_pct);
+    Con_Printf(" RGB min(%.3f %.3f %.3f) max(%.3f %.3f %.3f) avg(%.3f %.3f %.3f)\n",
+        stats.min_rgb[0], stats.min_rgb[1], stats.min_rgb[2],
+        stats.max_rgb[0], stats.max_rgb[1], stats.max_rgb[2],
+        avg_rgb[0], avg_rgb[1], avg_rgb[2]);
+    Con_Printf(" AO  min(%.3f) max(%.3f) avg(%.3f)\n", stats.min_ao, stats.max_ao, avg_ao);
+    Con_Printf(" Lightgrid colors treated as linear (no sRGB conversion).\n");
 }
 
 static void Lightgrid_DumpOctree(const lightgrid_octree_t *oct)
@@ -1175,18 +1332,7 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
         return true;
     }
 
-    const lightgrid_octree_sample_t *chosen = NULL;
-    for (uint8_t i = 0; i < set->used_samples; i++)
-    {
-        const lightgrid_octree_sample_t *candidate = &set->samples[i];
-        if (candidate->style == 0)
-        {
-            chosen = candidate;
-            break;
-        }
-        if (!chosen)
-            chosen = candidate;
-    }
+    const lightgrid_octree_sample_t *chosen = Lightgrid_SelectOctreeSample(set);
 
     if (chosen)
     {
@@ -1235,7 +1381,7 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, float *out_ao)
 
     VectorCopy(probe.rgb, out_color);
     if (out_ao)
-        *out_ao = probe.ao;
+        *out_ao = CLAMP(0.f, probe.ao, 1.f);
 }
 
 /* =====================================================================
@@ -1786,6 +1932,9 @@ void Lightgrid_Set(lightgrid_t *lg)
     }
 
     Lightgrid_LogBackendUsage(lg);
+
+    if (r_lightgrid_debug.value >= 1.f)
+        Lightgrid_LogStats(lg);
 }
 
 const lightgrid_t *Lightgrid_Get(void)
