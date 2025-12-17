@@ -243,33 +243,54 @@ static size_t Lightgrid_BackendBytes(const lightgrid_t *lg)
     case LIGHTGRID_BACKEND_OCTREE:
         if (!lg->octree)
             return 0;
-        return lg->octree->node_count * sizeof(*lg->octree->nodes) +
-               lg->octree->leaf_count * sizeof(*lg->octree->leaves);
+        if (!lg->octree->nodes || !lg->octree->leaves)
+            return 0;
+
+        size_t bytes = lg->octree->node_count * sizeof(*lg->octree->nodes);
+        bytes += lg->octree->leaf_count * sizeof(*lg->octree->leaves);
+
+        for (size_t i = 0; i < lg->octree->leaf_count; i++)
+        {
+            const lightgrid_octree_leaf_t *leaf = &lg->octree->leaves[i];
+            size_t count = (size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)leaf->size[2];
+            bytes += count * sizeof(*leaf->samples);
+        }
+
+        return bytes;
     default:
         return 0;
     }
 }
 
-static qboolean Lightgrid_ValidateLeaf(const lightgrid_octree_leaf_t *leaf, size_t leaf_index, qboolean verbose)
+static qboolean Lightgrid_ValidateLeaf(const lightgrid_octree_t *oct, const lightgrid_octree_leaf_t *leaf, size_t leaf_index, qboolean verbose)
 {
     if (!leaf)
         return false;
 
-    for (int i = 0; i < 3; i++)
-    {
-        if (!R_IsFinite(leaf->rgb[i]) || !R_IsFinite(leaf->dir[i]))
-        {
-            if (verbose)
-                Con_Printf("LIGHTGRID_OCTREE leaf %zu has non-finite payload\n", leaf_index);
-            return false;
-        }
-    }
-
-    if (!R_IsFinite(leaf->intensity) || leaf->intensity < 0.f)
+    if (leaf->size[0] <= 0 || leaf->size[1] <= 0 || leaf->size[2] <= 0)
     {
         if (verbose)
-            Con_Printf("LIGHTGRID_OCTREE leaf %zu has invalid intensity\n", leaf_index);
+            Con_Printf("LIGHTGRID_OCTREE leaf %zu has non-positive size (%d %d %d)\n", leaf_index, leaf->size[0], leaf->size[1], leaf->size[2]);
         return false;
+    }
+
+    if (!leaf->samples)
+        return false;
+
+    size_t count = (size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)leaf->size[2];
+    for (size_t i = 0; i < count; i++)
+    {
+        const lightgrid_octree_sampleset_t *set = &leaf->samples[i];
+
+        if (set->occluded)
+            continue;
+
+        if (set->used_samples > 4 || set->used_samples > oct->header.num_styles)
+        {
+            if (verbose)
+                Con_Printf("LIGHTGRID_OCTREE leaf %zu sample %zu has invalid used_samples %u\n", leaf_index, i, set->used_samples);
+            return false;
+        }
     }
 
     return true;
@@ -287,19 +308,36 @@ qboolean Lightgrid_ValidateOctree(const lightgrid_octree_t *oct, qboolean verbos
         return false;
     }
 
-    if (oct->root_node >= oct->node_count)
+    if (oct->header.root_node >= oct->node_count)
     {
         if (verbose)
-            Con_Printf("LIGHTGRID_OCTREE root %u outside node count %zu\n", oct->root_node, oct->node_count);
+            Con_Printf("LIGHTGRID_OCTREE root %u outside node count %zu\n", oct->header.root_node, oct->node_count);
         return false;
     }
 
     for (int i = 0; i < 3; i++)
     {
-        if (!R_IsFinite(oct->mins[i]) || !R_IsFinite(oct->maxs[i]) || oct->mins[i] > oct->maxs[i])
+        if (!R_IsFinite(oct->header.grid_dist[i]) || oct->header.grid_dist[i] <= 0.f)
         {
             if (verbose)
-                Con_Printf("LIGHTGRID_OCTREE invalid bounds [%f %f] axis %d\n", oct->mins[i], oct->maxs[i], i);
+                Con_Printf("LIGHTGRID_OCTREE invalid grid dist %f axis %d\n", oct->header.grid_dist[i], i);
+            return false;
+        }
+
+        if (!R_IsFinite(oct->header.grid_mins[i]))
+        {
+            if (verbose)
+                Con_Printf("LIGHTGRID_OCTREE invalid grid mins %f axis %d\n", oct->header.grid_mins[i], i);
+            return false;
+        }
+    }
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (oct->header.grid_size[i] <= 0)
+        {
+            if (verbose)
+                Con_Printf("LIGHTGRID_OCTREE invalid grid size axis %d: %d\n", i, oct->header.grid_size[i]);
             return false;
         }
     }
@@ -312,12 +350,12 @@ qboolean Lightgrid_ValidateOctree(const lightgrid_octree_t *oct, qboolean verbos
         for (int c = 0; c < 8; c++)
         {
             uint32_t child = oct->nodes[i].child[c];
-            if (child == LIGHTGRID_OCTREE_CHILD_EMPTY)
+            if (child & LIGHTGRID_OCTREE_FLAG_OCCLUDED)
                 continue;
 
-            if (child & LIGHTGRID_OCTREE_CHILD_LEAF)
+            if (child & LIGHTGRID_OCTREE_FLAG_LEAF)
             {
-                uint32_t leaf_index = child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
+                uint32_t leaf_index = child & ~LIGHTGRID_OCTREE_FLAG_MASK;
                 if (leaf_index >= oct->leaf_count)
                 {
                     if (verbose)
@@ -336,7 +374,7 @@ qboolean Lightgrid_ValidateOctree(const lightgrid_octree_t *oct, qboolean verbos
 
     for (size_t i = 0; i < oct->leaf_count; i++)
     {
-        if (!Lightgrid_ValidateLeaf(&oct->leaves[i], i, verbose))
+        if (!Lightgrid_ValidateLeaf(oct, &oct->leaves[i], i, verbose))
             return false;
     }
 
@@ -361,7 +399,7 @@ static int Lightgrid_OctreeDepth(const lightgrid_octree_t *oct)
         goto done;
 
     size_t top = 0;
-    node_stack[top] = oct->root_node;
+    node_stack[top] = oct->header.root_node;
     depth_stack[top] = 1;
     top++;
 
@@ -376,7 +414,7 @@ static int Lightgrid_OctreeDepth(const lightgrid_octree_t *oct)
         for (int c = 0; c < 8; c++)
         {
             uint32_t child = node->child[c];
-            if (child == LIGHTGRID_OCTREE_CHILD_EMPTY || (child & LIGHTGRID_OCTREE_CHILD_LEAF))
+            if ((child & LIGHTGRID_OCTREE_FLAG_OCCLUDED) || (child & LIGHTGRID_OCTREE_FLAG_LEAF))
                 continue;
 
             if (child < oct->node_count && top < stack_size)
@@ -428,12 +466,13 @@ static void Lightgrid_DumpOctree(const lightgrid_octree_t *oct)
     }
 
     int depth = Lightgrid_OctreeDepth(oct);
-    Con_Printf("LIGHTGRID_OCTREE: %zu nodes, %zu leaves, depth %d, flags 0x%08x\n",
-        oct->node_count, oct->leaf_count, depth, oct->flags);
-    Con_Printf(" bounds: mins(%.1f %.1f %.1f) maxs(%.1f %.1f %.1f)\n",
-        oct->mins[0], oct->mins[1], oct->mins[2],
-        oct->maxs[0], oct->maxs[1], oct->maxs[2]);
-    Con_Printf(" payload: float32 rgb+dir+intensity\n");
+    Con_Printf("LIGHTGRID_OCTREE: %zu nodes, %zu leaves, depth %d\n",
+        oct->node_count, oct->leaf_count, depth);
+    Con_Printf(" grid: dist(%.1f %.1f %.1f) size(%d %d %d) mins(%.1f %.1f %.1f) styles %u\n",
+        oct->header.grid_dist[0], oct->header.grid_dist[1], oct->header.grid_dist[2],
+        oct->header.grid_size[0], oct->header.grid_size[1], oct->header.grid_size[2],
+        oct->header.grid_mins[0], oct->header.grid_mins[1], oct->header.grid_mins[2],
+        oct->header.num_styles);
 
     if (r_lightgrid_octree_debug.value > 0.f)
         Lightgrid_ValidateOctree(oct, true);
@@ -1090,82 +1129,114 @@ static qboolean Lightgrid_SampleRawProbe(const lightgrid_t *lg, const vec3_t pos
 static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
 {
     const lightgrid_octree_t *oct = lg ? lg->octree : NULL;
-    vec3_t node_mins, node_maxs, center;
-    size_t steps = 0;
-    uint32_t node_index;
-    const lightgrid_octree_node_t *node;
+    int test_point[3];
     const lightgrid_octree_leaf_t *leaf = NULL;
+    const lightgrid_octree_sampleset_t *set = NULL;
+    uint32_t node_index;
+    size_t steps = 0;
 
     if (!oct || !out_probe)
         return false;
 
     for (int i = 0; i < 3; i++)
     {
-        if (pos[i] < oct->mins[i] || pos[i] > oct->maxs[i])
-            return false; // Let caller fall back (RAW clamps instead)
+        float local = (pos[i] - oct->header.grid_mins[i]) / oct->header.grid_dist[i];
+        test_point[i] = Q_rint(local);
+        if (test_point[i] < 0 || test_point[i] >= oct->header.grid_size[i])
+            return false;
     }
 
-    VectorCopy(oct->mins, node_mins);
-    VectorCopy(oct->maxs, node_maxs);
+    node_index = oct->header.root_node;
 
-    VectorCopy(pos, center);
-
-    node_index = oct->root_node;
-
-    while (steps < oct->node_count)
+    while (steps < (oct->node_count + oct->leaf_count))
     {
-        node = &oct->nodes[node_index];
-
-        VectorLerp(node_mins, node_maxs, 0.5f, center);
-
-        int child = 0;
-        if (pos[0] >= center[0]) child |= 1;
-        if (pos[1] >= center[1]) child |= 2;
-        if (pos[2] >= center[2]) child |= 4;
-
-        uint32_t raw_child = node->child[child];
-
-        if (raw_child == LIGHTGRID_OCTREE_CHILD_EMPTY)
-            break;
-
-        if (raw_child & LIGHTGRID_OCTREE_CHILD_LEAF)
+        if (node_index & LIGHTGRID_OCTREE_FLAG_OCCLUDED)
         {
-            uint32_t leaf_index = raw_child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
+            VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
+            VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
+            out_probe->intensity = 0.f;
+            out_probe->ao = 0.f;
+            out_probe->emissive = 0.f;
+            out_probe->sh_valid = false;
+            out_probe->sh9 = NULL;
+            return true;
+        }
+
+        if (node_index & LIGHTGRID_OCTREE_FLAG_LEAF)
+        {
+            uint32_t leaf_index = node_index & ~LIGHTGRID_OCTREE_FLAG_MASK;
             if (leaf_index >= oct->leaf_count)
                 return false;
             leaf = &oct->leaves[leaf_index];
             break;
         }
 
-        if (raw_child >= oct->node_count)
+        if (node_index >= oct->node_count)
             return false;
 
-        /* descend into child node */
-        if (pos[0] >= center[0])
-            node_mins[0] = center[0];
-        else
-            node_maxs[0] = center[0];
-        if (pos[1] >= center[1])
-            node_mins[1] = center[1];
-        else
-            node_maxs[1] = center[1];
-        if (pos[2] >= center[2])
-            node_mins[2] = center[2];
-        else
-            node_maxs[2] = center[2];
+        const lightgrid_octree_node_t *node = &oct->nodes[node_index];
 
-        node_index = raw_child;
+        int signx = test_point[0] >= node->division_point[0];
+        int signy = test_point[1] >= node->division_point[1];
+        int signz = test_point[2] >= node->division_point[2];
+        int child = 4 * signx + 2 * signy + signz;
+
+        node_index = node->child[child];
         steps++;
     }
 
     if (!leaf)
         return false;
 
-    VectorCopy(leaf->rgb, out_probe->rgb);
-    VectorCopy(leaf->dir, out_probe->dir);
-    if (VectorNormalize(out_probe->dir) == 0.f)
+    int lx = test_point[0] - leaf->mins[0];
+    int ly = test_point[1] - leaf->mins[1];
+    int lz = test_point[2] - leaf->mins[2];
+
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= leaf->size[0] || ly >= leaf->size[1] || lz >= leaf->size[2])
+        return false;
+
+    size_t idx = ((size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)lz) + ((size_t)leaf->size[0] * (size_t)ly) + (size_t)lx;
+    set = &leaf->samples[idx];
+
+    if (set->occluded)
+    {
+        VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
         VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
-    out_probe->intensity = leaf->intensity;
+        out_probe->intensity = 0.f;
+        out_probe->ao = 0.f;
+        out_probe->emissive = 0.f;
+        out_probe->sh_valid = false;
+        out_probe->sh9 = NULL;
+        return true;
+    }
+
+    const lightgrid_octree_sample_t *chosen = NULL;
+    for (uint8_t i = 0; i < set->used_samples; i++)
+    {
+        const lightgrid_octree_sample_t *candidate = &set->samples[i];
+        if (candidate->style == 0)
+        {
+            chosen = candidate;
+            break;
+        }
+        if (!chosen)
+            chosen = candidate;
+    }
+
+    if (chosen)
+    {
+        out_probe->rgb[0] = chosen->color[0] / 255.0f;
+        out_probe->rgb[1] = chosen->color[1] / 255.0f;
+        out_probe->rgb[2] = chosen->color[2] / 255.0f;
+        out_probe->intensity = q_max(q_max(out_probe->rgb[0], out_probe->rgb[1]), out_probe->rgb[2]);
+    }
+    else
+    {
+        VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
+        out_probe->intensity = 0.f;
+    }
+
+    VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
     out_probe->ao = 0.f;
     out_probe->emissive = 0.f;
     out_probe->sh_valid = false;
