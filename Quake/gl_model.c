@@ -2412,33 +2412,15 @@ static qboolean Lightgrid_SampleProbeAtPos (const lightgrid_t *lg, const vec3_t 
                 out_probe->rgb[i] = Lerp (c0, c1, fz);
         }
 
-        out_probe->intensity = Lerp (
-                Lerp (Lerp (c000->intensity, c100->intensity, fx), Lerp (c010->intensity, c110->intensity, fx), fy),
-                Lerp (Lerp (c001->intensity, c101->intensity, fx), Lerp (c011->intensity, c111->intensity, fx), fy),
+        out_probe->ao = Lerp (
+                Lerp (Lerp (c000->ao, c100->ao, fx), Lerp (c010->ao, c110->ao, fx), fy),
+                Lerp (Lerp (c001->ao, c101->ao, fx), Lerp (c011->ao, c111->ao, fx), fy),
                 fz);
 
         out_probe->emissive = Lerp (
                 Lerp (Lerp (c000->emissive, c100->emissive, fx), Lerp (c010->emissive, c110->emissive, fx), fy),
                 Lerp (Lerp (c001->emissive, c101->emissive, fx), Lerp (c011->emissive, c111->emissive, fx), fy),
                 fz);
-
-        {
-                vec3_t d00, d10, d01, d11, d0, d1, dir;
-
-                VectorLerp (c000->dir, c100->dir, fx, d00);
-                VectorLerp (c010->dir, c110->dir, fx, d10);
-                VectorLerp (c001->dir, c101->dir, fx, d01);
-                VectorLerp (c011->dir, c111->dir, fx, d11);
-
-                VectorLerp (d00, d10, fy, d0);
-                VectorLerp (d01, d11, fy, d1);
-
-                VectorLerp (d0, d1, fz, dir);
-                if (VectorNormalize (dir) == 0.f)
-                        VectorSet (dir, 0.f, 0.f, 1.f);
-
-                VectorCopy (dir, out_probe->dir);
-        }
 
         return true;
 }
@@ -2495,17 +2477,13 @@ static lightgrid_raw_t *LightgridRAW_FromGrid (const lightgrid_t *src, float tar
                                 if (!Lightgrid_SampleProbeAtPos (src, pos, &probe))
                                 {
                                         VectorClear (cell->rgb);
-                                        VectorSet (cell->dir, 0.f, 0.f, 1.f);
-                                        cell->intensity = 0.f;
                                         cell->ao = 1.f;
                                         cell->emissive = 0.f;
                                         continue;
                                 }
 
                                 VectorCopy (probe.rgb, cell->rgb);
-                                VectorCopy (probe.dir, cell->dir);
-                                cell->intensity = probe.intensity;
-                                cell->ao = 1.f;
+                                cell->ao = probe.ao;
                                 cell->emissive = probe.emissive;
                         }
                 }
@@ -2699,13 +2677,17 @@ static qboolean LightgridRAW_Load (qmodel_t *mod, void *data, int size, const ch
 
                 if (version == LIGHTGRID_RAW_VERSION_1 || (components & LIGHTGRID_RAW_COMPONENT_DIR))
                 {
-                        READ_COMPONENT_FLOAT (cell->dir[0]);
-                        READ_COMPONENT_FLOAT (cell->dir[1]);
-                        READ_COMPONENT_FLOAT (cell->dir[2]);
+                        float discard;
+                        READ_COMPONENT_FLOAT (discard);
+                        READ_COMPONENT_FLOAT (discard);
+                        READ_COMPONENT_FLOAT (discard);
                 }
 
                 if (version == LIGHTGRID_RAW_VERSION_1 || (components & LIGHTGRID_RAW_COMPONENT_INTENSITY))
-                        READ_COMPONENT_FLOAT (cell->intensity);
+                {
+                        float discard;
+                        READ_COMPONENT_FLOAT (discard);
+                }
 
                 if (components & LIGHTGRID_RAW_COMPONENT_AO)
                         READ_COMPONENT_FLOAT (cell->ao);

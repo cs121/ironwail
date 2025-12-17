@@ -521,8 +521,7 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache);
 qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb);
 qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir);
 qboolean R_LightgridEnabled (void);
-void R_LightgridLighting (const vec3_t pos, vec3_t out_color);
-void R_LightgridLightingDir (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
+void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 
 #define WORLDSHADER_SOLID		0

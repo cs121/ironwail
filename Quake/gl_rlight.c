@@ -298,30 +298,23 @@ qboolean R_LightgridEnabled (void)
 R_LightgridLighting
 ==================
 */
-void R_LightgridLighting (const vec3_t pos, vec3_t out_color)
-{
-        vec3_t dummy_dir;
-
-        R_LightgridLightingDir (pos, out_color, dummy_dir);
-}
-
-/*
-==================
-R_LightgridLightingDir
-==================
-*/
-void R_LightgridLightingDir (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 {
         const lightgrid_t *lg = Lightgrid_Get ();
+        float ao = 1.f;
 
         if (!R_LightgridEnabledInternal (lg))
         {
                 VectorClear (out_color);
-                VectorSet (out_dir, 0.f, 0.f, 1.f);
+                if (out_ao)
+                        *out_ao = 1.f;
                 return;
         }
 
-        Lightgrid_Sample (pos, out_color, out_dir);
+        Lightgrid_Sample (pos, out_color, &ao);
+        VectorScale (out_color, ao, out_color);
+        if (out_ao)
+                *out_ao = ao;
 }
 
 /*
@@ -803,17 +796,17 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
         qboolean        lightgrid_active;
 
         cache->lightgrid_has_sample = false;
-        cache->lightgrid_intensity = 0.f;
+        cache->lightgrid_ao = 0.f;
         VectorClear (cache->lightgrid_color);
-        VectorClear (cache->lightgrid_dir);
 
         lightgrid_active = R_LightgridEnabled ();
 
         if (lightgrid_active)
         {
-                vec3_t lg_color, lg_dir, lg_color255;
+                vec3_t lg_color, lg_color255;
+                float lg_ao = 1.f;
 
-                R_LightgridLightingDir (p, lg_color, lg_dir);
+                R_LightgridLighting (p, lg_color, &lg_ao);
                 VectorScale (lg_color, 255.f, lg_color255);
 
                 VectorCopy (lg_color255, lightcolor);
@@ -822,9 +815,8 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
                 cache->surfidx = 0;
                 VectorCopy (p, cache->pos);
                 cache->lightgrid_has_sample = true;
-                cache->lightgrid_intensity = 1.f;
+                cache->lightgrid_ao = lg_ao;
                 VectorCopy (lg_color, cache->lightgrid_color);
-                VectorCopy (lg_dir, cache->lightgrid_dir);
 
                 return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
         }
