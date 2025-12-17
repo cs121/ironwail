@@ -58,6 +58,8 @@ static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path);
 static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapname);
 static void Mod_LoadLightgridRaw_f (cvar_t *var);
 static void Mod_LoadLightgridOctree_f (cvar_t *var);
+static const char *Mod_LightgridBackendName (lightgrid_backend_t backend);
+static void Mod_PrintLightgridDebug (const char *op, const qmodel_t *mod, const char *source_path, qboolean applied, const char *reason);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
@@ -2816,34 +2818,103 @@ static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path)
         return ok;
 }
 
+static const char *Mod_LightgridBackendName (lightgrid_backend_t backend)
+{
+        switch (backend)
+        {
+        case LIGHTGRID_BACKEND_RAW:
+                return "RAW";
+        case LIGHTGRID_BACKEND_OCTREE:
+                return "OCTREE";
+        default:
+                return "NONE";
+        }
+}
+
+static void Mod_PrintLightgridDebug (const char *op, const qmodel_t *mod, const char *source_path, qboolean applied, const char *reason)
+{
+        const lightgrid_raw_t *raw = mod ? mod->lightgrid_raw : NULL;
+        const lightgrid_t *active = Lightgrid_Get();
+
+        Con_Printf ("%s debug information:\n", op);
+        Con_Printf ("  worldmodel: %s%s\n", mod ? mod->name : "<none>",
+                mod && mod->type == mod_brush ? " (brush)" : "");
+
+        if (source_path && source_path[0])
+                Con_Printf ("  source path: %s\n", source_path);
+
+        Con_Printf ("  raw lightgrid present: %s\n", raw ? "yes" : "no");
+        if (raw)
+        {
+                Con_Printf ("    raw dims: %dx%dx%d, cellsize=%.1f, origin=(%.0f %.0f %.0f)\n",
+                        raw->nx, raw->ny, raw->nz, raw->cellSize,
+                        raw->origin[0], raw->origin[1], raw->origin[2]);
+        }
+
+        Con_Printf ("  active lightgrid: %s\n", active ? "yes" : "no");
+        if (active)
+        {
+                Con_Printf ("    backend=%s, dims=%dx%dx%d, cellsize=%.1f, mins=(%.0f %.0f %.0f), maxs=(%.0f %.0f %.0f)\n",
+                        Mod_LightgridBackendName (active->backend), active->nx, active->ny, active->nz, active->cellsize,
+                        active->mins[0], active->mins[1], active->mins[2],
+                        active->maxs[0], active->maxs[1], active->maxs[2]);
+        }
+
+        if (applied)
+        {
+                Con_Printf ("  lightgrid applied successfully.\n");
+        }
+        else if (reason && reason[0])
+        {
+                Con_Printf ("  lightgrid not applied: %s\n", reason);
+        }
+}
+
 static void Mod_LoadLightgridRaw_f (cvar_t *var)
 {
-	static qboolean resetting = false;
-	const char *path;
+        static qboolean resetting = false;
+        const lightgrid_t *previous;
+        char relpath[MAX_QPATH];
+        qboolean success = false;
+        const char *failure_reason = NULL;
 
-	if (resetting)
-		return;
+        if (resetting)
+                return;
 
-	if (!var || !var->string || !var->string[0])
-		return;
+        if (!var || !var->string)
+                return;
 
-	if (!cl.worldmodel)
-	{
-		Con_Printf ("load_lightgrid_raw: no map loaded\n");
-	}
-	else if (cl.worldmodel->type != mod_brush)
-	{
-		Con_Printf ("load_lightgrid_raw: worldmodel is not a brush model\n");
-	}
-	else
-	{
-		path = var->string;
-		Mod_LoadLightgridRawFromPath (cl.worldmodel, path);
-	}
+        relpath[0] = '\0';
 
-	resetting = true;
-	Cvar_Set (var->name, "");
-	resetting = false;
+        if (!cl.worldmodel)
+        {
+                failure_reason = "no map loaded";
+        }
+        else if (cl.worldmodel->type != mod_brush)
+        {
+                failure_reason = "worldmodel is not a brush model";
+        }
+        else
+        {
+                previous = Lightgrid_Get ();
+                COM_StripExtension (cl.worldmodel->name, relpath, sizeof(relpath));
+                q_strlcat (relpath, ".lightgrid", sizeof(relpath));
+
+                Con_Printf ("load_lightgrid_raw: loading lightgrid for current map from %s\n", relpath);
+
+                success = Mod_LoadLightgridRawFromPath (cl.worldmodel, relpath);
+                if (!success)
+                        failure_reason = "failed to load or parse raw lightgrid";
+                else if (!Lightgrid_Get () || Lightgrid_Get () == previous)
+                        failure_reason = "lightgrid failed to apply";
+        }
+
+        Mod_PrintLightgridDebug ("load_lightgrid_raw", cl.worldmodel, cl.worldmodel ? relpath : NULL,
+                success && Lightgrid_Get () != NULL, failure_reason);
+
+        resetting = true;
+        Cvar_Set (var->name, "");
+        resetting = false;
 }
 
 static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapname)
@@ -2911,35 +2982,51 @@ static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapna
 
 static void Mod_LoadLightgridOctree_f (cvar_t *var)
 {
-	static qboolean resetting = false;
-	const char *target;
+        static qboolean resetting = false;
+        const lightgrid_t *previous;
+        char mapname[MAX_QPATH];
+        qboolean success = false;
+        const char *failure_reason = NULL;
 
-	if (resetting)
-		return;
+        if (resetting)
+                return;
 
-	if (!var || !var->string || !var->string[0])
-		return;
+        if (!var || !var->string)
+                return;
 
-	if (!cl.worldmodel)
-	{
-		Con_Printf ("load_lightgrid_octree: no map loaded\n");
-	}
-	else if (cl.worldmodel->type != mod_brush)
-	{
-		Con_Printf ("load_lightgrid_octree: worldmodel is not a brush model\n");
-	}
-	else if (!cl.worldmodel->bspx_header)
-	{
-		Con_Printf ("load_lightgrid_octree: current map has no BSPX directory\n");
-	}
-	else
-	{
-		target = var->string;
-		Mod_LoadLightgridOctreeFromMap (cl.worldmodel, target);
-	}
+        mapname[0] = '\0';
 
-	resetting = true;
-	Cvar_Set (var->name, "");
+        if (!cl.worldmodel)
+        {
+                failure_reason = "no map loaded";
+        }
+        else if (cl.worldmodel->type != mod_brush)
+        {
+                failure_reason = "worldmodel is not a brush model";
+        }
+        else if (!cl.worldmodel->bspx_header)
+        {
+                failure_reason = "current map has no BSPX directory";
+        }
+        else
+        {
+                previous = Lightgrid_Get ();
+                q_strlcpy (mapname, cl.worldmodel->name, sizeof(mapname));
+
+                Con_Printf ("load_lightgrid_octree: loading LIGHTGRID_OCTREE lump for current map (%s)\n", mapname);
+
+                success = Mod_LoadLightgridOctreeFromMap (cl.worldmodel, mapname);
+                if (!success)
+                        failure_reason = "failed to load LIGHTGRID_OCTREE lump";
+                else if (!Lightgrid_Get () || Lightgrid_Get () == previous)
+                        failure_reason = "lightgrid failed to apply";
+        }
+
+        Mod_PrintLightgridDebug ("load_lightgrid_octree", cl.worldmodel, cl.worldmodel ? mapname : NULL,
+                success && Lightgrid_Get () != NULL, failure_reason);
+
+        resetting = true;
+        Cvar_Set (var->name, "");
 	resetting = false;
 }
 static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
