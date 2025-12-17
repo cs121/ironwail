@@ -55,7 +55,9 @@ static void Lightgrid_Dump_f (void);
 static void Lightgrid_Generate_f (void);
 static void Lightgrid_Save_f (void);
 static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path);
+static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapname);
 static void Mod_LoadLightgridRaw_f (cvar_t *var);
+static void Mod_LoadLightgridOctree_f (cvar_t *var);
 void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size);
 void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
@@ -182,6 +184,7 @@ static cvar_t	gl_loadlitfiles = {"gl_loadlitfiles", "1", CVAR_ARCHIVE};
 static cvar_t	external_lits_dir = {"external_lits_dir", "", CVAR_ARCHIVE};
 static cvar_t	mod_ignorelmscale = {"mod_ignorelmscale", "0", 0};
 cvar_t			load_lightgrid_raw = {"load_lightgrid_raw", "", CVAR_NONE};
+cvar_t			load_lightgrid_octree = {"load_lightgrid_octree", "", CVAR_NONE};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
 
 static byte	*mod_novis;
@@ -260,15 +263,17 @@ Mod_Init
 */
 void Mod_Init (void)
 				{
-        Cvar_RegisterVariable (&external_vis);
-        Cvar_RegisterVariable (&external_ents);
-        Cvar_RegisterVariable (&gl_loadlitfiles);
-        Cvar_RegisterVariable (&external_lits_dir);
-        Cvar_RegisterVariable (&mod_ignorelmscale);
-        Cvar_RegisterVariable (&r_md5);
-        Cvar_RegisterVariable (&load_lightgrid_raw);
-        Cvar_SetCallback (&r_md5, R_MD5_f);
-        Cvar_SetCallback (&load_lightgrid_raw, Mod_LoadLightgridRaw_f);
+	Cvar_RegisterVariable (&external_vis);
+	Cvar_RegisterVariable (&external_ents);
+	Cvar_RegisterVariable (&gl_loadlitfiles);
+	Cvar_RegisterVariable (&external_lits_dir);
+	Cvar_RegisterVariable (&mod_ignorelmscale);
+	Cvar_RegisterVariable (&r_md5);
+	Cvar_RegisterVariable (&load_lightgrid_raw);
+	Cvar_RegisterVariable (&load_lightgrid_octree);
+	Cvar_SetCallback (&r_md5, R_MD5_f);
+	Cvar_SetCallback (&load_lightgrid_raw, Mod_LoadLightgridRaw_f);
+	Cvar_SetCallback (&load_lightgrid_octree, Mod_LoadLightgridOctree_f);
 
         Cmd_AddCommand ("mcache", Mod_Print);
         Cmd_AddCommand ("lightgrid_info", Lightgrid_Info_f);
@@ -2813,35 +2818,130 @@ static qboolean Mod_LoadLightgridRawFromPath (qmodel_t *mod, const char *path)
 
 static void Mod_LoadLightgridRaw_f (cvar_t *var)
 {
-        static qboolean resetting = false;
-        const char *path;
+	static qboolean resetting = false;
+	const char *path;
 
-        if (resetting)
-                return;
+	if (resetting)
+		return;
 
-        if (!var || !var->string || !var->string[0])
-                return;
+	if (!var || !var->string || !var->string[0])
+		return;
 
-        if (!cl.worldmodel)
-        {
-                Con_Printf ("load_lightgrid_raw: no map loaded\n");
-        }
-        else if (cl.worldmodel->type != mod_brush)
-        {
-                Con_Printf ("load_lightgrid_raw: worldmodel is not a brush model\n");
-        }
-        else
-        {
-                path = var->string;
-                Mod_LoadLightgridRawFromPath (cl.worldmodel, path);
-        }
+	if (!cl.worldmodel)
+	{
+		Con_Printf ("load_lightgrid_raw: no map loaded\n");
+	}
+	else if (cl.worldmodel->type != mod_brush)
+	{
+		Con_Printf ("load_lightgrid_raw: worldmodel is not a brush model\n");
+	}
+	else
+	{
+		path = var->string;
+		Mod_LoadLightgridRawFromPath (cl.worldmodel, path);
+	}
 
-        resetting = true;
-        Cvar_Set (var->name, "");
-        resetting = false;
+	resetting = true;
+	Cvar_Set (var->name, "");
+	resetting = false;
 }
 
+static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapname)
+{
+	byte *buffer;
+	char path[MAX_OSPATH];
+	char base[MAX_QPATH];
+	char old_loadname[sizeof(loadname)];
+	qmodel_t *old_loadmodel;
+	byte *old_mod_base;
+	size_t lumpsize;
+	void *lglump;
+	qboolean ok = false;
 
+	if (!mod || !mapname || !mapname[0] || mod->type != mod_brush)
+		return false;
+
+	if (!mod->bspx_header)
+		return false;
+
+	COM_FileBase (mapname, base, sizeof(base));
+
+	if (strchr(base, '.'))
+		q_strlcpy (path, base, sizeof(path));
+	else
+		q_snprintf (path, sizeof(path), "maps/%s.bsp", base);
+
+	buffer = COM_LoadMallocFile (path, NULL);
+	if (!buffer)
+	{
+		Con_Printf ("load_lightgrid_octree: couldn't load %s\n", path);
+		return false;
+	}
+
+	memcpy (old_loadname, loadname, sizeof(loadname));
+	old_loadmodel = loadmodel;
+	old_mod_base = mod_base;
+
+	COM_FileBase (path, loadname, sizeof(loadname));
+	loadmodel = mod;
+	mod_base = buffer;
+
+	lglump = BSPX_FindLump (mod->bspx_header, buffer, "LIGHTGRID_OCTREE", &lumpsize);
+	if (!lglump)
+	{
+		Con_Printf ("load_lightgrid_octree: LIGHTGRID_OCTREE not found in %s\n", path);
+		goto done;
+	}
+
+	if (!LightgridOctree_LoadBSPX (mod, lglump, (int)lumpsize))
+	{
+		Con_Warning ("load_lightgrid_octree: failed to consume %s\n", path);
+		goto done;
+	}
+
+	ok = true;
+
+	done:
+	memcpy (loadname, old_loadname, sizeof(loadname));
+	loadmodel = old_loadmodel;
+	mod_base = old_mod_base;
+	free (buffer);
+	return ok;
+}
+
+static void Mod_LoadLightgridOctree_f (cvar_t *var)
+{
+	static qboolean resetting = false;
+	const char *target;
+
+	if (resetting)
+		return;
+
+	if (!var || !var->string || !var->string[0])
+		return;
+
+	if (!cl.worldmodel)
+	{
+		Con_Printf ("load_lightgrid_octree: no map loaded\n");
+	}
+	else if (cl.worldmodel->type != mod_brush)
+	{
+		Con_Printf ("load_lightgrid_octree: worldmodel is not a brush model\n");
+	}
+	else if (!cl.worldmodel->bspx_header)
+	{
+		Con_Printf ("load_lightgrid_octree: current map has no BSPX directory\n");
+	}
+	else
+	{
+		target = var->string;
+		Mod_LoadLightgridOctreeFromMap (cl.worldmodel, target);
+	}
+
+	resetting = true;
+	Cvar_Set (var->name, "");
+	resetting = false;
+}
 static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 {
         const byte *cursor, *end;
