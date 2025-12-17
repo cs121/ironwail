@@ -3909,22 +3909,22 @@ static void Lightgrid_Info_f (void)
 
 	switch (lg->backend)
 	{
-	case LIGHTGRID_BACKEND_OCTREE:
-	{
-		const lightgrid_octree_t *oct = lg->octree;
+case LIGHTGRID_BACKEND_OCTREE:
+{
+const lightgrid_octree_t *oct = lg->octree;
 
-		if (!oct)
-		{
-			Con_Printf ("No lightgrid loaded\n");
-			return;
-		}
+if (!oct)
+{
+Con_Printf ("No lightgrid loaded\n");
+return;
+}
 
-		Con_Printf ("Lightgrid (octree): %zu nodes, %zu leaves\n", oct->node_count, oct->leaf_count);
-		Con_Printf ("Bounds: mins (%.1f %.1f %.1f) maxs (%.1f %.1f %.1f)\n",
-			oct->mins[0], oct->mins[1], oct->mins[2], oct->maxs[0], oct->maxs[1], oct->maxs[2]);
-		Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
-		break;
-	}
+Con_Printf ("Lightgrid (octree): %zu nodes, %zu leaves\n", oct->node_count, oct->leaf_count);
+Con_Printf ("Bounds: mins (%.1f %.1f %.1f) maxs (%.1f %.1f %.1f)\n",
+lg->mins[0], lg->mins[1], lg->mins[2], lg->maxs[0], lg->maxs[1], lg->maxs[2]);
+Con_Printf ("Source: %s\n", Lightgrid_GetSource ());
+break;
+}
 
 	case LIGHTGRID_BACKEND_RAW:
 	default:
