@@ -330,9 +330,10 @@ void main()
 
     if (LightgridParams.y > 0.5)
     {
-        gbuffer_color = vec4(lightgrid, 1.0);
-        gbuffer_normal = vec4(normalize(normal), 1.0);
-        gbuffer_extra = vec4(0.0);
+        OUT_COLOR = vec4(lightgrid, 1.0);
+#if !OIT
+        out_velocity = vec4(0.0);
+#endif
         return;
     }
 
