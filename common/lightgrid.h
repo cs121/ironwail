@@ -66,46 +66,42 @@ typedef enum lightgrid_backend_e {
 #define LIGHTGRID_OCTREE_CHILD_EMPTY 0xFFFFFFFFu
 #define LIGHTGRID_OCTREE_CHILD_LEAF  0x80000000u
 
+#define LIGHTGRID_OCTREE_FLAG_LEAF     (1u << 31)
+#define LIGHTGRID_OCTREE_FLAG_OCCLUDED (1u << 30)
+#define LIGHTGRID_OCTREE_FLAG_MASK     (LIGHTGRID_OCTREE_FLAG_LEAF | LIGHTGRID_OCTREE_FLAG_OCCLUDED)
+
 typedef struct lightgrid_octree_header_s {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t flags;
-    uint32_t reserved0;
-    vec3_t mins;
-    vec3_t maxs;
+    vec3_t grid_dist;
+    int32_t grid_size[3];
+    vec3_t grid_mins;
+    uint8_t num_styles;
     uint32_t root_node;
-    uint32_t node_count;
-    uint32_t leaf_count;
-    uint32_t nodes_offset;
-    uint32_t leaves_offset;
-    uint32_t leaf_stride;
-    uint32_t reserved1[3];
 } lightgrid_octree_header_t;
 
-typedef struct lightgrid_octree_disk_node_s {
-    uint32_t child[8];
-} lightgrid_octree_disk_node_t;
-
-typedef struct lightgrid_octree_disk_leaf_s {
-    float rgb[3];
-    float dir[3];
-    float intensity;
-} lightgrid_octree_disk_leaf_t;
-
 typedef struct lightgrid_octree_node_s {
+    int32_t division_point[3];
     uint32_t child[8];
 } lightgrid_octree_node_t;
 
+typedef struct lightgrid_octree_sample_s {
+    uint8_t color[3];
+    uint8_t style;
+} lightgrid_octree_sample_t;
+
+typedef struct lightgrid_octree_sampleset_s {
+    lightgrid_octree_sample_t samples[4];
+    uint8_t used_samples;
+    qboolean occluded;
+} lightgrid_octree_sampleset_t;
+
 typedef struct lightgrid_octree_leaf_s {
-    vec3_t rgb;
-    vec3_t dir;
-    float intensity;
+    int32_t mins[3];
+    int32_t size[3];
+    lightgrid_octree_sampleset_t *samples; // array of size[0] * size[1] * size[2]
 } lightgrid_octree_leaf_t;
 
 typedef struct lightgrid_octree_s {
-    vec3_t mins, maxs;
-    uint32_t flags;
-    uint32_t root_node;
+    lightgrid_octree_header_t header;
     size_t node_count;
     size_t leaf_count;
     lightgrid_octree_node_t *nodes;

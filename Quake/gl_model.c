@@ -2844,137 +2844,199 @@ static void Mod_LoadLightgridRaw_f (cvar_t *var)
 
 static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 {
-	const lightgrid_octree_header_t *hdr;
-	const lightgrid_octree_disk_node_t *disk_nodes;
-	lightgrid_octree_t *oct;
-	lightgrid_t *lg;
-	vec3_t mins, maxs;
-	uint32_t version, flags, nodes_offset, leaves_offset, leaf_stride;
-	uint32_t node_count, leaf_count, root_node;
-	size_t nodes_size, leaves_size;
-	const byte *payload;
+        const byte *cursor, *end;
+        lightgrid_octree_t *oct;
+        lightgrid_t *lg;
 
-	if (!mod || !data || size < (int)sizeof(lightgrid_octree_header_t))
-		return false;
+        if (!mod || !data || size <= 0)
+                return false;
 
-	payload = (const byte *)data;
-	hdr = (const lightgrid_octree_header_t *)payload;
+        cursor = (const byte *)data;
+        end = cursor + size;
 
-	if (LittleLong (hdr->magic) != LIGHTGRID_OCTREE_MAGIC)
-		return false;
+        if ((size_t)(end - cursor) < sizeof(float) * 6 + sizeof(uint8_t) + sizeof(uint32_t))
+                return false;
 
-	version = LittleLong (hdr->version);
-	if (version != LIGHTGRID_OCTREE_VERSION_1)
-		return false;
+        oct = (lightgrid_octree_t *)Hunk_AllocName (sizeof(*oct), "lgoctree");
+        if (!oct)
+                return false;
 
-	flags = LittleLong (hdr->flags);
-	if ((flags & LIGHTGRID_OCTREE_FLAG_FLOAT32) == 0)
-		return false;
+        memset (oct, 0, sizeof(*oct));
 
-	root_node = LittleLong (hdr->root_node);
-	node_count = LittleLong (hdr->node_count);
-	leaf_count = LittleLong (hdr->leaf_count);
-	nodes_offset = LittleLong (hdr->nodes_offset);
-	leaves_offset = LittleLong (hdr->leaves_offset);
-	leaf_stride = LittleLong (hdr->leaf_stride);
-
-	if (!node_count || !leaf_count)
-		return false;
-
-	if (root_node >= node_count)
-		return false;
-
-	if ((nodes_offset & 3u) || (leaves_offset & 3u) || (leaf_stride & 3u))
-		return false;
-
-	if (nodes_offset > leaves_offset)
-		return false;
-
-	if (leaf_stride < sizeof(lightgrid_octree_disk_leaf_t))
-		return false;
-
-	if ((size_t)node_count > SIZE_MAX / sizeof(lightgrid_octree_disk_node_t))
-		return false;
-	nodes_size = (size_t)node_count * sizeof(lightgrid_octree_disk_node_t);
-	if (nodes_offset + nodes_size > (size_t)size)
-		return false;
-
-	if ((size_t)leaf_count > SIZE_MAX / (size_t)leaf_stride)
-		return false;
-	leaves_size = (size_t)leaf_count * (size_t)leaf_stride;
-	if ((size_t)leaves_offset + leaves_size > (size_t)size)
-		return false;
-
-	mins[0] = LittleFloat (hdr->mins[0]);
-	mins[1] = LittleFloat (hdr->mins[1]);
-	mins[2] = LittleFloat (hdr->mins[2]);
-	maxs[0] = LittleFloat (hdr->maxs[0]);
-	maxs[1] = LittleFloat (hdr->maxs[1]);
-	maxs[2] = LittleFloat (hdr->maxs[2]);
-
-	for (int i = 0; i < 3; i++)
-	{
-		if (!isfinite (mins[i]) || !isfinite (maxs[i]) || mins[i] > maxs[i])
-			return false;
-	}
-
-	disk_nodes = (const lightgrid_octree_disk_node_t *)(payload + nodes_offset);
-	for (size_t i = 0; i < node_count; i++)
-	{
-		for (int c = 0; c < 8; c++)
-		{
-			uint32_t child = LittleLong (disk_nodes[i].child[c]);
-
-			if (child == LIGHTGRID_OCTREE_CHILD_EMPTY)
-				continue;
-			if (child & LIGHTGRID_OCTREE_CHILD_LEAF)
-			{
-				uint32_t leaf_idx = child & ~LIGHTGRID_OCTREE_CHILD_LEAF;
-				if (leaf_idx >= leaf_count)
-					return false;
-			}
-			else if (child >= node_count)
-			{
-				return false;
-			}
-		}
-	}
-
-	oct = (lightgrid_octree_t *)Hunk_AllocName (sizeof(*oct), "lgoctree");
-	if (!oct)
-		return false;
-
-	memset (oct, 0, sizeof(*oct));
-	VectorCopy (mins, oct->mins);
-	VectorCopy (maxs, oct->maxs);
-	oct->flags = flags;
-	oct->root_node = root_node;
-	oct->node_count = node_count;
-	oct->leaf_count = leaf_count;
-
-	oct->nodes = (lightgrid_octree_node_t *)Hunk_AllocName (node_count * sizeof(lightgrid_octree_node_t), "lgoctnodes");
-	oct->leaves = (lightgrid_octree_leaf_t *)Hunk_AllocName (leaf_count * sizeof(lightgrid_octree_leaf_t), "lgoctleaf");
-	if (!oct->nodes || !oct->leaves)
-		return false;
-
-	for (size_t i = 0; i < node_count; i++)
-	{
-		for (int c = 0; c < 8; c++)
-			oct->nodes[i].child[c] = LittleLong (disk_nodes[i].child[c]);
-	}
-
-        for (size_t i = 0; i < leaf_count; i++)
+        for (int i = 0; i < 3; i++)
         {
-                const lightgrid_octree_disk_leaf_t *src = (const lightgrid_octree_disk_leaf_t *)(payload + leaves_offset + i * leaf_stride);
-                lightgrid_octree_leaf_t *dst = &oct->leaves[i];
+                float temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->header.grid_dist[i] = LittleFloat (temp);
+                cursor += sizeof(float);
+        }
 
-		dst->rgb[0] = LittleFloat (src->rgb[0]);
-		dst->rgb[1] = LittleFloat (src->rgb[1]);
-		dst->rgb[2] = LittleFloat (src->rgb[2]);
-		dst->dir[0] = LittleFloat (src->dir[0]);
-		dst->dir[1] = LittleFloat (src->dir[1]);
-                dst->dir[2] = LittleFloat (src->dir[2]);
-                dst->intensity = LittleFloat (src->intensity);
+        for (int i = 0; i < 3; i++)
+        {
+                int32_t temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->header.grid_size[i] = LittleLong (temp);
+                cursor += sizeof(uint32_t);
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+                float temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->header.grid_mins[i] = LittleFloat (temp);
+                cursor += sizeof(float);
+        }
+
+        oct->header.num_styles = *cursor;
+        cursor += sizeof(uint8_t);
+
+        {
+                uint32_t temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->header.root_node = LittleLong (temp);
+        }
+        cursor += sizeof(uint32_t);
+
+        if (cursor > end)
+                return false;
+
+        if ((size_t)(end - cursor) < sizeof(uint32_t))
+                return false;
+
+        {
+                uint32_t temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->node_count = (size_t)LittleLong (temp);
+        }
+        cursor += sizeof(uint32_t);
+
+        if (!oct->node_count)
+                return false;
+
+        if (oct->node_count > SIZE_MAX / sizeof(lightgrid_octree_node_t))
+                return false;
+
+        {
+                size_t node_bytes = sizeof(int32_t) * 3 + sizeof(uint32_t) * 8;
+                if (oct->node_count > (size_t)(end - cursor) / node_bytes)
+                        return false;
+        }
+
+        oct->nodes = (lightgrid_octree_node_t *)Hunk_AllocName (oct->node_count * sizeof(lightgrid_octree_node_t), "lgoctnodes");
+        if (!oct->nodes)
+                return false;
+
+        for (size_t i = 0; i < oct->node_count; i++)
+        {
+                for (int axis = 0; axis < 3; axis++)
+                {
+                        int32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        oct->nodes[i].division_point[axis] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+
+                for (int c = 0; c < 8; c++)
+                {
+                        uint32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        oct->nodes[i].child[c] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+        }
+
+        if ((size_t)(end - cursor) < sizeof(uint32_t))
+                return false;
+
+        {
+                uint32_t temp;
+                memcpy(&temp, cursor, sizeof(temp));
+                oct->leaf_count = (size_t)LittleLong (temp);
+        }
+        cursor += sizeof(uint32_t);
+
+        if (!oct->leaf_count)
+                return false;
+
+        if (oct->leaf_count > SIZE_MAX / sizeof(lightgrid_octree_leaf_t))
+                return false;
+
+        {
+                size_t leaf_header_bytes = sizeof(uint32_t) * 6;
+                if (oct->leaf_count > (size_t)(end - cursor) / leaf_header_bytes)
+                        return false;
+        }
+
+        oct->leaves = (lightgrid_octree_leaf_t *)Hunk_AllocName (oct->leaf_count * sizeof(lightgrid_octree_leaf_t), "lgoctleaf");
+        if (!oct->leaves)
+                return false;
+
+        memset (oct->leaves, 0, oct->leaf_count * sizeof(lightgrid_octree_leaf_t));
+
+        for (size_t i = 0; i < oct->leaf_count; i++)
+        {
+                for (int axis = 0; axis < 3; axis++)
+                {
+                        int32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        oct->leaves[i].mins[axis] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+                for (int axis = 0; axis < 3; axis++)
+                {
+                        int32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        oct->leaves[i].size[axis] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+        }
+
+        for (size_t leaf_index = 0; leaf_index < oct->leaf_count; leaf_index++)
+        {
+                lightgrid_octree_leaf_t *leaf = &oct->leaves[leaf_index];
+                if (leaf->size[0] <= 0 || leaf->size[1] <= 0 || leaf->size[2] <= 0)
+                        return false;
+                size_t sample_count = (size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)leaf->size[2];
+
+                if (!sample_count || sample_count > SIZE_MAX / sizeof(lightgrid_octree_sampleset_t))
+                        return false;
+
+                if ((size_t)(end - cursor) < sample_count)
+                        return false;
+
+                leaf->samples = (lightgrid_octree_sampleset_t *)Hunk_AllocName (sample_count * sizeof(lightgrid_octree_sampleset_t), "lgoctsamp");
+                if (!leaf->samples)
+                        return false;
+
+                memset (leaf->samples, 0, sample_count * sizeof(lightgrid_octree_sampleset_t));
+
+                for (size_t i = 0; i < sample_count; i++)
+                {
+                        lightgrid_octree_sampleset_t *set = &leaf->samples[i];
+                        uint8_t used = *cursor++;
+
+                        if (used == 0xFF)
+                        {
+                                set->occluded = true;
+                                continue;
+                        }
+
+                        set->used_samples = used;
+
+                        if (set->used_samples > 4)
+                                return false;
+
+                        if ((size_t)(end - cursor) < (size_t)set->used_samples * (sizeof(uint8_t) + 3))
+                                return false;
+
+                        for (int j = 0; j < set->used_samples; j++)
+                        {
+                                set->samples[j].style = *cursor++;
+                                set->samples[j].color[0] = *cursor++;
+                                set->samples[j].color[1] = *cursor++;
+                                set->samples[j].color[2] = *cursor++;
+                        }
+                }
         }
 
         if (!Lightgrid_ValidateOctree (oct, r_lightgrid_octree_debug.value > 0.f))
@@ -2986,18 +3048,24 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
         if (!lg)
                 return false;
 
-	memset (lg, 0, sizeof(*lg));
-	lg->backend = LIGHTGRID_BACKEND_OCTREE;
-	lg->octree = oct;
-	lg->source = LIGHTGRID_SRC_OCTREE;
-	VectorCopy (mins, lg->mins);
-	VectorCopy (maxs, lg->maxs);
+        memset (lg, 0, sizeof(*lg));
+        lg->backend = LIGHTGRID_BACKEND_OCTREE;
+        lg->octree = oct;
+        lg->source = LIGHTGRID_SRC_OCTREE;
 
-	Lightgrid_Set (lg);
+        VectorCopy (oct->header.grid_mins, lg->mins);
+        for (int i = 0; i < 3; i++)
+                lg->maxs[i] = oct->header.grid_mins[i] + oct->header.grid_dist[i] * (oct->header.grid_size[i] - 1);
 
-	Con_Printf ("Loaded LIGHTGRID_OCTREE (%zu nodes, %zu leaves)\n", oct->node_count, oct->leaf_count);
+        Lightgrid_Set (lg);
 
-	return true;
+        Con_Printf ("Loaded LIGHTGRID_OCTREE: dist(%.1f %.1f %.1f) size(%d %d %d) mins(%.1f %.1f %.1f) styles %u (%zu nodes, %zu leaves)\n",
+                oct->header.grid_dist[0], oct->header.grid_dist[1], oct->header.grid_dist[2],
+                oct->header.grid_size[0], oct->header.grid_size[1], oct->header.grid_size[2],
+                oct->header.grid_mins[0], oct->header.grid_mins[1], oct->header.grid_mins[2],
+                oct->header.num_styles, oct->node_count, oct->leaf_count);
+
+        return true;
 }
 typedef struct lightgrid_static_light_s
 {
