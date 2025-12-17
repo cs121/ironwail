@@ -36,6 +36,7 @@ static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
 
 extern vec3_t lightcolor;
+extern cvar_t r_dlight_entities;
 
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
@@ -3487,13 +3488,13 @@ static qboolean LightgridRAW_TraceLine (const qmodel_t *mod, const vec3_t start,
 }
 
 
-static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos, vec3_t rgb, vec3_t dirsum)
+static void LightgridRAW_AddDynamicLights_Array (const qmodel_t *mod, const vec3_t pos, vec3_t rgb, vec3_t dirsum, const dlight_t *lights, int count)
 {
-        for (int i = 0; i < MAX_DLIGHTS; i++)
+        for (int i = 0; i < count; i++)
         {
-                const dlight_t *l = &cl_dlights[i];
+                const dlight_t *l = &lights[i];
 
-                if (l->die <= cl.time || (!l->radius && !l->minlight))
+                if (!CL_DlightIsActive (l))
                         continue;
 
                 vec3_t delta;
@@ -3523,6 +3524,14 @@ static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos
                         VectorMA (dirsum, add, delta, dirsum);
         }
 }
+
+static void LightgridRAW_AddDynamicLights (const qmodel_t *mod, const vec3_t pos, vec3_t rgb, vec3_t dirsum)
+{
+        LightgridRAW_AddDynamicLights_Array (mod, pos, rgb, dirsum, cl_dlights, MAX_DLIGHTS);
+        if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
+                LightgridRAW_AddDynamicLights_Array (mod, pos, rgb, dirsum, cl_entity_dlights, cl_num_entity_dlights);
+}
+
 
 static qboolean LightgridRAW_TextureIsEmissive (const texture_t *tx)
 {
