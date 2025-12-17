@@ -156,6 +156,7 @@ void R_CheckEfrags (void)
 ===========
 R_ClearEfrags
 ===========
+*/
 void R_ClearEfrags (void)
 {
 	if (!R_EfragsPointerIsCanonical (cl_efrags))
