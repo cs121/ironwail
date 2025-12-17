@@ -857,8 +857,10 @@ void GL_BuildBModelVertexBuffer (void)
                                 {
                                         vec3_t lg_color;
                                         float lg_ao = 1.f;
+                                        const qboolean sample_lightgrid = (r_lightgrid_apply_world.value > 0.f)
+                                                || (r_lightgrid_debug.value > 0.f);
 
-                                        if (r_lightgrid_apply_world.value > 0.f)
+                                        if (sample_lightgrid)
                                         {
                                                 Lightgrid_Sample (vec, lg_color, &lg_ao);
                                                 VectorScale (lg_color, lg_ao, vert->lightgrid);
