@@ -8,6 +8,8 @@ typedef struct sh9_color_s {
 
 typedef struct lightcell_s {
     vec3_t rgb;
+    vec3_t dir;
+    float intensity;
     float ao;
     float emissive;
     qboolean sh_valid;
