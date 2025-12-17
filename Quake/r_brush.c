@@ -858,8 +858,15 @@ void GL_BuildBModelVertexBuffer (void)
                                         vec3_t lg_color;
                                         float lg_ao = 1.f;
 
-                                        Lightgrid_Sample (vec, lg_color, &lg_ao);
-                                        VectorScale (lg_color, lg_ao, vert->lightgrid);
+                                        if (r_lightgrid_apply_world.value > 0.f)
+                                        {
+                                                Lightgrid_Sample (vec, lg_color, &lg_ao);
+                                                VectorScale (lg_color, lg_ao, vert->lightgrid);
+                                        }
+                                        else
+                                        {
+                                                VectorSet (vert->lightgrid, 1.f, 1.f, 1.f);
+                                        }
                                 }
 
                                 s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;
