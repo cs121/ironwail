@@ -47,6 +47,56 @@ int			*cl_efrags;
 
 vec3_t		r_emins, r_emaxs;
 
+static qboolean R_EfragsPointerIsCanonical (const void *ptr)
+{
+#if defined(__x86_64__) || defined(_M_X64)
+	uintptr_t addr = (uintptr_t) ptr;
+	uint64_t high = addr >> 48;
+	return addr == 0 || high == 0 || high == 0xFFFFu;
+#else
+	(void) ptr;
+	return true;
+#endif
+}
+
+static qboolean R_EfragsVectorIsValid (void)
+{
+	if (!R_EfragsPointerIsCanonical (cl_efrags))
+		return false;
+
+	if (!cl_efrags)
+		return true;
+
+	if (VEC_HEADER(cl_efrags).size > VEC_HEADER(cl_efrags).capacity)
+		return false;
+
+	if (cl.worldmodel)
+	{
+		size_t max_expected = (size_t) cl.num_statics * ((size_t) cl.worldmodel->numleafs + 1);
+		if (VEC_HEADER(cl_efrags).size > max_expected)
+			return false;
+	}
+
+	return true;
+}
+
+static void R_RebuildStaticEfrags (void)
+{
+	int i;
+
+	R_ClearEfrags ();
+
+	if (!cl.worldmodel)
+		return;
+
+	for (i = 0; i < cl.num_statics; i++)
+	{
+		entity_t *ent = &cl_static_entities[i];
+		if (ent->model)
+			R_AddEfrags (ent);
+	}
+}
+
 /*
 ===================
 R_SplitEntityOnNode
@@ -106,10 +156,15 @@ void R_CheckEfrags (void)
 ===========
 R_ClearEfrags
 ===========
-*/
 void R_ClearEfrags (void)
 {
-	VEC_CLEAR (cl_efrags);
+	if (!R_EfragsPointerIsCanonical (cl_efrags))
+		cl_efrags = NULL;
+
+	if (cl_efrags)
+		VEC_FREE (cl_efrags);
+
+	cl.num_efrags = 0;
 }
 
 /*
@@ -158,6 +213,15 @@ void R_AddStaticModels (const byte *vis)
 {
 	int			i, j, start, leafidx, maxleaf, numleafs, *efrags;
 	entity_t	*ent;
+
+	if (!R_EfragsVectorIsValid ())
+	{
+		Con_DWarning ("static efrags were corrupted, rebuilding\n");
+		R_RebuildStaticEfrags ();
+	}
+
+	if (!cl_efrags)
+		return;
 
 	for (i = maxleaf = 0, start = cl_numvisedicts, ent = cl_static_entities, efrags = cl_efrags; i < cl.num_statics; i++, ent++)
 	{
