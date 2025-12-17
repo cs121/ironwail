@@ -62,6 +62,8 @@ entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 int					cl_max_lightstyles = MAX_LIGHTSTYLES;
 dlight_t		cl_dlights[MAX_DLIGHTS];
+dlight_t		cl_entity_dlights[MAX_ENTITY_DLIGHTS];
+int				cl_num_entity_dlights;
 
 entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
 int				cl_max_edicts; //johnfitz -- only changes when new map loads
@@ -110,6 +112,8 @@ void CL_ClearState (void)
 
 // clear other arrays
 	memset (cl_dlights, 0, sizeof(cl_dlights));
+	memset (cl_entity_dlights, 0, sizeof(cl_entity_dlights));
+	cl_num_entity_dlights = 0;
 	memset (cl_lightstyle, 0, sizeof(cl_lightstyle));
 	cl_max_lightstyles = MAX_LIGHTSTYLES;
 	memset (cl_temp_entities, 0, sizeof(cl_temp_entities));
@@ -412,28 +416,42 @@ CL_DecayLights
 
 ===============
 */
+static void CL_UpdateDlightArray (dlight_t *dl, int count, float frametime)
+{
+	for (int i = 0; i < count; i++, dl++)
+	{
+		if (dl->die < cl.time || dl->spawn > cl.time || !dl->baseradius)
+			continue;
+
+		dl->baseradius -= frametime*dl->decay;
+		if (dl->baseradius < 0)
+			dl->baseradius = 0;
+
+		dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
+		if (dl->radius < 0)
+			dl->radius = 0;
+	}
+}
+
+/*
+===============
+CL_DecayLights
+===============
+*/
 void CL_DecayLights (void)
 {
-	int			i;
-	dlight_t	*dl;
-	float		time;
+	float time;
 
 	time = cl.time - cl.oldtime;
 
-        dl = cl_dlights;
-        for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
-        {
-                if (dl->die < cl.time || dl->spawn > cl.time || !dl->baseradius)
-                        continue;
+	CL_UpdateDlightArray (cl_dlights, MAX_DLIGHTS, time);
+	CL_UpdateDlightArray (cl_entity_dlights, cl_num_entity_dlights, time);
+}
 
-                dl->baseradius -= time*dl->decay;
-                if (dl->baseradius < 0)
-                        dl->baseradius = 0;
 
-                dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
-                if (dl->radius < 0)
-                        dl->radius = 0;
-        }
+/*
+===============
+CL_LerpPoint}
 }
 
 
@@ -873,6 +891,9 @@ int CL_ReadFromServer (void)
 
         //dlights
         for (i=0, l=cl_dlights ; i<MAX_DLIGHTS ; i++, l++)
+                if (l->die >= cl.time && l->spawn <= cl.time && l->baseradius)
+                        num_dlights++;
+        for (i=0, l=cl_entity_dlights ; i<cl_num_entity_dlights ; i++, l++)
                 if (l->die >= cl.time && l->spawn <= cl.time && l->baseradius)
                         num_dlights++;
 	if (num_dlights > 32 && dev_peakstats.dlights <= 32)

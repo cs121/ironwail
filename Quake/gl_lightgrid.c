@@ -15,6 +15,7 @@
 #include <math.h>
 
 extern vec3_t lightcolor;
+extern cvar_t r_dlight_entities;
 
 static lightgrid_t *current_lightgrid = NULL;
 static char lightgrid_source[16] = "NONE";
@@ -1867,13 +1868,13 @@ void Lightgrid_BuildFallback(void)
    Dlight integration
    ===================================================================== */
 
-static void Lightgrid_AddDlights(const vec3_t pos, vec3_t color, vec3_t dirsum)
+static void Lightgrid_AddDlightArray(const dlight_t *lights, int count, const vec3_t pos, vec3_t color, vec3_t dirsum)
 {
-    for (int i = 0; i < MAX_DLIGHTS; i++)
+    for (int i = 0; i < count; i++)
     {
-        const dlight_t *l = &cl_dlights[i];
+        const dlight_t *l = &lights[i];
 
-        if (l->die <= cl.time || (!l->radius && !l->minlight))
+        if (!CL_DlightIsActive (l) || (!l->radius && !l->minlight))
             continue;
 
         vec3_t delta;
@@ -1894,6 +1895,14 @@ static void Lightgrid_AddDlights(const vec3_t pos, vec3_t color, vec3_t dirsum)
             VectorMA(dirsum, add, delta, dirsum);
     }
 }
+
+static void Lightgrid_AddDlights(const vec3_t pos, vec3_t color, vec3_t dirsum)
+{
+    Lightgrid_AddDlightArray(cl_dlights, MAX_DLIGHTS, pos, color, dirsum);
+    if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
+        Lightgrid_AddDlightArray(cl_entity_dlights, cl_num_entity_dlights, pos, color, dirsum);
+}
+
 
 /* =====================================================================
    Public API
