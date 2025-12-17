@@ -199,6 +199,7 @@ cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
+cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };

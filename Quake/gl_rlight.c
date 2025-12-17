@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
+extern cvar_t r_dlight_entities;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
@@ -44,6 +45,149 @@ static qboolean R_IsFinite (float v)
 #else
         return isfinite(v);
 #endif
+}
+
+
+static void R_ParseDlightColor (const char *value, vec3_t color)
+{
+	float r = 1.f, g = 1.f, b = 1.f;
+	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
+	{
+		// Accept either 0-1 or 0-255 ranges; normalize to 0-1 for storage.
+		if (r > 2.f || g > 2.f || b > 2.f)
+		{
+			r *= 1.f / 255.f;
+			g *= 1.f / 255.f;
+			b *= 1.f / 255.f;
+		}
+	}
+	color[0] = r;
+	color[1] = g;
+	color[2] = b;
+}
+
+static qboolean R_ParseDlightOrigin (const char *value, vec3_t origin)
+{
+	return value && sscanf (value, "%f %f %f", &origin[0], &origin[1], &origin[2]) == 3;
+}
+
+static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t color, int style)
+{
+	if (cl_num_entity_dlights >= MAX_ENTITY_DLIGHTS)
+		return;
+
+	dlight_t *dl = &cl_entity_dlights[cl_num_entity_dlights++];
+
+	memset (dl, 0, sizeof(*dl));
+	VectorCopy (origin, dl->origin);
+	VectorCopy (color, dl->color);
+	dl->baseradius = radius;
+	dl->radius = radius;
+	dl->spawn = cl.time - 0.001f;
+	dl->die = FLT_MAX;
+	dl->decay = 0.f;
+	dl->minlight = 0.f;
+	dl->key = -(1000 + cl_num_entity_dlights);
+	dl->type = DLIGHT_DEFAULT;
+	dl->style = style;
+	dl->flicker_seed = (float) rand ();
+}
+
+// Parse BSP entity lump for persistent dynamic lights.
+// Supported forms:
+//   classname "dlight" (always persistent)
+//   classname "light" with either "dynamic" "1" or "dlight" "1"
+// Keys:
+//   "origin" (vector, required)
+//   "radius" or fallback "light" (radius/intensity)
+//   "_color" or "color" (RGB, accepts floats 0-1 or bytes 0-255, stored as 0-1)
+//   optional "style" / "flicker" / "pulse" (stored for future use)
+void R_ParseDlightEntities (void)
+{
+	const char *data;
+
+	memset (cl_entity_dlights, 0, sizeof (cl_entity_dlights));
+	cl_num_entity_dlights = 0;
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	if (r_dlight_entities.value <= 0.f)
+		return;
+
+	data = cl.worldmodel->entities;
+	data = COM_Parse (data);
+	while (data && com_token[0])
+	{
+		vec3_t origin = {0.f, 0.f, 0.f};
+		vec3_t color = {1.f, 1.f, 1.f};
+		float radius = 0.f;
+		int style = 0;
+		qboolean classname_is_dlight = false;
+		qboolean classname_is_light = false;
+		qboolean marked_dynamic = false;
+		qboolean parsed_origin = false;
+
+		if (com_token[0] != '{')
+			break;
+
+		while (1)
+		{
+			char key[64], value[1024];
+			data = COM_Parse (data);
+			if (!data || !com_token[0])
+				return;
+			if (com_token[0] == '}')
+				break;
+			q_strlcpy (key, com_token, sizeof (key));
+			if (key[0] == '_')
+				memmove (key, key + 1, strlen (key));
+			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+			if (!data)
+				return;
+			q_strlcpy (value, com_token, sizeof (value));
+			if (!strcmp (key, "classname"))
+			{
+				classname_is_dlight = !strcmp (value, "dlight");
+				classname_is_light = !strcmp (value, "light");
+			}
+			else if (!strcmp (key, "origin"))
+				parsed_origin = R_ParseDlightOrigin (value, origin);
+			else if (!strcmp (key, "_color") || !strcmp (key, "color"))
+				R_ParseDlightColor (value, color);
+			else if (!strcmp (key, "radius"))
+				radius = atof (value);
+			else if (!strcmp (key, "light") && radius <= 0.f)
+				radius = atof (value);
+			else if (!strcmp (key, "dynamic") || !strcmp (key, "dlight"))
+				marked_dynamic = atoi (value) != 0;
+			else if (!strcmp (key, "style") || !strcmp (key, "flicker") || !strcmp (key, "pulse"))
+				style = atoi (value);
+		}
+
+		if ((classname_is_dlight || (classname_is_light && marked_dynamic)) && radius > 0.f && parsed_origin)
+		{
+			R_AddEntityDlight (origin, radius, color, style);
+			if (cl_num_entity_dlights >= MAX_ENTITY_DLIGHTS)
+				break;
+		}
+
+		data = COM_Parse (data);
+	}
+
+	if (cl_num_entity_dlights || developer.value)
+	{
+		const int debugcount = q_min (cl_num_entity_dlights, 5);
+		Con_DPrintf ("Spawned %d entity dlights (showing %d):\n", cl_num_entity_dlights, debugcount);
+		for (int i = 0; i < debugcount; i++)
+		{
+			const dlight_t *dl = &cl_entity_dlights[i];
+			Con_DPrintf ("  #%d origin %.1f %.1f %.1f radius %.1f color %.2f %.2f %.2f style %d\n", i,
+					dl->origin[0], dl->origin[1], dl->origin[2], dl->baseradius,
+					dl->color[0], dl->color[1], dl->color[2], dl->style);
+		}
+	}
+	return;
 }
 
 int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist);
@@ -176,81 +320,90 @@ void GLLight_DeleteResources (void)
 	gl_lightclustertexture = 0;
 }
 
+static void R_PushDlightArray (dlight_t *lights, int count)
+{
+	int	j;
+
+	for (int i = 0; i < count; i++)
+	{
+		dlight_t *l = &lights[i];
+		gpulight_t *out;
+		qboolean cull = false;
+		float radius;
+
+		if (l->spawn > cl.time)
+		{
+			l->die = 0.f;
+			continue;
+		}
+
+		if (!CL_DlightIsActive (l))
+			continue;
+
+		radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
+		radius = q_max (radius, 0.f);
+		l->radius = radius;
+
+		for (j = 0; j < 4; j++)
+		{
+			mplane_t *p = &frustum[j];
+			if (DotProduct (p->normal, l->origin) - p->dist + radius < 0.f)
+			{
+				cull = true;
+				break;
+			}
+		}
+		if (cull)
+			continue;
+
+		out = &r_lightbuffer.lights[r_framedata.numlights++];
+		const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
+		float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
+		float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
+		vec3_t finalcolor;
+		finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
+		finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
+		finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
+		finalcolor[0] *= flicker;
+		finalcolor[1] *= flicker;
+		finalcolor[2] *= flicker;
+		if (l->type == DLIGHT_TORCH)
+		{
+			float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;
+			finalcolor[0] *= 1.0f + colorshift;
+			finalcolor[1] *= 1.0f - colorshift;
+		}
+		out->pos[0]   = l->origin[0];
+		out->pos[1]   = l->origin[1];
+		out->pos[2]   = l->origin[2];
+		out->radius   = radius;
+		out->color[0] = finalcolor[0];
+		out->color[1] = finalcolor[1];
+		out->color[2] = finalcolor[2];
+		out->minlight = l->minlight;
+	}
+}
+
 /*
-=============
+===============
 R_PushDlights
-=============
+===============
 */
 void R_PushDlights (void)
 {
-	int				i, j;
-	GLuint			buf;
-	GLbyte			*ofs;
+	int					i;
+	GLuint		buf;
+	GLbyte		*ofs;
 	gpu_cluster_inputs_t cluster_inputs;
 
 	r_framedata.numlights = 0;
 
 	if (r_dynamic.value)
 	{
-		dlight_t *l;
-		for (i = 0, l = cl_dlights; i < MAX_DLIGHTS; i++, l++)
-		{
-			gpulight_t *out;
-                        qboolean cull = false;
-                        float radius;
-
-                        if (l->spawn > cl.time)
-                        {
-                                l->die = 0.f;
-                                continue;
-                        }
-
-                        if (l->die < cl.time || !l->baseradius)
-                                continue;
-
-                        radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
-                        radius = q_max (radius, 0.f);
-                        l->radius = radius;
-
-                        for (j = 0; j < 4; j++)
-                        {
-                                mplane_t *p = &frustum[j];
-                                if (DotProduct (p->normal, l->origin) - p->dist + radius < 0.f)
-                                {
-                                        cull = true;
-                                        break;
-                                }
-                        }
-                        if (cull)
-                                continue;
-
-                        out = &r_lightbuffer.lights[r_framedata.numlights++];
-                        const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
-                        float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
-                        float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
-                        vec3_t finalcolor;
-                        finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
-                        finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
-                        finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
-                        finalcolor[0] *= flicker;
-                        finalcolor[1] *= flicker;
-                        finalcolor[2] *= flicker;
-                        if (l->type == DLIGHT_TORCH)
-                        {
-                                float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;
-                                finalcolor[0] *= 1.0f + colorshift;
-                                finalcolor[1] *= 1.0f - colorshift;
-                        }
-                        out->pos[0]   = l->origin[0];
-                        out->pos[1]   = l->origin[1];
-                        out->pos[2]   = l->origin[2];
-                        out->radius   = radius;
-                        out->color[0] = finalcolor[0];
-                        out->color[1] = finalcolor[1];
-                        out->color[2] = finalcolor[2];
-                        out->minlight = l->minlight;
-                }
-        }
+		R_PushDlightArray (cl_dlights, MAX_DLIGHTS);
+		if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
+			R_PushDlightArray (cl_entity_dlights, cl_num_entity_dlights);
+	}
 
 	GL_BeginGroup ("Light clustering");
 
@@ -271,6 +424,7 @@ void R_PushDlights (void)
 
 	GL_EndGroup ();
 }
+
 
 
 /*
@@ -322,32 +476,38 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 R_AddDynamicLights_Lightgrid
 ==================
 */
+static void R_AddDynamicLights_LightgridArray (const dlight_t *lights, int count, const vec3_t pos, vec3_t lightcolor)
+{
+	for (int i = 0; i < count; i++)
+	{
+		const dlight_t *l = &lights[i];
+		vec3_t dist;
+		float add;
+
+		if (!CL_DlightIsActive (l))
+			continue;
+
+		VectorSubtract (pos, l->origin, dist);
+		add = l->radius - VectorLength (dist);
+
+		if (add <= l->minlight)
+			continue;
+
+		add -= l->minlight;
+		VectorMA (lightcolor, add, l->color, lightcolor);
+	}
+}
+
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 {
-        int i;
+	if (!r_dynamic.value)
+		return;
 
-        if (!r_dynamic.value)
-                return;
-
-        for (i = 0; i < MAX_DLIGHTS; i++)
-        {
-                const dlight_t *l = &cl_dlights[i];
-                vec3_t dist;
-                float add;
-
-                if (l->die < cl.time || l->spawn > cl.time || !l->baseradius)
-                        continue;
-
-                VectorSubtract (pos, l->origin, dist);
-                add = l->radius - VectorLength (dist);
-
-                if (add <= l->minlight)
-                        continue;
-
-                add -= l->minlight;
-                VectorMA (lightcolor, add, l->color, lightcolor);
-        }
+	R_AddDynamicLights_LightgridArray (cl_dlights, MAX_DLIGHTS, pos, lightcolor);
+	if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
+		R_AddDynamicLights_LightgridArray (cl_entity_dlights, cl_num_entity_dlights, pos, lightcolor);
 }
+
 
 static inline int LightStyleValue (unsigned short style)
 {

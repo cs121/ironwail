@@ -376,6 +376,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
 	Cvar_RegisterVariable (&r_litwater);
 	Cvar_RegisterVariable (&r_dynamic);
+	Cvar_RegisterVariable (&r_dlight_entities);
 	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
 	Cvar_RegisterVariable (&r_simd);
@@ -646,6 +647,7 @@ void R_NewMap (void)
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, lavaalpha, telealpha, slimealpha in worldspawn
+        R_ParseDlightEntities (); // persistent dlights from BSP entities
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)

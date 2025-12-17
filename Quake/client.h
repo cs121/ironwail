@@ -70,6 +70,7 @@ extern cshift_t		cshift_empty;
 #define	SIGNONS		4			// signon messages to receive before connected
 
 #define	MAX_DLIGHTS		64 //johnfitz -- was 32
+#define	MAX_ENTITY_DLIGHTS		64 // persistent dlights spawned from BSP entities
 typedef enum
 {
 	DLIGHT_DEFAULT = 0,
@@ -94,8 +95,13 @@ typedef struct
 	vec3_t	color;				//johnfitz -- lit support via lordhavoc
 	float	flicker_seed;
 	dlighttype_t type;
+	int		style;			// optional light style/flicker index (entity dlights)
 } dlight_t;
 
+static inline qboolean CL_DlightIsActive (const dlight_t *dl)
+{
+	return dl && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
+}
 
 #define	MAX_BEAMS	32 //johnfitz -- was 24
 typedef struct
@@ -334,6 +340,8 @@ extern	entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 extern	int			cl_max_lightstyles;
 extern	lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 extern	dlight_t		cl_dlights[MAX_DLIGHTS];
+extern	dlight_t		cl_entity_dlights[MAX_ENTITY_DLIGHTS];
+extern	int			cl_num_entity_dlights;
 extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
 extern	beam_t			cl_beams[MAX_BEAMS];
 extern	entity_t		*cl_visedicts[MAX_VISEDICTS];
