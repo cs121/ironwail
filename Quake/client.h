@@ -98,11 +98,6 @@ typedef struct
 	int		style;			// optional light style/flicker index (entity dlights)
 } dlight_t;
 
-static inline qboolean CL_DlightIsActive (const dlight_t *dl)
-{
-	return dl && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
-}
-
 #define	MAX_BEAMS	32 //johnfitz -- was 24
 typedef struct
 {
@@ -346,6 +341,11 @@ extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
 extern	beam_t			cl_beams[MAX_BEAMS];
 extern	entity_t		*cl_visedicts[MAX_VISEDICTS];
 extern	int				cl_numvisedicts;
+
+static inline qboolean CL_DlightIsActive (const dlight_t *dl)
+{
+	return dl && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
+}
 
 extern	entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
 extern	int				cl_max_edicts; //johnfitz -- only changes when new map loads
