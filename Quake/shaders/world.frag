@@ -326,8 +326,18 @@ void main()
 		}
 	}
 
-	vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
-	static_light *= lightgrid;
+    vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
+
+    if (LightgridParams.y > 0.5)
+    {
+        OUT_COLOR = vec4(lightgrid, 1.0);
+#if !OIT
+        out_velocity = vec4(0.0);
+#endif
+        return;
+    }
+
+    static_light *= lightgrid;
 
 	// Directional lightmap
 	if (LightmapParams.z > 0.5)
