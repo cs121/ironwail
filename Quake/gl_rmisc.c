@@ -54,6 +54,8 @@ extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
+extern cvar_t r_dlight_style;
+extern cvar_t r_dlight_debug;
 extern cvar_t r_dlight_entities;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix

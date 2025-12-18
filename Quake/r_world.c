@@ -774,7 +774,8 @@ void R_DrawBrushModels (entity_t **ents, int count)
 			if (mask & (1 << BP_ALPHATEST))
 				R_DrawBrushModels_Real (ents + i, j - i, BP_ALPHATEST, true);
 			i = j;
-        }
+		}
+	}
 }
 
 void R_DrawBrushModels_DLights (entity_t **ents, int count)
@@ -784,7 +785,6 @@ void R_DrawBrushModels_DLights (entity_t **ents, int count)
 
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
-}
 }
 
 
