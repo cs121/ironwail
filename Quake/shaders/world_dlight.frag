@@ -1,4 +1,8 @@
+#if BINDLESS
+#extension GL_ARB_bindless_texture : require
+#else
 layout(binding=0) uniform sampler2D Tex;
+#endif
 layout(binding=2) uniform sampler2D LMTex; // unused, kept for binding slot consistency
 layout(binding=3) uniform sampler2D LMTexDir; // unused
 
