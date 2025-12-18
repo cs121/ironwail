@@ -519,10 +519,13 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
-	for (oit = 0; oit < 2; oit++)
-		for (dither = 0; dither < 3; dither++)
-			for (mode = 0; mode < 3; mode++)
+        for (oit = 0; oit < 2; oit++)
+                for (dither = 0; dither < 3; dither++)
+                        for (mode = 0; mode < 3; mode++)
                                 glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
+
+        for (alphatest = 0; alphatest < 2; alphatest++)
+                glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
 
 	for (dither = 0; dither < 2; dither++)
 	{

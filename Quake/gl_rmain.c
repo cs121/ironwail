@@ -199,6 +199,8 @@ cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
+cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
+cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
@@ -1660,6 +1662,10 @@ void R_SetupView (void)
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
         r_framedata.lightgrid_params[2] = 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
+        r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
+        r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
+        r_framedata.dlight_params[2] = 0.f;
+        r_framedata.dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
@@ -1824,8 +1830,8 @@ R_DrawWater
 */
 static void R_DrawWater (qboolean translucent)
 {
-	entity_t** entlist = cl_sorted_visedicts;
-	int* ofs = cl_modtype_ofs + 2 * mod_brush;
+        entity_t** entlist = cl_sorted_visedicts;
+        int* ofs = cl_modtype_ofs + 2 * mod_brush;
 
 	if (translucent)
 	{
@@ -2797,7 +2803,49 @@ static void R_EndTranslucency (void)
 		GL_EndGroup ();
 	}
 
-	GL_EndGroup (); // translucent objects
+        GL_EndGroup (); // translucent objects
+}
+
+// Quake3-style dynamic light pass rationale: render only additive dlight
+// contributions (albedo * dlight) in a separate pass to preserve contrast of
+// the baked lighting while avoiding gamma artifacts from modulating the base
+// color. Static lighting remains untouched in the base pass.
+static void R_DrawDLightPass (void)
+{
+        int count = 0;
+        entity_t **ents;
+
+        if (r_dlight_style.value <= 0.f)
+                return;
+
+        if (r_framedata.numlights == 0 || r_dynamic.value <= 0.f || !r_drawworld_cheatsafe)
+                return;
+
+        ents = R_GetVisEntities (mod_brush, false, &count);
+        if (count <= 0)
+                return;
+
+        GL_BeginGroup ("Dynamic lights (additive)");
+
+        r_framedata.dlight_params[2] = 1.f;
+        {
+                GLuint buf;
+                GLbyte *ofs;
+                GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
+                GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+        }
+
+        R_DrawBrushModels_DLights (ents, count);
+
+        r_framedata.dlight_params[2] = 0.f;
+        {
+                GLuint buf;
+                GLbyte *ofs;
+                GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
+                GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+        }
+
+        GL_EndGroup ();
 }
 
 /*
@@ -2815,13 +2863,15 @@ void R_RenderScene (void)
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
 	
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
-	
-	S_ExtraUpdate (); // don't let sound get messed up if going slow
-	
-	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-	
-	R_DrawParticles (false);
+        R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+
+        S_ExtraUpdate (); // don't let sound get messed up if going slow
+
+        R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+
+        R_DrawDLightPass ();
+
+        R_DrawParticles (false);
 	
 	Sky_DrawSky (); //johnfitz
 	

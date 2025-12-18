@@ -443,6 +443,8 @@ typedef enum {
         BP_SKYCUBEMAP,
         BP_SKYSTENCIL,
         BP_SHOWTRIS,
+        BP_DLIGHT_SOLID,
+        BP_DLIGHT_ALPHA,
 } brushpass_t;
 
 /*
@@ -504,6 +506,16 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_COUNT;
                 program = glprogs.world[0][0][0];
                 break;
+        case BP_DLIGHT_SOLID:
+                texbegin = 0;
+                texend = TEXTYPE_CUTOUT;
+                program = glprogs.world_dlight[0];
+                break;
+        case BP_DLIGHT_ALPHA:
+                texbegin = TEXTYPE_CUTOUT;
+                texend = TEXTYPE_CUTOUT + 1;
+                program = glprogs.world_dlight[1];
+                break;
         }
 
         for (i = 0, totalinst = 0; i < count; i++)
@@ -517,7 +529,9 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 return;
 
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
-        if (!translucent)
+        if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
+                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
+        else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
@@ -760,8 +774,17 @@ void R_DrawBrushModels (entity_t **ents, int count)
 			if (mask & (1 << BP_ALPHATEST))
 				R_DrawBrushModels_Real (ents + i, j - i, BP_ALPHATEST, true);
 			i = j;
-		}
-	}
+        }
+}
+
+void R_DrawBrushModels_DLights (entity_t **ents, int count)
+{
+        if (!count)
+                return;
+
+        R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
+        R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
+}
 }
 
 
