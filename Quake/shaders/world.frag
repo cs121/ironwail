@@ -287,12 +287,15 @@ void main()
 
 	// Gamma correction
 	bool linear_lightmaps = LightmapParams.x > 0.5;
-	if (!linear_lightmaps)
-	{
-		result.rgb = pow(result.rgb, vec3(2.2));
-		fullbright = pow(fullbright, vec3(2.2));
-		emissive = pow(emissive, vec3(2.2));
-	}
+        if (!linear_lightmaps)
+        {
+                result.rgb = pow(result.rgb, vec3(2.2));
+                fullbright = pow(fullbright, vec3(2.2));
+                emissive = pow(emissive, vec3(2.2));
+        }
+
+        bool additive_dlights = DLightParams.x > 0.5;
+        bool dlight_debug = DLightParams.y > 0.5;
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
@@ -339,6 +342,13 @@ void main()
 
     static_light *= lightgrid;
 
+    if (dlight_debug)
+    {
+        static_light = vec3(0.0);
+        fullbright = vec3(0.0);
+        emissive = vec3(0.0);
+    }
+
 	// Directional lightmap
 	if (LightmapParams.z > 0.5)
 	{
@@ -376,11 +386,11 @@ void main()
 	const float SPECULAR_POWER = 16.0;
 	const float SPECULAR_SCALE = 0.4;
 
-	// Dynamic lights (clustered lighting)
-	if (NumLights > 0u)
-	{
-		ivec3 cluster_coord = ivec3(
-			int(floor(in_coord.x)),
+        // Dynamic lights (clustered lighting)
+        if (!additive_dlights && NumLights > 0u)
+        {
+                ivec3 cluster_coord = ivec3(
+                        int(floor(in_coord.x)),
 			int(floor(in_coord.y)),
 			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
 		);
@@ -448,7 +458,7 @@ void main()
 	}
 
 	// Sun light
-	vec3 sun_light = ComputeSunLight(in_pos, surface_normal);
+        vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
 	// Apply lighting

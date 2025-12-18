@@ -270,29 +270,30 @@ void GL_EndGroup (void);
 #define GLS_INSTANCED_ATTRIBS(n)	((n) << GLS_INSTANCED_ATTRIBS_SHIFT)
 
 typedef enum {
-	GLS_NO_ZTEST				= 1 << 0,
-	GLS_NO_ZWRITE				= 1 << 1,
+        GLS_NO_ZTEST                            = 1 << 0,
+        GLS_NO_ZWRITE                           = 1 << 1,
 
-	GLS_BLEND_OPAQUE			= 0 << 2,
-	GLS_BLEND_ALPHA				= 1 << 2,
-	GLS_BLEND_ALPHA_OIT			= 2 << 2,
-	GLS_BLEND_MULTIPLY			= 3 << 2,
-	GLS_MASK_BLEND				= 3 << 2,
+        GLS_BLEND_OPAQUE                        = 0 << 2,
+        GLS_BLEND_ALPHA                         = 1 << 2,
+        GLS_BLEND_ALPHA_OIT                     = 2 << 2,
+        GLS_BLEND_MULTIPLY                      = 3 << 2,
+        GLS_BLEND_ADD                           = 4 << 2,
+        GLS_MASK_BLEND                          = 7 << 2,
 
-	GLS_CULL_BACK				= 0 << 4,
-	GLS_CULL_NONE				= 1 << 4,
-	GLS_CULL_FRONT				= 2 << 4,
-	GLS_MASK_CULL				= 3 << 4,
+        GLS_CULL_BACK                           = 0 << 5,
+        GLS_CULL_NONE                           = 1 << 5,
+        GLS_CULL_FRONT                          = 2 << 5,
+        GLS_MASK_CULL                           = 3 << 5,
 
-	GLS_ATTRIBS_BITS			= 3,
-	GLS_ATTRIBS_SHIFT			= 6,
-	GLS_ATTRIBS_MAXCOUNT		= (1 << GLS_ATTRIBS_BITS) - 1,
-	GLS_MASK_ATTRIBS			= GLS_ATTRIBS_MAXCOUNT << GLS_ATTRIBS_SHIFT,
+        GLS_ATTRIBS_BITS                        = 3,
+        GLS_ATTRIBS_SHIFT                       = 7,
+        GLS_ATTRIBS_MAXCOUNT            = (1 << GLS_ATTRIBS_BITS) - 1,
+        GLS_MASK_ATTRIBS                        = GLS_ATTRIBS_MAXCOUNT << GLS_ATTRIBS_SHIFT,
 
-	GLS_INSTANCED_ATTRIBS_SHIFT	= GLS_ATTRIBS_SHIFT + GLS_ATTRIBS_BITS,
-	GLS_MASK_INSTANCED_ATTRIBS	= GLS_ATTRIBS_MAXCOUNT << GLS_INSTANCED_ATTRIBS_SHIFT,
+        GLS_INSTANCED_ATTRIBS_SHIFT     = GLS_ATTRIBS_SHIFT + GLS_ATTRIBS_BITS,
+        GLS_MASK_INSTANCED_ATTRIBS      = GLS_ATTRIBS_MAXCOUNT << GLS_INSTANCED_ATTRIBS_SHIFT,
 
-	GLS_DEFAULT_STATE			= GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS (1),
+        GLS_DEFAULT_STATE                       = GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS (1),
 } glstatebits_t;
 
 extern unsigned glstate;
@@ -432,6 +433,7 @@ typedef struct gpuframedata_s {
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
         vec4_t          lightgrid_params; // x: enabled, yzw: unused
+        vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
@@ -467,6 +469,7 @@ void R_ResizeShadowMapIfNeeded (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
+void R_DrawBrushModels_DLights (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -544,6 +547,7 @@ typedef struct glprogs_s {
 
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
+	GLuint		world_dlight[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
