@@ -398,10 +398,14 @@ void R_PushDlights (void)
 
 	r_framedata.numlights = 0;
 
-	if (r_dynamic.value)
-	{
-		R_PushDlightArray (cl_dlights, MAX_DLIGHTS);
-		if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
+        // Collect dynamic lights both when the legacy r_dynamic toggle is
+        // enabled and when the Quake3-style additive path is requested via
+        // r_dlight_style. The latter needs the light list even if r_dynamic
+        // was disabled by the user.
+        if (r_dynamic.value > 0.f || r_dlight_style.value > 0.f)
+        {
+                R_PushDlightArray (cl_dlights, MAX_DLIGHTS);
+                if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
 			R_PushDlightArray (cl_entity_dlights, cl_num_entity_dlights);
 	}
 

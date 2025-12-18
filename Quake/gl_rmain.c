@@ -2818,7 +2818,7 @@ static void R_DrawDLightPass (void)
         if (r_dlight_style.value <= 0.f)
                 return;
 
-        if (r_framedata.numlights == 0 || r_dynamic.value <= 0.f || !r_drawworld_cheatsafe)
+        if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
 
         ents = R_GetVisEntities (mod_brush, false, &count);
