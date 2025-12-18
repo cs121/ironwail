@@ -1,4 +1,8 @@
+#if BINDLESS
+#extension GL_ARB_bindless_texture : require
+#else
 layout(binding=0) uniform sampler2D Tex;
+#endif
 layout(binding=2) uniform sampler2D LMTex; // unused, kept for binding slot consistency
 layout(binding=3) uniform sampler2D LMTexDir; // unused
 
@@ -60,10 +64,8 @@ float whitenoise01(vec2 p)
 
 void main()
 {
-        (void)in_flags;
         vec2 uv = in_uv;
 #if BINDLESS
-        (void)in_samplers1;
         sampler2D baseSampler = sampler2D(in_samplers0.xy);
         vec4 texel = texture(baseSampler, uv);
 #else
