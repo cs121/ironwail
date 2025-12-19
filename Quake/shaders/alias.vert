@@ -126,7 +126,7 @@ void main()
         float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
         vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
         vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
-        vec3 litDlight = inst.DLightColor.rgb * (lighting * Overbright);
+        vec3 litDlight = inst.DLightColor.rgb * lighting;
         vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
