@@ -18,6 +18,7 @@ extern cvar_t r_lightgrid_backend;
 extern cvar_t r_lightgrid_debug;
 extern cvar_t r_lightgrid_octree_debug;
 extern cvar_t r_lightgrid_style;
+extern cvar_t r_lightgrid_intensity;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_apply_world;
 extern cvar_t r_generate_lightgrid_test;
@@ -51,4 +52,3 @@ void SH9_EncodeDirectional(vec3_t dir, vec3_t rgb, sh9_color_t *out);
 qboolean Lightgrid_LoadFromKTX2(const char *mapname);
 qboolean Lightgrid_ExportToKTX2(const lightgrid_t *grid, const char *mapname);
 #endif
-

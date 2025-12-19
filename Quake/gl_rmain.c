@@ -2630,23 +2630,23 @@ static void R_ShowLightgridDebug (void)
         {
                 for (int y = 0; y < lg->ny; y++)
                 {
-                        for (int x = 0; x < lg->nx; x++)
-                        {
-                                vec3_t center;
-                                uint32_t color;
-                                const lightgrid_probe_t *probe = &lg->probes[(z * lg->ny + y) * lg->nx + x];
+                                for (int x = 0; x < lg->nx; x++)
+                                {
+                                        vec3_t center;
+                                        vec3_t debug_color;
+                                        uint32_t color;
+                                        const lightgrid_probe_t *probe = &lg->probes[(z * lg->ny + y) * lg->nx + x];
 
-                                VectorSet (center,
-                                        lg->mins[0] + (x + 0.5f) * lg->cellsize,
-                                        lg->mins[1] + (y + 0.5f) * lg->cellsize,
-                                        lg->mins[2] + (z + 0.5f) * lg->cellsize);
+                                        VectorSet (center,
+                                                lg->mins[0] + (x + 0.5f) * lg->cellsize,
+                                                lg->mins[1] + (y + 0.5f) * lg->cellsize,
+                                                lg->mins[2] + (z + 0.5f) * lg->cellsize);
 
-                                color = (probe->intensity > 0.f)
-                                        ? R_PackDebugColor (probe->rgb)
-                                        : 0xffffffff;
+                                        VectorScale (probe->rgb, q_max (0.f, r_lightgrid_intensity.value), debug_color);
+                                        color = R_PackDebugColor (debug_color);
 
-                                R_EmitDiamond (center, radius, color);
-                        }
+                                        R_EmitDiamond (center, radius, color);
+                                }
                 }
         }
 

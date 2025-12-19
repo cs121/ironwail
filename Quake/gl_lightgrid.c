@@ -26,6 +26,7 @@ cvar_t r_lightgrid_backend    = { "r_lightgrid_backend", "NONE", CVAR_ROM };
 cvar_t r_lightgrid_debug      = { "r_lightgrid_debug", "0", CVAR_NONE };
 cvar_t r_lightgrid_octree_debug = { "r_lightgrid_octree_debug", "0", CVAR_NONE };
 cvar_t r_lightgrid_style      = { "r_lightgrid_style", "0", CVAR_ARCHIVE };
+cvar_t r_lightgrid_intensity  = { "r_lightgrid_intensity", "1", CVAR_ARCHIVE };
 cvar_t r_lightgrid_force      = { "r_lightgrid_force", "0", CVAR_ARCHIVE };
 cvar_t r_lightgrid_apply_world = { "r_lightgrid_apply_world", "0", CVAR_ARCHIVE };
 cvar_t r_generate_lightgrid_test = { "r_generate_lightgrid_test", "0", CVAR_NONE };
@@ -77,6 +78,7 @@ void Lightgrid_Init(void)
     Cvar_RegisterVariable(&r_lightgrid_debug);
     Cvar_RegisterVariable(&r_lightgrid_octree_debug);
     Cvar_RegisterVariable(&r_lightgrid_style);
+    Cvar_RegisterVariable(&r_lightgrid_intensity);
     Cvar_RegisterVariable(&r_lightgrid_force);
     Cvar_RegisterVariable(&r_lightgrid_apply_world);
     Cvar_RegisterVariable(&r_generate_lightgrid_test);
@@ -1373,6 +1375,7 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, float *out_ao)
 {
     const lightgrid_t *lg = Lightgrid_Get();
     lightgrid_probe_t probe;
+    const float intensity_scale = q_max(0.f, r_lightgrid_intensity.value);
 
     if (!Lightgrid_SampleProbe(lg, pos, &probe))
     {
@@ -1380,7 +1383,7 @@ void Lightgrid_Sample(const vec3_t pos, vec3_t out_color, float *out_ao)
         return;
     }
 
-    VectorCopy(probe.rgb, out_color);
+    VectorScale(probe.rgb, intensity_scale, out_color);
     if (out_ao)
         *out_ao = CLAMP(0.f, probe.ao, 1.f);
 }
