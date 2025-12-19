@@ -310,6 +310,7 @@ static float R_GetDynamicDoFFocus (float fallback)
 	vec3_t end;
 	float range;
 	float target;
+	qboolean traced = false;
 
 	if (r_dof_autofocus.value <= 0.f)
 	{
@@ -329,13 +330,30 @@ static float R_GetDynamicDoFFocus (float fallback)
 
 	VectorMA (r_origin, range, vpn, end);
 
-	memset (&trace, 0, sizeof (trace));
-	trace.fraction = 1.f;
-	VectorCopy (end, trace.endpos);
+	if (sv.active)
+	{
+		extern edict_t* sv_player;
+		qcvm_t* oldvm = qcvm;
 
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
+		PR_SwitchQCVM (NULL);
+		PR_SwitchQCVM (&sv.qcvm);
 
-	if (trace.allsolid || trace.fraction <= 0.f)
+		trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
+		traced = true;
+
+		PR_SwitchQCVM (oldvm);
+	}
+
+	if (!traced)
+	{
+		memset (&trace, 0, sizeof (trace));
+		trace.fraction = 1.f;
+		VectorCopy (end, trace.endpos);
+
+		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
+	}
+
+	if (trace.allsolid || trace.startsolid || trace.fraction <= 0.f)
 		target = fallback;
 	else
 		target = q_max (trace.fraction * range, 0.f);
