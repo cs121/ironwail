@@ -439,8 +439,6 @@ void R_SetupAliasLighting (entity_t     *e)
 		VectorClear (dlightcolor);
 	}
 
-	const float overbright = gl_overbright_models.value ? 2.0f : 1.0f;
-
 	{
 		vec3_t pre_total;
 		vec3_t post_total;
@@ -448,7 +446,7 @@ void R_SetupAliasLighting (entity_t     *e)
 		for (i = 0; i < 3; i++)
 		{
 			float L = pre_total[i] * (1.0f / 256.0f);
-			L = fminf(L * overbright, 1.0f);
+			L = fminf(L, 1.0f);
 			L = powf(L, 1.0f / 2.2f);
 			post_total[i] = L;
 		}
