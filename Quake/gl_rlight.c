@@ -197,7 +197,7 @@ static qboolean R_LightgridEnabledInternal (const lightgrid_t *lg)
         if (r_lightgrid.value <= 0.f)
                 return false;
 
-        if (lg && lg->probes && lg->cellsize > 0.f)
+        if (lg && lg->octree)
                 return true;
 
         return r_lightgrid_force.value > 0.f;

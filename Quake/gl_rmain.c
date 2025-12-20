@@ -2578,7 +2578,6 @@ static char r_lightgrid_debug_reported_reason[64];
 static void R_ShowLightgridDebug (void)
 {
         const lightgrid_t *lg;
-        float radius;
 
         if (r_lightgrid_debug.value <= 0.f)
         {
@@ -2589,16 +2588,14 @@ static void R_ShowLightgridDebug (void)
         }
 
         lg = Lightgrid_Get ();
-        if (!lg || !lg->probes || lg->cellsize <= 0.f)
+        if (!lg || !lg->octree)
         {
                 const char *reason = "unknown";
 
                 if (!lg)
                         reason = "no lightgrid is loaded";
-                else if (!lg->probes)
-                        reason = "lightgrid has no probes";
-                else if (lg->cellsize <= 0.f)
-                        reason = "lightgrid cell size is invalid";
+                else if (!lg->octree)
+                        reason = "lightgrid has no octree";
 
                 if (!r_lightgrid_debug_reported_reason[0]
                         || q_strcasecmp (reason, r_lightgrid_debug_reported_reason))
@@ -2614,45 +2611,14 @@ static void R_ShowLightgridDebug (void)
 
         if (lg != r_lightgrid_debug_reported_grid || !r_lightgrid_debug_reported_loaded)
         {
-                Con_Printf ("r_lightgrid_debug: loaded from %s (%dx%dx%d probes, cell size %.1f)\n",
-                        Lightgrid_GetSource (), lg->nx, lg->ny, lg->nz, lg->cellsize);
+                Con_Printf ("r_lightgrid_debug: loaded from %s (%zu nodes, %zu leaves)\n",
+                        Lightgrid_GetSource (),
+                        lg->octree ? lg->octree->node_count : 0,
+                        lg->octree ? lg->octree->leaf_count : 0);
                 r_lightgrid_debug_reported_grid = lg;
                 r_lightgrid_debug_reported_loaded = true;
                 r_lightgrid_debug_reported_reason[0] = '\0';
         }
-
-        GL_BeginGroup ("Lightgrid debug");
-
-        R_SetDebugGeometryZTest (true);
-
-        radius = 2.f;
-        for (int z = 0; z < lg->nz; z++)
-        {
-                for (int y = 0; y < lg->ny; y++)
-                {
-                                for (int x = 0; x < lg->nx; x++)
-                                {
-                                        vec3_t center;
-                                        vec3_t debug_color;
-                                        uint32_t color;
-                                        const lightgrid_probe_t *probe = &lg->probes[(z * lg->ny + y) * lg->nx + x];
-
-                                        VectorSet (center,
-                                                lg->mins[0] + (x + 0.5f) * lg->cellsize,
-                                                lg->mins[1] + (y + 0.5f) * lg->cellsize,
-                                                lg->mins[2] + (z + 0.5f) * lg->cellsize);
-
-                                        VectorScale (probe->rgb, q_max (0.f, r_lightgrid_intensity.value), debug_color);
-                                        color = R_PackDebugColor (debug_color);
-
-                                        R_EmitDiamond (center, radius, color);
-                                }
-                }
-        }
-
-	R_FlushDebugGeometry ();
-
-	GL_EndGroup ();
 }
 
 /*

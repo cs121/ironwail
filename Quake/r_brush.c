@@ -857,7 +857,7 @@ void GL_BuildBModelVertexBuffer (void)
                                 {
                                         vec3_t lg_color;
                                         float lg_ao = 1.f;
-                                        const qboolean sample_lightgrid = (r_lightgrid_apply_world.value > 0.f)
+                                        const qboolean sample_lightgrid = (r_lightgrid.value > 0.f)
                                                 || (r_lightgrid_debug.value > 0.f);
 
                                         if (sample_lightgrid)
