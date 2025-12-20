@@ -2582,20 +2582,44 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 				continue;
 			}
 
-			set->used_samples = used;
-
-			if (set->used_samples > 4)
+			if ((size_t)(end - cursor) < (size_t)used * (sizeof(uint8_t) + 3))
 				return false;
 
-			if ((size_t)(end - cursor) < (size_t)set->used_samples * (sizeof(uint8_t) + 3))
-				return false;
+			if (used == 0)
+				continue;
 
-			for (int j = 0; j < set->used_samples; j++)
+			lightgrid_octree_sample_t chosen = { {0, 0, 0}, 0 };
+			qboolean chosen_set = false;
+			for (uint32_t j = 0; j < used; j++)
 			{
-				set->samples[j].style = *cursor++;
-				set->samples[j].color[0] = *cursor++;
-				set->samples[j].color[1] = *cursor++;
-				set->samples[j].color[2] = *cursor++;
+				uint8_t style = *cursor++;
+				uint8_t color[3];
+				color[0] = *cursor++;
+				color[1] = *cursor++;
+				color[2] = *cursor++;
+
+				if (!chosen_set)
+				{
+					chosen.style = style;
+					chosen.color[0] = color[0];
+					chosen.color[1] = color[1];
+					chosen.color[2] = color[2];
+					chosen_set = true;
+				}
+
+				if (style == 0)
+				{
+					chosen.style = style;
+					chosen.color[0] = color[0];
+					chosen.color[1] = color[1];
+					chosen.color[2] = color[2];
+				}
+			}
+
+			if (chosen_set)
+			{
+				set->samples[0] = chosen;
+				set->used_samples = 1;
 			}
 		}
 	}
