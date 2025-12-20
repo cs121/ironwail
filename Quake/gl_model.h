@@ -429,52 +429,6 @@ typedef struct
 	int		size;
 } bspx_entry_t;
 
-// LIGHTGRID_RAW header/encoding definitions
-#define LIGHTGRID_RAW_MAGIC             0x4447524Lu // 'LGRD'
-#define LIGHTGRID_RAW_VERSION_1         1u          // Legacy: kein Header mit Magic
-#define LIGHTGRID_RAW_VERSION_2         2u          // Neuer Header mit Magic
-
-typedef enum lightgrid_raw_encoding_e
-{
-        LIGHTGRID_RAW_ENCODING_FLOAT32 = 0u,
-        LIGHTGRID_RAW_ENCODING_FLOAT16 = 1u,
-} lightgrid_raw_encoding_t;
-
-typedef enum lightgrid_raw_component_e
-{
-        LIGHTGRID_RAW_COMPONENT_RGB      = (1u << 0),
-        LIGHTGRID_RAW_COMPONENT_DIR      = (1u << 1),
-        LIGHTGRID_RAW_COMPONENT_INTENSITY= (1u << 2),
-        LIGHTGRID_RAW_COMPONENT_AO       = (1u << 3),
-        LIGHTGRID_RAW_COMPONENT_EMISSIVE = (1u << 4),
-        LIGHTGRID_RAW_COMPONENT_SH9      = (1u << 5),
-} lightgrid_raw_component_t;
-
-#define LIGHTGRID_RAW_COMPONENTS_BASE (LIGHTGRID_RAW_COMPONENT_RGB | LIGHTGRID_RAW_COMPONENT_DIR | LIGHTGRID_RAW_COMPONENT_INTENSITY)
-
-typedef struct lightgrid_raw_header_s
-{
-        unsigned int magic;
-        unsigned int version;
-        unsigned int flags;
-        unsigned int components;
-        unsigned int encoding;
-        unsigned int sh_order;
-        unsigned int sh_coeffs;
-        unsigned int reserved[5];
-        int nx, ny, nz;
-        float cellSize;
-        vec3_t origin;       // world-space min corner
-} lightgrid_raw_header_t;
-
-typedef struct lightgrid_raw_s
-{
-        int nx, ny, nz;
-        float cellSize;
-        vec3_t origin;       // world-space min corner
-        lightcell_t *cells;  // array of nx*ny*nz
-} lightgrid_raw_t;
-
 typedef struct bspx_lump_out_s
 {
         char name[sizeof(((bspx_entry_t *)0)->name)];
@@ -584,7 +538,6 @@ typedef struct qmodel_s
 	qboolean	litfile;
 	qboolean	viswarn; // for Mod_DecompressVis()
 	qboolean	has_lightdata_rgb;
-	lightgrid_raw_t *lightgrid_raw;
 	lightgrid_octree_t *lightgrid_octree;
 
 	int			bspversion;
@@ -627,8 +580,5 @@ byte	*Mod_NoVisPVS (qmodel_t *model);
 void Mod_SetExtraFlags (qmodel_t *mod);
 size_t Mod_SanitizeMapDescription (char *dst, size_t dstsize, const char *src);
 qboolean Mod_LoadMapDescription (char *desc, size_t maxchars, const char *map);
-
-lightgrid_raw_t *LightgridRAW_Generate(qmodel_t *mod, float cellX, float cellY, float cellZ);
-qboolean LightgridRAW_Write(qmodel_t *mod, bspx_t *bspxOut);
 
 #endif	/* GL_MODEL_H */
