@@ -1315,12 +1315,12 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
     if (!leaf)
         return false;
 
-    int lx = test_point[0] - leaf->mins[0];
-    int ly = test_point[1] - leaf->mins[1];
-    int lz = test_point[2] - leaf->mins[2];
-
-    if (lx < 0 || ly < 0 || lz < 0 || lx >= leaf->size[0] || ly >= leaf->size[1] || lz >= leaf->size[2])
+    if (leaf->size[0] <= 0 || leaf->size[1] <= 0 || leaf->size[2] <= 0)
         return false;
+
+    int lx = CLAMP(0, test_point[0] - leaf->mins[0], leaf->size[0] - 1);
+    int ly = CLAMP(0, test_point[1] - leaf->mins[1], leaf->size[1] - 1);
+    int lz = CLAMP(0, test_point[2] - leaf->mins[2], leaf->size[2] - 1);
 
     size_t idx = ((size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)lz) + ((size_t)leaf->size[0] * (size_t)ly) + (size_t)lx;
     set = &leaf->samples[idx];
