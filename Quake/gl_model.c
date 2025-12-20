@@ -3131,39 +3131,33 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
         if (oct->leaf_count > SIZE_MAX / sizeof(lightgrid_octree_leaf_t))
                 return false;
 
-        {
-                size_t leaf_header_bytes = sizeof(uint32_t) * 6;
-                if (oct->leaf_count > (size_t)(end - cursor) / leaf_header_bytes)
-                        return false;
-        }
-
         oct->leaves = (lightgrid_octree_leaf_t *)Hunk_AllocName (oct->leaf_count * sizeof(lightgrid_octree_leaf_t), "lgoctleaf");
         if (!oct->leaves)
                 return false;
 
         memset (oct->leaves, 0, oct->leaf_count * sizeof(lightgrid_octree_leaf_t));
 
-        for (size_t i = 0; i < oct->leaf_count; i++)
-        {
-                for (int axis = 0; axis < 3; axis++)
-                {
-                        int32_t temp;
-                        memcpy(&temp, cursor, sizeof(temp));
-                        oct->leaves[i].mins[axis] = LittleLong (temp);
-                        cursor += sizeof(uint32_t);
-                }
-                for (int axis = 0; axis < 3; axis++)
-                {
-                        int32_t temp;
-                        memcpy(&temp, cursor, sizeof(temp));
-                        oct->leaves[i].size[axis] = LittleLong (temp);
-                        cursor += sizeof(uint32_t);
-                }
-        }
-
         for (size_t leaf_index = 0; leaf_index < oct->leaf_count; leaf_index++)
         {
                 lightgrid_octree_leaf_t *leaf = &oct->leaves[leaf_index];
+                if ((size_t)(end - cursor) < sizeof(uint32_t) * 6)
+                        return false;
+
+                for (int axis = 0; axis < 3; axis++)
+                {
+                        int32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        leaf->mins[axis] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+                for (int axis = 0; axis < 3; axis++)
+                {
+                        int32_t temp;
+                        memcpy(&temp, cursor, sizeof(temp));
+                        leaf->size[axis] = LittleLong (temp);
+                        cursor += sizeof(uint32_t);
+                }
+
                 if (leaf->size[0] <= 0 || leaf->size[1] <= 0 || leaf->size[2] <= 0)
                         return false;
                 size_t sample_count = (size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)leaf->size[2];
