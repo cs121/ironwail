@@ -546,6 +546,7 @@ typedef struct glprogs_s {
 	GLuint		viewblend;
 	GLuint		warpscale[2];		// [warp]
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
+	GLuint		filmgrain;
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
 	GLuint		oit_resolve[2];		// [msaa]
@@ -578,6 +579,7 @@ void GL_UseProgram (GLuint program);
 void GL_ClearCachedProgram (void);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
+void GL_ApplyFilmgrainUI (void);
 
 typedef struct glframebufs_s {
 	GLint			max_color_tex_samples;
