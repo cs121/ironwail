@@ -150,6 +150,74 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
         }
 }
 
+static const char *R_ModelTypeName (const qmodel_t *model)
+{
+        if (!model)
+                return "none";
+
+        switch (model->type)
+        {
+        case mod_alias:
+        {
+                aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata (model);
+                if (hdr && hdr->poseverttype == PV_IQM)
+                        return "alias/iqm";
+                return "alias";
+        }
+        case mod_sprite:
+                return "sprite";
+        case mod_brush:
+                return "brush";
+        default:
+                return "unknown";
+        }
+}
+
+static qboolean R_DebugItemLightEnabled (const entity_t *e)
+{
+        if (r_debug_itemlight.value <= 0.f)
+                return false;
+
+        if (!e || !e->model)
+                return false;
+
+        if (e == &cl.viewent)
+                return false;
+
+        return (e->model->flags & EF_ROTATE) != 0;
+}
+
+static void R_LogItemLight (const entity_t *e, const entity_lightinfo_t *info)
+{
+        if (!e || !e->model || !info)
+                return;
+
+        const char *cell = info->lightgrid_cell_valid ? va ("%d,%d,%d",
+                info->lightgrid_cell[0], info->lightgrid_cell[1], info->lightgrid_cell[2]) : "n/a";
+        const qboolean fullbright_hack = (!gl_overbright_models.value
+                && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value);
+
+        Con_Printf ("r_debug_itemlight: model=%s type=%s origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)\n",
+                e->model->name, R_ModelTypeName (e->model),
+                e->origin[0], e->origin[1], e->origin[2],
+                e->angles[0], e->angles[1], e->angles[2]);
+        Con_Printf ("  effects=0x%X model_flags=0x%X fullbright_cvar=%.0f fullbright_hack=%s\n",
+                e->effects, e->model->flags, gl_fullbrights.value,
+                fullbright_hack ? "yes" : "no");
+        Con_Printf ("  static_rgb=(%.3f %.3f %.3f) intensity=%.3f minlight=%s\n",
+                info->static_color[0], info->static_color[1], info->static_color[2],
+                info->intensity, info->used_minlight ? "yes" : "no");
+        Con_Printf ("  lightgrid=%s valid=%s cell=%s rgb=(%.3f %.3f %.3f) ao=%.2f\n",
+                info->used_lightgrid ? "yes" : "no",
+                info->lightgrid_valid ? "yes" : "no",
+                cell,
+                info->lightgrid_color[0], info->lightgrid_color[1], info->lightgrid_color[2],
+                info->lightgrid_ao);
+        Con_Printf ("  lightpoint=%s rgb=(%.3f %.3f %.3f)\n",
+                info->used_lightpoint ? "yes" : "no",
+                info->lightpoint_color[0], info->lightpoint_color[1], info->lightpoint_color[2]);
+}
+
 /*
 =================
 R_SetupAliasFrame -- johnfitz -- rewritten to support lerping
@@ -301,70 +369,21 @@ void R_SetupAliasLighting (entity_t     *e)
         unsigned int    i;
         vec3_t          dlightcolor = {0.f, 0.f, 0.f};
         vec3_t          ambientcolor;
-        vec3_t          dyn_add = {0.f, 0.f, 0.f};
-        qboolean        used_lightgrid = false;
-        qboolean        base_from_lightgrid = false;
-        float           lg_ao = 1.f;
+        vec3_t          static_color;
+        entity_lightinfo_t lightinfo;
+        entity_lightinfo_t *lightinfo_ptr = r_debug_itemlight.value > 0.f ? &lightinfo : NULL;
 
-        if (R_LightgridEnabled ())
+        R_EntityStaticLight (e, static_color, lightinfo_ptr);
+        VectorCopy (static_color, lightcolor);
+        VectorCopy (static_color, ambientcolor);
+
+        if (lightinfo_ptr && R_DebugItemLightEnabled (e))
+                R_LogItemLight (e, lightinfo_ptr);
+
+        if (lightinfo_ptr ? lightinfo_ptr->used_lightgrid : e->lightcache.lightgrid_has_sample)
         {
-                vec3_t lg_color, lg_color255;
-
-                R_LightgridLighting (e->origin, lg_color, &lg_ao);
-                VectorScale (lg_color, 255.0f, lg_color255);
-
-                VectorCopy (lg_color255, lightcolor);
                 R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
-
-                VectorCopy (lg_color255, ambientcolor);
                 VectorSubtract (lightcolor, ambientcolor, dlightcolor);
-
-                VectorCopy (lg_color, e->lightcache.lightgrid_color);
-                e->lightcache.lightgrid_ao = lg_ao;
-                e->lightcache.lightgrid_has_sample = true;
-
-                used_lightgrid = true;
-                base_from_lightgrid = true;
-        }
-
-        if (!base_from_lightgrid)
-        {
-                qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;
-
-                // if the initial trace is completely black, try again from above
-                // this helps with models whose origin is slightly below ground level
-                // (e.g. some of the candles in the DOTM start map)
-                if (!R_LightPoint (lightmodel, e->origin, 0.f, &e->lightcache))
-                        R_LightPoint (lightmodel, e->origin, e->model->maxs[2] * 0.5f, &e->lightcache);
-
-                VectorCopy (lightcolor, ambientcolor);
-
-                if (R_LightgridEnabled () && e->lightcache.lightgrid_has_sample)
-                {
-                        vec3_t lg_color, lg_color255;
-
-                        R_LightgridLighting (e->origin, lg_color, &lg_ao);
-                        VectorScale (lg_color, 255.0f, lg_color255);
-
-                        for (i = 0; i < 3; i++)
-                                dyn_add[i] = fmaxf (lightcolor[i] - lg_color255[i], 0.f);
-
-                        VectorCopy (lg_color255, ambientcolor);
-                        VectorCopy (lg_color, e->lightcache.lightgrid_color);
-                        e->lightcache.lightgrid_ao = lg_ao;
-
-                        used_lightgrid = true;
-                }
-        }
-
-        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
-
-        if (used_lightgrid)
-        {
-                for (i = 0; i < 3; i++)
-                {
-                        dlightcolor[i] += dyn_add[i];
-                }
         }
         else
         {
@@ -382,6 +401,8 @@ void R_SetupAliasLighting (entity_t     *e)
                         }
                 }
         }
+
+        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
 
         // viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)

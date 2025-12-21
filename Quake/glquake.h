@@ -521,11 +521,16 @@ void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);
 
 int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache);
+qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo_t *info);
 qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb);
 qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir);
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
+
+extern cvar_t r_debug_itemlight;
+extern cvar_t r_minlight_models;
+extern cvar_t r_model_lightgrid;
 
 #define WORLDSHADER_SOLID		0
 #define WORLDSHADER_ALPHATEST	1

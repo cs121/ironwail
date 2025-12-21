@@ -48,6 +48,20 @@ typedef struct lightcache_s {
 	qboolean		lightgrid_has_sample;
 } lightcache_t;
 
+typedef struct entity_lightinfo_s {
+	vec3_t				static_color;
+	float				intensity;
+	qboolean			used_lightgrid;
+	qboolean			lightgrid_valid;
+	qboolean			lightgrid_cell_valid;
+	int					lightgrid_cell[3];
+	vec3_t				lightgrid_color;
+	float				lightgrid_ao;
+	qboolean			used_lightpoint;
+	vec3_t				lightpoint_color;
+	qboolean			used_minlight;
+} entity_lightinfo_t;
+
 //johnfitz -- for lerping
 #define LERP_MOVESTEP	(1<<0) //this is a MOVETYPE_STEP entity, enable movement lerp
 #define LERP_RESETANIM	(1<<1) //disable anim lerping until next anim frame

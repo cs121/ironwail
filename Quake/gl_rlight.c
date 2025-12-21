@@ -36,6 +36,10 @@ extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
 
+cvar_t r_debug_itemlight = { "r_debug_itemlight", "0", CVAR_NONE };
+cvar_t r_minlight_models = { "r_minlight_models", "0.02", CVAR_ARCHIVE };
+cvar_t r_model_lightgrid = { "r_model_lightgrid", "1", CVAR_ARCHIVE };
+
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
 
@@ -737,6 +741,121 @@ static void R_SamplePointInternal (qmodel_t *model, const vec3_t pos, float ofs,
 }
 }
 
+static qboolean R_LightgridCellForPoint (const vec3_t pos, int out_cell[3])
+{
+        const lightgrid_t *lg = Lightgrid_Get ();
+
+        if (!out_cell || !R_LightgridEnabledInternal (lg) || !lg->octree)
+                return false;
+
+        const lightgrid_octree_header_t *header = &lg->octree->header;
+
+        for (int i = 0; i < 3; i++)
+        {
+                float local = (pos[i] - header->grid_mins[i]) / header->grid_dist[i];
+                int cell = Q_rint (local);
+                if (cell < 0 || cell >= header->grid_size[i])
+                        return false;
+                out_cell[i] = cell;
+        }
+
+        return true;
+}
+
+static qboolean R_LightPointNoGrid (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache, vec3_t out_color)
+{
+        qboolean use_rgblight = model && model->has_lightdata_rgb && r_rgblighting_enable.value;
+        vec3_t sample_pos;
+        lightcache_t local_cache;
+
+        if (!cache)
+        {
+                memset (&local_cache, 0, sizeof (local_cache));
+                cache = &local_cache;
+        }
+
+        cache->lightgrid_has_sample = false;
+        cache->lightgrid_ao = 0.f;
+        VectorClear (cache->lightgrid_color);
+
+        if (!model || !model->lightdata)
+        {
+                VectorSet (out_color, 255.f, 255.f, 255.f);
+                return false;
+        }
+
+        VectorCopy (p, sample_pos);
+
+        if (!R_AdjustPointForLeaf (model, sample_pos))
+        {
+                const float ambient = 0.04f * 255.f;
+                VectorSet (out_color, ambient, ambient, ambient);
+                cache->surfidx = -1;
+                VectorCopy (sample_pos, cache->pos);
+                R_ClampSampleColor (out_color);
+                return false;
+        }
+
+        R_SamplePointInternal (model, sample_pos, ofs, use_rgblight, cache, out_color);
+
+        const vec3_t fallback_offsets[] = {
+                { 0.f, 0.f, 0.f }, { 2.f, 0.f, 0.f }, { -2.f, 0.f, 0.f }, { 0.f, 2.f, 0.f }, { 0.f, -2.f, 0.f },
+                { 0.f, 0.f, 2.f }, { 0.f, 0.f, -2.f }, { 4.f, 4.f, 0.f }, { -4.f, -4.f, 0.f }, { 0.f, 4.f, 4.f }
+        };
+
+        float intensity = (out_color[0] + out_color[1] + out_color[2]) * (1.f / (3.f * 255.f));
+
+        if (intensity < 0.001f)
+        {
+                vec3_t accum = {0, 0, 0};
+                int hits = 0;
+
+                for (size_t i = 0; i < sizeof (fallback_offsets) / sizeof (fallback_offsets[0]); i++)
+                {
+                        vec3_t test;
+                        VectorAdd (sample_pos, fallback_offsets[i], test);
+
+                        if (!R_AdjustPointForLeaf (model, test))
+                                continue;
+
+                        vec3_t temp_color;
+                        lightcache_t temp_cache = {0};
+                        R_SamplePointInternal (model, test, ofs, use_rgblight, &temp_cache, temp_color);
+
+                        if (VectorLength (temp_color) > 0.f)
+                        {
+                                VectorAdd (accum, temp_color, accum);
+                                hits++;
+                        }
+                }
+
+                if (hits > 0)
+                {
+                        VectorScale (accum, 1.f / (float)hits, out_color);
+                        intensity = (out_color[0] + out_color[1] + out_color[2]) * (1.f / (3.f * 255.f));
+                }
+        }
+
+        if (intensity > 0.f && intensity < 0.015f)
+        {
+                vec3_t raised;
+                VectorCopy (sample_pos, raised);
+                raised[2] += 4.f;
+
+                if (R_AdjustPointForLeaf (model, raised))
+                {
+                        vec3_t above_color;
+                        lightcache_t temp_cache = {0};
+                        R_SamplePointInternal (model, raised, ofs, use_rgblight, &temp_cache, above_color);
+                        VectorMA (out_color, 0.2f, above_color, out_color);
+                }
+        }
+
+        R_ClampSampleColor (out_color);
+
+        return VectorLength (out_color) > 0.f;
+}
+
 static qboolean R_SampleLightmapAtPointInternal(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir, qboolean want_dir)
 {
 qmodel_t *model = cl.worldmodel;
@@ -1066,6 +1185,84 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
         R_ClampSampleColor (lightcolor);
 
         return ((lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0f / 3.0f));
+}
+
+qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo_t *info)
+{
+        vec3_t lightgrid_color = {0.f, 0.f, 0.f};
+        vec3_t lightpoint_color = {0.f, 0.f, 0.f};
+        float lightgrid_ao = 1.f;
+        qboolean lightgrid_valid = false;
+        qboolean used_lightgrid = false;
+        qboolean used_lightpoint = false;
+        qboolean used_minlight = false;
+
+        VectorClear (out_color255);
+
+        if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
+        {
+                const lightgrid_probe_t *probe = R_GetLightgridSample (e->origin);
+                if (probe)
+                {
+                        VectorCopy (probe->rgb, lightgrid_color);
+                        lightgrid_ao = CLAMP (0.f, probe->ao, 1.f);
+                        lightgrid_valid = probe->intensity > 0.f || lightgrid_ao > 0.f;
+                        if (lightgrid_valid)
+                        {
+                                VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
+                                used_lightgrid = true;
+                        }
+                }
+        }
+
+        if (!used_lightgrid)
+        {
+                qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;
+                if (lightmodel)
+                {
+                        if (!R_LightPointNoGrid (lightmodel, e->origin, 0.f, &e->lightcache, lightpoint_color))
+                        {
+                                float ofs = e->model ? e->model->maxs[2] * 0.5f : 0.f;
+                                R_LightPointNoGrid (lightmodel, e->origin, ofs, &e->lightcache, lightpoint_color);
+                        }
+                        VectorCopy (lightpoint_color, out_color255);
+                        used_lightpoint = VectorLength (lightpoint_color) > 0.f;
+                }
+        }
+
+        float intensity = (out_color255[0] + out_color255[1] + out_color255[2]) * (1.f / (3.f * 255.f));
+        if (intensity <= 0.f && r_minlight_models.value > 0.f && e != &cl.viewent)
+        {
+                const float minlight = CLAMP (0.f, r_minlight_models.value, 1.f);
+                VectorSet (out_color255, minlight * 255.f, minlight * 255.f, minlight * 255.f);
+                intensity = minlight;
+                used_minlight = true;
+        }
+
+        e->lightcache.lightgrid_has_sample = lightgrid_valid;
+        e->lightcache.lightgrid_ao = lightgrid_ao;
+        VectorCopy (lightgrid_color, e->lightcache.lightgrid_color);
+
+        if (info)
+        {
+                for (int i = 0; i < 3; i++)
+                {
+                        float L = out_color255[i] * (1.0f / 256.0f);
+                        L = fminf (L, 1.0f);
+                        info->static_color[i] = powf (L, 1.0f / 2.2f);
+                }
+                info->intensity = intensity;
+                info->used_lightgrid = used_lightgrid;
+                info->lightgrid_valid = lightgrid_valid;
+                info->lightgrid_cell_valid = R_LightgridCellForPoint (e->origin, info->lightgrid_cell);
+                VectorCopy (lightgrid_color, info->lightgrid_color);
+                info->lightgrid_ao = lightgrid_ao;
+                info->used_lightpoint = used_lightpoint;
+                VectorScale (lightpoint_color, 1.f / 255.f, info->lightpoint_color);
+                info->used_minlight = used_minlight;
+        }
+
+        return used_lightgrid || used_lightpoint || used_minlight;
 }
 
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
