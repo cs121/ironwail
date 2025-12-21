@@ -516,6 +516,7 @@ void GL_BuildLightmaps (void);
 void GL_DeleteBModelBuffers (void);
 void GL_BuildBModelVertexBuffer (void);
 void GL_BuildBModelMarkBuffers (void);
+void R_ResetGodraysStabilization (void);
 void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *hdr);
 void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);

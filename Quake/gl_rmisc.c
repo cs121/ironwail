@@ -90,6 +90,10 @@ extern cvar_t r_godrays_light_sharpness;
 extern cvar_t r_godrays_max_radius;
 extern cvar_t r_godrays_light_x;
 extern cvar_t r_godrays_light_y;
+extern cvar_t r_godrays_stabilize;
+extern cvar_t r_godrays_smooth_rate;
+extern cvar_t r_godrays_max_shift;
+extern cvar_t r_godrays_reset_on_teleport;
 extern cvar_t r_godrays_debug;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
@@ -447,6 +451,10 @@ Cvar_RegisterVariable (&r_godrays_light_sharpness);
 Cvar_RegisterVariable (&r_godrays_max_radius);
 Cvar_RegisterVariable (&r_godrays_light_x);
 Cvar_RegisterVariable (&r_godrays_light_y);
+Cvar_RegisterVariable (&r_godrays_stabilize);
+Cvar_RegisterVariable (&r_godrays_smooth_rate);
+Cvar_RegisterVariable (&r_godrays_max_shift);
+Cvar_RegisterVariable (&r_godrays_reset_on_teleport);
 Cvar_RegisterVariable (&r_godrays_debug);
 Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
@@ -688,6 +696,8 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 	VEC_CLEAR (r_pointfile);
+
+	R_ResetGodraysStabilization ();
 
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();

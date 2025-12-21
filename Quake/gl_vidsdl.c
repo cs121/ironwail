@@ -1326,10 +1326,11 @@ static void GL_Init (void)
         GL_CreateFrameBuffers ();
         R_InitShadow ();
         GLLight_CreateResources ();
-        GLPalette_CreateResources ();
+	GLPalette_CreateResources ();
 
 	GL_ClearBufferBindings ();
 	GL_CreateFrameResources ();
+	R_ResetGodraysStabilization ();
 }
 
 /*

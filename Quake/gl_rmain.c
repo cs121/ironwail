@@ -58,6 +58,16 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 
+typedef struct godrays_stabilization_s
+{
+	qboolean	valid;
+	vec2_t		smoothed_pos;
+	double		last_time;
+	vec3_t		last_viewangles;
+} godrays_stabilization_t;
+
+static godrays_stabilization_t r_godrays_stabilization;
+
 typedef struct framesetup_s
 {
         GLuint          scene_fbo;
@@ -239,6 +249,10 @@ cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_A
 cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_stabilize = { "r_godrays_stabilize", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_smooth_rate = { "r_godrays_smooth_rate", "8.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
@@ -725,6 +739,86 @@ static GLuint GL_GenerateBloomTexture (void)
 	return input_tex;
 }
 
+void R_ResetGodraysStabilization (void)
+{
+	r_godrays_stabilization.valid = false;
+	r_godrays_stabilization.smoothed_pos[0] = 0.f;
+	r_godrays_stabilization.smoothed_pos[1] = 0.f;
+	r_godrays_stabilization.last_time = 0.0;
+	VectorClear (r_godrays_stabilization.last_viewangles);
+}
+
+static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw_y, float *out_x, float *out_y)
+{
+	vec2_t raw = { raw_x, raw_y };
+	float stabilize = CLAMP (0.f, r_godrays_stabilize.value, 1.f);
+	float smooth_rate = q_max (0.f, r_godrays_smooth_rate.value);
+	// max shift is expressed in pixels per second in godrays buffer space
+	float max_shift = q_max (0.f, r_godrays_max_shift.value);
+	qboolean should_reset = !r_godrays_stabilization.valid;
+
+	if (!should_reset && r_godrays_reset_on_teleport.value > 0.f)
+	{
+		float yaw_delta = fabsf (AngleDifference (r_refdef.viewangles[YAW], r_godrays_stabilization.last_viewangles[YAW]));
+		float pitch_delta = fabsf (AngleDifference (r_refdef.viewangles[PITCH], r_godrays_stabilization.last_viewangles[PITCH]));
+		vec2_t delta = {
+			raw[0] - r_godrays_stabilization.smoothed_pos[0],
+			raw[1] - r_godrays_stabilization.smoothed_pos[1]
+		};
+		float delta_len = sqrtf (delta[0] * delta[0] + delta[1] * delta[1]);
+
+		if (yaw_delta > 45.f || pitch_delta > 35.f || delta_len > 0.35f)
+			should_reset = true;
+	}
+
+	if (should_reset)
+	{
+		r_godrays_stabilization.smoothed_pos[0] = raw[0];
+		r_godrays_stabilization.smoothed_pos[1] = raw[1];
+	}
+	else
+	{
+		float dt = (float)(cl.time - r_godrays_stabilization.last_time);
+		if (dt < 0.f)
+			dt = 0.f;
+
+		vec2_t delta = {
+			raw[0] - r_godrays_stabilization.smoothed_pos[0],
+			raw[1] - r_godrays_stabilization.smoothed_pos[1]
+		};
+
+		float alpha = 1.f;
+		if (smooth_rate > 0.f && dt > 0.f)
+			alpha = 1.f - expf (-dt * smooth_rate);
+
+		vec2_t step = { delta[0] * alpha, delta[1] * alpha };
+		if (max_shift > 0.f && dt > 0.f && width > 0 && height > 0)
+		{
+			float max_step = max_shift * dt;
+			vec2_t step_px = { step[0] * (float)width, step[1] * (float)height };
+			float step_len = sqrtf (step_px[0] * step_px[0] + step_px[1] * step_px[1]);
+			if (step_len > max_step && step_len > 0.f)
+			{
+				float scale = max_step / step_len;
+				step_px[0] *= scale;
+				step_px[1] *= scale;
+				step[0] = step_px[0] / (float)width;
+				step[1] = step_px[1] / (float)height;
+			}
+		}
+
+		r_godrays_stabilization.smoothed_pos[0] += step[0];
+		r_godrays_stabilization.smoothed_pos[1] += step[1];
+	}
+
+	r_godrays_stabilization.last_time = cl.time;
+	VectorCopy (r_refdef.viewangles, r_godrays_stabilization.last_viewangles);
+	r_godrays_stabilization.valid = true;
+
+	*out_x = CLAMP (0.f, raw[0] + (r_godrays_stabilization.smoothed_pos[0] - raw[0]) * stabilize, 1.f);
+	*out_y = CLAMP (0.f, raw[1] + (r_godrays_stabilization.smoothed_pos[1] - raw[1]) * stabilize, 1.f);
+}
+
 static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 {
 	int width = framebufs.godrays.width;
@@ -752,8 +846,12 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float max_radius = CLAMP (0.f, r_godrays_max_radius.value, 1.f);
 	float light_x = CLAMP (0.f, r_godrays_light_x.value, 1.f);
 	float light_y = CLAMP (0.f, r_godrays_light_y.value, 1.f);
+	float stabilized_x = light_x;
+	float stabilized_y = light_y;
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+
+	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
 
 	GL_BeginGroup ("Godrays mask");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
@@ -776,7 +874,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	GL_UseProgram (glprogs.godrays);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-	GL_Uniform4fFunc (0, light_x, light_y, density, weight);
+	GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 	GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
