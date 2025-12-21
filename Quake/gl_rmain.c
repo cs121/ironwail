@@ -227,6 +227,20 @@ cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
+cvar_t	r_godrays_density = { "r_godrays_density", "0.9", CVAR_ARCHIVE };
+cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
+cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
+cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_threshold = { "r_godrays_threshold", "1.1", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_softness = { "r_godrays_sky_softness", "1.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_ARCHIVE };
+cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
+
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
@@ -525,6 +539,13 @@ void GL_CreateFrameBuffers (void)
 	framebufs.bloom.pingpong_fbo[0] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[0], 0, 0, "bloom blur fbo 0");
 	framebufs.bloom.pingpong_fbo[1] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[1], 0, 0, "bloom blur fbo 1");
 
+	framebufs.godrays.width = q_max (1, vid.width / 2);
+	framebufs.godrays.height = q_max (1, vid.height / 2);
+	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
+	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
+	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
+	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
+
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
@@ -601,6 +622,8 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
@@ -613,6 +636,8 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.composite.color_tex);
 
@@ -698,6 +723,68 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_EndGroup ();
 
 	return input_tex;
+}
+
+static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
+{
+	int width = framebufs.godrays.width;
+	int height = framebufs.godrays.height;
+	GLuint fallback = 0;
+	if (out_mask)
+		*out_mask = 0;
+	if (width <= 0 || height <= 0)
+		return fallback;
+	if (!glprogs.godrays_mask || !glprogs.godrays)
+		return fallback;
+	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
+		return fallback;
+
+	int samples = (int)Q_rint (r_godrays_samples.value);
+	samples = CLAMP (8, samples, 128);
+
+	float threshold = q_max (0.f, r_godrays_threshold.value);
+	float density = q_max (0.f, r_godrays_density.value);
+	float weight = q_max (0.f, r_godrays_weight.value);
+	float decay = q_max (0.f, r_godrays_decay.value);
+	float exposure = q_max (0.f, r_godrays_exposure.value);
+	float softness = q_max (0.f, r_godrays_sky_softness.value);
+	float sharpness = q_max (0.f, r_godrays_light_sharpness.value);
+	float max_radius = CLAMP (0.f, r_godrays_max_radius.value, 1.f);
+	float light_x = CLAMP (0.f, r_godrays_light_x.value, 1.f);
+	float light_y = CLAMP (0.f, r_godrays_light_y.value, 1.f);
+	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
+	float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+
+	GL_BeginGroup ("Godrays mask");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.godrays_mask);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+	GL_Uniform4fFunc (0, threshold, softness, sharpness, reversed_z);
+	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
+		(float)vid.width / (float)width,
+		(float)vid.height / (float)height);
+	GL_Uniform4fFunc (2, sky_depth_cutoff, 0.f, 0.f, 0.f);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_EndGroup ();
+
+	GL_BeginGroup ("Godrays scatter");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.godrays);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+	GL_Uniform4fFunc (0, light_x, light_y, density, weight);
+	GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_EndGroup ();
+
+	if (out_mask)
+		*out_mask = framebufs.godrays.mask_tex;
+
+	return framebufs.godrays.shafts_tex;
 }
 
 
@@ -798,6 +885,8 @@ void GL_PostProcess (void)
 	qboolean msaa;
 	GLuint velocity_texture;
 	GLuint depth_texture;
+	GLuint godrays_texture;
+	GLuint godrays_mask;
 	float motion_strength;
 	float motion_shutter;
 	float motion_effective_shutter;
@@ -810,6 +899,8 @@ void GL_PostProcess (void)
 	float screen_darken_depth;
 	float teleport_fade;
 	float teleport_blur;
+	qboolean godrays_enabled;
+	float godrays_debug;
         r_saturation.value = CLAMP (0.0f, r_saturation.value, 2.0f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -844,6 +935,13 @@ void GL_PostProcess (void)
 		bloom_texture = framebufs.bloom.pingpong_tex[0];
 	if (bloom_intensity > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
+
+	godrays_enabled = (r_godrays.value > 0.f);
+	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
+	godrays_texture = 0;
+	godrays_mask = 0;
+	if (godrays_enabled)
+		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -898,6 +996,8 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
 	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
+	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, godrays_texture);
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
@@ -921,6 +1021,7 @@ void GL_PostProcess (void)
 	screen_darken_depth);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
+	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, 0.f, 0.f);
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);
@@ -1579,6 +1680,8 @@ qboolean GL_NeedsPostprocess (void)
 	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
 		return true;
 	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
+		return true;
+	if (r_godrays.value > 0.f)
 		return true;
 	return false;
 }

@@ -3,6 +3,8 @@ layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
 layout(binding=4) uniform sampler2D VelocityTexture;
+layout(binding=5) uniform sampler2D GodraysTexture;
+layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -135,6 +137,7 @@ layout(location=12) uniform float u_saturation;
 layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
+layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, zw: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -244,6 +247,16 @@ void main()
         vec2 invScale = max(DepthParams.xy, vec2(1e-4));
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
+
+        if (GodraysParams.y > 0.5)
+        {
+                vec3 maskColor = texture(GodraysMaskTexture, uv).rgb;
+                vec3 shaftsColor = vec3(0.0);
+                if (GodraysParams.x > 0.5)
+                        shaftsColor = texture(GodraysTexture, uv).rgb;
+                out_fragcolor = vec4(max(maskColor, shaftsColor), 1.0);
+                return;
+        }
 
         bool hasVelocityTexture = MotionParams1.z > 0.5;
         vec2 velocity = vec2(0.0);
@@ -468,9 +481,12 @@ void main()
         {
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
+        vec3 godraysColor = vec3(0.0);
+        if (GodraysParams.x > 0.5)
+                godraysColor = texture(GodraysTexture, uv).rgb;
         float exposure = max(HDRParams.y, 0.0);
         float tonemapMode = HDRParams.z;
-        vec3 combined = (hdrColor + bloomColor) * exposure * contrast;
+        vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure * contrast;
         combined = max(combined, vec3(0.0));
         vec3 mapped;
         if (tonemapMode > 0.5)
