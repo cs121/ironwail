@@ -507,12 +507,13 @@ void GL_CreateShaders (void)
 {
 	int palettize, dither, mode, alphatest, warp, oit, md5;
 
-    glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
-    glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
+	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
+	glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
 	for (warp = 0; warp < 2; warp++)
             glprogs.warpscale[warp] = GL_CreateProgram (GLSL_PATH("warpscale.vert"), GLSL_PATH("warpscale.frag"), "view warp/scale|WARP %d", warp);
 	for (palettize = 0; palettize < 3; palettize++)
             glprogs.postprocess[palettize] = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("postprocess.frag"), "postprocess|PALETTIZE %d", palettize);
+	glprogs.filmgrain = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("filmgrain.frag"), "filmgrain");
 
 	glprogs.bloom_extract = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_extract.frag"), "bloom extract");
     glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
