@@ -1201,17 +1201,31 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 
         if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
         {
-                const lightgrid_probe_t *probe = R_GetLightgridSample (e->origin);
-                if (probe)
+                vec3_t sample_pos;
+                VectorCopy (e->origin, sample_pos);
+
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
+                        const lightgrid_probe_t *probe = R_GetLightgridSample (sample_pos);
+                        if (!probe)
+                                break;
+
                         VectorCopy (probe->rgb, lightgrid_color);
                         lightgrid_ao = CLAMP (0.f, probe->ao, 1.f);
                         lightgrid_valid = probe->intensity > 0.f || lightgrid_ao > 0.f;
-                        if (lightgrid_valid)
-                        {
-                                VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
-                                used_lightgrid = true;
-                        }
+                        if (lightgrid_valid || attempt == 1 || !e->model)
+                                break;
+
+                        float ofs = e->model->maxs[2] * 0.5f;
+                        if (ofs <= 0.f)
+                                break;
+                        sample_pos[2] += ofs;
+                }
+
+                if (lightgrid_valid)
+                {
+                        VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
+                        used_lightgrid = true;
                 }
         }
 

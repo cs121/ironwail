@@ -150,7 +150,7 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
         }
 }
 
-static const char *R_ModelTypeName (const qmodel_t *model)
+static const char *R_ModelTypeName (qmodel_t *model)
 {
         if (!model)
                 return "none";
