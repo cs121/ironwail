@@ -27,6 +27,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "steam.h"
 #include <time.h>
 
+extern cvar_t r_autoexposure;
+extern cvar_t r_exposure_debug;
+extern float r_autoexposure_debug_exposure;
+extern float r_autoexposure_debug_luminance;
+
 /*
 
 background clear
@@ -1018,6 +1023,34 @@ void SCR_DrawDevStats (void)
 
 	sprintf (str, "GL upload|%4iK %4iK", dev_stats.gpu_upload/1024, dev_peakstats.gpu_upload/1024);
 	Draw_String (x, (y++)*8-x, str);
+}
+
+/*
+==============
+SCR_DrawExposureDebug
+==============
+*/
+void SCR_DrawExposureDebug (void)
+{
+	char	str[40];
+	int		y = 25 - 3;
+	int		x = 0;
+
+	if (r_exposure_debug.value <= 0.f)
+		return;
+
+	GL_SetCanvas (CANVAS_BOTTOMLEFT);
+
+	Draw_Fill (x, y * 8, 21 * 8, 3 * 8, 0, 0.5);
+
+	sprintf (str, "Exposure %6.3f", r_autoexposure_debug_exposure);
+	Draw_String (x, (y++) * 8 - x, str);
+
+	sprintf (str, "Luma     %6.3f", r_autoexposure_debug_luminance);
+	Draw_String (x, (y++) * 8 - x, str);
+
+	sprintf (str, "AutoExp  %s", r_autoexposure.value > 0.f ? "on" : "off");
+	Draw_String (x, (y++) * 8 - x, str);
 }
 
 /*
@@ -2160,6 +2193,7 @@ void SCR_UpdateScreen (void)
 		SCR_CheckDrawCenterString ();
 		Sbar_Draw ();
 		SCR_DrawDevStats (); //johnfitz
+		SCR_DrawExposureDebug ();
 		SCR_DrawClock (); //johnfitz
 		SCR_DrawDemoControls ();
 		SCR_DrawSpeed ();

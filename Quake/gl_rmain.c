@@ -32,6 +32,8 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
+float r_autoexposure_debug_exposure = 1.f;
+float r_autoexposure_debug_luminance = 0.f;
 
 vec3_t* r_pointfile;
 
@@ -234,6 +236,14 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 
 cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
+cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
+cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
+cvar_t	r_exposure_min = { "r_exposure_min", "0.85", CVAR_ARCHIVE };
+cvar_t	r_exposure_max = { "r_exposure_max", "1.15", CVAR_ARCHIVE };
+cvar_t	r_exposure_speed_up = { "r_exposure_speed_up", "0.6", CVAR_ARCHIVE };
+cvar_t	r_exposure_speed_down = { "r_exposure_speed_down", "0.3", CVAR_ARCHIVE };
+cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
+cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
@@ -554,6 +564,12 @@ void GL_CreateFrameBuffers (void)
 		"composite fbo"
 	);
 
+	framebufs.autoexposure.width = 16;
+	framebufs.autoexposure.height = 16;
+	framebufs.autoexposure.tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.autoexposure.width, framebufs.autoexposure.height,
+		GL_LINEAR, "autoexposure downscale");
+	framebufs.autoexposure.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.autoexposure.tex, 0, 0, "autoexposure fbo");
+
 	framebufs.bloom.width = q_max (1, vid.width / 2);
 	framebufs.bloom.height = q_max (1, vid.height / 2);
 	framebufs.bloom.extract_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom extract");
@@ -648,6 +664,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
@@ -663,6 +680,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
+	GL_DeleteNativeTexture (framebufs.autoexposure.tex);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
@@ -1046,6 +1064,127 @@ static void GL_SetFilmgrainUniforms (float amount, qboolean allow_debug)
 	GL_Uniform4fFunc (15, frame, 0.f, 0.f, 0.f);
 }
 
+static int GL_CompareFloat (const void *a, const void *b)
+{
+	const float fa = *(const float *)a;
+	const float fb = *(const float *)b;
+
+	if (fa < fb)
+		return -1;
+	if (fa > fb)
+		return 1;
+	return 0;
+}
+
+static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
+{
+	const int width = framebufs.autoexposure.width;
+	const int height = framebufs.autoexposure.height;
+	const int pixel_count = width * height;
+	float pixels[16 * 16 * 4];
+	float luminance_samples[16 * 16];
+
+	if (framebufs.composite.fbo == 0 || framebufs.autoexposure.fbo == 0)
+		return false;
+	if (width <= 0 || height <= 0 || pixel_count > (int)countof (luminance_samples))
+		return false;
+
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.autoexposure.fbo);
+	glBlitFramebuffer (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glReadBuffer (GL_BACK);
+
+	for (int i = 0; i < pixel_count; ++i)
+	{
+		const float r = pixels[i * 4 + 0];
+		const float g = pixels[i * 4 + 1];
+		const float b = pixels[i * 4 + 2];
+		float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+		lum = q_max (lum, 0.0001f);
+		luminance_samples[i] = lum;
+	}
+
+	qsort (luminance_samples, pixel_count, sizeof (float), GL_CompareFloat);
+
+	{
+		const int low = (int)floorf (pixel_count * 0.05f);
+		const int high = q_min (pixel_count - 1, (int)ceilf (pixel_count * 0.95f) - 1);
+		const int count = high - low + 1;
+		if (count <= 0)
+			return false;
+
+		double log_sum = 0.0;
+		for (int i = low; i <= high; ++i)
+			log_sum += logf (luminance_samples[i]);
+
+		*out_luminance = expf ((float)(log_sum / (double)count));
+	}
+
+	return true;
+}
+
+static float GL_UpdateAutoExposure (void)
+{
+	static qboolean initialized = false;
+	static double last_time = 0.0;
+	static float current_exposure = 1.f;
+	float scene_luminance = r_autoexposure_debug_luminance;
+
+	if (!initialized)
+	{
+		current_exposure = 1.f;
+		last_time = cl.time;
+		initialized = true;
+	}
+
+	if (GL_SampleAutoExposureLuminance (&scene_luminance))
+		r_autoexposure_debug_luminance = scene_luminance;
+
+	if (r_autoexposure.value <= 0.f)
+		return current_exposure;
+
+	if (r_exposure_lock.value > 0.f)
+		return current_exposure;
+
+	if ((in_attack.state & 1) || cl.cshifts[CSHIFT_DAMAGE].percent > 0.f)
+		return current_exposure;
+
+	if (scene_luminance <= 0.f)
+		return current_exposure;
+
+	{
+		const float exposure_middle_gray = 0.18f;
+		const float bias = q_max (0.f, r_exposure_bias.value);
+		const float min_exposure = q_min (r_exposure_min.value, r_exposure_max.value);
+		const float max_exposure = q_max (r_exposure_min.value, r_exposure_max.value);
+		float target = exposure_middle_gray * bias / scene_luminance;
+		float speed_up = q_max (0.f, r_exposure_speed_up.value);
+		float speed_down = q_max (0.f, r_exposure_speed_down.value);
+		float adaptation_speed = (target > current_exposure) ? speed_up : speed_down;
+		float delta = (float)(cl.time - last_time);
+		float change;
+		float max_delta;
+
+		if (delta < 0.f)
+			delta = 0.f;
+
+		last_time = cl.time;
+
+		target = CLAMP (min_exposure, target, max_exposure);
+		change = (target - current_exposure) * delta * adaptation_speed;
+		max_delta = current_exposure * 0.02f;
+		change = CLAMP (-max_delta, change, max_delta);
+		current_exposure = CLAMP (min_exposure, current_exposure + change, max_exposure);
+	}
+
+	return current_exposure;
+}
+
 
 void GL_PostProcess (void)
 	{
@@ -1108,6 +1247,14 @@ void GL_PostProcess (void)
 		bloom_texture = framebufs.bloom.pingpong_tex[0];
 	if (bloom_intensity > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
+
+	if (r_autoexposure.value > 0.f || r_exposure_debug.value > 0.f)
+	{
+		float auto_exposure = GL_UpdateAutoExposure ();
+		if (r_autoexposure.value > 0.f)
+			exposure *= auto_exposure;
+	}
+	r_autoexposure_debug_exposure = exposure;
 
 	godrays_enabled = (r_godrays.value > 0.f);
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
