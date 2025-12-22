@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include "r_maptex_export.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -409,6 +410,7 @@ void R_Init (void)
         Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
         Lightgrid_Init ();
+        R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
