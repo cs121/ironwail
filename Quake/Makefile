@@ -230,6 +230,8 @@ $(SYSOBJ_GL_VID) \
 gl_draw.o \
 image.o \
 gl_texmgr.o \
+ktx2_write.o \
+r_maptex_export.o \
 bc7enc.o \
 gl_mesh.o \
 r_sprite.o \

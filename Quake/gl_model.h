@@ -129,6 +129,7 @@ typedef struct
 {
 	float		vecs[2][4];
 	int			texnum;
+	int			miptex;
 	int			flags;
 } mtexinfo_t;
 
