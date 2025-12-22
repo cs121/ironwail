@@ -624,7 +624,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	for (i = 0, totalinst = 0; i < count; i++)
 	{
 		entity_t *ent = ents[i];
-		if (!ent || !ent->model)
+		if (!ent || !Mod_IsKnownModel (ent->model))
 			continue;
 		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
@@ -656,24 +656,28 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
 
-        for (i = 0, baseinst = 0; i < count; /**/)
-        {
-                int numinst;
-                entity_t *e = ents[i++];
-                qmodel_t *model = e->model;
-                qboolean isworld = (e == &cl_entities[0]);
-                qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
-                qboolean zfix = !isworld && !isstatic;
-                int frame = isworld ? 0 : e->frame;
-                int numtex = model->texofs[texend] - model->texofs[texbegin];
+	for (i = 0, baseinst = 0; i < count; /**/)
+	{
+		int numinst;
+		entity_t *e = ents[i++];
+		qmodel_t *model;
+
+		if (!e || !Mod_IsKnownModel (e->model))
+			continue;
+		model = e->model;
+		qboolean isworld = (e == &cl_entities[0]);
+		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
+		qboolean zfix = !isworld && !isstatic;
+		int frame = isworld ? 0 : e->frame;
+		int numtex = model->texofs[texend] - model->texofs[texbegin];
 
                 if (!numtex)
                         continue;
 
-		for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
+		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
 		{
-			if (!ents[i] || !ents[i]->model)
-				continue;
+			if (!ents[i] || ents[i]->model != model)
+				break;
 			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
 		}
 
@@ -733,6 +737,10 @@ R_EntHasWater
 static qboolean R_EntHasWater (entity_t *ent, qboolean translucent)
 {
 	int i;
+
+	if (!ent || !Mod_IsKnownModel (ent->model))
+		return false;
+
 	for (i = TEXTYPE_FIRSTLIQUID; i < TEXTYPE_LASTLIQUID+1; i++)
 	{
 		int numtex = ent->model->texofs[i+1] - ent->model->texofs[i];

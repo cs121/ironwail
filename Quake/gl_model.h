@@ -570,6 +570,7 @@ void	Mod_ResetAll (void); // for gamedir changes (Host_Game_f)
 qmodel_t *Mod_ForName (const char *name, qboolean crash);
 void	*Mod_Extradata (qmodel_t *mod);	// handles caching
 void	Mod_TouchModel (const char *name);
+qboolean Mod_IsKnownModel (const qmodel_t *mod);
 
 #define VIS_ALIGN			16						// vis buffer size alignment (in bytes)
 #define VIS_ALIGN_MASK		(VIS_ALIGN - 1)			// alignment - 1, to simplify alignment code
