@@ -175,6 +175,19 @@ void Mod_Init (void)
 
 /*
 ===============
+Mod_IsKnownModel
+===============
+*/
+qboolean Mod_IsKnownModel (const qmodel_t *mod)
+{
+	if (!mod)
+		return false;
+
+	return (mod >= mod_known && mod < mod_known + mod_numknown);
+}
+
+/*
+===============
 Mod_Extradata
 
 Caches the data if needed
