@@ -417,6 +417,7 @@ void Host_ClientCommands (const char *fmt, ...) FUNC_PRINTF(1,2);
 void Host_ShutdownServer (qboolean crash);
 void Host_BeginAssetLoading (void);
 void Host_EndAssetLoading (void);
+qboolean Host_IsAssetLoading (void);
 void Host_WriteConfiguration (void);
 void Host_Resetdemos (void);
 
@@ -456,4 +457,3 @@ void Host_InvokeOnMainThread (void (*func) (void *param), void *param);
 #endif /* RC_INVOKED */
 
 #endif	/* QUAKEDEFS_H */
-

@@ -1278,7 +1278,7 @@ void Con_Printf (const char *fmt, ...)
 	Con_Print (msg);
 
 // update the screen if the console is displayed
-	if (cls.signon != SIGNONS && !scr_disabled_for_loading )
+	if (cls.signon != SIGNONS && !scr_disabled_for_loading && !Host_IsAssetLoading ())
 	{
 	// protect against infinite loop if something in SCR_UpdateScreen calls
 	// Con_Printd
@@ -2424,4 +2424,3 @@ void LOG_Close (void)
 	close (log_fd);
 	log_fd = -1;
 }
-
