@@ -238,6 +238,14 @@ cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_lighttex_intensity = { "r_godrays_lighttex_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_lighttex_name_match = { "r_godrays_lighttex_name_match", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
 cvar_t	r_godrays_density = { "r_godrays_density", "0.9", CVAR_ARCHIVE };
 cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
@@ -250,6 +258,8 @@ cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_stabilize = { "r_godrays_stabilize", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_stabilize_strength = { "r_godrays_stabilize_strength", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_stabilize_max_px = { "r_godrays_stabilize_max_px", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_smooth_rate = { "r_godrays_smooth_rate", "8.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
@@ -555,8 +565,13 @@ void GL_CreateFrameBuffers (void)
 
 	framebufs.godrays.width = q_max (1, vid.width / 2);
 	framebufs.godrays.height = q_max (1, vid.height / 2);
+	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RG16F, vid.width, vid.height, GL_LINEAR, "godrays source");
 	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
 	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
+	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
+		framebufs.composite.depth_stencil_tex,
+		framebufs.composite.depth_stencil_tex,
+		"godrays source fbo");
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
@@ -636,6 +651,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.source_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
@@ -650,6 +666,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
@@ -753,8 +770,10 @@ static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw
 	vec2_t raw = { raw_x, raw_y };
 	float stabilize = CLAMP (0.f, r_godrays_stabilize.value, 1.f);
 	float smooth_rate = q_max (0.f, r_godrays_smooth_rate.value);
-	// max shift is expressed in pixels per second in godrays buffer space
-	float max_shift = q_max (0.f, r_godrays_max_shift.value);
+	float stabilize_strength = CLAMP (0.f, r_godrays_stabilize_strength.value, 1.f);
+	// max shift is expressed in pixels per frame when stabilize_max_px is set,
+	// otherwise fall back to the legacy max_shift (pixels per second).
+	float max_shift = q_max (0.f, r_godrays_stabilize_max_px.value);
 	qboolean should_reset = !r_godrays_stabilization.valid;
 
 	if (!should_reset && r_godrays_reset_on_teleport.value > 0.f)
@@ -788,13 +807,21 @@ static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw
 		};
 
 		float alpha = 1.f;
-		if (smooth_rate > 0.f && dt > 0.f)
+		if (stabilize_strength > 0.f)
+		{
+			float t = q_max (0.f, dt) * 60.f;
+			alpha = 1.f - powf (1.f - stabilize_strength, t);
+		}
+		else if (smooth_rate > 0.f && dt > 0.f)
 			alpha = 1.f - expf (-dt * smooth_rate);
 
 		vec2_t step = { delta[0] * alpha, delta[1] * alpha };
-		if (max_shift > 0.f && dt > 0.f && width > 0 && height > 0)
+		if (max_shift <= 0.f && dt > 0.f)
+			max_shift = q_max (0.f, r_godrays_max_shift.value) * dt;
+
+		if (max_shift > 0.f && width > 0 && height > 0)
 		{
-			float max_step = max_shift * dt;
+			float max_step = max_shift;
 			vec2_t step_px = { step[0] * (float)width, step[1] * (float)height };
 			float step_len = sqrtf (step_px[0] * step_px[0] + step_px[1] * step_px[1]);
 			if (step_len > max_step && step_len > 0.f)
@@ -819,6 +846,55 @@ static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw
 	*out_y = CLAMP (0.f, raw[1] + (r_godrays_stabilization.smoothed_pos[1] - raw[1]) * stabilize, 1.f);
 }
 
+static void GL_GenerateGodraysSource (void)
+{
+	int width = vid.width;
+	int height = vid.height;
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
+		return;
+
+	GL_BeginGroup ("Godrays source");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
+	glViewport (0, 0, width, height);
+	{
+		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
+		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+	}
+
+	if (r_godrays_emit_sky.value > 0.f && glprogs.godrays_source_sky)
+	{
+		float sky_intensity = q_max (0.f, r_godrays_sky_intensity.value);
+		if (sky_intensity > 0.f)
+		{
+			float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
+			float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+			GL_UseProgram (glprogs.godrays_source_sky);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, 0.f);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+		}
+	}
+
+	if ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source)
+	{
+		int count = 0;
+		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+		if (count > 0)
+		{
+			GL_UseProgram (glprogs.godrays_source);
+			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
+			GL_Uniform4fFunc (0,
+				q_max (0.f, r_godrays_emissive_intensity.value),
+				q_max (0.f, r_godrays_lighttex_intensity.value),
+				0.f, 0.f);
+			R_DrawBrushModels_Godrays (ents, count);
+		}
+	}
+
+	GL_EndGroup ();
+}
+
 static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 {
 	int width = framebufs.godrays.width;
@@ -841,30 +917,29 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float weight = q_max (0.f, r_godrays_weight.value);
 	float decay = q_max (0.f, r_godrays_decay.value);
 	float exposure = q_max (0.f, r_godrays_exposure.value);
-	float softness = q_max (0.f, r_godrays_sky_softness.value);
+	float softness = q_max (0.f, r_godrays_blur.value);
+	if (softness <= 0.f)
+		softness = q_max (0.f, r_godrays_sky_softness.value);
 	float sharpness = q_max (0.f, r_godrays_light_sharpness.value);
 	float max_radius = CLAMP (0.f, r_godrays_max_radius.value, 1.f);
 	float light_x = CLAMP (0.f, r_godrays_light_x.value, 1.f);
 	float light_y = CLAMP (0.f, r_godrays_light_y.value, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
-	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
-	float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
+	GL_GenerateGodraysSource ();
 
 	GL_BeginGroup ("Godrays mask");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
 	glViewport (0, 0, width, height);
 	GL_UseProgram (glprogs.godrays_mask);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-	GL_Uniform4fFunc (0, threshold, softness, sharpness, reversed_z);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
+	GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
 		(float)vid.height / (float)height);
-	GL_Uniform4fFunc (2, sky_depth_cutoff, 0.f, 0.f, 0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
