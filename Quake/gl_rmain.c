@@ -1091,7 +1091,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
 	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.autoexposure.fbo);
-	glBlitFramebuffer (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
 	glReadBuffer (GL_COLOR_ATTACHMENT0);
