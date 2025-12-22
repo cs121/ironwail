@@ -3,6 +3,7 @@
 #include "r_maptex_export.h"
 #include "gl_texmgr.h"
 #include "bspfile.h"
+#include "q_ctype.h"
 
 /*
 ===============================================================================
@@ -492,29 +493,35 @@ void R_MapTex_ExportFromBsp(qmodel_t *mod, const byte *bsp_base, const lump_t *t
                         continue;
                 }
 
-                if (!use_bsp)
                 {
-                        const byte *wad_buffer = NULL;
-                        size_t wad_size = 0;
-
-                        if (!MapTex_FindMiptexInWads(wads, wad_count, mt.name, &wad_buffer, &wad_size))
+                        const byte *level_data = NULL;
+                        size_t level_size = 0;
+                        qboolean use_bsp = MapTex_GetMiptexLevel(&mt, source_base, source_size, 0,
+                                                                &level_data, &level_size);
+                        if (!use_bsp)
                         {
-                                if (r_maptex_export_verbose.value)
-                                        Con_Warning("MapTex: wad texture %s missing\n", mt.name);
-                                failed++;
-                                continue;
-                        }
+                                const byte *wad_buffer = NULL;
+                                size_t wad_size = 0;
 
-                        if (!MapTex_ReadMiptexFromBuffer(wad_buffer, wad_size, &mt))
-                        {
-                                if (r_maptex_export_verbose.value)
-                                        Con_Warning("MapTex: invalid wad miptex %s\n", mt.name);
-                                failed++;
-                                continue;
-                        }
+                                if (!MapTex_FindMiptexInWads(wads, wad_count, mt.name, &wad_buffer, &wad_size))
+                                {
+                                        if (r_maptex_export_verbose.value)
+                                                Con_Warning("MapTex: wad texture %s missing\n", mt.name);
+                                        failed++;
+                                        continue;
+                                }
 
-                        source_base = wad_buffer;
-                        source_size = wad_size;
+                                if (!MapTex_ReadMiptexFromBuffer(wad_buffer, wad_size, &mt))
+                                {
+                                        if (r_maptex_export_verbose.value)
+                                                Con_Warning("MapTex: invalid wad miptex %s\n", mt.name);
+                                        failed++;
+                                        continue;
+                                }
+
+                                source_base = wad_buffer;
+                                source_size = wad_size;
+                        }
                 }
 
                 MapTex_SanitizeName(mt.name, sanitized, sizeof(sanitized));
