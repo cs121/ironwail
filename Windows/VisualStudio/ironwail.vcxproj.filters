@@ -96,6 +96,9 @@
     <ClCompile Include="..\..\Quake\gl_ktx2.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\ktx2_write.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\gl_vidsdl.c">
       <Filter>Source Files</Filter>
     </ClCompile>
