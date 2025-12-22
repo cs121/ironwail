@@ -149,6 +149,16 @@ void Host_EndAssetLoading (void)
 
 /*
 ================
+Host_IsAssetLoading
+================
+*/
+qboolean Host_IsAssetLoading (void)
+{
+	return host_assetloading_depth > 0;
+}
+
+/*
+================
 Max_Edicts_f -- johnfitz
 ================
 */
@@ -1576,4 +1586,3 @@ void Host_Shutdown(void)
         LOG_Close ();
         LOC_Shutdown ();
 }
-
