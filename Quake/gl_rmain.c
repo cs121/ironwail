@@ -369,6 +369,7 @@ static float R_GetDynamicDoFFocus (float fallback)
 	float range;
 	float target;
 	qboolean traced = false;
+	const hull_t *world_hull;
 
 	if (r_dof_autofocus.value <= 0.f)
 	{
@@ -376,7 +377,14 @@ static float R_GetDynamicDoFFocus (float fallback)
 		return fallback;
 	}
 
-	if (cls.state != ca_connected || !cl.worldmodel || !cl.worldmodel->hulls)
+	if (cls.state != ca_connected || !cl.worldmodel)
+	{
+		r_dof_autofocus_initialized = false;
+		return fallback;
+	}
+
+	world_hull = &cl.worldmodel->hulls[0];
+	if (!world_hull->clipnodes || !world_hull->planes)
 	{
 		r_dof_autofocus_initialized = false;
 		return fallback;
@@ -408,7 +416,7 @@ static float R_GetDynamicDoFFocus (float fallback)
 		trace.fraction = 1.f;
 		VectorCopy (end, trace.endpos);
 
-		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, r_origin, end, &trace);
+		SV_RecursiveHullCheck (world_hull, 0, 0.f, 1.f, r_origin, end, &trace);
 	}
 
 	if (trace.allsolid || trace.startsolid || trace.fraction <= 0.f)
