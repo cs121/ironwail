@@ -56,6 +56,28 @@ typedef struct gpumark_frame_s {
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
+static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
+{
+	int used_count;
+	int texnum;
+
+	if (!model || !model->usedtextures || !model->textures)
+		return NULL;
+
+	used_count = model->texofs[TEXTYPE_COUNT];
+	if (used_index < 0 || used_index >= used_count)
+		return NULL;
+
+	texnum = model->usedtextures[used_index];
+	if (texnum < 0 || texnum >= model->numtextures)
+		return NULL;
+
+	if (out_texnum)
+		*out_texnum = texnum;
+
+	return model->textures[texnum];
+}
+
 /*
 ===============
 R_MarkVisSurfaces
@@ -651,9 +673,13 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
 		{
-			texture_t *t = model->textures[model->usedtextures[j]];
+			int texnum = -1;
+			texture_t *t = R_GetUsedTexture (model, j, &texnum);
 			unsigned extra_flags = 0u;
 			qboolean force_fullbright = false;
+
+			if (!t)
+				continue;
 
 			if (pass == BP_GODRAYS)
 			{
@@ -662,7 +688,6 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
 				if (r_godrays_emit_lighttex.value > 0.f && t)
 				{
-					int texnum = model->usedtextures[j];
 					if (R_ModelTextureHasGodrayFlag (model, texnum))
 						lighttex = true;
 					else if ((t->type != TEXTYPE_SKY) && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
@@ -779,7 +804,11 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 
 		for (j = model->texofs[TEXTYPE_FIRSTLIQUID]; j < model->texofs[TEXTYPE_LASTLIQUID+1]; j++)
 		{
-			texture_t *t = model->textures[model->usedtextures[j]];
+			texture_t *t = R_GetUsedTexture (model, j, NULL);
+
+			if (!t)
+				continue;
+
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)
 				continue;
