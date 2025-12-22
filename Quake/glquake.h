@@ -470,6 +470,7 @@ void R_ResizeShadowMapIfNeeded (void);
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
 void R_DrawBrushModels_DLights (entity_t **ents, int count);
+void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -552,6 +553,8 @@ typedef struct glprogs_s {
 	GLuint		bloom_blur;
 	GLuint		godrays_mask;
 	GLuint		godrays;
+	GLuint		godrays_source;
+	GLuint		godrays_source_sky;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -619,8 +622,10 @@ typedef struct glframebufs_s {
 	}				bloom;
 
 	struct {
+		GLuint		source_tex;
 		GLuint		mask_tex;
 		GLuint		shafts_tex;
+		GLuint		source_fbo;
 		GLuint		mask_fbo;
 		GLuint		shafts_fbo;
 		int			width;
@@ -680,6 +685,9 @@ void Sky_LoadTextureQ64 (qmodel_t *m, texture_t *mt);
 void Sky_LoadSkyBox (const char *name);
 void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
+
+qboolean R_TextureEmitsGodrays (texture_t *t);
+qboolean R_SurfaceEmitsGodrays (msurface_t *s);
 
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);

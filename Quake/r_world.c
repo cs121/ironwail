@@ -25,6 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
+extern cvar_t r_godrays_emit_sky;
+extern cvar_t r_godrays_emit_emissive;
+extern cvar_t r_godrays_emit_lighttex;
+extern cvar_t r_godrays_lighttex_name_match;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -323,13 +327,84 @@ static void R_FlushBModelCalls (void)
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
+#define CALLFLAG_GODRAYS_LIGHT   (1u << 5)
+#define CALLFLAG_GODRAYS_EMISSIVE (1u << 6)
+
+static qboolean R_GodraysNameMatch (const char *name)
+{
+	if (!name || !name[0])
+		return false;
+
+	if (!q_strncasecmp (name, "light", 5))
+		return true;
+	if (q_strcasestr (name, "lamp"))
+		return true;
+	if (q_strcasestr (name, "glow"))
+		return true;
+	if (q_strcasestr (name, "flare"))
+		return true;
+
+	return false;
+}
+
+static qboolean R_ModelTextureHasGodrayFlag (const qmodel_t *model, int texnum)
+{
+	int i;
+
+	if (!model || texnum < 0)
+		return false;
+
+	for (i = 0; i < model->numsurfaces; ++i)
+	{
+		msurface_t *surface = &model->surfaces[i];
+		if (surface->texinfo && surface->texinfo->texnum == texnum && (surface->texinfo->flags & TEX_GODRAY_EMIT))
+			return true;
+	}
+
+	return false;
+}
+
+qboolean R_TextureEmitsGodrays (texture_t *t)
+{
+	if (!t)
+		return false;
+
+	if (r_godrays_emit_emissive.value > 0.f && (t->fullbright || t->emissive))
+		return true;
+
+	if (r_godrays_emit_lighttex.value > 0.f && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
+		return true;
+
+	return false;
+}
+
+qboolean R_SurfaceEmitsGodrays (msurface_t *s)
+{
+	if (!s)
+		return false;
+
+	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f)
+		return true;
+
+	if (s->texinfo && (s->texinfo->flags & TEX_GODRAY_EMIT) && r_godrays_emit_lighttex.value > 0.f)
+		return true;
+
+	if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
+	{
+		texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
+		return R_TextureEmitsGodrays (t);
+	}
+
+	return false;
+}
 
 /*
 =============
 R_AddBModelCall
 =============
 */
-static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix, float alpha_override)
+static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix, float alpha_override,
+	unsigned extra_flags, qboolean force_fullbright)
 {
 	GLuint		flags;
 	float		alpha;
@@ -345,7 +420,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		em = t->emissive;
 		if (r_lightmap_cheatsafe)
 			tx = fb = em = NULL;
-		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
+		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY && !force_fullbright)
 			fb = NULL;
 	}
 	else
@@ -357,7 +432,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	if (!gl_zfix.value || map_checks.value)
 		zfix = 0;
 
-	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2);
+	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2) | extra_flags;
 	if (em != NULL)
 		flags |= CALLFLAG_EMISSIVE;
 	if (t && t->type == TEXTYPE_CUTOUT)
@@ -439,6 +514,7 @@ static GLuint R_ChooseBModelProgram (qboolean oit, qboolean alphatest)
 typedef enum {
         BP_SOLID,
         BP_ALPHATEST,
+        BP_GODRAYS,
         BP_SKYLAYERS,
         BP_SKYCUBEMAP,
         BP_SKYSTENCIL,
@@ -486,6 +562,11 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_CUTOUT + 1;
                 program = R_ChooseBModelProgram (oit, true);
                 break;
+        case BP_GODRAYS:
+                texbegin = 0;
+                texend = TEXTYPE_COUNT;
+                program = glprogs.godrays_source;
+                break;
         case BP_SKYLAYERS:
                 texbegin = TEXTYPE_SKY;
                 texend = TEXTYPE_SKY + 1;
@@ -531,6 +612,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
+        else if (pass == BP_GODRAYS)
+                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
@@ -569,7 +652,39 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
 		{
 			texture_t *t = model->textures[model->usedtextures[j]];
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0, zfix, -1);
+			unsigned extra_flags = 0u;
+			qboolean force_fullbright = false;
+
+			if (pass == BP_GODRAYS)
+			{
+				qboolean emissive = (r_godrays_emit_emissive.value > 0.f && t && (t->fullbright || t->emissive));
+				qboolean lighttex = false;
+
+				if (r_godrays_emit_lighttex.value > 0.f && t)
+				{
+					int texnum = model->usedtextures[j];
+					if (R_ModelTextureHasGodrayFlag (model, texnum))
+						lighttex = true;
+					else if ((t->type != TEXTYPE_SKY) && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
+						lighttex = true;
+				}
+
+				if (emissive)
+				{
+					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
+					force_fullbright = true;
+				}
+
+				if (lighttex)
+					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
+
+				if (extra_flags == 0u)
+					continue;
+			}
+
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
+				pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
+				zfix, -1, extra_flags, force_fullbright);
 		}
 		
 		baseinst += numinst;
@@ -668,7 +783,9 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)
 				continue;
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst, R_TextureAnimation (t, frame), !isworld, alpha);
+			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
+				R_TextureAnimation (t, frame),
+				!isworld, alpha, 0u, false);
 		}
 
 		baseinst += numinst;
@@ -785,6 +902,19 @@ void R_DrawBrushModels_DLights (entity_t **ents, int count)
 
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
+}
+
+/*
+=============
+R_DrawBrushModels_Godrays
+=============
+*/
+void R_DrawBrushModels_Godrays (entity_t **ents, int count)
+{
+	if (!count || !glprogs.godrays_source)
+		return;
+
+	R_DrawBrushModels_Real (ents, count, BP_GODRAYS, false);
 }
 
 
