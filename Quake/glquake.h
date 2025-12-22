@@ -633,6 +633,13 @@ typedef struct glframebufs_s {
 	}				godrays;
 
 	struct {
+		GLuint		tex;
+		GLuint		fbo;
+		int			width;
+		int			height;
+	}				autoexposure;
+
+	struct {
 		union {
 			GLuint			mrt[2];
 			struct {

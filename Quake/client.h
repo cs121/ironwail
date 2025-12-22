@@ -379,6 +379,7 @@ typedef struct
 extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
+extern	kbutton_t	in_attack;
 
 void CL_InitInput (void);
 void CL_AccumulateCmd (void);
@@ -446,4 +447,3 @@ void Chase_UpdateForClient (void);	//johnfitz
 void Chase_UpdateForDrawing (void);	//johnfitz
 
 #endif	/* _CLIENT_H_ */
-
