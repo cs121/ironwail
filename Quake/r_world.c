@@ -621,12 +621,14 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 break;
         }
 
-        for (i = 0, totalinst = 0; i < count; i++)
-        {
-                entity_t *ent = ents[i];
-                if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
-                        R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
-        }
+	for (i = 0, totalinst = 0; i < count; i++)
+	{
+		entity_t *ent = ents[i];
+		if (!ent || !ent->model)
+			continue;
+		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
+			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
+	}
 
         if (!totalinst)
                 return;
@@ -668,8 +670,12 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
                 if (!numtex)
                         continue;
 
-                for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
-                        numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+		for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
+		{
+			if (!ents[i] || !ents[i]->model)
+				continue;
+			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+		}
 
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
 		{
@@ -792,6 +798,8 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 	{
 		int numinst;
 		entity_t *e = ents[i++];
+		if (!e || !e->model)
+			continue;
 		qmodel_t *model = e->model;
 		qboolean isworld = (e == &cl_entities[0]);
 		int frame = isworld ? 0 : e->frame;
