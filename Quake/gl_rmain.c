@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include <float.h>
+#include <math.h>
 
 #define NOISESCALE     (1.0f / 127.0f)
 
@@ -791,15 +793,34 @@ void R_ResetGodraysStabilization (void)
 	VectorClear (r_godrays_stabilization.last_viewangles);
 }
 
+static float R_SanitizeGodraysValue (float value, float fallback, float minval, float maxval)
+{
+#if defined(_MSC_VER)
+	if (_finite (value) == 0)
+		return fallback;
+#else
+	if (!isfinite (value))
+		return fallback;
+#endif
+
+	if (value < minval)
+		return minval;
+	if (value > maxval)
+		return maxval;
+	return value;
+}
+
 static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw_y, float *out_x, float *out_y)
 {
+	raw_x = R_SanitizeGodraysValue (raw_x, 0.5f, 0.f, 1.f);
+	raw_y = R_SanitizeGodraysValue (raw_y, 0.5f, 0.f, 1.f);
 	vec2_t raw = { raw_x, raw_y };
-	float stabilize = CLAMP (0.f, r_godrays_stabilize.value, 1.f);
-	float smooth_rate = q_max (0.f, r_godrays_smooth_rate.value);
-	float stabilize_strength = CLAMP (0.f, r_godrays_stabilize_strength.value, 1.f);
+	float stabilize = R_SanitizeGodraysValue (r_godrays_stabilize.value, 0.f, 0.f, 1.f);
+	float smooth_rate = R_SanitizeGodraysValue (r_godrays_smooth_rate.value, 0.f, 0.f, FLT_MAX);
+	float stabilize_strength = R_SanitizeGodraysValue (r_godrays_stabilize_strength.value, 0.5f, 0.f, 1.f);
 	// max shift is expressed in pixels per frame when stabilize_max_px is set,
 	// otherwise fall back to the legacy max_shift (pixels per second).
-	float max_shift = q_max (0.f, r_godrays_stabilize_max_px.value);
+	float max_shift = R_SanitizeGodraysValue (r_godrays_stabilize_max_px.value, 0.f, 0.f, FLT_MAX);
 	qboolean should_reset = !r_godrays_stabilization.valid;
 
 	if (!should_reset && r_godrays_reset_on_teleport.value > 0.f)
@@ -843,7 +864,7 @@ static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw
 
 		vec2_t step = { delta[0] * alpha, delta[1] * alpha };
 		if (max_shift <= 0.f && dt > 0.f)
-			max_shift = q_max (0.f, r_godrays_max_shift.value) * dt;
+			max_shift = R_SanitizeGodraysValue (r_godrays_max_shift.value, 0.f, 0.f, FLT_MAX) * dt;
 
 		if (max_shift > 0.f && width > 0 && height > 0)
 		{
@@ -934,22 +955,30 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
 		return fallback;
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
+		return fallback;
 
-	int samples = (int)Q_rint (r_godrays_samples.value);
+	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && glprogs.godrays_source_sky);
+	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
+	if (!emit_sky && !emit_brush)
+		return fallback;
+
+	float samples_value = R_SanitizeGodraysValue (r_godrays_samples.value, 48.f, 1.f, 128.f);
+	int samples = (int)Q_rint (samples_value);
 	samples = CLAMP (8, samples, 128);
 
-	float threshold = q_max (0.f, r_godrays_threshold.value);
-	float density = q_max (0.f, r_godrays_density.value);
-	float weight = q_max (0.f, r_godrays_weight.value);
-	float decay = q_max (0.f, r_godrays_decay.value);
-	float exposure = q_max (0.f, r_godrays_exposure.value);
-	float softness = q_max (0.f, r_godrays_blur.value);
+	float threshold = R_SanitizeGodraysValue (r_godrays_threshold.value, 1.1f, 0.f, FLT_MAX);
+	float density = R_SanitizeGodraysValue (r_godrays_density.value, 0.9f, 0.f, FLT_MAX);
+	float weight = R_SanitizeGodraysValue (r_godrays_weight.value, 0.015f, 0.f, FLT_MAX);
+	float decay = R_SanitizeGodraysValue (r_godrays_decay.value, 0.97f, 0.f, FLT_MAX);
+	float exposure = R_SanitizeGodraysValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
+	float softness = R_SanitizeGodraysValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
 	if (softness <= 0.f)
-		softness = q_max (0.f, r_godrays_sky_softness.value);
-	float sharpness = q_max (0.f, r_godrays_light_sharpness.value);
-	float max_radius = CLAMP (0.f, r_godrays_max_radius.value, 1.f);
-	float light_x = CLAMP (0.f, r_godrays_light_x.value, 1.f);
-	float light_y = CLAMP (0.f, r_godrays_light_y.value, 1.f);
+		softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
+	float sharpness = R_SanitizeGodraysValue (r_godrays_light_sharpness.value, 1.25f, 0.f, FLT_MAX);
+	float max_radius = R_SanitizeGodraysValue (r_godrays_max_radius.value, 1.f, 0.f, 1.f);
+	float light_x = R_SanitizeGodraysValue (r_godrays_light_x.value, 0.5f, 0.f, 1.f);
+	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
 
