@@ -98,7 +98,6 @@ extern	cvar_t	r_fullbright;
 extern	cvar_t	r_lightmap;
 extern	cvar_t	r_rgblighting_enable;
 extern	cvar_t	r_wateralpha;
-extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_litwater;

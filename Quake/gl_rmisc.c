@@ -317,22 +317,6 @@ static void R_SetWateralpha_f (cvar_t *var)
 
 /*
 ====================
-R_SetLavaalpha_f -- ericw
-====================
-*/
-static void R_SetLavaalpha_f (cvar_t *var)
-{
-	float alpha = CLAMP(0.f, var->value, 1.f);
-	if (alpha != var->value)
-		Cvar_SetValueQuick (var, alpha);
-
-	if (cls.signon == SIGNONS && cl.worldmodel && !(cl.worldmodel->contentstransparent&SURF_DRAWLAVA) && alpha && alpha < 1)
-				Con_Warning("Map does not appear to be lava-vised\n");
-	map_lavaalpha = alpha;
-}
-
-/*
-====================
 R_SetTelealpha_f -- ericw
 ====================
 */
@@ -383,7 +367,7 @@ GL_WaterAlphaForTextureType
 float GL_WaterAlphaForTextureType (textype_t type)
 {
 	if (type == TEXTYPE_LAVA)
-		return map_lavaalpha > 0 ? map_lavaalpha : map_fallbackalpha;
+		return map_lavaalpha;
 	else if (type == TEXTYPE_TELE)
 		return map_telealpha > 0 ? map_telealpha : map_fallbackalpha;
 	else if (type == TEXTYPE_SLIME)
@@ -561,11 +545,9 @@ Cvar_RegisterVariable (&r_vignette);
 	//johnfitz
 
 	Cvar_RegisterVariable (&gl_zfix); // QuakeSpasm z-fighting fix
-	Cvar_RegisterVariable (&r_lavaalpha);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_scale);
-	Cvar_SetCallback (&r_lavaalpha, R_SetLavaalpha_f);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
@@ -667,7 +649,7 @@ static void R_ParseWorldspawn (void)
 
 	map_fallbackalpha = r_wateralpha.value;
 	map_wateralpha = (cl.worldmodel->contentstransparent&SURF_DRAWWATER)?r_wateralpha.value:1;
-	map_lavaalpha = (cl.worldmodel->contentstransparent&SURF_DRAWLAVA)?r_lavaalpha.value:1;
+	map_lavaalpha = 1.0f;
 	map_telealpha = (cl.worldmodel->contentstransparent&SURF_DRAWTELE)?r_telealpha.value:1;
 	map_slimealpha = (cl.worldmodel->contentstransparent&SURF_DRAWSLIME)?r_slimealpha.value:1;
 
@@ -698,9 +680,6 @@ static void R_ParseWorldspawn (void)
 if (!strcmp("wateralpha", key))
 map_wateralpha = atof(value);
 
-if (!strcmp("lavaalpha", key))
-map_lavaalpha = atof(value);
-
 if (!strcmp("telealpha", key))
 map_telealpha = atof(value);
 
@@ -711,7 +690,7 @@ map_slimealpha = atof(value);
 
 map_fallbackalpha = CLAMP(0.f, map_fallbackalpha, 1.f);
 map_wateralpha = CLAMP(0.f, map_wateralpha, 1.f);
-map_lavaalpha = CLAMP(0.f, map_lavaalpha, 1.f);
+map_lavaalpha = 1.0f;
 map_telealpha = CLAMP(0.f, map_telealpha, 1.f);
 map_slimealpha = CLAMP(0.f, map_slimealpha, 1.f);
 
@@ -748,7 +727,7 @@ void R_NewMap (void)
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
-        R_ParseWorldspawn (); //ericw -- wateralpha, lavaalpha, telealpha, slimealpha in worldspawn
+        R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
         R_ParseDlightEntities (); // persistent dlights from BSP entities
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
