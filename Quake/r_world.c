@@ -56,7 +56,7 @@ typedef struct gpumark_frame_s {
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
-static qboolean R_IsPointerSane (const void *ptr);
+static inline qboolean R_ValidPtr (const void *ptr);
 
 static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 {
@@ -78,7 +78,7 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 
 	if (!model || !model->usedtextures || !model->textures)
 		return NULL;
-	if (!R_IsPointerSane (model->usedtextures) || !R_IsPointerSane (model->textures))
+	if (!R_ValidPtr (model->usedtextures) || !R_ValidPtr (model->textures))
 	{
 		if (r_framecount != last_warn_frame)
 		{
@@ -136,9 +136,16 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	return tex;
 }
 
-static qboolean R_IsPointerSane (const void *ptr)
+static inline qboolean R_ValidPtr (const void *ptr)
 {
-	return ptr && ptr != (const void *)-1 && (uintptr_t)ptr >= 4096;
+	uintptr_t address = (uintptr_t)ptr;
+
+	if (address == 0 || address == (uintptr_t)-1)
+		return false;
+	if (address < 0x10000)
+		return false;
+
+	return true;
 }
 
 static gltexture_t *R_SanitizeGLTexture (gltexture_t *tex, const char *texname, const char *label)
@@ -148,7 +155,7 @@ static gltexture_t *R_SanitizeGLTexture (gltexture_t *tex, const char *texname, 
 	if (!tex)
 		return NULL;
 
-	if (!R_IsPointerSane (tex))
+	if (!R_ValidPtr (tex))
 	{
 		if (r_framecount != last_bad_glt_frame)
 		{
@@ -478,11 +485,11 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (!t)
 		return false;
 
-	if (!R_IsPointerSane (t))
+	if (!R_ValidPtr (t))
 		return false;
 
 	if (r_godrays_emit_emissive.value > 0.f
-		&& (R_IsPointerSane (t->fullbright) || R_IsPointerSane (t->emissive)))
+		&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)))
 		return true;
 
 	if (r_godrays_emit_lighttex.value > 0.f && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
@@ -797,13 +804,13 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			if (!t)
 				continue;
 
-			if (!R_IsPointerSane (t))
+			if (!R_ValidPtr (t))
 				continue;
 
 			if (pass == BP_GODRAYS)
 			{
 				qboolean emissive = (r_godrays_emit_emissive.value > 0.f
-					&& (R_IsPointerSane (t->fullbright) || R_IsPointerSane (t->emissive)));
+					&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)));
 				qboolean lighttex = false;
 
 				if (r_godrays_emit_lighttex.value > 0.f && t)
