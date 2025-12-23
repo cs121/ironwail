@@ -61,6 +61,8 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	int used_count;
 	int texnum;
 	static int last_warn_frame = -1;
+	static int last_bad_ptr_frame = -1;
+	texture_t *tex;
 
 	if (!model || !model->usedtextures || !model->textures)
 		return NULL;
@@ -86,10 +88,22 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	if (out_texnum)
 		*out_texnum = texnum;
 
-	if (!model->textures[texnum])
+	tex = model->textures[texnum];
+	if (!tex)
 		return NULL;
 
-	return model->textures[texnum];
+	if (tex == (texture_t *)-1 || (uintptr_t)tex < 4096)
+	{
+		if (r_framecount != last_bad_ptr_frame)
+		{
+			last_bad_ptr_frame = r_framecount;
+			Con_DWarning ("R_GetUsedTexture: invalid texture pointer on %s (used_index=%d texnum=%d ptr=%p)\n",
+				model->name, used_index, texnum, (void *)tex);
+		}
+		return NULL;
+	}
+
+	return tex;
 }
 
 /*
