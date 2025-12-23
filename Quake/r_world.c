@@ -106,6 +106,32 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	return tex;
 }
 
+static qboolean R_IsPointerSane (const void *ptr)
+{
+	return ptr && ptr != (const void *)-1 && (uintptr_t)ptr >= 4096;
+}
+
+static gltexture_t *R_SanitizeGLTexture (gltexture_t *tex, const char *texname, const char *label)
+{
+	static int last_bad_glt_frame = -1;
+
+	if (!tex)
+		return NULL;
+
+	if (!R_IsPointerSane (tex))
+	{
+		if (r_framecount != last_bad_glt_frame)
+		{
+			last_bad_glt_frame = r_framecount;
+			Con_DWarning ("R_SanitizeGLTexture: invalid %s texture on %s (ptr=%p)\n",
+				label, texname ? texname : "<unknown>", (void *)tex);
+		}
+		return NULL;
+	}
+
+	return tex;
+}
+
 /*
 ===============
 R_MarkVisSurfaces
@@ -419,7 +445,8 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (!t)
 		return false;
 
-	if (r_godrays_emit_emissive.value > 0.f && (t->fullbright || t->emissive))
+	if (r_godrays_emit_emissive.value > 0.f
+		&& (R_IsPointerSane (t->fullbright) || R_IsPointerSane (t->emissive)))
 		return true;
 
 	if (r_godrays_emit_lighttex.value > 0.f && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
@@ -465,9 +492,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 	if (t)
 	{
-		tx = t->gltexture;
-		fb = t->fullbright;
-		em = t->emissive;
+		tx = R_SanitizeGLTexture (t->gltexture, t->name, "base");
+		fb = R_SanitizeGLTexture (t->fullbright, t->name, "fullbright");
+		em = R_SanitizeGLTexture (t->emissive, t->name, "emissive");
 		if (r_lightmap_cheatsafe)
 			tx = fb = em = NULL;
 		if (!gl_fullbrights.value && t->type != TEXTYPE_SKY && !force_fullbright)
@@ -732,7 +759,8 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
 			if (pass == BP_GODRAYS)
 			{
-				qboolean emissive = (r_godrays_emit_emissive.value > 0.f && t && (t->fullbright || t->emissive));
+				qboolean emissive = (r_godrays_emit_emissive.value > 0.f
+					&& (R_IsPointerSane (t->fullbright) || R_IsPointerSane (t->emissive)));
 				qboolean lighttex = false;
 
 				if (r_godrays_emit_lighttex.value > 0.f && t)
