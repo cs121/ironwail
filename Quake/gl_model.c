@@ -452,9 +452,11 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 //
 // load the file
 //
+	Host_BeginAssetLoading ();
 	buf = COM_LoadMallocFile (mod->name, &mod->path_id);
 	if (!buf)
 	{
+		Host_EndAssetLoading ();
 		if (crash)
 			Host_Error ("Mod_LoadModel: %s not found", mod->name); //johnfitz -- was "Mod_NumForName"
 		return NULL;
@@ -495,6 +497,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	}
 
 	free (buf);
+	Host_EndAssetLoading ();
 
 	return mod;
 }
