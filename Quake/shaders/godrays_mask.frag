@@ -26,9 +26,9 @@ vec4 SampleMaskAt(vec2 targetCoord)
                 for (int i = 0; i < 2; ++i)
                 {
                         ivec2 sampleCoord = baseCoord + ivec2(i, j);
-                        vec4 sample = FetchSource(sampleCoord, maxCoord);
-                        accum_rgb += sample.rgb * sample.a;
-                        accum_a += sample.a;
+                        vec4 sourceSample = FetchSource(sampleCoord, maxCoord);
+                        accum_rgb += sourceSample.rgb * sourceSample.a;
+                        accum_a += sourceSample.a;
                 }
         }
         float avg_a = accum_a * 0.25;
