@@ -24,11 +24,6 @@ layout(location=3) in vec2 in_uv;
 
 layout(location=0) out vec4 outColor;
 
-float Luma(vec3 color)
-{
-	return dot(color, vec3(0.2126, 0.7152, 0.0722));
-}
-
 void main()
 {
 #if BINDLESS
@@ -60,11 +55,25 @@ void main()
 		emissive = texture(EmissiveTex, in_uv).rgb;
 #endif
 
-	float intensity = 0.0;
-	if ((in_flags & CF_GODRAYS_EMISSIVE) != 0u)
-		intensity += Luma(fullbright + emissive) * GodraysSourceParams.x;
-	if ((in_flags & CF_GODRAYS_LIGHT) != 0u)
-		intensity += Luma(base.rgb) * GodraysSourceParams.y;
+	vec3 light_color = vec3(0.0);
+	vec3 emissive_color = fullbright + emissive;
+	float light_strength = 0.0;
+	float emissive_strength = 0.0;
 
-	outColor = vec4(0.0, intensity, 0.0, 1.0);
+	if ((in_flags & CF_GODRAYS_LIGHT) != 0u)
+	{
+		light_color = base.rgb;
+		light_strength = GodraysSourceParams.y;
+	}
+	if ((in_flags & CF_GODRAYS_EMISSIVE) != 0u)
+		emissive_strength = GodraysSourceParams.x;
+
+	float total_strength = light_strength + emissive_strength;
+	vec3 color = vec3(0.0);
+	if (total_strength > 0.0)
+	{
+		color = (light_color * light_strength + emissive_color * emissive_strength) / total_strength;
+	}
+
+	outColor = vec4(color, total_strength);
 }

@@ -33,8 +33,8 @@ void main()
                         break;
                 coord -= step;
                 coord = clamp(coord, vec2(0.0), vec2(1.0));
-                vec3 sampleColor = texture(MaskTexture, coord).rgb;
-                accum += sampleColor * illuminationDecay * weight;
+                vec4 sampleColor = texture(MaskTexture, coord);
+                accum += sampleColor.rgb * sampleColor.a * illuminationDecay * weight;
                 illuminationDecay *= decay;
         }
 
