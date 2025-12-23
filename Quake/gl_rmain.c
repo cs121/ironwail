@@ -254,6 +254,7 @@ cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_lighttex_intensity = { "r_godrays_lighttex_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
@@ -590,7 +591,7 @@ void GL_CreateFrameBuffers (void)
 
 	framebufs.godrays.width = q_max (1, vid.width / 2);
 	framebufs.godrays.height = q_max (1, vid.height / 2);
-	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RG16F, vid.width, vid.height, GL_LINEAR, "godrays source");
+	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_LINEAR, "godrays source");
 	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
 	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
 	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
@@ -809,6 +810,27 @@ static float R_SanitizeGodraysValue (float value, float fallback, float minval, 
 	return value;
 }
 
+static void R_ParseGodraysSkyTint (vec3_t out_tint)
+{
+	float r = 1.f;
+	float g = 1.f;
+	float b = 1.f;
+
+	if (r_godrays_sky_tint.string && r_godrays_sky_tint.string[0])
+	{
+		if (sscanf (r_godrays_sky_tint.string, "%f %f %f", &r, &g, &b) != 3)
+		{
+			r = 1.f;
+			g = 1.f;
+			b = 1.f;
+		}
+	}
+
+	out_tint[0] = q_max (0.f, r);
+	out_tint[1] = q_max (0.f, g);
+	out_tint[2] = q_max (0.f, b);
+}
+
 static qboolean R_GodraysReady (void)
 {
 	if (!cl.worldmodel)
@@ -924,12 +946,15 @@ static void GL_GenerateGodraysSource (void)
 		float sky_intensity = q_max (0.f, r_godrays_sky_intensity.value);
 		if (sky_intensity > 0.f)
 		{
+			vec3_t tint;
 			float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 			float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+			R_ParseGodraysSkyTint (tint);
 			GL_UseProgram (glprogs.godrays_source_sky);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, 0.f);
+			GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 		}
 	}
