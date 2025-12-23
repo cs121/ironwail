@@ -6,7 +6,8 @@
 	layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
 
-layout(location=0) uniform vec4 GodraysSourceParams; // x: emissive intensity, y: light intensity
+layout(location=0) uniform vec4 GodraysSourceParams0; // x: emissive intensity, y: light intensity, z: emissive threshold, w: light threshold
+layout(location=1) uniform vec4 GodraysSourceParams1; // x: mask knee, y: mask gamma, z: unused, w: unused
 
 const uint
 	CF_USE_FULLBRIGHT = 2u,
@@ -23,6 +24,16 @@ layout(location=3) in vec2 in_uv;
 #endif
 
 layout(location=0) out vec4 outColor;
+
+float BrightPartMask(vec3 color, float threshold, float knee, float gamma)
+{
+	float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+	float k = (knee > 0.0) ? knee : max(threshold * 0.5, 1e-5);
+	float mask = smoothstep(threshold - k, threshold + k, luma);
+	if (gamma > 0.0 && abs(gamma - 1.0) > 1e-4)
+		mask = pow(mask, gamma);
+	return mask;
+}
 
 void main()
 {
@@ -59,21 +70,29 @@ void main()
 	vec3 emissive_color = fullbright + emissive;
 	float light_strength = 0.0;
 	float emissive_strength = 0.0;
+	float light_mask = 0.0;
+	float emissive_mask = 0.0;
+	float knee = GodraysSourceParams1.x;
+	float gamma = GodraysSourceParams1.y;
 
 	if ((in_flags & CF_GODRAYS_LIGHT) != 0u)
 	{
 		light_color = base.rgb;
-		light_strength = GodraysSourceParams.y;
+		light_strength = GodraysSourceParams0.y;
+		light_mask = BrightPartMask(light_color, GodraysSourceParams0.w, knee, gamma);
 	}
 	if ((in_flags & CF_GODRAYS_EMISSIVE) != 0u)
-		emissive_strength = GodraysSourceParams.x;
-
-	float total_strength = light_strength + emissive_strength;
-	vec3 color = vec3(0.0);
-	if (total_strength > 0.0)
 	{
-		color = (light_color * light_strength + emissive_color * emissive_strength) / total_strength;
+		emissive_strength = GodraysSourceParams0.x;
+		emissive_mask = BrightPartMask(emissive_color, GodraysSourceParams0.z, knee, gamma);
 	}
 
-	outColor = vec4(color, total_strength);
+	vec3 color = vec3(0.0);
+	float mask = clamp(light_mask + emissive_mask, 0.0, 1.0);
+	if (light_strength > 0.0)
+		color += light_color * light_strength * light_mask;
+	if (emissive_strength > 0.0)
+		color += emissive_color * emissive_strength * emissive_mask;
+
+	outColor = vec4(color, mask);
 }

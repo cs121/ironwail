@@ -5,6 +5,7 @@ layout(binding=3) uniform sampler2D BloomTexture;
 layout(binding=4) uniform sampler2D VelocityTexture;
 layout(binding=5) uniform sampler2D GodraysTexture;
 layout(binding=6) uniform sampler2D GodraysMaskTexture;
+layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -137,7 +138,7 @@ layout(location=12) uniform float u_saturation;
 layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
-layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, zw: unused
+layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -248,6 +249,15 @@ void main()
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
 
+        if (GodraysParams.z > 0.5)
+        {
+                vec4 source = texture(GodraysSourceTexture, uv);
+                if (GodraysParams.z < 1.5)
+                        out_fragcolor = vec4(source.rgb, 1.0);
+                else
+                        out_fragcolor = vec4(vec3(source.a), 1.0);
+                return;
+        }
         if (GodraysParams.y > 0.5)
         {
                 vec3 maskColor = texture(GodraysMaskTexture, uv).rgb;
