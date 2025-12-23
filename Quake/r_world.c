@@ -60,11 +60,22 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 {
 	int used_count;
 	int texnum;
+	static int last_warn_frame = -1;
 
 	if (!model || !model->usedtextures || !model->textures)
 		return NULL;
 
 	used_count = model->texofs[TEXTYPE_COUNT];
+	if (model->numtextures <= 0 || used_count < 0 || used_count > model->numtextures)
+	{
+		if (r_framecount != last_warn_frame)
+		{
+			last_warn_frame = r_framecount;
+			Con_DWarning ("R_GetUsedTexture: invalid texture table on %s (used=%d numtextures=%d)\n",
+				model->name, used_count, model->numtextures);
+		}
+		return NULL;
+	}
 	if (used_index < 0 || used_index >= used_count)
 		return NULL;
 
@@ -74,6 +85,9 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 
 	if (out_texnum)
 		*out_texnum = texnum;
+
+	if (!model->textures[texnum])
+		return NULL;
 
 	return model->textures[texnum];
 }
@@ -671,8 +685,19 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		int frame = isworld ? 0 : e->frame;
 		int numtex = model->texofs[texend] - model->texofs[texbegin];
 
-                if (!numtex)
-                        continue;
+		if (model->texofs[TEXTYPE_COUNT] < 0
+			|| model->texofs[TEXTYPE_COUNT] > model->numtextures
+			|| model->texofs[texbegin] < 0
+			|| model->texofs[texend] < model->texofs[texbegin]
+			|| model->texofs[texend] > model->texofs[TEXTYPE_COUNT])
+		{
+			Con_DWarning ("R_DrawBrushModels: invalid texofs for %s (%d..%d of %d)\n",
+				model->name, model->texofs[texbegin], model->texofs[texend], model->texofs[TEXTYPE_COUNT]);
+			continue;
+		}
+
+		if (!numtex)
+			continue;
 
 		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
 		{
