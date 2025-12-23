@@ -809,6 +809,18 @@ static float R_SanitizeGodraysValue (float value, float fallback, float minval, 
 	return value;
 }
 
+static qboolean R_GodraysReady (void)
+{
+	if (!cl.worldmodel)
+		return false;
+	if (r_framecount <= 1)
+		return false;
+	if (!cl.worldmodel->textures || !cl.worldmodel->usedtextures || cl.worldmodel->numtextures <= 0)
+		return false;
+
+	return true;
+}
+
 static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw_y, float *out_x, float *out_y)
 {
 	raw_x = R_SanitizeGodraysValue (raw_x, 0.5f, 0.f, 1.f);
@@ -955,6 +967,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
 		return fallback;
 	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
+		return fallback;
+	if (!R_GodraysReady ())
 		return fallback;
 
 	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && glprogs.godrays_source_sky);
@@ -1292,7 +1306,7 @@ void GL_PostProcess (void)
 	}
 	r_autoexposure_debug_exposure = exposure;
 
-	godrays_enabled = (r_godrays.value > 0.f);
+	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_texture = 0;
 	godrays_mask = 0;
