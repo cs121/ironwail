@@ -56,16 +56,29 @@ typedef struct gpumark_frame_s {
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
+static qboolean R_IsPointerSane (const void *ptr);
+
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
 {
 	int used_count;
 	int texnum;
 	static int last_warn_frame = -1;
 	static int last_bad_ptr_frame = -1;
+	static int last_bad_texnum_frame = -1;
 	texture_t *tex;
 
 	if (!model || !model->usedtextures || !model->textures)
 		return NULL;
+	if (!R_IsPointerSane (model->usedtextures) || !R_IsPointerSane (model->textures))
+	{
+		if (r_framecount != last_warn_frame)
+		{
+			last_warn_frame = r_framecount;
+			Con_DWarning ("R_GetUsedTexture: invalid texture table pointers on %s (used=%p textures=%p)\n",
+				model->name, (void *)model->usedtextures, (void *)model->textures);
+		}
+		return NULL;
+	}
 
 	used_count = model->texofs[TEXTYPE_COUNT];
 	if (model->numtextures <= 0 || used_count < 0 || used_count > model->numtextures)
@@ -83,7 +96,15 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 
 	texnum = model->usedtextures[used_index];
 	if (texnum < 0 || texnum >= model->numtextures)
+	{
+		if (r_framecount != last_bad_texnum_frame)
+		{
+			last_bad_texnum_frame = r_framecount;
+			Con_DWarning ("R_GetUsedTexture: invalid texnum on %s (used_index=%d texnum=%d numtextures=%d)\n",
+				model->name, used_index, texnum, model->numtextures);
+		}
 		return NULL;
+	}
 
 	if (out_texnum)
 		*out_texnum = texnum;
