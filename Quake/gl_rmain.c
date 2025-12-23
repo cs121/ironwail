@@ -342,7 +342,6 @@ extern cvar_t	r_softemu_dither_texture;
 
 cvar_t	gl_zfix = { "gl_zfix", "1", CVAR_ARCHIVE }; // QuakeSpasm z-fighting fix
 
-cvar_t	r_lavaalpha = { "r_lavaalpha","1",CVAR_NONE };
 cvar_t	r_telealpha = { "r_telealpha","0",CVAR_NONE };
 cvar_t	r_slimealpha = { "r_slimealpha","0",CVAR_NONE };
 

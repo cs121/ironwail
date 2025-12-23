@@ -436,7 +436,7 @@ quakespasm (cl_alwaysrun 1, cl_forwardspeed 200, cl_backspeed 200)
 </itemize>
 <sect2>Visual improvements
 <itemize>
-<item> New cvars r_lavaalpha, r_slimealpha, r_telealpha for fine-tuning specific liquid opacities (from DirectQ/RMQEngine, non-archived, default to 0), and new worldspawn keys _wateralpha, _lavaalpha, _slimealpha, _telealpha, _skyfog (unique to Quakespasm, similar to the behaviour of the "fog" worldspawn key).
+<item> New cvars r_slimealpha, r_telealpha for fine-tuning specific liquid opacities (from DirectQ/RMQEngine, non-archived, default to 0), and new worldspawn keys _wateralpha, _slimealpha, _telealpha, _skyfog (unique to Quakespasm, similar to the behaviour of the "fog" worldspawn key).
 <item> GLSL gamma is now supported on older hardware without NPOT extension.
 </itemize>
 <sect2>Interface improvements
