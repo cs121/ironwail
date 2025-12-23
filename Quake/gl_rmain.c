@@ -253,10 +253,18 @@ cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_threshold = { "r_godray_sky_threshold", "0.05", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_intensity = { "r_godray_sky_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_blur = { "r_godray_sky_blur", "1.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_lighttex_intensity = { "r_godrays_lighttex_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_emissive_threshold = { "r_godrays_emissive_threshold", "0.4", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_threshold = { "r_godrays_light_threshold", "0.6", CVAR_ARCHIVE };
+cvar_t	r_godrays_mask_knee = { "r_godrays_mask_knee", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_mask_gamma = { "r_godrays_mask_gamma", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_lighttex_name_match = { "r_godrays_lighttex_name_match", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
@@ -264,7 +272,7 @@ cvar_t	r_godrays_density = { "r_godrays_density", "0.9", CVAR_ARCHIVE };
 cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
 cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
 cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_threshold = { "r_godrays_threshold", "1.1", CVAR_ARCHIVE };
+cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_softness = { "r_godrays_sky_softness", "1.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_ARCHIVE };
 cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
@@ -277,6 +285,7 @@ cvar_t	r_godrays_smooth_rate = { "r_godrays_smooth_rate", "8.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
@@ -926,12 +935,16 @@ static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw
 	*out_y = CLAMP (0.f, raw[1] + (r_godrays_stabilization.smoothed_pos[1] - raw[1]) * stabilize, 1.f);
 }
 
-static void GL_GenerateGodraysSource (void)
+static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 {
 	int width = vid.width;
 	int height = vid.height;
 	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return;
+	if (!draw_sky && !draw_brush)
+		return;
+	float mask_knee = q_max (0.f, r_godrays_mask_knee.value);
+	float mask_gamma = q_max (0.f, r_godrays_mask_gamma.value);
 
 	GL_BeginGroup ("Godrays source");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
@@ -941,9 +954,10 @@ static void GL_GenerateGodraysSource (void)
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
 
-	if (r_godrays_emit_sky.value > 0.f && glprogs.godrays_source_sky)
+	if (draw_sky && glprogs.godrays_source_sky)
 	{
-		float sky_intensity = q_max (0.f, r_godrays_sky_intensity.value);
+		float sky_intensity = q_max (0.f, r_godray_sky_intensity.value) * q_max (0.f, r_godrays_sky_intensity.value);
+		float sky_threshold = q_max (0.f, r_godray_sky_threshold.value);
 		if (sky_intensity > 0.f)
 		{
 			vec3_t tint;
@@ -953,13 +967,14 @@ static void GL_GenerateGodraysSource (void)
 			GL_UseProgram (glprogs.godrays_source_sky);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, 0.f);
+			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
 			GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
+			GL_Uniform4fFunc (2, mask_knee, mask_gamma, 0.f, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 		}
 	}
 
-	if ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source)
+	if (draw_brush && glprogs.godrays_source)
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
@@ -970,7 +985,9 @@ static void GL_GenerateGodraysSource (void)
 			GL_Uniform4fFunc (0,
 				q_max (0.f, r_godrays_emissive_intensity.value),
 				q_max (0.f, r_godrays_lighttex_intensity.value),
-				0.f, 0.f);
+				q_max (0.f, r_godrays_emissive_threshold.value),
+				q_max (0.f, r_godrays_light_threshold.value));
+			GL_Uniform4fFunc (1, mask_knee, mask_gamma, 0.f, 0.f);
 			R_DrawBrushModels_Godrays (ents, count);
 		}
 	}
@@ -996,7 +1013,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!R_GodraysReady ())
 		return fallback;
 
-	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && glprogs.godrays_source_sky);
+	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
@@ -1005,14 +1022,12 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	int samples = (int)Q_rint (samples_value);
 	samples = CLAMP (8, samples, 128);
 
-	float threshold = R_SanitizeGodraysValue (r_godrays_threshold.value, 1.1f, 0.f, FLT_MAX);
+	float threshold = R_SanitizeGodraysValue (r_godrays_threshold.value, 0.f, 0.f, FLT_MAX);
 	float density = R_SanitizeGodraysValue (r_godrays_density.value, 0.9f, 0.f, FLT_MAX);
 	float weight = R_SanitizeGodraysValue (r_godrays_weight.value, 0.015f, 0.f, FLT_MAX);
 	float decay = R_SanitizeGodraysValue (r_godrays_decay.value, 0.97f, 0.f, FLT_MAX);
 	float exposure = R_SanitizeGodraysValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
 	float softness = R_SanitizeGodraysValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
-	if (softness <= 0.f)
-		softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
 	float sharpness = R_SanitizeGodraysValue (r_godrays_light_sharpness.value, 1.25f, 0.f, FLT_MAX);
 	float max_radius = R_SanitizeGodraysValue (r_godrays_max_radius.value, 1.f, 0.f, 1.f);
 	float light_x = R_SanitizeGodraysValue (r_godrays_light_x.value, 0.5f, 0.f, 1.f);
@@ -1021,31 +1036,89 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float stabilized_y = light_y;
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
-	GL_GenerateGodraysSource ();
-
-	GL_BeginGroup ("Godrays mask");
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
-	glViewport (0, 0, width, height);
-	GL_UseProgram (glprogs.godrays_mask);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
-	GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
-	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
-		(float)vid.width / (float)width,
-		(float)vid.height / (float)height);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_EndGroup ();
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 	glViewport (0, 0, width, height);
-	GL_UseProgram (glprogs.godrays);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-	GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
-	GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
+	{
+		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
+		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+	}
 	GL_EndGroup ();
+
+	{
+		qboolean first_pass = true;
+		float sky_softness = R_SanitizeGodraysValue (r_godray_sky_blur.value, 1.5f, 0.f, FLT_MAX);
+		if (sky_softness <= 0.f)
+			sky_softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
+
+		if (emit_sky)
+		{
+			GL_GenerateGodraysSource (true, false);
+
+			GL_BeginGroup ("Godrays mask (sky)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
+			glViewport (0, 0, width, height);
+			{
+				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
+				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+			}
+			GL_UseProgram (glprogs.godrays_mask);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
+			GL_Uniform4fFunc (0, threshold, sky_softness, 1.f, 0.f);
+			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
+				(float)vid.width / (float)width,
+				(float)vid.height / (float)height);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+			GL_EndGroup ();
+
+			GL_BeginGroup ("Godrays scatter (sky)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
+			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+			GL_EndGroup ();
+			first_pass = false;
+		}
+
+		if (emit_brush)
+		{
+			GL_GenerateGodraysSource (false, true);
+
+			GL_BeginGroup ("Godrays mask (brush)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
+			glViewport (0, 0, width, height);
+			{
+				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
+				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+			}
+			GL_UseProgram (glprogs.godrays_mask);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
+			GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
+			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
+				(float)vid.width / (float)width,
+				(float)vid.height / (float)height);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+			GL_EndGroup ();
+
+			GL_BeginGroup ("Godrays scatter (brush)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
+			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
+			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+			GL_EndGroup ();
+		}
+	}
 
 	if (out_mask)
 		*out_mask = framebufs.godrays.mask_tex;
@@ -1274,6 +1347,7 @@ void GL_PostProcess (void)
 	GLuint depth_texture;
 	GLuint godrays_texture;
 	GLuint godrays_mask;
+	GLuint godrays_source;
 	float motion_strength;
 	float motion_shutter;
 	float motion_effective_shutter;
@@ -1288,6 +1362,7 @@ void GL_PostProcess (void)
 	float teleport_blur;
 	qboolean godrays_enabled;
 	float godrays_debug;
+	float godrays_debug_source;
         r_saturation.value = CLAMP (0.0f, r_saturation.value, 2.0f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -1333,10 +1408,15 @@ void GL_PostProcess (void)
 
 	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
+	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
 	godrays_texture = 0;
 	godrays_mask = 0;
+	godrays_source = 0;
 	if (godrays_enabled)
+	{
 		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
+		godrays_source = framebufs.godrays.source_tex;
+	}
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -1393,6 +1473,7 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
 	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, godrays_texture);
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
@@ -1416,7 +1497,7 @@ void GL_PostProcess (void)
 	screen_darken_depth);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
-	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, 0.f, 0.f);
+	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);
