@@ -58,6 +58,15 @@ byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 static qboolean R_IsPointerSane (const void *ptr);
 
+static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
+{
+	return model
+		&& model->type == mod_brush
+		&& model->numtextures > 0
+		&& model->textures
+		&& model->usedtextures;
+}
+
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
 {
 	int used_count;
@@ -451,6 +460,9 @@ static qboolean R_ModelTextureHasGodrayFlag (const qmodel_t *model, int texnum)
 	if (!model || texnum < 0)
 		return false;
 
+	if (model->numsurfaces <= 0 || !model->surfaces)
+		return false;
+
 	for (i = 0; i < model->numsurfaces; ++i)
 	{
 		msurface_t *surface = &model->surfaces[i];
@@ -705,6 +717,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 		entity_t *ent = ents[i];
 		if (!ent || !Mod_IsKnownModel (ent->model))
 			continue;
+		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (ent->model))
+			continue;
 		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
 	}
@@ -744,6 +758,8 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		if (!e || !Mod_IsKnownModel (e->model))
 			continue;
 		model = e->model;
+		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
+			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 		qboolean zfix = !isworld && !isstatic;
