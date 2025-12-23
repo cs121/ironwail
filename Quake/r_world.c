@@ -122,7 +122,7 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	if (!tex)
 		return NULL;
 
-	if (tex == (texture_t *)-1 || (uintptr_t)tex < 4096)
+	if (!R_ValidPtr (tex))
 	{
 		if (r_framecount != last_bad_ptr_frame)
 		{
@@ -817,14 +817,13 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			unsigned extra_flags = 0u;
 			qboolean force_fullbright = false;
 
-			if (!t)
-				continue;
-
-			if (!R_ValidPtr (t))
+			if (!t || !R_ValidPtr (t))
 				continue;
 
 			if (pass == BP_GODRAYS)
 			{
+				if (!t)
+					continue;
 				qboolean emissive = (r_godrays_emit_emissive.value > 0.f
 					&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)));
 				qboolean lighttex = false;
