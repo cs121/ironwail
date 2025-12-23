@@ -463,6 +463,9 @@ static qboolean R_GodraysNameMatch (const char *name)
 static qboolean R_ModelTextureHasGodrayFlag (const qmodel_t *model, int texnum)
 {
 	int i;
+	int start;
+	int count;
+	static int last_bad_range_frame = -1;
 
 	if (!model || texnum < 0)
 		return false;
@@ -470,9 +473,22 @@ static qboolean R_ModelTextureHasGodrayFlag (const qmodel_t *model, int texnum)
 	if (model->numsurfaces <= 0 || !model->surfaces)
 		return false;
 
-	for (i = 0; i < model->numsurfaces; ++i)
+	start = model->firstmodelsurface;
+	count = model->nummodelsurfaces;
+	if (start < 0 || count <= 0 || start >= model->numsurfaces || start + count > model->numsurfaces)
 	{
-		msurface_t *surface = &model->surfaces[i];
+		if (r_framecount != last_bad_range_frame)
+		{
+			last_bad_range_frame = r_framecount;
+			Con_DWarning ("R_ModelTextureHasGodrayFlag: invalid surface range on %s (first=%d count=%d total=%d)\n",
+				model->name, start, count, model->numsurfaces);
+		}
+		return false;
+	}
+
+	for (i = 0; i < count; ++i)
+	{
+		msurface_t *surface = &model->surfaces[start + i];
 		if (surface->texinfo && surface->texinfo->texnum == texnum && (surface->texinfo->flags & TEX_GODRAY_EMIT))
 			return true;
 	}
