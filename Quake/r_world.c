@@ -445,6 +445,9 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (!t)
 		return false;
 
+	if (!R_IsPointerSane (t))
+		return false;
+
 	if (r_godrays_emit_emissive.value > 0.f
 		&& (R_IsPointerSane (t->fullbright) || R_IsPointerSane (t->emissive)))
 		return true;
@@ -755,6 +758,9 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			qboolean force_fullbright = false;
 
 			if (!t)
+				continue;
+
+			if (!R_IsPointerSane (t))
 				continue;
 
 			if (pass == BP_GODRAYS)
