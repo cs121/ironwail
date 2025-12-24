@@ -9,6 +9,7 @@ layout(location=4) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z
 layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
 layout(location=6) uniform int u_samples;
 layout(location=7) uniform vec4 u_debugParams; // x: debug mode, y: debug far
+layout(location=8) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
 
 layout(location=0) out vec4 outColor;
 
@@ -48,27 +49,41 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
         vec3(0.2397, -0.1794, 0.3984)
 );
 
-float LinearizeDepth(float depth, vec4 depthParams)
+float DepthToNdcZ(float depth, float reversed, int mode)
 {
-        float nearPlane = depthParams.x;
-        float farPlane = depthParams.y;
-        float reversed = depthParams.z;
         if (reversed > 0.5)
         {
-                float denom = nearPlane + depth * (farPlane - nearPlane);
-                return (nearPlane * farPlane) / max(denom, 1e-6);
+                if (mode == 1)
+                        depth = 1.0 - depth;
+                if (mode == 2)
+                        return (1.0 - depth) * 2.0 - 1.0;
+                return depth;
         }
-        float ndcDepth = depth * 2.0 - 1.0;
-        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        return depth * 2.0 - 1.0;
 }
 
-vec3 ReconstructViewPos(vec2 uv, float depth, float reversed)
+vec3 ReconstructViewPos(vec2 uv, float depth)
 {
-        float ndcDepth = (reversed > 0.5) ? depth : depth * 2.0 - 1.0;
+        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
         vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
         vec4 view = u_invProj * clip;
         return view.xyz / max(view.w, 1e-6);
+}
+
+float GetViewZ(vec2 uv, float depth)
+{
+        vec3 view = ReconstructViewPos(uv, depth);
+        return -view.z;
+}
+
+vec3 ComputeNormalFromViewPos(vec3 viewPos)
+{
+        vec3 dx = dFdx(viewPos);
+        vec3 dy = dFdy(viewPos);
+        vec3 normal = normalize(cross(dx, dy));
+        if (length(normal) < 1e-4)
+                return vec3(0.0, 0.0, 1.0);
+        return normal;
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -105,8 +120,8 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                float linearDepth = LinearizeDepth(depth, u_depthParams);
-                float v = clamp(linearDepth / debugFar, 0.0, 1.0);
+                float viewZ = GetViewZ(uv, depth);
+                float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
@@ -117,8 +132,8 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                vec3 viewPosDebug = ReconstructViewPos(uv, depth, u_depthParams.z);
-                float v = clamp(abs(viewPosDebug.z) / debugFar, 0.0, 1.0);
+                float viewZ = GetViewZ(uv, depth);
+                float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
@@ -128,12 +143,8 @@ void main()
                 return;
         }
 
-        vec3 viewPos = ReconstructViewPos(uv, depth, u_depthParams.z);
-        vec3 dx = dFdx(viewPos);
-        vec3 dy = dFdy(viewPos);
-        vec3 normal = normalize(cross(dx, dy));
-        if (length(normal) < 1e-4)
-                normal = vec3(0.0, 0.0, 1.0);
+        vec3 viewPos = ReconstructViewPos(uv, depth);
+        vec3 normal = ComputeNormalFromViewPos(viewPos);
         if (debugMode == 5)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
@@ -166,8 +177,9 @@ void main()
                 float sampleDepth = texture(DepthTexture, sampleUV).r;
                 if (IsSkyDepth(sampleDepth, u_depthParams))
                         continue;
-                float sampleViewDepth = LinearizeDepth(sampleDepth, u_depthParams);
-                float samplePosDepth = abs(samplePos.z);
+                vec3 sampleViewPos = ReconstructViewPos(sampleUV, sampleDepth);
+                float sampleViewDepth = -sampleViewPos.z;
+                float samplePosDepth = -samplePos.z;
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(samplePosDepth - sampleViewDepth), 1e-4));
                 if (sampleViewDepth + bias < samplePosDepth)
                         occlusion += rangeCheck;
