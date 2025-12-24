@@ -8,6 +8,7 @@ layout(location=3) uniform vec4 u_params1; // xy: inv resolution, zw: noise scal
 layout(location=4) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
 layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
 layout(location=6) uniform int u_samples;
+layout(location=7) uniform vec4 u_debugParams; // x: debug mode, y: debug far
 
 layout(location=0) out vec4 outColor;
 
@@ -83,6 +84,8 @@ void main()
 {
         vec2 invResolution = u_params1.xy;
         vec2 uv = (gl_FragCoord.xy + 0.5) * invResolution;
+        int debugMode = int(u_debugParams.x + 0.5);
+        float debugFar = max(u_debugParams.y, 1e-3);
         if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
         {
                 outColor = vec4(1.0);
@@ -90,6 +93,35 @@ void main()
         }
 
         float depth = texture(DepthTexture, uv).r;
+        if (debugMode == 1)
+        {
+                outColor = vec4(depth, depth, depth, 1.0);
+                return;
+        }
+        if (debugMode == 2)
+        {
+                if (IsSkyDepth(depth, u_depthParams))
+                {
+                        outColor = vec4(1.0);
+                        return;
+                }
+                float linearDepth = LinearizeDepth(depth, u_depthParams);
+                float v = clamp(linearDepth / debugFar, 0.0, 1.0);
+                outColor = vec4(v, v, v, 1.0);
+                return;
+        }
+        if (debugMode == 3)
+        {
+                if (IsSkyDepth(depth, u_depthParams))
+                {
+                        outColor = vec4(1.0);
+                        return;
+                }
+                vec3 viewPosDebug = ReconstructViewPos(uv, depth, u_depthParams.z);
+                float v = clamp(abs(viewPosDebug.z) / debugFar, 0.0, 1.0);
+                outColor = vec4(v, v, v, 1.0);
+                return;
+        }
         if (IsSkyDepth(depth, u_depthParams))
         {
                 outColor = vec4(1.0);
@@ -102,6 +134,12 @@ void main()
         vec3 normal = normalize(cross(dx, dy));
         if (length(normal) < 1e-4)
                 normal = vec3(0.0, 0.0, 1.0);
+        if (debugMode == 5)
+        {
+                vec3 debugNormal = normal * 0.5 + 0.5;
+                outColor = vec4(debugNormal, 1.0);
+                return;
+        }
 
         vec2 noise = texture(NoiseTexture, uv * u_params1.zw).xy * 2.0 - 1.0;
         vec3 tangent = normalize(vec3(noise, 0.0) - normal * dot(vec3(noise, 0.0), normal));
