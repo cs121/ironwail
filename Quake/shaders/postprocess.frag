@@ -6,6 +6,7 @@ layout(binding=4) uniform sampler2D VelocityTexture;
 layout(binding=5) uniform sampler2D GodraysTexture;
 layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
+layout(binding=8) uniform sampler2D SSAOTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -139,6 +140,7 @@ layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: spe
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
+layout(location=17) uniform vec4 SSAOParams; // x: intensity, yzw: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -447,6 +449,12 @@ void main()
                         }
                         color.rgb += vec3(0.5, 0.3, 1.0) * teleportFade;
                 }
+                }
+
+                if (SSAOParams.x > 0.0 && inView && centerOpaque)
+                {
+                        float ao = texture(SSAOTexture, uv).r;
+                        color.rgb *= mix(1.0, ao, SSAOParams.x);
                 }
 
                 float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));

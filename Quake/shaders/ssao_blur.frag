@@ -1,0 +1,86 @@
+layout(binding=0) uniform sampler2D SSAOTexture;
+layout(binding=1) uniform sampler2D DepthTexture;
+
+layout(location=0) uniform vec4 u_params0; // xy: inv resolution, zw: direction
+layout(location=1) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
+layout(location=2) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: unused
+layout(location=3) uniform vec4 u_viewRect; // xy: view min, zw: view max
+
+layout(location=0) out vec4 outColor;
+
+float LinearizeDepth(float depth, vec4 depthParams)
+{
+        float nearPlane = depthParams.x;
+        float farPlane = depthParams.y;
+        float reversed = depthParams.z;
+        if (reversed > 0.5)
+        {
+                float denom = nearPlane + depth * (farPlane - nearPlane);
+                return (nearPlane * farPlane) / max(denom, 1e-6);
+        }
+        float ndcDepth = depth * 2.0 - 1.0;
+        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+}
+
+bool IsSkyDepth(float depth, vec4 depthParams)
+{
+        float reversed = depthParams.z;
+        float cutoff = depthParams.w;
+        if (reversed > 0.5)
+                return depth <= cutoff;
+        return depth >= cutoff;
+}
+
+float Gaussian(float x, float sigma)
+{
+        float denom = max(2.0 * sigma * sigma, 1e-6);
+        return exp(-x * x / denom);
+}
+
+void main()
+{
+        vec2 invResolution = u_params0.xy;
+        vec2 uv = (gl_FragCoord.xy + 0.5) * invResolution;
+        if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
+        {
+                outColor = vec4(1.0);
+                return;
+        }
+
+        float centerDepthRaw = texture(DepthTexture, uv).r;
+        if (IsSkyDepth(centerDepthRaw, u_depthParams))
+        {
+                outColor = vec4(1.0);
+                return;
+        }
+
+        float centerDepth = LinearizeDepth(centerDepthRaw, u_depthParams);
+        float sigma = max(u_params1.x, 0.01);
+        int radius = int(u_params1.y + 0.5);
+        float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
+
+        float total = 0.0;
+        float accum = 0.0;
+        vec2 direction = u_params0.zw;
+
+        for (int i = -4; i <= 4; ++i)
+        {
+                if (abs(i) > radius)
+                        continue;
+                vec2 offset = direction * (float(i) * invResolution);
+                vec2 sampleUV = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
+                float sampleDepthRaw = texture(DepthTexture, sampleUV).r;
+                if (IsSkyDepth(sampleDepthRaw, u_depthParams))
+                        continue;
+                float sampleDepth = LinearizeDepth(sampleDepthRaw, u_depthParams);
+                float depthDiff = abs(sampleDepth - centerDepth);
+                float depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
+                float weight = Gaussian(float(i), sigma) * depthWeight;
+                accum += texture(SSAOTexture, sampleUV).r * weight;
+                total += weight;
+        }
+
+        float ao = (total > 0.0) ? (accum / total) : 1.0;
+        outColor = vec4(ao, ao, ao, 1.0);
+}

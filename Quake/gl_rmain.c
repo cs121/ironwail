@@ -249,6 +249,18 @@ cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
 cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
+cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_radius = { "r_ssao_radius", "0.75", CVAR_ARCHIVE };
+cvar_t	r_ssao_intensity = { "r_ssao_intensity", "0.8", CVAR_ARCHIVE };
+cvar_t	r_ssao_bias = { "r_ssao_bias", "0.02", CVAR_ARCHIVE };
+cvar_t	r_ssao_power = { "r_ssao_power", "1.2", CVAR_ARCHIVE };
+cvar_t	r_ssao_min = { "r_ssao_min", "0.55", CVAR_ARCHIVE };
+cvar_t	r_ssao_samples = { "r_ssao_samples", "12", CVAR_ARCHIVE };
+cvar_t	r_ssao_blur = { "r_ssao_blur", "1", CVAR_ARCHIVE };
+cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
+cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
+cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
+
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
@@ -463,6 +475,38 @@ static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean
 
 glframebufs_t framebufs;
 
+#define SSAO_MAX_SAMPLES 32
+#define SSAO_NOISE_SIZE 4
+
+static GLuint GL_CreateSSAONoiseTexture (void)
+{
+	GLuint texnum = 0;
+	unsigned char noise[SSAO_NOISE_SIZE * SSAO_NOISE_SIZE * 2];
+
+	for (int i = 0; i < SSAO_NOISE_SIZE * SSAO_NOISE_SIZE; ++i)
+	{
+		float angle = (float)rand () / (float)RAND_MAX;
+		angle *= (float)(2.0 * M_PI);
+		float x = cosf (angle) * 0.5f + 0.5f;
+		float y = sinf (angle) * 0.5f + 0.5f;
+		noise[i * 2 + 0] = (unsigned char)CLAMP (0.f, x * 255.f, 255.f);
+		noise[i * 2 + 1] = (unsigned char)CLAMP (0.f, y * 255.f, 255.f);
+	}
+
+	glGenTextures (1, &texnum);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
+	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, "ssao noise");
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_RG8, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE);
+	glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE, GL_RG, GL_UNSIGNED_BYTE, noise);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	return texnum;
+}
+
 /*
 =============
 GL_CreateFBOAttachment
@@ -609,6 +653,22 @@ void GL_CreateFrameBuffers (void)
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
+	framebufs.ssao.width[0] = vid.width;
+	framebufs.ssao.height[0] = vid.height;
+	framebufs.ssao.width[1] = q_max (1, vid.width / 2);
+	framebufs.ssao.height[1] = q_max (1, vid.height / 2);
+	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
+	for (int i = 0; i < 2; ++i)
+	{
+		int width = framebufs.ssao.width[i];
+		int height = framebufs.ssao.height[i];
+		const char *suffix = (i == 0) ? "full" : "half";
+		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (GL_R8, width, height, GL_LINEAR, va ("ssao %s", suffix));
+		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (GL_R8, width, height, GL_LINEAR, va ("ssao blur %s", suffix));
+		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
+		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
+	}
+
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
@@ -689,6 +749,11 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.source_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
+	for (int i = 0; i < 2; ++i)
+	{
+		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.ao_fbo[i]);
+		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.blur_fbo[i]);
+	}
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
@@ -705,6 +770,12 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
+	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
+	for (int i = 0; i < 2; ++i)
+	{
+		GL_DeleteNativeTexture (framebufs.ssao.ao_tex[i]);
+		GL_DeleteNativeTexture (framebufs.ssao.blur_tex[i]);
+	}
 	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.composite.color_tex);
 
@@ -790,6 +861,86 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_EndGroup ();
 
 	return input_tex;
+}
+
+static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
+{
+	if (r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f)
+		return 0;
+	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
+		return 0;
+	if (framebufs.ssao.ao_fbo[0] == 0 || framebufs.ssao.ao_fbo[1] == 0)
+		return 0;
+
+	int samples = (int)Q_rint (r_ssao_samples.value);
+	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
+	float radius = q_max (0.01f, r_ssao_radius.value);
+	float bias = q_max (0.f, r_ssao_bias.value);
+	float power = q_max (0.01f, r_ssao_power.value);
+	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
+	qboolean use_halfres = (r_ssao_halfres.value > 0.f);
+	int index = use_halfres ? 1 : 0;
+	int width = framebufs.ssao.width[index];
+	int height = framebufs.ssao.height[index];
+	if (width <= 0 || height <= 0)
+		return 0;
+
+	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
+	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+
+	GL_BeginGroup ("SSAO");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+	glViewport (0, 0, width, height);
+	{
+		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
+		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
+	}
+
+	GL_UseProgram (glprogs.ssao);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.noise_tex);
+	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
+	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
+	GL_Uniform4fFunc (2, radius, bias, power, min_ao);
+	GL_Uniform4fFunc (3,
+		1.f / (float)width,
+		1.f / (float)height,
+		(float)width / (float)SSAO_NOISE_SIZE,
+		(float)height / (float)SSAO_NOISE_SIZE);
+	GL_Uniform4fFunc (4, view_znear, view_zfar, reversed_z, depth_cutoff);
+	GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
+	GL_Uniform1iFunc (6, samples);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur)
+	{
+		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
+		blur_radius = CLAMP (1, blur_radius, 4);
+		float blur_sigma = q_max (0.01f, r_ssao_blur_sigma.value);
+		float depth_threshold_scale = 0.02f;
+
+		GL_UseProgram (glprogs.ssao_blur);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+		GL_Uniform4fFunc (1, view_znear, view_zfar, reversed_z, depth_cutoff);
+		GL_Uniform4fFunc (2, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
+		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
+		glViewport (0, 0, width, height);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
+		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 1.f, 0.f);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
+		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 0.f, 1.f);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+	}
+
+	GL_EndGroup ();
+
+	return framebufs.ssao.ao_tex[index];
 }
 
 void R_ResetGodraysStabilization (void)
@@ -1347,6 +1498,7 @@ void GL_PostProcess (void)
 	GLuint godrays_texture;
 	GLuint godrays_mask;
 	GLuint godrays_source;
+	GLuint ssao_texture;
 	float motion_strength;
 	float motion_shutter;
 	float motion_effective_shutter;
@@ -1362,6 +1514,12 @@ void GL_PostProcess (void)
 	qboolean godrays_enabled;
 	float godrays_debug;
 	float godrays_debug_source;
+	float ssao_intensity;
+	float view_min_x;
+	float view_min_y;
+	float view_max_x;
+	float view_max_y;
+	float inv_scale;
         r_saturation.value = CLAMP (0.0f, r_saturation.value, 2.0f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -1416,6 +1574,17 @@ void GL_PostProcess (void)
 		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
 		godrays_source = framebufs.godrays.source_tex;
 	}
+
+	view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
+	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
+	view_max_x = view_min_x + r_refdef.vrect.width / (float)vid.width;
+	view_max_y = view_min_y + r_refdef.vrect.height / (float)vid.height;
+	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
+
+	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+	ssao_intensity = CLAMP (0.f, r_ssao_intensity.value, 2.f);
+	if (ssao_texture == 0 || r_ssao.value <= 0.f)
+		ssao_intensity = 0.f;
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -1473,6 +1642,7 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, godrays_texture);
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
+	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
@@ -1497,6 +1667,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
+	GL_Uniform4fFunc (17, ssao_intensity, 0.f, 0.f, 0.f);
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);
@@ -1508,17 +1679,7 @@ void GL_PostProcess (void)
 	dof_enabled = R_DoFEnabled ();
 
 	{
-		float view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
-		float view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
-		float view_size_x = r_refdef.vrect.width / (float)vid.width;
-		float view_size_y = r_refdef.vrect.height / (float)vid.height;
-		float inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
-
-		GL_Uniform4fFunc (3,
-			view_min_x,
-			view_min_y,
-			view_min_x + view_size_x,
-			view_min_y + view_size_y);
+		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
 		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
 	}
 
@@ -2155,6 +2316,8 @@ qboolean GL_NeedsPostprocess (void)
 	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
 		return true;
 	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
+		return true;
+	if (r_ssao.value > 0.f)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
@@ -3548,7 +3711,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-        need_depth_resolve = (fbodest == framebufs.composite.fbo) && R_DoFEnabled ();
+        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || r_ssao.value > 0.f);
 
 	if (msaa)
 	{
