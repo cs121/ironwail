@@ -296,7 +296,6 @@ cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
-cvar_t	r_chromatic_aberration = { "r_chromatic_aberration", "0", CVAR_ARCHIVE };
 cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
 cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
 cvar_t	r_teleportfx = { "r_teleportfx", "1", CVAR_ARCHIVE };
@@ -1492,9 +1491,9 @@ void GL_PostProcess (void)
 		q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
 	GL_Uniform4fFunc (10,
 	q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
-	q_max (0.f, r_chromatic_aberration.value),
 	screen_darken_strength,
-	screen_darken_depth);
+	screen_darken_depth,
+	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);

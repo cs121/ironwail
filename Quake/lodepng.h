@@ -1292,7 +1292,7 @@ The following features are supported by the decoder:
     bKGD: suggested background color
     pHYs: physical dimensions
     tIME: modification time
-    cHRM: RGB chromaticities
+    cHRM: RGB color primaries
     gAMA: RGB gamma correction
     iCCP: ICC color profile
     sRGB: rendering intent

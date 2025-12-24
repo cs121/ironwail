@@ -132,7 +132,7 @@ layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strengt
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
-layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: chromatic aberration (pixels), z: screen-space darken strength, w: screen-space darken depth range
+layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: screen-space darken strength, z: screen-space darken depth range, w: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
 layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
@@ -376,8 +376,8 @@ void main()
                 vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
                 float aspect = texSize.y > 0.0 ? texSize.x / texSize.y : 1.0;
 
-                float screenDarkenStrength = clamp(PostFXParams2.z, 0.0, 1.0);
-                float screenDarkenDepth = max(PostFXParams2.w, 1e-4);
+                float screenDarkenStrength = clamp(PostFXParams2.y, 0.0, 1.0);
+                float screenDarkenDepth = max(PostFXParams2.z, 1e-4);
                 if (screenDarkenStrength > 0.0 && depthInfo.valid)
                 {
                         float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
@@ -428,26 +428,6 @@ void main()
                                         vec3 multiplier = mix(vec3(1.0), vignetteColor, intensity);
                                         color.rgb *= multiplier;
                                 }
-                        }
-                }
-
-                float chromaticAmount = max(PostFXParams2.y, 0.0);
-                if (chromaticAmount > 0.0)
-                {
-                        vec2 dir = viewUV - vec2(0.5);
-                        float lenDir = length(dir);
-                        if (lenDir > 1e-4)
-                        {
-                                vec2 normDir = dir / lenDir;
-                                vec2 offsetPx = normDir * (chromaticAmount * lenDir);
-                                vec2 offsetUV = offsetPx * invTexSize;
-                                vec2 uvR = clamp(uv + offsetUV, viewMin, viewMax);
-                                vec2 uvB = clamp(uv - offsetUV, viewMin, viewMax);
-                                vec3 aberrated = color.rgb;
-                                aberrated.r = texture(GammaTexture, uvR).r;
-                                aberrated.b = texture(GammaTexture, uvB).b;
-                                float blend = clamp(chromaticAmount * lenDir, 0.0, 1.0);
-                                color.rgb = mix(color.rgb, aberrated, blend);
                         }
                 }
 
