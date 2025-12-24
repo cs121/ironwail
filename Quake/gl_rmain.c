@@ -260,6 +260,7 @@ cvar_t	r_ssao_blur = { "r_ssao_blur", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
+cvar_t	r_ssao_debug = { "ssao_debug", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -1515,6 +1516,7 @@ void GL_PostProcess (void)
 	float godrays_debug;
 	float godrays_debug_source;
 	float ssao_intensity;
+	float ssao_debug;
 	float view_min_x;
 	float view_min_y;
 	float view_max_x;
@@ -1583,6 +1585,7 @@ void GL_PostProcess (void)
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	ssao_intensity = CLAMP (0.f, r_ssao_intensity.value, 2.f);
+	ssao_debug = (r_ssao_debug.value > 0.f) ? 1.f : 0.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
 
@@ -1667,7 +1670,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
-	GL_Uniform4fFunc (17, ssao_intensity, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (17, ssao_intensity, ssao_debug, 0.f, 0.f);
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);
