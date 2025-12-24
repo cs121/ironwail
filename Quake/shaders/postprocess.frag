@@ -451,10 +451,16 @@ void main()
                 }
                 }
 
-                if (SSAOParams.x > 0.0 && inView && centerOpaque)
+                float ssaoIntensity = SSAOParams.x;
+                float ssaoDebug = SSAOParams.y;
+                if ((ssaoIntensity > 0.0 || ssaoDebug > 0.5) && inView && centerOpaque)
                 {
                         float ao = texture(SSAOTexture, uv).r;
-                        color.rgb *= mix(1.0, ao, SSAOParams.x);
+                        float aoApplied = mix(1.0, ao, ssaoIntensity);
+                        if (ssaoDebug > 0.5)
+                                color.rgb = vec3(aoApplied);
+                        else
+                                color.rgb *= aoApplied;
                 }
 
                 float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
