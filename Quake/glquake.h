@@ -550,6 +550,8 @@ typedef struct glprogs_s {
 	GLuint		filmgrain;
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
+	GLuint		ssao;
+	GLuint		ssao_blur;
 	GLuint		godrays_mask;
 	GLuint		godrays;
 	GLuint		godrays_source;
@@ -630,6 +632,16 @@ typedef struct glframebufs_s {
 		int			width;
 		int			height;
 	}				godrays;
+
+	struct {
+		GLuint		noise_tex;
+		GLuint		ao_tex[2];
+		GLuint		blur_tex[2];
+		GLuint		ao_fbo[2];
+		GLuint		blur_fbo[2];
+		int			width[2];
+		int			height[2];
+	}				ssao;
 
 	struct {
 		GLuint		tex;
