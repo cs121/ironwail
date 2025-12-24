@@ -87,6 +87,13 @@ static const float r_identity_mat4[16] = {
 		0.f, 0.f, 0.f, 1.f
 };
 
+static void GL_LogErrorIfDeveloper (const char *label)
+{
+	GLenum err = glGetError ();
+	if (err != GL_NO_ERROR)
+		Con_DPrintf ("GL error after %s: 0x%04X\n", label, err);
+}
+
 
 // Returns how much of the console is currently covering the screen in the range [0, 1].
 static float GL_ConsoleVisibility (void)
@@ -260,7 +267,9 @@ cvar_t	r_ssao_blur = { "r_ssao_blur", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-cvar_t	r_ssao_debug = { "ssao_debug", "0", CVAR_ARCHIVE };
+// r_ssao_debug modes: 0 off, 1 raw depth, 2 linear depth, 3 view-space Z, 4 AO, 5 normals-from-depth.
+cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -504,6 +513,7 @@ static GLuint GL_CreateSSAONoiseTexture (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	GL_LogErrorIfDeveloper ("GL_CreateSSAONoiseTexture");
 
 	return texnum;
 }
@@ -532,6 +542,7 @@ static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter,
 		glTexParameteri (target, GL_TEXTURE_MIN_FILTER, filter);
 	}
 	glTexParameteri (target, GL_TEXTURE_MAX_LEVEL, 0);
+	GL_LogErrorIfDeveloper ("GL_CreateFBOAttachment");
 
 	return texnum;
 }
@@ -555,6 +566,7 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	GL_LogErrorIfDeveloper ("GL_CreateTexture2D");
 
 	return texnum;
 }
@@ -572,18 +584,21 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, 
 	GL_GenFramebuffersFunc (1, &fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, fbo, -1, name);
+	GL_LogErrorIfDeveloper ("GL_CreateFBO bind");
 
 	for (i = 0; i < numcolors; i++)
 	{
 		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, target, colors[i], 0);
 		buffers[i] = GL_COLOR_ATTACHMENT0 + i;
 	}
+	GL_LogErrorIfDeveloper ("GL_CreateFBO color attachments");
 	GL_DrawBuffersFunc (numcolors, buffers);
 
 	if (depth)
 		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depth, 0);
 	if (stencil)
 		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, target, stencil, 0);
+	GL_LogErrorIfDeveloper ("GL_CreateFBO depth/stencil attachments");
 
 	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
 	if (status != GL_FRAMEBUFFER_COMPLETE)
@@ -864,9 +879,70 @@ static GLuint GL_GenerateBloomTexture (void)
 	return input_tex;
 }
 
+static void GL_LogSSAODepthInfo (GLuint depth_tex, int ssao_width, int ssao_height, float view_min_x, float view_min_y, float view_max_x, float view_max_y)
+{
+	static GLuint last_depth_tex = 0;
+	static int last_ssao_width = 0;
+	static int last_ssao_height = 0;
+	static int last_debug_mode = -1;
+	static float last_view_min_x = -1.f;
+	static float last_view_min_y = -1.f;
+	static float last_view_max_x = -1.f;
+	static float last_view_max_y = -1.f;
+
+	int debug_mode = (int)Q_rint (r_ssao_debug.value);
+	if (depth_tex == 0)
+		return;
+
+	if (debug_mode == last_debug_mode &&
+		depth_tex == last_depth_tex &&
+		ssao_width == last_ssao_width &&
+		ssao_height == last_ssao_height &&
+		view_min_x == last_view_min_x &&
+		view_min_y == last_view_min_y &&
+		view_max_x == last_view_max_x &&
+		view_max_y == last_view_max_y)
+		return;
+
+	last_debug_mode = debug_mode;
+	last_depth_tex = depth_tex;
+	last_ssao_width = ssao_width;
+	last_ssao_height = ssao_height;
+	last_view_min_x = view_min_x;
+	last_view_min_y = view_min_y;
+	last_view_max_x = view_max_x;
+	last_view_max_y = view_max_y;
+
+	GLint internal_format = 0;
+	GLint tex_width = 0;
+	GLint tex_height = 0;
+	GLfloat depth_range[2] = { 0.f, 1.f };
+	GLint viewport[4] = { 0, 0, 0, 0 };
+	const char *target_name = "GL_TEXTURE_2D";
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, depth_tex);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_width);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &tex_height);
+	glGetFloatv (GL_DEPTH_RANGE, depth_range);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+
+	Con_DPrintf ("SSAO depth input: tex=%u target=%s format=0x%X size=%dx%d viewport=%dx%d+%d+%d\n",
+		depth_tex, target_name, internal_format, tex_width, tex_height,
+		viewport[2], viewport[3], viewport[0], viewport[1]);
+	Con_DPrintf ("SSAO depth range: [%0.4f, %0.4f] reversedZ=%d znear=%0.4f zfar=%0.4f cutoff=%0.4f viewRect=[%0.3f,%0.3f]-[%0.3f,%0.3f] ssao=%dx%d debug=%d\n",
+		depth_range[0], depth_range[1],
+		gl_clipcontrol_able ? 1 : 0,
+		view_znear, view_zfar,
+		gl_clipcontrol_able ? 0.001f : 0.999f,
+		view_min_x, view_min_y, view_max_x, view_max_y,
+		ssao_width, ssao_height, debug_mode);
+	GL_LogErrorIfDeveloper ("GL_LogSSAODepthInfo");
+}
+
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
-	if (r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f)
+	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
 		return 0;
 	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
 		return 0;
@@ -888,14 +964,29 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+	int debug_mode_i = (int)Q_rint (r_ssao_debug.value);
+	float debug_mode = q_max (0.f, (float)debug_mode_i);
+	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+	GL_LogErrorIfDeveloper ("SSAO bind FBO");
+	{
+		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			Con_DPrintf ("SSAO FBO incomplete (0x%X)\n", status);
+			GL_EndGroup ();
+			return 0;
+		}
+	}
 	glViewport (0, 0, width, height);
 	{
 		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
 	}
+
+	GL_LogSSAODepthInfo (framebufs.composite.depth_stencil_tex, width, height, view_min_x, view_min_y, view_max_x, view_max_y);
 
 	GL_UseProgram (glprogs.ssao);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
@@ -912,9 +1003,11 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform4fFunc (4, view_znear, view_zfar, reversed_z, depth_cutoff);
 	GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
 	GL_Uniform1iFunc (6, samples);
+	GL_Uniform4fFunc (7, debug_mode, debug_far, 0.f, 0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_LogErrorIfDeveloper ("SSAO draw");
 
-	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur)
+	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur && (debug_mode_i == 0 || debug_mode_i == 4))
 	{
 		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
 		blur_radius = CLAMP (1, blur_radius, 4);
@@ -928,15 +1021,18 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
+		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
 		glViewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
 		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 1.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
+		GL_LogErrorIfDeveloper ("SSAO blur horizontal draw");
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 0.f, 1.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
+		GL_LogErrorIfDeveloper ("SSAO blur vertical draw");
 	}
 
 	GL_EndGroup ();
@@ -1585,7 +1681,9 @@ void GL_PostProcess (void)
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	ssao_intensity = CLAMP (0.f, r_ssao_intensity.value, 2.f);
-	ssao_debug = (r_ssao_debug.value > 0.f) ? 1.f : 0.f;
+	ssao_debug = q_max (0.f, r_ssao_debug.value);
+	if (ssao_texture == 0)
+		ssao_debug = 0.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
 
@@ -3714,7 +3812,7 @@ void R_WarpScaleView (void)
 
 	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
-        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || r_ssao.value > 0.f);
+        need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f);
 
 	if (msaa)
 	{
