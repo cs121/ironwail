@@ -5,22 +5,36 @@ layout(location=0) uniform vec4 u_params0; // xy: inv resolution, zw: direction
 layout(location=1) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
 layout(location=2) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: unused
 layout(location=3) uniform vec4 u_viewRect; // xy: view min, zw: view max
+layout(location=4) uniform mat4 u_invProj;
+layout(location=5) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
 
 layout(location=0) out vec4 outColor;
 
-float LinearizeDepth(float depth, vec4 depthParams)
+float DepthToNdcZ(float depth, float reversed, int mode)
 {
-        float nearPlane = depthParams.x;
-        float farPlane = depthParams.y;
-        float reversed = depthParams.z;
         if (reversed > 0.5)
         {
-                float denom = nearPlane + depth * (farPlane - nearPlane);
-                return (nearPlane * farPlane) / max(denom, 1e-6);
+                if (mode == 1)
+                        depth = 1.0 - depth;
+                if (mode == 2)
+                        return (1.0 - depth) * 2.0 - 1.0;
+                return depth;
         }
-        float ndcDepth = depth * 2.0 - 1.0;
-        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        return depth * 2.0 - 1.0;
+}
+
+vec3 ReconstructViewPos(vec2 uv, float depth)
+{
+        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+        vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
+        vec4 view = u_invProj * clip;
+        return view.xyz / max(view.w, 1e-6);
+}
+
+float GetViewZ(vec2 uv, float depth)
+{
+        vec3 view = ReconstructViewPos(uv, depth);
+        return -view.z;
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -55,7 +69,7 @@ void main()
                 return;
         }
 
-        float centerDepth = LinearizeDepth(centerDepthRaw, u_depthParams);
+        float centerDepth = GetViewZ(uv, centerDepthRaw);
         float sigma = max(u_params1.x, 0.01);
         int radius = int(u_params1.y + 0.5);
         float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
@@ -73,7 +87,7 @@ void main()
                 float sampleDepthRaw = texture(DepthTexture, sampleUV).r;
                 if (IsSkyDepth(sampleDepthRaw, u_depthParams))
                         continue;
-                float sampleDepth = LinearizeDepth(sampleDepthRaw, u_depthParams);
+                float sampleDepth = GetViewZ(sampleUV, sampleDepthRaw);
                 float depthDiff = abs(sampleDepth - centerDepth);
                 float depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
                 float weight = Gaussian(float(i), sigma) * depthWeight;

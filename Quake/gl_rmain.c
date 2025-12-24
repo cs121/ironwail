@@ -257,7 +257,7 @@ cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
-cvar_t	r_ssao_radius = { "r_ssao_radius", "0.75", CVAR_ARCHIVE };
+cvar_t	r_ssao_radius = { "r_ssao_radius", "24", CVAR_ARCHIVE };
 cvar_t	r_ssao_intensity = { "r_ssao_intensity", "0.8", CVAR_ARCHIVE };
 cvar_t	r_ssao_bias = { "r_ssao_bias", "0.02", CVAR_ARCHIVE };
 cvar_t	r_ssao_power = { "r_ssao_power", "1.2", CVAR_ARCHIVE };
@@ -270,6 +270,7 @@ cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
 // r_ssao_debug modes: 0 off, 1 raw depth, 2 linear depth, 3 view-space Z, 4 AO, 5 normals-from-depth.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
+cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -930,9 +931,10 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, int ssao_width, int ssao_heig
 	Con_DPrintf ("SSAO depth input: tex=%u target=%s format=0x%X size=%dx%d viewport=%dx%d+%d+%d\n",
 		depth_tex, target_name, internal_format, tex_width, tex_height,
 		viewport[2], viewport[3], viewport[0], viewport[1]);
-	Con_DPrintf ("SSAO depth range: [%0.4f, %0.4f] reversedZ=%d znear=%0.4f zfar=%0.4f cutoff=%0.4f viewRect=[%0.3f,%0.3f]-[%0.3f,%0.3f] ssao=%dx%d debug=%d\n",
+	Con_DPrintf ("SSAO depth range: [%0.4f, %0.4f] reversedZ=%d mode=%d znear=%0.4f zfar=%0.4f cutoff=%0.4f viewRect=[%0.3f,%0.3f]-[%0.3f,%0.3f] ssao=%dx%d debug=%d\n",
 		depth_range[0], depth_range[1],
 		gl_clipcontrol_able ? 1 : 0,
+		(int)Q_rint (r_ssao_reversedz_mode.value),
 		view_znear, view_zfar,
 		gl_clipcontrol_able ? 0.001f : 0.999f,
 		view_min_x, view_min_y, view_max_x, view_max_y,
@@ -964,6 +966,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
+	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_i = (int)Q_rint (r_ssao_debug.value);
 	float debug_mode = q_max (0.f, (float)debug_mode_i);
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
@@ -1004,6 +1008,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
 	GL_Uniform1iFunc (6, samples);
 	GL_Uniform4fFunc (7, debug_mode, debug_far, 0.f, 0.f);
+	GL_Uniform1iFunc (8, reversed_z_mode);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
@@ -1019,6 +1024,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_Uniform4fFunc (1, view_znear, view_zfar, reversed_z, depth_cutoff);
 		GL_Uniform4fFunc (2, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
+		GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, r_matinvproj);
+		GL_Uniform1iFunc (5, reversed_z_mode);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
