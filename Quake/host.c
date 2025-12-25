@@ -1478,7 +1478,7 @@ void Host_Init (void)
 	{
 		host_colormap = (byte *)COM_LoadHunkFile ("gfx/colormap.lmp", NULL);
 		if (!host_colormap)
-			Sys_Error ("Couldn't load gfx/colormap.lmp");
+			Con_Warning ("Couldn't load gfx/colormap.lmp\n");
 
 		V_Init ();
 		Chase_Init ();

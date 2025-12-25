@@ -71,6 +71,7 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt)
 	char		texturename[64];
 	unsigned	x, y, p, r, g, b, count, halfwidth, *rgba;
 	byte		*src, *front_data, *back_data;
+	byte		*back_rgba, *front_rgba;
 
 	if (mt->width != 256 || mt->height != 128)
 	{
@@ -82,6 +83,8 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt)
 	halfwidth = mt->width / 2;
 	back_data = (byte *) Hunk_AllocName (halfwidth*mt->height*2, "skytex");
 	front_data = back_data + halfwidth*mt->height;
+	back_rgba = (byte *) Hunk_AllocNameNoFill (halfwidth * mt->height * 4, "skytex");
+	front_rgba = (byte *) Hunk_AllocNameNoFill (halfwidth * mt->height * 4, "skytex");
 	src = (byte *)(mt + 1);
 
 // extract back layer and upload
@@ -89,7 +92,8 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt)
 		memcpy (back_data + y*halfwidth, src + halfwidth + y*mt->width, halfwidth);
 
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_back", mod->name, mt->name);
-	mt->gltexture = TexMgr_LoadImage (mod, texturename, halfwidth, mt->height, SRC_INDEXED, back_data, "", (src_offset_t)back_data, TEXPREF_BINDLESS);
+	TexMgr_DecodeIndexedToRGBA (back_data, halfwidth * mt->height, -1, TEXMGR_PALMODE_STANDARD, back_rgba);
+	mt->gltexture = TexMgr_LoadImage (mod, texturename, halfwidth, mt->height, SRC_RGBA, back_rgba, "", (src_offset_t)back_rgba, TEXPREF_BINDLESS);
 
 // extract front layer and upload
 	r = g = b = count = 0;
@@ -98,9 +102,7 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt)
 		for (x=0 ; x<halfwidth ; x++)
 		{
 			p = src[x];
-			if (p == 0)
-				p = 255;
-			else
+			if (p != 0)
 			{
 				rgba = &d_8to24table[p];
 				r += ((byte *)rgba)[0];
@@ -114,7 +116,8 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt)
 
 	front_data = back_data + halfwidth*mt->height;
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_front", mod->name, mt->name);
-	mt->fullbright = TexMgr_LoadImage (mod, texturename, halfwidth, mt->height, SRC_INDEXED, front_data, "", (src_offset_t)front_data, TEXPREF_ALPHA|TEXPREF_BINDLESS);
+	TexMgr_DecodeIndexedToRGBA (front_data, halfwidth * mt->height, 0, TEXMGR_PALMODE_STANDARD, front_rgba);
+	mt->fullbright = TexMgr_LoadImage (mod, texturename, halfwidth, mt->height, SRC_RGBA, front_rgba, "", (src_offset_t)front_rgba, TEXPREF_ALPHA|TEXPREF_BINDLESS);
 
 // calculate r_fastsky color based on average of all opaque foreground colors
 	skyflatcolor[0] = (float)r/(count*255);
@@ -133,7 +136,7 @@ void Sky_LoadTextureQ64 (qmodel_t *mod, texture_t *mt)
 {
 	char		texturename[64];
 	unsigned	i, p, r, g, b, count, halfheight, *rgba;
-	byte		*front, *back, *front_rgba;
+	byte		*front, *back, *front_rgba, *back_rgba;
 
 	if (mt->width != 32 || mt->height != 64)
 	{
@@ -147,10 +150,12 @@ void Sky_LoadTextureQ64 (qmodel_t *mod, texture_t *mt)
 	front = (byte *)(mt+1);
 	back = (byte *)(mt+1) + mt->width*halfheight;
 	front_rgba = (byte *) Hunk_AllocName (4*mt->width*halfheight, "q64_skytex");
+	back_rgba = (byte *) Hunk_AllocNameNoFill (4*mt->width*halfheight, "q64_skytex");
 
 	// Normal indexed texture for the back layer
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_back", mod->name, mt->name);
-	mt->gltexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_INDEXED, back, "", (src_offset_t)back, TEXPREF_BINDLESS);
+	TexMgr_DecodeIndexedToRGBA (back, mt->width * halfheight, -1, TEXMGR_PALMODE_STANDARD, back_rgba);
+	mt->gltexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_RGBA, back_rgba, "", (src_offset_t)back_rgba, TEXPREF_BINDLESS);
 
 	// front layer, convert to RGBA and upload
 	p = r = g = b = count = 0;

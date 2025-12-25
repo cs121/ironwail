@@ -1175,7 +1175,6 @@ static void Mod_LoadTextures (lump_t *l)
 //johnfitz -- more variables
 	char		texturename[64];
 	int			nummiptex;
-	src_offset_t		offset;
 	int			mark, fwidth, fheight;
 	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
 	byte		*data;
@@ -1307,28 +1306,27 @@ static void Mod_LoadTextures (lump_t *l)
                                 }
                                 else //use the texture from the bsp file
                                 {
+                                        qboolean has_fullbright = Mod_CheckFullbrights ((byte *)(tx + 1), pixels);
+                                        qboolean is_cutout = (tx->type == TEXTYPE_CUTOUT);
+                                        texmgr_palmode_t palmode = TEXMGR_PALMODE_STANDARD;
+                                        byte *rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_rgba");
+
+                                        if (has_fullbright)
+                                                palmode = is_cutout ? TEXMGR_PALMODE_NOBRIGHT : TEXMGR_PALMODE_ALPHABRIGHT;
+
+                                        TexMgr_DecodeIndexedToRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, palmode, rgba);
+
                                         q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-                                        offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-                                        if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                SRC_RGBA, rgba, "", (src_offset_t)rgba, TEXPREF_MIPMAP | TEXPREF_BINDLESS | (is_cutout ? TEXPREF_ALPHA : 0));
+
+                                        if (has_fullbright && is_cutout)
                                         {
-                                                if (tx->type != TEXTYPE_CUTOUT)
-                                                {
-                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | TEXPREF_BINDLESS);
-                                                }
-                                                else
-                                                {
-                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | TEXPREF_BINDLESS);
-                                                        q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
-                                                        tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | TEXPREF_BINDLESS);
-                                                }
-                                        }
-                                        else
-                                        {
-                                                tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                        SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                                byte *fb_rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_fbright");
+                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, 255, fb_rgba);
+                                                q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
+                                                tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                        SRC_RGBA, fb_rgba, "", (src_offset_t)fb_rgba, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
                                         }
                                 }
                                 tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
@@ -1369,28 +1367,27 @@ static void Mod_LoadTextures (lump_t *l)
                                 }
                                 else //use the texture from the bsp file
                                 {
+                                        qboolean has_fullbright = Mod_CheckFullbrights ((byte *)(tx + 1), pixels);
+                                        qboolean is_cutout = (tx->type == TEXTYPE_CUTOUT);
+                                        texmgr_palmode_t palmode = TEXMGR_PALMODE_STANDARD;
+                                        byte *rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_rgba");
+
+                                        if (has_fullbright)
+                                                palmode = is_cutout ? TEXMGR_PALMODE_NOBRIGHT : TEXMGR_PALMODE_ALPHABRIGHT;
+
+                                        TexMgr_DecodeIndexedToRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, palmode, rgba);
+
                                         q_snprintf (texturename, sizeof(texturename), "%s:%s", loadmodel->name, tx->name);
-                                        offset = (src_offset_t)(mt+1) - (src_offset_t)mod_base;
-                                        if (Mod_CheckFullbrights ((byte *)(tx+1), pixels))
+                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                SRC_RGBA, rgba, "", (src_offset_t)rgba, TEXPREF_MIPMAP | extraflags | (is_cutout ? TEXPREF_ALPHA : 0));
+
+                                        if (has_fullbright && is_cutout)
                                         {
-                                                if (tx->type != TEXTYPE_CUTOUT)
-                                                {
-                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_ALPHABRIGHT | extraflags);
-                                                }
-                                                else
-                                                {
-                                                        tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_NOBRIGHT | extraflags);
-                                                        q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
-                                                        tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                                SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | TEXPREF_FULLBRIGHT | extraflags);
-                                                }
-                                        }
-                                        else
-                                        {
-                                                tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
-                                                        SRC_INDEXED, (byte *)(tx+1), loadmodel->name, offset, TEXPREF_MIPMAP | extraflags);
+                                                byte *fb_rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_fbright");
+                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, 255, fb_rgba);
+                                                q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
+                                                tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
+                                                        SRC_RGBA, fb_rgba, "", (src_offset_t)fb_rgba, TEXPREF_MIPMAP | extraflags);
                                         }
                                 }
                                 tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | extraflags);

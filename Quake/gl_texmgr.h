@@ -97,6 +97,16 @@ extern unsigned int d_8to24table_fbright[256];
 extern unsigned int d_8to24table_nobright[256];
 extern unsigned int d_8to24table_conchars[256];
 
+typedef enum
+{
+	TEXMGR_PALMODE_STANDARD = 0,
+	TEXMGR_PALMODE_ALPHABRIGHT,
+	TEXMGR_PALMODE_NOBRIGHT
+} texmgr_palmode_t;
+
+void TexMgr_DecodeIndexedToRGBA (const byte *indexed, int pixel_count, int transparent_index, texmgr_palmode_t mode, byte *rgba);
+void TexMgr_BuildFullbrightRGBA (const byte *indexed, int pixel_count, int transparent_index, byte *rgba);
+
 extern GLint gl_max_texture_size;
 
 typedef enum
@@ -177,4 +187,3 @@ void GL_DeleteNativeTexture (GLuint texnum);
 void GL_ClearBindings (void);
 
 #endif	/* _GL_TEXMAN_H */
-
