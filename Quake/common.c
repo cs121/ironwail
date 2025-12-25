@@ -38,6 +38,7 @@ static char	argvdummy[] = " ";
 int		safemode;
 
 cvar_t	registered = {"registered","1",CVAR_ROM}; /* set to correct value in COM_CheckRegistered() */
+cvar_t	standalone = {"standalone","0"}; /* allow standalone mods without pak0/CRC gating */
 cvar_t	cmdline = {"cmdline","",CVAR_ROM/*|CVAR_SERVERINFO*/}; /* sending cmdline upon CCREQ_RULE_INFO is evil */
 cvar_t	language = {"language","auto",CVAR_ARCHIVE}; /* for 2021 rerelease text */
 
@@ -1502,6 +1503,11 @@ Immediately exits out if an alternate game was attempted to be started without
 being registered.
 ================
 */
+static qboolean COM_IsStandalone (void)
+{
+	return (standalone.value != 0);
+}
+
 static void COM_CheckRegistered (void)
 {
 	int		h;
@@ -1512,14 +1518,22 @@ static void COM_CheckRegistered (void)
 
 	if (h == -1)
 	{
-		Cvar_SetROM ("registered", "0");
-		Con_Printf ("Playing shareware version.\n");
-		if (com_modified)
-			Sys_Error ("You must have the registered version to use modified games.\n\n"
-				   "Basedir is: %s\n\n"
-				   "Check that this has an " GAMENAME " subdirectory containing pak0.pak and pak1.pak, "
-				   "or use the -basedir command-line option to specify another directory.",
-				   com_basedirs[0]);
+		if (COM_IsStandalone ())
+		{
+			Cvar_SetROM ("registered", "1");
+			Con_Warning ("Standalone mode enabled: gfx/pop.lmp not found, skipping registered check.\n");
+		}
+		else
+		{
+			Cvar_SetROM ("registered", "0");
+			Con_Printf ("Playing shareware version.\n");
+			if (com_modified)
+				Sys_Error ("You must have the registered version to use modified games.\n\n"
+					   "Basedir is: %s\n\n"
+					   "Check that this has an " GAMENAME " subdirectory containing pak0.pak and pak1.pak, "
+					   "or use the -basedir command-line option to specify another directory.",
+					   com_basedirs[0]);
+		}
 		return;
 	}
 
@@ -1532,6 +1546,12 @@ static void COM_CheckRegistered (void)
 	{
 		if (pop[i] != (unsigned short)BigShort (check[i]))
 		{ corrupt:
+			if (COM_IsStandalone ())
+			{
+				Cvar_SetROM ("registered", "1");
+				Con_Warning ("Standalone mode enabled: ignoring gfx/pop.lmp checksum mismatch.\n");
+				return;
+			}
 			Sys_Error ("Corrupted data file.");
 		}
 	}
@@ -2467,7 +2487,31 @@ const char *COM_GetGameNames(qboolean full)
 COM_AddEnginePak
 =================
 */
-static void COM_AddEnginePak (void)
+static void COM_PushSearchPath (searchpath_t *search, qboolean append)
+{
+	searchpath_t *tail;
+
+	if (!append)
+	{
+		search->next = com_searchpaths;
+		com_searchpaths = search;
+		return;
+	}
+
+	search->next = NULL;
+	if (!com_searchpaths)
+	{
+		com_searchpaths = search;
+		return;
+	}
+
+	tail = com_searchpaths;
+	while (tail->next)
+		tail = tail->next;
+	tail->next = search;
+}
+
+static void COM_AddEnginePak (unsigned int path_id, qboolean append)
 {
 	int			i;
 	char		pakfile[MAX_OSPATH];
@@ -2500,10 +2544,9 @@ static void COM_AddEnginePak (void)
 	if (pak)
 	{
 		searchpath_t *search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
-		search->path_id = com_searchpaths ? com_searchpaths->path_id : 1u;
 		search->pack = pak;
-		search->next = com_searchpaths;
-		com_searchpaths = search;
+		search->path_id = path_id;
+		COM_PushSearchPath (search, append);
 	}
 
 	com_modified = modified;
@@ -2517,7 +2560,7 @@ static int COM_Pk3Compare (const void *a, const void *b)
         return q_strcasecmp (left, right);
 }
 
-static void COM_AddPk3Files (const char *gamedir, unsigned int path_id)
+static void COM_AddPk3Files (const char *gamedir, unsigned int path_id, qboolean append)
 {
         char **pk3files = NULL;
         size_t numpk3 = 0, maxpk3 = 0;
@@ -2557,8 +2600,7 @@ static void COM_AddPk3Files (const char *gamedir, unsigned int path_id)
                         searchpath_t *search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
                         search->path_id = path_id;
                         search->pack = pak;
-                        search->next = com_searchpaths;
-                        com_searchpaths = search;
+                        COM_PushSearchPath (search, append);
                         com_modified = true;
                 }
 
@@ -2579,6 +2621,7 @@ void COM_AddGameDirectory (const char *dir)
 	const char *base;
 	int i, j;
 	unsigned int path_id;
+	qboolean append_paths;
 	searchpath_t *search;
 	pack_t *pak;
 	char pakfile[MAX_OSPATH];
@@ -2607,6 +2650,8 @@ void COM_AddGameDirectory (const char *dir)
 	else
 		path_id = 1U;
 
+	append_paths = (COM_IsStandalone () && !q_strcasecmp (dir, GAMENAME));
+
 	for (j = 0; j < com_numbasedirs; j++)
 	{
 		base = com_basedirs[j];
@@ -2616,8 +2661,7 @@ void COM_AddGameDirectory (const char *dir)
 		search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
 		search->path_id = path_id;
 		q_strlcpy (search->filename, com_gamedir, sizeof(search->filename));
-		search->next = com_searchpaths;
-		com_searchpaths = search;
+		COM_PushSearchPath (search, append_paths);
 
                 // add any pak files in the format pak0.pak pak1.pak, ...
                 for (i = 0; ; i++)
@@ -2630,15 +2674,14 @@ void COM_AddGameDirectory (const char *dir)
 			search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
 			search->path_id = path_id;
 			search->pack = pak;
-			search->next = com_searchpaths;
-			com_searchpaths = search;
+			COM_PushSearchPath (search, append_paths);
 
                         // add engine pak after pak0.pak
                         if (i == 0 && j == 0 && path_id == 1u && !fitzmode)
-                                COM_AddEnginePak ();
+                                COM_AddEnginePak (path_id, append_paths);
                 }
 
-                COM_AddPk3Files (com_gamedir, path_id);
+                COM_AddPk3Files (com_gamedir, path_id, append_paths);
         }
 }
 
@@ -2823,14 +2866,15 @@ static void COM_Game_f (void)
 		int i, pri;
 		char paths[1024];
 
-		if (!registered.value) //disable shareware quake
+		if (!registered.value && !COM_IsStandalone ()) //disable shareware quake
 		{
 			Con_Printf("You must have the registered version to use modified games\n");
 			return;
 		}
 
 		*paths = 0;
-		q_strlcat(paths, GAMENAME, sizeof(paths));
+		if (!COM_IsStandalone ())
+			q_strlcat(paths, GAMENAME, sizeof(paths));
 		for (pri = 0; pri <= 1; pri++)
 		{
 			for (i = 1; i < Cmd_Argc(); i++)
@@ -2888,7 +2932,11 @@ static qboolean COM_SetBaseDir (const char *path)
 	memcpy (pakpath, path, i);
 	memcpy (pakpath + i, pak0, sizeof (pak0));
 	if (!Sys_FileExists (pakpath))
+	{
+		if (!COM_IsStandalone ())
 		return false;
+		Con_Warning ("Standalone mode enabled: using basedir without %s\n", pak0 + 1);
+	}
 
 	memcpy (com_basedirs[0], path, i);
 	com_basedirs[0][i] = 0;
@@ -3451,11 +3499,19 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 {
 	int i;
 	const char *p, *startarg;
+	qboolean standalone_requested;
+	qboolean have_game;
 
 	Cvar_RegisterVariable (&registered);
 	Cvar_RegisterVariable (&cmdline);
+	Cvar_RegisterVariable (&standalone);
 	Cmd_AddCommand ("path", COM_Path_f);
 	Cmd_AddCommand ("game", COM_Game_f); //johnfitz
+
+	standalone_requested = (COM_CheckParm ("-standalone") != 0);
+	if (standalone_requested)
+		Cvar_Set ("standalone", "1");
+	have_game = (COM_CheckParm ("-game") != 0);
 
 	startarg = (com_argc == 2 && Sys_FileType (com_argv[1]) != FS_ENT_NONE) ? com_argv[1] : NULL;
 	if (startarg)
@@ -3491,7 +3547,8 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 	else
 	{
 		// start up with GAMENAME by default (id1)
-		COM_AddGameDirectory (GAMENAME);
+		if (!(standalone_requested && have_game))
+			COM_AddGameDirectory (GAMENAME);
 	}
 
 	/* this is the end of our base searchpath:
