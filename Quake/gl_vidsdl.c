@@ -1734,7 +1734,10 @@ void	VID_Init (void)
 	vid_initialized = true;
 
 	vid.colormap = host_colormap;
-	vid.fullbright = 256 - LittleLong (*((int *)vid.colormap + 2048));
+	if (vid.colormap)
+		vid.fullbright = 256 - LittleLong (*((int *)vid.colormap + 2048));
+	else
+		vid.fullbright = 224;
 
 	VID_SetMode (width, height, refreshrate, fullscreen);
 	VID_ApplyVSync ();

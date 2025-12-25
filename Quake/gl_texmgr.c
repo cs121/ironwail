@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "glquake.h"
 #include "bc7enc.h"
+#include "gl_ktx2.h"
 
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
 #define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
@@ -53,6 +54,7 @@ cvar_t			r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
 cvar_t			r_softemu_dither_screen = {"r_softemu_dither_screen", "1.0", CVAR_ARCHIVE};
 cvar_t			r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
 cvar_t			r_bc7_compress = {"r_bc7_compress", "0", CVAR_ARCHIVE};
+static cvar_t		gl_legacy_palettes = {"gl_legacy_palettes", "0", CVAR_ARCHIVE};
 
 static cvar_t	gl_max_size = {"gl_max_size", "0", CVAR_NONE};
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
@@ -771,6 +773,153 @@ static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 	}
 }
 
+static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
+{
+	FILE *f;
+	byte *buffer;
+	long length;
+
+	COM_FOpenFile (path, &f, NULL);
+	if (!f)
+		return NULL;
+
+	if (fseek (f, 0, SEEK_END) != 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	length = ftell (f);
+	if (length <= 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	if (fseek (f, 0, SEEK_SET) != 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	buffer = (byte *) malloc ((size_t) length);
+	if (!buffer)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	if (fread (buffer, 1, (size_t) length, f) != (size_t) length)
+	{
+		fclose (f);
+		free (buffer);
+		return NULL;
+	}
+
+	fclose (f);
+	*size_out = (size_t) length;
+	return buffer;
+}
+
+static qboolean TexMgr_LoadPaletteKTX2 (byte *pal)
+{
+	ktx2_header_t hdr;
+	ktx2_decoded_image_t decoded;
+	byte *raw;
+	size_t size;
+	qboolean ok = false;
+
+	raw = TexMgr_LoadFileWithSize ("gfx/palette.ktx2", &size);
+	if (!raw)
+		return false;
+
+	memset (&decoded, 0, sizeof (decoded));
+	if (!KTX2_ParseHeaderPublic (&hdr, raw, size))
+		goto cleanup;
+
+	if (!KTX2_TranscodeToRGBA (raw, size, &hdr, &decoded))
+		goto cleanup;
+
+	if (hdr.width * hdr.height < 256u)
+	{
+		Con_Warning ("palette.ktx2 too small (%ux%u)\n", (unsigned) hdr.width, (unsigned) hdr.height);
+		goto cleanup;
+	}
+
+	if (!decoded.mip_data[0] || decoded.mip_size[0] < 256u * 4u)
+		goto cleanup;
+
+	for (unsigned i = 0; i < 256; ++i)
+	{
+		const byte *src = decoded.mip_data[0] + i * 4;
+		pal[i * 3 + 0] = src[0];
+		pal[i * 3 + 1] = src[1];
+		pal[i * 3 + 2] = src[2];
+	}
+
+	ok = true;
+
+cleanup:
+	KTX2_FreeDecodedImage (&decoded);
+	free (raw);
+	return ok;
+}
+
+static qboolean TexMgr_LoadPaletteImage (byte *pal)
+{
+	int width, height;
+	enum srcformat fmt;
+	byte *data = Image_LoadImage ("gfx/palette", &width, &height, &fmt);
+
+	if (!data)
+		return false;
+	if (fmt != SRC_RGBA)
+	{
+		Con_Warning ("gfx/palette loaded with unexpected format %d\n", fmt);
+		return false;
+	}
+	if (width * height < 256)
+	{
+		Con_Warning ("gfx/palette image too small (%dx%d)\n", width, height);
+		return false;
+	}
+
+	for (int i = 0; i < 256; ++i)
+	{
+		pal[i * 3 + 0] = data[i * 4 + 0];
+		pal[i * 3 + 1] = data[i * 4 + 1];
+		pal[i * 3 + 2] = data[i * 4 + 2];
+	}
+
+	return true;
+}
+
+static qboolean TexMgr_LoadColormap (byte **colormap)
+{
+	FILE *f;
+
+	COM_FOpenFile ("gfx/colormap.lmp", &f, NULL);
+	if (!f)
+		return false;
+
+	*colormap = (byte *) Hunk_AllocNoFill (256 * 64);
+	if (fread (*colormap, 256 * 64, 1, f) != 1)
+		Sys_Error ("TexMgr_LoadPalette: colormap read error");
+	fclose (f);
+	return true;
+}
+
+static void TexMgr_SetDefaultFullbright (const byte *pal)
+{
+	memset (is_fullbright, 0, sizeof (is_fullbright));
+	for (int i = 224; i < 255; ++i)
+	{
+		const byte *src = pal + i * 3;
+		if (src[0] || src[1] || src[2])
+			SetBit (is_fullbright, i);
+	}
+}
+
 /*
 =================
 TexMgr_LoadPalette -- johnfitz -- was VID_SetPalette, moved here, renamed, rewritten
@@ -780,47 +929,65 @@ void TexMgr_LoadPalette (void)
 {
 	byte *pal, *src, *colormap;
 	int i, j, mark, numfb;
+	qboolean pal_loaded = false;
 	FILE *f;
-
-	COM_FOpenFile ("gfx/palette.lmp", &f, NULL);
-	if (!f)
-		Sys_Error ("Couldn't load gfx/palette.lmp");
 
 	mark = Hunk_LowMark ();
 	pal = (byte *) Hunk_AllocNoFill (768);
-	if (fread (pal, 768, 1, f) != 1)
-		Sys_Error ("Failed reading gfx/palette.lmp");
-	fclose(f);
+	colormap = NULL;
 
-	COM_FOpenFile ("gfx/colormap.lmp", &f, NULL);
-	if (!f)
-		Sys_Error ("Couldn't load gfx/colormap.lmp");
-	colormap = (byte *) Hunk_AllocNoFill (256 * 64);
-	if (fread (colormap, 256 * 64, 1, f) != 1)
-		Sys_Error ("TexMgr_LoadPalette: colormap read error");
-	fclose(f);
+	if (!gl_legacy_palettes.value)
+	{
+		pal_loaded = TexMgr_LoadPaletteKTX2 (pal);
+		if (!pal_loaded)
+			pal_loaded = TexMgr_LoadPaletteImage (pal);
+	}
+
+	if (!pal_loaded)
+	{
+		COM_FOpenFile ("gfx/palette.lmp", &f, NULL);
+		if (!f)
+			Sys_Error ("Couldn't load gfx/palette.lmp");
+
+		if (fread (pal, 768, 1, f) != 1)
+			Sys_Error ("Failed reading gfx/palette.lmp");
+		fclose (f);
+		pal_loaded = true;
+	}
+
+	if (!TexMgr_LoadColormap (&colormap))
+	{
+		if (gl_legacy_palettes.value)
+			Sys_Error ("Couldn't load gfx/colormap.lmp");
+		Con_Warning ("Couldn't load gfx/colormap.lmp, using default fullbright range\n");
+		TexMgr_SetDefaultFullbright (pal);
+		colormap = NULL;
+	}
 
 	//find fullbright colors
-	memset (is_fullbright, 0, sizeof (is_fullbright));
-	numfb = 0;
-	src = pal;
-	for (i = 0; i < 256; i++, src += 3)
+	if (colormap)
 	{
-		if (!src[0] && !src[1] && !src[2])
-			continue; // black can't be fullbright
-
-		for (j = 1; j < 64; j++)
-			if (colormap[i + j * 256] != colormap[i])
-				break;
-
-		if (j == 64) 
+		memset (is_fullbright, 0, sizeof (is_fullbright));
+		numfb = 0;
+		src = pal;
+		for (i = 0; i < 256; i++, src += 3)
 		{
-			SetBit (is_fullbright, i);
-			numfb++;
+			if (!src[0] && !src[1] && !src[2])
+				continue; // black can't be fullbright
+
+			for (j = 1; j < 64; j++)
+				if (colormap[i + j * 256] != colormap[i])
+					break;
+
+			if (j == 64) 
+			{
+				SetBit (is_fullbright, i);
+				numfb++;
+			}
 		}
+		if (developer.value)
+			Con_SafePrintf ("Colormap has %d fullbright colors\n", numfb);
 	}
-	if (developer.value)
-		Con_SafePrintf ("Colormap has %d fullbright colors\n", numfb);
 
 	//fill color tables
 	src = pal;
@@ -857,6 +1024,60 @@ void TexMgr_LoadPalette (void)
 	((byte *) &d_8to24table_conchars[0]) [3] = 0;
 
 	Hunk_FreeToLowMark (mark);
+}
+
+void TexMgr_DecodeIndexedToRGBA (const byte *indexed, int pixel_count, int transparent_index, texmgr_palmode_t mode, byte *rgba)
+{
+	for (int i = 0; i < pixel_count; ++i)
+	{
+		int idx = indexed[i];
+		byte *dst = rgba + i * 4;
+		const byte *src = (const byte *) &d_8to24table_opaque[idx];
+		qboolean transparent = (transparent_index >= 0 && idx == transparent_index);
+		qboolean is_fb = GetBit (is_fullbright, idx);
+
+		if (transparent)
+		{
+			dst[0] = dst[1] = dst[2] = 0;
+			dst[3] = 0;
+			continue;
+		}
+
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = 255;
+
+		if (mode == TEXMGR_PALMODE_ALPHABRIGHT)
+			dst[3] = is_fb ? 0 : 255;
+		else if (mode == TEXMGR_PALMODE_NOBRIGHT && is_fb)
+		{
+			dst[0] = dst[1] = dst[2] = 0;
+		}
+	}
+}
+
+void TexMgr_BuildFullbrightRGBA (const byte *indexed, int pixel_count, int transparent_index, byte *rgba)
+{
+	for (int i = 0; i < pixel_count; ++i)
+	{
+		int idx = indexed[i];
+		byte *dst = rgba + i * 4;
+		const byte *src = (const byte *) &d_8to24table_opaque[idx];
+		qboolean transparent = (transparent_index >= 0 && idx == transparent_index);
+		qboolean is_fb = GetBit (is_fullbright, idx);
+
+		if (transparent || !is_fb)
+		{
+			dst[0] = dst[1] = dst[2] = dst[3] = 0;
+			continue;
+		}
+
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = 255;
+	}
 }
 
 /*
@@ -903,6 +1124,7 @@ void TexMgr_Init (void)
 	TexMgr_ApplySettings ();
 
 	// palette
+	Cvar_RegisterVariable (&gl_legacy_palettes);
 	TexMgr_LoadPalette ();
 
 Cvar_RegisterVariable (&gl_max_size);
