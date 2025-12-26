@@ -12,15 +12,19 @@ layout(location=0) out vec4 outColor;
 
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
+        float raw = depth;
+        if (mode == 1)
+                raw = 1.0 - raw;
         if (reversed > 0.5)
         {
-                if (mode == 1)
-                        depth = 1.0 - depth;
                 if (mode == 2)
-                        return (1.0 - depth) * 2.0 - 1.0;
-                return depth;
+                        raw = 1.0 - raw;
+                return raw;
         }
-        return depth * 2.0 - 1.0;
+        float ndc = raw * 2.0 - 1.0;
+        if (mode == 2)
+                ndc = -ndc;
+        return ndc;
 }
 
 vec3 ReconstructViewPos(vec2 uv, float depth)

@@ -49,17 +49,23 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
         vec3(0.2397, -0.1794, 0.3984)
 );
 
+// Root cause: SSAO sampled depth in mixed clip/window space with reverse-Z ambiguity.
+// Fix: reconstruct view space from the same depth buffer using consistent NDC mapping.
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
+        float raw = depth;
+        if (mode == 1)
+                raw = 1.0 - raw;
         if (reversed > 0.5)
         {
-                if (mode == 1)
-                        depth = 1.0 - depth;
                 if (mode == 2)
-                        return (1.0 - depth) * 2.0 - 1.0;
-                return depth;
+                        raw = 1.0 - raw;
+                return raw;
         }
-        return depth * 2.0 - 1.0;
+        float ndc = raw * 2.0 - 1.0;
+        if (mode == 2)
+                ndc = -ndc;
+        return ndc;
 }
 
 vec3 ReconstructViewPos(vec2 uv, float depth)
@@ -83,6 +89,8 @@ vec3 ComputeNormalFromViewPos(vec3 viewPos)
         vec3 normal = normalize(cross(dx, dy));
         if (length(normal) < 1e-4)
                 return vec3(0.0, 0.0, 1.0);
+        if (normal.z < 0.0)
+                normal = -normal;
         return normal;
 }
 
@@ -110,22 +118,15 @@ void main()
         float depth = texture(DepthTexture, uv).r;
         if (debugMode == 1)
         {
-                outColor = vec4(depth, depth, depth, 1.0);
+                float debugDepth = depth;
+                if (u_reversedZMode == 1)
+                        debugDepth = 1.0 - debugDepth;
+                if (u_depthParams.z > 0.5)
+                        debugDepth = 1.0 - debugDepth;
+                outColor = vec4(debugDepth, debugDepth, debugDepth, 1.0);
                 return;
         }
         if (debugMode == 2)
-        {
-                if (IsSkyDepth(depth, u_depthParams))
-                {
-                        outColor = vec4(1.0);
-                        return;
-                }
-                float viewZ = GetViewZ(uv, depth);
-                float v = clamp(viewZ / debugFar, 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
-                return;
-        }
-        if (debugMode == 3)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
@@ -145,7 +146,7 @@ void main()
 
         vec3 viewPos = ReconstructViewPos(uv, depth);
         vec3 normal = ComputeNormalFromViewPos(viewPos);
-        if (debugMode == 5)
+        if (debugMode == 3)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
                 outColor = vec4(debugNormal, 1.0);
@@ -180,12 +181,14 @@ void main()
                 vec3 sampleViewPos = ReconstructViewPos(sampleUV, sampleDepth);
                 float sampleViewDepth = -sampleViewPos.z;
                 float samplePosDepth = -samplePos.z;
-                float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(samplePosDepth - sampleViewDepth), 1e-4));
-                if (sampleViewDepth + bias < samplePosDepth)
+                float dz = sampleViewDepth - samplePosDepth - bias;
+                float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
+                if (dz < 0.0)
                         occlusion += rangeCheck;
         }
 
         float ao = 1.0 - occlusion / float(samples);
+        ao = clamp(ao, 0.0, 1.0);
         ao = pow(ao, u_params0.z);
         ao = max(ao, u_params0.w);
         outColor = vec4(ao, ao, ao, 1.0);
