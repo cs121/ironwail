@@ -518,7 +518,12 @@ void main()
                                 ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                         bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
                         float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
-                        if (ssaoDebugMode == 8)
+                        if (ssaoDebugMode == 9)
+                        {
+                                float mask = centerOpaque ? (1.0 - ao) : 0.0;
+                                color.rgb = vec3(mask);
+                        }
+                        else if (ssaoDebugMode == 8)
                         {
                                 vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
                                 vec2 colorSize = vec2(textureSize(GammaTexture, 0));

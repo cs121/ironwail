@@ -29,6 +29,7 @@
 - `6`: sample hit ratio (valid samples / total)
 - `7`: AO raw (pre-blur)
 - `8`: blur debug (raw vs blur + depth weight)
+- `9`: AO mask (occlusion where applied)
 
 ## Noise controls
 - `r_ssao_noise` toggles per-pixel rotation.

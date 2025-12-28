@@ -268,7 +268,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 depth raw, 2 view-space Z, 3 view-space position, 4 normals, 5 noise, 6 sample hit ratio, 7 AO raw, 8 blur debug.
+// r_ssao_debug modes: 0 off, 1 depth raw, 2 view-space Z, 3 view-space position, 4 normals, 5 noise, 6 sample hit ratio, 7 AO raw, 8 blur debug, 9 AO mask.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -1030,7 +1030,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
-	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 8) : -1;
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 9) : -1;
 	qboolean debug_show_ao_raw = (debug_mode_i == 7);
 	qboolean debug_show_blur_debug = (debug_mode_i == 8);
 	int debug_mode_ssao = -1;
@@ -1810,7 +1810,7 @@ void GL_PostProcess (void)
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
-		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 8) : -1;
+		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 9) : -1;
 		ssao_debug_mode = (debug_mode_i > 0) ? (float)debug_mode_i : -1.f;
 	}
 	if (ssao_texture == 0)
