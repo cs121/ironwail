@@ -51,6 +51,12 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
 
 // Root cause: SSAO sampled depth in mixed clip/window space with reverse-Z ambiguity.
 // Fix: reconstruct view space from the same depth buffer using consistent NDC mapping.
+float DepthRaw(vec2 uv)
+{
+        return texture(DepthTexture, uv).r;
+}
+
+// Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
         float raw = depth;
@@ -110,7 +116,9 @@ void main()
 {
         vec2 invResolution = u_params1.xy;
         vec2 uv = (gl_FragCoord.xy + 0.5) * invResolution;
-        int debugMode = int(u_debugParams.x + 0.5);
+        int debugMode = -1;
+        if (u_debugParams.x >= -0.5)
+                debugMode = int(u_debugParams.x + 0.5);
         float debugFar = max(u_debugParams.y, 1e-3);
         if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
         {
@@ -118,15 +126,22 @@ void main()
                 return;
         }
 
-        float depth = texture(DepthTexture, uv).r;
+        float depth = DepthRaw(uv);
+        if (debugMode == 0)
+        {
+                outColor = vec4(depth, depth, depth, 1.0);
+                return;
+        }
         if (debugMode == 1)
         {
-                float debugDepth = depth;
-                if (u_reversedZMode == 1)
-                        debugDepth = 1.0 - debugDepth;
-                if (u_depthParams.z > 0.5)
-                        debugDepth = 1.0 - debugDepth;
-                outColor = vec4(debugDepth, debugDepth, debugDepth, 1.0);
+                if (IsSkyDepth(depth, u_depthParams))
+                {
+                        outColor = vec4(1.0);
+                        return;
+                }
+                float viewZ = GetViewZ(uv, depth);
+                float v = clamp(viewZ / debugFar, 0.0, 1.0);
+                outColor = vec4(v, v, v, 1.0);
                 return;
         }
         if (debugMode == 2)
@@ -137,7 +152,7 @@ void main()
                         return;
                 }
                 float viewZ = GetViewZ(uv, depth);
-                float v = clamp(viewZ / debugFar, 0.0, 1.0);
+                float v = clamp(abs(viewZ) / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
