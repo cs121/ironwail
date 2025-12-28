@@ -212,6 +212,47 @@ float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
         }
 }
 
+float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
+{
+        vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
+        vec2 colorSize = vec2(textureSize(GammaTexture, 0));
+        if (all(lessThan(abs(ssaoSize - colorSize), vec2(0.5))))
+                return texture(SSAOTexture, uv).r;
+
+        vec2 ssaoCoord = uv * ssaoSize - vec2(0.5);
+        vec2 base = floor(ssaoCoord);
+        vec2 frac = ssaoCoord - base;
+        vec2 ssaoToScreen = colorSize / max(ssaoSize, vec2(1.0));
+        float accum = 0.0;
+        float total = 0.0;
+        float depthThreshold = 0.02 * max(centerDepth, 1e-4);
+
+        for (int y = 0; y <= 1; ++y)
+        {
+                for (int x = 0; x <= 1; ++x)
+                {
+                        vec2 offset = vec2(float(x), float(y));
+                        vec2 aoTexel = clamp(base + offset, vec2(0.0), ssaoSize - vec2(1.0));
+                        vec2 aoUV = (aoTexel + 0.5) / ssaoSize;
+                        float weight = (x == 0 ? (1.0 - frac.x) : frac.x) * (y == 0 ? (1.0 - frac.y) : frac.y);
+                        if (useDepth && info.valid)
+                        {
+                                vec2 sampleScreenPx = (aoTexel + 0.5) * ssaoToScreen;
+                                float sampleDepth = SampleLinearDepth(sampleScreenPx, info);
+                                float depthDiff = abs(sampleDepth - centerDepth);
+                                float depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
+                                weight *= depthWeight;
+                        }
+                        accum += texture(SSAOTexture, aoUV).r * weight;
+                        total += weight;
+                }
+        }
+
+        if (total > 0.0)
+                return accum / total;
+        return texture(SSAOTexture, uv).r;
+}
+
 void AccumulateMotionSample(inout vec3 accum, inout float weight, vec2 sampleUV, vec2 sampleCoordPx, vec2 viewMin, vec2 viewMax, DepthSamplingInfo info, bool useDepth, float centerDepth, float depthThresholdRatio)
 {
         if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
@@ -453,16 +494,18 @@ void main()
 
                 float ssaoIntensity = SSAOParams.x;
                 int ssaoDebugMode = int(floor(SSAOParams.y + 0.5));
-                if (ssaoDebugMode >= 0 && inView)
+                bool ssaoInView = inView;
+                if ((ssaoDebugMode > 0 || ssaoIntensity > 0.0) && ssaoInView)
                 {
-                        float ao = texture(SSAOTexture, uv).r;
-                        color.rgb = vec3(ao);
-                }
-                else if (ssaoIntensity > 0.0 && inView && centerOpaque)
-                {
-                        float ao = texture(SSAOTexture, uv).r;
-                        float aoApplied = mix(1.0, ao, ssaoIntensity);
-                        color.rgb *= aoApplied;
+                        float ssaoCenterDepth = 0.0;
+                        bool ssaoUseDepth = depthInfo.valid;
+                        if (ssaoUseDepth)
+                                ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                        float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, ssaoUseDepth);
+                        if (ssaoDebugMode > 0)
+                                color.rgb = vec3(ao);
+                        else if (centerOpaque)
+                                color.rgb *= mix(1.0, ao, ssaoIntensity);
                 }
 
                 float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));

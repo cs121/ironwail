@@ -20,20 +20,22 @@
 - AO pixel centers are mapped to screen pixel centers to avoid half-res sampling seams.
 
 ## Debug modes (`r_ssao_debug`)
-- `-1`: off
-- `0`: final AO
-- `1`: depth_raw (0..1)
-- `2`: view-space Z (linearized)
-- `3`: viewPos.xyz (each channel)
-- `4`: normals (reconstructed)
-- `5`: AO raw (pre-blur)
-- `6`: AO blurred
-- `7`: noise/rotation
-- `8`: texel grid (AO vs screen)
+- `0`: off
+- `1`: AO raw (pre-blur)
+- `2`: AO blurred
+- `3`: noise/rotation
+- `4`: view-space Z (linearized)
+- `5`: normals (reconstructed)
+- `6`: AO UVs (uv.x/uv.y gradient)
 
 ## Noise controls
-- `r_ssao_noise` toggles per-pixel rotation (IGN-based, no tiling).
+- `r_ssao_noise` toggles per-pixel rotation.
+- `r_ssao_noise_mode` selects noise source (`1`=IGN hash, `2`=noise texture).
 - `r_ssao_freeze_noise` freezes the noise seed for debugging.
+
+## Format + blur controls
+- `r_ssao_format` selects AO target precision (`0`=R8, `1`=R16F).
+- `r_ssao_blur_bilateral` toggles depth-aware blur weighting.
 
 ## Normal source
 - `r_ssao_normalsource 0`: neighbor-based reconstruction from depth.

@@ -14,6 +14,7 @@ layout(location=9) uniform vec4 u_debugParams; // x: debug mode, y: debug far
 layout(location=10) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
 layout(location=11) uniform int u_normalSource; // 0: neighbor, 1: derivatives
 layout(location=12) uniform int u_yFlip; // 0: none, 1: flip Y
+layout(location=13) uniform int u_noiseMode; // 0: off, 1: IGN, 2: texture
 
 layout(location=0) out vec4 outColor;
 
@@ -218,7 +219,7 @@ void main()
         vec2 uv = AoUvFromPixel(aoPixel);
         vec2 depthUv = ScreenUvFromAoPixel(aoPixel);
         int debugMode = -1;
-        if (u_debugParams.x >= -0.5)
+        if (u_debugParams.x >= 0.5)
                 debugMode = int(u_debugParams.x + 0.5);
         float debugFar = max(u_debugParams.y, 1e-3);
         if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
@@ -227,13 +228,43 @@ void main()
                 return;
         }
 
-        float depth = DepthRaw(depthUv);
-        if (debugMode == 1)
+        if (debugMode == 6)
         {
-                outColor = vec4(depth, depth, depth, 1.0);
+                outColor = vec4(uv, 0.0, 1.0);
                 return;
         }
-        if (debugMode == 2)
+
+        float noiseSeed = u_noiseParams.w;
+        float noiseEnabled = u_noiseParams.z;
+        vec2 noiseVec;
+        if (noiseEnabled > 0.5 && u_noiseMode > 0)
+        {
+                vec2 screenPixel = floor(ScreenUvFromAoPixel(aoPixel) * ScreenSize());
+                ivec2 noisePixel = ivec2(screenPixel);
+                if (u_noiseMode == 2)
+                {
+                        vec2 noiseUV = (screenPixel + 0.5) / ScreenSize() * u_noiseParams.xy;
+                        vec2 noiseSample = texture(NoiseTexture, noiseUV).rg * 2.0 - 1.0;
+                        noiseVec = normalize(noiseSample);
+                }
+                else
+                {
+                        float angle = RandIGN(noisePixel, noiseSeed) * 6.2831853;
+                        noiseVec = vec2(cos(angle), sin(angle));
+                }
+        }
+        else
+        {
+                noiseVec = vec2(1.0, 0.0);
+        }
+        if (debugMode == 3)
+        {
+                outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
+                return;
+        }
+
+        float depth = DepthRaw(depthUv);
+        if (debugMode == 4)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
@@ -245,18 +276,6 @@ void main()
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
-        if (debugMode == 3)
-        {
-                if (IsSkyDepth(depth, u_depthParams))
-                {
-                        outColor = vec4(1.0);
-                        return;
-                }
-                vec3 viewPos = ReconstructViewPos(depthUv, depth);
-                vec3 v = clamp(viewPos / debugFar, vec3(-1.0), vec3(1.0));
-                outColor = vec4(v * 0.5 + 0.5, 1.0);
-                return;
-        }
         if (IsSkyDepth(depth, u_depthParams))
         {
                 outColor = vec4(1.0);
@@ -265,37 +284,10 @@ void main()
 
         vec3 viewPos = ReconstructViewPos(depthUv, depth);
         vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(depthUv);
-        if (debugMode == 4)
+        if (debugMode == 5)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
                 outColor = vec4(debugNormal, 1.0);
-                return;
-        }
-
-        float noiseSeed = u_noiseParams.w;
-        float noiseEnabled = u_noiseParams.z;
-        vec2 noiseVec;
-        if (noiseEnabled > 0.5)
-        {
-                float angle = RandIGN(ivec2(aoPixel), noiseSeed) * 6.2831853;
-                noiseVec = vec2(cos(angle), sin(angle));
-        }
-        else
-        {
-                noiseVec = vec2(1.0, 0.0);
-        }
-        if (debugMode == 7)
-        {
-                outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
-                return;
-        }
-        if (debugMode == 8)
-        {
-                vec2 scale = AoToScreenScale();
-                vec2 screenPixel = aoPixel * scale + 0.5 * scale;
-                float aoChecker = mod(aoPixel.x + aoPixel.y, 2.0);
-                float screenChecker = mod(floor(screenPixel.x) + floor(screenPixel.y), 2.0);
-                outColor = vec4(aoChecker, screenChecker, 0.0, 1.0);
                 return;
         }
 
@@ -336,10 +328,5 @@ void main()
         ao = clamp(ao, 0.0, 1.0);
         ao = pow(ao, u_params0.z);
         ao = max(ao, u_params0.w);
-        if (debugMode == 5 || debugMode == 6)
-        {
-                outColor = vec4(ao, ao, ao, 1.0);
-                return;
-        }
         outColor = vec4(ao, ao, ao, 1.0);
 }
