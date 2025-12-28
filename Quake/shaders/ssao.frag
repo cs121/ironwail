@@ -160,18 +160,11 @@ float DepthToNdcZ(float depth, float reversed, int mode)
 }
 
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
-float ViewZFromDepth(float depth01, mat4 proj, bool reversedZ)
+float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
 {
-        float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
-        float nearPlane = u_depthParams.x;
-        float farPlane = u_depthParams.y;
-        if (reversedZ)
-        {
-                float denom = nearPlane + ndcDepth * (farPlane - nearPlane);
-                return (nearPlane * farPlane) / max(denom, 1e-6);
-        }
-        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        // SSAO FIX: Use inverse projection for depth reconstruction to avoid reversed-Z/clip-control mismatches.
+        vec3 viewPos = ReconstructViewPos(uv, depth01);
+        return viewPos.x;
 }
 
 float DepthRawFromPixel(ivec2 pixel)
@@ -191,7 +184,7 @@ vec3 ReconstructViewPos(vec2 uv, float depth)
         vec4 view = u_invProj * clip;
         float w = view.w;
         if (abs(w) < 1e-6)
-                return vec3(0.0);
+                return vec3(1e30);
         return view.xyz / w;
 }
 
@@ -263,6 +256,16 @@ float RandIGN(ivec2 pixel, float seed)
         return fract(52.9829189 * f);
 }
 
+bool IsInvalidFloat(float v)
+{
+        return !(v > -1e20 && v < 1e20);
+}
+
+bool IsInvalidVec3(vec3 v)
+{
+        return IsInvalidFloat(v.x) || IsInvalidFloat(v.y) || IsInvalidFloat(v.z);
+}
+
 void main()
 {
         vec2 aoPixel = AoPixelCoord();
@@ -322,7 +325,12 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                float viewZ = ViewZFromDepth(depth, u_proj, u_depthParams.z > 0.5);
+                float viewZ = ViewZFromDepth(screenUv, depth, u_depthParams.z > 0.5);
+                if (IsInvalidFloat(viewZ))
+                {
+                        outColor = vec4(1.0, 0.0, 1.0, 1.0);
+                        return;
+                }
                 float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
@@ -335,6 +343,11 @@ void main()
                         return;
                 }
                 vec3 viewPos = ReconstructViewPos(screenUv, depth);
+                if (IsInvalidVec3(viewPos))
+                {
+                        outColor = vec4(1.0, 0.0, 1.0, 1.0);
+                        return;
+                }
                 float viewZ = max(viewPos.x, 0.0);
                 float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
@@ -356,7 +369,17 @@ void main()
         }
 
         vec3 viewPos = ReconstructViewPos(screenUv, depth);
+        if (IsInvalidVec3(viewPos))
+        {
+                outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
+                return;
+        }
         vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(screenUv);
+        if (IsInvalidVec3(normal))
+        {
+                outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
+                return;
+        }
         if (debugMode == 4)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
@@ -389,7 +412,9 @@ void main()
                 float sampleDepth = DepthRawFromUv(sampleUV);
                 if (IsSkyDepth(sampleDepth, u_depthParams))
                         continue;
-                float sampleViewDepth = ViewZFromDepth(sampleDepth, u_proj, u_depthParams.z > 0.5);
+                float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepth, u_depthParams.z > 0.5);
+                if (IsInvalidFloat(sampleViewDepth))
+                        continue;
                 float samplePosDepth = samplePos.x;
                 float dz = sampleViewDepth - samplePosDepth - bias;
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
