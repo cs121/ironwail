@@ -49,8 +49,10 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
         vec3(0.2397, -0.1794, 0.3984)
 );
 
-// Root cause: SSAO sampled depth in mixed clip/window space with reverse-Z ambiguity.
-// Fix: reconstruct view space from the same depth buffer using consistent NDC mapping.
+// SSAO conventions:
+// - View space uses +X forward (camera looks down +X).
+// - When reverse-Z (clip control) is enabled, NDC depth is [0..1]; otherwise [-1..1].
+// - All comparisons are done in view space using +X depth.
 float DepthRaw(vec2 uv)
 {
         return texture(DepthTexture, uv).r;
@@ -92,6 +94,11 @@ float GetViewZ(vec2 uv, float depth)
         return view.x;
 }
 
+float LinearizeViewZ(vec2 uv, float depth)
+{
+        return GetViewZ(uv, depth);
+}
+
 vec3 ComputeNormalFromViewPos(vec3 viewPos)
 {
         vec3 dx = dFdx(viewPos);
@@ -104,6 +111,13 @@ vec3 ComputeNormalFromViewPos(vec3 viewPos)
         if (dot(normal, viewDir) < 0.0)
                 normal = -normal;
         return normal;
+}
+
+float NdcZToDisplay(float ndcDepth, float reversed)
+{
+        if (reversed > 0.5)
+                return clamp(ndcDepth, 0.0, 1.0);
+        return clamp(ndcDepth * 0.5 + 0.5, 0.0, 1.0);
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -135,6 +149,13 @@ void main()
                 outColor = vec4(depth, depth, depth, 1.0);
                 return;
         }
+        if (debugMode == 8)
+        {
+                float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+                float v = NdcZToDisplay(ndcDepth, u_depthParams.z);
+                outColor = vec4(v, v, v, 1.0);
+                return;
+        }
         if (debugMode == 2)
         {
                 if (IsSkyDepth(depth, u_depthParams))
@@ -142,7 +163,7 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                float viewZ = GetViewZ(uv, depth);
+                float viewZ = LinearizeViewZ(uv, depth);
                 float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
