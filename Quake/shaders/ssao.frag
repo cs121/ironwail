@@ -79,7 +79,8 @@ vec3 ReconstructViewPos(vec2 uv, float depth)
 float GetViewZ(vec2 uv, float depth)
 {
         vec3 view = ReconstructViewPos(uv, depth);
-        return -view.z;
+        // SSAO FIX: Quake view space uses +X as forward depth, not -Z.
+        return view.x;
 }
 
 vec3 ComputeNormalFromViewPos(vec3 viewPos)
@@ -89,7 +90,9 @@ vec3 ComputeNormalFromViewPos(vec3 viewPos)
         vec3 normal = normalize(cross(dx, dy));
         if (length(normal) < 1e-4)
                 return vec3(0.0, 0.0, 1.0);
-        if (normal.z < 0.0)
+        // SSAO FIX: Orient reconstructed normals toward the camera for stable TBN.
+        vec3 viewDir = normalize(-viewPos);
+        if (dot(normal, viewDir) < 0.0)
                 normal = -normal;
         return normal;
 }
@@ -179,8 +182,9 @@ void main()
                 if (IsSkyDepth(sampleDepth, u_depthParams))
                         continue;
                 vec3 sampleViewPos = ReconstructViewPos(sampleUV, sampleDepth);
-                float sampleViewDepth = -sampleViewPos.z;
-                float samplePosDepth = -samplePos.z;
+                // SSAO FIX: Depth comparisons should use view-space X (forward axis).
+                float sampleViewDepth = sampleViewPos.x;
+                float samplePosDepth = samplePos.x;
                 float dz = sampleViewDepth - samplePosDepth - bias;
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
                 if (dz < 0.0)

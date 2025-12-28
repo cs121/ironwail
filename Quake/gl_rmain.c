@@ -924,6 +924,7 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	GLint tex_width = 0;
 	GLint tex_height = 0;
 	GLint compare_mode = 0;
+	GLint bound_depth_tex = 0;
 	GLint ao_internal_format = 0;
 	GLint ao_width = 0;
 	GLint ao_height = 0;
@@ -933,6 +934,7 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	const char *target_name = "GL_TEXTURE_2D";
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, depth_tex);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_depth_tex);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_width);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &tex_height);
@@ -945,8 +947,8 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	glGetIntegerv (GL_VIEWPORT, viewport);
 	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &draw_fbo);
 
-	Con_DPrintf ("SSAO depth input: tex=%u target=%s format=0x%X size=%dx%d compare=0x%X viewport=%dx%d+%d+%d fbo=%d\n",
-		depth_tex, target_name, internal_format, tex_width, tex_height,
+	Con_DPrintf ("SSAO depth input: tex=%u bound=%d target=%s format=0x%X size=%dx%d compare=0x%X viewport=%dx%d+%d+%d fbo=%d\n",
+		depth_tex, bound_depth_tex, target_name, internal_format, tex_width, tex_height,
 		compare_mode, viewport[2], viewport[3], viewport[0], viewport[1], draw_fbo);
 	Con_DPrintf ("SSAO AO output: tex=%u format=0x%X size=%dx%d\n",
 		ao_tex, ao_internal_format, ao_width, ao_height);
@@ -1007,6 +1009,14 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int debug_mode_i = (int)Q_rint (r_ssao_debug.value);
 	float debug_mode = q_max (0.f, (float)debug_mode_i);
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
+	static qboolean ssao_logged = false;
+	if (!ssao_logged)
+	{
+		// SSAO FIX: Log depth configuration once to validate reversed-Z/clip control wiring.
+		Con_DPrintf ("SSAO config: reversedZ=%d clipcontrol=%d znear=%0.4f zfar=%0.4f\n",
+			(int)reversed_z, gl_clipcontrol_able ? 1 : 0, view_znear, view_zfar);
+		ssao_logged = true;
+	}
 
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
