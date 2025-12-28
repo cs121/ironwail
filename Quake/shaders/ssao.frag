@@ -58,11 +58,6 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
 // - View space uses +X forward (camera looks down +X).
 // - When reverse-Z (clip control) is enabled, NDC depth is [0..1]; otherwise [-1..1].
 // - All comparisons are done in view space using +X depth.
-float DepthRaw(vec2 uv)
-{
-        return texture(DepthTexture, uv).r;
-}
-
 vec2 ApplyYFlip(vec2 uv)
 {
         if (u_yFlip != 0)
@@ -85,9 +80,9 @@ vec2 AoInvSize()
         return u_aoParams.xy;
 }
 
-vec2 AoToScreenScale()
+vec2 AoSize()
 {
-        return ScreenSize() * AoInvSize();
+        return u_aoParams.zw;
 }
 
 vec2 AoPixelCoord()
@@ -100,17 +95,50 @@ vec2 AoUvFromPixel(vec2 aoPixel)
         return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
 }
 
-vec2 ScreenUvFromAoPixel(vec2 aoPixel)
+vec2 UnflipUv(vec2 uv)
 {
-        vec2 scale = AoToScreenScale();
-        vec2 screenPixel = aoPixel * scale + vec2(0.5);
-        return ApplyYFlip(screenPixel * ScreenInvSize());
+        if (u_yFlip != 0)
+                uv.y = 1.0 - uv.y;
+        return uv;
 }
 
-vec2 ScreenPixelFromAoPixel(vec2 aoPixel)
+vec2 ViewMinPx()
 {
-        vec2 scale = AoToScreenScale();
-        return aoPixel * scale + vec2(0.5);
+        return floor(u_viewRect.xy * ScreenSize());
+}
+
+vec2 ViewMaxPx()
+{
+        vec2 minPx = ViewMinPx();
+        vec2 maxPx = floor(u_viewRect.zw * ScreenSize() - vec2(1.0));
+        return max(minPx, maxPx);
+}
+
+ivec2 ClampScreenPixel(vec2 pixel)
+{
+        vec2 maxPx = ScreenSize() - vec2(1.0);
+        return ivec2(clamp(pixel, vec2(0.0), maxPx));
+}
+
+ivec2 ScreenPixelFromAoPixelNearest(vec2 aoPixel)
+{
+        vec2 screenSize = ScreenSize();
+        vec2 aoSize = max(AoSize(), vec2(1.0));
+        // SSAO FIX: Snap AO pixels to integer depth texels to avoid half-res UV drift/banding.
+        vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
+        return ClampScreenPixel(screenPixel);
+}
+
+ivec2 ScreenPixelFromUv(vec2 uv)
+{
+        vec2 unflipped = UnflipUv(uv);
+        vec2 screenPixel = floor(unflipped * ScreenSize());
+        return ClampScreenPixel(screenPixel);
+}
+
+vec2 ScreenUvFromPixel(ivec2 pixel)
+{
+        return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
 }
 
 // Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
@@ -131,18 +159,29 @@ float DepthToNdcZ(float depth, float reversed, int mode)
         return ndc;
 }
 
-float LinearizeViewZ(float depth)
+// Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
+float ViewZFromDepth(float depth01, mat4 proj, bool reversedZ)
 {
-        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+        float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
         float nearPlane = u_depthParams.x;
         float farPlane = u_depthParams.y;
-        if (u_depthParams.z > 0.5)
+        if (reversedZ)
         {
                 float denom = nearPlane + ndcDepth * (farPlane - nearPlane);
                 return (nearPlane * farPlane) / max(denom, 1e-6);
         }
         float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
         return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+}
+
+float DepthRawFromPixel(ivec2 pixel)
+{
+        return texelFetch(DepthTexture, pixel, 0).r;
+}
+
+float DepthRawFromUv(vec2 uv)
+{
+        return DepthRawFromPixel(ScreenPixelFromUv(uv));
 }
 
 vec3 ReconstructViewPos(vec2 uv, float depth)
@@ -181,26 +220,31 @@ bool IsSkyDepth(float depth, vec4 depthParams)
 
 vec3 ReconstructNormalFromDepth(vec2 uv)
 {
-        vec2 texel = ScreenInvSize();
-        vec2 uvRight = clamp(uv + vec2(texel.x, 0.0), u_viewRect.xy, u_viewRect.zw);
-        vec2 uvLeft = clamp(uv - vec2(texel.x, 0.0), u_viewRect.xy, u_viewRect.zw);
-        vec2 uvUp = clamp(uv + vec2(0.0, texel.y), u_viewRect.xy, u_viewRect.zw);
-        vec2 uvDown = clamp(uv - vec2(0.0, texel.y), u_viewRect.xy, u_viewRect.zw);
+        ivec2 centerPixel = ScreenPixelFromUv(uv);
+        vec2 viewMinPx = ViewMinPx();
+        vec2 viewMaxPx = ViewMaxPx();
+        ivec2 rightPixel = ivec2(clamp(vec2(centerPixel + ivec2(1, 0)), viewMinPx, viewMaxPx));
+        ivec2 leftPixel = ivec2(clamp(vec2(centerPixel - ivec2(1, 0)), viewMinPx, viewMaxPx));
+        ivec2 upPixel = ivec2(clamp(vec2(centerPixel + ivec2(0, 1)), viewMinPx, viewMaxPx));
+        ivec2 downPixel = ivec2(clamp(vec2(centerPixel - ivec2(0, 1)), viewMinPx, viewMaxPx));
 
-        float centerDepth = DepthRaw(uv);
+        float centerDepth = DepthRawFromPixel(centerPixel);
         if (IsSkyDepth(centerDepth, u_depthParams))
                 return vec3(0.0, 0.0, 1.0);
 
-        vec3 p = ReconstructViewPos(uv, centerDepth);
-        float depthRight = DepthRaw(uvRight);
+        vec2 uvCenter = ScreenUvFromPixel(centerPixel);
+        vec3 p = ReconstructViewPos(uvCenter, centerDepth);
+        float depthRight = DepthRawFromPixel(rightPixel);
         if (IsSkyDepth(depthRight, u_depthParams))
-                depthRight = DepthRaw(uvLeft);
-        vec3 pr = ReconstructViewPos(IsSkyDepth(depthRight, u_depthParams) ? uv : uvRight, depthRight);
+                depthRight = DepthRawFromPixel(leftPixel);
+        vec2 uvRight = ScreenUvFromPixel(IsSkyDepth(depthRight, u_depthParams) ? centerPixel : rightPixel);
+        vec3 pr = ReconstructViewPos(uvRight, depthRight);
 
-        float depthUp = DepthRaw(uvUp);
+        float depthUp = DepthRawFromPixel(upPixel);
         if (IsSkyDepth(depthUp, u_depthParams))
-                depthUp = DepthRaw(uvDown);
-        vec3 pu = ReconstructViewPos(IsSkyDepth(depthUp, u_depthParams) ? uv : uvUp, depthUp);
+                depthUp = DepthRawFromPixel(downPixel);
+        vec2 uvUp = ScreenUvFromPixel(IsSkyDepth(depthUp, u_depthParams) ? centerPixel : upPixel);
+        vec3 pu = ReconstructViewPos(uvUp, depthUp);
 
         vec3 normal = normalize(cross(pr - p, pu - p));
         if (length(normal) < 1e-4)
@@ -223,7 +267,6 @@ void main()
 {
         vec2 aoPixel = AoPixelCoord();
         vec2 uv = AoUvFromPixel(aoPixel);
-        vec2 depthUv = ScreenUvFromAoPixel(aoPixel);
         int debugMode = -1;
         if (u_debugParams.x >= 0.5)
                 debugMode = int(u_debugParams.x + 0.5);
@@ -231,12 +274,6 @@ void main()
         if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
         {
                 outColor = vec4(1.0);
-                return;
-        }
-
-        if (debugMode == 6)
-        {
-                outColor = vec4(uv, 0.0, 1.0);
                 return;
         }
 
@@ -248,7 +285,9 @@ void main()
                 ivec2 noisePixel = ivec2(aoPixel);
                 if (u_noiseMode == 2)
                 {
-                        vec2 noiseUV = (aoPixel + 0.5) * AoInvSize() * u_noiseParams.xy;
+                        vec2 noiseJitter = vec2(noiseSeed, noiseSeed * 1.37);
+                        vec2 noiseUV = (aoPixel + noiseJitter + 0.5) * AoInvSize() * u_noiseParams.xy;
+                        noiseUV = fract(noiseUV);
                         vec2 noiseSample = texture(NoiseTexture, noiseUV).rg * 2.0 - 1.0;
                         noiseVec = normalize(noiseSample);
                 }
@@ -262,35 +301,42 @@ void main()
         {
                 noiseVec = vec2(1.0, 0.0);
         }
-        if (debugMode == 3)
+        if (debugMode == 8)
         {
                 outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
                 return;
         }
 
-        float depth = DepthRaw(depthUv);
-        if (debugMode == 4)
+        ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
+        vec2 screenUv = ScreenUvFromPixel(screenPixel);
+        float depth = DepthRawFromPixel(screenPixel);
+        if (debugMode == 1)
+        {
+                outColor = vec4(vec3(depth), 1.0);
+                return;
+        }
+        if (debugMode == 2)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
                         outColor = vec4(1.0);
                         return;
                 }
-                float viewZ = LinearizeViewZ(depth);
+                float viewZ = ViewZFromDepth(depth, u_proj, u_depthParams.z > 0.5);
                 float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
-        if (debugMode == 7)
+        if (debugMode == 3)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
                         outColor = vec4(1.0);
                         return;
                 }
-                vec3 viewPos = ReconstructViewPos(depthUv, depth);
-                float dist = length(viewPos);
-                float v = clamp(dist / debugFar, 0.0, 1.0);
+                vec3 viewPos = ReconstructViewPos(screenUv, depth);
+                float viewZ = max(viewPos.x, 0.0);
+                float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
@@ -300,25 +346,21 @@ void main()
                 return;
         }
 
-        vec3 viewPos = ReconstructViewPos(depthUv, depth);
-        vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(depthUv);
-        if (debugMode == 5)
+        if (debugMode == 9)
+        {
+                vec2 srcPixel = vec2(screenPixel);
+                vec2 stripes = mod(srcPixel, 2.0);
+                vec2 normCoord = srcPixel / max(ScreenSize(), vec2(1.0));
+                outColor = vec4(normCoord.x, normCoord.y, stripes.x * 0.5 + stripes.y * 0.5, 1.0);
+                return;
+        }
+
+        vec3 viewPos = ReconstructViewPos(screenUv, depth);
+        vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(screenUv);
+        if (debugMode == 4)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
                 outColor = vec4(debugNormal, 1.0);
-                return;
-        }
-        if (debugMode == 8)
-        {
-                vec2 screenCenter = ScreenPixelFromAoPixel(aoPixel);
-                vec3 offsetPos = viewPos + vec3(0.0, u_params0.x, 0.0);
-                vec4 clip = u_proj * vec4(offsetPos, 1.0);
-                float w = max(clip.w, 1e-6);
-                vec2 ndc = clip.xy / w;
-                vec2 screenOffset = (ApplyYFlip(ndc * 0.5 + 0.5) * ScreenSize()) - screenCenter;
-                float radiusPx = length(screenOffset);
-                float v = clamp(radiusPx / debugFar, 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
                 return;
         }
 
@@ -344,10 +386,10 @@ void main()
                 sampleUV = ApplyYFlip(sampleUV);
                 if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
                         continue;
-                float sampleDepth = texture(DepthTexture, sampleUV).r;
+                float sampleDepth = DepthRawFromUv(sampleUV);
                 if (IsSkyDepth(sampleDepth, u_depthParams))
                         continue;
-                float sampleViewDepth = LinearizeViewZ(sampleDepth);
+                float sampleViewDepth = ViewZFromDepth(sampleDepth, u_proj, u_depthParams.z > 0.5);
                 float samplePosDepth = samplePos.x;
                 float dz = sampleViewDepth - samplePosDepth - bias;
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));

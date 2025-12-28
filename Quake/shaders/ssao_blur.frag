@@ -44,9 +44,30 @@ vec2 AoToScreenScale()
         return ScreenSize() * AoInvSize();
 }
 
+vec2 UnflipUv(vec2 uv)
+{
+        if (u_yFlip != 0)
+                uv.y = 1.0 - uv.y;
+        return uv;
+}
+
 vec2 AoUvFromPixel(vec2 aoPixel)
 {
         return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+}
+
+ivec2 ClampScreenPixel(vec2 pixel)
+{
+        vec2 maxPx = ScreenSize() - vec2(1.0);
+        return ivec2(clamp(pixel, vec2(0.0), maxPx));
+}
+
+ivec2 ScreenPixelFromAoPixelNearest(vec2 aoPixel)
+{
+        vec2 screenSize = ScreenSize();
+        vec2 aoSize = max(AoSize(), vec2(1.0));
+        vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
+        return ClampScreenPixel(screenPixel);
 }
 
 vec2 ScreenUvFromAoPixel(vec2 aoPixel)
@@ -60,6 +81,13 @@ vec2 ScreenUvFromAoUv(vec2 uv)
 {
         vec2 aoPixel = floor(uv * AoSize());
         return ScreenUvFromAoPixel(aoPixel);
+}
+
+ivec2 ScreenPixelFromUv(vec2 uv)
+{
+        vec2 unflipped = UnflipUv(uv);
+        vec2 screenPixel = floor(unflipped * ScreenSize());
+        return ClampScreenPixel(screenPixel);
 }
 
 float DepthToNdcZ(float depth, float reversed, int mode)
@@ -79,18 +107,29 @@ float DepthToNdcZ(float depth, float reversed, int mode)
         return ndc;
 }
 
-float LinearizeViewZ(float depth)
+// Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
+float ViewZFromDepth(float depth01, mat4 proj, bool reversedZ)
 {
-        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+        float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
         float nearPlane = u_depthParams.x;
         float farPlane = u_depthParams.y;
-        if (u_depthParams.z > 0.5)
+        if (reversedZ)
         {
                 float denom = nearPlane + ndcDepth * (farPlane - nearPlane);
                 return (nearPlane * farPlane) / max(denom, 1e-6);
         }
         float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
         return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+}
+
+float DepthRawFromPixel(ivec2 pixel)
+{
+        return texelFetch(DepthTexture, pixel, 0).r;
+}
+
+float DepthRawFromUv(vec2 uv)
+{
+        return DepthRawFromPixel(ScreenPixelFromUv(uv));
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -119,15 +158,15 @@ void main()
                 return;
         }
 
-        vec2 depthUv = ScreenUvFromAoPixel(aoPixel);
-        float centerDepthRaw = texture(DepthTexture, depthUv).r;
+        ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
+        float centerDepthRaw = DepthRawFromPixel(screenPixel);
         if (IsSkyDepth(centerDepthRaw, u_depthParams))
         {
                 outColor = vec4(1.0);
                 return;
         }
 
-        float centerDepth = LinearizeViewZ(centerDepthRaw);
+        float centerDepth = ViewZFromDepth(centerDepthRaw, mat4(1.0), u_depthParams.z > 0.5);
         float sigma = max(u_params1.x, 0.01);
         int radius = int(u_params1.y + 0.5);
         float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
@@ -144,10 +183,10 @@ void main()
                 vec2 offset = direction * (float(i) * invResolution);
                 vec2 sampleUV = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
                 vec2 sampleDepthUv = ScreenUvFromAoUv(sampleUV);
-                float sampleDepthRaw = texture(DepthTexture, sampleDepthUv).r;
+                float sampleDepthRaw = DepthRawFromUv(sampleDepthUv);
                 if (IsSkyDepth(sampleDepthRaw, u_depthParams))
                         continue;
-                float sampleDepth = LinearizeViewZ(sampleDepthRaw);
+                float sampleDepth = ViewZFromDepth(sampleDepthRaw, mat4(1.0), u_depthParams.z > 0.5);
                 float depthDiff = abs(sampleDepth - centerDepth);
                 float depthWeight = useBilateral ? smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4)) : 1.0;
                 float weight = Gaussian(float(i), sigma) * depthWeight;

@@ -140,7 +140,7 @@ layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: spe
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
-layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, zw: unused
+layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -218,6 +218,14 @@ float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDep
         vec2 colorSize = vec2(textureSize(GammaTexture, 0));
         if (all(lessThan(abs(ssaoSize - colorSize), vec2(0.5))))
                 return texture(SSAOTexture, uv).r;
+
+        bool upscaleNearest = SSAOParams.z > 0.5;
+        if (upscaleNearest)
+        {
+                vec2 ssaoCoord = uv * ssaoSize;
+                ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), vec2(0.0), ssaoSize - vec2(1.0)));
+                return texelFetch(SSAOTexture, ssaoPixel, 0).r;
+        }
 
         vec2 ssaoCoord = uv * ssaoSize - vec2(0.5);
         vec2 base = floor(ssaoCoord);
@@ -501,7 +509,8 @@ void main()
                         bool ssaoUseDepth = depthInfo.valid;
                         if (ssaoUseDepth)
                                 ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-                        float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, ssaoUseDepth);
+                        bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
+                        float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
                         if (ssaoDebugMode > 0)
                                 color.rgb = vec3(ao);
                         else if (centerOpaque)

@@ -268,7 +268,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 AO raw, 2 AO blurred, 3 noise, 4 view-space Z, 5 normals, 6 AO UVs, 7 view-space length, 8 radius px.
+// r_ssao_debug modes: 0 off, 1 depth raw, 2 depth linear, 3 view-space Z, 4 normals, 5 AO raw, 6 AO blurred, 7 AO upscaled, 8 noise, 9 source texel coords.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -278,6 +278,7 @@ cvar_t	r_ssao_normalsource = { "r_ssao_normalsource", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_freeze_noise = { "r_ssao_freeze_noise", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_force_fullres = { "r_ssao_force_fullres", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_format = { "r_ssao_format", "1", CVAR_ARCHIVE };
+cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -1028,8 +1029,14 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
-	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 8) : -1;
-	float debug_mode = (float)debug_mode_i;
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 9) : -1;
+	qboolean debug_show_ao_raw = (debug_mode_i == 5);
+	qboolean debug_show_ao_blur = (debug_mode_i == 6);
+	qboolean debug_show_ao_upscaled = (debug_mode_i == 7);
+	int debug_mode_ssao = -1;
+	if (debug_mode_i == 1 || debug_mode_i == 2 || debug_mode_i == 3 || debug_mode_i == 4 || debug_mode_i == 8 || debug_mode_i == 9)
+		debug_mode_ssao = debug_mode_i;
+	float debug_mode = (float)debug_mode_ssao;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
 	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : (float)r_framecount;
@@ -1106,7 +1113,9 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
-	if (glprogs.ssao_blur && (debug_mode_i == 2 || (r_ssao_blur.value > 0.f && debug_mode_i < 0)))
+	qboolean allow_blur = (r_ssao_blur.value > 0.f) && (debug_mode_i < 0 || debug_show_ao_upscaled);
+	qboolean run_blur = glprogs.ssao_blur && (debug_show_ao_blur || (allow_blur && !debug_show_ao_raw));
+	if (run_blur)
 	{
 		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
 		blur_radius = CLAMP (1, blur_radius, 4);
@@ -1799,7 +1808,8 @@ void GL_PostProcess (void)
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
-		ssao_debug_mode = (debug_cvar > 0) ? (float)debug_cvar : -1.f;
+		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 9) : -1;
+		ssao_debug_mode = (debug_mode_i > 0) ? (float)debug_mode_i : -1.f;
 	}
 	if (ssao_texture == 0)
 		ssao_debug_mode = -1.f;
@@ -1887,7 +1897,10 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
-		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, 0.f, 0.f);
+	{
+		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
+		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, upscale_nearest, 0.f);
+	}
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);

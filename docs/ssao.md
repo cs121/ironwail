@@ -17,16 +17,19 @@
 ## AO resolution mapping
 - The SSAO pass can run at full or half resolution.
 - AO UVs are derived from AO buffer size, while depth sampling is derived from screen size.
-- AO pixel centers are mapped to screen pixel centers to avoid half-res sampling seams.
+- AO pixels are mapped to integer screen texels via `texelFetch` to avoid half-res UV drift and banding.
 
 ## Debug modes (`r_ssao_debug`)
 - `0`: off
-- `1`: AO raw (pre-blur)
-- `2`: AO blurred
-- `3`: noise/rotation
-- `4`: view-space Z (linearized)
-- `5`: normals (reconstructed)
-- `6`: AO UVs (uv.x/uv.y gradient)
+- `1`: depth raw (0..1)
+- `2`: depth linear (view-space depth from raw)
+- `3`: view-space Z (reconstructed)
+- `4`: normals (reconstructed)
+- `5`: AO raw (pre-blur)
+- `6`: AO blurred
+- `7`: AO upscaled (post-process sample)
+- `8`: noise/rotation
+- `9`: source texel coords (debug overlay)
 
 ## Noise controls
 - `r_ssao_noise` toggles per-pixel rotation.
@@ -36,6 +39,7 @@
 ## Format + blur controls
 - `r_ssao_format` selects AO target precision (`0`=R8, `1`=R16F).
 - `r_ssao_blur_bilateral` toggles depth-aware blur weighting.
+- `r_ssao_upscale_nearest` toggles nearest-neighbor AO upsampling (diagnostic).
 
 ## Normal source
 - `r_ssao_normalsource 0`: neighbor-based reconstruction from depth.
@@ -53,3 +57,6 @@ Toggles:
   r_ssao_reversedz_mode 0/1/2
 Expect: no stripes/banding; debug views are stable.
 -->
+
+## Changelog
+- SSAO: fix half-res depth sampling by snapping to integer depth texels; add upscaling toggle + expanded debug views.
