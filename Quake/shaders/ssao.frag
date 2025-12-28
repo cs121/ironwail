@@ -103,8 +103,14 @@ vec2 AoUvFromPixel(vec2 aoPixel)
 vec2 ScreenUvFromAoPixel(vec2 aoPixel)
 {
         vec2 scale = AoToScreenScale();
-        vec2 screenPixel = aoPixel * scale + 0.5 * scale;
+        vec2 screenPixel = aoPixel * scale + vec2(0.5);
         return ApplyYFlip(screenPixel * ScreenInvSize());
+}
+
+vec2 ScreenPixelFromAoPixel(vec2 aoPixel)
+{
+        vec2 scale = AoToScreenScale();
+        return aoPixel * scale + vec2(0.5);
 }
 
 // Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
@@ -239,11 +245,10 @@ void main()
         vec2 noiseVec;
         if (noiseEnabled > 0.5 && u_noiseMode > 0)
         {
-                vec2 screenPixel = floor(ScreenUvFromAoPixel(aoPixel) * ScreenSize());
-                ivec2 noisePixel = ivec2(screenPixel);
+                ivec2 noisePixel = ivec2(aoPixel);
                 if (u_noiseMode == 2)
                 {
-                        vec2 noiseUV = (screenPixel + 0.5) / ScreenSize() * u_noiseParams.xy;
+                        vec2 noiseUV = (aoPixel + 0.5) * AoInvSize() * u_noiseParams.xy;
                         vec2 noiseSample = texture(NoiseTexture, noiseUV).rg * 2.0 - 1.0;
                         noiseVec = normalize(noiseSample);
                 }
@@ -276,6 +281,19 @@ void main()
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
+        if (debugMode == 7)
+        {
+                if (IsSkyDepth(depth, u_depthParams))
+                {
+                        outColor = vec4(1.0);
+                        return;
+                }
+                vec3 viewPos = ReconstructViewPos(depthUv, depth);
+                float dist = length(viewPos);
+                float v = clamp(dist / debugFar, 0.0, 1.0);
+                outColor = vec4(v, v, v, 1.0);
+                return;
+        }
         if (IsSkyDepth(depth, u_depthParams))
         {
                 outColor = vec4(1.0);
@@ -288,6 +306,19 @@ void main()
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
                 outColor = vec4(debugNormal, 1.0);
+                return;
+        }
+        if (debugMode == 8)
+        {
+                vec2 screenCenter = ScreenPixelFromAoPixel(aoPixel);
+                vec3 offsetPos = viewPos + vec3(0.0, u_params0.x, 0.0);
+                vec4 clip = u_proj * vec4(offsetPos, 1.0);
+                float w = max(clip.w, 1e-6);
+                vec2 ndc = clip.xy / w;
+                vec2 screenOffset = (ApplyYFlip(ndc * 0.5 + 0.5) * ScreenSize()) - screenCenter;
+                float radiusPx = length(screenOffset);
+                float v = clamp(radiusPx / debugFar, 0.0, 1.0);
+                outColor = vec4(v, v, v, 1.0);
                 return;
         }
 
