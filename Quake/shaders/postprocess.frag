@@ -456,15 +456,7 @@ void main()
                 if (ssaoDebugMode >= 0 && inView)
                 {
                         float ao = texture(SSAOTexture, uv).r;
-                        if (ssaoDebugMode == 6)
-                        {
-                                if (centerOpaque)
-                                        color.rgb *= ao;
-                        }
-                        else
-                        {
-                                color.rgb = vec3(ao);
-                        }
+                        color.rgb = vec3(ao);
                 }
                 else if (ssaoIntensity > 0.0 && inView && centerOpaque)
                 {
