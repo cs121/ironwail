@@ -306,7 +306,7 @@ void main()
         {
                 noiseVec = vec2(1.0, 0.0);
         }
-        if (debugMode == 8)
+        if (debugMode == 5)
         {
                 outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
                 return;
@@ -350,23 +350,14 @@ void main()
                         outColor = vec4(1.0, 0.0, 1.0, 1.0);
                         return;
                 }
-                float viewZ = max(viewPos.x, 0.0);
-                float v = clamp(viewZ / debugFar, 0.0, 1.0);
+                float viewLen = length(viewPos);
+                float v = clamp(viewLen / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
         if (IsSkyDepth(depth, u_depthParams))
         {
                 outColor = vec4(1.0);
-                return;
-        }
-
-        if (debugMode == 9)
-        {
-                vec2 srcPixel = vec2(screenPixel);
-                vec2 stripes = mod(srcPixel, 2.0);
-                vec2 normCoord = srcPixel / max(ScreenSize(), vec2(1.0));
-                outColor = vec4(normCoord.x, normCoord.y, stripes.x * 0.5 + stripes.y * 0.5, 1.0);
                 return;
         }
 
@@ -396,6 +387,7 @@ void main()
         float radius = u_params0.x;
         float bias = u_params0.y;
         float occlusion = 0.0;
+        float validSamples = 0.0;
         int samples = clamp(u_samples, 1, SSAO_MAX_SAMPLES);
 
         for (int i = 0; i < SSAO_MAX_SAMPLES; ++i)
@@ -417,11 +409,20 @@ void main()
                 float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepth, u_depthParams.z > 0.5);
                 if (IsInvalidFloat(sampleViewDepth))
                         continue;
+                validSamples += 1.0;
                 float samplePosDepth = samplePos.x;
                 float dz = sampleViewDepth - samplePosDepth - bias;
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
                 if (dz < 0.0)
                         occlusion += rangeCheck;
+        }
+
+        if (debugMode == 6)
+        {
+                float ratio = validSamples / float(samples);
+                ratio = clamp(ratio, 0.0, 1.0);
+                outColor = vec4(vec3(ratio), 1.0);
+                return;
         }
 
         float ao = 1.0 - occlusion / float(samples);
