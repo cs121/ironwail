@@ -411,9 +411,9 @@ void main()
                         continue;
                 validSamples += 1.0;
                 float samplePosDepth = samplePos.x;
-                float dz = sampleViewDepth - samplePosDepth - bias;
-                float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
-                if (dz < 0.0)
+                float depthDelta = samplePosDepth - sampleViewDepth;
+                float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(depthDelta), 1e-4));
+                if (depthDelta > bias)
                         occlusion += rangeCheck;
         }
 
