@@ -32,7 +32,10 @@ vec3 ReconstructViewPos(vec2 uv, float depth)
         float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
         vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
         vec4 view = u_invProj * clip;
-        return view.xyz / max(view.w, 1e-6);
+        float w = view.w;
+        if (abs(w) < 1e-6)
+                return vec3(0.0);
+        return view.xyz / w;
 }
 
 float GetViewZ(vec2 uv, float depth)
