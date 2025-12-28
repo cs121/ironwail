@@ -4,12 +4,16 @@ layout(binding=1) uniform sampler2D NoiseTexture;
 layout(location=0) uniform mat4 u_proj;
 layout(location=1) uniform mat4 u_invProj;
 layout(location=2) uniform vec4 u_params0; // x: radius, y: bias, z: power, w: min AO
-layout(location=3) uniform vec4 u_params1; // xy: inv resolution, zw: noise scale
-layout(location=4) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
-layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
-layout(location=6) uniform int u_samples;
-layout(location=7) uniform vec4 u_debugParams; // x: debug mode, y: debug far
-layout(location=8) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
+layout(location=3) uniform vec4 u_screenParams; // xy: inv screen size, zw: screen size
+layout(location=4) uniform vec4 u_aoParams; // xy: inv AO size, zw: AO size
+layout(location=5) uniform vec4 u_noiseParams; // xy: noise scale, z: noise enabled, w: noise seed
+layout(location=6) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
+layout(location=7) uniform vec4 u_viewRect; // xy: view min, zw: view max
+layout(location=8) uniform int u_samples;
+layout(location=9) uniform vec4 u_debugParams; // x: debug mode, y: debug far
+layout(location=10) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
+layout(location=11) uniform int u_normalSource; // 0: neighbor, 1: derivatives
+layout(location=12) uniform int u_yFlip; // 0: none, 1: flip Y
 
 layout(location=0) out vec4 outColor;
 
@@ -56,6 +60,50 @@ const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
 float DepthRaw(vec2 uv)
 {
         return texture(DepthTexture, uv).r;
+}
+
+vec2 ApplyYFlip(vec2 uv)
+{
+        if (u_yFlip != 0)
+                uv.y = 1.0 - uv.y;
+        return uv;
+}
+
+vec2 ScreenInvSize()
+{
+        return u_screenParams.xy;
+}
+
+vec2 ScreenSize()
+{
+        return u_screenParams.zw;
+}
+
+vec2 AoInvSize()
+{
+        return u_aoParams.xy;
+}
+
+vec2 AoToScreenScale()
+{
+        return ScreenSize() * AoInvSize();
+}
+
+vec2 AoPixelCoord()
+{
+        return floor(gl_FragCoord.xy);
+}
+
+vec2 AoUvFromPixel(vec2 aoPixel)
+{
+        return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+}
+
+vec2 ScreenUvFromAoPixel(vec2 aoPixel)
+{
+        vec2 scale = AoToScreenScale();
+        vec2 screenPixel = aoPixel * scale + 0.5 * scale;
+        return ApplyYFlip(screenPixel * ScreenInvSize());
 }
 
 // Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
@@ -124,10 +172,51 @@ bool IsSkyDepth(float depth, vec4 depthParams)
         return depth >= cutoff;
 }
 
+vec3 ReconstructNormalFromDepth(vec2 uv)
+{
+        vec2 texel = ScreenInvSize();
+        vec2 uvRight = clamp(uv + vec2(texel.x, 0.0), u_viewRect.xy, u_viewRect.zw);
+        vec2 uvLeft = clamp(uv - vec2(texel.x, 0.0), u_viewRect.xy, u_viewRect.zw);
+        vec2 uvUp = clamp(uv + vec2(0.0, texel.y), u_viewRect.xy, u_viewRect.zw);
+        vec2 uvDown = clamp(uv - vec2(0.0, texel.y), u_viewRect.xy, u_viewRect.zw);
+
+        float centerDepth = DepthRaw(uv);
+        if (IsSkyDepth(centerDepth, u_depthParams))
+                return vec3(0.0, 0.0, 1.0);
+
+        vec3 p = ReconstructViewPos(uv, centerDepth);
+        float depthRight = DepthRaw(uvRight);
+        if (IsSkyDepth(depthRight, u_depthParams))
+                depthRight = DepthRaw(uvLeft);
+        vec3 pr = ReconstructViewPos(IsSkyDepth(depthRight, u_depthParams) ? uv : uvRight, depthRight);
+
+        float depthUp = DepthRaw(uvUp);
+        if (IsSkyDepth(depthUp, u_depthParams))
+                depthUp = DepthRaw(uvDown);
+        vec3 pu = ReconstructViewPos(IsSkyDepth(depthUp, u_depthParams) ? uv : uvUp, depthUp);
+
+        vec3 normal = normalize(cross(pr - p, pu - p));
+        if (length(normal) < 1e-4)
+                return vec3(0.0, 0.0, 1.0);
+        vec3 viewDir = normalize(-p);
+        if (dot(normal, viewDir) < 0.0)
+                normal = -normal;
+        return normal;
+}
+
+float RandIGN(ivec2 pixel, float seed)
+{
+        float x = float(pixel.x);
+        float y = float(pixel.y);
+        float f = fract(0.06711056 * x + 0.00583715 * y + seed);
+        return fract(52.9829189 * f);
+}
+
 void main()
 {
-        vec2 invResolution = u_params1.xy;
-        vec2 uv = (gl_FragCoord.xy + 0.5) * invResolution;
+        vec2 aoPixel = AoPixelCoord();
+        vec2 uv = AoUvFromPixel(aoPixel);
+        vec2 depthUv = ScreenUvFromAoPixel(aoPixel);
         int debugMode = -1;
         if (u_debugParams.x >= -0.5)
                 debugMode = int(u_debugParams.x + 0.5);
@@ -138,7 +227,7 @@ void main()
                 return;
         }
 
-        float depth = DepthRaw(uv);
+        float depth = DepthRaw(depthUv);
         if (debugMode == 1)
         {
                 outColor = vec4(depth, depth, depth, 1.0);
@@ -163,9 +252,9 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                vec3 viewPos = ReconstructViewPos(uv, depth);
-                float v = clamp(length(viewPos) / debugFar, 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
+                vec3 viewPos = ReconstructViewPos(depthUv, depth);
+                vec3 v = clamp(viewPos / debugFar, vec3(-1.0), vec3(1.0));
+                outColor = vec4(v * 0.5 + 0.5, 1.0);
                 return;
         }
         if (IsSkyDepth(depth, u_depthParams))
@@ -174,8 +263,8 @@ void main()
                 return;
         }
 
-        vec3 viewPos = ReconstructViewPos(uv, depth);
-        vec3 normal = ComputeNormalFromViewPos(viewPos);
+        vec3 viewPos = ReconstructViewPos(depthUv, depth);
+        vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(depthUv);
         if (debugMode == 4)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
@@ -183,8 +272,34 @@ void main()
                 return;
         }
 
-        vec2 noise = texture(NoiseTexture, uv * u_params1.zw).xy * 2.0 - 1.0;
-        vec3 tangent = normalize(vec3(noise, 0.0) - normal * dot(vec3(noise, 0.0), normal));
+        float noiseSeed = u_noiseParams.w;
+        float noiseEnabled = u_noiseParams.z;
+        vec2 noiseVec;
+        if (noiseEnabled > 0.5)
+        {
+                float angle = RandIGN(ivec2(aoPixel), noiseSeed) * 6.2831853;
+                noiseVec = vec2(cos(angle), sin(angle));
+        }
+        else
+        {
+                noiseVec = vec2(1.0, 0.0);
+        }
+        if (debugMode == 7)
+        {
+                outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
+                return;
+        }
+        if (debugMode == 8)
+        {
+                vec2 scale = AoToScreenScale();
+                vec2 screenPixel = aoPixel * scale + 0.5 * scale;
+                float aoChecker = mod(aoPixel.x + aoPixel.y, 2.0);
+                float screenChecker = mod(floor(screenPixel.x) + floor(screenPixel.y), 2.0);
+                outColor = vec4(aoChecker, screenChecker, 0.0, 1.0);
+                return;
+        }
+
+        vec3 tangent = normalize(vec3(noiseVec, 0.0) - normal * dot(vec3(noiseVec, 0.0), normal));
         vec3 bitangent = cross(normal, tangent);
         mat3 tbn = mat3(tangent, bitangent, normal);
 
@@ -203,6 +318,7 @@ void main()
                 if (offset.w <= 1e-6)
                         continue;
                 vec2 sampleUV = offset.xy / offset.w * 0.5 + 0.5;
+                sampleUV = ApplyYFlip(sampleUV);
                 if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
                         continue;
                 float sampleDepth = texture(DepthTexture, sampleUV).r;

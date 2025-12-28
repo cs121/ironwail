@@ -1,13 +1,66 @@
 layout(binding=0) uniform sampler2D SSAOTexture;
 layout(binding=1) uniform sampler2D DepthTexture;
 
-layout(location=0) uniform vec4 u_params0; // xy: inv resolution, zw: direction
-layout(location=1) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
-layout(location=2) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: unused
-layout(location=3) uniform vec4 u_viewRect; // xy: view min, zw: view max
-layout(location=5) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
+layout(location=0) uniform vec4 u_screenParams; // xy: inv screen size, zw: screen size
+layout(location=1) uniform vec4 u_aoParams; // xy: inv AO size, zw: AO size
+layout(location=2) uniform vec4 u_params0; // xy: blur direction, zw: unused
+layout(location=3) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
+layout(location=4) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: unused
+layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
+layout(location=6) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
+layout(location=7) uniform int u_yFlip; // 0: none, 1: flip Y
 
 layout(location=0) out vec4 outColor;
+
+vec2 ApplyYFlip(vec2 uv)
+{
+        if (u_yFlip != 0)
+                uv.y = 1.0 - uv.y;
+        return uv;
+}
+
+vec2 ScreenInvSize()
+{
+        return u_screenParams.xy;
+}
+
+vec2 ScreenSize()
+{
+        return u_screenParams.zw;
+}
+
+vec2 AoInvSize()
+{
+        return u_aoParams.xy;
+}
+
+vec2 AoSize()
+{
+        return u_aoParams.zw;
+}
+
+vec2 AoToScreenScale()
+{
+        return ScreenSize() * AoInvSize();
+}
+
+vec2 AoUvFromPixel(vec2 aoPixel)
+{
+        return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+}
+
+vec2 ScreenUvFromAoPixel(vec2 aoPixel)
+{
+        vec2 scale = AoToScreenScale();
+        vec2 screenPixel = aoPixel * scale + 0.5 * scale;
+        return ApplyYFlip(screenPixel * ScreenInvSize());
+}
+
+vec2 ScreenUvFromAoUv(vec2 uv)
+{
+        vec2 aoPixel = floor(uv * AoSize());
+        return ScreenUvFromAoPixel(aoPixel);
+}
 
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
@@ -57,15 +110,17 @@ float Gaussian(float x, float sigma)
 
 void main()
 {
-        vec2 invResolution = u_params0.xy;
-        vec2 uv = (gl_FragCoord.xy + 0.5) * invResolution;
+        vec2 aoPixel = floor(gl_FragCoord.xy);
+        vec2 invResolution = AoInvSize();
+        vec2 uv = AoUvFromPixel(aoPixel);
         if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
         {
                 outColor = vec4(1.0);
                 return;
         }
 
-        float centerDepthRaw = texture(DepthTexture, uv).r;
+        vec2 depthUv = ScreenUvFromAoPixel(aoPixel);
+        float centerDepthRaw = texture(DepthTexture, depthUv).r;
         if (IsSkyDepth(centerDepthRaw, u_depthParams))
         {
                 outColor = vec4(1.0);
@@ -79,7 +134,7 @@ void main()
 
         float total = 0.0;
         float accum = 0.0;
-        vec2 direction = u_params0.zw;
+        vec2 direction = u_params0.xy;
 
         for (int i = -4; i <= 4; ++i)
         {
@@ -87,7 +142,8 @@ void main()
                         continue;
                 vec2 offset = direction * (float(i) * invResolution);
                 vec2 sampleUV = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
-                float sampleDepthRaw = texture(DepthTexture, sampleUV).r;
+                vec2 sampleDepthUv = ScreenUvFromAoUv(sampleUV);
+                float sampleDepthRaw = texture(DepthTexture, sampleDepthUv).r;
                 if (IsSkyDepth(sampleDepthRaw, u_depthParams))
                         continue;
                 float sampleDepth = LinearizeViewZ(sampleDepthRaw);

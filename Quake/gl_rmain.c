@@ -267,11 +267,15 @@ cvar_t	r_ssao_blur = { "r_ssao_blur", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: -1 off, 0 final AO, 1 raw depth, 2 view-space Z, 3 view position length,
-// 4 view normals, 5 AO only, 6 AO * albedo.
+// r_ssao_debug modes: -1 off, 0 final AO, 1 raw depth, 2 view-space Z, 3 view position (XYZ),
+// 4 view normals, 5 AO raw (pre-blur), 6 AO blurred, 7 noise/rotation, 8 texel grid.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "-1", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_noise = { "r_ssao_noise", "1", CVAR_ARCHIVE };
+cvar_t	r_ssao_normalsource = { "r_ssao_normalsource", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_freeze_noise = { "r_ssao_freeze_noise", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_force_fullres = { "r_ssao_force_fullres", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -996,7 +1000,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	float bias = R_SanitizeSSAOValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
 	float power = R_SanitizeSSAOValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
-	qboolean use_halfres = (r_ssao_halfres.value > 0.f);
+	qboolean use_halfres = (r_ssao_halfres.value > 0.f && r_ssao_force_fullres.value <= 0.f);
 	int index = use_halfres ? 1 : 0;
 	int width = framebufs.ssao.width[index];
 	int height = framebufs.ssao.height[index];
@@ -1008,9 +1012,13 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_i = (int)Q_rint (r_ssao_debug.value);
-	debug_mode_i = CLAMP (-1, debug_mode_i, 6);
+	debug_mode_i = CLAMP (-1, debug_mode_i, 8);
 	float debug_mode = (float)debug_mode_i;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
+	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
+	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : (float)r_framecount;
+	int normal_source = (int)Q_rint (r_ssao_normalsource.value);
+	normal_source = CLAMP (0, normal_source, 1);
 	static qboolean ssao_logged = false;
 	if (!ssao_logged)
 	{
@@ -1048,19 +1056,31 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
 	GL_Uniform4fFunc (2, radius, bias, power, min_ao);
 	GL_Uniform4fFunc (3,
+		1.f / (float)vid.width,
+		1.f / (float)vid.height,
+		(float)vid.width,
+		(float)vid.height);
+	GL_Uniform4fFunc (4,
 		1.f / (float)width,
 		1.f / (float)height,
+		(float)width,
+		(float)height);
+	GL_Uniform4fFunc (5,
 		(float)width / (float)SSAO_NOISE_SIZE,
-		(float)height / (float)SSAO_NOISE_SIZE);
-	GL_Uniform4fFunc (4, view_znear, view_zfar, reversed_z, depth_cutoff);
-	GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
-	GL_Uniform1iFunc (6, samples);
-	GL_Uniform4fFunc (7, debug_mode, debug_far, 0.f, 0.f);
-	GL_Uniform1iFunc (8, reversed_z_mode);
+		(float)height / (float)SSAO_NOISE_SIZE,
+		noise_enabled,
+		noise_seed);
+	GL_Uniform4fFunc (6, view_znear, view_zfar, reversed_z, depth_cutoff);
+	GL_Uniform4fFunc (7, view_min_x, view_min_y, view_max_x, view_max_y);
+	GL_Uniform1iFunc (8, samples);
+	GL_Uniform4fFunc (9, debug_mode, debug_far, 0.f, 0.f);
+	GL_Uniform1iFunc (10, reversed_z_mode);
+	GL_Uniform1iFunc (11, normal_source);
+	GL_Uniform1iFunc (12, 0);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
-	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur && (debug_mode_i < 0 || debug_mode_i == 0 || debug_mode_i == 5 || debug_mode_i == 6))
+	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur && (debug_mode_i < 0 || debug_mode_i == 0 || debug_mode_i == 6))
 	{
 		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
 		blur_radius = CLAMP (1, blur_radius, 4);
@@ -1069,22 +1089,33 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 		GL_UseProgram (glprogs.ssao_blur);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-		GL_Uniform4fFunc (1, view_znear, view_zfar, reversed_z, depth_cutoff);
-		GL_Uniform4fFunc (2, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
-		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
-		GL_Uniform1iFunc (5, reversed_z_mode);
+		GL_Uniform4fFunc (0,
+			1.f / (float)vid.width,
+			1.f / (float)vid.height,
+			(float)vid.width,
+			(float)vid.height);
+		GL_Uniform4fFunc (1,
+			1.f / (float)width,
+			1.f / (float)height,
+			(float)width,
+			(float)height);
+		GL_Uniform4fFunc (3, view_znear, view_zfar, reversed_z, depth_cutoff);
+		GL_Uniform4fFunc (4, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
+		GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
+		GL_Uniform1iFunc (6, reversed_z_mode);
+		GL_Uniform1iFunc (7, 0);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
 		glViewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
-		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 1.f, 0.f);
+		GL_Uniform4fFunc (2, 1.f, 0.f, 0.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_LogErrorIfDeveloper ("SSAO blur horizontal draw");
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
-		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, 0.f, 1.f);
+		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_LogErrorIfDeveloper ("SSAO blur vertical draw");
 	}
