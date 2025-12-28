@@ -1140,6 +1140,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
 		GL_Uniform1iFunc (6, reversed_z_mode);
 		GL_Uniform1iFunc (7, 0);
+		GL_UniformMatrix4fvFunc (8, 1, GL_FALSE, r_matinvproj);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");

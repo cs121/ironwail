@@ -9,6 +9,7 @@ layout(location=4) uniform vec4 u_params1; // x: sigma, y: radius, z: depth thre
 layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
 layout(location=6) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
 layout(location=7) uniform int u_yFlip; // 0: none, 1: flip Y
+layout(location=8) uniform mat4 u_invProj;
 
 layout(location=0) out vec4 outColor;
 
@@ -54,6 +55,11 @@ vec2 UnflipUv(vec2 uv)
 vec2 AoUvFromPixel(vec2 aoPixel)
 {
         return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+}
+
+vec2 ScreenUvFromPixel(ivec2 pixel)
+{
+        return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
 }
 
 ivec2 ClampScreenPixel(vec2 pixel)
@@ -108,18 +114,16 @@ float DepthToNdcZ(float depth, float reversed, int mode)
 }
 
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
-float ViewZFromDepth(float depth01, mat4 proj, bool reversedZ)
+float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
 {
+        // SSAO FIX: Use inverse projection to keep blur depth comparisons consistent with SSAO reconstruction.
         float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
-        float nearPlane = u_depthParams.x;
-        float farPlane = u_depthParams.y;
-        if (reversedZ)
-        {
-                float denom = nearPlane + ndcDepth * (farPlane - nearPlane);
-                return (nearPlane * farPlane) / max(denom, 1e-6);
-        }
-        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
+        vec4 view = u_invProj * clip;
+        float w = view.w;
+        if (abs(w) < 1e-6)
+                return 1e30;
+        return view.x / w;
 }
 
 float DepthRawFromPixel(ivec2 pixel)
@@ -130,6 +134,11 @@ float DepthRawFromPixel(ivec2 pixel)
 float DepthRawFromUv(vec2 uv)
 {
         return DepthRawFromPixel(ScreenPixelFromUv(uv));
+}
+
+bool IsInvalidFloat(float v)
+{
+        return !(v > -1e20 && v < 1e20);
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -159,6 +168,7 @@ void main()
         }
 
         ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
+        vec2 screenUv = ScreenUvFromPixel(screenPixel);
         float centerDepthRaw = DepthRawFromPixel(screenPixel);
         if (IsSkyDepth(centerDepthRaw, u_depthParams))
         {
@@ -166,7 +176,12 @@ void main()
                 return;
         }
 
-        float centerDepth = ViewZFromDepth(centerDepthRaw, mat4(1.0), u_depthParams.z > 0.5);
+        float centerDepth = ViewZFromDepth(screenUv, centerDepthRaw, u_depthParams.z > 0.5);
+        if (IsInvalidFloat(centerDepth))
+        {
+                outColor = vec4(1.0);
+                return;
+        }
         float sigma = max(u_params1.x, 0.01);
         int radius = int(u_params1.y + 0.5);
         float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
@@ -186,7 +201,9 @@ void main()
                 float sampleDepthRaw = DepthRawFromUv(sampleDepthUv);
                 if (IsSkyDepth(sampleDepthRaw, u_depthParams))
                         continue;
-                float sampleDepth = ViewZFromDepth(sampleDepthRaw, mat4(1.0), u_depthParams.z > 0.5);
+                float sampleDepth = ViewZFromDepth(sampleDepthUv, sampleDepthRaw, u_depthParams.z > 0.5);
+                if (IsInvalidFloat(sampleDepth))
+                        continue;
                 float depthDiff = abs(sampleDepth - centerDepth);
                 float depthWeight = useBilateral ? smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4)) : 1.0;
                 float weight = Gaussian(float(i), sigma) * depthWeight;
