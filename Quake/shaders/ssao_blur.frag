@@ -38,7 +38,8 @@ vec3 ReconstructViewPos(vec2 uv, float depth)
 float GetViewZ(vec2 uv, float depth)
 {
         vec3 view = ReconstructViewPos(uv, depth);
-        return -view.z;
+        // SSAO FIX: Quake view space uses +X as forward depth, not -Z.
+        return view.x;
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
