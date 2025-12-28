@@ -5,7 +5,7 @@ layout(location=0) uniform vec4 u_screenParams; // xy: inv screen size, zw: scre
 layout(location=1) uniform vec4 u_aoParams; // xy: inv AO size, zw: AO size
 layout(location=2) uniform vec4 u_params0; // xy: blur direction, zw: unused
 layout(location=3) uniform vec4 u_depthParams; // x: near, y: far, z: reversed Z, w: sky depth cutoff
-layout(location=4) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: unused
+layout(location=4) uniform vec4 u_params1; // x: sigma, y: radius, z: depth threshold scale, w: bilateral toggle
 layout(location=5) uniform vec4 u_viewRect; // xy: view min, zw: view max
 layout(location=6) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2: invert ndc
 layout(location=7) uniform int u_yFlip; // 0: none, 1: flip Y
@@ -131,6 +131,7 @@ void main()
         float sigma = max(u_params1.x, 0.01);
         int radius = int(u_params1.y + 0.5);
         float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
+        bool useBilateral = (u_params1.w > 0.5);
 
         float total = 0.0;
         float accum = 0.0;
@@ -148,7 +149,7 @@ void main()
                         continue;
                 float sampleDepth = LinearizeViewZ(sampleDepthRaw);
                 float depthDiff = abs(sampleDepth - centerDepth);
-                float depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
+                float depthWeight = useBilateral ? smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4)) : 1.0;
                 float weight = Gaussian(float(i), sigma) * depthWeight;
                 accum += texture(SSAOTexture, sampleUV).r * weight;
                 total += weight;
