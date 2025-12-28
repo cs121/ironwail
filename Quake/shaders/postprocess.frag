@@ -237,7 +237,7 @@ float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDep
                         float weight = (x == 0 ? (1.0 - frac.x) : frac.x) * (y == 0 ? (1.0 - frac.y) : frac.y);
                         if (useDepth && info.valid)
                         {
-                                vec2 sampleScreenPx = (aoTexel + 0.5) * ssaoToScreen;
+                                vec2 sampleScreenPx = aoTexel * ssaoToScreen + vec2(0.5);
                                 float sampleDepth = SampleLinearDepth(sampleScreenPx, info);
                                 float depthDiff = abs(sampleDepth - centerDepth);
                                 float depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));

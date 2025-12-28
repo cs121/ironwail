@@ -268,7 +268,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 AO raw, 2 AO blurred, 3 noise, 4 view-space Z, 5 normals, 6 AO UVs.
+// r_ssao_debug modes: 0 off, 1 AO raw, 2 AO blurred, 3 noise, 4 view-space Z, 5 normals, 6 AO UVs, 7 view-space length, 8 radius px.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -693,8 +693,8 @@ void GL_CreateFrameBuffers (void)
 		int width = framebufs.ssao.width[i];
 		int height = framebufs.ssao.height[i];
 		const char *suffix = (i == 0) ? "full" : "half";
-		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_LINEAR, va ("ssao %s", suffix));
-		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_LINEAR, va ("ssao blur %s", suffix));
+		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao %s", suffix));
+		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao blur %s", suffix));
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
 		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
 	}
@@ -1028,7 +1028,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
-	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 6) : -1;
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 8) : -1;
 	float debug_mode = (float)debug_mode_i;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
@@ -1091,8 +1091,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		(float)width,
 		(float)height);
 	GL_Uniform4fFunc (5,
-		(float)vid.width / (float)SSAO_NOISE_SIZE,
-		(float)vid.height / (float)SSAO_NOISE_SIZE,
+		(float)width / (float)SSAO_NOISE_SIZE,
+		(float)height / (float)SSAO_NOISE_SIZE,
 		noise_enabled,
 		noise_seed);
 	GL_Uniform4fFunc (6, view_znear, view_zfar, reversed_z, depth_cutoff);

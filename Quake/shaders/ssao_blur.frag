@@ -52,7 +52,7 @@ vec2 AoUvFromPixel(vec2 aoPixel)
 vec2 ScreenUvFromAoPixel(vec2 aoPixel)
 {
         vec2 scale = AoToScreenScale();
-        vec2 screenPixel = aoPixel * scale + 0.5 * scale;
+        vec2 screenPixel = aoPixel * scale + vec2(0.5);
         return ApplyYFlip(screenPixel * ScreenInvSize());
 }
 
