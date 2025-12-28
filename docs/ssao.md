@@ -22,19 +22,19 @@
 ## Debug modes (`r_ssao_debug`)
 - `0`: off
 - `1`: depth raw (0..1)
-- `2`: depth linear (view-space depth from raw)
-- `3`: view-space Z (reconstructed)
+- `2`: view-space Z (linearized)
+- `3`: view-space position length (reconstructed)
 - `4`: normals (reconstructed)
-- `5`: AO raw (pre-blur)
-- `6`: AO blurred
-- `7`: AO upscaled (post-process sample)
-- `8`: noise/rotation
-- `9`: source texel coords (debug overlay)
+- `5`: noise/rotation
+- `6`: sample hit ratio (valid samples / total)
+- `7`: AO raw (pre-blur)
+- `8`: blur debug (raw vs blur + depth weight)
 
 ## Noise controls
 - `r_ssao_noise` toggles per-pixel rotation.
 - `r_ssao_noise_mode` selects noise source (`1`=IGN hash, `2`=noise texture).
 - `r_ssao_freeze_noise` freezes the noise seed for debugging.
+- `r_ssao_noise_scale` scales the noise tiling frequency.
 
 ## Format + blur controls
 - `r_ssao_format` selects AO target precision (`0`=R8, `1`=R16F).
