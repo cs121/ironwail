@@ -159,6 +159,8 @@ float DepthToNdcZ(float depth, float reversed, int mode)
         return ndc;
 }
 
+vec3 ReconstructViewPos(vec2 uv, float depth);
+
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
 float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
 {
