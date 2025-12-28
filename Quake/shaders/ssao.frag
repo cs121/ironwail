@@ -76,6 +76,20 @@ float DepthToNdcZ(float depth, float reversed, int mode)
         return ndc;
 }
 
+float LinearizeViewZ(float depth)
+{
+        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+        float nearPlane = u_depthParams.x;
+        float farPlane = u_depthParams.y;
+        if (u_depthParams.z > 0.5)
+        {
+                float denom = nearPlane + ndcDepth * (farPlane - nearPlane);
+                return (nearPlane * farPlane) / max(denom, 1e-6);
+        }
+        float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+        return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+}
+
 vec3 ReconstructViewPos(vec2 uv, float depth)
 {
         float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
@@ -85,18 +99,6 @@ vec3 ReconstructViewPos(vec2 uv, float depth)
         if (abs(w) < 1e-6)
                 return vec3(0.0);
         return view.xyz / w;
-}
-
-float GetViewZ(vec2 uv, float depth)
-{
-        vec3 view = ReconstructViewPos(uv, depth);
-        // SSAO FIX: Quake view space uses +X as forward depth, not -Z.
-        return view.x;
-}
-
-float LinearizeViewZ(vec2 uv, float depth)
-{
-        return GetViewZ(uv, depth);
 }
 
 vec3 ComputeNormalFromViewPos(vec3 viewPos)
@@ -111,13 +113,6 @@ vec3 ComputeNormalFromViewPos(vec3 viewPos)
         if (dot(normal, viewDir) < 0.0)
                 normal = -normal;
         return normal;
-}
-
-float NdcZToDisplay(float ndcDepth, float reversed)
-{
-        if (reversed > 0.5)
-                return clamp(ndcDepth, 0.0, 1.0);
-        return clamp(ndcDepth * 0.5 + 0.5, 0.0, 1.0);
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
@@ -149,13 +144,6 @@ void main()
                 outColor = vec4(depth, depth, depth, 1.0);
                 return;
         }
-        if (debugMode == 8)
-        {
-                float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
-                float v = NdcZToDisplay(ndcDepth, u_depthParams.z);
-                outColor = vec4(v, v, v, 1.0);
-                return;
-        }
         if (debugMode == 2)
         {
                 if (IsSkyDepth(depth, u_depthParams))
@@ -163,7 +151,7 @@ void main()
                         outColor = vec4(1.0);
                         return;
                 }
-                float viewZ = LinearizeViewZ(uv, depth);
+                float viewZ = LinearizeViewZ(depth);
                 float v = clamp(viewZ / debugFar, 0.0, 1.0);
                 outColor = vec4(v, v, v, 1.0);
                 return;
@@ -187,7 +175,6 @@ void main()
         }
 
         vec3 viewPos = ReconstructViewPos(uv, depth);
-        float centerViewDepth = viewPos.x;
         vec3 normal = ComputeNormalFromViewPos(viewPos);
         if (debugMode == 4)
         {
@@ -204,9 +191,6 @@ void main()
         float radius = u_params0.x;
         float bias = u_params0.y;
         float occlusion = 0.0;
-        float debugDeltaAccum = 0.0;
-        float debugSignAccum = 0.0;
-        int debugSamples = 0;
         int samples = clamp(u_samples, 1, SSAO_MAX_SAMPLES);
 
         for (int i = 0; i < SSAO_MAX_SAMPLES; ++i)
@@ -224,44 +208,19 @@ void main()
                 float sampleDepth = texture(DepthTexture, sampleUV).r;
                 if (IsSkyDepth(sampleDepth, u_depthParams))
                         continue;
-                vec3 sampleViewPos = ReconstructViewPos(sampleUV, sampleDepth);
-                // SSAO FIX: Depth comparisons should use view-space X (forward axis).
-                float sampleViewDepth = sampleViewPos.x;
+                float sampleViewDepth = LinearizeViewZ(sampleDepth);
                 float samplePosDepth = samplePos.x;
                 float dz = sampleViewDepth - samplePosDepth - bias;
-                if (debugMode == 6 || debugMode == 7)
-                {
-                        debugDeltaAccum += abs(sampleViewDepth - centerViewDepth);
-                        debugSignAccum += (sampleViewDepth >= centerViewDepth) ? 1.0 : -1.0;
-                        debugSamples += 1;
-                }
                 float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(dz), 1e-4));
                 if (dz < 0.0)
                         occlusion += rangeCheck;
-        }
-
-        if (debugMode == 6)
-        {
-                float denom = max(float(debugSamples), 1.0);
-                float avgDelta = debugDeltaAccum / denom;
-                float v = clamp(avgDelta / max(radius, 1e-4), 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
-                return;
-        }
-        if (debugMode == 7)
-        {
-                float denom = max(float(debugSamples), 1.0);
-                float avgSign = debugSignAccum / denom;
-                float v = avgSign > 0.0 ? 1.0 : 0.0;
-                outColor = vec4(v, v, v, 1.0);
-                return;
         }
 
         float ao = 1.0 - occlusion / float(samples);
         ao = clamp(ao, 0.0, 1.0);
         ao = pow(ao, u_params0.z);
         ao = max(ao, u_params0.w);
-        if (debugMode == 5)
+        if (debugMode == 5 || debugMode == 6)
         {
                 outColor = vec4(ao, ao, ao, 1.0);
                 return;

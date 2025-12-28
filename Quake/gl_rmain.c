@@ -267,8 +267,8 @@ cvar_t	r_ssao_blur = { "r_ssao_blur", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: -1 off, 1 raw depth, 2 view-space Z, 3 view position length, 4 view normals, 5 AO,
-// 6 sample delta, 7 depth compare sign, 8 NDC depth.
+// r_ssao_debug modes: -1 off, 0 final AO, 1 raw depth, 2 view-space Z, 3 view position length,
+// 4 view normals, 5 AO only, 6 AO * albedo.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "-1", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -1008,7 +1008,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_i = (int)Q_rint (r_ssao_debug.value);
-	debug_mode_i = CLAMP (-1, debug_mode_i, 8);
+	debug_mode_i = CLAMP (-1, debug_mode_i, 6);
 	float debug_mode = (float)debug_mode_i;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 	static qboolean ssao_logged = false;
@@ -1060,7 +1060,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
-	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur && (debug_mode_i < 0 || debug_mode_i == 5))
+	if (r_ssao_blur.value > 0.f && glprogs.ssao_blur && (debug_mode_i < 0 || debug_mode_i == 0 || debug_mode_i == 5 || debug_mode_i == 6))
 	{
 		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
 		blur_radius = CLAMP (1, blur_radius, 4);
@@ -1072,7 +1072,6 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_Uniform4fFunc (1, view_znear, view_zfar, reversed_z, depth_cutoff);
 		GL_Uniform4fFunc (2, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
-		GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, r_matinvproj);
 		GL_Uniform1iFunc (5, reversed_z_mode);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
@@ -1668,7 +1667,6 @@ void GL_PostProcess (void)
 	float godrays_debug_source;
 	float ssao_intensity;
 	float ssao_debug_mode;
-	float ssao_debug_enabled;
 	float view_min_x;
 	float view_min_y;
 	float view_max_x;
@@ -1740,7 +1738,6 @@ void GL_PostProcess (void)
 	ssao_debug_mode = r_ssao_debug.value;
 	if (ssao_texture == 0)
 		ssao_debug_mode = -1.f;
-	ssao_debug_enabled = (ssao_debug_mode >= 0.f) ? 1.f : 0.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
 
@@ -1825,7 +1822,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, r_saturation.value);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
-	GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_enabled, 0.f, 0.f);
+		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, 0.f, 0.f);
 	{
 		float filmgrain_amount = 0.f;
 		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);

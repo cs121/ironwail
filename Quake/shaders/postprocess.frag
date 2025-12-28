@@ -140,7 +140,7 @@ layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: spe
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
-layout(location=17) uniform vec4 SSAOParams; // x: intensity, yzw: unused
+layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, zw: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -452,11 +452,19 @@ void main()
                 }
 
                 float ssaoIntensity = SSAOParams.x;
-                float ssaoDebug = SSAOParams.y;
-                if (ssaoDebug > 0.5 && inView)
+                int ssaoDebugMode = int(floor(SSAOParams.y + 0.5));
+                if (ssaoDebugMode >= 0 && inView)
                 {
-                        float debugValue = texture(SSAOTexture, uv).r;
-                        color.rgb = vec3(debugValue);
+                        float ao = texture(SSAOTexture, uv).r;
+                        if (ssaoDebugMode == 6)
+                        {
+                                if (centerOpaque)
+                                        color.rgb *= ao;
+                        }
+                        else
+                        {
+                                color.rgb = vec3(ao);
+                        }
                 }
                 else if (ssaoIntensity > 0.0 && inView && centerOpaque)
                 {
