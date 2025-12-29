@@ -141,6 +141,57 @@ static qboolean ParseVec2 (const char **data, vec2_t out)
 	return true;
 }
 
+static qboolean ParseVec4 (const char **data, vec4_t out)
+{
+	if (!ParseFloat (data, &out[0]))
+		return false;
+	if (!ParseFloat (data, &out[1]))
+		return false;
+	if (!ParseFloat (data, &out[2]))
+		return false;
+	if (!ParseFloat (data, &out[3]))
+		return false;
+	return true;
+}
+
+static qboolean Mat_Shader_ParseTcGen (const char *token, mat_tcgen_t *out)
+{
+	if (!token || !out)
+		return false;
+	if (!q_strcasecmp (token, "base"))
+	{
+		*out = MAT_TCGEN_BASE;
+		return true;
+	}
+	if (!q_strcasecmp (token, "environment"))
+	{
+		*out = MAT_TCGEN_ENVIRONMENT;
+		return true;
+	}
+	if (!q_strcasecmp (token, "lightmap"))
+	{
+		*out = MAT_TCGEN_LIGHTMAP;
+		return true;
+	}
+	return false;
+}
+
+static void Mat_Shader_PushTcMod (mat_shader_stage_t *stage, mat_tcmod_type_t type, const float *args, int arg_count)
+{
+	mat_tcmod_t mod;
+	int i;
+
+	if (!stage || stage->tcmod_count >= (int)countof (stage->tcmods))
+		return;
+
+	memset (&mod, 0, sizeof (mod));
+	mod.type = type;
+	for (i = 0; i < arg_count && i < (int)countof (mod.args); ++i)
+		mod.args[i] = args[i];
+
+	stage->tcmods[stage->tcmod_count++] = mod;
+}
+
 static qboolean ExpectToken (const char **data, const char *token)
 {
 	const char *cursor;
@@ -361,6 +412,11 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	stage.map_type = MAT_MAP_MAP;
 	stage.blend_src = GL_ONE;
 	stage.blend_dst = GL_ZERO;
+	stage.tcgen = MAT_TCGEN_BASE;
+	stage.anim_map_fps = 0.f;
+	stage.anim_map_frame = 0;
+	stage.texmatrix_time_bucket = -1;
+	stage.anim_map_time_bucket = -1;
 
 	while ((data = COM_Parse (data)) != NULL)
 	{
@@ -479,6 +535,89 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (Mat_Shader_ParseDepthFunc (value, &stage.depth_func))
 				continue;
 			Mat_Shader_ReportUnknownToken (value, material->name);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "tcGen"))
+		{
+			if (!ParseIdent (&data, &value))
+				break;
+			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
+				Mat_Shader_ReportUnknownToken (value, material->name);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "tcMod"))
+		{
+			if (!ParseIdent (&data, &value))
+				break;
+			if (!q_strcasecmp (value, "scroll"))
+			{
+				vec2_t scroll = { 0.f, 0.f };
+				if (!ParseVec2 (&data, scroll))
+					break;
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCROLL, scroll, 2);
+				continue;
+			}
+			if (!q_strcasecmp (value, "scale"))
+			{
+				vec2_t scale = { 1.f, 1.f };
+				if (!ParseVec2 (&data, scale))
+					break;
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCALE, scale, 2);
+				continue;
+			}
+			if (!q_strcasecmp (value, "rotate"))
+			{
+				float deg_per_sec = 0.f;
+				if (!ParseFloat (&data, &deg_per_sec))
+					break;
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_ROTATE, &deg_per_sec, 1);
+				continue;
+			}
+			if (!q_strcasecmp (value, "turb"))
+			{
+				vec4_t turb = { 0.f, 0.f, 0.f, 0.f };
+				if (!ParseVec4 (&data, turb))
+					break;
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4);
+				continue;
+			}
+			if (!q_strcasecmp (value, "stretch"))
+			{
+				vec4_t stretch = { 0.f, 0.f, 0.f, 0.f };
+				if (!ParseVec4 (&data, stretch))
+					break;
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
+				continue;
+			}
+			Mat_Shader_ReportUnknownToken (value, material->name);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "animMap"))
+		{
+			float fps = 0.f;
+			int frames = 0;
+			const char *cursor = data;
+
+			if (!ParseFloat (&cursor, &fps))
+				break;
+
+			while (1)
+			{
+				const char *next = COM_Parse (cursor);
+				if (!next || !com_token[0])
+					break;
+				if (!strcmp (com_token, "{") || !strcmp (com_token, "}"))
+					break;
+				VEC_PUSH (stage.anim_map_frames, Mat_Shader_DupString (com_token));
+				frames++;
+				cursor = next;
+			}
+
+			if (frames > 0)
+			{
+				stage.anim_map_fps = fps;
+				data = cursor;
+			}
 			continue;
 		}
 

@@ -103,6 +103,34 @@ typedef enum
 
 typedef enum
 {
+	MAT_TCGEN_BASE = 0,
+	MAT_TCGEN_ENVIRONMENT,
+	MAT_TCGEN_LIGHTMAP
+} mat_tcgen_t;
+
+typedef enum
+{
+	MAT_TCMOD_NONE = 0,
+	MAT_TCMOD_SCROLL,
+	MAT_TCMOD_SCALE,
+	MAT_TCMOD_ROTATE,
+	MAT_TCMOD_TURB,
+	MAT_TCMOD_STRETCH
+} mat_tcmod_type_t;
+
+typedef struct mat_tcmod_s
+{
+	mat_tcmod_type_t type;
+	float args[4];
+} mat_tcmod_t;
+
+typedef struct mat_texmatrix_s
+{
+	float m[3][3];
+} mat_texmatrix_t;
+
+typedef enum
+{
 	MAT_SHADERFLAG_NODRAW		= (1u << 0),
 	MAT_SHADERFLAG_SKY		= (1u << 1),
 	MAT_SHADERFLAG_TRANS		= (1u << 2),
@@ -128,6 +156,15 @@ typedef struct mat_shader_stage_s
 	qboolean		depth_write;
 	mat_depthfunc_t		depth_func;
 	mat_map_type_t		map_type;
+	mat_tcgen_t		tcgen;
+	int			tcmod_count;
+	mat_tcmod_t		tcmods[4];
+	float			anim_map_fps;
+	char			**anim_map_frames;
+	int			texmatrix_time_bucket;
+	int			anim_map_time_bucket;
+	int			anim_map_frame;
+	mat_texmatrix_t	texmatrix_cache;
 } mat_shader_stage_t;
 
 typedef struct shader_material_s
@@ -174,6 +211,9 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material);
 void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname);
 void Mat_Shader_Print (const shader_material_t *material);
 char *Mat_Shader_DupString (const char *value);
+const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time);
+int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time);
+const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
 void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_ReportUnknownToken (const char *token, const char *context);

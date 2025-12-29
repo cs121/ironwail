@@ -22,9 +22,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 #include "mat_shader_parse.h"
 #include "miniz.h"
+#include <math.h>
 
 #define MAT_SHADER_HASH_SIZE 256
 #define MAT_SHADER_LIST_LIMIT 64
+#define MAT_TEXMOD_PI 3.14159265358979323846f
 
 typedef struct mat_shader_entry_s
 {
@@ -73,6 +75,16 @@ static void Mat_Shader_FreeMaterial (shader_material_t *material)
 		mat_shader_stage_t *stage = &material->stages[i];
 		if (stage->map_path)
 			Z_Free (stage->map_path);
+		if (stage->anim_map_frames)
+		{
+			size_t j;
+			for (j = 0; j < VEC_SIZE (stage->anim_map_frames); ++j)
+			{
+				if (stage->anim_map_frames[j])
+					Z_Free (stage->anim_map_frames[j]);
+			}
+			VEC_FREE (stage->anim_map_frames);
+		}
 	}
 	VEC_FREE (material->stages);
 
@@ -149,6 +161,72 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 
 	Mat_Shader_AddWarned (warn_key);
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
+}
+
+static void Mat_MatrixIdentity (mat_texmatrix_t *out)
+{
+	if (!out)
+		return;
+	memset (out, 0, sizeof (*out));
+	out->m[0][0] = 1.f;
+	out->m[1][1] = 1.f;
+	out->m[2][2] = 1.f;
+}
+
+static void Mat_MatrixMultiply (mat_texmatrix_t *out, const mat_texmatrix_t *a, const mat_texmatrix_t *b)
+{
+	mat_texmatrix_t result;
+	int r;
+	int c;
+
+	for (r = 0; r < 3; ++r)
+	{
+		for (c = 0; c < 3; ++c)
+		{
+			result.m[r][c] = a->m[r][0] * b->m[0][c] + a->m[r][1] * b->m[1][c] + a->m[r][2] * b->m[2][c];
+		}
+	}
+
+	*out = result;
+}
+
+static void Mat_MatrixTranslate (mat_texmatrix_t *out, float s, float t)
+{
+	Mat_MatrixIdentity (out);
+	out->m[0][2] = s;
+	out->m[1][2] = t;
+}
+
+static void Mat_MatrixScale (mat_texmatrix_t *out, float s, float t)
+{
+	Mat_MatrixIdentity (out);
+	out->m[0][0] = s;
+	out->m[1][1] = t;
+}
+
+static void Mat_MatrixRotate (mat_texmatrix_t *out, float degrees)
+{
+	float radians = degrees * (float)M_PI / 180.f;
+	float c = cosf (radians);
+	float s = sinf (radians);
+
+	Mat_MatrixIdentity (out);
+	out->m[0][0] = c;
+	out->m[0][1] = -s;
+	out->m[1][0] = s;
+	out->m[1][1] = c;
+}
+
+static void Mat_MatrixAroundCenter (mat_texmatrix_t *out, const mat_texmatrix_t *inner)
+{
+	mat_texmatrix_t tmp;
+	mat_texmatrix_t translate_to;
+	mat_texmatrix_t translate_back;
+
+	Mat_MatrixTranslate (&translate_to, -0.5f, -0.5f);
+	Mat_MatrixTranslate (&translate_back, 0.5f, 0.5f);
+	Mat_MatrixMultiply (&tmp, inner, &translate_to);
+	Mat_MatrixMultiply (out, &translate_back, &tmp);
 }
 
 static void Mat_Shader_Register (shader_material_t *material)
@@ -697,4 +775,125 @@ void Mat_Shader_ReportUnknownToken (const char *token, const char *context)
 		q_snprintf (warn_key, sizeof (warn_key), "%s", token);
 
 	Mat_Shader_WarnOnce (warn_key, token, context);
+}
+
+static int Mat_Shader_TimeBucket (float time, float fps_hint)
+{
+	float fps = fps_hint > 0.f ? fps_hint : 60.f;
+	if (fps < 1.f)
+		fps = 1.f;
+	return (int)floorf (time * fps);
+}
+
+const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time)
+{
+	mat_texmatrix_t matrix;
+	mat_texmatrix_t tmp;
+	int bucket;
+	int i;
+
+	if (!stage)
+		return NULL;
+
+	bucket = Mat_Shader_TimeBucket (time, 60.f);
+	if (stage->texmatrix_time_bucket == bucket)
+		return &stage->texmatrix_cache;
+
+	Mat_MatrixIdentity (&matrix);
+
+	for (i = 0; i < stage->tcmod_count; ++i)
+	{
+		const mat_tcmod_t *mod = &stage->tcmods[i];
+		switch (mod->type)
+		{
+		case MAT_TCMOD_SCROLL:
+			Mat_MatrixTranslate (&tmp, mod->args[0] * time, mod->args[1] * time);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
+		case MAT_TCMOD_SCALE:
+			Mat_MatrixScale (&tmp, mod->args[0], mod->args[1]);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
+		case MAT_TCMOD_ROTATE:
+		{
+			float degrees = mod->args[0] * time;
+			mat_texmatrix_t rot;
+			Mat_MatrixRotate (&rot, degrees);
+			Mat_MatrixAroundCenter (&tmp, &rot);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
+		}
+		case MAT_TCMOD_TURB:
+		{
+			float phase = mod->args[2];
+			float freq = mod->args[3];
+			float value = mod->args[0] + sinf ((time * freq + phase) * 2.f * MAT_TEXMOD_PI) * mod->args[1];
+			Mat_MatrixTranslate (&tmp, value, value);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
+		}
+		case MAT_TCMOD_STRETCH:
+		{
+			float phase = mod->args[2];
+			float freq = mod->args[3];
+			float value = mod->args[0] + sinf ((time * freq + phase) * 2.f * MAT_TEXMOD_PI) * mod->args[1];
+			mat_texmatrix_t scale;
+			Mat_MatrixScale (&scale, value, value);
+			Mat_MatrixAroundCenter (&tmp, &scale);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	stage->texmatrix_cache = matrix;
+	stage->texmatrix_time_bucket = bucket;
+	return &stage->texmatrix_cache;
+}
+
+int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time)
+{
+	int bucket;
+	int frame_count;
+	int frame;
+
+	if (!stage || stage->anim_map_fps <= 0.f)
+		return 0;
+
+	frame_count = (int)VEC_SIZE (stage->anim_map_frames);
+	if (frame_count <= 0)
+		return 0;
+
+	bucket = Mat_Shader_TimeBucket (time, stage->anim_map_fps);
+	if (stage->anim_map_time_bucket == bucket)
+		return stage->anim_map_frame;
+
+	frame = bucket % frame_count;
+	if (frame < 0)
+		frame += frame_count;
+
+	stage->anim_map_time_bucket = bucket;
+	stage->anim_map_frame = frame;
+	return frame;
+}
+
+const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time)
+{
+	int frame;
+	int frame_count;
+
+	if (!stage)
+		return NULL;
+
+	frame_count = (int)VEC_SIZE (stage->anim_map_frames);
+	if (frame_count <= 0)
+		return NULL;
+
+	frame = MatStage_EvalAnimMapFrame (stage, time);
+	if (frame < 0 || frame >= frame_count)
+		return NULL;
+
+	return stage->anim_map_frames[frame];
 }
