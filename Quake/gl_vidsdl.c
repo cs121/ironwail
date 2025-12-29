@@ -82,6 +82,7 @@ static void GL_SetupState (void); //johnfitz
 viddef_t	vid;				// global video state
 modestate_t	modestate = MS_UNINIT;
 qboolean	scr_skipupdate;
+qboolean	vid_framebuffer_srgb_capable = false;
 
 qboolean gl_anisotropy_able = false; //johnfitz
 qboolean gl_buffer_storage_able = false;
@@ -453,6 +454,7 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 	stencilbits = 8;
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthbits);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilbits);
+	SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 
 	q_snprintf(caption, sizeof(caption), WINDOW_TITLE_STRING);
 
@@ -551,6 +553,13 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR
 				);
 		}
+	}
+	{
+		int srgb_capable = 0;
+		if (SDL_GL_GetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &srgb_capable) == 0)
+			vid_framebuffer_srgb_capable = (srgb_capable != 0);
+		else
+			vid_framebuffer_srgb_capable = false;
 	}
 
 	vid.width = VID_GetCurrentWidth();

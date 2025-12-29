@@ -142,6 +142,7 @@ layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: unused
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
+layout(location=19) uniform vec2 ColorSpaceParams; // x: debug mode, y: manual gamma enabled
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -268,6 +269,20 @@ float Gaussian2(float r2, float sigma)
         return exp(-r2 / denom);
 }
 
+vec3 ApplyPostContrast(vec3 color, float contrast)
+{
+        if (abs(contrast - 1.0) < 1e-4)
+                return color;
+        vec3 t = color * (vec3(1.0) - color);
+        return clamp(color + t * ((contrast - 1.0) * 2.0), 0.0, 1.0);
+}
+
+vec3 ApplySaturation(vec3 color, float saturation)
+{
+        float luma = dot(color, vec3(0.299, 0.587, 0.114));
+        return mix(vec3(luma), color, saturation);
+}
+
 void AccumulateMotionSample(inout vec3 accum, inout float weight, vec2 sampleUV, vec2 sampleCoordPx, vec2 viewMin, vec2 viewMax, DepthSamplingInfo info, bool useDepth, float centerDepth, float depthThresholdRatio)
 {
         if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
@@ -291,9 +306,11 @@ layout(location=0) out vec4 out_fragcolor;
 void main()
 {
         float gamma = Params.x;
-        float contrast = Params.y;
+        float postContrast = Params.y;
         float scale = Params.z;
         float dither = Params.w;
+        int debugMode = int(floor(ColorSpaceParams.x + 0.5));
+        float manualGamma = ColorSpaceParams.y;
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
         bool centerOpaque = color.a >= OPAQUE_ALPHA_THRESHOLD;
@@ -591,9 +608,6 @@ void main()
                         }
                 }
 
-                float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-                color.rgb = mix(vec3(luma), color.rgb, u_saturation);
-
                 out_fragcolor = color;
 #if PALETTIZE == 1
                 vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
@@ -618,7 +632,7 @@ void main()
                 godraysColor = texture(GodraysTexture, uv).rgb;
         float exposure = max(HDRParams.y, 0.0);
         float tonemapMode = HDRParams.z;
-        vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure * contrast;
+        vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
         combined = max(combined, vec3(0.0));
         vec3 mapped;
         if (tonemapMode > 0.5)
@@ -633,7 +647,22 @@ void main()
                 mapped = clamp(combined, 0.0, 1.0);
         }
         mapped = clamp(mapped, 0.0, 1.0);
-        out_fragcolor = vec4(pow(mapped, vec3(gamma)), 1.0);
+        if (debugMode == 2)
+        {
+                out_fragcolor = vec4(mapped, 1.0);
+                return;
+        }
+        if (debugMode == 4)
+        {
+                float maxHdr = max(max(combined.r, combined.g), combined.b);
+                out_fragcolor = vec4(maxHdr > 1.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0), 1.0);
+                return;
+        }
+        mapped = ApplyPostContrast(mapped, postContrast);
+        mapped = ApplySaturation(mapped, u_saturation);
+        if (manualGamma > 0.5)
+                mapped = pow(mapped, vec3(gamma));
+        out_fragcolor = vec4(mapped, 1.0);
 #endif // PALETTIZE
 
 	float grainAmount = clamp(FilmGrainParams0.x, 0.0, 1.0);

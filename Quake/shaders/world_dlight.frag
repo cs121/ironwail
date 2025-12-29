@@ -79,10 +79,13 @@ void main()
 
         float alpha = texel.a * in_alpha;
         vec3 albedo = texel.rgb;
-        bool linear_lightmaps = LightmapParams.x > 0.5;
-        if (!linear_lightmaps)
-                albedo = pow(albedo, vec3(2.2));
-
+        int debug_mode = int(ColorSpaceParams.x + 0.5);
+        if (debug_mode == 1)
+        {
+                out_fragcolor = vec4(albedo, 1.0);
+                out_velocity = vec4(0.0);
+                return;
+        }
         vec3 surface_normal = normalize(in_normal);
         if (!gl_FrontFacing)
                 surface_normal = -surface_normal;
@@ -141,9 +144,6 @@ void main()
 
         vec3 contrib = clamp(dynamic_light * Overbright, 0.0, Overbright);
         vec3 color = albedo * contrib;
-
-        if (!linear_lightmaps)
-                color = pow(color, vec3(1.0 / 2.2));
 
         color = ApplyFog(color, in_pos - EyePos);
 

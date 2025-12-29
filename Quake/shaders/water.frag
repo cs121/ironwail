@@ -148,6 +148,15 @@ void main()
                 emissive = texture(EmissiveTex, uv).rgb;
 #endif
         vec4 result = texture(Tex, uv);
+        int debug_mode = int(ColorSpaceParams.x + 0.5);
+        if (debug_mode == 1)
+        {
+                out_fragcolor = vec4(result.rgb, 1.0);
+#if !OIT
+                out_velocity = vec4(0.0);
+#endif
+                return;
+        }
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);

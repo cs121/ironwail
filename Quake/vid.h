@@ -65,6 +65,7 @@ typedef struct
 } viddef_t;
 
 extern	viddef_t	vid;				// global video state
+extern	qboolean	vid_framebuffer_srgb_capable;
 
 typedef struct
 {
@@ -102,4 +103,3 @@ void		VID_RecalcConsoleSize (void);
 void		VID_RecalcInterfaceSize (void);
 
 #endif	/* __VID_DEFS_H */
-

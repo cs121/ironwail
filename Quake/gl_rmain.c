@@ -203,6 +203,10 @@ mleaf_t* r_viewleaf, * r_oldviewleaf;
 
 int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
+static qboolean gl_framebuffer_srgb_enabled = false;
+static qboolean gl_srgb_policy_warned = false;
+static qboolean gl_srgb_capability_warned = false;
+
 
 cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
 cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
@@ -217,6 +221,13 @@ cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
+cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
+cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
+cvar_t	r_manual_gamma = { "r_manual_gamma", "0", CVAR_ARCHIVE };
+cvar_t	r_gamma = { "r_gamma", "2.2", CVAR_ARCHIVE };
+cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
+cvar_t	r_post_contrast = { "r_post_contrast", "1.0", CVAR_ARCHIVE };
+cvar_t	r_post_saturation = { "r_post_saturation", "1.05", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -1519,6 +1530,49 @@ static qboolean GL_ShouldApplyMotionBlur (void)
 	return GL_ConsoleVisibility () <= 0.f;
 }
 
+static void GL_SetFramebufferSRGB (qboolean enable)
+{
+#ifdef GL_FRAMEBUFFER_SRGB
+	if (enable && !gl_framebuffer_srgb_enabled)
+	{
+		glEnable (GL_FRAMEBUFFER_SRGB);
+		gl_framebuffer_srgb_enabled = true;
+	}
+	else if (!enable && gl_framebuffer_srgb_enabled)
+	{
+		glDisable (GL_FRAMEBUFFER_SRGB);
+		gl_framebuffer_srgb_enabled = false;
+	}
+#else
+	(void)enable;
+#endif
+}
+
+static qboolean GL_UseManualGamma (void)
+{
+	if (r_srgb_framebuffer.value > 0.f && r_manual_gamma.value > 0.f)
+	{
+		if (!gl_srgb_policy_warned)
+		{
+			Con_Warning ("Both r_srgb_framebuffer and r_manual_gamma are enabled; disabling r_manual_gamma.\n");
+			gl_srgb_policy_warned = true;
+		}
+		Cvar_SetValueQuick (&r_manual_gamma, 0.f);
+	}
+
+	if (r_srgb_framebuffer.value > 0.f && !vid_framebuffer_srgb_capable)
+	{
+		if (!gl_srgb_capability_warned)
+		{
+			Con_Warning ("Default framebuffer is not sRGB-capable; disabling r_srgb_framebuffer.\n");
+			gl_srgb_capability_warned = true;
+		}
+		Cvar_SetValueQuick (&r_srgb_framebuffer, 0.f);
+	}
+
+	return r_manual_gamma.value > 0.f;
+}
+
 static void GL_PostProcessFallback (void)
 {
 	int width = glwidth;
@@ -1541,8 +1595,16 @@ static void GL_PostProcessFallback (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glReadBuffer (GL_BACK);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+	{
+		qboolean manual_gamma = GL_UseManualGamma ();
+		qboolean srgb_output = (r_srgb_framebuffer.value > 0.f) && !manual_gamma;
+		GL_SetFramebufferSRGB (srgb_output);
+	}
 
-	float sat = r_saturation.value;
+	float sat = CLAMP (0.9f, r_post_saturation.value, 1.2f);
+	float post_contrast = CLAMP (0.8f, r_post_contrast.value, 1.2f);
+	qboolean manual_gamma = GL_UseManualGamma ();
+	float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
 	for (size_t i = 0; i < numpixels; ++i)
 	{
 		float color[3] = {
@@ -1554,6 +1616,20 @@ static void GL_PostProcessFallback (void)
 		color[0] = l + (color[0] - l) * sat;
 		color[1] = l + (color[1] - l) * sat;
 		color[2] = l + (color[2] - l) * sat;
+		if (post_contrast != 1.f)
+		{
+			for (int c = 0; c < 3; ++c)
+			{
+				float t = color[c] * (1.f - color[c]);
+				color[c] = CLAMP (0.f, color[c] + t * ((post_contrast - 1.f) * 2.f), 1.f);
+			}
+		}
+		if (manual_gamma)
+		{
+			color[0] = powf (color[0], gamma);
+			color[1] = powf (color[1], gamma);
+			color[2] = powf (color[2], gamma);
+		}
 		pixels[i * 4 + 0] = (byte)CLAMP (0, (int)Q_rint (color[0] * 255.f), 255);
 		pixels[i * 4 + 1] = (byte)CLAMP (0, (int)Q_rint (color[1] * 255.f), 255);
 		pixels[i * 4 + 2] = (byte)CLAMP (0, (int)Q_rint (color[2] * 255.f), 255);
@@ -1755,7 +1831,7 @@ void GL_PostProcess (void)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
-        r_saturation.value = CLAMP (0.0f, r_saturation.value, 2.0f);
+        r_post_saturation.value = CLAMP (0.9f, r_post_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -1867,6 +1943,13 @@ void GL_PostProcess (void)
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
+	{
+		qboolean manual_gamma = GL_UseManualGamma ();
+		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
+		qboolean linear_debug = (debug_mode == 2);
+		qboolean srgb_output = (r_srgb_framebuffer.value > 0.f) && !manual_gamma && !linear_debug;
+		GL_SetFramebufferSRGB (srgb_output);
+	}
 
 	variant = q_min ((int)softemu, 2);
 	if (!glprogs.postprocess[variant])
@@ -1887,7 +1970,16 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
-		GL_Uniform4fFunc (0, vid_gamma.value, q_min (2.0f, q_max (1.0f, vid_contrast.value)), 1.f / r_refdef.scale, dither);
+	{
+		qboolean manual_gamma = GL_UseManualGamma ();
+		float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
+		float post_contrast = CLAMP (0.8f, r_post_contrast.value, 1.2f);
+		GL_Uniform4fFunc (0, gamma, post_contrast, 1.f / r_refdef.scale, dither);
+	}
+	{
+		qboolean manual_gamma = GL_UseManualGamma ();
+		GL_Uniform2fFunc (19, CLAMP (0.f, r_debug_colorspace.value, 4.f), manual_gamma ? 1.f : 0.f);
+	}
 	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
 	GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
@@ -1907,7 +1999,7 @@ void GL_PostProcess (void)
 	screen_darken_depth,
 	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
-	GL_Uniform1fFunc (12, r_saturation.value);
+	GL_Uniform1fFunc (12, CLAMP (0.9f, r_post_saturation.value, 1.2f));
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
@@ -2564,11 +2656,13 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-        float saturation = CLAMP (0.0f, r_saturation.value, 2.0f);
-	r_saturation.value = saturation;
-	if (vid_gamma.value != 1.f || vid_contrast.value != 1.f || softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+        float saturation = CLAMP (0.9f, r_post_saturation.value, 1.2f);
+	r_post_saturation.value = saturation;
+	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
+	if (r_manual_gamma.value > 0.f || r_debug_colorspace.value > 0.f)
+		return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_post_contrast.value != 1.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
 		return true;
 	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
 		return true;
@@ -2613,8 +2707,11 @@ void R_SetupGL (void)
 	if (!GL_NeedsSceneEffects ())
 	{
 		GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
+		qboolean manual_gamma = GL_UseManualGamma ();
+		qboolean srgb_output = (target == 0u) && (r_srgb_framebuffer.value > 0.f) && !manual_gamma;
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
+		GL_SetFramebufferSRGB (srgb_output);
 		framesetup.scene_fbo = framebufs.composite.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_composite;
 		if (target)
@@ -2632,6 +2729,7 @@ void R_SetupGL (void)
 	else
 	{
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_SetFramebufferSRGB (false);
 		framesetup.scene_fbo = framebufs.scene.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_scene;
 		if (framebufs.scene.velocity_tex)
@@ -2740,6 +2838,10 @@ void R_SetupView (void)
         r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
         r_framedata.dlight_params[2] = 0.f;
         r_framedata.dlight_params[3] = 0.f;
+        r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
+        r_framedata.colorspace_params[1] = 0.f;
+        r_framedata.colorspace_params[2] = 0.f;
+        r_framedata.colorspace_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;

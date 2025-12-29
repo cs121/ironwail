@@ -176,8 +176,6 @@ float tri(float x)
 vec4 SampleLightmap(vec2 uv)
 {
 	vec4 lm = texture(LMTex, uv);
-	if (LightmapParams.x <= 0.5)
-		lm = pow(lm, vec4(2.2));
 	return lm;
 }
 
@@ -220,7 +218,7 @@ vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
 
 	vec3 GammaToLinear(vec3 v)
 	{
-		return v; // Kept as identity for now
+		return v;
 	}
 
 	void main_body();
@@ -285,13 +283,14 @@ void main()
 		discard;
 #endif
 
-	// Gamma correction
-	bool linear_lightmaps = LightmapParams.x > 0.5;
-        if (!linear_lightmaps)
+        int debug_mode = int(ColorSpaceParams.x + 0.5);
+        if (debug_mode == 1)
         {
-                result.rgb = pow(result.rgb, vec3(2.2));
-                fullbright = pow(fullbright, vec3(2.2));
-                emissive = pow(emissive, vec3(2.2));
+                out_fragcolor = vec4(result.rgb, 1.0);
+#if !OIT
+                out_velocity = vec4(0.0);
+#endif
+                return;
         }
 
         bool additive_dlights = DLightParams.x > 0.5;
@@ -487,10 +486,6 @@ void main()
 	
 	result = clamp(result, 0.0, 1.0);
 	result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
-
-	// Output gamma correction
-	if (!linear_lightmaps)
-		result.rgb = pow(result.rgb, vec3(1.0 / 2.2));
 
 	result.a = in_alpha;
 	out_fragcolor = result;
