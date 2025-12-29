@@ -76,7 +76,7 @@ void main()
 
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;
-        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 2.0);
 #if DITHER
 	if (Fog.w > 0.)
 	{
