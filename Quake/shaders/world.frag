@@ -534,7 +534,7 @@ void main()
 #if !OIT
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	vec2 velocityOut = (result.a >= 0.999) ? (velocity * result.a) : vec2(0.0);
-	float materialMask = ((in_flags & CF_MAT_BLOOM) != 0u) ? 1.0 : 0.0;
+	float materialMask = ((in_flags & (CF_MAT_BLOOM | CF_MAT_EMISSIVE)) != 0u) ? 1.0 : 0.0;
 	if ((in_flags & CF_MAT_TRANS) != 0u)
 		materialMask += 2.0;
 	out_velocity = vec4(velocityOut, 0.0, materialMask);

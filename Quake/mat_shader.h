@@ -173,6 +173,14 @@ typedef enum
 	MAT_SHADERFLAG_GODRAY		= (1u << 12)
 } mat_shader_flags_t;
 
+typedef enum
+{
+	MAT_STAGE_OUTPUT_COLOR		= (1u << 0),
+	MAT_STAGE_OUTPUT_EMISSIVE	= (1u << 1),
+	MAT_STAGE_OUTPUT_BLOOM		= (1u << 2),
+	MAT_STAGE_OUTPUT_GODRAY_SOURCE	= (1u << 3)
+} mat_stage_output_t;
+
 typedef struct mat_shader_stage_s
 {
 	char		*map_path;
@@ -197,6 +205,12 @@ typedef struct mat_shader_stage_s
 	int			anim_map_time_bucket;
 	int			anim_map_frame;
 	mat_texmatrix_t	texmatrix_cache;
+	unsigned int		output_flags;
+	unsigned int		output_override_flags;
+	unsigned int		scale_override_flags;
+	float			emissive_scale;
+	float			bloom_scale;
+	float			godray_scale;
 } mat_shader_stage_t;
 
 typedef struct shader_material_s
@@ -223,6 +237,7 @@ typedef struct shader_material_s
 // Developer note:
 // Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
 // bloom_scale, godray_scale, and a single stage block with map + rgbGen identity.
+// Stage directives: emissive, bloom, godray, emissiveScale, bloomScale, godrayScale.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
 typedef struct texture_s texture_t;
