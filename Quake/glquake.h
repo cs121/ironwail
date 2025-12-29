@@ -564,6 +564,7 @@ typedef struct glprogs_s {
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
 	GLuint		world_dlight[2];		// [alpha test]
+	GLuint		world_dlight_hybrid[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
@@ -573,6 +574,7 @@ typedef struct glprogs_s {
 	GLuint		sprites[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
+	GLuint		dlight_composite;
 
 	/* compute */
 	GLuint		clear_indirect;
@@ -624,6 +626,11 @@ typedef struct glframebufs_s {
 		int			width;
 		int			height;
 	}				bloom;
+
+	struct {
+		GLuint		tex;
+		GLuint		fbo;
+	}				dlight;
 
 	struct {
 		GLuint		source_tex;

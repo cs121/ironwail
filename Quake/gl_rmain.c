@@ -61,6 +61,7 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
+static qboolean r_dlight_buffered_frame = false;
 
 typedef struct godrays_stabilization_s
 {
@@ -239,6 +240,21 @@ cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
+cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
+cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_falloff = { "r_dlight_falloff", "3", CVAR_ARCHIVE };
+cvar_t  r_dlight_exp = { "r_dlight_exp", "2.2", CVAR_ARCHIVE };
+cvar_t  r_dlight_core_boost = { "r_dlight_core_boost", "0.75", CVAR_ARCHIVE };
+cvar_t  r_dlight_core_exp = { "r_dlight_core_exp", "6.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_softknee = { "r_dlight_softknee", "1.5", CVAR_ARCHIVE };
+cvar_t  r_dlight_buffer = { "r_dlight_buffer", "1", CVAR_ARCHIVE };
+cvar_t  r_dlight_bloom = { "r_dlight_bloom", "0", CVAR_ARCHIVE };
+cvar_t  r_dlight_bloom_scale = { "r_dlight_bloom_scale", "0.15", CVAR_ARCHIVE };
+cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
+cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
+cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -734,6 +750,18 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
+	framebufs.dlight.tex = 0;
+	framebufs.dlight.fbo = 0;
+	if (framebufs.scene.samples == 1)
+	{
+		framebufs.dlight.tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_LINEAR, "dlight buffer");
+		framebufs.dlight.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.dlight.tex,
+			framebufs.scene.depth_stencil_tex,
+			framebufs.scene.depth_stencil_tex,
+			"dlight fbo"
+		);
+	}
+
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
 	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
 	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, framebufs.scene.samples, GL_NEAREST, "oit revealage");
@@ -789,6 +817,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
@@ -811,6 +840,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
+	GL_DeleteNativeTexture (framebufs.dlight.tex);
 	GL_DeleteNativeTexture (framebufs.autoexposure.tex);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
@@ -921,6 +951,60 @@ static GLuint GL_GenerateBloomTexture (void)
 	return input_tex;
 }
 
+static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, float radius_scale)
+{
+	int width = framebufs.bloom.width;
+	int height = framebufs.bloom.height;
+	GLuint fallback = framebufs.bloom.pingpong_tex[0] ? framebufs.bloom.pingpong_tex[0] : framebufs.bloom.extract_tex;
+
+	if (fallback == 0)
+		fallback = framebufs.bloom.extract_tex;
+	if (width <= 0 || height <= 0 || source_tex == 0)
+		return fallback;
+	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
+		return fallback;
+
+	threshold = q_max (0.f, threshold);
+	float radius = q_max (0.f, radius_scale);
+	if (radius <= 0.f)
+		radius = 1.f;
+
+	GL_BeginGroup ("Dlight bloom extract");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.bloom_extract);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
+	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
+		(float)vid.width / (float)width,
+		(float)vid.height / (float)height);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_EndGroup ();
+
+	GLuint input_tex = framebufs.bloom.extract_tex;
+	const int passes = 4;
+	GL_BeginGroup ("Dlight bloom blur");
+	for (int pass = 0; pass < passes; ++pass)
+	{
+		int target_index = pass & 1;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
+		glViewport (0, 0, width, height);
+		GL_UseProgram (glprogs.bloom_blur);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
+		float dirx = (pass & 1) ? 0.f : 1.f;
+		float diry = (pass & 1) ? 1.f : 0.f;
+		GL_Uniform4fFunc (0, radius / (float)width, radius / (float)height, dirx, diry);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+		input_tex = framebufs.bloom.pingpong_tex[target_index];
+	}
+	GL_EndGroup ();
+
+	return input_tex;
+}
+
 static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width, int ssao_height, float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
 	static GLuint last_depth_tex = 0;
@@ -1010,6 +1094,46 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 		view_min_x, view_min_y, view_max_x, view_max_y,
 		ssao_width, ssao_height, debug_mode);
 	GL_LogErrorIfDeveloper ("GL_LogSSAODepthInfo");
+}
+
+static void R_CompositeDlightBuffer (void)
+{
+	if (!r_dlight_buffered_frame || r_dlight_mode.value <= 0.f || r_dlight_buffer.value <= 0.f)
+		return;
+	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
+		return;
+
+	float scale = q_max (0.f, r_dlight_scale.value);
+	float bloom_enabled = q_max (0.f, r_dlight_bloom.value);
+	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value);
+	float bloom_radius = q_max (0.f, r_dlight_bloom_radius.value);
+	float bloom_threshold = q_max (0.f, r_dlight_bloom_threshold.value);
+
+	if (scale <= 0.f && (bloom_enabled <= 0.f || bloom_scale <= 0.f))
+		return;
+
+	GL_BeginGroup ("Dlight composite");
+	GL_UseProgram (glprogs.dlight_composite);
+	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
+	GL_Uniform1fFunc (0, scale);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_EndGroup ();
+
+	if (bloom_enabled > 0.f && bloom_scale > 0.f)
+	{
+		GLuint bloom_tex = GL_GenerateBloomTextureFrom (framebufs.dlight.tex, bloom_threshold, bloom_radius);
+		if (bloom_tex)
+		{
+			GL_BeginGroup ("Dlight bloom composite");
+			GL_UseProgram (glprogs.dlight_composite);
+			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, bloom_tex);
+			GL_Uniform1fFunc (0, bloom_scale);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
+			GL_EndGroup ();
+		}
+	}
 }
 
 static float R_SanitizeSSAOValue (float value, float fallback, float minval, float maxval)
@@ -2673,6 +2797,9 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
+	if (r_dlight_mode.value > 0.f && r_dlight_style.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
+		return true;
+
         if (GL_ShouldApplyMotionBlur ())
 		return true;
 
@@ -2849,6 +2976,8 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 */
 void R_SetupView (void)
 {
+	r_dlight_buffered_frame = false;
+
 	R_AnimateLight ();
 
 	{
@@ -4006,6 +4135,9 @@ static void R_DrawDLightPass (void)
 {
         int count = 0;
         entity_t **ents;
+	qboolean use_buffer = false;
+
+	r_dlight_buffered_frame = false;
 
         if (r_dlight_style.value <= 0.f)
                 return;
@@ -4019,6 +4151,19 @@ static void R_DrawDLightPass (void)
 
         GL_BeginGroup ("Dynamic lights (additive)");
 
+	if (r_dlight_mode.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo && framebufs.scene.samples == 1)
+	{
+		use_buffer = true;
+		r_dlight_buffered_frame = true;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		{
+			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
+			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
+		}
+	}
+
         r_framedata.dlight_params[2] = 1.f;
         {
                 GLuint buf;
@@ -4026,6 +4171,34 @@ static void R_DrawDLightPass (void)
                 GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
+
+	if (r_dlight_mode.value > 0.f && (glprogs.world_dlight_hybrid[0] || glprogs.world_dlight_hybrid[1]))
+	{
+		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
+		float falloff = (float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3);
+		float expval = q_max (0.01f, r_dlight_exp.value);
+		float core_boost = q_max (0.f, r_dlight_core_boost.value);
+		float core_exp = q_max (0.01f, r_dlight_core_exp.value);
+		float knee = q_max (0.f, r_dlight_softknee.value);
+		float ndotl = CLAMP (0.f, r_dlight_ndotl.value, 1.f);
+		float satchop = CLAMP (0.f, r_dlight_satchop.value, 1.f);
+		float radius_scale = q_max (0.f, r_dlight_radius_scale.value);
+
+		if (glprogs.world_dlight_hybrid[0])
+		{
+			GL_UseProgram (glprogs.world_dlight_hybrid[0]);
+			GL_Uniform4fFunc (0, scale, radius_scale, falloff, expval);
+			GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
+			GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
+		}
+		if (glprogs.world_dlight_hybrid[1])
+		{
+			GL_UseProgram (glprogs.world_dlight_hybrid[1]);
+			GL_Uniform4fFunc (0, scale, radius_scale, falloff, expval);
+			GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
+			GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
+		}
+	}
 
         R_DrawBrushModels_DLights (ents, count);
 
@@ -4036,6 +4209,21 @@ static void R_DrawDLightPass (void)
                 GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
+
+	if (use_buffer)
+	{
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
+		if (framesetup.scene_fbo)
+		{
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
+		else
+		{
+			glDrawBuffer (GL_BACK);
+			glReadBuffer (GL_BACK);
+		}
+	}
 
         GL_EndGroup ();
 }
@@ -4195,7 +4383,10 @@ void R_WarpScaleView (void)
 	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 
 	if (!needwarpscale)
+	{
+		R_CompositeDlightBuffer ();
 		return;
+	}
 
 	GL_BeginGroup ("Warp/scale view");
 
@@ -4218,6 +4409,8 @@ void R_WarpScaleView (void)
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
+
+	R_CompositeDlightBuffer ();
 }
 
 /*

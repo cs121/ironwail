@@ -533,6 +533,10 @@ void GL_CreateShaders (void)
 
         for (alphatest = 0; alphatest < 2; alphatest++)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
+        for (alphatest = 0; alphatest < 2; alphatest++)
+                glprogs.world_dlight_hybrid[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight_hybrid.frag"), "world dlight hybrid|ALPHATEST %d", alphatest);
+
+	glprogs.dlight_composite = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("dlight_composite.frag"), "dlight composite");
 
 	for (dither = 0; dither < 2; dither++)
 	{
