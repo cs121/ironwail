@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "glquake.h"
 #include "bc7enc.h"
 #include "gl_ktx2.h"
+#include <ctype.h>
 
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
 #define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
@@ -34,6 +35,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightmap_linear;
+extern cvar_t r_srgb_textures;
+extern cvar_t r_manual_gamma;
+extern cvar_t r_gamma;
+extern cvar_t r_post_contrast;
 
 typedef struct {
 	GLenum		id;
@@ -43,7 +48,7 @@ typedef struct {
 static const struct {
 	glformat_t	solid, alpha;
 } glformats[2] = {
-	{{GL_RGB, 1},							{GL_RGBA, 1}},
+	{{GL_RGB8, 1},							{GL_RGBA8, 1}},
 	{{GL_COMPRESSED_RGBA_BPTC_UNORM, 4},	{GL_COMPRESSED_RGBA_BPTC_UNORM, 4}},
 };
 
@@ -748,10 +753,94 @@ static void SetColor (uint32_t *dst, byte r, byte g, byte b, byte a)
 	((byte*)dst)[3] = a;
 }
 
+static qboolean TexMgr_IsLinearDataTextureName (const char *name)
+{
+	char lower[MAX_QPATH];
+	size_t len;
+
+	if (!name || !name[0])
+		return false;
+
+	q_strlcpy (lower, name, sizeof (lower));
+	len = strlen (lower);
+	for (size_t i = 0; i < len; ++i)
+		lower[i] = (char)tolower ((unsigned char)lower[i]);
+
+	if (strstr (lower, "lightmap") || strstr (lower, "_lm") || strstr (lower, "lightmap_"))
+		return true;
+	if (strstr (lower, "normal") || strstr (lower, "_nrm") || strstr (lower, "_norm"))
+		return true;
+	if (strstr (lower, "_rough") || strstr (lower, "roughness") || strstr (lower, "_metal") || strstr (lower, "metallic"))
+		return true;
+	if (strstr (lower, "_ao") || strstr (lower, "ambientocclusion"))
+		return true;
+	if (strstr (lower, "height") || strstr (lower, "_height"))
+		return true;
+	if (strstr (lower, "depth") || strstr (lower, "velocity"))
+		return true;
+	if (strstr (lower, "ssao") || strstr (lower, "noise") || strstr (lower, "blue"))
+		return true;
+	if (strstr (lower, "lut") || strstr (lower, "shadow"))
+		return true;
+
+	return false;
+}
+
+qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file)
+{
+	if (r_srgb_textures.value <= 0.f)
+		return false;
+
+	if (format == SRC_LIGHTMAP)
+		return false;
+
+	if (TexMgr_IsLinearDataTextureName (name))
+		return false;
+
+	if (source_file && !q_strcasecmp (source_file, "lightmap"))
+		return false;
+
+	return true;
+}
+
+static const char *TexMgr_InternalFormatName (GLenum format)
+{
+	switch (format)
+	{
+	case GL_RGB:
+		return "GL_RGB";
+	case GL_RGBA:
+		return "GL_RGBA";
+	case GL_RGB8:
+		return "GL_RGB8";
+	case GL_RGBA8:
+		return "GL_RGBA8";
+#ifdef GL_SRGB8
+	case GL_SRGB8:
+		return "GL_SRGB8";
+	case GL_SRGB8_ALPHA8:
+		return "GL_SRGB8_ALPHA8";
+#endif
+	case GL_RGBA16F:
+		return "GL_RGBA16F";
+	case GL_RGB16F:
+		return "GL_RGB16F";
+	case GL_COMPRESSED_RGBA_BPTC_UNORM:
+		return "GL_COMPRESSED_RGBA_BPTC_UNORM";
+	case GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM:
+		return "GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM";
+	default:
+		return "GL_UNKNOWN";
+	}
+}
+
 static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 {
 	size_t pixel_count;
 	byte *bytes;
+
+	if (r_srgb_textures.value > 0.f)
+		return;
 
 	if (q_strcasecmp (glt->source_file, WADFILENAME))
 		return;
@@ -771,6 +860,18 @@ static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 			bytes[c] = (byte) linear;
 		}
 	}
+}
+
+void TexMgr_SRGBTextures_f (cvar_t *var)
+{
+	(void)var;
+	TexMgr_ReloadImages ();
+}
+
+static void TexMgr_LogTextureUpload (const gltexture_t *glt)
+{
+	const char *colorspace = (glt->flags & TEXPREF_SRGB) ? "sRGB" : "linear";
+	Con_Printf ("Texture %s: %s, %s\n", glt->name, colorspace, TexMgr_InternalFormatName (glt->internal_format));
 }
 
 static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
@@ -1792,6 +1893,8 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                 glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
 #endif
 
+	TexMgr_LogTextureUpload (glt);
+
         // set filter modes
         TexMgr_SetFilterModes (glt);
 }
@@ -2228,6 +2331,7 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	GL_Bind (GL_TEXTURE0, glt);
 	if (use_half)
 	{
+		glt->internal_format = GL_RGBA16F;
 	        size_t pixels = (size_t)glt->width * glt->height * 4;
 	        GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
 	        if (!float_data)
@@ -2239,6 +2343,7 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	}
 	else
 	{
+		glt->internal_format = GL_RGBA8;
 	        GLsizeiptr upload_size = (GLsizeiptr) glt->width * glt->height * 4;
 	        if (TexMgr_EnsureLightmapUploadBuffer (upload_size))
 	        {
@@ -2255,6 +2360,8 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
         glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT,
                         r_lightmap_linear.value > 0.f ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
 #endif
+
+	TexMgr_LogTextureUpload (glt);
 
 	// set filter modes
 	TexMgr_SetFilterModes (glt);
@@ -2331,6 +2438,8 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 	glt->depth = depth;
 	glt->compression = 1;
 	glt->flags = flags;
+	if (TexMgr_ShouldUseSRGB (name, format, flags, source_file))
+		glt->flags |= TEXPREF_SRGB;
 	glt->shirt = -1;
 	glt->pants = -1;
 	q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
@@ -2878,19 +2987,22 @@ Returns index of palette buffer to use:
 	blend = (v_blend[3] && gl_polyblend.value) ? v_blend : vec4_origin;
 
 	/* can we use the original palette? */
-	if (vid_gamma.value == 1.f &&
-		vid_contrast.value == 1.f &&
+	{
+		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
+		float contrast = r_post_contrast.value;
+		if (gamma == 1.f && contrast == 1.f &&
 		blend[3] == 0.f)
-		return 0;
+			return 0;
 
-	/* no change since last time? */
-	if (cached_gamma == vid_gamma.value &&
-		cached_contrast == vid_contrast.value &&
+		/* no change since last time? */
+		if (cached_gamma == gamma &&
+			cached_contrast == contrast &&
 		memcmp (cached_blendcolor, blend, 4 * sizeof (float)) == 0)
-		return 1;
+			return 1;
 
-	cached_gamma = vid_gamma.value;
-	cached_contrast = vid_contrast.value;
+		cached_gamma = gamma;
+		cached_contrast = contrast;
+	}
 	memcpy (cached_blendcolor, blend, 4 * sizeof (float));
 
 	GL_BeginGroup ("Postprocess palette");
@@ -2898,7 +3010,12 @@ Returns index of palette buffer to use:
 	GL_UseProgram (glprogs.palette_postprocess);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_palette_buffer[1], 0, 256 * sizeof (GLuint));
-	GL_Uniform2fFunc (0, vid_gamma.value, CLAMP (1.0f, vid_contrast.value, 2.0f));
+	{
+		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
+		float contrast = CLAMP (0.1f, r_post_contrast.value, 2.0f);
+		GL_Uniform2fFunc (0, gamma, contrast);
+		GL_Uniform1fFunc (2, r_manual_gamma.value > 0.f ? 1.f : 0.f);
+	}
 	GL_Uniform4fvFunc (1, 1, blend);
 	GL_DispatchComputeFunc (256/64, 1, 1);
 	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);

@@ -271,6 +271,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
     gltexture_t *tex;
     GLenum gl_internal_format = GL_RGBA8;
     qboolean use_compressed = false;
+    qboolean srgb = false;
     int i;
 
     memset(&decoded, 0, sizeof(decoded));
@@ -291,8 +292,14 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
         return NULL;
     }
 
+    srgb = TexMgr_ShouldUseSRGB(name, SRC_RGBA, TEXPREF_MIPMAP, "");
+#ifdef GL_SRGB8
+    if (srgb)
+        gl_internal_format = GL_SRGB8_ALPHA8;
+#endif
+
     /* KTX2_TranscodeToRGBA() currently produces RGBA8 payloads, so upload uncompressed. */
-    use_compressed = (gl_internal_format != GL_RGBA8);
+    use_compressed = false;
 
     if (use_compressed)
     {
@@ -316,7 +323,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
     tex->height = (unsigned short)decoded.height[0];
     tex->depth = 1;
     tex->compression = use_compressed ? 4 : 1;
-    tex->flags = TEXPREF_MIPMAP;
+    tex->flags = TEXPREF_MIPMAP | (srgb ? TEXPREF_SRGB : 0);
     tex->source_file[0] = '\0';
     tex->source_offset = 0;
     tex->source_format = SRC_RGBA;
@@ -353,6 +360,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
 
     KTX2_FreeDecodedImage(&decoded);
 
+    Con_Printf("Texture %s: %s, %s\n", name, srgb ? "sRGB" : "linear", srgb ? "GL_SRGB8_ALPHA8" : "GL_RGBA8");
     KTX2_LogInfo("Finished uploading KTX2 texture '%s' (%dx%d, mips=%d)", name, tex->width, tex->height, tex->mipmap);
     return tex;
 }

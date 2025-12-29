@@ -22,6 +22,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    LightmapParams;
         vec4    LightgridParams;
         vec4    DLightParams;
+        vec4    ColorSpaceParams;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    _Pad1;

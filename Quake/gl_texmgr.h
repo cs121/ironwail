@@ -173,6 +173,8 @@ GLuint TexMgr_LoadDDS (const char *path);
 void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants);
 void TexMgr_ReloadImages (void);
 void TexMgr_ReloadNobrightImages (void);
+void TexMgr_SRGBTextures_f (cvar_t *var);
+qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file);
 
 int TexMgr_Pad(int s);
 int TexMgr_SafeTextureSize (int s);
