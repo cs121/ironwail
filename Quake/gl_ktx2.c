@@ -360,6 +360,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
 
     KTX2_FreeDecodedImage(&decoded);
 
+    Con_Printf("Texture %s: %s, %s\n", name, srgb ? "sRGB" : "linear", srgb ? "GL_SRGB8_ALPHA8" : "GL_RGBA8");
     KTX2_LogInfo("Finished uploading KTX2 texture '%s' (%dx%d, mips=%d)", name, tex->width, tex->height, tex->mipmap);
     return tex;
 }
