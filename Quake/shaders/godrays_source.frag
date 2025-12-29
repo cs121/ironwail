@@ -7,7 +7,7 @@
 #endif
 
 layout(location=0) uniform vec4 GodraysSourceParams0; // x: emissive intensity, y: light intensity, z: emissive threshold, w: light threshold
-layout(location=1) uniform vec4 GodraysSourceParams1; // x: mask knee, y: mask gamma, z: unused, w: unused
+layout(location=1) uniform vec4 GodraysSourceParams1; // x: mask knee, yzw: unused
 
 const uint
 	CF_USE_FULLBRIGHT = 2u,
@@ -25,13 +25,11 @@ layout(location=3) in vec2 in_uv;
 
 layout(location=0) out vec4 outColor;
 
-float BrightPartMask(vec3 color, float threshold, float knee, float gamma)
+float BrightPartMask(vec3 color, float threshold, float knee)
 {
 	float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
 	float k = (knee > 0.0) ? knee : max(threshold * 0.5, 1e-5);
 	float mask = smoothstep(threshold - k, threshold + k, luma);
-	if (gamma > 0.0 && abs(gamma - 1.0) > 1e-4)
-		mask = pow(mask, gamma);
 	return mask;
 }
 
@@ -73,18 +71,17 @@ void main()
 	float light_mask = 0.0;
 	float emissive_mask = 0.0;
 	float knee = GodraysSourceParams1.x;
-	float gamma = GodraysSourceParams1.y;
 
 	if ((in_flags & CF_GODRAYS_LIGHT) != 0u)
 	{
 		light_color = base.rgb;
 		light_strength = GodraysSourceParams0.y;
-		light_mask = BrightPartMask(light_color, GodraysSourceParams0.w, knee, gamma);
+		light_mask = BrightPartMask(light_color, GodraysSourceParams0.w, knee);
 	}
 	if ((in_flags & CF_GODRAYS_EMISSIVE) != 0u)
 	{
 		emissive_strength = GodraysSourceParams0.x;
-		emissive_mask = BrightPartMask(emissive_color, GodraysSourceParams0.z, knee, gamma);
+		emissive_mask = BrightPartMask(emissive_color, GodraysSourceParams0.z, knee);
 	}
 
 	vec3 color = vec3(0.0);

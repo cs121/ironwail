@@ -1,8 +1,7 @@
 layout(local_size_x=64) in;
 
-layout(location=0) uniform vec2 GammmaContrast;
+layout(location=0) uniform float Contrast;
 layout(location=1) uniform vec4 BlendColor;
-layout(location=2) uniform float ManualGamma;
 
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
@@ -22,16 +21,13 @@ layout(std430, binding=1) restrict writeonly buffer DstPaletteBuffer
 
 void main()
 {
-	float gamma = GammmaContrast.x;
-	float contrast = GammmaContrast.y;
+	float contrast = Contrast;
 	uint idx = gl_GlobalInvocationID.x;
 	if (idx >= 256u)
 		return;
 	vec3 color = vec3(UnpackRGB8(Palette[idx])) * (1./255.);
 	color = mix(color, BlendColor.rgb, BlendColor.a);
 	color *= contrast;
-	if (ManualGamma > 0.5)
-		color = pow(color, vec3(gamma));
 	uvec3 dst = uvec3(clamp(color, 0., 1.) * 255. + .5);
 	DstPalette[idx] = dst.r | (dst.g << 8) | (dst.b << 16) | 0xff000000u;
 }

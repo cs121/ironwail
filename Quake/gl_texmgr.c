@@ -37,8 +37,6 @@ extern cvar_t r_lightmap16f;
 extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_colorspace;
 extern cvar_t r_srgb_textures;
-extern cvar_t r_manual_gamma;
-extern cvar_t r_gamma;
 extern cvar_t r_color_contrast;
 
 typedef struct {
@@ -2909,7 +2907,6 @@ GLuint gl_palette_buffer[2]; // original + postprocessed
 
 static unsigned int cached_palette[256];
 static softemu_metric_t cached_softemu_metric = SOFTEMU_METRIC_INVALID;
-static float cached_gamma;
 static float cached_contrast;
 static vec4_t cached_blendcolor;
 
@@ -2921,7 +2918,6 @@ GLPalette_DeleteResources
 static void GLPalette_InvalidateRemapped (void)
 {
 	int i;
-	cached_gamma = -1.f;
 	cached_contrast = -1.f;
 	for (i = 0; i < 4; i++)
 		cached_blendcolor[i] = -1.f;
@@ -3044,19 +3040,15 @@ Returns index of palette buffer to use:
 
 	/* can we use the original palette? */
 	{
-		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
 		float contrast = r_color_contrast.value;
-		if (gamma == 1.f && contrast == 1.f &&
-		blend[3] == 0.f)
+		if (contrast == 1.f && blend[3] == 0.f)
 			return 0;
 
 		/* no change since last time? */
-		if (cached_gamma == gamma &&
-			cached_contrast == contrast &&
+		if (cached_contrast == contrast &&
 		memcmp (cached_blendcolor, blend, 4 * sizeof (float)) == 0)
 			return 1;
 
-		cached_gamma = gamma;
 		cached_contrast = contrast;
 	}
 	memcpy (cached_blendcolor, blend, 4 * sizeof (float));
@@ -3067,10 +3059,8 @@ Returns index of palette buffer to use:
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_palette_buffer[1], 0, 256 * sizeof (GLuint));
 	{
-		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
 		float contrast = CLAMP (0.1f, r_color_contrast.value, 2.0f);
-		GL_Uniform2fFunc (0, gamma, contrast);
-		GL_Uniform1fFunc (2, r_manual_gamma.value > 0.f ? 1.f : 0.f);
+		GL_Uniform1fFunc (0, contrast);
 	}
 	GL_Uniform4fvFunc (1, 1, blend);
 	GL_DispatchComputeFunc (256/64, 1, 1);

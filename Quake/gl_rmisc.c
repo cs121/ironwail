@@ -101,14 +101,9 @@ extern cvar_t r_exposure_speed_up;
 extern cvar_t r_exposure_speed_down;
 extern cvar_t r_exposure_lock;
 extern cvar_t r_exposure_debug;
-extern cvar_t r_saturation;
 extern cvar_t r_srgb_textures;
 extern cvar_t r_srgb_framebuffer;
-extern cvar_t r_manual_gamma;
-extern cvar_t r_gamma;
 extern cvar_t r_debug_colorspace;
-extern cvar_t r_post_contrast;
-extern cvar_t r_post_saturation;
 extern cvar_t r_color_midtone;
 extern cvar_t r_color_contrast;
 extern cvar_t r_color_saturation;
@@ -157,7 +152,6 @@ extern cvar_t r_godrays_lighttex_intensity;
 extern cvar_t r_godrays_emissive_threshold;
 extern cvar_t r_godrays_light_threshold;
 extern cvar_t r_godrays_mask_knee;
-extern cvar_t r_godrays_mask_gamma;
 extern cvar_t r_godrays_blur;
 extern cvar_t r_godrays_lighttex_name_match;
 extern cvar_t r_godrays_samples;
@@ -209,25 +203,6 @@ extern cvar_t r_simd;
 qboolean use_simd;
 
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
-
-static qboolean r_color_syncing = false;
-
-static void R_ColorCurveSync_f (cvar_t *var)
-{
-	if (r_color_syncing)
-		return;
-
-	r_color_syncing = true;
-	if (var == &r_post_contrast)
-		Cvar_SetValueQuick (&r_color_contrast, r_post_contrast.value);
-	else if (var == &r_color_contrast)
-		Cvar_SetValueQuick (&r_post_contrast, r_color_contrast.value);
-	else if (var == &r_post_saturation)
-		Cvar_SetValueQuick (&r_color_saturation, r_post_saturation.value);
-	else if (var == &r_color_saturation)
-		Cvar_SetValueQuick (&r_post_saturation, r_color_saturation.value);
-	r_color_syncing = false;
-}
 
 extern char r_showbboxes_filter_strings[MAXCMDLINE];
 extern qboolean r_showbboxes_filter_byindex;
@@ -552,22 +527,13 @@ Cvar_RegisterVariable (&r_exposure_speed_up);
 Cvar_RegisterVariable (&r_exposure_speed_down);
 Cvar_RegisterVariable (&r_exposure_lock);
 Cvar_RegisterVariable (&r_exposure_debug);
-Cvar_RegisterVariable (&r_saturation);
 Cvar_RegisterVariable (&r_srgb_textures);
 Cvar_SetCallback (&r_srgb_textures, TexMgr_SRGBTextures_f);
 Cvar_RegisterVariable (&r_srgb_framebuffer);
-Cvar_RegisterVariable (&r_manual_gamma);
-Cvar_RegisterVariable (&r_gamma);
 Cvar_RegisterVariable (&r_debug_colorspace);
-Cvar_RegisterVariable (&r_post_contrast);
-Cvar_RegisterVariable (&r_post_saturation);
 Cvar_RegisterVariable (&r_color_midtone);
 Cvar_RegisterVariable (&r_color_contrast);
 Cvar_RegisterVariable (&r_color_saturation);
-Cvar_SetCallback (&r_post_contrast, R_ColorCurveSync_f);
-Cvar_SetCallback (&r_post_saturation, R_ColorCurveSync_f);
-Cvar_SetCallback (&r_color_contrast, R_ColorCurveSync_f);
-Cvar_SetCallback (&r_color_saturation, R_ColorCurveSync_f);
 Cvar_RegisterVariable (&r_bloom);
 Cvar_RegisterVariable (&r_bloom_threshold);
 Cvar_RegisterVariable (&r_ssao);
@@ -608,7 +574,6 @@ Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_godrays_emissive_threshold);
 	Cvar_RegisterVariable (&r_godrays_light_threshold);
 	Cvar_RegisterVariable (&r_godrays_mask_knee);
-	Cvar_RegisterVariable (&r_godrays_mask_gamma);
 	Cvar_RegisterVariable (&r_godrays_blur);
 Cvar_RegisterVariable (&r_godrays_lighttex_name_match);
 Cvar_RegisterVariable (&r_godrays_samples);

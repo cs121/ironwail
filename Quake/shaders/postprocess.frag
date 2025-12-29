@@ -142,7 +142,7 @@ layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: unused
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
-layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: manual gamma enabled, z: output sRGB conversion, w: reserved
+layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: unused, z: output sRGB conversion, w: reserved
 layout(location=20) uniform float u_midtone;
 
 const int MOTION_MAX_SAMPLES = 64;
@@ -314,12 +314,10 @@ layout(location=0) out vec4 out_fragcolor;
 
 void main()
 {
-        float gamma = Params.x;
         float postContrast = Params.y;
         float scale = Params.z;
         float dither = Params.w;
         int debugMode = int(floor(ColorSpaceParams.x + 0.5));
-        float manualGamma = ColorSpaceParams.y;
         float outputSrgb = ColorSpaceParams.z;
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
@@ -673,8 +671,6 @@ void main()
                 mapped = pow(mapped, vec3(1.0 / midtone));
         mapped = ApplyPostContrast(mapped, postContrast);
         mapped = ApplySaturation(mapped, u_saturation);
-        if (manualGamma > 0.5)
-                mapped = pow(mapped, vec3(gamma));
         if (outputSrgb > 0.5)
                 mapped = LinearToSRGB(mapped);
         out_fragcolor = vec4(mapped, 1.0);
