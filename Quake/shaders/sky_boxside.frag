@@ -60,7 +60,7 @@ layout(location=1) out vec4 out_velocity;
 void main()
 {
 	out_fragcolor = texture(Tex, in_uv);
-        out_velocity = vec4(0.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 	out_fragcolor.rgb = mix(out_fragcolor.rgb, Fog.rgb, Fog.w);
 #if DITHER
 	out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
