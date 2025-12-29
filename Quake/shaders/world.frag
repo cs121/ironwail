@@ -356,6 +356,15 @@ void main()
 		static_light *= ndl;
 	}
 
+	if (LightmapParams.x > 0.5)
+	{
+		OUT_COLOR = vec4(clamp(static_light, 0.0, 1.0), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+
 	// Surface normal computation
 	vec3 surface_normal = in_normal;
 	float surface_normal_len = length(surface_normal);

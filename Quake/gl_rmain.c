@@ -215,7 +215,7 @@ cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
 cvar_t	r_pos = { "r_pos","0",CVAR_NONE };
 cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
 cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
-cvar_t	r_lightmap_linear = { "r_lightmap_linear", "1", CVAR_ARCHIVE };
+cvar_t	r_lightmap_linear = { "r_lightmap_linear", "0", CVAR_ARCHIVE };
 cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
@@ -228,6 +228,11 @@ cvar_t	r_gamma = { "r_gamma", "2.2", CVAR_ARCHIVE };
 cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
 cvar_t	r_post_contrast = { "r_post_contrast", "1.0", CVAR_ARCHIVE };
 cvar_t	r_post_saturation = { "r_post_saturation", "1.05", CVAR_ARCHIVE };
+cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
+cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
+cvar_t	r_color_saturation = { "r_color_saturation", "1.05", CVAR_ARCHIVE };
+cvar_t	r_lightmap_colorspace = { "r_lightmap_colorspace", "srgb", CVAR_ARCHIVE };
+cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -1601,10 +1606,14 @@ static void GL_PostProcessFallback (void)
 		GL_SetFramebufferSRGB (srgb_output);
 	}
 
-	float sat = CLAMP (0.9f, r_post_saturation.value, 1.2f);
-	float post_contrast = CLAMP (0.8f, r_post_contrast.value, 1.2f);
+	float sat = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
 	qboolean manual_gamma = GL_UseManualGamma ();
 	float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
+	float midtone = q_max (0.1f, r_color_midtone.value);
+	qboolean output_srgb = (r_srgb_framebuffer.value <= 0.f);
+	if (vid_framebuffer_srgb_capable && r_srgb_framebuffer.value > 0.f)
+		output_srgb = false;
 	for (size_t i = 0; i < numpixels; ++i)
 	{
 		float color[3] = {
@@ -1612,10 +1621,11 @@ static void GL_PostProcessFallback (void)
 			pixels[i * 4 + 1] * (1.f / 255.f),
 			pixels[i * 4 + 2] * (1.f / 255.f)
 		};
-		float l = color[0] * 0.299f + color[1] * 0.587f + color[2] * 0.114f;
-		color[0] = l + (color[0] - l) * sat;
-		color[1] = l + (color[1] - l) * sat;
-		color[2] = l + (color[2] - l) * sat;
+		if (midtone != 1.f)
+		{
+			for (int c = 0; c < 3; ++c)
+				color[c] = powf (color[c], 1.0f / midtone);
+		}
 		if (post_contrast != 1.f)
 		{
 			for (int c = 0; c < 3; ++c)
@@ -1624,11 +1634,28 @@ static void GL_PostProcessFallback (void)
 				color[c] = CLAMP (0.f, color[c] + t * ((post_contrast - 1.f) * 2.f), 1.f);
 			}
 		}
+		if (sat != 1.f)
+		{
+			float l = color[0] * 0.299f + color[1] * 0.587f + color[2] * 0.114f;
+			color[0] = l + (color[0] - l) * sat;
+			color[1] = l + (color[1] - l) * sat;
+			color[2] = l + (color[2] - l) * sat;
+		}
 		if (manual_gamma)
 		{
 			color[0] = powf (color[0], gamma);
 			color[1] = powf (color[1], gamma);
 			color[2] = powf (color[2], gamma);
+		}
+		if (output_srgb)
+		{
+			for (int c = 0; c < 3; ++c)
+			{
+				if (color[c] <= 0.0031308f)
+					color[c] = color[c] * 12.92f;
+				else
+					color[c] = 1.055f * powf (color[c], 1.0f / 2.4f) - 0.055f;
+			}
 		}
 		pixels[i * 4 + 0] = (byte)CLAMP (0, (int)Q_rint (color[0] * 255.f), 255);
 		pixels[i * 4 + 1] = (byte)CLAMP (0, (int)Q_rint (color[1] * 255.f), 255);
@@ -1831,7 +1858,7 @@ void GL_PostProcess (void)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
-        r_post_saturation.value = CLAMP (0.9f, r_post_saturation.value, 1.2f);
+        r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
 
@@ -1973,12 +2000,17 @@ void GL_PostProcess (void)
 	{
 		qboolean manual_gamma = GL_UseManualGamma ();
 		float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
-		float post_contrast = CLAMP (0.8f, r_post_contrast.value, 1.2f);
+		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
 		GL_Uniform4fFunc (0, gamma, post_contrast, 1.f / r_refdef.scale, dither);
 	}
 	{
 		qboolean manual_gamma = GL_UseManualGamma ();
-		GL_Uniform2fFunc (19, CLAMP (0.f, r_debug_colorspace.value, 4.f), manual_gamma ? 1.f : 0.f);
+		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
+		qboolean linear_debug = (debug_mode == 2);
+		qboolean output_srgb = (r_srgb_framebuffer.value <= 0.f) || !vid_framebuffer_srgb_capable;
+		if (linear_debug)
+			output_srgb = false;
+		GL_Uniform4fFunc (19, (float)debug_mode, manual_gamma ? 1.f : 0.f, output_srgb ? 1.f : 0.f, 0.f);
 	}
 	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
@@ -1999,7 +2031,8 @@ void GL_PostProcess (void)
 	screen_darken_depth,
 	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
-	GL_Uniform1fFunc (12, CLAMP (0.9f, r_post_saturation.value, 1.2f));
+	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
+	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
@@ -2656,13 +2689,15 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-        float saturation = CLAMP (0.9f, r_post_saturation.value, 1.2f);
-	r_post_saturation.value = saturation;
+        float saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	r_color_saturation.value = saturation;
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
 	if (r_manual_gamma.value > 0.f || r_debug_colorspace.value > 0.f)
 		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_post_contrast.value != 1.f || saturation != 1.f || GL_ShouldApplyMotionBlur ())
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
+		return true;
+	if (r_srgb_framebuffer.value <= 0.f)
 		return true;
 	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
 		return true;
@@ -2672,6 +2707,21 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	return false;
 }
+
+/*
+====================================================================================================
+COLOR-SPACE POLICY (HYBRID LINEAR)
+
+1) Lighting/compositing happens in linear HDR (RGBA16F targets).
+2) Albedo/diffuse textures are uploaded as sRGB. Non-color data (normals/depth/noise/LUTs/masks)
+   stays linear/UNORM.
+3) Lightmaps are controlled by r_lightmap_colorspace (srgb|linear). "srgb" assumes gamma-encoded
+   bakes and decodes on sampling; "linear" bypasses conversion.
+4) UI/HUD/2D is mixed AFTER tone mapping in LDR space (postprocess output).
+5) Exactly one output transform: postprocess applies the Quake curve + optional legacy gamma, then
+   performs linear->sRGB conversion if the backbuffer is not sRGB-capable.
+====================================================================================================
+*/
 
 void GL_ApplyFilmgrainUI (void)
 {
@@ -2826,7 +2876,7 @@ void R_SetupView (void)
         r_framedata.eye[1] = r_refdef.vieworg[1];
         r_framedata.eye[2] = r_refdef.vieworg[2];
         r_framedata.eye[3] = cl.time;
-        r_framedata.lightmap_params[0] = r_lightmap_linear.value > 0.f ? 1.f : 0.f;
+        r_framedata.lightmap_params[0] = r_lightmap_colorspace_debug.value > 0.f ? 1.f : 0.f;
         r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;

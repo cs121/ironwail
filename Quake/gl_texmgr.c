@@ -35,10 +35,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightmap_linear;
+extern cvar_t r_lightmap_colorspace;
 extern cvar_t r_srgb_textures;
 extern cvar_t r_manual_gamma;
 extern cvar_t r_gamma;
-extern cvar_t r_post_contrast;
+extern cvar_t r_color_contrast;
 
 typedef struct {
 	GLenum		id;
@@ -834,6 +835,18 @@ static const char *TexMgr_InternalFormatName (GLenum format)
 	}
 }
 
+static float TexMgr_SRGBToLinear (float c)
+{
+	if (c <= 0.04045f)
+		return c / 12.92f;
+	return powf ((c + 0.055f) / 1.055f, 2.4f);
+}
+
+static qboolean TexMgr_LightmapUsesSRGB (void)
+{
+	return !q_strcasecmp (r_lightmap_colorspace.string, "srgb");
+}
+
 static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 {
 	size_t pixel_count;
@@ -865,6 +878,41 @@ static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 void TexMgr_SRGBTextures_f (cvar_t *var)
 {
 	(void)var;
+	TexMgr_ReloadImages ();
+}
+
+static qboolean texmgr_lightmap_colorspace_syncing = false;
+
+void TexMgr_LightmapColorspace_f (cvar_t *var)
+{
+	if (texmgr_lightmap_colorspace_syncing)
+		return;
+
+	if (q_strcasecmp (var->string, "srgb") && q_strcasecmp (var->string, "linear"))
+	{
+		Con_Warning ("r_lightmap_colorspace must be \"srgb\" or \"linear\".\n");
+		texmgr_lightmap_colorspace_syncing = true;
+		Cvar_SetQuick (var, "srgb");
+		texmgr_lightmap_colorspace_syncing = false;
+		return;
+	}
+
+	texmgr_lightmap_colorspace_syncing = true;
+	Cvar_SetValueQuick (&r_lightmap_linear, !q_strcasecmp (var->string, "linear") ? 1.f : 0.f);
+	texmgr_lightmap_colorspace_syncing = false;
+
+	TexMgr_ReloadImages ();
+}
+
+void TexMgr_LightmapLinearCompat_f (cvar_t *var)
+{
+	if (texmgr_lightmap_colorspace_syncing)
+		return;
+
+	texmgr_lightmap_colorspace_syncing = true;
+	Cvar_SetQuick (&r_lightmap_colorspace, (var->value > 0.f) ? "linear" : "srgb");
+	texmgr_lightmap_colorspace_syncing = false;
+
 	TexMgr_ReloadImages ();
 }
 
@@ -2325,6 +2373,9 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 {
 	qboolean use_mipmaps = (r_lightmap_mipmaps.value > 0.f) && (glt->flags & TEXPREF_MIPMAP);
 	qboolean use_half = (r_lightmap16f.value > 0.f) && (!strstr(glt->name, "lightmap_dir"));
+	qboolean use_srgb = TexMgr_LightmapUsesSRGB ();
+	if (use_srgb)
+		glt->flags |= TEXPREF_SRGB;
 
 	// upload it
 	glt->compression = 1;
@@ -2337,28 +2388,33 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	        if (!float_data)
 	                Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
 	        for (size_t idx = 0; idx < pixels; idx++)
-	                float_data[idx] = data[idx] * (1.0f / 255.0f);
+	        {
+	                float value = data[idx] * (1.0f / 255.0f);
+	                if (use_srgb)
+	                        value = TexMgr_SRGBToLinear (value);
+	                float_data[idx] = value;
+	        }
 	        GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
 	        free (float_data);
 	}
 	else
 	{
-		glt->internal_format = GL_RGBA8;
+		glt->internal_format = use_srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
 	        GLsizeiptr upload_size = (GLsizeiptr) glt->width * glt->height * 4;
 	        if (TexMgr_EnsureLightmapUploadBuffer (upload_size))
 	        {
-	                glTexImage2D (glt->target, 0, GL_RGBA8, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, NULL);
+	                glTexImage2D (glt->target, 0, glt->internal_format, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, NULL);
 	                memcpy (lightmap_upload_ptr, data, upload_size);
 	                glTexSubImage2D (glt->target, 0, 0, 0, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, (const GLvoid *) 0);
 	                GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
 	        }
 	        else
-	                GL_TexImage (glt, 0, GL_RGBA8, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	                GL_TexImage (glt, 0, glt->internal_format, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
 	}
 
 #ifdef GL_EXT_texture_sRGB_decode
         glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT,
-                        r_lightmap_linear.value > 0.f ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
+                        use_srgb ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
 #endif
 
 	TexMgr_LogTextureUpload (glt);
@@ -2989,7 +3045,7 @@ Returns index of palette buffer to use:
 	/* can we use the original palette? */
 	{
 		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
-		float contrast = r_post_contrast.value;
+		float contrast = r_color_contrast.value;
 		if (gamma == 1.f && contrast == 1.f &&
 		blend[3] == 0.f)
 			return 0;
@@ -3012,7 +3068,7 @@ Returns index of palette buffer to use:
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_palette_buffer[1], 0, 256 * sizeof (GLuint));
 	{
 		float gamma = (r_manual_gamma.value > 0.f) ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
-		float contrast = CLAMP (0.1f, r_post_contrast.value, 2.0f);
+		float contrast = CLAMP (0.1f, r_color_contrast.value, 2.0f);
 		GL_Uniform2fFunc (0, gamma, contrast);
 		GL_Uniform1fFunc (2, r_manual_gamma.value > 0.f ? 1.f : 0.f);
 	}
