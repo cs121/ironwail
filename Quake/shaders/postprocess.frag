@@ -537,7 +537,7 @@ void main()
                 float ssaoIntensity = SSAOParams.x;
                 int ssaoDebugMode = int(floor(SSAOParams.y + 0.5));
                 bool ssaoInView = inView;
-                bool ssaoAllowed = (materialMask & 2) == 0;
+                bool ssaoAllowed = (materialMask & 2) == 0 && viewModelMask < 0.5;
                 if ((ssaoDebugMode > 0 || ssaoIntensity > 0.0) && ssaoInView)
                 {
                         if (!ssaoAllowed)
