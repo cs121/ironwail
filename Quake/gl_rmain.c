@@ -206,7 +206,6 @@ mleaf_t* r_viewleaf, * r_oldviewleaf;
 int		d_lightstylevalue[256];	// 8.8 fraction of base light value
 
 static qboolean gl_framebuffer_srgb_enabled = false;
-static qboolean gl_srgb_policy_warned = false;
 static qboolean gl_srgb_capability_warned = false;
 
 
@@ -222,14 +221,9 @@ cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
-cvar_t	r_saturation = { "r_saturation", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
-cvar_t	r_manual_gamma = { "r_manual_gamma", "0", CVAR_ARCHIVE };
-cvar_t	r_gamma = { "r_gamma", "2.2", CVAR_ARCHIVE };
 cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
-cvar_t	r_post_contrast = { "r_post_contrast", "1.0", CVAR_ARCHIVE };
-cvar_t	r_post_saturation = { "r_post_saturation", "1.05", CVAR_ARCHIVE };
 cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_saturation = { "r_color_saturation", "1.05", CVAR_ARCHIVE };
@@ -329,7 +323,6 @@ cvar_t	r_godrays_lighttex_intensity = { "r_godrays_lighttex_intensity", "1.0", C
 cvar_t	r_godrays_emissive_threshold = { "r_godrays_emissive_threshold", "0.4", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_threshold = { "r_godrays_light_threshold", "0.6", CVAR_ARCHIVE };
 cvar_t	r_godrays_mask_knee = { "r_godrays_mask_knee", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_mask_gamma = { "r_godrays_mask_gamma", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_lighttex_name_match = { "r_godrays_lighttex_name_match", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
@@ -1469,7 +1462,6 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	if (!draw_sky && !draw_brush)
 		return;
 	float mask_knee = q_max (0.f, r_godrays_mask_knee.value);
-	float mask_gamma = q_max (0.f, r_godrays_mask_gamma.value);
 
 	GL_BeginGroup ("Godrays source");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
@@ -1494,7 +1486,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
 			GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
-			GL_Uniform4fFunc (2, mask_knee, mask_gamma, 0.f, 0.f);
+			GL_Uniform4fFunc (2, mask_knee, 0.f, 0.f, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 		}
 	}
@@ -1512,7 +1504,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 				q_max (0.f, r_godrays_lighttex_intensity.value),
 				q_max (0.f, r_godrays_emissive_threshold.value),
 				q_max (0.f, r_godrays_light_threshold.value));
-			GL_Uniform4fFunc (1, mask_knee, mask_gamma, 0.f, 0.f);
+			GL_Uniform4fFunc (1, mask_knee, 0.f, 0.f, 0.f);
 			R_DrawBrushModels_Godrays (ents, count);
 		}
 	}
@@ -1678,19 +1670,11 @@ static void GL_SetFramebufferSRGB (qboolean enable)
 #endif
 }
 
-static qboolean GL_UseManualGamma (void)
+static qboolean GL_UseSRGBFramebuffer (void)
 {
-	if (r_srgb_framebuffer.value > 0.f && r_manual_gamma.value > 0.f)
-	{
-		if (!gl_srgb_policy_warned)
-		{
-			Con_Warning ("Both r_srgb_framebuffer and r_manual_gamma are enabled; disabling r_manual_gamma.\n");
-			gl_srgb_policy_warned = true;
-		}
-		Cvar_SetValueQuick (&r_manual_gamma, 0.f);
-	}
-
-	if (r_srgb_framebuffer.value > 0.f && !vid_framebuffer_srgb_capable)
+	if (r_srgb_framebuffer.value <= 0.f)
+		return false;
+	if (!vid_framebuffer_srgb_capable)
 	{
 		if (!gl_srgb_capability_warned)
 		{
@@ -1698,9 +1682,9 @@ static qboolean GL_UseManualGamma (void)
 			gl_srgb_capability_warned = true;
 		}
 		Cvar_SetValueQuick (&r_srgb_framebuffer, 0.f);
+		return false;
 	}
-
-	return r_manual_gamma.value > 0.f;
+	return true;
 }
 
 static void GL_PostProcessFallback (void)
@@ -1726,15 +1710,12 @@ static void GL_PostProcessFallback (void)
 	glReadBuffer (GL_BACK);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 	{
-		qboolean manual_gamma = GL_UseManualGamma ();
-		qboolean srgb_output = (r_srgb_framebuffer.value > 0.f) && !manual_gamma;
+		qboolean srgb_output = GL_UseSRGBFramebuffer ();
 		GL_SetFramebufferSRGB (srgb_output);
 	}
 
 	float sat = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
-	qboolean manual_gamma = GL_UseManualGamma ();
-	float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
 	float midtone = q_max (0.1f, r_color_midtone.value);
 	qboolean output_srgb = (r_srgb_framebuffer.value <= 0.f);
 	if (vid_framebuffer_srgb_capable && r_srgb_framebuffer.value > 0.f)
@@ -1765,12 +1746,6 @@ static void GL_PostProcessFallback (void)
 			color[0] = l + (color[0] - l) * sat;
 			color[1] = l + (color[1] - l) * sat;
 			color[2] = l + (color[2] - l) * sat;
-		}
-		if (manual_gamma)
-		{
-			color[0] = powf (color[0], gamma);
-			color[1] = powf (color[1], gamma);
-			color[2] = powf (color[2], gamma);
 		}
 		if (output_srgb)
 		{
@@ -2096,10 +2071,9 @@ void GL_PostProcess (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 	{
-		qboolean manual_gamma = GL_UseManualGamma ();
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
 		qboolean linear_debug = (debug_mode == 2);
-		qboolean srgb_output = (r_srgb_framebuffer.value > 0.f) && !manual_gamma && !linear_debug;
+		qboolean srgb_output = GL_UseSRGBFramebuffer () && !linear_debug;
 		GL_SetFramebufferSRGB (srgb_output);
 	}
 
@@ -2123,19 +2097,16 @@ void GL_PostProcess (void)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
-		qboolean manual_gamma = GL_UseManualGamma ();
-		float gamma = manual_gamma ? (1.0f / q_max (0.1f, r_gamma.value)) : 1.0f;
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
-		GL_Uniform4fFunc (0, gamma, post_contrast, 1.f / r_refdef.scale, dither);
+		GL_Uniform4fFunc (0, 1.f, post_contrast, 1.f / r_refdef.scale, dither);
 	}
 	{
-		qboolean manual_gamma = GL_UseManualGamma ();
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
 		qboolean linear_debug = (debug_mode == 2);
 		qboolean output_srgb = (r_srgb_framebuffer.value <= 0.f) || !vid_framebuffer_srgb_capable;
 		if (linear_debug)
 			output_srgb = false;
-		GL_Uniform4fFunc (19, (float)debug_mode, manual_gamma ? 1.f : 0.f, output_srgb ? 1.f : 0.f, 0.f);
+		GL_Uniform4fFunc (19, (float)debug_mode, 0.f, output_srgb ? 1.f : 0.f, 0.f);
 	}
 	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
@@ -2821,7 +2792,7 @@ qboolean GL_NeedsPostprocess (void)
 	r_color_saturation.value = saturation;
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
-	if (r_manual_gamma.value > 0.f || r_debug_colorspace.value > 0.f)
+	if (r_debug_colorspace.value > 0.f)
 		return true;
 	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
 		return true;
@@ -2846,8 +2817,8 @@ COLOR-SPACE POLICY (HYBRID LINEAR)
 3) Lightmaps are controlled by r_lightmap_colorspace (srgb|linear). "srgb" assumes gamma-encoded
    bakes and decodes on sampling; "linear" bypasses conversion.
 4) UI/HUD/2D is mixed AFTER tone mapping in LDR space (postprocess output).
-5) Exactly one output transform: postprocess applies the Quake curve + optional legacy gamma, then
-   performs linear->sRGB conversion if the backbuffer is not sRGB-capable.
+5) Exactly one output transform: postprocess applies the Quake curve, then performs linear->sRGB
+   conversion if the backbuffer is not sRGB-capable.
 ====================================================================================================
 */
 
@@ -2885,8 +2856,7 @@ void R_SetupGL (void)
 	if (!GL_NeedsSceneEffects ())
 	{
 		GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
-		qboolean manual_gamma = GL_UseManualGamma ();
-		qboolean srgb_output = (target == 0u) && (r_srgb_framebuffer.value > 0.f) && !manual_gamma;
+		qboolean srgb_output = (target == 0u) && GL_UseSRGBFramebuffer ();
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
 		GL_SetFramebufferSRGB (srgb_output);
@@ -4353,11 +4323,14 @@ void R_WarpScaleView (void)
 
 	if (need_depth_resolve && (!msaa || needwarpscale))
 	{
+		int dstw = (r_refdef.scale != 1) ? r_refdef.vrect.width : srcw;
+		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
+
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
 	if (!msaa && !needwarpscale)
