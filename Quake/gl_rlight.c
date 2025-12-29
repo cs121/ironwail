@@ -289,6 +289,7 @@ const vec3_t *R_GetDynamicLightTemperature (int type)
 		{ 1.30f, 1.00f, 0.50f }, // explosion
 		{ 1.30f, 1.10f, 0.80f }, // torch
 		{ 1.00f, 0.60f, 1.50f }, // teleport
+		{ 1.20f, 0.40f, 0.20f }, // lava
 	};
 
 	if (type < 0 || type >= DLIGHT_MAX_TYPES)
@@ -345,7 +346,10 @@ static void R_PushDlightArray (dlight_t *lights, int count)
 		if (!CL_DlightIsActive (l))
 			continue;
 
-		radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
+		if (CL_DlightShouldFlicker (l))
+			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
+		else
+			radius = l->baseradius;
 		radius = q_max (radius, 0.f);
 		l->radius = radius;
 
@@ -364,14 +368,17 @@ static void R_PushDlightArray (dlight_t *lights, int count)
 		out = &r_lightbuffer.lights[r_framedata.numlights++];
 		const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
 		float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
-		float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
 		vec3_t finalcolor;
 		finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
 		finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
 		finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
-		finalcolor[0] *= flicker;
-		finalcolor[1] *= flicker;
-		finalcolor[2] *= flicker;
+		if (CL_DlightShouldFlicker (l))
+		{
+			float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
+			finalcolor[0] *= flicker;
+			finalcolor[1] *= flicker;
+			finalcolor[2] *= flicker;
+		}
 		if (l->type == DLIGHT_TORCH)
 		{
 			float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;

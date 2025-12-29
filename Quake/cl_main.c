@@ -427,7 +427,10 @@ static void CL_UpdateDlightArray (dlight_t *dl, int count, float frametime)
 		if (dl->baseradius < 0)
 			dl->baseradius = 0;
 
-		dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
+		if (CL_DlightShouldFlicker (dl))
+			dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
+		else
+			dl->radius = dl->baseradius;
 		if (dl->radius < 0)
 			dl->radius = 0;
 	}
@@ -571,9 +574,16 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
                 return;
         }
 
+        if (name && (q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch")))
+        {
+                dl->type = DLIGHT_TORCH;
+                return;
+        }
+
         if (name && q_strcasestr (name, "lava"))
         {
                 dl->color[0] = 1.00f; dl->color[1] = 0.15f; dl->color[2] = 0.05f;
+                dl->type = DLIGHT_LAVA;
                 return;
         }
 
@@ -1180,4 +1190,3 @@ void CL_Init (void)
 
 	Cmd_AddCommand_ServerCommand ("v_water", V_Water_f);
 }
-
