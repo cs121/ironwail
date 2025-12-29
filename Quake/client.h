@@ -80,6 +80,7 @@ typedef enum
 	DLIGHT_EXPLOSION,
 	DLIGHT_TORCH,
 	DLIGHT_TELEPORT,
+	DLIGHT_LAVA,
 	DLIGHT_MAX_TYPES
 } dlighttype_t;
 typedef struct
@@ -345,6 +346,11 @@ extern	int				cl_numvisedicts;
 static inline qboolean CL_DlightIsActive (const dlight_t *dl)
 {
 	return dl && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
+}
+
+static inline qboolean CL_DlightShouldFlicker (const dlight_t *dl)
+{
+	return dl && (dl->type == DLIGHT_EXPLOSION || dl->type == DLIGHT_TORCH || dl->type == DLIGHT_LAVA);
 }
 
 extern	entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
