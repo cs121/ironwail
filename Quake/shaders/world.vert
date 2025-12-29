@@ -48,6 +48,7 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
+	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -141,6 +142,7 @@ layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
+layout(location=15) flat out vec4 out_stage_color;
 
 void main()
 {
@@ -174,10 +176,11 @@ void main()
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
 	out_flags = call.flags;
 #if MODE == 2
-	out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
+	out_alpha = (instance.alpha < 0.0 ? call.wateralpha : instance.alpha) * call.stage_color.a;
 #else
-	out_alpha = instance.alpha < 0.0 ? 1.0 : instance.alpha;
+	out_alpha = (instance.alpha < 0.0 ? 1.0 : instance.alpha) * call.stage_color.a;
 #endif
+	out_stage_color = call.stage_color;
 	out_styles.x = GetLightStyle(in_styles.x);
 	if (in_styles.y == 255)
 		out_styles.yzw = vec3(-1.);
