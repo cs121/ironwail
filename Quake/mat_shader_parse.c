@@ -462,10 +462,15 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	stage.anim_map_frame = 0;
 	stage.texmatrix_time_bucket = -1;
 	stage.anim_map_time_bucket = -1;
+	stage.output_flags = MAT_STAGE_OUTPUT_COLOR;
+	stage.emissive_scale = material->emissive_scale;
+	stage.bloom_scale = material->bloom_scale;
+	stage.godray_scale = material->godray_scale;
 
 	while ((data = COM_Parse (data)) != NULL)
 	{
 		const char *value;
+		float scale;
 
 		if (!com_token[0])
 			continue;
@@ -768,6 +773,63 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			Mat_Shader_ReportUnknownToken (value, material->name);
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "emissive"))
+		{
+			if (!ParseIdent (&data, &value))
+				break;
+			stage.output_override_flags |= MAT_STAGE_OUTPUT_EMISSIVE;
+			if (Mat_Shader_ParseBool (value, false))
+				stage.output_flags |= MAT_STAGE_OUTPUT_EMISSIVE;
+			else
+				stage.output_flags &= ~MAT_STAGE_OUTPUT_EMISSIVE;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "bloom"))
+		{
+			if (!ParseIdent (&data, &value))
+				break;
+			stage.output_override_flags |= MAT_STAGE_OUTPUT_BLOOM;
+			if (Mat_Shader_ParseBool (value, false))
+				stage.output_flags |= MAT_STAGE_OUTPUT_BLOOM;
+			else
+				stage.output_flags &= ~MAT_STAGE_OUTPUT_BLOOM;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray"))
+		{
+			if (!ParseIdent (&data, &value))
+				break;
+			stage.output_override_flags |= MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			if (Mat_Shader_ParseBool (value, false))
+				stage.output_flags |= MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			else
+				stage.output_flags &= ~MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "emissiveScale") || !q_strcasecmp (com_token, "emissive_scale"))
+		{
+			if (!ParseFloat (&data, &scale))
+				break;
+			stage.emissive_scale = scale;
+			stage.scale_override_flags |= MAT_STAGE_OUTPUT_EMISSIVE;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "bloomScale") || !q_strcasecmp (com_token, "bloom_scale"))
+		{
+			if (!ParseFloat (&data, &scale))
+				break;
+			stage.bloom_scale = scale;
+			stage.scale_override_flags |= MAT_STAGE_OUTPUT_BLOOM;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godrayScale") || !q_strcasecmp (com_token, "godray_scale"))
+		{
+			if (!ParseFloat (&data, &scale))
+				break;
+			stage.godray_scale = scale;
+			stage.scale_override_flags |= MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "animMap"))
 		{
 			float fps = 0.f;
@@ -814,6 +876,87 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		material->stage0 = stage;
 
 	return data;
+}
+
+static void Mat_Shader_ApplyStageDefaults (shader_material_t *material)
+{
+	size_t i;
+
+	if (!material)
+		return;
+
+	for (i = 0; i < VEC_SIZE (material->stages); ++i)
+	{
+		mat_shader_stage_t *stage = &material->stages[i];
+
+		stage->output_flags |= MAT_STAGE_OUTPUT_COLOR;
+
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_EMISSIVE) == 0u)
+		{
+			if (material->emissive_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_EMISSIVE;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_EMISSIVE;
+		}
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_BLOOM) == 0u)
+		{
+			if (material->bloom_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_BLOOM;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_BLOOM;
+		}
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_GODRAY_SOURCE) == 0u)
+		{
+			if (material->godray_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+		}
+
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_EMISSIVE) == 0u)
+			stage->emissive_scale = material->emissive_scale;
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_BLOOM) == 0u)
+			stage->bloom_scale = material->bloom_scale;
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_GODRAY_SOURCE) == 0u)
+			stage->godray_scale = material->godray_scale;
+	}
+
+	if (VEC_SIZE (material->stages) > 0)
+		material->stage0 = material->stages[0];
+	else
+	{
+		mat_shader_stage_t *stage = &material->stage0;
+
+		stage->output_flags |= MAT_STAGE_OUTPUT_COLOR;
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_EMISSIVE) == 0u)
+		{
+			if (material->emissive_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_EMISSIVE;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_EMISSIVE;
+		}
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_BLOOM) == 0u)
+		{
+			if (material->bloom_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_BLOOM;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_BLOOM;
+		}
+		if ((stage->output_override_flags & MAT_STAGE_OUTPUT_GODRAY_SOURCE) == 0u)
+		{
+			if (material->godray_enable)
+				stage->output_flags |= MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+			else
+				stage->output_flags &= ~MAT_STAGE_OUTPUT_GODRAY_SOURCE;
+		}
+
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_EMISSIVE) == 0u)
+			stage->emissive_scale = material->emissive_scale;
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_BLOOM) == 0u)
+			stage->bloom_scale = material->bloom_scale;
+		if ((stage->scale_override_flags & MAT_STAGE_OUTPUT_GODRAY_SOURCE) == 0u)
+			stage->godray_scale = material->godray_scale;
+	}
 }
 
 static const char *ParseMaterialBlock (const char *data, const char *name, const char *source_file)
@@ -941,6 +1084,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			break;
 	}
 
+	Mat_Shader_ApplyStageDefaults (&material);
 	existing = Mat_Shader_Find (material.name);
 	if (existing)
 		Mat_Shader_Remove (existing);

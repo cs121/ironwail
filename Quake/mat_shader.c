@@ -622,6 +622,32 @@ const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const ch
 	return material->stage0.map_path;
 }
 
+static qboolean Mat_Shader_StageHasOutput (const mat_shader_stage_t *stage, unsigned int output_flag)
+{
+	if (!stage)
+		return false;
+	return (stage->output_flags & output_flag) != 0u;
+}
+
+static qboolean Mat_Shader_MaterialHasOutput (const shader_material_t *material, unsigned int output_flag)
+{
+	size_t i;
+
+	if (!material)
+		return false;
+
+	if (VEC_SIZE (material->stages) == 0)
+		return Mat_Shader_StageHasOutput (&material->stage0, output_flag);
+
+	for (i = 0; i < VEC_SIZE (material->stages); ++i)
+	{
+		if (Mat_Shader_StageHasOutput (&material->stages[i], output_flag))
+			return true;
+	}
+
+	return false;
+}
+
 unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 {
 	unsigned int flags = 0u;
@@ -649,11 +675,11 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_MONSTERCLIP;
 	if (material->surfaceparms & MAT_SURFPARM_STONE)
 		flags |= MAT_SHADERFLAG_STONE;
-	if (material->emissive_enable)
+	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_EMISSIVE))
 		flags |= MAT_SHADERFLAG_EMISSIVE;
-	if (material->bloom_enable)
+	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_BLOOM))
 		flags |= MAT_SHADERFLAG_BLOOM;
-	if (material->godray_enable)
+	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_GODRAY_SOURCE))
 		flags |= MAT_SHADERFLAG_GODRAY;
 
 	return flags;
