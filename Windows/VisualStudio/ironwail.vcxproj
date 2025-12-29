@@ -273,6 +273,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\keys.c" />
     <ClCompile Include="..\..\Quake\main_sdl.c" />
     <ClCompile Include="..\..\Quake\mathlib.c" />
+    <ClCompile Include="..\..\Quake\mat_shader.c" />
+    <ClCompile Include="..\..\Quake\mat_shader_parse.c" />
     <ClCompile Include="..\..\Quake\menu.c" />
     <ClCompile Include="..\..\Quake\miniz.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
@@ -308,6 +310,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     </ClCompile>
     <ClCompile Include="..\..\Quake\r_alias.c" />
     <ClCompile Include="..\..\Quake\r_brush.c" />
+    <ClCompile Include="..\..\Quake\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\r_maptex_export.c" />
     <ClCompile Include="..\..\Quake\r_part.c" />
     <ClCompile Include="..\..\Quake\r_sprite.c" />
@@ -391,6 +394,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\json.h" />
     <ClInclude Include="..\..\Quake\keys.h" />
     <ClInclude Include="..\..\Quake\mathlib.h" />
+    <ClInclude Include="..\..\Quake\mat_shader.h" />
+    <ClInclude Include="..\..\Quake\mat_shader_parse.h" />
     <ClInclude Include="..\..\Quake\menu.h" />
     <ClInclude Include="..\..\Quake\miniz.h" />
     <ClInclude Include="..\..\Quake\modelgen.h" />
@@ -411,6 +416,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\q_sound.h" />
     <ClInclude Include="..\..\Quake\q_stdinc.h" />
     <ClInclude Include="..\..\Quake\render.h" />
+    <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
     <ClInclude Include="..\..\Quake\resource.h" />
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />
