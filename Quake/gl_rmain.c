@@ -216,9 +216,9 @@ cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
 cvar_t	r_pos = { "r_pos","0",CVAR_NONE };
 cvar_t	r_fullbright = { "r_fullbright","0",CVAR_NONE };
 cvar_t	r_lightmap = { "r_lightmap","0",CVAR_NONE };
-cvar_t	r_lightmap_linear = { "r_lightmap_linear", "0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_linear = { "r_lightmap_linear", "1", CVAR_ARCHIVE };
 cvar_t	r_lightmap_mipmaps = { "r_lightmap_mipmaps", "1", CVAR_ARCHIVE };
-cvar_t	r_lightmap16f = { "r_lightmap16f", "0", CVAR_ARCHIVE };
+cvar_t	r_lightmap16f = { "r_lightmap16f", "1", CVAR_ARCHIVE };
 cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
@@ -244,7 +244,7 @@ cvar_t  r_dlight_core_boost = { "r_dlight_core_boost", "0.75", CVAR_ARCHIVE };
 cvar_t  r_dlight_core_exp = { "r_dlight_core_exp", "6.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_softknee = { "r_dlight_softknee", "1.5", CVAR_ARCHIVE };
 cvar_t  r_dlight_buffer = { "r_dlight_buffer", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom = { "r_dlight_bloom", "0", CVAR_ARCHIVE };
+cvar_t  r_dlight_bloom = { "r_dlight_bloom", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_bloom_scale = { "r_dlight_bloom_scale", "0.15", CVAR_ARCHIVE };
 cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
@@ -257,10 +257,10 @@ cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
 cvar_t	r_alphasort = { "r_alphasort","1",CVAR_ARCHIVE };
 cvar_t	r_oit = { "r_oit","1",CVAR_ARCHIVE };
 cvar_t	r_dither = { "r_dither", "1.0", CVAR_ARCHIVE };
-cvar_t	r_dof = { "r_dof", "0", CVAR_ARCHIVE };
+cvar_t	r_dof = { "r_dof", "1", CVAR_ARCHIVE };
 cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
-cvar_t	r_dof_range = { "r_dof_range", "48", CVAR_ARCHIVE };
-cvar_t	r_dof_strength = { "r_dof_strength", "6", CVAR_ARCHIVE };
+cvar_t	r_dof_range = { "r_dof_range", "255", CVAR_ARCHIVE };
+cvar_t	r_dof_strength = { "r_dof_strength", "3", CVAR_ARCHIVE };
 cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
@@ -270,7 +270,7 @@ cvar_t	r_motionblur_maxsamples = { "r_motionblur_maxsamples", "16", CVAR_ARCHIVE
 cvar_t	r_motionblur_minvelocity = { "r_motionblur_minvelocity", "0.0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVAR_ARCHIVE };
 
-cvar_t	r_tonemap = { "r_tonemap", "1", CVAR_ARCHIVE };
+cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
@@ -280,12 +280,12 @@ cvar_t	r_exposure_speed_up = { "r_exposure_speed_up", "0.6", CVAR_ARCHIVE };
 cvar_t	r_exposure_speed_down = { "r_exposure_speed_down", "0.3", CVAR_ARCHIVE };
 cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
 cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
-cvar_t	r_bloom = { "r_bloom", "0.04", CVAR_ARCHIVE };
+cvar_t	r_bloom = { "r_bloom", "3.00", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
-cvar_t	r_ssao = { "r_ssao", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao = { "r_ssao", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_radius = { "r_ssao_radius", "24", CVAR_ARCHIVE };
-cvar_t	r_ssao_intensity = { "r_ssao_intensity", "0.5", CVAR_ARCHIVE };
+cvar_t	r_ssao_intensity = { "r_ssao_intensity", "1.5", CVAR_ARCHIVE };
 cvar_t	r_ssao_bias = { "r_ssao_bias", "0.02", CVAR_ARCHIVE };
 cvar_t	r_ssao_power = { "r_ssao_power", "1.5", CVAR_ARCHIVE };
 cvar_t	r_ssao_min = { "r_ssao_min", "0.55", CVAR_ARCHIVE };
@@ -335,7 +335,7 @@ cvar_t	r_godrays_sky_softness = { "r_godrays_sky_softness", "1.5", CVAR_ARCHIVE 
 cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_ARCHIVE };
 cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
-cvar_t	r_godrays_light_y = { "r_godrays_light_y", "0.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_y = { "r_godrays_light_y", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_stabilize = { "r_godrays_stabilize", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_stabilize_strength = { "r_godrays_stabilize_strength", "0.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_stabilize_max_px = { "r_godrays_stabilize_max_px", "0.0", CVAR_ARCHIVE };
@@ -345,9 +345,9 @@ cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
 
-cvar_t	r_vignette = { "r_vignette", "0.75", CVAR_ARCHIVE };
-cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.3", CVAR_ARCHIVE };
-cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "0.8", CVAR_ARCHIVE };
+cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
+cvar_t	r_vignette_radius_outer = { "r_vignette_radius_outer", "2.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_falloff = { "r_vignette_falloff", "2.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_r = { "r_vignette_color_r", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
@@ -369,7 +369,7 @@ cvar_t	r_filmgrain_seed = { "r_filmgrain_seed", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_affect_ui = { "r_filmgrain_affect_ui", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_debug = { "r_filmgrain_debug", "0", CVAR_ARCHIVE };
 
-cvar_t	r_overbrightbits = { "r_overbrightbits", "1", CVAR_ARCHIVE };
+cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
 
 cvar_t	gl_finish = { "gl_finish","0",CVAR_NONE };
 cvar_t	gl_clear = { "gl_clear","1",CVAR_NONE };
@@ -383,7 +383,7 @@ cvar_t	r_flatlightstyles = { "r_flatlightstyles", "0", CVAR_NONE };
 cvar_t	r_lerplightstyles = { "r_lerplightstyles", "1", CVAR_ARCHIVE }; // 0=off; 1=skip abrupt transitions; 2=always lerp
 cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
-cvar_t	gl_overbright_models = { "gl_overbright_models", "1", CVAR_ARCHIVE };
+cvar_t	gl_overbright_models = { "gl_overbright_models", "0", CVAR_ARCHIVE };
 cvar_t	r_model_halflambert = { "r_model_halflambert", "0", CVAR_ARCHIVE };
 cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
@@ -4211,44 +4211,27 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	
 	R_Clear ();
 	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	
-        R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
-
-        S_ExtraUpdate (); // don't let sound get messed up if going slow
-
-        R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-
-        R_DrawDLightPass ();
-
-        R_DrawParticles (false);
-	
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	S_ExtraUpdate (); // don't let sound get messed up if going slow
+	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	R_DrawDLightPass ();
+	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
-	
 	R_DrawWater (false);
-	
 	R_BeginTranslucency ();
-	
 	R_DrawWater (true);
-	
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
-	
 	R_DrawParticles (true);
-	
 	R_EndTranslucency ();
-	
-        R_ShowTris (); //johnfitz
-
-        R_ShowBoundingBoxes (); //johnfitz
-
-        R_ShowPointFile ();
-
-        R_ShowLightgridDebug ();
+	R_ShowTris (); //johnfitz
+	R_ShowBoundingBoxes (); //johnfitz
+	R_ShowPointFile ();
+	R_ShowLightgridDebug ();
 }
 
 /*
