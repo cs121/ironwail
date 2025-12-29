@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "../common/lightgrid.h"
+#include "r_dlight_pool.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -61,9 +62,6 @@ client_state_t	cl;
 entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 int					cl_max_lightstyles = MAX_LIGHTSTYLES;
-dlight_t		cl_dlights[MAX_DLIGHTS];
-dlight_t		cl_entity_dlights[MAX_ENTITY_DLIGHTS];
-int				cl_num_entity_dlights;
 
 entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
 int				cl_max_edicts; //johnfitz -- only changes when new map loads
@@ -111,9 +109,7 @@ void CL_ClearState (void)
 	SZ_Clear (&cls.message);
 
 // clear other arrays
-	memset (cl_dlights, 0, sizeof(cl_dlights));
-	memset (cl_entity_dlights, 0, sizeof(cl_entity_dlights));
-	cl_num_entity_dlights = 0;
+	DLightPool_Clear ();
 	memset (cl_lightstyle, 0, sizeof(cl_lightstyle));
 	cl_max_lightstyles = MAX_LIGHTSTYLES;
 	memset (cl_temp_entities, 0, sizeof(cl_temp_entities));
@@ -171,6 +167,7 @@ void CL_Disconnect (void)
 	CL_ClearSignons ();
 
 	V_ResetEffects ();
+	DLightPool_Clear ();
 }
 
 void CL_Disconnect_f (void)
@@ -361,52 +358,16 @@ CL_AllocDlight
 */
 dlight_t *CL_AllocDlight (int key)
 {
-	int		i;
-	dlight_t	*dl;
+	dlight_t *dl = DLightPool_AllocTransientByKey (key, cl.time);
 
-// first look for an exact key match
-	if (key)
-	{
-		dl = cl_dlights;
-                for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
-                {
-                        if (dl->key == key)
-                        {
-                                memset (dl, 0, sizeof(*dl));
-                                dl->key = key;
-                                dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-                                dl->type = DLIGHT_DEFAULT;
-                                dl->spawn = cl.time - 0.001;
-                                dl->flicker_seed = (float) rand ();
-                                return dl;
-                        }
-                }
-        }
-
-// then look for anything else
-	dl = cl_dlights;
-	for (i=0 ; i<MAX_DLIGHTS ; i++, dl++)
-	{
-                if (dl->die < cl.time || dl->spawn > cl.time)
-                {
-                        memset (dl, 0, sizeof(*dl));
-                        dl->key = key;
-                        dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-                        dl->type = DLIGHT_DEFAULT;
-                        dl->spawn = cl.time - 0.001;
-                        dl->flicker_seed = (float) rand ();
-                        return dl;
-                }
-        }
-
-        dl = &cl_dlights[0];
-        memset (dl, 0, sizeof(*dl));
-        dl->key = key;
-        dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
-        dl->type = DLIGHT_DEFAULT;
-        dl->spawn = cl.time - 0.001;
-        dl->flicker_seed = (float) rand ();
-        return dl;
+	dl->key = key;
+	dl->color[0] = dl->color[1] = dl->color[2] = 1; //johnfitz -- lit support via lordhavoc
+	dl->type = DLIGHT_DEFAULT;
+	dl->spawn = cl.time - 0.001;
+	dl->flicker_seed = (float) rand ();
+	dl->active = true;
+	dl->kind = DL_TRANSIENT;
+	return dl;
 }
 
 
@@ -416,26 +377,6 @@ CL_DecayLights
 
 ===============
 */
-static void CL_UpdateDlightArray (dlight_t *dl, int count, float frametime)
-{
-	for (int i = 0; i < count; i++, dl++)
-	{
-		if (dl->die < cl.time || dl->spawn > cl.time || !dl->baseradius)
-			continue;
-
-		dl->baseradius -= frametime*dl->decay;
-		if (dl->baseradius < 0)
-			dl->baseradius = 0;
-
-		if (CL_DlightShouldFlicker (dl))
-			dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (cl.time * 9.0 + dl->flicker_seed));
-		else
-			dl->radius = dl->baseradius;
-		if (dl->radius < 0)
-			dl->radius = 0;
-	}
-}
-
 /*
 ===============
 CL_DecayLights
@@ -446,9 +387,7 @@ void CL_DecayLights (void)
 	float time;
 
 	time = cl.time - cl.oldtime;
-
-	CL_UpdateDlightArray (cl_dlights, MAX_DLIGHTS, time);
-	CL_UpdateDlightArray (cl_entity_dlights, cl_num_entity_dlights, time);
+	DLightPool_Decay (time, cl.time);
 }
 
 
@@ -853,7 +792,6 @@ int CL_ReadFromServer (void)
 	int			num_beams = 0; //johnfitz
 	int			num_dlights = 0; //johnfitz
 	beam_t		*b; //johnfitz
-	dlight_t	*l; //johnfitz
 	int			i; //johnfitz
 
 	CL_AdvanceTime ();
@@ -899,15 +837,14 @@ int CL_ReadFromServer (void)
 	dev_stats.beams = num_beams;
 	dev_peakstats.beams = q_max(num_beams, dev_peakstats.beams);
 
-        //dlights
-        for (i=0, l=cl_dlights ; i<MAX_DLIGHTS ; i++, l++)
-                if (l->die >= cl.time && l->spawn <= cl.time && l->baseradius)
-                        num_dlights++;
-        for (i=0, l=cl_entity_dlights ; i<cl_num_entity_dlights ; i++, l++)
-                if (l->die >= cl.time && l->spawn <= cl.time && l->baseradius)
-                        num_dlights++;
+	//dlights
+	{
+		dlight_pool_stats_t stats;
+		DLightPool_GetStats (&stats);
+		num_dlights = stats.active;
+	}
 	if (num_dlights > 32 && dev_peakstats.dlights <= 32)
-		Con_DWarning ("%i dlights exceeded standard limit of 32 (max = %d).\n", num_dlights, MAX_DLIGHTS);
+		Con_DWarning ("%i dlights exceeded standard limit of 32 (max = %d).\n", num_dlights, DLIGHT_GPU_MAX);
 	dev_stats.dlights = num_dlights;
 	dev_peakstats.dlights = q_max(num_dlights, dev_peakstats.dlights);
 
@@ -1138,6 +1075,7 @@ void CL_Init (void)
 
 	CL_InitInput ();
 	CL_InitTEnts ();
+	DLightPool_Init ();
 
 	Cvar_RegisterVariable (&cl_name);
 	Cvar_RegisterVariable (&cl_color);

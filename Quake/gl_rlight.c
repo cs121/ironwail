@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "../common/lightgrid.h"
 #include "gl_lightgrid.h"
+#include "r_dlight_pool.h"
 #include <float.h>
 #include <math.h>
 
@@ -76,14 +77,10 @@ static qboolean R_ParseDlightOrigin (const char *value, vec3_t origin)
 	return value && sscanf (value, "%f %f %f", &origin[0], &origin[1], &origin[2]) == 3;
 }
 
-static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t color, int style)
+static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t color, int style, int key)
 {
-	if (cl_num_entity_dlights >= MAX_ENTITY_DLIGHTS)
-		return;
+	dlight_t *dl = DLightPool_GetOrCreatePersistent (key, cl.time);
 
-	dlight_t *dl = &cl_entity_dlights[cl_num_entity_dlights++];
-
-	memset (dl, 0, sizeof(*dl));
 	VectorCopy (origin, dl->origin);
 	VectorCopy (color, dl->color);
 	dl->baseradius = radius;
@@ -92,10 +89,12 @@ static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t c
 	dl->die = FLT_MAX;
 	dl->decay = 0.f;
 	dl->minlight = 0.f;
-	dl->key = -(1000 + cl_num_entity_dlights);
+	dl->key = key;
 	dl->type = DLIGHT_DEFAULT;
 	dl->style = style;
 	dl->flicker_seed = (float) rand ();
+	dl->kind = DL_PERSISTENT;
+	dl->active = true;
 }
 
 // Parse BSP entity lump for persistent dynamic lights.
@@ -110,9 +109,9 @@ static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t c
 void R_ParseDlightEntities (void)
 {
 	const char *data;
+	int entity_dlight_count = 0;
 
-	memset (cl_entity_dlights, 0, sizeof (cl_entity_dlights));
-	cl_num_entity_dlights = 0;
+	DLightPool_ClearPersistent ();
 
 	if (!cl.worldmodel || !cl.worldmodel->entities)
 		return;
@@ -172,24 +171,31 @@ void R_ParseDlightEntities (void)
 
 		if ((classname_is_dlight || (classname_is_light && marked_dynamic)) && radius > 0.f && parsed_origin)
 		{
-			R_AddEntityDlight (origin, radius, color, style);
-			if (cl_num_entity_dlights >= MAX_ENTITY_DLIGHTS)
-				break;
+			const int key = -(1000 + ++entity_dlight_count);
+			R_AddEntityDlight (origin, radius, color, style, key);
 		}
 
 		data = COM_Parse (data);
 	}
 
-	if (cl_num_entity_dlights || developer.value)
+	if (entity_dlight_count || developer.value)
 	{
-		const int debugcount = q_min (cl_num_entity_dlights, 5);
-		Con_DPrintf ("Spawned %d entity dlights (showing %d):\n", cl_num_entity_dlights, debugcount);
-		for (int i = 0; i < debugcount; i++)
+		int active_count = 0;
+		const dlight_t *const *active = DLightPool_GetActiveList (&active_count);
+		int shown = 0;
+
+		Con_DPrintf ("Spawned %d entity dlights (showing %d):\n",
+				entity_dlight_count, q_min (entity_dlight_count, 5));
+
+		for (int i = 0; i < active_count && shown < 5; i++)
 		{
-			const dlight_t *dl = &cl_entity_dlights[i];
-			Con_DPrintf ("  #%d origin %.1f %.1f %.1f radius %.1f color %.2f %.2f %.2f style %d\n", i,
+			const dlight_t *dl = active[i];
+			if (dl->kind != DL_PERSISTENT)
+				continue;
+			Con_DPrintf ("  #%d origin %.1f %.1f %.1f radius %.1f color %.2f %.2f %.2f style %d\n", shown,
 					dl->origin[0], dl->origin[1], dl->origin[2], dl->baseradius,
 					dl->color[0], dl->color[1], dl->color[2], dl->style);
+			shown++;
 		}
 	}
 	return;
@@ -326,13 +332,13 @@ void GLLight_DeleteResources (void)
 	gl_lightclustertexture = 0;
 }
 
-static void R_PushDlightArray (dlight_t *lights, int count)
+static void R_PushDlightArray (dlight_t *const *lights, int count)
 {
 	int	j;
 
 	for (int i = 0; i < count; i++)
 	{
-		dlight_t *l = &lights[i];
+		dlight_t *l = lights[i];
 		gpulight_t *out;
 		qboolean cull = false;
 		float radius;
@@ -407,6 +413,7 @@ void R_PushDlights (void)
 	GLuint		buf;
 	GLbyte		*ofs;
 	gpu_cluster_inputs_t cluster_inputs;
+	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
 
@@ -416,9 +423,17 @@ void R_PushDlights (void)
         // was disabled by the user.
         if (r_dynamic.value > 0.f || r_dlight_style.value > 0.f)
         {
-                R_PushDlightArray (cl_dlights, MAX_DLIGHTS);
-                if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
-			R_PushDlightArray (cl_entity_dlights, cl_num_entity_dlights);
+		const int budget = q_min (DLightPool_GetBudget (), DLIGHT_GPU_MAX);
+		DLightPool_NewFrame (cl.time, r_framecount);
+		const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
+		if (num_submit > 0)
+			R_PushDlightArray (submit, num_submit);
+		DLightPool_DebugPrintIfEnabled ();
+	}
+	else
+	{
+		DLightPool_NewFrame (cl.time, r_framecount);
+		DLightPool_DebugPrintIfEnabled ();
 	}
 
 	GL_BeginGroup ("Light clustering");
@@ -492,13 +507,16 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 R_AddDynamicLights_Lightgrid
 ==================
 */
-static void R_AddDynamicLights_LightgridArray (const dlight_t *lights, int count, const vec3_t pos, vec3_t lightcolor)
+static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, int count, const vec3_t pos, vec3_t lightcolor)
 {
 	for (int i = 0; i < count; i++)
 	{
-		const dlight_t *l = &lights[i];
+		const dlight_t *l = lights[i];
 		vec3_t dist;
 		float add;
+
+		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
+			continue;
 
 		if (!CL_DlightIsActive (l))
 			continue;
@@ -519,9 +537,10 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 	if (!r_dynamic.value)
 		return;
 
-	R_AddDynamicLights_LightgridArray (cl_dlights, MAX_DLIGHTS, pos, lightcolor);
-	if (r_dlight_entities.value > 0.f && cl_num_entity_dlights > 0)
-		R_AddDynamicLights_LightgridArray (cl_entity_dlights, cl_num_entity_dlights, pos, lightcolor);
+	int count = 0;
+	const dlight_t *const *active = DLightPool_GetActiveList (&count);
+	if (active && count > 0)
+		R_AddDynamicLights_LightgridArray (active, count, pos, lightcolor);
 }
 
 
