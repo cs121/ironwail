@@ -436,6 +436,7 @@ typedef struct gpuframedata_s {
         vec4_t          lightgrid_params; // x: enabled, yzw: unused
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
+        vec4_t          shader_params;  // x: shader debug, yzw: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;

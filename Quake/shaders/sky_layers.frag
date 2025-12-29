@@ -82,6 +82,6 @@ void main()
 	result.rgb = mix(result.rgb, layer.rgb, layer.a);
 	result.rgb = mix(result.rgb, SkyFog.rgb, SkyFog.a);
 	out_fragcolor = result;
-        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 3.0);
 	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
 }

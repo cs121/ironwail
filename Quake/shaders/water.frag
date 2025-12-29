@@ -13,7 +13,9 @@ const uint
         CF_USE_FULLBRIGHT = 2u,
         CF_NOLIGHTMAP = 4u,
         CF_USE_EMISSIVE = 8u,
-        CF_ALPHA_TEST = 16u
+        CF_ALPHA_TEST = 16u,
+        CF_MAT_BLOOM = 128u,
+        CF_MAT_HAS_SHADER = 4096u
 ;
 
 // ALU-only 16x16 Bayer matrix
@@ -171,7 +173,9 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, 0.0, 1.0);
+        float bloomMask = (((in_flags & CF_MAT_HAS_SHADER) == 0u) || ((in_flags & CF_MAT_BLOOM) != 0u)) ? 1.0 : 0.0;
+        float materialMask = 2.0 + bloomMask;
+        out_velocity = vec4(velocityOut, 0.0, materialMask);
 #endif
 #if DITHER
 	if (Fog.w > 0.)

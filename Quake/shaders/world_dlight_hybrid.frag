@@ -98,7 +98,7 @@ void main()
         if (debug_mode == 1)
         {
                 out_fragcolor = vec4(albedo, 1.0);
-                out_velocity = vec4(0.0);
+                out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
                 return;
         }
         vec3 surface_normal = normalize(in_normal);
@@ -185,5 +185,5 @@ void main()
         color = ApplyFog(color, in_pos - EyePos);
 
         out_fragcolor = vec4(color, 0.0);
-        out_velocity = vec4(0.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 }

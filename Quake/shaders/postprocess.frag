@@ -356,14 +356,14 @@ void main()
         bool hasVelocityTexture = MotionParams1.z > 0.5;
         vec2 velocity = vec2(0.0);
         float viewModelMask = 0.0;
-        float materialMask = 0.0;
+        int materialMask = 0;
         if (hasVelocityTexture && inView)
         {
                 vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), viewSize * invScale);
                 vec4 velocitySample = texture(VelocityTexture, velocityUV);
                 velocity = velocitySample.xy;
                 viewModelMask = velocitySample.z;
-                materialMask = velocitySample.w;
+                materialMask = int(floor(velocitySample.w + 0.5));
         }
 
         if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5 && centerOpaque)
@@ -539,7 +539,7 @@ void main()
                 float ssaoIntensity = SSAOParams.x;
                 int ssaoDebugMode = int(floor(SSAOParams.y + 0.5));
                 bool ssaoInView = inView;
-                bool ssaoAllowed = materialMask < 0.5;
+                bool ssaoAllowed = (materialMask & 2) == 0;
                 if ((ssaoDebugMode > 0 || ssaoIntensity > 0.0) && ssaoInView)
                 {
                         if (!ssaoAllowed)
