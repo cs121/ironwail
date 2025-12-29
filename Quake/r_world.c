@@ -452,59 +452,6 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
 
-static qboolean R_GodraysNameMatch (const char *name)
-{
-	if (!name || !name[0])
-		return false;
-
-	if (!q_strncasecmp (name, "light", 5))
-		return true;
-	if (q_strcasestr (name, "lamp"))
-		return true;
-	if (q_strcasestr (name, "glow"))
-		return true;
-	if (q_strcasestr (name, "flare"))
-		return true;
-
-	return false;
-}
-
-static qboolean R_ModelTextureHasGodrayFlag (const qmodel_t *model, int texnum)
-{
-	int i;
-	int start;
-	int count;
-	static int last_bad_range_frame = -1;
-
-	if (!model || texnum < 0)
-		return false;
-
-	if (model->numsurfaces <= 0 || !model->surfaces)
-		return false;
-
-	start = model->firstmodelsurface;
-	count = model->nummodelsurfaces;
-	if (start < 0 || count <= 0 || start >= model->numsurfaces || start + count > model->numsurfaces)
-	{
-		if (r_framecount != last_bad_range_frame)
-		{
-			last_bad_range_frame = r_framecount;
-			Con_DWarning ("R_ModelTextureHasGodrayFlag: invalid surface range on %s (first=%d count=%d total=%d)\n",
-				model->name, start, count, model->numsurfaces);
-		}
-		return false;
-	}
-
-	for (i = 0; i < count; ++i)
-	{
-		msurface_t *surface = &model->surfaces[start + i];
-		if (surface->texinfo && surface->texinfo->texnum == texnum && (surface->texinfo->flags & TEX_GODRAY_EMIT))
-			return true;
-	}
-
-	return false;
-}
-
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
@@ -513,17 +460,13 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (!R_ValidPtr (t))
 		return false;
 
-	if (r_shaders.value > 0.f && t->shader && (t->shader_flags & MAT_SHADERFLAG_GODRAY) == 0u)
+	if (r_shaders.value <= 0.f || !t->shader)
 		return false;
 
-	if (r_shaders.value > 0.f && (t->shader_flags & MAT_SHADERFLAG_GODRAY))
+	if ((t->shader_flags & MAT_SHADERFLAG_EMISSIVE) != 0u && r_godrays_emit_emissive.value > 0.f)
 		return true;
 
-	if (r_godrays_emit_emissive.value > 0.f
-		&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)))
-		return true;
-
-	if (r_godrays_emit_lighttex.value > 0.f && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
+	if ((t->shader_flags & MAT_SHADERFLAG_GODRAY) != 0u && r_godrays_emit_lighttex.value > 0.f)
 		return true;
 
 	return false;
@@ -535,10 +478,14 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 		return false;
 
 	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f)
-		return true;
-
-	if (s->texinfo && (s->texinfo->flags & TEX_GODRAY_EMIT) && r_godrays_emit_lighttex.value > 0.f)
-		return true;
+	{
+		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
+		{
+			texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
+			return R_TextureEmitsGodrays (t);
+		}
+		return false;
+	}
 
 	if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 	{
@@ -584,7 +531,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		zfix = 0;
 
 	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2) | extra_flags;
-	if (em != NULL)
+	if (em != NULL && (extra_flags & CALLFLAG_MAT_EMISSIVE))
 		flags |= CALLFLAG_EMISSIVE;
 	if (t && t->type == TEXTYPE_CUTOUT)
 		flags |= CALLFLAG_ALPHA_TEST;
@@ -856,35 +803,20 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
 			if (pass == BP_GODRAYS)
 			{
-				if (!t)
-					continue;
-				if (r_shaders.value > 0.f && t->shader && (mat_flags & MAT_SHADERFLAG_GODRAY) == 0u)
-					continue;
-				qboolean emissive = (r_godrays_emit_emissive.value > 0.f
-					&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)));
-				qboolean lighttex = false;
-				qboolean force_emissive = (mat_flags & MAT_SHADERFLAG_EMISSIVE) != 0u
-					&& r_godrays_emit_emissive.value > 0.f;
-				qboolean force_lighttex = (mat_flags & MAT_SHADERFLAG_GODRAY) != 0u
-					&& r_godrays_emit_lighttex.value > 0.f;
+				qboolean has_shader = (r_shaders.value > 0.f && t->shader);
+				qboolean mat_emissive = has_shader && (mat_flags & MAT_SHADERFLAG_EMISSIVE) != 0u;
+				qboolean mat_godray = has_shader && (mat_flags & MAT_SHADERFLAG_GODRAY) != 0u;
 
-				if (r_godrays_emit_lighttex.value > 0.f && t)
-				{
-					if (R_ModelTextureHasGodrayFlag (model, texnum))
-						lighttex = true;
-					else if ((t->type != TEXTYPE_SKY) && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
-						lighttex = true;
-					else if (force_lighttex)
-						lighttex = true;
-				}
+				if (!has_shader || (!mat_emissive && !mat_godray))
+					continue;
 
-				if (emissive || force_emissive)
+				if (mat_emissive && r_godrays_emit_emissive.value > 0.f)
 				{
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					force_fullbright = true;
 				}
 
-				if (lighttex)
+				if (mat_godray && r_godrays_emit_lighttex.value > 0.f)
 					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
 
 				if (extra_flags == 0u)
