@@ -859,6 +859,15 @@ static GLuint GL_GenerateBloomTexture (void)
 		return fallback;
 
 	float threshold = q_max (0.f, r_bloom_threshold.value);
+	qboolean msaa = framebufs.scene.samples > 1;
+	GLuint velocity_texture = 0;
+	if (framebufs.scene.velocity_tex)
+	{
+		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+		if (framesetup.scene_fbo != framebufs.scene.fbo)
+			velocity_texture = 0;
+	}
+	float mask_enabled = velocity_texture ? 1.f : 0.f;
 
 	GL_BeginGroup ("Bloom extract");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
@@ -866,7 +875,8 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_UseProgram (glprogs.bloom_extract);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, velocity_texture);
+	GL_Uniform4fFunc (0, threshold, mask_enabled, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
 		(float)vid.height / (float)height);

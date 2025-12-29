@@ -162,7 +162,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, 0.0, 0.0);
+        out_velocity = vec4(velocityOut, 0.0, 1.0);
 #endif
 #if DITHER
 	if (Fog.w > 0.)

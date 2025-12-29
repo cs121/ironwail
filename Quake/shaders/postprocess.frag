@@ -329,12 +329,14 @@ void main()
         bool hasVelocityTexture = MotionParams1.z > 0.5;
         vec2 velocity = vec2(0.0);
         float viewModelMask = 0.0;
+        float materialMask = 0.0;
         if (hasVelocityTexture && inView)
         {
                 vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), viewSize * invScale);
                 vec4 velocitySample = texture(VelocityTexture, velocityUV);
                 velocity = velocitySample.xy;
                 viewModelMask = velocitySample.z;
+                materialMask = velocitySample.w;
         }
 
         if (MotionParams0.x > 0.5 && inView && hasVelocityTexture && viewModelMask < 0.5 && centerOpaque)
@@ -510,73 +512,82 @@ void main()
                 float ssaoIntensity = SSAOParams.x;
                 int ssaoDebugMode = int(floor(SSAOParams.y + 0.5));
                 bool ssaoInView = inView;
+                bool ssaoAllowed = materialMask < 0.5;
                 if ((ssaoDebugMode > 0 || ssaoIntensity > 0.0) && ssaoInView)
                 {
-                        float ssaoCenterDepth = 0.0;
-                        bool ssaoUseDepth = depthInfo.valid;
-                        if (ssaoUseDepth)
-                                ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-                        bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
-                        float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
-                        if (ssaoDebugMode == 9)
+                        if (!ssaoAllowed)
                         {
-                                float mask = centerOpaque ? (1.0 - ao) : 0.0;
-                                color.rgb = vec3(mask);
+                                if (ssaoDebugMode > 0)
+                                        color.rgb = (ssaoDebugMode == 9) ? vec3(0.0) : vec3(1.0);
                         }
-                        else if (ssaoDebugMode == 8)
+                        else
                         {
-                                vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
-                                vec2 colorSize = vec2(textureSize(GammaTexture, 0));
-                                vec2 ssaoCoord = uv * ssaoSize;
-                                ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), vec2(0.0), ssaoSize - vec2(1.0)));
-                                float rawAo = texelFetch(SSAOTexture, ssaoPixel, 0).r;
-                                float sigma = max(SSAOBlurParams.x, 0.01);
-                                int radius = int(SSAOBlurParams.y + 0.5);
-                                float depthThreshold = SSAOBlurParams.z * max(ssaoCenterDepth, 1e-4);
-                                vec2 ssaoToScreen = colorSize / max(ssaoSize, vec2(1.0));
-                                float accum = 0.0;
-                                float total = 0.0;
-                                float depthWeightSum = 0.0;
-                                float sampleCount = 0.0;
-
-                                for (int y = -4; y <= 4; ++y)
+                                float ssaoCenterDepth = 0.0;
+                                bool ssaoUseDepth = depthInfo.valid;
+                                if (ssaoUseDepth)
+                                        ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
+                                bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
+                                float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
+                                if (ssaoDebugMode == 9)
                                 {
-                                        if (abs(y) > radius)
-                                                continue;
-                                        for (int x = -4; x <= 4; ++x)
-                                        {
-                                                if (abs(x) > radius)
-                                                        continue;
-                                                vec2 offset = vec2(float(x), float(y));
-                                                vec2 sampleTexel = clamp(vec2(ssaoPixel) + offset, vec2(0.0), ssaoSize - vec2(1.0));
-                                                ivec2 samplePixel = ivec2(sampleTexel);
-                                                float sampleAo = texelFetch(SSAOTexture, samplePixel, 0).r;
-                                                float depthWeight = 1.0;
-                                                if (ssaoUseDepth)
-                                                {
-                                                        vec2 sampleScreenPx = sampleTexel * ssaoToScreen + vec2(0.5);
-                                                        float sampleDepth = SampleLinearDepth(sampleScreenPx, depthInfo);
-                                                        float depthDiff = abs(sampleDepth - ssaoCenterDepth);
-                                                        depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
-                                                }
-                                                float weight = Gaussian2(dot(offset, offset), sigma) * depthWeight;
-                                                accum += sampleAo * weight;
-                                                total += weight;
-                                                depthWeightSum += depthWeight;
-                                                sampleCount += 1.0;
-                                        }
+                                        float mask = centerOpaque ? (1.0 - ao) : 0.0;
+                                        color.rgb = vec3(mask);
                                 }
-                                float blurred = (total > 0.0) ? (accum / total) : rawAo;
-                                float avgDepthWeight = (sampleCount > 0.0) ? (depthWeightSum / sampleCount) : 1.0;
-                                color.rgb = vec3(rawAo, blurred, avgDepthWeight);
-                        }
-                        else if (ssaoDebugMode > 0)
-                        {
-                                color.rgb = vec3(ao);
-                        }
-                        else if (centerOpaque)
-                        {
-                                color.rgb *= mix(1.0, ao, ssaoIntensity);
+                                else if (ssaoDebugMode == 8)
+                                {
+                                        vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
+                                        vec2 colorSize = vec2(textureSize(GammaTexture, 0));
+                                        vec2 ssaoCoord = uv * ssaoSize;
+                                        ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), vec2(0.0), ssaoSize - vec2(1.0)));
+                                        float rawAo = texelFetch(SSAOTexture, ssaoPixel, 0).r;
+                                        float sigma = max(SSAOBlurParams.x, 0.01);
+                                        int radius = int(SSAOBlurParams.y + 0.5);
+                                        float depthThreshold = SSAOBlurParams.z * max(ssaoCenterDepth, 1e-4);
+                                        vec2 ssaoToScreen = colorSize / max(ssaoSize, vec2(1.0));
+                                        float accum = 0.0;
+                                        float total = 0.0;
+                                        float depthWeightSum = 0.0;
+                                        float sampleCount = 0.0;
+
+                                        for (int y = -4; y <= 4; ++y)
+                                        {
+                                                if (abs(y) > radius)
+                                                        continue;
+                                                for (int x = -4; x <= 4; ++x)
+                                                {
+                                                        if (abs(x) > radius)
+                                                                continue;
+                                                        vec2 offset = vec2(float(x), float(y));
+                                                        vec2 sampleTexel = clamp(vec2(ssaoPixel) + offset, vec2(0.0), ssaoSize - vec2(1.0));
+                                                        ivec2 samplePixel = ivec2(sampleTexel);
+                                                        float sampleAo = texelFetch(SSAOTexture, samplePixel, 0).r;
+                                                        float depthWeight = 1.0;
+                                                        if (ssaoUseDepth)
+                                                        {
+                                                                vec2 sampleScreenPx = sampleTexel * ssaoToScreen + vec2(0.5);
+                                                                float sampleDepth = SampleLinearDepth(sampleScreenPx, depthInfo);
+                                                                float depthDiff = abs(sampleDepth - ssaoCenterDepth);
+                                                                depthWeight = smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4));
+                                                        }
+                                                        float weight = Gaussian2(dot(offset, offset), sigma) * depthWeight;
+                                                        accum += sampleAo * weight;
+                                                        total += weight;
+                                                        depthWeightSum += depthWeight;
+                                                        sampleCount += 1.0;
+                                                }
+                                        }
+                                        float blurred = (total > 0.0) ? (accum / total) : rawAo;
+                                        float avgDepthWeight = (sampleCount > 0.0) ? (depthWeightSum / sampleCount) : 1.0;
+                                        color.rgb = vec3(rawAo, blurred, avgDepthWeight);
+                                }
+                                else if (ssaoDebugMode > 0)
+                                {
+                                        color.rgb = vec3(ao);
+                                }
+                                else if (centerOpaque)
+                                {
+                                        color.rgb *= mix(1.0, ao, ssaoIntensity);
+                                }
                         }
                 }
 
