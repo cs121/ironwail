@@ -163,6 +163,16 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
 }
 
+void Mat_Shader_ReportWarningOnce (const char *warn_key, const char *message)
+{
+	if (!warn_key || !warn_key[0] || !message || !message[0])
+		return;
+	if (Mat_Shader_TokenWarned (warn_key))
+		return;
+	Mat_Shader_AddWarned (warn_key);
+	Con_Warning ("MatShader: %s\n", message);
+}
+
 static void Mat_MatrixIdentity (mat_texmatrix_t *out)
 {
 	if (!out)
@@ -785,6 +795,41 @@ static int Mat_Shader_TimeBucket (float time, float fps_hint)
 	return (int)floorf (time * fps);
 }
 
+static float Mat_Shader_EvalWave (const mat_wave_t *wave, float time)
+{
+	float t;
+	float frac;
+	float wave_value;
+
+	if (!wave)
+		return 0.f;
+
+	switch (wave->type)
+	{
+	case MAT_WAVE_TRIANGLE:
+		t = time * wave->freq + wave->phase;
+		frac = t - floorf (t);
+		wave_value = (1.f - fabsf (frac * 2.f - 1.f)) * 2.f - 1.f;
+		break;
+	case MAT_WAVE_SAW:
+		t = time * wave->freq + wave->phase;
+		frac = t - floorf (t);
+		wave_value = frac * 2.f - 1.f;
+		break;
+	case MAT_WAVE_INVERSESAW:
+		t = time * wave->freq + wave->phase;
+		frac = t - floorf (t);
+		wave_value = (1.f - frac) * 2.f - 1.f;
+		break;
+	case MAT_WAVE_SIN:
+	default:
+		wave_value = sinf ((time * wave->freq + wave->phase) * 2.f * MAT_TEXMOD_PI);
+		break;
+	}
+
+	return wave->base + wave_value * wave->amp;
+}
+
 const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time)
 {
 	mat_texmatrix_t matrix;
@@ -896,4 +941,66 @@ const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time)
 		return NULL;
 
 	return stage->anim_map_frames[frame];
+}
+
+void MatStage_EvalColor (const mat_shader_stage_t *stage, float time, qboolean has_vertex_color, const vec4_t vertex_color, vec4_t out_color)
+{
+	vec4_t color = { 1.f, 1.f, 1.f, 1.f };
+	float value;
+
+	if (!out_color)
+		return;
+
+	if (!stage)
+	{
+		Vector4Copy (color, out_color);
+		return;
+	}
+
+	switch (stage->rgbgen)
+	{
+	case MAT_RGBGEN_VERTEX:
+		if (has_vertex_color)
+		{
+			color[0] = vertex_color[0];
+			color[1] = vertex_color[1];
+			color[2] = vertex_color[2];
+		}
+		break;
+	case MAT_RGBGEN_CONST:
+		color[0] = stage->const_color[0];
+		color[1] = stage->const_color[1];
+		color[2] = stage->const_color[2];
+		break;
+	case MAT_RGBGEN_WAVE:
+		value = Mat_Shader_EvalWave (&stage->rgb_wave, time);
+		value = CLAMP (0.f, value, 1.f);
+		color[0] = value;
+		color[1] = value;
+		color[2] = value;
+		break;
+	case MAT_RGBGEN_IDENTITY:
+	default:
+		break;
+	}
+
+	switch (stage->alphagen)
+	{
+	case MAT_ALPHAGEN_VERTEX:
+		if (has_vertex_color)
+			color[3] = vertex_color[3];
+		break;
+	case MAT_ALPHAGEN_CONST:
+		color[3] = stage->const_alpha;
+		break;
+	case MAT_ALPHAGEN_WAVE:
+		value = Mat_Shader_EvalWave (&stage->alpha_wave, time);
+		color[3] = CLAMP (0.f, value, 1.f);
+		break;
+	case MAT_ALPHAGEN_IDENTITY:
+	default:
+		break;
+	}
+
+	Vector4Copy (color, out_color);
 }

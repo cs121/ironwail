@@ -86,6 +86,7 @@ layout(location=3) in vec3 in_pos;
 #endif
 layout(location=6) noperspective in vec4 in_curr_clip;
 layout(location=7) noperspective in vec4 in_prev_clip;
+layout(location=8) flat in vec4 in_stage_color;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -150,6 +151,7 @@ void main()
                 emissive = texture(EmissiveTex, uv).rgb;
 #endif
         vec4 result = texture(Tex, uv);
+        result.rgb *= in_stage_color.rgb;
         int debug_mode = int(ColorSpaceParams.x + 0.5);
         if (debug_mode == 1)
         {
