@@ -62,6 +62,47 @@ typedef enum
 
 typedef enum
 {
+	MAT_CULL_BACK = 0,
+	MAT_CULL_FRONT,
+	MAT_CULL_NONE
+} mat_cull_mode_t;
+
+typedef enum
+{
+	MAT_SORT_OPAQUE = 0,
+	MAT_SORT_DECAL,
+	MAT_SORT_ADDITIVE,
+	MAT_SORT_NEAREST
+} mat_sort_key_t;
+
+typedef enum
+{
+	MAT_BLEND_REPLACE = 0,
+	MAT_BLEND_ALPHA,
+	MAT_BLEND_ADD,
+	MAT_BLEND_MULT,
+	MAT_BLEND_PREMULT,
+	MAT_BLEND_CUSTOM
+} mat_blend_mode_t;
+
+typedef enum
+{
+	MAT_DEPTHFUNC_LEQUAL = 0,
+	MAT_DEPTHFUNC_EQUAL,
+	MAT_DEPTHFUNC_ALWAYS
+} mat_depthfunc_t;
+
+typedef enum
+{
+	MAT_MAP_MAP = 0,
+	MAT_MAP_CLAMPMAP,
+	MAT_MAP_LIGHTMAP,
+	MAT_MAP_WHITE,
+	MAT_MAP_BLACK
+} mat_map_type_t;
+
+typedef enum
+{
 	MAT_SHADERFLAG_NODRAW		= (1u << 0),
 	MAT_SHADERFLAG_SKY		= (1u << 1),
 	MAT_SHADERFLAG_TRANS		= (1u << 2),
@@ -81,6 +122,12 @@ typedef struct mat_shader_stage_s
 {
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
+	mat_blend_mode_t	blend_mode;
+	int			blend_src;
+	int			blend_dst;
+	qboolean		depth_write;
+	mat_depthfunc_t		depth_func;
+	mat_map_type_t		map_type;
 } mat_shader_stage_t;
 
 typedef struct shader_material_s
@@ -91,6 +138,9 @@ typedef struct shader_material_s
 	unsigned int		surfaceparms;
 	unsigned int		content_flags;
 	unsigned int		render_flags;
+	mat_cull_mode_t		cull_mode;
+	mat_sort_key_t		sort_key;
+	qboolean		polygon_offset;
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
 	qboolean		godray_enable;

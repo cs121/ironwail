@@ -518,7 +518,9 @@ const shader_material_t *Mat_Shader_FindForTextureName (const char *texname, con
 
 const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const char *texname)
 {
-	if (!material || !material->stage0.map_path || !material->stage0.map_path[0])
+	if (!material || (material->stage0.map_type != MAT_MAP_MAP && material->stage0.map_type != MAT_MAP_CLAMPMAP))
+		return NULL;
+	if (!material->stage0.map_path || !material->stage0.map_path[0])
 		return NULL;
 
 	if (texname && texname[0])
@@ -625,6 +627,12 @@ void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname)
 
 void Mat_Shader_Print (const shader_material_t *material)
 {
+	static const char *const cull_names[] = { "back", "front", "none" };
+	static const char *const sort_names[] = { "opaque", "decal", "additive", "nearest" };
+	static const char *const blend_names[] = { "replace", "alpha", "add", "mult", "premult", "custom" };
+	static const char *const depth_names[] = { "lequal", "equal", "always" };
+	static const char *const map_names[] = { "map", "clampmap", "lightmap", "white", "black" };
+
 	if (!material)
 		return;
 
@@ -636,11 +644,21 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  surfaceparms: 0x%08x\n", material->surfaceparms);
 	Con_Printf ("  render flags: 0x%08x\n", material->render_flags);
 	Con_Printf ("  content flags: 0x%08x\n", material->content_flags);
+	Con_Printf ("  cull: %s\n", cull_names[q_min ((int)material->cull_mode, (int)countof (cull_names) - 1)]);
+	Con_Printf ("  sort: %s\n", sort_names[q_min ((int)material->sort_key, (int)countof (sort_names) - 1)]);
+	Con_Printf ("  polygon offset: %s\n", material->polygon_offset ? "on" : "off");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
 	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
-	if (material->stage0.map_path)
-		Con_Printf ("  stage0 map: %s\n", material->stage0.map_path);
+	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
+	{
+		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];
+		Con_Printf ("  stage0 map: %s (%s)\n", material->stage0.map_path ? material->stage0.map_path : "<builtin>", map_name);
+		Con_Printf ("  stage0 blend: %s\n", blend_names[q_min ((int)material->stage0.blend_mode, (int)countof (blend_names) - 1)]);
+		Con_Printf ("  stage0 depth: %s (write %s)\n",
+			depth_names[q_min ((int)material->stage0.depth_func, (int)countof (depth_names) - 1)],
+			material->stage0.depth_write ? "on" : "off");
+	}
 }
 
 void Mat_Shader_Insert (shader_material_t *material)
