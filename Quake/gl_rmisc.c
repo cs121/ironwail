@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_lightgrid.h"
 #include "r_maptex_export.h"
+#include "r_dlight_pool.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -486,6 +487,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_dlight_style);
         Cvar_RegisterVariable (&r_dlight_debug);
         Cvar_RegisterVariable (&r_dlight_entities);
+	DLightPool_RegisterCvars ();
         Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);

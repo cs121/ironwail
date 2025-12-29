@@ -69,8 +69,6 @@ extern cshift_t		cshift_empty;
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		64 //johnfitz -- was 32
-#define	MAX_ENTITY_DLIGHTS		64 // persistent dlights spawned from BSP entities
 typedef enum
 {
 	DLIGHT_DEFAULT = 0,
@@ -83,7 +81,12 @@ typedef enum
 	DLIGHT_LAVA,
 	DLIGHT_MAX_TYPES
 } dlighttype_t;
-typedef struct
+typedef enum
+{
+	DL_TRANSIENT = 0,
+	DL_PERSISTENT
+} dlight_kind_t;
+typedef struct dlight_s
 {
 	vec3_t	origin;
 	float	radius;
@@ -97,6 +100,13 @@ typedef struct
 	float	flicker_seed;
 	dlighttype_t type;
 	int		style;			// optional light style/flicker index (entity dlights)
+	int		id;
+	dlight_kind_t kind;
+	qboolean active;
+	float	spawn_time;
+	float	last_score;
+	int		flags;
+	int		last_frame_touched;
 } dlight_t;
 
 #define	MAX_BEAMS	32 //johnfitz -- was 24
@@ -335,9 +345,6 @@ extern	client_state_t	cl;
 extern	entity_t		cl_static_entities[MAX_STATIC_ENTITIES];
 extern	int			cl_max_lightstyles;
 extern	lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
-extern	dlight_t		cl_dlights[MAX_DLIGHTS];
-extern	dlight_t		cl_entity_dlights[MAX_ENTITY_DLIGHTS];
-extern	int			cl_num_entity_dlights;
 extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
 extern	beam_t			cl_beams[MAX_BEAMS];
 extern	entity_t		*cl_visedicts[MAX_VISEDICTS];
@@ -345,7 +352,7 @@ extern	int				cl_numvisedicts;
 
 static inline qboolean CL_DlightIsActive (const dlight_t *dl)
 {
-	return dl && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
+	return dl && dl->active && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
 }
 
 static inline qboolean CL_DlightShouldFlicker (const dlight_t *dl)
