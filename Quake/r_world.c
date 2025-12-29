@@ -554,7 +554,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 	if (t && t->shader && r_shaders.value > 0.f)
 	{
-		const mat_shader_stage_t *stage = &t->shader->stage0;
+		const mat_shader_stage_t *stage = Mat_Shader_SelectStage (t->shader);
+		if (!stage)
+			stage = &t->shader->stage0;
 		if (!has_vertex_color && (stage->rgbgen == MAT_RGBGEN_VERTEX || stage->alphagen == MAT_ALPHAGEN_VERTEX))
 		{
 			char warn_key[MAX_QPATH * 2];

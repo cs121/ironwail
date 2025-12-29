@@ -381,6 +381,13 @@ static qboolean Mat_Shader_ParseDepthFunc (const char *token, mat_depthfunc_t *o
 	return false;
 }
 
+static qboolean Mat_Shader_IsLightmapFilterStage (const mat_shader_stage_t *stage)
+{
+	if (!stage)
+		return false;
+	return stage->map_type == MAT_MAP_LIGHTMAP && stage->blend_mode == MAT_BLEND_MULT;
+}
+
 static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char *token)
 {
 	for (size_t i = 0; i < countof (mat_surfaceparm_table); ++i)
@@ -865,7 +872,8 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			break;
 	}
 
-	if (stage.blend_mode != MAT_BLEND_REPLACE || !stage.depth_write || stage.depth_func != MAT_DEPTHFUNC_LEQUAL)
+	if (!Mat_Shader_IsLightmapFilterStage (&stage) &&
+		(stage.blend_mode != MAT_BLEND_REPLACE || !stage.depth_write || stage.depth_func != MAT_DEPTHFUNC_LEQUAL))
 		material->render_flags |= MAT_RENDER_TRANS;
 
 	if (!material->stages)
@@ -964,6 +972,8 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	shader_material_t material;
 	const shader_material_t *existing;
 	int stage_index = 0;
+	qboolean sort_explicit = false;
+	qboolean stage_limit_warned = false;
 	char canonical[MAX_QPATH];
 
 	memset (&material, 0, sizeof (material));
@@ -988,6 +998,25 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			break;
 		if (!strcmp (com_token, "{"))
 		{
+			if (stage_index >= MAT_SHADER_MAX_STAGES)
+			{
+				char warn_key[MAX_QPATH * 2];
+				char warn_msg[256];
+
+				if (!stage_limit_warned)
+				{
+					q_snprintf (warn_key, sizeof (warn_key), "%s::maxstages", material.name ? material.name : "shader");
+					q_snprintf (warn_msg, sizeof (warn_msg),
+						"%s exceeds max stages (%d); extra stages ignored",
+						material.name ? material.name : "shader",
+						MAT_SHADER_MAX_STAGES);
+					Mat_Shader_ReportWarningOnce (warn_key, warn_msg);
+					stage_limit_warned = true;
+				}
+				data = SkipUnknownBlockOrLine (data, true);
+				continue;
+			}
+
 			data = ParseStageBlock (data, &material, (size_t)stage_index++);
 			continue;
 		}
@@ -1022,6 +1051,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			{
 				if (material.sort_key != MAT_SORT_OPAQUE)
 					material.render_flags |= MAT_RENDER_TRANS;
+				sort_explicit = true;
 				continue;
 			}
 			Mat_Shader_ReportUnknownToken (value, material.name);
@@ -1085,6 +1115,20 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	}
 
 	Mat_Shader_ApplyStageDefaults (&material);
+
+	if (!sort_explicit)
+	{
+		if (material.polygon_offset)
+		{
+			material.sort_key = MAT_SORT_DECAL;
+			material.render_flags |= MAT_RENDER_TRANS;
+		}
+		else if (material.render_flags & MAT_RENDER_TRANS)
+		{
+			material.sort_key = MAT_SORT_ADDITIVE;
+		}
+	}
+
 	existing = Mat_Shader_Find (material.name);
 	if (existing)
 		Mat_Shader_Remove (existing);

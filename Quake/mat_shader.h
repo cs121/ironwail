@@ -244,6 +244,9 @@ typedef struct texture_s texture_t;
 
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
+extern cvar_t r_matshader_showstage;
+
+#define MAT_SHADER_MAX_STAGES 8
 
 void Mat_Shader_Init (void);
 void Mat_Shader_Shutdown (void);
@@ -253,6 +256,7 @@ const shader_material_t *Mat_Shader_GetByIndex (size_t index);
 void Mat_Shader_Canonicalize (const char *name, char *out, size_t out_size);
 const shader_material_t *Mat_Shader_Find (const char *name);
 const shader_material_t *Mat_Shader_FindForTextureName (const char *texname, const char *mapname);
+const mat_shader_stage_t *Mat_Shader_SelectStage (const shader_material_t *material);
 const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const char *texname);
 unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material);
 void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname);
