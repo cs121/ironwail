@@ -142,12 +142,12 @@ static void Mat_Shader_AddWarned (const char *token)
 	VEC_PUSH (mat_shader_warned, warn);
 }
 
-static void Mat_Shader_WarnOnce (const char *token, const char *context)
+static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const char *context)
 {
-	if (Mat_Shader_TokenWarned (token))
+	if (Mat_Shader_TokenWarned (warn_key))
 		return;
 
-	Mat_Shader_AddWarned (token);
+	Mat_Shader_AddWarned (warn_key);
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
 }
 
@@ -671,5 +671,12 @@ void Mat_Shader_Remove (const shader_material_t *material)
 
 void Mat_Shader_ReportUnknownToken (const char *token, const char *context)
 {
-	Mat_Shader_WarnOnce (token, context);
+	char warn_key[MAX_QPATH * 2];
+
+	if (context && context[0])
+		q_snprintf (warn_key, sizeof (warn_key), "%s::%s", context, token);
+	else
+		q_snprintf (warn_key, sizeof (warn_key), "%s", token);
+
+	Mat_Shader_WarnOnce (warn_key, token, context);
 }
