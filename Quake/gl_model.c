@@ -697,10 +697,7 @@ static void Q1BSPX_LogUsage(const char *modelname)
         int i;
 
         if (!loadmodel || !loadmodel->bspx_entries_count || !bspx_lump_usage_count)
-        {
-                Con_Printf("%s: no BSPX lumps present\n", modelname);
                 return;
-        }
 	Con_Printf("%s BSPX lumps:\n", modelname);
 	for (i = 0; i < bspx_lump_usage_count; i++)
 	{
@@ -1719,9 +1716,6 @@ static void Mod_LoadLighting (lump_t *l)
                 }
 
         }
-        else {
-                Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
-        }
 
         if (bspx_dlit && l->filelen && !loadmodel->lightdata)
         {
@@ -2387,10 +2381,7 @@ static qboolean Mod_LoadLightgridOctreeFromMap (qmodel_t *mod, const char *mapna
 
 	lglump = BSPX_FindLump (mod->bspx_header, buffer, "LIGHTGRID_OCTREE", &lumpsize);
 	if (!lglump)
-	{
-		Con_Printf ("load_lightgrid_octree: LIGHTGRID_OCTREE not found in %s\n", path);
 		goto done;
-	}
 
 	if (!LightgridOctree_LoadBSPX (mod, lglump, (int)lumpsize))
 	{
@@ -2445,7 +2436,7 @@ static void Mod_LoadLightgridOctree_f (cvar_t *var)
 
 		success = Mod_LoadLightgridOctreeFromMap (cl.worldmodel, mapname);
 		if (!success)
-			failure_reason = "failed to load LIGHTGRID_OCTREE lump";
+			failure_reason = "failed to load lightgrid octree";
 		else if (!Lightgrid_Get () || Lightgrid_Get () == previous)
 			failure_reason = "lightgrid failed to apply";
 	}
@@ -4008,8 +3999,6 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
                 lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
                 if (lump && lumpsize > 0)
                         Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
-                else
-                        Con_DPrintf("BSPX: no FACENORMALS lump found\n");
         }
 
 	if (mod->bspversion == BSPVERSION && external_vis.value/* && sv.modelname[0] && !q_strcasecmp(loadname, sv.name)*/) // woods allow vis load online
