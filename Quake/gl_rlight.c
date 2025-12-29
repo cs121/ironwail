@@ -33,6 +33,8 @@ extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 extern cvar_t r_dlight_style;
 extern cvar_t r_dlight_entities;
+extern cvar_t r_dlight_mode;
+extern cvar_t r_dlight_radius_scale;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
@@ -356,6 +358,8 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
 		else
 			radius = l->baseradius;
+		if (r_dlight_mode.value > 0.f)
+			radius *= q_max (0.f, r_dlight_radius_scale.value);
 		radius = q_max (radius, 0.f);
 		l->radius = radius;
 
