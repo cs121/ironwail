@@ -61,7 +61,13 @@ const uint
 	CF_USE_FULLBRIGHT = 2u,
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
-	CF_ALPHA_TEST = 16u;
+	CF_ALPHA_TEST = 16u,
+	CF_MAT_BLOOM = 128u,
+	CF_MAT_EMISSIVE = 256u,
+	CF_MAT_GODRAY = 512u,
+	CF_MAT_TRANS = 1024u,
+	CF_MAT_SKY = 2048u,
+	CF_MAT_HAS_SHADER = 4096u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -293,6 +299,29 @@ void main()
                 return;
         }
 
+        int shader_debug = int(ShaderParams.x + 0.5);
+        if (shader_debug >= 2)
+        {
+                vec3 debug_color = vec3(0.0);
+                if ((in_flags & CF_MAT_BLOOM) != 0u)
+                        debug_color += vec3(1.0, 0.0, 1.0);
+                if ((in_flags & CF_MAT_EMISSIVE) != 0u)
+                        debug_color += vec3(1.0, 1.0, 0.0);
+                if ((in_flags & CF_MAT_GODRAY) != 0u)
+                        debug_color += vec3(0.0, 1.0, 1.0);
+                if ((in_flags & CF_MAT_TRANS) != 0u)
+                        debug_color += vec3(0.0, 1.0, 0.0);
+                if ((in_flags & CF_MAT_SKY) != 0u)
+                        debug_color += vec3(0.0, 0.0, 1.0);
+                if (all(lessThanEqual(debug_color, vec3(0.0))))
+                        debug_color = result.rgb;
+                out_fragcolor = vec4(clamp(debug_color, 0.0, 1.0), 1.0);
+#if !OIT
+                out_velocity = vec4(0.0);
+#endif
+                return;
+        }
+
         bool additive_dlights = DLightParams.x > 0.5;
         bool dlight_debug = DLightParams.y > 0.5;
 
@@ -502,7 +531,8 @@ void main()
 #if !OIT
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	vec2 velocityOut = (result.a >= 0.999) ? (velocity * result.a) : vec2(0.0);
-	out_velocity = vec4(velocityOut, 0.0, 0.0);
+	float materialMask = (((in_flags & CF_MAT_HAS_SHADER) == 0u) || ((in_flags & CF_MAT_BLOOM) != 0u)) ? 1.0 : 0.0;
+	out_velocity = vec4(velocityOut, 0.0, materialMask);
 #endif
 
 	// Dithering

@@ -78,10 +78,10 @@ void main()
 	layer2.rgb *= layer2.a;
 	vec4 combined = layer1 + layer2;
 	out_fragcolor = vec4(base.rgb * (1.0 - combined.a) + combined.rgb, 1);
-	out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+	out_velocity = vec4(0.0, 0.0, 0.0, 3.0);
 #else
 	out_fragcolor = texture(Skybox, in_dir);
-        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 3.0);
 #endif
 	out_fragcolor.rgb = mix(out_fragcolor.rgb, SkyFog.rgb, SkyFog.a);
 #if DITHER

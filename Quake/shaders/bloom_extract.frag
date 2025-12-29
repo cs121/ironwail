@@ -25,7 +25,11 @@ void main()
                         vec4 sampleColor = texelFetch(SceneTexture, ivec2(sampleCoord), 0);
                         float mask = 1.0;
                         if (maskEnabled > 0.5)
-                                mask = step(0.5, texelFetch(MaskTexture, ivec2(sampleCoord), 0).w);
+                        {
+                                float rawMask = texelFetch(MaskTexture, ivec2(sampleCoord), 0).w;
+                                int maskBits = int(floor(rawMask + 0.5));
+                                mask = ((maskBits & 1) != 0) ? 1.0 : 0.0;
+                        }
                         accum += sampleColor.rgb * mask;
                         weight += mask;
                 }

@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "mat_shader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays_emit_sky;
@@ -444,6 +445,12 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
 #define CALLFLAG_GODRAYS_LIGHT   (1u << 5)
 #define CALLFLAG_GODRAYS_EMISSIVE (1u << 6)
+#define CALLFLAG_MAT_BLOOM       (1u << 7)
+#define CALLFLAG_MAT_EMISSIVE    (1u << 8)
+#define CALLFLAG_MAT_GODRAY      (1u << 9)
+#define CALLFLAG_MAT_TRANS       (1u << 10)
+#define CALLFLAG_MAT_SKY         (1u << 11)
+#define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
 
 static qboolean R_GodraysNameMatch (const char *name)
 {
@@ -505,6 +512,12 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 
 	if (!R_ValidPtr (t))
 		return false;
+
+	if (r_shaders.value > 0.f && t->shader && (t->shader_flags & MAT_SHADERFLAG_GODRAY) == 0u)
+		return false;
+
+	if (r_shaders.value > 0.f && (t->shader_flags & MAT_SHADERFLAG_GODRAY))
+		return true;
 
 	if (r_godrays_emit_emissive.value > 0.f
 		&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)))
@@ -818,17 +831,42 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			texture_t *t = R_GetUsedTexture (model, j, &texnum);
 			unsigned extra_flags = 0u;
 			qboolean force_fullbright = false;
+			unsigned mat_flags = 0u;
+			unsigned mat_call_flags = 0u;
 
 			if (!t || !R_ValidPtr (t))
 				continue;
+
+			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
+			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+				continue;
+
+			if (r_shaders.value > 0.f && t->shader)
+				mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
+			if (mat_flags & MAT_SHADERFLAG_BLOOM)
+				mat_call_flags |= CALLFLAG_MAT_BLOOM;
+			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
+				mat_call_flags |= CALLFLAG_MAT_EMISSIVE;
+			if (mat_flags & MAT_SHADERFLAG_GODRAY)
+				mat_call_flags |= CALLFLAG_MAT_GODRAY;
+			if (mat_flags & MAT_SHADERFLAG_TRANS)
+				mat_call_flags |= CALLFLAG_MAT_TRANS;
+			if (mat_flags & MAT_SHADERFLAG_SKY)
+				mat_call_flags |= CALLFLAG_MAT_SKY;
 
 			if (pass == BP_GODRAYS)
 			{
 				if (!t)
 					continue;
+				if (r_shaders.value > 0.f && t->shader && (mat_flags & MAT_SHADERFLAG_GODRAY) == 0u)
+					continue;
 				qboolean emissive = (r_godrays_emit_emissive.value > 0.f
 					&& (R_ValidPtr (t->fullbright) || R_ValidPtr (t->emissive)));
 				qboolean lighttex = false;
+				qboolean force_emissive = (mat_flags & MAT_SHADERFLAG_EMISSIVE) != 0u
+					&& r_godrays_emit_emissive.value > 0.f;
+				qboolean force_lighttex = (mat_flags & MAT_SHADERFLAG_GODRAY) != 0u
+					&& r_godrays_emit_lighttex.value > 0.f;
 
 				if (r_godrays_emit_lighttex.value > 0.f && t)
 				{
@@ -836,9 +874,11 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 						lighttex = true;
 					else if ((t->type != TEXTYPE_SKY) && r_godrays_lighttex_name_match.value > 0.f && R_GodraysNameMatch (t->name))
 						lighttex = true;
+					else if (force_lighttex)
+						lighttex = true;
 				}
 
-				if (emissive)
+				if (emissive || force_emissive)
 				{
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					force_fullbright = true;
@@ -851,6 +891,7 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 					continue;
 			}
 
+			extra_flags |= mat_call_flags;
 			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 				pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
 				zfix, -1, extra_flags, force_fullbright);
@@ -955,16 +996,34 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 		for (j = model->texofs[TEXTYPE_FIRSTLIQUID]; j < model->texofs[TEXTYPE_LASTLIQUID+1]; j++)
 		{
 			texture_t *t = R_GetUsedTexture (model, j, NULL);
+			unsigned extra_flags = 0u;
+			unsigned mat_flags = 0u;
 
 			if (!t)
 				continue;
+			if (r_shaders.value > 0.f && (t->shader_flags & MAT_SHADERFLAG_NODRAW))
+				continue;
+
+			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
+			if (r_shaders.value > 0.f && t->shader)
+				extra_flags |= CALLFLAG_MAT_HAS_SHADER;
+			if (mat_flags & MAT_SHADERFLAG_BLOOM)
+				extra_flags |= CALLFLAG_MAT_BLOOM;
+			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
+				extra_flags |= CALLFLAG_MAT_EMISSIVE;
+			if (mat_flags & MAT_SHADERFLAG_GODRAY)
+				extra_flags |= CALLFLAG_MAT_GODRAY;
+			if (mat_flags & MAT_SHADERFLAG_TRANS)
+				extra_flags |= CALLFLAG_MAT_TRANS;
+			if (mat_flags & MAT_SHADERFLAG_SKY)
+				extra_flags |= CALLFLAG_MAT_SKY;
 
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)
 				continue;
 			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 				R_TextureAnimation (t, frame),
-				!isworld, alpha, 0u, false);
+				!isworld, alpha, extra_flags, false);
 		}
 
 		baseinst += numinst;

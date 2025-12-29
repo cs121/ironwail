@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include "mat_shader.h"
 #include "r_maptex_export.h"
 #include "r_dlight_pool.h"
 
@@ -476,6 +477,7 @@ void R_Init (void)
         Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
         Lightgrid_Init ();
+        Mat_Shader_Init ();
         R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);

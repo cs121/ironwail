@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include "mat_shader.h"
 #include <float.h>
 #include <math.h>
 
@@ -3021,6 +3022,10 @@ void R_SetupView (void)
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
         r_framedata.colorspace_params[3] = 0.f;
+        r_framedata.shader_params[0] = r_shader_debug.value;
+        r_framedata.shader_params[1] = 0.f;
+        r_framedata.shader_params[2] = 0.f;
+        r_framedata.shader_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;

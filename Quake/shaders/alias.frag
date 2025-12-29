@@ -190,7 +190,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (viewModelMask < 0.5 && result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, viewModelMask, 0.0);
+        out_velocity = vec4(velocityOut, viewModelMask, 1.0);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag

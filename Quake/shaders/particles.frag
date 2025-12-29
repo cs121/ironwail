@@ -102,7 +102,7 @@ void main()
 {
 	out_fragcolor = in_color;
 #if !OIT
-        out_velocity = vec4(0.0);
+        out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 #endif
 	out_fragcolor.rgb = ApplyFog(out_fragcolor.rgb, in_pos);
 	float radius = length(in_uv);
