@@ -142,7 +142,8 @@ layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: unused
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
-layout(location=19) uniform vec2 ColorSpaceParams; // x: debug mode, y: manual gamma enabled
+layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: manual gamma enabled, z: output sRGB conversion, w: reserved
+layout(location=20) uniform float u_midtone;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -283,6 +284,14 @@ vec3 ApplySaturation(vec3 color, float saturation)
         return mix(vec3(luma), color, saturation);
 }
 
+vec3 LinearToSRGB(vec3 color)
+{
+        vec3 cutoff = step(vec3(0.0031308), color);
+        vec3 lower = color * 12.92;
+        vec3 higher = 1.055 * pow(color, vec3(1.0 / 2.4)) - 0.055;
+        return mix(lower, higher, cutoff);
+}
+
 void AccumulateMotionSample(inout vec3 accum, inout float weight, vec2 sampleUV, vec2 sampleCoordPx, vec2 viewMin, vec2 viewMax, DepthSamplingInfo info, bool useDepth, float centerDepth, float depthThresholdRatio)
 {
         if (!all(greaterThanEqual(sampleUV, viewMin)) || !all(lessThanEqual(sampleUV, viewMax)))
@@ -311,6 +320,7 @@ void main()
         float dither = Params.w;
         int debugMode = int(floor(ColorSpaceParams.x + 0.5));
         float manualGamma = ColorSpaceParams.y;
+        float outputSrgb = ColorSpaceParams.z;
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
         bool centerOpaque = color.a >= OPAQUE_ALPHA_THRESHOLD;
@@ -658,10 +668,15 @@ void main()
                 out_fragcolor = vec4(maxHdr > 1.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0), 1.0);
                 return;
         }
+        float midtone = max(u_midtone, 0.1);
+        if (abs(midtone - 1.0) > 1e-4)
+                mapped = pow(mapped, vec3(1.0 / midtone));
         mapped = ApplyPostContrast(mapped, postContrast);
         mapped = ApplySaturation(mapped, u_saturation);
         if (manualGamma > 0.5)
                 mapped = pow(mapped, vec3(gamma));
+        if (outputSrgb > 0.5)
+                mapped = LinearToSRGB(mapped);
         out_fragcolor = vec4(mapped, 1.0);
 #endif // PALETTIZE
 

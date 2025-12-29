@@ -92,8 +92,15 @@ extern cvar_t r_gamma;
 extern cvar_t r_debug_colorspace;
 extern cvar_t r_post_contrast;
 extern cvar_t r_post_saturation;
+extern cvar_t r_color_midtone;
+extern cvar_t r_color_contrast;
+extern cvar_t r_color_saturation;
+extern cvar_t r_lightmap_colorspace;
+extern cvar_t r_lightmap_colorspace_debug;
 extern cvar_t r_bloom;
 extern void TexMgr_SRGBTextures_f (cvar_t *var);
+extern void TexMgr_LightmapColorspace_f (cvar_t *var);
+extern void TexMgr_LightmapLinearCompat_f (cvar_t *var);
 extern cvar_t r_bloom_threshold;
 extern cvar_t r_ssao;
 extern cvar_t r_ssao_radius;
@@ -185,6 +192,25 @@ extern cvar_t r_simd;
 qboolean use_simd;
 
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
+
+static qboolean r_color_syncing = false;
+
+static void R_ColorCurveSync_f (cvar_t *var)
+{
+	if (r_color_syncing)
+		return;
+
+	r_color_syncing = true;
+	if (var == &r_post_contrast)
+		Cvar_SetValueQuick (&r_color_contrast, r_post_contrast.value);
+	else if (var == &r_color_contrast)
+		Cvar_SetValueQuick (&r_post_contrast, r_color_contrast.value);
+	else if (var == &r_post_saturation)
+		Cvar_SetValueQuick (&r_color_saturation, r_post_saturation.value);
+	else if (var == &r_color_saturation)
+		Cvar_SetValueQuick (&r_post_saturation, r_color_saturation.value);
+	r_color_syncing = false;
+}
 
 extern char r_showbboxes_filter_strings[MAXCMDLINE];
 extern qboolean r_showbboxes_filter_byindex;
@@ -439,6 +465,10 @@ void R_Init (void)
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
 Cvar_RegisterVariable (&r_lightmap_linear);
+Cvar_SetCallback (&r_lightmap_linear, TexMgr_LightmapLinearCompat_f);
+Cvar_RegisterVariable (&r_lightmap_colorspace);
+Cvar_SetCallback (&r_lightmap_colorspace, TexMgr_LightmapColorspace_f);
+Cvar_RegisterVariable (&r_lightmap_colorspace_debug);
 Cvar_RegisterVariable (&r_lightmap_mipmaps);
 Cvar_RegisterVariable (&r_lightmap16f);
 Cvar_RegisterVariable (&r_lightingdir);
@@ -497,6 +527,13 @@ Cvar_RegisterVariable (&r_gamma);
 Cvar_RegisterVariable (&r_debug_colorspace);
 Cvar_RegisterVariable (&r_post_contrast);
 Cvar_RegisterVariable (&r_post_saturation);
+Cvar_RegisterVariable (&r_color_midtone);
+Cvar_RegisterVariable (&r_color_contrast);
+Cvar_RegisterVariable (&r_color_saturation);
+Cvar_SetCallback (&r_post_contrast, R_ColorCurveSync_f);
+Cvar_SetCallback (&r_post_saturation, R_ColorCurveSync_f);
+Cvar_SetCallback (&r_color_contrast, R_ColorCurveSync_f);
+Cvar_SetCallback (&r_color_saturation, R_ColorCurveSync_f);
 Cvar_RegisterVariable (&r_bloom);
 Cvar_RegisterVariable (&r_bloom_threshold);
 Cvar_RegisterVariable (&r_ssao);
