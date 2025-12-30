@@ -284,6 +284,7 @@ typedef struct bmodel_gpu_instance_s {
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
+	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
@@ -292,6 +293,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
+	GLfloat		stage_color[4];
 	GLint		baseinstance;
 	GLint		padding;
 } bmodel_bound_gpu_call_t;
@@ -554,6 +556,10 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->stage_color[0] = 1.f;
+		call->stage_color[1] = 1.f;
+		call->stage_color[2] = 1.f;
+		call->stage_color[3] = 1.f;
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -564,6 +570,10 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->stage_color[0] = 1.f;
+		call->stage_color[1] = 1.f;
+		call->stage_color[2] = 1.f;
+		call->stage_color[3] = 1.f;
 		call->baseinstance = first_instance;
 		call->padding = 0;
 		textures[0] = tx ? tx : greytexture;
@@ -580,7 +590,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 }
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
-	qboolean zfix, float alpha_override, unsigned extra_flags)
+	qboolean zfix, float alpha_override, unsigned extra_flags, const vec4_t stage_color)
 {
 	GLuint flags;
 	float alpha;
@@ -603,6 +613,10 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
+		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
+		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
+		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -613,6 +627,10 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
+		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
+		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
+		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
 		call->baseinstance = first_instance;
 		call->padding = 0;
 		textures[0] = tx ? tx : greytexture;
@@ -639,6 +657,74 @@ static GLenum R_MapDepthFunc (mat_depthfunc_t depth_func)
 	case MAT_DEPTHFUNC_LEQUAL:
 	default:
 		return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+	}
+}
+
+static float R_Clamp01 (float value)
+{
+	if (value < 0.f)
+		return 0.f;
+	if (value > 1.f)
+		return 1.f;
+	return value;
+}
+
+static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, vec4_t out)
+{
+	static qboolean warned_vertex_color = false;
+	float wave_value;
+
+	out[0] = 1.f;
+	out[1] = 1.f;
+	out[2] = 1.f;
+	out[3] = 1.f;
+
+	if (!stage)
+		return;
+
+	switch (stage->rgbgen)
+	{
+	case MAT_RGBGEN_VERTEX:
+		if (!warned_vertex_color)
+		{
+			Con_Warning ("MatShader: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
+			warned_vertex_color = true;
+		}
+		break;
+	case MAT_RGBGEN_CONST:
+		out[0] = stage->const_color[0];
+		out[1] = stage->const_color[1];
+		out[2] = stage->const_color[2];
+		break;
+	case MAT_RGBGEN_WAVE:
+		wave_value = R_Clamp01 (Mat_Shader_EvalWaveValue (&stage->rgb_wave, time));
+		out[0] = wave_value;
+		out[1] = wave_value;
+		out[2] = wave_value;
+		break;
+	case MAT_RGBGEN_IDENTITY:
+	default:
+		break;
+	}
+
+	switch (stage->alphagen)
+	{
+	case MAT_ALPHAGEN_VERTEX:
+		if (!warned_vertex_color)
+		{
+			Con_Warning ("MatShader: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
+			warned_vertex_color = true;
+		}
+		break;
+	case MAT_ALPHAGEN_CONST:
+		out[3] = stage->const_alpha;
+		break;
+	case MAT_ALPHAGEN_WAVE:
+		out[3] = R_Clamp01 (Mat_Shader_EvalWaveValue (&stage->alpha_wave, time));
+		break;
+	case MAT_ALPHAGEN_IDENTITY:
+	default:
+		break;
 	}
 }
 
@@ -907,6 +993,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				gltexture_t *stage_tex;
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
+				vec4_t stage_color;
 				unsigned extra_flags = mat_call_flags;
 				unsigned stage_state;
 				GLenum depth_func;
@@ -924,6 +1011,8 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 
 				if (!stage_tex)
 					continue;
+
+				R_EvalStageColorAlpha (stage, cl.time, stage_color);
 
 				if (stage_index == 0 && stage_tex == t->gltexture)
 				{
@@ -970,7 +1059,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 
 				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 					stage_tex, fb, em,
-					zfix || material->polygon_offset, -1.f, extra_flags);
+					zfix || material->polygon_offset, -1.f, extra_flags, stage_color);
 			}
 		}
 

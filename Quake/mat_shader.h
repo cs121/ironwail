@@ -56,9 +56,36 @@ typedef enum
 
 typedef enum
 {
-	MAT_RGBGEN_DEFAULT = 0,
-	MAT_RGBGEN_IDENTITY
+	MAT_RGBGEN_IDENTITY = 0,
+	MAT_RGBGEN_VERTEX,
+	MAT_RGBGEN_CONST,
+	MAT_RGBGEN_WAVE
 } mat_rgbgen_t;
+
+typedef enum
+{
+	MAT_ALPHAGEN_IDENTITY = 0,
+	MAT_ALPHAGEN_VERTEX,
+	MAT_ALPHAGEN_CONST,
+	MAT_ALPHAGEN_WAVE
+} mat_alphagen_t;
+
+typedef enum
+{
+	MAT_WAVE_SIN = 0,
+	MAT_WAVE_TRIANGLE,
+	MAT_WAVE_SAW,
+	MAT_WAVE_INVERSESAW
+} mat_wave_type_t;
+
+typedef struct mat_wave_s
+{
+	mat_wave_type_t	type;
+	float		base;
+	float		amp;
+	float		phase;
+	float		freq;
+} mat_wave_t;
 
 typedef enum
 {
@@ -150,6 +177,11 @@ typedef struct mat_shader_stage_s
 {
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
+	mat_alphagen_t	alphagen;
+	float		const_color[3];
+	float		const_alpha;
+	mat_wave_t	rgb_wave;
+	mat_wave_t	alpha_wave;
 	mat_blend_mode_t	blend_mode;
 	int			blend_src;
 	int			blend_dst;
@@ -229,6 +261,7 @@ char *Mat_Shader_DupString (const char *value);
 const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time);
 int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time);
 const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
+float Mat_Shader_EvalWaveValue (const mat_wave_t *wave, float time);
 void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
