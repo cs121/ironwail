@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "mat_shader.h"
 #include "mat_shader_parse.h"
+#include <math.h>
 
 /*
 Parsing policy:
@@ -58,6 +59,9 @@ typedef struct
 	qboolean token_limit_hit;
 	const char *material_name;
 } mat_shader_parse_state_t;
+
+#define MAT_SHADER_SCALE_MAX 64.f
+#define MAT_SHADER_TCMOD_MAX_ABS 64.f
 
 static void Mat_Shader_WarnMaterial (const mat_shader_parse_state_t *state, const char *message)
 {
@@ -97,15 +101,25 @@ static const char *Mat_Shader_ParseToken (const char *data, mat_shader_parse_sta
 	return cursor;
 }
 
-static qboolean Mat_Shader_ParseBool (const char *token, qboolean default_value)
+static qboolean Mat_Shader_ParseBool (const char *token, qboolean default_value, const mat_shader_parse_state_t *state)
 {
+	float value;
+	char message[128];
+
 	if (!token || !token[0])
 		return default_value;
 	if (!q_strcasecmp (token, "true") || !q_strcasecmp (token, "yes") || !q_strcasecmp (token, "on"))
 		return true;
 	if (!q_strcasecmp (token, "false") || !q_strcasecmp (token, "no") || !q_strcasecmp (token, "off"))
 		return false;
-	return Q_atof (token) != 0.f;
+	value = Q_atof (token);
+	if (!isfinite (value))
+	{
+		q_snprintf (message, sizeof (message), "boolean value '%s' is not finite; using default", token);
+		Mat_Shader_WarnMaterial (state, message);
+		return default_value;
+	}
+	return value != 0.f;
 }
 
 static qboolean Mat_Shader_IsBraceToken (const char *token)
@@ -160,7 +174,7 @@ static qboolean ParseOptionalBool (const char **data, qboolean *out, mat_shader_
 	if (!Mat_Shader_IsBoolToken (com_token))
 		return false;
 
-	*out = Mat_Shader_ParseBool (com_token, false);
+	*out = Mat_Shader_ParseBool (com_token, false, state);
 	*data = cursor;
 	return true;
 }
@@ -264,8 +278,67 @@ static qboolean ParseRequiredBool (const char **data, qboolean *out, mat_shader_
 		Mat_Shader_WarnExpectedToken (state, "boolean", token);
 		return false;
 	}
-	*out = Mat_Shader_ParseBool (token, false);
+	*out = Mat_Shader_ParseBool (token, false, state);
 	return true;
+}
+
+static qboolean Mat_Shader_ValidateFiniteFloat (const mat_shader_parse_state_t *state, const char *label, float value, float default_value, float *out)
+{
+	char message[128];
+
+	if (isfinite (value))
+	{
+		*out = value;
+		return true;
+	}
+
+	q_snprintf (message, sizeof (message), "%s is not finite; using default", label);
+	Mat_Shader_WarnMaterial (state, message);
+	*out = default_value;
+	return false;
+}
+
+static qboolean Mat_Shader_ValidateFloatMin (const mat_shader_parse_state_t *state, const char *label, float value, float min_value, float default_value, float *out)
+{
+	char message[128];
+
+	if (!isfinite (value))
+	{
+		q_snprintf (message, sizeof (message), "%s is not finite; using default", label);
+		Mat_Shader_WarnMaterial (state, message);
+		*out = default_value;
+		return false;
+	}
+	if (value < min_value)
+	{
+		q_snprintf (message, sizeof (message), "%s below %.2f; using default", label, min_value);
+		Mat_Shader_WarnMaterial (state, message);
+		*out = default_value;
+		return false;
+	}
+
+	*out = value;
+	return true;
+}
+
+static void Mat_Shader_ValidateTcModArgs (const mat_shader_parse_state_t *state, const char *label, float *values, const float *defaults, int count)
+{
+	char message[128];
+
+	for (int i = 0; i < count; ++i)
+	{
+		if (!isfinite (values[i]))
+		{
+			q_snprintf (message, sizeof (message), "%s has non-finite values; using defaults", label);
+			Mat_Shader_WarnMaterial (state, message);
+			for (int j = 0; j < count; ++j)
+				values[j] = defaults[j];
+			return;
+		}
+	}
+
+	for (int i = 0; i < count; ++i)
+		values[i] = CLAMP (-MAT_SHADER_TCMOD_MAX_ABS, values[i], MAT_SHADER_TCMOD_MAX_ABS);
 }
 
 static qboolean Mat_Shader_ParseTcGen (const char *token, mat_tcgen_t *out)
@@ -751,60 +824,70 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (!q_strcasecmp (value, "scroll"))
 			{
 				vec2_t scroll = { 0.f, 0.f };
+				const vec2_t scroll_defaults = { 0.f, 0.f };
 				if (!ParseVec2 (&data, scroll, state))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod scroll", scroll, scroll_defaults, 2);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCROLL, scroll, 2);
 				continue;
 			}
 			if (!q_strcasecmp (value, "scale"))
 			{
 				vec2_t scale = { 1.f, 1.f };
+				const vec2_t scale_defaults = { 1.f, 1.f };
 				if (!ParseVec2 (&data, scale, state))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod scale", scale, scale_defaults, 2);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCALE, scale, 2);
 				continue;
 			}
 			if (!q_strcasecmp (value, "rotate"))
 			{
 				float deg_per_sec = 0.f;
+				const float rotate_default = 0.f;
 				if (!ParseFloat (&data, &deg_per_sec, state))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod rotate", &deg_per_sec, &rotate_default, 1);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_ROTATE, &deg_per_sec, 1);
 				continue;
 			}
 			if (!q_strcasecmp (value, "turb"))
 			{
 				vec4_t turb = { 0.f, 0.f, 0.f, 0.f };
+				const vec4_t turb_defaults = { 0.f, 0.f, 0.f, 0.f };
 				if (!ParseVec4 (&data, turb, state))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod turb", turb, turb_defaults, 4);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4);
 				continue;
 			}
 			if (!q_strcasecmp (value, "stretch"))
 			{
 				vec4_t stretch = { 0.f, 0.f, 0.f, 0.f };
+				const vec4_t stretch_defaults = { 0.f, 0.f, 0.f, 0.f };
 				if (!ParseVec4 (&data, stretch, state))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod stretch", stretch, stretch_defaults, 4);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
 				continue;
 			}
@@ -814,6 +897,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		if (!q_strcasecmp (com_token, "animMap"))
 		{
 			float fps = 0.f;
+			float validated_fps = 0.f;
 			int frames = 0;
 			qboolean limit_hit = false;
 			const char *cursor = data;
@@ -824,6 +908,8 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				data = SkipUnknownBlockOrLine (data, true, state);
 				break;
 			}
+
+			Mat_Shader_ValidateFloatMin (state, "animMap fps", fps, 0.f, 0.f, &validated_fps);
 
 			while (1)
 			{
@@ -853,7 +939,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 
 			if (frames > 0)
 			{
-				stage.anim_map_fps = fps;
+				stage.anim_map_fps = validated_fps;
 				data = cursor;
 			}
 			continue;
@@ -1030,32 +1116,38 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
+			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
 				data = ResyncMaterialBlock (data, state);
 				break;
 			}
-			material.emissive_scale = scale;
+			Mat_Shader_ValidateFiniteFloat (state, "emissive_scale", scale, 1.f, &validated_scale);
+			material.emissive_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "bloom_scale"))
 		{
+			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
 				data = ResyncMaterialBlock (data, state);
 				break;
 			}
-			material.bloom_scale = scale;
+			Mat_Shader_ValidateFiniteFloat (state, "bloom_scale", scale, 1.f, &validated_scale);
+			material.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "godray_scale"))
 		{
+			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
 				data = ResyncMaterialBlock (data, state);
 				break;
 			}
-			material.godray_scale = scale;
+			Mat_Shader_ValidateFiniteFloat (state, "godray_scale", scale, 1.f, &validated_scale);
+			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
 		Mat_Shader_ReportUnknownToken (com_token, material.name);
