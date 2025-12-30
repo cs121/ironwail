@@ -4262,7 +4262,7 @@ void R_WarpScaleView (void)
 	srcw = r_refdef.vrect.width / r_refdef.scale;
 	srch = r_refdef.vrect.height / r_refdef.scale;
 
-	needwarpscale = r_refdef.scale != 1 || water_warp || (v_blend[3] && gl_polyblend.value && !softemu);
+	needwarpscale = r_refdef.scale != 1 || water_warp;
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
         need_depth_resolve = (fbodest == framebufs.composite.fbo) && (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f);
 
@@ -4359,10 +4359,8 @@ void R_WarpScaleView (void)
 
 	t = M_ForcedUnderwater () ? realtime : cl.time;
 	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);
-	if (v_blend[3] && gl_polyblend.value && !softemu)
-		GL_Uniform4fvFunc (1, 1, v_blend);
-	else
-		GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+	// View blends are applied after postprocess/UI to avoid AO/tone-map affecting overlays.
+	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
