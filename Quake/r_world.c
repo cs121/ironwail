@@ -443,6 +443,7 @@ static void R_FlushBModelCalls (void)
 
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
+#define CALLFLAG_NOLIGHTMAP      (1u << 2)
 #define CALLFLAG_GODRAYS_LIGHT   (1u << 5)
 #define CALLFLAG_GODRAYS_EMISSIVE (1u << 6)
 #define CALLFLAG_MAT_BLOOM       (1u << 7)
@@ -530,7 +531,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	if (!gl_zfix.value || map_checks.value)
 		zfix = 0;
 
-	flags = zfix | ((fb != NULL) << 1) | ((r_fullbright_cheatsafe != false) << 2) | extra_flags;
+	flags = zfix | ((fb != NULL) << 1) | (r_fullbright_cheatsafe ? CALLFLAG_NOLIGHTMAP : 0u) | extra_flags;
 	if (em != NULL && (extra_flags & CALLFLAG_MAT_EMISSIVE))
 		flags |= CALLFLAG_EMISSIVE;
 	if (t && t->type == TEXTYPE_CUTOUT)
@@ -578,6 +579,159 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	++num_bmodel_calls;
 }
 
+static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
+	qboolean zfix, float alpha_override, unsigned extra_flags)
+{
+	GLuint flags;
+	float alpha;
+
+	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
+		R_FlushBModelCalls ();
+
+	tx = R_SanitizeGLTexture (tx, "shaderstage", "base");
+	fb = R_SanitizeGLTexture (fb, "shaderstage", "fullbright");
+	em = R_SanitizeGLTexture (em, "shaderstage", "emissive");
+
+	flags = zfix | ((fb != NULL) << 1) | (r_fullbright_cheatsafe ? CALLFLAG_NOLIGHTMAP : 0u) | extra_flags;
+	if (em != NULL && (extra_flags & CALLFLAG_MAT_EMISSIVE))
+		flags |= CALLFLAG_EMISSIVE;
+
+	alpha = (alpha_override >= 0.f) ? alpha_override : 1.f;
+
+	if (gl_bindless_able)
+	{
+		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
+		call->flags = flags;
+		call->alpha = alpha;
+		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
+		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
+		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+	}
+	else
+	{
+		bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
+		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
+		call->flags = flags;
+		call->alpha = alpha;
+		call->baseinstance = first_instance;
+		call->padding = 0;
+		textures[0] = tx ? tx : greytexture;
+		textures[1] = fb ? fb : blacktexture;
+		textures[2] = em ? em : blacktexture;
+	}
+
+	SDL_assert (num_instances > 0);
+	SDL_assert (num_instances <= MAX_BMODEL_INSTANCES);
+	bmodel_call_remap[num_bmodel_calls].src = index;
+	bmodel_call_remap[num_bmodel_calls].inst = first_instance * MAX_BMODEL_INSTANCES + (num_instances - 1);
+
+	++num_bmodel_calls;
+}
+
+static GLenum R_MapDepthFunc (mat_depthfunc_t depth_func)
+{
+	switch (depth_func)
+	{
+	case MAT_DEPTHFUNC_EQUAL:
+		return GL_EQUAL;
+	case MAT_DEPTHFUNC_ALWAYS:
+		return GL_ALWAYS;
+	case MAT_DEPTHFUNC_LEQUAL:
+	default:
+		return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+	}
+}
+
+static unsigned R_MapBlendMode (const mat_shader_stage_t *stage)
+{
+	if (!stage)
+		return GLS_BLEND_OPAQUE;
+
+	switch (stage->blend_mode)
+	{
+	case MAT_BLEND_ALPHA:
+	case MAT_BLEND_PREMULT:
+	case MAT_BLEND_CUSTOM:
+		return GLS_BLEND_ALPHA;
+	case MAT_BLEND_ADD:
+		return GLS_BLEND_ADD;
+	case MAT_BLEND_MULT:
+		return GLS_BLEND_MULTIPLY;
+	case MAT_BLEND_REPLACE:
+	default:
+		return GLS_BLEND_OPAQUE;
+	}
+}
+
+static unsigned R_MapCullMode (mat_cull_mode_t cull_mode)
+{
+	switch (cull_mode)
+	{
+	case MAT_CULL_FRONT:
+		return GLS_CULL_FRONT;
+	case MAT_CULL_NONE:
+		return GLS_CULL_NONE;
+	case MAT_CULL_BACK:
+	default:
+		return GLS_CULL_BACK;
+	}
+}
+
+static gltexture_t *R_FindStageTexture (const qmodel_t *model, const mat_shader_stage_t *stage, float time)
+{
+	const char *path = NULL;
+
+	if (!stage)
+		return NULL;
+
+	switch (stage->map_type)
+	{
+	case MAT_MAP_LIGHTMAP:
+		return whitetexture;
+	case MAT_MAP_WHITE:
+		return whitetexture;
+	case MAT_MAP_BLACK:
+		return blacktexture;
+	case MAT_MAP_CLAMPMAP:
+	case MAT_MAP_MAP:
+	default:
+		break;
+	}
+
+	path = MatStage_GetAnimMapPath ((mat_shader_stage_t *)stage, time);
+	if (!path || !path[0])
+		path = stage->map_path;
+	if (!path || !path[0])
+		return NULL;
+
+	return TexMgr_FindTexture ((qmodel_t *)model, path);
+}
+
+static qboolean R_StageUsesLightmap (const mat_shader_stage_t *stage, size_t stage_index)
+{
+	if (!stage)
+		return false;
+	if (stage->map_type == MAT_MAP_LIGHTMAP)
+		return true;
+	if (stage_index == 0 && stage->blend_mode == MAT_BLEND_REPLACE)
+		return true;
+	return false;
+}
+
+static qboolean R_StageIsOpaqueBase (const shader_material_t *material)
+{
+	const mat_shader_stage_t *stage;
+
+	if (!material || !material->stages)
+		return false;
+
+	stage = &material->stages[0];
+	return material->sort_key == MAT_SORT_OPAQUE
+		&& stage->blend_mode == MAT_BLEND_REPLACE
+		&& stage->depth_write
+		&& stage->depth_func == MAT_DEPTHFUNC_LEQUAL;
+}
+
 /*
 =============
 R_ChooseBModelProgram
@@ -620,6 +774,214 @@ typedef enum {
         BP_DLIGHT_SOLID,
         BP_DLIGHT_ALPHA,
 } brushpass_t;
+
+static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushpass_t pass, qboolean translucent, mat_sort_key_t sort_key)
+{
+	int i, j;
+	int totalinst, baseinst;
+	unsigned current_state = ~0u;
+	GLenum current_depth = GL_INVALID_ENUM;
+	mat_blend_mode_t current_blend_mode = MAT_BLEND_REPLACE;
+	int current_blend_src = GL_ONE;
+	int current_blend_dst = GL_ZERO;
+	GLuint program;
+	GLuint buf;
+	GLbyte *ofs;
+	textype_t texbegin, texend;
+	qboolean oit;
+
+	if (!count || r_shaders.value <= 0.f)
+		return;
+
+	if (pass != BP_SOLID && pass != BP_ALPHATEST)
+		return;
+
+	if (count > countof (bmodel_instances))
+	{
+		Con_DWarning ("bmodel instance overflow: %d > %d\n", count, (int)countof (bmodel_instances));
+		count = countof (bmodel_instances);
+	}
+
+	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
+	texbegin = (pass == BP_ALPHATEST) ? TEXTYPE_CUTOUT : 0;
+	texend = (pass == BP_ALPHATEST) ? (TEXTYPE_CUTOUT + 1) : TEXTYPE_CUTOUT;
+	program = R_ChooseBModelProgram (oit, pass == BP_ALPHATEST);
+
+	for (i = 0, totalinst = 0; i < count; i++)
+	{
+		entity_t *ent = ents[i];
+		if (!ent || !Mod_IsKnownModel (ent->model))
+			continue;
+		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
+			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
+	}
+
+	if (!totalinst)
+		return;
+
+	R_ResetBModelCalls (program);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
+
+	for (i = 0, baseinst = 0; i < count; /**/)
+	{
+		int numinst;
+		entity_t *e = ents[i++];
+		qmodel_t *model;
+
+		if (!e || !Mod_IsKnownModel (e->model))
+			continue;
+		model = e->model;
+		qboolean isworld = (e == &cl_entities[0]);
+		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
+			qboolean zfix = !isworld && !isstatic;
+		int frame = isworld ? 0 : e->frame;
+		int numtex = model->texofs[texend] - model->texofs[texbegin];
+
+		if (model->texofs[TEXTYPE_COUNT] < 0
+			|| model->texofs[TEXTYPE_COUNT] > model->numtextures
+			|| model->texofs[texbegin] < 0
+			|| model->texofs[texend] < model->texofs[texbegin]
+			|| model->texofs[texend] > model->texofs[TEXTYPE_COUNT])
+		{
+			Con_DWarning ("R_DrawBrushModels: invalid texofs for %s (%d..%d of %d)\n",
+				model->name, model->texofs[texbegin], model->texofs[texend], model->texofs[TEXTYPE_COUNT]);
+			continue;
+		}
+
+		if (!numtex)
+			continue;
+
+		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
+		{
+			if (!ents[i] || ents[i]->model != model)
+				break;
+			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+		}
+
+		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
+		{
+			texture_t *t = R_GetUsedTexture (model, j, NULL);
+			const shader_material_t *material;
+			unsigned mat_flags = 0u;
+			unsigned mat_call_flags = 0u;
+			size_t stage_count;
+			size_t stage_index;
+
+			if (!t || !R_ValidPtr (t))
+				continue;
+
+			if (!t->shader)
+				continue;
+
+			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
+			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+				continue;
+
+			material = t->shader;
+			if (material->sort_key != sort_key)
+				continue;
+
+			stage_count = material->stages ? VEC_SIZE (material->stages) : 0;
+			if (!stage_count)
+				continue;
+
+			if (mat_flags & MAT_SHADERFLAG_BLOOM)
+				mat_call_flags |= CALLFLAG_MAT_BLOOM;
+			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
+				mat_call_flags |= CALLFLAG_MAT_EMISSIVE;
+			if (mat_flags & MAT_SHADERFLAG_GODRAY)
+				mat_call_flags |= CALLFLAG_MAT_GODRAY;
+			if (mat_flags & MAT_SHADERFLAG_TRANS)
+				mat_call_flags |= CALLFLAG_MAT_TRANS;
+			if (mat_flags & MAT_SHADERFLAG_SKY)
+				mat_call_flags |= CALLFLAG_MAT_SKY;
+			mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
+
+			for (stage_index = 0; stage_index < stage_count; stage_index++)
+			{
+				const mat_shader_stage_t *stage = &material->stages[stage_index];
+				gltexture_t *stage_tex;
+				gltexture_t *fb = NULL;
+				gltexture_t *em = NULL;
+				unsigned extra_flags = mat_call_flags;
+				unsigned stage_state;
+				GLenum depth_func;
+				qboolean blend_changed;
+				qboolean uses_lightmap;
+				qboolean stage_is_base = (stage_index == 0 && R_StageIsOpaqueBase (material));
+
+				if (stage_is_base)
+					continue;
+
+				if (stage->map_type == MAT_MAP_MAP && (!stage->map_path || !stage->map_path[0]) && stage_index == 0)
+					stage_tex = t->gltexture;
+				else
+					stage_tex = R_FindStageTexture (model, stage, cl.time);
+
+				if (!stage_tex)
+					continue;
+
+				if (stage_index == 0 && stage_tex == t->gltexture)
+				{
+					fb = t->fullbright;
+					em = t->emissive;
+					if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
+						fb = NULL;
+				}
+
+				uses_lightmap = R_StageUsesLightmap (stage, stage_index);
+				if (!uses_lightmap)
+					extra_flags |= CALLFLAG_NOLIGHTMAP;
+				if (t->type == TEXTYPE_CUTOUT)
+					extra_flags |= CALLFLAG_ALPHA_TEST;
+
+				stage_state = GLS_ATTRIBS (6) | R_MapBlendMode (stage) | R_MapCullMode (material->cull_mode);
+				if (!stage->depth_write)
+					stage_state |= GLS_NO_ZWRITE;
+
+				depth_func = R_MapDepthFunc (stage->depth_func);
+				blend_changed = stage->blend_mode != current_blend_mode;
+				if (stage->blend_mode == MAT_BLEND_CUSTOM
+					&& (stage->blend_src != current_blend_src || stage->blend_dst != current_blend_dst))
+					blend_changed = true;
+
+				if (stage_state != current_state || depth_func != current_depth || blend_changed)
+				{
+					if (num_bmodel_calls)
+						R_FlushBModelCalls ();
+					R_ResetBModelCalls (program);
+					GL_SetState (stage_state);
+					current_state = stage_state;
+					glDepthFunc (depth_func);
+					current_depth = depth_func;
+
+					if (stage->blend_mode == MAT_BLEND_PREMULT)
+						glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+					else if (stage->blend_mode == MAT_BLEND_CUSTOM)
+						glBlendFunc (stage->blend_src, stage->blend_dst);
+					current_blend_mode = stage->blend_mode;
+					current_blend_src = stage->blend_src;
+					current_blend_dst = stage->blend_dst;
+				}
+
+				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
+					stage_tex, fb, em,
+					zfix || material->polygon_offset, -1.f, extra_flags);
+			}
+		}
+
+		baseinst += numinst;
+	}
+
+	if (num_bmodel_calls)
+		R_FlushBModelCalls ();
+
+	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+}
 
 /*
 =============
@@ -823,6 +1185,15 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 					continue;
 			}
 
+			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_shaders.value > 0.f && t->shader && t->shader->stages)
+			{
+				if (!R_StageIsOpaqueBase (t->shader))
+					continue;
+			}
+
+			if (r_shaders.value > 0.f && t->shader && t->shader->polygon_offset)
+				zfix = true;
+
 			extra_flags |= mat_call_flags;
 			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 				pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
@@ -832,7 +1203,15 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		baseinst += numinst;
         }
 
-        R_FlushBModelCalls ();
+	R_FlushBModelCalls ();
+
+	if (pass == BP_SOLID || pass == BP_ALPHATEST)
+	{
+		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_OPAQUE);
+		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_DECAL);
+		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_ADDITIVE);
+		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_NEAREST);
+	}
 }
 
 
