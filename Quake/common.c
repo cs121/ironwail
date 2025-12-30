@@ -1519,18 +1519,6 @@ static qboolean COM_IsPak0File (const char *packfile)
 	return !q_strcasecmp (filename, "pak0.pak");
 }
 
-static void COM_ReportPak0Integrity (const char *packfile, const dpackfile_t *info, int dirlen, int numpackfiles)
-{
-	unsigned short crc;
-
-	if (numpackfiles != PAK0_COUNT)
-		Con_Warning ("Integrity report: %s has %i files (expected %i)\n", packfile, numpackfiles, PAK0_COUNT);
-
-	crc = CRC_Block (info, dirlen);
-	if (crc != PAK0_CRC_V106 && crc != PAK0_CRC_V101 && crc != PAK0_CRC_V100)
-		Con_Warning ("Integrity report: %s directory CRC %u does not match known versions\n", packfile, crc);
-}
-
 static void COM_CheckRegistered (void)
 {
 	int		h;
@@ -1732,6 +1720,18 @@ typedef struct
 	int		dirofs;
 	int		dirlen;
 } dpackheader_t;
+
+static void COM_ReportPak0Integrity (const char *packfile, const dpackfile_t *info, int dirlen, int numpackfiles)
+{
+	unsigned short crc;
+
+	if (numpackfiles != PAK0_COUNT)
+		Con_Warning ("Integrity report: %s has %i files (expected %i)\n", packfile, numpackfiles, PAK0_COUNT);
+
+	crc = CRC_Block (info, dirlen);
+	if (crc != PAK0_CRC_V106 && crc != PAK0_CRC_V101 && crc != PAK0_CRC_V100)
+		Con_Warning ("Integrity report: %s directory CRC %u does not match known versions\n", packfile, crc);
+}
 
 #define MAX_FILES_IN_PACK	2048
 
