@@ -16,7 +16,11 @@ void main()
         vec2 maxCoord = max(sourceSize - vec2(1.0), vec2(0.0));
         ivec2 baseCoord = ivec2(floor(base));
         vec3 accum = vec3(0.0);
+        vec3 accum_bloom = vec3(0.0);
+        vec3 accum_emissive = vec3(0.0);
         float weight = 0.0;
+        float weight_bloom = 0.0;
+        float weight_emissive = 0.0;
         for (int j = 0; j < 2; ++j)
         {
                 for (int i = 0; i < 2; ++i)
@@ -28,16 +32,41 @@ void main()
                         {
                                 float rawMask = texelFetch(MaskTexture, ivec2(sampleCoord), 0).w;
                                 int maskBits = int(floor(rawMask + 0.5));
-                                mask = ((maskBits & 1) != 0) ? 1.0 : 0.0;
+                                bool bloomMask = (maskBits & 1) != 0;
+                                bool emissiveMask = (maskBits & 4) != 0;
+                                if (bloomMask)
+                                {
+                                        accum_bloom += sampleColor.rgb;
+                                        weight_bloom += 1.0;
+                                }
+                                if (emissiveMask)
+                                {
+                                        accum_emissive += sampleColor.rgb;
+                                        weight_emissive += 1.0;
+                                }
+                                mask = (bloomMask || emissiveMask) ? 1.0 : 0.0;
                         }
                         accum += sampleColor.rgb * mask;
                         weight += mask;
                 }
         }
         vec3 color = (weight > 0.0) ? (accum / weight) : vec3(0.0);
-        float brightness = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        float diff = max(brightness - threshold, 0.0);
-        float factor = brightness > 0.0 ? diff / brightness : 0.0;
-        color *= factor;
+        if (maskEnabled > 0.5)
+        {
+                vec3 emissiveColor = (weight_emissive > 0.0) ? (accum_emissive / weight_emissive) : vec3(0.0);
+                vec3 bloomColor = (weight_bloom > 0.0) ? (accum_bloom / weight_bloom) : vec3(0.0);
+                float brightness = dot(bloomColor, vec3(0.2126, 0.7152, 0.0722));
+                float diff = max(brightness - threshold, 0.0);
+                float factor = brightness > 0.0 ? diff / brightness : 0.0;
+                bloomColor *= factor;
+                color = emissiveColor + bloomColor;
+        }
+        else
+        {
+                float brightness = dot(color, vec3(0.2126, 0.7152, 0.0722));
+                float diff = max(brightness - threshold, 0.0);
+                float factor = brightness > 0.0 ? diff / brightness : 0.0;
+                color *= factor;
+        }
         outColor = vec4(color, 1.0);
 }

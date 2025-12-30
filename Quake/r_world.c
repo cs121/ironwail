@@ -458,6 +458,22 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
 
+static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
+{
+	unsigned flags = 0u;
+
+	if (!stage)
+		return flags;
+	if (stage->outputs & MAT_STAGE_OUT_BLOOM)
+		flags |= CALLFLAG_MAT_BLOOM;
+	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
+		flags |= CALLFLAG_MAT_EMISSIVE;
+	if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
+		flags |= CALLFLAG_MAT_GODRAY;
+
+	return flags;
+}
+
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
@@ -469,11 +485,26 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (r_shaders.value <= 0.f || !t->shader)
 		return false;
 
-	if ((t->shader_flags & MAT_SHADERFLAG_EMISSIVE) != 0u && r_godrays_emit_emissive.value > 0.f)
-		return true;
+	if (t->shader->stages)
+	{
+		size_t stage_count = VEC_SIZE (t->shader->stages);
+		qboolean has_godray = false;
+		qboolean has_emissive = false;
 
-	if ((t->shader_flags & MAT_SHADERFLAG_GODRAY) != 0u && r_godrays_emit_lighttex.value > 0.f)
-		return true;
+		for (size_t i = 0; i < stage_count; ++i)
+		{
+			const mat_shader_stage_t *stage = &t->shader->stages[i];
+			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
+				has_godray = true;
+			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
+				has_emissive = true;
+		}
+
+		if (has_godray && r_godrays_emit_lighttex.value > 0.f)
+			return true;
+		if (has_godray && has_emissive && r_godrays_emit_emissive.value > 0.f)
+			return true;
+	}
 
 	return false;
 }
@@ -984,12 +1015,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 			if (!stage_count)
 				continue;
 
-			if (mat_flags & MAT_SHADERFLAG_BLOOM)
-				mat_call_flags |= CALLFLAG_MAT_BLOOM;
-			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
-				mat_call_flags |= CALLFLAG_MAT_EMISSIVE;
-			if (mat_flags & MAT_SHADERFLAG_GODRAY)
-				mat_call_flags |= CALLFLAG_MAT_GODRAY;
 			if (mat_flags & MAT_SHADERFLAG_TRANS)
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
@@ -1003,7 +1028,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
 				vec4_t stage_color;
-				unsigned extra_flags = mat_call_flags;
+				unsigned extra_flags = mat_call_flags | R_StageOutputCallFlags (stage);
 				unsigned stage_state;
 				GLenum depth_func;
 				qboolean blend_changed;
@@ -1069,6 +1094,164 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 					stage_tex, fb, em,
 					zfix || material->polygon_offset, -1.f, extra_flags, stage_color);
+			}
+		}
+
+		baseinst += numinst;
+	}
+
+	if (num_bmodel_calls)
+		R_FlushBModelCalls ();
+
+	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+}
+
+static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
+{
+	int i, j;
+	int totalinst, baseinst;
+	GLuint buf;
+	GLbyte *ofs;
+	textype_t texbegin, texend;
+
+	if (!count || r_shaders.value <= 0.f || !glprogs.godrays_source)
+		return;
+
+	if (count > countof (bmodel_instances))
+	{
+		Con_DWarning ("bmodel instance overflow: %d > %d\n", count, (int)countof (bmodel_instances));
+		count = countof (bmodel_instances);
+	}
+
+	texbegin = 0;
+	texend = TEXTYPE_COUNT;
+
+	for (i = 0, totalinst = 0; i < count; i++)
+	{
+		entity_t *ent = ents[i];
+		if (!ent || !Mod_IsKnownModel (ent->model))
+			continue;
+		if (!R_BrushModelHasTextureTables (ent->model))
+			continue;
+		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
+			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
+	}
+
+	if (!totalinst)
+		return;
+
+	R_ResetBModelCalls (glprogs.godrays_source);
+	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
+
+	for (i = 0, baseinst = 0; i < count; /**/)
+	{
+		int numinst;
+		entity_t *e = ents[i++];
+		qmodel_t *model;
+
+		if (!e || !Mod_IsKnownModel (e->model))
+			continue;
+		model = e->model;
+		qboolean isworld = (e == &cl_entities[0]);
+		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
+		qboolean zfix = !isworld && !isstatic;
+		int numtex = model->texofs[texend] - model->texofs[texbegin];
+
+		if (model->texofs[TEXTYPE_COUNT] < 0
+			|| model->texofs[TEXTYPE_COUNT] > model->numtextures
+			|| model->texofs[texbegin] < 0
+			|| model->texofs[texend] < model->texofs[texbegin]
+			|| model->texofs[texend] > model->texofs[TEXTYPE_COUNT])
+		{
+			Con_DWarning ("R_DrawBrushModels_GodrayStages: invalid texofs for %s (%d..%d of %d)\n",
+				model->name, model->texofs[texbegin], model->texofs[texend], model->texofs[TEXTYPE_COUNT]);
+			continue;
+		}
+
+		if (!numtex)
+			continue;
+
+		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
+		{
+			if (!ents[i] || ents[i]->model != model)
+				break;
+			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+		}
+
+		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
+		{
+			texture_t *t = R_GetUsedTexture (model, j, NULL);
+			const shader_material_t *material;
+			unsigned mat_flags = 0u;
+			size_t stage_count;
+
+			if (!t || !R_ValidPtr (t))
+				continue;
+
+			if (!t->shader || !t->shader->stages)
+				continue;
+
+			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
+			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+				continue;
+
+			material = t->shader;
+			stage_count = material->stages ? VEC_SIZE (material->stages) : 0;
+			if (!stage_count)
+				continue;
+
+			for (size_t stage_index = 0; stage_index < stage_count; stage_index++)
+			{
+				const mat_shader_stage_t *stage = &material->stages[stage_index];
+				gltexture_t *stage_tex;
+				gltexture_t *fb = NULL;
+				gltexture_t *em = NULL;
+				unsigned extra_flags = CALLFLAG_MAT_HAS_SHADER;
+				qboolean wants_emissive = (stage->outputs & MAT_STAGE_OUT_EMISSIVE) != 0u;
+				qboolean wants_godray = (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE) != 0u;
+
+				if (!wants_godray)
+					continue;
+
+				if (stage->map_type == MAT_MAP_MAP && (!stage->map_path || !stage->map_path[0]) && stage_index == 0)
+					stage_tex = t->gltexture;
+				else
+					stage_tex = R_FindStageTexture (model, stage, cl.time);
+
+				if (!stage_tex)
+					continue;
+
+				if (stage_index == 0 && stage_tex == t->gltexture)
+				{
+					fb = t->fullbright;
+					em = t->emissive;
+					if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
+						fb = NULL;
+				}
+
+				if (r_godrays_emit_lighttex.value > 0.f)
+					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
+
+				if (wants_emissive && r_godrays_emit_emissive.value > 0.f)
+				{
+					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
+					extra_flags |= CALLFLAG_MAT_EMISSIVE;
+				}
+
+				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
+					continue;
+
+				if (t->type == TEXTYPE_CUTOUT)
+					extra_flags |= CALLFLAG_ALPHA_TEST;
+
+				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
+					stage_tex, fb, em,
+					zfix || material->polygon_offset, -1.f, extra_flags, NULL);
 			}
 		}
 
@@ -1248,40 +1431,23 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			if (mat_flags & MAT_SHADERFLAG_NODRAW)
 				continue;
 
+			if (pass == BP_GODRAYS)
+			{
+				if (r_shaders.value <= 0.f || !t->shader || !t->shader->stages)
+					continue;
+				continue;
+			}
+
 			if (r_shaders.value > 0.f && t->shader)
+			{
 				mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
-			if (mat_flags & MAT_SHADERFLAG_BLOOM)
-				mat_call_flags |= CALLFLAG_MAT_BLOOM;
-			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
-				mat_call_flags |= CALLFLAG_MAT_EMISSIVE;
-			if (mat_flags & MAT_SHADERFLAG_GODRAY)
-				mat_call_flags |= CALLFLAG_MAT_GODRAY;
+				if (t->shader->stages)
+					mat_call_flags |= R_StageOutputCallFlags (&t->shader->stages[0]);
+			}
 			if (mat_flags & MAT_SHADERFLAG_TRANS)
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
-
-			if (pass == BP_GODRAYS)
-			{
-				qboolean has_shader = (r_shaders.value > 0.f && t->shader);
-				qboolean mat_emissive = has_shader && (mat_flags & MAT_SHADERFLAG_EMISSIVE) != 0u;
-				qboolean mat_godray = has_shader && (mat_flags & MAT_SHADERFLAG_GODRAY) != 0u;
-
-				if (!has_shader || (!mat_emissive && !mat_godray))
-					continue;
-
-				if (mat_emissive && r_godrays_emit_emissive.value > 0.f)
-				{
-					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
-					force_fullbright = true;
-				}
-
-				if (mat_godray && r_godrays_emit_lighttex.value > 0.f)
-					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
-
-				if (extra_flags == 0u)
-					continue;
-			}
 
 			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_shaders.value > 0.f && t->shader && t->shader->stages)
 			{
@@ -1416,12 +1582,8 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
 			if (r_shaders.value > 0.f && t->shader)
 				extra_flags |= CALLFLAG_MAT_HAS_SHADER;
-			if (mat_flags & MAT_SHADERFLAG_BLOOM)
-				extra_flags |= CALLFLAG_MAT_BLOOM;
-			if (mat_flags & MAT_SHADERFLAG_EMISSIVE)
-				extra_flags |= CALLFLAG_MAT_EMISSIVE;
-			if (mat_flags & MAT_SHADERFLAG_GODRAY)
-				extra_flags |= CALLFLAG_MAT_GODRAY;
+			if (r_shaders.value > 0.f && t->shader && t->shader->stages)
+				extra_flags |= R_StageOutputCallFlags (&t->shader->stages[0]);
 			if (mat_flags & MAT_SHADERFLAG_TRANS)
 				extra_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
@@ -1561,7 +1723,7 @@ void R_DrawBrushModels_Godrays (entity_t **ents, int count)
 	if (!count || !glprogs.godrays_source)
 		return;
 
-	R_DrawBrushModels_Real (ents, count, BP_GODRAYS, false);
+	R_DrawBrushModels_GodrayStages (ents, count);
 }
 
 
