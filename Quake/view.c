@@ -263,9 +263,11 @@ static cshift_t cshift_lava = { {255,80,0}, 150 };
 static float v_dmg_time, v_dmg_roll, v_dmg_pitch;
 static float v_explosion_vibration_time;
 static float v_explosion_vibration_strength;
+static float v_bonusflash_time;
 
 static const float V_EXPLOSION_VIBRATION_DURATION = 0.25f;
 static const float V_EXPLOSION_VIBRATION_FREQUENCY = 40.0f;
+static const float V_BONUSFLASH_DURATION = 0.5f;
 
 float		v_blend[4];		// rgba 0.0 - 1.0; see note in V_PolyBlend for more info
 
@@ -285,6 +287,7 @@ void V_ResetEffects (void)
 	v_dmg_pitch = 0.f;
 	v_explosion_vibration_time = 0.f;
 	v_explosion_vibration_strength = 0.f;
+	v_bonusflash_time = 0.f;
 }
 
 /*
@@ -411,7 +414,7 @@ void V_BonusFlash_f (void)
 	cl.cshifts[CSHIFT_BONUS].destcolor[0] = 215;
 	cl.cshifts[CSHIFT_BONUS].destcolor[1] = 186;
 	cl.cshifts[CSHIFT_BONUS].destcolor[2] = 69;
-	cl.cshifts[CSHIFT_BONUS].percent = 50;
+	v_bonusflash_time = cl.time + V_BONUSFLASH_DURATION;
 }
 
 /*
@@ -482,6 +485,24 @@ void V_CalcPowerupCshift (void)
 
 /*
 =============
+V_CalcBonusCshift
+=============
+*/
+static void V_CalcBonusCshift (void)
+{
+	if (v_bonusflash_time > cl.time)
+	{
+		float frac = (v_bonusflash_time - cl.time) / V_BONUSFLASH_DURATION;
+		cl.cshifts[CSHIFT_BONUS].percent = 50.f * CLAMP (0.f, frac, 1.f);
+	}
+	else
+	{
+		cl.cshifts[CSHIFT_BONUS].percent = 0;
+	}
+}
+
+/*
+=============
 V_CalcBlend
 =============
 */
@@ -548,6 +569,7 @@ void V_UpdateBlend (void)
 	qboolean	blend_changed;
 
 	V_CalcPowerupCshift ();
+	V_CalcBonusCshift ();
 
 	blend_changed = false;
 
@@ -570,11 +592,6 @@ void V_UpdateBlend (void)
 	cl.cshifts[CSHIFT_DAMAGE].percent -= frametime*150;
 	if (cl.cshifts[CSHIFT_DAMAGE].percent <= 0)
 		cl.cshifts[CSHIFT_DAMAGE].percent = 0;
-
-// drop the bonus value
-	cl.cshifts[CSHIFT_BONUS].percent -= frametime*100;
-	if (cl.cshifts[CSHIFT_BONUS].percent <= 0)
-		cl.cshifts[CSHIFT_BONUS].percent = 0;
 
 	if (blend_changed)
 		V_CalcBlend ();
@@ -1162,4 +1179,3 @@ void V_Init (void)
 
 	Cvar_RegisterVariable (&r_viewmodel_quake); //MarkV
 }
-
