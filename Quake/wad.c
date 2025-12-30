@@ -81,7 +81,7 @@ void W_LoadWadFile (void) //johnfitz -- filename is now hard-coded for honesty
 	if (!wad_base)
 		Sys_Error ("W_LoadWadFile: couldn't load %s\n\n"
 			   "Basedir is: %s\n\n"
-			   "Check that this has an " GAMENAME " subdirectory containing pak0.pak and pak1.pak, "
+			   "Check that this has an " GAMENAME " subdirectory containing the required game data, "
 			   "or use the -basedir command-line option to specify another directory.",
 			   filename, com_basedirs[0]);
 
