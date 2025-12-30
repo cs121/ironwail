@@ -67,8 +67,38 @@ typedef struct
 #define MAT_SHADER_SCALE_MAX 64.f
 #define MAT_SHADER_TCMOD_MAX_ABS 64.f
 
+static size_t mat_shader_parse_warnings;
+static size_t mat_shader_parse_errors;
+
+void Mat_Shader_ParseResetStats (void)
+{
+	mat_shader_parse_warnings = 0;
+	mat_shader_parse_errors = 0;
+}
+
+void Mat_Shader_ParseAddWarning (void)
+{
+	mat_shader_parse_warnings++;
+}
+
+void Mat_Shader_ParseAddError (void)
+{
+	mat_shader_parse_errors++;
+}
+
+size_t Mat_Shader_ParseGetWarnings (void)
+{
+	return mat_shader_parse_warnings;
+}
+
+size_t Mat_Shader_ParseGetErrors (void)
+{
+	return mat_shader_parse_errors;
+}
+
 static void Mat_Shader_WarnMaterial (const mat_shader_parse_state_t *state, const char *message)
 {
+	Mat_Shader_ParseAddWarning ();
 	if (state && state->material_name)
 		Con_Warning ("Material '%s': %s\n", state->material_name, message);
 	else
@@ -79,6 +109,7 @@ static void Mat_Shader_WarnExpectedToken (const mat_shader_parse_state_t *state,
 {
 	const char *got_token = (got && got[0]) ? got : "<eof>";
 
+	Mat_Shader_ParseAddError ();
 	if (state && state->material_name)
 		Con_Warning ("Material '%s': expected %s, got '%s'\n", state->material_name, expected, got_token);
 	else
