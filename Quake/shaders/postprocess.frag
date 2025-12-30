@@ -145,7 +145,7 @@ layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: 
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
 layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: unused, z: output sRGB conversion, w: reserved
 layout(location=20) uniform float u_midtone;
-layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: desat
+layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
@@ -723,11 +723,11 @@ void main()
                 }
         }
         {
-                float desat = clamp(PostFXParams3.w, 0.0, 1.0);
-                if (desat > 0.0)
+                float damageTint = clamp(PostFXParams3.w, 0.0, 1.0);
+                if (damageTint > 0.0)
                 {
-                        float luma = dot(mapped, vec3(0.299, 0.587, 0.114));
-                        mapped = mix(mapped, vec3(luma), desat);
+                        vec3 tint = vec3(1.0, 0.15, 0.15);
+                        mapped = mix(mapped, mapped * tint, damageTint);
                 }
         }
         if (outputSrgb > 0.5)
