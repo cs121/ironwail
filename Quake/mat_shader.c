@@ -23,10 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader_parse.h"
 #include "miniz.h"
 #include <math.h>
+#include <stdarg.h>
 
 #define MAT_SHADER_HASH_SIZE 256
 #define MAT_SHADER_LIST_LIMIT 64
 #define MAT_TEXMOD_PI 3.14159265358979323846f
+#define MAT_SHADER_UNKNOWN_LIMIT 256
 
 typedef struct mat_shader_entry_s
 {
@@ -40,14 +42,78 @@ typedef struct mat_shader_warn_s
 	char *token;
 } mat_shader_warn_t;
 
+typedef struct mat_shader_keyword_def_s
+{
+	const char *keyword;
+	mat_shader_keyword_scope_t scope;
+	mat_shader_keyword_status_t status;
+	const char *notes;
+} mat_shader_keyword_def_t;
+
+typedef struct mat_shader_unknown_s
+{
+	char *token;
+	mat_shader_keyword_scope_t scope;
+	unsigned int count;
+	char *first_context;
+	char *first_source;
+} mat_shader_unknown_t;
+
 static mat_shader_entry_t *mat_shader_hash[MAT_SHADER_HASH_SIZE];
 static shader_material_t **mat_shader_list;
 static mat_shader_warn_t *mat_shader_warned;
+static mat_shader_unknown_t *mat_shader_unknowns;
 static qboolean mat_shader_loaded;
+static qboolean mat_shader_unknown_overflow;
+
+static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
+{
+	{ "qer_editorimage", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Editor preview texture." },
+	{ "surfaceparm", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface flags; see surfaceparm scope." },
+	{ "cull", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: back/front/none." },
+	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: opaque/decal/additive/nearest." },
+	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
+	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters." },
+	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters." },
+	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation." },
+	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives." },
+
+	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
+	{ "clampmap", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Clamp-wrapped texture." },
+	{ "animMap", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "FPS + frame list only." },
+	{ "rgbGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports identity only." },
+	{ "alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha generator." },
+	{ "blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports add/filter/blend/premult or explicit factors." },
+	{ "depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
+	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: lequal/equal/always." },
+	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test." },
+	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap." },
+	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
+
+	{ "solid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface solid." },
+	{ "nonsolid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface non-solid." },
+	{ "playerclip", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Blocks players." },
+	{ "monsterclip", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Blocks monsters." },
+	{ "trans", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Marks transparent." },
+	{ "alphashadow", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Alpha shadow hint." },
+	{ "sky", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Sky surface." },
+	{ "fog", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Fog surface." },
+	{ "nodraw", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "No draw surface." },
+	{ "stone", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Footstep hint." }
+};
+
+static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
+static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };
 
 char *Mat_Shader_DupString (const char *value)
 {
@@ -125,6 +191,20 @@ static void Mat_Shader_Reset (void)
 			Z_Free (mat_shader_warned[i].token);
 	}
 	VEC_FREE (mat_shader_warned);
+
+	for (i = 0; i < VEC_SIZE (mat_shader_unknowns); ++i)
+	{
+		if (mat_shader_unknowns[i].token)
+			Z_Free (mat_shader_unknowns[i].token);
+		if (mat_shader_unknowns[i].first_context)
+			Z_Free (mat_shader_unknowns[i].first_context);
+		if (mat_shader_unknowns[i].first_source)
+			Z_Free (mat_shader_unknowns[i].first_source);
+	}
+	VEC_FREE (mat_shader_unknowns);
+	mat_shader_unknown_overflow = false;
+
+	memset (mat_shader_keyword_seen, 0, sizeof (mat_shader_keyword_seen));
 }
 
 static unsigned int Mat_Shader_Hash (const char *name)
@@ -161,6 +241,282 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 
 	Mat_Shader_AddWarned (warn_key);
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
+}
+
+static const char *Mat_Shader_ScopeName (mat_shader_keyword_scope_t scope)
+{
+	switch (scope)
+	{
+	case MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL:
+		return "top-level";
+	case MAT_SHADER_KEYWORD_SCOPE_STAGE:
+		return "stage";
+	case MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM:
+		return "surfaceparm";
+	default:
+		return "unknown";
+	}
+}
+
+static const char *Mat_Shader_StatusName (mat_shader_keyword_status_t status)
+{
+	switch (status)
+	{
+	case MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED:
+		return "Implemented";
+	case MAT_SHADER_KEYWORD_STATUS_PARTIAL:
+		return "Partial";
+	case MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED:
+		return "Known-but-Unimplemented";
+	default:
+		return "Unknown";
+	}
+}
+
+void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope)
+{
+	size_t i;
+
+	if (!keyword || !keyword[0])
+		return;
+
+	for (i = 0; i < countof (mat_shader_keyword_table); ++i)
+	{
+		if (mat_shader_keyword_table[i].scope != scope)
+			continue;
+		if (!q_strcasecmp (mat_shader_keyword_table[i].keyword, keyword))
+		{
+			mat_shader_keyword_seen[i] = true;
+			return;
+		}
+	}
+}
+
+static void Mat_Shader_RecordUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file)
+{
+	size_t i;
+
+	if (!token || !token[0])
+		return;
+
+	for (i = 0; i < VEC_SIZE (mat_shader_unknowns); ++i)
+	{
+		if (mat_shader_unknowns[i].scope == scope && !q_strcasecmp (mat_shader_unknowns[i].token, token))
+		{
+			mat_shader_unknowns[i].count++;
+			return;
+		}
+	}
+
+	if (VEC_SIZE (mat_shader_unknowns) >= MAT_SHADER_UNKNOWN_LIMIT)
+	{
+		mat_shader_unknown_overflow = true;
+		return;
+	}
+
+	{
+		mat_shader_unknown_t entry;
+
+		memset (&entry, 0, sizeof (entry));
+		entry.token = Mat_Shader_DupString (token);
+		entry.scope = scope;
+		entry.count = 1;
+		entry.first_context = Mat_Shader_DupString (context ? context : "");
+		entry.first_source = Mat_Shader_DupString (source_file ? source_file : "");
+		VEC_PUSH (mat_shader_unknowns, entry);
+	}
+}
+
+static void Mat_Shader_ReportAppend (char **buffer, size_t *len, size_t *cap, const char *fmt, ...)
+{
+	char temp[1024];
+	va_list args;
+	size_t add;
+
+	if (!buffer || !len || !cap)
+		return;
+
+	va_start (args, fmt);
+	q_vsnprintf (temp, sizeof (temp), fmt, args);
+	va_end (args);
+
+	add = strlen (temp);
+	if (*len + add + 1 > *cap)
+	{
+		size_t newcap = *cap ? *cap : 1024;
+		while (newcap < *len + add + 1)
+			newcap *= 2;
+		{
+			char *newbuf = (char *) realloc (*buffer, newcap);
+			if (!newbuf)
+				return;
+			*buffer = newbuf;
+			*cap = newcap;
+		}
+	}
+
+	memcpy (*buffer + *len, temp, add);
+	*len += add;
+	(*buffer)[*len] = '\0';
+}
+
+typedef struct mat_shader_keyword_row_s
+{
+	const mat_shader_keyword_def_t *def;
+	qboolean seen;
+} mat_shader_keyword_row_t;
+
+static int Mat_Shader_CompareKeywordRows (const void *a, const void *b)
+{
+	const mat_shader_keyword_row_t *left = (const mat_shader_keyword_row_t *) a;
+	const mat_shader_keyword_row_t *right = (const mat_shader_keyword_row_t *) b;
+	int scope_cmp = (int)left->def->scope - (int)right->def->scope;
+
+	if (scope_cmp != 0)
+		return scope_cmp;
+	return q_strcasecmp (left->def->keyword, right->def->keyword);
+}
+
+static int Mat_Shader_CompareUnknowns (const void *a, const void *b)
+{
+	const mat_shader_unknown_t *const *left = (const mat_shader_unknown_t *const *) a;
+	const mat_shader_unknown_t *const *right = (const mat_shader_unknown_t *const *) b;
+	int scope_cmp = (int)(*left)->scope - (int)(*right)->scope;
+
+	if (scope_cmp != 0)
+		return scope_cmp;
+	return q_strcasecmp ((*left)->token, (*right)->token);
+}
+
+static void Mat_Shader_ReportKeywords (char **buffer, size_t *len, size_t *cap, const mat_shader_keyword_row_t *rows, size_t row_count, mat_shader_keyword_status_t status)
+{
+	size_t i;
+	int printed = 0;
+
+	Mat_Shader_ReportAppend (buffer, len, cap, "## %s\n", Mat_Shader_StatusName (status));
+
+	for (i = 0; i < row_count; ++i)
+	{
+		const mat_shader_keyword_row_t *row = &rows[i];
+		if (row->def->status != status)
+			continue;
+		printed++;
+		Mat_Shader_ReportAppend (buffer, len, cap, "- `%s` (%s) — Seen: %s",
+			row->def->keyword,
+			Mat_Shader_ScopeName (row->def->scope),
+			row->seen ? "yes" : "no");
+		if (row->def->notes && row->def->notes[0])
+			Mat_Shader_ReportAppend (buffer, len, cap, ". Notes: %s", row->def->notes);
+		Mat_Shader_ReportAppend (buffer, len, cap, "\n");
+	}
+
+	if (!printed)
+		Mat_Shader_ReportAppend (buffer, len, cap, "_None._\n");
+
+	Mat_Shader_ReportAppend (buffer, len, cap, "\n");
+}
+
+static void Mat_Shader_WriteReport (void)
+{
+	const char *path = "docs/mat_shader_report.md";
+	const size_t keyword_count = countof (mat_shader_keyword_table);
+	mat_shader_keyword_row_t *rows = NULL;
+	mat_shader_unknown_t **unknown_rows = NULL;
+	size_t unknown_count = VEC_SIZE (mat_shader_unknowns);
+	char *report = NULL;
+	size_t len = 0;
+	size_t cap = 0;
+	size_t i;
+
+	rows = (mat_shader_keyword_row_t *) malloc (keyword_count * sizeof (*rows));
+	if (!rows)
+		return;
+
+	for (i = 0; i < keyword_count; ++i)
+	{
+		rows[i].def = &mat_shader_keyword_table[i];
+		rows[i].seen = mat_shader_keyword_seen[i];
+	}
+	qsort (rows, keyword_count, sizeof (*rows), Mat_Shader_CompareKeywordRows);
+
+	Mat_Shader_ReportAppend (&report, &len, &cap, "# Material Shader Keyword Report\n\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "Tracked keywords are grouped by implementation status and scope.\n\n");
+
+	Mat_Shader_ReportKeywords (&report, &len, &cap, rows, keyword_count, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED);
+	Mat_Shader_ReportKeywords (&report, &len, &cap, rows, keyword_count, MAT_SHADER_KEYWORD_STATUS_PARTIAL);
+	Mat_Shader_ReportKeywords (&report, &len, &cap, rows, keyword_count, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED);
+
+	Mat_Shader_ReportAppend (&report, &len, &cap, "## Unknown-Seen\n");
+	if (unknown_count > 0)
+	{
+		unknown_rows = (mat_shader_unknown_t **) malloc (unknown_count * sizeof (*unknown_rows));
+		if (unknown_rows)
+		{
+			for (i = 0; i < unknown_count; ++i)
+				unknown_rows[i] = &mat_shader_unknowns[i];
+			qsort (unknown_rows, unknown_count, sizeof (*unknown_rows), Mat_Shader_CompareUnknowns);
+
+			for (i = 0; i < unknown_count; ++i)
+			{
+				const mat_shader_unknown_t *entry = unknown_rows[i];
+				Mat_Shader_ReportAppend (&report, &len, &cap,
+					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
+					entry->token,
+					Mat_Shader_ScopeName (entry->scope),
+					entry->count,
+					entry->first_source && entry->first_source[0] ? entry->first_source : "<unknown source>",
+					entry->first_context && entry->first_context[0] ? entry->first_context : "<unknown>");
+			}
+		}
+		else
+		{
+			for (i = 0; i < unknown_count; ++i)
+			{
+				const mat_shader_unknown_t *entry = &mat_shader_unknowns[i];
+				Mat_Shader_ReportAppend (&report, &len, &cap,
+					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
+					entry->token,
+					Mat_Shader_ScopeName (entry->scope),
+					entry->count,
+					entry->first_source && entry->first_source[0] ? entry->first_source : "<unknown source>",
+					entry->first_context && entry->first_context[0] ? entry->first_context : "<unknown>");
+			}
+		}
+		if (mat_shader_unknown_overflow)
+			Mat_Shader_ReportAppend (&report, &len, &cap, "- _Unknown token limit reached; additional tokens omitted._\n");
+	}
+	else
+	{
+		Mat_Shader_ReportAppend (&report, &len, &cap, "_None._\n");
+	}
+	Mat_Shader_ReportAppend (&report, &len, &cap, "\n");
+
+	Mat_Shader_ReportAppend (&report, &len, &cap, "## Wishlist / reference (Q3 keywords)\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- blendFunc (add, filter, blend, custom factors)\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- rgbGen modes (identity, identityLighting, entity, oneMinusEntity, vertex, exactVertex, lightingDiffuse)\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- alphaGen modes (identity, entity, oneMinusEntity, vertex, lightingSpecular, portal, wave)\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- tcGen / tcMod (base, lightmap, environment, vector; scroll/scale/rotate/stretch/transform/turb)\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- animMap / clampmap\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- depthFunc / depthWrite / alphaFunc\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- cull / sort / polygonOffset\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- deformVertexes\n");
+	Mat_Shader_ReportAppend (&report, &len, &cap, "- skyParms / fogParms / q3map_*\n");
+
+	if (report && len > 0)
+		COM_WriteFile (path, report, (int)len);
+
+	free (unknown_rows);
+	free (rows);
+	free (report);
+}
+
+static qboolean Mat_Shader_ShouldWriteReport (void)
+{
+#if defined(_DEBUG) || defined(DEBUG)
+	return true;
+#else
+	return r_matshader_report.value > 0.f;
+#endif
 }
 
 static void Mat_MatrixIdentity (mat_texmatrix_t *out)
@@ -457,6 +813,9 @@ static void Mat_Shader_LoadAll (void)
 	}
 
 	VEC_FREE (paths);
+
+	if (Mat_Shader_ShouldWriteReport ())
+		Mat_Shader_WriteReport ();
 }
 
 static void Mat_Shader_Reload_f (cvar_t *var)
@@ -510,6 +869,7 @@ void Mat_Shader_Init (void)
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
 	Cvar_RegisterVariable (&r_reloadshaders);
+	Cvar_RegisterVariable (&r_matshader_report);
 	Cvar_SetCallback (&r_reloadshaders, Mat_Shader_Reload_f);
 
 	Cmd_AddCommand ("shaderlist", Mat_Shader_List_f);
@@ -765,16 +1125,24 @@ void Mat_Shader_Remove (const shader_material_t *material)
 	Mat_Shader_FreeMaterial ((shader_material_t *) material);
 }
 
-void Mat_Shader_ReportUnknownToken (const char *token, const char *context)
+void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file)
 {
-	char warn_key[MAX_QPATH * 2];
+	char warn_key[MAX_QPATH * 3];
+	char warn_context[MAX_QPATH * 2];
+	const char *scope_name = Mat_Shader_ScopeName (scope);
 
 	if (context && context[0])
-		q_snprintf (warn_key, sizeof (warn_key), "%s::%s", context, token);
+		q_snprintf (warn_key, sizeof (warn_key), "%s::%s::%s", scope_name, context, token);
 	else
-		q_snprintf (warn_key, sizeof (warn_key), "%s", token);
+		q_snprintf (warn_key, sizeof (warn_key), "%s::%s", scope_name, token);
 
-	Mat_Shader_WarnOnce (warn_key, token, context);
+	if (context && context[0])
+		q_snprintf (warn_context, sizeof (warn_context), "%s (%s)", context, scope_name);
+	else
+		q_snprintf (warn_context, sizeof (warn_context), "shader (%s)", scope_name);
+
+	Mat_Shader_WarnOnce (warn_key, token, warn_context);
+	Mat_Shader_RecordUnknownToken (token, scope, context, source_file);
 }
 
 static int Mat_Shader_TimeBucket (float time, float fps_hint)

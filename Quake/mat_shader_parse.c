@@ -546,6 +546,7 @@ static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char
 	{
 		if (!q_strcasecmp (token, mat_surfaceparm_table[i].name))
 		{
+			Mat_Shader_MarkKeywordSeen (mat_surfaceparm_table[i].name, MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM);
 			material->surfaceparms |= mat_surfaceparm_table[i].surfaceparm;
 			material->render_flags |= mat_surfaceparm_table[i].render_flags;
 			material->content_flags |= mat_surfaceparm_table[i].content_flags;
@@ -553,7 +554,7 @@ static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char
 		}
 	}
 
-	Mat_Shader_ReportUnknownToken (token, material->name);
+	Mat_Shader_ReportUnknownToken (token, MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, material->name, material->source_file);
 }
 
 static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_open, mat_shader_parse_state_t *state)
@@ -668,6 +669,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			break;
 		if (!q_strcasecmp (com_token, "map"))
 		{
+			Mat_Shader_MarkKeywordSeen ("map", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "map path"))
 			{
 				valid = false;
@@ -695,6 +697,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "clampmap"))
 		{
+			Mat_Shader_MarkKeywordSeen ("clampmap", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "map path"))
 			{
 				valid = false;
@@ -707,6 +710,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "rgbGen"))
 		{
+			Mat_Shader_MarkKeywordSeen ("rgbGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "rgbGen mode"))
 			{
 				valid = false;
@@ -719,6 +723,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "blendFunc"))
 		{
+			Mat_Shader_MarkKeywordSeen ("blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			int src;
 			int dst;
 
@@ -767,7 +772,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				}
 				if (!Mat_Shader_ParseBlendFactor (value, &dst))
 				{
-					Mat_Shader_ReportUnknownToken (value, material->name);
+					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 					break;
 				}
 				stage.blend_mode = MAT_BLEND_CUSTOM;
@@ -776,11 +781,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				continue;
 			}
 
-			Mat_Shader_ReportUnknownToken (value, material->name);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "depthWrite"))
 		{
+			Mat_Shader_MarkKeywordSeen ("depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			qboolean parsed = false;
 			qboolean value_bool = true;
 
@@ -790,6 +796,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "depthFunc"))
 		{
+			Mat_Shader_MarkKeywordSeen ("depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "depthFunc mode"))
 			{
 				valid = false;
@@ -798,11 +805,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			}
 			if (Mat_Shader_ParseDepthFunc (value, &stage.depth_func))
 				continue;
-			Mat_Shader_ReportUnknownToken (value, material->name);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcGen"))
 		{
+			Mat_Shader_MarkKeywordSeen ("tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "tcGen mode"))
 			{
 				valid = false;
@@ -810,11 +818,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				break;
 			}
 			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
-				Mat_Shader_ReportUnknownToken (value, material->name);
+				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcMod"))
 		{
+			Mat_Shader_MarkKeywordSeen ("tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			if (!ParseIdentExpected (&data, &value, state, "tcMod type"))
 			{
 				valid = false;
@@ -891,11 +900,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
 				continue;
 			}
-			Mat_Shader_ReportUnknownToken (value, material->name);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "animMap"))
 		{
+			Mat_Shader_MarkKeywordSeen ("animMap", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			float fps = 0.f;
 			float validated_fps = 0.f;
 			int frames = 0;
@@ -945,7 +955,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			continue;
 		}
 
-		Mat_Shader_ReportUnknownToken (com_token, material->name);
+		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
 		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 		{
@@ -1032,6 +1042,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "qer_editorimage"))
 		{
+			Mat_Shader_MarkKeywordSeen ("qer_editorimage", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseIdentExpected (&data, &value, state, "qer_editorimage path"))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1042,6 +1053,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "surfaceparm"))
 		{
+			Mat_Shader_MarkKeywordSeen ("surfaceparm", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseIdentExpected (&data, &value, state, "surfaceparm value"))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1052,6 +1064,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "cull"))
 		{
+			Mat_Shader_MarkKeywordSeen ("cull", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseIdentExpected (&data, &value, state, "cull mode"))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1059,11 +1072,12 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			if (Mat_Shader_ParseCullMode (value, &material.cull_mode))
 				continue;
-			Mat_Shader_ReportUnknownToken (value, material.name);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "sort"))
 		{
+			Mat_Shader_MarkKeywordSeen ("sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseIdentExpected (&data, &value, state, "sort key"))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1075,11 +1089,12 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 					material.render_flags |= MAT_RENDER_TRANS;
 				continue;
 			}
-			Mat_Shader_ReportUnknownToken (value, material.name);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "polygonOffset"))
 		{
+			Mat_Shader_MarkKeywordSeen ("polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			qboolean parsed = false;
 			qboolean value_bool = true;
 
@@ -1089,6 +1104,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "emissive"))
 		{
+			Mat_Shader_MarkKeywordSeen ("emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseRequiredBool (&data, &material.emissive_enable, state))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1098,6 +1114,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "bloom"))
 		{
+			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseRequiredBool (&data, &material.bloom_enable, state))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1107,6 +1124,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "godray"))
 		{
+			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			if (!ParseRequiredBool (&data, &material.godray_enable, state))
 			{
 				data = ResyncMaterialBlock (data, state);
@@ -1116,6 +1134,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
+			Mat_Shader_MarkKeywordSeen ("emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
@@ -1128,6 +1147,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "bloom_scale"))
 		{
+			Mat_Shader_MarkKeywordSeen ("bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
@@ -1140,6 +1160,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "godray_scale"))
 		{
+			Mat_Shader_MarkKeywordSeen ("godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
 			float validated_scale = 1.f;
 			if (!ParseFloat (&data, &scale, state))
 			{
@@ -1150,7 +1171,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
-		Mat_Shader_ReportUnknownToken (com_token, material.name);
+		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
 		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 			break;
