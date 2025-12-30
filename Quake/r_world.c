@@ -284,6 +284,7 @@ typedef struct bmodel_gpu_instance_s {
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
+	GLfloat		_pad0[2];
 	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
@@ -293,6 +294,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
+	GLfloat		_pad0[2];
 	GLfloat		stage_color[4];
 	GLint		baseinstance;
 	GLint		padding;
