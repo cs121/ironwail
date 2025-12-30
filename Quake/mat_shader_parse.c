@@ -58,6 +58,10 @@ typedef struct
 	unsigned int token_count;
 	qboolean token_limit_hit;
 	const char *material_name;
+	const char *source_file;
+	unsigned int line;
+	unsigned int token_line;
+	qboolean track_tokens;
 } mat_shader_parse_state_t;
 
 #define MAT_SHADER_SCALE_MAX 64.f
@@ -81,20 +85,92 @@ static void Mat_Shader_WarnExpectedToken (const mat_shader_parse_state_t *state,
 		Con_Warning ("Expected %s, got '%s'\n", expected, got_token);
 }
 
+static void Mat_Shader_TrackTokenLine (const char *data, mat_shader_parse_state_t *state, const char **token_start)
+{
+	const char *cursor;
+	unsigned int line;
+	int c;
+
+	if (token_start)
+		*token_start = data;
+
+	if (!state || !data)
+		return;
+
+	line = state->line ? state->line : 1;
+	cursor = data;
+
+skipwhite:
+	while ((c = *cursor) <= ' ')
+	{
+		if (c == 0)
+		{
+			state->line = line;
+			state->token_line = line;
+			if (token_start)
+				*token_start = cursor;
+			return;
+		}
+		if (c == '\n')
+			line++;
+		cursor++;
+	}
+
+	if (c == '/' && cursor[1] == '/')
+	{
+		while (*cursor && *cursor != '\n')
+			cursor++;
+		goto skipwhite;
+	}
+
+	if (c == '/' && cursor[1] == '*')
+	{
+		cursor += 2;
+		while (*cursor && !(*cursor == '*' && cursor[1] == '/'))
+		{
+			if (*cursor == '\n')
+				line++;
+			cursor++;
+		}
+		if (*cursor)
+			cursor += 2;
+		goto skipwhite;
+	}
+
+	state->line = line;
+	state->token_line = line;
+	if (token_start)
+		*token_start = cursor;
+}
+
 static const char *Mat_Shader_ParseToken (const char *data, mat_shader_parse_state_t *state)
 {
-	const char *cursor = COM_Parse (data);
+	const char *token_start = data;
+	const char *cursor;
 
+	if (state)
+		Mat_Shader_TrackTokenLine (data, state, &token_start);
+
+	cursor = COM_Parse (data);
 	if (!cursor)
 		return NULL;
 
-	if (state && !state->token_limit_hit)
+	if (state)
 	{
-		state->token_count++;
-		if (state->token_count > MAT_SHADER_MAX_TOKENS)
+		for (const char *scan = token_start; scan < cursor; ++scan)
 		{
-			state->token_limit_hit = true;
-			Mat_Shader_WarnMaterial (state, "token limit exceeded; skipping remaining tokens");
+			if (*scan == '\n')
+				state->line++;
+		}
+
+		if (state->track_tokens && !state->token_limit_hit)
+		{
+			state->token_count++;
+			if (state->token_count > MAT_SHADER_MAX_TOKENS)
+			{
+				state->token_limit_hit = true;
+				Mat_Shader_WarnMaterial (state, "token limit exceeded; skipping remaining tokens");
+			}
 		}
 	}
 
@@ -155,6 +231,28 @@ static qboolean Mat_Shader_IsBoolToken (const char *token)
 		!q_strcasecmp (token, "on") || !q_strcasecmp (token, "off"))
 		return true;
 	return Mat_Shader_IsNumericToken (token);
+}
+
+static qboolean Mat_Shader_ParseLine (const char **data, mat_shader_parse_state_t *state)
+{
+	const char *cursor;
+	stringview_t line;
+
+	if (!data || !*data)
+		return false;
+
+	cursor = *data;
+	if (!COM_ParseLine (data, &line))
+		return false;
+
+	if (state)
+	{
+		const char *line_end = cursor + line.len;
+		if (*line_end == '\n')
+			state->line++;
+	}
+
+	return true;
 }
 
 static qboolean ParseOptionalBool (const char **data, qboolean *out, mat_shader_parse_state_t *state)
@@ -540,7 +638,7 @@ static qboolean Mat_Shader_ParseDepthFunc (const char *token, mat_depthfunc_t *o
 	return false;
 }
 
-static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char *token)
+static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char *token, const mat_shader_parse_state_t *state)
 {
 	for (size_t i = 0; i < countof (mat_surfaceparm_table); ++i)
 	{
@@ -554,7 +652,9 @@ static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char
 		}
 	}
 
-	Mat_Shader_ReportUnknownToken (token, MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, material->name, material->source_file);
+	Mat_Shader_ReportUnknownToken (token, MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, material->name,
+		state ? state->source_file : material->source_file,
+		state ? state->token_line : 0u);
 }
 
 static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_open, mat_shader_parse_state_t *state)
@@ -576,7 +676,7 @@ static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_op
 			depth = 1;
 		else
 		{
-			if (!COM_ParseLine (&cursor, NULL))
+			if (!Mat_Shader_ParseLine (&cursor, state))
 				return NULL;
 			return cursor;
 		}
@@ -772,7 +872,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				}
 				if (!Mat_Shader_ParseBlendFactor (value, &dst))
 				{
-					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+						state ? state->source_file : material->source_file,
+						state ? state->token_line : 0u);
 					break;
 				}
 				stage.blend_mode = MAT_BLEND_CUSTOM;
@@ -781,7 +883,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				continue;
 			}
 
-			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+				state ? state->source_file : material->source_file,
+				state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "depthWrite"))
@@ -805,7 +909,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			}
 			if (Mat_Shader_ParseDepthFunc (value, &stage.depth_func))
 				continue;
-			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+				state ? state->source_file : material->source_file,
+				state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcGen"))
@@ -818,7 +924,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				break;
 			}
 			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
-				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					state ? state->source_file : material->source_file,
+					state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcMod"))
@@ -900,7 +1008,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
 				continue;
 			}
-			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+				state ? state->source_file : material->source_file,
+				state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "animMap"))
@@ -955,7 +1065,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			continue;
 		}
 
-		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name, material->source_file);
+		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+			state ? state->source_file : material->source_file,
+			state ? state->token_line : 0u);
 		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 		{
@@ -999,6 +1111,8 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	char canonical[MAX_QPATH];
 
 	memset (&material, 0, sizeof (material));
+	if (state)
+		state->source_file = source_file;
 	Mat_Shader_Canonicalize (name, canonical, sizeof (canonical));
 	material.name = Mat_Shader_DupString (canonical);
 	material.source_file = Mat_Shader_DupString (source_file ? source_file : "");
@@ -1059,7 +1173,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 				data = ResyncMaterialBlock (data, state);
 				break;
 			}
-			Mat_Shader_ApplySurfaceParm (&material, value);
+			Mat_Shader_ApplySurfaceParm (&material, value, state);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "cull"))
@@ -1072,7 +1186,9 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			if (Mat_Shader_ParseCullMode (value, &material.cull_mode))
 				continue;
-			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
+				state ? state->source_file : material.source_file,
+				state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "sort"))
@@ -1089,7 +1205,9 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 					material.render_flags |= MAT_RENDER_TRANS;
 				continue;
 			}
-			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
+			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
+				state ? state->source_file : material.source_file,
+				state ? state->token_line : 0u);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "polygonOffset"))
@@ -1171,7 +1289,9 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
-		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, material.source_file);
+		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
+			state ? state->source_file : material.source_file,
+			state ? state->token_line : 0u);
 		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 			break;
@@ -1189,6 +1309,7 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 {
 	int parsed = 0;
 	const char *cursor = data;
+	mat_shader_parse_state_t file_state;
 	mat_shader_parse_state_t state;
 
 	(void) path;
@@ -1196,13 +1317,18 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 	if (!cursor)
 		return 0;
 
-	while ((cursor = COM_Parse (cursor)) != NULL)
+	memset (&file_state, 0, sizeof (file_state));
+	file_state.line = 1;
+	file_state.source_file = source_file;
+	file_state.track_tokens = false;
+
+	while ((cursor = Mat_Shader_ParseToken (cursor, &file_state)) != NULL)
 	{
 		if (!com_token[0])
 			continue;
 		if (!strcmp (com_token, "{"))
 		{
-			cursor = SkipUnknownBlockOrLine (cursor, true, NULL);
+			cursor = SkipUnknownBlockOrLine (cursor, true, &file_state);
 			continue;
 		}
 		{
@@ -1210,10 +1336,14 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 
 			q_strlcpy (name, com_token, sizeof (name));
 			memset (&state, 0, sizeof (state));
+			state.line = file_state.line;
+			state.source_file = file_state.source_file;
+			state.track_tokens = true;
 			state.material_name = name;
 			if (!ExpectToken (&cursor, "{", &state))
 				continue;
 			cursor = ParseMaterialBlock (cursor, name, source_file, &state);
+			file_state.line = state.line;
 			parsed++;
 		}
 	}

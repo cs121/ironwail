@@ -231,6 +231,6 @@ const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
 void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
-void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file);
+void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line);
 
 #endif // MAT_SHADER_H
