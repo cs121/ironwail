@@ -1381,3 +1381,143 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 
 	return parsed;
 }
+
+static char *Mat_Shader_BuildLongPathShader (void)
+{
+	const char *prefix = "fuzz_longpath\n{\n { map textures/";
+	const char *suffix = " }\n}\n";
+	const size_t path_len = MAX_QPATH * 4;
+	const size_t total = strlen (prefix) + path_len + strlen (suffix) + 1;
+	char *buffer = (char *) malloc (total);
+	size_t offset = 0;
+
+	if (!buffer)
+		return NULL;
+
+	offset += (size_t) q_snprintf (buffer + offset, total - offset, "%s", prefix);
+	memset (buffer + offset, 'a', path_len);
+	offset += path_len;
+	q_snprintf (buffer + offset, total - offset, "%s", suffix);
+	return buffer;
+}
+
+static char *Mat_Shader_BuildManyStagesShader (void)
+{
+	const char *prefix = "fuzz_many_stages\n{\n";
+	const char *stage = " { map $whiteimage }\n";
+	const char *suffix = "}\n";
+	const size_t stage_count = MAT_SHADER_MAX_STAGES + 2;
+	const size_t total = strlen (prefix) + (stage_count * strlen (stage)) + strlen (suffix) + 1;
+	char *buffer = (char *) malloc (total);
+	size_t offset = 0;
+
+	if (!buffer)
+		return NULL;
+
+	offset += (size_t) q_snprintf (buffer + offset, total - offset, "%s", prefix);
+	for (size_t i = 0; i < stage_count; ++i)
+		offset += (size_t) q_snprintf (buffer + offset, total - offset, "%s", stage);
+	q_snprintf (buffer + offset, total - offset, "%s", suffix);
+	return buffer;
+}
+
+static void Mat_Shader_RemoveFuzzMaterial (const char *name)
+{
+	const shader_material_t *material = Mat_Shader_Find (name);
+
+	if (!material || !material->source_file)
+		return;
+	if (q_strncasecmp (material->source_file, "matshader_fuzz", 14))
+		return;
+
+	Mat_Shader_Remove (material);
+}
+
+void Mat_Shader_DebugFuzzParse (void)
+{
+	const char *fuzz_missing_brace =
+		"fuzz_missing_brace\n"
+		"{\n"
+		" surfaceparm solid\n"
+		" { map textures/test }\n";
+	const char *fuzz_unknown =
+		"fuzz_unknown\n"
+		"{\n"
+		" unknown_key 1\n"
+		" unknown_block { nested 1 }\n"
+		" { map textures/test }\n"
+		"}\n";
+	const char *fuzz_nonfinite =
+		"fuzz_nonfinite\n"
+		"{\n"
+		" emissive_scale nan\n"
+		" bloom_scale inf\n"
+		" godray_scale -inf\n"
+		" { map $whiteimage }\n"
+		"}\n";
+	const char *fuzz_duplicate =
+		"fuzz_duplicate\n"
+		"{\n"
+		" surfaceparm solid\n"
+		" surfaceparm solid\n"
+		" cull none\n"
+		" cull back\n"
+		" emissive_scale 2\n"
+		" emissive_scale 3\n"
+		" { map $whiteimage }\n"
+		"}\n";
+	char *fuzz_longpath = Mat_Shader_BuildLongPathShader ();
+	char *fuzz_many_stages = Mat_Shader_BuildManyStagesShader ();
+	const size_t warnings_before = Mat_Shader_ParseGetWarnings ();
+	const size_t errors_before = Mat_Shader_ParseGetErrors ();
+	const char *names[] =
+	{
+		"fuzz_missing_brace",
+		"fuzz_unknown",
+		"fuzz_longpath",
+		"fuzz_many_stages",
+		"fuzz_nonfinite",
+		"fuzz_duplicate"
+	};
+	struct
+	{
+		const char *label;
+		const char *data;
+	} cases[] =
+	{
+		{ "missing_brace", fuzz_missing_brace },
+		{ "unknown_keywords", fuzz_unknown },
+		{ "long_path", fuzz_longpath },
+		{ "many_stages", fuzz_many_stages },
+		{ "nonfinite_scales", fuzz_nonfinite },
+		{ "duplicate_keys", fuzz_duplicate }
+	};
+
+	Con_Printf ("Material shader fuzz parse begin\n");
+
+	for (size_t i = 0; i < countof (cases); ++i)
+	{
+		char source_label[64];
+		int parsed;
+
+		if (!cases[i].data)
+		{
+			Con_Warning ("Material shader fuzz '%s' skipped (allocation failed)\n", cases[i].label);
+			continue;
+		}
+
+		q_snprintf (source_label, sizeof (source_label), "matshader_fuzz:%s", cases[i].label);
+		parsed = Mat_Shader_ParseFile ("matshader_fuzz", cases[i].data, source_label);
+		Con_Printf ("Material shader fuzz '%s' parsed %d material(s)\n", cases[i].label, parsed);
+	}
+
+	for (size_t i = 0; i < countof (names); ++i)
+		Mat_Shader_RemoveFuzzMaterial (names[i]);
+
+	Con_Printf ("Material shader fuzz end (+%zu warnings, +%zu errors)\n",
+		Mat_Shader_ParseGetWarnings () - warnings_before,
+		Mat_Shader_ParseGetErrors () - errors_before);
+
+	free (fuzz_longpath);
+	free (fuzz_many_stages);
+}

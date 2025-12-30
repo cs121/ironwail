@@ -34,5 +34,6 @@ void Mat_Shader_ParseAddWarning (void);
 void Mat_Shader_ParseAddError (void);
 size_t Mat_Shader_ParseGetWarnings (void);
 size_t Mat_Shader_ParseGetErrors (void);
+void Mat_Shader_DebugFuzzParse (void);
 
 #endif // MAT_SHADER_PARSE_H
