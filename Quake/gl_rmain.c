@@ -341,7 +341,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 depth raw, 2 view-space Z, 3 view-space position, 4 normals, 5 noise, 6 sample hit ratio, 7 AO raw, 8 blur debug, 9 AO mask.
+// r_ssao_debug modes: 0 off, 1 depth raw, 2 view-space Z, 3 view-space position, 4 normals, 5 noise, 6 sample hit ratio, 7 AO raw, 8 blur debug, 9 AO mask, 10 fog transmittance, 11 fog-damped AO.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -353,6 +353,8 @@ cvar_t	r_ssao_freeze_noise = { "r_ssao_freeze_noise", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_force_fullres = { "r_ssao_force_fullres", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_format = { "r_ssao_format", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
+cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.5", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -1220,7 +1222,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
-	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 9) : -1;
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 11) : -1;
 	qboolean debug_show_ao_raw = (debug_mode_i == 7);
 	qboolean debug_show_blur_debug = (debug_mode_i == 8);
 	int debug_mode_ssao = -1;
@@ -1999,6 +2001,8 @@ void GL_PostProcess (void)
 	float godrays_debug_source;
 	float ssao_intensity;
 	float ssao_debug_mode;
+	float ssao_fog_strength;
+	float ssao_fog_power;
 	float view_min_x;
 	float view_min_y;
 	float view_max_x;
@@ -2116,13 +2120,15 @@ void GL_PostProcess (void)
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
-		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 9) : -1;
+		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 11) : -1;
 		ssao_debug_mode = (debug_mode_i > 0) ? (float)debug_mode_i : -1.f;
 	}
 	if (ssao_texture == 0)
 		ssao_debug_mode = -1.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
+	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
+	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -2230,13 +2236,13 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
-		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, upscale_nearest, 0.f);
+		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, upscale_nearest, ssao_fog_strength);
 		{
 			int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
 			float blur_sigma = q_max (0.01f, r_ssao_blur_sigma.value);
 			float depth_threshold_scale = 0.02f;
 			blur_radius = CLAMP (1, blur_radius, 4);
-			GL_Uniform4fFunc (18, blur_sigma, (float)blur_radius, depth_threshold_scale, 0.f);
+			GL_Uniform4fFunc (18, blur_sigma, (float)blur_radius, depth_threshold_scale, ssao_fog_power);
 		}
 	}
 	{
