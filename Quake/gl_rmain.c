@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "cl_postfx.h"
+#include "r_postfx.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -282,6 +284,50 @@ cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
 cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
 cvar_t	r_bloom = { "r_bloom", "3.00", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
+
+cvar_t	r_postfx = { "r_postfx", "1", CVAR_ARCHIVE };
+cvar_t	r_polyblend_legacy = { "r_polyblend_legacy", "0", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup = { "r_postfx_pickup", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_exposure = { "r_postfx_pickup_exposure", "0.4", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_bloom = { "r_postfx_pickup_bloom", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_duration = { "r_postfx_pickup_duration", "0.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage = { "r_postfx_damage", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_vignette = { "r_postfx_damage_vignette", "0.45", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_vignette_softness = { "r_postfx_damage_vignette_softness", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_desat = { "r_postfx_damage_desat", "0.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_exposure = { "r_postfx_damage_exposure", "-0.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_duration = { "r_postfx_damage_duration", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_accum_window = { "r_postfx_damage_accum_window", "0.1", CVAR_ARCHIVE };
+cvar_t	r_postfx_damage_accum_scale = { "r_postfx_damage_accum_scale", "0.5", CVAR_ARCHIVE };
+cvar_t	r_postfx_powerup = { "r_postfx_powerup", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_powerup_lut_strength = { "r_postfx_powerup_lut_strength", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_powerup_ramp_in = { "r_postfx_powerup_ramp_in", "0.2", CVAR_ARCHIVE };
+cvar_t	r_postfx_powerup_ramp_out = { "r_postfx_powerup_ramp_out", "0.3", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater = { "r_postfx_underwater", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_grade_strength = { "r_postfx_underwater_grade_strength", "0.5", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_strength = { "r_postfx_underwater_fog_strength", "0.4", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_ramp_in = { "r_postfx_underwater_ramp_in", "0.2", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_ramp_out = { "r_postfx_underwater_ramp_out", "0.2", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_water_r = { "r_postfx_underwater_fog_water_r", "0.2", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_water_g = { "r_postfx_underwater_fog_water_g", "0.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_water_b = { "r_postfx_underwater_fog_water_b", "0.5", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_slime_r = { "r_postfx_underwater_fog_slime_r", "0.1", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_slime_g = { "r_postfx_underwater_fog_slime_g", "0.25", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_slime_b = { "r_postfx_underwater_fog_slime_b", "0.1", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_lava_r = { "r_postfx_underwater_fog_lava_r", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_lava_g = { "r_postfx_underwater_fog_lava_g", "0.2", CVAR_ARCHIVE };
+cvar_t	r_postfx_underwater_fog_lava_b = { "r_postfx_underwater_fog_lava_b", "0.05", CVAR_ARCHIVE };
+cvar_t	r_postfx_quad = { "r_postfx_quad", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_quad_emissive_boost = { "r_postfx_quad_emissive_boost", "0.5", CVAR_ARCHIVE };
+cvar_t	r_postfx_quad_bloom_boost = { "r_postfx_quad_bloom_boost", "0.4", CVAR_ARCHIVE };
+cvar_t	r_postfx_quad_pulse_speed = { "r_postfx_quad_pulse_speed", "2.0", CVAR_ARCHIVE };
+cvar_t	r_postfx_quad_pulse_intensity = { "r_postfx_quad_pulse_intensity", "0.1", CVAR_ARCHIVE };
+cvar_t	r_postfx_bloom_mode = { "r_postfx_bloom_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_postfx_lut = { "r_postfx_lut", "1", CVAR_ARCHIVE };
+cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6", CVAR_ARCHIVE };
+cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
+cvar_t	r_postfx_lut_debug_id = { "r_postfx_lut_debug_id", "0", CVAR_NONE };
+cvar_t	r_postfx_debug = { "r_postfx_debug", "0", CVAR_NONE };
 
 cvar_t	r_ssao = { "r_ssao", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_radius = { "r_ssao_radius", "24", CVAR_ARCHIVE };
@@ -1958,16 +2004,45 @@ void GL_PostProcess (void)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
+	postfx_state_t postfx_state;
+	float postfx_exposure_add;
+	float postfx_bloom_boost;
+	float postfx_emissive_boost;
+	float postfx_desat;
+	float postfx_vignette;
+	float postfx_vignette_softness;
+	float postfx_lut_strength;
+	int postfx_lut_id;
+	int postfx_lut_size;
+	float fog_r;
+	float fog_g;
+	float fog_b;
         r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
 
 	GL_BeginGroup ("Postprocess");
 
+	R_PostFX_GetState (&postfx_state);
+
 	palidx = GLPalette_Postprocess ();
 	dither = (softemu == SOFTEMU_FINE) ? NOISESCALE * r_dither.value * r_softemu_dither_screen.value : 0.f;
 
+	postfx_exposure_add = CLAMP (-2.f, postfx_state.exposure_add_stops, 2.f);
+	postfx_bloom_boost = q_max (0.f, postfx_state.bloom_boost);
+	postfx_emissive_boost = q_max (0.f, postfx_state.emissive_boost);
+	postfx_desat = q_min (1.f, q_max (0.f, postfx_state.desat));
+	postfx_vignette = q_min (1.f, q_max (0.f, q_max (r_vignette.value, postfx_state.vignette)));
+	postfx_vignette_softness = q_min (1.f, q_max (0.f, postfx_state.vignette_softness));
+	postfx_lut_strength = q_min (1.f, q_max (0.f, postfx_state.lut_strength));
+	postfx_lut_id = postfx_state.lut_id;
+	postfx_lut_size = R_PostFX_GetLUTSize ();
+	fog_r = postfx_state.underwater_fog_color[0];
+	fog_g = postfx_state.underwater_fog_color[1];
+	fog_b = postfx_state.underwater_fog_color[2];
+
 	float bloom_intensity = q_max (0.f, r_bloom.value);
+	float bloom_intensity_effective = bloom_intensity;
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
 	screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
@@ -1990,7 +2065,7 @@ void GL_PostProcess (void)
 	GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
 	if (framebufs.bloom.pingpong_tex[0])
 		bloom_texture = framebufs.bloom.pingpong_tex[0];
-	if (bloom_intensity > 0.f)
+	if (bloom_intensity_effective > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
 
 	if (r_autoexposure.value > 0.f || r_exposure_debug.value > 0.f)
@@ -2000,6 +2075,24 @@ void GL_PostProcess (void)
 			exposure *= auto_exposure;
 	}
 	r_autoexposure_debug_exposure = exposure;
+	if (r_postfx_bloom_mode.value > 0.f)
+		bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
+	else
+		bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
+	bloom_intensity_effective = q_max (0.f, bloom_intensity_effective);
+
+	if (r_postfx_lut_debug_id.value > 0.f)
+	{
+		int debug_id = (int)Q_rint (r_postfx_lut_debug_id.value);
+		postfx_lut_id = CLAMP (0, debug_id, PFX_LUT_COUNT - 1);
+		postfx_lut_strength = 1.f;
+	}
+
+	if (r_postfx_lut.value <= 0.f || postfx_lut_strength <= 0.f || postfx_lut_size <= 0)
+	{
+		postfx_lut_id = PFX_LUT_NONE;
+		postfx_lut_strength = 0.f;
+	}
 
 	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
@@ -2094,6 +2187,7 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
+	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
@@ -2112,7 +2206,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
 	GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
 	GL_Uniform4fFunc (8,
-		q_min (1.f, q_max (0.f, r_vignette.value)),
+		postfx_vignette,
 		q_max (0.f, r_vignette_radius_inner.value),
 		q_max (0.f, r_vignette_radius_outer.value),
 		q_max (0.001f, r_vignette_falloff.value));
@@ -2129,6 +2223,10 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
 	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
+	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
+	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
+	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
+	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
@@ -3060,11 +3158,13 @@ void R_SetupView (void)
 	r_fovx = r_refdef.fov_x;
 	r_fovy = r_refdef.fov_y;
 	water_warp = false;
+	{
+		int contents = r_viewleaf->contents;
+		qboolean forced = M_ForcedUnderwater ();
+		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
 	if (r_waterwarp.value)
 	{
-		int contents = Mod_PointInLeaf (r_origin, cl.worldmodel)->contents;
-		qboolean forced = M_ForcedUnderwater ();
-		if (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced)
+		if (underwater_active)
 		{
 			double t = forced ? realtime : cl.time;
 			if (r_waterwarp.value > 1.f)
@@ -3078,6 +3178,9 @@ void R_SetupView (void)
 				water_warp = true;
 			}
 		}
+	}
+	// TODO(postfx): hook underwater contents for postfx stack here.
+	CL_PostFX_SetContents (contents, underwater_active);
 	}
 	//johnfitz
 

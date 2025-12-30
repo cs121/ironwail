@@ -219,6 +219,7 @@ GLOBJS = \
 	gl_rmain.o \
 	gl_fog.o \
 	gl_rmisc.o \
+	r_postfx.o \
 	r_part.o \
 	r_world.o \
 	gl_screen.o \
@@ -252,6 +253,7 @@ OBJS = strlcat.o \
 	cl_demo.o \
 	cl_input.o \
 	cl_main.o \
+	cl_postfx.o \
 	cl_parse.o \
 	cl_tent.o \
 	console.o \
