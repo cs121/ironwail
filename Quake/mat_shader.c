@@ -57,6 +57,7 @@ typedef struct mat_shader_unknown_s
 	unsigned int count;
 	char *first_context;
 	char *first_source;
+	unsigned int first_line;
 } mat_shader_unknown_t;
 
 static mat_shader_entry_t *mat_shader_hash[MAT_SHADER_HASH_SIZE];
@@ -243,6 +244,26 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
 }
 
+static void Mat_Shader_FormatSourceLine (char *buffer, size_t buffer_size, const char *source_file, unsigned int line)
+{
+	if (!buffer || buffer_size == 0)
+		return;
+
+	if (source_file && source_file[0])
+	{
+		if (line > 0)
+			q_snprintf (buffer, buffer_size, "%s:%u", source_file, line);
+		else
+			q_snprintf (buffer, buffer_size, "%s", source_file);
+		return;
+	}
+
+	if (line > 0)
+		q_snprintf (buffer, buffer_size, "<unknown source>:%u", line);
+	else
+		q_snprintf (buffer, buffer_size, "<unknown source>");
+}
+
 static const char *Mat_Shader_ScopeName (mat_shader_keyword_scope_t scope)
 {
 	switch (scope)
@@ -292,7 +313,7 @@ void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t
 	}
 }
 
-static void Mat_Shader_RecordUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file)
+static void Mat_Shader_RecordUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line)
 {
 	size_t i;
 
@@ -323,6 +344,7 @@ static void Mat_Shader_RecordUnknownToken (const char *token, mat_shader_keyword
 		entry.count = 1;
 		entry.first_context = Mat_Shader_DupString (context ? context : "");
 		entry.first_source = Mat_Shader_DupString (source_file ? source_file : "");
+		entry.first_line = line;
 		VEC_PUSH (mat_shader_unknowns, entry);
 	}
 }
@@ -459,12 +481,14 @@ static void Mat_Shader_WriteReport (void)
 			for (i = 0; i < unknown_count; ++i)
 			{
 				const mat_shader_unknown_t *entry = unknown_rows[i];
+				char location[MAX_QPATH * 2];
+				Mat_Shader_FormatSourceLine (location, sizeof (location), entry->first_source, entry->first_line);
 				Mat_Shader_ReportAppend (&report, &len, &cap,
 					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
 					entry->token,
 					Mat_Shader_ScopeName (entry->scope),
 					entry->count,
-					entry->first_source && entry->first_source[0] ? entry->first_source : "<unknown source>",
+					location,
 					entry->first_context && entry->first_context[0] ? entry->first_context : "<unknown>");
 			}
 		}
@@ -473,12 +497,14 @@ static void Mat_Shader_WriteReport (void)
 			for (i = 0; i < unknown_count; ++i)
 			{
 				const mat_shader_unknown_t *entry = &mat_shader_unknowns[i];
+				char location[MAX_QPATH * 2];
+				Mat_Shader_FormatSourceLine (location, sizeof (location), entry->first_source, entry->first_line);
 				Mat_Shader_ReportAppend (&report, &len, &cap,
 					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
 					entry->token,
 					Mat_Shader_ScopeName (entry->scope),
 					entry->count,
-					entry->first_source && entry->first_source[0] ? entry->first_source : "<unknown source>",
+					location,
 					entry->first_context && entry->first_context[0] ? entry->first_context : "<unknown>");
 			}
 		}
@@ -1125,24 +1151,24 @@ void Mat_Shader_Remove (const shader_material_t *material)
 	Mat_Shader_FreeMaterial ((shader_material_t *) material);
 }
 
-void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file)
+void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line)
 {
 	char warn_key[MAX_QPATH * 3];
 	char warn_context[MAX_QPATH * 2];
+	char warn_location[MAX_QPATH * 2];
 	const char *scope_name = Mat_Shader_ScopeName (scope);
 
-	if (context && context[0])
-		q_snprintf (warn_key, sizeof (warn_key), "%s::%s::%s", scope_name, context, token);
-	else
-		q_snprintf (warn_key, sizeof (warn_key), "%s::%s", scope_name, token);
+	Mat_Shader_FormatSourceLine (warn_location, sizeof (warn_location), source_file, line);
+
+	q_snprintf (warn_key, sizeof (warn_key), "%s::%s", scope_name, token);
 
 	if (context && context[0])
-		q_snprintf (warn_context, sizeof (warn_context), "%s (%s)", context, scope_name);
+		q_snprintf (warn_context, sizeof (warn_context), "%s (%s at %s)", context, scope_name, warn_location);
 	else
-		q_snprintf (warn_context, sizeof (warn_context), "shader (%s)", scope_name);
+		q_snprintf (warn_context, sizeof (warn_context), "shader (%s at %s)", scope_name, warn_location);
 
 	Mat_Shader_WarnOnce (warn_key, token, warn_context);
-	Mat_Shader_RecordUnknownToken (token, scope, context, source_file);
+	Mat_Shader_RecordUnknownToken (token, scope, context, source_file, line);
 }
 
 static int Mat_Shader_TimeBucket (float time, float fps_hint)
