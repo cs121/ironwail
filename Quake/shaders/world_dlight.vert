@@ -35,7 +35,6 @@ struct Call
 {
         uint    flags;
         float   wateralpha;
-        vec4    stage_color;
 #if BINDLESS
         uvec2   txhandle;
         uvec2   fbhandle;

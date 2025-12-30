@@ -15,7 +15,6 @@ const uint
         CF_USE_EMISSIVE = 8u,
         CF_ALPHA_TEST = 16u,
         CF_MAT_BLOOM = 128u,
-        CF_MAT_EMISSIVE = 256u,
         CF_MAT_HAS_SHADER = 4096u
 ;
 
@@ -87,7 +86,6 @@ layout(location=3) in vec3 in_pos;
 #endif
 layout(location=6) noperspective in vec4 in_curr_clip;
 layout(location=7) noperspective in vec4 in_prev_clip;
-layout(location=8) flat in vec4 in_stage_color;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -152,7 +150,6 @@ void main()
                 emissive = texture(EmissiveTex, uv).rgb;
 #endif
         vec4 result = texture(Tex, uv);
-        result.rgb *= in_stage_color.rgb;
         int debug_mode = int(ColorSpaceParams.x + 0.5);
         if (debug_mode == 1)
         {
@@ -176,7 +173,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        float bloomMask = ((in_flags & (CF_MAT_BLOOM | CF_MAT_EMISSIVE)) != 0u) ? 1.0 : 0.0;
+        float bloomMask = ((in_flags & CF_MAT_BLOOM) != 0u) ? 1.0 : 0.0;
         float materialMask = 2.0 + bloomMask;
         out_velocity = vec4(velocityOut, 0.0, materialMask);
 #endif

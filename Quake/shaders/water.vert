@@ -19,7 +19,6 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
-	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -94,7 +93,6 @@ layout(location=3) out vec3 out_pos;
 #endif
 layout(location=6) noperspective out vec4 out_curr_clip;
 layout(location=7) noperspective out vec4 out_prev_clip;
-layout(location=8) flat out vec4 out_stage_color;
 
 void main()
 {
@@ -111,8 +109,7 @@ void main()
         out_flags = call.flags;
         out_uv = in_uv.xy;
         out_pos = world_pos;
-        out_alpha = (instance.alpha < 0.0 ? call.wateralpha : instance.alpha) * call.stage_color.a;
-        out_stage_color = call.stage_color;
+        out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS
         out_samplers0.xy = call.txhandle;
         if ((call.flags & CF_USE_FULLBRIGHT) != 0u)

@@ -46,7 +46,6 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
-	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -134,7 +133,6 @@ layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
-layout(location=15) flat in vec4 in_stage_color;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -285,7 +283,6 @@ void main()
 #else
 	vec4 result = texture(Tex, uv);
 #endif
-	result.rgb *= in_stage_color.rgb;
 
 #if MODE == 1
 	if (result.a < 0.666)
@@ -534,7 +531,7 @@ void main()
 #if !OIT
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	vec2 velocityOut = (result.a >= 0.999) ? (velocity * result.a) : vec2(0.0);
-	float materialMask = ((in_flags & (CF_MAT_BLOOM | CF_MAT_EMISSIVE)) != 0u) ? 1.0 : 0.0;
+	float materialMask = ((in_flags & CF_MAT_BLOOM) != 0u) ? 1.0 : 0.0;
 	if ((in_flags & CF_MAT_TRANS) != 0u)
 		materialMask += 2.0;
 	out_velocity = vec4(velocityOut, 0.0, materialMask);

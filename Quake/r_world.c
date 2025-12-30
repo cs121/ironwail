@@ -284,7 +284,6 @@ typedef struct bmodel_gpu_instance_s {
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
@@ -293,7 +292,6 @@ typedef struct bmodel_bindless_gpu_call_s {
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		stage_color[4];
 	GLint		baseinstance;
 	GLint		padding;
 } bmodel_bound_gpu_call_t;
@@ -508,8 +506,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 {
 	GLuint		flags;
 	float		alpha;
-	vec4_t		stage_color = { 1.f, 1.f, 1.f, 1.f };
-	qboolean	has_vertex_color = false;
 	gltexture_t	*tx, *fb, *em;
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
@@ -552,35 +548,11 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		alpha = 1.f;
 	}
 
-	if (t && t->shader && r_shaders.value > 0.f)
-	{
-		const mat_shader_stage_t *stage = Mat_Shader_SelectStage (t->shader);
-		if (!stage)
-			stage = &t->shader->stage0;
-		if (!has_vertex_color && (stage->rgbgen == MAT_RGBGEN_VERTEX || stage->alphagen == MAT_ALPHAGEN_VERTEX))
-		{
-			char warn_key[MAX_QPATH * 2];
-			char warn_msg[256];
-			const char *shader_name = t->shader->name ? t->shader->name : "shader";
-
-			q_snprintf (warn_key, sizeof (warn_key), "%s::vertexcolor", shader_name);
-			q_snprintf (warn_msg, sizeof (warn_msg),
-				"rgbGen/alphaGen vertex requested for %s without vertex colors (using identity)",
-				shader_name);
-			Mat_Shader_ReportWarningOnce (warn_key, warn_msg);
-		}
-		MatStage_EvalColor (stage, cl.time, has_vertex_color, vec4_origin, stage_color);
-	}
-
 	if (gl_bindless_able)
 	{
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
-		call->stage_color[0] = stage_color[0];
-		call->stage_color[1] = stage_color[1];
-		call->stage_color[2] = stage_color[2];
-		call->stage_color[3] = stage_color[3];
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -591,10 +563,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
-		call->stage_color[0] = stage_color[0];
-		call->stage_color[1] = stage_color[1];
-		call->stage_color[2] = stage_color[2];
-		call->stage_color[3] = stage_color[3];
 		call->baseinstance = first_instance;
 		call->padding = 0;
 		textures[0] = tx ? tx : greytexture;

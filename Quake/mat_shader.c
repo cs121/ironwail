@@ -47,8 +47,6 @@ static qboolean mat_shader_loaded;
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
-static cvar_t r_matshader_dump = { "r_matshader_dump", "0", CVAR_NONE };
-cvar_t r_matshader_showstage = { "r_matshader_showstage", "-1", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 
 char *Mat_Shader_DupString (const char *value)
@@ -163,44 +161,6 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 
 	Mat_Shader_AddWarned (warn_key);
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
-}
-
-void Mat_Shader_ReportWarningOnce (const char *warn_key, const char *message)
-{
-	if (!warn_key || !warn_key[0] || !message || !message[0])
-		return;
-	if (Mat_Shader_TokenWarned (warn_key))
-		return;
-	Mat_Shader_AddWarned (warn_key);
-	Con_Warning ("MatShader: %s\n", message);
-}
-
-const mat_shader_stage_t *Mat_Shader_SelectStage (const shader_material_t *material)
-{
-	int stage_index;
-
-	if (!material)
-		return NULL;
-
-	stage_index = (int)floorf (r_matshader_showstage.value);
-	if (stage_index < 0)
-	{
-		if (VEC_SIZE (material->stages) > 0)
-			return &material->stages[0];
-		return &material->stage0;
-	}
-
-	if (VEC_SIZE (material->stages) > 0)
-	{
-		if (stage_index >= 0 && stage_index < (int)VEC_SIZE (material->stages))
-			return &material->stages[stage_index];
-		return &material->stages[0];
-	}
-
-	if (stage_index == 0)
-		return &material->stage0;
-
-	return &material->stage0;
 }
 
 static void Mat_MatrixIdentity (mat_texmatrix_t *out)
@@ -549,8 +509,6 @@ void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
-	Cvar_RegisterVariable (&r_matshader_dump);
-	Cvar_RegisterVariable (&r_matshader_showstage);
 	Cvar_RegisterVariable (&r_reloadshaders);
 	Cvar_SetCallback (&r_reloadshaders, Mat_Shader_Reload_f);
 
@@ -638,17 +596,9 @@ const shader_material_t *Mat_Shader_FindForTextureName (const char *texname, con
 
 const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const char *texname)
 {
-	const mat_shader_stage_t *stage;
-
-	if (!material)
+	if (!material || (material->stage0.map_type != MAT_MAP_MAP && material->stage0.map_type != MAT_MAP_CLAMPMAP))
 		return NULL;
-
-	stage = Mat_Shader_SelectStage (material);
-	if (!stage)
-		return NULL;
-	if (stage->map_type != MAT_MAP_MAP && stage->map_type != MAT_MAP_CLAMPMAP)
-		return NULL;
-	if (!stage->map_path || !stage->map_path[0])
+	if (!material->stage0.map_path || !material->stage0.map_path[0])
 		return NULL;
 
 	if (texname && texname[0])
@@ -659,33 +609,7 @@ const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const ch
 			return NULL;
 	}
 
-	return stage->map_path;
-}
-
-static qboolean Mat_Shader_StageHasOutput (const mat_shader_stage_t *stage, unsigned int output_flag)
-{
-	if (!stage)
-		return false;
-	return (stage->output_flags & output_flag) != 0u;
-}
-
-static qboolean Mat_Shader_MaterialHasOutput (const shader_material_t *material, unsigned int output_flag)
-{
-	size_t i;
-
-	if (!material)
-		return false;
-
-	if (VEC_SIZE (material->stages) == 0)
-		return Mat_Shader_StageHasOutput (&material->stage0, output_flag);
-
-	for (i = 0; i < VEC_SIZE (material->stages); ++i)
-	{
-		if (Mat_Shader_StageHasOutput (&material->stages[i], output_flag))
-			return true;
-	}
-
-	return false;
+	return material->stage0.map_path;
 }
 
 unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
@@ -715,11 +639,11 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_MONSTERCLIP;
 	if (material->surfaceparms & MAT_SURFPARM_STONE)
 		flags |= MAT_SHADERFLAG_STONE;
-	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_EMISSIVE))
+	if (material->emissive_enable)
 		flags |= MAT_SHADERFLAG_EMISSIVE;
-	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_BLOOM))
+	if (material->bloom_enable)
 		flags |= MAT_SHADERFLAG_BLOOM;
-	if (Mat_Shader_MaterialHasOutput (material, MAT_STAGE_OUTPUT_GODRAY_SOURCE))
+	if (material->godray_enable)
 		flags |= MAT_SHADERFLAG_GODRAY;
 
 	return flags;
@@ -786,11 +710,6 @@ void Mat_Shader_Print (const shader_material_t *material)
 	static const char *const blend_names[] = { "replace", "alpha", "add", "mult", "premult", "custom" };
 	static const char *const depth_names[] = { "lequal", "equal", "always" };
 	static const char *const map_names[] = { "map", "clampmap", "lightmap", "white", "black" };
-	static const char *const tcgen_names[] = { "base", "environment", "lightmap" };
-	static const char *const rgbgen_names[] = { "identity", "vertex", "const", "wave" };
-	static const char *const alphagen_names[] = { "identity", "vertex", "const", "wave" };
-	static const char *const tcmod_names[] = { "scroll", "scale", "rotate", "turb", "stretch" };
-	size_t i;
 
 	if (!material)
 		return;
@@ -809,67 +728,14 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
 	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
-
-	if (VEC_SIZE (material->stages) == 0)
+	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
 	{
-		const mat_shader_stage_t *stage = &material->stage0;
-		const char *map_name = map_names[q_min ((int)stage->map_type, (int)countof (map_names) - 1)];
-		Con_Printf ("  stage0 map: %s (%s)\n", stage->map_path ? stage->map_path : "<builtin>", map_name);
-		Con_Printf ("  stage0 blend: %s\n", blend_names[q_min ((int)stage->blend_mode, (int)countof (blend_names) - 1)]);
+		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];
+		Con_Printf ("  stage0 map: %s (%s)\n", material->stage0.map_path ? material->stage0.map_path : "<builtin>", map_name);
+		Con_Printf ("  stage0 blend: %s\n", blend_names[q_min ((int)material->stage0.blend_mode, (int)countof (blend_names) - 1)]);
 		Con_Printf ("  stage0 depth: %s (write %s)\n",
-			depth_names[q_min ((int)stage->depth_func, (int)countof (depth_names) - 1)],
-			stage->depth_write ? "on" : "off");
-		Con_Printf ("  stage0 tcgen: %s\n", tcgen_names[q_min ((int)stage->tcgen, (int)countof (tcgen_names) - 1)]);
-		Con_Printf ("  stage0 rgbGen: %s\n", rgbgen_names[q_min ((int)stage->rgbgen, (int)countof (rgbgen_names) - 1)]);
-		Con_Printf ("  stage0 alphaGen: %s\n", alphagen_names[q_min ((int)stage->alphagen, (int)countof (alphagen_names) - 1)]);
-		if (stage->tcmod_count > 0)
-		{
-			int mod_index;
-			Con_Printf ("  stage0 tcmods: %d\n", stage->tcmod_count);
-			for (mod_index = 0; mod_index < stage->tcmod_count; ++mod_index)
-			{
-				const mat_tcmod_t *mod = &stage->tcmods[mod_index];
-				const char *mod_name = tcmod_names[q_min ((int)mod->type, (int)countof (tcmod_names) - 1)];
-				Con_Printf ("    tcmod %d: %s (%.3f %.3f %.3f %.3f)\n",
-					mod_index, mod_name, mod->args[0], mod->args[1], mod->args[2], mod->args[3]);
-			}
-		}
-		if (stage->anim_map_frames)
-			Con_Printf ("  stage0 animMap: %.2f fps (%zu frames)\n", stage->anim_map_fps, VEC_SIZE (stage->anim_map_frames));
-		return;
-	}
-
-	for (i = 0; i < VEC_SIZE (material->stages); ++i)
-	{
-		const mat_shader_stage_t *stage = &material->stages[i];
-		const char *map_name = map_names[q_min ((int)stage->map_type, (int)countof (map_names) - 1)];
-		const char *tcgen_name = tcgen_names[q_min ((int)stage->tcgen, (int)countof (tcgen_names) - 1)];
-		const char *rgbgen_name = rgbgen_names[q_min ((int)stage->rgbgen, (int)countof (rgbgen_names) - 1)];
-		const char *alphagen_name = alphagen_names[q_min ((int)stage->alphagen, (int)countof (alphagen_names) - 1)];
-
-		Con_Printf ("  stage %zu:\n", i);
-		Con_Printf ("    map: %s (%s)\n", stage->map_path ? stage->map_path : "<builtin>", map_name);
-		Con_Printf ("    blend: %s\n", blend_names[q_min ((int)stage->blend_mode, (int)countof (blend_names) - 1)]);
-		Con_Printf ("    depth: %s (write %s)\n",
-			depth_names[q_min ((int)stage->depth_func, (int)countof (depth_names) - 1)],
-			stage->depth_write ? "on" : "off");
-		Con_Printf ("    tcgen: %s\n", tcgen_name);
-		Con_Printf ("    rgbGen: %s\n", rgbgen_name);
-		Con_Printf ("    alphaGen: %s\n", alphagen_name);
-		if (stage->tcmod_count > 0)
-		{
-			int mod_index;
-			Con_Printf ("    tcmods: %d\n", stage->tcmod_count);
-			for (mod_index = 0; mod_index < stage->tcmod_count; ++mod_index)
-			{
-				const mat_tcmod_t *mod = &stage->tcmods[mod_index];
-				const char *mod_name = tcmod_names[q_min ((int)mod->type, (int)countof (tcmod_names) - 1)];
-				Con_Printf ("      tcmod %d: %s (%.3f %.3f %.3f %.3f)\n",
-					mod_index, mod_name, mod->args[0], mod->args[1], mod->args[2], mod->args[3]);
-			}
-		}
-		if (stage->anim_map_frames)
-			Con_Printf ("    animMap: %.2f fps (%zu frames)\n", stage->anim_map_fps, VEC_SIZE (stage->anim_map_frames));
+			depth_names[q_min ((int)material->stage0.depth_func, (int)countof (depth_names) - 1)],
+			material->stage0.depth_write ? "on" : "off");
 	}
 }
 
@@ -891,9 +757,6 @@ void Mat_Shader_Insert (shader_material_t *material)
 	owned = (shader_material_t *) Z_Malloc (sizeof (*owned));
 	memcpy (owned, material, sizeof (*owned));
 	Mat_Shader_Register (owned);
-
-	if (r_matshader_dump.value > 0.f)
-		Mat_Shader_Print (owned);
 }
 
 void Mat_Shader_Remove (const shader_material_t *material)
@@ -920,41 +783,6 @@ static int Mat_Shader_TimeBucket (float time, float fps_hint)
 	if (fps < 1.f)
 		fps = 1.f;
 	return (int)floorf (time * fps);
-}
-
-static float Mat_Shader_EvalWave (const mat_wave_t *wave, float time)
-{
-	float t;
-	float frac;
-	float wave_value;
-
-	if (!wave)
-		return 0.f;
-
-	switch (wave->type)
-	{
-	case MAT_WAVE_TRIANGLE:
-		t = time * wave->freq + wave->phase;
-		frac = t - floorf (t);
-		wave_value = (1.f - fabsf (frac * 2.f - 1.f)) * 2.f - 1.f;
-		break;
-	case MAT_WAVE_SAW:
-		t = time * wave->freq + wave->phase;
-		frac = t - floorf (t);
-		wave_value = frac * 2.f - 1.f;
-		break;
-	case MAT_WAVE_INVERSESAW:
-		t = time * wave->freq + wave->phase;
-		frac = t - floorf (t);
-		wave_value = (1.f - frac) * 2.f - 1.f;
-		break;
-	case MAT_WAVE_SIN:
-	default:
-		wave_value = sinf ((time * wave->freq + wave->phase) * 2.f * MAT_TEXMOD_PI);
-		break;
-	}
-
-	return wave->base + wave_value * wave->amp;
 }
 
 const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time)
@@ -1068,66 +896,4 @@ const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time)
 		return NULL;
 
 	return stage->anim_map_frames[frame];
-}
-
-void MatStage_EvalColor (const mat_shader_stage_t *stage, float time, qboolean has_vertex_color, const vec4_t vertex_color, vec4_t out_color)
-{
-	vec4_t color = { 1.f, 1.f, 1.f, 1.f };
-	float value;
-
-	if (!out_color)
-		return;
-
-	if (!stage)
-	{
-		Vector4Copy (color, out_color);
-		return;
-	}
-
-	switch (stage->rgbgen)
-	{
-	case MAT_RGBGEN_VERTEX:
-		if (has_vertex_color)
-		{
-			color[0] = vertex_color[0];
-			color[1] = vertex_color[1];
-			color[2] = vertex_color[2];
-		}
-		break;
-	case MAT_RGBGEN_CONST:
-		color[0] = stage->const_color[0];
-		color[1] = stage->const_color[1];
-		color[2] = stage->const_color[2];
-		break;
-	case MAT_RGBGEN_WAVE:
-		value = Mat_Shader_EvalWave (&stage->rgb_wave, time);
-		value = CLAMP (0.f, value, 1.f);
-		color[0] = value;
-		color[1] = value;
-		color[2] = value;
-		break;
-	case MAT_RGBGEN_IDENTITY:
-	default:
-		break;
-	}
-
-	switch (stage->alphagen)
-	{
-	case MAT_ALPHAGEN_VERTEX:
-		if (has_vertex_color)
-			color[3] = vertex_color[3];
-		break;
-	case MAT_ALPHAGEN_CONST:
-		color[3] = stage->const_alpha;
-		break;
-	case MAT_ALPHAGEN_WAVE:
-		value = Mat_Shader_EvalWave (&stage->alpha_wave, time);
-		color[3] = CLAMP (0.f, value, 1.f);
-		break;
-	case MAT_ALPHAGEN_IDENTITY:
-	default:
-		break;
-	}
-
-	Vector4Copy (color, out_color);
 }

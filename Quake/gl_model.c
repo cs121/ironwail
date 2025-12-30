@@ -1335,7 +1335,7 @@ static void Mod_LoadTextures (lump_t *l)
                                         byte *rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_rgba");
 
                                         if (has_fullbright)
-                                                palmode = TEXMGR_PALMODE_NOBRIGHT;
+                                                palmode = is_cutout ? TEXMGR_PALMODE_NOBRIGHT : TEXMGR_PALMODE_ALPHABRIGHT;
 
                                         TexMgr_DecodeIndexedToRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, palmode, rgba);
 
@@ -1343,10 +1343,10 @@ static void Mod_LoadTextures (lump_t *l)
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
                                                 SRC_RGBA, rgba, "", (src_offset_t)rgba, TEXPREF_MIPMAP | TEXPREF_BINDLESS | (is_cutout ? TEXPREF_ALPHA : 0));
 
-                                        if (has_fullbright)
+                                        if (has_fullbright && is_cutout)
                                         {
                                                 byte *fb_rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_fbright");
-                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, fb_rgba);
+                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, 255, fb_rgba);
                                                 q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
                                                 tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
                                                         SRC_RGBA, fb_rgba, "", (src_offset_t)fb_rgba, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
@@ -1407,7 +1407,7 @@ static void Mod_LoadTextures (lump_t *l)
                                         byte *rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_rgba");
 
                                         if (has_fullbright)
-                                                palmode = TEXMGR_PALMODE_NOBRIGHT;
+                                                palmode = is_cutout ? TEXMGR_PALMODE_NOBRIGHT : TEXMGR_PALMODE_ALPHABRIGHT;
 
                                         TexMgr_DecodeIndexedToRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, palmode, rgba);
 
@@ -1415,10 +1415,10 @@ static void Mod_LoadTextures (lump_t *l)
                                         tx->gltexture = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
                                                 SRC_RGBA, rgba, "", (src_offset_t)rgba, TEXPREF_MIPMAP | extraflags | (is_cutout ? TEXPREF_ALPHA : 0));
 
-                                        if (has_fullbright)
+                                        if (has_fullbright && is_cutout)
                                         {
                                                 byte *fb_rgba = (byte *) Hunk_AllocNameNoFill (pixels * 4, "tex_fbright");
-                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, is_cutout ? 255 : -1, fb_rgba);
+                                                TexMgr_BuildFullbrightRGBA ((byte *)(tx + 1), pixels, 255, fb_rgba);
                                                 q_snprintf (texturename, sizeof(texturename), "%s:%s_glow", loadmodel->name, tx->name);
                                                 tx->fullbright = TexMgr_LoadImage (loadmodel, texturename, tx->width, tx->height,
                                                         SRC_RGBA, fb_rgba, "", (src_offset_t)fb_rgba, TEXPREF_MIPMAP | extraflags);

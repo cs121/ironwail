@@ -56,36 +56,9 @@ typedef enum
 
 typedef enum
 {
-	MAT_RGBGEN_IDENTITY = 0,
-	MAT_RGBGEN_VERTEX,
-	MAT_RGBGEN_CONST,
-	MAT_RGBGEN_WAVE
+	MAT_RGBGEN_DEFAULT = 0,
+	MAT_RGBGEN_IDENTITY
 } mat_rgbgen_t;
-
-typedef enum
-{
-	MAT_ALPHAGEN_IDENTITY = 0,
-	MAT_ALPHAGEN_VERTEX,
-	MAT_ALPHAGEN_CONST,
-	MAT_ALPHAGEN_WAVE
-} mat_alphagen_t;
-
-typedef enum
-{
-	MAT_WAVE_SIN = 0,
-	MAT_WAVE_TRIANGLE,
-	MAT_WAVE_SAW,
-	MAT_WAVE_INVERSESAW
-} mat_wave_type_t;
-
-typedef struct mat_wave_s
-{
-	mat_wave_type_t	type;
-	float		base;
-	float		amp;
-	float		phase;
-	float		freq;
-} mat_wave_t;
 
 typedef enum
 {
@@ -173,23 +146,10 @@ typedef enum
 	MAT_SHADERFLAG_GODRAY		= (1u << 12)
 } mat_shader_flags_t;
 
-typedef enum
-{
-	MAT_STAGE_OUTPUT_COLOR		= (1u << 0),
-	MAT_STAGE_OUTPUT_EMISSIVE	= (1u << 1),
-	MAT_STAGE_OUTPUT_BLOOM		= (1u << 2),
-	MAT_STAGE_OUTPUT_GODRAY_SOURCE	= (1u << 3)
-} mat_stage_output_t;
-
 typedef struct mat_shader_stage_s
 {
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
-	mat_alphagen_t	alphagen;
-	float		const_color[3];
-	float		const_alpha;
-	mat_wave_t	rgb_wave;
-	mat_wave_t	alpha_wave;
 	mat_blend_mode_t	blend_mode;
 	int			blend_src;
 	int			blend_dst;
@@ -205,12 +165,6 @@ typedef struct mat_shader_stage_s
 	int			anim_map_time_bucket;
 	int			anim_map_frame;
 	mat_texmatrix_t	texmatrix_cache;
-	unsigned int		output_flags;
-	unsigned int		output_override_flags;
-	unsigned int		scale_override_flags;
-	float			emissive_scale;
-	float			bloom_scale;
-	float			godray_scale;
 } mat_shader_stage_t;
 
 typedef struct shader_material_s
@@ -237,16 +191,12 @@ typedef struct shader_material_s
 // Developer note:
 // Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
 // bloom_scale, godray_scale, and a single stage block with map + rgbGen identity.
-// Stage directives: emissive, bloom, godray, emissiveScale, bloomScale, godrayScale.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
 typedef struct texture_s texture_t;
 
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
-extern cvar_t r_matshader_showstage;
-
-#define MAT_SHADER_MAX_STAGES 8
 
 void Mat_Shader_Init (void);
 void Mat_Shader_Shutdown (void);
@@ -256,7 +206,6 @@ const shader_material_t *Mat_Shader_GetByIndex (size_t index);
 void Mat_Shader_Canonicalize (const char *name, char *out, size_t out_size);
 const shader_material_t *Mat_Shader_Find (const char *name);
 const shader_material_t *Mat_Shader_FindForTextureName (const char *texname, const char *mapname);
-const mat_shader_stage_t *Mat_Shader_SelectStage (const shader_material_t *material);
 const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const char *texname);
 unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material);
 void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname);
@@ -265,10 +214,8 @@ char *Mat_Shader_DupString (const char *value);
 const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time);
 int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time);
 const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
-void MatStage_EvalColor (const mat_shader_stage_t *stage, float time, qboolean has_vertex_color, const vec4_t vertex_color, vec4_t out_color);
 void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_ReportUnknownToken (const char *token, const char *context);
-void Mat_Shader_ReportWarningOnce (const char *warn_key, const char *message);
 
 #endif // MAT_SHADER_H
