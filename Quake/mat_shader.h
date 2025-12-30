@@ -198,6 +198,20 @@ typedef struct texture_s texture_t;
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
 
+typedef enum
+{
+	MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL = 0,
+	MAT_SHADER_KEYWORD_SCOPE_STAGE,
+	MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM
+} mat_shader_keyword_scope_t;
+
+typedef enum
+{
+	MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED = 0,
+	MAT_SHADER_KEYWORD_STATUS_PARTIAL,
+	MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED
+} mat_shader_keyword_status_t;
+
 void Mat_Shader_Init (void);
 void Mat_Shader_Shutdown (void);
 void Mat_Shader_Reload (void);
@@ -216,6 +230,7 @@ int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time);
 const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
 void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
-void Mat_Shader_ReportUnknownToken (const char *token, const char *context);
+void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
+void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file);
 
 #endif // MAT_SHADER_H
