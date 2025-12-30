@@ -289,6 +289,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
+	GLuint64	_pad1;
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -297,7 +298,7 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		_pad0[2];
 	GLfloat		stage_color[4];
 	GLint		baseinstance;
-	GLint		padding;
+	GLint		padding[3];
 } bmodel_bound_gpu_call_t;
 
 typedef struct bmodel_gpu_call_remap_s {
@@ -565,6 +566,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+		call->_pad1 = 0;
 	}
 	else
 	{
@@ -577,7 +579,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
 		call->baseinstance = first_instance;
-		call->padding = 0;
+		call->padding[0] = 0;
+		call->padding[1] = 0;
+		call->padding[2] = 0;
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
 		textures[2] = em ? em : blacktexture;
@@ -622,6 +626,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+		call->_pad1 = 0;
 	}
 	else
 	{
@@ -634,7 +639,9 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
 		call->baseinstance = first_instance;
-		call->padding = 0;
+		call->padding[0] = 0;
+		call->padding[1] = 0;
+		call->padding[2] = 0;
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
 		textures[2] = em ? em : blacktexture;
