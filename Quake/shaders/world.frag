@@ -327,93 +327,97 @@ void main()
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
-#if DITHER
-	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
-	lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
-#endif
-
-	vec4 lm0 = SampleLightmap(lmuv);
-	vec3 static_light;
-	
-	if (in_styles.y < 0.0) // Single style fast path
-	{
-		static_light = in_styles.x * lm0.xyz;
-	}
-	else
-	{
-		vec4 lm1 = SampleLightmap(vec2(lmuv.x + in_lmofs, lmuv.y));
-		if (in_styles.z < 0.0) // 2 styles
-		{
-			static_light = in_styles.x * lm0.xyz + in_styles.y * lm1.xyz;
-		}
-		else // 3 or 4 lightstyles
-		{
-			vec4 lm2 = SampleLightmap(vec2(lmuv.x + in_lmofs * 2.0, lmuv.y));
-			static_light = vec3(
-				dot(in_styles, lm0),
-				dot(in_styles, lm1),
-				dot(in_styles, lm2)
-			);
-		}
-	}
-
-    vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
-
-    if (LightgridParams.y > 0.5)
-    {
-        OUT_COLOR = vec4(lightgrid, 1.0);
-#if !OIT
-        out_velocity = vec4(0.0);
-#endif
-        return;
-    }
-
-    static_light *= lightgrid;
-
-    if (dlight_debug)
-    {
-        static_light = vec3(0.0);
-        fullbright = vec3(0.0);
-        emissive = vec3(0.0);
-    }
-
-	// Directional lightmap
-	if (LightmapParams.z > 0.5)
-	{
-		vec3 dir = SampleLightmapDir(lmuv);
-		float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
-		static_light *= ndl;
-	}
-
-	if (LightmapParams.x > 0.5)
-	{
-		OUT_COLOR = vec4(clamp(static_light, 0.0, 1.0), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-
-	// Surface normal computation
-	vec3 surface_normal = in_normal;
-	float surface_normal_len = length(surface_normal);
-	
-	if (surface_normal_len > 0.0)
-	{
-		surface_normal /= surface_normal_len;
-	}
-	else
-	{
-		vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-		float geom_len = length(surface_normal_vec);
-		surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
-	}
-	
-	if (!gl_FrontFacing)
-		surface_normal = -surface_normal;
-
-	vec3 total_light = clamp(static_light, 0.0, 1.0);
+	vec3 total_lightmap = vec3(1.0);
 	vec3 specular_light = vec3(0.0);
+
+	if ((in_flags & CF_NOLIGHTMAP) == 0u)
+	{
+#if DITHER
+		vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
+		lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
+#endif
+
+		vec4 lm0 = SampleLightmap(lmuv);
+		vec3 static_light;
+
+		if (in_styles.y < 0.0) // Single style fast path
+		{
+			static_light = in_styles.x * lm0.xyz;
+		}
+		else
+		{
+			vec4 lm1 = SampleLightmap(vec2(lmuv.x + in_lmofs, lmuv.y));
+			if (in_styles.z < 0.0) // 2 styles
+			{
+				static_light = in_styles.x * lm0.xyz + in_styles.y * lm1.xyz;
+			}
+			else // 3 or 4 lightstyles
+			{
+				vec4 lm2 = SampleLightmap(vec2(lmuv.x + in_lmofs * 2.0, lmuv.y));
+				static_light = vec3(
+					dot(in_styles, lm0),
+					dot(in_styles, lm1),
+					dot(in_styles, lm2)
+				);
+			}
+		}
+
+		vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
+
+		if (LightgridParams.y > 0.5)
+		{
+			OUT_COLOR = vec4(lightgrid, 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+
+		static_light *= lightgrid;
+
+		if (dlight_debug)
+		{
+			static_light = vec3(0.0);
+			fullbright = vec3(0.0);
+			emissive = vec3(0.0);
+		}
+
+		// Directional lightmap
+		if (LightmapParams.z > 0.5)
+		{
+			vec3 dir = SampleLightmapDir(lmuv);
+			float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
+			static_light *= ndl;
+		}
+
+		if (LightmapParams.x > 0.5)
+		{
+			OUT_COLOR = vec4(clamp(static_light, 0.0, 1.0), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+
+		// Surface normal computation
+		vec3 surface_normal = in_normal;
+		float surface_normal_len = length(surface_normal);
+
+		if (surface_normal_len > 0.0)
+		{
+			surface_normal /= surface_normal_len;
+		}
+		else
+		{
+			vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+			float geom_len = length(surface_normal_vec);
+			surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
+		}
+
+		if (!gl_FrontFacing)
+			surface_normal = -surface_normal;
+
+		vec3 total_light = clamp(static_light, 0.0, 1.0);
 	
 	// View direction
 	vec3 to_eye = EyePos - in_pos;
@@ -498,13 +502,14 @@ void main()
         vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
-	// Apply lighting
+		// Apply lighting
 #if DITHER >= 2
-	vec3 clamped_light = clamp(total_light, 0.0, 1.0);
-	vec3 total_lightmap = clamp(floor(clamped_light * 63.0 + 0.5) * (Overbright / 63.0), 0.0, Overbright);
+		vec3 clamped_light = clamp(total_light, 0.0, 1.0);
+		total_lightmap = clamp(floor(clamped_light * 63.0 + 0.5) * (Overbright / 63.0), 0.0, Overbright);
 #else
-	vec3 total_lightmap = clamp(total_light * Overbright, 0.0, Overbright);
+		total_lightmap = clamp(total_light * Overbright, 0.0, Overbright);
 #endif
+	}
 
 #if MODE != 1
 	result.rgb = mix(result.rgb, result.rgb * total_lightmap, result.a);
