@@ -44,6 +44,41 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "stone", MAT_SURFPARM_STONE, 0u, 0u }
 };
 
+typedef struct
+{
+	unsigned int token_count;
+	qboolean token_limit_hit;
+	const char *material_name;
+} mat_shader_parse_state_t;
+
+static void Mat_Shader_WarnMaterial (const mat_shader_parse_state_t *state, const char *message)
+{
+	if (state && state->material_name)
+		Con_Warning ("Material '%s': %s\n", state->material_name, message);
+	else
+		Con_Warning ("%s\n", message);
+}
+
+static const char *Mat_Shader_ParseToken (const char *data, mat_shader_parse_state_t *state)
+{
+	const char *cursor = COM_Parse (data);
+
+	if (!cursor)
+		return NULL;
+
+	if (state && !state->token_limit_hit)
+	{
+		state->token_count++;
+		if (state->token_count > MAT_SHADER_MAX_TOKENS)
+		{
+			state->token_limit_hit = true;
+			Mat_Shader_WarnMaterial (state, "token limit exceeded; skipping remaining tokens");
+		}
+	}
+
+	return cursor;
+}
+
 static qboolean Mat_Shader_ParseBool (const char *token, qboolean default_value)
 {
 	if (!token || !token[0])
@@ -83,15 +118,18 @@ static qboolean Mat_Shader_IsBoolToken (const char *token)
 	return Mat_Shader_IsNumericToken (token);
 }
 
-static qboolean ParseOptionalBool (const char **data, qboolean *out)
+static qboolean ParseOptionalBool (const char **data, qboolean *out, mat_shader_parse_state_t *state)
 {
 	const char *cursor;
 
 	if (!data || !*data || !out)
 		return false;
 
-	cursor = COM_Parse (*data);
+	cursor = Mat_Shader_ParseToken (*data, state);
 	if (!cursor || !com_token[0])
+		return false;
+
+	if (state && state->token_limit_hit)
 		return false;
 
 	if (!Mat_Shader_IsBoolToken (com_token))
@@ -102,14 +140,14 @@ static qboolean ParseOptionalBool (const char **data, qboolean *out)
 	return true;
 }
 
-static qboolean ParseIdent (const char **data, const char **out)
+static qboolean ParseIdent (const char **data, const char **out, mat_shader_parse_state_t *state)
 {
 	const char *cursor;
 
 	if (!data || !*data)
 		return false;
 
-	cursor = COM_Parse (*data);
+	cursor = Mat_Shader_ParseToken (*data, state);
 	if (!cursor)
 		return false;
 
@@ -117,39 +155,42 @@ static qboolean ParseIdent (const char **data, const char **out)
 	if (!com_token[0])
 		return false;
 
+	if (state && state->token_limit_hit)
+		return false;
+
 	*out = com_token;
 	return true;
 }
 
-static qboolean ParseFloat (const char **data, float *out)
+static qboolean ParseFloat (const char **data, float *out, mat_shader_parse_state_t *state)
 {
 	const char *token;
 
-	if (!ParseIdent (data, &token))
+	if (!ParseIdent (data, &token, state))
 		return false;
 
 	*out = Q_atof (token);
 	return true;
 }
 
-static qboolean ParseVec2 (const char **data, vec2_t out)
+static qboolean ParseVec2 (const char **data, vec2_t out, mat_shader_parse_state_t *state)
 {
-	if (!ParseFloat (data, &out[0]))
+	if (!ParseFloat (data, &out[0], state))
 		return false;
-	if (!ParseFloat (data, &out[1]))
+	if (!ParseFloat (data, &out[1], state))
 		return false;
 	return true;
 }
 
-static qboolean ParseVec4 (const char **data, vec4_t out)
+static qboolean ParseVec4 (const char **data, vec4_t out, mat_shader_parse_state_t *state)
 {
-	if (!ParseFloat (data, &out[0]))
+	if (!ParseFloat (data, &out[0], state))
 		return false;
-	if (!ParseFloat (data, &out[1]))
+	if (!ParseFloat (data, &out[1], state))
 		return false;
-	if (!ParseFloat (data, &out[2]))
+	if (!ParseFloat (data, &out[2], state))
 		return false;
-	if (!ParseFloat (data, &out[3]))
+	if (!ParseFloat (data, &out[3], state))
 		return false;
 	return true;
 }
@@ -192,18 +233,20 @@ static void Mat_Shader_PushTcMod (mat_shader_stage_t *stage, mat_tcmod_type_t ty
 	stage->tcmods[stage->tcmod_count++] = mod;
 }
 
-static qboolean ExpectToken (const char **data, const char *token)
+static qboolean ExpectToken (const char **data, const char *token, mat_shader_parse_state_t *state)
 {
 	const char *cursor;
 
 	if (!data || !*data)
 		return false;
 
-	cursor = COM_Parse (*data);
+	cursor = Mat_Shader_ParseToken (*data, state);
 	if (!cursor)
 		return false;
 
 	*data = cursor;
+	if (state && state->token_limit_hit)
+		return false;
 	return !strcmp (com_token, token);
 }
 
@@ -359,7 +402,7 @@ static void Mat_Shader_ApplySurfaceParm (shader_material_t *material, const char
 	Mat_Shader_ReportUnknownToken (token, material->name);
 }
 
-static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_open)
+static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_open, mat_shader_parse_state_t *state)
 {
 	int depth = 1;
 	const char *cursor = data;
@@ -369,7 +412,7 @@ static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_op
 
 	if (!already_open)
 	{
-		cursor = COM_Parse (cursor);
+		cursor = Mat_Shader_ParseToken (cursor, state);
 		if (!cursor)
 			return NULL;
 		if (!com_token[0])
@@ -384,12 +427,19 @@ static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_op
 		}
 	}
 
-	while ((cursor = COM_Parse (cursor)) != NULL)
+	while ((cursor = Mat_Shader_ParseToken (cursor, state)) != NULL)
 	{
 		if (!com_token[0])
 			continue;
 		if (!strcmp (com_token, "{"))
+		{
 			depth++;
+			if (depth > MAT_SHADER_MAX_BRACE_DEPTH)
+			{
+				Mat_Shader_WarnMaterial (state, "brace depth limit exceeded while skipping unknown block");
+				return NULL;
+			}
+		}
 		else if (!strcmp (com_token, "}"))
 		{
 			depth--;
@@ -400,7 +450,7 @@ static const char *SkipUnknownBlockOrLine (const char *data, qboolean already_op
 	return cursor;
 }
 
-static const char *ParseStageBlock (const char *data, shader_material_t *material, size_t stage_index)
+static const char *ParseStageBlock (const char *data, shader_material_t *material, size_t stage_index, mat_shader_parse_state_t *state)
 {
 	mat_shader_stage_t stage;
 
@@ -418,17 +468,22 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	stage.texmatrix_time_bucket = -1;
 	stage.anim_map_time_bucket = -1;
 
-	while ((data = COM_Parse (data)) != NULL)
+	while ((data = Mat_Shader_ParseToken (data, state)) != NULL)
 	{
 		const char *value;
 
 		if (!com_token[0])
 			continue;
+		if (state && state->token_limit_hit)
+		{
+			data = SkipUnknownBlockOrLine (data, true, NULL);
+			return data;
+		}
 		if (!strcmp (com_token, "}"))
 			break;
 		if (!q_strcasecmp (com_token, "map"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (!q_strcasecmp (value, "$lightmap"))
 			{
@@ -451,7 +506,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "clampmap"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			stage.map_type = MAT_MAP_CLAMPMAP;
 			stage.map_path = Mat_Shader_DupString (value);
@@ -459,7 +514,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "rgbGen"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (!q_strcasecmp (value, "identity"))
 				stage.rgbgen = MAT_RGBGEN_IDENTITY;
@@ -470,7 +525,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			int src;
 			int dst;
 
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 
 			if (Mat_Shader_ParseBlendMode (value, &stage.blend_mode))
@@ -503,7 +558,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 
 			if (Mat_Shader_ParseBlendFactor (value, &src))
 			{
-				if (!ParseIdent (&data, &value))
+				if (!ParseIdent (&data, &value, state))
 					break;
 				if (!Mat_Shader_ParseBlendFactor (value, &dst))
 				{
@@ -524,13 +579,13 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			qboolean parsed = false;
 			qboolean value_bool = true;
 
-			parsed = ParseOptionalBool (&data, &value_bool);
+			parsed = ParseOptionalBool (&data, &value_bool, state);
 			stage.depth_write = parsed ? value_bool : true;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "depthFunc"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (Mat_Shader_ParseDepthFunc (value, &stage.depth_func))
 				continue;
@@ -539,7 +594,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "tcGen"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
 				Mat_Shader_ReportUnknownToken (value, material->name);
@@ -547,12 +602,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 		if (!q_strcasecmp (com_token, "tcMod"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (!q_strcasecmp (value, "scroll"))
 			{
 				vec2_t scroll = { 0.f, 0.f };
-				if (!ParseVec2 (&data, scroll))
+				if (!ParseVec2 (&data, scroll, state))
 					break;
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCROLL, scroll, 2);
 				continue;
@@ -560,7 +615,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (!q_strcasecmp (value, "scale"))
 			{
 				vec2_t scale = { 1.f, 1.f };
-				if (!ParseVec2 (&data, scale))
+				if (!ParseVec2 (&data, scale, state))
 					break;
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_SCALE, scale, 2);
 				continue;
@@ -568,7 +623,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (!q_strcasecmp (value, "rotate"))
 			{
 				float deg_per_sec = 0.f;
-				if (!ParseFloat (&data, &deg_per_sec))
+				if (!ParseFloat (&data, &deg_per_sec, state))
 					break;
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_ROTATE, &deg_per_sec, 1);
 				continue;
@@ -576,7 +631,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (!q_strcasecmp (value, "turb"))
 			{
 				vec4_t turb = { 0.f, 0.f, 0.f, 0.f };
-				if (!ParseVec4 (&data, turb))
+				if (!ParseVec4 (&data, turb, state))
 					break;
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4);
 				continue;
@@ -584,7 +639,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			if (!q_strcasecmp (value, "stretch"))
 			{
 				vec4_t stretch = { 0.f, 0.f, 0.f, 0.f };
-				if (!ParseVec4 (&data, stretch))
+				if (!ParseVec4 (&data, stretch, state))
 					break;
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
 				continue;
@@ -596,20 +651,34 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		{
 			float fps = 0.f;
 			int frames = 0;
+			qboolean limit_hit = false;
 			const char *cursor = data;
 
-			if (!ParseFloat (&cursor, &fps))
+			if (!ParseFloat (&cursor, &fps, state))
 				break;
 
 			while (1)
 			{
-				const char *next = COM_Parse (cursor);
+				const char *next = Mat_Shader_ParseToken (cursor, state);
 				if (!next || !com_token[0])
 					break;
+				if (state && state->token_limit_hit)
+				{
+					data = SkipUnknownBlockOrLine (next, true, NULL);
+					return data;
+				}
 				if (!strcmp (com_token, "{") || !strcmp (com_token, "}"))
 					break;
-				VEC_PUSH (stage.anim_map_frames, Mat_Shader_DupString (com_token));
-				frames++;
+				if (frames < MAT_SHADER_MAX_ANIM_FRAMES)
+				{
+					VEC_PUSH (stage.anim_map_frames, Mat_Shader_DupString (com_token));
+					frames++;
+				}
+				else if (!limit_hit)
+				{
+					Mat_Shader_WarnMaterial (state, "animMap frame limit exceeded; ignoring remaining frames");
+					limit_hit = true;
+				}
 				cursor = next;
 			}
 
@@ -622,10 +691,13 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 		}
 
 		Mat_Shader_ReportUnknownToken (com_token, material->name);
-		data = SkipUnknownBlockOrLine (data, false);
+		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 			break;
 	}
+
+	if (state && state->token_limit_hit)
+		return data;
 
 	if (stage.blend_mode != MAT_BLEND_REPLACE || !stage.depth_write || stage.depth_func != MAT_DEPTHFUNC_LEQUAL)
 		material->render_flags |= MAT_RENDER_TRANS;
@@ -640,11 +712,11 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	return data;
 }
 
-static const char *ParseMaterialBlock (const char *data, const char *name, const char *source_file)
+static const char *ParseMaterialBlock (const char *data, const char *name, const char *source_file, mat_shader_parse_state_t *state)
 {
 	shader_material_t material;
 	const shader_material_t *existing;
-	int stage_index = 0;
+	size_t stage_index = 0;
 	char canonical[MAX_QPATH];
 
 	memset (&material, 0, sizeof (material));
@@ -658,37 +730,48 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
 
-	while ((data = COM_Parse (data)) != NULL)
+	while ((data = Mat_Shader_ParseToken (data, state)) != NULL)
 	{
 		const char *value;
 		float scale;
 
 		if (!com_token[0])
 			continue;
+		if (state && state->token_limit_hit)
+		{
+			data = SkipUnknownBlockOrLine (data, true, NULL);
+			break;
+		}
 		if (!strcmp (com_token, "}"))
 			break;
 		if (!strcmp (com_token, "{"))
 		{
-			data = ParseStageBlock (data, &material, (size_t)stage_index++);
+			if (stage_index >= MAT_SHADER_MAX_STAGES)
+			{
+				Mat_Shader_WarnMaterial (state, "stage limit exceeded; skipping remaining stages");
+				data = SkipUnknownBlockOrLine (data, true, NULL);
+				break;
+			}
+			data = ParseStageBlock (data, &material, stage_index++, state);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "qer_editorimage"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			material.editor_image = Mat_Shader_DupString (value);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "surfaceparm"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			Mat_Shader_ApplySurfaceParm (&material, value);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "cull"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (Mat_Shader_ParseCullMode (value, &material.cull_mode))
 				continue;
@@ -697,7 +780,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		}
 		if (!q_strcasecmp (com_token, "sort"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			if (Mat_Shader_ParseSortKey (value, &material.sort_key))
 			{
@@ -713,54 +796,54 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			qboolean parsed = false;
 			qboolean value_bool = true;
 
-			parsed = ParseOptionalBool (&data, &value_bool);
+			parsed = ParseOptionalBool (&data, &value_bool, state);
 			material.polygon_offset = parsed ? value_bool : true;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "emissive"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			material.emissive_enable = Mat_Shader_ParseBool (value, false);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "bloom"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			material.bloom_enable = Mat_Shader_ParseBool (value, false);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "godray"))
 		{
-			if (!ParseIdent (&data, &value))
+			if (!ParseIdent (&data, &value, state))
 				break;
 			material.godray_enable = Mat_Shader_ParseBool (value, false);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
-			if (!ParseFloat (&data, &scale))
+			if (!ParseFloat (&data, &scale, state))
 				break;
 			material.emissive_scale = scale;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "bloom_scale"))
 		{
-			if (!ParseFloat (&data, &scale))
+			if (!ParseFloat (&data, &scale, state))
 				break;
 			material.bloom_scale = scale;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "godray_scale"))
 		{
-			if (!ParseFloat (&data, &scale))
+			if (!ParseFloat (&data, &scale, state))
 				break;
 			material.godray_scale = scale;
 			continue;
 		}
 		Mat_Shader_ReportUnknownToken (com_token, material.name);
-		data = SkipUnknownBlockOrLine (data, false);
+		data = SkipUnknownBlockOrLine (data, false, state);
 		if (!data)
 			break;
 	}
@@ -777,6 +860,7 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 {
 	int parsed = 0;
 	const char *cursor = data;
+	mat_shader_parse_state_t state;
 
 	(void) path;
 
@@ -789,15 +873,18 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 			continue;
 		if (!strcmp (com_token, "{"))
 		{
-			cursor = SkipUnknownBlockOrLine (cursor, true);
+			cursor = SkipUnknownBlockOrLine (cursor, true, NULL);
 			continue;
 		}
 		{
 			char name[MAX_QPATH];
+
 			q_strlcpy (name, com_token, sizeof (name));
-			if (!ExpectToken (&cursor, "{"))
+			if (!ExpectToken (&cursor, "{", NULL))
 				continue;
-			cursor = ParseMaterialBlock (cursor, name, source_file);
+			memset (&state, 0, sizeof (state));
+			state.material_name = name;
+			cursor = ParseMaterialBlock (cursor, name, source_file, &state);
 			parsed++;
 		}
 	}
