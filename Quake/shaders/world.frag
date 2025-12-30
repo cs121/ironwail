@@ -329,11 +329,13 @@ void main()
 	vec2 lmuv = in_lmuv;
 	vec3 total_lightmap = vec3(1.0);
 	vec3 specular_light = vec3(0.0);
+#if DITHER
+	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
+#endif
 
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
 #if DITHER
-		vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
 		lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
 #endif
 
