@@ -621,14 +621,8 @@ void V_PolyBlend (void)
 		if (!cshift_empty.percent || maxcolor > 0)
 			return;
 	}
-	else
-	{
-		// If we're already rendering to an intermediate FBO (for warp/scale/MSAA)
-		// then we can apply the color blending when blitting the intermediate texture
-		// (to save the memory bandwidth an extra full-screen alpha blend would consume)
-		if (GL_NeedsSceneEffects ())
-			return;
-	}
+	// Blend happens as a late overlay to keep postprocess (e.g. SSAO/tonemap) from
+	// affecting UI-style color shifts like pickups or damage flashes.
 
 	GL_UseProgram (glprogs.viewblend);
 	GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
@@ -1092,8 +1086,6 @@ void V_RenderView (void)
 	//johnfitz -- removed lcd code
 
 	R_RenderView ();
-
-	V_PolyBlend (); //johnfitz -- moved here from R_Renderview ();
 }
 
 /*
