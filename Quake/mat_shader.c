@@ -115,6 +115,7 @@ cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
 cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
+static cvar_t r_matshader_fuzz = { "r_matshader_fuzz", "0", CVAR_NONE };
 static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };
 
 char *Mat_Shader_DupString (const char *value)
@@ -977,6 +978,14 @@ static void Mat_Shader_Reload_f (cvar_t *var)
 	Mat_Shader_LoadAll ();
 }
 
+static void Mat_Shader_Fuzz_f (cvar_t *var)
+{
+	if (var->value <= 0.f)
+		return;
+	Mat_Shader_DebugFuzzParse ();
+	var->value = 0.f;
+}
+
 static void Mat_Shader_List_f (void)
 {
 	size_t count = Mat_Shader_Count ();
@@ -1014,17 +1023,25 @@ static void Mat_Shader_Print_f (void)
 	Mat_Shader_Print (material);
 }
 
+static void Mat_Shader_FuzzCommand_f (void)
+{
+	Mat_Shader_DebugFuzzParse ();
+}
+
 void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
 	Cvar_RegisterVariable (&r_matshader_debug_parse);
 	Cvar_RegisterVariable (&r_reloadshaders);
+	Cvar_RegisterVariable (&r_matshader_fuzz);
 	Cvar_RegisterVariable (&r_matshader_report);
 	Cvar_SetCallback (&r_reloadshaders, Mat_Shader_Reload_f);
+	Cvar_SetCallback (&r_matshader_fuzz, Mat_Shader_Fuzz_f);
 
 	Cmd_AddCommand ("shaderlist", Mat_Shader_List_f);
 	Cmd_AddCommand ("shaderprint", Mat_Shader_Print_f);
+	Cmd_AddCommand ("shaderfuzz", Mat_Shader_FuzzCommand_f);
 }
 
 void Mat_Shader_Shutdown (void)
