@@ -113,6 +113,7 @@ static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
+cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };
 
@@ -241,6 +242,7 @@ static void Mat_Shader_WarnOnce (const char *warn_key, const char *token, const 
 		return;
 
 	Mat_Shader_AddWarned (warn_key);
+	Mat_Shader_ParseAddWarning ();
 	Con_Warning ("MatShader: unknown token '%s' in %s\n", token, context ? context : "shader");
 }
 
@@ -410,6 +412,16 @@ static int Mat_Shader_CompareUnknowns (const void *a, const void *b)
 	return q_strcasecmp ((*left)->token, (*right)->token);
 }
 
+static int Mat_Shader_CompareUnknownCountDesc (const void *a, const void *b)
+{
+	const mat_shader_unknown_t *const *left = (const mat_shader_unknown_t *const *) a;
+	const mat_shader_unknown_t *const *right = (const mat_shader_unknown_t *const *) b;
+
+	if ((*left)->count != (*right)->count)
+		return (*left)->count > (*right)->count ? -1 : 1;
+	return q_strcasecmp ((*left)->token, (*right)->token);
+}
+
 static void Mat_Shader_ReportKeywords (char **buffer, size_t *len, size_t *cap, const mat_shader_keyword_row_t *rows, size_t row_count, mat_shader_keyword_status_t status)
 {
 	size_t i;
@@ -545,6 +557,111 @@ static qboolean Mat_Shader_ShouldWriteReport (void)
 #endif
 }
 
+static const char *Mat_Shader_MapTypeName (mat_map_type_t map_type)
+{
+	switch (map_type)
+	{
+	case MAT_MAP_CLAMPMAP:
+		return "clampmap";
+	case MAT_MAP_LIGHTMAP:
+		return "lightmap";
+	case MAT_MAP_WHITE:
+		return "white";
+	case MAT_MAP_BLACK:
+		return "black";
+	case MAT_MAP_MAP:
+	default:
+		return "map";
+	}
+}
+
+static void Mat_Shader_LogUnknownSummary (void)
+{
+	mat_shader_unknown_t **unknown_rows = NULL;
+	size_t unknown_count = VEC_SIZE (mat_shader_unknowns);
+	size_t i;
+	size_t limit = 10;
+
+	if (!unknown_count)
+		return;
+
+	unknown_rows = (mat_shader_unknown_t **) malloc (unknown_count * sizeof (*unknown_rows));
+	if (!unknown_rows)
+		return;
+
+	for (i = 0; i < unknown_count; ++i)
+		unknown_rows[i] = &mat_shader_unknowns[i];
+
+	qsort (unknown_rows, unknown_count, sizeof (*unknown_rows), Mat_Shader_CompareUnknownCountDesc);
+
+	Con_Printf ("MatShader: Top %zu unknown keywords\n", q_min (limit, unknown_count));
+	for (i = 0; i < unknown_count && i < limit; ++i)
+	{
+		const mat_shader_unknown_t *entry = unknown_rows[i];
+		Con_Printf ("  %s (%s) x%u\n", entry->token, Mat_Shader_ScopeName (entry->scope), entry->count);
+	}
+
+	free (unknown_rows);
+}
+
+static void Mat_Shader_LogSummary (size_t parsed_total)
+{
+	size_t warning_count = Mat_Shader_ParseGetWarnings ();
+	size_t error_count = Mat_Shader_ParseGetErrors ();
+	size_t unknown_count = VEC_SIZE (mat_shader_unknowns);
+
+	Con_Printf ("MatShader: parsed %zu shaders (%zu errors, %zu warnings, %zu unknown unique)\n",
+		parsed_total, error_count, warning_count, unknown_count);
+	if (mat_shader_unknown_overflow)
+		Con_Printf ("MatShader: unknown token limit reached; additional tokens omitted\n");
+	Mat_Shader_LogUnknownSummary ();
+}
+
+static void Mat_Shader_DebugDumpShaders (void)
+{
+	size_t count = VEC_SIZE (mat_shader_list);
+	size_t i;
+
+	Con_Printf ("MatShader: Debug dump (%zu shaders)\n", count);
+	for (i = 0; i < count; ++i)
+	{
+		const shader_material_t *material = mat_shader_list[i];
+		size_t stage_count = VEC_SIZE (material->stages);
+
+		Con_Printf ("MatShader: %s\n", material->name);
+		Con_Printf ("  flags: surface=0x%08x render=0x%08x content=0x%08x\n",
+			material->surfaceparms, material->render_flags, material->content_flags);
+
+		if (stage_count == 0 && (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP))
+			stage_count = 1;
+		Con_Printf ("  stages: %zu\n", stage_count);
+
+		for (size_t stage_index = 0; stage_index < stage_count; ++stage_index)
+		{
+			const mat_shader_stage_t *stage = material->stages ? &material->stages[stage_index] : &material->stage0;
+			const char *map_name = stage->map_path && stage->map_path[0] ? stage->map_path : Mat_Shader_MapTypeName (stage->map_type);
+
+			Con_Printf ("    stage %zu: %s\n", stage_index, map_name);
+		}
+	}
+}
+
+static void Mat_Shader_DebugDumpUnknowns (void)
+{
+	size_t unknown_count = VEC_SIZE (mat_shader_unknowns);
+	size_t i;
+
+	Con_Printf ("MatShader: Unknown keywords (%zu)\n", unknown_count);
+	for (i = 0; i < unknown_count; ++i)
+	{
+		const mat_shader_unknown_t *entry = &mat_shader_unknowns[i];
+		char location[MAX_QPATH * 2];
+
+		Mat_Shader_FormatSourceLine (location, sizeof (location), entry->first_source, entry->first_line);
+		Con_Printf ("  %s (%s) at %s\n", entry->token, Mat_Shader_ScopeName (entry->scope), location);
+	}
+}
+
 static void Mat_MatrixIdentity (mat_texmatrix_t *out)
 {
 	if (!out)
@@ -678,13 +795,13 @@ static const shader_material_t *Mat_Shader_FindInternal (const char *name)
 	return NULL;
 }
 
-static qboolean Mat_Shader_ReadFile (const char *path, const byte *data, size_t size, const char *label)
+static int Mat_Shader_ReadFile (const char *path, const byte *data, size_t size, const char *label)
 {
 	char *buffer;
 	int parsed;
 
 	if (!data || size == 0)
-		return false;
+		return 0;
 
 	buffer = (char *) Z_Malloc (size + 1);
 	memcpy (buffer, data, size);
@@ -692,17 +809,17 @@ static qboolean Mat_Shader_ReadFile (const char *path, const byte *data, size_t 
 	parsed = Mat_Shader_ParseFile (path, buffer, label);
 	Z_Free (buffer);
 
-	return parsed > 0;
+	return parsed;
 }
 
-static qboolean Mat_Shader_LoadFromDirectory (const searchpath_t *search)
+static size_t Mat_Shader_LoadFromDirectory (const searchpath_t *search)
 {
 	char script_dir[MAX_OSPATH];
 	findfile_t *find;
-	qboolean loaded_any = false;
+	size_t parsed_total = 0;
 
 	if ((size_t) q_snprintf (script_dir, sizeof (script_dir), "%s/scripts", search->filename) >= sizeof (script_dir))
-		return false;
+		return 0;
 
 	for (find = Sys_FindFirst (script_dir, "shader"); find; find = Sys_FindNext (find))
 	{
@@ -743,19 +860,18 @@ static qboolean Mat_Shader_LoadFromDirectory (const searchpath_t *search)
 		Sys_FileClose (handle);
 		buffer[size] = '\0';
 
-		if (Mat_Shader_ReadFile (relpath, buffer, (size_t) size, relpath))
-			loaded_any = true;
+		parsed_total += (size_t)Mat_Shader_ReadFile (relpath, buffer, (size_t) size, relpath);
 
 		free (buffer);
 	}
 
-	return loaded_any;
+	return parsed_total;
 }
 
-static qboolean Mat_Shader_LoadFromPack (const searchpath_t *search)
+static size_t Mat_Shader_LoadFromPack (const searchpath_t *search)
 {
 	int i;
-	qboolean loaded_any = false;
+	size_t parsed_total = 0;
 	pack_t *pak = search->pack;
 
 	for (i = 0; i < pak->numfiles; ++i)
@@ -794,8 +910,7 @@ static qboolean Mat_Shader_LoadFromPack (const searchpath_t *search)
 		if (buffer)
 		{
 			buffer[size] = '\0';
-			if (Mat_Shader_ReadFile (name, buffer, size, name))
-				loaded_any = true;
+			parsed_total += (size_t)Mat_Shader_ReadFile (name, buffer, size, name);
 
 			if (pak->is_pk3)
 				MZ_FREE (buffer);
@@ -804,7 +919,7 @@ static qboolean Mat_Shader_LoadFromPack (const searchpath_t *search)
 		}
 	}
 
-	return loaded_any;
+	return parsed_total;
 }
 
 static void Mat_Shader_LoadAll (void)
@@ -813,11 +928,13 @@ static void Mat_Shader_LoadAll (void)
 	searchpath_t **paths = NULL;
 	size_t count = 0;
 	size_t i;
+	size_t parsed_total = 0;
 
 	if (mat_shader_loaded && r_reloadshaders.value <= 0.f)
 		return;
 
 	Mat_Shader_Reset ();
+	Mat_Shader_ParseResetStats ();
 	mat_shader_loaded = true;
 
 	if (r_shaders.value <= 0.f)
@@ -833,15 +950,22 @@ static void Mat_Shader_LoadAll (void)
 	{
 		search = paths[i - 1];
 		if (*search->filename)
-			Mat_Shader_LoadFromDirectory (search);
+			parsed_total += Mat_Shader_LoadFromDirectory (search);
 		else if (search->pack)
-			Mat_Shader_LoadFromPack (search);
+			parsed_total += Mat_Shader_LoadFromPack (search);
 	}
 
 	VEC_FREE (paths);
 
 	if (Mat_Shader_ShouldWriteReport ())
 		Mat_Shader_WriteReport ();
+
+	Mat_Shader_LogSummary (parsed_total);
+	if (r_matshader_debug_parse.value > 0.f)
+	{
+		Mat_Shader_DebugDumpShaders ();
+		Mat_Shader_DebugDumpUnknowns ();
+	}
 }
 
 static void Mat_Shader_Reload_f (cvar_t *var)
@@ -894,6 +1018,7 @@ void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
+	Cvar_RegisterVariable (&r_matshader_debug_parse);
 	Cvar_RegisterVariable (&r_reloadshaders);
 	Cvar_RegisterVariable (&r_matshader_report);
 	Cvar_SetCallback (&r_reloadshaders, Mat_Shader_Reload_f);

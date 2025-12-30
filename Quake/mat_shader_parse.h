@@ -29,5 +29,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MAT_SHADER_MAX_BRACE_DEPTH 64
 
 int Mat_Shader_ParseFile (const char *path, const char *data, const char *source_file);
+void Mat_Shader_ParseResetStats (void);
+void Mat_Shader_ParseAddWarning (void);
+void Mat_Shader_ParseAddError (void);
+size_t Mat_Shader_ParseGetWarnings (void);
+size_t Mat_Shader_ParseGetErrors (void);
 
 #endif // MAT_SHADER_PARSE_H
