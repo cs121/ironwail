@@ -141,8 +141,8 @@ layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: spe
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
-layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: unused
-layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
+layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
+layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
 layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: unused, z: output sRGB conversion, w: reserved
 layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
@@ -218,6 +218,13 @@ float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
                 float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
                 return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
         }
+}
+
+float FogTransmittanceFromDepth(float depth, float fogStrength)
+{
+        float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
+        fogFactor = clamp(fogFactor * fogStrength, 0.0, 1.0);
+        return 1.0 - fogFactor;
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -583,10 +590,27 @@ void main()
                                         ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                                 bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
                                 float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
+                                float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
+                                float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
+                                float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
+                                float fogTransmittance = 1.0;
+                                if (ssaoUseDepth && fogStrength > 0.0)
+                                        fogTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
+                                float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
+                                float aoFogged = mix(1.0, ao, aoFogMask);
+                                float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
                                 if (ssaoDebugMode == 9)
                                 {
                                         float mask = centerOpaque ? (1.0 - ao) : 0.0;
                                         color.rgb = vec3(mask);
+                                }
+                                else if (ssaoDebugMode == 10)
+                                {
+                                        color.rgb = vec3(fogTransmittance);
+                                }
+                                else if (ssaoDebugMode == 11)
+                                {
+                                        color.rgb = vec3(aoDamped);
                                 }
                                 else if (ssaoDebugMode == 8)
                                 {
@@ -641,7 +665,7 @@ void main()
                                 }
                                 else if (centerOpaque)
                                 {
-                                        color.rgb *= mix(1.0, ao, ssaoIntensity);
+                                        color.rgb *= mix(1.0, aoDamped, ssaoIntensity);
                                 }
                         }
                 }
