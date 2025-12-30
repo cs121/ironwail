@@ -48,6 +48,7 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
+	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -141,6 +142,7 @@ layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
+layout(location=15) flat out vec4 out_stage_color;
 
 void main()
 {
@@ -193,6 +195,7 @@ void main()
 	if ((call.flags & CF_NOLIGHTMAP) != 0u)
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
+	out_stage_color = call.stage_color;
 #if BINDLESS
 	out_samplers0.xy = call.txhandle;
 	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)

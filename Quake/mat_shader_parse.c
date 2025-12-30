@@ -396,6 +396,33 @@ static qboolean ParseVec4 (const char **data, vec4_t out, mat_shader_parse_state
 	return true;
 }
 
+static qboolean ParseWaveType (const char *token, mat_wave_type_t *out)
+{
+	if (!token || !token[0])
+		return false;
+	if (!q_strcasecmp (token, "sin"))
+	{
+		*out = MAT_WAVE_SIN;
+		return true;
+	}
+	if (!q_strcasecmp (token, "triangle"))
+	{
+		*out = MAT_WAVE_TRIANGLE;
+		return true;
+	}
+	if (!q_strcasecmp (token, "saw"))
+	{
+		*out = MAT_WAVE_SAW;
+		return true;
+	}
+	if (!q_strcasecmp (token, "inversesaw"))
+	{
+		*out = MAT_WAVE_INVERSESAW;
+		return true;
+	}
+	return false;
+}
+
 static qboolean ParseRequiredBool (const char **data, qboolean *out, mat_shader_parse_state_t *state)
 {
 	const char *token;
@@ -771,7 +798,14 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	qboolean valid = true;
 
 	memset (&stage, 0, sizeof (stage));
-	stage.rgbgen = MAT_RGBGEN_DEFAULT;
+	stage.rgbgen = MAT_RGBGEN_IDENTITY;
+	stage.alphagen = MAT_ALPHAGEN_IDENTITY;
+	stage.const_color[0] = 1.f;
+	stage.const_color[1] = 1.f;
+	stage.const_color[2] = 1.f;
+	stage.const_alpha = 1.f;
+	stage.rgb_wave.type = MAT_WAVE_SIN;
+	stage.alpha_wave.type = MAT_WAVE_SIN;
 	stage.blend_mode = MAT_BLEND_REPLACE;
 	stage.depth_write = true;
 	stage.depth_func = MAT_DEPTHFUNC_LEQUAL;
@@ -850,6 +884,206 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			}
 			if (!q_strcasecmp (value, "identity"))
 				stage.rgbgen = MAT_RGBGEN_IDENTITY;
+			else if (!q_strcasecmp (value, "vertex"))
+				stage.rgbgen = MAT_RGBGEN_VERTEX;
+			else if (!q_strcasecmp (value, "const"))
+			{
+				const char *token;
+				float color[3];
+
+				if (!ParseIdentExpected (&data, &token, state, "rgbGen const"))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+
+				if (!q_strcasecmp (token, "("))
+				{
+					if (!ParseFloat (&data, &color[0], state)
+						|| !ParseFloat (&data, &color[1], state)
+						|| !ParseFloat (&data, &color[2], state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+					if (!ExpectToken (&data, ")", state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+				}
+				else
+				{
+					if (!Mat_Shader_IsNumericToken (token))
+					{
+						Mat_Shader_WarnExpectedToken (state, "float", token);
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+					color[0] = Q_atof (token);
+					if (!ParseFloat (&data, &color[1], state)
+						|| !ParseFloat (&data, &color[2], state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+				}
+
+				stage.rgbgen = MAT_RGBGEN_CONST;
+				stage.const_color[0] = color[0];
+				stage.const_color[1] = color[1];
+				stage.const_color[2] = color[2];
+			}
+			else if (!q_strcasecmp (value, "wave"))
+			{
+				mat_wave_type_t wave_type;
+				float base;
+				float amp;
+				float phase;
+				float freq;
+
+				if (!ParseIdentExpected (&data, &value, state, "rgbGen wave type"))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+				if (!ParseWaveType (value, &wave_type))
+				{
+					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+						state ? state->source_file : material->source_file,
+						state ? state->token_line : 0u);
+					continue;
+				}
+				if (!ParseFloat (&data, &base, state)
+					|| !ParseFloat (&data, &amp, state)
+					|| !ParseFloat (&data, &phase, state)
+					|| !ParseFloat (&data, &freq, state))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+
+				Mat_Shader_ValidateFiniteFloat (state, "rgbGen wave base", base, 0.f, &stage.rgb_wave.base);
+				Mat_Shader_ValidateFiniteFloat (state, "rgbGen wave amp", amp, 0.f, &stage.rgb_wave.amp);
+				Mat_Shader_ValidateFiniteFloat (state, "rgbGen wave phase", phase, 0.f, &stage.rgb_wave.phase);
+				Mat_Shader_ValidateFiniteFloat (state, "rgbGen wave freq", freq, 0.f, &stage.rgb_wave.freq);
+				stage.rgb_wave.type = wave_type;
+				stage.rgbgen = MAT_RGBGEN_WAVE;
+			}
+			else
+			{
+				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					state ? state->source_file : material->source_file,
+					state ? state->token_line : 0u);
+			}
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "alphaGen"))
+		{
+			Mat_Shader_MarkKeywordSeen ("alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "alphaGen mode"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			if (!q_strcasecmp (value, "identity"))
+				stage.alphagen = MAT_ALPHAGEN_IDENTITY;
+			else if (!q_strcasecmp (value, "vertex"))
+				stage.alphagen = MAT_ALPHAGEN_VERTEX;
+			else if (!q_strcasecmp (value, "const"))
+			{
+				const char *token;
+				float alpha;
+
+				if (!ParseIdentExpected (&data, &token, state, "alphaGen const"))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+
+				if (!q_strcasecmp (token, "("))
+				{
+					if (!ParseFloat (&data, &alpha, state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+					if (!ExpectToken (&data, ")", state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+				}
+				else
+				{
+					if (!Mat_Shader_IsNumericToken (token))
+					{
+						Mat_Shader_WarnExpectedToken (state, "float", token);
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+					alpha = Q_atof (token);
+				}
+
+				stage.alphagen = MAT_ALPHAGEN_CONST;
+				stage.const_alpha = alpha;
+			}
+			else if (!q_strcasecmp (value, "wave"))
+			{
+				mat_wave_type_t wave_type;
+				float base;
+				float amp;
+				float phase;
+				float freq;
+
+				if (!ParseIdentExpected (&data, &value, state, "alphaGen wave type"))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+				if (!ParseWaveType (value, &wave_type))
+				{
+					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+						state ? state->source_file : material->source_file,
+						state ? state->token_line : 0u);
+					continue;
+				}
+				if (!ParseFloat (&data, &base, state)
+					|| !ParseFloat (&data, &amp, state)
+					|| !ParseFloat (&data, &phase, state)
+					|| !ParseFloat (&data, &freq, state))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+
+				Mat_Shader_ValidateFiniteFloat (state, "alphaGen wave base", base, 0.f, &stage.alpha_wave.base);
+				Mat_Shader_ValidateFiniteFloat (state, "alphaGen wave amp", amp, 0.f, &stage.alpha_wave.amp);
+				Mat_Shader_ValidateFiniteFloat (state, "alphaGen wave phase", phase, 0.f, &stage.alpha_wave.phase);
+				Mat_Shader_ValidateFiniteFloat (state, "alphaGen wave freq", freq, 0.f, &stage.alpha_wave.freq);
+				stage.alpha_wave.type = wave_type;
+				stage.alphagen = MAT_ALPHAGEN_WAVE;
+			}
+			else
+			{
+				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					state ? state->source_file : material->source_file,
+					state ? state->token_line : 0u);
+			}
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "blendFunc"))

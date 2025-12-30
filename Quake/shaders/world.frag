@@ -46,6 +46,7 @@ struct Call
 {
 	uint	flags;
 	float	wateralpha;
+	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -133,6 +134,7 @@ layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
+layout(location=15) flat in vec4 in_stage_color;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -529,10 +531,11 @@ void main()
 	if (LightmapParams.y > 0.5)
 		result.rgb = result.rgb / (vec3(1.0) + result.rgb);
 	
+	result.rgb *= in_stage_color.rgb;
+	result.a = in_alpha * in_stage_color.a;
 	result = clamp(result, 0.0, 1.0);
 	result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 
-	result.a = in_alpha;
 	out_fragcolor = result;
 
 #if !OIT

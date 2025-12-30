@@ -88,8 +88,8 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
 	{ "clampmap", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Clamp-wrapped texture." },
 	{ "animMap", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "FPS + frame list only." },
-	{ "rgbGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports identity only." },
-	{ "alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha generator." },
+	{ "rgbGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: identity/vertex/const/wave." },
+	{ "alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: identity/vertex/const/wave." },
 	{ "blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports add/filter/blend/premult or explicit factors." },
 	{ "depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
 	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: lequal/equal/always." },
@@ -1322,6 +1322,40 @@ static int Mat_Shader_TimeBucket (float time, float fps_hint)
 	if (fps < 1.f)
 		fps = 1.f;
 	return (int)floorf (time * fps);
+}
+
+float Mat_Shader_EvalWaveValue (const mat_wave_t *wave, float time)
+{
+	float t;
+	float phase;
+	float value;
+
+	if (!wave)
+		return 0.f;
+
+	t = time * wave->freq + wave->phase;
+
+	switch (wave->type)
+	{
+	case MAT_WAVE_TRIANGLE:
+		phase = t - floorf (t + 0.5f);
+		value = 1.f - 4.f * fabsf (phase);
+		break;
+	case MAT_WAVE_SAW:
+		phase = t - floorf (t);
+		value = phase * 2.f - 1.f;
+		break;
+	case MAT_WAVE_INVERSESAW:
+		phase = t - floorf (t);
+		value = 1.f - phase * 2.f;
+		break;
+	case MAT_WAVE_SIN:
+	default:
+		value = sinf (t * 2.f * MAT_TEXMOD_PI);
+		break;
+	}
+
+	return wave->base + value * wave->amp;
 }
 
 const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time)
