@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "cl_postfx.h"
 #include "bgmusic.h"
 #include "../common/lightgrid.h"
 #include "r_dlight_pool.h"
@@ -1076,6 +1077,7 @@ void CL_Init (void)
 	CL_InitInput ();
 	CL_InitTEnts ();
 	DLightPool_Init ();
+	CL_PostFX_Init ();
 
 	Cvar_RegisterVariable (&cl_name);
 	Cvar_RegisterVariable (&cl_color);

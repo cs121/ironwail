@@ -7,6 +7,7 @@ layout(binding=5) uniform sampler2D GodraysTexture;
 layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
+layout(binding=9) uniform sampler2DArray PostFXLUT;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -144,6 +145,10 @@ layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: 
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: unused
 layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: unused, z: output sRGB conversion, w: reserved
 layout(location=20) uniform float u_midtone;
+layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: desat
+layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
+layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
+layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -282,6 +287,29 @@ vec3 ApplySaturation(vec3 color, float saturation)
 {
         float luma = dot(color, vec3(0.299, 0.587, 0.114));
         return mix(vec3(luma), color, saturation);
+}
+
+vec3 ApplyPostFXLUT(vec3 color, float lutSize, int lutId)
+{
+        if (lutSize <= 1.0)
+                return color;
+        vec3 clamped = clamp(color, vec3(0.0), vec3(1.0));
+        float size = max(lutSize, 2.0);
+        float sliceSize = 1.0 / size;
+        float slicePixelSize = sliceSize / size;
+        float sliceInnerSize = slicePixelSize * (size - 1.0);
+        vec3 scaled = clamped * (size - 1.0);
+        float slice = scaled.b;
+        float slice0 = floor(slice);
+        float slice1 = min(slice0 + 1.0, size - 1.0);
+        float lerp = slice - slice0;
+        vec2 uv0 = vec2(slice0 * sliceSize + scaled.r * sliceInnerSize + slicePixelSize * 0.5,
+                        scaled.g * sliceInnerSize + slicePixelSize * 0.5);
+        vec2 uv1 = vec2(slice1 * sliceSize + scaled.r * sliceInnerSize + slicePixelSize * 0.5,
+                        scaled.g * sliceInnerSize + slicePixelSize * 0.5);
+        vec3 sample0 = texture(PostFXLUT, vec3(uv0, float(lutId))).rgb;
+        vec3 sample1 = texture(PostFXLUT, vec3(uv1, float(lutId))).rgb;
+        return mix(sample0, sample1, lerp);
 }
 
 vec3 LinearToSRGB(vec3 color)
@@ -476,6 +504,8 @@ void main()
                 float vignetteInner = max(PostFXParams0.y, 0.0);
                 float vignetteOuter = max(PostFXParams0.z, vignetteInner + 1e-3);
                 float vignetteFalloff = max(PostFXParams0.w, 1e-3);
+                float vignetteSoftness = clamp(PostFXParams4.w, 0.0, 1.0);
+                vignetteFalloff = mix(vignetteFalloff, 1.0, vignetteSoftness);
                 vec3 vignetteColor = clamp(PostFXParams1.xyz, vec3(0.0), vec3(1.0));
                 int vignetteBlendMode = clamp(int(PostFXParams1.w + 0.5), 0, 2);
                 float vignetteNoise = clamp(PostFXParams2.x, 0.0, 0.1);
@@ -629,19 +659,30 @@ void main()
 	out_fragcolor.rgb = vec3(UnpackRGB8(remap)) * (1./255.);
 #else
         vec3 hdrColor = out_fragcolor.rgb;
-        float bloomIntensity = HDRParams.x;
+        float bloomIntensity = max(HDRParams.x + PostFXParams3.y, 0.0);
         vec3 bloomColor = vec3(0.0);
         if (bloomIntensity > 0.0)
         {
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
+        bloomColor *= 1.0 + max(PostFXParams3.z, 0.0);
         vec3 godraysColor = vec3(0.0);
         if (GodraysParams.x > 0.5)
                 godraysColor = texture(GodraysTexture, uv).rgb;
         float exposure = max(HDRParams.y, 0.0);
+        float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
+        exposure *= exp2(exposureAdd);
         float tonemapMode = HDRParams.z;
         vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
         combined = max(combined, vec3(0.0));
+        float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
+        if (fogStrength > 0.0 && depthInfo.valid)
+        {
+                float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
+                float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
+                fogFactor = clamp(fogFactor * fogStrength, 0.0, 1.0);
+                combined = mix(combined, PostFXFogColor.rgb, fogFactor);
+        }
         vec3 mapped;
         if (tonemapMode > 0.5)
         {
@@ -671,6 +712,24 @@ void main()
                 mapped = pow(mapped, vec3(1.0 / midtone));
         mapped = ApplyPostContrast(mapped, postContrast);
         mapped = ApplySaturation(mapped, u_saturation);
+        {
+                float lutStrength = clamp(PostFXParams4.x, 0.0, 1.0);
+                float lutSize = PostFXLUTParams.x;
+                int lutId = int(PostFXLUTParams.y + 0.5);
+                if (lutStrength > 0.0 && lutSize > 1.0 && lutId > 0)
+                {
+                        vec3 lutColor = ApplyPostFXLUT(mapped, lutSize, lutId);
+                        mapped = mix(mapped, lutColor, lutStrength);
+                }
+        }
+        {
+                float desat = clamp(PostFXParams3.w, 0.0, 1.0);
+                if (desat > 0.0)
+                {
+                        float luma = dot(mapped, vec3(0.299, 0.587, 0.114));
+                        mapped = mix(mapped, vec3(luma), desat);
+                }
+        }
         if (outputSrgb > 0.5)
                 mapped = LinearToSRGB(mapped);
         out_fragcolor = vec4(mapped, 1.0);

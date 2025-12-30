@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // view.c -- player eye positioning
 
 #include "quakedef.h"
+#include "cl_postfx.h"
 
 /*
 
@@ -288,6 +289,7 @@ void V_ResetEffects (void)
 	v_explosion_vibration_time = 0.f;
 	v_explosion_vibration_strength = 0.f;
 	v_bonusflash_time = 0.f;
+	CL_PostFX_Reset ();
 }
 
 /*
@@ -340,6 +342,9 @@ void V_ParseDamage (void)
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[1] = 0;
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[2] = 0;
 	}
+
+	// TODO(postfx): hook damage events into the postfx stack here.
+	CL_PostFX_PushDamage (count);
 
 //
 // calculate view angle kicks
@@ -415,6 +420,8 @@ void V_BonusFlash_f (void)
 	cl.cshifts[CSHIFT_BONUS].destcolor[1] = 186;
 	cl.cshifts[CSHIFT_BONUS].destcolor[2] = 69;
 	v_bonusflash_time = cl.time + V_BONUSFLASH_DURATION;
+	// TODO(postfx): hook pickup events into the postfx stack here.
+	CL_PostFX_PushPickup ();
 }
 
 /*
@@ -595,6 +602,9 @@ void V_UpdateBlend (void)
 
 	if (blend_changed)
 		V_CalcBlend ();
+
+	// TODO(postfx): tick and aggregate postfx events once per frame.
+	CL_PostFX_Frame ();
 }
 
 /*
@@ -604,6 +614,11 @@ V_PolyBlend -- johnfitz -- moved here from gl_rmain.c
 */
 void V_PolyBlend (void)
 {
+	extern cvar_t r_polyblend_legacy;
+
+	if (!r_polyblend_legacy.value)
+		return;
+
 	if (!gl_polyblend.value || !v_blend[3])
 		return;
 
