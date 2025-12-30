@@ -41,6 +41,7 @@ cvar_t	registered = {"registered","1",CVAR_ROM}; /* set to correct value in COM_
 cvar_t	standalone = {"standalone","0"}; /* allow standalone mods without pak0/CRC gating */
 cvar_t	cmdline = {"cmdline","",CVAR_ROM/*|CVAR_SERVERINFO*/}; /* sending cmdline upon CCREQ_RULE_INFO is evil */
 cvar_t	language = {"language","auto",CVAR_ARCHIVE}; /* for 2021 rerelease text */
+cvar_t	fs_integrity_report = {"fs_integrity_report","0"}; /* optional pak0 integrity logging */
 
 static qboolean		com_modified;	// set true if using non-id files
 
@@ -50,7 +51,7 @@ static void COM_Path_f (void);
 static qboolean		COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size);
 static int COM_Pk3Compare (const void *a, const void *b);
 
-// if a packfile directory differs from this, it is assumed to be hacked
+// known pak0.pak metadata for optional integrity reporting
 #define PAK0_COUNT		339	/* id1/pak0.pak - v1.0x */
 #define PAK0_CRC_V100		13900	/* id1/pak0.pak - v1.00 */
 #define PAK0_CRC_V101		62751	/* id1/pak0.pak - v1.01 */
@@ -1508,6 +1509,28 @@ static qboolean COM_IsStandalone (void)
 	return (standalone.value != 0);
 }
 
+static qboolean COM_IsPak0File (const char *packfile)
+{
+	const char *slash = strrchr (packfile, '/');
+	const char *backslash = strrchr (packfile, '\\');
+	const char *sep = slash > backslash ? slash : backslash;
+	const char *filename = sep ? sep + 1 : packfile;
+
+	return !q_strcasecmp (filename, "pak0.pak");
+}
+
+static void COM_ReportPak0Integrity (const char *packfile, const dpackfile_t *info, int dirlen, int numpackfiles)
+{
+	unsigned short crc;
+
+	if (numpackfiles != PAK0_COUNT)
+		Con_Warning ("Integrity report: %s has %i files (expected %i)\n", packfile, numpackfiles, PAK0_COUNT);
+
+	crc = CRC_Block (info, dirlen);
+	if (crc != PAK0_CRC_V106 && crc != PAK0_CRC_V101 && crc != PAK0_CRC_V100)
+		Con_Warning ("Integrity report: %s directory CRC %u does not match known versions\n", packfile, crc);
+}
+
 static void COM_CheckRegistered (void)
 {
 	int		h;
@@ -1526,13 +1549,9 @@ static void COM_CheckRegistered (void)
 		else
 		{
 			Cvar_SetROM ("registered", "0");
-			Con_Printf ("Playing shareware version.\n");
+			Con_Printf ("Registered data not found (gfx/pop.lmp). Continuing in shareware mode.\n");
 			if (com_modified)
-				Sys_Error ("You must have the registered version to use modified games.\n\n"
-					   "Basedir is: %s\n\n"
-					   "Check that this has an " GAMENAME " subdirectory containing pak0.pak and pak1.pak, "
-					   "or use the -basedir command-line option to specify another directory.",
-					   com_basedirs[0]);
+				Con_Warning ("Mod content detected without registered data; some assets may be missing.\n");
 		}
 		return;
 	}
@@ -1552,7 +1571,9 @@ static void COM_CheckRegistered (void)
 				Con_Warning ("Standalone mode enabled: ignoring gfx/pop.lmp checksum mismatch.\n");
 				return;
 			}
-			Sys_Error ("Corrupted data file.");
+			Cvar_SetROM ("registered", "0");
+			Con_Warning ("Registered data appears to be corrupted; continuing in shareware mode.\n");
+			return;
 		}
 	}
 
@@ -2357,22 +2378,14 @@ static pack_t *COM_LoadPackFile (const char *packfile)
 	if (numpackfiles > MAX_FILES_IN_PACK)
 		Sys_Error ("%s has %i files", packfile, numpackfiles);
 
-	if (numpackfiles != PAK0_COUNT)
-		com_modified = true;	// not the original file
-
 	newfiles = (packfile_t *) Z_Malloc(numpackfiles * sizeof(packfile_t));
 
 	Sys_FileSeek (packhandle, header.dirofs);
 	if (Sys_FileRead(packhandle, info, header.dirlen) != header.dirlen)
 		Sys_Error ("Error reading %s", packfile);
 
-	// crc the directory to check for modifications
-	if (!com_modified)
-	{
-		unsigned short	crc = CRC_Block (info, header.dirlen);
-		if (crc != PAK0_CRC_V106 && crc != PAK0_CRC_V101 && crc != PAK0_CRC_V100)
-			com_modified = true;
-	}
+	if (fs_integrity_report.value && COM_IsPak0File (packfile))
+		COM_ReportPak0Integrity (packfile, info, header.dirlen, numpackfiles);
 
 	// parse the directory
 	for (i = 0; i < numpackfiles; i++)
@@ -2935,7 +2948,7 @@ static qboolean COM_SetBaseDir (const char *path)
 	{
 		if (!COM_IsStandalone ())
 		return false;
-		Con_Warning ("Standalone mode enabled: using basedir without %s\n", pak0 + 1);
+		Con_Warning ("Standalone mode enabled: using basedir without required game data in %s\n", GAMENAME);
 	}
 
 	memcpy (com_basedirs[0], path, i);
@@ -3505,6 +3518,7 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 	Cvar_RegisterVariable (&registered);
 	Cvar_RegisterVariable (&cmdline);
 	Cvar_RegisterVariable (&standalone);
+	Cvar_RegisterVariable (&fs_integrity_report);
 	Cmd_AddCommand ("path", COM_Path_f);
 	Cmd_AddCommand ("game", COM_Game_f); //johnfitz
 
