@@ -23,6 +23,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "mat_shader.h"
 
+#define MAT_SHADER_MAX_STAGES 128
+#define MAT_SHADER_MAX_ANIM_FRAMES 64
+#define MAT_SHADER_MAX_TOKENS 4096
+#define MAT_SHADER_MAX_BRACE_DEPTH 64
+
 int Mat_Shader_ParseFile (const char *path, const char *data, const char *source_file);
 
 #endif // MAT_SHADER_PARSE_H
