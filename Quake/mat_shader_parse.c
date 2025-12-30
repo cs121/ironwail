@@ -1095,6 +1095,48 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			}
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "emissive"))
+		{
+			Mat_Shader_MarkKeywordSeen ("emissive", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			qboolean parsed = false;
+			qboolean value_bool = true;
+
+			parsed = ParseOptionalBool (&data, &value_bool, state);
+			if (!parsed)
+				value_bool = true;
+
+			if (value_bool)
+				material->emissive_enable = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "bloom"))
+		{
+			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			qboolean parsed = false;
+			qboolean value_bool = true;
+
+			parsed = ParseOptionalBool (&data, &value_bool, state);
+			if (!parsed)
+				value_bool = true;
+
+			if (value_bool)
+				material->bloom_enable = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			qboolean parsed = false;
+			qboolean value_bool = true;
+
+			parsed = ParseOptionalBool (&data, &value_bool, state);
+			if (!parsed)
+				value_bool = true;
+
+			if (value_bool)
+				material->godray_enable = true;
+			continue;
+		}
 
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 			state ? state->source_file : material->source_file,
