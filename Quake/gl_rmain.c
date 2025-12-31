@@ -4255,6 +4255,19 @@ static void R_EndTranslucency (void)
 // contributions (albedo * dlight) in a separate pass to preserve contrast of
 // the baked lighting while avoiding gamma artifacts from modulating the base
 // color. Static lighting remains untouched in the base pass.
+static void R_SetDlightConfig (GLuint program, float scale, float falloff, float expval,
+			       float core_boost, float core_exp, float knee, float ndotl,
+			       float satchop)
+{
+	if (!program)
+		return;
+
+	GL_UseProgram (program);
+	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, falloff, expval);
+	GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
+	GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
+}
+
 static void R_DrawDLightPass (void)
 {
         int count = 0;
@@ -4296,7 +4309,6 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	if (r_dlight_mode.value > 0.f && (glprogs.world_dlight_hybrid[0] || glprogs.world_dlight_hybrid[1]))
 	{
 		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
 		float falloff = (float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3);
@@ -4306,21 +4318,17 @@ static void R_DrawDLightPass (void)
 		float knee = q_max (0.f, r_dlight_softknee.value);
 		float ndotl = CLAMP (0.f, r_dlight_ndotl.value, 1.f);
 		float satchop = CLAMP (0.f, r_dlight_satchop.value, 1.f);
-		float radius_scale = q_max (0.f, r_dlight_radius_scale.value);
 
-		if (glprogs.world_dlight_hybrid[0])
+		R_SetDlightConfig (glprogs.world_dlight[0], scale, falloff, expval,
+			core_boost, core_exp, knee, ndotl, satchop);
+		R_SetDlightConfig (glprogs.world_dlight[1], scale, falloff, expval,
+			core_boost, core_exp, knee, ndotl, satchop);
+		if (r_dlight_mode.value > 0.f)
 		{
-			GL_UseProgram (glprogs.world_dlight_hybrid[0]);
-			GL_Uniform4fFunc (0, scale, radius_scale, falloff, expval);
-			GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
-			GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
-		}
-		if (glprogs.world_dlight_hybrid[1])
-		{
-			GL_UseProgram (glprogs.world_dlight_hybrid[1]);
-			GL_Uniform4fFunc (0, scale, radius_scale, falloff, expval);
-			GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
-			GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
+			R_SetDlightConfig (glprogs.world_dlight_hybrid[0], scale, falloff, expval,
+				core_boost, core_exp, knee, ndotl, satchop);
+			R_SetDlightConfig (glprogs.world_dlight_hybrid[1], scale, falloff, expval,
+				core_boost, core_exp, knee, ndotl, satchop);
 		}
 	}
 

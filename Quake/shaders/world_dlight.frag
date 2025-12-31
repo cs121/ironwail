@@ -12,6 +12,10 @@ layout(binding=3) uniform sampler2D LMTexDir; // unused
 #define ALPHATEST 0
 #endif
 
+layout(location=0) uniform vec4 DLightConfig0; // x: scale, y: radius scale, z: falloff mode, w: exp
+layout(location=1) uniform vec4 DLightConfig1; // x: core boost, y: core exp, z: soft knee, w: ndotl mix
+layout(location=2) uniform vec4 DLightConfig2; // x: saturation chop
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
         float fog = exp2(-abs(Fog.w) * dot(p, p));
@@ -62,6 +66,17 @@ float whitenoise01(vec2 p)
         return fract((p3.x + p3.y) * p3.z);
 }
 
+float ComputeFalloff(float x, float mode, float expval)
+{
+        if (mode < 0.5)
+                return x;
+        if (mode < 1.5)
+                return x * x;
+        if (mode < 2.5)
+                return x * x * (3.0 - 2.0 * x);
+        return pow(max(x, 0.0), expval);
+}
+
 void main()
 {
         vec2 uv = in_uv;
@@ -105,6 +120,12 @@ void main()
                 {
                         float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
                         vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+                        float falloff_mode = DLightConfig0.z;
+                        float falloff_exp = max(DLightConfig0.w, 0.01);
+                        float core_boost = max(DLightConfig1.x, 0.0);
+                        float core_exp = max(DLightConfig1.y, 0.01);
+                        float knee = max(DLightConfig1.z, 0.0);
+                        float ndotl_mix = clamp(DLightConfig1.w, 0.0, 1.0);
 
                         for (uint i = 0u, ofs = 0u; i < 2u; i++, ofs += 32u)
                         {
@@ -129,20 +150,35 @@ void main()
                                         float surface_dist = length(light_vec);
                                         float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
                                         float normalized_dist = surface_dist / rad;
-                                        float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
+                                        float x = clamp(1.0 - clamp(normalized_dist, 0.0, 1.0), 0.0, 1.0);
+                                        float falloff = ComputeFalloff(x, falloff_mode, falloff_exp);
+                                        float intensity = attenuation * falloff;
+                                        float core = 1.0 + core_boost * pow(max(x, 0.0), core_exp);
+                                        float core_intensity = intensity * core;
+                                        float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
+                                        float ndotl = 1.0;
                                         if (surface_dist > 0.0)
                                         {
                                                 vec3 light_dir = light_vec / surface_dist;
-                                                float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                                                vec3 light_contrib = attenuation * falloff * l.color * dynamic_light_noise * ndotl;
-                                                dynamic_light += light_contrib;
+                                                float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
+                                                ndotl = mix(1.0, ndotl_raw, ndotl_mix);
                                         }
+
+                                        vec3 light_contrib = shaped * ndotl * l.color * dynamic_light_noise;
+                                        dynamic_light += light_contrib;
                                 }
                         }
                 }
         }
 
-        vec3 contrib = clamp(dynamic_light * Overbright, 0.0, Overbright);
+        float satchop = clamp(DLightConfig2.x, 0.0, 1.0);
+        if (satchop > 0.0)
+        {
+                float luma = dot(dynamic_light, vec3(0.299, 0.587, 0.114));
+                dynamic_light = mix(dynamic_light, vec3(luma), satchop);
+        }
+
+        vec3 contrib = clamp(dynamic_light * DLightConfig0.x * Overbright, 0.0, Overbright);
         vec3 color = albedo * contrib;
 
         color = ApplyFog(color, in_pos - EyePos);
