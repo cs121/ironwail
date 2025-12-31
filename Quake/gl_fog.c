@@ -308,7 +308,7 @@ void Fog_SetupFrame (void)
 {
 	const float ExpAdjustment = 1.20112241f; // sqrt(log2(e))
 	const float SphericalCorrection = 0.85f; // compensate higher perceived density with spherical fog
-	const float DensityScale = ExpAdjustment * SphericalCorrection / 64.0f;
+	const float DensityScale = ExpAdjustment * SphericalCorrection / 96.0f;
 	float density = Fog_GetDensity() * DensityScale;
 	memcpy(r_framedata.fogdata, Fog_GetColor(), 3 * sizeof(float));
 	memcpy(r_framedata.skyfogdata, r_framedata.fogdata, 3 * sizeof(float));
