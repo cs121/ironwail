@@ -55,6 +55,7 @@ typedef struct postfx_state_s
 	float	underwater_fog_strength;
 	float	underwater_fog_color[3];
 	float	emissive_boost;
+	float	damage_trauma;
 } postfx_state_t;
 
 void CL_PostFX_Init (void);
