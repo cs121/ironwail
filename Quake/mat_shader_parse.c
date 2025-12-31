@@ -357,6 +357,32 @@ static qboolean ParseIdentExpected (const char **data, const char **out, mat_sha
 	return true;
 }
 
+static const char *StripCommaToken (const char *token, char *buffer, size_t buffer_size)
+{
+	const char *start;
+	const char *end;
+	size_t len;
+
+	if (!token || !buffer || !buffer_size)
+		return token;
+
+	start = token;
+	while (*start == ',')
+		start++;
+
+	end = token + strlen (token);
+	while (end > start && end[-1] == ',')
+		end--;
+
+	len = (size_t)(end - start);
+	if (len >= buffer_size)
+		len = buffer_size - 1;
+
+	memcpy (buffer, start, len);
+	buffer[len] = '\0';
+	return buffer;
+}
+
 static qboolean ParseFloat (const char **data, float *out, mat_shader_parse_state_t *state)
 {
 	const char *token;
@@ -1092,6 +1118,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			Mat_Shader_MarkKeywordSeen ("blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
 			int src;
 			int dst;
+			char mode_buffer[MAX_TOKEN_CHARS];
+			const char *mode_token;
+			const char *comma;
 
 			if (!ParseIdentExpected (&data, &value, state, "blendFunc mode"))
 			{
@@ -1100,7 +1129,40 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				break;
 			}
 
-			if (Mat_Shader_ParseBlendMode (value, &stage.blend_mode))
+			mode_token = StripCommaToken (value, mode_buffer, sizeof (mode_buffer));
+			comma = strchr (mode_token, ',');
+			if (comma)
+			{
+				char src_buffer[MAX_TOKEN_CHARS];
+				char dst_buffer[MAX_TOKEN_CHARS];
+				const char *dst_start = comma + 1;
+				size_t src_len = (size_t)(comma - mode_token);
+				const char *src_token;
+				const char *dst_token;
+
+				if (src_len >= sizeof (src_buffer))
+					src_len = sizeof (src_buffer) - 1;
+				memcpy (src_buffer, mode_token, src_len);
+				src_buffer[src_len] = '\0';
+
+				src_token = StripCommaToken (src_buffer, src_buffer, sizeof (src_buffer));
+				dst_token = StripCommaToken (dst_start, dst_buffer, sizeof (dst_buffer));
+				if (src_token[0] && dst_token[0]
+					&& Mat_Shader_ParseBlendFactor (src_token, &src)
+					&& Mat_Shader_ParseBlendFactor (dst_token, &dst))
+				{
+					stage.blend_mode = MAT_BLEND_CUSTOM;
+					stage.blend_src = src;
+					stage.blend_dst = dst;
+					continue;
+				}
+				Mat_Shader_ReportUnknownToken (mode_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					state ? state->source_file : material->source_file,
+					state ? state->token_line : 0u);
+				continue;
+			}
+
+			if (Mat_Shader_ParseBlendMode (mode_token, &stage.blend_mode))
 			{
 				switch (stage.blend_mode)
 				{
@@ -1128,17 +1190,22 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				continue;
 			}
 
-			if (Mat_Shader_ParseBlendFactor (value, &src))
+			if (Mat_Shader_ParseBlendFactor (mode_token, &src))
 			{
+				char dst_buffer[MAX_TOKEN_CHARS];
+				const char *dst_token;
+
 				if (!ParseIdentExpected (&data, &value, state, "blendFunc dst"))
 				{
 					valid = false;
 					data = SkipUnknownBlockOrLine (data, true, state);
 					break;
 				}
-				if (!Mat_Shader_ParseBlendFactor (value, &dst))
+
+				dst_token = StripCommaToken (value, dst_buffer, sizeof (dst_buffer));
+				if (!Mat_Shader_ParseBlendFactor (dst_token, &dst))
 				{
-					Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					Mat_Shader_ReportUnknownToken (dst_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 						state ? state->source_file : material->source_file,
 						state ? state->token_line : 0u);
 					break;
