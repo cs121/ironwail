@@ -66,6 +66,7 @@ typedef struct
 
 #define MAT_SHADER_SCALE_MAX 64.f
 #define MAT_SHADER_TCMOD_MAX_ABS 64.f
+#define MAX_TOKEN_CHARS Q_COUNTOF(com_token)
 
 static size_t mat_shader_parse_warnings;
 static size_t mat_shader_parse_errors;
