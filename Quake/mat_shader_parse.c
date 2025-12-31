@@ -600,7 +600,10 @@ static qboolean Mat_Shader_ParseCullMode (const char *token, mat_cull_mode_t *ou
 		*out = MAT_CULL_FRONT;
 		return true;
 	}
-	if (!q_strcasecmp (token, "none"))
+	if (!q_strcasecmp (token, "none")
+		|| !q_strcasecmp (token, "disable")
+		|| !q_strcasecmp (token, "disabled")
+		|| !q_strcasecmp (token, "off"))
 	{
 		*out = MAT_CULL_NONE;
 		return true;
