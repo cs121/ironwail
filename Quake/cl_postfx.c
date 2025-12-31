@@ -46,6 +46,7 @@ static float			postfx_underwater_grade;
 static float			postfx_underwater_fog;
 static int				postfx_powerup_lut = PFX_LUT_NONE;
 static float			postfx_powerup_strength;
+static float			postfx_damage_trauma;
 
 extern cvar_t r_postfx;
 extern cvar_t r_postfx_pickup;
@@ -60,6 +61,9 @@ extern cvar_t r_postfx_damage_exposure;
 extern cvar_t r_postfx_damage_duration;
 extern cvar_t r_postfx_damage_accum_window;
 extern cvar_t r_postfx_damage_accum_scale;
+extern cvar_t r_post_damage_doublevision;
+extern cvar_t r_post_damage_trauma_scale;
+extern cvar_t r_post_damage_trauma_decay;
 extern cvar_t r_postfx_powerup;
 extern cvar_t r_postfx_powerup_lut_strength;
 extern cvar_t r_postfx_lut_strength_powerup;
@@ -208,6 +212,7 @@ void CL_PostFX_Reset (void)
 	postfx_underwater_fog = 0.f;
 	postfx_powerup_lut = PFX_LUT_NONE;
 	postfx_powerup_strength = 0.f;
+	postfx_damage_trauma = 0.f;
 }
 
 void CL_PostFX_Frame (void)
@@ -232,7 +237,19 @@ void CL_PostFX_Frame (void)
 		postfx_underwater_grade = 0.f;
 		postfx_underwater_fog = 0.f;
 		postfx_powerup_strength = 0.f;
+		postfx_damage_trauma = 0.f;
 		return;
+	}
+
+	if (r_post_damage_doublevision.value > 0.f)
+	{
+		float decay = q_max (0.f, r_post_damage_trauma_decay.value);
+		float decay_factor = (decay > 0.f) ? expf (-decay * dt) : 1.f;
+		postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma * decay_factor);
+	}
+	else
+	{
+		postfx_damage_trauma = 0.f;
 	}
 
 	desired_lut = PostFX_DesiredPowerupLUT ();
@@ -293,6 +310,14 @@ void CL_PostFX_PushDamage (float damage_amount)
 	float intensity;
 	float accum_window;
 	int i;
+
+	if (r_postfx.value > 0.f && r_post_damage_doublevision.value > 0.f)
+	{
+		float trauma_scale = q_max (0.f, r_post_damage_trauma_scale.value);
+		float trauma_kick = PostFX_Saturate (damage_amount * trauma_scale);
+		if (trauma_kick > 0.f)
+			postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma + trauma_kick);
+	}
 
 	if (r_postfx.value <= 0.f || r_postfx_damage.value <= 0.f)
 		return;
@@ -477,4 +502,6 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 			last_printed = now_seconds;
 		}
 	}
+
+	out_state->damage_trauma = PostFX_Saturate (postfx_damage_trauma);
 }

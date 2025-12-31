@@ -299,6 +299,25 @@ cvar_t	r_postfx_damage_exposure = { "r_postfx_damage_exposure", "-0.35", CVAR_AR
 cvar_t	r_postfx_damage_duration = { "r_postfx_damage_duration", "0.6", CVAR_ARCHIVE };
 cvar_t	r_postfx_damage_accum_window = { "r_postfx_damage_accum_window", "0.1", CVAR_ARCHIVE };
 cvar_t	r_postfx_damage_accum_scale = { "r_postfx_damage_accum_scale", "0.5", CVAR_ARCHIVE };
+/*
+Damage double-vision post effect.
+- r_post_damage_doublevision: master toggle for the effect.
+- r_post_damage_dv_strength: overall intensity (scaled by trauma).
+- r_post_damage_dv_px: max offset in pixels at trauma=1.
+- r_post_damage_dv_freq: oscillation frequency in Hz.
+- r_post_damage_trauma_scale: damage-to-trauma multiplier.
+- r_post_damage_trauma_decay: exponential decay rate per second.
+- r_post_damage_dv_quality: 0=off, 1=two ghosts, 2=three ghosts + mild smear.
+- r_post_damage_dv_debug: show trauma intensity as a grayscale output.
+*/
+cvar_t	r_post_damage_doublevision = { "r_post_damage_doublevision", "1", CVAR_ARCHIVE };
+cvar_t	r_post_damage_dv_strength = { "r_post_damage_dv_strength", "0.9", CVAR_ARCHIVE };
+cvar_t	r_post_damage_dv_px = { "r_post_damage_dv_px", "2.0", CVAR_ARCHIVE };
+cvar_t	r_post_damage_dv_freq = { "r_post_damage_dv_freq", "12.0", CVAR_ARCHIVE };
+cvar_t	r_post_damage_trauma_scale = { "r_post_damage_trauma_scale", "0.02", CVAR_ARCHIVE };
+cvar_t	r_post_damage_trauma_decay = { "r_post_damage_trauma_decay", "6.0", CVAR_ARCHIVE };
+cvar_t	r_post_damage_dv_quality = { "r_post_damage_dv_quality", "1", CVAR_ARCHIVE };
+cvar_t	r_post_damage_dv_debug = { "r_post_damage_dv_debug", "0", CVAR_NONE };
 cvar_t	r_postfx_powerup = { "r_postfx_powerup", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx_powerup_lut_strength = { "r_postfx_powerup_lut_strength", "0.6", CVAR_ARCHIVE };
 cvar_t	r_postfx_powerup_ramp_in = { "r_postfx_powerup_ramp_in", "0.2", CVAR_ARCHIVE };
@@ -2021,6 +2040,13 @@ void GL_PostProcess (void)
 	float fog_r;
 	float fog_g;
 	float fog_b;
+	float postfx_damage_trauma;
+	float dv_strength;
+	float dv_max_px;
+	float dv_freq;
+	float dv_quality;
+	float dv_debug;
+	float dv_time;
         r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -2044,6 +2070,7 @@ void GL_PostProcess (void)
 	fog_r = postfx_state.underwater_fog_color[0];
 	fog_g = postfx_state.underwater_fog_color[1];
 	fog_b = postfx_state.underwater_fog_color[2];
+	postfx_damage_trauma = CLAMP (0.f, postfx_state.damage_trauma, 1.f);
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
 	float bloom_intensity_effective = bloom_intensity;
@@ -2233,6 +2260,19 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
+	{
+		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
+		dv_quality = (float)CLAMP (0, quality, 2);
+		dv_strength = q_max (0.f, r_post_damage_dv_strength.value);
+		dv_max_px = q_max (0.f, r_post_damage_dv_px.value);
+		dv_freq = q_max (0.f, r_post_damage_dv_freq.value);
+		dv_debug = (r_post_damage_dv_debug.value > 0.f) ? 1.f : 0.f;
+		if (r_postfx.value <= 0.f || r_post_damage_doublevision.value <= 0.f || dv_quality <= 0.f)
+			postfx_damage_trauma = 0.f;
+		dv_time = (float)cl.time;
+		GL_Uniform4fFunc (25, postfx_damage_trauma, dv_strength, dv_max_px, dv_freq);
+		GL_Uniform4fFunc (26, dv_time, dv_quality, dv_debug, 0.f);
+	}
 	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;

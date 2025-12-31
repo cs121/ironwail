@@ -223,6 +223,9 @@
 
   Changes in 0.96.3:
 
+  -  Add a damage-driven double-vision post effect with new r_post_damage_*
+     controls.
+
   -  Fix potential infinite loop when playing sounds with loop start >=
      end (e.g. misc/forcefield.wav from Madfox's kaptlog.zip)
 
