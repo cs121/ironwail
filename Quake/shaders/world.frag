@@ -16,8 +16,6 @@ layout(binding=6) uniform sampler2D ShadowMapDepth;
 // Stage 1 shadow debug guards (temporary).
 // Toggle FORCE_WORLD_MAGENTA to confirm this permutation is bound at runtime.
 const bool FORCE_WORLD_MAGENTA = false;
-// Toggle FORCE_SHADOW_DEBUG to force a constant shadow debug output.
-const bool FORCE_SHADOW_DEBUG = true;
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
@@ -444,19 +442,6 @@ void main()
 
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
-
-		if (FORCE_SHADOW_DEBUG)
-		{
-			bool shadow_enabled = true;
-			int shadow_mode = 3;
-			float shadow_term = 0.25;
-			bool shadow_receiver = true;
-			out_fragcolor = vec4(vec3(shadow_term), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
 
 		bool shadow_enabled = ShadowControl.x > 0.5;
 		int shadow_mode = int(ShadowControl.y + 0.5);
