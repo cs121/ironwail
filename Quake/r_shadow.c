@@ -272,7 +272,19 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	view[13] = -DotProduct (light_up, eye);
 	view[14] = -DotProduct (sun_dir, eye);
 
-	R_Shadow_OrthoMatrix (ortho, -shadow_radius, shadow_radius, -shadow_radius, shadow_radius, 0.f, shadow_radius * 2.f);
+	{
+		float znear = 0.f;
+		float zfar = shadow_radius * 2.f;
+
+		if (gl_clipcontrol_able)
+		{
+			float tmp = znear;
+			znear = zfar;
+			zfar = tmp;
+		}
+
+		R_Shadow_OrthoMatrix (ortho, -shadow_radius, shadow_radius, -shadow_radius, shadow_radius, znear, zfar);
+	}
 
 	memcpy (out_viewproj, ortho, sizeof (ortho));
 	MatrixMultiply (out_viewproj, view);
