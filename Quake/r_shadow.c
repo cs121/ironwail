@@ -61,10 +61,12 @@ typedef struct shadow_state_s
 	GLint viewport[4];
 	GLint scissor_box[4];
 	GLboolean scissor_enabled;
+	GLboolean blend_enabled;
 	GLboolean color_mask[4];
 	GLboolean depth_mask;
 	GLboolean depth_test;
 	GLint depth_func;
+	GLdouble depth_range[2];
 } shadow_state_t;
 
 static void R_Shadow_SaveState (shadow_state_t *state)
@@ -73,10 +75,12 @@ static void R_Shadow_SaveState (shadow_state_t *state)
 	glGetIntegerv (GL_VIEWPORT, state->viewport);
 	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
 	glGetBooleanv (GL_SCISSOR_TEST, &state->scissor_enabled);
+	glGetBooleanv (GL_BLEND, &state->blend_enabled);
 	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_mask);
 	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_mask);
 	glGetBooleanv (GL_DEPTH_TEST, &state->depth_test);
 	glGetIntegerv (GL_DEPTH_FUNC, &state->depth_func);
+	glGetDoublev (GL_DEPTH_RANGE, state->depth_range);
 }
 
 static void R_Shadow_RestoreState (const shadow_state_t *state)
@@ -88,6 +92,10 @@ static void R_Shadow_RestoreState (const shadow_state_t *state)
 		glEnable (GL_SCISSOR_TEST);
 	else
 		glDisable (GL_SCISSOR_TEST);
+	if (state->blend_enabled)
+		glEnable (GL_BLEND);
+	else
+		glDisable (GL_BLEND);
 	glColorMask (state->color_mask[0], state->color_mask[1], state->color_mask[2], state->color_mask[3]);
 	glDepthMask (state->depth_mask);
 	if (state->depth_test)
@@ -95,6 +103,7 @@ static void R_Shadow_RestoreState (const shadow_state_t *state)
 	else
 		glDisable (GL_DEPTH_TEST);
 	glDepthFunc (state->depth_func);
+	glDepthRange (state->depth_range[0], state->depth_range[1]);
 }
 
 static void R_Shadow_DestroyDlightResources (void)
@@ -434,7 +443,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
@@ -534,7 +543,7 @@ void R_ResizeShadowMapIfNeeded (void)
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 }
 
@@ -603,9 +612,11 @@ void R_Shadow_SunPass (void)
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 	glDisable (GL_SCISSOR_TEST);
+	glDisable (GL_BLEND);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
+	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
 	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
@@ -765,9 +776,11 @@ void R_Shadow_DlightPass (void)
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 	glDisable (GL_SCISSOR_TEST);
+	glDisable (GL_BLEND);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
+	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
 	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 

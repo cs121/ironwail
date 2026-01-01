@@ -89,6 +89,7 @@ qboolean gl_buffer_storage_able = false;
 qboolean gl_multi_bind_able = false;
 qboolean gl_bindless_able = false;
 qboolean gl_clipcontrol_able = false;
+qboolean gl_clip_z_01 = false;
 float gl_max_anisotropy; //johnfitz
 int gl_stencilbits;
 
@@ -1102,10 +1103,12 @@ static void GL_CheckExtensions (void)
 	;
 
 	gl_clipcontrol_able =
+		COM_CheckParm ("-clipcontrol") &&
 		!COM_CheckParm ("-noclipcontrol") &&
 		GL_FindExtension ("GL_ARB_clip_control") &&
 		GL_InitFunctions (gl_arb_clip_control_functions, false)
 	;
+	gl_clip_z_01 = gl_clipcontrol_able;
 }
 
 /*
