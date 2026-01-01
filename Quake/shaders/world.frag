@@ -7,7 +7,7 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2DShadow ShadowMap;
+layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform sampler2D ShadowMapDepth;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
