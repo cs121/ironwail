@@ -28,11 +28,7 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
-#if REVERSED_Z
-	float compare_depth = reference + bias;
-#else
 	float compare_depth = reference - bias;
-#endif
 	return texture(ShadowMap, vec3(uv, compare_depth));
 }
 
@@ -138,11 +134,7 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 #ifdef SHADOW_DLIGHT
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
-#if REVERSED_Z
-	float compare_depth = reference + bias;
-#else
 	float compare_depth = reference - bias;
-#endif
 	return texture(ShadowDlightMap, vec3(uv, compare_depth));
 }
 
