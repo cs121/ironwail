@@ -521,18 +521,16 @@ void R_ResizeShadowMapIfNeeded (void)
 
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
-	float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE,
-		(debug_mode > 3.5f) ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 }
 
 void R_Shadow_BindShadowMapRaw (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
@@ -541,7 +539,7 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);

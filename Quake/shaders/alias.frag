@@ -102,13 +102,18 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 		return;
 	}
 
-	vec3 shadow_coord = clip.xyz / clip.w;
-	shadow_coord = shadow_coord * 0.5 + 0.5;
-	uv = shadow_coord.xy;
-	reference = shadow_coord.z;
+	vec3 shadow_ndc = clip.xyz / clip.w;
+	uv = shadow_ndc.xy * 0.5 + 0.5;
+	float depth01 =
+#if CLIP_Z_ZERO_TO_ONE
+		shadow_ndc.z;
+#else
+		shadow_ndc.z * 0.5 + 0.5;
+#endif
+	reference = depth01;
 
-	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
-		all(lessThanEqual(shadow_coord, vec3(1.0)));
+	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
+		all(lessThanEqual(uv, vec2(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 }
 
@@ -137,7 +142,7 @@ layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
 layout(location=7) in vec3 in_direct;
-layout(location=8) noperspective in vec4 in_shadow_clip;
+layout(location=8) in vec4 in_shadow_clip;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -207,12 +212,12 @@ void main()
 	{
 		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		if (shadow_mode != 4 && shadow_receiver)
+		if (shadow_receiver && (shadow_mode == 0 || shadow_mode == 4))
 		{
 			vec2 shadow_uv;
 			float shadow_ref;
 			ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
-			if (shadow_range >= 0.5 && shadow_mode <= 3)
+			if (shadow_range >= 0.5 && (shadow_mode == 0 || shadow_mode == 4))
 			{
 				float ndotl = dot(shadow_normal, ShadowSunDir.xyz);
 				float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
@@ -222,7 +227,7 @@ void main()
 					shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
 			}
 		}
-		if (shadow_mode >= 2)
+		if (shadow_mode >= 1)
 		{
 			out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
 #if !OIT

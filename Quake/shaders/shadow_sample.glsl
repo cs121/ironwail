@@ -22,21 +22,21 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 		proj.z * 0.5 + 0.5;
 #endif
 
-#if REVERSED_Z
-		reference = 1.0 - depth01;
-#else
-		reference = depth01;
-#endif
+	reference = depth01;
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
+		all(lessThanEqual(uv, vec2(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 }
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float compare_depth = reference - bias;
+#if REVERSED_Z
+	return 1.0 - texture(ShadowMap, vec3(uv, compare_depth));
+#else
 	return texture(ShadowMap, vec3(uv, compare_depth));
+#endif
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
@@ -99,9 +99,6 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	if (in_range < 0.5)
 		return 1.0;
 
-	if (ShadowDebug.y > 3.5)
-		return 1.0;
-
 	float ndotl = dot(normal, ShadowSunDir.xyz);
 	float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
 
@@ -122,17 +119,22 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	if (in_range < 0.5)
 		return vec3(1.0, 0.0, 0.0);
 
+	if (mode == 1)
+	{
+		float depth = texture(ShadowMapDepth, uv).r;
+		return vec3(depth);
+	}
 	if (mode == 2)
 		return vec3(uv, 0.0);
 	if (mode == 3)
-		return vec3(shadow_term);
-	if (mode == 4)
 	{
 		float depth = texture(ShadowMapDepth, uv).r;
 		float diff = reference - depth;
 		float scaled = clamp(diff * 10.0 + 0.5, 0.0, 1.0);
 		return vec3(scaled);
 	}
+	if (mode == 4)
+		return vec3(shadow_term);
 
 	return vec3(shadow_term);
 }
