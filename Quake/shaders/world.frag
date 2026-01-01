@@ -13,6 +13,12 @@ layout(binding=6) uniform sampler2D ShadowMapDepth;
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
+// Stage 1 shadow debug guards (temporary).
+// Toggle FORCE_WORLD_MAGENTA to confirm this permutation is bound at runtime.
+const bool FORCE_WORLD_MAGENTA = false;
+// Toggle FORCE_SHADOW_DEBUG to force a constant shadow debug output.
+const bool FORCE_SHADOW_DEBUG = true;
+
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
 	float fog = exp2(-abs(Fog.w) * dot(p, p));
@@ -265,6 +271,15 @@ void main()
 	vec3 fullbright = vec3(0.0);
 	vec3 emissive = vec3(0.0);
 	vec2 uv = in_uv;
+
+	if (FORCE_WORLD_MAGENTA)
+	{
+		out_fragcolor = vec4(1.0, 0.0, 1.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 	
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
@@ -429,6 +444,19 @@ void main()
 
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
+
+		if (FORCE_SHADOW_DEBUG)
+		{
+			bool shadow_enabled = true;
+			int shadow_mode = 3;
+			float shadow_term = 0.25;
+			bool shadow_receiver = true;
+			out_fragcolor = vec4(vec3(shadow_term), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
 
 		bool shadow_enabled = ShadowDebug.x > 0.5;
 		int shadow_mode = int(ShadowDebug.y + 0.5);
