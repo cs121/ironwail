@@ -106,10 +106,6 @@ layout(binding=6) uniform sampler2D ShadowMapDepth;
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
-// Stage 1 shadow debug guards (temporary).
-// Toggle FORCE_ALIAS_MAGENTA to confirm this permutation is bound at runtime.
-const bool FORCE_ALIAS_MAGENTA = true;
-
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
 #else
@@ -173,15 +169,6 @@ void main()
 	int shadow_mode = int(ShadowControl.y + 0.5);
 	vec4 lit_color = in_color;
 
-	if (FORCE_ALIAS_MAGENTA && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
-	{
-		out_fragcolor = vec4(1.0, 0.0, 1.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
 #endif
@@ -215,7 +202,25 @@ void main()
 				shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
 		}
 	}
-	if (shadow_mode >= 2 && allow_debug)
+	if (shadow_mode == 1 && allow_debug)
+	{
+		out_fragcolor = vec4(vec3(shadow_term), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (shadow_mode == 2 && allow_debug)
+	{
+		out_fragcolor = shadow_term < 0.5
+			? vec4(1.0, 0.0, 0.0, 1.0)
+			: vec4(0.0, 1.0, 0.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (shadow_mode >= 3 && allow_debug)
 	{
 		out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
 #if !OIT
