@@ -708,6 +708,8 @@ size_t gl_bmodel_indirect_buffer_size = 0;
 GLuint gl_bmodel_surf_buffer = 0;
 GLuint gl_bmodel_marksurf_buffer = 0;
 GLuint gl_bmodel_marksurf_buffer_size = 0;
+int *gl_bmodel_cmd_tris = NULL;
+int gl_bmodel_cmd_tris_count = 0;
 
 /*
 ==================
@@ -730,6 +732,9 @@ void GL_DeleteBModelBuffers (void)
 	gl_bmodel_surf_buffer = 0;
 	gl_bmodel_marksurf_buffer = 0;
 	gl_bmodel_marksurf_buffer_size = 0;
+	free (gl_bmodel_cmd_tris);
+	gl_bmodel_cmd_tris = NULL;
+	gl_bmodel_cmd_tris_count = 0;
 }
 
 /*
@@ -1124,6 +1129,14 @@ void GL_BuildBModelMarkBuffers (void)
 	{
 		cmds[i].baseVertex = (minverts[i] == UINT_MAX) ? 0 : minverts[i];
 	}
+
+	free (gl_bmodel_cmd_tris);
+	gl_bmodel_cmd_tris = (int *)calloc ((size_t)numtex, sizeof (*gl_bmodel_cmd_tris));
+	if (!gl_bmodel_cmd_tris)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d cmd tris)", numtex);
+	gl_bmodel_cmd_tris_count = numtex;
+	for (i = 0; i < numtex; i++)
+		gl_bmodel_cmd_tris[i] = (int)(cmds[i].count / 3);
 
 	// compute per-drawcall index buffer offsets
 	sum = 0;

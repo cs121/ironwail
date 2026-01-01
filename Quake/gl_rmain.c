@@ -182,6 +182,8 @@ static qboolean MatrixInverse4x4(const float m[16], float out[16])
 //johnfitz -- rendering statistics
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
+int rs_shadow_drawcalls_world, rs_shadow_drawcalls_alias;
+int rs_shadow_tris_world, rs_shadow_tris_alias;
 
 //
 // view origin
@@ -253,15 +255,22 @@ cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARC
 cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
 cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
+cvar_t	r_shadowmap = { "r_shadowmap", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
 cvar_t	r_shadow_bias = { "r_shadow_bias", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias = { "r_shadow_normalbias", "1.0", CVAR_ARCHIVE };
+cvar_t	r_shadowmap_bias = { "r_shadowmap_bias", "0.0008", CVAR_ARCHIVE };
+cvar_t	r_shadowmap_slopebias = { "r_shadowmap_slopebias", "2.0", CVAR_ARCHIVE };
+cvar_t	r_shadowmap_cull_front = { "r_shadowmap_cull_front", "1", CVAR_ARCHIVE };
+cvar_t	r_shadowmap_force_disable_scissor = { "r_shadowmap_force_disable_scissor", "1", CVAR_ARCHIVE };
+cvar_t	r_shadowmap_freeze = { "r_shadowmap_freeze", "0", CVAR_NONE };
 cvar_t	r_shadow_bias_mdl = { "r_shadow_bias_mdl", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
+cvar_t	r_shadowmap_debug = { "r_shadowmap_debug", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
@@ -3147,7 +3156,7 @@ void R_SetupView (void)
         r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
         r_framedata.lightgrid_params[2] =
-                (r_shadows.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
+                (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
                 ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
                 : 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
@@ -3163,17 +3172,22 @@ void R_SetupView (void)
         r_framedata.shader_params[1] = 0.f;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
-        r_framedata.shadow_params[0] = r_shadow_bias.value;
-        r_framedata.shadow_params[1] = r_shadow_normalbias.value;
+        r_framedata.shadow_params[0] = r_shadowmap_bias.value;
+        r_framedata.shadow_params[1] = r_shadowmap_slopebias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
-        r_framedata.shadow_debug[0] = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
-        r_framedata.shadow_debug[1] = r_shadow_debug.value;
+        {
+                float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
+                r_framedata.shadow_debug[0] =
+                        (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
+                r_framedata.shadow_debug[1] = debug_mode;
+        }
         r_framedata.shadow_debug[2] = 0.f;
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_dlight_params[2] =
+                (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
         r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
@@ -4591,6 +4605,8 @@ void R_RenderView (void)
 		//johnfitz -- rendering statistics
 		rs_brushpolys = rs_aliaspolys = rs_skypolys =
 			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
+		rs_shadow_drawcalls_world = rs_shadow_drawcalls_alias = 0;
+		rs_shadow_tris_world = rs_shadow_tris_alias = 0;
 	}
         else if (gl_finish.value)
                 glFinish ();
@@ -4631,5 +4647,11 @@ void R_RenderView (void)
 			rs_brushpolys,
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
+	if (r_speeds.value)
+		Con_Printf ("shadow %4i dc/%6i tri world  %4i dc/%6i tri alias\n",
+			rs_shadow_drawcalls_world,
+			rs_shadow_tris_world,
+			rs_shadow_drawcalls_alias,
+			rs_shadow_tris_alias);
 	//johnfitz
 }

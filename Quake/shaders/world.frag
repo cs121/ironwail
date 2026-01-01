@@ -7,7 +7,8 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=5) uniform sampler2DShadow ShadowMap;
+layout(binding=6) uniform sampler2D ShadowMapDepth;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -424,15 +425,17 @@ void main()
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
 
-		float shadow_range = 1.0;
-		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool shadow_enabled = ShadowDebug.x > 0.5;
+		int shadow_mode = int(ShadowDebug.y + 0.5);
+		float shadow_range = 1.0;
+		float shadow_term = 1.0;
+		if (shadow_enabled && shadow_mode != 4)
+			shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
-		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
+		if (shadow_enabled && shadow_mode >= 2)
 		{
-			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
-			out_fragcolor = vec4(vec3(debug_value), 1.0);
+			out_fragcolor = vec4(ShadowDebugColor(in_pos, shadow_term), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
