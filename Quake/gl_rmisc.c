@@ -76,6 +76,15 @@ extern cvar_t r_dlight_bloom_radius;
 extern cvar_t r_dlight_bloom_threshold;
 extern cvar_t r_dlight_ndotl;
 extern cvar_t r_dlight_satchop;
+extern cvar_t r_shadows;
+extern cvar_t r_shadow_sun;
+extern cvar_t r_shadowmap_size;
+extern cvar_t r_shadow_bias;
+extern cvar_t r_shadow_normalbias;
+extern cvar_t r_shadow_pcf;
+extern cvar_t r_shadow_pcf_taps;
+extern cvar_t r_shadow_debug;
+extern cvar_t r_shadow_sun_dir;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
@@ -548,6 +557,15 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_dlight_bloom_threshold);
         Cvar_RegisterVariable (&r_dlight_ndotl);
         Cvar_RegisterVariable (&r_dlight_satchop);
+        Cvar_RegisterVariable (&r_shadows);
+        Cvar_RegisterVariable (&r_shadow_sun);
+        Cvar_RegisterVariable (&r_shadowmap_size);
+        Cvar_RegisterVariable (&r_shadow_bias);
+        Cvar_RegisterVariable (&r_shadow_normalbias);
+        Cvar_RegisterVariable (&r_shadow_pcf);
+        Cvar_RegisterVariable (&r_shadow_pcf_taps);
+        Cvar_RegisterVariable (&r_shadow_debug);
+        Cvar_RegisterVariable (&r_shadow_sun_dir);
 	DLightPool_RegisterCvars ();
         Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
@@ -1454,16 +1472,4 @@ void GL_ReserveDeviceMemory (GLenum target, size_t numbytes, GLuint *outbuf, siz
 	*outofs = frameres_device_offset;
 
 	frameres_device_offset += numbytes;
-}
-
-void R_InitShadow (void)
-{
-}
-
-void R_ShutdownShadow (void)
-{
-}
-
-void R_ResizeShadowMapIfNeeded (void)
-{
 }

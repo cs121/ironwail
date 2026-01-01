@@ -24,6 +24,10 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    DLightParams;
         vec4    ColorSpaceParams;
         vec4    ShaderParams;
+        mat4    ShadowViewProj;
+        vec4    ShadowParams;
+        vec4    ShadowDebug;
+        vec4    ShadowSunDir;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    _Pad1;
