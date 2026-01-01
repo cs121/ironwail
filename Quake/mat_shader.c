@@ -1198,6 +1198,8 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_MONSTERCLIP;
 	if (material->surfaceparms & MAT_SURFPARM_STONE)
 		flags |= MAT_SHADERFLAG_STONE;
+	if (material->surfaceparms & MAT_SURFPARM_NO_SHADOW_RECEIVE)
+		flags |= MAT_SHADERFLAG_NO_SHADOW_RECEIVE;
 	if (material->emissive_enable)
 		flags |= MAT_SHADERFLAG_EMISSIVE;
 	if (material->bloom_enable)

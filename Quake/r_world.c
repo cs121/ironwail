@@ -482,6 +482,7 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_MAT_TRANS       (1u << 10)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
+#define CALLFLAG_MAT_NO_SHADOW_RECEIVE (1u << 13)
 
 static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 {
@@ -1070,6 +1071,10 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
+			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
+				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
+			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
+				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 			mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
 
 			for (stage_index = 0; stage_index < stage_count; stage_index++)
@@ -1300,6 +1305,8 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;
 				}
+				if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
+					extra_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
 					continue;
@@ -1531,6 +1538,8 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
+			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
+				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_shaders.value > 0.f && t->shader && t->shader->stages)
 			{
@@ -1689,6 +1698,8 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 				extra_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				extra_flags |= CALLFLAG_MAT_SKY;
+			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
+				extra_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)

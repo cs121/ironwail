@@ -73,7 +73,8 @@ const uint
 	CF_MAT_GODRAY = 512u,
 	CF_MAT_TRANS = 1024u,
 	CF_MAT_SKY = 2048u,
-	CF_MAT_HAS_SHADER = 4096u;
+	CF_MAT_HAS_SHADER = 4096u,
+	CF_MAT_NO_SHADOW_RECEIVE = 8192u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -429,7 +430,11 @@ void main()
 		int shadow_mode = int(ShadowDebug.y + 0.5);
 		float shadow_range = 1.0;
 		float shadow_term = 1.0;
-		if (shadow_enabled && shadow_mode != 4)
+		bool shadow_receiver = (in_flags & CF_MAT_SKY) == 0u;
+		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_EMISSIVE) == 0u;
+		shadow_receiver = shadow_receiver && (in_flags & CF_USE_EMISSIVE) == 0u;
+		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_NO_SHADOW_RECEIVE) == 0u;
+		if (shadow_enabled && shadow_mode != 4 && shadow_receiver)
 			shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
@@ -444,19 +449,22 @@ void main()
 
 		vec3 total_light;
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
+		vec3 ambient_term = vec3(0.0);
+		vec3 direct_term = vec3(0.0);
 
 		if (lightgrid_shadow)
 		{
-			vec3 ambient = clamped_static * lightgrid;
-			vec3 direct = clamped_static - ambient;
+			ambient_term = clamped_static * lightgrid;
+			direct_term = clamped_static - ambient_term;
 			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			total_light = ambient + direct * shadow_scale;
+			total_light = ambient_term + direct_term * shadow_scale;
 		}
 		else
 		{
-			total_light = clamped_static;
-			if (shadow_enabled)
-				total_light *= shadow_term;
+			ambient_term = vec3(0.0);
+			direct_term = clamped_static;
+			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
+			total_light = ambient_term + direct_term * shadow_scale;
 			total_light *= lightgrid;
 		}
 	

@@ -182,16 +182,32 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
+	vec3 fullbright = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
 	int shadow_mode = int(ShadowDebug.y + 0.5);
 	vec4 lit_color = in_color;
 
-	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+#if MODE == 2
+        uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
+#endif
+
+#if MODE == 2
+        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
+        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
+#else
+        fullbright = texture(FullbrightTex, uv).rgb;
+        emissive = texture(EmissiveTex, uv).rgb;
+#endif
+
+	bool shadow_receiver = !any(greaterThan(emissive, vec3(0.0)));
+	bool shadow_enabled = ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
+
+	if (shadow_enabled)
 	{
 		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		if (shadow_mode != 4)
+		if (shadow_mode != 4 && shadow_receiver)
 		{
 			vec2 shadow_uv;
 			float shadow_ref;
@@ -217,7 +233,6 @@ void main()
 	}
 	lit_color.rgb = clamp(lit_color.rgb + in_direct * shadow_term, 0.0, Overbright);
 #if MODE == 2
-        uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
         vec4 result = textureLod(Tex, uv, 0.);
 #else
         vec4 result = texture(Tex, uv);
@@ -230,14 +245,6 @@ void main()
 	result.rgb = mix(result.rgb, result.rgb * lit_color.rgb, result.a);
 #endif
 	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
-        vec3 fullbright;
-#if MODE == 2
-        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
-        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
-#else
-        fullbright = texture(FullbrightTex, uv).rgb;
-        emissive = texture(EmissiveTex, uv).rgb;
-#endif
         result.rgb += fullbright;
         result.rgb += emissive;
 
