@@ -13,16 +13,13 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 		return;
 	}
 
-	vec3 proj = clip.xyz / clip.w;
-	uv = proj.xy * 0.5 + 0.5;
-#if REVERSED_Z
-	reference = proj.z;
-#else
-	reference = proj.z * 0.5 + 0.5;
-#endif
+	vec3 shadow_coord = clip.xyz / clip.w;
+	shadow_coord = shadow_coord * 0.5 + 0.5;
+	uv = shadow_coord.xy;
+	reference = shadow_coord.z;
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
+		all(lessThanEqual(shadow_coord, vec3(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 }
 
@@ -95,8 +92,8 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	if (ShadowDebug.y > 3.5)
 		return 1.0;
 
-	float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
-	float bias = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
+	float ndotl = dot(normal, ShadowSunDir.xyz);
+	float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
 
 	if (ShadowParams.z > 0.5)
 		return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
@@ -218,19 +215,16 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 		return 1.0;
 	}
 
-	vec3 proj = clip.xyz / clip.w;
-	vec2 uv = proj.xy * 0.5 + 0.5;
-#if REVERSED_Z
-	float reference = proj.z;
-#else
-	float reference = proj.z * 0.5 + 0.5;
-#endif
+	vec3 shadow_coord = clip.xyz / clip.w;
+	shadow_coord = shadow_coord * 0.5 + 0.5;
 
 	vec4 atlas = ShadowDlightAtlas[shadow_index];
+	vec2 uv = shadow_coord.xy;
+	float reference = shadow_coord.z;
 	uv = uv * atlas.xy + atlas.zw;
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
+		all(lessThanEqual(shadow_coord, vec3(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 	if (!inside)
 		return 1.0;
