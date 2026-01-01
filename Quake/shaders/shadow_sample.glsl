@@ -120,6 +120,11 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	float in_range;
 
 	ShadowCoord(world_pos, uv, reference, in_range);
+	vec4 lightClip = ShadowViewProj * vec4(world_pos, 1.0);
+	vec3 lightNDC = lightClip.xyz / lightClip.w;
+	vec3 shadowUVZ = lightNDC * 0.5 + 0.5;
+	bool uv_outside = any(lessThan(shadowUVZ.xy, vec2(0.0))) ||
+		any(greaterThan(shadowUVZ.xy, vec2(1.0)));
 	if (mode == 6)
 	{
 		float matrix_sum = 0.0;
@@ -151,19 +156,18 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	if (mode == 2)
 		return vec3(uv, 0.0);
 	if (mode == 3)
-		return vec3(shadow_term);
+	{
+		if (uv_outside)
+			return vec3(0.0, 0.0, 1.0);
+		return vec3(shadowUVZ.xy, 0.0);
+	}
 	if (mode == 4)
 	{
-		float depth = texture(ShadowMapDepth, uv).r;
-#if REVERSED_Z
-		float receiver_depth = 1.0 - reference;
-		depth = 1.0 - depth;
-#else
-		float receiver_depth = reference;
-#endif
-		float diff = receiver_depth - depth;
-		float scaled = clamp(diff * 10.0 + 0.5, 0.0, 1.0);
-		return vec3(scaled);
+		if (uv_outside)
+			return vec3(0.0, 0.0, 1.0);
+		float sampled_depth = texture(ShadowMapDepth, shadowUVZ.xy).r;
+		float diff = abs(shadowUVZ.z - sampled_depth);
+		return vec3(shadowUVZ.z, sampled_depth, diff);
 	}
 
 	return vec3(shadow_term);
