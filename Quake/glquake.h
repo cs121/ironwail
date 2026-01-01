@@ -400,6 +400,7 @@ void Fog_Init (void);
 extern float r_matview[16];
 extern float r_matproj[16];
 extern float r_matviewproj[16];
+extern float r_fovx, r_fovy;
 
 void R_NewGame (void);
 
@@ -437,6 +438,10 @@ typedef struct gpuframedata_s {
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, yzw: unused
+        float           shadow_viewproj[16];
+        vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
+        vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
+        vec4_t          shadow_sun_dir; // xyz: direction, w: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
@@ -469,6 +474,9 @@ qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
+void R_Shadow_SunPass (void);
+void R_Shadow_DrawDebug (void);
+void R_Shadow_BindShadowMap (GLenum texunit);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
@@ -477,6 +485,7 @@ void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
+void R_DrawBrushModels_Shadow (entity_t **ents, int count);
 void R_DrawAliasModels (entity_t **ents, int count);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
@@ -567,6 +576,8 @@ typedef struct glprogs_s {
 	GLuint		world_dlight[2];		// [alpha test]
 	GLuint		world_dlight_hybrid[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
+	GLuint		shadow_depth;
+	GLuint		shadow_debug;
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
 	GLuint		skycubemap[2][2];	// [anim][dither]
