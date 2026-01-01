@@ -36,10 +36,8 @@ struct PoseVertex
 
 #if MD5
 	layout(location=0) in vec3 in_pos;
-	layout(location=1) in vec4 in_nor;
-	layout(location=2) in vec2 in_uv;
-	layout(location=3) in vec4 in_weights;
-	layout(location=4) in ivec4 in_indices;
+	layout(location=1) in vec4 in_weights;
+	layout(location=2) in ivec4 in_indices;
 
 	layout(std430, binding=2) restrict readonly buffer PoseBuffer
 	{
@@ -56,12 +54,10 @@ struct PoseVertex
 			blendmat += BonePoses[pose + in_indices.w] * in_weights.w;
 		}
 		mat4x3 anim = transpose(blendmat);
-		return PoseVertex((anim * vec4(in_pos, 1.0)).xyz, (anim * vec4(in_nor.xyz, 0.0)).xyz);
+		return PoseVertex((anim * vec4(in_pos, 1.0)).xyz, vec3(0.0));
 	}
 
 #else
-	layout(location=0) in vec2 in_uv;
-
 	layout(std430, binding=2) restrict readonly buffer BlendShapeBuffer
 	{
 		uvec2 PackedPosNor[];
@@ -80,8 +76,8 @@ void main()
 	InstanceData inst = instances[gl_InstanceID];
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
-	vec3 local_vert = mix(pose1.pos, pose2.pos, inst.Blend);
+	vec3 alias_pos = mix(pose1.pos, pose2.pos, inst.Blend);
 	mat4x3 worldmatrix = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
-	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
-	gl_Position = ShadowViewProj * vec4(world_vert, 1.0);
+	vec4 world_pos = vec4((worldmatrix * vec4(alias_pos, 1.0)).xyz, 1.0);
+	gl_Position = ShadowViewProj * world_pos;
 }

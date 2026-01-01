@@ -96,6 +96,8 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
+layout(location=7) out vec3 out_direct;
+layout(location=8) noperspective out vec4 out_shadow_clip;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -112,6 +114,7 @@ void main()
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
+	vec4 shadow_clip = ShadowViewProj * vec4(world_vert, 1.0);
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
@@ -134,7 +137,11 @@ void main()
         vec3 litDlight = inst.DLightColor.rgb * lighting;
         vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
-        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
+        vec3 ambient_color = litAmbient;
+        if (is_viewmodel)
+                ambient_color += vec3(rim);
+        out_color = clamp(vec4(ambient_color, inst.LightColor.a), 0.0, Overbright);
+	out_direct = litDlight;
 	out_normal = world_normal;
+	out_shadow_clip = shadow_clip;
 }

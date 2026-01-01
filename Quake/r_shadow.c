@@ -612,7 +612,13 @@ void R_Shadow_SunPass (void)
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
-		R_DrawAliasModels_Shadow (ents, count);
+		for (int i = 0; i < count; ++i)
+		{
+			entity_t *ent = ents[i];
+			if (ent && ent->model && ent->model->type == mod_alias)
+				R_DrawAliasShadow (ent);
+		}
+		R_FlushAliasShadows ();
 	}
 
 	R_Shadow_RestoreState (&prev_state);
@@ -802,7 +808,13 @@ void R_Shadow_DlightPass (void)
 		{
 			int count = 0;
 			entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
-			R_DrawAliasModels_Shadow (ents, count);
+			for (int i = 0; i < count; ++i)
+			{
+				entity_t *ent = ents[i];
+				if (ent && ent->model && ent->model->type == mod_alias)
+					R_DrawAliasShadow (ent);
+			}
+			R_FlushAliasShadows ();
 		}
 	}
 
