@@ -284,7 +284,7 @@ typedef struct bmodel_gpu_instance_s {
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		_pad0[2];
+	GLfloat		polygon_offset[2];
 	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
@@ -295,7 +295,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
 	GLfloat		alpha;
-	GLfloat		_pad0[2];
+	GLfloat		polygon_offset[2];
 	GLfloat		stage_color[4];
 	GLint		baseinstance;
 	GLint		padding[3];
@@ -319,6 +319,27 @@ static union {
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+
+static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolean use_offset,
+	float *factor, float *units)
+{
+	if (!factor || !units)
+		return;
+	if (!use_offset)
+	{
+		*factor = 0.f;
+		*units = 0.f;
+		return;
+	}
+	if (material && material->polygon_offset)
+	{
+		*factor = material->polygon_offset_factor;
+		*units = material->polygon_offset_units;
+		return;
+	}
+	*factor = 0.f;
+	*units = 1.f;
+}
 
 /*
 =============
@@ -538,8 +559,9 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 R_AddBModelCall
 =============
 */
-static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix, float alpha_override,
-	unsigned extra_flags, qboolean force_fullbright)
+static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix,
+	float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
+	qboolean force_fullbright)
 {
 	GLuint		flags;
 	float		alpha;
@@ -590,6 +612,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->polygon_offset[0] = polygon_offset_factor;
+		call->polygon_offset[1] = polygon_offset_units;
 		call->stage_color[0] = 1.f;
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
@@ -605,6 +629,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->polygon_offset[0] = polygon_offset_factor;
+		call->polygon_offset[1] = polygon_offset_units;
 		call->stage_color[0] = 1.f;
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
@@ -627,7 +653,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 }
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
-	qboolean zfix, float alpha_override, unsigned extra_flags, const vec4_t stage_color)
+	qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
+	const vec4_t stage_color)
 {
 	GLuint flags;
 	float alpha;
@@ -650,6 +677,8 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->polygon_offset[0] = polygon_offset_factor;
+		call->polygon_offset[1] = polygon_offset_units;
 		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
@@ -665,6 +694,8 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
 		call->alpha = alpha;
+		call->polygon_offset[0] = polygon_offset_factor;
+		call->polygon_offset[1] = polygon_offset_units;
 		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
@@ -1099,9 +1130,16 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					current_blend_dst = stage->blend_dst;
 				}
 
-				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-					stage_tex, fb, em,
-					zfix || material->polygon_offset, -1.f, extra_flags, stage_color);
+				{
+					float polygon_offset_factor;
+					float polygon_offset_units;
+					qboolean use_polygon_offset = zfix || material->polygon_offset;
+
+					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
+					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
+						stage_tex, fb, em,
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
+				}
 			}
 		}
 
@@ -1257,9 +1295,16 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				if (t->type == TEXTYPE_CUTOUT)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
 
-				R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-					stage_tex, fb, em,
-					zfix || material->polygon_offset, -1.f, extra_flags, NULL);
+				{
+					float polygon_offset_factor;
+					float polygon_offset_units;
+					qboolean use_polygon_offset = zfix || material->polygon_offset;
+
+					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
+					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
+						stage_tex, fb, em,
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, NULL);
+				}
 			}
 		}
 
@@ -1467,9 +1512,16 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 				zfix = true;
 
 			extra_flags |= mat_call_flags;
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
-				pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
-				zfix, -1, extra_flags, force_fullbright);
+			{
+				float polygon_offset_factor;
+				float polygon_offset_units;
+				const shader_material_t *material = (r_shaders.value > 0.f) ? t->shader : NULL;
+
+				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
+				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
+					pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
+					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright);
+			}
 		}
 		
 		baseinst += numinst;
@@ -1611,9 +1663,17 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)
 				continue;
-			R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
-				R_TextureAnimation (t, frame),
-				!isworld, alpha, extra_flags, false);
+			{
+				float polygon_offset_factor;
+				float polygon_offset_units;
+				qboolean zfix = !isworld;
+				const shader_material_t *material = (r_shaders.value > 0.f) ? t->shader : NULL;
+
+				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
+				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
+					R_TextureAnimation (t, frame),
+					zfix, polygon_offset_factor, polygon_offset_units, alpha, extra_flags, false);
+			}
 		}
 
 		baseinst += numinst;

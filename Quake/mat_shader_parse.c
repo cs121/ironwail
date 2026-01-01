@@ -1630,6 +1630,8 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.cull_mode = MAT_CULL_BACK;
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
+	material.polygon_offset_factor = 0.f;
+	material.polygon_offset_units = 1.f;
 
 	while ((data = Mat_Shader_ParseToken (data, state)) != NULL)
 	{
@@ -1721,11 +1723,72 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		if (!q_strcasecmp (com_token, "polygonOffset"))
 		{
 			Mat_Shader_MarkKeywordSeen ("polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			qboolean parsed = false;
 			qboolean value_bool = true;
+			float factor = material.polygon_offset_factor;
+			float units = material.polygon_offset_units;
+			const char *cursor = Mat_Shader_ParseToken (data, NULL);
 
-			parsed = ParseOptionalBool (&data, &value_bool, state);
-			material.polygon_offset = parsed ? value_bool : true;
+			if (!cursor || !com_token[0] || Mat_Shader_IsBraceToken (com_token))
+			{
+				material.polygon_offset = true;
+				continue;
+			}
+
+			if (!Mat_Shader_IsNumericToken (com_token) && Mat_Shader_IsBoolToken (com_token))
+			{
+				if (!ParseRequiredBool (&data, &value_bool, state))
+				{
+					data = ResyncMaterialBlock (data, state);
+					break;
+				}
+				material.polygon_offset = value_bool;
+				if (!value_bool)
+					continue;
+
+				cursor = Mat_Shader_ParseToken (data, NULL);
+				if (cursor && com_token[0] && Mat_Shader_IsNumericToken (com_token))
+				{
+					const char *next = Mat_Shader_ParseToken (cursor, NULL);
+					if (next && com_token[0] && Mat_Shader_IsNumericToken (com_token))
+					{
+						if (!ParseFloat (&data, &factor, state) || !ParseFloat (&data, &units, state))
+						{
+							data = ResyncMaterialBlock (data, state);
+							break;
+						}
+						material.polygon_offset_factor = factor;
+						material.polygon_offset_units = units;
+					}
+				}
+				continue;
+			}
+
+			if (Mat_Shader_IsNumericToken (com_token))
+			{
+				const char *next = Mat_Shader_ParseToken (cursor, NULL);
+				if (next && com_token[0] && Mat_Shader_IsNumericToken (com_token))
+				{
+					if (!ParseFloat (&data, &factor, state) || !ParseFloat (&data, &units, state))
+					{
+						data = ResyncMaterialBlock (data, state);
+						break;
+					}
+					material.polygon_offset = true;
+					material.polygon_offset_factor = factor;
+					material.polygon_offset_units = units;
+					continue;
+				}
+
+				if (!ParseRequiredBool (&data, &value_bool, state))
+				{
+					data = ResyncMaterialBlock (data, state);
+					break;
+				}
+				material.polygon_offset = value_bool;
+				continue;
+			}
+
+			material.polygon_offset = true;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "emissive"))
