@@ -38,6 +38,7 @@ extern gltexture_t *lightmap_texture;
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_mode;
+extern cvar_t r_shadowmap_cull_front;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -48,6 +49,8 @@ extern size_t gl_bmodel_indirect_buffer_size;
 extern GLuint gl_bmodel_surf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer_size;
+extern int *gl_bmodel_cmd_tris;
+extern int gl_bmodel_cmd_tris_count;
 
 typedef struct gpumark_frame_s {
 	vec4_t		frustum[4];
@@ -319,6 +322,7 @@ static union {
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+static qboolean						bmodel_shadow_pass;
 
 static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolean use_offset,
 	float *factor, float *units)
@@ -569,6 +573,13 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
+
+	if (bmodel_shadow_pass)
+	{
+		rs_shadow_drawcalls_world += 1;
+		if (gl_bmodel_cmd_tris && index >= 0 && index < gl_bmodel_cmd_tris_count)
+			rs_shadow_tris_world += gl_bmodel_cmd_tris[index] * num_instances;
+	}
 
 	if (t)
 	{
@@ -1421,13 +1432,15 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else if (pass == BP_SHADOW)
         {
                 state &= ~GLS_MASK_CULL;
-                state |= GLS_BLEND_OPAQUE | GLS_CULL_FRONT;
+                state |= GLS_BLEND_OPAQUE |
+                        (r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK);
         }
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
+        bmodel_shadow_pass = (pass == BP_SHADOW);
         R_ResetBModelCalls (program);
         GL_SetState (state);
 if (pass <= BP_ALPHATEST)
@@ -1435,6 +1448,7 @@ if (pass <= BP_ALPHATEST)
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 R_Shadow_BindShadowMap (GL_TEXTURE5);
+R_Shadow_BindShadowMapRaw (GL_TEXTURE6);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {

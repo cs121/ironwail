@@ -12,13 +12,20 @@ of the License, or (at your option) any later version.
 
 extern cvar_t gl_farclip;
 extern cvar_t r_shadows;
+extern cvar_t r_shadowmap;
 extern cvar_t r_shadow_sun;
 extern cvar_t r_shadowmap_size;
 extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
+extern cvar_t r_shadowmap_bias;
+extern cvar_t r_shadowmap_slopebias;
+extern cvar_t r_shadowmap_cull_front;
+extern cvar_t r_shadowmap_force_disable_scissor;
+extern cvar_t r_shadowmap_freeze;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
+extern cvar_t r_shadowmap_debug;
 extern cvar_t r_shadow_sun_dir;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_max;
@@ -38,6 +45,56 @@ static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
 static int shadow_dlight_selected_count;
 static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
+static float shadow_frozen_viewproj[16];
+static vec4_t shadow_frozen_sun_dir;
+static qboolean shadow_frozen_valid;
+static float shadow_dlight_frozen_viewproj[SHADOW_DLIGHT_MAX][16];
+static vec4_t shadow_dlight_frozen_atlas[SHADOW_DLIGHT_MAX];
+static vec4_t shadow_dlight_frozen_info[SHADOW_DLIGHT_MAX];
+static int shadow_dlight_frozen_selected_count;
+static qboolean shadow_dlight_frozen_valid;
+
+typedef struct shadow_state_s
+{
+	GLint framebuffer;
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLboolean scissor_enabled;
+	GLboolean color_mask[4];
+	GLboolean depth_mask;
+	GLboolean depth_test;
+	GLint depth_func;
+} shadow_state_t;
+
+static void R_Shadow_SaveState (shadow_state_t *state)
+{
+	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &state->framebuffer);
+	glGetIntegerv (GL_VIEWPORT, state->viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
+	glGetBooleanv (GL_SCISSOR_TEST, &state->scissor_enabled);
+	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_mask);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_mask);
+	glGetBooleanv (GL_DEPTH_TEST, &state->depth_test);
+	glGetIntegerv (GL_DEPTH_FUNC, &state->depth_func);
+}
+
+static void R_Shadow_RestoreState (const shadow_state_t *state)
+{
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, state->framebuffer);
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
+	if (state->scissor_enabled)
+		glEnable (GL_SCISSOR_TEST);
+	else
+		glDisable (GL_SCISSOR_TEST);
+	glColorMask (state->color_mask[0], state->color_mask[1], state->color_mask[2], state->color_mask[3]);
+	glDepthMask (state->depth_mask);
+	if (state->depth_test)
+		glEnable (GL_DEPTH_TEST);
+	else
+		glDisable (GL_DEPTH_TEST);
+	glDepthFunc (state->depth_func);
+}
 
 static void R_Shadow_DestroyDlightResources (void)
 {
@@ -54,6 +111,8 @@ static void R_Shadow_DestroyDlightResources (void)
 	shadow_dlight_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
+	shadow_dlight_frozen_valid = false;
+	shadow_dlight_frozen_selected_count = 0;
 }
 
 static void R_Shadow_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
@@ -100,6 +159,7 @@ static void R_Shadow_DestroyResources (void)
 		shadow_depth_tex = 0;
 	}
 	shadowmap_size = 0;
+	shadow_frozen_valid = false;
 	R_Shadow_DestroyDlightResources ();
 }
 
@@ -398,15 +458,16 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 	{
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
@@ -437,6 +498,9 @@ void R_InitShadow (void)
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
 	shadow_dlight_selected_count = 0;
+	shadow_frozen_valid = false;
+	shadow_dlight_frozen_valid = false;
+	shadow_dlight_frozen_selected_count = 0;
 }
 
 void R_ShutdownShadow (void)
@@ -471,15 +535,16 @@ void R_ResizeShadowMapIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_depth_tex, -1, "shadowmap depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, desired, desired);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 	{
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
@@ -500,21 +565,39 @@ void R_ResizeShadowMapIfNeeded (void)
 
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
+	float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE,
+		(debug_mode > 3.5f) ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+}
+
+void R_Shadow_BindShadowMapRaw (GLenum texunit)
+{
+	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
 {
 	if (shadow_dlight_depth_tex)
+	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
 }
 
 void R_Shadow_SunPass (void)
 {
-	qboolean enabled = r_shadows.value > 0.f && r_shadow_sun.value > 0.f;
+	qboolean enabled = r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f;
 	vec4_t sun_dir;
+	float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
+	static int last_debug_mode = -1;
+	shadow_state_t prev_state;
 
 	r_framedata.shadow_debug[0] = 0.f;
 	IdentityMatrix (r_framedata.shadow_viewproj);
@@ -527,21 +610,43 @@ void R_Shadow_SunPass (void)
 	if (!shadow_depth_tex || !shadow_fbo)
 		return;
 
-	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
+	if (r_shadowmap_freeze.value > 0.f && shadow_frozen_valid)
+	{
+		memcpy (r_framedata.shadow_viewproj, shadow_frozen_viewproj, sizeof (shadow_frozen_viewproj));
+		VectorCopy (shadow_frozen_sun_dir, r_framedata.shadow_sun_dir);
+		r_framedata.shadow_sun_dir[3] = 0.f;
+	}
+	else
+	{
+		R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
+		VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
+		r_framedata.shadow_sun_dir[3] = 0.f;
+		memcpy (shadow_frozen_viewproj, r_framedata.shadow_viewproj, sizeof (shadow_frozen_viewproj));
+		VectorCopy (sun_dir, shadow_frozen_sun_dir);
+		shadow_frozen_sun_dir[3] = 0.f;
+		shadow_frozen_valid = true;
+	}
 	r_framedata.shadow_debug[0] = 1.f;
-	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
-	r_framedata.shadow_sun_dir[3] = 0.f;
 	R_UploadFrameData ();
 
 	GL_BeginGroup ("Shadow map (sun)");
 
+	R_Shadow_SaveState (&prev_state);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
+	if (r_shadowmap_force_disable_scissor.value > 0.f)
+		glDisable (GL_SCISSOR_TEST);
+	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	glDepthMask (GL_TRUE);
+	glEnable (GL_DEPTH_TEST);
+	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	GL_UseProgram (glprogs.shadow_depth);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+	GL_SetState (GLS_BLEND_OPAQUE |
+		(r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK) |
+		GLS_ATTRIBS (6));
 	glClear (GL_DEPTH_BUFFER_BIT);
 
 	{
@@ -555,16 +660,34 @@ void R_Shadow_SunPass (void)
 		R_DrawAliasModels_Shadow (ents, count);
 	}
 
+	R_Shadow_RestoreState (&prev_state);
+
+	if (debug_mode >= 0.5f && (int)debug_mode != last_debug_mode)
+	{
+		Con_DPrintf ("Shadow viewproj m00=%.4f m11=%.4f sun_dir=(%.3f %.3f %.3f)\n",
+			r_framedata.shadow_viewproj[0],
+			r_framedata.shadow_viewproj[5],
+			r_framedata.shadow_sun_dir[0],
+			r_framedata.shadow_sun_dir[1],
+			r_framedata.shadow_sun_dir[2]);
+		last_debug_mode = (int)debug_mode;
+	}
+	else if (debug_mode < 0.5f)
+	{
+		last_debug_mode = -1;
+	}
+
 	GL_EndGroup ();
 }
 
 void R_Shadow_DlightPass (void)
 {
-	qboolean enabled = r_shadows.value > 0.f && r_shadow_dlights.value > 0.f;
+	qboolean enabled = r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_dlights.value > 0.f;
 	float sun_viewproj[16];
 	int max_tiles;
 	int grid;
 	int tiles_used = 0;
+	shadow_state_t prev_state;
 
 	shadow_dlight_selected_count = 0;
 
@@ -597,6 +720,19 @@ void R_Shadow_DlightPass (void)
 
 	if (r_framedata.numlights == 0)
 		return;
+
+	if (r_shadowmap_freeze.value > 0.f && shadow_dlight_frozen_valid)
+	{
+		for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+		{
+			memcpy (r_framedata.shadow_dlight_viewproj[i], shadow_dlight_frozen_viewproj[i], sizeof (shadow_dlight_frozen_viewproj[i]));
+			memcpy (r_framedata.shadow_dlight_atlas[i], shadow_dlight_frozen_atlas[i], sizeof (shadow_dlight_frozen_atlas[i]));
+			memcpy (r_framedata.shadow_dlight_info[i], shadow_dlight_frozen_info[i], sizeof (shadow_dlight_frozen_info[i]));
+		}
+		shadow_dlight_selected_count = shadow_dlight_frozen_selected_count;
+		R_UploadFrameData ();
+		return;
+	}
 
 	{
 		float scores[SHADOW_DLIGHT_MAX];
@@ -652,10 +788,15 @@ void R_Shadow_DlightPass (void)
 
 	GL_BeginGroup ("Shadow map (dlights)");
 
+	R_Shadow_SaveState (&prev_state);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 	glEnable (GL_SCISSOR_TEST);
+	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	glDepthMask (GL_TRUE);
+	glEnable (GL_DEPTH_TEST);
+	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -693,7 +834,9 @@ void R_Shadow_DlightPass (void)
 		glClear (GL_DEPTH_BUFFER_BIT);
 
 		GL_UseProgram (glprogs.shadow_depth);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+		GL_SetState (GLS_BLEND_OPAQUE |
+			(r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK) |
+			GLS_ATTRIBS (6));
 
 		{
 			int count = 0;
@@ -711,29 +854,36 @@ void R_Shadow_DlightPass (void)
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 
+	shadow_dlight_frozen_selected_count = shadow_dlight_selected_count;
+	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+	{
+		memcpy (shadow_dlight_frozen_viewproj[i], r_framedata.shadow_dlight_viewproj[i], sizeof (shadow_dlight_frozen_viewproj[i]));
+		memcpy (shadow_dlight_frozen_atlas[i], r_framedata.shadow_dlight_atlas[i], sizeof (shadow_dlight_frozen_atlas[i]));
+		memcpy (shadow_dlight_frozen_info[i], r_framedata.shadow_dlight_info[i], sizeof (shadow_dlight_frozen_info[i]));
+	}
+	shadow_dlight_frozen_valid = true;
+
+	R_Shadow_RestoreState (&prev_state);
+
 	GL_EndGroup ();
 }
 
 void R_Shadow_DrawDebug (void)
 {
-	int mode = (int)r_shadow_debug.value;
-	if (mode != 1 && mode != 4)
+	int mode = (int)(r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value);
+	if (mode != 1)
 		return;
 	if (!glprogs.shadow_debug)
 		return;
 	if (mode == 1 && !shadow_depth_tex)
-		return;
-	if (mode == 4 && !shadow_dlight_depth_tex)
 		return;
 
 	GL_BeginGroup ("Shadow map debug");
 
 	GL_UseProgram (glprogs.shadow_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	if (mode == 1)
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
-	else
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();

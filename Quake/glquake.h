@@ -342,6 +342,8 @@ void R_SetAlphaMode (alphamode_t mode);
 //johnfitz -- rendering statistics
 extern int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 extern int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
+extern int rs_shadow_drawcalls_world, rs_shadow_drawcalls_alias;
+extern int rs_shadow_tris_world, rs_shadow_tris_alias;
 
 //johnfitz -- track developer statistics that vary every frame
 extern cvar_t devstats;
@@ -487,6 +489,7 @@ void R_Shadow_SunPass (void);
 void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
+void R_Shadow_BindShadowMapRaw (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
 
 void R_DrawBrushModels (entity_t **ents, int count);
