@@ -525,14 +525,14 @@ void R_Shadow_BindShadowMap (GLenum texunit)
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE,
 		(debug_mode > 3.5f) ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
 }
 
 void R_Shadow_BindShadowMapRaw (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
@@ -541,7 +541,7 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GREATER : GL_LESS);
 	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
@@ -596,7 +596,8 @@ void R_Shadow_SunPass (void)
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
-	glDepthFunc (GL_LEQUAL);
+	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
+	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE |
@@ -757,7 +758,8 @@ void R_Shadow_DlightPass (void)
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
-	glDepthFunc (GL_LEQUAL);
+	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
+	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
