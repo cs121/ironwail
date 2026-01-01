@@ -435,7 +435,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
@@ -535,14 +535,14 @@ void R_Shadow_BindShadowMap (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 }
 
 void R_Shadow_BindShadowMapRaw (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
@@ -551,7 +551,7 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);

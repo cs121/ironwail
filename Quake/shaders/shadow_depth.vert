@@ -60,6 +60,7 @@ vec3 TransformPosition(vec3 p, vec4 mat[3])
 }
 
 layout(location=0) in vec3 in_pos;
+layout(location=0) out vec4 v_light_clip;
 
 void main()
 {
@@ -78,5 +79,6 @@ void main()
 		float zoffset = (call.polygon_offset.x + call.polygon_offset.y) * ZBIAS;
 		clip.z += zoffset;
 	}
+	v_light_clip = clip;
 	gl_Position = clip;
 }
