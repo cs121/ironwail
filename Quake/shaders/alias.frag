@@ -100,7 +100,7 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=5) uniform sampler2DShadow ShadowMapCmp;
 layout(binding=6) uniform sampler2D ShadowMapDepth;
 
 #define SHADOW_SUN 1
@@ -190,6 +190,16 @@ void main()
 	if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
 	{
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
+	}
+	float shadow_strength = clamp(ShadowControl.z, 0.0, 1.0);
+	shadow_term = mix(1.0, shadow_term, shadow_strength);
+	if (shadow_mode == 10 && allow_debug)
+	{
+		out_fragcolor = vec4(ShadowDebugDepth(world_pos), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
 	}
 	if (shadow_mode == 1 && allow_debug)
 	{

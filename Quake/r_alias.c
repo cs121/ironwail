@@ -31,8 +31,8 @@ extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
-extern cvar_t r_shadowmap_bias;
-extern cvar_t r_shadowmap_slopebias;
+extern cvar_t r_shadow_bias;
+extern cvar_t r_shadow_normal_bias;
 extern cvar_t r_shadowmap_cull_front;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
@@ -588,8 +588,8 @@ ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadowmap_bias.value;
-	ibuf.global.shadow_params[1] = r_shadowmap_slopebias.value;
+	ibuf.global.shadow_params[0] = r_shadow_bias.value;
+	ibuf.global.shadow_params[1] = r_shadow_normal_bias.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
@@ -605,7 +605,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindShadowMapRaw (GL_TEXTURE5);
+	R_Shadow_BindShadowMap (GL_TEXTURE5);
 	R_Shadow_BindShadowMapRaw (GL_TEXTURE6);
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
@@ -737,8 +737,8 @@ static void R_FlushAliasInstances_Shadow (void)
 	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadowmap_bias.value;
-	ibuf.global.shadow_params[1] = r_shadowmap_slopebias.value;
+	ibuf.global.shadow_params[0] = r_shadow_bias.value;
+	ibuf.global.shadow_params[1] = r_shadow_normal_bias.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
