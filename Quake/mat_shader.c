@@ -67,12 +67,37 @@ static mat_shader_unknown_t *mat_shader_unknowns;
 static qboolean mat_shader_loaded;
 static qboolean mat_shader_unknown_overflow;
 
+static const char *Mat_Shader_SortName (mat_sort_key_t key)
+{
+	switch (key)
+	{
+	case MAT_SORT_SKY:
+		return "sky";
+	case MAT_SORT_OPAQUE:
+		return "opaque";
+	case MAT_SORT_SEE_THROUGH:
+		return "seeThrough";
+	case MAT_SORT_DECAL:
+		return "decal";
+	case MAT_SORT_BANNER:
+		return "banner";
+	case MAT_SORT_UNDERWATER:
+		return "underwater";
+	case MAT_SORT_ADDITIVE:
+		return "additive";
+	case MAT_SORT_NEAREST:
+		return "nearest";
+	default:
+		return "unknown";
+	}
+}
+
 static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 {
 	{ "qer_editorimage", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Editor preview texture." },
 	{ "surfaceparm", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface flags; see surfaceparm scope." },
 	{ "cull", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: back/front/none." },
-	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: opaque/decal/additive/nearest." },
+	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: sky/opaque/seeThrough/decal/banner/underwater/additive/nearest or numeric." },
 	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
@@ -1240,7 +1265,6 @@ void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname)
 void Mat_Shader_Print (const shader_material_t *material)
 {
 	static const char *const cull_names[] = { "back", "front", "none" };
-	static const char *const sort_names[] = { "opaque", "decal", "additive", "nearest" };
 	static const char *const blend_names[] = { "replace", "alpha", "add", "mult", "premult", "custom" };
 	static const char *const depth_names[] = { "lequal", "less", "equal", "greater", "gequal", "always", "never" };
 	static const char *const map_names[] = { "map", "clampmap", "lightmap", "white", "black" };
@@ -1257,7 +1281,7 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  render flags: 0x%08x\n", material->render_flags);
 	Con_Printf ("  content flags: 0x%08x\n", material->content_flags);
 	Con_Printf ("  cull: %s\n", cull_names[q_min ((int)material->cull_mode, (int)countof (cull_names) - 1)]);
-	Con_Printf ("  sort: %s\n", sort_names[q_min ((int)material->sort_key, (int)countof (sort_names) - 1)]);
+	Con_Printf ("  sort: %s\n", Mat_Shader_SortName (material->sort_key));
 	Con_Printf ("  polygon offset: %s\n", material->polygon_offset ? "on" : "off");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);

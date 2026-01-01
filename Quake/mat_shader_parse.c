@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 #include "mat_shader_parse.h"
 #include <math.h>
+#include <stdlib.h>
 
 /*
 Parsing policy:
@@ -614,16 +615,63 @@ static qboolean Mat_Shader_ParseCullMode (const char *token, mat_cull_mode_t *ou
 
 static qboolean Mat_Shader_ParseSortKey (const char *token, mat_sort_key_t *out)
 {
+	char *endptr;
+	double numeric_value;
+
 	if (!token || !out)
 		return false;
+	if (token[0] == '-' || token[0] == '+' || (token[0] >= '0' && token[0] <= '9'))
+	{
+		numeric_value = strtod (token, &endptr);
+		if (endptr && *endptr == '\0')
+		{
+			if (numeric_value <= MAT_SORT_SKY)
+				*out = MAT_SORT_SKY;
+			else if (numeric_value <= MAT_SORT_OPAQUE)
+				*out = MAT_SORT_OPAQUE;
+			else if (numeric_value <= MAT_SORT_SEE_THROUGH)
+				*out = MAT_SORT_SEE_THROUGH;
+			else if (numeric_value <= MAT_SORT_DECAL)
+				*out = MAT_SORT_DECAL;
+			else if (numeric_value <= MAT_SORT_BANNER)
+				*out = MAT_SORT_BANNER;
+			else if (numeric_value <= MAT_SORT_UNDERWATER)
+				*out = MAT_SORT_UNDERWATER;
+			else if (numeric_value <= MAT_SORT_ADDITIVE)
+				*out = MAT_SORT_ADDITIVE;
+			else
+				*out = MAT_SORT_NEAREST;
+			return true;
+		}
+	}
 	if (!q_strcasecmp (token, "opaque"))
 	{
 		*out = MAT_SORT_OPAQUE;
 		return true;
 	}
+	if (!q_strcasecmp (token, "sky"))
+	{
+		*out = MAT_SORT_SKY;
+		return true;
+	}
+	if (!q_strcasecmp (token, "seethrough") || !q_strcasecmp (token, "seeThrough"))
+	{
+		*out = MAT_SORT_SEE_THROUGH;
+		return true;
+	}
 	if (!q_strcasecmp (token, "decal"))
 	{
 		*out = MAT_SORT_DECAL;
+		return true;
+	}
+	if (!q_strcasecmp (token, "banner"))
+	{
+		*out = MAT_SORT_BANNER;
+		return true;
+	}
+	if (!q_strcasecmp (token, "underwater"))
+	{
+		*out = MAT_SORT_UNDERWATER;
 		return true;
 	}
 	if (!q_strcasecmp (token, "additive"))
