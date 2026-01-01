@@ -13,13 +13,23 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 		return;
 	}
 
-	vec3 shadow_coord = clip.xyz / clip.w;
-	shadow_coord = shadow_coord * 0.5 + 0.5;
-	uv = shadow_coord.xy;
-	reference = shadow_coord.z;
+	vec3 proj = clip.xyz / clip.w;
+	uv = proj.xy * 0.5 + 0.5;
+	float depth01 =
+#if CLIP_Z_ZERO_TO_ONE
+		proj.z;
+#else
+		proj.z * 0.5 + 0.5;
+#endif
 
-	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
-		all(lessThanEqual(shadow_coord, vec3(1.0)));
+#if REVERSED_Z
+		reference = 1.0 - depth01;
+#else
+		reference = depth01;
+#endif
+
+	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
+		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 }
 
