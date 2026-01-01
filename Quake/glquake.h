@@ -446,6 +446,7 @@ typedef struct gpuframedata_s {
         vec4_t          shader_params;  // x: shader debug, yzw: unused
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
+        vec4_t          shadow_control; // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
         float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];

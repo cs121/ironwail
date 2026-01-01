@@ -28,6 +28,7 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    ShaderParams;
         mat4    ShadowViewProj;
         vec4    ShadowParams;
+        vec4    ShadowControl;
         vec4    ShadowDebug;
         vec4    ShadowSunDir;
         mat4    ShadowDlightViewProj[SHADOW_DLIGHT_MAX];

@@ -111,6 +111,7 @@ struct ibuf_s {
 		float	_pad1;
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
+		vec4_t	shadow_control;
 		vec4_t	shadow_debug;
 		vec4_t	shadow_sun_dir;
 	} global;
@@ -591,6 +592,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	ibuf.global.shadow_params[1] = r_shadowmap_slopebias.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
+	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
 	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
@@ -739,6 +741,7 @@ static void R_FlushAliasInstances_Shadow (void)
 	ibuf.global.shadow_params[1] = r_shadowmap_slopebias.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
+	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
 	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
