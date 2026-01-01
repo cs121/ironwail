@@ -2,9 +2,8 @@
 #define SHADOW_SAMPLE_GLSL
 
 #ifdef SHADOW_SUN
-void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_range)
+void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float in_range)
 {
-	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
 	if (clip.w <= 0.0)
 	{
 		uv = vec2(0.0);
@@ -13,20 +12,31 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 		return;
 	}
 
-	vec3 proj = clip.xyz / clip.w;
-	uv = proj.xy * 0.5 + 0.5;
+	vec3 ndc = clip.xyz / clip.w;
+	uv = ndc.xy * 0.5 + 0.5;
 	float depth01 =
 #if CLIP_Z_ZERO_TO_ONE
-		proj.z;
+		ndc.z;
 #else
-		proj.z * 0.5 + 0.5;
+		ndc.z * 0.5 + 0.5;
 #endif
 
+#if REVERSED_Z
+	reference = 1.0 - depth01;
+#else
 	reference = depth01;
+#endif
 
 	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
-		all(lessThanEqual(uv, vec2(1.0)));
+		all(lessThanEqual(uv, vec2(1.0))) &&
+		reference >= 0.0 && reference <= 1.0;
 	in_range = inside ? 1.0 : 0.0;
+}
+
+void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_range)
+{
+	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
+	ShadowCoordFromClip(clip, uv, reference, in_range);
 }
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
@@ -231,16 +241,29 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 		return 1.0;
 	}
 
-	vec3 shadow_coord = clip.xyz / clip.w;
-	shadow_coord = shadow_coord * 0.5 + 0.5;
+	vec3 ndc = clip.xyz / clip.w;
+	vec2 base_uv = ndc.xy * 0.5 + 0.5;
+	float depth01 =
+#if CLIP_Z_ZERO_TO_ONE
+		ndc.z;
+#else
+		ndc.z * 0.5 + 0.5;
+#endif
+
+	float reference =
+#if REVERSED_Z
+		1.0 - depth01;
+#else
+		depth01;
+#endif
 
 	vec4 atlas = ShadowDlightAtlas[shadow_index];
-	vec2 uv = shadow_coord.xy;
-	float reference = shadow_coord.z;
+	vec2 uv = base_uv;
 	uv = uv * atlas.xy + atlas.zw;
 
-	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
-		all(lessThanEqual(shadow_coord, vec3(1.0)));
+	bool inside = all(greaterThanEqual(base_uv, vec2(0.0))) &&
+		all(lessThanEqual(base_uv, vec2(1.0))) &&
+		reference >= 0.0 && reference <= 1.0;
 	in_range = inside ? 1.0 : 0.0;
 	if (!inside)
 		return 1.0;
