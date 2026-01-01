@@ -145,7 +145,7 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 		"#define CLIP_Z_ZERO_TO_ONE %d\n",
 		gl_bindless_able,
 		gl_clipcontrol_able,
-		gl_clipcontrol_able
+		gl_clip_z_01
 	);
 	strings[numstrings++] = header;
 

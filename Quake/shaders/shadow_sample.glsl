@@ -41,10 +41,11 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float shadow_depth = texture(ShadowMap, uv).r;
-	float compare_depth = reference - bias;
 #if REVERSED_Z
+	float compare_depth = reference + bias;
 	return step(shadow_depth, compare_depth);
 #else
+	float compare_depth = reference - bias;
 	return step(compare_depth, shadow_depth);
 #endif
 }
