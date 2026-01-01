@@ -22,6 +22,7 @@ extern cvar_t r_shadowmap_slopebias;
 extern cvar_t r_shadowmap_cull_front;
 extern cvar_t r_shadowmap_force_disable_scissor;
 extern cvar_t r_shadowmap_freeze;
+extern cvar_t r_shadow_freeze;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
@@ -195,26 +196,25 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	vec3_t up = { 0.f, 0.f, 1.f };
 	vec3_t right;
 	vec3_t light_up;
-	vec3_t corner;
-	float znear;
-	float zfar;
+	vec3_t view_forward;
+	vec3_t view_right;
+	vec3_t view_up;
+	vec3_t camera_center;
+	vec3_t eye;
+	float view[16];
+	float ortho[16];
 	float tanx;
 	float tany;
+	float znear;
+	float zfar;
 	float wnear;
 	float hnear;
 	float wfar;
 	float hfar;
-	float min_ls[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
-	float max_ls[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-	float center_ls[3];
-	float extents[3];
-	vec3_t view_forward;
-	vec3_t view_right;
-	vec3_t view_up;
-	vec3_t origin_world;
-	float view[16];
-	float ortho[16];
-	int i;
+	float center_dist;
+	float near_dist;
+	float far_dist;
+	float shadow_radius;
 
 	R_Shadow_GetSunDirection (sun_dir);
 	VectorCopy (sun_dir, out_sun_dir);
@@ -233,69 +233,29 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	VectorNormalize (light_up);
 
 	AngleVectors (r_refdef.viewangles, view_forward, view_right, view_up);
+	(void)view_right;
+	(void)view_up;
 
 	tanx = tanf (DEG2RAD (r_fovx) * 0.5f);
 	tany = tanf (DEG2RAD (r_fovy) * 0.5f);
 
-	{
-		float w = 1.f / tanx;
-		float h = 1.f / tany;
-		float d = 12.f * q_min (w, h);
-		znear = CLAMP (0.5f, d, 4.f);
-	}
-
-	zfar = gl_farclip.value;
+	znear = 1.f;
+	zfar = q_max (gl_farclip.value, znear + 1.f);
 
 	wnear = tanx * znear;
 	hnear = tany * znear;
 	wfar = tanx * zfar;
 	hfar = tany * zfar;
 
-	for (i = 0; i < 8; ++i)
-	{
-		float sx = (i & 1) ? 1.f : -1.f;
-		float sy = (i & 2) ? 1.f : -1.f;
-		float sz = (i & 4) ? zfar : znear;
-		float w = (i & 4) ? wfar : wnear;
-		float h = (i & 4) ? hfar : hnear;
+	center_dist = 0.5f * (zfar + znear);
+	near_dist = sqrtf (wnear * wnear + hnear * hnear + (center_dist - znear) * (center_dist - znear));
+	far_dist = sqrtf (wfar * wfar + hfar * hfar + (zfar - center_dist) * (zfar - center_dist));
+	shadow_radius = q_max (near_dist, far_dist);
+	if (shadow_radius <= 0.f)
+		shadow_radius = 1.f;
 
-		VectorMA (r_refdef.vieworg, sz, view_forward, corner);
-		VectorMA (corner, sx * w, view_right, corner);
-		VectorMA (corner, sy * h, view_up, corner);
-
-		{
-			float lsx = DotProduct (corner, right);
-			float lsy = DotProduct (corner, light_up);
-			float lsz = DotProduct (corner, sun_dir);
-
-			min_ls[0] = q_min (min_ls[0], lsx);
-			min_ls[1] = q_min (min_ls[1], lsy);
-			min_ls[2] = q_min (min_ls[2], lsz);
-			max_ls[0] = q_max (max_ls[0], lsx);
-			max_ls[1] = q_max (max_ls[1], lsy);
-			max_ls[2] = q_max (max_ls[2], lsz);
-		}
-	}
-
-	for (i = 0; i < 3; ++i)
-	{
-		center_ls[i] = 0.5f * (min_ls[i] + max_ls[i]);
-		extents[i] = 0.5f * (max_ls[i] - min_ls[i]);
-	}
-
-	if (shadowmap_size > 0)
-	{
-		float texel_x = (extents[0] * 2.f) / (float)shadowmap_size;
-		float texel_y = (extents[1] * 2.f) / (float)shadowmap_size;
-		if (texel_x > 0.f)
-			center_ls[0] = floorf (center_ls[0] / texel_x) * texel_x;
-		if (texel_y > 0.f)
-			center_ls[1] = floorf (center_ls[1] / texel_y) * texel_y;
-	}
-
-	VectorScale (right, center_ls[0], origin_world);
-	VectorMA (origin_world, center_ls[1], light_up, origin_world);
-	VectorMA (origin_world, center_ls[2], sun_dir, origin_world);
+	VectorMA (r_refdef.vieworg, center_dist, view_forward, camera_center);
+	VectorMA (camera_center, -shadow_radius, sun_dir, eye);
 
 	memset (view, 0, sizeof (view));
 	view[0] = right[0];
@@ -308,15 +268,11 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	view[9] = sun_dir[1];
 	view[10] = sun_dir[2];
 	view[15] = 1.f;
-	view[12] = -DotProduct (right, origin_world);
-	view[13] = -DotProduct (light_up, origin_world);
-	view[14] = -DotProduct (sun_dir, origin_world);
+	view[12] = -DotProduct (right, eye);
+	view[13] = -DotProduct (light_up, eye);
+	view[14] = -DotProduct (sun_dir, eye);
 
-	{
-		float min_z = -extents[2];
-		float max_z = extents[2];
-		R_Shadow_OrthoMatrix (ortho, -extents[0], extents[0], -extents[1], extents[1], min_z, max_z);
-	}
+	R_Shadow_OrthoMatrix (ortho, -shadow_radius, shadow_radius, -shadow_radius, shadow_radius, 0.f, shadow_radius * 2.f);
 
 	memcpy (out_viewproj, ortho, sizeof (ortho));
 	MatrixMultiply (out_viewproj, view);
@@ -610,7 +566,7 @@ void R_Shadow_SunPass (void)
 	if (!shadow_depth_tex || !shadow_fbo)
 		return;
 
-	if (r_shadowmap_freeze.value > 0.f && shadow_frozen_valid)
+	if ((r_shadowmap_freeze.value > 0.f || r_shadow_freeze.value > 0.f) && shadow_frozen_valid)
 	{
 		memcpy (r_framedata.shadow_viewproj, shadow_frozen_viewproj, sizeof (shadow_frozen_viewproj));
 		VectorCopy (shadow_frozen_sun_dir, r_framedata.shadow_sun_dir);
@@ -720,7 +676,7 @@ void R_Shadow_DlightPass (void)
 	if (r_framedata.numlights == 0)
 		return;
 
-	if (r_shadowmap_freeze.value > 0.f && shadow_dlight_frozen_valid)
+	if ((r_shadowmap_freeze.value > 0.f || r_shadow_freeze.value > 0.f) && shadow_dlight_frozen_valid)
 	{
 		for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 		{
