@@ -45,6 +45,7 @@ cvar_t r_model_lightgrid = { "r_model_lightgrid", "1", CVAR_ARCHIVE };
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
+dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static qboolean R_IsFinite (float v)
 {
@@ -375,6 +376,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 			continue;
 
 		out = &r_lightbuffer.lights[r_framedata.numlights++];
+		r_dlight_sources[r_framedata.numlights - 1] = l;
 		const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
 		float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
 		vec3_t finalcolor;
@@ -419,6 +421,7 @@ void R_PushDlights (void)
 	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
+	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 
         // Collect dynamic lights both when the legacy r_dynamic toggle is
         // enabled and when the Quake3-style additive path is requested via

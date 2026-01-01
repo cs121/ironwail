@@ -39,6 +39,8 @@ extern	int glx, gly, glwidth, glheight;
 
 #define BACKFACE_EPSILON	0.01
 
+typedef struct dlight_s dlight_t;
+
 extern vec3_t *r_pointfile;
 
 void R_TimeRefresh_f (void);
@@ -417,6 +419,8 @@ typedef struct gpulight_s {
 
 #define DLIGHT_GPU_MAX 64
 
+#define SHADOW_DLIGHT_MAX 4
+
 typedef struct gpulightbuffer_s {
 	float		lightstyles[MAX_LIGHTSTYLES * 2];
 	gpulight_t	lights[DLIGHT_GPU_MAX];
@@ -442,6 +446,10 @@ typedef struct gpuframedata_s {
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
+        float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
+        vec4_t          shadow_dlight_atlas[SHADOW_DLIGHT_MAX]; // xy: scale, zw: offset
+        vec4_t          shadow_dlight_info[SHADOW_DLIGHT_MAX]; // x: light index, yzw: unused
+        vec4_t          shadow_dlight_params; // x: bias, y: pcf taps, z: enabled, w: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
@@ -451,6 +459,7 @@ typedef struct gpuframedata_s {
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
+extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
@@ -475,8 +484,10 @@ void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
 void R_Shadow_SunPass (void);
+void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
+void R_Shadow_BindDlightShadowMap (GLenum texunit);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
