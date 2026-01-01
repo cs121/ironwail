@@ -258,8 +258,10 @@ cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadowmap = { "r_shadowmap", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
-cvar_t	r_shadow_bias = { "r_shadow_bias", "0.001", CVAR_ARCHIVE };
+cvar_t	r_shadow_bias = { "r_shadow_bias", "0.0015", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias = { "r_shadow_normalbias", "1.0", CVAR_ARCHIVE };
+cvar_t	r_shadow_normal_bias = { "r_shadow_normal_bias", "0.0025", CVAR_ARCHIVE };
+cvar_t	r_shadow_strength = { "r_shadow_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_bias = { "r_shadowmap_bias", "0.0015", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_slopebias = { "r_shadowmap_slopebias", "0.002", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_cull_front = { "r_shadowmap_cull_front", "1", CVAR_ARCHIVE };
@@ -3173,8 +3175,8 @@ void R_SetupView (void)
         r_framedata.shader_params[1] = 0.f;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
-        r_framedata.shadow_params[0] = r_shadowmap_bias.value;
-        r_framedata.shadow_params[1] = r_shadowmap_slopebias.value;
+        r_framedata.shadow_params[0] = r_shadow_bias.value;
+        r_framedata.shadow_params[1] = r_shadow_normal_bias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
         {
@@ -3183,7 +3185,7 @@ void R_SetupView (void)
                         (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
                 r_framedata.shadow_control[1] = debug_mode;
         }
-        r_framedata.shadow_control[2] = 0.f;
+        r_framedata.shadow_control[2] = r_shadow_strength.value;
         r_framedata.shadow_control[3] = 0.f;
         r_framedata.shadow_debug[0] = 1.f;
         r_framedata.shadow_debug[1] = r_framedata.shadow_control[1];

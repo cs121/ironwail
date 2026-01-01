@@ -20,9 +20,6 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 #else
 	shadow_uvz.z = light_ndc.z * 0.5 + 0.5;
 #endif
-#if REVERSED_Z
-	shadow_uvz.z = 1.0 - shadow_uvz.z;
-#endif
 	uv = shadow_uvz.xy;
 	reference = shadow_uvz.z;
 
@@ -40,19 +37,13 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
-	float shadow_depth = texture(ShadowMap, uv).r;
-#if REVERSED_Z
-	float compare_depth = reference + bias;
-	return step(shadow_depth, compare_depth);
-#else
 	float compare_depth = reference - bias;
-	return step(compare_depth, shadow_depth);
-#endif
+	return texture(ShadowMapCmp, vec3(uv, compare_depth));
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 {
-	vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
+	vec2 texel = 1.0 / vec2(textureSize(ShadowMapCmp, 0));
 	float sum = 0.0;
 	int count = 0;
 
@@ -159,6 +150,18 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	}
 
 	return vec3(shadow_term);
+}
+
+vec3 ShadowDebugDepth(vec3 world_pos)
+{
+	vec2 uv;
+	float reference;
+	float in_range;
+	ShadowCoord(world_pos, uv, reference, in_range);
+	vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
+	float depth = texture(ShadowMapDepth, clamped_uv).r;
+	float curve = pow(depth, 30.0);
+	return vec3(depth, curve, curve);
 }
 #endif
 

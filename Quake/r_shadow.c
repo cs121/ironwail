@@ -38,6 +38,8 @@ extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_fbo;
 static GLuint shadow_depth_tex;
+static GLuint shadow_compare_sampler;
+static GLuint shadow_raw_sampler;
 static int shadowmap_size;
 static GLuint shadow_dlight_fbo;
 static GLuint shadow_dlight_depth_tex;
@@ -167,6 +169,16 @@ static void R_Shadow_DestroyResources (void)
 	{
 		GL_DeleteNativeTexture (shadow_depth_tex);
 		shadow_depth_tex = 0;
+	}
+	if (shadow_compare_sampler)
+	{
+		GL_DeleteSamplersFunc (1, &shadow_compare_sampler);
+		shadow_compare_sampler = 0;
+	}
+	if (shadow_raw_sampler)
+	{
+		GL_DeleteSamplersFunc (1, &shadow_raw_sampler);
+		shadow_raw_sampler = 0;
 	}
 	shadowmap_size = 0;
 	shadow_frozen_valid = false;
@@ -468,6 +480,8 @@ void R_InitShadow (void)
 {
 	shadow_fbo = 0;
 	shadow_depth_tex = 0;
+	shadow_compare_sampler = 0;
+	shadow_raw_sampler = 0;
 	shadowmap_size = 0;
 	shadow_dlight_fbo = 0;
 	shadow_dlight_depth_tex = 0;
@@ -512,17 +526,38 @@ void R_ResizeShadowMapIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_depth_tex, -1, "shadowmap depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, desired, desired);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-	{
-		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
-		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	if (!shadow_compare_sampler || !shadow_raw_sampler)
+	{
+		if (shadow_compare_sampler)
+			GL_DeleteSamplersFunc (1, &shadow_compare_sampler);
+		if (shadow_raw_sampler)
+			GL_DeleteSamplersFunc (1, &shadow_raw_sampler);
+		shadow_compare_sampler = 0;
+		shadow_raw_sampler = 0;
+
+		GL_GenSamplersFunc (1, &shadow_compare_sampler);
+		GL_GenSamplersFunc (1, &shadow_raw_sampler);
+
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+		GL_SamplerParameteriFunc (shadow_compare_sampler, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+
+		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	}
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
@@ -543,15 +578,13 @@ void R_ResizeShadowMapIfNeeded (void)
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	GL_BindSamplerFunc (texunit - GL_TEXTURE0, shadow_compare_sampler);
 }
 
 void R_Shadow_BindShadowMapRaw (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	GL_BindSamplerFunc (texunit - GL_TEXTURE0, shadow_raw_sampler);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
