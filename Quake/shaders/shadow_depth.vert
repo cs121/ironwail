@@ -64,7 +64,9 @@ layout(location=0) in vec3 in_pos;
 void main()
 {
 	Call call = call_data[DRAW_ID];
-	vec3 world_pos = in_pos;
+	int instance_id = GET_INSTANCE_ID(call);
+	Instance instance = instance_data[instance_id];
+	vec3 world_pos = TransformPosition(in_pos, instance.mat);
 	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
 #if REVERSED_Z
 	const float ZBIAS = -1.0 / 1024.0;

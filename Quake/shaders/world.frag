@@ -189,13 +189,19 @@ float tri(float x)
 
 vec4 SampleLightmap(vec2 uv)
 {
-	vec4 lm = texture(LMTex, uv);
+	vec2 size = vec2(textureSize(LMTex, 0));
+	vec2 texel = 1.0 / size;
+	vec2 clamped_uv = clamp(uv, texel * 0.5, vec2(1.0) - texel * 0.5);
+	vec4 lm = texture(LMTex, clamped_uv);
 	return lm;
 }
 
 vec3 SampleLightmapDir(vec2 uv)
 {
-	vec3 dir = texture(LMTexDir, uv).xyz * 2.0 - 1.0;
+	vec2 size = vec2(textureSize(LMTexDir, 0));
+	vec2 texel = 1.0 / size;
+	vec2 clamped_uv = clamp(uv, texel * 0.5, vec2(1.0) - texel * 0.5);
+	vec3 dir = texture(LMTexDir, clamped_uv).xyz * 2.0 - 1.0;
 	return normalize(dir);
 }
 
@@ -285,7 +291,7 @@ void main()
 #endif
 
 #if DITHER >= 2
-	vec4 result = texture(Tex, uv, -1.0);
+	vec4 result = texture(Tex, uv, -0.5);
 #elif DITHER
 	vec4 result = texture(Tex, uv, -0.5);
 #else
@@ -410,11 +416,9 @@ void main()
 
 		// Surface normal computation
 		vec3 surface_normal = in_normal;
-		float surface_normal_len = length(surface_normal);
-
-		if (surface_normal_len > 0.0)
+		if (dot(surface_normal, surface_normal) > 0.0)
 		{
-			surface_normal /= surface_normal_len;
+			surface_normal = normalize(surface_normal);
 		}
 		else
 		{
@@ -530,12 +534,12 @@ void main()
 						if (ndotl > 0.0)
 						{
 							vec3 half_vec = light_dir + view_dir;
-							float half_len = length(half_vec);
+							float half_len_sq = dot(half_vec, half_vec);
 							
-							if (half_len > 0.0)
+							if (half_len_sq > 0.0)
 							{
-								half_vec /= half_len;
-								float ndoth = max(dot(surface_normal, half_vec), 0.0);
+								vec3 half_dir = half_vec * inversesqrt(half_len_sq);
+								float ndoth = max(dot(surface_normal, half_dir), 0.0);
 								float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
 								specular_light += light_contrib * spec * SPECULAR_SCALE;
 							}

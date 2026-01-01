@@ -144,7 +144,11 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
 	float compare_depth = reference - bias;
+#if REVERSED_Z
+	return 1.0 - texture(ShadowDlightMap, vec3(uv, compare_depth));
+#else
 	return texture(ShadowDlightMap, vec3(uv, compare_depth));
+#endif
 }
 
 float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)

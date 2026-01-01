@@ -123,7 +123,9 @@ void main()
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
-        vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
+        vec3 shadevector = orientation[0] + orientation[2];
+        float shade_len_sq = dot(shadevector, shadevector);
+        shadevector = (shade_len_sq > 0.0) ? (shadevector * inversesqrt(shade_len_sq)) : vec3(0.0, 0.0, 1.0);
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
