@@ -690,10 +690,18 @@ static GLenum R_MapDepthFunc (mat_depthfunc_t depth_func)
 {
 	switch (depth_func)
 	{
+	case MAT_DEPTHFUNC_LESS:
+		return gl_clipcontrol_able ? GL_GREATER : GL_LESS;
 	case MAT_DEPTHFUNC_EQUAL:
 		return GL_EQUAL;
+	case MAT_DEPTHFUNC_GREATER:
+		return gl_clipcontrol_able ? GL_LESS : GL_GREATER;
+	case MAT_DEPTHFUNC_GEQUAL:
+		return gl_clipcontrol_able ? GL_LEQUAL : GL_GEQUAL;
 	case MAT_DEPTHFUNC_ALWAYS:
 		return GL_ALWAYS;
+	case MAT_DEPTHFUNC_NEVER:
+		return GL_NEVER;
 	case MAT_DEPTHFUNC_LEQUAL:
 	default:
 		return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;

@@ -1242,7 +1242,7 @@ void Mat_Shader_Print (const shader_material_t *material)
 	static const char *const cull_names[] = { "back", "front", "none" };
 	static const char *const sort_names[] = { "opaque", "decal", "additive", "nearest" };
 	static const char *const blend_names[] = { "replace", "alpha", "add", "mult", "premult", "custom" };
-	static const char *const depth_names[] = { "lequal", "equal", "always" };
+	static const char *const depth_names[] = { "lequal", "less", "equal", "greater", "gequal", "always", "never" };
 	static const char *const map_names[] = { "map", "clampmap", "lightmap", "white", "black" };
 
 	if (!material)
