@@ -100,6 +100,8 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	vec2 uv;
 	float reference;
 	ShadowCoord(world_pos, uv, reference, in_range);
+	// ShadowDebug must never disable shadows.
+	// Shadow enable is controlled by ShadowParams or CPU-side logic.
 	if (in_range < 0.5)
 		return 1.0;
 

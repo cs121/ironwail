@@ -182,7 +182,7 @@ void main()
 #endif
 
 	bool shadow_receiver = !any(greaterThan(emissive, vec3(0.0)));
-	bool shadow_enabled = ShadowControl.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
+	bool shadow_enabled = ShadowParams.z > 0.0 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
 	bool allow_debug = (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
 
 	vec3 world_pos = in_pos + EyePos;
