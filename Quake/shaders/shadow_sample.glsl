@@ -15,7 +15,14 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 	vec3 light_ndc = clip.xyz / clip.w;
 	vec3 shadow_uvz;
 	shadow_uvz.xy = light_ndc.xy * 0.5 + 0.5;
+#if CLIP_Z_ZERO_TO_ONE
+	shadow_uvz.z = light_ndc.z;
+#else
 	shadow_uvz.z = light_ndc.z * 0.5 + 0.5;
+#endif
+#if REVERSED_Z
+	shadow_uvz.z = 1.0 - shadow_uvz.z;
+#endif
 	uv = shadow_uvz.xy;
 	reference = shadow_uvz.z;
 
@@ -34,8 +41,12 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float shadow_depth = texture(ShadowMap, uv).r;
-	float compare_depth = reference + bias;
+	float compare_depth = reference - bias;
+#if REVERSED_Z
+	return step(shadow_depth, compare_depth);
+#else
 	return step(compare_depth, shadow_depth);
+#endif
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
@@ -258,6 +269,8 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 
 	bool inside = all(greaterThanEqual(base_uv, vec2(0.0))) &&
 		all(lessThanEqual(base_uv, vec2(1.0))) &&
+		all(greaterThanEqual(uv, vec2(0.0))) &&
+		all(lessThanEqual(uv, vec2(1.0))) &&
 		reference >= 0.0 && reference <= 1.0;
 	in_range = inside ? 1.0 : 0.0;
 	if (!inside)
