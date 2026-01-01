@@ -430,7 +430,7 @@ void main()
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
 
-		bool shadow_enabled = ShadowControl.x > 0.5;
+		bool shadow_enabled = ShadowParams.z > 0.0;
 		int shadow_mode = int(ShadowControl.y + 0.5);
 		float shadow_range = 1.0;
 		float shadow_term = 1.0;
