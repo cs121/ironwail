@@ -264,6 +264,12 @@ cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_size = { "r_shadow_dlight_size", "256", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_distance = { "r_shadow_dlight_distance", "1024", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.0025", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_pcf_taps = { "r_shadow_dlight_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -3160,6 +3166,10 @@ void R_SetupView (void)
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
         r_framedata.shadow_debug[2] = 0.f;
         r_framedata.shadow_debug[3] = 0.f;
+        r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
+        r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
+        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
@@ -4389,6 +4399,7 @@ void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Shadow_SunPass ();
+	R_Shadow_DlightPass ();
 	R_SetupGL ();
 	R_Clear ();
 	

@@ -20,10 +20,41 @@ extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_shadow_dlights;
+extern cvar_t r_shadow_dlight_max;
+extern cvar_t r_shadow_dlight_size;
+extern cvar_t r_shadow_dlight_distance;
+extern cvar_t r_shadow_dlight_bias;
+extern cvar_t r_shadow_dlight_pcf_taps;
+extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_fbo;
 static GLuint shadow_depth_tex;
 static int shadowmap_size;
+static GLuint shadow_dlight_fbo;
+static GLuint shadow_dlight_depth_tex;
+static int shadow_dlight_atlas_size;
+static int shadow_dlight_tile_size;
+static int shadow_dlight_tile_count;
+static int shadow_dlight_selected_count;
+static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
+
+static void R_Shadow_DestroyDlightResources (void)
+{
+	if (shadow_dlight_fbo)
+	{
+		GL_DeleteFramebuffersFunc (1, &shadow_dlight_fbo);
+		shadow_dlight_fbo = 0;
+	}
+	if (shadow_dlight_depth_tex)
+	{
+		GL_DeleteNativeTexture (shadow_dlight_depth_tex);
+		shadow_dlight_depth_tex = 0;
+	}
+	shadow_dlight_atlas_size = 0;
+	shadow_dlight_tile_size = 0;
+	shadow_dlight_tile_count = 0;
+}
 
 static void R_Shadow_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
 {
@@ -69,6 +100,7 @@ static void R_Shadow_DestroyResources (void)
 		shadow_depth_tex = 0;
 	}
 	shadowmap_size = 0;
+	R_Shadow_DestroyDlightResources ();
 }
 
 static void R_Shadow_GetSunDirection (vec3_t out_dir)
@@ -230,11 +262,181 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	MatrixMultiply (out_viewproj, view);
 }
 
+static void R_Shadow_PerspectiveMatrix (float matrix[16], float fovx, float fovy, float n, float f)
+{
+	const float w = 1.0f / tanf (fovx * 0.5f);
+	const float h = 1.0f / tanf (fovy * 0.5f);
+
+	memset (matrix, 0, 16 * sizeof (float));
+
+	if (gl_clipcontrol_able)
+	{
+		matrix[0 * 4 + 2] = -n / (f - n);
+		matrix[0 * 4 + 3] = 1.f;
+		matrix[1 * 4 + 0] = -w;
+		matrix[2 * 4 + 1] = h;
+		matrix[3 * 4 + 2] = f * n / (f - n);
+	}
+	else
+	{
+		matrix[0 * 4 + 2] = (f + n) / (f - n);
+		matrix[0 * 4 + 3] = 1.f;
+		matrix[1 * 4 + 0] = -w;
+		matrix[2 * 4 + 1] = h;
+		matrix[3 * 4 + 2] = -2.f * f * n / (f - n);
+	}
+}
+
+static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t origin, float radius)
+{
+	vec3_t target;
+	vec3_t forward;
+	vec3_t up = { 0.f, 0.f, 1.f };
+	vec3_t right;
+	vec3_t light_up;
+	float view[16];
+	float proj[16];
+	float znear;
+	float zfar;
+
+	VectorCopy (r_refdef.vieworg, target);
+	VectorSubtract (target, origin, forward);
+	if (VectorNormalize (forward) == 0.f)
+	{
+		forward[0] = 0.f;
+		forward[1] = 0.f;
+		forward[2] = -1.f;
+	}
+
+	if (fabsf (DotProduct (forward, up)) > 0.95f)
+	{
+		up[0] = 0.f;
+		up[1] = 1.f;
+		up[2] = 0.f;
+	}
+
+	CrossProduct (up, forward, right);
+	VectorNormalize (right);
+	CrossProduct (forward, right, light_up);
+	VectorNormalize (light_up);
+
+	memset (view, 0, sizeof (view));
+	view[0] = right[0];
+	view[1] = right[1];
+	view[2] = right[2];
+	view[4] = light_up[0];
+	view[5] = light_up[1];
+	view[6] = light_up[2];
+	view[8] = forward[0];
+	view[9] = forward[1];
+	view[10] = forward[2];
+	view[15] = 1.f;
+	view[12] = -DotProduct (right, origin);
+	view[13] = -DotProduct (light_up, origin);
+	view[14] = -DotProduct (forward, origin);
+
+	znear = 4.f;
+	zfar = q_max (radius, znear + 1.f);
+	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (90.f), DEG2RAD (90.f), znear, zfar);
+
+	memcpy (out_viewproj, proj, sizeof (proj));
+	MatrixMultiply (out_viewproj, view);
+}
+
+static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
+{
+	int max_tiles;
+	int tile_size;
+	int grid;
+	int atlas_size;
+
+	max_tiles = CLAMP (0, (int)r_shadow_dlight_max.value, SHADOW_DLIGHT_MAX);
+	if (r_shadow_dlight_size.value <= 0.f || max_tiles <= 0)
+	{
+		if (shadow_dlight_depth_tex || shadow_dlight_fbo)
+			R_Shadow_DestroyDlightResources ();
+		return;
+	}
+
+	tile_size = (int)r_shadow_dlight_size.value;
+	if (tile_size < 64)
+		tile_size = 64;
+	if (tile_size > gl_max_texture_size)
+		tile_size = gl_max_texture_size;
+
+	grid = 1;
+	while (grid * grid < max_tiles)
+		grid++;
+
+	if (grid < 1)
+		grid = 1;
+
+	atlas_size = tile_size * grid;
+	if (atlas_size > gl_max_texture_size)
+	{
+		tile_size = gl_max_texture_size / grid;
+		if (tile_size < 64)
+			tile_size = 64;
+		atlas_size = tile_size * grid;
+		if (atlas_size > gl_max_texture_size)
+		{
+			grid = 1;
+			atlas_size = tile_size;
+		}
+	}
+
+	if (shadow_dlight_depth_tex && shadow_dlight_fbo &&
+		shadow_dlight_atlas_size == atlas_size &&
+		shadow_dlight_tile_size == tile_size &&
+		shadow_dlight_tile_count == grid * grid)
+		return;
+
+	if (shadow_dlight_depth_tex || shadow_dlight_fbo)
+		R_Shadow_DestroyDlightResources ();
+
+	glGenTextures (1, &shadow_dlight_depth_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	{
+		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
+		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	}
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_dlight_fbo, -1, "shadowmap dlight fbo");
+	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_dlight_depth_tex, 0);
+	glDrawBuffer (GL_NONE);
+	glReadBuffer (GL_NONE);
+
+	{
+		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE)
+			Sys_Error ("Failed to create dlight shadowmap FBO (status code 0x%X)", status);
+	}
+
+	shadow_dlight_atlas_size = atlas_size;
+	shadow_dlight_tile_size = tile_size;
+	shadow_dlight_tile_count = grid * grid;
+}
 void R_InitShadow (void)
 {
 	shadow_fbo = 0;
 	shadow_depth_tex = 0;
 	shadowmap_size = 0;
+	shadow_dlight_fbo = 0;
+	shadow_dlight_depth_tex = 0;
+	shadow_dlight_atlas_size = 0;
+	shadow_dlight_tile_size = 0;
+	shadow_dlight_tile_count = 0;
+	shadow_dlight_selected_count = 0;
 }
 
 void R_ShutdownShadow (void)
@@ -301,6 +503,14 @@ void R_Shadow_BindShadowMap (GLenum texunit)
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 }
 
+void R_Shadow_BindDlightShadowMap (GLenum texunit)
+{
+	if (shadow_dlight_depth_tex)
+		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	else
+		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
+}
+
 void R_Shadow_SunPass (void)
 {
 	qboolean enabled = r_shadows.value > 0.f && r_shadow_sun.value > 0.f;
@@ -321,6 +531,7 @@ void R_Shadow_SunPass (void)
 	r_framedata.shadow_debug[0] = 1.f;
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = 0.f;
+	R_UploadFrameData ();
 
 	GL_BeginGroup ("Shadow map (sun)");
 
@@ -347,18 +558,182 @@ void R_Shadow_SunPass (void)
 	GL_EndGroup ();
 }
 
+void R_Shadow_DlightPass (void)
+{
+	qboolean enabled = r_shadows.value > 0.f && r_shadow_dlights.value > 0.f;
+	float sun_viewproj[16];
+	int max_tiles;
+	int grid;
+	int tiles_used = 0;
+
+	shadow_dlight_selected_count = 0;
+
+	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+	{
+		IdentityMatrix (r_framedata.shadow_dlight_viewproj[i]);
+		r_framedata.shadow_dlight_atlas[i][0] = 0.f;
+		r_framedata.shadow_dlight_atlas[i][1] = 0.f;
+		r_framedata.shadow_dlight_atlas[i][2] = 0.f;
+		r_framedata.shadow_dlight_atlas[i][3] = 0.f;
+		r_framedata.shadow_dlight_info[i][0] = -1.f;
+		r_framedata.shadow_dlight_info[i][1] = 0.f;
+		r_framedata.shadow_dlight_info[i][2] = 0.f;
+		r_framedata.shadow_dlight_info[i][3] = 0.f;
+		shadow_dlight_light_indices[i] = -1;
+	}
+
+	if (!enabled || !glprogs.shadow_depth)
+		return;
+
+	R_Shadow_ResizeDlightAtlasIfNeeded ();
+	if (!shadow_dlight_depth_tex || !shadow_dlight_fbo)
+		return;
+
+	max_tiles = CLAMP (0, (int)r_shadow_dlight_max.value, SHADOW_DLIGHT_MAX);
+	if (shadow_dlight_tile_count > 0)
+		max_tiles = q_min (max_tiles, shadow_dlight_tile_count);
+	if (max_tiles <= 0)
+		return;
+
+	if (r_framedata.numlights == 0)
+		return;
+
+	{
+		float scores[SHADOW_DLIGHT_MAX];
+		for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+			scores[i] = -FLT_MAX;
+
+		for (unsigned int i = 0; i < r_framedata.numlights; ++i)
+		{
+			dlight_t *dl = r_dlight_sources[i];
+			const gpulight_t *glight = &r_lightbuffer.lights[i];
+			float dist;
+			float score;
+			vec3_t delta;
+
+			if (!dl)
+				continue;
+
+			VectorSubtract (glight->pos, r_refdef.vieworg, delta);
+			dist = VectorLength (delta);
+			if (r_shadow_dlight_distance.value > 0.f && dist > r_shadow_dlight_distance.value + glight->radius)
+				continue;
+
+			score = (glight->radius * (glight->color[0] + glight->color[1] + glight->color[2])) / (1.f + dist);
+
+			for (int slot = 0; slot < max_tiles; ++slot)
+			{
+				if (score > scores[slot])
+				{
+					for (int move = max_tiles - 1; move > slot; --move)
+					{
+						scores[move] = scores[move - 1];
+						shadow_dlight_light_indices[move] = shadow_dlight_light_indices[move - 1];
+					}
+					scores[slot] = score;
+					shadow_dlight_light_indices[slot] = (int)i;
+					break;
+				}
+			}
+		}
+	}
+
+	for (int i = 0; i < max_tiles; ++i)
+	{
+		if (shadow_dlight_light_indices[i] >= 0)
+			tiles_used++;
+	}
+	shadow_dlight_selected_count = tiles_used;
+
+	if (!tiles_used)
+		return;
+
+	memcpy (sun_viewproj, r_framedata.shadow_viewproj, sizeof (sun_viewproj));
+
+	GL_BeginGroup ("Shadow map (dlights)");
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	glDrawBuffer (GL_NONE);
+	glReadBuffer (GL_NONE);
+	glEnable (GL_SCISSOR_TEST);
+
+	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
+	if (grid < 1)
+		grid = 1;
+
+	for (int i = 0; i < max_tiles; ++i)
+	{
+		int light_index = shadow_dlight_light_indices[i];
+		if (light_index < 0)
+			continue;
+
+		const gpulight_t *glight = &r_lightbuffer.lights[light_index];
+		float viewproj[16];
+		int tile_x = i % grid;
+		int tile_y = i / grid;
+		float scale = (float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size;
+		float offset_x = tile_x * scale;
+		float offset_y = tile_y * scale;
+
+		R_Shadow_BuildDlightViewProj (viewproj, glight->pos, glight->radius);
+		memcpy (r_framedata.shadow_dlight_viewproj[i], viewproj, sizeof (viewproj));
+		r_framedata.shadow_dlight_atlas[i][0] = scale;
+		r_framedata.shadow_dlight_atlas[i][1] = scale;
+		r_framedata.shadow_dlight_atlas[i][2] = offset_x;
+		r_framedata.shadow_dlight_atlas[i][3] = offset_y;
+		r_framedata.shadow_dlight_info[i][0] = (float)light_index;
+
+		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
+		R_UploadFrameData ();
+
+		glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+			shadow_dlight_tile_size, shadow_dlight_tile_size);
+		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+			shadow_dlight_tile_size, shadow_dlight_tile_size);
+		glClear (GL_DEPTH_BUFFER_BIT);
+
+		GL_UseProgram (glprogs.shadow_depth);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+
+		{
+			int count = 0;
+			entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+			R_DrawBrushModels_Shadow (ents, count);
+		}
+		{
+			int count = 0;
+			entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
+			R_DrawAliasModels_Shadow (ents, count);
+		}
+	}
+
+	glDisable (GL_SCISSOR_TEST);
+
+	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
+
+	GL_EndGroup ();
+}
+
 void R_Shadow_DrawDebug (void)
 {
-	if ((int)r_shadow_debug.value != 1)
+	int mode = (int)r_shadow_debug.value;
+	if (mode != 1 && mode != 4)
 		return;
-	if (!shadow_depth_tex || !glprogs.shadow_debug)
+	if (!glprogs.shadow_debug)
+		return;
+	if (mode == 1 && !shadow_depth_tex)
+		return;
+	if (mode == 4 && !shadow_dlight_depth_tex)
 		return;
 
 	GL_BeginGroup ("Shadow map debug");
 
 	GL_UseProgram (glprogs.shadow_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
+	if (mode == 1)
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
+	else
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
