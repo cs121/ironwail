@@ -51,7 +51,8 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "sky", MAT_SURFPARM_SKY, MAT_RENDER_SKY, 0u },
 	{ "fog", MAT_SURFPARM_FOG, MAT_RENDER_FOG, 0u },
 	{ "nodraw", MAT_SURFPARM_NODRAW, MAT_RENDER_NODRAW, 0u },
-	{ "stone", MAT_SURFPARM_STONE, 0u, 0u }
+	{ "stone", MAT_SURFPARM_STONE, 0u, 0u },
+	{ "no_shadow_receive", MAT_SURFPARM_NO_SHADOW_RECEIVE, 0u, 0u }
 };
 
 typedef struct

@@ -34,7 +34,8 @@ typedef enum
 	MAT_SURFPARM_SKY		= (1u << 6),
 	MAT_SURFPARM_FOG		= (1u << 7),
 	MAT_SURFPARM_NODRAW		= (1u << 8),
-	MAT_SURFPARM_STONE		= (1u << 9)
+	MAT_SURFPARM_STONE		= (1u << 9),
+	MAT_SURFPARM_NO_SHADOW_RECEIVE = (1u << 10)
 } mat_surfaceparm_t;
 
 typedef enum
@@ -178,7 +179,8 @@ typedef enum
 	MAT_SHADERFLAG_STONE		= (1u << 9),
 	MAT_SHADERFLAG_EMISSIVE		= (1u << 10),
 	MAT_SHADERFLAG_BLOOM		= (1u << 11),
-	MAT_SHADERFLAG_GODRAY		= (1u << 12)
+	MAT_SHADERFLAG_GODRAY		= (1u << 12),
+	MAT_SHADERFLAG_NO_SHADOW_RECEIVE = (1u << 13)
 } mat_shader_flags_t;
 
 typedef struct mat_shader_stage_s
