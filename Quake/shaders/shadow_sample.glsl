@@ -21,11 +21,7 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 		ndc.z * 0.5 + 0.5;
 #endif
 
-#if REVERSED_Z
-	reference = 1.0 - depth01;
-#else
 	reference = depth01;
-#endif
 
 	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
 		all(lessThanEqual(uv, vec2(1.0))) &&
