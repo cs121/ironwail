@@ -21,11 +21,7 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 		ndc.z * 0.5 + 0.5;
 #endif
 
-#if REVERSED_Z
-	reference = 1.0 - depth01;
-#else
 	reference = depth01;
-#endif
 
 	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
 		all(lessThanEqual(uv, vec2(1.0))) &&
@@ -261,12 +257,7 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 		ndc.z * 0.5 + 0.5;
 #endif
 
-	float reference =
-#if REVERSED_Z
-		1.0 - depth01;
-#else
-		depth01;
-#endif
+	float reference = depth01;
 
 	vec4 atlas = ShadowDlightAtlas[shadow_index];
 	vec2 uv = base_uv;

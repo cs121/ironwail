@@ -141,8 +141,10 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 		"#version 430\n"
 		"\n"
 		"#define BINDLESS %d\n"
-		"#define REVERSED_Z %d\n",
+		"#define REVERSED_Z %d\n"
+		"#define CLIP_Z_ZERO_TO_ONE %d\n",
 		gl_bindless_able,
+		gl_clipcontrol_able,
 		gl_clipcontrol_able
 	);
 	strings[numstrings++] = header;
