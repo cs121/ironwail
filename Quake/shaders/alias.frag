@@ -92,6 +92,29 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
+void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float in_range)
+{
+	if (clip.w <= 0.0)
+	{
+		uv = vec2(0.0);
+		reference = 0.0;
+		in_range = 0.0;
+		return;
+	}
+
+	vec3 proj = clip.xyz / clip.w;
+	uv = proj.xy * 0.5 + 0.5;
+#if REVERSED_Z
+	reference = proj.z;
+#else
+	reference = proj.z * 0.5 + 0.5;
+#endif
+
+	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
+		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	in_range = inside ? 1.0 : 0.0;
+}
+
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
@@ -116,6 +139,8 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
+layout(location=7) in vec3 in_direct;
+layout(location=8) noperspective in vec4 in_shadow_clip;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -170,7 +195,20 @@ void main()
 		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		if (shadow_mode != 4)
-			shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
+		{
+			vec2 shadow_uv;
+			float shadow_ref;
+			ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
+			if (shadow_range >= 0.5 && shadow_mode <= 3)
+			{
+				float ndotl = clamp(dot(shadow_normal, -ShadowSunDir.xyz), 0.0, 1.0);
+				float bias = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
+				if (ShadowParams.z > 0.5)
+					shadow_term = ShadowSamplePCF(shadow_uv, shadow_ref, bias, int(ShadowParams.w + 0.5));
+				else
+					shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
+			}
+		}
 		if (shadow_mode >= 2)
 		{
 			out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
@@ -179,8 +217,8 @@ void main()
 #endif
 			return;
 		}
-		lit_color.rgb *= shadow_term;
 	}
+	lit_color.rgb = clamp(lit_color.rgb + in_direct * shadow_term, 0.0, Overbright);
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
         vec4 result = textureLod(Tex, uv, 0.);

@@ -79,6 +79,22 @@ typedef struct aliasinstance_s {
 #define ALIAS_INSTANCE_FLAG_VIEWMODEL      (1 << 1)
 #define ALIAS_INSTANCE_FLAG_LIGHTNING      (1 << 2)
 
+static int R_Alias_InstanceFlags (const entity_t *e)
+{
+	int flags = ALIAS_INSTANCE_FLAG_NONE;
+
+	if (!e || !e->model)
+		return flags;
+
+	if (e == &cl.viewent)
+		flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
+
+	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
+		flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+
+	return flags;
+}
+
 struct ibuf_s {
 	int			count;
 	entity_t	*ent;
@@ -703,7 +719,7 @@ static void R_FlushAliasInstances_Shadow (void)
 	GL_UseProgram (glprogs.shadow_depth_alias[md5]);
 
 	if (md5)
-		state = GLS_ATTRIBS(5);
+		state = GLS_ATTRIBS(3);
 	else
 		state = GLS_ATTRIBS(1);
 
@@ -741,10 +757,8 @@ static void R_FlushAliasInstances_Shadow (void)
 		if (md5)
 		{
 			GL_VertexAttribPointerFunc  (0, 3, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, xyz)));
-			GL_VertexAttribPointerFunc  (1, 4, GL_BYTE,				GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, norm)));
-			GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, st)));
-			GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
-			GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+			GL_VertexAttribPointerFunc  (1, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
+			GL_VertexAttribIPointerFunc (2, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vboposeofs;
@@ -891,7 +905,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		ibuf.ent = e;
 
 	instance = &ibuf.inst[ibuf.count++];
-	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
+	instance->flags = R_Alias_InstanceFlags (e);
 
 	{
 		float prev_model_matrix[16];
@@ -935,10 +949,6 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         VectorCopy (lightcolor, instance->lightcolor);
         VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
         instance->alpha = entalpha;
-        if (e == &cl.viewent)
-                instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-if (!Q_strncmp (e->model->name, "progs/bolt", 10))
-                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
@@ -971,7 +981,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	if (!e || !e->model)
 		return;
 
-	if (e == &cl.viewent)
+	if (R_Alias_InstanceFlags (e) & ALIAS_INSTANCE_FLAG_VIEWMODEL)
 		return;
 
 	if (e->model->flags & MOD_NOSHADOW)
@@ -1040,6 +1050,16 @@ void R_DrawAliasModels (entity_t **ents, int count)
         R_FlushAliasInstances (false);
 }
 
+void R_DrawAliasShadow (entity_t *e)
+{
+	R_DrawAliasModel_Shadow_Real (e);
+}
+
+void R_FlushAliasShadows (void)
+{
+	R_FlushAliasInstances_Shadow ();
+}
+
 /*
 =================
 R_DrawAliasModels_Shadow
@@ -1049,8 +1069,8 @@ void R_DrawAliasModels_Shadow (entity_t **ents, int count)
 {
 	int i;
 	for (i = 0; i < count; i++)
-		R_DrawAliasModel_Shadow_Real (ents[i]);
-	R_FlushAliasInstances_Shadow ();
+		R_DrawAliasShadow (ents[i]);
+	R_FlushAliasShadows ();
 }
 
 /*

@@ -502,6 +502,8 @@ void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
 void R_DrawBrushModels_Shadow (entity_t **ents, int count);
 void R_DrawAliasModels (entity_t **ents, int count);
 void R_DrawAliasModels_Shadow (entity_t **ents, int count);
+void R_DrawAliasShadow (entity_t *e);
+void R_FlushAliasShadows (void);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
