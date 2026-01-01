@@ -636,12 +636,11 @@ void R_Shadow_SunPass (void)
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	if (r_shadowmap_force_disable_scissor.value > 0.f)
-		glDisable (GL_SCISSOR_TEST);
+	glDisable (GL_SCISSOR_TEST);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
-	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glDepthFunc (GL_LEQUAL);
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE |
@@ -792,11 +791,11 @@ void R_Shadow_DlightPass (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	glEnable (GL_SCISSOR_TEST);
+	glDisable (GL_SCISSOR_TEST);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
-	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glDepthFunc (GL_LEQUAL);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -827,6 +826,7 @@ void R_Shadow_DlightPass (void)
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
 
+		glEnable (GL_SCISSOR_TEST);
 		glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
