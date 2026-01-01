@@ -438,8 +438,9 @@ void main()
 		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_EMISSIVE) == 0u;
 		shadow_receiver = shadow_receiver && (in_flags & CF_USE_EMISSIVE) == 0u;
 		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_NO_SHADOW_RECEIVE) == 0u;
+		vec3 shadow_world_pos = in_pos + EyePos;
 		if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
-			shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
+			shadow_term = ShadowVisibility(shadow_world_pos, surface_normal, shadow_range);
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
 		if (shadow_mode == 1)
@@ -464,7 +465,7 @@ void main()
 
 		if (shadow_mode >= 3)
 		{
-			out_fragcolor = vec4(ShadowDebugColor(in_pos, shadow_term), 1.0);
+			out_fragcolor = vec4(ShadowDebugColor(shadow_world_pos, shadow_term), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
