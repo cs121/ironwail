@@ -81,10 +81,13 @@ extern cvar_t r_shadow_sun;
 extern cvar_t r_shadowmap_size;
 extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
+extern cvar_t r_shadow_bias_mdl;
+extern cvar_t r_shadow_normalbias_mdl;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_shadow_twosided_mdl;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
@@ -562,10 +565,13 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadowmap_size);
         Cvar_RegisterVariable (&r_shadow_bias);
         Cvar_RegisterVariable (&r_shadow_normalbias);
+        Cvar_RegisterVariable (&r_shadow_bias_mdl);
+        Cvar_RegisterVariable (&r_shadow_normalbias_mdl);
         Cvar_RegisterVariable (&r_shadow_pcf);
         Cvar_RegisterVariable (&r_shadow_pcf_taps);
         Cvar_RegisterVariable (&r_shadow_debug);
         Cvar_RegisterVariable (&r_shadow_sun_dir);
+        Cvar_RegisterVariable (&r_shadow_twosided_mdl);
 	DLightPool_RegisterCvars ();
         Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)

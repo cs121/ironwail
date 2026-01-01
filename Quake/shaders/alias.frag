@@ -20,7 +20,11 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float   _Pad[5];
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -95,6 +99,9 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
+layout(binding=5) uniform sampler2D ShadowMap;
+
+#include "shadow_sample.glsl"
 
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
@@ -106,6 +113,7 @@ layout(location=2) in vec3 in_pos;
 layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
+layout(location=6) in vec3 in_normal;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -150,6 +158,26 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
+        float shadow_range = 1.0;
+        float shadow_term = 1.0;
+	vec4 lit_color = in_color;
+
+	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+	{
+		vec3 world_pos = in_pos + EyePos;
+		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
+		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
+		if (ShadowDebug.y > 1.5)
+		{
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			out_fragcolor = vec4(vec3(debug_value), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		lit_color.rgb *= shadow_term;
+	}
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
         vec4 result = textureLod(Tex, uv, 0.);
@@ -159,11 +187,11 @@ void main()
 #if ALPHATEST
 	if (result.a < 0.666)
 		discard;
-	result.rgb *= in_color.rgb;
+	result.rgb *= lit_color.rgb;
 #else
-	result.rgb = mix(result.rgb, result.rgb * in_color.rgb, result.a);
+	result.rgb = mix(result.rgb, result.rgb * lit_color.rgb, result.a);
 #endif
-	result.a = in_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
+	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
         vec3 fullbright;
 #if MODE == 2
         fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
@@ -182,6 +210,7 @@ void main()
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
         result.rgb = clamp(result.rgb, 0.0, 1.0);
+
         result.rgb = ApplyFog(result.rgb, in_pos);
         out_fragcolor = result;
 #if !OIT

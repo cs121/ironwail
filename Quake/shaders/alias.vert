@@ -20,7 +20,11 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float   _Pad[5];
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
 	InstanceData instances[];
 };
 
@@ -91,6 +95,7 @@ layout(location=2) out vec3 out_pos;
 layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
+layout(location=6) out vec3 out_normal;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -131,4 +136,5 @@ void main()
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
         out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
+	out_normal = world_normal;
 }
