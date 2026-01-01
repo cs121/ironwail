@@ -458,19 +458,19 @@ void main()
 			return;
 		}
 
-		bool shadow_enabled = ShadowDebug.x > 0.5;
-		int shadow_mode = int(ShadowDebug.y + 0.5);
+		bool shadow_enabled = ShadowControl.x > 0.5;
+		int shadow_mode = int(ShadowControl.y + 0.5);
 		float shadow_range = 1.0;
 		float shadow_term = 1.0;
 		bool shadow_receiver = (in_flags & CF_MAT_SKY) == 0u;
 		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_EMISSIVE) == 0u;
 		shadow_receiver = shadow_receiver && (in_flags & CF_USE_EMISSIVE) == 0u;
 		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_NO_SHADOW_RECEIVE) == 0u;
-		if (shadow_enabled && shadow_receiver && (shadow_mode == 0 || shadow_mode == 4))
+		if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
 			shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
-		if (shadow_enabled && shadow_mode >= 1)
+		if (shadow_mode >= 2)
 		{
 			out_fragcolor = vec4(ShadowDebugColor(in_pos, shadow_term), 1.0);
 #if !OIT
@@ -488,15 +488,13 @@ void main()
 		{
 			ambient_term = clamped_static * lightgrid;
 			direct_term = clamped_static - ambient_term;
-			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			total_light = ambient_term + direct_term * shadow_scale;
+			total_light = ambient_term + direct_term * (shadow_enabled ? shadow_term : 1.0);
 		}
 		else
 		{
 			ambient_term = vec3(0.0);
 			direct_term = clamped_static;
-			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			total_light = ambient_term + direct_term * shadow_scale;
+			total_light = ambient_term + direct_term * (shadow_enabled ? shadow_term : 1.0);
 			total_light *= lightgrid;
 		}
 	

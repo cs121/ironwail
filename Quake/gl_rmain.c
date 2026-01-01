@@ -3179,10 +3179,14 @@ void R_SetupView (void)
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
         {
                 float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
-                r_framedata.shadow_debug[0] =
+                r_framedata.shadow_control[0] =
                         (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
-                r_framedata.shadow_debug[1] = debug_mode;
+                r_framedata.shadow_control[1] = debug_mode;
         }
+        r_framedata.shadow_control[2] = 0.f;
+        r_framedata.shadow_control[3] = 0.f;
+        r_framedata.shadow_debug[0] = 1.f;
+        r_framedata.shadow_debug[1] = r_framedata.shadow_control[1];
         r_framedata.shadow_debug[2] = 0.f;
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;

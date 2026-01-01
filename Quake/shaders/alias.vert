@@ -23,6 +23,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
+	vec4	ShadowControl;
 	vec4	ShadowDebug;
 	vec4	ShadowSunDir;
 	InstanceData instances[];

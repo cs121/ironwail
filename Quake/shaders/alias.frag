@@ -23,6 +23,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
+	vec4	ShadowControl;
 	vec4	ShadowDebug;
 	vec4	ShadowSunDir;
 	InstanceData instances[];
@@ -169,7 +170,7 @@ void main()
 	vec3 fullbright = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
-	int shadow_mode = int(ShadowDebug.y + 0.5);
+	int shadow_mode = int(ShadowControl.y + 0.5);
 	vec4 lit_color = in_color;
 
 	if (FORCE_ALIAS_MAGENTA && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
@@ -194,37 +195,35 @@ void main()
 #endif
 
 	bool shadow_receiver = !any(greaterThan(emissive, vec3(0.0)));
-	bool shadow_enabled = ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
+	bool shadow_enabled = ShadowControl.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
+	bool allow_debug = (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
 
-	if (shadow_enabled)
+	vec3 world_pos = in_pos + EyePos;
+	vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
+	if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
 	{
-		vec3 world_pos = in_pos + EyePos;
-		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		if (shadow_receiver && (shadow_mode == 0 || shadow_mode == 4))
+		vec2 shadow_uv;
+		float shadow_ref;
+		ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
+		if (shadow_range >= 0.5 && (shadow_mode == 0 || shadow_mode == 3))
 		{
-			vec2 shadow_uv;
-			float shadow_ref;
-			ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
-			if (shadow_range >= 0.5 && (shadow_mode == 0 || shadow_mode == 4))
-			{
-				float ndotl = dot(shadow_normal, ShadowSunDir.xyz);
-				float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
-				if (ShadowParams.z > 0.5)
-					shadow_term = ShadowSamplePCF(shadow_uv, shadow_ref, bias, int(ShadowParams.w + 0.5));
-				else
-					shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
-			}
-		}
-		if (shadow_mode >= 1)
-		{
-			out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
+			float ndotl = dot(shadow_normal, ShadowSunDir.xyz);
+			float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
+			if (ShadowParams.z > 0.5)
+				shadow_term = ShadowSamplePCF(shadow_uv, shadow_ref, bias, int(ShadowParams.w + 0.5));
+			else
+				shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
 		}
 	}
-	lit_color.rgb = clamp(lit_color.rgb + in_direct * shadow_term, 0.0, Overbright);
+	if (shadow_mode >= 2 && allow_debug)
+	{
+		out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	lit_color.rgb = clamp(lit_color.rgb + in_direct * (shadow_enabled ? shadow_term : 1.0), 0.0, Overbright);
 #if MODE == 2
         vec4 result = textureLod(Tex, uv, 0.);
 #else
