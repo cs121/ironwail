@@ -270,6 +270,8 @@ cvar_t	r_shadow_dlight_size = { "r_shadow_dlight_size", "256", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_distance = { "r_shadow_dlight_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.0025", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_pcf_taps = { "r_shadow_dlight_pcf_taps", "4", CVAR_ARCHIVE };
+cvar_t	r_shadow_lightgrid = { "r_shadow_lightgrid", "0", CVAR_ARCHIVE };
+cvar_t	r_shadow_lightgrid_mode = { "r_shadow_lightgrid_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -3144,7 +3146,10 @@ void R_SetupView (void)
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
         r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
-        r_framedata.lightgrid_params[2] = 0.f;
+        r_framedata.lightgrid_params[2] =
+                (r_shadows.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
+                ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
+                : 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
         r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
         r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;

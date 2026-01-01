@@ -94,6 +94,8 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_dlight_distance;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
+extern cvar_t r_shadow_lightgrid;
+extern cvar_t r_shadow_lightgrid_mode;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
@@ -584,6 +586,8 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadow_dlight_distance);
         Cvar_RegisterVariable (&r_shadow_dlight_bias);
         Cvar_RegisterVariable (&r_shadow_dlight_pcf_taps);
+        Cvar_RegisterVariable (&r_shadow_lightgrid);
+        Cvar_RegisterVariable (&r_shadow_lightgrid_mode);
 	DLightPool_RegisterCvars ();
         Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)

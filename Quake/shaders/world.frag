@@ -381,8 +381,6 @@ void main()
 			return;
 		}
 
-		static_light *= lightgrid;
-
 		if (dlight_debug)
 		{
 			static_light = vec3(0.0);
@@ -400,7 +398,8 @@ void main()
 
 		if (LightmapParams.x > 0.5)
 		{
-			OUT_COLOR = vec4(clamp(static_light, 0.0, 1.0), 1.0);
+			vec3 static_light_debug = static_light * lightgrid;
+			OUT_COLOR = vec4(clamp(static_light_debug, 0.0, 1.0), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -427,6 +426,8 @@ void main()
 
 		float shadow_range = 1.0;
 		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
+		bool shadow_enabled = ShadowDebug.x > 0.5;
+		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
@@ -438,10 +439,23 @@ void main()
 			return;
 		}
 
-		vec3 total_light = clamp(static_light, 0.0, 1.0);
+		vec3 total_light;
+		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
 
-		if (ShadowDebug.x > 0.5)
-			total_light *= shadow_term;
+		if (lightgrid_shadow)
+		{
+			vec3 ambient = clamped_static * lightgrid;
+			vec3 direct = clamped_static - ambient;
+			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
+			total_light = ambient + direct * shadow_scale;
+		}
+		else
+		{
+			total_light = clamped_static;
+			if (shadow_enabled)
+				total_light *= shadow_term;
+			total_light *= lightgrid;
+		}
 	
 	// View direction
 	vec3 to_eye = EyePos - in_pos;
