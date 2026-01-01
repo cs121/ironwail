@@ -97,7 +97,7 @@ layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
 layout(location=7) out vec3 out_direct;
-layout(location=8) noperspective out vec4 out_shadow_clip;
+layout(location=8) out vec4 out_shadow_clip;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 

@@ -84,8 +84,5 @@ void main()
 		vec4(inst.WorldMatrix[0].w, inst.WorldMatrix[1].w, inst.WorldMatrix[2].w, 1.0)
 	);
 	vec3 world_pos = (model * vec4(alias_pos, 1.0)).xyz;
-	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
-	if (int(ShadowDebug.y + 0.5) == 5)
-		clip.z = world_pos.z * clip.w;
-	gl_Position = clip;
+	gl_Position = ShadowViewProj * vec4(world_pos, 1.0);
 }
