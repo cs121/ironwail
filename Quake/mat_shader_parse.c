@@ -713,14 +713,34 @@ static qboolean Mat_Shader_ParseDepthFunc (const char *token, mat_depthfunc_t *o
 		*out = MAT_DEPTHFUNC_LEQUAL;
 		return true;
 	}
+	if (!q_strcasecmp (token, "less"))
+	{
+		*out = MAT_DEPTHFUNC_LESS;
+		return true;
+	}
 	if (!q_strcasecmp (token, "equal"))
 	{
 		*out = MAT_DEPTHFUNC_EQUAL;
 		return true;
 	}
+	if (!q_strcasecmp (token, "greater"))
+	{
+		*out = MAT_DEPTHFUNC_GREATER;
+		return true;
+	}
+	if (!q_strcasecmp (token, "gequal"))
+	{
+		*out = MAT_DEPTHFUNC_GEQUAL;
+		return true;
+	}
 	if (!q_strcasecmp (token, "always"))
 	{
 		*out = MAT_DEPTHFUNC_ALWAYS;
+		return true;
+	}
+	if (!q_strcasecmp (token, "never"))
+	{
+		*out = MAT_DEPTHFUNC_NEVER;
 		return true;
 	}
 	return false;
@@ -1246,6 +1266,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			}
 			if (Mat_Shader_ParseDepthFunc (value, &stage.depth_func))
 				continue;
+			stage.depth_func = MAT_DEPTHFUNC_LEQUAL;
 			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 				state ? state->source_file : material->source_file,
 				state ? state->token_line : 0u);
