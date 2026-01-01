@@ -9,6 +9,7 @@ layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
+#define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)

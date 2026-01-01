@@ -101,6 +101,7 @@ layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
 
+#define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
 #if MODE == 2

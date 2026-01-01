@@ -1436,6 +1436,10 @@ GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 R_Shadow_BindShadowMap (GL_TEXTURE5);
 }
+else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
+{
+R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
+}
 else if (pass == BP_SKYCUBEMAP)
 GL_Bind (GL_TEXTURE2, skybox->cubemap);
 

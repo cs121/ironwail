@@ -1,6 +1,8 @@
 #ifndef FRAME_UNIFORMS_GLSL
 #define FRAME_UNIFORMS_GLSL
 
+#define SHADOW_DLIGHT_MAX 4
+
 layout(std140, binding=0) uniform FrameDataUBO
 {
         mat4    ViewProj;
@@ -28,6 +30,10 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    ShadowParams;
         vec4    ShadowDebug;
         vec4    ShadowSunDir;
+        mat4    ShadowDlightViewProj[SHADOW_DLIGHT_MAX];
+        vec4    ShadowDlightAtlas[SHADOW_DLIGHT_MAX];
+        vec4    ShadowDlightInfo[SHADOW_DLIGHT_MAX];
+        vec4    ShadowDlightParams;
         uint    NumLights;
         uint    PrevFrameValid;
         uint    _Pad1;

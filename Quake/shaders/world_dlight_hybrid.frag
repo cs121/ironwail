@@ -5,8 +5,11 @@ layout(binding=0) uniform sampler2D Tex;
 #endif
 layout(binding=2) uniform sampler2D LMTex; // unused, kept for binding slot consistency
 layout(binding=3) uniform sampler2D LMTexDir; // unused
+layout(binding=5) uniform sampler2D ShadowDlightMap;
 
 #include "frame_uniforms.glsl"
+#define SHADOW_DLIGHT 1
+#include "shadow_sample.glsl"
 
 #ifndef ALPHATEST
 #define ALPHATEST 0
@@ -165,7 +168,9 @@ void main()
                                                 ndotl = mix(1.0, ndotl_raw, ndotl_mix);
                                         }
 
-                                        vec3 light_contrib = shaped * ndotl * l.color * dynamic_light_noise;
+                                        float shadow_range = 1.0;
+                                        float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, ofs + uint(j), shadow_range);
+                                        vec3 light_contrib = shaped * ndotl * shadow_term * l.color * dynamic_light_noise;
                                         dynamic_light += light_contrib;
                                 }
                         }
