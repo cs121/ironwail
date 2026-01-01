@@ -100,7 +100,7 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2DShadow ShadowMap;
+layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform sampler2D ShadowMapDepth;
 
 #define SHADOW_SUN 1
@@ -189,18 +189,7 @@ void main()
 	vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 	if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
 	{
-		vec2 shadow_uv;
-		float shadow_ref;
-		ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
-		if (shadow_range >= 0.5 && (shadow_mode == 0 || shadow_mode == 3))
-		{
-			float ndotl = dot(shadow_normal, ShadowSunDir.xyz);
-			float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
-			if (ShadowParams.z > 0.5)
-				shadow_term = ShadowSamplePCF(shadow_uv, shadow_ref, bias, int(ShadowParams.w + 0.5));
-			else
-				shadow_term = ShadowSampleRaw(shadow_uv, shadow_ref, bias);
-		}
+		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
 	}
 	if (shadow_mode == 1 && allow_debug)
 	{

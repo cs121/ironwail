@@ -12,16 +12,12 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 		return;
 	}
 
-	vec3 ndc = clip.xyz / clip.w;
-	uv = ndc.xy * 0.5 + 0.5;
-	float depth01 =
-#if CLIP_Z_ZERO_TO_ONE
-		ndc.z;
-#else
-		ndc.z * 0.5 + 0.5;
-#endif
-
-	reference = depth01;
+	vec3 light_ndc = clip.xyz / clip.w;
+	vec3 shadow_uvz;
+	shadow_uvz.xy = light_ndc.xy * 0.5 + 0.5;
+	shadow_uvz.z = light_ndc.z * 0.5 + 0.5;
+	uv = shadow_uvz.xy;
+	reference = shadow_uvz.z;
 
 	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
 		all(lessThanEqual(uv, vec2(1.0))) &&
@@ -37,8 +33,9 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
-	float compare_depth = reference - bias;
-	return texture(ShadowMap, vec3(uv, compare_depth));
+	float shadow_depth = texture(ShadowMap, uv).r;
+	float compare_depth = reference + bias;
+	return step(compare_depth, shadow_depth);
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
@@ -114,7 +111,6 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	float reference;
 	float in_range;
 	ShadowCoordFromClip(lightClip, uv, reference, in_range);
-	bool uv_outside = (in_range < 0.5);
 	if (mode == 6)
 	{
 		float matrix_sum = 0.0;
@@ -137,24 +133,17 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 
 	if (mode == 1)
 	{
-		float depth = texture(ShadowMapDepth, uv).r;
-		return vec3(depth);
+		return vec3(uv.x, 0.0, 0.0);
 	}
 	if (mode == 2)
-		return vec3(uv, 0.0);
+		return vec3(0.0, uv.y, 0.0);
 	if (mode == 3)
-	{
-		if (uv_outside)
-			return vec3(0.0, 0.0, 1.0);
-		return vec3(uv, 0.0);
-	}
+		return vec3(reference);
 	if (mode == 4)
 	{
-		if (uv_outside)
-			return vec3(0.0, 0.0, 1.0);
 		float sampled_depth = texture(ShadowMapDepth, uv).r;
 		float diff = abs(reference - sampled_depth);
-		return vec3(reference, sampled_depth, diff);
+		return vec3(diff);
 	}
 
 	return vec3(shadow_term);
