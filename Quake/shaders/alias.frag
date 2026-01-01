@@ -92,31 +92,6 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
-void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float in_range)
-{
-	if (clip.w <= 0.0)
-	{
-		uv = vec2(0.0);
-		reference = 0.0;
-		in_range = 0.0;
-		return;
-	}
-
-	vec3 shadow_ndc = clip.xyz / clip.w;
-	uv = shadow_ndc.xy * 0.5 + 0.5;
-	float depth01 =
-#if CLIP_Z_ZERO_TO_ONE
-		shadow_ndc.z;
-#else
-		shadow_ndc.z * 0.5 + 0.5;
-#endif
-	reference = depth01;
-
-	bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
-		all(lessThanEqual(uv, vec2(1.0)));
-	in_range = inside ? 1.0 : 0.0;
-}
-
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
