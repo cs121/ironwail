@@ -98,7 +98,7 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "surfaceparm", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface flags; see surfaceparm scope." },
 	{ "cull", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: back/front/none." },
 	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: sky/opaque/seeThrough/decal/banner/underwater/additive/nearest or numeric." },
-	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
+	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean or factor/units pair." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
@@ -1282,7 +1282,11 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  content flags: 0x%08x\n", material->content_flags);
 	Con_Printf ("  cull: %s\n", cull_names[q_min ((int)material->cull_mode, (int)countof (cull_names) - 1)]);
 	Con_Printf ("  sort: %s\n", Mat_Shader_SortName (material->sort_key));
-	Con_Printf ("  polygon offset: %s\n", material->polygon_offset ? "on" : "off");
+	if (material->polygon_offset)
+		Con_Printf ("  polygon offset: on (factor %.2f units %.2f)\n",
+			material->polygon_offset_factor, material->polygon_offset_units);
+	else
+		Con_Printf ("  polygon offset: off\n");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
 	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);

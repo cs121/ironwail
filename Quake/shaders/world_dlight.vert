@@ -35,6 +35,7 @@ struct Call
 {
         uint    flags;
         float   wateralpha;
+        vec2    polygon_offset;
         vec4    stage_color;
 #if BINDLESS
         uvec2   txhandle;
@@ -129,7 +130,9 @@ void main()
 #endif
         if ((call.flags & CF_USE_POLYGON_OFFSET) != 0u)
         {
-                curr_clip.z += ZBIAS;
+                float zoffset = (call.polygon_offset.x + call.polygon_offset.y) * ZBIAS;
+
+                curr_clip.z += zoffset;
         }
         gl_Position = curr_clip;
         out_pos = world_pos;

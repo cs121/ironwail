@@ -234,6 +234,8 @@ typedef struct shader_material_s
 	mat_cull_mode_t		cull_mode;
 	mat_sort_key_t		sort_key;
 	qboolean		polygon_offset;
+	float			polygon_offset_factor;
+	float			polygon_offset_units;
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
 	qboolean		godray_enable;
