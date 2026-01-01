@@ -487,6 +487,7 @@ void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
 void R_DrawBrushModels_Shadow (entity_t **ents, int count);
 void R_DrawAliasModels (entity_t **ents, int count);
+void R_DrawAliasModels_Shadow (entity_t **ents, int count);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
@@ -577,6 +578,7 @@ typedef struct glprogs_s {
 	GLuint		world_dlight_hybrid[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		shadow_depth;
+	GLuint		shadow_depth_alias[2]; // [md5]
 	GLuint		shadow_debug;
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]

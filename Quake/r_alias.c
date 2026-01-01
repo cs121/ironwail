@@ -31,6 +31,11 @@ extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
+extern cvar_t r_shadow_bias_mdl;
+extern cvar_t r_shadow_normalbias_mdl;
+extern cvar_t r_shadow_pcf;
+extern cvar_t r_shadow_pcf_taps;
+extern cvar_t r_shadow_twosided_mdl;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -86,7 +91,11 @@ struct ibuf_s {
 		float	dither;
 		float	overbright;
 		float	half_lambert;
-		float	_padding[5]; // keep std430 layout in sync with InstanceBuffer in alias shaders
+		float	_pad1;
+		float	shadow_viewproj[16];
+		vec4_t	shadow_params;
+		vec4_t	shadow_debug;
+		vec4_t	shadow_sun_dir;
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -560,6 +569,13 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
+	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
+	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
+	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
+	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
+	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
+	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -570,6 +586,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
+	R_Shadow_BindShadowMap (GL_TEXTURE5);
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
 	{
@@ -641,6 +658,104 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 		}
 
 		GL_BindTextures (0, 3, textures);
+
+		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
+
+		rs_aliaspasses += hdr->numtris * ibuf.count;
+	}
+
+	ibuf.count = 0;
+
+	GL_EndGroup();
+}
+
+/*
+=================
+R_FlushAliasInstances_Shadow
+=================
+*/
+static void R_FlushAliasInstances_Shadow (void)
+{
+	qmodel_t	*model;
+	aliashdr_t	*mainhdr, *hdr;
+	qboolean	md5;
+	unsigned	state;
+	GLuint		buf;
+	GLbyte		*ofs;
+	size_t		ibuf_size;
+	GLuint		buffers[2];
+	GLintptr	offsets[2];
+	GLsizeiptr	sizes[2];
+
+	if (!ibuf.count)
+		return;
+
+	model = ibuf.ent->model;
+	mainhdr = (aliashdr_t *)Mod_Extradata (model);
+	md5 = mainhdr->poseverttype == PV_IQM;
+
+	GL_BeginGroup (model->name);
+
+	GL_UseProgram (glprogs.shadow_depth_alias[md5]);
+
+	if (md5)
+		state = GLS_ATTRIBS(5);
+	else
+		state = GLS_ATTRIBS(1);
+
+	if (r_shadow_twosided_mdl.value > 0.f)
+		state |= GLS_CULL_NONE;
+	else
+		state |= GLS_CULL_FRONT;
+
+	state |= GLS_BLEND_OPAQUE;
+	GL_SetState (state);
+
+	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
+	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
+	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
+	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
+	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
+	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
+	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
+
+	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
+
+	buffers[0] = buf;
+	offsets[0] = (GLintptr) ofs;
+	sizes[0] = ibuf_size;
+
+	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
+	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
+
+	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
+	{
+		if (md5)
+		{
+			GL_VertexAttribPointerFunc  (0, 3, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, xyz)));
+			GL_VertexAttribPointerFunc  (1, 4, GL_BYTE,				GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, norm)));
+			GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, st)));
+			GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
+			GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+
+			buffers[1] = model->meshvbo;
+			offsets[1] = hdr->vboposeofs;
+			sizes[1] = sizeof (bonepose_t) * hdr->numbones * hdr->numboneposes;
+		}
+		else
+		{
+			GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof (meshst_t), (void *) hdr->vbostofs);
+
+			buffers[1] = model->meshvbo;
+			offsets[1] = hdr->vbovertofs;
+			sizes[1] = sizeof (meshxyz_t) * hdr->numverts_vbo * hdr->numposes;
+		}
+
+		GL_BindBuffersRange (GL_SHADER_STORAGE_BUFFER, 1, 2, buffers, offsets, sizes);
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
 
@@ -838,6 +953,78 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
 
 /*
 =================
+R_DrawAliasModel_Shadow_Real
+=================
+*/
+static void R_DrawAliasModel_Shadow_Real (entity_t *e)
+{
+	aliashdr_t	*paliashdr;
+	lerpdata_t	lerpdata;
+	float		model_matrix[16];
+	aliasinstance_t	*instance;
+	float		entalpha;
+
+	if (!e || !e->model)
+		return;
+
+	if (e == &cl.viewent)
+		return;
+
+	if (e->model->flags & MOD_NOSHADOW)
+		return;
+
+	paliashdr = (aliashdr_t *)Mod_Extradata (e->model);
+
+	R_SetupAliasFrame (e, paliashdr, &lerpdata);
+	R_SetupEntityTransform (e, &lerpdata);
+
+	if (lerpdata.pose1 == lerpdata.pose2)
+		lerpdata.blend = 0.f;
+
+	if (R_CullModelForEntity (e))
+		return;
+
+	R_EntityMatrix (model_matrix, lerpdata.origin, lerpdata.angles, e->scale);
+	ApplyTranslation (model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
+	ApplyScale (model_matrix, paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
+
+	entalpha = ENTALPHA_DECODE (e->alpha);
+	if (entalpha == 0.f)
+		return;
+
+	if (!R_Alias_CanAddToBatch (e))
+		R_FlushAliasInstances_Shadow ();
+
+	if (!ibuf.count)
+		ibuf.ent = e;
+
+	instance = &ibuf.inst[ibuf.count++];
+	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
+
+	MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
+	MatrixTranspose4x3 (model_matrix, instance->prev_worldmatrix);
+
+	VectorClear (instance->lightcolor);
+	VectorClear (instance->dlightcolor);
+	instance->alpha = entalpha;
+	instance->pose1 = lerpdata.pose1;
+	instance->pose2 = lerpdata.pose2;
+	instance->blend = lerpdata.blend;
+
+	if (paliashdr->poseverttype == PV_QUAKE1)
+	{
+		instance->pose1 *= paliashdr->numverts_vbo;
+		instance->pose2 *= paliashdr->numverts_vbo;
+	}
+	else
+	{
+		instance->pose1 *= paliashdr->numbones;
+		instance->pose2 *= paliashdr->numbones;
+	}
+}
+
+/*
+=================
 R_DrawAliasModels
 =================
 */
@@ -847,6 +1034,19 @@ void R_DrawAliasModels (entity_t **ents, int count)
         for (i = 0; i < count; i++)
                 R_DrawAliasModel_Real (ents[i], false);
         R_FlushAliasInstances (false);
+}
+
+/*
+=================
+R_DrawAliasModels_Shadow
+=================
+*/
+void R_DrawAliasModels_Shadow (entity_t **ents, int count)
+{
+	int i;
+	for (i = 0; i < count; i++)
+		R_DrawAliasModel_Shadow_Real (ents[i]);
+	R_FlushAliasInstances_Shadow ();
 }
 
 /*

@@ -338,6 +338,11 @@ void R_Shadow_SunPass (void)
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 		R_DrawBrushModels_Shadow (ents, count);
 	}
+	{
+		int count = 0;
+		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
+		R_DrawAliasModels_Shadow (ents, count);
+	}
 
 	GL_EndGroup ();
 }
