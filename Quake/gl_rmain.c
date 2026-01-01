@@ -265,6 +265,7 @@ cvar_t	r_shadowmap_slopebias = { "r_shadowmap_slopebias", "2.0", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_cull_front = { "r_shadowmap_cull_front", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_force_disable_scissor = { "r_shadowmap_force_disable_scissor", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_freeze = { "r_shadowmap_freeze", "0", CVAR_NONE };
+cvar_t	r_shadow_freeze = { "r_shadow_freeze", "0", CVAR_NONE };
 cvar_t	r_shadow_bias_mdl = { "r_shadow_bias_mdl", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
