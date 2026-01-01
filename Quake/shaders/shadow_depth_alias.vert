@@ -78,6 +78,9 @@ void main()
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
 	vec3 alias_pos = mix(pose1.pos, pose2.pos, inst.Blend);
 	mat4x3 worldmatrix = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
-	vec4 world_pos = vec4((worldmatrix * vec4(alias_pos, 1.0)).xyz, 1.0);
-	gl_Position = ShadowViewProj * world_pos;
+	vec3 world_pos = (worldmatrix * vec4(alias_pos, 1.0)).xyz;
+	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
+	if (int(ShadowDebug.y + 0.5) == 5)
+		clip.z = world_pos.z * clip.w;
+	gl_Position = clip;
 }

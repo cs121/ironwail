@@ -102,16 +102,13 @@ void ShadowCoordFromClip(vec4 clip, out vec2 uv, out float reference, out float 
 		return;
 	}
 
-	vec3 proj = clip.xyz / clip.w;
-	uv = proj.xy * 0.5 + 0.5;
-#if REVERSED_Z
-	reference = proj.z;
-#else
-	reference = proj.z * 0.5 + 0.5;
-#endif
+	vec3 shadow_coord = clip.xyz / clip.w;
+	shadow_coord = shadow_coord * 0.5 + 0.5;
+	uv = shadow_coord.xy;
+	reference = shadow_coord.z;
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	bool inside = all(greaterThanEqual(shadow_coord, vec3(0.0))) &&
+		all(lessThanEqual(shadow_coord, vec3(1.0)));
 	in_range = inside ? 1.0 : 0.0;
 }
 
@@ -201,8 +198,8 @@ void main()
 			ShadowCoordFromClip(in_shadow_clip, shadow_uv, shadow_ref, shadow_range);
 			if (shadow_range >= 0.5 && shadow_mode <= 3)
 			{
-				float ndotl = clamp(dot(shadow_normal, -ShadowSunDir.xyz), 0.0, 1.0);
-				float bias = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
+				float ndotl = dot(shadow_normal, ShadowSunDir.xyz);
+				float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
 				if (ShadowParams.z > 0.5)
 					shadow_term = ShadowSamplePCF(shadow_uv, shadow_ref, bias, int(ShadowParams.w + 0.5));
 				else
