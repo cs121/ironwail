@@ -132,6 +132,9 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	if (mode == 1)
 	{
 		float depth = texture(ShadowMapDepth, uv).r;
+#if REVERSED_Z
+		depth = 1.0 - depth;
+#endif
 		return vec3(depth);
 	}
 	if (mode == 2)
@@ -139,7 +142,13 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	if (mode == 3)
 	{
 		float depth = texture(ShadowMapDepth, uv).r;
-		float diff = reference - depth;
+#if REVERSED_Z
+		float receiver_depth = 1.0 - reference;
+		depth = 1.0 - depth;
+#else
+		float receiver_depth = reference;
+#endif
+		float diff = receiver_depth - depth;
 		float scaled = clamp(diff * 10.0 + 0.5, 0.0, 1.0);
 		return vec3(scaled);
 	}
