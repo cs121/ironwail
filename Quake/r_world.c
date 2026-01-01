@@ -1479,10 +1479,21 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
 	if (pass == BP_SOLID || pass == BP_ALPHATEST)
 	{
-		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_OPAQUE);
-		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_DECAL);
-		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_ADDITIVE);
-		R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, MAT_SORT_NEAREST);
+		static const mat_sort_key_t sort_order[] =
+		{
+			MAT_SORT_SKY,
+			MAT_SORT_OPAQUE,
+			MAT_SORT_SEE_THROUGH,
+			MAT_SORT_DECAL,
+			MAT_SORT_BANNER,
+			MAT_SORT_UNDERWATER,
+			MAT_SORT_ADDITIVE,
+			MAT_SORT_NEAREST
+		};
+		size_t sort_index;
+
+		for (sort_index = 0; sort_index < countof (sort_order); ++sort_index)
+			R_DrawBrushModels_MaterialStages (ents, count, pass, translucent, sort_order[sort_index]);
 	}
 }
 
