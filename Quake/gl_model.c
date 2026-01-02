@@ -1155,7 +1155,7 @@ static gltexture_t *Mod_LoadKTX2Texture(const char *name)
                         free(rawbuf);
                         return gltex;
                 }
-                Con_Printf("KTX2 load failed, falling back.\n");
+                Con_DPrintf("KTX2 load failed, falling back.\n");
         }
 
         free(rawbuf);

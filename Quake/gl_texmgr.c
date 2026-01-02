@@ -917,7 +917,7 @@ void TexMgr_LightmapLinearCompat_f (cvar_t *var)
 static void TexMgr_LogTextureUpload (const gltexture_t *glt)
 {
 	const char *colorspace = (glt->flags & TEXPREF_SRGB) ? "sRGB" : "linear";
-	Con_Printf ("Texture %s: %s, %s\n", glt->name, colorspace, TexMgr_InternalFormatName (glt->internal_format));
+	Con_DPrintf ("Texture %s: %s, %s\n", glt->name, colorspace, TexMgr_InternalFormatName (glt->internal_format));
 }
 
 static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
