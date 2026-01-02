@@ -153,6 +153,7 @@ layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: 
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
+const int MATERIAL_MASK_NO_DOF = 8;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
 
 struct DepthSamplingInfo
@@ -452,7 +453,8 @@ void main()
                 }
         }
 
-        if (DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5 && centerOpaque)
+        if (DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5 && centerOpaque
+                && (materialMask & MATERIAL_MASK_NO_DOF) == 0)
         {
                 float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
                 float focusDistance = DoFParams0.y;
