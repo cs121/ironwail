@@ -4445,6 +4445,7 @@ void R_RenderScene (void)
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 	R_DrawParticles (true);
+	R_DrawRTLightCoronas ();
 	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz

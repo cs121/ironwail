@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../common/lightgrid.h"
 #include "gl_lightgrid.h"
 #include "r_dlight_pool.h"
+#include "rtlight.h"
+#include "gl_texmgr.h"
 #include <float.h>
 #include <math.h>
 
@@ -46,6 +48,21 @@ cvar_t r_model_lightgrid = { "r_model_lightgrid", "1", CVAR_ARCHIVE };
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
 dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
+
+typedef struct rtlight_corona_vert_s
+{
+	vec3_t pos;
+	float uv[2];
+	byte color[4];
+} rtlight_corona_vert_t;
+
+#define MAX_RTLIGHT_CORONAS 2048
+
+static rtlight_corona_vert_t rtlight_corona_batch[4 * MAX_RTLIGHT_CORONAS];
+static GLushort rtlight_corona_indices[6 * MAX_RTLIGHT_CORONAS];
+static qboolean rtlight_corona_indices_init = false;
+static int rtlight_corona_batch_count = 0;
+static gltexture_t *rtlight_corona_batch_texture = NULL;
 
 static qboolean R_IsFinite (float v)
 {
@@ -98,6 +115,33 @@ static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t c
 	dl->flicker_seed = (float) rand ();
 	dl->kind = DL_PERSISTENT;
 	dl->active = true;
+}
+
+void R_AddRTLightDlights (void)
+{
+	const rtlight_list_t *list = RTLight_GetActive ();
+
+	if (!list || !list->lights || list->count <= 0)
+		return;
+
+	if (r_rtlights.value <= 0.f)
+		return;
+
+	for (int i = 0; i < list->count; i++)
+	{
+		const rtlight_t *rtl = &list->lights[i];
+		vec3_t color;
+		int key;
+
+		if (rtl->radius <= 0.f || rtl->intensity <= 0.f)
+			continue;
+
+		VectorScale (rtl->color, rtl->intensity, color);
+
+		key = 20000 + (rtl->id ? rtl->id : (i + 1));
+
+		R_AddEntityDlight (rtl->origin, rtl->radius, color, rtl->style, key);
+	}
 }
 
 // Parse BSP entity lump for persistent dynamic lights.
@@ -202,6 +246,203 @@ void R_ParseDlightEntities (void)
 		}
 	}
 	return;
+}
+
+static void R_InitRTLightCoronaIndices (void)
+{
+	int i;
+
+	if (rtlight_corona_indices_init)
+		return;
+
+	for (i = 0; i < MAX_RTLIGHT_CORONAS; i++)
+	{
+		rtlight_corona_indices[i * 6 + 0] = i * 4 + 0;
+		rtlight_corona_indices[i * 6 + 1] = i * 4 + 1;
+		rtlight_corona_indices[i * 6 + 2] = i * 4 + 2;
+		rtlight_corona_indices[i * 6 + 3] = i * 4 + 0;
+		rtlight_corona_indices[i * 6 + 4] = i * 4 + 2;
+		rtlight_corona_indices[i * 6 + 5] = i * 4 + 3;
+	}
+
+	rtlight_corona_indices_init = true;
+}
+
+static gltexture_t *R_LoadRTLightTexture (const char *name, const char *fallback)
+{
+	int width, height;
+	enum srcformat fmt;
+	byte *data;
+	const char *source = (name && name[0]) ? name : fallback;
+	gltexture_t *glt;
+
+	if (!source || !source[0])
+		return notexture;
+
+	glt = TexMgr_FindTexture (NULL, source);
+	if (glt)
+		return glt;
+
+	data = Image_LoadImage (source, &width, &height, &fmt);
+	if (!data)
+		return notexture;
+
+	return TexMgr_LoadImage (NULL, source, width, height, fmt, data, source, 0,
+		TEXPREF_ALPHA | TEXPREF_MIPMAP);
+}
+
+static void R_FlushRTLightCoronaBatch (qboolean dither)
+{
+	GLuint buf;
+	GLbyte *ofs;
+
+	if (!rtlight_corona_batch_count)
+		return;
+
+	R_InitRTLightCoronaIndices ();
+
+	GL_BeginGroup ("RTLight coronas");
+	GL_UseProgram (glprogs.coronas[dither]);
+	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (3));
+
+	GL_Bind (GL_TEXTURE0, rtlight_corona_batch_texture);
+
+	GL_Upload (GL_ARRAY_BUFFER, rtlight_corona_batch,
+		sizeof (rtlight_corona_batch[0]) * rtlight_corona_batch_count * 4, &buf, &ofs);
+	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
+	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (rtlight_corona_batch[0]),
+		ofs + offsetof (rtlight_corona_vert_t, pos));
+	GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (rtlight_corona_batch[0]),
+		ofs + offsetof (rtlight_corona_vert_t, uv));
+	GL_VertexAttribPointerFunc (2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof (rtlight_corona_batch[0]),
+		ofs + offsetof (rtlight_corona_vert_t, color));
+
+	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, rtlight_corona_indices,
+		sizeof (rtlight_corona_indices[0]) * rtlight_corona_batch_count * 6, &buf, &ofs);
+	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
+	glDrawElements (GL_TRIANGLES, rtlight_corona_batch_count * 6, GL_UNSIGNED_SHORT, ofs);
+
+	GL_EndGroup ();
+
+	rtlight_corona_batch_count = 0;
+}
+
+static void R_AppendRTLightCoronaQuad (const vec3_t origin, float size, const vec3_t color, float alpha,
+	gltexture_t *texture, qboolean dither)
+{
+	rtlight_corona_vert_t *verts;
+	vec3_t right, up;
+	vec3_t mins, maxs;
+	float r, g, b;
+
+	if (size <= 0.f || alpha <= 0.f)
+		return;
+
+	VectorSet (mins, origin[0] - size, origin[1] - size, origin[2] - size);
+	VectorSet (maxs, origin[0] + size, origin[1] + size, origin[2] + size);
+	if (R_CullBox (mins, maxs))
+		return;
+
+	if (!rtlight_corona_batch_count || rtlight_corona_batch_texture != texture)
+	{
+		R_FlushRTLightCoronaBatch (dither);
+		rtlight_corona_batch_texture = texture;
+	}
+
+	if (rtlight_corona_batch_count == MAX_RTLIGHT_CORONAS)
+	{
+		R_FlushRTLightCoronaBatch (dither);
+		rtlight_corona_batch_texture = texture;
+		if (rtlight_corona_batch_count == MAX_RTLIGHT_CORONAS)
+			return;
+	}
+
+	VectorScale (vright, size, right);
+	VectorScale (vup, size, up);
+
+	r = CLAMP (0.f, color[0], 1.f);
+	g = CLAMP (0.f, color[1], 1.f);
+	b = CLAMP (0.f, color[2], 1.f);
+	alpha = CLAMP (0.f, alpha, 1.f);
+
+	verts = &rtlight_corona_batch[rtlight_corona_batch_count * 4];
+	VectorSubtract (origin, right, verts[0].pos);
+	VectorAdd (verts[0].pos, up, verts[0].pos);
+	verts[0].uv[0] = 0.f;
+	verts[0].uv[1] = 0.f;
+
+	VectorAdd (origin, right, verts[1].pos);
+	VectorAdd (verts[1].pos, up, verts[1].pos);
+	verts[1].uv[0] = 1.f;
+	verts[1].uv[1] = 0.f;
+
+	VectorAdd (origin, right, verts[2].pos);
+	VectorSubtract (verts[2].pos, up, verts[2].pos);
+	verts[2].uv[0] = 1.f;
+	verts[2].uv[1] = 1.f;
+
+	VectorSubtract (origin, right, verts[3].pos);
+	VectorSubtract (verts[3].pos, up, verts[3].pos);
+	verts[3].uv[0] = 0.f;
+	verts[3].uv[1] = 1.f;
+
+	for (int i = 0; i < 4; i++)
+	{
+		verts[i].color[0] = (byte) (r * 255.f);
+		verts[i].color[1] = (byte) (g * 255.f);
+		verts[i].color[2] = (byte) (b * 255.f);
+		verts[i].color[3] = (byte) (alpha * 255.f);
+	}
+
+	rtlight_corona_batch_count++;
+}
+
+void R_DrawRTLightCoronas (void)
+{
+	const rtlight_list_t *list = RTLight_GetActive ();
+	qboolean dither = (softemu == SOFTEMU_COARSE);
+
+	if (!list || !list->lights || list->count <= 0)
+		return;
+
+	if (r_rtlights.value <= 0.f)
+		return;
+
+	rtlight_corona_batch_count = 0;
+	rtlight_corona_batch_texture = NULL;
+
+	for (int i = 0; i < list->count; i++)
+	{
+		const rtlight_t *rtl = &list->lights[i];
+		vec3_t color;
+
+		if (rtl->intensity <= 0.f)
+			continue;
+
+		VectorScale (rtl->color, rtl->intensity, color);
+
+		if (rtl->corona && r_coronas.value > 0.f)
+		{
+			float alpha = rtl->corona_alpha;
+			if (r_coronas_debug.value > 0.f)
+				alpha = 1.f;
+			R_AppendRTLightCoronaQuad (rtl->origin, rtl->corona_size, color, alpha,
+				R_LoadRTLightTexture (rtl->corona_tex, "textures/effects/corona"), dither);
+		}
+
+		if (rtl->envmap && r_envmap_lights.value > 0.f)
+		{
+			const char *envtex = rtl->envmap_tex[0] ? rtl->envmap_tex : "textures/effects/corona";
+			float alpha = rtl->envmap_strength;
+			float size = rtl->radius * 0.1f;
+			if (r_envmap_lights_debug.value > 0.f)
+				alpha = 1.f;
+			R_AppendRTLightCoronaQuad (rtl->origin, size, color, alpha,
+				R_LoadRTLightTexture (envtex, "textures/effects/corona"), dither);
+		}
+	}
+
+	R_FlushRTLightCoronaBatch (dither);
 }
 
 int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist);
