@@ -1035,8 +1035,8 @@ void R_Shadow_DrawDepthDebugQuad (void)
 		GLint compare_func = GL_LEQUAL;
 		if (shadow_compare_sampler)
 		{
-			glGetSamplerParameteriv (shadow_compare_sampler, GL_TEXTURE_COMPARE_MODE, &compare_mode);
-			glGetSamplerParameteriv (shadow_compare_sampler, GL_TEXTURE_COMPARE_FUNC, &compare_func);
+			compare_mode = GL_COMPARE_REF_TO_TEXTURE;
+			compare_func = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
 		}
 		GL_Uniform1fFunc (1, compare_mode == GL_COMPARE_REF_TO_TEXTURE ? 1.f : 0.f);
 		GL_Uniform1fFunc (2, (compare_func == GL_GEQUAL || compare_func == GL_GREATER) ? 1.f : 0.f);
