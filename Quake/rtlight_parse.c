@@ -309,6 +309,11 @@ void RTLight_ParseFile (const char *mapname, rtlight_list_t *out)
 	q_snprintf (filename, sizeof(filename), "maps/%s.rtlight", mapname);
 	data = (char *) COM_LoadMallocFile (filename, NULL);
 	if (!data)
+	{
+		q_snprintf (filename, sizeof(filename), "maps/%s.rtlights", mapname);
+		data = (char *) COM_LoadMallocFile (filename, NULL);
+	}
+	if (!data)
 		return;
 
 	Con_Printf ("Loaded rtlights file %s\n", filename);

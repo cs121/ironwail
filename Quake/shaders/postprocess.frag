@@ -148,7 +148,7 @@ layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
-layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
+layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: ssao fog strength
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 
@@ -634,7 +634,7 @@ void main()
                                 float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
                                 float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
                                 float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
-                                float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
+                                float fogStrength = clamp(PostFXFogColor.w, 0.0, 1.0);
                                 float fogTransmittance = 1.0;
                                 if (ssaoUseDepth && fogStrength > 0.0)
                                         fogTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
