@@ -87,6 +87,7 @@ void main()
 		vec4(inst.WorldMatrix[0].w, inst.WorldMatrix[1].w, inst.WorldMatrix[2].w, 1.0)
 	);
 	vec3 world_pos = (model * vec4(alias_pos, 1.0)).xyz;
+	world_pos += EyePos;
 	v_light_clip = ShadowViewProj * vec4(world_pos, 1.0);
 	gl_Position = v_light_clip;
 }

@@ -133,6 +133,50 @@ static void R_Shadow_LogFboInfo (const char *label, int width, int height, GLuin
 		Con_Warning ("Shadow %s FBO depth attachment missing\n", label);
 }
 
+static void R_Shadow_LogDepthTextureParams (const char *label)
+{
+	GLint compare_mode = 0;
+	GLint compare_func = 0;
+	GLint internal_format = 0;
+	GLint min_filter = 0;
+	GLint mag_filter = 0;
+	GLint wrap_s = 0;
+	GLint wrap_t = 0;
+
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &compare_mode);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &compare_func);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &min_filter);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &mag_filter);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &wrap_s);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &wrap_t);
+
+	Con_DPrintf ("Shadow %s depth tex params: fmt 0x%X compare_mode 0x%X compare_func 0x%X min 0x%X mag 0x%X wrap_s 0x%X wrap_t 0x%X\n",
+		label, internal_format, compare_mode, compare_func, min_filter, mag_filter, wrap_s, wrap_t);
+	if (compare_mode == GL_NONE)
+		Con_Warning ("Shadow %s depth tex compare mode disabled\n", label);
+}
+
+static void R_Shadow_LogPassState (const char *label)
+{
+	GLdouble clear_depth = 0.0;
+	GLint depth_func = 0;
+	GLboolean depth_mask = GL_FALSE;
+	GLboolean cull_enabled = GL_FALSE;
+	GLint cull_mode = 0;
+	GLenum fbo_status = GL_FRAMEBUFFER_UNDEFINED;
+
+	glGetDoublev (GL_DEPTH_CLEAR_VALUE, &clear_depth);
+	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	glGetBooleanv (GL_CULL_FACE, &cull_enabled);
+	glGetIntegerv (GL_CULL_FACE_MODE, &cull_mode);
+	fbo_status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+
+	Con_DPrintf ("Shadow %s pass state: clear_depth %.3f depth_func 0x%X depth_mask %d cull %d mode 0x%X fbo 0x%X\n",
+		label, clear_depth, depth_func, depth_mask ? 1 : 0, cull_enabled ? 1 : 0, cull_mode, fbo_status);
+}
+
 static void R_Shadow_DestroyDlightResources (void)
 {
 	if (shadow_dlight_fbo)
@@ -480,9 +524,18 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	{
+		static qboolean logged = false;
+		if (!logged)
+		{
+			R_Shadow_LogDepthTextureParams ("dlight");
+			logged = true;
+		}
+	}
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
@@ -556,8 +609,18 @@ void R_ResizeShadowMapIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	{
+		static qboolean logged = false;
+		if (!logged)
+		{
+			R_Shadow_LogDepthTextureParams ("sun");
+			logged = true;
+		}
+	}
 
 	if (!shadow_compare_sampler || !shadow_raw_sampler)
 	{
@@ -632,6 +695,7 @@ void R_Shadow_SunPass (void)
 	vec4_t sun_dir;
 	float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
 	static int last_debug_mode = -1;
+	static qboolean logged_state = false;
 	shadow_state_t prev_state;
 
 	r_framedata.shadow_debug[0] = 0.f;
@@ -679,6 +743,11 @@ void R_Shadow_SunPass (void)
 	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
 	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	if (!logged_state)
+	{
+		R_Shadow_LogPassState ("sun");
+		logged_state = true;
+	}
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE |
@@ -730,6 +799,7 @@ void R_Shadow_DlightPass (void)
 	int max_tiles;
 	int grid;
 	int tiles_used = 0;
+	static qboolean logged_state = false;
 	shadow_state_t prev_state;
 
 	shadow_dlight_selected_count = 0;
@@ -843,6 +913,11 @@ void R_Shadow_DlightPass (void)
 	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
 	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	if (!logged_state)
+	{
+		R_Shadow_LogPassState ("dlights");
+		logged_state = true;
+	}
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -955,6 +1030,18 @@ void R_Shadow_DrawDepthDebugQuad (void)
 	GL_UseProgram (glprogs.shadow_depth_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_Uniform1fFunc (0, r_shadow_debug_depthview_invert.value > 0.f ? 1.f : 0.f);
+	{
+		GLint compare_mode = GL_NONE;
+		GLint compare_func = GL_LEQUAL;
+		if (shadow_compare_sampler)
+		{
+			glGetSamplerParameteriv (shadow_compare_sampler, GL_TEXTURE_COMPARE_MODE, &compare_mode);
+			glGetSamplerParameteriv (shadow_compare_sampler, GL_TEXTURE_COMPARE_FUNC, &compare_func);
+		}
+		GL_Uniform1fFunc (1, compare_mode == GL_COMPARE_REF_TO_TEXTURE ? 1.f : 0.f);
+		GL_Uniform1fFunc (2, (compare_func == GL_GEQUAL || compare_func == GL_GREATER) ? 1.f : 0.f);
+	}
+	R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
 	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
