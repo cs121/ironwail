@@ -1,14 +1,15 @@
+#include "texunits.glsl"
 #if BINDLESS
 	#extension GL_ARB_bindless_texture : require
 #else
-	layout(binding=0) uniform sampler2D Tex;
-	layout(binding=1) uniform sampler2D FullbrightTex;
-	layout(binding=4) uniform sampler2D EmissiveTex;
+	layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
+	layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
+	layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
 #endif
-layout(binding=2) uniform sampler2D LMTex;
-layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2DShadow ShadowMapCmp;
-layout(binding=6) uniform sampler2D ShadowMapDepth;
+layout(binding=TEXUNIT_LIGHTMAP) uniform sampler2D LMTex;
+layout(binding=TEXUNIT_LIGHTDIR) uniform sampler2D LMTexDir;
+layout(binding=TEXUNIT_SHADOW) uniform sampler2DShadow ShadowMapCmp;
+layout(binding=TEXUNIT_SHADOW_DEPTH) uniform sampler2D ShadowMapDepth;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -447,7 +448,7 @@ void main()
 
 		if (shadow_mode == 10)
 		{
-			out_fragcolor = vec4(ShadowDebugDepth(shadow_world_pos), 1.0);
+			out_fragcolor = ShadowDebugSample(shadow_world_pos);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif

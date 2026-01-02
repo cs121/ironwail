@@ -490,6 +490,7 @@ void R_ResizeShadowMapIfNeeded (void);
 void R_Shadow_SunPass (void);
 void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
+void R_Shadow_DrawDepthDebugQuad (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindShadowMapRaw (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
@@ -598,6 +599,7 @@ typedef struct glprogs_s {
 	GLuint		shadow_depth;
 	GLuint		shadow_depth_alias[2]; // [md5]
 	GLuint		shadow_debug;
+	GLuint		shadow_depth_debug;
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
 	GLuint		skycubemap[2][2];	// [anim][dither]

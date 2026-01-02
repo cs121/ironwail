@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "mat_shader.h"
+#include "shaders/texunits.glsl"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays_emit_sky;
@@ -1450,19 +1451,33 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         bmodel_shadow_pass = (pass == BP_SHADOW);
         R_ResetBModelCalls (program);
         GL_SetState (state);
-if (pass <= BP_ALPHATEST)
-{
-GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-R_Shadow_BindShadowMap (GL_TEXTURE5);
-R_Shadow_BindShadowMapRaw (GL_TEXTURE6);
-}
-else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-{
-R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
-}
-else if (pass == BP_SKYCUBEMAP)
-GL_Bind (GL_TEXTURE2, skybox->cubemap);
+	if (pass <= BP_ALPHATEST)
+	{
+		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTMAP, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTDIR, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+		R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
+		R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
+#ifndef NDEBUG
+		{
+			GLint bound = 0;
+			GLint prev_active = 0;
+			glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+			glActiveTexture (GL_TEXTURE0 + TEXUNIT_SHADOW);
+			glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
+			glActiveTexture (prev_active);
+			if (bound == 0)
+				Con_DWarning ("Shadow map unit %d not bound for world pass\n", TEXUNIT_SHADOW);
+		}
+#endif
+	}
+	else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
+	{
+		R_Shadow_BindDlightShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
+	}
+	else if (pass == BP_SKYCUBEMAP)
+	{
+		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTMAP, skybox->cubemap);
+	}
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);

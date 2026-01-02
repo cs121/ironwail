@@ -152,7 +152,7 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 	return vec3(shadow_term);
 }
 
-vec3 ShadowDebugDepth(vec3 world_pos)
+vec4 ShadowDebugSample(vec3 world_pos)
 {
 	vec2 uv;
 	float reference;
@@ -160,8 +160,7 @@ vec3 ShadowDebugDepth(vec3 world_pos)
 	ShadowCoord(world_pos, uv, reference, in_range);
 	vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
 	float depth = texture(ShadowMapDepth, clamped_uv).r;
-	float curve = pow(depth, 30.0);
-	return vec3(depth, curve, curve);
+	return vec4(depth, reference, in_range, 1.0);
 }
 #endif
 

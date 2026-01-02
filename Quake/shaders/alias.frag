@@ -93,15 +93,17 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
+#include "texunits.glsl"
+
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
 
-layout(binding=0) uniform sampler2D Tex;
-layout(binding=1) uniform sampler2D FullbrightTex;
-layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2DShadow ShadowMapCmp;
-layout(binding=6) uniform sampler2D ShadowMapDepth;
+layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
+layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
+layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
+layout(binding=TEXUNIT_SHADOW) uniform sampler2DShadow ShadowMapCmp;
+layout(binding=TEXUNIT_SHADOW_DEPTH) uniform sampler2D ShadowMapDepth;
 
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -195,7 +197,7 @@ void main()
 	shadow_term = mix(1.0, shadow_term, shadow_strength);
 	if (shadow_mode == 10 && allow_debug)
 	{
-		out_fragcolor = vec4(ShadowDebugDepth(world_pos), 1.0);
+		out_fragcolor = ShadowDebugSample(world_pos);
 #if !OIT
 		out_velocity = vec4(0.0);
 #endif

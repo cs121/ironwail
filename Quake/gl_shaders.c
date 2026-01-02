@@ -567,6 +567,7 @@ void GL_CreateShaders (void)
 
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
         glprogs.shadow_debug = GL_CreateProgram (GLSL_PATH("shadow_debug.vert"), GLSL_PATH("shadow_debug.frag"), "shadow debug");
+	glprogs.shadow_depth_debug = GL_CreateProgram (GLSL_PATH("shadow_depth_debug.vert"), GLSL_PATH("shadow_depth_debug.frag"), "shadow depth debug");
 
         glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");
         glprogs.gather_indirect = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"), "indirect draw gather");

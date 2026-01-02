@@ -8,6 +8,7 @@ of the License, or (at your option) any later version.
 */
 
 #include "quakedef.h"
+#include "shaders/texunits.glsl"
 #include <float.h>
 
 extern cvar_t gl_farclip;
@@ -27,6 +28,8 @@ extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadowmap_debug;
+extern cvar_t r_shadow_debug_depthview;
+extern cvar_t r_shadow_debug_depthview_invert;
 extern cvar_t r_shadow_sun_dir;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_max;
@@ -106,6 +109,28 @@ static void R_Shadow_RestoreState (const shadow_state_t *state)
 		glDisable (GL_DEPTH_TEST);
 	glDepthFunc (state->depth_func);
 	glDepthRange (state->depth_range[0], state->depth_range[1]);
+}
+
+static void R_Shadow_LogFboInfo (const char *label, int width, int height, GLuint depth_tex)
+{
+	GLint internal_format = 0;
+	GLint attachment_type = 0;
+	GLint attachment_name = 0;
+	GLint draw_buffer = 0;
+	GLint read_buffer = 0;
+
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+	glGetFramebufferAttachmentParameteriv (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &attachment_type);
+	glGetFramebufferAttachmentParameteriv (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachment_name);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+
+	Con_Printf ("Shadow %s FBO: %dx%d depth tex %u fmt 0x%X depth attachment type 0x%X name %d draw 0x%X read 0x%X\n",
+		label, width, height, depth_tex, internal_format, attachment_type, attachment_name, draw_buffer, read_buffer);
+	if (attachment_type == GL_NONE || attachment_name == 0)
+		Con_Warning ("Shadow %s FBO depth attachment missing\n", label);
 }
 
 static void R_Shadow_DestroyDlightResources (void)
@@ -471,6 +496,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 			Sys_Error ("Failed to create dlight shadowmap FBO (status code 0x%X)", status);
 	}
+	R_Shadow_LogFboInfo ("dlight", atlas_size, atlas_size, shadow_dlight_depth_tex);
 
 	shadow_dlight_atlas_size = atlas_size;
 	shadow_dlight_tile_size = tile_size;
@@ -571,6 +597,7 @@ void R_ResizeShadowMapIfNeeded (void)
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 			Sys_Error ("Failed to create shadowmap FBO (status code 0x%X)", status);
 	}
+	R_Shadow_LogFboInfo ("sun", desired, desired, shadow_depth_tex);
 
 	shadowmap_size = desired;
 }
@@ -908,8 +935,27 @@ void R_Shadow_DrawDebug (void)
 
 	GL_UseProgram (glprogs.shadow_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	R_Shadow_BindShadowMapRaw (GL_TEXTURE0);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	GL_EndGroup ();
+}
+
+void R_Shadow_DrawDepthDebugQuad (void)
+{
+	if (r_shadow_debug_depthview.value <= 0.f)
+		return;
+	if (!glprogs.shadow_depth_debug)
+		return;
+	if (!shadow_depth_tex)
+		return;
+
+	GL_BeginGroup ("Shadow map depth view");
+
+	GL_UseProgram (glprogs.shadow_depth_debug);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_Uniform1fFunc (0, r_shadow_debug_depthview_invert.value > 0.f ? 1.f : 0.f);
+	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();

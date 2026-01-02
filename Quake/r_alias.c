@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "shaders/texunits.glsl"
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
@@ -605,8 +606,20 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindShadowMap (GL_TEXTURE5);
-	R_Shadow_BindShadowMapRaw (GL_TEXTURE6);
+	R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
+	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
+#ifndef NDEBUG
+	{
+		GLint bound = 0;
+		GLint prev_active = 0;
+		glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+		glActiveTexture (GL_TEXTURE0 + TEXUNIT_SHADOW);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
+		glActiveTexture (prev_active);
+		if (bound == 0)
+			Con_DWarning ("Shadow map unit %d not bound for alias pass\n", TEXUNIT_SHADOW);
+	}
+#endif
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
 	{
