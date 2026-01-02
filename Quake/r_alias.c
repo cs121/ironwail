@@ -606,8 +606,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
-	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
+	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW);
 #ifndef NDEBUG
 	{
 		GLint bound = 0;

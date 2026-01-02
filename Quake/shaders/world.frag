@@ -8,8 +8,7 @@
 #endif
 layout(binding=TEXUNIT_LIGHTMAP) uniform sampler2D LMTex;
 layout(binding=TEXUNIT_LIGHTDIR) uniform sampler2D LMTexDir;
-layout(binding=TEXUNIT_SHADOW) uniform sampler2DShadow ShadowMapCmp;
-layout(binding=TEXUNIT_SHADOW_DEPTH) uniform sampler2D ShadowMapDepth;
+layout(binding=TEXUNIT_SHADOW) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"

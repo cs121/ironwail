@@ -41,6 +41,7 @@ extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_fbo;
 static GLuint shadow_depth_tex;
+static GLuint shadow_debug_tex;
 static GLuint shadow_compare_sampler;
 static GLuint shadow_raw_sampler;
 static int shadowmap_size;
@@ -238,6 +239,11 @@ static void R_Shadow_DestroyResources (void)
 	{
 		GL_DeleteNativeTexture (shadow_depth_tex);
 		shadow_depth_tex = 0;
+	}
+	if (shadow_debug_tex)
+	{
+		GL_DeleteNativeTexture (shadow_debug_tex);
+		shadow_debug_tex = 0;
 	}
 	if (shadow_compare_sampler)
 	{
@@ -559,6 +565,7 @@ void R_InitShadow (void)
 {
 	shadow_fbo = 0;
 	shadow_depth_tex = 0;
+	shadow_debug_tex = 0;
 	shadow_compare_sampler = 0;
 	shadow_raw_sampler = 0;
 	shadowmap_size = 0;
@@ -648,10 +655,21 @@ void R_ResizeShadowMapIfNeeded (void)
 		GL_SamplerParameteriFunc (shadow_raw_sampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	}
 
+	glGenTextures (1, &shadow_debug_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_debug_tex);
+	GL_ObjectLabelFunc (GL_TEXTURE, shadow_debug_tex, -1, "shadowmap debug depth");
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_R32F, desired, desired);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_fbo, -1, "shadowmap fbo");
 	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_depth_tex, 0);
+	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, shadow_debug_tex, 0);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 
@@ -668,13 +686,13 @@ void R_ResizeShadowMapIfNeeded (void)
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	GL_BindSamplerFunc (texunit - GL_TEXTURE0, shadow_compare_sampler);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	GL_BindSamplerFunc (texunit - GL_TEXTURE0, shadow_raw_sampler);
 }
 
 void R_Shadow_BindShadowMapRaw (GLenum texunit)
 {
-	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
-	GL_BindSamplerFunc (texunit - GL_TEXTURE0, shadow_raw_sampler);
+	R_Shadow_BindShadowMap (texunit);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
@@ -696,6 +714,7 @@ void R_Shadow_SunPass (void)
 	float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
 	static int last_debug_mode = -1;
 	static qboolean logged_state = false;
+	qboolean debug_depth = r_shadow_debug_depthview.value > 0.f;
 	shadow_state_t prev_state;
 
 	r_framedata.shadow_debug[0] = 0.f;
@@ -733,16 +752,26 @@ void R_Shadow_SunPass (void)
 	R_Shadow_SaveState (&prev_state);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
-	glDrawBuffer (GL_NONE);
-	glReadBuffer (GL_NONE);
+	if (debug_depth && shadow_debug_tex)
+	{
+		const GLenum buffers[1] = { GL_COLOR_ATTACHMENT0 };
+		GL_DrawBuffersFunc (1, buffers);
+		glReadBuffer (GL_NONE);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	}
+	else
+	{
+		glDrawBuffer (GL_NONE);
+		glReadBuffer (GL_NONE);
+		glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	}
 	glDisable (GL_SCISSOR_TEST);
 	glDisable (GL_BLEND);
-	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 	glDepthMask (GL_TRUE);
 	glEnable (GL_DEPTH_TEST);
 	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
-	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glDepthFunc (gl_clipcontrol_able ? GL_GREATER : GL_LEQUAL);
 	if (!logged_state)
 	{
 		R_Shadow_LogPassState ("sun");
@@ -750,8 +779,10 @@ void R_Shadow_SunPass (void)
 	}
 
 	GL_UseProgram (glprogs.shadow_depth);
+	GL_Uniform1iFunc (1, debug_depth ? 1 : 0);
 	GL_SetState (GLS_BLEND_OPAQUE |
-		(r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK) |
+		(debug_depth ? GLS_CULL_NONE :
+			(r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK)) |
 		GLS_ATTRIBS (6));
 	glClear (GL_DEPTH_BUFFER_BIT);
 
@@ -912,7 +943,7 @@ void R_Shadow_DlightPass (void)
 	glEnable (GL_DEPTH_TEST);
 	glDepthRange (0.0, 1.0);
 	glClearDepth (gl_clipcontrol_able ? 0.f : 1.f);
-	glDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	glDepthFunc (gl_clipcontrol_able ? GL_GREATER : GL_LEQUAL);
 	if (!logged_state)
 	{
 		R_Shadow_LogPassState ("dlights");
@@ -956,6 +987,7 @@ void R_Shadow_DlightPass (void)
 		glClear (GL_DEPTH_BUFFER_BIT);
 
 		GL_UseProgram (glprogs.shadow_depth);
+		GL_Uniform1iFunc (1, 0);
 		GL_SetState (GLS_BLEND_OPAQUE |
 			(r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK) |
 			GLS_ATTRIBS (6));
@@ -1030,19 +1062,17 @@ void R_Shadow_DrawDepthDebugQuad (void)
 	GL_UseProgram (glprogs.shadow_depth_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_Uniform1fFunc (0, r_shadow_debug_depthview_invert.value > 0.f ? 1.f : 0.f);
+	GL_Uniform1fFunc (1, 0.f);
+	GL_Uniform1fFunc (2, 0.f);
+	if (shadow_debug_tex)
 	{
-		GLint compare_mode = GL_NONE;
-		GLint compare_func = GL_LEQUAL;
-		if (shadow_compare_sampler)
-		{
-			compare_mode = GL_COMPARE_REF_TO_TEXTURE;
-			compare_func = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
-		}
-		GL_Uniform1fFunc (1, compare_mode == GL_COMPARE_REF_TO_TEXTURE ? 1.f : 0.f);
-		GL_Uniform1fFunc (2, (compare_func == GL_GEQUAL || compare_func == GL_GREATER) ? 1.f : 0.f);
+		GL_BindNative (GL_TEXTURE0 + TEXUNIT_SHADOW, GL_TEXTURE_2D, shadow_debug_tex);
+		GL_BindSamplerFunc (TEXUNIT_SHADOW, shadow_raw_sampler);
 	}
-	R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
-	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
+	else
+	{
+		R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW);
+	}
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();

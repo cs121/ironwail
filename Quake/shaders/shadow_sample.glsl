@@ -38,12 +38,17 @@ void ShadowCoord(vec3 world_pos, out vec2 uv, out float reference, out float in_
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float compare_depth = reference - bias;
-	return texture(ShadowMapCmp, vec3(uv, compare_depth));
+	float depth = texture(ShadowMap, uv).r;
+#if REVERSED_Z
+	return depth > compare_depth ? 1.0 : 0.0;
+#else
+	return depth < compare_depth ? 1.0 : 0.0;
+#endif
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 {
-	vec2 texel = 1.0 / vec2(textureSize(ShadowMapCmp, 0));
+	vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
 	float sum = 0.0;
 	int count = 0;
 
@@ -97,12 +102,7 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	if (in_range < 0.5)
 		return 1.0;
 
-	float ndotl = dot(normal, ShadowSunDir.xyz);
-	float bias = ShadowParams.x + ShadowParams.y * max(0.0, 1.0 - ndotl);
-
-	if (ShadowParams.z > 0.5)
-		return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
-
+	float bias = 0.001;
 	return ShadowSampleRaw(uv, reference, bias);
 }
 
@@ -125,7 +125,7 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 			return vec3(1.0, 0.0, 1.0);
 
 		vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
-		float depth = texture(ShadowMapDepth, clamped_uv).r;
+		float depth = texture(ShadowMap, clamped_uv).r;
 		if (depth <= 0.0001 || depth >= 0.9999)
 			return vec3(0.0, 1.0, 1.0);
 
@@ -144,9 +144,15 @@ vec3 ShadowDebugColor(vec3 world_pos, float shadow_term)
 		return vec3(reference);
 	if (mode == 4)
 	{
-		float sampled_depth = texture(ShadowMapDepth, uv).r;
+		float sampled_depth = texture(ShadowMap, uv).r;
 		float diff = abs(reference - sampled_depth);
 		return vec3(diff);
+	}
+	if (mode == 10)
+	{
+		vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
+		float sampled_depth = texture(ShadowMap, clamped_uv).r;
+		return vec3(sampled_depth);
 	}
 
 	return vec3(shadow_term);
@@ -159,7 +165,7 @@ vec4 ShadowDebugSample(vec3 world_pos)
 	float in_range;
 	ShadowCoord(world_pos, uv, reference, in_range);
 	vec2 clamped_uv = clamp(uv, vec2(0.0), vec2(1.0));
-	float depth = texture(ShadowMapDepth, clamped_uv).r;
+	float depth = texture(ShadowMap, clamped_uv).r;
 	return vec4(depth, reference, in_range, 1.0);
 }
 #endif
