@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_maptex_export.h"
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
+#include "rtlight.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -609,11 +610,18 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadow_dlight_size);
         Cvar_RegisterVariable (&r_shadow_dlight_distance);
         Cvar_RegisterVariable (&r_shadow_dlight_bias);
-        Cvar_RegisterVariable (&r_shadow_dlight_pcf_taps);
-        Cvar_RegisterVariable (&r_shadow_lightgrid);
-        Cvar_RegisterVariable (&r_shadow_lightgrid_mode);
+	Cvar_RegisterVariable (&r_shadow_dlight_pcf_taps);
+	Cvar_RegisterVariable (&r_shadow_lightgrid);
+	Cvar_RegisterVariable (&r_shadow_lightgrid_mode);
 	DLightPool_RegisterCvars ();
-        Cvar_RegisterVariable (&r_novis);
+	Cvar_RegisterVariable (&r_rtlights);
+	Cvar_RegisterVariable (&r_rtlights_max);
+	Cvar_RegisterVariable (&r_rtlights_debug);
+	Cvar_RegisterVariable (&r_coronas);
+	Cvar_RegisterVariable (&r_coronas_debug);
+	Cvar_RegisterVariable (&r_envmap_lights);
+	Cvar_RegisterVariable (&r_envmap_lights_debug);
+	Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);
         Cvar_SetCallback (&r_simd, R_SIMD_f);
@@ -995,6 +1003,7 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
+	rtlight_list_t rtlight_temp;
 
 	for (i=0 ; i<256 ; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
@@ -1016,9 +1025,10 @@ void R_NewMap (void)
 
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
-        Fog_NewMap (); //johnfitz -- global fog in worldspawn
-        R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
-        R_ParseDlightEntities (); // persistent dlights from BSP entities
+	Fog_NewMap (); //johnfitz -- global fog in worldspawn
+	R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
+	R_ParseDlightEntities (); // persistent dlights from BSP entities
+	RTLight_LoadForMap (cl.mapname, &rtlight_temp);
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)
