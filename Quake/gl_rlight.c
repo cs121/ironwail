@@ -781,7 +781,7 @@ static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, in
 
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 {
-	if (!r_dynamic.value)
+	if (r_dynamic.value <= 0.f && r_dlight_style.value <= 0.f)
 		return;
 
 	int count = 0;
