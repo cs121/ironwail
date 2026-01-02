@@ -311,6 +311,8 @@ void RTLight_ParseFile (const char *mapname, rtlight_list_t *out)
 	if (!data)
 		return;
 
+	Con_Printf ("Loaded rtlights file %s\n", filename);
+
 	max_lights = (int) r_rtlights_max.value;
 	if (max_lights <= 0)
 		max_lights = 1024;
