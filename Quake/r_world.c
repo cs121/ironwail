@@ -1455,8 +1455,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	{
 		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTMAP, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTDIR, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-		R_Shadow_BindShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
-		R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW_DEPTH);
+		R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW);
 #ifndef NDEBUG
 		{
 			GLint bound = 0;

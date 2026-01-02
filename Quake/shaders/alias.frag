@@ -102,8 +102,7 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
 layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
 layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
-layout(binding=TEXUNIT_SHADOW) uniform sampler2DShadow ShadowMapCmp;
-layout(binding=TEXUNIT_SHADOW_DEPTH) uniform sampler2D ShadowMapDepth;
+layout(binding=TEXUNIT_SHADOW) uniform sampler2D ShadowMap;
 
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
