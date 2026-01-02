@@ -562,6 +562,8 @@ qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, v
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
+void R_AddRTLightDlights (void);
+void R_DrawRTLightCoronas (void);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
@@ -608,6 +610,7 @@ typedef struct glprogs_s {
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
 	GLuint		sprites[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
+	GLuint		coronas[2];			// [dither]
 	GLuint		debug3d;
 	GLuint		dlight_composite;
 
