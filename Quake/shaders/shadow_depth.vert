@@ -68,6 +68,7 @@ void main()
 	int instance_id = GET_INSTANCE_ID(call);
 	Instance instance = instance_data[instance_id];
 	vec3 world_pos = TransformPosition(in_pos, instance.mat);
+	world_pos += EyePos;
 	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
 #if REVERSED_Z
 	const float ZBIAS = -1.0 / 1024.0;
