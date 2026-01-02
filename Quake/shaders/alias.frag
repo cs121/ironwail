@@ -97,6 +97,7 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
+const float ALIAS_MATERIAL_MASK = 8.0;
 const int ALIAS_FLAG_LIGHTNING = 4;
 
 layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
@@ -261,7 +262,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (viewModelMask < 0.5 && result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, viewModelMask, 1.0);
+        out_velocity = vec4(velocityOut, viewModelMask, ALIAS_MATERIAL_MASK);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
