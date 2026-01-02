@@ -274,6 +274,8 @@ cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t	r_shadowmap_debug = { "r_shadowmap_debug", "0", CVAR_NONE };
+cvar_t	r_shadow_debug_depthview = { "r_shadow_debug_depthview", "0", CVAR_NONE };
+cvar_t	r_shadow_debug_depthview_invert = { "r_shadow_debug_depthview_invert", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
@@ -4622,8 +4624,9 @@ void R_RenderView (void)
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();
-        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
+	Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
+	R_Shadow_DrawDepthDebugQuad ();
 
 	r_frame_rendered_this_update = true;
 

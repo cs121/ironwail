@@ -1,0 +1,12 @@
+#ifndef TEXUNITS_GLSL
+#define TEXUNITS_GLSL
+
+#define TEXUNIT_BASE        0
+#define TEXUNIT_FULLBRIGHT  1
+#define TEXUNIT_LIGHTMAP    2
+#define TEXUNIT_LIGHTDIR    3
+#define TEXUNIT_EMISSIVE    4
+#define TEXUNIT_SHADOW      5
+#define TEXUNIT_SHADOW_DEPTH 6
+
+#endif
