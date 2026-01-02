@@ -65,6 +65,7 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
+static qboolean r_ssao_underwater_blocked = false;
 
 typedef struct godrays_stabilization_s
 {
@@ -407,6 +408,7 @@ cvar_t	r_ssao_force_fullres = { "r_ssao_force_fullres", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_format = { "r_ssao_format", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	r_ssao_fog_intensity = { "r_ssao_fog_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.5", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
@@ -2074,6 +2076,7 @@ void GL_PostProcess (void)
 	float fog_r;
 	float fog_g;
 	float fog_b;
+	float ssao_fog_depth_strength;
 	float postfx_damage_trauma;
 	float dv_strength;
 	float dv_max_px;
@@ -2104,6 +2107,7 @@ void GL_PostProcess (void)
 	fog_r = postfx_state.underwater_fog_color[0];
 	fog_g = postfx_state.underwater_fog_color[1];
 	fog_b = postfx_state.underwater_fog_color[2];
+	ssao_fog_depth_strength = CLAMP (0.f, q_max (postfx_state.underwater_fog_strength, Fog_GetDensity ()), 1.f);
 	postfx_damage_trauma = CLAMP (0.f, postfx_state.damage_trauma, 1.f);
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
@@ -2177,7 +2181,10 @@ void GL_PostProcess (void)
 	view_max_y = view_min_y + r_refdef.vrect.height / (float)vid.height;
 	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
 
-	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+	if (!r_ssao_underwater_blocked)
+		ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+	else
+		ssao_texture = 0;
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
@@ -2188,8 +2195,18 @@ void GL_PostProcess (void)
 		ssao_debug_mode = -1.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
-	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
+	{
+		float fog_intensity = r_ssao_fog_intensity.value;
+		if (fog_intensity == 1.f && r_ssao_fog_strength.value != 1.f)
+			fog_intensity = r_ssao_fog_strength.value;
+		ssao_fog_strength = CLAMP (0.f, fog_intensity, 1.f);
+	}
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
+	if (r_ssao_underwater_blocked)
+	{
+		ssao_intensity = 0.f;
+		ssao_debug_mode = -1.f;
+	}
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -2293,7 +2310,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
-	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
+	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, ssao_fog_depth_strength);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
 		dv_quality = (float)CLAMP (0, quality, 2);
@@ -3266,6 +3283,7 @@ void R_SetupView (void)
 		int contents = r_viewleaf->contents;
 		qboolean forced = M_ForcedUnderwater ();
 		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
+		r_ssao_underwater_blocked = underwater_active;
 	if (r_waterwarp.value)
 	{
 		if (underwater_active)
