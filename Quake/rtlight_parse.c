@@ -7,7 +7,7 @@
 static void RTLight_Warnf (rtlight_list_t *out, const char *fmt, ...)
 {
 	va_list argptr;
-	char msg[MAXPRINTMSG];
+	char msg[1024];
 
 	if (out)
 		out->warnings++;
@@ -193,10 +193,10 @@ static qboolean RTLight_ParseLine (const char *line, rtlight_t *out_light, int d
 	}
 
 	out_light->radius = CLAMP (0.001f, out_light->radius, 100000.0f);
-	out_light->color[0] = MAX (0.0f, out_light->color[0]);
-	out_light->color[1] = MAX (0.0f, out_light->color[1]);
-	out_light->color[2] = MAX (0.0f, out_light->color[2]);
-	out_light->intensity = MAX (0.0f, out_light->intensity);
+	out_light->color[0] = q_max (0.0f, out_light->color[0]);
+	out_light->color[1] = q_max (0.0f, out_light->color[1]);
+	out_light->color[2] = q_max (0.0f, out_light->color[2]);
+	out_light->intensity = q_max (0.0f, out_light->intensity);
 
 	for (i = 8; i < num_tokens; i++)	
 	{
@@ -307,7 +307,7 @@ void RTLight_ParseFile (const char *mapname, rtlight_list_t *out)
 		return;
 
 	q_snprintf (filename, sizeof(filename), "maps/%s.rtlight", mapname);
-	data = (char *) COM_LoadFile (filename, NULL);
+	data = (char *) COM_LoadMallocFile (filename, NULL);
 	if (!data)
 		return;
 
@@ -348,5 +348,5 @@ void RTLight_ParseFile (const char *mapname, rtlight_list_t *out)
 	Con_Printf ("Loaded %d rtlights from %s (skipped %d, warnings %d)\n",
 		out->count, filename, out->skipped_lines, out->warnings);
 
-	COM_FreeFile (data);
+	free (data);
 }
