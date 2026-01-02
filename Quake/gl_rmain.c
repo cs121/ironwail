@@ -4426,15 +4426,14 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_Shadow_SunPass ();
-	R_Shadow_DlightPass ();
 	R_SetupGL ();
 	R_Clear ();
-	
+
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	R_Shadow_SunPass ();
+	R_Shadow_DlightPass ();
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDLightPass ();
@@ -4447,6 +4446,7 @@ void R_RenderScene (void)
 	R_DrawParticles (true);
 	R_DrawRTLightCoronas ();
 	R_EndTranslucency ();
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
 	R_ShowPointFile ();
