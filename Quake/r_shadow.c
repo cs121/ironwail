@@ -597,7 +597,7 @@ void R_ResizeShadowMapIfNeeded (void)
 	if (desired > gl_max_texture_size)
 		desired = gl_max_texture_size;
 
-	if (desired < 256)
+	if (desired > 0 && desired < 256)
 		desired = 256;
 
 	if (desired == shadowmap_size && shadow_depth_tex)
@@ -702,9 +702,13 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+		GL_BindSamplerFunc (texunit - GL_TEXTURE0, 0);
 	}
 	else
+	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
+		GL_BindSamplerFunc (texunit - GL_TEXTURE0, 0);
+	}
 }
 
 void R_Shadow_SunPass (void)
