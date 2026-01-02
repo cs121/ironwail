@@ -120,9 +120,9 @@ static void R_Shadow_LogFboInfo (const char *label, int width, int height, GLuin
 	GLint read_buffer = 0;
 
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
-	glGetFramebufferAttachmentParameteriv (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &attachment_type);
-	glGetFramebufferAttachmentParameteriv (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachment_name);
 	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
 	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
