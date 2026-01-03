@@ -13,6 +13,7 @@ uniform float halfLambertStrength;
 uniform vec3 viewmodelRimColor;
 uniform float viewmodelRimStrength;
 uniform bool isViewmodel;
+uniform bool debugViewmodelMagenta;
 
 varying vec2 vTexCoord;
 varying vec3 vNormal;
@@ -53,6 +54,12 @@ void main()
         vec3 litColor = (ambientColor + diffuseLight) * albedo.rgb + rimLight;
         litColor += fullbright;
         litColor = ApplyFog(litColor);
+
+        if (debugViewmodelMagenta && isViewmodel)
+        {
+                gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+                return;
+        }
 
         gl_FragColor = vec4(litColor, albedo.a);
 }

@@ -99,6 +99,172 @@ static void GL_LogErrorIfDeveloper (const char *label)
 		Con_DPrintf ("GL error after %s: 0x%04X\n", label, err);
 }
 
+typedef struct gl_state_guard_s
+{
+	GLint program;
+	GLint active_texture;
+	GLint draw_fbo;
+	GLint viewport[4];
+	GLint vao;
+	qboolean depth_test;
+	qboolean blend;
+	qboolean cull;
+	qboolean scissor;
+	qboolean srgb;
+} gl_state_guard_t;
+
+static void GL_CaptureState (gl_state_guard_t *state)
+{
+	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &state->active_texture);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
+	glGetIntegerv (GL_VIEWPORT, state->viewport);
+#ifdef GL_VERTEX_ARRAY_BINDING
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
+#else
+	state->vao = 0;
+#endif
+	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
+	state->blend = glIsEnabled (GL_BLEND);
+	state->cull = glIsEnabled (GL_CULL_FACE);
+	state->scissor = glIsEnabled (GL_SCISSOR_TEST);
+#ifdef GL_FRAMEBUFFER_SRGB
+	state->srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
+#else
+	state->srgb = false;
+#endif
+}
+
+static void GL_RestoreState (const gl_state_guard_t *state)
+{
+	GL_UseProgram (state->program);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, state->draw_fbo);
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+#ifdef GL_VERTEX_ARRAY_BINDING
+	GL_BindVertexArrayFunc (state->vao);
+#endif
+	state->depth_test ? glEnable (GL_DEPTH_TEST) : glDisable (GL_DEPTH_TEST);
+	state->blend ? glEnable (GL_BLEND) : glDisable (GL_BLEND);
+	state->cull ? glEnable (GL_CULL_FACE) : glDisable (GL_CULL_FACE);
+	state->scissor ? glEnable (GL_SCISSOR_TEST) : glDisable (GL_SCISSOR_TEST);
+	GL_SetFramebufferSRGB (state->srgb);
+	glActiveTexture (state->active_texture);
+}
+
+static qboolean GL_StateMatches (const gl_state_guard_t *state)
+{
+	gl_state_guard_t current;
+	GL_CaptureState (&current);
+
+	if (current.program != state->program)
+		return false;
+	if (current.active_texture != state->active_texture)
+		return false;
+	if (current.draw_fbo != state->draw_fbo)
+		return false;
+	if (memcmp (current.viewport, state->viewport, sizeof (state->viewport)) != 0)
+		return false;
+	if (current.vao != state->vao)
+		return false;
+	if (current.depth_test != state->depth_test)
+		return false;
+	if (current.blend != state->blend)
+		return false;
+	if (current.cull != state->cull)
+		return false;
+	if (current.scissor != state->scissor)
+		return false;
+	if (current.srgb != state->srgb)
+		return false;
+
+	return true;
+}
+
+static void GL_CheckError (const char *label)
+{
+	if (r_dof_debug_state.value <= 0.f)
+		return;
+	GLenum err = glGetError ();
+	if (err != GL_NO_ERROR)
+		Con_Printf ("GL error after %s: 0x%04X\n", label, err);
+}
+
+static void GL_LogSamplerUniform (GLuint program, const char *name)
+{
+	GLint location;
+	GLint value;
+
+	if (!program)
+		return;
+
+	location = GL_GetUniformLocationFunc (program, name);
+	if (location < 0)
+		return;
+
+	GL_GetUniformivFunc (program, location, &value);
+	Con_Printf ("  sampler %s = %d\n", name, value);
+}
+
+static void GL_LogState (const char *tag)
+{
+	GLint program = 0;
+	GLint active = 0;
+	GLint draw_fbo = 0;
+	GLint viewport[4] = {0};
+	GLint prev_active = 0;
+	int i;
+
+	if (r_dof_debug_state.value <= 0.f)
+		return;
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+
+	Con_Printf ("GL state [%s]\n", tag);
+	Con_Printf ("  program=%d activeTex=%d drawFBO=%d viewport=%d,%d %dx%d\n",
+		program,
+		active - GL_TEXTURE0,
+		draw_fbo,
+		viewport[0],
+		viewport[1],
+		viewport[2],
+		viewport[3]);
+	Con_Printf ("  enabled: depth=%d blend=%d cull=%d scissor=%d srgb=%d\n",
+		glIsEnabled (GL_DEPTH_TEST) ? 1 : 0,
+		glIsEnabled (GL_BLEND) ? 1 : 0,
+		glIsEnabled (GL_CULL_FACE) ? 1 : 0,
+		glIsEnabled (GL_SCISSOR_TEST) ? 1 : 0,
+#ifdef GL_FRAMEBUFFER_SRGB
+		glIsEnabled (GL_FRAMEBUFFER_SRGB) ? 1 : 0
+#else
+		0
+#endif
+	);
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+	for (i = 0; i < 4; i++)
+	{
+		GLint tex_binding = 0;
+		GLint sampler_binding = 0;
+		glActiveTexture (GL_TEXTURE0 + i);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex_binding);
+#ifdef GL_SAMPLER_BINDING
+		glGetIntegerv (GL_SAMPLER_BINDING, &sampler_binding);
+#endif
+		Con_Printf ("  texunit %d: tex2D=%d sampler=%d\n", i, tex_binding, sampler_binding);
+	}
+	glActiveTexture (prev_active);
+
+	GL_LogSamplerUniform (program, "Tex");
+	GL_LogSamplerUniform (program, "FullbrightTex");
+	GL_LogSamplerUniform (program, "EmissiveTex");
+	GL_LogSamplerUniform (program, "ShadowMap");
+	GL_LogSamplerUniform (program, "baseTexture");
+	GL_LogSamplerUniform (program, "fullbrightTexture");
+}
+
 
 // Returns how much of the console is currently covering the screen in the range [0, 1].
 static float GL_ConsoleVisibility (void)
@@ -299,6 +465,7 @@ cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "255", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "3", CVAR_ARCHIVE };
 cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
+cvar_t	r_dof_debug_state = { "r_dof_debug_state", "0", CVAR_NONE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_shutter = { "r_motionblur_shutter", "0.75", CVAR_ARCHIVE };
@@ -2084,6 +2251,8 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
+	gl_state_guard_t dof_state;
+	qboolean dof_state_saved;
         r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -2245,6 +2414,15 @@ void GL_PostProcess (void)
 	}
 	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
+	dof_enabled = R_DoFEnabled ();
+	dof_state_saved = false;
+	if (dof_enabled)
+	{
+		GL_CaptureState (&dof_state);
+		dof_state_saved = true;
+		GL_LogState ("DoF enter");
+	}
+
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
 	{
@@ -2344,8 +2522,6 @@ void GL_PostProcess (void)
 		GL_SetFilmgrainUniforms (filmgrain_amount, filmgrain_enabled);
 	}
 
-	dof_enabled = R_DoFEnabled ();
-
 	{
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
 		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
@@ -2380,6 +2556,26 @@ void GL_PostProcess (void)
 	}
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	if (dof_state_saved)
+	{
+		// Temporary debug guard to confirm state leaks from DoF/postprocess.
+		if (r_dof_debug_state.value >= 2.f)
+		{
+			glUseProgram (0);
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+			glActiveTexture (GL_TEXTURE0);
+		}
+
+		// DoF postprocess touched GL_ACTIVE_TEXTURE/viewport/FBO state; restore to avoid leaking into viewmodel/UI passes.
+		GL_RestoreState (&dof_state);
+		if (r_dof_debug_state.value > 0.f)
+		{
+			GL_LogState ("DoF exit");
+			Con_Printf ("DoF state restore: %s\n", GL_StateMatches (&dof_state) ? "STATE OK" : "STATE MISMATCH");
+		}
+		GL_CheckError ("DoF state restore");
+	}
 
 	GL_EndGroup ();
 }
@@ -3460,10 +3656,14 @@ void R_DrawViewModel (void)
 
 	GL_BeginGroup ("View model");
 
+	GL_LogState ("Viewmodel enter");
+
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
 	R_DrawAliasModels (&e, 1);
 	GL_DepthRange (ZRANGE_FULL);
+
+	GL_LogState ("Viewmodel exit");
 
 	GL_EndGroup ();
 }
