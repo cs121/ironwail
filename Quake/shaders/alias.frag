@@ -104,6 +104,7 @@ layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
 layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
 layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
 layout(binding=TEXUNIT_SHADOW) uniform sampler2D ShadowMap;
+uniform bool debugViewmodelMagenta;
 
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -245,6 +246,15 @@ void main()
 	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
         result.rgb += fullbright;
         result.rgb += emissive;
+
+	if (debugViewmodelMagenta && (in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
+	{
+		out_fragcolor = vec4(1.0, 0.0, 1.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 
         if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
         {

@@ -38,6 +38,7 @@ extern cvar_t r_shadowmap_cull_front;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_twosided_mdl;
+extern cvar_t r_dof_debug_state;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -535,6 +536,8 @@ void R_FlushAliasInstances (qboolean showtris)
 	GLintptr	offsets[2];
 	GLsizeiptr	sizes[2];
 	gltexture_t	*textures[3];
+	GLint		debug_magenta_loc;
+	qboolean	debug_viewmodel;
 
 	if (!ibuf.count)
 		return;
@@ -563,6 +566,10 @@ void R_FlushAliasInstances (qboolean showtris)
 		break;
 	}
 	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+	debug_magenta_loc = GL_GetUniformLocationFunc (glprogs.alias[oit][mode][alphatest][md5], "debugViewmodelMagenta");
+	debug_viewmodel = (ibuf.ent == &cl.viewent);
+	if (debug_magenta_loc >= 0 && !debug_viewmodel)
+		GL_Uniform1iFunc (debug_magenta_loc, 0);
 
 	if (md5)
 		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
@@ -690,6 +697,11 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 		}
 
 		GL_BindTextures (0, 3, textures);
+		if (debug_magenta_loc >= 0 && debug_viewmodel)
+		{
+			GLint debug_magenta = R_Alias_ShouldDebugMagenta () ? 1 : 0;
+			GL_Uniform1iFunc (debug_magenta_loc, debug_magenta);
+		}
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
 
@@ -824,6 +836,24 @@ static qboolean R_Alias_CanAddToBatch (const entity_t *e)
 		return false;
 
 	return true;
+}
+
+static qboolean R_Alias_ShouldDebugMagenta (void)
+{
+	GLint active = 0;
+	GLint prev_active = 0;
+	GLint bound = 0;
+
+	if (r_dof_debug_state.value <= 0.f)
+		return false;
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active);
+	prev_active = active;
+	glActiveTexture (GL_TEXTURE0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
+	glActiveTexture (prev_active);
+
+	return active != GL_TEXTURE0 || bound == 0;
 }
 
 /*
