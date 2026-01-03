@@ -1461,9 +1461,9 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 			GLint bound = 0;
 			GLint prev_active = 0;
 			glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-			glActiveTexture (GL_TEXTURE0 + TEXUNIT_SHADOW);
+			GL_ActiveTextureFunc (GL_TEXTURE0 + TEXUNIT_SHADOW);
 			glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-			glActiveTexture (prev_active);
+			GL_ActiveTextureFunc (prev_active);
 			if (bound == 0)
 				Con_DWarning ("Shadow map unit %d not bound for world pass\n", TEXUNIT_SHADOW);
 		}

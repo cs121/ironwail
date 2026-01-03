@@ -151,7 +151,7 @@ static void GL_RestoreState (const gl_state_guard_t *state)
 	state->cull ? glEnable (GL_CULL_FACE) : glDisable (GL_CULL_FACE);
 	state->scissor ? glEnable (GL_SCISSOR_TEST) : glDisable (GL_SCISSOR_TEST);
 	GL_SetFramebufferSRGB (state->srgb);
-	glActiveTexture (state->active_texture);
+	GL_ActiveTextureFunc (state->active_texture);
 }
 
 static qboolean GL_StateMatches (const gl_state_guard_t *state)
@@ -251,14 +251,14 @@ static void GL_LogState (const char *tag)
 	{
 		GLint tex_binding = 0;
 		GLint sampler_binding = 0;
-		glActiveTexture (GL_TEXTURE0 + i);
+		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex_binding);
 #ifdef GL_SAMPLER_BINDING
 		glGetIntegerv (GL_SAMPLER_BINDING, &sampler_binding);
 #endif
 		Con_Printf ("  texunit %d: tex2D=%d sampler=%d\n", i, tex_binding, sampler_binding);
 	}
-	glActiveTexture (prev_active);
+	GL_ActiveTextureFunc (prev_active);
 
 	GL_LogSamplerUniform (program, "Tex");
 	GL_LogSamplerUniform (program, "FullbrightTex");
@@ -2567,7 +2567,7 @@ void GL_PostProcess (void)
 		{
 			GL_UseProgramFunc (0);
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-			glActiveTexture (GL_TEXTURE0);
+			GL_ActiveTextureFunc (GL_TEXTURE0);
 		}
 
 		// DoF postprocess touched GL_ACTIVE_TEXTURE/viewport/FBO state; restore to avoid leaking into viewmodel/UI passes.

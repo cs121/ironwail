@@ -621,9 +621,9 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 		GLint bound = 0;
 		GLint prev_active = 0;
 		glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-		glActiveTexture (GL_TEXTURE0 + TEXUNIT_SHADOW);
+		GL_ActiveTextureFunc (GL_TEXTURE0 + TEXUNIT_SHADOW);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-		glActiveTexture (prev_active);
+		GL_ActiveTextureFunc (prev_active);
 		if (bound == 0)
 			Con_DWarning ("Shadow map unit %d not bound for alias pass\n", TEXUNIT_SHADOW);
 	}
@@ -851,9 +851,9 @@ static qboolean R_Alias_ShouldDebugMagenta (void)
 
 	glGetIntegerv (GL_ACTIVE_TEXTURE, &active);
 	prev_active = active;
-	glActiveTexture (GL_TEXTURE0);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-	glActiveTexture (prev_active);
+	GL_ActiveTextureFunc (prev_active);
 
 	return active != GL_TEXTURE0 || bound == 0;
 }
