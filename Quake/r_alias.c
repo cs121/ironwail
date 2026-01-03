@@ -40,6 +40,8 @@ extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_twosided_mdl;
 extern cvar_t r_dof_debug_state;
 
+static qboolean R_Alias_ShouldDebugMagenta (void);
+
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
 

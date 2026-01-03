@@ -67,6 +67,9 @@ static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 static qboolean r_ssao_underwater_blocked = false;
 
+extern cvar_t r_dof_debug_state;
+static void GL_SetFramebufferSRGB (qboolean enable);
+
 typedef struct godrays_stabilization_s
 {
 	qboolean	valid;
@@ -2562,7 +2565,7 @@ void GL_PostProcess (void)
 		// Temporary debug guard to confirm state leaks from DoF/postprocess.
 		if (r_dof_debug_state.value >= 2.f)
 		{
-			glUseProgram (0);
+			GL_UseProgramFunc (0);
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 			glActiveTexture (GL_TEXTURE0);
 		}
