@@ -380,7 +380,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 depth raw, 2 view-space Z, 3 view-space position, 4 normals, 5 noise, 6 sample hit ratio, 7 AO raw, 8 blur debug, 9 AO mask, 10 fog transmittance, 11 fog-damped AO.
+// r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance, 14 fog-damped AO.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -394,6 +394,7 @@ cvar_t	r_ssao_format = { "r_ssao_format", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.5", CVAR_ARCHIVE };
+cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -1261,11 +1262,11 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
 	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
-	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 11) : -1;
-	qboolean debug_show_ao_raw = (debug_mode_i == 7);
-	qboolean debug_show_blur_debug = (debug_mode_i == 8);
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 14) : -1;
+	qboolean debug_show_ao_raw = (debug_mode_i == 10);
+	qboolean debug_show_blur_debug = (debug_mode_i == 11);
 	int debug_mode_ssao = -1;
-	if (debug_mode_i >= 1 && debug_mode_i <= 6)
+	if (debug_mode_i >= 1 && debug_mode_i <= 9)
 		debug_mode_ssao = debug_mode_i;
 	float debug_mode = (float)debug_mode_ssao;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
@@ -1280,6 +1281,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		noise_mode = 1;
 	int normal_source = (int)Q_rint (r_ssao_normalsource.value);
 	normal_source = CLAMP (0, normal_source, 1);
+	float max_distance = R_SanitizeSSAOValue (r_ssao_max_distance.value, 1024.f, 1.f, 65536.f);
 	static qboolean ssao_logged = false;
 	if (!ssao_logged)
 	{
@@ -1342,6 +1344,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
+	GL_Uniform4fFunc (14, max_distance, 0.f, 0.f, 0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
