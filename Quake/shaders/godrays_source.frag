@@ -18,6 +18,7 @@ const uint
 
 layout(location=0) flat in uint in_flags;
 layout(location=3) in vec2 in_uv;
+layout(location=15) flat in vec4 in_stage_color;
 #if BINDLESS
 	layout(location=9) flat in uvec4 in_samplers0;
 	layout(location=10) flat in uvec2 in_samplers1;
@@ -64,6 +65,8 @@ void main()
 		emissive = texture(EmissiveTex, in_uv).rgb;
 #endif
 
+	vec3 stage_rgb = in_stage_color.rgb;
+	float stage_alpha = in_stage_color.a;
 	vec3 light_color = vec3(0.0);
 	vec3 emissive_color = fullbright + emissive;
 	float light_strength = 0.0;
@@ -74,14 +77,15 @@ void main()
 
 	if ((in_flags & CF_GODRAYS_LIGHT) != 0u)
 	{
-		light_color = base.rgb;
+		light_color = base.rgb * stage_rgb;
 		light_strength = GodraysSourceParams0.y;
-		light_mask = BrightPartMask(light_color, GodraysSourceParams0.w, knee);
+		light_mask = BrightPartMask(light_color, GodraysSourceParams0.w, knee) * stage_alpha;
 	}
 	if ((in_flags & CF_GODRAYS_EMISSIVE) != 0u)
 	{
 		emissive_strength = GodraysSourceParams0.x;
-		emissive_mask = BrightPartMask(emissive_color, GodraysSourceParams0.z, knee);
+		emissive_color *= stage_rgb;
+		emissive_mask = BrightPartMask(emissive_color, GodraysSourceParams0.z, knee) * stage_alpha;
 	}
 
 	vec3 color = vec3(0.0);

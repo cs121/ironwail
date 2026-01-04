@@ -1258,6 +1258,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				gltexture_t *stage_tex;
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
+				vec4_t stage_color;
 				unsigned extra_flags = CALLFLAG_MAT_HAS_SHADER;
 				qboolean wants_emissive = (stage->outputs & MAT_STAGE_OUT_EMISSIVE) != 0u;
 				qboolean wants_godray = (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE) != 0u;
@@ -1272,6 +1273,12 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 
 				if (!stage_tex)
 					continue;
+
+				R_EvalStageColorAlpha (stage, cl.time, stage_color);
+				stage_color[0] *= stage->godray_scale;
+				stage_color[1] *= stage->godray_scale;
+				stage_color[2] *= stage->godray_scale;
+				stage_color[3] *= stage->godray_scale;
 
 				if (stage_index == 0 && stage_tex == t->gltexture)
 				{
@@ -1304,7 +1311,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em,
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, NULL);
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
 		}
