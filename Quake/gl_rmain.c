@@ -2039,6 +2039,8 @@ void GL_PostProcess (void)
 	float teleport_fade;
 	float teleport_blur;
 	qboolean godrays_enabled;
+	qboolean godrays_debug_enabled;
+	qboolean godrays_preview;
 	float godrays_debug;
 	float godrays_debug_source;
 	float ssao_intensity;
@@ -2151,10 +2153,12 @@ void GL_PostProcess (void)
 	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
+	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_GodraysReady ()));
 	godrays_texture = 0;
 	godrays_mask = 0;
 	godrays_source = 0;
-	if (godrays_enabled)
+	if (godrays_preview)
 	{
 		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
 		godrays_source = framebufs.godrays.source_tex;
