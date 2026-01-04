@@ -1,6 +1,8 @@
 layout(binding=0) uniform sampler2D DepthTexture;
 layout(binding=1) uniform sampler2D NoiseTexture;
 
+#include "frame_uniforms.glsl"
+
 layout(location=0) uniform mat4 u_proj;
 layout(location=1) uniform mat4 u_invProj;
 layout(location=2) uniform vec4 u_params0; // x: radius, y: bias, z: power, w: min AO
@@ -15,6 +17,7 @@ layout(location=10) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2
 layout(location=11) uniform int u_normalSource; // 0: neighbor, 1: derivatives
 layout(location=12) uniform int u_yFlip; // 0: none, 1: flip Y
 layout(location=13) uniform int u_noiseMode; // 0: off, 1: IGN, 2: texture
+layout(location=14) uniform vec4 u_fogParams; // x: max distance
 
 layout(location=0) out vec4 outColor;
 
@@ -258,6 +261,20 @@ float RandIGN(ivec2 pixel, float seed)
         return fract(52.9829189 * f);
 }
 
+float FogTransmittanceFromViewPos(vec3 viewPos)
+{
+        float density = abs(Fog.w);
+        if (density <= 0.0)
+                return 1.0;
+        float fog = exp2(-density * dot(viewPos, viewPos));
+        return clamp(fog, 0.0, 1.0);
+}
+
+float FogFactorFromViewPos(vec3 viewPos)
+{
+        return 1.0 - FogTransmittanceFromViewPos(viewPos);
+}
+
 bool IsInvalidFloat(float v)
 {
         return !(v > -1e20 && v < 1e20);
@@ -306,7 +323,7 @@ void main()
         {
                 noiseVec = vec2(1.0, 0.0);
         }
-        if (debugMode == 5)
+        if (debugMode == 8)
         {
                 outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
                 return;
@@ -315,12 +332,12 @@ void main()
         ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
         vec2 screenUv = ScreenUvFromPixel(screenPixel);
         float depth = DepthRawFromPixel(screenPixel);
-        if (debugMode == 1)
+        if (debugMode == 4)
         {
                 outColor = vec4(vec3(depth), 1.0);
                 return;
         }
-        if (debugMode == 2)
+        if (debugMode == 5)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
@@ -337,7 +354,7 @@ void main()
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
-        if (debugMode == 3)
+        if (debugMode == 6)
         {
                 if (IsSkyDepth(depth, u_depthParams))
                 {
@@ -373,7 +390,7 @@ void main()
                 outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
                 return;
         }
-        if (debugMode == 4)
+        if (debugMode == 7)
         {
                 vec3 debugNormal = normal * 0.5 + 0.5;
                 outColor = vec4(debugNormal, 1.0);
@@ -417,7 +434,7 @@ void main()
                         occlusion += rangeCheck;
         }
 
-        if (debugMode == 6)
+        if (debugMode == 9)
         {
                 float ratio = validSamples / float(samples);
                 ratio = clamp(ratio, 0.0, 1.0);
@@ -429,5 +446,32 @@ void main()
         ao = clamp(ao, 0.0, 1.0);
         ao = pow(ao, u_params0.z);
         ao = max(ao, u_params0.w);
+
+        float viewZ = viewPos.x;
+        float maxDistance = max(u_fogParams.x, 1.0);
+        if (viewZ > maxDistance)
+                ao = 1.0;
+
+        float fogFactor = FogFactorFromViewPos(viewPos);
+        float aoFogWeight = 1.0 - clamp(fogFactor, 0.0, 1.0);
+        aoFogWeight = smoothstep(0.0, 0.6, aoFogWeight);
+
+        if (debugMode == 3)
+        {
+                outColor = vec4(vec3(clamp(fogFactor, 0.0, 1.0)), 1.0);
+                return;
+        }
+        if (debugMode == 2)
+        {
+                outColor = vec4(vec3(ao * aoFogWeight), 1.0);
+                return;
+        }
+        if (debugMode == 1)
+        {
+                outColor = vec4(vec3(ao), 1.0);
+                return;
+        }
+
+        ao = mix(1.0, ao, aoFogWeight);
         outColor = vec4(ao, ao, ao, 1.0);
 }

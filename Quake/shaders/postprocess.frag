@@ -622,7 +622,7 @@ void main()
                         if (!ssaoAllowed)
                         {
                                 if (ssaoDebugMode > 0)
-                                        color.rgb = (ssaoDebugMode == 9) ? vec3(0.0) : vec3(1.0);
+                                        color.rgb = (ssaoDebugMode == 12) ? vec3(0.0) : vec3(1.0);
                         }
                         else
                         {
@@ -630,7 +630,7 @@ void main()
                                 bool ssaoUseDepth = depthInfo.valid;
                                 if (ssaoUseDepth)
                                         ssaoCenterDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-                                bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode == 7);
+                                bool useDepthUpscale = ssaoUseDepth && (ssaoDebugMode <= 0 || ssaoDebugMode <= 3 || ssaoDebugMode == 10);
                                 float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
                                 float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
                                 float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
@@ -641,20 +641,20 @@ void main()
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
                                 float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
-                                if (ssaoDebugMode == 9)
+                                if (ssaoDebugMode == 12)
                                 {
                                         float mask = centerOpaque ? (1.0 - ao) : 0.0;
                                         color.rgb = vec3(mask);
                                 }
-                                else if (ssaoDebugMode == 10)
+                                else if (ssaoDebugMode == 13)
                                 {
                                         color.rgb = vec3(fogTransmittance);
                                 }
-                                else if (ssaoDebugMode == 11)
+                                else if (ssaoDebugMode == 14)
                                 {
                                         color.rgb = vec3(aoDamped);
                                 }
-                                else if (ssaoDebugMode == 8)
+                                else if (ssaoDebugMode == 11)
                                 {
                                         vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
                                         vec2 colorSize = vec2(textureSize(GammaTexture, 0));
