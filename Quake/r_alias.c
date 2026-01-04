@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
-#include "shaders/texunits.glsl"
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
@@ -32,15 +31,11 @@ extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
-extern cvar_t r_shadow_bias;
-extern cvar_t r_shadow_normal_bias;
-extern cvar_t r_shadowmap_cull_front;
+extern cvar_t r_shadow_bias_mdl;
+extern cvar_t r_shadow_normalbias_mdl;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_twosided_mdl;
-extern cvar_t r_dof_debug_state;
-
-static qboolean R_Alias_ShouldDebugMagenta (void);
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -83,22 +78,6 @@ typedef struct aliasinstance_s {
 #define ALIAS_INSTANCE_FLAG_VIEWMODEL      (1 << 1)
 #define ALIAS_INSTANCE_FLAG_LIGHTNING      (1 << 2)
 
-static int R_Alias_InstanceFlags (const entity_t *e)
-{
-	int flags = ALIAS_INSTANCE_FLAG_NONE;
-
-	if (!e || !e->model)
-		return flags;
-
-	if (e == &cl.viewent)
-		flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-
-	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
-		flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
-
-	return flags;
-}
-
 struct ibuf_s {
 	int			count;
 	entity_t	*ent;
@@ -115,7 +94,6 @@ struct ibuf_s {
 		float	_pad1;
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
-		vec4_t	shadow_control;
 		vec4_t	shadow_debug;
 		vec4_t	shadow_sun_dir;
 	} global;
@@ -538,8 +516,6 @@ void R_FlushAliasInstances (qboolean showtris)
 	GLintptr	offsets[2];
 	GLsizeiptr	sizes[2];
 	gltexture_t	*textures[3];
-	GLint		debug_magenta_loc;
-	qboolean	debug_viewmodel;
 
 	if (!ibuf.count)
 		return;
@@ -568,10 +544,6 @@ void R_FlushAliasInstances (qboolean showtris)
 		break;
 	}
 	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
-	debug_magenta_loc = GL_GetUniformLocationFunc (glprogs.alias[oit][mode][alphatest][md5], "debugViewmodelMagenta");
-	debug_viewmodel = (ibuf.ent == &cl.viewent);
-	if (debug_magenta_loc >= 0 && !debug_viewmodel)
-		GL_Uniform1iFunc (debug_magenta_loc, 0);
 
 	if (md5)
 		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
@@ -598,11 +570,10 @@ ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadow_bias.value;
-	ibuf.global.shadow_params[1] = r_shadow_normal_bias.value;
+	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
+	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
-	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
 	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
@@ -615,19 +586,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW);
-#ifndef NDEBUG
-	{
-		GLint bound = 0;
-		GLint prev_active = 0;
-		glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-		GL_ActiveTextureFunc (GL_TEXTURE0 + TEXUNIT_SHADOW);
-		glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-		GL_ActiveTextureFunc (prev_active);
-		if (bound == 0)
-			Con_DWarning ("Shadow map unit %d not bound for alias pass\n", TEXUNIT_SHADOW);
-	}
-#endif
+	R_Shadow_BindShadowMap (GL_TEXTURE5);
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
 	{
@@ -699,17 +658,10 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 		}
 
 		GL_BindTextures (0, 3, textures);
-		if (debug_magenta_loc >= 0 && debug_viewmodel)
-		{
-			GLint debug_magenta = R_Alias_ShouldDebugMagenta () ? 1 : 0;
-			GL_Uniform1iFunc (debug_magenta_loc, debug_magenta);
-		}
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
 
 		rs_aliaspasses += hdr->numtris * ibuf.count;
-		rs_shadow_drawcalls_alias += 1;
-		rs_shadow_tris_alias += hdr->numtris * ibuf.count;
 	}
 
 	ibuf.count = 0;
@@ -747,14 +699,14 @@ static void R_FlushAliasInstances_Shadow (void)
 	GL_UseProgram (glprogs.shadow_depth_alias[md5]);
 
 	if (md5)
-		state = GLS_ATTRIBS(3);
+		state = GLS_ATTRIBS(5);
 	else
 		state = GLS_ATTRIBS(1);
 
 	if (r_shadow_twosided_mdl.value > 0.f)
 		state |= GLS_CULL_NONE;
 	else
-		state |= (r_shadowmap_cull_front.value > 0.f) ? GLS_CULL_FRONT : GLS_CULL_BACK;
+		state |= GLS_CULL_FRONT;
 
 	state |= GLS_BLEND_OPAQUE;
 	GL_SetState (state);
@@ -763,11 +715,10 @@ static void R_FlushAliasInstances_Shadow (void)
 	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadow_bias.value;
-	ibuf.global.shadow_params[1] = r_shadow_normal_bias.value;
+	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
+	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
-	memcpy (ibuf.global.shadow_control, r_framedata.shadow_control, sizeof (r_framedata.shadow_control));
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
 	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
@@ -786,8 +737,10 @@ static void R_FlushAliasInstances_Shadow (void)
 		if (md5)
 		{
 			GL_VertexAttribPointerFunc  (0, 3, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, xyz)));
-			GL_VertexAttribPointerFunc  (1, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
-			GL_VertexAttribIPointerFunc (2, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+			GL_VertexAttribPointerFunc  (1, 4, GL_BYTE,				GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, norm)));
+			GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, st)));
+			GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
+			GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vboposeofs;
@@ -838,24 +791,6 @@ static qboolean R_Alias_CanAddToBatch (const entity_t *e)
 		return false;
 
 	return true;
-}
-
-static qboolean R_Alias_ShouldDebugMagenta (void)
-{
-	GLint active = 0;
-	GLint prev_active = 0;
-	GLint bound = 0;
-
-	if (r_dof_debug_state.value <= 0.f)
-		return false;
-
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &active);
-	prev_active = active;
-	GL_ActiveTextureFunc (GL_TEXTURE0);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-	GL_ActiveTextureFunc (prev_active);
-
-	return active != GL_TEXTURE0 || bound == 0;
 }
 
 /*
@@ -952,7 +887,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		ibuf.ent = e;
 
 	instance = &ibuf.inst[ibuf.count++];
-	instance->flags = R_Alias_InstanceFlags (e);
+	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
 
 	{
 		float prev_model_matrix[16];
@@ -996,6 +931,10 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         VectorCopy (lightcolor, instance->lightcolor);
         VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
         instance->alpha = entalpha;
+        if (e == &cl.viewent)
+                instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
+if (!Q_strncmp (e->model->name, "progs/bolt", 10))
+                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
@@ -1028,7 +967,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	if (!e || !e->model)
 		return;
 
-	if (R_Alias_InstanceFlags (e) & ALIAS_INSTANCE_FLAG_VIEWMODEL)
+	if (e == &cl.viewent)
 		return;
 
 	if (e->model->flags & MOD_NOSHADOW)
@@ -1097,16 +1036,6 @@ void R_DrawAliasModels (entity_t **ents, int count)
         R_FlushAliasInstances (false);
 }
 
-void R_DrawAliasShadow (entity_t *e)
-{
-	R_DrawAliasModel_Shadow_Real (e);
-}
-
-void R_FlushAliasShadows (void)
-{
-	R_FlushAliasInstances_Shadow ();
-}
-
 /*
 =================
 R_DrawAliasModels_Shadow
@@ -1116,8 +1045,8 @@ void R_DrawAliasModels_Shadow (entity_t **ents, int count)
 {
 	int i;
 	for (i = 0; i < count; i++)
-		R_DrawAliasShadow (ents[i]);
-	R_FlushAliasShadows ();
+		R_DrawAliasModel_Shadow_Real (ents[i]);
+	R_FlushAliasInstances_Shadow ();
 }
 
 /*

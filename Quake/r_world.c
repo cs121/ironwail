@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "mat_shader.h"
-#include "shaders/texunits.glsl"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays_emit_sky;
@@ -39,7 +38,6 @@ extern gltexture_t *lightmap_texture;
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_mode;
-extern cvar_t r_shadowmap_cull_front;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -50,8 +48,6 @@ extern size_t gl_bmodel_indirect_buffer_size;
 extern GLuint gl_bmodel_surf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer_size;
-extern int *gl_bmodel_cmd_tris;
-extern int gl_bmodel_cmd_tris_count;
 
 typedef struct gpumark_frame_s {
 	vec4_t		frustum[4];
@@ -323,7 +319,6 @@ static union {
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
-static qboolean						bmodel_shadow_pass;
 
 static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolean use_offset,
 	float *factor, float *units)
@@ -483,7 +478,6 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_MAT_TRANS       (1u << 10)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
-#define CALLFLAG_MAT_NO_SHADOW_RECEIVE (1u << 13)
 
 static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 {
@@ -575,13 +569,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 	if (num_bmodel_calls == MAX_BMODEL_DRAWS)
 		R_FlushBModelCalls ();
-
-	if (bmodel_shadow_pass)
-	{
-		rs_shadow_drawcalls_world += 1;
-		if (gl_bmodel_cmd_tris && index >= 0 && index < gl_bmodel_cmd_tris_count)
-			rs_shadow_tris_world += gl_bmodel_cmd_tris[index] * num_instances;
-	}
 
 	if (t)
 	{
@@ -1072,10 +1059,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
-			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
-				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
-			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
-				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 			mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
 
 			for (stage_index = 0; stage_index < stage_count; stage_index++)
@@ -1306,8 +1289,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;
 				}
-				if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
-					extra_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
 					continue;
@@ -1440,43 +1421,27 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else if (pass == BP_SHADOW)
         {
                 state &= ~GLS_MASK_CULL;
-                state |= GLS_BLEND_OPAQUE |
-                        (r_shadowmap_cull_front.value > 0.f ? GLS_CULL_FRONT : GLS_CULL_BACK);
+                state |= GLS_BLEND_OPAQUE | GLS_CULL_FRONT;
         }
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
-        bmodel_shadow_pass = (pass == BP_SHADOW);
         R_ResetBModelCalls (program);
         GL_SetState (state);
-	if (pass <= BP_ALPHATEST)
-	{
-		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTMAP, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTDIR, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-		R_Shadow_BindShadowMapRaw (GL_TEXTURE0 + TEXUNIT_SHADOW);
-#ifndef NDEBUG
-		{
-			GLint bound = 0;
-			GLint prev_active = 0;
-			glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-			GL_ActiveTextureFunc (GL_TEXTURE0 + TEXUNIT_SHADOW);
-			glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound);
-			GL_ActiveTextureFunc (prev_active);
-			if (bound == 0)
-				Con_DWarning ("Shadow map unit %d not bound for world pass\n", TEXUNIT_SHADOW);
-		}
-#endif
-	}
-	else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-	{
-		R_Shadow_BindDlightShadowMap (GL_TEXTURE0 + TEXUNIT_SHADOW);
-	}
-	else if (pass == BP_SKYCUBEMAP)
-	{
-		GL_Bind (GL_TEXTURE0 + TEXUNIT_LIGHTMAP, skybox->cubemap);
-	}
+if (pass <= BP_ALPHATEST)
+{
+GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+R_Shadow_BindShadowMap (GL_TEXTURE5);
+}
+else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
+{
+R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
+}
+else if (pass == BP_SKYCUBEMAP)
+GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -1552,8 +1517,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
-			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
-				mat_call_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_shaders.value > 0.f && t->shader && t->shader->stages)
 			{
@@ -1712,8 +1675,6 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 				extra_flags |= CALLFLAG_MAT_TRANS;
 			if (mat_flags & MAT_SHADERFLAG_SKY)
 				extra_flags |= CALLFLAG_MAT_SKY;
-			if (mat_flags & MAT_SHADERFLAG_NO_SHADOW_RECEIVE)
-				extra_flags |= CALLFLAG_MAT_NO_SHADOW_RECEIVE;
 
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)

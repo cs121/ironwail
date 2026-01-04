@@ -23,7 +23,6 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
-	vec4	ShadowControl;
 	vec4	ShadowDebug;
 	vec4	ShadowSunDir;
 	InstanceData instances[];
@@ -35,12 +34,12 @@ struct PoseVertex
 	vec3 nor;
 };
 
-layout(location=0) out vec4 v_light_clip;
-
 #if MD5
 	layout(location=0) in vec3 in_pos;
-	layout(location=1) in vec4 in_weights;
-	layout(location=2) in ivec4 in_indices;
+	layout(location=1) in vec4 in_nor;
+	layout(location=2) in vec2 in_uv;
+	layout(location=3) in vec4 in_weights;
+	layout(location=4) in ivec4 in_indices;
 
 	layout(std430, binding=2) restrict readonly buffer PoseBuffer
 	{
@@ -57,10 +56,12 @@ layout(location=0) out vec4 v_light_clip;
 			blendmat += BonePoses[pose + in_indices.w] * in_weights.w;
 		}
 		mat4x3 anim = transpose(blendmat);
-		return PoseVertex((anim * vec4(in_pos, 1.0)).xyz, vec3(0.0));
+		return PoseVertex((anim * vec4(in_pos, 1.0)).xyz, (anim * vec4(in_nor.xyz, 0.0)).xyz);
 	}
 
 #else
+	layout(location=0) in vec2 in_uv;
+
 	layout(std430, binding=2) restrict readonly buffer BlendShapeBuffer
 	{
 		uvec2 PackedPosNor[];
@@ -79,15 +80,8 @@ void main()
 	InstanceData inst = instances[gl_InstanceID];
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
-	vec3 alias_pos = mix(pose1.pos, pose2.pos, inst.Blend);
-	mat4 model = mat4(
-		vec4(inst.WorldMatrix[0].xyz, 0.0),
-		vec4(inst.WorldMatrix[1].xyz, 0.0),
-		vec4(inst.WorldMatrix[2].xyz, 0.0),
-		vec4(inst.WorldMatrix[0].w, inst.WorldMatrix[1].w, inst.WorldMatrix[2].w, 1.0)
-	);
-	vec3 world_pos = (model * vec4(alias_pos, 1.0)).xyz;
-	world_pos += EyePos;
-	v_light_clip = ShadowViewProj * vec4(world_pos, 1.0);
-	gl_Position = v_light_clip;
+	vec3 local_vert = mix(pose1.pos, pose2.pos, inst.Blend);
+	mat4x3 worldmatrix = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
+	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
+	gl_Position = ShadowViewProj * vec4(world_vert, 1.0);
 }

@@ -23,7 +23,6 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
-	vec4	ShadowControl;
 	vec4	ShadowDebug;
 	vec4	ShadowSunDir;
 	InstanceData instances[];
@@ -97,8 +96,6 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
-layout(location=7) out vec3 out_direct;
-layout(location=8) out vec4 out_shadow_clip;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -115,7 +112,6 @@ void main()
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
-	vec4 shadow_clip = ShadowViewProj * vec4(world_vert, 1.0);
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
@@ -124,9 +120,7 @@ void main()
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
-        vec3 shadevector = orientation[0] + orientation[2];
-        float shade_len_sq = dot(shadevector, shadevector);
-        shadevector = (shade_len_sq > 0.0) ? (shadevector * inversesqrt(shade_len_sq)) : vec3(0.0, 0.0, 1.0);
+        vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
@@ -140,11 +134,7 @@ void main()
         vec3 litDlight = inst.DLightColor.rgb * lighting;
         vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 ambient_color = litAmbient;
-        if (is_viewmodel)
-                ambient_color += vec3(rim);
-        out_color = clamp(vec4(ambient_color, inst.LightColor.a), 0.0, Overbright);
-	out_direct = litDlight;
+        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
+        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
 	out_normal = world_normal;
-	out_shadow_clip = shadow_clip;
 }

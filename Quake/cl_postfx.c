@@ -281,29 +281,12 @@ void CL_PostFX_PushPickup (void)
 	postfx_event_t *event;
 	float duration;
 	float intensity;
-	int i;
 
 	if (r_postfx.value <= 0.f || r_postfx_pickup.value <= 0.f)
 		return;
 
 	duration = q_max (0.05f, r_postfx_pickup_duration.value);
 	intensity = PostFX_Saturate (r_postfx_pickup.value);
-
-	for (i = 0; i < POSTFX_MAX_EVENTS; ++i)
-	{
-		if (!postfx_events[i].active || postfx_events[i].type != PFX_EVENT_PICKUP)
-			continue;
-
-		postfx_events[i].start_time = cl.time;
-		postfx_events[i].last_update = cl.time;
-		postfx_events[i].duration = duration;
-		postfx_events[i].attack = duration * 0.2f;
-		postfx_events[i].decay = duration * 0.8f;
-		postfx_events[i].intensity = q_max (postfx_events[i].intensity, intensity);
-		postfx_events[i].params[0] = r_postfx_pickup_exposure.value;
-		postfx_events[i].params[1] = r_postfx_pickup_bloom.value;
-		return;
-	}
 
 	event = PostFX_AllocEvent ();
 	memset (event, 0, sizeof (*event));

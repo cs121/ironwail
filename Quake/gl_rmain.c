@@ -65,10 +65,6 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
-static qboolean r_ssao_underwater_blocked = false;
-
-extern cvar_t r_dof_debug_state;
-static void GL_SetFramebufferSRGB (qboolean enable);
 
 typedef struct godrays_stabilization_s
 {
@@ -100,172 +96,6 @@ static void GL_LogErrorIfDeveloper (const char *label)
 	GLenum err = glGetError ();
 	if (err != GL_NO_ERROR)
 		Con_DPrintf ("GL error after %s: 0x%04X\n", label, err);
-}
-
-typedef struct gl_state_guard_s
-{
-	GLint program;
-	GLint active_texture;
-	GLint draw_fbo;
-	GLint viewport[4];
-	GLint vao;
-	qboolean depth_test;
-	qboolean blend;
-	qboolean cull;
-	qboolean scissor;
-	qboolean srgb;
-} gl_state_guard_t;
-
-static void GL_CaptureState (gl_state_guard_t *state)
-{
-	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &state->active_texture);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
-	glGetIntegerv (GL_VIEWPORT, state->viewport);
-#ifdef GL_VERTEX_ARRAY_BINDING
-	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
-#else
-	state->vao = 0;
-#endif
-	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
-	state->blend = glIsEnabled (GL_BLEND);
-	state->cull = glIsEnabled (GL_CULL_FACE);
-	state->scissor = glIsEnabled (GL_SCISSOR_TEST);
-#ifdef GL_FRAMEBUFFER_SRGB
-	state->srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
-#else
-	state->srgb = false;
-#endif
-}
-
-static void GL_RestoreState (const gl_state_guard_t *state)
-{
-	GL_UseProgram (state->program);
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, state->draw_fbo);
-	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
-#ifdef GL_VERTEX_ARRAY_BINDING
-	GL_BindVertexArrayFunc (state->vao);
-#endif
-	state->depth_test ? glEnable (GL_DEPTH_TEST) : glDisable (GL_DEPTH_TEST);
-	state->blend ? glEnable (GL_BLEND) : glDisable (GL_BLEND);
-	state->cull ? glEnable (GL_CULL_FACE) : glDisable (GL_CULL_FACE);
-	state->scissor ? glEnable (GL_SCISSOR_TEST) : glDisable (GL_SCISSOR_TEST);
-	GL_SetFramebufferSRGB (state->srgb);
-	GL_ActiveTextureFunc (state->active_texture);
-}
-
-static qboolean GL_StateMatches (const gl_state_guard_t *state)
-{
-	gl_state_guard_t current;
-	GL_CaptureState (&current);
-
-	if (current.program != state->program)
-		return false;
-	if (current.active_texture != state->active_texture)
-		return false;
-	if (current.draw_fbo != state->draw_fbo)
-		return false;
-	if (memcmp (current.viewport, state->viewport, sizeof (state->viewport)) != 0)
-		return false;
-	if (current.vao != state->vao)
-		return false;
-	if (current.depth_test != state->depth_test)
-		return false;
-	if (current.blend != state->blend)
-		return false;
-	if (current.cull != state->cull)
-		return false;
-	if (current.scissor != state->scissor)
-		return false;
-	if (current.srgb != state->srgb)
-		return false;
-
-	return true;
-}
-
-static void GL_CheckError (const char *label)
-{
-	if (r_dof_debug_state.value <= 0.f)
-		return;
-	GLenum err = glGetError ();
-	if (err != GL_NO_ERROR)
-		Con_Printf ("GL error after %s: 0x%04X\n", label, err);
-}
-
-static void GL_LogSamplerUniform (GLuint program, const char *name)
-{
-	GLint location;
-	GLint value;
-
-	if (!program)
-		return;
-
-	location = GL_GetUniformLocationFunc (program, name);
-	if (location < 0)
-		return;
-
-	GL_GetUniformivFunc (program, location, &value);
-	Con_Printf ("  sampler %s = %d\n", name, value);
-}
-
-static void GL_LogState (const char *tag)
-{
-	GLint program = 0;
-	GLint active = 0;
-	GLint draw_fbo = 0;
-	GLint viewport[4] = {0};
-	GLint prev_active = 0;
-	int i;
-
-	if (r_dof_debug_state.value <= 0.f)
-		return;
-
-	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &active);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_VIEWPORT, viewport);
-
-	Con_Printf ("GL state [%s]\n", tag);
-	Con_Printf ("  program=%d activeTex=%d drawFBO=%d viewport=%d,%d %dx%d\n",
-		program,
-		active - GL_TEXTURE0,
-		draw_fbo,
-		viewport[0],
-		viewport[1],
-		viewport[2],
-		viewport[3]);
-	Con_Printf ("  enabled: depth=%d blend=%d cull=%d scissor=%d srgb=%d\n",
-		glIsEnabled (GL_DEPTH_TEST) ? 1 : 0,
-		glIsEnabled (GL_BLEND) ? 1 : 0,
-		glIsEnabled (GL_CULL_FACE) ? 1 : 0,
-		glIsEnabled (GL_SCISSOR_TEST) ? 1 : 0,
-#ifdef GL_FRAMEBUFFER_SRGB
-		glIsEnabled (GL_FRAMEBUFFER_SRGB) ? 1 : 0
-#else
-		0
-#endif
-	);
-
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
-	for (i = 0; i < 4; i++)
-	{
-		GLint tex_binding = 0;
-		GLint sampler_binding = 0;
-		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
-		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex_binding);
-#ifdef GL_SAMPLER_BINDING
-		glGetIntegerv (GL_SAMPLER_BINDING, &sampler_binding);
-#endif
-		Con_Printf ("  texunit %d: tex2D=%d sampler=%d\n", i, tex_binding, sampler_binding);
-	}
-	GL_ActiveTextureFunc (prev_active);
-
-	GL_LogSamplerUniform (program, "Tex");
-	GL_LogSamplerUniform (program, "FullbrightTex");
-	GL_LogSamplerUniform (program, "EmissiveTex");
-	GL_LogSamplerUniform (program, "ShadowMap");
-	GL_LogSamplerUniform (program, "baseTexture");
-	GL_LogSamplerUniform (program, "fullbrightTexture");
 }
 
 
@@ -352,8 +182,6 @@ static qboolean MatrixInverse4x4(const float m[16], float out[16])
 //johnfitz -- rendering statistics
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
-int rs_shadow_drawcalls_world, rs_shadow_drawcalls_alias;
-int rs_shadow_tris_world, rs_shadow_tris_alias;
 
 //
 // view origin
@@ -425,27 +253,15 @@ cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARC
 cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
 cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
-cvar_t	r_shadowmap = { "r_shadowmap", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
-cvar_t	r_shadow_bias = { "r_shadow_bias", "0.0015", CVAR_ARCHIVE };
+cvar_t	r_shadow_bias = { "r_shadow_bias", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias = { "r_shadow_normalbias", "1.0", CVAR_ARCHIVE };
-cvar_t	r_shadow_normal_bias = { "r_shadow_normal_bias", "0.0025", CVAR_ARCHIVE };
-cvar_t	r_shadow_strength = { "r_shadow_strength", "1.0", CVAR_ARCHIVE };
-cvar_t	r_shadowmap_bias = { "r_shadowmap_bias", "0.0015", CVAR_ARCHIVE };
-cvar_t	r_shadowmap_slopebias = { "r_shadowmap_slopebias", "0.002", CVAR_ARCHIVE };
-cvar_t	r_shadowmap_cull_front = { "r_shadowmap_cull_front", "1", CVAR_ARCHIVE };
-cvar_t	r_shadowmap_force_disable_scissor = { "r_shadowmap_force_disable_scissor", "1", CVAR_ARCHIVE };
-cvar_t	r_shadowmap_freeze = { "r_shadowmap_freeze", "0", CVAR_NONE };
-cvar_t	r_shadow_freeze = { "r_shadow_freeze", "0", CVAR_NONE };
 cvar_t	r_shadow_bias_mdl = { "r_shadow_bias_mdl", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
-cvar_t	r_shadowmap_debug = { "r_shadowmap_debug", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_depthview = { "r_shadow_debug_depthview", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_depthview_invert = { "r_shadow_debug_depthview_invert", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
@@ -468,7 +284,6 @@ cvar_t	r_dof_focus = { "r_dof_focus", "64", CVAR_ARCHIVE };
 cvar_t	r_dof_range = { "r_dof_range", "255", CVAR_ARCHIVE };
 cvar_t	r_dof_strength = { "r_dof_strength", "3", CVAR_ARCHIVE };
 cvar_t	r_dof_autofocus = { "r_dof_autofocus", "1", CVAR_ARCHIVE };
-cvar_t	r_dof_debug_state = { "r_dof_debug_state", "0", CVAR_NONE };
 
 cvar_t	r_motionblur = { "r_motionblur", "0", CVAR_ARCHIVE };
 cvar_t	r_motionblur_shutter = { "r_motionblur_shutter", "0.75", CVAR_ARCHIVE };
@@ -578,7 +393,6 @@ cvar_t	r_ssao_force_fullres = { "r_ssao_force_fullres", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_format = { "r_ssao_format", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
-cvar_t	r_ssao_fog_intensity = { "r_ssao_fog_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.5", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
@@ -2246,7 +2060,6 @@ void GL_PostProcess (void)
 	float fog_r;
 	float fog_g;
 	float fog_b;
-	float ssao_fog_depth_strength;
 	float postfx_damage_trauma;
 	float dv_strength;
 	float dv_max_px;
@@ -2254,8 +2067,6 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-	gl_state_guard_t dof_state;
-	qboolean dof_state_saved;
         r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
@@ -2279,7 +2090,6 @@ void GL_PostProcess (void)
 	fog_r = postfx_state.underwater_fog_color[0];
 	fog_g = postfx_state.underwater_fog_color[1];
 	fog_b = postfx_state.underwater_fog_color[2];
-	ssao_fog_depth_strength = CLAMP (0.f, q_max (postfx_state.underwater_fog_strength, Fog_GetDensity ()), 1.f);
 	postfx_damage_trauma = CLAMP (0.f, postfx_state.damage_trauma, 1.f);
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
@@ -2353,10 +2163,7 @@ void GL_PostProcess (void)
 	view_max_y = view_min_y + r_refdef.vrect.height / (float)vid.height;
 	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
 
-	if (!r_ssao_underwater_blocked)
-		ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
-	else
-		ssao_texture = 0;
+	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
@@ -2367,18 +2174,8 @@ void GL_PostProcess (void)
 		ssao_debug_mode = -1.f;
 	if (ssao_texture == 0 || r_ssao.value <= 0.f)
 		ssao_intensity = 0.f;
-	{
-		float fog_intensity = r_ssao_fog_intensity.value;
-		if (fog_intensity == 1.f && r_ssao_fog_strength.value != 1.f)
-			fog_intensity = r_ssao_fog_strength.value;
-		ssao_fog_strength = CLAMP (0.f, fog_intensity, 1.f);
-	}
+	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
-	if (r_ssao_underwater_blocked)
-	{
-		ssao_intensity = 0.f;
-		ssao_debug_mode = -1.f;
-	}
 
 	msaa = framebufs.scene.samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
@@ -2416,15 +2213,6 @@ void GL_PostProcess (void)
 		}
 	}
 	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
-
-	dof_enabled = R_DoFEnabled ();
-	dof_state_saved = false;
-	if (dof_enabled)
-	{
-		GL_CaptureState (&dof_state);
-		dof_state_saved = true;
-		GL_LogState ("DoF enter");
-	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
@@ -2491,7 +2279,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
-	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, ssao_fog_depth_strength);
+	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
 		dv_quality = (float)CLAMP (0, quality, 2);
@@ -2524,6 +2312,8 @@ void GL_PostProcess (void)
 			filmgrain_amount = r_filmgrain_amount.value;
 		GL_SetFilmgrainUniforms (filmgrain_amount, filmgrain_enabled);
 	}
+
+	dof_enabled = R_DoFEnabled ();
 
 	{
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
@@ -2559,26 +2349,6 @@ void GL_PostProcess (void)
 	}
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
-
-	if (dof_state_saved)
-	{
-		// Temporary debug guard to confirm state leaks from DoF/postprocess.
-		if (r_dof_debug_state.value >= 2.f)
-		{
-			GL_UseProgramFunc (0);
-			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-			GL_ActiveTextureFunc (GL_TEXTURE0);
-		}
-
-		// DoF postprocess touched GL_ACTIVE_TEXTURE/viewport/FBO state; restore to avoid leaking into viewmodel/UI passes.
-		GL_RestoreState (&dof_state);
-		if (r_dof_debug_state.value > 0.f)
-		{
-			GL_LogState ("DoF exit");
-			Con_Printf ("DoF state restore: %s\n", GL_StateMatches (&dof_state) ? "STATE OK" : "STATE MISMATCH");
-		}
-		GL_CheckError ("DoF state restore");
-	}
 
 	GL_EndGroup ();
 }
@@ -3377,7 +3147,7 @@ void R_SetupView (void)
         r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
         r_framedata.lightgrid_params[2] =
-                (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
+                (r_shadows.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
                 ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
                 : 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
@@ -3394,25 +3164,16 @@ void R_SetupView (void)
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;
-        r_framedata.shadow_params[1] = r_shadow_normal_bias.value;
+        r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
-        {
-                float debug_mode = r_shadowmap_debug.value > 0.f ? r_shadowmap_debug.value : r_shadow_debug.value;
-                r_framedata.shadow_control[0] =
-                        (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
-                r_framedata.shadow_control[1] = debug_mode;
-        }
-        r_framedata.shadow_control[2] = r_shadow_strength.value;
-        r_framedata.shadow_control[3] = 0.f;
-        r_framedata.shadow_debug[0] = 1.f;
-        r_framedata.shadow_debug[1] = r_framedata.shadow_control[1];
+        r_framedata.shadow_debug[0] = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_debug[1] = r_shadow_debug.value;
         r_framedata.shadow_debug[2] = 0.f;
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] =
-                (r_shadows.value > 0.f && r_shadowmap.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
         r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
@@ -3482,7 +3243,6 @@ void R_SetupView (void)
 		int contents = r_viewleaf->contents;
 		qboolean forced = M_ForcedUnderwater ();
 		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
-		r_ssao_underwater_blocked = underwater_active;
 	if (r_waterwarp.value)
 	{
 		if (underwater_active)
@@ -3659,14 +3419,10 @@ void R_DrawViewModel (void)
 
 	GL_BeginGroup ("View model");
 
-	GL_LogState ("Viewmodel enter");
-
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
 	R_DrawAliasModels (&e, 1);
 	GL_DepthRange (ZRANGE_FULL);
-
-	GL_LogState ("Viewmodel exit");
 
 	GL_EndGroup ();
 }
@@ -4647,14 +4403,15 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+	R_Shadow_SunPass ();
+	R_Shadow_DlightPass ();
 	R_SetupGL ();
 	R_Clear ();
-
+	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	R_Shadow_SunPass ();
-	R_Shadow_DlightPass ();
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDLightPass ();
@@ -4665,9 +4422,7 @@ void R_RenderScene (void)
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
 	R_DrawParticles (true);
-	R_DrawRTLightCoronas ();
 	R_EndTranslucency ();
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
 	R_ShowPointFile ();
@@ -4836,8 +4591,6 @@ void R_RenderView (void)
 		//johnfitz -- rendering statistics
 		rs_brushpolys = rs_aliaspolys = rs_skypolys =
 			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
-		rs_shadow_drawcalls_world = rs_shadow_drawcalls_alias = 0;
-		rs_shadow_tris_world = rs_shadow_tris_alias = 0;
 	}
         else if (gl_finish.value)
                 glFinish ();
@@ -4846,9 +4599,8 @@ void R_RenderView (void)
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();
-	Fog_DisableGFog (); // Leave fog disabled for 2D overlays
+        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
-	R_Shadow_DrawDepthDebugQuad ();
 
 	r_frame_rendered_this_update = true;
 
@@ -4879,11 +4631,5 @@ void R_RenderView (void)
 			rs_brushpolys,
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
-	if (r_speeds.value)
-		Con_Printf ("shadow %4i dc/%6i tri world  %4i dc/%6i tri alias\n",
-			rs_shadow_drawcalls_world,
-			rs_shadow_tris_world,
-			rs_shadow_drawcalls_alias,
-			rs_shadow_tris_alias);
 	//johnfitz
 }

@@ -141,11 +141,9 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 		"#version 430\n"
 		"\n"
 		"#define BINDLESS %d\n"
-		"#define REVERSED_Z %d\n"
-		"#define CLIP_Z_ZERO_TO_ONE %d\n",
+		"#define REVERSED_Z %d\n",
 		gl_bindless_able,
-		gl_clipcontrol_able,
-		gl_clip_z_01
+		gl_clipcontrol_able
 	);
 	strings[numstrings++] = header;
 
@@ -555,7 +553,6 @@ void GL_CreateShaders (void)
                 glprogs.skylayers[dither] = GL_CreateProgram (GLSL_PATH("sky_layers.vert"), GLSL_PATH("sky_layers.frag"), "sky layers|DITHER %d", dither);
                 glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
                 glprogs.sprites[dither] = GL_CreateProgram (GLSL_PATH("sprites.vert"), GLSL_PATH("sprites.frag"), "sprites|DITHER %d", dither);
-                glprogs.coronas[dither] = GL_CreateProgram (GLSL_PATH("coronas.vert"), GLSL_PATH("coronas.frag"), "coronas|DITHER %d", dither);
         }
         glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 
@@ -568,7 +565,6 @@ void GL_CreateShaders (void)
 
         glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
         glprogs.shadow_debug = GL_CreateProgram (GLSL_PATH("shadow_debug.vert"), GLSL_PATH("shadow_debug.frag"), "shadow debug");
-	glprogs.shadow_depth_debug = GL_CreateProgram (GLSL_PATH("shadow_depth_debug.vert"), GLSL_PATH("shadow_depth_debug.frag"), "shadow depth debug");
 
         glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");
         glprogs.gather_indirect = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"), "indirect draw gather");

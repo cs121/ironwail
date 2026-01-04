@@ -28,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_maptex_export.h"
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
-#include "rtlight.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -78,27 +77,15 @@ extern cvar_t r_dlight_bloom_threshold;
 extern cvar_t r_dlight_ndotl;
 extern cvar_t r_dlight_satchop;
 extern cvar_t r_shadows;
-extern cvar_t r_shadowmap;
 extern cvar_t r_shadow_sun;
 extern cvar_t r_shadowmap_size;
 extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
-extern cvar_t r_shadow_normal_bias;
-extern cvar_t r_shadow_strength;
-extern cvar_t r_shadowmap_bias;
-extern cvar_t r_shadowmap_slopebias;
-extern cvar_t r_shadowmap_cull_front;
-extern cvar_t r_shadowmap_force_disable_scissor;
-extern cvar_t r_shadowmap_freeze;
-extern cvar_t r_shadow_freeze;
 extern cvar_t r_shadow_bias_mdl;
 extern cvar_t r_shadow_normalbias_mdl;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
-extern cvar_t r_shadowmap_debug;
-extern cvar_t r_shadow_debug_depthview;
-extern cvar_t r_shadow_debug_depthview_invert;
 extern cvar_t r_shadow_sun_dir;
 extern cvar_t r_shadow_twosided_mdl;
 extern cvar_t r_shadow_dlights;
@@ -119,7 +106,6 @@ extern cvar_t r_dof_autofocus;
 extern cvar_t r_dof_focus;
 extern cvar_t r_dof_range;
 extern cvar_t r_dof_strength;
-extern cvar_t r_dof_debug_state;
 extern cvar_t r_motionblur;
 extern cvar_t r_motionblur_shutter;
 extern cvar_t r_motionblur_maxradiuspixels;
@@ -224,7 +210,6 @@ extern cvar_t r_ssao_force_fullres;
 extern cvar_t r_ssao_format;
 extern cvar_t r_ssao_upscale_nearest;
 extern cvar_t r_ssao_fog_strength;
-extern cvar_t r_ssao_fog_intensity;
 extern cvar_t r_ssao_fog_power;
 extern cvar_t r_godrays;
 extern cvar_t r_godrays_emit_sky;
@@ -583,47 +568,28 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_dlight_bloom_threshold);
         Cvar_RegisterVariable (&r_dlight_ndotl);
         Cvar_RegisterVariable (&r_dlight_satchop);
-	Cvar_RegisterVariable (&r_shadows);
-	Cvar_RegisterVariable (&r_shadowmap);
-	Cvar_RegisterVariable (&r_shadow_sun);
-	Cvar_RegisterVariable (&r_shadowmap_size);
-	Cvar_RegisterVariable (&r_shadow_bias);
-	Cvar_RegisterVariable (&r_shadow_normalbias);
-	Cvar_RegisterVariable (&r_shadow_normal_bias);
-	Cvar_RegisterVariable (&r_shadow_strength);
-	Cvar_RegisterVariable (&r_shadowmap_bias);
-	Cvar_RegisterVariable (&r_shadowmap_slopebias);
-	Cvar_RegisterVariable (&r_shadowmap_cull_front);
-	Cvar_RegisterVariable (&r_shadowmap_force_disable_scissor);
-	Cvar_RegisterVariable (&r_shadowmap_freeze);
-	Cvar_RegisterVariable (&r_shadow_freeze);
-	Cvar_RegisterVariable (&r_shadow_bias_mdl);
-	Cvar_RegisterVariable (&r_shadow_normalbias_mdl);
-	Cvar_RegisterVariable (&r_shadow_pcf);
-	Cvar_RegisterVariable (&r_shadow_pcf_taps);
-	Cvar_RegisterVariable (&r_shadow_debug);
-	Cvar_RegisterVariable (&r_shadowmap_debug);
-	Cvar_RegisterVariable (&r_shadow_debug_depthview);
-	Cvar_RegisterVariable (&r_shadow_debug_depthview_invert);
-	Cvar_RegisterVariable (&r_shadow_sun_dir);
-	Cvar_RegisterVariable (&r_shadow_twosided_mdl);
+        Cvar_RegisterVariable (&r_shadows);
+        Cvar_RegisterVariable (&r_shadow_sun);
+        Cvar_RegisterVariable (&r_shadowmap_size);
+        Cvar_RegisterVariable (&r_shadow_bias);
+        Cvar_RegisterVariable (&r_shadow_normalbias);
+        Cvar_RegisterVariable (&r_shadow_bias_mdl);
+        Cvar_RegisterVariable (&r_shadow_normalbias_mdl);
+        Cvar_RegisterVariable (&r_shadow_pcf);
+        Cvar_RegisterVariable (&r_shadow_pcf_taps);
+        Cvar_RegisterVariable (&r_shadow_debug);
+        Cvar_RegisterVariable (&r_shadow_sun_dir);
+        Cvar_RegisterVariable (&r_shadow_twosided_mdl);
         Cvar_RegisterVariable (&r_shadow_dlights);
         Cvar_RegisterVariable (&r_shadow_dlight_max);
         Cvar_RegisterVariable (&r_shadow_dlight_size);
         Cvar_RegisterVariable (&r_shadow_dlight_distance);
         Cvar_RegisterVariable (&r_shadow_dlight_bias);
-	Cvar_RegisterVariable (&r_shadow_dlight_pcf_taps);
-	Cvar_RegisterVariable (&r_shadow_lightgrid);
-	Cvar_RegisterVariable (&r_shadow_lightgrid_mode);
+        Cvar_RegisterVariable (&r_shadow_dlight_pcf_taps);
+        Cvar_RegisterVariable (&r_shadow_lightgrid);
+        Cvar_RegisterVariable (&r_shadow_lightgrid_mode);
 	DLightPool_RegisterCvars ();
-	Cvar_RegisterVariable (&r_rtlights);
-	Cvar_RegisterVariable (&r_rtlights_max);
-	Cvar_RegisterVariable (&r_rtlights_debug);
-	Cvar_RegisterVariable (&r_coronas);
-	Cvar_RegisterVariable (&r_coronas_debug);
-	Cvar_RegisterVariable (&r_envmap_lights);
-	Cvar_RegisterVariable (&r_envmap_lights_debug);
-	Cvar_RegisterVariable (&r_novis);
+        Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);
         Cvar_SetCallback (&r_simd, R_SIMD_f);
@@ -639,7 +605,6 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_dof_focus);
 	Cvar_RegisterVariable (&r_dof_range);
 Cvar_RegisterVariable (&r_dof_strength);
-Cvar_RegisterVariable (&r_dof_debug_state);
 Cvar_RegisterVariable (&r_motionblur);
 Cvar_RegisterVariable (&r_motionblur_shutter);
 Cvar_RegisterVariable (&r_motionblur_maxradiuspixels);
@@ -741,7 +706,6 @@ Cvar_RegisterVariable (&r_ssao_samples);
 	Cvar_RegisterVariable (&r_ssao_format);
 	Cvar_RegisterVariable (&r_ssao_upscale_nearest);
 	Cvar_RegisterVariable (&r_ssao_fog_strength);
-	Cvar_RegisterVariable (&r_ssao_fog_intensity);
 	Cvar_RegisterVariable (&r_ssao_fog_power);
 Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_godrays_emit_sky);
@@ -1007,7 +971,6 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
-	rtlight_list_t rtlight_temp;
 
 	for (i=0 ; i<256 ; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
@@ -1029,11 +992,9 @@ void R_NewMap (void)
 
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
-	Fog_NewMap (); //johnfitz -- global fog in worldspawn
-	R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
-	R_ParseDlightEntities (); // persistent dlights from BSP entities
-	RTLight_LoadForMap (cl.mapname, &rtlight_temp);
-	R_AddRTLightDlights ();
+        Fog_NewMap (); //johnfitz -- global fog in worldspawn
+        R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
+        R_ParseDlightEntities (); // persistent dlights from BSP entities
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)

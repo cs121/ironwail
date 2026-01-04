@@ -23,7 +23,6 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
-	vec4	ShadowControl;
 	vec4	ShadowDebug;
 	vec4	ShadowSunDir;
 	InstanceData instances[];
@@ -93,18 +92,14 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
-#include "texunits.glsl"
-
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
-const float ALIAS_MATERIAL_MASK = 8.0;
 const int ALIAS_FLAG_LIGHTNING = 4;
 
-layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
-layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
-layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
-layout(binding=TEXUNIT_SHADOW) uniform sampler2D ShadowMap;
-uniform bool debugViewmodelMagenta;
+layout(binding=0) uniform sampler2D Tex;
+layout(binding=1) uniform sampler2D FullbrightTex;
+layout(binding=2) uniform sampler2D EmissiveTex;
+layout(binding=5) uniform sampler2D ShadowMap;
 
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -120,8 +115,6 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
-layout(location=7) in vec3 in_direct;
-layout(location=8) in vec4 in_shadow_clip;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -166,72 +159,28 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
-	vec3 fullbright = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
-	int shadow_mode = int(ShadowControl.y + 0.5);
 	vec4 lit_color = in_color;
 
+	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+	{
+		vec3 world_pos = in_pos + EyePos;
+		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
+		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
+		if (ShadowDebug.y > 1.5)
+		{
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			out_fragcolor = vec4(vec3(debug_value), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		lit_color.rgb *= shadow_term;
+	}
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
-#endif
-
-#if MODE == 2
-        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
-        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
-#else
-        fullbright = texture(FullbrightTex, uv).rgb;
-        emissive = texture(EmissiveTex, uv).rgb;
-#endif
-
-	bool shadow_receiver = !any(greaterThan(emissive, vec3(0.0)));
-	bool shadow_enabled = ShadowParams.z > 0.0 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
-	bool allow_debug = (in_flags & ALIAS_FLAG_VIEWMODEL) == 0;
-
-	vec3 world_pos = in_pos + EyePos;
-	vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-	if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
-	{
-		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
-	}
-	float shadow_strength = clamp(ShadowControl.z, 0.0, 1.0);
-	shadow_term = mix(1.0, shadow_term, shadow_strength);
-	if (shadow_mode == 10 && allow_debug)
-	{
-		out_fragcolor = ShadowDebugSample(world_pos);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (shadow_mode == 1 && allow_debug)
-	{
-		out_fragcolor = vec4(vec3(shadow_term), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (shadow_mode == 2 && allow_debug)
-	{
-		out_fragcolor = shadow_term < 0.5
-			? vec4(1.0, 0.0, 0.0, 1.0)
-			: vec4(0.0, 1.0, 0.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (shadow_mode >= 3 && allow_debug)
-	{
-		out_fragcolor = vec4(ShadowDebugColor(world_pos, shadow_term), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	lit_color.rgb = clamp(lit_color.rgb + in_direct * (shadow_enabled ? shadow_term : 1.0), 0.0, Overbright);
-#if MODE == 2
         vec4 result = textureLod(Tex, uv, 0.);
 #else
         vec4 result = texture(Tex, uv);
@@ -244,17 +193,16 @@ void main()
 	result.rgb = mix(result.rgb, result.rgb * lit_color.rgb, result.a);
 #endif
 	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
+        vec3 fullbright;
+#if MODE == 2
+        fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
+        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
+#else
+        fullbright = texture(FullbrightTex, uv).rgb;
+        emissive = texture(EmissiveTex, uv).rgb;
+#endif
         result.rgb += fullbright;
         result.rgb += emissive;
-
-	if (debugViewmodelMagenta && (in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
-	{
-		out_fragcolor = vec4(1.0, 0.0, 1.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
 
         if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
         {
@@ -272,7 +220,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (viewModelMask < 0.5 && result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, viewModelMask, ALIAS_MATERIAL_MASK);
+        out_velocity = vec4(velocityOut, viewModelMask, 1.0);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag

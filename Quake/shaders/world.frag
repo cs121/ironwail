@@ -1,14 +1,13 @@
-#include "texunits.glsl"
 #if BINDLESS
 	#extension GL_ARB_bindless_texture : require
 #else
-	layout(binding=TEXUNIT_BASE) uniform sampler2D Tex;
-	layout(binding=TEXUNIT_FULLBRIGHT) uniform sampler2D FullbrightTex;
-	layout(binding=TEXUNIT_EMISSIVE) uniform sampler2D EmissiveTex;
+	layout(binding=0) uniform sampler2D Tex;
+	layout(binding=1) uniform sampler2D FullbrightTex;
+	layout(binding=4) uniform sampler2D EmissiveTex;
 #endif
-layout(binding=TEXUNIT_LIGHTMAP) uniform sampler2D LMTex;
-layout(binding=TEXUNIT_LIGHTDIR) uniform sampler2D LMTexDir;
-layout(binding=TEXUNIT_SHADOW) uniform sampler2D ShadowMap;
+layout(binding=2) uniform sampler2D LMTex;
+layout(binding=3) uniform sampler2D LMTexDir;
+layout(binding=5) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -73,8 +72,7 @@ const uint
 	CF_MAT_GODRAY = 512u,
 	CF_MAT_TRANS = 1024u,
 	CF_MAT_SKY = 2048u,
-	CF_MAT_HAS_SHADER = 4096u,
-	CF_MAT_NO_SHADOW_RECEIVE = 8192u;
+	CF_MAT_HAS_SHADER = 4096u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -189,19 +187,13 @@ float tri(float x)
 
 vec4 SampleLightmap(vec2 uv)
 {
-	vec2 size = vec2(textureSize(LMTex, 0));
-	vec2 texel = 1.0 / size;
-	vec2 clamped_uv = clamp(uv, texel * 0.5, vec2(1.0) - texel * 0.5);
-	vec4 lm = texture(LMTex, clamped_uv);
+	vec4 lm = texture(LMTex, uv);
 	return lm;
 }
 
 vec3 SampleLightmapDir(vec2 uv)
 {
-	vec2 size = vec2(textureSize(LMTexDir, 0));
-	vec2 texel = 1.0 / size;
-	vec2 clamped_uv = clamp(uv, texel * 0.5, vec2(1.0) - texel * 0.5);
-	vec3 dir = texture(LMTexDir, clamped_uv).xyz * 2.0 - 1.0;
+	vec3 dir = texture(LMTexDir, uv).xyz * 2.0 - 1.0;
 	return normalize(dir);
 }
 
@@ -265,7 +257,7 @@ void main()
 	vec3 fullbright = vec3(0.0);
 	vec3 emissive = vec3(0.0);
 	vec2 uv = in_uv;
-
+	
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
 #endif
@@ -291,7 +283,7 @@ void main()
 #endif
 
 #if DITHER >= 2
-	vec4 result = texture(Tex, uv, -0.5);
+	vec4 result = texture(Tex, uv, -1.0);
 #elif DITHER
 	vec4 result = texture(Tex, uv, -0.5);
 #else
@@ -416,9 +408,11 @@ void main()
 
 		// Surface normal computation
 		vec3 surface_normal = in_normal;
-		if (dot(surface_normal, surface_normal) > 0.0)
+		float surface_normal_len = length(surface_normal);
+
+		if (surface_normal_len > 0.0)
 		{
-			surface_normal = normalize(surface_normal);
+			surface_normal /= surface_normal_len;
 		}
 		else
 		{
@@ -430,53 +424,15 @@ void main()
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
 
-		bool shadow_enabled = ShadowParams.z > 0.0;
-		int shadow_mode = int(ShadowControl.y + 0.5);
 		float shadow_range = 1.0;
-		float shadow_term = 1.0;
-		bool shadow_receiver = (in_flags & CF_MAT_SKY) == 0u;
-		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_EMISSIVE) == 0u;
-		shadow_receiver = shadow_receiver && (in_flags & CF_USE_EMISSIVE) == 0u;
-		shadow_receiver = shadow_receiver && (in_flags & CF_MAT_NO_SHADOW_RECEIVE) == 0u;
-		vec3 shadow_world_pos = in_pos + EyePos;
-		if (shadow_receiver && (shadow_enabled || shadow_mode >= 2) && (shadow_mode == 0 || shadow_mode == 3))
-			shadow_term = ShadowVisibility(shadow_world_pos, surface_normal, shadow_range);
-		float shadow_strength = clamp(ShadowControl.z, 0.0, 1.0);
-		shadow_term = mix(1.0, shadow_term, shadow_strength);
+		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
+		bool shadow_enabled = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
-		if (shadow_mode == 10)
+		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
-			out_fragcolor = ShadowDebugSample(shadow_world_pos);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-
-		if (shadow_mode == 1)
-		{
-			out_fragcolor = vec4(vec3(shadow_term), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-
-		if (shadow_mode == 2)
-		{
-			out_fragcolor = shadow_term < 0.5
-				? vec4(1.0, 0.0, 0.0, 1.0)
-				: vec4(0.0, 1.0, 0.0, 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-
-		if (shadow_mode >= 3)
-		{
-			out_fragcolor = vec4(ShadowDebugColor(shadow_world_pos, shadow_term), 1.0);
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			out_fragcolor = vec4(vec3(debug_value), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -485,20 +441,19 @@ void main()
 
 		vec3 total_light;
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
-		vec3 ambient_term = vec3(0.0);
-		vec3 direct_term = vec3(0.0);
 
 		if (lightgrid_shadow)
 		{
-			ambient_term = clamped_static * lightgrid;
-			direct_term = clamped_static - ambient_term;
-			total_light = ambient_term + direct_term * (shadow_enabled ? shadow_term : 1.0);
+			vec3 ambient = clamped_static * lightgrid;
+			vec3 direct = clamped_static - ambient;
+			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
+			total_light = ambient + direct * shadow_scale;
 		}
 		else
 		{
-			ambient_term = vec3(0.0);
-			direct_term = clamped_static;
-			total_light = ambient_term + direct_term * (shadow_enabled ? shadow_term : 1.0);
+			total_light = clamped_static;
+			if (shadow_enabled)
+				total_light *= shadow_term;
 			total_light *= lightgrid;
 		}
 	
@@ -564,12 +519,12 @@ void main()
 						if (ndotl > 0.0)
 						{
 							vec3 half_vec = light_dir + view_dir;
-							float half_len_sq = dot(half_vec, half_vec);
+							float half_len = length(half_vec);
 							
-							if (half_len_sq > 0.0)
+							if (half_len > 0.0)
 							{
-								vec3 half_dir = half_vec * inversesqrt(half_len_sq);
-								float ndoth = max(dot(surface_normal, half_dir), 0.0);
+								half_vec /= half_len;
+								float ndoth = max(dot(surface_normal, half_vec), 0.0);
 								float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
 								specular_light += light_contrib * spec * SPECULAR_SCALE;
 							}

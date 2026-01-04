@@ -122,7 +122,6 @@ extern	qboolean	gl_buffer_storage_able;
 extern	qboolean	gl_multi_bind_able;
 extern	qboolean	gl_bindless_able;
 extern	qboolean	gl_clipcontrol_able;
-extern	qboolean	gl_clip_z_01;
 
 extern	const char	*gl_vendor;
 extern	const char	*gl_renderer;
@@ -173,7 +172,6 @@ extern	const char	*gl_version;
 	x(void,			VertexAttribPointer, (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid *pointer))\
 	x(void,			VertexAttribIPointer, (GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer))\
 	x(GLint,		GetUniformLocation, (GLuint program, const GLchar *name))\
-	x(void,			GetUniformiv, (GLuint program, GLint location, GLint *params))\
 	x(void,			GetActiveUniform, (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name))\
 	x(void,			Uniform1i, (GLint location, GLint v0))\
 	x(void,			Uniform1f, (GLint location, GLfloat v0))\
@@ -190,7 +188,6 @@ extern	const char	*gl_version;
 	x(void,			DeleteFramebuffers, (GLsizei n, const GLuint *framebuffers))\
 	x(void,			FramebufferTexture2D, (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level))\
 	x(void,			FramebufferTextureLayer, (GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer))\
-	x(void,			GetFramebufferAttachmentParameteriv, (GLenum target, GLenum attachment, GLenum pname, GLint *params))\
 	x(GLenum,		CheckFramebufferStatus, (GLenum target))\
 	x(void,			BlitFramebuffer, (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter))\
 	x(void,			DrawBuffers, (GLsizei n, const GLenum *bufs))\
@@ -345,8 +342,6 @@ void R_SetAlphaMode (alphamode_t mode);
 //johnfitz -- rendering statistics
 extern int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 extern int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
-extern int rs_shadow_drawcalls_world, rs_shadow_drawcalls_alias;
-extern int rs_shadow_tris_world, rs_shadow_tris_alias;
 
 //johnfitz -- track developer statistics that vary every frame
 extern cvar_t devstats;
@@ -449,7 +444,6 @@ typedef struct gpuframedata_s {
         vec4_t          shader_params;  // x: shader debug, yzw: unused
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
-        vec4_t          shadow_control; // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
         float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
@@ -492,9 +486,7 @@ void R_ResizeShadowMapIfNeeded (void);
 void R_Shadow_SunPass (void);
 void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
-void R_Shadow_DrawDepthDebugQuad (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
-void R_Shadow_BindShadowMapRaw (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
 
 void R_DrawBrushModels (entity_t **ents, int count);
@@ -507,8 +499,6 @@ void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
 void R_DrawBrushModels_Shadow (entity_t **ents, int count);
 void R_DrawAliasModels (entity_t **ents, int count);
 void R_DrawAliasModels_Shadow (entity_t **ents, int count);
-void R_DrawAliasShadow (entity_t *e);
-void R_FlushAliasShadows (void);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
@@ -563,8 +553,6 @@ qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, v
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
-void R_AddRTLightDlights (void);
-void R_DrawRTLightCoronas (void);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
@@ -603,7 +591,6 @@ typedef struct glprogs_s {
 	GLuint		shadow_depth;
 	GLuint		shadow_depth_alias[2]; // [md5]
 	GLuint		shadow_debug;
-	GLuint		shadow_depth_debug;
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
 	GLuint		skycubemap[2][2];	// [anim][dither]
@@ -611,7 +598,6 @@ typedef struct glprogs_s {
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
 	GLuint		sprites[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
-	GLuint		coronas[2];			// [dither]
 	GLuint		debug3d;
 	GLuint		dlight_composite;
 
