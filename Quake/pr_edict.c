@@ -1616,8 +1616,8 @@ THREAD_LOCAL globalvars_t	*pr_global_struct;
 
 void PR_SwitchQCVM(qcvm_t *nvm)
 {
-	if (qcvm && nvm)
-		Sys_Error("PR_SwitchQCVM: A qcvm was already active");
+	if (qcvm && nvm && qcvm != nvm)
+		Con_DPrintf("PR_SwitchQCVM: switching away from active qcvm\n");
 	qcvm = nvm;
 	if (qcvm)
 		pr_global_struct = (globalvars_t*)qcvm->globals;
