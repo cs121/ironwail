@@ -22,6 +22,8 @@ typedef struct fog_volume_s
 	float heightScale;
 } fog_volume_t;
 
+typedef struct froxel_grid_s froxel_grid_t;
+
 extern cvar_t r_fogvol;
 extern cvar_t r_fogvol_halfres;
 
@@ -32,6 +34,7 @@ void R_FogVol_BuildList (void);
 void R_FogVol_AddTestVolumes (void);
 void R_FogVol_Render (void);
 void R_FogVol_DrawDebug2D (void);
+void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 
 #endif // R_FOGVOL_H

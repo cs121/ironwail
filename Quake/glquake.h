@@ -583,6 +583,7 @@ typedef struct glprogs_s {
 	GLuint		godrays_source_sky;
 	GLuint		fogvol;
 	GLuint		fogvol_upsample;
+	GLuint		fogvol_temporal;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -650,6 +651,8 @@ typedef struct glframebufs_s {
 	struct {
 		GLuint		color_tex[2];
 		GLuint		fbo[2];
+		GLuint		history_tex[2];
+		GLuint		history_fbo[2];
 		int			width;
 		int			height;
 	}				fogvol;

@@ -785,6 +785,14 @@ void GL_CreateFrameBuffers (void)
 			framebufs.fogvol.height, GL_NEAREST, suffix);
 		framebufs.fogvol.fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex[i], 0, 0, fbo_suffix);
 	}
+	for (int i = 0; i < 2; ++i)
+	{
+		const char *suffix = (i == 0) ? "fogvol history 0" : "fogvol history 1";
+		const char *fbo_suffix = (i == 0) ? "fogvol history fbo 0" : "fogvol history fbo 1";
+		framebufs.fogvol.history_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
+			framebufs.fogvol.height, GL_NEAREST, suffix);
+		framebufs.fogvol.history_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.history_tex[i], 0, 0, fbo_suffix);
+	}
 
 	framebufs.autoexposure.width = 16;
 	framebufs.autoexposure.height = 16;
@@ -918,6 +926,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.fbo);
+	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.history_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
@@ -936,6 +945,8 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
 	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[0]);
 	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[1]);
+	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[0]);
+	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[1]);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
