@@ -1253,6 +1253,14 @@ static void GL_SetupState (void)
 	if (gl_clipcontrol_able)
 	{
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+		if (glGetError () != GL_NO_ERROR)
+		{
+			Con_Warning ("GL_ClipControl failed; disabling clip control.\n");
+			gl_clipcontrol_able = false;
+		}
+	}
+	if (gl_clipcontrol_able)
+	{
 		glClearDepth (0.f);
 		glDepthFunc (GL_GEQUAL);
 	}
