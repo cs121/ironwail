@@ -81,6 +81,7 @@ typedef struct framesetup_s
 {
         GLuint          scene_fbo;
         GLuint          oit_fbo;
+        qboolean        composite_ready;
 } framesetup_t;
 
 static framesetup_t framesetup;
@@ -2042,7 +2043,7 @@ static float GL_UpdateAutoExposure (void)
 
 
 void GL_PostProcess (void)
-	{
+{
 	int palidx, variant;
 	float dither;
 	qboolean dof_enabled;
@@ -2102,9 +2103,25 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-        r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
+	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
+		return;
+	if (!framesetup.composite_ready)
+	{
+		GL_BeginGroup ("Postprocess backbuffer copy");
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, 0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		glReadBuffer (GL_BACK);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, vid.width, vid.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+		glDrawBuffer (GL_BACK);
+		glReadBuffer (GL_BACK);
+		framesetup.composite_ready = true;
+		GL_EndGroup ();
+	}
 
 	GL_BeginGroup ("Postprocess");
 
@@ -3071,6 +3088,7 @@ void R_SetupGL (void)
 		GL_SetFramebufferSRGB (srgb_output);
 		framesetup.scene_fbo = framebufs.composite.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_composite;
+		framesetup.composite_ready = (target == framebufs.composite.fbo);
 		if (target)
 		{
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
@@ -3089,6 +3107,7 @@ void R_SetupGL (void)
 		GL_SetFramebufferSRGB (false);
 		framesetup.scene_fbo = framebufs.scene.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_scene;
+		framesetup.composite_ready = false;
 		if (framebufs.scene.velocity_tex)
 		{
 			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
@@ -3157,6 +3176,7 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 void R_SetupView (void)
 {
 	r_dlight_buffered_frame = false;
+	framesetup.composite_ready = false;
 
 	R_AnimateLight ();
 
@@ -4596,6 +4616,8 @@ void R_WarpScaleView (void)
 
 	if (!needwarpscale)
 	{
+		if (fbodest == framebufs.composite.fbo)
+			framesetup.composite_ready = true;
 		R_CompositeDlightBuffer ();
 		return;
 	}
@@ -4620,6 +4642,8 @@ void R_WarpScaleView (void)
 
 	GL_EndGroup ();
 
+	if (fbodest == framebufs.composite.fbo)
+		framesetup.composite_ready = true;
 	R_CompositeDlightBuffer ();
 }
 
