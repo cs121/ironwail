@@ -23,6 +23,7 @@ typedef struct fog_volume_s
 } fog_volume_t;
 
 extern cvar_t r_fogvol;
+extern cvar_t r_fogvol_halfres;
 
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
