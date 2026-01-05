@@ -671,6 +671,16 @@ void R_FogVol_Render (void)
 	glDisable (GL_SCISSOR_TEST);
 	GLuint final_fbo = framebufs.fogvol.fbo[fog_src_index];
 
+	if (!has_drawn)
+	{
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		glViewport (glx, gly, glwidth, glheight);
+		GL_EndGroup ();
+		return;
+	}
+
 	if (has_drawn && glprogs.fogvol_temporal && final_tex)
 	{
 		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
