@@ -27,6 +27,7 @@ layout(location=2) uniform int FogDebugMode;
 layout(location=3) uniform int FogVolumeIndex;
 layout(location=4) uniform mat4 FogInvViewProj;
 layout(location=5) uniform int FogNoiseMode;
+layout(location=6) uniform int FogPhysBlend;
 layout(location=8) uniform vec3 FogCameraPosWS;
 layout(location=9) uniform vec4 FogViewportParams; // xy: size, zw: inv size
 
@@ -145,6 +146,16 @@ float Dither(vec2 pixel)
 	return fract(sin(dot(pixel, vec2(12.9898, 78.233)) + Time) * 43758.5453);
 }
 
+float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
+{
+	float edgeThickness = max(falloff, 0.0);
+	if (edgeThickness <= 0.0)
+		return 1.0;
+	vec3 d = min(p - bmin, bmax - p);
+	float edgeDist = min(d.x, min(d.y, d.z));
+	return smoothstep(0.0, edgeThickness, edgeDist);
+}
+
 void main()
 {
 	vec2 invViewport = FogViewportParams.zw;
@@ -201,9 +212,13 @@ void main()
 
 	vec3 scatterColor = volume.color_density.rgb;
 	float density = max(volume.color_density.a, 0.0);
+	float falloff = volume.misc.z;
 
 	vec3 accum = vec3(0.0);
 	float transmittance = 1.0;
+	float tau = 0.0;
+	float edgeFadeSum = 0.0;
+	float edgeFadeSamples = 0.0;
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
@@ -212,6 +227,7 @@ void main()
 			break;
 
 		vec3 p = ro + rd * t;
+		float edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
 		float noiseFactor = 1.0;
 		if (FogNoiseEnabled != 0)
 		{
@@ -225,30 +241,36 @@ void main()
 			noiseFactor = mix(1.0, n, amt);
 		}
 
-		float sigma = density * noiseFactor;
+		float sigma = density * noiseFactor * edgeFade;
 		float att = exp(-sigma * stepLen);
 		vec3 stepScatter = (1.0 - att) * scatterColor;
 		accum += transmittance * stepScatter;
 		transmittance *= att;
+		tau += sigma * stepLen;
+		edgeFadeSum += edgeFade;
+		edgeFadeSamples += 1.0;
 		if (transmittance < 0.01)
 			break;
 	}
 
 	if (FogDebugMode == 3)
 	{
-		FragColor = vec4(vec3(1.0 - transmittance), 1.0);
+		float tauViz = tau / (1.0 + tau);
+		FragColor = vec4(vec3(tauViz), 1.0);
 		return;
 	}
 	if (FogDebugMode == 4)
 	{
-		float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-		vec3 noisePos = (ro + rd * (tEnter + 0.5 * stepLen)) * noiseScale + volume.velocity.xyz * Time * noiseScale;
-		float n = FogNoise(noisePos);
-		FragColor = vec4(vec3(n), 1.0);
+		float fadeViz = (edgeFadeSamples > 0.0) ? (edgeFadeSum / edgeFadeSamples) : 0.0;
+		FragColor = vec4(vec3(fadeViz), 1.0);
 		return;
 	}
 
 	vec3 scene = texture(SceneColor, uv).rgb;
-	vec3 outColor = scene * transmittance + accum;
+	vec3 outColor;
+	if (FogPhysBlend != 0)
+		outColor = scene * transmittance + accum;
+	else
+		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
 	FragColor = vec4(outColor, 1.0);
 }
