@@ -2334,7 +2334,8 @@ void GL_PostProcess (void)
 
 	depth_texture = 0;
 	{
-		qboolean ssao_needs_depth = (ssao_texture != 0 && (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f));
+		qboolean ssao_needs_depth = (ssao_texture != 0
+			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
 		if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
 			depth_texture = framebufs.composite.depth_stencil_tex;
 	}
