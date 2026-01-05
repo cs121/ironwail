@@ -18,12 +18,14 @@ typedef struct fog_volume_s
 	int enabled;
 } fog_volume_t;
 
+extern cvar_t r_fogvol;
+
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
 void R_FogVol_BuildList (void);
 void R_FogVol_AddTestVolumes (void);
 void R_FogVol_Render (void);
 void R_FogVol_DrawDebug2D (void);
-qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1);
+qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 
 #endif // R_FOGVOL_H

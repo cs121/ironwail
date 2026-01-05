@@ -770,6 +770,8 @@ void GL_CreateFrameBuffers (void)
 		framebufs.composite.depth_stencil_tex,
 		"composite fbo"
 	);
+	framebufs.fogvol.color_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_NEAREST, "fogvol color");
+	framebufs.fogvol.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex, 0, 0, "fogvol fbo");
 
 	framebufs.autoexposure.width = 16;
 	framebufs.autoexposure.height = 16;
@@ -902,6 +904,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
@@ -918,6 +921,7 @@ void GL_DeleteFrameBuffers (void)
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
+	GL_DeleteNativeTexture (framebufs.fogvol.color_tex);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
@@ -2982,6 +2986,8 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
+	if (r_fogvol.value > 0.f)
+		return true;
 	return false;
 }
 
@@ -4443,8 +4449,6 @@ void R_RenderScene (void)
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
-	R_FogVol_BuildList ();
-	R_FogVol_Render ();
 	R_BeginTranslucency ();
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
@@ -4626,6 +4630,8 @@ void R_RenderView (void)
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();
+        R_FogVol_BuildList ();
+        R_FogVol_Render ();
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
 
