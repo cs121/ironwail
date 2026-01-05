@@ -2155,6 +2155,11 @@ void GL_PostProcess (void)
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
 	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_GodraysReady ()));
+	if (!godrays_preview)
+	{
+		godrays_debug = 0.f;
+		godrays_debug_source = 0.f;
+	}
 	godrays_texture = 0;
 	godrays_mask = 0;
 	godrays_source = 0;
