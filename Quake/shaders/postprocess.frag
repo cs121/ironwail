@@ -144,7 +144,6 @@ layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
-layout(location=19) uniform vec4 ColorSpaceParams; // x: debug mode, y: unused, z: output sRGB conversion, w: reserved
 layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
