@@ -12,6 +12,7 @@ layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
 };
+#include "frame_uniforms.glsl"
 
 uvec3 UnpackRGB8(uint c)
 {
@@ -227,6 +228,15 @@ float FogTransmittanceFromDepth(float depth, float fogStrength)
         float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
         fogFactor = clamp(fogFactor * fogStrength, 0.0, 1.0);
         return 1.0 - fogFactor;
+}
+
+float FogTransmittanceFromGlobalFog(float depth)
+{
+        float density = abs(Fog.w);
+        if (density <= 0.0)
+                return 1.0;
+        float fog = exp2(-density * depth * depth);
+        return clamp(fog, 0.0, 1.0);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -634,10 +644,16 @@ void main()
                                 float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
                                 float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
                                 float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
-                                float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
                                 float fogTransmittance = 1.0;
-                                if (ssaoUseDepth && fogStrength > 0.0)
-                                        fogTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
+                                if (ssaoUseDepth)
+                                {
+                                        float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
+                                        float underwaterTransmittance = 1.0;
+                                        if (fogStrength > 0.0)
+                                                underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
+                                        float globalTransmittance = FogTransmittanceFromGlobalFog(ssaoCenterDepth);
+                                        fogTransmittance = globalTransmittance * underwaterTransmittance;
+                                }
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
                                 float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
