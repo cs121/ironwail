@@ -581,6 +581,7 @@ typedef struct glprogs_s {
 	GLuint		godrays;
 	GLuint		godrays_source;
 	GLuint		godrays_source_sky;
+	GLuint		fogvol;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -617,6 +618,8 @@ void GL_ClearCachedProgram (void);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
 void GL_ApplyFilmgrainUI (void);
+void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
+void R_DebugFlushGeometry (void);
 
 typedef struct glframebufs_s {
 	GLint			max_color_tex_samples;

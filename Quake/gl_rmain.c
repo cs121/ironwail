@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
+#include "r_fogvol.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -3608,6 +3609,17 @@ static void R_EmitWireBox (const vec3_t mins, const vec3_t maxs, uint32_t color)
         R_AddDebugGeometry (v, countof (v), boxidx, countof (boxidx));
 }
 
+void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest)
+{
+	R_SetDebugGeometryZTest (ztest);
+	R_EmitWireBox (mins, maxs, R_PackDebugColor (color));
+}
+
+void R_DebugFlushGeometry (void)
+{
+	R_FlushDebugGeometry ();
+}
+
 static void R_EmitDiamond (const vec3_t center, float radius, uint32_t color)
 {
 	debugvert_t v[6];
@@ -4431,6 +4443,8 @@ void R_RenderScene (void)
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
+	R_FogVol_BuildList ();
+	R_FogVol_Render ();
 	R_BeginTranslucency ();
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
