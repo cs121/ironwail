@@ -52,6 +52,13 @@ cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
+cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
+
+static int r_fogvol_history_index = 0;
+static int r_fogvol_history_width = 0;
+static int r_fogvol_history_height = 0;
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
 {
@@ -130,6 +137,9 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
+	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
+	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
+	Cvar_RegisterVariable (&r_fogvol_jitter);
 }
 
 void R_FogVol_Clear (void)
@@ -142,18 +152,32 @@ static void R_FogVol_ClearEntities (void)
 	r_fogvolume_entity_count = 0;
 }
 
+static void R_FogVol_ClampVolume (fog_volume_t *volume)
+{
+	volume->density = CLAMP (0.f, volume->density, 10.f);
+	volume->falloff = CLAMP (0.f, volume->falloff, 256.f);
+}
+
 static void R_FogVol_AddVolume (const fog_volume_t *volume)
 {
+	fog_volume_t clamped;
+
 	if (r_fogvolume_count >= MAX_FOGVOLUMES)
 		return;
-	r_fogvolumes[r_fogvolume_count++] = *volume;
+	clamped = *volume;
+	R_FogVol_ClampVolume (&clamped);
+	r_fogvolumes[r_fogvolume_count++] = clamped;
 }
 
 static void R_FogVol_AddEntityVolume (const fog_volume_t *volume)
 {
+	fog_volume_t clamped;
+
 	if (r_fogvolume_entity_count >= MAX_FOGVOLUMES)
 		return;
-	r_fogvolume_entities[r_fogvolume_entity_count++] = *volume;
+	clamped = *volume;
+	R_FogVol_ClampVolume (&clamped);
+	r_fogvolume_entities[r_fogvolume_entity_count++] = clamped;
 }
 
 static void R_FogVol_ParseColor (const char *value, vec3_t color)
@@ -161,6 +185,7 @@ static void R_FogVol_ParseColor (const char *value, vec3_t color)
 	float r = 1.f, g = 1.f, b = 1.f;
 	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
 	{
+		// Inputs are assumed to be linear; 0..255 values are normalized to 0..1.
 		if (r > 2.f || g > 2.f || b > 2.f)
 		{
 			r *= 1.f / 255.f;
@@ -521,7 +546,6 @@ void R_FogVol_Render (void)
 	GLuint dst_tex;
 	GLuint dst_fbo;
 	GLuint depth_tex;
-	qboolean dst_is_composite;
 	qboolean has_drawn = false;
 	qboolean use_halfres;
 	int fog_width;
@@ -604,6 +628,7 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (2, mode);
 	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
 	GL_Uniform1iFunc (6, r_fogvol_physblend.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (7, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)fog_width, (float)fog_height, 1.f / (float)fog_width, 1.f / (float)fog_height);
@@ -616,9 +641,7 @@ void R_FogVol_Render (void)
 		glViewport (glx, gly, glwidth, glheight);
 	depth_tex = framebufs.composite.depth_stencil_tex;
 	src_tex = framebufs.composite.color_tex;
-	dst_tex = framebufs.fogvol.color_tex[0];
-	dst_fbo = framebufs.fogvol.fbo[0];
-	dst_is_composite = false;
+	final_tex = 0;
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
@@ -652,17 +675,14 @@ void R_FogVol_Render (void)
 			R_DebugDrawWireBox (v->mins, v->maxs, color, true);
 		}
 
-		if (use_halfres)
-		{
-			fog_dst_index = (i == 0) ? 0 : (1 - fog_src_index);
-			dst_tex = framebufs.fogvol.color_tex[fog_dst_index];
-			dst_fbo = framebufs.fogvol.fbo[fog_dst_index];
-		}
+		fog_dst_index = (i == 0) ? 0 : (1 - fog_src_index);
+		dst_tex = framebufs.fogvol.color_tex[fog_dst_index];
+		dst_fbo = framebufs.fogvol.fbo[fog_dst_index];
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 
-		if (use_halfres && i > 0)
+		if (i > 0)
 			src_tex = framebufs.fogvol.color_tex[fog_src_index];
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
@@ -670,57 +690,87 @@ void R_FogVol_Render (void)
 		GL_Uniform1iFunc (3, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
-		if (use_halfres)
-		{
-			fog_src_index = fog_dst_index;
-			final_tex = framebufs.fogvol.color_tex[fog_src_index];
-		}
-		else
-		{
-			GLuint tmp_tex = src_tex;
-			src_tex = dst_tex;
-			dst_tex = tmp_tex;
-			dst_is_composite = !dst_is_composite;
-			dst_fbo = dst_is_composite ? framebufs.composite.fbo : framebufs.fogvol.fbo[0];
-		}
+		fog_src_index = fog_dst_index;
+		final_tex = framebufs.fogvol.color_tex[fog_src_index];
 		has_drawn = true;
 	}
 	glDisable (GL_SCISSOR_TEST);
+	GLuint final_fbo = framebufs.fogvol.fbo[fog_src_index];
 
-	if (has_drawn && !use_halfres && src_tex != framebufs.composite.color_tex)
+	if (has_drawn && glprogs.fogvol_temporal && final_tex)
 	{
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.fogvol.fbo[0]);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-		GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-			0, 0, glwidth, glheight,
-			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
+		int history_src = r_fogvol_history_index;
+		int history_dst = 1 - history_src;
+		if (!history_valid)
+		{
+			r_fogvol_history_width = fog_width;
+			r_fogvol_history_height = fog_height;
+			history_src = 0;
+			history_dst = 1;
+			r_fogvol_history_index = history_src;
+		}
+
+		GL_UseProgram (glprogs.fogvol_temporal);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		glViewport (0, 0, fog_width, fog_height);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
+		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
+		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
+		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
+		GL_Uniform1iFunc (2, mode);
+		GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_viewproj);
+		GL_Uniform4fFunc (4, (float)fog_width, (float)fog_height, 1.f / (float)fog_width, 1.f / (float)fog_height);
+		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
+		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+
+		final_tex = framebufs.fogvol.history_tex[history_dst];
+		final_fbo = framebufs.fogvol.history_fbo[history_dst];
+		r_fogvol_history_index = history_dst;
 	}
-	else if (has_drawn && use_halfres)
+
+	if (has_drawn)
 	{
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		glViewport (glx, gly, glwidth, glheight);
-		if (r_fogvol_upsample.value > 0.f && glprogs.fogvol_upsample)
+		if (use_halfres)
 		{
-			int taps = (int)Q_rint (r_fogvol_upsample_taps.value);
-			taps = (taps == 9) ? 9 : 4;
-			GL_UseProgram (glprogs.fogvol_upsample);
-			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
-			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-			GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
-			GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
-			GL_Uniform1iFunc (2, taps);
-			glDrawArrays (GL_TRIANGLES, 0, 3);
+			if (r_fogvol_upsample.value > 0.f && glprogs.fogvol_upsample)
+			{
+				int taps = (int)Q_rint (r_fogvol_upsample_taps.value);
+				taps = (taps == 9) ? 9 : 4;
+				GL_UseProgram (glprogs.fogvol_upsample);
+				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
+				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
+				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
+				GL_Uniform1iFunc (2, taps);
+				glDrawArrays (GL_TRIANGLES, 0, 3);
+			}
+			else
+			{
+				GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
+				GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
+					0, 0, glwidth, glheight,
+					GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			}
 		}
 		else
 		{
-			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.fogvol.fbo[fog_src_index]);
+			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
 			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-			GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
+			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 				0, 0, glwidth, glheight,
-				GL_COLOR_BUFFER_BIT, GL_LINEAR);
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 	}
 
@@ -728,4 +778,11 @@ void R_FogVol_Render (void)
 		R_DebugFlushGeometry ();
 
 	GL_EndGroup ();
+}
+
+void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
+{
+	(void)grid;
+	(void)vols;
+	(void)num;
 }

@@ -28,6 +28,7 @@ layout(location=3) uniform int FogVolumeIndex;
 layout(location=4) uniform mat4 FogInvViewProj;
 layout(location=5) uniform int FogNoiseMode;
 layout(location=6) uniform int FogPhysBlend;
+layout(location=7) uniform int FogJitterEnabled;
 layout(location=8) uniform vec3 FogCameraPosWS;
 layout(location=9) uniform vec4 FogViewportParams; // xy: size, zw: inv size
 layout(location=10) uniform vec2 FogDepthScale;
@@ -147,6 +148,21 @@ float Dither(vec2 pixel)
 	return fract(sin(dot(pixel, vec2(12.9898, 78.233)) + Time) * 43758.5453);
 }
 
+float InterleavedGradientNoise(vec2 p)
+{
+	return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
+vec3 DebugVolumeColor(float id, float priority)
+{
+	vec3 base = vec3(
+		fract(id * 0.754877666),
+		fract(id * 0.569840296),
+		fract(id * 0.885943821));
+	float tint = fract(priority * 0.6180339887);
+	return mix(base, vec3(1.0, 1.0 - tint, tint), 0.35);
+}
+
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 {
 	float edgeThickness = max(falloff, 0.0);
@@ -210,7 +226,12 @@ void main()
 	float len = tExit - tEnter;
 	float stepLen = len / stepCount;
 	if (FogNoiseEnabled != 0)
-		tEnter += (Dither(gl_FragCoord.xy) - 0.5) * stepLen;
+	{
+		float jitter = Dither(gl_FragCoord.xy);
+		if (FogJitterEnabled != 0)
+			jitter = InterleavedGradientNoise(gl_FragCoord.xy + vec2(Time * 12.3, Time * 4.7));
+		tEnter += jitter * stepLen;
+	}
 
 	vec3 scatterColor = volume.color_density.rgb;
 	float density = max(volume.color_density.a, 0.0);
@@ -221,12 +242,15 @@ void main()
 	float tau = 0.0;
 	float edgeFadeSum = 0.0;
 	float edgeFadeSamples = 0.0;
+	float stepsTaken = 0.0;
+	bool earlyTerminated = false;
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
 		float t = tEnter + (float(i) + 0.5) * stepLen;
 		if (t >= tExit)
 			break;
+		stepsTaken += 1.0;
 
 		vec3 p = ro + rd * t;
 		float edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
@@ -252,9 +276,18 @@ void main()
 		edgeFadeSum += edgeFade;
 		edgeFadeSamples += 1.0;
 		if (transmittance < 0.01)
+		{
+			earlyTerminated = true;
 			break;
+		}
 	}
 
+	if (FogDebugMode == 5)
+	{
+		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
+		FragColor = vec4(debugColor, 1.0);
+		return;
+	}
 	if (FogDebugMode == 3)
 	{
 		float tauViz = tau / (1.0 + tau);
@@ -267,6 +300,13 @@ void main()
 		FragColor = vec4(vec3(fadeViz), 1.0);
 		return;
 	}
+	if (FogDebugMode == 8)
+	{
+		float stepViz = stepsTaken / max(stepCount, 1.0);
+		float earlyViz = earlyTerminated ? 1.0 : 0.0;
+		FragColor = vec4(stepViz, earlyViz, 0.0, 1.0);
+		return;
+	}
 
 	vec3 scene = texture(SceneColor, uv).rgb;
 	vec3 outColor;
@@ -274,5 +314,5 @@ void main()
 		outColor = scene * transmittance + accum;
 	else
 		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
-	FragColor = vec4(outColor, 1.0);
+	FragColor = vec4(outColor, transmittance);
 }
