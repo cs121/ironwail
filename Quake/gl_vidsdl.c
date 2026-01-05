@@ -1382,7 +1382,12 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	GLPalette_UpdateLookupTable ();
 	TexMgr_ApplySettings ();
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, GL_NeedsPostprocess () ? framebufs.composite.fbo : 0);
+	{
+		qboolean use_postprocess = GL_NeedsPostprocess ()
+			&& framebufs.composite.fbo
+			&& framebufs.composite.color_tex;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, use_postprocess ? framebufs.composite.fbo : 0);
+	}
 }
 
 /*
