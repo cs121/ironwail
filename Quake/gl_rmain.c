@@ -2042,7 +2042,7 @@ static float GL_UpdateAutoExposure (void)
 
 
 void GL_PostProcess (void)
-	{
+{
 	int palidx, variant;
 	float dither;
 	qboolean dof_enabled;
@@ -2102,8 +2102,10 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-        r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
+		return;
+	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
 		return;
 
 	GL_BeginGroup ("Postprocess");
