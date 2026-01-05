@@ -647,6 +647,11 @@ typedef struct glframebufs_s {
 	}				composite;
 
 	struct {
+		GLuint		color_tex;
+		GLuint		fbo;
+	}				fogvol;
+
+	struct {
 		GLuint		extract_tex;
 		GLuint		pingpong_tex[2];
 		GLuint		extract_fbo;

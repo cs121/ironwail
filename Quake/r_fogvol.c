@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "draw.h"
 #include "r_fogvol.h"
+#include <math.h>
 
 typedef struct fog_volume_gpu_s
 {
@@ -42,6 +43,57 @@ cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
+
+static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
+{
+	float inv[16];
+	float det;
+
+	inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] +
+		m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+	inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15]
+		- m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+	inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15]
+		+ m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+	inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14]
+		- m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+
+	inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15]
+		- m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+	inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15]
+		+ m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+	inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15]
+		- m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+	inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14]
+		+ m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+
+	inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15]
+		+ m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+	inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15]
+		- m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+	inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15]
+		+ m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+	inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14]
+		- m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+
+	inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11]
+		- m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+	inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11]
+		+ m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+	inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11]
+		- m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+	inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10]
+		+ m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+
+	det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+	if (fabsf (det) < 1e-8f)
+		return false;
+
+	det = 1.f / det;
+	for (int i = 0; i < 16; ++i)
+		out[i] = inv[i] * det;
+	return true;
+}
 
 static int R_FogVol_ComparePriority (const void *a, const void *b)
 {
@@ -124,7 +176,7 @@ void R_FogVol_BuildList (void)
 		qsort (r_fogvolumes, r_fogvolume_count, sizeof (fog_volume_t), R_FogVol_ComparePriority);
 }
 
-qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1)
+qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres)
 {
 	vec3_t corners[8];
 	vec3_t proj;
@@ -138,7 +190,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 	int view_h = r_refdef.vrect.height / q_max (1, r_refdef.scale);
 	int valid = 0;
 
-	if (!GL_NeedsSceneEffects ())
+	if (fullres || !GL_NeedsSceneEffects ())
 	{
 		view_x = glx + r_refdef.vrect.x;
 		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
@@ -213,7 +265,7 @@ void R_FogVol_DrawDebug2D (void)
 
 		if (!v->enabled)
 			continue;
-		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1))
+		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1, true))
 			continue;
 
 		color[0] = v->color[0];
@@ -233,12 +285,25 @@ void R_FogVol_Render (void)
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	int mode = (int)Q_rint (r_fogvol_debug.value);
+	float inv_viewproj[16];
+	GLuint src_tex;
+	GLuint dst_tex;
+	GLuint dst_fbo;
+	GLuint depth_tex;
+	qboolean dst_is_composite;
+	qboolean has_drawn = false;
 
 	if (r_fogvol.value <= 0.f)
 		return;
 	if (!glprogs.fogvol)
 		return;
 	if (r_fogvolume_count <= 0)
+		return;
+	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex == 0)
+		return;
+	if (framebufs.composite.depth_stencil_tex == 0)
+		return;
+	if (!R_FogVol_MatrixInverse4x4 (r_matviewproj, inv_viewproj))
 		return;
 
 	steps = (int)Q_rint (r_fogvol_steps.value);
@@ -285,12 +350,22 @@ void R_FogVol_Render (void)
 
 	GL_BeginGroup ("Fog volumes");
 	GL_UseProgram (glprogs.fogvol);
-	GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
+	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
+	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
+	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 
 	glEnable (GL_SCISSOR_TEST);
+	glViewport (glx, gly, glwidth, glheight);
+	depth_tex = framebufs.composite.depth_stencil_tex;
+	src_tex = framebufs.composite.color_tex;
+	dst_tex = framebufs.fogvol.color_tex;
+	dst_fbo = framebufs.fogvol.fbo;
+	dst_is_composite = false;
+
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
@@ -298,7 +373,7 @@ void R_FogVol_Render (void)
 
 		if (!v->enabled)
 			continue;
-		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1))
+		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1, true))
 			continue;
 
 		if (mode == 1)
@@ -308,15 +383,38 @@ void R_FogVol_Render (void)
 			R_DebugDrawWireBox (v->mins, v->maxs, color, true);
 		}
 
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		glScissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
+
+		{
+			GLuint tmp_tex = src_tex;
+			src_tex = dst_tex;
+			dst_tex = tmp_tex;
+			dst_is_composite = !dst_is_composite;
+			dst_fbo = dst_is_composite ? framebufs.composite.fbo : framebufs.fogvol.fbo;
+		}
+		has_drawn = true;
 	}
 	glDisable (GL_SCISSOR_TEST);
+
+	if (has_drawn && src_tex != framebufs.composite.color_tex)
+	{
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.fogvol.fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
+			0, 0, glwidth, glheight,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
 
 	if (mode == 1)
 		R_DebugFlushGeometry ();
 
 	GL_EndGroup ();
 }
-
