@@ -4,6 +4,7 @@
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
+layout(binding=3) uniform sampler3D FogNoiseTex;
 
 struct FogVolume
 {
@@ -25,33 +26,57 @@ layout(location=1) uniform int FogNoiseEnabled;
 layout(location=2) uniform int FogDebugMode;
 layout(location=3) uniform int FogVolumeIndex;
 layout(location=4) uniform mat4 FogInvViewProj;
+layout(location=5) uniform int FogNoiseMode;
 layout(location=8) uniform vec3 FogCameraPosWS;
 layout(location=9) uniform vec4 FogViewportParams; // xy: size, zw: inv size
 
 layout(location=0) out vec4 FragColor;
 
-float Hash3(vec3 p)
+const int NOISE_PERIOD = 64;
+const float NOISE_SCALE_MIN = 0.005;
+const float NOISE_SCALE_MAX = 0.5;
+const float LUT_PERIOD = 64.0;
+
+int WrapIndex(int v, int period)
 {
-	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+	int r = v % period;
+	return (r < 0) ? (r + period) : r;
 }
 
-float ValueNoise(vec3 p, float period)
+ivec3 WrapIndex(ivec3 v, int period)
+{
+	return ivec3(WrapIndex(v.x, period), WrapIndex(v.y, period), WrapIndex(v.z, period));
+}
+
+uint HashU32(ivec3 p)
+{
+	uvec3 x = uvec3(p);
+	x = (x ^ (x.yzx * 0x27d4eb2du)) * 0x165667b1u;
+	return x.x ^ x.y ^ x.z;
+}
+
+float Hash31(ivec3 p)
+{
+	return float(HashU32(p)) / 4294967295.0;
+}
+
+float ValueNoise(vec3 p)
 {
 	vec3 i = floor(p);
 	vec3 f = fract(p);
 	vec3 w = f * f * (3.0 - 2.0 * f);
 
-	vec3 i0 = mod(i, period);
-	vec3 i1 = mod(i0 + 1.0, period);
+	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
+	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
 
-	float n000 = Hash3(i0);
-	float n100 = Hash3(vec3(i1.x, i0.y, i0.z));
-	float n010 = Hash3(vec3(i0.x, i1.y, i0.z));
-	float n110 = Hash3(vec3(i1.x, i1.y, i0.z));
-	float n001 = Hash3(vec3(i0.x, i0.y, i1.z));
-	float n101 = Hash3(vec3(i1.x, i0.y, i1.z));
-	float n011 = Hash3(vec3(i0.x, i1.y, i1.z));
-	float n111 = Hash3(i1);
+	float n000 = Hash31(i0);
+	float n100 = Hash31(ivec3(i1.x, i0.y, i0.z));
+	float n010 = Hash31(ivec3(i0.x, i1.y, i0.z));
+	float n110 = Hash31(ivec3(i1.x, i1.y, i0.z));
+	float n001 = Hash31(ivec3(i0.x, i0.y, i1.z));
+	float n101 = Hash31(ivec3(i1.x, i0.y, i1.z));
+	float n011 = Hash31(ivec3(i0.x, i1.y, i1.z));
+	float n111 = Hash31(i1);
 
 	float nx00 = mix(n000, n100, w.x);
 	float nx10 = mix(n010, n110, w.x);
@@ -64,19 +89,25 @@ float ValueNoise(vec3 p, float period)
 
 float FBM(vec3 p)
 {
-	const float period = 16.0;
 	float sum = 0.0;
 	float amp = 0.5;
 	float freq = 1.0;
 	float norm = 0.0;
 	for (int i = 0; i < 3; ++i)
 	{
-		sum += amp * ValueNoise(p * freq, period * freq);
+		sum += amp * ValueNoise(p * freq);
 		norm += amp;
 		freq *= 2.0;
 		amp *= 0.5;
 	}
 	return sum / max(norm, 1e-5);
+}
+
+float FogNoise(vec3 p)
+{
+	if (FogNoiseMode == 1)
+		return texture(FogNoiseTex, fract(p / LUT_PERIOD)).r;
+	return FBM(p);
 }
 
 float DepthToNdcZ(float depth)
@@ -184,11 +215,14 @@ void main()
 		float noiseFactor = 1.0;
 		if (FogNoiseEnabled != 0)
 		{
-			vec3 noisePos = p * volume.noise_params.x + volume.velocity.xyz * Time;
-			float n = FBM(noisePos);
-			float biased = max(0.0, n + volume.noise_params.z);
+			float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+			vec3 noisePos = p * noiseScale + volume.velocity.xyz * Time * noiseScale;
+			float n = FogNoise(noisePos);
+			float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
+			if (noiseBias > 0.0)
+				n = smoothstep(noiseBias, 1.0, n);
 			float amt = clamp(volume.noise_params.y, 0.0, 1.0);
-			noiseFactor = mix(1.0, biased, amt);
+			noiseFactor = mix(1.0, n, amt);
 		}
 
 		float sigma = density * noiseFactor;
@@ -207,8 +241,9 @@ void main()
 	}
 	if (FogDebugMode == 4)
 	{
-		vec3 noisePos = (ro + rd * (tEnter + 0.5 * stepLen)) * volume.noise_params.x + volume.velocity.xyz * Time;
-		float n = FBM(noisePos);
+		float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		vec3 noisePos = (ro + rd * (tEnter + 0.5 * stepLen)) * noiseScale + volume.velocity.xyz * Time * noiseScale;
+		float n = FogNoise(noisePos);
 		FragColor = vec4(vec3(n), 1.0);
 		return;
 	}

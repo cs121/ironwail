@@ -42,6 +42,7 @@ cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -113,6 +114,7 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_steps);
 	Cvar_RegisterVariable (&r_fogvol_halfres);
 	Cvar_RegisterVariable (&r_fogvol_noise);
+	Cvar_RegisterVariable (&r_fogvol_noisemode);
 	Cvar_RegisterVariable (&r_fogvol_debug);
 }
 
@@ -135,31 +137,31 @@ void R_FogVol_AddTestVolumes (void)
 	VectorCopy (r_refdef.vieworg, origin);
 
 	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.7f, 0.8f, 1.0f);
-	volume.density = 0.15f;
-	volume.noiseScale = 0.05f;
-	volume.noiseAmount = 0.5f;
+	VectorSet (volume.color, 0.8f, 0.85f, 0.9f);
+	volume.density = 0.35f;
+	volume.noiseScale = 0.08f;
+	volume.noiseAmount = 0.85f;
 	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, 4.f, 0.f, 0.f);
+	VectorSet (volume.velocity, 0.f, 0.f, 6.f);
 	volume.maxDistance = 0.f;
 	volume.priority = 0;
 	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] - 64.f, origin[1] - 64.f, origin[2] - 32.f);
-	VectorSet (volume.maxs, origin[0] + 64.f, origin[1] + 64.f, origin[2] + 96.f);
+	VectorSet (volume.mins, origin[0] - 32.f, origin[1] - 32.f, origin[2] - 16.f);
+	VectorSet (volume.maxs, origin[0] + 32.f, origin[1] + 32.f, origin[2] + 48.f);
 	R_FogVol_AddVolume (&volume);
 
 	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.8f, 0.6f, 0.4f);
-	volume.density = 0.2f;
-	volume.noiseScale = 0.08f;
-	volume.noiseAmount = 0.6f;
+	VectorSet (volume.color, 0.7f, 0.75f, 0.85f);
+	volume.density = 0.05f;
+	volume.noiseScale = 0.02f;
+	volume.noiseAmount = 0.25f;
 	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, -2.f, 1.f, 0.f);
+	VectorSet (volume.velocity, -1.f, 0.5f, 0.f);
 	volume.maxDistance = 0.f;
 	volume.priority = 1;
 	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] + 96.f, origin[1] - 96.f, origin[2] - 16.f);
-	VectorSet (volume.maxs, origin[0] + 192.f, origin[1] + 0.f, origin[2] + 64.f);
+	VectorSet (volume.mins, origin[0] - 256.f, origin[1] - 256.f, origin[2] - 128.f);
+	VectorSet (volume.maxs, origin[0] + 256.f, origin[1] + 256.f, origin[2] + 128.f);
 	R_FogVol_AddVolume (&volume);
 }
 
@@ -329,8 +331,8 @@ void R_FogVol_Render (void)
 		gpu->color_density[2] = v->color[2];
 		gpu->color_density[3] = v->density;
 
-		gpu->noise_params[0] = v->noiseScale;
-		gpu->noise_params[1] = v->noiseAmount;
+		gpu->noise_params[0] = CLAMP (0.005f, v->noiseScale, 0.5f);
+		gpu->noise_params[1] = CLAMP (0.f, v->noiseAmount, 1.f);
 		gpu->noise_params[2] = v->noiseBias;
 		gpu->noise_params[3] = v->maxDistance;
 
@@ -354,6 +356,7 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
+	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
