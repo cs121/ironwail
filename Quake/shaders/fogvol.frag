@@ -30,6 +30,7 @@ layout(location=5) uniform int FogNoiseMode;
 layout(location=6) uniform int FogPhysBlend;
 layout(location=8) uniform vec3 FogCameraPosWS;
 layout(location=9) uniform vec4 FogViewportParams; // xy: size, zw: inv size
+layout(location=10) uniform vec2 FogDepthScale;
 
 layout(location=0) out vec4 FragColor;
 
@@ -168,7 +169,8 @@ void main()
 		return;
 	}
 
-	float depth = texelFetch(SceneDepth, ivec2(gl_FragCoord.xy), 0).r;
+	ivec2 depthCoord = ivec2(gl_FragCoord.xy * FogDepthScale);
+	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
 	float ndcDepth = DepthToNdcZ(depth);
 	vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
 	vec4 world = FogInvViewProj * clip;

@@ -770,8 +770,21 @@ void GL_CreateFrameBuffers (void)
 		framebufs.composite.depth_stencil_tex,
 		"composite fbo"
 	);
-	framebufs.fogvol.color_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_NEAREST, "fogvol color");
-	framebufs.fogvol.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex, 0, 0, "fogvol fbo");
+	framebufs.fogvol.width = vid.width;
+	framebufs.fogvol.height = vid.height;
+	if (r_fogvol_halfres.value > 0.f)
+	{
+		framebufs.fogvol.width = q_max (1, vid.width / 2);
+		framebufs.fogvol.height = q_max (1, vid.height / 2);
+	}
+	for (int i = 0; i < 2; ++i)
+	{
+		const char *suffix = (i == 0) ? "fogvol color 0" : "fogvol color 1";
+		const char *fbo_suffix = (i == 0) ? "fogvol fbo 0" : "fogvol fbo 1";
+		framebufs.fogvol.color_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
+			framebufs.fogvol.height, GL_NEAREST, suffix);
+		framebufs.fogvol.fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex[i], 0, 0, fbo_suffix);
+	}
 
 	framebufs.autoexposure.width = 16;
 	framebufs.autoexposure.height = 16;
@@ -904,7 +917,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.fbo);
+	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
@@ -921,7 +934,8 @@ void GL_DeleteFrameBuffers (void)
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
-	GL_DeleteNativeTexture (framebufs.fogvol.color_tex);
+	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[0]);
+	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[1]);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
