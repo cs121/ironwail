@@ -37,6 +37,8 @@ typedef struct fog_volume_gpu_s
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
+static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
+static int r_fogvolume_entity_count = 0;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
@@ -44,6 +46,8 @@ cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
 {
@@ -116,6 +120,8 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_noise);
 	Cvar_RegisterVariable (&r_fogvol_noisemode);
 	Cvar_RegisterVariable (&r_fogvol_debug);
+	Cvar_RegisterVariable (&r_fogvol_testvolumes);
+	Cvar_RegisterVariable (&r_fogvol_physblend);
 }
 
 void R_FogVol_Clear (void)
@@ -123,11 +129,206 @@ void R_FogVol_Clear (void)
 	r_fogvolume_count = 0;
 }
 
+static void R_FogVol_ClearEntities (void)
+{
+	r_fogvolume_entity_count = 0;
+}
+
 static void R_FogVol_AddVolume (const fog_volume_t *volume)
 {
 	if (r_fogvolume_count >= MAX_FOGVOLUMES)
 		return;
 	r_fogvolumes[r_fogvolume_count++] = *volume;
+}
+
+static void R_FogVol_AddEntityVolume (const fog_volume_t *volume)
+{
+	if (r_fogvolume_entity_count >= MAX_FOGVOLUMES)
+		return;
+	r_fogvolume_entities[r_fogvolume_entity_count++] = *volume;
+}
+
+static void R_FogVol_ParseColor (const char *value, vec3_t color)
+{
+	float r = 1.f, g = 1.f, b = 1.f;
+	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
+	{
+		if (r > 2.f || g > 2.f || b > 2.f)
+		{
+			r *= 1.f / 255.f;
+			g *= 1.f / 255.f;
+			b *= 1.f / 255.f;
+		}
+	}
+	color[0] = r;
+	color[1] = g;
+	color[2] = b;
+}
+
+static qboolean R_FogVol_ParseVector (const char *value, vec3_t out)
+{
+	return value && sscanf (value, "%f %f %f", &out[0], &out[1], &out[2]) == 3;
+}
+
+static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t *volume)
+{
+	float dist2 = 0.f;
+
+	for (int i = 0; i < 3; ++i)
+	{
+		if (point[i] < volume->mins[i])
+		{
+			float d = volume->mins[i] - point[i];
+			dist2 += d * d;
+		}
+		else if (point[i] > volume->maxs[i])
+		{
+			float d = point[i] - volume->maxs[i];
+			dist2 += d * d;
+		}
+	}
+
+	return sqrtf (dist2);
+}
+
+void R_FogVol_ParseEntities (void)
+{
+	const char *data;
+
+	R_FogVol_ClearEntities ();
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	data = cl.worldmodel->entities;
+	data = COM_Parse (data);
+	while (data && com_token[0])
+	{
+		fog_volume_t volume;
+		qboolean is_fog_volume = false;
+		char modelname[64] = "";
+		vec3_t origin = {0.f, 0.f, 0.f};
+		qboolean has_origin = false;
+
+		if (com_token[0] != '{')
+			break;
+
+		memset (&volume, 0, sizeof (volume));
+		VectorSet (volume.color, 1.f, 1.f, 1.f);
+		volume.density = 0.1f;
+		volume.falloff = 16.f;
+		volume.mode = 0;
+		volume.noiseScale = 0.05f;
+		volume.noiseAmount = 0.5f;
+		volume.noiseBias = 0.f;
+		VectorSet (volume.velocity, 0.f, 0.f, 0.f);
+		volume.maxDistance = 2048.f;
+		volume.priority = 0;
+		volume.enabled = 1;
+		volume.height = 0.f;
+		volume.heightScale = 0.f;
+
+		while (1)
+		{
+			char key[64], value[1024];
+			data = COM_Parse (data);
+			if (!data || !com_token[0])
+				return;
+			if (com_token[0] == '}')
+				break;
+			q_strlcpy (key, com_token, sizeof (key));
+			if (key[0] == '_')
+				memmove (key, key + 1, strlen (key));
+			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+			if (!data)
+				return;
+			q_strlcpy (value, com_token, sizeof (value));
+
+			if (!strcmp (key, "classname"))
+			{
+				if (!strcmp (value, "func_fog_volume") || !strcmp (value, "trigger_fog_volume"))
+					is_fog_volume = true;
+			}
+			else if (!strcmp (key, "model"))
+			{
+				q_strlcpy (modelname, value, sizeof (modelname));
+			}
+			else if (!strcmp (key, "origin"))
+			{
+				has_origin = R_FogVol_ParseVector (value, origin);
+			}
+			else if (!strcmp (key, "_color") || !strcmp (key, "color"))
+			{
+				R_FogVol_ParseColor (value, volume.color);
+			}
+			else if (!strcmp (key, "density"))
+			{
+				volume.density = atof (value);
+			}
+			else if (!strcmp (key, "falloff"))
+			{
+				volume.falloff = atof (value);
+			}
+			else if (!strcmp (key, "maxdist"))
+			{
+				volume.maxDistance = atof (value);
+			}
+			else if (!strcmp (key, "priority"))
+			{
+				volume.priority = atoi (value);
+			}
+			else if (!strcmp (key, "noise_scale"))
+			{
+				volume.noiseScale = atof (value);
+			}
+			else if (!strcmp (key, "noise_amount"))
+			{
+				volume.noiseAmount = atof (value);
+			}
+			else if (!strcmp (key, "noise_bias"))
+			{
+				volume.noiseBias = atof (value);
+			}
+			else if (!strcmp (key, "velocity"))
+			{
+				R_FogVol_ParseVector (value, volume.velocity);
+			}
+			else if (!strcmp (key, "mode"))
+			{
+				volume.mode = atoi (value);
+			}
+			else if (!strcmp (key, "height"))
+			{
+				volume.height = atof (value);
+			}
+			else if (!strcmp (key, "height_scale"))
+			{
+				volume.heightScale = atof (value);
+			}
+		}
+
+		if (is_fog_volume && modelname[0])
+		{
+			qmodel_t *model = Mod_ForName (modelname, false);
+			if (model && model->type == mod_brush)
+			{
+				vec3_t mins;
+				vec3_t maxs;
+				VectorCopy (model->mins, mins);
+				VectorCopy (model->maxs, maxs);
+				if (has_origin)
+				{
+					VectorAdd (mins, origin, mins);
+					VectorAdd (maxs, origin, maxs);
+				}
+				VectorCopy (mins, volume.mins);
+				VectorCopy (maxs, volume.maxs);
+				R_FogVol_AddEntityVolume (&volume);
+			}
+		}
+
+		data = COM_Parse (data);
+	}
 }
 
 void R_FogVol_AddTestVolumes (void)
@@ -139,6 +340,8 @@ void R_FogVol_AddTestVolumes (void)
 	memset (&volume, 0, sizeof (volume));
 	VectorSet (volume.color, 0.8f, 0.85f, 0.9f);
 	volume.density = 0.35f;
+	volume.falloff = 24.f;
+	volume.mode = 0;
 	volume.noiseScale = 0.08f;
 	volume.noiseAmount = 0.85f;
 	volume.noiseBias = 0.0f;
@@ -153,6 +356,8 @@ void R_FogVol_AddTestVolumes (void)
 	memset (&volume, 0, sizeof (volume));
 	VectorSet (volume.color, 0.7f, 0.75f, 0.85f);
 	volume.density = 0.05f;
+	volume.falloff = 32.f;
+	volume.mode = 0;
 	volume.noiseScale = 0.02f;
 	volume.noiseAmount = 0.25f;
 	volume.noiseBias = 0.0f;
@@ -172,7 +377,23 @@ void R_FogVol_BuildList (void)
 	if (r_fogvol.value <= 0.f)
 		return;
 
-	R_FogVol_AddTestVolumes ();
+	for (int i = 0; i < r_fogvolume_entity_count; ++i)
+	{
+		const fog_volume_t *volume = &r_fogvolume_entities[i];
+
+		if (!volume->enabled)
+			continue;
+		if (volume->maxDistance > 0.f)
+		{
+			float dist = R_FogVol_PointAABBDistance (r_refdef.vieworg, volume);
+			if (dist > volume->maxDistance)
+				continue;
+		}
+		R_FogVol_AddVolume (volume);
+	}
+
+	if (r_fogvol_testvolumes.value > 0.f)
+		R_FogVol_AddTestVolumes ();
 
 	if (r_fogvolume_count > 1)
 		qsort (r_fogvolumes, r_fogvolume_count, sizeof (fog_volume_t), R_FogVol_ComparePriority);
@@ -343,8 +564,8 @@ void R_FogVol_Render (void)
 
 		gpu->misc[0] = (float)v->priority;
 		gpu->misc[1] = (float)v->enabled;
-		gpu->misc[2] = 0.f;
-		gpu->misc[3] = 0.f;
+		gpu->misc[2] = v->falloff;
+		gpu->misc[3] = (float)v->mode;
 	}
 
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
@@ -357,6 +578,7 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
 	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
+	GL_Uniform1iFunc (6, r_fogvol_physblend.value > 0.f ? 1 : 0);
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);

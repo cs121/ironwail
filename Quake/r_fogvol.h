@@ -9,6 +9,8 @@ typedef struct fog_volume_s
 	vec3_t maxs;
 	vec3_t color;
 	float density;
+	float falloff;
+	int mode;
 	float noiseScale;
 	float noiseAmount;
 	float noiseBias;
@@ -16,12 +18,15 @@ typedef struct fog_volume_s
 	float maxDistance;
 	int priority;
 	int enabled;
+	float height;
+	float heightScale;
 } fog_volume_t;
 
 extern cvar_t r_fogvol;
 
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
+void R_FogVol_ParseEntities (void);
 void R_FogVol_BuildList (void);
 void R_FogVol_AddTestVolumes (void);
 void R_FogVol_Render (void);
