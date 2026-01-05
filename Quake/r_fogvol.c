@@ -49,7 +49,6 @@ cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
@@ -134,7 +133,6 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_steps_scale_halfres);
 	Cvar_RegisterVariable (&r_fogvol_noise);
 	Cvar_RegisterVariable (&r_fogvol_noisemode);
-	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
@@ -508,30 +506,6 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 
 void R_FogVol_DrawDebug2D (void)
 {
-	int mode = (int)Q_rint (r_fogvol_debug.value);
-	if (mode != 2)
-		return;
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		const fog_volume_t *v = &r_fogvolumes[i];
-		int x0, y0, x1, y1;
-		float color[3];
-		float alpha = 0.25f;
-
-		if (!v->enabled)
-			continue;
-		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1, true))
-			continue;
-
-		color[0] = v->color[0];
-		color[1] = v->color[1];
-		color[2] = v->color[2];
-		Draw_FillEx ((float)x0, (float)y0, (float)(x1 - x0), 1.f, color, alpha);
-		Draw_FillEx ((float)x0, (float)(y1 - 1), (float)(x1 - x0), 1.f, color, alpha);
-		Draw_FillEx ((float)x0, (float)y0, 1.f, (float)(y1 - y0), color, alpha);
-		Draw_FillEx ((float)(x1 - 1), (float)y0, 1.f, (float)(y1 - y0), color, alpha);
-	}
 }
 
 void R_FogVol_Render (void)
@@ -540,7 +514,7 @@ void R_FogVol_Render (void)
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
-	int mode = (int)Q_rint (r_fogvol_debug.value);
+	const int mode = 0;
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
