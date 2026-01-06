@@ -24,11 +24,6 @@ layout(binding=3) uniform sampler3D FogNoiseTex;
 
 struct FogVolume
 {
-    // DBG_FOG_MODES
-    if (FogDebugMode == 1) DBG_EARLY_OUT_COLOR(vec3(1,0,0));
-    if (FogDebugMode == 2) DBG_EARLY_OUT_COLOR(vec3(0,1,0));
-    if (FogDebugMode == 3) DBG_EARLY_OUT_COLOR(vec3(0,0,1));
-
 	vec4 mins;
 	vec4 maxs;
 	vec4 color_density;
