@@ -597,6 +597,8 @@ void R_FogVol_Render (void)
 	GL_BeginGroup ("Fog volumes");
 	GL_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	glDisable (GL_SCISSOR_TEST);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
