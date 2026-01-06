@@ -608,7 +608,6 @@ void R_FogVol_Render (void)
 	GL_Uniform4fFunc (9, (float)fog_width, (float)fog_height, 1.f / (float)fog_width, 1.f / (float)fog_height);
 	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
 
-	glEnable (GL_SCISSOR_TEST);
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
 	else
@@ -657,6 +656,7 @@ void R_FogVol_Render (void)
 		if (i > 0)
 			src_tex = framebufs.fogvol.color_tex[fog_src_index];
 		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src_index];
+		glDisable (GL_SCISSOR_TEST);
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, src_fbo);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, dst_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -679,9 +679,11 @@ void R_FogVol_Render (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+		glEnable (GL_SCISSOR_TEST);
 		glScissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
+		glDisable (GL_SCISSOR_TEST);
 
 		fog_src_index = fog_dst_index;
 		final_tex = framebufs.fogvol.color_tex[fog_src_index];
