@@ -12,7 +12,7 @@ float dbg_nan_guard_f(float v) {
     return v;
 }
 
-#define DBG_EARLY_OUT_COLOR(c) { fragColor = vec4(c, 1.0); return; }
+#define DBG_EARLY_OUT_COLOR(c) { OutColor = vec4(c, 1.0); return; }
 
 #include "frame_uniforms.glsl"
 
