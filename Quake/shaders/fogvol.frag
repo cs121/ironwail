@@ -1,19 +1,3 @@
-
-// ------------------------------
-// DEBUG / SAFETY HELPERS
-// ------------------------------
-vec3 dbg_nan_guard(vec3 v) {
-    if (any(isnan(v)) || any(isinf(v))) return vec3(1.0, 0.0, 1.0); // magenta = broken
-    return v;
-}
-
-float dbg_nan_guard_f(float v) {
-    if (isnan(v) || isinf(v)) return 0.0;
-    return v;
-}
-
-#define DBG_EARLY_OUT_COLOR(c) { fragColor = vec4(c, 1.0); return; }
-
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64

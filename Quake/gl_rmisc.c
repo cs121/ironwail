@@ -97,7 +97,6 @@ extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
 extern cvar_t r_shadow_lightgrid;
 extern cvar_t r_shadow_lightgrid_mode;
-extern cvar_t r_fragshader_debug_solid;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
@@ -546,7 +545,6 @@ Cvar_RegisterVariable (&r_rgblighting_enable);
 Cvar_RegisterVariable (&r_fullbright);
 Cvar_RegisterVariable (&r_drawentities);
 Cvar_RegisterVariable (&r_drawviewmodel);
-Cvar_RegisterVariable (&r_fragshader_debug_solid);
         Cvar_RegisterVariable (&r_debug_itemlight);
         Cvar_RegisterVariable (&r_minlight_models);
         Cvar_RegisterVariable (&r_model_lightgrid);

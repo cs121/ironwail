@@ -1,19 +1,3 @@
-
-// ------------------------------
-// DEBUG / SAFETY HELPERS
-// ------------------------------
-vec3 dbg_nan_guard(vec3 v) {
-    if (any(isnan(v)) || any(isinf(v))) return vec3(1.0, 0.0, 1.0); // magenta = broken
-    return v;
-}
-
-float dbg_nan_guard_f(float v) {
-    if (isnan(v) || isinf(v)) return 0.0;
-    return v;
-}
-
-#define DBG_EARLY_OUT_COLOR(c) { OutColor = vec4(c, 1.0); return; }
-
 #include "frame_uniforms.glsl"
 
 layout(binding=0) uniform sampler2D FogCurrent;
@@ -56,13 +40,6 @@ bool Reproject(vec2 uv, float depthNdc, out vec2 prevUv, out float prevDepthNdc)
 
 void main()
 {
-    // DBG_FOG_MODES (inside main)
-    // 1: pass reached (red)
-    // 2: depth fetch path (green)
-    // 3: volume path marker (blue)
-    if (FogDebugMode == 1) DBG_EARLY_OUT_COLOR(vec3(1,0,0));
-    
-
 	vec2 invViewport = FogViewportParams.zw;
 	vec2 uv = gl_FragCoord.xy * invViewport;
 	vec4 current = texture(FogCurrent, uv);

@@ -33,12 +33,6 @@ typedef struct shader_cache_s
         char *data;
 } shader_cache_t;
 
-typedef struct frag_debug_color_s
-{
-        const char *path;
-        vec3_t color;
-} frag_debug_color_t;
-
 static shader_cache_t shader_cache[128];
 static int shader_cache_count;
 
@@ -46,76 +40,6 @@ glprogs_t glprogs;
 static GLuint gl_programs[128];
 static GLuint gl_current_program;
 static int gl_num_programs;
-
-cvar_t r_fragshader_debug_solid = { "r_fragshader_debug_solid", "1", CVAR_ARCHIVE };
-
-static const frag_debug_color_t frag_debug_colors[] =
-{
-        { GLSL_PATH("gui.frag"), { 0.90f, 0.10f, 0.10f } },
-        { GLSL_PATH("viewblend.frag"), { 0.90f, 0.40f, 0.10f } },
-        { GLSL_PATH("warpscale.frag"), { 0.90f, 0.70f, 0.10f } },
-        { GLSL_PATH("postprocess.frag"), { 0.75f, 0.90f, 0.10f } },
-        { GLSL_PATH("filmgrain.frag"), { 0.45f, 0.90f, 0.10f } },
-        { GLSL_PATH("bloom_extract.frag"), { 0.10f, 0.90f, 0.20f } },
-        { GLSL_PATH("bloom_blur.frag"), { 0.10f, 0.90f, 0.55f } },
-        { GLSL_PATH("ssao.frag"), { 0.10f, 0.80f, 0.90f } },
-        { GLSL_PATH("ssao_blur.frag"), { 0.10f, 0.45f, 0.90f } },
-        { GLSL_PATH("godrays_mask.frag"), { 0.10f, 0.15f, 0.90f } },
-        { GLSL_PATH("godrays.frag"), { 0.35f, 0.10f, 0.90f } },
-        { GLSL_PATH("godrays_source.frag"), { 0.65f, 0.10f, 0.90f } },
-        { GLSL_PATH("godrays_source_sky.frag"), { 0.90f, 0.10f, 0.80f } },
-        { GLSL_PATH("fogvol.frag"), { 0.90f, 0.10f, 0.55f } },
-        { GLSL_PATH("fogvol_upsample.frag"), { 0.90f, 0.10f, 0.30f } },
-        { GLSL_PATH("fogvol_temporal.frag"), { 0.85f, 0.25f, 0.25f } },
-        { GLSL_PATH("oit_resolve.frag"), { 0.85f, 0.45f, 0.25f } },
-        { GLSL_PATH("world.frag"), { 0.85f, 0.65f, 0.25f } },
-        { GLSL_PATH("world_dlight.frag"), { 0.80f, 0.80f, 0.25f } },
-        { GLSL_PATH("world_dlight_hybrid.frag"), { 0.65f, 0.80f, 0.25f } },
-        { GLSL_PATH("shadow_depth.frag"), { 0.45f, 0.80f, 0.25f } },
-        { GLSL_PATH("dlight_composite.frag"), { 0.25f, 0.80f, 0.25f } },
-        { GLSL_PATH("water.frag"), { 0.25f, 0.80f, 0.45f } },
-        { GLSL_PATH("particles.frag"), { 0.25f, 0.80f, 0.70f } },
-        { GLSL_PATH("sky_cubemap.frag"), { 0.25f, 0.65f, 0.85f } },
-        { GLSL_PATH("sky_layers.frag"), { 0.25f, 0.40f, 0.85f } },
-        { GLSL_PATH("sky_boxside.frag"), { 0.25f, 0.25f, 0.85f } },
-        { GLSL_PATH("sprites.frag"), { 0.50f, 0.25f, 0.85f } },
-        { GLSL_PATH("alias.frag"), { 0.75f, 0.25f, 0.85f } },
-        { GLSL_PATH("debug3d.frag"), { 0.85f, 0.25f, 0.65f } },
-        { GLSL_PATH("shadow_debug.frag"), { 0.85f, 0.25f, 0.45f } },
-};
-
-static const frag_debug_color_t *GL_FindFragmentDebugColor (const char *path)
-{
-        size_t i;
-
-        for (i = 0; i < countof (frag_debug_colors); ++i)
-        {
-                if (!strcmp (frag_debug_colors[i].path, path))
-                        return &frag_debug_colors[i];
-        }
-
-        return NULL;
-}
-
-static char *GL_BuildFragmentDebugSource (const vec3_t color)
-{
-        char *source;
-
-        source = (char *) malloc (256);
-        if (!source)
-                Sys_Error ("GL_BuildFragmentDebugSource: out of memory");
-
-        q_snprintf (source, 256,
-                "layout(location=0) out vec4 outColor;\n"
-                "void main()\n"
-                "{\n"
-                "    outColor = vec4(%.3f, %.3f, %.3f, 1.0);\n"
-                "}\n",
-                color[0], color[1], color[2]
-        );
-
-        return source;
-}
 
 /*
 =============
@@ -496,30 +420,7 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
                 if (paths[i])
                 {
                         char *source = GL_LoadShaderFile (paths[i]);
-                        char *debug_source = NULL;
-
-                        if (types[i] == GL_FRAGMENT_SHADER && r_fragshader_debug_solid.value > 0.f)
-                        {
-                                const frag_debug_color_t *entry = GL_FindFragmentDebugColor (paths[i]);
-                                vec3_t color = { 1.0f, 0.0f, 1.0f };
-
-                                if (entry)
-                                        VectorCopy (entry->color, color);
-
-                                debug_source = GL_BuildFragmentDebugSource (color);
-                                source = debug_source;
-
-                                Con_Printf ("GLSL debug solid: %s -> %.2f %.2f %.2f\n",
-                                        paths[i],
-                                        color[0],
-                                        color[1],
-                                        color[2]
-                                );
-                        }
-
                         shaders[realcount] = GL_CreateShader (types[i], source, macros, name);
-                        if (debug_source)
-                                free (debug_source);
                         realcount++;
                 }
         }
@@ -605,8 +506,6 @@ GL_CreateShaders
 void GL_CreateShaders (void)
 {
 	int palettize, dither, mode, alphatest, warp, oit, md5;
-
-	Cvar_RegisterVariable (&r_fragshader_debug_solid);
 
 	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
 	glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
