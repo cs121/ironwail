@@ -4579,7 +4579,7 @@ void R_WarpScaleView (void)
 		}
 	}
 
-	if (need_depth_resolve && (!msaa || needwarpscale))
+	if (need_depth_resolve)
 	{
 		int dstw = (r_refdef.scale != 1) ? r_refdef.vrect.width : srcw;
 		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
