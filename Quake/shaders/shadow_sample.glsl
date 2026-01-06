@@ -1,3 +1,33 @@
+
+// ------------------------------
+// DEBUG / SAFETY HELPERS (softshadows)
+// ------------------------------
+#ifndef SHADOW_DEBUG_HELPERS_INCLUDED
+#define SHADOW_DEBUG_HELPERS_INCLUDED 1
+
+float dbg_nan_guard_f(float v) {
+    if (isnan(v) || isinf(v)) return 0.0;
+    return v;
+}
+vec2 dbg_nan_guard(vec2 v) {
+    if (any(isnan(v)) || any(isinf(v))) return vec2(0.0);
+    return v;
+}
+vec3 dbg_nan_guard(vec3 v) {
+    if (any(isnan(v)) || any(isinf(v))) return vec3(1.0, 0.0, 1.0); // magenta marker
+    return v;
+}
+vec4 dbg_nan_guard(vec4 v) {
+    if (any(isnan(v)) || any(isinf(v))) return vec4(1.0, 0.0, 1.0, 1.0);
+    return v;
+}
+
+float dbg_saturate(float v) { return clamp(v, 0.0, 1.0); }
+vec2  dbg_saturate(vec2 v)  { return clamp(v, vec2(0.0), vec2(1.0)); }
+vec3  dbg_saturate(vec3 v)  { return clamp(v, vec3(0.0), vec3(1.0)); }
+
+#endif
+
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
@@ -228,3 +258,20 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 #endif
 
 #endif
+
+
+// ------------------------------
+// SOFTSHADOW_DEBUG_MODES
+// ------------------------------
+// Define SHADOW_DEBUG_MODE at compile time (or via include before this file) to visualize issues.
+// 0 = off
+// 1 = visualize shadow UV in RGB (R=U,G=V)
+// 2 = visualize shadow depth compare value (Z)
+// 3 = visualize visibility (shadow factor)
+// Note: host shaders can use these outputs by sampling helper functions that return debug colors.
+#ifndef SHADOW_DEBUG_MODE
+#define SHADOW_DEBUG_MODE 0
+#endif
+
+vec3 ShadowDbg_UV(vec3 shadowUVZ) { return vec3(dbg_saturate(shadowUVZ.xy), 0.0); }
+vec3 ShadowDbg_Z (vec3 shadowUVZ) { return vec3(dbg_saturate(shadowUVZ.z)); }
