@@ -297,6 +297,9 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
+cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.02", CVAR_ARCHIVE };
+cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.25", CVAR_ARCHIVE };
+cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "8.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_min = { "r_exposure_min", "0.85", CVAR_ARCHIVE };
 cvar_t	r_exposure_max = { "r_exposure_max", "1.15", CVAR_ARCHIVE };
@@ -304,6 +307,8 @@ cvar_t	r_exposure_speed_up = { "r_exposure_speed_up", "0.6", CVAR_ARCHIVE };
 cvar_t	r_exposure_speed_down = { "r_exposure_speed_down", "0.3", CVAR_ARCHIVE };
 cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
 cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
+cvar_t	r_tonemap_black_lift = { "r_tonemap_black_lift", "0.0", CVAR_ARCHIVE };
+cvar_t	r_tonemap_black_lift_strength = { "r_tonemap_black_lift_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_bloom = { "r_bloom", "3.00", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
@@ -2010,6 +2015,12 @@ static float GL_UpdateAutoExposure (void)
 	if ((in_attack.state & 1) || cl.cshifts[CSHIFT_DAMAGE].percent > 0.f)
 		return current_exposure;
 
+	{
+		const float min_scene_luma = q_max (0.f, r_ae_min_scene_luma.value);
+		scene_luminance = q_max (scene_luminance, min_scene_luma);
+		r_autoexposure_debug_luminance = scene_luminance;
+	}
+
 	if (scene_luminance <= 0.f)
 		return current_exposure;
 
@@ -2018,6 +2029,8 @@ static float GL_UpdateAutoExposure (void)
 		const float bias = q_max (0.f, r_exposure_bias.value);
 		const float min_exposure = q_min (r_exposure_min.value, r_exposure_max.value);
 		const float max_exposure = q_max (r_exposure_min.value, r_exposure_max.value);
+		const float hard_min_exposure = q_max (0.f, q_min (r_ae_min_exposure.value, r_ae_max_exposure.value));
+		const float hard_max_exposure = q_max (hard_min_exposure, q_max (r_ae_min_exposure.value, r_ae_max_exposure.value));
 		float target = exposure_middle_gray * bias / scene_luminance;
 		float speed_up = q_max (0.f, r_exposure_speed_up.value);
 		float speed_down = q_max (0.f, r_exposure_speed_down.value);
@@ -2032,10 +2045,12 @@ static float GL_UpdateAutoExposure (void)
 		last_time = cl.time;
 
 		target = CLAMP (min_exposure, target, max_exposure);
+		target = CLAMP (hard_min_exposure, target, hard_max_exposure);
 		change = (target - current_exposure) * delta * adaptation_speed;
 		max_delta = current_exposure * 0.02f;
 		change = CLAMP (-max_delta, change, max_delta);
 		current_exposure = CLAMP (min_exposure, current_exposure + change, max_exposure);
+		current_exposure = CLAMP (hard_min_exposure, current_exposure, hard_max_exposure);
 	}
 
 	return current_exposure;
@@ -2335,6 +2350,11 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
 	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
+	{
+		float black_lift = CLAMP (0.f, r_tonemap_black_lift.value, 0.05f);
+		float black_lift_strength = q_max (0.f, r_tonemap_black_lift_strength.value);
+		GL_Uniform4fFunc (27, black_lift, black_lift_strength, 0.f, 0.f);
+	}
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);

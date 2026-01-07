@@ -151,6 +151,7 @@ layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: 
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
+layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -777,6 +778,16 @@ void main()
                 mapped = clamp(combined, 0.0, 1.0);
         }
         mapped = clamp(mapped, 0.0, 1.0);
+        {
+                float blackLift = max(TonemapBlackLiftParams.x, 0.0);
+                float blackLiftStrength = max(TonemapBlackLiftParams.y, 0.0);
+                if (blackLift > 0.0 && blackLiftStrength > 0.0)
+                {
+                        mapped = mix(mapped, vec3(blackLift),
+                                1.0 - exp(-mapped * blackLiftStrength));
+                        mapped = clamp(mapped, 0.0, 1.0);
+                }
+        }
         if (debugMode == 2)
         {
                 out_fragcolor = vec4(mapped, 1.0);
