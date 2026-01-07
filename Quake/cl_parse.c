@@ -96,7 +96,9 @@ const char *svc_strings[] =
 	"svc_chat", // 53
 	"svc_levelcompleted", // 54
 	"svc_backtolobby", // 55
-	"svc_localsound" // 56
+	"svc_localsound", // 56
+	"svc_snapshot_full", // 57
+	"svc_snapshot_delta" // 58
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
@@ -674,6 +676,171 @@ void CL_ParseUpdate (int bits)
 	}
 }
 
+static void CL_SendSnapshotAck (unsigned int seq)
+{
+	if (cls.demoplayback || cls.state != ca_connected)
+		return;
+	MSG_WriteByte (&cls.message, clc_snapshot_ack);
+	MSG_WriteLong (&cls.message, (int)seq);
+}
+
+static void CL_ReadSnapshotState (snapshot_state_t *state)
+{
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		state->state.origin[i] = MSG_ReadCoord (cl.protocolflags);
+		state->state.angles[i] = MSG_ReadAngle (cl.protocolflags);
+	}
+	state->state.modelindex = (unsigned short)MSG_ReadShort ();
+	state->state.frame = (unsigned short)MSG_ReadShort ();
+	state->state.colormap = (unsigned char)MSG_ReadByte ();
+	state->state.skin = (unsigned char)MSG_ReadByte ();
+	state->state.effects = MSG_ReadByte ();
+	state->state.alpha = (unsigned char)MSG_ReadByte ();
+	state->state.scale = (unsigned char)MSG_ReadByte ();
+	state->step = (byte)MSG_ReadByte ();
+}
+
+static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int mask)
+{
+	if (mask & SNAP_ORIGIN1)
+		state->state.origin[0] = MSG_ReadCoord (cl.protocolflags);
+	if (mask & SNAP_ORIGIN2)
+		state->state.origin[1] = MSG_ReadCoord (cl.protocolflags);
+	if (mask & SNAP_ORIGIN3)
+		state->state.origin[2] = MSG_ReadCoord (cl.protocolflags);
+	if (mask & SNAP_ANGLE1)
+		state->state.angles[0] = MSG_ReadAngle (cl.protocolflags);
+	if (mask & SNAP_ANGLE2)
+		state->state.angles[1] = MSG_ReadAngle (cl.protocolflags);
+	if (mask & SNAP_ANGLE3)
+		state->state.angles[2] = MSG_ReadAngle (cl.protocolflags);
+	if (mask & SNAP_MODEL)
+		state->state.modelindex = (unsigned short)MSG_ReadShort ();
+	if (mask & SNAP_FRAME)
+		state->state.frame = (unsigned short)MSG_ReadShort ();
+	if (mask & SNAP_COLORMAP)
+		state->state.colormap = (unsigned char)MSG_ReadByte ();
+	if (mask & SNAP_SKIN)
+		state->state.skin = (unsigned char)MSG_ReadByte ();
+	if (mask & SNAP_EFFECTS)
+		state->state.effects = MSG_ReadByte ();
+	if (mask & SNAP_ALPHA)
+		state->state.alpha = (unsigned char)MSG_ReadByte ();
+	if (mask & SNAP_SCALE)
+		state->state.scale = (unsigned char)MSG_ReadByte ();
+	if (mask & SNAP_STEP)
+		state->step = (byte)MSG_ReadByte ();
+}
+
+static void CL_ClearSnapshotEntity (int entnum)
+{
+	entity_t *ent;
+
+	if (entnum <= 0 || entnum >= cl_max_edicts)
+		return;
+	ent = &cl_entities[entnum];
+
+	ent->model = NULL;
+	ent->effects = 0;
+	ent->forcelink = true;
+}
+
+static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
+{
+	entity_t	*ent;
+	qboolean	forcelink;
+	double		oldtime;
+	int			i;
+	int			skin;
+	model_t		*model;
+
+	ent = CL_EntityNum (entnum);
+	forcelink = (ent->msgtime != cl.mtime[1]);
+	oldtime = ent->msgtime;
+
+	if (oldtime + 0.2 < cl.mtime[0])
+		ent->lerpflags |= LERP_RESETANIM;
+
+	ent->msgtime = cl.mtime[0];
+
+	VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+	VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+
+	ent->frame = state->state.frame;
+	ent->effects = state->state.effects;
+	ent->alpha = state->state.alpha;
+	ent->scale = state->state.scale;
+
+	i = state->state.colormap;
+	if (!i)
+		ent->colormap = vid.colormap;
+	else
+	{
+		if (i > cl.maxclients)
+			Sys_Error ("CL_ApplySnapshotState: i >= cl.maxclients");
+		ent->colormap = cl.scores[i-1].translations;
+	}
+
+	skin = state->state.skin;
+	if (skin != ent->skinnum)
+	{
+		ent->skinnum = skin;
+		if (entnum > 0 && entnum <= cl.maxclients)
+			R_TranslateNewPlayerSkin (entnum - 1);
+	}
+
+	for (i = 0; i < 3; i++)
+	{
+		ent->msg_origins[0][i] = state->state.origin[i];
+		ent->msg_angles[0][i] = state->state.angles[i];
+	}
+
+	if (state->step)
+	{
+		ent->lerpflags |= LERP_MOVESTEP;
+		ent->forcelink = true;
+	}
+	else
+		ent->lerpflags &= ~LERP_MOVESTEP;
+
+	model = cl.model_precache[state->state.modelindex];
+	if (model != ent->model)
+	{
+		ent->model = model;
+		if (model)
+		{
+			if (model->synctype == ST_FRAMETIME)
+				ent->syncbase = -cl.time;
+			else if (model->synctype == ST_RAND)
+				ent->syncbase = (float)(rand()&0x7fff) / 0x7fff;
+			else
+				ent->syncbase = 0.0;
+		}
+		else
+			forcelink = true;
+		if (entnum > 0 && entnum <= cl.maxclients)
+			R_TranslateNewPlayerSkin (entnum - 1);
+
+		ent->lerpflags |= LERP_RESETANIM;
+	}
+	else if (model && model->synctype == ST_FRAMETIME)
+		ent->syncbase = -cl.time;
+
+	ent->baseline = state->state;
+
+	if (forcelink)
+	{
+		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+		VectorCopy (ent->msg_origins[0], ent->origin);
+		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+		VectorCopy (ent->msg_angles[0], ent->angles);
+		ent->forcelink = true;
+	}
+}
+
 /*
 ==================
 CL_ParseBaseline
@@ -700,6 +867,107 @@ void CL_ParseBaseline (entity_t *ent, int version) //johnfitz -- added argument
 
 	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte() : ENTALPHA_DEFAULT; //johnfitz -- PROTOCOL_FITZQUAKE
 	ent->baseline.scale = (bits & B_SCALE) ? MSG_ReadByte() : ENTSCALE_DEFAULT;
+}
+
+static void CL_ParseSnapshotFull (void)
+{
+	unsigned int seq;
+	int count;
+	int i;
+
+	seq = (unsigned int)MSG_ReadLong ();
+	count = (unsigned short)MSG_ReadShort ();
+
+	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+	for (i = 1; i < cl_max_edicts; i++)
+		CL_ClearSnapshotEntity (i);
+
+	for (i = 0; i < count; i++)
+	{
+		int entnum;
+		snapshot_state_t state;
+
+		entnum = (unsigned short)MSG_ReadShort ();
+		if (entnum <= 0 || entnum >= cl_max_edicts)
+			Host_Error ("CL_ParseSnapshotFull: entnum out of range");
+		CL_ReadSnapshotState (&state);
+		cl.snapshot_baseline[entnum] = state;
+		cl.snapshot_present[entnum] = 1;
+		CL_ApplySnapshotState (entnum, &state);
+	}
+
+	cl.snapshot_baseline_seq = seq;
+	CL_SendSnapshotAck (seq);
+}
+
+static void CL_ParseSnapshotDelta (void)
+{
+	unsigned int seq;
+	unsigned int baseline_seq;
+	unsigned int mask;
+	int count;
+	int i;
+	qboolean baseline_match;
+
+	seq = (unsigned int)MSG_ReadLong ();
+	baseline_seq = (unsigned int)MSG_ReadLong ();
+	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
+
+	count = (unsigned short)MSG_ReadShort ();
+	for (i = 0; i < count; i++)
+	{
+		int entnum = (unsigned short)MSG_ReadShort ();
+		if (baseline_match && entnum > 0 && entnum < cl_max_edicts)
+		{
+			cl.snapshot_present[entnum] = 0;
+			CL_ClearSnapshotEntity (entnum);
+		}
+	}
+
+	count = (unsigned short)MSG_ReadShort ();
+	for (i = 0; i < count; i++)
+	{
+		int entnum = (unsigned short)MSG_ReadShort ();
+		snapshot_state_t state;
+
+		CL_ReadSnapshotState (&state);
+		if (baseline_match && entnum > 0 && entnum < cl_max_edicts)
+		{
+			cl.snapshot_baseline[entnum] = state;
+			cl.snapshot_present[entnum] = 1;
+			CL_ApplySnapshotState (entnum, &state);
+		}
+	}
+
+	count = (unsigned short)MSG_ReadShort ();
+	for (i = 0; i < count; i++)
+	{
+		int entnum = (unsigned short)MSG_ReadShort ();
+		mask = (unsigned int)MSG_ReadLong ();
+		if (baseline_match && entnum > 0 && entnum < cl_max_edicts && cl.snapshot_present[entnum])
+		{
+			snapshot_state_t state = cl.snapshot_baseline[entnum];
+			CL_ReadSnapshotDeltaFields (&state, mask);
+			cl.snapshot_baseline[entnum] = state;
+			CL_ApplySnapshotState (entnum, &state);
+		}
+		else
+		{
+			snapshot_state_t scratch;
+			memset (&scratch, 0, sizeof(scratch));
+			CL_ReadSnapshotDeltaFields (&scratch, mask);
+		}
+	}
+
+	if (baseline_match)
+	{
+		cl.snapshot_baseline_seq = seq;
+		CL_SendSnapshotAck (seq);
+	}
+	else
+	{
+		CL_SendSnapshotAck (0);
+	}
 }
 
 #define CL_SetHudStat(stat) cl.statsf[stat] = cl.stats[stat]
@@ -1386,9 +1654,16 @@ void CL_ParseServerMessage (void)
 		case svc_localsound:
 			CL_ParseLocalSound();
 			break;
+
+		case svc_snapshot_full:
+			CL_ParseSnapshotFull ();
+			break;
+
+		case svc_snapshot_delta:
+			CL_ParseSnapshotDelta ();
+			break;
 		}
 
 		lastcmd = cmd; //johnfitz
 	}
 }
-

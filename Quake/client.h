@@ -271,6 +271,9 @@ typedef struct
 	int			num_entities;	// held in cl_entities array
 	int			num_statics;	// held in cl_staticentities array
 	entity_t	viewent;			// the gun model
+	unsigned int snapshot_baseline_seq;
+	snapshot_state_t *snapshot_baseline;
+	byte		*snapshot_present;
 
 	int			cdtrack, looptrack;	// cd audio
 

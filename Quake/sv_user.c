@@ -602,6 +602,10 @@ nextmsg:
 			case clc_move:
 				SV_ReadClientMove (&host_client->cmd);
 				break;
+
+			case clc_snapshot_ack:
+				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadLong ());
+				break;
 			}
 		}
 	} while (ret == 1);
@@ -644,4 +648,3 @@ void SV_RunClients (void)
 			SV_ClientThink ();
 	}
 }
-

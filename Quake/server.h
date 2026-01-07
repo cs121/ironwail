@@ -161,6 +161,17 @@ typedef struct client_s
 	int				oldstats_i[MAX_CL_STATS];		//previous values of stats. if these differ from the current values, reflag resendstats.
 	float			oldstats_f[MAX_CL_STATS];		//previous values of stats. if these differ from the current values, reflag resendstats.
 	char			*oldstats_s[MAX_CL_STATS];
+
+	unsigned int	snapshot_next_seq;
+	unsigned int	snapshot_baseline_seq;
+	unsigned int	snapshot_pending_seq;
+	unsigned int	snapshot_pending_baseline_seq;
+	double			snapshot_pending_time;
+	qboolean		snapshot_pending_is_delta;
+	snapshot_state_t *snapshot_baseline;
+	byte			*snapshot_baseline_present;
+	snapshot_state_t *snapshot_pending;
+	byte			*snapshot_pending_present;
 } client_t;
 
 
@@ -307,5 +318,6 @@ void SV_CheckForNewClients (void);
 void SV_RunClients (void);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
+void SV_SnapshotAck (client_t *client, unsigned int seq);
 
 #endif	/* QUAKE_SERVER_H */

@@ -119,6 +119,8 @@ void CL_ClearState (void)
 	//johnfitz -- cl_entities is now dynamically allocated
 	cl_max_edicts = CLAMP (MIN_EDICTS,(int)max_edicts.value,MAX_EDICTS);
 	cl_entities = (entity_t *) Hunk_AllocName (cl_max_edicts*sizeof(entity_t), "cl_entities");
+	cl.snapshot_baseline = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_base");
+	cl.snapshot_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
 	//johnfitz
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));

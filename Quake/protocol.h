@@ -69,6 +69,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define U_EXTEND2		(1<<23) // another byte to follow, future expansion
 //johnfitz
 
+// snapshot delta field bits
+#define SNAP_ORIGIN1	(1u<<0)
+#define SNAP_ORIGIN2	(1u<<1)
+#define SNAP_ORIGIN3	(1u<<2)
+#define SNAP_ANGLE1		(1u<<3)
+#define SNAP_ANGLE2		(1u<<4)
+#define SNAP_ANGLE3		(1u<<5)
+#define SNAP_MODEL		(1u<<6)
+#define SNAP_FRAME		(1u<<7)
+#define SNAP_COLORMAP	(1u<<8)
+#define SNAP_SKIN		(1u<<9)
+#define SNAP_EFFECTS	(1u<<10)
+#define SNAP_ALPHA		(1u<<11)
+#define SNAP_SCALE		(1u<<12)
+#define SNAP_STEP		(1u<<13)
+
 //johnfitz -- PROTOCOL_NEHAHRA transparency
 #define U_TRANS			(1<<15)
 //johnfitz
@@ -223,6 +239,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_levelcompleted	54
 #define svc_backtolobby		55
 #define svc_localsound		56
+#define svc_snapshot_full	57
+#define svc_snapshot_delta	58
 
 //
 // client to server
@@ -232,6 +250,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_disconnect	2
 #define	clc_move		3		// [usercmd_t]
 #define	clc_stringcmd	4		// [string] message
+#define	clc_snapshot_ack	5	// [long] seq
 
 //
 // temp entity events
@@ -266,6 +285,12 @@ typedef struct
 	unsigned char	scale;		//Quakespasm: for model scale support.
 	int		effects;
 } entity_state_t;
+
+typedef struct
+{
+	entity_state_t	state;
+	byte		step;
+} snapshot_state_t;
 
 typedef struct
 {
