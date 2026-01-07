@@ -2998,6 +2998,7 @@ void R_SetFrustum (void)
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
         memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
+        memcpy (r_framedata.view, r_matview, 16 * sizeof (float));
         r_framedata.zparams[0] = LIGHT_TILES_Z / (logzfar - logznear);
         r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
 }
