@@ -8,9 +8,10 @@ layout(location=0) uniform float FogTemporalAlpha;
 layout(location=1) uniform float FogTemporalDepthReject;
 layout(location=2) uniform int FogDebugMode;
 layout(location=3) uniform mat4 FogInvViewProj;
-layout(location=4) uniform vec4 FogViewportParams; // xy: size, zw: inv size
+layout(location=4) uniform vec4 FogViewportParams; // xy: screen size, zw: inv screen size
 layout(location=5) uniform vec2 FogDepthScale;
 layout(location=6) uniform int FogHistoryValid;
+layout(location=7) uniform vec4 FogViewParams; // xy: view origin in screen px, zw: inv view size
 
 layout(location=0) out vec4 OutColor;
 
@@ -23,9 +24,9 @@ float DepthToNdcZ(float depth)
 #endif
 }
 
-bool Reproject(vec2 uv, float depthNdc, out vec2 prevUv, out float prevDepthNdc)
+bool Reproject(vec2 viewUv, float depthNdc, out vec2 prevViewUv, out float prevDepthNdc)
 {
-	vec4 clip = vec4(uv * 2.0 - 1.0, depthNdc, 1.0);
+	vec4 clip = vec4(viewUv * 2.0 - 1.0, depthNdc, 1.0);
 	vec4 world = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 		return false;
@@ -33,16 +34,19 @@ bool Reproject(vec2 uv, float depthNdc, out vec2 prevUv, out float prevDepthNdc)
 	if (abs(prevClip.w) < 1e-6)
 		return false;
 	vec3 prevNdc = prevClip.xyz / prevClip.w;
-	prevUv = prevNdc.xy * 0.5 + 0.5;
+	prevViewUv = prevNdc.xy * 0.5 + 0.5;
 	prevDepthNdc = prevNdc.z;
 	return true;
 }
 
 void main()
 {
-	vec2 invViewport = FogViewportParams.zw;
-	vec2 uv = gl_FragCoord.xy * invViewport;
-	vec4 current = texture(FogCurrent, uv);
+	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
+	vec2 invScreen = FogViewportParams.zw;
+	vec2 screenUv = screenPos * invScreen;
+	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
+	vec2 viewSize = 1.0 / max(FogViewParams.zw, vec2(1e-6));
+	vec4 current = texture(FogCurrent, screenUv);
 
 	if (FogHistoryValid == 0 || PrevFrameValid == 0u || FogTemporalAlpha <= 0.0 || FogDebugMode == 5 || FogDebugMode == 8)
 	{
@@ -50,21 +54,23 @@ void main()
 		return;
 	}
 
-	ivec2 depthCoord = ivec2(gl_FragCoord.xy * FogDepthScale);
+	ivec2 depthCoord = ivec2(screenPos);
 	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
 	float depthNdc = DepthToNdcZ(depth);
 
-	vec2 prevUv;
+	vec2 prevViewUv;
 	float prevDepthNdc;
-	bool valid = Reproject(uv, depthNdc, prevUv, prevDepthNdc);
-	valid = valid && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)));
+	bool valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
+	valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
 
 	vec4 history = vec4(0.0);
+	vec2 prevScreenUv = vec2(0.0);
 	if (valid)
 	{
-		ivec2 prevCoord = ivec2(prevUv * FogViewportParams.xy);
+		prevScreenUv = (prevViewUv * viewSize + FogViewParams.xy) * invScreen;
+		ivec2 prevCoord = ivec2(prevScreenUv * FogViewportParams.xy);
 		prevCoord = clamp(prevCoord, ivec2(0), ivec2(FogViewportParams.xy) - ivec2(1));
-		float depthPrev = texelFetch(SceneDepth, ivec2(vec2(prevCoord) * FogDepthScale), 0).r;
+		float depthPrev = texelFetch(SceneDepth, prevCoord, 0).r;
 		float depthPrevNdc = DepthToNdcZ(depthPrev);
 		float depthReject = max(FogTemporalDepthReject, 0.0);
 		if (abs(depthPrevNdc - prevDepthNdc) > depthReject)
@@ -72,7 +78,7 @@ void main()
 	}
 
 	if (valid)
-		history = texture(FogHistory, prevUv);
+		history = texture(FogHistory, prevScreenUv);
 
 	if (FogDebugMode == 6)
 	{
@@ -86,15 +92,15 @@ void main()
 	{
 		for (int i = -1; i <= 1; ++i)
 		{
-			vec2 offset = vec2(i, j) * invViewport;
-			vec3 tap = texture(FogCurrent, uv + offset).rgb;
+			vec2 offset = vec2(i, j) * invScreen;
+			vec3 tap = texture(FogCurrent, screenUv + offset).rgb;
 			minColor = min(minColor, tap);
 			maxColor = max(maxColor, tap);
 		}
 	}
 	history.rgb = clamp(history.rgb, minColor, maxColor);
 
-	float motionPx = length((prevUv - uv) * FogViewportParams.xy);
+	float motionPx = length((prevScreenUv - screenUv) * FogViewportParams.xy);
 	float motionFactor = clamp(1.0 - motionPx * 0.1, 0.0, 1.0);
 	float alpha = (valid ? FogTemporalAlpha : 0.0) * motionFactor;
 	alpha = clamp(alpha, 0.0, 1.0);

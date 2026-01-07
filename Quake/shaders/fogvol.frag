@@ -30,8 +30,9 @@ layout(location=5) uniform int FogNoiseMode;
 layout(location=6) uniform int FogPhysBlend;
 layout(location=7) uniform int FogJitterEnabled;
 layout(location=8) uniform vec3 FogCameraPosWS;
-layout(location=9) uniform vec4 FogViewportParams; // xy: size, zw: inv size
+layout(location=9) uniform vec4 FogViewportParams; // xy: screen size, zw: inv screen size
 layout(location=10) uniform vec2 FogDepthScale;
+layout(location=11) uniform vec4 FogViewParams; // xy: view origin in screen px, zw: inv view size
 
 layout(location=0) out vec4 FragColor;
 
@@ -175,24 +176,26 @@ float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 
 void main()
 {
-	vec2 invViewport = FogViewportParams.zw;
-	vec2 uv = gl_FragCoord.xy * invViewport;
+	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
+	vec2 invScreen = FogViewportParams.zw;
+	vec2 screenUv = screenPos * invScreen;
+	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 
 	FogVolume volume = FogVolumes[FogVolumeIndex];
 	if (volume.misc.y <= 0.0)
 	{
-		FragColor = vec4(texture(SceneColor, uv).rgb, 1.0);
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
 		return;
 	}
 
-	ivec2 depthCoord = ivec2(gl_FragCoord.xy * FogDepthScale);
+	ivec2 depthCoord = ivec2(screenPos);
 	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
 	float ndcDepth = DepthToNdcZ(depth);
-	vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
+	vec4 clip = vec4(viewUv * 2.0 - 1.0, ndcDepth, 1.0);
 	vec4 world = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 	{
-		FragColor = vec4(texture(SceneColor, uv).rgb, 1.0);
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
 		return;
 	}
 	vec3 worldPos = world.xyz / world.w;
@@ -207,7 +210,7 @@ void main()
 	float tExit;
 	if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
 	{
-		FragColor = vec4(texture(SceneColor, uv).rgb, 1.0);
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
 		return;
 	}
 
@@ -218,7 +221,7 @@ void main()
 		tExit = min(tExit, maxDistance);
 	if (tExit <= tEnter)
 	{
-		FragColor = vec4(texture(SceneColor, uv).rgb, 1.0);
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
 		return;
 	}
 
@@ -308,7 +311,7 @@ void main()
 		return;
 	}
 
-	vec3 scene = texture(SceneColor, uv).rgb;
+	vec3 scene = texture(SceneColor, screenUv).rgb;
 	vec3 outColor;
 	if (FogPhysBlend != 0)
 		outColor = scene * transmittance + accum;
