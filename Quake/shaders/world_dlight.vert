@@ -34,7 +34,9 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
 struct Call
 {
         uint    flags;
+        uint    tcgen;
         float   wateralpha;
+        float   _pad0;
         vec2    polygon_offset;
         vec4    stage_color;
 #if BINDLESS
@@ -53,6 +55,11 @@ const uint
         CF_USE_EMISSIVE = 8u,
         CF_ALPHA_TEST = 16u
 ;
+
+const uint
+	TCGEN_BASE = 0u,
+	TCGEN_LIGHTMAP = 1u,
+	TCGEN_ENVIRONMENT = 2u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -115,6 +122,14 @@ layout(location=6) out vec3 out_normal;
         layout(location=8) flat out uvec2 out_samplers1;
 #endif
 
+vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
+{
+	vec3 view_dir = normalize(EyePos - world_pos);
+	vec3 refl = reflect(-view_dir, normalize(world_normal));
+	float m = 2.0 * sqrt(refl.x * refl.x + refl.y * refl.y + (refl.z + 1.0) * (refl.z + 1.0));
+	return refl.xy / max(m, 1e-6) + 0.5;
+}
+
 void main()
 {
         Call call = call_data[DRAW_ID];
@@ -137,7 +152,12 @@ void main()
         gl_Position = curr_clip;
         out_pos = world_pos;
         out_normal = normalize(world_normal);
-        out_uv = in_uv.xy;
+	vec2 uv = in_uv.xy;
+	if (call.tcgen == TCGEN_LIGHTMAP)
+		uv = in_uv.zw;
+	else if (call.tcgen == TCGEN_ENVIRONMENT)
+		uv = ComputeEnvUV(world_pos, world_normal);
+        out_uv = uv;
         out_depth = gl_Position.w;
         out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
         out_flags = call.flags;

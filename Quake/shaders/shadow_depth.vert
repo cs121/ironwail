@@ -11,7 +11,9 @@
 struct Call
 {
 	uint	flags;
+	uint	tcgen;
 	float	wateralpha;
+	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
 #if BINDLESS

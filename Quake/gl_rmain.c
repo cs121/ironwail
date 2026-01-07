@@ -3248,7 +3248,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[2] = 0.f;
         r_framedata.colorspace_params[3] = 0.f;
         r_framedata.shader_params[0] = r_shader_debug.value;
-        r_framedata.shader_params[1] = 0.f;
+        r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;

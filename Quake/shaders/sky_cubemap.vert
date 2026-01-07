@@ -18,7 +18,9 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 struct Call
 {
 	uint	flags;
+	uint	tcgen;
 	float	wateralpha;
+	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
 #if BINDLESS

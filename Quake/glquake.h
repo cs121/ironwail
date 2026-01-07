@@ -441,7 +441,7 @@ typedef struct gpuframedata_s {
         vec4_t          lightgrid_params; // x: enabled, yzw: unused
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
-        vec4_t          shader_params;  // x: shader debug, yzw: unused
+        vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
@@ -455,6 +455,13 @@ typedef struct gpuframedata_s {
         unsigned int    _padding1;
         unsigned int    _padding2;
 } gpuframedata_t;
+
+typedef enum
+{
+	TCGEN_BASE = 0,
+	TCGEN_LIGHTMAP = 1,
+	TCGEN_ENVIRONMENT = 2,
+} tcgen_mode_t;
 
 extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
