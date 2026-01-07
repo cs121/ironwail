@@ -7,6 +7,7 @@ layout(std140, binding=0) uniform FrameDataUBO
 {
         mat4    ViewProj;
         mat4    PrevViewProj;
+        mat4    View;
         vec4    Fog;
         vec4    SkyFog;
         vec3    WindDir;

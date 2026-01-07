@@ -430,6 +430,7 @@ typedef struct gpuframedata_s {
         // Fields are grouped into vec4-aligned blocks to match the std140 layout in frame_uniforms.glsl.
         float           viewproj[16];
         float           prev_viewproj[16];
+        float           view[16];
         float           fogdata[4];
         float           skyfogdata[4];
         vec4_t          wind;           // xyz: winddir, w: windphase

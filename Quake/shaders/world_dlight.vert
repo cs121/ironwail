@@ -126,8 +126,9 @@ vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
 	vec3 view_dir = normalize(EyePos - world_pos);
 	vec3 refl = reflect(-view_dir, normalize(world_normal));
-	float m = 2.0 * sqrt(refl.x * refl.x + refl.y * refl.y + (refl.z + 1.0) * (refl.z + 1.0));
-	return refl.xy / max(m, 1e-6) + 0.5;
+	vec3 refl_view = mat3(View) * refl;
+	float m = 2.0 * sqrt(refl_view.x * refl_view.x + refl_view.y * refl_view.y + (refl_view.z + 1.0) * (refl_view.z + 1.0));
+	return refl_view.xy / max(m, 1e-6) + 0.5;
 }
 
 void main()
