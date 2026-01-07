@@ -1407,6 +1407,11 @@ void CL_ParseServerMessage (void)
 			cl.mtime[1] = cl.mtime[0];
 			cl.mtime[0] = MSG_ReadFloat ();
 			cl.fixangle = false;
+			if (cls.signon == SIGNONS - 1)
+			{	// allow map loads with no visible entity updates to finish signon
+				cls.signon = SIGNONS;
+				CL_SignonReply ();
+			}
 			break;
 
 		case svc_clientdata:
