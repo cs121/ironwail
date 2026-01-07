@@ -622,7 +622,7 @@ void R_FogVol_Render (void)
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
 	else
-		glViewport (glx, gly, glwidth, glheight);
+		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
 	src_tex = framebufs.composite.color_tex;
 	final_tex = 0;
