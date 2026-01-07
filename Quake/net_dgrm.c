@@ -883,7 +883,28 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	control = BigLong(*((int *)net_message.data));
 	MSG_ReadLong();
 	if (control == -1)
+	{
+		const char *request = MSG_ReadString();
+
+		if (!q_strncasecmp(request, "status", 6) ||
+			!q_strncasecmp(request, "info", 4) ||
+			!q_strncasecmp(request, "A2A_INFO", 8))
+		{
+			char reply[MAX_MSGLEN];
+
+			q_snprintf (reply, sizeof (reply),
+					"\\hostname\\%s\\map\\%s\\players\\%d\\max\\%d",
+					hostname.string, sv.name, net_activeconnections, svs.maxclients);
+
+			SZ_Clear(&net_message);
+			MSG_WriteLong(&net_message, -1);
+			MSG_WriteString(&net_message, "statusResponse");
+			MSG_WriteString(&net_message, reply);
+			dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+			SZ_Clear(&net_message);
+		}
 		return NULL;
+	}
 	if ((control & (~NETFLAG_LENGTH_MASK)) != (int)NETFLAG_CTL)
 		return NULL;
 	if ((control & NETFLAG_LENGTH_MASK) != len)
@@ -1418,4 +1439,3 @@ qsocket_t *Datagram_Connect (const char *host)
 	}
 	return ret;
 }
-
