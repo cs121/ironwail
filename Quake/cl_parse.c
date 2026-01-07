@@ -755,7 +755,7 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	double		oldtime;
 	int			i;
 	int			skin;
-	model_t		*model;
+	qmodel_t	*model;
 
 	ent = CL_EntityNum (entnum);
 	forcelink = (ent->msgtime != cl.mtime[1]);
