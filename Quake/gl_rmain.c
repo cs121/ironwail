@@ -3250,7 +3250,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = 0.f;
         r_framedata.shader_params[0] = r_shader_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = 0.f;
+        r_framedata.shader_params[2] = (r_envmap_source.value > 0.f && skybox && skybox->cubemap) ? 1.f : 0.f;
         r_framedata.shader_params[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;

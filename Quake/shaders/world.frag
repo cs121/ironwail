@@ -8,6 +8,7 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=6) uniform samplerCube EnvmapCube;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -224,6 +225,15 @@ float DepthToCanonical(float depth)
 #endif
 }
 
+vec3 ComputeEnvCubeDir(vec3 world_pos, vec3 world_normal)
+{
+	vec3 view_dir = normalize(EyePos - world_pos);
+	vec3 refl = reflect(-view_dir, normalize(world_normal));
+	vec3 refl_view = mat3(View) * refl;
+	vec3 dir = normalize(refl_view);
+	return vec3(-dir.y, dir.z, dir.x);
+}
+
 vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
 {
 	return vec3(0.0);
@@ -265,6 +275,7 @@ void main()
 	vec3 fullbright = vec3(0.0);
 	vec3 emissive = vec3(0.0);
 	vec2 uv = in_uv;
+	bool use_envmap = (in_tcgen == TCGEN_ENVIRONMENT) && (ShaderParams.z > 0.5);
 	
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
@@ -282,30 +293,39 @@ void main()
 	// Sample textures
 #if BINDLESS
 	sampler2D Tex = sampler2D(in_samplers0.xy);
-	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
+	if (!use_envmap && (in_flags & CF_USE_FULLBRIGHT) != 0u)
 	{
 		sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
 		fullbright = texture(FullbrightTex, uv).rgb;
 	}
-	if ((in_flags & CF_USE_EMISSIVE) != 0u)
+	if (!use_envmap && (in_flags & CF_USE_EMISSIVE) != 0u)
 	{
 		sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
 		emissive = texture(EmissiveSampler, uv).rgb;
 	}
 #else
-	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
+	if (!use_envmap && (in_flags & CF_USE_FULLBRIGHT) != 0u)
 		fullbright = texture(FullbrightTex, uv).rgb;
-	if ((in_flags & CF_USE_EMISSIVE) != 0u)
+	if (!use_envmap && (in_flags & CF_USE_EMISSIVE) != 0u)
 		emissive = texture(EmissiveTex, uv).rgb;
 #endif
 
+	vec4 result;
+	if (use_envmap)
+	{
+		vec3 env_dir = ComputeEnvCubeDir(in_pos, in_normal);
+		result = texture(EnvmapCube, env_dir);
+	}
+	else
+	{
 #if DITHER >= 2
-	vec4 result = texture(Tex, uv, -1.0);
+		result = texture(Tex, uv, -1.0);
 #elif DITHER
-	vec4 result = texture(Tex, uv, -0.5);
+		result = texture(Tex, uv, -0.5);
 #else
-	vec4 result = texture(Tex, uv);
+		result = texture(Tex, uv);
 #endif
+	}
 
 #if MODE == 1
 	if (result.a < 0.666)
