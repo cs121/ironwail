@@ -526,6 +526,10 @@ void R_FogVol_Render (void)
 	int fog_height;
 	float depth_scale_x;
 	float depth_scale_y;
+	float view_x;
+	float view_y;
+	float view_w;
+	float view_h;
 	int fog_src_index = 0;
 	int fog_dst_index = 0;
 	GLuint final_tex = 0;
@@ -548,6 +552,10 @@ void R_FogVol_Render (void)
 	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
 	depth_scale_x = (float)glwidth / (float)fog_width;
 	depth_scale_y = (float)glheight / (float)fog_height;
+	view_x = (float)(glx + r_refdef.vrect.x);
+	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
+	view_w = (float)r_refdef.vrect.width;
+	view_h = (float)r_refdef.vrect.height;
 
 	if (use_halfres && r_fogvol_steps_scale_halfres.value > 0.f)
 		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
@@ -607,13 +615,14 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (7, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	GL_Uniform4fFunc (9, (float)fog_width, (float)fog_height, 1.f / (float)fog_width, 1.f / (float)fog_height);
+	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
+	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
 	else
-		glViewport (glx, gly, glwidth, glheight);
+		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
 	src_tex = framebufs.composite.color_tex;
 	final_tex = 0;
@@ -731,9 +740,10 @@ void R_FogVol_Render (void)
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
 		GL_Uniform1iFunc (2, mode);
 		GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_viewproj);
-		GL_Uniform4fFunc (4, (float)fog_width, (float)fog_height, 1.f / (float)fog_width, 1.f / (float)fog_height);
+		GL_Uniform4fFunc (4, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
 		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
+		GL_Uniform4fFunc (7, view_x, view_y, 1.f / view_w, 1.f / view_h);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		final_tex = framebufs.fogvol.history_tex[history_dst];
