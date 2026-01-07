@@ -48,7 +48,9 @@ layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
 struct Call
 {
 	uint	flags;
+	uint	tcgen;
 	float	wateralpha;
+	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
 #if BINDLESS
@@ -73,6 +75,11 @@ const uint
 	CF_MAT_TRANS = 1024u,
 	CF_MAT_SKY = 2048u,
 	CF_MAT_HAS_SHADER = 4096u;
+
+const uint
+	TCGEN_BASE = 0u,
+	TCGEN_LIGHTMAP = 1u,
+	TCGEN_ENVIRONMENT = 2u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -139,6 +146,7 @@ layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
 layout(location=15) flat in vec4 in_stage_color;
+layout(location=16) flat in uint in_tcgen;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -261,6 +269,15 @@ void main()
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
 #endif
+	int tcgen_debug = int(ShaderParams.y + 0.5);
+	if (tcgen_debug > 0 && in_tcgen == TCGEN_ENVIRONMENT)
+	{
+		OUT_COLOR = vec4(fract(uv), 0.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 
 	// Sample textures
 #if BINDLESS

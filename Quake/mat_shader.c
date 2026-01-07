@@ -144,6 +144,7 @@ static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
+cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
 cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 static cvar_t r_matshader_fuzz = { "r_matshader_fuzz", "0", CVAR_NONE };
@@ -1063,6 +1064,7 @@ void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
+	Cvar_RegisterVariable (&r_tcgen_debug);
 	Cvar_RegisterVariable (&r_matshader_debug_parse);
 	Cvar_RegisterVariable (&r_reloadshaders);
 	Cvar_RegisterVariable (&r_matshader_fuzz);

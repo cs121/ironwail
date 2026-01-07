@@ -283,8 +283,11 @@ typedef struct bmodel_gpu_instance_s {
 
 typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
+	GLuint		tcgen;
 	GLfloat		alpha;
+	GLfloat		_pad0;
 	GLfloat		polygon_offset[2];
+	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
@@ -294,8 +297,11 @@ typedef struct bmodel_bindless_gpu_call_s {
 
 typedef struct bmodel_bound_gpu_call_s {
 	GLuint		flags;
+	GLuint		tcgen;
 	GLfloat		alpha;
+	GLfloat		_pad0;
 	GLfloat		polygon_offset[2];
+	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
 	GLint		baseinstance;
 	GLint		padding[3];
@@ -611,9 +617,13 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	{
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
+		call->tcgen = TCGEN_BASE;
 		call->alpha = alpha;
+		call->_pad0 = 0.f;
 		call->polygon_offset[0] = polygon_offset_factor;
 		call->polygon_offset[1] = polygon_offset_units;
+		call->_pad1[0] = 0.f;
+		call->_pad1[1] = 0.f;
 		call->stage_color[0] = 1.f;
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
@@ -628,9 +638,13 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
+		call->tcgen = TCGEN_BASE;
 		call->alpha = alpha;
+		call->_pad0 = 0.f;
 		call->polygon_offset[0] = polygon_offset_factor;
 		call->polygon_offset[1] = polygon_offset_units;
+		call->_pad1[0] = 0.f;
+		call->_pad1[1] = 0.f;
 		call->stage_color[0] = 1.f;
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
@@ -653,7 +667,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 }
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
-	qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
+	tcgen_mode_t tcgen, qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
 	const vec4_t stage_color)
 {
 	GLuint flags;
@@ -676,9 +690,13 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 	{
 		bmodel_bindless_gpu_call_t *call = &bmodel_calls.bindless.params[num_bmodel_calls];
 		call->flags = flags;
+		call->tcgen = tcgen;
 		call->alpha = alpha;
+		call->_pad0 = 0.f;
 		call->polygon_offset[0] = polygon_offset_factor;
 		call->polygon_offset[1] = polygon_offset_units;
+		call->_pad1[0] = 0.f;
+		call->_pad1[1] = 0.f;
 		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
@@ -693,9 +711,13 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		bmodel_bound_gpu_call_t *call = &bmodel_calls.bound.params[num_bmodel_calls];
 		gltexture_t **textures = bmodel_calls.bound.textures[num_bmodel_calls];
 		call->flags = flags;
+		call->tcgen = tcgen;
 		call->alpha = alpha;
+		call->_pad0 = 0.f;
 		call->polygon_offset[0] = polygon_offset_factor;
 		call->polygon_offset[1] = polygon_offset_units;
+		call->_pad1[0] = 0.f;
+		call->_pad1[1] = 0.f;
 		call->stage_color[0] = stage_color ? stage_color[0] : 1.f;
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
@@ -881,6 +903,28 @@ static qboolean R_StageUsesLightmap (const mat_shader_stage_t *stage, size_t sta
 	if (stage_index == 0 && stage->blend_mode == MAT_BLEND_REPLACE)
 		return true;
 	return false;
+}
+
+static tcgen_mode_t R_ResolveStageTcGen (const mat_shader_stage_t *stage)
+{
+	if (!stage)
+		return TCGEN_BASE;
+
+	switch (stage->tcgen)
+	{
+	case MAT_TCGEN_ENVIRONMENT:
+		return TCGEN_ENVIRONMENT;
+	case MAT_TCGEN_LIGHTMAP:
+		return TCGEN_LIGHTMAP;
+	case MAT_TCGEN_BASE:
+	default:
+		break;
+	}
+
+	if (stage->map_type == MAT_MAP_LIGHTMAP)
+		return TCGEN_LIGHTMAP;
+
+	return TCGEN_BASE;
 }
 
 static qboolean R_StageIsOpaqueBase (const shader_material_t *material)
@@ -1138,7 +1182,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-						stage_tex, fb, em,
+						stage_tex, fb, em, R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
@@ -1310,7 +1354,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-						stage_tex, fb, em,
+						stage_tex, fb, em, R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}

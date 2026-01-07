@@ -47,7 +47,9 @@ float GetLightStyle(int index)
 struct Call
 {
 	uint	flags;
+	uint	tcgen;
 	float	wateralpha;
+	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
 #if BINDLESS
@@ -66,6 +68,11 @@ const uint
 	CF_USE_EMISSIVE = 8u,
 	CF_ALPHA_TEST = 16u
 ;
+
+const uint
+	TCGEN_BASE = 0u,
+	TCGEN_LIGHTMAP = 1u,
+	TCGEN_ENVIRONMENT = 2u;
 
 layout(std430, binding=1) restrict readonly buffer CallBuffer
 {
@@ -144,6 +151,15 @@ layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
 layout(location=15) flat out vec4 out_stage_color;
+layout(location=16) flat out uint out_tcgen;
+
+vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
+{
+	vec3 view_dir = normalize(EyePos - world_pos);
+	vec3 refl = reflect(-view_dir, normalize(world_normal));
+	float m = 2.0 * sqrt(refl.x * refl.x + refl.y * refl.y + (refl.z + 1.0) * (refl.z + 1.0));
+	return refl.xy / max(m, 1e-6) + 0.5;
+}
 
 void main()
 {
@@ -173,7 +189,12 @@ void main()
         out_pos = world_pos;
         out_normal = normalize(world_normal);
         out_lightgrid = in_lightgrid;
-        out_uv = in_uv.xy;
+	vec2 uv = in_uv.xy;
+	if (call.tcgen == TCGEN_LIGHTMAP)
+		uv = in_uv.zw;
+	else if (call.tcgen == TCGEN_ENVIRONMENT)
+		uv = ComputeEnvUV(world_pos, world_normal);
+        out_uv = uv;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
@@ -199,6 +220,7 @@ void main()
 		out_styles.xy = vec2(1., -1.);
 	out_lmofs = in_lmofs;
 	out_stage_color = call.stage_color;
+	out_tcgen = call.tcgen;
 #if BINDLESS
 	out_samplers0.xy = call.txhandle;
 	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
