@@ -879,8 +879,6 @@ static void CL_ParseSnapshotFull (void)
 	count = (unsigned short)MSG_ReadShort ();
 
 	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-	for (i = 1; i < cl_max_edicts; i++)
-		CL_ClearSnapshotEntity (i);
 
 	for (i = 0; i < count; i++)
 	{
@@ -961,6 +959,11 @@ static void CL_ParseSnapshotDelta (void)
 
 	if (baseline_match)
 	{
+		for (i = 1; i < cl_max_edicts; i++)
+		{
+			if (cl.snapshot_present[i] && cl_entities[i].msgtime != cl.mtime[0])
+				cl_entities[i].msgtime = cl.mtime[0];
+		}
 		cl.snapshot_baseline_seq = seq;
 		CL_SendSnapshotAck (seq);
 	}
