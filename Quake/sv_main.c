@@ -40,6 +40,9 @@ static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
 
 //============================================================================
 
+static void SV_InitClientSnapshotData (client_t *client);
+static void SV_ResetClientSnapshot (client_t *client);
+
 void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **statss)
 {
 	size_t i;
