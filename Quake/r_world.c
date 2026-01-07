@@ -70,6 +70,12 @@ static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 		&& model->usedtextures;
 }
 
+static void R_BindEnvmapCubemap (void)
+{
+	if (r_envmap_source.value > 0.f && skybox && skybox->cubemap)
+		GL_Bind (GL_TEXTURE6, skybox->cubemap);
+}
+
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
 {
 	int used_count;
@@ -1032,6 +1038,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	R_ResetBModelCalls (program);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	R_BindEnvmapCubemap ();
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1479,12 +1486,13 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
-        R_ResetBModelCalls (program);
-        GL_SetState (state);
+R_ResetBModelCalls (program);
+GL_SetState (state);
 if (pass <= BP_ALPHATEST)
 {
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+R_BindEnvmapCubemap ();
 R_Shadow_BindShadowMap (GL_TEXTURE5);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
@@ -1685,6 +1693,7 @@ R_ResetBModelCalls (program);
 GL_SetState (state);
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+R_BindEnvmapCubemap ();
 
 GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);

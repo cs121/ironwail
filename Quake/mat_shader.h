@@ -257,6 +257,7 @@ typedef struct texture_s texture_t;
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
 extern cvar_t r_tcgen_debug;
+extern cvar_t r_envmap_source;
 extern cvar_t r_matshader_debug_parse;
 
 typedef enum
