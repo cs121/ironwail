@@ -1966,7 +1966,10 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		const float g = pixels[i * 4 + 1];
 		const float b = pixels[i * 4 + 2];
 		float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+		const float min_scene_luma = q_max (0.f, r_ae_min_scene_luma.value);
 		lum = q_max (lum, 0.0001f);
+		if (min_scene_luma > 0.f)
+			lum = q_max (lum, min_scene_luma);
 		luminance_samples[i] = lum;
 	}
 
