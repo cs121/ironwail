@@ -7,6 +7,7 @@
 cvar_t sv_tickrate = {"sv_tickrate", "60", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "30", CVAR_NONE};
 cvar_t sv_netburst = {"sv_netburst", "1", CVAR_NONE};
+cvar_t sv_net_mtu = {"sv_net_mtu", "1200", CVAR_NONE};
 cvar_t sv_pktmax = {"sv_pktmax", "1200", CVAR_NONE};
 cvar_t sv_netcoalesce = {"sv_netcoalesce", "1", CVAR_NONE};
 cvar_t sv_net_debug = {"sv_net_debug", "0", CVAR_NONE};
@@ -62,6 +63,8 @@ static int SV_Coalesce_PacketCap(client_t *client)
 	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
 		cap = DATAGRAM_MTU;
 
+	if (sv_net_mtu.value > 0)
+		cap = q_min(cap, (int)sv_net_mtu.value);
 	if (sv_pktmax.value > 0)
 		cap = q_min(cap, (int)sv_pktmax.value);
 
@@ -107,6 +110,7 @@ void SV_Coalesce_RegisterCvars(void)
 	Cvar_RegisterVariable(&sv_tickrate);
 	Cvar_RegisterVariable(&sv_netrate);
 	Cvar_RegisterVariable(&sv_netburst);
+	Cvar_RegisterVariable(&sv_net_mtu);
 	Cvar_RegisterVariable(&sv_pktmax);
 	Cvar_RegisterVariable(&sv_netcoalesce);
 	Cvar_RegisterVariable(&sv_net_debug);

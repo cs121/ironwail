@@ -42,6 +42,8 @@ static cvar_t sv_netsort = {"sv_netsort", "1", CVAR_NONE};
 static cvar_t sv_snapshotdelta = {"sv_snapshotdelta", "1", CVAR_NONE};
 static cvar_t sv_snapshotdebug = {"sv_snapshotdebug", "0", CVAR_NONE};
 static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
+static cvar_t sv_snapshot_maxents = {"sv_snapshot_maxents", "768", CVAR_NONE};
+static cvar_t sv_snapshot_full_on_ackstall = {"sv_snapshot_full_on_ackstall", "3", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
 static cvar_t net_snap_debug = {"net_snap_debug", "0", CVAR_NONE};
@@ -109,6 +111,25 @@ void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **sta
 			break;
 		}
 	}
+}
+
+void SV_RunTick (double tick_dt)
+{
+	pr_global_struct->frametime = tick_dt;
+
+// set the time and clear the general datagram
+	SV_ClearDatagram ();
+
+// check for new clients
+	SV_CheckForNewClients ();
+
+// read client messages
+	SV_RunClients ();
+
+// move things around and think
+// always pause in single player if in console or menus
+	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
+		SV_Physics ();
 }
 
 /*
@@ -191,6 +212,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snapshotdelta);
 	Cvar_RegisterVariable (&sv_snapshotdebug);
 	Cvar_RegisterVariable (&sv_snapshottimeout);
+	Cvar_RegisterVariable (&sv_snapshot_maxents);
+	Cvar_RegisterVariable (&sv_snapshot_full_on_ackstall);
 	Cvar_RegisterVariable (&net_snap_tinyvel);
 	Cvar_RegisterVariable (&net_snap_forcefull_frames);
 	Cvar_RegisterVariable (&net_snap_debug);
@@ -751,6 +774,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_baseline_seq = 0;
 	client->snapshot_pending_time = 0;
 	client->snapshot_pending_is_delta = false;
+	client->snapshot_last_server_tick = 0;
 	client->snapshot_unacked_frames = 0;
 	client->snapshot_pending_mandatory = 0;
 	client->snapshot_pending_dropped = 0;
@@ -815,6 +839,9 @@ static qboolean SV_SnapshotMandatoryEnt (const edict_t *ent)
 		return true;
 	if (ent->v.movetype == MOVETYPE_PUSH && SV_SnapshotMoverMoving (ent))
 		return true;
+	if ((ent->v.movetype == MOVETYPE_TOSS || ent->v.movetype == MOVETYPE_BOUNCE)
+		&& SV_SnapshotTossMoving (ent))
+		return true;
 	return false;
 }
 
@@ -860,7 +887,7 @@ static int SV_SnapshotEntitySizeWorst (void)
 
 static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 {
-	int header_size = 1 + 2 + 2 + 2 + 2 + 2;
+	int header_size = 1 + 2 + 2 + 4 + 2 + 2 + 2;
 	int delta_counts_size = 3 * 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
 	int available = msg->maxsize - msg->cursize - header_size - delta_counts_size;
@@ -1075,23 +1102,21 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 	return count;
 }
 
-static void SV_WriteSnapshotCoord (sizebuf_t *msg, float value, qboolean hires)
+static qboolean SV_WriteSnapshotCoord (sizebuf_t *msg, float value, qboolean hires)
 {
 	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
-		MSG_WriteCoord32f (msg, value);
-	else
-		MSG_WriteCoord (msg, value, sv.protocolflags);
+		return MSG_TryWriteCoord32f (msg, value);
+	return MSG_TryWriteCoord (msg, value, sv.protocolflags);
 }
 
-static void SV_WriteSnapshotAngle (sizebuf_t *msg, float value, qboolean hires)
+static qboolean SV_WriteSnapshotAngle (sizebuf_t *msg, float value, qboolean hires)
 {
 	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
-		MSG_WriteFloat (msg, value);
-	else
-		MSG_WriteAngle (msg, value, sv.protocolflags);
+		return MSG_TryWriteFloat (msg, value);
+	return MSG_TryWriteAngle (msg, value, sv.protocolflags);
 }
 
-static void SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state, byte snapflags)
+static qboolean SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state, byte snapflags)
 {
 	int i;
 	qboolean hires_origin = (snapflags & SNAPFLAG_HIRES_ORIGIN) != 0;
@@ -1099,17 +1124,28 @@ static void SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state
 
 	for (i=0 ; i<3 ; i++)
 	{
-		SV_WriteSnapshotCoord (msg, state->state.origin[i], hires_origin);
-		SV_WriteSnapshotAngle (msg, state->state.angles[i], hires_angles);
+		if (!SV_WriteSnapshotCoord (msg, state->state.origin[i], hires_origin))
+			return false;
+		if (!SV_WriteSnapshotAngle (msg, state->state.angles[i], hires_angles))
+			return false;
 	}
-	MSG_WriteShort (msg, state->state.modelindex);
-	MSG_WriteShort (msg, state->state.frame);
-	MSG_WriteByte (msg, state->state.colormap);
-	MSG_WriteByte (msg, state->state.skin);
-	MSG_WriteByte (msg, state->state.effects);
-	MSG_WriteByte (msg, state->state.alpha);
-	MSG_WriteByte (msg, state->state.scale);
-	MSG_WriteByte (msg, state->step);
+	if (!MSG_TryWriteShort (msg, state->state.modelindex))
+		return false;
+	if (!MSG_TryWriteShort (msg, state->state.frame))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->state.colormap))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->state.skin))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->state.effects))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->state.alpha))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->state.scale))
+		return false;
+	if (!MSG_TryWriteByte (msg, state->step))
+		return false;
+	return true;
 }
 
 static byte SV_SnapshotNetFlags (byte flags)
@@ -1130,22 +1166,30 @@ static void SV_WriteShortAt (sizebuf_t *msg, int offset, unsigned short value)
 	msg->data[offset + 1] = (value >> 8) & 0xff;
 }
 
-static int SV_WriteSnapshotHeader (sizebuf_t *msg, qboolean is_delta, unsigned int seq,
-	unsigned int baseline_seq, unsigned short entity_count, int *out_payload_offset,
-	int *out_len_offset, int *out_crc_offset)
+static qboolean SV_WriteSnapshotHeader (sizebuf_t *msg, qboolean is_delta, unsigned int seq,
+	unsigned int baseline_seq, unsigned int server_tick, unsigned short entity_count,
+	int *out_payload_offset, int *out_len_offset, int *out_crc_offset)
 {
-	MSG_WriteByte (msg, is_delta ? svc_snapshot_delta : svc_snapshot_full);
-	MSG_WriteShort (msg, (int)seq);
-	MSG_WriteShort (msg, is_delta ? (int)baseline_seq : 0xFFFF);
+	if (!MSG_TryWriteByte (msg, is_delta ? svc_snapshot_delta : svc_snapshot_full))
+		return false;
+	if (!MSG_TryWriteShort (msg, (int)seq))
+		return false;
+	if (!MSG_TryWriteShort (msg, is_delta ? (int)baseline_seq : 0xFFFF))
+		return false;
+	if (!MSG_TryWriteLong (msg, (int)server_tick))
+		return false;
 
 	*out_len_offset = msg->cursize;
-	MSG_WriteShort (msg, 0);
-	MSG_WriteShort (msg, entity_count);
+	if (!MSG_TryWriteShort (msg, 0))
+		return false;
+	if (!MSG_TryWriteShort (msg, entity_count))
+		return false;
 	*out_crc_offset = msg->cursize;
-	MSG_WriteShort (msg, 0);
+	if (!MSG_TryWriteShort (msg, 0))
+		return false;
 
 	*out_payload_offset = msg->cursize;
-	return msg->cursize;
+	return true;
 }
 
 static void SV_FinalizeSnapshotHeader (sizebuf_t *msg, int payload_offset, int len_offset, int crc_offset)
@@ -1208,8 +1252,9 @@ static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const sn
 	return mask;
 }
 
-static void SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, const snapshot_state_t *states,
-	const byte *present, const byte *snapflags, int max_edicts, int *out_count)
+static qboolean SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, unsigned int server_tick,
+	const snapshot_state_t *states, const byte *present, const byte *snapflags, int max_edicts,
+	int *out_count)
 {
 	int count = 0;
 	int entnum;
@@ -1223,29 +1268,37 @@ static void SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, const snapsh
 			count++;
 	}
 
-	SV_WriteSnapshotHeader (msg, false, seq, 0, (unsigned short)count,
-		&payload_offset, &len_offset, &crc_offset);
-	MSG_WriteShort (msg, count);
+	if (!SV_WriteSnapshotHeader (msg, false, seq, 0, server_tick, (unsigned short)count,
+		&payload_offset, &len_offset, &crc_offset))
+		return false;
+	if (!MSG_TryWriteShort (msg, count))
+		return false;
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
 		if (!present[entnum])
 			continue;
-		MSG_WriteShort (msg, entnum);
+		if (!MSG_TryWriteShort (msg, entnum))
+			return false;
 		if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
-			MSG_WriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0);
-		SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0);
+		{
+			if (!MSG_TryWriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0))
+				return false;
+		}
+		if (!SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0))
+			return false;
 	}
 
 	SV_FinalizeSnapshotHeader (msg, payload_offset, len_offset, crc_offset);
 
 	if (out_count)
 		*out_count = count;
+	return true;
 }
 
-static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned int baseline_seq,
-	const snapshot_state_t *states, const byte *present, const snapshot_state_t *baseline,
-	const byte *baseline_present, const byte *snapflags, int max_edicts, int *out_remove,
-	int *out_add, int *out_update)
+static qboolean SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned int baseline_seq,
+	unsigned int server_tick, const snapshot_state_t *states, const byte *present,
+	const snapshot_state_t *baseline, const byte *baseline_present, const byte *snapflags,
+	int max_edicts, int *out_remove, int *out_add, int *out_update)
 {
 	int entnum;
 	int remove_count = 0;
@@ -1274,29 +1327,41 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 			update_count++;
 	}
 
-	SV_WriteSnapshotHeader (msg, true, seq, baseline_seq, (unsigned short)(add_count + update_count),
-		&payload_offset, &len_offset, &crc_offset);
+	if (!SV_WriteSnapshotHeader (msg, true, seq, baseline_seq, server_tick,
+		(unsigned short)(add_count + update_count), &payload_offset, &len_offset, &crc_offset))
+		return false;
 
-	MSG_WriteShort (msg, remove_count);
+	if (!MSG_TryWriteShort (msg, remove_count))
+		return false;
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
 		if (baseline_present[entnum] && !present[entnum])
-			MSG_WriteShort (msg, entnum);
+		{
+			if (!MSG_TryWriteShort (msg, entnum))
+				return false;
+		}
 	}
 
-	MSG_WriteShort (msg, add_count);
+	if (!MSG_TryWriteShort (msg, add_count))
+		return false;
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
 		if (!baseline_present[entnum] && present[entnum])
 		{
-			MSG_WriteShort (msg, entnum);
+			if (!MSG_TryWriteShort (msg, entnum))
+				return false;
 			if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
-				MSG_WriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0);
-			SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0);
+			{
+				if (!MSG_TryWriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0))
+					return false;
+			}
+			if (!SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0))
+				return false;
 		}
 	}
 
-	MSG_WriteShort (msg, update_count);
+	if (!MSG_TryWriteShort (msg, update_count))
+		return false;
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
 		unsigned int mask;
@@ -1306,36 +1371,80 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (!mask)
 			continue;
-		MSG_WriteShort (msg, entnum);
-		MSG_WriteLong (msg, (int)mask);
+		if (!MSG_TryWriteShort (msg, entnum))
+			return false;
+		if (!MSG_TryWriteLong (msg, (int)mask))
+			return false;
 		if (mask & SNAP_ORIGIN1)
-			SV_WriteSnapshotCoord (msg, states[entnum].state.origin[0], (mask & SNAP_HIRES_ORIGIN) != 0);
+		{
+			if (!SV_WriteSnapshotCoord (msg, states[entnum].state.origin[0], (mask & SNAP_HIRES_ORIGIN) != 0))
+				return false;
+		}
 		if (mask & SNAP_ORIGIN2)
-			SV_WriteSnapshotCoord (msg, states[entnum].state.origin[1], (mask & SNAP_HIRES_ORIGIN) != 0);
+		{
+			if (!SV_WriteSnapshotCoord (msg, states[entnum].state.origin[1], (mask & SNAP_HIRES_ORIGIN) != 0))
+				return false;
+		}
 		if (mask & SNAP_ORIGIN3)
-			SV_WriteSnapshotCoord (msg, states[entnum].state.origin[2], (mask & SNAP_HIRES_ORIGIN) != 0);
+		{
+			if (!SV_WriteSnapshotCoord (msg, states[entnum].state.origin[2], (mask & SNAP_HIRES_ORIGIN) != 0))
+				return false;
+		}
 		if (mask & SNAP_ANGLE1)
-			SV_WriteSnapshotAngle (msg, states[entnum].state.angles[0], (mask & SNAP_HIRES_ANGLES) != 0);
+		{
+			if (!SV_WriteSnapshotAngle (msg, states[entnum].state.angles[0], (mask & SNAP_HIRES_ANGLES) != 0))
+				return false;
+		}
 		if (mask & SNAP_ANGLE2)
-			SV_WriteSnapshotAngle (msg, states[entnum].state.angles[1], (mask & SNAP_HIRES_ANGLES) != 0);
+		{
+			if (!SV_WriteSnapshotAngle (msg, states[entnum].state.angles[1], (mask & SNAP_HIRES_ANGLES) != 0))
+				return false;
+		}
 		if (mask & SNAP_ANGLE3)
-			SV_WriteSnapshotAngle (msg, states[entnum].state.angles[2], (mask & SNAP_HIRES_ANGLES) != 0);
+		{
+			if (!SV_WriteSnapshotAngle (msg, states[entnum].state.angles[2], (mask & SNAP_HIRES_ANGLES) != 0))
+				return false;
+		}
 		if (mask & SNAP_MODEL)
-			MSG_WriteShort (msg, states[entnum].state.modelindex);
+		{
+			if (!MSG_TryWriteShort (msg, states[entnum].state.modelindex))
+				return false;
+		}
 		if (mask & SNAP_FRAME)
-			MSG_WriteShort (msg, states[entnum].state.frame);
+		{
+			if (!MSG_TryWriteShort (msg, states[entnum].state.frame))
+				return false;
+		}
 		if (mask & SNAP_COLORMAP)
-			MSG_WriteByte (msg, states[entnum].state.colormap);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].state.colormap))
+				return false;
+		}
 		if (mask & SNAP_SKIN)
-			MSG_WriteByte (msg, states[entnum].state.skin);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].state.skin))
+				return false;
+		}
 		if (mask & SNAP_EFFECTS)
-			MSG_WriteByte (msg, states[entnum].state.effects);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].state.effects))
+				return false;
+		}
 		if (mask & SNAP_ALPHA)
-			MSG_WriteByte (msg, states[entnum].state.alpha);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].state.alpha))
+				return false;
+		}
 		if (mask & SNAP_SCALE)
-			MSG_WriteByte (msg, states[entnum].state.scale);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].state.scale))
+				return false;
+		}
 		if (mask & SNAP_STEP)
-			MSG_WriteByte (msg, states[entnum].step);
+		{
+			if (!MSG_TryWriteByte (msg, states[entnum].step))
+				return false;
+		}
 	}
 
 	SV_FinalizeSnapshotHeader (msg, payload_offset, len_offset, crc_offset);
@@ -1346,6 +1455,7 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 		*out_add = add_count;
 	if (out_update)
 		*out_update = update_count;
+	return true;
 }
 
 static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
@@ -1358,14 +1468,22 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	int entity_count = 0;
 	int snap_flags = 0;
 	int drop_pct = 0;
+	unsigned int server_tick = (unsigned int)sv_clock.server_tick;
 	double timeout_s = sv_snapshottimeout.value / 1000.0;
 	qboolean use_delta;
 	qboolean forced_full = false;
+	qboolean wrote_snapshot = false;
 
 	drop_pct = CLAMP (0, (int)net_drop_delta_pct.value, 100);
 
+	if (server_tick < client->snapshot_last_server_tick)
+		server_tick = client->snapshot_last_server_tick;
+	client->snapshot_last_server_tick = server_tick;
+
 	if (client->snapshot_pending_seq)
 	{
+		int ackstall = (int)sv_snapshot_full_on_ackstall.value;
+
 		client->snapshot_unacked_frames++;
 		if (client->snapshot_pending_is_delta)
 		{
@@ -1374,11 +1492,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->snapshot_pending_is_delta = false;
 				forced_full = true;
 			}
-			else if (net_snap_forcefull_frames.value > 0.0
-				&& client->snapshot_unacked_frames >= (int)net_snap_forcefull_frames.value)
+			else
 			{
-				client->snapshot_pending_is_delta = false;
-				forced_full = true;
+				if (ackstall <= 0)
+					ackstall = (int)net_snap_forcefull_frames.value;
+				if (ackstall > 0 && client->snapshot_unacked_frames >= ackstall)
+				{
+					client->snapshot_pending_is_delta = false;
+					forced_full = true;
+				}
 			}
 		}
 		use_delta = client->snapshot_pending_is_delta;
@@ -1395,14 +1517,16 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 		client->snapshot_pending_is_delta = use_delta;
 		if (use_delta)
-			SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq, client->snapshot_pending_baseline_seq,
-				client->snapshot_pending, client->snapshot_pending_present,
+			wrote_snapshot = SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq,
+				client->snapshot_pending_baseline_seq, server_tick, client->snapshot_pending,
+				client->snapshot_pending_present,
 				client->snapshot_baseline, client->snapshot_baseline_present,
 				client->snapshot_pending_flags, qcvm->max_edicts,
 				&remove_count, &add_count, &update_count);
 		else
-			SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
-				client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			wrote_snapshot = SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, server_tick,
+				client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_flags,
+				qcvm->max_edicts, &full_count);
 		client->snapshot_pending_time = realtime;
 	}
 	else
@@ -1411,6 +1535,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		int dropped_count = 0;
 		int max_ents = SV_SnapshotMaxEntities (msg);
 		qboolean debug_frame = false;
+
+		if (sv_snapshot_maxents.value > 0)
+			max_ents = q_min (max_ents, (int)sv_snapshot_maxents.value);
 
 		if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 		{
@@ -1422,6 +1549,8 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			client->snapshot_pending_flags, max_ents, &mandatory_count, &dropped_count, debug_frame);
 		client->snapshot_pending_mandatory = mandatory_count;
 		client->snapshot_pending_dropped = dropped_count;
+		if (sv_tickdebug.value && dropped_count > 0)
+			Con_DWarning ("snapshot %s dropped %d ents (budget)\n", client->name, dropped_count);
 		client->snapshot_pending_seq = client->snapshot_next_seq++;
 		if (client->snapshot_next_seq > 0xFFFF)
 			client->snapshot_next_seq = 1;
@@ -1443,14 +1572,25 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 		client->snapshot_pending_is_delta = use_delta;
 		if (use_delta)
-			SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq, client->snapshot_baseline_seq,
-				client->snapshot_pending, client->snapshot_pending_present,
+			wrote_snapshot = SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq,
+				client->snapshot_baseline_seq, server_tick, client->snapshot_pending,
+				client->snapshot_pending_present,
 				client->snapshot_baseline, client->snapshot_baseline_present,
 				client->snapshot_pending_flags, qcvm->max_edicts,
 				&remove_count, &add_count, &update_count);
 		else
-			SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
-				client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			wrote_snapshot = SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, server_tick,
+				client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_flags,
+				qcvm->max_edicts, &full_count);
+	}
+
+	if (!wrote_snapshot)
+	{
+		msg->cursize = start_size;
+		sv_clock.frame_mtu_drops++;
+		if (sv_tickdebug.value)
+			Con_DWarning ("snapshot %s dropped (mtu cap)\n", client->name);
+		return;
 	}
 
 	if (forced_full)
@@ -1489,9 +1629,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->name, client->snapshot_pending_seq, size_delta, full_count);
 	}
 
+	entity_count = client->snapshot_pending_is_delta ? (add_count + update_count) : full_count;
+	sv_clock.frame_ents_sent += entity_count;
+	sv_clock.frame_bytes_sent += (msg->cursize - start_size);
+
 	if (net_debug_snap.value)
 	{
-		entity_count = client->snapshot_pending_is_delta ? (add_count + update_count) : full_count;
 		snap_flags = client->snapshot_pending_is_delta ? 1 : 0;
 		if (forced_full)
 			snap_flags |= 2;
@@ -2050,6 +2193,21 @@ static void SV_BuildClientDatagram (client_t *client, sizebuf_t *msg)
 		SZ_Write (msg, sv.datagram.data, sv.datagram.cursize);
 }
 
+static int SV_ClientPacketCap (client_t *client)
+{
+	int cap = MAX_DATAGRAM;
+
+	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
+		cap = DATAGRAM_MTU;
+
+	if (sv_net_mtu.value > 0)
+		cap = q_min (cap, (int)sv_net_mtu.value);
+	if (sv_pktmax.value > 0)
+		cap = q_min (cap, (int)sv_pktmax.value);
+
+	return cap;
+}
+
 qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[MAX_DATAGRAM];
@@ -2059,10 +2217,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	msg.maxsize = sizeof(buf);
 	msg.cursize = 0;
 
-	//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
-	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
-		msg.maxsize = DATAGRAM_MTU;
-	//johnfitz
+	msg.maxsize = q_min (msg.maxsize, SV_ClientPacketCap (client));
 
 	SV_BuildClientDatagram (client, &msg);
 
@@ -2254,10 +2409,7 @@ void SV_SendClientMessages (void)
 			msg.maxsize = sizeof(buf);
 			msg.cursize = 0;
 
-			//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
-			if (Q_strcmp(NET_QSocketGetAddressString(host_client->netconnection), "LOCAL") != 0)
-				msg.maxsize = DATAGRAM_MTU;
-			//johnfitz
+			msg.maxsize = q_min (msg.maxsize, SV_ClientPacketCap (host_client));
 
 			SV_BuildClientDatagram (host_client, &msg);
 			SV_Coalesce_Enqueue (host_client, msg.data, msg.cursize);
@@ -2972,6 +3124,7 @@ void SV_SpawnServer (const char *server)
 	ED_LoadFromFile (sv.worldmodel->entities);
 
 	sv.active = true;
+	Host_ResetServerClock ();
 
 // all setup is completed, any further precache statements are errors
 	sv.state = ss_active;

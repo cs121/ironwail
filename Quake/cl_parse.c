@@ -920,13 +920,14 @@ ent->baseline.scale = (bits & B_SCALE) ? MSG_ReadByte() : ENTSCALE_DEFAULT;
 }
 
 static qboolean CL_ReadSnapshotHeader (unsigned int *out_seq, unsigned int *out_delta_from,
-	unsigned int *out_payload_len, unsigned int *out_entity_count, unsigned int *out_crc,
-	int *out_payload_start, int *out_payload_end)
+	unsigned int *out_server_tick, unsigned int *out_payload_len, unsigned int *out_entity_count,
+	unsigned int *out_crc, int *out_payload_start, int *out_payload_end)
 {
 	int limit = MSG_GetReadLimit();
 
 	*out_seq = (unsigned short)MSG_ReadShort ();
 	*out_delta_from = (unsigned short)MSG_ReadShort ();
+	*out_server_tick = (unsigned int)MSG_ReadLong ();
 	*out_payload_len = (unsigned short)MSG_ReadShort ();
 	*out_entity_count = (unsigned short)MSG_ReadShort ();
 	*out_crc = (unsigned short)MSG_ReadShort ();
@@ -960,6 +961,7 @@ static void CL_ParseSnapshotFull (void)
 {
 	unsigned int seq;
 	unsigned int delta_from;
+	unsigned int server_tick;
 	unsigned int payload_len;
 	unsigned int entity_count;
 	unsigned int crc;
@@ -970,12 +972,24 @@ static void CL_ParseSnapshotFull (void)
 	int i;
 
 	old_limit = MSG_GetReadLimit();
-	if (!CL_ReadSnapshotHeader (&seq, &delta_from, &payload_len, &entity_count, &crc, &payload_start, &payload_end))
+	if (!CL_ReadSnapshotHeader (&seq, &delta_from, &server_tick, &payload_len, &entity_count, &crc,
+		&payload_start, &payload_end))
 		return;
 	MSG_SetReadLimit (payload_end);
 
 	cl.last_snapshot_seq = seq;
 	cl.last_snapshot_delta_from = delta_from;
+	if (server_tick < cl.last_snapshot_server_tick)
+	{
+		if (net_debug_snap.value)
+			Con_Printf ("snapdbg client full server_tick regressed %u -> %u\n",
+				cl.last_snapshot_server_tick, server_tick);
+		cl.need_fullsnap = true;
+	}
+	else
+	{
+		cl.last_snapshot_server_tick = server_tick;
+	}
 
 	if (net_debug_snap.value)
 	{
@@ -1042,6 +1056,7 @@ static void CL_ParseSnapshotDelta (void)
 	unsigned int seq;
 	unsigned int baseline_seq;
 	unsigned int mask;
+	unsigned int server_tick;
 	unsigned int payload_len;
 	unsigned int entity_count;
 	unsigned int crc;
@@ -1053,12 +1068,24 @@ static void CL_ParseSnapshotDelta (void)
 	qboolean baseline_match;
 
 	old_limit = MSG_GetReadLimit();
-	if (!CL_ReadSnapshotHeader (&seq, &baseline_seq, &payload_len, &entity_count, &crc, &payload_start, &payload_end))
+	if (!CL_ReadSnapshotHeader (&seq, &baseline_seq, &server_tick, &payload_len, &entity_count, &crc,
+		&payload_start, &payload_end))
 		return;
 	MSG_SetReadLimit (payload_end);
 
 	cl.last_snapshot_seq = seq;
 	cl.last_snapshot_delta_from = baseline_seq;
+	if (server_tick < cl.last_snapshot_server_tick)
+	{
+		if (net_debug_snap.value)
+			Con_Printf ("snapdbg client delta server_tick regressed %u -> %u\n",
+				cl.last_snapshot_server_tick, server_tick);
+		cl.need_fullsnap = true;
+	}
+	else
+	{
+		cl.last_snapshot_server_tick = server_tick;
+	}
 
 	if (net_debug_snap.value)
 	{

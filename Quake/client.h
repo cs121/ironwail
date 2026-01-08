@@ -274,6 +274,7 @@ typedef struct
 	unsigned int snapshot_baseline_seq;
 	unsigned int last_snapshot_seq;
 	unsigned int last_snapshot_delta_from;
+	unsigned int last_snapshot_server_tick;
 	snapshot_state_t *snapshot_baseline;
 	byte		*snapshot_present;
 	qboolean	need_fullsnap;
