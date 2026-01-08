@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "sv_coalesce.h"
 #include "bgmusic.h"
 #include "steam.h"
 #include <setjmp.h>
@@ -100,9 +101,16 @@ cvar_t	sv_cheats = {"sv_cheats","0",CVAR_NONE}; // for the 2021 rerelease
 
 cvar_t	sv_autosave = {"sv_autosave", "1", CVAR_ARCHIVE};
 cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
+cvar_t	sv_maxtickcatchup = {"sv_maxtickcatchup", "8", CVAR_NONE};
+cvar_t	sv_tickdebug = {"sv_tickdebug", "0", CVAR_NONE};
+cvar_t	sv_clock_log = {"sv_clock_log", "0", CVAR_NONE};
 
 devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
+
+sv_clock_t sv_clock;
+
+static void Host_ClockStats_f (void);
 
 
 /*
@@ -418,6 +426,7 @@ void Host_InitLocal (void)
 {
 	Cmd_AddCommand ("version", Host_Version_f);
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
+	Cmd_AddCommand ("sv_clock_stats", Host_ClockStats_f);
 
         Host_InitCommands ();
 
@@ -462,6 +471,9 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&pausable);
 
 	Cvar_RegisterVariable (&temp1);
+	Cvar_RegisterVariable (&sv_maxtickcatchup);
+	Cvar_RegisterVariable (&sv_tickdebug);
+	Cvar_RegisterVariable (&sv_clock_log);
 
 	Host_FindMaxClients ();
 }
@@ -995,6 +1007,191 @@ static void Host_CheckAutosave (void)
 	Cbuf_AddText (va ("save \"autosave/%s\" 0\n", sv.name));
 }
 
+static void Host_UpdateServerDevStats (void)
+{
+	int i, active;
+	edict_t *ent;
+
+	if (cls.signon != SIGNONS)
+		return;
+
+	for (i = 0, active = 0; i < qcvm->num_edicts; i++)
+	{
+		ent = EDICT_NUM (i);
+		if (!ent->free)
+			active++;
+	}
+	if (active > 600 && dev_peakstats.edicts <= 600)
+		Con_DWarning ("%i edicts exceeds standard limit of 600 (max = %d).\n", active, qcvm->max_edicts);
+	dev_stats.edicts = active;
+	dev_peakstats.edicts = q_max (active, dev_peakstats.edicts);
+}
+
+void Host_ResetServerClock (void)
+{
+	memset (&sv_clock, 0, sizeof (sv_clock));
+	sv_clock.last_realtime = realtime;
+}
+
+static void Host_RunServerSimTicks (double real_dt)
+{
+	int max_steps;
+	int steps = 0;
+	double rate;
+
+	if (!sv.active)
+		return;
+
+	rate = sv_tickrate.value;
+	if (rate < 10.0)
+		rate = 10.0;
+
+	sv_clock.tick_dt = 1.0 / rate;
+	sv_clock.sim_accum += real_dt;
+
+	max_steps = (sv_maxtickcatchup.value > 0.0) ? (int)sv_maxtickcatchup.value : 1;
+
+	while (sv_clock.sim_accum >= sv_clock.tick_dt && steps < max_steps)
+	{
+		double old_frametime = host_frametime;
+		double old_rawframetime = host_rawframetime;
+
+		host_frametime = sv_clock.tick_dt;
+		host_rawframetime = sv_clock.tick_dt;
+
+		PR_SwitchQCVM(&sv.qcvm);
+		SV_RunTick (sv_clock.tick_dt);
+		Host_UpdateServerDevStats ();
+		Host_CheckAutosave ();
+		PR_SwitchQCVM(NULL);
+
+		host_frametime = old_frametime;
+		host_rawframetime = old_rawframetime;
+
+		sv_clock.sim_accum -= sv_clock.tick_dt;
+		sv_clock.server_tick++;
+		steps++;
+	}
+
+	if (steps >= max_steps && sv_clock.sim_accum >= sv_clock.tick_dt)
+	{
+		sv_clock.sim_accum = q_min (sv_clock.sim_accum, sv_clock.tick_dt);
+		sv_clock.stats_hitch_clamps++;
+		if (sv_tickdebug.value)
+			Con_DWarning ("sv_clock: catchup clamp (accum %.4f)\n", sv_clock.sim_accum);
+	}
+
+	sv_clock.frame_sim_steps += steps;
+	sv_clock.stats_sim_ticks += steps;
+	sv_clock.stats_catchup_steps += steps;
+}
+
+static void Host_RunServerNetSends (double real_dt)
+{
+	int send_steps = 0;
+	double rate;
+
+	if (!sv.active)
+		return;
+
+	rate = sv_netrate.value;
+	if (rate <= 0.0)
+		return;
+
+	rate = CLAMP (1.0, rate, 200.0);
+	sv_clock.send_dt = 1.0 / rate;
+	sv_clock.send_accum += real_dt;
+
+	while (sv_clock.send_accum >= sv_clock.send_dt)
+	{
+		SV_SendClientMessages ();
+		sv_clock.send_accum -= sv_clock.send_dt;
+		send_steps++;
+	}
+
+	sv_clock.frame_send_steps += send_steps;
+	sv_clock.stats_send_ticks += send_steps;
+}
+
+static void Host_ClockStats_f (void)
+{
+	double sim_rate = 0.0;
+	double send_rate = 0.0;
+	double avg_steps = 0.0;
+
+	if (sv_clock.stats_time > 0.0)
+	{
+		sim_rate = sv_clock.stats_sim_ticks / sv_clock.stats_time;
+		send_rate = sv_clock.stats_send_ticks / sv_clock.stats_time;
+	}
+	if (sv_clock.stats_frames > 0)
+		avg_steps = (double)sv_clock.stats_catchup_steps / (double)sv_clock.stats_frames;
+
+	Con_Printf ("sv_clock: tickrate %.2f tick_dt %.4f sim %.2f/s net %.2f/s avg_steps %.2f clamps %u tick %llu\n",
+		sv_tickrate.value, sv_clock.tick_dt, sim_rate, send_rate, avg_steps,
+		sv_clock.stats_hitch_clamps, (unsigned long long)sv_clock.server_tick);
+
+	sv_clock.stats_frames = 0;
+	sv_clock.stats_sim_ticks = 0;
+	sv_clock.stats_send_ticks = 0;
+	sv_clock.stats_catchup_steps = 0;
+	sv_clock.stats_hitch_clamps = 0;
+	sv_clock.stats_time = 0.0;
+}
+
+static void Host_UpdateClockLog (void)
+{
+	static FILE *clock_log = NULL;
+	static qboolean log_active = false;
+	char path[MAX_OSPATH];
+
+	if (!sv.active)
+	{
+		if (sv_clock_log.value <= 0 && log_active)
+		{
+			fclose (clock_log);
+			clock_log = NULL;
+			log_active = false;
+		}
+		return;
+	}
+
+	if (sv_clock_log.value <= 0)
+	{
+		if (log_active)
+		{
+			fclose (clock_log);
+			clock_log = NULL;
+			log_active = false;
+		}
+		return;
+	}
+
+	if (!log_active)
+	{
+		q_snprintf (path, sizeof (path), "%s/logs/sv_clock.csv", com_gamedir);
+		COM_CreatePath (path);
+		clock_log = Sys_fopen (path, "w");
+		if (!clock_log)
+			return;
+		fprintf (clock_log, "realtime_ms,sim_steps,server_tick,send_steps,mtu_drops,ents_sent,bytes_sent\n");
+		log_active = true;
+	}
+
+	if (clock_log)
+	{
+		fprintf (clock_log, "%.0f,%u,%llu,%u,%u,%u,%u\n",
+			realtime * 1000.0,
+			sv_clock.frame_sim_steps,
+			(unsigned long long)sv_clock.server_tick,
+			sv_clock.frame_send_steps,
+			sv_clock.frame_mtu_drops,
+			sv_clock.frame_ents_sent,
+			sv_clock.frame_bytes_sent);
+		fflush (clock_log);
+	}
+}
+
 /*
 ==================
 Host_ServerFrame
@@ -1002,43 +1199,8 @@ Host_ServerFrame
 */
 void Host_ServerFrame (void)
 {
-	int		i, active; //johnfitz
-	edict_t	*ent; //johnfitz
-
-// run the world state
-	pr_global_struct->frametime = host_frametime;
-
-// set the time and clear the general datagram
-	SV_ClearDatagram ();
-
-// check for new clients
-	SV_CheckForNewClients ();
-
-// read client messages
-	SV_RunClients ();
-
-// move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
-		SV_Physics ();
-
-//johnfitz -- devstats
-	if (cls.signon == SIGNONS)
-	{
-		for (i=0, active=0; i<qcvm->num_edicts; i++)
-		{
-			ent = EDICT_NUM(i);
-			if (!ent->free)
-				active++;
-		}
-		if (active > 600 && dev_peakstats.edicts <= 600)
-			Con_DWarning ("%i edicts exceeds standard limit of 600 (max = %d).\n", active, qcvm->max_edicts);
-		dev_stats.edicts = active;
-		dev_peakstats.edicts = q_max(active, dev_peakstats.edicts);
-	}
-//johnfitz
-
-// send all messages to the clients
+	SV_RunTick (host_frametime);
+	Host_UpdateServerDevStats ();
 	SV_SendClientMessages ();
 
 	Host_CheckAutosave ();
@@ -1260,6 +1422,7 @@ void _Host_Frame (double time)
 {
 	static double	accumtime = 0;
 	double time1, time2, time3;
+	double real_dt;
 	qboolean ranserver = false;
 
 	time1 = Sys_DoubleTime ();
@@ -1271,8 +1434,15 @@ void _Host_Frame (double time)
 	rand ();
 
 // decide the simulation time
-	accumtime += host_netinterval?CLAMP(0.0, time, 0.2):0.0;	//for renderer/server isolation
-	Host_AdvanceTime (time);
+	real_dt = CLAMP (0.0, time, 0.25);
+	accumtime += host_netinterval ? CLAMP(0.0, real_dt, 0.2) : 0.0;	//for renderer/server isolation
+	Host_AdvanceTime (real_dt);
+
+	sv_clock.frame_sim_steps = 0;
+	sv_clock.frame_send_steps = 0;
+	sv_clock.frame_mtu_drops = 0;
+	sv_clock.frame_ents_sent = 0;
+	sv_clock.frame_bytes_sent = 0;
 
 // run async procs
 	AsyncQueue_Drain (&async_queue);
@@ -1304,33 +1474,25 @@ void _Host_Frame (double time)
 	}
 
 	CL_AccumulateCmd ();
-
-	//Run the server+networking (client->server->client), at a different rate from everyt
-	if (accumtime >= host_netinterval)
+	if (!host_netinterval || accumtime >= host_netinterval)
 	{
-		float realframetime = host_frametime;
-		if (host_netinterval)
-		{
-			host_frametime = q_max(accumtime, (double)host_netinterval);
-			accumtime -= host_frametime;
-			if (host_timescale.value > 0)
-				host_frametime *= host_timescale.value;
-			else if (host_framerate.value)
-				host_frametime = host_framerate.value;
-		}
-		else
-			accumtime -= host_netinterval;
 		CL_SendCmd ();
-		if (sv.active)
-		{
-			PR_SwitchQCVM(&sv.qcvm);
-			Host_ServerFrame ();
-			PR_SwitchQCVM(NULL);
-		}
-		host_frametime = realframetime;
+		if (host_netinterval)
+			accumtime -= host_netinterval;
 		Cbuf_Waited();
-		ranserver = true;
 	}
+
+	if (sv.active)
+	{
+		sv_clock.stats_time += real_dt;
+		sv_clock.stats_frames++;
+		Host_RunServerSimTicks (real_dt);
+		Host_RunServerNetSends (real_dt);
+	}
+
+	Host_UpdateClockLog ();
+
+	ranserver = (sv_clock.frame_sim_steps > 0);
 
 // fetch results from server
 	if (cls.state == ca_connected)

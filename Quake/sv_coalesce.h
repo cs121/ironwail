@@ -6,6 +6,7 @@
 extern cvar_t sv_tickrate;
 extern cvar_t sv_netrate;
 extern cvar_t sv_netburst;
+extern cvar_t sv_net_mtu;
 extern cvar_t sv_pktmax;
 extern cvar_t sv_netcoalesce;
 extern cvar_t sv_net_debug;

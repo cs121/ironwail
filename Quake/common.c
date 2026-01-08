@@ -692,6 +692,17 @@ Handles byte ordering and avoids alignment errors
 // writing functions
 //
 
+static qboolean MSG_TryGetSpace (sizebuf_t *sb, int length, byte **out)
+{
+	if (length < 0)
+		return false;
+	if (sb->cursize + length > sb->maxsize)
+		return false;
+	*out = sb->data + sb->cursize;
+	sb->cursize += length;
+	return true;
+}
+
 void MSG_WriteChar (sizebuf_t *sb, int c)
 {
 	byte	*buf;
@@ -705,6 +716,21 @@ void MSG_WriteChar (sizebuf_t *sb, int c)
 	buf[0] = c;
 }
 
+qboolean MSG_TryWriteChar (sizebuf_t *sb, int c)
+{
+	byte *buf;
+
+#ifdef PARANOID
+	if (c < -128 || c > 127)
+		Sys_Error ("MSG_TryWriteChar: range error");
+#endif
+
+	if (!MSG_TryGetSpace (sb, 1, &buf))
+		return false;
+	buf[0] = c;
+	return true;
+}
+
 void MSG_WriteByte (sizebuf_t *sb, int c)
 {
 	byte	*buf;
@@ -716,6 +742,21 @@ void MSG_WriteByte (sizebuf_t *sb, int c)
 
 	buf = (byte *) SZ_GetSpace (sb, 1);
 	buf[0] = c;
+}
+
+qboolean MSG_TryWriteByte (sizebuf_t *sb, int c)
+{
+	byte *buf;
+
+#ifdef PARANOID
+	if (c < 0 || c > 255)
+		Sys_Error ("MSG_TryWriteByte: range error");
+#endif
+
+	if (!MSG_TryGetSpace (sb, 1, &buf))
+		return false;
+	buf[0] = c;
+	return true;
 }
 
 void MSG_WriteShort (sizebuf_t *sb, int c)
@@ -732,6 +773,22 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 	buf[1] = c>>8;
 }
 
+qboolean MSG_TryWriteShort (sizebuf_t *sb, int c)
+{
+	byte *buf;
+
+#ifdef PARANOID
+	if (c < ((short)0x8000) || c > (short)0x7fff)
+		Sys_Error ("MSG_TryWriteShort: range error");
+#endif
+
+	if (!MSG_TryGetSpace (sb, 2, &buf))
+		return false;
+	buf[0] = c&0xff;
+	buf[1] = c>>8;
+	return true;
+}
+
 void MSG_WriteLong (sizebuf_t *sb, int c)
 {
 	byte	*buf;
@@ -741,6 +798,19 @@ void MSG_WriteLong (sizebuf_t *sb, int c)
 	buf[1] = (c>>8)&0xff;
 	buf[2] = (c>>16)&0xff;
 	buf[3] = c>>24;
+}
+
+qboolean MSG_TryWriteLong (sizebuf_t *sb, int c)
+{
+	byte *buf;
+
+	if (!MSG_TryGetSpace (sb, 4, &buf))
+		return false;
+	buf[0] = c&0xff;
+	buf[1] = (c>>8)&0xff;
+	buf[2] = (c>>16)&0xff;
+	buf[3] = c>>24;
+	return true;
 }
 
 void MSG_WriteFloat (sizebuf_t *sb, float f)
@@ -757,12 +827,41 @@ void MSG_WriteFloat (sizebuf_t *sb, float f)
 	SZ_Write (sb, &dat.l, 4);
 }
 
+qboolean MSG_TryWriteFloat (sizebuf_t *sb, float f)
+{
+	union
+	{
+		float	f;
+		int	l;
+	} dat;
+
+	dat.f = f;
+	dat.l = LittleLong (dat.l);
+
+	return MSG_TryWriteLong (sb, dat.l);
+}
+
 void MSG_WriteString (sizebuf_t *sb, const char *s)
 {
 	if (!s)
 		SZ_Write (sb, "", 1);
 	else
 		SZ_Write (sb, s, Q_strlen(s)+1);
+}
+
+qboolean MSG_TryWriteString (sizebuf_t *sb, const char *s)
+{
+	int len;
+	byte *buf;
+
+	if (!s)
+		s = "";
+
+	len = Q_strlen (s) + 1;
+	if (!MSG_TryGetSpace (sb, len, &buf))
+		return false;
+	Q_memcpy (buf, s, len);
+	return true;
 }
 
 //johnfitz -- original behavior, 13.3 fixed point coords, max range +-4096
@@ -784,6 +883,11 @@ void MSG_WriteCoord32f (sizebuf_t *sb, float f)
 	MSG_WriteFloat (sb, f);
 }
 
+qboolean MSG_TryWriteCoord32f (sizebuf_t *sb, float f)
+{
+	return MSG_TryWriteFloat (sb, f);
+}
+
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags)
 {
 	if (flags & PRFL_FLOATCOORD)
@@ -795,6 +899,22 @@ void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags)
 	else MSG_WriteCoord16 (sb, f);
 }
 
+qboolean MSG_TryWriteCoord (sizebuf_t *sb, float f, unsigned int flags)
+{
+	if (flags & PRFL_FLOATCOORD)
+		return MSG_TryWriteFloat (sb, f);
+	if (flags & PRFL_INT32COORD)
+		return MSG_TryWriteLong (sb, Q_rint (f * 16));
+	if (flags & PRFL_24BITCOORD)
+	{
+		int whole = (int)f;
+		if (!MSG_TryWriteShort (sb, whole))
+			return false;
+		return MSG_TryWriteByte (sb, (int)(f*255) % 255);
+	}
+	return MSG_TryWriteShort (sb, Q_rint (f * 8));
+}
+
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags)
 {
 	if (flags & PRFL_FLOATANGLE)
@@ -802,6 +922,15 @@ void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags)
 	else if (flags & PRFL_SHORTANGLE)
 		MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 	else MSG_WriteByte (sb, Q_rint(f * 256.0 / 360.0) & 255); //johnfitz -- use Q_rint instead of (int)	}
+}
+
+qboolean MSG_TryWriteAngle (sizebuf_t *sb, float f, unsigned int flags)
+{
+	if (flags & PRFL_FLOATANGLE)
+		return MSG_TryWriteFloat (sb, f);
+	if (flags & PRFL_SHORTANGLE)
+		return MSG_TryWriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
+	return MSG_TryWriteByte (sb, Q_rint(f * 256.0 / 360.0) & 255);
 }
 
 //johnfitz -- for PROTOCOL_FITZQUAKE
@@ -812,6 +941,13 @@ void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 	else MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 }
 //johnfitz
+
+qboolean MSG_TryWriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
+{
+	if (flags & PRFL_FLOATANGLE)
+		return MSG_TryWriteFloat (sb, f);
+	return MSG_TryWriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
+}
 
 //
 // reading functions
