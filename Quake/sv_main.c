@@ -42,6 +42,11 @@ static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
 static cvar_t net_snap_debug = {"net_snap_debug", "0", CVAR_NONE};
+static cvar_t sv_icull_enable = {"sv_icull_enable", "1", CVAR_NONE};
+static cvar_t sv_icull_radius = {"sv_icull_radius", "2048", CVAR_NONE};
+static cvar_t sv_icull_radius_players = {"sv_icull_radius_players", "0", CVAR_NONE};
+static cvar_t sv_icull_pvs = {"sv_icull_pvs", "1", CVAR_NONE};
+static cvar_t sv_icull_debug = {"sv_icull_debug", "0", CVAR_NONE};
 static qboolean sv_packedents_selftest_done = false;
 
 typedef struct
@@ -174,6 +179,30 @@ static void SV_PackedEntStats_f (void)
 		Con_Printf ("packedents stats are gathered when sv_packedents_debug is enabled.\n");
 }
 
+static void SV_IcullStats_f (void)
+{
+	int i;
+
+	if (!sv_icull_enable.value)
+		Con_Printf ("icull: sv_icull_enable is 0 (showing last recorded stats)\n");
+
+	for (i = 0; i < svs.maxclients && i < MAX_SCOREBOARD; i++)
+	{
+		client_t *client = &svs.clients[i];
+
+		if (!client->active)
+			continue;
+
+		Con_Printf ("icull %s: considered %d sent %d dist %d pvs %d forced %d\n",
+			client->name,
+			sv_icull_last_stats[i].considered,
+			sv_icull_last_stats[i].sent,
+			sv_icull_last_stats[i].culled_distance,
+			sv_icull_last_stats[i].culled_pvs,
+			sv_icull_last_stats[i].forced_sent);
+	}
+}
+
 /*
 ===============
 SV_Init
@@ -228,12 +257,18 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&net_snap_tinyvel);
 	Cvar_RegisterVariable (&net_snap_forcefull_frames);
 	Cvar_RegisterVariable (&net_snap_debug);
+	Cvar_RegisterVariable (&sv_icull_enable);
+	Cvar_RegisterVariable (&sv_icull_radius);
+	Cvar_RegisterVariable (&sv_icull_radius_players);
+	Cvar_RegisterVariable (&sv_icull_pvs);
+	Cvar_RegisterVariable (&sv_icull_debug);
 	Cvar_RegisterVariable (&sv_autoload);
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
 	Cmd_AddCommand ("packedents_stats", &SV_PackedEntStats_f);
+	Cmd_AddCommand ("sv_icull_stats", &SV_IcullStats_f);
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -751,6 +786,29 @@ qboolean SV_VisibleToClient (edict_t *client, edict_t *test, qmodel_t *worldmode
 
 //=============================================================================
 
+typedef struct
+{
+	int considered;
+	int sent;
+	int culled_distance;
+	int culled_pvs;
+	int forced_sent;
+} sv_icull_stats_t;
+
+typedef struct
+{
+	vec3_t	vieworg;
+	float	radius2;
+	byte	*pvs;
+	qboolean	enabled;
+	qboolean	radius_enabled;
+	qboolean	pvs_enabled;
+	qboolean	cull_players;
+} sv_icull_context_t;
+
+static sv_icull_stats_t sv_icull_last_stats[MAX_SCOREBOARD];
+static double sv_icull_debug_next_time = 0.0;
+
 #define MAX_NET_EDICTS 65536
 
 static uint16_t		net_edicts[MAX_NET_EDICTS];
@@ -818,6 +876,142 @@ static qboolean SV_SnapshotTossMoving (const edict_t *ent)
 	if (!((int)ent->v.flags & FL_ONGROUND))
 		return true;
 	return VectorLengthSquared (ent->v.velocity) > (tinyvel * tinyvel);
+}
+
+static void SV_InitInterestCullContext (sv_icull_context_t *ctx, const edict_t *clent)
+{
+	memset (ctx, 0, sizeof(*ctx));
+	VectorAdd (clent->v.origin, clent->v.view_ofs, ctx->vieworg);
+
+	ctx->enabled = (sv_icull_enable.value != 0.0f);
+	if (!ctx->enabled)
+	{
+		ctx->pvs = SV_FatPVS (ctx->vieworg, sv.worldmodel);
+		return;
+	}
+
+	ctx->radius_enabled = (sv_icull_radius.value > 0.0f);
+	if (ctx->radius_enabled)
+		ctx->radius2 = sv_icull_radius.value * sv_icull_radius.value;
+	ctx->pvs_enabled = (sv_icull_pvs.value != 0.0f);
+	ctx->cull_players = (sv_icull_radius_players.value != 0.0f);
+
+	if (ctx->pvs_enabled)
+	{
+		mleaf_t *leaf = Mod_PointInLeaf (ctx->vieworg, sv.worldmodel);
+		if (leaf)
+			ctx->pvs = Mod_LeafPVS (leaf, sv.worldmodel);
+	}
+}
+
+static qboolean SV_EntityMustSend (const edict_t *ent, const edict_t *clent)
+{
+	if (ent == clent)
+		return true;
+	if ((int)ent->v.movetype == MOVETYPE_PUSH && SV_SnapshotMoverMoving (ent))
+		return true;
+	if ((int)ent->v.effects & (EF_BRIGHTFIELD | EF_MUZZLEFLASH | EF_BRIGHTLIGHT | EF_DIMLIGHT
+		| EF_QEX_QUADLIGHT | EF_QEX_PENTALIGHT | EF_QEX_CANDLELIGHT))
+		return true;
+	if ((int)ent->v.movetype == MOVETYPE_FLYMISSILE && ent->v.owner == EDICT_TO_PROG ((edict_t *)clent))
+		return true;
+	if (ent->v.sounds)
+		return true;
+	return false;
+}
+
+static qboolean SV_ShouldSendEntityToClient (const sv_icull_context_t *ctx, const edict_t *clent,
+	edict_t *ent, sv_icull_stats_t *stats)
+{
+	if (stats)
+		stats->considered++;
+
+	if (!ent->v.modelindex || !PR_GetString(ent->v.model)[0])
+		return false;
+
+	if (sv.protocol == PROTOCOL_NETQUAKE && (int)ent->v.modelindex & 0xFF00)
+		return false;
+
+	if (!ctx->enabled)
+	{
+		if (ent->num_leafs < MAX_ENT_LEAFS && !SV_EdictInPVS (ent, ctx->pvs))
+			return false;
+		if (stats)
+			stats->sent++;
+		return true;
+	}
+
+	if (SV_EntityMustSend (ent, clent))
+	{
+		if (stats)
+		{
+			stats->sent++;
+			stats->forced_sent++;
+		}
+		return true;
+	}
+
+	if (ctx->radius_enabled && (ctx->cull_players || !((int)ent->v.flags & FL_CLIENT)))
+	{
+		vec3_t delta;
+		VectorSubtract (ent->v.origin, ctx->vieworg, delta);
+		if (DotProduct (delta, delta) > ctx->radius2)
+		{
+			if (stats)
+				stats->culled_distance++;
+			if (sv_icull_debug.value >= 2.0f && stats && (stats->considered & 127) == 0)
+				Con_DPrintf ("icull: ent %d culled by distance\n", NUM_FOR_EDICT(ent));
+			return false;
+		}
+	}
+
+	if (ctx->pvs_enabled && ctx->pvs && ent->num_leafs < MAX_ENT_LEAFS && !SV_EdictInPVS (ent, ctx->pvs))
+	{
+		if (stats)
+			stats->culled_pvs++;
+		if (sv_icull_debug.value >= 2.0f && stats && (stats->considered & 127) == 0)
+			Con_DPrintf ("icull: ent %d culled by pvs\n", NUM_FOR_EDICT(ent));
+		return false;
+	}
+
+	if (stats)
+		stats->sent++;
+	return true;
+}
+
+static void SV_IcullStoreStats (const sv_icull_stats_t *stats)
+{
+	int i;
+	int client_index;
+
+	if (!host_client)
+		return;
+
+	client_index = (int)(host_client - svs.clients);
+	if (client_index < 0 || client_index >= svs.maxclients || client_index >= MAX_SCOREBOARD)
+		return;
+
+	sv_icull_last_stats[client_index] = *stats;
+
+	if (sv_icull_debug.value < 1.0f || realtime < sv_icull_debug_next_time)
+		return;
+
+	sv_icull_debug_next_time = realtime + 2.0;
+	for (i = 0; i < svs.maxclients && i < MAX_SCOREBOARD; i++)
+	{
+		client_t *client = &svs.clients[i];
+
+		if (!client->active)
+			continue;
+
+		Con_Printf ("icull %s: considered %d sent %d dist %d pvs %d forced %d\n",
+			client->name,
+			sv_icull_last_stats[i].considered,
+			sv_icull_last_stats[i].sent,
+			sv_icull_last_stats[i].culled_distance,
+			sv_icull_last_stats[i].culled_pvs,
+			sv_icull_last_stats[i].forced_sent);
+	}
 }
 
 static byte SV_SnapshotFlagsForEnt (const edict_t *ent)
@@ -905,13 +1099,14 @@ static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 static int SV_BuildNetEdictsList (edict_t *clent)
 {
 	int		e, i, numents;
-	byte	*pvs;
 	vec3_t	org, forward, right, up;
 	float	dist, size;
 	edict_t	*ent;
+	sv_icull_context_t icull;
+	sv_icull_stats_t icull_stats = {0};
 
-	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
-	pvs = SV_FatPVS (org, sv.worldmodel);
+	SV_InitInterestCullContext (&icull, clent);
+	VectorCopy (icull.vieworg, org);
 
 	AngleVectors (clent->v.v_angle, forward, right, up);
 
@@ -926,23 +1121,16 @@ static int SV_BuildNetEdictsList (edict_t *clent)
 	else
 		net_edicts_sorted[0] = NUM_FOR_EDICT (clent);
 	numents = 1;
+	icull_stats.considered++;
+	icull_stats.sent++;
+	icull_stats.forced_sent++;
 
 	ent = NEXT_EDICT(qcvm->edicts);
 	for (e=1 ; e<qcvm->num_edicts ; e++, ent = NEXT_EDICT(ent))
 	{
 		if (ent != clent)
 		{
-			if (!ent->v.modelindex || !PR_GetString(ent->v.model)[0])
-				continue;
-
-			if (sv.protocol == PROTOCOL_NETQUAKE && (int)ent->v.modelindex & 0xFF00)
-				continue;
-
-			for (i=0 ; i < ent->num_leafs ; i++)
-				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i]&7) ))
-					break;
-
-			if (i == ent->num_leafs && ent->num_leafs < MAX_ENT_LEAFS)
+			if (!SV_ShouldSendEntityToClient (&icull, clent, ent, &icull_stats))
 				continue;
 
 			if (sv_netsort.value)
@@ -990,6 +1178,8 @@ static int SV_BuildNetEdictsList (edict_t *clent)
 		for (e=0 ; e<numents ; e++)
 			net_edicts_sorted[net_edict_bins[net_edict_dists[e]]++] = net_edicts[e];
 	}
+
+	SV_IcullStoreStats (&icull_stats);
 
 	return numents;
 }
@@ -1743,117 +1933,14 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 {
 	int		e, i, j, numents;
 	int		bits;
-	byte	*pvs;
-	vec3_t	org, forward, right, up;
-	float	miss, dist, size;
+	float	miss;
 	eval_t	*val;
 	edict_t	*ent;
 	qboolean	use_packed = (sv_packedents.value != 0.0f && host_client && host_client->supports_packedents);
 	int		packed_start = msg->cursize;
 	int		packed_count_pos = -1;
 	int		packed_count = 0;
-
-// find the client's PVS
-	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
-	pvs = SV_FatPVS (org, sv.worldmodel);
-
-// find the client's orientation
-	AngleVectors (clent->v.v_angle, forward, right, up);
-
-// reset sorting bins
-	memset (net_edict_bins, 0, sizeof (net_edict_bins));
-
-// add clent
-	if (sv_netsort.value)
-	{
-		net_edicts[0] = NUM_FOR_EDICT (clent);
-		net_edict_dists[0] = 0;
-		net_edict_bins[0] = 1;
-	}
-	else
-		net_edicts_sorted[0] = NUM_FOR_EDICT (clent);
-	numents = 1;
-
-// add all other entities that touch the pvs
-	ent = NEXT_EDICT(qcvm->edicts);
-	for (e=1 ; e<qcvm->num_edicts ; e++, ent = NEXT_EDICT(ent))
-	{
-		if (ent != clent)	// clent already added before the loop
-		{
-			// ignore ents without visible models
-			if (!ent->v.modelindex || !PR_GetString(ent->v.model)[0])
-				continue;
-
-			//johnfitz -- don't send model>255 entities if protocol is 15
-			if (sv.protocol == PROTOCOL_NETQUAKE && (int)ent->v.modelindex & 0xFF00)
-				continue;
-
-			// ignore if not touching a PV leaf
-			for (i=0 ; i < ent->num_leafs ; i++)
-				if (pvs[ent->leafnums[i] >> 3] & (1 << (ent->leafnums[i]&7) ))
-					break;
-			
-			// ericw -- added ent->num_leafs < MAX_ENT_LEAFS condition.
-			//
-			// if ent->num_leafs == MAX_ENT_LEAFS, the ent is visible from too many leafs
-			// for us to say whether it's in the PVS, so don't try to vis cull it.
-			// this commonly happens with rotators, because they often have huge bboxes
-			// spanning the entire map, or really tall lifts, etc.
-			if (i == ent->num_leafs && ent->num_leafs < MAX_ENT_LEAFS)
-				continue;		// not visible
-
-			if (sv_netsort.value)
-			{
-				// compute ent bbox size and distance from org to the closest point in ent's bbox
-				dist = size = 0.f;
-				for (i=0 ; i<3 ; i++)
-				{
-					float delta = CLAMP (ent->v.absmin[i], org[i], ent->v.absmax[i]) - org[i];
-					dist += delta * delta;
-					delta = ent->v.absmax[i] - ent->v.absmin[i];
-					size += delta * delta;
-				}
-				size = q_max (1.f, size);
-
-				// use scaled square root of (distance/size) as sort key
-				dist = 8.f * sqrt (sqrt (dist/size));
-				net_edict_dists[numents] = (int) q_min (dist, 255.f);
-				net_edicts[numents] = e;
-
-				// compute max distance along forward axis
-				dist = 0.f;
-				for (i=0 ; i<3 ; i++)
-					dist += ((forward[i] < 0.f ? ent->v.absmin[i] : ent->v.absmax[i]) - org[i]) * forward[i];
-				if (dist < 0.f)
-					net_edict_dists[numents] |= 128; // deprioritize entities behind the client
-
-				net_edict_bins[net_edict_dists[numents]]++;
-			}
-			else
-				net_edicts_sorted[numents] = e;
-
-			if (++numents == MAX_NET_EDICTS)
-				break;
-		}
-		else
-			continue;
-	}
-
-	if (sv_netsort.value)
-	{
-		// compute bin offsets
-		e = 0;
-		for (i=0 ; i<countof(net_edict_bins) ; i++)
-		{
-			int tmp = net_edict_bins[i];
-			net_edict_bins[i] = e;
-			e += tmp;
-		}
-
-		// generate sorted list
-		for (e=0 ; e<numents ; e++)
-			net_edicts_sorted[net_edict_bins[net_edict_dists[e]]++] = net_edicts[e];
-	}
+	numents = SV_BuildNetEdictsList (clent);
 
 	if (use_packed)
 	{
