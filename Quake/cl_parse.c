@@ -337,10 +337,22 @@ void CL_ParseServerInfo (void)
 	if (cl.protocol == PROTOCOL_RMQ)
 	{
 		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES | PRFL_NET_COALESCE);
-		
+
 		// mh - read protocol flags from server so that we know what protocol features to expect
 		cl.protocolflags = (unsigned int) MSG_ReadLong ();
-		
+
+		if (cl.protocolflags & PRFL_MOREFLAGS)
+		{
+			unsigned int extra_flags = cl.protocolflags;
+			Con_Warning ("PROTOCOL_RMQ protocolflags %i contains PRFL_MOREFLAGS; ignoring additional flags\n", cl.protocolflags);
+			while (extra_flags & PRFL_MOREFLAGS)
+			{
+				extra_flags = (unsigned int) MSG_ReadLong ();
+				Con_DWarning ("PROTOCOL_RMQ extra protocolflags %i ignored\n", extra_flags);
+			}
+		}
+
+		cl.protocolflags &= ~PRFL_MOREFLAGS;
 		if (0 != (cl.protocolflags & (~supportedflags)))
 		{
 			Con_Warning("PROTOCOL_RMQ protocolflags %i contains unsupported flags\n", cl.protocolflags);
