@@ -172,6 +172,17 @@ typedef struct client_s
 	byte			*snapshot_baseline_present;
 	snapshot_state_t *snapshot_pending;
 	byte			*snapshot_pending_present;
+	byte			*snapshot_pending_flags;
+	int				snapshot_unacked_frames;
+	int				snapshot_pending_mandatory;
+	int				snapshot_pending_dropped;
+	int				snapshot_stats_full;
+	int				snapshot_stats_delta;
+	int				snapshot_stats_forced_full;
+	int				snapshot_stats_mandatory;
+	int				snapshot_stats_dropped;
+	double			snapshot_stats_next_time;
+	double			snapshot_debug_next_time;
 } client_t;
 
 
