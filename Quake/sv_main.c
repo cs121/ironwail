@@ -778,7 +778,7 @@ static qboolean SV_SnapshotTossMoving (const edict_t *ent)
 {
 	float tinyvel = net_snap_tinyvel.value;
 
-	if (!(ent->v.flags & FL_ONGROUND))
+	if (!((int)ent->v.flags & FL_ONGROUND))
 		return true;
 	return VectorLengthSquared (ent->v.velocity) > (tinyvel * tinyvel);
 }
@@ -807,7 +807,7 @@ static byte SV_SnapshotFlagsForEnt (const edict_t *ent)
 
 static qboolean SV_SnapshotMandatoryEnt (const edict_t *ent)
 {
-	if (ent->v.flags & FL_CLIENT)
+	if ((int)ent->v.flags & FL_CLIENT)
 		return true;
 	if (ent->v.movetype == MOVETYPE_PUSH && SV_SnapshotMoverMoving (ent))
 		return true;
