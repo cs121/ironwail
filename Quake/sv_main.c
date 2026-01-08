@@ -446,9 +446,12 @@ This will be sent on the initial connection and upon each server load.
 */
 void SV_SendServerinfo (client_t *client)
 {
+	qcvm_t			*oldvm;
 	const char		**s;
 	char			message[2048];
 	int				i; //johnfitz
+
+	PR_PushQCVM (&sv.qcvm, &oldvm);
 
 	MSG_WriteByte (&client->message, svc_print);
 	sprintf (message, "%c\nFITZQUAKE %1.2f SERVER (%i CRC)\n", 2, FITZQUAKE_VERSION, qcvm->crc); //johnfitz -- include fitzquake version
@@ -498,6 +501,8 @@ void SV_SendServerinfo (client_t *client)
 
 	client->sendsignon = PRESPAWN_FLUSH;
 	client->spawned = false;		// need prespawn, spawn, etc
+
+	PR_PopQCVM (oldvm);
 }
 
 /*
