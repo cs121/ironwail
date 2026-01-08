@@ -18,6 +18,8 @@ static unsigned int sv_net_split_packets;
 static unsigned int sv_net_dropped_msgs;
 static double sv_net_debug_next_time;
 
+void SV_Coalesce_FlushClient(client_t *client);
+
 static double SV_Coalesce_Interval(void)
 {
 	double rate = sv_netrate.value;
@@ -141,9 +143,22 @@ void SV_Coalesce_Enqueue(client_t *client, const byte *data, int len)
 
 	if (buf->cursize + len + 2 > buf->maxsize)
 	{
-		if (buf->cursize)
-			sv_net_dropped_msgs++;
-		buf->cursize = 0;
+		while (buf->cursize && buf->cursize + len + 2 > buf->maxsize)
+		{
+			int before = buf->cursize;
+
+			SV_Coalesce_FlushClient(client);
+
+			if (buf->cursize >= before)
+				break;
+		}
+
+		if (buf->cursize + len + 2 > buf->maxsize)
+		{
+			if (buf->cursize)
+				sv_net_dropped_msgs++;
+			buf->cursize = 0;
+		}
 	}
 
 	buf->data[buf->cursize] = len & 0xff;
