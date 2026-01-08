@@ -17,6 +17,28 @@ static unsigned int sv_net_coalesced_msgs;
 static unsigned int sv_net_split_packets;
 static unsigned int sv_net_dropped_msgs;
 static double sv_net_debug_next_time;
+static float sv_netcoalesce_prev;
+static qboolean sv_netcoalesce_updating;
+
+static void SV_NetCoalesce_Changed(cvar_t *var)
+{
+	if (sv_netcoalesce_updating)
+		return;
+
+	if (sv.active && sv.protocol == PROTOCOL_RMQ)
+	{
+		if (var->value != sv_netcoalesce_prev)
+		{
+			Con_Printf("sv_netcoalesce cannot be changed while a RMQ server is running; restart to apply.\n");
+			sv_netcoalesce_updating = true;
+			Cvar_SetValueQuick(var, sv_netcoalesce_prev);
+			sv_netcoalesce_updating = false;
+		}
+		return;
+	}
+
+	sv_netcoalesce_prev = var->value;
+}
 
 void SV_Coalesce_FlushClient(client_t *client);
 
@@ -88,6 +110,8 @@ void SV_Coalesce_RegisterCvars(void)
 	Cvar_RegisterVariable(&sv_pktmax);
 	Cvar_RegisterVariable(&sv_netcoalesce);
 	Cvar_RegisterVariable(&sv_net_debug);
+	Cvar_SetCallback(&sv_netcoalesce, SV_NetCoalesce_Changed);
+	sv_netcoalesce_prev = sv_netcoalesce.value;
 }
 
 void SV_Coalesce_UpdateProtocolFlags(void)
