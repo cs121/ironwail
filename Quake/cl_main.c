@@ -808,7 +808,32 @@ int CL_ReadFromServer (void)
 			break;
 
 		cl.last_received_message = realtime;
-		CL_ParseServerMessage ();
+		if (cl.protocolflags & PRFL_NET_COALESCE)
+		{
+			sizebuf_t old = net_message;
+			int pos = 0;
+			while (pos + 2 <= old.cursize)
+			{
+				int len = old.data[pos] | (old.data[pos + 1] << 8);
+				pos += 2;
+				if (len <= 0 || pos + len > old.cursize)
+				{
+					net_message = old;
+					CL_ParseServerMessage ();
+					break;
+				}
+				net_message.data = old.data + pos;
+				net_message.cursize = len;
+				net_message.maxsize = len;
+				CL_ParseServerMessage ();
+				pos += len;
+			}
+			net_message = old;
+		}
+		else
+		{
+			CL_ParseServerMessage ();
+		}
 	} while (ret && cls.state == ca_connected);
 
 	if (cl_shownet.value)
