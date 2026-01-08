@@ -36,8 +36,8 @@ cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
-cvar_t	cl_interp_delay = {"cl_interp_delay","0.05",CVAR_ARCHIVE};
-cvar_t	cl_interp_delay_max = {"cl_interp_delay_max","0.1",CVAR_ARCHIVE};
+cvar_t	cl_interp_delay = {"cl_interp_delay","0.1",CVAR_ARCHIVE};
+cvar_t	cl_interp_delay_max = {"cl_interp_delay_max","0.15",CVAR_ARCHIVE};
 cvar_t	cl_interp_extrap = {"cl_interp_extrap","0.1",CVAR_ARCHIVE};
 cvar_t	cl_interp_adapt = {"cl_interp_adapt","1",CVAR_ARCHIVE};
 
@@ -438,8 +438,14 @@ float	CL_LerpPoint (void)
 
 	if (cl_interp_adapt.value)
 	{
+		double spacing = cl.interp_last_spacing;
+		double interval = f;
+
+		if (spacing > 0.0)
+			interval = q_max(interval, spacing);
+
 		max_delay = cl_interp_delay_max.value > 0.0 ? cl_interp_delay_max.value : cl_interp_delay.value;
-		target_delay = q_min(max_delay, q_max(cl_interp_delay.value, f * 1.5));
+		target_delay = q_min(max_delay, q_max(cl_interp_delay.value, interval * 1.5));
 		cl.interp_delay_target = target_delay;
 		cl.interp_delay += (cl.interp_delay_target - cl.interp_delay) * 0.1;
 	}
