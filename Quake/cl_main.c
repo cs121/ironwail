@@ -36,6 +36,10 @@ cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
+cvar_t	cl_interp_delay = {"cl_interp_delay","0.05",CVAR_ARCHIVE};
+cvar_t	cl_interp_delay_max = {"cl_interp_delay_max","0.1",CVAR_ARCHIVE};
+cvar_t	cl_interp_extrap = {"cl_interp_extrap","0.1",CVAR_ARCHIVE};
+cvar_t	cl_interp_adapt = {"cl_interp_adapt","1",CVAR_ARCHIVE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -411,6 +415,9 @@ should be put at.
 float	CL_LerpPoint (void)
 {
 	float	f, frac;
+	double	render_time;
+	double	target_delay;
+	double	max_delay;
 
 	f = cl.mtime[0] - cl.mtime[1];
 
@@ -426,18 +433,37 @@ float	CL_LerpPoint (void)
 		f = 0.1;
 	}
 
-	frac = (cl.time - cl.mtime[1]) / f;
+	if (cl.interp_delay <= 0.0)
+		cl.interp_delay = cl_interp_delay.value;
+
+	if (cl_interp_adapt.value)
+	{
+		max_delay = cl_interp_delay_max.value > 0.0 ? cl_interp_delay_max.value : cl_interp_delay.value;
+		target_delay = q_min(max_delay, q_max(cl_interp_delay.value, f * 1.5));
+		cl.interp_delay_target = target_delay;
+		cl.interp_delay += (cl.interp_delay_target - cl.interp_delay) * 0.1;
+	}
+	else
+	{
+		cl.interp_delay = cl_interp_delay.value;
+	}
+
+	render_time = cl.time - cl.interp_delay;
+	if (render_time > cl.mtime[0] + cl_interp_extrap.value)
+		render_time = cl.mtime[0];
+
+	frac = (render_time - cl.mtime[1]) / f;
 
 	if (frac < 0)
 	{
 		if (frac < -0.01)
-			cl.time = cl.mtime[1];
+			render_time = cl.mtime[1];
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
-			cl.time = cl.mtime[0];
+			render_time = cl.mtime[0];
 		frac = 1;
 	}
 
@@ -1139,6 +1165,10 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
+	Cvar_RegisterVariable (&cl_interp_delay);
+	Cvar_RegisterVariable (&cl_interp_delay_max);
+	Cvar_RegisterVariable (&cl_interp_extrap);
+	Cvar_RegisterVariable (&cl_interp_adapt);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

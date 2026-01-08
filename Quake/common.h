@@ -232,6 +232,8 @@ extern	int			msg_readcount;
 extern	qboolean	msg_badread;		// set if a read goes beyond end of message
 
 void MSG_BeginReading (void);
+void MSG_SetReadLimit (int limit);
+int MSG_GetReadLimit (void);
 int MSG_ReadChar (void);
 int MSG_ReadByte (void);
 int MSG_ReadShort (void);

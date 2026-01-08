@@ -248,6 +248,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_localsound		56
 #define svc_snapshot_full	57
 #define svc_snapshot_delta	58
+#define svc_signon_chunk	59
 
 //
 // client to server
@@ -257,7 +258,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_disconnect	2
 #define	clc_move		3		// [usercmd_t]
 #define	clc_stringcmd	4		// [string] message
-#define	clc_snapshot_ack	5	// [long] seq
+#define	clc_snapshot_ack	5	// [short] seq
+#define	clc_signon_chunk_ack	6	// [short] chunkIndex
 
 //
 // temp entity events

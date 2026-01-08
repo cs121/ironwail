@@ -134,6 +134,8 @@ typedef struct client_s
 	qboolean		dropasap;			// has been told to go to another level
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
+	qboolean		signon_chunk_pending;
+	int				signon_chunk_sent;
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
