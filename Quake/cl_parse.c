@@ -98,7 +98,8 @@ const char *svc_strings[] =
 	"svc_backtolobby", // 55
 	"svc_localsound", // 56
 	"svc_snapshot_full", // 57
-	"svc_snapshot_delta" // 58
+	"svc_snapshot_delta", // 58
+	"svc_packedentities" // 59
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
@@ -674,6 +675,340 @@ void CL_ParseUpdate (int bits)
 		VectorCopy (ent->msg_angles[0], ent->angles);
 		ent->forcelink = true;
 	}
+}
+
+static qboolean CL_ReadPackedByte (int *out)
+{
+	if (msg_readcount + 1 > net_message.cursize)
+		return false;
+	*out = net_message.data[msg_readcount];
+	msg_readcount++;
+	return true;
+}
+
+static qboolean CL_ReadPackedInt16 (short *out)
+{
+	if (msg_readcount + 2 > net_message.cursize)
+		return false;
+	*out = (short)(net_message.data[msg_readcount]
+		+ (net_message.data[msg_readcount+1] << 8));
+	msg_readcount += 2;
+	return true;
+}
+
+static qboolean CL_ReadPackedUInt16 (unsigned int *out)
+{
+	if (msg_readcount + 2 > net_message.cursize)
+		return false;
+	*out = (unsigned int)net_message.data[msg_readcount]
+		| ((unsigned int)net_message.data[msg_readcount+1] << 8);
+	msg_readcount += 2;
+	return true;
+}
+
+static void CL_ParsePackedEntities (void)
+{
+	unsigned int count;
+	unsigned int i;
+
+	if (cls.signon == SIGNONS - 1)
+	{	// first update is the final signon stage
+		cls.signon = SIGNONS;
+		CL_SignonReply ();
+	}
+
+	if (!CL_ReadPackedUInt16 (&count))
+	{
+		Con_DPrintf ("CL_ParsePackedEntities: short read on count\n");
+		msg_readcount = net_message.cursize;
+		return;
+	}
+
+	for (i = 0; i < count; i++)
+	{
+		entity_t *ent;
+		qmodel_t *model;
+		qboolean forcelink;
+		unsigned int entnum;
+		unsigned int lowmask;
+		unsigned int highmask = 0;
+		uint32_t mask;
+		int modnum;
+		int skin;
+		int prevframe;
+		int temp;
+		short coord;
+
+		if (!CL_ReadPackedUInt16 (&entnum))
+			goto short_read;
+		if (!CL_ReadPackedUInt16 (&lowmask))
+			goto short_read;
+		if (lowmask & PACKEDENT_MASK_EXTEND)
+		{
+			if (!CL_ReadPackedUInt16 (&highmask))
+				goto short_read;
+			mask = ((uint32_t)highmask << 16) | (lowmask & ~PACKEDENT_MASK_EXTEND);
+		}
+		else
+			mask = lowmask;
+
+		if (mask & ~PACKEDENT_MASK_VALID)
+		{
+			Con_DPrintf ("CL_ParsePackedEntities: invalid mask 0x%x\n", mask);
+			msg_readcount = net_message.cursize;
+			return;
+		}
+
+		if (entnum >= (unsigned int)cl_max_edicts)
+		{
+			Con_DPrintf ("CL_ParsePackedEntities: invalid entnum %u\n", entnum);
+			msg_readcount = net_message.cursize;
+			return;
+		}
+
+		ent = CL_EntityNum ((int)entnum);
+
+		if (ent->msgtime != cl.mtime[1])
+			forcelink = true;	// no previous frame to lerp from
+		else
+			forcelink = false;
+
+		if (ent->msgtime + 0.2 < cl.mtime[0])
+			ent->lerpflags |= LERP_RESETANIM;
+
+		ent->msgtime = cl.mtime[0];
+
+		if (mask & PACKEDENT_MASK_MODEL)
+		{
+			unsigned int umod;
+			if (!CL_ReadPackedUInt16 (&umod))
+				goto short_read;
+			modnum = (int)umod;
+			if (modnum >= MAX_MODELS)
+			{
+				Con_DPrintf ("CL_ParsePackedEntities: bad modnum\n");
+				msg_readcount = net_message.cursize;
+				return;
+			}
+		}
+		else
+			modnum = ent->baseline.modelindex;
+
+		prevframe = ent->frame;
+		if (mask & PACKEDENT_MASK_FRAME)
+		{
+			unsigned int uframe;
+			if (!CL_ReadPackedUInt16 (&uframe))
+				goto short_read;
+			ent->frame = (int)uframe;
+		}
+		else
+			ent->frame = ent->baseline.frame;
+
+		if (mask & PACKEDENT_MASK_COLORMAP)
+		{
+			if (!CL_ReadPackedByte (&temp))
+				goto short_read;
+		}
+		else
+			temp = ent->baseline.colormap;
+
+		if (!temp)
+			ent->colormap = vid.colormap;
+		else
+		{
+			if (temp > cl.maxclients)
+			{
+				Con_DPrintf ("CL_ParsePackedEntities: bad colormap\n");
+				msg_readcount = net_message.cursize;
+				return;
+			}
+			ent->colormap = cl.scores[temp-1].translations;
+		}
+
+		if (mask & PACKEDENT_MASK_SKIN)
+		{
+			if (!CL_ReadPackedByte (&skin))
+				goto short_read;
+		}
+		else
+			skin = ent->baseline.skin;
+		if (skin != ent->skinnum)
+		{
+			ent->skinnum = skin;
+			if (entnum > 0 && entnum <= (unsigned int)cl.maxclients)
+				R_TranslateNewPlayerSkin ((int)entnum - 1);
+		}
+
+		if (mask & PACKEDENT_MASK_EFFECTS)
+		{
+			if (!CL_ReadPackedByte (&ent->effects))
+				goto short_read;
+		}
+		else
+			ent->effects = ent->baseline.effects;
+
+		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+
+		if (mask & PACKEDENT_MASK_ORIGIN_X)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->msg_origins[0][0] = coord / PACKEDENT_POS_SCALE;
+		}
+		else
+			ent->msg_origins[0][0] = ent->baseline.origin[0];
+
+		if (mask & PACKEDENT_MASK_ANGLE_PITCH)
+		{
+			unsigned int angle;
+			if (!CL_ReadPackedUInt16 (&angle))
+				goto short_read;
+			ent->msg_angles[0][0] = (float)angle * (360.0f / 65536.0f);
+		}
+		else
+			ent->msg_angles[0][0] = ent->baseline.angles[0];
+
+		if (mask & PACKEDENT_MASK_ORIGIN_Y)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->msg_origins[0][1] = coord / PACKEDENT_POS_SCALE;
+		}
+		else
+			ent->msg_origins[0][1] = ent->baseline.origin[1];
+
+		if (mask & PACKEDENT_MASK_ANGLE_YAW)
+		{
+			unsigned int angle;
+			if (!CL_ReadPackedUInt16 (&angle))
+				goto short_read;
+			ent->msg_angles[0][1] = (float)angle * (360.0f / 65536.0f);
+		}
+		else
+			ent->msg_angles[0][1] = ent->baseline.angles[1];
+
+		if (mask & PACKEDENT_MASK_ORIGIN_Z)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->msg_origins[0][2] = coord / PACKEDENT_POS_SCALE;
+		}
+		else
+			ent->msg_origins[0][2] = ent->baseline.origin[2];
+
+		if (mask & PACKEDENT_MASK_ANGLE_ROLL)
+		{
+			unsigned int angle;
+			if (!CL_ReadPackedUInt16 (&angle))
+				goto short_read;
+			ent->msg_angles[0][2] = (float)angle * (360.0f / 65536.0f);
+		}
+		else
+			ent->msg_angles[0][2] = ent->baseline.angles[2];
+
+		if (mask & PACKEDENT_MASK_VEL_X)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->packed_velocity[0] = coord / PACKEDENT_VEL_SCALE;
+		}
+		else
+			ent->packed_velocity[0] = 0.0f;
+
+		if (mask & PACKEDENT_MASK_VEL_Y)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->packed_velocity[1] = coord / PACKEDENT_VEL_SCALE;
+		}
+		else
+			ent->packed_velocity[1] = 0.0f;
+
+		if (mask & PACKEDENT_MASK_VEL_Z)
+		{
+			if (!CL_ReadPackedInt16 (&coord))
+				goto short_read;
+			ent->packed_velocity[2] = coord / PACKEDENT_VEL_SCALE;
+		}
+		else
+			ent->packed_velocity[2] = 0.0f;
+
+		if (mask & PACKEDENT_MASK_ALPHA)
+		{
+			if (!CL_ReadPackedByte (&temp))
+				goto short_read;
+			ent->alpha = temp;
+		}
+		else
+			ent->alpha = ent->baseline.alpha;
+
+		if (mask & PACKEDENT_MASK_SCALE)
+		{
+			if (!CL_ReadPackedByte (&temp))
+				goto short_read;
+			ent->scale = temp;
+		}
+		else
+			ent->scale = ent->baseline.scale;
+
+		if (mask & PACKEDENT_MASK_LERPFINISH)
+		{
+			if (!CL_ReadPackedByte (&temp))
+				goto short_read;
+			ent->lerpfinish = ent->msgtime + ((float)temp / 255.0f);
+			ent->lerpflags |= LERP_FINISH;
+		}
+		else
+			ent->lerpflags &= ~LERP_FINISH;
+
+		if (mask & PACKEDENT_MASK_STEP)
+		{
+			ent->lerpflags |= LERP_MOVESTEP;
+			ent->forcelink = true;
+		}
+		else
+			ent->lerpflags &= ~LERP_MOVESTEP;
+
+		model = cl.model_precache[modnum];
+		if (model != ent->model)
+		{
+			ent->model = model;
+			if (model)
+			{
+				if (model->synctype == ST_FRAMETIME)
+					ent->syncbase = -cl.time;
+				else if (model->synctype == ST_RAND)
+					ent->syncbase = (float)(rand()&0x7fff) / 0x7fff;
+				else
+					ent->syncbase = 0.0;
+			}
+			else
+				forcelink = true;
+			if (entnum > 0 && entnum <= (unsigned int)cl.maxclients)
+				R_TranslateNewPlayerSkin ((int)entnum - 1);
+
+			ent->lerpflags |= LERP_RESETANIM;
+		}
+		else if (model && model->synctype == ST_FRAMETIME && ent->frame != prevframe)
+			ent->syncbase = -cl.time;
+
+		if (forcelink)
+		{
+			VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+			VectorCopy (ent->msg_origins[0], ent->origin);
+			VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+			VectorCopy (ent->msg_angles[0], ent->angles);
+			ent->forcelink = true;
+		}
+	}
+
+	return;
+
+short_read:
+	Con_DPrintf ("CL_ParsePackedEntities: short read\n");
+	msg_readcount = net_message.cursize;
 }
 
 static void CL_SendSnapshotAck (unsigned int seq)
@@ -1695,6 +2030,10 @@ void CL_ParseServerMessage (void)
 
 		case svc_snapshot_delta:
 			CL_ParseSnapshotDelta ();
+			break;
+
+		case svc_packedentities:
+			CL_ParsePackedEntities ();
 			break;
 		}
 

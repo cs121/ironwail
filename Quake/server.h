@@ -131,6 +131,7 @@ typedef struct client_s
 	qboolean		active;				// false = client is free
 	qboolean		spawned;			// false = don't send datagrams
 	qboolean		dropasap;			// has been told to go to another level
+	qboolean		supports_packedents;
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
 
