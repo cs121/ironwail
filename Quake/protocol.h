@@ -37,6 +37,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PRFL_EDICTSCALE		(1 << 5)
 #define PRFL_ALPHASANITY	(1 << 6)	// cleanup insanity with alpha
 #define PRFL_INT32COORD		(1 << 7)
+#define PRFL_SNAPSHOT_HIRES	(1 << 8)
 #define PRFL_MOREFLAGS		(1 << 31)	// not supported
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
@@ -84,6 +85,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SNAP_ALPHA		(1u<<11)
 #define SNAP_SCALE		(1u<<12)
 #define SNAP_STEP		(1u<<13)
+#define SNAP_HIRES_ORIGIN	(1u<<14)
+#define SNAP_HIRES_ANGLES	(1u<<15)
+
+#define SNAPFL_HIRES_ORIGIN	(1u<<0)
+#define SNAPFL_HIRES_ANGLES	(1u<<1)
 
 //johnfitz -- PROTOCOL_NEHAHRA transparency
 #define U_TRANS			(1<<15)

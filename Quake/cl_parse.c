@@ -318,7 +318,7 @@ void CL_ParseServerInfo (void)
 
 	if (cl.protocol == PROTOCOL_RMQ)
 	{
-		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD);
+		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES);
 		
 		// mh - read protocol flags from server so that we know what protocol features to expect
 		cl.protocolflags = (unsigned int) MSG_ReadLong ();
@@ -684,14 +684,30 @@ static void CL_SendSnapshotAck (unsigned int seq)
 	MSG_WriteLong (&cls.message, (int)seq);
 }
 
-static void CL_ReadSnapshotState (snapshot_state_t *state)
+static float CL_ReadSnapshotCoord (qboolean hires)
+{
+	if (hires && (cl.protocolflags & PRFL_SNAPSHOT_HIRES))
+		return MSG_ReadFloat ();
+	return MSG_ReadCoord (cl.protocolflags);
+}
+
+static float CL_ReadSnapshotAngle (qboolean hires)
+{
+	if (hires && (cl.protocolflags & PRFL_SNAPSHOT_HIRES))
+		return MSG_ReadFloat ();
+	return MSG_ReadAngle (cl.protocolflags);
+}
+
+static void CL_ReadSnapshotState (snapshot_state_t *state, unsigned int snapflags)
 {
 	int i;
+	qboolean hires_origin = (snapflags & SNAPFL_HIRES_ORIGIN) != 0;
+	qboolean hires_angles = (snapflags & SNAPFL_HIRES_ANGLES) != 0;
 
 	for (i = 0; i < 3; i++)
 	{
-		state->state.origin[i] = MSG_ReadCoord (cl.protocolflags);
-		state->state.angles[i] = MSG_ReadAngle (cl.protocolflags);
+		state->state.origin[i] = CL_ReadSnapshotCoord (hires_origin);
+		state->state.angles[i] = CL_ReadSnapshotAngle (hires_angles);
 	}
 	state->state.modelindex = (unsigned short)MSG_ReadShort ();
 	state->state.frame = (unsigned short)MSG_ReadShort ();
@@ -705,18 +721,22 @@ static void CL_ReadSnapshotState (snapshot_state_t *state)
 
 static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int mask)
 {
+	qboolean hires_origin = (mask & SNAP_HIRES_ORIGIN) != 0;
+	qboolean hires_angles = (mask & SNAP_HIRES_ANGLES) != 0;
+	mask &= ~(SNAP_HIRES_ORIGIN | SNAP_HIRES_ANGLES);
+
 	if (mask & SNAP_ORIGIN1)
-		state->state.origin[0] = MSG_ReadCoord (cl.protocolflags);
+		state->state.origin[0] = CL_ReadSnapshotCoord (hires_origin);
 	if (mask & SNAP_ORIGIN2)
-		state->state.origin[1] = MSG_ReadCoord (cl.protocolflags);
+		state->state.origin[1] = CL_ReadSnapshotCoord (hires_origin);
 	if (mask & SNAP_ORIGIN3)
-		state->state.origin[2] = MSG_ReadCoord (cl.protocolflags);
+		state->state.origin[2] = CL_ReadSnapshotCoord (hires_origin);
 	if (mask & SNAP_ANGLE1)
-		state->state.angles[0] = MSG_ReadAngle (cl.protocolflags);
+		state->state.angles[0] = CL_ReadSnapshotAngle (hires_angles);
 	if (mask & SNAP_ANGLE2)
-		state->state.angles[1] = MSG_ReadAngle (cl.protocolflags);
+		state->state.angles[1] = CL_ReadSnapshotAngle (hires_angles);
 	if (mask & SNAP_ANGLE3)
-		state->state.angles[2] = MSG_ReadAngle (cl.protocolflags);
+		state->state.angles[2] = CL_ReadSnapshotAngle (hires_angles);
 	if (mask & SNAP_MODEL)
 		state->state.modelindex = (unsigned short)MSG_ReadShort ();
 	if (mask & SNAP_FRAME)
@@ -884,11 +904,14 @@ static void CL_ParseSnapshotFull (void)
 	{
 		int entnum;
 		snapshot_state_t state;
+		unsigned int snapflags = 0;
 
 		entnum = (unsigned short)MSG_ReadShort ();
 		if (entnum <= 0 || entnum >= cl_max_edicts)
 			Host_Error ("CL_ParseSnapshotFull: entnum out of range");
-		CL_ReadSnapshotState (&state);
+		if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
+			snapflags = (unsigned int)MSG_ReadByte ();
+		CL_ReadSnapshotState (&state, snapflags);
 		cl.snapshot_baseline[entnum] = state;
 		cl.snapshot_present[entnum] = 1;
 		CL_ApplySnapshotState (entnum, &state);
@@ -927,8 +950,11 @@ static void CL_ParseSnapshotDelta (void)
 	{
 		int entnum = (unsigned short)MSG_ReadShort ();
 		snapshot_state_t state;
+		unsigned int snapflags = 0;
 
-		CL_ReadSnapshotState (&state);
+		if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
+			snapflags = (unsigned int)MSG_ReadByte ();
+		CL_ReadSnapshotState (&state, snapflags);
 		if (baseline_match && entnum > 0 && entnum < cl_max_edicts)
 		{
 			cl.snapshot_baseline[entnum] = state;
