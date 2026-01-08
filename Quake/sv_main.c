@@ -63,6 +63,29 @@ typedef struct
 static packedent_stats_t sv_packedents_stats;
 static double sv_packedents_stats_next_time = 0.0;
 
+typedef struct
+{
+	int considered;
+	int sent;
+	int culled_distance;
+	int culled_pvs;
+	int forced_sent;
+} sv_icull_stats_t;
+
+typedef struct
+{
+	vec3_t	vieworg;
+	float	radius2;
+	byte	*pvs;
+	qboolean	enabled;
+	qboolean	radius_enabled;
+	qboolean	pvs_enabled;
+	qboolean	cull_players;
+} sv_icull_context_t;
+
+static sv_icull_stats_t sv_icull_last_stats[MAX_SCOREBOARD];
+static double sv_icull_debug_next_time = 0.0;
+
 //============================================================================
 
 static void SV_InitClientSnapshotData (client_t *client);
@@ -785,29 +808,6 @@ qboolean SV_VisibleToClient (edict_t *client, edict_t *test, qmodel_t *worldmode
 }
 
 //=============================================================================
-
-typedef struct
-{
-	int considered;
-	int sent;
-	int culled_distance;
-	int culled_pvs;
-	int forced_sent;
-} sv_icull_stats_t;
-
-typedef struct
-{
-	vec3_t	vieworg;
-	float	radius2;
-	byte	*pvs;
-	qboolean	enabled;
-	qboolean	radius_enabled;
-	qboolean	pvs_enabled;
-	qboolean	cull_players;
-} sv_icull_context_t;
-
-static sv_icull_stats_t sv_icull_last_stats[MAX_SCOREBOARD];
-static double sv_icull_debug_next_time = 0.0;
 
 #define MAX_NET_EDICTS 65536
 
