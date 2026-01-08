@@ -2375,6 +2375,10 @@ static qboolean PR_IsValidString (const char *p)
 
 const char *PR_GetString (int num)
 {
+	if (!qcvm)
+		Host_Error ("PR_GetString: qcvm == NULL\n");
+	if (qcvm->stringssize < 0 || qcvm->stringssize > (1 << 28))
+		Host_Error ("PR_GetString: qcvm->stringssize out of range %d\n", qcvm->stringssize);
 	if (num >= 0 && num < qcvm->stringssize)
 		return qcvm->strings + num;
 	else if (num < 0 && num >= -qcvm->numknownstrings)
