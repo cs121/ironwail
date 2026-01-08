@@ -25,6 +25,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "sv_coalesce.h"
 #include "crc.h"
+#include "arch_def.h"
+#include "net_sys.h"
+#include "net_defs.h"
 
 server_t	sv;
 server_static_t	svs;
