@@ -818,11 +818,23 @@ void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 //
 int		msg_readcount;
 qboolean	msg_badread;
+static int	msg_readlimit;
 
 void MSG_BeginReading (void)
 {
 	msg_readcount = 0;
 	msg_badread = false;
+	msg_readlimit = net_message.cursize;
+}
+
+void MSG_SetReadLimit (int limit)
+{
+	msg_readlimit = limit;
+}
+
+int MSG_GetReadLimit (void)
+{
+	return msg_readlimit;
 }
 
 // returns -1 and sets msg_badread if no more characters are available
@@ -831,6 +843,11 @@ int MSG_ReadChar (void)
 	int	c;
 
 	if (msg_readcount+1 > net_message.cursize)
+	{
+		msg_badread = true;
+		return -1;
+	}
+	if (msg_readcount+1 > msg_readlimit)
 	{
 		msg_badread = true;
 		return -1;
@@ -851,6 +868,11 @@ int MSG_ReadByte (void)
 		msg_badread = true;
 		return -1;
 	}
+	if (msg_readcount+1 > msg_readlimit)
+	{
+		msg_badread = true;
+		return -1;
+	}
 
 	c = (unsigned char)net_message.data[msg_readcount];
 	msg_readcount++;
@@ -863,6 +885,11 @@ int MSG_ReadShort (void)
 	int	c;
 
 	if (msg_readcount+2 > net_message.cursize)
+	{
+		msg_badread = true;
+		return -1;
+	}
+	if (msg_readcount+2 > msg_readlimit)
 	{
 		msg_badread = true;
 		return -1;
@@ -881,6 +908,11 @@ int MSG_ReadLong (void)
 	int	c;
 
 	if (msg_readcount+4 > net_message.cursize)
+	{
+		msg_badread = true;
+		return -1;
+	}
+	if (msg_readcount+4 > msg_readlimit)
 	{
 		msg_badread = true;
 		return -1;
@@ -904,6 +936,17 @@ float MSG_ReadFloat (void)
 		float	f;
 		int	l;
 	} dat;
+
+	if (msg_readcount+4 > net_message.cursize)
+	{
+		msg_badread = true;
+		return -1;
+	}
+	if (msg_readcount+4 > msg_readlimit)
+	{
+		msg_badread = true;
+		return -1;
+	}
 
 	dat.b[0] = net_message.data[msg_readcount];
 	dat.b[1] = net_message.data[msg_readcount+1];
@@ -1013,8 +1056,15 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 {
 	void	*data;
 
+	if (net_debug_buf.value)
+		Con_Printf ("SZ_GetSpace buf %p cursize %d + %d -> %d/%d\n",
+			(void *)buf, buf->cursize, length, buf->cursize + length, buf->maxsize);
+
 	if (buf->cursize + length > buf->maxsize)
 	{
+		if (net_debug_buf.value)
+			Con_Printf ("SZ_GetSpace overflow buf %p cursize %d + %d > %d\n",
+				(void *)buf, buf->cursize, length, buf->maxsize);
 		if (!buf->allowoverflow)
 			Host_Error ("SZ_GetSpace: overflow without allowoverflow set"); // ericw -- made Host_Error to be less annoying
 

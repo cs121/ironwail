@@ -3069,6 +3069,8 @@ static void Host_PreSpawn_f (void)
 
 	host_client->sendsignon = PRESPAWN_SIGNONBUFS;
 	host_client->signonidx = 0;
+	host_client->signon_chunk_pending = false;
+	host_client->signon_chunk_sent = -1;
 }
 
 /*
@@ -3817,4 +3819,3 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewnext", Host_Viewnext_f);
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 }
-
