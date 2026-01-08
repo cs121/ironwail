@@ -44,6 +44,20 @@ static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVA
 static cvar_t net_snap_debug = {"net_snap_debug", "0", CVAR_NONE};
 static qboolean sv_packedents_selftest_done = false;
 
+typedef struct
+{
+	int packets;
+	int entities;
+	int bytes;
+	int mask_bits_total;
+	int mask_hist[33];
+	int clamp_origin;
+	int clamp_velocity;
+} packedent_stats_t;
+
+static packedent_stats_t sv_packedents_stats;
+static double sv_packedents_stats_next_time = 0.0;
+
 //============================================================================
 
 static void SV_InitClientSnapshotData (client_t *client);
@@ -1468,20 +1482,6 @@ typedef struct
 	byte		scale;
 	byte		lerpfinish;
 } packedent_update_t;
-
-typedef struct
-{
-	int packets;
-	int entities;
-	int bytes;
-	int mask_bits_total;
-	int mask_hist[33];
-	int clamp_origin;
-	int clamp_velocity;
-} packedent_stats_t;
-
-static packedent_stats_t sv_packedents_stats;
-static double sv_packedents_stats_next_time = 0.0;
 
 static short SV_PackedQuantizeCoord (float value, int *clamp_count)
 {
