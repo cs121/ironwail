@@ -64,10 +64,6 @@ int		unreliableMessagesSent		= 0;
 int		unreliableMessagesReceived	= 0;
 
 static	cvar_t	net_messagetimeout = {"net_messagetimeout","300",CVAR_NONE};
-cvar_t	net_debug_snap = {"net_debug_snap","0",CVAR_NONE};
-cvar_t	net_debug_buf = {"net_debug_buf","0",CVAR_NONE};
-cvar_t	net_force_fullsnap = {"net_force_fullsnap","0",CVAR_NONE};
-cvar_t	net_drop_delta_pct = {"net_drop_delta_pct","0",CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
 
 // these two macros are to make the code more readable
@@ -805,10 +801,6 @@ void NET_Init (void)
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
 
 	Cvar_RegisterVariable (&net_messagetimeout);
-	Cvar_RegisterVariable (&net_debug_snap);
-	Cvar_RegisterVariable (&net_debug_buf);
-	Cvar_RegisterVariable (&net_force_fullsnap);
-	Cvar_RegisterVariable (&net_drop_delta_pct);
 	Cvar_RegisterVariable (&hostname);
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
@@ -922,3 +914,4 @@ void SchedulePollProcedure(PollProcedure *proc, double timeOffset)
 	proc->next = pp;
 	prev->next = proc;
 }
+

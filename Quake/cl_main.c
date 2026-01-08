@@ -36,10 +36,6 @@ cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
-cvar_t	cl_interp_delay = {"cl_interp_delay","0.1",CVAR_ARCHIVE};
-cvar_t	cl_interp_delay_max = {"cl_interp_delay_max","0.15",CVAR_ARCHIVE};
-cvar_t	cl_interp_extrap = {"cl_interp_extrap","0.1",CVAR_ARCHIVE};
-cvar_t	cl_interp_adapt = {"cl_interp_adapt","1",CVAR_ARCHIVE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -415,9 +411,6 @@ should be put at.
 float	CL_LerpPoint (void)
 {
 	float	f, frac;
-	double	render_time;
-	double	target_delay;
-	double	max_delay;
 
 	f = cl.mtime[0] - cl.mtime[1];
 
@@ -433,43 +426,18 @@ float	CL_LerpPoint (void)
 		f = 0.1;
 	}
 
-	if (cl.interp_delay <= 0.0)
-		cl.interp_delay = cl_interp_delay.value;
-
-	if (cl_interp_adapt.value)
-	{
-		double spacing = cl.interp_last_spacing;
-		double interval = f;
-
-		if (spacing > 0.0)
-			interval = q_max(interval, spacing);
-
-		max_delay = cl_interp_delay_max.value > 0.0 ? cl_interp_delay_max.value : cl_interp_delay.value;
-		target_delay = q_min(max_delay, q_max(cl_interp_delay.value, interval * 1.5));
-		cl.interp_delay_target = target_delay;
-		cl.interp_delay += (cl.interp_delay_target - cl.interp_delay) * 0.1;
-	}
-	else
-	{
-		cl.interp_delay = cl_interp_delay.value;
-	}
-
-	render_time = cl.time - cl.interp_delay;
-	if (render_time > cl.mtime[0] + cl_interp_extrap.value)
-		render_time = cl.mtime[0];
-
-	frac = (render_time - cl.mtime[1]) / f;
+	frac = (cl.time - cl.mtime[1]) / f;
 
 	if (frac < 0)
 	{
 		if (frac < -0.01)
-			render_time = cl.mtime[1];
+			cl.time = cl.mtime[1];
 		frac = 0;
 	}
 	else if (frac > 1)
 	{
 		if (frac > 1.01)
-			render_time = cl.mtime[0];
+			cl.time = cl.mtime[0];
 		frac = 1;
 	}
 
@@ -828,7 +796,6 @@ int CL_ReadFromServer (void)
 	int			num_dlights = 0; //johnfitz
 	beam_t		*b; //johnfitz
 	int			i; //johnfitz
-	qboolean	coalesced_message;
 
 	CL_AdvanceTime ();
 
@@ -841,52 +808,7 @@ int CL_ReadFromServer (void)
 			break;
 
 		cl.last_received_message = realtime;
-		coalesced_message = (cl.protocolflags & PRFL_NET_COALESCE);
-		if (!coalesced_message && cl.protocol == 0 && cls.state == ca_connected && net_message.cursize >= 2)
-		{
-			int pos = 0;
-			coalesced_message = true;
-			while (pos + 2 <= net_message.cursize)
-			{
-				int len = net_message.data[pos] | (net_message.data[pos + 1] << 8);
-				pos += 2;
-				if (len <= 0 || pos + len > net_message.cursize)
-				{
-					coalesced_message = false;
-					break;
-				}
-				pos += len;
-			}
-			if (pos != net_message.cursize)
-				coalesced_message = false;
-		}
-
-		if (coalesced_message)
-		{
-			sizebuf_t old = net_message;
-			int pos = 0;
-			while (pos + 2 <= old.cursize)
-			{
-				int len = old.data[pos] | (old.data[pos + 1] << 8);
-				pos += 2;
-				if (len <= 0 || pos + len > old.cursize)
-				{
-					net_message = old;
-					CL_ParseServerMessage ();
-					break;
-				}
-				net_message.data = old.data + pos;
-				net_message.cursize = len;
-				net_message.maxsize = len;
-				CL_ParseServerMessage ();
-				pos += len;
-			}
-			net_message = old;
-		}
-		else
-		{
-			CL_ParseServerMessage ();
-		}
+		CL_ParseServerMessage ();
 	} while (ret && cls.state == ca_connected);
 
 	if (cl_shownet.value)
@@ -1171,10 +1093,6 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
-	Cvar_RegisterVariable (&cl_interp_delay);
-	Cvar_RegisterVariable (&cl_interp_delay_max);
-	Cvar_RegisterVariable (&cl_interp_extrap);
-	Cvar_RegisterVariable (&cl_interp_adapt);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

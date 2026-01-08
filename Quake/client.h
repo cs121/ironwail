@@ -272,17 +272,8 @@ typedef struct
 	int			num_statics;	// held in cl_staticentities array
 	entity_t	viewent;			// the gun model
 	unsigned int snapshot_baseline_seq;
-	unsigned int last_snapshot_seq;
-	unsigned int last_snapshot_delta_from;
-	unsigned int last_snapshot_server_tick;
 	snapshot_state_t *snapshot_baseline;
 	byte		*snapshot_present;
-	qboolean	need_fullsnap;
-	double		interp_delay;
-	double		interp_delay_target;
-	double		interp_last_spacing;
-	int			signon_chunk_expected;
-	int			signon_chunk_total;
 
 	int			cdtrack, looptrack;	// cd audio
 

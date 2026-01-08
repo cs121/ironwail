@@ -224,26 +224,13 @@ void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, const char *s);
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags);
-void MSG_WriteCoord32f (sizebuf_t *sb, float f);
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags); //johnfitz
-qboolean MSG_TryWriteChar (sizebuf_t *sb, int c);
-qboolean MSG_TryWriteByte (sizebuf_t *sb, int c);
-qboolean MSG_TryWriteShort (sizebuf_t *sb, int c);
-qboolean MSG_TryWriteLong (sizebuf_t *sb, int c);
-qboolean MSG_TryWriteFloat (sizebuf_t *sb, float f);
-qboolean MSG_TryWriteString (sizebuf_t *sb, const char *s);
-qboolean MSG_TryWriteCoord (sizebuf_t *sb, float f, unsigned int flags);
-qboolean MSG_TryWriteCoord32f (sizebuf_t *sb, float f);
-qboolean MSG_TryWriteAngle (sizebuf_t *sb, float f, unsigned int flags);
-qboolean MSG_TryWriteAngle16 (sizebuf_t *sb, float f, unsigned int flags);
 
 extern	int			msg_readcount;
 extern	qboolean	msg_badread;		// set if a read goes beyond end of message
 
 void MSG_BeginReading (void);
-void MSG_SetReadLimit (int limit);
-int MSG_GetReadLimit (void);
 int MSG_ReadChar (void);
 int MSG_ReadByte (void);
 int MSG_ReadShort (void);
@@ -497,3 +484,4 @@ extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
 
 #endif	/* _Q_COMMON_H */
+

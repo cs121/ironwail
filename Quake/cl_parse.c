@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "steam.h"
-#include "crc.h"
 
 const char *svc_strings[] =
 {
@@ -99,8 +98,7 @@ const char *svc_strings[] =
 	"svc_backtolobby", // 55
 	"svc_localsound", // 56
 	"svc_snapshot_full", // 57
-	"svc_snapshot_delta", // 58
-	"svc_signon_chunk" // 59
+	"svc_snapshot_delta" // 58
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
@@ -258,24 +256,8 @@ void CL_KeepaliveMessage (void)
 			Host_Error ("CL_KeepaliveMessage: received a message");
 			break;
 		case 2:
-			if (cl.protocolflags & PRFL_NET_COALESCE)
-			{
-				int pos = 0;
-				while (pos + 2 <= net_message.cursize)
-				{
-					int len = net_message.data[pos] | (net_message.data[pos + 1] << 8);
-					pos += 2;
-					if (len != 1 || pos + len > net_message.cursize || net_message.data[pos] != svc_nop)
-						Host_Error ("CL_KeepaliveMessage: datagram wasn't a nop");
-					pos += len;
-				}
-				if (pos != net_message.cursize)
-					Host_Error ("CL_KeepaliveMessage: truncated coalesced nop");
-			}
-			else if (MSG_ReadByte() != svc_nop)
-			{
+			if (MSG_ReadByte() != svc_nop)
 				Host_Error ("CL_KeepaliveMessage: datagram wasn't a nop");
-			}
 			break;
 		}
 	} while (ret);
@@ -336,23 +318,11 @@ void CL_ParseServerInfo (void)
 
 	if (cl.protocol == PROTOCOL_RMQ)
 	{
-		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES | PRFL_NET_COALESCE);
-
+		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES);
+		
 		// mh - read protocol flags from server so that we know what protocol features to expect
 		cl.protocolflags = (unsigned int) MSG_ReadLong ();
-
-		if (cl.protocolflags & PRFL_MOREFLAGS)
-		{
-			unsigned int extra_flags = cl.protocolflags;
-			Con_Warning ("PROTOCOL_RMQ protocolflags %i contains PRFL_MOREFLAGS; ignoring additional flags\n", cl.protocolflags);
-			while (extra_flags & PRFL_MOREFLAGS)
-			{
-				extra_flags = (unsigned int) MSG_ReadLong ();
-				Con_DWarning ("PROTOCOL_RMQ extra protocolflags %i ignored\n", extra_flags);
-			}
-		}
-
-		cl.protocolflags &= ~PRFL_MOREFLAGS;
+		
 		if (0 != (cl.protocolflags & (~supportedflags)))
 		{
 			Con_Warning("PROTOCOL_RMQ protocolflags %i contains unsupported flags\n", cl.protocolflags);
@@ -711,7 +681,7 @@ static void CL_SendSnapshotAck (unsigned int seq)
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
 	MSG_WriteByte (&cls.message, clc_snapshot_ack);
-	MSG_WriteShort (&cls.message, (int)seq);
+	MSG_WriteLong (&cls.message, (int)seq);
 }
 
 static float CL_ReadSnapshotCoord (qboolean hires)
@@ -916,103 +886,16 @@ void CL_ParseBaseline (entity_t *ent, int version) //johnfitz -- added argument
 	}
 
 	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte() : ENTALPHA_DEFAULT; //johnfitz -- PROTOCOL_FITZQUAKE
-ent->baseline.scale = (bits & B_SCALE) ? MSG_ReadByte() : ENTSCALE_DEFAULT;
-}
-
-static qboolean CL_ReadSnapshotHeader (unsigned int *out_seq, unsigned int *out_delta_from,
-	unsigned int *out_server_tick, unsigned int *out_payload_len, unsigned int *out_entity_count,
-	unsigned int *out_crc, int *out_payload_start, int *out_payload_end)
-{
-	int limit = MSG_GetReadLimit();
-
-	*out_seq = (unsigned short)MSG_ReadShort ();
-	*out_delta_from = (unsigned short)MSG_ReadShort ();
-	*out_server_tick = (unsigned int)MSG_ReadLong ();
-	*out_payload_len = (unsigned short)MSG_ReadShort ();
-	*out_entity_count = (unsigned short)MSG_ReadShort ();
-	*out_crc = (unsigned short)MSG_ReadShort ();
-
-	if (msg_badread)
-		return false;
-
-	*out_payload_start = msg_readcount;
-	*out_payload_end = msg_readcount + (int)(*out_payload_len);
-	if (*out_payload_end > limit)
-	{
-		msg_badread = true;
-		return false;
-	}
-
-	return true;
-}
-
-static qboolean CL_ValidateSnapshotCRC (unsigned int expected_crc, int payload_start, int payload_len)
-{
-	unsigned short actual_crc;
-
-	if (!payload_len)
-		return expected_crc == 0;
-
-	actual_crc = CRC_Block (net_message.data + payload_start, payload_len);
-	return actual_crc == (unsigned short)expected_crc;
+	ent->baseline.scale = (bits & B_SCALE) ? MSG_ReadByte() : ENTSCALE_DEFAULT;
 }
 
 static void CL_ParseSnapshotFull (void)
 {
 	unsigned int seq;
-	unsigned int delta_from;
-	unsigned int server_tick;
-	unsigned int payload_len;
-	unsigned int entity_count;
-	unsigned int crc;
-	int payload_start;
-	int payload_end;
-	int old_limit;
 	int count;
 	int i;
 
-	old_limit = MSG_GetReadLimit();
-	if (!CL_ReadSnapshotHeader (&seq, &delta_from, &server_tick, &payload_len, &entity_count, &crc,
-		&payload_start, &payload_end))
-		return;
-	MSG_SetReadLimit (payload_end);
-
-	cl.last_snapshot_seq = seq;
-	cl.last_snapshot_delta_from = delta_from;
-	if (server_tick < cl.last_snapshot_server_tick)
-	{
-		if (net_debug_snap.value)
-			Con_Printf ("snapdbg client full server_tick regressed %u -> %u\n",
-				cl.last_snapshot_server_tick, server_tick);
-		cl.need_fullsnap = true;
-	}
-	else
-	{
-		cl.last_snapshot_server_tick = server_tick;
-	}
-
-	if (net_debug_snap.value)
-	{
-		Con_Printf ("snapdbg client full seq %u base %u payload %u ents %u msg %d\n",
-			seq, delta_from, payload_len, entity_count, net_message.cursize);
-	}
-	if (delta_from != 0xFFFF && net_debug_snap.value)
-		Con_Printf ("snapdbg client full unexpected base %u\n", delta_from);
-
-	if (!CL_ValidateSnapshotCRC (crc, payload_start, (int)payload_len))
-	{
-		if (net_debug_snap.value)
-		{
-			Con_Printf ("snapdbg client full crc mismatch seq %u payload %u msg %d\n",
-				seq, payload_len, net_message.cursize);
-		}
-		cl.need_fullsnap = true;
-		msg_readcount = payload_end;
-		MSG_SetReadLimit (old_limit);
-		CL_SendSnapshotAck (0);
-		return;
-	}
-
+	seq = (unsigned int)MSG_ReadLong ();
 	count = (unsigned short)MSG_ReadShort ();
 
 	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
@@ -1025,10 +908,7 @@ static void CL_ParseSnapshotFull (void)
 
 		entnum = (unsigned short)MSG_ReadShort ();
 		if (entnum <= 0 || entnum >= cl_max_edicts)
-		{
-			msg_badread = true;
-			break;
-		}
+			Host_Error ("CL_ParseSnapshotFull: entnum out of range");
 		if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 			snapflags = (unsigned int)MSG_ReadByte ();
 		CL_ReadSnapshotState (&state, snapflags);
@@ -1037,17 +917,7 @@ static void CL_ParseSnapshotFull (void)
 		CL_ApplySnapshotState (entnum, &state);
 	}
 
-	if (msg_readcount != payload_end)
-	{
-		if (net_debug_snap.value)
-			Con_Printf ("snapdbg client full payload mismatch read %d expected %d\n",
-				msg_readcount, payload_end);
-		msg_badread = true;
-	}
-	MSG_SetReadLimit (old_limit);
-
 	cl.snapshot_baseline_seq = seq;
-	cl.need_fullsnap = false;
 	CL_SendSnapshotAck (seq);
 }
 
@@ -1056,65 +926,13 @@ static void CL_ParseSnapshotDelta (void)
 	unsigned int seq;
 	unsigned int baseline_seq;
 	unsigned int mask;
-	unsigned int server_tick;
-	unsigned int payload_len;
-	unsigned int entity_count;
-	unsigned int crc;
-	int payload_start;
-	int payload_end;
-	int old_limit;
 	int count;
 	int i;
 	qboolean baseline_match;
 
-	old_limit = MSG_GetReadLimit();
-	if (!CL_ReadSnapshotHeader (&seq, &baseline_seq, &server_tick, &payload_len, &entity_count, &crc,
-		&payload_start, &payload_end))
-		return;
-	MSG_SetReadLimit (payload_end);
-
-	cl.last_snapshot_seq = seq;
-	cl.last_snapshot_delta_from = baseline_seq;
-	if (server_tick < cl.last_snapshot_server_tick)
-	{
-		if (net_debug_snap.value)
-			Con_Printf ("snapdbg client delta server_tick regressed %u -> %u\n",
-				cl.last_snapshot_server_tick, server_tick);
-		cl.need_fullsnap = true;
-	}
-	else
-	{
-		cl.last_snapshot_server_tick = server_tick;
-	}
-
-	if (net_debug_snap.value)
-	{
-		Con_Printf ("snapdbg client delta seq %u base %u payload %u ents %u msg %d\n",
-			seq, baseline_seq, payload_len, entity_count, net_message.cursize);
-	}
-
-	if (!CL_ValidateSnapshotCRC (crc, payload_start, (int)payload_len))
-	{
-		if (net_debug_snap.value)
-		{
-			Con_Printf ("snapdbg client delta crc mismatch seq %u base %u payload %u msg %d\n",
-				seq, baseline_seq, payload_len, net_message.cursize);
-		}
-		cl.need_fullsnap = true;
-		msg_readcount = payload_end;
-		MSG_SetReadLimit (old_limit);
-		CL_SendSnapshotAck (0);
-		return;
-	}
-
+	seq = (unsigned int)MSG_ReadLong ();
+	baseline_seq = (unsigned int)MSG_ReadLong ();
 	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
-	if (!baseline_match)
-	{
-		if (net_debug_snap.value)
-			Con_Printf ("snapdbg client delta mismatch seq %u base %u expected %u\n",
-				seq, baseline_seq, cl.snapshot_baseline_seq);
-		cl.need_fullsnap = true;
-	}
 
 	count = (unsigned short)MSG_ReadShort ();
 	for (i = 0; i < count; i++)
@@ -1165,16 +983,7 @@ static void CL_ParseSnapshotDelta (void)
 		}
 	}
 
-	if (msg_readcount != payload_end)
-	{
-		if (net_debug_snap.value)
-			Con_Printf ("snapdbg client delta payload mismatch read %d expected %d\n",
-				msg_readcount, payload_end);
-		msg_badread = true;
-	}
-	MSG_SetReadLimit (old_limit);
-
-	if (baseline_match && !msg_badread)
+	if (baseline_match)
 	{
 		for (i = 1; i < cl_max_edicts; i++)
 		{
@@ -1182,12 +991,10 @@ static void CL_ParseSnapshotDelta (void)
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
 		cl.snapshot_baseline_seq = seq;
-		cl.need_fullsnap = false;
 		CL_SendSnapshotAck (seq);
 	}
 	else
 	{
-		cl.need_fullsnap = true;
 		CL_SendSnapshotAck (0);
 	}
 }
@@ -1555,36 +1362,6 @@ static void CL_ParseStuffText(const char *msg)
 	}
 }
 
-static void CL_DropBadServerMessage (const char *reason, int lastcmd)
-{
-	Con_Printf ("Bad server message (%s): lastcmd %s readcount %d cursize %d snap %u base %u\n",
-		reason,
-		(lastcmd >= 0 && lastcmd < (int)NUM_SVC_STRINGS) ? svc_strings[lastcmd] : "unknown",
-		msg_readcount, net_message.cursize, cl.last_snapshot_seq, cl.last_snapshot_delta_from);
-	CL_Disconnect ();
-}
-
-void CL_ParseServerMessage (void);
-
-static void CL_ParseEmbeddedMessage (const byte *data, int length)
-{
-	sizebuf_t old_message = net_message;
-	int old_readcount = msg_readcount;
-	int old_readlimit = MSG_GetReadLimit();
-	qboolean old_badread = msg_badread;
-
-	net_message.data = (byte *)data;
-	net_message.cursize = length;
-
-	MSG_BeginReading ();
-	CL_ParseServerMessage ();
-
-	net_message = old_message;
-	msg_readcount = old_readcount;
-	msg_badread = old_badread;
-	MSG_SetReadLimit (old_readlimit);
-}
-
 /*
 =====================
 CL_ParseServerMessage
@@ -1616,10 +1393,7 @@ void CL_ParseServerMessage (void)
 	while (1)
 	{
 		if (msg_badread)
-		{
-			CL_DropBadServerMessage ("read overflow", lastcmd);
-			return;
-		}
+			Host_Error ("CL_ParseServerMessage: Bad server message");
 
 		cmd = MSG_ReadByte ();
 
@@ -1650,9 +1424,8 @@ void CL_ParseServerMessage (void)
 		switch (cmd)
 		{
 		default:
-	//	CL_DumpPacket ();
-			Con_Printf ("Illegible server message %d (previous was %s)\n", cmd, svc_strings[lastcmd]); //johnfitz -- added svc_strings[lastcmd]
-			CL_DropBadServerMessage ("illegible", lastcmd);
+		//	CL_DumpPacket ();
+			Host_Error ("Illegible server message %d (previous was %s)", cmd, svc_strings[lastcmd]); //johnfitz -- added svc_strings[lastcmd]
 			break;
 
 		case svc_nop:
@@ -1660,14 +1433,8 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_time:
-		{
-			double newtime;
-
 			cl.mtime[1] = cl.mtime[0];
 			cl.mtime[0] = MSG_ReadFloat ();
-			newtime = cl.mtime[0];
-			if (cl.mtime[1] > 0.0)
-				cl.interp_last_spacing = q_max(0.0, newtime - cl.mtime[1]);
 			cl.fixangle = false;
 			if (cls.signon == SIGNONS - 1)
 			{	// allow map loads with no visible entity updates to finish signon
@@ -1675,7 +1442,6 @@ void CL_ParseServerMessage (void)
 				CL_SignonReply ();
 			}
 			break;
-		}
 
 		case svc_clientdata:
 			CL_ParseClientdata (); //johnfitz -- removed bits parameter, we will read this inside CL_ParseClientdata()
@@ -1930,57 +1696,6 @@ void CL_ParseServerMessage (void)
 		case svc_snapshot_delta:
 			CL_ParseSnapshotDelta ();
 			break;
-
-		case svc_signon_chunk:
-		{
-			int chunk_index = (unsigned short)MSG_ReadShort ();
-			int chunk_count = (unsigned short)MSG_ReadShort ();
-			int payload_len = (unsigned short)MSG_ReadShort ();
-			const byte *payload;
-
-			if (msg_badread)
-				break;
-
-			if (cl.signon_chunk_total == 0)
-			{
-				cl.signon_chunk_total = chunk_count;
-				cl.signon_chunk_expected = 0;
-			}
-
-			if (chunk_count != cl.signon_chunk_total)
-			{
-				Con_Printf ("signon chunk count mismatch %d (expected %d)\n",
-					chunk_count, cl.signon_chunk_total);
-				cl.signon_chunk_total = chunk_count;
-				cl.signon_chunk_expected = 0;
-			}
-
-			if (chunk_index != cl.signon_chunk_expected)
-			{
-				Con_Printf ("signon chunk out of order %d (expected %d)\n",
-					chunk_index, cl.signon_chunk_expected);
-				cl.signon_chunk_expected = chunk_index;
-			}
-
-			if (msg_readcount + payload_len > MSG_GetReadLimit())
-			{
-				msg_badread = true;
-				break;
-			}
-
-			payload = net_message.data + msg_readcount;
-			msg_readcount += payload_len;
-			cl.signon_chunk_expected++;
-
-			if (payload_len > 0)
-				CL_ParseEmbeddedMessage (payload, payload_len);
-
-			if (cls.demoplayback || cls.state != ca_connected)
-				break;
-			MSG_WriteByte (&cls.message, clc_signon_chunk_ack);
-			MSG_WriteShort (&cls.message, chunk_index);
-			break;
-		}
 		}
 
 		lastcmd = cmd; //johnfitz

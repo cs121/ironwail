@@ -115,38 +115,8 @@ typedef struct
 	}			mapchecks;				// additional map checks (for level designers)
 } server_t;
 
-typedef struct
-{
-	double		tick_dt;
-	double		send_dt;
-	double		sim_accum;
-	double		send_accum;
-	double		last_realtime;
-	uint64_t	server_tick;
-	unsigned int	frame_sim_steps;
-	unsigned int	frame_send_steps;
-	unsigned int	frame_mtu_drops;
-	unsigned int	frame_ents_sent;
-	unsigned int	frame_bytes_sent;
-	unsigned int	stats_frames;
-	unsigned int	stats_sim_ticks;
-	unsigned int	stats_send_ticks;
-	unsigned int	stats_catchup_steps;
-	unsigned int	stats_hitch_clamps;
-	double		stats_time;
-} sv_clock_t;
-
-extern sv_clock_t sv_clock;
-
-extern cvar_t sv_tickdebug;
-extern cvar_t sv_maxtickcatchup;
-extern cvar_t sv_clock_log;
-
-void SV_RunTick (double tick_dt);
-void Host_ResetServerClock (void);
 
 #define	NUM_PING_TIMES		16
-#define COALESCE_BUFSIZE	16384
 
 enum sendsignon_e
 {
@@ -163,8 +133,6 @@ typedef struct client_s
 	qboolean		dropasap;			// has been told to go to another level
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
-	qboolean		signon_chunk_pending;
-	int				signon_chunk_sent;
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
@@ -177,10 +145,6 @@ typedef struct client_s
 	sizebuf_t		message;			// can be added to at any time,
 										// copied and clear once per frame
 	byte			msgbuf[MAX_MSGLEN];
-	double			next_send_time;
-	sizebuf_t		coalesce_buf;
-	byte			coalesce_storage[COALESCE_BUFSIZE];
-	qboolean		coalesce_framing;
 	edict_t			*edict;				// EDICT_NUM(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;
@@ -204,7 +168,6 @@ typedef struct client_s
 	unsigned int	snapshot_pending_baseline_seq;
 	double			snapshot_pending_time;
 	qboolean		snapshot_pending_is_delta;
-	unsigned int	snapshot_last_server_tick;
 	snapshot_state_t *snapshot_baseline;
 	byte			*snapshot_baseline_present;
 	snapshot_state_t *snapshot_pending;

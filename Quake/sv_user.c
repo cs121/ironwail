@@ -604,12 +604,7 @@ nextmsg:
 				break;
 
 			case clc_snapshot_ack:
-				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadShort ());
-				break;
-			case clc_signon_chunk_ack:
-				host_client->signon_chunk_pending = false;
-				if (host_client->signon_chunk_sent == (unsigned short)MSG_ReadShort ())
-					host_client->signonidx++;
+				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadLong ());
 				break;
 			}
 		}
