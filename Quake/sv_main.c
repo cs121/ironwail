@@ -860,9 +860,10 @@ static int SV_SnapshotEntitySizeWorst (void)
 
 static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 {
-	int header_size = 1 + 4 + 2;
+	int header_size = 1 + 2 + 2 + 2 + 2 + 2;
+	int delta_counts_size = 3 * 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
-	int available = msg->maxsize - msg->cursize - header_size;
+	int available = msg->maxsize - msg->cursize - header_size - delta_counts_size;
 
 	if (per_ent <= 0 || available <= 0)
 		return 0;
