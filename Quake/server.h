@@ -117,6 +117,7 @@ typedef struct
 
 
 #define	NUM_PING_TIMES		16
+#define COALESCE_BUFSIZE	16384
 
 enum sendsignon_e
 {
@@ -145,6 +146,10 @@ typedef struct client_s
 	sizebuf_t		message;			// can be added to at any time,
 										// copied and clear once per frame
 	byte			msgbuf[MAX_MSGLEN];
+	double			next_send_time;
+	sizebuf_t		coalesce_buf;
+	byte			coalesce_storage[COALESCE_BUFSIZE];
+	qboolean		coalesce_framing;
 	edict_t			*edict;				// EDICT_NUM(clientnum+1)
 	char			name[32];			// for printing to other people
 	int				colors;

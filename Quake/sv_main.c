@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "sv_coalesce.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -192,6 +193,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autoload);
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
+	SV_Coalesce_RegisterCvars();
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
 
@@ -531,6 +533,7 @@ void SV_ConnectClient (int clientnum)
 	client->message.data = client->msgbuf;
 	client->message.maxsize = sizeof(client->msgbuf);
 	client->message.allowoverflow = true;		// we can catch it
+	SV_Coalesce_InitClient(client);
 
 	if (sv.loadgame)
 		memcpy (client->spawn_parms, spawn_parms, sizeof(spawn_parms));
@@ -1922,6 +1925,21 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 SV_SendClientDatagram
 =======================
 */
+static void SV_BuildClientDatagram (client_t *client, sizebuf_t *msg)
+{
+	MSG_WriteByte (msg, svc_time);
+	MSG_WriteFloat (msg, qcvm->time);
+
+// add the client specific data to the datagram
+	SV_WriteClientdataToMessage (client->edict, msg);
+
+	SV_SendSnapshot (client, msg);
+
+// copy the server datagram if there is space
+	if (msg->cursize + sv.datagram.cursize < msg->maxsize)
+		SZ_Write (msg, sv.datagram.data, sv.datagram.cursize);
+}
+
 qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[MAX_DATAGRAM];
@@ -1936,17 +1954,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 		msg.maxsize = DATAGRAM_MTU;
 	//johnfitz
 
-	MSG_WriteByte (&msg, svc_time);
-	MSG_WriteFloat (&msg, qcvm->time);
-
-// add the client specific data to the datagram
-	SV_WriteClientdataToMessage (client->edict, &msg);
-
-	SV_SendSnapshot (client, &msg);
-
-// copy the server datagram if there is space
-	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
-		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
+	SV_BuildClientDatagram (client, &msg);
 
 // send the datagram
 	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
@@ -2114,9 +2122,12 @@ SV_SendClientMessages
 void SV_SendClientMessages (void)
 {
 	int			i;
+	qboolean	use_coalesce;
 
 // update frags, names, etc
 	SV_UpdateToReliableMessages ();
+
+	use_coalesce = (sv_netcoalesce.value != 0);
 
 // build individual updates
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
@@ -2124,10 +2135,31 @@ void SV_SendClientMessages (void)
 		if (!host_client->active)
 			continue;
 
+		if (use_coalesce && host_client->spawned)
+		{
+			byte		buf[MAX_DATAGRAM];
+			sizebuf_t	msg;
+
+			msg.data = buf;
+			msg.maxsize = sizeof(buf);
+			msg.cursize = 0;
+
+			//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
+			if (Q_strcmp(NET_QSocketGetAddressString(host_client->netconnection), "LOCAL") != 0)
+				msg.maxsize = DATAGRAM_MTU;
+			//johnfitz
+
+			SV_BuildClientDatagram (host_client, &msg);
+			SV_Coalesce_Enqueue (host_client, msg.data, msg.cursize);
+		}
+
 		if (host_client->spawned)
 		{
-			if (!SV_SendClientDatagram (host_client))
-				continue;
+			if (!use_coalesce)
+			{
+				if (!SV_SendClientDatagram (host_client))
+					continue;
+			}
 		}
 		else
 		{
@@ -2184,30 +2216,61 @@ void SV_SendClientMessages (void)
 
 		if (host_client->message.cursize || host_client->dropasap)
 		{
+			qboolean had_reliable = (host_client->message.cursize != 0);
+
 			if (!NET_CanSendMessage (host_client->netconnection))
 			{
 //				I_Printf ("can't write\n");
-				continue;
+				had_reliable = false;
 			}
-
-			if (host_client->dropasap)
+			else if (host_client->dropasap)
+			{
 				SV_DropClient (false);	// went to another level
+			}
 			else
 			{
-				if (NET_SendMessage (host_client->netconnection
-				, &host_client->message) == -1)
-					SV_DropClient (true);	// if the message couldn't send, kick off
+				if (use_coalesce && host_client->coalesce_framing)
+				{
+					byte		framedbuf[MAX_MSGLEN + 2];
+					sizebuf_t	framed;
+					int			len = host_client->message.cursize;
+
+					framed.data = framedbuf;
+					framed.maxsize = sizeof(framedbuf);
+					framed.cursize = 0;
+
+					framedbuf[0] = len & 0xff;
+					framedbuf[1] = (len >> 8) & 0xff;
+					memcpy(framedbuf + 2, host_client->message.data, len);
+					framed.cursize = len + 2;
+
+					if (NET_SendMessage (host_client->netconnection, &framed) == -1)
+						SV_DropClient (true);	// if the message couldn't send, kick off
+				}
+				else
+				{
+					if (NET_SendMessage (host_client->netconnection
+					, &host_client->message) == -1)
+						SV_DropClient (true);	// if the message couldn't send, kick off
+				}
 				SZ_Clear (&host_client->message);
 				host_client->last_message = realtime;
 				if (host_client->sendsignon == PRESPAWN_FLUSH)
 					host_client->sendsignon = PRESPAWN_DONE;
 			}
+			if (use_coalesce && host_client->spawned)
+				SV_Coalesce_MaybeFlushClient (host_client, sv_netburst.value && had_reliable);
+			continue;
 		}
+		if (use_coalesce && host_client->spawned)
+			SV_Coalesce_MaybeFlushClient (host_client, false);
 	}
 
 
 // clear muzzle flashes
 	SV_CleanupEnts ();
+	if (use_coalesce)
+		SV_Coalesce_DebugUpdate();
 }
 
 
@@ -2706,6 +2769,7 @@ void SV_SpawnServer (const char *server)
 		sv.protocolflags = PRFL_INT32COORD | PRFL_SHORTANGLE | PRFL_SNAPSHOT_HIRES;
 	}
 	else sv.protocolflags = 0;
+	SV_Coalesce_UpdateProtocolFlags();
 
 	PR_SwitchQCVM(vm);
 // load progs to get entity field count

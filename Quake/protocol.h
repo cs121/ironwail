@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PRFL_ALPHASANITY	(1 << 6)	// cleanup insanity with alpha
 #define PRFL_INT32COORD		(1 << 7)
 #define PRFL_SNAPSHOT_HIRES	(1 << 8)
+#define PRFL_NET_COALESCE	(1 << 9)
 #define PRFL_MOREFLAGS		(1 << 31)	// not supported
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:

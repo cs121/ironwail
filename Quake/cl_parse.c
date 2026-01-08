@@ -256,8 +256,24 @@ void CL_KeepaliveMessage (void)
 			Host_Error ("CL_KeepaliveMessage: received a message");
 			break;
 		case 2:
-			if (MSG_ReadByte() != svc_nop)
+			if (cl.protocolflags & PRFL_NET_COALESCE)
+			{
+				int pos = 0;
+				while (pos + 2 <= net_message.cursize)
+				{
+					int len = net_message.data[pos] | (net_message.data[pos + 1] << 8);
+					pos += 2;
+					if (len != 1 || pos + len > net_message.cursize || net_message.data[pos] != svc_nop)
+						Host_Error ("CL_KeepaliveMessage: datagram wasn't a nop");
+					pos += len;
+				}
+				if (pos != net_message.cursize)
+					Host_Error ("CL_KeepaliveMessage: truncated coalesced nop");
+			}
+			else if (MSG_ReadByte() != svc_nop)
+			{
 				Host_Error ("CL_KeepaliveMessage: datagram wasn't a nop");
+			}
 			break;
 		}
 	} while (ret);
@@ -318,7 +334,7 @@ void CL_ParseServerInfo (void)
 
 	if (cl.protocol == PROTOCOL_RMQ)
 	{
-		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES);
+		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES | PRFL_NET_COALESCE);
 		
 		// mh - read protocol flags from server so that we know what protocol features to expect
 		cl.protocolflags = (unsigned int) MSG_ReadLong ();
