@@ -355,6 +355,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sv_main.c" />
+    <ClCompile Include="..\..\Quake\sv_coalesce.c" />
     <ClCompile Include="..\..\Quake\sv_move.c" />
     <ClCompile Include="..\..\Quake\sv_phys.c" />
     <ClCompile Include="..\..\Quake\sv_user.c" />
