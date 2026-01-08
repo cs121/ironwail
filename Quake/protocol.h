@@ -88,8 +88,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SNAP_HIRES_ORIGIN	(1u<<14)
 #define SNAP_HIRES_ANGLES	(1u<<15)
 
-#define SNAPFL_HIRES_ORIGIN	(1u<<0)
-#define SNAPFL_HIRES_ANGLES	(1u<<1)
+#define SNAPFL_HIRES_ORIGIN	(1u<<2)
+#define SNAPFL_HIRES_ANGLES	(1u<<3)
 
 //johnfitz -- PROTOCOL_NEHAHRA transparency
 #define U_TRANS			(1<<15)
