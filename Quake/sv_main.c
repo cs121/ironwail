@@ -2980,7 +2980,7 @@ void SV_SpawnServer (const char *server)
 	static char	dummy[8] = { 0,0,0,0,0,0,0,0 };
 	edict_t		*ent;
 	int			i, signonsize;
-	qcvm_t		*vm = qcvm;
+	qcvm_t		*vm = &sv.qcvm;
 
 	// let's not have any servers with no name
 	if (hostname.string[0] == 0)
