@@ -527,6 +527,12 @@ nextmsg:
 
 			case clc_stringcmd:
 				s = MSG_ReadString ();
+				if (q_strncasecmp(s, "packedents", 10) == 0)
+				{
+					int value = Q_atoi(s + 10);
+					host_client->supports_packedents = value ? true : false;
+					break;
+				}
 				if (q_strncasecmp(s, "spawn", 5) && q_strncasecmp(s, "begin", 5) && q_strncasecmp(s, "prespawn", 8) && qcvm->extfuncs.SV_ParseClientCommand)
 				{	//the spawn/begin/prespawn are because of numerous mods that disobey the rules.
 					//at a minimum, we must be able to join the server, so that we can see any sprints/bprints (because dprint sucks, yes there's proper ways to deal with this, but moders don't always know them).

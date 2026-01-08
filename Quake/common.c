@@ -765,6 +765,43 @@ void MSG_WriteString (sizebuf_t *sb, const char *s)
 		SZ_Write (sb, s, Q_strlen(s)+1);
 }
 
+void MSG_WriteBits (sizebuf_t *sb, unsigned int value, int bits)
+{
+	int i;
+
+	for (i = 0; i < bits; i++)
+	{
+		if (sb->bitpos == 0)
+		{
+			byte *buf = (byte *)SZ_GetSpace (sb, 1);
+			*buf = 0;
+		}
+		if (value & 1u)
+			sb->data[sb->cursize - 1] |= (byte)(1u << sb->bitpos);
+		sb->bitpos++;
+		if (sb->bitpos == 8)
+			sb->bitpos = 0;
+		value >>= 1;
+	}
+}
+
+void MSG_WriteInt8 (sizebuf_t *sb, int c)
+{
+	MSG_WriteChar (sb, c);
+}
+
+void MSG_WriteInt16 (sizebuf_t *sb, int c)
+{
+	MSG_WriteShort (sb, c);
+}
+
+void MSG_WriteUInt16 (sizebuf_t *sb, unsigned int c)
+{
+	byte *buf = (byte *) SZ_GetSpace (sb, 2);
+	buf[0] = c & 0xff;
+	buf[1] = (c >> 8) & 0xff;
+}
+
 //johnfitz -- original behavior, 13.3 fixed point coords, max range +-4096
 void MSG_WriteCoord16 (sizebuf_t *sb, float f)
 {
@@ -818,11 +855,13 @@ void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 //
 int		msg_readcount;
 qboolean	msg_badread;
+int		msg_readbitpos;
 
 void MSG_BeginReading (void)
 {
 	msg_readcount = 0;
 	msg_badread = false;
+	msg_readbitpos = 0;
 }
 
 // returns -1 and sets msg_badread if no more characters are available
@@ -874,6 +913,117 @@ int MSG_ReadShort (void)
 	msg_readcount += 2;
 
 	return c;
+}
+
+unsigned int MSG_ReadBits (int bits)
+{
+	unsigned int value = 0;
+	int i;
+
+	for (i = 0; i < bits; i++)
+	{
+		if (msg_readcount >= net_message.cursize)
+		{
+			msg_badread = true;
+			return value;
+		}
+		value |= ((net_message.data[msg_readcount] >> msg_readbitpos) & 1u) << i;
+		msg_readbitpos++;
+		if (msg_readbitpos == 8)
+		{
+			msg_readbitpos = 0;
+			msg_readcount++;
+		}
+	}
+	return value;
+}
+
+int MSG_ReadInt8 (void)
+{
+	return MSG_ReadChar ();
+}
+
+int MSG_ReadInt16 (void)
+{
+	return MSG_ReadShort ();
+}
+
+unsigned int MSG_ReadUInt16 (void)
+{
+	unsigned int c;
+
+	if (msg_readcount+2 > net_message.cursize)
+	{
+		msg_badread = true;
+		return 0;
+	}
+
+	c = (unsigned int)net_message.data[msg_readcount]
+		| ((unsigned int)net_message.data[msg_readcount+1] << 8);
+
+	msg_readcount += 2;
+
+	return c;
+}
+
+qboolean MSG_PackedSelfTest (void)
+{
+#if defined(DEBUG) || defined(_DEBUG)
+	byte buffer[64];
+	sizebuf_t buf;
+	sizebuf_t old_message = net_message;
+	int old_readcount = msg_readcount;
+	int old_readbitpos = msg_readbitpos;
+	qboolean old_badread = msg_badread;
+	unsigned int read_u32;
+	int read_i16;
+
+	buf.data = buffer;
+	buf.maxsize = sizeof(buffer);
+	buf.cursize = 0;
+	buf.allowoverflow = false;
+	buf.overflowed = false;
+	buf.bitpos = 0;
+
+	MSG_WriteBits (&buf, 0x3, 2);
+	MSG_WriteBits (&buf, 0xA5, 8);
+	MSG_WriteUInt16 (&buf, 0xBEEF);
+	MSG_WriteInt16 (&buf, -12345);
+
+	net_message.data = buf.data;
+	net_message.cursize = buf.cursize;
+	net_message.maxsize = buf.maxsize;
+
+	MSG_BeginReading ();
+	read_u32 = MSG_ReadBits (2);
+	if (read_u32 != 0x3)
+		goto fail;
+	read_u32 = MSG_ReadBits (8);
+	if (read_u32 != 0xA5)
+		goto fail;
+	read_u32 = MSG_ReadUInt16 ();
+	if (read_u32 != 0xBEEF)
+		goto fail;
+	read_i16 = MSG_ReadInt16 ();
+	if (read_i16 != -12345)
+		goto fail;
+
+	net_message = old_message;
+	msg_readcount = old_readcount;
+	msg_readbitpos = old_readbitpos;
+	msg_badread = old_badread;
+	return true;
+
+fail:
+	net_message = old_message;
+	msg_readcount = old_readcount;
+	msg_readbitpos = old_readbitpos;
+	msg_badread = old_badread;
+	Con_DPrintf ("MSG_PackedSelfTest: failed\n");
+	return false;
+#else
+	return true;
+#endif
 }
 
 int MSG_ReadLong (void)
@@ -993,6 +1143,7 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	buf->data = (byte *) Hunk_AllocName (startsize, "sizebuf");
 	buf->maxsize = startsize;
 	buf->cursize = 0;
+	buf->bitpos = 0;
 }
 
 
@@ -1007,6 +1158,7 @@ void SZ_Free (sizebuf_t *buf)
 void SZ_Clear (sizebuf_t *buf)
 {
 	buf->cursize = 0;
+	buf->bitpos = 0;
 }
 
 void *SZ_GetSpace (sizebuf_t *buf, int length)

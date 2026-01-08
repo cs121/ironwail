@@ -119,6 +119,7 @@ typedef struct sizebuf_s
 	byte		*data;
 	int		maxsize;
 	int		cursize;
+	int		bitpos;
 } sizebuf_t;
 
 void SZ_Alloc (sizebuf_t *buf, int startsize);
@@ -223,6 +224,10 @@ void MSG_WriteShort (sizebuf_t *sb, int c);
 void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, const char *s);
+void MSG_WriteBits (sizebuf_t *sb, unsigned int value, int bits);
+void MSG_WriteInt8 (sizebuf_t *sb, int c);
+void MSG_WriteInt16 (sizebuf_t *sb, int c);
+void MSG_WriteUInt16 (sizebuf_t *sb, unsigned int c);
 void MSG_WriteCoord32f (sizebuf_t *sb, float f);
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags);
@@ -238,6 +243,11 @@ int MSG_ReadShort (void);
 int MSG_ReadLong (void);
 float MSG_ReadFloat (void);
 const char *MSG_ReadString (void);
+unsigned int MSG_ReadBits (int bits);
+int MSG_ReadInt8 (void);
+int MSG_ReadInt16 (void);
+unsigned int MSG_ReadUInt16 (void);
+qboolean MSG_PackedSelfTest (void);
 
 float MSG_ReadCoord (unsigned int flags);
 float MSG_ReadAngle (unsigned int flags);

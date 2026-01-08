@@ -34,12 +34,15 @@ int		sv_protocol = PROTOCOL_RMQ; //johnfitz
 extern cvar_t nomonsters;
 
 static cvar_t sv_netsort = {"sv_netsort", "1", CVAR_NONE};
+static cvar_t sv_packedents = {"sv_packedents", "0", CVAR_NONE};
+static cvar_t sv_packedents_debug = {"sv_packedents_debug", "0", CVAR_NONE};
 static cvar_t sv_snapshotdelta = {"sv_snapshotdelta", "1", CVAR_NONE};
 static cvar_t sv_snapshotdebug = {"sv_snapshotdebug", "0", CVAR_NONE};
 static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
 static cvar_t net_snap_debug = {"net_snap_debug", "0", CVAR_NONE};
+static qboolean sv_packedents_selftest_done = false;
 
 //============================================================================
 
@@ -137,6 +140,26 @@ void SV_Protocol_f (void)
 	}
 }
 
+static void SV_PackedEntStats_f (void)
+{
+	int i;
+	float avg_bytes = sv_packedents_stats.entities ? (float)sv_packedents_stats.bytes / sv_packedents_stats.entities : 0.0f;
+	float avg_bits = sv_packedents_stats.entities ? (float)sv_packedents_stats.mask_bits_total / sv_packedents_stats.entities : 0.0f;
+
+	Con_Printf ("packedents stats: packets %d entities %d avg_bytes %.1f avg_bits %.1f clamp_origin %d clamp_vel %d\n",
+		sv_packedents_stats.packets, sv_packedents_stats.entities, avg_bytes, avg_bits,
+		sv_packedents_stats.clamp_origin, sv_packedents_stats.clamp_velocity);
+	Con_Printf ("packedents mask hist:");
+	for (i = 0; i < (int)countof(sv_packedents_stats.mask_hist); i++)
+	{
+		if (sv_packedents_stats.mask_hist[i])
+			Con_Printf (" %d:%d", i, sv_packedents_stats.mask_hist[i]);
+	}
+	Con_Printf ("\n");
+	if (!sv_packedents_debug.value)
+		Con_Printf ("packedents stats are gathered when sv_packedents_debug is enabled.\n");
+}
+
 /*
 ===============
 SV_Init
@@ -183,6 +206,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&sv_gameplayfix_elevators);
 	Cvar_RegisterVariable (&sv_netsort);
+	Cvar_RegisterVariable (&sv_packedents);
+	Cvar_RegisterVariable (&sv_packedents_debug);
 	Cvar_RegisterVariable (&sv_snapshotdelta);
 	Cvar_RegisterVariable (&sv_snapshotdebug);
 	Cvar_RegisterVariable (&sv_snapshottimeout);
@@ -194,6 +219,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
+	Cmd_AddCommand ("packedents_stats", &SV_PackedEntStats_f);
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -1427,6 +1453,286 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		Con_Printf ("snapshot %s ack seq %u\n", client->name, seq);
 }
 
+typedef struct
+{
+	uint32_t	mask;
+	unsigned short	model;
+	unsigned short	frame;
+	byte		colormap;
+	byte		skin;
+	byte		effects;
+	short		origin[3];
+	unsigned short	angles[3];
+	short		velocity[3];
+	byte		alpha;
+	byte		scale;
+	byte		lerpfinish;
+} packedent_update_t;
+
+typedef struct
+{
+	int packets;
+	int entities;
+	int bytes;
+	int mask_bits_total;
+	int mask_hist[33];
+	int clamp_origin;
+	int clamp_velocity;
+} packedent_stats_t;
+
+static packedent_stats_t sv_packedents_stats;
+static double sv_packedents_stats_next_time = 0.0;
+
+static short SV_PackedQuantizeCoord (float value, int *clamp_count)
+{
+	int q = Q_rint (value * PACKEDENT_POS_SCALE);
+	int clamped = CLAMP (-32768, q, 32767);
+
+	if (clamp_count && clamped != q)
+		(*clamp_count)++;
+	return (short)clamped;
+}
+
+static short SV_PackedQuantizeVelocity (float value, int *clamp_count)
+{
+	int q = Q_rint (value * PACKEDENT_VEL_SCALE);
+	int clamped = CLAMP (-32768, q, 32767);
+
+	if (clamp_count && clamped != q)
+		(*clamp_count)++;
+	return (short)clamped;
+}
+
+static unsigned short SV_PackedQuantizeAngle (float value)
+{
+	int q = Q_rint (value * PACKEDENT_ANGLE_SCALE) & 0xFFFF;
+	return (unsigned short)q;
+}
+
+static int SV_PackedMaskBits (uint32_t mask)
+{
+	int count = 0;
+
+	while (mask)
+	{
+		count += mask & 1u;
+		mask >>= 1;
+	}
+	return count;
+}
+
+static int SV_PackedEntitySize (uint32_t mask)
+{
+	int size = 0;
+
+	size += 2; // entnum
+	size += 2; // mask low
+	if (mask & ~0x7FFFu)
+		size += 2;
+
+	if (mask & PACKEDENT_MASK_MODEL)
+		size += 2;
+	if (mask & PACKEDENT_MASK_FRAME)
+		size += 2;
+	if (mask & PACKEDENT_MASK_COLORMAP)
+		size += 1;
+	if (mask & PACKEDENT_MASK_SKIN)
+		size += 1;
+	if (mask & PACKEDENT_MASK_EFFECTS)
+		size += 1;
+	if (mask & PACKEDENT_MASK_ORIGIN_X)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ORIGIN_Y)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ORIGIN_Z)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ANGLE_YAW)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ANGLE_ROLL)
+		size += 2;
+	if (mask & PACKEDENT_MASK_VEL_X)
+		size += 2;
+	if (mask & PACKEDENT_MASK_VEL_Y)
+		size += 2;
+	if (mask & PACKEDENT_MASK_VEL_Z)
+		size += 2;
+	if (mask & PACKEDENT_MASK_ALPHA)
+		size += 1;
+	if (mask & PACKEDENT_MASK_SCALE)
+		size += 1;
+	if (mask & PACKEDENT_MASK_LERPFINISH)
+		size += 1;
+
+	return size;
+}
+
+static uint32_t SV_PackedReduceMaskForBudget (uint32_t mask, int available, qboolean mover)
+{
+	static const uint32_t drop_order[] =
+	{
+		PACKEDENT_MASK_LERPFINISH,
+		PACKEDENT_MASK_VEL_X,
+		PACKEDENT_MASK_VEL_Y,
+		PACKEDENT_MASK_VEL_Z,
+		PACKEDENT_MASK_SCALE,
+		PACKEDENT_MASK_ALPHA,
+		PACKEDENT_MASK_EFFECTS,
+		PACKEDENT_MASK_SKIN,
+		PACKEDENT_MASK_COLORMAP,
+		PACKEDENT_MASK_FRAME,
+		PACKEDENT_MASK_MODEL
+	};
+	uint32_t reduced = mask;
+	size_t i;
+
+	if (SV_PackedEntitySize (reduced) <= available)
+		return reduced;
+
+	for (i = 0; i < countof(drop_order); i++)
+	{
+		if (reduced & drop_order[i])
+		{
+			reduced &= ~drop_order[i];
+			if (SV_PackedEntitySize (reduced) <= available)
+				return reduced;
+		}
+	}
+
+	if (mover)
+		return 0;
+
+	if (SV_PackedEntitySize (reduced) <= available)
+		return reduced;
+
+	return 0;
+}
+
+static uint32_t SV_BuildPackedUpdate (edict_t *ent, packedent_update_t *update, int *clamp_origin, int *clamp_velocity)
+{
+	uint32_t mask = 0;
+	int model = (int)ent->v.modelindex;
+	int frame = (int)ent->v.frame;
+	int i;
+
+	if (model < 0)
+		model = 0;
+	if (model > 0xFFFF)
+		model = 0xFFFF;
+	update->model = (unsigned short)model;
+	if (ent->baseline.modelindex != update->model)
+		mask |= PACKEDENT_MASK_MODEL;
+
+	if (frame < 0)
+		frame = 0;
+	if (frame > 0xFFFF)
+		frame = 0xFFFF;
+	update->frame = (unsigned short)frame;
+	if (ent->baseline.frame != update->frame)
+		mask |= PACKEDENT_MASK_FRAME;
+
+	update->colormap = (byte)ent->v.colormap;
+	if (ent->baseline.colormap != update->colormap)
+		mask |= PACKEDENT_MASK_COLORMAP;
+
+	update->skin = (byte)ent->v.skin;
+	if (ent->baseline.skin != update->skin)
+		mask |= PACKEDENT_MASK_SKIN;
+
+	update->effects = (byte)((int)ent->v.effects & qcvm->effects_mask);
+	if (ent->baseline.effects != update->effects)
+		mask |= PACKEDENT_MASK_EFFECTS;
+
+	for (i = 0; i < 3; i++)
+	{
+		short base = SV_PackedQuantizeCoord (ent->baseline.origin[i], NULL);
+
+		update->origin[i] = SV_PackedQuantizeCoord (ent->v.origin[i], clamp_origin);
+		if (update->origin[i] != base)
+			mask |= PACKEDENT_MASK_ORIGIN_X << i;
+
+		update->angles[i] = SV_PackedQuantizeAngle (ent->v.angles[i]);
+		if (update->angles[i] != SV_PackedQuantizeAngle (ent->baseline.angles[i]))
+			mask |= PACKEDENT_MASK_ANGLE_PITCH << i;
+
+		update->velocity[i] = SV_PackedQuantizeVelocity (ent->v.velocity[i], clamp_velocity);
+		if (update->velocity[i] != 0)
+			mask |= PACKEDENT_MASK_VEL_X << i;
+	}
+
+	update->alpha = ent->alpha;
+	if (ent->baseline.alpha != update->alpha)
+		mask |= PACKEDENT_MASK_ALPHA;
+
+	update->scale = ent->scale;
+	if (ent->baseline.scale != update->scale)
+		mask |= PACKEDENT_MASK_SCALE;
+
+	if (ent->v.movetype == MOVETYPE_STEP)
+		mask |= PACKEDENT_MASK_STEP;
+
+	if (ent->sendinterval)
+	{
+		float interval = (ent->v.nextthink - qcvm->time) * 255.0f;
+		update->lerpfinish = (byte)CLAMP (0, Q_rint (interval), 255);
+		mask |= PACKEDENT_MASK_LERPFINISH;
+	}
+	else
+		update->lerpfinish = 0;
+
+	return mask;
+}
+
+static void SV_WritePackedEntity (sizebuf_t *msg, int entnum, uint32_t mask, const packedent_update_t *update)
+{
+	unsigned int low = (unsigned int)(mask & 0x7FFFu);
+	unsigned int high = (unsigned int)(mask >> 16);
+
+	if (high)
+		low |= PACKEDENT_MASK_EXTEND;
+
+	MSG_WriteUInt16 (msg, (unsigned int)entnum);
+	MSG_WriteUInt16 (msg, low);
+	if (high)
+		MSG_WriteUInt16 (msg, high);
+
+	if (mask & PACKEDENT_MASK_MODEL)
+		MSG_WriteUInt16 (msg, update->model);
+	if (mask & PACKEDENT_MASK_FRAME)
+		MSG_WriteUInt16 (msg, update->frame);
+	if (mask & PACKEDENT_MASK_COLORMAP)
+		MSG_WriteByte (msg, update->colormap);
+	if (mask & PACKEDENT_MASK_SKIN)
+		MSG_WriteByte (msg, update->skin);
+	if (mask & PACKEDENT_MASK_EFFECTS)
+		MSG_WriteByte (msg, update->effects);
+	if (mask & PACKEDENT_MASK_ORIGIN_X)
+		MSG_WriteInt16 (msg, update->origin[0]);
+	if (mask & PACKEDENT_MASK_ORIGIN_Y)
+		MSG_WriteInt16 (msg, update->origin[1]);
+	if (mask & PACKEDENT_MASK_ORIGIN_Z)
+		MSG_WriteInt16 (msg, update->origin[2]);
+	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
+		MSG_WriteUInt16 (msg, update->angles[0]);
+	if (mask & PACKEDENT_MASK_ANGLE_YAW)
+		MSG_WriteUInt16 (msg, update->angles[1]);
+	if (mask & PACKEDENT_MASK_ANGLE_ROLL)
+		MSG_WriteUInt16 (msg, update->angles[2]);
+	if (mask & PACKEDENT_MASK_VEL_X)
+		MSG_WriteInt16 (msg, update->velocity[0]);
+	if (mask & PACKEDENT_MASK_VEL_Y)
+		MSG_WriteInt16 (msg, update->velocity[1]);
+	if (mask & PACKEDENT_MASK_VEL_Z)
+		MSG_WriteInt16 (msg, update->velocity[2]);
+	if (mask & PACKEDENT_MASK_ALPHA)
+		MSG_WriteByte (msg, update->alpha);
+	if (mask & PACKEDENT_MASK_SCALE)
+		MSG_WriteByte (msg, update->scale);
+	if (mask & PACKEDENT_MASK_LERPFINISH)
+		MSG_WriteByte (msg, update->lerpfinish);
+}
+
 /*
 =============
 SV_WriteEntitiesToClient
@@ -1442,6 +1748,10 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 	float	miss, dist, size;
 	eval_t	*val;
 	edict_t	*ent;
+	qboolean	use_packed = (sv_packedents.value != 0.0f && host_client && host_client->supports_packedents);
+	int		packed_start = msg->cursize;
+	int		packed_count_pos = -1;
+	int		packed_count = 0;
 
 // find the client's PVS
 	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
@@ -1545,29 +1855,99 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 			net_edicts_sorted[net_edict_bins[net_edict_dists[e]]++] = net_edicts[e];
 	}
 
+	if (use_packed)
+	{
+		if (sv_packedents_debug.value && !sv_packedents_selftest_done)
+		{
+			MSG_PackedSelfTest ();
+			sv_packedents_selftest_done = true;
+		}
+
+		if (msg->cursize + 3 > msg->maxsize)
+			goto stats;
+		MSG_WriteByte (msg, svc_packedentities);
+		packed_count_pos = msg->cursize;
+		MSG_WriteShort (msg, 0);
+	}
+
 // send entities (closest first)
 	for (j=0 ; j<numents ; j++)
 	{
 		e = net_edicts_sorted[j];
 		ent = EDICT_NUM (e);
 
-		// johnfitz -- max size for protocol 15 is 18 bytes, not 16 as originally
-		// assumed here.  And, for protocol 85 the max size is actually 24 bytes.
-		// For float coords and angles the limit is 40.
-		// FIXME: Use tighter limit according to protocol flags and send bits.
-		if (msg->cursize + 40 > msg->maxsize)
+		if (!use_packed)
 		{
-			//johnfitz -- less spammy overflow message
-			if (!dev_overflows.packetsize || dev_overflows.packetsize + CONSOLE_RESPAM_TIME < realtime )
+			// johnfitz -- max size for protocol 15 is 18 bytes, not 16 as originally
+			// assumed here.  And, for protocol 85 the max size is actually 24 bytes.
+			// For float coords and angles the limit is 40.
+			// FIXME: Use tighter limit according to protocol flags and send bits.
+			if (msg->cursize + 40 > msg->maxsize)
 			{
-				Con_Printf ("Packet overflow!\n");
-				dev_overflows.packetsize = realtime;
+				//johnfitz -- less spammy overflow message
+				if (!dev_overflows.packetsize || dev_overflows.packetsize + CONSOLE_RESPAM_TIME < realtime )
+				{
+					Con_Printf ("Packet overflow!\n");
+					dev_overflows.packetsize = realtime;
+				}
+				goto stats;
+				//johnfitz
 			}
-			goto stats;
-			//johnfitz
 		}
 
 // send an update
+		if (use_packed)
+		{
+			packedent_update_t update;
+			uint32_t mask;
+			int clamp_origin = 0;
+			int clamp_velocity = 0;
+			int available = msg->maxsize - msg->cursize;
+			qboolean mover = (ent->v.movetype == MOVETYPE_PUSH || ent->v.movetype == MOVETYPE_STEP);
+
+			//johnfitz -- alpha
+			val = GetEdictFieldValueByName(ent, "alpha");
+			if (val)
+				ent->alpha = ENTALPHA_ENCODE(val->_float);
+
+			//don't send invisible entities unless they have effects
+			if (ent->alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
+				continue;
+
+			val = GetEdictFieldValueByName(ent, "scale");
+			if (val)
+				ent->scale = ENTSCALE_ENCODE(val->_float);
+			else
+				ent->scale = ENTSCALE_DEFAULT;
+
+			mask = SV_BuildPackedUpdate (ent, &update, &clamp_origin, &clamp_velocity);
+			if (!mask)
+				continue;
+
+			mask = SV_PackedReduceMaskForBudget (mask, available, mover);
+			if (!mask)
+				goto stats;
+
+			SV_WritePackedEntity (msg, e, mask, &update);
+			packed_count++;
+
+			if (sv_packedents_debug.value)
+			{
+				int size = SV_PackedEntitySize (mask);
+				int bits = SV_PackedMaskBits (mask);
+
+				sv_packedents_stats.bytes += size;
+				sv_packedents_stats.entities++;
+				sv_packedents_stats.mask_bits_total += bits;
+				if (bits >= 0 && bits < (int)countof(sv_packedents_stats.mask_hist))
+					sv_packedents_stats.mask_hist[bits]++;
+				sv_packedents_stats.clamp_origin += clamp_origin;
+				sv_packedents_stats.clamp_velocity += clamp_velocity;
+			}
+
+			continue;
+		}
+
 		bits = 0;
 
 		for (i=0 ; i<3 ; i++)
@@ -1700,6 +2080,47 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 
 	//johnfitz -- devstats
 stats:
+	if (use_packed)
+	{
+		if (packed_count == 0)
+			msg->cursize = packed_start;
+		else
+		{
+			msg->data[packed_count_pos] = packed_count & 0xff;
+			msg->data[packed_count_pos + 1] = (packed_count >> 8) & 0xff;
+		}
+
+		if (sv_packedents_debug.value)
+		{
+			sv_packedents_stats.packets++;
+			if (realtime >= sv_packedents_stats_next_time)
+			{
+				float avg_bytes = sv_packedents_stats.entities ? (float)sv_packedents_stats.bytes / sv_packedents_stats.entities : 0.0f;
+				float avg_bits = sv_packedents_stats.entities ? (float)sv_packedents_stats.mask_bits_total / sv_packedents_stats.entities : 0.0f;
+
+				char hist[256];
+				int len = 0;
+				int h;
+
+				hist[0] = '\0';
+				for (h = 0; h < (int)countof(sv_packedents_stats.mask_hist); h++)
+				{
+					if (sv_packedents_stats.mask_hist[h] == 0)
+						continue;
+					len += q_snprintf (hist + len, sizeof(hist) - len, "%d:%d ", h, sv_packedents_stats.mask_hist[h]);
+					if (len >= (int)sizeof(hist))
+						break;
+				}
+
+				Con_DPrintf ("packedents: avg_bytes %.1f avg_bits %.1f clamp_origin %d clamp_vel %d masks[%s]\n",
+					avg_bytes, avg_bits, sv_packedents_stats.clamp_origin, sv_packedents_stats.clamp_velocity,
+					hist[0] ? hist : "none");
+				sv_packedents_stats = (packedent_stats_t){0};
+				sv_packedents_stats_next_time = realtime + 1.0;
+			}
+		}
+	}
+
 	if (msg->cursize > 1024 && dev_peakstats.packetsize <= 1024)
 		Con_DWarning ("%i byte packet exceeds standard limit of 1024 (max = %d).\n", msg->cursize, msg->maxsize);
 	dev_stats.packetsize = msg->cursize;
