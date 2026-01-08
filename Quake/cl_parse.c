@@ -1633,8 +1633,14 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_time:
+		{
+			double newtime;
+
 			cl.mtime[1] = cl.mtime[0];
 			cl.mtime[0] = MSG_ReadFloat ();
+			newtime = cl.mtime[0];
+			if (cl.mtime[1] > 0.0)
+				cl.interp_last_spacing = q_max(0.0, newtime - cl.mtime[1]);
 			cl.fixangle = false;
 			if (cls.signon == SIGNONS - 1)
 			{	// allow map loads with no visible entity updates to finish signon
@@ -1642,6 +1648,7 @@ void CL_ParseServerMessage (void)
 				CL_SignonReply ();
 			}
 			break;
+		}
 
 		case svc_clientdata:
 			CL_ParseClientdata (); //johnfitz -- removed bits parameter, we will read this inside CL_ParseClientdata()
