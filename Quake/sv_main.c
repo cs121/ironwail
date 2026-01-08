@@ -1112,6 +1112,18 @@ static void SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state
 	MSG_WriteByte (msg, state->step);
 }
 
+static byte SV_SnapshotNetFlags (byte flags)
+{
+	byte net_flags = 0;
+
+	if (flags & SNAPFLAG_HIRES_ORIGIN)
+		net_flags |= SNAPFL_HIRES_ORIGIN;
+	if (flags & SNAPFLAG_HIRES_ANGLES)
+		net_flags |= SNAPFL_HIRES_ANGLES;
+
+	return net_flags;
+}
+
 static void SV_WriteShortAt (sizebuf_t *msg, int offset, unsigned short value)
 {
 	msg->data[offset] = value & 0xff;
@@ -1220,7 +1232,7 @@ static void SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, const snapsh
 			continue;
 		MSG_WriteShort (msg, entnum);
 		if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
-			MSG_WriteByte (msg, snapflags ? snapflags[entnum] : 0);
+			MSG_WriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0);
 		SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0);
 	}
 
@@ -1279,7 +1291,7 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 		{
 			MSG_WriteShort (msg, entnum);
 			if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
-				MSG_WriteByte (msg, snapflags ? snapflags[entnum] : 0);
+				MSG_WriteByte (msg, snapflags ? SV_SnapshotNetFlags (snapflags[entnum]) : 0);
 			SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0);
 		}
 	}
