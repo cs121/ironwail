@@ -796,6 +796,7 @@ int CL_ReadFromServer (void)
 	int			num_dlights = 0; //johnfitz
 	beam_t		*b; //johnfitz
 	int			i; //johnfitz
+	qboolean	coalesced_message;
 
 	CL_AdvanceTime ();
 
@@ -808,7 +809,27 @@ int CL_ReadFromServer (void)
 			break;
 
 		cl.last_received_message = realtime;
-		if (cl.protocolflags & PRFL_NET_COALESCE)
+		coalesced_message = (cl.protocolflags & PRFL_NET_COALESCE);
+		if (!coalesced_message && cl.protocol == 0 && cls.state == ca_connected && net_message.cursize >= 2)
+		{
+			int pos = 0;
+			coalesced_message = true;
+			while (pos + 2 <= net_message.cursize)
+			{
+				int len = net_message.data[pos] | (net_message.data[pos + 1] << 8);
+				pos += 2;
+				if (len <= 0 || pos + len > net_message.cursize)
+				{
+					coalesced_message = false;
+					break;
+				}
+				pos += len;
+			}
+			if (pos != net_message.cursize)
+				coalesced_message = false;
+		}
+
+		if (coalesced_message)
 		{
 			sizebuf_t old = net_message;
 			int pos = 0;
