@@ -274,6 +274,8 @@ typedef struct
 	unsigned int snapshot_baseline_seq;
 	snapshot_state_t *snapshot_baseline;
 	byte		*snapshot_present;
+	byte		*snapshot_active;
+	double		*snapshot_last_update_time;
 
 	int			cdtrack, looptrack;	// cd audio
 
@@ -336,6 +338,9 @@ extern	cvar_t	m_side;
 
 extern	cvar_t	cl_startdemos;
 extern	cvar_t	cl_confirmquit;
+extern	cvar_t	cl_snap_debug;
+extern	cvar_t	cl_test_drop;
+extern	cvar_t	cl_entity_timeout_ms;
 
 
 #define	MAX_TEMP_ENTITIES	256		//johnfitz -- was 64
