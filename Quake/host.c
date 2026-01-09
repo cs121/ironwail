@@ -82,7 +82,6 @@ cvar_t	noexit = {"noexit","0",CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	skill = {"skill","1",CVAR_NONE};			// 0 - 3
 cvar_t	deathmatch = {"deathmatch","0",CVAR_NONE};	// 0, 1, or 2
 cvar_t	coop = {"coop","0",CVAR_NONE};			// 0 or 1
-cvar_t	bloodhound = {"bloodhound","0",CVAR_NONE};
 
 cvar_t	pausable = {"pausable","1",CVAR_NONE};
 
@@ -453,7 +452,6 @@ void Host_InitLocal (void)
 	Cvar_SetCallback (&map_checks, Map_Checks_f);
 	Cvar_RegisterVariable (&coop);
 	Cvar_RegisterVariable (&deathmatch);
-	Cvar_RegisterVariable (&bloodhound);
 
 	Cvar_RegisterVariable (&campaign);
 	Cvar_RegisterVariable (&horde);
