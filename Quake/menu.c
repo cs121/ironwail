@@ -6061,7 +6061,7 @@ void M_GameOptions_Draw (void)
 			x = (320-26*8)/2;
 			M_DrawTextBox (x, 138, 24, 4);
 			x += 8;
-			M_Print (x, 146, "  More than 4 players   ");
+			M_Print (x, 146, "  More than 32 players  ");
 			M_Print (x, 154, " requires using command ");
 			M_Print (x, 162, "line parameters; please ");
 			M_Print (x, 170, "   see techinfo.txt.    ");

@@ -220,7 +220,7 @@ typedef enum
 
 //===========================================
 
-#define	MAX_SCOREBOARD		16
+#define	MAX_SCOREBOARD		32
 #define	MAX_SCOREBOARDNAME	32
 
 #define	SOUND_CHANNELS		8
