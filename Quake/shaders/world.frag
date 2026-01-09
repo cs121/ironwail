@@ -10,6 +10,9 @@ layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform samplerCube EnvmapCube;
 #include "frame_uniforms.glsl"
+#ifndef HAVE_DELUXE_LIGHTING
+#define HAVE_DELUXE_LIGHTING 0
+#endif
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -200,11 +203,13 @@ vec4 SampleLightmap(vec2 uv)
 	return lm;
 }
 
+#if HAVE_DELUXE_LIGHTING
 vec3 SampleLightmapDir(vec2 uv)
 {
 	vec3 dir = texture(LMTexDir, uv).xyz * 2.0 - 1.0;
 	return normalize(dir);
 }
+#endif
 
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
@@ -426,12 +431,14 @@ void main()
 		}
 
 		// Directional lightmap
+#if HAVE_DELUXE_LIGHTING
 		if (LightmapParams.z > 0.5)
 		{
 			vec3 dir = SampleLightmapDir(lmuv);
 			float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
 			static_light *= ndl;
 		}
+#endif
 
 		if (LightmapParams.x > 0.5)
 		{

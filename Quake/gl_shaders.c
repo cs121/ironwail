@@ -532,7 +532,7 @@ void GL_CreateShaders (void)
         for (oit = 0; oit < 2; oit++)
                 for (dither = 0; dither < 3; dither++)
                         for (mode = 0; mode < 3; mode++)
-                                glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
+                glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d; HAVE_DELUXE_LIGHTING 1", oit, dither, mode);
 
         for (alphatest = 0; alphatest < 2; alphatest++)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
