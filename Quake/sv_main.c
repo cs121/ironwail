@@ -3001,7 +3001,7 @@ void SV_UpdateToReliableMessages (void)
 		{
 			for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 			{
-				if (!client->active)
+				if (!client->active || client->is_bot)
 					continue;
 				MSG_WriteByte (&client->message, svc_updatefrags);
 				MSG_WriteByte (&client->message, i);
@@ -3014,7 +3014,7 @@ void SV_UpdateToReliableMessages (void)
 
 	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 	{
-		if (!client->active)
+		if (!client->active || client->is_bot)
 			continue;
 		SV_WriteStats (client);
 		SV_WriteUnderwaterOverride (client);
@@ -3065,6 +3065,8 @@ void SV_SendClientMessages (void)
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 	{
 		if (!host_client->active)
+			continue;
+		if (host_client->is_bot)
 			continue;
 
 		if (host_client->spawned)
@@ -3614,6 +3616,7 @@ void SV_SpawnServer (const char *server)
 //
 	if (sv.active)
 	{
+		SV_KickBots ();
 		SV_SendReconnect ();
 	}
 

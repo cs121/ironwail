@@ -126,12 +126,26 @@ enum sendsignon_e
 	PRESPAWN_SIGNONMSG,
 };
 
+typedef struct bot_state_s
+{
+	int			enemy;
+	double		next_target_scan;
+	double		next_fire_time;
+	double		next_wander_time;
+	double		next_strafe_time;
+	double		last_progress_time;
+	float		wander_yaw;
+	int			strafe_dir;
+	vec3_t		last_origin;
+} bot_state_t;
+
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
 	qboolean		spawned;			// false = don't send datagrams
 	qboolean		dropasap;			// has been told to go to another level
 	qboolean		supports_packedents;
+	qboolean		is_bot;
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
 
@@ -195,6 +209,7 @@ typedef struct client_s
 	int				mtu_dropped_tier1;
 	int				mtu_dropped_tier2;
 	double			mtu_debug_next_time;
+	bot_state_t		bot;
 } client_t;
 
 
@@ -338,6 +353,9 @@ void SV_MoveToGoal (void);
 
 void SV_CheckForNewClients (void);
 void SV_RunClients (void);
+qboolean SV_AddBot (const char *name);
+void SV_KickBots (void);
+void SV_BotFrame (client_t *client, double now);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
 void SV_SnapshotAck (client_t *client, unsigned int seq);
