@@ -799,6 +799,7 @@ qboolean SV_AddBot (const char *name)
 	edict_t *ent;
 	const char *bot_name = name;
 	qcvm_t *oldvm;
+	double bot_time;
 
 	if (!sv.active)
 	{
@@ -870,10 +871,12 @@ qboolean SV_AddBot (const char *name)
 	PR_ExecuteProgram (pr_global_struct->ClientConnect);
 	PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 
+	bot_time = qcvm->time;
+
 	PR_SwitchQCVM(NULL);
 	PR_SwitchQCVM(oldvm);
 
-	SV_BotReset (client, qcvm->time);
+	SV_BotReset (client, bot_time);
 
 	MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
 	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
