@@ -40,6 +40,9 @@ cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
+cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
+cvar_t	cl_lerp_max_gap_ms = {"cl_lerp_max_gap_ms", "250", CVAR_NONE};
+cvar_t	cl_lerp_debug = {"cl_lerp_debug", "0", CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -79,6 +82,187 @@ extern float	host_netinterval;	//Spike
 
 extern vec3_t	v_punchangles[2];
 
+#define CL_PLAYER_SNAP_HISTORY 64
+#define CL_PLAYER_SNAP_MASK_WORDS ((MAX_SCOREBOARD + 31) / 32)
+
+typedef struct cl_player_snap_s
+{
+	double		t;
+	int			servertime;
+	vec3_t		org[MAX_SCOREBOARD];
+	vec3_t		ang[MAX_SCOREBOARD];
+	uint32_t	valid_mask_words[CL_PLAYER_SNAP_MASK_WORDS];
+} cl_player_snap_t;
+
+static cl_player_snap_t	cl_psnaps[CL_PLAYER_SNAP_HISTORY];
+static int				cl_psnap_head = 0;
+static int				cl_psnap_count = 0;
+
+static int				cl_lerp_miss_pairs = 0;
+static int				cl_lerp_hold_newest = 0;
+static int				cl_lerp_hold_oldest = 0;
+static int				cl_lerp_gap_holds = 0;
+static double			cl_lerp_debug_next_time = 0.0;
+
+static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
+{
+	int word = idx >> 5;
+	int bit = idx & 31;
+
+	if (word < 0 || word >= CL_PLAYER_SNAP_MASK_WORDS)
+		return;
+	snap->valid_mask_words[word] |= (1u << bit);
+}
+
+static inline qboolean CL_IsValidBit (const cl_player_snap_t *snap, int idx)
+{
+	int word = idx >> 5;
+	int bit = idx & 31;
+
+	if (word < 0 || word >= CL_PLAYER_SNAP_MASK_WORDS)
+		return false;
+	return (snap->valid_mask_words[word] & (1u << bit)) != 0;
+}
+
+static void CL_ClearPlayerSnaps (void)
+{
+	memset (cl_psnaps, 0, sizeof(cl_psnaps));
+	cl_psnap_head = 0;
+	cl_psnap_count = 0;
+	cl_lerp_miss_pairs = 0;
+	cl_lerp_hold_newest = 0;
+	cl_lerp_hold_oldest = 0;
+	cl_lerp_gap_holds = 0;
+	cl_lerp_debug_next_time = 0.0;
+}
+
+void CL_RecordPlayerSnap (void)
+{
+	cl_player_snap_t *snap;
+	int i;
+
+	if (cl.maxclients <= 0)
+		return;
+
+	snap = &cl_psnaps[cl_psnap_head];
+	memset (snap, 0, sizeof(*snap));
+	snap->t = Sys_DoubleTime ();
+	snap->servertime = 0;
+
+	for (i = 0; i < cl.maxclients && i < MAX_SCOREBOARD; i++)
+	{
+		int entnum = i + 1;
+		entity_t *ent;
+
+		if (entnum == cl.viewentity)
+			continue;
+		if (!cl.snapshot_present || !cl.snapshot_present[entnum])
+			continue;
+		ent = &cl_entities[entnum];
+		if (!ent->model)
+			continue;
+		VectorCopy (ent->msg_origins[0], snap->org[i]);
+		VectorCopy (ent->msg_angles[0], snap->ang[i]);
+		CL_SetValidBit (snap, i);
+	}
+
+	cl_psnap_head = (cl_psnap_head + 1) % CL_PLAYER_SNAP_HISTORY;
+	cl_psnap_count = q_min (cl_psnap_count + 1, CL_PLAYER_SNAP_HISTORY);
+}
+
+static float CL_LerpAngle (float a, float b, float f)
+{
+	float d = b - a;
+
+	while (d > 180.0f)
+		d -= 360.0f;
+	while (d < -180.0f)
+		d += 360.0f;
+	return a + f * d;
+}
+
+static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out_ang)
+{
+	double now;
+	double render_t;
+	double max_gap_s;
+	cl_player_snap_t *newest;
+	cl_player_snap_t *oldest = NULL;
+	cl_player_snap_t *snap;
+	cl_player_snap_t *prev;
+	int idx;
+	int count;
+
+	if (cl_lerp_ms.value <= 0.0f)
+		return false;
+	if (player < 0 || player >= MAX_SCOREBOARD)
+		return false;
+	if (cl_psnap_count <= 0)
+		return false;
+
+	now = Sys_DoubleTime ();
+	render_t = now - (cl_lerp_ms.value * 0.001);
+	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
+
+	idx = (cl_psnap_head - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
+	newest = &cl_psnaps[idx];
+
+	if (render_t >= newest->t)
+	{
+		if (!CL_IsValidBit (newest, player))
+			return false;
+		VectorCopy (newest->org[player], out_org);
+		VectorCopy (newest->ang[player], out_ang);
+		cl_lerp_hold_newest++;
+		return true;
+	}
+
+	prev = newest;
+	for (count = 0; count < cl_psnap_count; count++)
+	{
+		snap = &cl_psnaps[idx];
+		oldest = snap;
+		if (snap->t <= render_t)
+		{
+			if (!CL_IsValidBit (snap, player) || !CL_IsValidBit (prev, player))
+				break;
+			if (prev->t - snap->t > max_gap_s)
+			{
+				VectorCopy (snap->org[player], out_org);
+				VectorCopy (snap->ang[player], out_ang);
+				cl_lerp_gap_holds++;
+				return true;
+			}
+			if (prev->t <= snap->t)
+				break;
+			{
+				float f = (float)((render_t - snap->t) / (prev->t - snap->t));
+				int axis;
+				f = CLAMP (0.0f, f, 1.0f);
+				for (axis = 0; axis < 3; axis++)
+				{
+					out_org[axis] = snap->org[player][axis] + f * (prev->org[player][axis] - snap->org[player][axis]);
+					out_ang[axis] = CL_LerpAngle (snap->ang[player][axis], prev->ang[player][axis], f);
+				}
+				return true;
+			}
+		}
+		prev = snap;
+		idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
+	}
+
+	if (oldest && render_t < oldest->t && CL_IsValidBit (oldest, player))
+	{
+		VectorCopy (oldest->org[player], out_org);
+		VectorCopy (oldest->ang[player], out_ang);
+		cl_lerp_hold_oldest++;
+		return true;
+	}
+
+	cl_lerp_miss_pairs++;
+	return false;
+}
+
 void CL_FreeState(void)
 {
         int i;
@@ -110,6 +294,7 @@ void CL_ClearState (void)
 
 // wipe the entire cl structure
 	CL_FreeState ();
+	CL_ClearPlayerSnaps ();
 
 	SZ_Clear (&cls.message);
 
@@ -686,6 +871,18 @@ void CL_RelinkEntities (void)
 			}
 		}
 
+		if (i <= cl.maxclients && i != cl.viewentity)
+		{
+			vec3_t lerp_org;
+			vec3_t lerp_ang;
+
+			if (CL_GetInterpolatedPlayer (i - 1, lerp_org, lerp_ang))
+			{
+				VectorCopy (lerp_org, ent->origin);
+				VectorCopy (lerp_ang, ent->angles);
+			}
+		}
+
 		if (ent->forcelink || ent->lerpflags & LERP_RESETMOVE)
 			CL_ResetTrail (ent);
 
@@ -814,6 +1011,22 @@ void CL_RelinkEntities (void)
 
 	if (viewentity_teleported)
 		cl.teleport_fx_time = cl.time;
+
+	if (cl_lerp_debug.value > 0.0f)
+	{
+		double now = Sys_DoubleTime ();
+
+		if (now >= cl_lerp_debug_next_time)
+		{
+			Con_Printf ("lerp: miss_pairs %d hold_newest %d hold_oldest %d gap_holds %d\n",
+				cl_lerp_miss_pairs, cl_lerp_hold_newest, cl_lerp_hold_oldest, cl_lerp_gap_holds);
+			cl_lerp_miss_pairs = 0;
+			cl_lerp_hold_newest = 0;
+			cl_lerp_hold_oldest = 0;
+			cl_lerp_gap_holds = 0;
+			cl_lerp_debug_next_time = now + 1.0;
+		}
+	}
 }
 
 
@@ -1133,6 +1346,9 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_snap_debug);
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
+	Cvar_RegisterVariable (&cl_lerp_ms);
+	Cvar_RegisterVariable (&cl_lerp_max_gap_ms);
+	Cvar_RegisterVariable (&cl_lerp_debug);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

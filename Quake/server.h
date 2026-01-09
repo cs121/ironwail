@@ -191,6 +191,10 @@ typedef struct client_s
 	int				snapshot_stats_dropped;
 	double			snapshot_stats_next_time;
 	double			snapshot_debug_next_time;
+	int				mtu_last_snapshot_size;
+	int				mtu_dropped_tier1;
+	int				mtu_dropped_tier2;
+	double			mtu_debug_next_time;
 } client_t;
 
 

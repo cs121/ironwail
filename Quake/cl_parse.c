@@ -1300,6 +1300,7 @@ static void CL_ParseSnapshotFull (void)
 	{
 		cl.snapshot_baseline_seq = seq;
 		CL_SendSnapshotAck (seq);
+		CL_RecordPlayerSnap ();
 	}
 }
 
@@ -1385,6 +1386,7 @@ static void CL_ParseSnapshotDelta (void)
 		}
 		cl.snapshot_baseline_seq = seq;
 		CL_SendSnapshotAck (seq);
+		CL_RecordPlayerSnap ();
 	}
 	else
 	{
@@ -1461,6 +1463,7 @@ static void CL_ParseSnapshot2 (void)
 		{
 			cl.snapshot_baseline_seq = header.seq;
 			CL_SendSnapshotAck (header.seq);
+			CL_RecordPlayerSnap ();
 		}
 		return;
 	}
@@ -1536,6 +1539,7 @@ static void CL_ParseSnapshot2 (void)
 		}
 		cl.snapshot_baseline_seq = header.seq;
 		CL_SendSnapshotAck (header.seq);
+		CL_RecordPlayerSnap ();
 	}
 	else
 	{
