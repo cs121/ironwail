@@ -3209,6 +3209,41 @@ static void Host_Begin_f (void)
 	host_client->spawned = true;
 }
 
+/*
+==================
+Host_AddBot_f
+==================
+*/
+static void Host_AddBot_f (void)
+{
+	const char *name;
+
+	if (cmd_source != src_command)
+	{
+		Con_Printf ("sv_addbot is not valid from the client\n");
+		return;
+	}
+
+	name = (Cmd_Argc () > 1) ? Cmd_Args () : NULL;
+	SV_AddBot (name);
+}
+
+/*
+==================
+Host_KickBots_f
+==================
+*/
+static void Host_KickBots_f (void)
+{
+	if (cmd_source != src_command)
+	{
+		Con_Printf ("sv_kickbots is not valid from the client\n");
+		return;
+	}
+
+	SV_KickBots ();
+}
+
 //===========================================================================
 
 /*
@@ -3804,6 +3839,8 @@ void Host_InitCommands (void)
 	Cmd_AddCommand_ClientCommand ("prespawn", Host_PreSpawn_f);
 	Cmd_AddCommand_ClientCommand ("kick", Host_Kick_f);
 	Cmd_AddCommand_ClientCommand ("ping", Host_Ping_f);
+	Cmd_AddCommand_Console ("sv_addbot", Host_AddBot_f);
+	Cmd_AddCommand_Console ("sv_kickbots", Host_KickBots_f);
 	Cmd_AddCommand ("load", Host_Loadgame_f);
 	Cmd_AddCommand ("save", Host_Savegame_f);
 	Cmd_AddCommand_ClientCommand ("give", Host_Give_f);
@@ -3817,4 +3854,3 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewnext", Host_Viewnext_f);
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 }
-

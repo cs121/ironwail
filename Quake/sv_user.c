@@ -623,6 +623,286 @@ nextmsg:
 	return true;
 }
 
+static float SV_BotRandom (void)
+{
+	return (float)(rand() & 0x7fff) / 32767.0f;
+}
+
+static void SV_BotReset (client_t *client, double now)
+{
+	client->bot.enemy = -1;
+	client->bot.next_target_scan = 0;
+	client->bot.next_fire_time = 0;
+	client->bot.next_wander_time = now;
+	client->bot.next_strafe_time = now;
+	client->bot.last_progress_time = now;
+	client->bot.wander_yaw = client->edict->v.angles[YAW];
+	client->bot.strafe_dir = 1;
+	VectorCopy (client->edict->v.origin, client->bot.last_origin);
+}
+
+static qboolean SV_BotCanSee (edict_t *self, edict_t *other)
+{
+	vec3_t start;
+	vec3_t end;
+	trace_t trace;
+
+	VectorAdd (self->v.origin, self->v.view_ofs, start);
+	VectorAdd (other->v.origin, other->v.view_ofs, end);
+	trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
+	return (trace.fraction >= 1.0f);
+}
+
+static void SV_BotSelectEnemy (client_t *client, double now)
+{
+	int i;
+	float best_dist = 0;
+	int best_index = -1;
+	vec3_t delta;
+
+	if (now < client->bot.next_target_scan)
+		return;
+
+	client->bot.next_target_scan = now + 0.3 + SV_BotRandom() * 0.2;
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		client_t *other = &svs.clients[i];
+		float dist;
+
+		if (!other->active || !other->spawned || other == client)
+			continue;
+		if (other->edict->v.health <= 0)
+			continue;
+		if (!SV_BotCanSee (client->edict, other->edict))
+			continue;
+
+		VectorSubtract (other->edict->v.origin, client->edict->v.origin, delta);
+		dist = VectorLength (delta);
+		if (best_index == -1 || dist < best_dist)
+		{
+			best_index = i;
+			best_dist = dist;
+		}
+	}
+
+	client->bot.enemy = best_index;
+}
+
+void SV_BotFrame (client_t *client, double now)
+{
+	usercmd_t cmd;
+	vec3_t target_dir;
+	vec3_t angles;
+	vec3_t forward;
+	float dot;
+	vec3_t delta;
+
+	if (!client->spawned)
+		return;
+
+	if (client->bot.last_progress_time == 0)
+		SV_BotReset (client, now);
+
+	SV_BotSelectEnemy (client, now);
+
+	memset (&cmd, 0, sizeof(cmd));
+	client->edict->v.button0 = 0;
+	client->edict->v.button2 = 0;
+	client->edict->v.impulse = 0;
+
+	if (client->bot.enemy >= 0 && client->bot.enemy < svs.maxclients)
+	{
+		client_t *enemy = &svs.clients[client->bot.enemy];
+		if (!enemy->active || !enemy->spawned || enemy->edict->v.health <= 0
+			|| !SV_BotCanSee (client->edict, enemy->edict))
+			client->bot.enemy = -1;
+	}
+
+	if (client->bot.enemy >= 0)
+	{
+		client_t *enemy = &svs.clients[client->bot.enemy];
+
+		VectorSubtract (enemy->edict->v.origin, client->edict->v.origin, target_dir);
+		VectorNormalize (target_dir);
+		VectorAngles (target_dir, angles);
+		angles[ROLL] = 0;
+		if (angles[PITCH] > 80)
+			angles[PITCH] = 80;
+		if (angles[PITCH] < -80)
+			angles[PITCH] = -80;
+
+		VectorCopy (angles, client->edict->v.v_angle);
+		client->edict->v.fixangle = 0;
+
+		cmd.forwardmove = 400;
+		if (now >= client->bot.next_strafe_time)
+		{
+			client->bot.strafe_dir = (SV_BotRandom() > 0.5f) ? 1 : -1;
+			client->bot.next_strafe_time = now + 0.8 + SV_BotRandom() * 0.6;
+		}
+		cmd.sidemove = client->bot.strafe_dir * 200;
+
+		AngleVectors (angles, forward, NULL, NULL);
+		dot = DotProduct (forward, target_dir);
+		if (dot > 0.9f && now >= client->bot.next_fire_time)
+		{
+			client->edict->v.button0 = 1;
+			client->bot.next_fire_time = now + 0.2 + SV_BotRandom() * 0.4;
+		}
+	}
+	else
+	{
+		if (now >= client->bot.next_wander_time)
+		{
+			client->bot.wander_yaw += (SV_BotRandom() - 0.5f) * 120.0f;
+			client->bot.next_wander_time = now + 1.0 + SV_BotRandom() * 1.5;
+		}
+
+		angles[PITCH] = 0;
+		angles[YAW] = client->bot.wander_yaw;
+		angles[ROLL] = 0;
+		VectorCopy (angles, client->edict->v.v_angle);
+		client->edict->v.fixangle = 0;
+
+		cmd.forwardmove = 200;
+		if (now >= client->bot.next_strafe_time)
+		{
+			client->bot.strafe_dir = (SV_BotRandom() > 0.5f) ? 1 : -1;
+			client->bot.next_strafe_time = now + 1.0 + SV_BotRandom() * 1.0;
+		}
+		cmd.sidemove = client->bot.strafe_dir * 120;
+	}
+
+	VectorSubtract (client->edict->v.origin, client->bot.last_origin, delta);
+	if (VectorLength (delta) > 8.0f)
+	{
+		VectorCopy (client->edict->v.origin, client->bot.last_origin);
+		client->bot.last_progress_time = now;
+	}
+	else if (now - client->bot.last_progress_time > 1.0)
+	{
+		client->bot.wander_yaw += 120.0f;
+		cmd.sidemove = client->bot.strafe_dir * 300;
+		cmd.upmove = 200;
+		VectorCopy (client->edict->v.origin, client->bot.last_origin);
+		client->bot.last_progress_time = now;
+	}
+
+	client->cmd = cmd;
+}
+
+qboolean SV_AddBot (const char *name)
+{
+	int i;
+	client_t *client = NULL;
+	edict_t *ent;
+	const char *bot_name = name;
+	qcvm_t *oldvm;
+
+	if (!sv.active)
+	{
+		Con_Printf ("No active server.\n");
+		return false;
+	}
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		if (!svs.clients[i].active)
+		{
+			client = &svs.clients[i];
+			break;
+		}
+	}
+
+	if (!client)
+	{
+		Con_Printf ("No free client slots.\n");
+		return false;
+	}
+
+	ent = client->edict ? client->edict : EDICT_NUM(i + 1);
+	memset (client, 0, sizeof(*client));
+	client->edict = ent;
+	client->message.data = client->msgbuf;
+	client->message.maxsize = sizeof(client->msgbuf);
+	client->message.allowoverflow = true;
+	client->active = true;
+	client->spawned = true;
+	client->is_bot = true;
+	client->old_frags = 0;
+	client->colors = 0;
+
+	if (!bot_name || !bot_name[0])
+	{
+		static char default_name[32];
+		q_snprintf (default_name, sizeof(default_name), "bot%i", i + 1);
+		bot_name = default_name;
+	}
+	q_strlcpy (client->name, bot_name, sizeof(client->name));
+
+	oldvm = qcvm;
+	PR_SwitchQCVM(NULL);
+	PR_SwitchQCVM(&sv.qcvm);
+
+	if (sv.loadgame)
+		memset (client->spawn_parms, 0, sizeof(client->spawn_parms));
+	else
+	{
+		PR_ExecuteProgram (pr_global_struct->SetNewParms);
+		for (i = 0; i < NUM_SPAWN_PARMS; i++)
+			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
+	}
+
+	host_client = client;
+	sv_player = ent;
+
+	memset (&ent->v, 0, qcvm->progs->entityfields * 4);
+	ent->v.colormap = NUM_FOR_EDICT(ent);
+	ent->v.team = (client->colors & 15) + 1;
+	ent->v.netname = PR_SetEngineString(client->name);
+
+	for (i = 0; i < NUM_SPAWN_PARMS; i++)
+		(&pr_global_struct->parm1)[i] = client->spawn_parms[i];
+
+	pr_global_struct->time = qcvm->time;
+	pr_global_struct->self = EDICT_TO_PROG(sv_player);
+	PR_ExecuteProgram (pr_global_struct->ClientConnect);
+	PR_ExecuteProgram (pr_global_struct->PutClientInServer);
+
+	PR_SwitchQCVM(NULL);
+	PR_SwitchQCVM(oldvm);
+
+	SV_BotReset (client, qcvm->time);
+
+	MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
+	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
+	MSG_WriteString (&sv.reliable_datagram, client->name);
+	MSG_WriteByte (&sv.reliable_datagram, svc_updatefrags);
+	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
+	MSG_WriteShort (&sv.reliable_datagram, client->edict->v.frags);
+	MSG_WriteByte (&sv.reliable_datagram, svc_updatecolors);
+	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
+	MSG_WriteByte (&sv.reliable_datagram, client->colors);
+
+	Con_Printf ("Added bot %s\n", client->name);
+	return true;
+}
+
+void SV_KickBots (void)
+{
+	int i;
+	client_t *client;
+
+	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
+	{
+		if (!client->active || !client->is_bot)
+			continue;
+		host_client = client;
+		sv_player = client->edict;
+		SV_DropClient (false);
+	}
+}
 
 /*
 ==================
@@ -640,10 +920,17 @@ void SV_RunClients (void)
 
 		sv_player = host_client->edict;
 
-		if (!SV_ReadClientMessage ())
+		if (host_client->is_bot)
 		{
-			SV_DropClient (false);	// client misbehaved...
-			continue;
+			SV_BotFrame (host_client, qcvm->time);
+		}
+		else
+		{
+			if (!SV_ReadClientMessage ())
+			{
+				SV_DropClient (false);	// client misbehaved...
+				continue;
+			}
 		}
 
 		if (!host_client->spawned)
