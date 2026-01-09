@@ -167,12 +167,19 @@ typedef struct client_s
 	unsigned int	snapshot_baseline_seq;
 	unsigned int	snapshot_pending_seq;
 	unsigned int	snapshot_pending_baseline_seq;
+	unsigned int	snapshot_last_sent_seq;
+	unsigned int	snapshot_last_acked_seq;
+	unsigned int	snapshot_last_full_seq;
+	double			snapshot_last_full_time;
+	qboolean		snapshot_has_valid_base;
+	qboolean		snapshot_force_full;
 	double			snapshot_pending_time;
 	qboolean		snapshot_pending_is_delta;
 	snapshot_state_t *snapshot_baseline;
 	byte			*snapshot_baseline_present;
 	snapshot_state_t *snapshot_pending;
 	byte			*snapshot_pending_present;
+	byte			*snapshot_pending_relevant;
 	byte			*snapshot_pending_flags;
 	int				snapshot_unacked_frames;
 	int				snapshot_pending_mandatory;
@@ -330,5 +337,6 @@ void SV_RunClients (void);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
 void SV_SnapshotAck (client_t *client, unsigned int seq);
+void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int received_base);
 
 #endif	/* QUAKE_SERVER_H */

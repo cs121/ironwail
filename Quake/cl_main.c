@@ -37,6 +37,9 @@ cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
+cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
+cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
+cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -122,7 +125,15 @@ void CL_ClearState (void)
 	cl_entities = (entity_t *) Hunk_AllocName (cl_max_edicts*sizeof(entity_t), "cl_entities");
 	cl.snapshot_baseline = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_base");
 	cl.snapshot_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
+	cl.snapshot_active = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_active");
+	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
 	//johnfitz
+	if (cl.snapshot_present)
+		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_active)
+		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_last_update_time)
+		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
 }
@@ -610,12 +621,30 @@ void CL_RelinkEntities (void)
 			continue;
 		}
 
-// if the object wasn't included in the last packet, remove it
+// if the object wasn't included in the last packet, remove it (or hold briefly)
 		if (ent->msgtime != cl.mtime[0])
 		{
-			ent->model = NULL;
-			ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM; //johnfitz -- next time this entity slot is reused, the lerp will need to be reset
-			continue;
+			qboolean keepalive = false;
+			double timeout_s = cl_entity_timeout_ms.value / 1000.0;
+
+			if (timeout_s > 0.0 && cl.snapshot_active && cl.snapshot_active[i] && cl.snapshot_last_update_time)
+			{
+				if (cl.time - cl.snapshot_last_update_time[i] <= timeout_s)
+				{
+					ent->msgtime = cl.mtime[0];
+					ent->forcelink = true;
+					keepalive = true;
+				}
+			}
+
+			if (!keepalive)
+			{
+				ent->model = NULL;
+				ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM; //johnfitz -- next time this entity slot is reused, the lerp will need to be reset
+				if (cl.snapshot_active)
+					cl.snapshot_active[i] = 0;
+				continue;
+			}
 		}
 
 		if (ent->forcelink)
@@ -1101,6 +1130,9 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
+	Cvar_RegisterVariable (&cl_snap_debug);
+	Cvar_RegisterVariable (&cl_test_drop);
+	Cvar_RegisterVariable (&cl_entity_timeout_ms);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

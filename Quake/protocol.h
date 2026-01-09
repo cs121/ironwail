@@ -248,6 +248,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_snapshot_full	57
 #define svc_snapshot_delta	58
 #define svc_packedentities	59
+#define svc_snapshot2		60
+
+#define SNAPSHOT_FLAG_FULL		(1u << 0)
+#define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 1)
 
 #define PACKEDENT_MASK_EXTEND	0x8000u
 #define PACKEDENT_MASK_MODEL	(1u << 0)
@@ -288,6 +292,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_move		3		// [usercmd_t]
 #define	clc_stringcmd	4		// [string] message
 #define	clc_snapshot_ack	5	// [long] seq
+#define	clc_snapshot_nak	6	// [long] expected base [long] received base
 
 //
 // temp entity events

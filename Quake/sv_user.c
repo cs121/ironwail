@@ -612,6 +612,10 @@ nextmsg:
 			case clc_snapshot_ack:
 				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadLong ());
 				break;
+
+			case clc_snapshot_nak:
+				SV_SnapshotNak (host_client, (unsigned int)MSG_ReadLong (), (unsigned int)MSG_ReadLong ());
+				break;
 			}
 		}
 	} while (ret == 1);
