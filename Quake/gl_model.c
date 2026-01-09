@@ -1611,6 +1611,8 @@ static void Mod_LoadLighting (lump_t *l)
 	qboolean bspx_dlit;
 	qboolean has_classic_lighting;
 	qboolean allow_bspx_lighting;
+	byte *bspx_rgb = NULL;
+	int bspx_rgb_size = 0;
 	qboolean loaded_bspx_rgb = false;
 	qboolean loaded_bspx_dir = false;
 	const char *lighting_mode = "none";
@@ -1628,6 +1630,10 @@ static void Mod_LoadLighting (lump_t *l)
 	bspx_dlit = Q1BSPX_IsProcessed("DLIT");
 	has_classic_lighting = (l->filelen > 0);
 	allow_bspx_lighting = (gl_loadlitfiles.value > 0) || !has_classic_lighting;
+	if (!allow_bspx_lighting)
+	{
+		bspx_rgb = Q1BSPX_FindLump("RGBLIGHTING", &bspx_rgb_size);
+	}
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -1791,6 +1797,29 @@ static void Mod_LoadLighting (lump_t *l)
                         Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspxsize);
                 }
 
+        }
+        else if (bspx_rgb)
+        {
+                if (bspx_rgb_size % 3 == 0)
+                {
+                        int samples = bspx_rgb_size / 3;
+
+                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspx_rgb_size, litfilename);
+                        loadmodel->lightdatasamples = samples;
+                        loadmodel->litfile = true;
+                        loadmodel->lightdatasize = samples;
+
+                        memcpy(loadmodel->lightdata, bspx_rgb, bspx_rgb_size);
+                        Q1BSPX_MarkUsed("RGBLIGHTING");
+
+                        Con_DPrintf("loaded BSPX lighting (%d samples)\n", samples);
+                        lighting_mode = "bspx_rgb";
+                        loaded_bspx_rgb = true;
+                        goto loadlightdir;
+                }
+
+                Q1BSPX_MarkUnsupported("RGBLIGHTING");
+                Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspx_rgb_size);
         }
         else if (gl_loadlitfiles.value <= 0)
         {
