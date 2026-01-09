@@ -291,6 +291,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 	struct qsockaddr readaddr;
 	unsigned int	sequence;
 	unsigned int	count;
+	int				packetLengthRead;
 
 	if (!sock->canSend)
 		if ((net_time - sock->lastSendTime) > 1.0)
@@ -298,16 +299,16 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 	while (1)
 	{
-		length = (unsigned int) sfunc.Read(sock->socket, (byte *)&packetBuffer,
+		packetLengthRead = (int) sfunc.Read(sock->socket, (byte *)&packetBuffer,
 							NET_DATAGRAMSIZE, &readaddr);
 
 	//	if ((rand() & 255) > 220)
 	//		continue;
 
-		if (length == 0)
+		if (packetLengthRead == 0)
 			break;
 
-		if (length == (unsigned int)-1)
+		if (packetLengthRead == -1)
 		{
 			Con_Printf("Read error\n");
 			return -1;
@@ -321,7 +322,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			continue;
 		}
 
-		if (length < NET_HEADERSIZE)
+		if (packetLengthRead < NET_HEADERSIZE)
 		{
 			shortPacketCount++;
 			continue;
@@ -333,6 +334,19 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 		if (flags & NETFLAG_CTL)
 			continue;
+
+		if (length < NET_HEADERSIZE || length > NET_DATAGRAMSIZE)
+		{
+			Con_DPrintf("NET_GetMessage: invalid packet length %u\n", length);
+			continue;
+		}
+
+		if ((int)length > packetLengthRead)
+		{
+			Con_DPrintf("NET_GetMessage: truncated packet length %u (read %d)\n",
+				length, packetLengthRead);
+			continue;
+		}
 
 		sequence = BigLong(packetBuffer.sequence);
 		packetsReceived++;
@@ -354,6 +368,12 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			sock->unreliableReceiveSequence = sequence + 1;
 
 			length -= NET_HEADERSIZE;
+
+			if (length > MAX_DATAGRAM)
+			{
+				Con_DPrintf("NET_GetMessage: unreliable packet too large (%u)\n", length);
+				continue;
+			}
 
 			SZ_Clear (&net_message);
 			SZ_Write (&net_message, packetBuffer.data, length);
@@ -408,6 +428,20 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			sock->receiveSequence++;
 
 			length -= NET_HEADERSIZE;
+
+			if (length > MAX_DATAGRAM)
+			{
+				Con_DPrintf("NET_GetMessage: reliable packet too large (%u)\n", length);
+				continue;
+			}
+
+			if (sock->receiveMessageLength + length > NET_MAXMESSAGE)
+			{
+				Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
+					sock->receiveMessageLength, length);
+				sock->receiveMessageLength = 0;
+				continue;
+			}
 
 			if (flags & NETFLAG_EOM)
 			{
