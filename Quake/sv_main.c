@@ -535,6 +535,10 @@ void SV_SendServerinfo (client_t *client)
 	char			message[2048];
 	int				i; //johnfitz
 
+	SZ_Clear (&client->message);
+	client->message.allowoverflow = true;
+	client->message.overflowed = false;
+
 	MSG_WriteByte (&client->message, svc_print);
 	sprintf (message, "%c\nFITZQUAKE %1.2f SERVER (%i CRC)\n", 2, FITZQUAKE_VERSION, qcvm->crc); //johnfitz -- include fitzquake version
 	MSG_WriteString (&client->message,message);
