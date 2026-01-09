@@ -341,6 +341,9 @@ extern	cvar_t	cl_confirmquit;
 extern	cvar_t	cl_snap_debug;
 extern	cvar_t	cl_test_drop;
 extern	cvar_t	cl_entity_timeout_ms;
+extern	cvar_t	cl_lerp_ms;
+extern	cvar_t	cl_lerp_max_gap_ms;
+extern	cvar_t	cl_lerp_debug;
 
 
 #define	MAX_TEMP_ENTITIES	256		//johnfitz -- was 64
@@ -439,6 +442,7 @@ void CL_TimeDemo_f (void);
 //
 void CL_ParseServerMessage (void);
 void CL_NewTranslation (int slot);
+void CL_RecordPlayerSnap (void);
 
 //
 // view

@@ -44,6 +44,8 @@ static cvar_t sv_snap_debug = {"sv_snap_debug", "0", CVAR_NONE};
 static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE};
 static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
+static cvar_t sv_mtu = {"sv_mtu", "1200", CVAR_NONE};
+static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
 static cvar_t net_test_drop = {"net_test_drop", "0", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
@@ -288,6 +290,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_full_interval);
 	Cvar_RegisterVariable (&sv_snap_force_full_after_frames);
 	Cvar_RegisterVariable (&sv_snap_max_payload);
+	Cvar_RegisterVariable (&sv_mtu);
+	Cvar_RegisterVariable (&sv_mtu_debug);
 	Cvar_RegisterVariable (&net_test_drop);
 	Cvar_RegisterVariable (&net_snap_tinyvel);
 	Cvar_RegisterVariable (&net_snap_forcefull_frames);
@@ -874,6 +878,10 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_stats_dropped = 0;
 	client->snapshot_stats_next_time = 0;
 	client->snapshot_debug_next_time = 0;
+	client->mtu_last_snapshot_size = 0;
+	client->mtu_dropped_tier1 = 0;
+	client->mtu_dropped_tier2 = 0;
+	client->mtu_debug_next_time = 0;
 	if (client->snapshot_baseline_present)
 		memset (client->snapshot_baseline_present, 0, max_edicts * sizeof(byte));
 	if (client->snapshot_pending_present)
@@ -1064,8 +1072,6 @@ static qboolean SV_SnapshotMandatoryEnt (const edict_t *ent)
 {
 	if ((int)ent->v.flags & FL_CLIENT)
 		return true;
-	if ((int)ent->v.movetype == MOVETYPE_PUSH && SV_SnapshotMoverMoving (ent))
-		return true;
 	return false;
 }
 
@@ -1089,6 +1095,19 @@ static qboolean SV_SnapshotPriorityMissile (const edict_t *ent)
 		return true;
 	if (((int)ent->v.movetype == MOVETYPE_TOSS || (int)ent->v.movetype == MOVETYPE_BOUNCE)
 		&& SV_SnapshotTossMoving (ent))
+		return true;
+	return false;
+}
+
+static qboolean SV_SnapshotTier1Ent (const edict_t *ent)
+{
+	if (SV_SnapshotPriorityMover (ent))
+		return true;
+	if (SV_SnapshotPriorityMissile (ent))
+		return true;
+	if ((int)ent->v.solid == SOLID_BSP)
+		return true;
+	if (ent->v.velocity[0] || ent->v.velocity[1] || ent->v.velocity[2])
 		return true;
 	return false;
 }
@@ -1138,11 +1157,14 @@ static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 	int header_size = 1 + 4 + 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
 	int payload_cap = (int)sv_snap_max_payload.value;
+	int mtu_cap = (int)sv_mtu.value;
 
 	if (sv_snapshot2.value)
 		header_size = 1 + 4 + 4 + 1 + 2 + 2;
 
 	int available = msg->maxsize - msg->cursize - header_size;
+	if (mtu_cap > 0)
+		payload_cap = payload_cap > 0 ? q_min (payload_cap, mtu_cap) : mtu_cap;
 	if (payload_cap > 0)
 		available = q_min (available, payload_cap - header_size);
 
@@ -1272,11 +1294,14 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 
 static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byte *present,
 	byte *relevant, byte *snapflags, int max_ents, const byte *baseline_present,
-	int *out_mandatory, int *out_dropped, qboolean debug_frame)
+	int *out_mandatory, int *out_dropped, int *out_dropped_tier1, int *out_dropped_tier2,
+	qboolean debug_frame)
 {
 	int	num, j, numents, count;
 	int mandatory_count = 0;
 	int dropped_count = 0;
+	int dropped_tier1 = 0;
+	int dropped_tier2 = 0;
 	edict_t	*ent;
 
 	memset (present, 0, qcvm->max_edicts * sizeof(byte));
@@ -1326,39 +1351,13 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		num = net_edicts_sorted[j];
 		ent = EDICT_NUM (num);
 
-		if (present[num] || !SV_SnapshotPriorityMover (ent))
+		if (present[num] || !SV_SnapshotTier1Ent (ent))
 			continue;
 
 		if (max_ents > 0 && count >= max_ents)
 		{
 			dropped_count++;
-			if (debug_frame && net_snap_debug.value)
-				Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
-			continue;
-		}
-
-		SV_FillSnapshotState (ent, &states[num]);
-
-		if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
-			continue;
-
-		present[num] = 1;
-		if (snapflags)
-			snapflags[num] = SV_SnapshotFlagsForEnt (ent);
-		count++;
-	}
-
-	for (j=0 ; j<numents ; j++)
-	{
-		num = net_edicts_sorted[j];
-		ent = EDICT_NUM (num);
-
-		if (present[num] || !SV_SnapshotPriorityMissile (ent))
-			continue;
-
-		if (max_ents > 0 && count >= max_ents)
-		{
-			dropped_count++;
+			dropped_tier1++;
 			if (debug_frame && net_snap_debug.value)
 				Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
 			continue;
@@ -1386,6 +1385,7 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		if (max_ents > 0 && count >= max_ents)
 		{
 			dropped_count++;
+			dropped_tier2++;
 			if (debug_frame && net_snap_debug.value)
 				Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
 			continue;
@@ -1412,6 +1412,10 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		*out_mandatory = mandatory_count;
 	if (out_dropped)
 		*out_dropped = dropped_count;
+	if (out_dropped_tier1)
+		*out_dropped_tier1 = dropped_tier1;
+	if (out_dropped_tier2)
+		*out_dropped_tier2 = dropped_tier2;
 
 	return count;
 }
@@ -1870,6 +1874,8 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	{
 		int mandatory_count = 0;
 		int dropped_count = 0;
+		int dropped_tier1 = 0;
+		int dropped_tier2 = 0;
 		int max_ents = SV_SnapshotMaxEntities (msg);
 		qboolean debug_frame = false;
 
@@ -1881,9 +1887,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 
 		SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
 			client->snapshot_pending_relevant, client->snapshot_pending_flags, max_ents,
-			client->snapshot_baseline_present, &mandatory_count, &dropped_count, debug_frame);
+			client->snapshot_baseline_present, &mandatory_count, &dropped_count,
+			&dropped_tier1, &dropped_tier2, debug_frame);
 		client->snapshot_pending_mandatory = mandatory_count;
 		client->snapshot_pending_dropped = dropped_count;
+		client->mtu_dropped_tier1 = dropped_tier1;
+		client->mtu_dropped_tier2 = dropped_tier2;
+		if (sv_mtu_debug.value > 0 && max_ents > 0 && dropped_tier1 > 0 && mandatory_count >= max_ents)
+			Con_Printf ("mtu %s forcing tier0 only (budget %d mandatory %d)\n",
+				client->name, max_ents, mandatory_count);
 		client->snapshot_pending_seq = client->snapshot_next_seq++;
 		if (!client->snapshot_next_seq)
 			client->snapshot_next_seq = 1;
@@ -1936,6 +1948,8 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 		client->snapshot_last_sent_seq = client->snapshot_pending_seq;
 	}
+
+	client->mtu_last_snapshot_size = msg->cursize - start_size;
 
 	if (forced_full)
 		client->snapshot_stats_forced_full++;
@@ -2836,6 +2850,8 @@ qboolean SV_SendClientDatagram (client_t *client)
 	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
 		msg.maxsize = DATAGRAM_MTU;
 	//johnfitz
+	if (sv_mtu.value > 0)
+		msg.maxsize = q_min (msg.maxsize, (int)sv_mtu.value);
 
 	MSG_WriteByte (&msg, svc_time);
 	MSG_WriteFloat (&msg, qcvm->time);
@@ -2848,6 +2864,13 @@ qboolean SV_SendClientDatagram (client_t *client)
 // copy the server datagram if there is space
 	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
 		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
+
+	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
+	{
+		Con_Printf ("mtu %s bytes %d dropped tier1 %d tier2 %d\n",
+			client->name, msg.cursize, client->mtu_dropped_tier1, client->mtu_dropped_tier2);
+		client->mtu_debug_next_time = realtime + 1.0;
+	}
 
 // send the datagram
 	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
