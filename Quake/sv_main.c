@@ -839,6 +839,7 @@ static uint16_t		net_edicts_sorted[MAX_NET_EDICTS];
 #define SNAPFLAG_FORCE_ANGLES	(1u<<1)
 #define SNAPFLAG_HIRES_ORIGIN	(1u<<2)
 #define SNAPFLAG_HIRES_ANGLES	(1u<<3)
+#define SNAPFLAG_NO_DELTA		(1u<<4)
 
 static void SV_InitClientSnapshotData (client_t *client)
 {
@@ -1056,13 +1057,19 @@ static byte SV_SnapshotFlagsForEnt (const edict_t *ent)
 	{
 		flags |= SNAPFLAG_HIRES_ORIGIN | SNAPFLAG_HIRES_ANGLES;
 		if (SV_SnapshotMoverMoving (ent))
+		{
 			flags |= SNAPFLAG_FORCE_ORIGIN | SNAPFLAG_FORCE_ANGLES;
+			flags |= SNAPFLAG_NO_DELTA;
+		}
 	}
 	else if (ent->v.movetype == MOVETYPE_TOSS || ent->v.movetype == MOVETYPE_BOUNCE)
 	{
 		flags |= SNAPFLAG_HIRES_ORIGIN;
-		if (SV_SnapshotTossMoving (ent))
+		if (SV_SnapshotTossMoving (ent) && ent->v.solid == SOLID_TRIGGER)
+		{
 			flags |= SNAPFLAG_FORCE_ORIGIN;
+			flags |= SNAPFLAG_NO_DELTA;
+		}
 	}
 
 	return flags;
@@ -1598,12 +1605,14 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 	}
 
 	for (entnum = 1; entnum < max_edicts; entnum++)
-		if (!baseline_present[entnum] && present[entnum])
+		if (present[entnum] && (!baseline_present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA))))
 			add_count++;
 	MSG_WriteShort (msg, add_count);
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
-		if (!baseline_present[entnum] && present[entnum])
+		if (present[entnum] && (!baseline_present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA))))
 		{
 			MSG_WriteShort (msg, entnum);
 			if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
@@ -1616,7 +1625,8 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 	{
 		unsigned int mask;
 
-		if (!baseline_present[entnum] || !present[entnum])
+		if (!baseline_present[entnum] || !present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA)))
 			continue;
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (mask)
@@ -1628,7 +1638,8 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 	{
 		unsigned int mask;
 
-		if (!baseline_present[entnum] || !present[entnum])
+		if (!baseline_present[entnum] || !present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA)))
 			continue;
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (!mask)
@@ -1689,14 +1700,16 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 			remove_count++;
 
 	for (entnum = 1; entnum < max_edicts; entnum++)
-		if (!baseline_present[entnum] && present[entnum])
+		if (present[entnum] && (!baseline_present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA))))
 			add_count++;
 
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
 		unsigned int mask;
 
-		if (!baseline_present[entnum] || !present[entnum])
+		if (!baseline_present[entnum] || !present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA)))
 			continue;
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (mask)
@@ -1716,7 +1729,8 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	MSG_WriteShort (msg, add_count);
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
-		if (!baseline_present[entnum] && present[entnum])
+		if (present[entnum] && (!baseline_present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA))))
 		{
 			MSG_WriteShort (msg, entnum);
 			if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
@@ -1730,7 +1744,8 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	{
 		unsigned int mask;
 
-		if (!baseline_present[entnum] || !present[entnum])
+		if (!baseline_present[entnum] || !present[entnum]
+			|| (snapflags && (snapflags[entnum] & SNAPFLAG_NO_DELTA)))
 			continue;
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (!mask)
