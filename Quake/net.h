@@ -36,6 +36,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define NET_MAXMESSAGE		65535	/* ericw -- was 32000 */
 
+typedef struct net_packetinfo_s
+{
+	unsigned int	sequence;
+	unsigned int	flags;
+	unsigned int	packet_length;
+	unsigned int	payload_length;
+	qboolean		unreliable;
+	qboolean		valid;
+} net_packetinfo_t;
+
 extern int		DEFAULTnet_hostport;
 extern int		net_hostport;
 
@@ -43,6 +53,7 @@ extern cvar_t		hostname;
 
 extern	double		net_time;
 extern	sizebuf_t	net_message;
+extern	net_packetinfo_t	net_last_incoming;
 extern	int		net_activeconnections;
 
 
@@ -111,5 +122,6 @@ extern	qboolean	tcpipAvailable;
 extern	char		my_ipx_address[NET_NAMELEN];
 extern	char		my_tcpip_address[NET_NAMELEN];
 
-#endif	/* _QUAKE_NET_H */
+extern cvar_t		net_maxpacket;
 
+#endif	/* _QUAKE_NET_H */

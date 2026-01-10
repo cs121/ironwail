@@ -57,6 +57,7 @@ static PollProcedure	slistPollProcedure = {NULL, 0.0, Slist_Poll};
 
 sizebuf_t	net_message;
 int		net_activeconnections		= 0;
+net_packetinfo_t	net_last_incoming;
 
 int		messagesSent			= 0;
 int		messagesReceived		= 0;
@@ -65,6 +66,7 @@ int		unreliableMessagesReceived	= 0;
 
 static	cvar_t	net_messagetimeout = {"net_messagetimeout","300",CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
+cvar_t	net_maxpacket = {"net_maxpacket", "1400", CVAR_NONE};
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -799,9 +801,11 @@ void NET_Init (void)
 
 	// allocate space for network message buffer
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
+	Q_memset(&net_last_incoming, 0, sizeof(net_last_incoming));
 
 	Cvar_RegisterVariable (&net_messagetimeout);
 	Cvar_RegisterVariable (&hostname);
+	Cvar_RegisterVariable (&net_maxpacket);
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
 	Cmd_AddCommand ("listen", NET_Listen_f);
@@ -914,4 +918,3 @@ void SchedulePollProcedure(PollProcedure *proc, double timeOffset)
 	proc->next = pp;
 	prev->next = proc;
 }
-

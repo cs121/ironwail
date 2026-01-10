@@ -314,6 +314,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			return -1;
 		}
 
+		if (net_maxpacket.value > 0 && packetLengthRead > (int)net_maxpacket.value)
+		{
+			Con_DPrintf("NET_GetMessage: oversized packet (%d > %d)\n",
+				packetLengthRead, (int)net_maxpacket.value);
+			continue;
+		}
+
 		if (sfunc.AddrCompare(&readaddr, &sock->addr) != 0)
 		{
 			Con_Printf("Forged packet received\n");
@@ -338,6 +345,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		if (length < NET_HEADERSIZE || length > NET_DATAGRAMSIZE)
 		{
 			Con_DPrintf("NET_GetMessage: invalid packet length %u\n", length);
+			continue;
+		}
+
+		if (net_maxpacket.value > 0 && length > (unsigned int)net_maxpacket.value)
+		{
+			Con_DPrintf("NET_GetMessage: oversized packet length %u (cap %d)\n",
+				length, (int)net_maxpacket.value);
 			continue;
 		}
 
@@ -377,6 +391,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 			SZ_Clear (&net_message);
 			SZ_Write (&net_message, packetBuffer.data, length);
+
+			net_last_incoming.sequence = sequence;
+			net_last_incoming.flags = flags;
+			net_last_incoming.packet_length = (unsigned int)packetLengthRead;
+			net_last_incoming.payload_length = (unsigned int)length;
+			net_last_incoming.unreliable = true;
+			net_last_incoming.valid = true;
 
 			ret = 2;
 			break;
@@ -449,6 +470,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
 				SZ_Write(&net_message, packetBuffer.data, length);
 				sock->receiveMessageLength = 0;
+
+				net_last_incoming.sequence = sequence;
+				net_last_incoming.flags = flags;
+				net_last_incoming.packet_length = (unsigned int)packetLengthRead;
+				net_last_incoming.payload_length = (unsigned int)(net_message.cursize);
+				net_last_incoming.unreliable = false;
+				net_last_incoming.valid = true;
 
 				ret = 1;
 				break;
