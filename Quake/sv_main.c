@@ -3304,7 +3304,39 @@ void SV_CreateBaseline (void)
 	//
 	// add to the message
 	//
-		SV_ReserveSignonSpace (35);
+		{
+			int coord_bytes;
+			int angle_bytes;
+			int reserve;
+
+			if (sv.protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
+				coord_bytes = 4;
+			else if (sv.protocolflags & PRFL_24BITCOORD)
+				coord_bytes = 3;
+			else
+				coord_bytes = 2;
+
+			if (sv.protocolflags & PRFL_FLOATANGLE)
+				angle_bytes = 4;
+			else if (sv.protocolflags & PRFL_SHORTANGLE)
+				angle_bytes = 2;
+			else
+				angle_bytes = 1;
+
+			reserve = 1 + 2;
+			if (bits)
+				reserve += 1;
+			reserve += (bits & B_LARGEMODEL) ? 2 : 1;
+			reserve += (bits & B_LARGEFRAME) ? 2 : 1;
+			reserve += 1 + 1;
+			reserve += 3 * (coord_bytes + angle_bytes);
+			if (bits & B_ALPHA)
+				reserve += 1;
+			if (bits & B_SCALE)
+				reserve += 1;
+
+			SV_ReserveSignonSpace (reserve);
+		}
 
 		//johnfitz -- PROTOCOL_FITZQUAKE
 		if (bits)
