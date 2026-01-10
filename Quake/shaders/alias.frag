@@ -158,7 +158,6 @@ layout(location=6) in vec3 in_normal;
 void main()
 {
         vec2 uv = in_texcoord;
-        vec3 emissive = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
@@ -196,13 +195,10 @@ void main()
         vec3 fullbright;
 #if MODE == 2
         fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
-        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
 #else
         fullbright = texture(FullbrightTex, uv).rgb;
-        emissive = texture(EmissiveTex, uv).rgb;
 #endif
         result.rgb += fullbright;
-        result.rgb += emissive;
 
         if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
         {
@@ -220,7 +216,7 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (viewModelMask < 0.5 && result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, viewModelMask, 1.0);
+        out_velocity = vec4(velocityOut, viewModelMask, 0.0);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
