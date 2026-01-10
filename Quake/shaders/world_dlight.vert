@@ -39,6 +39,8 @@ struct Call
         float   _pad0;
         vec2    polygon_offset;
         vec4    stage_color;
+	vec4	texmatrix0;
+	vec4	texmatrix1;
 #if BINDLESS
         uvec2   txhandle;
         uvec2   fbhandle;
@@ -131,6 +133,12 @@ vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 	return refl_view.xy / max(m, 1e-6) + 0.5;
 }
 
+vec2 ApplyTexMatrix(Call call, vec2 uv)
+{
+	vec3 uvh = vec3(uv, 1.0);
+	return vec2(dot(call.texmatrix0.xyz, uvh), dot(call.texmatrix1.xyz, uvh));
+}
+
 void main()
 {
         Call call = call_data[DRAW_ID];
@@ -158,6 +166,7 @@ void main()
 		uv = in_uv.zw;
 	else if (call.tcgen == TCGEN_ENVIRONMENT)
 		uv = ComputeEnvUV(world_pos, world_normal);
+	uv = ApplyTexMatrix(call, uv);
         out_uv = uv;
         out_depth = gl_Position.w;
         out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
