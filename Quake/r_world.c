@@ -295,6 +295,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLfloat		polygon_offset[2];
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
+	GLfloat		texmatrix[8];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
@@ -309,6 +310,7 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		polygon_offset[2];
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
+	GLfloat		texmatrix[8];
 	GLint		baseinstance;
 	GLint		padding[3];
 } bmodel_bound_gpu_call_t;
@@ -571,6 +573,34 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 R_AddBModelCall
 =============
 */
+static void R_SetCallTexMatrix (float *dst, const mat_texmatrix_t *matrix)
+{
+	if (!dst)
+		return;
+
+	if (!matrix)
+	{
+		dst[0] = 1.f;
+		dst[1] = 0.f;
+		dst[2] = 0.f;
+		dst[3] = 0.f;
+		dst[4] = 0.f;
+		dst[5] = 1.f;
+		dst[6] = 0.f;
+		dst[7] = 0.f;
+		return;
+	}
+
+	dst[0] = matrix->m[0][0];
+	dst[1] = matrix->m[0][1];
+	dst[2] = matrix->m[0][2];
+	dst[3] = 0.f;
+	dst[4] = matrix->m[1][0];
+	dst[5] = matrix->m[1][1];
+	dst[6] = matrix->m[1][2];
+	dst[7] = 0.f;
+}
+
 static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix,
 	float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
 	qboolean force_fullbright)
@@ -634,6 +664,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
+		R_SetCallTexMatrix (call->texmatrix, NULL);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -655,6 +686,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
+		R_SetCallTexMatrix (call->texmatrix, NULL);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -674,7 +706,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
 	tcgen_mode_t tcgen, qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
-	const vec4_t stage_color)
+	const mat_texmatrix_t *texmatrix, const vec4_t stage_color)
 {
 	GLuint flags;
 	float alpha;
@@ -707,6 +739,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
+		R_SetCallTexMatrix (call->texmatrix, texmatrix);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -728,6 +761,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
+		R_SetCallTexMatrix (call->texmatrix, texmatrix);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -944,7 +978,9 @@ static qboolean R_StageIsOpaqueBase (const shader_material_t *material)
 	return material->sort_key == MAT_SORT_OPAQUE
 		&& stage->blend_mode == MAT_BLEND_REPLACE
 		&& stage->depth_write
-		&& stage->depth_func == MAT_DEPTHFUNC_LEQUAL;
+		&& stage->depth_func == MAT_DEPTHFUNC_LEQUAL
+		&& stage->tcgen == MAT_TCGEN_BASE
+		&& stage->tcmod_count == 0;
 }
 
 /*
@@ -1190,7 +1226,8 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
+						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color);
 				}
 			}
 		}
@@ -1362,7 +1399,8 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
+						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color);
 				}
 			}
 		}
