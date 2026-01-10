@@ -105,7 +105,7 @@ returns a pointer to hunk allocated RGBA data
 */
 byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat *fmt)
 {
-	static const char *const stbi_formats[] = {"png", "tga", "jpg", NULL};
+	static const char *const stbi_formats[] = {"png", "tga", "jpg", "jpeg", NULL};
 	FILE	*f;
 	int		i;
 
