@@ -1157,13 +1157,43 @@ static void SZ_DumpBufferTail (const sizebuf_t *buf)
 
 static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length)
 {
-	const char *name = buf->dbg_name ? buf->dbg_name : "unnamed";
-	const char *file = buf->dbg_file ? buf->dbg_file : "unknown";
+	const char *name = "unnamed";
+	const char *file = "unknown";
+	qboolean name_valid = false;
+	qboolean file_valid = false;
+
+	if (buf->dbg_name)
+	{
+#if UINTPTR_MAX > 0xFFFFFFFFu
+		uintptr_t dbg_name_ptr = (uintptr_t)buf->dbg_name;
+		name_valid = ((dbg_name_ptr >> 48) == 0u) || ((dbg_name_ptr >> 48) == 0xFFFFu);
+#else
+		name_valid = true;
+#endif
+	}
+	if (buf->dbg_file)
+	{
+#if UINTPTR_MAX > 0xFFFFFFFFu
+		uintptr_t dbg_file_ptr = (uintptr_t)buf->dbg_file;
+		file_valid = ((dbg_file_ptr >> 48) == 0u) || ((dbg_file_ptr >> 48) == 0xFFFFu);
+#else
+		file_valid = true;
+#endif
+	}
+
+	if (name_valid)
+		name = buf->dbg_name;
+	if (file_valid)
+		file = buf->dbg_file;
 
 	Con_Printf ("SZ_GetSpace overflow on '%s': max=%d cursize=%d request=%d\n",
 		name, buf->maxsize, buf->cursize, length);
+	if (buf->dbg_name && !name_valid)
+		Con_Printf ("  dbg_name pointer looks invalid: %p\n", (void *)buf->dbg_name);
 	Con_Printf ("  last write at %s:%d msgkind=%d id=%d aux=%d\n",
 		file, buf->dbg_line, buf->dbg_msgkind, buf->dbg_id, buf->dbg_aux);
+	if (buf->dbg_file && !file_valid)
+		Con_Printf ("  dbg_file pointer looks invalid: %p\n", (void *)buf->dbg_file);
 	if (sz_debug_hexdump.value)
 		SZ_DumpBufferTail (buf);
 }
