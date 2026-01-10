@@ -51,7 +51,13 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "sky", MAT_SURFPARM_SKY, MAT_RENDER_SKY, 0u },
 	{ "fog", MAT_SURFPARM_FOG, MAT_RENDER_FOG, 0u },
 	{ "nodraw", MAT_SURFPARM_NODRAW, MAT_RENDER_NODRAW, 0u },
-	{ "stone", MAT_SURFPARM_STONE, 0u, 0u }
+	{ "stone", MAT_SURFPARM_STONE, 0u, 0u },
+	{ "noimpact", 0u, 0u, 0u },
+	{ "lava", 0u, 0u, 0u },
+	{ "water", 0u, 0u, 0u },
+	{ "nolightmap", 0u, 0u, 0u },
+	{ "slime", 0u, 0u, 0u },
+	{ "nomarks", 0u, 0u, 0u }
 };
 
 typedef struct
@@ -443,7 +449,17 @@ static qboolean ParseWaveType (const char *token, mat_wave_type_t *out)
 		*out = MAT_WAVE_SAW;
 		return true;
 	}
+	if (!q_strcasecmp (token, "sawtooth"))
+	{
+		*out = MAT_WAVE_SAW;
+		return true;
+	}
 	if (!q_strcasecmp (token, "inversesaw"))
+	{
+		*out = MAT_WAVE_INVERSESAW;
+		return true;
+	}
+	if (!q_strcasecmp (token, "inversesawtooth"))
 	{
 		*out = MAT_WAVE_INVERSESAW;
 		return true;
@@ -1177,6 +1193,10 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.alpha_wave.type = wave_type;
 				stage.alphagen = MAT_ALPHAGEN_WAVE;
 			}
+			else if (!q_strcasecmp (value, "lightingSpecular"))
+			{
+				stage.alphagen = MAT_ALPHAGEN_IDENTITY;
+			}
 			else
 			{
 				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
@@ -1320,6 +1340,17 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				state ? state->token_line : 0u);
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "alphaFunc"))
+		{
+			Mat_Shader_MarkKeywordSeen ("alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "alphaFunc mode"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "tcGen"))
 		{
 			Mat_Shader_MarkKeywordSeen ("tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1398,6 +1429,25 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				}
 				Mat_Shader_ValidateTcModArgs (state, "tcMod turb", turb, turb_defaults, 4);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4);
+				continue;
+			}
+			if (!q_strcasecmp (value, "transform"))
+			{
+				float transform[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
+				const float transform_defaults[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
+				for (int i = 0; i < 6; ++i)
+				{
+					if (!ParseFloat (&data, &transform[i], state))
+					{
+						valid = false;
+						data = SkipUnknownBlockOrLine (data, true, state);
+						break;
+					}
+				}
+				if (!valid)
+					break;
+				Mat_Shader_ValidateTcModArgs (state, "tcMod transform", transform, transform_defaults, 6);
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TRANSFORM, transform, 6);
 				continue;
 			}
 			if (!q_strcasecmp (value, "stretch"))
@@ -1789,6 +1839,60 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 
 			material.polygon_offset = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "qer_trans"))
+		{
+			Mat_Shader_MarkKeywordSeen ("qer_trans", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strncasecmp (com_token, "q3map_", 6))
+		{
+			Mat_Shader_MarkKeywordSeen ("q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "fogparms"))
+		{
+			Mat_Shader_MarkKeywordSeen ("fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "tesssize"))
+		{
+			Mat_Shader_MarkKeywordSeen ("tessSize", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "deformVertexes"))
+		{
+			Mat_Shader_MarkKeywordSeen ("deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "map"))
+		{
+			Mat_Shader_MarkKeywordSeen ("map", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "blendFunc"))
+		{
+			Mat_Shader_MarkKeywordSeen ("blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "rgbGen"))
+		{
+			Mat_Shader_MarkKeywordSeen ("rgbGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			(void) Mat_Shader_ParseLine (&data, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "tcMod"))
+		{
+			Mat_Shader_MarkKeywordSeen ("tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			(void) Mat_Shader_ParseLine (&data, state);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "emissive"))

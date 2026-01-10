@@ -149,6 +149,7 @@ typedef enum
 	MAT_TCMOD_SCROLL,
 	MAT_TCMOD_SCALE,
 	MAT_TCMOD_ROTATE,
+	MAT_TCMOD_TRANSFORM,
 	MAT_TCMOD_TURB,
 	MAT_TCMOD_STRETCH
 } mat_tcmod_type_t;
@@ -156,7 +157,7 @@ typedef enum
 typedef struct mat_tcmod_s
 {
 	mat_tcmod_type_t type;
-	float args[4];
+	float args[6];
 } mat_tcmod_t;
 
 typedef struct mat_texmatrix_s

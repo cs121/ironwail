@@ -99,6 +99,7 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "cull", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: back/front/none." },
 	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: sky/opaque/seeThrough/decal/banner/underwater/additive/nearest or numeric." },
 	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean or factor/units pair." },
+	{ "qer_trans", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Editor transparency hint." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
@@ -108,6 +109,7 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters." },
 	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters." },
 	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation." },
+	{ "tessSize", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 surface tessellation." },
 	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives." },
 
 	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
@@ -137,7 +139,13 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "sky", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Sky surface." },
 	{ "fog", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Fog surface." },
 	{ "nodraw", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "No draw surface." },
-	{ "stone", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Footstep hint." }
+	{ "stone", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Footstep hint." },
+	{ "noimpact", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 noimpact." },
+	{ "lava", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 lava." },
+	{ "water", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 water." },
+	{ "nolightmap", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 nolightmap." },
+	{ "slime", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 slime." },
+	{ "nomarks", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 nomarks." }
 };
 
 static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
@@ -748,6 +756,17 @@ static void Mat_MatrixRotate (mat_texmatrix_t *out, float degrees)
 	out->m[0][1] = -s;
 	out->m[1][0] = s;
 	out->m[1][1] = c;
+}
+
+static void Mat_MatrixTransform (mat_texmatrix_t *out, const float *args)
+{
+	Mat_MatrixIdentity (out);
+	out->m[0][0] = args[0];
+	out->m[0][1] = args[1];
+	out->m[1][0] = args[2];
+	out->m[1][1] = args[3];
+	out->m[0][2] = args[4];
+	out->m[1][2] = args[5];
 }
 
 static void Mat_MatrixAroundCenter (mat_texmatrix_t *out, const mat_texmatrix_t *inner)
@@ -1431,6 +1450,10 @@ const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float 
 			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
 			break;
 		}
+		case MAT_TCMOD_TRANSFORM:
+			Mat_MatrixTransform (&tmp, mod->args);
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
 		case MAT_TCMOD_TURB:
 		{
 			float phase = mod->args[2];
