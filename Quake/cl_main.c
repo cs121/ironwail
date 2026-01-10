@@ -35,6 +35,10 @@ cvar_t	cl_name = {"_cl_name", "player", CVAR_ARCHIVE};
 cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
+cvar_t	cl_netdebug_parse = {"cl_netdebug_parse", "0", CVAR_NONE};
+cvar_t	cl_netdebug_hexdump = {"cl_netdebug_hexdump", "0", CVAR_NONE};
+cvar_t	cl_netdebug_dropbad = {"cl_netdebug_dropbad", "1", CVAR_NONE};
+cvar_t	cl_netdebug_maxdump = {"cl_netdebug_maxdump", "256", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
@@ -1341,6 +1345,10 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_pitchspeed);
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
+	Cvar_RegisterVariable (&cl_netdebug_parse);
+	Cvar_RegisterVariable (&cl_netdebug_hexdump);
+	Cvar_RegisterVariable (&cl_netdebug_dropbad);
+	Cvar_RegisterVariable (&cl_netdebug_maxdump);
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
 	Cvar_RegisterVariable (&cl_snap_debug);

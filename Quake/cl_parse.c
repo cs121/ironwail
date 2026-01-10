@@ -27,6 +27,118 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 
+extern const char *svc_strings[];
+
+extern cvar_t cl_netdebug_parse;
+extern cvar_t cl_netdebug_hexdump;
+extern cvar_t cl_netdebug_dropbad;
+extern cvar_t cl_netdebug_maxdump;
+
+static const char *CL_SvcName (int cmd)
+{
+	if (cmd >= 0 && cmd < (int)NUM_SVC_STRINGS)
+		return svc_strings[cmd];
+	return "svc_unknown";
+}
+
+static void CL_NetHexDump (const byte *data, int len, int max)
+{
+	int i;
+	int dump_len = q_min(len, max);
+
+	if (dump_len <= 0)
+		return;
+
+	Con_Printf ("NETDBG: hexdump %d bytes\n", dump_len);
+	for (i = 0; i < dump_len; i += 16)
+	{
+		int j;
+		char line[128];
+		char *out = line;
+		int line_len = q_min(16, dump_len - i);
+
+		out += q_snprintf (out, sizeof(line), "NETDBG: %04x:", i);
+		for (j = 0; j < line_len; j++)
+			out += q_snprintf (out, (size_t)(line + sizeof(line) - out), " %02x", data[i + j]);
+		*out = '\0';
+		Con_Printf ("%s\n", line);
+	}
+}
+
+static int CL_NetDebugDumpLength (void)
+{
+	int maxdump = (int)cl_netdebug_maxdump.value;
+
+	if (maxdump <= 0)
+		return 0;
+	if (maxdump > 64)
+		maxdump = 64;
+	if (maxdump > net_message.cursize)
+		maxdump = net_message.cursize;
+	return maxdump;
+}
+
+static void CL_NetDebugHeader (void)
+{
+	if (!cl_netdebug_parse.value && !cl_netdebug_hexdump.value)
+		return;
+
+	Con_Printf ("NETDBG: msg len %d time %.3f state %d signon %d\n",
+		net_message.cursize, realtime, cls.state, cls.signon);
+	if (cls.netcon)
+	{
+		Con_Printf ("NETDBG: from %s rseq %u sseq %u ack %u unrel %u\n",
+			NET_QSocketGetAddressString (cls.netcon),
+			cls.netcon->receiveSequence,
+			cls.netcon->sendSequence,
+			cls.netcon->ackSequence,
+			cls.netcon->unreliableReceiveSequence);
+	}
+	if (net_last_incoming.valid)
+	{
+		Con_Printf ("NETDBG: packet seq %u flags 0x%x len %u payload %u %s\n",
+			net_last_incoming.sequence,
+			net_last_incoming.flags,
+			net_last_incoming.packet_length,
+			net_last_incoming.payload_length,
+			net_last_incoming.unreliable ? "unreliable" : "reliable");
+	}
+	if (cl_netdebug_hexdump.value)
+		CL_NetHexDump (net_message.data, net_message.cursize, CL_NetDebugDumpLength ());
+}
+
+static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
+	int lastcmd, int lastcmd_offset, int prevcmd, int prevcmd_offset)
+{
+	if (cl_netdebug_parse.value || cl_netdebug_hexdump.value)
+	{
+		Con_Printf ("NETDBG: bad server message: %s\n", reason);
+		Con_Printf ("NETDBG: readcount %d/%d cmd %d (%s) @%d last %d (%s) @%d prev %d (%s) @%d badread %d\n",
+			msg_readcount, net_message.cursize,
+			cmd, CL_SvcName (cmd), cmd_offset,
+			lastcmd, CL_SvcName (lastcmd), lastcmd_offset,
+			prevcmd, CL_SvcName (prevcmd), prevcmd_offset,
+			msg_badread);
+		if (cl_netdebug_hexdump.value)
+			CL_NetHexDump (net_message.data, net_message.cursize, CL_NetDebugDumpLength ());
+	}
+
+	if (cls.signon < SIGNONS)
+	{
+		Con_Printf ("Malformed server message during signon: %s\n", reason);
+		CL_Disconnect ();
+		return;
+	}
+
+	if (cl_netdebug_dropbad.value)
+	{
+		Con_Printf ("Dropping malformed server message: %s\n", reason);
+		return;
+	}
+
+	Host_Error ("Illegible server message %d (previous was %s)", cmd, CL_SvcName (lastcmd));
+}
+
 const char *svc_strings[] =
 {
 	"svc_bad",
@@ -1922,6 +2034,10 @@ void CL_ParseServerMessage (void)
 	int			i;
 	const char		*str; //johnfitz
 	int			lastcmd; //johnfitz
+	int			lastcmd_offset;
+	int			prevcmd;
+	int			prevcmd_offset;
+	int			cmd_offset;
 
 //
 // if recording demos, copy the message out
@@ -1938,13 +2054,30 @@ void CL_ParseServerMessage (void)
 //
 	MSG_BeginReading ();
 
-	lastcmd = 0;
+	CL_NetDebugHeader ();
+
+	lastcmd = -1;
+	lastcmd_offset = -1;
+	prevcmd = -1;
+	prevcmd_offset = -1;
+	if (net_message.cursize <= 0)
+	{
+		CL_BadServerMessage ("empty server message", -1, msg_readcount,
+			lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+		return;
+	}
+
 	while (1)
 	{
 		if (msg_badread)
-			Host_Error ("CL_ParseServerMessage: Bad server message");
+		{
+			CL_BadServerMessage ("message read past end", -1, msg_readcount,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			return;
+		}
 
 		cmd = MSG_ReadByte ();
+		cmd_offset = msg_readcount - 1;
 
 		if (cmd == -1)
 		{
@@ -1957,25 +2090,50 @@ void CL_ParseServerMessage (void)
 			return;		// end of message
 		}
 
+		if (cmd == svc_bad)
+		{
+			CL_BadServerMessage ("svc_bad", cmd, cmd_offset,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			return;
+		}
+
 	// if the high bit of the command byte is set, it is a fast update
 		if (cmd & U_SIGNAL) //johnfitz -- was 128, changed for clarity
 		{
 			SHOWNET("fast update");
+			if (cl_netdebug_parse.value)
+				Con_Printf ("NETDBG: cmd fast_update 0x%x @%d\n", cmd, cmd_offset);
 			CL_ParseUpdate (cmd&127);
+			if (msg_badread)
+			{
+				CL_BadServerMessage ("bad fast update", cmd, cmd_offset,
+					lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+				return;
+			}
+			if (cl_netdebug_parse.value)
+				Con_Printf ("NETDBG: cmd fast_update end %d bytes %d\n",
+					msg_readcount, msg_readcount - cmd_offset);
+			prevcmd = lastcmd;
+			prevcmd_offset = lastcmd_offset;
+			lastcmd = cmd;
+			lastcmd_offset = cmd_offset;
 			continue;
 		}
 
 		if (cmd < (int)NUM_SVC_STRINGS) {
 			SHOWNET(svc_strings[cmd]);
 		}
+		if (cl_netdebug_parse.value)
+			Con_Printf ("NETDBG: cmd %s (%d) @%d\n", CL_SvcName (cmd), cmd, cmd_offset);
 
 	// other commands
 		switch (cmd)
 		{
 		default:
 		//	CL_DumpPacket ();
-			Host_Error ("Illegible server message %d (previous was %s)", cmd, svc_strings[lastcmd]); //johnfitz -- added svc_strings[lastcmd]
-			break;
+			CL_BadServerMessage ("unknown command", cmd, cmd_offset,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			return;
 
 		case svc_nop:
 		//	Con_Printf ("svc_nop\n");
@@ -2255,6 +2413,19 @@ void CL_ParseServerMessage (void)
 			break;
 		}
 
+		if (msg_badread)
+		{
+			CL_BadServerMessage ("message read past end", cmd, cmd_offset,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			return;
+		}
+		if (cl_netdebug_parse.value)
+			Con_Printf ("NETDBG: cmd %s end %d bytes %d\n",
+				CL_SvcName (cmd), msg_readcount, msg_readcount - cmd_offset);
+
+		prevcmd = lastcmd;
+		prevcmd_offset = lastcmd_offset;
 		lastcmd = cmd; //johnfitz
+		lastcmd_offset = cmd_offset;
 	}
 }

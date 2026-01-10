@@ -2866,6 +2866,9 @@ qboolean SV_SendClientDatagram (client_t *client)
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
 	msg.cursize = 0;
+	msg.allowoverflow = true;
+	msg.overflowed = false;
+	msg.bitpos = 0;
 
 	//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
 	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
@@ -2881,6 +2884,12 @@ qboolean SV_SendClientDatagram (client_t *client)
 	SV_WriteClientdataToMessage (client->edict, &msg);
 
 	SV_SendSnapshot (client, &msg);
+
+	if (msg.overflowed)
+	{
+		Con_DPrintf ("SV_SendClientDatagram: overflow for %s, dropping packet\n", client->name);
+		return true;
+	}
 
 // copy the server datagram if there is space
 	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
