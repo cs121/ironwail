@@ -1129,6 +1129,7 @@ static int SV_SnapshotEntitySizeWorst (void)
 	int angle_size;
 	int field_size = 0;
 	int extra_flags = (sv.protocolflags & PRFL_SNAPSHOT_HIRES) ? 1 : 0;
+	int entry_overhead;
 
 	if (sv.protocolflags & PRFL_FLOATCOORD)
 		coord_size = 4;
@@ -1160,18 +1161,19 @@ static int SV_SnapshotEntitySizeWorst (void)
 	field_size += 1; // scale
 	field_size += 1; // step
 
-	return 2 + extra_flags + field_size;
+	entry_overhead = q_max (extra_flags, 4); // worst-case delta includes a 32-bit mask
+	return 2 + entry_overhead + field_size;
 }
 
 static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 {
-	int header_size = 1 + 4 + 2;
+	int header_size = 1 + 4 + 4 + 2 + 2 + 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
 	int payload_cap = (int)sv_snap_max_payload.value;
 	int mtu_cap = (int)sv_mtu.value;
 
 	if (sv_snapshot2.value)
-		header_size = 1 + 4 + 4 + 1 + 2 + 2;
+		header_size = 1 + 4 + 4 + 1 + 2 + 2 + 2 + 2;
 
 	int available = msg->maxsize - msg->cursize - header_size;
 	if (mtu_cap > 0)
