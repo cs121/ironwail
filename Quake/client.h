@@ -284,6 +284,9 @@ typedef struct
 
 	unsigned	protocol; //johnfitz
 	unsigned	protocolflags;
+	qboolean	signon_chunking;
+	byte		signon_chunk_stage;
+	unsigned short	signon_chunk_next_seq;
 
 	qboolean	sendprespawn;
 

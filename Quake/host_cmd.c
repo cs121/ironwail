@@ -3069,6 +3069,7 @@ static void Host_PreSpawn_f (void)
 
 	host_client->sendsignon = PRESPAWN_SIGNONBUFS;
 	host_client->signonidx = 0;
+	memset (&host_client->signon_stream, 0, sizeof(host_client->signon_stream));
 }
 
 /*
