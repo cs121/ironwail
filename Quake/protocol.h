@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PRFL_ALPHASANITY	(1 << 6)	// cleanup insanity with alpha
 #define PRFL_INT32COORD		(1 << 7)
 #define PRFL_SNAPSHOT_HIRES	(1 << 8)
+#define PRFL_SIGNON_CHUNKS	(1 << 9)	// signon streaming via svc_signon_chunk
 #define PRFL_MOREFLAGS		(1 << 31)	// not supported
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
@@ -249,9 +250,32 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_snapshot_delta	58
 #define svc_packedentities	59
 #define svc_snapshot2		60
+#define svc_signon_chunk	61	// [byte stage] [short seq] [byte flags] [short payload_len] [payload bytes]
+
+// Signon chunk format (PRFL_SIGNON_CHUNKS):
+//   svc_signon_chunk
+//     stage: signon_stage_t
+//     seq:   monotonically increasing sequence number
+//     flags: SIGNON_CHUNK_FLAG_* (stage end, etc.)
+//     payload_len: size of payload bytes that follow
+//     payload: one or more complete svc_* commands
 
 #define SNAPSHOT_FLAG_FULL		(1u << 0)
 #define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 1)
+
+// signon chunk protocol extension
+#define SIGNON_CHUNK_FLAG_STAGE_END	(1u << 0)
+
+typedef enum
+{
+	SIGNON_STAGE_PRECACHES = 0,
+	SIGNON_STAGE_BASELINES,
+	SIGNON_STAGE_STATIC_ENTS,
+	SIGNON_STAGE_LIGHTSTYLES,
+	SIGNON_STAGE_CUSTOM_EXT,
+	SIGNON_STAGE_FINAL,
+	SIGNON_STAGE_COUNT
+} signon_stage_t;
 
 #define PACKEDENT_MASK_EXTEND	0x8000u
 #define PACKEDENT_MASK_MODEL	(1u << 0)
@@ -293,6 +317,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	clc_stringcmd	4		// [string] message
 #define	clc_snapshot_ack	5	// [long] seq
 #define	clc_snapshot_nak	6	// [long] expected base [long] received base
+#define	clc_signon_ack	7	// [byte stage] [short next_seq_expected]
 
 //
 // temp entity events

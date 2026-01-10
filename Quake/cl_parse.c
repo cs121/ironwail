@@ -34,6 +34,7 @@ extern cvar_t cl_netdebug_parse;
 extern cvar_t cl_netdebug_hexdump;
 extern cvar_t cl_netdebug_dropbad;
 extern cvar_t cl_netdebug_maxdump;
+extern cvar_t cl_signon_chunk_debug;
 
 const char *svc_strings[] =
 {
@@ -108,7 +109,8 @@ const char *svc_strings[] =
 	"svc_snapshot_full", // 57
 	"svc_snapshot_delta", // 58
 	"svc_packedentities", // 59
-	"svc_snapshot2" // 60
+	"svc_snapshot2", // 60
+	"svc_signon_chunk" // 61
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
@@ -218,6 +220,30 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 }
 
 qboolean warn_about_nehahra_protocol; //johnfitz
+
+static void CL_ParseSignonChunkPayload (const byte *payload, int payload_len)
+{
+	sizebuf_t saved_message = net_message;
+	int saved_readcount = msg_readcount;
+	qboolean saved_badread = msg_badread;
+	int saved_readbitpos = msg_readbitpos;
+	sizebuf_t chunk_message;
+
+	chunk_message.data = (byte *)payload;
+	chunk_message.cursize = payload_len;
+	chunk_message.maxsize = payload_len;
+	chunk_message.allowoverflow = false;
+	chunk_message.overflowed = false;
+	chunk_message.bitpos = 0;
+
+	net_message = chunk_message;
+	CL_ParseServerMessage ();
+
+	net_message = saved_message;
+	msg_readcount = saved_readcount;
+	msg_badread = saved_badread;
+	msg_readbitpos = saved_readbitpos;
+}
 
 extern vec3_t	v_punchangles[2]; //johnfitz
 
@@ -433,7 +459,7 @@ void CL_ParseServerInfo (void)
 
 	if (cl.protocol == PROTOCOL_RMQ)
 	{
-		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES);
+		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES | PRFL_SIGNON_CHUNKS);
 		
 		// mh - read protocol flags from server so that we know what protocol features to expect
 		cl.protocolflags = (unsigned int) MSG_ReadLong ();
@@ -442,8 +468,15 @@ void CL_ParseServerInfo (void)
 		{
 			Con_Warning("PROTOCOL_RMQ protocolflags %i contains unsupported flags\n", cl.protocolflags);
 		}
+		cl.signon_chunking = (cl.protocolflags & PRFL_SIGNON_CHUNKS) != 0;
 	}
-	else cl.protocolflags = 0;
+	else
+	{
+		cl.protocolflags = 0;
+		cl.signon_chunking = false;
+	}
+	cl.signon_chunk_stage = SIGNON_STAGE_PRECACHES;
+	cl.signon_chunk_next_seq = 0;
 
 // parse maxclients
 	cl.maxclients = MSG_ReadByte ();
@@ -2290,6 +2323,59 @@ void CL_ParseServerMessage (void)
 			//johnfitz
 			CL_SignonReply ();
 			break;
+
+		case svc_signon_chunk:
+		{
+			byte stage = (byte)MSG_ReadByte ();
+			unsigned short seq = (unsigned short)MSG_ReadShort ();
+			byte flags = (byte)MSG_ReadByte ();
+			unsigned short payload_len = (unsigned short)MSG_ReadShort ();
+			const byte *payload;
+
+			if (payload_len > (unsigned short)(net_message.cursize - msg_readcount))
+			{
+				CL_BadServerMessage ("signon chunk length exceeds packet", cmd, cmd_offset,
+					lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+				return;
+			}
+
+			payload = net_message.data + msg_readcount;
+			msg_readcount += payload_len;
+
+			if (cl_signon_chunk_debug.value)
+				Con_Printf ("SIGNONCHUNK: stage %u seq %u len %u flags 0x%x\n",
+					stage, seq, payload_len, flags);
+
+			if (!cl.signon_chunking)
+			{
+				Con_Warning ("Received signon chunk without negotiation\n");
+				break;
+			}
+
+			if (stage != cl.signon_chunk_stage && cl.signon_chunk_next_seq == 0)
+				cl.signon_chunk_stage = stage;
+
+			if (seq != cl.signon_chunk_next_seq)
+			{
+				if (cl_signon_chunk_debug.value)
+					Con_Printf ("SIGNONCHUNK: expected seq %u, got %u (stage %u)\n",
+						cl.signon_chunk_next_seq, seq, stage);
+				MSG_WriteByte (&cls.message, clc_signon_ack);
+				MSG_WriteByte (&cls.message, cl.signon_chunk_stage);
+				MSG_WriteShort (&cls.message, cl.signon_chunk_next_seq);
+				break;
+			}
+
+			CL_ParseSignonChunkPayload (payload, payload_len);
+			cl.signon_chunk_next_seq++;
+			if (flags & SIGNON_CHUNK_FLAG_STAGE_END)
+				cl.signon_chunk_stage = stage + 1;
+
+			MSG_WriteByte (&cls.message, clc_signon_ack);
+			MSG_WriteByte (&cls.message, stage);
+			MSG_WriteShort (&cls.message, cl.signon_chunk_next_seq);
+			break;
+		}
 
 		case svc_killedmonster:
 			cl.stats[STAT_MONSTERS]++;

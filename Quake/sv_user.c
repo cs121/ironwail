@@ -616,6 +616,18 @@ nextmsg:
 			case clc_snapshot_nak:
 				SV_SnapshotNak (host_client, (unsigned int)MSG_ReadLong (), (unsigned int)MSG_ReadLong ());
 				break;
+
+			case clc_signon_ack:
+			{
+				MSG_ReadByte ();
+				{
+					unsigned short next_seq = (unsigned short)MSG_ReadShort ();
+					signon_stream_t *stream = &host_client->signon_stream;
+					if (stream->active && next_seq > stream->acked_seq)
+						stream->acked_seq = next_seq;
+				}
+				break;
+			}
 			}
 		}
 	} while (ret == 1);

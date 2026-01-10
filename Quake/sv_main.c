@@ -46,6 +46,9 @@ static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frame
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_mtu = {"sv_mtu", "1200", CVAR_NONE};
 static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
+static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
+static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
+static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE};
 static cvar_t net_test_drop = {"net_test_drop", "0", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
@@ -293,6 +296,9 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_max_payload);
 	Cvar_RegisterVariable (&sv_mtu);
 	Cvar_RegisterVariable (&sv_mtu_debug);
+	Cvar_RegisterVariable (&sv_signon_chunks);
+	Cvar_RegisterVariable (&sv_signon_chunk_debug);
+	Cvar_RegisterVariable (&sv_signon_chunk_window);
 	Cvar_RegisterVariable (&net_test_drop);
 	Cvar_RegisterVariable (&net_snap_tinyvel);
 	Cvar_RegisterVariable (&net_snap_forcefull_frames);
@@ -3103,22 +3109,29 @@ void SV_SendClientMessages (void)
 			}
 			if (host_client->sendsignon == PRESPAWN_SIGNONBUFS)
 			{
-				qboolean local = SV_IsLocalClient (host_client);
-				while (host_client->signonidx < sv.num_signon_buffers)
+				if (SV_SignonChunksEnabled ())
 				{
-					sizebuf_t *signon = sv.signon_buffers[host_client->signonidx];
-					if (host_client->message.cursize + signon->cursize > host_client->message.maxsize)
-						break;
-					SZ_Write (&host_client->message, signon->data, signon->cursize);
-					host_client->signonidx++;
-					// only send multiple buffers at once when playing locally,
-					// otherwise we send one signon at a time to avoid overflowing
-					// the datagram buffer for clients using a lower limit (e.g. 32000 in QS)
-					if (!local)
-						break;
+					SV_SignonStreamSend (host_client);
 				}
-				if (host_client->signonidx == sv.num_signon_buffers)
-					host_client->sendsignon = PRESPAWN_SIGNONMSG;
+				else
+				{
+					qboolean local = SV_IsLocalClient (host_client);
+					while (host_client->signonidx < sv.num_signon_buffers)
+					{
+						sizebuf_t *signon = sv.signon_buffers[host_client->signonidx];
+						if (host_client->message.cursize + signon->cursize > host_client->message.maxsize)
+							break;
+						SZ_Write (&host_client->message, signon->data, signon->cursize);
+						host_client->signonidx++;
+						// only send multiple buffers at once when playing locally,
+						// otherwise we send one signon at a time to avoid overflowing
+						// the datagram buffer for clients using a lower limit (e.g. 32000 in QS)
+						if (!local)
+							break;
+					}
+					if (host_client->signonidx == sv.num_signon_buffers)
+						host_client->sendsignon = PRESPAWN_SIGNONMSG;
+				}
 			}
 			if (host_client->sendsignon == PRESPAWN_SIGNONMSG)
 			{
@@ -3179,6 +3192,612 @@ SERVER SPAWNING
 */
 
 #define SIGNON_SIZE		(MAX_MSGLEN - 1024) // allow larger signon buffers for busy startups while leaving headroom
+#define SIGNON_CHUNK_MAX_PAYLOAD	1024
+#define SIGNON_CHUNK_HEADER_BYTES	7
+
+typedef struct
+{
+	int	buffer_index;
+	int	buffer_offset;
+} signon_reader_t;
+
+static qboolean SV_SignonChunksEnabled (void)
+{
+	return (sv.protocol == PROTOCOL_RMQ) && (sv.protocolflags & PRFL_SIGNON_CHUNKS) && sv_signon_chunks.value;
+}
+
+static qboolean SV_SignonReaderAtEnd (const signon_reader_t *reader)
+{
+	int index = reader->buffer_index;
+	int offset = reader->buffer_offset;
+
+	while (index < sv.num_signon_buffers)
+	{
+		sizebuf_t *sb = sv.signon_buffers[index];
+		if (offset < sb->cursize)
+			return false;
+		index++;
+		offset = 0;
+	}
+	return true;
+}
+
+static qboolean SV_SignonReaderRead (signon_reader_t *reader, void *out, int count)
+{
+	byte *outbytes = (byte *)out;
+	int remaining = count;
+
+	while (remaining > 0)
+	{
+		sizebuf_t *sb;
+		int available;
+		int take;
+
+		while (reader->buffer_index < sv.num_signon_buffers)
+		{
+			sb = sv.signon_buffers[reader->buffer_index];
+			if (reader->buffer_offset < sb->cursize)
+				break;
+			reader->buffer_index++;
+			reader->buffer_offset = 0;
+		}
+
+		if (reader->buffer_index >= sv.num_signon_buffers)
+			return false;
+
+		sb = sv.signon_buffers[reader->buffer_index];
+		available = sb->cursize - reader->buffer_offset;
+		take = q_min(available, remaining);
+		if (outbytes)
+		{
+			memcpy (outbytes, sb->data + reader->buffer_offset, take);
+			outbytes += take;
+		}
+		reader->buffer_offset += take;
+		remaining -= take;
+	}
+
+	return true;
+}
+
+static qboolean SV_SignonReadBytes (signon_reader_t *reader, int count, size_t *consumed)
+{
+	if (!SV_SignonReaderRead (reader, NULL, count))
+		return false;
+	if (consumed)
+		*consumed += (size_t)count;
+	return true;
+}
+
+static qboolean SV_SignonReadByte (signon_reader_t *reader, int *out, size_t *consumed)
+{
+	byte value;
+	if (!SV_SignonReaderRead (reader, &value, 1))
+		return false;
+	if (out)
+		*out = value;
+	if (consumed)
+		*consumed += 1;
+	return true;
+}
+
+static qboolean SV_SignonReadShort (signon_reader_t *reader, size_t *consumed)
+{
+	return SV_SignonReadBytes (reader, 2, consumed);
+}
+
+static qboolean SV_SignonReadLong (signon_reader_t *reader, size_t *consumed)
+{
+	return SV_SignonReadBytes (reader, 4, consumed);
+}
+
+static qboolean SV_SignonReadString (signon_reader_t *reader, size_t *consumed)
+{
+	int c;
+	do
+	{
+		if (!SV_SignonReadByte (reader, &c, consumed))
+			return false;
+	} while (c != 0);
+	return true;
+}
+
+static int SV_SignonCoordBytes (unsigned int protocolflags)
+{
+	if (protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
+		return 4;
+	if (protocolflags & PRFL_24BITCOORD)
+		return 3;
+	return 2;
+}
+
+static int SV_SignonAngleBytes (unsigned int protocolflags)
+{
+	if (protocolflags & PRFL_FLOATANGLE)
+		return 4;
+	if (protocolflags & PRFL_SHORTANGLE)
+		return 2;
+	return 1;
+}
+
+static signon_stage_t SV_SignonStageForCommand (int cmd)
+{
+	switch (cmd)
+	{
+	case svc_spawnbaseline:
+	case svc_spawnbaseline2:
+		return SIGNON_STAGE_BASELINES;
+	case svc_spawnstatic:
+	case svc_spawnstatic2:
+	case svc_spawnstaticsound:
+	case svc_spawnstaticsound2:
+		return SIGNON_STAGE_STATIC_ENTS;
+	case svc_lightstyle:
+		return SIGNON_STAGE_LIGHTSTYLES;
+	default:
+		return SIGNON_STAGE_CUSTOM_EXT;
+	}
+}
+
+static int SV_SignonCommandLength (const signon_reader_t *reader, int *out_cmd, signon_stage_t *out_stage)
+{
+	signon_reader_t temp = *reader;
+	size_t consumed = 0;
+	int cmd;
+	int coord_bytes = SV_SignonCoordBytes (sv.protocolflags);
+	int angle_bytes = SV_SignonAngleBytes (sv.protocolflags);
+
+	if (!SV_SignonReadByte (&temp, &cmd, &consumed))
+		return 0;
+
+	if (cmd & U_SIGNAL)
+		return -1;
+
+	if (out_cmd)
+		*out_cmd = cmd;
+	if (out_stage)
+		*out_stage = SV_SignonStageForCommand (cmd);
+
+	switch (cmd)
+	{
+	case svc_nop:
+	case svc_disconnect:
+	case svc_bf:
+	case svc_sellscreen:
+		break;
+
+	case svc_time:
+		if (!SV_SignonReadLong (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_clientdata:
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		// variable length based on bits - skip worst case by reading all bits
+		// clientdata does not appear during signon, so reject to avoid mis-splitting
+		return -1;
+
+	case svc_version:
+		if (!SV_SignonReadLong (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_print:
+	case svc_stufftext:
+	case svc_centerprint:
+	case svc_finale:
+	case svc_cutscene:
+	case svc_skybox:
+	case svc_rawprint:
+	case svc_servervars:
+	case svc_chat:
+	case svc_achievement:
+		if (!SV_SignonReadString (&temp, &consumed))
+			return 0;
+		if (cmd == svc_finale)
+		{
+			if (!SV_SignonReadString (&temp, &consumed))
+				return 0;
+		}
+		break;
+
+	case svc_serverinfo:
+		return -1;
+
+	case svc_lightstyle:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		if (!SV_SignonReadString (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_setangle:
+		if (!SV_SignonReadBytes (&temp, angle_bytes * 3, &consumed))
+			return 0;
+		break;
+
+	case svc_setview:
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_sound:
+	{
+		int field_mask;
+		if (!SV_SignonReadByte (&temp, &field_mask, &consumed))
+			return 0;
+		if (field_mask & SND_VOLUME)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		if (field_mask & SND_ATTENUATION)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		if (field_mask & SND_LARGEENTITY)
+		{
+			if (!SV_SignonReadShort (&temp, &consumed))
+				return 0;
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		else
+		{
+			if (!SV_SignonReadShort (&temp, &consumed))
+				return 0;
+		}
+		if (field_mask & SND_LARGESOUND)
+		{
+			if (!SV_SignonReadShort (&temp, &consumed))
+				return 0;
+		}
+		else
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		break;
+	}
+
+	case svc_stopsound:
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_updatename:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		if (!SV_SignonReadString (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_updatecolors:
+		if (!SV_SignonReadBytes (&temp, 2, &consumed))
+			return 0;
+		break;
+
+	case svc_updatestat:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		if (!SV_SignonReadLong (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_updatefrags:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_particle:
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 3, &consumed))
+			return 0;
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		break;
+
+	case svc_damage:
+		if (!SV_SignonReadBytes (&temp, 2, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		break;
+
+	case svc_spawnstatic:
+		if (!SV_SignonReadBytes (&temp, 1 + 1 + 1 + 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, angle_bytes * 3, &consumed))
+			return 0;
+		break;
+
+	case svc_spawnbaseline:
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 1 + 1 + 1 + 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, angle_bytes * 3, &consumed))
+			return 0;
+		break;
+
+	case svc_temp_entity:
+		return -1;
+
+	case svc_spawnstaticsound:
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 1 + 1 + 1, &consumed))
+			return 0;
+		break;
+
+	case svc_intermission:
+		break;
+
+	case svc_cdtrack:
+		if (!SV_SignonReadBytes (&temp, 2, &consumed))
+			return 0;
+		break;
+
+	case svc_fog:
+		if (!SV_SignonReadBytes (&temp, 4, &consumed))
+			return 0;
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		break;
+
+	case svc_spawnbaseline2:
+	{
+		int bits;
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		if (!SV_SignonReadByte (&temp, &bits, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, (bits & B_LARGEMODEL) ? 2 : 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, (bits & B_LARGEFRAME) ? 2 : 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 1 + 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, angle_bytes * 3, &consumed))
+			return 0;
+		if (bits & B_ALPHA)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		if (bits & B_SCALE)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		break;
+	}
+
+	case svc_spawnstatic2:
+	{
+		int bits;
+		if (!SV_SignonReadByte (&temp, &bits, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, (bits & B_LARGEMODEL) ? 2 : 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, (bits & B_LARGEFRAME) ? 2 : 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 1 + 1, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, angle_bytes * 3, &consumed))
+			return 0;
+		if (bits & B_ALPHA)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		if (bits & B_SCALE)
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		break;
+	}
+
+	case svc_spawnstaticsound2:
+		if (!SV_SignonReadBytes (&temp, coord_bytes * 3, &consumed))
+			return 0;
+		if (!SV_SignonReadShort (&temp, &consumed))
+			return 0;
+		if (!SV_SignonReadBytes (&temp, 2, &consumed))
+			return 0;
+		break;
+
+	case svc_localsound:
+	{
+		int field_mask;
+		if (!SV_SignonReadByte (&temp, &field_mask, &consumed))
+			return 0;
+		if (field_mask & SND_LARGESOUND)
+		{
+			if (!SV_SignonReadShort (&temp, &consumed))
+				return 0;
+		}
+		else
+		{
+			if (!SV_SignonReadByte (&temp, NULL, &consumed))
+				return 0;
+		}
+		break;
+	}
+
+	default:
+		return -1;
+	}
+
+	return (int)consumed;
+}
+
+static void SV_SignonStreamInit (client_t *client)
+{
+	signon_stream_t *stream = &client->signon_stream;
+
+	memset (stream, 0, sizeof(*stream));
+	stream->active = true;
+	stream->stage = SIGNON_STAGE_PRECACHES;
+	stream->next_seq = 0;
+	stream->acked_seq = 0;
+	stream->buffer_index = 0;
+	stream->buffer_offset = 0;
+	stream->start_time = realtime;
+}
+
+static void SV_SignonStreamFinish (client_t *client)
+{
+	signon_stream_t *stream = &client->signon_stream;
+	double elapsed = realtime - stream->start_time;
+	int stage;
+
+	if (sv_signon_chunk_debug.value || developer.value)
+	{
+		Con_Printf ("Signon chunks complete in %.3fs\n", elapsed);
+		for (stage = 0; stage < SIGNON_STAGE_COUNT; stage++)
+		{
+			if (!stream->stage_records[stage])
+				continue;
+			Con_Printf ("  stage %d: bytes %u records %u max_record %u\n",
+				stage,
+				(unsigned)stream->stage_bytes[stage],
+				(unsigned)stream->stage_records[stage],
+				(unsigned)stream->stage_max_record[stage]);
+		}
+	}
+	stream->active = false;
+}
+
+static void SV_SignonStreamSend (client_t *client)
+{
+	signon_stream_t *stream = &client->signon_stream;
+	int window = (int)sv_signon_chunk_window.value;
+
+	if (!stream->active)
+		SV_SignonStreamInit (client);
+
+	if (window < 1)
+		window = 1;
+	if (window > 4)
+		window = 4;
+
+	while ((unsigned short)(stream->next_seq - stream->acked_seq) < window)
+	{
+		signon_reader_t reader = { stream->buffer_index, stream->buffer_offset };
+		byte payload[SIGNON_CHUNK_MAX_PAYLOAD];
+		int payload_len = 0;
+		int cmd_len;
+		int cmd;
+		signon_stage_t stage;
+		byte flags = 0;
+
+		cmd_len = SV_SignonCommandLength (&reader, &cmd, &stage);
+		if (cmd_len == 0)
+			stream->complete = true;
+		if (cmd_len < 0)
+			Host_Error ("Unsupported signon command %d in stream", cmd);
+		if (cmd_len <= 0)
+			break;
+
+		if (cmd_len > SIGNON_CHUNK_MAX_PAYLOAD)
+			Host_Error ("Signon command %d exceeds chunk payload (%d bytes)", cmd, cmd_len);
+
+		reader = (signon_reader_t){ stream->buffer_index, stream->buffer_offset };
+		stage = SV_SignonStageForCommand (cmd);
+
+		while (cmd_len > 0)
+		{
+			signon_stage_t cmd_stage;
+			signon_reader_t temp = reader;
+
+			cmd_len = SV_SignonCommandLength (&temp, &cmd, &cmd_stage);
+			if (cmd_len < 0)
+				Host_Error ("Unsupported signon command %d in stream", cmd);
+			if (cmd_len <= 0)
+			{
+				stream->complete = true;
+				flags |= SIGNON_CHUNK_FLAG_STAGE_END;
+				break;
+			}
+
+			if (cmd_stage != stage)
+			{
+				flags |= SIGNON_CHUNK_FLAG_STAGE_END;
+				break;
+			}
+
+			if (payload_len + cmd_len > SIGNON_CHUNK_MAX_PAYLOAD)
+				break;
+
+			if (!SV_SignonReaderRead (&reader, payload + payload_len, cmd_len))
+			{
+				Host_Error ("Signon stream read failed");
+				break;
+			}
+
+			payload_len += cmd_len;
+			stream->stage_bytes[stage] += (size_t)cmd_len;
+			stream->stage_records[stage] += 1;
+			if ((size_t)cmd_len > stream->stage_max_record[stage])
+				stream->stage_max_record[stage] = (size_t)cmd_len;
+		}
+
+		if (payload_len == 0)
+			break;
+
+		if (SV_SignonReaderAtEnd (&reader))
+			flags |= SIGNON_CHUNK_FLAG_STAGE_END;
+
+		if (client->message.maxsize - client->message.cursize < SIGNON_CHUNK_HEADER_BYTES + payload_len)
+			break;
+
+		MSG_WriteByte (&client->message, svc_signon_chunk);
+		MSG_WriteByte (&client->message, stage);
+		MSG_WriteShort (&client->message, stream->next_seq);
+		MSG_WriteByte (&client->message, flags);
+		MSG_WriteShort (&client->message, payload_len);
+		SZ_Write (&client->message, payload, payload_len);
+
+		if (sv_signon_chunk_debug.value)
+			Con_Printf ("SIGNONCHUNK: client %s stage %d seq %u len %d flags 0x%x\n",
+				client->name, stage, stream->next_seq, payload_len, flags);
+
+		stream->stage = stage;
+		stream->next_seq++;
+		stream->buffer_index = reader.buffer_index;
+		stream->buffer_offset = reader.buffer_offset;
+
+		if (SV_SignonReaderAtEnd (&reader))
+			stream->complete = true;
+	}
+
+	if (stream->complete && stream->acked_seq == stream->next_seq)
+	{
+		if (client->sendsignon == PRESPAWN_SIGNONBUFS)
+			client->sendsignon = PRESPAWN_SIGNONMSG;
+		if (stream->active)
+			SV_SignonStreamFinish (client);
+	}
+}
 
 /*
 ================
@@ -3696,6 +4315,8 @@ void SV_SpawnServer (const char *server)
 		// set up the protocol flags used by this server
 		// (note - these could be cvar-ised so that server admins could choose the protocol features used by their servers)
 		sv.protocolflags = PRFL_INT32COORD | PRFL_SHORTANGLE | PRFL_SNAPSHOT_HIRES;
+		if (sv_signon_chunks.value)
+			sv.protocolflags |= PRFL_SIGNON_CHUNKS;
 	}
 	else sv.protocolflags = 0;
 
@@ -3820,3 +4441,12 @@ void SV_SpawnServer (const char *server)
 	if (sv.mapchecks.active)
 		SV_PrintMapChecklist ();
 }
+	case svc_setpause:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		break;
+
+	case svc_signonnum:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		break;
