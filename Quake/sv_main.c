@@ -98,6 +98,7 @@ static double sv_icull_debug_next_time = 0.0;
 
 static void SV_InitClientSnapshotData (client_t *client);
 static void SV_ResetClientSnapshot (client_t *client);
+static qboolean SV_IsLocalClient (client_t *client);
 
 void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **statss)
 {
@@ -652,6 +653,8 @@ void SV_ConnectClient (int clientnum)
 	client->message.data = client->msgbuf;
 	client->message.maxsize = sizeof(client->msgbuf);
 	client->message.allowoverflow = true;		// we can catch it
+	if (SV_IsLocalClient (client))
+		client->message.maxsize = NET_MAXMESSAGE - 4;
 
 	if (sv.loadgame)
 		memcpy (client->spawn_parms, spawn_parms, sizeof(spawn_parms));
