@@ -3175,7 +3175,7 @@ SERVER SPAWNING
 ==============================================================================
 */
 
-#define SIGNON_SIZE		31500 // QS has a MAX_DATAGRAM of 32000, try to play nice
+#define SIGNON_SIZE		(MAX_MSGLEN - 1024) // allow larger signon buffers for busy startups while leaving headroom
 
 /*
 ================
