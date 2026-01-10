@@ -24,15 +24,93 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
+#include "arch_def.h"
+#include "net_sys.h"
+#include "net_defs.h"
 #include "bgmusic.h"
 #include "steam.h"
-
-extern const char *svc_strings[];
 
 extern cvar_t cl_netdebug_parse;
 extern cvar_t cl_netdebug_hexdump;
 extern cvar_t cl_netdebug_dropbad;
 extern cvar_t cl_netdebug_maxdump;
+
+const char *svc_strings[] =
+{
+	"svc_bad",
+	"svc_nop",
+	"svc_disconnect",
+	"svc_updatestat",
+	"svc_version",		// [long] server version
+	"svc_setview",		// [short] entity number
+	"svc_sound",			// <see code>
+	"svc_time",			// [float] server time
+	"svc_print",			// [string] null terminated string
+	"svc_stufftext",		// [string] stuffed into client's console buffer
+						// the string should be \n terminated
+	"svc_setangle",		// [vec3] set the view angle to this absolute value
+
+	"svc_serverinfo",		// [long] version
+						// [string] signon string
+						// [string]..[0]model cache [string]...[0]sounds cache
+						// [string]..[0]item cache
+	"svc_lightstyle",		// [byte] [string]
+	"svc_updatename",		// [byte] [string]
+	"svc_updatefrags",	// [byte] [short]
+	"svc_clientdata",		// <shortbits + data>
+	"svc_stopsound",		// <see code>
+	"svc_updatecolors",	// [byte] [byte]
+	"svc_particle",		// [vec3] <variable>
+	"svc_damage",			// [byte] impact [byte] blood [vec3] from
+
+	"svc_spawnstatic",
+	"OBSOLETE svc_spawnbinary",
+	"svc_spawnbaseline",
+
+	"svc_temp_entity",		// <variable>
+	"svc_setpause",
+	"svc_signonnum",
+	"svc_centerprint",
+	"svc_killedmonster",
+	"svc_foundsecret",
+	"svc_spawnstaticsound",
+	"svc_intermission",
+	"svc_finale",			// [string] music [string] text
+	"svc_cdtrack",			// [byte] track [byte] looptrack
+	"svc_sellscreen",
+	"svc_cutscene",
+//johnfitz -- new server messages
+	"",	// 35
+	"",	// 36
+	"svc_skybox", // 37					// [string] skyname
+	"svc_botchat", // 38 (2021 RE-RELEASE)
+	"", // 39
+	"svc_bf", // 40						// no data
+	"svc_fog", // 41					// [byte] density [byte] red [byte] green [byte] blue [float] time
+	"svc_spawnbaseline2", //42			// support for large modelindex, large framenum, alpha, using flags
+	"svc_spawnstatic2", // 43			// support for large modelindex, large framenum, alpha, using flags
+	"svc_spawnstaticsound2", //	44		// [coord3] [short] samp [byte] vol [byte] aten
+//johnfitz
+
+// 2021 RE-RELEASE:
+	"svc_setviews", // 45
+	"svc_updateping", // 46
+	"svc_updatesocial", // 47
+	"svc_updateplinfo", // 48
+	"svc_rawprint", // 49
+	"svc_servervars", // 50
+	"svc_seq", // 51
+	"svc_achievement", // 52
+	"svc_chat", // 53
+	"svc_levelcompleted", // 54
+	"svc_backtolobby", // 55
+	"svc_localsound", // 56
+	"svc_snapshot_full", // 57
+	"svc_snapshot_delta", // 58
+	"svc_packedentities", // 59
+	"svc_snapshot2" // 60
+};
+#define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
 static const char *CL_SvcName (int cmd)
 {
@@ -138,83 +216,6 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 
 	Host_Error ("Illegible server message %d (previous was %s)", cmd, CL_SvcName (lastcmd));
 }
-
-const char *svc_strings[] =
-{
-	"svc_bad",
-	"svc_nop",
-	"svc_disconnect",
-	"svc_updatestat",
-	"svc_version",		// [long] server version
-	"svc_setview",		// [short] entity number
-	"svc_sound",			// <see code>
-	"svc_time",			// [float] server time
-	"svc_print",			// [string] null terminated string
-	"svc_stufftext",		// [string] stuffed into client's console buffer
-						// the string should be \n terminated
-	"svc_setangle",		// [vec3] set the view angle to this absolute value
-
-	"svc_serverinfo",		// [long] version
-						// [string] signon string
-						// [string]..[0]model cache [string]...[0]sounds cache
-						// [string]..[0]item cache
-	"svc_lightstyle",		// [byte] [string]
-	"svc_updatename",		// [byte] [string]
-	"svc_updatefrags",	// [byte] [short]
-	"svc_clientdata",		// <shortbits + data>
-	"svc_stopsound",		// <see code>
-	"svc_updatecolors",	// [byte] [byte]
-	"svc_particle",		// [vec3] <variable>
-	"svc_damage",			// [byte] impact [byte] blood [vec3] from
-
-	"svc_spawnstatic",
-	"OBSOLETE svc_spawnbinary",
-	"svc_spawnbaseline",
-
-	"svc_temp_entity",		// <variable>
-	"svc_setpause",
-	"svc_signonnum",
-	"svc_centerprint",
-	"svc_killedmonster",
-	"svc_foundsecret",
-	"svc_spawnstaticsound",
-	"svc_intermission",
-	"svc_finale",			// [string] music [string] text
-	"svc_cdtrack",			// [byte] track [byte] looptrack
-	"svc_sellscreen",
-	"svc_cutscene",
-//johnfitz -- new server messages
-	"",	// 35
-	"",	// 36
-	"svc_skybox", // 37					// [string] skyname
-	"svc_botchat", // 38 (2021 RE-RELEASE)
-	"", // 39
-	"svc_bf", // 40						// no data
-	"svc_fog", // 41					// [byte] density [byte] red [byte] green [byte] blue [float] time
-	"svc_spawnbaseline2", //42			// support for large modelindex, large framenum, alpha, using flags
-	"svc_spawnstatic2", // 43			// support for large modelindex, large framenum, alpha, using flags
-	"svc_spawnstaticsound2", //	44		// [coord3] [short] samp [byte] vol [byte] aten
-//johnfitz
-
-// 2021 RE-RELEASE:
-	"svc_setviews", // 45
-	"svc_updateping", // 46
-	"svc_updatesocial", // 47
-	"svc_updateplinfo", // 48
-	"svc_rawprint", // 49
-	"svc_servervars", // 50
-	"svc_seq", // 51
-	"svc_achievement", // 52
-	"svc_chat", // 53
-	"svc_levelcompleted", // 54
-	"svc_backtolobby", // 55
-	"svc_localsound", // 56
-	"svc_snapshot_full", // 57
-	"svc_snapshot_delta", // 58
-	"svc_packedentities", // 59
-	"svc_snapshot2" // 60
-};
-#define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
 qboolean warn_about_nehahra_protocol; //johnfitz
 
