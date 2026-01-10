@@ -35,6 +35,7 @@ extern cvar_t cl_netdebug_hexdump;
 extern cvar_t cl_netdebug_dropbad;
 extern cvar_t cl_netdebug_maxdump;
 extern cvar_t cl_signon_chunk_debug;
+extern cvar_t cl_signon_debug;
 
 const char *svc_strings[] =
 {
@@ -221,28 +222,128 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 
 qboolean warn_about_nehahra_protocol; //johnfitz
 
-static void CL_ParseSignonChunkPayload (const byte *payload, int payload_len)
+static void CL_ParseSignonRecord (const byte *payload, int payload_len)
 {
 	sizebuf_t saved_message = net_message;
 	int saved_readcount = msg_readcount;
 	qboolean saved_badread = msg_badread;
 	int saved_readbitpos = msg_readbitpos;
-	sizebuf_t chunk_message;
+	sizebuf_t record_message;
 
-	chunk_message.data = (byte *)payload;
-	chunk_message.cursize = payload_len;
-	chunk_message.maxsize = payload_len;
-	chunk_message.allowoverflow = false;
-	chunk_message.overflowed = false;
-	chunk_message.bitpos = 0;
+	record_message.data = (byte *)payload;
+	record_message.cursize = payload_len;
+	record_message.maxsize = payload_len;
+	record_message.allowoverflow = false;
+	record_message.overflowed = false;
+	record_message.bitpos = 0;
 
-	net_message = chunk_message;
+	net_message = record_message;
 	CL_ParseServerMessage ();
 
 	net_message = saved_message;
 	msg_readcount = saved_readcount;
 	msg_badread = saved_badread;
 	msg_readbitpos = saved_readbitpos;
+}
+
+static void CL_ResetSignonFragment (void)
+{
+	if (cl.signon_frag_buf)
+	{
+		Z_Free (cl.signon_frag_buf);
+		cl.signon_frag_buf = NULL;
+	}
+	cl.signon_frag_id = 0;
+	cl.signon_frag_total = 0;
+	cl.signon_frag_offset = 0;
+}
+
+static void CL_ParseSignonChunkPayload (const byte *payload, int payload_len, byte stage, unsigned short seq)
+{
+	int offset = 0;
+	int records = 0;
+
+	while (offset < payload_len)
+	{
+		int rec_type;
+		unsigned short rec_id;
+
+		if (offset + 1 > payload_len)
+			Host_Error ("Signon chunk record truncated");
+
+		rec_type = payload[offset++];
+		if (rec_type == SIGNON_REC_RAW)
+		{
+			unsigned short len;
+			if (offset + 4 > payload_len)
+				Host_Error ("Signon record header truncated");
+			rec_id = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			len = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			if (offset + len > payload_len)
+				Host_Error ("Signon record length exceeds chunk payload");
+			if (cl.signon_frag_buf)
+				Host_Error ("Signon record %u arrived while fragment %u incomplete", rec_id, cl.signon_frag_id);
+			CL_ParseSignonRecord (payload + offset, len);
+			offset += len;
+			records++;
+			continue;
+		}
+
+		if (rec_type == SIGNON_REC_RAW_FRAG)
+		{
+			unsigned short total_len;
+			unsigned short frag_offset;
+			unsigned short frag_len;
+			if (offset + 8 > payload_len)
+				Host_Error ("Signon fragment header truncated");
+			rec_id = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			total_len = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			frag_offset = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			frag_len = (unsigned short)LittleShort(*(short *)(payload + offset));
+			offset += 2;
+			if (offset + frag_len > payload_len)
+				Host_Error ("Signon fragment length exceeds chunk payload");
+			if (total_len == 0)
+				Host_Error ("Signon fragment total length is zero for record %u", rec_id);
+			if (!cl.signon_frag_buf || cl.signon_frag_id != rec_id)
+			{
+				CL_ResetSignonFragment ();
+				cl.signon_frag_buf = (byte *)Z_Malloc (total_len);
+				cl.signon_frag_id = rec_id;
+				cl.signon_frag_total = total_len;
+				cl.signon_frag_offset = 0;
+			}
+			if (total_len != cl.signon_frag_total)
+				Host_Error ("Signon fragment total length mismatch for record %u", rec_id);
+			if (frag_offset != cl.signon_frag_offset)
+				Host_Error ("Signon fragment offset mismatch for record %u (expected %u got %u)",
+					rec_id, cl.signon_frag_offset, frag_offset);
+			if (frag_offset + frag_len > total_len)
+				Host_Error ("Signon fragment exceeds record length for record %u", rec_id);
+
+			memcpy (cl.signon_frag_buf + frag_offset, payload + offset, frag_len);
+			offset += frag_len;
+			cl.signon_frag_offset = frag_offset + frag_len;
+			if (cl.signon_frag_offset == cl.signon_frag_total)
+			{
+				CL_ParseSignonRecord (cl.signon_frag_buf, cl.signon_frag_total);
+				CL_ResetSignonFragment ();
+				records++;
+			}
+			continue;
+		}
+
+		Host_Error ("Signon chunk record type %d unknown", rec_type);
+	}
+
+	if (cl_signon_debug.value)
+		Con_Printf ("SIGNON: stage %u seq %u records %d payload %d\n",
+			stage, seq, records, payload_len);
 }
 
 extern vec3_t	v_punchangles[2]; //johnfitz
@@ -477,6 +578,7 @@ void CL_ParseServerInfo (void)
 	}
 	cl.signon_chunk_stage = SIGNON_STAGE_PRECACHES;
 	cl.signon_chunk_next_seq = 0;
+	CL_ResetSignonFragment ();
 
 // parse maxclients
 	cl.maxclients = MSG_ReadByte ();
@@ -2360,17 +2462,21 @@ void CL_ParseServerMessage (void)
 				if (cl_signon_chunk_debug.value)
 					Con_Printf ("SIGNONCHUNK: expected seq %u, got %u (stage %u)\n",
 						cl.signon_chunk_next_seq, seq, stage);
+				MSG_BEGINCLC (&cls.message, clc_signon_ack);
+				MSG_DBGAUX (&cls.message, stage);
 				MSG_WriteByte (&cls.message, clc_signon_ack);
 				MSG_WriteByte (&cls.message, cl.signon_chunk_stage);
 				MSG_WriteShort (&cls.message, cl.signon_chunk_next_seq);
 				break;
 			}
 
-			CL_ParseSignonChunkPayload (payload, payload_len);
+			CL_ParseSignonChunkPayload (payload, payload_len, stage, seq);
 			cl.signon_chunk_next_seq++;
 			if (flags & SIGNON_CHUNK_FLAG_STAGE_END)
 				cl.signon_chunk_stage = stage + 1;
 
+			MSG_BEGINCLC (&cls.message, clc_signon_ack);
+			MSG_DBGAUX (&cls.message, stage);
 			MSG_WriteByte (&cls.message, clc_signon_ack);
 			MSG_WriteByte (&cls.message, stage);
 			MSG_WriteShort (&cls.message, cl.signon_chunk_next_seq);

@@ -624,13 +624,21 @@ static void PF_ambientsound (void)
 
 	SV_ReserveSignonSpace (17);
 
-// add an svc_spawnambient command to the level signon packet
+	// add an svc_spawnambient command to the level signon packet
 
 	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (large)
+	{
+		MSG_BEGINSVC (sv.signon, svc_spawnstaticsound2);
+		MSG_DBGAUX (sv.signon, soundnum);
 		MSG_WriteByte (sv.signon,svc_spawnstaticsound2);
+	}
 	else
+	{
+		MSG_BEGINSVC (sv.signon, svc_spawnstaticsound);
+		MSG_DBGAUX (sv.signon, soundnum);
 		MSG_WriteByte (sv.signon,svc_spawnstaticsound);
+	}
 	//johnfitz
 
 	for (i = 0; i < 3; i++)
@@ -1641,11 +1649,17 @@ static void PF_makestatic (void)
 
 	if (bits)
 	{
+		MSG_BEGINSVC (sv.signon, svc_spawnstatic2);
+		MSG_DBGAUX (sv.signon, NUM_FOR_EDICT(ent));
 		MSG_WriteByte (sv.signon, svc_spawnstatic2);
 		MSG_WriteByte (sv.signon, bits);
 	}
 	else
+	{
+		MSG_BEGINSVC (sv.signon, svc_spawnstatic);
+		MSG_DBGAUX (sv.signon, NUM_FOR_EDICT(ent));
 		MSG_WriteByte (sv.signon, svc_spawnstatic);
+	}
 
 	if (bits & B_LARGEMODEL)
 		MSG_WriteShort (sv.signon, SV_ModelIndex(PR_GetString(ent->v.model)));

@@ -49,6 +49,7 @@ static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE};
+static cvar_t sv_signon_debug = {"sv_signon_debug", "0", CVAR_NONE};
 static cvar_t net_test_drop = {"net_test_drop", "0", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
 static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
@@ -302,6 +303,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_signon_chunks);
 	Cvar_RegisterVariable (&sv_signon_chunk_debug);
 	Cvar_RegisterVariable (&sv_signon_chunk_window);
+	Cvar_RegisterVariable (&sv_signon_debug);
 	Cvar_RegisterVariable (&net_test_drop);
 	Cvar_RegisterVariable (&net_snap_tinyvel);
 	Cvar_RegisterVariable (&net_snap_forcefull_frames);
@@ -549,10 +551,12 @@ void SV_SendServerinfo (client_t *client)
 	client->message.allowoverflow = true;
 	client->message.overflowed = false;
 
+	MSG_BEGINSVC (&client->message, svc_print);
 	MSG_WriteByte (&client->message, svc_print);
 	sprintf (message, "%c\nFITZQUAKE %1.2f SERVER (%i CRC)\n", 2, FITZQUAKE_VERSION, qcvm->crc); //johnfitz -- include fitzquake version
 	MSG_WriteString (&client->message,message);
 
+	MSG_BEGINSVC (&client->message, svc_serverinfo);
 	MSG_WriteByte (&client->message, svc_serverinfo);
 	MSG_WriteLong (&client->message, sv.protocol); //johnfitz -- sv.protocol instead of PROTOCOL_VERSION
 	
@@ -574,24 +578,33 @@ void SV_SendServerinfo (client_t *client)
 	//johnfitz -- only send the first 256 model and sound precaches if protocol is 15
 	for (i = 1, s = sv.model_precache+1; *s; s++,i++)
 		if (sv.protocol != PROTOCOL_NETQUAKE || i < 256)
+		{
+			MSG_DBGAUX (&client->message, i);
 			MSG_WriteString (&client->message, *s);
+		}
 	MSG_WriteByte (&client->message, 0);
 
 	for (i = 1, s = sv.sound_precache+1; *s; s++, i++)
 		if (sv.protocol != PROTOCOL_NETQUAKE || i < 256)
+		{
+			MSG_DBGAUX (&client->message, i);
 			MSG_WriteString (&client->message, *s);
+		}
 	MSG_WriteByte (&client->message, 0);
 	//johnfitz
 
 // send music
+	MSG_BEGINSVC (&client->message, svc_cdtrack);
 	MSG_WriteByte (&client->message, svc_cdtrack);
 	MSG_WriteByte (&client->message, qcvm->edicts->v.sounds);
 	MSG_WriteByte (&client->message, qcvm->edicts->v.sounds);
 
 // set view
+	MSG_BEGINSVC (&client->message, svc_setview);
 	MSG_WriteByte (&client->message, svc_setview);
 	MSG_WriteShort (&client->message, NUM_FOR_EDICT(client->edict));
 
+	MSG_BEGINSVC (&client->message, svc_signonnum);
 	MSG_WriteByte (&client->message, svc_signonnum);
 	MSG_WriteByte (&client->message, 1);
 
@@ -662,6 +675,7 @@ void SV_ConnectClient (int clientnum)
 	client->message.data = client->msgbuf;
 	client->message.maxsize = sizeof(client->msgbuf);
 	client->message.allowoverflow = true;		// we can catch it
+	client->message.dbg_name = "client_message";
 	if (SV_IsLocalClient (client))
 		client->message.maxsize = NET_MAXMESSAGE - 4;
 
@@ -3140,6 +3154,8 @@ void SV_SendClientMessages (void)
 			{
 				if (host_client->message.cursize + 2 < host_client->message.maxsize)
 				{
+					MSG_BEGINSVC (&host_client->message, svc_signonnum);
+					MSG_DBGAUX (&host_client->message, 2);
 					MSG_WriteByte (&host_client->message, svc_signonnum);
 					MSG_WriteByte (&host_client->message, 2);
 					host_client->sendsignon = PRESPAWN_FLUSH;
@@ -3195,8 +3211,9 @@ SERVER SPAWNING
 */
 
 #define SIGNON_SIZE		(MAX_MSGLEN - 1024) // allow larger signon buffers for busy startups while leaving headroom
-#define SIGNON_CHUNK_MAX_PAYLOAD	1024
+#define SIGNON_CHUNK_MAX_PAYLOAD	1100
 #define SIGNON_CHUNK_HEADER_BYTES	7
+#define SIGNON_RECORD_MAX_SIZE		65535
 
 typedef struct
 {
@@ -3672,8 +3689,14 @@ static void SV_SignonStreamInit (client_t *client)
 	stream->stage = SIGNON_STAGE_PRECACHES;
 	stream->next_seq = 0;
 	stream->acked_seq = 0;
+	stream->next_record_id = 0;
 	stream->buffer_index = 0;
 	stream->buffer_offset = 0;
+	stream->record_len = 0;
+	stream->record_offset = 0;
+	stream->record_cmd = 0;
+	stream->record_stage = SIGNON_STAGE_PRECACHES;
+	stream->record_active = false;
 	stream->start_time = realtime;
 }
 
@@ -3683,7 +3706,7 @@ static void SV_SignonStreamFinish (client_t *client)
 	double elapsed = realtime - stream->start_time;
 	int stage;
 
-	if (sv_signon_chunk_debug.value || developer.value)
+	if (sv_signon_debug.value || sv_signon_chunk_debug.value || developer.value)
 	{
 		Con_Printf ("Signon chunks complete in %.3fs\n", elapsed);
 		for (stage = 0; stage < SIGNON_STAGE_COUNT; stage++)
@@ -3698,6 +3721,77 @@ static void SV_SignonStreamFinish (client_t *client)
 		}
 	}
 	stream->active = false;
+}
+
+static client_t *SV_SignonFirewallClientForMessage (sizebuf_t *msg)
+{
+	int i;
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		if (&svs.clients[i].message == msg)
+			return &svs.clients[i];
+	}
+
+	return NULL;
+}
+
+void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line)
+{
+	if (!sv.active || !sv_signon_chunks.value)
+		return;
+	if (svc_id == svc_signon_chunk)
+		return;
+	if (msg != sv.signon)
+	{
+		client_t *client = SV_SignonFirewallClientForMessage (msg);
+		if (!client || !client->signon_stream.active)
+			return;
+	}
+	else
+	{
+		int i;
+		qboolean active = false;
+		for (i = 0; i < svs.maxclients; i++)
+		{
+			if (svs.clients[i].signon_stream.active)
+			{
+				active = true;
+				break;
+			}
+		}
+		if (!active)
+			return;
+	}
+	switch (svc_id)
+	{
+	case svc_serverinfo:
+	case svc_signonnum:
+	case svc_spawnbaseline:
+	case svc_spawnbaseline2:
+	case svc_spawnstatic:
+	case svc_spawnstatic2:
+	case svc_spawnstaticsound:
+	case svc_spawnstaticsound2:
+	case svc_lightstyle:
+		Host_Error ("Signon firewall: direct write of svc %d at %s:%d", svc_id, file, line);
+		break;
+	default:
+		break;
+	}
+}
+
+static void SV_SignonPayloadWriteByte (byte *payload, int *offset, int value)
+{
+	payload[*offset] = (byte)value;
+	*offset += 1;
+}
+
+static void SV_SignonPayloadWriteShort (byte *payload, int *offset, int value)
+{
+	unsigned short out = (unsigned short)LittleShort(value);
+	memcpy (payload + *offset, &out, sizeof(out));
+	*offset += (int)sizeof(out);
 }
 
 static void SV_SignonStreamSend (client_t *client)
@@ -3718,88 +3812,127 @@ static void SV_SignonStreamSend (client_t *client)
 		signon_reader_t reader = { stream->buffer_index, stream->buffer_offset };
 		byte payload[SIGNON_CHUNK_MAX_PAYLOAD];
 		int payload_len = 0;
-		int cmd_len;
-		int cmd;
-		signon_stage_t stage;
+		int cmd_len = 0;
+		int cmd = 0;
+		signon_stage_t stage = SIGNON_STAGE_PRECACHES;
+		signon_stage_t chunk_stage = SIGNON_STAGE_PRECACHES;
+		qboolean have_stage = false;
 		byte flags = 0;
+		int records_in_chunk = 0;
 
-		cmd_len = SV_SignonCommandLength (&reader, &cmd, &stage);
-		if (cmd_len == 0)
-			stream->complete = true;
-		if (cmd_len < 0)
-			Host_Error ("Unsupported signon command %d in stream", cmd);
-		if (cmd_len <= 0)
-			break;
-
-		if (cmd_len > SIGNON_CHUNK_MAX_PAYLOAD)
-			Host_Error ("Signon command %d exceeds chunk payload (%d bytes)", cmd, cmd_len);
-
-		reader = (signon_reader_t){ stream->buffer_index, stream->buffer_offset };
-		stage = SV_SignonStageForCommand (cmd);
-
-		while (cmd_len > 0)
+		while (payload_len < SIGNON_CHUNK_MAX_PAYLOAD)
 		{
-			signon_stage_t cmd_stage;
-			signon_reader_t temp = reader;
+			int remaining = SIGNON_CHUNK_MAX_PAYLOAD - payload_len;
+			int header_len;
+			int take;
 
-			cmd_len = SV_SignonCommandLength (&temp, &cmd, &cmd_stage);
-			if (cmd_len < 0)
-				Host_Error ("Unsupported signon command %d in stream", cmd);
-			if (cmd_len <= 0)
+			if (!stream->record_active)
 			{
-				stream->complete = true;
+				signon_reader_t temp = reader;
+				cmd_len = SV_SignonCommandLength (&temp, &cmd, &stage);
+				if (cmd_len == 0)
+				{
+					stream->complete = true;
+					flags |= SIGNON_CHUNK_FLAG_STAGE_END;
+					break;
+				}
+				if (cmd_len < 0)
+					Host_Error ("Unsupported signon command %d in stream", cmd);
+				if (cmd_len > SIGNON_RECORD_MAX_SIZE)
+					Host_Error ("Signon record too large: type %d len %d (map/mod issue)", cmd, cmd_len);
+
+				stream->record_len = cmd_len;
+				stream->record_offset = 0;
+				stream->record_cmd = cmd;
+				stream->record_stage = (byte)stage;
+				stream->record_active = true;
+			}
+
+			stage = (signon_stage_t)stream->record_stage;
+			if (!have_stage)
+			{
+				chunk_stage = stage;
+				have_stage = true;
+			}
+			else if (stage != chunk_stage)
+			{
 				flags |= SIGNON_CHUNK_FLAG_STAGE_END;
 				break;
 			}
 
-			if (cmd_stage != stage)
+			if (stream->record_offset == 0 && stream->record_len <= (remaining - 5))
 			{
-				flags |= SIGNON_CHUNK_FLAG_STAGE_END;
-				break;
+				header_len = 1 + 2 + 2;
+				if (remaining < header_len + stream->record_len)
+					break;
+				SV_SignonPayloadWriteByte (payload, &payload_len, SIGNON_REC_RAW);
+				SV_SignonPayloadWriteShort (payload, &payload_len, stream->next_record_id);
+				SV_SignonPayloadWriteShort (payload, &payload_len, stream->record_len);
+				if (!SV_SignonReaderRead (&reader, payload + payload_len, stream->record_len))
+					Host_Error ("Signon stream read failed");
+				payload_len += stream->record_len;
+				stream->record_offset = stream->record_len;
+			}
+			else
+			{
+				header_len = 1 + 2 + 2 + 2 + 2;
+				if (remaining <= header_len)
+					break;
+				take = q_min(remaining - header_len, stream->record_len - stream->record_offset);
+				SV_SignonPayloadWriteByte (payload, &payload_len, SIGNON_REC_RAW_FRAG);
+				SV_SignonPayloadWriteShort (payload, &payload_len, stream->next_record_id);
+				SV_SignonPayloadWriteShort (payload, &payload_len, stream->record_len);
+				SV_SignonPayloadWriteShort (payload, &payload_len, stream->record_offset);
+				SV_SignonPayloadWriteShort (payload, &payload_len, take);
+				if (!SV_SignonReaderRead (&reader, payload + payload_len, take))
+					Host_Error ("Signon stream read failed");
+				payload_len += take;
+				stream->record_offset += take;
 			}
 
-			if (payload_len + cmd_len > SIGNON_CHUNK_MAX_PAYLOAD)
-				break;
-
-			if (!SV_SignonReaderRead (&reader, payload + payload_len, cmd_len))
+			if (stream->record_offset == stream->record_len)
 			{
-				Host_Error ("Signon stream read failed");
-				break;
+				stream->record_active = false;
+				stream->record_offset = 0;
+				stream->stage_bytes[stage] += (size_t)stream->record_len;
+				stream->stage_records[stage] += 1;
+				if ((size_t)stream->record_len > stream->stage_max_record[stage])
+					stream->stage_max_record[stage] = (size_t)stream->record_len;
+				stream->next_record_id++;
 			}
 
-			payload_len += cmd_len;
-			stream->stage_bytes[stage] += (size_t)cmd_len;
-			stream->stage_records[stage] += 1;
-			if ((size_t)cmd_len > stream->stage_max_record[stage])
-				stream->stage_max_record[stage] = (size_t)cmd_len;
+			records_in_chunk++;
 		}
 
 		if (payload_len == 0)
 			break;
 
-		if (SV_SignonReaderAtEnd (&reader))
+		if (SV_SignonReaderAtEnd (&reader) && !stream->record_active)
 			flags |= SIGNON_CHUNK_FLAG_STAGE_END;
 
 		if (client->message.maxsize - client->message.cursize < SIGNON_CHUNK_HEADER_BYTES + payload_len)
 			break;
 
+		MSG_BEGINSVC (&client->message, svc_signon_chunk);
+		MSG_DBGAUX (&client->message, have_stage ? chunk_stage : 0);
 		MSG_WriteByte (&client->message, svc_signon_chunk);
-		MSG_WriteByte (&client->message, stage);
+		MSG_WriteByte (&client->message, have_stage ? chunk_stage : stream->stage);
 		MSG_WriteShort (&client->message, stream->next_seq);
 		MSG_WriteByte (&client->message, flags);
 		MSG_WriteShort (&client->message, payload_len);
 		SZ_Write (&client->message, payload, payload_len);
 
 		if (sv_signon_chunk_debug.value)
-			Con_Printf ("SIGNONCHUNK: client %s stage %d seq %u len %d flags 0x%x\n",
-				client->name, stage, stream->next_seq, payload_len, flags);
+			Con_Printf ("SIGNONCHUNK: client %s stage %d seq %u len %d flags 0x%x records %d\n",
+				client->name, have_stage ? chunk_stage : stream->stage, stream->next_seq, payload_len, flags, records_in_chunk);
 
-		stream->stage = stage;
+		if (have_stage)
+			stream->stage = chunk_stage;
 		stream->next_seq++;
 		stream->buffer_index = reader.buffer_index;
 		stream->buffer_offset = reader.buffer_offset;
 
-		if (SV_SignonReaderAtEnd (&reader))
+		if (SV_SignonReaderAtEnd (&reader) && !stream->record_active)
 			stream->complete = true;
 	}
 
@@ -3824,8 +3957,10 @@ static void SV_AddSignonBuffer (void)
 		Host_Error ("SV_AddSignonBuffer overflow\n");
 
 	sb = (sizebuf_t *) Hunk_AllocName (sizeof (sizebuf_t) + SIGNON_SIZE, "signon");
+	memset (sb, 0, sizeof(*sb));
 	sb->data = (byte *)(sb + 1);
 	sb->maxsize = SIGNON_SIZE;
+	sb->dbg_name = "signon";
 	sv.signon_buffers[sv.num_signon_buffers++] = sb;
 	sv.signon = sb;
 }
@@ -3975,9 +4110,17 @@ void SV_CreateBaseline (void)
 
 		//johnfitz -- PROTOCOL_FITZQUAKE
 		if (bits)
+		{
+			MSG_BEGINSVC (sv.signon, svc_spawnbaseline2);
+			MSG_DBGAUX (sv.signon, entnum);
 			MSG_WriteByte (sv.signon, svc_spawnbaseline2);
+		}
 		else
+		{
+			MSG_BEGINSVC (sv.signon, svc_spawnbaseline);
+			MSG_DBGAUX (sv.signon, entnum);
 			MSG_WriteByte (sv.signon, svc_spawnbaseline);
+		}
 		//johnfitz
 
 		MSG_WriteShort (sv.signon,entnum);
@@ -4032,6 +4175,7 @@ void SV_SendReconnect (void)
 	msg.cursize = 0;
 	msg.maxsize = sizeof(data);
 
+	MSG_BEGINSVC (&msg, svc_stufftext);
 	MSG_WriteChar (&msg, svc_stufftext);
 	MSG_WriteString (&msg, "reconnect\n");
 	NET_SendToAll (&msg, 5.0);
@@ -4348,10 +4492,12 @@ void SV_SpawnServer (const char *server)
 	sv.datagram.maxsize = sizeof(sv.datagram_buf);
 	sv.datagram.cursize = 0;
 	sv.datagram.data = sv.datagram_buf;
+	sv.datagram.dbg_name = "sv_datagram";
 
 	sv.reliable_datagram.maxsize = sizeof(sv.reliable_datagram_buf);
 	sv.reliable_datagram.cursize = 0;
 	sv.reliable_datagram.data = sv.reliable_datagram_buf;
+	sv.reliable_datagram.dbg_name = "sv_reliable_datagram";
 
 	SV_AddSignonBuffer ();
 

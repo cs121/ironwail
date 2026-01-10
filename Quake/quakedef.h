@@ -314,6 +314,7 @@ extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 extern	cvar_t		map_checks;
 extern	cvar_t		max_edicts; //johnfitz
+extern	cvar_t		sz_debug_hexdump;
 
 extern	qboolean	host_initialized;	// true if into command execution
 extern	double		host_frametime;

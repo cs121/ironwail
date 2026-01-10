@@ -146,8 +146,14 @@ typedef struct signon_stream_s
 	byte		stage;
 	unsigned short	next_seq;
 	unsigned short	acked_seq;
+	unsigned short	next_record_id;
 	int			buffer_index;
 	int			buffer_offset;
+	int			record_len;
+	int			record_offset;
+	int			record_cmd;
+	byte		record_stage;
+	qboolean	record_active;
 	double		start_time;
 	size_t		stage_bytes[SIGNON_STAGE_COUNT];
 	size_t		stage_records[SIGNON_STAGE_COUNT];

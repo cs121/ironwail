@@ -1136,6 +1136,38 @@ float MSG_ReadAngle16 (unsigned int flags)
 
 //===========================================================================
 
+cvar_t sz_debug_hexdump = {"sz_debug_hexdump", "0", CVAR_NONE};
+
+static void SZ_DumpBufferTail (const sizebuf_t *buf)
+{
+	int start;
+	int count;
+	int i;
+
+	if (!buf->data || buf->cursize <= 0)
+		return;
+
+	count = q_min(buf->cursize, 32);
+	start = buf->cursize - count;
+	Con_Printf ("  tail[%d..%d]:", start, buf->cursize - 1);
+	for (i = start; i < buf->cursize; i++)
+		Con_Printf (" %02x", buf->data[i]);
+	Con_Printf ("\n");
+}
+
+static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length)
+{
+	const char *name = buf->dbg_name ? buf->dbg_name : "unnamed";
+	const char *file = buf->dbg_file ? buf->dbg_file : "unknown";
+
+	Con_Printf ("SZ_GetSpace overflow on '%s': max=%d cursize=%d request=%d\n",
+		name, buf->maxsize, buf->cursize, length);
+	Con_Printf ("  last write at %s:%d msgkind=%d id=%d aux=%d\n",
+		file, buf->dbg_line, buf->dbg_msgkind, buf->dbg_id, buf->dbg_aux);
+	if (sz_debug_hexdump.value)
+		SZ_DumpBufferTail (buf);
+}
+
 void SZ_Alloc (sizebuf_t *buf, int startsize)
 {
 	if (startsize < 256)
@@ -1144,6 +1176,12 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	buf->maxsize = startsize;
 	buf->cursize = 0;
 	buf->bitpos = 0;
+	buf->dbg_name = NULL;
+	buf->dbg_file = NULL;
+	buf->dbg_line = 0;
+	buf->dbg_msgkind = 0;
+	buf->dbg_id = 0;
+	buf->dbg_aux = 0;
 }
 
 
@@ -1168,13 +1206,16 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 	if (buf->cursize + length > buf->maxsize)
 	{
 		if (!buf->allowoverflow)
+		{
+			SZ_PrintOverflowDiagnostics (buf, length);
 			Host_Error ("SZ_GetSpace: overflow without allowoverflow set"); // ericw -- made Host_Error to be less annoying
+		}
 
 		if (length > buf->maxsize)
 			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
 
 		buf->overflowed = true;
-		Con_Printf ("SZ_GetSpace: overflow\n");
+		SZ_PrintOverflowDiagnostics (buf, length);
 		SZ_Clear (buf);
 	}
 

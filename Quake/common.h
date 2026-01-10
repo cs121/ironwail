@@ -116,11 +116,38 @@ typedef struct sizebuf_s
 {
 	qboolean	allowoverflow;	// if false, do a Sys_Error
 	qboolean	overflowed;		// set to true if the buffer size failed
+	const char	*dbg_name;
+	const char	*dbg_file;
+	int		dbg_line;
+	int		dbg_msgkind; // 0 unknown, 1 server svc, 2 client clc, 3 misc
+	int		dbg_id;
+	int		dbg_aux;
 	byte		*data;
 	int		maxsize;
 	int		cursize;
 	int		bitpos;
 } sizebuf_t;
+
+#define MSG_BEGINSVC(msg, svc_id) do { \
+	SV_SignonFirewallCheck((msg), (svc_id), __FILE__, __LINE__); \
+	(msg)->dbg_msgkind = 1; \
+	(msg)->dbg_id = (svc_id); \
+	(msg)->dbg_file = __FILE__; \
+	(msg)->dbg_line = __LINE__; \
+} while (0)
+
+#define MSG_BEGINCLC(msg, clc_id) do { \
+	(msg)->dbg_msgkind = 2; \
+	(msg)->dbg_id = (clc_id); \
+	(msg)->dbg_file = __FILE__; \
+	(msg)->dbg_line = __LINE__; \
+} while (0)
+
+#define MSG_DBGAUX(msg, aux) do { \
+	(msg)->dbg_aux = (aux); \
+} while (0)
+
+void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line);
 
 void SZ_Alloc (sizebuf_t *buf, int startsize);
 void SZ_Free (sizebuf_t *buf);
