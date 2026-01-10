@@ -801,6 +801,7 @@ void NET_Init (void)
 
 	// allocate space for network message buffer
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
+	net_message.dbg_name = "net_message";
 	Q_memset(&net_last_incoming, 0, sizeof(net_last_incoming));
 
 	Cvar_RegisterVariable (&net_messagetimeout);

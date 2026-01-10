@@ -258,13 +258,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     seq:   monotonically increasing sequence number
 //     flags: SIGNON_CHUNK_FLAG_* (stage end, etc.)
 //     payload_len: size of payload bytes that follow
-//     payload: one or more complete svc_* commands
+//     payload: one or more signon records (SIGNON_REC_*)
 
 #define SNAPSHOT_FLAG_FULL		(1u << 0)
 #define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 1)
 
 // signon chunk protocol extension
 #define SIGNON_CHUNK_FLAG_STAGE_END	(1u << 0)
+
+// signon record payload types
+#define SIGNON_REC_RAW		0	// [short rec_id] [short len] [len bytes raw svc command]
+#define SIGNON_REC_RAW_FRAG	1	// [short rec_id] [short total_len] [short offset] [short len] [len bytes]
 
 typedef enum
 {

@@ -40,6 +40,7 @@ cvar_t	cl_netdebug_hexdump = {"cl_netdebug_hexdump", "0", CVAR_NONE};
 cvar_t	cl_netdebug_dropbad = {"cl_netdebug_dropbad", "1", CVAR_NONE};
 cvar_t	cl_netdebug_maxdump = {"cl_netdebug_maxdump", "256", CVAR_NONE};
 cvar_t	cl_signon_chunk_debug = {"cl_signon_chunk_debug", "0", CVAR_NONE};
+cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
@@ -273,6 +274,8 @@ void CL_FreeState(void)
         int i;
         for (i = 0; i < MAX_CL_STATS; i++)
                 free (cl.statss[i]);
+        if (cl.signon_frag_buf)
+                Z_Free (cl.signon_frag_buf);
         Lightgrid_Free(cl.lightgrid);
         PR_ClearProgs (&cl.qcvm);
         memset (&cl, 0, sizeof(cl));
@@ -1351,6 +1354,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_netdebug_dropbad);
 	Cvar_RegisterVariable (&cl_netdebug_maxdump);
 	Cvar_RegisterVariable (&cl_signon_chunk_debug);
+	Cvar_RegisterVariable (&cl_signon_debug);
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
 	Cvar_RegisterVariable (&cl_snap_debug);

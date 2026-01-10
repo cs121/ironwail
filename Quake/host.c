@@ -529,6 +529,7 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&pausable);
 
 	Cvar_RegisterVariable (&temp1);
+	Cvar_RegisterVariable (&sz_debug_hexdump);
 
 	Host_FindMaxClients ();
 }

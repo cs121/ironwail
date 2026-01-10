@@ -287,6 +287,10 @@ typedef struct
 	qboolean	signon_chunking;
 	byte		signon_chunk_stage;
 	unsigned short	signon_chunk_next_seq;
+	unsigned short	signon_frag_id;
+	unsigned short	signon_frag_total;
+	unsigned short	signon_frag_offset;
+	byte		*signon_frag_buf;
 
 	qboolean	sendprespawn;
 
