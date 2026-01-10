@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 #include <setjmp.h>
+#include <time.h>
 
 /*
 
@@ -102,6 +103,72 @@ cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
 
 devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
+
+/*
+================
+Host_ShouldWriteNetErrorReport
+================
+*/
+static qboolean Host_ShouldWriteNetErrorReport (const char *message)
+{
+	if (!message)
+		return false;
+
+	if (q_strcasestr (message, "overflow"))
+		return true;
+	if (q_strcasestr (message, "bad") && (q_strcasestr (message, "packet") || q_strcasestr (message, "message") || q_strcasestr (message, "server")))
+		return true;
+	if (q_strcasestr (message, "illegible") || q_strcasestr (message, "packet") || q_strcasestr (message, "datagram"))
+		return true;
+
+	return false;
+}
+
+/*
+================
+Host_WriteNetErrorReport
+================
+*/
+static void Host_WriteNetErrorReport (const char *message)
+{
+	static qboolean inreport = false;
+	FILE *file;
+	const char *path;
+	time_t now;
+
+	if (inreport || !host_parms || !host_parms->userdir)
+		return;
+
+	inreport = true;
+
+	path = va ("%s/%s", host_parms->userdir, "debug_net_error.txt");
+	file = Sys_fopen (path, "w");
+	if (!file)
+	{
+		inreport = false;
+		return;
+	}
+
+	now = time (NULL);
+	fprintf (file, "Ironwail network error report\n");
+	fprintf (file, "Timestamp: %s", ctime (&now));
+	fprintf (file, "Error: %s\n\n", message ? message : "<null>");
+	fprintf (file, "Engine version: Quake %1.2f\n", VERSION);
+	fprintf (file, "QuakeSpasm version: " QUAKESPASM_VER_STRING "\n");
+	fprintf (file, "Ironwail version: " IRONWAIL_VER_STRING "\n");
+	fprintf (file, "Host frame: %d\n", host_framecount);
+	fprintf (file, "Realtime: %.3f\n", realtime);
+	fprintf (file, "Client state: %d\n", cls.state);
+	fprintf (file, "Client signon: %d\n", cls.signon);
+	fprintf (file, "Demo playback: %d\n", cls.demoplayback);
+	fprintf (file, "Demo recording: %d\n", cls.demorecording);
+	fprintf (file, "Server active: %d\n", sv.active);
+	fprintf (file, "Server map: %s\n", sv.name[0] ? sv.name : "<none>");
+	fprintf (file, "Max clients: %d\n", svs.maxclients);
+	fclose (file);
+
+	inreport = false;
+}
 
 
 /*
@@ -263,6 +330,8 @@ void Host_ReportError (const char *error, ...)
 	q_vsnprintf (string, sizeof(string), error, argptr);
 	va_end (argptr);
 	Con_Printf ("Host_Error: %s\n",string);
+	if (Host_ShouldWriteNetErrorReport (string))
+		Host_WriteNetErrorReport (string);
 
 	if (sv.active)
 		Host_ShutdownServer (false);
