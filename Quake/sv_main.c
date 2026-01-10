@@ -60,6 +60,9 @@ static cvar_t sv_icull_pvs = {"sv_icull_pvs", "1", CVAR_NONE};
 static cvar_t sv_icull_debug = {"sv_icull_debug", "0", CVAR_NONE};
 static qboolean sv_packedents_selftest_done = false;
 
+static qboolean SV_SignonChunksEnabled (void);
+static void SV_SignonStreamSend (client_t *client);
+
 typedef struct
 {
 	int packets;
@@ -3643,6 +3646,16 @@ static int SV_SignonCommandLength (const signon_reader_t *reader, int *out_cmd, 
 		break;
 	}
 
+	case svc_setpause:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		break;
+
+	case svc_signonnum:
+		if (!SV_SignonReadByte (&temp, NULL, &consumed))
+			return 0;
+		break;
+
 	default:
 		return -1;
 	}
@@ -4441,12 +4454,3 @@ void SV_SpawnServer (const char *server)
 	if (sv.mapchecks.active)
 		SV_PrintMapChecklist ();
 }
-	case svc_setpause:
-		if (!SV_SignonReadByte (&temp, NULL, &consumed))
-			return 0;
-		break;
-
-	case svc_signonnum:
-		if (!SV_SignonReadByte (&temp, NULL, &consumed))
-			return 0;
-		break;
