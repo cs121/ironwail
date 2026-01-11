@@ -195,6 +195,7 @@ vec3_t	r_origin;
 
 float r_fovx, r_fovy; //johnfitz -- rendering fov may be different becuase of r_waterwarp and r_stereo
 qboolean water_warp;
+static qboolean r_underwater_dof_active = false;
 
 extern byte* SV_FatPVS (vec3_t org, qmodel_t* worldmodel);
 extern qboolean SV_EdictInPVS (edict_t* test, byte* pvs);
@@ -2417,6 +2418,13 @@ void GL_PostProcess (void)
 		dof_focus = R_GetDynamicDoFFocus (dof_focus);
 		dof_range = q_max (0.f, r_dof_range.value);
 		dof_strength = q_max (0.f, r_dof_strength.value);
+		if (r_underwater_dof_active)
+		{
+			const float underwater_strength_scale = 2.0f;
+			const float underwater_range_scale = 0.4f;
+			dof_strength = q_max (0.f, dof_strength * underwater_strength_scale);
+			dof_range = q_max (1.f, dof_range * underwater_range_scale);
+		}
 		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
 		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
 		GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
@@ -3335,25 +3343,26 @@ void R_SetupView (void)
 		int contents = r_viewleaf->contents;
 		qboolean forced = M_ForcedUnderwater ();
 		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
-	if (r_waterwarp.value)
-	{
-		if (underwater_active)
+		r_underwater_dof_active = underwater_active;
+		if (r_waterwarp.value)
 		{
-			double t = forced ? realtime : cl.time;
-			if (r_waterwarp.value > 1.f)
+			if (underwater_active)
 			{
-				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
-				r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
-				r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
-			}
-			else
-			{
-				water_warp = true;
+				double t = forced ? realtime : cl.time;
+				if (r_waterwarp.value > 1.f)
+				{
+					//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
+					r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+					r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				}
+				else
+				{
+					water_warp = true;
+				}
 			}
 		}
-	}
-	// TODO(postfx): hook underwater contents for postfx stack here.
-	CL_PostFX_SetContents (contents, underwater_active);
+		// TODO(postfx): hook underwater contents for postfx stack here.
+		CL_PostFX_SetContents (contents, underwater_active);
 	}
 	//johnfitz
 
