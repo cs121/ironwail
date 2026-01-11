@@ -262,6 +262,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define SNAPSHOT_FLAG_FULL		(1u << 0)
 #define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 1)
+#define SNAPSHOT_FLAG_CONTINUE		(1u << 2)
 
 // signon chunk protocol extension
 #define SIGNON_CHUNK_FLAG_STAGE_END	(1u << 0)

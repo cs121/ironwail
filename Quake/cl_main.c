@@ -320,6 +320,8 @@ void CL_ClearState (void)
 	cl.snapshot_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
 	cl.snapshot_active = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_active");
 	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
+	cl.snapshot_chunk = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_chunk");
+	cl.snapshot_chunk_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_chunk_present");
 	//johnfitz
 	if (cl.snapshot_present)
 		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
@@ -327,6 +329,10 @@ void CL_ClearState (void)
 		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_last_update_time)
 		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+	if (cl.snapshot_chunk_present)
+		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
+	cl.snapshot_chunk_active = false;
+	cl.snapshot_chunk_seq = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
 }

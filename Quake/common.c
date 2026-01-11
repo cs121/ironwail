@@ -693,7 +693,7 @@ static const char *SZ_DebugName (const sizebuf_t *buf);
 
 static qboolean MSG_EnsureSpace (sizebuf_t *sb, int length)
 {
-	if (sb->overflowed || sb->write_blocked)
+	if (sb->overflowed || sb->write_blocked || sb->write_locked)
 	{
 #if !defined(NDEBUG)
 		SDL_assert (!"MSG write after overflow");
@@ -727,6 +727,7 @@ static qboolean MSG_EnsureSpace (sizebuf_t *sb, int length)
 		sb->overflowed = true;
 		sb->overflowed_once = true;
 		sb->write_blocked = true;
+		sb->write_locked = true;
 		sb->blocked_file = __FILE__;
 		sb->blocked_line = __LINE__;
 		SZ_PrintOverflowDiagnostics (sb, length);
@@ -1052,6 +1053,7 @@ qboolean MSG_PackedSelfTest (void)
 	buf.overflowed = false;
 	buf.overflowed_once = false;
 	buf.write_blocked = false;
+	buf.write_locked = false;
 	buf.blocked_file = NULL;
 	buf.blocked_line = 0;
 	buf.dbg_name = "packed_selftest";
@@ -1299,6 +1301,7 @@ static const char *SZ_DebugName (const sizebuf_t *buf)
 void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line)
 {
 	buf->write_blocked = true;
+	buf->write_locked = true;
 	buf->blocked_file = file;
 	buf->blocked_line = line;
 }
@@ -1306,6 +1309,7 @@ void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line)
 void SZ_UnblockWrites (sizebuf_t *buf)
 {
 	buf->write_blocked = false;
+	buf->write_locked = false;
 	buf->blocked_file = NULL;
 	buf->blocked_line = 0;
 }
@@ -1321,6 +1325,7 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	buf->overflowed = false;
 	buf->overflowed_once = false;
 	buf->write_blocked = false;
+	buf->write_locked = false;
 	buf->blocked_file = NULL;
 	buf->blocked_line = 0;
 	buf->dbg_name = NULL;
@@ -1346,13 +1351,14 @@ void SZ_Clear (sizebuf_t *buf)
 	buf->bitpos = 0;
 	buf->overflowed = false;
 	buf->overflowed_once = false;
+	buf->write_locked = false;
 }
 
 void *SZ_GetSpace (sizebuf_t *buf, int length)
 {
 	void	*data;
 
-	if (buf->write_blocked)
+	if (buf->write_blocked || buf->write_locked)
 	{
 		const char *name = SZ_DebugName (buf);
 		Sys_Error ("SZ_GetSpace: write blocked on '%s' (blocked at %s:%d, last write %s:%d msgkind=%d id=%d aux=%d)",
