@@ -983,6 +983,16 @@ qboolean MSG_PackedSelfTest (void)
 	buf.cursize = 0;
 	buf.allowoverflow = false;
 	buf.overflowed = false;
+	buf.overflowed_once = false;
+	buf.write_blocked = false;
+	buf.blocked_file = NULL;
+	buf.blocked_line = 0;
+	buf.dbg_name = "packed_selftest";
+	buf.dbg_file = NULL;
+	buf.dbg_line = 0;
+	buf.dbg_msgkind = 0;
+	buf.dbg_id = 0;
+	buf.dbg_aux = 0;
 	buf.bitpos = 0;
 
 	MSG_WriteBits (&buf, 0x3, 2);
@@ -1198,6 +1208,41 @@ static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length)
 		SZ_DumpBufferTail (buf);
 }
 
+static const char *SZ_DebugName (const sizebuf_t *buf)
+{
+	const char *name = "unnamed";
+	qboolean name_valid = false;
+
+	if (buf->dbg_name)
+	{
+#if UINTPTR_MAX > 0xFFFFFFFFu
+		uintptr_t dbg_name_ptr = (uintptr_t)buf->dbg_name;
+		name_valid = ((dbg_name_ptr >> 48) == 0u) || ((dbg_name_ptr >> 48) == 0xFFFFu);
+#else
+		name_valid = true;
+#endif
+	}
+
+	if (name_valid)
+		name = buf->dbg_name;
+
+	return name;
+}
+
+void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line)
+{
+	buf->write_blocked = true;
+	buf->blocked_file = file;
+	buf->blocked_line = line;
+}
+
+void SZ_UnblockWrites (sizebuf_t *buf)
+{
+	buf->write_blocked = false;
+	buf->blocked_file = NULL;
+	buf->blocked_line = 0;
+}
+
 void SZ_Alloc (sizebuf_t *buf, int startsize)
 {
 	if (startsize < 256)
@@ -1206,6 +1251,11 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	buf->maxsize = startsize;
 	buf->cursize = 0;
 	buf->bitpos = 0;
+	buf->overflowed = false;
+	buf->overflowed_once = false;
+	buf->write_blocked = false;
+	buf->blocked_file = NULL;
+	buf->blocked_line = 0;
 	buf->dbg_name = NULL;
 	buf->dbg_file = NULL;
 	buf->dbg_line = 0;
@@ -1227,11 +1277,27 @@ void SZ_Clear (sizebuf_t *buf)
 {
 	buf->cursize = 0;
 	buf->bitpos = 0;
+	buf->overflowed = false;
+	buf->overflowed_once = false;
 }
 
 void *SZ_GetSpace (sizebuf_t *buf, int length)
 {
 	void	*data;
+
+	if (buf->write_blocked)
+	{
+		const char *name = SZ_DebugName (buf);
+		Sys_Error ("SZ_GetSpace: write blocked on '%s' (blocked at %s:%d, last write %s:%d msgkind=%d id=%d aux=%d)",
+			name,
+			buf->blocked_file ? buf->blocked_file : "unknown",
+			buf->blocked_line,
+			buf->dbg_file ? buf->dbg_file : "unknown",
+			buf->dbg_line,
+			buf->dbg_msgkind,
+			buf->dbg_id,
+			buf->dbg_aux);
+	}
 
 	if (buf->cursize + length > buf->maxsize)
 	{
@@ -1244,9 +1310,23 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 		if (length > buf->maxsize)
 			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
 
+		if (buf->overflowed_once)
+		{
+			const char *name = SZ_DebugName (buf);
+			Sys_Error ("Repeated SZ overflow on '%s': indicates buffer reuse / reentrant append bug (last write %s:%d msgkind=%d id=%d aux=%d)",
+				name,
+				buf->dbg_file ? buf->dbg_file : "unknown",
+				buf->dbg_line,
+				buf->dbg_msgkind,
+				buf->dbg_id,
+				buf->dbg_aux);
+		}
+
 		buf->overflowed = true;
+		buf->overflowed_once = true;
 		SZ_PrintOverflowDiagnostics (buf, length);
-		SZ_Clear (buf);
+		buf->cursize = 0;
+		buf->bitpos = 0;
 	}
 
 	data = buf->data + buf->cursize;

@@ -116,6 +116,10 @@ typedef struct sizebuf_s
 {
 	qboolean	allowoverflow;	// if false, do a Sys_Error
 	qboolean	overflowed;		// set to true if the buffer size failed
+	qboolean	overflowed_once;	// set on first overflow until explicit clear/init
+	qboolean	write_blocked;		// set when writes are not allowed
+	const char	*blocked_file;
+	int		blocked_line;
 	const char	*dbg_name;
 	const char	*dbg_file;
 	int		dbg_line;
@@ -128,19 +132,21 @@ typedef struct sizebuf_s
 	int		bitpos;
 } sizebuf_t;
 
-#define MSG_BEGINSVC(msg, svc_id) do { \
-	SV_SignonFirewallCheck((msg), (svc_id), __FILE__, __LINE__); \
-	(msg)->dbg_msgkind = 1; \
-	(msg)->dbg_id = (svc_id); \
+#define MSG_DBG_SET(msg, kind, id, aux) do { \
+	(msg)->dbg_msgkind = (kind); \
+	(msg)->dbg_id = (id); \
+	(msg)->dbg_aux = (aux); \
 	(msg)->dbg_file = __FILE__; \
 	(msg)->dbg_line = __LINE__; \
 } while (0)
 
+#define MSG_BEGINSVC(msg, svc_id) do { \
+	SV_SignonFirewallCheck((msg), (svc_id), __FILE__, __LINE__); \
+	MSG_DBG_SET((msg), 1, (svc_id), (msg)->dbg_aux); \
+} while (0)
+
 #define MSG_BEGINCLC(msg, clc_id) do { \
-	(msg)->dbg_msgkind = 2; \
-	(msg)->dbg_id = (clc_id); \
-	(msg)->dbg_file = __FILE__; \
-	(msg)->dbg_line = __LINE__; \
+	MSG_DBG_SET((msg), 2, (clc_id), (msg)->dbg_aux); \
 } while (0)
 
 #define MSG_DBGAUX(msg, aux) do { \
@@ -155,6 +161,11 @@ void SZ_Clear (sizebuf_t *buf);
 void *SZ_GetSpace (sizebuf_t *buf, int length);
 void SZ_Write (sizebuf_t *buf, const void *data, int length);
 void SZ_Print (sizebuf_t *buf, const char *data);	// strcats onto the sizebuf
+void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line);
+void SZ_UnblockWrites (sizebuf_t *buf);
+
+#define SZ_BLOCK_WRITES(buf) SZ_BlockWrites((buf), __FILE__, __LINE__)
+#define SZ_UNBLOCK_WRITES(buf) SZ_UnblockWrites((buf))
 
 //============================================================================
 

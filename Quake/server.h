@@ -231,6 +231,7 @@ typedef struct client_s
 	int				mtu_dropped_tier1;
 	int				mtu_dropped_tier2;
 	double			mtu_debug_next_time;
+	int				datagram_overflow_count;
 	bot_state_t		bot;
 } client_t;
 

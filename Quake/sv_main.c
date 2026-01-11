@@ -45,6 +45,7 @@ static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE
 static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_mtu = {"sv_mtu", "1200", CVAR_NONE};
+static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1200", CVAR_NONE};
 static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
@@ -299,6 +300,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_force_full_after_frames);
 	Cvar_RegisterVariable (&sv_snap_max_payload);
 	Cvar_RegisterVariable (&sv_mtu);
+	Cvar_RegisterVariable (&sv_mtu_cap);
 	Cvar_RegisterVariable (&sv_mtu_debug);
 	Cvar_RegisterVariable (&sv_signon_chunks);
 	Cvar_RegisterVariable (&sv_signon_chunk_debug);
@@ -531,6 +533,14 @@ CLIENT SPAWNING
 static qboolean SV_IsLocalClient (client_t *client)
 {
 	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
+}
+
+static int SV_MTUCap (void)
+{
+	int cap = (int)sv_mtu_cap.value;
+	if (cap <= 0)
+		cap = (int)sv_mtu.value;
+	return cap;
 }
 
 /*
@@ -1196,7 +1206,7 @@ static int SV_SnapshotMaxEntities (sizebuf_t *msg)
 	int header_size = 1 + 4 + 4 + 2 + 2 + 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
 	int payload_cap = (int)sv_snap_max_payload.value;
-	int mtu_cap = (int)sv_mtu.value;
+	int mtu_cap = SV_MTUCap ();
 
 	if (sv_snapshot2.value)
 		header_size = 1 + 4 + 4 + 1 + 2 + 2 + 2 + 2;
@@ -1499,6 +1509,7 @@ static void SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state
 static void SV_WriteSnapshot2Header (sizebuf_t *msg, unsigned int seq, unsigned int base_seq,
 	unsigned int flags, unsigned short num_entities, unsigned short num_removed)
 {
+	MSG_BEGINSVC (msg, svc_snapshot2);
 	MSG_WriteByte (msg, svc_snapshot2);
 	MSG_WriteLong (msg, (int)seq);
 	MSG_WriteLong (msg, (int)base_seq);
@@ -1567,6 +1578,7 @@ static void SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, const snapsh
 			count++;
 	}
 
+	MSG_BEGINSVC (msg, svc_snapshot_full);
 	MSG_WriteByte (msg, svc_snapshot_full);
 	MSG_WriteLong (msg, (int)seq);
 	MSG_WriteShort (msg, count);
@@ -1622,6 +1634,7 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 	int add_count = 0;
 	int update_count = 0;
 
+	MSG_BEGINSVC (msg, svc_snapshot_delta);
 	MSG_WriteByte (msg, svc_snapshot_delta);
 	MSG_WriteLong (msg, (int)seq);
 	MSG_WriteLong (msg, (int)baseline_seq);
@@ -2406,6 +2419,7 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 
 		if (msg->cursize + 3 > msg->maxsize)
 			goto stats;
+		MSG_BEGINSVC (msg, svc_packedentities);
 		MSG_WriteByte (msg, svc_packedentities);
 		packed_count_pos = msg->cursize;
 		MSG_WriteShort (msg, 0);
@@ -2707,6 +2721,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 	if (ent->v.dmg_take || ent->v.dmg_save)
 	{
 		other = PROG_TO_EDICT(ent->v.dmg_inflictor);
+		MSG_BEGINSVC (msg, svc_damage);
 		MSG_WriteByte (msg, svc_damage);
 		MSG_WriteByte (msg, ent->v.dmg_save);
 		MSG_WriteByte (msg, ent->v.dmg_take);
@@ -2725,6 +2740,7 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 // a fixangle might get lost in a dropped packet.  Oh well.
 	if ( ent->v.fixangle )
 	{
+		MSG_BEGINSVC (msg, svc_setangle);
 		MSG_WriteByte (msg, svc_setangle);
 		for (i=0 ; i < 3 ; i++)
 			MSG_WriteAngle (msg, ent->v.angles[i], sv.protocolflags );
@@ -2888,21 +2904,37 @@ qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
+	int		mtu_cap;
 
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
 	msg.cursize = 0;
 	msg.allowoverflow = true;
 	msg.overflowed = false;
+	msg.overflowed_once = false;
+	msg.write_blocked = false;
+	msg.blocked_file = NULL;
+	msg.blocked_line = 0;
+	msg.dbg_name = "sv_client_datagram";
+	msg.dbg_file = NULL;
+	msg.dbg_line = 0;
+	msg.dbg_msgkind = 0;
+	msg.dbg_id = 0;
+	msg.dbg_aux = 0;
 	msg.bitpos = 0;
 
 	//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
 	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
 		msg.maxsize = DATAGRAM_MTU;
 	//johnfitz
-	if (sv_mtu.value > 0)
-		msg.maxsize = q_min (msg.maxsize, (int)sv_mtu.value);
+	mtu_cap = SV_MTUCap ();
+	if (mtu_cap > 0)
+		msg.maxsize = q_min (msg.maxsize, mtu_cap);
 
+	if (!NET_CanSendUnreliableMessage (client->netconnection))
+		return false;
+
+	MSG_BEGINSVC (&msg, svc_time);
 	MSG_WriteByte (&msg, svc_time);
 	MSG_WriteFloat (&msg, qcvm->time);
 
@@ -2913,9 +2945,25 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 	if (msg.overflowed)
 	{
-		Con_DPrintf ("SV_SendClientDatagram: overflow for %s, dropping packet\n", client->name);
-		return true;
+		client->datagram_overflow_count++;
+		if (client->datagram_overflow_count > 1)
+			Sys_Error ("Repeated datagram overflow for %s (last write %s:%d msgkind=%d id=%d aux=%d)",
+				client->name,
+				msg.dbg_file ? msg.dbg_file : "unknown",
+				msg.dbg_line,
+				msg.dbg_msgkind,
+				msg.dbg_id,
+				msg.dbg_aux);
+		Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped %d)\n",
+			msg.maxsize,
+			client->name,
+			msg.cursize,
+			client->sendsignon,
+			client->snapshot_pending_mandatory,
+			client->snapshot_pending_dropped);
+		return false;
 	}
+	client->datagram_overflow_count = 0;
 
 // copy the server datagram if there is space
 	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
@@ -3078,7 +3126,21 @@ void SV_SendNop (client_t *client)
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
 	msg.cursize = 0;
+	msg.allowoverflow = false;
+	msg.overflowed = false;
+	msg.overflowed_once = false;
+	msg.write_blocked = false;
+	msg.blocked_file = NULL;
+	msg.blocked_line = 0;
+	msg.dbg_name = "sv_nop";
+	msg.dbg_file = NULL;
+	msg.dbg_line = 0;
+	msg.dbg_msgkind = 0;
+	msg.dbg_id = 0;
+	msg.dbg_aux = 0;
+	msg.bitpos = 0;
 
+	MSG_BEGINSVC (&msg, svc_nop);
 	MSG_WriteChar (&msg, svc_nop);
 
 	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
@@ -3105,6 +3167,7 @@ void SV_SendClientMessages (void)
 			continue;
 		if (host_client->is_bot)
 			continue;
+		SZ_UNBLOCK_WRITES (&host_client->message);
 
 		if (host_client->spawned)
 		{
@@ -3118,6 +3181,11 @@ void SV_SendClientMessages (void)
 		// send a full message when the next signon stage has been requested
 		// some other message data (name changes, etc) may accumulate
 		// between signon stages
+			if (!NET_CanSendMessage (host_client->netconnection))
+			{
+				SZ_BLOCK_WRITES (&host_client->message);
+				continue;
+			}
 			if (!host_client->sendsignon)
 			{
 				if (realtime - host_client->last_message > 5)
@@ -3178,6 +3246,7 @@ void SV_SendClientMessages (void)
 			if (!NET_CanSendMessage (host_client->netconnection))
 			{
 //				I_Printf ("can't write\n");
+				SZ_BLOCK_WRITES (&host_client->message);
 				continue;
 			}
 
@@ -3798,6 +3867,8 @@ static void SV_SignonStreamSend (client_t *client)
 {
 	signon_stream_t *stream = &client->signon_stream;
 	int window = (int)sv_signon_chunk_window.value;
+	int mtu_cap = SV_MTUCap ();
+	int payload_cap = SIGNON_CHUNK_MAX_PAYLOAD;
 
 	if (!stream->active)
 		SV_SignonStreamInit (client);
@@ -3806,6 +3877,10 @@ static void SV_SignonStreamSend (client_t *client)
 		window = 1;
 	if (window > 4)
 		window = 4;
+	if (mtu_cap > 0)
+		payload_cap = q_min (payload_cap, mtu_cap - SIGNON_CHUNK_HEADER_BYTES);
+	if (payload_cap < 1)
+		return;
 
 	while ((unsigned short)(stream->next_seq - stream->acked_seq) < window)
 	{
@@ -3820,9 +3895,9 @@ static void SV_SignonStreamSend (client_t *client)
 		byte flags = 0;
 		int records_in_chunk = 0;
 
-		while (payload_len < SIGNON_CHUNK_MAX_PAYLOAD)
+		while (payload_len < payload_cap)
 		{
-			int remaining = SIGNON_CHUNK_MAX_PAYLOAD - payload_len;
+			int remaining = payload_cap - payload_len;
 			int header_len;
 			int take;
 
@@ -4174,6 +4249,19 @@ void SV_SendReconnect (void)
 	msg.data = data;
 	msg.cursize = 0;
 	msg.maxsize = sizeof(data);
+	msg.allowoverflow = false;
+	msg.overflowed = false;
+	msg.overflowed_once = false;
+	msg.write_blocked = false;
+	msg.blocked_file = NULL;
+	msg.blocked_line = 0;
+	msg.dbg_name = "sv_reconnect";
+	msg.dbg_file = NULL;
+	msg.dbg_line = 0;
+	msg.dbg_msgkind = 0;
+	msg.dbg_id = 0;
+	msg.dbg_aux = 0;
+	msg.bitpos = 0;
 
 	MSG_BEGINSVC (&msg, svc_stufftext);
 	MSG_WriteChar (&msg, svc_stufftext);
