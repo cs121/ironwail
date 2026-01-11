@@ -153,6 +153,8 @@ typedef struct sizebuf_s
 	(msg)->dbg_aux = (aux); \
 } while (0)
 
+#define MSG_CAN_FIT(msg, bytes) ((msg)->cursize + (bytes) <= (msg)->maxsize)
+
 void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line);
 
 void SZ_Alloc (sizebuf_t *buf, int startsize);

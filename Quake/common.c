@@ -688,6 +688,54 @@ Handles byte ordering and avoids alignment errors
 ==============================================================================
 */
 
+static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length);
+static const char *SZ_DebugName (const sizebuf_t *buf);
+
+static qboolean MSG_EnsureSpace (sizebuf_t *sb, int length)
+{
+	if (sb->overflowed || sb->write_blocked)
+	{
+#if !defined(NDEBUG)
+		SDL_assert (!"MSG write after overflow");
+#endif
+		return false;
+	}
+
+	if (!MSG_CAN_FIT(sb, length))
+	{
+		if (!sb->allowoverflow)
+		{
+			SZ_PrintOverflowDiagnostics (sb, length);
+			Host_Error ("SZ_GetSpace: overflow without allowoverflow set"); // ericw -- made Host_Error to be less annoying
+		}
+
+		if (length > sb->maxsize)
+			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
+
+		if (sb->overflowed_once)
+		{
+			const char *name = SZ_DebugName (sb);
+			Sys_Error ("Repeated SZ overflow on '%s': indicates buffer reuse / reentrant append bug (last write %s:%d msgkind=%d id=%d aux=%d)",
+				name,
+				sb->dbg_file ? sb->dbg_file : "unknown",
+				sb->dbg_line,
+				sb->dbg_msgkind,
+				sb->dbg_id,
+				sb->dbg_aux);
+		}
+
+		sb->overflowed = true;
+		sb->overflowed_once = true;
+		sb->write_blocked = true;
+		sb->blocked_file = __FILE__;
+		sb->blocked_line = __LINE__;
+		SZ_PrintOverflowDiagnostics (sb, length);
+		return false;
+	}
+
+	return true;
+}
+
 //
 // writing functions
 //
@@ -701,6 +749,8 @@ void MSG_WriteChar (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteChar: range error");
 #endif
 
+	if (!MSG_EnsureSpace (sb, 1))
+		return;
 	buf = (byte *) SZ_GetSpace (sb, 1);
 	buf[0] = c;
 }
@@ -714,6 +764,8 @@ void MSG_WriteByte (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteByte: range error");
 #endif
 
+	if (!MSG_EnsureSpace (sb, 1))
+		return;
 	buf = (byte *) SZ_GetSpace (sb, 1);
 	buf[0] = c;
 }
@@ -727,6 +779,8 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteShort: range error");
 #endif
 
+	if (!MSG_EnsureSpace (sb, 2))
+		return;
 	buf = (byte *) SZ_GetSpace (sb, 2);
 	buf[0] = c&0xff;
 	buf[1] = c>>8;
@@ -736,6 +790,8 @@ void MSG_WriteLong (sizebuf_t *sb, int c)
 {
 	byte	*buf;
 
+	if (!MSG_EnsureSpace (sb, 4))
+		return;
 	buf = (byte *) SZ_GetSpace (sb, 4);
 	buf[0] = c&0xff;
 	buf[1] = (c>>8)&0xff;
@@ -767,7 +823,14 @@ void MSG_WriteString (sizebuf_t *sb, const char *s)
 
 void MSG_WriteBits (sizebuf_t *sb, unsigned int value, int bits)
 {
+	int bytes_needed;
 	int i;
+
+	bytes_needed = (sb->bitpos + bits + 7) / 8;
+	if (sb->bitpos != 0)
+		bytes_needed--;
+	if (bytes_needed > 0 && !MSG_EnsureSpace (sb, bytes_needed))
+		return;
 
 	for (i = 0; i < bits; i++)
 	{
@@ -797,7 +860,11 @@ void MSG_WriteInt16 (sizebuf_t *sb, int c)
 
 void MSG_WriteUInt16 (sizebuf_t *sb, unsigned int c)
 {
-	byte *buf = (byte *) SZ_GetSpace (sb, 2);
+	byte *buf;
+
+	if (!MSG_EnsureSpace (sb, 2))
+		return;
+	buf = (byte *) SZ_GetSpace (sb, 2);
 	buf[0] = c & 0xff;
 	buf[1] = (c >> 8) & 0xff;
 }
@@ -1337,6 +1404,8 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, const void *data, int length)
 {
+	if (!MSG_EnsureSpace (buf, length))
+		return;
 	Q_memcpy (SZ_GetSpace(buf,length),data,length);
 }
 
@@ -1346,10 +1415,14 @@ void SZ_Print (sizebuf_t *buf, const char *data)
 
 	if (buf->data[buf->cursize-1])
 	{	/* no trailing 0 */
+		if (!MSG_EnsureSpace (buf, len))
+			return;
 		Q_memcpy ((byte *)SZ_GetSpace(buf, len  )  , data, len);
 	}
 	else
 	{	/* write over trailing 0 */
+		if (!MSG_EnsureSpace (buf, len - 1))
+			return;
 		Q_memcpy ((byte *)SZ_GetSpace(buf, len-1)-1, data, len);
 	}
 }
