@@ -535,8 +535,10 @@ static qboolean SV_IsLocalClient (client_t *client)
 	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
-static int SV_MTUCap (void)
+static int SV_MTUCap (client_t *client)
 {
+	if (client && SV_IsLocalClient (client))
+		return 0;
 	int cap = (int)sv_mtu_cap.value;
 	if (cap <= 0)
 		cap = (int)sv_mtu.value;
@@ -1274,12 +1276,12 @@ static int SV_Snapshot2FullSize (const byte *present, const byte *snapflags, int
 	return size;
 }
 
-static int SV_SnapshotMaxEntities (sizebuf_t *msg)
+static int SV_SnapshotMaxEntities (client_t *client, sizebuf_t *msg)
 {
 	int header_size = 1 + 4 + 4 + 2 + 2 + 2;
 	int per_ent = SV_SnapshotEntitySizeWorst ();
 	int payload_cap = (int)sv_snap_max_payload.value;
-	int mtu_cap = SV_MTUCap ();
+	int mtu_cap = SV_MTUCap (client);
 
 	if (sv_snapshot2.value)
 		header_size = 1 + 4 + 4 + 1 + 2 + 2 + 2 + 2;
@@ -2144,7 +2146,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		int dropped_count = 0;
 		int dropped_tier1 = 0;
 		int dropped_tier2 = 0;
-		int max_ents = SV_SnapshotMaxEntities (msg);
+		int max_ents = SV_SnapshotMaxEntities (client, msg);
 		qboolean debug_frame = false;
 
 		if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
@@ -3163,7 +3165,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
 		msg.maxsize = DATAGRAM_MTU;
 	//johnfitz
-	mtu_cap = SV_MTUCap ();
+	mtu_cap = SV_MTUCap (client);
 	if (mtu_cap > 0)
 		msg.maxsize = q_min (msg.maxsize, mtu_cap);
 
@@ -4140,7 +4142,7 @@ static void SV_SignonStreamSend (client_t *client)
 {
 	signon_stream_t *stream = &client->signon_stream;
 	int window = (int)sv_signon_chunk_window.value;
-	int mtu_cap = SV_MTUCap ();
+	int mtu_cap = SV_MTUCap (client);
 	int payload_cap = SIGNON_CHUNK_MAX_PAYLOAD;
 
 	if (!stream->active)
