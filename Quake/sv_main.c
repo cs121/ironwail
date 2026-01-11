@@ -2905,6 +2905,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
 	int		mtu_cap;
+	qboolean	packet_too_large = false;
 
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
@@ -2940,10 +2941,43 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 // add the client specific data to the datagram
 	SV_WriteClientdataToMessage (client->edict, &msg);
+	if (msg.overflowed)
+	{
+		packet_too_large = true;
+		goto datagram_too_large;
+	}
 
 	SV_SendSnapshot (client, &msg);
 
 	if (msg.overflowed)
+	{
+		packet_too_large = true;
+		goto datagram_too_large;
+	}
+	client->datagram_overflow_count = 0;
+
+// copy the server datagram if there is space
+	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
+		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
+
+	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
+	{
+		Con_Printf ("mtu %s bytes %d dropped tier1 %d tier2 %d\n",
+			client->name, msg.cursize, client->mtu_dropped_tier1, client->mtu_dropped_tier2);
+		client->mtu_debug_next_time = realtime + 1.0;
+	}
+
+// send the datagram
+	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
+	{
+		SV_DropClient (true);// if the message couldn't send, kick off
+		return false;
+	}
+
+	return true;
+
+datagram_too_large:
+	if (packet_too_large)
 	{
 		client->datagram_overflow_count++;
 		if (client->datagram_overflow_count > 1)
@@ -2970,27 +3004,6 @@ qboolean SV_SendClientDatagram (client_t *client)
 			client->snapshot_pending_dropped);
 		return false;
 	}
-	client->datagram_overflow_count = 0;
-
-// copy the server datagram if there is space
-	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
-		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
-
-	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
-	{
-		Con_Printf ("mtu %s bytes %d dropped tier1 %d tier2 %d\n",
-			client->name, msg.cursize, client->mtu_dropped_tier1, client->mtu_dropped_tier2);
-		client->mtu_debug_next_time = realtime + 1.0;
-	}
-
-// send the datagram
-	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
-	{
-		SV_DropClient (true);// if the message couldn't send, kick off
-		return false;
-	}
-
-	return true;
 }
 
 /*
