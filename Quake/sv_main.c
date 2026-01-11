@@ -3004,6 +3004,8 @@ datagram_too_large:
 			client->snapshot_pending_dropped);
 		return false;
 	}
+
+	return false;
 }
 
 /*
