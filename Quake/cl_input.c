@@ -389,6 +389,19 @@ void CL_SendMove (const usercmd_t *cmd)
 	buf.maxsize = 128;
 	buf.cursize = 0;
 	buf.data = data;
+	buf.allowoverflow = false;
+	buf.overflowed = false;
+	buf.overflowed_once = false;
+	buf.write_blocked = false;
+	buf.blocked_file = NULL;
+	buf.blocked_line = 0;
+	buf.dbg_name = "cl_move";
+	buf.dbg_file = NULL;
+	buf.dbg_line = 0;
+	buf.dbg_msgkind = 0;
+	buf.dbg_id = 0;
+	buf.dbg_aux = 0;
+	buf.bitpos = 0;
 
 	if (cmd) 
 	{
@@ -496,4 +509,3 @@ void CL_InitInput (void)
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
 }
-

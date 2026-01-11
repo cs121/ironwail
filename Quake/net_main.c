@@ -677,6 +677,19 @@ qboolean NET_CanSendMessage (qsocket_t *sock)
 	return sfunc.CanSendMessage(sock);
 }
 
+qboolean NET_CanSendUnreliableMessage (qsocket_t *sock)
+{
+	if (!sock)
+		return false;
+
+	if (sock->disconnected)
+		return false;
+
+	SetNetTime();
+
+	return sfunc.CanSendUnreliableMessage(sock);
+}
+
 
 int NET_SendToAll (sizebuf_t *data, double blocktime)
 {

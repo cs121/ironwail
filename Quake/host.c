@@ -745,6 +745,19 @@ void Host_ShutdownServer(qboolean crash)
 	buf.data = message;
 	buf.maxsize = 4;
 	buf.cursize = 0;
+	buf.allowoverflow = false;
+	buf.overflowed = false;
+	buf.overflowed_once = false;
+	buf.write_blocked = false;
+	buf.blocked_file = NULL;
+	buf.blocked_line = 0;
+	buf.dbg_name = "shutdown_disconnect";
+	buf.dbg_file = NULL;
+	buf.dbg_line = 0;
+	buf.dbg_msgkind = 0;
+	buf.dbg_id = 0;
+	buf.dbg_aux = 0;
+	buf.bitpos = 0;
 	MSG_WriteByte(&buf, svc_disconnect);
 	count = NET_SendToAll(&buf, 5.0);
 	if (count)

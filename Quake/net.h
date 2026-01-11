@@ -72,6 +72,7 @@ const char *NET_QSocketGetAddressString (const struct qsocket_s *sock);
 qboolean NET_CanSendMessage (struct qsocket_s *sock);
 // Returns true or false if the given qsocket can currently accept a
 // message to be transmitted.
+qboolean NET_CanSendUnreliableMessage (struct qsocket_s *sock);
 
 int	NET_GetMessage (struct qsocket_s *sock);
 // returns data in net_message sizebuf
