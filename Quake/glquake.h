@@ -360,6 +360,7 @@ extern devstats_t dev_stats, dev_peakstats;
 //ohnfitz -- reduce overflow warning spam
 typedef struct {
 	double	packetsize;
+	double	datagram;
 	double	efrags;
 	double	beams;
 	double	varstring;
