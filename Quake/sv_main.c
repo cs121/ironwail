@@ -923,6 +923,15 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->mtu_dropped_tier1 = 0;
 	client->mtu_dropped_tier2 = 0;
 	client->mtu_debug_next_time = 0;
+	client->datagram_overflow_next_time = 0;
+	client->entstream.active = false;
+	client->entstream.signon_stage = 0;
+	client->entstream.next_edict = 1;
+	client->entstream.total_edicts = 0;
+	client->entstream.base_snapshot = 0;
+	client->entstream.total_entities = 0;
+	client->entstream.sent_entities = 0;
+	client->entstream.next_log_time = 0;
 	if (client->snapshot_baseline_present)
 		memset (client->snapshot_baseline_present, 0, max_edicts * sizeof(byte));
 	if (client->snapshot_pending_present)
@@ -931,6 +940,18 @@ static void SV_ResetClientSnapshot (client_t *client)
 		memset (client->snapshot_pending_relevant, 0, max_edicts * sizeof(byte));
 	if (client->snapshot_pending_flags)
 		memset (client->snapshot_pending_flags, 0, max_edicts * sizeof(byte));
+}
+
+static void SV_InitEntityStream (client_t *client, int total_entities, unsigned int seq)
+{
+	client->entstream.active = true;
+	client->entstream.signon_stage = client->sendsignon;
+	client->entstream.next_edict = 1;
+	client->entstream.total_edicts = qcvm->max_edicts;
+	client->entstream.base_snapshot = (int)seq;
+	client->entstream.total_entities = total_entities;
+	client->entstream.sent_entities = 0;
+	client->entstream.next_log_time = 0;
 }
 
 static qboolean SV_SnapshotMoverMoving (const edict_t *ent)
@@ -1199,6 +1220,58 @@ static int SV_SnapshotEntitySizeWorst (void)
 
 	entry_overhead = q_max (extra_flags, 4); // worst-case delta includes a 32-bit mask
 	return 2 + entry_overhead + field_size;
+}
+
+static int SV_SnapshotCoordBytes (qboolean hires)
+{
+	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
+		return 4;
+	if (sv.protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
+		return 4;
+	if (sv.protocolflags & PRFL_24BITCOORD)
+		return 3;
+	return 2;
+}
+
+static int SV_SnapshotAngleBytes (qboolean hires)
+{
+	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
+		return 4;
+	if (sv.protocolflags & PRFL_FLOATANGLE)
+		return 4;
+	if (sv.protocolflags & PRFL_SHORTANGLE)
+		return 2;
+	return 1;
+}
+
+static int SV_Snapshot2EntitySizeForFlags (byte snapflags)
+{
+	int coord_size = SV_SnapshotCoordBytes ((snapflags & SNAPFLAG_HIRES_ORIGIN) != 0);
+	int angle_size = SV_SnapshotAngleBytes ((snapflags & SNAPFLAG_HIRES_ANGLES) != 0);
+	int state_size = 3 * coord_size + 3 * angle_size + 2 + 2 + 1 + 1 + 1 + 1 + 1 + 1;
+	int extra_flags = (sv.protocolflags & PRFL_SNAPSHOT_HIRES) ? 1 : 0;
+
+	return 2 + extra_flags + state_size;
+}
+
+static int SV_Snapshot2FullSize (const byte *present, const byte *snapflags, int max_edicts, int *out_count)
+{
+	int entnum;
+	int count = 0;
+	int size = 1 + 4 + 4 + 1 + 2 + 2;
+
+	for (entnum = 1; entnum < max_edicts; entnum++)
+	{
+		if (!present[entnum])
+			continue;
+		count++;
+		size += SV_Snapshot2EntitySizeForFlags (snapflags ? snapflags[entnum] : 0);
+	}
+
+	if (out_count)
+		*out_count = count;
+
+	return size;
 }
 
 static int SV_SnapshotMaxEntities (sizebuf_t *msg)
@@ -1516,6 +1589,105 @@ static void SV_WriteSnapshot2Header (sizebuf_t *msg, unsigned int seq, unsigned 
 	MSG_WriteByte (msg, (byte)flags);
 	MSG_WriteShort (msg, (short)num_entities);
 	MSG_WriteShort (msg, (short)num_removed);
+}
+
+static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
+	const byte *present, const byte *snapflags)
+{
+	int header_size = 1 + 4 + 4 + 1 + 2 + 2;
+	int available = msg->maxsize - msg->cursize;
+	int entnum;
+	int chunk_count = 0;
+	int chunk_size = header_size;
+	int last_sent = 0;
+	qboolean more = false;
+	unsigned int flags = SNAPSHOT_FLAG_FULL;
+
+	if (available < header_size)
+		return false;
+
+	for (entnum = client->entstream.next_edict; entnum < qcvm->max_edicts; entnum++)
+	{
+		int ent_size;
+
+		if (!present[entnum])
+			continue;
+
+		ent_size = SV_Snapshot2EntitySizeForFlags (snapflags ? snapflags[entnum] : 0);
+		if (chunk_size + ent_size > available)
+		{
+			more = true;
+			break;
+		}
+
+		chunk_size += ent_size;
+		chunk_count++;
+		last_sent = entnum;
+	}
+
+	if (chunk_count == 0 && more)
+		return false;
+
+	if (more)
+		flags |= SNAPSHOT_FLAG_CONTINUE;
+
+	if (!MSG_CanFit (msg, chunk_size))
+		return false;
+
+	SV_WriteSnapshot2Header (msg, client->snapshot_pending_seq,
+		0xFFFFFFFFu, flags, (unsigned short)chunk_count, 0);
+
+	if (chunk_count)
+	{
+		int remaining = chunk_count;
+
+		for (entnum = client->entstream.next_edict; entnum < qcvm->max_edicts; entnum++)
+		{
+			snapshot_state_t state;
+			byte snapflag = 0;
+
+			if (!present[entnum])
+				continue;
+
+			if (snapflags)
+				snapflag = snapflags[entnum];
+
+			state = client->snapshot_pending[entnum];
+			MSG_WriteShort (msg, entnum);
+			if (sv.protocolflags & PRFL_SNAPSHOT_HIRES)
+				MSG_WriteByte (msg, snapflag);
+			SV_WriteSnapshotState (msg, &state, snapflag);
+
+			remaining--;
+			if (remaining == 0)
+				break;
+		}
+	}
+
+	client->entstream.sent_entities += chunk_count;
+
+	if (more)
+	{
+		client->entstream.next_edict = last_sent + 1;
+		msg->write_locked = true;
+		if (realtime >= client->entstream.next_log_time)
+		{
+			Con_Printf ("snapshot %s seq %u: sent %d/%d entities, continuing\n",
+				client->name,
+				client->snapshot_pending_seq,
+				client->entstream.sent_entities,
+				client->entstream.total_entities);
+			client->entstream.next_log_time = realtime + 1.0;
+		}
+	}
+	else
+	{
+		client->entstream.active = false;
+		client->entstream.next_edict = 1;
+		client->entstream.base_snapshot = 0;
+	}
+
+	return true;
 }
 
 static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const snapshot_state_t *base, byte snapflags)
@@ -1851,6 +2023,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	qboolean reason_interval = false;
 	qboolean reason_force_full = false;
 
+	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
+		client->entstream.active = false;
+
 	if (net_test_drop.value > 0.0f && ((float)rand() / (float)RAND_MAX) < net_test_drop.value)
 	{
 		if (sv_snap_debug.value >= 1.0f)
@@ -1919,11 +2094,44 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		else
 		{
 			if (sv_snapshot2.value)
-				SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
-					client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			{
+				int total_count = 0;
+				int total_size = SV_Snapshot2FullSize (client->snapshot_pending_present,
+					client->snapshot_pending_flags, qcvm->max_edicts, &total_count);
+
+				full_count = total_count;
+				if (client->entstream.active)
+				{
+					if (!SV_WriteSnapshot2FullChunked (client, msg,
+						client->snapshot_pending_present, client->snapshot_pending_flags))
+					{
+						msg->overflowed = true;
+						msg->write_locked = true;
+						return;
+					}
+				}
+				else if (total_size > (msg->maxsize - msg->cursize))
+				{
+					SV_InitEntityStream (client, total_count, client->snapshot_pending_seq);
+					if (!SV_WriteSnapshot2FullChunked (client, msg,
+						client->snapshot_pending_present, client->snapshot_pending_flags))
+					{
+						msg->overflowed = true;
+						msg->write_locked = true;
+						return;
+					}
+				}
+				else
+				{
+					SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
+						client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+				}
+			}
 			else
+			{
 				SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
 					client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			}
 			client->snapshot_last_full_seq = client->snapshot_pending_seq;
 			client->snapshot_last_full_time = realtime;
 		}
@@ -1998,11 +2206,34 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		else
 		{
 			if (sv_snapshot2.value)
-				SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
-					client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			{
+				int total_count = 0;
+				int total_size = SV_Snapshot2FullSize (client->snapshot_pending_present,
+					client->snapshot_pending_flags, qcvm->max_edicts, &total_count);
+
+				full_count = total_count;
+				if (total_size > (msg->maxsize - msg->cursize))
+				{
+					SV_InitEntityStream (client, total_count, client->snapshot_pending_seq);
+					if (!SV_WriteSnapshot2FullChunked (client, msg,
+						client->snapshot_pending_present, client->snapshot_pending_flags))
+					{
+						msg->overflowed = true;
+						msg->write_locked = true;
+						return;
+					}
+				}
+				else
+				{
+					SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
+						client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+				}
+			}
 			else
+			{
 				SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
 					client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
+			}
 			client->snapshot_last_full_seq = client->snapshot_pending_seq;
 			client->snapshot_last_full_time = realtime;
 		}
@@ -2083,6 +2314,7 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 	if (seq == 0)
 	{
 		SV_ResetClientSnapshot (client);
+		client->entstream.active = false;
 		if (sv_snapshotdebug.value || sv_snap_debug.value)
 			Con_Printf ("snapshot %s baseline reset request\n", client->name);
 		return;
@@ -2109,6 +2341,7 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_pending_baseline_seq = 0;
 	client->snapshot_unacked_frames = 0;
+	client->entstream.active = false;
 
 	if (sv_snapshotdebug.value || sv_snap_debug.value)
 		Con_Printf ("snapshot %s ack seq %u\n", client->name, seq);
@@ -2122,6 +2355,7 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_pending_seq = 0;
 	client->snapshot_unacked_frames = 0;
+	client->entstream.active = false;
 }
 
 typedef struct
@@ -2914,6 +3148,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	msg.overflowed = false;
 	msg.overflowed_once = false;
 	msg.write_blocked = false;
+	msg.write_locked = false;
 	msg.blocked_file = NULL;
 	msg.blocked_line = 0;
 	msg.dbg_name = "sv_client_datagram";
@@ -2943,8 +3178,10 @@ qboolean SV_SendClientDatagram (client_t *client)
 	SV_WriteClientdataToMessage (client->edict, &msg);
 	if (msg.overflowed)
 	{
-		packet_too_large = true;
-		goto datagram_too_large;
+		Con_Printf ("sv_mtu_cap %d too small for mandatory clientdata for %s\n",
+			msg.maxsize, client->name);
+		SV_DropClient (true);
+		return false;
 	}
 
 	SV_SendSnapshot (client, &msg);
@@ -2957,7 +3194,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	client->datagram_overflow_count = 0;
 
 // copy the server datagram if there is space
-	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
+	if (!msg.write_locked && msg.cursize + sv.datagram.cursize < msg.maxsize)
 		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
 
 	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
@@ -2995,13 +3232,26 @@ datagram_too_large:
 			}
 			client->datagram_overflow_count = 1;
 		}
-		Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped %d)\n",
-			msg.maxsize,
-			client->name,
-			msg.cursize,
-			client->sendsignon,
-			client->snapshot_pending_mandatory,
-			client->snapshot_pending_dropped);
+		if (realtime >= client->datagram_overflow_next_time)
+		{
+			if (client->entstream.active)
+				Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, entities %d/%d)\n",
+					msg.maxsize,
+					client->name,
+					msg.cursize,
+					client->sendsignon,
+					client->entstream.sent_entities,
+					client->entstream.total_entities);
+			else
+				Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped %d)\n",
+					msg.maxsize,
+					client->name,
+					msg.cursize,
+					client->sendsignon,
+					client->snapshot_pending_mandatory,
+					client->snapshot_pending_dropped);
+			client->datagram_overflow_next_time = realtime + 1.0;
+		}
 		return false;
 	}
 
@@ -3152,6 +3402,7 @@ void SV_SendNop (client_t *client)
 	msg.overflowed = false;
 	msg.overflowed_once = false;
 	msg.write_blocked = false;
+	msg.write_locked = false;
 	msg.blocked_file = NULL;
 	msg.blocked_line = 0;
 	msg.dbg_name = "sv_nop";
@@ -4275,6 +4526,7 @@ void SV_SendReconnect (void)
 	msg.overflowed = false;
 	msg.overflowed_once = false;
 	msg.write_blocked = false;
+	msg.write_locked = false;
 	msg.blocked_file = NULL;
 	msg.blocked_line = 0;
 	msg.dbg_name = "sv_reconnect";

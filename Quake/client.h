@@ -276,6 +276,10 @@ typedef struct
 	byte		*snapshot_present;
 	byte		*snapshot_active;
 	double		*snapshot_last_update_time;
+	qboolean	snapshot_chunk_active;
+	unsigned int snapshot_chunk_seq;
+	snapshot_state_t *snapshot_chunk;
+	byte		*snapshot_chunk_present;
 
 	int			cdtrack, looptrack;	// cd audio
 

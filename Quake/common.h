@@ -118,6 +118,7 @@ typedef struct sizebuf_s
 	qboolean	overflowed;		// set to true if the buffer size failed
 	qboolean	overflowed_once;	// set on first overflow until explicit clear/init
 	qboolean	write_blocked;		// set when writes are not allowed
+	qboolean	write_locked;		// set when no more writes should occur
 	const char	*blocked_file;
 	int		blocked_line;
 	const char	*dbg_name;
@@ -154,6 +155,10 @@ typedef struct sizebuf_s
 } while (0)
 
 #define MSG_CAN_FIT(msg, bytes) ((msg)->cursize + (bytes) <= (msg)->maxsize)
+static inline qboolean MSG_CanFit (sizebuf_t *msg, int bytes)
+{
+	return MSG_CAN_FIT (msg, bytes);
+}
 
 void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line);
 

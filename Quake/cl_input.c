@@ -393,6 +393,7 @@ void CL_SendMove (const usercmd_t *cmd)
 	buf.overflowed = false;
 	buf.overflowed_once = false;
 	buf.write_blocked = false;
+	buf.write_locked = false;
 	buf.blocked_file = NULL;
 	buf.blocked_line = 0;
 	buf.dbg_name = "cl_move";

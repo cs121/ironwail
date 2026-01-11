@@ -160,6 +160,18 @@ typedef struct signon_stream_s
 	size_t		stage_max_record[SIGNON_STAGE_COUNT];
 } signon_stream_t;
 
+typedef struct sv_entity_stream_s
+{
+	qboolean	active;
+	int			signon_stage;
+	int			next_edict;
+	int			total_edicts;
+	int			base_snapshot;
+	int			total_entities;
+	int			sent_entities;
+	double		next_log_time;
+} sv_entity_stream_t;
+
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
@@ -170,6 +182,7 @@ typedef struct client_s
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
 	signon_stream_t	signon_stream;
+	sv_entity_stream_t entstream;
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
@@ -232,6 +245,7 @@ typedef struct client_s
 	int				mtu_dropped_tier2;
 	double			mtu_debug_next_time;
 	int				datagram_overflow_count;
+	double			datagram_overflow_next_time;
 	bot_state_t		bot;
 } client_t;
 

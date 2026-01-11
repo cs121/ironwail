@@ -1661,6 +1661,14 @@ static void CL_ReadSnapshotHeader (snapshot_header_t *header)
 	header->num_removed = (unsigned short)MSG_ReadShort ();
 }
 
+static void CL_ResetSnapshotChunk (void)
+{
+	if (cl.snapshot_chunk_present)
+		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
+	cl.snapshot_chunk_active = false;
+	cl.snapshot_chunk_seq = 0;
+}
+
 static void CL_ParseSnapshot2 (void)
 {
 	snapshot_header_t header;
@@ -1680,6 +1688,68 @@ static void CL_ParseSnapshot2 (void)
 
 	if (header.flags & SNAPSHOT_FLAG_FULL)
 	{
+		qboolean continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
+
+		if (continuation || cl.snapshot_chunk_active)
+		{
+			if (!cl.snapshot_chunk_active || cl.snapshot_chunk_seq != header.seq)
+			{
+				CL_ResetSnapshotChunk ();
+				cl.snapshot_chunk_active = true;
+				cl.snapshot_chunk_seq = header.seq;
+			}
+
+			for (i = 0; i < header.num_entities; i++)
+			{
+				int entnum;
+				snapshot_state_t state;
+				unsigned int snapflags = 0;
+
+				entnum = (unsigned short)MSG_ReadShort ();
+				if (entnum <= 0 || entnum >= cl_max_edicts)
+					Host_Error ("CL_ParseSnapshot2: entnum out of range");
+				if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
+					snapflags = (unsigned int)MSG_ReadByte ();
+				CL_ReadSnapshotState (&state, snapflags);
+				if (!drop)
+				{
+					cl.snapshot_chunk[entnum] = state;
+					cl.snapshot_chunk_present[entnum] = 1;
+				}
+			}
+
+			if (drop)
+			{
+				CL_ResetSnapshotChunk ();
+				return;
+			}
+
+			if (continuation)
+				return;
+
+			memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+			if (cl.snapshot_active)
+				memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+			if (cl.snapshot_last_update_time)
+				memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+
+			for (i = 1; i < cl_max_edicts; i++)
+			{
+				if (!cl.snapshot_chunk_present[i])
+					continue;
+				cl.snapshot_baseline[i] = cl.snapshot_chunk[i];
+				cl.snapshot_present[i] = 1;
+				CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+				CL_MarkSnapshotEntityUpdated (i);
+			}
+
+			cl.snapshot_baseline_seq = header.seq;
+			CL_SendSnapshotAck (header.seq);
+			CL_RecordPlayerSnap ();
+			CL_ResetSnapshotChunk ();
+			return;
+		}
+
 		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
 		if (cl.snapshot_active)
 			memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
