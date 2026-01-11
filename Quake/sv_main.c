@@ -2947,13 +2947,20 @@ qboolean SV_SendClientDatagram (client_t *client)
 	{
 		client->datagram_overflow_count++;
 		if (client->datagram_overflow_count > 1)
-			Sys_Error ("Repeated datagram overflow for %s (last write %s:%d msgkind=%d id=%d aux=%d)",
-				client->name,
-				msg.dbg_file ? msg.dbg_file : "unknown",
-				msg.dbg_line,
-				msg.dbg_msgkind,
-				msg.dbg_id,
-				msg.dbg_aux);
+		{
+			if (!dev_overflows.datagram || dev_overflows.datagram + CONSOLE_RESPAM_TIME < realtime )
+			{
+				Con_Printf ("Datagram overflow for %s (last write %s:%d msgkind=%d id=%d aux=%d)\n",
+					client->name,
+					msg.dbg_file ? msg.dbg_file : "unknown",
+					msg.dbg_line,
+					msg.dbg_msgkind,
+					msg.dbg_id,
+					msg.dbg_aux);
+				dev_overflows.datagram = realtime;
+			}
+			client->datagram_overflow_count = 1;
+		}
 		Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped %d)\n",
 			msg.maxsize,
 			client->name,
