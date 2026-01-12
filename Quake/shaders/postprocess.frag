@@ -784,7 +784,7 @@ void main()
                 if (blackLift > 0.0 && blackLiftStrength > 0.0)
                 {
                         mapped = mix(mapped, vec3(blackLift),
-                                1.0 - exp(-mapped * blackLiftStrength));
+                                exp(-mapped * blackLiftStrength));
                         mapped = clamp(mapped, 0.0, 1.0);
                 }
         }
