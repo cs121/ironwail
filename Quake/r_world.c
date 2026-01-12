@@ -814,6 +814,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 {
 	static qboolean warned_vertex_color = false;
 	float wave_value;
+	float output_scale = 1.f;
 
 	out[0] = 1.f;
 	out[1] = 1.f;
@@ -867,6 +868,15 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 	default:
 		break;
 	}
+
+	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
+		output_scale *= stage->emissive_scale;
+	if (stage->outputs & MAT_STAGE_OUT_BLOOM)
+		output_scale *= stage->bloom_scale;
+
+	out[0] *= output_scale;
+	out[1] *= output_scale;
+	out[2] *= output_scale;
 }
 
 static unsigned R_MapBlendMode (const mat_shader_stage_t *stage)
