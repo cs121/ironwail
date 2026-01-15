@@ -32,6 +32,7 @@ typedef struct godray_volume_s
 	vec3_t axis_t;
 	vec3_t axis_b;
 	vec3_t axis_r;
+	vec3_t ray_dir;
 	vec3_t mins;
 	vec3_t maxs;
 	vec4_t color_density;
@@ -55,6 +56,7 @@ static cvar_t r_godray_volume_noise_amount = { "r_godray_volume_noise_amount", "
 static cvar_t r_godray_volume_intensity = { "r_godray_volume_intensity", "1.0", CVAR_ARCHIVE };
 static cvar_t r_godray_volume_color = { "r_godray_volume_color", "1 1 1", CVAR_ARCHIVE };
 static cvar_t r_godray_volume_dir = { "r_godray_volume_dir", "0 -1 0", CVAR_ARCHIVE };
+static cvar_t r_godray_volume_debug = { "r_godray_volume_debug", "0", CVAR_ARCHIVE };
 
 static void R_GodrayVolume_ParseColor (const char *value, vec3_t color)
 {
@@ -95,6 +97,50 @@ static void R_GodrayVolume_TransformVector (const float matrix[16], const vec3_t
 	out[0] = matrix[0] * in[0] + matrix[4] * in[1] + matrix[8] * in[2];
 	out[1] = matrix[1] * in[0] + matrix[5] * in[1] + matrix[9] * in[2];
 	out[2] = matrix[2] * in[0] + matrix[6] * in[1] + matrix[10] * in[2];
+}
+
+static qboolean R_GodrayVolume_Invert3x3 (const float matrix[16], float out[9])
+{
+	const float a = matrix[0];
+	const float b = matrix[4];
+	const float c = matrix[8];
+	const float d = matrix[1];
+	const float e = matrix[5];
+	const float f = matrix[9];
+	const float g = matrix[2];
+	const float h = matrix[6];
+	const float i = matrix[10];
+	const float det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+
+	if (fabsf (det) < 1e-6f)
+		return false;
+
+	const float inv_det = 1.f / det;
+	out[0] = (e * i - f * h) * inv_det;
+	out[1] = (c * h - b * i) * inv_det;
+	out[2] = (b * f - c * e) * inv_det;
+	out[3] = (f * g - d * i) * inv_det;
+	out[4] = (a * i - c * g) * inv_det;
+	out[5] = (c * d - a * f) * inv_det;
+	out[6] = (d * h - e * g) * inv_det;
+	out[7] = (b * g - a * h) * inv_det;
+	out[8] = (a * e - b * d) * inv_det;
+	return true;
+}
+
+static void R_GodrayVolume_TransformNormal (const float matrix[16], const vec3_t in, vec3_t out)
+{
+	float inv[9];
+
+	if (R_GodrayVolume_Invert3x3 (matrix, inv))
+	{
+		out[0] = inv[0] * in[0] + inv[3] * in[1] + inv[6] * in[2];
+		out[1] = inv[1] * in[0] + inv[4] * in[1] + inv[7] * in[2];
+		out[2] = inv[2] * in[0] + inv[5] * in[1] + inv[8] * in[2];
+		return;
+	}
+
+	R_GodrayVolume_TransformVector (matrix, in, out);
 }
 
 static void R_GodrayVolume_TransformAABB (const float matrix[16], const vec3_t mins, const vec3_t maxs,
@@ -169,6 +215,7 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	vec3_t axis_t;
 	vec3_t axis_b;
 	vec3_t axis_r;
+	vec3_t ray_dir;
 	vec3_t up;
 	vec3_t corners[8];
 	float min_u = 0.f, max_u = 0.f;
@@ -201,7 +248,7 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	if (transform_surface)
 	{
 		vec3_t transformed_normal;
-		R_GodrayVolume_TransformVector (matrix, normal, transformed_normal);
+		R_GodrayVolume_TransformNormal (matrix, normal, transformed_normal);
 		VectorNormalize (transformed_normal);
 		VectorCopy (transformed_normal, normal);
 
@@ -213,6 +260,16 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	VectorAdd (world_mins, world_maxs, center);
 	VectorScale (center, 0.5f, center);
 	VectorMA (center, -(DotProduct (center, normal) - dist), normal, center_on_plane);
+
+	VectorCopy (base_dir, ray_dir);
+	if (VectorLength (ray_dir) > 0.001f)
+	{
+		float proj = DotProduct (ray_dir, normal);
+		VectorMA (ray_dir, -proj, normal, ray_dir);
+	}
+	if (VectorLength (ray_dir) < 0.001f)
+		VectorCopy (normal, ray_dir);
+	VectorNormalize (ray_dir);
 
 	VectorCopy (base_dir, axis_r);
 	if (VectorLength (axis_r) < 0.001f)
@@ -294,6 +351,7 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	VectorCopy (axis_t, volume->axis_t);
 	VectorCopy (axis_b, volume->axis_b);
 	VectorCopy (axis_r, volume->axis_r);
+	VectorCopy (ray_dir, volume->ray_dir);
 	volume->mins[0] = min_u;
 	volume->mins[1] = min_v;
 	volume->mins[2] = 0.f;
@@ -369,6 +427,7 @@ void R_GodrayVolume_Init (void)
 	Cvar_RegisterVariable (&r_godray_volume_intensity);
 	Cvar_RegisterVariable (&r_godray_volume_color);
 	Cvar_RegisterVariable (&r_godray_volume_dir);
+	Cvar_RegisterVariable (&r_godray_volume_debug);
 }
 
 void R_GodrayVolume_BuildList (void)
@@ -447,19 +506,36 @@ void R_GodrayVolume_Render (void)
 	{
 		const godray_volume_t *volume = &r_godray_volumes[i];
 		godray_volume_vertex_t verts[8];
+		vec3_t origin_vs;
+		vec3_t axis_t_vs;
+		vec3_t axis_b_vs;
+		vec3_t axis_r_vs;
+		vec3_t ray_dir_vs;
 
 		for (int v = 0; v < 8; ++v)
 			VectorCopy (volume->verts[v], verts[v].pos);
 
-		GL_Uniform3fFunc (0, volume->origin[0], volume->origin[1], volume->origin[2]);
-		GL_Uniform3fFunc (1, volume->axis_t[0], volume->axis_t[1], volume->axis_t[2]);
-		GL_Uniform3fFunc (2, volume->axis_b[0], volume->axis_b[1], volume->axis_b[2]);
-		GL_Uniform3fFunc (3, volume->axis_r[0], volume->axis_r[1], volume->axis_r[2]);
+		R_GodrayVolume_TransformPoint (r_matview, volume->origin, origin_vs);
+		R_GodrayVolume_TransformVector (r_matview, volume->axis_t, axis_t_vs);
+		R_GodrayVolume_TransformVector (r_matview, volume->axis_b, axis_b_vs);
+		R_GodrayVolume_TransformVector (r_matview, volume->axis_r, axis_r_vs);
+		R_GodrayVolume_TransformVector (r_matview, volume->ray_dir, ray_dir_vs);
+		VectorNormalize (axis_t_vs);
+		VectorNormalize (axis_b_vs);
+		VectorNormalize (axis_r_vs);
+		VectorNormalize (ray_dir_vs);
+
+		GL_Uniform3fFunc (0, origin_vs[0], origin_vs[1], origin_vs[2]);
+		GL_Uniform3fFunc (1, axis_t_vs[0], axis_t_vs[1], axis_t_vs[2]);
+		GL_Uniform3fFunc (2, axis_b_vs[0], axis_b_vs[1], axis_b_vs[2]);
+		GL_Uniform3fFunc (3, axis_r_vs[0], axis_r_vs[1], axis_r_vs[2]);
 		GL_Uniform3fFunc (4, volume->mins[0], volume->mins[1], volume->mins[2]);
 		GL_Uniform3fFunc (5, volume->maxs[0], volume->maxs[1], volume->maxs[2]);
 		GL_Uniform4fFunc (6, volume->color_density[0], volume->color_density[1],
 			volume->color_density[2], volume->color_density[3]);
 		GL_Uniform4fFunc (7, volume->misc[0], volume->misc[1], volume->misc[2], volume->misc[3]);
+		GL_Uniform3fFunc (9, ray_dir_vs[0], ray_dir_vs[1], ray_dir_vs[2]);
+		GL_Uniform1fFunc (10, r_godray_volume_debug.value);
 
 		GL_Upload (GL_ARRAY_BUFFER, verts, sizeof (verts), &buf, &ofs);
 		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
