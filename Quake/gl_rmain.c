@@ -819,12 +819,16 @@ void GL_CreateFrameBuffers (void)
 	framebufs.godrays.width = q_max (1, vid.width / 2);
 	framebufs.godrays.height = q_max (1, vid.height / 2);
 	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_LINEAR, "godrays source");
+	framebufs.godrays.dir_tex = GL_CreateTexture2D (GL_RG16F, vid.width, vid.height, GL_LINEAR, "godrays dir");
 	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
 	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
-	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
-		framebufs.composite.depth_stencil_tex,
-		framebufs.composite.depth_stencil_tex,
-		"godrays source fbo");
+	{
+		GLuint colors[2] = { framebufs.godrays.source_tex, framebufs.godrays.dir_tex };
+		framebufs.godrays.source_fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2,
+			framebufs.composite.depth_stencil_tex,
+			framebufs.composite.depth_stencil_tex,
+			"godrays source fbo");
+	}
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
@@ -965,6 +969,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.dir_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
@@ -1584,7 +1589,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 {
 	int width = vid.width;
 	int height = vid.height;
-	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0 || framebufs.godrays.dir_tex == 0)
 		return;
 	if (!draw_sky && !draw_brush)
 		return;
@@ -1595,7 +1600,9 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
+		const float clear_dir[4] = { 0.5f, 0.5f, 0.f, 1.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+		GL_ClearBufferfvFunc (GL_COLOR, 1, clear_dir);
 	}
 
 	if (draw_sky && glprogs.godrays_source_sky)
@@ -1632,6 +1639,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 				q_max (0.f, r_godrays_emissive_threshold.value),
 				q_max (0.f, r_godrays_light_threshold.value));
 			GL_Uniform4fFunc (1, mask_knee, 0.f, 0.f, 0.f);
+			GL_Uniform2fFunc (2, (float)width, (float)height);
 			R_DrawBrushModels_Godrays (ents, count);
 		}
 	}
@@ -1652,7 +1660,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
 		return fallback;
-	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0 || framebufs.godrays.dir_tex == 0)
 		return fallback;
 	if (!R_GodraysReady ())
 		return fallback;
@@ -1723,6 +1731,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
@@ -1757,6 +1766,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
 			glDrawArrays (GL_TRIANGLES, 0, 3);

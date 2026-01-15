@@ -682,6 +682,7 @@ typedef struct glframebufs_s {
 
 	struct {
 		GLuint		source_tex;
+		GLuint		dir_tex;
 		GLuint		mask_tex;
 		GLuint		shafts_tex;
 		GLuint		source_fbo;
