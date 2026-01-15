@@ -593,6 +593,7 @@ typedef struct glprogs_s {
 	GLuint		fogvol;
 	GLuint		fogvol_upsample;
 	GLuint		fogvol_temporal;
+	GLuint		godray_volume;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
