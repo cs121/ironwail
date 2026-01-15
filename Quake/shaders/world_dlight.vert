@@ -41,6 +41,7 @@ struct Call
         vec4    stage_color;
 	vec4	texmatrix0;
 	vec4	texmatrix1;
+	vec4	emitter_center;
 #if BINDLESS
         uvec2   txhandle;
         uvec2   fbhandle;

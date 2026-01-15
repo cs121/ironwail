@@ -55,6 +55,7 @@ struct Call
 	vec4	stage_color;
 	vec4	texmatrix0;
 	vec4	texmatrix1;
+	vec4	emitter_center;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -155,6 +156,7 @@ layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
 layout(location=15) flat out vec4 out_stage_color;
 layout(location=16) flat out uint out_tcgen;
+layout(location=17) flat out vec2 out_emitter_center_ss;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -232,6 +234,7 @@ void main()
 	out_lmofs = in_lmofs;
 	out_stage_color = call.stage_color;
 	out_tcgen = call.tcgen;
+	out_emitter_center_ss = call.emitter_center.xy;
 #if BINDLESS
 	out_samplers0.xy = call.txhandle;
 	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)
