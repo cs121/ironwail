@@ -194,7 +194,7 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	dist = surf->plane->dist;
 	if (surf->flags & SURF_PLANEBACK)
 	{
-		VectorNegate (normal, normal);
+		VectorScale (normal, -1.f, normal);
 		dist = -dist;
 	}
 
@@ -221,7 +221,7 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	if (fabsf (DotProduct (axis_r, normal)) < 0.1f)
 		VectorCopy (normal, axis_r);
 	if (DotProduct (axis_r, normal) < 0.f)
-		VectorNegate (axis_r, axis_r);
+		VectorScale (axis_r, -1.f, axis_r);
 
 	if (fabsf (normal[2]) < 0.95f)
 	{
