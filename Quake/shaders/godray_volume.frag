@@ -1,6 +1,6 @@
 #include "frame_uniforms.glsl"
 
-layout(location=0) in vec3 v_world_pos;
+layout(location=0) in vec3 v_view_pos;
 layout(location=0) out vec4 FragColor;
 
 layout(location=0) uniform vec3 GodrayVolumeOrigin;
@@ -12,6 +12,8 @@ layout(location=5) uniform vec3 GodrayVolumeMaxs;
 layout(location=6) uniform vec4 GodrayVolumeColorDensity;
 layout(location=7) uniform vec4 GodrayVolumeMisc; // x: noise scale, y: noise amount, z: intensity
 layout(location=8) uniform int GodrayVolumeSteps;
+layout(location=9) uniform vec3 GodrayVolumeRayDir;
+layout(location=10) uniform float GodrayVolumeDebug;
 
 float Hash31(vec3 p)
 {
@@ -20,18 +22,24 @@ float Hash31(vec3 p)
 
 void main()
 {
-	vec3 ray_origin_ws = EyePos;
-	vec3 ray_dir_ws = normalize(v_world_pos - ray_origin_ws);
+	if (GodrayVolumeDebug > 0.0)
+	{
+		FragColor = vec4(GodrayVolumeRayDir * 0.5 + 0.5, 1.0);
+		return;
+	}
 
-	vec3 rel_origin = ray_origin_ws - GodrayVolumeOrigin;
+	vec3 ray_origin_vs = vec3(0.0);
+	vec3 ray_dir_vs = normalize(v_view_pos - ray_origin_vs);
+
+	vec3 rel_origin = ray_origin_vs - GodrayVolumeOrigin;
 	vec3 ray_origin = vec3(
 		dot(rel_origin, GodrayVolumeAxisT),
 		dot(rel_origin, GodrayVolumeAxisB),
 		dot(rel_origin, GodrayVolumeAxisR));
 	vec3 ray_dir = vec3(
-		dot(ray_dir_ws, GodrayVolumeAxisT),
-		dot(ray_dir_ws, GodrayVolumeAxisB),
-		dot(ray_dir_ws, GodrayVolumeAxisR));
+		dot(ray_dir_vs, GodrayVolumeAxisT),
+		dot(ray_dir_vs, GodrayVolumeAxisB),
+		dot(ray_dir_vs, GodrayVolumeAxisR));
 
 	vec3 inv_dir = 1.0 / ray_dir;
 	vec3 t0 = (GodrayVolumeMins - ray_origin) * inv_dir;
