@@ -2569,7 +2569,7 @@ R_EntityMatrix
 PERF OPT: Calculate sin/cos only once, reuse for both branches
 ===============
 */
-void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned char scale)
+void R_EntityMatrix (float matrix[16], const vec3_t origin, const vec3_t angles, unsigned char scale)
 {
 	float scalefactor = ENTSCALE_DECODE (scale);
 	float yaw = DEG2RAD (angles[YAW]);
