@@ -296,6 +296,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
 	GLfloat		texmatrix[8];
+	GLfloat		emitter_center[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
@@ -311,6 +312,7 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
 	GLfloat		texmatrix[8];
+	GLfloat		emitter_center[4];
 	GLint		baseinstance;
 	GLint		padding[3];
 } bmodel_bound_gpu_call_t;
@@ -601,9 +603,110 @@ static void R_SetCallTexMatrix (float *dst, const mat_texmatrix_t *matrix)
 	dst[7] = 0.f;
 }
 
+static void R_SetCallEmitterCenter (float *dst, const vec2_t emitter_center_ss)
+{
+	if (!dst)
+		return;
+
+	if (emitter_center_ss)
+	{
+		dst[0] = emitter_center_ss[0];
+		dst[1] = emitter_center_ss[1];
+	}
+	else
+	{
+		dst[0] = 0.5f;
+		dst[1] = 0.5f;
+	}
+	dst[2] = 0.f;
+	dst[3] = 0.f;
+}
+
+static void R_TransformPoint (const float matrix[16], const vec3_t in, vec3_t out)
+{
+	out[0] = in[0] * matrix[0] + in[1] * matrix[4] + in[2] * matrix[8] + matrix[12];
+	out[1] = in[0] * matrix[1] + in[1] * matrix[5] + in[2] * matrix[9] + matrix[13];
+	out[2] = in[0] * matrix[2] + in[1] * matrix[6] + in[2] * matrix[10] + matrix[14];
+}
+
+static qboolean R_GetModelTextureBounds (const qmodel_t *model, int texnum, vec3_t out_mins, vec3_t out_maxs)
+{
+	qboolean found = false;
+
+	if (!model || !model->surfaces || model->nummodelsurfaces <= 0)
+		return false;
+
+	int start = model->firstmodelsurface;
+	int end = start + model->nummodelsurfaces;
+	for (int i = start; i < end; i++)
+	{
+		msurface_t *surf = &model->surfaces[i];
+		if (!surf->texinfo || surf->texinfo->texnum != texnum)
+			continue;
+
+		if (!found)
+		{
+			VectorCopy (surf->mins, out_mins);
+			VectorCopy (surf->maxs, out_maxs);
+			found = true;
+		}
+		else
+		{
+			out_mins[0] = q_min (out_mins[0], surf->mins[0]);
+			out_mins[1] = q_min (out_mins[1], surf->mins[1]);
+			out_mins[2] = q_min (out_mins[2], surf->mins[2]);
+			out_maxs[0] = q_max (out_maxs[0], surf->maxs[0]);
+			out_maxs[1] = q_max (out_maxs[1], surf->maxs[1]);
+			out_maxs[2] = q_max (out_maxs[2], surf->maxs[2]);
+		}
+	}
+
+	return found;
+}
+
+static void R_ComputeGodraysEmitterCenterSS (const entity_t *ent, const qmodel_t *model, int texnum, vec2_t out_center_ss)
+{
+	vec3_t mins;
+	vec3_t maxs;
+	vec3_t center_local;
+	vec3_t center_world;
+	vec3_t proj;
+
+	if (!out_center_ss)
+		return;
+
+	out_center_ss[0] = 0.5f;
+	out_center_ss[1] = 0.5f;
+
+	if (!R_GetModelTextureBounds (model, texnum, mins, maxs))
+		return;
+
+	center_local[0] = (mins[0] + maxs[0]) * 0.5f;
+	center_local[1] = (mins[1] + maxs[1]) * 0.5f;
+	center_local[2] = (mins[2] + maxs[2]) * 0.5f;
+
+	if (ent && ent != &cl_entities[0])
+	{
+		vec3_t matrix_angles;
+		float matrix[16];
+		VectorCopy (ent->angles, matrix_angles);
+		matrix_angles[0] = -matrix_angles[0];
+		R_EntityMatrix (matrix, ent->origin, matrix_angles, ent->scale);
+		R_TransformPoint (matrix, center_local, center_world);
+	}
+	else
+	{
+		VectorCopy (center_local, center_world);
+	}
+
+	ProjectVector (center_world, r_matviewproj, proj);
+	out_center_ss[0] = CLAMP (0.f, proj[0] * 0.5f + 0.5f, 1.f);
+	out_center_ss[1] = CLAMP (0.f, proj[1] * 0.5f + 0.5f, 1.f);
+}
+
 static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix,
 	float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
-	qboolean force_fullbright)
+	qboolean force_fullbright, const vec2_t emitter_center_ss)
 {
 	GLuint		flags;
 	float		alpha;
@@ -665,6 +768,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
 		R_SetCallTexMatrix (call->texmatrix, NULL);
+		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -687,6 +791,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
 		R_SetCallTexMatrix (call->texmatrix, NULL);
+		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -706,7 +811,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
 	tcgen_mode_t tcgen, qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
-	const mat_texmatrix_t *texmatrix, const vec4_t stage_color)
+	const mat_texmatrix_t *texmatrix, const vec4_t stage_color, const vec2_t emitter_center_ss)
 {
 	GLuint flags;
 	float alpha;
@@ -740,6 +845,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
 		R_SetCallTexMatrix (call->texmatrix, texmatrix);
+		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
@@ -762,6 +868,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
 		R_SetCallTexMatrix (call->texmatrix, texmatrix);
+		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -1237,7 +1344,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
-						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color);
+						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color, NULL);
 				}
 			}
 		}
@@ -1334,6 +1441,8 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 			const shader_material_t *material;
 			unsigned mat_flags = 0u;
 			size_t stage_count;
+			qboolean emitter_center_valid = false;
+			vec2_t emitter_center_ss = { 0.5f, 0.5f };
 
 			if (!t || !R_ValidPtr (t))
 				continue;
@@ -1401,6 +1510,12 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				if (t->type == TEXTYPE_CUTOUT)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
 
+				if (!emitter_center_valid)
+				{
+					R_ComputeGodraysEmitterCenterSS (e, model, j, emitter_center_ss);
+					emitter_center_valid = true;
+				}
+
 				{
 					float polygon_offset_factor;
 					float polygon_offset_units;
@@ -1410,7 +1525,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
-						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color);
+						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color, emitter_center_ss);
 				}
 			}
 		}
@@ -1643,7 +1758,7 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 					pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
-					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright);
+					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright, NULL);
 			}
 		}
 		
@@ -1796,7 +1911,7 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 					R_TextureAnimation (t, frame),
-					zfix, polygon_offset_factor, polygon_offset_units, alpha, extra_flags, false);
+					zfix, polygon_offset_factor, polygon_offset_units, alpha, extra_flags, false, NULL);
 			}
 		}
 

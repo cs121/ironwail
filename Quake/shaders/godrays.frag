@@ -1,4 +1,5 @@
 layout(binding=0) uniform sampler2D MaskTexture;
+layout(binding=1) uniform sampler2D DirTexture;
 
 layout(location=0) uniform vec4 LightParams; // xy: light position, z: density, w: weight
 layout(location=1) uniform vec4 ScatterParams; // x: decay, y: exposure, z: max radius, w: samples
@@ -18,11 +19,16 @@ void main()
         int samples = int(ScatterParams.w + 0.5);
         samples = clamp(samples, 1, 128);
 
-        vec2 delta = uv - lightPos;
-        float dist = length(delta);
-        if (maxRadius > 0.0 && dist > maxRadius)
-                delta *= maxRadius / max(dist, 1e-4);
-        vec2 step = delta * (density / float(samples));
+        vec2 dir = texture(DirTexture, uv).rg * 2.0 - 1.0;
+        float l2 = dot(dir, dir);
+        if (l2 < 1e-4)
+                dir = normalize(uv - lightPos);
+        else
+                dir *= inversesqrt(l2);
+        float step_scale = density / float(samples);
+        if (maxRadius > 0.0)
+                step_scale = min(step_scale, maxRadius / float(samples));
+        vec2 step = dir * step_scale;
 
         vec2 coord = uv;
         vec3 accum = vec3(0.0);
@@ -32,7 +38,8 @@ void main()
                 if (i >= samples)
                         break;
                 coord -= step;
-                coord = clamp(coord, vec2(0.0), vec2(1.0));
+                if (coord.x < 0.0 || coord.x > 1.0 || coord.y < 0.0 || coord.y > 1.0)
+                        break;
                 vec4 sampleColor = texture(MaskTexture, coord);
                 accum += sampleColor.rgb * sampleColor.a * illuminationDecay * weight;
                 illuminationDecay *= decay;
