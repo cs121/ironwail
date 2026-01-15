@@ -1686,8 +1686,18 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
+	float inv_viewproj[16];
+	vec3_t light_dir;
+	vec3_t emitter_normal;
+	GLuint depth_tex = framebufs.composite.depth_stencil_tex;
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
+	if (!MatrixInverse4x4 (r_matviewproj, inv_viewproj))
+		memcpy (inv_viewproj, r_identity_mat4, sizeof (inv_viewproj));
+	VectorCopy (r_framedata.shadow_sun_dir, light_dir);
+	if (VectorNormalize (light_dir) <= 0.f)
+		VectorSet (light_dir, 0.f, 0.f, -1.f);
+	VectorSet (emitter_normal, 0.f, 0.f, 1.f);
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
@@ -1731,9 +1741,14 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+			GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_UniformMatrix4fvFunc (2, 1, GL_FALSE, inv_viewproj);
+			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
+			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
+			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
@@ -1766,9 +1781,14 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+			GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_UniformMatrix4fvFunc (2, 1, GL_FALSE, inv_viewproj);
+			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
+			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
+			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
