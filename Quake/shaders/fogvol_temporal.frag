@@ -100,7 +100,8 @@ void main()
 	}
 	history.rgb = clamp(history.rgb, minColor, maxColor);
 
-	float motionPx = length((prevScreenUv - screenUv) * FogViewportParams.xy);
+	vec2 motionVecPx = (prevScreenUv - screenUv) * FogViewportParams.xy;
+	float motionPx = sqrt(dot(motionVecPx, motionVecPx));
 	float motionFactor = clamp(1.0 - motionPx * 0.1, 0.0, 1.0);
 	float alpha = (valid ? FogTemporalAlpha : 0.0) * motionFactor;
 	alpha = clamp(alpha, 0.0, 1.0);

@@ -181,7 +181,14 @@ void main()
 	vec2 screenUv = screenPos * invScreen;
 	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 
-	FogVolume volume = FogVolumes[FogVolumeIndex];
+	int _fogIdx = FogVolumeIndex;
+	if (_fogIdx < 0 || _fogIdx >= MAX_FOGVOLUMES)
+	{
+		// Invalid index -> no fog
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		return;
+	}
+	FogVolume volume = FogVolumes[_fogIdx];
 	if (volume.misc.y <= 0.0)
 	{
 		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
@@ -201,8 +208,14 @@ void main()
 	vec3 worldPos = world.xyz / world.w;
 
 	vec3 ro = FogCameraPosWS;
-	vec3 rd = normalize(worldPos - ro);
-	float tScene = length(worldPos - ro);
+	vec3 toP = worldPos - ro;
+	float tScene = length(toP);
+	if (tScene < 1e-6)
+	{
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		return;
+	}
+	vec3 rd = toP / tScene;
 	if (IsSkyDepth(depth))
 		tScene = 1e6;
 
@@ -287,7 +300,7 @@ void main()
 
 	if (FogDebugMode == 5)
 	{
-		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
+		vec3 debugColor = DebugVolumeColor(float(_fogIdx), volume.misc.x);
 		FragColor = vec4(debugColor, 1.0);
 		return;
 	}

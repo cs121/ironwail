@@ -446,7 +446,7 @@ void main()
                                         float t = (float(i) - 0.5 + jitter) / float(sampleCount);
                                         t = clamp(t, 0.0, 1.0);
                                         vec2 offsetPx = direction * (t * radius);
-                                        if (length(offsetPx) < 1e-6)
+                                        if (dot(offsetPx, offsetPx) < 1e-12)
                                                 continue;
                                         vec2 offsetUV = offsetPx * invTexSize;
                                         vec2 sampleUVPos = uv + offsetUV;
@@ -520,8 +520,8 @@ void main()
                         float px = maxPx * a * (0.65 + 0.35 * abs(osc));
                         vec2 baseDir = vec2(cos(t * 1.7), sin(t * 1.31));
                         vec2 dir = baseDir + vec2(jitter, -jitter);
-                        float dirLen = length(dir);
-                        dir = (dirLen > 1e-4) ? (dir / dirLen) : vec2(1.0, 0.0);
+                        float dirLen2 = dot(dir, dir);
+                        dir = (dirLen2 > 1e-8) ? (dir * inversesqrt(dirLen2)) : vec2(1.0, 0.0);
                         vec2 offset1 = dir * px * invTexSize;
                         vec2 offset2 = vec2(-dir.y, dir.x) * (px * 0.75) * invTexSize;
                         vec3 base = color.rgb;

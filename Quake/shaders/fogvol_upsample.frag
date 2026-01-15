@@ -16,7 +16,7 @@ void main()
 	halfCoord = clamp(halfCoord, ivec2(0), halfSize - ivec2(1));
 
 	float depthCenter = texelFetch(SceneDepth, fullCoord, 0).r;
-	vec3 accum = vec3(0.0);
+	vec4 accum = vec4(0.0);
 	float weightSum = 0.0;
 
 	if (FogUpsampleTaps == 9)
@@ -31,7 +31,7 @@ void main()
 				fullTap = clamp(fullTap, ivec2(0), fullSize - ivec2(1));
 				float depthTap = texelFetch(SceneDepth, fullTap, 0).r;
 				float weight = exp(-abs(depthTap - depthCenter) * FogUpsampleK);
-				accum += texelFetch(FogColor, tapCoord, 0).rgb * weight;
+				accum += texelFetch(FogColor, tapCoord, 0) * weight;
 				weightSum += weight;
 			}
 		}
@@ -48,12 +48,12 @@ void main()
 				fullTap = clamp(fullTap, ivec2(0), fullSize - ivec2(1));
 				float depthTap = texelFetch(SceneDepth, fullTap, 0).r;
 				float weight = exp(-abs(depthTap - depthCenter) * FogUpsampleK);
-				accum += texelFetch(FogColor, tapCoord, 0).rgb * weight;
+				accum += texelFetch(FogColor, tapCoord, 0) * weight;
 				weightSum += weight;
 			}
 		}
 	}
 
-	vec3 color = (weightSum > 0.0) ? (accum / weightSum) : vec3(0.0);
-	outColor = vec4(color, 1.0);
+	vec4 fog = (weightSum > 0.0) ? (accum / weightSum) : vec4(0.0, 0.0, 0.0, 1.0);
+	outColor = fog;
 }

@@ -10,6 +10,7 @@
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
+	if (Fog.w <= 0.0) return clr;
 	float fog = exp2(-Fog.w * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);

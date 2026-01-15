@@ -18,7 +18,8 @@ layout(binding=6) uniform samplerCube EnvmapCube;
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-	float fog = exp2(-abs(Fog.w) * dot(p, p));
+	if (Fog.w <= 0.0) return clr;
+	float fog = exp2(-Fog.w * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);
 }
@@ -516,9 +517,11 @@ void main()
         {
                 ivec3 cluster_coord = ivec3(
                         int(floor(in_coord.x)),
-			int(floor(in_coord.y)),
-			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
-		);
+                        int(floor(in_coord.y)),
+                        int(floor(log2(max(in_depth, 1e-6)) * ZLogScale + ZLogBias))
+                );
+                // Clamp to valid cluster volume to avoid undefined imageLoad reads at screen edges / extreme depths
+                cluster_coord = clamp(cluster_coord, ivec3(0), ivec3(LIGHT_TILES_X-1, LIGHT_TILES_Y-1, LIGHT_TILES_Z-1));
 		
 		uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
 		
