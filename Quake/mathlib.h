@@ -97,6 +97,7 @@ float DistanceSquared (const vec3_t a, const vec3_t b);
 float Distance (const vec3_t a, const vec3_t b);
 void VectorInverse (vec3_t v);
 void VectorScale (const vec3_t in, vec_t scale, vec3_t out);
+void PerpendicularVector (vec3_t dst, const vec3_t src);
 int Q_log2(int val);
 int Q_nextPow2(int val);
 
@@ -173,4 +174,3 @@ qboolean RayVsBox (const vec3_t org, const vec3_t rcpdelta, const vec3_t mins, c
 /*==========================================================================*/
 
 #endif	/* __MATHLIB_H */
-
