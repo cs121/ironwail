@@ -527,6 +527,7 @@ void GL_CreateShaders (void)
 	glprogs.fogvol_upsample = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_upsample.frag"), "fog volumes upsample");
 	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
 	glprogs.godray_volume = GL_CreateProgram (GLSL_PATH("godray_volume.vert"), GLSL_PATH("godray_volume.frag"), "godray volumes");
+	glprogs.godray_volume_debug = GL_CreateProgram (GLSL_PATH("godray_volume_debug.vert"), GLSL_PATH("godray_volume_debug.frag"), "godray volumes debug");
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
