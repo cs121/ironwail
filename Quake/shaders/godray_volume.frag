@@ -12,8 +12,6 @@ layout(location=5) uniform vec3 GodrayVolumeMaxs;
 layout(location=6) uniform vec4 GodrayVolumeColorDensity;
 layout(location=7) uniform vec4 GodrayVolumeMisc; // x: noise scale, y: noise amount, z: intensity
 layout(location=8) uniform int GodrayVolumeSteps;
-layout(location=9) uniform vec3 GodrayVolumeRayDir;
-layout(location=10) uniform float GodrayVolumeDebug;
 
 float Hash31(vec3 p)
 {
@@ -22,12 +20,6 @@ float Hash31(vec3 p)
 
 void main()
 {
-	if (GodrayVolumeDebug > 0.0)
-	{
-		FragColor = vec4(GodrayVolumeRayDir * 0.5 + 0.5, 1.0);
-		return;
-	}
-
 	vec3 ray_origin_vs = vec3(0.0);
 	vec3 ray_dir_vs = normalize(v_view_pos - ray_origin_vs);
 

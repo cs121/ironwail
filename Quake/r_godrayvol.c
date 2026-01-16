@@ -56,7 +56,7 @@ static cvar_t r_godray_volume_noise_amount = { "r_godray_volume_noise_amount", "
 static cvar_t r_godray_volume_intensity = { "r_godray_volume_intensity", "1.0", CVAR_ARCHIVE };
 static cvar_t r_godray_volume_color = { "r_godray_volume_color", "1 1 1", CVAR_ARCHIVE };
 static cvar_t r_godray_volume_dir = { "r_godray_volume_dir", "0 -1 0", CVAR_ARCHIVE };
-static cvar_t r_godray_volume_debug = { "r_godray_volume_debug", "0", CVAR_ARCHIVE };
+static cvar_t r_godray_vol_debug = { "r_godray_vol_debug", "0", CVAR_ARCHIVE };
 
 static void R_GodrayVolume_ParseColor (const char *value, vec3_t color)
 {
@@ -216,7 +216,6 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 	vec3_t axis_b;
 	vec3_t axis_r;
 	vec3_t ray_dir;
-	vec3_t up;
 	vec3_t corners[8];
 	float min_u = 0.f, max_u = 0.f;
 	float min_v = 0.f, max_v = 0.f;
@@ -257,6 +256,40 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 		dist = DotProduct (normal, plane_point);
 	}
 
+	if (surf->texinfo)
+	{
+		VectorCopy (surf->texinfo->vecs[0], axis_t);
+		VectorCopy (surf->texinfo->vecs[1], axis_b);
+		if (transform_surface)
+		{
+			vec3_t transformed_axis_t;
+			vec3_t transformed_axis_b;
+			R_GodrayVolume_TransformVector (matrix, axis_t, transformed_axis_t);
+			R_GodrayVolume_TransformVector (matrix, axis_b, transformed_axis_b);
+			VectorCopy (transformed_axis_t, axis_t);
+			VectorCopy (transformed_axis_b, axis_b);
+		}
+	}
+	else
+	{
+		PerpendicularVector (axis_t, normal);
+		CrossProduct (normal, axis_t, axis_b);
+	}
+
+	VectorMA (axis_t, -DotProduct (axis_t, normal), normal, axis_t);
+	if (VectorNormalize (axis_t) < 0.001f)
+	{
+		PerpendicularVector (axis_t, normal);
+		VectorNormalize (axis_t);
+	}
+	VectorMA (axis_b, -DotProduct (axis_b, normal), normal, axis_b);
+	VectorMA (axis_b, -DotProduct (axis_b, axis_t), axis_t, axis_b);
+	if (VectorNormalize (axis_b) < 0.001f || fabsf (DotProduct (axis_b, axis_t)) > 0.95f)
+	{
+		CrossProduct (normal, axis_t, axis_b);
+		VectorNormalize (axis_b);
+	}
+
 	VectorAdd (world_mins, world_maxs, center);
 	VectorScale (center, 0.5f, center);
 	VectorMA (center, -(DotProduct (center, normal) - dist), normal, center_on_plane);
@@ -279,23 +312,6 @@ static qboolean R_GodrayVolume_AddSurface (const qmodel_t *model, const msurface
 		VectorCopy (normal, axis_r);
 	if (DotProduct (axis_r, normal) < 0.f)
 		VectorScale (axis_r, -1.f, axis_r);
-
-	if (fabsf (normal[2]) < 0.95f)
-	{
-		up[0] = 0.f;
-		up[1] = 0.f;
-		up[2] = 1.f;
-	}
-	else
-	{
-		up[0] = 0.f;
-		up[1] = 1.f;
-		up[2] = 0.f;
-	}
-	CrossProduct (up, normal, axis_t);
-	VectorNormalize (axis_t);
-	CrossProduct (normal, axis_t, axis_b);
-	VectorNormalize (axis_b);
 
 	corners[0][0] = world_mins[0]; corners[0][1] = world_mins[1]; corners[0][2] = world_mins[2];
 	corners[1][0] = world_maxs[0]; corners[1][1] = world_mins[1]; corners[1][2] = world_mins[2];
@@ -427,7 +443,7 @@ void R_GodrayVolume_Init (void)
 	Cvar_RegisterVariable (&r_godray_volume_intensity);
 	Cvar_RegisterVariable (&r_godray_volume_color);
 	Cvar_RegisterVariable (&r_godray_volume_dir);
-	Cvar_RegisterVariable (&r_godray_volume_debug);
+	Cvar_RegisterVariable (&r_godray_vol_debug);
 }
 
 void R_GodrayVolume_BuildList (void)
@@ -495,12 +511,31 @@ void R_GodrayVolume_Render (void)
 		return;
 
 	GL_BeginGroup ("Godray volumes");
-	GL_UseProgram (glprogs.godray_volume);
-	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (1));
+	int debug_mode = (int)Q_rint (r_godray_vol_debug.value);
+	debug_mode = CLAMP (0, debug_mode, 3);
+
+	if (debug_mode > 0 && glprogs.godray_volume_debug)
+	{
+		GL_UseProgram (glprogs.godray_volume_debug);
+		if (debug_mode == 1 || debug_mode == 2)
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (1));
+		else
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (1));
+	}
+	else
+	{
+		GL_UseProgram (glprogs.godray_volume);
+		GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (1));
+		debug_mode = 0;
+	}
 
 	int steps = (int)Q_rint (r_godray_volume_steps.value);
 	steps = CLAMP (8, steps, 64);
-	GL_Uniform1iFunc (8, steps);
+	if (debug_mode == 0)
+		GL_Uniform1iFunc (8, steps);
+
+	if (debug_mode == 3)
+		glPolygonMode (GL_FRONT_AND_BACK, GL_LINE);
 
 	for (int i = 0; i < r_godray_volume_count; ++i)
 	{
@@ -525,17 +560,23 @@ void R_GodrayVolume_Render (void)
 		VectorNormalize (axis_r_vs);
 		VectorNormalize (ray_dir_vs);
 
-		GL_Uniform3fFunc (0, origin_vs[0], origin_vs[1], origin_vs[2]);
-		GL_Uniform3fFunc (1, axis_t_vs[0], axis_t_vs[1], axis_t_vs[2]);
-		GL_Uniform3fFunc (2, axis_b_vs[0], axis_b_vs[1], axis_b_vs[2]);
-		GL_Uniform3fFunc (3, axis_r_vs[0], axis_r_vs[1], axis_r_vs[2]);
-		GL_Uniform3fFunc (4, volume->mins[0], volume->mins[1], volume->mins[2]);
-		GL_Uniform3fFunc (5, volume->maxs[0], volume->maxs[1], volume->maxs[2]);
-		GL_Uniform4fFunc (6, volume->color_density[0], volume->color_density[1],
-			volume->color_density[2], volume->color_density[3]);
-		GL_Uniform4fFunc (7, volume->misc[0], volume->misc[1], volume->misc[2], volume->misc[3]);
-		GL_Uniform3fFunc (9, ray_dir_vs[0], ray_dir_vs[1], ray_dir_vs[2]);
-		GL_Uniform1fFunc (10, r_godray_volume_debug.value);
+		if (debug_mode == 0)
+		{
+			GL_Uniform3fFunc (0, origin_vs[0], origin_vs[1], origin_vs[2]);
+			GL_Uniform3fFunc (1, axis_t_vs[0], axis_t_vs[1], axis_t_vs[2]);
+			GL_Uniform3fFunc (2, axis_b_vs[0], axis_b_vs[1], axis_b_vs[2]);
+			GL_Uniform3fFunc (3, axis_r_vs[0], axis_r_vs[1], axis_r_vs[2]);
+			GL_Uniform3fFunc (4, volume->mins[0], volume->mins[1], volume->mins[2]);
+			GL_Uniform3fFunc (5, volume->maxs[0], volume->maxs[1], volume->maxs[2]);
+			GL_Uniform4fFunc (6, volume->color_density[0], volume->color_density[1],
+				volume->color_density[2], volume->color_density[3]);
+			GL_Uniform4fFunc (7, volume->misc[0], volume->misc[1], volume->misc[2], volume->misc[3]);
+		}
+		else
+		{
+			GL_Uniform3fFunc (9, ray_dir_vs[0], ray_dir_vs[1], ray_dir_vs[2]);
+			GL_Uniform1iFunc (10, debug_mode);
+		}
 
 		GL_Upload (GL_ARRAY_BUFFER, verts, sizeof (verts), &buf, &ofs);
 		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
@@ -545,6 +586,9 @@ void R_GodrayVolume_Render (void)
 		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
 		glDrawElements (GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, ofs);
 	}
+
+	if (debug_mode == 3)
+		glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 
 	GL_EndGroup ();
 }
