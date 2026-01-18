@@ -44,6 +44,7 @@ static cvar_t sv_snap_debug = {"sv_snap_debug", "0", CVAR_NONE};
 static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE};
 static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
+static cvar_t sv_event_max = {"sv_event_max", "0", CVAR_NONE};
 static cvar_t sv_mtu = {"sv_mtu", "1200", CVAR_NONE};
 static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1200", CVAR_NONE};
 static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
@@ -101,6 +102,7 @@ typedef struct
 
 static sv_icull_stats_t sv_icull_last_stats[MAX_SCOREBOARD];
 static double sv_icull_debug_next_time = 0.0;
+static int sv_event_count = 0;
 
 //============================================================================
 
@@ -299,6 +301,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_full_interval);
 	Cvar_RegisterVariable (&sv_snap_force_full_after_frames);
 	Cvar_RegisterVariable (&sv_snap_max_payload);
+	Cvar_RegisterVariable (&sv_event_max);
 	Cvar_RegisterVariable (&sv_mtu);
 	Cvar_RegisterVariable (&sv_mtu_cap);
 	Cvar_RegisterVariable (&sv_mtu_debug);
@@ -366,9 +369,13 @@ Make sure the event gets sent to all clients
 void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count)
 {
 	int		i, v;
+	int		event_max = (int)sv_event_max.value;
 
+	if (event_max > 0 && sv_event_count >= event_max)
+		return;
 	if (sv.datagram.cursize > MAX_DATAGRAM-18)
 		return;
+	sv_event_count++;
 	MSG_WriteByte (&sv.datagram, svc_particle);
 	MSG_WriteCoord (&sv.datagram, org[0], sv.protocolflags);
 	MSG_WriteCoord (&sv.datagram, org[1], sv.protocolflags);
@@ -759,6 +766,7 @@ SV_ClearDatagram
 void SV_ClearDatagram (void)
 {
 	SZ_Clear (&sv.datagram);
+	sv_event_count = 0;
 }
 
 /*
@@ -914,6 +922,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_unacked_frames = 0;
 	client->snapshot_pending_mandatory = 0;
 	client->snapshot_pending_dropped = 0;
+	client->snapshot_pending_incomplete = false;
 	client->snapshot_stats_full = 0;
 	client->snapshot_stats_delta = 0;
 	client->snapshot_stats_forced_full = 0;
@@ -1949,7 +1958,8 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned int baseline_seq,
 	const snapshot_state_t *states, const byte *present, const byte *relevant,
 	const snapshot_state_t *baseline, const byte *baseline_present, const byte *snapflags,
-	int max_edicts, int *out_remove, int *out_add, int *out_update, unsigned int extra_flags)
+	int max_edicts, int *out_remove, int *out_add, int *out_update, unsigned int extra_flags,
+	qboolean *out_incomplete)
 {
 	int entnum;
 	unsigned short remove_count = 0;
@@ -1964,10 +1974,15 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	int budget = available - header_size;
 	qboolean incomplete = false;
 
+	if (out_incomplete)
+		*out_incomplete = false;
+
 	if (available < header_size)
 	{
 		msg->overflowed = true;
 		msg->write_locked = true;
+		if (out_incomplete)
+			*out_incomplete = true;
 		return;
 	}
 
@@ -2109,6 +2124,8 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 		*out_add = add_written;
 	if (out_update)
 		*out_update = update_written;
+	if (out_incomplete)
+		*out_incomplete = incomplete;
 }
 
 static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
@@ -2127,6 +2144,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	qboolean reason_interval = false;
 	qboolean reason_force_full = false;
 	unsigned int extra_flags = 0;
+	qboolean delta_incomplete = false;
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -2190,7 +2208,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_relevant,
 					client->snapshot_baseline, client->snapshot_baseline_present,
 					client->snapshot_pending_flags, qcvm->max_edicts,
-					&remove_count, &add_count, &update_count, extra_flags);
+					&remove_count, &add_count, &update_count, extra_flags, &delta_incomplete);
 			else
 				SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq, client->snapshot_pending_baseline_seq,
 					client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_relevant,
@@ -2245,6 +2263,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 		client->snapshot_pending_time = realtime;
 		client->snapshot_last_sent_seq = client->snapshot_pending_seq;
+		client->snapshot_pending_incomplete = ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0) || delta_incomplete;
 	}
 	else
 	{
@@ -2254,6 +2273,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		int dropped_tier2 = 0;
 		int max_ents = SV_SnapshotMaxEntities (client, msg);
 		qboolean debug_frame = false;
+		qboolean tier0_only = false;
 
 		if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 		{
@@ -2265,13 +2285,22 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			client->snapshot_pending_relevant, client->snapshot_pending_flags, max_ents,
 			client->snapshot_baseline_present, &mandatory_count, &dropped_count,
 			&dropped_tier1, &dropped_tier2, debug_frame);
+		if (max_ents > 0 && mandatory_count > max_ents)
+		{
+			max_ents = mandatory_count;
+			tier0_only = true;
+			SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
+				client->snapshot_pending_relevant, client->snapshot_pending_flags, max_ents,
+				client->snapshot_baseline_present, &mandatory_count, &dropped_count,
+				&dropped_tier1, &dropped_tier2, debug_frame);
+		}
 		client->snapshot_pending_mandatory = mandatory_count;
 		client->snapshot_pending_dropped = dropped_count;
 		client->mtu_dropped_tier1 = dropped_tier1;
 		client->mtu_dropped_tier2 = dropped_tier2;
 		if (client->snapshot_pending_dropped > 0)
 			extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
-		if (sv_mtu_debug.value > 0 && max_ents > 0 && dropped_tier1 > 0 && mandatory_count >= max_ents)
+		if (sv_mtu_debug.value > 0 && max_ents > 0 && (tier0_only || (dropped_tier1 > 0 && mandatory_count >= max_ents)))
 			Con_Printf ("mtu %s forcing tier0 only (budget %d mandatory %d)\n",
 				client->name, max_ents, mandatory_count);
 		client->snapshot_pending_seq = client->snapshot_next_seq++;
@@ -2305,7 +2334,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_relevant,
 					client->snapshot_baseline, client->snapshot_baseline_present,
 					client->snapshot_pending_flags, qcvm->max_edicts,
-					&remove_count, &add_count, &update_count, extra_flags);
+					&remove_count, &add_count, &update_count, extra_flags, &delta_incomplete);
 			else
 				SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq, client->snapshot_baseline_seq,
 					client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_relevant,
@@ -2349,6 +2378,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			client->snapshot_last_full_time = realtime;
 		}
 		client->snapshot_last_sent_seq = client->snapshot_pending_seq;
+		client->snapshot_pending_incomplete = ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0) || delta_incomplete;
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
@@ -2442,12 +2472,17 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		return;
 	}
 
-	memcpy (client->snapshot_baseline, client->snapshot_pending, qcvm->max_edicts * sizeof(snapshot_state_t));
-	memcpy (client->snapshot_baseline_present, client->snapshot_pending_present, qcvm->max_edicts * sizeof(byte));
-	client->snapshot_baseline_seq = seq;
-	client->snapshot_last_acked_seq = seq;
+	qboolean was_incomplete = client->snapshot_pending_incomplete;
+
+	if (!was_incomplete)
+	{
+		memcpy (client->snapshot_baseline, client->snapshot_pending, qcvm->max_edicts * sizeof(snapshot_state_t));
+		memcpy (client->snapshot_baseline_present, client->snapshot_pending_present, qcvm->max_edicts * sizeof(byte));
+		client->snapshot_baseline_seq = seq;
+		client->snapshot_last_acked_seq = seq;
+	}
 	client->snapshot_pending_seq = 0;
-	if (!client->snapshot_pending_is_delta)
+	if (!client->snapshot_pending_is_delta && !was_incomplete)
 	{
 		client->snapshot_has_valid_base = true;
 		client->snapshot_last_full_seq = seq;
@@ -2457,9 +2492,11 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 	client->snapshot_pending_baseline_seq = 0;
 	client->snapshot_unacked_frames = 0;
 	client->entstream.active = false;
+	client->snapshot_pending_incomplete = false;
 
 	if (sv_snapshotdebug.value || sv_snap_debug.value)
-		Con_Printf ("snapshot %s ack seq %u\n", client->name, seq);
+		Con_Printf ("snapshot %s ack seq %u%s\n", client->name, seq,
+			was_incomplete ? " incomplete" : "");
 }
 
 void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int received_base)
@@ -2470,6 +2507,7 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_pending_seq = 0;
 	client->snapshot_unacked_frames = 0;
+	client->snapshot_pending_incomplete = false;
 	client->entstream.active = false;
 }
 
