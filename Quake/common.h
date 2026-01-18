@@ -159,6 +159,10 @@ static inline qboolean MSG_CanFit (sizebuf_t *msg, int bytes)
 {
 	return MSG_CAN_FIT (msg, bytes);
 }
+static inline qboolean MSG_CanWrite (sizebuf_t *msg, int bytes)
+{
+	return MSG_CAN_FIT (msg, bytes) && !msg->write_locked;
+}
 
 void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line);
 

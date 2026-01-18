@@ -272,6 +272,12 @@ typedef struct
 	int			num_statics;	// held in cl_staticentities array
 	entity_t	viewent;			// the gun model
 	unsigned int snapshot_baseline_seq;
+	unsigned short snap_last_applied_seq;
+	unsigned short snap_last_complete_seq;
+	qboolean	need_full_snapshot;
+	int			snap_parse_errors;
+	int			snap_delta_mismatch;
+	int			snap_incomplete_count;
 	snapshot_state_t *snapshot_baseline;
 	byte		*snapshot_present;
 	byte		*snapshot_active;

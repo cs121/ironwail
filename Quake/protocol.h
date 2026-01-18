@@ -261,8 +261,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     payload: one or more signon records (SIGNON_REC_*)
 
 #define SNAPSHOT_FLAG_FULL		(1u << 0)
-#define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 1)
-#define SNAPSHOT_FLAG_CONTINUE		(1u << 2)
+#define SNAPSHOT_FLAG_DELTA		(1u << 1)
+#define SNAPSHOT_FLAG_HAS_REMOVE_LIST	(1u << 2)
+#define SNAPSHOT_FLAG_CONTINUE		(1u << 3)
+#define SNAPSHOT_FLAG_INCOMPLETE	(1u << 4)
+
+#define SNAP_VALID_MASK		(SNAP_ORIGIN1 | SNAP_ORIGIN2 | SNAP_ORIGIN3 | SNAP_ANGLE1 | \
+				 SNAP_ANGLE2 | SNAP_ANGLE3 | SNAP_MODEL | SNAP_FRAME | SNAP_COLORMAP | \
+				 SNAP_SKIN | SNAP_EFFECTS | SNAP_ALPHA | SNAP_SCALE | SNAP_STEP | \
+				 SNAP_HIRES_ORIGIN | SNAP_HIRES_ANGLES)
 
 // signon chunk protocol extension
 #define SIGNON_CHUNK_FLAG_STAGE_END	(1u << 0)

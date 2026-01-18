@@ -333,6 +333,12 @@ void CL_ClearState (void)
 		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
+	cl.snap_last_applied_seq = 0;
+	cl.snap_last_complete_seq = 0;
+	cl.need_full_snapshot = false;
+	cl.snap_parse_errors = 0;
+	cl.snap_delta_mismatch = 0;
+	cl.snap_incomplete_count = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
 }
