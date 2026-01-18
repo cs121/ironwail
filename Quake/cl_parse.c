@@ -1268,6 +1268,21 @@ static void CL_SendSnapshotAck (unsigned int seq)
 	MSG_WriteLong (&cls.message, (int)seq);
 }
 
+static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error)
+{
+	if (cls.demoplayback || cls.state != ca_connected)
+		return;
+	if (count_parse_error)
+		cl.snap_parse_errors++;
+	if (!cl.need_full_snapshot)
+	{
+		cl.need_full_snapshot = true;
+		if (cl_snap_debug.value >= 1.0f && reason)
+			Con_Printf ("cl_snap request full: %s\n", reason);
+		CL_SendSnapshotAck (0);
+	}
+}
+
 static void CL_SendSnapshotNak (unsigned int expected_base, unsigned int received_base)
 {
 	if (cls.demoplayback || cls.state != ca_connected)
@@ -1509,13 +1524,22 @@ static void CL_ParseSnapshotFull (void)
 	int count;
 	int i;
 	qboolean drop;
+	unsigned short seq16;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	count = (unsigned short)MSG_ReadShort ();
 	drop = CL_ShouldDropSnapshot ();
+	seq16 = (unsigned short)seq;
 
 	if (cl_snap_debug.value >= 1.0f)
 		Con_Printf ("cl_snap full seq %u ents %d%s\n", seq, count, drop ? " drop" : "");
+
+	if (msg_badread || count < 0 || count > cl_max_edicts)
+	{
+		CL_RequestFullSnapshot ("snapshot_full header", true);
+		msg_readcount = net_message.cursize;
+		return;
+	}
 
 	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_active)
@@ -1531,10 +1555,20 @@ static void CL_ParseSnapshotFull (void)
 
 		entnum = (unsigned short)MSG_ReadShort ();
 		if (entnum <= 0 || entnum >= cl_max_edicts)
-			Host_Error ("CL_ParseSnapshotFull: entnum out of range");
+		{
+			CL_RequestFullSnapshot ("snapshot_full entnum", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 			snapflags = (unsigned int)MSG_ReadByte ();
 		CL_ReadSnapshotState (&state, snapflags);
+		if (msg_badread)
+		{
+			CL_RequestFullSnapshot ("snapshot_full state", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (!drop)
 		{
 			cl.snapshot_baseline[entnum] = state;
@@ -1547,6 +1581,9 @@ static void CL_ParseSnapshotFull (void)
 	if (!drop)
 	{
 		cl.snapshot_baseline_seq = seq;
+		cl.snap_last_applied_seq = seq16;
+		cl.snap_last_complete_seq = seq16;
+		cl.need_full_snapshot = false;
 		CL_SendSnapshotAck (seq);
 		CL_RecordPlayerSnap ();
 	}
@@ -1561,9 +1598,15 @@ static void CL_ParseSnapshotDelta (void)
 	int i;
 	qboolean baseline_match;
 	qboolean drop;
+	unsigned short seq16;
+	unsigned short base16;
+	qboolean need_full;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	baseline_seq = (unsigned int)MSG_ReadLong ();
+	seq16 = (unsigned short)seq;
+	base16 = (unsigned short)baseline_seq;
+	need_full = cl.need_full_snapshot;
 	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
 	drop = CL_ShouldDropSnapshot ();
 
@@ -1571,13 +1614,42 @@ static void CL_ParseSnapshotDelta (void)
 		Con_Printf ("cl_snap delta seq %u base %u match %d%s\n",
 			seq, baseline_seq, baseline_match, drop ? " drop" : "");
 
+	if (msg_badread)
+	{
+		CL_RequestFullSnapshot ("snapshot_delta header", true);
+		msg_readcount = net_message.cursize;
+		return;
+	}
+
 	if (!drop && baseline_match)
 		SDL_assert (baseline_seq == cl.snapshot_baseline_seq);
 
+	if (!drop && (!baseline_match || need_full || base16 != cl.snap_last_applied_seq))
+	{
+		if (cl_snap_debug.value >= 1.0f)
+			Con_Printf ("cl_snap delta mismatch base %u last %u need_full %d\n",
+				baseline_seq, cl.snap_last_applied_seq, need_full);
+		cl.snap_delta_mismatch++;
+		CL_RequestFullSnapshot ("snapshot_delta base mismatch", false);
+		drop = true;
+	}
+
 	count = (unsigned short)MSG_ReadShort ();
+	if (msg_badread || count < 0 || count > cl_max_edicts)
+	{
+		CL_RequestFullSnapshot ("snapshot_delta remove header", true);
+		msg_readcount = net_message.cursize;
+		return;
+	}
 	for (i = 0; i < count; i++)
 	{
 		int entnum = (unsigned short)MSG_ReadShort ();
+		if (msg_badread)
+		{
+			CL_RequestFullSnapshot ("snapshot_delta remove list", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 		{
 			cl.snapshot_present[entnum] = 0;
@@ -1586,6 +1658,12 @@ static void CL_ParseSnapshotDelta (void)
 	}
 
 	count = (unsigned short)MSG_ReadShort ();
+	if (msg_badread || count < 0 || count > cl_max_edicts)
+	{
+		CL_RequestFullSnapshot ("snapshot_delta add header", true);
+		msg_readcount = net_message.cursize;
+		return;
+	}
 	for (i = 0; i < count; i++)
 	{
 		int entnum = (unsigned short)MSG_ReadShort ();
@@ -1595,6 +1673,12 @@ static void CL_ParseSnapshotDelta (void)
 		if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 			snapflags = (unsigned int)MSG_ReadByte ();
 		CL_ReadSnapshotState (&state, snapflags);
+		if (msg_badread)
+		{
+			CL_RequestFullSnapshot ("snapshot_delta add state", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 		{
 			cl.snapshot_baseline[entnum] = state;
@@ -1605,14 +1689,32 @@ static void CL_ParseSnapshotDelta (void)
 	}
 
 	count = (unsigned short)MSG_ReadShort ();
+	if (msg_badread || count < 0 || count > cl_max_edicts)
+	{
+		CL_RequestFullSnapshot ("snapshot_delta update header", true);
+		msg_readcount = net_message.cursize;
+		return;
+	}
 	for (i = 0; i < count; i++)
 	{
 		int entnum = (unsigned short)MSG_ReadShort ();
 		mask = (unsigned int)MSG_ReadLong ();
+		if (msg_badread || (mask & ~SNAP_VALID_MASK))
+		{
+			CL_RequestFullSnapshot ("snapshot_delta update mask", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts && cl.snapshot_present[entnum])
 		{
 			snapshot_state_t state = cl.snapshot_baseline[entnum];
 			CL_ReadSnapshotDeltaFields (&state, mask);
+			if (msg_badread)
+			{
+				CL_RequestFullSnapshot ("snapshot_delta update fields", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			cl.snapshot_baseline[entnum] = state;
 			CL_ApplySnapshotState (entnum, &state);
 			CL_MarkSnapshotEntityUpdated (entnum);
@@ -1622,6 +1724,12 @@ static void CL_ParseSnapshotDelta (void)
 			snapshot_state_t scratch;
 			memset (&scratch, 0, sizeof(scratch));
 			CL_ReadSnapshotDeltaFields (&scratch, mask);
+			if (msg_badread)
+			{
+				CL_RequestFullSnapshot ("snapshot_delta update skip", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 		}
 	}
 
@@ -1633,6 +1741,7 @@ static void CL_ParseSnapshotDelta (void)
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
 		cl.snapshot_baseline_seq = seq;
+		cl.snap_last_applied_seq = seq16;
 		CL_SendSnapshotAck (seq);
 		CL_RecordPlayerSnap ();
 	}
@@ -1675,15 +1784,30 @@ static void CL_ParseSnapshot2 (void)
 	qboolean baseline_match;
 	qboolean drop;
 	int i;
+	unsigned short seq16;
+	unsigned short base16;
+	qboolean incomplete;
+	qboolean need_full;
 
 	CL_ReadSnapshotHeader (&header);
 	drop = CL_ShouldDropSnapshot ();
+	seq16 = (unsigned short)header.seq;
+	base16 = (unsigned short)header.base_seq;
+	incomplete = (header.flags & SNAPSHOT_FLAG_INCOMPLETE) != 0;
+	need_full = cl.need_full_snapshot;
 
 	if (cl_snap_debug.value >= 1.0f)
 	{
 		Con_Printf ("cl_snap2 seq %u base %u flags 0x%x ents %u rem %u%s\n",
 			header.seq, header.base_seq, header.flags,
 			header.num_entities, header.num_removed, drop ? " drop" : "");
+	}
+
+	if (msg_badread || header.num_entities > cl_max_edicts || header.num_removed > cl_max_edicts)
+	{
+		CL_RequestFullSnapshot ("snapshot2 header", true);
+		msg_readcount = net_message.cursize;
+		return;
 	}
 
 	if (header.flags & SNAPSHOT_FLAG_FULL)
@@ -1707,10 +1831,22 @@ static void CL_ParseSnapshot2 (void)
 
 				entnum = (unsigned short)MSG_ReadShort ();
 				if (entnum <= 0 || entnum >= cl_max_edicts)
-					Host_Error ("CL_ParseSnapshot2: entnum out of range");
+				{
+					CL_RequestFullSnapshot ("snapshot2 chunk entnum", true);
+					msg_readcount = net_message.cursize;
+					CL_ResetSnapshotChunk ();
+					return;
+				}
 				if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 					snapflags = (unsigned int)MSG_ReadByte ();
 				CL_ReadSnapshotState (&state, snapflags);
+				if (msg_badread)
+				{
+					CL_RequestFullSnapshot ("snapshot2 chunk state", true);
+					msg_readcount = net_message.cursize;
+					CL_ResetSnapshotChunk ();
+					return;
+				}
 				if (!drop)
 				{
 					cl.snapshot_chunk[entnum] = state;
@@ -1727,11 +1863,14 @@ static void CL_ParseSnapshot2 (void)
 			if (continuation)
 				return;
 
-			memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-			if (cl.snapshot_active)
-				memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-			if (cl.snapshot_last_update_time)
-				memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+			if (!incomplete)
+			{
+				memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+				if (cl.snapshot_active)
+					memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+				if (cl.snapshot_last_update_time)
+					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+			}
 
 			for (i = 1; i < cl_max_edicts; i++)
 			{
@@ -1744,17 +1883,31 @@ static void CL_ParseSnapshot2 (void)
 			}
 
 			cl.snapshot_baseline_seq = header.seq;
-			CL_SendSnapshotAck (header.seq);
-			CL_RecordPlayerSnap ();
+			cl.snap_last_applied_seq = seq16;
+			if (!incomplete)
+			{
+				cl.snap_last_complete_seq = seq16;
+				cl.need_full_snapshot = false;
+				CL_SendSnapshotAck (header.seq);
+				CL_RecordPlayerSnap ();
+			}
+			else
+			{
+				cl.snap_incomplete_count++;
+				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
+			}
 			CL_ResetSnapshotChunk ();
 			return;
 		}
 
-		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-		if (cl.snapshot_active)
-			memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-		if (cl.snapshot_last_update_time)
-			memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+		if (!incomplete)
+		{
+			memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+			if (cl.snapshot_active)
+				memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+			if (cl.snapshot_last_update_time)
+				memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+		}
 
 		for (i = 0; i < header.num_entities; i++)
 		{
@@ -1764,10 +1917,20 @@ static void CL_ParseSnapshot2 (void)
 
 			entnum = (unsigned short)MSG_ReadShort ();
 			if (entnum <= 0 || entnum >= cl_max_edicts)
-				Host_Error ("CL_ParseSnapshot2: entnum out of range");
+			{
+				CL_RequestFullSnapshot ("snapshot2 full entnum", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 				snapflags = (unsigned int)MSG_ReadByte ();
 			CL_ReadSnapshotState (&state, snapflags);
+			if (msg_badread)
+			{
+				CL_RequestFullSnapshot ("snapshot2 full state", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			if (!drop)
 			{
 				cl.snapshot_baseline[entnum] = state;
@@ -1780,8 +1943,19 @@ static void CL_ParseSnapshot2 (void)
 		if (!drop)
 		{
 			cl.snapshot_baseline_seq = header.seq;
-			CL_SendSnapshotAck (header.seq);
-			CL_RecordPlayerSnap ();
+			cl.snap_last_applied_seq = seq16;
+			if (!incomplete)
+			{
+				cl.snap_last_complete_seq = seq16;
+				cl.need_full_snapshot = false;
+				CL_SendSnapshotAck (header.seq);
+				CL_RecordPlayerSnap ();
+			}
+			else
+			{
+				cl.snap_incomplete_count++;
+				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
+			}
 		}
 		return;
 	}
@@ -1790,11 +1964,27 @@ static void CL_ParseSnapshot2 (void)
 	if (!drop && baseline_match)
 		SDL_assert (header.base_seq == cl.snapshot_baseline_seq);
 
+	if (!drop && (!baseline_match || need_full || base16 != cl.snap_last_applied_seq))
+	{
+		if (cl_snap_debug.value >= 1.0f)
+			Con_Printf ("cl_snap2 delta mismatch base %u last %u need_full %d\n",
+				header.base_seq, cl.snap_last_applied_seq, need_full);
+		cl.snap_delta_mismatch++;
+		CL_RequestFullSnapshot ("snapshot2 base mismatch", false);
+		drop = true;
+	}
+
 	if (header.flags & SNAPSHOT_FLAG_HAS_REMOVE_LIST)
 	{
 		for (i = 0; i < header.num_removed; i++)
 		{
 			int entnum = (unsigned short)MSG_ReadShort ();
+			if (msg_badread)
+			{
+				CL_RequestFullSnapshot ("snapshot2 remove list", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 			{
 				cl.snapshot_present[entnum] = 0;
@@ -1805,6 +1995,12 @@ static void CL_ParseSnapshot2 (void)
 
 	{
 		int add_count = (unsigned short)MSG_ReadShort ();
+		if (msg_badread || add_count < 0 || add_count > cl_max_edicts)
+		{
+			CL_RequestFullSnapshot ("snapshot2 add header", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		for (i = 0; i < add_count; i++)
 		{
 			int entnum = (unsigned short)MSG_ReadShort ();
@@ -1814,6 +2010,12 @@ static void CL_ParseSnapshot2 (void)
 			if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
 				snapflags = (unsigned int)MSG_ReadByte ();
 			CL_ReadSnapshotState (&state, snapflags);
+			if (msg_badread)
+			{
+				CL_RequestFullSnapshot ("snapshot2 add state", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 			{
 				cl.snapshot_baseline[entnum] = state;
@@ -1825,15 +2027,33 @@ static void CL_ParseSnapshot2 (void)
 
 		{
 			int update_count = (unsigned short)MSG_ReadShort ();
+			if (msg_badread || update_count < 0 || update_count > cl_max_edicts)
+			{
+				CL_RequestFullSnapshot ("snapshot2 update header", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			for (i = 0; i < update_count; i++)
 			{
 				int entnum = (unsigned short)MSG_ReadShort ();
 				unsigned int mask = (unsigned int)MSG_ReadLong ();
+				if (msg_badread || (mask & ~SNAP_VALID_MASK))
+				{
+					CL_RequestFullSnapshot ("snapshot2 update mask", true);
+					msg_readcount = net_message.cursize;
+					return;
+				}
 
 				if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts && cl.snapshot_present[entnum])
 				{
 					snapshot_state_t state = cl.snapshot_baseline[entnum];
 					CL_ReadSnapshotDeltaFields (&state, mask);
+					if (msg_badread)
+					{
+						CL_RequestFullSnapshot ("snapshot2 update fields", true);
+						msg_readcount = net_message.cursize;
+						return;
+					}
 					cl.snapshot_baseline[entnum] = state;
 					CL_ApplySnapshotState (entnum, &state);
 					CL_MarkSnapshotEntityUpdated (entnum);
@@ -1843,6 +2063,12 @@ static void CL_ParseSnapshot2 (void)
 					snapshot_state_t scratch;
 					memset (&scratch, 0, sizeof(scratch));
 					CL_ReadSnapshotDeltaFields (&scratch, mask);
+					if (msg_badread)
+					{
+						CL_RequestFullSnapshot ("snapshot2 update skip", true);
+						msg_readcount = net_message.cursize;
+						return;
+					}
 				}
 			}
 		}
@@ -1856,6 +2082,7 @@ static void CL_ParseSnapshot2 (void)
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
 		cl.snapshot_baseline_seq = header.seq;
+		cl.snap_last_applied_seq = seq16;
 		CL_SendSnapshotAck (header.seq);
 		CL_RecordPlayerSnap ();
 	}
