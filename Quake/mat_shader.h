@@ -243,13 +243,22 @@ typedef struct shader_material_s
 	float			emissive_scale;
 	float			bloom_scale;
 	float			godray_scale;
+	float			godray_intensity;
+	float			godray_length;
+	float			godray_color[3];
+	float			godray_dir[3];
+	qboolean		godray_intensity_set;
+	qboolean		godray_length_set;
+	qboolean		godray_color_set;
+	qboolean		godray_dir_set;
 	mat_shader_stage_t	stage0;
 	mat_shader_stage_t	*stages;
 } shader_material_t;
 
 // Developer note:
 // Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
-// bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
+// bloom_scale, godray_scale, godray_intensity, godray_length, godray_color, godray_dir,
+// emissiveScale, bloomScale, godrayScale, and a single stage block
 // with map + rgbGen identity.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
