@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "net_defs.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -45,9 +46,9 @@ static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE
 static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_event_max = {"sv_event_max", "0", CVAR_NONE};
-static cvar_t sv_mtu = {"sv_mtu", "1200", CVAR_NONE};
-static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1200", CVAR_NONE};
-static cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
+cvar_t sv_mtu = {"sv_mtu", "1400", CVAR_NONE};
+static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1400", CVAR_NONE};
+cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE};
@@ -547,9 +548,17 @@ static int SV_MTUCap (client_t *client)
 	if (client && SV_IsLocalClient (client))
 		return 0;
 	int cap = (int)sv_mtu_cap.value;
+	int payload;
+
 	if (cap <= 0)
 		cap = (int)sv_mtu.value;
-	return cap;
+	if (cap <= 0)
+		return 0;
+
+	payload = cap - NET_UDPIP_HEADER_BYTES - NET_HEADERSIZE;
+	if (payload < 1)
+		payload = 1;
+	return payload;
 }
 
 /*
@@ -3312,10 +3321,6 @@ qboolean SV_SendClientDatagram (client_t *client)
 	msg.dbg_aux = 0;
 	msg.bitpos = 0;
 
-	//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
-	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
-		msg.maxsize = DATAGRAM_MTU;
-	//johnfitz
 	mtu_cap = SV_MTUCap (client);
 	if (mtu_cap > 0)
 		msg.maxsize = q_min (msg.maxsize, mtu_cap);
@@ -3352,8 +3357,17 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
 	{
-		Con_Printf ("mtu %s bytes %d dropped tier1 %d tier2 %d\n",
-			client->name, msg.cursize, client->mtu_dropped_tier1, client->mtu_dropped_tier2);
+		int packet_bytes = msg.cursize + NET_HEADERSIZE + NET_UDPIP_HEADER_BYTES;
+		Con_Printf ("mtu %s sv_mtu %d packet %d reliable %d snapshot %d dropped tier1 %d tier2 %d\n",
+			client->name,
+			(int)sv_mtu.value,
+			packet_bytes,
+			client->message.cursize,
+			client->mtu_last_snapshot_size,
+			client->mtu_dropped_tier1,
+			client->mtu_dropped_tier2);
+		if (mtu_cap > 0 && sv_mtu.value > 0)
+			SDL_assert (packet_bytes <= (int)sv_mtu.value);
 		client->mtu_debug_next_time = realtime + 1.0;
 	}
 

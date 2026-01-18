@@ -67,6 +67,7 @@ int		unreliableMessagesReceived	= 0;
 static	cvar_t	net_messagetimeout = {"net_messagetimeout","300",CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
 cvar_t	net_maxpacket = {"net_maxpacket", "1400", CVAR_NONE};
+cvar_t	net_mtu = {"net_mtu", "1400", CVAR_NONE};
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -123,6 +124,7 @@ qsocket_t *NET_NewQSocket (void)
 	sock->sendSequence = 0;
 	sock->unreliableSendSequence = 0;
 	sock->sendMessageLength = 0;
+	sock->sendMessageSize = 0;
 	sock->receiveSequence = 0;
 	sock->unreliableReceiveSequence = 0;
 	sock->receiveMessageLength = 0;
@@ -820,6 +822,7 @@ void NET_Init (void)
 	Cvar_RegisterVariable (&net_messagetimeout);
 	Cvar_RegisterVariable (&hostname);
 	Cvar_RegisterVariable (&net_maxpacket);
+	Cvar_RegisterVariable (&net_mtu);
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
 	Cmd_AddCommand ("listen", NET_Listen_f);
