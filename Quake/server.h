@@ -233,6 +233,7 @@ typedef struct client_s
 	int				snapshot_unacked_frames;
 	int				snapshot_pending_mandatory;
 	int				snapshot_pending_dropped;
+	qboolean		snapshot_pending_incomplete;
 	int				snapshot_stats_full;
 	int				snapshot_stats_delta;
 	int				snapshot_stats_forced_full;

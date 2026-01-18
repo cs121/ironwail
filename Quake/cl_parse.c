@@ -188,6 +188,9 @@ static void CL_NetDebugHeader (void)
 		CL_NetHexDump (net_message.data, net_message.cursize, CL_NetDebugDumpLength ());
 }
 
+static double cl_badmsg_next_warn_time = 0.0;
+static double cl_unknown_cmd_next_warn_time = 0.0;
+
 static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 	int lastcmd, int lastcmd_offset, int prevcmd, int prevcmd_offset)
 {
@@ -211,13 +214,11 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 		return;
 	}
 
-	if (cl_netdebug_dropbad.value)
+	if (realtime >= cl_badmsg_next_warn_time)
 	{
 		Con_Printf ("Dropping malformed server message: %s\n", reason);
-		return;
+		cl_badmsg_next_warn_time = realtime + 1.0;
 	}
-
-	Host_Error ("Illegible server message %d (previous was %s)", cmd, CL_SvcName (lastcmd));
 }
 
 qboolean warn_about_nehahra_protocol; //johnfitz
@@ -1387,6 +1388,24 @@ static qboolean CL_ShouldDropSnapshot (void)
 	return ((float)rand() / (float)RAND_MAX) < cl_test_drop.value;
 }
 
+static void CL_LogDeltaReject (const char *reason, unsigned int seq, unsigned int base_seq)
+{
+	if (cl_delta_reject_debug.value < 1.0f)
+		return;
+	Con_Printf ("cl_delta_reject %s seq %u base %u\n", reason, seq, base_seq);
+}
+
+static qboolean CL_SnapshotChunkTimedOut (void)
+{
+	double timeout_s = cl_full_reasm_timeout_ms.value * 0.001;
+
+	if (!cl.snapshot_chunk_active)
+		return false;
+	if (timeout_s <= 0.0)
+		return false;
+	return (realtime - cl.snapshot_chunk_start_time) > timeout_s;
+}
+
 static void CL_MarkSnapshotEntityUpdated (int entnum)
 {
 	if (entnum <= 0 || entnum >= cl_max_edicts)
@@ -1541,11 +1560,7 @@ static void CL_ParseSnapshotFull (void)
 		return;
 	}
 
-	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_active)
-		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_last_update_time)
-		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+	CL_ClearSnapshotStage ();
 
 	for (i = 0; i < count; i++)
 	{
@@ -1571,22 +1586,37 @@ static void CL_ParseSnapshotFull (void)
 		}
 		if (!drop)
 		{
-			cl.snapshot_baseline[entnum] = state;
-			cl.snapshot_present[entnum] = 1;
-			CL_ApplySnapshotState (entnum, &state);
-			CL_MarkSnapshotEntityUpdated (entnum);
+			cl.snapshot_stage[entnum] = state;
+			cl.snapshot_stage_present[entnum] = 1;
 		}
 	}
 
-	if (!drop)
+	if (drop)
+		return;
+
+	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_active)
+		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_last_update_time)
+		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+
+	for (i = 1; i < cl_max_edicts; i++)
 	{
-		cl.snapshot_baseline_seq = seq;
-		cl.snap_last_applied_seq = seq16;
-		cl.snap_last_complete_seq = seq16;
-		cl.need_full_snapshot = false;
-		CL_SendSnapshotAck (seq);
-		CL_RecordPlayerSnap ();
+		if (!cl.snapshot_stage_present[i])
+			continue;
+		cl.snapshot_baseline[i] = cl.snapshot_stage[i];
+		cl.snapshot_present[i] = 1;
+		CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+		CL_MarkSnapshotEntityUpdated (i);
 	}
+
+	cl.snapshot_baseline_seq = seq;
+	cl.snap_last_applied_seq = seq16;
+	cl.snap_last_complete_seq = seq16;
+	cl.snap_last_incomplete = false;
+	cl.need_full_snapshot = false;
+	CL_SendSnapshotAck (seq);
+	CL_RecordPlayerSnap ();
 }
 
 static void CL_ParseSnapshotDelta (void)
@@ -1601,6 +1631,8 @@ static void CL_ParseSnapshotDelta (void)
 	unsigned short seq16;
 	unsigned short base16;
 	qboolean need_full;
+	qboolean base_complete;
+	qboolean continuation_pending;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	baseline_seq = (unsigned int)MSG_ReadLong ();
@@ -1608,6 +1640,8 @@ static void CL_ParseSnapshotDelta (void)
 	base16 = (unsigned short)baseline_seq;
 	need_full = cl.need_full_snapshot;
 	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
+	base_complete = (cl.snap_last_complete_seq != 0 && base16 == cl.snap_last_complete_seq);
+	continuation_pending = cl.snapshot_chunk_active;
 	drop = CL_ShouldDropSnapshot ();
 
 	if (cl_snap_debug.value >= 1.0f)
@@ -1624,15 +1658,25 @@ static void CL_ParseSnapshotDelta (void)
 	if (!drop && baseline_match)
 		SDL_assert (baseline_seq == cl.snapshot_baseline_seq);
 
-	if (!drop && (!baseline_match || need_full || base16 != cl.snap_last_applied_seq))
+	if (!drop && (!baseline_match || !base_complete || continuation_pending || need_full))
 	{
 		if (cl_snap_debug.value >= 1.0f)
 			Con_Printf ("cl_snap delta mismatch base %u last %u need_full %d\n",
-				baseline_seq, cl.snap_last_applied_seq, need_full);
+				baseline_seq, cl.snap_last_complete_seq, need_full);
+		if (!baseline_match)
+			CL_LogDeltaReject ("base_mismatch", seq, baseline_seq);
+		else if (!base_complete)
+			CL_LogDeltaReject ("base_incomplete", seq, baseline_seq);
+		else if (continuation_pending)
+			CL_LogDeltaReject ("base_continuation", seq, baseline_seq);
+		else
+			CL_LogDeltaReject ("need_full", seq, baseline_seq);
 		cl.snap_delta_mismatch++;
 		CL_RequestFullSnapshot ("snapshot_delta base mismatch", false);
 		drop = true;
 	}
+
+	CL_ClearSnapshotStage ();
 
 	count = (unsigned short)MSG_ReadShort ();
 	if (msg_badread || count < 0 || count > cl_max_edicts)
@@ -1651,10 +1695,7 @@ static void CL_ParseSnapshotDelta (void)
 			return;
 		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
-		{
-			cl.snapshot_present[entnum] = 0;
-			CL_ClearSnapshotEntity (entnum);
-		}
+			cl.snapshot_stage_remove[entnum] = 1;
 	}
 
 	count = (unsigned short)MSG_ReadShort ();
@@ -1681,10 +1722,8 @@ static void CL_ParseSnapshotDelta (void)
 		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 		{
-			cl.snapshot_baseline[entnum] = state;
-			cl.snapshot_present[entnum] = 1;
-			CL_ApplySnapshotState (entnum, &state);
-			CL_MarkSnapshotEntityUpdated (entnum);
+			cl.snapshot_stage[entnum] = state;
+			cl.snapshot_stage_present[entnum] = 1;
 		}
 	}
 
@@ -1715,9 +1754,8 @@ static void CL_ParseSnapshotDelta (void)
 				msg_readcount = net_message.cursize;
 				return;
 			}
-			cl.snapshot_baseline[entnum] = state;
-			CL_ApplySnapshotState (entnum, &state);
-			CL_MarkSnapshotEntityUpdated (entnum);
+			cl.snapshot_stage[entnum] = state;
+			cl.snapshot_stage_present[entnum] = 1;
 		}
 		else
 		{
@@ -1737,18 +1775,34 @@ static void CL_ParseSnapshotDelta (void)
 	{
 		for (i = 1; i < cl_max_edicts; i++)
 		{
+			if (cl.snapshot_stage_remove[i])
+			{
+				cl.snapshot_present[i] = 0;
+				CL_ClearSnapshotEntity (i);
+			}
+			if (!cl.snapshot_stage_present[i])
+				continue;
+			cl.snapshot_baseline[i] = cl.snapshot_stage[i];
+			cl.snapshot_present[i] = 1;
+			CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+			CL_MarkSnapshotEntityUpdated (i);
+		}
+
+		for (i = 1; i < cl_max_edicts; i++)
+		{
 			if (cl.snapshot_present[i] && cl_entities[i].msgtime != cl.mtime[0])
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
 		cl.snapshot_baseline_seq = seq;
 		cl.snap_last_applied_seq = seq16;
+		cl.snap_last_complete_seq = seq16;
+		cl.snap_last_incomplete = false;
 		CL_SendSnapshotAck (seq);
 		CL_RecordPlayerSnap ();
 	}
-	else
+	else if (!drop)
 	{
-		if (!drop)
-			CL_SendSnapshotNak (cl.snapshot_baseline_seq, baseline_seq);
+		CL_SendSnapshotNak (cl.snapshot_baseline_seq, baseline_seq);
 	}
 }
 
@@ -1770,12 +1824,22 @@ static void CL_ReadSnapshotHeader (snapshot_header_t *header)
 	header->num_removed = (unsigned short)MSG_ReadShort ();
 }
 
+static void CL_ClearSnapshotStage (void)
+{
+	if (cl.snapshot_stage_present)
+		memset (cl.snapshot_stage_present, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_stage_remove)
+		memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
+}
+
 static void CL_ResetSnapshotChunk (void)
 {
 	if (cl.snapshot_chunk_present)
 		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
+	cl.snapshot_chunk_start_time = 0;
+	cl.snapshot_chunk_packets = 0;
 }
 
 static void CL_ParseSnapshot2 (void)
@@ -1795,6 +1859,14 @@ static void CL_ParseSnapshot2 (void)
 	base16 = (unsigned short)header.base_seq;
 	incomplete = (header.flags & SNAPSHOT_FLAG_INCOMPLETE) != 0;
 	need_full = cl.need_full_snapshot;
+
+	if (CL_SnapshotChunkTimedOut ())
+	{
+		if (cl_full_reasm_debug.value >= 1.0f)
+			Con_Printf ("cl_snap2 full reasm timeout seq %u\n", cl.snapshot_chunk_seq);
+		CL_ResetSnapshotChunk ();
+		CL_RequestFullSnapshot ("snapshot2 full reasm timeout", false);
+	}
 
 	if (cl_snap_debug.value >= 1.0f)
 	{
@@ -1821,7 +1893,14 @@ static void CL_ParseSnapshot2 (void)
 				CL_ResetSnapshotChunk ();
 				cl.snapshot_chunk_active = true;
 				cl.snapshot_chunk_seq = header.seq;
+				cl.snapshot_chunk_start_time = realtime;
+				cl.snapshot_chunk_packets = 0;
 			}
+
+			cl.snapshot_chunk_packets++;
+			if (cl_full_reasm_debug.value >= 2.0f)
+				Con_Printf ("cl_snap2 full reasm seq %u packet %d flags 0x%x ents %u\n",
+					header.seq, cl.snapshot_chunk_packets, header.flags, header.num_entities);
 
 			for (i = 0; i < header.num_entities; i++)
 			{
@@ -1876,23 +1955,29 @@ static void CL_ParseSnapshot2 (void)
 			{
 				if (!cl.snapshot_chunk_present[i])
 					continue;
-				cl.snapshot_baseline[i] = cl.snapshot_chunk[i];
-				cl.snapshot_present[i] = 1;
-				CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+				if (!incomplete)
+				{
+					cl.snapshot_baseline[i] = cl.snapshot_chunk[i];
+					cl.snapshot_present[i] = 1;
+				}
+				CL_ApplySnapshotState (i, &cl.snapshot_chunk[i]);
 				CL_MarkSnapshotEntityUpdated (i);
 			}
 
-			cl.snapshot_baseline_seq = header.seq;
-			cl.snap_last_applied_seq = seq16;
 			if (!incomplete)
 			{
+				cl.snapshot_baseline_seq = header.seq;
+				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
+				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
 				CL_SendSnapshotAck (header.seq);
 				CL_RecordPlayerSnap ();
 			}
 			else
 			{
+				cl.snap_last_incomplete_seq = seq16;
+				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
 				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
 			}
@@ -1900,14 +1985,7 @@ static void CL_ParseSnapshot2 (void)
 			return;
 		}
 
-		if (!incomplete)
-		{
-			memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-			if (cl.snapshot_active)
-				memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-			if (cl.snapshot_last_update_time)
-				memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
-		}
+		CL_ClearSnapshotStage ();
 
 		for (i = 0; i < header.num_entities; i++)
 		{
@@ -1933,26 +2011,50 @@ static void CL_ParseSnapshot2 (void)
 			}
 			if (!drop)
 			{
-				cl.snapshot_baseline[entnum] = state;
-				cl.snapshot_present[entnum] = 1;
-				CL_ApplySnapshotState (entnum, &state);
-				CL_MarkSnapshotEntityUpdated (entnum);
+				cl.snapshot_stage[entnum] = state;
+				cl.snapshot_stage_present[entnum] = 1;
 			}
 		}
 
 		if (!drop)
 		{
-			cl.snapshot_baseline_seq = header.seq;
-			cl.snap_last_applied_seq = seq16;
 			if (!incomplete)
 			{
+				memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+				if (cl.snapshot_active)
+					memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+				if (cl.snapshot_last_update_time)
+					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+
+				for (i = 1; i < cl_max_edicts; i++)
+				{
+					if (!cl.snapshot_stage_present[i])
+						continue;
+					cl.snapshot_baseline[i] = cl.snapshot_stage[i];
+					cl.snapshot_present[i] = 1;
+					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+					CL_MarkSnapshotEntityUpdated (i);
+				}
+
+				cl.snapshot_baseline_seq = header.seq;
+				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
+				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
 				CL_SendSnapshotAck (header.seq);
 				CL_RecordPlayerSnap ();
 			}
 			else
 			{
+				for (i = 1; i < cl_max_edicts; i++)
+				{
+					if (!cl.snapshot_stage_present[i])
+						continue;
+					CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
+					CL_MarkSnapshotEntityUpdated (i);
+				}
+				cl.snap_last_incomplete_seq = seq16;
+				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
 				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
 			}
@@ -1964,15 +2066,25 @@ static void CL_ParseSnapshot2 (void)
 	if (!drop && baseline_match)
 		SDL_assert (header.base_seq == cl.snapshot_baseline_seq);
 
-	if (!drop && (!baseline_match || need_full || base16 != cl.snap_last_applied_seq))
+	if (!drop && (!baseline_match || base16 != cl.snap_last_complete_seq || cl.snapshot_chunk_active || need_full))
 	{
 		if (cl_snap_debug.value >= 1.0f)
 			Con_Printf ("cl_snap2 delta mismatch base %u last %u need_full %d\n",
-				header.base_seq, cl.snap_last_applied_seq, need_full);
+				header.base_seq, cl.snap_last_complete_seq, need_full);
+		if (!baseline_match)
+			CL_LogDeltaReject ("base_mismatch", header.seq, header.base_seq);
+		else if (base16 != cl.snap_last_complete_seq)
+			CL_LogDeltaReject ("base_incomplete", header.seq, header.base_seq);
+		else if (cl.snapshot_chunk_active)
+			CL_LogDeltaReject ("base_continuation", header.seq, header.base_seq);
+		else
+			CL_LogDeltaReject ("need_full", header.seq, header.base_seq);
 		cl.snap_delta_mismatch++;
 		CL_RequestFullSnapshot ("snapshot2 base mismatch", false);
 		drop = true;
 	}
+
+	CL_ClearSnapshotStage ();
 
 	if (header.flags & SNAPSHOT_FLAG_HAS_REMOVE_LIST)
 	{
@@ -1986,10 +2098,7 @@ static void CL_ParseSnapshot2 (void)
 				return;
 			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
-			{
-				cl.snapshot_present[entnum] = 0;
-				CL_ClearSnapshotEntity (entnum);
-			}
+				cl.snapshot_stage_remove[entnum] = 1;
 		}
 	}
 
@@ -2018,10 +2127,8 @@ static void CL_ParseSnapshot2 (void)
 			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 			{
-				cl.snapshot_baseline[entnum] = state;
-				cl.snapshot_present[entnum] = 1;
-				CL_ApplySnapshotState (entnum, &state);
-				CL_MarkSnapshotEntityUpdated (entnum);
+				cl.snapshot_stage[entnum] = state;
+				cl.snapshot_stage_present[entnum] = 1;
 			}
 		}
 
@@ -2054,9 +2161,8 @@ static void CL_ParseSnapshot2 (void)
 						msg_readcount = net_message.cursize;
 						return;
 					}
-					cl.snapshot_baseline[entnum] = state;
-					CL_ApplySnapshotState (entnum, &state);
-					CL_MarkSnapshotEntityUpdated (entnum);
+					cl.snapshot_stage[entnum] = state;
+					cl.snapshot_stage_present[entnum] = 1;
 				}
 				else
 				{
@@ -2078,18 +2184,44 @@ static void CL_ParseSnapshot2 (void)
 	{
 		for (i = 1; i < cl_max_edicts; i++)
 		{
+			if (cl.snapshot_stage_remove[i])
+			{
+				if (!incomplete)
+					cl.snapshot_present[i] = 0;
+				CL_ClearSnapshotEntity (i);
+			}
+			if (!cl.snapshot_stage_present[i])
+				continue;
+			if (!incomplete)
+				cl.snapshot_baseline[i] = cl.snapshot_stage[i];
+			CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
+			CL_MarkSnapshotEntityUpdated (i);
+		}
+
+		for (i = 1; i < cl_max_edicts; i++)
+		{
 			if (cl.snapshot_present[i] && cl_entities[i].msgtime != cl.mtime[0])
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
-		cl.snapshot_baseline_seq = header.seq;
-		cl.snap_last_applied_seq = seq16;
+		if (!incomplete)
+		{
+			cl.snapshot_baseline_seq = header.seq;
+			cl.snap_last_applied_seq = seq16;
+			cl.snap_last_complete_seq = seq16;
+			cl.snap_last_incomplete = false;
+			CL_RecordPlayerSnap ();
+		}
+		else
+		{
+			cl.snap_last_incomplete_seq = seq16;
+			cl.snap_last_incomplete = true;
+			cl.snap_incomplete_count++;
+		}
 		CL_SendSnapshotAck (header.seq);
-		CL_RecordPlayerSnap ();
 	}
-	else
+	else if (!drop)
 	{
-		if (!drop)
-			CL_SendSnapshotNak (cl.snapshot_baseline_seq, header.base_seq);
+		CL_SendSnapshotNak (cl.snapshot_baseline_seq, header.base_seq);
 	}
 }
 
@@ -2564,8 +2696,13 @@ void CL_ParseServerMessage (void)
 		{
 		default:
 		//	CL_DumpPacket ();
-			CL_BadServerMessage ("unknown command", cmd, cmd_offset,
-				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			if (realtime >= cl_unknown_cmd_next_warn_time)
+			{
+				Con_Printf ("Dropping server packet with unknown command %s (%d)\n",
+					CL_SvcName (cmd), cmd);
+				cl_unknown_cmd_next_warn_time = realtime + 1.0;
+			}
+			msg_readcount = net_message.cursize;
 			return;
 
 		case svc_nop:

@@ -274,6 +274,8 @@ typedef struct
 	unsigned int snapshot_baseline_seq;
 	unsigned short snap_last_applied_seq;
 	unsigned short snap_last_complete_seq;
+	unsigned short snap_last_incomplete_seq;
+	qboolean	snap_last_incomplete;
 	qboolean	need_full_snapshot;
 	int			snap_parse_errors;
 	int			snap_delta_mismatch;
@@ -284,8 +286,13 @@ typedef struct
 	double		*snapshot_last_update_time;
 	qboolean	snapshot_chunk_active;
 	unsigned int snapshot_chunk_seq;
+	double		snapshot_chunk_start_time;
+	int			snapshot_chunk_packets;
 	snapshot_state_t *snapshot_chunk;
 	byte		*snapshot_chunk_present;
+	snapshot_state_t *snapshot_stage;
+	byte		*snapshot_stage_present;
+	byte		*snapshot_stage_remove;
 
 	int			cdtrack, looptrack;	// cd audio
 
@@ -356,6 +363,9 @@ extern	cvar_t	m_side;
 extern	cvar_t	cl_startdemos;
 extern	cvar_t	cl_confirmquit;
 extern	cvar_t	cl_snap_debug;
+extern	cvar_t	cl_delta_reject_debug;
+extern	cvar_t	cl_full_reasm_debug;
+extern	cvar_t	cl_full_reasm_timeout_ms;
 extern	cvar_t	cl_test_drop;
 extern	cvar_t	cl_entity_timeout_ms;
 extern	cvar_t	cl_lerp_ms;

@@ -44,6 +44,9 @@ cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
+cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
+cvar_t	cl_full_reasm_debug = {"cl_full_reasm_debug", "0", CVAR_NONE};
+cvar_t	cl_full_reasm_timeout_ms = {"cl_full_reasm_timeout_ms", "1000", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
 cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
@@ -322,6 +325,9 @@ void CL_ClearState (void)
 	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
 	cl.snapshot_chunk = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_chunk");
 	cl.snapshot_chunk_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_chunk_present");
+	cl.snapshot_stage = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_stage");
+	cl.snapshot_stage_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_present");
+	cl.snapshot_stage_remove = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_remove");
 	//johnfitz
 	if (cl.snapshot_present)
 		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
@@ -331,10 +337,18 @@ void CL_ClearState (void)
 		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
 	if (cl.snapshot_chunk_present)
 		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_stage_present)
+		memset (cl.snapshot_stage_present, 0, cl_max_edicts * sizeof(byte));
+	if (cl.snapshot_stage_remove)
+		memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
+	cl.snapshot_chunk_start_time = 0;
+	cl.snapshot_chunk_packets = 0;
 	cl.snap_last_applied_seq = 0;
 	cl.snap_last_complete_seq = 0;
+	cl.snap_last_incomplete_seq = 0;
+	cl.snap_last_incomplete = false;
 	cl.need_full_snapshot = false;
 	cl.snap_parse_errors = 0;
 	cl.snap_delta_mismatch = 0;
@@ -831,6 +845,13 @@ void CL_RelinkEntities (void)
 		{
 			qboolean keepalive = false;
 			double timeout_s = cl_entity_timeout_ms.value / 1000.0;
+
+			if (cl.snap_last_incomplete)
+			{
+				ent->msgtime = cl.mtime[0];
+				ent->forcelink = true;
+				keepalive = true;
+			}
 
 			if (timeout_s > 0.0 && cl.snapshot_active && cl.snapshot_active[i] && cl.snapshot_last_update_time)
 			{
@@ -1370,6 +1391,9 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
 	Cvar_RegisterVariable (&cl_snap_debug);
+	Cvar_RegisterVariable (&cl_delta_reject_debug);
+	Cvar_RegisterVariable (&cl_full_reasm_debug);
+	Cvar_RegisterVariable (&cl_full_reasm_timeout_ms);
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
 	Cvar_RegisterVariable (&cl_lerp_ms);
