@@ -55,6 +55,53 @@ static int myDriverLevel;
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
 
+static int NET_GetConfiguredMTU (const qsocket_t *sock)
+{
+	(void)sock;
+	if (sv.active)
+		return (int)sv_mtu.value;
+	return (int)net_mtu.value;
+}
+
+static int NET_GetPacketPayloadLimit (const qsocket_t *sock)
+{
+	int mtu = NET_GetConfiguredMTU (sock);
+	int payload;
+
+	if (mtu <= 0)
+		return NET_DATAGRAMSIZE;
+	payload = mtu - NET_UDPIP_HEADER_BYTES;
+	if (payload < NET_HEADERSIZE + 1)
+		payload = NET_HEADERSIZE + 1;
+	return q_min (payload, NET_DATAGRAMSIZE);
+}
+
+static int NET_GetPacketDataLimit (const qsocket_t *sock)
+{
+	int payload = NET_GetPacketPayloadLimit (sock);
+	int data_limit = payload - NET_HEADERSIZE;
+
+	if (data_limit < 1)
+		data_limit = 1;
+	return q_min (data_limit, MAX_DATAGRAM);
+}
+
+static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len)
+{
+	static double next_log_time = 0.0;
+
+	if (!sv.active || sv_mtu_debug.value <= 0)
+		return;
+	if (net_time < next_log_time)
+		return;
+
+	Con_Printf ("sv_mtu %d oversize send blocked (%s size %u)\n",
+		(int)sv_mtu.value,
+		NET_QSocketGetAddressString (sock),
+		packet_len);
+	next_log_time = net_time + 1.0;
+}
+
 
 static char *StrAddr (struct qsockaddr *addr)
 {
@@ -134,6 +181,8 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	unsigned int	packetLen;
 	unsigned int	dataLen;
 	unsigned int	eom;
+	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
 
 #ifdef DEBUG
 	if (data->cursize == 0)
@@ -149,23 +198,30 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	Q_memcpy(sock->sendMessage, data->data, data->cursize);
 	sock->sendMessageLength = data->cursize;
 
-	if (data->cursize <= MAX_DATAGRAM)
+	if (data->cursize <= (int)max_data)
 	{
 		dataLen = data->cursize;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = max_data;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
+
+	if (packetLen > payload_limit)
+	{
+		NET_LogOversizedSend (sock, packetLen);
+		return -1;
+	}
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence++);
 	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->canSend = false;
+	sock->sendMessageSize = (int)dataLen;
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
@@ -181,24 +237,33 @@ static int SendMessageNext (qsocket_t *sock)
 	unsigned int	packetLen;
 	unsigned int	dataLen;
 	unsigned int	eom;
+	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
 
-	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	if (sock->sendMessageLength <= (int)max_data)
 	{
 		dataLen = sock->sendMessageLength;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = max_data;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
+
+	if (packetLen > payload_limit)
+	{
+		NET_LogOversizedSend (sock, packetLen);
+		return -1;
+	}
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence++);
 	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->sendNext = false;
+	sock->sendMessageSize = (int)dataLen;
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
@@ -214,24 +279,33 @@ static int ReSendMessage (qsocket_t *sock)
 	unsigned int	packetLen;
 	unsigned int	dataLen;
 	unsigned int	eom;
+	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
 
-	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	if (sock->sendMessageLength <= (int)max_data)
 	{
 		dataLen = sock->sendMessageLength;
 		eom = NETFLAG_EOM;
 	}
 	else
 	{
-		dataLen = MAX_DATAGRAM;
+		dataLen = max_data;
 		eom = 0;
 	}
 	packetLen = NET_HEADERSIZE + dataLen;
+
+	if (packetLen > payload_limit)
+	{
+		NET_LogOversizedSend (sock, packetLen);
+		return -1;
+	}
 
 	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
 	packetBuffer.sequence = BigLong(sock->sendSequence - 1);
 	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->sendNext = false;
+	sock->sendMessageSize = (int)dataLen;
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
@@ -260,6 +334,8 @@ qboolean Datagram_CanSendUnreliableMessage (qsocket_t *sock)
 int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int	packetLen;
+	int	payload_limit = NET_GetPacketPayloadLimit (sock);
+	int	max_data = NET_GetPacketDataLimit (sock);
 
 #ifdef DEBUG
 	if (data->cursize == 0)
@@ -269,7 +345,18 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		Sys_Error("Datagram_SendUnreliableMessage: message too big: %u", data->cursize);
 #endif
 
+	if (data->cursize > max_data)
+	{
+		NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+		return 0;
+	}
+
 	packetLen = NET_HEADERSIZE + data->cursize;
+	if (packetLen > payload_limit)
+	{
+		NET_LogOversizedSend (sock, (unsigned int)packetLen);
+		return 0;
+	}
 
 	packetBuffer.length = BigLong(packetLen | NETFLAG_UNRELIABLE);
 	packetBuffer.sequence = BigLong(sock->unreliableSendSequence++);
@@ -421,16 +508,20 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				Con_DPrintf("Duplicate ACK received\n");
 				continue;
 			}
-			sock->sendMessageLength -= MAX_DATAGRAM;
-			if (sock->sendMessageLength > 0)
 			{
-				memmove (sock->sendMessage, sock->sendMessage + MAX_DATAGRAM, sock->sendMessageLength);
-				sock->sendNext = true;
-			}
-			else
-			{
-				sock->sendMessageLength = 0;
-				sock->canSend = true;
+				int chunk = sock->sendMessageSize > 0 ? sock->sendMessageSize : MAX_DATAGRAM;
+				sock->sendMessageLength -= chunk;
+				if (sock->sendMessageLength > 0)
+				{
+					memmove (sock->sendMessage, sock->sendMessage + chunk, sock->sendMessageLength);
+					sock->sendNext = true;
+				}
+				else
+				{
+					sock->sendMessageLength = 0;
+					sock->canSend = true;
+				}
+				sock->sendMessageSize = 0;
 			}
 			continue;
 		}

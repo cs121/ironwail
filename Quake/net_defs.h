@@ -36,6 +36,7 @@ struct qsockaddr
 };
 
 #define NET_HEADERSIZE		(2 * sizeof(unsigned int))
+#define NET_UDPIP_HEADER_BYTES	28
 #define NET_DATAGRAMSIZE	(MAX_DATAGRAM + NET_HEADERSIZE)
 
 // NetHeader flags
@@ -147,6 +148,7 @@ typedef struct qsocket_s
 	unsigned int	sendSequence;
 	unsigned int	unreliableSendSequence;
 	int		sendMessageLength;
+	int		sendMessageSize;
 	byte		sendMessage [NET_MAXMESSAGE];
 
 	unsigned int	receiveSequence;
@@ -257,4 +259,3 @@ typedef struct _PollProcedure
 void SchedulePollProcedure(PollProcedure *pp, double timeOffset);
 
 #endif	/* __NET_DEFS_H */
-

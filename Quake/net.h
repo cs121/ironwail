@@ -124,5 +124,6 @@ extern	char		my_ipx_address[NET_NAMELEN];
 extern	char		my_tcpip_address[NET_NAMELEN];
 
 extern cvar_t		net_maxpacket;
+extern cvar_t		net_mtu;
 
 #endif	/* _QUAKE_NET_H */

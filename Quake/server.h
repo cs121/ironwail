@@ -34,6 +34,9 @@ typedef struct
 	qboolean	changelevel_issued;	// cleared when at SV_SpawnServer
 } server_static_t;
 
+extern cvar_t sv_mtu;
+extern cvar_t sv_mtu_debug;
+
 //=============================================================================
 
 #define MAX_SIGNON_BUFFERS 256
