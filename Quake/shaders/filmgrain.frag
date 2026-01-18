@@ -79,6 +79,8 @@ void main()
 	float grainDebug = FilmGrainParams1.z;
 	if (grainAmount > 0.0 || grainDebug > 0.5)
 	{
+		float seed = FilmGrainParams1.w;
+		float frame = FilmGrainParams2.x;
 		float grainSize = max(FilmGrainParams0.y, 0.01);
 		// Subtle size wobble for analog feel (keep tiny to avoid shimmer)
 		grainSize *= mix(0.97, 1.03, U01(Hash32(floatBitsToUint(seed) ^ uint(frame) * 0x51ed2705u)));
@@ -86,8 +88,6 @@ void main()
 		float lumaWeight = clamp(FilmGrainParams0.w, 0.0, 1.0);
 		float blend = clamp(FilmGrainParams1.x, 0.0, 1.0);
 		float colored = clamp(FilmGrainParams1.y, 0.0, 1.0);
-		float seed = FilmGrainParams1.w;
-		float frame = FilmGrainParams2.x;
 		float time = frame * grainSpeed;
 		uvec2 pix = uvec2(pixel);
 		uint jseed = floatBitsToUint(seed) ^ uint(frame) * 0x9e3779b9u;
