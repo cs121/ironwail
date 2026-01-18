@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
+#include "r_godray_emit.h"
 #include "r_godrayvol.h"
 
 //johnfitz -- new cvars
@@ -831,6 +832,7 @@ Cvar_RegisterVariable (&r_vignette);
 
 	R_PostFX_Init ();
 	R_FogVol_Init ();
+	R_GodrayEmitters_Init ();
 	R_GodrayVolume_Init ();
 
 	R_InitParticles ();

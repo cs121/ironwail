@@ -1677,6 +1677,14 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.emissive_scale = 1.f;
 	material.bloom_scale = 1.f;
 	material.godray_scale = 1.f;
+	material.godray_intensity = 1.f;
+	material.godray_length = 0.f;
+	material.godray_color[0] = 1.f;
+	material.godray_color[1] = 1.f;
+	material.godray_color[2] = 1.f;
+	material.godray_dir[0] = 0.f;
+	material.godray_dir[1] = -1.f;
+	material.godray_dir[2] = 0.f;
 	material.cull_mode = MAT_CULL_BACK;
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
@@ -1962,6 +1970,68 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			Mat_Shader_ValidateFiniteFloat (state, "godray_scale", scale, 1.f, &validated_scale);
 			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray_intensity"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray_intensity", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float validated_intensity = 1.f;
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			Mat_Shader_ValidateFiniteFloat (state, "godray_intensity", scale, 1.f, &validated_intensity);
+			material.godray_intensity = CLAMP (0.f, validated_intensity, MAT_SHADER_SCALE_MAX);
+			material.godray_intensity_set = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray_length"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray_length", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float validated_length = 0.f;
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			Mat_Shader_ValidateFiniteFloat (state, "godray_length", scale, 0.f, &validated_length);
+			material.godray_length = q_max (0.f, validated_length);
+			material.godray_length_set = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray_color"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray_color", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float color[3];
+			if (!ParseFloat (&data, &color[0], state)
+				|| !ParseFloat (&data, &color[1], state)
+				|| !ParseFloat (&data, &color[2], state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			material.godray_color[0] = color[0];
+			material.godray_color[1] = color[1];
+			material.godray_color[2] = color[2];
+			material.godray_color_set = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray_dir"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray_dir", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float dir[3];
+			if (!ParseFloat (&data, &dir[0], state)
+				|| !ParseFloat (&data, &dir[1], state)
+				|| !ParseFloat (&data, &dir[2], state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			material.godray_dir[0] = dir[0];
+			material.godray_dir[1] = dir[1];
+			material.godray_dir[2] = dir[2];
+			material.godray_dir_set = true;
 			continue;
 		}
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,

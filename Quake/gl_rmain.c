@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_postfx.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
+#include "r_godray_emit.h"
 #include "r_godrayvol.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
@@ -1665,6 +1666,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (!R_GodraysReady ())
 		return fallback;
+	if ((int)CLAMP (0, (int)Q_rint (r_godrays_mode.value), 2) == 1)
+		return fallback;
 
 	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
@@ -1691,6 +1694,13 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	vec3_t light_dir;
 	vec3_t emitter_normal;
 	GLuint depth_tex = framebufs.composite.depth_stencil_tex;
+	vec4_t emitter_centers[MAX_GODRAY_POSTFX_EMITTERS];
+	vec4_t emitter_dirs[MAX_GODRAY_POSTFX_EMITTERS];
+	vec4_t emitter_colors[MAX_GODRAY_POSTFX_EMITTERS];
+	int total_emitters = 0;
+	int volume_emitters = 0;
+	int postfx_emitters = 0;
+	const godray_emitter_t *emitters = R_GodrayEmitters_GetList (&total_emitters);
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
 	if (!MatrixInverse4x4 (r_matviewproj, inv_viewproj))
@@ -1699,6 +1709,67 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (VectorNormalize (light_dir) <= 0.f)
 		VectorSet (light_dir, 0.f, 0.f, -1.f);
 	VectorSet (emitter_normal, 0.f, 0.f, 1.f);
+
+	R_GodrayEmitters_GetRenderCounts (&volume_emitters, &postfx_emitters);
+	postfx_emitters = q_min (postfx_emitters, MAX_GODRAY_POSTFX_EMITTERS);
+	if (volume_emitters + postfx_emitters > total_emitters)
+		postfx_emitters = q_max (0, total_emitters - volume_emitters);
+	for (int i = 0; i < postfx_emitters; ++i)
+	{
+		const godray_emitter_t *emitter = &emitters[volume_emitters + i];
+		vec3_t center_proj;
+		vec3_t dir_proj;
+		vec3_t center_ss;
+		vec3_t dir_ss;
+		vec3_t end_ws;
+		vec3_t end_proj;
+		float dir_len2;
+
+		ProjectVector (emitter->center_ws, r_matviewproj, center_proj);
+		center_ss[0] = CLAMP (0.f, center_proj[0] * 0.5f + 0.5f, 1.f);
+		center_ss[1] = CLAMP (0.f, center_proj[1] * 0.5f + 0.5f, 1.f);
+		center_ss[2] = 0.f;
+
+		VectorMA (emitter->center_ws, 16.f, emitter->ray_dir_ws, end_ws);
+		ProjectVector (end_ws, r_matviewproj, dir_proj);
+		dir_ss[0] = dir_proj[0] * 0.5f + 0.5f - center_ss[0];
+		dir_ss[1] = dir_proj[1] * 0.5f + 0.5f - center_ss[1];
+		dir_ss[2] = 0.f;
+		dir_len2 = dir_ss[0] * dir_ss[0] + dir_ss[1] * dir_ss[1];
+		if (dir_len2 > 1e-6f)
+		{
+			float inv_len = 1.f / sqrtf (dir_len2);
+			dir_ss[0] *= inv_len;
+			dir_ss[1] *= inv_len;
+		}
+		else
+		{
+			dir_ss[0] = 1.f;
+			dir_ss[1] = 0.f;
+		}
+
+		VectorMA (emitter->center_ws, emitter->ray_length, emitter->ray_dir_ws, end_ws);
+		ProjectVector (end_ws, r_matviewproj, end_proj);
+		float end_ss_x = end_proj[0] * 0.5f + 0.5f;
+		float end_ss_y = end_proj[1] * 0.5f + 0.5f;
+		float max_radius_ss = sqrtf ((end_ss_x - center_ss[0]) * (end_ss_x - center_ss[0])
+			+ (end_ss_y - center_ss[1]) * (end_ss_y - center_ss[1]));
+
+		emitter_centers[i][0] = center_ss[0];
+		emitter_centers[i][1] = center_ss[1];
+		emitter_centers[i][2] = CLAMP (0.f, max_radius_ss, 1.f);
+		emitter_centers[i][3] = emitter->intensity;
+		emitter_dirs[i][0] = dir_ss[0];
+		emitter_dirs[i][1] = dir_ss[1];
+		emitter_dirs[i][2] = 0.f;
+		emitter_dirs[i][3] = 0.f;
+		emitter_colors[i][0] = emitter->color[0];
+		emitter_colors[i][1] = emitter->color[1];
+		emitter_colors[i][2] = emitter->color[2];
+		emitter_colors[i][3] = 1.f;
+	}
+	if (postfx_emitters <= 0)
+		emit_brush = false;
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
@@ -1750,6 +1821,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
 			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
 			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
+			GL_Uniform1iFunc (12, 0);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
@@ -1790,6 +1862,13 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
 			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
 			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
+			GL_Uniform1iFunc (12, postfx_emitters);
+			if (postfx_emitters > 0)
+			{
+				GL_Uniform4fvFunc (13, postfx_emitters, &emitter_centers[0][0]);
+				GL_Uniform4fvFunc (21, postfx_emitters, &emitter_dirs[0][0]);
+				GL_Uniform4fvFunc (29, postfx_emitters, &emitter_colors[0][0]);
+			}
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
@@ -1798,6 +1877,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (out_mask)
 		*out_mask = framebufs.godrays.mask_tex;
 
+	R_GodrayEmitters_SetRenderedCounts (volume_emitters, postfx_emitters);
 	return framebufs.godrays.shafts_tex;
 }
 
@@ -4546,7 +4626,7 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_GodrayVolume_BuildList ();
+	R_GodrayEmitters_BuildList ();
 	R_Shadow_SunPass ();
 	R_Shadow_DlightPass ();
 	R_SetupGL ();
