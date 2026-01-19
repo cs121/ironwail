@@ -1286,13 +1286,24 @@ static void CL_EnsureReliableControlSpace (int needed, const char *reason)
 	}
 }
 
-static void CL_SendSnapshotAck (unsigned int seq)
+static qboolean CL_SendSnapshotAck (unsigned int seq)
 {
 	if (cls.demoplayback || cls.state != ca_connected)
-		return;
+		return false;
 	CL_EnsureReliableControlSpace (1 + 4, "snapshot_ack");
+	if (cls.message.maxsize - cls.message.cursize < (1 + 4))
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_ack_drop seq %u\n",
+			realtime, seq);
+		return false;
+	}
 	MSG_WriteByte (&cls.message, clc_snapshot_ack);
 	MSG_WriteLong (&cls.message, (int)seq);
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_ack_send seq %u\n",
+		realtime, seq);
+	return true;
 }
 
 static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error)
@@ -1309,7 +1320,7 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 		cl.need_full_snapshot = true;
 		if (cl_snap_debug.value >= 1.0f && reason)
 			Con_Printf ("cl_snap request full: %s\n", reason);
-		CL_SendSnapshotAck (0);
+		(void)CL_SendSnapshotAck (0);
 	}
 }
 
@@ -1654,7 +1665,7 @@ static void CL_ParseSnapshotFull (void)
 	cl.snap_last_complete_seq = seq16;
 	cl.snap_last_incomplete = false;
 	cl.need_full_snapshot = false;
-	CL_SendSnapshotAck (seq);
+	(void)CL_SendSnapshotAck (seq);
 	CL_RecordPlayerSnap ();
 }
 
@@ -1837,7 +1848,7 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_applied_seq = seq16;
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
-		CL_SendSnapshotAck (seq);
+		(void)CL_SendSnapshotAck (seq);
 		CL_RecordPlayerSnap ();
 	}
 	else if (!drop)
@@ -2018,7 +2029,6 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
-				CL_SendSnapshotAck (header.seq);
 				CL_RecordPlayerSnap ();
 			}
 			else
@@ -2026,8 +2036,9 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
-				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
 			}
+			if (!CL_SendSnapshotAck (header.seq))
+				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 			CL_ResetSnapshotChunk ();
 			return;
 		}
@@ -2089,7 +2100,6 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
-				CL_SendSnapshotAck (header.seq);
 				CL_RecordPlayerSnap ();
 			}
 			else
@@ -2105,8 +2115,9 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
-				CL_RequestFullSnapshot ("snapshot2 full incomplete", false);
 			}
+			if (!CL_SendSnapshotAck (header.seq))
+				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 		}
 		return;
 	}
@@ -2268,7 +2279,8 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_incomplete = true;
 			cl.snap_incomplete_count++;
 		}
-		CL_SendSnapshotAck (header.seq);
+		if (!CL_SendSnapshotAck (header.seq))
+			CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 	}
 	else if (!drop)
 	{

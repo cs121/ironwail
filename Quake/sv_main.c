@@ -924,6 +924,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_next_seq = 1;
 	client->snapshot_baseline_seq = 0;
 	client->snapshot_pending_seq = 0;
+	client->snapshot_no_progress_count = 0;
 	client->snapshot_pending_baseline_seq = 0;
 	client->snapshot_last_sent_seq = 0;
 	client->snapshot_last_acked_seq = 0;
@@ -937,6 +938,11 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_mandatory = 0;
 	client->snapshot_pending_dropped = 0;
 	client->snapshot_pending_incomplete = false;
+	client->snapshot_no_progress_seq = 0;
+	client->snapshot_no_progress_base = 0;
+	client->snapshot_no_progress_next_edict = 0;
+	client->snapshot_no_progress_bytes = 0;
+	client->snapshot_no_progress_count = 0;
 	client->snapshot_debug_flags = 0;
 	client->snapshot_debug_base = 0;
 	client->snapshot_debug_add = 0;
@@ -1719,7 +1725,8 @@ static void SV_WriteSnapshot2Header (sizebuf_t *msg, unsigned int seq, unsigned 
 }
 
 static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
-	const byte *present, const byte *snapflags, unsigned int extra_flags)
+	const byte *present, const byte *snapflags, unsigned int extra_flags,
+	int *out_remaining, unsigned int *out_flags)
 {
 	int header_size = 1 + 4 + 4 + 1 + 2 + 2;
 	int available = msg->maxsize - msg->cursize;
@@ -1729,6 +1736,7 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 	int last_sent = 0;
 	qboolean more = false;
 	unsigned int flags = SNAPSHOT_FLAG_FULL | extra_flags;
+	int remaining_entities = 0;
 
 	if (available < header_size)
 		return false;
@@ -1755,8 +1763,19 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 	if (chunk_count == 0 && more)
 		return false;
 
-	if (more)
+	remaining_entities = client->entstream.total_entities - (client->entstream.sent_entities + chunk_count);
+	if (remaining_entities < 0)
+		remaining_entities = 0;
+
+	if (remaining_entities > 0)
+	{
 		flags |= SNAPSHOT_FLAG_CONTINUE;
+		flags |= SNAPSHOT_FLAG_INCOMPLETE;
+	}
+	else
+	{
+		flags &= ~(SNAPSHOT_FLAG_CONTINUE | SNAPSHOT_FLAG_INCOMPLETE);
+	}
 
 	if (!MSG_CanWrite (msg, chunk_size))
 		return false;
@@ -1793,7 +1812,7 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 
 	client->entstream.sent_entities += chunk_count;
 
-	if (more)
+	if (remaining_entities > 0)
 	{
 		client->entstream.next_edict = last_sent + 1;
 		msg->write_locked = true;
@@ -1813,6 +1832,15 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		client->entstream.next_edict = 1;
 		client->entstream.base_snapshot = 0;
 	}
+
+	if (out_remaining)
+		*out_remaining = remaining_entities;
+	if (out_flags)
+		*out_flags = flags;
+	if (net_snap_debug.value)
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_chunk_rem %s seq %u rem %d flags 0x%x\n",
+			realtime, client->name, client->snapshot_pending_seq, remaining_entities, flags);
 
 	return true;
 }
@@ -2252,6 +2280,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	int update_count = 0;
 	int full_count = 0;
 	qboolean continuation = false;
+	int chunk_remaining = -1;
+	unsigned int chunk_flags = 0;
+	qboolean chunked_snapshot = false;
 	double timeout_s = sv_snapshottimeout.value / 1000.0;
 	double full_interval_s = sv_snap_full_interval.value;
 	int force_full_frames = (int)sv_snap_force_full_after_frames.value;
@@ -2344,8 +2375,10 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				full_count = total_count;
 				if (client->entstream.active)
 				{
+					chunked_snapshot = true;
 					if (!SV_WriteSnapshot2FullChunked (client, msg,
-						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags))
+						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
+						&chunk_remaining, &chunk_flags))
 					{
 						msg->overflowed = true;
 						msg->write_locked = true;
@@ -2355,8 +2388,10 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				else if (total_size > (msg->maxsize - msg->cursize))
 				{
 					SV_InitEntityStream (client, total_count, client->snapshot_pending_seq);
+					chunked_snapshot = true;
 					if (!SV_WriteSnapshot2FullChunked (client, msg,
-						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags))
+						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
+						&chunk_remaining, &chunk_flags))
 					{
 						msg->overflowed = true;
 						msg->write_locked = true;
@@ -2380,7 +2415,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 		client->snapshot_pending_time = realtime;
 		client->snapshot_last_sent_seq = client->snapshot_pending_seq;
-		client->snapshot_pending_incomplete = ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0) || delta_incomplete;
+		{
+			qboolean packet_incomplete = delta_incomplete;
+			if (chunked_snapshot)
+				packet_incomplete = packet_incomplete || ((chunk_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
+			else
+				packet_incomplete = packet_incomplete || ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
+			client->snapshot_pending_incomplete = packet_incomplete;
+		}
 	}
 	else
 	{
@@ -2434,9 +2476,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		client->snapshot_pending_dropped = dropped_count;
 		client->mtu_dropped_tier1 = dropped_tier1;
 		client->mtu_dropped_tier2 = dropped_tier2;
-		if (budget_continuation && sv_snapshot2.value)
-			extra_flags |= SNAPSHOT_FLAG_CONTINUE;
-		if (client->snapshot_pending_dropped > 0 || budget_continuation)
+		if (client->snapshot_pending_dropped > 0)
 			extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 		client->snapshot_pending_seq = client->snapshot_next_seq++;
 		if (!client->snapshot_next_seq)
@@ -2489,14 +2529,16 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				if (total_size > (msg->maxsize - msg->cursize))
 				{
 					SV_InitEntityStream (client, total_count, client->snapshot_pending_seq);
-				if (!SV_WriteSnapshot2FullChunked (client, msg,
-					client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags))
-				{
-					msg->overflowed = true;
-					msg->write_locked = true;
-					return;
+					chunked_snapshot = true;
+					if (!SV_WriteSnapshot2FullChunked (client, msg,
+						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
+						&chunk_remaining, &chunk_flags))
+					{
+						msg->overflowed = true;
+						msg->write_locked = true;
+						return;
+					}
 				}
-			}
 				else
 				{
 					SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
@@ -2513,12 +2555,21 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			client->snapshot_last_full_time = realtime;
 		}
 		client->snapshot_last_sent_seq = client->snapshot_pending_seq;
-		client->snapshot_pending_incomplete = ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0) || delta_incomplete;
+		{
+			qboolean packet_incomplete = delta_incomplete;
+			if (chunked_snapshot)
+				packet_incomplete = packet_incomplete || ((chunk_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
+			else
+				packet_incomplete = packet_incomplete || ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
+			client->snapshot_pending_incomplete = packet_incomplete;
+		}
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
 	continuation = msg->write_locked && client->entstream.active;
-	if (extra_flags & SNAPSHOT_FLAG_CONTINUE)
+	if (chunked_snapshot && (chunk_flags & SNAPSHOT_FLAG_CONTINUE))
+		continuation = true;
+	else if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
 		continuation = true;
 
 	if (forced_full)
@@ -2569,7 +2620,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			flags |= SNAPSHOT_FLAG_DELTA;
 		if (remove_count)
 			flags |= SNAPSHOT_FLAG_HAS_REMOVE_LIST;
-		if (extra_flags & SNAPSHOT_FLAG_INCOMPLETE)
+		if (chunked_snapshot)
+		{
+			if (chunk_flags & SNAPSHOT_FLAG_INCOMPLETE)
+				flags |= SNAPSHOT_FLAG_INCOMPLETE;
+		}
+		else if (extra_flags & SNAPSHOT_FLAG_INCOMPLETE)
 			flags |= SNAPSHOT_FLAG_INCOMPLETE;
 
 		if (!use_delta && sv_snap_debug.value >= 2.0f)
@@ -2612,7 +2668,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			const char *reason = NULL;
 			if (client->snapshot_pending_dropped > 0)
 				reason = "budget_drop";
-			else if (extra_flags & SNAPSHOT_FLAG_CONTINUE)
+			else if (continuation)
 				reason = "continuation";
 			else if (delta_incomplete)
 				reason = "delta_budget";
@@ -2622,6 +2678,46 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop %d\n",
 				realtime, client->name, client->snapshot_pending_seq, base_seq, reason,
 				client->snapshot_pending_mandatory, client->snapshot_pending_dropped);
+		}
+	}
+
+	if (client->snapshot_pending_seq)
+	{
+		unsigned int base_seq = use_delta ? client->snapshot_pending_baseline_seq : 0xFFFFFFFFu;
+		int size_delta = msg->cursize - start_size;
+		if (size_delta > 0)
+		{
+			int cursor = client->entstream.active ? client->entstream.next_edict : 0;
+			qboolean same_seq = (client->snapshot_pending_seq == client->snapshot_no_progress_seq);
+			qboolean same_base = (base_seq == client->snapshot_no_progress_base);
+			qboolean same_cursor = (cursor == client->snapshot_no_progress_next_edict);
+			qboolean same_size = (size_delta == client->snapshot_no_progress_bytes);
+
+			if (same_seq && same_base && (same_cursor || same_size))
+				client->snapshot_no_progress_count++;
+			else
+				client->snapshot_no_progress_count = 0;
+
+			client->snapshot_no_progress_seq = client->snapshot_pending_seq;
+			client->snapshot_no_progress_base = base_seq;
+			client->snapshot_no_progress_next_edict = cursor;
+			client->snapshot_no_progress_bytes = size_delta;
+
+			if (client->snapshot_no_progress_count >= 2)
+			{
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_no_progress %s seq %u base %u size %d cursor %d\n",
+					realtime, client->name, client->snapshot_pending_seq, base_seq, size_delta, cursor);
+				client->snapshot_force_full = true;
+				client->snapshot_pending_is_delta = false;
+				client->snapshot_pending_seq = 0;
+				client->snapshot_pending_incomplete = false;
+				client->snapshot_unacked_frames = 0;
+				client->entstream.active = false;
+				client->entstream.next_edict = 1;
+				client->entstream.base_snapshot = 0;
+				client->snapshot_no_progress_count = 0;
+			}
 		}
 	}
 }
@@ -2655,6 +2751,9 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		memcpy (client->snapshot_baseline_present, client->snapshot_pending_present, qcvm->max_edicts * sizeof(byte));
 		client->snapshot_baseline_seq = seq;
 		client->snapshot_last_acked_seq = seq;
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_base_advance %s seq %u\n",
+			realtime, client->name, seq);
 	}
 	client->snapshot_pending_seq = 0;
 	if (!client->snapshot_pending_is_delta && !was_incomplete)
