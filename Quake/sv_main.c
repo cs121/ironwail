@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
+#include "net_dgrm.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -547,8 +548,7 @@ static qboolean SV_IsLocalClient (client_t *client)
 
 static int SV_MTUCap (client_t *client)
 {
-	if (client && SV_IsLocalClient (client))
-		return 0;
+	(void)client;
 	int cap = (int)sv_mtu_cap.value;
 	int payload;
 
@@ -934,6 +934,12 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_mandatory = 0;
 	client->snapshot_pending_dropped = 0;
 	client->snapshot_pending_incomplete = false;
+	client->snapshot_debug_flags = 0;
+	client->snapshot_debug_base = 0;
+	client->snapshot_debug_add = 0;
+	client->snapshot_debug_update = 0;
+	client->snapshot_debug_remove = 0;
+	client->snapshot_debug_full_count = 0;
 	client->snapshot_stats_full = 0;
 	client->snapshot_stats_delta = 0;
 	client->snapshot_stats_forced_full = 0;
@@ -2146,6 +2152,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	int remove_count = 0;
 	int update_count = 0;
 	int full_count = 0;
+	qboolean continuation = false;
 	double timeout_s = sv_snapshottimeout.value / 1000.0;
 	double full_interval_s = sv_snap_full_interval.value;
 	int force_full_frames = (int)sv_snap_force_full_after_frames.value;
@@ -2365,14 +2372,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				if (total_size > (msg->maxsize - msg->cursize))
 				{
 					SV_InitEntityStream (client, total_count, client->snapshot_pending_seq);
-					if (!SV_WriteSnapshot2FullChunked (client, msg,
-						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags))
-					{
-						msg->overflowed = true;
-						msg->write_locked = true;
-						return;
-					}
+				if (!SV_WriteSnapshot2FullChunked (client, msg,
+					client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags))
+				{
+					msg->overflowed = true;
+					msg->write_locked = true;
+					return;
 				}
+			}
 				else
 				{
 					SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
@@ -2393,6 +2400,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
+	continuation = msg->write_locked && client->entstream.active;
 
 	if (forced_full)
 		client->snapshot_stats_forced_full++;
@@ -2460,6 +2468,41 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			use_delta ? (add_count + update_count) : full_count, remove_count,
 			reason ? " reason " : "", reason ? reason : "");
 	}
+
+	{
+		unsigned int debug_flags = 0;
+		unsigned int base_seq = use_delta ? client->snapshot_pending_baseline_seq : 0xFFFFFFFFu;
+
+		debug_flags |= use_delta ? SNAPSHOT_FLAG_DELTA : SNAPSHOT_FLAG_FULL;
+		if (remove_count)
+			debug_flags |= SNAPSHOT_FLAG_HAS_REMOVE_LIST;
+		if (client->snapshot_pending_incomplete)
+			debug_flags |= SNAPSHOT_FLAG_INCOMPLETE;
+		if (continuation)
+			debug_flags |= SNAPSHOT_FLAG_CONTINUE;
+
+		client->snapshot_debug_flags = debug_flags;
+		client->snapshot_debug_base = base_seq;
+		client->snapshot_debug_add = add_count;
+		client->snapshot_debug_update = update_count;
+		client->snapshot_debug_remove = remove_count;
+		client->snapshot_debug_full_count = full_count;
+
+		if (client->snapshot_pending_incomplete)
+		{
+			const char *reason = NULL;
+			if (client->snapshot_pending_dropped > 0)
+				reason = "budget_drop";
+			else if (delta_incomplete)
+				reason = "delta_budget";
+			else
+				reason = "unknown";
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop %d\n",
+				realtime, client->name, client->snapshot_pending_seq, base_seq, reason,
+				client->snapshot_pending_mandatory, client->snapshot_pending_dropped);
+		}
+	}
 }
 
 void SV_SnapshotAck (client_t *client, unsigned int seq)
@@ -2514,6 +2557,9 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 {
 	if (sv_snap_debug.value >= 1.0f)
 		Con_Printf ("snapshot %s nak expected %u received %u\n", client->name, expected_base, received_base);
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_nak %s expected %u received %u\n",
+		realtime, client->name, expected_base, received_base);
 	client->snapshot_force_full = true;
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_pending_seq = 0;
@@ -3294,6 +3340,18 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 }
 
 /*
+Outgoing server->client packet pipeline (queues/merge/send):
+- Reliable queue: client->message and sv.reliable_datagram (SV_UpdateToReliableMessages,
+  SV_WriteStats, signon buffers/chunks) flushed in SV_SendClientMessages via NET_SendMessage.
+- Unreliable queue: sv.datagram (temp entities/sounds) plus snapshot stream (SV_SendSnapshot)
+  merged in SV_SendClientDatagram after svc_time/clientdata are written.
+- Flush/coalesce points: SV_SendClientMessages (per-tick), SV_SendClientDatagram (per-client),
+  NET_Send(Un)reliableMessage -> driver sendto()/loopback.
+- Resend path: net_dgrm reliable resend (ReSendMessage) and snapshot resend via SV_SnapshotAck/Nak.
+- Continuations: snapshot2 entity stream chunking and signon chunk window (SV_SignonStreamSend).
+*/
+
+/*
 =======================
 SV_SendClientDatagram
 =======================
@@ -3335,6 +3393,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	MSG_WriteFloat (&msg, qcvm->time);
 
 // add the client specific data to the datagram
+	// INV-2: control/ack data (time + clientdata) is written first and never trimmed.
 	SV_WriteClientdataToMessage (client->edict, &msg);
 	if (msg.overflowed)
 	{
@@ -3356,6 +3415,24 @@ qboolean SV_SendClientDatagram (client_t *client)
 // copy the server datagram if there is space
 	if (!msg.write_locked && msg.cursize + sv.datagram.cursize < msg.maxsize)
 		SZ_Write (&msg, sv.datagram.data, sv.datagram.cursize);
+	else if (!msg.write_locked && sv.datagram.cursize > 0)
+	{
+		// INV-2: keep control/snapshot data; trim low-priority sv.datagram instead.
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f trim_unreliable %s keep_control snapshot %d drop_datagram %d mtu_cap %d\n",
+			realtime, client->name, client->mtu_last_snapshot_size, sv.datagram.cursize, msg.maxsize);
+	}
+
+	if (msg.cursize > msg.maxsize)
+	{
+		// INV-1: final MTU guard before NET_SendUnreliableMessage.
+		packet_too_large = true;
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f PREVENTED_OVERSHOOT %s total %d max %d reliable_pending %d snapshot %d datagram %d\n",
+			realtime, client->name, msg.cursize, msg.maxsize, client->message.cursize,
+			client->mtu_last_snapshot_size, sv.datagram.cursize);
+		goto datagram_too_large;
+	}
 
 	if (sv_mtu_debug.value > 0 && realtime >= client->mtu_debug_next_time)
 	{
@@ -3380,11 +3457,30 @@ qboolean SV_SendClientDatagram (client_t *client)
 		return false;
 	}
 
+	NET_DebugLogEvent (false,
+		"NETDBG time %.3f send_packet %s seq %u base %u flags 0x%x total %d reliable_pending %d "
+		"unreliable %d snapshot %d signon %d queue_rel %d\n",
+		realtime,
+		client->name,
+		client->snapshot_last_sent_seq,
+		client->snapshot_debug_base,
+		client->snapshot_debug_flags,
+		msg.cursize,
+		client->message.cursize,
+		msg.cursize,
+		client->mtu_last_snapshot_size,
+		0,
+		client->message.cursize);
+
 	return true;
 
 datagram_too_large:
 	if (packet_too_large)
 	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f PREVENTED_OVERSHOOT %s total %d max %d snapshot %d stage %d\n",
+			realtime, client->name, msg.cursize, msg.maxsize, client->mtu_last_snapshot_size,
+			client->sendsignon);
 		client->datagram_overflow_count++;
 		if (client->datagram_overflow_count > 1)
 		{
@@ -3642,7 +3738,6 @@ void SV_SendClientMessages (void)
 				}
 				else
 				{
-					qboolean local = SV_IsLocalClient (host_client);
 					while (host_client->signonidx < sv.num_signon_buffers)
 					{
 						sizebuf_t *signon = sv.signon_buffers[host_client->signonidx];
@@ -3650,11 +3745,8 @@ void SV_SendClientMessages (void)
 							break;
 						SZ_Write (&host_client->message, signon->data, signon->cursize);
 						host_client->signonidx++;
-						// only send multiple buffers at once when playing locally,
-						// otherwise we send one signon at a time to avoid overflowing
-						// the datagram buffer for clients using a lower limit (e.g. 32000 in QS)
-						if (!local)
-							break;
+						// send one signon buffer per tick to avoid bursty coalescing
+						break;
 					}
 					if (host_client->signonidx == sv.num_signon_buffers)
 						host_client->sendsignon = PRESPAWN_SIGNONMSG;
@@ -3699,6 +3791,13 @@ void SV_SendClientMessages (void)
 				if (NET_SendMessage (host_client->netconnection
 				, &host_client->message) == -1)
 					SV_DropClient (true);	// if the message couldn't send, kick off
+				else
+				{
+					NET_DebugLogEvent (false,
+						"NETDBG time %.3f send_reliable %s size %d signon_stage %d queue_rel %d\n",
+						realtime, host_client->name, host_client->message.cursize,
+						(int)host_client->sendsignon, host_client->message.cursize);
+				}
 				SZ_Clear (&host_client->message);
 				host_client->last_message = realtime;
 				if (host_client->sendsignon == PRESPAWN_FLUSH)
