@@ -1364,6 +1364,8 @@ static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int ma
 		state->step = (byte)MSG_ReadByte ();
 }
 
+static void CL_ClearSnapshotStage (void);
+
 static void CL_ClearSnapshotEntity (int entnum)
 {
 	entity_t *ent;
