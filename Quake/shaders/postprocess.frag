@@ -151,7 +151,7 @@ layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: 
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
-layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
+layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: shadow threshold, w: shadow softness
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -781,10 +781,22 @@ void main()
         {
                 float blackLift = max(TonemapBlackLiftParams.x, 0.0);
                 float blackLiftStrength = max(TonemapBlackLiftParams.y, 0.0);
+                float shadowThreshold = max(TonemapBlackLiftParams.z, 0.0);
+                float shadowSoftness = max(TonemapBlackLiftParams.w, 1e-4);
                 if (blackLift > 0.0 && blackLiftStrength > 0.0)
                 {
-                        mapped = mix(mapped, vec3(blackLift),
-                                exp(-mapped * blackLiftStrength));
+                        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+                        float luma = dot(mapped, lumaWeights);
+                        float shadow = 1.0 - smoothstep(shadowThreshold,
+                                shadowThreshold + shadowSoftness, luma);
+                        shadow = pow(shadow, 1.5);
+                        float amt = clamp(blackLiftStrength, 0.0, 1.0) * shadow;
+                        vec3 lifted = mix(mapped, vec3(blackLift), amt);
+                        float satKeep = 0.7;
+                        float l0 = dot(mapped, lumaWeights);
+                        float l1 = dot(lifted, lumaWeights);
+                        vec3 chroma = mapped - vec3(l0);
+                        mapped = vec3(l1) + chroma * satKeep;
                         mapped = clamp(mapped, 0.0, 1.0);
                 }
         }
