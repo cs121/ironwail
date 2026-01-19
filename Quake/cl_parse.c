@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
+#include "net_dgrm.h"
 #include "bgmusic.h"
 #include "steam.h"
 
@@ -1261,10 +1262,35 @@ short_read:
 	msg_readcount = net_message.cursize;
 }
 
+// INV-2: keep control/acks from starving behind queued reliable data.
+static void CL_EnsureReliableControlSpace (int needed, const char *reason)
+{
+	if (cls.demoplayback || cls.state != ca_connected)
+		return;
+	if (cls.message.maxsize - cls.message.cursize >= needed)
+		return;
+
+	if (NET_CanSendMessage (cls.netcon) && cls.message.cursize > 0)
+	{
+		if (NET_SendMessage (cls.netcon, &cls.message) == -1)
+			Host_Error ("CL_EnsureReliableControlSpace: lost server connection");
+		SZ_Clear (&cls.message);
+	}
+
+	if (cls.message.maxsize - cls.message.cursize < needed)
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f control_trim reason %s dropped %d needed %d\n",
+			realtime, reason ? reason : "unknown", cls.message.cursize, needed);
+		SZ_Clear (&cls.message);
+	}
+}
+
 static void CL_SendSnapshotAck (unsigned int seq)
 {
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
+	CL_EnsureReliableControlSpace (1 + 4, "snapshot_ack");
 	MSG_WriteByte (&cls.message, clc_snapshot_ack);
 	MSG_WriteLong (&cls.message, (int)seq);
 }
@@ -1275,6 +1301,9 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 		return;
 	if (count_parse_error)
 		cl.snap_parse_errors++;
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_abort reason %s parse_errors %d need_full %d\n",
+		realtime, reason ? reason : "unknown", cl.snap_parse_errors, cl.need_full_snapshot ? 1 : 0);
 	if (!cl.need_full_snapshot)
 	{
 		cl.need_full_snapshot = true;
@@ -1288,9 +1317,13 @@ static void CL_SendSnapshotNak (unsigned int expected_base, unsigned int receive
 {
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
+	CL_EnsureReliableControlSpace (1 + 4 + 4, "snapshot_nak");
 	MSG_WriteByte (&cls.message, clc_snapshot_nak);
 	MSG_WriteLong (&cls.message, (int)expected_base);
 	MSG_WriteLong (&cls.message, (int)received_base);
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_nak expected %u received %u\n",
+		realtime, expected_base, received_base);
 }
 
 static float CL_ReadSnapshotCoord (qboolean hires)
@@ -1392,6 +1425,9 @@ static qboolean CL_ShouldDropSnapshot (void)
 
 static void CL_LogDeltaReject (const char *reason, unsigned int seq, unsigned int base_seq)
 {
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f delta_reject %s seq %u base %u\n",
+		realtime, reason ? reason : "unknown", seq, base_seq);
 	if (cl_delta_reject_debug.value < 1.0f)
 		return;
 	Con_Printf ("cl_delta_reject %s seq %u base %u\n", reason, seq, base_seq);
@@ -1602,6 +1638,7 @@ static void CL_ParseSnapshotFull (void)
 	if (cl.snapshot_last_update_time)
 		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
 
+	// INV-5: commit staged snapshot only after full parse.
 	for (i = 1; i < cl_max_edicts; i++)
 	{
 		if (!cl.snapshot_stage_present[i])
@@ -1773,6 +1810,7 @@ static void CL_ParseSnapshotDelta (void)
 		}
 	}
 
+	// INV-5: commit staged snapshot only after full parse/validation.
 	if (!drop && baseline_match)
 	{
 		for (i = 1; i < cl_max_edicts; i++)
@@ -1883,6 +1921,12 @@ static void CL_ParseSnapshot2 (void)
 		msg_readcount = net_message.cursize;
 		return;
 	}
+	if (incomplete)
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_incomplete_recv seq %u base %u flags 0x%x ents %u rem %u\n",
+			realtime, header.seq, header.base_seq, header.flags, header.num_entities, header.num_removed);
+	}
 
 	if (header.flags & SNAPSHOT_FLAG_FULL)
 	{
@@ -1953,6 +1997,7 @@ static void CL_ParseSnapshot2 (void)
 					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
 			}
 
+			// INV-5: commit reassembled snapshot only after full chunk parse.
 			for (i = 1; i < cl_max_edicts; i++)
 			{
 				if (!cl.snapshot_chunk_present[i])
@@ -2028,6 +2073,7 @@ static void CL_ParseSnapshot2 (void)
 				if (cl.snapshot_last_update_time)
 					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
 
+				// INV-5: commit staged snapshot only after full parse.
 				for (i = 1; i < cl_max_edicts; i++)
 				{
 					if (!cl.snapshot_stage_present[i])
@@ -2048,6 +2094,7 @@ static void CL_ParseSnapshot2 (void)
 			}
 			else
 			{
+				// INV-5: apply staged updates only after full parse.
 				for (i = 1; i < cl_max_edicts; i++)
 				{
 					if (!cl.snapshot_stage_present[i])
@@ -2188,6 +2235,7 @@ static void CL_ParseSnapshot2 (void)
 		{
 			if (cl.snapshot_stage_remove[i])
 			{
+				// INV-4: incomplete snapshots must not imply removals.
 				if (!incomplete)
 					cl.snapshot_present[i] = 0;
 				if (!incomplete)
@@ -2899,6 +2947,7 @@ void CL_ParseServerMessage (void)
 				if (cl_signon_chunk_debug.value)
 					Con_Printf ("SIGNONCHUNK: expected seq %u, got %u (stage %u)\n",
 						cl.signon_chunk_next_seq, seq, stage);
+				CL_EnsureReliableControlSpace (1 + 1 + 2, "signon_ack_resend");
 				MSG_BEGINCLC (&cls.message, clc_signon_ack);
 				MSG_DBGAUX (&cls.message, stage);
 				MSG_WriteByte (&cls.message, clc_signon_ack);
@@ -2912,6 +2961,7 @@ void CL_ParseServerMessage (void)
 			if (flags & SIGNON_CHUNK_FLAG_STAGE_END)
 				cl.signon_chunk_stage = stage + 1;
 
+			CL_EnsureReliableControlSpace (1 + 1 + 2, "signon_ack");
 			MSG_BEGINCLC (&cls.message, clc_signon_ack);
 			MSG_DBGAUX (&cls.message, stage);
 			MSG_WriteByte (&cls.message, clc_signon_ack);

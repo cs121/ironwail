@@ -237,6 +237,12 @@ typedef struct client_s
 	int				snapshot_pending_mandatory;
 	int				snapshot_pending_dropped;
 	qboolean		snapshot_pending_incomplete;
+	unsigned int	snapshot_debug_flags;
+	unsigned int	snapshot_debug_base;
+	int				snapshot_debug_add;
+	int				snapshot_debug_update;
+	int				snapshot_debug_remove;
+	int				snapshot_debug_full_count;
 	int				snapshot_stats_full;
 	int				snapshot_stats_delta;
 	int				snapshot_stats_forced_full;

@@ -73,10 +73,19 @@ static qboolean NET_DebugEnabled (void)
 	return false;
 }
 
+static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr);
 static void NET_DebugLog (qboolean force, const char *fmt, ...) FUNCP_PRINTF(2,3);
 static void NET_DebugLog (qboolean force, const char *fmt, ...)
 {
 	va_list argptr;
+
+	va_start (argptr, fmt);
+	NET_DebugLogV (force, fmt, argptr);
+	va_end (argptr);
+}
+
+static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr)
+{
 	char text[2048];
 	int len;
 
@@ -95,15 +104,22 @@ static void NET_DebugLog (qboolean force, const char *fmt, ...)
 	if (!net_debug_log)
 		return;
 
-	va_start (argptr, fmt);
 	len = q_vsnprintf (text, sizeof(text), fmt, argptr);
-	va_end (argptr);
 	if (len < 0)
 		return;
 	if (len >= (int)sizeof(text))
 		len = (int)sizeof(text) - 1;
 	fwrite (text, 1, (size_t)len, net_debug_log);
 	fflush (net_debug_log);
+}
+
+void NET_DebugLogEvent (qboolean force, const char *fmt, ...)
+{
+	va_list argptr;
+
+	va_start (argptr, fmt);
+	NET_DebugLogV (force, fmt, argptr);
+	va_end (argptr);
 }
 
 static void NET_DebugRecordPacket (unsigned int packet_len)
@@ -174,19 +190,17 @@ static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len
 	unsigned int mtu = (unsigned int)NET_GetConfiguredMTU (sock);
 	unsigned int payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
 
-	if (!sv.active || sv_mtu_debug.value <= 0)
-		return;
-	if (net_time < next_log_time)
-		return;
-
-	Con_Printf ("sv_mtu %d oversize send blocked (%s size %u)\n",
-		(int)sv_mtu.value,
-		NET_QSocketGetAddressString (sock),
-		packet_len);
 	NET_DebugLog (true,
 		"NETDBG time %.3f PREVENTED_OVERSHOOT addr %s mtu %u payload_cap %u packet %u\n",
 		net_time, NET_QSocketGetAddressString (sock), mtu, payload_limit, packet_len);
-	next_log_time = net_time + 1.0;
+	if (sv.active && sv_mtu_debug.value > 0 && net_time >= next_log_time)
+	{
+		Con_Printf ("sv_mtu %d oversize send blocked (%s size %u)\n",
+			(int)sv_mtu.value,
+			NET_QSocketGetAddressString (sock),
+			packet_len);
+		next_log_time = net_time + 1.0;
+	}
 }
 
 
