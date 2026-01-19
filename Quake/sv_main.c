@@ -1302,25 +1302,60 @@ static int SV_Snapshot2FullSize (const byte *present, const byte *snapflags, int
 	return size;
 }
 
-static int SV_SnapshotMaxEntities (client_t *client, sizebuf_t *msg)
+static int SV_SnapshotHeaderBytes (void)
 {
-	int header_size = 1 + 4 + 4 + 2 + 2 + 2;
-	int per_ent = SV_SnapshotEntitySizeWorst ();
+	if (sv_snapshot2.value)
+		return 1 + 4 + 4 + 1 + 2 + 2 + 2 + 2;
+	return 1 + 4 + 4 + 2 + 2 + 2;
+}
+
+static int SV_SnapshotEntityBudgetBytes (byte snapflags)
+{
+	if (sv_snapshot2.value)
+		return SV_Snapshot2EntitySizeForFlags (snapflags);
+	return SV_SnapshotEntitySizeWorst ();
+}
+
+static int SV_SnapshotBudgetBytes (client_t *client, sizebuf_t *msg,
+	int *out_mtu_payload, int *out_current, int *out_remaining, int *out_header)
+{
+	int header_size = SV_SnapshotHeaderBytes ();
 	int payload_cap = (int)sv_snap_max_payload.value;
 	int mtu_cap = SV_MTUCap (client);
+	int mtu_payload = msg->maxsize;
+	int current = msg->cursize;
+	int remaining;
+	int budget;
 
-	if (sv_snapshot2.value)
-		header_size = 1 + 4 + 4 + 1 + 2 + 2 + 2 + 2;
-
-	int available = msg->maxsize - msg->cursize - header_size;
 	if (mtu_cap > 0)
-		payload_cap = payload_cap > 0 ? q_min (payload_cap, mtu_cap) : mtu_cap;
-	if (payload_cap > 0)
-		available = q_min (available, payload_cap - header_size);
+		mtu_payload = q_min (mtu_payload, mtu_cap);
 
-	if (per_ent <= 0 || available <= 0)
-		return 0;
-	return available / per_ent;
+	remaining = mtu_payload - current;
+	if (remaining < 0)
+		remaining = 0;
+
+	budget = remaining;
+	if (payload_cap > 0)
+	{
+		int cap = payload_cap;
+		if (mtu_cap > 0)
+			cap = q_min (cap, mtu_cap);
+		if (cap < 1)
+			cap = 1;
+		if (budget > cap)
+			budget = cap;
+	}
+
+	if (out_mtu_payload)
+		*out_mtu_payload = mtu_payload;
+	if (out_current)
+		*out_current = current;
+	if (out_remaining)
+		*out_remaining = remaining;
+	if (out_header)
+		*out_header = header_size;
+
+	return budget;
 }
 
 static int SV_BuildNetEdictsList (edict_t *clent)
@@ -1443,16 +1478,22 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 }
 
 static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byte *present,
-	byte *relevant, byte *snapflags, int max_ents, const byte *baseline_present,
-	int *out_mandatory, int *out_dropped, int *out_dropped_tier1, int *out_dropped_tier2,
-	qboolean debug_frame)
+	byte *relevant, byte *snapflags, int budget_bytes, int header_bytes, const byte *baseline_present,
+	int *out_mandatory, int *out_mandatory_bytes, int *out_total_bytes, int *out_dropped,
+	int *out_dropped_tier1, int *out_dropped_tier2, qboolean debug_frame)
 {
 	int	num, j, numents, count;
 	int mandatory_count = 0;
+	int mandatory_bytes = 0;
+	int total_bytes = 0;
 	int dropped_count = 0;
 	int dropped_tier1 = 0;
 	int dropped_tier2 = 0;
+	int entity_budget = budget_bytes - header_bytes;
 	edict_t	*ent;
+
+	if (entity_budget < 0)
+		entity_budget = 0;
 
 	memset (present, 0, qcvm->max_edicts * sizeof(byte));
 	if (relevant)
@@ -1486,6 +1527,11 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		present[num] = 1;
 		if (snapflags)
 			snapflags[num] = SV_SnapshotFlagsForEnt (ent);
+		{
+			int ent_size = SV_SnapshotEntityBudgetBytes (snapflags ? snapflags[num] : 0);
+			total_bytes += ent_size;
+			mandatory_bytes += ent_size;
+		}
 		count++;
 		mandatory_count++;
 
@@ -1504,23 +1550,27 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		if (present[num] || !SV_SnapshotTier1Ent (ent))
 			continue;
 
-		if (max_ents > 0 && count >= max_ents)
-		{
-			dropped_count++;
-			dropped_tier1++;
-			if (debug_frame && net_snap_debug.value)
-				Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
-			continue;
-		}
-
 		SV_FillSnapshotState (ent, &states[num]);
 
 		if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
 			continue;
 
-		present[num] = 1;
-		if (snapflags)
-			snapflags[num] = SV_SnapshotFlagsForEnt (ent);
+		{
+			byte snapflag = snapflags ? SV_SnapshotFlagsForEnt (ent) : 0;
+			int ent_size = SV_SnapshotEntityBudgetBytes (snapflag);
+			if (total_bytes + ent_size > entity_budget)
+			{
+				dropped_count++;
+				dropped_tier1++;
+				if (debug_frame && net_snap_debug.value)
+					Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
+				continue;
+			}
+			present[num] = 1;
+			if (snapflags)
+				snapflags[num] = snapflag;
+			total_bytes += ent_size;
+		}
 		count++;
 	}
 
@@ -1532,23 +1582,27 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		if (present[num])
 			continue;
 
-		if (max_ents > 0 && count >= max_ents)
-		{
-			dropped_count++;
-			dropped_tier2++;
-			if (debug_frame && net_snap_debug.value)
-				Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
-			continue;
-		}
-
 		SV_FillSnapshotState (ent, &states[num]);
 
 		if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
 			continue;
 
-		present[num] = 1;
-		if (snapflags)
-			snapflags[num] = SV_SnapshotFlagsForEnt (ent);
+		{
+			byte snapflag = snapflags ? SV_SnapshotFlagsForEnt (ent) : 0;
+			int ent_size = SV_SnapshotEntityBudgetBytes (snapflag);
+			if (total_bytes + ent_size > entity_budget)
+			{
+				dropped_count++;
+				dropped_tier2++;
+				if (debug_frame && net_snap_debug.value)
+					Con_DPrintf ("snapdbg %s ent %d dropped budget\n", PR_GetString (clent->v.netname), num);
+				continue;
+			}
+			present[num] = 1;
+			if (snapflags)
+				snapflags[num] = snapflag;
+			total_bytes += ent_size;
+		}
 		count++;
 
 		if (debug_frame && net_snap_debug.value)
@@ -1560,6 +1614,10 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 
 	if (out_mandatory)
 		*out_mandatory = mandatory_count;
+	if (out_mandatory_bytes)
+		*out_mandatory_bytes = mandatory_bytes;
+	if (out_total_bytes)
+		*out_total_bytes = total_bytes;
 	if (out_dropped)
 		*out_dropped = dropped_count;
 	if (out_dropped_tier1)
@@ -2286,12 +2344,22 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	else
 	{
 		int mandatory_count = 0;
+		int mandatory_bytes = 0;
+		int total_bytes = 0;
 		int dropped_count = 0;
 		int dropped_tier1 = 0;
 		int dropped_tier2 = 0;
-		int max_ents = SV_SnapshotMaxEntities (client, msg);
+		int mtu_payload_bytes = 0;
+		int current_bytes = 0;
+		int remaining_bytes = 0;
+		int header_bytes = 0;
+		int snapshot_budget_bytes = SV_SnapshotBudgetBytes (client, msg,
+			&mtu_payload_bytes, &current_bytes, &remaining_bytes, &header_bytes);
+		int mandatory_total_bytes = 0;
+		const int tier0_slack_bytes = 8;
 		qboolean debug_frame = false;
 		qboolean tier0_only = false;
+		const char *tier0_reason = NULL;
 
 		if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 		{
@@ -2300,17 +2368,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		}
 
 		SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
-			client->snapshot_pending_relevant, client->snapshot_pending_flags, max_ents,
-			client->snapshot_baseline_present, &mandatory_count, &dropped_count,
+			client->snapshot_pending_relevant, client->snapshot_pending_flags, snapshot_budget_bytes, header_bytes,
+			client->snapshot_baseline_present, &mandatory_count, &mandatory_bytes, &total_bytes, &dropped_count,
 			&dropped_tier1, &dropped_tier2, debug_frame);
-		if (max_ents > 0 && mandatory_count > max_ents)
+		mandatory_total_bytes = header_bytes + mandatory_bytes;
+		if (remaining_bytes <= mandatory_total_bytes + tier0_slack_bytes)
 		{
-			max_ents = mandatory_count;
 			tier0_only = true;
-			SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
-				client->snapshot_pending_relevant, client->snapshot_pending_flags, max_ents,
-				client->snapshot_baseline_present, &mandatory_count, &dropped_count,
-				&dropped_tier1, &dropped_tier2, debug_frame);
+			tier0_reason = "mandatory_bytes";
 		}
 		client->snapshot_pending_mandatory = mandatory_count;
 		client->snapshot_pending_dropped = dropped_count;
@@ -2318,9 +2383,24 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		client->mtu_dropped_tier2 = dropped_tier2;
 		if (client->snapshot_pending_dropped > 0)
 			extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
-		if (sv_mtu_debug.value > 0 && max_ents > 0 && (tier0_only || (dropped_tier1 > 0 && mandatory_count >= max_ents)))
-			Con_Printf ("mtu %s forcing tier0 only (budget %d mandatory %d)\n",
-				client->name, max_ents, mandatory_count);
+		if (sv_mtu_debug.value > 0 && (tier0_only || dropped_tier1 > 0 || dropped_tier2 > 0))
+		{
+			const char *reason = tier0_reason ? tier0_reason : "budget_drop";
+			if (tier0_only)
+				Con_Printf ("mtu %s forcing tier0 only (mtu_payload %d current %d remaining %d budget %d header %d mandatory %d reason %s)\n",
+					client->name, mtu_payload_bytes, current_bytes, remaining_bytes, snapshot_budget_bytes,
+					header_bytes, mandatory_total_bytes, reason);
+			else
+				Con_Printf ("mtu %s budget drop (mtu_payload %d current %d remaining %d budget %d header %d mandatory %d reason %s)\n",
+					client->name, mtu_payload_bytes, current_bytes, remaining_bytes, snapshot_budget_bytes,
+					header_bytes, mandatory_total_bytes, reason);
+		}
+		if (tier0_only || dropped_tier1 > 0 || dropped_tier2 > 0)
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_budget %s mtu_payload %d current %d remaining %d budget %d header %d mandatory %d total %d drop1 %d drop2 %d reason %s\n",
+				realtime, client->name, mtu_payload_bytes, current_bytes, remaining_bytes,
+				snapshot_budget_bytes, header_bytes, mandatory_total_bytes, total_bytes,
+				dropped_tier1, dropped_tier2, tier0_reason ? tier0_reason : "budget_drop");
 		client->snapshot_pending_seq = client->snapshot_next_seq++;
 		if (!client->snapshot_next_seq)
 			client->snapshot_next_seq = 1;
