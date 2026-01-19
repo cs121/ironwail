@@ -2190,7 +2190,8 @@ static void CL_ParseSnapshot2 (void)
 			{
 				if (!incomplete)
 					cl.snapshot_present[i] = 0;
-				CL_ClearSnapshotEntity (i);
+				if (!incomplete)
+					CL_ClearSnapshotEntity (i);
 			}
 			if (!cl.snapshot_stage_present[i])
 				continue;

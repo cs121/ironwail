@@ -52,8 +52,90 @@ static struct
 
 static int myDriverLevel;
 
+static FILE *net_debug_log;
+static qboolean net_debug_log_tried;
+static double net_debug_next_time;
+static unsigned int net_debug_packets;
+static unsigned int net_debug_bytes;
+static unsigned int net_debug_max;
+static unsigned int net_debug_oversize;
+static unsigned int net_debug_resends;
+
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
+
+static qboolean NET_DebugEnabled (void)
+{
+	if (developer.value)
+		return true;
+	if (sv.active && sv_mtu_debug.value > 0)
+		return true;
+	return false;
+}
+
+static void NET_DebugLog (qboolean force, const char *fmt, ...) FUNCP_PRINTF(2,3);
+static void NET_DebugLog (qboolean force, const char *fmt, ...)
+{
+	va_list argptr;
+	char text[2048];
+	int len;
+
+	if (!force && !NET_DebugEnabled ())
+		return;
+	if (!net_debug_log && !net_debug_log_tried)
+	{
+		char path[MAX_OSPATH];
+		net_debug_log_tried = true;
+		if (host_parms && host_parms->basedir)
+		{
+			q_snprintf (path, sizeof(path), "%s/net_debug.log", host_parms->basedir);
+			net_debug_log = Sys_fopen (path, "ab");
+		}
+	}
+	if (!net_debug_log)
+		return;
+
+	va_start (argptr, fmt);
+	len = q_vsnprintf (text, sizeof(text), fmt, argptr);
+	va_end (argptr);
+	if (len < 0)
+		return;
+	if (len >= (int)sizeof(text))
+		len = (int)sizeof(text) - 1;
+	fwrite (text, 1, (size_t)len, net_debug_log);
+	fflush (net_debug_log);
+}
+
+static void NET_DebugRecordPacket (unsigned int packet_len)
+{
+	net_debug_packets++;
+	net_debug_bytes += packet_len;
+	if (packet_len > net_debug_max)
+		net_debug_max = packet_len;
+}
+
+static void NET_DebugMaybeLogSummary (void)
+{
+	if (!NET_DebugEnabled ())
+		return;
+	if (net_time < net_debug_next_time)
+		return;
+
+	if (net_debug_packets > 0)
+	{
+		unsigned int avg = net_debug_bytes / net_debug_packets;
+		NET_DebugLog (false,
+			"NETDBG time %.3f summary packets %u avg %u max %u oversize %u resends %u\n",
+			net_time, net_debug_packets, avg, net_debug_max, net_debug_oversize, net_debug_resends);
+	}
+
+	net_debug_packets = 0;
+	net_debug_bytes = 0;
+	net_debug_max = 0;
+	net_debug_oversize = 0;
+	net_debug_resends = 0;
+	net_debug_next_time = net_time + 1.0;
+}
 
 static int NET_GetConfiguredMTU (const qsocket_t *sock)
 {
@@ -89,6 +171,8 @@ static int NET_GetPacketDataLimit (const qsocket_t *sock)
 static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len)
 {
 	static double next_log_time = 0.0;
+	unsigned int mtu = (unsigned int)NET_GetConfiguredMTU (sock);
+	unsigned int payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
 
 	if (!sv.active || sv_mtu_debug.value <= 0)
 		return;
@@ -99,6 +183,9 @@ static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len
 		(int)sv_mtu.value,
 		NET_QSocketGetAddressString (sock),
 		packet_len);
+	NET_DebugLog (true,
+		"NETDBG time %.3f PREVENTED_OVERSHOOT addr %s mtu %u payload_cap %u packet %u\n",
+		net_time, NET_QSocketGetAddressString (sock), mtu, payload_limit, packet_len);
 	next_log_time = net_time + 1.0;
 }
 
@@ -213,6 +300,8 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	if (packetLen > payload_limit)
 	{
 		NET_LogOversizedSend (sock, packetLen);
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
 		return -1;
 	}
 
@@ -225,6 +314,13 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
+
+	NET_DebugRecordPacket (packetLen);
+	NET_DebugLog (false,
+		"NETDBG time %.3f send reliable addr %s seq %u len %u data %u eom %u\n",
+		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
+		packetLen, dataLen, eom ? 1u : 0u);
+	NET_DebugMaybeLogSummary ();
 
 	sock->lastSendTime = net_time;
 	packetsSent++;
@@ -255,6 +351,8 @@ static int SendMessageNext (qsocket_t *sock)
 	if (packetLen > payload_limit)
 	{
 		NET_LogOversizedSend (sock, packetLen);
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
 		return -1;
 	}
 
@@ -267,6 +365,13 @@ static int SendMessageNext (qsocket_t *sock)
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
+
+	NET_DebugRecordPacket (packetLen);
+	NET_DebugLog (false,
+		"NETDBG time %.3f send reliable-next addr %s seq %u len %u data %u eom %u\n",
+		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
+		packetLen, dataLen, eom ? 1u : 0u);
+	NET_DebugMaybeLogSummary ();
 
 	sock->lastSendTime = net_time;
 	packetsSent++;
@@ -297,6 +402,8 @@ static int ReSendMessage (qsocket_t *sock)
 	if (packetLen > payload_limit)
 	{
 		NET_LogOversizedSend (sock, packetLen);
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
 		return -1;
 	}
 
@@ -309,6 +416,14 @@ static int ReSendMessage (qsocket_t *sock)
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
+
+	NET_DebugRecordPacket (packetLen);
+	net_debug_resends++;
+	NET_DebugLog (false,
+		"NETDBG time %.3f send reliable-resend addr %s seq %u len %u data %u eom %u\n",
+		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
+		packetLen, dataLen, eom ? 1u : 0u);
+	NET_DebugMaybeLogSummary ();
 
 	sock->lastSendTime = net_time;
 	packetsReSent++;
@@ -348,6 +463,8 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	if (data->cursize > max_data)
 	{
 		NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
 		return 0;
 	}
 
@@ -355,6 +472,8 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	if (packetLen > payload_limit)
 	{
 		NET_LogOversizedSend (sock, (unsigned int)packetLen);
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
 		return 0;
 	}
 
@@ -364,6 +483,13 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
+
+	NET_DebugRecordPacket ((unsigned int)packetLen);
+	NET_DebugLog (false,
+		"NETDBG time %.3f send unreliable addr %s seq %u len %u data %u\n",
+		net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
+		(unsigned int)packetLen, (unsigned int)data->cursize);
+	NET_DebugMaybeLogSummary ();
 
 	packetsSent++;
 	return 1;
