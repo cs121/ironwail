@@ -272,6 +272,146 @@ static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out
 	return false;
 }
 
+static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out_ang)
+{
+	double render_t;
+	double max_gap_s;
+	double max_extrap_s;
+	cl_entity_snap_t *snaps;
+	cl_entity_snap_t *newest;
+	cl_entity_snap_t *oldest = NULL;
+	cl_entity_snap_t *snap;
+	cl_entity_snap_t *prev;
+	int snap_count;
+	int head;
+	int idx;
+	int axis;
+
+	if (cl_lerp_ms.value <= 0.0f)
+		return false;
+	if (!cl.entity_snapshots || !cl.entity_snap_head || !cl.entity_snap_count)
+		return false;
+	if (entnum <= 0 || entnum >= cl_max_edicts)
+		return false;
+
+	snap_count = cl.entity_snap_count[entnum];
+	if (snap_count <= 0)
+		return false;
+
+	render_t = cl.time - (cl_lerp_ms.value * 0.001);
+	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
+	max_extrap_s = 0.05;
+	if (max_gap_s > 0.0 && max_gap_s < max_extrap_s)
+		max_extrap_s = max_gap_s;
+
+	snaps = &cl.entity_snapshots[entnum * CL_ENTITY_SNAP_HISTORY];
+	head = cl.entity_snap_head[entnum];
+	newest = &snaps[head];
+
+	if (snap_count == 1)
+	{
+		VectorCopy (newest->origin, out_org);
+		VectorCopy (newest->angles, out_ang);
+		return true;
+	}
+
+	if (render_t >= newest->servertime)
+	{
+		int prev_idx = (head - 1 + CL_ENTITY_SNAP_HISTORY) % CL_ENTITY_SNAP_HISTORY;
+		prev = &snaps[prev_idx];
+		if (prev->servertime > 0.0 && newest->servertime > prev->servertime)
+		{
+			double dt = newest->servertime - prev->servertime;
+			double extrap_t = render_t - newest->servertime;
+
+			if ((max_gap_s <= 0.0 || dt <= max_gap_s) && dt > 0.0)
+			{
+				float f;
+
+				if (extrap_t < 0.0)
+					extrap_t = 0.0;
+				if (extrap_t > max_extrap_s)
+					extrap_t = max_extrap_s;
+
+				for (axis = 0; axis < 3; axis++)
+				{
+					float delta = newest->origin[axis] - prev->origin[axis];
+					if (delta > 100.0f || delta < -100.0f)
+					{
+						VectorCopy (newest->origin, out_org);
+						VectorCopy (newest->angles, out_ang);
+						return true;
+					}
+				}
+
+				f = (float)((dt + extrap_t) / dt);
+				for (axis = 0; axis < 3; axis++)
+				{
+					out_org[axis] = prev->origin[axis] + f * (newest->origin[axis] - prev->origin[axis]);
+					out_ang[axis] = CL_LerpAngle (prev->angles[axis], newest->angles[axis], f);
+				}
+				return true;
+			}
+		}
+		VectorCopy (newest->origin, out_org);
+		VectorCopy (newest->angles, out_ang);
+		return true;
+	}
+
+	prev = newest;
+	idx = head;
+	for (idx = 0; idx < snap_count; idx++)
+	{
+		snap = &snaps[head];
+		oldest = snap;
+		if (snap->servertime <= render_t)
+		{
+			double span = prev->servertime - snap->servertime;
+			float f;
+
+			if (span <= 0.0)
+				break;
+			if (max_gap_s > 0.0 && span > max_gap_s)
+			{
+				VectorCopy (snap->origin, out_org);
+				VectorCopy (snap->angles, out_ang);
+				return true;
+			}
+
+			for (axis = 0; axis < 3; axis++)
+			{
+				float delta = prev->origin[axis] - snap->origin[axis];
+				if (delta > 100.0f || delta < -100.0f)
+				{
+					VectorCopy (prev->origin, out_org);
+					VectorCopy (prev->angles, out_ang);
+					return true;
+				}
+			}
+
+			f = (float)((render_t - snap->servertime) / span);
+			f = CLAMP (0.0f, f, 1.0f);
+			for (axis = 0; axis < 3; axis++)
+			{
+				out_org[axis] = snap->origin[axis] + f * (prev->origin[axis] - snap->origin[axis]);
+				out_ang[axis] = CL_LerpAngle (snap->angles[axis], prev->angles[axis], f);
+			}
+			return true;
+		}
+		prev = snap;
+		head = (head - 1 + CL_ENTITY_SNAP_HISTORY) % CL_ENTITY_SNAP_HISTORY;
+	}
+
+	if (oldest && render_t < oldest->servertime)
+	{
+		VectorCopy (oldest->origin, out_org);
+		VectorCopy (oldest->angles, out_ang);
+		return true;
+	}
+
+	return false;
+}
+
 void CL_FreeState(void)
 {
         int i;
@@ -328,6 +468,9 @@ void CL_ClearState (void)
 	cl.snapshot_stage = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_stage");
 	cl.snapshot_stage_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_present");
 	cl.snapshot_stage_remove = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_remove");
+	cl.entity_snapshots = (cl_entity_snap_t *) Hunk_AllocName (cl_max_edicts * CL_ENTITY_SNAP_HISTORY * sizeof(cl_entity_snap_t), "cl_ent_snaps");
+	cl.entity_snap_head = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_head");
+	cl.entity_snap_count = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_count");
 	//johnfitz
 	if (cl.snapshot_present)
 		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
@@ -341,6 +484,12 @@ void CL_ClearState (void)
 		memset (cl.snapshot_stage_present, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_stage_remove)
 		memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
+	if (cl.entity_snapshots)
+		memset (cl.entity_snapshots, 0, cl_max_edicts * CL_ENTITY_SNAP_HISTORY * sizeof(cl_entity_snap_t));
+	if (cl.entity_snap_head)
+		memset (cl.entity_snap_head, 0, cl_max_edicts * sizeof(byte));
+	if (cl.entity_snap_count)
+		memset (cl.entity_snap_count, 0, cl_max_edicts * sizeof(byte));
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
 	cl.snapshot_chunk_start_time = 0;
@@ -851,8 +1000,6 @@ void CL_RelinkEntities (void)
 
 			if (cl.snap_last_incomplete)
 			{
-				ent->msgtime = cl.mtime[0];
-				ent->forcelink = true;
 				keepalive = true;
 			}
 
@@ -860,13 +1007,19 @@ void CL_RelinkEntities (void)
 			{
 				if (cl.time - cl.snapshot_last_update_time[i] <= timeout_s)
 				{
-					ent->msgtime = cl.mtime[0];
-					ent->forcelink = true;
 					keepalive = true;
 				}
 			}
+			else
+			{
+				keepalive = true;
+			}
 
-			if (!keepalive)
+			if (keepalive)
+			{
+				ent->msgtime = cl.mtime[0];
+			}
+			else
 			{
 				ent->model = NULL;
 				ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM; //johnfitz -- next time this entity slot is reused, the lerp will need to be reset
@@ -921,6 +1074,17 @@ void CL_RelinkEntities (void)
 			vec3_t lerp_ang;
 
 			if (CL_GetInterpolatedPlayer (i - 1, lerp_org, lerp_ang))
+			{
+				VectorCopy (lerp_org, ent->origin);
+				VectorCopy (lerp_ang, ent->angles);
+			}
+		}
+		else if (i > cl.maxclients)
+		{
+			vec3_t lerp_org;
+			vec3_t lerp_ang;
+
+			if (CL_GetInterpolatedEntity (i, lerp_org, lerp_ang))
 			{
 				VectorCopy (lerp_org, ent->origin);
 				VectorCopy (lerp_ang, ent->angles);

@@ -69,6 +69,15 @@ extern cshift_t		cshift_empty;
 
 #define	SIGNONS		4			// signon messages to receive before connected
 
+#define CL_ENTITY_SNAP_HISTORY 3
+
+typedef struct cl_entity_snap_s
+{
+	double		servertime;
+	vec3_t		origin;
+	vec3_t		angles;
+} cl_entity_snap_t;
+
 typedef enum
 {
 	DLIGHT_DEFAULT = 0,
@@ -296,6 +305,9 @@ typedef struct
 	snapshot_state_t *snapshot_stage;
 	byte		*snapshot_stage_present;
 	byte		*snapshot_stage_remove;
+	cl_entity_snap_t *entity_snapshots;
+	byte		*entity_snap_head;
+	byte		*entity_snap_count;
 
 	int			cdtrack, looptrack;	// cd audio
 

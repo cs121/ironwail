@@ -1410,6 +1410,18 @@ static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int ma
 
 static void CL_ClearSnapshotStage (void);
 
+static void CL_ClearEntitySnapHistory (int entnum)
+{
+	if (entnum <= 0 || entnum >= cl_max_edicts)
+		return;
+	if (!cl.entity_snapshots || !cl.entity_snap_head || !cl.entity_snap_count)
+		return;
+	cl.entity_snap_head[entnum] = 0;
+	cl.entity_snap_count[entnum] = 0;
+	memset (&cl.entity_snapshots[entnum * CL_ENTITY_SNAP_HISTORY], 0,
+		sizeof(cl_entity_snap_t) * CL_ENTITY_SNAP_HISTORY);
+}
+
 static void CL_ClearSnapshotEntity (int entnum)
 {
 	entity_t *ent;
@@ -1425,6 +1437,7 @@ static void CL_ClearSnapshotEntity (int entnum)
 		cl.snapshot_active[entnum] = 0;
 	if (cl.snapshot_last_update_time)
 		cl.snapshot_last_update_time[entnum] = 0;
+	CL_ClearEntitySnapHistory (entnum);
 }
 
 static qboolean CL_ShouldDropSnapshot (void)
@@ -1463,6 +1476,40 @@ static void CL_MarkSnapshotEntityUpdated (int entnum)
 		cl.snapshot_active[entnum] = 1;
 	if (cl.snapshot_last_update_time)
 		cl.snapshot_last_update_time[entnum] = cl.time;
+}
+
+static void CL_RecordEntitySnap (int entnum, const snapshot_state_t *state)
+{
+	int base;
+	byte head;
+	cl_entity_snap_t *snap;
+
+	if (entnum <= 0 || entnum >= cl_max_edicts)
+		return;
+	if (!cl.entity_snapshots || !cl.entity_snap_head || !cl.entity_snap_count)
+		return;
+
+	base = entnum * CL_ENTITY_SNAP_HISTORY;
+	head = cl.entity_snap_head[entnum];
+	if (cl.entity_snap_count[entnum] == 0)
+		head = 0;
+	else
+		head = (byte)((head + 1) % CL_ENTITY_SNAP_HISTORY);
+	cl.entity_snap_head[entnum] = head;
+	if (cl.entity_snap_count[entnum] < CL_ENTITY_SNAP_HISTORY)
+		cl.entity_snap_count[entnum]++;
+
+	snap = &cl.entity_snapshots[base + head];
+	snap->servertime = cl.mtime[0];
+	VectorCopy (state->state.origin, snap->origin);
+	VectorCopy (state->state.angles, snap->angles);
+}
+
+static qboolean CL_IsSnapshotSeqStale (unsigned short seq)
+{
+	if (cl.snap_last_applied_seq == 0)
+		return false;
+	return (short)(seq - cl.snap_last_applied_seq) <= 0;
 }
 
 static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
@@ -1556,6 +1603,8 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 		VectorCopy (ent->msg_angles[0], ent->angles);
 		ent->forcelink = true;
 	}
+
+	CL_RecordEntitySnap (entnum, state);
 }
 
 /*
@@ -1643,12 +1692,6 @@ static void CL_ParseSnapshotFull (void)
 	if (drop)
 		return;
 
-	memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_active)
-		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_last_update_time)
-		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
-
 	// INV-5: commit staged snapshot only after full parse.
 	for (i = 1; i < cl_max_edicts; i++)
 	{
@@ -1735,6 +1778,14 @@ static void CL_ParseSnapshotDelta (void)
 			CL_LogDeltaReject ("need_full", seq, baseline_seq);
 		cl.snap_delta_mismatch++;
 		CL_RequestFullSnapshot ("snapshot_delta base mismatch", false);
+		drop = true;
+	}
+
+	if (!drop && CL_IsSnapshotSeqStale (seq16))
+	{
+		CL_LogDeltaReject ("seq_stale", seq, baseline_seq);
+		cl.snap_delta_mismatch++;
+		CL_RequestFullSnapshot ("snapshot_delta seq stale", false);
 		drop = true;
 	}
 
@@ -2055,15 +2106,6 @@ static void CL_ParseSnapshot2 (void)
 			if (apply_complete && rem_zero)
 				incomplete = false;
 
-			if (apply_complete)
-			{
-				memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-				if (cl.snapshot_active)
-					memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-				if (cl.snapshot_last_update_time)
-					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
-			}
-
 			// INV-5: commit reassembled snapshot only after full chunk parse.
 			for (i = 1; i < cl_max_edicts; i++)
 			{
@@ -2137,12 +2179,6 @@ static void CL_ParseSnapshot2 (void)
 		{
 			if (!incomplete)
 			{
-				memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
-				if (cl.snapshot_active)
-					memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-				if (cl.snapshot_last_update_time)
-					memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
-
 				// INV-5: commit staged snapshot only after full parse.
 				for (i = 1; i < cl_max_edicts; i++)
 				{
@@ -2212,6 +2248,14 @@ static void CL_ParseSnapshot2 (void)
 			CL_LogDeltaReject ("need_full", header.seq, header.base_seq);
 		cl.snap_delta_mismatch++;
 		CL_RequestFullSnapshot ("snapshot2 base mismatch", false);
+		drop = true;
+	}
+
+	if (!drop && CL_IsSnapshotSeqStale (seq16))
+	{
+		CL_LogDeltaReject ("seq_stale", header.seq, header.base_seq);
+		cl.snap_delta_mismatch++;
+		CL_RequestFullSnapshot ("snapshot2 seq stale", false);
 		drop = true;
 	}
 
