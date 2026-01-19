@@ -280,6 +280,9 @@ typedef struct
 	int			snap_parse_errors;
 	int			snap_delta_mismatch;
 	int			snap_incomplete_count;
+	unsigned int snap_rem0_seq;
+	unsigned int snap_rem0_base;
+	int			snap_rem0_count;
 	snapshot_state_t *snapshot_baseline;
 	byte		*snapshot_present;
 	byte		*snapshot_active;

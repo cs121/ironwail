@@ -942,6 +942,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_no_progress_base = 0;
 	client->snapshot_no_progress_next_edict = 0;
 	client->snapshot_no_progress_bytes = 0;
+	client->snapshot_no_progress_remaining = 0;
 	client->snapshot_no_progress_count = 0;
 	client->snapshot_debug_flags = 0;
 	client->snapshot_debug_base = 0;
@@ -1781,7 +1782,7 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		return false;
 
 	SV_WriteSnapshot2Header (msg, client->snapshot_pending_seq,
-		0xFFFFFFFFu, flags, (unsigned short)chunk_count, 0);
+		0xFFFFFFFFu, flags, (unsigned short)chunk_count, (unsigned short)remaining_entities);
 
 	if (chunk_count)
 	{
@@ -1841,6 +1842,10 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_chunk_rem %s seq %u rem %d flags 0x%x\n",
 			realtime, client->name, client->snapshot_pending_seq, remaining_entities, flags);
+	if (net_snap_debug.value && remaining_entities == 0)
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_chunk_complete %s seq %u\n",
+			realtime, client->name, client->snapshot_pending_seq);
 
 	return true;
 }
@@ -2293,6 +2298,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	qboolean reason_force_full = false;
 	unsigned int extra_flags = 0;
 	qboolean delta_incomplete = false;
+	qboolean invalid_base = false;
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -2338,6 +2344,13 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		if (use_delta && !client->snapshot_has_valid_base)
 		{
 			SDL_assert (!"snapshot delta without valid base");
+			use_delta = false;
+			forced_full = true;
+			reason_no_base = true;
+		}
+		if (use_delta && client->snapshot_pending_baseline_seq == 0xFFFFFFFFu)
+		{
+			invalid_base = true;
 			use_delta = false;
 			forced_full = true;
 			reason_no_base = true;
@@ -2486,6 +2499,13 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		client->snapshot_pending_baseline_seq = client->snapshot_baseline_seq;
 
 		use_delta = (sv_snapshotdelta.value && client->snapshot_baseline_seq && client->snapshot_has_valid_base);
+		if (use_delta && client->snapshot_baseline_seq == 0xFFFFFFFFu)
+		{
+			invalid_base = true;
+			use_delta = false;
+			forced_full = true;
+			reason_no_base = true;
+		}
 		if (!client->snapshot_has_valid_base)
 			reason_no_base = true;
 		if (client->snapshot_force_full)
@@ -2571,6 +2591,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		continuation = true;
 	else if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
 		continuation = true;
+	if (invalid_base)
+	{
+		client->snapshot_has_valid_base = false;
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_invalid_base %s seq %u base %u\n",
+			realtime, client->name, client->snapshot_pending_seq,
+			client->snapshot_pending_baseline_seq);
+	}
 
 	if (forced_full)
 		client->snapshot_stats_forced_full++;
@@ -2688,12 +2716,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		if (size_delta > 0)
 		{
 			int cursor = client->entstream.active ? client->entstream.next_edict : 0;
+			int remaining = chunked_snapshot ? chunk_remaining : -1;
 			qboolean same_seq = (client->snapshot_pending_seq == client->snapshot_no_progress_seq);
 			qboolean same_base = (base_seq == client->snapshot_no_progress_base);
 			qboolean same_cursor = (cursor == client->snapshot_no_progress_next_edict);
 			qboolean same_size = (size_delta == client->snapshot_no_progress_bytes);
+			qboolean same_remaining = (remaining == client->snapshot_no_progress_remaining);
+			qboolean continuation_stall = continuation && (same_cursor || (remaining == 0 && same_remaining));
 
-			if (same_seq && same_base && (same_cursor || same_size))
+			if (same_seq && same_base && (same_cursor || same_size || continuation_stall))
 				client->snapshot_no_progress_count++;
 			else
 				client->snapshot_no_progress_count = 0;
@@ -2702,12 +2733,13 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			client->snapshot_no_progress_base = base_seq;
 			client->snapshot_no_progress_next_edict = cursor;
 			client->snapshot_no_progress_bytes = size_delta;
+			client->snapshot_no_progress_remaining = remaining;
 
 			if (client->snapshot_no_progress_count >= 2)
 			{
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap_no_progress %s seq %u base %u size %d cursor %d\n",
-					realtime, client->name, client->snapshot_pending_seq, base_seq, size_delta, cursor);
+					"NETDBG time %.3f snap_no_progress %s seq %u base %u size %d cursor %d rem %d\n",
+					realtime, client->name, client->snapshot_pending_seq, base_seq, size_delta, cursor, remaining);
 				client->snapshot_force_full = true;
 				client->snapshot_pending_is_delta = false;
 				client->snapshot_pending_seq = 0;
@@ -2735,6 +2767,14 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 			Con_Printf ("snapshot %s baseline reset request\n", client->name);
 		return;
 	}
+	if (seq == 0xFFFFFFFFu)
+	{
+		client->snapshot_has_valid_base = false;
+		client->snapshot_force_full = true;
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_invalid_ack %s seq %u\n",
+			realtime, client->name, seq);
+	}
 
 	if (seq != client->snapshot_pending_seq)
 	{
@@ -2745,18 +2785,20 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 
 	qboolean was_incomplete = client->snapshot_pending_incomplete;
 
+	if (seq != 0xFFFFFFFFu)
+		client->snapshot_last_acked_seq = seq;
+
 	if (!was_incomplete)
 	{
 		memcpy (client->snapshot_baseline, client->snapshot_pending, qcvm->max_edicts * sizeof(snapshot_state_t));
 		memcpy (client->snapshot_baseline_present, client->snapshot_pending_present, qcvm->max_edicts * sizeof(byte));
 		client->snapshot_baseline_seq = seq;
-		client->snapshot_last_acked_seq = seq;
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_base_advance %s seq %u\n",
 			realtime, client->name, seq);
 	}
 	client->snapshot_pending_seq = 0;
-	if (!client->snapshot_pending_is_delta && !was_incomplete)
+	if (!client->snapshot_pending_is_delta && !was_incomplete && seq != 0xFFFFFFFFu)
 	{
 		client->snapshot_has_valid_base = true;
 		client->snapshot_last_full_seq = seq;
