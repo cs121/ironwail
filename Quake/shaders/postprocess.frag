@@ -783,8 +783,9 @@ void main()
                 float blackLiftStrength = max(TonemapBlackLiftParams.y, 0.0);
                 if (blackLift > 0.0 && blackLiftStrength > 0.0)
                 {
+                        float liftFalloff = max(blackLiftStrength, 1e-4);
                         mapped = mix(mapped, vec3(blackLift),
-                                exp(-mapped * blackLiftStrength));
+                                exp(-mapped / liftFalloff));
                         mapped = clamp(mapped, 0.0, 1.0);
                 }
         }
