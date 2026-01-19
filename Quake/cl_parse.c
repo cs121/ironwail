@@ -1667,6 +1667,9 @@ static void CL_ParseSnapshotFull (void)
 	cl.need_full_snapshot = false;
 	(void)CL_SendSnapshotAck (seq);
 	CL_RecordPlayerSnap ();
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_complete_apply seq %u\n",
+		realtime, seq);
 }
 
 static void CL_ParseSnapshotDelta (void)
@@ -1703,6 +1706,15 @@ static void CL_ParseSnapshotDelta (void)
 		CL_RequestFullSnapshot ("snapshot_delta header", true);
 		msg_readcount = net_message.cursize;
 		return;
+	}
+
+	if (baseline_seq == 0xFFFFFFFFu)
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_invalid_base_recv seq %u base %u\n",
+			realtime, seq, baseline_seq);
+		CL_RequestFullSnapshot ("snapshot_delta invalid base", false);
+		drop = true;
 	}
 
 	if (!drop && baseline_match)
@@ -1850,6 +1862,9 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_incomplete = false;
 		(void)CL_SendSnapshotAck (seq);
 		CL_RecordPlayerSnap ();
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_complete_apply seq %u\n",
+			realtime, seq);
 	}
 	else if (!drop)
 	{
@@ -1937,11 +1952,36 @@ static void CL_ParseSnapshot2 (void)
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_incomplete_recv seq %u base %u flags 0x%x ents %u rem %u\n",
 			realtime, header.seq, header.base_seq, header.flags, header.num_entities, header.num_removed);
+		if ((header.flags & SNAPSHOT_FLAG_FULL) && header.num_removed == 0)
+		{
+			if (header.base_seq == cl.snap_rem0_base && header.seq != cl.snap_rem0_seq)
+				cl.snap_rem0_count++;
+			else
+				cl.snap_rem0_count = 0;
+			cl.snap_rem0_base = header.base_seq;
+			cl.snap_rem0_seq = header.seq;
+			if (cl.snap_rem0_count >= 2)
+			{
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_rem0_stall seq %u base %u\n",
+					realtime, header.seq, header.base_seq);
+				CL_RequestFullSnapshot ("snapshot2 rem0 stall", false);
+			}
+		}
+		else
+		{
+			cl.snap_rem0_count = 0;
+		}
+	}
+	else
+	{
+		cl.snap_rem0_count = 0;
 	}
 
 	if (header.flags & SNAPSHOT_FLAG_FULL)
 	{
 		qboolean continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
+		qboolean final_chunk = (!continuation || header.num_removed == 0);
 
 		if (continuation || cl.snapshot_chunk_active)
 		{
@@ -1996,7 +2036,7 @@ static void CL_ParseSnapshot2 (void)
 				return;
 			}
 
-			if (continuation)
+			if (!final_chunk)
 				return;
 
 			if (!incomplete)
@@ -2030,6 +2070,9 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
 				CL_RecordPlayerSnap ();
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_complete_apply seq %u\n",
+					realtime, header.seq);
 			}
 			else
 			{
@@ -2101,6 +2144,9 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
 				CL_RecordPlayerSnap ();
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_complete_apply seq %u\n",
+					realtime, header.seq);
 			}
 			else
 			{
@@ -2120,6 +2166,15 @@ static void CL_ParseSnapshot2 (void)
 				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 		}
 		return;
+	}
+
+	if (header.base_seq == 0xFFFFFFFFu)
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_invalid_base_recv seq %u base %u\n",
+			realtime, header.seq, header.base_seq);
+		CL_RequestFullSnapshot ("snapshot2 invalid base", false);
+		drop = true;
 	}
 
 	baseline_match = (header.base_seq != 0xFFFFFFFFu && header.base_seq == cl.snapshot_baseline_seq);
@@ -2272,6 +2327,9 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_complete_seq = seq16;
 			cl.snap_last_incomplete = false;
 			CL_RecordPlayerSnap ();
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_complete_apply seq %u\n",
+				realtime, header.seq);
 		}
 		else
 		{

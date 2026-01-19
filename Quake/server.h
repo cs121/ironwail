@@ -241,6 +241,7 @@ typedef struct client_s
 	unsigned int	snapshot_no_progress_base;
 	int				snapshot_no_progress_next_edict;
 	int				snapshot_no_progress_bytes;
+	int				snapshot_no_progress_remaining;
 	int				snapshot_no_progress_count;
 	unsigned int	snapshot_debug_flags;
 	unsigned int	snapshot_debug_base;
