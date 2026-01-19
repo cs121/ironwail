@@ -1736,7 +1736,7 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 	int chunk_size = header_size;
 	int last_sent = 0;
 	qboolean more = false;
-	unsigned int flags = SNAPSHOT_FLAG_FULL | extra_flags;
+	unsigned int flags = SNAPSHOT_FLAG_FULL | (extra_flags & ~SNAPSHOT_FLAG_INCOMPLETE);
 	int remaining_entities = 0;
 
 	if (available < header_size)
@@ -1769,14 +1769,9 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		remaining_entities = 0;
 
 	if (remaining_entities > 0)
-	{
-		flags |= SNAPSHOT_FLAG_CONTINUE;
-		flags |= SNAPSHOT_FLAG_INCOMPLETE;
-	}
+		flags |= SNAPSHOT_FLAG_CONTINUE | SNAPSHOT_FLAG_INCOMPLETE;
 	else
-	{
 		flags &= ~(SNAPSHOT_FLAG_CONTINUE | SNAPSHOT_FLAG_INCOMPLETE);
-	}
 
 	if (!MSG_CanWrite (msg, chunk_size))
 		return false;
@@ -1838,6 +1833,9 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		*out_remaining = remaining_entities;
 	if (out_flags)
 		*out_flags = flags;
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_chunk_flags %s seq %u rem %d flags 0x%x\n",
+		realtime, client->name, client->snapshot_pending_seq, remaining_entities, flags);
 	if (net_snap_debug.value)
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_chunk_rem %s seq %u rem %d flags 0x%x\n",
@@ -2586,14 +2584,19 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
-	continuation = msg->write_locked && client->entstream.active;
-	if (chunked_snapshot && (chunk_flags & SNAPSHOT_FLAG_CONTINUE))
-		continuation = true;
-	else if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
+	if (chunked_snapshot)
+		continuation = (chunk_remaining > 0);
+	else
+		continuation = msg->write_locked && client->entstream.active;
+	if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
 		continuation = true;
 	if (invalid_base)
 	{
 		client->snapshot_has_valid_base = false;
+		client->snapshot_force_full = true;
+		client->entstream.active = false;
+		client->entstream.next_edict = 1;
+		client->entstream.base_snapshot = 0;
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_invalid_base %s seq %u base %u\n",
 			realtime, client->name, client->snapshot_pending_seq,
@@ -2720,11 +2723,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			qboolean same_seq = (client->snapshot_pending_seq == client->snapshot_no_progress_seq);
 			qboolean same_base = (base_seq == client->snapshot_no_progress_base);
 			qboolean same_cursor = (cursor == client->snapshot_no_progress_next_edict);
-			qboolean same_size = (size_delta == client->snapshot_no_progress_bytes);
-			qboolean same_remaining = (remaining == client->snapshot_no_progress_remaining);
-			qboolean continuation_stall = continuation && (same_cursor || (remaining == 0 && same_remaining));
+			qboolean continuation_stall = continuation && (remaining == 0 || same_cursor);
 
-			if (same_seq && same_base && (same_cursor || same_size || continuation_stall))
+			if (same_seq && same_base && continuation_stall)
 				client->snapshot_no_progress_count++;
 			else
 				client->snapshot_no_progress_count = 0;

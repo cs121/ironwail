@@ -1981,10 +1981,22 @@ static void CL_ParseSnapshot2 (void)
 	if (header.flags & SNAPSHOT_FLAG_FULL)
 	{
 		qboolean continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
-		qboolean final_chunk = (!continuation || header.num_removed == 0);
+		qboolean rem_zero = (header.num_removed == 0);
+		qboolean final_chunk = (!continuation || rem_zero);
+		qboolean finalize_invalid = (!continuation && !rem_zero);
+
+		if (finalize_invalid)
+		{
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_finalize_skip seq %u base %u flags 0x%x reason flag_mismatch\n",
+				realtime, header.seq, header.base_seq, header.flags);
+			CL_RequestFullSnapshot ("snapshot2 flag mismatch", false);
+			drop = true;
+		}
 
 		if (continuation || cl.snapshot_chunk_active)
 		{
+			qboolean apply_complete;
 			if (!cl.snapshot_chunk_active || cl.snapshot_chunk_seq != header.seq)
 			{
 				CL_ResetSnapshotChunk ();
@@ -2039,7 +2051,11 @@ static void CL_ParseSnapshot2 (void)
 			if (!final_chunk)
 				return;
 
-			if (!incomplete)
+			apply_complete = !drop && final_chunk && !finalize_invalid;
+			if (apply_complete && rem_zero)
+				incomplete = false;
+
+			if (apply_complete)
 			{
 				memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
 				if (cl.snapshot_active)
@@ -2062,7 +2078,7 @@ static void CL_ParseSnapshot2 (void)
 				CL_MarkSnapshotEntityUpdated (i);
 			}
 
-			if (!incomplete)
+			if (apply_complete)
 			{
 				cl.snapshot_baseline_seq = header.seq;
 				cl.snap_last_applied_seq = seq16;
@@ -2074,7 +2090,7 @@ static void CL_ParseSnapshot2 (void)
 					"NETDBG time %.3f snap_complete_apply seq %u\n",
 					realtime, header.seq);
 			}
-			else
+			else if (!drop)
 			{
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
