@@ -969,6 +969,19 @@ static qboolean CL_ReadPackedUInt16 (unsigned int *out)
 	return true;
 }
 
+static qboolean CL_PackedOriginIsSane (const vec3_t origin)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
+			return false;
+	}
+	return true;
+}
+
 static void CL_ParsePackedEntities (void)
 {
 	unsigned int count;
@@ -1001,6 +1014,8 @@ static void CL_ParsePackedEntities (void)
 		int prevframe;
 		int temp;
 		short coord;
+		qboolean origin_full;
+		vec3_t parsed_origin;
 
 		if (!CL_ReadPackedUInt16 (&entnum))
 			goto short_read;
@@ -1114,14 +1129,20 @@ static void CL_ParsePackedEntities (void)
 		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
 		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
 
+		origin_full = (mask & PACKEDENT_MASK_POS_FULL) != 0;
+		VectorCopy (ent->baseline.origin, parsed_origin);
+
 		if (mask & PACKEDENT_MASK_ORIGIN_X)
 		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->msg_origins[0][0] = coord / PACKEDENT_POS_SCALE;
+			if (origin_full)
+				parsed_origin[0] = MSG_ReadCoord (cl.protocolflags);
+			else
+			{
+				if (!CL_ReadPackedInt16 (&coord))
+					goto short_read;
+				parsed_origin[0] = coord / PACKEDENT_POS_SCALE;
+			}
 		}
-		else
-			ent->msg_origins[0][0] = ent->baseline.origin[0];
 
 		if (mask & PACKEDENT_MASK_ANGLE_PITCH)
 		{
@@ -1135,12 +1156,15 @@ static void CL_ParsePackedEntities (void)
 
 		if (mask & PACKEDENT_MASK_ORIGIN_Y)
 		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->msg_origins[0][1] = coord / PACKEDENT_POS_SCALE;
+			if (origin_full)
+				parsed_origin[1] = MSG_ReadCoord (cl.protocolflags);
+			else
+			{
+				if (!CL_ReadPackedInt16 (&coord))
+					goto short_read;
+				parsed_origin[1] = coord / PACKEDENT_POS_SCALE;
+			}
 		}
-		else
-			ent->msg_origins[0][1] = ent->baseline.origin[1];
 
 		if (mask & PACKEDENT_MASK_ANGLE_YAW)
 		{
@@ -1154,12 +1178,15 @@ static void CL_ParsePackedEntities (void)
 
 		if (mask & PACKEDENT_MASK_ORIGIN_Z)
 		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->msg_origins[0][2] = coord / PACKEDENT_POS_SCALE;
+			if (origin_full)
+				parsed_origin[2] = MSG_ReadCoord (cl.protocolflags);
+			else
+			{
+				if (!CL_ReadPackedInt16 (&coord))
+					goto short_read;
+				parsed_origin[2] = coord / PACKEDENT_POS_SCALE;
+			}
 		}
-		else
-			ent->msg_origins[0][2] = ent->baseline.origin[2];
 
 		if (mask & PACKEDENT_MASK_ANGLE_ROLL)
 		{
@@ -1170,6 +1197,14 @@ static void CL_ParsePackedEntities (void)
 		}
 		else
 			ent->msg_angles[0][2] = ent->baseline.angles[2];
+
+		if (!CL_PackedOriginIsSane (parsed_origin))
+		{
+			CL_RequestFullSnapshot ("packedents origin guard", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
+		VectorCopy (parsed_origin, ent->msg_origins[0]);
 
 		if (mask & PACKEDENT_MASK_VEL_X)
 		{
