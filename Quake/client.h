@@ -456,6 +456,7 @@ void CL_SendMove (const usercmd_t *cmd);
 void CL_Predict_Clear (void);
 void CL_Predict_SetupCmd (usercmd_t *cmd);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
+void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
 int  CL_ReadFromServer (void);
 void CL_AdjustAngles (void);

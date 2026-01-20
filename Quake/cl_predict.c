@@ -312,3 +312,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	CL_Predict_ApplyToClient ();
 }
+
+void CL_Predict_Reapply (void)
+{
+	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
+		return;
+
+	CL_Predict_ApplyToClient ();
+}
