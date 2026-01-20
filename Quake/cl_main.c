@@ -499,12 +499,16 @@ void CL_ClearState (void)
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
 	cl.need_full_snapshot = false;
+	cl.has_valid_worldstate = false;
 	cl.snap_parse_errors = 0;
 	cl.snap_delta_mismatch = 0;
 	cl.snap_incomplete_count = 0;
 	cl.snap_rem0_seq = 0;
 	cl.snap_rem0_base = 0;
 	cl.snap_rem0_count = 0;
+	cl.snapshot_chunk_expected_total = 0;
+	cl.snapshot_chunk_received = 0;
+	cl.snapshot_chunk_remaining = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
 
