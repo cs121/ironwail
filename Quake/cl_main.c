@@ -179,6 +179,26 @@ void CL_RecordPlayerSnap (void)
 	cl_psnap_count = q_min (cl_psnap_count + 1, CL_PLAYER_SNAP_HISTORY);
 }
 
+qboolean CL_WorldReady (void)
+{
+	entity_t *view;
+
+	// Strict mapload gating: only allow prediction/input when the viewentity has a model.
+	if (cls.signon != SIGNONS)
+		return false;
+	if (!cl.worldmodel)
+		return false;
+	if (cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return false;
+	if (!cl_entities)
+		return false;
+	view = &cl_entities[cl.viewentity];
+	if (!view->model)
+		return false;
+
+	return true;
+}
+
 static float CL_LerpAngle (float a, float b, float f)
 {
 	float d = b - a;
@@ -498,7 +518,7 @@ void CL_ClearState (void)
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
-	cl.need_full_snapshot = false;
+	cl.need_full_snapshot = true;
 	cl.has_valid_worldstate = false;
 	cl.snap_parse_errors = 0;
 	cl.snap_delta_mismatch = 0;
@@ -1370,11 +1390,21 @@ void CL_SendCmd (void)
 		in_attack.state &= ~2;
 
 		if (in_jump.state & 3)
-			cmd.buttons |= 2;
+		cmd.buttons |= 2;
 		in_jump.state &= ~2;
 
 		cmd.impulse = in_impulse;
 		in_impulse = 0;
+
+		// Freeze local movement until we have a ready viewentity to avoid void spawns.
+		if (!CL_WorldReady ())
+		{
+			cmd.forwardmove = 0;
+			cmd.sidemove = 0;
+			cmd.upmove = 0;
+			cmd.buttons = 0;
+			cmd.impulse = 0;
+		}
 
 		CL_Predict_SetupCmd (&cmd);
 

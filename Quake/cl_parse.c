@@ -2652,6 +2652,7 @@ void CL_ParseClientdata (void)
 		cl.viewent.alpha = ENTALPHA_DEFAULT;
 	//johnfitz
 
+	// svc_clientdata carries pmove-critical fields; snapshot2 owns local player position/orientation.
 	if (bits & SU_PREDICT)
 	{
 		unsigned int ack = (unsigned int)MSG_ReadLong ();
@@ -3053,6 +3054,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_setview:
+			// Viewentity is per-client and must be set immediately for snapshot2/clientdata merge.
 			cl.viewentity = MSG_ReadShort ();
 			break;
 
