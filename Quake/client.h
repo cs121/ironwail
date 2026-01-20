@@ -285,6 +285,7 @@ typedef struct
 	unsigned short snap_last_complete_seq;
 	unsigned short snap_last_incomplete_seq;
 	qboolean	snap_last_incomplete;
+	qboolean	has_full_snapshot;
 	qboolean	need_full_snapshot;
 	qboolean	has_valid_worldstate;
 	int			snap_parse_errors;

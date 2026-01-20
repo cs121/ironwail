@@ -931,7 +931,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_last_full_seq = 0;
 	client->snapshot_last_full_time = 0;
 	client->snapshot_has_valid_base = false;
-	client->snapshot_force_full = false;
+	client->snapshot_force_full = true;
 	client->snapshot_pending_time = 0;
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_unacked_frames = 0;
@@ -2598,9 +2598,10 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		client->entstream.next_edict = 1;
 		client->entstream.base_snapshot = 0;
 		NET_DebugLogEvent (true,
-			"NETDBG time %.3f snap_invalid_base %s seq %u base %u\n",
+			"NETDBG time %.3f snap_invalid_base %s seq %u base %u full %d delta %d force_full %d\n",
 			realtime, client->name, client->snapshot_pending_seq,
-			client->snapshot_pending_baseline_seq);
+			client->snapshot_pending_baseline_seq,
+			use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
 	}
 
 	if (forced_full)
@@ -2706,9 +2707,10 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			else
 				reason = "unknown";
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop %d\n",
+				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop %d full %d delta %d force_full %d\n",
 				realtime, client->name, client->snapshot_pending_seq, base_seq, reason,
-				client->snapshot_pending_mandatory, client->snapshot_pending_dropped);
+				client->snapshot_pending_mandatory, client->snapshot_pending_dropped,
+				use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
 		}
 	}
 
@@ -2739,8 +2741,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			if (client->snapshot_no_progress_count >= 2)
 			{
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap_no_progress %s seq %u base %u size %d cursor %d rem %d\n",
-					realtime, client->name, client->snapshot_pending_seq, base_seq, size_delta, cursor, remaining);
+					"NETDBG time %.3f snap_no_progress %s seq %u base %u size %d cursor %d rem %d full %d delta %d force_full %d\n",
+					realtime, client->name, client->snapshot_pending_seq, base_seq, size_delta, cursor, remaining,
+					use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
 				client->snapshot_force_full = true;
 				client->snapshot_pending_is_delta = false;
 				client->snapshot_pending_seq = 0;
