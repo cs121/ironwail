@@ -382,9 +382,11 @@ CL_SendMove
 void CL_SendMove (const usercmd_t *cmd)
 {
 	int		i;
-	int		bits;
+	int		cmd_count;
+	int		j;
 	sizebuf_t	buf;
 	byte	data[128];
+	usercmd_t	cmd_buf[CMD_BACKUP + 1];
 
 	buf.maxsize = 128;
 	buf.cursize = 0;
@@ -415,35 +417,35 @@ void CL_SendMove (const usercmd_t *cmd)
 
 		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
 
-		for (i=0 ; i<3 ; i++)
-			//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
-			if (cl.protocol == PROTOCOL_NETQUAKE)
-				MSG_WriteAngle (&buf, cl.viewangles[i], cl.protocolflags);
-			else
-				MSG_WriteAngle16 (&buf, cl.viewangles[i], cl.protocolflags);
-			//johnfitz
+		cmd_count = 0;
+		for (i = CMD_BACKUP; i >= 0; i--)
+		{
+			unsigned int seq = cmd->sequence - (unsigned int)i;
 
-		MSG_WriteShort (&buf, cmd->forwardmove);
-		MSG_WriteShort (&buf, cmd->sidemove);
-		MSG_WriteShort (&buf, cmd->upmove);
+			if (CL_Predict_GetCmd (seq, &cmd_buf[cmd_count]))
+				cmd_count++;
+		}
 
-	//
-	// send button bits
-	//
-		bits = 0;
+		MSG_WriteByte (&buf, cmd_count);
+		for (i = 0; i < cmd_count; i++)
+		{
+			const usercmd_t *out = &cmd_buf[i];
 
-		if ( in_attack.state & 3 )
-			bits |= 1;
-		in_attack.state &= ~2;
+			MSG_WriteLong (&buf, (int)out->sequence);
+			for (j=0 ; j<3 ; j++)
+				//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
+				if (cl.protocol == PROTOCOL_NETQUAKE)
+					MSG_WriteAngle (&buf, out->viewangles[j], cl.protocolflags);
+				else
+					MSG_WriteAngle16 (&buf, out->viewangles[j], cl.protocolflags);
+				//johnfitz
 
-		if (in_jump.state & 3)
-			bits |= 2;
-		in_jump.state &= ~2;
-
-		MSG_WriteByte (&buf, bits);
-
-		MSG_WriteByte (&buf, in_impulse);
-		in_impulse = 0;
+			MSG_WriteShort (&buf, out->forwardmove);
+			MSG_WriteShort (&buf, out->sidemove);
+			MSG_WriteShort (&buf, out->upmove);
+			MSG_WriteByte (&buf, out->buttons);
+			MSG_WriteByte (&buf, out->impulse);
+		}
 	}
 
 //

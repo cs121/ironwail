@@ -435,27 +435,26 @@ void SV_ClientThink (void)
 SV_ReadClientMove
 ===================
 */
+static qboolean SV_CmdSeqNewer (unsigned int seq, unsigned int last)
+{
+	return (int)(seq - last) > 0;
+}
+
 void SV_ReadClientMove (usercmd_t *move)
 {
 	int		i;
-	vec3_t	angle;
 	int		bits;
 
-// read ping time
-	host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
-		= qcvm->time - MSG_ReadFloat ();
-	host_client->num_pings++;
+	move->sequence = (unsigned int)MSG_ReadLong ();
 
 // read current angles
 	for (i=0 ; i<3 ; i++)
 		//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
 		if (sv.protocol == PROTOCOL_NETQUAKE)
-			angle[i] = MSG_ReadAngle (sv.protocolflags);
+			move->viewangles[i] = MSG_ReadAngle (sv.protocolflags);
 		else
-			angle[i] = MSG_ReadAngle16 (sv.protocolflags);
+			move->viewangles[i] = MSG_ReadAngle16 (sv.protocolflags);
 		//johnfitz
-
-	VectorCopy (angle, host_client->edict->v.v_angle);
 
 // read movement
 	move->forwardmove = MSG_ReadShort ();
@@ -464,12 +463,9 @@ void SV_ReadClientMove (usercmd_t *move)
 
 // read buttons
 	bits = MSG_ReadByte ();
-	host_client->edict->v.button0 = bits & 1;
-	host_client->edict->v.button2 = (bits & 2)>>1;
+	move->buttons = bits;
 
-	i = MSG_ReadByte ();
-	if (i)
-		host_client->edict->v.impulse = i;
+	move->impulse = MSG_ReadByte ();
 }
 
 /*
@@ -606,8 +602,35 @@ nextmsg:
 				return false;
 
 			case clc_move:
-				SV_ReadClientMove (&host_client->cmd);
+			{
+				int cmd_count;
+				int cmd_index;
+
+			// read ping time
+				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
+					= qcvm->time - MSG_ReadFloat ();
+				host_client->num_pings++;
+
+				cmd_count = MSG_ReadByte ();
+				for (cmd_index = 0; cmd_index < cmd_count; cmd_index++)
+				{
+					usercmd_t move;
+
+					SV_ReadClientMove (&move);
+					if (!SV_CmdSeqNewer (move.sequence, host_client->last_cmd_seq))
+						continue;
+
+					host_client->last_cmd_seq = move.sequence;
+					host_client->cmd = move;
+
+					VectorCopy (move.viewangles, host_client->edict->v.v_angle);
+					host_client->edict->v.button0 = move.buttons & 1;
+					host_client->edict->v.button2 = (move.buttons & 2) >> 1;
+					if (move.impulse)
+						host_client->edict->v.impulse = move.impulse;
+				}
 				break;
+			}
 
 			case clc_snapshot_ack:
 				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadLong ());

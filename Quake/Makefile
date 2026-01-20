@@ -257,6 +257,7 @@ OBJS = strlcat.o \
 	chase.o \
 	cl_demo.o \
 	cl_input.o \
+	cl_predict.o \
 	cl_main.o \
 	cl_postfx.o \
 	cl_parse.o \

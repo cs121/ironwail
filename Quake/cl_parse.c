@@ -2573,6 +2573,26 @@ void CL_ParseClientdata (void)
 		cl.viewent.alpha = ENTALPHA_DEFAULT;
 	//johnfitz
 
+	if (bits & SU_PREDICT)
+	{
+		unsigned int ack = (unsigned int)MSG_ReadLong ();
+		vec3_t origin;
+		vec3_t velocity;
+		vec3_t viewangles;
+
+		for (i = 0; i < 3; i++)
+			origin[i] = MSG_ReadCoord (cl.protocolflags);
+		for (i = 0; i < 3; i++)
+			velocity[i] = MSG_ReadCoord (cl.protocolflags);
+		for (i = 0; i < 3; i++)
+			if (cl.protocol == PROTOCOL_NETQUAKE)
+				viewangles[i] = MSG_ReadAngle (cl.protocolflags);
+			else
+				viewangles[i] = MSG_ReadAngle16 (cl.protocolflags);
+
+		CL_Predict_ServerUpdate (ack, origin, velocity, viewangles, cl.onground);
+	}
+
 	CL_SetHudStat (STAT_WEAPONFRAME);
 	CL_SetHudStat (STAT_ARMOR);
 	CL_SetHudStat (STAT_WEAPON);

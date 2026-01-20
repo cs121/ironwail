@@ -263,6 +263,7 @@ typedef struct client_s
 	int				datagram_overflow_count;
 	double			datagram_overflow_next_time;
 	bot_state_t		bot;
+	unsigned int	last_cmd_seq;
 } client_t;
 
 
@@ -400,7 +401,7 @@ void SV_Physics (void);
 qboolean SV_CheckBottom (edict_t *ent);
 qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink);
 
-void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg);
+void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg);
 
 void SV_MoveToGoal (void);
 
