@@ -76,6 +76,8 @@ cvar_t	r_viewmodel_quake = {"r_viewmodel_quake", "0", CVAR_ARCHIVE};
 
 vec3_t	v_punchangles[2]; //johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous value. never the same unless map just loaded
 
+extern cvar_t cl_netdebug_parse;
+
 /*
 ===============
 V_CalcRoll
@@ -1059,6 +1061,16 @@ void V_CalcRefdef (void)
 	}
 	else
 		oldz = ent->origin[2];
+
+	if (cl_netdebug_parse.value)
+	{
+		Con_Printf ("NETDBG vieworg ent %d cur %.2f %.2f %.2f prev %.2f %.2f %.2f lerp %.3f view %.2f %.2f %.2f\n",
+			cl.viewentity,
+			ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
+			ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
+			cl_lerpfrac,
+			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
+	}
 
 	if (chase_active.value)
 		Chase_UpdateForDrawing (); //johnfitz

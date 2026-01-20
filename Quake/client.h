@@ -391,6 +391,7 @@ extern	cvar_t	cl_entity_timeout_ms;
 extern	cvar_t	cl_lerp_ms;
 extern	cvar_t	cl_lerp_max_gap_ms;
 extern	cvar_t	cl_lerp_debug;
+extern	float	cl_lerpfrac;
 
 
 #define	MAX_TEMP_ENTITIES	256		//johnfitz -- was 64
@@ -472,6 +473,7 @@ qboolean CL_IsPlayerEnt (const entity_t *ent);
 
 void CL_ParseTEnt (void);
 void CL_UpdateTEnts (void);
+void CL_ResetPlayerSnaps (void);
 
 void CL_FreeState(void);
 void CL_ClearState (void);

@@ -145,6 +145,13 @@ static void CL_ClearPlayerSnaps (void)
 	cl_lerp_debug_next_time = 0.0;
 }
 
+void CL_ResetPlayerSnaps (void)
+{
+	CL_ClearPlayerSnaps ();
+}
+
+float cl_lerpfrac = 1.0f;
+
 void CL_RecordPlayerSnap (void)
 {
 	cl_player_snap_t *snap;
@@ -365,6 +372,8 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 				}
 
 				f = (float)((dt + extrap_t) / dt);
+				if (f < 0.0f || f > 1.0f)
+					f = 1.0f;
 				for (axis = 0; axis < 3; axis++)
 				{
 					out_org[axis] = prev->origin[axis] + f * (newest->origin[axis] - prev->origin[axis]);
@@ -390,7 +399,11 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 			float f;
 
 			if (span <= 0.0)
-				break;
+			{
+				VectorCopy (prev->origin, out_org);
+				VectorCopy (prev->angles, out_ang);
+				return true;
+			}
 			if (max_gap_s > 0.0 && span > max_gap_s)
 			{
 				VectorCopy (snap->origin, out_org);
@@ -492,6 +505,8 @@ void CL_ClearState (void)
 	cl.entity_snap_head = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_head");
 	cl.entity_snap_count = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_count");
 	//johnfitz
+	if (cl_entities)
+		memset (cl_entities, 0, cl_max_edicts * sizeof(entity_t));
 	if (cl.snapshot_present)
 		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_active)
@@ -510,6 +525,11 @@ void CL_ClearState (void)
 		memset (cl.entity_snap_head, 0, cl_max_edicts * sizeof(byte));
 	if (cl.entity_snap_count)
 		memset (cl.entity_snap_count, 0, cl_max_edicts * sizeof(byte));
+	cl.mtime[0] = 0.0;
+	cl.mtime[1] = 0.0;
+	cl.time = 0.0;
+	cl.oldtime = 0.0;
+	cl_lerpfrac = 1.0f;
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
 	cl.snapshot_chunk_start_time = 0;
@@ -830,9 +850,10 @@ float	CL_LerpPoint (void)
 
 	f = cl.mtime[0] - cl.mtime[1];
 
-	if (!f || cls.timedemo || (sv.active && !host_netinterval))
+	if (f <= 0.0f || cls.timedemo || (sv.active && !host_netinterval))
 	{
 		cl.time = cl.mtime[0];
+		cl.mtime[1] = cl.mtime[0];
 		return 1;
 	}
 
@@ -844,17 +865,11 @@ float	CL_LerpPoint (void)
 
 	frac = (cl.time - cl.mtime[1]) / f;
 
-	if (frac < 0)
+	if (frac < 0.0f || frac > 1.0f)
 	{
-		if (frac < -0.01)
-			cl.time = cl.mtime[1];
-		frac = 0;
-	}
-	else if (frac > 1)
-	{
-		if (frac > 1.01)
-			cl.time = cl.mtime[0];
-		frac = 1;
+		cl.time = cl.mtime[0];
+		cl.mtime[1] = cl.mtime[0];
+		frac = 1.0f;
 	}
 
 	//johnfitz -- better nolerp behavior
@@ -976,6 +991,7 @@ void CL_RelinkEntities (void)
 
 // determine partial update time
 	frac = CL_LerpPoint ();
+	cl_lerpfrac = frac;
 
 	cl_numvisedicts = 0;
 

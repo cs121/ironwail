@@ -1469,6 +1469,8 @@ static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int ma
 }
 
 static void CL_ClearSnapshotStage (void);
+static void CL_PrepareFullSnapshotInterpReset (void);
+static void CL_FinalizeFullSnapshotInterpReset (void);
 
 static void CL_ClearEntitySnapHistory (int entnum)
 {
@@ -1768,6 +1770,12 @@ static void CL_ParseSnapshotFull (void)
 	if (drop)
 		return;
 
+	{
+		qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+
+		if (reset_interp)
+			CL_PrepareFullSnapshotInterpReset ();
+
 	// INV-5: commit staged snapshot only after full parse.
 	for (i = 1; i < cl_max_edicts; i++)
 	{
@@ -1777,6 +1785,10 @@ static void CL_ParseSnapshotFull (void)
 		cl.snapshot_present[i] = 1;
 		CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 		CL_MarkSnapshotEntityUpdated (i);
+	}
+
+		if (reset_interp)
+			CL_FinalizeFullSnapshotInterpReset ();
 	}
 
 	cl.snapshot_baseline_seq = seq;
@@ -2028,6 +2040,39 @@ static void CL_ClearSnapshotStage (void)
 		memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
 }
 
+static void CL_PrepareFullSnapshotInterpReset (void)
+{
+	int i;
+
+	cl.mtime[1] = cl.mtime[0];
+	cl.time = cl.mtime[0];
+	cl.oldtime = cl.mtime[0];
+	CL_ResetPlayerSnaps ();
+
+	for (i = 1; i < cl_max_edicts; i++)
+		CL_ClearEntitySnapHistory (i);
+}
+
+static void CL_FinalizeFullSnapshotInterpReset (void)
+{
+	int i;
+
+	for (i = 1; i < cl_max_edicts; i++)
+	{
+		entity_t *ent;
+
+		if (!cl.snapshot_present || !cl.snapshot_present[i])
+			continue;
+		ent = &cl_entities[i];
+		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+		VectorCopy (ent->msg_origins[0], ent->origin);
+		VectorCopy (ent->msg_angles[0], ent->angles);
+		ent->forcelink = true;
+		ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM;
+	}
+}
+
 static void CL_ResetSnapshotChunk (void)
 {
 	if (cl.snapshot_chunk_present)
@@ -2253,6 +2298,11 @@ static void CL_ParseSnapshot2 (void)
 
 			if (apply_complete)
 			{
+				qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+
+				if (reset_interp)
+					CL_PrepareFullSnapshotInterpReset ();
+
 				// INV-5: commit reassembled snapshot only after full chunk parse.
 				for (i = 1; i < cl_max_edicts; i++)
 				{
@@ -2263,6 +2313,9 @@ static void CL_ParseSnapshot2 (void)
 					CL_ApplySnapshotState (i, &cl.snapshot_chunk[i]);
 					CL_MarkSnapshotEntityUpdated (i);
 				}
+
+				if (reset_interp)
+					CL_FinalizeFullSnapshotInterpReset ();
 
 				CL_Predict_Reapply ();
 
@@ -2333,6 +2386,11 @@ static void CL_ParseSnapshot2 (void)
 		{
 			if (!incomplete)
 			{
+				qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+
+				if (reset_interp)
+					CL_PrepareFullSnapshotInterpReset ();
+
 				// INV-5: commit staged snapshot only after full parse.
 				for (i = 1; i < cl_max_edicts; i++)
 				{
@@ -2343,6 +2401,9 @@ static void CL_ParseSnapshot2 (void)
 					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 					CL_MarkSnapshotEntityUpdated (i);
 				}
+
+				if (reset_interp)
+					CL_FinalizeFullSnapshotInterpReset ();
 
 				CL_Predict_Reapply ();
 
