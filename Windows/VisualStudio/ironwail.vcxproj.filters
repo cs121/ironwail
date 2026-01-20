@@ -39,6 +39,9 @@
     <ClCompile Include="..\..\Quake\cl_parse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\cl_predict.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\cl_tent.c">
       <Filter>Source Files</Filter>
     </ClCompile>
