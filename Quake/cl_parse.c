@@ -116,6 +116,8 @@ const char *svc_strings[] =
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
+static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error);
+
 static const char *CL_SvcName (int cmd)
 {
 	if (cmd >= 0 && cmd < (int)NUM_SVC_STRINGS)
