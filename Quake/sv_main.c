@@ -3414,7 +3414,7 @@ SV_WriteClientdataToMessage
 
 ==================
 */
-void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
+void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg)
 {
 	int		bits;
 	int		i;
@@ -3495,6 +3495,8 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 
 //	if (ent->v.weapon)
 	  bits |= SU_WEAPON;
+
+	bits |= SU_PREDICT;
 
 	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (sv.protocol != PROTOCOL_NETQUAKE)
@@ -3591,6 +3593,17 @@ void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg)
 		MSG_WriteByte (msg, ent->alpha); //for now, weaponalpha = client entity alpha
 	//johnfitz
 
+	MSG_WriteLong (msg, (int)client->last_cmd_seq);
+	for (i=0 ; i<3 ; i++)
+		MSG_WriteCoord (msg, ent->v.origin[i], sv.protocolflags);
+	for (i=0 ; i<3 ; i++)
+		MSG_WriteCoord (msg, ent->v.velocity[i], sv.protocolflags);
+	for (i=0 ; i<3 ; i++)
+		if (sv.protocol == PROTOCOL_NETQUAKE)
+			MSG_WriteAngle (msg, ent->v.v_angle[i], sv.protocolflags);
+		else
+			MSG_WriteAngle16 (msg, ent->v.v_angle[i], sv.protocolflags);
+
 	// Hack: Alkaline 1.1 uses bit flags to store the active weapon,
 	// but we only send the stat as a byte, which can lead to truncation.
 	// If we detect this, re-send the stat separately (as a 32-bit int).
@@ -3657,7 +3670,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 // add the client specific data to the datagram
 	// INV-2: control/ack data (time + clientdata) is written first and never trimmed.
-	SV_WriteClientdataToMessage (client->edict, &msg);
+	SV_WriteClientdataToMessage (client, client->edict, &msg);
 	if (msg.overflowed)
 	{
 		Con_Printf ("sv_mtu_cap %d too small for mandatory clientdata for %s\n",

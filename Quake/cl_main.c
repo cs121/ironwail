@@ -507,6 +507,8 @@ void CL_ClearState (void)
 	cl.snap_rem0_count = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
+
+	CL_Predict_Clear ();
 }
 
 /*
@@ -1356,6 +1358,21 @@ void CL_SendCmd (void)
 		cmd.forwardmove	+= cl.pendingcmd.forwardmove;
 		cmd.sidemove	+= cl.pendingcmd.sidemove;
 		cmd.upmove		+= cl.pendingcmd.upmove;
+
+		VectorCopy (cl.viewangles, cmd.viewangles);
+		cmd.buttons = 0;
+		if ( in_attack.state & 3 )
+			cmd.buttons |= 1;
+		in_attack.state &= ~2;
+
+		if (in_jump.state & 3)
+			cmd.buttons |= 2;
+		in_jump.state &= ~2;
+
+		cmd.impulse = in_impulse;
+		in_impulse = 0;
+
+		CL_Predict_SetupCmd (&cmd);
 
 	// send the unreliable message
 		CL_SendMove (&cmd);

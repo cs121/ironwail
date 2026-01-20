@@ -104,7 +104,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	SU_VELOCITY1	(1<<5)
 #define	SU_VELOCITY2	(1<<6)
 #define	SU_VELOCITY3	(1<<7)
-#define	SU_UNUSED8		(1<<8)  //AVAILABLE BIT
+#define	SU_PREDICT		(1<<8)  // client prediction data
 #define	SU_ITEMS		(1<<9)
 #define	SU_ONGROUND		(1<<10)	// no data follows, the bit is it
 #define	SU_INWATER		(1<<11)	// no data follows, the bit is it
@@ -373,12 +373,18 @@ typedef struct
 
 typedef struct
 {
+	unsigned int	sequence;
 	vec3_t	viewangles;
 
 // intended velocities
 	float	forwardmove;
 	float	sidemove;
 	float	upmove;
+	byte	buttons;
+	byte	impulse;
 } usercmd_t;
+
+#define CMD_BACKUP	2
+#define CMD_RING	64
 
 #endif	/* _QUAKE_PROTOCOL_H */

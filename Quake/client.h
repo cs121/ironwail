@@ -446,11 +446,17 @@ extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 extern	kbutton_t	in_attack;
+extern	kbutton_t	in_jump;
+extern	int			in_impulse;
 
 void CL_InitInput (void);
 void CL_AccumulateCmd (void);
 void CL_SendCmd (void);
 void CL_SendMove (const usercmd_t *cmd);
+void CL_Predict_Clear (void);
+void CL_Predict_SetupCmd (usercmd_t *cmd);
+void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
+qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
 int  CL_ReadFromServer (void);
 void CL_AdjustAngles (void);
 void CL_BaseMove (usercmd_t *cmd);

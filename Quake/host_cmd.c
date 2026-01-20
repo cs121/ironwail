@@ -3187,7 +3187,7 @@ static void Host_Spawn_f (void)
 			MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.protocolflags );
 	MSG_WriteAngle (&host_client->message, 0, sv.protocolflags );
 
-	SV_WriteClientdataToMessage (sv_player, &host_client->message);
+	SV_WriteClientdataToMessage (host_client, sv_player, &host_client->message);
 
 	MSG_WriteByte (&host_client->message, svc_signonnum);
 	MSG_WriteByte (&host_client->message, 3);
