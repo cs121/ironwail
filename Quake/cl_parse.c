@@ -160,6 +160,18 @@ static int CL_NetDebugDumpLength (void)
 	return maxdump;
 }
 
+static int CL_NetDebugReadcount (void)
+{
+	int readcount = msg_readcount;
+
+	if (readcount < 0)
+		readcount = 0;
+	if (readcount > net_message.cursize)
+		readcount = net_message.cursize;
+
+	return readcount;
+}
+
 static void CL_NetDebugHeader (void)
 {
 	if (!cl_netdebug_parse.value && !cl_netdebug_hexdump.value)
@@ -2120,6 +2132,8 @@ static void CL_ParseSnapshot2 (void)
 				CL_MarkSnapshotEntityUpdated (i);
 			}
 
+			CL_Predict_Reapply ();
+
 			if (apply_complete)
 			{
 				cl.snapshot_baseline_seq = header.seq;
@@ -2190,6 +2204,8 @@ static void CL_ParseSnapshot2 (void)
 					CL_MarkSnapshotEntityUpdated (i);
 				}
 
+				CL_Predict_Reapply ();
+
 				cl.snapshot_baseline_seq = header.seq;
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
@@ -2210,6 +2226,7 @@ static void CL_ParseSnapshot2 (void)
 					CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
 					CL_MarkSnapshotEntityUpdated (i);
 				}
+				CL_Predict_Reapply ();
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
@@ -2374,6 +2391,8 @@ static void CL_ParseSnapshot2 (void)
 			CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
 			CL_MarkSnapshotEntityUpdated (i);
 		}
+
+		CL_Predict_Reapply ();
 
 		for (i = 1; i < cl_max_edicts; i++)
 		{
@@ -2877,8 +2896,13 @@ void CL_ParseServerMessage (void)
 				return;
 			}
 			if (cl_netdebug_parse.value)
+			{
+				int cmd_end = CL_NetDebugReadcount ();
+				if (cmd_end < cmd_offset)
+					cmd_end = cmd_offset;
 				Con_Printf ("NETDBG: cmd fast_update end %d bytes %d\n",
-					msg_readcount, msg_readcount - cmd_offset);
+					cmd_end, cmd_end - cmd_offset);
+			}
 			prevcmd = lastcmd;
 			prevcmd_offset = lastcmd_offset;
 			lastcmd = cmd;
@@ -3250,8 +3274,13 @@ void CL_ParseServerMessage (void)
 			return;
 		}
 		if (cl_netdebug_parse.value)
+		{
+			int cmd_end = CL_NetDebugReadcount ();
+			if (cmd_end < cmd_offset)
+				cmd_end = cmd_offset;
 			Con_Printf ("NETDBG: cmd %s end %d bytes %d\n",
-				CL_SvcName (cmd), msg_readcount, msg_readcount - cmd_offset);
+				CL_SvcName (cmd), cmd_end, cmd_end - cmd_offset);
+		}
 
 		prevcmd = lastcmd;
 		prevcmd_offset = lastcmd_offset;
