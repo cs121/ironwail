@@ -90,6 +90,13 @@ void CL_ClearSignons (void)
 	VEC_CLEAR (demo_head);
 	VEC_CLEAR (demo_head_sizes);
 	cls.signon = 0;
+	cl.has_full_snapshot = false;
+	cl.need_full_snapshot = true;
+	cl.snap_last_applied_seq = 0;
+	cl.snap_last_complete_seq = 0;
+	cl.snap_last_incomplete_seq = 0;
+	cl.snap_last_incomplete = false;
+	cl.snapshot_baseline_seq = 0;
 }
 
 /*
@@ -868,4 +875,3 @@ void CL_TimeDemo_f (void)
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;	// get a new message this frame
 }
-

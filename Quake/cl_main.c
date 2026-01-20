@@ -518,6 +518,7 @@ void CL_ClearState (void)
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
+	cl.has_full_snapshot = false;
 	cl.need_full_snapshot = true;
 	cl.has_valid_worldstate = false;
 	cl.snap_parse_errors = 0;

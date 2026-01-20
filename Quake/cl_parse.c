@@ -1335,6 +1335,13 @@ static void CL_EnsureReliableControlSpace (int needed, const char *reason)
 	}
 }
 
+static unsigned int CL_GetSnapshotAckSeq (void)
+{
+	if (!cl.has_full_snapshot)
+		return 0;
+	return cl.snapshot_baseline_seq;
+}
+
 static qboolean CL_SendSnapshotAck (unsigned int seq)
 {
 	if (cls.demoplayback || cls.state != ca_connected)
@@ -1371,7 +1378,7 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 		cl.need_full_snapshot = true;
 		if (cl_snap_debug.value >= 1.0f && reason)
 			Con_Printf ("cl_snap request full: %s\n", reason);
-		ack_seq = cl.snapshot_baseline_seq ? cl.snapshot_baseline_seq : 0;
+		ack_seq = CL_GetSnapshotAckSeq ();
 		(void)CL_SendSnapshotAck (ack_seq);
 	}
 }
@@ -1761,7 +1768,8 @@ static void CL_ParseSnapshotFull (void)
 	cl.snap_last_incomplete = false;
 	cl.need_full_snapshot = false;
 	cl.has_valid_worldstate = true;
-	(void)CL_SendSnapshotAck (seq);
+	cl.has_full_snapshot = true;
+	(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
 	CL_RecordPlayerSnap ();
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_complete_apply seq %u\n",
@@ -1787,7 +1795,7 @@ static void CL_ParseSnapshotDelta (void)
 	baseline_seq = (unsigned int)MSG_ReadLong ();
 	seq16 = (unsigned short)seq;
 	base16 = (unsigned short)baseline_seq;
-	need_full = cl.need_full_snapshot;
+	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
 	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
 	base_complete = (cl.snap_last_complete_seq != 0 && base16 == cl.snap_last_complete_seq);
 	continuation_pending = cl.snapshot_chunk_active;
@@ -1964,7 +1972,8 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_applied_seq = seq16;
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
-		(void)CL_SendSnapshotAck (seq);
+		cl.has_full_snapshot = true;
+		(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
 		CL_RecordPlayerSnap ();
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_complete_apply seq %u\n",
@@ -2025,6 +2034,8 @@ static void CL_ParseSnapshot2 (void)
 	unsigned short base16;
 	qboolean incomplete;
 	qboolean need_full;
+	qboolean is_full;
+	qboolean is_delta;
 	const int incomplete_limit = 3;
 
 	CL_ReadSnapshotHeader (&header);
@@ -2032,11 +2043,14 @@ static void CL_ParseSnapshot2 (void)
 	seq16 = (unsigned short)header.seq;
 	base16 = (unsigned short)header.base_seq;
 	incomplete = (header.flags & SNAPSHOT_FLAG_INCOMPLETE) != 0;
-	need_full = cl.need_full_snapshot;
+	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
+	is_full = (header.flags & SNAPSHOT_FLAG_FULL) != 0;
+	is_delta = (header.flags & SNAPSHOT_FLAG_DELTA) != 0;
 
 	NET_DebugLogEvent (true,
-		"NETDBG time %.3f snap2_recv seq %u base %u flags 0x%x ents %u rem %u\n",
-		realtime, header.seq, header.base_seq, header.flags, header.num_entities, header.num_removed);
+		"NETDBG time %.3f snap2_recv seq %u base %u flags 0x%x ents %u rem %u full %d delta %d has_full %d\n",
+		realtime, header.seq, header.base_seq, header.flags, header.num_entities, header.num_removed,
+		is_full ? 1 : 0, is_delta ? 1 : 0, cl.has_full_snapshot ? 1 : 0);
 
 	if (CL_SnapshotChunkTimedOut ())
 	{
@@ -2090,7 +2104,14 @@ static void CL_ParseSnapshot2 (void)
 		cl.snap_rem0_count = 0;
 	}
 
-	if (header.flags & SNAPSHOT_FLAG_FULL)
+	if (is_delta && !cl.has_full_snapshot)
+	{
+		CL_LogDeltaReject ("need_full", header.seq, header.base_seq);
+		CL_RequestFullSnapshot ("snapshot2 need full", false);
+		drop = true;
+	}
+
+	if (is_full)
 	{
 		qboolean continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
 		qboolean rem_zero = (header.num_removed == 0);
@@ -2230,12 +2251,14 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
+				cl.has_full_snapshot = true;
 				cl.has_valid_worldstate = true;
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap2_apply seq %u flags 0x%x\n",
-					realtime, header.seq, header.flags);
+					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
+					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
+					cl.has_full_snapshot ? 1 : 0);
 			}
 			else if (!drop)
 			{
@@ -2243,12 +2266,13 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d\n",
-					realtime, header.seq, header.flags, cl.snap_incomplete_count);
+					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
+					realtime, header.seq, header.flags, cl.snap_incomplete_count,
+					cl.has_full_snapshot ? 1 : 0);
 				if (cl.snap_incomplete_count >= incomplete_limit)
 					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 			}
-			if (!CL_SendSnapshotAck (header.seq))
+			if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 			CL_ResetSnapshotChunk ();
 			return;
@@ -2307,12 +2331,14 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
 				cl.need_full_snapshot = false;
+				cl.has_full_snapshot = true;
 				cl.has_valid_worldstate = true;
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap2_apply seq %u flags 0x%x\n",
-					realtime, header.seq, header.flags);
+					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
+					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
+					cl.has_full_snapshot ? 1 : 0);
 			}
 			else
 			{
@@ -2320,12 +2346,13 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d\n",
-					realtime, header.seq, header.flags, cl.snap_incomplete_count);
+					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
+					realtime, header.seq, header.flags, cl.snap_incomplete_count,
+					cl.has_full_snapshot ? 1 : 0);
 				if (cl.snap_incomplete_count >= incomplete_limit)
 					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 			}
-			if (!CL_SendSnapshotAck (header.seq))
+			if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 		}
 		return;
@@ -2497,10 +2524,12 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_complete_seq = seq16;
 			cl.snap_last_incomplete = false;
 			cl.snap_incomplete_count = 0;
+			cl.has_full_snapshot = true;
 			CL_RecordPlayerSnap ();
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap2_apply seq %u flags 0x%x\n",
-				realtime, header.seq, header.flags);
+				"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
+				realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
+				cl.has_full_snapshot ? 1 : 0);
 		}
 		else
 		{
@@ -2508,12 +2537,13 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_incomplete = true;
 			cl.snap_incomplete_count++;
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d\n",
-				realtime, header.seq, header.flags, cl.snap_incomplete_count);
+				"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
+				realtime, header.seq, header.flags, cl.snap_incomplete_count,
+				cl.has_full_snapshot ? 1 : 0);
 			if (cl.snap_incomplete_count >= incomplete_limit)
 				CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 		}
-		if (!CL_SendSnapshotAck (header.seq))
+		if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 			CL_RequestFullSnapshot ("snapshot2 ack failed", false);
 	}
 	else if (!drop)
