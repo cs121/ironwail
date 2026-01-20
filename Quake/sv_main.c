@@ -2840,6 +2840,7 @@ typedef struct
 	byte		skin;
 	byte		effects;
 	short		origin[3];
+	byte		origin_full_axes;
 	unsigned short	angles[3];
 	short		velocity[3];
 	byte		alpha;
@@ -2873,6 +2874,17 @@ static unsigned short SV_PackedQuantizeAngle (float value)
 	return (unsigned short)q;
 }
 
+static int SV_PackedCoordSize (void)
+{
+	if (sv.protocolflags & PRFL_FLOATCOORD)
+		return 4;
+	if (sv.protocolflags & PRFL_INT32COORD)
+		return 4;
+	if (sv.protocolflags & PRFL_24BITCOORD)
+		return 3;
+	return 2;
+}
+
 static int SV_PackedMaskBits (uint32_t mask)
 {
 	int count = 0;
@@ -2888,6 +2900,7 @@ static int SV_PackedMaskBits (uint32_t mask)
 static int SV_PackedEntitySize (uint32_t mask)
 {
 	int size = 0;
+	int coord_size = (mask & PACKEDENT_MASK_POS_FULL) ? SV_PackedCoordSize () : 2;
 
 	size += 2; // entnum
 	size += 2; // mask low
@@ -2905,11 +2918,11 @@ static int SV_PackedEntitySize (uint32_t mask)
 	if (mask & PACKEDENT_MASK_EFFECTS)
 		size += 1;
 	if (mask & PACKEDENT_MASK_ORIGIN_X)
-		size += 2;
+		size += coord_size;
 	if (mask & PACKEDENT_MASK_ORIGIN_Y)
-		size += 2;
+		size += coord_size;
 	if (mask & PACKEDENT_MASK_ORIGIN_Z)
-		size += 2;
+		size += coord_size;
 	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
 		size += 2;
 	if (mask & PACKEDENT_MASK_ANGLE_YAW)
@@ -2979,6 +2992,8 @@ static uint32_t SV_BuildPackedUpdate (edict_t *ent, packedent_update_t *update, 
 	int model = (int)ent->v.modelindex;
 	int frame = (int)ent->v.frame;
 	int i;
+	byte origin_full_axes = 0;
+	const float packed_pos_max = 32767.0f / PACKEDENT_POS_SCALE;
 
 	if (model < 0)
 		model = 0;
@@ -3010,11 +3025,28 @@ static uint32_t SV_BuildPackedUpdate (edict_t *ent, packedent_update_t *update, 
 
 	for (i = 0; i < 3; i++)
 	{
-		short base = SV_PackedQuantizeCoord (ent->baseline.origin[i], NULL);
+		if (fabsf (ent->v.origin[i]) > packed_pos_max)
+			origin_full_axes |= (byte)(1u << i);
+	}
+	update->origin_full_axes = origin_full_axes;
+	if (origin_full_axes)
+		mask |= PACKEDENT_MASK_POS_FULL;
 
-		update->origin[i] = SV_PackedQuantizeCoord (ent->v.origin[i], clamp_origin);
-		if (update->origin[i] != base)
+	for (i = 0; i < 3; i++)
+	{
+		if (origin_full_axes)
+		{
+			update->origin[i] = 0;
 			mask |= PACKEDENT_MASK_ORIGIN_X << i;
+		}
+		else
+		{
+			short base = SV_PackedQuantizeCoord (ent->baseline.origin[i], NULL);
+
+			update->origin[i] = SV_PackedQuantizeCoord (ent->v.origin[i], clamp_origin);
+			if (update->origin[i] != base)
+				mask |= PACKEDENT_MASK_ORIGIN_X << i;
+		}
 
 		update->angles[i] = SV_PackedQuantizeAngle (ent->v.angles[i]);
 		if (update->angles[i] != SV_PackedQuantizeAngle (ent->baseline.angles[i]))
@@ -3048,7 +3080,7 @@ static uint32_t SV_BuildPackedUpdate (edict_t *ent, packedent_update_t *update, 
 	return mask;
 }
 
-static void SV_WritePackedEntity (sizebuf_t *msg, int entnum, uint32_t mask, const packedent_update_t *update)
+static void SV_WritePackedEntity (sizebuf_t *msg, const edict_t *ent, int entnum, uint32_t mask, const packedent_update_t *update)
 {
 	unsigned int low = (unsigned int)(mask & 0x7FFFu);
 	unsigned int high = (unsigned int)(mask >> 16);
@@ -3071,12 +3103,43 @@ static void SV_WritePackedEntity (sizebuf_t *msg, int entnum, uint32_t mask, con
 		MSG_WriteByte (msg, update->skin);
 	if (mask & PACKEDENT_MASK_EFFECTS)
 		MSG_WriteByte (msg, update->effects);
+	if ((mask & PACKEDENT_MASK_POS_FULL) && sv_packedents_debug.value)
+	{
+		char axes[4];
+		int count = 0;
+
+		if (update->origin_full_axes & 1u)
+			axes[count++] = 'x';
+		if (update->origin_full_axes & 2u)
+			axes[count++] = 'y';
+		if (update->origin_full_axes & 4u)
+			axes[count++] = 'z';
+		axes[count] = '\0';
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f packedents_pos_full ent %d axes %s\n",
+			realtime, entnum, axes);
+	}
 	if (mask & PACKEDENT_MASK_ORIGIN_X)
-		MSG_WriteInt16 (msg, update->origin[0]);
+	{
+		if (mask & PACKEDENT_MASK_POS_FULL)
+			MSG_WriteCoord (msg, ent->v.origin[0], sv.protocolflags);
+		else
+			MSG_WriteInt16 (msg, update->origin[0]);
+	}
 	if (mask & PACKEDENT_MASK_ORIGIN_Y)
-		MSG_WriteInt16 (msg, update->origin[1]);
+	{
+		if (mask & PACKEDENT_MASK_POS_FULL)
+			MSG_WriteCoord (msg, ent->v.origin[1], sv.protocolflags);
+		else
+			MSG_WriteInt16 (msg, update->origin[1]);
+	}
 	if (mask & PACKEDENT_MASK_ORIGIN_Z)
-		MSG_WriteInt16 (msg, update->origin[2]);
+	{
+		if (mask & PACKEDENT_MASK_POS_FULL)
+			MSG_WriteCoord (msg, ent->v.origin[2], sv.protocolflags);
+		else
+			MSG_WriteInt16 (msg, update->origin[2]);
+	}
 	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
 		MSG_WriteUInt16 (msg, update->angles[0]);
 	if (mask & PACKEDENT_MASK_ANGLE_YAW)
@@ -3190,7 +3253,7 @@ void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
 			if (!mask)
 				goto stats;
 
-			SV_WritePackedEntity (msg, e, mask, &update);
+			SV_WritePackedEntity (msg, ent, e, mask, &update);
 			packed_count++;
 
 			if (sv_packedents_debug.value)
