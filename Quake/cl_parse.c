@@ -1208,6 +1208,7 @@ static void CL_ParsePackedEntities (void)
 			return;
 		}
 		CL_ApplySnapshotOrigin (ent->msg_origins[0], parsed_origin);
+		CL_ApplyEntityOrigin (ent, (int)entnum);
 
 		if (mask & PACKEDENT_MASK_VEL_X)
 		{
@@ -1530,6 +1531,19 @@ static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in)
 		VectorCopy (in, out);
 }
 
+static void CL_ApplyEntityOrigin (entity_t *ent, int entnum)
+{
+	VectorCopy (ent->msg_origins[0], ent->origin);
+
+	if (entnum == cl.viewentity)
+	{
+		if (!VectorCompare (ent->msg_origins[0], vec3_origin))
+			VectorCopy (ent->msg_origins[0], cl.simorg);
+		if (VectorCompare (ent->origin, vec3_origin))
+			VectorCopy (cl.simorg, ent->origin);
+	}
+}
+
 static void CL_LogDeltaReject (const char *reason, unsigned int seq, unsigned int base_seq)
 {
 	NET_DebugLogEvent (true,
@@ -1641,6 +1655,7 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 
 	CL_ApplySnapshotOrigin (ent->msg_origins[0], state->state.origin);
 	VectorCopy (state->state.angles, ent->msg_angles[0]);
+	CL_ApplyEntityOrigin (ent, entnum);
 
 	if (state->step)
 	{

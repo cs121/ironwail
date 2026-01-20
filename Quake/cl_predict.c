@@ -55,6 +55,7 @@ static void CL_Predict_ApplyToClient (void)
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
+	VectorCopy (cl_pred.predicted.origin, cl.simorg);
 	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].msg_origins[0]);
 	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].msg_origins[1]);
@@ -292,6 +293,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	cl_pred.seq_acked = ack;
 	VectorCopy (origin, cl_pred.base.origin);
+	VectorCopy (origin, cl.simorg);
 	VectorCopy (velocity, cl_pred.base.velocity);
 	VectorCopy (viewangles, cl_pred.base.viewangles);
 	cl_pred.base.onground = onground;
