@@ -117,6 +117,7 @@ const char *svc_strings[] =
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
 static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error);
+static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in);
 
 static const char *CL_SvcName (int cmd)
 {
@@ -1206,7 +1207,7 @@ static void CL_ParsePackedEntities (void)
 			msg_readcount = net_message.cursize;
 			return;
 		}
-		VectorCopy (parsed_origin, ent->msg_origins[0]);
+		CL_ApplySnapshotOrigin (ent->msg_origins[0], parsed_origin);
 
 		if (mask & PACKEDENT_MASK_VEL_X)
 		{
@@ -1506,6 +1507,26 @@ static qboolean CL_ShouldDropSnapshot (void)
 	return ((float)rand() / (float)RAND_MAX) < cl_test_drop.value;
 }
 
+static qboolean CL_SnapshotWorldModelReady (const char *reason)
+{
+	if (cl.worldmodel && cl.worldmodel->type == mod_brush)
+		return true;
+
+	cl.need_full_snapshot = true;
+	cl.has_valid_worldstate = false;
+	CL_RequestFullSnapshot (reason, false);
+	return false;
+}
+
+static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in)
+{
+	// Snapshot/packedent origins are model-space; offset by worldmodel origin to render in world-space.
+	if (cl.worldmodel && cl.worldmodel->type == mod_brush)
+		VectorAdd (in, cl.worldmodel->origin, out);
+	else
+		VectorCopy (in, out);
+}
+
 static void CL_LogDeltaReject (const char *reason, unsigned int seq, unsigned int base_seq)
 {
 	NET_DebugLogEvent (true,
@@ -1615,11 +1636,8 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 			R_TranslateNewPlayerSkin (entnum - 1);
 	}
 
-	for (i = 0; i < 3; i++)
-	{
-		ent->msg_origins[0][i] = state->state.origin[i];
-		ent->msg_angles[0][i] = state->state.angles[i];
-	}
+	CL_ApplySnapshotOrigin (ent->msg_origins[0], state->state.origin);
+	VectorCopy (state->state.angles, ent->msg_angles[0]);
 
 	if (state->step)
 	{
@@ -1651,8 +1669,6 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	}
 	else if (model && model->synctype == ST_FRAMETIME)
 		ent->syncbase = -cl.time;
-
-	ent->baseline = state->state;
 
 	if (forcelink)
 	{
@@ -2046,6 +2062,9 @@ static void CL_ParseSnapshot2 (void)
 	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
 	is_full = (header.flags & SNAPSHOT_FLAG_FULL) != 0;
 	is_delta = (header.flags & SNAPSHOT_FLAG_DELTA) != 0;
+
+	if (!CL_SnapshotWorldModelReady ("snapshot2 worldmodel"))
+		drop = true;
 
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap2_recv seq %u base %u flags 0x%x ents %u rem %u full %d delta %d has_full %d\n",
