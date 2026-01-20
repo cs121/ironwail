@@ -1521,8 +1521,9 @@ static qboolean CL_SnapshotWorldModelReady (const char *reason)
 static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in)
 {
 	// Snapshot/packedent origins are model-space; offset by worldmodel origin to render in world-space.
-	if (cl.worldmodel && cl.worldmodel->type == mod_brush)
-		VectorAdd (in, cl.worldmodel->origin, out);
+	if (cl.worldmodel && cl.worldmodel->type == mod_brush
+		&& cl.worldmodel->submodels && cl.worldmodel->numsubmodels > 0)
+		VectorAdd (in, cl.worldmodel->submodels[0].origin, out);
 	else
 		VectorCopy (in, out);
 }
