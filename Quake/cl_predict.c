@@ -45,6 +45,8 @@ static qboolean CL_Predict_IsEnabled (void)
 		return false;
 	if (cl.intermission)
 		return false;
+	if (!cl.has_valid_worldstate)
+		return false;
 	if (cl.viewentity <= 0)
 		return false;
 	return true;

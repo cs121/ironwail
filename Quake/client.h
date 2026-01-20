@@ -286,6 +286,7 @@ typedef struct
 	unsigned short snap_last_incomplete_seq;
 	qboolean	snap_last_incomplete;
 	qboolean	need_full_snapshot;
+	qboolean	has_valid_worldstate;
 	int			snap_parse_errors;
 	int			snap_delta_mismatch;
 	int			snap_incomplete_count;
@@ -298,6 +299,9 @@ typedef struct
 	double		*snapshot_last_update_time;
 	qboolean	snapshot_chunk_active;
 	unsigned int snapshot_chunk_seq;
+	unsigned int snapshot_chunk_expected_total;
+	unsigned int snapshot_chunk_received;
+	unsigned short snapshot_chunk_remaining;
 	double		snapshot_chunk_start_time;
 	int			snapshot_chunk_packets;
 	snapshot_state_t *snapshot_chunk;
