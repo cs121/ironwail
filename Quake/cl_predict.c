@@ -127,11 +127,31 @@ static void CL_Predict_AirAccelerate (vec3_t velocity, vec3_t wishvel, float wis
 		velocity[i] += accelspeed * wishvel[i];
 }
 
-static qboolean CL_Predict_CheckGround (const vec3_t origin)
+static void CL_Predict_GetPlayerBounds (vec3_t mins, vec3_t maxs)
+{
+	if (cl.worldmodel)
+	{
+		VectorCopy (cl.worldmodel->hulls[1].clip_mins, mins);
+		VectorCopy (cl.worldmodel->hulls[1].clip_maxs, maxs);
+		return;
+	}
+
+	mins[0] = -16;
+	mins[1] = -16;
+	mins[2] = -24;
+	maxs[0] = 16;
+	maxs[1] = 16;
+	maxs[2] = 32;
+}
+
+static qboolean CL_Predict_CheckGround (const vec3_t origin, const vec3_t mins, const vec3_t maxs)
 {
 	vec3_t point;
 	qmodel_t *saved;
 	int contents;
+	int x;
+	int y;
+	float sample_z;
 
 	if (!cl.worldmodel)
 		return false;
@@ -140,9 +160,29 @@ static qboolean CL_Predict_CheckGround (const vec3_t origin)
 	if (!sv.worldmodel)
 		sv.worldmodel = cl.worldmodel;
 
+	sample_z = origin[2] + mins[2] - 1.0f;
+
 	VectorCopy (origin, point);
-	point[2] -= 1.0f;
+	point[2] = sample_z;
 	contents = SV_PointContents (point);
+	if (contents == CONTENTS_SOLID)
+		goto done;
+
+	for (x = 0; x <= 1; x++)
+	{
+		for (y = 0; y <= 1; y++)
+		{
+			point[0] = origin[0] + (x ? maxs[0] : mins[0]);
+			point[1] = origin[1] + (y ? maxs[1] : mins[1]);
+			point[2] = sample_z;
+
+			contents = SV_PointContents (point);
+			if (contents == CONTENTS_SOLID)
+				goto done;
+		}
+	}
+
+done:
 
 	sv.worldmodel = saved;
 
@@ -154,6 +194,18 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	vec3_t forward, right, up;
 	vec3_t wishvel, wishdir;
 	float wishspeed;
+	vec3_t mins, maxs;
+
+	CL_Predict_GetPlayerBounds (mins, maxs);
+
+	if (!state->onground && state->velocity[2] <= 0)
+	{
+		if (CL_Predict_CheckGround (state->origin, mins, maxs))
+		{
+			state->onground = true;
+			state->velocity[2] = 0;
+		}
+	}
 
 	VectorCopy (cmd->viewangles, state->viewangles);
 
@@ -193,7 +245,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 
 	if (!state->onground && state->velocity[2] <= 0)
 	{
-		if (CL_Predict_CheckGround (state->origin))
+		if (CL_Predict_CheckGround (state->origin, mins, maxs))
 		{
 			state->onground = true;
 			state->velocity[2] = 0;
