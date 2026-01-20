@@ -496,6 +496,7 @@ void CL_TimeDemo_f (void);
 void CL_ParseServerMessage (void);
 void CL_NewTranslation (int slot);
 void CL_RecordPlayerSnap (void);
+qboolean CL_WorldReady (void);
 
 //
 // view

@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static qboolean	localconnectpending = false;
 static qsocket_t	*loop_client = NULL;
 static qsocket_t	*loop_server = NULL;
+static unsigned int	loop_sequence = 0;
 
 int Loop_Init (void)
 {
@@ -142,6 +143,13 @@ int Loop_GetMessage (qsocket_t *sock)
 	SZ_Clear (&net_message);
 	SZ_Write (&net_message, &sock->receiveMessage[4], length);
 
+	net_last_incoming.sequence = ++loop_sequence;
+	net_last_incoming.flags = 0;
+	net_last_incoming.packet_length = (unsigned int)(length + 4);
+	net_last_incoming.payload_length = (unsigned int)length;
+	net_last_incoming.unreliable = (ret == 2);
+	net_last_incoming.valid = true;
+
 	length = IntAlign(length + 4);
 	sock->receiveMessageLength -= length;
 
@@ -247,4 +255,3 @@ void Loop_Close (qsocket_t *sock)
 	else
 		loop_server = NULL;
 }
-

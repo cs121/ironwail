@@ -39,15 +39,13 @@ static qboolean CL_Predict_IsEnabled (void)
 {
 	if (cls.state != ca_connected)
 		return false;
-	if (cls.signon != SIGNONS)
-		return false;
 	if (cls.demoplayback)
 		return false;
 	if (cl.intermission)
 		return false;
 	if (!cl.has_valid_worldstate)
 		return false;
-	if (cl.viewentity <= 0)
+	if (!CL_WorldReady ())
 		return false;
 	return true;
 }
