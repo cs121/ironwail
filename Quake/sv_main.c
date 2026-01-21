@@ -52,6 +52,10 @@ static cvar_t sv_event_max = {"sv_event_max", "0", CVAR_NONE};
 cvar_t sv_mtu = {"sv_mtu", "1400", CVAR_NONE};
 static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1400", CVAR_NONE};
 cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
+cvar_t sv_minrate = {"sv_minrate", "0", CVAR_NONE};
+cvar_t sv_maxrate = {"sv_maxrate", "0", CVAR_NONE};
+cvar_t sv_minupdaterate = {"sv_minupdaterate", "0", CVAR_NONE};
+cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
 static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE};
@@ -309,6 +313,10 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_mtu);
 	Cvar_RegisterVariable (&sv_mtu_cap);
 	Cvar_RegisterVariable (&sv_mtu_debug);
+	Cvar_RegisterVariable (&sv_minrate);
+	Cvar_RegisterVariable (&sv_maxrate);
+	Cvar_RegisterVariable (&sv_minupdaterate);
+	Cvar_RegisterVariable (&sv_maxupdaterate);
 	Cvar_RegisterVariable (&sv_signon_chunks);
 	Cvar_RegisterVariable (&sv_signon_chunk_debug);
 	Cvar_RegisterVariable (&sv_signon_chunk_window);
@@ -700,6 +708,8 @@ void SV_ConnectClient (int clientnum)
 		SV_InitClientSnapshotData (client);
 	SV_ResetClientSnapshot (client);
 	client->netconnection = netconnection;
+	client->rate = sv_minrate.value > 0.0f ? (int)sv_minrate.value : 0;
+	client->updaterate = sv_minupdaterate.value > 0.0f ? (int)sv_minupdaterate.value : 0;
 
 	strcpy (client->name, "unconnected");
 	client->active = true;
@@ -1354,6 +1364,14 @@ static int SV_SnapshotBudgetBytes (client_t *client, sizebuf_t *msg,
 			cap = 1;
 		if (budget > cap)
 			budget = cap;
+	}
+	if (client->rate > 0 && client->updaterate > 0)
+	{
+		int per_snapshot = client->rate / client->updaterate;
+		if (per_snapshot < header_size + 1)
+			per_snapshot = header_size + 1;
+		if (budget > per_snapshot)
+			budget = per_snapshot;
 	}
 
 	if (out_mtu_payload)

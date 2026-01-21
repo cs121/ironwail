@@ -186,11 +186,32 @@ static int NET_GetPacketDataLimit (const qsocket_t *sock)
 	return q_min (data_limit, MAX_DATAGRAM);
 }
 
+static const client_t *NET_GetClientForSocket (const qsocket_t *sock)
+{
+	int i;
+
+	if (!sv.active || !svs.clients)
+		return NULL;
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		client_t *client = &svs.clients[i];
+
+		if (!client->active)
+			continue;
+		if (client->netconnection == sock)
+			return client;
+	}
+	return NULL;
+}
+
 static unsigned int NET_GetRateBudgetLimit (const qsocket_t *sock)
 {
 	unsigned int payload = (unsigned int)NET_GetPacketPayloadLimit (sock);
 	unsigned int budget = payload * 4u;
+	const client_t *client = NET_GetClientForSocket (sock);
 
+	if (client && client->rate > 0)
+		budget = (unsigned int)client->rate / 10u;
 	if (budget < (unsigned int)(NET_HEADERSIZE + 1))
 		budget = (unsigned int)(NET_HEADERSIZE + 1);
 	return budget;

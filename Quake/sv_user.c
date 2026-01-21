@@ -28,6 +28,10 @@ edict_t	*sv_player;
 extern	cvar_t	sv_friction;
 cvar_t	sv_edgefriction = {"edgefriction", "2", CVAR_NONE};
 extern	cvar_t	sv_stopspeed;
+extern	cvar_t	sv_minrate;
+extern	cvar_t	sv_maxrate;
+extern	cvar_t	sv_minupdaterate;
+extern	cvar_t	sv_maxupdaterate;
 
 static	vec3_t		forward, right, up;
 
@@ -37,6 +41,19 @@ float	*origin;
 float	*velocity;
 
 qboolean	onground;
+
+static int SV_ClampClientRate (int value, const cvar_t *min_rate, const cvar_t *max_rate)
+{
+	int clamped = value;
+
+	if (clamped < 0)
+		clamped = 0;
+	if (min_rate->value > 0.0f && clamped < (int)min_rate->value)
+		clamped = (int)min_rate->value;
+	if (max_rate->value > 0.0f && clamped > (int)max_rate->value)
+		clamped = (int)max_rate->value;
+	return clamped;
+}
 
 usercmd_t	cmd;
 
@@ -523,6 +540,18 @@ nextmsg:
 
 			case clc_stringcmd:
 				s = MSG_ReadString ();
+				if (q_strncasecmp(s, "rate", 4) == 0)
+				{
+					int rate = Q_atoi(s + 4);
+					host_client->rate = SV_ClampClientRate (rate, &sv_minrate, &sv_maxrate);
+					break;
+				}
+				if (q_strncasecmp(s, "updaterate", 10) == 0)
+				{
+					int updaterate = Q_atoi(s + 10);
+					host_client->updaterate = SV_ClampClientRate (updaterate, &sv_minupdaterate, &sv_maxupdaterate);
+					break;
+				}
 				if (q_strncasecmp(s, "packedents", 10) == 0)
 				{
 					int value = Q_atoi(s + 10);

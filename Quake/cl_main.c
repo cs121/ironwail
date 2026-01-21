@@ -43,6 +43,8 @@ cvar_t	cl_signon_chunk_debug = {"cl_signon_chunk_debug", "0", CVAR_NONE};
 cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
+cvar_t	cl_rate = {"cl_rate", "25000", CVAR_ARCHIVE};
+cvar_t	cl_updaterate = {"cl_updaterate", "20", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
 cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
 cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
@@ -748,6 +750,12 @@ void CL_SignonReply (void)
 
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, va("color %i %i\n", ((int)cl_color.value)>>4, ((int)cl_color.value)&15));
+
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		MSG_WriteString (&cls.message, va("rate %d\n", (int)cl_rate.value));
+
+		MSG_WriteByte (&cls.message, clc_stringcmd);
+		MSG_WriteString (&cls.message, va("updaterate %d\n", (int)cl_updaterate.value));
 
 		if (cl_packedents.value)
 		{
@@ -1710,6 +1718,8 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_signon_debug);
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
+	Cvar_RegisterVariable (&cl_rate);
+	Cvar_RegisterVariable (&cl_updaterate);
 	Cvar_RegisterVariable (&cl_snap_debug);
 	Cvar_RegisterVariable (&cl_snapshot_debug);
 	Cvar_RegisterVariable (&cl_delta_reject_debug);
