@@ -156,6 +156,8 @@ typedef struct qsocket_s
 	double		connecttime;
 	double		lastMessageTime;
 	double		lastSendTime;
+	double		rate_next_time;
+	int		rate_budget;
 
 	qboolean	disconnected;
 	qboolean	canSend;

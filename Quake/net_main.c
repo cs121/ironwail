@@ -119,6 +119,8 @@ qsocket_t *NET_NewQSocket (void)
 	sock->driverdata = NULL;
 	sock->canSend = true;
 	sock->lastMessageTime = net_time;
+	sock->rate_next_time = 0.0;
+	sock->rate_budget = 0;
 	sock->sendSequence = 1;
 	sock->unreliableSendSequence = 0;
 	sock->sendMessageLength = 0;
