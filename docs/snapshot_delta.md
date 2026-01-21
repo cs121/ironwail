@@ -9,7 +9,7 @@ The server builds a snapshot for each client and sends either:
 - **FULL** snapshot (no baseline available)
 - **DELTA** snapshot (changes from the last acknowledged baseline)
 
-Clients ACK the snapshot sequence after successfully applying it. The server keeps **exactly one** baseline and uses a **stop-and-wait** approach: it will resend the pending snapshot until it receives the ACK. If the client reports a baseline mismatch, the server resets its baseline and sends a FULL snapshot.
+Clients ACK the snapshot sequence after successfully applying it. The server keeps a **rolling window** of recent baselines (the last `SV_SNAPSHOT_BASELINE_HISTORY` snapshots per client) and may delta against any entry in that window. Snapshots continue to advance even if earlier baselines are not ACKed. If the client reports a baseline mismatch, the server forces a FULL snapshot.
 
 ## Message types
 
@@ -62,13 +62,14 @@ Entities are keyed by `entnum` and sorted by visibility (PVS) like standard enti
 
 If the client receives a delta with a baseline mismatch, it still reads the packet but responds with `clc_snapshot_ack` **seq = 0** to force a full resend.
 
-## Stop-and-wait behavior
+## Baseline window + ACK behavior
 
 Per client:
 
-- The server sends a snapshot with a new `seq` only when the previous one has been ACKed.
-- While awaiting ACK, the server resends the same snapshot every send tick.
-- After `sv_snapshottimeout` milliseconds, the server forces resends as FULL snapshots to recover from mismatches.
+- The server maintains a ring buffer of baselines (`SV_SNAPSHOT_BASELINE_HISTORY` entries) and can emit delta snapshots against **any** sequence in that window.
+- Snapshots are sent continuously; ACKs advance the server’s notion of the latest confirmed sequence but do **not** gate new snapshots.
+- Clients keep their own baseline window (`CL_SNAPSHOT_BASELINE_HISTORY`) and select the best matching baseline by `base_seq`; if none are available, they request a FULL snapshot.
+- The server can still force FULL snapshots (e.g., on `clc_snapshot_nak` or after `sv_snapshottimeout`) to recover from mismatches.
 
 ## Cvars
 

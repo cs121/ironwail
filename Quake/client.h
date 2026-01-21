@@ -27,6 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "../common/lightgrid.h"
 
+// snapshot baseline history
+#define CL_SNAPSHOT_BASELINE_HISTORY 4
+
 typedef struct
 {
 	int		length;
@@ -297,8 +300,14 @@ typedef struct
 	unsigned int snap_rem0_seq;
 	unsigned int snap_rem0_base;
 	int			snap_rem0_count;
+	int			snapshot_baseline_head;
+	int			snapshot_baseline_index;
 	snapshot_state_t *snapshot_baseline;
+	snapshot_state_t *snapshot_baselines[CL_SNAPSHOT_BASELINE_HISTORY];
 	byte		*snapshot_present;
+	byte		*snapshot_baseline_present[CL_SNAPSHOT_BASELINE_HISTORY];
+	unsigned int snapshot_baseline_seqs[CL_SNAPSHOT_BASELINE_HISTORY];
+	byte		snapshot_baseline_valid[CL_SNAPSHOT_BASELINE_HISTORY];
 	byte		*snapshot_active;
 	double		*snapshot_last_update_time;
 	qboolean	snapshot_chunk_active;

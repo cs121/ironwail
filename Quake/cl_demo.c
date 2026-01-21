@@ -87,6 +87,8 @@ CL_ClearSignons
 */
 void CL_ClearSignons (void)
 {
+	int i;
+
 	VEC_CLEAR (demo_head);
 	VEC_CLEAR (demo_head_sizes);
 	cls.signon = 0;
@@ -97,6 +99,15 @@ void CL_ClearSignons (void)
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
 	cl.snapshot_baseline_seq = 0;
+	cl.snapshot_baseline_head = 0;
+	cl.snapshot_baseline_index = -1;
+	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
+	{
+		cl.snapshot_baseline_valid[i] = 0;
+		cl.snapshot_baseline_seqs[i] = 0;
+		if (cl.snapshot_baseline_present[i])
+			memset (cl.snapshot_baseline_present[i], 0, cl_max_edicts * sizeof(byte));
+	}
 }
 
 /*

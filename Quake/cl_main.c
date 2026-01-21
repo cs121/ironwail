@@ -575,8 +575,13 @@ void CL_ClearState (void)
 	//johnfitz -- cl_entities is now dynamically allocated
 	cl_max_edicts = CLAMP (MIN_EDICTS,(int)max_edicts.value,MAX_EDICTS);
 	cl_entities = (entity_t *) Hunk_AllocName (cl_max_edicts*sizeof(entity_t), "cl_entities");
-	cl.snapshot_baseline = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_base");
-	cl.snapshot_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
+	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
+	{
+		cl.snapshot_baselines[i] = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_base");
+		cl.snapshot_baseline_present[i] = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
+	}
+	cl.snapshot_baseline = cl.snapshot_baselines[0];
+	cl.snapshot_present = cl.snapshot_baseline_present[0];
 	cl.snapshot_active = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_active");
 	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
 	cl.snapshot_chunk = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_chunk");
@@ -590,8 +595,15 @@ void CL_ClearState (void)
 	//johnfitz
 	if (cl_entities)
 		memset (cl_entities, 0, cl_max_edicts * sizeof(entity_t));
-	if (cl.snapshot_present)
-		memset (cl.snapshot_present, 0, cl_max_edicts * sizeof(byte));
+	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
+	{
+		if (cl.snapshot_baseline_present[i])
+			memset (cl.snapshot_baseline_present[i], 0, cl_max_edicts * sizeof(byte));
+		cl.snapshot_baseline_valid[i] = 0;
+		cl.snapshot_baseline_seqs[i] = 0;
+	}
+	cl.snapshot_baseline_head = 0;
+	cl.snapshot_baseline_index = -1;
 	if (cl.snapshot_active)
 		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_last_update_time)
@@ -618,6 +630,7 @@ void CL_ClearState (void)
 	cl.snapshot_chunk_seq = 0;
 	cl.snapshot_chunk_start_time = 0;
 	cl.snapshot_chunk_packets = 0;
+	cl.snapshot_baseline_seq = 0;
 	cl.snap_last_applied_seq = 0;
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;

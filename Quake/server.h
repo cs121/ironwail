@@ -120,6 +120,7 @@ typedef struct
 
 
 #define	NUM_PING_TIMES		16
+#define SV_SNAPSHOT_BASELINE_HISTORY 4
 
 enum sendsignon_e
 {
@@ -217,20 +218,24 @@ typedef struct client_s
 	float			oldstats_f[MAX_CL_STATS];		//previous values of stats. if these differ from the current values, reflag resendstats.
 	char			*oldstats_s[MAX_CL_STATS];
 
+	snapshot_state_t *snapshot_baselines[SV_SNAPSHOT_BASELINE_HISTORY];
+	byte			*snapshot_baseline_present[SV_SNAPSHOT_BASELINE_HISTORY];
+	unsigned int	snapshot_baseline_seqs[SV_SNAPSHOT_BASELINE_HISTORY];
+	byte			snapshot_baseline_valid[SV_SNAPSHOT_BASELINE_HISTORY];
+	int				snapshot_baseline_head;
+	int				snapshot_baseline_index;
 	unsigned int	snapshot_next_seq;
-	unsigned int	snapshot_baseline_seq;
 	unsigned int	snapshot_pending_seq;
 	unsigned int	snapshot_pending_baseline_seq;
 	unsigned int	snapshot_last_sent_seq;
 	unsigned int	snapshot_last_acked_seq;
 	unsigned int	snapshot_last_full_seq;
 	double			snapshot_last_full_time;
+	double			snapshot_last_acked_time;
 	qboolean		snapshot_has_valid_base;
 	qboolean		snapshot_force_full;
 	double			snapshot_pending_time;
 	qboolean		snapshot_pending_is_delta;
-	snapshot_state_t *snapshot_baseline;
-	byte			*snapshot_baseline_present;
 	snapshot_state_t *snapshot_pending;
 	byte			*snapshot_pending_present;
 	byte			*snapshot_pending_relevant;
