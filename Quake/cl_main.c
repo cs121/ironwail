@@ -44,6 +44,7 @@ cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_packedents = {"cl_packedents", "1", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
+cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
 cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_debug = {"cl_full_reasm_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_timeout_ms = {"cl_full_reasm_timeout_ms", "1000", CVAR_NONE};
@@ -1717,6 +1718,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_packedents);
 	Cvar_RegisterVariable (&cl_snap_debug);
+	Cvar_RegisterVariable (&cl_snapshot_debug);
 	Cvar_RegisterVariable (&cl_delta_reject_debug);
 	Cvar_RegisterVariable (&cl_full_reasm_debug);
 	Cvar_RegisterVariable (&cl_full_reasm_timeout_ms);
