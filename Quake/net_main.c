@@ -118,16 +118,20 @@ qsocket_t *NET_NewQSocket (void)
 	sock->socket = 0;
 	sock->driverdata = NULL;
 	sock->canSend = true;
-	sock->sendNext = false;
 	sock->lastMessageTime = net_time;
-	sock->ackSequence = 0;
-	sock->sendSequence = 0;
+	sock->sendSequence = 1;
 	sock->unreliableSendSequence = 0;
 	sock->sendMessageLength = 0;
-	sock->sendMessageSize = 0;
-	sock->receiveSequence = 0;
+	sock->sendMessageOffset = 0;
+	sock->sendReliableBase = sock->sendSequence;
+	memset(sock->reliableSend, 0, sizeof(sock->reliableSend));
+	sock->receiveSequence = 1;
+	sock->reliableReceiveValid = false;
+	sock->reliableReceiveSequence = 0;
+	sock->reliableReceiveMask = 0;
 	sock->unreliableReceiveSequence = 0;
 	sock->receiveMessageLength = 0;
+	memset(sock->reliableReceive, 0, sizeof(sock->reliableReceive));
 
 	return sock;
 }
@@ -156,6 +160,18 @@ void NET_FreeQSocket(qsocket_t *sock)
 	}
 
 	// add it to free list
+	{
+		int i;
+		for (i = 0; i < NET_RELIABLE_WINDOW; ++i)
+		{
+			if (sock->reliableReceive[i].data)
+			{
+				Z_Free(sock->reliableReceive[i].data);
+				sock->reliableReceive[i].data = NULL;
+			}
+			sock->reliableReceive[i].received = false;
+		}
+	}
 	sock->next = net_freeSockets;
 	net_freeSockets = sock;
 	sock->disconnected = true;

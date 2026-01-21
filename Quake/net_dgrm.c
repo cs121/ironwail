@@ -47,6 +47,8 @@ static struct
 {
 	unsigned int	length;
 	unsigned int	sequence;
+	unsigned int	ack;
+	unsigned int	ack_bits;
 	byte	data[MAX_DATAGRAM];
 } packetBuffer;
 
@@ -203,6 +205,231 @@ static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len
 	}
 }
 
+static qboolean NET_SequenceLessThan (unsigned int a, unsigned int b)
+{
+	return (int)(a - b) < 0;
+}
+
+static unsigned int NET_GetAckSequence (const qsocket_t *sock)
+{
+	if (!sock->reliableReceiveValid)
+		return 0;
+	return sock->reliableReceiveSequence;
+}
+
+static unsigned int NET_GetAckBits (const qsocket_t *sock)
+{
+	if (!sock->reliableReceiveValid)
+		return 0;
+	return sock->reliableReceiveMask;
+}
+
+static void NET_SetPacketHeader (qsocket_t *sock, unsigned int packet_len, unsigned int flags, unsigned int sequence)
+{
+	packetBuffer.length = BigLong(packet_len | flags);
+	packetBuffer.sequence = BigLong(sequence);
+	packetBuffer.ack = BigLong(NET_GetAckSequence(sock));
+	packetBuffer.ack_bits = BigLong(NET_GetAckBits(sock));
+}
+
+static void NET_UpdateReceiveAckState (qsocket_t *sock, unsigned int sequence)
+{
+	if (!sock->reliableReceiveValid)
+	{
+		sock->reliableReceiveValid = true;
+		sock->reliableReceiveSequence = sequence;
+		sock->reliableReceiveMask = 0;
+		return;
+	}
+
+	if (sequence == sock->reliableReceiveSequence)
+		return;
+
+	if (NET_SequenceLessThan(sequence, sock->reliableReceiveSequence))
+	{
+		unsigned int delta = sock->reliableReceiveSequence - sequence;
+		if (delta >= 1 && delta <= NET_ACK_BITS)
+			sock->reliableReceiveMask |= 1u << (delta - 1);
+		return;
+	}
+	else
+	{
+		unsigned int shift = sequence - sock->reliableReceiveSequence;
+		if (shift >= NET_ACK_BITS + 1)
+			sock->reliableReceiveMask = 0;
+		else
+			sock->reliableReceiveMask <<= shift;
+		if (shift >= 1 && shift <= NET_ACK_BITS)
+			sock->reliableReceiveMask |= 1u << (shift - 1);
+		sock->reliableReceiveSequence = sequence;
+	}
+}
+
+static int NET_SendReliablePacket (qsocket_t *sock, net_reliable_send_t *packet, const char *label, qboolean is_resend)
+{
+	unsigned int	packet_len;
+	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int	flags = NETFLAG_DATA;
+
+	packet_len = NET_HEADERSIZE + (unsigned int)packet->length;
+	if (packet->eom)
+		flags |= NETFLAG_EOM;
+
+	if (packet_len > payload_limit)
+	{
+		NET_LogOversizedSend (sock, packet_len);
+		net_debug_oversize++;
+		NET_DebugMaybeLogSummary ();
+		return -1;
+	}
+
+	NET_SetPacketHeader(sock, packet_len, flags, packet->sequence);
+	Q_memcpy (packetBuffer.data, sock->sendMessage + packet->offset, packet->length);
+
+	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packet_len, &sock->addr) == -1)
+		return -1;
+
+	NET_DebugRecordPacket (packet_len);
+	if (is_resend)
+		net_debug_resends++;
+	NET_DebugLog (false,
+		"NETDBG time %.3f send reliable-%s addr %s seq %u len %u data %u eom %u\n",
+		net_time, label, NET_QSocketGetAddressString (sock), packet->sequence,
+		packet_len, (unsigned int)packet->length, packet->eom ? 1u : 0u);
+	NET_DebugMaybeLogSummary ();
+
+	packet->lastSendTime = net_time;
+	sock->lastSendTime = net_time;
+	if (is_resend)
+		packetsReSent++;
+	else
+		packetsSent++;
+	return 1;
+}
+
+static int NET_SendPendingReliable (qsocket_t *sock)
+{
+	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
+
+	while (sock->sendMessageOffset < sock->sendMessageLength)
+	{
+		unsigned int in_flight = sock->sendSequence - sock->sendReliableBase;
+		net_reliable_send_t *packet;
+		unsigned int sequence;
+		int data_len;
+		int offset;
+		qboolean eom;
+
+		if (in_flight >= NET_RELIABLE_WINDOW)
+			break;
+
+		offset = sock->sendMessageOffset;
+		data_len = sock->sendMessageLength - sock->sendMessageOffset;
+		if (data_len > (int)max_data)
+			data_len = (int)max_data;
+		eom = (sock->sendMessageOffset + data_len) >= sock->sendMessageLength;
+
+		sequence = sock->sendSequence++;
+		packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
+		packet->sequence = sequence;
+		packet->length = data_len;
+		packet->offset = offset;
+		packet->eom = eom;
+		packet->acked = false;
+		packet->lastSendTime = 0.0;
+
+		if (NET_SendReliablePacket (sock, packet, "window", false) == -1)
+			return -1;
+
+		sock->sendMessageOffset += data_len;
+	}
+
+	return 1;
+}
+
+static void NET_AckReliableSequence (qsocket_t *sock, unsigned int sequence)
+{
+	net_reliable_send_t *packet;
+
+	if (NET_SequenceLessThan(sequence, sock->sendReliableBase))
+		return;
+	if (!NET_SequenceLessThan(sequence, sock->sendSequence))
+		return;
+	if (sequence - sock->sendReliableBase >= NET_RELIABLE_WINDOW)
+		return;
+
+	packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
+	if (packet->sequence != sequence)
+		return;
+	packet->acked = true;
+}
+
+static void NET_AdvanceSendWindow (qsocket_t *sock)
+{
+	while (sock->sendReliableBase != sock->sendSequence)
+	{
+		net_reliable_send_t *packet = &sock->reliableSend[sock->sendReliableBase % NET_RELIABLE_WINDOW];
+		if (!packet->acked || packet->sequence != sock->sendReliableBase)
+			break;
+		memset(packet, 0, sizeof(*packet));
+		sock->sendReliableBase++;
+	}
+
+	if (sock->sendReliableBase == sock->sendSequence &&
+		sock->sendMessageOffset >= sock->sendMessageLength)
+	{
+		sock->sendMessageLength = 0;
+		sock->sendMessageOffset = 0;
+		sock->canSend = true;
+	}
+}
+
+static void NET_ProcessAcks (qsocket_t *sock, unsigned int ack, unsigned int ack_bits)
+{
+	unsigned int i;
+
+	if (ack == 0)
+		return;
+
+	NET_AckReliableSequence(sock, ack);
+	for (i = 0; i < NET_ACK_BITS; ++i)
+	{
+		if (ack_bits & (1u << i))
+			NET_AckReliableSequence(sock, ack - (i + 1));
+	}
+
+	NET_AdvanceSendWindow(sock);
+	NET_SendPendingReliable(sock);
+}
+
+static void NET_ResendReliablePackets (qsocket_t *sock)
+{
+	unsigned int sequence;
+
+	if (sock->sendMessageLength == 0)
+		return;
+
+	for (sequence = sock->sendReliableBase; sequence != sock->sendSequence; ++sequence)
+	{
+		net_reliable_send_t *packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
+		if (packet->sequence != sequence || packet->acked)
+			continue;
+		if ((net_time - packet->lastSendTime) <= 1.0)
+			continue;
+		NET_SendReliablePacket (sock, packet, "resend", true);
+	}
+}
+
+static void NET_ClearReliableReceiveEntry (net_reliable_receive_t *entry)
+{
+	if (entry->data)
+	{
+		Z_Free(entry->data);
+		entry->data = NULL;
+	}
+	memset(entry, 0, sizeof(*entry));
+}
+
 
 static char *StrAddr (struct qsockaddr *addr)
 {
@@ -279,12 +506,6 @@ static void NET_Ban_f (void)
 
 int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 {
-	unsigned int	packetLen;
-	unsigned int	dataLen;
-	unsigned int	eom;
-	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
-
 #ifdef DEBUG
 	if (data->cursize == 0)
 		Sys_Error("Datagram_SendMessage: zero length message");
@@ -298,157 +519,21 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	Q_memcpy(sock->sendMessage, data->data, data->cursize);
 	sock->sendMessageLength = data->cursize;
-
-	if (data->cursize <= (int)max_data)
-	{
-		dataLen = data->cursize;
-		eom = NETFLAG_EOM;
-	}
-	else
-	{
-		dataLen = max_data;
-		eom = 0;
-	}
-	packetLen = NET_HEADERSIZE + dataLen;
-
-	if (packetLen > payload_limit)
-	{
-		NET_LogOversizedSend (sock, packetLen);
-		net_debug_oversize++;
-		NET_DebugMaybeLogSummary ();
-		return -1;
-	}
-
-	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
-	packetBuffer.sequence = BigLong(sock->sendSequence++);
-	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+	sock->sendMessageOffset = 0;
+	sock->sendReliableBase = sock->sendSequence;
 
 	sock->canSend = false;
-	sock->sendMessageSize = (int)dataLen;
-
-	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
+	if (NET_SendPendingReliable(sock) == -1)
 		return -1;
-
-	NET_DebugRecordPacket (packetLen);
-	NET_DebugLog (false,
-		"NETDBG time %.3f send reliable addr %s seq %u len %u data %u eom %u\n",
-		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
-		packetLen, dataLen, eom ? 1u : 0u);
-	NET_DebugMaybeLogSummary ();
-
-	sock->lastSendTime = net_time;
-	packetsSent++;
 	return 1;
 }
 
-
-static int SendMessageNext (qsocket_t *sock)
-{
-	unsigned int	packetLen;
-	unsigned int	dataLen;
-	unsigned int	eom;
-	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
-
-	if (sock->sendMessageLength <= (int)max_data)
-	{
-		dataLen = sock->sendMessageLength;
-		eom = NETFLAG_EOM;
-	}
-	else
-	{
-		dataLen = max_data;
-		eom = 0;
-	}
-	packetLen = NET_HEADERSIZE + dataLen;
-
-	if (packetLen > payload_limit)
-	{
-		NET_LogOversizedSend (sock, packetLen);
-		net_debug_oversize++;
-		NET_DebugMaybeLogSummary ();
-		return -1;
-	}
-
-	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
-	packetBuffer.sequence = BigLong(sock->sendSequence++);
-	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
-
-	sock->sendNext = false;
-	sock->sendMessageSize = (int)dataLen;
-
-	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
-		return -1;
-
-	NET_DebugRecordPacket (packetLen);
-	NET_DebugLog (false,
-		"NETDBG time %.3f send reliable-next addr %s seq %u len %u data %u eom %u\n",
-		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
-		packetLen, dataLen, eom ? 1u : 0u);
-	NET_DebugMaybeLogSummary ();
-
-	sock->lastSendTime = net_time;
-	packetsSent++;
-	return 1;
-}
-
-
-static int ReSendMessage (qsocket_t *sock)
-{
-	unsigned int	packetLen;
-	unsigned int	dataLen;
-	unsigned int	eom;
-	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
-
-	if (sock->sendMessageLength <= (int)max_data)
-	{
-		dataLen = sock->sendMessageLength;
-		eom = NETFLAG_EOM;
-	}
-	else
-	{
-		dataLen = max_data;
-		eom = 0;
-	}
-	packetLen = NET_HEADERSIZE + dataLen;
-
-	if (packetLen > payload_limit)
-	{
-		NET_LogOversizedSend (sock, packetLen);
-		net_debug_oversize++;
-		NET_DebugMaybeLogSummary ();
-		return -1;
-	}
-
-	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
-	packetBuffer.sequence = BigLong(sock->sendSequence - 1);
-	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
-
-	sock->sendNext = false;
-	sock->sendMessageSize = (int)dataLen;
-
-	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
-		return -1;
-
-	NET_DebugRecordPacket (packetLen);
-	net_debug_resends++;
-	NET_DebugLog (false,
-		"NETDBG time %.3f send reliable-resend addr %s seq %u len %u data %u eom %u\n",
-		net_time, NET_QSocketGetAddressString (sock), sock->sendSequence - 1,
-		packetLen, dataLen, eom ? 1u : 0u);
-	NET_DebugMaybeLogSummary ();
-
-	sock->lastSendTime = net_time;
-	packetsReSent++;
-	return 1;
-}
 
 
 qboolean Datagram_CanSendMessage (qsocket_t *sock)
 {
-	if (sock->sendNext)
-		SendMessageNext (sock);
+	if (sock->sendMessageLength > 0)
+		NET_SendPendingReliable(sock);
 
 	return sock->canSend;
 }
@@ -491,8 +576,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		return 0;
 	}
 
-	packetBuffer.length = BigLong(packetLen | NETFLAG_UNRELIABLE);
-	packetBuffer.sequence = BigLong(sock->unreliableSendSequence++);
+	NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE, sock->unreliableSendSequence++);
 	Q_memcpy (packetBuffer.data, data->data, data->cursize);
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
@@ -520,9 +604,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 	unsigned int	count;
 	int				packetLengthRead;
 
-	if (!sock->canSend)
-		if ((net_time - sock->lastSendTime) > 1.0)
-			ReSendMessage (sock);
+	NET_ResendReliablePackets (sock);
 
 	while (1)
 	{
@@ -590,7 +672,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		}
 
 		sequence = BigLong(packetBuffer.sequence);
-		packetsReceived++;
+		{
+			unsigned int ack = BigLong(packetBuffer.ack);
+			unsigned int ack_bits = BigLong(packetBuffer.ack_bits);
+
+			packetsReceived++;
+			NET_ProcessAcks(sock, ack, ack_bits);
+		}
 
 		if (flags & NETFLAG_UNRELIABLE)
 		{
@@ -632,95 +720,106 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 		if (flags & NETFLAG_ACK)
 		{
-			if (sequence != (sock->sendSequence - 1))
-			{
-				Con_DPrintf("Stale ACK received\n");
+			if (!(flags & (NETFLAG_DATA | NETFLAG_UNRELIABLE)))
 				continue;
-			}
-			if (sequence == sock->ackSequence)
-			{
-				sock->ackSequence++;
-				if (sock->ackSequence != sock->sendSequence)
-					Con_DPrintf("ack sequencing error\n");
-			}
-			else
-			{
-				Con_DPrintf("Duplicate ACK received\n");
-				continue;
-			}
-			{
-				int chunk = sock->sendMessageSize > 0 ? sock->sendMessageSize : MAX_DATAGRAM;
-				sock->sendMessageLength -= chunk;
-				if (sock->sendMessageLength > 0)
-				{
-					memmove (sock->sendMessage, sock->sendMessage + chunk, sock->sendMessageLength);
-					sock->sendNext = true;
-				}
-				else
-				{
-					sock->sendMessageLength = 0;
-					sock->canSend = true;
-				}
-				sock->sendMessageSize = 0;
-			}
-			continue;
 		}
 
 		if (flags & NETFLAG_DATA)
 		{
-			packetBuffer.length = BigLong(NET_HEADERSIZE | NETFLAG_ACK);
-			packetBuffer.sequence = BigLong(sequence);
-			sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
+			net_reliable_receive_t *entry;
+			unsigned int window_offset;
 
-			if (sequence != sock->receiveSequence)
+			if (NET_SequenceLessThan(sequence, sock->receiveSequence))
 			{
+				NET_UpdateReceiveAckState(sock, sequence);
 				receivedDuplicateCount++;
+				NET_SetPacketHeader(sock, NET_HEADERSIZE, NETFLAG_ACK, 0);
+				sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
 				continue;
 			}
-			sock->receiveSequence++;
+
+			window_offset = sequence - sock->receiveSequence;
+			if (window_offset >= NET_RELIABLE_WINDOW)
+				continue;
+
+			NET_UpdateReceiveAckState(sock, sequence);
 
 			length -= NET_HEADERSIZE;
-
 			if (length > MAX_DATAGRAM)
 			{
 				Con_DPrintf("NET_GetMessage: reliable packet too large (%u)\n", length);
 				continue;
 			}
 
-			if (sock->receiveMessageLength + length > NET_MAXMESSAGE)
+			entry = &sock->reliableReceive[sequence % NET_RELIABLE_WINDOW];
+			if (entry->received && entry->sequence == sequence)
 			{
-				Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
-					sock->receiveMessageLength, length);
-				sock->receiveMessageLength = 0;
-				continue;
+				receivedDuplicateCount++;
+			}
+			else
+			{
+				NET_ClearReliableReceiveEntry(entry);
+				entry->sequence = sequence;
+				entry->length = (int)length;
+				entry->eom = (flags & NETFLAG_EOM) != 0;
+				entry->received = true;
+				entry->data = (byte *)Z_Malloc(length);
+				Q_memcpy(entry->data, packetBuffer.data, length);
 			}
 
-			if (flags & NETFLAG_EOM)
+			NET_SetPacketHeader(sock, NET_HEADERSIZE, NETFLAG_ACK, 0);
+			sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
+
+			while (1)
 			{
-				SZ_Clear(&net_message);
-				SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
-				SZ_Write(&net_message, packetBuffer.data, length);
-				sock->receiveMessageLength = 0;
+				unsigned int message_sequence;
+				entry = &sock->reliableReceive[sock->receiveSequence % NET_RELIABLE_WINDOW];
+				if (!entry->received || entry->sequence != sock->receiveSequence)
+					break;
 
-				net_last_incoming.sequence = sequence;
-				net_last_incoming.flags = flags;
-				net_last_incoming.packet_length = (unsigned int)packetLengthRead;
-				net_last_incoming.payload_length = (unsigned int)(net_message.cursize);
-				net_last_incoming.unreliable = false;
-				net_last_incoming.valid = true;
+				if (sock->receiveMessageLength + entry->length > NET_MAXMESSAGE)
+				{
+					Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
+						sock->receiveMessageLength, entry->length);
+					sock->receiveMessageLength = 0;
+					message_sequence = entry->sequence;
+					NET_ClearReliableReceiveEntry(entry);
+					sock->receiveSequence++;
+					continue;
+				}
 
-				ret = 1;
+				Q_memcpy(sock->receiveMessage + sock->receiveMessageLength, entry->data, entry->length);
+				sock->receiveMessageLength += entry->length;
+				message_sequence = entry->sequence;
+
+				if (entry->eom)
+				{
+					SZ_Clear(&net_message);
+					SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
+					sock->receiveMessageLength = 0;
+
+					net_last_incoming.sequence = message_sequence;
+					net_last_incoming.flags = NETFLAG_DATA | NETFLAG_EOM;
+					net_last_incoming.packet_length = NET_HEADERSIZE + (unsigned int)entry->length;
+					net_last_incoming.payload_length = (unsigned int)(net_message.cursize);
+					net_last_incoming.unreliable = false;
+					net_last_incoming.valid = true;
+
+					NET_ClearReliableReceiveEntry(entry);
+					sock->receiveSequence++;
+					ret = 1;
+					break;
+				}
+
+				NET_ClearReliableReceiveEntry(entry);
+				sock->receiveSequence++;
+			}
+
+			if (ret == 1)
 				break;
-			}
-
-			Q_memcpy(sock->receiveMessage + sock->receiveMessageLength, packetBuffer.data, length);
-			sock->receiveMessageLength += length;
 			continue;
 		}
 	}
-
-	if (sock->sendNext)
-		SendMessageNext (sock);
 
 	return ret;
 }
