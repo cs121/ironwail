@@ -191,6 +191,8 @@ typedef struct client_s
 										// periodically
 
 	struct qsocket_s *netconnection;	// communications handle
+	int				rate;				// bytes per second
+	int				updaterate;			// snapshots per second
 
 	usercmd_t		cmd;				// movement
 	vec3_t			wishdir;			// intended motion calced from cmd
