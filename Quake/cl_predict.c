@@ -30,6 +30,12 @@ typedef struct
 } cl_pred_t;
 
 static cl_pred_t cl_pred;
+static qboolean cl_netdbg_predict_ran;
+
+qboolean CL_NetDbg_PredictRan (void)
+{
+	return cl_netdbg_predict_ran;
+}
 
 static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
 {
@@ -301,6 +307,7 @@ void CL_Predict_Clear (void)
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
+	cl_netdbg_predict_ran = false;
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
 	cl_pred.cmds[cmd->sequence % CMD_RING] = *cmd;
@@ -310,6 +317,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 
 	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd);
 	CL_Predict_ApplyToClient ();
+	cl_netdbg_predict_ran = true;
 }
 
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out)
