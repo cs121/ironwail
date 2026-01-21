@@ -37,6 +37,7 @@ extern cvar_t cl_netdebug_dropbad;
 extern cvar_t cl_netdebug_maxdump;
 extern cvar_t cl_signon_chunk_debug;
 extern cvar_t cl_signon_debug;
+extern qboolean cl_viewent_needs_init;
 
 const char *svc_strings[] =
 {
@@ -973,6 +974,43 @@ static qboolean CL_ReadPackedUInt16 (unsigned int *out)
 	return true;
 }
 
+static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	if (VectorCompare (origin, vec3_origin))
+		return true;
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
+			return true;
+	}
+
+	return false;
+}
+
+static void CL_EnsureViewEntityOrigin (const char *reason)
+{
+	entity_t *ent;
+
+	if (!cl_entities || cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return;
+	ent = &cl_entities[cl.viewentity];
+	if (!CL_ViewEntityOriginIsBad (ent->origin))
+		return;
+
+	// The renderer/camera rely on the viewentity origin; repair it using simorg.
+	VectorCopy (cl.simorg, ent->origin);
+	VectorCopy (cl.simorg, ent->msg_origins[0]);
+	VectorCopy (cl.simorg, ent->msg_origins[1]);
+	if (cl_netdebug_parse.value)
+	{
+		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+	}
+}
+
 static qboolean CL_PackedOriginIsSane (const vec3_t origin)
 {
 	const float max_abs = 65536.0f;
@@ -1532,6 +1570,22 @@ static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in)
 		VectorCopy (in, out);
 }
 
+static void CL_InitViewEntityFromSim (void)
+{
+	entity_t *ent;
+
+	if (!cl_viewent_needs_init)
+		return;
+	if (!cl_entities || cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return;
+
+	ent = &cl_entities[cl.viewentity];
+	VectorCopy (cl.simorg, ent->origin);
+	VectorCopy (cl.simorg, ent->msg_origins[0]);
+	VectorCopy (cl.simorg, ent->msg_origins[1]);
+	cl_viewent_needs_init = false;
+}
+
 static void CL_ApplyEntityOrigin (entity_t *ent, int entnum)
 {
 	VectorCopy (ent->msg_origins[0], ent->origin);
@@ -1805,6 +1859,8 @@ static void CL_ParseSnapshotFull (void)
 
 		if (reset_interp)
 			CL_FinalizeFullSnapshotInterpReset ();
+
+		CL_InitViewEntityFromSim ();
 	}
 
 	cl.snapshot_baseline_seq = seq;
@@ -2274,6 +2330,13 @@ static void CL_ParseSnapshot2 (void)
 					CL_ResetSnapshotChunk ();
 					return;
 				}
+				if (!CL_PackedOriginIsSane (state.state.origin))
+				{
+					CL_RequestFullSnapshot ("snapshot2 origin guard", true);
+					msg_readcount = net_message.cursize;
+					CL_ResetSnapshotChunk ();
+					return;
+				}
 				if (!drop)
 				{
 					cl.snapshot_chunk[entnum] = state;
@@ -2333,6 +2396,7 @@ static void CL_ParseSnapshot2 (void)
 				if (reset_interp)
 					CL_FinalizeFullSnapshotInterpReset ();
 
+				CL_InitViewEntityFromSim ();
 				CL_Predict_Reapply ();
 
 				cl.snapshot_baseline_seq = header.seq;
@@ -2344,6 +2408,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.has_valid_worldstate = true;
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
+				CL_EnsureViewEntityOrigin ("snapshot2");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
@@ -2391,6 +2456,12 @@ static void CL_ParseSnapshot2 (void)
 				msg_readcount = net_message.cursize;
 				return;
 			}
+			if (!CL_PackedOriginIsSane (state.state.origin))
+			{
+				CL_RequestFullSnapshot ("snapshot2 origin guard", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 			if (!drop)
 			{
 				cl.snapshot_stage[entnum] = state;
@@ -2421,6 +2492,7 @@ static void CL_ParseSnapshot2 (void)
 				if (reset_interp)
 					CL_FinalizeFullSnapshotInterpReset ();
 
+				CL_InitViewEntityFromSim ();
 				CL_Predict_Reapply ();
 
 				cl.snapshot_baseline_seq = header.seq;
@@ -2432,6 +2504,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.has_valid_worldstate = true;
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
+				CL_EnsureViewEntityOrigin ("snapshot2");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
@@ -2537,6 +2610,12 @@ static void CL_ParseSnapshot2 (void)
 			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 			{
+				if (!CL_PackedOriginIsSane (state.state.origin))
+				{
+					CL_RequestFullSnapshot ("snapshot2 origin guard", true);
+					msg_readcount = net_message.cursize;
+					return;
+				}
 				cl.snapshot_stage[entnum] = state;
 				cl.snapshot_stage_present[entnum] = 1;
 			}
@@ -2571,6 +2650,12 @@ static void CL_ParseSnapshot2 (void)
 						msg_readcount = net_message.cursize;
 						return;
 					}
+					if (!CL_PackedOriginIsSane (state.state.origin))
+					{
+						CL_RequestFullSnapshot ("snapshot2 origin guard", true);
+						msg_readcount = net_message.cursize;
+						return;
+					}
 					cl.snapshot_stage[entnum] = state;
 					cl.snapshot_stage_present[entnum] = 1;
 				}
@@ -2582,6 +2667,12 @@ static void CL_ParseSnapshot2 (void)
 					if (msg_badread)
 					{
 						CL_RequestFullSnapshot ("snapshot2 update skip", true);
+						msg_readcount = net_message.cursize;
+						return;
+					}
+					if (!CL_PackedOriginIsSane (scratch.state.origin))
+					{
+						CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 						msg_readcount = net_message.cursize;
 						return;
 					}
@@ -2623,6 +2714,7 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_incomplete_count = 0;
 			cl.has_full_snapshot = true;
 			CL_RecordPlayerSnap ();
+			CL_EnsureViewEntityOrigin ("snapshot2");
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 				realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
