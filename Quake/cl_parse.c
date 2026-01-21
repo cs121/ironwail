@@ -2211,6 +2211,7 @@ static void CL_ParseSnapshot2 (void)
 	qboolean need_full;
 	qboolean is_full;
 	qboolean is_delta;
+	qboolean continuation;
 	const int incomplete_limit = 3;
 	qboolean base_advanced = false;
 
@@ -2222,6 +2223,10 @@ static void CL_ParseSnapshot2 (void)
 	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
 	is_full = (header.flags & SNAPSHOT_FLAG_FULL) != 0;
 	is_delta = (header.flags & SNAPSHOT_FLAG_DELTA) != 0;
+	continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
+
+	if (is_full && !cl.has_full_snapshot && !continuation)
+		incomplete = false;
 
 	if (!CL_SnapshotWorldModelReady ("snapshot2 worldmodel"))
 		drop = true;
@@ -2292,7 +2297,6 @@ static void CL_ParseSnapshot2 (void)
 
 	if (is_full)
 	{
-		qboolean continuation = (header.flags & SNAPSHOT_FLAG_CONTINUE) != 0;
 		qboolean rem_zero = (header.num_removed == 0);
 		qboolean final_chunk = (!continuation || rem_zero);
 		qboolean finalize_invalid = (!continuation && !rem_zero);

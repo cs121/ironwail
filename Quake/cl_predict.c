@@ -81,6 +81,7 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 
 static qboolean CL_Predict_IsEnabled (void)
 {
+	// Prediction may be gated on world readiness, but command sending must not be.
 	if (cls.state != ca_connected)
 		return false;
 	if (cls.demoplayback)
