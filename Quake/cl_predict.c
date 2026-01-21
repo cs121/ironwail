@@ -206,6 +206,7 @@ static trace_t CL_Predict_TraceBox (const vec3_t start, const vec3_t end, const 
 	vec3_t mins_copy;
 	vec3_t maxs_copy;
 	qmodel_t *saved;
+	qcvm_t *oldvm;
 
 	memset (&trace, 0, sizeof(trace));
 	trace.fraction = 1.0f;
@@ -221,7 +222,9 @@ static trace_t CL_Predict_TraceBox (const vec3_t start, const vec3_t end, const 
 
 	saved = sv.worldmodel;
 	sv.worldmodel = cl.worldmodel;
+	PR_PushQCVM(&sv.qcvm, &oldvm);
 	trace = SV_Move (start_copy, mins_copy, maxs_copy, end_copy, typeflags, NULL);
+	PR_PopQCVM(oldvm);
 	sv.worldmodel = saved;
 
 	return trace;
