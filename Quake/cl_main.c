@@ -151,6 +151,44 @@ void CL_ResetPlayerSnaps (void)
 }
 
 float cl_lerpfrac = 1.0f;
+qboolean cl_viewent_needs_init = true;
+
+static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	if (VectorCompare (origin, vec3_origin))
+		return true;
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
+			return true;
+	}
+
+	return false;
+}
+
+static void CL_EnsureViewEntityOrigin (const char *reason)
+{
+	entity_t *ent;
+
+	if (!cl_entities || cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return;
+	ent = &cl_entities[cl.viewentity];
+	if (!CL_ViewEntityOriginIsBad (ent->origin))
+		return;
+
+	// The renderer/camera rely on the viewentity origin; repair it using simorg.
+	VectorCopy (cl.simorg, ent->origin);
+	VectorCopy (cl.simorg, ent->msg_origins[0]);
+	VectorCopy (cl.simorg, ent->msg_origins[1]);
+	if (cl_netdebug_parse.value)
+	{
+		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+	}
+}
 
 void CL_RecordPlayerSnap (void)
 {
@@ -530,6 +568,7 @@ void CL_ClearState (void)
 	cl.time = 0.0;
 	cl.oldtime = 0.0;
 	cl_lerpfrac = 1.0f;
+	cl_viewent_needs_init = true;
 	cl.snapshot_chunk_active = false;
 	cl.snapshot_chunk_seq = 0;
 	cl.snapshot_chunk_start_time = 0;
@@ -1081,6 +1120,11 @@ void CL_RelinkEntities (void)
 		else
 		{	// if the delta is large, assume a teleport and don't lerp
 			f = frac;
+			if (ent == &cl_entities[cl.viewentity] && cl_viewent_needs_init)
+			{
+				f = 1.0f;
+				ent->lerpflags |= LERP_RESETMOVE;
+			}
 			for (j=0 ; j<3 ; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
@@ -1314,6 +1358,7 @@ int CL_ReadFromServer (void)
 	if (cl_shownet.value)
 		Con_Printf ("\n");
 
+	CL_EnsureViewEntityOrigin ("render");
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
 

@@ -9,6 +9,7 @@ extern cvar_t sv_accelerate;
 extern cvar_t sv_friction;
 extern cvar_t sv_stopspeed;
 extern cvar_t sv_gravity;
+extern cvar_t cl_netdebug_parse;
 
 typedef struct
 {
@@ -29,6 +30,43 @@ typedef struct
 } cl_pred_t;
 
 static cl_pred_t cl_pred;
+
+static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	if (VectorCompare (origin, vec3_origin))
+		return true;
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
+			return true;
+	}
+
+	return false;
+}
+
+static void CL_EnsureViewEntityOrigin (const char *reason)
+{
+	entity_t *ent;
+
+	if (!cl_entities || cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return;
+	ent = &cl_entities[cl.viewentity];
+	if (!CL_ViewEntityOriginIsBad (ent->origin))
+		return;
+
+	// The renderer/camera rely on the viewentity origin; repair it using simorg.
+	VectorCopy (cl.simorg, ent->origin);
+	VectorCopy (cl.simorg, ent->msg_origins[0]);
+	VectorCopy (cl.simorg, ent->msg_origins[1]);
+	if (cl_netdebug_parse.value)
+	{
+		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+	}
+}
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 {
@@ -62,6 +100,8 @@ static void CL_Predict_ApplyToClient (void)
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[0]);
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[1]);
 	cl.onground = cl_pred.predicted.onground;
+
+	CL_EnsureViewEntityOrigin ("predict");
 }
 
 static void CL_Predict_Friction (vec3_t velocity)
