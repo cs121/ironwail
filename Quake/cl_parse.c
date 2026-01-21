@@ -186,11 +186,11 @@ static void CL_NetDebugHeader (void)
 		net_message.cursize, realtime, cls.state, cls.signon);
 	if (cls.netcon)
 	{
-		Con_Printf ("NETDBG: from %s rseq %u sseq %u ack %u unrel %u\n",
+		Con_Printf ("NETDBG: from %s rseq %u sseq %u rack %u unrel %u\n",
 			NET_QSocketGetAddressString (cls.netcon),
 			cls.netcon->receiveSequence,
 			cls.netcon->sendSequence,
-			cls.netcon->ackSequence,
+			cls.netcon->reliableReceiveSequence,
 			cls.netcon->unreliableReceiveSequence);
 	}
 	if (net_last_incoming.valid)

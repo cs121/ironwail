@@ -35,7 +35,7 @@ struct qsockaddr
 	unsigned char qsa_data[14];
 };
 
-#define NET_HEADERSIZE		(2 * sizeof(unsigned int))
+#define NET_HEADERSIZE		(4 * sizeof(unsigned int))
 #define NET_UDPIP_HEADER_BYTES	28
 #define NET_DATAGRAMSIZE	(MAX_DATAGRAM + NET_HEADERSIZE)
 
@@ -52,7 +52,29 @@ struct qsockaddr
 #error "NET_MAXMESSAGE must fit within NETFLAG_LENGTH_MASK"
 #endif
 
-#define NET_PROTOCOL_VERSION	3
+#define NET_PROTOCOL_VERSION	4
+
+#define NET_ACK_BITS		32
+#define NET_RELIABLE_WINDOW	32
+
+typedef struct
+{
+	unsigned int	sequence;
+	int		length;
+	int		offset;
+	qboolean	eom;
+	qboolean	acked;
+	double		lastSendTime;
+} net_reliable_send_t;
+
+typedef struct
+{
+	unsigned int	sequence;
+	int		length;
+	qboolean	eom;
+	qboolean	received;
+	byte		*data;
+} net_reliable_receive_t;
 
 /**
 
@@ -137,24 +159,28 @@ typedef struct qsocket_s
 
 	qboolean	disconnected;
 	qboolean	canSend;
-	qboolean	sendNext;
 
 	int		driver;
 	int		landriver;
 	sys_socket_t	socket;
 	void		*driverdata;
 
-	unsigned int	ackSequence;
 	unsigned int	sendSequence;
 	unsigned int	unreliableSendSequence;
 	int		sendMessageLength;
-	int		sendMessageSize;
+	int		sendMessageOffset;
 	byte		sendMessage [NET_MAXMESSAGE];
+	unsigned int	sendReliableBase;
+	net_reliable_send_t	reliableSend [NET_RELIABLE_WINDOW];
 
 	unsigned int	receiveSequence;
+	qboolean	reliableReceiveValid;
+	unsigned int	reliableReceiveSequence;
+	unsigned int	reliableReceiveMask;
 	unsigned int	unreliableReceiveSequence;
 	int		receiveMessageLength;
 	byte		receiveMessage [NET_MAXMESSAGE];
+	net_reliable_receive_t	reliableReceive [NET_RELIABLE_WINDOW];
 
 	struct qsockaddr	addr;
 	char		address[NET_NAMELEN];
