@@ -90,6 +90,7 @@ extern cvar_t	r_lerpmodels, r_lerpmove; //johnfitz
 extern float	host_netinterval;	//Spike
 
 extern vec3_t	v_punchangles[2];
+extern qboolean	CL_NetDbg_PredictRan (void);
 
 #define CL_PLAYER_SNAP_HISTORY 64
 #define CL_PLAYER_SNAP_MASK_WORDS ((MAX_SCOREBOARD + 31) / 32)
@@ -112,6 +113,7 @@ static int				cl_lerp_hold_newest = 0;
 static int				cl_lerp_hold_oldest = 0;
 static int				cl_lerp_gap_holds = 0;
 static double			cl_lerp_debug_next_time = 0.0;
+static double			cl_netdbg_move_next_time = 0.0;
 
 static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
 {
@@ -226,9 +228,7 @@ void CL_RecordPlayerSnap (void)
 
 qboolean CL_WorldReady (void)
 {
-	entity_t *view;
-
-	// Strict mapload gating: only allow prediction/input when the viewentity has a model.
+	// Strict mapload gating: only allow prediction/input when the viewentity has a sane origin.
 	if (cls.signon != SIGNONS)
 		return false;
 	if (!cl.worldmodel)
@@ -237,11 +237,53 @@ qboolean CL_WorldReady (void)
 		return false;
 	if (!cl_entities)
 		return false;
-	view = &cl_entities[cl.viewentity];
-	if (!view->model)
+	if (CL_ViewEntityOriginIsBad (cl.simorg))
 		return false;
 
 	return true;
+}
+
+static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
+{
+	double now;
+	vec3_t vieworg;
+	int forward = 0;
+	int side = 0;
+	int up = 0;
+
+	if (!cl_netdebug_parse.value)
+		return;
+
+	now = Sys_DoubleTime ();
+	if (now < cl_netdbg_move_next_time)
+		return;
+	cl_netdbg_move_next_time = now + 1.0;
+
+	VectorCopy (vec3_origin, vieworg);
+	if (cl_entities && cl.viewentity > 0 && cl.viewentity < cl_max_edicts)
+		VectorCopy (cl_entities[cl.viewentity].origin, vieworg);
+
+	if (cmd)
+	{
+		forward = cmd->forwardmove;
+		side = cmd->sidemove;
+		up = cmd->upmove;
+	}
+
+	Con_Printf ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
+		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d\n",
+		cls.signon,
+		cl.has_full_snapshot ? 1 : 0,
+		cl.need_full_snapshot ? 1 : 0,
+		cl_viewent_needs_init ? 1 : 0,
+		cl.worldmodel ? 1 : 0,
+		cl.paused ? 1 : 0,
+		cl.intermission ? 1 : 0,
+		vieworg[0], vieworg[1], vieworg[2],
+		cl.simorg[0], cl.simorg[1], cl.simorg[2],
+		forward, side, up,
+		CL_NetDbg_PredictRan () ? 1 : 0,
+		sendcmd_ran ? 1 : 0);
 }
 
 static float CL_LerpAngle (float a, float b, float f)
@@ -1471,10 +1513,14 @@ void CL_SendCmd (void)
 		CL_Predict_SetupCmd (&cmd);
 
 	// send the unreliable message
+		CL_NetDbg_LogMovement (&cmd, true);
 		CL_SendMove (&cmd);
 	}
 	else
+	{
+		CL_NetDbg_LogMovement (NULL, true);
 		CL_SendMove (NULL);
+	}
 	memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
 
 	if (cls.demoplayback)
