@@ -1501,15 +1501,8 @@ void CL_SendCmd (void)
 		cmd.impulse = in_impulse;
 		in_impulse = 0;
 
-		// Freeze local movement until we have a ready viewentity to avoid void spawns.
-		if (!CL_WorldReady ())
-		{
-			cmd.forwardmove = 0;
-			cmd.sidemove = 0;
-			cmd.upmove = 0;
-			cmd.buttons = 0;
-			cmd.impulse = 0;
-		}
+		// NOTE: Never gate command generation/sending on snapshot readiness.
+		// Prediction handles world-ready checks; the server still needs cmds every frame.
 
 		CL_Predict_SetupCmd (&cmd);
 
