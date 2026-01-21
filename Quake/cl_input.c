@@ -416,6 +416,8 @@ void CL_SendMove (const usercmd_t *cmd)
 		MSG_WriteByte (&buf, clc_move);
 
 		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
+		MSG_WriteLong (&buf, (int)cmd->sequence);
+		MSG_WriteLong (&buf, (int)cl.last_cmd_ack);
 
 		cmd_count = 0;
 		for (i = CMD_BACKUP; i >= 0; i--)

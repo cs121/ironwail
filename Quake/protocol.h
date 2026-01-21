@@ -327,7 +327,7 @@ typedef enum
 #define	clc_bad			0
 #define	clc_nop 		1
 #define	clc_disconnect	2
-#define	clc_move		3		// [usercmd_t]
+#define	clc_move		3		// [float mtime] [long cmd_seq] [long cmd_ack] [byte count] [usercmd_t]
 #define	clc_stringcmd	4		// [string] message
 #define	clc_snapshot_ack	5	// [long] seq
 #define	clc_snapshot_nak	6	// [long] expected base [long] received base

@@ -3002,9 +3002,15 @@ void CL_ParseClientdata (void)
 	if (bits & SU_PREDICT)
 	{
 		unsigned int ack = (unsigned int)MSG_ReadLong ();
+		unsigned int ack_echo = (unsigned int)MSG_ReadLong ();
 		vec3_t origin;
 		vec3_t velocity;
 		vec3_t viewangles;
+
+		if ((int)(ack - cl.last_cmd_ack) > 0)
+			cl.last_cmd_ack = ack;
+		if ((int)(ack_echo - cl.last_cmd_ack_echo) > 0)
+			cl.last_cmd_ack_echo = ack_echo;
 
 		for (i = 0; i < 3; i++)
 			origin[i] = MSG_ReadCoord (cl.protocolflags);

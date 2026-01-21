@@ -264,6 +264,7 @@ typedef struct client_s
 	double			datagram_overflow_next_time;
 	bot_state_t		bot;
 	unsigned int	last_cmd_seq;
+	unsigned int	last_cmd_ack;
 } client_t;
 
 
