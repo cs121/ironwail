@@ -31,6 +31,12 @@ typedef struct
 
 static cl_pred_t cl_pred;
 static qboolean cl_netdbg_predict_ran;
+static qboolean cl_pred_warned_solid;
+
+#define CL_PREDICT_MAX_CLIP_PLANES 5
+#define CL_PREDICT_STEP_SIZE 18.0f
+#define CL_PREDICT_GROUND_EPSILON 2.0f
+#define CL_PREDICT_CORRECTION_THRESHOLD 64.0f
 
 qboolean CL_NetDbg_PredictRan (void)
 {
@@ -192,49 +198,265 @@ static void CL_Predict_GetPlayerBounds (vec3_t mins, vec3_t maxs)
 	maxs[2] = 32;
 }
 
-static qboolean CL_Predict_CheckGround (const vec3_t origin, const vec3_t mins, const vec3_t maxs)
+static trace_t CL_Predict_TraceBox (const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs, int typeflags)
 {
-	vec3_t point;
+	trace_t trace;
+	vec3_t start_copy;
+	vec3_t end_copy;
+	vec3_t mins_copy;
+	vec3_t maxs_copy;
 	qmodel_t *saved;
-	int contents;
-	int x;
-	int y;
-	float sample_z;
+
+	memset (&trace, 0, sizeof(trace));
+	trace.fraction = 1.0f;
+	VectorCopy (end, trace.endpos);
 
 	if (!cl.worldmodel)
-		return false;
+		return trace;
+
+	VectorCopy (start, start_copy);
+	VectorCopy (end, end_copy);
+	VectorCopy (mins, mins_copy);
+	VectorCopy (maxs, maxs_copy);
 
 	saved = sv.worldmodel;
-	if (!sv.worldmodel)
-		sv.worldmodel = cl.worldmodel;
+	sv.worldmodel = cl.worldmodel;
+	trace = SV_Move (start_copy, mins_copy, maxs_copy, end_copy, typeflags, NULL);
+	sv.worldmodel = saved;
 
-	sample_z = origin[2] + mins[2] - 1.0f;
+	return trace;
+}
 
-	VectorCopy (origin, point);
-	point[2] = sample_z;
-	contents = SV_PointContents (point);
-	if (contents == CONTENTS_SOLID)
-		goto done;
+static void CL_Predict_LogSolidTrace (const char *context, const trace_t *trace)
+{
+	if (cl_pred_warned_solid || !cl_netdebug_parse.value)
+		return;
 
-	for (x = 0; x <= 1; x++)
+	if (trace->startsolid || trace->allsolid)
 	{
-		for (y = 0; y <= 1; y++)
-		{
-			point[0] = origin[0] + (x ? maxs[0] : mins[0]);
-			point[1] = origin[1] + (y ? maxs[1] : mins[1]);
-			point[2] = sample_z;
+		Con_Printf ("NETDBG: prediction trace %s startsolid=%d allsolid=%d\n",
+			context ? context : "unknown", trace->startsolid, trace->allsolid);
+		cl_pred_warned_solid = true;
+	}
+}
 
-			contents = SV_PointContents (point);
-			if (contents == CONTENTS_SOLID)
-				goto done;
+static qboolean CL_Predict_CheckGroundTrace (const vec3_t origin, const vec3_t mins, const vec3_t maxs)
+{
+	trace_t trace;
+	vec3_t end;
+
+	VectorCopy (origin, end);
+	end[2] -= CL_PREDICT_GROUND_EPSILON;
+
+	trace = CL_Predict_TraceBox (origin, end, mins, maxs, MOVE_NOMONSTERS);
+
+	if (trace.startsolid || trace.allsolid)
+		return false;
+
+	if (trace.fraction < 1.0f && trace.plane.normal[2] > 0.7f)
+		return true;
+
+	return false;
+}
+
+static int CL_Predict_ClipVelocity (const vec3_t in, const vec3_t normal, vec3_t out, float overbounce)
+{
+	float backoff;
+	float change;
+	int i;
+	int blocked;
+
+	blocked = 0;
+	if (normal[2] > 0)
+		blocked |= 1;
+	if (!normal[2])
+		blocked |= 2;
+
+	backoff = DotProduct (in, normal) * overbounce;
+
+	for (i = 0; i < 3; i++)
+	{
+		change = normal[i] * backoff;
+		out[i] = in[i] - change;
+		if (out[i] > -0.1f && out[i] < 0.1f)
+			out[i] = 0;
+	}
+
+	return blocked;
+}
+
+static qboolean CL_Predict_SlideMove (cl_pred_state_t *state, const vec3_t mins, const vec3_t maxs, float dt)
+{
+	int bumpcount;
+	int numbumps;
+	int numplanes;
+	vec3_t planes[CL_PREDICT_MAX_CLIP_PLANES];
+	vec3_t primal_velocity;
+	vec3_t original_velocity;
+	vec3_t new_velocity;
+	vec3_t end;
+	vec3_t dir;
+	trace_t trace;
+	float time_left;
+	float d;
+	int i;
+	int j;
+	qboolean blocked;
+
+	numbumps = 4;
+	blocked = false;
+	numplanes = 0;
+	time_left = dt;
+
+	VectorCopy (state->velocity, original_velocity);
+	VectorCopy (state->velocity, primal_velocity);
+
+	for (bumpcount = 0; bumpcount < numbumps; bumpcount++)
+	{
+		if (!state->velocity[0] && !state->velocity[1] && !state->velocity[2])
+			break;
+
+		VectorMA (state->origin, time_left, state->velocity, end);
+		trace = CL_Predict_TraceBox (state->origin, end, mins, maxs, MOVE_NOMONSTERS);
+
+		if (trace.startsolid || trace.allsolid)
+		{
+			CL_Predict_LogSolidTrace ("slide", &trace);
+			VectorClear (state->velocity);
+			state->onground = false;
+			return true;
+		}
+
+		if (trace.fraction > 0)
+		{
+			VectorCopy (trace.endpos, state->origin);
+			VectorCopy (state->velocity, original_velocity);
+			numplanes = 0;
+		}
+
+		if (trace.fraction == 1.0f)
+			break;
+
+		blocked = true;
+		time_left -= time_left * trace.fraction;
+
+		if (numplanes >= CL_PREDICT_MAX_CLIP_PLANES)
+		{
+			VectorClear (state->velocity);
+			return true;
+		}
+
+		VectorCopy (trace.plane.normal, planes[numplanes]);
+		numplanes++;
+
+		for (i = 0; i < numplanes; i++)
+		{
+			CL_Predict_ClipVelocity (original_velocity, planes[i], new_velocity, 1);
+			for (j = 0; j < numplanes; j++)
+			{
+				if (j != i && DotProduct (new_velocity, planes[j]) < 0)
+					break;
+			}
+			if (j == numplanes)
+				break;
+		}
+
+		if (i != numplanes)
+		{
+			VectorCopy (new_velocity, state->velocity);
+		}
+		else
+		{
+			if (numplanes != 2)
+			{
+				VectorClear (state->velocity);
+				return true;
+			}
+			CrossProduct (planes[0], planes[1], dir);
+			d = DotProduct (dir, state->velocity);
+			VectorScale (dir, d, state->velocity);
+		}
+
+		if (DotProduct (state->velocity, primal_velocity) <= 0)
+		{
+			VectorClear (state->velocity);
+			return true;
 		}
 	}
 
-done:
+	return blocked;
+}
 
-	sv.worldmodel = saved;
+static void CL_Predict_StepSlideMove (cl_pred_state_t *state, const vec3_t mins, const vec3_t maxs, float dt)
+{
+	vec3_t original_origin;
+	vec3_t original_velocity;
+	vec3_t nostep_origin;
+	vec3_t nostep_velocity;
+	vec3_t end;
+	trace_t trace;
+	trace_t downtrace;
+	float stepdist;
+	float nostepdist;
 
-	return contents == CONTENTS_SOLID;
+	VectorCopy (state->origin, original_origin);
+	VectorCopy (state->velocity, original_velocity);
+
+	if (!CL_Predict_SlideMove (state, mins, maxs, dt))
+		return;
+
+	if (!state->onground)
+		return;
+
+	VectorCopy (state->origin, nostep_origin);
+	VectorCopy (state->velocity, nostep_velocity);
+
+	VectorCopy (original_origin, state->origin);
+	VectorCopy (original_velocity, state->velocity);
+
+	VectorCopy (state->origin, end);
+	end[2] += CL_PREDICT_STEP_SIZE;
+	trace = CL_Predict_TraceBox (state->origin, end, mins, maxs, MOVE_NOMONSTERS);
+	if (trace.startsolid || trace.allsolid)
+	{
+		CL_Predict_LogSolidTrace ("step-up", &trace);
+		VectorCopy (nostep_origin, state->origin);
+		VectorCopy (nostep_velocity, state->velocity);
+		return;
+	}
+
+	VectorCopy (trace.endpos, state->origin);
+	state->velocity[2] = 0;
+
+	CL_Predict_SlideMove (state, mins, maxs, dt);
+
+	VectorCopy (state->origin, end);
+	end[2] -= CL_PREDICT_STEP_SIZE;
+	downtrace = CL_Predict_TraceBox (state->origin, end, mins, maxs, MOVE_NOMONSTERS);
+	if (downtrace.startsolid || downtrace.allsolid)
+	{
+		CL_Predict_LogSolidTrace ("step-down", &downtrace);
+		VectorCopy (nostep_origin, state->origin);
+		VectorCopy (nostep_velocity, state->velocity);
+		return;
+	}
+
+	VectorCopy (downtrace.endpos, state->origin);
+
+	if (downtrace.plane.normal[2] < 0.7f)
+	{
+		VectorCopy (nostep_origin, state->origin);
+		VectorCopy (nostep_velocity, state->velocity);
+		return;
+	}
+
+	stepdist = DistanceSquared (original_origin, state->origin);
+	nostepdist = DistanceSquared (original_origin, nostep_origin);
+	if (nostepdist > stepdist)
+	{
+		VectorCopy (nostep_origin, state->origin);
+		VectorCopy (nostep_velocity, state->velocity);
+	}
 }
 
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd)
@@ -247,13 +469,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	CL_Predict_GetPlayerBounds (mins, maxs);
 
 	if (!state->onground && state->velocity[2] <= 0)
-	{
-		if (CL_Predict_CheckGround (state->origin, mins, maxs))
-		{
-			state->onground = true;
-			state->velocity[2] = 0;
-		}
-	}
+		state->onground = CL_Predict_CheckGroundTrace (state->origin, mins, maxs);
 
 	VectorCopy (cmd->viewangles, state->viewangles);
 
@@ -270,6 +486,14 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	{
 		VectorScale (wishvel, sv_maxspeed.value / wishspeed, wishvel);
 		wishspeed = sv_maxspeed.value;
+	}
+
+	if (noclip_anglehack)
+	{
+		VectorCopy (wishvel, state->velocity);
+		VectorMA (state->origin, host_frametime, state->velocity, state->origin);
+		state->onground = false;
+		return;
 	}
 
 	if (state->onground)
@@ -289,21 +513,20 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		state->velocity[2] -= sv_gravity.value * host_frametime;
 	}
 
-	VectorMA (state->origin, host_frametime, state->velocity, state->origin);
+	if (state->onground)
+		CL_Predict_StepSlideMove (state, mins, maxs, host_frametime);
+	else
+		CL_Predict_SlideMove (state, mins, maxs, host_frametime);
 
-	if (!state->onground && state->velocity[2] <= 0)
-	{
-		if (CL_Predict_CheckGround (state->origin, mins, maxs))
-		{
-			state->onground = true;
-			state->velocity[2] = 0;
-		}
-	}
+	state->onground = CL_Predict_CheckGroundTrace (state->origin, mins, maxs);
+	if (state->onground && state->velocity[2] < 0)
+		state->velocity[2] = 0;
 }
 
 void CL_Predict_Clear (void)
 {
 	memset (&cl_pred, 0, sizeof(cl_pred));
+	cl_pred_warned_solid = false;
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
@@ -336,9 +559,22 @@ qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out)
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground)
 {
 	unsigned int seq;
+	float correction;
 
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
+
+	if (cl_pred.has_base && cl_netdebug_parse.value)
+	{
+		correction = Distance (origin, cl.simorg);
+		if (correction > CL_PREDICT_CORRECTION_THRESHOLD)
+		{
+			Con_Printf ("NETDBG: prediction correction %.1f units (server %f %f %f, client %f %f %f)\n",
+				correction,
+				origin[0], origin[1], origin[2],
+				cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+		}
+	}
 
 	cl_pred.seq_acked = ack;
 	VectorCopy (origin, cl_pred.base.origin);
