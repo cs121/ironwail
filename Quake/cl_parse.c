@@ -1383,6 +1383,88 @@ static unsigned int CL_GetSnapshotAckSeq (void)
 	return cl.snapshot_baseline_seq;
 }
 
+static int CL_FindSnapshotBaselineIndex (unsigned int seq)
+{
+	int i;
+
+	if (!seq)
+		return -1;
+
+	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
+	{
+		if (!cl.snapshot_baseline_valid[i])
+			continue;
+		if (cl.snapshot_baseline_seqs[i] == seq)
+			return i;
+	}
+
+	return -1;
+}
+
+static void CL_SetSnapshotBaselineIndex (int index)
+{
+	cl.snapshot_baseline_index = index;
+	if (index >= 0 && index < CL_SNAPSHOT_BASELINE_HISTORY)
+	{
+		cl.snapshot_baseline = cl.snapshot_baselines[index];
+		cl.snapshot_present = cl.snapshot_baseline_present[index];
+		cl.snapshot_baseline_seq = cl.snapshot_baseline_seqs[index];
+		return;
+	}
+	cl.snapshot_baseline = NULL;
+	cl.snapshot_present = NULL;
+	cl.snapshot_baseline_seq = 0;
+}
+
+static int CL_AllocSnapshotBaselineSlot (unsigned int seq)
+{
+	int index = cl.snapshot_baseline_head;
+	int next_index;
+
+	if (index == cl.snapshot_baseline_index && cl.snapshot_baseline_valid[index])
+		index = (index + 1) % CL_SNAPSHOT_BASELINE_HISTORY;
+	next_index = (index + 1) % CL_SNAPSHOT_BASELINE_HISTORY;
+	cl.snapshot_baseline_head = next_index;
+	cl.snapshot_baseline_valid[index] = 1;
+	cl.snapshot_baseline_seqs[index] = seq;
+	return index;
+}
+
+static int CL_StoreSnapshotBaseline (unsigned int seq, const snapshot_state_t *states, const byte *present)
+{
+	int index = CL_AllocSnapshotBaselineSlot (seq);
+
+	memcpy (cl.snapshot_baselines[index], states, cl_max_edicts * sizeof(snapshot_state_t));
+	memcpy (cl.snapshot_baseline_present[index], present, cl_max_edicts * sizeof(byte));
+	CL_SetSnapshotBaselineIndex (index);
+	return index;
+}
+
+static int CL_StoreSnapshotBaselineFromBase (unsigned int seq, const snapshot_state_t *base_states,
+	const byte *base_present)
+{
+	int i;
+	int index = CL_AllocSnapshotBaselineSlot (seq);
+	snapshot_state_t *dest_states = cl.snapshot_baselines[index];
+	byte *dest_present = cl.snapshot_baseline_present[index];
+
+	memcpy (dest_states, base_states, cl_max_edicts * sizeof(snapshot_state_t));
+	memcpy (dest_present, base_present, cl_max_edicts * sizeof(byte));
+
+	for (i = 1; i < cl_max_edicts; i++)
+	{
+		if (cl.snapshot_stage_remove[i])
+			dest_present[i] = 0;
+		if (!cl.snapshot_stage_present[i])
+			continue;
+		dest_states[i] = cl.snapshot_stage[i];
+		dest_present[i] = 1;
+	}
+
+	CL_SetSnapshotBaselineIndex (index);
+	return index;
+}
+
 static qboolean CL_SendSnapshotAck (unsigned int seq)
 {
 	if (cls.demoplayback || cls.state != ca_connected)
@@ -1877,16 +1959,15 @@ static void CL_ParseSnapshotFull (void)
 		if (reset_interp)
 			CL_PrepareFullSnapshotInterpReset ();
 
-	// INV-5: commit staged snapshot only after full parse.
-	for (i = 1; i < cl_max_edicts; i++)
-	{
-		if (!cl.snapshot_stage_present[i])
-			continue;
-		cl.snapshot_baseline[i] = cl.snapshot_stage[i];
-		cl.snapshot_present[i] = 1;
-		CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
-		CL_MarkSnapshotEntityUpdated (i);
-	}
+		// INV-5: commit staged snapshot only after full parse.
+		CL_StoreSnapshotBaseline (seq, cl.snapshot_stage, cl.snapshot_stage_present);
+		for (i = 1; i < cl_max_edicts; i++)
+		{
+			if (!cl.snapshot_present[i])
+				continue;
+			CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+			CL_MarkSnapshotEntityUpdated (i);
+		}
 
 		if (reset_interp)
 			CL_FinalizeFullSnapshotInterpReset ();
@@ -1894,7 +1975,6 @@ static void CL_ParseSnapshotFull (void)
 		CL_InitViewEntityFromSim ();
 	}
 
-	cl.snapshot_baseline_seq = seq;
 	cl.snap_last_applied_seq = seq16;
 	cl.snap_last_complete_seq = seq16;
 	cl.snap_last_incomplete = false;
@@ -1918,21 +1998,29 @@ static void CL_ParseSnapshotDelta (void)
 	int removes_parsed = 0;
 	int touched = 0;
 	qboolean baseline_match;
+	qboolean base_is_current;
+	const snapshot_state_t *base_states = NULL;
+	const byte *base_present = NULL;
 	qboolean drop;
 	unsigned short seq16;
-	unsigned short base16;
 	qboolean need_full;
-	qboolean base_complete;
 	qboolean continuation_pending;
 	qboolean base_advanced = false;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	baseline_seq = (unsigned int)MSG_ReadLong ();
 	seq16 = (unsigned short)seq;
-	base16 = (unsigned short)baseline_seq;
 	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
-	baseline_match = (baseline_seq != 0 && baseline_seq == cl.snapshot_baseline_seq);
-	base_complete = (cl.snap_last_complete_seq != 0 && base16 == cl.snap_last_complete_seq);
+	{
+		int base_index = CL_FindSnapshotBaselineIndex (baseline_seq);
+		baseline_match = (base_index >= 0);
+		base_is_current = (baseline_match && baseline_seq == cl.snapshot_baseline_seq);
+		if (baseline_match)
+		{
+			base_states = cl.snapshot_baselines[base_index];
+			base_present = cl.snapshot_baseline_present[base_index];
+		}
+	}
 	continuation_pending = cl.snapshot_chunk_active;
 	drop = CL_ShouldDropSnapshot ();
 
@@ -1956,18 +2044,16 @@ static void CL_ParseSnapshotDelta (void)
 		drop = true;
 	}
 
-	if (!drop && baseline_match)
+	if (!drop && base_is_current)
 		SDL_assert (baseline_seq == cl.snapshot_baseline_seq);
 
-	if (!drop && (!baseline_match || !base_complete || continuation_pending || need_full))
+	if (!drop && (!baseline_match || continuation_pending || need_full))
 	{
 		if (cl_snap_debug.value >= 1.0f)
 			Con_Printf ("cl_snap delta mismatch base %u last %u need_full %d\n",
 				baseline_seq, cl.snap_last_complete_seq, need_full);
 		if (!baseline_match)
 			CL_LogDeltaReject ("base_mismatch", seq, baseline_seq);
-		else if (!base_complete)
-			CL_LogDeltaReject ("base_incomplete", seq, baseline_seq);
 		else if (continuation_pending)
 			CL_LogDeltaReject ("base_continuation", seq, baseline_seq);
 		else
@@ -2004,7 +2090,8 @@ static void CL_ParseSnapshotDelta (void)
 			msg_readcount = net_message.cursize;
 			return;
 		}
-		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
+		if (!drop && baseline_match && base_present && entnum > 0 && entnum < cl_max_edicts
+			&& base_present[entnum])
 			cl.snapshot_stage_remove[entnum] = 1;
 	}
 
@@ -2054,9 +2141,10 @@ static void CL_ParseSnapshotDelta (void)
 			msg_readcount = net_message.cursize;
 			return;
 		}
-		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts && cl.snapshot_present[entnum])
+		if (!drop && baseline_match && base_present && entnum > 0 && entnum < cl_max_edicts
+			&& base_present[entnum])
 		{
-			snapshot_state_t state = cl.snapshot_baseline[entnum];
+			snapshot_state_t state = base_states[entnum];
 			CL_ReadSnapshotDeltaFields (&state, mask);
 			if (msg_badread)
 			{
@@ -2084,20 +2172,37 @@ static void CL_ParseSnapshotDelta (void)
 	// INV-5: commit staged snapshot only after full parse/validation.
 	if (!drop && baseline_match)
 	{
-		for (i = 1; i < cl_max_edicts; i++)
+		byte *old_present = cl.snapshot_present;
+
+		CL_StoreSnapshotBaselineFromBase (seq, base_states, base_present);
+		if (base_is_current)
 		{
-			if (cl.snapshot_stage_remove[i])
+			for (i = 1; i < cl_max_edicts; i++)
 			{
-				cl.snapshot_present[i] = 0;
-				CL_ClearSnapshotEntity (i);
+				if (cl.snapshot_stage_remove[i])
+					CL_ClearSnapshotEntity (i);
+				if (!cl.snapshot_stage_present[i])
+					continue;
+				CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+				CL_MarkSnapshotEntityUpdated (i);
+				touched++;
 			}
-			if (!cl.snapshot_stage_present[i])
-				continue;
-			cl.snapshot_baseline[i] = cl.snapshot_stage[i];
-			cl.snapshot_present[i] = 1;
-			CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
-			CL_MarkSnapshotEntityUpdated (i);
-			touched++;
+		}
+		else
+		{
+			for (i = 1; i < cl_max_edicts; i++)
+			{
+				if (cl.snapshot_present[i])
+				{
+					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+					CL_MarkSnapshotEntityUpdated (i);
+					touched++;
+				}
+				else if (old_present && old_present[i])
+				{
+					CL_ClearSnapshotEntity (i);
+				}
+			}
 		}
 
 		for (i = 1; i < cl_max_edicts; i++)
@@ -2105,7 +2210,6 @@ static void CL_ParseSnapshotDelta (void)
 			if (cl.snapshot_present[i] && cl_entities[i].msgtime != cl.mtime[0])
 				cl_entities[i].msgtime = cl.mtime[0];
 		}
-		cl.snapshot_baseline_seq = seq;
 		cl.snap_last_applied_seq = seq16;
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
@@ -2201,12 +2305,14 @@ static void CL_ParseSnapshot2 (void)
 {
 	snapshot_header_t header;
 	qboolean baseline_match;
+	qboolean base_is_current;
+	const snapshot_state_t *base_states = NULL;
+	const byte *base_present = NULL;
 	qboolean drop;
 	int i;
 	int removes_parsed = 0;
 	int touched = 0;
 	unsigned short seq16;
-	unsigned short base16;
 	qboolean incomplete;
 	qboolean need_full;
 	qboolean is_full;
@@ -2218,7 +2324,6 @@ static void CL_ParseSnapshot2 (void)
 	CL_ReadSnapshotHeader (&header);
 	drop = CL_ShouldDropSnapshot ();
 	seq16 = (unsigned short)header.seq;
-	base16 = (unsigned short)header.base_seq;
 	incomplete = (header.flags & SNAPSHOT_FLAG_INCOMPLETE) != 0;
 	need_full = (cl.need_full_snapshot || !cl.has_full_snapshot);
 	is_full = (header.flags & SNAPSHOT_FLAG_FULL) != 0;
@@ -2432,13 +2537,12 @@ static void CL_ParseSnapshot2 (void)
 					CL_PrepareFullSnapshotInterpReset ();
 
 				// INV-5: commit reassembled snapshot only after full chunk parse.
+				CL_StoreSnapshotBaseline (header.seq, cl.snapshot_chunk, cl.snapshot_chunk_present);
 				for (i = 1; i < cl_max_edicts; i++)
 				{
-					if (!cl.snapshot_chunk_present[i])
+					if (!cl.snapshot_present[i])
 						continue;
-					cl.snapshot_baseline[i] = cl.snapshot_chunk[i];
-					cl.snapshot_present[i] = 1;
-					CL_ApplySnapshotState (i, &cl.snapshot_chunk[i]);
+					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 					CL_MarkSnapshotEntityUpdated (i);
 					touched++;
 				}
@@ -2449,7 +2553,6 @@ static void CL_ParseSnapshot2 (void)
 				CL_InitViewEntityFromSim ();
 				CL_Predict_Reapply ();
 
-				cl.snapshot_baseline_seq = header.seq;
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
@@ -2550,12 +2653,11 @@ static void CL_ParseSnapshot2 (void)
 					CL_PrepareFullSnapshotInterpReset ();
 
 				// INV-5: commit staged snapshot only after full parse.
+				CL_StoreSnapshotBaseline (header.seq, cl.snapshot_stage, cl.snapshot_stage_present);
 				for (i = 1; i < cl_max_edicts; i++)
 				{
-					if (!cl.snapshot_stage_present[i])
+					if (!cl.snapshot_present[i])
 						continue;
-					cl.snapshot_baseline[i] = cl.snapshot_stage[i];
-					cl.snapshot_present[i] = 1;
 					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 					CL_MarkSnapshotEntityUpdated (i);
 					touched++;
@@ -2567,7 +2669,6 @@ static void CL_ParseSnapshot2 (void)
 				CL_InitViewEntityFromSim ();
 				CL_Predict_Reapply ();
 
-				cl.snapshot_baseline_seq = header.seq;
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
@@ -2616,19 +2717,26 @@ static void CL_ParseSnapshot2 (void)
 		drop = true;
 	}
 
-	baseline_match = (header.base_seq != 0xFFFFFFFFu && header.base_seq == cl.snapshot_baseline_seq);
-	if (!drop && baseline_match)
+	{
+		int base_index = CL_FindSnapshotBaselineIndex (header.base_seq);
+		baseline_match = (base_index >= 0);
+		base_is_current = (baseline_match && header.base_seq == cl.snapshot_baseline_seq);
+		if (baseline_match)
+		{
+			base_states = cl.snapshot_baselines[base_index];
+			base_present = cl.snapshot_baseline_present[base_index];
+		}
+	}
+	if (!drop && base_is_current)
 		SDL_assert (header.base_seq == cl.snapshot_baseline_seq);
 
-	if (!drop && (!baseline_match || base16 != cl.snap_last_complete_seq || cl.snapshot_chunk_active || need_full))
+	if (!drop && (!baseline_match || cl.snapshot_chunk_active || need_full))
 	{
 		if (cl_snap_debug.value >= 1.0f)
 			Con_Printf ("cl_snap2 delta mismatch base %u last %u need_full %d\n",
 				header.base_seq, cl.snap_last_complete_seq, need_full);
 		if (!baseline_match)
 			CL_LogDeltaReject ("base_mismatch", header.seq, header.base_seq);
-		else if (base16 != cl.snap_last_complete_seq)
-			CL_LogDeltaReject ("base_incomplete", header.seq, header.base_seq);
 		else if (cl.snapshot_chunk_active)
 			CL_LogDeltaReject ("base_continuation", header.seq, header.base_seq);
 		else
@@ -2660,7 +2768,8 @@ static void CL_ParseSnapshot2 (void)
 				msg_readcount = net_message.cursize;
 				return;
 			}
-			if (!drop && baseline_match && !incomplete && entnum > 0 && entnum < cl_max_edicts)
+			if (!drop && baseline_match && !incomplete && base_present && entnum > 0 && entnum < cl_max_edicts
+				&& base_present[entnum])
 				cl.snapshot_stage_remove[entnum] = 1;
 		}
 	}
@@ -2720,9 +2829,10 @@ static void CL_ParseSnapshot2 (void)
 					return;
 				}
 
-				if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts && cl.snapshot_present[entnum])
+				if (!drop && baseline_match && base_present && entnum > 0 && entnum < cl_max_edicts
+					&& base_present[entnum])
 				{
-					snapshot_state_t state = cl.snapshot_baseline[entnum];
+					snapshot_state_t state = base_states[entnum];
 					CL_ReadSnapshotDeltaFields (&state, mask);
 					if (msg_badread)
 					{
@@ -2765,19 +2875,37 @@ static void CL_ParseSnapshot2 (void)
 	{
 		if (!incomplete)
 		{
-			for (i = 1; i < cl_max_edicts; i++)
+			byte *old_present = cl.snapshot_present;
+
+			CL_StoreSnapshotBaselineFromBase (header.seq, base_states, base_present);
+			if (base_is_current)
 			{
-				if (cl.snapshot_stage_remove[i])
+				for (i = 1; i < cl_max_edicts; i++)
 				{
-					cl.snapshot_present[i] = 0;
-					CL_ClearSnapshotEntity (i);
+					if (cl.snapshot_stage_remove[i])
+						CL_ClearSnapshotEntity (i);
+					if (!cl.snapshot_stage_present[i])
+						continue;
+					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+					CL_MarkSnapshotEntityUpdated (i);
+					touched++;
 				}
-				if (!cl.snapshot_stage_present[i])
-					continue;
-				cl.snapshot_baseline[i] = cl.snapshot_stage[i];
-				CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
-				CL_MarkSnapshotEntityUpdated (i);
-				touched++;
+			}
+			else
+			{
+				for (i = 1; i < cl_max_edicts; i++)
+				{
+					if (cl.snapshot_present[i])
+					{
+						CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
+						CL_MarkSnapshotEntityUpdated (i);
+						touched++;
+					}
+					else if (old_present && old_present[i])
+					{
+						CL_ClearSnapshotEntity (i);
+					}
+				}
 			}
 
 			CL_Predict_Reapply ();
@@ -2788,7 +2916,6 @@ static void CL_ParseSnapshot2 (void)
 					cl_entities[i].msgtime = cl.mtime[0];
 			}
 
-			cl.snapshot_baseline_seq = header.seq;
 			cl.snap_last_applied_seq = seq16;
 			cl.snap_last_complete_seq = seq16;
 			cl.snap_last_incomplete = false;
@@ -2806,22 +2933,33 @@ static void CL_ParseSnapshot2 (void)
 		}
 		else
 		{
-			// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
-			touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
-			cl.snap_last_incomplete_seq = seq16;
-			cl.snap_last_incomplete = true;
-			cl.snap_incomplete_count++;
-			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
-				realtime, header.seq, header.flags, cl.snap_incomplete_count,
-				cl.has_full_snapshot ? 1 : 0);
-			if (cl.snap_incomplete_count >= incomplete_limit)
-				CL_RequestFullSnapshot ("snapshot2 incomplete", false);
-			CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, false,
-				removes_parsed, touched, base_advanced);
+			if (!base_is_current)
+			{
+				CL_RequestFullSnapshot ("snapshot2 incomplete base mismatch", false);
+				drop = true;
+			}
+			else
+			{
+				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
+				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
+				cl.snap_last_incomplete_seq = seq16;
+				cl.snap_last_incomplete = true;
+				cl.snap_incomplete_count++;
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
+					realtime, header.seq, header.flags, cl.snap_incomplete_count,
+					cl.has_full_snapshot ? 1 : 0);
+				if (cl.snap_incomplete_count >= incomplete_limit)
+					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
+				CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, false,
+					removes_parsed, touched, base_advanced);
+			}
 		}
-		if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
-			CL_RequestFullSnapshot ("snapshot2 ack failed", false);
+		if (!drop)
+		{
+			if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
+				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
+		}
 	}
 	else if (!drop)
 	{
