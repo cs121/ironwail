@@ -201,6 +201,8 @@ typedef struct
 								// first frame
 	usercmd_t	cmd;			// last command sent to the server
 	usercmd_t	pendingcmd;		// accumulated state from mice+joysticks.
+	unsigned int	last_cmd_ack;		// last command acknowledged by the server
+	unsigned int	last_cmd_ack_echo;	// last command ack echoed back by the server
 
 // information for local display
 	int			stats[MAX_CL_STATS];	// health, etc

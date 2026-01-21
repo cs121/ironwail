@@ -605,11 +605,18 @@ nextmsg:
 			{
 				int cmd_count;
 				int cmd_index;
+				unsigned int cmd_seq;
+				unsigned int cmd_ack;
 
 			// read ping time
 				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
 					= qcvm->time - MSG_ReadFloat ();
 				host_client->num_pings++;
+
+				cmd_seq = (unsigned int)MSG_ReadLong ();
+				cmd_ack = (unsigned int)MSG_ReadLong ();
+				if (SV_CmdSeqNewer (cmd_ack, host_client->last_cmd_ack))
+					host_client->last_cmd_ack = cmd_ack;
 
 				cmd_count = MSG_ReadByte ();
 				for (cmd_index = 0; cmd_index < cmd_count; cmd_index++)
@@ -629,6 +636,8 @@ nextmsg:
 					if (move.impulse)
 						host_client->edict->v.impulse = move.impulse;
 				}
+				if (cmd_count == 0 && SV_CmdSeqNewer (cmd_seq, host_client->last_cmd_seq))
+					host_client->last_cmd_seq = cmd_seq;
 				break;
 			}
 

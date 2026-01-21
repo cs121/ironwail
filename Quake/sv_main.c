@@ -3660,6 +3660,7 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	//johnfitz
 
 	MSG_WriteLong (msg, (int)client->last_cmd_seq);
+	MSG_WriteLong (msg, (int)client->last_cmd_ack);
 	for (i=0 ; i<3 ; i++)
 		MSG_WriteCoord (msg, ent->v.origin[i], sv.protocolflags);
 	for (i=0 ; i<3 ; i++)
