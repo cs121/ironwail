@@ -186,6 +186,44 @@ static int NET_GetPacketDataLimit (const qsocket_t *sock)
 	return q_min (data_limit, MAX_DATAGRAM);
 }
 
+static unsigned int NET_GetRateBudgetLimit (const qsocket_t *sock)
+{
+	unsigned int payload = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int budget = payload * 4u;
+
+	if (budget < (unsigned int)(NET_HEADERSIZE + 1))
+		budget = (unsigned int)(NET_HEADERSIZE + 1);
+	return budget;
+}
+
+static void NET_UpdateRateBudget (qsocket_t *sock)
+{
+	if (IS_LOOP_DRIVER(sock->driver))
+		return;
+	if (sock->rate_next_time == 0.0 || net_time >= sock->rate_next_time)
+	{
+		sock->rate_budget = (int)NET_GetRateBudgetLimit (sock);
+		sock->rate_next_time = net_time + 0.1;
+	}
+}
+
+static qboolean NET_HasRateBudget (qsocket_t *sock, unsigned int packet_len)
+{
+	if (IS_LOOP_DRIVER(sock->driver))
+		return true;
+	NET_UpdateRateBudget(sock);
+	return sock->rate_budget >= (int)packet_len;
+}
+
+static qboolean NET_ConsumeRateBudget (qsocket_t *sock, unsigned int packet_len)
+{
+	if (!NET_HasRateBudget(sock, packet_len))
+		return false;
+	if (!IS_LOOP_DRIVER(sock->driver))
+		sock->rate_budget -= (int)packet_len;
+	return true;
+}
+
 static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len)
 {
 	static double next_log_time = 0.0;
@@ -283,6 +321,9 @@ static int NET_SendReliablePacket (qsocket_t *sock, net_reliable_send_t *packet,
 		return -1;
 	}
 
+	if (!NET_ConsumeRateBudget(sock, packet_len))
+		return 0;
+
 	NET_SetPacketHeader(sock, packet_len, flags, packet->sequence);
 	Q_memcpy (packetBuffer.data, sock->sendMessage + packet->offset, packet->length);
 
@@ -328,6 +369,8 @@ static int NET_SendPendingReliable (qsocket_t *sock)
 		if (data_len > (int)max_data)
 			data_len = (int)max_data;
 		eom = (sock->sendMessageOffset + data_len) >= sock->sendMessageLength;
+		if (!NET_HasRateBudget(sock, (unsigned int)(NET_HEADERSIZE + data_len)))
+			break;
 
 		sequence = sock->sendSequence++;
 		packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
@@ -338,8 +381,13 @@ static int NET_SendPendingReliable (qsocket_t *sock)
 		packet->acked = false;
 		packet->lastSendTime = 0.0;
 
-		if (NET_SendReliablePacket (sock, packet, "window", false) == -1)
-			return -1;
+		{
+			int ret = NET_SendReliablePacket (sock, packet, "window", false);
+			if (ret == -1)
+				return -1;
+			if (ret == 0)
+				break;
+		}
 
 		sock->sendMessageOffset += data_len;
 	}
@@ -416,7 +464,8 @@ static void NET_ResendReliablePackets (qsocket_t *sock)
 			continue;
 		if ((net_time - packet->lastSendTime) <= 1.0)
 			continue;
-		NET_SendReliablePacket (sock, packet, "resend", true);
+		if (NET_SendReliablePacket (sock, packet, "resend", true) == 0)
+			break;
 	}
 }
 
@@ -575,6 +624,9 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		NET_DebugMaybeLogSummary ();
 		return 0;
 	}
+
+	if (!NET_ConsumeRateBudget(sock, (unsigned int)packetLen))
+		return 0;
 
 	NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE, sock->unreliableSendSequence++);
 	Q_memcpy (packetBuffer.data, data->data, data->cursize);
