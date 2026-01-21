@@ -1755,6 +1755,37 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	CL_RecordEntitySnap (entnum, state);
 }
 
+static int CL_ApplySnapshotOverlay (const snapshot_state_t *states, const byte *present)
+{
+	int i;
+	int touched = 0;
+
+	if (!states || !present)
+		return 0;
+
+	for (i = 1; i < cl_max_edicts; i++)
+	{
+		if (!present[i])
+			continue;
+		cl.snapshot_present[i] = 1;
+		CL_ApplySnapshotState (i, &states[i]);
+		CL_MarkSnapshotEntityUpdated (i);
+		touched++;
+	}
+
+	return touched;
+}
+
+static void CL_LogSnapshotDebug (const char *label, unsigned int seq, unsigned int flags,
+	qboolean snap_complete, int removes_parsed, int touched, qboolean base_advanced)
+{
+	if (cl_snapshot_debug.value < 1.0f)
+		return;
+	Con_Printf ("cl_snapshot %s seq %u flags 0x%x complete %d removes %d touched %d base_adv %d\n",
+		label ? label : "unknown", seq, flags, snap_complete ? 1 : 0,
+		removes_parsed, touched, base_advanced ? 1 : 0);
+}
+
 /*
 ==================
 CL_ParseBaseline
@@ -1884,6 +1915,8 @@ static void CL_ParseSnapshotDelta (void)
 	unsigned int mask;
 	int count;
 	int i;
+	int removes_parsed = 0;
+	int touched = 0;
 	qboolean baseline_match;
 	qboolean drop;
 	unsigned short seq16;
@@ -1891,6 +1924,7 @@ static void CL_ParseSnapshotDelta (void)
 	qboolean need_full;
 	qboolean base_complete;
 	qboolean continuation_pending;
+	qboolean base_advanced = false;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	baseline_seq = (unsigned int)MSG_ReadLong ();
@@ -1954,6 +1988,7 @@ static void CL_ParseSnapshotDelta (void)
 	CL_ClearSnapshotStage ();
 
 	count = (unsigned short)MSG_ReadShort ();
+	removes_parsed = count;
 	if (msg_badread || count < 0 || count > cl_max_edicts)
 	{
 		CL_RequestFullSnapshot ("snapshot_delta remove header", true);
@@ -2062,6 +2097,7 @@ static void CL_ParseSnapshotDelta (void)
 			cl.snapshot_present[i] = 1;
 			CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 			CL_MarkSnapshotEntityUpdated (i);
+			touched++;
 		}
 
 		for (i = 1; i < cl_max_edicts; i++)
@@ -2074,15 +2110,18 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
 		cl.has_full_snapshot = true;
+		base_advanced = true;
 		(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
 		CL_RecordPlayerSnap ();
 		NET_DebugLogEvent (true,
 			"NETDBG time %.3f snap_complete_apply seq %u\n",
 			realtime, seq);
+		CL_LogSnapshotDebug ("delta", seq, 0, true, removes_parsed, touched, base_advanced);
 	}
 	else if (!drop)
 	{
 		CL_SendSnapshotNak (cl.snapshot_baseline_seq, baseline_seq);
+		CL_LogSnapshotDebug ("delta", seq, 0, true, removes_parsed, touched, base_advanced);
 	}
 }
 
@@ -2164,6 +2203,8 @@ static void CL_ParseSnapshot2 (void)
 	qboolean baseline_match;
 	qboolean drop;
 	int i;
+	int removes_parsed = 0;
+	int touched = 0;
 	unsigned short seq16;
 	unsigned short base16;
 	qboolean incomplete;
@@ -2171,6 +2212,7 @@ static void CL_ParseSnapshot2 (void)
 	qboolean is_full;
 	qboolean is_delta;
 	const int incomplete_limit = 3;
+	qboolean base_advanced = false;
 
 	CL_ReadSnapshotHeader (&header);
 	drop = CL_ShouldDropSnapshot ();
@@ -2267,6 +2309,8 @@ static void CL_ParseSnapshot2 (void)
 		if (continuation || cl.snapshot_chunk_active)
 		{
 			qboolean apply_complete;
+			qboolean apply_incomplete;
+			qboolean chunk_total_ok = true;
 			qboolean chunk_order_error = false;
 
 			if (!cl.snapshot_chunk_active || cl.snapshot_chunk_seq != header.seq)
@@ -2362,18 +2406,19 @@ static void CL_ParseSnapshot2 (void)
 			if (!final_chunk)
 				return;
 
-			apply_complete = !drop && final_chunk && !finalize_invalid && !incomplete;
-			if (apply_complete && rem_zero)
-				incomplete = false;
-			if (apply_complete && cl.snapshot_chunk_expected_total
+			if (cl.snapshot_chunk_expected_total
 				&& cl.snapshot_chunk_received != cl.snapshot_chunk_expected_total)
 			{
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_chunk_mismatch seq %u recv %u total %u\n",
 					realtime, header.seq, cl.snapshot_chunk_received, cl.snapshot_chunk_expected_total);
 				CL_RequestFullSnapshot ("snapshot2 chunk total", false);
-				apply_complete = false;
+				chunk_total_ok = false;
 			}
+			apply_complete = !drop && final_chunk && !finalize_invalid && !incomplete && chunk_total_ok;
+			apply_incomplete = !drop && final_chunk && !finalize_invalid && incomplete && chunk_total_ok;
+			if (apply_complete && rem_zero)
+				incomplete = false;
 
 			if (apply_complete)
 			{
@@ -2391,6 +2436,7 @@ static void CL_ParseSnapshot2 (void)
 					cl.snapshot_present[i] = 1;
 					CL_ApplySnapshotState (i, &cl.snapshot_chunk[i]);
 					CL_MarkSnapshotEntityUpdated (i);
+					touched++;
 				}
 
 				if (reset_interp)
@@ -2409,10 +2455,29 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
 				CL_EnsureViewEntityOrigin ("snapshot2");
+				base_advanced = true;
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
 					cl.has_full_snapshot ? 1 : 0);
+				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, true,
+					0, touched, base_advanced);
+			}
+			else if (apply_incomplete)
+			{
+				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
+				touched = CL_ApplySnapshotOverlay (cl.snapshot_chunk, cl.snapshot_chunk_present);
+				cl.snap_last_incomplete_seq = seq16;
+				cl.snap_last_incomplete = true;
+				cl.snap_incomplete_count++;
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap2_partial_apply seq %u flags 0x%x incomplete %d has_full %d\n",
+					realtime, header.seq, header.flags, cl.snap_incomplete_count,
+					cl.has_full_snapshot ? 1 : 0);
+				if (cl.snap_incomplete_count >= incomplete_limit)
+					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
+				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
+					0, touched, base_advanced);
 			}
 			else if (!drop)
 			{
@@ -2425,6 +2490,8 @@ static void CL_ParseSnapshot2 (void)
 					cl.has_full_snapshot ? 1 : 0);
 				if (cl.snap_incomplete_count >= incomplete_limit)
 					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
+				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
+					0, touched, base_advanced);
 			}
 			if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
@@ -2487,6 +2554,7 @@ static void CL_ParseSnapshot2 (void)
 					cl.snapshot_present[i] = 1;
 					CL_ApplySnapshotState (i, &cl.snapshot_baseline[i]);
 					CL_MarkSnapshotEntityUpdated (i);
+					touched++;
 				}
 
 				if (reset_interp)
@@ -2505,13 +2573,18 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_incomplete_count = 0;
 				CL_RecordPlayerSnap ();
 				CL_EnsureViewEntityOrigin ("snapshot2");
+				base_advanced = true;
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 					realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
 					cl.has_full_snapshot ? 1 : 0);
+				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, true,
+					0, touched, base_advanced);
 			}
 			else
 			{
+				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
+				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
 				cl.snap_incomplete_count++;
@@ -2521,6 +2594,8 @@ static void CL_ParseSnapshot2 (void)
 					cl.has_full_snapshot ? 1 : 0);
 				if (cl.snap_incomplete_count >= incomplete_limit)
 					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
+				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
+					0, touched, base_advanced);
 			}
 			if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 				CL_RequestFullSnapshot ("snapshot2 ack failed", false);
@@ -2574,13 +2649,14 @@ static void CL_ParseSnapshot2 (void)
 		for (i = 0; i < header.num_removed; i++)
 		{
 			int entnum = (unsigned short)MSG_ReadShort ();
+			removes_parsed++;
 			if (msg_badread)
 			{
 				CL_RequestFullSnapshot ("snapshot2 remove list", true);
 				msg_readcount = net_message.cursize;
 				return;
 			}
-			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
+			if (!drop && baseline_match && !incomplete && entnum > 0 && entnum < cl_max_edicts)
 				cl.snapshot_stage_remove[entnum] = 1;
 		}
 	}
@@ -2697,6 +2773,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.snapshot_baseline[i] = cl.snapshot_stage[i];
 				CL_ApplySnapshotState (i, &cl.snapshot_stage[i]);
 				CL_MarkSnapshotEntityUpdated (i);
+				touched++;
 			}
 
 			CL_Predict_Reapply ();
@@ -2713,15 +2790,20 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_incomplete = false;
 			cl.snap_incomplete_count = 0;
 			cl.has_full_snapshot = true;
+			base_advanced = true;
 			CL_RecordPlayerSnap ();
 			CL_EnsureViewEntityOrigin ("snapshot2");
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap2_apply seq %u flags 0x%x full %d delta %d has_full %d\n",
 				realtime, header.seq, header.flags, is_full ? 1 : 0, is_delta ? 1 : 0,
 				cl.has_full_snapshot ? 1 : 0);
+			CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, true,
+				removes_parsed, touched, base_advanced);
 		}
 		else
 		{
+			// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
+			touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
 			cl.snap_last_incomplete_seq = seq16;
 			cl.snap_last_incomplete = true;
 			cl.snap_incomplete_count++;
@@ -2731,6 +2813,8 @@ static void CL_ParseSnapshot2 (void)
 				cl.has_full_snapshot ? 1 : 0);
 			if (cl.snap_incomplete_count >= incomplete_limit)
 				CL_RequestFullSnapshot ("snapshot2 incomplete", false);
+			CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, false,
+				removes_parsed, touched, base_advanced);
 		}
 		if (!CL_SendSnapshotAck (CL_GetSnapshotAckSeq ()))
 			CL_RequestFullSnapshot ("snapshot2 ack failed", false);
@@ -2738,6 +2822,8 @@ static void CL_ParseSnapshot2 (void)
 	else if (!drop)
 	{
 		CL_SendSnapshotNak (cl.snapshot_baseline_seq, header.base_seq);
+		CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, !incomplete,
+			removes_parsed, touched, base_advanced);
 	}
 }
 

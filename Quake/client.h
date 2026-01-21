@@ -384,6 +384,7 @@ extern	cvar_t	m_side;
 extern	cvar_t	cl_startdemos;
 extern	cvar_t	cl_confirmquit;
 extern	cvar_t	cl_snap_debug;
+extern	cvar_t	cl_snapshot_debug;
 extern	cvar_t	cl_delta_reject_debug;
 extern	cvar_t	cl_full_reasm_debug;
 extern	cvar_t	cl_full_reasm_timeout_ms;
