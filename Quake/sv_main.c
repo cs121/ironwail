@@ -564,6 +564,7 @@ void SV_ConnectClient (int clientnum)
 	byte			*snapshot_pending_present;
 	byte			*snapshot_pending_relevant;
 	byte			*snapshot_pending_flags;
+	unsigned int	*snapshot_last_sent_seq_by_ent;
 
 	client = svs.clients + clientnum;
 	memcpy (snapshot_baselines, client->snapshot_baselines, sizeof(snapshot_baselines));
@@ -572,6 +573,7 @@ void SV_ConnectClient (int clientnum)
 	snapshot_pending_present = client->snapshot_pending_present;
 	snapshot_pending_relevant = client->snapshot_pending_relevant;
 	snapshot_pending_flags = client->snapshot_pending_flags;
+	snapshot_last_sent_seq_by_ent = client->snapshot_last_sent_seq_by_ent;
 
 	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
 
@@ -591,9 +593,11 @@ void SV_ConnectClient (int clientnum)
 	client->snapshot_pending_present = snapshot_pending_present;
 	client->snapshot_pending_relevant = snapshot_pending_relevant;
 	client->snapshot_pending_flags = snapshot_pending_flags;
+	client->snapshot_last_sent_seq_by_ent = snapshot_last_sent_seq_by_ent;
 	if (!client->snapshot_baselines[0] || !client->snapshot_baseline_present[0]
 		|| !client->snapshot_pending || !client->snapshot_pending_present
-		|| !client->snapshot_pending_relevant || !client->snapshot_pending_flags)
+		|| !client->snapshot_pending_relevant || !client->snapshot_pending_flags
+		|| !client->snapshot_last_sent_seq_by_ent)
 		SV_InitClientSnapshotData (client);
 	SV_ResetClientSnapshot (client);
 	client->netconnection = netconnection;
@@ -804,6 +808,11 @@ static uint16_t		net_edicts_sorted[MAX_NET_EDICTS];
 #define SNAPFLAG_HIRES_ANGLES	(1u<<3)
 #define SNAPFLAG_NO_DELTA		(1u<<4)
 
+#define SNAP_PRIORITY_COUNT 5
+#define SNAP_PRIORITY_NEAR_DIST 512.0f
+#define SNAP_PRIORITY_MID_DIST 1024.0f
+#define SNAP_PRIORITY_FAR_DIST 2048.0f
+
 static qboolean SV_SnapshotSeqNewer (unsigned int a, unsigned int b)
 {
 	return NETSEQ_GT (a, b);
@@ -878,6 +887,7 @@ static void SV_InitClientSnapshotData (client_t *client)
 	client->snapshot_pending_present = (byte *) Hunk_AllocName (max_edicts * sizeof(byte), "sv_snap_pending_present");
 	client->snapshot_pending_relevant = (byte *) Hunk_AllocName (max_edicts * sizeof(byte), "sv_snap_pending_relevant");
 	client->snapshot_pending_flags = (byte *) Hunk_AllocName (max_edicts * sizeof(byte), "sv_snap_pending_flags");
+	client->snapshot_last_sent_seq_by_ent = (unsigned int *) Hunk_AllocName (max_edicts * sizeof(unsigned int), "sv_snap_last_sent");
 }
 
 static void SV_ResetClientSnapshot (client_t *client)
@@ -936,6 +946,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->mtu_dropped_tier2 = 0;
 	client->mtu_debug_next_time = 0;
 	client->datagram_overflow_next_time = 0;
+	client->snapshot_prio_cursor = 0;
 	client->snapshot_baseline_head = 0;
 	client->snapshot_baseline_index = -1;
 	for (i = 0; i < SV_SNAPSHOT_BASELINE_HISTORY; i++)
@@ -959,6 +970,8 @@ static void SV_ResetClientSnapshot (client_t *client)
 		memset (client->snapshot_pending_relevant, 0, max_edicts * sizeof(byte));
 	if (client->snapshot_pending_flags)
 		memset (client->snapshot_pending_flags, 0, max_edicts * sizeof(byte));
+	if (client->snapshot_last_sent_seq_by_ent)
+		memset (client->snapshot_last_sent_seq_by_ent, 0, max_edicts * sizeof(unsigned int));
 }
 
 static void SV_InitEntityStream (client_t *client, int total_entities, unsigned int seq)
@@ -1136,7 +1149,8 @@ static byte SV_SnapshotFlagsForEnt (const edict_t *ent)
 		if (SV_SnapshotMoverMoving (ent))
 		{
 			flags |= SNAPFLAG_FORCE_ORIGIN | SNAPFLAG_FORCE_ANGLES;
-			flags |= SNAPFLAG_NO_DELTA;
+			if (!sv_snapshot2.value)
+				flags |= SNAPFLAG_NO_DELTA;
 		}
 	}
 	else if (ent->v.movetype == MOVETYPE_TOSS || ent->v.movetype == MOVETYPE_BOUNCE)
@@ -1145,7 +1159,8 @@ static byte SV_SnapshotFlagsForEnt (const edict_t *ent)
 		if (SV_SnapshotTossMoving (ent) && ent->v.solid == SOLID_TRIGGER)
 		{
 			flags |= SNAPFLAG_FORCE_ORIGIN;
-			flags |= SNAPFLAG_NO_DELTA;
+			if (!sv_snapshot2.value)
+				flags |= SNAPFLAG_NO_DELTA;
 		}
 	}
 
@@ -1162,6 +1177,27 @@ static qboolean SV_SnapshotMandatoryEnt (const edict_t *ent)
 static qboolean SV_SnapshotNeedsBaseline (const byte *baseline_present, int entnum)
 {
 	return baseline_present && !baseline_present[entnum];
+}
+
+static float SV_SnapshotDistanceSq (const edict_t *clent, const edict_t *ent)
+{
+	vec3_t delta;
+	VectorSubtract (ent->v.origin, clent->v.origin, delta);
+	return DotProduct (delta, delta);
+}
+
+static int SV_SnapshotResendInterval (float dist_sq, qboolean changed)
+{
+	float far_sq = SNAP_PRIORITY_FAR_DIST * SNAP_PRIORITY_FAR_DIST;
+	float mid_sq = SNAP_PRIORITY_MID_DIST * SNAP_PRIORITY_MID_DIST;
+
+	if (changed)
+		return 0;
+	if (dist_sq > far_sq)
+		return 5;
+	if (dist_sq > mid_sq)
+		return 3;
+	return 2;
 }
 
 static qboolean SV_SnapshotPriorityMover (const edict_t *ent)
@@ -1183,17 +1219,41 @@ static qboolean SV_SnapshotPriorityMissile (const edict_t *ent)
 	return false;
 }
 
-static qboolean SV_SnapshotTier1Ent (const edict_t *ent)
+static int SV_SnapshotPriorityTier (const edict_t *clent, const edict_t *ent, qboolean changed, float dist_sq)
 {
-	if (SV_SnapshotPriorityMover (ent))
-		return true;
-	if (SV_SnapshotPriorityMissile (ent))
-		return true;
-	if ((int)ent->v.solid == SOLID_BSP)
-		return true;
-	if (ent->v.velocity[0] || ent->v.velocity[1] || ent->v.velocity[2])
-		return true;
-	return false;
+	float near_sq = SNAP_PRIORITY_NEAR_DIST * SNAP_PRIORITY_NEAR_DIST;
+	float mid_sq = SNAP_PRIORITY_MID_DIST * SNAP_PRIORITY_MID_DIST;
+
+	if (SV_SnapshotPriorityMover (ent) || SV_SnapshotPriorityMissile (ent))
+	{
+		if (dist_sq <= near_sq)
+			return 0;
+		if (dist_sq <= mid_sq)
+			return 1;
+		return 2;
+	}
+
+	if (((int)ent->v.flags & FL_CLIENT) && ent != clent)
+	{
+		if (dist_sq <= near_sq)
+			return 1;
+		if (dist_sq <= mid_sq)
+			return 2;
+		return 3;
+	}
+
+	if (changed)
+	{
+		if (dist_sq <= near_sq)
+			return 1;
+		if (dist_sq <= mid_sq)
+			return 2;
+		return 3;
+	}
+
+	if (dist_sq <= mid_sq)
+		return 3;
+	return 4;
 }
 
 static int SV_SnapshotEntitySizeWorst (void)
@@ -1491,15 +1551,16 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 	out->step = (ent->v.movetype == MOVETYPE_STEP);
 }
 
-static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byte *present,
+static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, byte *present,
 	byte *relevant, byte *snapflags, int budget_bytes, int optional_budget_bytes, int header_bytes,
-	const byte *baseline_present,
+	const snapshot_state_t *baseline_states, const byte *baseline_present,
+	qboolean delta_mode, unsigned int current_seq,
 	int *out_mandatory, int *out_mandatory_bytes, int *out_total_bytes, int *out_dropped,
-	int *out_dropped_tier1, int *out_dropped_tier2, qboolean debug_frame,
+	int *out_dropped_tier1, int *out_dropped_tier2,
+	int *out_sent_by_priority, int *out_skipped_by_priority, qboolean debug_frame,
 	qboolean *out_continuation, qboolean *out_mandatory_oversize)
 {
-	int	num, j, numents, count;
-	int	k;
+	int	num, j, k, numents, count;
 	int mandatory_count = 0;
 	int mandatory_bytes = 0;
 	int total_bytes = 0;
@@ -1509,8 +1570,13 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 	int entity_budget = budget_bytes - header_bytes;
 	int optional_entity_budget = optional_budget_bytes - header_bytes;
 	int remaining_budget;
+	int sent_by_priority[SNAP_PRIORITY_COUNT] = {0};
+	int skipped_by_priority[SNAP_PRIORITY_COUNT] = {0};
 	qboolean continuation = false;
 	edict_t	*ent;
+	edict_t *clent = client->edict;
+	qboolean snapshot2 = SV_Snapshot2RecoveryEnabled ();
+	int stream_start = 0;
 
 	if (entity_budget < 0)
 		entity_budget = 0;
@@ -1542,12 +1608,26 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		num = net_edicts_sorted[j];
 		ent = EDICT_NUM (num);
 
-		if (!SV_SnapshotMandatoryEnt (ent) && !SV_SnapshotNeedsBaseline (baseline_present, num))
-			continue;
+		/*
+		** Mandatory policy:
+		** - Snapshot2 deltas: only the local player is mandatory and must fit MTU.
+		** - Full snapshots and legacy protocols: keep prior mandatory+baseline behavior.
+		*/
+		if (delta_mode && snapshot2)
+		{
+			if (ent != clent)
+				continue;
+		}
+		else
+		{
+			if (!SV_SnapshotMandatoryEnt (ent) && !SV_SnapshotNeedsBaseline (baseline_present, num))
+				continue;
+		}
 
 		SV_FillSnapshotState (ent, &states[num]);
 
-		if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
+		if (ent != clent && states[num].state.alpha == ENTALPHA_ZERO
+			&& !((int)ent->v.effects & qcvm->effects_mask))
 			continue;
 
 		present[num] = 1;
@@ -1582,126 +1662,102 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 			remaining_budget = 0;
 	}
 
-	for (j=0 ; j<numents ; j++)
+	if (numents > 0)
+		stream_start = client->snapshot_prio_cursor % numents;
+
+	for (k = 0; k < SNAP_PRIORITY_COUNT; k++)
 	{
-		num = net_edicts_sorted[j];
-		ent = EDICT_NUM (num);
+		int start = (k >= 2 && numents > 0) ? stream_start : 0;
+		int idx;
 
-		if (present[num] || !SV_SnapshotTier1Ent (ent))
-			continue;
-
-		if (remaining_budget <= 0)
+		for (idx = 0; idx < numents; idx++)
 		{
-			continuation = true;
-			for (k = j; k < numents; k++)
+			int check = (start + idx) % numents;
+			float dist_sq;
+			byte snapflag = 0;
+			unsigned int mask = 0;
+			qboolean changed = true;
+			int priority;
+			int resend_interval = 0;
+			unsigned int last_sent_seq = 0;
+			int ent_size;
+			qboolean needs_baseline;
+
+			num = net_edicts_sorted[check];
+			ent = EDICT_NUM (num);
+
+			if (present[num])
+				continue;
+			if (delta_mode && snapshot2 && ent == clent)
+				continue;
+
+			SV_FillSnapshotState (ent, &states[num]);
+			if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
+				continue;
+
+			if (snapflags)
+				snapflag = SV_SnapshotFlagsForEnt (ent);
+
+			needs_baseline = SV_SnapshotNeedsBaseline (baseline_present, num);
+			if (baseline_states && baseline_present && baseline_present[num]
+				&& !(snapflag & SNAPFLAG_NO_DELTA))
 			{
-				int pending = net_edicts_sorted[k];
-				edict_t *pending_ent = EDICT_NUM (pending);
-				if (present[pending])
-					continue;
-				if (!SV_SnapshotTier1Ent (pending_ent))
-					continue;
-				dropped_tier1++;
+				mask = SV_SnapshotFieldMask (&states[num], &baseline_states[num], snapflag);
+				changed = (mask != 0);
 			}
-			break;
-		}
+			else if (baseline_present && baseline_present[num] && (snapflag & SNAPFLAG_NO_DELTA))
+			{
+				changed = true;
+			}
+			else
+			{
+				changed = true;
+			}
 
-		SV_FillSnapshotState (ent, &states[num]);
+			dist_sq = SV_SnapshotDistanceSq (clent, ent);
+			priority = SV_SnapshotPriorityTier (clent, ent, changed, dist_sq);
+			if (needs_baseline && priority > 1)
+				priority = 1;
+			if (priority != k)
+				continue;
 
-		if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
-			continue;
+			if (delta_mode && snapshot2 && client->snapshot_last_sent_seq_by_ent)
+			{
+				resend_interval = SV_SnapshotResendInterval (dist_sq, changed);
+				last_sent_seq = client->snapshot_last_sent_seq_by_ent[num];
+				if (resend_interval > 0 && last_sent_seq
+					&& (int)(current_seq - last_sent_seq) < resend_interval)
+					continue;
+			}
 
-		{
-			byte snapflag = snapflags ? SV_SnapshotFlagsForEnt (ent) : 0;
-			int ent_size = SV_SnapshotEntityBudgetBytes (snapflag);
+			ent_size = SV_SnapshotEntityBudgetBytes (snapflag);
 			if (ent_size > remaining_budget)
 			{
 				continuation = true;
-				for (k = j; k < numents; k++)
-				{
-					int pending = net_edicts_sorted[k];
-					edict_t *pending_ent = EDICT_NUM (pending);
-					if (present[pending])
-						continue;
-					if (!SV_SnapshotTier1Ent (pending_ent))
-						continue;
-					dropped_tier1++;
-				}
-				break;
+				skipped_by_priority[k]++;
+				continue;
 			}
+
 			present[num] = 1;
 			if (snapflags)
 				snapflags[num] = snapflag;
 			total_bytes += ent_size;
 			remaining_budget -= ent_size;
-		}
-		count++;
-	}
-
-	if (!continuation)
-	{
-		for (j=0 ; j<numents ; j++)
-		{
-			num = net_edicts_sorted[j];
-			ent = EDICT_NUM (num);
-
-			if (present[num])
-				continue;
-
-			if (remaining_budget <= 0)
-			{
-				continuation = true;
-				for (k = j; k < numents; k++)
-				{
-					int pending = net_edicts_sorted[k];
-					edict_t *pending_ent = EDICT_NUM (pending);
-					if (present[pending])
-						continue;
-					if (SV_SnapshotTier1Ent (pending_ent))
-						continue;
-					dropped_tier2++;
-				}
-				break;
-			}
-
-			SV_FillSnapshotState (ent, &states[num]);
-
-			if (states[num].state.alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
-				continue;
-
-			{
-				byte snapflag = snapflags ? SV_SnapshotFlagsForEnt (ent) : 0;
-				int ent_size = SV_SnapshotEntityBudgetBytes (snapflag);
-				if (ent_size > remaining_budget)
-				{
-					continuation = true;
-					for (k = j; k < numents; k++)
-					{
-						int pending = net_edicts_sorted[k];
-						edict_t *pending_ent = EDICT_NUM (pending);
-						if (present[pending])
-							continue;
-						if (SV_SnapshotTier1Ent (pending_ent))
-							continue;
-						dropped_tier2++;
-					}
-					break;
-				}
-				present[num] = 1;
-				if (snapflags)
-					snapflags[num] = snapflag;
-				total_bytes += ent_size;
-				remaining_budget -= ent_size;
-			}
 			count++;
+			sent_by_priority[k]++;
+			if (delta_mode && snapshot2 && client->snapshot_last_sent_seq_by_ent)
+				client->snapshot_last_sent_seq_by_ent[num] = current_seq;
 
 			if (debug_frame && net_snap_debug.value)
-				Con_DPrintf ("snapdbg %s ent %d included hires_o %d hires_a %d\n",
-					PR_GetString (clent->v.netname), num,
-					(snapflags[num] & SNAPFLAG_HIRES_ORIGIN) != 0,
-					(snapflags[num] & SNAPFLAG_HIRES_ANGLES) != 0);
+				Con_DPrintf ("snapdbg %s ent %d prio %d hires_o %d hires_a %d\n",
+					PR_GetString (clent->v.netname), num, k + 1,
+					(snapflag & SNAPFLAG_HIRES_ORIGIN) != 0,
+					(snapflag & SNAPFLAG_HIRES_ANGLES) != 0);
 		}
 	}
+
+	if (numents > 0)
+		client->snapshot_prio_cursor = (client->snapshot_prio_cursor + 1) % numents;
 
 	if (out_mandatory)
 		*out_mandatory = mandatory_count;
@@ -1709,15 +1765,81 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		*out_mandatory_bytes = mandatory_bytes;
 	if (out_total_bytes)
 		*out_total_bytes = total_bytes;
-	dropped_count = dropped_tier1 + dropped_tier2;
+	for (j = 0; j < SNAP_PRIORITY_COUNT; j++)
+		dropped_count += skipped_by_priority[j];
+	dropped_tier1 = skipped_by_priority[0];
+	dropped_tier2 = skipped_by_priority[1];
 	if (out_dropped)
 		*out_dropped = dropped_count;
 	if (out_dropped_tier1)
 		*out_dropped_tier1 = dropped_tier1;
 	if (out_dropped_tier2)
 		*out_dropped_tier2 = dropped_tier2;
+	if (out_sent_by_priority)
+		memcpy (out_sent_by_priority, sent_by_priority, sizeof(sent_by_priority));
+	if (out_skipped_by_priority)
+		memcpy (out_skipped_by_priority, skipped_by_priority, sizeof(skipped_by_priority));
 	if (out_continuation)
 		*out_continuation = continuation;
+
+	if (debug_frame && net_snap_debug.value && delta_mode && snapshot2 && baseline_states && baseline_present)
+	{
+		int top_ent[3] = {0};
+		int top_size[3] = {0};
+		unsigned int top_mask[3] = {0};
+
+		for (num = 1; num < qcvm->max_edicts; num++)
+		{
+			int estimate = 0;
+			unsigned int mask = 0;
+			byte snapflag = snapflags ? snapflags[num] : 0;
+
+			if (!present[num])
+				continue;
+
+			if (baseline_present[num] && !(snapflag & SNAPFLAG_NO_DELTA))
+			{
+				mask = SV_SnapshotFieldMask (&states[num], &baseline_states[num], snapflag);
+				if (!mask)
+					continue;
+				estimate = 2 + 4 + SV_SnapshotDeltaFieldSize (mask);
+			}
+			else
+			{
+				estimate = SV_Snapshot2EntitySizeForFlags (snapflag);
+				mask = 0xFFFFFFFFu;
+			}
+
+			for (j = 0; j < 3; j++)
+			{
+				if (estimate > top_size[j])
+				{
+					int shift;
+
+					for (shift = 2; shift > j; shift--)
+					{
+						top_size[shift] = top_size[shift - 1];
+						top_ent[shift] = top_ent[shift - 1];
+						top_mask[shift] = top_mask[shift - 1];
+					}
+					top_size[j] = estimate;
+					top_ent[j] = num;
+					top_mask[j] = mask;
+					break;
+				}
+			}
+		}
+
+		for (j = 0; j < 3; j++)
+		{
+			if (!top_ent[j])
+				continue;
+			NET_DebugLogEvent (false,
+				"NETDBG time %.3f snap_entity_bytes %s ent %d est_bytes %d mask 0x%x\n",
+				realtime, PR_GetString (clent->v.netname),
+				top_ent[j], top_size[j], top_mask[j]);
+		}
+	}
 
 	return count;
 }
@@ -2161,6 +2283,7 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	unsigned short remove_written = 0;
 	unsigned short add_written = 0;
 	unsigned short update_written = 0;
+	unsigned short remove_skipped = 0;
 	unsigned int flags = SNAPSHOT_FLAG_DELTA | extra_flags;
 	int header_size = 1 + 4 + 4 + 1 + 2 + 2;
 	int available = msg->maxsize - msg->cursize;
@@ -2187,8 +2310,8 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 		{
 			if (budget < 2)
 			{
-				incomplete = true;
-				break;
+				remove_skipped++;
+				continue;
 			}
 			remove_count++;
 			budget -= 2;
@@ -2317,6 +2440,10 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 		*out_add = add_written;
 	if (out_update)
 		*out_update = update_written;
+	if (remove_skipped && net_snap_debug.value)
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f snap_delta_remove_skip seq %u skipped %u\n",
+			realtime, seq, remove_skipped);
 	if (out_incomplete)
 		*out_incomplete = incomplete;
 }
@@ -2345,6 +2472,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	qboolean invalid_base = false;
 	qboolean need_full = false;
 	qboolean snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
+	int sent_by_priority[SNAP_PRIORITY_COUNT] = {0};
+	int skipped_by_priority[SNAP_PRIORITY_COUNT] = {0};
+	qboolean delta_mode = false;
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -2394,6 +2524,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		{
 			forced_full = true;
 			reason_force_full = true;
+		}
+		if (full_interval_s > 0.0 && (realtime - client->snapshot_last_full_time) > full_interval_s)
+		{
+			forced_full = true;
+			reason_interval = true;
 		}
 
 		if (client->entstream.active)
@@ -2465,6 +2600,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			int current_bytes = 0;
 			int remaining_bytes = 0;
 			int header_bytes = 0;
+			int total_bytes = 0;
 			int snapshot_budget_bytes = SV_SnapshotBudgetBytes (client, msg,
 				&mtu_payload_bytes, &current_bytes, &remaining_bytes, &header_bytes);
 			int mandatory_total_bytes = 0;
@@ -2475,12 +2611,20 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			qboolean debug_frame = false;
 			qboolean force_complete_full = need_full;
 			qboolean rebuild_snapshot = false;
+			qboolean allow_delta = false;
 
 			if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 			{
 				debug_frame = true;
 				client->snapshot_debug_next_time = realtime + 1.0;
 			}
+
+			allow_delta = (sv_snapshotdelta.value && have_baseline && !need_full && !forced_full);
+			if (baseline_seq == 0xFFFFFFFFu)
+				allow_delta = false;
+			delta_mode = (snapshot2_recovery && allow_delta);
+			if (sv_snapshot2.value && !delta_mode)
+				force_complete_full = true;
 
 			do
 			{
@@ -2497,14 +2641,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					build_optional_budget_bytes = header_bytes;
 				}
 
-				SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
+				SV_BuildClientSnapshot (client, client->snapshot_pending, client->snapshot_pending_present,
 					client->snapshot_pending_relevant, client->snapshot_pending_flags, build_budget_bytes,
 					build_optional_budget_bytes,
-					header_bytes, baseline_present, &mandatory_count, &mandatory_bytes, NULL,
-					&dropped_count, &dropped_tier1, &dropped_tier2, debug_frame, &budget_continuation,
-					&mandatory_oversize);
+					header_bytes, baseline_states, baseline_present, delta_mode, client->snapshot_next_seq,
+					&mandatory_count, &mandatory_bytes, &total_bytes, &dropped_count,
+					&dropped_tier1, &dropped_tier2, sent_by_priority, skipped_by_priority,
+					debug_frame, &budget_continuation, &mandatory_oversize);
 				mandatory_total_bytes = header_bytes + mandatory_bytes;
-				if (!force_complete_full && mtu_payload_bytes > 0
+				if (delta_mode && mtu_payload_bytes > 0
 					&& current_bytes + mandatory_total_bytes > mtu_payload_bytes)
 				{
 					if (snapshot2_recovery)
@@ -2527,7 +2672,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					client->mtu_dropped_tier2 = 0;
 					return;
 				}
-				if (!force_complete_full && mandatory_oversize)
+				if (delta_mode && mandatory_oversize)
 				{
 					if (snapshot2_recovery)
 					{
@@ -2556,6 +2701,34 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					realtime, client->name, client->snapshot_next_seq,
 					mandatory_total_bytes, build_budget_bytes, build_optional_budget_bytes,
 					dropped_count, dropped_tier1, dropped_tier2);
+			if (sv_snap_debug.value >= 1.0f && sv_snapshot2.value && delta_mode)
+			{
+				int optional_bytes_used = total_bytes - mandatory_bytes;
+				int highest_skipped = 0;
+				int tier;
+
+				for (tier = 0; tier < SNAP_PRIORITY_COUNT; tier++)
+				{
+					if (skipped_by_priority[tier] > 0)
+					{
+						highest_skipped = tier + 1;
+						break;
+					}
+				}
+
+				NET_DebugLogEvent (false,
+					"NETDBG time %.3f snap_delta_budget %s seq %u mtu %d mand_bytes %d opt_bytes %d sent[%d %d %d %d %d] skip[%d %d %d %d %d]\n",
+					realtime, client->name, client->snapshot_next_seq,
+					mtu_payload_bytes, mandatory_total_bytes, optional_bytes_used,
+					sent_by_priority[0], sent_by_priority[1], sent_by_priority[2],
+					sent_by_priority[3], sent_by_priority[4],
+					skipped_by_priority[0], skipped_by_priority[1], skipped_by_priority[2],
+					skipped_by_priority[3], skipped_by_priority[4]);
+				if (highest_skipped > 0)
+					NET_DebugLogEvent (false,
+						"NETDBG time %.3f snap_delta_skip %s seq %u tier %d reason budget\n",
+						realtime, client->name, client->snapshot_next_seq, highest_skipped);
+			}
 			if (dropped_count > 0 && sv_snap_debug.value >= 1.0f && sv_snapshot2.value)
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap_budget_drop(optional) %s seq %u drop_opt %d tier1 %d tier2 %d\n",
@@ -2572,19 +2745,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			if (!client->snapshot_next_seq)
 				client->snapshot_next_seq = 1;
 			client->snapshot_pending_time = realtime;
-			use_delta = (sv_snapshotdelta.value && have_baseline);
+			use_delta = allow_delta;
 			if (!have_baseline)
 				reason_no_base = true;
 			if (forced_full)
 			{
 				use_delta = false;
-				reason_force_full = true;
-			}
-			if (full_interval_s > 0.0 && (realtime - client->snapshot_last_full_time) > full_interval_s)
-			{
-				use_delta = false;
-				forced_full = true;
-				reason_interval = true;
+				if (!reason_interval)
+					reason_force_full = true;
 			}
 			if (use_delta && baseline_seq == 0xFFFFFFFFu)
 			{

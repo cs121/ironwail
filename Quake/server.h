@@ -240,6 +240,8 @@ typedef struct client_s
 	byte			*snapshot_pending_present;
 	byte			*snapshot_pending_relevant;
 	byte			*snapshot_pending_flags;
+	unsigned int	*snapshot_last_sent_seq_by_ent;
+	int				snapshot_prio_cursor;
 	int				snapshot_unacked_frames;
 	int				snapshot_pending_mandatory;
 	int				snapshot_pending_dropped_optional;
