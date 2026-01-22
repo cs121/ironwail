@@ -25,51 +25,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // protocol.h -- communications protocols
 
-#define	PROTOCOL_NETQUAKE	15 //johnfitz -- standard quake protocol
-#define PROTOCOL_FITZQUAKE	666 //johnfitz -- added new protocol for fitzquake 0.85
 #define PROTOCOL_RMQ		999
 
-// PROTOCOL_RMQ protocol flags
+// protocol flags (single modern protocol)
 #define PRFL_SHORTANGLE		(1 << 1)
-#define PRFL_FLOATANGLE		(1 << 2)
-#define PRFL_24BITCOORD		(1 << 3)
-#define PRFL_FLOATCOORD		(1 << 4)
-#define PRFL_EDICTSCALE		(1 << 5)
-#define PRFL_ALPHASANITY	(1 << 6)	// cleanup insanity with alpha
 #define PRFL_INT32COORD		(1 << 7)
 #define PRFL_SNAPSHOT_HIRES	(1 << 8)
 #define PRFL_SIGNON_CHUNKS	(1 << 9)	// signon streaming via svc_signon_chunk
-#define PRFL_MOREFLAGS		(1 << 31)	// not supported
-
-// if the high bit of the servercmd is set, the low bits are fast update flags:
-#define	U_MOREBITS		(1<<0)
-#define	U_ORIGIN1		(1<<1)
-#define	U_ORIGIN2		(1<<2)
-#define	U_ORIGIN3		(1<<3)
-#define	U_ANGLE2		(1<<4)
-#define	U_STEP			(1<<5)	//johnfitz -- was U_NOLERP, renamed since it's only used for MOVETYPE_STEP
-#define	U_FRAME			(1<<6)
-#define U_SIGNAL		(1<<7)	// just differentiates from other updates
-
-// svc_update can pass all of the fast update bits, plus more
-#define	U_ANGLE1		(1<<8)
-#define	U_ANGLE3		(1<<9)
-#define	U_MODEL			(1<<10)
-#define	U_COLORMAP		(1<<11)
-#define	U_SKIN			(1<<12)
-#define	U_EFFECTS		(1<<13)
-#define	U_LONGENTITY	(1<<14)
-//johnfitz -- PROTOCOL_FITZQUAKE -- new bits
-#define U_EXTEND1		(1<<15)
-#define U_ALPHA			(1<<16) // 1 byte, uses ENTALPHA_ENCODE, not sent if equal to baseline
-#define U_FRAME2		(1<<17) // 1 byte, this is .frame & 0xFF00 (second byte)
-#define U_MODEL2		(1<<18) // 1 byte, this is .modelindex & 0xFF00 (second byte)
-#define U_LERPFINISH	(1<<19) // 1 byte, 0.0-1.0 maps to 0-255, not sent if exactly 0.1, this is ent->v.nextthink - sv.time, used for lerping
-#define U_SCALE			(1<<20) // 1 byte, for PROTOCOL_RMQ PRFL_EDICTSCALE
-#define U_UNUSED21		(1<<21)
-#define U_UNUSED22		(1<<22)
-#define U_EXTEND2		(1<<23) // another byte to follow, future expansion
-//johnfitz
+#define PROTOCOL_RMQ_FLAGS	(PRFL_INT32COORD | PRFL_SHORTANGLE | PRFL_SNAPSHOT_HIRES | PRFL_SIGNON_CHUNKS)
 
 // snapshot delta field bits
 #define SNAP_ORIGIN1	(1u<<0)
@@ -92,10 +55,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SNAPFL_HIRES_ORIGIN	(1u<<2)
 #define SNAPFL_HIRES_ANGLES	(1u<<3)
 
-//johnfitz -- PROTOCOL_NEHAHRA transparency
-#define U_TRANS			(1<<15)
-//johnfitz
-
 #define	SU_VIEWHEIGHT	(1<<0)
 #define	SU_IDEALPITCH	(1<<1)
 #define	SU_PUNCH1		(1<<2)
@@ -111,7 +70,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	SU_WEAPONFRAME	(1<<12)
 #define	SU_ARMOR		(1<<13)
 #define	SU_WEAPON		(1<<14)
-//johnfitz -- PROTOCOL_FITZQUAKE -- new bits
 #define SU_EXTEND1		(1<<15) // another byte to follow
 #define SU_WEAPON2		(1<<16) // 1 byte, this is .weaponmodel & 0xFF00 (second byte)
 #define SU_ARMOR2		(1<<17) // 1 byte, this is .armorvalue & 0xFF00 (second byte)
@@ -129,7 +87,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SU_UNUSED29		(1<<29)
 #define SU_UNUSED30		(1<<30)
 #define SU_EXTEND3		(1<<31) // another byte to follow, future expansion
-//johnfitz
 
 // a sound with no channel is a local only sound
 #define	SND_VOLUME		(1<<0)	// a byte
@@ -139,19 +96,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DEFAULT_SOUND_PACKET_VOLUME		255
 #define DEFAULT_SOUND_PACKET_ATTENUATION	1.0
 
-//johnfitz -- PROTOCOL_FITZQUAKE -- new bits
 #define	SND_LARGEENTITY	(1<<3)	// a short + byte (instead of just a short)
 #define	SND_LARGESOUND	(1<<4)	// a short soundindex (instead of a byte)
-//johnfitz
 
-//johnfitz -- PROTOCOL_FITZQUAKE -- flags for entity baseline messages
+// flags for entity baseline messages
 #define B_LARGEMODEL	(1<<0)	// modelindex is short instead of byte
 #define B_LARGEFRAME	(1<<1)	// frame is short instead of byte
 #define B_ALPHA			(1<<2)	// 1 byte, uses ENTALPHA_ENCODE, not sent if ENTALPHA_DEFAULT
 #define B_SCALE			(1<<3)
-//johnfitz
 
-//johnfitz -- PROTOCOL_FITZQUAKE -- alpha encoding
+// alpha encoding
 #define ENTALPHA_DEFAULT	0	//entity's alpha is "default" (i.e. water obeys r_wateralpha) -- must be zero so zeroed out memory works
 #define ENTALPHA_ZERO		1	//entity is invisible (lowest possible alpha)
 #define ENTALPHA_ONE		255 //entity is fully opaque (highest possible alpha)
@@ -221,14 +175,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_sellscreen			33
 #define svc_cutscene			34
 
-//johnfitz -- PROTOCOL_FITZQUAKE -- new server messages
 #define	svc_skybox				37	// [string] name
 #define svc_bf					40
 #define svc_fog					41	// [byte] density [byte] red [byte] green [byte] blue [float] time
 #define svc_spawnbaseline2		42  // support for large modelindex, large framenum, alpha, using flags
 #define svc_spawnstatic2		43	// support for large modelindex, large framenum, alpha, using flags
 #define	svc_spawnstaticsound2	44	// [coord3] [short] samp [byte] vol [byte] aten
-//johnfitz
 
 // 2021 re-release server messages - see:
 // https://steamcommunity.com/sharedfiles/filedetails/?id=2679459726
@@ -248,9 +200,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define svc_localsound		56
 #define svc_snapshot_full	57
 #define svc_snapshot_delta	58
-#define svc_packedentities	59
-#define svc_snapshot2		60
-#define svc_signon_chunk	61	// [byte stage] [short seq] [byte flags] [short payload_len] [payload bytes]
+#define svc_snapshot2		59
+#define svc_signon_chunk	60	// [byte stage] [short seq] [byte flags] [short payload_len] [payload bytes]
 
 // Signon chunk format (PRFL_SIGNON_CHUNKS):
 //   svc_signon_chunk
@@ -320,6 +271,12 @@ typedef enum
 #define PACKEDENT_POS_SCALE	16.0f	// 12.4 int16 range ~+-2048; PACKEDENT_MASK_POS_FULL falls back to MSG_WriteCoord.
 #define PACKEDENT_VEL_SCALE	8.0f
 #define PACKEDENT_ANGLE_SCALE	(65536.0f / 360.0f)
+
+#define MAX_SNAPSHOT_ENTITIES	MAX_EDICTS
+#define MAX_REMOVE_ENTITIES	MAX_EDICTS
+#define MAX_PACKED_FIELDS	32
+#define MAX_CMDS_PER_PACKET	64
+#define MAX_SNAPSHOT_PARSE_ERRORS	5
 
 //
 // client to server

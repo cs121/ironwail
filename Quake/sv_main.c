@@ -33,13 +33,9 @@ server_static_t	svs;
 
 static char	localmodels[MAX_MODELS][8];	// inline model names for precache
 
-int		sv_protocol = PROTOCOL_RMQ; //johnfitz
-
 extern cvar_t nomonsters;
 
 static cvar_t sv_netsort = {"sv_netsort", "1", CVAR_NONE};
-static cvar_t sv_packedents = {"sv_packedents", "0", CVAR_NONE};
-static cvar_t sv_packedents_debug = {"sv_packedents_debug", "0", CVAR_NONE};
 static cvar_t sv_snapshotdelta = {"sv_snapshotdelta", "1", CVAR_NONE};
 static cvar_t sv_snapshotdebug = {"sv_snapshotdebug", "0", CVAR_NONE};
 static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
@@ -56,7 +52,6 @@ cvar_t sv_minrate = {"sv_minrate", "0", CVAR_NONE};
 cvar_t sv_maxrate = {"sv_maxrate", "0", CVAR_NONE};
 cvar_t sv_minupdaterate = {"sv_minupdaterate", "0", CVAR_NONE};
 cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
-static cvar_t sv_signon_chunks = {"sv_signon_chunks", "1", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
 static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE};
 static cvar_t sv_signon_debug = {"sv_signon_debug", "0", CVAR_NONE};
@@ -69,24 +64,9 @@ static cvar_t sv_icull_radius = {"sv_icull_radius", "2048", CVAR_NONE};
 static cvar_t sv_icull_radius_players = {"sv_icull_radius_players", "0", CVAR_NONE};
 static cvar_t sv_icull_pvs = {"sv_icull_pvs", "1", CVAR_NONE};
 static cvar_t sv_icull_debug = {"sv_icull_debug", "0", CVAR_NONE};
-static qboolean sv_packedents_selftest_done = false;
 
 static qboolean SV_SignonChunksEnabled (void);
 static void SV_SignonStreamSend (client_t *client);
-
-typedef struct
-{
-	int packets;
-	int entities;
-	int bytes;
-	int mask_bits_total;
-	int mask_hist[33];
-	int clamp_origin;
-	int clamp_velocity;
-} packedent_stats_t;
-
-static packedent_stats_t sv_packedents_stats;
-static double sv_packedents_stats_next_time = 0.0;
 
 typedef struct
 {
@@ -178,57 +158,6 @@ void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **sta
 	}
 }
 
-/*
-===============
-SV_Protocol_f
-===============
-*/
-void SV_Protocol_f (void)
-{
-	int i;
-
-	switch (Cmd_Argc())
-	{
-	case 1:
-		Con_Printf ("\"sv_protocol\" is \"%i\"\n", sv_protocol);
-		break;
-	case 2:
-		i = atoi(Cmd_Argv(1));
-		if (i != PROTOCOL_NETQUAKE && i != PROTOCOL_FITZQUAKE && i != PROTOCOL_RMQ)
-			Con_Printf ("sv_protocol must be %i or %i or %i\n", PROTOCOL_NETQUAKE, PROTOCOL_FITZQUAKE, PROTOCOL_RMQ);
-		else
-		{
-			sv_protocol = i;
-			if (sv.active)
-				Con_Printf ("changes will not take effect until the next level load.\n");
-		}
-		break;
-	default:
-		Con_SafePrintf ("usage: sv_protocol <protocol>\n");
-		break;
-	}
-}
-
-static void SV_PackedEntStats_f (void)
-{
-	int i;
-	float avg_bytes = sv_packedents_stats.entities ? (float)sv_packedents_stats.bytes / sv_packedents_stats.entities : 0.0f;
-	float avg_bits = sv_packedents_stats.entities ? (float)sv_packedents_stats.mask_bits_total / sv_packedents_stats.entities : 0.0f;
-
-	Con_Printf ("packedents stats: packets %d entities %d avg_bytes %.1f avg_bits %.1f clamp_origin %d clamp_vel %d\n",
-		sv_packedents_stats.packets, sv_packedents_stats.entities, avg_bytes, avg_bits,
-		sv_packedents_stats.clamp_origin, sv_packedents_stats.clamp_velocity);
-	Con_Printf ("packedents mask hist:");
-	for (i = 0; i < (int)countof(sv_packedents_stats.mask_hist); i++)
-	{
-		if (sv_packedents_stats.mask_hist[i])
-			Con_Printf (" %d:%d", i, sv_packedents_stats.mask_hist[i]);
-	}
-	Con_Printf ("\n");
-	if (!sv_packedents_debug.value)
-		Con_Printf ("packedents stats are gathered when sv_packedents_debug is enabled.\n");
-}
-
 static void SV_IcullStats_f (void)
 {
 	int i;
@@ -299,8 +228,6 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&sv_gameplayfix_elevators);
 	Cvar_RegisterVariable (&sv_netsort);
-	Cvar_RegisterVariable (&sv_packedents);
-	Cvar_RegisterVariable (&sv_packedents_debug);
 	Cvar_RegisterVariable (&sv_snapshotdelta);
 	Cvar_RegisterVariable (&sv_snapshotdebug);
 	Cvar_RegisterVariable (&sv_snapshottimeout);
@@ -317,7 +244,6 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_maxrate);
 	Cvar_RegisterVariable (&sv_minupdaterate);
 	Cvar_RegisterVariable (&sv_maxupdaterate);
-	Cvar_RegisterVariable (&sv_signon_chunks);
 	Cvar_RegisterVariable (&sv_signon_chunk_debug);
 	Cvar_RegisterVariable (&sv_signon_chunk_window);
 	Cvar_RegisterVariable (&sv_signon_debug);
@@ -334,33 +260,13 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
-	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
-	Cmd_AddCommand ("packedents_stats", &SV_PackedEntStats_f);
 	Cmd_AddCommand ("sv_icull_stats", &SV_IcullStats_f);
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
 
-	i = COM_CheckParm ("-protocol");
-	if (i && i < com_argc - 1)
-		sv_protocol = atoi (com_argv[i + 1]);
-	switch (sv_protocol)
-	{
-	case PROTOCOL_NETQUAKE:
-		p = "NetQuake";
-		break;
-	case PROTOCOL_FITZQUAKE:
-		p = "FitzQuake";
-		break;
-	case PROTOCOL_RMQ:
-		p = "RMQ";
-		break;
-	default:
-		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i.",
-				sv_protocol, PROTOCOL_NETQUAKE, PROTOCOL_FITZQUAKE, PROTOCOL_RMQ);
-		return; /* silence compiler */
-	}
-	Sys_Printf ("Server using protocol %i (%s)\n", sv_protocol, p);
+	p = "RMQ";
+	Sys_Printf ("Server using protocol %i (%s)\n", PROTOCOL_RMQ, p);
 }
 
 /*
@@ -458,20 +364,10 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION)
 		field_mask |= SND_ATTENUATION;
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (ent >= 8192)
-	{
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			return; //don't send any info protocol can't support
 		field_mask |= SND_LARGEENTITY;
-	}
 	if (sound_num >= 256 || channel >= 8)
-	{
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			return; //don't send any info protocol can't support
 		field_mask |= SND_LARGESOUND;
-	}
-	//johnfitz
 
 	if (sv.datagram.cursize > MAX_DATAGRAM-21)
 		return;
@@ -484,7 +380,6 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 	if (field_mask & SND_ATTENUATION)
 		MSG_WriteByte (&sv.datagram, attenuation*64);
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (field_mask & SND_LARGEENTITY)
 	{
 		MSG_WriteShort (&sv.datagram, ent);
@@ -496,7 +391,6 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 		MSG_WriteShort (&sv.datagram, sound_num);
 	else
 		MSG_WriteByte (&sv.datagram, sound_num);
-	//johnfitz
 
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord (&sv.datagram, entity->v.origin[i]+0.5*(entity->v.mins[i]+entity->v.maxs[i]), sv.protocolflags);
@@ -524,11 +418,7 @@ void SV_LocalSound (client_t *client, const char *sample)
 
 	field_mask = 0;
 	if (sound_num >= 256)
-	{
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			return;
 		field_mask = SND_LARGESOUND;
-	}
 
 	if (client->message.cursize > client->message.maxsize-4)
 		return;
@@ -599,13 +489,8 @@ void SV_SendServerinfo (client_t *client)
 
 	MSG_BEGINSVC (&client->message, svc_serverinfo);
 	MSG_WriteByte (&client->message, svc_serverinfo);
-	MSG_WriteLong (&client->message, sv.protocol); //johnfitz -- sv.protocol instead of PROTOCOL_VERSION
-	
-	if (sv.protocol == PROTOCOL_RMQ)
-	{
-		// mh - now send protocol flags so that the client knows the protocol features to expect
-		MSG_WriteLong (&client->message, sv.protocolflags);
-	}
+	MSG_WriteLong (&client->message, sv.protocol);
+	MSG_WriteLong (&client->message, sv.protocolflags);
 	
 	MSG_WriteByte (&client->message, svs.maxclients);
 
@@ -616,23 +501,19 @@ void SV_SendServerinfo (client_t *client)
 
 	MSG_WriteString (&client->message, PR_GetString(qcvm->edicts->v.message));
 
-	//johnfitz -- only send the first 256 model and sound precaches if protocol is 15
 	for (i = 1, s = sv.model_precache+1; *s; s++,i++)
-		if (sv.protocol != PROTOCOL_NETQUAKE || i < 256)
-		{
-			MSG_DBGAUX (&client->message, i);
-			MSG_WriteString (&client->message, *s);
-		}
+	{
+		MSG_DBGAUX (&client->message, i);
+		MSG_WriteString (&client->message, *s);
+	}
 	MSG_WriteByte (&client->message, 0);
 
 	for (i = 1, s = sv.sound_precache+1; *s; s++, i++)
-		if (sv.protocol != PROTOCOL_NETQUAKE || i < 256)
-		{
-			MSG_DBGAUX (&client->message, i);
-			MSG_WriteString (&client->message, *s);
-		}
+	{
+		MSG_DBGAUX (&client->message, i);
+		MSG_WriteString (&client->message, *s);
+	}
 	MSG_WriteByte (&client->message, 0);
-	//johnfitz
 
 // send music
 	MSG_BEGINSVC (&client->message, svc_cdtrack);
@@ -1139,9 +1020,6 @@ static qboolean SV_ShouldSendEntityToClient (const sv_icull_context_t *ctx, cons
 	if (!ent->v.modelindex || !PR_GetString(ent->v.model)[0])
 		return false;
 
-	if (sv.protocol == PROTOCOL_NETQUAKE && (int)ent->v.modelindex & 0xFF00)
-		return false;
-
 	if (!ctx->enabled)
 	{
 		if (ent->num_leafs < MAX_ENT_LEAFS && !SV_EdictInPVS (ent, ctx->pvs))
@@ -1304,18 +1182,12 @@ static int SV_SnapshotEntitySizeWorst (void)
 	int extra_flags = (sv.protocolflags & PRFL_SNAPSHOT_HIRES) ? 1 : 0;
 	int entry_overhead;
 
-	if (sv.protocolflags & PRFL_FLOATCOORD)
+	if (sv.protocolflags & PRFL_INT32COORD)
 		coord_size = 4;
-	else if (sv.protocolflags & PRFL_INT32COORD)
-		coord_size = 4;
-	else if (sv.protocolflags & PRFL_24BITCOORD)
-		coord_size = 3;
 	else
 		coord_size = 2;
 
-	if (sv.protocolflags & PRFL_FLOATANGLE)
-		angle_size = 4;
-	else if (sv.protocolflags & PRFL_SHORTANGLE)
+	if (sv.protocolflags & PRFL_SHORTANGLE)
 		angle_size = 2;
 	else
 		angle_size = 1;
@@ -1342,18 +1214,14 @@ static int SV_SnapshotCoordBytes (qboolean hires)
 {
 	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
 		return 4;
-	if (sv.protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
+	if (sv.protocolflags & PRFL_INT32COORD)
 		return 4;
-	if (sv.protocolflags & PRFL_24BITCOORD)
-		return 3;
 	return 2;
 }
 
 static int SV_SnapshotAngleBytes (qboolean hires)
 {
 	if (hires && (sv.protocolflags & PRFL_SNAPSHOT_HIRES))
-		return 4;
-	if (sv.protocolflags & PRFL_FLOATANGLE)
 		return 4;
 	if (sv.protocolflags & PRFL_SHORTANGLE)
 		return 2;
@@ -1581,6 +1449,7 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 	qboolean *out_continuation, qboolean *out_mandatory_oversize)
 {
 	int	num, j, numents, count;
+	int	k;
 	int mandatory_count = 0;
 	int mandatory_bytes = 0;
 	int total_bytes = 0;
@@ -1674,6 +1543,16 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		if (remaining_budget <= 0)
 		{
 			continuation = true;
+			for (k = j; k < numents; k++)
+			{
+				int pending = net_edicts_sorted[k];
+				edict_t *pending_ent = EDICT_NUM (pending);
+				if (present[pending])
+					continue;
+				if (!SV_SnapshotTier1Ent (pending_ent))
+					continue;
+				dropped_tier1++;
+			}
 			break;
 		}
 
@@ -1688,6 +1567,16 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 			if (ent_size > remaining_budget)
 			{
 				continuation = true;
+				for (k = j; k < numents; k++)
+				{
+					int pending = net_edicts_sorted[k];
+					edict_t *pending_ent = EDICT_NUM (pending);
+					if (present[pending])
+						continue;
+					if (!SV_SnapshotTier1Ent (pending_ent))
+						continue;
+					dropped_tier1++;
+				}
 				break;
 			}
 			present[num] = 1;
@@ -1712,6 +1601,16 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 			if (remaining_budget <= 0)
 			{
 				continuation = true;
+				for (k = j; k < numents; k++)
+				{
+					int pending = net_edicts_sorted[k];
+					edict_t *pending_ent = EDICT_NUM (pending);
+					if (present[pending])
+						continue;
+					if (SV_SnapshotTier1Ent (pending_ent))
+						continue;
+					dropped_tier2++;
+				}
 				break;
 			}
 
@@ -1726,6 +1625,16 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 				if (ent_size > remaining_budget)
 				{
 					continuation = true;
+					for (k = j; k < numents; k++)
+					{
+						int pending = net_edicts_sorted[k];
+						edict_t *pending_ent = EDICT_NUM (pending);
+						if (present[pending])
+							continue;
+						if (SV_SnapshotTier1Ent (pending_ent))
+							continue;
+						dropped_tier2++;
+					}
 					break;
 				}
 				present[num] = 1;
@@ -1750,6 +1659,7 @@ static int SV_BuildClientSnapshot (edict_t *clent, snapshot_state_t *states, byt
 		*out_mandatory_bytes = mandatory_bytes;
 	if (out_total_bytes)
 		*out_total_bytes = total_bytes;
+	dropped_count = dropped_tier1 + dropped_tier2;
 	if (out_dropped)
 		*out_dropped = dropped_count;
 	if (out_dropped_tier1)
@@ -2862,628 +2772,6 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 	client->entstream.active = false;
 }
 
-typedef struct
-{
-	uint32_t	mask;
-	unsigned short	model;
-	unsigned short	frame;
-	byte		colormap;
-	byte		skin;
-	byte		effects;
-	short		origin[3];
-	byte		origin_full_axes;
-	unsigned short	angles[3];
-	short		velocity[3];
-	byte		alpha;
-	byte		scale;
-	byte		lerpfinish;
-} packedent_update_t;
-
-static short SV_PackedQuantizeCoord (float value, int *clamp_count)
-{
-	int q = Q_rint (value * PACKEDENT_POS_SCALE);
-	int clamped = CLAMP (-32768, q, 32767);
-
-	if (clamp_count && clamped != q)
-		(*clamp_count)++;
-	return (short)clamped;
-}
-
-static short SV_PackedQuantizeVelocity (float value, int *clamp_count)
-{
-	int q = Q_rint (value * PACKEDENT_VEL_SCALE);
-	int clamped = CLAMP (-32768, q, 32767);
-
-	if (clamp_count && clamped != q)
-		(*clamp_count)++;
-	return (short)clamped;
-}
-
-static unsigned short SV_PackedQuantizeAngle (float value)
-{
-	int q = Q_rint (value * PACKEDENT_ANGLE_SCALE) & 0xFFFF;
-	return (unsigned short)q;
-}
-
-static int SV_PackedCoordSize (void)
-{
-	if (sv.protocolflags & PRFL_FLOATCOORD)
-		return 4;
-	if (sv.protocolflags & PRFL_INT32COORD)
-		return 4;
-	if (sv.protocolflags & PRFL_24BITCOORD)
-		return 3;
-	return 2;
-}
-
-static int SV_PackedMaskBits (uint32_t mask)
-{
-	int count = 0;
-
-	while (mask)
-	{
-		count += mask & 1u;
-		mask >>= 1;
-	}
-	return count;
-}
-
-static int SV_PackedEntitySize (uint32_t mask)
-{
-	int size = 0;
-	int coord_size = (mask & PACKEDENT_MASK_POS_FULL) ? SV_PackedCoordSize () : 2;
-
-	size += 2; // entnum
-	size += 2; // mask low
-	if (mask & ~0x7FFFu)
-		size += 2;
-
-	if (mask & PACKEDENT_MASK_MODEL)
-		size += 2;
-	if (mask & PACKEDENT_MASK_FRAME)
-		size += 2;
-	if (mask & PACKEDENT_MASK_COLORMAP)
-		size += 1;
-	if (mask & PACKEDENT_MASK_SKIN)
-		size += 1;
-	if (mask & PACKEDENT_MASK_EFFECTS)
-		size += 1;
-	if (mask & PACKEDENT_MASK_ORIGIN_X)
-		size += coord_size;
-	if (mask & PACKEDENT_MASK_ORIGIN_Y)
-		size += coord_size;
-	if (mask & PACKEDENT_MASK_ORIGIN_Z)
-		size += coord_size;
-	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
-		size += 2;
-	if (mask & PACKEDENT_MASK_ANGLE_YAW)
-		size += 2;
-	if (mask & PACKEDENT_MASK_ANGLE_ROLL)
-		size += 2;
-	if (mask & PACKEDENT_MASK_VEL_X)
-		size += 2;
-	if (mask & PACKEDENT_MASK_VEL_Y)
-		size += 2;
-	if (mask & PACKEDENT_MASK_VEL_Z)
-		size += 2;
-	if (mask & PACKEDENT_MASK_ALPHA)
-		size += 1;
-	if (mask & PACKEDENT_MASK_SCALE)
-		size += 1;
-	if (mask & PACKEDENT_MASK_LERPFINISH)
-		size += 1;
-
-	return size;
-}
-
-static uint32_t SV_PackedReduceMaskForBudget (uint32_t mask, int available, qboolean mover)
-{
-	static const uint32_t drop_order[] =
-	{
-		PACKEDENT_MASK_LERPFINISH,
-		PACKEDENT_MASK_VEL_X,
-		PACKEDENT_MASK_VEL_Y,
-		PACKEDENT_MASK_VEL_Z,
-		PACKEDENT_MASK_SCALE,
-		PACKEDENT_MASK_ALPHA,
-		PACKEDENT_MASK_EFFECTS,
-		PACKEDENT_MASK_SKIN,
-		PACKEDENT_MASK_COLORMAP,
-		PACKEDENT_MASK_FRAME,
-		PACKEDENT_MASK_MODEL
-	};
-	uint32_t reduced = mask;
-	size_t i;
-
-	if (SV_PackedEntitySize (reduced) <= available)
-		return reduced;
-
-	for (i = 0; i < countof(drop_order); i++)
-	{
-		if (reduced & drop_order[i])
-		{
-			reduced &= ~drop_order[i];
-			if (SV_PackedEntitySize (reduced) <= available)
-				return reduced;
-		}
-	}
-
-	if (mover)
-		return 0;
-
-	if (SV_PackedEntitySize (reduced) <= available)
-		return reduced;
-
-	return 0;
-}
-
-static uint32_t SV_BuildPackedUpdate (edict_t *ent, packedent_update_t *update, int *clamp_origin, int *clamp_velocity)
-{
-	uint32_t mask = 0;
-	int model = (int)ent->v.modelindex;
-	int frame = (int)ent->v.frame;
-	int i;
-	byte origin_full_axes = 0;
-	const float packed_pos_max = 32767.0f / PACKEDENT_POS_SCALE;
-
-	if (model < 0)
-		model = 0;
-	if (model > 0xFFFF)
-		model = 0xFFFF;
-	update->model = (unsigned short)model;
-	if (ent->baseline.modelindex != update->model)
-		mask |= PACKEDENT_MASK_MODEL;
-
-	if (frame < 0)
-		frame = 0;
-	if (frame > 0xFFFF)
-		frame = 0xFFFF;
-	update->frame = (unsigned short)frame;
-	if (ent->baseline.frame != update->frame)
-		mask |= PACKEDENT_MASK_FRAME;
-
-	update->colormap = (byte)ent->v.colormap;
-	if (ent->baseline.colormap != update->colormap)
-		mask |= PACKEDENT_MASK_COLORMAP;
-
-	update->skin = (byte)ent->v.skin;
-	if (ent->baseline.skin != update->skin)
-		mask |= PACKEDENT_MASK_SKIN;
-
-	update->effects = (byte)((int)ent->v.effects & qcvm->effects_mask);
-	if (ent->baseline.effects != update->effects)
-		mask |= PACKEDENT_MASK_EFFECTS;
-
-	for (i = 0; i < 3; i++)
-	{
-		if (fabsf (ent->v.origin[i]) > packed_pos_max)
-			origin_full_axes |= (byte)(1u << i);
-	}
-	update->origin_full_axes = origin_full_axes;
-	if (origin_full_axes)
-		mask |= PACKEDENT_MASK_POS_FULL;
-
-	for (i = 0; i < 3; i++)
-	{
-		if (origin_full_axes)
-		{
-			update->origin[i] = 0;
-			mask |= PACKEDENT_MASK_ORIGIN_X << i;
-		}
-		else
-		{
-			short base = SV_PackedQuantizeCoord (ent->baseline.origin[i], NULL);
-
-			update->origin[i] = SV_PackedQuantizeCoord (ent->v.origin[i], clamp_origin);
-			if (update->origin[i] != base)
-				mask |= PACKEDENT_MASK_ORIGIN_X << i;
-		}
-
-		update->angles[i] = SV_PackedQuantizeAngle (ent->v.angles[i]);
-		if (update->angles[i] != SV_PackedQuantizeAngle (ent->baseline.angles[i]))
-			mask |= PACKEDENT_MASK_ANGLE_PITCH << i;
-
-		update->velocity[i] = SV_PackedQuantizeVelocity (ent->v.velocity[i], clamp_velocity);
-		if (update->velocity[i] != 0)
-			mask |= PACKEDENT_MASK_VEL_X << i;
-	}
-
-	update->alpha = ent->alpha;
-	if (ent->baseline.alpha != update->alpha)
-		mask |= PACKEDENT_MASK_ALPHA;
-
-	update->scale = ent->scale;
-	if (ent->baseline.scale != update->scale)
-		mask |= PACKEDENT_MASK_SCALE;
-
-	if (ent->v.movetype == MOVETYPE_STEP)
-		mask |= PACKEDENT_MASK_STEP;
-
-	if (ent->sendinterval)
-	{
-		float interval = (ent->v.nextthink - qcvm->time) * 255.0f;
-		update->lerpfinish = (byte)CLAMP (0, Q_rint (interval), 255);
-		mask |= PACKEDENT_MASK_LERPFINISH;
-	}
-	else
-		update->lerpfinish = 0;
-
-	return mask;
-}
-
-static void SV_WritePackedEntity (sizebuf_t *msg, const edict_t *ent, int entnum, uint32_t mask, const packedent_update_t *update)
-{
-	unsigned int low = (unsigned int)(mask & 0x7FFFu);
-	unsigned int high = (unsigned int)(mask >> 16);
-
-	if (high)
-		low |= PACKEDENT_MASK_EXTEND;
-
-	MSG_WriteUInt16 (msg, (unsigned int)entnum);
-	MSG_WriteUInt16 (msg, low);
-	if (high)
-		MSG_WriteUInt16 (msg, high);
-
-	if (mask & PACKEDENT_MASK_MODEL)
-		MSG_WriteUInt16 (msg, update->model);
-	if (mask & PACKEDENT_MASK_FRAME)
-		MSG_WriteUInt16 (msg, update->frame);
-	if (mask & PACKEDENT_MASK_COLORMAP)
-		MSG_WriteByte (msg, update->colormap);
-	if (mask & PACKEDENT_MASK_SKIN)
-		MSG_WriteByte (msg, update->skin);
-	if (mask & PACKEDENT_MASK_EFFECTS)
-		MSG_WriteByte (msg, update->effects);
-	if ((mask & PACKEDENT_MASK_POS_FULL) && sv_packedents_debug.value)
-	{
-		char axes[4];
-		int count = 0;
-
-		if (update->origin_full_axes & 1u)
-			axes[count++] = 'x';
-		if (update->origin_full_axes & 2u)
-			axes[count++] = 'y';
-		if (update->origin_full_axes & 4u)
-			axes[count++] = 'z';
-		axes[count] = '\0';
-		NET_DebugLogEvent (true,
-			"NETDBG time %.3f packedents_pos_full ent %d axes %s\n",
-			realtime, entnum, axes);
-	}
-	if (mask & PACKEDENT_MASK_ORIGIN_X)
-	{
-		if (mask & PACKEDENT_MASK_POS_FULL)
-			MSG_WriteCoord (msg, ent->v.origin[0], sv.protocolflags);
-		else
-			MSG_WriteInt16 (msg, update->origin[0]);
-	}
-	if (mask & PACKEDENT_MASK_ORIGIN_Y)
-	{
-		if (mask & PACKEDENT_MASK_POS_FULL)
-			MSG_WriteCoord (msg, ent->v.origin[1], sv.protocolflags);
-		else
-			MSG_WriteInt16 (msg, update->origin[1]);
-	}
-	if (mask & PACKEDENT_MASK_ORIGIN_Z)
-	{
-		if (mask & PACKEDENT_MASK_POS_FULL)
-			MSG_WriteCoord (msg, ent->v.origin[2], sv.protocolflags);
-		else
-			MSG_WriteInt16 (msg, update->origin[2]);
-	}
-	if (mask & PACKEDENT_MASK_ANGLE_PITCH)
-		MSG_WriteUInt16 (msg, update->angles[0]);
-	if (mask & PACKEDENT_MASK_ANGLE_YAW)
-		MSG_WriteUInt16 (msg, update->angles[1]);
-	if (mask & PACKEDENT_MASK_ANGLE_ROLL)
-		MSG_WriteUInt16 (msg, update->angles[2]);
-	if (mask & PACKEDENT_MASK_VEL_X)
-		MSG_WriteInt16 (msg, update->velocity[0]);
-	if (mask & PACKEDENT_MASK_VEL_Y)
-		MSG_WriteInt16 (msg, update->velocity[1]);
-	if (mask & PACKEDENT_MASK_VEL_Z)
-		MSG_WriteInt16 (msg, update->velocity[2]);
-	if (mask & PACKEDENT_MASK_ALPHA)
-		MSG_WriteByte (msg, update->alpha);
-	if (mask & PACKEDENT_MASK_SCALE)
-		MSG_WriteByte (msg, update->scale);
-	if (mask & PACKEDENT_MASK_LERPFINISH)
-		MSG_WriteByte (msg, update->lerpfinish);
-}
-
-/*
-=============
-SV_WriteEntitiesToClient
-
-=============
-*/
-void SV_WriteEntitiesToClient (edict_t	*clent, sizebuf_t *msg)
-{
-	int		e, i, j, numents;
-	int		bits;
-	float	miss;
-	eval_t	*val;
-	edict_t	*ent;
-	qboolean	use_packed = (sv_packedents.value != 0.0f && host_client && host_client->supports_packedents);
-	int		packed_start = msg->cursize;
-	int		packed_count_pos = -1;
-	int		packed_count = 0;
-	numents = SV_BuildNetEdictsList (clent);
-
-	if (use_packed)
-	{
-		if (sv_packedents_debug.value && !sv_packedents_selftest_done)
-		{
-			MSG_PackedSelfTest ();
-			sv_packedents_selftest_done = true;
-		}
-
-		if (msg->cursize + 3 > msg->maxsize)
-			goto stats;
-		MSG_BEGINSVC (msg, svc_packedentities);
-		MSG_WriteByte (msg, svc_packedentities);
-		packed_count_pos = msg->cursize;
-		MSG_WriteShort (msg, 0);
-	}
-
-// send entities (closest first)
-	for (j=0 ; j<numents ; j++)
-	{
-		e = net_edicts_sorted[j];
-		ent = EDICT_NUM (e);
-
-		if (!use_packed)
-		{
-			// johnfitz -- max size for protocol 15 is 18 bytes, not 16 as originally
-			// assumed here.  And, for protocol 85 the max size is actually 24 bytes.
-			// For float coords and angles the limit is 40.
-			// FIXME: Use tighter limit according to protocol flags and send bits.
-			if (msg->cursize + 40 > msg->maxsize)
-			{
-				//johnfitz -- less spammy overflow message
-				if (!dev_overflows.packetsize || dev_overflows.packetsize + CONSOLE_RESPAM_TIME < realtime )
-				{
-					Con_Printf ("Packet overflow!\n");
-					dev_overflows.packetsize = realtime;
-				}
-				goto stats;
-				//johnfitz
-			}
-		}
-
-// send an update
-		if (use_packed)
-		{
-			packedent_update_t update;
-			uint32_t mask;
-			int clamp_origin = 0;
-			int clamp_velocity = 0;
-			int available = msg->maxsize - msg->cursize;
-			qboolean mover = (ent->v.movetype == MOVETYPE_PUSH || ent->v.movetype == MOVETYPE_STEP);
-
-			//johnfitz -- alpha
-			val = GetEdictFieldValueByName(ent, "alpha");
-			if (val)
-				ent->alpha = ENTALPHA_ENCODE(val->_float);
-
-			//don't send invisible entities unless they have effects
-			if (ent->alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
-				continue;
-
-			val = GetEdictFieldValueByName(ent, "scale");
-			if (val)
-				ent->scale = ENTSCALE_ENCODE(val->_float);
-			else
-				ent->scale = ENTSCALE_DEFAULT;
-
-			mask = SV_BuildPackedUpdate (ent, &update, &clamp_origin, &clamp_velocity);
-			if (!mask)
-				continue;
-
-			mask = SV_PackedReduceMaskForBudget (mask, available, mover);
-			if (!mask)
-				goto stats;
-
-			SV_WritePackedEntity (msg, ent, e, mask, &update);
-			packed_count++;
-
-			if (sv_packedents_debug.value)
-			{
-				int size = SV_PackedEntitySize (mask);
-				int bits = SV_PackedMaskBits (mask);
-
-				sv_packedents_stats.bytes += size;
-				sv_packedents_stats.entities++;
-				sv_packedents_stats.mask_bits_total += bits;
-				if (bits >= 0 && bits < (int)countof(sv_packedents_stats.mask_hist))
-					sv_packedents_stats.mask_hist[bits]++;
-				sv_packedents_stats.clamp_origin += clamp_origin;
-				sv_packedents_stats.clamp_velocity += clamp_velocity;
-			}
-
-			continue;
-		}
-
-		bits = 0;
-
-		for (i=0 ; i<3 ; i++)
-		{
-			miss = ent->v.origin[i] - ent->baseline.origin[i];
-			if ( miss < -0.1 || miss > 0.1 )
-				bits |= U_ORIGIN1<<i;
-		}
-
-		if ( ent->v.angles[0] != ent->baseline.angles[0] )
-			bits |= U_ANGLE1;
-
-		if ( ent->v.angles[1] != ent->baseline.angles[1] )
-			bits |= U_ANGLE2;
-
-		if ( ent->v.angles[2] != ent->baseline.angles[2] )
-			bits |= U_ANGLE3;
-
-		if (ent->v.movetype == MOVETYPE_STEP)
-			bits |= U_STEP;	// don't mess up the step animation
-
-		if (ent->baseline.colormap != ent->v.colormap)
-			bits |= U_COLORMAP;
-
-		if (ent->baseline.skin != ent->v.skin)
-			bits |= U_SKIN;
-
-		if (ent->baseline.frame != ent->v.frame)
-			bits |= U_FRAME;
-
-		if ((ent->baseline.effects ^ (int)ent->v.effects) & qcvm->effects_mask)
-			bits |= U_EFFECTS;
-
-		if (ent->baseline.modelindex != ent->v.modelindex)
-			bits |= U_MODEL;
-
-		//johnfitz -- alpha
-		// TODO: find a cleaner place to put this code
-		val = GetEdictFieldValueByName(ent, "alpha");
-		if (val)
-			ent->alpha = ENTALPHA_ENCODE(val->_float);
-
-		//don't send invisible entities unless they have effects
-		if (ent->alpha == ENTALPHA_ZERO && !((int)ent->v.effects & qcvm->effects_mask))
-			continue;
-		//johnfitz
-
-		val = GetEdictFieldValueByName(ent, "scale");
-		if (val)
-			ent->scale = ENTSCALE_ENCODE(val->_float);
-		else
-			ent->scale = ENTSCALE_DEFAULT;
-
-		//johnfitz -- PROTOCOL_FITZQUAKE
-		if (sv.protocol != PROTOCOL_NETQUAKE)
-		{
-
-			if (ent->baseline.alpha != ent->alpha) bits |= U_ALPHA;
-			if (ent->baseline.scale != ent->scale) bits |= U_SCALE;
-			if (bits & U_FRAME && (int)ent->v.frame & 0xFF00) bits |= U_FRAME2;
-			if (bits & U_MODEL && (int)ent->v.modelindex & 0xFF00) bits |= U_MODEL2;
-			if (ent->sendinterval) bits |= U_LERPFINISH;
-			if (bits >= 65536) bits |= U_EXTEND1;
-			if (bits >= 16777216) bits |= U_EXTEND2;
-		}
-		//johnfitz
-
-		if (e >= 256)
-			bits |= U_LONGENTITY;
-
-		if (bits >= 256)
-			bits |= U_MOREBITS;
-
-	//
-	// write the message
-	//
-		MSG_WriteByte (msg, bits | U_SIGNAL);
-
-		if (bits & U_MOREBITS)
-			MSG_WriteByte (msg, bits>>8);
-
-		//johnfitz -- PROTOCOL_FITZQUAKE
-		if (bits & U_EXTEND1)
-			MSG_WriteByte(msg, bits>>16);
-		if (bits & U_EXTEND2)
-			MSG_WriteByte(msg, bits>>24);
-		//johnfitz
-
-		if (bits & U_LONGENTITY)
-			MSG_WriteShort (msg,e);
-		else
-			MSG_WriteByte (msg,e);
-
-		if (bits & U_MODEL)
-			MSG_WriteByte (msg,	ent->v.modelindex);
-		if (bits & U_FRAME)
-			MSG_WriteByte (msg, ent->v.frame);
-		if (bits & U_COLORMAP)
-			MSG_WriteByte (msg, ent->v.colormap);
-		if (bits & U_SKIN)
-			MSG_WriteByte (msg, ent->v.skin);
-		if (bits & U_EFFECTS)
-			MSG_WriteByte (msg, (int)ent->v.effects & qcvm->effects_mask);
-		if (bits & U_ORIGIN1)
-			MSG_WriteCoord (msg, ent->v.origin[0], sv.protocolflags);
-		if (bits & U_ANGLE1)
-			MSG_WriteAngle(msg, ent->v.angles[0], sv.protocolflags);
-		if (bits & U_ORIGIN2)
-			MSG_WriteCoord (msg, ent->v.origin[1], sv.protocolflags);
-		if (bits & U_ANGLE2)
-			MSG_WriteAngle(msg, ent->v.angles[1], sv.protocolflags);
-		if (bits & U_ORIGIN3)
-			MSG_WriteCoord (msg, ent->v.origin[2], sv.protocolflags);
-		if (bits & U_ANGLE3)
-			MSG_WriteAngle(msg, ent->v.angles[2], sv.protocolflags);
-
-		//johnfitz -- PROTOCOL_FITZQUAKE
-		if (bits & U_ALPHA)
-			MSG_WriteByte(msg, ent->alpha);
-		if (bits & U_SCALE)
-			MSG_WriteByte(msg, ent->scale);
-		if (bits & U_FRAME2)
-			MSG_WriteByte(msg, (int)ent->v.frame >> 8);
-		if (bits & U_MODEL2)
-			MSG_WriteByte(msg, (int)ent->v.modelindex >> 8);
-		if (bits & U_LERPFINISH)
-			MSG_WriteByte(msg, (byte)(Q_rint((ent->v.nextthink-qcvm->time)*255)));
-		//johnfitz
-	}
-
-	//johnfitz -- devstats
-stats:
-	if (use_packed)
-	{
-		if (packed_count == 0)
-			msg->cursize = packed_start;
-		else
-		{
-			msg->data[packed_count_pos] = packed_count & 0xff;
-			msg->data[packed_count_pos + 1] = (packed_count >> 8) & 0xff;
-		}
-
-		if (sv_packedents_debug.value)
-		{
-			sv_packedents_stats.packets++;
-			if (realtime >= sv_packedents_stats_next_time)
-			{
-				float avg_bytes = sv_packedents_stats.entities ? (float)sv_packedents_stats.bytes / sv_packedents_stats.entities : 0.0f;
-				float avg_bits = sv_packedents_stats.entities ? (float)sv_packedents_stats.mask_bits_total / sv_packedents_stats.entities : 0.0f;
-
-				char hist[256];
-				int len = 0;
-				int h;
-
-				hist[0] = '\0';
-				for (h = 0; h < (int)countof(sv_packedents_stats.mask_hist); h++)
-				{
-					if (sv_packedents_stats.mask_hist[h] == 0)
-						continue;
-					len += q_snprintf (hist + len, sizeof(hist) - len, "%d:%d ", h, sv_packedents_stats.mask_hist[h]);
-					if (len >= (int)sizeof(hist))
-						break;
-				}
-
-				Con_DPrintf ("packedents: avg_bytes %.1f avg_bits %.1f clamp_origin %d clamp_vel %d masks[%s]\n",
-					avg_bytes, avg_bits, sv_packedents_stats.clamp_origin, sv_packedents_stats.clamp_velocity,
-					hist[0] ? hist : "none");
-				sv_packedents_stats = (packedent_stats_t){0};
-				sv_packedents_stats_next_time = realtime + 1.0;
-			}
-		}
-	}
-
-	if (msg->cursize > 1024 && dev_peakstats.packetsize <= 1024)
-		Con_DWarning ("%i byte packet exceeds standard limit of 1024 (max = %d).\n", msg->cursize, msg->maxsize);
-	dev_stats.packetsize = msg->cursize;
-	dev_peakstats.packetsize = q_max(msg->cursize, dev_peakstats.packetsize);
-	//johnfitz
-}
-
 /*
 =============
 SV_CleanupEnts
@@ -3592,32 +2880,25 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 
 	bits |= SU_PREDICT;
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
-	if (sv.protocol != PROTOCOL_NETQUAKE)
-	{
-		if (bits & SU_WEAPON && SV_ModelIndex(PR_GetString(ent->v.weaponmodel)) & 0xFF00) bits |= SU_WEAPON2;
-		if ((int)ent->v.armorvalue & 0xFF00) bits |= SU_ARMOR2;
-		if ((int)ent->v.currentammo & 0xFF00) bits |= SU_AMMO2;
-		if ((int)ent->v.ammo_shells & 0xFF00) bits |= SU_SHELLS2;
-		if ((int)ent->v.ammo_nails & 0xFF00) bits |= SU_NAILS2;
-		if ((int)ent->v.ammo_rockets & 0xFF00) bits |= SU_ROCKETS2;
-		if ((int)ent->v.ammo_cells & 0xFF00) bits |= SU_CELLS2;
-		if (bits & SU_WEAPONFRAME && (int)ent->v.weaponframe & 0xFF00) bits |= SU_WEAPONFRAME2;
-		if (bits & SU_WEAPON && ent->alpha != ENTALPHA_DEFAULT) bits |= SU_WEAPONALPHA; //for now, weaponalpha = client entity alpha
-		if (bits >= 65536) bits |= SU_EXTEND1;
-		if (bits >= 16777216) bits |= SU_EXTEND2;
-	}
-	//johnfitz
+	if (bits & SU_WEAPON && SV_ModelIndex(PR_GetString(ent->v.weaponmodel)) & 0xFF00) bits |= SU_WEAPON2;
+	if ((int)ent->v.armorvalue & 0xFF00) bits |= SU_ARMOR2;
+	if ((int)ent->v.currentammo & 0xFF00) bits |= SU_AMMO2;
+	if ((int)ent->v.ammo_shells & 0xFF00) bits |= SU_SHELLS2;
+	if ((int)ent->v.ammo_nails & 0xFF00) bits |= SU_NAILS2;
+	if ((int)ent->v.ammo_rockets & 0xFF00) bits |= SU_ROCKETS2;
+	if ((int)ent->v.ammo_cells & 0xFF00) bits |= SU_CELLS2;
+	if (bits & SU_WEAPONFRAME && (int)ent->v.weaponframe & 0xFF00) bits |= SU_WEAPONFRAME2;
+	if (bits & SU_WEAPON && ent->alpha != ENTALPHA_DEFAULT) bits |= SU_WEAPONALPHA; //for now, weaponalpha = client entity alpha
+	if (bits >= 65536) bits |= SU_EXTEND1;
+	if (bits >= 16777216) bits |= SU_EXTEND2;
 
 // send the data
 
 	MSG_WriteByte (msg, svc_clientdata);
 	MSG_WriteShort (msg, bits);
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (bits & SU_EXTEND1) MSG_WriteByte(msg, bits>>16);
 	if (bits & SU_EXTEND2) MSG_WriteByte(msg, bits>>24);
-	//johnfitz
 
 	if (bits & SU_VIEWHEIGHT)
 		MSG_WriteChar (msg, ent->v.view_ofs[2]);
@@ -3666,7 +2947,6 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 		}
 	}
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (bits & SU_WEAPON2)
 		MSG_WriteByte (msg, SV_ModelIndex(PR_GetString(ent->v.weaponmodel)) >> 8);
 	if (bits & SU_ARMOR2)
@@ -3694,10 +2974,7 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	for (i=0 ; i<3 ; i++)
 		MSG_WriteCoord (msg, ent->v.velocity[i], sv.protocolflags);
 	for (i=0 ; i<3 ; i++)
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			MSG_WriteAngle (msg, ent->v.v_angle[i], sv.protocolflags);
-		else
-			MSG_WriteAngle16 (msg, ent->v.v_angle[i], sv.protocolflags);
+		MSG_WriteAngle16 (msg, ent->v.v_angle[i], sv.protocolflags);
 
 	// Hack: Alkaline 1.1 uses bit flags to store the active weapon,
 	// but we only send the stat as a byte, which can lead to truncation.
@@ -4217,7 +3494,7 @@ typedef struct
 
 static qboolean SV_SignonChunksEnabled (void)
 {
-	return (sv.protocol == PROTOCOL_RMQ) && (sv.protocolflags & PRFL_SIGNON_CHUNKS) && sv_signon_chunks.value;
+	return (sv.protocolflags & PRFL_SIGNON_CHUNKS) != 0;
 }
 
 static qboolean SV_SignonReaderAtEnd (const signon_reader_t *reader)
@@ -4318,17 +3595,13 @@ static qboolean SV_SignonReadString (signon_reader_t *reader, size_t *consumed)
 
 static int SV_SignonCoordBytes (unsigned int protocolflags)
 {
-	if (protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
+	if (protocolflags & PRFL_INT32COORD)
 		return 4;
-	if (protocolflags & PRFL_24BITCOORD)
-		return 3;
 	return 2;
 }
 
 static int SV_SignonAngleBytes (unsigned int protocolflags)
 {
-	if (protocolflags & PRFL_FLOATANGLE)
-		return 4;
 	if (protocolflags & PRFL_SHORTANGLE)
 		return 2;
 	return 1;
@@ -4364,7 +3637,7 @@ static int SV_SignonCommandLength (const signon_reader_t *reader, int *out_cmd, 
 	if (!SV_SignonReadByte (&temp, &cmd, &consumed))
 		return 0;
 
-	if (cmd & U_SIGNAL)
+	if (cmd & 128)
 		return -1;
 
 	if (out_cmd)
@@ -4732,7 +4005,7 @@ static client_t *SV_SignonFirewallClientForMessage (sizebuf_t *msg)
 
 void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line)
 {
-	if (!sv.active || !sv_signon_chunks.value)
+	if (!sv.active)
 		return;
 	if (svc_id == svc_signon_chunk)
 		return;
@@ -5007,7 +4280,7 @@ void SV_CreateBaseline (void)
 	int			i;
 	edict_t		*svent;
 	int			entnum;
-	int			bits; //johnfitz -- PROTOCOL_FITZQUAKE
+	int			bits;
 
 	for (entnum = 0; entnum < qcvm->num_edicts ; entnum++)
 	{
@@ -5038,38 +4311,21 @@ void SV_CreateBaseline (void)
 			svent->baseline.modelindex = SV_ModelIndex(PR_GetString(svent->v.model));
 			svent->baseline.alpha = svent->alpha; //johnfitz -- alpha support
 			svent->baseline.scale = ENTSCALE_DEFAULT;
-			if (sv.protocol == PROTOCOL_RMQ)
-			{
-				eval_t* val;
-				val = GetEdictFieldValueByName(svent, "scale");
-				if (val)
-					svent->baseline.scale = ENTSCALE_ENCODE(val->_float);
-			}
+			eval_t* val;
+			val = GetEdictFieldValueByName(svent, "scale");
+			if (val)
+				svent->baseline.scale = ENTSCALE_ENCODE(val->_float);
 		}
 
-		//johnfitz -- PROTOCOL_FITZQUAKE
 		bits = 0;
-		if (sv.protocol == PROTOCOL_NETQUAKE) //still want to send baseline in PROTOCOL_NETQUAKE, so reset these values
-		{
-			if (svent->baseline.modelindex & 0xFF00)
-				svent->baseline.modelindex = 0;
-			if (svent->baseline.frame & 0xFF00)
-				svent->baseline.frame = 0;
-			svent->baseline.alpha = ENTALPHA_DEFAULT;
-			svent->baseline.scale = ENTSCALE_DEFAULT;
-		}
-		else //decide which extra data needs to be sent
-		{
-			if (svent->baseline.modelindex & 0xFF00)
-				bits |= B_LARGEMODEL;
-			if (svent->baseline.frame & 0xFF00)
-				bits |= B_LARGEFRAME;
-			if (svent->baseline.alpha != ENTALPHA_DEFAULT)
-				bits |= B_ALPHA;
-			if (svent->baseline.scale != ENTSCALE_DEFAULT)
-				bits |= B_SCALE;
-		}
-		//johnfitz
+		if (svent->baseline.modelindex & 0xFF00)
+			bits |= B_LARGEMODEL;
+		if (svent->baseline.frame & 0xFF00)
+			bits |= B_LARGEFRAME;
+		if (svent->baseline.alpha != ENTALPHA_DEFAULT)
+			bits |= B_ALPHA;
+		if (svent->baseline.scale != ENTSCALE_DEFAULT)
+			bits |= B_SCALE;
 
 	//
 	// add to the message
@@ -5079,19 +4335,8 @@ void SV_CreateBaseline (void)
 			int angle_bytes;
 			int reserve;
 
-			if (sv.protocolflags & (PRFL_FLOATCOORD | PRFL_INT32COORD))
-				coord_bytes = 4;
-			else if (sv.protocolflags & PRFL_24BITCOORD)
-				coord_bytes = 3;
-			else
-				coord_bytes = 2;
-
-			if (sv.protocolflags & PRFL_FLOATANGLE)
-				angle_bytes = 4;
-			else if (sv.protocolflags & PRFL_SHORTANGLE)
-				angle_bytes = 2;
-			else
-				angle_bytes = 1;
+			coord_bytes = (sv.protocolflags & PRFL_INT32COORD) ? 4 : 2;
+			angle_bytes = (sv.protocolflags & PRFL_SHORTANGLE) ? 2 : 1;
 
 			reserve = 1 + 2;
 			if (bits)
@@ -5108,7 +4353,6 @@ void SV_CreateBaseline (void)
 			SV_ReserveSignonSpace (reserve);
 		}
 
-		//johnfitz -- PROTOCOL_FITZQUAKE
 		if (bits)
 		{
 			MSG_BEGINSVC (sv.signon, svc_spawnbaseline2);
@@ -5121,11 +4365,9 @@ void SV_CreateBaseline (void)
 			MSG_DBGAUX (sv.signon, entnum);
 			MSG_WriteByte (sv.signon, svc_spawnbaseline);
 		}
-		//johnfitz
 
 		MSG_WriteShort (sv.signon,entnum);
 
-		//johnfitz -- PROTOCOL_FITZQUAKE
 		if (bits)
 			MSG_WriteByte (sv.signon, bits);
 
@@ -5148,10 +4390,8 @@ void SV_CreateBaseline (void)
 			MSG_WriteAngle(sv.signon, svent->baseline.angles[i], sv.protocolflags);
 		}
 
-		//johnfitz -- PROTOCOL_FITZQUAKE
 		if (bits & B_ALPHA)
 			MSG_WriteByte (sv.signon, svent->baseline.alpha);
-		//johnfitz
 
 		if (bits & B_SCALE)
 			MSG_WriteByte (sv.signon, svent->baseline.scale);
@@ -5479,17 +4719,8 @@ void SV_SpawnServer (const char *server)
 	if (developer.value || map_checks.value)
 		sv.mapchecks.active = true;
 
-	sv.protocol = sv_protocol; // johnfitz
-	
-	if (sv.protocol == PROTOCOL_RMQ)
-	{
-		// set up the protocol flags used by this server
-		// (note - these could be cvar-ised so that server admins could choose the protocol features used by their servers)
-		sv.protocolflags = PRFL_INT32COORD | PRFL_SHORTANGLE | PRFL_SNAPSHOT_HIRES;
-		if (sv_signon_chunks.value)
-			sv.protocolflags |= PRFL_SIGNON_CHUNKS;
-	}
-	else sv.protocolflags = 0;
+	sv.protocol = PROTOCOL_RMQ;
+	sv.protocolflags = PROTOCOL_RMQ_FLAGS;
 
 	PR_SwitchQCVM(vm);
 // load progs to get entity field count

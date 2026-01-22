@@ -850,7 +850,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				if (!entry->received || entry->sequence != sock->receiveSequence)
 					break;
 
-				if (sock->receiveMessageLength + entry->length > NET_MAXMESSAGE)
+				if (sock->receiveMessageLength + entry->length > MAX_RELIABLE_QUEUE_BYTES)
 				{
 					Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
 						sock->receiveMessageLength, entry->length);

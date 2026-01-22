@@ -592,7 +592,7 @@ static void PF_ambientsound (void)
 	float		*pos;
 	float		vol, attenuation;
 	int		i, soundnum;
-	int		large = false; //johnfitz -- PROTOCOL_FITZQUAKE
+	int		large = false;
 
 	pos = G_VECTOR (OFS_PARM0);
 	samp = G_STRING(OFS_PARM1);
@@ -612,21 +612,13 @@ static void PF_ambientsound (void)
 		return;
 	}
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (soundnum > 255)
-	{
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			return; //don't send any info protocol can't support
-		else
-			large = true;
-	}
-	//johnfitz
+		large = true;
 
 	SV_ReserveSignonSpace (17);
 
 	// add an svc_spawnambient command to the level signon packet
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (large)
 	{
 		MSG_BEGINSVC (sv.signon, svc_spawnstaticsound2);
@@ -639,17 +631,14 @@ static void PF_ambientsound (void)
 		MSG_DBGAUX (sv.signon, soundnum);
 		MSG_WriteByte (sv.signon,svc_spawnstaticsound);
 	}
-	//johnfitz
 
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord(sv.signon, pos[i], sv.protocolflags);
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (large)
 		MSG_WriteShort(sv.signon, soundnum);
 	else
 		MSG_WriteByte (sv.signon, soundnum);
-	//johnfitz
 
 	MSG_WriteByte (sv.signon, vol*255);
 	MSG_WriteByte (sv.signon, attenuation*64);
@@ -1602,7 +1591,7 @@ static void PF_makestatic (void)
 {
 	edict_t	*ent;
 	int		i;
-	int	bits = 0; //johnfitz -- PROTOCOL_FITZQUAKE
+	int	bits = 0;
 
 	ent = G_EDICT(OFS_PARM0);
 
@@ -1613,37 +1602,22 @@ static void PF_makestatic (void)
 	}
 	//johnfitz
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
-	if (sv.protocol == PROTOCOL_NETQUAKE)
-	{
-		if (SV_ModelIndex(PR_GetString(ent->v.model)) & 0xFF00 || (int)(ent->v.frame) & 0xFF00)
-		{
-			ED_Free (ent);
-			return; //can't display the correct model & frame, so don't show it at all
-		}
-	}
+	if (SV_ModelIndex(PR_GetString(ent->v.model)) & 0xFF00)
+		bits |= B_LARGEMODEL;
+	if ((int)(ent->v.frame) & 0xFF00)
+		bits |= B_LARGEFRAME;
+	if (ent->alpha != ENTALPHA_DEFAULT)
+		bits |= B_ALPHA;
+
+	eval_t* val;
+	val = GetEdictFieldValueByName(ent, "scale");
+	if (val)
+		ent->scale = ENTSCALE_ENCODE(val->_float);
 	else
-	{
-		if (SV_ModelIndex(PR_GetString(ent->v.model)) & 0xFF00)
-			bits |= B_LARGEMODEL;
-		if ((int)(ent->v.frame) & 0xFF00)
-			bits |= B_LARGEFRAME;
-		if (ent->alpha != ENTALPHA_DEFAULT)
-			bits |= B_ALPHA;
+		ent->scale = ENTSCALE_DEFAULT;
 
-		if (sv.protocol == PROTOCOL_RMQ)
-		{
-			eval_t* val;
-			val = GetEdictFieldValueByName(ent, "scale");
-			if (val)
-				ent->scale = ENTSCALE_ENCODE(val->_float);
-			else
-				ent->scale = ENTSCALE_DEFAULT;
-
-			if (ent->scale != ENTSCALE_DEFAULT)
-				bits |= B_SCALE;
-		}
-	}
+	if (ent->scale != ENTSCALE_DEFAULT)
+		bits |= B_SCALE;
 
 	SV_ReserveSignonSpace (34);
 
@@ -1670,8 +1644,6 @@ static void PF_makestatic (void)
 		MSG_WriteShort (sv.signon, ent->v.frame);
 	else
 		MSG_WriteByte (sv.signon, ent->v.frame);
-	//johnfitz
-
 	MSG_WriteByte (sv.signon, ent->v.colormap);
 	MSG_WriteByte (sv.signon, ent->v.skin);
 	for (i = 0; i < 3; i++)
@@ -1680,10 +1652,8 @@ static void PF_makestatic (void)
 		MSG_WriteAngle(sv.signon, ent->v.angles[i], sv.protocolflags);
 	}
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (bits & B_ALPHA)
 		MSG_WriteByte (sv.signon, ent->alpha);
-	//johnfitz
 
 	if (bits & B_SCALE)
 		MSG_WriteByte (sv.signon, ent->scale);

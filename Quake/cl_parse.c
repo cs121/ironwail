@@ -111,9 +111,8 @@ const char *svc_strings[] =
 	"svc_localsound", // 56
 	"svc_snapshot_full", // 57
 	"svc_snapshot_delta", // 58
-	"svc_packedentities", // 59
-	"svc_snapshot2", // 60
-	"svc_signon_chunk" // 61
+	"svc_snapshot2", // 59
+	"svc_signon_chunk" // 60
 };
 #define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
 
@@ -207,7 +206,6 @@ static void CL_NetDebugHeader (void)
 }
 
 static double cl_badmsg_next_warn_time = 0.0;
-static double cl_unknown_cmd_next_warn_time = 0.0;
 
 static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 	int lastcmd, int lastcmd_offset, int prevcmd, int prevcmd_offset)
@@ -237,9 +235,8 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 		Con_Printf ("Dropping malformed server message: %s\n", reason);
 		cl_badmsg_next_warn_time = realtime + 1.0;
 	}
+	CL_RequestFullSnapshot (reason, true);
 }
-
-qboolean warn_about_nehahra_protocol; //johnfitz
 
 static void CL_ParseSignonRecord (const byte *payload, int payload_len)
 {
@@ -427,7 +424,6 @@ void CL_ParseStartSoundPacket(void)
 	else
 		attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (field_mask & SND_LARGEENTITY)
 	{
 		ent = (unsigned short) MSG_ReadShort ();
@@ -444,12 +440,9 @@ void CL_ParseStartSoundPacket(void)
 		sound_num = (unsigned short) MSG_ReadShort ();
 	else
 		sound_num = MSG_ReadByte ();
-	//johnfitz
 
-	//johnfitz -- check soundnum
 	if (sound_num >= MAX_SOUNDS)
 		Host_Error ("CL_ParseStartSoundPacket: %i > MAX_SOUNDS", sound_num);
-	//johnfitz
 
 	if (ent > cl_max_edicts) //johnfitz -- no more MAX_EDICTS
 		Host_Error ("CL_ParseStartSoundPacket: ent = %i", ent);
@@ -569,32 +562,17 @@ void CL_ParseServerInfo (void)
 
 // parse protocol version number
 	i = MSG_ReadLong ();
-	//johnfitz -- support multiple protocols
-	if (i != PROTOCOL_NETQUAKE && i != PROTOCOL_FITZQUAKE && i != PROTOCOL_RMQ) {
+	if (i != PROTOCOL_RMQ)
+	{
 		Con_Printf ("\n"); //because there's no newline after serverinfo print
-		Host_Error ("Server returned version %i, not %i or %i or %i", i, PROTOCOL_NETQUAKE, PROTOCOL_FITZQUAKE, PROTOCOL_RMQ);
+		Host_Error ("Server returned protocol %i, expected %i", i, PROTOCOL_RMQ);
 	}
-	cl.protocol = i;
-	//johnfitz
+	cl.protocol = PROTOCOL_RMQ;
 
-	if (cl.protocol == PROTOCOL_RMQ)
-	{
-		const unsigned int supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD | PRFL_SNAPSHOT_HIRES | PRFL_SIGNON_CHUNKS);
-		
-		// mh - read protocol flags from server so that we know what protocol features to expect
-		cl.protocolflags = (unsigned int) MSG_ReadLong ();
-		
-		if (0 != (cl.protocolflags & (~supportedflags)))
-		{
-			Con_Warning("PROTOCOL_RMQ protocolflags %i contains unsupported flags\n", cl.protocolflags);
-		}
-		cl.signon_chunking = (cl.protocolflags & PRFL_SIGNON_CHUNKS) != 0;
-	}
-	else
-	{
-		cl.protocolflags = 0;
-		cl.signon_chunking = false;
-	}
+	cl.protocolflags = (unsigned int) MSG_ReadLong ();
+	if (cl.protocolflags != PROTOCOL_RMQ_FLAGS)
+		Host_Error ("Server protocol flags 0x%x do not match required flags 0x%x", cl.protocolflags, PROTOCOL_RMQ_FLAGS);
+	cl.signon_chunking = true;
 	cl.signon_chunk_stage = SIGNON_STAGE_PRECACHES;
 	cl.signon_chunk_next_seq = 0;
 	CL_ResetSignonFragment ();
@@ -618,8 +596,7 @@ void CL_ParseServerInfo (void)
 	Con_Printf ("\n%s\n", Con_Quakebar(40)); //johnfitz
 	Con_Printf ("%c%s\n", 2, str);
 
-//johnfitz -- tell user which protocol this is
-	Con_Printf ("Using protocol %i\n", i);
+	Con_Printf ("Using protocol %i\n", cl.protocol);
 
 // first we go through and touch all of the precache data that still
 // happens to be in the cache, so precaching something else doesn't
@@ -716,264 +693,6 @@ void CL_ParseServerInfo (void)
 	memset(&dev_overflows, 0, sizeof(dev_overflows));
 }
 
-/*
-==================
-CL_ParseUpdate
-
-Parse an entity update message from the server
-If an entities model or origin changes from frame to frame, it must be
-relinked.  Other attributes can change without relinking.
-==================
-*/
-void CL_ParseUpdate (int bits)
-{
-	int		i;
-	qmodel_t	*model;
-	int		modnum;
-	qboolean	forcelink;
-	entity_t	*ent;
-	int		num;
-	int		skin;
-	int		prevframe;
-
-	if (cls.signon == SIGNONS - 1)
-	{	// first update is the final signon stage
-		cls.signon = SIGNONS;
-		CL_SignonReply ();
-	}
-
-	if (bits & U_MOREBITS)
-	{
-		i = MSG_ReadByte ();
-		bits |= (i<<8);
-	}
-
-	//johnfitz -- PROTOCOL_FITZQUAKE
-	if (cl.protocol == PROTOCOL_FITZQUAKE || cl.protocol == PROTOCOL_RMQ)
-	{
-		if (bits & U_EXTEND1)
-			bits |= MSG_ReadByte() << 16;
-		if (bits & U_EXTEND2)
-			bits |= MSG_ReadByte() << 24;
-	}
-	//johnfitz
-
-	if (bits & U_LONGENTITY)
-		num = MSG_ReadShort ();
-	else
-		num = MSG_ReadByte ();
-
-	ent = CL_EntityNum (num);
-
-	if (ent->msgtime != cl.mtime[1])
-		forcelink = true;	// no previous frame to lerp from
-	else
-		forcelink = false;
-
-	//johnfitz -- lerping
-	if (ent->msgtime + 0.2 < cl.mtime[0]) //more than 0.2 seconds since the last message (most entities think every 0.1 sec)
-		ent->lerpflags |= LERP_RESETANIM; //if we missed a think, we'd be lerping from the wrong frame
-	//johnfitz
-
-	ent->msgtime = cl.mtime[0];
-
-	if (bits & U_MODEL)
-	{
-		modnum = MSG_ReadByte ();
-		if (modnum >= MAX_MODELS)
-			Host_Error ("CL_ParseModel: bad modnum");
-	}
-	else
-		modnum = ent->baseline.modelindex;
-
-	prevframe = ent->frame;
-	if (bits & U_FRAME)
-		ent->frame = MSG_ReadByte ();
-	else
-		ent->frame = ent->baseline.frame;
-
-	if (bits & U_COLORMAP)
-		i = MSG_ReadByte();
-	else
-		i = ent->baseline.colormap;
-	if (!i)
-		ent->colormap = vid.colormap;
-	else
-	{
-		if (i > cl.maxclients)
-			Sys_Error ("i >= cl.maxclients");
-		ent->colormap = cl.scores[i-1].translations;
-	}
-	if (bits & U_SKIN)
-		skin = MSG_ReadByte();
-	else
-		skin = ent->baseline.skin;
-	if (skin != ent->skinnum)
-	{
-		ent->skinnum = skin;
-		if (num > 0 && num <= cl.maxclients)
-			R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
-	}
-	if (bits & U_EFFECTS)
-		ent->effects = MSG_ReadByte();
-	else
-		ent->effects = ent->baseline.effects;
-
-// shift the known values for interpolation
-	VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-	VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-
-	if (bits & U_ORIGIN1)
-		ent->msg_origins[0][0] = MSG_ReadCoord (cl.protocolflags);
-	else
-		ent->msg_origins[0][0] = ent->baseline.origin[0];
-	if (bits & U_ANGLE1)
-		ent->msg_angles[0][0] = MSG_ReadAngle(cl.protocolflags);
-	else
-		ent->msg_angles[0][0] = ent->baseline.angles[0];
-
-	if (bits & U_ORIGIN2)
-		ent->msg_origins[0][1] = MSG_ReadCoord (cl.protocolflags);
-	else
-		ent->msg_origins[0][1] = ent->baseline.origin[1];
-	if (bits & U_ANGLE2)
-		ent->msg_angles[0][1] = MSG_ReadAngle(cl.protocolflags);
-	else
-		ent->msg_angles[0][1] = ent->baseline.angles[1];
-
-	if (bits & U_ORIGIN3)
-		ent->msg_origins[0][2] = MSG_ReadCoord (cl.protocolflags);
-	else
-		ent->msg_origins[0][2] = ent->baseline.origin[2];
-	if (bits & U_ANGLE3)
-		ent->msg_angles[0][2] = MSG_ReadAngle(cl.protocolflags);
-	else
-		ent->msg_angles[0][2] = ent->baseline.angles[2];
-
-	//johnfitz -- lerping for movetype_step entities
-	if (bits & U_STEP)
-	{
-		ent->lerpflags |= LERP_MOVESTEP;
-		ent->forcelink = true;
-	}
-	else
-		ent->lerpflags &= ~LERP_MOVESTEP;
-	//johnfitz
-
-	//johnfitz -- PROTOCOL_FITZQUAKE and PROTOCOL_NEHAHRA
-	if (cl.protocol == PROTOCOL_FITZQUAKE || cl.protocol == PROTOCOL_RMQ)
-	{
-		if (bits & U_ALPHA)
-			ent->alpha = MSG_ReadByte();
-		else
-			ent->alpha = ent->baseline.alpha;
-		if (bits & U_SCALE)
-			ent->scale = MSG_ReadByte();
-		else
-			ent->scale = ent->baseline.scale;
-		if (bits & U_FRAME2)
-			ent->frame = (ent->frame & 0x00FF) | (MSG_ReadByte() << 8);
-		if (bits & U_MODEL2)
-			modnum = (modnum & 0x00FF) | (MSG_ReadByte() << 8);
-		if (bits & U_LERPFINISH)
-		{
-			ent->lerpfinish = ent->msgtime + ((float)(MSG_ReadByte()) / 255);
-			ent->lerpflags |= LERP_FINISH;
-		}
-		else
-			ent->lerpflags &= ~LERP_FINISH;
-	}
-	else if (cl.protocol == PROTOCOL_NETQUAKE)
-	{
-		//HACK: if this bit is set, assume this is PROTOCOL_NEHAHRA
-		if (bits & U_TRANS)
-		{
-			float a, b;
-
-			if (warn_about_nehahra_protocol)
-			{
-				Con_Warning ("nonstandard update bit, assuming Nehahra protocol\n");
-				warn_about_nehahra_protocol = false;
-			}
-
-			a = MSG_ReadFloat();
-			b = MSG_ReadFloat(); //alpha
-			if (a == 2)
-				MSG_ReadFloat(); //fullbright (not using this yet)
-			ent->alpha = ENTALPHA_ENCODE(b);
-		}
-		else
-			ent->alpha = ent->baseline.alpha;
-		ent->scale = ent->baseline.scale;
-	}
-	//johnfitz
-
-	//johnfitz -- moved here from above
-	model = cl.model_precache[modnum];
-	if (model != ent->model)
-	{
-		ent->model = model;
-	// automatic animation (torches, etc) can be either all together
-	// or randomized
-		if (model)
-		{
-			if (model->synctype == ST_FRAMETIME)
-				ent->syncbase = -cl.time;
-			else if (model->synctype == ST_RAND)
-				ent->syncbase = (float)(rand()&0x7fff) / 0x7fff;
-			else
-				ent->syncbase = 0.0;
-		}
-		else
-			forcelink = true;	// hack to make null model players work
-		if (num > 0 && num <= cl.maxclients)
-			R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
-
-		ent->lerpflags |= LERP_RESETANIM; //johnfitz -- don't lerp animation across model changes
-	}
-	//johnfitz
-	else if (model && model->synctype == ST_FRAMETIME && ent->frame != prevframe)
-		ent->syncbase = -cl.time;
-
-	if ( forcelink )
-	{	// didn't have an update last message
-		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-		VectorCopy (ent->msg_origins[0], ent->origin);
-		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-		VectorCopy (ent->msg_angles[0], ent->angles);
-		ent->forcelink = true;
-	}
-}
-
-static qboolean CL_ReadPackedByte (int *out)
-{
-	if (msg_readcount + 1 > net_message.cursize)
-		return false;
-	*out = net_message.data[msg_readcount];
-	msg_readcount++;
-	return true;
-}
-
-static qboolean CL_ReadPackedInt16 (short *out)
-{
-	if (msg_readcount + 2 > net_message.cursize)
-		return false;
-	*out = (short)(net_message.data[msg_readcount]
-		+ (net_message.data[msg_readcount+1] << 8));
-	msg_readcount += 2;
-	return true;
-}
-
-static qboolean CL_ReadPackedUInt16 (unsigned int *out)
-{
-	if (msg_readcount + 2 > net_message.cursize)
-		return false;
-	*out = (unsigned int)net_message.data[msg_readcount]
-		| ((unsigned int)net_message.data[msg_readcount+1] << 8);
-	msg_readcount += 2;
-	return true;
-}
-
 static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
 {
 	const float max_abs = 65536.0f;
@@ -988,6 +707,31 @@ static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
 	}
 
 	return false;
+}
+
+static qboolean CL_SnapshotOriginIsSane (const vec3_t origin)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
+			return false;
+	}
+	return true;
+}
+
+static int CL_CountMaskBits (unsigned int mask)
+{
+	int count = 0;
+
+	while (mask)
+	{
+		count += mask & 1u;
+		mask >>= 1;
+	}
+	return count;
 }
 
 static void CL_EnsureViewEntityOrigin (const char *reason)
@@ -1009,347 +753,6 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
 			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 	}
-}
-
-static qboolean CL_PackedOriginIsSane (const vec3_t origin)
-{
-	const float max_abs = 65536.0f;
-	int i;
-
-	for (i = 0; i < 3; i++)
-	{
-		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
-			return false;
-	}
-	return true;
-}
-
-static void CL_ParsePackedEntities (void)
-{
-	unsigned int count;
-	unsigned int i;
-
-	if (cls.signon == SIGNONS - 1)
-	{	// first update is the final signon stage
-		cls.signon = SIGNONS;
-		CL_SignonReply ();
-	}
-
-	if (!CL_ReadPackedUInt16 (&count))
-	{
-		Con_DPrintf ("CL_ParsePackedEntities: short read on count\n");
-		msg_readcount = net_message.cursize;
-		return;
-	}
-
-	for (i = 0; i < count; i++)
-	{
-		entity_t *ent;
-		qmodel_t *model;
-		qboolean forcelink;
-		unsigned int entnum;
-		unsigned int lowmask;
-		unsigned int highmask = 0;
-		uint32_t mask;
-		int modnum;
-		int skin;
-		int prevframe;
-		int temp;
-		short coord;
-		qboolean origin_full;
-		vec3_t parsed_origin;
-
-		if (!CL_ReadPackedUInt16 (&entnum))
-			goto short_read;
-		if (!CL_ReadPackedUInt16 (&lowmask))
-			goto short_read;
-		if (lowmask & PACKEDENT_MASK_EXTEND)
-		{
-			if (!CL_ReadPackedUInt16 (&highmask))
-				goto short_read;
-			mask = ((uint32_t)highmask << 16) | (lowmask & ~PACKEDENT_MASK_EXTEND);
-		}
-		else
-			mask = lowmask;
-
-		if (mask & ~PACKEDENT_MASK_VALID)
-		{
-			Con_DPrintf ("CL_ParsePackedEntities: invalid mask 0x%x\n", mask);
-			msg_readcount = net_message.cursize;
-			return;
-		}
-
-		if (entnum >= (unsigned int)cl_max_edicts)
-		{
-			Con_DPrintf ("CL_ParsePackedEntities: invalid entnum %u\n", entnum);
-			msg_readcount = net_message.cursize;
-			return;
-		}
-
-		ent = CL_EntityNum ((int)entnum);
-
-		if (ent->msgtime != cl.mtime[1])
-			forcelink = true;	// no previous frame to lerp from
-		else
-			forcelink = false;
-
-		if (ent->msgtime + 0.2 < cl.mtime[0])
-			ent->lerpflags |= LERP_RESETANIM;
-
-		ent->msgtime = cl.mtime[0];
-
-		if (mask & PACKEDENT_MASK_MODEL)
-		{
-			unsigned int umod;
-			if (!CL_ReadPackedUInt16 (&umod))
-				goto short_read;
-			modnum = (int)umod;
-			if (modnum >= MAX_MODELS)
-			{
-				Con_DPrintf ("CL_ParsePackedEntities: bad modnum\n");
-				msg_readcount = net_message.cursize;
-				return;
-			}
-		}
-		else
-			modnum = ent->baseline.modelindex;
-
-		prevframe = ent->frame;
-		if (mask & PACKEDENT_MASK_FRAME)
-		{
-			unsigned int uframe;
-			if (!CL_ReadPackedUInt16 (&uframe))
-				goto short_read;
-			ent->frame = (int)uframe;
-		}
-		else
-			ent->frame = ent->baseline.frame;
-
-		if (mask & PACKEDENT_MASK_COLORMAP)
-		{
-			if (!CL_ReadPackedByte (&temp))
-				goto short_read;
-		}
-		else
-			temp = ent->baseline.colormap;
-
-		if (!temp)
-			ent->colormap = vid.colormap;
-		else
-		{
-			if (temp > cl.maxclients)
-			{
-				Con_DPrintf ("CL_ParsePackedEntities: bad colormap\n");
-				msg_readcount = net_message.cursize;
-				return;
-			}
-			ent->colormap = cl.scores[temp-1].translations;
-		}
-
-		if (mask & PACKEDENT_MASK_SKIN)
-		{
-			if (!CL_ReadPackedByte (&skin))
-				goto short_read;
-		}
-		else
-			skin = ent->baseline.skin;
-		if (skin != ent->skinnum)
-		{
-			ent->skinnum = skin;
-			if (entnum > 0 && entnum <= (unsigned int)cl.maxclients)
-				R_TranslateNewPlayerSkin ((int)entnum - 1);
-		}
-
-		if (mask & PACKEDENT_MASK_EFFECTS)
-		{
-			if (!CL_ReadPackedByte (&ent->effects))
-				goto short_read;
-		}
-		else
-			ent->effects = ent->baseline.effects;
-
-		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-
-		origin_full = (mask & PACKEDENT_MASK_POS_FULL) != 0;
-		VectorCopy (ent->baseline.origin, parsed_origin);
-
-		if (mask & PACKEDENT_MASK_ORIGIN_X)
-		{
-			if (origin_full)
-				parsed_origin[0] = MSG_ReadCoord (cl.protocolflags);
-			else
-			{
-				if (!CL_ReadPackedInt16 (&coord))
-					goto short_read;
-				parsed_origin[0] = coord / PACKEDENT_POS_SCALE;
-			}
-		}
-
-		if (mask & PACKEDENT_MASK_ANGLE_PITCH)
-		{
-			unsigned int angle;
-			if (!CL_ReadPackedUInt16 (&angle))
-				goto short_read;
-			ent->msg_angles[0][0] = (float)angle * (360.0f / 65536.0f);
-		}
-		else
-			ent->msg_angles[0][0] = ent->baseline.angles[0];
-
-		if (mask & PACKEDENT_MASK_ORIGIN_Y)
-		{
-			if (origin_full)
-				parsed_origin[1] = MSG_ReadCoord (cl.protocolflags);
-			else
-			{
-				if (!CL_ReadPackedInt16 (&coord))
-					goto short_read;
-				parsed_origin[1] = coord / PACKEDENT_POS_SCALE;
-			}
-		}
-
-		if (mask & PACKEDENT_MASK_ANGLE_YAW)
-		{
-			unsigned int angle;
-			if (!CL_ReadPackedUInt16 (&angle))
-				goto short_read;
-			ent->msg_angles[0][1] = (float)angle * (360.0f / 65536.0f);
-		}
-		else
-			ent->msg_angles[0][1] = ent->baseline.angles[1];
-
-		if (mask & PACKEDENT_MASK_ORIGIN_Z)
-		{
-			if (origin_full)
-				parsed_origin[2] = MSG_ReadCoord (cl.protocolflags);
-			else
-			{
-				if (!CL_ReadPackedInt16 (&coord))
-					goto short_read;
-				parsed_origin[2] = coord / PACKEDENT_POS_SCALE;
-			}
-		}
-
-		if (mask & PACKEDENT_MASK_ANGLE_ROLL)
-		{
-			unsigned int angle;
-			if (!CL_ReadPackedUInt16 (&angle))
-				goto short_read;
-			ent->msg_angles[0][2] = (float)angle * (360.0f / 65536.0f);
-		}
-		else
-			ent->msg_angles[0][2] = ent->baseline.angles[2];
-
-		if (!CL_PackedOriginIsSane (parsed_origin))
-		{
-			CL_RequestFullSnapshot ("packedents origin guard", true);
-			msg_readcount = net_message.cursize;
-			return;
-		}
-		CL_ApplySnapshotOrigin (ent->msg_origins[0], parsed_origin);
-		CL_ApplyEntityOrigin (ent, (int)entnum);
-
-		if (mask & PACKEDENT_MASK_VEL_X)
-		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->packed_velocity[0] = coord / PACKEDENT_VEL_SCALE;
-		}
-		else
-			ent->packed_velocity[0] = 0.0f;
-
-		if (mask & PACKEDENT_MASK_VEL_Y)
-		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->packed_velocity[1] = coord / PACKEDENT_VEL_SCALE;
-		}
-		else
-			ent->packed_velocity[1] = 0.0f;
-
-		if (mask & PACKEDENT_MASK_VEL_Z)
-		{
-			if (!CL_ReadPackedInt16 (&coord))
-				goto short_read;
-			ent->packed_velocity[2] = coord / PACKEDENT_VEL_SCALE;
-		}
-		else
-			ent->packed_velocity[2] = 0.0f;
-
-		if (mask & PACKEDENT_MASK_ALPHA)
-		{
-			if (!CL_ReadPackedByte (&temp))
-				goto short_read;
-			ent->alpha = temp;
-		}
-		else
-			ent->alpha = ent->baseline.alpha;
-
-		if (mask & PACKEDENT_MASK_SCALE)
-		{
-			if (!CL_ReadPackedByte (&temp))
-				goto short_read;
-			ent->scale = temp;
-		}
-		else
-			ent->scale = ent->baseline.scale;
-
-		if (mask & PACKEDENT_MASK_LERPFINISH)
-		{
-			if (!CL_ReadPackedByte (&temp))
-				goto short_read;
-			ent->lerpfinish = ent->msgtime + ((float)temp / 255.0f);
-			ent->lerpflags |= LERP_FINISH;
-		}
-		else
-			ent->lerpflags &= ~LERP_FINISH;
-
-		if (mask & PACKEDENT_MASK_STEP)
-		{
-			ent->lerpflags |= LERP_MOVESTEP;
-			ent->forcelink = true;
-		}
-		else
-			ent->lerpflags &= ~LERP_MOVESTEP;
-
-		model = cl.model_precache[modnum];
-		if (model != ent->model)
-		{
-			ent->model = model;
-			if (model)
-			{
-				if (model->synctype == ST_FRAMETIME)
-					ent->syncbase = -cl.time;
-				else if (model->synctype == ST_RAND)
-					ent->syncbase = (float)(rand()&0x7fff) / 0x7fff;
-				else
-					ent->syncbase = 0.0;
-			}
-			else
-				forcelink = true;
-			if (entnum > 0 && entnum <= (unsigned int)cl.maxclients)
-				R_TranslateNewPlayerSkin ((int)entnum - 1);
-
-			ent->lerpflags |= LERP_RESETANIM;
-		}
-		else if (model && model->synctype == ST_FRAMETIME && ent->frame != prevframe)
-			ent->syncbase = -cl.time;
-
-		if (forcelink)
-		{
-			VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-			VectorCopy (ent->msg_origins[0], ent->origin);
-			VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-			VectorCopy (ent->msg_angles[0], ent->angles);
-			ent->forcelink = true;
-		}
-	}
-
-	return;
-
-short_read:
-	Con_DPrintf ("CL_ParsePackedEntities: short read\n");
-	msg_readcount = net_message.cursize;
 }
 
 // INV-2: keep control/acks from starving behind queued reliable data.
@@ -1492,7 +895,15 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
 	if (count_parse_error)
+	{
 		cl.snap_parse_errors++;
+		cl.snap_parse_consecutive++;
+		if (cl.snap_parse_consecutive >= MAX_SNAPSHOT_PARSE_ERRORS)
+		{
+			Host_EndGame ("Too many malformed packets\n");
+			return;
+		}
+	}
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_abort reason %s parse_errors %d need_full %d\n",
 		realtime, reason ? reason : "unknown", cl.snap_parse_errors, cl.need_full_snapshot ? 1 : 0);
@@ -1511,6 +922,13 @@ static void CL_SendSnapshotNak (unsigned int expected_base, unsigned int receive
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
 	CL_EnsureReliableControlSpace (1 + 4 + 4, "snapshot_nak");
+	if (cls.message.maxsize - cls.message.cursize < (1 + 4 + 4))
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_nak_drop expected %u received %u\n",
+			realtime, expected_base, received_base);
+		return;
+	}
 	MSG_WriteByte (&cls.message, clc_snapshot_nak);
 	MSG_WriteLong (&cls.message, (int)expected_base);
 	MSG_WriteLong (&cls.message, (int)received_base);
@@ -1644,7 +1062,7 @@ static qboolean CL_SnapshotWorldModelReady (const char *reason)
 
 static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in)
 {
-	// Snapshot/packedent origins are model-space; offset by worldmodel origin to render in world-space.
+	// Snapshot origins are model-space; offset by worldmodel origin to render in world-space.
 	if (cl.worldmodel && cl.worldmodel->type == mod_brush
 		&& cl.worldmodel->submodels && cl.worldmodel->numsubmodels > 0)
 		VectorAdd (in, cl.worldmodel->submodels[0].origin, out);
@@ -1878,11 +1296,9 @@ void CL_ParseBaseline (entity_t *ent, int version) //johnfitz -- added argument
 	int	i;
 	int bits; //johnfitz
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	bits = (version == 2) ? MSG_ReadByte() : 0;
 	ent->baseline.modelindex = (bits & B_LARGEMODEL) ? MSG_ReadShort() : MSG_ReadByte();
 	ent->baseline.frame = (bits & B_LARGEFRAME) ? MSG_ReadShort() : MSG_ReadByte();
-	//johnfitz
 
 	ent->baseline.colormap = MSG_ReadByte();
 	ent->baseline.skin = MSG_ReadByte();
@@ -1892,7 +1308,7 @@ void CL_ParseBaseline (entity_t *ent, int version) //johnfitz -- added argument
 		ent->baseline.angles[i] = MSG_ReadAngle (cl.protocolflags);
 	}
 
-	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte() : ENTALPHA_DEFAULT; //johnfitz -- PROTOCOL_FITZQUAKE
+	ent->baseline.alpha = (bits & B_ALPHA) ? MSG_ReadByte() : ENTALPHA_DEFAULT;
 	ent->baseline.scale = (bits & B_SCALE) ? MSG_ReadByte() : ENTSCALE_DEFAULT;
 }
 
@@ -1912,7 +1328,7 @@ static void CL_ParseSnapshotFull (void)
 	if (cl_snap_debug.value >= 1.0f)
 		Con_Printf ("cl_snap full seq %u ents %d%s\n", seq, count, drop ? " drop" : "");
 
-	if (msg_badread || count < 0 || count > cl_max_edicts)
+	if (msg_badread || count < 0 || count > cl_max_edicts || count > MAX_SNAPSHOT_ENTITIES)
 	{
 		CL_RequestFullSnapshot ("snapshot_full header", true);
 		msg_readcount = net_message.cursize;
@@ -1940,6 +1356,12 @@ static void CL_ParseSnapshotFull (void)
 		if (msg_badread)
 		{
 			CL_RequestFullSnapshot ("snapshot_full state", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
+		if (!CL_SnapshotOriginIsSane (state.state.origin))
+		{
+			CL_RequestFullSnapshot ("snapshot_full origin guard", true);
 			msg_readcount = net_message.cursize;
 			return;
 		}
@@ -1978,6 +1400,7 @@ static void CL_ParseSnapshotFull (void)
 	cl.snap_last_applied_seq = seq16;
 	cl.snap_last_complete_seq = seq16;
 	cl.snap_last_incomplete = false;
+	cl.snap_parse_consecutive = 0;
 	cl.need_full_snapshot = false;
 	cl.has_valid_worldstate = true;
 	cl.has_full_snapshot = true;
@@ -2075,7 +1498,7 @@ static void CL_ParseSnapshotDelta (void)
 
 	count = (unsigned short)MSG_ReadShort ();
 	removes_parsed = count;
-	if (msg_badread || count < 0 || count > cl_max_edicts)
+	if (msg_badread || count < 0 || count > cl_max_edicts || count > MAX_REMOVE_ENTITIES)
 	{
 		CL_RequestFullSnapshot ("snapshot_delta remove header", true);
 		msg_readcount = net_message.cursize;
@@ -2096,7 +1519,7 @@ static void CL_ParseSnapshotDelta (void)
 	}
 
 	count = (unsigned short)MSG_ReadShort ();
-	if (msg_badread || count < 0 || count > cl_max_edicts)
+	if (msg_badread || count < 0 || count > cl_max_edicts || count > MAX_SNAPSHOT_ENTITIES)
 	{
 		CL_RequestFullSnapshot ("snapshot_delta add header", true);
 		msg_readcount = net_message.cursize;
@@ -2117,6 +1540,12 @@ static void CL_ParseSnapshotDelta (void)
 			msg_readcount = net_message.cursize;
 			return;
 		}
+		if (!CL_SnapshotOriginIsSane (state.state.origin))
+		{
+			CL_RequestFullSnapshot ("snapshot_delta origin guard", true);
+			msg_readcount = net_message.cursize;
+			return;
+		}
 		if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 		{
 			cl.snapshot_stage[entnum] = state;
@@ -2125,7 +1554,7 @@ static void CL_ParseSnapshotDelta (void)
 	}
 
 	count = (unsigned short)MSG_ReadShort ();
-	if (msg_badread || count < 0 || count > cl_max_edicts)
+	if (msg_badread || count < 0 || count > cl_max_edicts || count > MAX_SNAPSHOT_ENTITIES)
 	{
 		CL_RequestFullSnapshot ("snapshot_delta update header", true);
 		msg_readcount = net_message.cursize;
@@ -2135,7 +1564,7 @@ static void CL_ParseSnapshotDelta (void)
 	{
 		int entnum = (unsigned short)MSG_ReadShort ();
 		mask = (unsigned int)MSG_ReadLong ();
-		if (msg_badread || (mask & ~SNAP_VALID_MASK))
+		if (msg_badread || (mask & ~SNAP_VALID_MASK) || CL_CountMaskBits (mask & SNAP_VALID_MASK) > MAX_PACKED_FIELDS)
 		{
 			CL_RequestFullSnapshot ("snapshot_delta update mask", true);
 			msg_readcount = net_message.cursize;
@@ -2149,6 +1578,12 @@ static void CL_ParseSnapshotDelta (void)
 			if (msg_badread)
 			{
 				CL_RequestFullSnapshot ("snapshot_delta update fields", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
+			if (!CL_SnapshotOriginIsSane (state.state.origin))
+			{
+				CL_RequestFullSnapshot ("snapshot_delta origin guard", true);
 				msg_readcount = net_message.cursize;
 				return;
 			}
@@ -2166,14 +1601,18 @@ static void CL_ParseSnapshotDelta (void)
 				msg_readcount = net_message.cursize;
 				return;
 			}
+			if (!CL_SnapshotOriginIsSane (scratch.state.origin))
+			{
+				CL_RequestFullSnapshot ("snapshot_delta origin guard", true);
+				msg_readcount = net_message.cursize;
+				return;
+			}
 		}
 	}
 
 	// INV-5: commit staged snapshot only after full parse/validation.
 	if (!drop && baseline_match)
 	{
-		byte *old_present = cl.snapshot_present;
-
 		CL_StoreSnapshotBaselineFromBase (seq, base_states, base_present);
 		if (base_is_current)
 		{
@@ -2198,10 +1637,6 @@ static void CL_ParseSnapshotDelta (void)
 					CL_MarkSnapshotEntityUpdated (i);
 					touched++;
 				}
-				else if (old_present && old_present[i])
-				{
-					CL_ClearSnapshotEntity (i);
-				}
 			}
 		}
 
@@ -2213,6 +1648,7 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_applied_seq = seq16;
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
+		cl.snap_parse_consecutive = 0;
 		cl.has_full_snapshot = true;
 		base_advanced = true;
 		(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
@@ -2356,7 +1792,9 @@ static void CL_ParseSnapshot2 (void)
 			header.num_entities, header.num_removed, drop ? " drop" : "");
 	}
 
-	if (msg_badread || header.num_entities > cl_max_edicts || header.num_removed > cl_max_edicts)
+	if (msg_badread || header.num_entities > cl_max_edicts || header.num_removed > cl_max_edicts
+		|| header.num_entities > MAX_SNAPSHOT_ENTITIES || header.num_removed > MAX_REMOVE_ENTITIES
+		|| (unsigned int)header.num_entities + (unsigned int)header.num_removed > MAX_SNAPSHOT_ENTITIES)
 	{
 		CL_RequestFullSnapshot ("snapshot2 header", true);
 		msg_readcount = net_message.cursize;
@@ -2483,7 +1921,7 @@ static void CL_ParseSnapshot2 (void)
 					CL_ResetSnapshotChunk ();
 					return;
 				}
-				if (!CL_PackedOriginIsSane (state.state.origin))
+				if (!CL_SnapshotOriginIsSane (state.state.origin))
 				{
 					CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 					msg_readcount = net_message.cursize;
@@ -2556,6 +1994,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
+				cl.snap_parse_consecutive = 0;
 				cl.need_full_snapshot = false;
 				cl.has_full_snapshot = true;
 				cl.has_valid_worldstate = true;
@@ -2576,6 +2015,7 @@ static void CL_ParseSnapshot2 (void)
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_chunk, cl.snapshot_chunk_present);
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
+				cl.snap_parse_consecutive = 0;
 				cl.snap_incomplete_count++;
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_partial_apply seq %u flags 0x%x incomplete %d has_full %d\n",
@@ -2590,6 +2030,7 @@ static void CL_ParseSnapshot2 (void)
 			{
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
+				cl.snap_parse_consecutive = 0;
 				cl.snap_incomplete_count++;
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
@@ -2630,7 +2071,7 @@ static void CL_ParseSnapshot2 (void)
 				msg_readcount = net_message.cursize;
 				return;
 			}
-			if (!CL_PackedOriginIsSane (state.state.origin))
+			if (!CL_SnapshotOriginIsSane (state.state.origin))
 			{
 				CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 				msg_readcount = net_message.cursize;
@@ -2672,6 +2113,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
+				cl.snap_parse_consecutive = 0;
 				cl.need_full_snapshot = false;
 				cl.has_full_snapshot = true;
 				cl.has_valid_worldstate = true;
@@ -2692,6 +2134,7 @@ static void CL_ParseSnapshot2 (void)
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
 				cl.snap_last_incomplete_seq = seq16;
 				cl.snap_last_incomplete = true;
+				cl.snap_parse_consecutive = 0;
 				cl.snap_incomplete_count++;
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
@@ -2776,7 +2219,7 @@ static void CL_ParseSnapshot2 (void)
 
 	{
 		int add_count = (unsigned short)MSG_ReadShort ();
-		if (msg_badread || add_count < 0 || add_count > cl_max_edicts)
+		if (msg_badread || add_count < 0 || add_count > cl_max_edicts || add_count > MAX_SNAPSHOT_ENTITIES)
 		{
 			CL_RequestFullSnapshot ("snapshot2 add header", true);
 			msg_readcount = net_message.cursize;
@@ -2799,7 +2242,7 @@ static void CL_ParseSnapshot2 (void)
 			}
 			if (!drop && baseline_match && entnum > 0 && entnum < cl_max_edicts)
 			{
-				if (!CL_PackedOriginIsSane (state.state.origin))
+				if (!CL_SnapshotOriginIsSane (state.state.origin))
 				{
 					CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 					msg_readcount = net_message.cursize;
@@ -2812,7 +2255,7 @@ static void CL_ParseSnapshot2 (void)
 
 		{
 			int update_count = (unsigned short)MSG_ReadShort ();
-			if (msg_badread || update_count < 0 || update_count > cl_max_edicts)
+		if (msg_badread || update_count < 0 || update_count > cl_max_edicts || update_count > MAX_SNAPSHOT_ENTITIES)
 			{
 				CL_RequestFullSnapshot ("snapshot2 update header", true);
 				msg_readcount = net_message.cursize;
@@ -2822,7 +2265,7 @@ static void CL_ParseSnapshot2 (void)
 			{
 				int entnum = (unsigned short)MSG_ReadShort ();
 				unsigned int mask = (unsigned int)MSG_ReadLong ();
-				if (msg_badread || (mask & ~SNAP_VALID_MASK))
+				if (msg_badread || (mask & ~SNAP_VALID_MASK) || CL_CountMaskBits (mask & SNAP_VALID_MASK) > MAX_PACKED_FIELDS)
 				{
 					CL_RequestFullSnapshot ("snapshot2 update mask", true);
 					msg_readcount = net_message.cursize;
@@ -2840,7 +2283,7 @@ static void CL_ParseSnapshot2 (void)
 						msg_readcount = net_message.cursize;
 						return;
 					}
-					if (!CL_PackedOriginIsSane (state.state.origin))
+					if (!CL_SnapshotOriginIsSane (state.state.origin))
 					{
 						CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 						msg_readcount = net_message.cursize;
@@ -2860,7 +2303,7 @@ static void CL_ParseSnapshot2 (void)
 						msg_readcount = net_message.cursize;
 						return;
 					}
-					if (!CL_PackedOriginIsSane (scratch.state.origin))
+					if (!CL_SnapshotOriginIsSane (scratch.state.origin))
 					{
 						CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 						msg_readcount = net_message.cursize;
@@ -2875,8 +2318,6 @@ static void CL_ParseSnapshot2 (void)
 	{
 		if (!incomplete)
 		{
-			byte *old_present = cl.snapshot_present;
-
 			CL_StoreSnapshotBaselineFromBase (header.seq, base_states, base_present);
 			if (base_is_current)
 			{
@@ -2901,10 +2342,6 @@ static void CL_ParseSnapshot2 (void)
 						CL_MarkSnapshotEntityUpdated (i);
 						touched++;
 					}
-					else if (old_present && old_present[i])
-					{
-						CL_ClearSnapshotEntity (i);
-					}
 				}
 			}
 
@@ -2919,6 +2356,7 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_applied_seq = seq16;
 			cl.snap_last_complete_seq = seq16;
 			cl.snap_last_incomplete = false;
+			cl.snap_parse_consecutive = 0;
 			cl.snap_incomplete_count = 0;
 			cl.has_full_snapshot = true;
 			base_advanced = true;
@@ -2985,12 +2423,10 @@ void CL_ParseClientdata (void)
 
 	bits = (unsigned short)MSG_ReadShort (); //johnfitz -- read bits here isntead of in CL_ParseServerMessage()
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (bits & SU_EXTEND1)
 		bits |= (MSG_ReadByte() << 16);
 	if (bits & SU_EXTEND2)
 		bits |= (MSG_ReadByte() << 24);
-	//johnfitz
 
 	if (bits & SU_VIEWHEIGHT)
 		cl.viewheight = MSG_ReadChar ();
@@ -3113,7 +2549,6 @@ void CL_ParseClientdata (void)
 		}
 	}
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (bits & SU_WEAPON2)
 		cl.stats[STAT_WEAPON] |= (MSG_ReadByte() << 8);
 	if (bits & SU_ARMOR2)
@@ -3134,7 +2569,6 @@ void CL_ParseClientdata (void)
 		cl.viewent.alpha = MSG_ReadByte();
 	else
 		cl.viewent.alpha = ENTALPHA_DEFAULT;
-	//johnfitz
 
 	// svc_clientdata carries pmove-critical fields; snapshot2 owns local player position/orientation.
 	if (bits & SU_PREDICT)
@@ -3155,10 +2589,7 @@ void CL_ParseClientdata (void)
 		for (i = 0; i < 3; i++)
 			velocity[i] = MSG_ReadCoord (cl.protocolflags);
 		for (i = 0; i < 3; i++)
-			if (cl.protocol == PROTOCOL_NETQUAKE)
-				viewangles[i] = MSG_ReadAngle (cl.protocolflags);
-			else
-				viewangles[i] = MSG_ReadAngle16 (cl.protocolflags);
+			viewangles[i] = MSG_ReadAngle16 (cl.protocolflags);
 
 		CL_Predict_ServerUpdate (ack, origin, velocity, viewangles, cl.onground);
 	}
@@ -3271,12 +2702,10 @@ void CL_ParseStaticSound (int version) //johnfitz -- added argument
 	for (i = 0; i < 3; i++)
 		org[i] = MSG_ReadCoord (cl.protocolflags);
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	if (version == 2)
 		sound_num = MSG_ReadShort ();
 	else
 		sound_num = MSG_ReadByte ();
-	//johnfitz
 
 	vol = MSG_ReadByte ();
 	atten = MSG_ReadByte ();
@@ -3325,7 +2754,6 @@ static void CL_DumpPacket (void)
 //mods and servers might not send the \n instantly.
 //some mods bug out and omit the \n entirely, this function helps prevent the damage from spreading too much.
 //some servers or mods use //prefixed commands as extensions to avoid spam about unrecognised commands.
-//proquake has its own extension coding thing.
 static void CL_ParseStuffText(const char *msg)
 {
 	const char *str;
@@ -3335,13 +2763,6 @@ static void CL_ParseStuffText(const char *msg)
 		qboolean handled = false;
 
 		str++;//skip past the \n
-
-		if (*cl.stuffcmdbuf == 0x01 && cl.protocol == PROTOCOL_NETQUAKE) //proquake message, just strip this and try again (doesn't necessarily have a trailing \n straight away)
-		{
-			for (str = cl.stuffcmdbuf+1; *str >= 0x01 && *str <= 0x1f; str++)
-				;//FIXME: parse properly
-			continue;
-		}
 
 		//handle special commands
 		if (cl.stuffcmdbuf[0] == '/' && cl.stuffcmdbuf[1] == '/')
@@ -3433,32 +2854,12 @@ void CL_ParseServerMessage (void)
 			return;
 		}
 
-	// if the high bit of the command byte is set, it is a fast update
-		if (cmd & U_SIGNAL) //johnfitz -- was 128, changed for clarity
+		// fast updates are not supported
+		if (cmd & 128)
 		{
-			SHOWNET("fast update");
-			if (cl_netdebug_parse.value)
-				Con_Printf ("NETDBG: cmd fast_update 0x%x @%d\n", cmd, cmd_offset);
-			CL_ParseUpdate (cmd&127);
-			if (msg_badread)
-			{
-				CL_BadServerMessage ("bad fast update", cmd, cmd_offset,
-					lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
-				return;
-			}
-			if (cl_netdebug_parse.value)
-			{
-				int cmd_end = CL_NetDebugReadcount ();
-				if (cmd_end < cmd_offset)
-					cmd_end = cmd_offset;
-				Con_Printf ("NETDBG: cmd fast_update end %d bytes %d\n",
-					cmd_end, cmd_end - cmd_offset);
-			}
-			prevcmd = lastcmd;
-			prevcmd_offset = lastcmd_offset;
-			lastcmd = cmd;
-			lastcmd_offset = cmd_offset;
-			continue;
+			CL_BadServerMessage ("unsupported fast update", cmd, cmd_offset,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+			return;
 		}
 
 		if (cmd < (int)NUM_SVC_STRINGS) {
@@ -3471,14 +2872,8 @@ void CL_ParseServerMessage (void)
 		switch (cmd)
 		{
 		default:
-		//	CL_DumpPacket ();
-			if (realtime >= cl_unknown_cmd_next_warn_time)
-			{
-				Con_Printf ("Dropping server packet with unknown command %s (%d)\n",
-					CL_SvcName (cmd), cmd);
-				cl_unknown_cmd_next_warn_time = realtime + 1.0;
-			}
-			msg_readcount = net_message.cursize;
+			CL_BadServerMessage ("unknown command", cmd, cmd_offset,
+				lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
 			return;
 
 		case svc_nop:
@@ -3502,11 +2897,9 @@ void CL_ParseServerMessage (void)
 
 		case svc_version:
 			i = MSG_ReadLong ();
-			//johnfitz -- support multiple protocols
-			if (i != PROTOCOL_NETQUAKE && i != PROTOCOL_FITZQUAKE && i != PROTOCOL_RMQ)
-				Host_Error ("Server returned version %i, not %i or %i or %i", i, PROTOCOL_NETQUAKE, PROTOCOL_FITZQUAKE, PROTOCOL_RMQ);
-			cl.protocol = i;
-			//johnfitz
+			if (i != PROTOCOL_RMQ)
+				Host_Error ("Server returned protocol %i, expected %i", i, PROTOCOL_RMQ);
+			cl.protocol = PROTOCOL_RMQ;
 			break;
 
 		case svc_disconnect:
@@ -3645,6 +3038,13 @@ void CL_ParseServerMessage (void)
 			unsigned short payload_len = (unsigned short)MSG_ReadShort ();
 			const byte *payload;
 
+			if (payload_len > MAX_RELIABLE_QUEUE_BYTES)
+			{
+				CL_BadServerMessage ("signon chunk length exceeds cap", cmd, cmd_offset,
+					lastcmd, lastcmd_offset, prevcmd, prevcmd_offset);
+				return;
+			}
+
 			if (payload_len > (unsigned short)(net_message.cursize - msg_readcount))
 			{
 				CL_BadServerMessage ("signon chunk length exceeds packet", cmd, cmd_offset,
@@ -3775,17 +3175,17 @@ void CL_ParseServerMessage (void)
 			Fog_ParseServerMessage ();
 			break;
 
-		case svc_spawnbaseline2: //PROTOCOL_FITZQUAKE
+		case svc_spawnbaseline2:
 			i = MSG_ReadShort ();
 			// must use CL_EntityNum() to force cl.num_entities up
 			CL_ParseBaseline (CL_EntityNum(i), 2);
 			break;
 
-		case svc_spawnstatic2: //PROTOCOL_FITZQUAKE
+		case svc_spawnstatic2:
 			CL_ParseStatic (2);
 			break;
 
-		case svc_spawnstaticsound2: //PROTOCOL_FITZQUAKE
+		case svc_spawnstaticsound2:
 			CL_ParseStaticSound (2);
 			break;
 		//johnfitz
@@ -3814,9 +3214,6 @@ void CL_ParseServerMessage (void)
 			CL_ParseSnapshot2 ();
 			break;
 
-		case svc_packedentities:
-			CL_ParsePackedEntities ();
-			break;
 		}
 
 		if (msg_badread)

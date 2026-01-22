@@ -1277,7 +1277,6 @@ void SV_Physics (void)
 		else
 			Sys_Error ("SV_Physics: bad movetype %i", (int)ent->v.movetype);
 
-	//johnfitz -- PROTOCOL_FITZQUAKE
 	//capture interval to nextthink here and send it to client for better
 	//lerp timing, but only if interval is not 0.1 (which client assumes)
 		ent->sendinterval = false;
@@ -1287,7 +1286,6 @@ void SV_Physics (void)
 			if (j >= 0 && j < 256 && j != 25 && j != 26) //25 and 26 are close enough to 0.1 to not send
 				ent->sendinterval = true;
 		}
-	//johnfitz
 	}
 
 	if (pr_global_struct->force_retouch)
