@@ -901,12 +901,15 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_unacked_frames = 0;
 	client->snapshot_pending_mandatory = 0;
-	client->snapshot_pending_dropped = 0;
+	client->snapshot_pending_dropped_optional = 0;
+	client->snapshot_pending_missing_mandatory = false;
 	client->snapshot_pending_incomplete = false;
 	client->snapshot_ack_stall_seq = 0;
 	client->snapshot_ack_stall_frames = 0;
 	client->snapshot_incomplete_streak = 0;
 	client->snapshot_force_full_until_ack = false;
+	client->snapshot_need_complete_delta_after_full = false;
+	client->snapshot_need_complete_delta_seq = 0;
 	client->snapshot_force_full_ack_seq = 0;
 	client->snapshot_force_full_next_time = 0;
 	client->snapshot_no_progress_seq = 0;
@@ -2395,7 +2398,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 
 		if (client->entstream.active)
 		{
-			if (client->snapshot_pending_dropped > 0)
+			if (client->snapshot_pending_missing_mandatory)
 				extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 			use_delta = false;
 			client->snapshot_pending_is_delta = false;
@@ -2445,6 +2448,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			}
 			client->snapshot_last_full_seq = client->snapshot_pending_seq;
 			client->snapshot_last_full_time = realtime;
+			if (snapshot2_recovery)
+			{
+				client->snapshot_need_complete_delta_after_full = true;
+				client->snapshot_need_complete_delta_seq = 0;
+			}
 		}
 		else
 		{
@@ -2459,13 +2467,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			int header_bytes = 0;
 			int snapshot_budget_bytes = SV_SnapshotBudgetBytes (client, msg,
 				&mtu_payload_bytes, &current_bytes, &remaining_bytes, &header_bytes);
+			int mandatory_total_bytes = 0;
 			int build_budget_bytes = remaining_bytes;
 			int build_optional_budget_bytes = snapshot_budget_bytes;
-			int mandatory_total_bytes = 0;
 			qboolean budget_continuation = false;
 			qboolean mandatory_oversize = false;
 			qboolean debug_frame = false;
 			qboolean force_complete_full = need_full;
+			qboolean rebuild_snapshot = false;
 
 			if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 			{
@@ -2473,62 +2482,91 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->snapshot_debug_next_time = realtime + 1.0;
 			}
 
-			if (force_complete_full)
+			do
 			{
-				build_budget_bytes = 1 << 30;
-				build_optional_budget_bytes = 1 << 30;
-			}
+				rebuild_snapshot = false;
+				build_budget_bytes = remaining_bytes;
+				build_optional_budget_bytes = snapshot_budget_bytes;
+				if (force_complete_full)
+				{
+					build_budget_bytes = 1 << 30;
+					build_optional_budget_bytes = 1 << 30;
+				}
+				else if (snapshot2_recovery && client->snapshot_need_complete_delta_after_full)
+				{
+					build_optional_budget_bytes = header_bytes;
+				}
 
-			SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
-				client->snapshot_pending_relevant, client->snapshot_pending_flags, build_budget_bytes,
-				build_optional_budget_bytes,
-				header_bytes, baseline_present, &mandatory_count, &mandatory_bytes, NULL,
-				&dropped_count, &dropped_tier1, &dropped_tier2, debug_frame, &budget_continuation,
-				&mandatory_oversize);
-			mandatory_total_bytes = header_bytes + mandatory_bytes;
-			if (!force_complete_full && mtu_payload_bytes > 0 && current_bytes + mandatory_total_bytes > mtu_payload_bytes)
-			{
-				if (snapshot2_recovery)
+				SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
+					client->snapshot_pending_relevant, client->snapshot_pending_flags, build_budget_bytes,
+					build_optional_budget_bytes,
+					header_bytes, baseline_present, &mandatory_count, &mandatory_bytes, NULL,
+					&dropped_count, &dropped_tier1, &dropped_tier2, debug_frame, &budget_continuation,
+					&mandatory_oversize);
+				mandatory_total_bytes = header_bytes + mandatory_bytes;
+				if (!force_complete_full && mtu_payload_bytes > 0
+					&& current_bytes + mandatory_total_bytes > mtu_payload_bytes)
 				{
-					NET_DebugLogEvent (true,
-						"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d mtu %d\n",
-						realtime, client->name, client->snapshot_next_seq,
-						mandatory_total_bytes, mtu_payload_bytes);
-					client->snapshot_incomplete_streak++;
-					SV_Snapshot2ForceFull (client, "mandatory_overflow");
+					if (snapshot2_recovery)
+					{
+						NET_DebugLogEvent (true,
+							"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d mtu %d\n",
+							realtime, client->name, client->snapshot_next_seq,
+							mandatory_total_bytes, mtu_payload_bytes);
+						SV_Snapshot2ForceFull (client, "mandatory_overflow");
+						force_complete_full = true;
+						rebuild_snapshot = true;
+						continue;
+					}
+					SDL_assert (current_bytes + mandatory_total_bytes <= mtu_payload_bytes);
+					client->snapshot_pending_incomplete = true;
+					client->snapshot_pending_mandatory = mandatory_count;
+					client->snapshot_pending_dropped_optional = 0;
+					client->snapshot_pending_missing_mandatory = true;
+					client->mtu_dropped_tier1 = 0;
+					client->mtu_dropped_tier2 = 0;
+					return;
 				}
-				SDL_assert (current_bytes + mandatory_total_bytes <= mtu_payload_bytes);
-				client->snapshot_pending_incomplete = true;
-				client->snapshot_pending_mandatory = mandatory_count;
-				client->snapshot_pending_dropped = 0;
-				client->mtu_dropped_tier1 = 0;
-				client->mtu_dropped_tier2 = 0;
-				return;
-			}
-			if (!force_complete_full && mandatory_oversize)
-			{
-				if (snapshot2_recovery)
+				if (!force_complete_full && mandatory_oversize)
 				{
-					NET_DebugLogEvent (true,
-						"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d budget %d\n",
-						realtime, client->name, client->snapshot_next_seq,
-						mandatory_total_bytes, build_budget_bytes);
-					client->snapshot_incomplete_streak++;
-					SV_Snapshot2ForceFull (client, "mandatory_overflow");
+					if (snapshot2_recovery)
+					{
+						NET_DebugLogEvent (true,
+							"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d budget %d\n",
+							realtime, client->name, client->snapshot_next_seq,
+							mandatory_total_bytes, build_budget_bytes);
+						SV_Snapshot2ForceFull (client, "mandatory_overflow");
+						force_complete_full = true;
+						rebuild_snapshot = true;
+						continue;
+					}
+					SDL_assert (!mandatory_oversize);
+					client->snapshot_pending_incomplete = true;
+					client->snapshot_pending_mandatory = mandatory_count;
+					client->snapshot_pending_dropped_optional = 0;
+					client->snapshot_pending_missing_mandatory = true;
+					client->mtu_dropped_tier1 = 0;
+					client->mtu_dropped_tier2 = 0;
+					return;
 				}
-				SDL_assert (!mandatory_oversize);
-				client->snapshot_pending_incomplete = true;
-				client->snapshot_pending_mandatory = mandatory_count;
-				client->snapshot_pending_dropped = 0;
-				client->mtu_dropped_tier1 = 0;
-				client->mtu_dropped_tier2 = 0;
-				return;
-			}
+			} while (rebuild_snapshot);
+			if (sv_snap_debug.value >= 1.0f && sv_snapshot2.value)
+				NET_DebugLogEvent (false,
+					"NETDBG time %.3f snap_budget %s seq %u mand_bytes %d budget %d opt_budget %d drop_opt %d tier1 %d tier2 %d\n",
+					realtime, client->name, client->snapshot_next_seq,
+					mandatory_total_bytes, build_budget_bytes, build_optional_budget_bytes,
+					dropped_count, dropped_tier1, dropped_tier2);
+			if (dropped_count > 0 && sv_snap_debug.value >= 1.0f && sv_snapshot2.value)
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_budget_drop(optional) %s seq %u drop_opt %d tier1 %d tier2 %d\n",
+					realtime, client->name, client->snapshot_next_seq,
+					dropped_count, dropped_tier1, dropped_tier2);
 			client->snapshot_pending_mandatory = mandatory_count;
-			client->snapshot_pending_dropped = dropped_count;
+			client->snapshot_pending_dropped_optional = dropped_count;
+			client->snapshot_pending_missing_mandatory = false;
 			client->mtu_dropped_tier1 = dropped_tier1;
 			client->mtu_dropped_tier2 = dropped_tier2;
-			if (client->snapshot_pending_dropped > 0)
+			if (client->snapshot_pending_missing_mandatory)
 				extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 			client->snapshot_pending_seq = client->snapshot_next_seq++;
 			if (!client->snapshot_next_seq)
@@ -2609,6 +2647,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				}
 				client->snapshot_last_full_seq = client->snapshot_pending_seq;
 				client->snapshot_last_full_time = realtime;
+				if (snapshot2_recovery)
+				{
+					client->snapshot_need_complete_delta_after_full = true;
+					client->snapshot_need_complete_delta_seq = 0;
+				}
 			}
 		}
 
@@ -2622,12 +2665,16 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			else
 				packet_incomplete = packet_incomplete || ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
 			client->snapshot_pending_incomplete = packet_incomplete;
+			if (packet_incomplete)
+				client->snapshot_pending_missing_mandatory = true;
 		}
 
 		if (snapshot2_recovery)
 		{
-			if (client->snapshot_pending_incomplete || client->snapshot_pending_dropped > 0)
+			if (client->snapshot_pending_incomplete)
 				client->snapshot_incomplete_streak++;
+			if (delta_incomplete)
+				SV_Snapshot2ForceFull (client, "delta_budget");
 			if (client->snapshot_incomplete_streak >= 3)
 				SV_Snapshot2ForceFull (client, "incomplete_streak");
 		}
@@ -2640,6 +2687,18 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		continuation = msg->write_locked && client->entstream.active;
 	if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
 		continuation = true;
+	if (snapshot2_recovery
+		&& client->snapshot_need_complete_delta_after_full
+		&& use_delta
+		&& !client->snapshot_pending_incomplete
+		&& !continuation
+		&& client->snapshot_pending_baseline_seq == client->snapshot_last_full_seq)
+	{
+		client->snapshot_need_complete_delta_seq = client->snapshot_pending_seq;
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_need_complete_delta %s seq %u base %u\n",
+			realtime, client->name, client->snapshot_pending_seq, client->snapshot_pending_baseline_seq);
+	}
 	if (client->snapshot_pending_seq && !client->snapshot_pending_incomplete && !continuation)
 		SV_StoreSnapshotBaseline (client, client->snapshot_pending_seq,
 			client->snapshot_pending, client->snapshot_pending_present);
@@ -2665,11 +2724,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	else
 		client->snapshot_stats_full++;
 	client->snapshot_stats_mandatory += client->snapshot_pending_mandatory;
-	client->snapshot_stats_dropped += client->snapshot_pending_dropped;
+	client->snapshot_stats_dropped += client->snapshot_pending_dropped_optional;
 
 	if (net_snap_debug.value && realtime >= client->snapshot_stats_next_time)
 	{
-		Con_Printf ("snapstats %s full %d delta %d forced_full %d mandatory %d dropped %d\n",
+		Con_Printf ("snapstats %s full %d delta %d forced_full %d mandatory %d dropped_optional %d\n",
 			client->name, client->snapshot_stats_full, client->snapshot_stats_delta,
 			client->snapshot_stats_forced_full, client->snapshot_stats_mandatory,
 			client->snapshot_stats_dropped);
@@ -2752,28 +2811,47 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		{
 			int size_delta = msg->cursize - start_size;
 			qboolean complete = (!client->snapshot_pending_incomplete && !continuation);
+			const char *delta_reason = "complete";
 
 			NET_DebugLogEvent (false,
 				"NETDBG time %.3f snap2_build %s seq %u base %u flags 0x%x complete %d bytes %d need_full %d\n",
 				realtime, client->name, client->snapshot_pending_seq, base_seq, debug_flags,
 				complete ? 1 : 0, size_delta, need_full ? 1 : 0);
+			if (use_delta)
+			{
+				if (!complete)
+				{
+					if (continuation)
+						delta_reason = "continuation";
+					else if (delta_incomplete)
+						delta_reason = "delta_budget";
+					else if (client->snapshot_pending_missing_mandatory)
+						delta_reason = "mandatory_missing";
+					else
+						delta_reason = "unknown";
+				}
+				NET_DebugLogEvent (false,
+					"NETDBG time %.3f snap_delta_status %s seq %u base %u complete %d reason %s\n",
+					realtime, client->name, client->snapshot_pending_seq, base_seq,
+					complete ? 1 : 0, delta_reason);
+			}
 		}
 
 		if (client->snapshot_pending_incomplete)
 		{
 			const char *reason = NULL;
-			if (client->snapshot_pending_dropped > 0)
-				reason = "budget_drop";
-			else if (continuation)
+			if (continuation)
 				reason = "continuation";
 			else if (delta_incomplete)
 				reason = "delta_budget";
+			else if (client->snapshot_pending_missing_mandatory)
+				reason = "mandatory_missing";
 			else
 				reason = "unknown";
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop %d full %d delta %d force_full %d\n",
+				"NETDBG time %.3f snap_incomplete %s seq %u base %u reason %s mand %d drop_opt %d full %d delta %d force_full %d\n",
 				realtime, client->name, client->snapshot_pending_seq, base_seq, reason,
-				client->snapshot_pending_mandatory, client->snapshot_pending_dropped,
+				client->snapshot_pending_mandatory, client->snapshot_pending_dropped_optional,
 				use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
 		}
 	}
@@ -2892,6 +2970,17 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap_force_full_off %s ack %u\n",
 				realtime, client->name, client->snapshot_last_acked_complete_seq);
+		}
+		if (client->snapshot_need_complete_delta_after_full
+			&& client->snapshot_need_complete_delta_seq
+			&& (seq == client->snapshot_need_complete_delta_seq
+				|| SV_SnapshotSeqNewer (seq, client->snapshot_need_complete_delta_seq)))
+		{
+			client->snapshot_need_complete_delta_after_full = false;
+			client->snapshot_need_complete_delta_seq = 0;
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_complete_delta_after_full %s ack %u\n",
+				realtime, client->name, seq);
 		}
 	}
 
@@ -3311,13 +3400,13 @@ datagram_too_large:
 					client->entstream.sent_entities,
 					client->entstream.total_entities);
 			else
-				Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped %d)\n",
+				Con_Printf ("Datagram too large for MTU cap %d for %s (size %d, stage %d, mandatory %d dropped_optional %d)\n",
 					msg.maxsize,
 					client->name,
 					msg.cursize,
 					client->sendsignon,
 					client->snapshot_pending_mandatory,
-					client->snapshot_pending_dropped);
+					client->snapshot_pending_dropped_optional);
 			client->datagram_overflow_next_time = realtime + 1.0;
 		}
 		return false;
