@@ -1093,9 +1093,54 @@ void Host_ServerFrame (void)
 {
 	int		i, active; //johnfitz
 	edict_t	*ent; //johnfitz
+	static double next_sv_report_time = 0.0;
+	static double next_sv_zero_frametime_log = 0.0;
+	static double next_sv_skip_log = 0.0;
+	static double next_sv_stall_log = 0.0;
+	static double last_sv_time = -1.0;
+	int		active_clients = 0;
+	float		clamped_frametime;
 
 // run the world state
+	clamped_frametime = host_frametime;
+	if (clamped_frametime <= 0.0f)
+	{
+		if (realtime >= next_sv_zero_frametime_log)
+		{
+			Con_Printf ("NETDBG sv.frametime <= 0 (%.6f) clamping; sv.time %.3f\n",
+				host_frametime, qcvm->time);
+			next_sv_zero_frametime_log = realtime + 1.0;
+		}
+		clamped_frametime = 0.0001f;
+	}
+	if (clamped_frametime > 0.1f)
+		clamped_frametime = 0.1f;
+	host_frametime = clamped_frametime;
 	pr_global_struct->frametime = host_frametime;
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		if (svs.clients[i].active)
+			active_clients++;
+	}
+	if (realtime >= next_sv_report_time)
+	{
+		Con_Printf ("NETDBG sv.time %.3f sv.frametime %.6f edicts %d active_clients %d\n",
+			qcvm->time, host_frametime, qcvm->num_edicts, active_clients);
+		next_sv_report_time = realtime + 1.0;
+	}
+	if (last_sv_time >= 0.0)
+	{
+		if (qcvm->time + 0.001 < last_sv_time)
+			last_sv_time = qcvm->time;
+		else if (qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
+		{
+			Con_Printf ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
+				qcvm->time, host_frametime);
+			next_sv_stall_log = realtime + 1.0;
+		}
+	}
+	last_sv_time = qcvm->time;
 
 // set the time and clear the general datagram
 	SV_ClearDatagram ();
@@ -1107,9 +1152,16 @@ void Host_ServerFrame (void)
 	SV_RunClients ();
 
 // move things around and think
-// always pause in single player if in console or menus
-	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
+	if (!sv.paused)
+	{
 		SV_Physics ();
+	}
+	else if (realtime >= next_sv_skip_log)
+	{
+		Con_Printf ("NETDBG SV_Physics skipped (Host_ServerFrame) paused=%d key_dest=%d\n",
+			sv.paused, key_dest);
+		next_sv_skip_log = realtime + 1.0;
+	}
 
 //johnfitz -- devstats
 	if (cls.signon == SIGNONS)
