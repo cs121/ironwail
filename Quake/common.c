@@ -891,30 +891,21 @@ void MSG_WriteCoord32f (sizebuf_t *sb, float f)
 
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags)
 {
-	if (flags & PRFL_FLOATCOORD)
-		MSG_WriteFloat (sb, f);
-	else if (flags & PRFL_INT32COORD)
+	if (flags & PRFL_INT32COORD)
 		MSG_WriteLong (sb, Q_rint (f * 16));
-	else if (flags & PRFL_24BITCOORD)
-		MSG_WriteCoord24 (sb, f);
 	else MSG_WriteCoord16 (sb, f);
 }
 
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags)
 {
-	if (flags & PRFL_FLOATANGLE)
-		MSG_WriteFloat (sb, f);
-	else if (flags & PRFL_SHORTANGLE)
+	if (flags & PRFL_SHORTANGLE)
 		MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 	else MSG_WriteByte (sb, Q_rint(f * 256.0 / 360.0) & 255); //johnfitz -- use Q_rint instead of (int)	}
 }
 
-//johnfitz -- for PROTOCOL_FITZQUAKE
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 {
-	if (flags & PRFL_FLOATANGLE)
-		MSG_WriteFloat (sb, f);
-	else MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
+	MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 }
 //johnfitz
 
@@ -1186,32 +1177,22 @@ float MSG_ReadCoord32f (void)
 
 float MSG_ReadCoord (unsigned int flags)
 {
-	if (flags & PRFL_FLOATCOORD)
-		return MSG_ReadFloat ();
-	else if (flags & PRFL_INT32COORD)
+	if (flags & PRFL_INT32COORD)
 		return MSG_ReadLong () * (1.0 / 16.0);
-	else if (flags & PRFL_24BITCOORD)
-		return MSG_ReadCoord24 ();
 	else return MSG_ReadCoord16 ();
 }
 
 float MSG_ReadAngle (unsigned int flags)
 {
-	if (flags & PRFL_FLOATANGLE)
-		return MSG_ReadFloat ();
-	else if (flags & PRFL_SHORTANGLE)
+	if (flags & PRFL_SHORTANGLE)
 		return MSG_ReadShort () * (360.0 / 65536);
 	else return MSG_ReadChar () * (360.0 / 256);
 }
 
-//johnfitz -- for PROTOCOL_FITZQUAKE
 float MSG_ReadAngle16 (unsigned int flags)
 {
-	if (flags & PRFL_FLOATANGLE)
-		return MSG_ReadFloat ();	// make sure
-	else return MSG_ReadShort () * (360.0 / 65536);
+	return MSG_ReadShort () * (360.0 / 65536);
 }
-//johnfitz
 
 //===========================================================================
 

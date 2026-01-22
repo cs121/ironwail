@@ -295,6 +295,7 @@ typedef struct
 	qboolean	need_full_snapshot;
 	qboolean	has_valid_worldstate;
 	int			snap_parse_errors;
+	int			snap_parse_consecutive;
 	int			snap_delta_mismatch;
 	int			snap_incomplete_count;
 	unsigned int snap_rem0_seq;

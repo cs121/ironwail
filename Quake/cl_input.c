@@ -420,7 +420,7 @@ void CL_SendMove (const usercmd_t *cmd)
 		MSG_WriteLong (&buf, (int)cl.last_cmd_ack);
 
 		cmd_count = 0;
-		for (i = CMD_BACKUP; i >= 0; i--)
+		for (i = CMD_BACKUP; i >= 0 && cmd_count < MAX_CMDS_PER_PACKET; i--)
 		{
 			unsigned int seq = cmd->sequence - (unsigned int)i;
 
@@ -435,12 +435,7 @@ void CL_SendMove (const usercmd_t *cmd)
 
 			MSG_WriteLong (&buf, (int)out->sequence);
 			for (j=0 ; j<3 ; j++)
-				//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
-				if (cl.protocol == PROTOCOL_NETQUAKE)
-					MSG_WriteAngle (&buf, out->viewangles[j], cl.protocolflags);
-				else
-					MSG_WriteAngle16 (&buf, out->viewangles[j], cl.protocolflags);
-				//johnfitz
+				MSG_WriteAngle16 (&buf, out->viewangles[j], cl.protocolflags);
 
 			MSG_WriteShort (&buf, out->forwardmove);
 			MSG_WriteShort (&buf, out->sidemove);

@@ -466,12 +466,7 @@ void SV_ReadClientMove (usercmd_t *move)
 
 // read current angles
 	for (i=0 ; i<3 ; i++)
-		//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
-		if (sv.protocol == PROTOCOL_NETQUAKE)
-			move->viewangles[i] = MSG_ReadAngle (sv.protocolflags);
-		else
-			move->viewangles[i] = MSG_ReadAngle16 (sv.protocolflags);
-		//johnfitz
+		move->viewangles[i] = MSG_ReadAngle16 (sv.protocolflags);
 
 // read movement
 	move->forwardmove = MSG_ReadShort ();
@@ -552,12 +547,6 @@ nextmsg:
 					host_client->updaterate = SV_ClampClientRate (updaterate, &sv_minupdaterate, &sv_maxupdaterate);
 					break;
 				}
-				if (q_strncasecmp(s, "packedents", 10) == 0)
-				{
-					int value = Q_atoi(s + 10);
-					host_client->supports_packedents = value ? true : false;
-					break;
-				}
 				if (q_strncasecmp(s, "spawn", 5) && q_strncasecmp(s, "begin", 5) && q_strncasecmp(s, "prespawn", 8) && qcvm->extfuncs.SV_ParseClientCommand)
 				{	//the spawn/begin/prespawn are because of numerous mods that disobey the rules.
 					//at a minimum, we must be able to join the server, so that we can see any sprints/bprints (because dprint sucks, yes there's proper ways to deal with this, but moders don't always know them).
@@ -636,6 +625,7 @@ nextmsg:
 				int cmd_index;
 				unsigned int cmd_seq;
 				unsigned int cmd_ack;
+				unsigned int prev_seq = 0;
 
 			// read ping time
 				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
@@ -644,15 +634,37 @@ nextmsg:
 
 				cmd_seq = (unsigned int)MSG_ReadLong ();
 				cmd_ack = (unsigned int)MSG_ReadLong ();
+				if (SV_CmdSeqNewer (cmd_ack, cmd_seq))
+				{
+					Con_Printf ("SV_ReadClientMessage: invalid cmd ack from %s\n",
+						host_client->name);
+					SV_DropClient (true);
+					return false;
+				}
 				if (SV_CmdSeqNewer (cmd_ack, host_client->last_cmd_ack))
 					host_client->last_cmd_ack = cmd_ack;
 
 				cmd_count = MSG_ReadByte ();
+				if (cmd_count > MAX_CMDS_PER_PACKET)
+				{
+					Con_Printf ("SV_ReadClientMessage: too many cmds (%d) from %s\n",
+						cmd_count, host_client->name);
+					SV_DropClient (true);
+					return false;
+				}
 				for (cmd_index = 0; cmd_index < cmd_count; cmd_index++)
 				{
 					usercmd_t move;
 
 					SV_ReadClientMove (&move);
+					if (cmd_index > 0 && !SV_CmdSeqNewer (move.sequence, prev_seq))
+					{
+						Con_Printf ("SV_ReadClientMessage: non-increasing cmd seq from %s\n",
+							host_client->name);
+						SV_DropClient (true);
+						return false;
+					}
+					prev_seq = move.sequence;
 					if (!SV_CmdSeqNewer (move.sequence, host_client->last_cmd_seq))
 						continue;
 
