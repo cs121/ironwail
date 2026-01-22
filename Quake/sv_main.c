@@ -2306,6 +2306,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	unsigned int extra_flags = 0;
 	qboolean delta_incomplete = false;
 	qboolean invalid_base = false;
+	qboolean need_full = false;
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -2322,7 +2323,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		const byte *baseline_present = NULL;
 		unsigned int baseline_seq = 0;
 		qboolean have_baseline = SV_SelectSnapshotBaseline (client, &baseline_seq, &baseline_states, &baseline_present);
-		qboolean need_full = (client->snapshot_force_full
+		need_full = (client->snapshot_force_full
 			|| !client->snapshot_has_valid_base
 			|| client->snapshot_last_acked_complete_seq == 0);
 
