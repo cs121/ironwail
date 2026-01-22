@@ -271,6 +271,8 @@ typedef struct client_s
 	bot_state_t		bot;
 	unsigned int	last_cmd_seq;
 	unsigned int	last_cmd_ack;
+	int				invalid_cmd_ack_count;
+	double			invalid_cmd_ack_time;
 } client_t;
 
 

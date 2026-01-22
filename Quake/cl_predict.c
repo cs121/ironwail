@@ -82,7 +82,7 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 {
-	return (int)(seq - ref) > 0;
+	return NETSEQ_GT (seq, ref);
 }
 
 static qboolean CL_Predict_IsEnabled (void)

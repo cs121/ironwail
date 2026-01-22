@@ -32,6 +32,10 @@ extern	cvar_t	sv_minrate;
 extern	cvar_t	sv_maxrate;
 extern	cvar_t	sv_minupdaterate;
 extern	cvar_t	sv_maxupdaterate;
+extern	cvar_t	sv_cmd_ack_slack;
+extern	cvar_t	sv_cmd_ack_bad_limit;
+extern	cvar_t	sv_cmd_ack_bad_window;
+extern	cvar_t	sv_cmd_ack_debug;
 
 static	vec3_t		forward, right, up;
 
@@ -454,7 +458,25 @@ SV_ReadClientMove
 */
 static qboolean SV_CmdSeqNewer (unsigned int seq, unsigned int last)
 {
-	return (int)(seq - last) > 0;
+	return NETSEQ_GT (seq, last);
+}
+
+static void SV_CmdAckResync (client_t *client, const char *reason)
+{
+	client->snapshot_force_full = true;
+	client->snapshot_has_valid_base = false;
+	client->snapshot_pending_seq = 0;
+	client->snapshot_pending_incomplete = false;
+	client->snapshot_pending_is_delta = false;
+	client->snapshot_unacked_frames = 0;
+	client->entstream.active = false;
+	client->entstream.next_edict = 1;
+	client->entstream.base_snapshot = 0;
+	if (sv_cmd_ack_debug.value)
+	{
+		Con_Printf ("NETDBG time %.3f cmd_ack_resync %s reason %s\n",
+			realtime, client->name, reason ? reason : "unknown");
+	}
 }
 
 void SV_ReadClientMove (usercmd_t *move)
@@ -626,24 +648,85 @@ nextmsg:
 				unsigned int cmd_seq;
 				unsigned int cmd_ack;
 				unsigned int prev_seq = 0;
+				int readcount_before_ack;
+				int readcount_after_ack;
+				const int header_bytes = 4 + 4 + 4;
+				const int cmd_bytes = 4 + (3 * 2) + (3 * 2) + 1 + 1;
 
 			// read ping time
+				if (msg_readcount + header_bytes > net_message.cursize)
+				{
+					Con_Printf ("SV_ReadClientMessage: truncated clc_move header from %s\n",
+						host_client->name);
+					return true;
+				}
 				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
 					= qcvm->time - MSG_ReadFloat ();
 				host_client->num_pings++;
 
 				cmd_seq = (unsigned int)MSG_ReadLong ();
+				readcount_before_ack = msg_readcount;
 				cmd_ack = (unsigned int)MSG_ReadLong ();
-				if (SV_CmdSeqNewer (cmd_ack, cmd_seq))
+				readcount_after_ack = msg_readcount;
+				if (sv_cmd_ack_debug.value)
 				{
-					Con_Printf ("SV_ReadClientMessage: invalid cmd ack from %s\n",
-						host_client->name);
-					SV_DropClient (true);
-					return false;
+					int remaining = net_message.cursize - msg_readcount;
+					unsigned int window_head = cmd_seq;
+					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
+					unsigned int window_tail = window_head - slack;
+					Con_Printf ("NETDBG cmd_ack_read %s ack %u type long read %d->%d rem %d "
+						"cmd_seq %u last_seq %u last_ack %u win_head %u win_tail %u flags 0x%x\n",
+						host_client->name, cmd_ack, readcount_before_ack, readcount_after_ack, remaining,
+						cmd_seq, host_client->last_cmd_seq, host_client->last_cmd_ack,
+						window_head, window_tail, sv.protocolflags);
+				}
+				{
+					// Ack window: [cmd_seq - slack, cmd_seq], wrap-safe via NETSEQ_GT().
+					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
+					unsigned int window_head = cmd_seq;
+					unsigned int window_tail = window_head - slack;
+					qboolean ack_ahead = NETSEQ_GT (cmd_ack, window_head);
+					qboolean ack_behind = NETSEQ_GT (window_tail, cmd_ack);
+
+					if (ack_ahead || ack_behind)
+					{
+						int limit = (int)sv_cmd_ack_bad_limit.value;
+						double window_s = sv_cmd_ack_bad_window.value;
+						const char *reason = ack_ahead ? "ahead" : "behind";
+
+						if (window_s <= 0.0)
+							window_s = 1.0;
+						if (realtime - host_client->invalid_cmd_ack_time > window_s)
+						{
+							host_client->invalid_cmd_ack_time = realtime;
+							host_client->invalid_cmd_ack_count = 0;
+						}
+						host_client->invalid_cmd_ack_count++;
+						if (sv_cmd_ack_debug.value)
+						{
+							Con_Printf ("NETDBG cmd_ack_invalid %s ack %u seq %u reason %s count %d\n",
+								host_client->name, cmd_ack, cmd_seq, reason, host_client->invalid_cmd_ack_count);
+						}
+						cmd_ack = host_client->last_cmd_ack;
+						SV_CmdAckResync (host_client, reason);
+						if (limit > 0 && host_client->invalid_cmd_ack_count >= limit)
+						{
+							Con_Printf ("SV_ReadClientMessage: invalid cmd ack from %s\n",
+								host_client->name);
+							SV_DropClient (true);
+							return false;
+						}
+					}
 				}
 				if (SV_CmdSeqNewer (cmd_ack, host_client->last_cmd_ack))
 					host_client->last_cmd_ack = cmd_ack;
 
+				if (msg_readcount + 1 > net_message.cursize)
+				{
+					Con_Printf ("SV_ReadClientMessage: truncated clc_move cmdcount from %s\n",
+						host_client->name);
+					return true;
+				}
 				cmd_count = MSG_ReadByte ();
 				if (cmd_count > MAX_CMDS_PER_PACKET)
 				{
@@ -651,6 +734,12 @@ nextmsg:
 						cmd_count, host_client->name);
 					SV_DropClient (true);
 					return false;
+				}
+				if (cmd_count > 0 && msg_readcount + (cmd_count * cmd_bytes) > net_message.cursize)
+				{
+					Con_Printf ("SV_ReadClientMessage: truncated clc_move cmds from %s\n",
+						host_client->name);
+					return true;
 				}
 				for (cmd_index = 0; cmd_index < cmd_count; cmd_index++)
 				{
