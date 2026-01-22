@@ -39,6 +39,8 @@ extern cvar_t cl_signon_chunk_debug;
 extern cvar_t cl_signon_debug;
 extern qboolean cl_viewent_needs_init;
 
+static qboolean warn_about_nehahra_protocol;
+
 const char *svc_strings[] =
 {
 	"svc_bad",
