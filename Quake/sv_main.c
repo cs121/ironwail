@@ -830,15 +830,19 @@ static int SV_FindSnapshotBaselineIndex (const client_t *client, unsigned int se
 static qboolean SV_SelectSnapshotBaseline (const client_t *client, unsigned int *out_seq,
 	const snapshot_state_t **out_states, const byte **out_present)
 {
-	int index = client->snapshot_baseline_index;
+	// Snapshot2 deltas must reference the last ACKED COMPLETE snapshot.
+	unsigned int seq = client->snapshot_last_acked_complete_seq;
+	int index = SV_FindSnapshotBaselineIndex (client, seq);
 
-	if (index < 0 || index >= SV_SNAPSHOT_BASELINE_HISTORY)
+	if (!client->snapshot_has_valid_base)
 		return false;
-	if (!client->snapshot_baseline_valid[index])
+	if (!seq)
+		return false;
+	if (index < 0 || index >= SV_SNAPSHOT_BASELINE_HISTORY)
 		return false;
 
 	if (out_seq)
-		*out_seq = client->snapshot_baseline_seqs[index];
+		*out_seq = seq;
 	if (out_states)
 		*out_states = client->snapshot_baselines[index];
 	if (out_present)
@@ -887,6 +891,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_baseline_seq = 0;
 	client->snapshot_last_sent_seq = 0;
 	client->snapshot_last_acked_seq = 0;
+	client->snapshot_last_acked_complete_seq = 0;
 	client->snapshot_last_full_seq = 0;
 	client->snapshot_last_full_time = 0;
 	client->snapshot_last_acked_time = 0;
@@ -2317,6 +2322,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		const byte *baseline_present = NULL;
 		unsigned int baseline_seq = 0;
 		qboolean have_baseline = SV_SelectSnapshotBaseline (client, &baseline_seq, &baseline_states, &baseline_present);
+		qboolean need_full = (client->snapshot_force_full
+			|| !client->snapshot_has_valid_base
+			|| client->snapshot_last_acked_complete_seq == 0);
 
 		if (!have_baseline && client->snapshot_baseline_present[0])
 			baseline_present = client->snapshot_baseline_present[0];
@@ -2405,10 +2413,13 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			int header_bytes = 0;
 			int snapshot_budget_bytes = SV_SnapshotBudgetBytes (client, msg,
 				&mtu_payload_bytes, &current_bytes, &remaining_bytes, &header_bytes);
+			int build_budget_bytes = remaining_bytes;
+			int build_optional_budget_bytes = snapshot_budget_bytes;
 			int mandatory_total_bytes = 0;
 			qboolean budget_continuation = false;
 			qboolean mandatory_oversize = false;
 			qboolean debug_frame = false;
+			qboolean force_complete_full = need_full;
 
 			if (net_snap_debug.value && realtime >= client->snapshot_debug_next_time)
 			{
@@ -2416,13 +2427,20 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->snapshot_debug_next_time = realtime + 1.0;
 			}
 
+			if (force_complete_full)
+			{
+				build_budget_bytes = 1 << 30;
+				build_optional_budget_bytes = 1 << 30;
+			}
+
 			SV_BuildClientSnapshot (client->edict, client->snapshot_pending, client->snapshot_pending_present,
-				client->snapshot_pending_relevant, client->snapshot_pending_flags, remaining_bytes, snapshot_budget_bytes,
+				client->snapshot_pending_relevant, client->snapshot_pending_flags, build_budget_bytes,
+				build_optional_budget_bytes,
 				header_bytes, baseline_present, &mandatory_count, &mandatory_bytes, NULL,
 				&dropped_count, &dropped_tier1, &dropped_tier2, debug_frame, &budget_continuation,
 				&mandatory_oversize);
 			mandatory_total_bytes = header_bytes + mandatory_bytes;
-			if (mtu_payload_bytes > 0 && current_bytes + mandatory_total_bytes > mtu_payload_bytes)
+			if (!force_complete_full && mtu_payload_bytes > 0 && current_bytes + mandatory_total_bytes > mtu_payload_bytes)
 			{
 				client->snapshot_pending_incomplete = true;
 				client->snapshot_pending_mandatory = mandatory_count;
@@ -2431,7 +2449,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->mtu_dropped_tier2 = 0;
 				return;
 			}
-			if (mandatory_oversize)
+			if (!force_complete_full && mandatory_oversize)
 			{
 				client->snapshot_pending_incomplete = true;
 				client->snapshot_pending_mandatory = mandatory_count;
@@ -2656,6 +2674,17 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		client->snapshot_debug_remove = remove_count;
 		client->snapshot_debug_full_count = full_count;
 
+		if (sv_snap_debug.value >= 1.0f && sv_snapshot2.value)
+		{
+			int size_delta = msg->cursize - start_size;
+			qboolean complete = (!client->snapshot_pending_incomplete && !continuation);
+
+			NET_DebugLogEvent (false,
+				"NETDBG time %.3f snap2_build %s seq %u base %u flags 0x%x complete %d bytes %d need_full %d\n",
+				realtime, client->name, client->snapshot_pending_seq, base_seq, debug_flags,
+				complete ? 1 : 0, size_delta, need_full ? 1 : 0);
+		}
+
 		if (client->snapshot_pending_incomplete)
 		{
 			const char *reason = NULL;
@@ -2756,6 +2785,8 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 	{
 		if (SV_SnapshotSeqNewer (seq, client->snapshot_last_acked_seq))
 			client->snapshot_last_acked_seq = seq;
+		if (SV_SnapshotSeqNewer (seq, client->snapshot_last_acked_complete_seq))
+			client->snapshot_last_acked_complete_seq = seq;
 		client->snapshot_last_acked_time = realtime;
 		client->snapshot_unacked_frames = 0;
 		client->snapshot_has_valid_base = true;

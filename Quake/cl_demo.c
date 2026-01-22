@@ -98,6 +98,7 @@ void CL_ClearSignons (void)
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
+	cl.snap_incomplete_start_time = 0;
 	cl.snapshot_baseline_seq = 0;
 	cl.snapshot_baseline_head = 0;
 	cl.snapshot_baseline_index = -1;

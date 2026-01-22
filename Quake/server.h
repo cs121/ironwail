@@ -228,6 +228,7 @@ typedef struct client_s
 	unsigned int	snapshot_pending_baseline_seq;
 	unsigned int	snapshot_last_sent_seq;
 	unsigned int	snapshot_last_acked_seq;
+	unsigned int	snapshot_last_acked_complete_seq;
 	unsigned int	snapshot_last_full_seq;
 	double			snapshot_last_full_time;
 	double			snapshot_last_acked_time;
