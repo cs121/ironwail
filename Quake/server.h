@@ -244,6 +244,12 @@ typedef struct client_s
 	int				snapshot_pending_mandatory;
 	int				snapshot_pending_dropped;
 	qboolean		snapshot_pending_incomplete;
+	unsigned int	snapshot_ack_stall_seq;
+	int				snapshot_ack_stall_frames;
+	int				snapshot_incomplete_streak;
+	qboolean		snapshot_force_full_until_ack;
+	unsigned int	snapshot_force_full_ack_seq;
+	double			snapshot_force_full_next_time;
 	unsigned int	snapshot_no_progress_seq;
 	unsigned int	snapshot_no_progress_base;
 	int				snapshot_no_progress_next_edict;
