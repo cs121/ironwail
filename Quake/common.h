@@ -110,6 +110,10 @@ GENERIC_TYPES (IMPL_GENERIC_FUNCS, NO_COMMA)
 
 #define LERP(a, b, t) ((a) + ((b)-(a))*(t))
 
+// Wrap-safe sequence comparisons for 32-bit command ids (valid for < 2^31 gaps).
+#define NETSEQ_GT(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) > 0)
+#define NETSEQ_GEQ(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) >= 0)
+
 #define countof(arr) (sizeof(arr) / sizeof(arr[0]))
 
 typedef struct sizebuf_s

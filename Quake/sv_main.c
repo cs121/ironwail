@@ -45,6 +45,10 @@ static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE
 static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_event_max = {"sv_event_max", "0", CVAR_NONE};
+cvar_t sv_cmd_ack_slack = {"sv_cmd_ack_slack", "64", CVAR_NONE};
+cvar_t sv_cmd_ack_bad_limit = {"sv_cmd_ack_bad_limit", "3", CVAR_NONE};
+cvar_t sv_cmd_ack_bad_window = {"sv_cmd_ack_bad_window", "2.0", CVAR_NONE};
+cvar_t sv_cmd_ack_debug = {"sv_cmd_ack_debug", "0", CVAR_NONE};
 cvar_t sv_mtu = {"sv_mtu", "1400", CVAR_NONE};
 static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1400", CVAR_NONE};
 cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
@@ -237,6 +241,10 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_force_full_after_frames);
 	Cvar_RegisterVariable (&sv_snap_max_payload);
 	Cvar_RegisterVariable (&sv_event_max);
+	Cvar_RegisterVariable (&sv_cmd_ack_slack);
+	Cvar_RegisterVariable (&sv_cmd_ack_bad_limit);
+	Cvar_RegisterVariable (&sv_cmd_ack_bad_window);
+	Cvar_RegisterVariable (&sv_cmd_ack_debug);
 	Cvar_RegisterVariable (&sv_mtu);
 	Cvar_RegisterVariable (&sv_mtu_cap);
 	Cvar_RegisterVariable (&sv_mtu_debug);
@@ -798,7 +806,7 @@ static uint16_t		net_edicts_sorted[MAX_NET_EDICTS];
 
 static qboolean SV_SnapshotSeqNewer (unsigned int a, unsigned int b)
 {
-	return (int)(a - b) > 0;
+	return NETSEQ_GT (a, b);
 }
 
 static int SV_FindSnapshotBaselineIndex (const client_t *client, unsigned int seq)

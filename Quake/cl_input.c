@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t cl_maxpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_minpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_mwheelpitch;
+extern cvar_t cl_netdebug_parse;
 
 /*
 ===============================================================================
@@ -442,6 +443,15 @@ void CL_SendMove (const usercmd_t *cmd)
 			MSG_WriteShort (&buf, out->upmove);
 			MSG_WriteByte (&buf, out->buttons);
 			MSG_WriteByte (&buf, out->impulse);
+		}
+
+		if (cl_netdebug_parse.value)
+		{
+			unsigned int reliable_seq = cls.netcon ? cls.netcon->sendSequence : 0u;
+			unsigned int reliable_base = cls.netcon ? cls.netcon->sendReliableBase : 0u;
+			Con_Printf ("NETDBG cmd_ack_write ack %u type long cmd_seq %u rel_seq %u rel_base %u snap_ack %u msg %d flags 0x%x\n",
+				cl.last_cmd_ack, cmd->sequence, reliable_seq, reliable_base, cl.last_snapshot_ack_sent,
+				buf.cursize, cl.protocolflags);
 		}
 	}
 

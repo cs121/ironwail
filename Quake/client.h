@@ -206,6 +206,7 @@ typedef struct
 	usercmd_t	pendingcmd;		// accumulated state from mice+joysticks.
 	unsigned int	last_cmd_ack;		// last command acknowledged by the server
 	unsigned int	last_cmd_ack_echo;	// last command ack echoed back by the server
+	unsigned int	last_snapshot_ack_sent;	// last snapshot ack sent to the server
 
 // information for local display
 	int			stats[MAX_CL_STATS];	// health, etc

@@ -884,6 +884,7 @@ static qboolean CL_SendSnapshotAck (unsigned int seq)
 	}
 	MSG_WriteByte (&cls.message, clc_snapshot_ack);
 	MSG_WriteLong (&cls.message, (int)seq);
+	cl.last_snapshot_ack_sent = seq;
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_ack_send seq %u\n",
 		realtime, seq);
@@ -2581,9 +2582,9 @@ void CL_ParseClientdata (void)
 		vec3_t velocity;
 		vec3_t viewangles;
 
-		if ((int)(ack - cl.last_cmd_ack) > 0)
+		if (NETSEQ_GT (ack, cl.last_cmd_ack))
 			cl.last_cmd_ack = ack;
-		if ((int)(ack_echo - cl.last_cmd_ack_echo) > 0)
+		if (NETSEQ_GT (ack_echo, cl.last_cmd_ack_echo))
 			cl.last_cmd_ack_echo = ack_echo;
 
 		for (i = 0; i < 3; i++)
