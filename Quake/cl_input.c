@@ -420,6 +420,7 @@ void CL_SendMove (const usercmd_t *cmd)
 		MSG_WriteByte (&buf, clc_move);
 
 		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
+		// RMQ wire format: cmd_seq/cmd_ack are 32-bit unsigned (wrap-safe via NETSEQ_GT).
 		MSG_WriteLong (&buf, (int)cmd->sequence);
 		MSG_WriteLong (&buf, (int)cl.last_cmd_ack);
 
@@ -452,9 +453,11 @@ void CL_SendMove (const usercmd_t *cmd)
 		{
 			unsigned int reliable_seq = cls.netcon ? cls.netcon->sendSequence : 0u;
 			unsigned int reliable_base = cls.netcon ? cls.netcon->sendReliableBase : 0u;
-			Con_Printf ("NETDBG cmd_ack_write ack %u type long cmd_seq %u rel_seq %u rel_base %u snap_ack %u msg %d flags 0x%x\n",
-				cl.last_cmd_ack, cmd->sequence, reliable_seq, reliable_base, cl.last_snapshot_ack_sent,
-				buf.cursize, cl.protocolflags);
+			Con_Printf ("NETDBG time %.3f cmd_move_write msg %d type %d flags 0x%x cmd_seq %u "
+				"cmd_ack %u snap_ack %u rel_seq %u rel_base %u widths[mtime=float cmd_seq=long "
+				"cmd_ack=long cmd_count=byte ucmd_seq=long angles=short moves=short buttons=byte impulse=byte]\n",
+				realtime, buf.cursize, clc_move, cl.protocolflags, cmd->sequence,
+				cl.last_cmd_ack, cl.last_snapshot_ack_sent, reliable_seq, reliable_base);
 		}
 	}
 

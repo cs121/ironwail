@@ -479,6 +479,17 @@ static void SV_CmdAckResync (client_t *client, const char *reason)
 	}
 }
 
+static void SV_NetHexDump (const byte *data, int len, int max)
+{
+	int dump_len = q_min(len, max);
+	int i;
+
+	Con_Printf ("NETDBG cmd_ack_hexdump %d bytes (cursize %d):", dump_len, len);
+	for (i = 0; i < dump_len; i++)
+		Con_Printf (" %02x", data[i]);
+	Con_Printf ("\n");
+}
+
 void SV_ReadClientMove (usercmd_t *move)
 {
 	int		i;
@@ -648,10 +659,15 @@ nextmsg:
 				unsigned int cmd_seq;
 				unsigned int cmd_ack;
 				unsigned int prev_seq = 0;
+				int readcount_before_time;
+				int readcount_after_time;
+				int readcount_before_seq;
+				int readcount_after_seq;
 				int readcount_before_ack;
 				int readcount_after_ack;
 				const int header_bytes = 4 + 4 + 4;
 				const int cmd_bytes = 4 + (3 * 2) + (3 * 2) + 1 + 1;
+				float mtime;
 
 			// read ping time
 				if (msg_readcount + header_bytes > net_message.cursize)
@@ -660,33 +676,51 @@ nextmsg:
 						host_client->name);
 					return true;
 				}
+				readcount_before_time = msg_readcount;
+				mtime = MSG_ReadFloat ();
+				readcount_after_time = msg_readcount;
 				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
-					= qcvm->time - MSG_ReadFloat ();
+					= qcvm->time - mtime;
 				host_client->num_pings++;
 
+				readcount_before_seq = msg_readcount;
 				cmd_seq = (unsigned int)MSG_ReadLong ();
+				readcount_after_seq = msg_readcount;
 				readcount_before_ack = msg_readcount;
 				cmd_ack = (unsigned int)MSG_ReadLong ();
 				readcount_after_ack = msg_readcount;
 				if (sv_cmd_ack_debug.value)
 				{
 					int remaining = net_message.cursize - msg_readcount;
-					unsigned int window_head = cmd_seq;
+					unsigned int newest_cmd_seq = cmd_seq;
+					unsigned int last_cmd_received = host_client->last_cmd_seq;
+					unsigned int last_cmd_acked = host_client->last_cmd_ack;
 					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
-					unsigned int window_tail = window_head - slack;
-					Con_Printf ("NETDBG cmd_ack_read %s ack %u type long read %d->%d rem %d "
-						"cmd_seq %u last_seq %u last_ack %u win_head %u win_tail %u flags 0x%x\n",
-						host_client->name, cmd_ack, readcount_before_ack, readcount_after_ack, remaining,
-						cmd_seq, host_client->last_cmd_seq, host_client->last_cmd_ack,
-						window_head, window_tail, sv.protocolflags);
+					unsigned int window_tail = last_cmd_acked - slack;
+					Con_Printf ("NETDBG time %.3f cmd_ack_read %s cmd %d flags 0x%x "
+						"mtime %d->%d seq %d->%d ack %d->%d rem %d cmd_ack %u "
+						"newest_cmd %u last_recv %u last_ack %u win_tail %u slack %u\n",
+						realtime, host_client->name, clc_move, sv.protocolflags,
+						readcount_before_time, readcount_after_time,
+						readcount_before_seq, readcount_after_seq,
+						readcount_before_ack, readcount_after_ack,
+						remaining, cmd_ack, newest_cmd_seq,
+						last_cmd_received, last_cmd_acked, window_tail, slack);
 				}
 				{
-					// Ack window: [cmd_seq - slack, cmd_seq], wrap-safe via NETSEQ_GT().
+					// Ack window: not ahead of newest, not too far behind last ack (wrap-safe via NETSEQ_GT).
 					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
-					unsigned int window_head = cmd_seq;
-					unsigned int window_tail = window_head - slack;
-					qboolean ack_ahead = NETSEQ_GT (cmd_ack, window_head);
-					qboolean ack_behind = NETSEQ_GT (window_tail, cmd_ack);
+					unsigned int newest_cmd_seq = cmd_seq;
+					unsigned int last_cmd_acked = host_client->last_cmd_ack;
+					qboolean ack_ahead = NETSEQ_GT (cmd_ack, newest_cmd_seq);
+					qboolean ack_behind = false;
+					unsigned int ack_behind_delta = 0;
+
+					if (NETSEQ_GT (last_cmd_acked, cmd_ack))
+					{
+						ack_behind_delta = last_cmd_acked - cmd_ack;
+						ack_behind = ack_behind_delta > slack;
+					}
 
 					if (ack_ahead || ack_behind)
 					{
@@ -694,6 +728,8 @@ nextmsg:
 						double window_s = sv_cmd_ack_bad_window.value;
 						const char *reason = ack_ahead ? "ahead" : "behind";
 
+						if (limit < 2)
+							limit = 2;
 						if (window_s <= 0.0)
 							window_s = 1.0;
 						if (realtime - host_client->invalid_cmd_ack_time > window_s)
@@ -704,8 +740,11 @@ nextmsg:
 						host_client->invalid_cmd_ack_count++;
 						if (sv_cmd_ack_debug.value)
 						{
-							Con_Printf ("NETDBG cmd_ack_invalid %s ack %u seq %u reason %s count %d\n",
-								host_client->name, cmd_ack, cmd_seq, reason, host_client->invalid_cmd_ack_count);
+							Con_Printf ("NETDBG cmd_ack_invalid %s ack %u newest %u last_ack %u "
+								"behind_delta %u slack %u reason %s count %d\n",
+								host_client->name, cmd_ack, newest_cmd_seq, last_cmd_acked,
+								ack_behind_delta, slack, reason, host_client->invalid_cmd_ack_count);
+							SV_NetHexDump (net_message.data, net_message.cursize, 48);
 						}
 						cmd_ack = host_client->last_cmd_ack;
 						SV_CmdAckResync (host_client, reason);
