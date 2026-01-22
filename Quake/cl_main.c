@@ -49,6 +49,7 @@ cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
 cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_debug = {"cl_full_reasm_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_timeout_ms = {"cl_full_reasm_timeout_ms", "1000", CVAR_NONE};
+cvar_t	cl_snap_incomplete_timeout_ms = {"cl_snap_incomplete_timeout_ms", "1500", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
 cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
@@ -636,6 +637,7 @@ void CL_ClearState (void)
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
+	cl.snap_incomplete_start_time = 0;
 	cl.has_full_snapshot = false;
 	cl.need_full_snapshot = true;
 	cl.has_valid_worldstate = false;
@@ -1732,6 +1734,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_delta_reject_debug);
 	Cvar_RegisterVariable (&cl_full_reasm_debug);
 	Cvar_RegisterVariable (&cl_full_reasm_timeout_ms);
+	Cvar_RegisterVariable (&cl_snap_incomplete_timeout_ms);
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
 	Cvar_RegisterVariable (&cl_lerp_ms);

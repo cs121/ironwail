@@ -292,6 +292,7 @@ typedef struct
 	unsigned short snap_last_complete_seq;
 	unsigned short snap_last_incomplete_seq;
 	qboolean	snap_last_incomplete;
+	double		snap_incomplete_start_time;
 	qboolean	has_full_snapshot;
 	qboolean	need_full_snapshot;
 	qboolean	has_valid_worldstate;
@@ -401,6 +402,7 @@ extern	cvar_t	cl_snapshot_debug;
 extern	cvar_t	cl_delta_reject_debug;
 extern	cvar_t	cl_full_reasm_debug;
 extern	cvar_t	cl_full_reasm_timeout_ms;
+extern	cvar_t	cl_snap_incomplete_timeout_ms;
 extern	cvar_t	cl_test_drop;
 extern	cvar_t	cl_entity_timeout_ms;
 extern	cvar_t	cl_lerp_ms;

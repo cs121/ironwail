@@ -785,6 +785,7 @@ static unsigned int CL_GetSnapshotAckSeq (void)
 {
 	if (!cl.has_full_snapshot)
 		return 0;
+	// Ack the last applied COMPLETE snapshot baseline (never incomplete/buffered).
 	return cl.snapshot_baseline_seq;
 }
 
@@ -888,6 +889,12 @@ static qboolean CL_SendSnapshotAck (unsigned int seq)
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_ack_send seq %u\n",
 		realtime, seq);
+	if (cl_snap_debug.value >= 1.0f)
+	{
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f snap_ack_status seq %u last_complete %u\n",
+			realtime, seq, cl.snapshot_baseline_seq);
+	}
 	return true;
 }
 
@@ -1121,6 +1128,33 @@ static qboolean CL_SnapshotChunkTimedOut (void)
 	if (timeout_s <= 0.0)
 		return false;
 	return (realtime - cl.snapshot_chunk_start_time) > timeout_s;
+}
+
+static void CL_TrackSnapshotIncomplete (unsigned short seq16, const char *reason)
+{
+	double timeout_s = cl_snap_incomplete_timeout_ms.value * 0.001;
+
+	if (!cl.snap_last_incomplete || cl.snap_last_incomplete_seq != seq16)
+		cl.snap_incomplete_start_time = realtime;
+
+	cl.snap_last_incomplete = true;
+	cl.snap_last_incomplete_seq = seq16;
+	cl.snap_incomplete_count++;
+
+	if (timeout_s <= 0.0)
+		return;
+	if ((realtime - cl.snap_incomplete_start_time) <= timeout_s)
+		return;
+
+	if (cl_snap_debug.value >= 1.0f)
+	{
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f snap2_incomplete_timeout seq %u reason %s\n",
+			realtime, (unsigned int)seq16, reason ? reason : "unknown");
+	}
+	CL_RequestFullSnapshot ("snapshot2 incomplete timeout", false);
+	cl.snap_incomplete_start_time = realtime;
+	cl.snap_incomplete_count = 0;
 }
 
 static void CL_MarkSnapshotEntityUpdated (int entnum)
@@ -1403,6 +1437,7 @@ static void CL_ParseSnapshotFull (void)
 	cl.snap_last_applied_seq = seq16;
 	cl.snap_last_complete_seq = seq16;
 	cl.snap_last_incomplete = false;
+	cl.snap_incomplete_start_time = 0;
 	cl.snap_parse_consecutive = 0;
 	cl.need_full_snapshot = false;
 	cl.has_valid_worldstate = true;
@@ -1651,6 +1686,7 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_last_applied_seq = seq16;
 		cl.snap_last_complete_seq = seq16;
 		cl.snap_last_incomplete = false;
+		cl.snap_incomplete_start_time = 0;
 		cl.snap_parse_consecutive = 0;
 		cl.has_full_snapshot = true;
 		base_advanced = true;
@@ -1757,7 +1793,6 @@ static void CL_ParseSnapshot2 (void)
 	qboolean is_full;
 	qboolean is_delta;
 	qboolean continuation;
-	const int incomplete_limit = 3;
 	qboolean base_advanced = false;
 
 	CL_ReadSnapshotHeader (&header);
@@ -1997,6 +2032,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
+				cl.snap_incomplete_start_time = 0;
 				cl.snap_parse_consecutive = 0;
 				cl.need_full_snapshot = false;
 				cl.has_full_snapshot = true;
@@ -2016,31 +2052,23 @@ static void CL_ParseSnapshot2 (void)
 			{
 				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_chunk, cl.snapshot_chunk_present);
-				cl.snap_last_incomplete_seq = seq16;
-				cl.snap_last_incomplete = true;
 				cl.snap_parse_consecutive = 0;
-				cl.snap_incomplete_count++;
+				CL_TrackSnapshotIncomplete (seq16, "chunk_full");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_partial_apply seq %u flags 0x%x incomplete %d has_full %d\n",
 					realtime, header.seq, header.flags, cl.snap_incomplete_count,
 					cl.has_full_snapshot ? 1 : 0);
-				if (cl.snap_incomplete_count >= incomplete_limit)
-					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
 					0, touched, base_advanced);
 			}
 			else if (!drop)
 			{
-				cl.snap_last_incomplete_seq = seq16;
-				cl.snap_last_incomplete = true;
 				cl.snap_parse_consecutive = 0;
-				cl.snap_incomplete_count++;
+				CL_TrackSnapshotIncomplete (seq16, "chunk_full_buffer");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
 					realtime, header.seq, header.flags, cl.snap_incomplete_count,
 					cl.has_full_snapshot ? 1 : 0);
-				if (cl.snap_incomplete_count >= incomplete_limit)
-					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
 					0, touched, base_advanced);
 			}
@@ -2116,6 +2144,7 @@ static void CL_ParseSnapshot2 (void)
 				cl.snap_last_applied_seq = seq16;
 				cl.snap_last_complete_seq = seq16;
 				cl.snap_last_incomplete = false;
+				cl.snap_incomplete_start_time = 0;
 				cl.snap_parse_consecutive = 0;
 				cl.need_full_snapshot = false;
 				cl.has_full_snapshot = true;
@@ -2135,16 +2164,12 @@ static void CL_ParseSnapshot2 (void)
 			{
 				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
-				cl.snap_last_incomplete_seq = seq16;
-				cl.snap_last_incomplete = true;
 				cl.snap_parse_consecutive = 0;
-				cl.snap_incomplete_count++;
+				CL_TrackSnapshotIncomplete (seq16, "full");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
 					realtime, header.seq, header.flags, cl.snap_incomplete_count,
 					cl.has_full_snapshot ? 1 : 0);
-				if (cl.snap_incomplete_count >= incomplete_limit)
-					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 				CL_LogSnapshotDebug ("snap2_full", header.seq, header.flags, false,
 					0, touched, base_advanced);
 			}
@@ -2172,6 +2197,13 @@ static void CL_ParseSnapshot2 (void)
 			base_states = cl.snapshot_baselines[base_index];
 			base_present = cl.snapshot_baseline_present[base_index];
 		}
+	}
+	if (cl_snap_debug.value >= 1.0f)
+	{
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f snap2_base seq %u base %u flags 0x%x baseline %d base_current %d need_full %d\n",
+			realtime, header.seq, header.base_seq, header.flags,
+			baseline_match ? 1 : 0, base_is_current ? 1 : 0, need_full ? 1 : 0);
 	}
 	if (!drop && base_is_current)
 		SDL_assert (header.base_seq == cl.snapshot_baseline_seq);
@@ -2359,6 +2391,7 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_last_applied_seq = seq16;
 			cl.snap_last_complete_seq = seq16;
 			cl.snap_last_incomplete = false;
+			cl.snap_incomplete_start_time = 0;
 			cl.snap_parse_consecutive = 0;
 			cl.snap_incomplete_count = 0;
 			cl.has_full_snapshot = true;
@@ -2383,15 +2416,11 @@ static void CL_ParseSnapshot2 (void)
 			{
 				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
-				cl.snap_last_incomplete_seq = seq16;
-				cl.snap_last_incomplete = true;
-				cl.snap_incomplete_count++;
+				CL_TrackSnapshotIncomplete (seq16, "delta");
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_buffer seq %u flags 0x%x incomplete %d has_full %d\n",
 					realtime, header.seq, header.flags, cl.snap_incomplete_count,
 					cl.has_full_snapshot ? 1 : 0);
-				if (cl.snap_incomplete_count >= incomplete_limit)
-					CL_RequestFullSnapshot ("snapshot2 incomplete", false);
 				CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, false,
 					removes_parsed, touched, base_advanced);
 			}
