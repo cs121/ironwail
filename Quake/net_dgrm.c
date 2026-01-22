@@ -239,7 +239,12 @@ static qboolean NET_HasRateBudget (qsocket_t *sock, unsigned int packet_len)
 static qboolean NET_ConsumeRateBudget (qsocket_t *sock, unsigned int packet_len)
 {
 	if (!NET_HasRateBudget(sock, packet_len))
+	{
+		NET_DebugLog (false,
+			"NETDBG time %.3f rate_budget_block addr %s budget %d wanted %u\n",
+			net_time, NET_QSocketGetAddressString (sock), sock->rate_budget, packet_len);
 		return false;
+	}
 	if (!IS_LOOP_DRIVER(sock->driver))
 		sock->rate_budget -= (int)packet_len;
 	return true;
@@ -250,10 +255,11 @@ static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len
 	static double next_log_time = 0.0;
 	unsigned int mtu = (unsigned int)NET_GetConfiguredMTU (sock);
 	unsigned int payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
+	unsigned int data_limit = (unsigned int)NET_GetPacketDataLimit (sock);
 
 	NET_DebugLog (true,
-		"NETDBG time %.3f PREVENTED_OVERSHOOT addr %s mtu %u payload_cap %u packet %u\n",
-		net_time, NET_QSocketGetAddressString (sock), mtu, payload_limit, packet_len);
+		"NETDBG time %.3f PREVENTED_OVERSHOOT addr %s mtu %u payload_cap %u data_cap %u packet %u\n",
+		net_time, NET_QSocketGetAddressString (sock), mtu, payload_limit, data_limit, packet_len);
 	if (sv.active && sv_mtu_debug.value > 0 && net_time >= next_log_time)
 	{
 		Con_Printf ("sv_mtu %d oversize send blocked (%s size %u)\n",
@@ -281,6 +287,68 @@ static unsigned int NET_GetAckBits (const qsocket_t *sock)
 	if (!sock->reliableReceiveValid)
 		return 0;
 	return sock->reliableReceiveMask;
+}
+
+static const char *NET_FlagsToString (unsigned int flags, char *buf, size_t buflen)
+{
+	char *ptr = buf;
+	size_t remaining = buflen;
+	int written;
+
+	if (!buflen)
+		return "";
+
+	buf[0] = 0;
+	if (flags & NETFLAG_CTL)
+	{
+		written = q_snprintf (ptr, remaining, "CTL");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+	if (flags & NETFLAG_DATA)
+	{
+		written = q_snprintf (ptr, remaining, "%sDATA", buf[0] ? "|" : "");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+	if (flags & NETFLAG_ACK)
+	{
+		written = q_snprintf (ptr, remaining, "%sACK", buf[0] ? "|" : "");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+	if (flags & NETFLAG_EOM)
+	{
+		written = q_snprintf (ptr, remaining, "%sEOM", buf[0] ? "|" : "");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+	if (flags & NETFLAG_UNRELIABLE)
+	{
+		written = q_snprintf (ptr, remaining, "%sUNREL", buf[0] ? "|" : "");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+
+	if (!buf[0])
+		q_strlcpy (buf, "NONE", buflen);
+
+	return buf;
 }
 
 static void NET_SetPacketHeader (qsocket_t *sock, unsigned int packet_len, unsigned int flags, unsigned int sequence)
@@ -355,9 +423,10 @@ static int NET_SendReliablePacket (qsocket_t *sock, net_reliable_send_t *packet,
 	if (is_resend)
 		net_debug_resends++;
 	NET_DebugLog (false,
-		"NETDBG time %.3f send reliable-%s addr %s seq %u len %u data %u eom %u\n",
+		"NETDBG time %.3f send reliable-%s addr %s seq %u len %u data %u eom %u ack %u ack_bits 0x%08x\n",
 		net_time, label, NET_QSocketGetAddressString (sock), packet->sequence,
-		packet_len, (unsigned int)packet->length, packet->eom ? 1u : 0u);
+		packet_len, (unsigned int)packet->length, packet->eom ? 1u : 0u,
+		NET_GetAckSequence(sock), NET_GetAckBits(sock));
 	NET_DebugMaybeLogSummary ();
 
 	packet->lastSendTime = net_time;
@@ -593,6 +662,10 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	sock->sendReliableBase = sock->sendSequence;
 
 	sock->canSend = false;
+	NET_DebugLog (false,
+		"NETDBG time %.3f queue reliable message addr %s bytes %u data_cap %u payload_cap %u\n",
+		net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+		(unsigned int)NET_GetPacketDataLimit(sock), (unsigned int)NET_GetPacketPayloadLimit(sock));
 	if (NET_SendPendingReliable(sock) == -1)
 		return -1;
 	return 1;
@@ -631,6 +704,10 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (data->cursize > max_data)
 	{
+		NET_DebugLog (true,
+			"NETDBG time %.3f oversize unreliable-data addr %s data %u cap %u payload_cap %u\n",
+			net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+			(unsigned int)max_data, (unsigned int)payload_limit);
 		NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
 		net_debug_oversize++;
 		NET_DebugMaybeLogSummary ();
@@ -640,6 +717,9 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	packetLen = NET_HEADERSIZE + data->cursize;
 	if (packetLen > payload_limit)
 	{
+		NET_DebugLog (true,
+			"NETDBG time %.3f oversize unreliable-packet addr %s packet %u payload_cap %u\n",
+			net_time, NET_QSocketGetAddressString (sock), (unsigned int)packetLen, (unsigned int)payload_limit);
 		NET_LogOversizedSend (sock, (unsigned int)packetLen);
 		net_debug_oversize++;
 		NET_DebugMaybeLogSummary ();
@@ -657,9 +737,10 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	NET_DebugRecordPacket ((unsigned int)packetLen);
 	NET_DebugLog (false,
-		"NETDBG time %.3f send unreliable addr %s seq %u len %u data %u\n",
+		"NETDBG time %.3f send unreliable addr %s seq %u len %u data %u ack %u ack_bits 0x%08x\n",
 		net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
-		(unsigned int)packetLen, (unsigned int)data->cursize);
+		(unsigned int)packetLen, (unsigned int)data->cursize,
+		NET_GetAckSequence(sock), NET_GetAckBits(sock));
 	NET_DebugMaybeLogSummary ();
 
 	packetsSent++;
@@ -693,12 +774,19 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		if (packetLengthRead == -1)
 		{
 			Con_Printf("Read error\n");
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv error addr %s\n",
+				net_time, NET_QSocketGetAddressString (sock));
 			return -1;
 		}
 
 		if (net_maxpacket.value > 0 && packetLengthRead > (int)net_maxpacket.value)
 		{
 			Con_DPrintf("NET_GetMessage: oversized packet (%d > %d)\n",
+				packetLengthRead, (int)net_maxpacket.value);
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv oversized packet addr %s read %d cap %d\n",
+				net_time, NET_QSocketGetAddressString (sock),
 				packetLengthRead, (int)net_maxpacket.value);
 			continue;
 		}
@@ -708,12 +796,18 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			Con_Printf("Forged packet received\n");
 			Con_Printf("Expected: %s\n", StrAddr (&sock->addr));
 			Con_Printf("Received: %s\n", StrAddr (&readaddr));
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv forged addr %s expected %s\n",
+				net_time, StrAddr (&readaddr), StrAddr (&sock->addr));
 			continue;
 		}
 
 		if (packetLengthRead < NET_HEADERSIZE)
 		{
 			shortPacketCount++;
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv short packet addr %s read %d\n",
+				net_time, NET_QSocketGetAddressString (sock), packetLengthRead);
 			continue;
 		}
 
@@ -727,6 +821,9 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		if (length < NET_HEADERSIZE || length > NET_DATAGRAMSIZE)
 		{
 			Con_DPrintf("NET_GetMessage: invalid packet length %u\n", length);
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv invalid packet length addr %s len %u\n",
+				net_time, NET_QSocketGetAddressString (sock), length);
 			continue;
 		}
 
@@ -734,6 +831,9 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		{
 			Con_DPrintf("NET_GetMessage: oversized packet length %u (cap %d)\n",
 				length, (int)net_maxpacket.value);
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv oversized packet length addr %s len %u cap %d\n",
+				net_time, NET_QSocketGetAddressString (sock), length, (int)net_maxpacket.value);
 			continue;
 		}
 
@@ -741,6 +841,9 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		{
 			Con_DPrintf("NET_GetMessage: truncated packet length %u (read %d)\n",
 				length, packetLengthRead);
+			NET_DebugLog (true,
+				"NETDBG time %.3f recv truncated packet addr %s len %u read %d\n",
+				net_time, NET_QSocketGetAddressString (sock), length, packetLengthRead);
 			continue;
 		}
 
@@ -748,7 +851,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		{
 			unsigned int ack = BigLong(packetBuffer.ack);
 			unsigned int ack_bits = BigLong(packetBuffer.ack_bits);
+			char flags_text[64];
 
+			NET_DebugLog (false,
+				"NETDBG time %.3f recv packet addr %s read %d len %u flags %s seq %u ack %u ack_bits 0x%08x\n",
+				net_time, NET_QSocketGetAddressString (sock), packetLengthRead,
+				length, NET_FlagsToString(flags, flags_text, sizeof(flags_text)),
+				sequence, ack, ack_bits);
 			packetsReceived++;
 			NET_ProcessAcks(sock, ack, ack_bits);
 		}
@@ -758,6 +867,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			if (sequence < sock->unreliableReceiveSequence)
 			{
 				Con_DPrintf("Got a stale datagram\n");
+				NET_DebugLog (true,
+					"NETDBG time %.3f recv stale unreliable addr %s seq %u expected %u\n",
+					net_time, NET_QSocketGetAddressString (sock), sequence,
+					sock->unreliableReceiveSequence);
 				ret = 0;
 				break;
 			}
@@ -766,6 +879,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				count = sequence - sock->unreliableReceiveSequence;
 				droppedDatagrams += count;
 				Con_DPrintf("Dropped %u datagram(s)\n", count);
+				NET_DebugLog (true,
+					"NETDBG time %.3f recv dropped datagrams addr %s count %u seq %u expected %u\n",
+					net_time, NET_QSocketGetAddressString (sock), count,
+					sequence, sock->unreliableReceiveSequence);
 			}
 			sock->unreliableReceiveSequence = sequence + 1;
 
@@ -774,6 +891,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			if (length > MAX_DATAGRAM)
 			{
 				Con_DPrintf("NET_GetMessage: unreliable packet too large (%u)\n", length);
+				NET_DebugLog (true,
+					"NETDBG time %.3f recv unreliable too large addr %s len %u cap %u\n",
+					net_time, NET_QSocketGetAddressString (sock), length,
+					(unsigned int)MAX_DATAGRAM);
 				continue;
 			}
 
@@ -787,6 +908,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			net_last_incoming.unreliable = true;
 			net_last_incoming.valid = true;
 
+			NET_DebugLog (false,
+				"NETDBG time %.3f recv unreliable message addr %s seq %u payload %u packet %u\n",
+				net_time, NET_QSocketGetAddressString (sock), sequence,
+				(unsigned int)length, (unsigned int)packetLengthRead);
 			ret = 2;
 			break;
 		}
@@ -808,12 +933,22 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				receivedDuplicateCount++;
 				NET_SetPacketHeader(sock, NET_HEADERSIZE, NETFLAG_ACK, 0);
 				sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
+				NET_DebugLog (false,
+					"NETDBG time %.3f recv duplicate reliable addr %s seq %u expected %u\n",
+					net_time, NET_QSocketGetAddressString (sock), sequence,
+					sock->receiveSequence);
 				continue;
 			}
 
 			window_offset = sequence - sock->receiveSequence;
 			if (window_offset >= NET_RELIABLE_WINDOW)
+			{
+				NET_DebugLog (true,
+					"NETDBG time %.3f recv reliable out of window addr %s seq %u base %u window %u\n",
+					net_time, NET_QSocketGetAddressString (sock), sequence,
+					sock->receiveSequence, (unsigned int)NET_RELIABLE_WINDOW);
 				continue;
+			}
 
 			NET_UpdateReceiveAckState(sock, sequence);
 
@@ -821,6 +956,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			if (length > MAX_DATAGRAM)
 			{
 				Con_DPrintf("NET_GetMessage: reliable packet too large (%u)\n", length);
+				NET_DebugLog (true,
+					"NETDBG time %.3f recv reliable too large addr %s len %u cap %u\n",
+					net_time, NET_QSocketGetAddressString (sock), length,
+					(unsigned int)MAX_DATAGRAM);
 				continue;
 			}
 
@@ -828,6 +967,9 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			if (entry->received && entry->sequence == sequence)
 			{
 				receivedDuplicateCount++;
+				NET_DebugLog (false,
+					"NETDBG time %.3f recv reliable duplicate entry addr %s seq %u\n",
+					net_time, NET_QSocketGetAddressString (sock), sequence);
 			}
 			else
 			{
@@ -854,6 +996,11 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				{
 					Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
 						sock->receiveMessageLength, entry->length);
+					NET_DebugLog (true,
+						"NETDBG time %.3f recv reliable overflow addr %s queue %u + %u limit %u\n",
+						net_time, NET_QSocketGetAddressString (sock),
+						sock->receiveMessageLength, entry->length,
+						(unsigned int)MAX_RELIABLE_QUEUE_BYTES);
 					sock->receiveMessageLength = 0;
 					message_sequence = entry->sequence;
 					NET_ClearReliableReceiveEntry(entry);
@@ -878,6 +1025,10 @@ int	Datagram_GetMessage (qsocket_t *sock)
 					net_last_incoming.unreliable = false;
 					net_last_incoming.valid = true;
 
+					NET_DebugLog (false,
+						"NETDBG time %.3f recv reliable message addr %s seq %u payload %u\n",
+						net_time, NET_QSocketGetAddressString (sock), message_sequence,
+						(unsigned int)net_message.cursize);
 					NET_ClearReliableReceiveEntry(entry);
 					sock->receiveSequence++;
 					ret = 1;
@@ -1366,7 +1517,17 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 			MSG_WriteString(&net_message, "statusResponse");
 			MSG_WriteString(&net_message, reply);
 			dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+			NET_DebugLog (false,
+				"NETDBG time %.3f handshake status_reply addr %s reply_len %u\n",
+				net_time, dfunc.AddrToString (&clientaddr),
+				(unsigned int)net_message.cursize);
 			SZ_Clear(&net_message);
+		}
+		else
+		{
+			NET_DebugLog (false,
+				"NETDBG time %.3f handshake info request addr %s request %s\n",
+				net_time, dfunc.AddrToString (&clientaddr), request);
 		}
 		return NULL;
 	}
@@ -1376,6 +1537,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		return NULL;
 
 	command = MSG_ReadByte();
+	NET_DebugLog (false,
+		"NETDBG time %.3f handshake ctl addr %s cmd %d len %d\n",
+		net_time, dfunc.AddrToString (&clientaddr), command, len);
 	if (command == CCREQ_SERVER_INFO)
 	{
 		if (Q_strcmp(MSG_ReadString(), "QUAKE") != 0)
@@ -1394,6 +1558,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		NET_DebugLog (false,
+			"NETDBG time %.3f handshake server_info reply addr %s players %d/%d\n",
+			net_time, dfunc.AddrToString (&clientaddr), net_activeconnections, svs.maxclients);
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -1433,6 +1600,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, client->netconnection->address);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		NET_DebugLog (false,
+			"NETDBG time %.3f handshake player_info reply addr %s player %d\n",
+			net_time, dfunc.AddrToString (&clientaddr), playerNumber);
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -1459,6 +1629,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		}
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		NET_DebugLog (false,
+			"NETDBG time %.3f handshake rule_info reply addr %s name %s\n",
+			net_time, dfunc.AddrToString (&clientaddr),
+			var ? var->name : "<none>");
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -1479,6 +1653,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, "Incompatible version.\n");
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake reject addr %s reason incompatible_version\n",
+			net_time, dfunc.AddrToString (&clientaddr));
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -1524,6 +1701,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 				MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
 				*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 				dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+				NET_DebugLog (false,
+					"NETDBG time %.3f handshake duplicate accept addr %s port %d\n",
+					net_time, dfunc.AddrToString (&clientaddr),
+					dfunc.GetSocketPort(&newaddr));
 				SZ_Clear(&net_message);
 				return NULL;
 			}
@@ -1545,6 +1726,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, "Server is full.\n");
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake reject addr %s reason server_full\n",
+			net_time, dfunc.AddrToString (&clientaddr));
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -1562,6 +1746,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	{
 		dfunc.Close_Socket(newsock);
 		NET_FreeQSocket(sock);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake connect_failed addr %s\n",
+			net_time, dfunc.AddrToString (&clientaddr));
 		return NULL;
 	}
 
@@ -1581,6 +1768,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 //	MSG_WriteString(&net_message, dfunc.AddrToString(&newaddr));
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 	dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
+	NET_DebugLog (false,
+		"NETDBG time %.3f handshake accept addr %s port %d\n",
+		net_time, dfunc.AddrToString (&clientaddr),
+		dfunc.GetSocketPort(&newaddr));
 	SZ_Clear(&net_message);
 
 	return sock;
@@ -1764,6 +1955,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
+		NET_DebugLog (false,
+			"NETDBG time %.3f handshake connect request addr %s attempt %d\n",
+			net_time, dfunc.AddrToString (&sendaddr), reps + 1);
 		SZ_Clear(&net_message);
 		do
 		{
@@ -1777,6 +1971,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 					Con_Printf("wrong reply address\n");
 					Con_Printf("Expected: %s | %s\n", dfunc.AddrToString (&sendaddr), StrAddr(&sendaddr));
 					Con_Printf("Received: %s | %s\n", dfunc.AddrToString (&readaddr), StrAddr(&readaddr));
+					NET_DebugLog (true,
+						"NETDBG time %.3f handshake reply wrong addr expected %s got %s\n",
+						net_time, dfunc.AddrToString (&sendaddr), dfunc.AddrToString (&readaddr));
 					SCR_UpdateScreen ();
 					ret = 0;
 					continue;
@@ -1795,16 +1992,26 @@ static qsocket_t *_Datagram_Connect (const char *host)
 				MSG_ReadLong();
 				if (control == -1)
 				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f handshake reply invalid control -1 addr %s\n",
+						net_time, dfunc.AddrToString (&readaddr));
 					ret = 0;
 					continue;
 				}
 				if ((control & (~NETFLAG_LENGTH_MASK)) != (int)NETFLAG_CTL)
 				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f handshake reply invalid control flags addr %s control 0x%x\n",
+						net_time, dfunc.AddrToString (&readaddr), control);
 					ret = 0;
 					continue;
 				}
 				if ((control & NETFLAG_LENGTH_MASK) != ret)
 				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f handshake reply length mismatch addr %s control_len %d read %d\n",
+						net_time, dfunc.AddrToString (&readaddr),
+						control & NETFLAG_LENGTH_MASK, ret);
 					ret = 0;
 					continue;
 				}
@@ -1825,6 +2032,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "No Response";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake no response addr %s\n",
+			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -1833,6 +2043,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "Network Error";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake network error addr %s\n",
+			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -1842,6 +2055,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = MSG_ReadString();
 		Con_Printf("%s\n", reason);
 		q_strlcpy(m_return_reason, reason, sizeof(m_return_reason));
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake rejected addr %s reason %s\n",
+			net_time, dfunc.AddrToString (&sendaddr), reason);
 		goto ErrorReturn;
 	}
 
@@ -1849,12 +2065,18 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	{
 		Q_memcpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
 		dfunc.SetSocketPort (&sock->addr, MSG_ReadLong());
+		NET_DebugLog (false,
+			"NETDBG time %.3f handshake accepted addr %s port %d\n",
+			net_time, dfunc.AddrToString (&sendaddr), dfunc.GetSocketPort (&sock->addr));
 	}
 	else
 	{
 		reason = "Bad Response";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake bad response addr %s\n",
+			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -1869,6 +2091,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "Connect to Game failed";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
+		NET_DebugLog (true,
+			"NETDBG time %.3f handshake connect failed addr %s\n",
+			net_time, dfunc.AddrToString (&sock->addr));
 		goto ErrorReturn;
 	}
 
