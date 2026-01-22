@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // rights reserved.
 
 #include "quakedef.h"
+#include "arch_def.h"
+#include "net_sys.h"
 #include "net_defs.h"
 
 extern cvar_t cl_maxpitch; //johnfitz -- variable pitch clamping
