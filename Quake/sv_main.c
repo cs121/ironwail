@@ -4766,6 +4766,10 @@ void SV_SpawnServer (const char *server)
 	{
 		SV_InitClientSnapshotData (&svs.clients[i]);
 		SV_ResetClientSnapshot (&svs.clients[i]);
+		svs.clients[i].last_cmd_seq = 0;
+		svs.clients[i].last_cmd_ack = 0;
+		svs.clients[i].invalid_cmd_ack_count = 0;
+		svs.clients[i].invalid_cmd_ack_time = 0.0;
 	}
 
 	sv.state = ss_loading;
