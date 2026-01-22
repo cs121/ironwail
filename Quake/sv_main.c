@@ -903,6 +903,12 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_pending_mandatory = 0;
 	client->snapshot_pending_dropped = 0;
 	client->snapshot_pending_incomplete = false;
+	client->snapshot_ack_stall_seq = 0;
+	client->snapshot_ack_stall_frames = 0;
+	client->snapshot_incomplete_streak = 0;
+	client->snapshot_force_full_until_ack = false;
+	client->snapshot_force_full_ack_seq = 0;
+	client->snapshot_force_full_next_time = 0;
 	client->snapshot_no_progress_seq = 0;
 	client->snapshot_no_progress_base = 0;
 	client->snapshot_no_progress_next_edict = 0;
@@ -1333,6 +1339,34 @@ static int SV_SnapshotBudgetBytes (client_t *client, sizebuf_t *msg,
 		*out_header = header_size;
 
 	return budget;
+}
+
+static qboolean SV_Snapshot2RecoveryEnabled (void)
+{
+	return (sv.protocol == PROTOCOL_RMQ && sv_snapshot2.value);
+}
+
+static void SV_Snapshot2ForceFull (client_t *client, const char *reason)
+{
+	if (!SV_Snapshot2RecoveryEnabled ())
+		return;
+	if (realtime < client->snapshot_force_full_next_time)
+		return;
+
+	if (!client->snapshot_force_full_until_ack)
+	{
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_force_full_on %s reason %s ack %u stall %d incomplete %d\n",
+			realtime, client->name, reason ? reason : "unknown",
+			client->snapshot_last_acked_complete_seq,
+			client->snapshot_ack_stall_frames,
+			client->snapshot_incomplete_streak);
+	}
+
+	client->snapshot_force_full_until_ack = true;
+	client->snapshot_force_full_ack_seq = client->snapshot_last_acked_complete_seq;
+	client->snapshot_force_full = true;
+	client->snapshot_force_full_next_time = realtime + 0.2;
 }
 
 static int SV_BuildNetEdictsList (edict_t *clent)
@@ -2307,6 +2341,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	qboolean delta_incomplete = false;
 	qboolean invalid_base = false;
 	qboolean need_full = false;
+	qboolean snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -2324,17 +2359,27 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		unsigned int baseline_seq = 0;
 		qboolean have_baseline = SV_SelectSnapshotBaseline (client, &baseline_seq, &baseline_states, &baseline_present);
 		need_full = (client->snapshot_force_full
+			|| (snapshot2_recovery && client->snapshot_force_full_until_ack)
 			|| !client->snapshot_has_valid_base
 			|| client->snapshot_last_acked_complete_seq == 0);
 
 		if (!have_baseline && client->snapshot_baseline_present[0])
 			baseline_present = client->snapshot_baseline_present[0];
 
-		if (client->snapshot_force_full)
+		if (snapshot2_recovery)
+		{
+			if (client->snapshot_incomplete_streak >= 3)
+				SV_Snapshot2ForceFull (client, "incomplete_streak");
+			if (client->snapshot_ack_stall_frames >= 10)
+				SV_Snapshot2ForceFull (client, "ack_stall");
+		}
+
+		if (client->snapshot_force_full || (snapshot2_recovery && client->snapshot_force_full_until_ack))
 		{
 			forced_full = true;
 			reason_force_full = true;
-			client->snapshot_force_full = false;
+			if (!client->snapshot_force_full_until_ack)
+				client->snapshot_force_full = false;
 		}
 		if (force_full_frames > 0 && client->snapshot_unacked_frames >= force_full_frames)
 		{
@@ -2443,6 +2488,16 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			mandatory_total_bytes = header_bytes + mandatory_bytes;
 			if (!force_complete_full && mtu_payload_bytes > 0 && current_bytes + mandatory_total_bytes > mtu_payload_bytes)
 			{
+				if (snapshot2_recovery)
+				{
+					NET_DebugLogEvent (true,
+						"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d mtu %d\n",
+						realtime, client->name, client->snapshot_next_seq,
+						mandatory_total_bytes, mtu_payload_bytes);
+					client->snapshot_incomplete_streak++;
+					SV_Snapshot2ForceFull (client, "mandatory_overflow");
+				}
+				SDL_assert (current_bytes + mandatory_total_bytes <= mtu_payload_bytes);
 				client->snapshot_pending_incomplete = true;
 				client->snapshot_pending_mandatory = mandatory_count;
 				client->snapshot_pending_dropped = 0;
@@ -2452,6 +2507,16 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			}
 			if (!force_complete_full && mandatory_oversize)
 			{
+				if (snapshot2_recovery)
+				{
+					NET_DebugLogEvent (true,
+						"NETDBG time %.3f snap_mandatory_overflow %s seq %u mand_bytes %d budget %d\n",
+						realtime, client->name, client->snapshot_next_seq,
+						mandatory_total_bytes, build_budget_bytes);
+					client->snapshot_incomplete_streak++;
+					SV_Snapshot2ForceFull (client, "mandatory_overflow");
+				}
+				SDL_assert (!mandatory_oversize);
 				client->snapshot_pending_incomplete = true;
 				client->snapshot_pending_mandatory = mandatory_count;
 				client->snapshot_pending_dropped = 0;
@@ -2557,6 +2622,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			else
 				packet_incomplete = packet_incomplete || ((extra_flags & SNAPSHOT_FLAG_INCOMPLETE) != 0);
 			client->snapshot_pending_incomplete = packet_incomplete;
+		}
+
+		if (snapshot2_recovery)
+		{
+			if (client->snapshot_pending_incomplete || client->snapshot_pending_dropped > 0)
+				client->snapshot_incomplete_streak++;
+			if (client->snapshot_incomplete_streak >= 3)
+				SV_Snapshot2ForceFull (client, "incomplete_streak");
 		}
 	}
 
@@ -2752,6 +2825,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 void SV_SnapshotAck (client_t *client, unsigned int seq)
 {
 	int baseline_index;
+	unsigned int prev_complete;
 
 	if (!client->snapshot_pending_present)
 		return;
@@ -2782,6 +2856,16 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		return;
 	}
 
+	if (SV_Snapshot2RecoveryEnabled ())
+	{
+		if (seq == client->snapshot_ack_stall_seq)
+			client->snapshot_ack_stall_frames++;
+		else
+			client->snapshot_ack_stall_frames = 0;
+		client->snapshot_ack_stall_seq = seq;
+	}
+
+	prev_complete = client->snapshot_last_acked_complete_seq;
 	if (seq != 0xFFFFFFFFu)
 	{
 		if (SV_SnapshotSeqNewer (seq, client->snapshot_last_acked_seq))
@@ -2791,6 +2875,24 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		client->snapshot_last_acked_time = realtime;
 		client->snapshot_unacked_frames = 0;
 		client->snapshot_has_valid_base = true;
+	}
+
+	if (SV_Snapshot2RecoveryEnabled ()
+		&& SV_SnapshotSeqNewer (client->snapshot_last_acked_complete_seq, prev_complete))
+	{
+		client->snapshot_ack_stall_frames = 0;
+		client->snapshot_incomplete_streak = 0;
+		if (client->snapshot_force_full_until_ack
+			&& SV_SnapshotSeqNewer (client->snapshot_last_acked_complete_seq,
+				client->snapshot_force_full_ack_seq))
+		{
+			client->snapshot_force_full_until_ack = false;
+			client->snapshot_force_full = false;
+			client->snapshot_force_full_next_time = 0;
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_force_full_off %s ack %u\n",
+				realtime, client->name, client->snapshot_last_acked_complete_seq);
+		}
 	}
 
 	if (sv_snapshotdebug.value || sv_snap_debug.value)
