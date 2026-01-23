@@ -258,6 +258,9 @@ typedef struct
 #include "crc.h"
 
 #include "platform.h"
+#if defined(_WIN32) && defined(_DEBUG)
+#include <windows.h>
+#endif
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
@@ -323,6 +326,48 @@ extern	byte		*host_colormap;
 extern	int		host_framecount;	// incremented every frame, never reset
 extern	double		realtime;		// not bounded in any way, changed at
 							// start of every frame, never reset
+
+static inline int SV_CurrentClientIndex (void)
+{
+	if (!host_client || !svs.clients || svs.maxclients <= 0)
+		return -1;
+	if (host_client < svs.clients || host_client >= svs.clients + svs.maxclients)
+		return -1;
+	return (int)(host_client - svs.clients);
+}
+
+static inline void SV_PlayerNullTrap (const char *where, int fatal)
+{
+	int client_index = SV_CurrentClientIndex ();
+	const char *client_name = (host_client && host_client->name[0]) ? host_client->name : "(null)";
+
+	Con_Printf ("NETDBG sv_player NULL cl %d name %s where %s fatal %d\n",
+		client_index, client_name, where ? where : "(unknown)", fatal);
+	Con_Printf ("NETDBG sv_player NULL sv.active %d sv.state %d cls.state %d cls.demoplayback %d "
+		"signon %d frame %d\n",
+		sv.active, sv.state, cls.state, cls.demoplayback, cls.signon, host_framecount);
+
+#if defined(_WIN32) && defined(_DEBUG)
+	{
+		void *stack[32];
+		USHORT frames = RtlCaptureStackBackTrace (0, (ULONG)(sizeof (stack) / sizeof (stack[0])), stack, NULL);
+		Con_Printf ("NETDBG sv_player NULL stack frames %u\n", frames);
+		for (USHORT i = 0; i < frames; ++i)
+			Con_Printf ("NETDBG sv_player NULL  #%u %p\n", i, stack[i]);
+	}
+#endif
+
+#if defined(_DEBUG)
+	if (fatal)
+		SDL_assert (!"sv_player NULL");
+#endif
+
+	if (cls.demoplayback)
+	{
+		Con_Printf ("NETDBG sv_player NULL cl %d reason demo_playback_abort\n", client_index);
+		CL_StopPlayback ();
+	}
+}
 
 typedef struct filelist_item_s
 {

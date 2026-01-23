@@ -1007,6 +1007,13 @@ static void Host_CheckAutosave (void)
 {
 	float health_change, speed, elapsed, score;
 
+	if (!sv_player)
+	{
+		Con_Printf ("NETDBG sv_player NULL cl %d reason autosave\n", SV_CurrentClientIndex ());
+		SV_PlayerNullTrap (__func__, 0);
+		return;
+	}
+
 	if (!sv_autosave.value || sv_autosave_interval.value <= 0.f || svs.maxclients != 1 || sv_player->v.health <= 0.f || cl.intermission)
 		return;
 
