@@ -32,6 +32,7 @@ typedef struct
 static cl_pred_t cl_pred;
 static qboolean cl_netdbg_predict_ran;
 static qboolean cl_pred_warned_solid;
+static vec3_t cl_pred_error;
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -103,16 +104,39 @@ static qboolean CL_Predict_IsEnabled (void)
 
 static void CL_Predict_ApplyToClient (void)
 {
+	vec3_t smooth_origin;
+	float smooth_ms;
+	float decay;
+	vec3_t correction;
+
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
-	VectorCopy (cl_pred.predicted.origin, cl.simorg);
-	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].origin);
-	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].msg_origins[0]);
-	VectorCopy (cl_pred.predicted.origin, cl_entities[cl.viewentity].msg_origins[1]);
+	smooth_ms = cl_pred_smooth_ms.value;
+	if (smooth_ms <= 0.0f)
+		VectorClear (cl_pred_error);
+
+	VectorAdd (cl_pred.predicted.origin, cl_pred_error, smooth_origin);
+	VectorCopy (smooth_origin, cl.simorg);
+	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
+	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
+	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[1]);
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[0]);
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[1]);
 	cl.onground = cl_pred.predicted.onground;
+
+	if (smooth_ms > 0.0f)
+	{
+		decay = host_frametime / (smooth_ms * 0.001f);
+		decay = CLAMP (0.0f, decay, 1.0f);
+		VectorScale (cl_pred_error, decay, correction);
+		VectorSubtract (cl_pred_error, correction, cl_pred_error);
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
+				VectorLength (correction), VectorLength (cl_pred_error));
+		}
+	}
 
 	CL_EnsureViewEntityOrigin ("predict");
 }
@@ -530,6 +554,7 @@ void CL_Predict_Clear (void)
 {
 	memset (&cl_pred, 0, sizeof(cl_pred));
 	cl_pred_warned_solid = false;
+	VectorClear (cl_pred_error);
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
@@ -563,6 +588,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 {
 	unsigned int seq;
 	float correction;
+	vec3_t error;
+	float error_len;
+	float teleport_dist = cl_pred_teleport_dist.value;
 
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
@@ -580,6 +608,30 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 
 	cl_pred.seq_acked = ack;
+	if (cl_pred.has_base)
+	{
+		VectorSubtract (origin, cl_pred.predicted.origin, error);
+		error_len = VectorLength (error);
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
+				error_len,
+				origin[0], origin[1], origin[2],
+				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
+		}
+		if (teleport_dist > 0.0f && error_len > teleport_dist)
+		{
+			VectorClear (cl_pred_error);
+		}
+		else
+		{
+			VectorAdd (cl_pred_error, error, cl_pred_error);
+		}
+	}
+	else
+	{
+		VectorClear (cl_pred_error);
+	}
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (origin, cl.simorg);
 	VectorCopy (velocity, cl_pred.base.velocity);

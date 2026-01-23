@@ -92,6 +92,7 @@ typedef struct cl_snapshot_chunk_asm_s
 	unsigned short sizes[CL_SNAPSHOT_MAX_CHUNKS];
 	byte		received_mask[CL_SNAPSHOT_MAX_CHUNKS];
 	double		start_time;
+	double		server_time;
 	int			packets;
 } cl_snapshot_chunk_asm_t;
 
@@ -286,6 +287,11 @@ typedef struct
 								// to decay light values and smooth step ups
 	double		latest_server_time;	// most recent server time from snapshots
 	double		clock_offset;		// smoothed server_time - realtime offset
+	double		server_time_base;	// last server time sample
+	double		server_time_skew;	// realtime when sample captured
+	double		snapshot_time;		// time applied for snapshot entity state
+	double		snap_last_server_time;	// last applied snapshot time
+	double		snap_last_arrival_time;	// realtime of last snapshot apply
 
 
 	float		last_received_message;	// (realtime) for net trouble icon
@@ -423,9 +429,15 @@ extern	cvar_t	cl_snap_incomplete_timeout_ms;
 extern	cvar_t	cl_snap_chunk_drop;
 extern	cvar_t	cl_test_drop;
 extern	cvar_t	cl_entity_timeout_ms;
+extern	cvar_t	cl_entity_dormant_ms;
 extern	cvar_t	cl_lerp_ms;
 extern	cvar_t	cl_lerp_max_gap_ms;
 extern	cvar_t	cl_lerp_debug;
+extern	cvar_t	cl_netdbg_interp;
+extern	cvar_t	cl_netdbg_watch_ent;
+extern	cvar_t	cl_netdbg_pred;
+extern	cvar_t	cl_pred_smooth_ms;
+extern	cvar_t	cl_pred_teleport_dist;
 extern	float	cl_lerpfrac;
 
 
@@ -499,6 +511,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
 void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
+void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count);
 int  CL_ReadFromServer (void);
 void CL_AdjustAngles (void);
 void CL_BaseMove (usercmd_t *cmd);
