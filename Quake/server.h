@@ -173,8 +173,28 @@ typedef struct sv_entity_stream_s
 	int			base_snapshot;
 	int			total_entities;
 	int			sent_entities;
+	int			total_chunks;
+	int			chunk_index;
 	double		next_log_time;
 } sv_entity_stream_t;
+
+typedef enum snapshot_client_state_e
+{
+	SNAP_INIT = 0,
+	SNAP_WAIT_FULL_ACK,
+	SNAP_ACTIVE
+} snapshot_client_state_t;
+
+typedef enum snapshot_full_reason_e
+{
+	SNAP_FULL_MAP_START = 0,
+	SNAP_FULL_JOIN_INIT,
+	SNAP_FULL_MISSING_BASE,
+	SNAP_FULL_HISTORY_EVICTED,
+	SNAP_FULL_PARSE_ERROR,
+	SNAP_FULL_MANDATORY_OVERFLOW,
+	SNAP_FULL_MANUAL_RESYNC
+} snapshot_full_reason_t;
 
 typedef struct client_s
 {
@@ -229,11 +249,18 @@ typedef struct client_s
 	unsigned int	snapshot_last_sent_seq;
 	unsigned int	snapshot_last_acked_seq;
 	unsigned int	snapshot_last_acked_complete_seq;
+	unsigned int	snapshot_last_acked_full_seq;
 	unsigned int	snapshot_last_full_seq;
 	double			snapshot_last_full_time;
 	double			snapshot_last_acked_time;
 	qboolean		snapshot_has_valid_base;
+	// Snapshot2 join state machine:
+	// SNAP_INIT -> SNAP_WAIT_FULL_ACK after sending FULL; SNAP_ACTIVE after FULL ack.
 	qboolean		snapshot_force_full;
+	snapshot_full_reason_t snapshot_force_full_reason;
+	snapshot_client_state_t snapshot_state;
+	unsigned int	snapshot_safe_base_seq;
+	unsigned int	snapshot_join_epoch;
 	double			snapshot_pending_time;
 	qboolean		snapshot_pending_is_delta;
 	snapshot_state_t *snapshot_pending;
