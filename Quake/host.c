@@ -103,6 +103,11 @@ cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
 
 devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
+extern cvar_t sv_tickrate;
+extern cvar_t sv_netrate;
+extern cvar_t sv_tick_maxcatchup;
+extern cvar_t sv_tick_debug;
+extern cvar_t sv_timewarp;
 
 /*
 ================
@@ -1089,19 +1094,50 @@ static void Host_CheckAutosave (void)
 Host_ServerFrame
 ==================
 */
+static void SV_RunOneTick (double tick_dt)
+{
+	static double next_sv_skip_log = 0.0;
+
+	host_frametime = tick_dt;
+	pr_global_struct->frametime = host_frametime;
+
+	// read client messages and run per-client think
+	SV_RunClients ();
+
+	// move things around and think
+	if (!sv.paused)
+	{
+		SV_Physics ();
+	}
+	else if (realtime >= next_sv_skip_log)
+	{
+		Con_Printf ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
+			sv.paused, key_dest);
+		next_sv_skip_log = realtime + 1.0;
+	}
+}
+
 void Host_ServerFrame (void)
 {
 	int		i, active; //johnfitz
 	edict_t	*ent; //johnfitz
 	static double next_sv_report_time = 0.0;
 	static double next_sv_zero_frametime_log = 0.0;
-	static double next_sv_skip_log = 0.0;
 	static double next_sv_stall_log = 0.0;
 	static double last_sv_time = -1.0;
+	static double next_sv_tick_log = 0.0;
+	static double sv_accum = 0.0;
+	static double sv_next_snapshot_time = 0.0;
 	int		active_clients = 0;
-	float		clamped_frametime;
+	double		clamped_frametime;
+	double		tick_dt;
+	double		net_dt;
+	int		ticks = 0;
+	int		maxcatchup;
+	int		sends = 0;
+	const int	max_sends = 2;
 
-// run the world state
+// accumulate the world state
 	clamped_frametime = host_frametime;
 	if (clamped_frametime <= 0.0f)
 	{
@@ -1115,8 +1151,7 @@ void Host_ServerFrame (void)
 	}
 	if (clamped_frametime > 0.1f)
 		clamped_frametime = 0.1f;
-	host_frametime = clamped_frametime;
-	pr_global_struct->frametime = host_frametime;
+	sv_accum += clamped_frametime;
 
 	for (i = 0; i < svs.maxclients; i++)
 	{
@@ -1126,42 +1161,50 @@ void Host_ServerFrame (void)
 	if (realtime >= next_sv_report_time)
 	{
 		Con_Printf ("NETDBG sv.time %.3f sv.frametime %.6f edicts %d active_clients %d\n",
-			qcvm->time, host_frametime, qcvm->num_edicts, active_clients);
+			qcvm->time, clamped_frametime, qcvm->num_edicts, active_clients);
 		next_sv_report_time = realtime + 1.0;
 	}
-	if (last_sv_time >= 0.0)
-	{
-		if (qcvm->time + 0.001 < last_sv_time)
-			last_sv_time = qcvm->time;
-		else if (qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
-		{
-			Con_Printf ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
-				qcvm->time, host_frametime);
-			next_sv_stall_log = realtime + 1.0;
-		}
-	}
-	last_sv_time = qcvm->time;
-
-// set the time and clear the general datagram
-	SV_ClearDatagram ();
 
 // check for new clients
 	SV_CheckForNewClients ();
 
-// read client messages
-	SV_RunClients ();
+	tick_dt = 1.0 / (sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0);
+	maxcatchup = (int)sv_tick_maxcatchup.value;
+	if (maxcatchup < 1)
+		maxcatchup = 1;
+	while (sv_accum >= tick_dt && ticks < maxcatchup)
+	{
+		SV_RunOneTick (tick_dt);
+		sv_accum -= tick_dt;
+		ticks++;
+	}
+	if (sv_accum >= tick_dt && ticks >= maxcatchup)
+	{
+		if (!sv_timewarp.value)
+			sv_accum = tick_dt;
+		if (sv_tick_debug.value)
+		{
+			Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+				ticks, sv_accum, tick_dt);
+		}
+	}
 
-// move things around and think
-	if (!sv.paused)
+	if (last_sv_time >= 0.0)
 	{
-		SV_Physics ();
+		if (qcvm->time + 0.001 < last_sv_time)
+		{
+			last_sv_time = qcvm->time;
+			sv_accum = 0.0;
+			sv_next_snapshot_time = qcvm->time;
+		}
+		else if (qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
+		{
+			Con_Printf ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
+				qcvm->time, clamped_frametime);
+			next_sv_stall_log = realtime + 1.0;
+		}
 	}
-	else if (realtime >= next_sv_skip_log)
-	{
-		Con_Printf ("NETDBG SV_Physics skipped (Host_ServerFrame) paused=%d key_dest=%d\n",
-			sv.paused, key_dest);
-		next_sv_skip_log = realtime + 1.0;
-	}
+	last_sv_time = qcvm->time;
 
 //johnfitz -- devstats
 	if (cls.signon == SIGNONS)
@@ -1179,8 +1222,37 @@ void Host_ServerFrame (void)
 	}
 //johnfitz
 
-// send all messages to the clients
-	SV_SendClientMessages ();
+	{
+		double netrate = sv_netrate.value;
+
+		if (netrate <= 1.0)
+			netrate = sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0;
+		net_dt = 1.0 / netrate;
+	}
+	if (sv_next_snapshot_time <= 0.0 || qcvm->time < sv_next_snapshot_time - 1.0)
+		sv_next_snapshot_time = qcvm->time;
+	while (qcvm->time >= sv_next_snapshot_time && sends < max_sends)
+	{
+		int temp_bytes = sv.datagram.cursize;
+
+		SV_SendClientMessages ();
+		if (sv_tick_debug.value)
+		{
+			Con_Printf ("NETDBG sv_snap_send time %.3f next %.3f clients %d bytes %d\n",
+				qcvm->time, sv_next_snapshot_time + net_dt, active_clients, temp_bytes);
+		}
+		SV_ClearDatagram ();
+		sv_next_snapshot_time += net_dt;
+		sends++;
+	}
+	if (active_clients == 0 && sv.datagram.cursize > 0)
+		SV_ClearDatagram ();
+	if (sv_tick_debug.value && realtime >= next_sv_tick_log)
+	{
+		Con_Printf ("NETDBG sv_tick frame_dt %.6f tick_dt %.6f ticks %d accum %.6f time %.3f sends %d\n",
+			clamped_frametime, tick_dt, ticks, sv_accum, qcvm->time, sends);
+		next_sv_tick_log = realtime + 1.0;
+	}
 
 	Host_CheckAutosave ();
 }

@@ -33,6 +33,7 @@ extern cvar_t cl_maxpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_minpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_mwheelpitch;
 extern cvar_t cl_netdebug_parse;
+extern cvar_t cl_cmd_maxbatch;
 
 /*
 ===============================================================================
@@ -425,12 +426,21 @@ void CL_SendMove (const usercmd_t *cmd)
 		MSG_WriteLong (&buf, (int)cl.last_cmd_ack);
 
 		cmd_count = 0;
-		for (i = CMD_BACKUP; i >= 0 && cmd_count < MAX_CMDS_PER_PACKET; i--)
 		{
-			unsigned int seq = cmd->sequence - (unsigned int)i;
+			int maxbatch = (int)cl_cmd_maxbatch.value;
 
-			if (CL_Predict_GetCmd (seq, &cmd_buf[cmd_count]))
-				cmd_count++;
+			if (maxbatch < 1)
+				maxbatch = 1;
+			if (maxbatch > MAX_CMDS_PER_PACKET)
+				maxbatch = MAX_CMDS_PER_PACKET;
+
+			for (i = CMD_BACKUP; i >= 0 && cmd_count < maxbatch; i--)
+			{
+				unsigned int seq = cmd->sequence - (unsigned int)i;
+
+				if (CL_Predict_GetCmd (seq, &cmd_buf[cmd_count]))
+					cmd_count++;
+			}
 		}
 
 		MSG_WriteByte (&buf, cmd_count);

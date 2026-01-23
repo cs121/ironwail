@@ -44,6 +44,11 @@ cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
 cvar_t	cl_rate = {"cl_rate", "25000", CVAR_ARCHIVE};
 cvar_t	cl_updaterate = {"cl_updaterate", "20", CVAR_ARCHIVE};
+cvar_t	cl_cmdrate = {"cl_cmdrate", "60", CVAR_ARCHIVE};
+cvar_t	cl_cmd_maxbatch = {"cl_cmd_maxbatch", "6", CVAR_ARCHIVE};
+cvar_t	cl_interp = {"cl_interp", "0.05", CVAR_ARCHIVE};
+cvar_t	cl_jitter = {"cl_jitter", "0.02", CVAR_ARCHIVE};
+cvar_t	cl_physrate = {"cl_physrate", "0", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
 cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
 cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
@@ -117,6 +122,11 @@ static int				cl_lerp_hold_oldest = 0;
 static int				cl_lerp_gap_holds = 0;
 static double			cl_lerp_debug_next_time = 0.0;
 static double			cl_netdbg_move_next_time = 0.0;
+static double			cl_cmd_accum = 0.0;
+static double			cl_cmd_debug_next_time = 0.0;
+static unsigned int		cl_cmds_built_since_log = 0;
+static unsigned int		cl_cmds_sent_since_log = 0;
+static unsigned int		cl_cmd_packets_since_log = 0;
 
 static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
 {
@@ -153,6 +163,11 @@ static void CL_ClearPlayerSnaps (void)
 void CL_ResetPlayerSnaps (void)
 {
 	CL_ClearPlayerSnaps ();
+	cl_cmd_accum = 0.0;
+	cl_cmd_debug_next_time = 0.0;
+	cl_cmds_built_since_log = 0;
+	cl_cmds_sent_since_log = 0;
+	cl_cmd_packets_since_log = 0;
 }
 
 float cl_lerpfrac = 1.0f;
@@ -206,7 +221,7 @@ void CL_RecordPlayerSnap (void)
 	snap = &cl_psnaps[cl_psnap_head];
 	memset (snap, 0, sizeof(*snap));
 	snap->t = Sys_DoubleTime ();
-	snap->servertime = 0;
+	snap->servertime = cl.mtime[0];
 
 	for (i = 0; i < cl.maxclients && i < MAX_SCOREBOARD; i++)
 	{
@@ -300,11 +315,41 @@ static float CL_LerpAngle (float a, float b, float f)
 	return a + f * d;
 }
 
+static double CL_GetInterpDelaySeconds (void)
+{
+	double interp = cl_interp.value;
+	double jitter = cl_jitter.value;
+
+	if (interp <= 0.0)
+	{
+		if (cl_lerp_ms.value <= 0.0)
+			return 0.0;
+		return cl_lerp_ms.value * 0.001;
+	}
+
+	if (jitter < 0.0)
+		jitter = 0.0;
+	return interp + jitter;
+}
+
+static double CL_GetInterpTargetTime (void)
+{
+	double delay = CL_GetInterpDelaySeconds ();
+	double server_time = cl.latest_server_time > 0.0 ? cl.latest_server_time : cl.mtime[0];
+
+	if (server_time > 0.0 && cl.clock_offset != 0.0)
+		server_time = realtime + cl.clock_offset;
+
+	if (server_time > 0.0)
+		return server_time - delay;
+	return Sys_DoubleTime () - delay;
+}
+
 static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out_ang)
 {
-	double now;
 	double render_t;
 	double max_gap_s;
+	double delay;
 	cl_player_snap_t *newest;
 	cl_player_snap_t *oldest = NULL;
 	cl_player_snap_t *snap;
@@ -312,21 +357,21 @@ static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out
 	int idx;
 	int count;
 
-	if (cl_lerp_ms.value <= 0.0f)
+	delay = CL_GetInterpDelaySeconds ();
+	if (delay <= 0.0)
 		return false;
 	if (player < 0 || player >= MAX_SCOREBOARD)
 		return false;
 	if (cl_psnap_count <= 0)
 		return false;
 
-	now = Sys_DoubleTime ();
-	render_t = now - (cl_lerp_ms.value * 0.001);
+	render_t = CL_GetInterpTargetTime ();
 	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
 
 	idx = (cl_psnap_head - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
 	newest = &cl_psnaps[idx];
 
-	if (render_t >= newest->t)
+	if (render_t >= (newest->servertime > 0 ? newest->servertime : newest->t))
 	{
 		if (!CL_IsValidBit (newest, player))
 			return false;
@@ -341,21 +386,25 @@ static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out
 	{
 		snap = &cl_psnaps[idx];
 		oldest = snap;
-		if (snap->t <= render_t)
+		if ((snap->servertime > 0 ? snap->servertime : snap->t) <= render_t)
 		{
 			if (!CL_IsValidBit (snap, player) || !CL_IsValidBit (prev, player))
 				break;
-			if (prev->t - snap->t > max_gap_s)
+			if ((prev->servertime > 0 ? prev->servertime : prev->t)
+				- (snap->servertime > 0 ? snap->servertime : snap->t) > max_gap_s)
 			{
 				VectorCopy (snap->org[player], out_org);
 				VectorCopy (snap->ang[player], out_ang);
 				cl_lerp_gap_holds++;
 				return true;
 			}
-			if (prev->t <= snap->t)
+			if ((prev->servertime > 0 ? prev->servertime : prev->t)
+				<= (snap->servertime > 0 ? snap->servertime : snap->t))
 				break;
 			{
-				float f = (float)((render_t - snap->t) / (prev->t - snap->t));
+				double snap_time = (snap->servertime > 0 ? snap->servertime : snap->t);
+				double prev_time = (prev->servertime > 0 ? prev->servertime : prev->t);
+				float f = (float)((render_t - snap_time) / (prev_time - snap_time));
 				int axis;
 				f = CLAMP (0.0f, f, 1.0f);
 				for (axis = 0; axis < 3; axis++)
@@ -370,7 +419,8 @@ static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out
 		idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
 	}
 
-	if (oldest && render_t < oldest->t && CL_IsValidBit (oldest, player))
+	if (oldest && render_t < (oldest->servertime > 0 ? oldest->servertime : oldest->t)
+		&& CL_IsValidBit (oldest, player))
 	{
 		VectorCopy (oldest->org[player], out_org);
 		VectorCopy (oldest->ang[player], out_ang);
@@ -387,6 +437,7 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 	double render_t;
 	double max_gap_s;
 	double max_extrap_s;
+	double delay;
 	cl_entity_snap_t *snaps;
 	cl_entity_snap_t *newest;
 	cl_entity_snap_t *oldest = NULL;
@@ -397,7 +448,8 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 	int idx;
 	int axis;
 
-	if (cl_lerp_ms.value <= 0.0f)
+	delay = CL_GetInterpDelaySeconds ();
+	if (delay <= 0.0)
 		return false;
 	if (!cl.entity_snapshots || !cl.entity_snap_head || !cl.entity_snap_count)
 		return false;
@@ -408,7 +460,7 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 	if (snap_count <= 0)
 		return false;
 
-	render_t = cl.time - (cl_lerp_ms.value * 0.001);
+	render_t = CL_GetInterpTargetTime ();
 	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
 	max_extrap_s = 0.05;
 	if (max_gap_s > 0.0 && max_gap_s < max_extrap_s)
@@ -1374,8 +1426,12 @@ void CL_RelinkEntities (void)
 
 		if (now >= cl_lerp_debug_next_time)
 		{
-			Con_Printf ("lerp: miss_pairs %d hold_newest %d hold_oldest %d gap_holds %d\n",
-				cl_lerp_miss_pairs, cl_lerp_hold_newest, cl_lerp_hold_oldest, cl_lerp_gap_holds);
+			double delay = CL_GetInterpDelaySeconds ();
+			double target_time = CL_GetInterpTargetTime ();
+			Con_Printf ("lerp: miss_pairs %d hold_newest %d hold_oldest %d gap_holds %d "
+				"interp_delay %.3f target_time %.3f psnaps %d\n",
+				cl_lerp_miss_pairs, cl_lerp_hold_newest, cl_lerp_hold_oldest, cl_lerp_gap_holds,
+				delay, target_time, cl_psnap_count);
 			cl_lerp_miss_pairs = 0;
 			cl_lerp_hold_newest = 0;
 			cl_lerp_hold_oldest = 0;
@@ -1492,48 +1548,117 @@ CL_SendCmd
 void CL_SendCmd (void)
 {
 	usercmd_t		cmd;
+	double			cmd_rate;
+	double			cmd_dt;
+	double			phys_dt;
+	double			max_accum;
+	float			prev_frametime;
+	int				max_catchup;
+	int				cmds_built;
+	qboolean		send_move;
+	qboolean		sendcmd_ran;
 
 	if (cls.state != ca_connected)
 		return;
 
-	if (cls.signon == SIGNONS)
+	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
+	cmd_dt = 1.0 / cmd_rate;
+	phys_dt = (cl_physrate.value > 0.0) ? (1.0 / cl_physrate.value) : cmd_dt;
+	max_catchup = (int)cl_cmd_maxbatch.value;
+	if (max_catchup < 1)
+		max_catchup = 1;
+
+	cl_cmd_accum += host_frametime;
+	if (cl_cmd_accum < 0.0)
+		cl_cmd_accum = 0.0;
+	max_accum = cmd_dt * (double)max_catchup * 2.0;
+	if (cl_cmd_accum > max_accum)
+		cl_cmd_accum = max_accum;
+
+	cmds_built = 0;
+	send_move = false;
+	sendcmd_ran = false;
+	prev_frametime = host_frametime;
+
+	while (cl_cmd_accum >= cmd_dt && cmds_built < max_catchup)
 	{
-	// get basic movement from keyboard
-		CL_BaseMove (&cmd);
+		if (cls.signon == SIGNONS)
+		{
+		// get basic movement from keyboard
+			CL_BaseMove (&cmd);
 
-	// allow mice or other external controllers to add to the move
-		cmd.forwardmove	+= cl.pendingcmd.forwardmove;
-		cmd.sidemove	+= cl.pendingcmd.sidemove;
-		cmd.upmove		+= cl.pendingcmd.upmove;
+		// allow mice or other external controllers to add to the move
+			cmd.forwardmove	+= cl.pendingcmd.forwardmove;
+			cmd.sidemove	+= cl.pendingcmd.sidemove;
+			cmd.upmove		+= cl.pendingcmd.upmove;
 
-		VectorCopy (cl.viewangles, cmd.viewangles);
-		cmd.buttons = 0;
-		if ( in_attack.state & 3 )
-			cmd.buttons |= 1;
-		in_attack.state &= ~2;
+			VectorCopy (cl.viewangles, cmd.viewangles);
+			cmd.buttons = 0;
+			if ( in_attack.state & 3 )
+				cmd.buttons |= 1;
+			if (in_jump.state & 3)
+				cmd.buttons |= 2;
+			cmd.impulse = in_impulse;
 
-		if (in_jump.state & 3)
-		cmd.buttons |= 2;
-		in_jump.state &= ~2;
+			// NOTE: Never gate command generation/sending on snapshot readiness.
+			// Prediction handles world-ready checks; the server still needs cmds every tick.
+			host_frametime = (float)phys_dt;
+			CL_Predict_SetupCmd (&cmd);
+			host_frametime = prev_frametime;
 
-		cmd.impulse = in_impulse;
-		in_impulse = 0;
+			in_attack.state &= ~2;
+			in_jump.state &= ~2;
+			in_impulse = 0;
+			send_move = true;
+			cl_cmds_built_since_log++;
+		}
+		else
+		{
+			send_move = true;
+		}
 
-		// NOTE: Never gate command generation/sending on snapshot readiness.
-		// Prediction handles world-ready checks; the server still needs cmds every frame.
-
-		CL_Predict_SetupCmd (&cmd);
-
-	// send the unreliable message
-		CL_NetDbg_LogMovement (&cmd, true);
-		CL_SendMove (&cmd);
+		cl_cmd_accum -= cmd_dt;
+		cmds_built++;
+		sendcmd_ran = true;
 	}
-	else
+
+	if (cmds_built >= max_catchup && cl_cmd_accum >= cmd_dt && cl_netdebug_parse.value)
 	{
-		CL_NetDbg_LogMovement (NULL, true);
-		CL_SendMove (NULL);
+		Con_Printf ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
+			cl_cmd_accum, cmd_dt);
 	}
-	memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
+
+	if (send_move)
+	{
+		if (cls.signon == SIGNONS)
+		{
+			CL_NetDbg_LogMovement (&cmd, sendcmd_ran);
+			CL_SendMove (&cmd);
+			cl_cmds_sent_since_log++;
+		}
+		else
+		{
+			CL_NetDbg_LogMovement (NULL, sendcmd_ran);
+			CL_SendMove (NULL);
+		}
+		cl_cmd_packets_since_log++;
+	}
+	if (send_move && cls.signon == SIGNONS)
+		memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
+
+	if (cl_netdebug_parse.value)
+	{
+		if (realtime >= cl_cmd_debug_next_time)
+		{
+			Con_Printf ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
+				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
+				cmd_dt, cl_cmd_accum);
+			cl_cmds_built_since_log = 0;
+			cl_cmds_sent_since_log = 0;
+			cl_cmd_packets_since_log = 0;
+			cl_cmd_debug_next_time = realtime + 1.0;
+		}
+	}
 
 	if (cls.demoplayback)
 	{
@@ -1729,6 +1854,11 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&cl_rate);
 	Cvar_RegisterVariable (&cl_updaterate);
+	Cvar_RegisterVariable (&cl_cmdrate);
+	Cvar_RegisterVariable (&cl_cmd_maxbatch);
+	Cvar_RegisterVariable (&cl_interp);
+	Cvar_RegisterVariable (&cl_jitter);
+	Cvar_RegisterVariable (&cl_physrate);
 	Cvar_RegisterVariable (&cl_snap_debug);
 	Cvar_RegisterVariable (&cl_snapshot_debug);
 	Cvar_RegisterVariable (&cl_delta_reject_debug);
