@@ -464,6 +464,7 @@ static qboolean SV_CmdSeqNewer (unsigned int seq, unsigned int last)
 static void SV_CmdAckResync (client_t *client, const char *reason)
 {
 	client->snapshot_force_full = true;
+	client->snapshot_force_full_reason = SNAP_FULL_PARSE_ERROR;
 	client->snapshot_has_valid_base = false;
 	client->snapshot_pending_seq = 0;
 	client->snapshot_pending_incomplete = false;

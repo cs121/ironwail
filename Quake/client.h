@@ -73,6 +73,7 @@ extern cshift_t		cshift_empty;
 #define	SIGNONS		4			// signon messages to receive before connected
 
 #define CL_ENTITY_SNAP_HISTORY 3
+#define CL_SNAPSHOT_MAX_CHUNKS 64
 
 typedef struct cl_entity_snap_s
 {
@@ -320,6 +321,14 @@ typedef struct
 	unsigned int snapshot_chunk_expected_total;
 	unsigned int snapshot_chunk_received;
 	unsigned short snapshot_chunk_remaining;
+	unsigned short snapshot_chunk_total_entities;
+	unsigned short snapshot_chunk_total_chunks;
+	unsigned short snapshot_chunk_received_chunks;
+	unsigned int snapshot_chunk_total_bytes;
+	unsigned int snapshot_chunk_flags;
+	byte		*snapshot_chunk_buffers[CL_SNAPSHOT_MAX_CHUNKS];
+	unsigned short snapshot_chunk_sizes[CL_SNAPSHOT_MAX_CHUNKS];
+	byte		snapshot_chunk_received_mask[CL_SNAPSHOT_MAX_CHUNKS];
 	double		snapshot_chunk_start_time;
 	int			snapshot_chunk_packets;
 	snapshot_state_t *snapshot_chunk;
@@ -405,6 +414,7 @@ extern	cvar_t	cl_delta_reject_debug;
 extern	cvar_t	cl_full_reasm_debug;
 extern	cvar_t	cl_full_reasm_timeout_ms;
 extern	cvar_t	cl_snap_incomplete_timeout_ms;
+extern	cvar_t	cl_snap_chunk_drop;
 extern	cvar_t	cl_test_drop;
 extern	cvar_t	cl_entity_timeout_ms;
 extern	cvar_t	cl_lerp_ms;

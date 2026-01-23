@@ -55,6 +55,7 @@ cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_debug = {"cl_full_reasm_debug", "0", CVAR_NONE};
 cvar_t	cl_full_reasm_timeout_ms = {"cl_full_reasm_timeout_ms", "1000", CVAR_NONE};
 cvar_t	cl_snap_incomplete_timeout_ms = {"cl_snap_incomplete_timeout_ms", "1500", CVAR_NONE};
+cvar_t	cl_snap_chunk_drop = {"cl_snap_chunk_drop", "0", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
 cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
@@ -684,6 +685,17 @@ void CL_ClearState (void)
 	cl.snapshot_chunk_seq = 0;
 	cl.snapshot_chunk_start_time = 0;
 	cl.snapshot_chunk_packets = 0;
+	cl.snapshot_chunk_total_entities = 0;
+	cl.snapshot_chunk_total_chunks = 0;
+	cl.snapshot_chunk_received_chunks = 0;
+	cl.snapshot_chunk_total_bytes = 0;
+	cl.snapshot_chunk_flags = 0;
+	for (i = 0; i < CL_SNAPSHOT_MAX_CHUNKS; i++)
+	{
+		cl.snapshot_chunk_buffers[i] = NULL;
+		cl.snapshot_chunk_sizes[i] = 0;
+		cl.snapshot_chunk_received_mask[i] = 0;
+	}
 	cl.snapshot_baseline_seq = 0;
 	cl.snap_last_applied_seq = 0;
 	cl.snap_last_complete_seq = 0;
@@ -1865,6 +1877,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_full_reasm_debug);
 	Cvar_RegisterVariable (&cl_full_reasm_timeout_ms);
 	Cvar_RegisterVariable (&cl_snap_incomplete_timeout_ms);
+	Cvar_RegisterVariable (&cl_snap_chunk_drop);
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
 	Cvar_RegisterVariable (&cl_lerp_ms);
