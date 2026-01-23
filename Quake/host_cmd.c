@@ -38,6 +38,26 @@ cvar_t sv_autoload = {"sv_autoload", "2", CVAR_ARCHIVE};
 
 int	current_skill;
 
+#define HOST_PLAYER_GUARD(reason) \
+	do { \
+		if (!sv_player) \
+		{ \
+			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			SV_PlayerNullTrap (__func__, 0); \
+			return; \
+		} \
+	} while (0)
+
+#define HOST_PLAYER_GUARD_BOOL(reason, retval) \
+	do { \
+		if (!sv_player) \
+		{ \
+			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			SV_PlayerNullTrap (__func__, 0); \
+			return retval; \
+		} \
+	} while (0)
+
 /*
 ==================
 Host_Quit_f
@@ -1639,6 +1659,8 @@ static void Host_God_f (void)
 	if (pr_global_struct->deathmatch)
 		return;
 
+	HOST_PLAYER_GUARD ("god");
+
 	//johnfitz -- allow user to explicitly set god mode to on or off
 	switch (Cmd_Argc())
 	{
@@ -1683,6 +1705,8 @@ static void Host_Notarget_f (void)
 
 	if (pr_global_struct->deathmatch)
 		return;
+
+	HOST_PLAYER_GUARD ("notarget");
 
 	//johnfitz -- allow user to explicitly set notarget to on or off
 	switch (Cmd_Argc())
@@ -1730,6 +1754,8 @@ static void Host_Noclip_f (void)
 
 	if (pr_global_struct->deathmatch)
 		return;
+
+	HOST_PLAYER_GUARD ("noclip");
 
 	//johnfitz -- allow user to explicitly set noclip to on or off
 	switch (Cmd_Argc())
@@ -1789,6 +1815,8 @@ static void Host_SetPos_f(void)
 
 	if (pr_global_struct->deathmatch)
 		return;
+
+	HOST_PLAYER_GUARD ("setpos");
 
 	for (i = 1, numargs = 0; i < Cmd_Argc (); i++)
 	{
@@ -1859,6 +1887,8 @@ static void Host_Fly_f (void)
 
 	if (pr_global_struct->deathmatch)
 		return;
+
+	HOST_PLAYER_GUARD ("fly");
 
 	//johnfitz -- allow user to explicitly set noclip to on or off
 	switch (Cmd_Argc())
@@ -2051,6 +2081,8 @@ static qboolean Host_AutoLoad (void)
 {
 	if (!sv_autoload.value || !sv.lastsave[0] || svs.maxclients != 1 || cl.intermission)
 		return false;
+
+	HOST_PLAYER_GUARD_BOOL ("autoload", false);
 
 	if (sv_autoload.value < 2.f)
 	{
@@ -2965,6 +2997,8 @@ static void Host_Kill_f (void)
 		return;
 	}
 
+	HOST_PLAYER_GUARD ("kill");
+
 	if (sv_player->v.health <= 0)
 	{
 		SV_ClientPrintf ("Can't suicide -- already dead!\n");
@@ -2999,6 +3033,9 @@ static void Host_BotSpawn_f (void)
 		return;
 	}
 
+	if (cmd_source != src_command)
+		HOST_PLAYER_GUARD ("botspawn");
+
 	pr_global_struct->time = qcvm->time;
 	self = (cmd_source == src_command) ? qcvm->edicts : sv_player;
 	pr_global_struct->self = EDICT_TO_PROG(self);
@@ -3025,6 +3062,7 @@ static void Host_Pause_f (void)
 		Cmd_ForwardToServer ();
 		return;
 	}
+	HOST_PLAYER_GUARD ("pause");
 	if (!pausable.value)
 		SV_ClientPrintf ("Pause not allowed.\n");
 	else
@@ -3116,7 +3154,7 @@ static void Host_Spawn_f (void)
 			(&pr_global_struct->parm1)[i] = host_client->spawn_parms[i];
 		// call the spawn function
 		pr_global_struct->time = qcvm->time;
-		pr_global_struct->self = EDICT_TO_PROG(sv_player);
+		pr_global_struct->self = EDICT_TO_PROG(host_client->edict);
 		PR_ExecuteProgram (pr_global_struct->ClientConnect);
 
 		if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= qcvm->time)
@@ -3187,7 +3225,7 @@ static void Host_Spawn_f (void)
 			MSG_WriteAngle (&host_client->message, ent->v.angles[i], sv.protocolflags );
 	MSG_WriteAngle (&host_client->message, 0, sv.protocolflags );
 
-	SV_WriteClientdataToMessage (host_client, sv_player, &host_client->message);
+	SV_WriteClientdataToMessage (host_client, host_client->edict, &host_client->message);
 
 	MSG_WriteByte (&host_client->message, svc_signonnum);
 	MSG_WriteByte (&host_client->message, 3);
@@ -3360,6 +3398,8 @@ static void Host_Give_f (void)
 
 	if (pr_global_struct->deathmatch)
 		return;
+
+	HOST_PLAYER_GUARD ("give");
 
 	t = Cmd_Argv(1);
 	v = atoi (Cmd_Argv(2));

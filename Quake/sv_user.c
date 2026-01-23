@@ -46,6 +46,26 @@ float	*velocity;
 
 qboolean	onground;
 
+#define SV_PLAYER_GUARD_VOID(reason, fatal) \
+	do { \
+		if (!sv_player) \
+		{ \
+			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			SV_PlayerNullTrap (__func__, fatal); \
+			return; \
+		} \
+	} while (0)
+
+#define SV_PLAYER_GUARD_BOOL(reason, fatal, retval) \
+	do { \
+		if (!sv_player) \
+		{ \
+			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			SV_PlayerNullTrap (__func__, fatal); \
+			return retval; \
+		} \
+	} while (0)
+
 static int SV_ClampClientRate (int value, const cvar_t *min_rate, const cvar_t *max_rate)
 {
 	int clamped = value;
@@ -78,6 +98,8 @@ void SV_SetIdealPitch (void)
 	float	z[MAX_FORWARD];
 	int		i, j;
 	int		step, dir, steps;
+
+	SV_PLAYER_GUARD_VOID ("SV_SetIdealPitch", 0);
 
 	if (!((int)sv_player->v.flags & FL_ONGROUND))
 		return;
@@ -146,6 +168,8 @@ void SV_UserFriction (void)
 	vec3_t	start, stop;
 	float	friction;
 	trace_t	trace;
+
+	SV_PLAYER_GUARD_VOID ("SV_UserFriction", 0);
 
 	vel = velocity;
 
@@ -229,6 +253,8 @@ void DropPunchAngle (void)
 {
 	float	len;
 
+	SV_PLAYER_GUARD_VOID ("DropPunchAngle", 0);
+
 	len = VectorNormalize (sv_player->v.punchangle);
 
 	len -= 10*host_frametime;
@@ -248,6 +274,8 @@ void SV_WaterMove (void)
 	int		i;
 	vec3_t	wishvel;
 	float	speed, newspeed, wishspeed, addspeed, accelspeed;
+
+	SV_PLAYER_GUARD_VOID ("SV_WaterMove", 0);
 
 //
 // user intentions
@@ -305,6 +333,8 @@ void SV_WaterMove (void)
 
 void SV_WaterJump (void)
 {
+	SV_PLAYER_GUARD_VOID ("SV_WaterJump", 0);
+
 	if (qcvm->time > sv_player->v.teleport_time
 	|| !sv_player->v.waterlevel)
 	{
@@ -324,6 +354,8 @@ new, alternate noclip. old noclip is still handled in SV_AirMove
 */
 void SV_NoclipMove (void)
 {
+	SV_PLAYER_GUARD_VOID ("SV_NoclipMove", 0);
+
 	AngleVectors (sv_player->v.v_angle, forward, right, up);
 
 	velocity[0] = forward[0]*cmd.forwardmove + right[0]*cmd.sidemove;
@@ -349,6 +381,8 @@ void SV_AirMove (void)
 	vec3_t		wishvel, wishdir;
 	float		wishspeed;
 	float		fmove, smove;
+
+	SV_PLAYER_GUARD_VOID ("SV_AirMove", 0);
 
 	AngleVectors (sv_player->v.angles, forward, right, up);
 
@@ -401,6 +435,8 @@ the angle fields specify an exact angular motion in degrees
 void SV_ClientThink (void)
 {
 	vec3_t		v_angle;
+
+	SV_PLAYER_GUARD_VOID ("SV_ClientThink", 0);
 
 	if (sv_player->v.movetype == MOVETYPE_NONE)
 		return;
@@ -526,6 +562,26 @@ qboolean SV_ReadClientMessage (void)
 	int		ret;
 	int		ccmd;
 	const char	*s;
+
+	// Server-only: should never parse client messages without an active server.
+	if (!sv.active || sv.state != ss_active)
+	{
+		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason server_inactive\n", SV_CurrentClientIndex ());
+		return true;
+	}
+
+	if (cls.demoplayback)
+	{
+		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
+		return true;
+	}
+
+	if (!host_client || !host_client->netconnection)
+	{
+		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason no_client_context\n", SV_CurrentClientIndex ());
+		SV_PlayerNullTrap (__func__, 0);
+		return false;
+	}
 
 	do
 	{
@@ -1130,10 +1186,28 @@ void SV_RunClients (void)
 {
 	int				i;
 
+	// Server-only: requires an active server and a valid client context.
+	if (!sv.active || sv.state != ss_active)
+		return;
+
+	if (cls.demoplayback)
+	{
+		Con_Printf ("NETDBG sv_runclients skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
+		return;
+	}
+
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 	{
 		if (!host_client->active)
 			continue;
+
+		if (!host_client->edict)
+		{
+			Con_Printf ("NETDBG sv_player NULL cl %d reason runclients_no_edict\n",
+				SV_CurrentClientIndex ());
+			SV_PlayerNullTrap (__func__, 0);
+			continue;
+		}
 
 		sv_player = host_client->edict;
 

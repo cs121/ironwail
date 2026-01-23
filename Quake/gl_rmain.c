@@ -567,13 +567,21 @@ static float R_GetDynamicDoFFocus (float fallback)
 		extern edict_t* sv_player;
 		qcvm_t* oldvm = qcvm;
 
-		PR_SwitchQCVM (NULL);
-		PR_SwitchQCVM (&sv.qcvm);
+		if (!sv_player)
+		{
+			Con_Printf ("NETDBG sv_player NULL cl %d reason dof_autofocus\n", SV_CurrentClientIndex ());
+			SV_PlayerNullTrap (__func__, 0);
+		}
+		else
+		{
+			PR_SwitchQCVM (NULL);
+			PR_SwitchQCVM (&sv.qcvm);
 
-		trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
-		traced = true;
+			trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
+			traced = true;
 
-		PR_SwitchQCVM (oldvm);
+			PR_SwitchQCVM (oldvm);
+		}
 	}
 
 	if (!traced)
@@ -4072,6 +4080,13 @@ static void R_ShowBoundingBoxes (void)
 	mode = abs ((int)r_showbboxes.value);
 	if ((!mode && !r_showfields.value) || cl.maxclients > 1 || !r_drawentities.value || !sv.active)
 		return;
+
+	if (!sv_player)
+	{
+		Con_Printf ("NETDBG sv_player NULL cl %d reason showbboxes\n", SV_CurrentClientIndex ());
+		SV_PlayerNullTrap (__func__, 0);
+		return;
+	}
 
 	GL_BeginGroup ("Show bounding boxes");
 
