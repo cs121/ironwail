@@ -73,6 +73,11 @@ static cvar_t sv_icull_debug = {"sv_icull_debug", "0", CVAR_NONE};
 
 static qboolean SV_SignonChunksEnabled (void);
 static void SV_SignonStreamSend (client_t *client);
+static qboolean SV_Snapshot2RecoveryEnabled (void);
+static int SV_Snapshot2EstimateDeltaBytes (const snapshot_state_t *next, const snapshot_state_t *base,
+	byte snapflags, unsigned int *out_mask);
+static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const snapshot_state_t *base, byte snapflags);
+static int SV_SnapshotDeltaFieldSize (unsigned int mask);
 
 typedef struct
 {
