@@ -1238,15 +1238,27 @@ static void CL_LogDeltaReject (const char *reason, unsigned int seq, unsigned in
 	Con_Printf ("cl_delta_reject %s seq %u base %u\n", reason, seq, base_seq);
 }
 
-static qboolean CL_SnapshotChunkTimedOut (void)
+static void CL_CheckSnapshotChunkTimeouts (void)
 {
 	double timeout_s = cl_full_reasm_timeout_ms.value * 0.001;
+	int i;
 
-	if (!cl.snapshot_chunk_active)
-		return false;
 	if (timeout_s <= 0.0)
-		return false;
-	return (realtime - cl.snapshot_chunk_start_time) > timeout_s;
+		return;
+
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
+	{
+		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
+
+		if (!chunk->active)
+			continue;
+		if ((realtime - chunk->start_time) <= timeout_s)
+			continue;
+		if (cl_full_reasm_debug.value >= 1.0f)
+			Con_Printf ("cl_snap2 full reasm timeout seq %u\n", chunk->seq);
+		CL_ResetSnapshotChunkAssembly (chunk);
+		CL_RequestFullSnapshot ("snapshot2 full reasm timeout", false);
+	}
 }
 
 static void CL_TrackSnapshotIncomplete (unsigned short seq16, const char *reason)
@@ -1601,7 +1613,7 @@ static void CL_ParseSnapshotDelta (void)
 			base_present = cl.snapshot_baseline_present[base_index];
 		}
 	}
-	continuation_pending = cl.snapshot_chunk_active;
+	continuation_pending = CL_HasActiveSnapshotChunks ();
 	drop = CL_ShouldDropSnapshot ();
 
 	if (cl_snap_debug.value >= 1.0f)
@@ -1894,34 +1906,84 @@ static void CL_FinalizeFullSnapshotInterpReset (void)
 	}
 }
 
-static void CL_ResetSnapshotChunk (void)
+static void CL_ResetSnapshotChunkAssembly (cl_snapshot_chunk_asm_t *chunk)
 {
 	int i;
 
+	if (!chunk)
+		return;
+
 	for (i = 0; i < CL_SNAPSHOT_MAX_CHUNKS; i++)
 	{
-		if (cl.snapshot_chunk_buffers[i])
+		if (chunk->buffers[i])
 		{
-			Z_Free (cl.snapshot_chunk_buffers[i]);
-			cl.snapshot_chunk_buffers[i] = NULL;
+			Z_Free (chunk->buffers[i]);
+			chunk->buffers[i] = NULL;
 		}
-		cl.snapshot_chunk_sizes[i] = 0;
-		cl.snapshot_chunk_received_mask[i] = 0;
+		chunk->sizes[i] = 0;
+		chunk->received_mask[i] = 0;
 	}
 	if (cl.snapshot_chunk_present)
 		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
-	cl.snapshot_chunk_active = false;
-	cl.snapshot_chunk_seq = 0;
-	cl.snapshot_chunk_expected_total = 0;
-	cl.snapshot_chunk_received = 0;
-	cl.snapshot_chunk_remaining = 0;
-	cl.snapshot_chunk_total_entities = 0;
-	cl.snapshot_chunk_total_chunks = 0;
-	cl.snapshot_chunk_received_chunks = 0;
-	cl.snapshot_chunk_total_bytes = 0;
-	cl.snapshot_chunk_flags = 0;
-	cl.snapshot_chunk_start_time = 0;
-	cl.snapshot_chunk_packets = 0;
+	memset (chunk, 0, sizeof(*chunk));
+}
+
+static cl_snapshot_chunk_asm_t *CL_FindSnapshotChunkAssembly (unsigned int seq)
+{
+	int i;
+
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
+	{
+		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
+
+		if (chunk->active && chunk->seq == seq)
+			return chunk;
+	}
+
+	return NULL;
+}
+
+static cl_snapshot_chunk_asm_t *CL_AllocSnapshotChunkAssembly (unsigned int seq)
+{
+	int i;
+	cl_snapshot_chunk_asm_t *oldest = NULL;
+
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
+	{
+		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
+
+		if (!chunk->active)
+			return chunk;
+		if (!oldest || chunk->start_time < oldest->start_time)
+			oldest = chunk;
+	}
+
+	if (oldest)
+	{
+		if (cl_snap_debug.value >= 1.0f)
+		{
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap2_chunk_evict seq %u new_seq %u\n",
+				realtime, oldest->seq, seq);
+		}
+		CL_ResetSnapshotChunkAssembly (oldest);
+		return oldest;
+	}
+
+	return NULL;
+}
+
+static qboolean CL_HasActiveSnapshotChunks (void)
+{
+	int i;
+
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
+	{
+		if (cl.snapshot_chunk_assemblies[i].active)
+			return true;
+	}
+
+	return false;
 }
 
 static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, qboolean drop, qboolean incomplete,
@@ -2105,13 +2167,7 @@ static void CL_ParseSnapshot2 (void)
 		realtime, header.seq, header.base_seq, header.flags, header.num_entities, header.num_removed,
 		is_full ? 1 : 0, is_delta ? 1 : 0, cl.has_full_snapshot ? 1 : 0);
 
-	if (CL_SnapshotChunkTimedOut ())
-	{
-		if (cl_full_reasm_debug.value >= 1.0f)
-			Con_Printf ("cl_snap2 full reasm timeout seq %u\n", cl.snapshot_chunk_seq);
-		CL_ResetSnapshotChunk ();
-		CL_RequestFullSnapshot ("snapshot2 full reasm timeout", false);
-	}
+	CL_CheckSnapshotChunkTimeouts ();
 
 	if (cl_snap_debug.value >= 1.0f)
 	{
@@ -2171,7 +2227,8 @@ static void CL_ParseSnapshot2 (void)
 		qboolean rem_zero = (header.num_removed == 0);
 		qboolean final_chunk = (!continuation || rem_zero);
 		qboolean finalize_invalid = (!continuation && !rem_zero);
-		qboolean is_chunked = (continuation || cl.snapshot_chunk_active);
+		qboolean chunkinfo_ok = (header.flags & SNAPSHOT_FLAG_CHUNKINFO) != 0;
+		qboolean is_chunked = (chunkinfo_ok || continuation);
 
 		if (finalize_invalid)
 		{
@@ -2190,9 +2247,9 @@ static void CL_ParseSnapshot2 (void)
 			unsigned short chunk_index = header.chunk_index;
 			unsigned short total_chunks = header.chunk_total_chunks;
 			unsigned short total_entities = header.chunk_total_entities;
-			qboolean chunkinfo_ok = (header.flags & SNAPSHOT_FLAG_CHUNKINFO) != 0;
 			qboolean duplicate_chunk = false;
 			qboolean chunk_done = false;
+			cl_snapshot_chunk_asm_t *chunk = NULL;
 
 			if (!chunkinfo_ok)
 			{
@@ -2215,41 +2272,45 @@ static void CL_ParseSnapshot2 (void)
 				drop = true;
 			}
 
-			if (!cl.snapshot_chunk_active || cl.snapshot_chunk_seq != header.seq)
+			chunk = CL_FindSnapshotChunkAssembly (header.seq);
+			if (!chunk)
+				chunk = CL_AllocSnapshotChunkAssembly (header.seq);
+			if (!chunk)
 			{
-				if (cl.snapshot_chunk_active && cl.snapshot_chunk_seq != header.seq)
-				{
-					NET_DebugLogEvent (true,
-						"NETDBG time %.3f snap2_chunk_abort seq %u new_seq %u\n",
-						realtime, cl.snapshot_chunk_seq, header.seq);
-					CL_RequestFullSnapshot ("snapshot2 chunk seq", false);
-				}
-				CL_ResetSnapshotChunk ();
-				cl.snapshot_chunk_active = true;
-				cl.snapshot_chunk_seq = header.seq;
-				cl.snapshot_chunk_start_time = realtime;
-				cl.snapshot_chunk_packets = 0;
-				cl.snapshot_chunk_total_chunks = total_chunks;
-				cl.snapshot_chunk_total_entities = total_entities;
-				cl.snapshot_chunk_expected_total = total_entities;
-				cl.snapshot_chunk_received = 0;
-				cl.snapshot_chunk_remaining = header.num_removed;
-				cl.snapshot_chunk_flags = header.flags;
+				CL_RequestFullSnapshot ("snapshot2 chunk seq", false);
+				drop = true;
+			}
+			else if (!chunk->active)
+			{
+				chunk->active = true;
+				chunk->seq = header.seq;
+				chunk->start_time = realtime;
+				chunk->packets = 0;
+				chunk->total_chunks = total_chunks;
+				chunk->total_entities = total_entities;
+				chunk->expected_total = total_entities;
+				chunk->received = 0;
+				chunk->remaining = header.num_removed;
+				chunk->flags = header.flags;
 			}
 			else
 			{
-				if (cl.snapshot_chunk_total_chunks != total_chunks
-					|| cl.snapshot_chunk_total_entities != total_entities)
+				if (chunk->total_chunks != total_chunks
+					|| chunk->total_entities != total_entities)
 				{
 					CL_RequestFullSnapshot ("snapshot2 chunk mismatch", false);
+					CL_ResetSnapshotChunkAssembly (chunk);
 					drop = true;
 				}
 			}
 
-			cl.snapshot_chunk_packets++;
-			if (cl_full_reasm_debug.value >= 2.0f)
-				Con_Printf ("cl_snap2 full reasm seq %u packet %d flags 0x%x ents %u\n",
-					header.seq, cl.snapshot_chunk_packets, header.flags, header.num_entities);
+			if (chunk)
+			{
+				chunk->packets++;
+				if (cl_full_reasm_debug.value >= 2.0f)
+					Con_Printf ("cl_snap2 full reasm seq %u packet %d flags 0x%x ents %u\n",
+						header.seq, chunk->packets, header.flags, header.num_entities);
+			}
 
 			for (i = 0; i < header.num_entities; i++)
 			{
@@ -2262,7 +2323,8 @@ static void CL_ParseSnapshot2 (void)
 				{
 					CL_RequestFullSnapshot ("snapshot2 chunk entnum", true);
 					msg_readcount = net_message.cursize;
-					CL_ResetSnapshotChunk ();
+					if (chunk)
+						CL_ResetSnapshotChunkAssembly (chunk);
 					return;
 				}
 				if (cl.protocolflags & PRFL_SNAPSHOT_HIRES)
@@ -2272,23 +2334,25 @@ static void CL_ParseSnapshot2 (void)
 				{
 					CL_RequestFullSnapshot ("snapshot2 chunk state", true);
 					msg_readcount = net_message.cursize;
-					CL_ResetSnapshotChunk ();
+					if (chunk)
+						CL_ResetSnapshotChunkAssembly (chunk);
 					return;
 				}
 				if (!CL_SnapshotOriginIsSane (state.state.origin))
 				{
 					CL_RequestFullSnapshot ("snapshot2 origin guard", true);
 					msg_readcount = net_message.cursize;
-					CL_ResetSnapshotChunk ();
+					if (chunk)
+						CL_ResetSnapshotChunkAssembly (chunk);
 					return;
 				}
 			}
 
 			payload_end = msg_readcount;
 			chunk_len = payload_end - payload_start;
-			if (!drop)
+			if (!drop && chunk)
 			{
-				if (chunk_len <= 0 || cl.snapshot_chunk_total_bytes + (unsigned int)chunk_len > MAX_MSGLEN)
+				if (chunk_len <= 0 || chunk->total_bytes + (unsigned int)chunk_len > MAX_MSGLEN)
 				{
 					CL_RequestFullSnapshot ("snapshot2 chunk bytes", true);
 					drop = true;
@@ -2297,61 +2361,68 @@ static void CL_ParseSnapshot2 (void)
 
 			if (drop)
 			{
-				CL_ResetSnapshotChunk ();
+				if (chunk)
+					CL_ResetSnapshotChunkAssembly (chunk);
 				snap_status = "drop";
 				CL_LogSnapshot2Receive (&header, start_pos, snap_status);
 				return;
 			}
 
-			if (cl.snapshot_chunk_received_mask[chunk_index])
+			if (chunk->received_mask[chunk_index])
 				duplicate_chunk = true;
 
 			if (!duplicate_chunk)
 			{
 				byte *buffer = (byte *)Z_Malloc (chunk_len);
 				memcpy (buffer, net_message.data + payload_start, chunk_len);
-				cl.snapshot_chunk_buffers[chunk_index] = buffer;
-				cl.snapshot_chunk_sizes[chunk_index] = (unsigned short)chunk_len;
-				cl.snapshot_chunk_received_mask[chunk_index] = 1;
-				cl.snapshot_chunk_received_chunks++;
-				cl.snapshot_chunk_received += header.num_entities;
-				cl.snapshot_chunk_total_bytes += (unsigned int)chunk_len;
+				chunk->buffers[chunk_index] = buffer;
+				chunk->sizes[chunk_index] = (unsigned short)chunk_len;
+				chunk->received_mask[chunk_index] = 1;
+				chunk->received_chunks++;
+				chunk->received += header.num_entities;
+				chunk->total_bytes += (unsigned int)chunk_len;
 			}
 
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap2_chunk_buffer seq %u flags 0x%x recv %u total %u rem %u packets %d\n",
-				realtime, header.seq, header.flags, cl.snapshot_chunk_received,
-				cl.snapshot_chunk_expected_total, header.num_removed,
-				cl.snapshot_chunk_packets);
+				realtime, header.seq, header.flags, chunk->received,
+				chunk->expected_total, header.num_removed,
+				chunk->packets);
 
-			if (cl.snapshot_chunk_received > cl.snapshot_chunk_expected_total)
+			if (chunk->received > chunk->expected_total)
 			{
 				CL_RequestFullSnapshot ("snapshot2 chunk overrun", false);
-				CL_ResetSnapshotChunk ();
+				CL_ResetSnapshotChunkAssembly (chunk);
 				return;
 			}
 
-			if (cl.snapshot_chunk_received_chunks < cl.snapshot_chunk_total_chunks)
+			if (chunk->received_chunks < chunk->total_chunks)
 			{
+				if (cl_snap_debug.value >= 1.0f)
+				{
+					NET_DebugLogEvent (true,
+						"NETDBG time %.3f full_chunk_in_progress seq %u recv %u/%u\n",
+						realtime, header.seq, chunk->received_chunks, chunk->total_chunks);
+				}
 				snap_status = "buffered";
 				CL_LogSnapshot2Receive (&header, start_pos, snap_status);
 				return;
 			}
 
-			if (cl.snapshot_chunk_received != cl.snapshot_chunk_expected_total)
+			if (chunk->received != chunk->expected_total)
 			{
 				NET_DebugLogEvent (true,
 					"NETDBG time %.3f snap2_chunk_mismatch seq %u recv %u total %u\n",
-					realtime, header.seq, cl.snapshot_chunk_received, cl.snapshot_chunk_expected_total);
+					realtime, header.seq, chunk->received, chunk->expected_total);
 				CL_RequestFullSnapshot ("snapshot2 chunk total", false);
-				CL_ResetSnapshotChunk ();
+				CL_ResetSnapshotChunkAssembly (chunk);
 				snap_status = "drop";
 				CL_LogSnapshot2Receive (&header, start_pos, snap_status);
 				return;
 			}
 
 			{
-				byte *assembled = (byte *)Z_Malloc (cl.snapshot_chunk_total_bytes);
+				byte *assembled = (byte *)Z_Malloc (chunk->total_bytes);
 				int offset = 0;
 				snapshot_header_t full_header = header;
 				sizebuf_t saved_message = net_message;
@@ -2360,28 +2431,28 @@ static void CL_ParseSnapshot2 (void)
 				int saved_readbitpos = msg_readbitpos;
 
 				full_header.flags &= ~(SNAPSHOT_FLAG_CONTINUE | SNAPSHOT_FLAG_CHUNKINFO);
-				full_header.num_entities = cl.snapshot_chunk_total_entities;
+				full_header.num_entities = chunk->total_entities;
 				full_header.num_removed = 0;
 
-				for (i = 0; i < cl.snapshot_chunk_total_chunks; i++)
+				for (i = 0; i < chunk->total_chunks; i++)
 				{
-					if (!cl.snapshot_chunk_received_mask[i])
+					if (!chunk->received_mask[i])
 					{
 						Z_Free (assembled);
 						CL_RequestFullSnapshot ("snapshot2 chunk missing", false);
-						CL_ResetSnapshotChunk ();
+						CL_ResetSnapshotChunkAssembly (chunk);
 						snap_status = "drop";
 						CL_LogSnapshot2Receive (&header, start_pos, snap_status);
 						return;
 					}
-					memcpy (assembled + offset, cl.snapshot_chunk_buffers[i],
-						cl.snapshot_chunk_sizes[i]);
-					offset += cl.snapshot_chunk_sizes[i];
+					memcpy (assembled + offset, chunk->buffers[i],
+						chunk->sizes[i]);
+					offset += chunk->sizes[i];
 				}
 
 				net_message.data = assembled;
-				net_message.cursize = cl.snapshot_chunk_total_bytes;
-				net_message.maxsize = cl.snapshot_chunk_total_bytes;
+				net_message.cursize = chunk->total_bytes;
+				net_message.maxsize = chunk->total_bytes;
 				net_message.allowoverflow = false;
 				net_message.overflowed = false;
 				net_message.bitpos = 0;
@@ -2399,7 +2470,7 @@ static void CL_ParseSnapshot2 (void)
 				Z_Free (assembled);
 			}
 
-			CL_ResetSnapshotChunk ();
+			CL_ResetSnapshotChunkAssembly (chunk);
 			snap_status = chunk_done ? (incomplete ? "buffered" : "accepted") : "drop";
 			CL_LogSnapshot2Receive (&header, start_pos, snap_status);
 			return;
@@ -2443,14 +2514,14 @@ static void CL_ParseSnapshot2 (void)
 	if (!drop && base_is_current)
 		SDL_assert (header.base_seq == cl.snapshot_baseline_seq);
 
-	if (!drop && (!baseline_match || cl.snapshot_chunk_active || need_full))
+	if (!drop && (!baseline_match || CL_HasActiveSnapshotChunks () || need_full))
 	{
 		if (cl_snap_debug.value >= 1.0f)
 			Con_Printf ("cl_snap2 delta mismatch base %u last %u need_full %d\n",
 				header.base_seq, cl.snap_last_complete_seq, need_full);
 		if (!baseline_match)
 			CL_LogDeltaReject ("base_mismatch", header.seq, header.base_seq);
-		else if (cl.snapshot_chunk_active)
+		else if (CL_HasActiveSnapshotChunks ())
 			CL_LogDeltaReject ("base_continuation", header.seq, header.base_seq);
 		else
 			CL_LogDeltaReject ("need_full", header.seq, header.base_seq);

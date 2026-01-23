@@ -681,20 +681,20 @@ void CL_ClearState (void)
 	cl.oldtime = 0.0;
 	cl_lerpfrac = 1.0f;
 	cl_viewent_needs_init = true;
-	cl.snapshot_chunk_active = false;
-	cl.snapshot_chunk_seq = 0;
-	cl.snapshot_chunk_start_time = 0;
-	cl.snapshot_chunk_packets = 0;
-	cl.snapshot_chunk_total_entities = 0;
-	cl.snapshot_chunk_total_chunks = 0;
-	cl.snapshot_chunk_received_chunks = 0;
-	cl.snapshot_chunk_total_bytes = 0;
-	cl.snapshot_chunk_flags = 0;
-	for (i = 0; i < CL_SNAPSHOT_MAX_CHUNKS; i++)
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
 	{
-		cl.snapshot_chunk_buffers[i] = NULL;
-		cl.snapshot_chunk_sizes[i] = 0;
-		cl.snapshot_chunk_received_mask[i] = 0;
+		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
+		int j;
+
+		for (j = 0; j < CL_SNAPSHOT_MAX_CHUNKS; j++)
+		{
+			if (chunk->buffers[j])
+				Z_Free (chunk->buffers[j]);
+			chunk->buffers[j] = NULL;
+			chunk->sizes[j] = 0;
+			chunk->received_mask[j] = 0;
+		}
+		memset (chunk, 0, sizeof(*chunk));
 	}
 	cl.snapshot_baseline_seq = 0;
 	cl.snap_last_applied_seq = 0;
@@ -711,9 +711,6 @@ void CL_ClearState (void)
 	cl.snap_rem0_seq = 0;
 	cl.snap_rem0_base = 0;
 	cl.snap_rem0_count = 0;
-	cl.snapshot_chunk_expected_total = 0;
-	cl.snapshot_chunk_received = 0;
-	cl.snapshot_chunk_remaining = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
 

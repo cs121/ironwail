@@ -1621,6 +1621,8 @@ static void SV_Snapshot2ForceFull (client_t *client, snapshot_full_reason_t reas
 {
 	if (!SV_Snapshot2RecoveryEnabled ())
 		return;
+	if (client->entstream.active && reason == SNAP_FULL_MANUAL_RESYNC)
+		return;
 	if (realtime < client->snapshot_force_full_next_time)
 		return;
 
@@ -3069,10 +3071,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 
 		if (snapshot2_recovery)
 		{
-			if (client->snapshot_incomplete_streak >= 3)
-				SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
-			if (client->snapshot_ack_stall_frames >= 10)
-				SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+			qboolean full_chunk_in_progress = client->entstream.active;
+
+			if (!full_chunk_in_progress)
+			{
+				if (client->snapshot_incomplete_streak >= 3)
+					SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+				if (client->snapshot_ack_stall_frames >= 10)
+					SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+			}
 		}
 
 		if (client->snapshot_force_full || (snapshot2_recovery && client->snapshot_force_full_until_ack))
@@ -3084,20 +3091,22 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			if (!client->snapshot_force_full_until_ack)
 				client->snapshot_force_full = false;
 		}
-		if (force_full_frames > 0 && client->snapshot_unacked_frames >= force_full_frames)
+		if (!client->entstream.active && force_full_frames > 0
+			&& client->snapshot_unacked_frames >= force_full_frames)
 		{
 			forced_full = true;
 			reason_force_full = true;
 			client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
 		}
-		if (timeout_s > 0.0 && client->snapshot_last_acked_time > 0.0
+		if (!client->entstream.active && timeout_s > 0.0 && client->snapshot_last_acked_time > 0.0
 			&& realtime - client->snapshot_last_acked_time > timeout_s)
 		{
 			forced_full = true;
 			reason_force_full = true;
 			client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
 		}
-		if (full_interval_s > 0.0 && (realtime - client->snapshot_last_full_time) > full_interval_s)
+		if (!client->entstream.active && full_interval_s > 0.0
+			&& (realtime - client->snapshot_last_full_time) > full_interval_s)
 		{
 			forced_full = true;
 			reason_interval = true;
@@ -3460,13 +3469,6 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				client->snapshot_pending_missing_mandatory = true;
 		}
 
-		if (snapshot2_recovery)
-		{
-			if (client->snapshot_pending_incomplete)
-				client->snapshot_incomplete_streak++;
-			if (client->snapshot_incomplete_streak >= 3)
-				SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
-		}
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
@@ -3488,6 +3490,15 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		continuation = msg->write_locked && client->entstream.active;
 	if (!chunked_snapshot && (extra_flags & SNAPSHOT_FLAG_CONTINUE))
 		continuation = true;
+	if (snapshot2_recovery)
+	{
+		qboolean full_chunk_in_progress = client->entstream.active;
+
+		if (client->snapshot_pending_incomplete && !continuation)
+			client->snapshot_incomplete_streak++;
+		if (!full_chunk_in_progress && client->snapshot_incomplete_streak >= 3)
+			SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+	}
 	if (snapshot2_recovery
 		&& client->snapshot_need_complete_delta_after_full
 		&& use_delta
@@ -3663,11 +3674,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 		{
 			const char *reason = NULL;
 			if (continuation)
-				reason = "continuation";
+				reason = "IN_PROGRESS_FULL_CHUNK";
 			else if (client->snapshot_pending_missing_mandatory)
-				reason = "mandatory_missing";
+				reason = "BUDGET_DROP_INCOMPLETE";
 			else
-				reason = "unknown";
+				reason = "UNKNOWN_INCOMPLETE";
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap_incomplete cl %d %s seq %u base %u reason %s mand %d drop_opt %d full %d delta %d force_full %d\n",
 				realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq, base_seq, reason,
@@ -3710,8 +3721,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 			qboolean same_base = (base_seq == client->snapshot_no_progress_base);
 			qboolean same_cursor = (cursor == client->snapshot_no_progress_next_edict);
 			qboolean continuation_stall = continuation && (remaining == 0 || same_cursor);
+			qboolean full_chunk_in_progress = client->entstream.active;
 
-			if (same_seq && same_base && continuation_stall)
+			if (full_chunk_in_progress)
+				client->snapshot_no_progress_count = 0;
+			else if (same_seq && same_base && continuation_stall)
 				client->snapshot_no_progress_count++;
 			else
 				client->snapshot_no_progress_count = 0;
