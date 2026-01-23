@@ -33,6 +33,9 @@ Snapshot state mirrors standard Quake entity update fields:
 - alpha
 - scale
 - step flag (movetype step)
+- player stats block (health, armor, ammo, weaponmodel, weaponframe, items, activeweapon, ammo counts)
+- player movement block (viewheight, idealpitch, punch angles, velocity, movetype, flags, waterlevel, watertype)
+- player events block (event, event_param, event_seq)
 
 Entities are keyed by `entnum` and sorted by visibility (PVS) like standard entity updates.
 
@@ -61,6 +64,51 @@ Entities are keyed by `entnum` and sorted by visibility (PVS) like standard enti
 ```
 
 If the client receives a delta with a baseline mismatch, it still reads the packet but responds with `clc_snapshot_ack` **seq = 0** to force a full resend.
+
+## Player state extensions
+
+Snapshots now include additional player-centric fields modeled after Quake 3's `playerState`. These are always present in FULL snapshots and are grouped into three delta blocks. Each block has a single field mask bit so any change inside a block sends the full block payload.
+
+### Delta mask bits
+
+- `SNAP_PLAYERSTATS` (block of stats)
+- `SNAP_PLAYERMOVE` (movement state)
+- `SNAP_PLAYEREVENTS` (event state)
+
+### Block payloads
+
+All numeric values are little-endian and use the standard message types (`short`, `long`, `byte`, `char`) already used in clientdata.
+
+**Player stats (`SNAP_PLAYERSTATS`, 22 bytes)**
+
+- `short health`
+- `short armor`
+- `short ammo`
+- `short weaponmodel`
+- `short weaponframe`
+- `long items` (combined with `items2`/serverflags like `svc_clientdata`)
+- `long activeweapon`
+- `byte ammo_shells`
+- `byte ammo_nails`
+- `byte ammo_rockets`
+- `byte ammo_cells`
+
+**Player movement (`SNAP_PLAYERMOVE`, 12 bytes)**
+
+- `char viewheight`
+- `char idealpitch`
+- `char punchangle[3]`
+- `char velocity[3]` (velocity scaled by 1/16, matching `svc_clientdata`)
+- `byte movetype`
+- `byte pm_flags` (`SNAP_PM_ONGROUND`, `SNAP_PM_INWATER`)
+- `byte waterlevel`
+- `byte watertype`
+
+**Player events (`SNAP_PLAYEREVENTS`, 4 bytes)**
+
+- `byte event`
+- `byte event_param`
+- `short event_seq`
 
 ## Baseline window + ACK behavior
 

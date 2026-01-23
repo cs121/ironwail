@@ -51,6 +51,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SNAP_STEP		(1u<<13)
 #define SNAP_HIRES_ORIGIN	(1u<<14)
 #define SNAP_HIRES_ANGLES	(1u<<15)
+#define SNAP_PLAYERSTATS	(1u<<16)
+#define SNAP_PLAYERMOVE		(1u<<17)
+#define SNAP_PLAYEREVENTS	(1u<<18)
 
 #define SNAPFL_HIRES_ORIGIN	(1u<<2)
 #define SNAPFL_HIRES_ANGLES	(1u<<3)
@@ -221,7 +224,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define SNAP_VALID_MASK		(SNAP_ORIGIN1 | SNAP_ORIGIN2 | SNAP_ORIGIN3 | SNAP_ANGLE1 | \
 				 SNAP_ANGLE2 | SNAP_ANGLE3 | SNAP_MODEL | SNAP_FRAME | SNAP_COLORMAP | \
 				 SNAP_SKIN | SNAP_EFFECTS | SNAP_ALPHA | SNAP_SCALE | SNAP_STEP | \
-				 SNAP_HIRES_ORIGIN | SNAP_HIRES_ANGLES)
+				 SNAP_HIRES_ORIGIN | SNAP_HIRES_ANGLES | SNAP_PLAYERSTATS | SNAP_PLAYERMOVE | \
+				 SNAP_PLAYEREVENTS)
+
+#define SNAP_PM_ONGROUND	(1u<<0)
+#define SNAP_PM_INWATER		(1u<<1)
 
 // signon chunk protocol extension
 #define SIGNON_CHUNK_FLAG_STAGE_END	(1u << 0)
@@ -330,6 +337,28 @@ typedef struct
 {
 	entity_state_t	state;
 	byte		step;
+	short		health;
+	short		armor;
+	short		ammo;
+	unsigned short	weaponmodel;
+	unsigned short	weaponframe;
+	unsigned int	items;
+	unsigned int	activeweapon;
+	byte		ammo_shells;
+	byte		ammo_nails;
+	byte		ammo_rockets;
+	byte		ammo_cells;
+	char		viewheight;
+	char		idealpitch;
+	char		punchangle[3];
+	char		velocity[3];
+	byte		movetype;
+	byte		pm_flags;
+	byte		waterlevel;
+	byte		watertype;
+	byte		event;
+	byte		event_param;
+	unsigned short	event_seq;
 } snapshot_state_t;
 
 typedef struct

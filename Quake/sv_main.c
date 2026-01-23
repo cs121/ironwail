@@ -1384,6 +1384,9 @@ static int SV_SnapshotEntitySizeWorst (void)
 	field_size += 1; // alpha
 	field_size += 1; // scale
 	field_size += 1; // step
+	field_size += 22; // player stats
+	field_size += 12; // player movement
+	field_size += 4; // player events
 
 	entry_overhead = q_max (extra_flags, 4); // worst-case delta includes a 32-bit mask
 	return 2 + entry_overhead + field_size;
@@ -1411,7 +1414,7 @@ static int SV_Snapshot2EntitySizeForFlags (byte snapflags)
 {
 	int coord_size = SV_SnapshotCoordBytes ((snapflags & SNAPFLAG_HIRES_ORIGIN) != 0);
 	int angle_size = SV_SnapshotAngleBytes ((snapflags & SNAPFLAG_HIRES_ANGLES) != 0);
-	int state_size = 3 * coord_size + 3 * angle_size + 2 + 2 + 1 + 1 + 1 + 1 + 1 + 1;
+	int state_size = 3 * coord_size + 3 * angle_size + 2 + 2 + 1 + 1 + 1 + 1 + 1 + 1 + 22 + 12 + 4;
 	int extra_flags = (sv.protocolflags & PRFL_SNAPSHOT_HIRES) ? 1 : 0;
 
 	return 2 + extra_flags + state_size;
@@ -1729,6 +1732,7 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 {
 	int	i;
 	eval_t	*val;
+	int	items;
 
 	for (i=0 ; i<3 ; i++)
 	{
@@ -1754,6 +1758,82 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 	out->state.scale = ent->scale;
 
 	out->step = (ent->v.movetype == MOVETYPE_STEP);
+
+	out->health = 0;
+	out->armor = 0;
+	out->ammo = 0;
+	out->weaponmodel = 0;
+	out->weaponframe = 0;
+	out->items = 0;
+	out->activeweapon = 0;
+	out->ammo_shells = 0;
+	out->ammo_nails = 0;
+	out->ammo_rockets = 0;
+	out->ammo_cells = 0;
+	out->viewheight = 0;
+	out->idealpitch = 0;
+	out->punchangle[0] = 0;
+	out->punchangle[1] = 0;
+	out->punchangle[2] = 0;
+	out->velocity[0] = 0;
+	out->velocity[1] = 0;
+	out->velocity[2] = 0;
+	out->movetype = 0;
+	out->pm_flags = 0;
+	out->waterlevel = 0;
+	out->watertype = 0;
+	out->event = 0;
+	out->event_param = 0;
+	out->event_seq = 0;
+
+	if ((int)ent->v.flags & FL_CLIENT)
+	{
+		out->health = (short)ent->v.health;
+		out->armor = (short)ent->v.armorvalue;
+		out->ammo = (short)ent->v.currentammo;
+		out->weaponmodel = (unsigned short)SV_ModelIndex (PR_GetString (ent->v.weaponmodel));
+		out->weaponframe = (unsigned short)ent->v.weaponframe;
+		out->activeweapon = (unsigned int)ent->v.weapon;
+		out->ammo_shells = (byte)ent->v.ammo_shells;
+		out->ammo_nails = (byte)ent->v.ammo_nails;
+		out->ammo_rockets = (byte)ent->v.ammo_rockets;
+		out->ammo_cells = (byte)ent->v.ammo_cells;
+
+		val = GetEdictFieldValueByName(ent, "items2");
+		if (val)
+			items = (int)ent->v.items | ((int)val->_float << 23);
+		else
+			items = (int)ent->v.items | ((int)pr_global_struct->serverflags << 28);
+		out->items = (unsigned int)items;
+
+		out->viewheight = (char)ent->v.view_ofs[2];
+		out->idealpitch = (char)ent->v.idealpitch;
+		for (i = 0; i < 3; i++)
+		{
+			int vel = Q_rint (ent->v.velocity[i] / 16.0f);
+			vel = CLAMP (-128, vel, 127);
+			out->punchangle[i] = (char)ent->v.punchangle[i];
+			out->velocity[i] = (char)vel;
+		}
+
+		out->movetype = (byte)ent->v.movetype;
+		if ((int)ent->v.flags & FL_ONGROUND)
+			out->pm_flags |= SNAP_PM_ONGROUND;
+		if (ent->v.waterlevel >= 2)
+			out->pm_flags |= SNAP_PM_INWATER;
+		out->waterlevel = (byte)ent->v.waterlevel;
+		out->watertype = (byte)ent->v.watertype;
+
+		val = GetEdictFieldValueByName(ent, "event");
+		if (val)
+			out->event = (byte)val->_float;
+		val = GetEdictFieldValueByName(ent, "event_param");
+		if (val)
+			out->event_param = (byte)val->_float;
+		val = GetEdictFieldValueByName(ent, "event_seq");
+		if (val)
+			out->event_seq = (unsigned short)val->_float;
+	}
 }
 
 static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, byte *present,
@@ -2164,6 +2244,30 @@ static void SV_WriteSnapshotState (sizebuf_t *msg, const snapshot_state_t *state
 	MSG_WriteByte (msg, state->state.alpha);
 	MSG_WriteByte (msg, state->state.scale);
 	MSG_WriteByte (msg, state->step);
+	MSG_WriteShort (msg, state->health);
+	MSG_WriteShort (msg, state->armor);
+	MSG_WriteShort (msg, state->ammo);
+	MSG_WriteShort (msg, state->weaponmodel);
+	MSG_WriteShort (msg, state->weaponframe);
+	MSG_WriteLong (msg, (int)state->items);
+	MSG_WriteLong (msg, (int)state->activeweapon);
+	MSG_WriteByte (msg, state->ammo_shells);
+	MSG_WriteByte (msg, state->ammo_nails);
+	MSG_WriteByte (msg, state->ammo_rockets);
+	MSG_WriteByte (msg, state->ammo_cells);
+	MSG_WriteChar (msg, state->viewheight);
+	MSG_WriteChar (msg, state->idealpitch);
+	for (i = 0; i < 3; i++)
+		MSG_WriteChar (msg, state->punchangle[i]);
+	for (i = 0; i < 3; i++)
+		MSG_WriteChar (msg, state->velocity[i]);
+	MSG_WriteByte (msg, state->movetype);
+	MSG_WriteByte (msg, state->pm_flags);
+	MSG_WriteByte (msg, state->waterlevel);
+	MSG_WriteByte (msg, state->watertype);
+	MSG_WriteByte (msg, state->event);
+	MSG_WriteByte (msg, state->event_param);
+	MSG_WriteShort (msg, state->event_seq);
 }
 
 static void SV_WriteSnapshot2Header (sizebuf_t *msg, unsigned int seq, unsigned int base_seq,
@@ -2379,6 +2483,27 @@ static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const sn
 		mask |= SNAP_SCALE;
 	if (next->step != base->step)
 		mask |= SNAP_STEP;
+	if (next->health != base->health || next->armor != base->armor || next->ammo != base->ammo
+		|| next->weaponmodel != base->weaponmodel || next->weaponframe != base->weaponframe
+		|| next->items != base->items || next->activeweapon != base->activeweapon
+		|| next->ammo_shells != base->ammo_shells || next->ammo_nails != base->ammo_nails
+		|| next->ammo_rockets != base->ammo_rockets || next->ammo_cells != base->ammo_cells)
+		mask |= SNAP_PLAYERSTATS;
+	if (next->viewheight != base->viewheight || next->idealpitch != base->idealpitch
+		|| next->punchangle[0] != base->punchangle[0]
+		|| next->punchangle[1] != base->punchangle[1]
+		|| next->punchangle[2] != base->punchangle[2]
+		|| next->velocity[0] != base->velocity[0]
+		|| next->velocity[1] != base->velocity[1]
+		|| next->velocity[2] != base->velocity[2]
+		|| next->movetype != base->movetype
+		|| next->pm_flags != base->pm_flags
+		|| next->waterlevel != base->waterlevel
+		|| next->watertype != base->watertype)
+		mask |= SNAP_PLAYERMOVE;
+	if (next->event != base->event || next->event_param != base->event_param
+		|| next->event_seq != base->event_seq)
+		mask |= SNAP_PLAYEREVENTS;
 
 	if (snapflags & SNAPFLAG_FORCE_ORIGIN)
 		mask |= SNAP_ORIGIN1 | SNAP_ORIGIN2 | SNAP_ORIGIN3;
@@ -2449,6 +2574,12 @@ static int SV_SnapshotDeltaFieldSize (unsigned int mask)
 		size += 1;
 	if (mask & SNAP_STEP)
 		size += 1;
+	if (mask & SNAP_PLAYERSTATS)
+		size += 22;
+	if (mask & SNAP_PLAYERMOVE)
+		size += 12;
+	if (mask & SNAP_PLAYEREVENTS)
+		size += 4;
 
 	return size;
 }
@@ -2606,6 +2737,41 @@ static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned in
 			MSG_WriteByte (msg, states[entnum].state.scale);
 		if (mask & SNAP_STEP)
 			MSG_WriteByte (msg, states[entnum].step);
+		if (mask & SNAP_PLAYERSTATS)
+		{
+			MSG_WriteShort (msg, states[entnum].health);
+			MSG_WriteShort (msg, states[entnum].armor);
+			MSG_WriteShort (msg, states[entnum].ammo);
+			MSG_WriteShort (msg, states[entnum].weaponmodel);
+			MSG_WriteShort (msg, states[entnum].weaponframe);
+			MSG_WriteLong (msg, (int)states[entnum].items);
+			MSG_WriteLong (msg, (int)states[entnum].activeweapon);
+			MSG_WriteByte (msg, states[entnum].ammo_shells);
+			MSG_WriteByte (msg, states[entnum].ammo_nails);
+			MSG_WriteByte (msg, states[entnum].ammo_rockets);
+			MSG_WriteByte (msg, states[entnum].ammo_cells);
+		}
+		if (mask & SNAP_PLAYERMOVE)
+		{
+			int i;
+
+			MSG_WriteChar (msg, states[entnum].viewheight);
+			MSG_WriteChar (msg, states[entnum].idealpitch);
+			for (i = 0; i < 3; i++)
+				MSG_WriteChar (msg, states[entnum].punchangle[i]);
+			for (i = 0; i < 3; i++)
+				MSG_WriteChar (msg, states[entnum].velocity[i]);
+			MSG_WriteByte (msg, states[entnum].movetype);
+			MSG_WriteByte (msg, states[entnum].pm_flags);
+			MSG_WriteByte (msg, states[entnum].waterlevel);
+			MSG_WriteByte (msg, states[entnum].watertype);
+		}
+		if (mask & SNAP_PLAYEREVENTS)
+		{
+			MSG_WriteByte (msg, states[entnum].event);
+			MSG_WriteByte (msg, states[entnum].event_param);
+			MSG_WriteShort (msg, states[entnum].event_seq);
+		}
 	}
 
 	if (out_remove)
@@ -2742,6 +2908,41 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 			MSG_WriteByte (msg, states[entnum].state.scale);
 		if (mask & SNAP_STEP)
 			MSG_WriteByte (msg, states[entnum].step);
+		if (mask & SNAP_PLAYERSTATS)
+		{
+			MSG_WriteShort (msg, states[entnum].health);
+			MSG_WriteShort (msg, states[entnum].armor);
+			MSG_WriteShort (msg, states[entnum].ammo);
+			MSG_WriteShort (msg, states[entnum].weaponmodel);
+			MSG_WriteShort (msg, states[entnum].weaponframe);
+			MSG_WriteLong (msg, (int)states[entnum].items);
+			MSG_WriteLong (msg, (int)states[entnum].activeweapon);
+			MSG_WriteByte (msg, states[entnum].ammo_shells);
+			MSG_WriteByte (msg, states[entnum].ammo_nails);
+			MSG_WriteByte (msg, states[entnum].ammo_rockets);
+			MSG_WriteByte (msg, states[entnum].ammo_cells);
+		}
+		if (mask & SNAP_PLAYERMOVE)
+		{
+			int i;
+
+			MSG_WriteChar (msg, states[entnum].viewheight);
+			MSG_WriteChar (msg, states[entnum].idealpitch);
+			for (i = 0; i < 3; i++)
+				MSG_WriteChar (msg, states[entnum].punchangle[i]);
+			for (i = 0; i < 3; i++)
+				MSG_WriteChar (msg, states[entnum].velocity[i]);
+			MSG_WriteByte (msg, states[entnum].movetype);
+			MSG_WriteByte (msg, states[entnum].pm_flags);
+			MSG_WriteByte (msg, states[entnum].waterlevel);
+			MSG_WriteByte (msg, states[entnum].watertype);
+		}
+		if (mask & SNAP_PLAYEREVENTS)
+		{
+			MSG_WriteByte (msg, states[entnum].event);
+			MSG_WriteByte (msg, states[entnum].event_param);
+			MSG_WriteShort (msg, states[entnum].event_seq);
+		}
 		update_count--;
 		update_written++;
 	}
