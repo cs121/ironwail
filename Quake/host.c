@@ -1165,7 +1165,7 @@ void Host_ServerFrame (void)
 		if (svs.clients[i].active)
 			active_clients++;
 	}
-	if (realtime >= next_sv_report_time)
+	if (sv_tick_debug.value && realtime >= next_sv_report_time)
 	{
 		Con_Printf ("NETDBG sv.time %.3f sv.frametime %.6f edicts %d active_clients %d\n",
 			qcvm->time, clamped_frametime, qcvm->num_edicts, active_clients);
@@ -1204,7 +1204,7 @@ void Host_ServerFrame (void)
 			sv_accum = 0.0;
 			sv_next_snapshot_time = qcvm->time;
 		}
-		else if (qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
+		else if (sv_tick_debug.value && qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
 		{
 			Con_Printf ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
 				qcvm->time, clamped_frametime);
