@@ -1143,6 +1143,64 @@ static void CL_ClearSnapshotStage (void);
 static void CL_PrepareFullSnapshotInterpReset (void);
 static void CL_FinalizeFullSnapshotInterpReset (void);
 
+static void CL_UpdateServerTimeEstimate (double server_time, const char *source)
+{
+	double offset;
+	double delta;
+	double max_step = 0.05;
+
+	if (server_time <= 0.0)
+		return;
+
+	if (cl.latest_server_time > 0.0 && server_time + 0.001 < cl.latest_server_time)
+	{
+		if (cl_netdbg_interp.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: server_time non-monotonic %.3f < %.3f (%s)\n",
+				server_time, cl.latest_server_time, source ? source : "unknown");
+		}
+		server_time = cl.latest_server_time;
+	}
+
+	cl.latest_server_time = server_time;
+	cl.server_time_base = server_time;
+	cl.server_time_skew = realtime;
+
+	offset = server_time - realtime;
+	if (cl.clock_offset == 0.0)
+	{
+		cl.clock_offset = offset;
+		return;
+	}
+
+	delta = offset - cl.clock_offset;
+	if (delta > max_step)
+		delta = max_step;
+	else if (delta < -max_step)
+		delta = -max_step;
+
+	cl.clock_offset += delta * 0.25;
+}
+
+static double CL_ClampSnapshotServerTime (double snap_time, unsigned int seq)
+{
+	if (snap_time <= 0.0)
+		return 0.0;
+
+	if (cl.snap_last_server_time > 0.0 && snap_time + 0.001 < cl.snap_last_server_time)
+	{
+		if (cl_netdbg_interp.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: snap_time non-monotonic %.3f < %.3f seq %u\n",
+				snap_time, cl.snap_last_server_time, seq);
+		}
+		snap_time = cl.snap_last_server_time;
+	}
+
+	cl.snap_last_server_time = snap_time;
+	return snap_time;
+}
+
 static void CL_ClearEntitySnapHistory (int entnum)
 {
 	if (entnum <= 0 || entnum >= cl_max_edicts)
@@ -1292,12 +1350,14 @@ static void CL_TrackSnapshotIncomplete (unsigned short seq16, const char *reason
 
 static void CL_MarkSnapshotEntityUpdated (int entnum)
 {
+	double stamp = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
+
 	if (entnum <= 0 || entnum >= cl_max_edicts)
 		return;
 	if (cl.snapshot_active)
 		cl.snapshot_active[entnum] = 1;
 	if (cl.snapshot_last_update_time)
-		cl.snapshot_last_update_time[entnum] = cl.time;
+		cl.snapshot_last_update_time[entnum] = stamp;
 }
 
 static void CL_RecordEntitySnap (int entnum, const snapshot_state_t *state)
@@ -1322,7 +1382,7 @@ static void CL_RecordEntitySnap (int entnum, const snapshot_state_t *state)
 		cl.entity_snap_count[entnum]++;
 
 	snap = &cl.entity_snapshots[base + head];
-	snap->servertime = cl.mtime[0];
+	snap->servertime = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
 	VectorCopy (state->state.origin, snap->origin);
 	VectorCopy (state->state.angles, snap->angles);
 }
@@ -1339,6 +1399,7 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	entity_t	*ent;
 	qboolean	forcelink;
 	double		oldtime;
+	double		stamp;
 	int			i;
 	int			skin;
 	qmodel_t	*model;
@@ -1346,11 +1407,12 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	ent = CL_EntityNum (entnum);
 	forcelink = (ent->msgtime != cl.mtime[1]);
 	oldtime = ent->msgtime;
+	stamp = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
 
-	if (oldtime + 0.2 < cl.mtime[0])
+	if (oldtime + 0.2 < stamp)
 		ent->lerpflags |= LERP_RESETANIM;
 
-	ent->msgtime = cl.mtime[0];
+	ent->msgtime = stamp;
 
 	VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
 	VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
@@ -1456,6 +1518,176 @@ static void CL_LogSnapshotDebug (const char *label, unsigned int seq, unsigned i
 		removes_parsed, touched, base_advanced ? 1 : 0);
 }
 
+static void CL_CountSnapshotEntities (const byte *prev_present, const byte *cur_present,
+	int *out_total, int *out_created, int *out_missing, int *out_dormant)
+{
+	int total = 0;
+	int created = 0;
+	int missing = 0;
+	int dormant = 0;
+	int i;
+	double dormant_s = cl_entity_dormant_ms.value * 0.001;
+	double now = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
+
+	if (!cur_present)
+	{
+		if (out_total)
+			*out_total = 0;
+		if (out_created)
+			*out_created = 0;
+		if (out_missing)
+			*out_missing = 0;
+		if (out_dormant)
+			*out_dormant = 0;
+		return;
+	}
+
+	for (i = 1; i < cl_max_edicts; i++)
+	{
+		if (cur_present[i])
+		{
+			total++;
+			if (prev_present && !prev_present[i])
+				created++;
+		}
+		else if (prev_present && prev_present[i])
+		{
+			missing++;
+			if (dormant_s > 0.0 && cl.snapshot_last_update_time)
+			{
+				if (cl.snapshot_last_update_time[i] > 0.0
+					&& (now - cl.snapshot_last_update_time[i]) <= dormant_s)
+				{
+					dormant++;
+				}
+			}
+		}
+	}
+
+	if (out_total)
+		*out_total = total;
+	if (out_created)
+		*out_created = created;
+	if (out_missing)
+		*out_missing = missing;
+	if (out_dormant)
+		*out_dormant = dormant;
+}
+
+static void CL_NetDbg_LogWatchEnt (const snapshot_header_t *header, int removed)
+{
+	int watch = (int)cl_netdbg_watch_ent.value;
+	cl_entity_snap_t *snaps;
+	const cl_entity_snap_t *newest = NULL;
+	const cl_entity_snap_t *prev = NULL;
+	int count;
+	int head;
+	const snapshot_state_t *state;
+	const char *status = "absent";
+	const char *reason = "absent";
+
+	if (watch <= 0 || watch >= cl_max_edicts)
+		return;
+	if (!cl.snapshot_present)
+		return;
+
+	if (removed)
+	{
+		status = "removed";
+		reason = "remove_list";
+	}
+	else if (cl.snapshot_present[watch])
+	{
+		status = "present";
+		reason = "present";
+	}
+
+	state = &cl.snapshot_baseline[watch];
+	if (cl.entity_snapshots && cl.entity_snap_head && cl.entity_snap_count)
+	{
+		count = cl.entity_snap_count[watch];
+		head = cl.entity_snap_head[watch];
+		snaps = &cl.entity_snapshots[watch * CL_ENTITY_SNAP_HISTORY];
+		if (count > 0)
+		{
+			newest = &snaps[head];
+			if (count > 1)
+			{
+				int prev_idx = (head - 1 + CL_ENTITY_SNAP_HISTORY) % CL_ENTITY_SNAP_HISTORY;
+				prev = &snaps[prev_idx];
+			}
+		}
+	}
+
+	Con_Printf ("NETDBG: watch_ent %d seq %u base %u state %s reason %s origin %.1f %.1f %.1f "
+		"vel %d %d %d",
+		watch, header->seq, header->base_seq, status, reason,
+		state->state.origin[0], state->state.origin[1], state->state.origin[2],
+		state->velocity[0], state->velocity[1], state->velocity[2]);
+
+	if (newest)
+	{
+		Con_Printf (" snap0 %.1f %.1f %.1f", newest->origin[0], newest->origin[1], newest->origin[2]);
+	}
+	if (prev)
+	{
+		Con_Printf (" snap1 %.1f %.1f %.1f", prev->origin[0], prev->origin[1], prev->origin[2]);
+	}
+	Con_Printf ("\n");
+}
+
+static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int removes_parsed,
+	const byte *prev_present)
+{
+	double interp_delay;
+	double server_now;
+	double render_time;
+	double arrival_dt = 0.0;
+	double oldest = 0.0;
+	double newest = 0.0;
+	double buffer_fill_ms = 0.0;
+	int psnap_count = 0;
+	int total = 0;
+	int created = 0;
+	int missing = 0;
+	int dormant = 0;
+
+	if (cl_netdbg_interp.value <= 0.0f)
+		return;
+
+	if (cl.snap_last_arrival_time > 0.0)
+		arrival_dt = realtime - cl.snap_last_arrival_time;
+	cl.snap_last_arrival_time = realtime;
+
+	interp_delay = cl_interp.value;
+	if (interp_delay <= 0.0)
+		interp_delay = cl_lerp_ms.value * 0.001;
+	else
+		interp_delay += q_max (0.0, cl_jitter.value);
+
+	if (cl.clock_offset != 0.0)
+		server_now = realtime + cl.clock_offset;
+	else if (cl.latest_server_time > 0.0)
+		server_now = cl.latest_server_time;
+	else
+		server_now = cl.mtime[0];
+
+	render_time = server_now - interp_delay;
+
+	CL_GetPlayerSnapRange (&oldest, &newest, &psnap_count);
+	if (psnap_count > 1)
+		buffer_fill_ms = (newest - oldest) * 1000.0;
+
+	CL_CountSnapshotEntities (prev_present, cl.snapshot_present, &total, &created, &missing, &dormant);
+
+	Con_Printf ("NETDBG: interp seq %u base %u srvtime %.3f arrival_dt %.3f "
+		"render_time %.3f interp_delay %.3f buf_oldest %.3f buf_newest %.3f buf_fill_ms %.1f "
+		"ents total %d created %d removed %d missing %d dormant %d\n",
+		header->seq, header->base_seq, cl.snapshot_time > 0.0 ? cl.snapshot_time : header->server_time,
+		arrival_dt, render_time, interp_delay, oldest, newest, buffer_fill_ms,
+		total, created, removes_parsed, missing, dormant);
+}
+
 /*
 ==================
 CL_ParseBaseline
@@ -1547,9 +1779,16 @@ static void CL_ParseSnapshotFull (void)
 
 	{
 		qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+		double snap_time = CL_ClampSnapshotServerTime (cl.mtime[0], seq);
 
 		if (reset_interp)
 			CL_PrepareFullSnapshotInterpReset ();
+
+		if (snap_time > 0.0)
+		{
+			cl.snapshot_time = snap_time;
+			CL_UpdateServerTimeEstimate (snap_time, "snap_full");
+		}
 
 		// INV-5: commit staged snapshot only after full parse.
 		CL_StoreSnapshotBaseline (seq, cl.snapshot_stage, cl.snapshot_stage_present);
@@ -1785,6 +2024,15 @@ static void CL_ParseSnapshotDelta (void)
 	if (!drop && baseline_match)
 	{
 		CL_StoreSnapshotBaselineFromBase (seq, base_states, base_present);
+		{
+			double snap_time = CL_ClampSnapshotServerTime (cl.mtime[0], seq);
+
+			if (snap_time > 0.0)
+			{
+				cl.snapshot_time = snap_time;
+				CL_UpdateServerTimeEstimate (snap_time, "snap_delta");
+			}
+		}
 		if (base_is_current)
 		{
 			for (i = 1; i < cl_max_edicts; i++)
@@ -1847,6 +2095,7 @@ typedef struct
 	unsigned short	chunk_total_entities;
 	unsigned short	chunk_index;
 	unsigned short	chunk_total_chunks;
+	double		server_time;
 } snapshot_header_t;
 
 static void CL_ReadSnapshotHeader (snapshot_header_t *header)
@@ -1859,6 +2108,7 @@ static void CL_ReadSnapshotHeader (snapshot_header_t *header)
 	header->chunk_total_entities = 0;
 	header->chunk_index = 0;
 	header->chunk_total_chunks = 0;
+	header->server_time = (cl.latest_server_time > 0.0) ? cl.latest_server_time : cl.mtime[0];
 	if (header->flags & SNAPSHOT_FLAG_CHUNKINFO)
 	{
 		header->chunk_total_entities = (unsigned short)MSG_ReadShort ();
@@ -2037,9 +2287,17 @@ static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, q
 		if (!incomplete)
 		{
 			qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+			const byte *prev_present = cl.snapshot_present;
+			double snap_time = CL_ClampSnapshotServerTime (header->server_time, header->seq);
 
 			if (reset_interp)
 				CL_PrepareFullSnapshotInterpReset ();
+
+			if (snap_time > 0.0)
+			{
+				cl.snapshot_time = snap_time;
+				CL_UpdateServerTimeEstimate (snap_time, "snap2_full");
+			}
 
 			// INV-5: commit staged snapshot only after full parse.
 			CL_StoreSnapshotBaseline (header->seq, cl.snapshot_stage, cl.snapshot_stage_present);
@@ -2076,9 +2334,18 @@ static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, q
 				cl.has_full_snapshot ? 1 : 0);
 			CL_LogSnapshotDebug ("snap2_full", header->seq, header->flags, true,
 				0, touched, base_advanced);
+			CL_NetDbg_LogInterpSnapshot (header, 0, prev_present);
+			CL_NetDbg_LogWatchEnt (header, 0);
 		}
 		else
 		{
+			double snap_time = CL_ClampSnapshotServerTime (header->server_time, header->seq);
+
+			if (snap_time > 0.0)
+			{
+				cl.snapshot_time = snap_time;
+				CL_UpdateServerTimeEstimate (snap_time, "snap2_full_incomplete");
+			}
 			// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
 			touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
 			cl.snap_parse_consecutive = 0;
@@ -2287,6 +2554,7 @@ static void CL_ParseSnapshot2 (void)
 				chunk->active = true;
 				chunk->seq = header.seq;
 				chunk->start_time = realtime;
+				chunk->server_time = header.server_time;
 				chunk->packets = 0;
 				chunk->total_chunks = total_chunks;
 				chunk->total_entities = total_entities;
@@ -2304,6 +2572,8 @@ static void CL_ParseSnapshot2 (void)
 					CL_ResetSnapshotChunkAssembly (chunk);
 					drop = true;
 				}
+				if (chunk->server_time <= 0.0 && header.server_time > 0.0)
+					chunk->server_time = header.server_time;
 			}
 
 			if (chunk)
@@ -2435,6 +2705,7 @@ static void CL_ParseSnapshot2 (void)
 				full_header.flags &= ~(SNAPSHOT_FLAG_CONTINUE | SNAPSHOT_FLAG_CHUNKINFO);
 				full_header.num_entities = chunk->total_entities;
 				full_header.num_removed = 0;
+				full_header.server_time = chunk->server_time;
 
 				for (i = 0; i < chunk->total_chunks; i++)
 				{
@@ -2661,6 +2932,15 @@ static void CL_ParseSnapshot2 (void)
 	{
 		if (!incomplete)
 		{
+			const byte *prev_present = cl.snapshot_present;
+			double snap_time = CL_ClampSnapshotServerTime (header.server_time, header.seq);
+
+			if (snap_time > 0.0)
+			{
+				cl.snapshot_time = snap_time;
+				CL_UpdateServerTimeEstimate (snap_time, "snap2_delta");
+			}
+
 			CL_StoreSnapshotBaselineFromBase (header.seq, base_states, base_present);
 			if (base_is_current)
 			{
@@ -2712,6 +2992,18 @@ static void CL_ParseSnapshot2 (void)
 				cl.has_full_snapshot ? 1 : 0);
 			CL_LogSnapshotDebug ("snap2_delta", header.seq, header.flags, true,
 				removes_parsed, touched, base_advanced);
+			CL_NetDbg_LogInterpSnapshot (&header, removes_parsed, prev_present);
+			{
+				int watch_removed = 0;
+				int watch = (int)cl_netdbg_watch_ent.value;
+
+				if (watch > 0 && watch < cl_max_edicts && cl.snapshot_stage_remove
+					&& cl.snapshot_stage_remove[watch])
+				{
+					watch_removed = 1;
+				}
+				CL_NetDbg_LogWatchEnt (&header, watch_removed);
+			}
 		}
 		else
 		{
@@ -2722,6 +3014,13 @@ static void CL_ParseSnapshot2 (void)
 			}
 			else
 			{
+				double snap_time = CL_ClampSnapshotServerTime (header.server_time, header.seq);
+
+				if (snap_time > 0.0)
+				{
+					cl.snapshot_time = snap_time;
+					CL_UpdateServerTimeEstimate (snap_time, "snap2_delta_incomplete");
+				}
 				// INCOMPLETE snapshots: keep existing entities, overlay only touched updates.
 				touched = CL_ApplySnapshotOverlay (cl.snapshot_stage, cl.snapshot_stage_present);
 				CL_TrackSnapshotIncomplete (seq16, "delta");
@@ -3237,14 +3536,7 @@ void CL_ParseServerMessage (void)
 
 			cl.mtime[1] = cl.mtime[0];
 			cl.mtime[0] = server_time;
-			cl.latest_server_time = server_time;
-			{
-				double offset = server_time - realtime;
-				if (cl.clock_offset == 0.0)
-					cl.clock_offset = offset;
-				else
-					cl.clock_offset += (offset - cl.clock_offset) * 0.1;
-			}
+			CL_UpdateServerTimeEstimate (server_time, "svc_time");
 			cl.fixangle = false;
 			if (cls.signon == SIGNONS - 1)
 			{	// allow map loads with no visible entity updates to finish signon

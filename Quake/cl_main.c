@@ -58,9 +58,15 @@ cvar_t	cl_snap_incomplete_timeout_ms = {"cl_snap_incomplete_timeout_ms", "1500",
 cvar_t	cl_snap_chunk_drop = {"cl_snap_chunk_drop", "0", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
+cvar_t	cl_entity_dormant_ms = {"cl_entity_dormant_ms", "400", CVAR_NONE};
 cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
 cvar_t	cl_lerp_max_gap_ms = {"cl_lerp_max_gap_ms", "250", CVAR_NONE};
 cvar_t	cl_lerp_debug = {"cl_lerp_debug", "0", CVAR_NONE};
+cvar_t	cl_netdbg_interp = {"cl_netdbg_interp", "0", CVAR_NONE};
+cvar_t	cl_netdbg_watch_ent = {"cl_netdbg_watch_ent", "0", CVAR_NONE};
+cvar_t	cl_netdbg_pred = {"cl_netdbg_pred", "0", CVAR_NONE};
+cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
+cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -174,6 +180,53 @@ void CL_ResetPlayerSnaps (void)
 float cl_lerpfrac = 1.0f;
 qboolean cl_viewent_needs_init = true;
 
+void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count)
+{
+	double oldest = 0.0;
+	double newest = 0.0;
+	int count = cl_psnap_count;
+	int idx;
+	int i;
+
+	if (count <= 0)
+	{
+		if (out_oldest)
+			*out_oldest = 0.0;
+		if (out_newest)
+			*out_newest = 0.0;
+		if (out_count)
+			*out_count = 0;
+		return;
+	}
+
+	idx = (cl_psnap_head - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
+	for (i = 0; i < count; i++)
+	{
+		const cl_player_snap_t *snap = &cl_psnaps[idx];
+		double t = (snap->servertime > 0 ? snap->servertime : snap->t);
+		if (i == 0)
+		{
+			oldest = t;
+			newest = t;
+		}
+		else
+		{
+			if (t < oldest)
+				oldest = t;
+			if (t > newest)
+				newest = t;
+		}
+		idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
+	}
+
+	if (out_oldest)
+		*out_oldest = oldest;
+	if (out_newest)
+		*out_newest = newest;
+	if (out_count)
+		*out_count = count;
+}
+
 static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
 {
 	const float max_abs = 65536.0f;
@@ -222,7 +275,7 @@ void CL_RecordPlayerSnap (void)
 	snap = &cl_psnaps[cl_psnap_head];
 	memset (snap, 0, sizeof(*snap));
 	snap->t = Sys_DoubleTime ();
-	snap->servertime = cl.mtime[0];
+	snap->servertime = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
 
 	for (i = 0; i < cl.maxclients && i < MAX_SCOREBOARD; i++)
 	{
@@ -336,10 +389,14 @@ static double CL_GetInterpDelaySeconds (void)
 static double CL_GetInterpTargetTime (void)
 {
 	double delay = CL_GetInterpDelaySeconds ();
-	double server_time = cl.latest_server_time > 0.0 ? cl.latest_server_time : cl.mtime[0];
+	double server_time = 0.0;
 
-	if (server_time > 0.0 && cl.clock_offset != 0.0)
+	if (cl.server_time_base > 0.0 && cl.server_time_skew > 0.0)
+		server_time = cl.server_time_base + (realtime - cl.server_time_skew);
+	else if (cl.clock_offset != 0.0)
 		server_time = realtime + cl.clock_offset;
+	else
+		server_time = cl.latest_server_time > 0.0 ? cl.latest_server_time : cl.mtime[0];
 
 	if (server_time > 0.0)
 		return server_time - delay;
@@ -374,6 +431,52 @@ static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out
 
 	if (render_t >= (newest->servertime > 0 ? newest->servertime : newest->t))
 	{
+		int prev_idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
+		cl_player_snap_t *prev_snap = &cl_psnaps[prev_idx];
+		double newest_time = (newest->servertime > 0 ? newest->servertime : newest->t);
+		double prev_time = (prev_snap->servertime > 0 ? prev_snap->servertime : prev_snap->t);
+
+		if (cl_psnap_count > 1 && CL_IsValidBit (newest, player) && CL_IsValidBit (prev_snap, player)
+			&& prev_time > 0.0 && newest_time > prev_time)
+		{
+			double dt = newest_time - prev_time;
+			double extrap_t = render_t - newest_time;
+			double max_extrap_s = 0.1;
+			int axis;
+
+			if (max_gap_s > 0.0 && max_gap_s < max_extrap_s)
+				max_extrap_s = max_gap_s;
+			if ((max_gap_s <= 0.0 || dt <= max_gap_s) && dt > 0.0)
+			{
+				float f;
+
+				if (extrap_t < 0.0)
+					extrap_t = 0.0;
+				if (extrap_t > max_extrap_s)
+					extrap_t = max_extrap_s;
+
+				for (axis = 0; axis < 3; axis++)
+				{
+					float delta = newest->org[player][axis] - prev_snap->org[player][axis];
+					if (delta > 100.0f || delta < -100.0f)
+					{
+						VectorCopy (newest->org[player], out_org);
+						VectorCopy (newest->ang[player], out_ang);
+						return true;
+					}
+				}
+
+				f = (float)((dt + extrap_t) / dt);
+				f = CLAMP (0.0f, f, 1.0f);
+				for (axis = 0; axis < 3; axis++)
+				{
+					out_org[axis] = prev_snap->org[player][axis] + f * (newest->org[player][axis] - prev_snap->org[player][axis]);
+					out_ang[axis] = CL_LerpAngle (prev_snap->ang[player][axis], newest->ang[player][axis], f);
+				}
+				return true;
+			}
+		}
+
 		if (!CL_IsValidBit (newest, player))
 			return false;
 		VectorCopy (newest->org[player], out_org);
@@ -1201,15 +1304,21 @@ void CL_RelinkEntities (void)
 		{
 			qboolean keepalive = false;
 			double timeout_s = cl_entity_timeout_ms.value / 1000.0;
+			double dormant_s = cl_entity_dormant_ms.value / 1000.0;
+			double grace_s = 0.0;
 
 			if (cl.snap_last_incomplete)
 			{
 				keepalive = true;
 			}
 
-			if (timeout_s > 0.0 && cl.snapshot_active && cl.snapshot_active[i] && cl.snapshot_last_update_time)
+			if (dormant_s > 0.0)
+				grace_s = dormant_s;
+			if (timeout_s > 0.0 && timeout_s > grace_s)
+				grace_s = timeout_s;
+			if (grace_s > 0.0 && cl.snapshot_active && cl.snapshot_active[i] && cl.snapshot_last_update_time)
 			{
-				if (cl.time - cl.snapshot_last_update_time[i] <= timeout_s)
+				if (grace_s > 0.0 && cl.time - cl.snapshot_last_update_time[i] <= grace_s)
 				{
 					keepalive = true;
 				}
@@ -1877,9 +1986,15 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_snap_chunk_drop);
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
+	Cvar_RegisterVariable (&cl_entity_dormant_ms);
 	Cvar_RegisterVariable (&cl_lerp_ms);
 	Cvar_RegisterVariable (&cl_lerp_max_gap_ms);
 	Cvar_RegisterVariable (&cl_lerp_debug);
+	Cvar_RegisterVariable (&cl_netdbg_interp);
+	Cvar_RegisterVariable (&cl_netdbg_watch_ent);
+	Cvar_RegisterVariable (&cl_netdbg_pred);
+	Cvar_RegisterVariable (&cl_pred_smooth_ms);
+	Cvar_RegisterVariable (&cl_pred_teleport_dist);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
