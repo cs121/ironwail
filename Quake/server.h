@@ -196,6 +196,26 @@ typedef enum snapshot_full_reason_e
 	SNAP_FULL_MANUAL_RESYNC
 } snapshot_full_reason_t;
 
+typedef struct net_budget_stats_s
+{
+	double		avg_ctrl_bytes;
+	double		avg_snap_bytes;
+	double		avg_ent_bytes;
+	double		avg_remove_bytes;
+	double		avg_temp_bytes;
+	double		avg_sound_bytes;
+	double		avg_print_bytes;
+	double		avg_misc_bytes;
+	double		avg_fields_per_ent;
+	double		avg_bytes_per_ent;
+	int			total_datagrams;
+	int			total_trim_unreliable;
+	int			total_drop_events;
+	int			total_drop_temps;
+	int			total_drop_sounds;
+	int			total_drop_prints;
+} net_budget_stats_t;
+
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
@@ -271,6 +291,7 @@ typedef struct client_s
 	snapshot_state_t *snapshot_build_state;
 	byte			*snapshot_build_present;
 	unsigned int	*snapshot_last_sent_seq_by_ent;
+	double			*snapshot_last_sent_time_by_ent;
 	double			*snapshot_last_relevant_time_by_ent;
 	double			snapshot_rate_tokens;
 	double			snapshot_rate_last_time;
@@ -313,6 +334,14 @@ typedef struct client_s
 	double			mtu_debug_next_time;
 	int				datagram_overflow_count;
 	double			datagram_overflow_next_time;
+	double			net_send_next_time;
+	double			net_budget_second_start;
+	int				net_budget_sec_event_bytes;
+	int				net_budget_sec_event_count;
+	int				net_budget_sec_temp_count;
+	int				net_budget_sec_sound_count;
+	int				net_budget_sec_print_count;
+	net_budget_stats_t net_budget_stats;
 	bot_state_t		bot;
 	unsigned int	last_cmd_seq;
 	unsigned int	last_cmd_ack;

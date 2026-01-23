@@ -47,6 +47,11 @@ static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_snap_remove_ttl = {"sv_snap_remove_ttl", "2.0", CVAR_NONE};
 static cvar_t sv_snap_temp_max_bytes = {"sv_snap_temp_max_bytes", "0", CVAR_NONE};
 static cvar_t sv_event_max = {"sv_event_max", "0", CVAR_NONE};
+static cvar_t sv_event_budget_bytes = {"sv_event_budget_bytes", "200", CVAR_NONE};
+static cvar_t sv_event_budget_count = {"sv_event_budget_count", "8", CVAR_NONE};
+static cvar_t sv_sound_budget_count = {"sv_sound_budget_count", "8", CVAR_NONE};
+static cvar_t sv_print_budget_count = {"sv_print_budget_count", "4", CVAR_NONE};
+static cvar_t sv_tempentity_budget_count = {"sv_tempentity_budget_count", "8", CVAR_NONE};
 cvar_t sv_cmd_ack_slack = {"sv_cmd_ack_slack", "64", CVAR_NONE};
 cvar_t sv_cmd_ack_bad_limit = {"sv_cmd_ack_bad_limit", "3", CVAR_NONE};
 cvar_t sv_cmd_ack_bad_window = {"sv_cmd_ack_bad_window", "2.0", CVAR_NONE};
@@ -60,6 +65,7 @@ cvar_t sv_minupdaterate = {"sv_minupdaterate", "0", CVAR_NONE};
 cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
 cvar_t sv_tickrate = {"sv_tickrate", "20", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "20", CVAR_NONE};
+static cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
 cvar_t sv_tick_maxcatchup = {"sv_tick_maxcatchup", "5", CVAR_NONE};
 cvar_t sv_tick_debug = {"sv_tick_debug", "0", CVAR_NONE};
 cvar_t sv_timewarp = {"sv_timewarp", "0", CVAR_NONE};
@@ -201,6 +207,57 @@ static void SV_IcullStats_f (void)
 	}
 }
 
+static int SV_ClientSendRate (const client_t *client)
+{
+	int rate = (int)sv_sendrate.value;
+
+	if (rate <= 0)
+		rate = client->updaterate;
+	if (rate <= 0)
+		rate = (int)sv_netrate.value;
+	if (rate <= 0)
+		rate = (int)sv_tickrate.value;
+	if (rate <= 0)
+		rate = 20;
+
+	return rate;
+}
+
+static void SV_NetBudgetStats_f (void)
+{
+	int i;
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		const client_t *client = &svs.clients[i];
+		const net_budget_stats_t *stats = &client->net_budget_stats;
+
+		if (!client->active)
+			continue;
+
+		Con_Printf ("net_budget %s: avg ctrl %.1f snap %.1f ent %.1f rem %.1f temp %.1f snd %.1f prn %.1f misc %.1f\n",
+			client->name,
+			stats->avg_ctrl_bytes,
+			stats->avg_snap_bytes,
+			stats->avg_ent_bytes,
+			stats->avg_remove_bytes,
+			stats->avg_temp_bytes,
+			stats->avg_sound_bytes,
+			stats->avg_print_bytes,
+			stats->avg_misc_bytes);
+		Con_Printf ("net_budget %s: avg fields/ent %.2f avg bytes/ent %.2f datagrams %d trim %d drop event %d temp %d sound %d print %d\n",
+			client->name,
+			stats->avg_fields_per_ent,
+			stats->avg_bytes_per_ent,
+			stats->total_datagrams,
+			stats->total_trim_unreliable,
+			stats->total_drop_events,
+			stats->total_drop_temps,
+			stats->total_drop_sounds,
+			stats->total_drop_prints);
+	}
+}
+
 /*
 ===============
 SV_Init
@@ -258,6 +315,11 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_snap_remove_ttl);
 	Cvar_RegisterVariable (&sv_snap_temp_max_bytes);
 	Cvar_RegisterVariable (&sv_event_max);
+	Cvar_RegisterVariable (&sv_event_budget_bytes);
+	Cvar_RegisterVariable (&sv_event_budget_count);
+	Cvar_RegisterVariable (&sv_sound_budget_count);
+	Cvar_RegisterVariable (&sv_print_budget_count);
+	Cvar_RegisterVariable (&sv_tempentity_budget_count);
 	Cvar_RegisterVariable (&sv_cmd_ack_slack);
 	Cvar_RegisterVariable (&sv_cmd_ack_bad_limit);
 	Cvar_RegisterVariable (&sv_cmd_ack_bad_window);
@@ -271,6 +333,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_maxupdaterate);
 	Cvar_RegisterVariable (&sv_tickrate);
 	Cvar_RegisterVariable (&sv_netrate);
+	Cvar_RegisterVariable (&sv_sendrate);
 	Cvar_RegisterVariable (&sv_tick_maxcatchup);
 	Cvar_RegisterVariable (&sv_tick_debug);
 	Cvar_RegisterVariable (&sv_timewarp);
@@ -291,6 +354,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_icull_stats", &SV_IcullStats_f);
+	Cmd_AddCommand ("net_budget_stats", &SV_NetBudgetStats_f);
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -590,6 +654,7 @@ void SV_ConnectClient (int clientnum)
 	snapshot_state_t *snapshot_build_state;
 	byte			*snapshot_build_present;
 	unsigned int	*snapshot_last_sent_seq_by_ent;
+	double			*snapshot_last_sent_time_by_ent;
 	double			*snapshot_last_relevant_time_by_ent;
 
 	client = svs.clients + clientnum;
@@ -603,6 +668,7 @@ void SV_ConnectClient (int clientnum)
 	snapshot_build_state = client->snapshot_build_state;
 	snapshot_build_present = client->snapshot_build_present;
 	snapshot_last_sent_seq_by_ent = client->snapshot_last_sent_seq_by_ent;
+	snapshot_last_sent_time_by_ent = client->snapshot_last_sent_time_by_ent;
 	snapshot_last_relevant_time_by_ent = client->snapshot_last_relevant_time_by_ent;
 
 	Con_DPrintf ("Client %s connected\n", NET_QSocketGetAddressString(client->netconnection));
@@ -627,12 +693,14 @@ void SV_ConnectClient (int clientnum)
 	client->snapshot_build_state = snapshot_build_state;
 	client->snapshot_build_present = snapshot_build_present;
 	client->snapshot_last_sent_seq_by_ent = snapshot_last_sent_seq_by_ent;
+	client->snapshot_last_sent_time_by_ent = snapshot_last_sent_time_by_ent;
 	client->snapshot_last_relevant_time_by_ent = snapshot_last_relevant_time_by_ent;
 	if (!client->snapshot_baselines[0] || !client->snapshot_baseline_present[0]
 		|| !client->snapshot_pending || !client->snapshot_pending_present
 		|| !client->snapshot_pending_relevant || !client->snapshot_pending_remove
 		|| !client->snapshot_pending_flags || !client->snapshot_build_state
 		|| !client->snapshot_build_present || !client->snapshot_last_sent_seq_by_ent
+		|| !client->snapshot_last_sent_time_by_ent
 		|| !client->snapshot_last_relevant_time_by_ent)
 		SV_InitClientSnapshotData (client);
 	SV_ResetClientSnapshot (client);
@@ -967,6 +1035,7 @@ static void SV_InitClientSnapshotData (client_t *client)
 	client->snapshot_build_state = (snapshot_state_t *) Hunk_AllocName (max_edicts * sizeof(snapshot_state_t), "sv_snap_build_state");
 	client->snapshot_build_present = (byte *) Hunk_AllocName (max_edicts * sizeof(byte), "sv_snap_build_present");
 	client->snapshot_last_sent_seq_by_ent = (unsigned int *) Hunk_AllocName (max_edicts * sizeof(unsigned int), "sv_snap_last_sent");
+	client->snapshot_last_sent_time_by_ent = (double *) Hunk_AllocName (max_edicts * sizeof(double), "sv_snap_last_sent_time");
 	client->snapshot_last_relevant_time_by_ent = (double *) Hunk_AllocName (max_edicts * sizeof(double), "sv_snap_last_relevant");
 }
 
@@ -1029,6 +1098,14 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->mtu_last_snapshot_size = 0;
 	client->mtu_dropped_tier1 = 0;
 	client->mtu_dropped_tier2 = 0;
+	client->net_send_next_time = 0;
+	client->net_budget_second_start = 0;
+	client->net_budget_sec_event_bytes = 0;
+	client->net_budget_sec_event_count = 0;
+	client->net_budget_sec_temp_count = 0;
+	client->net_budget_sec_sound_count = 0;
+	client->net_budget_sec_print_count = 0;
+	memset (&client->net_budget_stats, 0, sizeof(client->net_budget_stats));
 	client->mtu_debug_next_time = 0;
 	client->datagram_overflow_next_time = 0;
 	client->snapshot_rate_tokens = 0;
@@ -1065,6 +1142,8 @@ static void SV_ResetClientSnapshot (client_t *client)
 		memset (client->snapshot_build_present, 0, max_edicts * sizeof(byte));
 	if (client->snapshot_last_sent_seq_by_ent)
 		memset (client->snapshot_last_sent_seq_by_ent, 0, max_edicts * sizeof(unsigned int));
+	if (client->snapshot_last_sent_time_by_ent)
+		memset (client->snapshot_last_sent_time_by_ent, 0, max_edicts * sizeof(double));
 	if (client->snapshot_last_relevant_time_by_ent)
 		memset (client->snapshot_last_relevant_time_by_ent, 0, max_edicts * sizeof(double));
 }
@@ -1298,6 +1377,22 @@ static int SV_SnapshotResendInterval (float dist_sq, qboolean changed)
 	return 2;
 }
 
+static double SV_SnapshotStaleThreshold (int priority_tier)
+{
+	switch (priority_tier)
+	{
+	case 0:
+		return 0.0;
+	case 1:
+		return 0.25;
+	case 2:
+		return 0.5;
+	case 3:
+	default:
+		return 1.0;
+	}
+}
+
 static qboolean SV_SnapshotPriorityMover (const edict_t *ent)
 {
 	if ((int)ent->v.movetype == MOVETYPE_PUSH)
@@ -1321,6 +1416,9 @@ static int SV_SnapshotPriorityTier (const edict_t *clent, const edict_t *ent, qb
 {
 	float near_sq = SNAP_PRIORITY_NEAR_DIST * SNAP_PRIORITY_NEAR_DIST;
 	float mid_sq = SNAP_PRIORITY_MID_DIST * SNAP_PRIORITY_MID_DIST;
+
+	if (ent == clent)
+		return 0;
 
 	if (SV_SnapshotPriorityMover (ent) || SV_SnapshotPriorityMissile (ent))
 	{
@@ -1866,6 +1964,7 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 	edict_t *clent = client->edict;
 	qboolean snapshot2 = SV_Snapshot2RecoveryEnabled ();
 	int stream_start = 0;
+	double *last_sent_time = client->snapshot_last_sent_time_by_ent;
 
 	if (entity_budget < 0)
 		entity_budget = 0;
@@ -1963,6 +2062,8 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 			continue;
 
 		present[num] = 1;
+		if (last_sent_time)
+			last_sent_time[num] = realtime;
 		{
 			byte snapflag = SV_SnapshotFlagsForEnt (ent);
 			int ent_size = 0;
@@ -2033,6 +2134,8 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 			int priority;
 			int resend_interval = 0;
 			unsigned int last_sent_seq = 0;
+			double last_sent_stamp = 0.0;
+			double stale_threshold = 0.0;
 			int ent_size;
 			qboolean needs_baseline;
 			qboolean force_refresh = false;
@@ -2075,6 +2178,15 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 			if (priority != k)
 				continue;
 
+			if (!changed && last_sent_time)
+			{
+				last_sent_stamp = last_sent_time[num];
+				stale_threshold = SV_SnapshotStaleThreshold (priority);
+				if (stale_threshold > 0.0 && last_sent_stamp > 0.0
+					&& (realtime - last_sent_stamp) < stale_threshold)
+					continue;
+			}
+
 			if (delta_mode && snapshot2 && client->snapshot_last_sent_seq_by_ent)
 			{
 				resend_interval = SV_SnapshotResendInterval (dist_sq, changed);
@@ -2116,6 +2228,8 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 			sent_by_priority[k]++;
 			if (delta_mode && snapshot2 && client->snapshot_last_sent_seq_by_ent)
 				client->snapshot_last_sent_seq_by_ent[num] = current_seq;
+			if (last_sent_time)
+				last_sent_time[num] = realtime;
 
 			if (debug_frame && net_snap_debug.value)
 				Con_DPrintf ("snapdbg %s ent %d prio %d hires_o %d hires_a %d\n",
@@ -2287,6 +2401,17 @@ static void SV_WriteSnapshot2Header (sizebuf_t *msg, unsigned int seq, unsigned 
 
 #define SNAPSHOT2_HEADER_SIZE (1 + 4 + 4 + 1 + 2 + 2)
 #define SNAPSHOT2_CHUNKINFO_SIZE (2 + 2 + 2)
+#define SNAPSHOT2_FULL_FIELD_COUNT 40
+
+typedef struct snapshot_write_stats_s
+{
+	int header_bytes;
+	int remove_bytes;
+	int entity_bytes;
+	int entity_count;
+	int field_count;
+	int total_bytes;
+} snapshot_write_stats_t;
 
 static int SV_Snapshot2CountFullChunks (const byte *present, const byte *snapflags, int max_edicts, int available)
 {
@@ -2320,7 +2445,7 @@ static int SV_Snapshot2CountFullChunks (const byte *present, const byte *snapfla
 
 static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 	const byte *present, const byte *snapflags, unsigned int extra_flags,
-	int *out_remaining, unsigned int *out_flags)
+	int *out_remaining, unsigned int *out_flags, snapshot_write_stats_t *out_stats)
 {
 	int header_size = SNAPSHOT2_HEADER_SIZE + SNAPSHOT2_CHUNKINFO_SIZE;
 	int available = msg->maxsize - msg->cursize;
@@ -2333,6 +2458,7 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 	int remaining_entities = 0;
 	int chunk_index = client->entstream.chunk_index;
 	int total_chunks = client->entstream.total_chunks;
+	int start_size = msg->cursize;
 
 	if (available < header_size)
 		return false;
@@ -2373,6 +2499,9 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 
 	if (!MSG_CanWrite (msg, chunk_size))
 		return false;
+
+	if (out_stats)
+		memset (out_stats, 0, sizeof(*out_stats));
 
 	SV_WriteSnapshot2Header (msg, client->snapshot_pending_seq,
 		0xFFFFFFFFu, flags, (unsigned short)chunk_count, (unsigned short)remaining_entities);
@@ -2437,6 +2566,17 @@ static qboolean SV_WriteSnapshot2FullChunked (client_t *client, sizebuf_t *msg,
 		*out_remaining = remaining_entities;
 	if (out_flags)
 		*out_flags = flags;
+	if (out_stats)
+	{
+		int total_bytes = msg->cursize - start_size;
+
+		out_stats->header_bytes = SNAPSHOT2_HEADER_SIZE + SNAPSHOT2_CHUNKINFO_SIZE;
+		out_stats->remove_bytes = 0;
+		out_stats->entity_bytes = total_bytes - out_stats->header_bytes;
+		out_stats->entity_count = chunk_count;
+		out_stats->field_count = chunk_count * SNAPSHOT2_FULL_FIELD_COUNT;
+		out_stats->total_bytes = total_bytes;
+	}
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_chunk_flags cl %d %s seq %u rem %d flags 0x%x idx %d/%d\n",
 		realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq,
@@ -2521,6 +2661,19 @@ static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const sn
 		mask |= SNAP_HIRES_ANGLES;
 
 	return mask;
+}
+
+static int SV_Popcount32 (unsigned int value)
+{
+	int count = 0;
+
+	while (value)
+	{
+		count += value & 1u;
+		value >>= 1;
+	}
+
+	return count;
 }
 
 static int SV_Snapshot2EstimateDeltaBytes (const snapshot_state_t *next, const snapshot_state_t *base,
@@ -2618,10 +2771,12 @@ static void SV_WriteSnapshotFull (sizebuf_t *msg, unsigned int seq, const snapsh
 }
 
 static void SV_WriteSnapshot2Full (sizebuf_t *msg, unsigned int seq, const snapshot_state_t *states,
-	const byte *present, const byte *snapflags, int max_edicts, int *out_count, unsigned int extra_flags)
+	const byte *present, const byte *snapflags, int max_edicts, int *out_count, unsigned int extra_flags,
+	snapshot_write_stats_t *out_stats)
 {
 	unsigned short count = 0;
 	int entnum;
+	int start_size = msg->cursize;
 
 	for (entnum = 1; entnum < max_edicts; entnum++)
 	{
@@ -2643,6 +2798,17 @@ static void SV_WriteSnapshot2Full (sizebuf_t *msg, unsigned int seq, const snaps
 
 	if (out_count)
 		*out_count = count;
+	if (out_stats)
+	{
+		int total_bytes = msg->cursize - start_size;
+
+		out_stats->header_bytes = SNAPSHOT2_HEADER_SIZE;
+		out_stats->remove_bytes = 0;
+		out_stats->entity_bytes = total_bytes - SNAPSHOT2_HEADER_SIZE;
+		out_stats->entity_count = count;
+		out_stats->field_count = count * SNAPSHOT2_FULL_FIELD_COUNT;
+		out_stats->total_bytes = total_bytes;
+	}
 }
 
 static void SV_WriteSnapshotDelta (sizebuf_t *msg, unsigned int seq, unsigned int baseline_seq,
@@ -2789,7 +2955,7 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	const snapshot_state_t *states, const byte *present, const byte *remove_list,
 	const snapshot_state_t *baseline, const byte *baseline_present, const byte *snapflags,
 	int max_edicts, int *out_remove, int *out_add, int *out_update, unsigned int extra_flags,
-	qboolean *out_incomplete)
+	qboolean *out_incomplete, snapshot_write_stats_t *out_stats)
 {
 	int entnum;
 	unsigned short remove_count = 0;
@@ -2801,6 +2967,8 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 	unsigned int flags = SNAPSHOT_FLAG_DELTA | extra_flags;
 	int header_size = 1 + 4 + 4 + 1 + 2 + 2;
 	int available = msg->maxsize - msg->cursize;
+	int start_size = msg->cursize;
+	int field_count = 0;
 
 	if (out_incomplete)
 		*out_incomplete = false;
@@ -2865,6 +3033,7 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 			SV_WriteSnapshotState (msg, &states[entnum], snapflags ? snapflags[entnum] : 0);
 			add_count--;
 			add_written++;
+			field_count += SNAPSHOT2_FULL_FIELD_COUNT;
 		}
 	}
 
@@ -2879,6 +3048,7 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 		mask = SV_SnapshotFieldMask (&states[entnum], &baseline[entnum], snapflags ? snapflags[entnum] : 0);
 		if (!mask)
 			continue;
+		field_count += SV_Popcount32 (mask & (SNAP_VALID_MASK & ~(SNAP_HIRES_ORIGIN | SNAP_HIRES_ANGLES)));
 		if (update_count == 0)
 			break;
 		MSG_WriteShort (msg, entnum);
@@ -2958,6 +3128,17 @@ static void SV_WriteSnapshot2Delta (sizebuf_t *msg, unsigned int seq, unsigned i
 		*out_update = update_written;
 	if (out_incomplete)
 		*out_incomplete = false;
+	if (out_stats)
+	{
+		int total_bytes = msg->cursize - start_size;
+
+		out_stats->header_bytes = header_size;
+		out_stats->remove_bytes = remove_written * 2;
+		out_stats->entity_bytes = total_bytes - out_stats->header_bytes - out_stats->remove_bytes;
+		out_stats->entity_count = add_written + update_written;
+		out_stats->field_count = field_count;
+		out_stats->total_bytes = total_bytes;
+	}
 }
 
 static void SV_BuildSnapshot2BaselineState (client_t *client, const snapshot_state_t *base_states,
@@ -2998,7 +3179,7 @@ static void SV_BuildSnapshot2BaselineState (client_t *client, const snapshot_sta
 	}
 }
 
-static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
+static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_stats_t *out_stats)
 {
 	int start_size = msg->cursize;
 	int add_count = 0;
@@ -3028,6 +3209,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	const byte *baseline_present = NULL;
 	unsigned int baseline_seq = 0;
 	qboolean have_baseline = false;
+	snapshot_write_stats_t local_stats;
+
+	if (out_stats)
+		memset (out_stats, 0, sizeof(*out_stats));
+
+	memset (&local_stats, 0, sizeof(local_stats));
 
 	if (client->entstream.active && client->entstream.base_snapshot != (int)client->snapshot_pending_seq)
 		client->entstream.active = false;
@@ -3131,7 +3318,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					chunked_snapshot = true;
 					if (!SV_WriteSnapshot2FullChunked (client, msg,
 						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
-						&chunk_remaining, &chunk_flags))
+						&chunk_remaining, &chunk_flags, &local_stats))
 					{
 						msg->overflowed = true;
 						msg->write_locked = true;
@@ -3146,7 +3333,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					chunked_snapshot = true;
 					if (!SV_WriteSnapshot2FullChunked (client, msg,
 						client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
-						&chunk_remaining, &chunk_flags))
+						&chunk_remaining, &chunk_flags, &local_stats))
 					{
 						msg->overflowed = true;
 						msg->write_locked = true;
@@ -3157,7 +3344,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 				{
 					SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
 						client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts,
-						&full_count, extra_flags);
+						&full_count, extra_flags, &local_stats);
 				}
 			}
 			else
@@ -3399,7 +3586,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 						client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_remove,
 						baseline_states, baseline_present,
 						client->snapshot_pending_flags, qcvm->max_edicts,
-						&remove_count, &add_count, &update_count, extra_flags, NULL);
+						&remove_count, &add_count, &update_count, extra_flags, NULL, &local_stats);
 				else
 					SV_WriteSnapshotDelta (msg, client->snapshot_pending_seq, baseline_seq,
 						client->snapshot_pending, client->snapshot_pending_present, client->snapshot_pending_relevant,
@@ -3424,7 +3611,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 						chunked_snapshot = true;
 						if (!SV_WriteSnapshot2FullChunked (client, msg,
 							client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
-							&chunk_remaining, &chunk_flags))
+							&chunk_remaining, &chunk_flags, &local_stats))
 						{
 							msg->overflowed = true;
 							msg->write_locked = true;
@@ -3435,7 +3622,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 					{
 						SV_WriteSnapshot2Full (msg, client->snapshot_pending_seq, client->snapshot_pending,
 							client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts,
-							&full_count, extra_flags);
+							&full_count, extra_flags, &local_stats);
 					}
 				}
 				else
@@ -3472,6 +3659,36 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg)
 	}
 
 	client->mtu_last_snapshot_size = msg->cursize - start_size;
+	if (out_stats)
+	{
+		int snapshot_bytes = msg->cursize - start_size;
+		int ent_count = use_delta ? (add_count + update_count) : full_count;
+
+		if (local_stats.total_bytes == 0)
+			local_stats.total_bytes = snapshot_bytes;
+		if (local_stats.entity_bytes == 0)
+			local_stats.entity_bytes = snapshot_bytes - local_stats.header_bytes - local_stats.remove_bytes;
+		if (local_stats.entity_count == 0)
+			local_stats.entity_count = ent_count;
+		if (local_stats.field_count == 0 && ent_count > 0)
+		{
+			if (use_delta)
+				local_stats.field_count = ent_count * SNAPSHOT2_FULL_FIELD_COUNT;
+			else
+				local_stats.field_count = full_count * SNAPSHOT2_FULL_FIELD_COUNT;
+		}
+		*out_stats = local_stats;
+	}
+	if (net_snap_debug.value && local_stats.entity_count > 0)
+	{
+		double fields_per_ent = (double)local_stats.field_count / (double)local_stats.entity_count;
+		double bytes_per_ent = (double)local_stats.entity_bytes / (double)local_stats.entity_count;
+
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f snap_field_stats cl %d %s seq %u ents %d fields/ent %.2f bytes/ent %.2f\n",
+			realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq,
+			local_stats.entity_count, fields_per_ent, bytes_per_ent);
+	}
 	if (snapshot2_recovery && client->rate > 0)
 	{
 		double spent = (double)(msg->cursize - start_size);
@@ -3885,6 +4102,547 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 	client->entstream.active = false;
 }
 
+typedef enum
+{
+	SV_DG_CAT_MISC = 0,
+	SV_DG_CAT_TEMP,
+	SV_DG_CAT_EVENT,
+	SV_DG_CAT_SOUND,
+	SV_DG_CAT_PRINT
+} sv_dg_category_t;
+
+typedef struct
+{
+	const byte		*data;
+	int				size;
+	int				offset;
+	qboolean		bad;
+} sv_datagram_reader_t;
+
+typedef struct
+{
+	int				cmd;
+	int				length;
+	sv_dg_category_t category;
+	int				temp_type;
+	qboolean		has_origin;
+	vec3_t			origin;
+} sv_datagram_cmd_info_t;
+
+typedef struct
+{
+	int ctrl_bytes;
+	int snap_bytes;
+	int ent_bytes;
+	int remove_bytes;
+	int temp_bytes;
+	int sound_bytes;
+	int print_bytes;
+	int misc_bytes;
+	int temp_count;
+	int event_count;
+	int sound_count;
+	int print_count;
+	int drop_events;
+	int drop_temps;
+	int drop_sounds;
+	int drop_prints;
+	int trim_unreliable;
+} sv_datagram_budget_frame_t;
+
+typedef struct
+{
+	int cmd;
+	int type;
+	vec3_t origin;
+	qboolean has_origin;
+} sv_event_dedupe_t;
+
+static qboolean SV_DGReadBytes (sv_datagram_reader_t *reader, int count)
+{
+	if (reader->offset + count > reader->size)
+	{
+		reader->bad = true;
+		return false;
+	}
+	reader->offset += count;
+	return true;
+}
+
+static qboolean SV_DGReadByte (sv_datagram_reader_t *reader, int *out)
+{
+	if (reader->offset + 1 > reader->size)
+	{
+		reader->bad = true;
+		return false;
+	}
+	if (out)
+		*out = (unsigned char)reader->data[reader->offset];
+	reader->offset += 1;
+	return true;
+}
+
+static qboolean SV_DGReadShort (sv_datagram_reader_t *reader, int *out)
+{
+	int value;
+
+	if (reader->offset + 2 > reader->size)
+	{
+		reader->bad = true;
+		return false;
+	}
+	value = (short)(reader->data[reader->offset] + (reader->data[reader->offset + 1] << 8));
+	if (out)
+		*out = value;
+	reader->offset += 2;
+	return true;
+}
+
+static qboolean SV_DGReadLong (sv_datagram_reader_t *reader)
+{
+	return SV_DGReadBytes (reader, 4);
+}
+
+static qboolean SV_DGReadString (sv_datagram_reader_t *reader)
+{
+	int ch;
+
+	do
+	{
+		if (!SV_DGReadByte (reader, &ch))
+			return false;
+	} while (ch != 0);
+
+	return true;
+}
+
+static int SV_DGCoordBytes (void)
+{
+	return (sv.protocolflags & PRFL_INT32COORD) ? 4 : 2;
+}
+
+static int SV_DGAngleBytes (void)
+{
+	return (sv.protocolflags & PRFL_SHORTANGLE) ? 2 : 1;
+}
+
+static qboolean SV_DGReadCoord (sv_datagram_reader_t *reader, vec3_t origin, int index)
+{
+	if (SV_DGCoordBytes () == 4)
+	{
+		int value;
+		if (!SV_DGReadLong (reader))
+			return false;
+		if (origin)
+		{
+			memcpy (&value, reader->data + reader->offset - 4, sizeof(value));
+			origin[index] = (float)LittleLong(value) * (1.0f / 16.0f);
+		}
+		return true;
+	}
+	{
+		int value;
+		if (!SV_DGReadShort (reader, &value))
+			return false;
+		if (origin)
+			origin[index] = value * (1.0f / 8.0f);
+	}
+	return true;
+}
+
+static int SV_DGTempEntityPriority (int type)
+{
+	switch (type)
+	{
+	case TE_EXPLOSION:
+	case TE_TAREXPLOSION:
+	case TE_LIGHTNING1:
+	case TE_LIGHTNING2:
+	case TE_LIGHTNING3:
+	case TE_LAVASPLASH:
+	case TE_TELEPORT:
+	case TE_EXPLOSION2:
+	case TE_BEAM:
+		return 0;
+	default:
+		return 1;
+	}
+}
+
+static qboolean SV_DGTempEntityLength (sv_datagram_reader_t *reader, sv_datagram_cmd_info_t *info)
+{
+	int type;
+	int coord_bytes = SV_DGCoordBytes ();
+
+	if (!SV_DGReadByte (reader, &type))
+		return false;
+
+	if (info)
+	{
+		info->temp_type = type;
+		info->category = SV_DG_CAT_TEMP;
+		info->has_origin = false;
+		VectorClear (info->origin);
+	}
+
+	switch (type)
+	{
+	case TE_SPIKE:
+	case TE_SUPERSPIKE:
+	case TE_GUNSHOT:
+	case TE_EXPLOSION:
+	case TE_TAREXPLOSION:
+	case TE_WIZSPIKE:
+	case TE_KNIGHTSPIKE:
+	case TE_LAVASPLASH:
+	case TE_TELEPORT:
+		if (!SV_DGReadBytes (reader, coord_bytes * 3))
+			return false;
+		if (info)
+		{
+			sv_datagram_reader_t temp = *reader;
+			temp.offset -= coord_bytes * 3;
+			SV_DGReadCoord (&temp, info->origin, 0);
+			SV_DGReadCoord (&temp, info->origin, 1);
+			SV_DGReadCoord (&temp, info->origin, 2);
+			info->has_origin = true;
+		}
+		return true;
+	case TE_EXPLOSION2:
+		if (!SV_DGReadBytes (reader, coord_bytes * 3))
+			return false;
+		if (!SV_DGReadBytes (reader, 2))
+			return false;
+		if (info)
+		{
+			sv_datagram_reader_t temp = *reader;
+			temp.offset -= coord_bytes * 3 + 2;
+			SV_DGReadCoord (&temp, info->origin, 0);
+			SV_DGReadCoord (&temp, info->origin, 1);
+			SV_DGReadCoord (&temp, info->origin, 2);
+			info->has_origin = true;
+		}
+		return true;
+	case TE_LIGHTNING1:
+	case TE_LIGHTNING2:
+	case TE_LIGHTNING3:
+	case TE_BEAM:
+		if (!SV_DGReadShort (reader, NULL))
+			return false;
+		if (!SV_DGReadBytes (reader, coord_bytes * 6))
+			return false;
+		if (info)
+		{
+			sv_datagram_reader_t temp = *reader;
+			temp.offset -= coord_bytes * 6;
+			SV_DGReadCoord (&temp, info->origin, 0);
+			SV_DGReadCoord (&temp, info->origin, 1);
+			SV_DGReadCoord (&temp, info->origin, 2);
+			info->has_origin = true;
+		}
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int SV_DGCommandLength (const sv_datagram_reader_t *reader, sv_datagram_cmd_info_t *info)
+{
+	sv_datagram_reader_t temp = *reader;
+	int cmd;
+	int coord_bytes = SV_DGCoordBytes ();
+	int angle_bytes = SV_DGAngleBytes ();
+
+	if (info)
+		memset (info, 0, sizeof(*info));
+
+	if (!SV_DGReadByte (&temp, &cmd))
+		return 0;
+
+	if (info)
+	{
+		info->cmd = cmd;
+		info->length = 0;
+		info->category = SV_DG_CAT_MISC;
+		info->temp_type = -1;
+		info->has_origin = false;
+		VectorClear (info->origin);
+	}
+
+	switch (cmd)
+	{
+	case svc_nop:
+	case svc_disconnect:
+	case svc_bf:
+	case svc_sellscreen:
+		break;
+	case svc_time:
+		if (!SV_DGReadLong (&temp))
+			return 0;
+		break;
+	case svc_print:
+	case svc_centerprint:
+	case svc_rawprint:
+		if (info)
+			info->category = SV_DG_CAT_PRINT;
+		if (!SV_DGReadString (&temp))
+			return 0;
+		break;
+	case svc_stufftext:
+	case svc_chat:
+		if (!SV_DGReadString (&temp))
+			return 0;
+		break;
+	case svc_sound:
+	{
+		int field_mask;
+		if (info)
+			info->category = SV_DG_CAT_SOUND;
+		if (!SV_DGReadByte (&temp, &field_mask))
+			return 0;
+		if (field_mask & SND_VOLUME)
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		if (field_mask & SND_ATTENUATION)
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		if (field_mask & SND_LARGEENTITY)
+		{
+			if (!SV_DGReadShort (&temp, NULL))
+				return 0;
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		}
+		else
+		{
+			if (!SV_DGReadShort (&temp, NULL))
+				return 0;
+		}
+		if (field_mask & SND_LARGESOUND)
+		{
+			if (!SV_DGReadShort (&temp, NULL))
+				return 0;
+		}
+		else
+		{
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		}
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		break;
+	}
+	case svc_particle:
+		if (info)
+			info->category = SV_DG_CAT_EVENT;
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		if (info)
+		{
+			sv_datagram_reader_t origin_reader = temp;
+			origin_reader.offset -= coord_bytes * 3;
+			SV_DGReadCoord (&origin_reader, info->origin, 0);
+			SV_DGReadCoord (&origin_reader, info->origin, 1);
+			SV_DGReadCoord (&origin_reader, info->origin, 2);
+			info->has_origin = true;
+		}
+		if (!SV_DGReadBytes (&temp, 3))
+			return 0;
+		if (!SV_DGReadByte (&temp, NULL))
+			return 0;
+		if (!SV_DGReadByte (&temp, NULL))
+			return 0;
+		break;
+	case svc_temp_entity:
+		if (info)
+			info->category = SV_DG_CAT_TEMP;
+		if (!SV_DGTempEntityLength (&temp, info))
+			return 0;
+		break;
+	case svc_damage:
+		if (info)
+			info->category = SV_DG_CAT_EVENT;
+		if (!SV_DGReadBytes (&temp, 2))
+			return 0;
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		break;
+	case svc_spawnstatic:
+		if (!SV_DGReadBytes (&temp, 1 + 1 + 1 + 1))
+			return 0;
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		if (!SV_DGReadBytes (&temp, angle_bytes * 3))
+			return 0;
+		break;
+	case svc_spawnstatic2:
+	{
+		int bits;
+		if (!SV_DGReadByte (&temp, &bits))
+			return 0;
+		if (!SV_DGReadBytes (&temp, (bits & B_LARGEMODEL) ? 2 : 1))
+			return 0;
+		if (!SV_DGReadBytes (&temp, (bits & B_LARGEFRAME) ? 2 : 1))
+			return 0;
+		if (!SV_DGReadBytes (&temp, 1 + 1))
+			return 0;
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		if (!SV_DGReadBytes (&temp, angle_bytes * 3))
+			return 0;
+		if (bits & B_ALPHA)
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		if (bits & B_SCALE)
+			if (!SV_DGReadByte (&temp, NULL))
+				return 0;
+		break;
+	}
+	case svc_spawnstaticsound:
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		if (!SV_DGReadBytes (&temp, 1 + 1 + 1))
+			return 0;
+		break;
+	case svc_spawnstaticsound2:
+		if (!SV_DGReadBytes (&temp, coord_bytes * 3))
+			return 0;
+		if (!SV_DGReadShort (&temp, NULL))
+			return 0;
+		if (!SV_DGReadBytes (&temp, 2))
+			return 0;
+		break;
+	case svc_setpause:
+	case svc_signonnum:
+		if (!SV_DGReadByte (&temp, NULL))
+			return 0;
+		break;
+	default:
+		return -1;
+	}
+
+	return temp.offset - reader->offset;
+}
+
+static void SV_UpdateNetBudgetAverages (net_budget_stats_t *stats, double sample, double *avg)
+{
+	const double alpha = 0.1;
+
+	if (stats->total_datagrams == 1)
+		*avg = sample;
+	else
+		*avg = (*avg * (1.0 - alpha)) + (sample * alpha);
+}
+
+static qboolean SV_DGIsDuplicateEvent (const sv_datagram_cmd_info_t *info,
+	const sv_event_dedupe_t *seen, int seen_count)
+{
+	int i;
+
+	if (!info->has_origin)
+		return false;
+
+	for (i = 0; i < seen_count; i++)
+	{
+		vec3_t delta;
+
+		if (!seen[i].has_origin)
+			continue;
+		if (seen[i].cmd != info->cmd || seen[i].type != info->temp_type)
+			continue;
+		VectorSubtract (info->origin, seen[i].origin, delta);
+		if (DotProduct (delta, delta) <= 16.0f)
+			return true;
+	}
+
+	return false;
+}
+
+static void SV_NetBudgetResetSecond (client_t *client, double now)
+{
+	if (client->net_budget_second_start <= 0.0 || now - client->net_budget_second_start >= 1.0)
+	{
+		client->net_budget_second_start = now;
+		client->net_budget_sec_event_bytes = 0;
+		client->net_budget_sec_event_count = 0;
+		client->net_budget_sec_temp_count = 0;
+		client->net_budget_sec_sound_count = 0;
+		client->net_budget_sec_print_count = 0;
+	}
+}
+
+static qboolean SV_NetBudgetAllowEvent (client_t *client, int bytes, int *tick_bytes, int *tick_count)
+{
+	int per_tick_bytes = (int)sv_event_budget_bytes.value;
+	int per_tick_count = (int)sv_event_budget_count.value;
+	int rate = SV_ClientSendRate (client);
+	int per_sec_bytes = per_tick_bytes > 0 ? per_tick_bytes * rate : 0;
+	int per_sec_count = per_tick_count > 0 ? per_tick_count * rate : 0;
+
+	if (per_tick_bytes > 0 && (*tick_bytes + bytes) > per_tick_bytes)
+		return false;
+	if (per_tick_count > 0 && (*tick_count + 1) > per_tick_count)
+		return false;
+	if (per_sec_bytes > 0 && (client->net_budget_sec_event_bytes + bytes) > per_sec_bytes)
+		return false;
+	if (per_sec_count > 0 && (client->net_budget_sec_event_count + 1) > per_sec_count)
+		return false;
+
+	*tick_bytes += bytes;
+	*tick_count += 1;
+	client->net_budget_sec_event_bytes += bytes;
+	client->net_budget_sec_event_count += 1;
+	return true;
+}
+
+static qboolean SV_NetBudgetAllowCount (int limit, int *tick_count, int *sec_count, int rate)
+{
+	int per_sec = limit > 0 ? limit * rate : 0;
+
+	if (limit > 0 && (*tick_count + 1) > limit)
+		return false;
+	if (per_sec > 0 && (*sec_count + 1) > per_sec)
+		return false;
+
+	*tick_count += 1;
+	*sec_count += 1;
+	return true;
+}
+
+static void SV_UpdateNetBudgetStats (client_t *client, const sv_datagram_budget_frame_t *frame,
+	const snapshot_write_stats_t *snapshot_stats)
+{
+	net_budget_stats_t *stats = &client->net_budget_stats;
+	double fields_per_ent = 0.0;
+	double bytes_per_ent = 0.0;
+
+	stats->total_datagrams++;
+	if (frame->trim_unreliable)
+		stats->total_trim_unreliable++;
+	stats->total_drop_events += frame->drop_events;
+	stats->total_drop_temps += frame->drop_temps;
+	stats->total_drop_sounds += frame->drop_sounds;
+	stats->total_drop_prints += frame->drop_prints;
+
+	SV_UpdateNetBudgetAverages (stats, frame->ctrl_bytes, &stats->avg_ctrl_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->snap_bytes, &stats->avg_snap_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->ent_bytes, &stats->avg_ent_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->remove_bytes, &stats->avg_remove_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->temp_bytes, &stats->avg_temp_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->sound_bytes, &stats->avg_sound_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->print_bytes, &stats->avg_print_bytes);
+	SV_UpdateNetBudgetAverages (stats, frame->misc_bytes, &stats->avg_misc_bytes);
+
+	if (snapshot_stats && snapshot_stats->entity_count > 0)
+	{
+		fields_per_ent = (double)snapshot_stats->field_count / (double)snapshot_stats->entity_count;
+		bytes_per_ent = (double)snapshot_stats->entity_bytes / (double)snapshot_stats->entity_count;
+	}
+
+	SV_UpdateNetBudgetAverages (stats, fields_per_ent, &stats->avg_fields_per_ent);
+	SV_UpdateNetBudgetAverages (stats, bytes_per_ent, &stats->avg_bytes_per_ent);
+}
+
 /*
 =============
 SV_CleanupEnts
@@ -4125,6 +4883,11 @@ qboolean SV_SendClientDatagram (client_t *client)
 	qboolean	snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
 	int		temp_bytes = sv.datagram.cursize;
 	qboolean	packet_too_large = false;
+	snapshot_write_stats_t snapshot_stats;
+	sv_datagram_budget_frame_t frame;
+	int ctrl_start = 0;
+	int ctrl_bytes = 0;
+	int sendrate = SV_ClientSendRate (client);
 
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
@@ -4147,10 +4910,20 @@ qboolean SV_SendClientDatagram (client_t *client)
 	mtu_cap = SV_MTUCap (client);
 	if (mtu_cap > 0)
 		msg.maxsize = q_min (msg.maxsize, mtu_cap);
+	if (client->rate > 0 && sendrate > 0)
+	{
+		int per_packet = client->rate / sendrate;
+		if (per_packet > 0)
+			msg.maxsize = q_min (msg.maxsize, per_packet);
+	}
 
 	if (!NET_CanSendUnreliableMessage (client->netconnection))
 		return false;
 
+	memset (&snapshot_stats, 0, sizeof(snapshot_stats));
+	memset (&frame, 0, sizeof(frame));
+
+	ctrl_start = msg.cursize;
 	MSG_BEGINSVC (&msg, svc_time);
 	MSG_WriteByte (&msg, svc_time);
 	MSG_WriteFloat (&msg, qcvm->time);
@@ -4158,6 +4931,8 @@ qboolean SV_SendClientDatagram (client_t *client)
 // add the client specific data to the datagram
 	// INV-2: control/ack data (time + clientdata) is written first and never trimmed.
 	SV_WriteClientdataToMessage (client, client->edict, &msg);
+	ctrl_bytes = msg.cursize - ctrl_start;
+	frame.ctrl_bytes = ctrl_bytes;
 	if (msg.overflowed)
 	{
 		Con_Printf ("sv_mtu_cap %d too small for mandatory clientdata for %s\n",
@@ -4166,7 +4941,10 @@ qboolean SV_SendClientDatagram (client_t *client)
 		return false;
 	}
 
-	SV_SendSnapshot (client, &msg);
+	SV_SendSnapshot (client, &msg, &snapshot_stats);
+	frame.snap_bytes = snapshot_stats.header_bytes;
+	frame.ent_bytes = snapshot_stats.entity_bytes;
+	frame.remove_bytes = snapshot_stats.remove_bytes;
 
 	if (msg.overflowed)
 	{
@@ -4189,16 +4967,180 @@ qboolean SV_SendClientDatagram (client_t *client)
 			"NETDBG time %.3f snap_temp_bytes cl %d %s bytes %d\n",
 			realtime, SV_ClientSlot (client), client->name, temp_bytes);
 
-// copy the server datagram if there is space
-	if (!msg.write_locked && temp_bytes > 0 && msg.cursize + temp_bytes < msg.maxsize)
-		SZ_Write (&msg, sv.datagram.data, temp_bytes);
-	else if (!msg.write_locked && temp_bytes > 0)
+	SV_NetBudgetResetSecond (client, realtime);
+
+// copy the server datagram with per-category budgets
+	if (!msg.write_locked && temp_bytes > 0)
 	{
-		// INV-2: keep control/snapshot data; trim low-priority sv.datagram instead.
-		NET_DebugLogEvent (true,
-			"NETDBG time %.3f trim_unreliable cl %d %s keep_control snapshot %d drop_datagram %d mtu_cap %d\n",
-			realtime, SV_ClientSlot (client), client->name,
-			client->mtu_last_snapshot_size, temp_bytes, msg.maxsize);
+		sv_datagram_reader_t reader;
+		sv_event_dedupe_t seen[32];
+		int seen_count = 0;
+		int tick_event_bytes = 0;
+		int tick_event_count = 0;
+		int tick_temp_count = 0;
+		int tick_sound_count = 0;
+		int tick_print_count = 0;
+		int remaining = msg.maxsize - msg.cursize;
+		int copied_bytes = 0;
+		int dropped_bytes = 0;
+		int rate = SV_ClientSendRate (client);
+
+		memset (seen, 0, sizeof(seen));
+		reader.data = sv.datagram.data;
+		reader.size = temp_bytes;
+		reader.offset = 0;
+		reader.bad = false;
+
+		while (reader.offset < reader.size)
+		{
+			sv_datagram_cmd_info_t info;
+			int length = SV_DGCommandLength (&reader, &info);
+			qboolean allow = true;
+
+			if (length <= 0)
+			{
+				int remaining_bytes = reader.size - reader.offset;
+
+				if (remaining_bytes > 0 && remaining_bytes <= remaining)
+				{
+					SZ_Write (&msg, reader.data + reader.offset, remaining_bytes);
+					frame.misc_bytes += remaining_bytes;
+					copied_bytes += remaining_bytes;
+					remaining -= remaining_bytes;
+				}
+				else if (remaining_bytes > 0)
+				{
+					dropped_bytes += remaining_bytes;
+					frame.trim_unreliable = 1;
+				}
+				break;
+			}
+
+			if (length > remaining)
+			{
+				dropped_bytes += length;
+				frame.trim_unreliable = 1;
+				reader.offset += length;
+				continue;
+			}
+
+			if ((info.category == SV_DG_CAT_EVENT || info.category == SV_DG_CAT_TEMP)
+				&& SV_DGIsDuplicateEvent (&info, seen, seen_count))
+			{
+				allow = false;
+				if (info.category == SV_DG_CAT_EVENT)
+					frame.drop_events++;
+				else
+					frame.drop_temps++;
+			}
+
+			if (allow && info.category == SV_DG_CAT_EVENT)
+			{
+				allow = SV_NetBudgetAllowEvent (client, length, &tick_event_bytes, &tick_event_count);
+				if (!allow)
+					frame.drop_events++;
+			}
+			else if (allow && info.category == SV_DG_CAT_TEMP)
+			{
+				if (info.temp_type >= 0
+					&& SV_DGTempEntityPriority (info.temp_type) > 0
+					&& remaining < length + 32)
+				{
+					allow = false;
+				}
+				if (allow)
+					allow = SV_NetBudgetAllowCount ((int)sv_tempentity_budget_count.value,
+						&tick_temp_count, &client->net_budget_sec_temp_count, rate);
+				if (!allow)
+					frame.drop_temps++;
+			}
+			else if (allow && info.category == SV_DG_CAT_SOUND)
+			{
+				allow = SV_NetBudgetAllowCount ((int)sv_sound_budget_count.value,
+					&tick_sound_count, &client->net_budget_sec_sound_count, rate);
+				if (!allow)
+					frame.drop_sounds++;
+			}
+			else if (allow && info.category == SV_DG_CAT_PRINT)
+			{
+				allow = SV_NetBudgetAllowCount ((int)sv_print_budget_count.value,
+					&tick_print_count, &client->net_budget_sec_print_count, rate);
+				if (!allow)
+					frame.drop_prints++;
+			}
+
+			if (allow)
+			{
+				SZ_Write (&msg, reader.data + reader.offset, length);
+				copied_bytes += length;
+				remaining -= length;
+
+				switch (info.category)
+				{
+				case SV_DG_CAT_EVENT:
+					frame.event_count++;
+					frame.temp_bytes += length;
+					break;
+				case SV_DG_CAT_TEMP:
+					frame.temp_count++;
+					frame.temp_bytes += length;
+					break;
+				case SV_DG_CAT_SOUND:
+					frame.sound_count++;
+					frame.sound_bytes += length;
+					break;
+				case SV_DG_CAT_PRINT:
+					frame.print_count++;
+					frame.print_bytes += length;
+					break;
+				default:
+					frame.misc_bytes += length;
+					break;
+				}
+
+				if (info.has_origin && seen_count < (int)(sizeof(seen) / sizeof(seen[0])))
+				{
+					seen[seen_count].cmd = info.cmd;
+					seen[seen_count].type = info.temp_type;
+					seen[seen_count].has_origin = info.has_origin;
+					VectorCopy (info.origin, seen[seen_count].origin);
+					seen_count++;
+				}
+			}
+			else
+			{
+				dropped_bytes += length;
+			}
+
+			reader.offset += length;
+		}
+
+		if (dropped_bytes > 0)
+		{
+			frame.trim_unreliable = 1;
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f trim_unreliable cl %d %s keep_control snapshot %d drop_datagram %d mtu_cap %d\n",
+				realtime, SV_ClientSlot (client), client->name,
+				client->mtu_last_snapshot_size, dropped_bytes, msg.maxsize);
+		}
+	}
+
+	SV_UpdateNetBudgetStats (client, &frame, &snapshot_stats);
+	if (net_snap_debug.value && (msg.maxsize - msg.cursize) <= 64)
+	{
+		NET_DebugLogEvent (false,
+			"NETDBG datagram_budget cl=%d mtu_cap=%d used=%d bycat: ctrl=%d snap=%d ent=%d rem=%d temp=%d snd=%d prn=%d misc=%d\n",
+			SV_ClientSlot (client),
+			msg.maxsize,
+			msg.cursize,
+			frame.ctrl_bytes,
+			frame.snap_bytes,
+			frame.ent_bytes,
+			frame.remove_bytes,
+			frame.temp_bytes,
+			frame.sound_bytes,
+			frame.print_bytes,
+			frame.misc_bytes);
 	}
 
 	if (msg.cursize > msg.maxsize)
@@ -4500,8 +5442,15 @@ void SV_SendClientMessages (void)
 
 		if (host_client->spawned)
 		{
+			int sendrate = SV_ClientSendRate (host_client);
+			double interval = sendrate > 0 ? (1.0 / (double)sendrate) : 0.0;
+
+			if (interval > 0.0 && realtime < host_client->net_send_next_time)
+				continue;
 			if (!SV_SendClientDatagram (host_client))
 				continue;
+			if (interval > 0.0)
+				host_client->net_send_next_time = realtime + interval;
 		}
 		else
 		{
