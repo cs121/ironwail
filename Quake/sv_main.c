@@ -52,6 +52,8 @@ static cvar_t sv_event_budget_count = {"sv_event_budget_count", "8", CVAR_NONE};
 static cvar_t sv_sound_budget_count = {"sv_sound_budget_count", "8", CVAR_NONE};
 static cvar_t sv_print_budget_count = {"sv_print_budget_count", "4", CVAR_NONE};
 static cvar_t sv_tempentity_budget_count = {"sv_tempentity_budget_count", "8", CVAR_NONE};
+static cvar_t sv_unrel_cooldown_frames = {"sv_unrel_cooldown_frames", "10", CVAR_NONE};
+static cvar_t sv_unrel_cap_bytes_conservative = {"sv_unrel_cap_bytes_conservative", "256", CVAR_NONE};
 cvar_t sv_cmd_ack_slack = {"sv_cmd_ack_slack", "64", CVAR_NONE};
 cvar_t sv_cmd_ack_bad_limit = {"sv_cmd_ack_bad_limit", "3", CVAR_NONE};
 cvar_t sv_cmd_ack_bad_window = {"sv_cmd_ack_bad_window", "2.0", CVAR_NONE};
@@ -92,6 +94,9 @@ static int SV_Snapshot2EstimateDeltaBytes (const snapshot_state_t *next, const s
 static int SV_Snapshot2CountFullChunks (const byte *present, const byte *snapflags, int max_edicts, int available);
 static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const snapshot_state_t *base, byte snapflags);
 static int SV_SnapshotDeltaFieldSize (unsigned int mask);
+static void SV_SetUnreliableMode (client_t *client, sv_unreliable_mode_t mode, int cooldown_frames, const char *reason);
+static void SV_SetUnreliableConservative (client_t *client, const char *reason);
+static void SV_UpdateUnreliableMode (client_t *client);
 
 typedef struct
 {
@@ -320,6 +325,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_sound_budget_count);
 	Cvar_RegisterVariable (&sv_print_budget_count);
 	Cvar_RegisterVariable (&sv_tempentity_budget_count);
+	Cvar_RegisterVariable (&sv_unrel_cooldown_frames);
+	Cvar_RegisterVariable (&sv_unrel_cap_bytes_conservative);
 	Cvar_RegisterVariable (&sv_cmd_ack_slack);
 	Cvar_RegisterVariable (&sv_cmd_ack_bad_limit);
 	Cvar_RegisterVariable (&sv_cmd_ack_bad_window);
@@ -558,6 +565,19 @@ static int SV_MTUCap (client_t *client)
 	return payload;
 }
 
+static void SV_MTUReasonAppend (char *dst, size_t dst_size, const char *reason)
+{
+	if (!dst || dst_size == 0 || !reason || !*reason)
+		return;
+	if (!dst[0])
+		q_strlcpy (dst, reason, dst_size);
+	else
+	{
+		q_strlcat (dst, "|", dst_size);
+		q_strlcat (dst, reason, dst_size);
+	}
+}
+
 /*
 ================
 SV_SendServerinfo
@@ -732,6 +752,8 @@ void SV_ConnectClient (int clientnum)
 		for (i=0 ; i<NUM_SPAWN_PARMS ; i++)
 			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
 	}
+
+	SV_SetUnreliableConservative (client, "connect");
 
 	SV_SendServerinfo (client);
 }
@@ -1096,9 +1118,12 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_stats_next_time = 0;
 	client->snapshot_debug_next_time = 0;
 	client->mtu_last_snapshot_size = 0;
+	client->mtu_last_cap = 0;
 	client->mtu_dropped_tier1 = 0;
 	client->mtu_dropped_tier2 = 0;
 	client->net_send_next_time = 0;
+	client->unreliable_mode = UNRELIABLE_NORMAL;
+	client->unreliable_cooldown_frames = 0;
 	client->net_budget_second_start = 0;
 	client->net_budget_sec_event_bytes = 0;
 	client->net_budget_sec_event_count = 0;
@@ -1723,6 +1748,9 @@ static void SV_Snapshot2ForceFull (client_t *client, snapshot_full_reason_t reas
 		return;
 	if (realtime < client->snapshot_force_full_next_time)
 		return;
+
+	if (reason == SNAP_FULL_MANUAL_RESYNC)
+		SV_SetUnreliableConservative (client, "manual_resync");
 
 	if (!client->snapshot_force_full_until_ack)
 	{
@@ -3988,6 +4016,7 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		SV_ResetClientSnapshot (client);
 		client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
 		client->entstream.active = false;
+		SV_SetUnreliableConservative (client, "baseline_reset");
 		if (sv_snapshotdebug.value || sv_snap_debug.value)
 			Con_Printf ("snapshot %s baseline reset request\n", client->name);
 		return;
@@ -4040,6 +4069,7 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 		{
 			client->snapshot_state = SNAP_ACTIVE;
 			client->snapshot_last_acked_full_seq = seq;
+			SV_SetUnreliableConservative (client, "full_snapshot_ack");
 		}
 		if (seq == client->snapshot_last_full_seq)
 			client->snapshot_last_acked_full_seq = seq;
@@ -4079,6 +4109,7 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f snap_complete_delta_after_full cl %d %s ack %u\n",
 				realtime, SV_ClientSlot (client), client->name, seq);
+			SV_SetUnreliableConservative (client, "complete_delta_after_full");
 		}
 	}
 
@@ -4609,6 +4640,51 @@ static qboolean SV_NetBudgetAllowCount (int limit, int *tick_count, int *sec_cou
 	return true;
 }
 
+static void SV_SetUnreliableMode (client_t *client, sv_unreliable_mode_t mode, int cooldown_frames, const char *reason)
+{
+	if (!client)
+		return;
+	if (cooldown_frames < 0)
+		cooldown_frames = 0;
+	if (mode == UNRELIABLE_NORMAL)
+		cooldown_frames = 0;
+	if (client->unreliable_mode == mode && client->unreliable_cooldown_frames == cooldown_frames)
+		return;
+
+	client->unreliable_mode = mode;
+	client->unreliable_cooldown_frames = cooldown_frames;
+
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f unrel_mode cl %d %s mode %d frames %d reason %s\n",
+		realtime, SV_ClientSlot (client), client->name, mode, cooldown_frames,
+		reason ? reason : "unknown");
+}
+
+static void SV_SetUnreliableConservative (client_t *client, const char *reason)
+{
+	int frames = (int)sv_unrel_cooldown_frames.value;
+
+	if (frames < 0)
+		frames = 0;
+	if (frames == 0)
+		return;
+	if (client->unreliable_mode != UNRELIABLE_CONSERVATIVE
+		|| client->unreliable_cooldown_frames < frames)
+	{
+		SV_SetUnreliableMode (client, UNRELIABLE_CONSERVATIVE, frames, reason);
+	}
+}
+
+static void SV_UpdateUnreliableMode (client_t *client)
+{
+	if (client->unreliable_mode != UNRELIABLE_CONSERVATIVE)
+		return;
+	if (client->unreliable_cooldown_frames > 0)
+		client->unreliable_cooldown_frames--;
+	if (client->unreliable_cooldown_frames <= 0)
+		SV_SetUnreliableMode (client, UNRELIABLE_NORMAL, 0, "cooldown_complete");
+}
+
 static void SV_UpdateNetBudgetStats (client_t *client, const sv_datagram_budget_frame_t *frame,
 	const snapshot_write_stats_t *snapshot_stats)
 {
@@ -4880,6 +4956,11 @@ qboolean SV_SendClientDatagram (client_t *client)
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
 	int		mtu_cap;
+	int		mtu_raw;
+	int		mtu_cvar_cap;
+	int		per_packet;
+	int		old_mtu_cap;
+	char		mtu_reason[128];
 	qboolean	snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
 	int		temp_bytes = sv.datagram.cursize;
 	qboolean	packet_too_large = false;
@@ -4907,15 +4988,44 @@ qboolean SV_SendClientDatagram (client_t *client)
 	msg.dbg_aux = 0;
 	msg.bitpos = 0;
 
+	mtu_raw = (int)sv_mtu.value;
+	mtu_cvar_cap = (int)sv_mtu_cap.value;
+	per_packet = 0;
+	old_mtu_cap = client->mtu_last_cap;
+	mtu_reason[0] = '\0';
+
+	SV_UpdateUnreliableMode (client);
+
 	mtu_cap = SV_MTUCap (client);
 	if (mtu_cap > 0)
+	{
+		if (mtu_cap < msg.maxsize)
+			SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "cap");
 		msg.maxsize = q_min (msg.maxsize, mtu_cap);
+	}
 	if (client->rate > 0 && sendrate > 0)
 	{
-		int per_packet = client->rate / sendrate;
+		per_packet = client->rate / sendrate;
 		if (per_packet > 0)
+		{
+			if (per_packet < msg.maxsize)
+				SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "rate");
 			msg.maxsize = q_min (msg.maxsize, per_packet);
+		}
 	}
+	if (client->snapshot_state != SNAP_ACTIVE)
+		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "join");
+	if (client->snapshot_force_full_reason == SNAP_FULL_MANUAL_RESYNC
+		|| client->snapshot_force_full_until_ack)
+	{
+		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "resync");
+	}
+	if (client->unreliable_mode == UNRELIABLE_CONSERVATIVE)
+		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "policy");
+	if (client->snapshot_incomplete_streak > 0 || client->snapshot_ack_stall_frames > 0)
+		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "loss");
+	if (client->mtu_dropped_tier1 > 0 || client->mtu_dropped_tier2 > 0)
+		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "frag");
 
 	if (!NET_CanSendUnreliableMessage (client->netconnection))
 		return false;
@@ -4969,7 +5079,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 	SV_NetBudgetResetSecond (client, realtime);
 
-// copy the server datagram with per-category budgets
+// Phase 2: copy optional/unreliable payload with MTU-aware pre-budgeting.
 	if (!msg.write_locked && temp_bytes > 0)
 	{
 		sv_datagram_reader_t reader;
@@ -4980,16 +5090,27 @@ qboolean SV_SendClientDatagram (client_t *client)
 		int tick_temp_count = 0;
 		int tick_sound_count = 0;
 		int tick_print_count = 0;
-		int remaining = msg.maxsize - msg.cursize;
+		int optional_total_budget = msg.maxsize - msg.cursize;
+		int optional_budget = optional_total_budget;
+		int optional_remaining;
+		int deferred_bytes = 0;
+		qboolean budget_exhausted = false;
 		int copied_bytes = 0;
 		int dropped_bytes = 0;
 		int rate = SV_ClientSendRate (client);
+		int conservative_cap = (int)sv_unrel_cap_bytes_conservative.value;
 
 		memset (seen, 0, sizeof(seen));
 		reader.data = sv.datagram.data;
 		reader.size = temp_bytes;
 		reader.offset = 0;
 		reader.bad = false;
+
+		if (optional_budget < 0)
+			optional_budget = 0;
+		if (client->unreliable_mode == UNRELIABLE_CONSERVATIVE && conservative_cap > 0)
+			optional_budget = q_min (optional_budget, conservative_cap);
+		optional_remaining = optional_budget;
 
 		while (reader.offset < reader.size)
 		{
@@ -5001,27 +5122,26 @@ qboolean SV_SendClientDatagram (client_t *client)
 			{
 				int remaining_bytes = reader.size - reader.offset;
 
-				if (remaining_bytes > 0 && remaining_bytes <= remaining)
+				if (remaining_bytes > 0 && remaining_bytes <= optional_remaining)
 				{
 					SZ_Write (&msg, reader.data + reader.offset, remaining_bytes);
 					frame.misc_bytes += remaining_bytes;
 					copied_bytes += remaining_bytes;
-					remaining -= remaining_bytes;
+					optional_remaining -= remaining_bytes;
 				}
 				else if (remaining_bytes > 0)
 				{
-					dropped_bytes += remaining_bytes;
-					frame.trim_unreliable = 1;
+					deferred_bytes += remaining_bytes;
+					budget_exhausted = true;
 				}
 				break;
 			}
 
-			if (length > remaining)
+			if (length > optional_remaining)
 			{
-				dropped_bytes += length;
-				frame.trim_unreliable = 1;
-				reader.offset += length;
-				continue;
+				deferred_bytes += reader.size - reader.offset;
+				budget_exhausted = true;
+				break;
 			}
 
 			if ((info.category == SV_DG_CAT_EVENT || info.category == SV_DG_CAT_TEMP)
@@ -5044,7 +5164,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 			{
 				if (info.temp_type >= 0
 					&& SV_DGTempEntityPriority (info.temp_type) > 0
-					&& remaining < length + 32)
+					&& optional_remaining < length + 32)
 				{
 					allow = false;
 				}
@@ -5073,7 +5193,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 			{
 				SZ_Write (&msg, reader.data + reader.offset, length);
 				copied_bytes += length;
-				remaining -= length;
+				optional_remaining -= length;
 
 				switch (info.category)
 				{
@@ -5115,14 +5235,40 @@ qboolean SV_SendClientDatagram (client_t *client)
 			reader.offset += length;
 		}
 
-		if (dropped_bytes > 0)
+		if (budget_exhausted || dropped_bytes > 0)
 		{
-			frame.trim_unreliable = 1;
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f trim_unreliable cl %d %s keep_control snapshot %d drop_datagram %d mtu_cap %d\n",
+				"NETDBG time %.3f unrel_budget cl %d %s mode %d budget %d used %d deferred %d dropped %d mtu_cap %d\n",
 				realtime, SV_ClientSlot (client), client->name,
-				client->mtu_last_snapshot_size, dropped_bytes, msg.maxsize);
+				client->unreliable_mode,
+				optional_budget,
+				optional_budget - optional_remaining,
+				deferred_bytes,
+				dropped_bytes,
+				msg.maxsize);
 		}
+	}
+
+	{
+		int remaining_bytes = msg.maxsize - msg.cursize;
+		int header_reserve = NET_HEADERSIZE + NET_UDPIP_HEADER_BYTES;
+
+		if (remaining_bytes < 0)
+			remaining_bytes = 0;
+		if (old_mtu_cap != msg.maxsize || net_snap_debug.value || sv_mtu_debug.value)
+		{
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f mtu_cap cl %d %s cap %d->%d raw_mtu %d cap_cvar %d rate_pkt %d "
+				"reserves hdr %d ctrl %d reliable %d reason %s frag_tier %d/%d loss %d ack_stall %d policy %d remaining %d\n",
+				realtime, SV_ClientSlot (client), client->name,
+				old_mtu_cap, msg.maxsize, mtu_raw, mtu_cvar_cap, per_packet,
+				header_reserve, ctrl_bytes, client->message.cursize,
+				mtu_reason[0] ? mtu_reason : "none",
+				client->mtu_dropped_tier1, client->mtu_dropped_tier2,
+				client->snapshot_incomplete_streak, client->snapshot_ack_stall_frames,
+				client->unreliable_mode, remaining_bytes);
+		}
+		client->mtu_last_cap = msg.maxsize;
 	}
 
 	SV_UpdateNetBudgetStats (client, &frame, &snapshot_stats);

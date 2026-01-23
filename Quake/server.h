@@ -196,6 +196,12 @@ typedef enum snapshot_full_reason_e
 	SNAP_FULL_MANUAL_RESYNC
 } snapshot_full_reason_t;
 
+typedef enum sv_unreliable_mode_e
+{
+	UNRELIABLE_NORMAL = 0,
+	UNRELIABLE_CONSERVATIVE
+} sv_unreliable_mode_t;
+
 typedef struct net_budget_stats_s
 {
 	double		avg_ctrl_bytes;
@@ -329,12 +335,15 @@ typedef struct client_s
 	double			snapshot_stats_next_time;
 	double			snapshot_debug_next_time;
 	int				mtu_last_snapshot_size;
+	int				mtu_last_cap;
 	int				mtu_dropped_tier1;
 	int				mtu_dropped_tier2;
 	double			mtu_debug_next_time;
 	int				datagram_overflow_count;
 	double			datagram_overflow_next_time;
 	double			net_send_next_time;
+	sv_unreliable_mode_t unreliable_mode;
+	int				unreliable_cooldown_frames;
 	double			net_budget_second_start;
 	int				net_budget_sec_event_bytes;
 	int				net_budget_sec_event_count;
