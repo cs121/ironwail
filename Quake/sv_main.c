@@ -83,6 +83,7 @@ static void SV_SignonStreamSend (client_t *client);
 static qboolean SV_Snapshot2RecoveryEnabled (void);
 static int SV_Snapshot2EstimateDeltaBytes (const snapshot_state_t *next, const snapshot_state_t *base,
 	byte snapflags, unsigned int *out_mask);
+static int SV_Snapshot2CountFullChunks (const byte *present, const byte *snapflags, int max_edicts, int available);
 static unsigned int SV_SnapshotFieldMask (const snapshot_state_t *next, const snapshot_state_t *base, byte snapflags);
 static int SV_SnapshotDeltaFieldSize (unsigned int mask);
 
