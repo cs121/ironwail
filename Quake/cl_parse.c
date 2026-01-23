@@ -2920,8 +2920,19 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_time:
+		{
+			double server_time = MSG_ReadFloat ();
+
 			cl.mtime[1] = cl.mtime[0];
-			cl.mtime[0] = MSG_ReadFloat ();
+			cl.mtime[0] = server_time;
+			cl.latest_server_time = server_time;
+			{
+				double offset = server_time - realtime;
+				if (cl.clock_offset == 0.0)
+					cl.clock_offset = offset;
+				else
+					cl.clock_offset += (offset - cl.clock_offset) * 0.1;
+			}
 			cl.fixangle = false;
 			if (cls.signon == SIGNONS - 1)
 			{	// allow map loads with no visible entity updates to finish signon
@@ -2929,6 +2940,7 @@ void CL_ParseServerMessage (void)
 				CL_SignonReply ();
 			}
 			break;
+		}
 
 		case svc_clientdata:
 			CL_ParseClientdata (); //johnfitz -- removed bits parameter, we will read this inside CL_ParseClientdata()

@@ -263,6 +263,8 @@ typedef struct
 								// a lerp point for other data
 	double		oldtime;		// previous cl.time, time-oldtime is used
 								// to decay light values and smooth step ups
+	double		latest_server_time;	// most recent server time from snapshots
+	double		clock_offset;		// smoothed server_time - realtime offset
 
 
 	float		last_received_message;	// (realtime) for net trouble icon
