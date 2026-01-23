@@ -98,9 +98,9 @@ static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr)
 	char text[2048];
 	int len;
 
-	if (!force && !NET_DebugEnabled ())
+	if (!NET_DebugEnabled () && (!force || !net_debug_log))
 		return;
-	if (!net_debug_log && !net_debug_log_tried)
+	if (!net_debug_log && !net_debug_log_tried && NET_DebugEnabled ())
 	{
 		char path[MAX_OSPATH];
 		net_debug_log_tried = true;
