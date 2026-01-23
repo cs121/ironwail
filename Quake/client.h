@@ -74,6 +74,26 @@ extern cshift_t		cshift_empty;
 
 #define CL_ENTITY_SNAP_HISTORY 3
 #define CL_SNAPSHOT_MAX_CHUNKS 64
+#define CL_SNAPSHOT_CHUNK_INFLIGHT 4
+
+typedef struct cl_snapshot_chunk_asm_s
+{
+	qboolean	active;
+	unsigned int seq;
+	unsigned int expected_total;
+	unsigned int received;
+	unsigned short remaining;
+	unsigned short total_entities;
+	unsigned short total_chunks;
+	unsigned short received_chunks;
+	unsigned int total_bytes;
+	unsigned int flags;
+	byte		*buffers[CL_SNAPSHOT_MAX_CHUNKS];
+	unsigned short sizes[CL_SNAPSHOT_MAX_CHUNKS];
+	byte		received_mask[CL_SNAPSHOT_MAX_CHUNKS];
+	double		start_time;
+	int			packets;
+} cl_snapshot_chunk_asm_t;
 
 typedef struct cl_entity_snap_s
 {
@@ -316,21 +336,7 @@ typedef struct
 	byte		snapshot_baseline_valid[CL_SNAPSHOT_BASELINE_HISTORY];
 	byte		*snapshot_active;
 	double		*snapshot_last_update_time;
-	qboolean	snapshot_chunk_active;
-	unsigned int snapshot_chunk_seq;
-	unsigned int snapshot_chunk_expected_total;
-	unsigned int snapshot_chunk_received;
-	unsigned short snapshot_chunk_remaining;
-	unsigned short snapshot_chunk_total_entities;
-	unsigned short snapshot_chunk_total_chunks;
-	unsigned short snapshot_chunk_received_chunks;
-	unsigned int snapshot_chunk_total_bytes;
-	unsigned int snapshot_chunk_flags;
-	byte		*snapshot_chunk_buffers[CL_SNAPSHOT_MAX_CHUNKS];
-	unsigned short snapshot_chunk_sizes[CL_SNAPSHOT_MAX_CHUNKS];
-	byte		snapshot_chunk_received_mask[CL_SNAPSHOT_MAX_CHUNKS];
-	double		snapshot_chunk_start_time;
-	int			snapshot_chunk_packets;
+	cl_snapshot_chunk_asm_t snapshot_chunk_assemblies[CL_SNAPSHOT_CHUNK_INFLIGHT];
 	snapshot_state_t *snapshot_chunk;
 	byte		*snapshot_chunk_present;
 	snapshot_state_t *snapshot_stage;
