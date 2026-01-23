@@ -121,6 +121,8 @@ const char *svc_strings[] =
 static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error);
 static void CL_ApplySnapshotOrigin (vec3_t out, const vec3_t in);
 static void CL_ApplyEntityOrigin (entity_t *ent, int entnum);
+static void CL_ResetSnapshotChunkAssembly (cl_snapshot_chunk_asm_t *chunk);
+static qboolean CL_HasActiveSnapshotChunks (void);
 
 static const char *CL_SvcName (int cmd)
 {
