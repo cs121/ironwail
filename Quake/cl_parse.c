@@ -1806,6 +1806,13 @@ static void CL_ParseSnapshot2 (void)
 
 	if (is_full && !cl.has_full_snapshot && !continuation)
 		incomplete = false;
+	if (is_delta && incomplete)
+	{
+		if (cl_snap_debug.value >= 1.0f)
+			Con_Printf ("cl_snap2 delta incomplete ignored seq %u base %u\n",
+				header.seq, header.base_seq);
+		incomplete = false;
+	}
 
 	if (!CL_SnapshotWorldModelReady ("snapshot2 worldmodel"))
 		drop = true;

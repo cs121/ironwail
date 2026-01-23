@@ -239,8 +239,14 @@ typedef struct client_s
 	snapshot_state_t *snapshot_pending;
 	byte			*snapshot_pending_present;
 	byte			*snapshot_pending_relevant;
+	byte			*snapshot_pending_remove;
 	byte			*snapshot_pending_flags;
+	snapshot_state_t *snapshot_build_state;
+	byte			*snapshot_build_present;
 	unsigned int	*snapshot_last_sent_seq_by_ent;
+	double			*snapshot_last_relevant_time_by_ent;
+	double			snapshot_rate_tokens;
+	double			snapshot_rate_last_time;
 	int				snapshot_prio_cursor;
 	int				snapshot_unacked_frames;
 	int				snapshot_pending_mandatory;
