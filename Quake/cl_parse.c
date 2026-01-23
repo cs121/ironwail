@@ -1040,6 +1040,30 @@ static void CL_ReadSnapshotState (snapshot_state_t *state, unsigned int snapflag
 	state->state.alpha = (unsigned char)MSG_ReadByte ();
 	state->state.scale = (unsigned char)MSG_ReadByte ();
 	state->step = (byte)MSG_ReadByte ();
+	state->health = (short)MSG_ReadShort ();
+	state->armor = (short)MSG_ReadShort ();
+	state->ammo = (short)MSG_ReadShort ();
+	state->weaponmodel = (unsigned short)MSG_ReadShort ();
+	state->weaponframe = (unsigned short)MSG_ReadShort ();
+	state->items = (unsigned int)MSG_ReadLong ();
+	state->activeweapon = (unsigned int)MSG_ReadLong ();
+	state->ammo_shells = (byte)MSG_ReadByte ();
+	state->ammo_nails = (byte)MSG_ReadByte ();
+	state->ammo_rockets = (byte)MSG_ReadByte ();
+	state->ammo_cells = (byte)MSG_ReadByte ();
+	state->viewheight = (char)MSG_ReadChar ();
+	state->idealpitch = (char)MSG_ReadChar ();
+	for (i = 0; i < 3; i++)
+		state->punchangle[i] = (char)MSG_ReadChar ();
+	for (i = 0; i < 3; i++)
+		state->velocity[i] = (char)MSG_ReadChar ();
+	state->movetype = (byte)MSG_ReadByte ();
+	state->pm_flags = (byte)MSG_ReadByte ();
+	state->waterlevel = (byte)MSG_ReadByte ();
+	state->watertype = (byte)MSG_ReadByte ();
+	state->event = (byte)MSG_ReadByte ();
+	state->event_param = (byte)MSG_ReadByte ();
+	state->event_seq = (unsigned short)MSG_ReadShort ();
 }
 
 static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int mask)
@@ -1076,6 +1100,41 @@ static void CL_ReadSnapshotDeltaFields (snapshot_state_t *state, unsigned int ma
 		state->state.scale = (unsigned char)MSG_ReadByte ();
 	if (mask & SNAP_STEP)
 		state->step = (byte)MSG_ReadByte ();
+	if (mask & SNAP_PLAYERSTATS)
+	{
+		state->health = (short)MSG_ReadShort ();
+		state->armor = (short)MSG_ReadShort ();
+		state->ammo = (short)MSG_ReadShort ();
+		state->weaponmodel = (unsigned short)MSG_ReadShort ();
+		state->weaponframe = (unsigned short)MSG_ReadShort ();
+		state->items = (unsigned int)MSG_ReadLong ();
+		state->activeweapon = (unsigned int)MSG_ReadLong ();
+		state->ammo_shells = (byte)MSG_ReadByte ();
+		state->ammo_nails = (byte)MSG_ReadByte ();
+		state->ammo_rockets = (byte)MSG_ReadByte ();
+		state->ammo_cells = (byte)MSG_ReadByte ();
+	}
+	if (mask & SNAP_PLAYERMOVE)
+	{
+		int i;
+
+		state->viewheight = (char)MSG_ReadChar ();
+		state->idealpitch = (char)MSG_ReadChar ();
+		for (i = 0; i < 3; i++)
+			state->punchangle[i] = (char)MSG_ReadChar ();
+		for (i = 0; i < 3; i++)
+			state->velocity[i] = (char)MSG_ReadChar ();
+		state->movetype = (byte)MSG_ReadByte ();
+		state->pm_flags = (byte)MSG_ReadByte ();
+		state->waterlevel = (byte)MSG_ReadByte ();
+		state->watertype = (byte)MSG_ReadByte ();
+	}
+	if (mask & SNAP_PLAYEREVENTS)
+	{
+		state->event = (byte)MSG_ReadByte ();
+		state->event_param = (byte)MSG_ReadByte ();
+		state->event_seq = (unsigned short)MSG_ReadShort ();
+	}
 }
 
 static void CL_ClearSnapshotStage (void);
