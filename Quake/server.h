@@ -35,6 +35,7 @@ typedef struct
 } server_static_t;
 
 extern cvar_t sv_mtu;
+extern cvar_t sv_mtu_headroom;
 extern cvar_t sv_mtu_debug;
 
 //=============================================================================
@@ -339,6 +340,8 @@ typedef struct client_s
 	int				mtu_dropped_tier1;
 	int				mtu_dropped_tier2;
 	double			mtu_debug_next_time;
+	sizebuf_t		unrel_queue;
+	byte			unrel_queue_buf[MAX_DATAGRAM];
 	int				datagram_overflow_count;
 	double			datagram_overflow_next_time;
 	double			net_send_next_time;

@@ -60,6 +60,7 @@ cvar_t sv_cmd_ack_bad_window = {"sv_cmd_ack_bad_window", "2.0", CVAR_NONE};
 cvar_t sv_cmd_ack_debug = {"sv_cmd_ack_debug", "0", CVAR_NONE};
 cvar_t sv_mtu = {"sv_mtu", "1400", CVAR_NONE};
 static cvar_t sv_mtu_cap = {"sv_mtu_cap", "1400", CVAR_NONE};
+cvar_t sv_mtu_headroom = {"sv_mtu_headroom", "48", CVAR_NONE};
 cvar_t sv_mtu_debug = {"sv_mtu_debug", "0", CVAR_NONE};
 cvar_t sv_minrate = {"sv_minrate", "0", CVAR_NONE};
 cvar_t sv_maxrate = {"sv_maxrate", "0", CVAR_NONE};
@@ -333,6 +334,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_cmd_ack_debug);
 	Cvar_RegisterVariable (&sv_mtu);
 	Cvar_RegisterVariable (&sv_mtu_cap);
+	Cvar_RegisterVariable (&sv_mtu_headroom);
 	Cvar_RegisterVariable (&sv_mtu_debug);
 	Cvar_RegisterVariable (&sv_minrate);
 	Cvar_RegisterVariable (&sv_maxrate);
@@ -742,6 +744,11 @@ void SV_ConnectClient (int clientnum)
 	client->message.dbg_name = "client_message";
 	if (SV_IsLocalClient (client))
 		client->message.maxsize = NET_MAXMESSAGE - 4;
+	client->unrel_queue.data = client->unrel_queue_buf;
+	client->unrel_queue.maxsize = sizeof(client->unrel_queue_buf);
+	client->unrel_queue.allowoverflow = false;
+	client->unrel_queue.dbg_name = "client_unrel_queue";
+	SZ_Clear (&client->unrel_queue);
 
 	if (sv.loadgame)
 		memcpy (client->spawn_parms, spawn_parms, sizeof(spawn_parms));
@@ -4150,6 +4157,35 @@ typedef struct
 	qboolean		bad;
 } sv_datagram_reader_t;
 
+static void SV_UnrelQueueConsume (client_t *client, int bytes)
+{
+	if (bytes <= 0)
+		return;
+	if (bytes >= client->unrel_queue.cursize)
+	{
+		client->unrel_queue.cursize = 0;
+		return;
+	}
+	memmove (client->unrel_queue.data,
+		client->unrel_queue.data + bytes,
+		client->unrel_queue.cursize - bytes);
+	client->unrel_queue.cursize -= bytes;
+}
+
+static int SV_UnrelQueueAppend (client_t *client, const byte *data, int bytes)
+{
+	int available = client->unrel_queue.maxsize - client->unrel_queue.cursize;
+	int to_copy = q_min (available, bytes);
+
+	if (to_copy > 0)
+	{
+		memcpy (client->unrel_queue.data + client->unrel_queue.cursize, data, to_copy);
+		client->unrel_queue.cursize += to_copy;
+	}
+
+	return bytes - to_copy;
+}
+
 typedef struct
 {
 	int				cmd;
@@ -4963,6 +4999,9 @@ qboolean SV_SendClientDatagram (client_t *client)
 	char		mtu_reason[128];
 	qboolean	snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
 	int		temp_bytes = sv.datagram.cursize;
+	int		mandatory_bytes = 0;
+	int		headroom_bytes = 0;
+	int		best_effort_budget = 0;
 	qboolean	packet_too_large = false;
 	snapshot_write_stats_t snapshot_stats;
 	sv_datagram_budget_frame_t frame;
@@ -5062,6 +5101,19 @@ qboolean SV_SendClientDatagram (client_t *client)
 		goto datagram_too_large;
 	}
 	client->datagram_overflow_count = 0;
+	mandatory_bytes = msg.cursize;
+	headroom_bytes = (int)sv_mtu_headroom.value;
+	if (headroom_bytes < 0)
+		headroom_bytes = 0;
+	best_effort_budget = msg.maxsize - mandatory_bytes - headroom_bytes;
+	if (best_effort_budget < 0)
+		best_effort_budget = 0;
+	if (client->unreliable_mode == UNRELIABLE_CONSERVATIVE
+		&& sv_unrel_cap_bytes_conservative.value > 0.0f)
+	{
+		best_effort_budget = q_min (best_effort_budget,
+			(int)sv_unrel_cap_bytes_conservative.value);
+	}
 
 	if (snapshot2_recovery && sv_snap_temp_max_bytes.value > 0
 		&& temp_bytes > (int)sv_snap_temp_max_bytes.value)
@@ -5080,7 +5132,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	SV_NetBudgetResetSecond (client, realtime);
 
 // Phase 2: copy optional/unreliable payload with MTU-aware pre-budgeting.
-	if (!msg.write_locked && temp_bytes > 0)
+	if (!msg.write_locked && (temp_bytes > 0 || client->unrel_queue.cursize > 0))
 	{
 		sv_datagram_reader_t reader;
 		sv_event_dedupe_t seen[32];
@@ -5090,150 +5142,295 @@ qboolean SV_SendClientDatagram (client_t *client)
 		int tick_temp_count = 0;
 		int tick_sound_count = 0;
 		int tick_print_count = 0;
-		int optional_total_budget = msg.maxsize - msg.cursize;
-		int optional_budget = optional_total_budget;
+		int optional_budget = best_effort_budget;
 		int optional_remaining;
 		int deferred_bytes = 0;
 		qboolean budget_exhausted = false;
-		int copied_bytes = 0;
 		int dropped_bytes = 0;
 		int rate = SV_ClientSendRate (client);
-		int conservative_cap = (int)sv_unrel_cap_bytes_conservative.value;
+		int queue_consumed = 0;
 
 		memset (seen, 0, sizeof(seen));
-		reader.data = sv.datagram.data;
-		reader.size = temp_bytes;
-		reader.offset = 0;
-		reader.bad = false;
 
 		if (optional_budget < 0)
 			optional_budget = 0;
-		if (client->unreliable_mode == UNRELIABLE_CONSERVATIVE && conservative_cap > 0)
-			optional_budget = q_min (optional_budget, conservative_cap);
 		optional_remaining = optional_budget;
 
-		while (reader.offset < reader.size)
+		if (client->unrel_queue.cursize > 0)
 		{
-			sv_datagram_cmd_info_t info;
-			int length = SV_DGCommandLength (&reader, &info);
-			qboolean allow = true;
+			reader.data = client->unrel_queue.data;
+			reader.size = client->unrel_queue.cursize;
+			reader.offset = 0;
+			reader.bad = false;
 
-			if (length <= 0)
+			while (reader.offset < reader.size)
 			{
-				int remaining_bytes = reader.size - reader.offset;
+				sv_datagram_cmd_info_t info;
+				int length = SV_DGCommandLength (&reader, &info);
+				qboolean allow = true;
 
-				if (remaining_bytes > 0 && remaining_bytes <= optional_remaining)
+				if (length <= 0)
 				{
-					SZ_Write (&msg, reader.data + reader.offset, remaining_bytes);
-					frame.misc_bytes += remaining_bytes;
-					copied_bytes += remaining_bytes;
-					optional_remaining -= remaining_bytes;
+					int remaining_bytes = reader.size - reader.offset;
+
+					if (remaining_bytes > 0 && remaining_bytes <= optional_remaining)
+					{
+						SZ_Write (&msg, reader.data + reader.offset, remaining_bytes);
+						frame.misc_bytes += remaining_bytes;
+						optional_remaining -= remaining_bytes;
+						queue_consumed += remaining_bytes;
+					}
+					else if (remaining_bytes > 0)
+					{
+						budget_exhausted = true;
+					}
+					break;
 				}
-				else if (remaining_bytes > 0)
+
+				if (length > optional_remaining)
 				{
-					deferred_bytes += remaining_bytes;
 					budget_exhausted = true;
+					break;
 				}
-				break;
-			}
 
-			if (length > optional_remaining)
-			{
-				deferred_bytes += reader.size - reader.offset;
-				budget_exhausted = true;
-				break;
-			}
-
-			if ((info.category == SV_DG_CAT_EVENT || info.category == SV_DG_CAT_TEMP)
-				&& SV_DGIsDuplicateEvent (&info, seen, seen_count))
-			{
-				allow = false;
-				if (info.category == SV_DG_CAT_EVENT)
-					frame.drop_events++;
-				else
-					frame.drop_temps++;
-			}
-
-			if (allow && info.category == SV_DG_CAT_EVENT)
-			{
-				allow = SV_NetBudgetAllowEvent (client, length, &tick_event_bytes, &tick_event_count);
-				if (!allow)
-					frame.drop_events++;
-			}
-			else if (allow && info.category == SV_DG_CAT_TEMP)
-			{
-				if (info.temp_type >= 0
-					&& SV_DGTempEntityPriority (info.temp_type) > 0
-					&& optional_remaining < length + 32)
+				if ((info.category == SV_DG_CAT_EVENT || info.category == SV_DG_CAT_TEMP)
+					&& SV_DGIsDuplicateEvent (&info, seen, seen_count))
 				{
 					allow = false;
+					if (info.category == SV_DG_CAT_EVENT)
+						frame.drop_events++;
+					else
+						frame.drop_temps++;
 				}
+
+				if (allow && info.category == SV_DG_CAT_EVENT)
+				{
+					allow = SV_NetBudgetAllowEvent (client, length, &tick_event_bytes, &tick_event_count);
+					if (!allow)
+						frame.drop_events++;
+				}
+				else if (allow && info.category == SV_DG_CAT_TEMP)
+				{
+					if (info.temp_type >= 0
+						&& SV_DGTempEntityPriority (info.temp_type) > 0
+						&& optional_remaining < length + 32)
+					{
+						allow = false;
+					}
+					if (allow)
+						allow = SV_NetBudgetAllowCount ((int)sv_tempentity_budget_count.value,
+							&tick_temp_count, &client->net_budget_sec_temp_count, rate);
+					if (!allow)
+						frame.drop_temps++;
+				}
+				else if (allow && info.category == SV_DG_CAT_SOUND)
+				{
+					allow = SV_NetBudgetAllowCount ((int)sv_sound_budget_count.value,
+						&tick_sound_count, &client->net_budget_sec_sound_count, rate);
+					if (!allow)
+						frame.drop_sounds++;
+				}
+				else if (allow && info.category == SV_DG_CAT_PRINT)
+				{
+					allow = SV_NetBudgetAllowCount ((int)sv_print_budget_count.value,
+						&tick_print_count, &client->net_budget_sec_print_count, rate);
+					if (!allow)
+						frame.drop_prints++;
+				}
+
 				if (allow)
-					allow = SV_NetBudgetAllowCount ((int)sv_tempentity_budget_count.value,
-						&tick_temp_count, &client->net_budget_sec_temp_count, rate);
-				if (!allow)
-					frame.drop_temps++;
-			}
-			else if (allow && info.category == SV_DG_CAT_SOUND)
-			{
-				allow = SV_NetBudgetAllowCount ((int)sv_sound_budget_count.value,
-					&tick_sound_count, &client->net_budget_sec_sound_count, rate);
-				if (!allow)
-					frame.drop_sounds++;
-			}
-			else if (allow && info.category == SV_DG_CAT_PRINT)
-			{
-				allow = SV_NetBudgetAllowCount ((int)sv_print_budget_count.value,
-					&tick_print_count, &client->net_budget_sec_print_count, rate);
-				if (!allow)
-					frame.drop_prints++;
-			}
-
-			if (allow)
-			{
-				SZ_Write (&msg, reader.data + reader.offset, length);
-				copied_bytes += length;
-				optional_remaining -= length;
-
-				switch (info.category)
 				{
-				case SV_DG_CAT_EVENT:
-					frame.event_count++;
-					frame.temp_bytes += length;
-					break;
-				case SV_DG_CAT_TEMP:
-					frame.temp_count++;
-					frame.temp_bytes += length;
-					break;
-				case SV_DG_CAT_SOUND:
-					frame.sound_count++;
-					frame.sound_bytes += length;
-					break;
-				case SV_DG_CAT_PRINT:
-					frame.print_count++;
-					frame.print_bytes += length;
-					break;
-				default:
-					frame.misc_bytes += length;
-					break;
+					SZ_Write (&msg, reader.data + reader.offset, length);
+					optional_remaining -= length;
+					queue_consumed += length;
+
+					switch (info.category)
+					{
+					case SV_DG_CAT_EVENT:
+						frame.event_count++;
+						frame.temp_bytes += length;
+						break;
+					case SV_DG_CAT_TEMP:
+						frame.temp_count++;
+						frame.temp_bytes += length;
+						break;
+					case SV_DG_CAT_SOUND:
+						frame.sound_count++;
+						frame.sound_bytes += length;
+						break;
+					case SV_DG_CAT_PRINT:
+						frame.print_count++;
+						frame.print_bytes += length;
+						break;
+					default:
+						frame.misc_bytes += length;
+						break;
+					}
+
+					if (info.has_origin && seen_count < (int)(sizeof(seen) / sizeof(seen[0])))
+					{
+						seen[seen_count].cmd = info.cmd;
+						seen[seen_count].type = info.temp_type;
+						seen[seen_count].has_origin = info.has_origin;
+						VectorCopy (info.origin, seen[seen_count].origin);
+						seen_count++;
+					}
+				}
+				else
+				{
+					queue_consumed += length;
+					dropped_bytes += length;
 				}
 
-				if (info.has_origin && seen_count < (int)(sizeof(seen) / sizeof(seen[0])))
-				{
-					seen[seen_count].cmd = info.cmd;
-					seen[seen_count].type = info.temp_type;
-					seen[seen_count].has_origin = info.has_origin;
-					VectorCopy (info.origin, seen[seen_count].origin);
-					seen_count++;
-				}
+				reader.offset += length;
+			}
+
+			SV_UnrelQueueConsume (client, queue_consumed);
+		}
+
+		if (temp_bytes > 0)
+		{
+			if (optional_remaining <= 0)
+			{
+				int dropped = SV_UnrelQueueAppend (client, sv.datagram.data, temp_bytes);
+				dropped_bytes += dropped;
+				budget_exhausted = true;
 			}
 			else
 			{
-				dropped_bytes += length;
-			}
+				reader.data = sv.datagram.data;
+				reader.size = temp_bytes;
+				reader.offset = 0;
+				reader.bad = false;
 
-			reader.offset += length;
+				while (reader.offset < reader.size)
+				{
+					sv_datagram_cmd_info_t info;
+					int length = SV_DGCommandLength (&reader, &info);
+					qboolean allow = true;
+
+					if (length <= 0)
+					{
+						int remaining_bytes = reader.size - reader.offset;
+
+						if (remaining_bytes > 0 && remaining_bytes <= optional_remaining)
+						{
+							SZ_Write (&msg, reader.data + reader.offset, remaining_bytes);
+							frame.misc_bytes += remaining_bytes;
+							optional_remaining -= remaining_bytes;
+						}
+						else if (remaining_bytes > 0)
+						{
+							int dropped = SV_UnrelQueueAppend (client, reader.data + reader.offset, remaining_bytes);
+							dropped_bytes += dropped;
+							budget_exhausted = true;
+						}
+						break;
+					}
+
+					if (length > optional_remaining)
+					{
+						int remaining_bytes = reader.size - reader.offset;
+						int dropped = SV_UnrelQueueAppend (client, reader.data + reader.offset, remaining_bytes);
+						dropped_bytes += dropped;
+						budget_exhausted = true;
+						break;
+					}
+
+					if ((info.category == SV_DG_CAT_EVENT || info.category == SV_DG_CAT_TEMP)
+						&& SV_DGIsDuplicateEvent (&info, seen, seen_count))
+					{
+						allow = false;
+						if (info.category == SV_DG_CAT_EVENT)
+							frame.drop_events++;
+						else
+							frame.drop_temps++;
+					}
+
+					if (allow && info.category == SV_DG_CAT_EVENT)
+					{
+						allow = SV_NetBudgetAllowEvent (client, length, &tick_event_bytes, &tick_event_count);
+						if (!allow)
+							frame.drop_events++;
+					}
+					else if (allow && info.category == SV_DG_CAT_TEMP)
+					{
+						if (info.temp_type >= 0
+							&& SV_DGTempEntityPriority (info.temp_type) > 0
+							&& optional_remaining < length + 32)
+						{
+							allow = false;
+						}
+						if (allow)
+							allow = SV_NetBudgetAllowCount ((int)sv_tempentity_budget_count.value,
+								&tick_temp_count, &client->net_budget_sec_temp_count, rate);
+						if (!allow)
+							frame.drop_temps++;
+					}
+					else if (allow && info.category == SV_DG_CAT_SOUND)
+					{
+						allow = SV_NetBudgetAllowCount ((int)sv_sound_budget_count.value,
+							&tick_sound_count, &client->net_budget_sec_sound_count, rate);
+						if (!allow)
+							frame.drop_sounds++;
+					}
+					else if (allow && info.category == SV_DG_CAT_PRINT)
+					{
+						allow = SV_NetBudgetAllowCount ((int)sv_print_budget_count.value,
+							&tick_print_count, &client->net_budget_sec_print_count, rate);
+						if (!allow)
+							frame.drop_prints++;
+					}
+
+					if (allow)
+					{
+						SZ_Write (&msg, reader.data + reader.offset, length);
+						optional_remaining -= length;
+
+						switch (info.category)
+						{
+						case SV_DG_CAT_EVENT:
+							frame.event_count++;
+							frame.temp_bytes += length;
+							break;
+						case SV_DG_CAT_TEMP:
+							frame.temp_count++;
+							frame.temp_bytes += length;
+							break;
+						case SV_DG_CAT_SOUND:
+							frame.sound_count++;
+							frame.sound_bytes += length;
+							break;
+						case SV_DG_CAT_PRINT:
+							frame.print_count++;
+							frame.print_bytes += length;
+							break;
+						default:
+							frame.misc_bytes += length;
+							break;
+						}
+
+						if (info.has_origin && seen_count < (int)(sizeof(seen) / sizeof(seen[0])))
+						{
+							seen[seen_count].cmd = info.cmd;
+							seen[seen_count].type = info.temp_type;
+							seen[seen_count].has_origin = info.has_origin;
+							VectorCopy (info.origin, seen[seen_count].origin);
+							seen_count++;
+						}
+					}
+					else
+					{
+						dropped_bytes += length;
+					}
+
+					reader.offset += length;
+				}
+			}
 		}
+
+		if (client->unrel_queue.cursize > 0)
+			deferred_bytes += client->unrel_queue.cursize;
 
 		if (budget_exhausted || dropped_bytes > 0)
 		{
@@ -5255,14 +5452,18 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 		if (remaining_bytes < 0)
 			remaining_bytes = 0;
+		if (headroom_bytes > 0 && remaining_bytes <= headroom_bytes)
+			SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "near_cap");
 		if (old_mtu_cap != msg.maxsize || net_snap_debug.value || sv_mtu_debug.value)
 		{
 			NET_DebugLogEvent (true,
 				"NETDBG time %.3f mtu_cap cl %d %s cap %d->%d raw_mtu %d cap_cvar %d rate_pkt %d "
-				"reserves hdr %d ctrl %d reliable %d reason %s frag_tier %d/%d loss %d ack_stall %d policy %d remaining %d\n",
+				"reserves hdr %d ctrl %d reliable %d mandatory %d headroom %d best_effort %d final %d reason %s "
+				"frag_tier %d/%d loss %d ack_stall %d policy %d remaining %d\n",
 				realtime, SV_ClientSlot (client), client->name,
 				old_mtu_cap, msg.maxsize, mtu_raw, mtu_cvar_cap, per_packet,
 				header_reserve, ctrl_bytes, client->message.cursize,
+				mandatory_bytes, headroom_bytes, best_effort_budget, msg.cursize,
 				mtu_reason[0] ? mtu_reason : "none",
 				client->mtu_dropped_tier1, client->mtu_dropped_tier2,
 				client->snapshot_incomplete_streak, client->snapshot_ack_stall_frames,
