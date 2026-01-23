@@ -62,6 +62,13 @@ static unsigned int net_debug_bytes;
 static unsigned int net_debug_max;
 static unsigned int net_debug_oversize;
 static unsigned int net_debug_resends;
+static unsigned int net_debug_fragments_sent;
+static unsigned int net_debug_fragments_received;
+static unsigned int net_debug_fragments_lost;
+static unsigned int net_debug_fragments_timeouts;
+
+#define NET_UNRELIABLE_FRAG_HEADER_BYTES 8
+#define NET_UNRELIABLE_FRAG_TIMEOUT_S 1.0
 
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
@@ -143,8 +150,10 @@ static void NET_DebugMaybeLogSummary (void)
 	{
 		unsigned int avg = net_debug_bytes / net_debug_packets;
 		NET_DebugLog (false,
-			"NETDBG time %.3f summary packets %u avg %u max %u oversize %u resends %u\n",
-			net_time, net_debug_packets, avg, net_debug_max, net_debug_oversize, net_debug_resends);
+			"NETDBG time %.3f summary packets %u avg %u max %u oversize %u resends %u frags sent %u recv %u lost %u timeouts %u\n",
+			net_time, net_debug_packets, avg, net_debug_max, net_debug_oversize,
+			net_debug_resends, net_debug_fragments_sent, net_debug_fragments_received,
+			net_debug_fragments_lost, net_debug_fragments_timeouts);
 	}
 
 	net_debug_packets = 0;
@@ -152,7 +161,67 @@ static void NET_DebugMaybeLogSummary (void)
 	net_debug_max = 0;
 	net_debug_oversize = 0;
 	net_debug_resends = 0;
+	net_debug_fragments_sent = 0;
+	net_debug_fragments_received = 0;
+	net_debug_fragments_lost = 0;
+	net_debug_fragments_timeouts = 0;
 	net_debug_next_time = net_time + 1.0;
+}
+
+static void NET_ClearUnreliableFragState (qsocket_t *sock)
+{
+	int i;
+
+	for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
+	{
+		if (sock->unreliableFragBuffers[i])
+		{
+			Z_Free (sock->unreliableFragBuffers[i]);
+			sock->unreliableFragBuffers[i] = NULL;
+		}
+		sock->unreliableFragSizes[i] = 0;
+		sock->unreliableFragReceivedMask[i] = 0;
+	}
+	sock->unreliableFragActive = false;
+	sock->unreliableFragSequence = 0;
+	sock->unreliableFragTotal = 0;
+	sock->unreliableFragReceived = 0;
+	sock->unreliableFragTotalBytes = 0;
+	sock->unreliableFragStartTime = 0.0;
+}
+
+static void NET_LogUnreliableFragLoss (const qsocket_t *sock, const char *reason, qboolean timeout)
+{
+	unsigned int missing = 0;
+	float loss_rate = 0.0f;
+
+	if (!sock->unreliableFragActive || sock->unreliableFragTotal == 0)
+		return;
+
+	if (sock->unreliableFragTotal > sock->unreliableFragReceived)
+		missing = (unsigned int)(sock->unreliableFragTotal - sock->unreliableFragReceived);
+	if (sock->unreliableFragTotal > 0)
+		loss_rate = (float)missing / (float)sock->unreliableFragTotal;
+
+	net_debug_fragments_lost += missing;
+	if (timeout)
+		net_debug_fragments_timeouts++;
+	NET_DebugLog (true,
+		"NETDBG time %.3f frag loss addr %s seq %u recv %u total %u missing %u loss_rate %.2f reason %s\n",
+		net_time, NET_QSocketGetAddressString (sock), sock->unreliableFragSequence,
+		(unsigned int)sock->unreliableFragReceived, (unsigned int)sock->unreliableFragTotal,
+		missing, loss_rate, reason ? reason : "unknown");
+}
+
+static void NET_CheckUnreliableFragTimeout (qsocket_t *sock)
+{
+	if (!sock->unreliableFragActive)
+		return;
+	if ((net_time - sock->unreliableFragStartTime) <= NET_UNRELIABLE_FRAG_TIMEOUT_S)
+		return;
+	NET_LogUnreliableFragLoss (sock, "timeout", true);
+	NET_ClearUnreliableFragState (sock);
+	NET_DebugMaybeLogSummary ();
 }
 
 static int NET_GetConfiguredMTU (const qsocket_t *sock)
@@ -338,6 +407,15 @@ static const char *NET_FlagsToString (unsigned int flags, char *buf, size_t bufl
 	if (flags & NETFLAG_UNRELIABLE)
 	{
 		written = q_snprintf (ptr, remaining, "%sUNREL", buf[0] ? "|" : "");
+		if (written > 0 && (size_t)written < remaining)
+		{
+			ptr += written;
+			remaining -= (size_t)written;
+		}
+	}
+	if (flags & NETFLAG_FRAG)
+	{
+		written = q_snprintf (ptr, remaining, "%sFRAG", buf[0] ? "|" : "");
 		if (written > 0 && (size_t)written < remaining)
 		{
 			ptr += written;
@@ -693,6 +771,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	int	packetLen;
 	int	payload_limit = NET_GetPacketPayloadLimit (sock);
 	int	max_data = NET_GetPacketDataLimit (sock);
+	int	frag_payload;
 
 #ifdef DEBUG
 	if (data->cursize == 0)
@@ -704,14 +783,83 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 	if (data->cursize > max_data)
 	{
-		NET_DebugLog (true,
-			"NETDBG time %.3f oversize unreliable-data addr %s data %u cap %u payload_cap %u\n",
-			net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
-			(unsigned int)max_data, (unsigned int)payload_limit);
-		NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
-		net_debug_oversize++;
+		unsigned int frag_sequence;
+		unsigned int total_bytes = 0;
+		unsigned int offset = 0;
+		unsigned int frag_total;
+		unsigned int i;
+
+		frag_payload = max_data - NET_UNRELIABLE_FRAG_HEADER_BYTES;
+		if (frag_payload <= 0)
+		{
+			NET_DebugLog (true,
+				"NETDBG time %.3f oversize unreliable-data addr %s data %u cap %u payload_cap %u\n",
+				net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+				(unsigned int)max_data, (unsigned int)payload_limit);
+			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+			net_debug_oversize++;
+			NET_DebugMaybeLogSummary ();
+			return 0;
+		}
+
+		frag_total = (unsigned int)((data->cursize + frag_payload - 1) / frag_payload);
+		if (frag_total == 0 || frag_total > NET_UNRELIABLE_MAX_FRAGMENTS)
+		{
+			NET_DebugLog (true,
+				"NETDBG time %.3f oversize unreliable-frag addr %s data %u frags %u cap %u\n",
+				net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+				frag_total, (unsigned int)NET_UNRELIABLE_MAX_FRAGMENTS);
+			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+			net_debug_oversize++;
+			NET_DebugMaybeLogSummary ();
+			return 0;
+		}
+
+		for (i = 0; i < frag_total; ++i)
+		{
+			unsigned int frag_size = (unsigned int)q_min(frag_payload, data->cursize - (int)offset);
+			unsigned int frag_packet = (unsigned int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
+			total_bytes += frag_packet;
+			offset += frag_size;
+		}
+
+		if (!NET_HasRateBudget(sock, total_bytes))
+			return 0;
+
+		frag_sequence = sock->unreliableFragmentSequence++;
+		offset = 0;
+		for (i = 0; i < frag_total; ++i)
+		{
+			unsigned int frag_size = (unsigned int)q_min(frag_payload, data->cursize - (int)offset);
+
+			packetLen = (int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
+			if (!NET_ConsumeRateBudget(sock, (unsigned int)packetLen))
+				return 0;
+			NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE | NETFLAG_FRAG,
+				sock->unreliableSendSequence++);
+
+			*(unsigned int *)packetBuffer.data = BigLong(frag_sequence);
+			*(unsigned short *)(packetBuffer.data + 4) = BigShort((unsigned short)i);
+			*(unsigned short *)(packetBuffer.data + 6) = BigShort((unsigned short)frag_total);
+			Q_memcpy (packetBuffer.data + NET_UNRELIABLE_FRAG_HEADER_BYTES,
+				data->data + offset, frag_size);
+
+			if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
+				return -1;
+
+			NET_DebugRecordPacket ((unsigned int)packetLen);
+			net_debug_fragments_sent++;
+			NET_DebugLog (false,
+				"NETDBG time %.3f send unreliable-frag addr %s seq %u frag_seq %u frag %u/%u len %u data %u\n",
+				net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
+				frag_sequence, i + 1, frag_total, (unsigned int)packetLen, frag_size);
+
+			offset += frag_size;
+		}
+
 		NET_DebugMaybeLogSummary ();
-		return 0;
+		packetsSent += (int)frag_total;
+		return 1;
 	}
 
 	packetLen = NET_HEADERSIZE + data->cursize;
@@ -759,6 +907,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 	int				packetLengthRead;
 
 	NET_ResendReliablePackets (sock);
+	NET_CheckUnreliableFragTimeout (sock);
 
 	while (1)
 	{
@@ -895,6 +1044,138 @@ int	Datagram_GetMessage (qsocket_t *sock)
 					"NETDBG time %.3f recv unreliable too large addr %s len %u cap %u\n",
 					net_time, NET_QSocketGetAddressString (sock), length,
 					(unsigned int)MAX_DATAGRAM);
+				continue;
+			}
+
+			if (flags & NETFLAG_FRAG)
+			{
+				unsigned int frag_sequence;
+				unsigned short frag_index;
+				unsigned short frag_total;
+				unsigned int frag_payload_len;
+				byte *payload = packetBuffer.data;
+				unsigned int i;
+
+				if (length < NET_UNRELIABLE_FRAG_HEADER_BYTES)
+				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f recv unreliable-frag short addr %s len %u\n",
+						net_time, NET_QSocketGetAddressString (sock), (unsigned int)length);
+					continue;
+				}
+
+				frag_sequence = BigLong(*(unsigned int *)payload);
+				frag_index = BigShort(*(unsigned short *)(payload + 4));
+				frag_total = BigShort(*(unsigned short *)(payload + 6));
+				frag_payload_len = length - NET_UNRELIABLE_FRAG_HEADER_BYTES;
+
+				if (frag_total == 0 || frag_total > NET_UNRELIABLE_MAX_FRAGMENTS || frag_index >= frag_total)
+				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f recv unreliable-frag invalid addr %s seq %u frag %u/%u\n",
+						net_time, NET_QSocketGetAddressString (sock), frag_sequence,
+						(unsigned int)frag_index, (unsigned int)frag_total);
+					continue;
+				}
+
+				if (sock->unreliableFragActive && sock->unreliableFragSequence != frag_sequence)
+				{
+					NET_LogUnreliableFragLoss (sock, "sequence jump", false);
+					NET_ClearUnreliableFragState (sock);
+				}
+
+				if (!sock->unreliableFragActive)
+				{
+					sock->unreliableFragActive = true;
+					sock->unreliableFragSequence = frag_sequence;
+					sock->unreliableFragTotal = frag_total;
+					sock->unreliableFragReceived = 0;
+					sock->unreliableFragTotalBytes = 0;
+					sock->unreliableFragStartTime = net_time;
+					for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
+					{
+						if (sock->unreliableFragBuffers[i])
+						{
+							Z_Free (sock->unreliableFragBuffers[i]);
+							sock->unreliableFragBuffers[i] = NULL;
+						}
+						sock->unreliableFragSizes[i] = 0;
+						sock->unreliableFragReceivedMask[i] = 0;
+					}
+				}
+				else if (sock->unreliableFragTotal != frag_total)
+				{
+					NET_LogUnreliableFragLoss (sock, "total mismatch", false);
+					NET_ClearUnreliableFragState (sock);
+					continue;
+				}
+
+				if (sock->unreliableFragReceivedMask[frag_index])
+				{
+					continue;
+				}
+
+				sock->unreliableFragBuffers[frag_index] = (byte *)Z_Malloc (frag_payload_len);
+				Q_memcpy (sock->unreliableFragBuffers[frag_index],
+					payload + NET_UNRELIABLE_FRAG_HEADER_BYTES, frag_payload_len);
+				sock->unreliableFragSizes[frag_index] = (unsigned short)frag_payload_len;
+				sock->unreliableFragReceivedMask[frag_index] = 1;
+				sock->unreliableFragReceived++;
+				sock->unreliableFragTotalBytes += frag_payload_len;
+				net_debug_fragments_received++;
+
+				NET_DebugLog (false,
+					"NETDBG time %.3f recv unreliable-frag addr %s seq %u frag %u/%u len %u\n",
+					net_time, NET_QSocketGetAddressString (sock), frag_sequence,
+					(unsigned int)frag_index + 1, (unsigned int)frag_total, frag_payload_len);
+
+				if (sock->unreliableFragReceived == sock->unreliableFragTotal)
+				{
+					byte *assembled = (byte *)Z_Malloc (sock->unreliableFragTotalBytes);
+					unsigned int offset = 0;
+					qboolean missing = false;
+
+					for (i = 0; i < sock->unreliableFragTotal; ++i)
+					{
+						if (!sock->unreliableFragReceivedMask[i])
+						{
+							missing = true;
+							break;
+						}
+						Q_memcpy (assembled + offset, sock->unreliableFragBuffers[i],
+							sock->unreliableFragSizes[i]);
+						offset += sock->unreliableFragSizes[i];
+					}
+
+					if (missing)
+					{
+						Z_Free (assembled);
+						NET_LogUnreliableFragLoss (sock, "missing", false);
+						NET_ClearUnreliableFragState (sock);
+						continue;
+					}
+
+					SZ_Clear (&net_message);
+					SZ_Write (&net_message, assembled, sock->unreliableFragTotalBytes);
+					Z_Free (assembled);
+
+					net_last_incoming.sequence = frag_sequence;
+					net_last_incoming.flags = flags;
+					net_last_incoming.packet_length = NET_HEADERSIZE + sock->unreliableFragTotalBytes;
+					net_last_incoming.payload_length = sock->unreliableFragTotalBytes;
+					net_last_incoming.unreliable = true;
+					net_last_incoming.valid = true;
+
+					NET_DebugLog (false,
+						"NETDBG time %.3f recv unreliable-frag complete addr %s seq %u payload %u frags %u\n",
+						net_time, NET_QSocketGetAddressString (sock), frag_sequence,
+						sock->unreliableFragTotalBytes, (unsigned int)sock->unreliableFragTotal);
+
+					NET_ClearUnreliableFragState (sock);
+					ret = 2;
+					break;
+				}
+
 				continue;
 			}
 

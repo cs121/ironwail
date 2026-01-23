@@ -123,6 +123,7 @@ qsocket_t *NET_NewQSocket (void)
 	sock->rate_budget = 0;
 	sock->sendSequence = 1;
 	sock->unreliableSendSequence = 0;
+	sock->unreliableFragmentSequence = 0;
 	sock->sendMessageLength = 0;
 	sock->sendMessageOffset = 0;
 	sock->sendReliableBase = sock->sendSequence;
@@ -132,6 +133,15 @@ qsocket_t *NET_NewQSocket (void)
 	sock->reliableReceiveSequence = 0;
 	sock->reliableReceiveMask = 0;
 	sock->unreliableReceiveSequence = 0;
+	sock->unreliableFragActive = false;
+	sock->unreliableFragSequence = 0;
+	sock->unreliableFragTotal = 0;
+	sock->unreliableFragReceived = 0;
+	sock->unreliableFragTotalBytes = 0;
+	sock->unreliableFragStartTime = 0.0;
+	memset(sock->unreliableFragBuffers, 0, sizeof(sock->unreliableFragBuffers));
+	memset(sock->unreliableFragSizes, 0, sizeof(sock->unreliableFragSizes));
+	memset(sock->unreliableFragReceivedMask, 0, sizeof(sock->unreliableFragReceivedMask));
 	sock->receiveMessageLength = 0;
 	memset(sock->reliableReceive, 0, sizeof(sock->reliableReceive));
 
@@ -173,6 +183,25 @@ void NET_FreeQSocket(qsocket_t *sock)
 			}
 			sock->reliableReceive[i].received = false;
 		}
+	}
+	{
+		int i;
+		for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
+		{
+			if (sock->unreliableFragBuffers[i])
+			{
+				Z_Free(sock->unreliableFragBuffers[i]);
+				sock->unreliableFragBuffers[i] = NULL;
+			}
+			sock->unreliableFragSizes[i] = 0;
+			sock->unreliableFragReceivedMask[i] = 0;
+		}
+		sock->unreliableFragActive = false;
+		sock->unreliableFragSequence = 0;
+		sock->unreliableFragTotal = 0;
+		sock->unreliableFragReceived = 0;
+		sock->unreliableFragTotalBytes = 0;
+		sock->unreliableFragStartTime = 0.0;
 	}
 	sock->next = net_freeSockets;
 	net_freeSockets = sock;

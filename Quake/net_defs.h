@@ -46,6 +46,7 @@ struct qsockaddr
 #define NETFLAG_NAK		0x00040000
 #define NETFLAG_EOM		0x00080000
 #define NETFLAG_UNRELIABLE	0x00100000
+#define NETFLAG_FRAG		0x00200000
 #define NETFLAG_CTL		0x80000000
 
 #if (NETFLAG_LENGTH_MASK & NET_MAXMESSAGE) != NET_MAXMESSAGE
@@ -56,6 +57,7 @@ struct qsockaddr
 
 #define NET_ACK_BITS		32
 #define NET_RELIABLE_WINDOW	32
+#define NET_UNRELIABLE_MAX_FRAGMENTS	256
 
 typedef struct
 {
@@ -169,6 +171,7 @@ typedef struct qsocket_s
 
 	unsigned int	sendSequence;
 	unsigned int	unreliableSendSequence;
+	unsigned int	unreliableFragmentSequence;
 	int		sendMessageLength;
 	int		sendMessageOffset;
 	byte		sendMessage [NET_MAXMESSAGE];
@@ -180,6 +183,15 @@ typedef struct qsocket_s
 	unsigned int	reliableReceiveSequence;
 	unsigned int	reliableReceiveMask;
 	unsigned int	unreliableReceiveSequence;
+	qboolean	unreliableFragActive;
+	unsigned int	unreliableFragSequence;
+	unsigned short	unreliableFragTotal;
+	unsigned short	unreliableFragReceived;
+	unsigned int	unreliableFragTotalBytes;
+	double		unreliableFragStartTime;
+	byte		*unreliableFragBuffers[NET_UNRELIABLE_MAX_FRAGMENTS];
+	unsigned short	unreliableFragSizes[NET_UNRELIABLE_MAX_FRAGMENTS];
+	byte		unreliableFragReceivedMask[NET_UNRELIABLE_MAX_FRAGMENTS];
 	int		receiveMessageLength;
 	byte		receiveMessage [NET_MAXMESSAGE];
 	net_reliable_receive_t	reliableReceive [NET_RELIABLE_WINDOW];
