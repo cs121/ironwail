@@ -322,6 +322,20 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 	int forward = 0;
 	int side = 0;
 	int up = 0;
+	unsigned int cmd_seq = 0u;
+	unsigned int cmd_ack = cl.last_cmd_ack;
+	unsigned int cmd_ack_echo = cl.last_cmd_ack_echo;
+	unsigned int snap_ack = cl.last_snapshot_ack_sent;
+	unsigned int net_rx_seq = 0u;
+	unsigned int net_tx_seq = 0u;
+	unsigned int net_rel_recv_seq = 0u;
+	unsigned int net_rel_send_base = 0u;
+	unsigned int net_unrel_rx = 0u;
+	double net_last_msg_age = 0.0;
+	double net_last_send_age = 0.0;
+	int net_rate_budget = 0;
+	int net_disconnected = 0;
+	int net_can_send = 0;
 
 	if (!cl_netdebug_parse.value)
 		return;
@@ -337,13 +351,33 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 
 	if (cmd)
 	{
+		cmd_seq = cmd->sequence;
 		forward = cmd->forwardmove;
 		side = cmd->sidemove;
 		up = cmd->upmove;
 	}
 
+	if (cls.netcon)
+	{
+		net_rx_seq = cls.netcon->receiveSequence;
+		net_tx_seq = cls.netcon->sendSequence;
+		net_rel_recv_seq = cls.netcon->reliableReceiveSequence;
+		net_rel_send_base = cls.netcon->sendReliableBase;
+		net_unrel_rx = cls.netcon->unreliableReceiveSequence;
+		net_rate_budget = cls.netcon->rate_budget;
+		net_disconnected = cls.netcon->disconnected ? 1 : 0;
+		net_can_send = cls.netcon->canSend ? 1 : 0;
+		if (cls.netcon->lastMessageTime > 0.0)
+			net_last_msg_age = now - cls.netcon->lastMessageTime;
+		if (cls.netcon->lastSendTime > 0.0)
+			net_last_send_age = now - cls.netcon->lastSendTime;
+	}
+
 	Con_Printf ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
-		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d\n",
+		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d "
+		"cmd_seq %u cmd_ack %u ack_echo %u snap_ack %u cmd_accum %.4f cmd_dt %.4f "
+		"net_rx %u net_tx %u net_rel_rx %u net_rel_base %u net_unrel_rx %u "
+		"net_last_msg %.3f net_last_send %.3f net_budget %d net_can_send %d net_disc %d\n",
 		cls.signon,
 		cl.has_full_snapshot ? 1 : 0,
 		cl.need_full_snapshot ? 1 : 0,
@@ -355,7 +389,11 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 		cl.simorg[0], cl.simorg[1], cl.simorg[2],
 		forward, side, up,
 		CL_NetDbg_PredictRan () ? 1 : 0,
-		sendcmd_ran ? 1 : 0);
+		sendcmd_ran ? 1 : 0,
+		cmd_seq, cmd_ack, cmd_ack_echo, snap_ack,
+		cl_cmd_accum, host_netinterval,
+		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
+		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
 }
 
 static float CL_LerpAngle (float a, float b, float f)

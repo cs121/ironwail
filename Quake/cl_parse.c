@@ -191,12 +191,29 @@ static void CL_NetDebugHeader (void)
 		net_message.cursize, realtime, cls.state, cls.signon);
 	if (cls.netcon)
 	{
-		Con_Printf ("NETDBG: from %s rseq %u sseq %u rack %u unrel %u\n",
+		double now = Sys_DoubleTime ();
+		double last_msg_age = 0.0;
+		double last_send_age = 0.0;
+
+		if (cls.netcon->lastMessageTime > 0.0)
+			last_msg_age = now - cls.netcon->lastMessageTime;
+		if (cls.netcon->lastSendTime > 0.0)
+			last_send_age = now - cls.netcon->lastSendTime;
+
+		Con_Printf ("NETDBG: from %s rseq %u sseq %u rack %u unrel %u "
+			"rmask 0x%x sbase %u rate_budget %d can_send %d disc %d "
+			"lastmsg %.3f lastsend %.3f\n",
 			NET_QSocketGetAddressString (cls.netcon),
 			cls.netcon->receiveSequence,
 			cls.netcon->sendSequence,
 			cls.netcon->reliableReceiveSequence,
-			cls.netcon->unreliableReceiveSequence);
+			cls.netcon->unreliableReceiveSequence,
+			cls.netcon->reliableReceiveMask,
+			cls.netcon->sendReliableBase,
+			cls.netcon->rate_budget,
+			cls.netcon->canSend ? 1 : 0,
+			cls.netcon->disconnected ? 1 : 0,
+			last_msg_age, last_send_age);
 	}
 	if (net_last_incoming.valid)
 	{
@@ -1661,6 +1678,11 @@ static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int re
 	double oldest = 0.0;
 	double newest = 0.0;
 	double buffer_fill_ms = 0.0;
+	double render_vs_oldest_ms = 0.0;
+	double render_vs_newest_ms = 0.0;
+	double server_time = 0.0;
+	double server_skew_age = 0.0;
+	double snap_age = 0.0;
 	int psnap_count = 0;
 	int total = 0;
 	int created = 0;
@@ -1688,19 +1710,35 @@ static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int re
 		server_now = cl.mtime[0];
 
 	render_time = server_now - interp_delay;
+	server_time = cl.snapshot_time > 0.0 ? cl.snapshot_time : header->server_time;
+	if (cl.server_time_skew > 0.0)
+		server_skew_age = realtime - cl.server_time_skew;
+	if (server_now > 0.0 && server_time > 0.0)
+		snap_age = server_now - server_time;
 
 	CL_GetPlayerSnapRange (&oldest, &newest, &psnap_count);
 	if (psnap_count > 1)
 		buffer_fill_ms = (newest - oldest) * 1000.0;
+	if (psnap_count > 0)
+	{
+		render_vs_oldest_ms = (render_time - oldest) * 1000.0;
+		render_vs_newest_ms = (render_time - newest) * 1000.0;
+	}
 
 	CL_CountSnapshotEntities (prev_present, cl.snapshot_present, &total, &created, &missing, &dormant);
 
 	Con_Printf ("NETDBG: interp seq %u base %u srvtime %.3f arrival_dt %.3f "
 		"render_time %.3f interp_delay %.3f buf_oldest %.3f buf_newest %.3f buf_fill_ms %.1f "
-		"ents total %d created %d removed %d missing %d dormant %d\n",
-		header->seq, header->base_seq, cl.snapshot_time > 0.0 ? cl.snapshot_time : header->server_time,
+		"render_gap_ms oldest %.1f newest %.1f srvnow %.3f srv_skew_age %.3f snap_age %.3f "
+		"ents total %d created %d removed %d missing %d dormant %d "
+		"snap_seq last %u complete %u incomplete %u need_full %d delta_mismatch %d parse_err %d incomplete_cnt %d\n",
+		header->seq, header->base_seq, server_time,
 		arrival_dt, render_time, interp_delay, oldest, newest, buffer_fill_ms,
-		total, created, removes_parsed, missing, dormant);
+		render_vs_oldest_ms, render_vs_newest_ms, server_now, server_skew_age, snap_age,
+		total, created, removes_parsed, missing, dormant,
+		cl.snap_last_applied_seq, cl.snap_last_complete_seq, cl.snap_last_incomplete_seq,
+		cl.need_full_snapshot ? 1 : 0, cl.snap_delta_mismatch, cl.snap_parse_errors,
+		cl.snap_incomplete_count);
 }
 
 /*
