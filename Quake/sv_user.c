@@ -497,11 +497,21 @@ static qboolean SV_CmdSeqNewer (unsigned int seq, unsigned int last)
 	return NETSEQ_GT (seq, last);
 }
 
+extern void NET_DebugLogEvent (qboolean important, const char *fmt, ...);
+
 static void SV_CmdAckResync (client_t *client, const char *reason)
 {
+	unsigned int base_preview = client->snapshot_safe_base_seq
+		? client->snapshot_safe_base_seq
+		: client->snapshot_last_acked_seq;
+	int slot = (int)(client - svs.clients);
 	client->snapshot_force_full = true;
-	client->snapshot_force_full_reason = SNAP_FULL_PARSE_ERROR;
-	client->snapshot_has_valid_base = false;
+	client->snapshot_force_full_reason = SNAP_FULL_DECODE_ERROR;
+	client->snapshot_decode_error_count++;
+	NET_DebugLogEvent (true,
+		"NETDBG time %.3f snap_force_full_on cl %d %s seq_build %u base %u signon %d reason DECODE_ERROR last_full %.3f\n",
+		realtime, slot, client->name, client->snapshot_next_seq, base_preview,
+		client->entstream.signon_stage, client->snapshot_last_full_time);
 	client->snapshot_pending_seq = 0;
 	client->snapshot_pending_incomplete = false;
 	client->snapshot_pending_is_delta = false;

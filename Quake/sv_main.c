@@ -38,11 +38,9 @@ extern cvar_t nomonsters;
 static cvar_t sv_netsort = {"sv_netsort", "1", CVAR_NONE};
 static cvar_t sv_snapshotdelta = {"sv_snapshotdelta", "1", CVAR_NONE};
 static cvar_t sv_snapshotdebug = {"sv_snapshotdebug", "0", CVAR_NONE};
-static cvar_t sv_snapshottimeout = {"sv_snapshottimeout", "1000", CVAR_NONE};
 static cvar_t sv_snapshot2 = {"sv_snapshot2", "1", CVAR_NONE};
 static cvar_t sv_snap_debug = {"sv_snap_debug", "0", CVAR_NONE};
-static cvar_t sv_snap_full_interval = {"sv_snap_full_interval", "2.0", CVAR_NONE};
-static cvar_t sv_snap_force_full_after_frames = {"sv_snap_force_full_after_frames", "3", CVAR_NONE};
+static cvar_t sv_snap2_full_cooldown = {"sv_snap2_full_cooldown", "2.0", CVAR_NONE};
 static cvar_t sv_snap_max_payload = {"sv_snap_max_payload", "1200", CVAR_NONE};
 static cvar_t sv_snap_remove_ttl = {"sv_snap_remove_ttl", "2.0", CVAR_NONE};
 static cvar_t sv_snap_temp_max_bytes = {"sv_snap_temp_max_bytes", "0", CVAR_NONE};
@@ -77,7 +75,6 @@ static cvar_t sv_signon_chunk_window = {"sv_signon_chunk_window", "3", CVAR_NONE
 static cvar_t sv_signon_debug = {"sv_signon_debug", "0", CVAR_NONE};
 static cvar_t net_test_drop = {"net_test_drop", "0", CVAR_NONE};
 static cvar_t net_snap_tinyvel = {"net_snap_tinyvel", "1", CVAR_NONE};
-static cvar_t net_snap_forcefull_frames = {"net_snap_forcefull_frames", "3", CVAR_NONE};
 static cvar_t net_snap_debug = {"net_snap_debug", "0", CVAR_NONE};
 static cvar_t sv_icull_enable = {"sv_icull_enable", "1", CVAR_NONE};
 static cvar_t sv_icull_radius = {"sv_icull_radius", "2048", CVAR_NONE};
@@ -312,11 +309,9 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_netsort);
 	Cvar_RegisterVariable (&sv_snapshotdelta);
 	Cvar_RegisterVariable (&sv_snapshotdebug);
-	Cvar_RegisterVariable (&sv_snapshottimeout);
 	Cvar_RegisterVariable (&sv_snapshot2);
 	Cvar_RegisterVariable (&sv_snap_debug);
-	Cvar_RegisterVariable (&sv_snap_full_interval);
-	Cvar_RegisterVariable (&sv_snap_force_full_after_frames);
+	Cvar_RegisterVariable (&sv_snap2_full_cooldown);
 	Cvar_RegisterVariable (&sv_snap_max_payload);
 	Cvar_RegisterVariable (&sv_snap_remove_ttl);
 	Cvar_RegisterVariable (&sv_snap_temp_max_bytes);
@@ -351,7 +346,6 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_signon_debug);
 	Cvar_RegisterVariable (&net_test_drop);
 	Cvar_RegisterVariable (&net_snap_tinyvel);
-	Cvar_RegisterVariable (&net_snap_forcefull_frames);
 	Cvar_RegisterVariable (&net_snap_debug);
 	Cvar_RegisterVariable (&sv_icull_enable);
 	Cvar_RegisterVariable (&sv_icull_radius);
@@ -729,7 +723,7 @@ void SV_ConnectClient (int clientnum)
 	client->snapshot_join_epoch = ++sv_snapshot_join_epoch_counter;
 	client->snapshot_state = SNAP_INIT;
 	client->snapshot_force_full = true;
-	client->snapshot_force_full_reason = SNAP_FULL_JOIN_INIT;
+	client->snapshot_force_full_reason = SNAP_FULL_CONNECT;
 	client->netconnection = netconnection;
 	client->rate = sv_minrate.value > 0.0f ? (int)sv_minrate.value : 0;
 	client->updaterate = sv_minupdaterate.value > 0.0f ? (int)sv_minupdaterate.value : 0;
@@ -1086,7 +1080,7 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_last_acked_time = 0;
 	client->snapshot_has_valid_base = false;
 	client->snapshot_force_full = true;
-	client->snapshot_force_full_reason = SNAP_FULL_MAP_START;
+	client->snapshot_force_full_reason = SNAP_FULL_MAPRESET;
 	client->snapshot_state = SNAP_INIT;
 	client->snapshot_safe_base_seq = 0;
 	client->snapshot_join_epoch = 0;
@@ -1120,6 +1114,13 @@ static void SV_ResetClientSnapshot (client_t *client)
 	client->snapshot_stats_full = 0;
 	client->snapshot_stats_delta = 0;
 	client->snapshot_stats_forced_full = 0;
+	client->snapshot_full_counted_seq = 0;
+	memset (client->snapshot_full_sent_by_reason, 0, sizeof(client->snapshot_full_sent_by_reason));
+	client->snapshot_full_sent_midgame = 0;
+	client->snapshot_full_rate_limited_count = 0;
+	client->snapshot_base_mismatch_count = 0;
+	client->snapshot_decode_error_count = 0;
+	client->snapshot_full_rate_limited_until = 0;
 	client->snapshot_stats_mandatory = 0;
 	client->snapshot_stats_dropped = 0;
 	client->snapshot_stats_next_time = 0;
@@ -1729,51 +1730,104 @@ static const char *SV_SnapshotFullReasonName (snapshot_full_reason_t reason)
 {
 	switch (reason)
 	{
-	case SNAP_FULL_MAP_START:
-		return "MAP_START";
-	case SNAP_FULL_JOIN_INIT:
-		return "JOIN_INIT";
-	case SNAP_FULL_MISSING_BASE:
-		return "MISSING_BASE";
-	case SNAP_FULL_HISTORY_EVICTED:
-		return "HISTORY_EVICTED";
-	case SNAP_FULL_PARSE_ERROR:
-		return "PARSE_ERROR";
-	case SNAP_FULL_MANDATORY_OVERFLOW:
-		return "MANDATORY_OVERFLOW";
-	case SNAP_FULL_MANUAL_RESYNC:
+	case SNAP_FULL_CONNECT:
+		return "CONNECT";
+	case SNAP_FULL_MAPRESET:
+		return "MAPRESET";
+	case SNAP_FULL_CLIENT_REQUEST:
+		return "CLIENT_REQUEST";
+	case SNAP_FULL_BASE_MISMATCH:
+		return "BASE_MISMATCH";
+	case SNAP_FULL_DECODE_ERROR:
+		return "DECODE_ERROR";
+	case SNAP_FULL_INTERNAL_ERROR:
 	default:
-		return "MANUAL_RESYNC";
+		return "INTERNAL_ERROR";
 	}
 }
 
-static void SV_Snapshot2ForceFull (client_t *client, snapshot_full_reason_t reason)
+static qboolean SV_SnapshotFullReasonBypassesCooldown (snapshot_full_reason_t reason, const client_t *client)
 {
-	if (!SV_Snapshot2RecoveryEnabled ())
-		return;
-	if (client->entstream.active && reason == SNAP_FULL_MANUAL_RESYNC)
-		return;
-	if (realtime < client->snapshot_force_full_next_time)
-		return;
+	if (reason == SNAP_FULL_CONNECT || reason == SNAP_FULL_MAPRESET)
+		return true;
+	// Cooldown is only enforced mid-game; connect/signon flow bypasses it.
+	if (!client || client->snapshot_state != SNAP_ACTIVE || client->sendsignon != 0)
+		return true;
+	return false;
+}
 
-	if (reason == SNAP_FULL_MANUAL_RESYNC)
-		SV_SetUnreliableConservative (client, "manual_resync");
+static qboolean SV_SnapshotFullReasonIsBaseMismatch (snapshot_full_reason_t reason)
+{
+	return reason == SNAP_FULL_BASE_MISMATCH;
+}
 
-	if (!client->snapshot_force_full_until_ack)
+static qboolean SV_SnapshotFullReasonIsDecodeError (snapshot_full_reason_t reason)
+{
+	return reason == SNAP_FULL_DECODE_ERROR;
+}
+
+static qboolean SV_Snapshot2ForceFull (client_t *client, snapshot_full_reason_t reason)
+{
+	qboolean was_forcing;
+	qboolean until_ack;
+	unsigned int base_preview;
+
+	if (!client)
+		return false;
+
+	was_forcing = client->snapshot_force_full
+		|| (SV_Snapshot2RecoveryEnabled () && client->snapshot_force_full_until_ack);
+	if (client->entstream.active && reason == SNAP_FULL_INTERNAL_ERROR)
+		return true;
+
+	until_ack = SV_SnapshotFullReasonBypassesCooldown (reason, client);
+	base_preview = client->snapshot_safe_base_seq ? client->snapshot_safe_base_seq : client->snapshot_last_acked_seq;
+
+	if (!was_forcing || client->snapshot_force_full_reason != reason)
 	{
 		NET_DebugLogEvent (true,
-			"NETDBG time %.3f snap_force_full_on cl %d %s reason %s ack %u stall %d incomplete %d\n",
-			realtime, SV_ClientSlot (client), client->name, SV_SnapshotFullReasonName (reason),
-			client->snapshot_last_acked_complete_seq,
-			client->snapshot_ack_stall_frames,
-			client->snapshot_incomplete_streak);
+			"NETDBG time %.3f snap_force_full_on cl %d %s seq_build %u base %u signon %d reason %s last_full %.3f\n",
+			realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq, base_preview,
+			client->entstream.signon_stage, SV_SnapshotFullReasonName (reason),
+			client->snapshot_last_full_time);
+		if (client->snapshot_state == SNAP_ACTIVE && client->sendsignon == 0
+			&& !SV_SnapshotFullReasonBypassesCooldown (reason, client))
+		{
+			Con_Printf ("NETDBG: midgame force_full cl %d %s reason %s last_full %.3f\n",
+				SV_ClientSlot (client), client->name, SV_SnapshotFullReasonName (reason),
+				client->snapshot_last_full_time);
+		}
+		if (SV_SnapshotFullReasonIsBaseMismatch (reason))
+			client->snapshot_base_mismatch_count++;
+		if (SV_SnapshotFullReasonIsDecodeError (reason))
+			client->snapshot_decode_error_count++;
 	}
 
-	client->snapshot_force_full_until_ack = true;
+	if (reason == SNAP_FULL_INTERNAL_ERROR)
+		SV_SetUnreliableConservative (client, "snap2_internal_resync");
+
+	client->snapshot_force_full_until_ack = until_ack;
 	client->snapshot_force_full_ack_seq = client->snapshot_last_acked_complete_seq;
 	client->snapshot_force_full = true;
 	client->snapshot_force_full_reason = reason;
-	client->snapshot_force_full_next_time = realtime + 0.2;
+	if (client->snapshot_force_full_next_time < realtime)
+		client->snapshot_force_full_next_time = realtime;
+
+	return true;
+}
+
+static void SV_Snapshot2RecordFullSend (client_t *client, snapshot_full_reason_t reason)
+{
+	if (!client)
+		return;
+	if (client->snapshot_full_counted_seq == client->snapshot_pending_seq)
+		return;
+	client->snapshot_full_counted_seq = client->snapshot_pending_seq;
+	if (reason >= SNAP_FULL_REASON_COUNT)
+		reason = SNAP_FULL_INTERNAL_ERROR;
+	client->snapshot_full_sent_by_reason[reason]++;
+	if (client->snapshot_state == SNAP_ACTIVE && client->sendsignon == 0)
+		client->snapshot_full_sent_midgame++;
 }
 
 static int SV_BuildNetEdictsList (edict_t *clent)
@@ -3225,17 +3279,19 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 	int chunk_remaining = -1;
 	unsigned int chunk_flags = 0;
 	qboolean chunked_snapshot = false;
-	double timeout_s = sv_snapshottimeout.value / 1000.0;
-	double full_interval_s = sv_snap_full_interval.value;
-	int force_full_frames = (int)sv_snap_force_full_after_frames.value;
+	int chunk_index_before = -1;
+	double full_cooldown_s = sv_snap2_full_cooldown.value;
+	double cooldown_end = 0.0;
+	double prev_last_full_time = client->snapshot_last_full_time;
 	qboolean use_delta;
 	qboolean forced_full = false;
-	qboolean reason_no_base = false;
-	qboolean reason_interval = false;
-	qboolean reason_force_full = false;
+	qboolean cooldown_blocked = false;
 	unsigned int extra_flags = 0;
 	qboolean invalid_base = false;
 	qboolean need_full = false;
+	qboolean force_full_requested = false;
+	qboolean midgame_active = false;
+	snapshot_full_reason_t full_reason = client->snapshot_force_full_reason;
 	qboolean snapshot2_recovery = SV_Snapshot2RecoveryEnabled ();
 	int sent_by_priority[SNAP_PRIORITY_COUNT] = {0};
 	int skipped_by_priority[SNAP_PRIORITY_COUNT] = {0};
@@ -3263,76 +3319,107 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 
 	{
 		have_baseline = SV_SelectSnapshotBaseline (client, &baseline_seq, &baseline_states, &baseline_present);
-		need_full = (client->snapshot_force_full
-			|| (snapshot2_recovery && client->snapshot_force_full_until_ack)
-			|| !client->snapshot_has_valid_base
-			|| (snapshot2_recovery ? (client->snapshot_last_acked_seq == 0)
-				: (client->snapshot_last_acked_complete_seq == 0)));
+		midgame_active = (client->snapshot_state == SNAP_ACTIVE && client->sendsignon == 0);
+		if (full_cooldown_s < 0.0)
+			full_cooldown_s = 0.0;
+		if (client->snapshot_last_full_time > 0.0)
+			cooldown_end = client->snapshot_last_full_time + full_cooldown_s;
+
+		force_full_requested = client->snapshot_force_full
+			|| (snapshot2_recovery && client->snapshot_force_full_until_ack);
+		full_reason = client->snapshot_force_full_reason;
 
 		if (client->snapshot_state != SNAP_ACTIVE)
 		{
 			need_full = true;
-			client->snapshot_force_full = true;
-			if (client->snapshot_state == SNAP_INIT)
-				client->snapshot_force_full_reason = SNAP_FULL_JOIN_INIT;
+			if (client->snapshot_force_full_reason != SNAP_FULL_MAPRESET)
+				client->snapshot_force_full_reason = SNAP_FULL_CONNECT;
+			full_reason = client->snapshot_force_full_reason;
+			force_full_requested = true;
 		}
 
 		if (!have_baseline)
 		{
-			reason_no_base = true;
-			client->snapshot_force_full = true;
-			if (client->snapshot_has_valid_base)
-				client->snapshot_force_full_reason = SNAP_FULL_HISTORY_EVICTED;
-			else
-				client->snapshot_force_full_reason = SNAP_FULL_MISSING_BASE;
 			client->snapshot_safe_base_seq = 0;
+			force_full_requested = true;
+			need_full = true;
+			if (snapshot2_recovery)
+				SV_Snapshot2ForceFull (client, SNAP_FULL_BASE_MISMATCH);
+			else
+				client->snapshot_force_full_reason = SNAP_FULL_BASE_MISMATCH;
+			full_reason = client->snapshot_force_full_reason;
 		}
 
 		if (!have_baseline && client->snapshot_baseline_present[0])
 			baseline_present = client->snapshot_baseline_present[0];
 
-		if (snapshot2_recovery)
+		/*
+		** Periodic full refresh CVARs were removed:
+		** - sv_snapshottimeout = 1000
+		** - sv_snap_full_interval = 2.0
+		** - sv_snap_force_full_after_frames = 3
+		** - net_snap_forcefull_frames = 3 (unused)
+		** Full snapshots now trigger only for connect/map reset, explicit client request,
+		** or verified mismatch/error cases.
+		*/
+		if (force_full_requested && !SV_SnapshotFullReasonBypassesCooldown (full_reason, client)
+			&& client->snapshot_force_full_next_time > realtime && have_baseline)
 		{
-			qboolean full_chunk_in_progress = client->entstream.active;
-
-			if (!full_chunk_in_progress)
+			cooldown_blocked = true;
+			force_full_requested = false;
+		}
+		if (force_full_requested && full_cooldown_s > 0.0 && client->snapshot_last_full_time > 0.0
+			&& midgame_active && have_baseline
+			&& !SV_SnapshotFullReasonBypassesCooldown (full_reason, client)
+			&& realtime < cooldown_end)
+		{
+			cooldown_blocked = true;
+			force_full_requested = false;
+			if (client->snapshot_force_full_next_time < cooldown_end)
+				client->snapshot_force_full_next_time = cooldown_end;
+			if (client->snapshot_full_rate_limited_until <= realtime)
 			{
-				if (client->snapshot_incomplete_streak >= 3)
-					SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
-				if (client->snapshot_ack_stall_frames >= 10)
-					SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+				client->snapshot_full_rate_limited_count++;
+				client->snapshot_full_rate_limited_until = cooldown_end;
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_force_full_blocked cl %d %s seq_build %u base %u signon %d reason %s last_full %.3f cooldown_until %.3f\n",
+					realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq, baseline_seq,
+					client->entstream.signon_stage, SV_SnapshotFullReasonName (full_reason),
+					client->snapshot_last_full_time, cooldown_end);
 			}
 		}
+		if (cooldown_blocked && client->snapshot_force_full_next_time < cooldown_end)
+			client->snapshot_force_full_next_time = cooldown_end;
+		if (force_full_requested)
+		{
+			forced_full = true;
+		}
 
-		if (client->snapshot_force_full || (snapshot2_recovery && client->snapshot_force_full_until_ack))
+		need_full = (client->snapshot_state != SNAP_ACTIVE)
+			|| force_full_requested
+			|| !client->snapshot_has_valid_base
+			|| !have_baseline
+			|| (snapshot2_recovery ? (client->snapshot_last_acked_seq == 0)
+				: (client->snapshot_last_acked_complete_seq == 0));
+		full_reason = client->snapshot_force_full_reason;
+		if (midgame_active && need_full && !SV_SnapshotFullReasonBypassesCooldown (full_reason, client))
 		{
 			forced_full = true;
-			reason_force_full = true;
-			if (client->snapshot_force_full_reason == SNAP_FULL_MAP_START)
-				client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
-			if (!client->snapshot_force_full_until_ack)
-				client->snapshot_force_full = false;
 		}
-		if (!client->entstream.active && force_full_frames > 0
-			&& client->snapshot_unacked_frames >= force_full_frames)
+		if (forced_full)
 		{
-			forced_full = true;
-			reason_force_full = true;
-			client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
-		}
-		if (!client->entstream.active && timeout_s > 0.0 && client->snapshot_last_acked_time > 0.0
-			&& realtime - client->snapshot_last_acked_time > timeout_s)
-		{
-			forced_full = true;
-			reason_force_full = true;
-			client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
-		}
-		if (!client->entstream.active && full_interval_s > 0.0
-			&& (realtime - client->snapshot_last_full_time) > full_interval_s)
-		{
-			forced_full = true;
-			reason_interval = true;
-			client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
+			unsigned int base_log = have_baseline ? baseline_seq : 0xFFFFFFFFu;
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f snap_force_full_decision cl %d %s seq_build %u base %u signon %d reason %s last_full %.3f cooldown_until %.3f\n",
+				realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq, base_log,
+				client->entstream.signon_stage, SV_SnapshotFullReasonName (full_reason),
+				client->snapshot_last_full_time, client->snapshot_force_full_next_time);
+			if (midgame_active && !SV_SnapshotFullReasonBypassesCooldown (full_reason, client))
+			{
+				Con_Printf ("NETDBG: midgame full decision cl %d %s base %u reason %s last_full %.3f\n",
+					SV_ClientSlot (client), client->name, base_log, SV_SnapshotFullReasonName (full_reason),
+					client->snapshot_last_full_time);
+			}
 		}
 
 		if (client->entstream.active)
@@ -3341,6 +3428,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 				extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 			use_delta = false;
 			client->snapshot_pending_is_delta = false;
+			chunk_index_before = client->entstream.chunk_index;
 			if (sv_snapshot2.value)
 			{
 				int total_count = 0;
@@ -3387,8 +3475,30 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 				SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
 					client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
 			}
+			{
+				qboolean new_full_sequence = (!chunked_snapshot || chunk_index_before == 0)
+					&& (client->snapshot_full_counted_seq != client->snapshot_pending_seq);
+				if (new_full_sequence)
+				{
+					if (full_cooldown_s > 0.0 && prev_last_full_time > 0.0
+						&& midgame_active
+						&& (realtime - prev_last_full_time) < full_cooldown_s
+						&& !SV_SnapshotFullReasonBypassesCooldown (full_reason, client))
+					{
+						NET_DebugLogEvent (true,
+							"NETDBG time %.3f snap_full_within_cooldown cl %d %s since_last %.3f cooldown %.3f reason %s\n",
+							realtime, SV_ClientSlot (client), client->name,
+							realtime - prev_last_full_time, full_cooldown_s,
+							SV_SnapshotFullReasonName (full_reason));
+					}
+					SV_Snapshot2RecordFullSend (client, full_reason);
+				}
+			}
 			client->snapshot_last_full_seq = client->snapshot_pending_seq;
 			client->snapshot_last_full_time = realtime;
+			if (!client->snapshot_force_full_until_ack)
+				client->snapshot_force_full = false;
+			client->snapshot_force_full_next_time = realtime;
 			if (client->snapshot_state == SNAP_INIT)
 				client->snapshot_state = SNAP_WAIT_FULL_ACK;
 			if (snapshot2_recovery)
@@ -3412,10 +3522,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 			int snapshot_budget_bytes = 0;
 			int token_budget_bytes = 0;
 			int mandatory_total_bytes = 0;
+			int mandatory_override_budget_bytes = 0;
 			int build_budget_bytes = remaining_bytes;
 			int build_optional_budget_bytes = snapshot_budget_bytes;
 			qboolean budget_continuation = false;
 			qboolean mandatory_oversize = false;
+			qboolean mandatory_budget_override = false;
 			qboolean debug_frame = false;
 			qboolean force_complete_full = need_full;
 			qboolean rebuild_snapshot = false;
@@ -3466,6 +3578,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 					build_budget_bytes = 1 << 30;
 					build_optional_budget_bytes = 1 << 30;
 				}
+				else if (mandatory_budget_override && mandatory_override_budget_bytes > 0)
+				{
+					build_budget_bytes = q_max (build_budget_bytes, mandatory_override_budget_bytes);
+					build_optional_budget_bytes = header_bytes;
+				}
 				else if (snapshot2_recovery && client->snapshot_need_complete_delta_after_full)
 				{
 					build_optional_budget_bytes = header_bytes;
@@ -3492,46 +3609,44 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 				if (delta_mode && mtu_payload_bytes > 0
 					&& current_bytes + mandatory_total_bytes > mtu_payload_bytes)
 				{
-					if (snapshot2_recovery)
-					{
-						NET_DebugLogEvent (true,
-							"NETDBG time %.3f snap_mandatory_overflow cl %d %s seq %u mand_bytes %d mtu %d\n",
-							realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq,
-							mandatory_total_bytes, mtu_payload_bytes);
-						SV_Snapshot2ForceFull (client, SNAP_FULL_MANDATORY_OVERFLOW);
-						force_complete_full = true;
-						rebuild_snapshot = true;
-						continue;
-					}
-					SDL_assert (current_bytes + mandatory_total_bytes <= mtu_payload_bytes);
+					NET_DebugLogEvent (true,
+						"NETDBG time %.3f snap_mandatory_overflow cl %d %s seq %u mand_bytes %d mtu %d policy keep_last_state\n",
+						realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq,
+						mandatory_total_bytes, mtu_payload_bytes);
 					client->snapshot_pending_incomplete = true;
 					client->snapshot_pending_mandatory = mandatory_count;
-					client->snapshot_pending_dropped_optional = 0;
+					client->snapshot_pending_dropped_optional = dropped_count;
 					client->snapshot_pending_missing_mandatory = true;
-					client->mtu_dropped_tier1 = 0;
-					client->mtu_dropped_tier2 = 0;
+					client->mtu_dropped_tier1 = dropped_tier1;
+					client->mtu_dropped_tier2 = dropped_tier2;
+					extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 					return;
 				}
 				if (delta_mode && mandatory_oversize)
 				{
-					if (snapshot2_recovery)
+					if (!mandatory_budget_override
+						&& (mtu_payload_bytes <= 0 || current_bytes + mandatory_total_bytes <= mtu_payload_bytes))
 					{
-						NET_DebugLogEvent (true,
-							"NETDBG time %.3f snap_mandatory_overflow cl %d %s seq %u mand_bytes %d budget %d\n",
+						mandatory_budget_override = true;
+						mandatory_override_budget_bytes = mandatory_total_bytes;
+						NET_DebugLogEvent (false,
+							"NETDBG time %.3f snap_mandatory_budget_override cl %d %s seq %u mand_bytes %d budget %d\n",
 							realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq,
 							mandatory_total_bytes, build_budget_bytes);
-						SV_Snapshot2ForceFull (client, SNAP_FULL_MANDATORY_OVERFLOW);
-						force_complete_full = true;
 						rebuild_snapshot = true;
 						continue;
 					}
-					SDL_assert (!mandatory_oversize);
+					NET_DebugLogEvent (true,
+						"NETDBG time %.3f snap_mandatory_overflow cl %d %s seq %u mand_bytes %d budget %d policy keep_last_state\n",
+						realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq,
+						mandatory_total_bytes, build_budget_bytes);
 					client->snapshot_pending_incomplete = true;
 					client->snapshot_pending_mandatory = mandatory_count;
-					client->snapshot_pending_dropped_optional = 0;
+					client->snapshot_pending_dropped_optional = dropped_count;
 					client->snapshot_pending_missing_mandatory = true;
-					client->mtu_dropped_tier1 = 0;
-					client->mtu_dropped_tier2 = 0;
+					client->mtu_dropped_tier1 = dropped_tier1;
+					client->mtu_dropped_tier2 = dropped_tier2;
+					extra_flags |= SNAPSHOT_FLAG_INCOMPLETE;
 					return;
 				}
 			} while (rebuild_snapshot);
@@ -3581,9 +3696,11 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 			}
 			if (dropped_count > 0 && sv_snap_debug.value >= 1.0f && sv_snapshot2.value)
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap_budget_drop(optional) cl %d %s seq %u drop_opt %d tier1 %d tier2 %d\n",
+					"NETDBG time %.3f snap_budget_drop(optional) cl %d %s seq %u drop_opt %d tier1 %d tier2 %d force_full %d reason %s\n",
 					realtime, SV_ClientSlot (client), client->name, client->snapshot_next_seq,
-					dropped_count, dropped_tier1, dropped_tier2);
+					dropped_count, dropped_tier1, dropped_tier2,
+					forced_full ? 1 : 0,
+					forced_full ? SV_SnapshotFullReasonName (full_reason) : "NONE");
 			client->snapshot_pending_mandatory = mandatory_count;
 			client->snapshot_pending_dropped_optional = dropped_count;
 			client->snapshot_pending_missing_mandatory = false;
@@ -3596,20 +3713,20 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 				client->snapshot_next_seq = 1;
 			client->snapshot_pending_time = realtime;
 			use_delta = allow_delta;
-			if (!have_baseline)
-				reason_no_base = true;
 			if (forced_full)
 			{
 				use_delta = false;
-				if (!reason_interval)
-					reason_force_full = true;
 			}
 			if (use_delta && baseline_seq == 0xFFFFFFFFu)
 			{
 				invalid_base = true;
 				use_delta = false;
 				forced_full = true;
-				reason_no_base = true;
+				if (snapshot2_recovery)
+					SV_Snapshot2ForceFull (client, SNAP_FULL_BASE_MISMATCH);
+				else
+					client->snapshot_force_full_reason = SNAP_FULL_BASE_MISMATCH;
+				full_reason = client->snapshot_force_full_reason;
 			}
 			client->snapshot_pending_baseline_seq = use_delta ? baseline_seq : 0xFFFFFFFFu;
 			client->snapshot_pending_is_delta = use_delta;
@@ -3644,6 +3761,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 							client->snapshot_pending_present, client->snapshot_pending_flags,
 							msg->maxsize - msg->cursize);
 						chunked_snapshot = true;
+						chunk_index_before = client->entstream.chunk_index;
 						if (!SV_WriteSnapshot2FullChunked (client, msg,
 							client->snapshot_pending_present, client->snapshot_pending_flags, extra_flags,
 							&chunk_remaining, &chunk_flags, &local_stats))
@@ -3665,8 +3783,30 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 					SV_WriteSnapshotFull (msg, client->snapshot_pending_seq, client->snapshot_pending,
 						client->snapshot_pending_present, client->snapshot_pending_flags, qcvm->max_edicts, &full_count);
 				}
+				{
+					qboolean new_full_sequence = (!chunked_snapshot || chunk_index_before == 0)
+						&& (client->snapshot_full_counted_seq != client->snapshot_pending_seq);
+					if (new_full_sequence)
+					{
+						if (full_cooldown_s > 0.0 && prev_last_full_time > 0.0
+							&& midgame_active
+							&& (realtime - prev_last_full_time) < full_cooldown_s
+							&& !SV_SnapshotFullReasonBypassesCooldown (full_reason, client))
+						{
+							NET_DebugLogEvent (true,
+								"NETDBG time %.3f snap_full_within_cooldown cl %d %s since_last %.3f cooldown %.3f reason %s\n",
+								realtime, SV_ClientSlot (client), client->name,
+								realtime - prev_last_full_time, full_cooldown_s,
+								SV_SnapshotFullReasonName (full_reason));
+						}
+						SV_Snapshot2RecordFullSend (client, full_reason);
+					}
+				}
 				client->snapshot_last_full_seq = client->snapshot_pending_seq;
 				client->snapshot_last_full_time = realtime;
+				if (!client->snapshot_force_full_until_ack)
+					client->snapshot_force_full = false;
+				client->snapshot_force_full_next_time = realtime;
 				if (client->snapshot_state == SNAP_INIT)
 					client->snapshot_state = SNAP_WAIT_FULL_ACK;
 				if (snapshot2_recovery)
@@ -3744,12 +3884,14 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 		continuation = true;
 	if (snapshot2_recovery)
 	{
-		qboolean full_chunk_in_progress = client->entstream.active;
-
 		if (client->snapshot_pending_incomplete && !continuation)
+		{
 			client->snapshot_incomplete_streak++;
-		if (!full_chunk_in_progress && client->snapshot_incomplete_streak >= 3)
-			SV_Snapshot2ForceFull (client, SNAP_FULL_MANUAL_RESYNC);
+			if (client->snapshot_incomplete_streak == 3 && sv_snap_debug.value >= 1.0f)
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap_incomplete_streak cl %d %s streak %d policy no_periodic_full\n",
+					realtime, SV_ClientSlot (client), client->name, client->snapshot_incomplete_streak);
+		}
 	}
 	if (snapshot2_recovery
 		&& client->snapshot_need_complete_delta_after_full
@@ -3780,17 +3922,17 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 	}
 	if (invalid_base)
 	{
-		client->snapshot_has_valid_base = false;
-		client->snapshot_force_full = true;
-		client->snapshot_force_full_reason = SNAP_FULL_MISSING_BASE;
+		client->snapshot_safe_base_seq = 0;
+		SV_Snapshot2ForceFull (client, SNAP_FULL_BASE_MISMATCH);
 		client->entstream.active = false;
 		client->entstream.next_edict = 1;
 		client->entstream.base_snapshot = 0;
 		NET_DebugLogEvent (true,
-			"NETDBG time %.3f snap_invalid_base cl %d %s seq %u base %u full %d delta %d force_full %d\n",
+			"NETDBG time %.3f snap_invalid_base cl %d %s seq %u base %u full %d delta %d force_full %d reason %s\n",
 			realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq,
 			client->snapshot_pending_baseline_seq,
-			use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
+			use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0,
+			SV_SnapshotFullReasonName (client->snapshot_force_full_reason));
 	}
 
 	if (forced_full)
@@ -3851,12 +3993,7 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 
 		if (!use_delta && sv_snap_debug.value >= 2.0f)
 		{
-			if (reason_force_full)
-				reason = "forced_full";
-			else if (reason_interval)
-				reason = "full_interval";
-			else if (reason_no_base)
-				reason = "no_base";
+			reason = SV_SnapshotFullReasonName (full_reason);
 		}
 
 		Con_Printf ("snap %s seq %u base %u flags 0x%x ents %d rem %d%s%s\n",
@@ -3932,10 +4069,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 			else
 				reason = "UNKNOWN_INCOMPLETE";
 			NET_DebugLogEvent (true,
-				"NETDBG time %.3f snap_incomplete cl %d %s seq %u base %u reason %s mand %d drop_opt %d full %d delta %d force_full %d\n",
+				"NETDBG time %.3f snap_incomplete cl %d %s seq %u base %u reason %s mand %d drop_opt %d full %d delta %d force_full %d force_reason %s\n",
 				realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq, base_seq, reason,
 				client->snapshot_pending_mandatory, client->snapshot_pending_dropped_optional,
-				use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
+				use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0,
+				!use_delta ? SV_SnapshotFullReasonName (full_reason)
+				: (forced_full ? SV_SnapshotFullReasonName (full_reason) : "NONE"));
 		}
 	}
 
@@ -3956,9 +4095,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 		}
 
 		NET_DebugLogEvent (false,
-			"NETDBG time %.3f snap2_send cl %d %s seq %u base %u flags 0x%x bytes %d chunk %d/%d rem %d ents %d\n",
+			"NETDBG time %.3f snap2_send cl %d %s seq %u base %u flags 0x%x bytes %d chunk %d/%d rem %d ents %d force_full %d reason %s\n",
 			realtime, SV_ClientSlot (client), client->name, client->snapshot_pending_seq, base_seq,
-			client->snapshot_debug_flags, size_delta, chunk_idx, chunk_total, rem_count, ents);
+			client->snapshot_debug_flags, size_delta, chunk_idx, chunk_total, rem_count, ents,
+			forced_full ? 1 : 0,
+			!use_delta ? SV_SnapshotFullReasonName (full_reason)
+			: (forced_full ? SV_SnapshotFullReasonName (full_reason) : "NONE"));
 	}
 
 	if (client->snapshot_pending_seq)
@@ -3991,12 +4133,12 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 			if (client->snapshot_no_progress_count >= 2)
 			{
 				NET_DebugLogEvent (true,
-					"NETDBG time %.3f snap_no_progress cl %d %s seq %u base %u size %d cursor %d rem %d full %d delta %d force_full %d\n",
+					"NETDBG time %.3f snap_no_progress cl %d %s seq %u base %u size %d cursor %d rem %d full %d delta %d force_full %d reason %s\n",
 					realtime, SV_ClientSlot (client), client->name,
 					client->snapshot_pending_seq, base_seq, size_delta, cursor, remaining,
-					use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0);
-				client->snapshot_force_full = true;
-				client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
+					use_delta ? 0 : 1, use_delta ? 1 : 0, forced_full ? 1 : 0,
+					SV_SnapshotFullReasonName (SNAP_FULL_INTERNAL_ERROR));
+				SV_Snapshot2ForceFull (client, SNAP_FULL_INTERNAL_ERROR);
 				client->snapshot_pending_is_delta = false;
 				client->snapshot_pending_seq = 0;
 				client->snapshot_pending_incomplete = false;
@@ -4020,22 +4162,42 @@ void SV_SnapshotAck (client_t *client, unsigned int seq)
 
 	if (seq == 0)
 	{
-		SV_ResetClientSnapshot (client);
-		client->snapshot_force_full_reason = SNAP_FULL_MANUAL_RESYNC;
+		qboolean midgame_active = (client->snapshot_state == SNAP_ACTIVE && client->sendsignon == 0);
+		if (!midgame_active)
+		{
+			SV_ResetClientSnapshot (client);
+		}
+		else
+		{
+			client->snapshot_safe_base_seq = 0;
+			client->snapshot_pending_seq = 0;
+			client->snapshot_pending_incomplete = false;
+			client->snapshot_pending_is_delta = false;
+			client->snapshot_unacked_frames = 0;
+			client->snapshot_no_progress_count = 0;
+		}
+		SV_Snapshot2ForceFull (client, SNAP_FULL_CLIENT_REQUEST);
 		client->entstream.active = false;
-		SV_SetUnreliableConservative (client, "baseline_reset");
+		SV_SetUnreliableConservative (client, "client_request_full");
+		NET_DebugLogEvent (true,
+			"NETDBG time %.3f snap_client_request_full cl %d %s last_full %.3f\n",
+			realtime, SV_ClientSlot (client), client->name, client->snapshot_last_full_time);
 		if (sv_snapshotdebug.value || sv_snap_debug.value)
 			Con_Printf ("snapshot %s baseline reset request\n", client->name);
 		return;
 	}
 	if (seq == 0xFFFFFFFFu)
 	{
-		client->snapshot_has_valid_base = false;
-		client->snapshot_force_full = true;
-		client->snapshot_force_full_reason = SNAP_FULL_PARSE_ERROR;
+		client->snapshot_safe_base_seq = 0;
+		client->snapshot_pending_seq = 0;
+		client->snapshot_pending_incomplete = false;
+		client->snapshot_pending_is_delta = false;
+		client->entstream.active = false;
+		SV_Snapshot2ForceFull (client, SNAP_FULL_DECODE_ERROR);
 		NET_DebugLogEvent (true,
-			"NETDBG time %.3f snap_invalid_ack cl %d %s seq %u\n",
-			realtime, SV_ClientSlot (client), client->name, seq);
+			"NETDBG time %.3f snap_invalid_ack cl %d %s seq %u reason %s\n",
+			realtime, SV_ClientSlot (client), client->name, seq,
+			SV_SnapshotFullReasonName (client->snapshot_force_full_reason));
 		return;
 	}
 
@@ -4129,10 +4291,11 @@ void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int 
 	if (sv_snap_debug.value >= 1.0f)
 		Con_Printf ("snapshot %s nak expected %u received %u\n", client->name, expected_base, received_base);
 	NET_DebugLogEvent (true,
-		"NETDBG time %.3f snap_nak cl %d %s expected %u received %u\n",
-		realtime, SV_ClientSlot (client), client->name, expected_base, received_base);
-	client->snapshot_force_full = true;
-	client->snapshot_force_full_reason = SNAP_FULL_MISSING_BASE;
+		"NETDBG time %.3f snap_nak cl %d %s expected %u received %u reason %s last_full %.3f\n",
+		realtime, SV_ClientSlot (client), client->name, expected_base, received_base,
+		SV_SnapshotFullReasonName (SNAP_FULL_BASE_MISMATCH), client->snapshot_last_full_time);
+	client->snapshot_safe_base_seq = 0;
+	SV_Snapshot2ForceFull (client, SNAP_FULL_BASE_MISMATCH);
 	client->snapshot_pending_is_delta = false;
 	client->snapshot_pending_seq = 0;
 	client->snapshot_unacked_frames = 0;
@@ -5054,7 +5217,7 @@ qboolean SV_SendClientDatagram (client_t *client)
 	}
 	if (client->snapshot_state != SNAP_ACTIVE)
 		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "join");
-	if (client->snapshot_force_full_reason == SNAP_FULL_MANUAL_RESYNC
+	if (client->snapshot_force_full_reason == SNAP_FULL_INTERNAL_ERROR
 		|| client->snapshot_force_full_until_ack)
 	{
 		SV_MTUReasonAppend (mtu_reason, sizeof(mtu_reason), "resync");

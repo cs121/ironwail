@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // cl_parse.c  -- parse a message received from the server
 
+#include <string.h>
+
 #include "quakedef.h"
 #include "arch_def.h"
 #include "net_sys.h"
@@ -971,6 +973,15 @@ static void CL_GetSnapshotHistoryRange (unsigned int *out_min, unsigned int *out
 		*out_count = count;
 }
 
+static qboolean CL_SnapshotReasonIsBaseMismatch (const char *reason)
+{
+	if (!reason)
+		return false;
+	return strstr (reason, "base mismatch")
+		|| strstr (reason, "invalid base")
+		|| strstr (reason, "missing base");
+}
+
 static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_error)
 {
 	unsigned int ack_seq;
@@ -984,11 +995,16 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 	{
 		cl.snap_parse_errors++;
 		cl.snap_parse_consecutive++;
+		cl.snap_decode_error_count++;
 		if (cl.snap_parse_consecutive >= MAX_SNAPSHOT_PARSE_ERRORS)
 		{
 			Host_EndGame ("Too many malformed packets\n");
 			return;
 		}
+	}
+	else if (CL_SnapshotReasonIsBaseMismatch (reason))
+	{
+		cl.snap_base_mismatch_count++;
 	}
 	NET_DebugLogEvent (true,
 		"NETDBG time %.3f snap_abort reason %s parse_errors %d need_full %d\n",
@@ -1247,6 +1263,16 @@ static void CL_ClearSnapshotEntity (int entnum)
 		cl.snapshot_active[entnum] = 0;
 	if (cl.snapshot_last_update_time)
 		cl.snapshot_last_update_time[entnum] = 0;
+	if (cl.snapshot_missing_grace_until)
+		cl.snapshot_missing_grace_until[entnum] = 0;
+	if (cl.snapshot_resync_start_time)
+		cl.snapshot_resync_start_time[entnum] = 0;
+	if (cl.snapshot_resync_end_time)
+		cl.snapshot_resync_end_time[entnum] = 0;
+	if (cl.snapshot_resync_from_origin)
+		VectorClear (cl.snapshot_resync_from_origin[entnum]);
+	if (cl.snapshot_resync_from_angles)
+		VectorClear (cl.snapshot_resync_from_angles[entnum]);
 	CL_ClearEntitySnapHistory (entnum);
 }
 
@@ -1377,6 +1403,8 @@ static void CL_MarkSnapshotEntityUpdated (int entnum)
 		cl.snapshot_active[entnum] = 1;
 	if (cl.snapshot_last_update_time)
 		cl.snapshot_last_update_time[entnum] = stamp;
+	if (cl.snapshot_missing_grace_until)
+		cl.snapshot_missing_grace_until[entnum] = 0;
 }
 
 static void CL_RecordEntitySnap (int entnum, const snapshot_state_t *state)
@@ -2175,7 +2203,15 @@ static void CL_PrepareFullSnapshotInterpReset (void)
 	CL_ResetPlayerSnaps ();
 
 	for (i = 1; i < cl_max_edicts; i++)
+	{
 		CL_ClearEntitySnapHistory (i);
+		if (cl.snapshot_missing_grace_until)
+			cl.snapshot_missing_grace_until[i] = 0;
+		if (cl.snapshot_resync_start_time)
+			cl.snapshot_resync_start_time[i] = 0;
+		if (cl.snapshot_resync_end_time)
+			cl.snapshot_resync_end_time[i] = 0;
+	}
 }
 
 static void CL_FinalizeFullSnapshotInterpReset (void)
@@ -2196,6 +2232,18 @@ static void CL_FinalizeFullSnapshotInterpReset (void)
 		ent->forcelink = true;
 		ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM;
 	}
+}
+
+static double CL_Snap2ResyncBlendSeconds (void)
+{
+	double ms = CLAMP (0.0, cl_snap2_resync_blend_ms.value, 1000.0);
+	return ms * 0.001;
+}
+
+static double CL_Snap2MissingGraceSeconds (void)
+{
+	double ms = CLAMP (0.0, cl_snap2_missing_grace_ms.value, 2000.0);
+	return ms * 0.001;
 }
 
 static void CL_ResetSnapshotChunkAssembly (cl_snapshot_chunk_asm_t *chunk)
@@ -2327,8 +2375,12 @@ static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, q
 		if (!incomplete)
 		{
 			qboolean reset_interp = (!cl.has_full_snapshot || cl.need_full_snapshot);
+			qboolean midgame_full = (cl.has_full_snapshot && !cl.need_full_snapshot && cls.signon == SIGNONS);
+			double blend_s = midgame_full ? CL_Snap2ResyncBlendSeconds () : 0.0;
+			double grace_s = midgame_full ? CL_Snap2MissingGraceSeconds () : 0.0;
 			const byte *prev_present = cl.snapshot_present;
 			double snap_time = CL_ClampSnapshotServerTime (header->server_time, header->seq);
+			double snap_stamp = 0.0;
 
 			if (reset_interp)
 				CL_PrepareFullSnapshotInterpReset ();
@@ -2338,9 +2390,54 @@ static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, q
 				cl.snapshot_time = snap_time;
 				CL_UpdateServerTimeEstimate (snap_time, "snap2_full");
 			}
+			snap_stamp = (snap_time > 0.0) ? snap_time
+				: (cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0]);
 
 			// INV-5: commit staged snapshot only after full parse.
 			CL_StoreSnapshotBaseline (header->seq, cl.snapshot_stage, cl.snapshot_stage_present);
+			if (midgame_full)
+			{
+				int resync_count = 0;
+				int missing_grace_count = 0;
+
+				cl.snap_full_midgame_count++;
+				if (prev_present && cl.snapshot_present)
+				{
+					for (i = 1; i < cl_max_edicts; i++)
+					{
+						if (!prev_present[i])
+							continue;
+						if (cl.snapshot_present[i])
+						{
+							if (blend_s > 0.0 && cl.snapshot_resync_start_time && cl.snapshot_resync_end_time
+								&& cl.snapshot_resync_from_origin && cl.snapshot_resync_from_angles)
+							{
+								entity_t *ent = &cl_entities[i];
+								VectorCopy (ent->origin, cl.snapshot_resync_from_origin[i]);
+								VectorCopy (ent->angles, cl.snapshot_resync_from_angles[i]);
+								cl.snapshot_resync_start_time[i] = snap_stamp;
+								cl.snapshot_resync_end_time[i] = snap_stamp + blend_s;
+								resync_count++;
+							}
+							if (cl.snapshot_missing_grace_until)
+								cl.snapshot_missing_grace_until[i] = 0;
+						}
+						else if (grace_s > 0.0 && cl.snapshot_missing_grace_until)
+						{
+							cl.snapshot_missing_grace_until[i] = snap_stamp + grace_s;
+							missing_grace_count++;
+						}
+					}
+				}
+				if (resync_count > 0)
+					cl.snap_full_midgame_soft_count++;
+				if (missing_grace_count > 0)
+					cl.snap_full_midgame_missing_grace += missing_grace_count;
+				NET_DebugLogEvent (true,
+					"NETDBG time %.3f snap2_midgame_full seq %u blend_ms %.0f grace_ms %.0f resync %d missing_grace %d\n",
+					realtime, header->seq, blend_s * 1000.0, grace_s * 1000.0,
+					resync_count, missing_grace_count);
+			}
 			for (i = 1; i < cl_max_edicts; i++)
 			{
 				if (!cl.snapshot_present[i])
