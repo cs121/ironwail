@@ -188,13 +188,13 @@ typedef enum snapshot_client_state_e
 
 typedef enum snapshot_full_reason_e
 {
-	SNAP_FULL_MAP_START = 0,
-	SNAP_FULL_JOIN_INIT,
-	SNAP_FULL_MISSING_BASE,
-	SNAP_FULL_HISTORY_EVICTED,
-	SNAP_FULL_PARSE_ERROR,
-	SNAP_FULL_MANDATORY_OVERFLOW,
-	SNAP_FULL_MANUAL_RESYNC
+	SNAP_FULL_CONNECT = 0,
+	SNAP_FULL_MAPRESET,
+	SNAP_FULL_CLIENT_REQUEST,
+	SNAP_FULL_BASE_MISMATCH,
+	SNAP_FULL_DECODE_ERROR,
+	SNAP_FULL_INTERNAL_ERROR,
+	SNAP_FULL_REASON_COUNT
 } snapshot_full_reason_t;
 
 typedef enum sv_unreliable_mode_e
@@ -331,6 +331,13 @@ typedef struct client_s
 	int				snapshot_stats_full;
 	int				snapshot_stats_delta;
 	int				snapshot_stats_forced_full;
+	unsigned int	snapshot_full_counted_seq;
+	int				snapshot_full_sent_by_reason[SNAP_FULL_REASON_COUNT];
+	int				snapshot_full_sent_midgame;
+	int				snapshot_full_rate_limited_count;
+	int				snapshot_base_mismatch_count;
+	int				snapshot_decode_error_count;
+	double			snapshot_full_rate_limited_until;
 	int				snapshot_stats_mandatory;
 	int				snapshot_stats_dropped;
 	double			snapshot_stats_next_time;

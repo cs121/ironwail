@@ -62,6 +62,8 @@ cvar_t	cl_snap_chunk_drop = {"cl_snap_chunk_drop", "0", CVAR_NONE};
 cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
 cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
 cvar_t	cl_entity_dormant_ms = {"cl_entity_dormant_ms", "400", CVAR_NONE};
+cvar_t	cl_snap2_resync_blend_ms = {"cl_snap2_resync_blend_ms", "150", CVAR_NONE};
+cvar_t	cl_snap2_missing_grace_ms = {"cl_snap2_missing_grace_ms", "400", CVAR_NONE};
 cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
 cvar_t	cl_lerp_max_gap_ms = {"cl_lerp_max_gap_ms", "250", CVAR_NONE};
 cvar_t	cl_lerp_debug = {"cl_lerp_debug", "0", CVAR_NONE};
@@ -725,6 +727,53 @@ static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out
 	return false;
 }
 
+static void CL_ApplySnapshotResyncBlend (int entnum, vec3_t org, vec3_t ang)
+{
+	double end_time;
+	double start_time;
+	double duration;
+	double frac;
+	double now;
+	int axis;
+
+	if (!cl.snapshot_resync_end_time || !cl.snapshot_resync_start_time
+		|| !cl.snapshot_resync_from_origin || !cl.snapshot_resync_from_angles)
+		return;
+	if (entnum <= 0 || entnum >= cl_max_edicts)
+		return;
+
+	end_time = cl.snapshot_resync_end_time[entnum];
+	if (end_time <= 0.0)
+		return;
+	start_time = cl.snapshot_resync_start_time[entnum];
+	duration = end_time - start_time;
+	if (duration <= 0.0)
+	{
+		cl.snapshot_resync_end_time[entnum] = 0.0;
+		return;
+	}
+
+	now = cl.time;
+	if (now >= end_time)
+	{
+		cl.snapshot_resync_end_time[entnum] = 0.0;
+		return;
+	}
+
+	if (now <= start_time)
+		frac = 0.0;
+	else
+		frac = (now - start_time) / duration;
+	frac = CLAMP (0.0, frac, 1.0);
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		float from = cl.snapshot_resync_from_origin[entnum][axis];
+		org[axis] = from + (float)frac * (org[axis] - from);
+		ang[axis] = CL_LerpAngle (cl.snapshot_resync_from_angles[entnum][axis], ang[axis], (float)frac);
+	}
+}
+
 void CL_FreeState(void)
 {
         int i;
@@ -783,6 +832,11 @@ void CL_ClearState (void)
 	cl.snapshot_present = cl.snapshot_baseline_present[0];
 	cl.snapshot_active = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_active");
 	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
+	cl.snapshot_missing_grace_until = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_missing_grace");
+	cl.snapshot_resync_start_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_resync_start");
+	cl.snapshot_resync_end_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_resync_end");
+	cl.snapshot_resync_from_origin = (vec3_t *) Hunk_AllocName (cl_max_edicts*sizeof(vec3_t), "cl_snap_resync_org");
+	cl.snapshot_resync_from_angles = (vec3_t *) Hunk_AllocName (cl_max_edicts*sizeof(vec3_t), "cl_snap_resync_ang");
 	cl.snapshot_chunk = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_chunk");
 	cl.snapshot_chunk_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_chunk_present");
 	cl.snapshot_stage = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_stage");
@@ -807,6 +861,16 @@ void CL_ClearState (void)
 		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_last_update_time)
 		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+	if (cl.snapshot_missing_grace_until)
+		memset (cl.snapshot_missing_grace_until, 0, cl_max_edicts * sizeof(double));
+	if (cl.snapshot_resync_start_time)
+		memset (cl.snapshot_resync_start_time, 0, cl_max_edicts * sizeof(double));
+	if (cl.snapshot_resync_end_time)
+		memset (cl.snapshot_resync_end_time, 0, cl_max_edicts * sizeof(double));
+	if (cl.snapshot_resync_from_origin)
+		memset (cl.snapshot_resync_from_origin, 0, cl_max_edicts * sizeof(vec3_t));
+	if (cl.snapshot_resync_from_angles)
+		memset (cl.snapshot_resync_from_angles, 0, cl_max_edicts * sizeof(vec3_t));
 	if (cl.snapshot_chunk_present)
 		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
 	if (cl.snapshot_stage_present)
@@ -1352,6 +1416,14 @@ void CL_RelinkEntities (void)
 			{
 				keepalive = true;
 			}
+			if (cl.snapshot_missing_grace_until)
+			{
+				double grace_until = cl.snapshot_missing_grace_until[i];
+				if (grace_until > cl.time)
+					keepalive = true;
+				else if (grace_until > 0.0)
+					cl.snapshot_missing_grace_until[i] = 0.0;
+			}
 
 			if (dormant_s > 0.0)
 				grace_s = dormant_s;
@@ -1436,6 +1508,7 @@ void CL_RelinkEntities (void)
 			{
 				VectorCopy (lerp_org, ent->origin);
 				VectorCopy (lerp_ang, ent->angles);
+				CL_ApplySnapshotResyncBlend (i, ent->origin, ent->angles);
 			}
 		}
 		else if (i > cl.maxclients)
@@ -1447,6 +1520,7 @@ void CL_RelinkEntities (void)
 			{
 				VectorCopy (lerp_org, ent->origin);
 				VectorCopy (lerp_ang, ent->angles);
+				CL_ApplySnapshotResyncBlend (i, ent->origin, ent->angles);
 			}
 		}
 
@@ -2028,6 +2102,8 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_test_drop);
 	Cvar_RegisterVariable (&cl_entity_timeout_ms);
 	Cvar_RegisterVariable (&cl_entity_dormant_ms);
+	Cvar_RegisterVariable (&cl_snap2_resync_blend_ms);
+	Cvar_RegisterVariable (&cl_snap2_missing_grace_ms);
 	Cvar_RegisterVariable (&cl_lerp_ms);
 	Cvar_RegisterVariable (&cl_lerp_max_gap_ms);
 	Cvar_RegisterVariable (&cl_lerp_debug);
