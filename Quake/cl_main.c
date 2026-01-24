@@ -72,6 +72,12 @@ cvar_t	cl_netdbg_watch_ent = {"cl_netdbg_watch_ent", "0", CVAR_NONE};
 cvar_t	cl_netdbg_pred = {"cl_netdbg_pred", "0", CVAR_NONE};
 cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
 cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
+cvar_t	cl_pred_tickrate = {"cl_pred_tickrate", "72", CVAR_ARCHIVE};
+cvar_t	cl_pred_frame_min_ms = {"cl_pred_frame_min_ms", "1.0", CVAR_ARCHIVE};
+cvar_t	cl_pred_frame_max_ms = {"cl_pred_frame_max_ms", "50.0", CVAR_ARCHIVE};
+cvar_t	cl_pred_corr_ms = {"cl_pred_corr_ms", "150", CVAR_ARCHIVE};
+cvar_t	cl_pred_corr_eps = {"cl_pred_corr_eps", "0.75", CVAR_ARCHIVE};
+cvar_t	cl_pred_corr_vel = {"cl_pred_corr_vel", "1", CVAR_ARCHIVE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -301,6 +307,195 @@ void CL_RecordPlayerSnap (void)
 
 	cl_psnap_head = (cl_psnap_head + 1) % CL_PLAYER_SNAP_HISTORY;
 	cl_psnap_count = q_min (cl_psnap_count + 1, CL_PLAYER_SNAP_HISTORY);
+}
+
+unsigned int CL_ConnGen (void)
+{
+	return cls.conn_gen;
+}
+
+unsigned int CL_ConnGenPacket (void)
+{
+	return cls.conn_gen_packet;
+}
+
+void CL_ConnGenBump (const char *reason)
+{
+	unsigned int next = cls.conn_gen + 1u;
+	unsigned int prev_drops = cls.conn_gen_drop_count;
+
+	if (next == 0u)
+		next = 1u;
+	cls.conn_gen = next;
+	cls.conn_gen_packet = next;
+	cls.conn_gen_frame = next;
+	cls.conn_gen_parse = next;
+	cls.conn_gen_drop_count = 0;
+	cls.conn_gen_bump_count++;
+
+	if (cl_netdbg_pred.value > 0.0f)
+	{
+		if (prev_drops > 0u)
+		{
+			Con_Printf ("NETDBG: conn_gen bump prev_drops %u\n", prev_drops);
+		}
+		Con_Printf ("NETDBG: conn_gen bump -> %u reason %s\n",
+			cls.conn_gen, reason ? reason : "unknown");
+	}
+}
+
+static void CL_ResetSnapshotSoftState (const char *reason)
+{
+	int i;
+	unsigned int prev_seq = cl.snapshot_baseline_seq;
+	unsigned int cand = (unsigned int)cl.snap_last_complete_seq;
+
+	if (NETSEQ_GT (cand, prev_seq))
+		prev_seq = cand;
+	cand = (unsigned int)cl.snap_last_applied_seq;
+	if (NETSEQ_GT (cand, prev_seq))
+		prev_seq = cand;
+	cand = (unsigned int)cl.snap_last_incomplete_seq;
+	if (NETSEQ_GT (cand, prev_seq))
+		prev_seq = cand;
+	if (NETSEQ_GT (prev_seq, cl.snapshot_reset_min_seq))
+		cl.snapshot_reset_min_seq = prev_seq;
+	cl.snapshot_reset_pending = true;
+
+	if (cl_max_edicts > 0)
+	{
+		for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
+		{
+			if (cl.snapshot_baselines[i])
+				memset (cl.snapshot_baselines[i], 0, cl_max_edicts * sizeof(snapshot_state_t));
+			if (cl.snapshot_baseline_present[i])
+				memset (cl.snapshot_baseline_present[i], 0, cl_max_edicts * sizeof(byte));
+			cl.snapshot_baseline_valid[i] = 0;
+			cl.snapshot_baseline_seqs[i] = 0;
+		}
+		if (cl.snapshot_active)
+			memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
+		if (cl.snapshot_last_update_time)
+			memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
+		if (cl.snapshot_missing_grace_until)
+			memset (cl.snapshot_missing_grace_until, 0, cl_max_edicts * sizeof(double));
+		if (cl.snapshot_resync_start_time)
+			memset (cl.snapshot_resync_start_time, 0, cl_max_edicts * sizeof(double));
+		if (cl.snapshot_resync_end_time)
+			memset (cl.snapshot_resync_end_time, 0, cl_max_edicts * sizeof(double));
+		if (cl.snapshot_resync_from_origin)
+			memset (cl.snapshot_resync_from_origin, 0, cl_max_edicts * sizeof(vec3_t));
+		if (cl.snapshot_resync_from_angles)
+			memset (cl.snapshot_resync_from_angles, 0, cl_max_edicts * sizeof(vec3_t));
+		if (cl.snapshot_chunk)
+			memset (cl.snapshot_chunk, 0, cl_max_edicts * sizeof(snapshot_state_t));
+		if (cl.snapshot_chunk_present)
+			memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
+		if (cl.snapshot_stage)
+			memset (cl.snapshot_stage, 0, cl_max_edicts * sizeof(snapshot_state_t));
+		if (cl.snapshot_stage_present)
+			memset (cl.snapshot_stage_present, 0, cl_max_edicts * sizeof(byte));
+		if (cl.snapshot_stage_remove)
+			memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
+		if (cl.entity_snapshots)
+			memset (cl.entity_snapshots, 0, cl_max_edicts * CL_ENTITY_SNAP_HISTORY * sizeof(cl_entity_snap_t));
+		if (cl.entity_snap_head)
+			memset (cl.entity_snap_head, 0, cl_max_edicts * sizeof(byte));
+		if (cl.entity_snap_count)
+			memset (cl.entity_snap_count, 0, cl_max_edicts * sizeof(byte));
+	}
+
+	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
+	{
+		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
+		int j;
+
+		for (j = 0; j < CL_SNAPSHOT_MAX_CHUNKS; j++)
+		{
+			if (chunk->buffers[j])
+				Z_Free (chunk->buffers[j]);
+			chunk->buffers[j] = NULL;
+			chunk->sizes[j] = 0;
+			chunk->received_mask[j] = 0;
+		}
+		memset (chunk, 0, sizeof(*chunk));
+	}
+
+	cl.snapshot_baseline_head = 0;
+	cl.snapshot_baseline_index = -1;
+	cl.snapshot_baseline_seq = 0;
+	cl.snap_last_applied_seq = 0;
+	cl.snap_last_complete_seq = 0;
+	cl.snap_last_incomplete_seq = 0;
+	cl.snap_last_incomplete = false;
+	cl.snap_incomplete_start_time = 0;
+	cl.has_full_snapshot = false;
+	cl.need_full_snapshot = true;
+	cl.has_valid_worldstate = false;
+	cl.snap_parse_errors = 0;
+	cl.snap_parse_consecutive = 0;
+	cl.snap_delta_mismatch = 0;
+	cl.snap_incomplete_count = 0;
+	cl.snap_full_midgame_count = 0;
+	cl.snap_full_midgame_soft_count = 0;
+	cl.snap_full_midgame_missing_grace = 0;
+	cl.snap_base_mismatch_count = 0;
+	cl.snap_decode_error_count = 0;
+	cl.snap_rem0_seq = 0;
+	cl.snap_rem0_base = 0;
+	cl.snap_rem0_count = 0;
+	cl.snap_last_server_time = 0.0;
+	cl.snap_last_arrival_time = 0.0;
+	cl.snapshot_time = 0.0;
+	cl.pred_snapshot_age = 0.0;
+	cl.pred_cmd_age = 0.0;
+	cl.pred_frame_dt = 0.0;
+	cl.pred_frame_dt_clamped = 0.0;
+	cl.pred_fixed_dt = 0.0;
+	cl.pred_error_mag = 0.0f;
+	cl.pred_error_raw_mag = 0.0f;
+	cl.pred_correction_applied = 0.0f;
+	cl.pred_correction_remaining = 0.0f;
+
+	CL_Predict_Clear ();
+
+	if (cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: snapshot soft reset gen %u reason %s\n",
+			cls.conn_gen, reason ? reason : "unknown");
+	}
+}
+
+void CL_ResetNetSession (const char *reason, qboolean suppress_clearstate_bump)
+{
+	if (!suppress_clearstate_bump)
+		CL_ConnGenBump (reason);
+	cls.conn_gen_suppress_clearstate_bump = suppress_clearstate_bump;
+	cls.conn_gen_packet = cls.conn_gen;
+	cls.conn_gen_parse = cls.conn_gen;
+	cls.conn_gen_frame = cls.conn_gen;
+	memset (&net_last_incoming, 0, sizeof(net_last_incoming));
+	SZ_Clear (&net_message);
+	net_message.allowoverflow = false;
+	net_message.overflowed = false;
+	net_message.overflowed_once = false;
+	net_message.write_blocked = false;
+	net_message.bitpos = 0;
+	msg_readcount = 0;
+	msg_badread = false;
+	msg_readbitpos = 0;
+	CL_ResetSnapshotSoftState (reason);
+	CL_ResetSignonFragments ();
+	CL_ClearSignons ();
+	CL_ResetPlayerSnaps ();
+	cl.last_cmd_ack = 0;
+	cl.last_cmd_ack_echo = 0;
+	cl.last_snapshot_ack_sent = 0;
+	if (cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: net session reset gen %u reason %s suppress_clearstate_bump %d\n",
+			cls.conn_gen, reason ? reason : "unknown", suppress_clearstate_bump ? 1 : 0);
+	}
 }
 
 qboolean CL_WorldReady (void)
@@ -804,12 +999,15 @@ void CL_ClearState (void)
 		PR_SwitchQCVM(NULL);
 	}
 
+	CL_ResetNetSession (cls.conn_gen_suppress_clearstate_bump ? "clearstate_suppressed" : "clearstate",
+		cls.conn_gen_suppress_clearstate_bump);
+
 	if (!sv.active)
 		Host_ClearMemory ();
 
 // wipe the entire cl structure
 	CL_FreeState ();
-	CL_ClearPlayerSnaps ();
+	CL_ResetPlayerSnaps ();
 
 	SZ_Clear (&cls.message);
 
@@ -938,6 +1136,8 @@ void CL_Disconnect (void)
 	if (key_dest == key_message)
 		Key_EndChat ();	// don't get stuck in chat mode
 
+	CL_ResetNetSession ("disconnect", false);
+
 // stop sounds (especially looping!)
 	S_StopAllSounds (true);
 	BGM_Pause ();
@@ -966,6 +1166,8 @@ void CL_Disconnect (void)
 	cls.demopaused = false;
 	cl.intermission = 0;
 	cl.sendprespawn = false;
+	cl.snapshot_reset_min_seq = 0;
+	cl.snapshot_reset_pending = false;
 	CL_ClearSignons ();
 
 	V_ResetEffects ();
@@ -1006,6 +1208,7 @@ void CL_EstablishConnection (const char *host)
 
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
+	CL_ResetNetSession ("establish_connection", false);
 	CL_ClearSignons ();			// need all the signon messages before playing
 	MSG_WriteByte (&cls.message, clc_nop);	// NAT Fix from ProQuake
 }
@@ -1692,6 +1895,7 @@ int CL_ReadFromServer (void)
 	int			i; //johnfitz
 
 	CL_AdvanceTime ();
+	cls.conn_gen_frame = cls.conn_gen;
 
 	do
 	{
@@ -1702,7 +1906,27 @@ int CL_ReadFromServer (void)
 			break;
 
 		cl.last_received_message = realtime;
+		if (cls.conn_gen_packet != cls.conn_gen_frame)
+		{
+			cls.conn_gen_drop_count++;
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: drop packet due to conn_gen mismatch frame %u packet %u\n",
+					cls.conn_gen_frame, cls.conn_gen_packet);
+			}
+			continue;
+		}
+		cls.conn_gen_parse = cls.conn_gen_packet;
 		CL_ParseServerMessage ();
+		if (cls.conn_gen != cls.conn_gen_frame)
+		{
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: conn_gen changed mid-frame %u -> %u, abort remaining packets\n",
+					cls.conn_gen_frame, cls.conn_gen);
+			}
+			break;
+		}
 	} while (ret && cls.state == ca_connected);
 
 	if (cl_shownet.value)
@@ -1784,7 +2008,13 @@ void CL_SendCmd (void)
 	double			cmd_rate;
 	double			cmd_dt;
 	double			phys_dt;
+	double			pred_tickrate;
+	double			pred_dt;
 	double			max_accum;
+	double			frame_dt;
+	double			frame_dt_clamped;
+	double			min_dt;
+	double			max_dt;
 	float			prev_frametime;
 	int				max_catchup;
 	int				cmds_built;
@@ -1796,12 +2026,35 @@ void CL_SendCmd (void)
 
 	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
 	cmd_dt = 1.0 / cmd_rate;
-	phys_dt = (cl_physrate.value > 0.0) ? (1.0 / cl_physrate.value) : cmd_dt;
+	frame_dt = host_frametime;
+	min_dt = CLAMP (0.0, cl_pred_frame_min_ms.value, 100.0) * 0.001;
+	max_dt = CLAMP (1.0, cl_pred_frame_max_ms.value, 250.0) * 0.001;
+	if (max_dt < min_dt)
+		max_dt = min_dt;
+	frame_dt_clamped = CLAMP (min_dt, frame_dt, max_dt);
+	if (cl_pred_tickrate.value > 0.0)
+		pred_tickrate = cl_pred_tickrate.value;
+	else if (cl_physrate.value > 0.0)
+		pred_tickrate = cl_physrate.value;
+	else if (host_netinterval > 0.0f)
+		pred_tickrate = 1.0 / host_netinterval;
+	else
+		pred_tickrate = cmd_rate;
+	pred_tickrate = CLAMP (10.0, pred_tickrate, 200.0);
+	pred_dt = 1.0 / pred_tickrate;
+	phys_dt = pred_dt;
+	cl.pred_frame_dt = frame_dt;
+	cl.pred_frame_dt_clamped = frame_dt_clamped;
+	cl.pred_fixed_dt = pred_dt;
+	cl.pred_steps = 0;
+	cl.pred_correction_applied = 0.0f;
+	if (cls.signon != SIGNONS)
+		cl.pred_accumulator = 0.0;
 	max_catchup = (int)cl_cmd_maxbatch.value;
 	if (max_catchup < 1)
 		max_catchup = 1;
 
-	cl_cmd_accum += host_frametime;
+	cl_cmd_accum += frame_dt_clamped;
 	if (cl_cmd_accum < 0.0)
 		cl_cmd_accum = 0.0;
 	max_accum = cmd_dt * (double)max_catchup * 2.0;
@@ -1817,6 +2070,7 @@ void CL_SendCmd (void)
 	{
 		if (cls.signon == SIGNONS)
 		{
+			host_frametime = (float)cmd_dt;
 		// get basic movement from keyboard
 			CL_BaseMove (&cmd);
 
@@ -1835,9 +2089,7 @@ void CL_SendCmd (void)
 
 			// NOTE: Never gate command generation/sending on snapshot readiness.
 			// Prediction handles world-ready checks; the server still needs cmds every tick.
-			host_frametime = (float)phys_dt;
-			CL_Predict_SetupCmd (&cmd);
-			host_frametime = prev_frametime;
+			CL_Predict_SetupCmd (&cmd, cmd_dt, phys_dt);
 
 			in_attack.state &= ~2;
 			in_jump.state &= ~2;
@@ -1850,6 +2102,7 @@ void CL_SendCmd (void)
 			send_move = true;
 		}
 
+		host_frametime = prev_frametime;
 		cl_cmd_accum -= cmd_dt;
 		cmds_built++;
 		sendcmd_ran = true;
@@ -2112,6 +2365,12 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_netdbg_pred);
 	Cvar_RegisterVariable (&cl_pred_smooth_ms);
 	Cvar_RegisterVariable (&cl_pred_teleport_dist);
+	Cvar_RegisterVariable (&cl_pred_tickrate);
+	Cvar_RegisterVariable (&cl_pred_frame_min_ms);
+	Cvar_RegisterVariable (&cl_pred_frame_max_ms);
+	Cvar_RegisterVariable (&cl_pred_corr_ms);
+	Cvar_RegisterVariable (&cl_pred_corr_eps);
+	Cvar_RegisterVariable (&cl_pred_corr_vel);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
