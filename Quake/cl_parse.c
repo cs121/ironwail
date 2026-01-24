@@ -319,6 +319,11 @@ static void CL_ResetSignonFragment (void)
 	cl.signon_frag_offset = 0;
 }
 
+void CL_ResetSignonFragments (void)
+{
+	CL_ResetSignonFragment ();
+}
+
 static void CL_ParseSignonChunkPayload (const byte *payload, int payload_len, byte stage, unsigned short seq)
 {
 	int offset = 0;
@@ -603,7 +608,11 @@ void CL_ParseServerInfo (void)
 //
 // wipe the client_state_t struct
 //
+	cls.conn_gen_suppress_clearstate_bump = true;
 	CL_ClearState ();
+	cls.conn_gen_suppress_clearstate_bump = false;
+	cls.conn_gen_parse = cls.conn_gen;
+	cls.conn_gen_packet = cls.conn_gen;
 
 // parse protocol version number
 	i = MSG_ReadLong ();
@@ -991,6 +1000,17 @@ static void CL_RequestFullSnapshot (const char *reason, qboolean count_parse_err
 
 	if (cls.demoplayback || cls.state != ca_connected)
 		return;
+	if (cls.signon < 2 || (cls.conn_gen_parse != 0 && cls.conn_gen_parse != cls.conn_gen))
+	{
+		cl.need_full_snapshot = true;
+		cl.has_valid_worldstate = false;
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: suppress snap request signon %d gen_parse %u gen %u reason %s\n",
+				cls.signon, cls.conn_gen_parse, cls.conn_gen, reason ? reason : "unknown");
+		}
+		return;
+	}
 	if (count_parse_error)
 	{
 		cl.snap_parse_errors++;
@@ -1285,6 +1305,19 @@ static qboolean CL_ShouldDropSnapshot (void)
 
 static qboolean CL_SnapshotWorldModelReady (const char *reason)
 {
+	if (cls.state != ca_connected || cls.signon < 2
+		|| (cls.conn_gen_parse != 0 && cls.conn_gen_parse != cls.conn_gen))
+	{
+		cl.need_full_snapshot = true;
+		cl.has_valid_worldstate = false;
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: snapshot apply gated signon %d state %d gen_parse %u gen %u reason %s\n",
+				cls.signon, cls.state, cls.conn_gen_parse, cls.conn_gen, reason ? reason : "unknown");
+		}
+		return false;
+	}
+
 	if (cl.worldmodel && cl.worldmodel->type == mod_brush)
 		return true;
 
@@ -1451,6 +1484,16 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	int			skin;
 	qmodel_t	*model;
 
+	if (!state || !cl_entities || cl_max_edicts <= 0 || entnum <= 0 || entnum >= cl_max_edicts)
+	{
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: skip snapshot apply ent %d max %d state %d\n",
+				entnum, cl_max_edicts, state ? 1 : 0);
+		}
+		return;
+	}
+
 	ent = CL_EntityNum (entnum);
 	forcelink = (ent->msgtime != cl.mtime[1]);
 	oldtime = ent->msgtime;
@@ -1470,12 +1513,14 @@ static void CL_ApplySnapshotState (int entnum, const snapshot_state_t *state)
 	ent->scale = state->state.scale;
 
 	i = state->state.colormap;
-	if (!i)
+	if (!i || !cl.scores || i > cl.maxclients)
+	{
+		if (i > cl.maxclients && cl_netdbg_pred.value > 0.0f)
+			Con_Printf ("NETDBG: snapshot colormap out of range %d max %d\n", i, cl.maxclients);
 		ent->colormap = vid.colormap;
+	}
 	else
 	{
-		if (i > cl.maxclients)
-			Sys_Error ("CL_ApplySnapshotState: i >= cl.maxclients");
 		ent->colormap = cl.scores[i-1].translations;
 	}
 
@@ -1802,6 +1847,8 @@ static void CL_ParseSnapshotFull (void)
 	int i;
 	qboolean drop;
 	unsigned short seq16;
+	qboolean apply_ready;
+	qboolean old_seq;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	count = (unsigned short)MSG_ReadShort ();
@@ -1817,6 +1864,35 @@ static void CL_ParseSnapshotFull (void)
 		msg_readcount = net_message.cursize;
 		return;
 	}
+
+	apply_ready = CL_SnapshotWorldModelReady ("snapshot_full worldmodel");
+	if (!apply_ready && cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: gate snapshot_full apply signon %d state %d gen_parse %u gen %u seq %u\n",
+			cls.signon, cls.state, cls.conn_gen_parse, cls.conn_gen, seq);
+	}
+	old_seq = (cl.snapshot_reset_min_seq != 0 && !NETSEQ_GT (seq, cl.snapshot_reset_min_seq));
+	if (old_seq && cl.snapshot_reset_pending)
+	{
+		qboolean seq_reset = (cl.snapshot_reset_min_seq > 4096u && seq < 1024u);
+
+		if (seq_reset)
+		{
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: snapshot seq reset detected seq %u reset_min %u\n",
+					seq, cl.snapshot_reset_min_seq);
+			}
+			cl.snapshot_reset_min_seq = 0;
+			old_seq = false;
+		}
+	}
+	if (old_seq && cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: drop snapshot_full old seq %u reset_min %u\n",
+			seq, cl.snapshot_reset_min_seq);
+	}
+	drop = drop || !apply_ready || old_seq;
 
 	CL_ClearSnapshotStage ();
 
@@ -1895,6 +1971,7 @@ static void CL_ParseSnapshotFull (void)
 	cl.need_full_snapshot = false;
 	cl.has_valid_worldstate = true;
 	cl.has_full_snapshot = true;
+	cl.snapshot_reset_pending = false;
 	(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
 	CL_RecordPlayerSnap ();
 	NET_DebugLogEvent (true,
@@ -1920,6 +1997,8 @@ static void CL_ParseSnapshotDelta (void)
 	qboolean need_full;
 	qboolean continuation_pending;
 	qboolean base_advanced = false;
+	qboolean apply_ready;
+	qboolean old_seq;
 
 	seq = (unsigned int)MSG_ReadLong ();
 	baseline_seq = (unsigned int)MSG_ReadLong ();
@@ -1948,6 +2027,35 @@ static void CL_ParseSnapshotDelta (void)
 		msg_readcount = net_message.cursize;
 		return;
 	}
+
+	apply_ready = CL_SnapshotWorldModelReady ("snapshot_delta worldmodel");
+	if (!apply_ready && cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: gate snapshot_delta apply signon %d state %d gen_parse %u gen %u seq %u\n",
+			cls.signon, cls.state, cls.conn_gen_parse, cls.conn_gen, seq);
+	}
+	old_seq = (cl.snapshot_reset_min_seq != 0 && !NETSEQ_GT (seq, cl.snapshot_reset_min_seq));
+	if (old_seq && cl.snapshot_reset_pending)
+	{
+		qboolean seq_reset = (cl.snapshot_reset_min_seq > 4096u && seq < 1024u);
+
+		if (seq_reset)
+		{
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: snapshot seq reset detected seq %u reset_min %u\n",
+					seq, cl.snapshot_reset_min_seq);
+			}
+			cl.snapshot_reset_min_seq = 0;
+			old_seq = false;
+		}
+	}
+	if (old_seq && cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: drop snapshot_delta old seq %u reset_min %u\n",
+			seq, cl.snapshot_reset_min_seq);
+	}
+	drop = drop || !apply_ready || old_seq;
 
 	if (baseline_seq == 0xFFFFFFFFu)
 	{
@@ -2151,6 +2259,7 @@ static void CL_ParseSnapshotDelta (void)
 		cl.snap_incomplete_start_time = 0;
 		cl.snap_parse_consecutive = 0;
 		cl.has_full_snapshot = true;
+		cl.snapshot_reset_pending = false;
 		base_advanced = true;
 		(void)CL_SendSnapshotAck (CL_GetSnapshotAckSeq ());
 		CL_RecordPlayerSnap ();
@@ -2461,6 +2570,7 @@ static qboolean CL_ParseSnapshot2FullPayload (const snapshot_header_t *header, q
 			cl.need_full_snapshot = false;
 			cl.has_full_snapshot = true;
 			cl.has_valid_worldstate = true;
+			cl.snapshot_reset_pending = false;
 			cl.snap_incomplete_count = 0;
 			CL_RecordPlayerSnap ();
 			CL_EnsureViewEntityOrigin ("snapshot2");
@@ -2536,6 +2646,7 @@ static void CL_ParseSnapshot2 (void)
 	qboolean base_advanced = false;
 	const char *snap_status = "drop";
 	int start_pos = msg_readcount;
+	qboolean old_seq;
 
 	CL_ReadSnapshotHeader (&header);
 	drop = CL_ShouldDropSnapshot ();
@@ -2566,6 +2677,29 @@ static void CL_ParseSnapshot2 (void)
 	}
 
 	if (!CL_SnapshotWorldModelReady ("snapshot2 worldmodel"))
+		drop = true;
+	old_seq = (cl.snapshot_reset_min_seq != 0 && !NETSEQ_GT (header.seq, cl.snapshot_reset_min_seq));
+	if (old_seq && cl.snapshot_reset_pending)
+	{
+		qboolean seq_reset = (cl.snapshot_reset_min_seq > 4096u && header.seq < 1024u);
+
+		if (seq_reset)
+		{
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: snapshot seq reset detected seq %u reset_min %u\n",
+					header.seq, cl.snapshot_reset_min_seq);
+			}
+			cl.snapshot_reset_min_seq = 0;
+			old_seq = false;
+		}
+	}
+	if (old_seq && cl_netdbg_pred.value > 0.0f)
+	{
+		Con_Printf ("NETDBG: drop snapshot2 old seq %u reset_min %u\n",
+			header.seq, cl.snapshot_reset_min_seq);
+	}
+	if (old_seq)
 		drop = true;
 
 	NET_DebugLogEvent (true,
@@ -3120,6 +3254,7 @@ static void CL_ParseSnapshot2 (void)
 			cl.snap_parse_consecutive = 0;
 			cl.snap_incomplete_count = 0;
 			cl.has_full_snapshot = true;
+			cl.snapshot_reset_pending = false;
 			base_advanced = true;
 			CL_RecordPlayerSnap ();
 			CL_EnsureViewEntityOrigin ("snapshot2");
@@ -3378,7 +3513,16 @@ void CL_ParseClientdata (void)
 		for (i = 0; i < 3; i++)
 			viewangles[i] = MSG_ReadAngle16 (cl.protocolflags);
 
-		CL_Predict_ServerUpdate (ack, origin, velocity, viewangles, cl.onground);
+		if (cl.has_valid_worldstate && cls.signon >= 2
+			&& (cls.conn_gen_parse == 0 || cls.conn_gen_parse == cls.conn_gen))
+		{
+			CL_Predict_ServerUpdate (ack, origin, velocity, viewangles, cl.onground);
+		}
+		else if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: skip pred update signon %d valid %d gen_parse %u gen %u ack %u\n",
+				cls.signon, cl.has_valid_worldstate ? 1 : 0, cls.conn_gen_parse, cls.conn_gen, ack);
+		}
 	}
 
 	CL_SetHudStat (STAT_WEAPONFRAME);
@@ -3582,6 +3726,7 @@ void CL_ParseServerMessage (void)
 	int			prevcmd;
 	int			prevcmd_offset;
 	int			cmd_offset;
+	unsigned int		parse_gen;
 
 //
 // if recording demos, copy the message out
@@ -3599,6 +3744,17 @@ void CL_ParseServerMessage (void)
 	MSG_BeginReading ();
 
 	CL_NetDebugHeader ();
+	parse_gen = cls.conn_gen_parse ? cls.conn_gen_parse : cls.conn_gen;
+	if (parse_gen != cls.conn_gen)
+	{
+		cls.conn_gen_drop_count++;
+		if (cl_netdbg_pred.value > 0.0f)
+		{
+			Con_Printf ("NETDBG: drop parse start due to conn_gen mismatch parse %u current %u\n",
+				parse_gen, cls.conn_gen);
+		}
+		return;
+	}
 
 	lastcmd = -1;
 	lastcmd_offset = -1;
@@ -3613,6 +3769,18 @@ void CL_ParseServerMessage (void)
 
 	while (1)
 	{
+		if (parse_gen != cls.conn_gen)
+		{
+			cls.conn_gen_drop_count++;
+			if (cl_netdbg_pred.value > 0.0f)
+			{
+				Con_Printf ("NETDBG: drop parse mid-packet due to conn_gen mismatch parse %u current %u\n",
+					parse_gen, cls.conn_gen);
+			}
+			msg_readcount = net_message.cursize;
+			msg_badread = false;
+			return;
+		}
 		if (msg_badread)
 		{
 			CL_BadServerMessage ("message read past end", -1, msg_readcount,

@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "arch_def.h"
+#include "net_sys.h"
+#include "net_defs.h"
 #include "q_ctype.h"
 #include "json.h"
 #include <time.h>
@@ -1963,6 +1966,125 @@ SERVER TRANSITIONS
 ===============================================================================
 */
 
+#define MAPCYCLE_MAX_MAPS 16
+
+typedef struct
+{
+	qboolean	active;
+	double		interval;
+	int		map_count;
+	int		index;
+	char		maps[MAPCYCLE_MAX_MAPS][MAX_QPATH];
+} mapcycle_state_t;
+
+static mapcycle_state_t mapcycle_state;
+static void Host_MapCycle_Poll (void *unused);
+static PollProcedure mapcycle_pollproc = {NULL, 0.0, Host_MapCycle_Poll};
+
+static void Host_MapCycle_Stop (const char *reason)
+{
+	if (!mapcycle_state.active)
+		return;
+
+	mapcycle_state.active = false;
+	mapcycle_state.interval = 0.0;
+	mapcycle_state.map_count = 0;
+	mapcycle_state.index = 0;
+
+	if (reason)
+		Con_Printf ("mapcycle: stopped (%s)\n", reason);
+	else
+		Con_Printf ("mapcycle: stopped\n");
+}
+
+static void Host_MapCycle_Poll (void *unused)
+{
+	const char *map;
+
+	(void)unused;
+
+	if (!mapcycle_state.active)
+		return;
+	if (mapcycle_state.map_count <= 0)
+	{
+		Host_MapCycle_Stop ("no maps");
+		return;
+	}
+	if (!sv.active || (cls.state != ca_dedicated && cls.signon != SIGNONS))
+	{
+		SchedulePollProcedure (&mapcycle_pollproc, 1.0);
+		return;
+	}
+
+	map = mapcycle_state.maps[mapcycle_state.index];
+	mapcycle_state.index = (mapcycle_state.index + 1) % mapcycle_state.map_count;
+	if (map && *map)
+	{
+		Con_Printf ("mapcycle: map %s (interval %.1fs)\n", map, mapcycle_state.interval);
+		Cbuf_AddText (va("map %s\n", map));
+	}
+	SchedulePollProcedure (&mapcycle_pollproc, mapcycle_state.interval);
+}
+
+static void Host_MapCycle_Start_f (void)
+{
+	double interval;
+	int map_count;
+	int i;
+
+	if (cmd_source != src_command)
+		return;
+	if (Cmd_Argc () < 3)
+	{
+		Con_Printf ("mapcycle_start <interval_seconds> <map1> [map2 ...]\n");
+		return;
+	}
+
+	interval = atof (Cmd_Argv (1));
+	if (interval <= 0.0)
+		interval = 5.0;
+	interval = CLAMP (1.0, interval, 300.0);
+	map_count = Cmd_Argc () - 2;
+	if (map_count > MAPCYCLE_MAX_MAPS)
+		map_count = MAPCYCLE_MAX_MAPS;
+	if (map_count <= 0)
+	{
+		Con_Printf ("mapcycle_start requires at least one map name\n");
+		return;
+	}
+
+	memset (&mapcycle_state, 0, sizeof(mapcycle_state));
+	mapcycle_state.active = true;
+	mapcycle_state.interval = interval;
+	mapcycle_state.map_count = map_count;
+	mapcycle_state.index = 0;
+
+	for (i = 0; i < map_count; ++i)
+	{
+		char *p;
+
+		q_strlcpy (mapcycle_state.maps[i], Cmd_Argv (i + 2), sizeof(mapcycle_state.maps[i]));
+		p = strstr (mapcycle_state.maps[i], ".bsp");
+		if (p && p[4] == '\0')
+			*p = '\0';
+	}
+
+	Con_Printf ("mapcycle: starting interval %.1fs maps %d\n", mapcycle_state.interval, mapcycle_state.map_count);
+	SchedulePollProcedure (&mapcycle_pollproc, 0.0);
+}
+
+static void Host_MapCycle_Stop_f (void)
+{
+	if (cmd_source != src_command)
+		return;
+	if (!mapcycle_state.active)
+	{
+		Con_Printf ("mapcycle: not running\n");
+		return;
+	}
+	Host_MapCycle_Stop ("command");
+}
+
 /*
 ======================
 Host_Map_f
@@ -2196,7 +2318,7 @@ static void Host_Reconnect_f (void)
 		return;
 
 	SCR_BeginLoadingPlaque ();
-	CL_ClearSignons ();		// need new connection messages
+	CL_ResetNetSession ("reconnect", false);
 }
 
 /*
@@ -3865,6 +3987,8 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("changelevel", Host_Changelevel_f);
 	Cmd_AddCommand ("connect", Host_Connect_f);
 	Cmd_AddCommand_Console ("reconnect", Host_Reconnect_f);
+	Cmd_AddCommand_Console ("mapcycle_start", Host_MapCycle_Start_f);
+	Cmd_AddCommand_Console ("mapcycle_stop", Host_MapCycle_Stop_f);
 	Cmd_AddCommand_ClientCommand ("name", Host_Name_f);
 	Cmd_AddCommand_ClientCommand ("noclip", Host_Noclip_f);
 	Cmd_AddCommand_ClientCommand ("setpos", Host_SetPos_f); //QuakeSpasm

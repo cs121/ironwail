@@ -118,14 +118,33 @@ void CL_ClearSignons (void)
 	cls.signon = 0;
 	cl.has_full_snapshot = false;
 	cl.need_full_snapshot = true;
+	cl.has_valid_worldstate = false;
+	cl.last_cmd_ack = 0;
+	cl.last_cmd_ack_echo = 0;
+	cl.last_snapshot_ack_sent = 0;
 	cl.snap_last_applied_seq = 0;
 	cl.snap_last_complete_seq = 0;
 	cl.snap_last_incomplete_seq = 0;
 	cl.snap_last_incomplete = false;
 	cl.snap_incomplete_start_time = 0;
+	cl.snap_parse_errors = 0;
+	cl.snap_parse_consecutive = 0;
+	cl.snap_delta_mismatch = 0;
+	cl.snap_incomplete_count = 0;
+	cl.snap_base_mismatch_count = 0;
+	cl.snap_decode_error_count = 0;
 	cl.snapshot_baseline_seq = 0;
 	cl.snapshot_baseline_head = 0;
 	cl.snapshot_baseline_index = -1;
+	cl.snap_last_server_time = 0.0;
+	cl.snap_last_arrival_time = 0.0;
+	cl.snapshot_time = 0.0;
+	cl.pred_error_mag = 0.0f;
+	cl.pred_error_raw_mag = 0.0f;
+	cl.pred_correction_applied = 0.0f;
+	cl.pred_correction_remaining = 0.0f;
+	cl.pred_snapshot_age = 0.0;
+	cl.pred_cmd_age = 0.0;
 	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
 	{
 		cl.snapshot_baseline_valid[i] = 0;
@@ -622,6 +641,8 @@ int CL_GetMessage (void)
 		else
 			break;
 	}
+
+	cls.conn_gen_packet = cls.conn_gen;
 
 	if (cls.demorecording)
 		CL_WriteDemoMessage ();
