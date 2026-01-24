@@ -38,6 +38,8 @@ extern cvar_t cl_netdebug_maxdump;
 extern cvar_t cl_signon_chunk_debug;
 extern cvar_t cl_signon_debug;
 extern qboolean cl_viewent_needs_init;
+extern cvar_t cl_interp;
+extern cvar_t cl_jitter;
 
 static qboolean warn_about_nehahra_protocol;
 
@@ -1574,7 +1576,18 @@ static void CL_CountSnapshotEntities (const byte *prev_present, const byte *cur_
 		*out_dormant = dormant;
 }
 
-typedef struct snapshot_header_s snapshot_header_t;
+typedef struct snapshot_header_s
+{
+	unsigned int	seq;
+	unsigned int	base_seq;
+	unsigned int	flags;
+	unsigned short	num_entities;
+	unsigned short	num_removed;
+	unsigned short	chunk_total_entities;
+	unsigned short	chunk_index;
+	unsigned short	chunk_total_chunks;
+	double		server_time;
+} snapshot_header_t;
 
 static void CL_NetDbg_LogWatchEnt (const snapshot_header_t *header, int removed)
 {
@@ -2086,19 +2099,6 @@ static void CL_ParseSnapshotDelta (void)
 		CL_LogSnapshotDebug ("delta", seq, 0, true, removes_parsed, touched, base_advanced);
 	}
 }
-
-struct snapshot_header_s
-{
-	unsigned int	seq;
-	unsigned int	base_seq;
-	unsigned int	flags;
-	unsigned short	num_entities;
-	unsigned short	num_removed;
-	unsigned short	chunk_total_entities;
-	unsigned short	chunk_index;
-	unsigned short	chunk_total_chunks;
-	double		server_time;
-};
 
 static void CL_ReadSnapshotHeader (snapshot_header_t *header)
 {
