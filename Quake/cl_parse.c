@@ -1574,6 +1574,8 @@ static void CL_CountSnapshotEntities (const byte *prev_present, const byte *cur_
 		*out_dormant = dormant;
 }
 
+typedef struct snapshot_header_s snapshot_header_t;
+
 static void CL_NetDbg_LogWatchEnt (const snapshot_header_t *header, int removed)
 {
 	int watch = (int)cl_netdbg_watch_ent.value;
@@ -2085,7 +2087,7 @@ static void CL_ParseSnapshotDelta (void)
 	}
 }
 
-typedef struct
+struct snapshot_header_s
 {
 	unsigned int	seq;
 	unsigned int	base_seq;
@@ -2096,7 +2098,7 @@ typedef struct
 	unsigned short	chunk_index;
 	unsigned short	chunk_total_chunks;
 	double		server_time;
-} snapshot_header_t;
+};
 
 static void CL_ReadSnapshotHeader (snapshot_header_t *header)
 {
