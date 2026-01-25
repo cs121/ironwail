@@ -616,6 +616,8 @@ void CL_ParseServerInfo (void)
 
 // parse protocol version number
 	i = MSG_ReadLong ();
+	if (msg_badread)
+		return;
 	if (i != PROTOCOL_RMQ)
 	{
 		Con_Printf ("\n"); //because there's no newline after serverinfo print
@@ -624,6 +626,8 @@ void CL_ParseServerInfo (void)
 	cl.protocol = PROTOCOL_RMQ;
 
 	cl.protocolflags = (unsigned int) MSG_ReadLong ();
+	if (msg_badread)
+		return;
 	if (cl.protocolflags != PROTOCOL_RMQ_FLAGS)
 		Host_Error ("Server protocol flags 0x%x do not match required flags 0x%x", cl.protocolflags, PROTOCOL_RMQ_FLAGS);
 	cl.signon_chunking = true;
@@ -3857,6 +3861,8 @@ void CL_ParseServerMessage (void)
 
 		case svc_version:
 			i = MSG_ReadLong ();
+			if (msg_badread)
+				return;
 			if (i != PROTOCOL_RMQ)
 				Host_Error ("Server returned protocol %i, expected %i", i, PROTOCOL_RMQ);
 			cl.protocol = PROTOCOL_RMQ;
