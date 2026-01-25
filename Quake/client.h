@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // client.h
 
-typedef struct lightgrid_s lightgrid_t;
+#include "../common/lightgrid.h"
 
 // snapshot baseline history
 #define CL_SNAPSHOT_BASELINE_HISTORY 4
@@ -207,13 +207,6 @@ typedef struct
 
 // connection information
 	int		signon;			// 0 to SIGNONS
-	unsigned int	conn_gen;		// monotonically increasing connection/map generation id
-	unsigned int	conn_gen_packet;	// generation observed when dequeuing current packet
-	unsigned int	conn_gen_frame;	// generation at frame start
-	unsigned int	conn_gen_parse;	// generation being parsed
-	unsigned int	conn_gen_drop_count;	// late packets dropped due to generation mismatch
-	unsigned int	conn_gen_bump_count;	// total generation bumps
-	qboolean	conn_gen_suppress_clearstate_bump;	// avoid mid-packet bump during expected signon resets
 	struct qsocket_s	*netcon;
 	sizebuf_t	message;		// writing buffer to send to server
 
@@ -299,17 +292,6 @@ typedef struct
 	double		snapshot_time;		// time applied for snapshot entity state
 	double		snap_last_server_time;	// last applied snapshot time
 	double		snap_last_arrival_time;	// realtime of last snapshot apply
-	double		pred_frame_dt;		// unclamped frame dt used for prediction accumulator
-	double		pred_frame_dt_clamped;	// clamped frame dt used for prediction accumulator
-	double		pred_fixed_dt;		// fixed prediction step dt
-	double		pred_accumulator;	// accumulated time for fixed-step prediction
-	unsigned int	pred_steps;		// number of prediction steps run this frame
-	float		pred_error_mag;		// smoothed prediction error magnitude
-	float		pred_error_raw_mag;	// raw prediction error magnitude
-	float		pred_correction_applied;	// correction applied this frame
-	float		pred_correction_remaining;	// remaining correction after smoothing
-	double		pred_snapshot_age;	// age of last snapshot sample
-	double		pred_cmd_age;		// age since last command ack
 
 
 	float		last_received_message;	// (realtime) for net trouble icon
@@ -335,8 +317,6 @@ typedef struct
 	int			num_statics;	// held in cl_staticentities array
 	entity_t	viewent;			// the gun model
 	unsigned int snapshot_baseline_seq;
-	unsigned int snapshot_reset_min_seq;
-	qboolean	snapshot_reset_pending;
 	unsigned short snap_last_applied_seq;
 	unsigned short snap_last_complete_seq;
 	unsigned short snap_last_incomplete_seq;
@@ -470,12 +450,6 @@ extern	cvar_t	cl_netdbg_watch_ent;
 extern	cvar_t	cl_netdbg_pred;
 extern	cvar_t	cl_pred_smooth_ms;
 extern	cvar_t	cl_pred_teleport_dist;
-extern	cvar_t	cl_pred_tickrate;
-extern	cvar_t	cl_pred_frame_min_ms;
-extern	cvar_t	cl_pred_frame_max_ms;
-extern	cvar_t	cl_pred_corr_ms;
-extern	cvar_t	cl_pred_corr_eps;
-extern	cvar_t	cl_pred_corr_vel;
 extern	float	cl_lerpfrac;
 
 
@@ -545,7 +519,7 @@ void CL_AccumulateCmd (void);
 void CL_SendCmd (void);
 void CL_SendMove (const usercmd_t *cmd);
 void CL_Predict_Clear (void);
-void CL_Predict_SetupCmd (usercmd_t *cmd, double cmd_dt, double pred_dt);
+void CL_Predict_SetupCmd (usercmd_t *cmd);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
 void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
@@ -563,10 +537,6 @@ void CL_ResetPlayerSnaps (void);
 
 void CL_FreeState(void);
 void CL_ClearState (void);
-void CL_ResetNetSession (const char *reason, qboolean suppress_clearstate_bump);
-void CL_ConnGenBump (const char *reason);
-unsigned int CL_ConnGen (void);
-unsigned int CL_ConnGenPacket (void);
 
 //
 // cl_demo.c
@@ -576,7 +546,6 @@ int CL_GetMessage (void);
 void CL_ClearSignons (void);
 void CL_AdvanceTime (void);
 void CL_FinishDemoFrame (void);
-void CL_ResetSignonFragments (void);
 void CL_AddDemoRewindSound (int entnum, int channel, sfx_t *sfx, vec3_t pos, int vol, float atten);
 
 void CL_Stop_f (void);

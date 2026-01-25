@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Quake/q_stdinc.h"
+#include "quakedef.h"
 
 typedef struct lightcell_s {
     vec3_t rgb;

@@ -1030,64 +1030,6 @@ void SCR_DrawDevStats (void)
 
 /*
 ==============
-SCR_DrawNetDbgPred
-==============
-*/
-static void SCR_DrawNetDbgPred (void)
-{
-	char	str[96];
-	int	lines = 8;
-	int	y = 25 - lines;
-	int	x = 22 * 8;
-	double snap_age_ms;
-	double cmd_age_ms;
-	double frame_dt_ms;
-	double frame_dt_clamped_ms;
-	double fixed_dt_ms;
-	double pred_tickrate;
-
-	if (cl_netdbg_pred.value <= 0.0f)
-		return;
-
-	snap_age_ms = cl.pred_snapshot_age * 1000.0;
-	cmd_age_ms = cl.pred_cmd_age * 1000.0;
-	frame_dt_ms = cl.pred_frame_dt * 1000.0;
-	frame_dt_clamped_ms = cl.pred_frame_dt_clamped * 1000.0;
-	fixed_dt_ms = cl.pred_fixed_dt * 1000.0;
-	pred_tickrate = (cl.pred_fixed_dt > 0.0) ? (1.0 / cl.pred_fixed_dt) : 0.0;
-
-	GL_SetCanvas (CANVAS_BOTTOMLEFT);
-	Draw_Fill (x, y * 8, 30 * 8, lines * 8, 0, 0.5);
-
-	sprintf (str, "netdbg pred | gen %u/%u drop %u",
-		cls.conn_gen_parse, cls.conn_gen, cls.conn_gen_drop_count);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "pred err    |%6.2f raw %6.2f", cl.pred_error_mag, cl.pred_error_raw_mag);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "pred corr   |%6.2f rem %6.2f", cl.pred_correction_applied, cl.pred_correction_remaining);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "ages (ms)   |%6.1f cmd %6.1f", snap_age_ms, cmd_age_ms);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "pred steps  |%5u acc %6.3f", cl.pred_steps, cl.pred_accumulator);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "dt frame ms |%6.2f clamp %6.2f", frame_dt_ms, frame_dt_clamped_ms);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "dt fixed ms |%6.2f tick %6.1f", fixed_dt_ms, pred_tickrate);
-	Draw_String (x, (y++) * 8 - x, str);
-
-	sprintf (str, "snap reset  |min %10u pend %d",
-		cl.snapshot_reset_min_seq, cl.snapshot_reset_pending ? 1 : 0);
-	Draw_String (x, (y++) * 8 - x, str);
-}
-
-/*
-==============
 SCR_DrawExposureDebug
 ==============
 */
@@ -2286,7 +2228,6 @@ void SCR_UpdateScreen (void)
 		SCR_CheckDrawCenterString ();
 		Sbar_Draw ();
 		SCR_DrawDevStats (); //johnfitz
-		SCR_DrawNetDbgPred ();
 		SCR_DrawExposureDebug ();
 		SCR_DrawGodraysDebug ();
 		SCR_DrawClock (); //johnfitz

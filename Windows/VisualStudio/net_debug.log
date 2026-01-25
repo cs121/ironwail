@@ -1,0 +1,6 @@
+NETDBG time 5.278 snap2_recv seq 1 base 4294967295 flags 0x1 ents 8 rem 0 full 1 delta 0 has_full 0
+NETDBG time 5.278 snap2_apply seq 1 flags 0x1 full 1 delta 0 has_full 1
+NETDBG time 5.278 snap_ack_send seq 1
+NETDBG time 3.573 snap2_recv seq 1 base 4294967295 flags 0x1 ents 8 rem 0 full 1 delta 0 has_full 0
+NETDBG time 3.573 snap2_apply seq 1 flags 0x1 full 1 delta 0 has_full 1
+NETDBG time 3.573 snap_ack_send seq 1

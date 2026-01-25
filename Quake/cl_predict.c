@@ -10,7 +10,6 @@ extern cvar_t sv_friction;
 extern cvar_t sv_stopspeed;
 extern cvar_t sv_gravity;
 extern cvar_t cl_netdebug_parse;
-extern cvar_t cl_cmd_maxbatch;
 
 typedef struct
 {
@@ -23,12 +22,8 @@ typedef struct
 typedef struct
 {
 	usercmd_t	cmds[CMD_RING];
-	double		cmd_dt[CMD_RING];
-	double		pred_dt[CMD_RING];
-	double		accum_phase[CMD_RING];
 	unsigned int	seq_latest;
 	unsigned int	seq_acked;
-	double		last_ack_time;
 	qboolean	has_base;
 	cl_pred_state_t	base;
 	cl_pred_state_t	predicted;
@@ -38,7 +33,6 @@ static cl_pred_t cl_pred;
 static qboolean cl_netdbg_predict_ran;
 static qboolean cl_pred_warned_solid;
 static vec3_t cl_pred_error;
-static vec3_t cl_pred_vel_error;
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -101,8 +95,6 @@ static qboolean CL_Predict_IsEnabled (void)
 		return false;
 	if (cl.intermission)
 		return false;
-	if (cls.conn_gen_parse != 0 && cls.conn_gen_parse != cls.conn_gen)
-		return false;
 	if (!cl.has_valid_worldstate)
 		return false;
 	if (!CL_WorldReady ())
@@ -113,62 +105,38 @@ static qboolean CL_Predict_IsEnabled (void)
 static void CL_Predict_ApplyToClient (void)
 {
 	vec3_t smooth_origin;
-	vec3_t smooth_velocity;
-	float corr_ms;
+	float smooth_ms;
 	float decay;
 	vec3_t correction;
-	vec3_t vel_correction;
-	float corr_len = 0.0f;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
-	corr_ms = cl_pred_corr_ms.value;
-	if (corr_ms <= 0.0f)
-		corr_ms = cl_pred_smooth_ms.value;
-	if (corr_ms <= 0.0f)
-	{
+	smooth_ms = cl_pred_smooth_ms.value;
+	if (smooth_ms <= 0.0f)
 		VectorClear (cl_pred_error);
-		VectorClear (cl_pred_vel_error);
-	}
 
 	VectorAdd (cl_pred.predicted.origin, cl_pred_error, smooth_origin);
-	if (cl_pred_corr_vel.value != 0.0f)
-		VectorAdd (cl_pred.predicted.velocity, cl_pred_vel_error, smooth_velocity);
-	else
-		VectorCopy (cl_pred.predicted.velocity, smooth_velocity);
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[1]);
-	VectorCopy (smooth_velocity, cl.mvelocity[0]);
-	VectorCopy (smooth_velocity, cl.mvelocity[1]);
+	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[0]);
+	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[1]);
 	cl.onground = cl_pred.predicted.onground;
 
-	if (corr_ms > 0.0f)
+	if (smooth_ms > 0.0f)
 	{
-		decay = host_frametime / (corr_ms * 0.001f);
+		decay = host_frametime / (smooth_ms * 0.001f);
 		decay = CLAMP (0.0f, decay, 1.0f);
 		VectorScale (cl_pred_error, decay, correction);
 		VectorSubtract (cl_pred_error, correction, cl_pred_error);
-		corr_len = VectorLength (correction);
-		if (cl_pred_corr_vel.value != 0.0f)
-		{
-			VectorScale (cl_pred_vel_error, decay, vel_correction);
-			VectorSubtract (cl_pred_vel_error, vel_correction, cl_pred_vel_error);
-		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
-			Con_Printf ("NETDBG: pred_corr apply %.2f remaining %.2f window %.1fms\n",
-				corr_len, VectorLength (cl_pred_error), corr_ms);
+			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
+				VectorLength (correction), VectorLength (cl_pred_error));
 		}
 	}
-
-	cl.pred_correction_applied += corr_len;
-	cl.pred_correction_remaining = VectorLength (cl_pred_error);
-	cl.pred_error_mag = cl.pred_correction_remaining;
-	cl.pred_snapshot_age = (cl.snap_last_arrival_time > 0.0) ? (realtime - cl.snap_last_arrival_time) : 0.0;
-	cl.pred_cmd_age = (cl_pred.last_ack_time > 0.0) ? (realtime - cl_pred.last_ack_time) : 0.0;
 
 	CL_EnsureViewEntityOrigin ("predict");
 }
@@ -582,89 +550,25 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		state->velocity[2] = 0;
 }
 
-static int CL_Predict_RunCommand (cl_pred_state_t *state, const usercmd_t *cmd, double cmd_dt, double pred_dt, int max_steps)
-{
-	double accum;
-	double max_accum;
-	int steps = 0;
-
-	if (cmd_dt <= 0.0)
-		cmd_dt = host_frametime > 0.0 ? host_frametime : 0.015;
-	if (pred_dt <= 0.0)
-		pred_dt = cmd_dt;
-	pred_dt = CLAMP (0.001, pred_dt, 0.1);
-	if (max_steps < 1)
-		max_steps = 1;
-	max_accum = pred_dt * (double)max_steps;
-	accum = cl.pred_accumulator + cmd_dt;
-	if (accum > max_accum)
-		accum = max_accum;
-
-	while (accum >= pred_dt && steps < max_steps)
-	{
-		host_frametime = (float)pred_dt;
-		CL_Predict_SimulateCmd (state, cmd);
-		accum -= pred_dt;
-		steps++;
-	}
-
-	if (steps == 0 && accum > 0.0)
-	{
-		host_frametime = (float)accum;
-		CL_Predict_SimulateCmd (state, cmd);
-		accum = 0.0;
-		steps = 1;
-	}
-
-	cl.pred_accumulator = accum;
-	return steps;
-}
-
 void CL_Predict_Clear (void)
 {
 	memset (&cl_pred, 0, sizeof(cl_pred));
 	cl_pred_warned_solid = false;
 	VectorClear (cl_pred_error);
-	VectorClear (cl_pred_vel_error);
-	cl.pred_accumulator = 0.0;
-	cl.pred_steps = 0;
 }
 
-void CL_Predict_SetupCmd (usercmd_t *cmd, double cmd_dt, double pred_dt)
+void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
-	int max_steps;
-	int steps;
-	float prev_frametime = host_frametime;
-
 	cl_netdbg_predict_ran = false;
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
 	cl_pred.cmds[cmd->sequence % CMD_RING] = *cmd;
-	if (cmd_dt <= 0.0)
-		cmd_dt = prev_frametime > 0.0f ? prev_frametime : 0.015;
-	if (pred_dt <= 0.0)
-		pred_dt = cmd_dt;
-	pred_dt = CLAMP (0.001, pred_dt, 0.1);
-	cl_pred.cmd_dt[cmd->sequence % CMD_RING] = cmd_dt;
-	cl_pred.pred_dt[cmd->sequence % CMD_RING] = pred_dt;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
-	{
-		cl.pred_accumulator = 0.0;
-		cl_pred.accum_phase[cmd->sequence % CMD_RING] = cl.pred_accumulator;
 		return;
-	}
 
-	max_steps = (int)cl_cmd_maxbatch.value;
-	if (max_steps < 1)
-		max_steps = 1;
-	max_steps *= 4;
-	steps = CL_Predict_RunCommand (&cl_pred.predicted, cmd, cmd_dt, pred_dt, max_steps);
-	cl.pred_steps += (unsigned int)steps;
-	cl_pred.accum_phase[cmd->sequence % CMD_RING] = cl.pred_accumulator;
-	host_frametime = (float)cmd_dt;
+	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd);
 	CL_Predict_ApplyToClient ();
-	host_frametime = prev_frametime;
 	cl_netdbg_predict_ran = true;
 }
 
@@ -685,18 +589,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	unsigned int seq;
 	float correction;
 	vec3_t error;
-	vec3_t vel_error;
-	float error_len = 0.0f;
+	float error_len;
 	float teleport_dist = cl_pred_teleport_dist.value;
-	float epsilon = q_max (0.0f, cl_pred_corr_eps.value);
-	float corr_ms = cl_pred_corr_ms.value > 0.0f ? cl_pred_corr_ms.value : cl_pred_smooth_ms.value;
-	qboolean apply_correction = false;
-	qboolean teleported = false;
-	double cmd_dt;
-	double step_dt;
-	int max_steps;
-	int steps;
-	float prev_frametime = host_frametime;
 
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
@@ -714,18 +608,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 
 	cl_pred.seq_acked = ack;
-	cl_pred.last_ack_time = realtime;
-	cl.snap_last_arrival_time = realtime;
-	cl.pred_snapshot_age = 0.0;
-	if (cl_pred_corr_vel.value == 0.0f)
-		VectorClear (cl_pred_vel_error);
 	if (cl_pred.has_base)
 	{
 		VectorSubtract (origin, cl_pred.predicted.origin, error);
 		error_len = VectorLength (error);
-		cl.pred_error_raw_mag = error_len;
-		apply_correction = (error_len > epsilon && corr_ms > 0.0f);
-		teleported = (teleport_dist > 0.0f && error_len > teleport_dist);
 		if (cl_netdbg_pred.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
@@ -733,37 +619,18 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				origin[0], origin[1], origin[2],
 				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
 		}
-		if (teleported)
+		if (teleport_dist > 0.0f && error_len > teleport_dist)
 		{
 			VectorClear (cl_pred_error);
-			VectorClear (cl_pred_vel_error);
-			cl.pred_accumulator = 0.0;
-			if (cl_netdbg_pred.value > 0.0f)
-			{
-				Con_Printf ("NETDBG: pred teleport reset err %.2f dist %.2f\n",
-					error_len, teleport_dist);
-			}
 		}
-		else if (apply_correction)
+		else
 		{
 			VectorAdd (cl_pred_error, error, cl_pred_error);
-			if (cl_pred_corr_vel.value != 0.0f)
-			{
-				VectorSubtract (velocity, cl_pred.predicted.velocity, vel_error);
-				VectorAdd (cl_pred_vel_error, vel_error, cl_pred_vel_error);
-			}
-			if (cl_netdbg_pred.value > 0.0f)
-			{
-				Con_Printf ("NETDBG: pred correction queued err %.2f eps %.2f window %.1fms\n",
-					error_len, epsilon, corr_ms);
-			}
 		}
 	}
 	else
 	{
 		VectorClear (cl_pred_error);
-		VectorClear (cl_pred_vel_error);
-		cl.pred_error_raw_mag = 0.0f;
 	}
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (origin, cl.simorg);
@@ -776,39 +643,16 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	if (!CL_Predict_IsEnabled ())
 		return;
 
-	max_steps = (int)cl_cmd_maxbatch.value;
-	if (max_steps < 1)
-		max_steps = 1;
-	max_steps *= 4;
-	cl.pred_accumulator = 0.0;
-	if (!teleported && !CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
-	{
-		usercmd_t *ack_cmd = &cl_pred.cmds[ack % CMD_RING];
-
-		if (ack_cmd->sequence == ack)
-			cl.pred_accumulator = cl_pred.accum_phase[ack % CMD_RING];
-	}
-
 	for (seq = ack + 1; !CL_Predict_SeqNewer (seq, cl_pred.seq_latest); seq++)
 	{
 		usercmd_t cmd;
 
 		if (!CL_Predict_GetCmd (seq, &cmd))
 			break;
-		cmd_dt = cl_pred.cmd_dt[seq % CMD_RING];
-		step_dt = cl_pred.pred_dt[seq % CMD_RING];
-		if (cmd_dt <= 0.0)
-			cmd_dt = cl.pred_frame_dt_clamped > 0.0 ? cl.pred_frame_dt_clamped : prev_frametime;
-		if (step_dt <= 0.0)
-			step_dt = cl.pred_fixed_dt > 0.0 ? cl.pred_fixed_dt : cmd_dt;
-		steps = CL_Predict_RunCommand (&cl_pred.predicted, &cmd, cmd_dt, step_dt, max_steps);
-		cl.pred_steps += (unsigned int)steps;
-		cl_pred.accum_phase[seq % CMD_RING] = cl.pred_accumulator;
+		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd);
 	}
 
-	host_frametime = prev_frametime;
 	CL_Predict_ApplyToClient ();
-	host_frametime = prev_frametime;
 }
 
 void CL_Predict_Reapply (void)
