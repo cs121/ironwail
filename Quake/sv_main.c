@@ -582,7 +582,7 @@ Sends the first message from the server to a connected client.
 This will be sent on the initial connection and upon each server load.
 ================
 */
-void SV_SendServerinfo (client_t *client)
+qboolean SV_SendServerinfo (client_t *client)
 {
 	const char		**s;
 	char			message[2048];
@@ -640,8 +640,16 @@ void SV_SendServerinfo (client_t *client)
 	MSG_WriteByte (&client->message, svc_signonnum);
 	MSG_WriteByte (&client->message, 1);
 
+	if (client->message.overflowed)
+	{
+		Con_Printf ("Serverinfo message overflowed for %s (max %d).\n",
+			client->name, client->message.maxsize);
+		return false;
+	}
+
 	client->sendsignon = PRESPAWN_FLUSH;
 	client->spawned = false;		// need prespawn, spawn, etc
+	return true;
 }
 
 /*
@@ -652,7 +660,7 @@ Initializes a client_t for a new net connection.  This will only be called
 once for a player each game, not once for each level change.
 ================
 */
-void SV_ConnectClient (int clientnum)
+qboolean SV_ConnectClient (int clientnum)
 {
 	edict_t			*ent;
 	client_t		*client;
@@ -756,7 +764,18 @@ void SV_ConnectClient (int clientnum)
 
 	SV_SetUnreliableConservative (client, "connect");
 
-	SV_SendServerinfo (client);
+	if (!SV_SendServerinfo (client))
+	{
+		if (!client->is_bot && client->netconnection)
+			NET_Close (client->netconnection);
+		client->netconnection = NULL;
+		client->active = false;
+		client->is_bot = false;
+		client->name[0] = 0;
+		client->old_frags = -999999;
+		return false;
+	}
+	return true;
 }
 
 
@@ -790,9 +809,8 @@ void SV_CheckForNewClients (void)
 			Sys_Error ("Host_CheckForNewClients: no free clients");
 
 		svs.clients[i].netconnection = ret;
-		SV_ConnectClient (i);
-
-		net_activeconnections++;
+		if (SV_ConnectClient (i))
+			net_activeconnections++;
 	}
 }
 
@@ -7431,7 +7449,8 @@ void SV_SpawnServer (const char *server)
 // send serverinfo to all connected clients
 	for (i=0,host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 		if (host_client->active)
-			SV_SendServerinfo (host_client);
+			if (!SV_SendServerinfo (host_client))
+				SV_DropClient (true);
 
 	Con_DPrintf ("Server spawned.\n");
 
