@@ -34,11 +34,11 @@ typedef struct godray_emitter_stats_s
 extern cvar_t r_godrays_mode;
 extern cvar_t r_godrays_max_emitters;
 extern cvar_t r_godrays_hero_emitters;
-extern cvar_t r_godray_volume_length;
-extern cvar_t r_godray_volume_density;
-extern cvar_t r_godray_volume_intensity;
-extern cvar_t r_godray_volume_color;
-extern cvar_t r_godray_volume_dir;
+extern cvar_t r_godrays_volume_length;
+extern cvar_t r_godrays_volume_density;
+extern cvar_t r_godrays_volume_intensity;
+extern cvar_t r_godrays_volume_color;
+extern cvar_t r_godrays_volume_dir;
 
 void R_GodrayEmitters_Init (void);
 void R_GodrayEmitters_BuildList (void);

@@ -33,11 +33,11 @@ typedef struct godray_emitter_sort_s
 cvar_t r_godrays_mode = { "r_godrays_mode", "2", CVAR_ARCHIVE };
 cvar_t r_godrays_max_emitters = { "r_godrays_max_emitters", "64", CVAR_ARCHIVE };
 cvar_t r_godrays_hero_emitters = { "r_godrays_hero_emitters", "2", CVAR_ARCHIVE };
-cvar_t r_godray_volume_length = { "r_godray_volume_length", "256", CVAR_ARCHIVE };
-cvar_t r_godray_volume_density = { "r_godray_volume_density", "0.4", CVAR_ARCHIVE };
-cvar_t r_godray_volume_intensity = { "r_godray_volume_intensity", "1.0", CVAR_ARCHIVE };
-cvar_t r_godray_volume_color = { "r_godray_volume_color", "1 1 1", CVAR_ARCHIVE };
-cvar_t r_godray_volume_dir = { "r_godray_volume_dir", "0 -1 0", CVAR_ARCHIVE };
+cvar_t r_godrays_volume_length = { "r_godrays_volume_length", "256", CVAR_ARCHIVE };
+cvar_t r_godrays_volume_density = { "r_godrays_volume_density", "0.4", CVAR_ARCHIVE };
+cvar_t r_godrays_volume_intensity = { "r_godrays_volume_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t r_godrays_volume_color = { "r_godrays_volume_color", "1 1 1", CVAR_ARCHIVE };
+cvar_t r_godrays_volume_dir = { "r_godrays_volume_dir", "0 -1 0", CVAR_ARCHIVE };
 
 static godray_emitter_t r_godray_emitters[MAX_GODRAY_EMITTERS];
 static int r_godray_emitter_count = 0;
@@ -460,11 +460,11 @@ void R_GodrayEmitters_Init (void)
 	Cvar_RegisterVariable (&r_godrays_mode);
 	Cvar_RegisterVariable (&r_godrays_max_emitters);
 	Cvar_RegisterVariable (&r_godrays_hero_emitters);
-	Cvar_RegisterVariable (&r_godray_volume_length);
-	Cvar_RegisterVariable (&r_godray_volume_density);
-	Cvar_RegisterVariable (&r_godray_volume_intensity);
-	Cvar_RegisterVariable (&r_godray_volume_color);
-	Cvar_RegisterVariable (&r_godray_volume_dir);
+	Cvar_RegisterVariable (&r_godrays_volume_length);
+	Cvar_RegisterVariable (&r_godrays_volume_density);
+	Cvar_RegisterVariable (&r_godrays_volume_intensity);
+	Cvar_RegisterVariable (&r_godrays_volume_color);
+	Cvar_RegisterVariable (&r_godrays_volume_dir);
 }
 
 void R_GodrayEmitters_BuildList (void)
@@ -481,17 +481,17 @@ void R_GodrayEmitters_BuildList (void)
 	if (r_shaders.value <= 0.f)
 		return;
 
-	R_GodrayEmitters_ParseColor (r_godray_volume_color.string, color);
-	if (!R_GodrayEmitters_ParseVector (r_godray_volume_dir.string, dir))
+	R_GodrayEmitters_ParseColor (r_godrays_volume_color.string, color);
+	if (!R_GodrayEmitters_ParseVector (r_godrays_volume_dir.string, dir))
 	{
 		dir[0] = 0.f;
 		dir[1] = -1.f;
 		dir[2] = 0.f;
 	}
 
-	ray_length = q_max (0.f, r_godray_volume_length.value);
-	density = q_max (0.f, r_godray_volume_density.value);
-	intensity = q_max (0.f, r_godray_volume_intensity.value);
+		ray_length = q_max (0.f, r_godrays_volume_length.value);
+		density = q_max (0.f, r_godrays_volume_density.value);
+		intensity = q_max (0.f, r_godrays_volume_intensity.value);
 	if (ray_length <= 0.1f || density <= 0.f || intensity <= 0.f)
 		return;
 

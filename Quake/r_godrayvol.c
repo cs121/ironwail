@@ -28,11 +28,11 @@ typedef struct godray_volume_vertex_s
 	vec3_t pos;
 } godray_volume_vertex_t;
 
-static cvar_t r_godray_volumes_enable = { "r_godray_volumes", "0", CVAR_ARCHIVE };
-static cvar_t r_godray_volume_steps = { "r_godray_volume_steps", "24", CVAR_ARCHIVE };
-static cvar_t r_godray_volume_noise_scale = { "r_godray_volume_noise_scale", "0.03", CVAR_ARCHIVE };
-static cvar_t r_godray_volume_noise_amount = { "r_godray_volume_noise_amount", "0.6", CVAR_ARCHIVE };
-static cvar_t r_godray_vol_debug = { "r_godray_vol_debug", "0", CVAR_ARCHIVE };
+static cvar_t r_godrays_volumes_enable = { "r_godrays_volumes", "0", CVAR_ARCHIVE };
+static cvar_t r_godrays_volume_steps = { "r_godrays_volume_steps", "24", CVAR_ARCHIVE };
+static cvar_t r_godrays_volume_noise_scale = { "r_godrays_volume_noise_scale", "0.03", CVAR_ARCHIVE };
+static cvar_t r_godrays_volume_noise_amount = { "r_godrays_volume_noise_amount", "0.6", CVAR_ARCHIVE };
+static cvar_t r_godrays_volume_debug = { "r_godrays_volume_debug", "0", CVAR_ARCHIVE };
 
 static void R_GodrayVolume_TransformPoint (const float matrix[16], const vec3_t in, vec3_t out)
 {
@@ -51,11 +51,11 @@ static void R_GodrayVolume_TransformVector (const float matrix[16], const vec3_t
 
 void R_GodrayVolume_Init (void)
 {
-	Cvar_RegisterVariable (&r_godray_volumes_enable);
-	Cvar_RegisterVariable (&r_godray_volume_steps);
-	Cvar_RegisterVariable (&r_godray_volume_noise_scale);
-	Cvar_RegisterVariable (&r_godray_volume_noise_amount);
-	Cvar_RegisterVariable (&r_godray_vol_debug);
+	Cvar_RegisterVariable (&r_godrays_volumes_enable);
+	Cvar_RegisterVariable (&r_godrays_volume_steps);
+	Cvar_RegisterVariable (&r_godrays_volume_noise_scale);
+	Cvar_RegisterVariable (&r_godrays_volume_noise_amount);
+	Cvar_RegisterVariable (&r_godrays_volume_debug);
 }
 
 void R_GodrayVolume_Render (void)
@@ -74,7 +74,7 @@ void R_GodrayVolume_Render (void)
 	int postfx_emitters = 0;
 	const godray_emitter_t *emitters = NULL;
 
-	if (r_godray_volumes_enable.value <= 0.f)
+	if (r_godrays_volumes_enable.value <= 0.f)
 		return;
 	if (!glprogs.godray_volume)
 		return;
@@ -88,7 +88,7 @@ void R_GodrayVolume_Render (void)
 	}
 
 	GL_BeginGroup ("Godray volumes");
-	int debug_mode = (int)Q_rint (r_godray_vol_debug.value);
+	int debug_mode = (int)Q_rint (r_godrays_volume_debug.value);
 	debug_mode = CLAMP (0, debug_mode, 3);
 
 	if (debug_mode > 0 && glprogs.godray_volume_debug)
@@ -106,7 +106,7 @@ void R_GodrayVolume_Render (void)
 		debug_mode = 0;
 	}
 
-	int steps = (int)Q_rint (r_godray_volume_steps.value);
+	int steps = (int)Q_rint (r_godrays_volume_steps.value);
 	steps = CLAMP (8, steps, 64);
 	if (debug_mode == 0)
 		GL_Uniform1iFunc (8, steps);
@@ -114,8 +114,8 @@ void R_GodrayVolume_Render (void)
 	if (debug_mode == 3)
 		glPolygonMode (GL_FRONT_AND_BACK, GL_LINE);
 
-	float noise_scale = q_max (0.0001f, r_godray_volume_noise_scale.value);
-	float noise_amount = CLAMP (0.f, r_godray_volume_noise_amount.value, 1.f);
+	float noise_scale = q_max (0.0001f, r_godrays_volume_noise_scale.value);
+	float noise_amount = CLAMP (0.f, r_godrays_volume_noise_amount.value, 1.f);
 	for (int i = 0; i < volume_emitters; ++i)
 	{
 		const godray_emitter_t *emitter = &emitters[i];

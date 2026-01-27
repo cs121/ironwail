@@ -30,7 +30,7 @@ extern cvar_t r_godrays_emit_sky;
 extern cvar_t r_godrays_emit_emissive;
 extern cvar_t r_godrays_emit_lighttex;
 extern cvar_t r_godrays_lighttex_name_match;
-extern cvar_t r_godray_sky_enable;
+extern cvar_t r_godrays_sky_enable;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -551,7 +551,7 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 	if (!s)
 		return false;
 
-	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f)
+	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godrays_sky_enable.value > 0.f)
 	{
 		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 		{
