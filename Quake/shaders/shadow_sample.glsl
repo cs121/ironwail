@@ -1,6 +1,22 @@
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
+#ifndef SHADOW_VIEWPROJ
+#define SHADOW_VIEWPROJ ShadowViewProj
+#endif
+
+#ifndef SHADOW_PARAMS
+#define SHADOW_PARAMS ShadowParams
+#endif
+
+#ifndef SHADOW_DEBUG
+#define SHADOW_DEBUG ShadowDebug
+#endif
+
+#ifndef SHADOW_SUN_DIR
+#define SHADOW_SUN_DIR ShadowSunDir
+#endif
+
 // -----------------------------------------------------------------------------
 // Matrix multiplication robustness
 //
@@ -118,13 +134,13 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 
 float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 {
-	if (ShadowDebug.x < 0.5)
+	if (SHADOW_DEBUG.x < 0.5)
 	{
 		in_range = 1.0;
 		return 1.0;
 	}
 
-	vec4 clip = ShadowMul(ShadowViewProj, vec4(world_pos, 1.0));
+	vec4 clip = ShadowMul(SHADOW_VIEWPROJ, vec4(world_pos, 1.0));
 	if (clip.w <= 0.0)
 	{
 		in_range = 0.0;
@@ -141,11 +157,11 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	if (!inside)
 		return 1.0;
 
-	float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
-	float bias = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
+	float ndotl = clamp(dot(normal, -SHADOW_SUN_DIR.xyz), 0.0, 1.0);
+	float bias = SHADOW_PARAMS.x + SHADOW_PARAMS.y * (1.0 - ndotl);
 
-	if (ShadowParams.z > 0.5)
-		return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
+	if (SHADOW_PARAMS.z > 0.5)
+		return ShadowSamplePCF(uv, reference, bias, int(SHADOW_PARAMS.w + 0.5));
 
 	return ShadowSampleRaw(uv, reference, bias);
 }

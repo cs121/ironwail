@@ -12,20 +12,20 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	ViewProj;
-	mat4	PrevViewProj;
-	vec3	EyePos;
-	float	_Pad0;
-	vec4	Fog;
-	float	ScreenDither;
-	float	Overbright;
-	float	ModelHalfLambert;
-	float	_Pad1;
-	mat4	ShadowViewProj;
-	vec4	ShadowParams;
-	vec4	ShadowDebug;
-	vec4	ShadowSunDir;
-	InstanceData instances[];
+	mat4	inst_ViewProj;
+	mat4	inst_PrevViewProj;
+	vec3	inst_EyePos;
+	float	inst_Pad0;
+	vec4	inst_Fog;
+	float	inst_ScreenDither;
+	float	inst_Overbright;
+	float	inst_ModelHalfLambert;
+	float	inst_Pad1;
+	mat4	inst_ShadowViewProj;
+	vec4	inst_ShadowParams;
+	vec4	inst_ShadowDebug;
+	vec4	inst_ShadowSunDir;
+	InstanceData inst_instances[];
 };
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -47,9 +47,9 @@ float bayer(ivec2 coord)
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-abs(Fog.w) * dot(p, p));
+        float fog = exp2(-abs(inst_Fog.w) * dot(p, p));
         fog = clamp(fog, 0.0, 1.0);
-        return mix(Fog.rgb, clr, fog);
+        return mix(inst_Fog.rgb, clr, fog);
 }
 
 // Hash without Sine
@@ -102,7 +102,15 @@ layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
 
 #define SHADOW_SUN 1
+#define SHADOW_VIEWPROJ inst_ShadowViewProj
+#define SHADOW_PARAMS inst_ShadowParams
+#define SHADOW_DEBUG inst_ShadowDebug
+#define SHADOW_SUN_DIR inst_ShadowSunDir
 #include "shadow_sample.glsl"
+#undef SHADOW_VIEWPROJ
+#undef SHADOW_PARAMS
+#undef SHADOW_DEBUG
+#undef SHADOW_SUN_DIR
 
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
@@ -162,14 +170,14 @@ void main()
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
 
-	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+	if (inst_ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
-		vec3 world_pos = in_pos + EyePos;
+		vec3 world_pos = in_pos + inst_EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
-		if (ShadowDebug.y > 1.5)
+		if (inst_ShadowDebug.y > 1.5)
 		{
-			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			float debug_value = (inst_ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
 			out_fragcolor = vec4(vec3(debug_value), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
@@ -220,13 +228,13 @@ void main()
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
-	if (abs(Fog.w) > 0.)
+	if (abs(inst_Fog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
+		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * inst_ScreenDither;
 		out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
-	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
+	out_fragcolor.rgb += SUPPRESS_BANDING() * inst_ScreenDither;
 #endif
 }
