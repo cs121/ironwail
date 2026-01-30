@@ -489,10 +489,18 @@ void CL_JitterDebug_Log (void)
 		VectorClear (pred.base_angles);
 		VectorClear (pred.predicted_origin);
 		VectorClear (pred.predicted_angles);
+		pred.onground = false;
+		pred.groundent = 0;
+		pred.ground_valid = false;
+		pred.ground_delta_len = 0.0f;
+		pred.ground_yaw_delta = 0.0f;
+		pred.ground_apply_pred = 0;
+		pred.ground_apply_render = 0;
 	}
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f "
+		"onground %d groundent %d ground_valid %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
 		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
 		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
 		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
@@ -501,6 +509,13 @@ void CL_JitterDebug_Log (void)
 		pred.prediction_steps,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
+		pred.onground ? 1 : 0,
+		pred.groundent,
+		pred.ground_valid ? 1 : 0,
+		pred.ground_delta_len,
+		pred.ground_yaw_delta,
+		pred.ground_apply_pred,
+		pred.ground_apply_render,
 		pred.base_origin[0], pred.base_origin[1], pred.base_origin[2],
 		pred.base_angles[0], pred.base_angles[1], pred.base_angles[2],
 		pred.predicted_origin[0], pred.predicted_origin[1], pred.predicted_origin[2],
