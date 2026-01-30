@@ -38,6 +38,7 @@ typedef struct
 	vec3_t	endpos;			// final position
 	plane_t	plane;			// surface normal at impact
 	edict_t	*ent;			// entity the surface is on
+	int		entnum;			// NUM_FOR_EDICT(ent) while qcvm context is active
 } trace_t;
 
 
@@ -84,4 +85,3 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace);
 
 #endif	/* _QUAKE_WORLD_H */
-

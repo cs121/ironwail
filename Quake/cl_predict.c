@@ -300,6 +300,8 @@ static trace_t CL_Predict_TraceBox (const vec3_t start, const vec3_t end, const 
 	sv.worldmodel = cl.worldmodel;
 	PR_PushQCVM(&sv.qcvm, &oldvm);
 	trace = SV_Move (start_copy, mins_copy, maxs_copy, end_copy, typeflags, NULL);
+	// NUM_FOR_EDICT depends on qcvm; compute ent->num before popping sv.qcvm.
+	trace.entnum = trace.ent ? NUM_FOR_EDICT (trace.ent) : 0;
 	PR_PopQCVM(oldvm);
 	sv.worldmodel = saved;
 
@@ -323,7 +325,7 @@ static int CL_Predict_TraceEntNum (const trace_t *trace)
 {
 	if (!trace->ent)
 		return 0;
-	return NUM_FOR_EDICT (trace->ent);
+	return trace->entnum;
 }
 
 static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t mins, const vec3_t maxs, int *groundent)
