@@ -2183,6 +2183,8 @@ void SCR_UpdateScreen (void)
 
        V_PolyBlend ();
 
+	CL_JitterDebug_Log ();
+
        R_StorePrevFrameState ();
 
 	GL_BeginGroup ("2D");
