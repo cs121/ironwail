@@ -10,6 +10,8 @@ extern cvar_t sv_friction;
 extern cvar_t sv_stopspeed;
 extern cvar_t sv_gravity;
 extern cvar_t cl_netdebug_parse;
+extern cvar_t cl_cmdrate;
+extern cvar_t cl_physrate;
 
 typedef struct
 {
@@ -33,6 +35,9 @@ static cl_pred_t cl_pred;
 static qboolean cl_netdbg_predict_ran;
 static qboolean cl_pred_warned_solid;
 static vec3_t cl_pred_error;
+static vec3_t cl_pred_angle_error;
+static int cl_pred_steps_this_frame;
+static qboolean cl_pred_server_update_this_frame;
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -86,6 +91,27 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 	return NETSEQ_GT (seq, ref);
 }
 
+static float CL_Predict_GetStepTime (void)
+{
+	double cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
+	double cmd_dt = 1.0 / cmd_rate;
+
+	if (cl_physrate.value > 0.0)
+		return (float)(1.0 / cl_physrate.value);
+	return (float)cmd_dt;
+}
+
+static float CL_Predict_AngleDelta (float a, float b)
+{
+	float d = a - b;
+
+	while (d > 180.0f)
+		d -= 360.0f;
+	while (d < -180.0f)
+		d += 360.0f;
+	return d;
+}
+
 static qboolean CL_Predict_IsEnabled (void)
 {
 	// Prediction may be gated on world readiness, but command sending must not be.
@@ -105,22 +131,29 @@ static qboolean CL_Predict_IsEnabled (void)
 static void CL_Predict_ApplyToClient (void)
 {
 	vec3_t smooth_origin;
+	vec3_t smooth_angles;
 	float smooth_ms;
 	float decay;
 	vec3_t correction;
+	vec3_t angle_correction;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
 	smooth_ms = cl_pred_smooth_ms.value;
 	if (smooth_ms <= 0.0f)
+	{
 		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
+	}
 
 	VectorAdd (cl_pred.predicted.origin, cl_pred_error, smooth_origin);
+	VectorAdd (cl_pred.predicted.viewangles, cl_pred_angle_error, smooth_angles);
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[1]);
+	VectorCopy (smooth_angles, cl.viewangles);
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[0]);
 	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[1]);
 	cl.onground = cl_pred.predicted.onground;
@@ -131,6 +164,8 @@ static void CL_Predict_ApplyToClient (void)
 		decay = CLAMP (0.0f, decay, 1.0f);
 		VectorScale (cl_pred_error, decay, correction);
 		VectorSubtract (cl_pred_error, correction, cl_pred_error);
+		VectorScale (cl_pred_angle_error, decay, angle_correction);
+		VectorSubtract (cl_pred_angle_error, angle_correction, cl_pred_angle_error);
 		if (cl_netdbg_pred.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
@@ -141,7 +176,7 @@ static void CL_Predict_ApplyToClient (void)
 	CL_EnsureViewEntityOrigin ("predict");
 }
 
-static void CL_Predict_Friction (vec3_t velocity)
+static void CL_Predict_Friction (vec3_t velocity, float dt)
 {
 	float	speed;
 	float	newspeed;
@@ -152,7 +187,7 @@ static void CL_Predict_Friction (vec3_t velocity)
 		return;
 
 	control = speed < sv_stopspeed.value ? sv_stopspeed.value : speed;
-	newspeed = speed - host_frametime * control * sv_friction.value;
+	newspeed = speed - dt * control * sv_friction.value;
 	if (newspeed < 0)
 		newspeed = 0;
 	newspeed /= speed;
@@ -161,7 +196,7 @@ static void CL_Predict_Friction (vec3_t velocity)
 	velocity[1] *= newspeed;
 }
 
-static void CL_Predict_Accelerate (vec3_t velocity, const vec3_t wishdir, float wishspeed, float accel)
+static void CL_Predict_Accelerate (vec3_t velocity, const vec3_t wishdir, float wishspeed, float accel, float dt)
 {
 	float	addspeed;
 	float	accelspeed;
@@ -173,7 +208,7 @@ static void CL_Predict_Accelerate (vec3_t velocity, const vec3_t wishdir, float 
 	if (addspeed <= 0)
 		return;
 
-	accelspeed = accel * host_frametime * wishspeed;
+	accelspeed = accel * dt * wishspeed;
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 
@@ -181,7 +216,7 @@ static void CL_Predict_Accelerate (vec3_t velocity, const vec3_t wishdir, float 
 		velocity[i] += accelspeed * wishdir[i];
 }
 
-static void CL_Predict_AirAccelerate (vec3_t velocity, vec3_t wishvel, float wishspeed)
+static void CL_Predict_AirAccelerate (vec3_t velocity, vec3_t wishvel, float wishspeed, float dt)
 {
 	float	addspeed;
 	float	accelspeed;
@@ -197,7 +232,7 @@ static void CL_Predict_AirAccelerate (vec3_t velocity, vec3_t wishvel, float wis
 	if (addspeed <= 0)
 		return;
 
-	accelspeed = sv_accelerate.value * wishspeed * host_frametime;
+	accelspeed = sv_accelerate.value * wishspeed * dt;
 	if (accelspeed > addspeed)
 		accelspeed = addspeed;
 
@@ -486,13 +521,14 @@ static void CL_Predict_StepSlideMove (cl_pred_state_t *state, const vec3_t mins,
 	}
 }
 
-static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd)
+static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt)
 {
 	vec3_t forward, right, up;
 	vec3_t wishvel, wishdir;
 	float wishspeed;
 	vec3_t mins, maxs;
 
+	cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);
 
 	if (!state->onground && state->velocity[2] <= 0)
@@ -518,7 +554,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	if (noclip_anglehack)
 	{
 		VectorCopy (wishvel, state->velocity);
-		VectorMA (state->origin, host_frametime, state->velocity, state->origin);
+		VectorMA (state->origin, dt, state->velocity, state->origin);
 		state->onground = false;
 		return;
 	}
@@ -531,19 +567,19 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 			state->onground = false;
 		}
 
-		CL_Predict_Friction (state->velocity);
-		CL_Predict_Accelerate (state->velocity, wishdir, wishspeed, sv_accelerate.value);
+		CL_Predict_Friction (state->velocity, dt);
+		CL_Predict_Accelerate (state->velocity, wishdir, wishspeed, sv_accelerate.value, dt);
 	}
 	else
 	{
-		CL_Predict_AirAccelerate (state->velocity, wishvel, wishspeed);
-		state->velocity[2] -= sv_gravity.value * host_frametime;
+		CL_Predict_AirAccelerate (state->velocity, wishvel, wishspeed, dt);
+		state->velocity[2] -= sv_gravity.value * dt;
 	}
 
 	if (state->onground)
-		CL_Predict_StepSlideMove (state, mins, maxs, host_frametime);
+		CL_Predict_StepSlideMove (state, mins, maxs, dt);
 	else
-		CL_Predict_SlideMove (state, mins, maxs, host_frametime);
+		CL_Predict_SlideMove (state, mins, maxs, dt);
 
 	state->onground = CL_Predict_CheckGroundTrace (state->origin, mins, maxs);
 	if (state->onground && state->velocity[2] < 0)
@@ -555,10 +591,21 @@ void CL_Predict_Clear (void)
 	memset (&cl_pred, 0, sizeof(cl_pred));
 	cl_pred_warned_solid = false;
 	VectorClear (cl_pred_error);
+	VectorClear (cl_pred_angle_error);
+	cl_pred_steps_this_frame = 0;
+	cl_pred_server_update_this_frame = false;
+}
+
+void CL_Predict_BeginFrame (void)
+{
+	cl_pred_steps_this_frame = 0;
+	cl_pred_server_update_this_frame = false;
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
+	float dt;
+
 	cl_netdbg_predict_ran = false;
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
@@ -567,7 +614,8 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
-	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd);
+	dt = CL_Predict_GetStepTime ();
+	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt);
 	CL_Predict_ApplyToClient ();
 	cl_netdbg_predict_ran = true;
 }
@@ -589,8 +637,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	unsigned int seq;
 	float correction;
 	vec3_t error;
+	vec3_t angle_error;
 	float error_len;
 	float teleport_dist = cl_pred_teleport_dist.value;
+	float dt;
+	int i;
 
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
@@ -608,10 +659,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 
 	cl_pred.seq_acked = ack;
+	cl_pred_server_update_this_frame = true;
 	if (cl_pred.has_base)
 	{
 		VectorSubtract (origin, cl_pred.predicted.origin, error);
 		error_len = VectorLength (error);
+		for (i = 0; i < 3; i++)
+			angle_error[i] = CL_Predict_AngleDelta (viewangles[i], cl_pred.predicted.viewangles[i]);
 		if (cl_netdbg_pred.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
@@ -622,15 +676,18 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (teleport_dist > 0.0f && error_len > teleport_dist)
 		{
 			VectorClear (cl_pred_error);
+			VectorClear (cl_pred_angle_error);
 		}
 		else
 		{
 			VectorAdd (cl_pred_error, error, cl_pred_error);
+			VectorAdd (cl_pred_angle_error, angle_error, cl_pred_angle_error);
 		}
 	}
 	else
 	{
 		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
 	}
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (origin, cl.simorg);
@@ -643,13 +700,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	if (!CL_Predict_IsEnabled ())
 		return;
 
+	dt = CL_Predict_GetStepTime ();
 	for (seq = ack + 1; !CL_Predict_SeqNewer (seq, cl_pred.seq_latest); seq++)
 	{
 		usercmd_t cmd;
 
 		if (!CL_Predict_GetCmd (seq, &cmd))
 			break;
-		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd);
+		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt);
 	}
 
 	CL_Predict_ApplyToClient ();
@@ -661,4 +719,27 @@ void CL_Predict_Reapply (void)
 		return;
 
 	CL_Predict_ApplyToClient ();
+}
+
+qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
+{
+	if (!out)
+		return false;
+
+	memset (out, 0, sizeof(*out));
+	out->prediction_steps = cl_pred_steps_this_frame;
+	out->server_update_applied = cl_pred_server_update_this_frame;
+	out->pred_error_len = VectorLength (cl_pred_error);
+	out->pred_angle_error_len = VectorLength (cl_pred_angle_error);
+	VectorCopy (cl_pred_error, out->pred_error);
+	VectorCopy (cl_pred_angle_error, out->pred_angle_error);
+
+	if (!cl_pred.has_base)
+		return false;
+
+	VectorCopy (cl_pred.base.origin, out->base_origin);
+	VectorCopy (cl_pred.base.viewangles, out->base_angles);
+	VectorCopy (cl_pred.predicted.origin, out->predicted_origin);
+	VectorCopy (cl_pred.predicted.viewangles, out->predicted_angles);
+	return true;
 }

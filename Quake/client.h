@@ -507,6 +507,20 @@ typedef struct
 	int		state;			// low bit is down state
 } kbutton_t;
 
+typedef struct
+{
+	vec3_t		base_origin;
+	vec3_t		base_angles;
+	vec3_t		predicted_origin;
+	vec3_t		predicted_angles;
+	vec3_t		pred_error;
+	vec3_t		pred_angle_error;
+	float		pred_error_len;
+	float		pred_angle_error_len;
+	int			prediction_steps;
+	qboolean	server_update_applied;
+} cl_pred_debug_t;
+
 extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
@@ -519,10 +533,13 @@ void CL_AccumulateCmd (void);
 void CL_SendCmd (void);
 void CL_SendMove (const usercmd_t *cmd);
 void CL_Predict_Clear (void);
+void CL_Predict_BeginFrame (void);
 void CL_Predict_SetupCmd (usercmd_t *cmd);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
 void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
+qboolean CL_Predict_GetDebug (cl_pred_debug_t *out);
+void CL_JitterDebug_Log (void);
 void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count);
 int  CL_ReadFromServer (void);
 void CL_AdjustAngles (void);

@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include <stdint.h>
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
@@ -51,6 +52,7 @@ cvar_t	cl_cmdrate = {"cl_cmdrate", "60", CVAR_ARCHIVE};
 cvar_t	cl_cmd_maxbatch = {"cl_cmd_maxbatch", "6", CVAR_ARCHIVE};
 cvar_t	cl_interp = {"cl_interp", "0.05", CVAR_ARCHIVE};
 cvar_t	cl_jitter = {"cl_jitter", "0.02", CVAR_ARCHIVE};
+cvar_t	cl_jitter_debug = {"cl_jitter_debug", "0", CVAR_NONE};
 cvar_t	cl_physrate = {"cl_physrate", "0", CVAR_ARCHIVE};
 cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
 cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
@@ -134,7 +136,7 @@ static int				cl_lerp_hold_oldest = 0;
 static int				cl_lerp_gap_holds = 0;
 static double			cl_lerp_debug_next_time = 0.0;
 static double			cl_netdbg_move_next_time = 0.0;
-static double			cl_cmd_accum = 0.0;
+static int64_t			cl_cmd_accum_us = 0;
 static double			cl_cmd_debug_next_time = 0.0;
 static unsigned int		cl_cmds_built_since_log = 0;
 static unsigned int		cl_cmds_sent_since_log = 0;
@@ -175,7 +177,7 @@ static void CL_ClearPlayerSnaps (void)
 void CL_ResetPlayerSnaps (void)
 {
 	CL_ClearPlayerSnaps ();
-	cl_cmd_accum = 0.0;
+	cl_cmd_accum_us = 0;
 	cl_cmd_debug_next_time = 0.0;
 	cl_cmds_built_since_log = 0;
 	cl_cmds_sent_since_log = 0;
@@ -323,6 +325,9 @@ qboolean CL_WorldReady (void)
 static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 {
 	double now;
+	double cmd_rate;
+	double cmd_dt;
+	double cmd_accum_s;
 	vec3_t vieworg;
 	int forward = 0;
 	int side = 0;
@@ -375,8 +380,12 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 		if (cls.netcon->lastMessageTime > 0.0)
 			net_last_msg_age = now - cls.netcon->lastMessageTime;
 		if (cls.netcon->lastSendTime > 0.0)
-			net_last_send_age = now - cls.netcon->lastSendTime;
+		net_last_send_age = now - cls.netcon->lastSendTime;
 	}
+
+	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
+	cmd_dt = 1.0 / cmd_rate;
+	cmd_accum_s = (double)cl_cmd_accum_us / 1000000.0;
 
 	Con_Printf ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
 		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d "
@@ -396,7 +405,7 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 		CL_NetDbg_PredictRan () ? 1 : 0,
 		sendcmd_ran ? 1 : 0,
 		cmd_seq, cmd_ack, cmd_ack_echo, snap_ack,
-		cl_cmd_accum, host_netinterval,
+		cmd_accum_s, cmd_dt,
 		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
 		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
 }
@@ -444,6 +453,58 @@ static double CL_GetInterpTargetTime (void)
 	if (server_time > 0.0)
 		return server_time - delay;
 	return Sys_DoubleTime () - delay;
+}
+
+static int64_t CL_SecondsToUsec (double seconds)
+{
+	if (seconds <= 0.0)
+		return 0;
+	return (int64_t)(seconds * 1000000.0 + 0.5);
+}
+
+void CL_JitterDebug_Log (void)
+{
+	double interp_delay;
+	double interp_target;
+	cl_pred_debug_t pred;
+	vec3_t render_org;
+	vec3_t render_ang;
+	qboolean has_pred;
+
+	if (cl_jitter_debug.value <= 0.0f)
+		return;
+
+	interp_delay = CL_GetInterpDelaySeconds ();
+	interp_target = CL_GetInterpTargetTime ();
+	has_pred = CL_Predict_GetDebug (&pred);
+
+	VectorCopy (r_refdef.vieworg, render_org);
+	VectorCopy (r_refdef.viewangles, render_ang);
+
+	if (!has_pred)
+	{
+		VectorClear (pred.base_origin);
+		VectorClear (pred.base_angles);
+		VectorClear (pred.predicted_origin);
+		VectorClear (pred.predicted_angles);
+	}
+
+	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
+		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f "
+		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
+		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
+		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
+		cl.time, realtime, host_frametime, interp_target, interp_delay,
+		pred.server_update_applied ? 1 : 0,
+		pred.prediction_steps,
+		pred.pred_error_len,
+		pred.pred_angle_error_len,
+		pred.base_origin[0], pred.base_origin[1], pred.base_origin[2],
+		pred.base_angles[0], pred.base_angles[1], pred.base_angles[2],
+		pred.predicted_origin[0], pred.predicted_origin[1], pred.predicted_origin[2],
+		pred.predicted_angles[0], pred.predicted_angles[1], pred.predicted_angles[2],
+		render_org[0], render_org[1], render_org[2],
+		render_ang[0], render_ang[1], render_ang[2]);
 }
 
 static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out_ang)
@@ -1763,6 +1824,7 @@ Spike: split from CL_SendCmd, to do clientside viewangle changes separately from
 */
 void CL_AccumulateCmd (void)
 {
+	CL_Predict_BeginFrame ();
 	if (cls.signon == SIGNONS)
 	{
 		//basic keyboard looking
@@ -1783,9 +1845,9 @@ void CL_SendCmd (void)
 	usercmd_t		cmd;
 	double			cmd_rate;
 	double			cmd_dt;
-	double			phys_dt;
-	double			max_accum;
-	float			prev_frametime;
+	int64_t			cmd_dt_us;
+	int64_t			max_accum_us;
+	int64_t			frame_us;
 	int				max_catchup;
 	int				cmds_built;
 	qboolean		send_move;
@@ -1796,24 +1858,26 @@ void CL_SendCmd (void)
 
 	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
 	cmd_dt = 1.0 / cmd_rate;
-	phys_dt = (cl_physrate.value > 0.0) ? (1.0 / cl_physrate.value) : cmd_dt;
+	cmd_dt_us = CL_SecondsToUsec (cmd_dt);
+	if (cmd_dt_us <= 0)
+		cmd_dt_us = 1;
 	max_catchup = (int)cl_cmd_maxbatch.value;
 	if (max_catchup < 1)
 		max_catchup = 1;
 
-	cl_cmd_accum += host_frametime;
-	if (cl_cmd_accum < 0.0)
-		cl_cmd_accum = 0.0;
-	max_accum = cmd_dt * (double)max_catchup * 2.0;
-	if (cl_cmd_accum > max_accum)
-		cl_cmd_accum = max_accum;
+	frame_us = CL_SecondsToUsec (host_frametime);
+	cl_cmd_accum_us += frame_us;
+	if (cl_cmd_accum_us < 0)
+		cl_cmd_accum_us = 0;
+	max_accum_us = cmd_dt_us * (int64_t)max_catchup * 2;
+	if (cl_cmd_accum_us > max_accum_us)
+		cl_cmd_accum_us = max_accum_us;
 
 	cmds_built = 0;
 	send_move = false;
 	sendcmd_ran = false;
-	prev_frametime = host_frametime;
 
-	while (cl_cmd_accum >= cmd_dt && cmds_built < max_catchup)
+	while (cl_cmd_accum_us >= cmd_dt_us && cmds_built < max_catchup)
 	{
 		if (cls.signon == SIGNONS)
 		{
@@ -1835,9 +1899,7 @@ void CL_SendCmd (void)
 
 			// NOTE: Never gate command generation/sending on snapshot readiness.
 			// Prediction handles world-ready checks; the server still needs cmds every tick.
-			host_frametime = (float)phys_dt;
 			CL_Predict_SetupCmd (&cmd);
-			host_frametime = prev_frametime;
 
 			in_attack.state &= ~2;
 			in_jump.state &= ~2;
@@ -1850,15 +1912,15 @@ void CL_SendCmd (void)
 			send_move = true;
 		}
 
-		cl_cmd_accum -= cmd_dt;
+		cl_cmd_accum_us -= cmd_dt_us;
 		cmds_built++;
 		sendcmd_ran = true;
 	}
 
-	if (cmds_built >= max_catchup && cl_cmd_accum >= cmd_dt && cl_netdebug_parse.value)
+	if (cmds_built >= max_catchup && cl_cmd_accum_us >= cmd_dt_us && cl_netdebug_parse.value)
 	{
 		Con_Printf ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
-			cl_cmd_accum, cmd_dt);
+			(double)cl_cmd_accum_us / 1000000.0, cmd_dt);
 	}
 
 	if (send_move)
@@ -1885,7 +1947,7 @@ void CL_SendCmd (void)
 		{
 			Con_Printf ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
 				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
-				cmd_dt, cl_cmd_accum);
+				cmd_dt, (double)cl_cmd_accum_us / 1000000.0);
 			cl_cmds_built_since_log = 0;
 			cl_cmds_sent_since_log = 0;
 			cl_cmd_packets_since_log = 0;
@@ -2091,6 +2153,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_cmd_maxbatch);
 	Cvar_RegisterVariable (&cl_interp);
 	Cvar_RegisterVariable (&cl_jitter);
+	Cvar_RegisterVariable (&cl_jitter_debug);
 	Cvar_RegisterVariable (&cl_physrate);
 	Cvar_RegisterVariable (&cl_snap_debug);
 	Cvar_RegisterVariable (&cl_snapshot_debug);
