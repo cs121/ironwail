@@ -19,6 +19,8 @@ typedef struct
 	vec3_t	velocity;
 	vec3_t	viewangles;
 	qboolean	onground;
+	int		groundent;
+	qboolean	ground_valid;
 } cl_pred_state_t;
 
 typedef struct
@@ -302,7 +304,14 @@ static void CL_Predict_LogSolidTrace (const char *context, const trace_t *trace)
 	}
 }
 
-static qboolean CL_Predict_CheckGroundTrace (const vec3_t origin, const vec3_t mins, const vec3_t maxs)
+static int CL_Predict_TraceEntNum (const trace_t *trace)
+{
+	if (!trace->ent)
+		return 0;
+	return NUM_FOR_EDICT (trace->ent);
+}
+
+static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t mins, const vec3_t maxs, int *groundent)
 {
 	trace_t trace;
 	vec3_t end;
@@ -316,9 +325,91 @@ static qboolean CL_Predict_CheckGroundTrace (const vec3_t origin, const vec3_t m
 		return false;
 
 	if (trace.fraction < 1.0f && trace.plane.normal[2] > 0.7f)
+	{
+		if (groundent)
+			*groundent = CL_Predict_TraceEntNum (&trace);
 		return true;
+	}
 
 	return false;
+}
+
+static qboolean CL_Predict_GetGroundMotion (int groundent, float dt, vec3_t out_delta, float *out_yaw_delta)
+{
+	entity_t *ent;
+	double msg_dt;
+	float scale;
+	int i;
+
+	VectorClear (out_delta);
+	if (out_yaw_delta)
+		*out_yaw_delta = 0.0f;
+
+	if (groundent <= 0 || groundent >= cl_max_edicts)
+		return false;
+
+	msg_dt = cl.mtime[0] - cl.mtime[1];
+	if (msg_dt <= 0.0)
+		return false;
+
+	ent = &cl_entities[groundent];
+	scale = (float)(dt / msg_dt);
+	for (i = 0; i < 3; i++)
+		out_delta[i] = (ent->msg_origins[0][i] - ent->msg_origins[1][i]) * scale;
+
+	if (out_yaw_delta)
+	{
+		float yaw_delta = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
+		*out_yaw_delta = yaw_delta * scale;
+	}
+
+	return true;
+}
+
+static void CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int groundent, float dt)
+{
+	vec3_t delta;
+	float yaw_delta;
+	entity_t *ground;
+	vec3_t rel;
+	float radians;
+	float c, s;
+
+	if (groundent <= 0 || groundent >= cl_max_edicts)
+	{
+		state->groundent = 0;
+		state->ground_valid = false;
+		return;
+	}
+
+	if (state->groundent != groundent)
+	{
+		state->groundent = groundent;
+		state->ground_valid = false;
+	}
+
+	if (!CL_Predict_GetGroundMotion (groundent, dt, delta, &yaw_delta))
+		return;
+
+	if (!state->ground_valid)
+	{
+		state->ground_valid = true;
+		return;
+	}
+
+	VectorAdd (state->origin, delta, state->origin);
+
+	if (yaw_delta != 0.0f)
+	{
+		ground = &cl_entities[groundent];
+		VectorSubtract (state->origin, ground->msg_origins[0], rel);
+		radians = yaw_delta * (float)(M_PI / 180.0f);
+		c = cosf (radians);
+		s = sinf (radians);
+		state->origin[0] = ground->msg_origins[0][0] + rel[0] * c - rel[1] * s;
+		state->origin[1] = ground->msg_origins[0][1] + rel[0] * s + rel[1] * c;
+		state->origin[2] = ground->msg_origins[0][2] + rel[2];
+	}
 }
 
 static int CL_Predict_ClipVelocity (const vec3_t in, const vec3_t normal, vec3_t out, float overbounce)
@@ -527,12 +618,23 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	vec3_t wishvel, wishdir;
 	float wishspeed;
 	vec3_t mins, maxs;
+	int groundent = 0;
 
 	cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);
 
 	if (!state->onground && state->velocity[2] <= 0)
-		state->onground = CL_Predict_CheckGroundTrace (state->origin, mins, maxs);
+		state->onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+	else if (state->onground)
+		CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+
+	if (state->onground)
+		CL_Predict_ApplyGroundMotion (state, groundent, dt);
+	else
+	{
+		state->groundent = 0;
+		state->ground_valid = false;
+	}
 
 	VectorCopy (cmd->viewangles, state->viewangles);
 
@@ -581,9 +683,17 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	else
 		CL_Predict_SlideMove (state, mins, maxs, dt);
 
-	state->onground = CL_Predict_CheckGroundTrace (state->origin, mins, maxs);
+	state->onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
 	if (state->onground && state->velocity[2] < 0)
 		state->velocity[2] = 0;
+
+	if (state->onground)
+		state->groundent = groundent;
+	else
+	{
+		state->groundent = 0;
+		state->ground_valid = false;
+	}
 }
 
 void CL_Predict_Clear (void)
@@ -680,6 +790,19 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		else
 		{
+			float deadzone = cl_pred_deadzone.value;
+			float angle_deadzone = cl_pred_angle_deadzone.value;
+
+			if (deadzone > 0.0f && error_len < deadzone)
+				VectorClear (error);
+			if (angle_deadzone > 0.0f)
+			{
+				for (i = 0; i < 3; i++)
+				{
+					if (fabsf (angle_error[i]) < angle_deadzone)
+						angle_error[i] = 0.0f;
+				}
+			}
 			VectorAdd (cl_pred_error, error, cl_pred_error);
 			VectorAdd (cl_pred_angle_error, angle_error, cl_pred_angle_error);
 		}
@@ -694,8 +817,23 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	VectorCopy (velocity, cl_pred.base.velocity);
 	VectorCopy (viewangles, cl_pred.base.viewangles);
 	cl_pred.base.onground = onground;
+	cl_pred.base.groundent = 0;
+	cl_pred.base.ground_valid = false;
 	cl_pred.predicted = cl_pred.base;
 	cl_pred.has_base = true;
+
+	if (onground)
+	{
+		vec3_t mins, maxs;
+		int groundent = 0;
+
+		CL_Predict_GetPlayerBounds (mins, maxs);
+		if (CL_Predict_GetGroundTrace (cl_pred.base.origin, mins, maxs, &groundent))
+		{
+			cl_pred.base.groundent = groundent;
+			cl_pred.predicted.groundent = groundent;
+		}
+	}
 
 	if (!CL_Predict_IsEnabled ())
 		return;
