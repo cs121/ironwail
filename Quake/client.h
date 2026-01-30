@@ -540,6 +540,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
 void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
+void CL_Predict_ResetGround (void);
 qboolean CL_Predict_GetDebug (cl_pred_debug_t *out);
 void CL_JitterDebug_Log (void);
 void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count);
