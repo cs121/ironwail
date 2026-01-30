@@ -1577,6 +1577,9 @@ void CL_RelinkEntities (void)
 			}
 		}
 
+		if (ent == &cl_entities[cl.viewentity] && !cl.onground)
+			VectorCopy (cl.simorg, ent->origin);
+
 		if (i <= cl.maxclients && i != cl.viewentity)
 		{
 			vec3_t lerp_org;
