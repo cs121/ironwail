@@ -565,15 +565,11 @@ static float R_GetDynamicDoFFocus (float fallback)
 	if (sv.active)
 	{
 		extern edict_t* sv_player;
-		qcvm_t* oldvm = qcvm;
 
-		if (!sv_player)
+		if (sv_player)
 		{
-			Con_Printf ("NETDBG sv_player NULL cl %d reason dof_autofocus\n", SV_CurrentClientIndex ());
-			SV_PlayerNullTrap (__func__, 0);
-		}
-		else
-		{
+			qcvm_t* oldvm = qcvm;
+
 			PR_SwitchQCVM (NULL);
 			PR_SwitchQCVM (&sv.qcvm);
 
