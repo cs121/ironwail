@@ -42,6 +42,9 @@ typedef struct
 	qboolean	onground;
 	int		groundent;
 	qboolean	ground_valid;
+	int		pred_ground_ent;
+	vec3_t		pred_ground_offset;
+	float		pred_ground_yaw_delta;
 	cl_pred_ground_cache_t ground_cache;
 } cl_pred_state_t;
 
@@ -123,6 +126,9 @@ static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
 
 	state->groundent = 0;
 	state->ground_valid = false;
+	state->pred_ground_ent = 0;
+	VectorClear (state->pred_ground_offset);
+	state->pred_ground_yaw_delta = 0.0f;
 	state->ground_cache.id = 0;
 	state->ground_cache.last_time = 0.0;
 	state->ground_cache.valid = false;
@@ -499,25 +505,35 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		CL_Predict_InvalidateGroundCache (state);
 	}
 
-	if (!CL_Predict_GetGroundMotion (state, groundent, dt, delta, &yaw_delta))
-		goto done;
-
-	if (!CL_Predict_GroundDeltaIsValid (delta, yaw_delta))
+	if (state->pred_ground_ent != groundent)
 	{
-		state->ground_valid = false;
-		goto done;
+		state->pred_ground_ent = groundent;
+		VectorClear (state->pred_ground_offset);
+		state->pred_ground_yaw_delta = 0.0f;
 	}
 
-	state->ground_valid = true;
-	applied = true;
+	if (CL_Predict_GetGroundMotion (state, groundent, dt, delta, &yaw_delta)
+		&& CL_Predict_GroundDeltaIsValid (delta, yaw_delta))
+	{
+		state->ground_valid = true;
+		VectorCopy (delta, state->pred_ground_offset);
+		state->pred_ground_yaw_delta = yaw_delta;
+	}
+	else
+	{
+		state->ground_valid = false;
+	}
 
-	VectorAdd (state->origin, delta, state->origin);
+	if (state->pred_ground_ent == groundent)
+		applied = true;
 
-	if (yaw_delta != 0.0f)
+	VectorAdd (state->origin, state->pred_ground_offset, state->origin);
+
+	if (state->pred_ground_yaw_delta != 0.0f)
 	{
 		ground = &cl_entities[groundent];
 		VectorSubtract (state->origin, ground->msg_origins[0], rel);
-		radians = yaw_delta * (float)(M_PI / 180.0f);
+		radians = state->pred_ground_yaw_delta * (float)(M_PI / 180.0f);
 		c = cosf (radians);
 		s = sinf (radians);
 		state->origin[0] = ground->msg_origins[0][0] + rel[0] * c - rel[1] * s;
@@ -527,9 +543,9 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 
 done:
 	if (out_delta)
-		VectorCopy (delta, out_delta);
+		VectorCopy (state->pred_ground_offset, out_delta);
 	if (out_yaw_delta)
-		*out_yaw_delta = yaw_delta;
+		*out_yaw_delta = state->pred_ground_yaw_delta;
 	return applied;
 }
 
@@ -772,14 +788,11 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		ground_yaw_delta = 0.0f;
 	}
 	if (groundent <= 0)
-		state->ground_valid = false;
-	if (!state->ground_valid || groundent <= 0)
 	{
+		state->ground_valid = false;
 		VectorClear (ground_delta);
 		ground_yaw_delta = 0.0f;
 	}
-	if (!state->ground_valid)
-		ground_yaw_delta = 0.0f;
 	if (cl_netdebug_parse.value && ground_entity && !state->ground_valid)
 	{
 		Con_Printf ("NETDBG: pred ground missing ent=%d mtime=%.3f\n",
@@ -930,9 +943,20 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	float teleport_dist = cl_pred_teleport_dist.value;
 	float dt;
 	int i;
+	int prev_pred_ground_ent = 0;
+	vec3_t prev_pred_ground_offset;
+	float prev_pred_ground_yaw_delta = 0.0f;
 
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
+
+	VectorClear (prev_pred_ground_offset);
+	if (cl_pred.has_base)
+	{
+		prev_pred_ground_ent = cl_pred.predicted.pred_ground_ent;
+		VectorCopy (cl_pred.predicted.pred_ground_offset, prev_pred_ground_offset);
+		prev_pred_ground_yaw_delta = cl_pred.predicted.pred_ground_yaw_delta;
+	}
 
 	if (cl_pred.has_base && cl_netdebug_parse.value)
 	{
@@ -1030,6 +1054,42 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		{
 			Con_Printf ("NETDBG: server onground without ground entity (groundent 0)\n");
 		}
+		if (groundent > 0)
+		{
+			if (prev_pred_ground_ent == groundent)
+			{
+				cl_pred.base.pred_ground_ent = groundent;
+				VectorCopy (prev_pred_ground_offset, cl_pred.base.pred_ground_offset);
+				cl_pred.base.pred_ground_yaw_delta = prev_pred_ground_yaw_delta;
+			}
+			else
+			{
+				cl_pred.base.pred_ground_ent = groundent;
+				VectorClear (cl_pred.base.pred_ground_offset);
+				cl_pred.base.pred_ground_yaw_delta = 0.0f;
+			}
+			cl_pred.predicted.pred_ground_ent = cl_pred.base.pred_ground_ent;
+			VectorCopy (cl_pred.base.pred_ground_offset, cl_pred.predicted.pred_ground_offset);
+			cl_pred.predicted.pred_ground_yaw_delta = cl_pred.base.pred_ground_yaw_delta;
+		}
+		else
+		{
+			cl_pred.base.pred_ground_ent = 0;
+			VectorClear (cl_pred.base.pred_ground_offset);
+			cl_pred.base.pred_ground_yaw_delta = 0.0f;
+			cl_pred.predicted.pred_ground_ent = 0;
+			VectorClear (cl_pred.predicted.pred_ground_offset);
+			cl_pred.predicted.pred_ground_yaw_delta = 0.0f;
+		}
+	}
+	else
+	{
+		cl_pred.base.pred_ground_ent = 0;
+		VectorClear (cl_pred.base.pred_ground_offset);
+		cl_pred.base.pred_ground_yaw_delta = 0.0f;
+		cl_pred.predicted.pred_ground_ent = 0;
+		VectorClear (cl_pred.predicted.pred_ground_offset);
+		cl_pred.predicted.pred_ground_yaw_delta = 0.0f;
 	}
 
 	if (!CL_Predict_IsEnabled ())
