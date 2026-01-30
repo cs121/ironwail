@@ -521,6 +521,13 @@ typedef struct
 	float		pred_angle_error_len;
 	int			prediction_steps;
 	qboolean	server_update_applied;
+	qboolean	onground;
+	int			groundent;
+	qboolean	ground_valid;
+	float		ground_delta_len;
+	float		ground_yaw_delta;
+	int			ground_apply_pred;
+	int			ground_apply_render;
 } cl_pred_debug_t;
 
 extern	kbutton_t	in_mlook, in_klook;
