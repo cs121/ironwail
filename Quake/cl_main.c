@@ -72,6 +72,7 @@ cvar_t	cl_lerp_debug = {"cl_lerp_debug", "0", CVAR_NONE};
 cvar_t	cl_netdbg_interp = {"cl_netdbg_interp", "0", CVAR_NONE};
 cvar_t	cl_netdbg_watch_ent = {"cl_netdbg_watch_ent", "0", CVAR_NONE};
 cvar_t	cl_netdbg_pred = {"cl_netdbg_pred", "0", CVAR_NONE};
+cvar_t	cl_predict = {"cl_predict", "1", CVAR_ARCHIVE};
 cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
 cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
 cvar_t	cl_pred_deadzone = {"cl_pred_deadzone", "0.25", CVAR_NONE};
@@ -2193,6 +2194,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_netdbg_interp);
 	Cvar_RegisterVariable (&cl_netdbg_watch_ent);
 	Cvar_RegisterVariable (&cl_netdbg_pred);
+	Cvar_RegisterVariable (&cl_predict);
 	Cvar_RegisterVariable (&cl_pred_smooth_ms);
 	Cvar_RegisterVariable (&cl_pred_teleport_dist);
 	Cvar_RegisterVariable (&cl_pred_deadzone);

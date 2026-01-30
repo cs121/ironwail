@@ -10,6 +10,7 @@ extern cvar_t sv_friction;
 extern cvar_t sv_stopspeed;
 extern cvar_t sv_gravity;
 extern cvar_t cl_netdebug_parse;
+extern cvar_t cl_predict;
 extern cvar_t cl_cmdrate;
 extern cvar_t cl_physrate;
 extern cvar_t cl_jitter_debug;
@@ -198,6 +199,8 @@ static qboolean CL_Predict_IsEnabled (void)
 	if (cls.demoplayback)
 		return false;
 	if (cl.intermission)
+		return false;
+	if (!cl_predict.value)
 		return false;
 	if (!cl.has_valid_worldstate)
 		return false;

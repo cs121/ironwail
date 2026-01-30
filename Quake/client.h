@@ -448,6 +448,7 @@ extern	cvar_t	cl_lerp_debug;
 extern	cvar_t	cl_netdbg_interp;
 extern	cvar_t	cl_netdbg_watch_ent;
 extern	cvar_t	cl_netdbg_pred;
+extern	cvar_t	cl_predict;
 extern	cvar_t	cl_pred_smooth_ms;
 extern	cvar_t	cl_pred_teleport_dist;
 extern	cvar_t	cl_pred_deadzone;
