@@ -743,6 +743,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	vec3_t ground_delta;
 	float ground_yaw_delta;
 	qboolean ground_applied;
+	qboolean ground_entity;
 
 	cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);
@@ -755,7 +756,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	else if (state->onground)
 		CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
 
-	if (state->onground)
+	ground_entity = (state->onground && groundent > 0);
+	if (ground_entity)
 		ground_applied = CL_Predict_ApplyGroundMotion (state, groundent, dt, ground_delta, &ground_yaw_delta);
 	else
 	{
@@ -763,6 +765,13 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		ground_applied = false;
 		VectorClear (ground_delta);
 		ground_yaw_delta = 0.0f;
+	}
+	if (!state->ground_valid)
+		ground_yaw_delta = 0.0f;
+	if (cl_netdebug_parse.value && ground_entity && !state->ground_valid)
+	{
+		Con_Printf ("NETDBG: pred ground missing ent=%d mtime=%.3f\n",
+			groundent, cl.mtime[0]);
 	}
 
 	VectorCopy (cmd->viewangles, state->viewangles);
@@ -823,7 +832,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		CL_Predict_ResetGroundCache (state);
 	}
 
-	cl_pred_ground_dbg.onground = state->onground;
+	cl_pred_ground_dbg.onground = (state->onground && state->groundent > 0);
 	cl_pred_ground_dbg.groundent = state->groundent;
 	cl_pred_ground_dbg.ground_valid = state->ground_valid;
 	cl_pred_ground_dbg.ground_delta_len = VectorLength (ground_delta);
