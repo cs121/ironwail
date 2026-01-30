@@ -756,6 +756,11 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	else if (state->onground)
 		CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
 
+	if (state->onground && groundent == 0 && cl_netdebug_parse.value)
+	{
+		Con_Printf ("NETDBG: pred onground without ground entity (groundent 0)\n");
+	}
+
 	ground_entity = (state->onground && groundent > 0);
 	if (ground_entity)
 		ground_applied = CL_Predict_ApplyGroundMotion (state, groundent, dt, ground_delta, &ground_yaw_delta);
@@ -763,6 +768,13 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	{
 		CL_Predict_ResetGroundCache (state);
 		ground_applied = false;
+		VectorClear (ground_delta);
+		ground_yaw_delta = 0.0f;
+	}
+	if (groundent <= 0)
+		state->ground_valid = false;
+	if (!state->ground_valid || groundent <= 0)
+	{
 		VectorClear (ground_delta);
 		ground_yaw_delta = 0.0f;
 	}
@@ -826,13 +838,23 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		state->velocity[2] = 0;
 
 	if (state->onground)
+	{
 		state->groundent = groundent;
+		if (state->groundent <= 0)
+		{
+			state->ground_valid = false;
+			if (cl_netdebug_parse.value)
+			{
+				Con_Printf ("NETDBG: pred onground without ground entity (post-move)\n");
+			}
+		}
+	}
 	else
 	{
 		CL_Predict_ResetGroundCache (state);
 	}
 
-	cl_pred_ground_dbg.onground = (state->onground && state->groundent > 0);
+	cl_pred_ground_dbg.onground = (state->onground && state->groundent > 0 && state->ground_valid);
 	cl_pred_ground_dbg.groundent = state->groundent;
 	cl_pred_ground_dbg.ground_valid = state->ground_valid;
 	cl_pred_ground_dbg.ground_delta_len = VectorLength (ground_delta);
@@ -995,12 +1017,18 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	{
 		vec3_t mins, maxs;
 		int groundent = 0;
+		qboolean ground_trace;
 
 		CL_Predict_GetPlayerBounds (mins, maxs);
-		if (CL_Predict_GetGroundTrace (cl_pred.base.origin, mins, maxs, &groundent))
+		ground_trace = CL_Predict_GetGroundTrace (cl_pred.base.origin, mins, maxs, &groundent);
+		if (ground_trace)
 		{
 			cl_pred.base.groundent = groundent;
 			cl_pred.predicted.groundent = groundent;
+		}
+		if (groundent == 0 && cl_netdebug_parse.value)
+		{
+			Con_Printf ("NETDBG: server onground without ground entity (groundent 0)\n");
 		}
 	}
 
