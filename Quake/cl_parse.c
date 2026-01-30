@@ -3731,6 +3731,7 @@ void CL_ParseServerMessage (void)
 		case svc_setview:
 			// Viewentity is per-client and must be set immediately for snapshot2/clientdata merge.
 			cl.viewentity = MSG_ReadShort ();
+			CL_Predict_ResetGround ();
 			break;
 
 		case svc_lightstyle:

@@ -93,6 +93,21 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 	return NETSEQ_GT (seq, ref);
 }
 
+static qboolean CL_Predict_IsGroundEntityValid (int groundent)
+{
+	if (groundent <= 0 || groundent >= cl_max_edicts)
+		return false;
+	if (!cl_entities)
+		return false;
+	if (cl.mtime[0] <= 0.0)
+		return false;
+	if (cl.snapshot_present && !cl.snapshot_present[groundent])
+		return false;
+	if (cl_entities[groundent].msgtime != cl.mtime[0])
+		return false;
+	return true;
+}
+
 static float CL_Predict_GetStepTime (void)
 {
 	double cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
@@ -345,8 +360,15 @@ static qboolean CL_Predict_GetGroundMotion (int groundent, float dt, vec3_t out_
 	if (out_yaw_delta)
 		*out_yaw_delta = 0.0f;
 
-	if (groundent <= 0 || groundent >= cl_max_edicts)
+	if (!CL_Predict_IsGroundEntityValid (groundent))
+	{
+		if (cl_netdebug_parse.value)
+		{
+			Con_Printf ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
+				groundent, cl.mtime[0]);
+		}
 		return false;
+	}
 
 	msg_dt = cl.mtime[0] - cl.mtime[1];
 	if (msg_dt <= 0.0)
@@ -375,7 +397,7 @@ static void CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int groundent,
 	float radians;
 	float c, s;
 
-	if (groundent <= 0 || groundent >= cl_max_edicts)
+	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
 		state->groundent = 0;
 		state->ground_valid = false;
@@ -704,6 +726,17 @@ void CL_Predict_Clear (void)
 	VectorClear (cl_pred_angle_error);
 	cl_pred_steps_this_frame = 0;
 	cl_pred_server_update_this_frame = false;
+}
+
+void CL_Predict_ResetGround (void)
+{
+	if (!cl_pred.has_base)
+		return;
+
+	cl_pred.base.groundent = 0;
+	cl_pred.base.ground_valid = false;
+	cl_pred.predicted.groundent = 0;
+	cl_pred.predicted.ground_valid = false;
 }
 
 void CL_Predict_BeginFrame (void)
