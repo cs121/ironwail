@@ -525,11 +525,31 @@ typedef struct
 	qboolean	onground;
 	int			groundent;
 	qboolean	ground_valid;
+	int			ground_valid_reason;
+	float		ground_trace_fraction;
+	float		ground_trace_normal_z;
+	int			ground_trace_ent;
+	int			ground_trace_startsolid;
+	int			ground_trace_allsolid;
+	int			ground_trace_fallback;
+	float		wishspeed;
+	float		wishvel_z;
+	float		cmd_frametime;
+	int			flags;
 	float		ground_delta_len;
 	float		ground_yaw_delta;
 	int			ground_apply_pred;
 	int			ground_apply_render;
 } cl_pred_debug_t;
+
+enum
+{
+	CL_GROUND_REASON_OK = 0,
+	CL_GROUND_REASON_TRACE_SOLID,
+	CL_GROUND_REASON_TRACE_MISS,
+	CL_GROUND_REASON_BAD_PLANE,
+	CL_GROUND_REASON_INVALID_ENTITY,
+};
 
 extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
