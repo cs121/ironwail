@@ -820,14 +820,15 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 			for (i = 0; i < 3; i++)
 				delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
 
-			Con_Printf ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f\n",
+			Con_Printf ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f mouse_applied %d\n",
 				groundent,
 				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
 				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
 				msg_dt,
 				ent->msg_angles[0][YAW], ent->msg_angles[1][YAW], yaw_raw,
 				delta_raw[0], delta_raw[1], delta_raw[2],
-				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2]);
+				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2],
+				IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 	}
 	else
@@ -1371,8 +1372,8 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 	if (cl_jitter_debug.value > 0.0f)
 	{
-		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
-			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub);
+		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 	}
 	for (i = 0; i < substeps; i++)
 		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub, false);
@@ -1460,7 +1461,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
-			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d\n",
+			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d mouse_applied %d\n",
 				cl_pred_ground_dbg.onground ? 1 : 0,
 				cl_pred_ground_dbg.groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
@@ -1478,7 +1479,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_ground_dbg.ground_delta_len,
 				cl_pred_ground_dbg.ground_yaw_delta,
 				cl_pred_ground_dbg.ground_apply_pred,
-				cl_pred_ground_dbg.ground_apply_render);
+				cl_pred_ground_dbg.ground_apply_render,
+				IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 		if (teleport_dist > 0.0f && error_len > teleport_dist)
 		{
@@ -1615,8 +1617,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 		if (cl_jitter_debug.value > 0.0f)
 		{
-			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
-				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub);
+			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 		for (i = 0; i < substeps; i++)
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub, false);

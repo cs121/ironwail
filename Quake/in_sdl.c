@@ -39,6 +39,14 @@ static textmode_t textmode = TEXTMODE_OFF;
 static keydevice_t lastactivetype = KD_NONE;
 
 static cvar_t in_debugkeys = {"in_debugkeys", "0", CVAR_NONE};
+static cvar_t cl_mouselook_dbg = {"cl_mouselook_dbg", "0", CVAR_NONE};
+
+static qboolean in_mouse_applied = false;
+static double in_mouse_dbg_next = 0.0;
+static float in_mouse_dbg_dmx = 0.0f;
+static float in_mouse_dbg_dmy = 0.0f;
+static vec3_t in_mouse_dbg_before = {0};
+static vec3_t in_mouse_dbg_after = {0};
 
 #ifdef __APPLE__
 /* Mouse acceleration needs to be disabled on OS X */
@@ -666,6 +674,7 @@ void IN_Init (void)
 	Cvar_RegisterVariable(&in_disablemacosxmouseaccel);
 #endif
 	Cvar_RegisterVariable(&in_debugkeys);
+	Cvar_RegisterVariable(&cl_mouselook_dbg);
 	Cvar_RegisterVariable(&joy_sensitivity_yaw);
 	Cvar_RegisterVariable(&joy_sensitivity_pitch);
 	Cvar_RegisterVariable(&joy_deadzone_look);
@@ -1266,6 +1275,7 @@ void IN_MouseMove(usercmd_t *cmd)
 	float		dmx, dmy;
 	float		sens;
 	qboolean	mlook = (in_mlook.state & 1) || freelook.value;
+	vec3_t		before;
 
 	sens = sensitivity.value * IN_FovScale ();
 
@@ -1274,6 +1284,8 @@ void IN_MouseMove(usercmd_t *cmd)
 
 	total_dx = 0;
 	total_dy = 0;
+
+	VectorCopy (cl.viewangles, before);
 
 	if ((in_strafe.state & 1) || (lookstrafe.value && mlook))
 		cmd->sidemove += m_side.value * dmx;
@@ -1302,10 +1314,32 @@ void IN_MouseMove(usercmd_t *cmd)
 		else
 			cmd->forwardmove -= m_forward.value * dmy;
 	}
+
+	in_mouse_dbg_dmx = dmx;
+	in_mouse_dbg_dmy = dmy;
+	VectorCopy (before, in_mouse_dbg_before);
+	VectorCopy (cl.viewangles, in_mouse_dbg_after);
+	if (dmx != 0.0f || dmy != 0.0f)
+		in_mouse_applied = true;
+
+	if (cl_mouselook_dbg.value > 0.0f && realtime >= in_mouse_dbg_next)
+	{
+		qboolean input_blocked = (key_dest != key_game) || con_forcedup;
+		int in_console = (key_dest == key_console);
+
+		Con_Printf ("MOUSEDBG time %.3f key_dest %d in_console %d input_blocked %d mouse_dx %.2f mouse_dy %.2f "
+			"view_before %.2f %.2f %.2f view_after %.2f %.2f %.2f\n",
+			realtime, key_dest, in_console, input_blocked ? 1 : 0,
+			in_mouse_dbg_dmx, in_mouse_dbg_dmy,
+			in_mouse_dbg_before[0], in_mouse_dbg_before[1], in_mouse_dbg_before[2],
+			in_mouse_dbg_after[0], in_mouse_dbg_after[1], in_mouse_dbg_after[2]);
+		in_mouse_dbg_next = realtime + 1.0;
+	}
 }
 
 void IN_Move(usercmd_t *cmd)
 {
+	in_mouse_applied = false;
 	IN_JoyMove(cmd);
 	IN_GyroMove(cmd);
 	IN_MouseMove(cmd);
@@ -1328,6 +1362,11 @@ void IN_UpdateInputMode (void)
 qboolean IN_EmulatedCharEvents (void)
 {
 	return textmode == TEXTMODE_NOPOPUP && !SDL_IsTextInputActive ();
+}
+
+qboolean IN_DidApplyMouseDelta (void)
+{
+	return in_mouse_applied;
 }
 
 keydevice_t IN_GetLastActiveDeviceType (void)
@@ -1749,4 +1788,3 @@ void IN_SendKeyEvents (void)
 		}
 	}
 }
-
