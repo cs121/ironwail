@@ -1210,7 +1210,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 
 	cmd_dt = CL_Predict_GetCmdStepTime (cmd);
 	host_dt = host_frametime;
-	if (host_dt <= 0.0f)
+	if (host_dt < 0.001f || host_dt > 0.1f)
 		host_dt = cmd_dt;
 	substeps = 1;
 	if (host_dt > 0.0f)
@@ -1459,7 +1459,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
 		host_dt = host_frametime;
-		if (host_dt <= 0.0f)
+		if (host_dt < 0.001f || host_dt > 0.1f)
 			host_dt = cmd_dt;
 		substeps = 1;
 		if (host_dt > 0.0f)
