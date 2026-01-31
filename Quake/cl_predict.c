@@ -634,27 +634,13 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		return false;
 
 	ent = &cl_entities[groundent];
-	if (!state || !state->ground_cache.valid || state->ground_cache.id != groundent || state->ground_cache.last_time != cl.mtime[1])
-	{
-		if (state)
-		{
-			state->ground_cache.id = groundent;
-			VectorCopy (ent->msg_origins[1], state->ground_cache.last_origin);
-			VectorCopy (ent->msg_angles[1], state->ground_cache.last_angles);
-			state->ground_cache.last_time = cl.mtime[1];
-			state->ground_cache.valid = true;
-			state->ground_valid = false;
-		}
-		return false;
-	}
-
 	scale = (float)(dt / msg_dt);
 	for (i = 0; i < 3; i++)
-		out_delta[i] = (ent->msg_origins[0][i] - state->ground_cache.last_origin[i]) * scale;
+		out_delta[i] = (ent->msg_origins[0][i] - ent->msg_origins[1][i]) * scale;
 
 	if (out_yaw_delta)
 	{
-		float yaw_delta = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], state->ground_cache.last_angles[YAW]);
+		float yaw_delta = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
 		*out_yaw_delta = yaw_delta * scale;
 	}
 
@@ -684,10 +670,12 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	float radians;
 	float c, s;
 	qboolean applied;
+	qboolean got_motion;
 
 	VectorClear (delta);
 	yaw_delta = 0.0f;
 	applied = false;
+	got_motion = false;
 
 	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
@@ -718,6 +706,7 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	if (CL_Predict_GetGroundMotion (state, groundent, dt, delta, &yaw_delta)
 		&& CL_Predict_GroundDeltaIsValid (delta, yaw_delta))
 	{
+		got_motion = true;
 		state->ground_valid = true;
 		VectorCopy (delta, state->pred_ground_offset);
 		state->pred_ground_yaw_delta = yaw_delta;
@@ -725,23 +714,28 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	else
 	{
 		state->ground_valid = false;
+		VectorClear (state->pred_ground_offset);
+		state->pred_ground_yaw_delta = 0.0f;
 	}
 
-	if (state->pred_ground_ent == groundent)
+	if (state->pred_ground_ent == groundent && got_motion)
 		applied = true;
 
-	VectorAdd (state->origin, state->pred_ground_offset, state->origin);
-
-	if (state->pred_ground_yaw_delta != 0.0f)
+	if (got_motion)
 	{
-		ground = &cl_entities[groundent];
-		VectorSubtract (state->origin, ground->msg_origins[0], rel);
-		radians = state->pred_ground_yaw_delta * (float)(M_PI / 180.0f);
-		c = cosf (radians);
-		s = sinf (radians);
-		state->origin[0] = ground->msg_origins[0][0] + rel[0] * c - rel[1] * s;
-		state->origin[1] = ground->msg_origins[0][1] + rel[0] * s + rel[1] * c;
-		state->origin[2] = ground->msg_origins[0][2] + rel[2];
+		VectorAdd (state->origin, state->pred_ground_offset, state->origin);
+
+		if (state->pred_ground_yaw_delta != 0.0f)
+		{
+			ground = &cl_entities[groundent];
+			VectorSubtract (state->origin, ground->msg_origins[0], rel);
+			radians = state->pred_ground_yaw_delta * (float)(M_PI / 180.0f);
+			c = cosf (radians);
+			s = sinf (radians);
+			state->origin[0] = ground->msg_origins[0][0] + rel[0] * c - rel[1] * s;
+			state->origin[1] = ground->msg_origins[0][1] + rel[0] * s + rel[1] * c;
+			state->origin[2] = ground->msg_origins[0][2] + rel[2];
+		}
 	}
 
 done:
