@@ -47,11 +47,23 @@ cvar_t	sv_gravity = {"sv_gravity","800",CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	sv_maxvelocity = {"sv_maxvelocity","2000",CVAR_NONE};
 cvar_t	sv_nostep = {"sv_nostep","0",CVAR_NONE};
 cvar_t	sv_freezenonclients = {"sv_freezenonclients","0",CVAR_NONE};
+cvar_t	sv_phys_debug = {"sv_phys_debug","0",CVAR_NONE};
 
 
 #define	MOVE_EPSILON	0.01
 
 void SV_Physics_Toss (edict_t *ent);
+
+static qboolean sv_phys_debug_registered;
+
+static void SV_Phys_RegisterDebugCvars (void)
+{
+	if (sv_phys_debug_registered)
+		return;
+
+	Cvar_RegisterVariable (&sv_phys_debug);
+	sv_phys_debug_registered = true;
+}
 
 /*
 ================
@@ -1228,6 +1240,13 @@ void SV_Physics (void)
 	int	i;
 	int	entity_cap; // For sv_freezenonclients 
 	edict_t	*ent;
+	int steps = 1;
+
+	SV_Phys_RegisterDebugCvars ();
+	if (sv_phys_debug.value > 0.0f)
+	{
+		Con_Printf ("SVPHYS: frametime=%.4f steps=%d\n", host_frametime, steps);
+	}
 
 // let the progs know that a new frame has started
 	pr_global_struct->self = EDICT_TO_PROG(qcvm->edicts);
@@ -1293,4 +1312,20 @@ void SV_Physics (void)
 
 	if (!sv_freezenonclients.value) 
 	  qcvm->time += host_frametime;
+
+	if (sv_phys_debug.value > 0.0f)
+	{
+		for (i = 1; i <= svs.maxclients; i++)
+		{
+			edict_t *player = EDICT_NUM (i);
+
+			if (!player || player->free)
+				continue;
+			Con_Printf ("SVPHYS: player %d origin=%.2f %.2f %.2f\n",
+				i,
+				player->v.origin[0],
+				player->v.origin[1],
+				player->v.origin[2]);
+		}
+	}
 }
