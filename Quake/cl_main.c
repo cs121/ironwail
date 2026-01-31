@@ -532,7 +532,7 @@ void CL_JitterDebug_Log (void)
 	}
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d "
+		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
@@ -547,6 +547,7 @@ void CL_JitterDebug_Log (void)
 		pred.pred_max_substeps,
 		pred.pred_nullcmd,
 		pred.pred_angles_normalized,
+		IN_DidApplyMouseDelta () ? 1 : 0,
 		pred.pred_apply_pred_reason,
 		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
@@ -1893,6 +1894,10 @@ Spike: split from CL_SendCmd, to do clientside viewangle changes separately from
 void CL_AccumulateCmd (void)
 {
 	CL_Predict_BeginFrame ();
+	if (CL_InputBlocked ())
+		// Force prediction to stop immediately when UI/console owns input.
+		CL_Predict_ForceNullCmd ();
+	CL_Predict_Reapply ();
 	if (cls.signon == SIGNONS)
 	{
 		//basic keyboard looking
@@ -1901,10 +1906,6 @@ void CL_AccumulateCmd (void)
 		//accumulate movement from other devices
 		IN_Move (&cl.pendingcmd);
 	}
-	if (CL_InputBlocked ())
-		// Force prediction to stop immediately when UI/console owns input.
-		CL_Predict_ForceNullCmd ();
-	CL_Predict_Reapply ();
 }
 
 /*

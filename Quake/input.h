@@ -94,5 +94,6 @@ void IN_Activate (void);
 void IN_Deactivate (qboolean free_cursor);
 void IN_DeactivateForConsole (void);
 void IN_DeactivateForMenu (void);
+qboolean IN_DidApplyMouseDelta (void);
 
 #endif
