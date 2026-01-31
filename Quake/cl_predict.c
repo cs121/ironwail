@@ -92,6 +92,8 @@ static int cl_pred_last_trace_startsolid;
 static int cl_pred_last_trace_allsolid;
 static int cl_pred_last_trace_fallback;
 
+static float CL_Predict_GetStepTime (void);
+
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
 #define CL_PREDICT_GROUND_EPSILON 2.0f
@@ -201,9 +203,7 @@ static void CL_Predict_ResetGroundDebug (void)
 
 static float CL_Predict_GetCmdStepTime (const usercmd_t *cmd)
 {
-	if (cmd && cmd->msec > 0)
-		return cmd->msec * 0.001f;
-
+	(void)cmd;
 	return CL_Predict_GetStepTime ();
 }
 
@@ -227,10 +227,9 @@ static void CL_Predict_DebugLogCmd (const char *tag, const usercmd_t *cmd, float
 	error_len = VectorLength (error);
 	is_local = CL_Predict_IsLocalListenServer () ? 1 : 0;
 
-	Con_Printf ("PREDDBG: %s seq=%u msec=%d dt=%.4f pred=%.2f %.2f %.2f base=%.2f %.2f %.2f err=%.3f local=%d\n",
+	Con_Printf ("PREDDBG: %s seq=%u dt=%.4f pred=%.2f %.2f %.2f base=%.2f %.2f %.2f err=%.3f local=%d\n",
 		tag ? tag : "cmd",
 		cmd->sequence,
-		cmd->msec,
 		dt,
 		cl_pred.predicted.origin[0],
 		cl_pred.predicted.origin[1],
