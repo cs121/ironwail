@@ -621,7 +621,7 @@ static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean
 //
 //==============================================================================
 
-glframebufs_t framebufs;
+glframebufs_t framebufs = {0};
 
 #define SSAO_MAX_SAMPLES 32
 // SSAO FIX: Use a larger noise tile to reduce visible tiling in half-res AO.
@@ -724,6 +724,7 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, 
 		Sys_Error ("GL_CreateFBO: too many color buffers (%d)", numcolors);
 
 	GL_GenFramebuffersFunc (1, &fbo);
+	Con_DPrintf ("GL_CreateFBO: %s id=%u\n", name ? name : "(unnamed)", fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, fbo, -1, name);
 	GL_LogErrorIfDeveloper ("GL_CreateFBO bind");
@@ -842,6 +843,10 @@ void GL_CreateFrameBuffers (void)
 	framebufs.ssao.height[0] = vid.height;
 	framebufs.ssao.width[1] = q_max (1, vid.width / 2);
 	framebufs.ssao.height[1] = q_max (1, vid.height / 2);
+#ifndef NDEBUG
+	if (!VID_GLContextIsCurrent ())
+		Sys_Error ("SSAO framebuffer init requires an active GL context.");
+#endif
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
@@ -850,6 +855,8 @@ void GL_CreateFrameBuffers (void)
 		int width = framebufs.ssao.width[i];
 		int height = framebufs.ssao.height[i];
 		const char *suffix = (i == 0) ? "full" : "half";
+		framebufs.ssao.ao_fbo[i] = 0;
+		framebufs.ssao.blur_fbo[i] = 0;
 		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao %s", suffix));
 		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao blur %s", suffix));
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
@@ -1285,6 +1292,11 @@ static float R_SanitizeSSAOValue (float value, float fallback, float minval, flo
 
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
+	if (!VID_GLContextIsCurrent ())
+	{
+		Con_Warning ("SSAO skipped: no current GL context.\n");
+		return 0;
+	}
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
 		return 0;
 	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
@@ -1339,8 +1351,20 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		ssao_logged = true;
 	}
 
+	while (glGetError () != GL_NO_ERROR) {}
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+#ifndef NDEBUG
+	{
+		static qboolean ssao_fbo_validated = false;
+		if (!ssao_fbo_validated)
+		{
+			if (framebufs.ssao.ao_fbo[index] != 0 && !glIsFramebuffer (framebufs.ssao.ao_fbo[index]))
+				Con_Warning ("SSAO FBO invalid: %u\n", framebufs.ssao.ao_fbo[index]);
+			ssao_fbo_validated = true;
+		}
+	}
+#endif
 	GL_LogErrorIfDeveloper ("SSAO bind FBO");
 	{
 		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);

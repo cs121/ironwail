@@ -345,6 +345,16 @@ void *VID_GetWindow (void)
 
 /*
 ====================
+VID_GLContextIsCurrent
+====================
+*/
+qboolean VID_GLContextIsCurrent (void)
+{
+	return gl_context && SDL_GL_GetCurrentContext () == gl_context;
+}
+
+/*
+====================
 VID_SetWindowTitle
 ====================
 */
