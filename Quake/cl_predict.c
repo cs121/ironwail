@@ -107,6 +107,7 @@ static double cl_pred_frame_accum;
 static float cl_pred_frame_dt_last;
 
 static float CL_Predict_GetStepTime (void);
+static qboolean CL_Predict_IsEnabled (void);
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
