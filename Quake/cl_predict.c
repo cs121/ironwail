@@ -15,6 +15,8 @@ extern cvar_t cl_cmdrate;
 extern cvar_t cl_physrate;
 extern cvar_t cl_jitter_debug;
 
+static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
+
 typedef struct
 {
 	int		id;
@@ -80,6 +82,8 @@ static vec3_t cl_pred_error;
 static vec3_t cl_pred_angle_error;
 static int cl_pred_steps_this_frame;
 static qboolean cl_pred_server_update_this_frame;
+static qboolean cl_pred_debug_registered;
+static qboolean cl_pred_prev_enabled;
 static cl_pred_ground_debug_t cl_pred_ground_dbg;
 static float cl_pred_last_trace_fraction;
 static float cl_pred_last_trace_normal_z;
@@ -92,6 +96,7 @@ static int cl_pred_last_trace_fallback;
 #define CL_PREDICT_STEP_SIZE 18.0f
 #define CL_PREDICT_GROUND_EPSILON 2.0f
 #define CL_PREDICT_CORRECTION_THRESHOLD 64.0f
+#define CL_PREDICT_SNAP_THRESHOLD 8.0f
 #define CL_PREDICT_GROUND_STABLE_FRAMES 2
 #define CL_PREDICT_GROUND_KEEP_FRAMES 2
 
@@ -135,6 +140,15 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
 			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 	}
+}
+
+static void CL_Predict_RegisterDebugCvars (void)
+{
+	if (cl_pred_debug_registered)
+		return;
+
+	Cvar_RegisterVariable (&cl_pred_debug);
+	cl_pred_debug_registered = true;
 }
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
@@ -183,6 +197,72 @@ static void CL_Predict_ResetGroundDebug (void)
 	cl_pred_last_trace_startsolid = 0;
 	cl_pred_last_trace_allsolid = 0;
 	cl_pred_last_trace_fallback = 0;
+}
+
+static float CL_Predict_GetCmdStepTime (const usercmd_t *cmd)
+{
+	if (cmd && cmd->msec > 0)
+		return cmd->msec * 0.001f;
+
+	return CL_Predict_GetStepTime ();
+}
+
+static qboolean CL_Predict_IsLocalListenServer (void)
+{
+	return (sv.active && cls.state == ca_connected && !cls.demoplayback);
+}
+
+static void CL_Predict_DebugLogCmd (const char *tag, const usercmd_t *cmd, float dt)
+{
+	vec3_t error;
+	float error_len;
+	const vec3_t *base_origin;
+	int is_local;
+
+	if (cl_pred_debug.value <= 0.0f || !cmd || !cl_pred.has_base)
+		return;
+
+	base_origin = &cl_pred.base.origin;
+	VectorSubtract (cl_pred.predicted.origin, *base_origin, error);
+	error_len = VectorLength (error);
+	is_local = CL_Predict_IsLocalListenServer () ? 1 : 0;
+
+	Con_Printf ("PREDDBG: %s seq=%u msec=%d dt=%.4f pred=%.2f %.2f %.2f base=%.2f %.2f %.2f err=%.3f local=%d\n",
+		tag ? tag : "cmd",
+		cmd->sequence,
+		cmd->msec,
+		dt,
+		cl_pred.predicted.origin[0],
+		cl_pred.predicted.origin[1],
+		cl_pred.predicted.origin[2],
+		(*base_origin)[0],
+		(*base_origin)[1],
+		(*base_origin)[2],
+		error_len,
+		is_local);
+}
+
+static void CL_Predict_HardResetToBase (const char *reason)
+{
+	if (!cl_pred.has_base)
+		return;
+
+	cl_pred.predicted = cl_pred.base;
+	VectorClear (cl_pred_error);
+	VectorClear (cl_pred_angle_error);
+	CL_Predict_InvalidateGroundCache (&cl_pred.base);
+	CL_Predict_ResetGroundCache (&cl_pred.predicted);
+	cl_pred.predicted.onground = cl_pred.base.onground;
+	cl_pred.predicted.groundent = cl_pred.base.groundent;
+
+	if (cl_pred_debug.value > 0.0f)
+	{
+		Con_Printf ("PREDDBG: HardReset reason=%s base=%.2f %.2f %.2f\n",
+			reason ? reason : "unknown",
+			cl_pred.base.origin[0],
+			cl_pred.base.origin[1],
+			cl_pred.base.origin[2]);
+	}
 }
 
 static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean trace_onground, int trace_groundent)
@@ -1058,6 +1138,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 
 void CL_Predict_Clear (void)
 {
+	CL_Predict_RegisterDebugCvars ();
 	memset (&cl_pred, 0, sizeof(cl_pred));
 	cl_pred_warned_solid = false;
 	cl_pred_warned_no_snapshot = false;
@@ -1065,6 +1146,7 @@ void CL_Predict_Clear (void)
 	VectorClear (cl_pred_angle_error);
 	cl_pred_steps_this_frame = 0;
 	cl_pred_server_update_this_frame = false;
+	cl_pred_prev_enabled = false;
 	CL_Predict_ResetGroundDebug ();
 }
 
@@ -1079,15 +1161,24 @@ void CL_Predict_ResetGround (void)
 
 void CL_Predict_BeginFrame (void)
 {
+	qboolean enabled;
+
+	CL_Predict_RegisterDebugCvars ();
 	cl_pred_steps_this_frame = 0;
 	cl_pred_server_update_this_frame = false;
 	CL_Predict_ResetGroundDebug ();
+
+	enabled = CL_Predict_IsEnabled ();
+	if (enabled && !cl_pred_prev_enabled && cl_pred.has_base)
+		CL_Predict_HardResetToBase ("predict reenabled");
+	cl_pred_prev_enabled = enabled;
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
 	float dt;
 
+	CL_Predict_RegisterDebugCvars ();
 	cl_netdbg_predict_ran = false;
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
@@ -1096,8 +1187,9 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
-	dt = CL_Predict_GetStepTime ();
+	dt = CL_Predict_GetCmdStepTime (cmd);
 	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt);
+	CL_Predict_DebugLogCmd ("setup", cmd, dt);
 	CL_Predict_ApplyToClient ();
 	cl_netdbg_predict_ran = true;
 }
@@ -1120,17 +1212,20 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	float correction;
 	vec3_t error;
 	vec3_t angle_error;
-	float error_len;
+	float error_len = 0.0f;
 	float teleport_dist = cl_pred_teleport_dist.value;
 	float dt;
 	int i;
 	int prev_pred_ground_ent = 0;
 	vec3_t prev_pred_ground_offset;
 	float prev_pred_ground_yaw_delta = 0.0f;
+	qboolean had_base;
 
+	CL_Predict_RegisterDebugCvars ();
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
 
+	had_base = cl_pred.has_base;
 	VectorClear (prev_pred_ground_offset);
 	if (cl_pred.has_base)
 	{
@@ -1218,7 +1313,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorClear (cl_pred_angle_error);
 	}
 	VectorCopy (origin, cl_pred.base.origin);
-	VectorCopy (origin, cl.simorg);
 	VectorCopy (velocity, cl_pred.base.velocity);
 	VectorCopy (viewangles, cl_pred.base.viewangles);
 	cl_pred.base.onground = onground;
@@ -1284,17 +1378,42 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred.predicted.pred_ground_yaw_delta = 0.0f;
 	}
 
-	if (!CL_Predict_IsEnabled ())
-		return;
+	if (!had_base)
+		CL_Predict_HardResetToBase ("new base");
 
-	dt = CL_Predict_GetStepTime ();
+	if (!CL_Predict_IsEnabled ())
+	{
+		VectorCopy (origin, cl.simorg);
+		return;
+	}
+
+	if (error_len > CL_PREDICT_SNAP_THRESHOLD)
+	{
+		VectorCopy (origin, cl.simorg);
+		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
+	}
+
+	if (CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
+	{
+		CL_Predict_HardResetToBase ("ack ahead of latest");
+		CL_Predict_ApplyToClient ();
+		return;
+	}
+
 	for (seq = ack + 1; !CL_Predict_SeqNewer (seq, cl_pred.seq_latest); seq++)
 	{
 		usercmd_t cmd;
 
 		if (!CL_Predict_GetCmd (seq, &cmd))
-			break;
+		{
+			CL_Predict_HardResetToBase ("cmd chain broken");
+			CL_Predict_ApplyToClient ();
+			return;
+		}
+		dt = CL_Predict_GetCmdStepTime (&cmd);
 		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt);
+		CL_Predict_DebugLogCmd ("resim", &cmd, dt);
 	}
 
 	CL_Predict_ApplyToClient ();
