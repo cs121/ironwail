@@ -42,6 +42,7 @@ extern cvar_t cl_signon_debug;
 extern qboolean cl_viewent_needs_init;
 extern cvar_t cl_interp;
 extern cvar_t cl_jitter;
+extern cvar_t cl_updaterate;
 
 static qboolean warn_about_nehahra_protocol;
 
@@ -1696,6 +1697,35 @@ static void CL_NetDbg_LogWatchEnt (const snapshot_header_t *header, int removed)
 	Con_Printf ("\n");
 }
 
+static double CL_GetInterpDelaySecondsDebug (void)
+{
+	double interp = cl_interp.value;
+	double jitter = cl_jitter.value;
+	double min_delay = 0.0;
+	double base;
+	double jitter_scale = 1.0;
+
+	if (interp <= 0.0)
+	{
+		if (cl_lerp_ms.value <= 0.0)
+			return 0.0;
+		interp = cl_lerp_ms.value * 0.001;
+	}
+
+	if (jitter < 0.0)
+		jitter = 0.0;
+	if (cl_updaterate.value > 0.0)
+		min_delay = 2.0 / cl_updaterate.value;
+	base = interp;
+	if (min_delay > 0.0 && base < min_delay)
+	{
+		jitter_scale = interp > 0.0 ? (interp / min_delay) : 0.0;
+		base = min_delay;
+	}
+
+	return base + (jitter * jitter_scale);
+}
+
 static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int removes_parsed,
 	const byte *prev_present)
 {
@@ -1724,11 +1754,7 @@ static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int re
 		arrival_dt = realtime - cl.snap_last_arrival_time;
 	cl.snap_last_arrival_time = realtime;
 
-	interp_delay = cl_interp.value;
-	if (interp_delay <= 0.0)
-		interp_delay = cl_lerp_ms.value * 0.001;
-	else
-		interp_delay += q_max (0.0, cl_jitter.value);
+	interp_delay = CL_GetInterpDelaySecondsDebug ();
 
 	if (cl.clock_offset != 0.0)
 		server_now = realtime + cl.clock_offset;
