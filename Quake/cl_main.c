@@ -504,6 +504,17 @@ void CL_JitterDebug_Log (void)
 		pred.onground = false;
 		pred.groundent = 0;
 		pred.ground_valid = false;
+		pred.ground_valid_reason = CL_GROUND_REASON_OK;
+		pred.ground_trace_fraction = 1.0f;
+		pred.ground_trace_normal_z = 0.0f;
+		pred.ground_trace_ent = 0;
+		pred.ground_trace_startsolid = 0;
+		pred.ground_trace_allsolid = 0;
+		pred.ground_trace_fallback = 0;
+		pred.wishspeed = 0.0f;
+		pred.wishvel_z = 0.0f;
+		pred.cmd_frametime = 0.0f;
+		pred.flags = 0;
 		pred.ground_delta_len = 0.0f;
 		pred.ground_yaw_delta = 0.0f;
 		pred.ground_apply_pred = 0;
@@ -512,7 +523,8 @@ void CL_JitterDebug_Log (void)
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f "
-		"onground %d groundent %d ground_valid %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
+		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
+		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
 		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
 		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
 		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
@@ -524,6 +536,17 @@ void CL_JitterDebug_Log (void)
 		pred.onground ? 1 : 0,
 		pred.groundent,
 		pred.ground_valid ? 1 : 0,
+		pred.ground_valid_reason,
+		pred.ground_trace_fraction,
+		pred.ground_trace_normal_z,
+		pred.ground_trace_ent,
+		pred.ground_trace_startsolid,
+		pred.ground_trace_allsolid,
+		pred.ground_trace_fallback,
+		pred.wishspeed,
+		pred.wishvel_z,
+		pred.cmd_frametime,
+		pred.flags,
 		pred.ground_delta_len,
 		pred.ground_yaw_delta,
 		pred.ground_apply_pred,

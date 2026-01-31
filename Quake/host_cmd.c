@@ -3169,6 +3169,9 @@ static void Host_Spawn_f (void)
 // send all current names, colors, and frag counts
 	SZ_Clear (&host_client->message);
 
+	MSG_WriteByte (&host_client->message, svc_setpause);
+	MSG_WriteByte (&host_client->message, sv.paused);
+
 // send time of update
 	MSG_WriteByte (&host_client->message, svc_time);
 	MSG_WriteFloat (&host_client->message, qcvm->time);

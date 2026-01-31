@@ -1106,6 +1106,7 @@ static void SV_RunOneTick (double tick_dt)
 	static double next_sv_skip_log = 0.0;
 	static int paused_frame_count = 0;
 	const int paused_frame_threshold = 120;
+	const int paused_force_threshold = 300;
 
 	host_frametime = tick_dt;
 	pr_global_struct->frametime = host_frametime;
@@ -1132,6 +1133,16 @@ static void SV_RunOneTick (double tick_dt)
 			Con_Printf ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
 				sv.paused, key_dest);
 			next_sv_skip_log = realtime + 1.0;
+		}
+		if (paused_frame_count >= paused_force_threshold && key_dest == key_game && svs.maxclients <= 1 && !cls.demoplayback)
+		{
+			sv.paused = false;
+			cl.paused = false;
+			paused_frame_count = 0;
+			Con_Printf ("NETDBG SV_RunOneTick forced unpause (paused=%d key_dest=%d)\n",
+				sv.paused, key_dest);
+			MSG_WriteByte (&sv.reliable_datagram, svc_setpause);
+			MSG_WriteByte (&sv.reliable_datagram, sv.paused);
 		}
 	}
 }

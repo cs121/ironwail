@@ -29,6 +29,17 @@ typedef struct
 	qboolean	onground;
 	int		groundent;
 	qboolean	ground_valid;
+	int		ground_valid_reason;
+	float		ground_trace_fraction;
+	float		ground_trace_normal_z;
+	int		ground_trace_ent;
+	int		ground_trace_startsolid;
+	int		ground_trace_allsolid;
+	int		ground_trace_fallback;
+	float		wishspeed;
+	float		wishvel_z;
+	float		cmd_frametime;
+	int		flags;
 	float		ground_delta_len;
 	float		ground_yaw_delta;
 	int		ground_apply_pred;
@@ -70,12 +81,19 @@ static vec3_t cl_pred_angle_error;
 static int cl_pred_steps_this_frame;
 static qboolean cl_pred_server_update_this_frame;
 static cl_pred_ground_debug_t cl_pred_ground_dbg;
+static float cl_pred_last_trace_fraction;
+static float cl_pred_last_trace_normal_z;
+static int cl_pred_last_trace_ent;
+static int cl_pred_last_trace_startsolid;
+static int cl_pred_last_trace_allsolid;
+static int cl_pred_last_trace_fallback;
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
 #define CL_PREDICT_GROUND_EPSILON 2.0f
 #define CL_PREDICT_CORRECTION_THRESHOLD 64.0f
 #define CL_PREDICT_GROUND_STABLE_FRAMES 2
+#define CL_PREDICT_GROUND_KEEP_FRAMES 2
 
 qboolean CL_NetDbg_PredictRan (void)
 {
@@ -159,6 +177,12 @@ static void CL_Predict_InvalidateGroundCache (cl_pred_state_t *state)
 static void CL_Predict_ResetGroundDebug (void)
 {
 	memset (&cl_pred_ground_dbg, 0, sizeof(cl_pred_ground_dbg));
+	cl_pred_last_trace_fraction = 1.0f;
+	cl_pred_last_trace_normal_z = 0.0f;
+	cl_pred_last_trace_ent = 0;
+	cl_pred_last_trace_startsolid = 0;
+	cl_pred_last_trace_allsolid = 0;
+	cl_pred_last_trace_fallback = 0;
 }
 
 static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean trace_onground, int trace_groundent)
@@ -461,6 +485,13 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 
 	trace = CL_Predict_TraceBox (origin, end, mins, maxs, MOVE_NOMONSTERS);
 
+	cl_pred_last_trace_fraction = trace.fraction;
+	cl_pred_last_trace_normal_z = trace.plane.normal[2];
+	cl_pred_last_trace_ent = CL_Predict_TraceEntNum (&trace);
+	cl_pred_last_trace_startsolid = trace.startsolid ? 1 : 0;
+	cl_pred_last_trace_allsolid = trace.allsolid ? 1 : 0;
+	cl_pred_last_trace_fallback = 0;
+
 	if (trace.startsolid || trace.allsolid)
 		return false;
 
@@ -469,6 +500,29 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 		if (groundent)
 			*groundent = CL_Predict_TraceEntNum (&trace);
 		return true;
+	}
+
+	if (trace.fraction == 1.0f)
+	{
+		vec3_t lower_end;
+		trace_t lower_trace;
+
+		VectorCopy (origin, lower_end);
+		lower_end[2] -= (CL_PREDICT_GROUND_EPSILON + 2.0f);
+		lower_trace = CL_Predict_TraceBox (origin, lower_end, mins, maxs, MOVE_NOMONSTERS);
+		if (!lower_trace.startsolid && !lower_trace.allsolid
+			&& lower_trace.fraction < 1.0f && lower_trace.plane.normal[2] > 0.7f)
+		{
+			cl_pred_last_trace_fraction = lower_trace.fraction;
+			cl_pred_last_trace_normal_z = lower_trace.plane.normal[2];
+			cl_pred_last_trace_ent = CL_Predict_TraceEntNum (&lower_trace);
+			cl_pred_last_trace_startsolid = lower_trace.startsolid ? 1 : 0;
+			cl_pred_last_trace_allsolid = lower_trace.allsolid ? 1 : 0;
+			cl_pred_last_trace_fallback = 1;
+			if (groundent)
+				*groundent = CL_Predict_TraceEntNum (&lower_trace);
+			return true;
+		}
 	}
 
 	return false;
@@ -829,6 +883,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	float ground_yaw_delta;
 	qboolean ground_applied;
 	qboolean ground_entity;
+	int ground_reason = CL_GROUND_REASON_OK;
 
 	cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);
@@ -839,11 +894,29 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	if (!state->onground && state->velocity[2] <= 0)
 	{
 		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		if (!trace_onground)
+		{
+			if (cl_pred_last_trace_startsolid || cl_pred_last_trace_allsolid)
+				ground_reason = CL_GROUND_REASON_TRACE_SOLID;
+			else if (cl_pred_last_trace_normal_z <= 0.7f && cl_pred_last_trace_fraction < 1.0f)
+				ground_reason = CL_GROUND_REASON_BAD_PLANE;
+			else
+				ground_reason = CL_GROUND_REASON_TRACE_MISS;
+		}
 		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
 	}
 	else if (state->onground)
 	{
 		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		if (!trace_onground)
+		{
+			if (cl_pred_last_trace_startsolid || cl_pred_last_trace_allsolid)
+				ground_reason = CL_GROUND_REASON_TRACE_SOLID;
+			else if (cl_pred_last_trace_normal_z <= 0.7f && cl_pred_last_trace_fraction < 1.0f)
+				ground_reason = CL_GROUND_REASON_BAD_PLANE;
+			else
+				ground_reason = CL_GROUND_REASON_TRACE_MISS;
+		}
 		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
 	}
 	groundent = state->onground ? state->groundent : 0;
@@ -868,6 +941,13 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		state->ground_valid = false;
 		VectorClear (ground_delta);
 		ground_yaw_delta = 0.0f;
+	}
+	if (!state->ground_valid && state->onground && state->groundent > 0
+		&& state->ground_transition_count < CL_PREDICT_GROUND_KEEP_FRAMES
+		&& ground_reason != CL_GROUND_REASON_TRACE_SOLID)
+	{
+		state->ground_valid = true;
+		ground_reason = CL_GROUND_REASON_OK;
 	}
 	if (cl_netdebug_parse.value && ground_entity && !state->ground_valid)
 	{
@@ -924,6 +1004,15 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 
 	{
 		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		if (!trace_onground && state->onground)
+		{
+			if (cl_pred_last_trace_startsolid || cl_pred_last_trace_allsolid)
+				ground_reason = CL_GROUND_REASON_TRACE_SOLID;
+			else if (cl_pred_last_trace_normal_z <= 0.7f && cl_pred_last_trace_fraction < 1.0f)
+				ground_reason = CL_GROUND_REASON_BAD_PLANE;
+			else
+				ground_reason = CL_GROUND_REASON_TRACE_MISS;
+		}
 		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
 	}
 	groundent = state->onground ? state->groundent : 0;
@@ -935,6 +1024,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		if (state->groundent <= 0)
 		{
 			state->ground_valid = false;
+			ground_reason = CL_GROUND_REASON_INVALID_ENTITY;
 			if (cl_netdebug_parse.value)
 			{
 				Con_Printf ("NETDBG: pred onground without ground entity (post-move)\n");
@@ -949,6 +1039,17 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	cl_pred_ground_dbg.onground = (state->onground && state->groundent > 0 && state->ground_valid);
 	cl_pred_ground_dbg.groundent = state->groundent;
 	cl_pred_ground_dbg.ground_valid = state->ground_valid;
+	cl_pred_ground_dbg.ground_valid_reason = ground_reason;
+	cl_pred_ground_dbg.ground_trace_fraction = cl_pred_last_trace_fraction;
+	cl_pred_ground_dbg.ground_trace_normal_z = cl_pred_last_trace_normal_z;
+	cl_pred_ground_dbg.ground_trace_ent = cl_pred_last_trace_ent;
+	cl_pred_ground_dbg.ground_trace_startsolid = cl_pred_last_trace_startsolid;
+	cl_pred_ground_dbg.ground_trace_allsolid = cl_pred_last_trace_allsolid;
+	cl_pred_ground_dbg.ground_trace_fallback = cl_pred_last_trace_fallback;
+	cl_pred_ground_dbg.wishspeed = wishspeed;
+	cl_pred_ground_dbg.wishvel_z = wishvel[2];
+	cl_pred_ground_dbg.cmd_frametime = dt;
+	cl_pred_ground_dbg.flags = state->onground ? FL_ONGROUND : 0;
 	cl_pred_ground_dbg.ground_delta_len = VectorLength (ground_delta);
 	cl_pred_ground_dbg.ground_yaw_delta = ground_yaw_delta;
 	if (ground_applied)
@@ -1067,10 +1168,21 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
-			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d\n",
+			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d\n",
 				cl_pred_ground_dbg.onground ? 1 : 0,
 				cl_pred_ground_dbg.groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
+				cl_pred_ground_dbg.ground_valid_reason,
+				cl_pred_ground_dbg.ground_trace_fraction,
+				cl_pred_ground_dbg.ground_trace_normal_z,
+				cl_pred_ground_dbg.ground_trace_ent,
+				cl_pred_ground_dbg.ground_trace_startsolid,
+				cl_pred_ground_dbg.ground_trace_allsolid,
+				cl_pred_ground_dbg.ground_trace_fallback,
+				cl_pred_ground_dbg.wishspeed,
+				cl_pred_ground_dbg.wishvel_z,
+				cl_pred_ground_dbg.cmd_frametime,
+				cl_pred_ground_dbg.flags,
 				cl_pred_ground_dbg.ground_delta_len,
 				cl_pred_ground_dbg.ground_yaw_delta,
 				cl_pred_ground_dbg.ground_apply_pred,
@@ -1211,6 +1323,17 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	out->onground = cl_pred_ground_dbg.onground;
 	out->groundent = cl_pred_ground_dbg.groundent;
 	out->ground_valid = cl_pred_ground_dbg.ground_valid;
+	out->ground_valid_reason = cl_pred_ground_dbg.ground_valid_reason;
+	out->ground_trace_fraction = cl_pred_ground_dbg.ground_trace_fraction;
+	out->ground_trace_normal_z = cl_pred_ground_dbg.ground_trace_normal_z;
+	out->ground_trace_ent = cl_pred_ground_dbg.ground_trace_ent;
+	out->ground_trace_startsolid = cl_pred_ground_dbg.ground_trace_startsolid;
+	out->ground_trace_allsolid = cl_pred_ground_dbg.ground_trace_allsolid;
+	out->ground_trace_fallback = cl_pred_ground_dbg.ground_trace_fallback;
+	out->wishspeed = cl_pred_ground_dbg.wishspeed;
+	out->wishvel_z = cl_pred_ground_dbg.wishvel_z;
+	out->cmd_frametime = cl_pred_ground_dbg.cmd_frametime;
+	out->flags = cl_pred_ground_dbg.flags;
 	out->ground_delta_len = cl_pred_ground_dbg.ground_delta_len;
 	out->ground_yaw_delta = cl_pred_ground_dbg.ground_yaw_delta;
 	out->ground_apply_pred = cl_pred_ground_dbg.ground_apply_pred;
