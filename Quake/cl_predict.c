@@ -607,12 +607,14 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 	return false;
 }
 
-static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt, vec3_t out_delta, float *out_yaw_delta)
+static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt_step, vec3_t out_delta, float *out_yaw_delta)
 {
 	entity_t *ent;
 	double msg_dt;
-	float scale;
+	float yaw_raw;
 	int i;
+	vec3_t delta_raw;
+	vec3_t vel;
 
 	VectorClear (out_delta);
 	if (out_yaw_delta)
@@ -633,15 +635,15 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		return false;
 
 	ent = &cl_entities[groundent];
-	scale = (float)(dt / msg_dt);
 	for (i = 0; i < 3; i++)
-		out_delta[i] = (ent->msg_origins[0][i] - ent->msg_origins[1][i]) * scale;
+		delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
+	// TODO: If msg_origins[0] == msg_origins[1] consistently, the server may not be sending pusher samples.
+	VectorScale (delta_raw, (float)(1.0 / msg_dt), vel);
+	VectorScale (vel, dt_step, out_delta);
 
+	yaw_raw = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
 	if (out_yaw_delta)
-	{
-		float yaw_delta = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
-		*out_yaw_delta = yaw_delta * scale;
-	}
+		*out_yaw_delta = yaw_raw * (float)(dt_step / msg_dt);
 
 	return true;
 }
@@ -709,6 +711,27 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		state->ground_valid = true;
 		VectorCopy (delta, state->pred_ground_offset);
 		state->pred_ground_yaw_delta = yaw_delta;
+
+		if (cl_jitter_debug.value > 0.0f && groundent > 0)
+		{
+			entity_t *ent = &cl_entities[groundent];
+			double msg_dt = cl.mtime[0] - cl.mtime[1];
+			vec3_t delta_raw;
+			float yaw_raw = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
+			int i;
+
+			for (i = 0; i < 3; i++)
+				delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
+
+			Con_Printf ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f\n",
+				groundent,
+				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
+				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
+				msg_dt,
+				ent->msg_angles[0][YAW], ent->msg_angles[1][YAW], yaw_raw,
+				delta_raw[0], delta_raw[1], delta_raw[2],
+				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2]);
+		}
 	}
 	else
 	{
@@ -1171,7 +1194,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
 	float cmd_dt;
 	float dt_sub;
-	float hf;
+	float host_dt;
 	float ratio;
 	int substeps;
 	int i;
@@ -1186,11 +1209,13 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 		return;
 
 	cmd_dt = CL_Predict_GetCmdStepTime (cmd);
-	hf = host_frametime;
+	host_dt = host_frametime;
+	if (host_dt <= 0.0f)
+		host_dt = cmd_dt;
 	substeps = 1;
-	if (hf > 0.0f)
+	if (host_dt > 0.0f)
 	{
-		ratio = cmd_dt / hf;
+		ratio = cmd_dt / host_dt;
 		if (ratio > 1.25f)
 			substeps = (int)floorf (ratio + 0.5f);
 	}
@@ -1202,7 +1227,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	if (cl_jitter_debug.value > 0.0f)
 	{
 		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
-			cmd->sequence, cmd_dt, hf, substeps, dt_sub);
+			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub);
 	}
 	for (i = 0; i < substeps; i++)
 		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub);
@@ -1233,7 +1258,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	float teleport_dist = cl_pred_teleport_dist.value;
 	float cmd_dt;
 	float dt_sub;
-	float hf;
+	float host_dt;
 	float ratio;
 	int substeps;
 	int i;
@@ -1433,11 +1458,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			return;
 		}
 		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
-		hf = host_frametime;
+		host_dt = host_frametime;
+		if (host_dt <= 0.0f)
+			host_dt = cmd_dt;
 		substeps = 1;
-		if (hf > 0.0f)
+		if (host_dt > 0.0f)
 		{
-			ratio = cmd_dt / hf;
+			ratio = cmd_dt / host_dt;
 			if (ratio > 1.25f)
 				substeps = (int)floorf (ratio + 0.5f);
 		}
@@ -1449,7 +1476,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (cl_jitter_debug.value > 0.0f)
 		{
 			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
-				cmd.sequence, cmd_dt, hf, substeps, dt_sub);
+				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub);
 		}
 		for (i = 0; i < substeps; i++)
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub);
