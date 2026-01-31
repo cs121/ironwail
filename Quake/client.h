@@ -540,6 +540,15 @@ typedef struct
 	float		ground_yaw_delta;
 	int			ground_apply_pred;
 	int			ground_apply_render;
+	float		pred_accum_time;
+	float		pred_step_dt;
+	int			pred_substeps;
+	int			pred_max_substeps;
+	int			pred_nullcmd;
+	int			pred_angles_normalized;
+	int			pred_apply_pred_reason;
+	int			pred_apply_render_reason;
+	vec3_t		pred_angle_delta_shortest;
 } cl_pred_debug_t;
 
 enum
@@ -549,6 +558,15 @@ enum
 	CL_GROUND_REASON_TRACE_MISS,
 	CL_GROUND_REASON_BAD_PLANE,
 	CL_GROUND_REASON_INVALID_ENTITY,
+};
+
+enum
+{
+	CL_PRED_APPLY_OK = 0,
+	CL_PRED_APPLY_SKIP_DISABLED,
+	CL_PRED_APPLY_SKIP_NO_BASE,
+	CL_PRED_APPLY_SKIP_NO_CMD,
+	CL_PRED_APPLY_SKIP_ACCUM,
 };
 
 extern	kbutton_t	in_mlook, in_klook;
@@ -565,6 +583,8 @@ void CL_SendMove (const usercmd_t *cmd);
 void CL_Predict_Clear (void);
 void CL_Predict_BeginFrame (void);
 void CL_Predict_SetupCmd (usercmd_t *cmd);
+void CL_Predict_SetNullCmdInjected (qboolean injected);
+void CL_Predict_ForceNullCmd (void);
 void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
 void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);

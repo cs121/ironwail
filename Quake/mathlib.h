@@ -131,8 +131,12 @@ int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, struct mplane_s *plane);
 float	anglemod(float a);
 
 float NormalizeAngle (float degrees);
+float NormalizeAngle180 (float degrees);
+float NormalizeAngle360 (float degrees);
 float AngleDifference (float dega, float degb);
+float AngleDeltaShortest (float degfrom, float degto);
 float LerpAngle (float degfrom, float degto, float frac);
+float LerpAngleShortest (float degfrom, float degto, float frac);
 
 void MatrixMultiply(float left[16], float right[16]);
 void RotationMatrix(float matrix[16], float angle, int axis);

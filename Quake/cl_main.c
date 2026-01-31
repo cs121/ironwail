@@ -77,6 +77,10 @@ cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
 cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
 cvar_t	cl_pred_deadzone = {"cl_pred_deadzone", "0.25", CVAR_NONE};
 cvar_t	cl_pred_angle_deadzone = {"cl_pred_angle_deadzone", "0.1", CVAR_NONE};
+cvar_t	cl_pred_substeps = {"cl_pred_substeps", "0", CVAR_ARCHIVE};
+cvar_t	cl_pred_max_substeps = {"cl_pred_max_substeps", "6", CVAR_ARCHIVE};
+cvar_t	cl_pred_step_hz = {"cl_pred_step_hz", "60", CVAR_ARCHIVE};
+cvar_t	cl_pred_accum_debug = {"cl_pred_accum_debug", "0", CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -113,6 +117,7 @@ entity_t		*cl_visedicts[MAX_VISEDICTS];
 
 extern cvar_t	r_lerpmodels, r_lerpmove; //johnfitz
 extern float	host_netinterval;	//Spike
+extern qboolean	con_forcedup;
 
 extern vec3_t	v_punchangles[2];
 extern qboolean	CL_NetDbg_PredictRan (void);
@@ -415,13 +420,7 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 
 static float CL_LerpAngle (float a, float b, float f)
 {
-	float d = b - a;
-
-	while (d > 180.0f)
-		d -= 360.0f;
-	while (d < -180.0f)
-		d += 360.0f;
-	return a + f * d;
+	return LerpAngleShortest (a, b, f);
 }
 
 static double CL_GetInterpDelaySeconds (void)
@@ -476,6 +475,8 @@ static int64_t CL_SecondsToUsec (double seconds)
 	return (int64_t)(seconds * 1000000.0 + 0.5);
 }
 
+static qboolean CL_InputBlocked (void);
+
 void CL_JitterDebug_Log (void)
 {
 	double interp_delay;
@@ -519,20 +520,42 @@ void CL_JitterDebug_Log (void)
 		pred.ground_yaw_delta = 0.0f;
 		pred.ground_apply_pred = 0;
 		pred.ground_apply_render = 0;
+		pred.pred_accum_time = 0.0f;
+		pred.pred_step_dt = 0.0f;
+		pred.pred_substeps = 0;
+		pred.pred_max_substeps = 0;
+		pred.pred_nullcmd = 0;
+		pred.pred_angles_normalized = 0;
+		pred.pred_apply_pred_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+		pred.pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+		VectorClear (pred.pred_angle_delta_shortest);
 	}
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f "
+		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d "
+		"pred_apply_reason %d render_apply_reason %d "
+		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
 		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
 		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
 		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
 		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
 		cl.time, realtime, host_frametime, interp_target, interp_delay,
+		pred.pred_accum_time,
+		pred.pred_step_dt,
+		pred.pred_substeps,
+		pred.pred_max_substeps,
+		pred.pred_nullcmd,
+		pred.pred_angles_normalized,
+		pred.pred_apply_pred_reason,
+		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
 		pred.prediction_steps,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
+		pred.pred_angle_delta_shortest[0],
+		pred.pred_angle_delta_shortest[1],
+		pred.pred_angle_delta_shortest[2],
 		pred.onground ? 1 : 0,
 		pred.groundent,
 		pred.ground_valid ? 1 : 0,
@@ -1465,7 +1488,7 @@ void CL_RelinkEntities (void)
 {
 	entity_t	*ent;
 	int			i, j;
-	float		frac, f, d;
+	float		frac, f;
 	vec3_t		delta;
 	float		bobjrotate;
 	dlight_t	*dl;
@@ -1491,12 +1514,7 @@ void CL_RelinkEntities (void)
 	// interpolate the angles
 		for (j=0 ; j<3 ; j++)
 		{
-			d = cl.mviewangles[0][j] - cl.mviewangles[1][j];
-			if (d > 180)
-				d -= 360;
-			else if (d < -180)
-				d += 360;
-			cl.viewangles[j] = cl.mviewangles[1][j] + frac*d;
+			cl.viewangles[j] = LerpAngleShortest (cl.mviewangles[1][j], cl.mviewangles[0][j], frac);
 		}
 	}
 
@@ -1603,12 +1621,7 @@ void CL_RelinkEntities (void)
 			{
 				ent->origin[j] = ent->msg_origins[1][j] + f*delta[j];
 
-				d = ent->msg_angles[0][j] - ent->msg_angles[1][j];
-				if (d > 180)
-					d -= 360;
-				else if (d < -180)
-					d += 360;
-				ent->angles[j] = ent->msg_angles[1][j] + f*d;
+				ent->angles[j] = LerpAngleShortest (ent->msg_angles[1][j], ent->msg_angles[0][j], f);
 			}
 		}
 
@@ -1888,6 +1901,10 @@ void CL_AccumulateCmd (void)
 		//accumulate movement from other devices
 		IN_Move (&cl.pendingcmd);
 	}
+	if (CL_InputBlocked ())
+		// Force prediction to stop immediately when UI/console owns input.
+		CL_Predict_ForceNullCmd ();
+	CL_Predict_Reapply ();
 }
 
 /*
@@ -1895,6 +1912,11 @@ void CL_AccumulateCmd (void)
 CL_SendCmd
 =================
 */
+static qboolean CL_InputBlocked (void)
+{
+	return key_dest != key_game || con_forcedup;
+}
+
 void CL_SendCmd (void)
 {
 	usercmd_t		cmd;
@@ -1944,13 +1966,29 @@ void CL_SendCmd (void)
 			cmd.sidemove	+= cl.pendingcmd.sidemove;
 			cmd.upmove		+= cl.pendingcmd.upmove;
 
-			VectorCopy (cl.viewangles, cmd.viewangles);
+			{
+				int axis;
+
+				VectorCopy (cl.viewangles, cmd.viewangles);
+				for (axis = 0; axis < 3; axis++)
+					cmd.viewangles[axis] = NormalizeAngle180 (cmd.viewangles[axis]);
+			}
 			cmd.buttons = 0;
 			if ( in_attack.state & 3 )
 				cmd.buttons |= 1;
 			if (in_jump.state & 3)
 				cmd.buttons |= 2;
 			cmd.impulse = in_impulse;
+			if (CL_InputBlocked ())
+			{
+				// If UI/console owns input, ensure we send a null command to stop movement.
+				cmd.forwardmove = 0;
+				cmd.sidemove = 0;
+				cmd.upmove = 0;
+				cmd.buttons = 0;
+				cmd.impulse = 0;
+				CL_Predict_SetNullCmdInjected (true);
+			}
 
 			// NOTE: Never gate command generation/sending on snapshot readiness.
 			// Prediction handles world-ready checks; the server still needs cmds every tick.
@@ -2233,6 +2271,10 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_pred_teleport_dist);
 	Cvar_RegisterVariable (&cl_pred_deadzone);
 	Cvar_RegisterVariable (&cl_pred_angle_deadzone);
+	Cvar_RegisterVariable (&cl_pred_substeps);
+	Cvar_RegisterVariable (&cl_pred_max_substeps);
+	Cvar_RegisterVariable (&cl_pred_step_hz);
+	Cvar_RegisterVariable (&cl_pred_accum_debug);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

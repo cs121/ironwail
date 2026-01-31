@@ -14,6 +14,10 @@ extern cvar_t cl_predict;
 extern cvar_t cl_cmdrate;
 extern cvar_t cl_physrate;
 extern cvar_t cl_jitter_debug;
+extern cvar_t cl_pred_substeps;
+extern cvar_t cl_pred_max_substeps;
+extern cvar_t cl_pred_step_hz;
+extern cvar_t cl_pred_accum_debug;
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
 
@@ -91,6 +95,15 @@ static int cl_pred_last_trace_ent;
 static int cl_pred_last_trace_startsolid;
 static int cl_pred_last_trace_allsolid;
 static int cl_pred_last_trace_fallback;
+static double cl_pred_render_accum;
+static usercmd_t cl_pred_render_cmd;
+static qboolean cl_pred_render_cmd_valid;
+static int cl_pred_last_substeps;
+static float cl_pred_last_substep_dt;
+static int cl_pred_nullcmd_injected;
+static int cl_pred_angles_normalized;
+static int cl_pred_apply_pred_reason;
+static int cl_pred_apply_render_reason;
 
 static float CL_Predict_GetStepTime (void);
 
@@ -199,6 +212,23 @@ static void CL_Predict_ResetGroundDebug (void)
 	cl_pred_last_trace_startsolid = 0;
 	cl_pred_last_trace_allsolid = 0;
 	cl_pred_last_trace_fallback = 0;
+}
+
+void CL_Predict_SetNullCmdInjected (qboolean injected)
+{
+	cl_pred_nullcmd_injected = injected ? 1 : 0;
+}
+
+void CL_Predict_ForceNullCmd (void)
+{
+	if (!cl_pred_render_cmd_valid)
+		return;
+
+	cl_pred_render_cmd.forwardmove = 0;
+	cl_pred_render_cmd.sidemove = 0;
+	cl_pred_render_cmd.upmove = 0;
+	cl_pred_render_cmd.buttons = 0;
+	cl_pred_render_cmd.impulse = 0;
 }
 
 static float CL_Predict_GetCmdStepTime (const usercmd_t *cmd)
@@ -332,15 +362,59 @@ static float CL_Predict_GetStepTime (void)
 	return (float)cmd_dt;
 }
 
+static void CL_Predict_GetSubstepInfo (float cmd_dt, float host_dt, int *substeps, float *dt_sub)
+{
+	int steps = 1;
+	float dt = cmd_dt;
+
+	if (cl_pred_substeps.value > 0.0f)
+	{
+		// Fixed-step substepping for client prediction.
+		float step_hz = cl_pred_step_hz.value > 0.0f ? cl_pred_step_hz.value : 60.0f;
+		float step_dt = step_hz > 0.0f ? (1.0f / step_hz) : cmd_dt;
+		int max_steps = (int)cl_pred_max_substeps.value;
+
+		if (step_dt <= 0.0f)
+			step_dt = cmd_dt;
+		steps = (int)ceilf (cmd_dt / step_dt);
+		if (steps < 1)
+			steps = 1;
+		if (max_steps < 1)
+			max_steps = 1;
+		if (steps > max_steps)
+			steps = max_steps;
+		dt = cmd_dt / (float)steps;
+	}
+	else
+	{
+		float ratio;
+
+		if (host_dt < 0.001f || host_dt > 0.1f)
+			host_dt = cmd_dt;
+		if (host_dt > 0.0f)
+		{
+			ratio = cmd_dt / host_dt;
+			if (ratio > 1.25f)
+				steps = (int)floorf (ratio + 0.5f);
+		}
+		if (steps < 1)
+			steps = 1;
+		if (steps > 4)
+			steps = 4;
+		dt = cmd_dt / (float)steps;
+	}
+
+	if (substeps)
+		*substeps = steps;
+	if (dt_sub)
+		*dt_sub = dt;
+	cl_pred_last_substeps = steps;
+	cl_pred_last_substep_dt = dt;
+}
+
 static float CL_Predict_AngleDelta (float a, float b)
 {
-	float d = a - b;
-
-	while (d > 180.0f)
-		d -= 360.0f;
-	while (d < -180.0f)
-		d += 360.0f;
-	return d;
+	return AngleDeltaShortest (b, a);
 }
 
 static qboolean CL_Predict_IsEnabled (void)
@@ -369,9 +443,14 @@ static void CL_Predict_ApplyToClient (void)
 	float decay;
 	vec3_t correction;
 	vec3_t angle_correction;
+	cl_pred_state_t render_state;
+	const cl_pred_state_t *state = &cl_pred.predicted;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
+	{
+		cl_pred_apply_pred_reason = !CL_Predict_IsEnabled () ? CL_PRED_APPLY_SKIP_DISABLED : CL_PRED_APPLY_SKIP_NO_BASE;
 		return;
+	}
 
 	if (cl_netdebug_parse.value && !cl_pred_warned_no_snapshot
 		&& (!cl.has_full_snapshot || !cl.snapshot_present || cl.mtime[0] <= 0.0))
@@ -390,16 +469,32 @@ static void CL_Predict_ApplyToClient (void)
 		VectorClear (cl_pred_angle_error);
 	}
 
-	VectorAdd (cl_pred.predicted.origin, cl_pred_error, smooth_origin);
-	VectorAdd (cl_pred.predicted.viewangles, cl_pred_angle_error, smooth_angles);
+	if (cl_pred_substeps.value > 0.0f && cl_pred_render_cmd_valid && cl_pred_render_accum > 0.0)
+	{
+		float render_dt = (float)cl_pred_render_accum;
+		float cmd_dt = CL_Predict_GetCmdStepTime (&cl_pred_render_cmd);
+
+		if (cmd_dt > 0.0f && render_dt > cmd_dt)
+			render_dt = cmd_dt;
+		render_state = cl_pred.predicted;
+		// Render-only substep to avoid frame holds between command ticks.
+		CL_Predict_SimulateCmd (&render_state, &cl_pred_render_cmd, render_dt, true);
+		state = &render_state;
+	}
+
+	VectorAdd (state->origin, cl_pred_error, smooth_origin);
+	VectorAdd (state->viewangles, cl_pred_angle_error, smooth_angles);
+	smooth_angles[0] = NormalizeAngle180 (smooth_angles[0]);
+	smooth_angles[1] = NormalizeAngle180 (smooth_angles[1]);
+	smooth_angles[2] = NormalizeAngle180 (smooth_angles[2]);
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[1]);
 	VectorCopy (smooth_angles, cl.viewangles);
-	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[0]);
-	VectorCopy (cl_pred.predicted.velocity, cl.mvelocity[1]);
-	cl.onground = cl_pred.predicted.onground;
+	VectorCopy (state->velocity, cl.mvelocity[0]);
+	VectorCopy (state->velocity, cl.mvelocity[1]);
+	cl.onground = state->onground;
 
 	if (smooth_ms > 0.0f)
 	{
@@ -417,6 +512,7 @@ static void CL_Predict_ApplyToClient (void)
 	}
 
 	CL_EnsureViewEntityOrigin ("predict");
+	cl_pred_apply_render_reason = CL_PRED_APPLY_OK;
 }
 
 static void CL_Predict_Friction (vec3_t velocity, float dt)
@@ -968,7 +1064,7 @@ static void CL_Predict_StepSlideMove (cl_pred_state_t *state, const vec3_t mins,
 	}
 }
 
-static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt)
+static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render)
 {
 	vec3_t forward, right, up;
 	vec3_t wishvel, wishdir;
@@ -981,7 +1077,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	qboolean ground_entity;
 	int ground_reason = CL_GROUND_REASON_OK;
 
-	cl_pred_steps_this_frame++;
+	if (!is_render)
+		cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);
 	VectorClear (ground_delta);
 	ground_yaw_delta = 0.0f;
@@ -1149,7 +1246,12 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	cl_pred_ground_dbg.ground_delta_len = VectorLength (ground_delta);
 	cl_pred_ground_dbg.ground_yaw_delta = ground_yaw_delta;
 	if (ground_applied)
-		cl_pred_ground_dbg.ground_apply_pred++;
+	{
+		if (is_render)
+			cl_pred_ground_dbg.ground_apply_render++;
+		else
+			cl_pred_ground_dbg.ground_apply_pred++;
+	}
 }
 
 void CL_Predict_Clear (void)
@@ -1164,6 +1266,14 @@ void CL_Predict_Clear (void)
 	cl_pred_server_update_this_frame = false;
 	cl_pred_prev_enabled = false;
 	CL_Predict_ResetGroundDebug ();
+	cl_pred_render_accum = 0.0;
+	cl_pred_render_cmd_valid = false;
+	cl_pred_last_substeps = 0;
+	cl_pred_last_substep_dt = 0.0f;
+	cl_pred_nullcmd_injected = 0;
+	cl_pred_angles_normalized = 0;
+	cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
+	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
 }
 
 void CL_Predict_ResetGround (void)
@@ -1183,11 +1293,58 @@ void CL_Predict_BeginFrame (void)
 	cl_pred_steps_this_frame = 0;
 	cl_pred_server_update_this_frame = false;
 	CL_Predict_ResetGroundDebug ();
+	cl_pred_nullcmd_injected = 0;
+	cl_pred_angles_normalized = 0;
 
 	enabled = CL_Predict_IsEnabled ();
 	if (enabled && !cl_pred_prev_enabled && cl_pred.has_base)
 		CL_Predict_HardResetToBase ("predict reenabled");
 	cl_pred_prev_enabled = enabled;
+
+	if (enabled && cl_pred_render_cmd_valid)
+	{
+		float cmd_dt = CL_Predict_GetCmdStepTime (&cl_pred_render_cmd);
+		float max_accum = cmd_dt;
+		if (cl_pred_substeps.value > 0.0f)
+		{
+			float step_hz = cl_pred_step_hz.value > 0.0f ? cl_pred_step_hz.value : 60.0f;
+			float step_dt = step_hz > 0.0f ? (1.0f / step_hz) : cmd_dt;
+			int max_steps = (int)cl_pred_max_substeps.value;
+
+			if (max_steps < 1)
+				max_steps = 1;
+			max_accum = step_dt * (float)max_steps;
+		}
+		cl_pred_render_accum += host_frametime;
+		if (cl_pred_render_accum < 0.0)
+			cl_pred_render_accum = 0.0;
+		if (max_accum > 0.0f && cl_pred_render_accum > max_accum)
+			cl_pred_render_accum = max_accum;
+	}
+	else
+	{
+		cl_pred_render_accum = 0.0;
+	}
+
+	if (cl_pred_accum_debug.value > 0.0f)
+	{
+		Con_Printf ("PREDACCUM dt %.4f accum %.4f step_dt %.4f\n",
+			host_frametime, cl_pred_render_accum, cl_pred_last_substep_dt);
+	}
+
+	if (!enabled)
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
+	else if (!cl_pred.has_base)
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+	else
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_ACCUM;
+
+	if (!enabled)
+		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
+	else if (!cl_pred.has_base)
+		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+	else
+		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_ACCUM;
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
@@ -1195,7 +1352,6 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	float cmd_dt;
 	float dt_sub;
 	float host_dt;
-	float ratio;
 	int substeps;
 	int i;
 
@@ -1204,34 +1360,26 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
 	cl_pred.cmds[cmd->sequence % CMD_RING] = *cmd;
+	cl_pred_angles_normalized = 1;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
 	cmd_dt = CL_Predict_GetCmdStepTime (cmd);
 	host_dt = host_frametime;
-	if (host_dt < 0.001f || host_dt > 0.1f)
-		host_dt = cmd_dt;
-	substeps = 1;
-	if (host_dt > 0.0f)
-	{
-		ratio = cmd_dt / host_dt;
-		if (ratio > 1.25f)
-			substeps = (int)floorf (ratio + 0.5f);
-	}
-	if (substeps < 1)
-		substeps = 1;
-	if (substeps > 4)
-		substeps = 4;
-	dt_sub = cmd_dt / (float)substeps;
+	CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 	if (cl_jitter_debug.value > 0.0f)
 	{
 		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
 			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub);
 	}
 	for (i = 0; i < substeps; i++)
-		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub);
+		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub, false);
 	CL_Predict_DebugLogCmd ("setup", cmd, cmd_dt);
+	cl_pred_render_cmd = *cmd;
+	cl_pred_render_cmd_valid = true;
+	cl_pred_render_accum = 0.0;
+	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient ();
 	cl_netdbg_predict_ran = true;
 }
@@ -1259,15 +1407,17 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	float cmd_dt;
 	float dt_sub;
 	float host_dt;
-	float ratio;
 	int substeps;
 	int i;
 	int prev_pred_ground_ent = 0;
 	vec3_t prev_pred_ground_offset;
 	float prev_pred_ground_yaw_delta = 0.0f;
 	qboolean had_base;
+	qboolean resim_cmd_valid = false;
+	usercmd_t resim_cmd;
 
 	CL_Predict_RegisterDebugCvars ();
+	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
 
@@ -1360,7 +1510,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (velocity, cl_pred.base.velocity);
-	VectorCopy (viewangles, cl_pred.base.viewangles);
+	cl_pred.base.viewangles[0] = NormalizeAngle180 (viewangles[0]);
+	cl_pred.base.viewangles[1] = NormalizeAngle180 (viewangles[1]);
+	cl_pred.base.viewangles[2] = NormalizeAngle180 (viewangles[2]);
 	cl_pred.base.onground = onground;
 	cl_pred.predicted = cl_pred.base;
 	cl_pred.has_base = true;
@@ -1459,37 +1611,40 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
 		host_dt = host_frametime;
-		if (host_dt < 0.001f || host_dt > 0.1f)
-			host_dt = cmd_dt;
-		substeps = 1;
-		if (host_dt > 0.0f)
-		{
-			ratio = cmd_dt / host_dt;
-			if (ratio > 1.25f)
-				substeps = (int)floorf (ratio + 0.5f);
-		}
-		if (substeps < 1)
-			substeps = 1;
-		if (substeps > 4)
-			substeps = 4;
-		dt_sub = cmd_dt / (float)substeps;
+		CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 		if (cl_jitter_debug.value > 0.0f)
 		{
 			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
 				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub);
 		}
 		for (i = 0; i < substeps; i++)
-			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub);
+			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub, false);
+		resim_cmd = cmd;
+		resim_cmd_valid = true;
 		CL_Predict_DebugLogCmd ("resim", &cmd, cmd_dt);
 	}
 
+	if (resim_cmd_valid)
+	{
+		cl_pred_render_cmd = resim_cmd;
+		cl_pred_render_cmd_valid = true;
+		cl_pred_render_accum = 0.0;
+	}
+	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient ();
 }
 
 void CL_Predict_Reapply (void)
 {
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
+	{
+		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
+		if (cl_pred.has_base && !CL_Predict_IsEnabled ())
+			cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
+		else if (!cl_pred.has_base)
+			cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_BASE;
 		return;
+	}
 
 	CL_Predict_ApplyToClient ();
 }
@@ -1524,6 +1679,14 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	out->ground_yaw_delta = cl_pred_ground_dbg.ground_yaw_delta;
 	out->ground_apply_pred = cl_pred_ground_dbg.ground_apply_pred;
 	out->ground_apply_render = cl_pred_ground_dbg.ground_apply_render;
+	out->pred_accum_time = (float)cl_pred_render_accum;
+	out->pred_step_dt = cl_pred_last_substep_dt;
+	out->pred_substeps = cl_pred_last_substeps;
+	out->pred_max_substeps = (int)cl_pred_max_substeps.value;
+	out->pred_nullcmd = cl_pred_nullcmd_injected;
+	out->pred_angles_normalized = cl_pred_angles_normalized;
+	out->pred_apply_pred_reason = cl_pred_apply_pred_reason;
+	out->pred_apply_render_reason = cl_pred_apply_render_reason;
 
 	if (!cl_pred.has_base)
 		return false;
@@ -1532,5 +1695,8 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	VectorCopy (cl_pred.base.viewangles, out->base_angles);
 	VectorCopy (cl_pred.predicted.origin, out->predicted_origin);
 	VectorCopy (cl_pred.predicted.viewangles, out->predicted_angles);
+	out->pred_angle_delta_shortest[0] = AngleDeltaShortest (cl_pred.base.viewangles[0], cl_pred.predicted.viewangles[0]);
+	out->pred_angle_delta_shortest[1] = AngleDeltaShortest (cl_pred.base.viewangles[1], cl_pred.predicted.viewangles[1]);
+	out->pred_angle_delta_shortest[2] = AngleDeltaShortest (cl_pred.base.viewangles[2], cl_pred.predicted.viewangles[2]);
 	return true;
 }
