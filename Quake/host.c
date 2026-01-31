@@ -1009,12 +1009,29 @@ static void Host_CheckAutosave (void)
 
 	if (!sv_player)
 	{
-		Con_Printf ("NETDBG sv_player NULL cl %d reason autosave\n", SV_CurrentClientIndex ());
-		SV_PlayerNullTrap (__func__, 0);
+		Con_Printf ("NETDBG autosave skipped: sv_player NULL cl %d\n", SV_CurrentClientIndex ());
 		return;
 	}
 
-	if (!sv_autosave.value || sv_autosave_interval.value <= 0.f || svs.maxclients != 1 || sv_player->v.health <= 0.f || cl.intermission)
+	if (cls.state != ca_connected)
+	{
+		Con_Printf ("NETDBG autosave skipped: cls.state %d\n", cls.state);
+		return;
+	}
+
+	if (cls.signon != SIGNONS)
+	{
+		Con_Printf ("NETDBG autosave skipped: signon %d\n", cls.signon);
+		return;
+	}
+
+	if (cl.intermission)
+	{
+		Con_Printf ("NETDBG autosave skipped: intermission\n");
+		return;
+	}
+
+	if (!sv_autosave.value || sv_autosave_interval.value <= 0.f || svs.maxclients != 1 || sv_player->v.health <= 0.f)
 		return;
 
 	if (cls.signon == SIGNONS)
