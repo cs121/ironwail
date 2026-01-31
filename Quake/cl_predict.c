@@ -95,7 +95,6 @@ static int cl_pred_last_trace_ent;
 static int cl_pred_last_trace_startsolid;
 static int cl_pred_last_trace_allsolid;
 static int cl_pred_last_trace_fallback;
-static double cl_pred_render_accum;
 static usercmd_t cl_pred_render_cmd;
 static qboolean cl_pred_render_cmd_valid;
 static int cl_pred_last_substeps;
@@ -104,6 +103,8 @@ static int cl_pred_nullcmd_injected;
 static int cl_pred_angles_normalized;
 static int cl_pred_apply_pred_reason;
 static int cl_pred_apply_render_reason;
+static double cl_pred_frame_accum;
+static float cl_pred_frame_dt_last;
 
 static float CL_Predict_GetStepTime (void);
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
@@ -413,6 +414,69 @@ static void CL_Predict_GetSubstepInfo (float cmd_dt, float host_dt, int *substep
 	cl_pred_last_substep_dt = dt;
 }
 
+static float CL_Predict_GetFrameStepTime (float frame_dt)
+{
+	float step_dt = frame_dt;
+
+	if (cl_pred_step_hz.value > 0.0f)
+	{
+		float step_hz = cl_pred_step_hz.value;
+
+		step_dt = step_hz > 0.0f ? (1.0f / step_hz) : frame_dt;
+	}
+	if (step_dt <= 0.0f)
+		step_dt = frame_dt;
+	return step_dt;
+}
+
+static void CL_Predict_RunFrameSteps (void)
+{
+	usercmd_t cmd;
+	float step_dt;
+	float dt;
+	int max_steps;
+	int steps = 0;
+
+	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
+		return;
+	if (cl_pred_frame_accum <= 0.0)
+		return;
+
+	if (cl_pred_render_cmd_valid)
+	{
+		cmd = cl_pred_render_cmd;
+	}
+	else
+	{
+		memset (&cmd, 0, sizeof(cmd));
+		VectorCopy (cl_pred.predicted.viewangles, cmd.viewangles);
+	}
+
+	step_dt = CL_Predict_GetFrameStepTime (cl_pred_frame_dt_last);
+	if (step_dt <= 0.0f)
+		step_dt = (float)cl_pred_frame_accum;
+	max_steps = (int)cl_pred_max_substeps.value;
+	if (max_steps < 1)
+		max_steps = 1;
+
+	while (cl_pred_frame_accum > 0.0 && steps < max_steps)
+	{
+		dt = step_dt;
+		if (cl_pred_frame_accum < dt)
+			dt = (float)cl_pred_frame_accum;
+		if (dt <= 0.0f)
+			break;
+		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt, false);
+		cl_pred_frame_accum -= dt;
+		steps++;
+	}
+
+	cl_pred_last_substeps = steps;
+	cl_pred_last_substep_dt = step_dt;
+	if (cl_pred_frame_accum < 0.0)
+		cl_pred_frame_accum = 0.0;
+}
+
 static float CL_Predict_AngleDelta (float a, float b)
 {
 	return AngleDeltaShortest (b, a);
@@ -444,7 +508,6 @@ static void CL_Predict_ApplyToClient (void)
 	float decay;
 	vec3_t correction;
 	vec3_t angle_correction;
-	cl_pred_state_t render_state;
 	const cl_pred_state_t *state = &cl_pred.predicted;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
@@ -468,19 +531,6 @@ static void CL_Predict_ApplyToClient (void)
 	{
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
-	}
-
-	if (cl_pred_substeps.value > 0.0f && cl_pred_render_cmd_valid && cl_pred_render_accum > 0.0)
-	{
-		float render_dt = (float)cl_pred_render_accum;
-		float cmd_dt = CL_Predict_GetCmdStepTime (&cl_pred_render_cmd);
-
-		if (cmd_dt > 0.0f && render_dt > cmd_dt)
-			render_dt = cmd_dt;
-		render_state = cl_pred.predicted;
-		// Render-only substep to avoid frame holds between command ticks.
-		CL_Predict_SimulateCmd (&render_state, &cl_pred_render_cmd, render_dt, true);
-		state = &render_state;
 	}
 
 	VectorAdd (state->origin, cl_pred_error, smooth_origin);
@@ -1268,7 +1318,6 @@ void CL_Predict_Clear (void)
 	cl_pred_server_update_this_frame = false;
 	cl_pred_prev_enabled = false;
 	CL_Predict_ResetGroundDebug ();
-	cl_pred_render_accum = 0.0;
 	cl_pred_render_cmd_valid = false;
 	cl_pred_last_substeps = 0;
 	cl_pred_last_substep_dt = 0.0f;
@@ -1276,6 +1325,8 @@ void CL_Predict_Clear (void)
 	cl_pred_angles_normalized = 0;
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
+	cl_pred_frame_accum = 0.0;
+	cl_pred_frame_dt_last = 0.0f;
 }
 
 void CL_Predict_ResetGround (void)
@@ -1305,33 +1356,33 @@ void CL_Predict_BeginFrame (void)
 
 	if (enabled && cl_pred_render_cmd_valid)
 	{
-		float cmd_dt = CL_Predict_GetCmdStepTime (&cl_pred_render_cmd);
-		float max_accum = cmd_dt;
-		if (cl_pred_substeps.value > 0.0f)
-		{
-			float step_hz = cl_pred_step_hz.value > 0.0f ? cl_pred_step_hz.value : 60.0f;
-			float step_dt = step_hz > 0.0f ? (1.0f / step_hz) : cmd_dt;
-			int max_steps = (int)cl_pred_max_substeps.value;
+		float frame_dt = (float)(host_rawframetime > 0.0 ? host_rawframetime : host_frametime);
+		float max_accum;
+		float step_dt;
+		int max_steps;
 
-			if (max_steps < 1)
-				max_steps = 1;
-			max_accum = step_dt * (float)max_steps;
-		}
-		cl_pred_render_accum += host_frametime;
-		if (cl_pred_render_accum < 0.0)
-			cl_pred_render_accum = 0.0;
-		if (max_accum > 0.0f && cl_pred_render_accum > max_accum)
-			cl_pred_render_accum = max_accum;
+		step_dt = CL_Predict_GetFrameStepTime (frame_dt);
+		max_steps = (int)cl_pred_max_substeps.value;
+		if (max_steps < 1)
+			max_steps = 1;
+		max_accum = step_dt * (float)max_steps;
+		cl_pred_frame_accum += frame_dt;
+		cl_pred_frame_dt_last = frame_dt;
+		if (cl_pred_frame_accum < 0.0)
+			cl_pred_frame_accum = 0.0;
+		if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
+			cl_pred_frame_accum = max_accum;
 	}
 	else
 	{
-		cl_pred_render_accum = 0.0;
+		cl_pred_frame_accum = 0.0;
+		cl_pred_frame_dt_last = 0.0f;
 	}
 
 	if (cl_pred_accum_debug.value > 0.0f)
 	{
 		Con_Printf ("PREDACCUM dt %.4f accum %.4f step_dt %.4f\n",
-			host_frametime, cl_pred_render_accum, cl_pred_last_substep_dt);
+			host_frametime, cl_pred_frame_accum, cl_pred_last_substep_dt);
 	}
 
 	if (!enabled)
@@ -1355,7 +1406,6 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	float dt_sub;
 	float host_dt;
 	int substeps;
-	int i;
 
 	CL_Predict_RegisterDebugCvars ();
 	cl_netdbg_predict_ran = false;
@@ -1368,19 +1418,16 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 		return;
 
 	cmd_dt = CL_Predict_GetCmdStepTime (cmd);
-	host_dt = host_frametime;
-	CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 	if (cl_jitter_debug.value > 0.0f)
 	{
+		host_dt = host_frametime;
+		CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
 			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 	}
-	for (i = 0; i < substeps; i++)
-		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub, false);
 	CL_Predict_DebugLogCmd ("setup", cmd, cmd_dt);
 	cl_pred_render_cmd = *cmd;
 	cl_pred_render_cmd_valid = true;
-	cl_pred_render_accum = 0.0;
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient ();
 	cl_netdbg_predict_ran = true;
@@ -1631,7 +1678,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	{
 		cl_pred_render_cmd = resim_cmd;
 		cl_pred_render_cmd_valid = true;
-		cl_pred_render_accum = 0.0;
 	}
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient ();
@@ -1649,6 +1695,7 @@ void CL_Predict_Reapply (void)
 		return;
 	}
 
+	CL_Predict_RunFrameSteps ();
 	CL_Predict_ApplyToClient ();
 }
 
@@ -1682,7 +1729,7 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	out->ground_yaw_delta = cl_pred_ground_dbg.ground_yaw_delta;
 	out->ground_apply_pred = cl_pred_ground_dbg.ground_apply_pred;
 	out->ground_apply_render = cl_pred_ground_dbg.ground_apply_render;
-	out->pred_accum_time = (float)cl_pred_render_accum;
+	out->pred_accum_time = (float)cl_pred_frame_accum;
 	out->pred_step_dt = cl_pred_last_substep_dt;
 	out->pred_substeps = cl_pred_last_substeps;
 	out->pred_max_substeps = (int)cl_pred_max_substeps.value;
