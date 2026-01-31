@@ -43,6 +43,8 @@ typedef struct
 	qboolean	onground;
 	int		groundent;
 	qboolean	ground_valid;
+	int		ground_transition_count;
+	qboolean	ground_transition_state;
 	int		pred_ground_ent;
 	vec3_t		pred_ground_offset;
 	float		pred_ground_yaw_delta;
@@ -62,6 +64,7 @@ typedef struct
 static cl_pred_t cl_pred;
 static qboolean cl_netdbg_predict_ran;
 static qboolean cl_pred_warned_solid;
+static qboolean cl_pred_warned_no_snapshot;
 static vec3_t cl_pred_error;
 static vec3_t cl_pred_angle_error;
 static int cl_pred_steps_this_frame;
@@ -72,6 +75,7 @@ static cl_pred_ground_debug_t cl_pred_ground_dbg;
 #define CL_PREDICT_STEP_SIZE 18.0f
 #define CL_PREDICT_GROUND_EPSILON 2.0f
 #define CL_PREDICT_CORRECTION_THRESHOLD 64.0f
+#define CL_PREDICT_GROUND_STABLE_FRAMES 2
 
 qboolean CL_NetDbg_PredictRan (void)
 {
@@ -127,6 +131,8 @@ static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
 
 	state->groundent = 0;
 	state->ground_valid = false;
+	state->ground_transition_count = 0;
+	state->ground_transition_state = false;
 	state->pred_ground_ent = 0;
 	VectorClear (state->pred_ground_offset);
 	state->pred_ground_yaw_delta = 0.0f;
@@ -153,6 +159,49 @@ static void CL_Predict_InvalidateGroundCache (cl_pred_state_t *state)
 static void CL_Predict_ResetGroundDebug (void)
 {
 	memset (&cl_pred_ground_dbg, 0, sizeof(cl_pred_ground_dbg));
+}
+
+static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean trace_onground, int trace_groundent)
+{
+	if (!state)
+		return;
+
+	if (trace_onground == state->onground)
+	{
+		state->ground_transition_count = 0;
+		state->ground_transition_state = state->onground;
+		if (trace_onground)
+			state->groundent = trace_groundent;
+		return;
+	}
+
+	if (trace_onground)
+	{
+		// Accept onground transitions immediately; trace normal check already enforces safe planes.
+		state->onground = true;
+		state->groundent = trace_groundent;
+		state->ground_transition_count = 0;
+		state->ground_transition_state = state->onground;
+		return;
+	}
+
+	// Leaving ground requires a brief stable window to avoid flapping.
+	if (state->ground_transition_state != trace_onground)
+	{
+		state->ground_transition_state = trace_onground;
+		state->ground_transition_count = 1;
+	}
+	else
+	{
+		state->ground_transition_count++;
+	}
+
+	if (state->ground_transition_count >= CL_PREDICT_GROUND_STABLE_FRAMES)
+	{
+		state->onground = false;
+		state->groundent = 0;
+		state->ground_transition_count = 0;
+	}
 }
 
 static qboolean CL_Predict_IsGroundEntityValid (int groundent)
@@ -220,6 +269,16 @@ static void CL_Predict_ApplyToClient (void)
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
+
+	if (cl_netdebug_parse.value && !cl_pred_warned_no_snapshot
+		&& (!cl.has_full_snapshot || !cl.snapshot_present || cl.mtime[0] <= 0.0))
+	{
+		Con_Printf ("NETDBG: prediction apply without valid snapshot (full %d present %d mtime %.3f)\n",
+			cl.has_full_snapshot ? 1 : 0,
+			cl.snapshot_present ? 1 : 0,
+			cl.mtime[0]);
+		cl_pred_warned_no_snapshot = true;
+	}
 
 	smooth_ms = cl_pred_smooth_ms.value;
 	if (smooth_ms <= 0.0f)
@@ -498,6 +557,13 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 
 	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
+		if (cl_netdebug_parse.value)
+		{
+			Con_Printf ("NETDBG: pred groundent invalid ent=%d full=%d mtime=%.3f\n",
+				groundent, cl.has_full_snapshot ? 1 : 0, cl.mtime[0]);
+		}
+		if (groundent <= 0 || groundent >= cl_max_edicts)
+			SDL_assert (!"prediction groundent out of range");
 		CL_Predict_ResetGroundCache (state);
 		goto done;
 	}
@@ -771,9 +837,16 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	ground_applied = false;
 
 	if (!state->onground && state->velocity[2] <= 0)
-		state->onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+	{
+		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+	}
 	else if (state->onground)
-		CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+	{
+		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+	}
+	groundent = state->onground ? state->groundent : 0;
 
 	if (state->onground && groundent == 0 && cl_netdebug_parse.value)
 	{
@@ -849,13 +922,16 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	else
 		CL_Predict_SlideMove (state, mins, maxs, dt);
 
-	state->onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+	{
+		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+	}
+	groundent = state->onground ? state->groundent : 0;
 	if (state->onground && state->velocity[2] < 0)
 		state->velocity[2] = 0;
 
 	if (state->onground)
 	{
-		state->groundent = groundent;
 		if (state->groundent <= 0)
 		{
 			state->ground_valid = false;
@@ -883,6 +959,7 @@ void CL_Predict_Clear (void)
 {
 	memset (&cl_pred, 0, sizeof(cl_pred));
 	cl_pred_warned_solid = false;
+	cl_pred_warned_no_snapshot = false;
 	VectorClear (cl_pred_error);
 	VectorClear (cl_pred_angle_error);
 	cl_pred_steps_this_frame = 0;

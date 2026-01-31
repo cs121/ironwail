@@ -428,17 +428,28 @@ static double CL_GetInterpDelaySeconds (void)
 {
 	double interp = cl_interp.value;
 	double jitter = cl_jitter.value;
+	double min_delay = 0.0;
+	double base;
+	double jitter_scale = 1.0;
 
 	if (interp <= 0.0)
 	{
 		if (cl_lerp_ms.value <= 0.0)
 			return 0.0;
-		return cl_lerp_ms.value * 0.001;
+		interp = cl_lerp_ms.value * 0.001;
 	}
 
 	if (jitter < 0.0)
 		jitter = 0.0;
-	return interp + jitter;
+	if (cl_updaterate.value > 0.0)
+		min_delay = 2.0 / cl_updaterate.value;
+	base = interp;
+	if (min_delay > 0.0 && base < min_delay)
+	{
+		jitter_scale = interp > 0.0 ? (interp / min_delay) : 0.0;
+		base = min_delay;
+	}
+	return base + (jitter * jitter_scale);
 }
 
 static double CL_GetInterpTargetTime (void)
