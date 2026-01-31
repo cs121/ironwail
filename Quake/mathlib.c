@@ -117,6 +117,19 @@ float NormalizeAngle (float degrees)
 	return degrees;
 }
 
+float NormalizeAngle180 (float degrees)
+{
+	return NormalizeAngle (degrees);
+}
+
+float NormalizeAngle360 (float degrees)
+{
+	degrees -= floor (degrees * (1.f/360.f)) * 360.f;
+	if (degrees < 0.f)
+		degrees += 360.f;
+	return degrees;
+}
+
 /*
 ==================
 AngleDifference
@@ -129,6 +142,11 @@ float AngleDifference (float dega, float degb)
 	return NormalizeAngle (dega - degb);
 }
 
+float AngleDeltaShortest (float degfrom, float degto)
+{
+	return NormalizeAngle (degto - degfrom);
+}
+
 /*
 ==================
 LerpAngle
@@ -139,6 +157,11 @@ Returns a value between -180 and 180
 float LerpAngle (float degfrom, float degto, float frac)
 {
 	return NormalizeAngle (degfrom + AngleDifference (degto, degfrom) * frac);
+}
+
+float LerpAngleShortest (float degfrom, float degto, float frac)
+{
+	return NormalizeAngle (degfrom + AngleDeltaShortest (degfrom, degto) * frac);
 }
 
 

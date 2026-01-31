@@ -287,7 +287,7 @@ void CL_AdjustAngles (void)
 	{
 		cl.viewangles[YAW] -= speed*cl_yawspeed.value*CL_KeyState (&in_right);
 		cl.viewangles[YAW] += speed*cl_yawspeed.value*CL_KeyState (&in_left);
-		cl.viewangles[YAW] -= floor (cl.viewangles[YAW]/360.0) * 360.0;
+		cl.viewangles[YAW] = NormalizeAngle180 (cl.viewangles[YAW]);
 	}
 	if (in_klook.state & 1)
 	{
