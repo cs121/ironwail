@@ -1169,7 +1169,12 @@ void CL_Predict_BeginFrame (void)
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
 {
-	float dt;
+	float cmd_dt;
+	float dt_sub;
+	float hf;
+	float ratio;
+	int substeps;
+	int i;
 
 	CL_Predict_RegisterDebugCvars ();
 	cl_netdbg_predict_ran = false;
@@ -1180,9 +1185,28 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
 
-	dt = CL_Predict_GetCmdStepTime (cmd);
-	CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt);
-	CL_Predict_DebugLogCmd ("setup", cmd, dt);
+	cmd_dt = CL_Predict_GetCmdStepTime (cmd);
+	hf = host_frametime;
+	substeps = 1;
+	if (hf > 0.0f)
+	{
+		ratio = cmd_dt / hf;
+		if (ratio > 1.25f)
+			substeps = (int)floorf (ratio + 0.5f);
+	}
+	if (substeps < 1)
+		substeps = 1;
+	if (substeps > 4)
+		substeps = 4;
+	dt_sub = cmd_dt / (float)substeps;
+	if (cl_jitter_debug.value > 0.0f)
+	{
+		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
+			cmd->sequence, cmd_dt, hf, substeps, dt_sub);
+	}
+	for (i = 0; i < substeps; i++)
+		CL_Predict_SimulateCmd (&cl_pred.predicted, cmd, dt_sub);
+	CL_Predict_DebugLogCmd ("setup", cmd, cmd_dt);
 	CL_Predict_ApplyToClient ();
 	cl_netdbg_predict_ran = true;
 }
@@ -1207,7 +1231,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	vec3_t angle_error;
 	float error_len = 0.0f;
 	float teleport_dist = cl_pred_teleport_dist.value;
-	float dt;
+	float cmd_dt;
+	float dt_sub;
+	float hf;
+	float ratio;
+	int substeps;
 	int i;
 	int prev_pred_ground_ent = 0;
 	vec3_t prev_pred_ground_offset;
@@ -1404,9 +1432,28 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			CL_Predict_ApplyToClient ();
 			return;
 		}
-		dt = CL_Predict_GetCmdStepTime (&cmd);
-		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt);
-		CL_Predict_DebugLogCmd ("resim", &cmd, dt);
+		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
+		hf = host_frametime;
+		substeps = 1;
+		if (hf > 0.0f)
+		{
+			ratio = cmd_dt / hf;
+			if (ratio > 1.25f)
+				substeps = (int)floorf (ratio + 0.5f);
+		}
+		if (substeps < 1)
+			substeps = 1;
+		if (substeps > 4)
+			substeps = 4;
+		dt_sub = cmd_dt / (float)substeps;
+		if (cl_jitter_debug.value > 0.0f)
+		{
+			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f\n",
+				cmd.sequence, cmd_dt, hf, substeps, dt_sub);
+		}
+		for (i = 0; i < substeps; i++)
+			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub);
+		CL_Predict_DebugLogCmd ("resim", &cmd, cmd_dt);
 	}
 
 	CL_Predict_ApplyToClient ();
