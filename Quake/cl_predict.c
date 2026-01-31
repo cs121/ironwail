@@ -106,6 +106,7 @@ static int cl_pred_apply_pred_reason;
 static int cl_pred_apply_render_reason;
 
 static float CL_Predict_GetStepTime (void);
+static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
