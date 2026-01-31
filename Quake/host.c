@@ -1104,6 +1104,8 @@ Host_ServerFrame
 static void SV_RunOneTick (double tick_dt)
 {
 	static double next_sv_skip_log = 0.0;
+	static int paused_frame_count = 0;
+	const int paused_frame_threshold = 120;
 
 	host_frametime = tick_dt;
 	pr_global_struct->frametime = host_frametime;
@@ -1114,13 +1116,23 @@ static void SV_RunOneTick (double tick_dt)
 	// move things around and think
 	if (!sv.paused)
 	{
+		paused_frame_count = 0;
 		SV_Physics ();
 	}
-	else if (realtime >= next_sv_skip_log)
+	else
 	{
-		Con_Printf ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
-			sv.paused, key_dest);
-		next_sv_skip_log = realtime + 1.0;
+		paused_frame_count++;
+		if (paused_frame_count == paused_frame_threshold)
+		{
+			Con_Printf ("NETDBG SV_RunOneTick paused for %d frames (paused=%d key_dest=%d)\n",
+				paused_frame_count, sv.paused, key_dest);
+		}
+		if (realtime >= next_sv_skip_log)
+		{
+			Con_Printf ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
+				sv.paused, key_dest);
+			next_sv_skip_log = realtime + 1.0;
+		}
 	}
 }
 
