@@ -3163,6 +3163,9 @@ static void Host_Spawn_f (void)
 		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 	}
 
+	sv.paused = false;
+	cl.paused = false;
+
 // send all current names, colors, and frag counts
 	SZ_Clear (&host_client->message);
 
