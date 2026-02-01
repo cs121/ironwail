@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_fogvol.h"
 #include "r_godray_emit.h"
 #include "r_godrayvol.h"
+#include "renderer_backend.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -534,6 +535,9 @@ void R_Init (void)
 {
         cmd_function_t *cmd;
 
+        // TODO BACKEND: initialize renderer backend (stub in phase 1).
+        RB_Init();
+
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
         Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
         cmd = Cmd_AddCommand ("r_showbboxes_filter", R_ShowbboxesFilter_f);
@@ -996,6 +1000,9 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
+
+	// TODO BACKEND: notify renderer backend of new map (stub in phase 1).
+	RB_NewMap();
 
 	for (i=0 ; i<256 ; i++)
 		d_lightstylevalue[i] = 264;		// normal light value

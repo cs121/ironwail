@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
+#include "renderer_backend.h"
 #include "r_fogvol.h"
 #include "r_godray_emit.h"
 #include "r_godrayvol.h"
@@ -4860,6 +4861,9 @@ void R_RenderView (void)
         else if (gl_finish.value)
                 glFinish ();
 
+	// TODO BACKEND: begin frame once backend owns frame sequencing.
+	RB_BeginFrame();
+
         R_SetupView (); //johnfitz -- this does everything that should be done once per frame
         Fog_EnableGFog ();
         R_RenderScene ();
@@ -4868,6 +4872,9 @@ void R_RenderView (void)
         R_FogVol_Render ();
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
+
+	// TODO BACKEND: end frame once backend owns frame sequencing.
+	RB_EndFrame();
 
 	r_frame_rendered_this_update = true;
 
