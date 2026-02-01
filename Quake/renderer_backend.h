@@ -95,7 +95,7 @@ typedef struct rb_backend_api_s
 	rb_fbo_t			(*create_fbo)(const rb_fbo_desc_t *desc);
 	void				(*destroy_fbo)(rb_fbo_t fbo);
 	void				(*submit)(const rb_draw_desc_t *desc);
-	const rb_caps_t	(*get_caps)(void);
+	const rb_caps_t	*(*get_caps)(void);
 	void				(*debug_marker_begin)(const char *label);
 	void				(*debug_marker_end)(void);
 } rb_backend_api_t;
