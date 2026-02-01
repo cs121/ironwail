@@ -226,6 +226,9 @@ GLOBJS = \
 	gl_rmain.o \
 	gl_fog.o \
 	gl_rmisc.o \
+	renderer_backend.o \
+	renderer_backend_gl.o \
+	renderer_backend_null.o \
 	r_shadow.o \
 	r_postfx.o \
 	r_godrayvol.o \
