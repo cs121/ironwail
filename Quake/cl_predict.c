@@ -20,6 +20,7 @@ extern cvar_t cl_pred_step_hz;
 extern cvar_t cl_pred_accum_debug;
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
+static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
 
 typedef struct
 {
@@ -114,6 +115,7 @@ static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
 static void CL_Predict_ResetRenderInterp (void);
+static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -171,12 +173,26 @@ static void CL_Predict_RegisterDebugCvars (void)
 		return;
 
 	Cvar_RegisterVariable (&cl_pred_debug);
+	Cvar_RegisterVariable (&cl_pred_correct_angles);
 	cl_pred_debug_registered = true;
 }
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 {
 	return NETSEQ_GT (seq, ref);
+}
+
+static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec)
+{
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (vec[i]))
+			return false;
+	}
+
+	return true;
 }
 
 static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
@@ -549,11 +565,12 @@ static qboolean CL_Predict_IsEnabled (void)
 static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render)
 {
 	vec3_t smooth_origin;
-	vec3_t smooth_angles;
 	float smooth_ms;
 	float decay;
 	vec3_t correction;
 	vec3_t angle_correction;
+	float frame_dt;
+	qboolean apply_angle_correction;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 	{
@@ -574,32 +591,72 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		cl_pred_warned_no_snapshot = true;
 	}
 
+	if (!CL_Predict_Vec3IsFinite (state->origin) || !CL_Predict_Vec3IsFinite (state->velocity))
+	{
+		Con_Printf ("NETDBG: prediction apply with invalid state origin/velocity\n");
+		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
+		return;
+	}
+
 	smooth_ms = cl_pred_smooth_ms.value;
+	if (smooth_ms < 0.0f)
+		smooth_ms = 0.0f;
 	if (smooth_ms <= 0.0f)
 	{
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
 	}
 
+	if (!CL_Predict_Vec3IsFinite (cl_pred_error) || !CL_Predict_Vec3IsFinite (cl_pred_angle_error))
+	{
+		Con_Printf ("NETDBG: prediction apply with invalid error vectors\n");
+		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
+	}
+
+	frame_dt = (float)host_frametime;
+	if (!isfinite (frame_dt) || frame_dt < 0.0f)
+	{
+		Con_Printf ("NETDBG: prediction apply with invalid host_frametime %.4f\n", frame_dt);
+		frame_dt = 0.0f;
+	}
+
+	apply_angle_correction = (cl_pred_correct_angles.value > 0.0f);
+	if (!apply_angle_correction)
+		VectorClear (cl_pred_angle_error);
+
 	VectorAdd (state->origin, cl_pred_error, smooth_origin);
-	VectorAdd (state->viewangles, cl_pred_angle_error, smooth_angles);
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[1]);
-	VectorCopy (smooth_angles, cl.viewangles);
+	if (apply_angle_correction)
+	{
+		vec3_t smooth_angles;
+
+		VectorAdd (state->viewangles, cl_pred_angle_error, smooth_angles);
+		VectorCopy (smooth_angles, cl.viewangles);
+	}
 	VectorCopy (state->velocity, cl.mvelocity[0]);
 	VectorCopy (state->velocity, cl.mvelocity[1]);
 	cl.onground = state->onground;
 
 	if (smooth_ms > 0.0f)
 	{
-		decay = host_frametime / (smooth_ms * 0.001f);
+		decay = frame_dt / (smooth_ms * 0.001f);
 		decay = CLAMP (0.0f, decay, 1.0f);
 		VectorScale (cl_pred_error, decay, correction);
 		VectorSubtract (cl_pred_error, correction, cl_pred_error);
-		VectorScale (cl_pred_angle_error, decay, angle_correction);
-		VectorSubtract (cl_pred_angle_error, angle_correction, cl_pred_angle_error);
+		if (apply_angle_correction)
+		{
+			VectorScale (cl_pred_angle_error, decay, angle_correction);
+			VectorSubtract (cl_pred_angle_error, angle_correction, cl_pred_angle_error);
+		}
+		else
+		{
+			VectorClear (cl_pred_angle_error);
+		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
@@ -1521,6 +1578,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	qboolean had_base;
 	qboolean resim_cmd_valid = false;
 	usercmd_t resim_cmd;
+	qboolean allow_angle_correction;
 
 	CL_Predict_RegisterDebugCvars ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
@@ -1550,6 +1608,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	cl_pred.seq_acked = ack;
 	cl_pred_server_update_this_frame = true;
+	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
 	if (cl_pred.has_base)
 	{
 		VectorSubtract (origin, cl_pred.predicted.origin, error);
@@ -1607,7 +1666,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				}
 			}
 			VectorAdd (cl_pred_error, error, cl_pred_error);
-			VectorAdd (cl_pred_angle_error, angle_error, cl_pred_angle_error);
+			if (allow_angle_correction)
+				VectorAdd (cl_pred_angle_error, angle_error, cl_pred_angle_error);
+			else
+				VectorClear (cl_pred_angle_error);
 		}
 	}
 	else
