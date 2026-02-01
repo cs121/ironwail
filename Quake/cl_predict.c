@@ -105,10 +105,15 @@ static int cl_pred_apply_pred_reason;
 static int cl_pred_apply_render_reason;
 static double cl_pred_frame_accum;
 static float cl_pred_frame_dt_last;
+static cl_pred_state_t cl_pred_render_from;
+static cl_pred_state_t cl_pred_render_to;
+static qboolean cl_pred_render_interp_valid;
+static float cl_pred_render_frac;
 
 static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
+static void CL_Predict_ResetRenderInterp (void);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -286,6 +291,7 @@ static void CL_Predict_HardResetToBase (const char *reason)
 	CL_Predict_ResetGroundCache (&cl_pred.predicted);
 	cl_pred.predicted.onground = cl_pred.base.onground;
 	cl_pred.predicted.groundent = cl_pred.base.groundent;
+	CL_Predict_ResetRenderInterp ();
 
 	if (cl_pred_debug.value > 0.0f)
 	{
@@ -365,6 +371,31 @@ static float CL_Predict_GetStepTime (void)
 	return (float)cmd_dt;
 }
 
+static void CL_Predict_ResetRenderInterp (void)
+{
+	cl_pred_render_from = cl_pred.predicted;
+	cl_pred_render_to = cl_pred.predicted;
+	cl_pred_render_interp_valid = true;
+	cl_pred_render_frac = 0.0f;
+}
+
+static void CL_Predict_LerpState (cl_pred_state_t *out, const cl_pred_state_t *from, const cl_pred_state_t *to, float frac)
+{
+	int i;
+
+	if (!out || !from || !to)
+		return;
+
+	*out = *to;
+	for (i = 0; i < 3; i++)
+		out->origin[i] = from->origin[i] + (to->origin[i] - from->origin[i]) * frac;
+	for (i = 0; i < 3; i++)
+	{
+		float delta = AngleDeltaShortest (from->viewangles[i], to->viewangles[i]);
+		out->viewangles[i] = NormalizeAngle180 (from->viewangles[i] + delta * frac);
+	}
+}
+
 static void CL_Predict_GetSubstepInfo (float cmd_dt, float host_dt, int *substeps, float *dt_sub)
 {
 	int steps = 1;
@@ -417,13 +448,17 @@ static void CL_Predict_GetSubstepInfo (float cmd_dt, float host_dt, int *substep
 
 static float CL_Predict_GetFrameStepTime (float frame_dt)
 {
-	float step_dt = frame_dt;
+	float step_dt;
 
 	if (cl_pred_step_hz.value > 0.0f)
 	{
 		float step_hz = cl_pred_step_hz.value;
 
-		step_dt = step_hz > 0.0f ? (1.0f / step_hz) : frame_dt;
+		step_dt = step_hz > 0.0f ? (1.0f / step_hz) : 0.0f;
+	}
+	else
+	{
+		step_dt = CL_Predict_GetStepTime ();
 	}
 	if (step_dt <= 0.0f)
 		step_dt = frame_dt;
@@ -434,7 +469,6 @@ static void CL_Predict_RunFrameSteps (void)
 {
 	usercmd_t cmd;
 	float step_dt;
-	float dt;
 	int max_steps;
 	int steps = 0;
 
@@ -455,27 +489,38 @@ static void CL_Predict_RunFrameSteps (void)
 
 	step_dt = CL_Predict_GetFrameStepTime (cl_pred_frame_dt_last);
 	if (step_dt <= 0.0f)
-		step_dt = (float)cl_pred_frame_accum;
+		return;
 	max_steps = (int)cl_pred_max_substeps.value;
 	if (max_steps < 1)
 		max_steps = 1;
 
-	while (cl_pred_frame_accum > 0.0 && steps < max_steps)
+	while (cl_pred_frame_accum >= step_dt && steps < max_steps)
 	{
-		dt = step_dt;
-		if (cl_pred_frame_accum < dt)
-			dt = (float)cl_pred_frame_accum;
-		if (dt <= 0.0f)
-			break;
-		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt, false);
-		cl_pred_frame_accum -= dt;
+		cl_pred_render_from = cl_pred.predicted;
+		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
+		cl_pred_render_to = cl_pred.predicted;
+		cl_pred_frame_accum -= step_dt;
 		steps++;
 	}
 
 	cl_pred_last_substeps = steps;
 	cl_pred_last_substep_dt = step_dt;
+	if (!cl_pred_render_interp_valid)
+		CL_Predict_ResetRenderInterp ();
+	if (step_dt > 0.0f)
+	{
+		cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
+		cl_pred_render_frac = CLAMP (0.0f, cl_pred_render_frac, 1.0f);
+	}
 	if (cl_pred_frame_accum < 0.0)
 		cl_pred_frame_accum = 0.0;
+	cl_pred_render_interp_valid = true;
+
+	if (cl_jitter_debug.value > 0.0f)
+	{
+		Con_Printf ("JITTERDBG pred_accum %.4f step_dt %.4f steps %d render_frac %.3f\n",
+			cl_pred_frame_accum, step_dt, steps, cl_pred_render_frac);
+	}
 }
 
 static float CL_Predict_AngleDelta (float a, float b)
@@ -501,7 +546,7 @@ static qboolean CL_Predict_IsEnabled (void)
 	return true;
 }
 
-static void CL_Predict_ApplyToClient (void)
+static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render)
 {
 	vec3_t smooth_origin;
 	vec3_t smooth_angles;
@@ -509,11 +554,13 @@ static void CL_Predict_ApplyToClient (void)
 	float decay;
 	vec3_t correction;
 	vec3_t angle_correction;
-	const cl_pred_state_t *state = &cl_pred.predicted;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 	{
-		cl_pred_apply_pred_reason = !CL_Predict_IsEnabled () ? CL_PRED_APPLY_SKIP_DISABLED : CL_PRED_APPLY_SKIP_NO_BASE;
+		if (is_render)
+			cl_pred_apply_render_reason = !CL_Predict_IsEnabled () ? CL_PRED_APPLY_SKIP_DISABLED : CL_PRED_APPLY_SKIP_NO_BASE;
+		else
+			cl_pred_apply_pred_reason = !CL_Predict_IsEnabled () ? CL_PRED_APPLY_SKIP_DISABLED : CL_PRED_APPLY_SKIP_NO_BASE;
 		return;
 	}
 
@@ -536,9 +583,6 @@ static void CL_Predict_ApplyToClient (void)
 
 	VectorAdd (state->origin, cl_pred_error, smooth_origin);
 	VectorAdd (state->viewangles, cl_pred_angle_error, smooth_angles);
-	smooth_angles[0] = NormalizeAngle180 (smooth_angles[0]);
-	smooth_angles[1] = NormalizeAngle180 (smooth_angles[1]);
-	smooth_angles[2] = NormalizeAngle180 (smooth_angles[2]);
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
@@ -564,7 +608,10 @@ static void CL_Predict_ApplyToClient (void)
 	}
 
 	CL_EnsureViewEntityOrigin ("predict");
-	cl_pred_apply_render_reason = CL_PRED_APPLY_OK;
+	if (is_render)
+		cl_pred_apply_render_reason = CL_PRED_APPLY_OK;
+	else
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 }
 
 static void CL_Predict_Friction (vec3_t velocity, float dt)
@@ -1328,6 +1375,10 @@ void CL_Predict_Clear (void)
 	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_frame_accum = 0.0;
 	cl_pred_frame_dt_last = 0.0f;
+	cl_pred_render_interp_valid = false;
+	cl_pred_render_frac = 0.0f;
+	memset (&cl_pred_render_from, 0, sizeof(cl_pred_render_from));
+	memset (&cl_pred_render_to, 0, sizeof(cl_pred_render_to));
 }
 
 void CL_Predict_ResetGround (void)
@@ -1355,7 +1406,7 @@ void CL_Predict_BeginFrame (void)
 		CL_Predict_HardResetToBase ("predict reenabled");
 	cl_pred_prev_enabled = enabled;
 
-	if (enabled && cl_pred_render_cmd_valid)
+	if (enabled && cl_pred.has_base && cl_pred_render_cmd_valid)
 	{
 		float frame_dt = (float)(host_rawframetime > 0.0 ? host_rawframetime : host_frametime);
 		float max_accum;
@@ -1374,10 +1425,11 @@ void CL_Predict_BeginFrame (void)
 		if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
 			cl_pred_frame_accum = max_accum;
 	}
-	else
+	else if (!enabled || !cl_pred.has_base)
 	{
 		cl_pred_frame_accum = 0.0;
 		cl_pred_frame_dt_last = 0.0f;
+		cl_pred_render_interp_valid = false;
 	}
 
 	if (cl_pred_accum_debug.value > 0.0f)
@@ -1390,6 +1442,8 @@ void CL_Predict_BeginFrame (void)
 		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	else if (!cl_pred.has_base)
 		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+	else if (!cl_pred_render_cmd_valid)
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_NO_CMD;
 	else
 		cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_ACCUM;
 
@@ -1397,6 +1451,8 @@ void CL_Predict_BeginFrame (void)
 		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	else if (!cl_pred.has_base)
 		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_BASE;
+	else if (!cl_pred_render_cmd_valid)
+		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_CMD;
 	else
 		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_ACCUM;
 }
@@ -1430,7 +1486,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	cl_pred_render_cmd = *cmd;
 	cl_pred_render_cmd_valid = true;
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
-	CL_Predict_ApplyToClient ();
+	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 	cl_netdbg_predict_ran = true;
 }
 
@@ -1566,6 +1622,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred.base.viewangles[2] = NormalizeAngle180 (viewangles[2]);
 	cl_pred.base.onground = onground;
 	cl_pred.predicted = cl_pred.base;
+	CL_Predict_ResetRenderInterp ();
 	cl_pred.has_base = true;
 	CL_Predict_InvalidateGroundCache (&cl_pred.base);
 	CL_Predict_InvalidateGroundCache (&cl_pred.predicted);
@@ -1646,7 +1703,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	if (CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
 	{
 		CL_Predict_HardResetToBase ("ack ahead of latest");
-		CL_Predict_ApplyToClient ();
+		CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 		return;
 	}
 
@@ -1657,7 +1714,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (!CL_Predict_GetCmd (seq, &cmd))
 		{
 			CL_Predict_HardResetToBase ("cmd chain broken");
-			CL_Predict_ApplyToClient ();
+			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 			return;
 		}
 		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
@@ -1681,7 +1738,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred_render_cmd_valid = true;
 	}
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
-	CL_Predict_ApplyToClient ();
+	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 }
 
 void CL_Predict_Reapply (void)
@@ -1697,7 +1754,14 @@ void CL_Predict_Reapply (void)
 	}
 
 	CL_Predict_RunFrameSteps ();
-	CL_Predict_ApplyToClient ();
+	{
+		cl_pred_state_t render_state;
+
+		render_state = cl_pred.predicted;
+		if (cl_pred_render_interp_valid)
+			CL_Predict_LerpState (&render_state, &cl_pred_render_from, &cl_pred_render_to, cl_pred_render_frac);
+		CL_Predict_ApplyToClient (&render_state, true);
+	}
 }
 
 qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
