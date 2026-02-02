@@ -21,6 +21,8 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	inst_Overbright;
 	float	inst_ModelHalfLambert;
 	float	inst_Pad1;
+	vec4	inst_RimParams0;
+	vec4	inst_RimParams1;
 	mat4	inst_ShadowViewProj;
 	vec4	inst_ShadowParams;
 	vec4	inst_ShadowDebug;
@@ -123,6 +125,8 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
+layout(location=7) flat in vec3 in_ambient;
+layout(location=8) flat in vec3 in_direct;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -214,6 +218,33 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
+
+	if (inst_RimParams0.x > 0.5)
+	{
+		vec3 normal = normalize(gl_FrontFacing ? in_normal : -in_normal);
+		vec3 view_dir = normalize(-in_pos);
+		float ndotv = clamp(dot(normal, view_dir), 0.0, 1.0);
+		float rim_base = pow(1.0 - ndotv, inst_RimParams0.y);
+		float light_len = length(inst_ShadowSunDir.xyz);
+		vec3 light_dir = (light_len > 0.0) ? normalize(-inst_ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
+		float rim_light = clamp(dot(normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
+		vec3 ambient_color = in_ambient * inst_RimParams1.x;
+		vec3 direct_color = in_direct * inst_RimParams0.w;
+		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
+		float rim_visibility = rim_light * direct_strength;
+		rim_visibility *= shadow_term;
+		vec3 rim_color = mix(ambient_color, direct_color, rim_light);
+		vec3 rim_term = rim_base * inst_RimParams0.z * rim_visibility * rim_color;
+		if (inst_RimParams1.y > 0.5)
+		{
+			out_fragcolor = vec4(clamp(rim_term, 0.0, 1.0), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		result.rgb += rim_term;
+	}
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);
