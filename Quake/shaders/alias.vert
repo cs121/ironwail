@@ -21,6 +21,8 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	inst_Overbright;
 	float	inst_ModelHalfLambert;
 	float	inst_Pad1;
+	vec4	inst_RimParams0;
+	vec4	inst_RimParams1;
 	mat4	inst_ShadowViewProj;
 	vec4	inst_ShadowParams;
 	vec4	inst_ShadowDebug;
@@ -96,6 +98,8 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
+layout(location=7) flat out vec3 out_ambient;
+layout(location=8) flat out vec3 out_direct;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -124,17 +128,15 @@ void main()
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
-        vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-        mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
-        vec3 world_normal = normalize(world_orientation * blended_normal);
-        vec3 view_dir = normalize(-out_pos);
-        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
-        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * inst_Overbright);
-        vec3 litDlight = inst.DLightColor.rgb * lighting;
-        vec3 base_color = litAmbient + litDlight;
-        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
-        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, inst_Overbright);
+	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
+	mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
+	vec3 world_normal = normalize(world_orientation * blended_normal);
+	vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+	vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * inst_Overbright);
+	vec3 litDlight = inst.DLightColor.rgb * lighting;
+	vec3 base_color = litAmbient + litDlight;
+	out_color = clamp(vec4(base_color, inst.LightColor.a), 0.0, inst_Overbright);
+	out_ambient = ambient;
+	out_direct = inst.DLightColor.rgb;
 	out_normal = world_normal;
 }

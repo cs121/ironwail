@@ -26,6 +26,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
+extern cvar_t r_rim;
+extern cvar_t r_rim_power;
+extern cvar_t r_rim_strength;
+extern cvar_t r_rim_lightscale;
+extern cvar_t r_rim_ambientscale;
+extern cvar_t r_rim_debug;
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
@@ -92,6 +98,8 @@ struct ibuf_s {
 		float	overbright;
 		float	half_lambert;
 		float	_pad1;
+		vec4_t	rim_params0;
+		vec4_t	rim_params1;
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
 		vec4_t	shadow_debug;
@@ -566,9 +574,17 @@ gl_overbright_models.value ?
 -fabs (r_framedata.fogdata[3]) :
  fabs (r_framedata.fogdata[3])
 ;
-ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
-ibuf.global.dither = r_framedata.dither[0];
-ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+	ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
+	ibuf.global.dither = r_framedata.dither[0];
+	ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+	ibuf.global.rim_params0[0] = (r_rim.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params0[1] = r_rim_power.value;
+	ibuf.global.rim_params0[2] = r_rim_strength.value;
+	ibuf.global.rim_params0[3] = r_rim_lightscale.value;
+	ibuf.global.rim_params1[0] = r_rim_ambientscale.value;
+	ibuf.global.rim_params1[1] = (r_rim_debug.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params1[2] = 0.f;
+	ibuf.global.rim_params1[3] = 0.f;
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
 	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
@@ -721,6 +737,14 @@ static void R_FlushAliasInstances_Shadow (void)
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
 	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
+	ibuf.global.rim_params0[0] = (r_rim.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params0[1] = r_rim_power.value;
+	ibuf.global.rim_params0[2] = r_rim_strength.value;
+	ibuf.global.rim_params0[3] = r_rim_lightscale.value;
+	ibuf.global.rim_params1[0] = r_rim_ambientscale.value;
+	ibuf.global.rim_params1[1] = (r_rim_debug.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params1[2] = 0.f;
+	ibuf.global.rim_params1[3] = 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);

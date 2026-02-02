@@ -377,6 +377,27 @@ void main()
         bool additive_dlights = DLightParams.x > 0.5;
         bool dlight_debug = DLightParams.y > 0.5;
 
+	// Surface normal computation (shared by lighting and rim)
+	vec3 surface_normal = in_normal;
+	float surface_normal_len = length(surface_normal);
+
+	if (surface_normal_len > 0.0)
+	{
+		surface_normal /= surface_normal_len;
+	}
+	else
+	{
+		vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+		float geom_len = length(surface_normal_vec);
+		surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
+	}
+
+	if (!gl_FrontFacing)
+		surface_normal = -surface_normal;
+
+	vec3 total_light = vec3(1.0);
+	float rim_shadow = 1.0;
+
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
 	vec3 total_lightmap = vec3(1.0);
@@ -454,28 +475,11 @@ void main()
 			return;
 		}
 
-		// Surface normal computation
-		vec3 surface_normal = in_normal;
-		float surface_normal_len = length(surface_normal);
-
-		if (surface_normal_len > 0.0)
-		{
-			surface_normal /= surface_normal_len;
-		}
-		else
-		{
-			vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-			float geom_len = length(surface_normal_vec);
-			surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
-		}
-
-		if (!gl_FrontFacing)
-			surface_normal = -surface_normal;
-
 		float shadow_range = 1.0;
 		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool shadow_enabled = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
+		rim_shadow = shadow_enabled ? shadow_term : 1.0;
 
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
@@ -487,7 +491,6 @@ void main()
 			return;
 		}
 
-		vec3 total_light;
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
 
 		if (lightgrid_shadow)
@@ -610,6 +613,32 @@ void main()
 	// Add specular
 	vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
 	result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
+
+	// Rim lighting (edge highlight)
+	if (RimParams0.x > 0.5)
+	{
+		vec3 view_dir = normalize(EyePos - in_pos);
+		float ndotv = clamp(dot(surface_normal, view_dir), 0.0, 1.0);
+		float rim_base = pow(1.0 - ndotv, RimParams0.y);
+		float light_len = length(ShadowSunDir.xyz);
+		vec3 light_dir = (light_len > 0.0) ? normalize(-ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
+		float rim_light = clamp(dot(surface_normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
+		vec3 ambient_color = Fog.rgb * RimParams1.x;
+		vec3 direct_color = total_light * RimParams0.w;
+		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
+		float rim_visibility = rim_light * direct_strength * rim_shadow;
+		vec3 rim_color = mix(ambient_color, direct_color, rim_light);
+		vec3 rim_term = rim_base * RimParams0.z * rim_visibility * rim_color;
+		if (RimParams1.y > 0.5)
+		{
+			out_fragcolor = vec4(clamp(rim_term, 0.0, 1.0), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		result.rgb += rim_term;
+	}
 	
 	// Tone mapping
 	if (LightmapParams.y > 0.5)

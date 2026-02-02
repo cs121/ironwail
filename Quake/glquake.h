@@ -440,11 +440,13 @@ typedef struct gpuframedata_s {
         vec4_t          prev_eye;       // xyz: prev_eyepos, w: delta_time
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
-        vec4_t          lightgrid_params; // x: enabled, yzw: unused
-        vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
-        vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
-        vec4_t          shader_params;  // x: shader debug, y: tcgen debug, z: envmap source, w: unused
-        float           shadow_viewproj[16];
+	vec4_t          lightgrid_params; // x: enabled, yzw: unused
+	vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
+	vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
+	vec4_t          shader_params;  // x: shader debug, y: tcgen debug, z: envmap source, w: unused
+	vec4_t          rim_params0;    // x: enabled, y: power, z: strength, w: light scale
+	vec4_t          rim_params1;    // x: ambient scale, y: debug, zw: unused
+	float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
