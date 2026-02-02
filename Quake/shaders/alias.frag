@@ -14,6 +14,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	inst_ViewProj;
 	mat4	inst_PrevViewProj;
+	mat4	inst_View;
 	vec3	inst_EyePos;
 	float	inst_Pad0;
 	vec4	inst_Fog;
@@ -127,6 +128,8 @@ layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
 layout(location=7) flat in vec3 in_ambient;
 layout(location=8) flat in vec3 in_direct;
+layout(location=9) in vec3 in_view_pos;
+layout(location=10) in vec3 in_view_normal;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -221,10 +224,8 @@ void main()
 
 	if (inst_RimParams0.x > 0.5)
 	{
-		vec3 normal = normalize(gl_FrontFacing ? in_normal : -in_normal);
-		vec3 to_eye = -in_pos;
-		float view_len = length(to_eye);
-		vec3 view_dir = (view_len > 0.0) ? (to_eye / view_len) : vec3(0.0, 0.0, 1.0);
+		vec3 normal = normalize(gl_FrontFacing ? in_view_normal : -in_view_normal);
+		vec3 view_dir = normalize(-in_view_pos);
 		float ndotv = clamp(dot(normal, view_dir), 0.0, 1.0);
 		float rim_base = pow(1.0 - ndotv, inst_RimParams0.y);
 		float light_len = length(inst_ShadowSunDir.xyz);
@@ -238,9 +239,18 @@ void main()
 		float rim_visibility = mix(inst_RimParams1.x, 1.0, direct_w) * rim_shadow;
 		vec3 rim_color = mix(ambient_color, direct_color, rim_light_mix);
 		vec3 rim_term = rim_base * inst_RimParams0.z * rim_visibility * rim_color;
-		if (inst_RimParams1.y > 0.5)
+		int rim_debug = int(clamp(inst_RimParams1.y, 0.0, 2.0) + 0.5);
+		if (rim_debug == 1)
 		{
 			out_fragcolor = vec4(vec3(rim_base), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		else if (rim_debug == 2)
+		{
+			out_fragcolor = vec4(vec3(ndotv), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif

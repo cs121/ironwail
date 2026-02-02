@@ -14,6 +14,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	inst_ViewProj;
 	mat4	inst_PrevViewProj;
+	mat4	inst_View;
 	vec3	inst_EyePos;
 	float	inst_Pad0;
 	vec4	inst_Fog;

@@ -91,6 +91,7 @@ struct ibuf_s {
 	struct {
 		float	matviewproj[16];
 		float	prev_matviewproj[16];
+		float	view[16];
 		vec3_t	eyepos;
 		float	_pad;
 		vec4_t	fog;
@@ -564,10 +565,11 @@ void R_FlushAliasInstances (qboolean showtris)
 		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 	GL_SetState (state);
 
-memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
-memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
-memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+	memcpy (ibuf.global.view, r_framedata.view, sizeof (r_framedata.view));
+	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
 // use fog density sign bit as overbright flag
 ibuf.global.fog[3] =
 gl_overbright_models.value ?
@@ -582,7 +584,7 @@ gl_overbright_models.value ?
 	ibuf.global.rim_params0[2] = r_rim_strength.value;
 	ibuf.global.rim_params0[3] = r_rim_lightscale.value;
 	ibuf.global.rim_params1[0] = r_rim_ambientscale.value;
-	ibuf.global.rim_params1[1] = (r_rim_debug.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params1[1] = CLAMP (0.f, r_rim_debug.value, 2.f);
 	ibuf.global.rim_params1[2] = 0.f;
 	ibuf.global.rim_params1[3] = 0.f;
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
@@ -729,6 +731,7 @@ static void R_FlushAliasInstances_Shadow (void)
 
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
+	memcpy (ibuf.global.view, r_framedata.view, sizeof (r_framedata.view));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
@@ -742,7 +745,7 @@ static void R_FlushAliasInstances_Shadow (void)
 	ibuf.global.rim_params0[2] = r_rim_strength.value;
 	ibuf.global.rim_params0[3] = r_rim_lightscale.value;
 	ibuf.global.rim_params1[0] = r_rim_ambientscale.value;
-	ibuf.global.rim_params1[1] = (r_rim_debug.value > 0.f) ? 1.f : 0.f;
+	ibuf.global.rim_params1[1] = CLAMP (0.f, r_rim_debug.value, 2.f);
 	ibuf.global.rim_params1[2] = 0.f;
 	ibuf.global.rim_params1[3] = 0.f;
 

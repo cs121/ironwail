@@ -3414,7 +3414,7 @@ void R_SetupView (void)
         r_framedata.rim_params0[2] = r_rim_strength.value;
         r_framedata.rim_params0[3] = r_rim_lightscale.value;
         r_framedata.rim_params1[0] = r_rim_ambientscale.value;
-        r_framedata.rim_params1[1] = (r_rim_debug.value > 0.f) ? 1.f : 0.f;
+        r_framedata.rim_params1[1] = CLAMP (0.f, r_rim_debug.value, 2.f);
         r_framedata.rim_params1[2] = 0.f;
         r_framedata.rim_params1[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;

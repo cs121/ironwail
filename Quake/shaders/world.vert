@@ -157,6 +157,8 @@ layout(location=14) out vec3 out_lightgrid;
 layout(location=15) flat out vec4 out_stage_color;
 layout(location=16) flat out uint out_tcgen;
 layout(location=17) flat out vec2 out_emitter_center_ss;
+layout(location=18) out vec3 out_view_pos;
+layout(location=19) out vec3 out_view_normal;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -180,6 +182,8 @@ void main()
 	Instance instance = instance_data[instance_id];
 	vec3 world_pos = Transform(in_pos, instance);
         vec3 world_normal = TransformDirection(in_normal, instance);
+	vec3 view_pos = (View * vec4(world_pos, 1.0)).xyz;
+	vec3 view_normal = normalize((View * vec4(world_normal, 0.0)).xyz);
 	vec3 prev_world_pos = TransformPrev(in_pos, instance);
 	vec4 curr_clip = ViewProj * vec4(world_pos, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_pos, 1.0);
@@ -201,6 +205,8 @@ void main()
         out_pos = world_pos;
         out_normal = normalize(world_normal);
         out_lightgrid = in_lightgrid;
+	out_view_pos = view_pos;
+	out_view_normal = view_normal;
 	vec2 uv = in_uv.xy;
 	if (call.tcgen == TCGEN_LIGHTMAP)
 		uv = in_uv.zw;
