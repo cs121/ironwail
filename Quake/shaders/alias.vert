@@ -14,6 +14,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	inst_ViewProj;
 	mat4	inst_PrevViewProj;
+	mat4	inst_View;
 	vec3	inst_EyePos;
 	float	inst_Pad0;
 	vec4	inst_Fog;
@@ -100,6 +101,8 @@ layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
 layout(location=7) flat out vec3 out_ambient;
 layout(location=8) flat out vec3 out_direct;
+layout(location=9) out vec3 out_view_pos;
+layout(location=10) out vec3 out_view_normal;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -131,6 +134,8 @@ void main()
 	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
 	mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
 	vec3 world_normal = normalize(world_orientation * blended_normal);
+	vec3 view_pos = (inst_View * vec4(world_vert, 1.0)).xyz;
+	vec3 view_normal = normalize((inst_View * vec4(world_normal, 0.0)).xyz);
 	vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
 	vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * inst_Overbright);
 	vec3 litDlight = inst.DLightColor.rgb * lighting;
@@ -139,4 +144,6 @@ void main()
 	out_ambient = ambient;
 	out_direct = inst.DLightColor.rgb;
 	out_normal = world_normal;
+	out_view_pos = view_pos;
+	out_view_normal = view_normal;
 }

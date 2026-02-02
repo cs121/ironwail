@@ -155,6 +155,8 @@ layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
 layout(location=15) flat in vec4 in_stage_color;
 layout(location=16) flat in uint in_tcgen;
+layout(location=18) in vec3 in_view_pos;
+layout(location=19) in vec3 in_view_normal;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -617,8 +619,9 @@ void main()
 	// Rim lighting (edge highlight)
 	if (RimParams0.x > 0.5)
 	{
-		vec3 view_dir = normalize(EyePos - in_pos);
-		float ndotv = clamp(dot(surface_normal, view_dir), 0.0, 1.0);
+		vec3 view_dir = normalize(-in_view_pos);
+		vec3 view_normal = normalize(in_view_normal);
+		float ndotv = clamp(dot(view_normal, view_dir), 0.0, 1.0);
 		float rim_base = pow(1.0 - ndotv, RimParams0.y);
 		float light_len = length(ShadowSunDir.xyz);
 		vec3 light_dir = (light_len > 0.0) ? normalize(-ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
@@ -631,9 +634,18 @@ void main()
 		float rim_visibility = mix(RimParams1.x, 1.0, direct_w) * rim_shadow_mix;
 		vec3 rim_color = mix(ambient_color, direct_color, rim_light_mix);
 		vec3 rim_term = rim_base * RimParams0.z * rim_visibility * rim_color;
-		if (RimParams1.y > 0.5)
+		int rim_debug = int(clamp(RimParams1.y, 0.0, 2.0) + 0.5);
+		if (rim_debug == 1)
 		{
 			out_fragcolor = vec4(vec3(rim_base), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		else if (rim_debug == 2)
+		{
+			out_fragcolor = vec4(vec3(ndotv), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
