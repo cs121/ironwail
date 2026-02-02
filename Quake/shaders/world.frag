@@ -622,16 +622,18 @@ void main()
 		float rim_base = pow(1.0 - ndotv, RimParams0.y);
 		float light_len = length(ShadowSunDir.xyz);
 		vec3 light_dir = (light_len > 0.0) ? normalize(-ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
-		float rim_light = clamp(dot(surface_normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
+		float direct_w = clamp(dot(surface_normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
 		vec3 ambient_color = Fog.rgb * RimParams1.x;
-		vec3 direct_color = total_light * RimParams0.w;
+		vec3 direct_color = total_light;
 		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
-		float rim_visibility = rim_light * direct_strength * rim_shadow;
-		vec3 rim_color = mix(ambient_color, direct_color, rim_light);
+		float rim_light_mix = clamp(RimParams0.w * direct_strength, 0.0, 1.0);
+		float rim_shadow_mix = mix(0.25, 1.0, rim_shadow);
+		float rim_visibility = mix(RimParams1.x, 1.0, direct_w) * rim_shadow_mix;
+		vec3 rim_color = mix(ambient_color, direct_color, rim_light_mix);
 		vec3 rim_term = rim_base * RimParams0.z * rim_visibility * rim_color;
 		if (RimParams1.y > 0.5)
 		{
-			out_fragcolor = vec4(clamp(rim_term, 0.0, 1.0), 1.0);
+			out_fragcolor = vec4(vec3(rim_base), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
