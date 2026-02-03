@@ -177,9 +177,9 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	}
 	if (offset < 0 || length <= 0)
 	{
-		Con_Printf("RB_MapBufferRange: invalid range offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " target=%s buffer=%u\n",
-			(int64_t)offset,
-			(uint64_t)length,
+		Con_Printf("RB_MapBufferRange: invalid range offset=%lld length=%llu target=%s buffer=%u\n",
+			(long long)offset,
+			(unsigned long long)length,
 			target_name,
 			buffer);
 		return NULL;
@@ -201,14 +201,14 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 
 	if (binding_enum && (GLuint)binding != buffer)
 	{
-		Sys_Error("RB_MapBufferRange: binding mismatch target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_MapBufferRange: binding mismatch target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
 			binding,
-			(int64_t)offset,
-			(uint64_t)length,
-			(uint64_t)buffer_size,
+			(long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)buffer_size,
 			flags,
 			mapped,
 			thread_id,
@@ -216,14 +216,14 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	}
 	if (mapped)
 	{
-		Sys_Error("RB_MapBufferRange: buffer already mapped target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_MapBufferRange: buffer already mapped target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
 			binding,
-			(int64_t)offset,
-			(uint64_t)length,
-			(uint64_t)buffer_size,
+			(long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)buffer_size,
 			flags,
 			mapped,
 			thread_id,
@@ -231,12 +231,12 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	}
 	if (buffer_size <= 0)
 	{
-		Con_Printf("RB_MapBufferRange: buffer has no storage target=%s(0x%04X) buffer=%u bound=%d size=%" SDL_PRId64 " flags=0x%08X thread=%u ctx=%p\n",
+		Con_Printf("RB_MapBufferRange: buffer has no storage target=%s(0x%04X) buffer=%u bound=%d size=%lld flags=0x%08X thread=%u ctx=%p\n",
 			target_name,
 			target,
 			buffer,
 			binding,
-			(int64_t)buffer_size,
+			(long long)buffer_size,
 			flags,
 			thread_id,
 			context);
@@ -244,14 +244,14 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	}
 	if ((uint64_t)offset + (uint64_t)length > (uint64_t)buffer_size)
 	{
-		Sys_Error("RB_MapBufferRange: range exceeds buffer target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_MapBufferRange: range exceeds buffer target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
 			binding,
-			(int64_t)offset,
-			(uint64_t)length,
-			(uint64_t)buffer_size,
+			(long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)buffer_size,
 			flags,
 			mapped,
 			thread_id,
@@ -262,15 +262,15 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	if (!ptr)
 	{
 		err = glGetError();
-		Con_Printf("RB_MapBufferRange: glMapBufferRange failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p\n",
+		Con_Printf("RB_MapBufferRange: glMapBufferRange failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p\n",
 			err,
 			target_name,
 			target,
 			buffer,
 			binding,
-			(int64_t)offset,
-			(uint64_t)length,
-			(uint64_t)buffer_size,
+			(long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)buffer_size,
 			flags,
 			mapped,
 			thread_id,
@@ -281,15 +281,15 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 		if (!ptr)
 		{
 			err = glGetError();
-			Sys_Error("RB_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+			Sys_Error("RB_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
 				err,
 				target_name,
 				target,
 				buffer,
 				binding,
-				(int64_t)offset,
-				(uint64_t)length,
-				(uint64_t)buffer_size,
+				(long long)offset,
+				(unsigned long long)length,
+				(unsigned long long)buffer_size,
 				flags,
 				mapped,
 				thread_id,
@@ -306,24 +306,24 @@ static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset,
 
 	if (full_size && (offset + length > full_size))
 	{
-		Sys_Error("%s: range exceeds expected size target=%s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64,
+		Sys_Error("%s: range exceeds expected size target=%s buffer=%u offset=%llu length=%llu size=%llu",
 			label ? label : "RBGL_BufferMapRange",
 			RBGL_TargetName(target),
 			buffer,
-			(uint64_t)offset,
-			(uint64_t)length,
-			(uint64_t)full_size);
+			(unsigned long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)full_size);
 	}
 
 	ptr = RB_MapBufferRange((GLenum)target, (GLuint)buffer, (GLintptr)offset, (GLsizeiptr)length, (GLbitfield)flags);
 	if (!ptr && label)
 	{
-		Con_Printf("%s: RB_MapBufferRange returned NULL target=%s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 "\n",
+		Con_Printf("%s: RB_MapBufferRange returned NULL target=%s buffer=%u offset=%llu length=%llu\n",
 			label,
 			RBGL_TargetName(target),
 			buffer,
-			(uint64_t)offset,
-			(uint64_t)length);
+			(unsigned long long)offset,
+			(unsigned long long)length);
 	}
 
 	return ptr;
