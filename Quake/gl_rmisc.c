@@ -1290,6 +1290,137 @@ static size_t		frameres_device_offset = 0;
 static size_t		frameres_host_buffer_size = 1 * 1024 * 1024;
 static size_t		frameres_device_buffer_size = 1 * 1024 * 1024;
 
+static const char *GL_TargetName (GLenum target)
+{
+	switch (target)
+	{
+		case GL_ARRAY_BUFFER:
+			return "GL_ARRAY_BUFFER";
+		case GL_ELEMENT_ARRAY_BUFFER:
+			return "GL_ELEMENT_ARRAY_BUFFER";
+		case GL_UNIFORM_BUFFER:
+			return "GL_UNIFORM_BUFFER";
+		case GL_SHADER_STORAGE_BUFFER:
+			return "GL_SHADER_STORAGE_BUFFER";
+		case GL_PIXEL_UNPACK_BUFFER:
+			return "GL_PIXEL_UNPACK_BUFFER";
+		case GL_DRAW_INDIRECT_BUFFER:
+			return "GL_DRAW_INDIRECT_BUFFER";
+		default:
+			return "UNKNOWN_TARGET";
+	}
+}
+
+static GLenum GL_TargetBindingEnum (GLenum target)
+{
+	switch (target)
+	{
+		case GL_ARRAY_BUFFER:
+			return GL_ARRAY_BUFFER_BINDING;
+		case GL_ELEMENT_ARRAY_BUFFER:
+			return GL_ELEMENT_ARRAY_BUFFER_BINDING;
+		case GL_UNIFORM_BUFFER:
+			return GL_UNIFORM_BUFFER_BINDING;
+		case GL_SHADER_STORAGE_BUFFER:
+			return GL_SHADER_STORAGE_BUFFER_BINDING;
+		case GL_PIXEL_UNPACK_BUFFER:
+			return GL_PIXEL_UNPACK_BUFFER_BINDING;
+		case GL_DRAW_INDIRECT_BUFFER:
+			return GL_DRAW_INDIRECT_BUFFER_BINDING;
+		default:
+			return 0;
+	}
+}
+
+static void *GL_TryMapRange (GLenum target, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield flags, GLsizeiptr full_size, const char *label)
+{
+	GLenum err;
+	GLenum binding_enum;
+	GLint binding = 0;
+	GLint mapped = 0;
+	GLint64 buffer_size = 0;
+	void *ptr;
+	const char *target_name = GL_TargetName (target);
+
+	while (glGetError () != GL_NO_ERROR)
+	{
+	}
+
+	GL_BindBuffer (target, buffer);
+
+	binding_enum = GL_TargetBindingEnum (target);
+	if (binding_enum)
+		glGetIntegerv (binding_enum, &binding);
+	glGetBufferParameteri64v (target, GL_BUFFER_SIZE, &buffer_size);
+	glGetBufferParameteriv (target, GL_BUFFER_MAPPED, &mapped);
+
+	if (length <= 0)
+		Con_Printf ("%s: warning: non-positive map length=%" SDL_PRIu64 " for %s buffer=%u\n",
+			label ? label : "GL_TryMapRange",
+			(uint64_t) length,
+			target_name,
+			buffer);
+	if (buffer_size == 0 || (uint64_t) (offset + length) > (uint64_t) buffer_size)
+		Con_Printf ("%s: warning: map range offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " exceeds size=%" SDL_PRIu64 " for %s buffer=%u\n",
+			label ? label : "GL_TryMapRange",
+			(uint64_t) offset,
+			(uint64_t) length,
+			(uint64_t) buffer_size,
+			target_name,
+			buffer);
+
+	Con_Printf ("%s: %s target=0x%04X buffer=%u bound=%d offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " flags=0x%08X size=%" SDL_PRIu64 " mapped=%d thread=%lu ctx=%p\n",
+		label ? label : "GL_TryMapRange",
+		target_name,
+		target,
+		buffer,
+		binding,
+		(uint64_t) offset,
+		(uint64_t) length,
+		(unsigned int) flags,
+		(uint64_t) buffer_size,
+		mapped,
+		(unsigned long) SDL_ThreadID (),
+		(void *) SDL_GL_GetCurrentContext ());
+
+	SDL_assert (!mapped);
+
+	ptr = GL_MapBufferRangeFunc (target, offset, length, flags);
+	if (!ptr)
+	{
+		err = glGetError ();
+		Con_Printf ("%s: glMapBufferRange failed (err=0x%04X) on %s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 "\n",
+			label ? label : "GL_TryMapRange",
+			err,
+			target_name,
+			buffer,
+			(uint64_t) offset,
+			(uint64_t) length);
+
+		GL_BufferDataFunc (target, full_size, NULL, GL_STREAM_DRAW);
+		ptr = GL_MapBufferRangeFunc (target, offset, length, flags);
+		if (!ptr)
+		{
+			err = glGetError ();
+			Sys_Error ("%s: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d ctx=%p",
+				label ? label : "GL_TryMapRange",
+				err,
+				target_name,
+				target,
+				buffer,
+				binding,
+				(uint64_t) offset,
+				(uint64_t) length,
+				(uint64_t) buffer_size,
+				(unsigned int) flags,
+				mapped,
+				(void *) SDL_GL_GetCurrentContext ());
+		}
+	}
+
+	return ptr;
+}
+
 /*
 ====================
 GL_AddGarbageBuffer
@@ -1334,7 +1465,7 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 			if (gl_buffer_storage_able)
 			{
 				GL_BufferStorageFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, flags);
-				frame->host_ptr = GL_MapBufferRangeFunc (GL_ARRAY_BUFFER, 0, frameres_host_buffer_size, flags);
+				frame->host_ptr = GL_TryMapRange (GL_ARRAY_BUFFER, frame->host_buffer, 0, frameres_host_buffer_size, flags, frameres_host_buffer_size, "GL_AllocFrameResources");
 				if (!frame->host_ptr)
 					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %" SDL_PRIu64 " bytes", (uint64_t)frameres_host_buffer_size);
 			}
