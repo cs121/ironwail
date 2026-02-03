@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_godray_emit.h"
 #include "r_godrayvol.h"
 #include "renderer_backend.h"
+#include "renderer_backend_gl.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -1094,11 +1095,11 @@ GL_CreateBuffer
 GLuint GL_CreateBuffer (GLenum target, GLenum usage, const char *name, size_t size, const void *data)
 {
 	GLuint buffer;
-	GL_GenBuffersFunc (1, &buffer);
+	RB_GL_GenBuffers (1, &buffer);
 	GL_BindBuffer (target, buffer);
 	if (name)
 		GL_ObjectLabelFunc (GL_BUFFER, buffer, -1, name);
-	GL_BufferDataFunc (target, size, data, usage);
+	RB_GL_BufferData (target, size, data, usage);
 	return buffer;
 }
 
@@ -1135,7 +1136,7 @@ void GL_BindBuffer (GLenum target, GLuint buffer)
 	{
 		*cache = buffer;
 	apply:
-		GL_BindBufferFunc (target, buffer);
+		RB_GL_BindBuffer (target, buffer);
 	}
 }
 
@@ -1229,7 +1230,7 @@ void GL_DeleteBuffer (GLuint buffer)
 		if (ssbo_ranges[i].buffer == buffer)
 			ssbo_ranges[i].buffer = 0;
 
-	GL_DeleteBuffersFunc (1, &buffer);
+	RB_GL_DeleteBuffers (1, &buffer);
 }
 
 /*

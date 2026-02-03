@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // draw.c -- 2d drawing
 
 #include "quakedef.h"
+#include "renderer_backend_gl.h"
 
 const vec3_t	rgb_black = {0.f, 0.f, 0.f};
 const vec3_t	rgb_white = {1.f, 1.f, 1.f};
@@ -1139,8 +1140,8 @@ void Draw_SetClipRect (float x, float y, float width, float height)
 	y2 = floor (gly + y2 * glheight + 0.5f);
 
 	Draw_Flush ();
-	glEnable (GL_SCISSOR_TEST);
-	glScissor (x, y2, x2 - x, y - y2);
+	RB_GL_Enable (GL_SCISSOR_TEST);
+	RB_GL_Scissor (x, y2, x2 - x, y - y2);
 }
 
 /*
@@ -1151,7 +1152,7 @@ Draw_ResetClipping
 void Draw_ResetClipping (void)
 {
 	Draw_Flush ();
-	glDisable (GL_SCISSOR_TEST);
+	RB_GL_Disable (GL_SCISSOR_TEST);
 }
 
 #define CANVAS_ALIGN_LEFT		0.f

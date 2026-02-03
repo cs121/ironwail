@@ -24,6 +24,76 @@ typedef struct rb_gl_fbo_s
 
 static rb_caps_t rb_gl_caps = {0, 0};
 
+void RB_GL_Enable(int cap)
+{
+	glEnable (cap);
+}
+
+void RB_GL_Disable(int cap)
+{
+	glDisable (cap);
+}
+
+void RB_GL_BlendFunc(int sfactor, int dfactor)
+{
+	glBlendFunc (sfactor, dfactor);
+}
+
+void RB_GL_CullFace(int mode)
+{
+	glCullFace (mode);
+}
+
+void RB_GL_DepthMask(int flag)
+{
+	glDepthMask (flag);
+}
+
+void RB_GL_Viewport(int x, int y, int width, int height)
+{
+	glViewport (x, y, width, height);
+}
+
+void RB_GL_Scissor(int x, int y, int width, int height)
+{
+	glScissor (x, y, width, height);
+}
+
+void RB_GL_GenBuffers(int n, unsigned int *buffers)
+{
+	GL_GenBuffersFunc (n, buffers);
+}
+
+void RB_GL_DeleteBuffers(int n, const unsigned int *buffers)
+{
+	GL_DeleteBuffersFunc (n, buffers);
+}
+
+void RB_GL_BindBuffer(int target, unsigned int buffer)
+{
+	GL_BindBufferFunc (target, buffer);
+}
+
+void RB_GL_BufferData(int target, size_t size, const void *data, int usage)
+{
+	GL_BufferDataFunc (target, size, data, usage);
+}
+
+void RB_GL_GenVertexArrays(int n, unsigned int *arrays)
+{
+	GL_GenVertexArraysFunc (n, arrays);
+}
+
+void RB_GL_DeleteVertexArrays(int n, const unsigned int *arrays)
+{
+	GL_DeleteVertexArraysFunc (n, arrays);
+}
+
+void RB_GL_BindVertexArray(unsigned int array)
+{
+	GL_BindVertexArrayFunc (array);
+}
+
 static void RB_GL_Init(void)
 {
 	Con_DPrintf("RB_GL_Init: stub backend initialized.\n");
