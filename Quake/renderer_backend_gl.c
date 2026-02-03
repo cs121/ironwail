@@ -323,7 +323,7 @@ static rb_fbo_t RBGL_CreateFBO(const rb_fbo_desc_t *desc)
 		const rb_gl_tex_t *color_tex = (const rb_gl_tex_t *)desc->color;
 		GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, color_tex->target, color_tex->id, 0);
 		draw_buffers[0] = GL_COLOR_ATTACHMENT0;
-		glDrawBuffers(1, draw_buffers);
+		GL_DrawBuffersFunc(1, draw_buffers);
 	}
 	else
 	{
