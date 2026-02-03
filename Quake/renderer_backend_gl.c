@@ -157,7 +157,7 @@ static int RBGL_TargetBindingEnum(int target)
 	}
 }
 
-static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label)
+static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield flags)
 {
 	GLenum err;
 	int binding_enum;
@@ -166,6 +166,23 @@ static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset,
 	GLint64 buffer_size = 0;
 	void *ptr;
 	const char *target_name = RBGL_TargetName(target);
+	Uint32 thread_id = SDL_ThreadID();
+	void *context = SDL_GL_GetCurrentContext();
+
+	if (!buffer)
+	{
+		Con_Printf("RB_MapBufferRange: invalid buffer=0 for target=%s(0x%04X)\n", target_name, target);
+		return NULL;
+	}
+	if (offset < 0 || length <= 0)
+	{
+		Con_Printf("RB_MapBufferRange: invalid range offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " target=%s buffer=%u\n",
+			(int64_t)offset,
+			(uint64_t)length,
+			target_name,
+			buffer);
+		return NULL;
+	}
 
 	assert(buffer != 0);
 
@@ -181,40 +198,131 @@ static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset,
 	GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
 	GL_GetBufferParameterivFunc(target, GL_BUFFER_MAPPED, &mapped);
 
-	assert(binding != 0);
-	assert((uint64_t)(offset + length) <= (uint64_t)buffer_size);
+	if (binding_enum && (GLuint)binding != buffer)
+	{
+		Sys_Error("RB_MapBufferRange: binding mismatch target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(int64_t)offset,
+			(uint64_t)length,
+			(uint64_t)buffer_size,
+			flags,
+			mapped,
+			thread_id,
+			context);
+	}
+	if (mapped)
+	{
+		Sys_Error("RB_MapBufferRange: buffer already mapped target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(int64_t)offset,
+			(uint64_t)length,
+			(uint64_t)buffer_size,
+			flags,
+			mapped,
+			thread_id,
+			context);
+	}
+	if (buffer_size <= 0)
+	{
+		Con_Printf("RB_MapBufferRange: buffer has no storage target=%s(0x%04X) buffer=%u bound=%d size=%" SDL_PRId64 " flags=0x%08X thread=%u ctx=%p\n",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(int64_t)buffer_size,
+			flags,
+			thread_id,
+			context);
+		return NULL;
+	}
+	if ((uint64_t)offset + (uint64_t)length > (uint64_t)buffer_size)
+	{
+		Sys_Error("RB_MapBufferRange: range exceeds buffer target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(int64_t)offset,
+			(uint64_t)length,
+			(uint64_t)buffer_size,
+			flags,
+			mapped,
+			thread_id,
+			context);
+	}
 
 	ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
 	if (!ptr)
 	{
 		err = glGetError();
-		Con_Printf("%s: glMapBufferRange failed (err=0x%04X) on %s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 "\n",
-			label ? label : "RBGL_BufferMapRange",
+		Con_Printf("RB_MapBufferRange: glMapBufferRange failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p\n",
 			err,
 			target_name,
+			target,
 			buffer,
-			(uint64_t)offset,
-			(uint64_t)length);
+			binding,
+			(int64_t)offset,
+			(uint64_t)length,
+			(uint64_t)buffer_size,
+			flags,
+			mapped,
+			thread_id,
+			context);
 
-		GL_BufferDataFunc(target, full_size, NULL, GL_STREAM_DRAW);
+		GL_BufferDataFunc(target, (GLsizeiptr)buffer_size, NULL, GL_STREAM_DRAW);
 		ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
 		if (!ptr)
 		{
 			err = glGetError();
-			Sys_Error("%s: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d ctx=%p",
-				label ? label : "RBGL_BufferMapRange",
+			Sys_Error("RB_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRId64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d thread=%u ctx=%p",
 				err,
 				target_name,
 				target,
 				buffer,
 				binding,
-				(uint64_t)offset,
+				(int64_t)offset,
 				(uint64_t)length,
 				(uint64_t)buffer_size,
 				flags,
 				mapped,
-				(void *)SDL_GL_GetCurrentContext());
+				thread_id,
+				context);
 		}
+	}
+
+	return ptr;
+}
+
+static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label)
+{
+	void *ptr;
+
+	if (full_size && (offset + length > full_size))
+	{
+		Sys_Error("%s: range exceeds expected size target=%s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64,
+			label ? label : "RBGL_BufferMapRange",
+			RBGL_TargetName(target),
+			buffer,
+			(uint64_t)offset,
+			(uint64_t)length,
+			(uint64_t)full_size);
+	}
+
+	ptr = RB_MapBufferRange((GLenum)target, (GLuint)buffer, (GLintptr)offset, (GLsizeiptr)length, (GLbitfield)flags);
+	if (!ptr && label)
+	{
+		Con_Printf("%s: RB_MapBufferRange returned NULL target=%s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 "\n",
+			label,
+			RBGL_TargetName(target),
+			buffer,
+			(uint64_t)offset,
+			(uint64_t)length);
 	}
 
 	return ptr;
