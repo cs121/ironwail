@@ -1061,7 +1061,7 @@ static void GL_CheckExtensions (void)
 		// test to make sure we really have control over it
 		// 1.0 and 2.0 should always be legal values
 		glGenTextures(1, &tex);
-		glBindTexture (GL_TEXTURE_2D, tex);
+		RB_BindTexture (GL_TEXTURE_2D, tex);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
 		glGetTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &test1);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 2.0f);

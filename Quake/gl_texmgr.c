@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "glquake.h"
 #include "bc7enc.h"
 #include "gl_ktx2.h"
+#include "renderer_backend.h"
 #include <ctype.h>
 
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
@@ -2176,7 +2177,7 @@ GLuint TexMgr_LoadDDS (const char *path)
 	}
 
 	glGenTextures (1, &texnum);
-	glBindTexture (GL_TEXTURE_2D, texnum);
+	RB_BindTexture (GL_TEXTURE_2D, texnum);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 
 	{
@@ -2830,7 +2831,7 @@ qboolean GL_BindNative (GLenum texunit, GLenum type, GLuint handle)
 	}
 
 	GL_SelectTexture (texunit);
-	glBindTexture (type, handle);
+	RB_BindTexture (type, handle);
 
 	return true;
 }
@@ -2889,7 +2890,7 @@ void GL_ClearBindings(void)
 		for (i = 0; i < countof (currenttexture); i++)
 		{
 			GL_SelectTexture (GL_TEXTURE0 + i);
-			glBindTexture (GL_TEXTURE_2D, 0);
+			RB_BindTexture (GL_TEXTURE_2D, 0);
 			GL_BindSamplerFunc (i, 0);
 		}
 }

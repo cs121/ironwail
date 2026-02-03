@@ -113,6 +113,8 @@ typedef struct rb_backend_api_s
 	void				(*depth_mask)(int flag);
 	void				(*viewport)(int x, int y, int width, int height);
 	void				(*scissor)(int x, int y, int width, int height);
+	void				(*bind_framebuffer)(int target, unsigned int framebuffer);
+	void				(*bind_texture)(int target, unsigned int texture);
 	void				(*gen_buffers)(int n, unsigned int *buffers);
 	void				(*delete_buffers)(int n, const unsigned int *buffers);
 	void				(*bind_buffer)(int target, unsigned int buffer);
@@ -151,6 +153,8 @@ void			RB_CullFace(int mode);
 void			RB_DepthMask(int flag);
 void			RB_Viewport(int x, int y, int width, int height);
 void			RB_Scissor(int x, int y, int width, int height);
+void			RB_BindFramebuffer(int target, unsigned int framebuffer);
+void			RB_BindTexture(int target, unsigned int texture);
 void			RB_GenBuffers(int n, unsigned int *buffers);
 void			RB_DeleteBuffers(int n, const unsigned int *buffers);
 void			RB_BindBuffer(int target, unsigned int buffer);

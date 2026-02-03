@@ -117,6 +117,18 @@ static void RB_NULL_Scissor(int x, int y, int width, int height)
 	(void)height;
 }
 
+static void RB_NULL_BindFramebuffer(int target, unsigned int framebuffer)
+{
+	(void)target;
+	(void)framebuffer;
+}
+
+static void RB_NULL_BindTexture(int target, unsigned int texture)
+{
+	(void)target;
+	(void)texture;
+}
+
 static void RB_NULL_GenBuffers(int n, unsigned int *buffers)
 {
 	(void)n;
@@ -196,6 +208,8 @@ static const rb_backend_api_t rb_null_api = {
 	RB_NULL_DepthMask,
 	RB_NULL_Viewport,
 	RB_NULL_Scissor,
+	RB_NULL_BindFramebuffer,
+	RB_NULL_BindTexture,
 	RB_NULL_GenBuffers,
 	RB_NULL_DeleteBuffers,
 	RB_NULL_BindBuffer,

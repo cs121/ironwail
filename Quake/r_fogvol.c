@@ -669,8 +669,8 @@ void R_FogVol_Render (void)
 			src_tex = framebufs.fogvol.color_tex[fog_src_index];
 		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src_index];
 		RB_Disable (GL_SCISSOR_TEST);
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, src_fbo);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, dst_fbo);
+		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
+		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		if (use_halfres && i == 0)
@@ -686,7 +686,7 @@ void R_FogVol_Render (void)
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
+		RB_BindFramebuffer (GL_FRAMEBUFFER, dst_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
@@ -706,7 +706,7 @@ void R_FogVol_Render (void)
 
 	if (!has_drawn)
 	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		RB_Viewport (glx, gly, glwidth, glheight);
@@ -730,7 +730,7 @@ void R_FogVol_Render (void)
 
 		GL_UseProgram (glprogs.fogvol_temporal);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
+		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		RB_Viewport (0, 0, fog_width, fog_height);
@@ -754,7 +754,7 @@ void R_FogVol_Render (void)
 
 	if (has_drawn)
 	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		RB_Viewport (glx, gly, glwidth, glheight);
@@ -775,8 +775,8 @@ void R_FogVol_Render (void)
 			}
 			else
 			{
-				GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
-				GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+				RB_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
+				RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 					0, 0, glwidth, glheight,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -784,8 +784,8 @@ void R_FogVol_Render (void)
 		}
 		else
 		{
-			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
-			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+			RB_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
+			RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 				0, 0, glwidth, glheight,
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
