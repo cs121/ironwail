@@ -85,6 +85,16 @@ static void RBGL_Scissor(int x, int y, int width, int height)
 	glScissor (x, y, width, height);
 }
 
+static void RBGL_BindFramebuffer(int target, unsigned int framebuffer)
+{
+	GL_BindFramebufferFunc(target, framebuffer);
+}
+
+static void RBGL_BindTexture(int target, unsigned int texture)
+{
+	glBindTexture(target, texture);
+}
+
 static void RBGL_GenBuffers(int n, unsigned int *buffers)
 {
 	GL_GenBuffersFunc (n, buffers);
@@ -411,6 +421,8 @@ static const rb_backend_api_t rb_gl_api = {
 	RBGL_DepthMask,
 	RBGL_Viewport,
 	RBGL_Scissor,
+	RBGL_BindFramebuffer,
+	RBGL_BindTexture,
 	RBGL_GenBuffers,
 	RBGL_DeleteBuffers,
 	RBGL_BindBuffer,

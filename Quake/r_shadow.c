@@ -411,7 +411,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_dlight_fbo, -1, "shadowmap dlight fbo");
 	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_dlight_depth_tex, 0);
 	glDrawBuffer (GL_NONE);
@@ -484,7 +484,7 @@ void R_ResizeShadowMapIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_fbo, -1, "shadowmap fbo");
 	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_depth_tex, 0);
 	glDrawBuffer (GL_NONE);
@@ -536,7 +536,7 @@ void R_Shadow_SunPass (void)
 
 	GL_BeginGroup ("Shadow map (sun)");
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_fbo);
 	RB_Viewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
@@ -653,7 +653,7 @@ void R_Shadow_DlightPass (void)
 
 	GL_BeginGroup ("Shadow map (dlights)");
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 	RB_Enable (GL_SCISSOR_TEST);

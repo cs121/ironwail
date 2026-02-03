@@ -202,6 +202,20 @@ void RB_Scissor(int x, int y, int width, int height)
 	rb_backend->scissor(x, y, width, height);
 }
 
+void RB_BindFramebuffer(int target, unsigned int framebuffer)
+{
+	if (!rb_backend || !rb_backend->bind_framebuffer)
+		return;
+	rb_backend->bind_framebuffer(target, framebuffer);
+}
+
+void RB_BindTexture(int target, unsigned int texture)
+{
+	if (!rb_backend || !rb_backend->bind_texture)
+		return;
+	rb_backend->bind_texture(target, texture);
+}
+
 void RB_GenBuffers(int n, unsigned int *buffers)
 {
 	if (!rb_backend || !rb_backend->gen_buffers)
