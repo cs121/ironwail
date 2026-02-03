@@ -104,8 +104,9 @@ rb_tex_t RB_CreateTexture(const rb_tex_desc_t *desc)
 
 void RB_DestroyTexture(rb_tex_t tex)
 {
-	assert(tex);
 	if (!rb_backend || !rb_backend->destroy_texture)
+		return;
+	if (!tex)
 		return;
 	rb_backend->destroy_texture(tex);
 }
@@ -120,8 +121,9 @@ rb_buf_t RB_CreateBuffer(const rb_buf_desc_t *desc)
 
 void RB_DestroyBuffer(rb_buf_t buf)
 {
-	assert(buf);
 	if (!rb_backend || !rb_backend->destroy_buffer)
+		return;
+	if (!buf)
 		return;
 	rb_backend->destroy_buffer(buf);
 }
@@ -136,8 +138,9 @@ rb_fbo_t RB_CreateFBO(const rb_fbo_desc_t *desc)
 
 void RB_DestroyFBO(rb_fbo_t fbo)
 {
-	assert(fbo);
 	if (!rb_backend || !rb_backend->destroy_fbo)
+		return;
+	if (!fbo)
 		return;
 	rb_backend->destroy_fbo(fbo);
 }
