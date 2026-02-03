@@ -15,6 +15,17 @@ This file is part of Ironwail.
 #define RENDERER_BACKEND_GL 1
 #endif
 
+/*
+Renderer backend responsibilities:
+- Owns graphics API calls, resource lifetimes, and backend state tracking/caching.
+- Exposes a minimal RB_* interface for renderer orchestration to consume.
+- Does NOT contain render graph logic, pass sequencing, or high-level effects.
+
+Migration Notes:
+- RenderView orchestration, passes, and effects like SSAO/postfx remain in the frontend.
+- Backend should stay focused on API calls, resource management, and state control only.
+*/
+
 typedef struct rb_tex_s *rb_tex_t;
 typedef struct rb_buf_s *rb_buf_t;
 typedef struct rb_fbo_s *rb_fbo_t;
@@ -95,6 +106,20 @@ typedef struct rb_backend_api_s
 	rb_fbo_t			(*create_fbo)(const rb_fbo_desc_t *desc);
 	void				(*destroy_fbo)(rb_fbo_t fbo);
 	void				(*submit)(const rb_draw_desc_t *desc);
+	void				(*enable)(int cap);
+	void				(*disable)(int cap);
+	void				(*blend_func)(int sfactor, int dfactor);
+	void				(*cull_face)(int mode);
+	void				(*depth_mask)(int flag);
+	void				(*viewport)(int x, int y, int width, int height);
+	void				(*scissor)(int x, int y, int width, int height);
+	void				(*gen_buffers)(int n, unsigned int *buffers);
+	void				(*delete_buffers)(int n, const unsigned int *buffers);
+	void				(*bind_buffer)(int target, unsigned int buffer);
+	void				(*buffer_data)(int target, size_t size, const void *data, int usage);
+	void				(*gen_vertex_arrays)(int n, unsigned int *arrays);
+	void				(*delete_vertex_arrays)(int n, const unsigned int *arrays);
+	void				(*bind_vertex_array)(unsigned int array);
 	const rb_caps_t	*(*get_caps)(void);
 	void				(*debug_marker_begin)(const char *label);
 	void				(*debug_marker_end)(void);
@@ -119,6 +144,20 @@ rb_fbo_t		RB_CreateFBO(const rb_fbo_desc_t *desc);
 void			RB_DestroyFBO(rb_fbo_t fbo);
 
 void			RB_Submit(const rb_draw_desc_t *desc);
+void			RB_Enable(int cap);
+void			RB_Disable(int cap);
+void			RB_BlendFunc(int sfactor, int dfactor);
+void			RB_CullFace(int mode);
+void			RB_DepthMask(int flag);
+void			RB_Viewport(int x, int y, int width, int height);
+void			RB_Scissor(int x, int y, int width, int height);
+void			RB_GenBuffers(int n, unsigned int *buffers);
+void			RB_DeleteBuffers(int n, const unsigned int *buffers);
+void			RB_BindBuffer(int target, unsigned int buffer);
+void			RB_BufferData(int target, size_t size, const void *data, int usage);
+void			RB_GenVertexArrays(int n, unsigned int *arrays);
+void			RB_DeleteVertexArrays(int n, const unsigned int *arrays);
+void			RB_BindVertexArray(unsigned int array);
 const rb_caps_t	*RB_GetCaps(void);
 void			RB_DebugMarkerBegin(const char *label);
 void			RB_DebugMarkerEnd(void);

@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "draw.h"
 #include "r_fogvol.h"
-#include "renderer_backend_gl.h"
+#include "renderer_backend.h"
 #include <math.h>
 
 typedef struct fog_volume_gpu_s
@@ -606,7 +606,7 @@ void R_FogVol_Render (void)
 	GL_BeginGroup ("Fog volumes");
 	GL_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	RB_GL_Disable (GL_SCISSOR_TEST);
+	RB_Disable (GL_SCISSOR_TEST);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -621,9 +621,9 @@ void R_FogVol_Render (void)
 	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
 
 	if (use_halfres)
-		RB_GL_Viewport (0, 0, fog_width, fog_height);
+		RB_Viewport (0, 0, fog_width, fog_height);
 	else
-		RB_GL_Viewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
+		RB_Viewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
 	src_tex = framebufs.composite.color_tex;
 	final_tex = 0;
@@ -668,7 +668,7 @@ void R_FogVol_Render (void)
 		if (i > 0)
 			src_tex = framebufs.fogvol.color_tex[fog_src_index];
 		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src_index];
-		RB_GL_Disable (GL_SCISSOR_TEST);
+		RB_Disable (GL_SCISSOR_TEST);
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, src_fbo);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, dst_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -691,17 +691,17 @@ void R_FogVol_Render (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-		RB_GL_Enable (GL_SCISSOR_TEST);
-		RB_GL_Scissor (x0, y0, x1 - x0, y1 - y0);
+		RB_Enable (GL_SCISSOR_TEST);
+		RB_Scissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
-		RB_GL_Disable (GL_SCISSOR_TEST);
+		RB_Disable (GL_SCISSOR_TEST);
 
 		fog_src_index = fog_dst_index;
 		final_tex = framebufs.fogvol.color_tex[fog_src_index];
 		has_drawn = true;
 	}
-	RB_GL_Disable (GL_SCISSOR_TEST);
+	RB_Disable (GL_SCISSOR_TEST);
 	GLuint final_fbo = framebufs.fogvol.fbo[fog_src_index];
 
 	if (!has_drawn)
@@ -709,7 +709,7 @@ void R_FogVol_Render (void)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_GL_Viewport (glx, gly, glwidth, glheight);
+		RB_Viewport (glx, gly, glwidth, glheight);
 		GL_EndGroup ();
 		return;
 	}
@@ -733,7 +733,7 @@ void R_FogVol_Render (void)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_GL_Viewport (0, 0, fog_width, fog_height);
+		RB_Viewport (0, 0, fog_width, fog_height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
@@ -757,7 +757,7 @@ void R_FogVol_Render (void)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_GL_Viewport (glx, gly, glwidth, glheight);
+		RB_Viewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
 			if (r_fogvol_upsample.value > 0.f && glprogs.fogvol_upsample)

@@ -8,7 +8,7 @@ of the License, or (at your option) any later version.
 */
 
 #include "quakedef.h"
-#include "renderer_backend_gl.h"
+#include "renderer_backend.h"
 #include <float.h>
 
 extern cvar_t gl_farclip;
@@ -537,7 +537,7 @@ void R_Shadow_SunPass (void)
 	GL_BeginGroup ("Shadow map (sun)");
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
-	RB_GL_Viewport (0, 0, shadowmap_size, shadowmap_size);
+	RB_Viewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 
@@ -656,7 +656,7 @@ void R_Shadow_DlightPass (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	RB_GL_Enable (GL_SCISSOR_TEST);
+	RB_Enable (GL_SCISSOR_TEST);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -687,9 +687,9 @@ void R_Shadow_DlightPass (void)
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
 
-		RB_GL_Viewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		RB_Viewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
-		RB_GL_Scissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		RB_Scissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		glClear (GL_DEPTH_BUFFER_BIT);
 
@@ -708,7 +708,7 @@ void R_Shadow_DlightPass (void)
 		}
 	}
 
-	RB_GL_Disable (GL_SCISSOR_TEST);
+	RB_Disable (GL_SCISSOR_TEST);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 

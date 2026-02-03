@@ -507,7 +507,7 @@ void GL_CreateShaders (void)
 {
 	int palettize, dither, mode, alphatest, warp, oit, md5;
 
-	// TODO BACKEND: keep shader management/permutation system in the frontend for now.
+	// Migration note: shader management/permutation system stays in the frontend for now.
 	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
 	glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
 	for (warp = 0; warp < 2; warp++)
