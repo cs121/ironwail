@@ -1351,8 +1351,8 @@ static void *GL_TryMapRange (GLenum target, GLuint buffer, GLintptr offset, GLsi
 	binding_enum = GL_TargetBindingEnum (target);
 	if (binding_enum)
 		glGetIntegerv (binding_enum, &binding);
-	glGetBufferParameteri64v (target, GL_BUFFER_SIZE, &buffer_size);
-	glGetBufferParameteriv (target, GL_BUFFER_MAPPED, &mapped);
+	GL_GetBufferParameteri64vFunc (target, GL_BUFFER_SIZE, &buffer_size);
+	GL_GetBufferParameterivFunc (target, GL_BUFFER_MAPPED, &mapped);
 
 	if (length <= 0)
 		Con_Printf ("%s: warning: non-positive map length=%" SDL_PRIu64 " for %s buffer=%u\n",
