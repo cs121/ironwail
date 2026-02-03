@@ -8,6 +8,7 @@ This file is part of Ironwail.
 #include "renderer_backend_gl.h"
 
 #include <assert.h>
+#include <SDL_inttypes.h>
 #include <SDL_stdinc.h>
 
 typedef struct rb_gl_tex_s
