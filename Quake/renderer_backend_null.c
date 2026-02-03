@@ -155,6 +155,18 @@ static void RB_NULL_BufferData(int target, size_t size, const void *data, int us
 	(void)usage;
 }
 
+static void *RB_NULL_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label)
+{
+	(void)target;
+	(void)buffer;
+	(void)offset;
+	(void)length;
+	(void)flags;
+	(void)full_size;
+	(void)label;
+	return NULL;
+}
+
 static void RB_NULL_GenVertexArrays(int n, unsigned int *arrays)
 {
 	(void)n;
@@ -214,6 +226,7 @@ static const rb_backend_api_t rb_null_api = {
 	RB_NULL_DeleteBuffers,
 	RB_NULL_BindBuffer,
 	RB_NULL_BufferData,
+	RB_NULL_BufferMapRange,
 	RB_NULL_GenVertexArrays,
 	RB_NULL_DeleteVertexArrays,
 	RB_NULL_BindVertexArray,

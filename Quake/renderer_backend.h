@@ -119,6 +119,7 @@ typedef struct rb_backend_api_s
 	void				(*delete_buffers)(int n, const unsigned int *buffers);
 	void				(*bind_buffer)(int target, unsigned int buffer);
 	void				(*buffer_data)(int target, size_t size, const void *data, int usage);
+	void				*(*buffer_map_range)(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label);
 	void				(*gen_vertex_arrays)(int n, unsigned int *arrays);
 	void				(*delete_vertex_arrays)(int n, const unsigned int *arrays);
 	void				(*bind_vertex_array)(unsigned int array);
@@ -159,6 +160,7 @@ void			RB_GenBuffers(int n, unsigned int *buffers);
 void			RB_DeleteBuffers(int n, const unsigned int *buffers);
 void			RB_BindBuffer(int target, unsigned int buffer);
 void			RB_BufferData(int target, size_t size, const void *data, int usage);
+void			*RB_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label);
 void			RB_GenVertexArrays(int n, unsigned int *arrays);
 void			RB_DeleteVertexArrays(int n, const unsigned int *arrays);
 void			RB_BindVertexArray(unsigned int array);

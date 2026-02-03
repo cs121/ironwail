@@ -115,6 +115,111 @@ static void RBGL_BufferData(int target, size_t size, const void *data, int usage
 	GL_BufferDataFunc (target, size, data, usage);
 }
 
+static const char *RBGL_TargetName(int target)
+{
+	switch (target)
+	{
+	case GL_ARRAY_BUFFER:
+		return "GL_ARRAY_BUFFER";
+	case GL_ELEMENT_ARRAY_BUFFER:
+		return "GL_ELEMENT_ARRAY_BUFFER";
+	case GL_UNIFORM_BUFFER:
+		return "GL_UNIFORM_BUFFER";
+	case GL_SHADER_STORAGE_BUFFER:
+		return "GL_SHADER_STORAGE_BUFFER";
+	case GL_PIXEL_UNPACK_BUFFER:
+		return "GL_PIXEL_UNPACK_BUFFER";
+	case GL_DRAW_INDIRECT_BUFFER:
+		return "GL_DRAW_INDIRECT_BUFFER";
+	default:
+		return "UNKNOWN_TARGET";
+	}
+}
+
+static int RBGL_TargetBindingEnum(int target)
+{
+	switch (target)
+	{
+	case GL_ARRAY_BUFFER:
+		return GL_ARRAY_BUFFER_BINDING;
+	case GL_ELEMENT_ARRAY_BUFFER:
+		return GL_ELEMENT_ARRAY_BUFFER_BINDING;
+	case GL_UNIFORM_BUFFER:
+		return GL_UNIFORM_BUFFER_BINDING;
+	case GL_SHADER_STORAGE_BUFFER:
+		return GL_SHADER_STORAGE_BUFFER_BINDING;
+	case GL_PIXEL_UNPACK_BUFFER:
+		return GL_PIXEL_UNPACK_BUFFER_BINDING;
+	case GL_DRAW_INDIRECT_BUFFER:
+		return GL_DRAW_INDIRECT_BUFFER_BINDING;
+	default:
+		return 0;
+	}
+}
+
+static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t length, unsigned int flags, size_t full_size, const char *label)
+{
+	GLenum err;
+	int binding_enum;
+	GLint binding = 0;
+	GLint mapped = 0;
+	GLint64 buffer_size = 0;
+	void *ptr;
+	const char *target_name = RBGL_TargetName(target);
+
+	assert(buffer != 0);
+
+	while (glGetError() != GL_NO_ERROR)
+	{
+	}
+
+	GL_BindBufferFunc(target, buffer);
+
+	binding_enum = RBGL_TargetBindingEnum(target);
+	if (binding_enum)
+		glGetIntegerv(binding_enum, &binding);
+	GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
+	GL_GetBufferParameterivFunc(target, GL_BUFFER_MAPPED, &mapped);
+
+	assert(binding != 0);
+	assert((uint64_t)(offset + length) <= (uint64_t)buffer_size);
+
+	ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
+	if (!ptr)
+	{
+		err = glGetError();
+		Con_Printf("%s: glMapBufferRange failed (err=0x%04X) on %s buffer=%u offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 "\n",
+			label ? label : "RBGL_BufferMapRange",
+			err,
+			target_name,
+			buffer,
+			(uint64_t)offset,
+			(uint64_t)length);
+
+		GL_BufferDataFunc(target, full_size, NULL, GL_STREAM_DRAW);
+		ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
+		if (!ptr)
+		{
+			err = glGetError();
+			Sys_Error("%s: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%" SDL_PRIu64 " length=%" SDL_PRIu64 " size=%" SDL_PRIu64 " flags=0x%08X mapped=%d ctx=%p",
+				label ? label : "RBGL_BufferMapRange",
+				err,
+				target_name,
+				target,
+				buffer,
+				binding,
+				(uint64_t)offset,
+				(uint64_t)length,
+				(uint64_t)buffer_size,
+				flags,
+				mapped,
+				(void *)SDL_GL_GetCurrentContext());
+		}
+	}
+
+	return ptr;
+}
+
 static void RBGL_GenVertexArrays(int n, unsigned int *arrays)
 {
 	GL_GenVertexArraysFunc (n, arrays);
@@ -427,6 +532,7 @@ static const rb_backend_api_t rb_gl_api = {
 	RBGL_DeleteBuffers,
 	RBGL_BindBuffer,
 	RBGL_BufferData,
+	RBGL_BufferMapRange,
 	RBGL_GenVertexArrays,
 	RBGL_DeleteVertexArrays,
 	RBGL_BindVertexArray,
