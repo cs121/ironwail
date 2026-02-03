@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_vidsdl.c -- SDL GL vid component
 
 #include "quakedef.h"
-#include "renderer_backend_gl.h"
+#include "renderer_backend.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
@@ -1134,7 +1134,7 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                 {
                         default:
                         case GLS_BLEND_OPAQUE:
-                                RB_GL_BlendFunc (GL_ONE, GL_ZERO);
+                                RB_BlendFunc (GL_ONE, GL_ZERO);
                                 break;
                         case GLS_BLEND_ALPHA_OIT:
                                 if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
@@ -1145,13 +1145,13 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                                 }
                                 // fallthrough!
                         case GLS_BLEND_ALPHA:
-                                RB_GL_BlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                                RB_BlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
                                 break;
                         case GLS_BLEND_MULTIPLY:
-                                RB_GL_BlendFunc (GL_ZERO, GL_SRC_COLOR);
+                                RB_BlendFunc (GL_ZERO, GL_SRC_COLOR);
                                 break;
                         case GLS_BLEND_ADD:
-                                RB_GL_BlendFunc (GL_ONE, GL_ONE);
+                                RB_BlendFunc (GL_ONE, GL_ONE);
                                 break;
                 }
         }
@@ -1161,29 +1161,29 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		unsigned cull = mask & GLS_MASK_CULL;
 		if (cull == GLS_CULL_NONE)
 		{
-			RB_GL_Disable (GL_CULL_FACE);
+			RB_Disable (GL_CULL_FACE);
 		}
 		else
 		{
 			if ((glstate & GLS_MASK_CULL) == GLS_CULL_NONE || (force & GLS_MASK_CULL) != 0)
-				RB_GL_Enable (GL_CULL_FACE);
+				RB_Enable (GL_CULL_FACE);
 			if (cull == GLS_CULL_FRONT)
-				RB_GL_CullFace (GL_FRONT);
+				RB_CullFace (GL_FRONT);
 			else
-				RB_GL_CullFace (GL_BACK);
+				RB_CullFace (GL_BACK);
 		}
 	}
 
 	if (diff & GLS_NO_ZTEST)
 	{
 		if (mask & GLS_NO_ZTEST)
-			RB_GL_Disable (GL_DEPTH_TEST);
+			RB_Disable (GL_DEPTH_TEST);
 		else
-			RB_GL_Enable (GL_DEPTH_TEST);
+			RB_Enable (GL_DEPTH_TEST);
 	}
 
 	if (diff & GLS_NO_ZWRITE)
-		RB_GL_DepthMask ((mask & GLS_NO_ZWRITE) == 0);
+		RB_DepthMask ((mask & GLS_NO_ZWRITE) == 0);
 
 	if (diff & GLS_MASK_ATTRIBS)
 	{
@@ -1317,8 +1317,8 @@ static void GL_Init (void)
 
 	GL_CheckExtensions ();
 
-	RB_GL_GenVertexArrays (1, &globalvao);
-	RB_GL_BindVertexArray (globalvao);
+	RB_GenVertexArrays (1, &globalvao);
+	RB_BindVertexArray (globalvao);
 
 	glGetIntegerv (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &ssbo_align);
 	glGetIntegerv (GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);

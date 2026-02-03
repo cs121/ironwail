@@ -32,7 +32,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_godray_emit.h"
 #include "r_godrayvol.h"
 #include "renderer_backend.h"
-#include "renderer_backend_gl.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -542,7 +541,7 @@ void R_Init (void)
 {
         cmd_function_t *cmd;
 
-        // TODO BACKEND: initialize renderer backend (stub in phase 1).
+        // Initialize renderer backend.
         RB_Init();
 
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
@@ -1014,7 +1013,7 @@ void R_NewMap (void)
 {
 	int		i;
 
-	// TODO BACKEND: notify renderer backend of new map (stub in phase 1).
+	// Notify renderer backend of new map.
 	RB_NewMap();
 
 	for (i=0 ; i<256 ; i++)
@@ -1095,11 +1094,11 @@ GL_CreateBuffer
 GLuint GL_CreateBuffer (GLenum target, GLenum usage, const char *name, size_t size, const void *data)
 {
 	GLuint buffer;
-	RB_GL_GenBuffers (1, &buffer);
+	RB_GenBuffers (1, &buffer);
 	GL_BindBuffer (target, buffer);
 	if (name)
 		GL_ObjectLabelFunc (GL_BUFFER, buffer, -1, name);
-	RB_GL_BufferData (target, size, data, usage);
+	RB_BufferData (target, size, data, usage);
 	return buffer;
 }
 
@@ -1136,7 +1135,7 @@ void GL_BindBuffer (GLenum target, GLuint buffer)
 	{
 		*cache = buffer;
 	apply:
-		RB_GL_BindBuffer (target, buffer);
+		RB_BindBuffer (target, buffer);
 	}
 }
 
@@ -1230,7 +1229,7 @@ void GL_DeleteBuffer (GLuint buffer)
 		if (ssbo_ranges[i].buffer == buffer)
 			ssbo_ranges[i].buffer = 0;
 
-	RB_GL_DeleteBuffers (1, &buffer);
+	RB_DeleteBuffers (1, &buffer);
 }
 
 /*

@@ -75,6 +75,91 @@ static void RB_NULL_Submit(const rb_draw_desc_t *desc)
 	(void)desc;
 }
 
+static void RB_NULL_Enable(int cap)
+{
+	(void)cap;
+}
+
+static void RB_NULL_Disable(int cap)
+{
+	(void)cap;
+}
+
+static void RB_NULL_BlendFunc(int sfactor, int dfactor)
+{
+	(void)sfactor;
+	(void)dfactor;
+}
+
+static void RB_NULL_CullFace(int mode)
+{
+	(void)mode;
+}
+
+static void RB_NULL_DepthMask(int flag)
+{
+	(void)flag;
+}
+
+static void RB_NULL_Viewport(int x, int y, int width, int height)
+{
+	(void)x;
+	(void)y;
+	(void)width;
+	(void)height;
+}
+
+static void RB_NULL_Scissor(int x, int y, int width, int height)
+{
+	(void)x;
+	(void)y;
+	(void)width;
+	(void)height;
+}
+
+static void RB_NULL_GenBuffers(int n, unsigned int *buffers)
+{
+	(void)n;
+	(void)buffers;
+}
+
+static void RB_NULL_DeleteBuffers(int n, const unsigned int *buffers)
+{
+	(void)n;
+	(void)buffers;
+}
+
+static void RB_NULL_BindBuffer(int target, unsigned int buffer)
+{
+	(void)target;
+	(void)buffer;
+}
+
+static void RB_NULL_BufferData(int target, size_t size, const void *data, int usage)
+{
+	(void)target;
+	(void)size;
+	(void)data;
+	(void)usage;
+}
+
+static void RB_NULL_GenVertexArrays(int n, unsigned int *arrays)
+{
+	(void)n;
+	(void)arrays;
+}
+
+static void RB_NULL_DeleteVertexArrays(int n, const unsigned int *arrays)
+{
+	(void)n;
+	(void)arrays;
+}
+
+static void RB_NULL_BindVertexArray(unsigned int array)
+{
+	(void)array;
+}
+
 static const rb_caps_t *RB_NULL_GetCaps(void)
 {
 	return &rb_null_caps;
@@ -104,6 +189,20 @@ static const rb_backend_api_t rb_null_api = {
 	RB_NULL_CreateFBO,
 	RB_NULL_DestroyFBO,
 	RB_NULL_Submit,
+	RB_NULL_Enable,
+	RB_NULL_Disable,
+	RB_NULL_BlendFunc,
+	RB_NULL_CullFace,
+	RB_NULL_DepthMask,
+	RB_NULL_Viewport,
+	RB_NULL_Scissor,
+	RB_NULL_GenBuffers,
+	RB_NULL_DeleteBuffers,
+	RB_NULL_BindBuffer,
+	RB_NULL_BufferData,
+	RB_NULL_GenVertexArrays,
+	RB_NULL_DeleteVertexArrays,
+	RB_NULL_BindVertexArray,
 	RB_NULL_GetCaps,
 	RB_NULL_DebugMarkerBegin,
 	RB_NULL_DebugMarkerEnd
