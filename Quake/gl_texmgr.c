@@ -2350,7 +2350,7 @@ static qboolean TexMgr_EnsureLightmapUploadBuffer (GLsizeiptr size)
 	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
 	        GL_ObjectLabelFunc (GL_BUFFER, lightmap_upload_pbo, -1, "lightmap upload");
 	        GL_BufferStorageFunc (GL_PIXEL_UNPACK_BUFFER, size, NULL, flags);
-	        lightmap_upload_ptr = (byte *) GL_MapBufferRangeFunc (GL_PIXEL_UNPACK_BUFFER, 0, size, flags);
+	        lightmap_upload_ptr = (byte *) RB_BufferMapRange (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo, 0, size, flags, size, "TexMgr_EnsureLightmapUploadBuffer");
 	        if (!lightmap_upload_ptr)
 	        {
 	                TexMgr_DestroyLightmapUploadBuffer ();

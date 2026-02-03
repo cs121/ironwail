@@ -751,6 +751,7 @@ static void VID_Restart (void)
 		return;
 	}
 
+	GL_DeleteFrameResources ();
 	GL_DeleteFrameBuffers ();
 
 //
@@ -762,6 +763,8 @@ static void VID_Restart (void)
 	VID_RecalcInterfaceSize ();
 
 	GL_CreateFrameBuffers ();
+	GL_ClearBufferBindings ();
+	GL_CreateFrameResources ();
 //
 // keep cvars in line with actual mode
 //
