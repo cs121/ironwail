@@ -399,6 +399,8 @@ void main()
 
 	vec3 total_light = vec3(1.0);
 	float rim_shadow = 1.0;
+	vec3 rim_ambient_light = vec3(0.0);
+	vec3 rim_direct_light = vec3(0.0);
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
@@ -408,7 +410,8 @@ void main()
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
 #endif
 
-	if ((in_flags & CF_NOLIGHTMAP) == 0u)
+	bool has_lightmap = (in_flags & CF_NOLIGHTMAP) == 0u;
+	if (has_lightmap)
 	{
 #if DITHER
 		lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
@@ -494,9 +497,6 @@ void main()
 		}
 
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
-
-		vec3 rim_ambient_light = vec3(0.0);
-		vec3 rim_direct_light = vec3(0.0);
 
 		if (lightgrid_shadow)
 		{
@@ -601,6 +601,12 @@ void main()
 	// Sun light
         vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
+
+	if (!has_lightmap)
+	{
+		rim_ambient_light = total_light;
+		rim_direct_light = vec3(0.0);
+	}
 
 		// Apply lighting
 #if DITHER >= 2
