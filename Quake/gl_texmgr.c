@@ -26,13 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "glquake.h"
 #include "bc7enc.h"
 #include "gl_ktx2.h"
-#include "renderer_backend.h"
 #include <ctype.h>
-
-#ifndef NDEBUG
-#define glMapBufferRange DO_NOT_CALL_glMapBufferRange_USE_RB
-#define glUnmapBuffer DO_NOT_CALL_glUnmapBuffer_USE_RB
-#endif
 
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
 #define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
@@ -2182,7 +2176,7 @@ GLuint TexMgr_LoadDDS (const char *path)
 	}
 
 	glGenTextures (1, &texnum);
-	RB_BindTexture (GL_TEXTURE_2D, texnum);
+	glBindTexture (GL_TEXTURE_2D, texnum);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 
 	{
@@ -2326,8 +2320,9 @@ static void TexMgr_DestroyLightmapUploadBuffer (void)
 	if (!lightmap_upload_pbo)
 	        return;
 
+	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
 	if (lightmap_upload_ptr)
-		RB_BufferUnmap (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo, "TexMgr_DestroyLightmapUploadBuffer");
+	        GL_UnmapBufferFunc (GL_PIXEL_UNPACK_BUFFER);
 	lightmap_upload_ptr = NULL;
 
 	GL_DeleteBuffer (lightmap_upload_pbo);
@@ -2354,7 +2349,7 @@ static qboolean TexMgr_EnsureLightmapUploadBuffer (GLsizeiptr size)
 	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
 	        GL_ObjectLabelFunc (GL_BUFFER, lightmap_upload_pbo, -1, "lightmap upload");
 	        GL_BufferStorageFunc (GL_PIXEL_UNPACK_BUFFER, size, NULL, flags);
-	        lightmap_upload_ptr = (byte *) RB_BufferMapRange (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo, 0, size, flags, size, "TexMgr_EnsureLightmapUploadBuffer");
+	        lightmap_upload_ptr = (byte *) GL_MapBufferRangeFunc (GL_PIXEL_UNPACK_BUFFER, 0, size, flags);
 	        if (!lightmap_upload_ptr)
 	        {
 	                TexMgr_DestroyLightmapUploadBuffer ();
@@ -2835,7 +2830,7 @@ qboolean GL_BindNative (GLenum texunit, GLenum type, GLuint handle)
 	}
 
 	GL_SelectTexture (texunit);
-	RB_BindTexture (type, handle);
+	glBindTexture (type, handle);
 
 	return true;
 }
@@ -2894,7 +2889,7 @@ void GL_ClearBindings(void)
 		for (i = 0; i < countof (currenttexture); i++)
 		{
 			GL_SelectTexture (GL_TEXTURE0 + i);
-			RB_BindTexture (GL_TEXTURE_2D, 0);
+			glBindTexture (GL_TEXTURE_2D, 0);
 			GL_BindSamplerFunc (i, 0);
 		}
 }

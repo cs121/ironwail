@@ -141,8 +141,6 @@ extern	const char	*gl_version;
 	x(void,			BindBufferRange, (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size))\
 	x(void,			BufferData, (GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage))\
 	x(void,			BufferSubData, (GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data))\
-	x(void,			GetBufferParameteriv, (GLenum target, GLenum pname, GLint *params))\
-	x(void,			GetBufferParameteri64v, (GLenum target, GLenum pname, GLint64 *params))\
 	x(GLvoid*,		MapBuffer, (GLenum target, GLenum access))\
 	x(GLboolean,	UnmapBuffer, (GLenum target))\
 	x(void*,		MapBufferRange, (GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access))\

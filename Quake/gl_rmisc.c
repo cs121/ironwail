@@ -33,11 +33,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_godrayvol.h"
 #include "renderer_backend.h"
 
-#ifndef NDEBUG
-#define glMapBufferRange DO_NOT_CALL_glMapBufferRange_USE_RB
-#define glUnmapBuffer DO_NOT_CALL_glUnmapBuffer_USE_RB
-#endif
-
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -546,7 +541,7 @@ void R_Init (void)
 {
         cmd_function_t *cmd;
 
-        // Initialize renderer backend.
+        // TODO BACKEND: initialize renderer backend (stub in phase 1).
         RB_Init();
 
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
@@ -1018,7 +1013,7 @@ void R_NewMap (void)
 {
 	int		i;
 
-	// Notify renderer backend of new map.
+	// TODO BACKEND: notify renderer backend of new map (stub in phase 1).
 	RB_NewMap();
 
 	for (i=0 ; i<256 ; i++)
@@ -1099,11 +1094,11 @@ GL_CreateBuffer
 GLuint GL_CreateBuffer (GLenum target, GLenum usage, const char *name, size_t size, const void *data)
 {
 	GLuint buffer;
-	RB_GenBuffers (1, &buffer);
+	GL_GenBuffersFunc (1, &buffer);
 	GL_BindBuffer (target, buffer);
 	if (name)
 		GL_ObjectLabelFunc (GL_BUFFER, buffer, -1, name);
-	RB_BufferData (target, size, data, usage);
+	GL_BufferDataFunc (target, size, data, usage);
 	return buffer;
 }
 
@@ -1140,7 +1135,7 @@ void GL_BindBuffer (GLenum target, GLuint buffer)
 	{
 		*cache = buffer;
 	apply:
-		RB_BindBuffer (target, buffer);
+		GL_BindBufferFunc (target, buffer);
 	}
 }
 
@@ -1234,7 +1229,7 @@ void GL_DeleteBuffer (GLuint buffer)
 		if (ssbo_ranges[i].buffer == buffer)
 			ssbo_ranges[i].buffer = 0;
 
-	RB_DeleteBuffers (1, &buffer);
+	GL_DeleteBuffersFunc (1, &buffer);
 }
 
 /*
@@ -1295,7 +1290,6 @@ static size_t		frameres_device_offset = 0;
 static size_t		frameres_host_buffer_size = 1 * 1024 * 1024;
 static size_t		frameres_device_buffer_size = 1 * 1024 * 1024;
 
-
 /*
 ====================
 GL_AddGarbageBuffer
@@ -1327,7 +1321,8 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 			{
 				if (frame->host_ptr)
 				{
-					RB_BufferUnmap (GL_ARRAY_BUFFER, frame->host_buffer, "GL_AllocFrameResources");
+					GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
+					GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
 				}
 				GL_AddGarbageBuffer (frame->host_buffer);
 			}
@@ -1339,9 +1334,9 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 			if (gl_buffer_storage_able)
 			{
 				GL_BufferStorageFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, flags);
-				frame->host_ptr = RB_BufferMapRange (GL_ARRAY_BUFFER, frame->host_buffer, 0, frameres_host_buffer_size, flags, frameres_host_buffer_size, "GL_AllocFrameResources");
+				frame->host_ptr = GL_MapBufferRangeFunc (GL_ARRAY_BUFFER, 0, frameres_host_buffer_size, flags);
 				if (!frame->host_ptr)
-					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %llu bytes", (unsigned long long)frameres_host_buffer_size);
+					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %" SDL_PRIu64 " bytes", (uint64_t)frameres_host_buffer_size);
 			}
 			else
 			{
@@ -1375,11 +1370,6 @@ GL_CreateFrameResources
 */
 void GL_CreateFrameResources (void)
 {
-	if (frameres_host_buffer_size < 1 * 1024 * 1024)
-		frameres_host_buffer_size = 1 * 1024 * 1024;
-	if (frameres_device_buffer_size < 1 * 1024 * 1024)
-		frameres_device_buffer_size = 1 * 1024 * 1024;
-
 	GL_AllocFrameResources (FRAMERES_ALL_BITS);
 }
 
@@ -1410,7 +1400,8 @@ void GL_DeleteFrameResources (void)
 
 		if (frame->host_ptr)
 		{
-			RB_BufferUnmap (GL_ARRAY_BUFFER, frame->host_buffer, "GL_DeleteFrameResources");
+			GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
+			GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
 			frame->host_ptr = NULL;
 		}
 

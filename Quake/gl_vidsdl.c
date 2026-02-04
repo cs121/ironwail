@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_vidsdl.c -- SDL GL vid component
 
 #include "quakedef.h"
-#include "renderer_backend.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
@@ -751,7 +750,6 @@ static void VID_Restart (void)
 		return;
 	}
 
-	GL_DeleteFrameResources ();
 	GL_DeleteFrameBuffers ();
 
 //
@@ -763,8 +761,6 @@ static void VID_Restart (void)
 	VID_RecalcInterfaceSize ();
 
 	GL_CreateFrameBuffers ();
-	GL_ClearBufferBindings ();
-	GL_CreateFrameResources ();
 //
 // keep cvars in line with actual mode
 //
@@ -1064,7 +1060,7 @@ static void GL_CheckExtensions (void)
 		// test to make sure we really have control over it
 		// 1.0 and 2.0 should always be legal values
 		glGenTextures(1, &tex);
-		RB_BindTexture (GL_TEXTURE_2D, tex);
+		glBindTexture (GL_TEXTURE_2D, tex);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
 		glGetTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &test1);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 2.0f);
@@ -1137,7 +1133,7 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                 {
                         default:
                         case GLS_BLEND_OPAQUE:
-                                RB_BlendFunc (GL_ONE, GL_ZERO);
+                                glBlendFunc(GL_ONE, GL_ZERO);
                                 break;
                         case GLS_BLEND_ALPHA_OIT:
                                 if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
@@ -1148,13 +1144,13 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                                 }
                                 // fallthrough!
                         case GLS_BLEND_ALPHA:
-                                RB_BlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
                                 break;
                         case GLS_BLEND_MULTIPLY:
-                                RB_BlendFunc (GL_ZERO, GL_SRC_COLOR);
+                                glBlendFunc(GL_ZERO, GL_SRC_COLOR);
                                 break;
                         case GLS_BLEND_ADD:
-                                RB_BlendFunc (GL_ONE, GL_ONE);
+                                glBlendFunc(GL_ONE, GL_ONE);
                                 break;
                 }
         }
@@ -1164,29 +1160,29 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		unsigned cull = mask & GLS_MASK_CULL;
 		if (cull == GLS_CULL_NONE)
 		{
-			RB_Disable (GL_CULL_FACE);
+			glDisable(GL_CULL_FACE);
 		}
 		else
 		{
 			if ((glstate & GLS_MASK_CULL) == GLS_CULL_NONE || (force & GLS_MASK_CULL) != 0)
-				RB_Enable (GL_CULL_FACE);
+				glEnable(GL_CULL_FACE);
 			if (cull == GLS_CULL_FRONT)
-				RB_CullFace (GL_FRONT);
+				glCullFace(GL_FRONT);
 			else
-				RB_CullFace (GL_BACK);
+				glCullFace(GL_BACK);
 		}
 	}
 
 	if (diff & GLS_NO_ZTEST)
 	{
 		if (mask & GLS_NO_ZTEST)
-			RB_Disable (GL_DEPTH_TEST);
+			glDisable(GL_DEPTH_TEST);
 		else
-			RB_Enable (GL_DEPTH_TEST);
+			glEnable(GL_DEPTH_TEST);
 	}
 
 	if (diff & GLS_NO_ZWRITE)
-		RB_DepthMask ((mask & GLS_NO_ZWRITE) == 0);
+		glDepthMask((mask & GLS_NO_ZWRITE) == 0);
 
 	if (diff & GLS_MASK_ATTRIBS)
 	{
@@ -1320,8 +1316,8 @@ static void GL_Init (void)
 
 	GL_CheckExtensions ();
 
-	RB_GenVertexArrays (1, &globalvao);
-	RB_BindVertexArray (globalvao);
+	GL_GenVertexArraysFunc (1, &globalvao);
+	GL_BindVertexArrayFunc (globalvao);
 
 	glGetIntegerv (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &ssbo_align);
 	glGetIntegerv (GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);

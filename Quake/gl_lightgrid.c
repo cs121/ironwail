@@ -9,8 +9,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-// Migration note: lightgrid/clustered/bindless/SSBO paths stay in the frontend for now due to global coupling.
-
 static lightgrid_t *current_lightgrid = NULL;
 static char lightgrid_source[16] = "NONE";
 

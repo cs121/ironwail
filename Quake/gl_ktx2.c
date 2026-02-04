@@ -1,7 +1,6 @@
 #include "quakedef.h"
 #include "gl_ktx2.h"
 #include "gl_texmgr.h"
-#include "renderer_backend.h"
 #include "basisu_transcoder.h"
 
 static const uint8_t KTX2_MAGIC[12] = {
@@ -337,7 +336,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
     tex->mipmap = decoded.mip_count;
     tex->internal_format = gl_internal_format;
 
-    RB_BindTexture(GL_TEXTURE_2D, tex->texnum);
+    glBindTexture(GL_TEXTURE_2D, tex->texnum);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);

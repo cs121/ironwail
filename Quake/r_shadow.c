@@ -8,7 +8,6 @@ of the License, or (at your option) any later version.
 */
 
 #include "quakedef.h"
-#include "renderer_backend.h"
 #include <float.h>
 
 extern cvar_t gl_farclip;
@@ -411,7 +410,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
-	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_dlight_fbo, -1, "shadowmap dlight fbo");
 	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_dlight_depth_tex, 0);
 	glDrawBuffer (GL_NONE);
@@ -484,7 +483,7 @@ void R_ResizeShadowMapIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
-	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_fbo, -1, "shadowmap fbo");
 	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_depth_tex, 0);
 	glDrawBuffer (GL_NONE);
@@ -536,8 +535,8 @@ void R_Shadow_SunPass (void)
 
 	GL_BeginGroup ("Shadow map (sun)");
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_fbo);
-	RB_Viewport (0, 0, shadowmap_size, shadowmap_size);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
+	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 
@@ -653,10 +652,10 @@ void R_Shadow_DlightPass (void)
 
 	GL_BeginGroup ("Shadow map (dlights)");
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, shadow_dlight_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	RB_Enable (GL_SCISSOR_TEST);
+	glEnable (GL_SCISSOR_TEST);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -687,9 +686,9 @@ void R_Shadow_DlightPass (void)
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
 
-		RB_Viewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
-		RB_Scissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		glClear (GL_DEPTH_BUFFER_BIT);
 
@@ -708,7 +707,7 @@ void R_Shadow_DlightPass (void)
 		}
 	}
 
-	RB_Disable (GL_SCISSOR_TEST);
+	glDisable (GL_SCISSOR_TEST);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 
