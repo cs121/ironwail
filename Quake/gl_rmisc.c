@@ -33,6 +33,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_godrayvol.h"
 #include "renderer_backend.h"
 
+#ifndef NDEBUG
+#define glMapBufferRange DO_NOT_CALL_glMapBufferRange_USE_RB
+#define glUnmapBuffer DO_NOT_CALL_glUnmapBuffer_USE_RB
+#endif
+
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -1322,8 +1327,7 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 			{
 				if (frame->host_ptr)
 				{
-					GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
-					GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
+					RB_BufferUnmap (GL_ARRAY_BUFFER, frame->host_buffer, "GL_AllocFrameResources");
 				}
 				GL_AddGarbageBuffer (frame->host_buffer);
 			}
@@ -1337,7 +1341,7 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 				GL_BufferStorageFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, flags);
 				frame->host_ptr = RB_BufferMapRange (GL_ARRAY_BUFFER, frame->host_buffer, 0, frameres_host_buffer_size, flags, frameres_host_buffer_size, "GL_AllocFrameResources");
 				if (!frame->host_ptr)
-					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %" SDL_PRIu64 " bytes", (uint64_t)frameres_host_buffer_size);
+					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %llu bytes", (unsigned long long)frameres_host_buffer_size);
 			}
 			else
 			{
@@ -1401,8 +1405,7 @@ void GL_DeleteFrameResources (void)
 
 		if (frame->host_ptr)
 		{
-			GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
-			GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
+			RB_BufferUnmap (GL_ARRAY_BUFFER, frame->host_buffer, "GL_DeleteFrameResources");
 			frame->host_ptr = NULL;
 		}
 

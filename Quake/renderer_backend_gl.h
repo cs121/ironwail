@@ -10,5 +10,7 @@ This file is part of Ironwail.
 #include "renderer_backend.h"
 
 const rb_backend_api_t *RBGL_GetApi(void);
+void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield flags, const char *tag);
+void RB_GL_UnmapBuffer(GLenum target, GLuint buffer, const char *tag);
 
 #endif

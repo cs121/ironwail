@@ -39,6 +39,120 @@ typedef struct rb_gl_fbo_s
 static rb_caps_t rb_gl_caps = {0, 0};
 static cvar_t r_backend_gl_errors = {"r_backend_gl_errors", "0", CVAR_NONE};
 
+/*
+Buffer/mapping callsite inventory (outside renderer_backend_*):
+Frontend files:
+- gl_rmisc.c: GL_ClearBufferBindings (GL_BindBufferFunc)
+- gl_rmisc.c: GL_AllocFrameResources (GL_BindBuffer, GL_BufferStorageFunc, GL_BufferDataFunc, RB_BufferMapRange -> RB_BufferUnmap)
+- gl_rmisc.c: GL_DeleteFrameResources (RB_BufferUnmap)
+- gl_rmisc.c: GL_Upload (GL_BindBuffer, GL_BufferSubDataFunc)
+- gl_texmgr.c: TexMgr_DestroyLightmapUploadBuffer (RB_BufferUnmap)
+- gl_texmgr.c: TexMgr_EnsureLightmapUploadBuffer (GL_BindBuffer, GL_BufferStorageFunc, RB_BufferMapRange)
+- gl_texmgr.c: GLPalette_UpdateLookupTable (GL_BindBufferRange, GL_BufferSubDataFunc)
+- r_sprite.c: R_FlushSpriteInstances (GL_BindBuffer)
+- gl_draw.c: Draw_Flush (GL_BindBuffer)
+- r_godrayvol.c: R_GodrayVolume_Render (GL_BindBuffer)
+- r_decals.c: R_FlushDecalBatch (GL_BindBuffer)
+- r_fogvol.c: R_FogVol_Render (GL_BindBufferRange)
+- r_alias.c: R_DrawAliasModel_Real (GL_BindBuffer, GL_BindBuffersRange)
+- gl_sky.c: Sky_DrawSkyBox (GL_BindBuffer)
+- r_world.c: R_MarkVisSurfaces (GL_BindBufferRange)
+- r_world.c: R_FlushBModelCalls (GL_BindBufferRange, GL_BindBuffer)
+- r_world.c: R_DrawBrushModels_MaterialStages (GL_BindBufferRange)
+- gl_rlight.c: R_PushDlights (GL_BindBufferRange)
+- gl_rmain.c: GL_PostProcess (GL_BindBufferRange)
+- gl_rmain.c: R_UploadFrameData (GL_BindBufferRange)
+- gl_rmain.c: R_FlushDebugGeometry (GL_BindBuffer)
+- gl_rmain.c: R_DrawDLightPass (GL_BindBufferRange)
+- r_part.c: R_FlushParticleBatch (GL_BindBuffer)
+Backend files:
+- renderer_backend_gl.c: RB_GL_MapBufferRange/RB_GL_UnmapBuffer, RBGL_BindBuffer, RBGL_BufferData
+- renderer_backend_null.c: RB_NULL_BindBuffer, RB_NULL_BufferData, RB_NULL_BufferMapRange
+*/
+
+#ifndef NDEBUG
+typedef struct rb_gl_map_state_s
+{
+	GLuint id;
+	int mapped;
+} rb_gl_map_state_t;
+
+#define RBGL_MAP_TRACK_MAX 256
+static rb_gl_map_state_t rbgl_map_states[RBGL_MAP_TRACK_MAX];
+
+static rb_gl_map_state_t *RBGL_MapStateLookup(GLuint id, qboolean create)
+{
+	int i;
+	rb_gl_map_state_t *free_slot = NULL;
+
+	for (i = 0; i < RBGL_MAP_TRACK_MAX; ++i)
+	{
+		if (rbgl_map_states[i].id == id)
+			return &rbgl_map_states[i];
+		if (!rbgl_map_states[i].id && !free_slot)
+			free_slot = &rbgl_map_states[i];
+	}
+
+	if (create && free_slot)
+	{
+		free_slot->id = id;
+		free_slot->mapped = 0;
+		return free_slot;
+	}
+
+	return NULL;
+}
+
+static void RBGL_MapStateOnMap(GLuint id, const char *tag, const char *target_name)
+{
+	rb_gl_map_state_t *entry = RBGL_MapStateLookup(id, true);
+	if (!entry)
+	{
+		Sys_Error("RB_GL_MapBufferRange: map state table full buffer=%u tag=%s target=%s",
+			id,
+			tag ? tag : "(null)",
+			target_name);
+	}
+	if (entry->mapped)
+	{
+		Sys_Error("RB_GL_MapBufferRange: buffer already tracked as mapped buffer=%u tag=%s target=%s",
+			id,
+			tag ? tag : "(null)",
+			target_name);
+	}
+	entry->mapped = 1;
+}
+
+static void RBGL_MapStateOnUnmap(GLuint id, const char *tag, const char *target_name)
+{
+	rb_gl_map_state_t *entry = RBGL_MapStateLookup(id, false);
+	if (!entry || !entry->mapped)
+	{
+		Sys_Error("RB_GL_UnmapBuffer: buffer not tracked as mapped buffer=%u tag=%s target=%s",
+			id,
+			tag ? tag : "(null)",
+			target_name);
+	}
+}
+
+static void RBGL_MapStateSetUnmapped(GLuint id)
+{
+	rb_gl_map_state_t *entry = RBGL_MapStateLookup(id, false);
+	if (!entry)
+		return;
+	entry->mapped = 0;
+}
+
+static void RBGL_MapStateClear(GLuint id)
+{
+	rb_gl_map_state_t *entry = RBGL_MapStateLookup(id, false);
+	if (!entry)
+		return;
+	entry->id = 0;
+	entry->mapped = 0;
+}
+#endif
+
 static void RBGL_CheckError(const char *label)
 {
 	unsigned int err;
@@ -103,7 +217,16 @@ static void RBGL_GenBuffers(int n, unsigned int *buffers)
 
 static void RBGL_DeleteBuffers(int n, const unsigned int *buffers)
 {
+#ifndef NDEBUG
+	int i;
+#endif
+
 	GL_DeleteBuffersFunc (n, buffers);
+
+#ifndef NDEBUG
+	for (i = 0; i < n; ++i)
+		RBGL_MapStateClear(buffers[i]);
+#endif
 }
 
 static void RBGL_BindBuffer(int target, unsigned int buffer)
@@ -158,7 +281,7 @@ static int RBGL_TargetBindingEnum(int target)
 	}
 }
 
-static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield flags)
+void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsizeiptr length, GLbitfield flags, const char *tag)
 {
 	GLenum err;
 	int binding_enum;
@@ -172,16 +295,20 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 
 	if (!buffer)
 	{
-		Con_Printf("RB_MapBufferRange: invalid buffer=0 for target=%s(0x%04X)\n", target_name, target);
+		Con_Printf("RB_GL_MapBufferRange: invalid buffer=0 for target=%s(0x%04X) tag=%s\n",
+			target_name,
+			target,
+			tag ? tag : "(null)");
 		return NULL;
 	}
 	if (offset < 0 || length <= 0)
 	{
-		Con_Printf("RB_MapBufferRange: invalid range offset=%lld length=%llu target=%s buffer=%u\n",
+		Con_Printf("RB_GL_MapBufferRange: invalid range offset=%lld length=%llu target=%s buffer=%u tag=%s\n",
 			(long long)offset,
 			(unsigned long long)length,
 			target_name,
-			buffer);
+			buffer,
+			tag ? tag : "(null)");
 		return NULL;
 	}
 
@@ -199,9 +326,24 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
 	GL_GetBufferParameterivFunc(target, GL_BUFFER_MAPPED, &mapped);
 
+	if (binding_enum && binding == 0)
+	{
+		Sys_Error("RB_GL_MapBufferRange: binding is zero target=%s(0x%04X) buffer=%u offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			(long long)offset,
+			(unsigned long long)length,
+			(unsigned long long)buffer_size,
+			flags,
+			mapped,
+			tag ? tag : "(null)",
+			thread_id,
+			context);
+	}
 	if (binding_enum && (GLuint)binding != buffer)
 	{
-		Sys_Error("RB_MapBufferRange: binding mismatch target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_GL_MapBufferRange: binding mismatch target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
@@ -211,12 +353,13 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 			(unsigned long long)buffer_size,
 			flags,
 			mapped,
+			tag ? tag : "(null)",
 			thread_id,
 			context);
 	}
 	if (mapped)
 	{
-		Sys_Error("RB_MapBufferRange: buffer already mapped target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_GL_MapBufferRange: buffer already mapped target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
@@ -226,25 +369,27 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 			(unsigned long long)buffer_size,
 			flags,
 			mapped,
+			tag ? tag : "(null)",
 			thread_id,
 			context);
 	}
 	if (buffer_size <= 0)
 	{
-		Con_Printf("RB_MapBufferRange: buffer has no storage target=%s(0x%04X) buffer=%u bound=%d size=%lld flags=0x%08X thread=%u ctx=%p\n",
+		Con_Printf("RB_GL_MapBufferRange: buffer has no storage target=%s(0x%04X) buffer=%u bound=%d size=%lld flags=0x%08X tag=%s thread=%u ctx=%p\n",
 			target_name,
 			target,
 			buffer,
 			binding,
 			(long long)buffer_size,
 			flags,
+			tag ? tag : "(null)",
 			thread_id,
 			context);
 		return NULL;
 	}
 	if ((uint64_t)offset + (uint64_t)length > (uint64_t)buffer_size)
 	{
-		Sys_Error("RB_MapBufferRange: range exceeds buffer target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
+		Sys_Error("RB_GL_MapBufferRange: range exceeds buffer target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p",
 			target_name,
 			target,
 			buffer,
@@ -254,6 +399,7 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 			(unsigned long long)buffer_size,
 			flags,
 			mapped,
+			tag ? tag : "(null)",
 			thread_id,
 			context);
 	}
@@ -262,7 +408,7 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 		assert(binding != 0);
 	assert((uint64_t)buffer_size >= (uint64_t)offset + (uint64_t)length);
 
-	Con_Printf("RB_MapBufferRange: target=%s(0x%04X) buffer=%u bound=%d size=%llu offset=%lld length=%llu flags=0x%08X\n",
+	Con_Printf("RB_GL_MapBufferRange: target=%s(0x%04X) buffer=%u bound=%d size=%llu offset=%lld length=%llu flags=0x%08X tag=%s\n",
 		target_name,
 		target,
 		buffer,
@@ -270,13 +416,14 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 		(unsigned long long)buffer_size,
 		(long long)offset,
 		(unsigned long long)length,
-		flags);
+		flags,
+		tag ? tag : "(null)");
 
 	ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
 	if (!ptr)
 	{
 		err = glGetError();
-		Con_Printf("RB_MapBufferRange: glMapBufferRange failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p\n",
+		Con_Printf("RB_GL_MapBufferRange: glMapBufferRange failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p\n",
 			err,
 			target_name,
 			target,
@@ -287,6 +434,7 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 			(unsigned long long)buffer_size,
 			flags,
 			mapped,
+			tag ? tag : "(null)",
 			thread_id,
 			context);
 
@@ -295,7 +443,7 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 		if (!ptr)
 		{
 			err = glGetError();
-			Sys_Error("RB_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d thread=%u ctx=%p",
+			Sys_Error("RB_GL_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%llu size=%llu flags=0x%08X mapped=%d tag=%s thread=%u ctx=%p",
 				err,
 				target_name,
 				target,
@@ -306,10 +454,15 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 				(unsigned long long)buffer_size,
 				flags,
 				mapped,
+				tag ? tag : "(null)",
 				thread_id,
 				context);
 		}
 	}
+
+#ifndef NDEBUG
+	RBGL_MapStateOnMap(buffer, tag, target_name);
+#endif
 
 	return ptr;
 }
@@ -329,10 +482,10 @@ static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset,
 			(unsigned long long)full_size);
 	}
 
-	ptr = RB_MapBufferRange((GLenum)target, (GLuint)buffer, (GLintptr)offset, (GLsizeiptr)length, (GLbitfield)flags);
+	ptr = RB_GL_MapBufferRange((GLenum)target, (GLuint)buffer, (GLintptr)offset, (GLsizeiptr)length, (GLbitfield)flags, label);
 	if (!ptr && label)
 	{
-		Con_Printf("%s: RB_MapBufferRange returned NULL target=%s buffer=%u offset=%llu length=%llu\n",
+		Con_Printf("%s: RB_GL_MapBufferRange returned NULL target=%s buffer=%u offset=%llu length=%llu\n",
 			label,
 			RBGL_TargetName(target),
 			buffer,
@@ -341,6 +494,104 @@ static void *RBGL_BufferMapRange(int target, unsigned int buffer, size_t offset,
 	}
 
 	return ptr;
+}
+
+void RB_GL_UnmapBuffer(GLenum target, GLuint buffer, const char *tag)
+{
+	GLenum err;
+	int binding_enum;
+	GLint binding = 0;
+	GLint mapped = 0;
+	GLint64 buffer_size = 0;
+	const char *target_name = RBGL_TargetName(target);
+	Uint32 thread_id = SDL_ThreadID();
+	void *context = SDL_GL_GetCurrentContext();
+
+	if (!buffer)
+	{
+		Con_Printf("RB_GL_UnmapBuffer: invalid buffer=0 for target=%s(0x%04X) tag=%s\n",
+			target_name,
+			target,
+			tag ? tag : "(null)");
+		return;
+	}
+
+	while (glGetError() != GL_NO_ERROR)
+	{
+	}
+
+	GL_BindBuffer(target, buffer);
+
+	binding_enum = RBGL_TargetBindingEnum(target);
+	if (binding_enum)
+		glGetIntegerv(binding_enum, &binding);
+	GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
+	GL_GetBufferParameterivFunc(target, GL_BUFFER_MAPPED, &mapped);
+
+	if (binding_enum && binding == 0)
+	{
+		Sys_Error("RB_GL_UnmapBuffer: binding is zero target=%s(0x%04X) buffer=%u bound=%d size=%llu tag=%s thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(unsigned long long)buffer_size,
+			tag ? tag : "(null)",
+			thread_id,
+			context);
+	}
+	if (binding_enum && (GLuint)binding != buffer)
+	{
+		Sys_Error("RB_GL_UnmapBuffer: binding mismatch target=%s(0x%04X) buffer=%u bound=%d size=%llu tag=%s thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(unsigned long long)buffer_size,
+			tag ? tag : "(null)",
+			thread_id,
+			context);
+	}
+	if (!mapped)
+	{
+		Sys_Error("RB_GL_UnmapBuffer: buffer not mapped target=%s(0x%04X) buffer=%u bound=%d size=%llu tag=%s thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			binding,
+			(unsigned long long)buffer_size,
+			tag ? tag : "(null)",
+			thread_id,
+			context);
+	}
+
+#ifndef NDEBUG
+	RBGL_MapStateOnUnmap(buffer, tag, target_name);
+#endif
+
+	if (!GL_UnmapBufferFunc(target))
+	{
+		err = glGetError();
+		Sys_Error("RB_GL_UnmapBuffer: glUnmapBuffer failed (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d size=%llu tag=%s thread=%u ctx=%p",
+			err,
+			target_name,
+			target,
+			buffer,
+			binding,
+			(unsigned long long)buffer_size,
+			tag ? tag : "(null)",
+			thread_id,
+			context);
+	}
+
+#ifndef NDEBUG
+	RBGL_MapStateSetUnmapped(buffer);
+#endif
+}
+
+static void RBGL_BufferUnmap(int target, unsigned int buffer, const char *label)
+{
+	RB_GL_UnmapBuffer((GLenum)target, (GLuint)buffer, label);
 }
 
 static void RBGL_GenVertexArrays(int n, unsigned int *arrays)
@@ -529,7 +780,13 @@ static void RBGL_DestroyBuffer(rb_buf_t buf)
 
 	assert(gl_buf);
 	if (gl_buf->id)
+	{
 		GL_DeleteBuffersFunc(1, &gl_buf->id);
+#ifndef NDEBUG
+		RBGL_MapStateClear(gl_buf->id);
+#endif
+		gl_buf->id = 0;
+	}
 	Z_Free(gl_buf);
 }
 
@@ -656,6 +913,7 @@ static const rb_backend_api_t rb_gl_api = {
 	RBGL_BindBuffer,
 	RBGL_BufferData,
 	RBGL_BufferMapRange,
+	RBGL_BufferUnmap,
 	RBGL_GenVertexArrays,
 	RBGL_DeleteVertexArrays,
 	RBGL_BindVertexArray,
