@@ -251,6 +251,13 @@ void *RB_BufferMapRange(int target, unsigned int buffer, size_t offset, size_t l
 	return rb_backend->buffer_map_range(target, buffer, offset, length, flags, full_size, label);
 }
 
+void RB_BufferUnmap(int target, unsigned int buffer, const char *label)
+{
+	if (!rb_backend || !rb_backend->buffer_unmap)
+		return;
+	rb_backend->buffer_unmap(target, buffer, label);
+}
+
 void RB_GenVertexArrays(int n, unsigned int *arrays)
 {
 	if (!rb_backend || !rb_backend->gen_vertex_arrays)

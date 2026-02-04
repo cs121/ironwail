@@ -29,6 +29,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "renderer_backend.h"
 #include <ctype.h>
 
+#ifndef NDEBUG
+#define glMapBufferRange DO_NOT_CALL_glMapBufferRange_USE_RB
+#define glUnmapBuffer DO_NOT_CALL_glUnmapBuffer_USE_RB
+#endif
+
 #ifndef GL_COMPRESSED_RED_GREEN_RGTC2
 #define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
 #endif
@@ -2321,9 +2326,8 @@ static void TexMgr_DestroyLightmapUploadBuffer (void)
 	if (!lightmap_upload_pbo)
 	        return;
 
-	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
 	if (lightmap_upload_ptr)
-	        GL_UnmapBufferFunc (GL_PIXEL_UNPACK_BUFFER);
+		RB_BufferUnmap (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo, "TexMgr_DestroyLightmapUploadBuffer");
 	lightmap_upload_ptr = NULL;
 
 	GL_DeleteBuffer (lightmap_upload_pbo);

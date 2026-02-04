@@ -298,10 +298,12 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 
 	// upload indexes buffer
 	GL_DeleteBuffer (m->meshindexesvbo);
+	m->meshindexesvbo = 0;
 	m->meshindexesvbo = GL_CreateBuffer (GL_ELEMENT_ARRAY_BUFFER, GL_STATIC_DRAW, va ("%s indices", m->name), numindexes * sizeof (unsigned short), ebodata);
 
 	// upload vertexes buffer
 	GL_DeleteBuffer (m->meshvbo);
+	m->meshvbo = 0;
 	m->meshvbo = GL_CreateBuffer (GL_ARRAY_BUFFER, GL_STATIC_DRAW, va ("%s vertices", m->name), totalvbosize, vbodata);
 
 	free (vbodata);

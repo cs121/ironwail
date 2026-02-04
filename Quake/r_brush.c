@@ -751,6 +751,7 @@ void GL_BuildBModelVertexBuffer (void)
 
 // ask GL for a name for our VBO
 	GL_DeleteBuffer (gl_bmodel_vbo);
+	gl_bmodel_vbo = 0;
 	
 // count all verts in all models
 	numverts = 0;
