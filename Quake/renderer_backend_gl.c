@@ -191,7 +191,7 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 	{
 	}
 
-	GL_BindBufferFunc(target, buffer);
+	GL_BindBuffer(target, buffer);
 
 	binding_enum = RBGL_TargetBindingEnum(target);
 	if (binding_enum)
@@ -257,6 +257,20 @@ static void *RB_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GL
 			thread_id,
 			context);
 	}
+
+	if (binding_enum)
+		assert(binding != 0);
+	assert((uint64_t)buffer_size >= (uint64_t)offset + (uint64_t)length);
+
+	Con_Printf("RB_MapBufferRange: target=%s(0x%04X) buffer=%u bound=%d size=%llu offset=%lld length=%llu flags=0x%08X\n",
+		target_name,
+		target,
+		buffer,
+		binding,
+		(unsigned long long)buffer_size,
+		(long long)offset,
+		(unsigned long long)length,
+		flags);
 
 	ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
 	if (!ptr)
