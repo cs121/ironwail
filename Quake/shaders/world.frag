@@ -495,12 +495,17 @@ void main()
 
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
 
+		vec3 rim_ambient_light = vec3(0.0);
+		vec3 rim_direct_light = vec3(0.0);
+
 		if (lightgrid_shadow)
 		{
 			vec3 ambient = clamped_static * lightgrid;
 			vec3 direct = clamped_static - ambient;
 			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			total_light = ambient + direct * shadow_scale;
+			rim_ambient_light = ambient;
+			rim_direct_light = direct * shadow_scale;
+			total_light = rim_ambient_light + rim_direct_light;
 		}
 		else
 		{
@@ -508,6 +513,8 @@ void main()
 			if (shadow_enabled)
 				total_light *= shadow_term;
 			total_light *= lightgrid;
+			rim_ambient_light = clamped_static * lightgrid;
+			rim_direct_light = max(total_light - rim_ambient_light, vec3(0.0));
 		}
 	
 	// View direction
@@ -626,14 +633,21 @@ void main()
 		float light_len = length(ShadowSunDir.xyz);
 		vec3 light_dir = (light_len > 0.0) ? normalize(-ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
 		float direct_w = clamp(dot(surface_normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
-		vec3 ambient_color = Fog.rgb * RimParams1.x;
-		vec3 direct_color = total_light;
+		float effective_ambient_scale = min(RimParams1.x, 0.25);
+		vec3 ambient_color = rim_ambient_light * effective_ambient_scale;
+		vec3 direct_color = rim_direct_light;
 		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
-		float rim_light_mix = clamp(RimParams0.w * direct_strength, 0.0, 1.0);
+		float ambient_strength = clamp(max(max(ambient_color.r, ambient_color.g), ambient_color.b), 0.0, 1.0);
+		const float rim_direct_scale = 1.5;
+		float rim_direct_mask = clamp(direct_strength * rim_direct_scale, 0.0, 1.0);
 		float rim_shadow_mix = mix(0.25, 1.0, rim_shadow);
-		float rim_visibility = mix(RimParams1.x, 1.0, direct_w) * rim_shadow_mix;
-		vec3 rim_color = mix(ambient_color, direct_color, rim_light_mix);
-		vec3 rim_term = rim_base * RimParams0.z * rim_visibility * rim_color;
+		float rim_visibility = mix(effective_ambient_scale, 1.0, direct_w) * rim_shadow_mix;
+		float rim_value = rim_base * RimParams0.z * rim_visibility;
+		vec3 rim_light_rgb = rim_value * (direct_color + 0.15 * ambient_color);
+		float rim_max_allowed = direct_strength + 0.2 * ambient_strength;
+		// Rim rules: direct-light mask, ambient sockel, clamp to local lighting.
+		rim_light_rgb *= rim_direct_mask;
+		rim_light_rgb = min(rim_light_rgb, vec3(rim_max_allowed));
 		int rim_debug = int(clamp(RimParams1.y, 0.0, 2.0) + 0.5);
 		if (rim_debug == 1)
 		{
@@ -651,7 +665,7 @@ void main()
 #endif
 			return;
 		}
-		result.rgb += rim_term;
+		result.rgb += rim_light_rgb;
 	}
 	
 	// Tone mapping
