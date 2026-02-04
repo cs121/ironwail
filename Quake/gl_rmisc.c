@@ -1375,6 +1375,11 @@ GL_CreateFrameResources
 */
 void GL_CreateFrameResources (void)
 {
+	if (frameres_host_buffer_size < 1 * 1024 * 1024)
+		frameres_host_buffer_size = 1 * 1024 * 1024;
+	if (frameres_device_buffer_size < 1 * 1024 * 1024)
+		frameres_device_buffer_size = 1 * 1024 * 1024;
+
 	GL_AllocFrameResources (FRAMERES_ALL_BITS);
 }
 

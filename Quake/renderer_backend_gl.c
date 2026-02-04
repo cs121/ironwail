@@ -293,6 +293,7 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 	const char *target_name = RBGL_TargetName(target);
 	Uint32 thread_id = SDL_ThreadID();
 	void *context = SDL_GL_GetCurrentContext();
+	const char *map_func_kind = "core";
 
 	if (!buffer)
 	{
@@ -313,17 +314,67 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 		return NULL;
 	}
 
+	if (expected_total_size <= 0)
+	{
+		Sys_Error("RB_GL_MapBufferRange: invalid expected_total_size target=%s(0x%04X) buffer=%u offset=%lld length=%lld expected=%lld flags=0x%08X thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			(long long)offset,
+			(long long)length,
+			(long long)expected_total_size,
+			flags,
+			thread_id,
+			context);
+	}
+	if ((uint64_t)expected_total_size < (uint64_t)offset + (uint64_t)length)
+	{
+		Sys_Error("RB_GL_MapBufferRange: expected_total_size too small target=%s(0x%04X) buffer=%u offset=%lld length=%lld expected=%lld flags=0x%08X thread=%u ctx=%p",
+			target_name,
+			target,
+			buffer,
+			(long long)offset,
+			(long long)length,
+			(long long)expected_total_size,
+			flags,
+			thread_id,
+			context);
+	}
+
 	assert(buffer != 0);
 
 	while (glGetError() != GL_NO_ERROR)
 	{
 	}
 
+	if (!GL_MapBufferRangeFunc)
+	{
+		Sys_Error("RB_GL_MapBufferRange: MapBufferRange function pointer NULL target=%s(0x%04X) buffer=%u offset=%lld length=%lld expected=%lld flags=0x%08X thread=%u ctx=%p func=%p kind=%s",
+			target_name,
+			target,
+			buffer,
+			(long long)offset,
+			(long long)length,
+			(long long)expected_total_size,
+			flags,
+			thread_id,
+			context,
+			(void *)GL_MapBufferRangeFunc,
+			map_func_kind);
+	}
+	Con_Printf("RB_GL_MapBufferRange: MapBufferRangeFunc=%p kind=%s\n", (void *)GL_MapBufferRangeFunc, map_func_kind);
+
 	GL_BindBuffer(target, buffer);
 
 	binding_enum = RBGL_TargetBindingEnum(target);
 	if (binding_enum)
 		glGetIntegerv(binding_enum, &binding);
+	Con_Printf("RB_GL_MapBufferRange: binding query target=%s(0x%04X) enum=0x%04X binding=%d buffer=%u\n",
+		target_name,
+		target,
+		binding_enum,
+		binding,
+		buffer);
 	GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
 	GL_GetBufferParameterivFunc(target, GL_BUFFER_MAPPED, &mapped);
 
@@ -391,10 +442,23 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 			context);
 
 		GL_BufferDataFunc(target, alloc_size, NULL, GL_STREAM_DRAW);
+		err = glGetError();
+		Con_Printf("RB_GL_MapBufferRange: glBufferData err=0x%04X target=%s(0x%04X) buffer=%u expected=%lld\n",
+			err,
+			target_name,
+			target,
+			buffer,
+			(long long)alloc_size);
 		GL_GetBufferParameteri64vFunc(target, GL_BUFFER_SIZE, &buffer_size);
+		Con_Printf("RB_GL_MapBufferRange: buffer size after alloc target=%s(0x%04X) buffer=%u size=%lld expected=%lld\n",
+			target_name,
+			target,
+			buffer,
+			(long long)buffer_size,
+			(long long)alloc_size);
 		if (buffer_size <= 0)
 		{
-			Sys_Error("RB_GL_MapBufferRange: buffer storage allocation failed target=%s(0x%04X) buffer=%u bound=%d size=%lld expected=%lld flags=0x%08X thread=%u ctx=%p",
+			Sys_Error("RB_GL_MapBufferRange: buffer storage allocation failed target=%s(0x%04X) buffer=%u bound=%d size=%lld expected=%lld flags=0x%08X err=0x%04X thread=%u ctx=%p",
 				target_name,
 				target,
 				buffer,
@@ -402,6 +466,7 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 				(long long)buffer_size,
 				(long long)alloc_size,
 				flags,
+				err,
 				thread_id,
 				context);
 		}
@@ -438,6 +503,10 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 		(long long)alloc_size,
 		flags);
 
+	while (glGetError() != GL_NO_ERROR)
+	{
+	}
+
 	ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
 	if (!ptr)
 	{
@@ -458,10 +527,27 @@ void *RB_GL_MapBufferRange(GLenum target, GLuint buffer, GLintptr offset, GLsize
 			context);
 
 		GL_BufferDataFunc(target, (GLsizeiptr)buffer_size, NULL, GL_STREAM_DRAW);
+		while (glGetError() != GL_NO_ERROR)
+		{
+		}
 		ptr = GL_MapBufferRangeFunc(target, (GLintptr)offset, (GLsizeiptr)length, flags);
+		err = glGetError();
+		Con_Printf("RB_GL_MapBufferRange: glMapBufferRange retry err=0x%04X target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%lld size=%lld expected=%lld flags=0x%08X mapped=%d thread=%u ctx=%p\n",
+			err,
+			target_name,
+			target,
+			buffer,
+			binding,
+			(long long)offset,
+			(long long)length,
+			(long long)buffer_size,
+			(long long)alloc_size,
+			flags,
+			mapped,
+			thread_id,
+			context);
 		if (!ptr)
 		{
-			err = glGetError();
 			Sys_Error("RB_GL_MapBufferRange: MapBufferRange failed after orphan (err=0x%04X) target=%s(0x%04X) buffer=%u bound=%d offset=%lld length=%lld size=%lld expected=%lld flags=0x%08X mapped=%d thread=%u ctx=%p",
 				err,
 				target_name,
