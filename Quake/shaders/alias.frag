@@ -231,14 +231,21 @@ void main()
 		float light_len = length(inst_ShadowSunDir.xyz);
 		vec3 light_dir = (light_len > 0.0) ? normalize(-inst_ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
 		float direct_w = clamp(dot(normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
-		vec3 ambient_color = in_ambient * inst_RimParams1.x;
+		float effective_ambient_scale = min(inst_RimParams1.x, 0.25);
+		vec3 ambient_color = in_ambient * effective_ambient_scale;
 		vec3 direct_color = in_direct;
 		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
-		float rim_light_mix = clamp(inst_RimParams0.w * direct_strength, 0.0, 1.0);
+		float ambient_strength = clamp(max(max(ambient_color.r, ambient_color.g), ambient_color.b), 0.0, 1.0);
+		const float rim_direct_scale = 1.5;
+		float rim_direct_mask = clamp(direct_strength * rim_direct_scale, 0.0, 1.0);
 		float rim_shadow = mix(0.25, 1.0, shadow_term);
-		float rim_visibility = mix(inst_RimParams1.x, 1.0, direct_w) * rim_shadow;
-		vec3 rim_color = mix(ambient_color, direct_color, rim_light_mix);
-		vec3 rim_term = rim_base * inst_RimParams0.z * rim_visibility * rim_color;
+		float rim_visibility = mix(effective_ambient_scale, 1.0, direct_w) * rim_shadow;
+		float rim_value = rim_base * inst_RimParams0.z * rim_visibility;
+		vec3 rim_light_rgb = rim_value * (direct_color + 0.15 * ambient_color);
+		float rim_max_allowed = direct_strength + 0.2 * ambient_strength;
+		// Rim rules: direct-light mask, ambient sockel, clamp to local lighting.
+		rim_light_rgb *= rim_direct_mask;
+		rim_light_rgb = min(rim_light_rgb, vec3(rim_max_allowed));
 		int rim_debug = int(clamp(inst_RimParams1.y, 0.0, 2.0) + 0.5);
 		if (rim_debug == 1)
 		{
@@ -256,7 +263,7 @@ void main()
 #endif
 			return;
 		}
-		result.rgb += rim_term;
+		result.rgb += rim_light_rgb;
 	}
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
