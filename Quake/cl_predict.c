@@ -21,6 +21,8 @@ extern cvar_t cl_pred_accum_debug;
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
+static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
+static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
 
 typedef struct
 {
@@ -51,6 +53,10 @@ typedef struct
 	float		ground_yaw_delta;
 	int		ground_apply_pred;
 	int		ground_apply_render;
+	int		ground_switches;
+	vec3_t		ground_origin_now;
+	vec3_t		ground_origin_prev;
+	int		delta_applied;
 } cl_pred_ground_debug_t;
 
 typedef struct
@@ -176,6 +182,8 @@ static void CL_Predict_RegisterDebugCvars (void)
 
 	Cvar_RegisterVariable (&cl_pred_debug);
 	Cvar_RegisterVariable (&cl_pred_correct_angles);
+	Cvar_RegisterVariable (&cl_pred_inherit_ground);
+	Cvar_RegisterVariable (&cl_pred_ground_yaw);
 	cl_pred_debug_registered = true;
 }
 
@@ -957,7 +965,7 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		VectorClear (out_delta);
 		if (out_yaw_delta)
 			*out_yaw_delta = 0.0f;
-		return true;
+		return false;
 	}
 
 	VectorCopy (state->ground_cache.last_origin, ground_prev);
@@ -1022,10 +1030,14 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	qboolean applied;
 	qboolean got_motion;
 
+	(void)dt;
 	VectorClear (delta);
 	yaw_delta = 0.0f;
 	applied = false;
 	got_motion = false;
+	cl_pred_ground_dbg.delta_applied = 0;
+	VectorClear (cl_pred_ground_dbg.ground_origin_now);
+	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
 
 	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
@@ -1053,6 +1065,7 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		state->pred_ground_ent = groundent;
 		VectorClear (state->pred_ground_offset);
 		state->pred_ground_yaw_delta = 0.0f;
+		cl_pred_ground_dbg.ground_switches++;
 	}
 
 	if (CL_Predict_GetGroundMotion (state, groundent, dt, delta, &yaw_delta)
@@ -1061,7 +1074,7 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		got_motion = true;
 		state->ground_valid = true;
 		VectorCopy (delta, state->pred_ground_offset);
-		state->pred_ground_yaw_delta = yaw_delta;
+		state->pred_ground_yaw_delta = (cl_pred_ground_yaw.value > 0.0f) ? yaw_delta : 0.0f;
 
 		if (cl_jitter_debug.value > 0.0f && groundent > 0)
 		{
@@ -1100,12 +1113,13 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		state->pred_ground_yaw_delta = 0.0f;
 	}
 
-	if (state->pred_ground_ent == groundent && got_motion)
+	if (state->pred_ground_ent == groundent && got_motion && cl_pred_inherit_ground.value > 0.0f)
 		applied = true;
 
-	if (got_motion)
+	if (applied)
 	{
 		VectorAdd (state->origin, state->pred_ground_offset, state->origin);
+		cl_pred_ground_dbg.delta_applied = 1;
 
 		if (state->pred_ground_yaw_delta != 0.0f)
 		{
@@ -1118,6 +1132,12 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 			state->origin[1] = ground->msg_origins[0][1] + rel[0] * s + rel[1] * c;
 			state->origin[2] = ground->msg_origins[0][2] + rel[2];
 		}
+	}
+
+	if (state->ground_cache.valid && state->ground_cache.id == groundent)
+	{
+		VectorCopy (state->ground_cache.last_origin, cl_pred_ground_dbg.ground_origin_now);
+		VectorSubtract (state->ground_cache.last_origin, state->pred_ground_offset, cl_pred_ground_dbg.ground_origin_prev);
 	}
 
 done:
@@ -1350,6 +1370,9 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	VectorClear (ground_delta);
 	ground_yaw_delta = 0.0f;
 	ground_applied = false;
+	cl_pred_ground_dbg.delta_applied = 0;
+	VectorClear (cl_pred_ground_dbg.ground_origin_now);
+	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
 
 	if (!state->onground && state->velocity[2] <= 0)
 	{
@@ -1525,6 +1548,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		else
 			cl_pred_ground_dbg.ground_apply_pred++;
 	}
+	if (!ground_applied)
+		cl_pred_ground_dbg.delta_applied = 0;
 }
 
 void CL_Predict_Clear (void)
@@ -1752,7 +1777,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
-			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d mouse_applied %d\n",
+			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d switches %d gprev %.2f %.2f %.2f gnow %.2f %.2f %.2f delta_applied %d mouse_applied %d\n",
 				cl_pred_ground_dbg.onground ? 1 : 0,
 				cl_pred_ground_dbg.groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
@@ -1771,8 +1796,12 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_ground_dbg.ground_yaw_delta,
 				cl_pred_ground_dbg.ground_apply_pred,
 				cl_pred_ground_dbg.ground_apply_render,
+				cl_pred_ground_dbg.ground_switches,
+				cl_pred_ground_dbg.ground_origin_prev[0], cl_pred_ground_dbg.ground_origin_prev[1], cl_pred_ground_dbg.ground_origin_prev[2],
+				cl_pred_ground_dbg.ground_origin_now[0], cl_pred_ground_dbg.ground_origin_now[1], cl_pred_ground_dbg.ground_origin_now[2],
+				cl_pred_ground_dbg.delta_applied,
 				IN_DidApplyMouseDelta () ? 1 : 0);
-			JITTER_LOG ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d mouse_applied %d\n",
+			JITTER_LOG ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d switches %d gprev %.2f %.2f %.2f gnow %.2f %.2f %.2f delta_applied %d mouse_applied %d\n",
 				cl_pred_ground_dbg.onground ? 1 : 0,
 				cl_pred_ground_dbg.groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
@@ -1791,6 +1820,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_ground_dbg.ground_yaw_delta,
 				cl_pred_ground_dbg.ground_apply_pred,
 				cl_pred_ground_dbg.ground_apply_render,
+				cl_pred_ground_dbg.ground_switches,
+				cl_pred_ground_dbg.ground_origin_prev[0], cl_pred_ground_dbg.ground_origin_prev[1], cl_pred_ground_dbg.ground_origin_prev[2],
+				cl_pred_ground_dbg.ground_origin_now[0], cl_pred_ground_dbg.ground_origin_now[1], cl_pred_ground_dbg.ground_origin_now[2],
+				cl_pred_ground_dbg.delta_applied,
 				IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 		if (teleport_dist > 0.0f && error_len > teleport_dist)
