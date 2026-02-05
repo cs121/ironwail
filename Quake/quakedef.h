@@ -378,6 +378,9 @@ typedef struct sys_step_debug_info_s
 	int		player_onground_after;
 	float		player_ground_trace_fraction;
 	float		player_ground_trace_normal_z;
+	int		player_ground_trace_startsolid;
+	int		player_ground_trace_allsolid;
+	int		player_ground_trace_fallback;
 	vec3_t		player_ground_vel;
 	int		player_ground_is_mover;
 } sys_step_debug_info_t;

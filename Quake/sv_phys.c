@@ -65,6 +65,15 @@ static void SV_Phys_RegisterDebugCvars (void)
 	sv_phys_debug_registered = true;
 }
 
+static qboolean SV_TraceHasValidGroundPlane (const trace_t *trace)
+{
+	if (trace->fraction <= 0.0f && (trace->startsolid || trace->allsolid || trace->plane.normal[2] <= 0.0f))
+		return false;
+	if (trace->plane.normal[2] <= 0.7f)
+		return false;
+	return true;
+}
+
 /*
 ================
 SV_CheckAllEnts
@@ -929,13 +938,32 @@ void SV_WalkMove (edict_t *ent)
 // move down
 	downtrace = SV_PushEntity (ent, downmove);	// FIXME: don't link?
 
+	if (!SV_TraceHasValidGroundPlane (&downtrace) && downtrace.fraction <= 0.0f)
+	{
+		vec3_t nudge;
+		trace_t retrace;
+
+		VectorCopy (vec3_origin, nudge);
+		nudge[2] = 1.0f;
+		SV_PushEntity (ent, nudge);
+		retrace = SV_PushEntity (ent, downmove);
+		if (SV_TraceHasValidGroundPlane (&retrace))
+		{
+			downtrace = retrace;
+			if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
+				sys_step_debug_info.player_ground_trace_fallback = 1;
+		}
+	}
+
 	if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
 	{
 		sys_step_debug_info.player_ground_trace_fraction = downtrace.fraction;
 		sys_step_debug_info.player_ground_trace_normal_z = downtrace.plane.normal[2];
+		sys_step_debug_info.player_ground_trace_startsolid = downtrace.startsolid ? 1 : 0;
+		sys_step_debug_info.player_ground_trace_allsolid = downtrace.allsolid ? 1 : 0;
 	}
 
-	if (downtrace.plane.normal[2] > 0.7)
+	if (SV_TraceHasValidGroundPlane (&downtrace))
 	{
 		if (ent->v.solid == SOLID_BSP)
 		{
@@ -945,6 +973,8 @@ void SV_WalkMove (edict_t *ent)
 	}
 	else
 	{
+		ent->v.flags = (int)ent->v.flags & ~FL_ONGROUND;
+		ent->v.groundentity = EDICT_TO_PROG(qcvm->edicts);
 // if the push down didn't end up on good ground, use the move without
 // the step up.  This happens near wall / slope combinations, and can
 // cause the player to hop up higher on a slope too steep to climb
@@ -977,6 +1007,11 @@ void SV_Physics_Client (edict_t	*ent, int num)
 			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_before);
 			sys_step_debug_info.player_groundent_before = (int)ent->v.groundentity;
 			sys_step_debug_info.player_onground_before = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
+			sys_step_debug_info.player_ground_trace_fraction = 1.0f;
+			sys_step_debug_info.player_ground_trace_normal_z = 0.0f;
+			sys_step_debug_info.player_ground_trace_startsolid = 0;
+			sys_step_debug_info.player_ground_trace_allsolid = 0;
+			sys_step_debug_info.player_ground_trace_fallback = 0;
 		}
 	}
 
@@ -1067,8 +1102,12 @@ void SV_Physics_Client (edict_t	*ent, int num)
 			groundent = PROG_TO_EDICT (ent->v.groundentity);
 			if (groundent && groundent != qcvm->edicts && groundent->v.movetype == MOVETYPE_PUSH)
 			{
+				vec3_t gdelta;
+
 				sys_step_debug_info.player_ground_is_mover = 1;
-				VectorCopy (groundent->v.velocity, sys_step_debug_info.player_ground_vel);
+				VectorSubtract (groundent->v.origin, groundent->v.oldorigin, gdelta);
+				if (host_frametime > 0.0f)
+					VectorScale (gdelta, 1.0f / host_frametime, sys_step_debug_info.player_ground_vel);
 			}
 		}
 	}
@@ -1316,6 +1355,8 @@ void SV_Physics (void)
 			continue;
 		if (ent->v.movetype != MOVETYPE_PUSH)
 			continue;
+
+		VectorCopy (ent->v.origin, ent->v.oldorigin);
 
 		if (pr_global_struct->force_retouch)
 			SV_LinkEdict (ent, true);	// force retouch even for stationary
