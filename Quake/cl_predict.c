@@ -916,7 +916,7 @@ static qboolean CL_GetEntityTransform (int entnum, vec3_t origin, vec3_t angles)
 	if (entnum <= 0 || entnum >= MAX_EDICTS)
 		return false;
 
-	ent = &cl.entities[entnum];
+	ent = &cl_entities[entnum];
 	VectorCopy (ent->origin, origin);
 	VectorCopy (ent->angles, angles);
 
