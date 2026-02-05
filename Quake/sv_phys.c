@@ -1059,6 +1059,7 @@ void SV_Physics_Client (edict_t	*ent, int num)
 
 			VectorCopy (ent->v.origin, sys_step_debug_info.player_origin_after);
 			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_after);
+			VectorCopy (ent->v.basevelocity, sys_step_debug_info.player_basevel_after);
 			sys_step_debug_info.player_groundent_after = (int)ent->v.groundentity;
 			sys_step_debug_info.player_onground_after = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
 			VectorClear (sys_step_debug_info.player_ground_vel);

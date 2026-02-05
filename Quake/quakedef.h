@@ -354,6 +354,7 @@ typedef struct sys_step_debug_info_s
 	int		cl_cmd_msec_wild;
 	int		cl_cmd_msec_zero;
 	int		cl_cmd_msec_over;
+	int		cl_cmd_skipped_frame;
 	int64_t		sv_accum_us_before;
 	int64_t		sv_accum_us_after;
 	int64_t		cl_cmd_accum_us_before;
@@ -369,6 +370,7 @@ typedef struct sys_step_debug_info_s
 	vec3_t		player_origin_after;
 	vec3_t		player_vel_before;
 	vec3_t		player_vel_after;
+	vec3_t		player_basevel_after;
 	int		player_groundent_before;
 	int		player_groundent_after;
 	int		player_onground_before;

@@ -2124,7 +2124,10 @@ void CL_SendCmd (void)
 	if (sys_step_debug.value > 0.0f)
 	{
 		if (cmds_built == 0)
+		{
 			sys_step_debug_info.cl_cmd_no_cmd++;
+			sys_step_debug_info.cl_cmd_skipped_frame = 1;
+		}
 		sys_step_debug_info.cl_cmds_built += cmds_built;
 		sys_step_debug_info.cl_cmd_accum_us_after = cl_cmd_accum_us;
 	}

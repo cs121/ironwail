@@ -1028,6 +1028,24 @@ static void Sys_StepDebug_LogFrame (void)
 		sys_step_debug_info.cl_time,
 		sys_step_debug_info.cl_servertime,
 		sys_step_debug_info.cl_snapshot_time);
+	Con_Printf ("[TIMING] rt %.6f host_frametime %.6f cl.time %.6f\n",
+		sys_step_debug_info.realtime,
+		sys_step_debug_info.host_frametime,
+		sys_step_debug_info.cl_time);
+	JITTER_LOG ("[TIMING] rt %.6f host_frametime %.6f cl.time %.6f\n",
+		sys_step_debug_info.realtime,
+		sys_step_debug_info.host_frametime,
+		sys_step_debug_info.cl_time);
+	Con_Printf ("[PRED] steps %d cmd.msec %d skipped %d zero %d\n",
+		sys_step_debug_info.cl_pred_steps,
+		sys_step_debug_info.cl_cmd_msec_last,
+		sys_step_debug_info.cl_cmd_skipped_frame,
+		sys_step_debug_info.cl_cmd_msec_zero > 0 ? 1 : 0);
+	JITTER_LOG ("[PRED] steps %d cmd.msec %d skipped %d zero %d\n",
+		sys_step_debug_info.cl_pred_steps,
+		sys_step_debug_info.cl_cmd_msec_last,
+		sys_step_debug_info.cl_cmd_skipped_frame,
+		sys_step_debug_info.cl_cmd_msec_zero > 0 ? 1 : 0);
 	Con_Printf ("STEPDBG sv ticks %d phys %d tick_us %lld frame_us %lld accum %lld->%lld maxsteps %d\n",
 		sys_step_debug_info.sv_ticks,
 		sys_step_debug_info.sv_physics_calls,
@@ -1133,6 +1151,39 @@ static void Sys_StepDebug_LogFrame (void)
 			sys_step_debug_info.player_ground_vel[0],
 			sys_step_debug_info.player_ground_vel[1],
 			sys_step_debug_info.player_ground_vel[2]);
+		Con_Printf ("[PHYS] onground %d->%d groundent %d->%d basevel %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_onground_before,
+			sys_step_debug_info.player_onground_after,
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after,
+			sys_step_debug_info.player_basevel_after[0],
+			sys_step_debug_info.player_basevel_after[1],
+			sys_step_debug_info.player_basevel_after[2]);
+		JITTER_LOG ("[PHYS] onground %d->%d groundent %d->%d basevel %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_onground_before,
+			sys_step_debug_info.player_onground_after,
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after,
+			sys_step_debug_info.player_basevel_after[0],
+			sys_step_debug_info.player_basevel_after[1],
+			sys_step_debug_info.player_basevel_after[2]);
+		if (sys_step_debug_info.player_ground_is_mover)
+		{
+			vec3_t vel_delta;
+			VectorSubtract (sys_step_debug_info.player_vel_after, sys_step_debug_info.player_vel_before, vel_delta);
+			Con_Printf ("[MOVER] groundent %d mover_vel %.2f %.2f %.2f player_dvel %.2f %.2f %.2f\n",
+				sys_step_debug_info.player_groundent_after,
+				sys_step_debug_info.player_ground_vel[0],
+				sys_step_debug_info.player_ground_vel[1],
+				sys_step_debug_info.player_ground_vel[2],
+				vel_delta[0], vel_delta[1], vel_delta[2]);
+			JITTER_LOG ("[MOVER] groundent %d mover_vel %.2f %.2f %.2f player_dvel %.2f %.2f %.2f\n",
+				sys_step_debug_info.player_groundent_after,
+				sys_step_debug_info.player_ground_vel[0],
+				sys_step_debug_info.player_ground_vel[1],
+				sys_step_debug_info.player_ground_vel[2],
+				vel_delta[0], vel_delta[1], vel_delta[2]);
+		}
 	}
 
 	if (sys_step_debug_info.warn_host_frametime_clamped)
@@ -1151,6 +1202,33 @@ static void Sys_StepDebug_LogFrame (void)
 		JITTER_LOG ("STEPWARN sim dt is zero\n");
 	if (sys_step_debug_info.warn_many_ticks)
 		JITTER_LOG ("STEPWARN max ticks exceeded in frame\n");
+	if (sys_step_debug_info.host_frametime < 0.001 || sys_step_debug_info.host_frametime > 0.05)
+	{
+		Con_Printf ("[WARN] host_frametime out of range %.6f\n", sys_step_debug_info.host_frametime);
+		JITTER_LOG ("[WARN] host_frametime out of range %.6f\n", sys_step_debug_info.host_frametime);
+	}
+	if (sys_step_debug_info.cl_cmd_msec_zero > 0)
+	{
+		Con_Printf ("[WARN] cmd.msec == 0 encountered count %d\n", sys_step_debug_info.cl_cmd_msec_zero);
+		JITTER_LOG ("[WARN] cmd.msec == 0 encountered count %d\n", sys_step_debug_info.cl_cmd_msec_zero);
+	}
+	if (sys_step_debug_info.sv_ticks > 4)
+	{
+		Con_Printf ("[WARN] simulation ran %d ticks in one frame\n", sys_step_debug_info.sv_ticks);
+		JITTER_LOG ("[WARN] simulation ran %d ticks in one frame\n", sys_step_debug_info.sv_ticks);
+	}
+	if (sys_step_debug_info.player_valid
+		&& sys_step_debug_info.player_groundent_before != sys_step_debug_info.player_groundent_after
+		&& VectorLength (sys_step_debug_info.player_vel_before) < 5.0f
+		&& VectorLength (sys_step_debug_info.player_vel_after) < 5.0f)
+	{
+		Con_Printf ("[WARN] groundent changed at near-zero velocity %d -> %d\n",
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after);
+		JITTER_LOG ("[WARN] groundent changed at near-zero velocity %d -> %d\n",
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after);
+	}
 
 	if (sys_step_hitch_ms.value > 0.0f)
 	{
@@ -1395,6 +1473,53 @@ static void SV_RunOneTick (double tick_dt)
 				sv.paused, key_dest);
 			MSG_WriteByte (&sv.reliable_datagram, svc_setpause);
 			MSG_WriteByte (&sv.reliable_datagram, sv.paused);
+		}
+	}
+
+	if (sys_step_debug.value > 0.0f)
+	{
+		Con_Printf ("[PHYS] sv.time %.6f sv.frametime %.6f ticks_this_frame %d\n",
+			qcvm->time, host_frametime, sys_step_debug_info.sv_ticks);
+		JITTER_LOG ("[PHYS] sv.time %.6f sv.frametime %.6f ticks_this_frame %d\n",
+			qcvm->time, host_frametime, sys_step_debug_info.sv_ticks);
+		if (sys_step_debug_info.player_valid)
+		{
+			Con_Printf ("[PHYS] player org %.2f %.2f %.2f -> %.2f %.2f %.2f vel %.2f %.2f %.2f -> %.2f %.2f %.2f onground %d groundent %d basevel %.2f %.2f %.2f\n",
+				sys_step_debug_info.player_origin_before[0],
+				sys_step_debug_info.player_origin_before[1],
+				sys_step_debug_info.player_origin_before[2],
+				sys_step_debug_info.player_origin_after[0],
+				sys_step_debug_info.player_origin_after[1],
+				sys_step_debug_info.player_origin_after[2],
+				sys_step_debug_info.player_vel_before[0],
+				sys_step_debug_info.player_vel_before[1],
+				sys_step_debug_info.player_vel_before[2],
+				sys_step_debug_info.player_vel_after[0],
+				sys_step_debug_info.player_vel_after[1],
+				sys_step_debug_info.player_vel_after[2],
+				sys_step_debug_info.player_onground_after,
+				sys_step_debug_info.player_groundent_after,
+				sys_step_debug_info.player_basevel_after[0],
+				sys_step_debug_info.player_basevel_after[1],
+				sys_step_debug_info.player_basevel_after[2]);
+			JITTER_LOG ("[PHYS] player org %.2f %.2f %.2f -> %.2f %.2f %.2f vel %.2f %.2f %.2f -> %.2f %.2f %.2f onground %d groundent %d basevel %.2f %.2f %.2f\n",
+				sys_step_debug_info.player_origin_before[0],
+				sys_step_debug_info.player_origin_before[1],
+				sys_step_debug_info.player_origin_before[2],
+				sys_step_debug_info.player_origin_after[0],
+				sys_step_debug_info.player_origin_after[1],
+				sys_step_debug_info.player_origin_after[2],
+				sys_step_debug_info.player_vel_before[0],
+				sys_step_debug_info.player_vel_before[1],
+				sys_step_debug_info.player_vel_before[2],
+				sys_step_debug_info.player_vel_after[0],
+				sys_step_debug_info.player_vel_after[1],
+				sys_step_debug_info.player_vel_after[2],
+				sys_step_debug_info.player_onground_after,
+				sys_step_debug_info.player_groundent_after,
+				sys_step_debug_info.player_basevel_after[0],
+				sys_step_debug_info.player_basevel_after[1],
+				sys_step_debug_info.player_basevel_after[2]);
 		}
 	}
 }
