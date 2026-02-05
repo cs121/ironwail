@@ -909,15 +909,26 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 	return false;
 }
 
-static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt_step, vec3_t out_delta, float *out_yaw_delta)
+static qboolean CL_GetEntityTransform (int entnum, vec3_t origin, vec3_t angles)
 {
 	entity_t *ent;
-	double sample_t;
-	double t0;
-	double t1;
-	float frac;
-	vec3_t ground_now;
+
+	if (entnum <= 0 || entnum >= MAX_EDICTS)
+		return false;
+
+	ent = &cl.entities[entnum];
+	VectorCopy (ent->origin, origin);
+	VectorCopy (ent->angles, angles);
+
+	return true;
+}
+
+static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt_step, vec3_t out_delta, float *out_yaw_delta)
+{
+	vec3_t origin_now;
+	vec3_t angles_now;
 	vec3_t ground_prev;
+	vec3_t delta;
 	float yaw_now;
 	float yaw_prev;
 	float yaw_delta;
@@ -939,27 +950,15 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		return false;
 	}
 
-	ent = &cl_entities[groundent];
-	t0 = cl.mtime[1];
-	t1 = cl.mtime[0];
-	if (t1 <= t0)
+	if (!CL_GetEntityTransform (groundent, origin_now, angles_now))
 		return false;
-
-	// Keep mover sampling on the same timebase as prediction steps.
-	sample_t = cl.time;
-
-	frac = (float)((sample_t - t0) / (t1 - t0));
-	frac = CLAMP (0.0f, frac, 1.0f);
-
-	VectorLerp (ent->msg_origins[1], ent->msg_origins[0], frac, ground_now);
-	yaw_now = LerpAngleShortest (ent->msg_angles[1][YAW], ent->msg_angles[0][YAW], frac);
+	yaw_now = angles_now[YAW];
 
 	if (!state->ground_cache.valid || state->ground_cache.id != groundent)
 	{
-		VectorCopy (ground_now, state->ground_cache.last_origin);
-		VectorCopy (ent->msg_angles[0], state->ground_cache.last_angles);
-		state->ground_cache.last_angles[YAW] = yaw_now;
-		state->ground_cache.last_time = sample_t;
+		VectorCopy (origin_now, state->ground_cache.last_origin);
+		VectorCopy (angles_now, state->ground_cache.last_angles);
+		state->ground_cache.last_time = cl.time;
 		state->ground_cache.id = groundent;
 		state->ground_cache.valid = true;
 		VectorClear (out_delta);
@@ -970,14 +969,15 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 
 	VectorCopy (state->ground_cache.last_origin, ground_prev);
 	yaw_prev = state->ground_cache.last_angles[YAW];
-	VectorSubtract (ground_now, ground_prev, out_delta);
+	VectorSubtract (origin_now, ground_prev, delta);
+	VectorCopy (delta, out_delta);
 	yaw_delta = CL_Predict_AngleDelta (yaw_now, yaw_prev);
 	if (out_yaw_delta)
 		*out_yaw_delta = yaw_delta;
 
-	VectorCopy (ground_now, state->ground_cache.last_origin);
-	state->ground_cache.last_angles[YAW] = yaw_now;
-	state->ground_cache.last_time = sample_t;
+	VectorCopy (origin_now, state->ground_cache.last_origin);
+	VectorCopy (angles_now, state->ground_cache.last_angles);
+	state->ground_cache.last_time = cl.time;
 	state->ground_cache.id = groundent;
 	state->ground_cache.valid = true;
 
@@ -1035,6 +1035,8 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	yaw_delta = 0.0f;
 	applied = false;
 	got_motion = false;
+	cl_pred_ground_dbg.ground_delta_len = 0.0f;
+	cl_pred_ground_dbg.ground_yaw_delta = 0.0f;
 	cl_pred_ground_dbg.delta_applied = 0;
 	VectorClear (cl_pred_ground_dbg.ground_origin_now);
 	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
@@ -1370,6 +1372,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	VectorClear (ground_delta);
 	ground_yaw_delta = 0.0f;
 	ground_applied = false;
+	cl_pred_ground_dbg.ground_delta_len = 0.0f;
+	cl_pred_ground_dbg.ground_yaw_delta = 0.0f;
 	cl_pred_ground_dbg.delta_applied = 0;
 	VectorClear (cl_pred_ground_dbg.ground_origin_now);
 	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
