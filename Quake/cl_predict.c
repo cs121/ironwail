@@ -1234,6 +1234,9 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	qboolean ground_entity;
 	int ground_reason = CL_GROUND_REASON_OK;
 
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.cl_pred_steps++;
+
 	if (!is_render)
 		cl_pred_steps_this_frame++;
 	CL_Predict_GetPlayerBounds (mins, maxs);

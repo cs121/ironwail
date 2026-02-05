@@ -3609,6 +3609,9 @@ void CL_ParseServerMessage (void)
 	int			prevcmd_offset;
 	int			cmd_offset;
 
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.cl_parse_calls++;
+
 //
 // if recording demos, copy the message out
 //

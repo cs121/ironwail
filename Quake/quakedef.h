@@ -318,6 +318,64 @@ extern	cvar_t		developer;
 extern	cvar_t		map_checks;
 extern	cvar_t		max_edicts; //johnfitz
 extern	cvar_t		sz_debug_hexdump;
+extern	cvar_t		sys_step_debug;
+extern	cvar_t		sys_step_dump;
+extern	cvar_t		sys_step_hitch_ms;
+extern	cvar_t		sv_fixedtick;
+extern	cvar_t		sv_maxsteps_per_frame;
+
+typedef struct sys_step_debug_info_s
+{
+	int		frame;
+	double		realtime;
+	double		host_frametime;
+	double		host_rawframetime;
+	double		cl_time;
+	double		cl_servertime;
+	double		cl_snapshot_time;
+	int		sv_ticks;
+	int		sv_physics_calls;
+	int		cl_sendcmd_calls;
+	int		cl_readfromserver_calls;
+	int		cl_parse_calls;
+	int		cl_pred_steps;
+	int		cl_cmds_built;
+	int		cl_cmds_sent;
+	int		cl_cmd_packets;
+	int		cl_cmds_dropped;
+	int		cl_cmd_no_cmd;
+	int		cl_cmd_msec_min;
+	int		cl_cmd_msec_max;
+	int		cl_cmd_msec_last;
+	int		cl_cmd_msec_wild;
+	int		cl_cmd_msec_zero;
+	int		cl_cmd_msec_over;
+	int64_t		sv_accum_us_before;
+	int64_t		sv_accum_us_after;
+	int64_t		cl_cmd_accum_us_before;
+	int64_t		cl_cmd_accum_us_after;
+	int64_t		frame_us;
+	int64_t		tick_us;
+	int		warn_host_frametime_clamped;
+	int		warn_zero_sim_dt;
+	int		warn_many_ticks;
+	int		warn_zero_frametime;
+	int		player_valid;
+	vec3_t		player_origin_before;
+	vec3_t		player_origin_after;
+	vec3_t		player_vel_before;
+	vec3_t		player_vel_after;
+	int		player_groundent_before;
+	int		player_groundent_after;
+	int		player_onground_before;
+	int		player_onground_after;
+	float		player_ground_trace_fraction;
+	float		player_ground_trace_normal_z;
+	vec3_t		player_ground_vel;
+	int		player_ground_is_mover;
+} sys_step_debug_info_t;
+
+extern	sys_step_debug_info_t sys_step_debug_info;
 
 extern	qboolean	host_initialized;	// true if into command execution
 extern	double		host_frametime;
