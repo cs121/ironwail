@@ -149,6 +149,8 @@ static double			cl_cmd_debug_next_time = 0.0;
 static unsigned int		cl_cmds_built_since_log = 0;
 static unsigned int		cl_cmds_sent_since_log = 0;
 static unsigned int		cl_cmd_packets_since_log = 0;
+static int			cl_cmd_msec_last_generated = 0;
+static int			cl_cmds_generated_last_frame = 0;
 
 static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
 {
@@ -509,8 +511,17 @@ void CL_JitterDebug_Log (void)
 	vec3_t render_ang;
 	qboolean has_pred;
 
+	if (jitter_time_debug.value > 0.0f)
+	{
+		Con_Printf ("JITTIME CL rt=%.6f hf=%.6f clt=%.6f cmdmsec=%d cmds=%u predsteps=%d\n",
+			realtime, host_frametime, cl.time, cl_cmd_msec_last_generated, cl_cmds_generated_last_frame, sys_step_debug_info.cl_pred_steps);
+		JITTER_LOG ("JITTIME CL rt=%.6f hf=%.6f clt=%.6f cmdmsec=%d cmds=%u predsteps=%d\n",
+			realtime, host_frametime, cl.time, cl_cmd_msec_last_generated, cl_cmds_generated_last_frame, sys_step_debug_info.cl_pred_steps);
+	}
+
 	if (cl_jitter_debug.value <= 0.0f)
 		return;
+
 
 	interp_delay = CL_GetInterpDelaySeconds ();
 	interp_target = CL_GetInterpTargetTime ();
@@ -2049,12 +2060,22 @@ void CL_SendCmd (void)
 			{
 				if (sys_step_debug.value > 0.0f)
 					sys_step_debug_info.cl_cmd_msec_zero++;
+				if (jitter_time_debug.value > 0.0f)
+				{
+					Con_Printf ("JITWARN cmdmsec_zero_or_out_of_range\n");
+					JITTER_LOG ("JITWARN cmdmsec_zero_or_out_of_range\n");
+				}
 				cmd_msec = 1;
 			}
 		else if (cmd_msec > 255)
 		{
 			if (sys_step_debug.value > 0.0f)
 				sys_step_debug_info.cl_cmd_msec_over++;
+			if (jitter_time_debug.value > 0.0f)
+			{
+				Con_Printf ("JITWARN cmdmsec_zero_or_out_of_range\n");
+				JITTER_LOG ("JITWARN cmdmsec_zero_or_out_of_range\n");
+			}
 			cmd_msec = 255;
 		}
 		if (sys_step_debug.value > 0.0f)
@@ -2120,6 +2141,10 @@ void CL_SendCmd (void)
 		cmds_built++;
 		sendcmd_ran = true;
 	}
+
+	cl_cmds_generated_last_frame = cmds_built;
+	if (cmds_built > 0 && last_cmd_msec >= 0)
+		cl_cmd_msec_last_generated = last_cmd_msec;
 
 	if (sys_step_debug.value > 0.0f)
 	{
