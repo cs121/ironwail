@@ -468,6 +468,11 @@ void CL_SendMove (const usercmd_t *cmd)
 				"cmd_ack=long cmd_count=byte ucmd_seq=long angles=short moves=short buttons=byte impulse=byte]\n",
 				realtime, buf.cursize, clc_move, cl.protocolflags, cmd->sequence,
 				cl.last_cmd_ack, cl.last_snapshot_ack_sent, reliable_seq, reliable_base);
+			JITTER_LOG ("NETDBG time %.3f cmd_move_write msg %d type %d flags 0x%x cmd_seq %u "
+				"cmd_ack %u snap_ack %u rel_seq %u rel_base %u widths[mtime=float cmd_seq=long "
+				"cmd_ack=long cmd_count=byte ucmd_seq=long angles=short moves=short buttons=byte impulse=byte]\n",
+				realtime, buf.cursize, clc_move, cl.protocolflags, cmd->sequence,
+				cl.last_cmd_ack, cl.last_snapshot_ack_sent, reliable_seq, reliable_base);
 		}
 	}
 

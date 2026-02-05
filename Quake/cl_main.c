@@ -276,6 +276,8 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 	{
 		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
 			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+		JITTER_LOG ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 	}
 }
 
@@ -416,6 +418,27 @@ static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
 		cmd_accum_s, cmd_dt,
 		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
 		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
+	JITTER_LOG ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
+		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d "
+		"cmd_seq %u cmd_ack %u ack_echo %u snap_ack %u cmd_accum %.4f cmd_dt %.4f "
+		"net_rx %u net_tx %u net_rel_rx %u net_rel_base %u net_unrel_rx %u "
+		"net_last_msg %.3f net_last_send %.3f net_budget %d net_can_send %d net_disc %d\n",
+		cls.signon,
+		cl.has_full_snapshot ? 1 : 0,
+		cl.need_full_snapshot ? 1 : 0,
+		cl_viewent_needs_init ? 1 : 0,
+		cl.worldmodel ? 1 : 0,
+		cl.paused ? 1 : 0,
+		cl.intermission ? 1 : 0,
+		vieworg[0], vieworg[1], vieworg[2],
+		cl.simorg[0], cl.simorg[1], cl.simorg[2],
+		forward, side, up,
+		CL_NetDbg_PredictRan () ? 1 : 0,
+		sendcmd_ran ? 1 : 0,
+		cmd_seq, cmd_ack, cmd_ack_echo, snap_ack,
+		cmd_accum_s, cmd_dt,
+		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
+		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
 }
 
 static float CL_LerpAngle (float a, float b, float f)
@@ -532,6 +555,56 @@ void CL_JitterDebug_Log (void)
 	}
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
+		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
+		"pred_apply_reason %d render_apply_reason %d "
+		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
+		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
+		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
+		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
+		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
+		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
+		cl.time, realtime, host_frametime, interp_target, interp_delay,
+		pred.pred_accum_time,
+		pred.pred_step_dt,
+		pred.pred_substeps,
+		pred.pred_max_substeps,
+		pred.pred_nullcmd,
+		pred.pred_angles_normalized,
+		IN_DidApplyMouseDelta () ? 1 : 0,
+		pred.pred_apply_pred_reason,
+		pred.pred_apply_render_reason,
+		pred.server_update_applied ? 1 : 0,
+		pred.prediction_steps,
+		pred.pred_error_len,
+		pred.pred_angle_error_len,
+		pred.pred_angle_delta_shortest[0],
+		pred.pred_angle_delta_shortest[1],
+		pred.pred_angle_delta_shortest[2],
+		pred.onground ? 1 : 0,
+		pred.groundent,
+		pred.ground_valid ? 1 : 0,
+		pred.ground_valid_reason,
+		pred.ground_trace_fraction,
+		pred.ground_trace_normal_z,
+		pred.ground_trace_ent,
+		pred.ground_trace_startsolid,
+		pred.ground_trace_allsolid,
+		pred.ground_trace_fallback,
+		pred.wishspeed,
+		pred.wishvel_z,
+		pred.cmd_frametime,
+		pred.flags,
+		pred.ground_delta_len,
+		pred.ground_yaw_delta,
+		pred.ground_apply_pred,
+		pred.ground_apply_render,
+		pred.base_origin[0], pred.base_origin[1], pred.base_origin[2],
+		pred.base_angles[0], pred.base_angles[1], pred.base_angles[2],
+		pred.predicted_origin[0], pred.predicted_origin[1], pred.predicted_origin[2],
+		pred.predicted_angles[0], pred.predicted_angles[1], pred.predicted_angles[2],
+		render_org[0], render_org[1], render_org[2],
+		render_ang[0], render_ang[1], render_ang[2]);
+	JITTER_LOG ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
 		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
@@ -2060,6 +2133,8 @@ void CL_SendCmd (void)
 	{
 		Con_Printf ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
 			(double)cl_cmd_accum_us / 1000000.0, cmd_dt);
+		JITTER_LOG ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
+			(double)cl_cmd_accum_us / 1000000.0, cmd_dt);
 	}
 
 	if (send_move)
@@ -2089,6 +2164,9 @@ void CL_SendCmd (void)
 		if (realtime >= cl_cmd_debug_next_time)
 		{
 			Con_Printf ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
+				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
+				cmd_dt, (double)cl_cmd_accum_us / 1000000.0);
+			JITTER_LOG ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
 				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
 				cmd_dt, (double)cl_cmd_accum_us / 1000000.0);
 			cl_cmds_built_since_log = 0;

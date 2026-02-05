@@ -164,6 +164,8 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 	{
 		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
 			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+		JITTER_LOG ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 	}
 }
 
@@ -536,6 +538,8 @@ static void CL_Predict_RunFrameSteps (void)
 	{
 		Con_Printf ("JITTERDBG pred_accum %.4f step_dt %.4f steps %d render_frac %.3f\n",
 			cl_pred_frame_accum, step_dt, steps, cl_pred_render_frac);
+		JITTER_LOG ("JITTERDBG pred_accum %.4f step_dt %.4f steps %d render_frac %.3f\n",
+			cl_pred_frame_accum, step_dt, steps, cl_pred_render_frac);
 	}
 }
 
@@ -588,12 +592,17 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 			cl.has_full_snapshot ? 1 : 0,
 			cl.snapshot_present ? 1 : 0,
 			cl.mtime[0]);
+		JITTER_LOG ("NETDBG: prediction apply without valid snapshot (full %d present %d mtime %.3f)\n",
+			cl.has_full_snapshot ? 1 : 0,
+			cl.snapshot_present ? 1 : 0,
+			cl.mtime[0]);
 		cl_pred_warned_no_snapshot = true;
 	}
 
 	if (!CL_Predict_Vec3IsFinite (state->origin) || !CL_Predict_Vec3IsFinite (state->velocity))
 	{
 		Con_Printf ("NETDBG: prediction apply with invalid state origin/velocity\n");
+		JITTER_LOG ("NETDBG: prediction apply with invalid state origin/velocity\n");
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
 		return;
@@ -611,6 +620,7 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	if (!CL_Predict_Vec3IsFinite (cl_pred_error) || !CL_Predict_Vec3IsFinite (cl_pred_angle_error))
 	{
 		Con_Printf ("NETDBG: prediction apply with invalid error vectors\n");
+		JITTER_LOG ("NETDBG: prediction apply with invalid error vectors\n");
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
 	}
@@ -619,6 +629,7 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	if (!isfinite (frame_dt) || frame_dt < 0.0f)
 	{
 		Con_Printf ("NETDBG: prediction apply with invalid host_frametime %.4f\n", frame_dt);
+		JITTER_LOG ("NETDBG: prediction apply with invalid host_frametime %.4f\n", frame_dt);
 		frame_dt = 0.0f;
 	}
 
@@ -660,6 +671,8 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		if (cl_netdbg_pred.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
+				VectorLength (correction), VectorLength (cl_pred_error));
+			JITTER_LOG ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
 				VectorLength (correction), VectorLength (cl_pred_error));
 		}
 	}
@@ -795,6 +808,8 @@ static void CL_Predict_LogSolidTrace (const char *context, const trace_t *trace)
 	{
 		Con_Printf ("NETDBG: prediction trace %s startsolid=%d allsolid=%d\n",
 			context ? context : "unknown", trace->startsolid, trace->allsolid);
+		JITTER_LOG ("NETDBG: prediction trace %s startsolid=%d allsolid=%d\n",
+			context ? context : "unknown", trace->startsolid, trace->allsolid);
 		cl_pred_warned_solid = true;
 	}
 }
@@ -878,6 +893,8 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		{
 			Con_Printf ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
 				groundent, cl.mtime[0]);
+			JITTER_LOG ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
+				groundent, cl.mtime[0]);
 		}
 		return false;
 	}
@@ -936,6 +953,8 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		{
 			Con_Printf ("NETDBG: pred groundent invalid ent=%d full=%d mtime=%.3f\n",
 				groundent, cl.has_full_snapshot ? 1 : 0, cl.mtime[0]);
+			JITTER_LOG ("NETDBG: pred groundent invalid ent=%d full=%d mtime=%.3f\n",
+				groundent, cl.has_full_snapshot ? 1 : 0, cl.mtime[0]);
 		}
 		if (groundent <= 0 || groundent >= cl_max_edicts)
 			SDL_assert (!"prediction groundent out of range");
@@ -976,6 +995,15 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 				delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
 
 			Con_Printf ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f mouse_applied %d\n",
+				groundent,
+				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
+				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
+				msg_dt,
+				ent->msg_angles[0][YAW], ent->msg_angles[1][YAW], yaw_raw,
+				delta_raw[0], delta_raw[1], delta_raw[2],
+				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2],
+				IN_DidApplyMouseDelta () ? 1 : 0);
+			JITTER_LOG ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f mouse_applied %d\n",
 				groundent,
 				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
 				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
@@ -1277,6 +1305,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	if (state->onground && groundent == 0 && cl_netdebug_parse.value)
 	{
 		Con_Printf ("NETDBG: pred onground without ground entity (groundent 0)\n");
+		JITTER_LOG ("NETDBG: pred onground without ground entity (groundent 0)\n");
 	}
 
 	ground_entity = (state->onground && groundent > 0);
@@ -1305,6 +1334,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	if (cl_netdebug_parse.value && ground_entity && !state->ground_valid)
 	{
 		Con_Printf ("NETDBG: pred ground missing ent=%d mtime=%.3f\n",
+			groundent, cl.mtime[0]);
+		JITTER_LOG ("NETDBG: pred ground missing ent=%d mtime=%.3f\n",
 			groundent, cl.mtime[0]);
 	}
 
@@ -1381,6 +1412,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 			if (cl_netdebug_parse.value)
 			{
 				Con_Printf ("NETDBG: pred onground without ground entity (post-move)\n");
+				JITTER_LOG ("NETDBG: pred onground without ground entity (post-move)\n");
 			}
 		}
 	}
@@ -1496,6 +1528,8 @@ void CL_Predict_BeginFrame (void)
 	{
 		Con_Printf ("PREDACCUM dt %.4f accum %.4f step_dt %.4f\n",
 			host_frametime, cl_pred_frame_accum, cl_pred_last_substep_dt);
+		JITTER_LOG ("PREDACCUM dt %.4f accum %.4f step_dt %.4f\n",
+			host_frametime, cl_pred_frame_accum, cl_pred_last_substep_dt);
 	}
 
 	if (!enabled)
@@ -1540,6 +1574,8 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 		host_dt = host_frametime;
 		CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
 		Con_Printf ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
+		JITTER_LOG ("JITTERDBG setup seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
 			cmd->sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 	}
 	CL_Predict_DebugLogCmd ("setup", cmd, cmd_dt);
@@ -1606,6 +1642,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				correction,
 				origin[0], origin[1], origin[2],
 				cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+			JITTER_LOG ("NETDBG: prediction correction %.1f units (server %f %f %f, client %f %f %f)\n",
+				correction,
+				origin[0], origin[1], origin[2],
+				cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 		}
 	}
 
@@ -1624,10 +1664,34 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				error_len,
 				origin[0], origin[1], origin[2],
 				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
+			JITTER_LOG ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
+				error_len,
+				origin[0], origin[1], origin[2],
+				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
 			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d mouse_applied %d\n",
+				cl_pred_ground_dbg.onground ? 1 : 0,
+				cl_pred_ground_dbg.groundent,
+				cl_pred_ground_dbg.ground_valid ? 1 : 0,
+				cl_pred_ground_dbg.ground_valid_reason,
+				cl_pred_ground_dbg.ground_trace_fraction,
+				cl_pred_ground_dbg.ground_trace_normal_z,
+				cl_pred_ground_dbg.ground_trace_ent,
+				cl_pred_ground_dbg.ground_trace_startsolid,
+				cl_pred_ground_dbg.ground_trace_allsolid,
+				cl_pred_ground_dbg.ground_trace_fallback,
+				cl_pred_ground_dbg.wishspeed,
+				cl_pred_ground_dbg.wishvel_z,
+				cl_pred_ground_dbg.cmd_frametime,
+				cl_pred_ground_dbg.flags,
+				cl_pred_ground_dbg.ground_delta_len,
+				cl_pred_ground_dbg.ground_yaw_delta,
+				cl_pred_ground_dbg.ground_apply_pred,
+				cl_pred_ground_dbg.ground_apply_render,
+				IN_DidApplyMouseDelta () ? 1 : 0);
+			JITTER_LOG ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d mouse_applied %d\n",
 				cl_pred_ground_dbg.onground ? 1 : 0,
 				cl_pred_ground_dbg.groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
@@ -1710,6 +1774,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (groundent == 0 && cl_netdebug_parse.value)
 		{
 			Con_Printf ("NETDBG: server onground without ground entity (groundent 0)\n");
+			JITTER_LOG ("NETDBG: server onground without ground entity (groundent 0)\n");
 		}
 		if (groundent > 0)
 		{
@@ -1788,6 +1853,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (cl_jitter_debug.value > 0.0f)
 		{
 			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
+			JITTER_LOG ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
 				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 		for (i = 0; i < substeps; i++)

@@ -43,6 +43,7 @@ int	current_skill;
 		if (!sv_player) \
 		{ \
 			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
 			SV_PlayerNullTrap (__func__, 0); \
 			return; \
 		} \
@@ -53,6 +54,7 @@ int	current_skill;
 		if (!sv_player) \
 		{ \
 			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
 			SV_PlayerNullTrap (__func__, 0); \
 			return retval; \
 		} \

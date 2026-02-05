@@ -520,6 +520,8 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_step_debug);
 	Cvar_RegisterVariable (&sys_step_dump);
 	Cvar_RegisterVariable (&sys_step_hitch_ms);
+	Cvar_RegisterVariable (&jitter_log_enable);
+	Cvar_RegisterVariable (&jitter_log_file);
 
 	Cvar_RegisterVariable (&fraglimit);
 	Cvar_RegisterVariable (&timelimit);
@@ -1016,7 +1018,23 @@ static void Sys_StepDebug_LogFrame (void)
 		sys_step_debug_info.cl_time,
 		sys_step_debug_info.cl_servertime,
 		sys_step_debug_info.cl_snapshot_time);
+	JITTER_LOG ("STEPDBG frame %d rt %.6f ft %.6f raw %.6f cl.time %.6f cl.srv %.6f cl.snap %.6f\n",
+		sys_step_debug_info.frame,
+		sys_step_debug_info.realtime,
+		sys_step_debug_info.host_frametime,
+		sys_step_debug_info.host_rawframetime,
+		sys_step_debug_info.cl_time,
+		sys_step_debug_info.cl_servertime,
+		sys_step_debug_info.cl_snapshot_time);
 	Con_Printf ("STEPDBG sv ticks %d phys %d tick_us %lld frame_us %lld accum %lld->%lld maxsteps %d\n",
+		sys_step_debug_info.sv_ticks,
+		sys_step_debug_info.sv_physics_calls,
+		(long long)sys_step_debug_info.tick_us,
+		(long long)sys_step_debug_info.frame_us,
+		(long long)sys_step_debug_info.sv_accum_us_before,
+		(long long)sys_step_debug_info.sv_accum_us_after,
+		(int)(sv_maxsteps_per_frame.value > 0 ? sv_maxsteps_per_frame.value : sv_tick_maxcatchup.value));
+	JITTER_LOG ("STEPDBG sv ticks %d phys %d tick_us %lld frame_us %lld accum %lld->%lld maxsteps %d\n",
 		sys_step_debug_info.sv_ticks,
 		sys_step_debug_info.sv_physics_calls,
 		(long long)sys_step_debug_info.tick_us,
@@ -1034,7 +1052,26 @@ static void Sys_StepDebug_LogFrame (void)
 		sys_step_debug_info.cl_cmd_packets,
 		(long long)sys_step_debug_info.cl_cmd_accum_us_before,
 		(long long)sys_step_debug_info.cl_cmd_accum_us_after);
+	JITTER_LOG ("STEPDBG cl sendcmd %d read %d parse %d predsteps %d cmds built %d sent %d packets %d accum %lld->%lld\n",
+		sys_step_debug_info.cl_sendcmd_calls,
+		sys_step_debug_info.cl_readfromserver_calls,
+		sys_step_debug_info.cl_parse_calls,
+		sys_step_debug_info.cl_pred_steps,
+		sys_step_debug_info.cl_cmds_built,
+		sys_step_debug_info.cl_cmds_sent,
+		sys_step_debug_info.cl_cmd_packets,
+		(long long)sys_step_debug_info.cl_cmd_accum_us_before,
+		(long long)sys_step_debug_info.cl_cmd_accum_us_after);
 	Con_Printf ("STEPDBG cmd msec min %d max %d last %d no_cmd %d dropped %d wild %d zero %d over %d\n",
+		cmd_msec_min,
+		cmd_msec_max,
+		sys_step_debug_info.cl_cmd_msec_last,
+		sys_step_debug_info.cl_cmd_no_cmd,
+		sys_step_debug_info.cl_cmds_dropped,
+		sys_step_debug_info.cl_cmd_msec_wild,
+		sys_step_debug_info.cl_cmd_msec_zero,
+		sys_step_debug_info.cl_cmd_msec_over);
+	JITTER_LOG ("STEPDBG cmd msec min %d max %d last %d no_cmd %d dropped %d wild %d zero %d over %d\n",
 		cmd_msec_min,
 		cmd_msec_max,
 		sys_step_debug_info.cl_cmd_msec_last,
@@ -1059,7 +1096,31 @@ static void Sys_StepDebug_LogFrame (void)
 			sys_step_debug_info.player_vel_after[0],
 			sys_step_debug_info.player_vel_after[1],
 			sys_step_debug_info.player_vel_after[2]);
+		JITTER_LOG ("STEPDBG player org %.2f %.2f %.2f -> %.2f %.2f %.2f vel %.2f %.2f %.2f -> %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_origin_before[0],
+			sys_step_debug_info.player_origin_before[1],
+			sys_step_debug_info.player_origin_before[2],
+			sys_step_debug_info.player_origin_after[0],
+			sys_step_debug_info.player_origin_after[1],
+			sys_step_debug_info.player_origin_after[2],
+			sys_step_debug_info.player_vel_before[0],
+			sys_step_debug_info.player_vel_before[1],
+			sys_step_debug_info.player_vel_before[2],
+			sys_step_debug_info.player_vel_after[0],
+			sys_step_debug_info.player_vel_after[1],
+			sys_step_debug_info.player_vel_after[2]);
 		Con_Printf ("STEPDBG player onground %d->%d groundent %d->%d trace frac %.3f normalz %.3f mover %d gvel %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_onground_before,
+			sys_step_debug_info.player_onground_after,
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after,
+			sys_step_debug_info.player_ground_trace_fraction,
+			sys_step_debug_info.player_ground_trace_normal_z,
+			sys_step_debug_info.player_ground_is_mover,
+			sys_step_debug_info.player_ground_vel[0],
+			sys_step_debug_info.player_ground_vel[1],
+			sys_step_debug_info.player_ground_vel[2]);
+		JITTER_LOG ("STEPDBG player onground %d->%d groundent %d->%d trace frac %.3f normalz %.3f mover %d gvel %.2f %.2f %.2f\n",
 			sys_step_debug_info.player_onground_before,
 			sys_step_debug_info.player_onground_after,
 			sys_step_debug_info.player_groundent_before,
@@ -1080,17 +1141,28 @@ static void Sys_StepDebug_LogFrame (void)
 		Con_Printf ("STEPWARN sim dt is zero\n");
 	if (sys_step_debug_info.warn_many_ticks)
 		Con_Printf ("STEPWARN max ticks exceeded in frame\n");
+	if (sys_step_debug_info.warn_host_frametime_clamped)
+		JITTER_LOG ("STEPWARN host_frametime clamped raw %.6f ft %.6f\n", host_rawframetime, host_frametime);
+	if (sys_step_debug_info.warn_zero_frametime)
+		JITTER_LOG ("STEPWARN host_frametime <= 0\n");
+	if (sys_step_debug_info.warn_zero_sim_dt)
+		JITTER_LOG ("STEPWARN sim dt is zero\n");
+	if (sys_step_debug_info.warn_many_ticks)
+		JITTER_LOG ("STEPWARN max ticks exceeded in frame\n");
 
 	if (sys_step_hitch_ms.value > 0.0f)
 	{
 		double hitch_ms = sys_step_hitch_ms.value;
 		if (host_rawframetime * 1000.0 >= hitch_ms)
 			Con_Printf ("STEPWARN hitch %.2fms >= %.2fms\n", host_rawframetime * 1000.0, hitch_ms);
+		if (host_rawframetime * 1000.0 >= hitch_ms)
+			JITTER_LOG ("STEPWARN hitch %.2fms >= %.2fms\n", host_rawframetime * 1000.0, hitch_ms);
 	}
 
 	if (dump_frame && debug_level <= 0)
 	{
 		Con_Printf ("STEPDBG dump requested; enable sys_step_debug for continuous logging.\n");
+		JITTER_LOG ("STEPDBG dump requested; enable sys_step_debug for continuous logging.\n");
 	}
 }
 
@@ -1158,24 +1230,28 @@ static void Host_CheckAutosave (void)
 	if (!sv_player)
 	{
 		Con_Printf ("NETDBG autosave skipped: sv_player NULL cl %d\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG autosave skipped: sv_player NULL cl %d\n", SV_CurrentClientIndex ());
 		return;
 	}
 
 	if (cls.state != ca_connected)
 	{
 		Con_Printf ("NETDBG autosave skipped: cls.state %d\n", cls.state);
+		JITTER_LOG ("NETDBG autosave skipped: cls.state %d\n", cls.state);
 		return;
 	}
 
 	if (cls.signon != SIGNONS)
 	{
 		Con_Printf ("NETDBG autosave skipped: signon %d\n", cls.signon);
+		JITTER_LOG ("NETDBG autosave skipped: signon %d\n", cls.signon);
 		return;
 	}
 
 	if (cl.intermission)
 	{
 		Con_Printf ("NETDBG autosave skipped: intermission\n");
+		JITTER_LOG ("NETDBG autosave skipped: intermission\n");
 		return;
 	}
 
@@ -1295,10 +1371,14 @@ static void SV_RunOneTick (double tick_dt)
 		{
 			Con_Printf ("NETDBG SV_RunOneTick paused for %d frames (paused=%d key_dest=%d)\n",
 				paused_frame_count, sv.paused, key_dest);
+			JITTER_LOG ("NETDBG SV_RunOneTick paused for %d frames (paused=%d key_dest=%d)\n",
+				paused_frame_count, sv.paused, key_dest);
 		}
 		if (realtime >= next_sv_skip_log)
 		{
 			Con_Printf ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
+				sv.paused, key_dest);
+			JITTER_LOG ("NETDBG SV_Physics skipped (SV_RunOneTick) paused=%d key_dest=%d\n",
 				sv.paused, key_dest);
 			next_sv_skip_log = realtime + 1.0;
 		}
@@ -1308,6 +1388,8 @@ static void SV_RunOneTick (double tick_dt)
 			cl.paused = false;
 			paused_frame_count = 0;
 			Con_Printf ("NETDBG SV_RunOneTick forced unpause (paused=%d key_dest=%d)\n",
+				sv.paused, key_dest);
+			JITTER_LOG ("NETDBG SV_RunOneTick forced unpause (paused=%d key_dest=%d)\n",
 				sv.paused, key_dest);
 			MSG_WriteByte (&sv.reliable_datagram, svc_setpause);
 			MSG_WriteByte (&sv.reliable_datagram, sv.paused);
@@ -1347,6 +1429,8 @@ void Host_ServerFrame (void)
 		{
 			Con_Printf ("NETDBG sv.frametime <= 0 (%.6f) clamping; sv.time %.3f\n",
 				host_frametime, qcvm->time);
+			JITTER_LOG ("NETDBG sv.frametime <= 0 (%.6f) clamping; sv.time %.3f\n",
+				host_frametime, qcvm->time);
 			next_sv_zero_frametime_log = realtime + 1.0;
 		}
 		clamped_frametime = 0.0001f;
@@ -1385,6 +1469,8 @@ void Host_ServerFrame (void)
 	{
 		Con_Printf ("NETDBG sv.time %.3f sv.frametime %.6f edicts %d active_clients %d\n",
 			qcvm->time, clamped_frametime, qcvm->num_edicts, active_clients);
+		JITTER_LOG ("NETDBG sv.time %.3f sv.frametime %.6f edicts %d active_clients %d\n",
+			qcvm->time, clamped_frametime, qcvm->num_edicts, active_clients);
 		next_sv_report_time = realtime + 1.0;
 	}
 
@@ -1421,6 +1507,8 @@ void Host_ServerFrame (void)
 			{
 				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
 					ticks, (double)sv_accum_us / 1000000.0, tick_dt);
+				JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+					ticks, (double)sv_accum_us / 1000000.0, tick_dt);
 			}
 		}
 	}
@@ -1441,6 +1529,8 @@ void Host_ServerFrame (void)
 			{
 				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
 					ticks, sv_accum, tick_dt);
+				JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+					ticks, sv_accum, tick_dt);
 			}
 		}
 	}
@@ -1460,6 +1550,8 @@ void Host_ServerFrame (void)
 		else if (sv_tick_debug.value && qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
 		{
 			Con_Printf ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
+				qcvm->time, clamped_frametime);
+			JITTER_LOG ("NETDBG sv.time stalled at %.3f (frametime %.6f)\n",
 				qcvm->time, clamped_frametime);
 			next_sv_stall_log = realtime + 1.0;
 		}
@@ -1500,6 +1592,8 @@ void Host_ServerFrame (void)
 		{
 			Con_Printf ("NETDBG sv_snap_send time %.3f next %.3f clients %d bytes %d\n",
 				qcvm->time, sv_next_snapshot_time + net_dt, active_clients, temp_bytes);
+			JITTER_LOG ("NETDBG sv_snap_send time %.3f next %.3f clients %d bytes %d\n",
+				qcvm->time, sv_next_snapshot_time + net_dt, active_clients, temp_bytes);
 		}
 		SV_ClearDatagram ();
 		sv_next_snapshot_time += net_dt;
@@ -1512,6 +1606,8 @@ void Host_ServerFrame (void)
 		double accum_s = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
 
 		Con_Printf ("NETDBG sv_tick frame_dt %.6f tick_dt %.6f ticks %d accum %.6f time %.3f sends %d\n",
+			clamped_frametime, tick_dt, ticks, accum_s, qcvm->time, sends);
+		JITTER_LOG ("NETDBG sv_tick frame_dt %.6f tick_dt %.6f ticks %d accum %.6f time %.3f sends %d\n",
 			clamped_frametime, tick_dt, ticks, accum_s, qcvm->time, sends);
 		next_sv_tick_log = realtime + 1.0;
 	}
@@ -2044,6 +2140,7 @@ void Host_Shutdown(void)
 
 	Host_ShutdownSave ();
 	Host_WriteConfiguration ();
+	Jitter_Log_Close ();
 
 // stop downloads before shutting down networking
         Modlist_ShutDown ();

@@ -303,6 +303,9 @@ SV_AreaTriggerEdicts ( edict_t *ent, areanode_t *node, edict_t **list, int *list
 				Con_Printf ("STEPDBG trigger_no_touch ent %s #%d trigger %s #%d\n",
 					PR_GetString (ent->v.classname), NUM_FOR_EDICT (ent),
 					PR_GetString (touch->v.classname), NUM_FOR_EDICT (touch));
+				JITTER_LOG ("STEPDBG trigger_no_touch ent %s #%d trigger %s #%d\n",
+					PR_GetString (ent->v.classname), NUM_FOR_EDICT (ent),
+					PR_GetString (touch->v.classname), NUM_FOR_EDICT (touch));
 			}
 		}
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER)

@@ -97,6 +97,7 @@ static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr)
 {
 	char text[2048];
 	int len;
+	va_list argcopy;
 
 	if (!NET_DebugEnabled () && (!force || !net_debug_log))
 		return;
@@ -113,13 +114,19 @@ static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr)
 	if (!net_debug_log)
 		return;
 
+	va_copy (argcopy, argptr);
 	len = q_vsnprintf (text, sizeof(text), fmt, argptr);
 	if (len < 0)
+	{
+		va_end (argcopy);
 		return;
+	}
 	if (len >= (int)sizeof(text))
 		len = (int)sizeof(text) - 1;
 	fwrite (text, 1, (size_t)len, net_debug_log);
 	fflush (net_debug_log);
+	Jitter_LogV (fmt, argcopy);
+	va_end (argcopy);
 }
 
 void NET_DebugLogEvent (qboolean force, const char *fmt, ...)

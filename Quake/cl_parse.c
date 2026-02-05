@@ -145,6 +145,7 @@ static void CL_NetHexDump (const byte *data, int len, int max)
 		return;
 
 	Con_Printf ("NETDBG: hexdump %d bytes\n", dump_len);
+	JITTER_LOG ("NETDBG: hexdump %d bytes\n", dump_len);
 	for (i = 0; i < dump_len; i += 16)
 	{
 		int j;
@@ -157,6 +158,7 @@ static void CL_NetHexDump (const byte *data, int len, int max)
 			out += q_snprintf (out, (size_t)(line + sizeof(line) - out), " %02x", data[i + j]);
 		*out = '\0';
 		Con_Printf ("%s\n", line);
+		JITTER_LOG ("%s\n", line);
 	}
 }
 
@@ -192,6 +194,8 @@ static void CL_NetDebugHeader (void)
 
 	Con_Printf ("NETDBG: msg len %d time %.3f state %d signon %d\n",
 		net_message.cursize, realtime, cls.state, cls.signon);
+	JITTER_LOG ("NETDBG: msg len %d time %.3f state %d signon %d\n",
+		net_message.cursize, realtime, cls.state, cls.signon);
 	if (cls.netcon)
 	{
 		double now = Sys_DoubleTime ();
@@ -217,10 +221,30 @@ static void CL_NetDebugHeader (void)
 			cls.netcon->canSend ? 1 : 0,
 			cls.netcon->disconnected ? 1 : 0,
 			last_msg_age, last_send_age);
+		JITTER_LOG ("NETDBG: from %s rseq %u sseq %u rack %u unrel %u "
+			"rmask 0x%x sbase %u rate_budget %d can_send %d disc %d "
+			"lastmsg %.3f lastsend %.3f\n",
+			NET_QSocketGetAddressString (cls.netcon),
+			cls.netcon->receiveSequence,
+			cls.netcon->sendSequence,
+			cls.netcon->reliableReceiveSequence,
+			cls.netcon->unreliableReceiveSequence,
+			cls.netcon->reliableReceiveMask,
+			cls.netcon->sendReliableBase,
+			cls.netcon->rate_budget,
+			cls.netcon->canSend ? 1 : 0,
+			cls.netcon->disconnected ? 1 : 0,
+			last_msg_age, last_send_age);
 	}
 	if (net_last_incoming.valid)
 	{
 		Con_Printf ("NETDBG: packet seq %u flags 0x%x len %u payload %u %s\n",
+			net_last_incoming.sequence,
+			net_last_incoming.flags,
+			net_last_incoming.packet_length,
+			net_last_incoming.payload_length,
+			net_last_incoming.unreliable ? "unreliable" : "reliable");
+		JITTER_LOG ("NETDBG: packet seq %u flags 0x%x len %u payload %u %s\n",
 			net_last_incoming.sequence,
 			net_last_incoming.flags,
 			net_last_incoming.packet_length,
@@ -238,14 +262,23 @@ static void CL_NetHexDumpTail (const byte *data, int len, int tail)
 	int dump_len = q_min (tail, len);
 	int start = len - dump_len;
 	int i;
+	char line[256];
+	char *out = line;
+	char *line_end = line + sizeof(line);
 
 	if (dump_len <= 0)
 		return;
 
 	Con_Printf ("NETDBG: tail %d bytes (cursize %d):", dump_len, len);
+	out += q_snprintf (out, (size_t)(line_end - out), "NETDBG: tail %d bytes (cursize %d):", dump_len, len);
 	for (i = 0; i < dump_len; i++)
+	{
 		Con_Printf (" %02x", data[start + i]);
+		out += q_snprintf (out, (size_t)(line_end - out), " %02x", data[start + i]);
+	}
 	Con_Printf ("\n");
+	out += q_snprintf (out, (size_t)(line_end - out), "\n");
+	JITTER_LOG ("%s", line);
 }
 
 static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
@@ -254,7 +287,14 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 	if (cl_netdebug_parse.value || cl_netdebug_hexdump.value)
 	{
 		Con_Printf ("NETDBG: bad server message: %s\n", reason);
+		JITTER_LOG ("NETDBG: bad server message: %s\n", reason);
 		Con_Printf ("NETDBG: readcount %d/%d cmd %d (%s) @%d last %d (%s) @%d prev %d (%s) @%d badread %d\n",
+			msg_readcount, net_message.cursize,
+			cmd, CL_SvcName (cmd), cmd_offset,
+			lastcmd, CL_SvcName (lastcmd), lastcmd_offset,
+			prevcmd, CL_SvcName (prevcmd), prevcmd_offset,
+			msg_badread);
+		JITTER_LOG ("NETDBG: readcount %d/%d cmd %d (%s) @%d last %d (%s) @%d prev %d (%s) @%d badread %d\n",
 			msg_readcount, net_message.cursize,
 			cmd, CL_SvcName (cmd), cmd_offset,
 			lastcmd, CL_SvcName (lastcmd), lastcmd_offset,
@@ -267,7 +307,11 @@ static void CL_BadServerMessage (const char *reason, int cmd, int cmd_offset,
 	if (cls.signon < SIGNONS)
 	{
 		Con_Printf ("NETDBG: disconnecting due to parse error: %s\n", reason);
+		JITTER_LOG ("NETDBG: disconnecting due to parse error: %s\n", reason);
 		Con_Printf ("NETDBG: last svc %d (%s) @%d readpos %d cursize %d state %d signon %d\n",
+			cmd, CL_SvcName (cmd), cmd_offset, msg_readcount, net_message.cursize,
+			(int)cls.state, (int)cls.signon);
+		JITTER_LOG ("NETDBG: last svc %d (%s) @%d readpos %d cursize %d state %d signon %d\n",
 			cmd, CL_SvcName (cmd), cmd_offset, msg_readcount, net_message.cursize,
 			(int)cls.state, (int)cls.signon);
 		CL_NetHexDumpTail (net_message.data, net_message.cursize, 64);
@@ -798,6 +842,8 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 	{
 		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
 			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
+		JITTER_LOG ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
+			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
 	}
 }
 
@@ -1194,6 +1240,8 @@ static void CL_UpdateServerTimeEstimate (double server_time, const char *source)
 		{
 			Con_Printf ("NETDBG: server_time non-monotonic %.3f < %.3f (%s)\n",
 				server_time, cl.latest_server_time, source ? source : "unknown");
+			JITTER_LOG ("NETDBG: server_time non-monotonic %.3f < %.3f (%s)\n",
+				server_time, cl.latest_server_time, source ? source : "unknown");
 		}
 		server_time = cl.latest_server_time;
 	}
@@ -1228,6 +1276,8 @@ static double CL_ClampSnapshotServerTime (double snap_time, unsigned int seq)
 		if (cl_netdbg_interp.value > 0.0f)
 		{
 			Con_Printf ("NETDBG: snap_time non-monotonic %.3f < %.3f seq %u\n",
+				snap_time, cl.snap_last_server_time, seq);
+			JITTER_LOG ("NETDBG: snap_time non-monotonic %.3f < %.3f seq %u\n",
 				snap_time, cl.snap_last_server_time, seq);
 		}
 		snap_time = cl.snap_last_server_time;
@@ -1685,16 +1735,34 @@ static void CL_NetDbg_LogWatchEnt (const snapshot_header_t *header, int removed)
 		watch, header->seq, header->base_seq, status, reason,
 		state->state.origin[0], state->state.origin[1], state->state.origin[2],
 		state->velocity[0], state->velocity[1], state->velocity[2]);
+	{
+		char line[512];
+		char *out = line;
+		char *line_end = line + sizeof(line);
+
+		out += q_snprintf (out, (size_t)(line_end - out),
+			"NETDBG: watch_ent %d seq %u base %u state %s reason %s origin %.1f %.1f %.1f "
+			"vel %d %d %d",
+			watch, header->seq, header->base_seq, status, reason,
+			state->state.origin[0], state->state.origin[1], state->state.origin[2],
+			state->velocity[0], state->velocity[1], state->velocity[2]);
 
 	if (newest)
 	{
 		Con_Printf (" snap0 %.1f %.1f %.1f", newest->origin[0], newest->origin[1], newest->origin[2]);
+		out += q_snprintf (out, (size_t)(line_end - out), " snap0 %.1f %.1f %.1f",
+			newest->origin[0], newest->origin[1], newest->origin[2]);
 	}
 	if (prev)
 	{
 		Con_Printf (" snap1 %.1f %.1f %.1f", prev->origin[0], prev->origin[1], prev->origin[2]);
+		out += q_snprintf (out, (size_t)(line_end - out), " snap1 %.1f %.1f %.1f",
+			prev->origin[0], prev->origin[1], prev->origin[2]);
 	}
 	Con_Printf ("\n");
+	out += q_snprintf (out, (size_t)(line_end - out), "\n");
+	JITTER_LOG ("%s", line);
+	}
 }
 
 static double CL_GetInterpDelaySecondsDebug (void)
@@ -1782,6 +1850,18 @@ static void CL_NetDbg_LogInterpSnapshot (const snapshot_header_t *header, int re
 	CL_CountSnapshotEntities (prev_present, cl.snapshot_present, &total, &created, &missing, &dormant);
 
 	Con_Printf ("NETDBG: interp seq %u base %u srvtime %.3f arrival_dt %.3f "
+		"render_time %.3f interp_delay %.3f buf_oldest %.3f buf_newest %.3f buf_fill_ms %.1f "
+		"render_gap_ms oldest %.1f newest %.1f srvnow %.3f srv_skew_age %.3f snap_age %.3f "
+		"ents total %d created %d removed %d missing %d dormant %d "
+		"snap_seq last %u complete %u incomplete %u need_full %d delta_mismatch %d parse_err %d incomplete_cnt %d\n",
+		header->seq, header->base_seq, server_time,
+		arrival_dt, render_time, interp_delay, oldest, newest, buffer_fill_ms,
+		render_vs_oldest_ms, render_vs_newest_ms, server_now, server_skew_age, snap_age,
+		total, created, removes_parsed, missing, dormant,
+		cl.snap_last_applied_seq, cl.snap_last_complete_seq, cl.snap_last_incomplete_seq,
+		cl.need_full_snapshot ? 1 : 0, cl.snap_delta_mismatch, cl.snap_parse_errors,
+		cl.snap_incomplete_count);
+	JITTER_LOG ("NETDBG: interp seq %u base %u srvtime %.3f arrival_dt %.3f "
 		"render_time %.3f interp_delay %.3f buf_oldest %.3f buf_newest %.3f buf_fill_ms %.1f "
 		"render_gap_ms oldest %.1f newest %.1f srvnow %.3f srv_skew_age %.3f snap_age %.3f "
 		"ents total %d created %d removed %d missing %d dormant %d "
@@ -3683,6 +3763,8 @@ void CL_ParseServerMessage (void)
 		}
 		if (cl_netdebug_parse.value)
 			Con_Printf ("NETDBG: cmd %s (%d) @%d\n", CL_SvcName (cmd), cmd, cmd_offset);
+		if (cl_netdebug_parse.value)
+			JITTER_LOG ("NETDBG: cmd %s (%d) @%d\n", CL_SvcName (cmd), cmd, cmd_offset);
 
 	// other commands
 		switch (cmd)
@@ -4050,6 +4132,8 @@ void CL_ParseServerMessage (void)
 			if (cmd_end < cmd_offset)
 				cmd_end = cmd_offset;
 			Con_Printf ("NETDBG: cmd %s end %d bytes %d\n",
+				CL_SvcName (cmd), cmd_end, cmd_end - cmd_offset);
+			JITTER_LOG ("NETDBG: cmd %s end %d bytes %d\n",
 				CL_SvcName (cmd), cmd_end, cmd_end - cmd_offset);
 		}
 
