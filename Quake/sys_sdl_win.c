@@ -1126,6 +1126,7 @@ void Sys_Printf (const char *fmt, ...)
 	q_vsnprintf (qtext, sizeof (qtext), fmt, argptr);
 	va_end (argptr);
 
+	JitterLog_WriteLine ("SYS", qtext);
 	UTF8_FromQuake (u8text, sizeof (u8text), qtext);
 
 	// log all messages to file as well if -condebug was specified

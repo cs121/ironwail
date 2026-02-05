@@ -323,6 +323,8 @@ extern	cvar_t		sys_step_dump;
 extern	cvar_t		sys_step_hitch_ms;
 extern	cvar_t		jitter_log_enable;
 extern	cvar_t		jitter_log_file;
+extern	cvar_t		jitter_log_flush;
+extern	cvar_t		jitter_log_force_developer;
 extern	cvar_t		sv_fixedtick;
 extern	cvar_t		sv_maxsteps_per_frame;
 
@@ -389,6 +391,7 @@ extern	double		realtime;		// not bounded in any way, changed at
 
 void Jitter_Log (const char *fmt, ...) FUNCP_PRINTF(1,2);
 void Jitter_LogV (const char *fmt, va_list argptr);
+void JitterLog_WriteLine (const char *tag, const char *text);
 void Jitter_Log_Close (void);
 
 #define JITTER_LOG(...) \

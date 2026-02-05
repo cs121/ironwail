@@ -1267,6 +1267,7 @@ void Con_Printf (const char *fmt, ...)
 
 // also echo to debugging console
 	Sys_Printf ("%s", Con_StripControlPrefixes (msg));
+	JitterLog_WriteLine ("CON", Con_StripControlPrefixes (msg));
 
 	if (!con_initialized)
 		return;
@@ -1345,15 +1346,21 @@ void Con_DPrintf (const char *fmt, ...)
 {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
+	qboolean	developer_visible;
 
-	if (!developer.value)
+	developer_visible = developer.value || (jitter_log_enable.value > 0.0f && jitter_log_force_developer.value > 0.0f);
+	if (!developer_visible && jitter_log_enable.value <= 0.0f)
 		return;			// don't confuse non-developers with techie stuff...
 
 	va_start (argptr, fmt);
 	q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 
-	Con_SafePrintf ("%s", msg); //johnfitz -- was Con_Printf
+	if (jitter_log_enable.value > 0.0f)
+		JitterLog_WriteLine ("CON_D", msg);
+
+	if (developer_visible)
+		Con_SafePrintf ("%s", msg); //johnfitz -- was Con_Printf
 }
 
 /*
