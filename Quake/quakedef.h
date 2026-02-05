@@ -325,6 +325,7 @@ extern	cvar_t		jitter_log_enable;
 extern	cvar_t		jitter_log_file;
 extern	cvar_t		jitter_log_flush;
 extern	cvar_t		jitter_log_force_developer;
+extern	cvar_t		jitter_time_debug;
 extern	cvar_t		sv_fixedtick;
 extern	cvar_t		sv_maxsteps_per_frame;
 

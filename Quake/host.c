@@ -77,6 +77,7 @@ cvar_t	serverprofile = {"serverprofile","0",CVAR_NONE};
 cvar_t	sys_step_debug = {"sys_step_debug", "0", CVAR_NONE};
 cvar_t	sys_step_dump = {"sys_step_dump", "0", CVAR_NONE};
 cvar_t	sys_step_hitch_ms = {"sys_step_hitch_ms", "50", CVAR_NONE};
+cvar_t	jitter_time_debug = {"jitter_time_debug", "0", CVAR_NONE};
 
 cvar_t	fraglimit = {"fraglimit","0",CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	timelimit = {"timelimit","0",CVAR_NOTIFY|CVAR_SERVERINFO};
@@ -520,6 +521,7 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_step_debug);
 	Cvar_RegisterVariable (&sys_step_dump);
 	Cvar_RegisterVariable (&sys_step_hitch_ms);
+	Cvar_RegisterVariable (&jitter_time_debug);
 	Cvar_RegisterVariable (&jitter_log_enable);
 	Cvar_RegisterVariable (&jitter_log_file);
 	Cvar_RegisterVariable (&jitter_log_flush);
@@ -1271,6 +1273,11 @@ static void Host_AdvanceTime (double dt)
 		if (host_frametime != host_rawframetime)
 			sys_step_debug_info.warn_host_frametime_clamped = 1;
 	}
+	if (jitter_time_debug.value > 0.0f && host_frametime != host_rawframetime)
+	{
+		Con_Printf ("JITWARN host_frametime_clamped\n");
+		JITTER_LOG ("JITWARN host_frametime_clamped\n");
+	}
 	if (sys_step_debug.value > 0.0f && host_frametime <= 0.0)
 		sys_step_debug_info.warn_zero_frametime = 1;
 }
@@ -1476,6 +1483,20 @@ static void SV_RunOneTick (double tick_dt)
 		}
 	}
 
+	if (jitter_time_debug.value > 0.0f && sv_player)
+	{
+		Con_Printf ("JITTIME SV tick svt=%.6f svft=%.6f plorg=%.2f %.2f %.2f plvel=%.2f %.2f %.2f ongr=%d grent=%d\n",
+			qcvm->time, host_frametime,
+			sv_player->v.origin[0], sv_player->v.origin[1], sv_player->v.origin[2],
+			sv_player->v.velocity[0], sv_player->v.velocity[1], sv_player->v.velocity[2],
+			((int)sv_player->v.flags & FL_ONGROUND) ? 1 : 0, (int)sv_player->v.groundentity);
+		JITTER_LOG ("JITTIME SV tick svt=%.6f svft=%.6f plorg=%.2f %.2f %.2f plvel=%.2f %.2f %.2f ongr=%d grent=%d\n",
+			qcvm->time, host_frametime,
+			sv_player->v.origin[0], sv_player->v.origin[1], sv_player->v.origin[2],
+			sv_player->v.velocity[0], sv_player->v.velocity[1], sv_player->v.velocity[2],
+			((int)sv_player->v.flags & FL_ONGROUND) ? 1 : 0, (int)sv_player->v.groundentity);
+	}
+
 	if (sys_step_debug.value > 0.0f)
 	{
 		Con_Printf ("[PHYS] sv.time %.6f sv.frametime %.6f ticks_this_frame %d\n",
@@ -1540,6 +1561,7 @@ void Host_ServerFrame (void)
 	double		clamped_frametime;
 	double		tick_dt;
 	double		net_dt;
+	double		jit_accum_before;
 	int64_t		frame_us;
 	int64_t		tick_dt_us;
 	int64_t		max_accum_us;
@@ -1579,6 +1601,8 @@ void Host_ServerFrame (void)
 		tick_dt_us = 1;
 	if (sys_step_debug.value > 0.0f)
 		sys_step_debug_info.tick_us = tick_dt_us;
+
+	jit_accum_before = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
 
 	if (sv_fixedtick.value > 0.0f)
 	{
@@ -1659,6 +1683,19 @@ void Host_ServerFrame (void)
 				JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
 					ticks, sv_accum, tick_dt);
 			}
+		}
+	}
+
+	if (jitter_time_debug.value > 0.0f)
+	{
+		double accum_before = jit_accum_before;
+		double accum_after = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
+		Con_Printf ("JITTIME SV frame rt=%.6f hf=%.6f ticks=%d acc=%.6f->%.6f\n", realtime, clamped_frametime, ticks, accum_before, accum_after);
+		JITTER_LOG ("JITTIME SV frame rt=%.6f hf=%.6f ticks=%d acc=%.6f->%.6f\n", realtime, clamped_frametime, ticks, accum_before, accum_after);
+		if (ticks == 0 || ticks > 3)
+		{
+			Con_Printf ("JITWARN ticks_this_frame==0 or >3\n");
+			JITTER_LOG ("JITWARN ticks_this_frame==0 or >3\n");
 		}
 	}
 
@@ -1973,6 +2010,11 @@ void _Host_Frame (double time)
 // decide the simulation time
 	accumtime += host_netinterval?CLAMP(0.0, time, 0.2):0.0;	//for renderer/server isolation
 	Host_AdvanceTime (time);
+	if (jitter_time_debug.value > 0.0f && host_frametime <= 0.0)
+	{
+		Con_Printf ("JITWARN host_frame_skipped\n");
+		JITTER_LOG ("JITWARN host_frame_skipped\n");
+	}
 
 // run async procs
 	AsyncQueue_Drain (&async_queue);
