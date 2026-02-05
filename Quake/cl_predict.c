@@ -909,37 +909,35 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 	return false;
 }
 
-static qboolean CL_GetEntityTransform (int entnum, vec3_t origin, vec3_t angles)
-{
-	entity_t *ent;
-
-	if (entnum <= 0 || entnum >= MAX_EDICTS)
-		return false;
-
-	ent = &cl_entities[entnum];
-	VectorCopy (ent->origin, origin);
-	VectorCopy (ent->angles, angles);
-
-	return true;
-}
-
 static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt_step, vec3_t out_delta, float *out_yaw_delta)
 {
-	vec3_t origin_now;
-	vec3_t angles_now;
+	entity_t *ent;
+	vec3_t ground_now;
 	vec3_t ground_prev;
 	vec3_t delta;
+	double t0;
+	double t1;
+	double sample_t;
+	float frac;
 	float yaw_now;
 	float yaw_prev;
 	float yaw_delta;
-	(void)dt_step;
 
 	VectorClear (out_delta);
 	if (out_yaw_delta)
 		*out_yaw_delta = 0.0f;
+	VectorClear (cl_pred_ground_dbg.ground_origin_now);
+	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
+
+	if (!state || !cl.has_full_snapshot)
+	{
+		CL_Predict_ResetGroundCache (state);
+		return false;
+	}
 
 	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
+		CL_Predict_ResetGroundCache (state);
 		if (cl_netdebug_parse.value)
 		{
 			Con_Printf ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
@@ -950,15 +948,38 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		return false;
 	}
 
-	if (!CL_GetEntityTransform (groundent, origin_now, angles_now))
+	t0 = cl.mtime[1];
+	t1 = cl.mtime[0];
+	if (t1 <= t0)
+	{
+		CL_Predict_InvalidateGroundCache (state);
 		return false;
-	yaw_now = angles_now[YAW];
+	}
+
+	ent = &cl_entities[groundent];
+	if (state->ground_cache.valid && state->ground_cache.id == groundent && dt_step > 0.0f)
+		sample_t = state->ground_cache.last_time + (double)dt_step;
+	else
+		sample_t = cl.time;
+
+	if (sample_t < t0)
+		sample_t = t0;
+	if (sample_t > t1)
+		sample_t = t1;
+
+	frac = (float)((sample_t - t0) / (t1 - t0));
+	frac = CLAMP (0.0f, frac, 1.0f);
+
+	VectorLerp (ent->msg_origins[1], ent->msg_origins[0], frac, ground_now);
+	yaw_now = LerpAngleShortest (ent->msg_angles[1][YAW], ent->msg_angles[0][YAW], frac);
 
 	if (!state->ground_cache.valid || state->ground_cache.id != groundent)
 	{
-		VectorCopy (origin_now, state->ground_cache.last_origin);
-		VectorCopy (angles_now, state->ground_cache.last_angles);
-		state->ground_cache.last_time = cl.time;
+		VectorCopy (ground_now, state->ground_cache.last_origin);
+		VectorCopy (ground_now, cl_pred_ground_dbg.ground_origin_now);
+		VectorCopy (ground_now, cl_pred_ground_dbg.ground_origin_prev);
+		state->ground_cache.last_angles[YAW] = yaw_now;
+		state->ground_cache.last_time = sample_t;
 		state->ground_cache.id = groundent;
 		state->ground_cache.valid = true;
 		VectorClear (out_delta);
@@ -969,15 +990,17 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 
 	VectorCopy (state->ground_cache.last_origin, ground_prev);
 	yaw_prev = state->ground_cache.last_angles[YAW];
-	VectorSubtract (origin_now, ground_prev, delta);
+	VectorSubtract (ground_now, ground_prev, delta);
 	VectorCopy (delta, out_delta);
 	yaw_delta = CL_Predict_AngleDelta (yaw_now, yaw_prev);
 	if (out_yaw_delta)
 		*out_yaw_delta = yaw_delta;
+	VectorCopy (ground_prev, cl_pred_ground_dbg.ground_origin_prev);
+	VectorCopy (ground_now, cl_pred_ground_dbg.ground_origin_now);
 
-	VectorCopy (origin_now, state->ground_cache.last_origin);
-	VectorCopy (angles_now, state->ground_cache.last_angles);
-	state->ground_cache.last_time = cl.time;
+	VectorCopy (ground_now, state->ground_cache.last_origin);
+	state->ground_cache.last_angles[YAW] = yaw_now;
+	state->ground_cache.last_time = sample_t;
 	state->ground_cache.id = groundent;
 	state->ground_cache.valid = true;
 
@@ -1022,9 +1045,11 @@ static qboolean CL_Predict_GroundDeltaIsValid (const vec3_t delta, float yaw_del
 static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int groundent, float dt, vec3_t out_delta, float *out_yaw_delta)
 {
 	vec3_t delta;
-	float yaw_delta;
-	entity_t *ground;
+	vec3_t origin_no_trans;
 	vec3_t rel;
+	vec3_t rel_rot;
+	vec3_t origin_rot;
+	float yaw_delta;
 	float radians;
 	float c, s;
 	qboolean applied;
@@ -1125,22 +1150,21 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 
 		if (state->pred_ground_yaw_delta != 0.0f)
 		{
-			ground = &cl_entities[groundent];
-			VectorSubtract (state->origin, ground->msg_origins[0], rel);
+			VectorSubtract (state->origin, state->pred_ground_offset, origin_no_trans);
+			VectorSubtract (origin_no_trans, cl_pred_ground_dbg.ground_origin_prev, rel);
 			radians = state->pred_ground_yaw_delta * (float)(M_PI / 180.0f);
 			c = cosf (radians);
 			s = sinf (radians);
-			state->origin[0] = ground->msg_origins[0][0] + rel[0] * c - rel[1] * s;
-			state->origin[1] = ground->msg_origins[0][1] + rel[0] * s + rel[1] * c;
-			state->origin[2] = ground->msg_origins[0][2] + rel[2];
+			rel_rot[0] = rel[0] * c - rel[1] * s;
+			rel_rot[1] = rel[0] * s + rel[1] * c;
+			rel_rot[2] = rel[2];
+			VectorAdd (cl_pred_ground_dbg.ground_origin_prev, rel_rot, origin_rot);
+			VectorAdd (origin_rot, state->pred_ground_offset, state->origin);
 		}
 	}
 
-	if (state->ground_cache.valid && state->ground_cache.id == groundent)
-	{
-		VectorCopy (state->ground_cache.last_origin, cl_pred_ground_dbg.ground_origin_now);
-		VectorSubtract (state->ground_cache.last_origin, state->pred_ground_offset, cl_pred_ground_dbg.ground_origin_prev);
-	}
+	cl_pred_ground_dbg.ground_delta_len = VectorLength (state->pred_ground_offset);
+	cl_pred_ground_dbg.ground_yaw_delta = state->pred_ground_yaw_delta;
 
 done:
 	if (out_delta)
