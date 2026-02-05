@@ -1070,6 +1070,12 @@ void V_CalcRefdef (void)
 			ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
 			cl_lerpfrac,
 			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
+		JITTER_LOG ("NETDBG vieworg ent %d cur %.2f %.2f %.2f prev %.2f %.2f %.2f lerp %.3f view %.2f %.2f %.2f\n",
+			cl.viewentity,
+			ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
+			ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
+			cl_lerpfrac,
+			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	}
 
 	if (chase_active.value)

@@ -321,6 +321,8 @@ extern	cvar_t		sz_debug_hexdump;
 extern	cvar_t		sys_step_debug;
 extern	cvar_t		sys_step_dump;
 extern	cvar_t		sys_step_hitch_ms;
+extern	cvar_t		jitter_log_enable;
+extern	cvar_t		jitter_log_file;
 extern	cvar_t		sv_fixedtick;
 extern	cvar_t		sv_maxsteps_per_frame;
 
@@ -385,6 +387,17 @@ extern	int		host_framecount;	// incremented every frame, never reset
 extern	double		realtime;		// not bounded in any way, changed at
 							// start of every frame, never reset
 
+void Jitter_Log (const char *fmt, ...) FUNCP_PRINTF(1,2);
+void Jitter_LogV (const char *fmt, va_list argptr);
+void Jitter_Log_Close (void);
+
+#define JITTER_LOG(...) \
+	do \
+	{ \
+		if (jitter_log_enable.value > 0.0f) \
+			Jitter_Log (__VA_ARGS__); \
+	} while (0)
+
 static inline int SV_CurrentClientIndex (void)
 {
 	if (!host_client || !svs.clients || svs.maxclients <= 0)
@@ -401,7 +414,12 @@ static inline void SV_PlayerNullTrap (const char *where, int fatal)
 
 	Con_Printf ("NETDBG sv_player NULL cl %d name %s where %s fatal %d\n",
 		client_index, client_name, where ? where : "(unknown)", fatal);
+	JITTER_LOG ("NETDBG sv_player NULL cl %d name %s where %s fatal %d\n",
+		client_index, client_name, where ? where : "(unknown)", fatal);
 	Con_Printf ("NETDBG sv_player NULL sv.active %d sv.state %d cls.state %d cls.demoplayback %d "
+		"signon %d frame %d\n",
+		sv.active, sv.state, cls.state, cls.demoplayback, cls.signon, host_framecount);
+	JITTER_LOG ("NETDBG sv_player NULL sv.active %d sv.state %d cls.state %d cls.demoplayback %d "
 		"signon %d frame %d\n",
 		sv.active, sv.state, cls.state, cls.demoplayback, cls.signon, host_framecount);
 
@@ -410,8 +428,12 @@ static inline void SV_PlayerNullTrap (const char *where, int fatal)
 		void *stack[32];
 		USHORT frames = RtlCaptureStackBackTrace (0, (ULONG)(sizeof (stack) / sizeof (stack[0])), stack, NULL);
 		Con_Printf ("NETDBG sv_player NULL stack frames %u\n", frames);
+		JITTER_LOG ("NETDBG sv_player NULL stack frames %u\n", frames);
 		for (USHORT i = 0; i < frames; ++i)
+		{
 			Con_Printf ("NETDBG sv_player NULL  #%u %p\n", i, stack[i]);
+			JITTER_LOG ("NETDBG sv_player NULL  #%u %p\n", i, stack[i]);
+		}
 	}
 #endif
 
@@ -423,6 +445,7 @@ static inline void SV_PlayerNullTrap (const char *where, int fatal)
 	if (cls.demoplayback)
 	{
 		Con_Printf ("NETDBG sv_player NULL cl %d reason demo_playback_abort\n", client_index);
+		JITTER_LOG ("NETDBG sv_player NULL cl %d reason demo_playback_abort\n", client_index);
 		CL_StopPlayback ();
 	}
 }

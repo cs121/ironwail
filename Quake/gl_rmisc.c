@@ -359,6 +359,7 @@ static void R_ShowbboxesFilter_Completion_f (const char *partial)
 	if (!sv_player)
 	{
 		Con_Printf ("NETDBG sv_player NULL cl %d reason showbboxes_filter_completion\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_player NULL cl %d reason showbboxes_filter_completion\n", SV_CurrentClientIndex ());
 		SV_PlayerNullTrap (__func__, 0);
 		return;
 	}

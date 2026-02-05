@@ -4119,6 +4119,7 @@ static void R_ShowBoundingBoxes (void)
 	if (!sv_player)
 	{
 		Con_Printf ("NETDBG sv_player NULL cl %d reason showbboxes\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_player NULL cl %d reason showbboxes\n", SV_CurrentClientIndex ());
 		SV_PlayerNullTrap (__func__, 0);
 		return;
 	}

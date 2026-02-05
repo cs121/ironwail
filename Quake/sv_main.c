@@ -1800,6 +1800,9 @@ static qboolean SV_Snapshot2ForceFull (client_t *client, snapshot_full_reason_t 
 			Con_Printf ("NETDBG: midgame force_full cl %d %s reason %s last_full %.3f\n",
 				SV_ClientSlot (client), client->name, SV_SnapshotFullReasonName (reason),
 				client->snapshot_last_full_time);
+			JITTER_LOG ("NETDBG: midgame force_full cl %d %s reason %s last_full %.3f\n",
+				SV_ClientSlot (client), client->name, SV_SnapshotFullReasonName (reason),
+				client->snapshot_last_full_time);
 		}
 		if (SV_SnapshotFullReasonIsBaseMismatch (reason))
 			client->snapshot_base_mismatch_count++;
@@ -3421,6 +3424,9 @@ static void SV_SendSnapshot (client_t *client, sizebuf_t *msg, snapshot_write_st
 			if (midgame_active && !SV_SnapshotFullReasonBypassesCooldown (full_reason, client))
 			{
 				Con_Printf ("NETDBG: midgame full decision cl %d %s base %u reason %s last_full %.3f\n",
+					SV_ClientSlot (client), client->name, base_log, SV_SnapshotFullReasonName (full_reason),
+					client->snapshot_last_full_time);
+				JITTER_LOG ("NETDBG: midgame full decision cl %d %s base %u reason %s last_full %.3f\n",
 					SV_ClientSlot (client), client->name, base_log, SV_SnapshotFullReasonName (full_reason),
 					client->snapshot_last_full_time);
 			}
@@ -7274,6 +7280,7 @@ void SV_SpawnServer (const char *server)
 	if (hostname.string[0] == 0)
 		Cvar_Set ("hostname", "UNNAMED");
 	scr_centertime_off = 0;
+	Jitter_Log_Close ();
 
 	Con_DPrintf ("SpawnServer: %s\n",server);
 	svs.changelevel_issued = false;		// now safe to issue another

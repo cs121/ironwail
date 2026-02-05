@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <limits.h>
 #include "miniz.h"
 #include "unicode_translit.h"
+#include <stdarg.h>
 
 static const char	*largv[MAX_NUM_ARGVS + 1];
 static char	argvdummy[] = " ";
@@ -38,6 +39,92 @@ static char	argvdummy[] = " ";
 int		safemode;
 
 cvar_t	registered = {"registered","1",CVAR_ROM}; /* set to correct value in COM_CheckRegistered() */
+cvar_t	jitter_log_enable = {"jitter_log_enable", "0", CVAR_NONE};
+cvar_t	jitter_log_file = {"jitter_log_file", "jitter_debug.log", CVAR_NONE};
+
+static FILE *jitter_log_fp;
+static qboolean jitter_log_tried;
+
+static const char *Jitter_LogContext (void)
+{
+	if (sv.active && (cls.state == ca_disconnected || cls.state == ca_dedicated))
+		return "SV";
+	return "CL";
+}
+
+static const char *Jitter_LogPath (char *buffer, size_t buffer_size)
+{
+	const char *filename = jitter_log_file.string;
+
+	if (!filename || !filename[0])
+		return NULL;
+
+	if (host_parms && host_parms->userdir && host_parms->userdir[0])
+		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->userdir, filename);
+	else if (host_parms && host_parms->basedir && host_parms->basedir[0])
+		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->basedir, filename);
+	else
+		q_snprintf (buffer, buffer_size, "%s", filename);
+
+	return buffer;
+}
+
+void Jitter_Log_Close (void)
+{
+	if (jitter_log_fp)
+	{
+		fclose (jitter_log_fp);
+		jitter_log_fp = NULL;
+	}
+	jitter_log_tried = false;
+}
+
+void Jitter_LogV (const char *fmt, va_list argptr)
+{
+	char text[4096];
+	int len;
+	int prefix_len;
+
+	if (jitter_log_enable.value <= 0.0f)
+		return;
+
+	if (!jitter_log_fp && !jitter_log_tried)
+	{
+		char path[MAX_OSPATH];
+		const char *logpath = Jitter_LogPath (path, sizeof(path));
+
+		jitter_log_tried = true;
+		if (logpath)
+			jitter_log_fp = Sys_fopen (logpath, "ab");
+	}
+
+	if (!jitter_log_fp)
+		return;
+
+	prefix_len = q_snprintf (text, sizeof(text), "[%.3f][%d][%s] ",
+		realtime, host_framecount, Jitter_LogContext ());
+	if (prefix_len < 0)
+		return;
+	if (prefix_len >= (int)sizeof(text))
+		prefix_len = (int)sizeof(text) - 1;
+
+	len = q_vsnprintf (text + prefix_len, sizeof(text) - (size_t)prefix_len, fmt, argptr);
+	if (len < 0)
+		return;
+	if (len >= (int)(sizeof(text) - (size_t)prefix_len))
+		len = (int)(sizeof(text) - (size_t)prefix_len) - 1;
+
+	fwrite (text, 1, (size_t)(prefix_len + len), jitter_log_fp);
+}
+
+void Jitter_Log (const char *fmt, ...)
+{
+	va_list argptr;
+
+	va_start (argptr, fmt);
+	Jitter_LogV (fmt, argptr);
+	va_end (argptr);
+}
 cvar_t	standalone = {"standalone","0"}; /* allow standalone mods without pak0/CRC gating */
 cvar_t	cmdline = {"cmdline","",CVAR_ROM/*|CVAR_SERVERINFO*/}; /* sending cmdline upon CCREQ_RULE_INFO is evil */
 cvar_t	language = {"language","auto",CVAR_ARCHIVE}; /* for 2021 rerelease text */

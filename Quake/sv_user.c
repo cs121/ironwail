@@ -51,6 +51,7 @@ qboolean	onground;
 		if (!sv_player) \
 		{ \
 			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
 			SV_PlayerNullTrap (__func__, fatal); \
 			return; \
 		} \
@@ -61,6 +62,7 @@ qboolean	onground;
 		if (!sv_player) \
 		{ \
 			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
+			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
 			SV_PlayerNullTrap (__func__, fatal); \
 			return retval; \
 		} \
@@ -523,6 +525,8 @@ static void SV_CmdAckResync (client_t *client, const char *reason)
 	{
 		Con_Printf ("NETDBG time %.3f cmd_ack_resync %s reason %s\n",
 			realtime, client->name, reason ? reason : "unknown");
+		JITTER_LOG ("NETDBG time %.3f cmd_ack_resync %s reason %s\n",
+			realtime, client->name, reason ? reason : "unknown");
 	}
 }
 
@@ -530,11 +534,20 @@ static void SV_NetHexDump (const byte *data, int len, int max)
 {
 	int dump_len = q_min(len, max);
 	int i;
+	char line[256];
+	char *out = line;
+	char *line_end = line + sizeof(line);
 
 	Con_Printf ("NETDBG cmd_ack_hexdump %d bytes (cursize %d):", dump_len, len);
+	out += q_snprintf (out, (size_t)(line_end - out), "NETDBG cmd_ack_hexdump %d bytes (cursize %d):", dump_len, len);
 	for (i = 0; i < dump_len; i++)
+	{
 		Con_Printf (" %02x", data[i]);
+		out += q_snprintf (out, (size_t)(line_end - out), " %02x", data[i]);
+	}
 	Con_Printf ("\n");
+	out += q_snprintf (out, (size_t)(line_end - out), "\n");
+	JITTER_LOG ("%s", line);
 }
 
 void SV_ReadClientMove (usercmd_t *move)
@@ -577,18 +590,21 @@ qboolean SV_ReadClientMessage (void)
 	if (!sv.active || sv.state != ss_active)
 	{
 		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason server_inactive\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason server_inactive\n", SV_CurrentClientIndex ());
 		return true;
 	}
 
 	if (cls.demoplayback)
 	{
 		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
 		return true;
 	}
 
 	if (!host_client || !host_client->netconnection)
 	{
 		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason no_client_context\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason no_client_context\n", SV_CurrentClientIndex ());
 		SV_PlayerNullTrap (__func__, 0);
 		return false;
 	}
@@ -741,6 +757,8 @@ nextmsg:
 				{
 					Con_Printf ("SV_ReadClientMessage: truncated clc_move header from %s\n",
 						host_client->name);
+					JITTER_LOG ("SV_ReadClientMessage: truncated clc_move header from %s\n",
+						host_client->name);
 					return true;
 				}
 				readcount_before_time = msg_readcount;
@@ -765,6 +783,15 @@ nextmsg:
 					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
 					unsigned int window_tail = last_cmd_acked - slack;
 					Con_Printf ("NETDBG time %.3f cmd_ack_read %s cmd %d flags 0x%x "
+						"mtime %d->%d seq %d->%d ack %d->%d rem %d cmd_ack %u "
+						"newest_cmd %u last_recv %u last_ack %u win_tail %u slack %u\n",
+						realtime, host_client->name, clc_move, sv.protocolflags,
+						readcount_before_time, readcount_after_time,
+						readcount_before_seq, readcount_after_seq,
+						readcount_before_ack, readcount_after_ack,
+						remaining, cmd_ack, newest_cmd_seq,
+						last_cmd_received, last_cmd_acked, window_tail, slack);
+					JITTER_LOG ("NETDBG time %.3f cmd_ack_read %s cmd %d flags 0x%x "
 						"mtime %d->%d seq %d->%d ack %d->%d rem %d cmd_ack %u "
 						"newest_cmd %u last_recv %u last_ack %u win_tail %u slack %u\n",
 						realtime, host_client->name, clc_move, sv.protocolflags,
@@ -808,6 +835,10 @@ nextmsg:
 						if (sv_cmd_ack_debug.value)
 						{
 							Con_Printf ("NETDBG cmd_ack_invalid %s ack %u newest %u last_ack %u "
+								"behind_delta %u slack %u reason %s count %d\n",
+								host_client->name, cmd_ack, newest_cmd_seq, last_cmd_acked,
+								ack_behind_delta, slack, reason, host_client->invalid_cmd_ack_count);
+							JITTER_LOG ("NETDBG cmd_ack_invalid %s ack %u newest %u last_ack %u "
 								"behind_delta %u slack %u reason %s count %d\n",
 								host_client->name, cmd_ack, newest_cmd_seq, last_cmd_acked,
 								ack_behind_delta, slack, reason, host_client->invalid_cmd_ack_count);
@@ -1203,6 +1234,7 @@ void SV_RunClients (void)
 	if (cls.demoplayback)
 	{
 		Con_Printf ("NETDBG sv_runclients skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
+		JITTER_LOG ("NETDBG sv_runclients skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
 		return;
 	}
 
@@ -1214,6 +1246,8 @@ void SV_RunClients (void)
 		if (!host_client->edict)
 		{
 			Con_Printf ("NETDBG sv_player NULL cl %d reason runclients_no_edict\n",
+				SV_CurrentClientIndex ());
+			JITTER_LOG ("NETDBG sv_player NULL cl %d reason runclients_no_edict\n",
 				SV_CurrentClientIndex ());
 			SV_PlayerNullTrap (__func__, 0);
 			continue;
