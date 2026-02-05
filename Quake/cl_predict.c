@@ -943,8 +943,8 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 	frac = (float)((sample_t - t0) / (t1 - t0));
 	frac = CLAMP (0.0f, frac, 1.0f);
 
-	VectorLerp (ent->msg_origins[1], frac, ent->msg_origins[0], ground_now);
-	yaw_now = CL_LerpAngle (ent->msg_angles[1][YAW], ent->msg_angles[0][YAW], frac);
+	VectorLerp (ent->msg_origins[1], ent->msg_origins[0], frac, ground_now);
+	yaw_now = LerpAngleShortest (ent->msg_angles[1][YAW], ent->msg_angles[0][YAW], frac);
 
 	if (!state->ground_cache.valid || state->ground_cache.id != groundent)
 	{
