@@ -994,7 +994,7 @@ static void Sys_StepDebug_LogFrame (void)
 	debug_level = (int)sys_step_debug.value;
 	dump_frame = sys_step_dump.value > 0.0f;
 	if (dump_frame)
-		Cvar_SetValue (&sys_step_dump, 0.0f);
+		Cvar_SetValueQuick (&sys_step_dump, 0.0f);
 
 	sys_step_debug_info.realtime = realtime;
 	sys_step_debug_info.host_frametime = host_frametime;
