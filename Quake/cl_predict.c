@@ -821,6 +821,15 @@ static int CL_Predict_TraceEntNum (const trace_t *trace)
 	return trace->entnum;
 }
 
+static qboolean CL_Predict_TraceHasValidGroundPlane (const trace_t *trace)
+{
+	if (trace->fraction <= 0.0f && (trace->startsolid || trace->allsolid || trace->plane.normal[2] <= 0.0f))
+		return false;
+	if (trace->plane.normal[2] <= 0.7f)
+		return false;
+	return true;
+}
+
 static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t mins, const vec3_t maxs, int *groundent)
 {
 	trace_t trace;
@@ -838,10 +847,29 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 	cl_pred_last_trace_allsolid = trace.allsolid ? 1 : 0;
 	cl_pred_last_trace_fallback = 0;
 
-	if (trace.startsolid || trace.allsolid)
-		return false;
+	if (trace.fraction <= 0.0f && (trace.startsolid || trace.allsolid || trace.plane.normal[2] <= 0.0f))
+	{
+		vec3_t nudge_origin;
+		trace_t nudge_trace;
 
-	if (trace.fraction < 1.0f && trace.plane.normal[2] > 0.7f)
+		VectorCopy (origin, nudge_origin);
+		nudge_origin[2] += 1.0f;
+		nudge_trace = CL_Predict_TraceBox (nudge_origin, end, mins, maxs, MOVE_NOMONSTERS);
+		if (CL_Predict_TraceHasValidGroundPlane (&nudge_trace) && nudge_trace.fraction < 1.0f)
+		{
+			trace = nudge_trace;
+			cl_pred_last_trace_fraction = trace.fraction;
+			cl_pred_last_trace_normal_z = trace.plane.normal[2];
+			cl_pred_last_trace_ent = CL_Predict_TraceEntNum (&trace);
+			cl_pred_last_trace_startsolid = trace.startsolid ? 1 : 0;
+			cl_pred_last_trace_allsolid = trace.allsolid ? 1 : 0;
+			cl_pred_last_trace_fallback = 1;
+		}
+		else
+			return false;
+	}
+
+	if (trace.fraction < 1.0f && CL_Predict_TraceHasValidGroundPlane (&trace))
 	{
 		if (groundent)
 			*groundent = CL_Predict_TraceEntNum (&trace);
@@ -856,8 +884,7 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 		VectorCopy (origin, lower_end);
 		lower_end[2] -= (CL_PREDICT_GROUND_EPSILON + 2.0f);
 		lower_trace = CL_Predict_TraceBox (origin, lower_end, mins, maxs, MOVE_NOMONSTERS);
-		if (!lower_trace.startsolid && !lower_trace.allsolid
-			&& lower_trace.fraction < 1.0f && lower_trace.plane.normal[2] > 0.7f)
+		if (lower_trace.fraction < 1.0f && CL_Predict_TraceHasValidGroundPlane (&lower_trace))
 		{
 			cl_pred_last_trace_fraction = lower_trace.fraction;
 			cl_pred_last_trace_normal_z = lower_trace.plane.normal[2];
