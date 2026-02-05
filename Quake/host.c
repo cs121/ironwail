@@ -522,6 +522,8 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_step_hitch_ms);
 	Cvar_RegisterVariable (&jitter_log_enable);
 	Cvar_RegisterVariable (&jitter_log_file);
+	Cvar_RegisterVariable (&jitter_log_flush);
+	Cvar_RegisterVariable (&jitter_log_force_developer);
 
 	Cvar_RegisterVariable (&fraglimit);
 	Cvar_RegisterVariable (&timelimit);

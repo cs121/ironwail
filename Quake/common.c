@@ -41,16 +41,11 @@ int		safemode;
 cvar_t	registered = {"registered","1",CVAR_ROM}; /* set to correct value in COM_CheckRegistered() */
 cvar_t	jitter_log_enable = {"jitter_log_enable", "0", CVAR_NONE};
 cvar_t	jitter_log_file = {"jitter_log_file", "jitter_debug.log", CVAR_NONE};
+cvar_t	jitter_log_flush = {"jitter_log_flush", "0", CVAR_NONE};
+cvar_t	jitter_log_force_developer = {"jitter_log_force_developer", "0", CVAR_NONE};
 
 static FILE *jitter_log_fp;
 static qboolean jitter_log_tried;
-
-static const char *Jitter_LogContext (void)
-{
-	if (sv.active && (cls.state == ca_disconnected || cls.state == ca_dedicated))
-		return "SV";
-	return "CL";
-}
 
 static const char *Jitter_LogPath (char *buffer, size_t buffer_size)
 {
@@ -69,6 +64,88 @@ static const char *Jitter_LogPath (char *buffer, size_t buffer_size)
 	return buffer;
 }
 
+static void Jitter_LogWriteRaw (const char *tag, const char *text, size_t len)
+{
+	char prefix[256];
+	int prefix_len;
+
+	prefix_len = q_snprintf (prefix, sizeof(prefix), "[%.3f][%d][%s] ", realtime, host_framecount, tag ? tag : "LOG");
+	if (prefix_len < 0)
+		return;
+	if (prefix_len >= (int)sizeof(prefix))
+		prefix_len = (int)sizeof(prefix) - 1;
+
+	fwrite (prefix, 1, (size_t)prefix_len, jitter_log_fp);
+	if (len > 0 && text)
+		fwrite (text, 1, len, jitter_log_fp);
+	fwrite ("\n", 1, 1, jitter_log_fp);
+}
+
+void JitterLog_WriteLine (const char *tag, const char *text)
+{
+	const char *p;
+	const char *line_start;
+
+	if (jitter_log_enable.value <= 0.0f)
+		return;
+
+	if (!jitter_log_fp && !jitter_log_tried)
+	{
+		char path[MAX_OSPATH];
+		const char *logpath = Jitter_LogPath (path, sizeof(path));
+
+		jitter_log_tried = true;
+		if (logpath)
+			jitter_log_fp = Sys_fopen (logpath, "ab");
+
+		if (jitter_log_fp)
+		{
+			time_t now = time (NULL);
+			struct tm *tm_now = localtime (&now);
+			char stamp[64];
+			char mapname[64];
+			const char *map = "(none)";
+
+			if (tm_now)
+				strftime (stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", tm_now);
+			else
+				q_strlcpy (stamp, "unknown", sizeof(stamp));
+
+			if (sv.active && sv.name[0])
+				map = sv.name;
+			else if (cl.worldmodel && cl.worldmodel->name[0])
+			{
+				COM_StripExtension (COM_SkipPath (cl.worldmodel->name), mapname, sizeof(mapname));
+				map = mapname[0] ? mapname : cl.worldmodel->name;
+			}
+
+			{
+				char header[512];
+				q_snprintf (header, sizeof(header), "=== jitter log start, map=%s, build=%s, time=%s ===", map, IRONWAIL_VER_STRING, stamp);
+				Jitter_LogWriteRaw ("JIT", header, strlen(header));
+			}
+		}
+	}
+
+	if (!jitter_log_fp)
+		return;
+
+	line_start = text ? text : "";
+	for (p = line_start; ; ++p)
+	{
+		if (*p == '\n' || *p == '\0')
+		{
+			Jitter_LogWriteRaw (tag, line_start, (size_t)(p - line_start));
+			if (*p == '\0')
+				break;
+			line_start = p + 1;
+		}
+	}
+
+	if (jitter_log_flush.value > 0.0f)
+		fflush (jitter_log_fp);
+}
+
 void Jitter_Log_Close (void)
 {
 	if (jitter_log_fp)
@@ -82,39 +159,9 @@ void Jitter_Log_Close (void)
 void Jitter_LogV (const char *fmt, va_list argptr)
 {
 	char text[4096];
-	int len;
-	int prefix_len;
 
-	if (jitter_log_enable.value <= 0.0f)
-		return;
-
-	if (!jitter_log_fp && !jitter_log_tried)
-	{
-		char path[MAX_OSPATH];
-		const char *logpath = Jitter_LogPath (path, sizeof(path));
-
-		jitter_log_tried = true;
-		if (logpath)
-			jitter_log_fp = Sys_fopen (logpath, "ab");
-	}
-
-	if (!jitter_log_fp)
-		return;
-
-	prefix_len = q_snprintf (text, sizeof(text), "[%.3f][%d][%s] ",
-		realtime, host_framecount, Jitter_LogContext ());
-	if (prefix_len < 0)
-		return;
-	if (prefix_len >= (int)sizeof(text))
-		prefix_len = (int)sizeof(text) - 1;
-
-	len = q_vsnprintf (text + prefix_len, sizeof(text) - (size_t)prefix_len, fmt, argptr);
-	if (len < 0)
-		return;
-	if (len >= (int)(sizeof(text) - (size_t)prefix_len))
-		len = (int)(sizeof(text) - (size_t)prefix_len) - 1;
-
-	fwrite (text, 1, (size_t)(prefix_len + len), jitter_log_fp);
+	q_vsnprintf (text, sizeof(text), fmt, argptr);
+	JitterLog_WriteLine ("JIT", text);
 }
 
 void Jitter_Log (const char *fmt, ...)
