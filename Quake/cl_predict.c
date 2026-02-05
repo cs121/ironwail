@@ -904,11 +904,16 @@ static qboolean CL_Predict_GetGroundTrace (const vec3_t origin, const vec3_t min
 static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int groundent, float dt_step, vec3_t out_delta, float *out_yaw_delta)
 {
 	entity_t *ent;
-	double msg_dt;
-	float yaw_raw;
-	int i;
-	vec3_t delta_raw;
-	vec3_t vel;
+	double sample_t;
+	double t0;
+	double t1;
+	float frac;
+	vec3_t ground_now;
+	vec3_t ground_prev;
+	float yaw_now;
+	float yaw_prev;
+	float yaw_delta;
+	(void)dt_step;
 
 	VectorClear (out_delta);
 	if (out_yaw_delta)
@@ -926,21 +931,69 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		return false;
 	}
 
-	msg_dt = cl.mtime[0] - cl.mtime[1];
-	if (msg_dt <= 0.0)
+	ent = &cl_entities[groundent];
+	t0 = cl.mtime[1];
+	t1 = cl.mtime[0];
+	if (t1 <= t0)
 		return false;
 
-	ent = &cl_entities[groundent];
-	for (i = 0; i < 3; i++)
-		delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
-	// TODO: If msg_origins[0] == msg_origins[1] consistently, the server may not be sending pusher samples.
-	VectorScale (delta_raw, (float)(1.0 / msg_dt), vel);
-	VectorScale (vel, dt_step, out_delta);
+	// Keep mover sampling on the same timebase as prediction steps.
+	sample_t = cl.time;
 
-	yaw_raw = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
+	frac = (float)((sample_t - t0) / (t1 - t0));
+	frac = CLAMP (0.0f, frac, 1.0f);
+
+	VectorLerp (ent->msg_origins[1], frac, ent->msg_origins[0], ground_now);
+	yaw_now = CL_LerpAngle (ent->msg_angles[1][YAW], ent->msg_angles[0][YAW], frac);
+
+	if (!state->ground_cache.valid || state->ground_cache.id != groundent)
+	{
+		VectorCopy (ground_now, state->ground_cache.last_origin);
+		VectorCopy (ent->msg_angles[0], state->ground_cache.last_angles);
+		state->ground_cache.last_angles[YAW] = yaw_now;
+		state->ground_cache.last_time = sample_t;
+		state->ground_cache.id = groundent;
+		state->ground_cache.valid = true;
+		VectorClear (out_delta);
+		if (out_yaw_delta)
+			*out_yaw_delta = 0.0f;
+		return true;
+	}
+
+	VectorCopy (state->ground_cache.last_origin, ground_prev);
+	yaw_prev = state->ground_cache.last_angles[YAW];
+	VectorSubtract (ground_now, ground_prev, out_delta);
+	yaw_delta = CL_Predict_AngleDelta (yaw_now, yaw_prev);
 	if (out_yaw_delta)
-		*out_yaw_delta = yaw_raw * (float)(dt_step / msg_dt);
+		*out_yaw_delta = yaw_delta;
 
+	VectorCopy (ground_now, state->ground_cache.last_origin);
+	state->ground_cache.last_angles[YAW] = yaw_now;
+	state->ground_cache.last_time = sample_t;
+	state->ground_cache.id = groundent;
+	state->ground_cache.valid = true;
+
+	return true;
+}
+
+static qboolean CL_Predict_PostMoveGroundSnap (cl_pred_state_t *state, const vec3_t mins, const vec3_t maxs)
+{
+	trace_t trace;
+	vec3_t end;
+
+	if (!state->onground || state->velocity[2] > 0.0f)
+		return false;
+
+	VectorCopy (state->origin, end);
+	end[2] -= 2.0f;
+	trace = CL_Predict_TraceBox (state->origin, end, mins, maxs, MOVE_NOMONSTERS);
+	if (trace.fraction >= 1.0f)
+		return false;
+	if (!CL_Predict_TraceHasValidGroundPlane (&trace))
+		return false;
+
+	VectorCopy (trace.endpos, state->origin);
+	state->velocity[2] = 0.0f;
 	return true;
 }
 
@@ -1012,33 +1065,32 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 
 		if (cl_jitter_debug.value > 0.0f && groundent > 0)
 		{
-			entity_t *ent = &cl_entities[groundent];
-			double msg_dt = cl.mtime[0] - cl.mtime[1];
-			vec3_t delta_raw;
-			float yaw_raw = CL_Predict_AngleDelta (ent->msg_angles[0][YAW], ent->msg_angles[1][YAW]);
-			int i;
-
-			for (i = 0; i < 3; i++)
-				delta_raw[i] = ent->msg_origins[0][i] - ent->msg_origins[1][i];
-
-			Con_Printf ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f mouse_applied %d\n",
+			Con_Printf ("JITTERDBG groundent %d ground_prev %.3f %.3f %.3f ground_now %.3f %.3f %.3f delta_pos %.3f %.3f %.3f delta_yaw %.3f delta_applied %d\n",
 				groundent,
-				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
-				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
-				msg_dt,
-				ent->msg_angles[0][YAW], ent->msg_angles[1][YAW], yaw_raw,
-				delta_raw[0], delta_raw[1], delta_raw[2],
-				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2],
-				IN_DidApplyMouseDelta () ? 1 : 0);
-			JITTER_LOG ("JITTERDBG groundent %d msg_origins0 %.2f %.2f %.2f msg_origins1 %.2f %.2f %.2f msg_dt %.4f yaw0 %.2f yaw1 %.2f yaw_raw %.2f platform_delta_raw %.3f %.3f %.3f ground_delta %.3f %.3f %.3f mouse_applied %d\n",
+				state->ground_cache.last_origin[0] - state->pred_ground_offset[0],
+				state->ground_cache.last_origin[1] - state->pred_ground_offset[1],
+				state->ground_cache.last_origin[2] - state->pred_ground_offset[2],
+				state->ground_cache.last_origin[0],
+				state->ground_cache.last_origin[1],
+				state->ground_cache.last_origin[2],
+				state->pred_ground_offset[0],
+				state->pred_ground_offset[1],
+				state->pred_ground_offset[2],
+				state->pred_ground_yaw_delta,
+				applied ? 1 : 0);
+			JITTER_LOG ("JITTERDBG groundent %d ground_prev %.3f %.3f %.3f ground_now %.3f %.3f %.3f delta_pos %.3f %.3f %.3f delta_yaw %.3f delta_applied %d\n",
 				groundent,
-				ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
-				ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
-				msg_dt,
-				ent->msg_angles[0][YAW], ent->msg_angles[1][YAW], yaw_raw,
-				delta_raw[0], delta_raw[1], delta_raw[2],
-				state->pred_ground_offset[0], state->pred_ground_offset[1], state->pred_ground_offset[2],
-				IN_DidApplyMouseDelta () ? 1 : 0);
+				state->ground_cache.last_origin[0] - state->pred_ground_offset[0],
+				state->ground_cache.last_origin[1] - state->pred_ground_offset[1],
+				state->ground_cache.last_origin[2] - state->pred_ground_offset[2],
+				state->ground_cache.last_origin[0],
+				state->ground_cache.last_origin[1],
+				state->ground_cache.last_origin[2],
+				state->pred_ground_offset[0],
+				state->pred_ground_offset[1],
+				state->pred_ground_offset[2],
+				state->pred_ground_yaw_delta,
+				applied ? 1 : 0);
 		}
 	}
 	else
@@ -1412,6 +1464,8 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		CL_Predict_StepSlideMove (state, mins, maxs, dt);
 	else
 		CL_Predict_SlideMove (state, mins, maxs, dt);
+
+	CL_Predict_PostMoveGroundSnap (state, mins, maxs);
 
 	{
 		qboolean trace_onground = CL_Predict_GetGroundTrace (state->origin, mins, maxs, &groundent);
