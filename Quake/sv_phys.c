@@ -929,6 +929,12 @@ void SV_WalkMove (edict_t *ent)
 // move down
 	downtrace = SV_PushEntity (ent, downmove);	// FIXME: don't link?
 
+	if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
+	{
+		sys_step_debug_info.player_ground_trace_fraction = downtrace.fraction;
+		sys_step_debug_info.player_ground_trace_normal_z = downtrace.plane.normal[2];
+	}
+
 	if (downtrace.plane.normal[2] > 0.7)
 	{
 		if (ent->v.solid == SOLID_BSP)
@@ -961,6 +967,18 @@ void SV_Physics_Client (edict_t	*ent, int num)
 
 	if ( ! svs.clients[num-1].active )
 		return;		// unconnected slot
+
+	if (sys_step_debug.value > 0.0f)
+	{
+		if (num == 1)
+		{
+			sys_step_debug_info.player_valid = 1;
+			VectorCopy (ent->v.origin, sys_step_debug_info.player_origin_before);
+			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_before);
+			sys_step_debug_info.player_groundent_before = (int)ent->v.groundentity;
+			sys_step_debug_info.player_onground_before = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
+		}
+	}
 
 //
 // call standard client pre-think
@@ -1031,6 +1049,27 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	{
 		ent->forcewater = forceunderwater;
 		ent->sendforcewater = true;
+	}
+
+	if (sys_step_debug.value > 0.0f)
+	{
+		if (num == 1)
+		{
+			edict_t *groundent;
+
+			VectorCopy (ent->v.origin, sys_step_debug_info.player_origin_after);
+			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_after);
+			sys_step_debug_info.player_groundent_after = (int)ent->v.groundentity;
+			sys_step_debug_info.player_onground_after = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
+			VectorClear (sys_step_debug_info.player_ground_vel);
+			sys_step_debug_info.player_ground_is_mover = 0;
+			groundent = PROG_TO_EDICT (ent->v.groundentity);
+			if (groundent && groundent != qcvm->edicts && groundent->v.movetype == MOVETYPE_PUSH)
+			{
+				sys_step_debug_info.player_ground_is_mover = 1;
+				VectorCopy (groundent->v.velocity, sys_step_debug_info.player_ground_vel);
+			}
+		}
 	}
 }
 
@@ -1248,6 +1287,9 @@ void SV_Physics (void)
 		Con_Printf ("SVPHYS: frametime=%.4f steps=%d\n", host_frametime, steps);
 	}
 
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.sv_physics_calls++;
+
 // let the progs know that a new frame has started
 	pr_global_struct->self = EDICT_TO_PROG(qcvm->edicts);
 	pr_global_struct->other = EDICT_TO_PROG(qcvm->edicts);
@@ -1267,9 +1309,24 @@ void SV_Physics (void)
 	  entity_cap = qcvm->num_edicts;
 
 	//for (i=0 ; i<sv.num_edicts ; i++, ent = NEXT_EDICT(ent))
-	for (i=0 ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
+	for (i=0, ent = qcvm->edicts ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
+			continue;
+		if (ent->v.movetype != MOVETYPE_PUSH)
+			continue;
+
+		if (pr_global_struct->force_retouch)
+			SV_LinkEdict (ent, true);	// force retouch even for stationary
+
+		SV_Physics_Pusher (ent);
+	}
+
+	for (i=0, ent = qcvm->edicts ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
+	{
+		if (ent->free)
+			continue;
+		if (ent->v.movetype == MOVETYPE_PUSH)
 			continue;
 
 		if (pr_global_struct->force_retouch)
@@ -1279,8 +1336,6 @@ void SV_Physics (void)
 
 		if (i > 0 && i <= svs.maxclients)
 			SV_Physics_Client (ent, i);
-		else if (ent->v.movetype == MOVETYPE_PUSH)
-			SV_Physics_Pusher (ent);
 		else if (ent->v.movetype == MOVETYPE_NONE)
 			SV_Physics_None (ent);
 		else if (ent->v.movetype == MOVETYPE_NOCLIP)

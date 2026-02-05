@@ -68,6 +68,8 @@ cvar_t sv_tickrate = {"sv_tickrate", "20", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "20", CVAR_NONE};
 static cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
 cvar_t sv_tick_maxcatchup = {"sv_tick_maxcatchup", "5", CVAR_NONE};
+cvar_t sv_fixedtick = {"sv_fixedtick", "1", CVAR_NONE};
+cvar_t sv_maxsteps_per_frame = {"sv_maxsteps_per_frame", "8", CVAR_NONE};
 cvar_t sv_tick_debug = {"sv_tick_debug", "0", CVAR_NONE};
 cvar_t sv_timewarp = {"sv_timewarp", "0", CVAR_NONE};
 static cvar_t sv_signon_chunk_debug = {"sv_signon_chunk_debug", "0", CVAR_NONE};
@@ -339,6 +341,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_netrate);
 	Cvar_RegisterVariable (&sv_sendrate);
 	Cvar_RegisterVariable (&sv_tick_maxcatchup);
+	Cvar_RegisterVariable (&sv_fixedtick);
+	Cvar_RegisterVariable (&sv_maxsteps_per_frame);
 	Cvar_RegisterVariable (&sv_tick_debug);
 	Cvar_RegisterVariable (&sv_timewarp);
 	Cvar_RegisterVariable (&sv_signon_chunk_debug);

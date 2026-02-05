@@ -296,6 +296,15 @@ SV_AreaTriggerEdicts ( edict_t *ent, areanode_t *node, edict_t **list, int *list
 		touch = EDICT_FROM_AREA(l);
 		if (touch == ent)
 			continue;
+		if (touch->v.solid == SOLID_TRIGGER && !touch->v.touch)
+		{
+			if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
+			{
+				Con_Printf ("STEPDBG trigger_no_touch ent %s #%d trigger %s #%d\n",
+					PR_GetString (ent->v.classname), NUM_FOR_EDICT (ent),
+					PR_GetString (touch->v.classname), NUM_FOR_EDICT (touch));
+			}
+		}
 		if (!touch->v.touch || touch->v.solid != SOLID_TRIGGER)
 			continue;
 		if (ent->v.absmin[0] > touch->v.absmax[0]
@@ -969,4 +978,3 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 	return clip.trace;
 }
-

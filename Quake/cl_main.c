@@ -1821,6 +1821,9 @@ int CL_ReadFromServer (void)
 	beam_t		*b; //johnfitz
 	int			i; //johnfitz
 
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.cl_readfromserver_calls++;
+
 	CL_AdvanceTime ();
 
 	do
@@ -1930,9 +1933,13 @@ void CL_SendCmd (void)
 	int				cmds_built;
 	qboolean		send_move;
 	qboolean		sendcmd_ran;
+	static int		last_cmd_msec = -1;
 
 	if (cls.state != ca_connected)
 		return;
+
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.cl_sendcmd_calls++;
 
 	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
 	cmd_dt = 1.0 / cmd_rate;
@@ -1943,13 +1950,19 @@ void CL_SendCmd (void)
 	if (max_catchup < 1)
 		max_catchup = 1;
 
-	frame_us = CL_SecondsToUsec (host_frametime);
+	frame_us = CL_SecondsToUsec (host_rawframetime);
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.cl_cmd_accum_us_before = cl_cmd_accum_us;
 	cl_cmd_accum_us += frame_us;
 	if (cl_cmd_accum_us < 0)
 		cl_cmd_accum_us = 0;
 	max_accum_us = cmd_dt_us * (int64_t)max_catchup * 2;
 	if (cl_cmd_accum_us > max_accum_us)
+	{
+		if (sys_step_debug.value > 0.0f)
+			sys_step_debug_info.cl_cmds_dropped++;
 		cl_cmd_accum_us = max_accum_us;
+	}
 
 	cmds_built = 0;
 	send_move = false;
@@ -1957,6 +1970,30 @@ void CL_SendCmd (void)
 
 	while (cl_cmd_accum_us >= cmd_dt_us && cmds_built < max_catchup)
 	{
+		int cmd_msec = (int)((cmd_dt_us + 500) / 1000);
+
+			if (cmd_msec < 1)
+			{
+				if (sys_step_debug.value > 0.0f)
+					sys_step_debug_info.cl_cmd_msec_zero++;
+				cmd_msec = 1;
+			}
+		else if (cmd_msec > 255)
+		{
+			if (sys_step_debug.value > 0.0f)
+				sys_step_debug_info.cl_cmd_msec_over++;
+			cmd_msec = 255;
+		}
+		if (sys_step_debug.value > 0.0f)
+		{
+			sys_step_debug_info.cl_cmd_msec_min = q_min (sys_step_debug_info.cl_cmd_msec_min, cmd_msec);
+			sys_step_debug_info.cl_cmd_msec_max = q_max (sys_step_debug_info.cl_cmd_msec_max, cmd_msec);
+			sys_step_debug_info.cl_cmd_msec_last = cmd_msec;
+			if (last_cmd_msec >= 0 && abs (cmd_msec - last_cmd_msec) >= 20)
+				sys_step_debug_info.cl_cmd_msec_wild++;
+		}
+		last_cmd_msec = cmd_msec;
+
 		if (cls.signon == SIGNONS)
 		{
 		// get basic movement from keyboard
@@ -2011,6 +2048,14 @@ void CL_SendCmd (void)
 		sendcmd_ran = true;
 	}
 
+	if (sys_step_debug.value > 0.0f)
+	{
+		if (cmds_built == 0)
+			sys_step_debug_info.cl_cmd_no_cmd++;
+		sys_step_debug_info.cl_cmds_built += cmds_built;
+		sys_step_debug_info.cl_cmd_accum_us_after = cl_cmd_accum_us;
+	}
+
 	if (cmds_built >= max_catchup && cl_cmd_accum_us >= cmd_dt_us && cl_netdebug_parse.value)
 	{
 		Con_Printf ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
@@ -2024,6 +2069,8 @@ void CL_SendCmd (void)
 			CL_NetDbg_LogMovement (&cmd, sendcmd_ran);
 			CL_SendMove (&cmd);
 			cl_cmds_sent_since_log++;
+			if (sys_step_debug.value > 0.0f)
+				sys_step_debug_info.cl_cmds_sent++;
 		}
 		else
 		{
@@ -2031,6 +2078,8 @@ void CL_SendCmd (void)
 			CL_SendMove (NULL);
 		}
 		cl_cmd_packets_since_log++;
+		if (sys_step_debug.value > 0.0f)
+			sys_step_debug_info.cl_cmd_packets++;
 	}
 	if (send_move && cls.signon == SIGNONS)
 		memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));

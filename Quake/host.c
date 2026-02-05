@@ -74,6 +74,9 @@ cvar_t	cl_nocsqc = {"cl_nocsqc", "0", CVAR_NONE};	//spike -- blocks the loading 
 
 cvar_t	sys_ticrate = {"sys_ticrate","0.05",CVAR_NONE}; // dedicated server
 cvar_t	serverprofile = {"serverprofile","0",CVAR_NONE};
+cvar_t	sys_step_debug = {"sys_step_debug", "0", CVAR_NONE};
+cvar_t	sys_step_dump = {"sys_step_dump", "0", CVAR_NONE};
+cvar_t	sys_step_hitch_ms = {"sys_step_hitch_ms", "50", CVAR_NONE};
 
 cvar_t	fraglimit = {"fraglimit","0",CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	timelimit = {"timelimit","0",CVAR_NOTIFY|CVAR_SERVERINFO};
@@ -106,8 +109,12 @@ overflowtimes_t dev_overflows; //this stores the last time overflow messages wer
 extern cvar_t sv_tickrate;
 extern cvar_t sv_netrate;
 extern cvar_t sv_tick_maxcatchup;
+extern cvar_t sv_fixedtick;
+extern cvar_t sv_maxsteps_per_frame;
 extern cvar_t sv_tick_debug;
 extern cvar_t sv_timewarp;
+
+sys_step_debug_info_t sys_step_debug_info;
 
 /*
 ================
@@ -510,6 +517,9 @@ void Host_InitLocal (void)
 
 	Cvar_RegisterVariable (&sys_ticrate);
 	Cvar_RegisterVariable (&serverprofile);
+	Cvar_RegisterVariable (&sys_step_debug);
+	Cvar_RegisterVariable (&sys_step_dump);
+	Cvar_RegisterVariable (&sys_step_hitch_ms);
 
 	Cvar_RegisterVariable (&fraglimit);
 	Cvar_RegisterVariable (&timelimit);
@@ -954,6 +964,136 @@ double Host_GetFrameInterval (void)
 	return 0.0;
 }
 
+static int64_t Host_SecondsToUsec (double seconds)
+{
+	if (seconds <= 0.0)
+		return 0;
+	return (int64_t)(seconds * 1000000.0 + 0.5);
+}
+
+static void Sys_StepDebug_BeginFrame (void)
+{
+	if (sys_step_debug.value <= 0.0f)
+		return;
+
+	memset (&sys_step_debug_info, 0, sizeof (sys_step_debug_info));
+	sys_step_debug_info.frame = host_framecount;
+	sys_step_debug_info.cl_cmd_msec_min = 9999;
+}
+
+static void Sys_StepDebug_LogFrame (void)
+{
+	qboolean dump_frame;
+	int debug_level;
+	int cmd_msec_min;
+	int cmd_msec_max;
+
+	if (sys_step_debug.value <= 0.0f)
+		return;
+
+	debug_level = (int)sys_step_debug.value;
+	dump_frame = sys_step_dump.value > 0.0f;
+	if (dump_frame)
+		Cvar_SetValue (&sys_step_dump, 0.0f);
+
+	sys_step_debug_info.realtime = realtime;
+	sys_step_debug_info.host_frametime = host_frametime;
+	sys_step_debug_info.host_rawframetime = host_rawframetime;
+	sys_step_debug_info.cl_time = cl.time;
+	sys_step_debug_info.cl_servertime = cl.latest_server_time;
+	sys_step_debug_info.cl_snapshot_time = cl.snapshot_time;
+
+	cmd_msec_min = sys_step_debug_info.cl_cmd_msec_min;
+	cmd_msec_max = sys_step_debug_info.cl_cmd_msec_max;
+	if (cmd_msec_min == 9999)
+		cmd_msec_min = 0;
+
+	Con_Printf ("STEPDBG frame %d rt %.6f ft %.6f raw %.6f cl.time %.6f cl.srv %.6f cl.snap %.6f\n",
+		sys_step_debug_info.frame,
+		sys_step_debug_info.realtime,
+		sys_step_debug_info.host_frametime,
+		sys_step_debug_info.host_rawframetime,
+		sys_step_debug_info.cl_time,
+		sys_step_debug_info.cl_servertime,
+		sys_step_debug_info.cl_snapshot_time);
+	Con_Printf ("STEPDBG sv ticks %d phys %d tick_us %lld frame_us %lld accum %lld->%lld maxsteps %d\n",
+		sys_step_debug_info.sv_ticks,
+		sys_step_debug_info.sv_physics_calls,
+		(long long)sys_step_debug_info.tick_us,
+		(long long)sys_step_debug_info.frame_us,
+		(long long)sys_step_debug_info.sv_accum_us_before,
+		(long long)sys_step_debug_info.sv_accum_us_after,
+		(int)(sv_maxsteps_per_frame.value > 0 ? sv_maxsteps_per_frame.value : sv_tick_maxcatchup.value));
+	Con_Printf ("STEPDBG cl sendcmd %d read %d parse %d predsteps %d cmds built %d sent %d packets %d accum %lld->%lld\n",
+		sys_step_debug_info.cl_sendcmd_calls,
+		sys_step_debug_info.cl_readfromserver_calls,
+		sys_step_debug_info.cl_parse_calls,
+		sys_step_debug_info.cl_pred_steps,
+		sys_step_debug_info.cl_cmds_built,
+		sys_step_debug_info.cl_cmds_sent,
+		sys_step_debug_info.cl_cmd_packets,
+		(long long)sys_step_debug_info.cl_cmd_accum_us_before,
+		(long long)sys_step_debug_info.cl_cmd_accum_us_after);
+	Con_Printf ("STEPDBG cmd msec min %d max %d last %d no_cmd %d dropped %d wild %d zero %d over %d\n",
+		cmd_msec_min,
+		cmd_msec_max,
+		sys_step_debug_info.cl_cmd_msec_last,
+		sys_step_debug_info.cl_cmd_no_cmd,
+		sys_step_debug_info.cl_cmds_dropped,
+		sys_step_debug_info.cl_cmd_msec_wild,
+		sys_step_debug_info.cl_cmd_msec_zero,
+		sys_step_debug_info.cl_cmd_msec_over);
+
+	if (sys_step_debug_info.player_valid)
+	{
+		Con_Printf ("STEPDBG player org %.2f %.2f %.2f -> %.2f %.2f %.2f vel %.2f %.2f %.2f -> %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_origin_before[0],
+			sys_step_debug_info.player_origin_before[1],
+			sys_step_debug_info.player_origin_before[2],
+			sys_step_debug_info.player_origin_after[0],
+			sys_step_debug_info.player_origin_after[1],
+			sys_step_debug_info.player_origin_after[2],
+			sys_step_debug_info.player_vel_before[0],
+			sys_step_debug_info.player_vel_before[1],
+			sys_step_debug_info.player_vel_before[2],
+			sys_step_debug_info.player_vel_after[0],
+			sys_step_debug_info.player_vel_after[1],
+			sys_step_debug_info.player_vel_after[2]);
+		Con_Printf ("STEPDBG player onground %d->%d groundent %d->%d trace frac %.3f normalz %.3f mover %d gvel %.2f %.2f %.2f\n",
+			sys_step_debug_info.player_onground_before,
+			sys_step_debug_info.player_onground_after,
+			sys_step_debug_info.player_groundent_before,
+			sys_step_debug_info.player_groundent_after,
+			sys_step_debug_info.player_ground_trace_fraction,
+			sys_step_debug_info.player_ground_trace_normal_z,
+			sys_step_debug_info.player_ground_is_mover,
+			sys_step_debug_info.player_ground_vel[0],
+			sys_step_debug_info.player_ground_vel[1],
+			sys_step_debug_info.player_ground_vel[2]);
+	}
+
+	if (sys_step_debug_info.warn_host_frametime_clamped)
+		Con_Printf ("STEPWARN host_frametime clamped raw %.6f ft %.6f\n", host_rawframetime, host_frametime);
+	if (sys_step_debug_info.warn_zero_frametime)
+		Con_Printf ("STEPWARN host_frametime <= 0\n");
+	if (sys_step_debug_info.warn_zero_sim_dt)
+		Con_Printf ("STEPWARN sim dt is zero\n");
+	if (sys_step_debug_info.warn_many_ticks)
+		Con_Printf ("STEPWARN max ticks exceeded in frame\n");
+
+	if (sys_step_hitch_ms.value > 0.0f)
+	{
+		double hitch_ms = sys_step_hitch_ms.value;
+		if (host_rawframetime * 1000.0 >= hitch_ms)
+			Con_Printf ("STEPWARN hitch %.2fms >= %.2fms\n", host_rawframetime * 1000.0, hitch_ms);
+	}
+
+	if (dump_frame && debug_level <= 0)
+	{
+		Con_Printf ("STEPDBG dump requested; enable sys_step_debug for continuous logging.\n");
+	}
+}
+
 /*
 ===================
 Host_AdvanceTime
@@ -973,6 +1113,14 @@ static void Host_AdvanceTime (double dt)
 		host_frametime = host_framerate.value;
 	else if (host_maxfps.value)// don't allow really long or short frames
 		host_frametime = CLAMP (0.0001, host_frametime, 0.1); //johnfitz -- use CLAMP
+
+	if (sys_step_debug.value > 0.0f && host_maxfps.value)
+	{
+		if (host_frametime != host_rawframetime)
+			sys_step_debug_info.warn_host_frametime_clamped = 1;
+	}
+	if (sys_step_debug.value > 0.0f && host_frametime <= 0.0)
+		sys_step_debug_info.warn_zero_frametime = 1;
 }
 
 /*
@@ -1125,6 +1273,9 @@ static void SV_RunOneTick (double tick_dt)
 	const int paused_frame_threshold = 120;
 	const int paused_force_threshold = 300;
 
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.sv_ticks++;
+
 	host_frametime = tick_dt;
 	pr_global_struct->frametime = host_frametime;
 
@@ -1174,11 +1325,15 @@ void Host_ServerFrame (void)
 	static double last_sv_time = -1.0;
 	static double next_sv_tick_log = 0.0;
 	static double sv_accum = 0.0;
+	static int64_t sv_accum_us = 0;
 	static double sv_next_snapshot_time = 0.0;
 	int		active_clients = 0;
 	double		clamped_frametime;
 	double		tick_dt;
 	double		net_dt;
+	int64_t		frame_us;
+	int64_t		tick_dt_us;
+	int64_t		max_accum_us;
 	int		ticks = 0;
 	int		maxcatchup;
 	int		sends = 0;
@@ -1198,7 +1353,28 @@ void Host_ServerFrame (void)
 	}
 	if (clamped_frametime > 0.1f)
 		clamped_frametime = 0.1f;
-	sv_accum += clamped_frametime;
+	frame_us = Host_SecondsToUsec (clamped_frametime);
+	if (sys_step_debug.value > 0.0f)
+	{
+		sys_step_debug_info.frame_us = frame_us;
+		sys_step_debug_info.sv_accum_us_before = sv_accum_us;
+		if (frame_us == 0)
+			sys_step_debug_info.warn_zero_sim_dt = 1;
+	}
+
+	tick_dt = 1.0 / (sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0);
+	tick_dt_us = Host_SecondsToUsec (tick_dt);
+	if (tick_dt_us <= 0)
+		tick_dt_us = 1;
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.tick_us = tick_dt_us;
+
+	if (sv_fixedtick.value > 0.0f)
+	{
+		sv_accum_us += frame_us;
+		if (sv_accum_us < 0)
+			sv_accum_us = 0;
+	}
 
 	for (i = 0; i < svs.maxclients; i++)
 	{
@@ -1215,26 +1391,62 @@ void Host_ServerFrame (void)
 // check for new clients
 	SV_CheckForNewClients ();
 
-	tick_dt = 1.0 / (sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0);
-	maxcatchup = (int)sv_tick_maxcatchup.value;
+	maxcatchup = (int)(sv_maxsteps_per_frame.value > 0.0f ? sv_maxsteps_per_frame.value : sv_tick_maxcatchup.value);
 	if (maxcatchup < 1)
 		maxcatchup = 1;
-	while (sv_accum >= tick_dt && ticks < maxcatchup)
+	if (sv_fixedtick.value > 0.0f)
 	{
-		SV_RunOneTick (tick_dt);
-		sv_accum -= tick_dt;
-		ticks++;
-	}
-	if (sv_accum >= tick_dt && ticks >= maxcatchup)
-	{
-		if (!sv_timewarp.value)
-			sv_accum = tick_dt;
-		if (sv_tick_debug.value)
+		max_accum_us = tick_dt_us * (int64_t)maxcatchup * 2;
+		if (max_accum_us < tick_dt_us)
+			max_accum_us = tick_dt_us;
+		if (sv_accum_us > max_accum_us)
 		{
-			Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
-				ticks, sv_accum, tick_dt);
+			sv_accum_us = max_accum_us;
+			if (sys_step_debug.value > 0.0f)
+				sys_step_debug_info.warn_many_ticks = 1;
+		}
+		while (sv_accum_us >= tick_dt_us && ticks < maxcatchup)
+		{
+			SV_RunOneTick (tick_dt);
+			sv_accum_us -= tick_dt_us;
+			ticks++;
+		}
+		if (sv_accum_us >= tick_dt_us && ticks >= maxcatchup)
+		{
+			if (!sv_timewarp.value)
+				sv_accum_us = tick_dt_us;
+			if (sys_step_debug.value > 0.0f)
+				sys_step_debug_info.warn_many_ticks = 1;
+			if (sv_tick_debug.value)
+			{
+				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+					ticks, (double)sv_accum_us / 1000000.0, tick_dt);
+			}
 		}
 	}
+	else
+	{
+		sv_accum += clamped_frametime;
+		while (sv_accum >= tick_dt && ticks < maxcatchup)
+		{
+			SV_RunOneTick (tick_dt);
+			sv_accum -= tick_dt;
+			ticks++;
+		}
+		if (sv_accum >= tick_dt && ticks >= maxcatchup)
+		{
+			if (!sv_timewarp.value)
+				sv_accum = tick_dt;
+			if (sv_tick_debug.value)
+			{
+				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+					ticks, sv_accum, tick_dt);
+			}
+		}
+	}
+
+	if (sys_step_debug.value > 0.0f)
+		sys_step_debug_info.sv_accum_us_after = sv_accum_us;
 
 	if (last_sv_time >= 0.0)
 	{
@@ -1242,6 +1454,7 @@ void Host_ServerFrame (void)
 		{
 			last_sv_time = qcvm->time;
 			sv_accum = 0.0;
+			sv_accum_us = 0;
 			sv_next_snapshot_time = qcvm->time;
 		}
 		else if (sv_tick_debug.value && qcvm->time <= last_sv_time && realtime >= next_sv_stall_log)
@@ -1296,8 +1509,10 @@ void Host_ServerFrame (void)
 		SV_ClearDatagram ();
 	if (sv_tick_debug.value && realtime >= next_sv_tick_log)
 	{
+		double accum_s = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
+
 		Con_Printf ("NETDBG sv_tick frame_dt %.6f tick_dt %.6f ticks %d accum %.6f time %.3f sends %d\n",
-			clamped_frametime, tick_dt, ticks, sv_accum, qcvm->time, sends);
+			clamped_frametime, tick_dt, ticks, accum_s, qcvm->time, sends);
 		next_sv_tick_log = realtime + 1.0;
 	}
 
@@ -1530,6 +1745,8 @@ void _Host_Frame (double time)
 // keep the random time dependent
 	rand ();
 
+	Sys_StepDebug_BeginFrame ();
+
 // decide the simulation time
 	accumtime += host_netinterval?CLAMP(0.0, time, 0.2):0.0;	//for renderer/server isolation
 	Host_AdvanceTime (time);
@@ -1656,6 +1873,8 @@ void _Host_Frame (double time)
 	}
 
 	host_framecount++;
+
+	Sys_StepDebug_LogFrame ();
 }
 
 void Host_Frame (double time)
