@@ -72,6 +72,8 @@ typedef struct
 	int		pred_ground_ent;
 	vec3_t		pred_ground_offset;
 	float		pred_ground_yaw_delta;
+	int		ground_keep;
+	int		last_groundent;
 	cl_pred_ground_cache_t ground_cache;
 } cl_pred_state_t;
 
@@ -122,6 +124,9 @@ static qboolean CL_Predict_IsEnabled (void);
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render);
 static void CL_Predict_ResetRenderInterp (void);
 static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec);
+static qboolean CL_Predict_Vec3Sane (const vec3_t v);
+static qboolean CL_Predict_AnglesSane (const vec3_t a);
+static qboolean CL_Predict_EntityStateSane (const entity_t *e);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -205,6 +210,54 @@ static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec)
 	return true;
 }
 
+static qboolean CL_Predict_Vec3Sane (const vec3_t v)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (v[i]) || fabsf (v[i]) >= max_abs)
+			return false;
+	}
+
+	return true;
+}
+
+static qboolean CL_Predict_AnglesSane (const vec3_t a)
+{
+	const float max_abs = 65536.0f;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (a[i]) || fabsf (a[i]) >= max_abs)
+			return false;
+	}
+
+	return true;
+}
+
+static qboolean CL_Predict_EntityStateSane (const entity_t *e)
+{
+	if (!e)
+		return false;
+	if (!CL_Predict_Vec3Sane (e->msg_origins[0]))
+		return false;
+	if (!CL_Predict_Vec3Sane (e->msg_origins[1]))
+		return false;
+	if (!CL_Predict_AnglesSane (e->msg_angles[0]))
+		return false;
+	if (!CL_Predict_AnglesSane (e->msg_angles[1]))
+		return false;
+	if (e->modelindex == 0
+		&& VectorCompare (e->msg_origins[0], vec3_origin)
+		&& VectorCompare (e->msg_origins[1], vec3_origin))
+		return false;
+
+	return true;
+}
+
 static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
 {
 	if (!state)
@@ -217,6 +270,8 @@ static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
 	state->pred_ground_ent = 0;
 	VectorClear (state->pred_ground_offset);
 	state->pred_ground_yaw_delta = 0.0f;
+	state->ground_keep = 0;
+	state->last_groundent = 0;
 	state->ground_cache.id = 0;
 	state->ground_cache.last_time = 0.0;
 	state->ground_cache.valid = false;
@@ -233,6 +288,7 @@ static void CL_Predict_InvalidateGroundCache (cl_pred_state_t *state)
 	state->ground_cache.id = 0;
 	state->ground_cache.last_time = 0.0;
 	state->ground_cache.valid = false;
+	state->ground_keep = 0;
 	VectorClear (state->ground_cache.last_origin);
 	VectorClear (state->ground_cache.last_angles);
 }
@@ -374,15 +430,16 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 
 static qboolean CL_Predict_IsGroundEntityValid (int groundent)
 {
+	entity_t *ent;
+
 	if (groundent <= 0 || groundent >= cl_max_edicts)
 		return false;
 	if (!cl_entities)
 		return false;
 	if (cl.mtime[0] <= 0.0)
 		return false;
-	if (cl.snapshot_present && !cl.snapshot_present[groundent])
-		return false;
-	if (cl_entities[groundent].msgtime != cl.mtime[0])
+	ent = &cl_entities[groundent];
+	if (!CL_Predict_EntityStateSane (ent))
 		return false;
 	return true;
 }
@@ -929,7 +986,7 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 	VectorClear (cl_pred_ground_dbg.ground_origin_now);
 	VectorClear (cl_pred_ground_dbg.ground_origin_prev);
 
-	if (!state || !cl.has_full_snapshot)
+	if (!state)
 	{
 		CL_Predict_ResetGroundCache (state);
 		return false;
@@ -940,10 +997,14 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		CL_Predict_ResetGroundCache (state);
 		if (cl_netdebug_parse.value)
 		{
-			Con_Printf ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
-				groundent, cl.mtime[0]);
-			JITTER_LOG ("NETDBG: pred ground invalid ent=%d mtime=%.3f\n",
-				groundent, cl.mtime[0]);
+			int present = (cl.snapshot_present && groundent > 0 && groundent < cl_max_edicts) ? (cl.snapshot_present[groundent] ? 1 : 0) : -1;
+			double msgtime = (groundent > 0 && groundent < cl_max_edicts) ? cl_entities[groundent].msgtime : 0.0;
+			Con_Printf ("NETDBG: pred ground invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
+				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
+				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
+			JITTER_LOG ("NETDBG: pred ground invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
+				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
+				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
 		}
 		return false;
 	}
@@ -982,6 +1043,9 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		state->ground_cache.last_time = sample_t;
 		state->ground_cache.id = groundent;
 		state->ground_cache.valid = true;
+		cl_pred_ground_dbg.ground_delta_len = 0.0f;
+		cl_pred_ground_dbg.ground_yaw_delta = 0.0f;
+		cl_pred_ground_dbg.delta_applied = 0;
 		VectorClear (out_delta);
 		if (out_yaw_delta)
 			*out_yaw_delta = 0.0f;
@@ -997,6 +1061,8 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 		*out_yaw_delta = yaw_delta;
 	VectorCopy (ground_prev, cl_pred_ground_dbg.ground_origin_prev);
 	VectorCopy (ground_now, cl_pred_ground_dbg.ground_origin_now);
+	cl_pred_ground_dbg.ground_delta_len = VectorLength (delta);
+	cl_pred_ground_dbg.ground_yaw_delta = yaw_delta;
 
 	VectorCopy (ground_now, state->ground_cache.last_origin);
 	state->ground_cache.last_angles[YAW] = yaw_now;
@@ -1070,10 +1136,14 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 	{
 		if (cl_netdebug_parse.value)
 		{
-			Con_Printf ("NETDBG: pred groundent invalid ent=%d full=%d mtime=%.3f\n",
-				groundent, cl.has_full_snapshot ? 1 : 0, cl.mtime[0]);
-			JITTER_LOG ("NETDBG: pred groundent invalid ent=%d full=%d mtime=%.3f\n",
-				groundent, cl.has_full_snapshot ? 1 : 0, cl.mtime[0]);
+			int present = (cl.snapshot_present && groundent > 0 && groundent < cl_max_edicts) ? (cl.snapshot_present[groundent] ? 1 : 0) : -1;
+			double msgtime = (groundent > 0 && groundent < cl_max_edicts) ? cl_entities[groundent].msgtime : 0.0;
+			Con_Printf ("NETDBG: pred groundent invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
+				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
+				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
+			JITTER_LOG ("NETDBG: pred groundent invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
+				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
+				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
 		}
 		if (groundent <= 0 || groundent >= cl_max_edicts)
 			SDL_assert (!"prediction groundent out of range");
@@ -1116,7 +1186,7 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 				state->pred_ground_offset[0],
 				state->pred_ground_offset[1],
 				state->pred_ground_offset[2],
-				state->pred_ground_yaw_delta,
+				yaw_delta,
 				applied ? 1 : 0);
 			JITTER_LOG ("JITTERDBG groundent %d ground_prev %.3f %.3f %.3f ground_now %.3f %.3f %.3f delta_pos %.3f %.3f %.3f delta_yaw %.3f delta_applied %d\n",
 				groundent,
@@ -1129,7 +1199,7 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 				state->pred_ground_offset[0],
 				state->pred_ground_offset[1],
 				state->pred_ground_offset[2],
-				state->pred_ground_yaw_delta,
+				yaw_delta,
 				applied ? 1 : 0);
 		}
 	}
@@ -1163,8 +1233,11 @@ static qboolean CL_Predict_ApplyGroundMotion (cl_pred_state_t *state, int ground
 		}
 	}
 
-	cl_pred_ground_dbg.ground_delta_len = VectorLength (state->pred_ground_offset);
-	cl_pred_ground_dbg.ground_yaw_delta = state->pred_ground_yaw_delta;
+	if (!got_motion)
+	{
+		cl_pred_ground_dbg.ground_delta_len = 0.0f;
+		cl_pred_ground_dbg.ground_yaw_delta = 0.0f;
+	}
 
 done:
 	if (out_delta)
@@ -1439,11 +1512,27 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	}
 
 	ground_entity = (state->onground && groundent > 0);
+	if (ground_entity && groundent == state->last_groundent)
+		state->ground_keep = CL_PREDICT_GROUND_KEEP_FRAMES;
+	else if (ground_entity)
+		state->ground_keep = CL_PREDICT_GROUND_KEEP_FRAMES;
+	else if (state->ground_keep > 0)
+		state->ground_keep--;
+
 	if (ground_entity)
+	{
+		if (state->last_groundent > 0 && groundent != state->last_groundent)
+			CL_Predict_InvalidateGroundCache (state);
+		state->last_groundent = groundent;
 		ground_applied = CL_Predict_ApplyGroundMotion (state, groundent, dt, ground_delta, &ground_yaw_delta);
+	}
 	else
 	{
-		CL_Predict_ResetGroundCache (state);
+		if (state->ground_keep <= 0)
+		{
+			CL_Predict_ResetGroundCache (state);
+			state->last_groundent = 0;
+		}
 		ground_applied = false;
 		VectorClear (ground_delta);
 		ground_yaw_delta = 0.0f;
@@ -1550,7 +1639,11 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	}
 	else
 	{
-		CL_Predict_ResetGroundCache (state);
+		if (state->ground_keep <= 0)
+		{
+			CL_Predict_ResetGroundCache (state);
+			state->last_groundent = 0;
+		}
 	}
 
 	cl_pred_ground_dbg.onground = (state->onground && state->groundent > 0 && state->ground_valid);
