@@ -250,7 +250,7 @@ static qboolean CL_Predict_EntityStateSane (const entity_t *e)
 		return false;
 	if (!CL_Predict_AnglesSane (e->msg_angles[1]))
 		return false;
-	if (e->modelindex == 0
+	if (e->model == NULL
 		&& VectorCompare (e->msg_origins[0], vec3_origin)
 		&& VectorCompare (e->msg_origins[1], vec3_origin))
 		return false;
