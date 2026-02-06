@@ -431,16 +431,29 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 static qboolean CL_Predict_IsGroundEntityValid (int groundent)
 {
 	entity_t *ent;
+	int i;
 
-	if (groundent <= 0 || groundent >= cl_max_edicts)
+	if (groundent <= 0 || groundent >= MAX_EDICTS)
 		return false;
+
 	if (!cl_entities)
 		return false;
+
 	if (cl.mtime[0] <= 0.0)
 		return false;
+
 	ent = &cl_entities[groundent];
-	if (!CL_Predict_EntityStateSane (ent))
-		return false;
+
+	// Validate origin sanity only.
+	for (i = 0; i < 3; i++)
+	{
+		if (!isfinite (ent->msg_origins[0][i]) || !isfinite (ent->msg_origins[1][i]))
+			return false;
+
+		if (fabs (ent->msg_origins[0][i]) > 65536 || fabs (ent->msg_origins[1][i]) > 65536)
+			return false;
+	}
+
 	return true;
 }
 
@@ -994,18 +1007,15 @@ static qboolean CL_Predict_GetGroundMotion (cl_pred_state_t *state, int grounden
 
 	if (!CL_Predict_IsGroundEntityValid (groundent))
 	{
-		CL_Predict_ResetGroundCache (state);
 		if (cl_netdebug_parse.value)
 		{
-			int present = (cl.snapshot_present && groundent > 0 && groundent < cl_max_edicts) ? (cl.snapshot_present[groundent] ? 1 : 0) : -1;
-			double msgtime = (groundent > 0 && groundent < cl_max_edicts) ? cl_entities[groundent].msgtime : 0.0;
-			Con_Printf ("NETDBG: pred ground invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
-				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
-				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
-			JITTER_LOG ("NETDBG: pred ground invalid ent=%d present=%d ent_msg=%.3f mtime0=%.3f mtime1=%.3f sane=%d\n",
-				groundent, present, msgtime, cl.mtime[0], cl.mtime[1],
-				(groundent > 0 && groundent < cl_max_edicts) ? (CL_Predict_EntityStateSane (&cl_entities[groundent]) ? 1 : 0) : 0);
+			Con_Printf ("PREDDBG invalid groundent %d cache_id %d\n", groundent, state->ground_cache.id);
 		}
+
+		// Only invalidate if entity changed.
+		if (state->ground_cache.id != groundent)
+			state->ground_cache.valid = false;
+
 		return false;
 	}
 
