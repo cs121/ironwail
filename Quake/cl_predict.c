@@ -2,6 +2,11 @@
 Copyright (C) 2024
 */
 
+/* Q3MINI PLAN:
+ * - Add render-only net smoothing based on authoritative correction error.
+ * - Log smoothing decisions behind net_dbg_q3mini.
+ */
+
 #include "quakedef.h"
 
 extern cvar_t sv_maxspeed;
@@ -22,6 +27,11 @@ extern cvar_t cl_pred_accum_debug;
 extern cvar_t cl_pred_smooth;
 extern cvar_t cl_pred_smooth_rate;
 extern cvar_t cl_pred_snapdist;
+// Q3MINI BEGIN
+extern cvar_t cl_netsmooth;
+extern cvar_t cl_netsmooth_time;
+extern cvar_t cl_netsmooth_maxdist;
+// Q3MINI END
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
@@ -113,6 +123,12 @@ static qboolean cl_pred_warned_solid;
 static qboolean cl_pred_warned_no_snapshot;
 static vec3_t cl_pred_error;
 static vec3_t cl_pred_angle_error;
+// Q3MINI BEGIN
+static vec3_t cl_q3mini_net_error;
+static float cl_q3mini_net_remaining;
+static float cl_q3mini_net_duration;
+static qboolean cl_q3mini_net_active;
+// Q3MINI END
 static int cl_pred_steps_this_frame;
 static qboolean cl_pred_server_update_this_frame;
 static qboolean cl_pred_debug_registered;
@@ -445,6 +461,12 @@ static void CL_Predict_HardResetToBase (const char *reason)
 	cl_pred.predicted = cl_pred.base;
 	VectorClear (cl_pred_error);
 	VectorClear (cl_pred_angle_error);
+	// Q3MINI BEGIN
+	VectorClear (cl_q3mini_net_error);
+	cl_q3mini_net_remaining = 0.0f;
+	cl_q3mini_net_duration = 0.0f;
+	cl_q3mini_net_active = false;
+	// Q3MINI END
 	CL_Predict_InvalidateGroundCache (&cl_pred.base);
 	CL_Predict_ResetGroundCache (&cl_pred.predicted);
 	cl_pred.predicted.onground = cl_pred.base.onground;
@@ -801,6 +823,33 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		VectorClear (cl_pred_angle_error);
 
 	VectorAdd (state->origin, cl_pred_error, smooth_origin);
+	// Q3MINI BEGIN
+	if (is_render && cl_q3mini_net_active && cl_netsmooth.value > 0.0f)
+	{
+		float frac = 0.0f;
+
+		if (cl_q3mini_net_duration > 0.0f)
+			frac = cl_q3mini_net_remaining / cl_q3mini_net_duration;
+		frac = CLAMP (0.0f, frac, 1.0f);
+		VectorMA (smooth_origin, frac, cl_q3mini_net_error, smooth_origin);
+		if (frame_dt > 0.0f)
+			cl_q3mini_net_remaining -= frame_dt;
+		if (cl_q3mini_net_remaining <= 0.0f)
+		{
+			VectorClear (cl_q3mini_net_error);
+			cl_q3mini_net_active = false;
+			cl_q3mini_net_remaining = 0.0f;
+			cl_q3mini_net_duration = 0.0f;
+		}
+		if (net_dbg_q3mini.value > 0.0f)
+		{
+			Con_Printf ("NETDBG q3mini smooth_apply frac %.2f remain %.3f\n",
+				frac, cl_q3mini_net_remaining);
+			JITTER_LOG ("NETDBG q3mini smooth_apply frac %.2f remain %.3f\n",
+				frac, cl_q3mini_net_remaining);
+		}
+	}
+	// Q3MINI END
 	VectorCopy (smooth_origin, cl.simorg);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].origin);
 	VectorCopy (smooth_origin, cl_entities[cl.viewentity].msg_origins[0]);
@@ -2175,6 +2224,44 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			cl_pred_reset = false;
 			cl_pred_smooth_count++;
 		}
+		// Q3MINI BEGIN
+		{
+			float smooth_ms = cl_netsmooth_time.value;
+			float maxdist = cl_netsmooth_maxdist.value;
+			qboolean allow_smooth = (cl_netsmooth.value > 0.0f && smooth_ms > 0.0f && !snap_correction);
+
+			if (maxdist < 0.0f)
+				maxdist = 0.0f;
+			if (allow_smooth && (maxdist <= 0.0f || error_len <= maxdist))
+			{
+				VectorCopy (error, cl_q3mini_net_error);
+				cl_q3mini_net_duration = smooth_ms * 0.001f;
+				cl_q3mini_net_remaining = cl_q3mini_net_duration;
+				cl_q3mini_net_active = true;
+				if (net_dbg_q3mini.value > 0.0f)
+				{
+					Con_Printf ("NETDBG q3mini smooth_start err %.2f dur %.0fms onground %d groundent %d\n",
+						error_len, smooth_ms, onground ? 1 : 0, cl_pred.base.pred_ground_ent);
+					JITTER_LOG ("NETDBG q3mini smooth_start err %.2f dur %.0fms onground %d groundent %d\n",
+						error_len, smooth_ms, onground ? 1 : 0, cl_pred.base.pred_ground_ent);
+				}
+			}
+			else
+			{
+				if (cl_q3mini_net_active && net_dbg_q3mini.value > 0.0f)
+				{
+					Con_Printf ("NETDBG q3mini smooth_snap err %.2f maxdist %.2f snap %d\n",
+						error_len, maxdist, snap_correction ? 1 : 0);
+					JITTER_LOG ("NETDBG q3mini smooth_snap err %.2f maxdist %.2f snap %d\n",
+						error_len, maxdist, snap_correction ? 1 : 0);
+				}
+				VectorClear (cl_q3mini_net_error);
+				cl_q3mini_net_active = false;
+				cl_q3mini_net_remaining = 0.0f;
+				cl_q3mini_net_duration = 0.0f;
+			}
+		}
+		// Q3MINI END
 	}
 	else
 	{

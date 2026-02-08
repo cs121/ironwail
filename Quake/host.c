@@ -20,6 +20,9 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
+/* Q3MINI PLAN:
+ * - Respect sv_tickrate/sv_sendrate=0 legacy path and clamp tick/send cadence.
+ */
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
@@ -1605,20 +1608,35 @@ void Host_ServerFrame (void)
 			sys_step_debug_info.warn_zero_sim_dt = 1;
 	}
 
-	tick_dt = 1.0 / (sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0);
-	tick_dt_us = Host_SecondsToUsec (tick_dt);
-	if (tick_dt_us <= 0)
-		tick_dt_us = 1;
-	if (sys_step_debug.value > 0.0f)
-		sys_step_debug_info.tick_us = tick_dt_us;
-
-	jit_accum_before = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
-
-	if (sv_fixedtick.value > 0.0f)
+	// Q3MINI BEGIN
+	qboolean use_fixed_tick = (sv_tickrate.value > 0.0f);
+	if (use_fixed_tick)
 	{
-		sv_accum_us += frame_us;
-		if (sv_accum_us < 0)
-			sv_accum_us = 0;
+		tick_dt = 1.0 / (sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0);
+		tick_dt_us = Host_SecondsToUsec (tick_dt);
+		if (tick_dt_us <= 0)
+			tick_dt_us = 1;
+		if (sys_step_debug.value > 0.0f)
+			sys_step_debug_info.tick_us = tick_dt_us;
+
+		jit_accum_before = sv_fixedtick.value > 0.0f ? (double)sv_accum_us / 1000000.0 : sv_accum;
+
+		if (sv_fixedtick.value > 0.0f)
+		{
+			sv_accum_us += frame_us;
+			if (sv_accum_us < 0)
+				sv_accum_us = 0;
+		}
+	}
+	else
+	{
+		tick_dt = clamped_frametime;
+		tick_dt_us = Host_SecondsToUsec (tick_dt);
+		if (tick_dt_us <= 0)
+			tick_dt_us = 1;
+		if (sys_step_debug.value > 0.0f)
+			sys_step_debug_info.tick_us = tick_dt_us;
+		jit_accum_before = 0.0;
 	}
 
 	for (i = 0; i < svs.maxclients; i++)
@@ -1641,60 +1659,69 @@ void Host_ServerFrame (void)
 	maxcatchup = (int)(sv_maxsteps_per_frame.value > 0.0f ? sv_maxsteps_per_frame.value : sv_tick_maxcatchup.value);
 	if (maxcatchup < 1)
 		maxcatchup = 1;
-	if (sv_fixedtick.value > 0.0f)
+	if (use_fixed_tick)
 	{
-		max_accum_us = tick_dt_us * (int64_t)maxcatchup * 2;
-		if (max_accum_us < tick_dt_us)
-			max_accum_us = tick_dt_us;
-		if (sv_accum_us > max_accum_us)
+		if (sv_fixedtick.value > 0.0f)
 		{
-			sv_accum_us = max_accum_us;
-			if (sys_step_debug.value > 0.0f)
-				sys_step_debug_info.warn_many_ticks = 1;
-		}
-		while (sv_accum_us >= tick_dt_us && ticks < maxcatchup)
-		{
-			SV_RunOneTick (tick_dt);
-			sv_accum_us -= tick_dt_us;
-			ticks++;
-		}
-		if (sv_accum_us >= tick_dt_us && ticks >= maxcatchup)
-		{
-			if (!sv_timewarp.value)
-				sv_accum_us = tick_dt_us;
-			if (sys_step_debug.value > 0.0f)
-				sys_step_debug_info.warn_many_ticks = 1;
-			if (sv_tick_debug.value)
+			max_accum_us = tick_dt_us * (int64_t)maxcatchup * 2;
+			if (max_accum_us < tick_dt_us)
+				max_accum_us = tick_dt_us;
+			if (sv_accum_us > max_accum_us)
 			{
-				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
-					ticks, (double)sv_accum_us / 1000000.0, tick_dt);
-				JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
-					ticks, (double)sv_accum_us / 1000000.0, tick_dt);
+				sv_accum_us = max_accum_us;
+				if (sys_step_debug.value > 0.0f)
+					sys_step_debug_info.warn_many_ticks = 1;
+			}
+			while (sv_accum_us >= tick_dt_us && ticks < maxcatchup)
+			{
+				SV_RunOneTick (tick_dt);
+				sv_accum_us -= tick_dt_us;
+				ticks++;
+			}
+			if (sv_accum_us >= tick_dt_us && ticks >= maxcatchup)
+			{
+				if (!sv_timewarp.value)
+					sv_accum_us = tick_dt_us;
+				if (sys_step_debug.value > 0.0f)
+					sys_step_debug_info.warn_many_ticks = 1;
+				if (sv_tick_debug.value)
+				{
+					Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+						ticks, (double)sv_accum_us / 1000000.0, tick_dt);
+					JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+						ticks, (double)sv_accum_us / 1000000.0, tick_dt);
+				}
+			}
+		}
+		else
+		{
+			sv_accum += clamped_frametime;
+			while (sv_accum >= tick_dt && ticks < maxcatchup)
+			{
+				SV_RunOneTick (tick_dt);
+				sv_accum -= tick_dt;
+				ticks++;
+			}
+			if (sv_accum >= tick_dt && ticks >= maxcatchup)
+			{
+				if (!sv_timewarp.value)
+					sv_accum = tick_dt;
+				if (sv_tick_debug.value)
+				{
+					Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+						ticks, sv_accum, tick_dt);
+					JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
+						ticks, sv_accum, tick_dt);
+				}
 			}
 		}
 	}
 	else
 	{
-		sv_accum += clamped_frametime;
-		while (sv_accum >= tick_dt && ticks < maxcatchup)
-		{
-			SV_RunOneTick (tick_dt);
-			sv_accum -= tick_dt;
-			ticks++;
-		}
-		if (sv_accum >= tick_dt && ticks >= maxcatchup)
-		{
-			if (!sv_timewarp.value)
-				sv_accum = tick_dt;
-			if (sv_tick_debug.value)
-			{
-				Con_Printf ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
-					ticks, sv_accum, tick_dt);
-				JITTER_LOG ("NETDBG sv_tick catchup clamped ticks %d accum %.6f dt %.6f\n",
-					ticks, sv_accum, tick_dt);
-			}
-		}
+		SV_RunOneTick (tick_dt);
+		ticks = 1;
 	}
+	// Q3MINI END
 
 	if (jitter_time_debug.value > 0.0f)
 	{
@@ -1748,13 +1775,17 @@ void Host_ServerFrame (void)
 	}
 //johnfitz
 
+	// Q3MINI BEGIN
 	{
-		double netrate = sv_netrate.value;
+		double netrate = sv_sendrate.value;
 
+		if (netrate <= 0.0)
+			netrate = sv_netrate.value;
 		if (netrate <= 1.0)
 			netrate = sv_tickrate.value > 1.0 ? sv_tickrate.value : 1.0;
 		net_dt = 1.0 / netrate;
 	}
+	// Q3MINI END
 	if (sv_next_snapshot_time <= 0.0 || qcvm->time < sv_next_snapshot_time - 1.0)
 		sv_next_snapshot_time = qcvm->time;
 	while (qcvm->time >= sv_next_snapshot_time && sends < max_sends)

@@ -20,6 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+/* Q3MINI PLAN:
+ * - Track mini-Q3 server sequence and client ackmask bookkeeping for debug/logging.
+ */
+
 #ifndef QUAKE_SERVER_H
 #define QUAKE_SERVER_H
 
@@ -366,6 +370,11 @@ typedef struct client_s
 	unsigned int	last_cmd_ack;
 	int				invalid_cmd_ack_count;
 	double			invalid_cmd_ack_time;
+	// Q3MINI BEGIN
+	unsigned int	q3mini_srv_seq;
+	unsigned int	q3mini_last_srv_ack;
+	unsigned int	q3mini_last_srv_ack_mask;
+	// Q3MINI END
 } client_t;
 
 

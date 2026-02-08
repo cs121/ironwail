@@ -23,6 +23,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef _QUAKE_PROTOCOL_H
 #define _QUAKE_PROTOCOL_H
 
+/* Q3MINI PLAN:
+ * - Add a protocol flag to gate mini-Q3 netcode fields without breaking legacy parsing.
+ * - Document the extended clc_move header for ack mask support.
+ */
+
 // protocol.h -- communications protocols
 
 #define PROTOCOL_RMQ		999
@@ -32,6 +37,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PRFL_INT32COORD		(1 << 7)
 #define PRFL_SNAPSHOT_HIRES	(1 << 8)
 #define PRFL_SIGNON_CHUNKS	(1 << 9)	// signon streaming via svc_signon_chunk
+// Q3MINI BEGIN
+#define PRFL_Q3MINI		(1 << 10)	// Q3MINI: mini Q3-style netcode extensions
+// Q3MINI END
 #define PROTOCOL_RMQ_FLAGS	(PRFL_INT32COORD | PRFL_SHORTANGLE | PRFL_SNAPSHOT_HIRES | PRFL_SIGNON_CHUNKS)
 
 // snapshot delta field bits
@@ -294,6 +302,7 @@ typedef enum
 #define	clc_disconnect	2
 #define	clc_move		3		// [float mtime] [long cmd_seq] [long cmd_ack] [byte count] [usercmd_t]
 						// RMQ: cmd_seq/cmd_ack are uint32 on wire; compare with NETSEQ_GT for wrap safety.
+						// Q3MINI: [long srv_ack] [long srv_ack_mask] when PRFL_Q3MINI && net_ackmask.
 #define	clc_stringcmd	4		// [string] message
 #define	clc_snapshot_ack	5	// [long] seq
 #define	clc_snapshot_nak	6	// [long] expected base [long] received base

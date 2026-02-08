@@ -21,6 +21,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+/* Q3MINI PLAN:
+ * - Expose shared cvars for mini-Q3 netcode (ackmask/debug/protocol gate, client throttles).
+ */
+
 #ifndef QUAKEDEFS_H
 #define QUAKEDEFS_H
 
@@ -328,6 +332,16 @@ extern	cvar_t		jitter_log_force_developer;
 extern	cvar_t		jitter_time_debug;
 extern	cvar_t		sv_fixedtick;
 extern	cvar_t		sv_maxsteps_per_frame;
+// Q3MINI BEGIN
+extern	cvar_t		net_ackmask;
+extern	cvar_t		net_dbg_q3mini;
+extern	cvar_t		net_force_q3mini;
+extern	cvar_t		cl_cmd_redundancy;
+extern	cvar_t		cl_maxpackets;
+extern	cvar_t		cl_netsmooth;
+extern	cvar_t		cl_netsmooth_time;
+extern	cvar_t		cl_netsmooth_maxdist;
+// Q3MINI END
 
 typedef struct sys_step_debug_info_s
 {
