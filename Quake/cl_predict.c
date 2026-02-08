@@ -304,7 +304,7 @@ static void CL_Predict_ClearFrames (void)
 	for (i = 0; i < CL_PRED_FRAME_RING; i++)
 	{
 		cl_pred.frames[i].valid = false;
-		cl_pred.frames[i].seq = 0;
+		cl_pred.frames[i].seq = ~0u;
 	}
 }
 
@@ -327,9 +327,9 @@ static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
 {
 	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
 
-	if (!frame->valid || frame->seq != seq)
+	if (frame->seq != seq)
 	{
-		if (frame->valid && frame->seq != seq && cl_pred_debug.value > 0.0f)
+		if (cl_pred_debug.value > 0.0f)
 		{
 			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u\n",
 				seq % CL_PRED_FRAME_RING, frame->seq, seq);
@@ -2083,6 +2083,7 @@ void CL_Predict_ResetGround (void)
 void CL_Predict_BeginFrame (void)
 {
 	qboolean enabled;
+	qboolean was_enabled;
 
 	CL_Predict_RegisterDebugCvars ();
 	cl_pred_steps_this_frame = 0;
@@ -2096,48 +2097,30 @@ void CL_Predict_BeginFrame (void)
 	cl_pred_true_error_len = 0.0f;
 	cl_pred_pred_frame_found = false;
 
+	was_enabled = cl_pred_prev_enabled;
 	enabled = CL_Predict_IsEnabled ();
-	if (enabled && !cl_pred_prev_enabled && cl_pred.has_base)
+	if (enabled && !was_enabled && cl_pred.has_base)
 		CL_Predict_HardResetToBase ("predict reenabled");
-	cl_pred_prev_enabled = enabled;
 
-	if (enabled && cl_pred.has_base && cl_pred_render_cmd_valid)
+	if (enabled && cl_pred.has_base)
 	{
 		float frame_dt = (float)(host_rawframetime > 0.0 ? host_rawframetime : host_frametime);
-		float max_accum;
 
-		if (CL_Predict_UseUltra ())
-		{
-			max_accum = 0.25f;
-			cl_pred_frame_accum += frame_dt;
-			if (cl_pred_frame_accum < 0.0)
-				cl_pred_frame_accum = 0.0;
-			cl_pred_frame_dt_last = frame_dt;
-			if (cl_pred_frame_accum > max_accum)
-				cl_pred_frame_accum = max_accum;
-		}
-		else
-		{
-			float step_dt;
-			int max_steps;
-
-			step_dt = CL_Predict_GetFrameStepTime (frame_dt);
-			max_steps = (int)cl_pred_max_substeps.value;
-			if (max_steps < 1)
-				max_steps = 1;
-			max_accum = step_dt * (float)max_steps;
-			cl_pred_frame_accum += frame_dt;
-			cl_pred_frame_dt_last = frame_dt;
-			if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
-				cl_pred_frame_accum = max_accum;
-		}
+		cl_pred_frame_accum += frame_dt;
+		if (cl_pred_frame_accum < 0.0)
+			cl_pred_frame_accum = 0.0;
+		cl_pred_frame_dt_last = frame_dt;
 	}
 	else if (!enabled || !cl_pred.has_base)
 	{
-		cl_pred_frame_dt_last = 0.0f;
-		cl_pred_frame_accum = cl_pred_frame_dt_last;
+		if (was_enabled || cl_pred_frame_accum > 0.0 || cl_pred_frame_dt_last > 0.0f)
+		{
+			cl_pred_frame_dt_last = 0.0f;
+			cl_pred_frame_accum = cl_pred_frame_dt_last;
+		}
 		cl_pred_render_interp_valid = false;
 	}
+	cl_pred_prev_enabled = enabled;
 
 	if (cl_pred_accum_debug.value > 0.0f)
 	{
