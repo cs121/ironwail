@@ -683,6 +683,7 @@ static void CL_Predict_RunFrameSteps (void)
 	float step_dt;
 	int max_steps;
 	int steps = 0;
+	const float PRED_EPS = 0.002f;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
@@ -706,7 +707,19 @@ static void CL_Predict_RunFrameSteps (void)
 	if (max_steps < 1)
 		max_steps = 1;
 
-	while (cl_pred_frame_accum >= step_dt && steps < max_steps)
+	if (fabsf (cl_pred_frame_accum - step_dt) < PRED_EPS)
+		cl_pred_frame_accum = step_dt;
+
+	if (cl_pred_nullcmd_injected)
+	{
+		cmd.forwardmove = 0;
+		cmd.sidemove = 0;
+		cmd.upmove = 0;
+		cmd.buttons = 0;
+		cmd.impulse = 0;
+	}
+
+	while (cl_pred_frame_accum + PRED_EPS >= step_dt && steps < max_steps)
 	{
 		cl_pred_render_from = cl_pred.predicted;
 		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
@@ -714,7 +727,11 @@ static void CL_Predict_RunFrameSteps (void)
 		if (cl_pred_render_cmd_valid && cmd.sequence > 0)
 			CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 		cl_pred_frame_accum -= step_dt;
+		if (cl_pred_frame_accum < 0.0f)
+			cl_pred_frame_accum = 0.0f;
 		steps++;
+		Con_Printf ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
+		JITTER_LOG ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
 	}
 
 	cl_pred_last_substeps = steps;
