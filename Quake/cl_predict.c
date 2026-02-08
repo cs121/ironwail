@@ -310,7 +310,7 @@ static void CL_Predict_ClearFrames (void)
 
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state)
 {
-	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
+	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
 
 	frame->seq = seq;
 	VectorCopy (state->origin, frame->origin);
@@ -325,7 +325,7 @@ static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *stat
 
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
 {
-	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
+	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
 
 	if (frame->seq != seq)
 	{
@@ -2055,7 +2055,7 @@ void CL_Predict_Clear (void)
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_frame_dt_last = 0.0f;
-	cl_pred_frame_accum = cl_pred_frame_dt_last;
+	cl_pred_frame_accum = 0.0;
 	cl_pred_render_interp_valid = false;
 	cl_pred_render_frac = 0.0f;
 	memset (&cl_pred_render_from, 0, sizeof(cl_pred_render_from));
@@ -2113,10 +2113,10 @@ void CL_Predict_BeginFrame (void)
 	}
 	else if (!enabled || !cl_pred.has_base)
 	{
-		if (was_enabled || cl_pred_frame_accum > 0.0 || cl_pred_frame_dt_last > 0.0f)
+		if (was_enabled)
 		{
 			cl_pred_frame_dt_last = 0.0f;
-			cl_pred_frame_accum = cl_pred_frame_dt_last;
+			cl_pred_frame_accum = 0.0;
 		}
 		cl_pred_render_interp_valid = false;
 	}
@@ -2288,7 +2288,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		{
 			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
 			{
-				pred_slot = ack % CL_PRED_FRAME_RING;
+				pred_slot = ack & (CL_PRED_FRAME_RING - 1);
 				pred_stored_seq = cl_pred.frames[pred_slot].seq;
 				Con_Printf ("PredFrame MISS: ack=%u stored=%u slot=%u latest=%u\n",
 					ack, pred_stored_seq, pred_slot, cl_pred.seq_latest);
