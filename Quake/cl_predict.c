@@ -727,8 +727,6 @@ static void CL_Predict_RunFrameSteps (void)
 		if (cl_pred_render_cmd_valid && cmd.sequence > 0)
 			CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 		cl_pred_frame_accum -= step_dt;
-		if (cl_pred_frame_accum < 0.0f)
-			cl_pred_frame_accum = 0.0f;
 		steps++;
 		Con_Printf ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
 		JITTER_LOG ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
@@ -743,8 +741,6 @@ static void CL_Predict_RunFrameSteps (void)
 		cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
 		cl_pred_render_frac = CLAMP (0.0f, cl_pred_render_frac, 1.0f);
 	}
-	if (cl_pred_frame_accum < 0.0)
-		cl_pred_frame_accum = 0.0;
 	cl_pred_render_interp_valid = true;
 
 	if (cl_jitter_debug.value > 0.0f)
@@ -1953,8 +1949,8 @@ void CL_Predict_Clear (void)
 	cl_pred_angles_normalized = 0;
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
-	cl_pred_frame_accum = 0.0;
 	cl_pred_frame_dt_last = 0.0f;
+	cl_pred_frame_accum = cl_pred_frame_dt_last;
 	cl_pred_render_interp_valid = false;
 	cl_pred_render_frac = 0.0f;
 	memset (&cl_pred_render_from, 0, sizeof(cl_pred_render_from));
@@ -2011,15 +2007,13 @@ void CL_Predict_BeginFrame (void)
 		max_accum = step_dt * (float)max_steps;
 		cl_pred_frame_accum += frame_dt;
 		cl_pred_frame_dt_last = frame_dt;
-		if (cl_pred_frame_accum < 0.0)
-			cl_pred_frame_accum = 0.0;
 		if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
 			cl_pred_frame_accum = max_accum;
 	}
 	else if (!enabled || !cl_pred.has_base)
 	{
-		cl_pred_frame_accum = 0.0;
 		cl_pred_frame_dt_last = 0.0f;
+		cl_pred_frame_accum = cl_pred_frame_dt_last;
 		cl_pred_render_interp_valid = false;
 	}
 
@@ -2063,6 +2057,11 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	cl_pred.seq_latest = cmd->sequence;
 	cl_pred.cmds[cmd->sequence % CMD_RING] = *cmd;
 	cl_pred_angles_normalized = 1;
+	if (cl_jitter_debug.value > 0.0f)
+	{
+		Con_Printf ("CMD OUT seq=%u\n", cmd->sequence);
+		JITTER_LOG ("CMD OUT seq=%u\n", cmd->sequence);
+	}
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
@@ -2448,6 +2447,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		resim_cmd_valid = true;
 		CL_Predict_DebugLogCmd ("resim", &cmd, cmd_dt);
 		cl_pred_replay_count++;
+	}
+	if (!resim_cmd_valid && (cl_jitter_debug.value > 0.0f || cl_pred_debug.value > 0.0f))
+	{
+		Con_Printf ("Replay skipped: latest=%u ack=%u\n", cl_pred.seq_latest, ack);
+		JITTER_LOG ("Replay skipped: latest=%u ack=%u\n", cl_pred.seq_latest, ack);
 	}
 
 	if (resim_cmd_valid)
