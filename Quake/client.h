@@ -532,9 +532,14 @@ typedef struct
 	vec3_t		pred_error;
 	vec3_t		pred_angle_error;
 	float		pred_error_len;
+	float		pred_smooth_error_len;
 	float		pred_angle_error_len;
 	int			prediction_steps;
 	qboolean	server_update_applied;
+	unsigned int	ack_seq;
+	qboolean	pred_frame_found;
+	int			replay_count;
+	int			snap_count;
 	qboolean	onground;
 	int			groundent;
 	qboolean	ground_valid;
