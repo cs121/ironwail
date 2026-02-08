@@ -19,6 +19,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
+/* Q3MINI PLAN:
+ * - Add client cvars for cmd redundancy/maxpackets and smoothing.
+ * - Throttle outgoing packets (maxpackets/rate) with debug logging.
+ */
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
@@ -50,6 +54,10 @@ cvar_t	cl_rate = {"cl_rate", "25000", CVAR_ARCHIVE};
 cvar_t	cl_updaterate = {"cl_updaterate", "20", CVAR_ARCHIVE};
 cvar_t	cl_cmdrate = {"cl_cmdrate", "60", CVAR_ARCHIVE};
 cvar_t	cl_cmd_maxbatch = {"cl_cmd_maxbatch", "6", CVAR_ARCHIVE};
+// Q3MINI BEGIN
+cvar_t	cl_cmd_redundancy = {"cl_cmd_redundancy", "2", CVAR_ARCHIVE};
+cvar_t	cl_maxpackets = {"cl_maxpackets", "60", CVAR_ARCHIVE};
+// Q3MINI END
 cvar_t	cl_interp = {"cl_interp", "0.05", CVAR_ARCHIVE};
 cvar_t	cl_jitter = {"cl_jitter", "0.02", CVAR_ARCHIVE};
 cvar_t	cl_jitter_debug = {"cl_jitter_debug", "0", CVAR_NONE};
@@ -78,6 +86,11 @@ cvar_t	cl_pred_smooth = {"cl_pred_smooth", "1", CVAR_ARCHIVE};
 cvar_t	cl_pred_smooth_rate = {"cl_pred_smooth_rate", "10", CVAR_ARCHIVE};
 cvar_t	cl_pred_snapdist = {"cl_pred_snapdist", "64", CVAR_ARCHIVE};
 cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
+// Q3MINI BEGIN
+cvar_t	cl_netsmooth = {"cl_netsmooth", "1", CVAR_ARCHIVE};
+cvar_t	cl_netsmooth_time = {"cl_netsmooth_time", "100", CVAR_ARCHIVE};
+cvar_t	cl_netsmooth_maxdist = {"cl_netsmooth_maxdist", "12", CVAR_ARCHIVE};
+// Q3MINI END
 cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
 cvar_t	cl_pred_deadzone = {"cl_pred_deadzone", "0.25", CVAR_NONE};
 cvar_t	cl_pred_angle_deadzone = {"cl_pred_angle_deadzone", "0.1", CVAR_NONE};
@@ -155,6 +168,11 @@ static unsigned int		cl_cmds_sent_since_log = 0;
 static unsigned int		cl_cmd_packets_since_log = 0;
 static int			cl_cmd_msec_last_generated = 0;
 static int			cl_cmds_generated_last_frame = 0;
+// Q3MINI BEGIN
+static double			cl_q3mini_next_send_time = 0.0;
+static double			cl_q3mini_rate_tokens = 0.0;
+static double			cl_q3mini_rate_last_time = 0.0;
+// Q3MINI END
 
 static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
 {
@@ -1035,6 +1053,11 @@ void CL_ClearState (void)
 // wipe the entire cl structure
 	CL_FreeState ();
 	CL_ClearPlayerSnaps ();
+	// Q3MINI BEGIN
+	cl_q3mini_next_send_time = 0.0;
+	cl_q3mini_rate_tokens = 0.0;
+	cl_q3mini_rate_last_time = 0.0;
+	// Q3MINI END
 
 	SZ_Clear (&cls.message);
 
@@ -2021,6 +2044,14 @@ void CL_SendCmd (void)
 	int				cmds_built;
 	qboolean		send_move;
 	qboolean		sendcmd_ran;
+	// Q3MINI BEGIN
+	int				packet_bytes = 0;
+	int				packet_cmd_count = 0;
+	int				maxpackets = 0;
+	double			maxpackets_interval = 0.0;
+	qboolean		send_allowed = true;
+	qboolean		sent_move = false;
+	// Q3MINI END
 	static int		last_cmd_msec = -1;
 
 	if (cls.state != ca_connected)
@@ -2173,22 +2204,84 @@ void CL_SendCmd (void)
 	{
 		if (cls.signon == SIGNONS)
 		{
-			CL_NetDbg_LogMovement (&cmd, sendcmd_ran);
-			CL_SendMove (&cmd);
-			cl_cmds_sent_since_log++;
-			if (sys_step_debug.value > 0.0f)
-				sys_step_debug_info.cl_cmds_sent++;
+			// Q3MINI BEGIN
+			packet_bytes = CL_CalcMovePacketBytes (&cmd, &packet_cmd_count);
+			{
+				maxpackets = (int)cl_maxpackets.value;
+
+				if (maxpackets < 10)
+					maxpackets = 10;
+				if (maxpackets > 125)
+					maxpackets = 125;
+				maxpackets_interval = 1.0 / (double)maxpackets;
+				if (realtime < cl_q3mini_next_send_time)
+					send_allowed = false;
+				if (!send_allowed && net_dbg_q3mini.value > 0.0f)
+				{
+					Con_Printf ("NETDBG q3mini send_skip maxpackets=%d next=%.3f now=%.3f\n",
+						maxpackets, cl_q3mini_next_send_time, realtime);
+					JITTER_LOG ("NETDBG q3mini send_skip maxpackets=%d next=%.3f now=%.3f\n",
+						maxpackets, cl_q3mini_next_send_time, realtime);
+				}
+			}
+			if (send_allowed && cl_rate.value > 0.0f)
+			{
+				double now = realtime;
+				double rate = cl_rate.value;
+				double cap = rate;
+
+				if (cl_q3mini_rate_last_time <= 0.0 || now <= cl_q3mini_rate_last_time)
+				{
+					cl_q3mini_rate_last_time = now;
+					if (cl_q3mini_rate_tokens <= 0.0)
+						cl_q3mini_rate_tokens = cap;
+				}
+				cl_q3mini_rate_tokens += (now - cl_q3mini_rate_last_time) * rate;
+				cl_q3mini_rate_last_time = now;
+				if (cl_q3mini_rate_tokens > cap)
+					cl_q3mini_rate_tokens = cap;
+				if (packet_bytes > 0 && cl_q3mini_rate_tokens < (double)packet_bytes)
+				{
+					send_allowed = false;
+					if (net_dbg_q3mini.value > 0.0f)
+					{
+						Con_Printf ("NETDBG q3mini send_skip rate=%.0f tokens=%.1f want=%d\n",
+							rate, cl_q3mini_rate_tokens, packet_bytes);
+						JITTER_LOG ("NETDBG q3mini send_skip rate=%.0f tokens=%.1f want=%d\n",
+							rate, cl_q3mini_rate_tokens, packet_bytes);
+					}
+				}
+			}
+			// Q3MINI END
+			if (send_allowed)
+			{
+				CL_NetDbg_LogMovement (&cmd, sendcmd_ran);
+				CL_SendMove (&cmd);
+				// Q3MINI BEGIN
+				if (packet_bytes > 0 && cl_rate.value > 0.0f)
+					cl_q3mini_rate_tokens = q_max (0.0, cl_q3mini_rate_tokens - (double)packet_bytes);
+				sent_move = true;
+				if (maxpackets_interval > 0.0)
+					cl_q3mini_next_send_time = realtime + maxpackets_interval;
+				// Q3MINI END
+				cl_cmds_sent_since_log++;
+				if (sys_step_debug.value > 0.0f)
+					sys_step_debug_info.cl_cmds_sent++;
+			}
 		}
 		else
 		{
 			CL_NetDbg_LogMovement (NULL, sendcmd_ran);
 			CL_SendMove (NULL);
 		}
-		cl_cmd_packets_since_log++;
-		if (sys_step_debug.value > 0.0f)
-			sys_step_debug_info.cl_cmd_packets++;
+		if (send_allowed)
+		{
+			cl_cmd_packets_since_log++;
+			if (sys_step_debug.value > 0.0f)
+				sys_step_debug_info.cl_cmd_packets++;
+		}
 	}
-	if (send_move && cls.signon == SIGNONS)
+	if (send_move && cls.signon == SIGNONS && sent_move)
 		memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
 
 	if (cl_netdebug_parse.value)
@@ -2404,6 +2497,10 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_updaterate);
 	Cvar_RegisterVariable (&cl_cmdrate);
 	Cvar_RegisterVariable (&cl_cmd_maxbatch);
+	// Q3MINI BEGIN
+	Cvar_RegisterVariable (&cl_cmd_redundancy);
+	Cvar_RegisterVariable (&cl_maxpackets);
+	// Q3MINI END
 	Cvar_RegisterVariable (&cl_interp);
 	Cvar_RegisterVariable (&cl_jitter);
 	Cvar_RegisterVariable (&cl_jitter_debug);
@@ -2431,6 +2528,11 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_pred_smooth_rate);
 	Cvar_RegisterVariable (&cl_pred_snapdist);
 	Cvar_RegisterVariable (&cl_pred_smooth_ms);
+	// Q3MINI BEGIN
+	Cvar_RegisterVariable (&cl_netsmooth);
+	Cvar_RegisterVariable (&cl_netsmooth_time);
+	Cvar_RegisterVariable (&cl_netsmooth_maxdist);
+	// Q3MINI END
 	Cvar_RegisterVariable (&cl_pred_teleport_dist);
 	Cvar_RegisterVariable (&cl_pred_deadzone);
 	Cvar_RegisterVariable (&cl_pred_angle_deadzone);

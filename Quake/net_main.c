@@ -29,6 +29,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <curl/curl.h>
 #endif
 
+/* Q3MINI PLAN:
+ * - Register shared netcode cvars for mini-Q3 features (ackmask, debug, protocol gate).
+ */
+
 qsocket_t	*net_activeSockets = NULL;
 qsocket_t	*net_freeSockets = NULL;
 int		net_numsockets = 0;
@@ -68,6 +72,11 @@ static	cvar_t	net_messagetimeout = {"net_messagetimeout","300",CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
 cvar_t	net_maxpacket = {"net_maxpacket", "1400", CVAR_NONE};
 cvar_t	net_mtu = {"net_mtu", "1400", CVAR_NONE};
+// Q3MINI BEGIN
+cvar_t	net_ackmask = {"net_ackmask", "1", CVAR_NONE};
+cvar_t	net_dbg_q3mini = {"net_dbg_q3mini", "0", CVAR_NONE};
+cvar_t	net_force_q3mini = {"net_force_q3mini", "0", CVAR_NONE};
+// Q3MINI END
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -870,6 +879,11 @@ void NET_Init (void)
 	Cvar_RegisterVariable (&hostname);
 	Cvar_RegisterVariable (&net_maxpacket);
 	Cvar_RegisterVariable (&net_mtu);
+	// Q3MINI BEGIN
+	Cvar_RegisterVariable (&net_ackmask);
+	Cvar_RegisterVariable (&net_dbg_q3mini);
+	Cvar_RegisterVariable (&net_force_q3mini);
+	// Q3MINI END
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
 	Cmd_AddCommand ("listen", NET_Listen_f);

@@ -21,6 +21,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
+/* Q3MINI PLAN:
+ * - Parse mini-Q3 server sequence fields and update client ackmask tracking.
+ * - Emit debug logs when enabled.
+ */
 // cl_parse.c  -- parse a message received from the server
 
 #include <string.h>
@@ -960,6 +964,45 @@ static int CL_StoreSnapshotBaselineFromBase (unsigned int seq, const snapshot_st
 	CL_SetSnapshotBaselineIndex (index);
 	return index;
 }
+
+// Q3MINI BEGIN
+static qboolean CL_Q3Mini_Enabled (void)
+{
+	return (cl.protocolflags & PRFL_Q3MINI) != 0;
+}
+
+static void CL_Q3Mini_UpdateSrvAck (unsigned int seq)
+{
+	if (!cl.q3mini_srv_ack_valid)
+	{
+		cl.q3mini_srv_ack_valid = true;
+		cl.q3mini_srv_ack = seq;
+		cl.q3mini_srv_ack_mask = 0;
+		return;
+	}
+
+	if (seq == cl.q3mini_srv_ack)
+		return;
+
+	if (NETSEQ_GT (seq, cl.q3mini_srv_ack))
+	{
+		unsigned int shift = seq - cl.q3mini_srv_ack;
+		if (shift >= 32 + 1)
+			cl.q3mini_srv_ack_mask = 0;
+		else
+			cl.q3mini_srv_ack_mask <<= shift;
+		if (shift >= 1 && shift <= 32)
+			cl.q3mini_srv_ack_mask |= 1u << (shift - 1);
+		cl.q3mini_srv_ack = seq;
+	}
+	else
+	{
+		unsigned int delta = cl.q3mini_srv_ack - seq;
+		if (delta >= 1 && delta <= 32)
+			cl.q3mini_srv_ack_mask |= 1u << (delta - 1);
+	}
+}
+// Q3MINI END
 
 static qboolean CL_SendSnapshotAck (unsigned int seq)
 {
@@ -3466,11 +3509,29 @@ void CL_ParseClientdata (void)
 	// svc_clientdata carries pmove-critical fields; snapshot2 owns local player position/orientation.
 	if (bits & SU_PREDICT)
 	{
+		// Q3MINI BEGIN
+		unsigned int srv_seq = 0;
+		// Q3MINI END
 		unsigned int ack = (unsigned int)MSG_ReadLong ();
 		unsigned int ack_echo = (unsigned int)MSG_ReadLong ();
 		vec3_t origin;
 		vec3_t velocity;
 		vec3_t viewangles;
+
+		// Q3MINI BEGIN
+		if (CL_Q3Mini_Enabled ())
+		{
+			srv_seq = (unsigned int)MSG_ReadLong ();
+			CL_Q3Mini_UpdateSrvAck (srv_seq);
+			if (net_dbg_q3mini.value > 0.0f)
+			{
+				Con_Printf ("NETDBG q3mini recv srv_seq %u ack %u echo %u mask 0x%08x\n",
+					srv_seq, ack, ack_echo, cl.q3mini_srv_ack_mask);
+				JITTER_LOG ("NETDBG q3mini recv srv_seq %u ack %u echo %u mask 0x%08x\n",
+					srv_seq, ack, ack_echo, cl.q3mini_srv_ack_mask);
+			}
+		}
+		// Q3MINI END
 
 		if (NETSEQ_GT (ack, cl.last_cmd_ack))
 			cl.last_cmd_ack = ack;

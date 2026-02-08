@@ -18,6 +18,10 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+/* Q3MINI PLAN:
+ * - Parse client ackmask fields and dedupe redundant usercmds with debug logs.
+ */
+
 */
 // sv_user.c -- server code for moving users
 
@@ -752,6 +756,13 @@ nextmsg:
 				int cmd_index;
 				unsigned int cmd_seq;
 				unsigned int cmd_ack;
+				// Q3MINI BEGIN
+				unsigned int srv_ack = 0;
+				unsigned int srv_ack_mask = 0;
+				qboolean q3mini_enabled = (sv.protocolflags & PRFL_Q3MINI) && (net_ackmask.value > 0.0f);
+				int accepted_cmds = 0;
+				int dropped_cmds = 0;
+				// Q3MINI END
 				unsigned int prev_seq = 0;
 				int readcount_before_time;
 				int readcount_after_time;
@@ -759,7 +770,7 @@ nextmsg:
 				int readcount_after_seq;
 				int readcount_before_ack;
 				int readcount_after_ack;
-				const int header_bytes = 4 + 4 + 4;
+				const int header_bytes = 4 + 4 + 4 + (q3mini_enabled ? 8 : 0);
 				const int cmd_bytes = 4 + (3 * 2) + (3 * 2) + 1 + 1;
 				float mtime;
 
@@ -785,6 +796,15 @@ nextmsg:
 				readcount_before_ack = msg_readcount;
 				cmd_ack = (unsigned int)MSG_ReadLong ();
 				readcount_after_ack = msg_readcount;
+				// Q3MINI BEGIN
+				if (q3mini_enabled)
+				{
+					srv_ack = (unsigned int)MSG_ReadLong ();
+					srv_ack_mask = (unsigned int)MSG_ReadLong ();
+					host_client->q3mini_last_srv_ack = srv_ack;
+					host_client->q3mini_last_srv_ack_mask = srv_ack_mask;
+				}
+				// Q3MINI END
 				if (sv_cmd_ack_debug.value)
 				{
 					int remaining = net_message.cursize - msg_readcount;
@@ -903,10 +923,18 @@ nextmsg:
 					}
 					prev_seq = move.sequence;
 					if (!SV_CmdSeqNewer (move.sequence, host_client->last_cmd_seq))
+					{
+						// Q3MINI BEGIN
+						dropped_cmds++;
+						// Q3MINI END
 						continue;
+					}
 
 					host_client->last_cmd_seq = move.sequence;
 					host_client->cmd = move;
+					// Q3MINI BEGIN
+					accepted_cmds++;
+					// Q3MINI END
 
 					VectorCopy (move.viewangles, host_client->edict->v.v_angle);
 					host_client->edict->v.button0 = move.buttons & 1;
@@ -916,6 +944,17 @@ nextmsg:
 				}
 				if (cmd_count == 0 && SV_CmdSeqNewer (cmd_seq, host_client->last_cmd_seq))
 					host_client->last_cmd_seq = cmd_seq;
+				// Q3MINI BEGIN
+				if (net_dbg_q3mini.value > 0.0f)
+				{
+					Con_Printf ("NETDBG q3mini recv %s cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d accepted %d dropped %d\n",
+						host_client->name, cmd_seq, cmd_ack, srv_ack, srv_ack_mask, cmd_count,
+						accepted_cmds, dropped_cmds);
+					JITTER_LOG ("NETDBG q3mini recv %s cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d accepted %d dropped %d\n",
+						host_client->name, cmd_seq, cmd_ack, srv_ack, srv_ack_mask, cmd_count,
+						accepted_cmds, dropped_cmds);
+				}
+				// Q3MINI END
 				break;
 			}
 

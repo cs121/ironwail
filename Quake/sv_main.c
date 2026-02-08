@@ -28,6 +28,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "net_defs.h"
 #include "net_dgrm.h"
 
+/* Q3MINI PLAN:
+ * - Gate protocol flags and server packet sequencing for mini-Q3 ackmask.
+ * - Adjust tick/send defaults and use send cadence gating.
+ */
+
 server_t	sv;
 server_static_t	svs;
 
@@ -64,9 +69,11 @@ cvar_t sv_minrate = {"sv_minrate", "0", CVAR_NONE};
 cvar_t sv_maxrate = {"sv_maxrate", "0", CVAR_NONE};
 cvar_t sv_minupdaterate = {"sv_minupdaterate", "0", CVAR_NONE};
 cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
-cvar_t sv_tickrate = {"sv_tickrate", "20", CVAR_NONE};
+// Q3MINI BEGIN
+cvar_t sv_tickrate = {"sv_tickrate", "60", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "20", CVAR_NONE};
 static cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
+// Q3MINI END
 cvar_t sv_tick_maxcatchup = {"sv_tick_maxcatchup", "5", CVAR_NONE};
 cvar_t sv_fixedtick = {"sv_fixedtick", "1", CVAR_NONE};
 cvar_t sv_maxsteps_per_frame = {"sv_maxsteps_per_frame", "8", CVAR_NONE};
@@ -215,7 +222,12 @@ static void SV_IcullStats_f (void)
 static int SV_ClientSendRate (const client_t *client)
 {
 	int rate = (int)sv_sendrate.value;
+	// Q3MINI BEGIN
+	int tickrate = (int)sv_tickrate.value;
 
+	if (rate > 0 && tickrate > 0 && rate > tickrate)
+		rate = tickrate;
+	// Q3MINI END
 	if (rate <= 0)
 		rate = client->updaterate;
 	if (rate <= 0)
@@ -5125,6 +5137,10 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 
 	MSG_WriteLong (msg, (int)client->last_cmd_seq);
 	MSG_WriteLong (msg, (int)client->last_cmd_ack);
+	// Q3MINI BEGIN
+	if (sv.protocolflags & PRFL_Q3MINI)
+		MSG_WriteLong (msg, (int)client->q3mini_srv_seq);
+	// Q3MINI END
 	for (i=0 ; i<3 ; i++)
 		MSG_WriteCoord (msg, ent->v.origin[i], sv.protocolflags);
 	for (i=0 ; i<3 ; i++)
@@ -5252,6 +5268,10 @@ qboolean SV_SendClientDatagram (client_t *client)
 
 // add the client specific data to the datagram
 	// INV-2: control/ack data (time + clientdata) is written first and never trimmed.
+	// Q3MINI BEGIN
+	if (sv.protocolflags & PRFL_Q3MINI)
+		client->q3mini_srv_seq++;
+	// Q3MINI END
 	SV_WriteClientdataToMessage (client, client->edict, &msg);
 	ctrl_bytes = msg.cursize - ctrl_start;
 	frame.ctrl_bytes = ctrl_bytes;
@@ -7321,6 +7341,10 @@ void SV_SpawnServer (const char *server)
 
 	sv.protocol = PROTOCOL_RMQ;
 	sv.protocolflags = PROTOCOL_RMQ_FLAGS;
+	// Q3MINI BEGIN
+	if (net_force_q3mini.value > 0.0f)
+		sv.protocolflags |= PRFL_Q3MINI;
+	// Q3MINI END
 
 	PR_SwitchQCVM(vm);
 // load progs to get entity field count
@@ -7362,6 +7386,11 @@ void SV_SpawnServer (const char *server)
 		svs.clients[i].last_cmd_ack = 0;
 		svs.clients[i].invalid_cmd_ack_count = 0;
 		svs.clients[i].invalid_cmd_ack_time = 0.0;
+		// Q3MINI BEGIN
+		svs.clients[i].q3mini_srv_seq = 0;
+		svs.clients[i].q3mini_last_srv_ack = 0;
+		svs.clients[i].q3mini_last_srv_ack_mask = 0;
+		// Q3MINI END
 	}
 
 	sv.state = ss_loading;

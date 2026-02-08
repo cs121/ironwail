@@ -20,6 +20,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+/* Q3MINI PLAN:
+ * - Track server sequence + ackmask state for mini-Q3 acknowledgements.
+ * - Store client-side smoothing state (render-only correction) wiring.
+ */
+
 #ifndef _CLIENT_H_
 #define _CLIENT_H_
 
@@ -229,6 +234,11 @@ typedef struct
 	unsigned int	last_cmd_ack;		// last command acknowledged by the server
 	unsigned int	last_cmd_ack_echo;	// last command ack echoed back by the server
 	unsigned int	last_snapshot_ack_sent;	// last snapshot ack sent to the server
+	// Q3MINI BEGIN
+	unsigned int	q3mini_srv_ack;		// last received server packet sequence
+	unsigned int	q3mini_srv_ack_mask;	// bitmask of previous received server packets
+	qboolean	q3mini_srv_ack_valid;
+	// Q3MINI END
 
 // information for local display
 	int			stats[MAX_CL_STATS];	// health, etc
@@ -583,6 +593,7 @@ void CL_InitInput (void);
 void CL_AccumulateCmd (void);
 void CL_SendCmd (void);
 void CL_SendMove (const usercmd_t *cmd);
+int CL_CalcMovePacketBytes (const usercmd_t *cmd, int *out_cmd_count);
 void CL_Predict_Clear (void);
 void CL_Predict_BeginFrame (void);
 void CL_Predict_SetupCmd (usercmd_t *cmd);
