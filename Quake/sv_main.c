@@ -73,7 +73,7 @@ cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
 // Q3MINI BEGIN
 cvar_t sv_tickrate = {"sv_tickrate", "60", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "20", CVAR_NONE};
-static cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
+cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
 static cvar_t sv_entprio = {"sv_entprio", "1", CVAR_NONE};
 static cvar_t sv_ent_budget = {"sv_ent_budget", "1100", CVAR_NONE};
 static cvar_t sv_ent_keepalive_ms = {"sv_ent_keepalive_ms", "250", CVAR_NONE};
