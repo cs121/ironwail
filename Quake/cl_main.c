@@ -81,6 +81,10 @@ cvar_t	cl_netdbg_interp = {"cl_netdbg_interp", "0", CVAR_NONE};
 cvar_t	cl_netdbg_watch_ent = {"cl_netdbg_watch_ent", "0", CVAR_NONE};
 cvar_t	cl_netdbg_pred = {"cl_netdbg_pred", "0", CVAR_NONE};
 cvar_t	cl_predict = {"cl_predict", "1", CVAR_ARCHIVE};
+// Ultra deterministic prediction core toggles.
+cvar_t	cl_pred_ultra = {"cl_pred_ultra", "1", CVAR_ARCHIVE};
+cvar_t	cl_pred_tick = {"cl_pred_tick", "60", CVAR_ARCHIVE};
+cvar_t	cl_pred_eps = {"cl_pred_eps", "0.0005", CVAR_ARCHIVE};
 // Prediction smoothing: test with moving platforms (e1m1 elevator) and slopes; compare cl_predict/cl_pred_smooth on/off.
 cvar_t	cl_pred_smooth = {"cl_pred_smooth", "1", CVAR_ARCHIVE};
 cvar_t	cl_pred_smooth_rate = {"cl_pred_smooth_rate", "10", CVAR_ARCHIVE};
@@ -569,6 +573,7 @@ void CL_JitterDebug_Log (void)
 		pred.pred_angle_error_len = 0.0f;
 		pred.onground = false;
 		pred.ack_seq = 0;
+		pred.latest_seq = 0;
 		pred.pred_frame_found = false;
 		pred.replay_count = 0;
 		pred.snap_count = 0;
@@ -591,6 +596,8 @@ void CL_JitterDebug_Log (void)
 		pred.ground_apply_render = 0;
 		pred.pred_accum_time = 0.0f;
 		pred.pred_step_dt = 0.0f;
+		pred.pred_steps = 0;
+		pred.pred_render_frac = 0.0f;
 		pred.pred_substeps = 0;
 		pred.pred_max_substeps = 0;
 		pred.pred_nullcmd = 0;
@@ -601,9 +608,11 @@ void CL_JitterDebug_Log (void)
 	}
 
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
+		"seq %u ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"pred_accum %.4f step_dt %.4f steps %d render_frac %.3f "
+		"pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"server_applied %d pred_steps %d "
 		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
@@ -612,8 +621,17 @@ void CL_JitterDebug_Log (void)
 		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
 		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
 		cl.time, realtime, host_frametime, interp_target, interp_delay,
+		pred.latest_seq,
+		pred.ack_seq,
+		pred.pred_frame_found ? 1 : 0,
+		pred.pred_error_len,
+		pred.pred_smooth_error_len,
+		pred.replay_count,
+		pred.snap_count,
 		pred.pred_accum_time,
 		pred.pred_step_dt,
+		pred.pred_steps,
+		pred.pred_render_frac,
 		pred.pred_substeps,
 		pred.pred_max_substeps,
 		pred.pred_nullcmd,
@@ -623,12 +641,6 @@ void CL_JitterDebug_Log (void)
 		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
 		pred.prediction_steps,
-		pred.ack_seq,
-		pred.pred_frame_found ? 1 : 0,
-		pred.pred_error_len,
-		pred.pred_smooth_error_len,
-		pred.replay_count,
-		pred.snap_count,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
 		pred.pred_angle_delta_shortest[0],
@@ -662,9 +674,11 @@ void CL_JitterDebug_Log (void)
 		render_org[0], render_org[1], render_org[2],
 		render_ang[0], render_ang[1], render_ang[2]);
 	JITTER_LOG ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
+		"seq %u ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"pred_accum %.4f step_dt %.4f steps %d render_frac %.3f "
+		"pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"server_applied %d pred_steps %d "
 		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
@@ -673,8 +687,17 @@ void CL_JitterDebug_Log (void)
 		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
 		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
 		cl.time, realtime, host_frametime, interp_target, interp_delay,
+		pred.latest_seq,
+		pred.ack_seq,
+		pred.pred_frame_found ? 1 : 0,
+		pred.pred_error_len,
+		pred.pred_smooth_error_len,
+		pred.replay_count,
+		pred.snap_count,
 		pred.pred_accum_time,
 		pred.pred_step_dt,
+		pred.pred_steps,
+		pred.pred_render_frac,
 		pred.pred_substeps,
 		pred.pred_max_substeps,
 		pred.pred_nullcmd,
@@ -684,12 +707,6 @@ void CL_JitterDebug_Log (void)
 		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
 		pred.prediction_steps,
-		pred.ack_seq,
-		pred.pred_frame_found ? 1 : 0,
-		pred.pred_error_len,
-		pred.pred_smooth_error_len,
-		pred.replay_count,
-		pred.snap_count,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
 		pred.pred_angle_delta_shortest[0],
@@ -2567,6 +2584,9 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_netdbg_watch_ent);
 	Cvar_RegisterVariable (&cl_netdbg_pred);
 	Cvar_RegisterVariable (&cl_predict);
+	Cvar_RegisterVariable (&cl_pred_ultra);
+	Cvar_RegisterVariable (&cl_pred_tick);
+	Cvar_RegisterVariable (&cl_pred_eps);
 	Cvar_RegisterVariable (&cl_pred_smooth);
 	Cvar_RegisterVariable (&cl_pred_smooth_rate);
 	Cvar_RegisterVariable (&cl_pred_snapdist);

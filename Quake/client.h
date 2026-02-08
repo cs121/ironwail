@@ -537,6 +537,7 @@ typedef struct
 	int			prediction_steps;
 	qboolean	server_update_applied;
 	unsigned int	ack_seq;
+	unsigned int	latest_seq;
 	qboolean	pred_frame_found;
 	int			replay_count;
 	int			snap_count;
@@ -560,6 +561,8 @@ typedef struct
 	int			ground_apply_render;
 	float		pred_accum_time;
 	float		pred_step_dt;
+	int			pred_steps;
+	float		pred_render_frac;
 	int			pred_substeps;
 	int			pred_max_substeps;
 	int			pred_nullcmd;
