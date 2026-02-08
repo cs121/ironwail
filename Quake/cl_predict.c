@@ -745,6 +745,15 @@ static qboolean CL_Predict_IsEnabled (void)
 	return true;
 }
 
+qboolean CL_Predict_ShouldBypassInterpolation (void)
+{
+	if (!CL_Predict_IsEnabled ())
+		return false;
+	if (!cl_pred.has_base)
+		return false;
+	return true;
+}
+
 static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render)
 {
 	vec3_t smooth_origin;
@@ -2215,7 +2224,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 						angle_error[i] = 0.0f;
 				}
 			}
-			VectorCopy (error, cl_pred_error);
+			VectorAdd (cl_pred_error, error, cl_pred_error);
 			if (allow_angle_correction)
 				VectorCopy (angle_error, cl_pred_angle_error);
 			else
@@ -2223,6 +2232,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			cl_pred_error_time = realtime;
 			cl_pred_reset = false;
 			cl_pred_smooth_count++;
+			if (cl_pred_debug.value > 0.0f)
+			{
+				float total_error = VectorLength (cl_pred_error);
+
+				Con_Printf ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
+				JITTER_LOG ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
+			}
 		}
 		// Q3MINI BEGIN
 		{
