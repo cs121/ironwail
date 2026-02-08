@@ -276,13 +276,17 @@ void SV_WaterMove (void)
 	int		i;
 	vec3_t	wishvel;
 	float	speed, newspeed, wishspeed, addspeed, accelspeed;
+	vec3_t	moveangles;
 
 	SV_PLAYER_GUARD_VOID ("SV_WaterMove", 0);
 
 //
 // user intentions
 //
-	AngleVectors (sv_player->v.v_angle, forward, right, up);
+	VectorCopy (sv_player->v.v_angle, moveangles);
+	moveangles[PITCH] = 0.0f;
+	moveangles[ROLL] = 0.0f;
+	AngleVectors (moveangles, forward, right, up);
 
 	for (i=0 ; i<3 ; i++)
 		wishvel[i] = forward[i]*cmd.forwardmove + right[i]*cmd.sidemove;
@@ -383,10 +387,17 @@ void SV_AirMove (void)
 	vec3_t		wishvel, wishdir;
 	float		wishspeed;
 	float		fmove, smove;
+	vec3_t		moveangles;
 
 	SV_PLAYER_GUARD_VOID ("SV_AirMove", 0);
 
-	AngleVectors (sv_player->v.angles, forward, right, up);
+	VectorCopy (sv_player->v.angles, moveangles);
+	if ((int)sv_player->v.movetype == MOVETYPE_WALK)
+	{
+		moveangles[PITCH] = 0.0f;
+		moveangles[ROLL] = 0.0f;
+	}
+	AngleVectors (moveangles, forward, right, up);
 
 	fmove = cmd.forwardmove;
 	smove = cmd.sidemove;
