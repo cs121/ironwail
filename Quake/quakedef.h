@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /* Q3MINI PLAN:
  * - Expose shared cvars for mini-Q3 netcode (ackmask/debug/protocol gate, client throttles).
  */
+// Q3MINI Phase 4/5 summary: add externs for compression cvars used in netcode.
 
 #ifndef QUAKEDEFS_H
 #define QUAKEDEFS_H
@@ -317,6 +318,7 @@ extern qboolean noclip_anglehack;
 extern	quakeparms_t *host_parms;
 
 extern	cvar_t		sys_ticrate;
+// Q3MINI Phase 4/5 summary: add cvar hooks for entity prioritization and packet compression toggles.
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 extern	cvar_t		map_checks;
@@ -336,6 +338,9 @@ extern	cvar_t		sv_maxsteps_per_frame;
 extern	cvar_t		net_ackmask;
 extern	cvar_t		net_dbg_q3mini;
 extern	cvar_t		net_force_q3mini;
+extern	cvar_t		net_compress;
+extern	cvar_t		net_compress_threshold;
+extern	cvar_t		net_compress_debug;
 extern	cvar_t		cl_cmd_redundancy;
 extern	cvar_t		cl_maxpackets;
 extern	cvar_t		cl_netsmooth;

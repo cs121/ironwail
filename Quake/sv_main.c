@@ -20,6 +20,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
+// Q3MINI Phase 4/5 summary: add entity prioritization knobs and keepalive pacing for snapshots.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
@@ -73,6 +74,11 @@ cvar_t sv_maxupdaterate = {"sv_maxupdaterate", "0", CVAR_NONE};
 cvar_t sv_tickrate = {"sv_tickrate", "60", CVAR_NONE};
 cvar_t sv_netrate = {"sv_netrate", "20", CVAR_NONE};
 static cvar_t sv_sendrate = {"sv_sendrate", "30", CVAR_NONE};
+static cvar_t sv_entprio = {"sv_entprio", "1", CVAR_NONE};
+static cvar_t sv_ent_budget = {"sv_ent_budget", "1100", CVAR_NONE};
+static cvar_t sv_ent_keepalive_ms = {"sv_ent_keepalive_ms", "250", CVAR_NONE};
+static cvar_t sv_ent_pvs = {"sv_ent_pvs", "1", CVAR_NONE};
+static cvar_t sv_entprio_debug = {"sv_entprio_debug", "0", CVAR_NONE};
 // Q3MINI END
 cvar_t sv_tick_maxcatchup = {"sv_tick_maxcatchup", "5", CVAR_NONE};
 cvar_t sv_fixedtick = {"sv_fixedtick", "1", CVAR_NONE};
@@ -352,6 +358,13 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_tickrate);
 	Cvar_RegisterVariable (&sv_netrate);
 	Cvar_RegisterVariable (&sv_sendrate);
+	// Q3MINI BEGIN
+	Cvar_RegisterVariable (&sv_entprio);
+	Cvar_RegisterVariable (&sv_ent_budget);
+	Cvar_RegisterVariable (&sv_ent_keepalive_ms);
+	Cvar_RegisterVariable (&sv_ent_pvs);
+	Cvar_RegisterVariable (&sv_entprio_debug);
+	// Q3MINI END
 	Cvar_RegisterVariable (&sv_tick_maxcatchup);
 	Cvar_RegisterVariable (&sv_fixedtick);
 	Cvar_RegisterVariable (&sv_maxsteps_per_frame);
@@ -1245,7 +1258,12 @@ static void SV_InitInterestCullContext (sv_icull_context_t *ctx, const edict_t *
 	ctx->radius_enabled = (sv_icull_radius.value > 0.0f);
 	if (ctx->radius_enabled)
 		ctx->radius2 = sv_icull_radius.value * sv_icull_radius.value;
-	ctx->pvs_enabled = (sv_icull_pvs.value != 0.0f);
+	// Q3MINI BEGIN
+	if (sv_entprio.value > 0.0f)
+		ctx->pvs_enabled = (sv_ent_pvs.value != 0.0f);
+	else
+		ctx->pvs_enabled = (sv_icull_pvs.value != 0.0f);
+	// Q3MINI END
 	ctx->cull_players = (sv_icull_radius_players.value != 0.0f);
 
 	if (ctx->pvs_enabled)
@@ -1428,6 +1446,14 @@ static int SV_SnapshotResendInterval (float dist_sq, qboolean changed)
 
 static double SV_SnapshotStaleThreshold (int priority_tier)
 {
+	// Q3MINI BEGIN
+	if (sv_entprio.value > 0.0f && sv_ent_keepalive_ms.value > 0.0f)
+	{
+		if (priority_tier <= 0)
+			return 0.0;
+		return sv_ent_keepalive_ms.value * 0.001;
+	}
+	// Q3MINI END
 	switch (priority_tier)
 	{
 	case 0:
@@ -1639,6 +1665,16 @@ static int SV_SnapshotBudgetBytes (client_t *client, sizebuf_t *msg,
 		if (budget > per_snapshot)
 			budget = per_snapshot;
 	}
+	// Q3MINI BEGIN
+	if (sv_entprio.value > 0.0f && sv_ent_budget.value > 0.0f)
+	{
+		int ent_cap = (int)sv_ent_budget.value;
+		if (ent_cap < 1)
+			ent_cap = 1;
+		if (budget > ent_cap)
+			budget = ent_cap;
+	}
+	// Q3MINI END
 
 	if (out_mtu_payload)
 		*out_mtu_payload = mtu_payload;
@@ -1722,6 +1758,16 @@ static int SV_Snapshot2RateBudgetBytes (client_t *client, sizebuf_t *msg,
 		SV_Snapshot2UpdateRateTokens (client);
 		token_budget = (int)q_min ((double)budget, client->snapshot_rate_tokens);
 	}
+	// Q3MINI BEGIN
+	if (sv_entprio.value > 0.0f && sv_ent_budget.value > 0.0f)
+	{
+		int ent_cap = (int)sv_ent_budget.value;
+		if (ent_cap < 1)
+			ent_cap = 1;
+		if (token_budget > ent_cap)
+			token_budget = ent_cap;
+	}
+	// Q3MINI END
 
 	if (out_mtu_payload)
 		*out_mtu_payload = mtu_payload;
@@ -2045,6 +2091,14 @@ static void SV_FillSnapshotState (edict_t *ent, snapshot_state_t *out)
 	}
 }
 
+// Q3MINI BEGIN
+/*
+Q3MINI Phase 4 design: keep the existing snapshot list/delta machinery but
+cap entity bytes with sv_ent_budget, prioritize by distance/mover/missile flags,
+and pace unchanged entities with sv_ent_keepalive_ms. This keeps protocol
+compatibility (round-robin cursor + optional omission) while reducing drops.
+*/
+// Q3MINI END
 static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, byte *present,
 	byte *relevant, byte *remove_list, byte *snapflags, int budget_bytes, int optional_budget_bytes, int header_bytes,
 	const snapshot_state_t *baseline_states, const byte *baseline_present,
@@ -2067,6 +2121,10 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 	int remove_bytes = 0;
 	int sent_by_priority[SNAP_PRIORITY_COUNT] = {0};
 	int skipped_by_priority[SNAP_PRIORITY_COUNT] = {0};
+	// Q3MINI BEGIN
+	int skipped_over_budget = 0;
+	int skipped_not_due = 0;
+	// Q3MINI END
 	qboolean continuation = false;
 	edict_t	*ent;
 	edict_t *clent = client->edict;
@@ -2292,7 +2350,12 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 				stale_threshold = SV_SnapshotStaleThreshold (priority);
 				if (stale_threshold > 0.0 && last_sent_stamp > 0.0
 					&& (realtime - last_sent_stamp) < stale_threshold)
+				{
+					// Q3MINI BEGIN
+					skipped_not_due++;
+					// Q3MINI END
 					continue;
+				}
 			}
 
 			if (delta_mode && snapshot2 && client->snapshot_last_sent_seq_by_ent)
@@ -2301,7 +2364,12 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 				last_sent_seq = client->snapshot_last_sent_seq_by_ent[num];
 				if (resend_interval > 0 && last_sent_seq
 					&& (int)(current_seq - last_sent_seq) < resend_interval)
+				{
+					// Q3MINI BEGIN
+					skipped_not_due++;
+					// Q3MINI END
 					continue;
+				}
 				if (!changed && resend_interval > 0 && last_sent_seq)
 					force_refresh = true;
 			}
@@ -2324,6 +2392,9 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 			{
 				continuation = true;
 				skipped_by_priority[k]++;
+				// Q3MINI BEGIN
+				skipped_over_budget++;
+				// Q3MINI END
 				continue;
 			}
 
@@ -2430,6 +2501,108 @@ static int SV_BuildClientSnapshot (client_t *client, snapshot_state_t *states, b
 				top_ent[j], top_size[j], top_mask[j]);
 		}
 	}
+
+	// Q3MINI BEGIN
+	if (sv_entprio.value > 0.0f && net_dbg_q3mini.value > 0.0f && sv_entprio_debug.value > 0.0f)
+	{
+		struct entprio_debug_s
+		{
+			int entnum;
+			int priority;
+			float dist_sq;
+			qboolean included;
+			qboolean changed;
+		} top[5];
+		int client_index = SV_ClientSlot (client);
+		int culled_pvs = 0;
+		int culled_distance = 0;
+
+		memset (top, 0, sizeof(top));
+		if (client_index >= 0 && client_index < MAX_SCOREBOARD)
+		{
+			culled_pvs = sv_icull_last_stats[client_index].culled_pvs;
+			culled_distance = sv_icull_last_stats[client_index].culled_distance;
+		}
+
+		for (j = 0; j < numents; j++)
+		{
+			snapshot_state_t temp;
+			byte snapflag = 0;
+			unsigned int mask = 0;
+			qboolean changed = true;
+			float dist_sq;
+			int priority;
+			int insert = -1;
+			int idx;
+
+			num = net_edicts_sorted[j];
+			ent = EDICT_NUM (num);
+			SV_FillSnapshotState (ent, &temp);
+			snapflag = SV_SnapshotFlagsForEnt (ent);
+
+			if (baseline_states && baseline_present && baseline_present[num]
+				&& !(snapflag & SNAPFLAG_NO_DELTA))
+			{
+				mask = SV_SnapshotFieldMask (&temp, &baseline_states[num], snapflag);
+				changed = (mask != 0);
+			}
+			else if (baseline_present && baseline_present[num] && (snapflag & SNAPFLAG_NO_DELTA))
+			{
+				changed = true;
+			}
+			else
+			{
+				changed = true;
+			}
+
+			dist_sq = SV_SnapshotDistanceSq (clent, ent);
+			priority = SV_SnapshotPriorityTier (clent, ent, changed, dist_sq);
+			if (SV_SnapshotNeedsBaseline (baseline_present, num) && priority > 1)
+				priority = 1;
+
+			for (idx = 0; idx < (int)(sizeof(top) / sizeof(top[0])); idx++)
+			{
+				if (top[idx].entnum == 0
+					|| priority < top[idx].priority
+					|| (priority == top[idx].priority && dist_sq < top[idx].dist_sq))
+				{
+					insert = idx;
+					break;
+				}
+			}
+
+			if (insert >= 0)
+			{
+				int shift;
+				for (shift = (int)(sizeof(top) / sizeof(top[0])) - 1; shift > insert; shift--)
+					top[shift] = top[shift - 1];
+				top[insert].entnum = num;
+				top[insert].priority = priority;
+				top[insert].dist_sq = dist_sq;
+				top[insert].included = present[num] != 0;
+				top[insert].changed = changed;
+			}
+		}
+
+		NET_DebugLogEvent (false,
+			"NETDBG time %.3f entprio_build cl %d %s budget %d opt_budget %d mand_bytes %d total_bytes %d "
+			"considered %d sent %d skip_budget %d skip_not_due %d culled_pvs %d culled_dist %d\n",
+			realtime, SV_ClientSlot (client), client->name,
+			budget_bytes, optional_budget_bytes, mandatory_bytes, total_bytes,
+			numents, count, skipped_over_budget, skipped_not_due, culled_pvs, culled_distance);
+
+		for (j = 0; j < (int)(sizeof(top) / sizeof(top[0])); j++)
+		{
+			if (!top[j].entnum)
+				continue;
+			NET_DebugLogEvent (false,
+				"NETDBG time %.3f entprio_rank cl %d %s ent %d prio %d dist2 %.0f changed %d included %d\n",
+				realtime, SV_ClientSlot (client), client->name,
+				top[j].entnum, top[j].priority, top[j].dist_sq,
+				top[j].changed ? 1 : 0, top[j].included ? 1 : 0);
+		}
+	}
+	// Q3MINI END
 
 	return count;
 }

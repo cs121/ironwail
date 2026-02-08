@@ -19,12 +19,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+// Q3MINI Phase 4/5 summary: add negotiated message compression on large packets.
 #include "quakedef.h"
 #include "q_stdinc.h"
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
 #include "net_dgrm.h"
+// Q3MINI BEGIN
+#include "miniz.h"
+#include "lodepng.h"
+// Q3MINI END
 
 // This is enables a simple IP banning mechanism
 #define BAN_TEST
@@ -66,6 +71,137 @@ static unsigned int net_debug_fragments_sent;
 static unsigned int net_debug_fragments_received;
 static unsigned int net_debug_fragments_lost;
 static unsigned int net_debug_fragments_timeouts;
+
+// Q3MINI BEGIN
+#define NET_COMPRESS_MAGIC0 'C'
+#define NET_COMPRESS_MAGIC1 'M'
+#define NET_COMPRESS_HEADER_BYTES 5
+#define NET_COMPRESS_FLAG_ZLIB 0x01
+
+static qboolean NET_CompressAllowed (const qsocket_t *sock, unsigned int payload_len)
+{
+	if (!sock)
+		return false;
+	if (net_compress.value <= 0.0f)
+		return false;
+	if (net_compress_threshold.value > 0.0f
+		&& payload_len < (unsigned int)net_compress_threshold.value)
+		return false;
+	if ((sock->features & NETFEATURE_Q3MINI_COMPRESS) == 0)
+		return false;
+	if (cls.demoplayback || cls.demorecording)
+		return false;
+	return true;
+}
+
+static qboolean NET_CompressPayload (const byte *in, unsigned int in_len,
+	byte *out, unsigned int out_max, unsigned int *out_len)
+{
+	unsigned char *compressed = NULL;
+	size_t compressed_size = 0;
+	LodePNGCompressSettings settings;
+	unsigned error;
+
+	if (!in || !out || !out_len)
+		return false;
+	if (in_len > 0xFFFFu)
+		return false;
+	if (out_max <= NET_COMPRESS_HEADER_BYTES)
+		return false;
+
+	lodepng_compress_settings_init (&settings);
+	error = lodepng_zlib_compress (&compressed, &compressed_size, in, in_len, &settings);
+	if (error != 0 || !compressed || compressed_size == 0)
+	{
+		if (compressed)
+			free (compressed);
+		return false;
+	}
+
+	if (compressed_size + NET_COMPRESS_HEADER_BYTES >= in_len
+		|| compressed_size + NET_COMPRESS_HEADER_BYTES > out_max)
+	{
+		free (compressed);
+		return false;
+	}
+
+	out[0] = NET_COMPRESS_MAGIC0;
+	out[1] = NET_COMPRESS_MAGIC1;
+	out[2] = NET_COMPRESS_FLAG_ZLIB;
+	out[3] = (byte)(in_len & 0xFF);
+	out[4] = (byte)((in_len >> 8) & 0xFF);
+	memcpy (out + NET_COMPRESS_HEADER_BYTES, compressed, compressed_size);
+	*out_len = (unsigned int)(compressed_size + NET_COMPRESS_HEADER_BYTES);
+	free (compressed);
+	return true;
+}
+
+static int NET_DecompressPayload (const qsocket_t *sock, sizebuf_t *msg)
+{
+	static byte net_decompress_buffer[NET_MAXMESSAGE];
+	unsigned int compressed_len;
+	unsigned int uncompressed_len;
+	unsigned int flags;
+	tinfl_decompressor inflator;
+	size_t in_bytes;
+	size_t out_bytes;
+	tinfl_status status;
+
+	if (!sock || !msg)
+		return 0;
+	if ((sock->features & NETFEATURE_Q3MINI_COMPRESS) == 0)
+		return 0;
+	if (msg->cursize < NET_COMPRESS_HEADER_BYTES)
+		return 0;
+	if (msg->data[0] != NET_COMPRESS_MAGIC0 || msg->data[1] != NET_COMPRESS_MAGIC1)
+		return 0;
+
+	flags = msg->data[2];
+	if ((flags & NET_COMPRESS_FLAG_ZLIB) == 0)
+		return -1;
+
+	uncompressed_len = (unsigned int)msg->data[3] | ((unsigned int)msg->data[4] << 8);
+	if (uncompressed_len == 0 || uncompressed_len > NET_MAXMESSAGE)
+	{
+		if (net_dbg_q3mini.value > 0.0f)
+		{
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f compress_recv invalid_len addr %s ulen %u\n",
+				net_time, NET_QSocketGetAddressString (sock), uncompressed_len);
+		}
+		return -1;
+	}
+
+	compressed_len = (unsigned int)msg->cursize - NET_COMPRESS_HEADER_BYTES;
+	if (compressed_len == 0)
+		return -1;
+
+	tinfl_init (&inflator);
+	in_bytes = compressed_len;
+	out_bytes = uncompressed_len;
+	status = tinfl_decompress (&inflator,
+		(const mz_uint8 *)(msg->data + NET_COMPRESS_HEADER_BYTES), &in_bytes,
+		(mz_uint8 *)net_decompress_buffer,
+		(mz_uint8 *)net_decompress_buffer, &out_bytes,
+		TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+
+	if (status != TINFL_STATUS_DONE || out_bytes != uncompressed_len)
+	{
+		if (net_dbg_q3mini.value > 0.0f)
+		{
+			NET_DebugLogEvent (true,
+				"NETDBG time %.3f compress_recv fail addr %s status %d in %u out %u expect %u\n",
+				net_time, NET_QSocketGetAddressString (sock), status,
+				(unsigned int)in_bytes, (unsigned int)out_bytes, uncompressed_len);
+		}
+		return -1;
+	}
+
+	SZ_Clear (msg);
+	SZ_Write (msg, net_decompress_buffer, (int)uncompressed_len);
+	return 1;
+}
+// Q3MINI END
 
 #define NET_UNRELIABLE_FRAG_HEADER_BYTES 8
 #define NET_UNRELIABLE_FRAG_TIMEOUT_S 1.0
@@ -740,16 +876,37 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	if (sock->canSend == false)
 		Sys_Error("SendMessage: called with canSend == false");
 #endif
-
-	Q_memcpy(sock->sendMessage, data->data, data->cursize);
-	sock->sendMessageLength = data->cursize;
+	// Q3MINI BEGIN
+	{
+		unsigned int payload_len = (unsigned int)data->cursize;
+		unsigned int compressed_len = 0;
+		if (NET_CompressAllowed (sock, payload_len)
+			&& NET_CompressPayload (data->data, payload_len, sock->sendMessage,
+				(unsigned int)sizeof(sock->sendMessage), &compressed_len))
+		{
+			sock->sendMessageLength = (int)compressed_len;
+			if (net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
+			{
+				NET_DebugLogEvent (false,
+					"NETDBG time %.3f compress_send reliable addr %s orig %u comp %u ratio %.2f\n",
+					net_time, NET_QSocketGetAddressString (sock), payload_len,
+					compressed_len, compressed_len ? (float)payload_len / (float)compressed_len : 0.0f);
+			}
+		}
+		else
+		{
+			Q_memcpy(sock->sendMessage, data->data, data->cursize);
+			sock->sendMessageLength = data->cursize;
+		}
+	}
+	// Q3MINI END
 	sock->sendMessageOffset = 0;
 	sock->sendReliableBase = sock->sendSequence;
 
 	sock->canSend = false;
 	NET_DebugLog (false,
 		"NETDBG time %.3f queue reliable message addr %s bytes %u data_cap %u payload_cap %u\n",
-		net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+		net_time, NET_QSocketGetAddressString (sock), (unsigned int)sock->sendMessageLength,
 		(unsigned int)NET_GetPacketDataLimit(sock), (unsigned int)NET_GetPacketPayloadLimit(sock));
 	if (NET_SendPendingReliable(sock) == -1)
 		return -1;
@@ -779,6 +936,11 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	int	payload_limit = NET_GetPacketPayloadLimit (sock);
 	int	max_data = NET_GetPacketDataLimit (sock);
 	int	frag_payload;
+	// Q3MINI BEGIN
+	static byte	compress_buf[MAX_DATAGRAM];
+	const byte	*payload = data->data;
+	int		payload_len = data->cursize;
+	// Q3MINI END
 
 #ifdef DEBUG
 	if (data->cursize == 0)
@@ -788,7 +950,27 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		Sys_Error("Datagram_SendUnreliableMessage: message too big: %u", data->cursize);
 #endif
 
-	if (data->cursize > max_data)
+	// Q3MINI BEGIN
+	{
+		unsigned int compressed_len = 0;
+		if (NET_CompressAllowed (sock, (unsigned int)payload_len)
+			&& NET_CompressPayload (payload, (unsigned int)payload_len,
+				compress_buf, (unsigned int)sizeof(compress_buf), &compressed_len))
+		{
+			payload = compress_buf;
+			payload_len = (int)compressed_len;
+			if (net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
+			{
+				NET_DebugLogEvent (false,
+					"NETDBG time %.3f compress_send unreliable addr %s orig %u comp %u ratio %.2f\n",
+					net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+					compressed_len, compressed_len ? (float)data->cursize / (float)compressed_len : 0.0f);
+			}
+		}
+	}
+	// Q3MINI END
+
+	if (payload_len > max_data)
 	{
 		unsigned int frag_sequence;
 		unsigned int total_bytes = 0;
@@ -801,22 +983,22 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		{
 			NET_DebugLog (true,
 				"NETDBG time %.3f oversize unreliable-data addr %s data %u cap %u payload_cap %u\n",
-				net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+				net_time, NET_QSocketGetAddressString (sock), (unsigned int)payload_len,
 				(unsigned int)max_data, (unsigned int)payload_limit);
-			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + payload_len));
 			net_debug_oversize++;
 			NET_DebugMaybeLogSummary ();
 			return 0;
 		}
 
-		frag_total = (unsigned int)((data->cursize + frag_payload - 1) / frag_payload);
+		frag_total = (unsigned int)((payload_len + frag_payload - 1) / frag_payload);
 		if (frag_total == 0 || frag_total > NET_UNRELIABLE_MAX_FRAGMENTS)
 		{
 			NET_DebugLog (true,
 				"NETDBG time %.3f oversize unreliable-frag addr %s data %u frags %u cap %u\n",
-				net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
+				net_time, NET_QSocketGetAddressString (sock), (unsigned int)payload_len,
 				frag_total, (unsigned int)NET_UNRELIABLE_MAX_FRAGMENTS);
-			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + data->cursize));
+			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + payload_len));
 			net_debug_oversize++;
 			NET_DebugMaybeLogSummary ();
 			return 0;
@@ -824,7 +1006,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 
 		for (i = 0; i < frag_total; ++i)
 		{
-			unsigned int frag_size = (unsigned int)q_min(frag_payload, data->cursize - (int)offset);
+			unsigned int frag_size = (unsigned int)q_min(frag_payload, payload_len - (int)offset);
 			unsigned int frag_packet = (unsigned int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
 			total_bytes += frag_packet;
 			offset += frag_size;
@@ -837,7 +1019,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		offset = 0;
 		for (i = 0; i < frag_total; ++i)
 		{
-			unsigned int frag_size = (unsigned int)q_min(frag_payload, data->cursize - (int)offset);
+			unsigned int frag_size = (unsigned int)q_min(frag_payload, payload_len - (int)offset);
 
 			packetLen = (int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
 			if (!NET_ConsumeRateBudget(sock, (unsigned int)packetLen))
@@ -849,7 +1031,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 			*(unsigned short *)(packetBuffer.data + 4) = BigShort((unsigned short)i);
 			*(unsigned short *)(packetBuffer.data + 6) = BigShort((unsigned short)frag_total);
 			Q_memcpy (packetBuffer.data + NET_UNRELIABLE_FRAG_HEADER_BYTES,
-				data->data + offset, frag_size);
+				payload + offset, frag_size);
 
 			if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 				return -1;
@@ -869,7 +1051,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		return 1;
 	}
 
-	packetLen = NET_HEADERSIZE + data->cursize;
+	packetLen = NET_HEADERSIZE + payload_len;
 	if (packetLen > payload_limit)
 	{
 		NET_DebugLog (true,
@@ -885,7 +1067,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		return 0;
 
 	NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE, sock->unreliableSendSequence++);
-	Q_memcpy (packetBuffer.data, data->data, data->cursize);
+	Q_memcpy (packetBuffer.data, payload, payload_len);
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
@@ -894,7 +1076,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 	NET_DebugLog (false,
 		"NETDBG time %.3f send unreliable addr %s seq %u len %u data %u ack %u ack_bits 0x%08x\n",
 		net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
-		(unsigned int)packetLen, (unsigned int)data->cursize,
+		(unsigned int)packetLen, (unsigned int)payload_len,
 		NET_GetAckSequence(sock), NET_GetAckBits(sock));
 	NET_DebugMaybeLogSummary ();
 
@@ -1165,11 +1347,34 @@ int	Datagram_GetMessage (qsocket_t *sock)
 					SZ_Clear (&net_message);
 					SZ_Write (&net_message, assembled, sock->unreliableFragTotalBytes);
 					Z_Free (assembled);
+					// Q3MINI BEGIN
+					{
+						unsigned int before = (unsigned int)net_message.cursize;
+						int decomp = NET_DecompressPayload (sock, &net_message);
+						if (decomp < 0)
+						{
+							NET_DebugLog (true,
+								"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
+								net_time, NET_QSocketGetAddressString (sock), frag_sequence);
+							NET_ClearUnreliableFragState (sock);
+							ret = 0;
+							break;
+						}
+						if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
+						{
+							NET_DebugLogEvent (false,
+								"NETDBG time %.3f compress_recv unreliable-frag addr %s orig %u decomp %u ratio %.2f\n",
+								net_time, NET_QSocketGetAddressString (sock), before,
+								(unsigned int)net_message.cursize,
+								net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
+						}
+					}
+					// Q3MINI END
 
 					net_last_incoming.sequence = frag_sequence;
 					net_last_incoming.flags = flags;
 					net_last_incoming.packet_length = NET_HEADERSIZE + sock->unreliableFragTotalBytes;
-					net_last_incoming.payload_length = sock->unreliableFragTotalBytes;
+					net_last_incoming.payload_length = (unsigned int)net_message.cursize;
 					net_last_incoming.unreliable = true;
 					net_last_incoming.valid = true;
 
@@ -1188,11 +1393,32 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 			SZ_Clear (&net_message);
 			SZ_Write (&net_message, packetBuffer.data, length);
+			// Q3MINI BEGIN
+			{
+				unsigned int before = (unsigned int)net_message.cursize;
+				int decomp = NET_DecompressPayload (sock, &net_message);
+				if (decomp < 0)
+				{
+					NET_DebugLog (true,
+						"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
+						net_time, NET_QSocketGetAddressString (sock), sequence);
+					continue;
+				}
+				if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
+				{
+					NET_DebugLogEvent (false,
+						"NETDBG time %.3f compress_recv unreliable addr %s orig %u decomp %u ratio %.2f\n",
+						net_time, NET_QSocketGetAddressString (sock), before,
+						(unsigned int)net_message.cursize,
+						net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
+				}
+			}
+			// Q3MINI END
 
 			net_last_incoming.sequence = sequence;
 			net_last_incoming.flags = flags;
 			net_last_incoming.packet_length = (unsigned int)packetLengthRead;
-			net_last_incoming.payload_length = (unsigned int)length;
+			net_last_incoming.payload_length = (unsigned int)net_message.cursize;
 			net_last_incoming.unreliable = true;
 			net_last_incoming.valid = true;
 
@@ -1305,6 +1531,29 @@ int	Datagram_GetMessage (qsocket_t *sock)
 					SZ_Clear(&net_message);
 					SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
 					sock->receiveMessageLength = 0;
+					// Q3MINI BEGIN
+					{
+						unsigned int before = (unsigned int)net_message.cursize;
+						int decomp = NET_DecompressPayload (sock, &net_message);
+						if (decomp < 0)
+						{
+							NET_DebugLog (true,
+								"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
+								net_time, NET_QSocketGetAddressString (sock), message_sequence);
+							NET_ClearReliableReceiveEntry(entry);
+							sock->receiveSequence++;
+							continue;
+						}
+						if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
+						{
+							NET_DebugLogEvent (false,
+								"NETDBG time %.3f compress_recv reliable addr %s orig %u decomp %u ratio %.2f\n",
+								net_time, NET_QSocketGetAddressString (sock), before,
+								(unsigned int)net_message.cursize,
+								net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
+						}
+					}
+					// Q3MINI END
 
 					net_last_incoming.sequence = message_sequence;
 					net_last_incoming.flags = NETFLAG_DATA | NETFLAG_EOM;
@@ -1771,6 +2020,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	int			command;
 	int			control;
 	int			ret;
+	// Q3MINI BEGIN
+	unsigned int	client_features = 0;
+	unsigned int	accepted_features = 0;
+	// Q3MINI END
 
 	acceptsock = dfunc.CheckNewConnections();
 	if (acceptsock == INVALID_SOCKET)
@@ -1947,6 +2200,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		SZ_Clear(&net_message);
 		return NULL;
 	}
+	// Q3MINI BEGIN
+	if (msg_readcount + 4 <= net_message.cursize)
+		client_features = (unsigned int)MSG_ReadLong();
+	// Q3MINI END
 
 #ifdef BAN_TEST
 	// check for a ban
@@ -2045,6 +2302,13 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	sock->landriver = net_landriverlevel;
 	sock->addr = clientaddr;
 	Q_strcpy(sock->address, dfunc.AddrToString(&clientaddr));
+	// Q3MINI BEGIN
+	if (net_compress.value > 0.0f
+		&& (client_features & NETFEATURE_Q3MINI_COMPRESS)
+		&& !cls.demoplayback && !cls.demorecording)
+		accepted_features |= NETFEATURE_Q3MINI_COMPRESS;
+	sock->features = accepted_features;
+	// Q3MINI END
 
 	// send him back the info about the server connection he has been allocated
 	SZ_Clear(&net_message);
@@ -2053,6 +2317,10 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	MSG_WriteByte(&net_message, CCREP_ACCEPT);
 	dfunc.GetSocketAddr(newsock, &newaddr);
 	MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
+	// Q3MINI BEGIN
+	if (client_features || accepted_features)
+		MSG_WriteLong(&net_message, (int)accepted_features);
+	// Q3MINI END
 //	MSG_WriteString(&net_message, dfunc.AddrToString(&newaddr));
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 	dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
@@ -2206,6 +2474,9 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	double		start_time;
 	int			control;
 	const char		*reason;
+	// Q3MINI BEGIN
+	unsigned int	request_features = 0;
+	// Q3MINI END
 
 	// see if we can resolve the host name
 	if (dfunc.GetAddrFromName(host, &sendaddr) == -1)
@@ -2241,6 +2512,12 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		MSG_WriteByte(&net_message, CCREQ_CONNECT);
 		MSG_WriteString(&net_message, "QUAKE");
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
+		// Q3MINI BEGIN
+		if (net_compress.value > 0.0f && !cls.demoplayback && !cls.demorecording)
+			request_features |= NETFEATURE_Q3MINI_COMPRESS;
+		if (request_features)
+			MSG_WriteLong(&net_message, (int)request_features);
+		// Q3MINI END
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
 		NET_DebugLog (false,
@@ -2353,6 +2630,10 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	{
 		Q_memcpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
 		dfunc.SetSocketPort (&sock->addr, MSG_ReadLong());
+		// Q3MINI BEGIN
+		if (msg_readcount + 4 <= net_message.cursize)
+			sock->features = (unsigned int)MSG_ReadLong();
+		// Q3MINI END
 		NET_DebugLog (false,
 			"NETDBG time %.3f handshake accepted addr %s port %d\n",
 			net_time, dfunc.AddrToString (&sendaddr), dfunc.GetSocketPort (&sock->addr));

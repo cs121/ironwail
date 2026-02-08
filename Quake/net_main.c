@@ -57,6 +57,7 @@ static int		slistLastShown;
 static void Slist_Send (void *);
 static void Slist_Poll (void *);
 static PollProcedure	slistSendProcedure = {NULL, 0.0, Slist_Send};
+// Q3MINI Phase 4/5 summary: add net compression cvars and feature initialization.
 static PollProcedure	slistPollProcedure = {NULL, 0.0, Slist_Poll};
 
 sizebuf_t	net_message;
@@ -76,6 +77,9 @@ cvar_t	net_mtu = {"net_mtu", "1400", CVAR_NONE};
 cvar_t	net_ackmask = {"net_ackmask", "1", CVAR_NONE};
 cvar_t	net_dbg_q3mini = {"net_dbg_q3mini", "0", CVAR_NONE};
 cvar_t	net_force_q3mini = {"net_force_q3mini", "0", CVAR_NONE};
+cvar_t	net_compress = {"net_compress", "0", CVAR_NONE};
+cvar_t	net_compress_threshold = {"net_compress_threshold", "900", CVAR_NONE};
+cvar_t	net_compress_debug = {"net_compress_debug", "0", CVAR_NONE};
 // Q3MINI END
 
 // these two macros are to make the code more readable
@@ -138,6 +142,9 @@ qsocket_t *NET_NewQSocket (void)
 	sock->sendReliableBase = sock->sendSequence;
 	memset(sock->reliableSend, 0, sizeof(sock->reliableSend));
 	sock->receiveSequence = 1;
+	// Q3MINI BEGIN
+	sock->features = 0;
+	// Q3MINI END
 	sock->reliableReceiveValid = false;
 	sock->reliableReceiveSequence = 0;
 	sock->reliableReceiveMask = 0;
@@ -883,6 +890,9 @@ void NET_Init (void)
 	Cvar_RegisterVariable (&net_ackmask);
 	Cvar_RegisterVariable (&net_dbg_q3mini);
 	Cvar_RegisterVariable (&net_force_q3mini);
+	Cvar_RegisterVariable (&net_compress);
+	Cvar_RegisterVariable (&net_compress_threshold);
+	Cvar_RegisterVariable (&net_compress_debug);
 	// Q3MINI END
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
