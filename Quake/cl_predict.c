@@ -328,7 +328,16 @@ static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
 	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
 
 	if (!frame->valid || frame->seq != seq)
+	{
+		if (frame->valid && frame->seq != seq && cl_pred_debug.value > 0.0f)
+		{
+			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u\n",
+				seq % CL_PRED_FRAME_RING, frame->seq, seq);
+			JITTER_LOG ("PredFrame mismatch: slot %u has %u expected %u\n",
+				seq % CL_PRED_FRAME_RING, frame->seq, seq);
+		}
 		return false;
+	}
 	if (out)
 		*out = *frame;
 	return true;
@@ -737,7 +746,7 @@ static void CL_Predict_RunFrameSteps (void)
 	float step_dt;
 	int max_steps;
 	int steps = 0;
-	const float PRED_EPS = 0.002f;
+	const float PRED_EPS = 0.0005f;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
@@ -756,7 +765,6 @@ static void CL_Predict_RunFrameSteps (void)
 
 	if (CL_Predict_UseUltra ())
 	{
-		const float eps = CL_Predict_GetUltraEps ();
 		const float max_accum = 0.25f;
 		step_dt = CL_Predict_GetUltraStepTime ();
 		if (step_dt <= 0.0f)
@@ -775,7 +783,7 @@ static void CL_Predict_RunFrameSteps (void)
 			cmd.impulse = 0;
 		}
 
-		while (cl_pred_frame_accum + eps >= step_dt && steps < max_steps)
+		while (cl_pred_frame_accum + PRED_EPS >= step_dt && steps < max_steps)
 		{
 			cl_pred_render_from = cl_pred.predicted;
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
@@ -797,9 +805,6 @@ static void CL_Predict_RunFrameSteps (void)
 		if (max_steps < 1)
 			max_steps = 1;
 
-		if (fabsf (cl_pred_frame_accum - step_dt) < PRED_EPS)
-			cl_pred_frame_accum = step_dt;
-
 		if (cl_pred_nullcmd_injected)
 		{
 			cmd.forwardmove = 0;
@@ -817,6 +822,8 @@ static void CL_Predict_RunFrameSteps (void)
 			if (cl_pred_render_cmd_valid && cmd.sequence > 0)
 				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 			cl_pred_frame_accum -= step_dt;
+			if (cl_pred_frame_accum < 0.0f)
+				cl_pred_frame_accum = 0.0f;
 			steps++;
 			Con_Printf ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
 			JITTER_LOG ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
@@ -2279,23 +2286,23 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	if (cl_pred.has_base)
 	{
 		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
-		if (use_ultra)
+		if (CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
 		{
-			if (CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
-			{
-				unsigned int delta = cl_pred.seq_latest - ack;
+			unsigned int delta = cl_pred.seq_latest - ack;
 
-				if (delta >= CMD_RING)
+			if (delta > (CL_PRED_FRAME_RING - 1))
+			{
+				pred_overflow = true;
+				if (!cl_pred_warned_overflow)
 				{
-					pred_overflow = true;
-					if (!cl_pred_warned_overflow)
-					{
-						Con_Printf ("Pred overflow: latest-ack=%u > CMD_BUF\n", delta);
-						JITTER_LOG ("Pred overflow: latest-ack=%u > CMD_BUF\n", delta);
-						cl_pred_warned_overflow = true;
-					}
+					Con_Printf ("Pred overflow: latest-ack=%u > PRED_RING\n", delta);
+					JITTER_LOG ("Pred overflow: latest-ack=%u > PRED_RING\n", delta);
+					cl_pred_warned_overflow = true;
 				}
 			}
+		}
+		if (use_ultra)
+		{
 			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
 			{
 				pred_slot = ack % CL_PRED_FRAME_RING;
@@ -2389,7 +2396,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if ((teleport_dist > 0.0f && error_len > teleport_dist)
 			|| (snap_dist > 0.0f && error_len > snap_dist)
-			|| (use_ultra && (!pred_frame_valid || pred_overflow)))
+			|| (!pred_frame_valid && use_ultra)
+			|| pred_overflow)
 		{
 			VectorClear (cl_pred_error);
 			VectorClear (cl_pred_angle_error);
@@ -2576,7 +2584,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	{
 		cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 		CL_Predict_ApplyToClient (&cl_pred.predicted, false);
-		return;
 	}
 
 	if (CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
