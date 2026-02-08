@@ -532,6 +532,9 @@ void CL_JitterDebug_Log (void)
 	vec3_t render_org;
 	vec3_t render_ang;
 	qboolean has_pred;
+	qboolean local_interp_bypassed;
+	int view_origin_source;
+	float viewheight_used;
 
 	if (jitter_time_debug.value > 0.0f)
 	{
@@ -548,6 +551,9 @@ void CL_JitterDebug_Log (void)
 	interp_delay = CL_GetInterpDelaySeconds ();
 	interp_target = CL_GetInterpTargetTime ();
 	has_pred = CL_Predict_GetDebug (&pred);
+	local_interp_bypassed = CL_Predict_ShouldBypassInterpolation ();
+	view_origin_source = local_interp_bypassed ? 1 : 0;
+	viewheight_used = cl.viewheight;
 
 	VectorCopy (r_refdef.vieworg, render_org);
 	VectorCopy (r_refdef.viewangles, render_ang);
@@ -591,6 +597,7 @@ void CL_JitterDebug_Log (void)
 		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
+		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
 		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
 		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
@@ -613,6 +620,9 @@ void CL_JitterDebug_Log (void)
 		pred.pred_angle_delta_shortest[0],
 		pred.pred_angle_delta_shortest[1],
 		pred.pred_angle_delta_shortest[2],
+		local_interp_bypassed ? 1 : 0,
+		viewheight_used,
+		view_origin_source,
 		pred.onground ? 1 : 0,
 		pred.groundent,
 		pred.ground_valid ? 1 : 0,
@@ -641,6 +651,7 @@ void CL_JitterDebug_Log (void)
 		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
 		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
+		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
 		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
 		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
@@ -663,6 +674,9 @@ void CL_JitterDebug_Log (void)
 		pred.pred_angle_delta_shortest[0],
 		pred.pred_angle_delta_shortest[1],
 		pred.pred_angle_delta_shortest[2],
+		local_interp_bypassed ? 1 : 0,
+		viewheight_used,
+		view_origin_source,
 		pred.onground ? 1 : 0,
 		pred.groundent,
 		pred.ground_valid ? 1 : 0,
@@ -1636,6 +1650,7 @@ void CL_RelinkEntities (void)
 	for (i=1,ent=cl_entities+1 ; i<cl.num_entities ; i++,ent++)
 	{
 		qboolean teleported = false;
+		qboolean bypass_local_interp = false;
 
 		if (!ent->model)
 		{	// empty slot
@@ -1698,7 +1713,14 @@ void CL_RelinkEntities (void)
 			}
 		}
 
-		if (ent->forcelink)
+		if (ent == &cl_entities[cl.viewentity] && CL_Predict_ShouldBypassInterpolation ())
+			bypass_local_interp = true;
+
+		if (bypass_local_interp)
+		{
+			VectorCopy (cl.simorg, ent->origin);
+		}
+		else if (ent->forcelink)
 		{	// the entity was not updated in the last message
 			// so move to the final spot
 			VectorCopy (ent->msg_origins[0], ent->origin);

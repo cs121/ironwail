@@ -604,6 +604,7 @@ void CL_Predict_Reapply (void);
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
 void CL_Predict_ResetGround (void);
 qboolean CL_Predict_GetDebug (cl_pred_debug_t *out);
+qboolean CL_Predict_ShouldBypassInterpolation (void);
 void CL_JitterDebug_Log (void);
 void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count);
 int  CL_ReadFromServer (void);
