@@ -436,7 +436,7 @@ static void CL_Predict_HardResetToBase (const char *reason)
 	}
 }
 
-static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean trace_onground, int trace_groundent)
+static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean trace_onground, int trace_groundent, qboolean allow_leave)
 {
 	if (!state)
 		return;
@@ -459,6 +459,9 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 		state->ground_transition_state = state->onground;
 		return;
 	}
+
+	if (!allow_leave)
+		return;
 
 	// Leaving ground requires a brief stable window to avoid flapping.
 	if (state->ground_transition_state != trace_onground)
@@ -1563,7 +1566,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 			else
 				ground_reason = CL_GROUND_REASON_TRACE_MISS;
 		}
-		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent, false);
 	}
 	else if (state->onground)
 	{
@@ -1577,7 +1580,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 			else
 				ground_reason = CL_GROUND_REASON_TRACE_MISS;
 		}
-		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent, false);
 	}
 	groundent = state->onground ? state->groundent : 0;
 
@@ -1694,7 +1697,7 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 			else
 				ground_reason = CL_GROUND_REASON_TRACE_MISS;
 		}
-		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent);
+		CL_Predict_ApplyGroundTransition (state, trace_onground, groundent, true);
 	}
 	groundent = state->onground ? state->groundent : 0;
 	if (state->onground && state->velocity[2] < 0)
