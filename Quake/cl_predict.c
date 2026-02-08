@@ -24,6 +24,9 @@ extern cvar_t cl_pred_substeps;
 extern cvar_t cl_pred_max_substeps;
 extern cvar_t cl_pred_step_hz;
 extern cvar_t cl_pred_accum_debug;
+extern cvar_t cl_pred_ultra;
+extern cvar_t cl_pred_tick;
+extern cvar_t cl_pred_eps;
 extern cvar_t cl_pred_smooth;
 extern cvar_t cl_pred_smooth_rate;
 extern cvar_t cl_pred_snapdist;
@@ -33,10 +36,16 @@ extern cvar_t cl_netsmooth_time;
 extern cvar_t cl_netsmooth_maxdist;
 // Q3MINI END
 
-static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
+static cvar_t cl_pred_debug = {"cl_pred_debug", "1", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
 static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
 static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
+
+#if defined(_DEBUG) || !defined(NDEBUG)
+#define CL_PRED_ASSERT(condition) SDL_assert(condition)
+#else
+#define CL_PRED_ASSERT(condition) ((void)0)
+#endif
 
 #define CL_PRED_FRAME_RING 256
 
@@ -162,6 +171,9 @@ static int cl_pred_smooth_count;
 static float cl_pred_true_error_len;
 static qboolean cl_pred_pred_frame_found;
 static unsigned int cl_pred_last_ack_seq;
+static qboolean cl_pred_warned_pred_miss;
+static qboolean cl_pred_warned_overflow;
+static qboolean cl_pred_warned_replay;
 
 static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
@@ -434,6 +446,29 @@ static float CL_Predict_GetCmdStepTime (const usercmd_t *cmd)
 	return CL_Predict_GetStepTime ();
 }
 
+static qboolean CL_Predict_UseUltra (void)
+{
+	return (cl_pred_ultra.value > 0.0f);
+}
+
+static float CL_Predict_GetUltraStepTime (void)
+{
+	float tick = cl_pred_tick.value;
+
+	if (tick <= 0.0f)
+		tick = 60.0f;
+	return 1.0f / tick;
+}
+
+static float CL_Predict_GetUltraEps (void)
+{
+	float eps = cl_pred_eps.value;
+
+	if (eps < 0.0f)
+		eps = 0.0f;
+	return eps;
+}
+
 static qboolean CL_Predict_IsLocalListenServer (void)
 {
 	return (sv.active && cls.state == ca_connected && !cls.demoplayback);
@@ -578,6 +613,8 @@ static float CL_Predict_GetStepTime (void)
 	double cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
 	double cmd_dt = 1.0 / cmd_rate;
 
+	if (CL_Predict_UseUltra ())
+		return CL_Predict_GetUltraStepTime ();
 	if (cl_physrate.value > 0.0)
 		return (float)(1.0 / cl_physrate.value);
 	return (float)cmd_dt;
@@ -612,6 +649,21 @@ static void CL_Predict_GetSubstepInfo (float cmd_dt, float host_dt, int *substep
 {
 	int steps = 1;
 	float dt = cmd_dt;
+
+	if (CL_Predict_UseUltra ())
+	{
+		dt = CL_Predict_GetUltraStepTime ();
+		if (dt <= 0.0f)
+			dt = cmd_dt;
+		steps = 1;
+		if (substeps)
+			*substeps = steps;
+		if (dt_sub)
+			*dt_sub = dt;
+		cl_pred_last_substeps = steps;
+		cl_pred_last_substep_dt = dt;
+		return;
+	}
 
 	if (cl_pred_substeps.value > 0.0f)
 	{
@@ -662,6 +714,8 @@ static float CL_Predict_GetFrameStepTime (float frame_dt)
 {
 	float step_dt;
 
+	if (CL_Predict_UseUltra ())
+		return CL_Predict_GetUltraStepTime ();
 	if (cl_pred_step_hz.value > 0.0f)
 	{
 		float step_hz = cl_pred_step_hz.value;
@@ -700,36 +754,73 @@ static void CL_Predict_RunFrameSteps (void)
 		VectorCopy (cl_pred.predicted.viewangles, cmd.viewangles);
 	}
 
-	step_dt = CL_Predict_GetFrameStepTime (cl_pred_frame_dt_last);
-	if (step_dt <= 0.0f)
-		return;
-	max_steps = (int)cl_pred_max_substeps.value;
-	if (max_steps < 1)
-		max_steps = 1;
-
-	if (fabsf (cl_pred_frame_accum - step_dt) < PRED_EPS)
-		cl_pred_frame_accum = step_dt;
-
-	if (cl_pred_nullcmd_injected)
+	if (CL_Predict_UseUltra ())
 	{
-		cmd.forwardmove = 0;
-		cmd.sidemove = 0;
-		cmd.upmove = 0;
-		cmd.buttons = 0;
-		cmd.impulse = 0;
+		const float eps = CL_Predict_GetUltraEps ();
+		const float max_accum = 0.25f;
+		step_dt = CL_Predict_GetUltraStepTime ();
+		if (step_dt <= 0.0f)
+			return;
+		max_steps = (int)ceilf (max_accum / step_dt);
+		if (max_steps < 1)
+			max_steps = 1;
+		CL_PRED_ASSERT (step_dt > 0.0f);
+
+		if (cl_pred_nullcmd_injected)
+		{
+			cmd.forwardmove = 0;
+			cmd.sidemove = 0;
+			cmd.upmove = 0;
+			cmd.buttons = 0;
+			cmd.impulse = 0;
+		}
+
+		while (cl_pred_frame_accum + eps >= step_dt && steps < max_steps)
+		{
+			cl_pred_render_from = cl_pred.predicted;
+			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
+			cl_pred_render_to = cl_pred.predicted;
+			if (cl_pred_render_cmd_valid && cmd.sequence > 0)
+				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+			cl_pred_frame_accum -= step_dt;
+			if (cl_pred_frame_accum < 0.0)
+				cl_pred_frame_accum = 0.0;
+			steps++;
+		}
 	}
-
-	while (cl_pred_frame_accum + PRED_EPS >= step_dt && steps < max_steps)
+	else
 	{
-		cl_pred_render_from = cl_pred.predicted;
-		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
-		cl_pred_render_to = cl_pred.predicted;
-		if (cl_pred_render_cmd_valid && cmd.sequence > 0)
-			CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
-		cl_pred_frame_accum -= step_dt;
-		steps++;
-		Con_Printf ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
-		JITTER_LOG ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
+		step_dt = CL_Predict_GetFrameStepTime (cl_pred_frame_dt_last);
+		if (step_dt <= 0.0f)
+			return;
+		max_steps = (int)cl_pred_max_substeps.value;
+		if (max_steps < 1)
+			max_steps = 1;
+
+		if (fabsf (cl_pred_frame_accum - step_dt) < PRED_EPS)
+			cl_pred_frame_accum = step_dt;
+
+		if (cl_pred_nullcmd_injected)
+		{
+			cmd.forwardmove = 0;
+			cmd.sidemove = 0;
+			cmd.upmove = 0;
+			cmd.buttons = 0;
+			cmd.impulse = 0;
+		}
+
+		while (cl_pred_frame_accum + PRED_EPS >= step_dt && steps < max_steps)
+		{
+			cl_pred_render_from = cl_pred.predicted;
+			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
+			cl_pred_render_to = cl_pred.predicted;
+			if (cl_pred_render_cmd_valid && cmd.sequence > 0)
+				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+			cl_pred_frame_accum -= step_dt;
+			steps++;
+			Con_Printf ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
+			JITTER_LOG ("CONT_PRED step executed acc=%f\n", cl_pred_frame_accum);
+		}
 	}
 
 	cl_pred_last_substeps = steps;
@@ -795,6 +886,7 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	float frame_dt;
 	qboolean apply_angle_correction;
 	qboolean apply_smoothing;
+	qboolean use_ultra;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 	{
@@ -828,14 +920,17 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		return;
 	}
 
+	use_ultra = CL_Predict_UseUltra ();
 	apply_smoothing = (cl_pred_smooth.value > 0.0f);
+	if (use_ultra && !is_render)
+		apply_smoothing = false;
 	smooth_ms = cl_pred_smooth_ms.value;
 	if (smooth_ms < 0.0f)
 		smooth_ms = 0.0f;
 	smooth_rate = cl_pred_smooth_rate.value;
 	if (smooth_rate < 0.0f)
 		smooth_rate = 0.0f;
-	if (!apply_smoothing)
+	if (!apply_smoothing && (!use_ultra || is_render))
 	{
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
@@ -861,9 +956,12 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	if (!apply_angle_correction)
 		VectorClear (cl_pred_angle_error);
 
-	VectorAdd (state->origin, cl_pred_error, smooth_origin);
+	if (use_ultra && !is_render)
+		VectorCopy (state->origin, smooth_origin);
+	else
+		VectorAdd (state->origin, cl_pred_error, smooth_origin);
 	// Q3MINI BEGIN
-	if (is_render && cl_q3mini_net_active && cl_netsmooth.value > 0.0f)
+	if (!use_ultra && is_render && cl_q3mini_net_active && cl_netsmooth.value > 0.0f)
 	{
 		float frac = 0.0f;
 
@@ -1961,6 +2059,9 @@ void CL_Predict_Clear (void)
 	cl_pred_snap_count = 0;
 	cl_pred_smooth_count = 0;
 	cl_pred_last_ack_seq = 0;
+	cl_pred_warned_pred_miss = false;
+	cl_pred_warned_overflow = false;
+	cl_pred_warned_replay = false;
 }
 
 void CL_Predict_ResetGround (void)
@@ -1997,18 +2098,32 @@ void CL_Predict_BeginFrame (void)
 	{
 		float frame_dt = (float)(host_rawframetime > 0.0 ? host_rawframetime : host_frametime);
 		float max_accum;
-		float step_dt;
-		int max_steps;
 
-		step_dt = CL_Predict_GetFrameStepTime (frame_dt);
-		max_steps = (int)cl_pred_max_substeps.value;
-		if (max_steps < 1)
-			max_steps = 1;
-		max_accum = step_dt * (float)max_steps;
-		cl_pred_frame_accum += frame_dt;
-		cl_pred_frame_dt_last = frame_dt;
-		if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
-			cl_pred_frame_accum = max_accum;
+		if (CL_Predict_UseUltra ())
+		{
+			max_accum = 0.25f;
+			cl_pred_frame_accum += frame_dt;
+			if (cl_pred_frame_accum < 0.0)
+				cl_pred_frame_accum = 0.0;
+			cl_pred_frame_dt_last = frame_dt;
+			if (cl_pred_frame_accum > max_accum)
+				cl_pred_frame_accum = max_accum;
+		}
+		else
+		{
+			float step_dt;
+			int max_steps;
+
+			step_dt = CL_Predict_GetFrameStepTime (frame_dt);
+			max_steps = (int)cl_pred_max_substeps.value;
+			if (max_steps < 1)
+				max_steps = 1;
+			max_accum = step_dt * (float)max_steps;
+			cl_pred_frame_accum += frame_dt;
+			cl_pred_frame_dt_last = frame_dt;
+			if (max_accum > 0.0f && cl_pred_frame_accum > max_accum)
+				cl_pred_frame_accum = max_accum;
+		}
 	}
 	else if (!enabled || !cl_pred.has_base)
 	{
@@ -2121,8 +2236,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred_frame_t pred_frame;
 	qboolean pred_frame_valid = false;
 	qboolean snap_correction = false;
+	qboolean use_ultra = false;
+	qboolean pred_overflow = false;
+	unsigned int pred_slot = 0;
+	unsigned int pred_stored_seq = 0;
 
 	CL_Predict_RegisterDebugCvars ();
+	use_ultra = CL_Predict_UseUltra ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
@@ -2157,10 +2277,37 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred_last_ack_seq = ack;
 	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
 	if (cl_pred.has_base)
-		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
-	cl_pred_pred_frame_found = pred_frame_valid ? true : false;
-	if (cl_pred.has_base)
 	{
+		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
+		if (use_ultra)
+		{
+			if (CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
+			{
+				unsigned int delta = cl_pred.seq_latest - ack;
+
+				if (delta >= CMD_RING)
+				{
+					pred_overflow = true;
+					if (!cl_pred_warned_overflow)
+					{
+						Con_Printf ("Pred overflow: latest-ack=%u > CMD_BUF\n", delta);
+						JITTER_LOG ("Pred overflow: latest-ack=%u > CMD_BUF\n", delta);
+						cl_pred_warned_overflow = true;
+					}
+				}
+			}
+			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
+			{
+				pred_slot = ack % CL_PRED_FRAME_RING;
+				pred_stored_seq = cl_pred.frames[pred_slot].seq;
+				Con_Printf ("PredFrame MISS: ack=%u stored=%u slot=%u latest=%u\n",
+					ack, pred_stored_seq, pred_slot, cl_pred.seq_latest);
+				JITTER_LOG ("PredFrame MISS: ack=%u stored=%u slot=%u latest=%u\n",
+					ack, pred_stored_seq, pred_slot, cl_pred.seq_latest);
+				cl_pred_warned_pred_miss = true;
+			}
+		}
+		cl_pred_pred_frame_found = pred_frame_valid ? true : false;
 		if (pred_frame_valid)
 		{
 			VectorSubtract (origin, pred_frame.origin, error);
@@ -2241,7 +2388,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				IN_DidApplyMouseDelta () ? 1 : 0);
 		}
 		if ((teleport_dist > 0.0f && error_len > teleport_dist)
-			|| (snap_dist > 0.0f && error_len > snap_dist))
+			|| (snap_dist > 0.0f && error_len > snap_dist)
+			|| (use_ultra && (!pred_frame_valid || pred_overflow)))
 		{
 			VectorClear (cl_pred_error);
 			VectorClear (cl_pred_angle_error);
@@ -2250,7 +2398,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			snap_correction = true;
 			CL_Predict_ClearFrames ();
 		}
-		else
+		else if (!use_ultra)
 		{
 			float deadzone = cl_pred_deadzone.value;
 			float angle_deadzone = cl_pred_angle_deadzone.value;
@@ -2281,7 +2429,19 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				JITTER_LOG ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
 			}
 		}
+		else
+		{
+			VectorAdd (cl_pred_error, error, cl_pred_error);
+			if (allow_angle_correction)
+				VectorCopy (angle_error, cl_pred_angle_error);
+			else
+				VectorClear (cl_pred_angle_error);
+			cl_pred_error_time = realtime;
+			cl_pred_reset = false;
+			cl_pred_smooth_count++;
+		}
 		// Q3MINI BEGIN
+		if (!use_ultra)
 		{
 			float smooth_ms = cl_netsmooth_time.value;
 			float maxdist = cl_netsmooth_maxdist.value;
@@ -2412,6 +2572,12 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
 	}
+	if (use_ultra && snap_correction)
+	{
+		cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
+		CL_Predict_ApplyToClient (&cl_pred.predicted, false);
+		return;
+	}
 
 	if (CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
 	{
@@ -2430,9 +2596,19 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 			return;
 		}
-		cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
-		host_dt = host_frametime;
-		CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
+		if (use_ultra)
+		{
+			cmd_dt = CL_Predict_GetUltraStepTime ();
+			host_dt = host_frametime;
+			substeps = 1;
+			dt_sub = cmd_dt;
+		}
+		else
+		{
+			cmd_dt = CL_Predict_GetCmdStepTime (&cmd);
+			host_dt = host_frametime;
+			CL_Predict_GetSubstepInfo (cmd_dt, host_dt, &substeps, &dt_sub);
+		}
 		if (cl_jitter_debug.value > 0.0f)
 		{
 			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
@@ -2448,10 +2624,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		CL_Predict_DebugLogCmd ("resim", &cmd, cmd_dt);
 		cl_pred_replay_count++;
 	}
-	if (!resim_cmd_valid && (cl_jitter_debug.value > 0.0f || cl_pred_debug.value > 0.0f))
+	if (!resim_cmd_valid && CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
 	{
-		Con_Printf ("Replay skipped: latest=%u ack=%u\n", cl_pred.seq_latest, ack);
-		JITTER_LOG ("Replay skipped: latest=%u ack=%u\n", cl_pred.seq_latest, ack);
+		if (!cl_pred_warned_replay)
+		{
+			Con_Printf ("Replay skipped: ack=%u latest=%u (should be >= ack+1 when cmds pending)\n", ack, cl_pred.seq_latest);
+			JITTER_LOG ("Replay skipped: ack=%u latest=%u (should be >= ack+1 when cmds pending)\n", ack, cl_pred.seq_latest);
+			cl_pred_warned_replay = true;
+		}
 	}
 
 	if (resim_cmd_valid)
@@ -2515,6 +2695,7 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	VectorCopy (cl_pred_error, out->pred_error);
 	VectorCopy (cl_pred_angle_error, out->pred_angle_error);
 	out->ack_seq = cl_pred_last_ack_seq;
+	out->latest_seq = cl_pred.seq_latest;
 	out->pred_frame_found = cl_pred_pred_frame_found;
 	out->replay_count = cl_pred_replay_count;
 	out->snap_count = cl_pred_snap_count;
@@ -2538,6 +2719,8 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	out->ground_apply_render = cl_pred_ground_dbg.ground_apply_render;
 	out->pred_accum_time = (float)cl_pred_frame_accum;
 	out->pred_step_dt = cl_pred_last_substep_dt;
+	out->pred_steps = cl_pred_last_substeps;
+	out->pred_render_frac = cl_pred_render_frac;
 	out->pred_substeps = cl_pred_last_substeps;
 	out->pred_max_substeps = (int)cl_pred_max_substeps.value;
 	out->pred_nullcmd = cl_pred_nullcmd_injected;
