@@ -112,6 +112,7 @@ devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
 extern cvar_t sv_tickrate;
 extern cvar_t sv_netrate;
+extern cvar_t sv_sendrate;
 extern cvar_t sv_tick_maxcatchup;
 extern cvar_t sv_fixedtick;
 extern cvar_t sv_maxsteps_per_frame;
