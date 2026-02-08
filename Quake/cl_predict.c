@@ -171,6 +171,7 @@ static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec);
 static qboolean CL_Predict_Vec3Sane (const vec3_t v);
 static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
+static void CL_Predict_ClearFrames (void);
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state);
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
 static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
@@ -282,6 +283,17 @@ static qboolean CL_Predict_AnglesSane (const vec3_t a)
 	}
 
 	return true;
+}
+
+static void CL_Predict_ClearFrames (void)
+{
+	int i;
+
+	for (i = 0; i < CL_PRED_FRAME_RING; i++)
+	{
+		cl_pred.frames[i].valid = false;
+		cl_pred.frames[i].seq = 0;
+	}
 }
 
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state)
@@ -699,6 +711,8 @@ static void CL_Predict_RunFrameSteps (void)
 		cl_pred_render_from = cl_pred.predicted;
 		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
 		cl_pred_render_to = cl_pred.predicted;
+		if (cl_pred_render_cmd_valid && cmd.sequence > 0)
+			CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 		cl_pred_frame_accum -= step_dt;
 		steps++;
 	}
@@ -1906,6 +1920,7 @@ void CL_Predict_Clear (void)
 {
 	CL_Predict_RegisterDebugCvars ();
 	memset (&cl_pred, 0, sizeof(cl_pred));
+	CL_Predict_ClearFrames ();
 	cl_pred_warned_solid = false;
 	cl_pred_warned_no_snapshot = false;
 	VectorClear (cl_pred_error);
@@ -2048,6 +2063,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 	CL_Predict_DebugLogCmd ("setup", cmd, cmd_dt);
 	cl_pred_render_cmd = *cmd;
 	cl_pred_render_cmd_valid = true;
+	CL_Predict_StoreFrame (cmd->sequence, &cl_pred.predicted);
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 	cl_netdbg_predict_ran = true;
@@ -2216,6 +2232,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			cl_pred_reset = true;
 			cl_pred_snap_count++;
 			snap_correction = true;
+			CL_Predict_ClearFrames ();
 		}
 		else
 		{
@@ -2293,7 +2310,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorClear (cl_pred_angle_error);
 		cl_pred_reset = false;
 	}
-	cl_pred_true_error_len = error_len;
+	cl_pred_true_error_len = pred_frame_valid ? error_len : 0.0f;
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (velocity, cl_pred.base.velocity);
 	cl_pred.base.viewangles[0] = NormalizeAngle180 (viewangles[0]);
