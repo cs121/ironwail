@@ -18,11 +18,29 @@ extern cvar_t cl_pred_substeps;
 extern cvar_t cl_pred_max_substeps;
 extern cvar_t cl_pred_step_hz;
 extern cvar_t cl_pred_accum_debug;
+extern cvar_t cl_pred_smooth;
+extern cvar_t cl_pred_smooth_rate;
+extern cvar_t cl_pred_snapdist;
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "0", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
 static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
 static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
+
+#define CL_PRED_FRAME_RING 128
+
+typedef struct
+{
+	unsigned int	seq;
+	vec3_t		origin;
+	vec3_t		velocity;
+	vec3_t		viewangles;
+	qboolean	onground;
+	int		groundent;
+	byte		waterlevel;
+	byte		pm_flags;
+	qboolean	valid;
+} cl_pred_frame_t;
 
 typedef struct
 {
@@ -85,6 +103,7 @@ typedef struct
 	qboolean	has_base;
 	cl_pred_state_t	base;
 	cl_pred_state_t	predicted;
+	cl_pred_frame_t	frames[CL_PRED_FRAME_RING];
 } cl_pred_t;
 
 static cl_pred_t cl_pred;
@@ -118,6 +137,11 @@ static cl_pred_state_t cl_pred_render_from;
 static cl_pred_state_t cl_pred_render_to;
 static qboolean cl_pred_render_interp_valid;
 static float cl_pred_render_frac;
+static qboolean cl_pred_reset;
+static double cl_pred_error_time;
+static int cl_pred_replay_count;
+static int cl_pred_snap_count;
+static int cl_pred_smooth_count;
 
 static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
@@ -127,12 +151,13 @@ static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec);
 static qboolean CL_Predict_Vec3Sane (const vec3_t v);
 static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
+static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state);
+static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
 #define CL_PREDICT_GROUND_EPSILON 2.0f
 #define CL_PREDICT_CORRECTION_THRESHOLD 64.0f
-#define CL_PREDICT_SNAP_THRESHOLD 8.0f
 #define CL_PREDICT_GROUND_STABLE_FRAMES 2
 #define CL_PREDICT_GROUND_KEEP_FRAMES 2
 
@@ -235,6 +260,32 @@ static qboolean CL_Predict_AnglesSane (const vec3_t a)
 			return false;
 	}
 
+	return true;
+}
+
+static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state)
+{
+	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
+
+	frame->seq = seq;
+	VectorCopy (state->origin, frame->origin);
+	VectorCopy (state->velocity, frame->velocity);
+	VectorCopy (state->viewangles, frame->viewangles);
+	frame->onground = state->onground;
+	frame->groundent = state->groundent;
+	frame->pm_flags = state->onground ? SNAP_PM_ONGROUND : 0;
+	frame->waterlevel = 0;
+	frame->valid = true;
+}
+
+static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
+{
+	cl_pred_frame_t *frame = &cl_pred.frames[seq % CL_PRED_FRAME_RING];
+
+	if (!frame->valid || frame->seq != seq)
+		return false;
+	if (out)
+		*out = *frame;
 	return true;
 }
 
@@ -648,11 +699,13 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 {
 	vec3_t smooth_origin;
 	float smooth_ms;
+	float smooth_rate;
 	float decay;
 	vec3_t correction;
 	vec3_t angle_correction;
 	float frame_dt;
 	qboolean apply_angle_correction;
+	qboolean apply_smoothing;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 	{
@@ -686,10 +739,14 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		return;
 	}
 
+	apply_smoothing = (cl_pred_smooth.value > 0.0f);
 	smooth_ms = cl_pred_smooth_ms.value;
 	if (smooth_ms < 0.0f)
 		smooth_ms = 0.0f;
-	if (smooth_ms <= 0.0f)
+	smooth_rate = cl_pred_smooth_rate.value;
+	if (smooth_rate < 0.0f)
+		smooth_rate = 0.0f;
+	if (!apply_smoothing)
 	{
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
@@ -731,16 +788,23 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	VectorCopy (state->velocity, cl.mvelocity[1]);
 	cl.onground = state->onground;
 
-	if (smooth_ms > 0.0f)
+	if (apply_smoothing)
 	{
-		decay = frame_dt / (smooth_ms * 0.001f);
+		float error_before = VectorLength (cl_pred_error);
+
+		if (smooth_rate <= 0.0f && smooth_ms > 0.0f)
+			smooth_rate = 1.0f / (smooth_ms * 0.001f);
+		if (smooth_rate > 0.0f)
+			decay = expf (-smooth_rate * frame_dt);
+		else
+			decay = 0.0f;
 		decay = CLAMP (0.0f, decay, 1.0f);
 		VectorScale (cl_pred_error, decay, correction);
-		VectorSubtract (cl_pred_error, correction, cl_pred_error);
+		VectorCopy (correction, cl_pred_error);
 		if (apply_angle_correction)
 		{
 			VectorScale (cl_pred_angle_error, decay, angle_correction);
-			VectorSubtract (cl_pred_angle_error, angle_correction, cl_pred_angle_error);
+			VectorCopy (angle_correction, cl_pred_angle_error);
 		}
 		else
 		{
@@ -748,10 +812,12 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
+			float error_after = VectorLength (cl_pred_error);
+
 			Con_Printf ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
-				VectorLength (correction), VectorLength (cl_pred_error));
+				error_before - error_after, error_after);
 			JITTER_LOG ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
-				VectorLength (correction), VectorLength (cl_pred_error));
+				error_before - error_after, error_after);
 		}
 	}
 
@@ -1708,6 +1774,11 @@ void CL_Predict_Clear (void)
 	cl_pred_render_frac = 0.0f;
 	memset (&cl_pred_render_from, 0, sizeof(cl_pred_render_from));
 	memset (&cl_pred_render_to, 0, sizeof(cl_pred_render_to));
+	cl_pred_reset = false;
+	cl_pred_error_time = 0.0;
+	cl_pred_replay_count = 0;
+	cl_pred_snap_count = 0;
+	cl_pred_smooth_count = 0;
 }
 
 void CL_Predict_ResetGround (void)
@@ -1729,6 +1800,9 @@ void CL_Predict_BeginFrame (void)
 	CL_Predict_ResetGroundDebug ();
 	cl_pred_nullcmd_injected = 0;
 	cl_pred_angles_normalized = 0;
+	cl_pred_replay_count = 0;
+	cl_pred_snap_count = 0;
+	cl_pred_smooth_count = 0;
 
 	enabled = CL_Predict_IsEnabled ();
 	if (enabled && !cl_pred_prev_enabled && cl_pred.has_base)
@@ -1843,6 +1917,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	vec3_t angle_error;
 	float error_len = 0.0f;
 	float teleport_dist = cl_pred_teleport_dist.value;
+	float snap_dist = cl_pred_snapdist.value;
 	float cmd_dt;
 	float dt_sub;
 	float host_dt;
@@ -1855,6 +1930,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	qboolean resim_cmd_valid = false;
 	usercmd_t resim_cmd;
 	qboolean allow_angle_correction;
+	cl_pred_frame_t pred_frame;
+	qboolean pred_frame_valid = false;
+	qboolean snap_correction = false;
 
 	CL_Predict_RegisterDebugCvars ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
@@ -1890,21 +1968,36 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred_server_update_this_frame = true;
 	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
 	if (cl_pred.has_base)
+		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
+	if (cl_pred.has_base)
 	{
-		VectorSubtract (origin, cl_pred.predicted.origin, error);
-		error_len = VectorLength (error);
-		for (i = 0; i < 3; i++)
-			angle_error[i] = CL_Predict_AngleDelta (viewangles[i], cl_pred.predicted.viewangles[i]);
+		if (pred_frame_valid)
+		{
+			VectorSubtract (origin, pred_frame.origin, error);
+			error_len = VectorLength (error);
+			for (i = 0; i < 3; i++)
+				angle_error[i] = CL_Predict_AngleDelta (viewangles[i], pred_frame.viewangles[i]);
+		}
+		else
+		{
+			VectorSubtract (origin, cl_pred.predicted.origin, error);
+			error_len = VectorLength (error);
+			for (i = 0; i < 3; i++)
+				angle_error[i] = CL_Predict_AngleDelta (viewangles[i], cl_pred.predicted.viewangles[i]);
+		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
+			const vec3_t *client_origin = pred_frame_valid ? (const vec3_t *)pred_frame.origin
+				: (const vec3_t *)cl_pred.predicted.origin;
+
 			Con_Printf ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
 				error_len,
 				origin[0], origin[1], origin[2],
-				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
+				(*client_origin)[0], (*client_origin)[1], (*client_origin)[2]);
 			JITTER_LOG ("NETDBG: pred_error %.2f (server %.1f %.1f %.1f client %.1f %.1f %.1f)\n",
 				error_len,
 				origin[0], origin[1], origin[2],
-				cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2]);
+				(*client_origin)[0], (*client_origin)[1], (*client_origin)[2]);
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
@@ -1957,10 +2050,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_ground_dbg.delta_applied,
 				IN_DidApplyMouseDelta () ? 1 : 0);
 		}
-		if (teleport_dist > 0.0f && error_len > teleport_dist)
+		if ((teleport_dist > 0.0f && error_len > teleport_dist)
+			|| (snap_dist > 0.0f && error_len > snap_dist))
 		{
 			VectorClear (cl_pred_error);
 			VectorClear (cl_pred_angle_error);
+			cl_pred_reset = true;
+			cl_pred_snap_count++;
+			snap_correction = true;
 		}
 		else
 		{
@@ -1977,17 +2074,21 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 						angle_error[i] = 0.0f;
 				}
 			}
-			VectorAdd (cl_pred_error, error, cl_pred_error);
+			VectorCopy (error, cl_pred_error);
 			if (allow_angle_correction)
-				VectorAdd (cl_pred_angle_error, angle_error, cl_pred_angle_error);
+				VectorCopy (angle_error, cl_pred_angle_error);
 			else
 				VectorClear (cl_pred_angle_error);
+			cl_pred_error_time = realtime;
+			cl_pred_reset = false;
+			cl_pred_smooth_count++;
 		}
 	}
 	else
 	{
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
+		cl_pred_reset = false;
 	}
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (velocity, cl_pred.base.velocity);
@@ -2068,7 +2169,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		return;
 	}
 
-	if (error_len > CL_PREDICT_SNAP_THRESHOLD)
+	if (snap_correction)
 	{
 		VectorCopy (origin, cl.simorg);
 		VectorClear (cl_pred_error);
@@ -2104,15 +2205,32 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		for (i = 0; i < substeps; i++)
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub, false);
+		CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 		resim_cmd = cmd;
 		resim_cmd_valid = true;
 		CL_Predict_DebugLogCmd ("resim", &cmd, cmd_dt);
+		cl_pred_replay_count++;
 	}
 
 	if (resim_cmd_valid)
 	{
 		cl_pred_render_cmd = resim_cmd;
 		cl_pred_render_cmd_valid = true;
+	}
+	if (cl_pred_debug.value > 0.0f)
+	{
+		Con_Printf ("PREDDBG ack %u pred %u replay %d err %.2f onground %d groundent %d platform_delta %d dt %.4f snap %d snaps %d smooth %d\n",
+			ack,
+			cl_pred.seq_latest,
+			cl_pred_replay_count,
+			error_len,
+			cl_pred.predicted.onground ? 1 : 0,
+			cl_pred.predicted.groundent,
+			cl_pred_ground_dbg.delta_applied,
+			host_frametime,
+			snap_correction ? 1 : 0,
+			cl_pred_snap_count,
+			cl_pred_smooth_count);
 	}
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
