@@ -78,6 +78,7 @@ typedef struct
 	byte		*data;
 } net_reliable_receive_t;
 
+/* Q3MINI Phase 4/5 summary: add net feature flag storage for compression negotiation. */
 /**
 
 This is the network info/connection protocol.  It is used to find Quake
@@ -152,6 +153,10 @@ CCREP_RULE_INFO
 #define CCREP_PLAYER_INFO	0x84
 #define CCREP_RULE_INFO		0x85
 
+// Q3MINI BEGIN
+#define NETFEATURE_Q3MINI_COMPRESS	(1u << 0)
+// Q3MINI END
+
 typedef struct qsocket_s
 {
 	struct qsocket_s	*next;
@@ -198,6 +203,9 @@ typedef struct qsocket_s
 
 	struct qsockaddr	addr;
 	char		address[NET_NAMELEN];
+	// Q3MINI BEGIN
+	unsigned int	features;
+	// Q3MINI END
 
 } qsocket_t;
 
