@@ -487,7 +487,7 @@ static qboolean CL_Predict_IsGroundEntityValid (int groundent)
 	entity_t *ent;
 	int i;
 
-	if (groundent <= 0 || groundent >= MAX_EDICTS)
+	if (groundent <= 0 || groundent >= cl_max_edicts)
 		return false;
 
 	if (!cl_entities)
