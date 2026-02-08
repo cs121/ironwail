@@ -9,6 +9,7 @@ extern cvar_t sv_accelerate;
 extern cvar_t sv_friction;
 extern cvar_t sv_stopspeed;
 extern cvar_t sv_gravity;
+extern cvar_t sv_altnoclip;
 extern cvar_t cl_netdebug_parse;
 extern cvar_t cl_predict;
 extern cvar_t cl_cmdrate;
@@ -153,6 +154,7 @@ static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state);
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
+static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -306,6 +308,29 @@ static qboolean CL_Predict_EntityStateSane (const entity_t *e)
 		&& VectorCompare (e->msg_origins[1], vec3_origin))
 		return false;
 
+	return true;
+}
+
+static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel)
+{
+	const snapshot_state_t *state;
+
+	if (movetype)
+		*movetype = MOVETYPE_WALK;
+	if (waterlevel)
+		*waterlevel = 0;
+	if (!cl.snapshot_baseline || !cl.snapshot_present)
+		return false;
+	if (cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
+		return false;
+	if (!cl.snapshot_present[cl.viewentity])
+		return false;
+
+	state = &cl.snapshot_baseline[cl.viewentity];
+	if (movetype)
+		*movetype = state->movetype;
+	if (waterlevel)
+		*waterlevel = state->waterlevel;
 	return true;
 }
 
@@ -1529,6 +1554,7 @@ static void CL_Predict_StepSlideMove (cl_pred_state_t *state, const vec3_t mins,
 static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd, float dt, qboolean is_render)
 {
 	vec3_t forward, right, up;
+	vec3_t moveangles;
 	vec3_t wishvel, wishdir;
 	float wishspeed;
 	vec3_t mins, maxs;
@@ -1538,6 +1564,12 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	qboolean ground_applied;
 	qboolean ground_entity;
 	int ground_reason = CL_GROUND_REASON_OK;
+	byte movetype = MOVETYPE_WALK;
+	byte waterlevel = 0;
+	qboolean use_full_angles = false;
+	qboolean use_alt_noclip = false;
+	qboolean use_noclip = false;
+	qboolean in_water = false;
 
 	if (sys_step_debug.value > 0.0f)
 		sys_step_debug_info.cl_pred_steps++;
@@ -1639,12 +1671,29 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 
 	VectorCopy (cmd->viewangles, state->viewangles);
 
-	AngleVectors (cmd->viewangles, forward, right, up);
+	CL_Predict_GetLocalMovementState (&movetype, &waterlevel);
+	use_alt_noclip = (movetype == MOVETYPE_NOCLIP && sv_altnoclip.value > 0.0f);
+	use_noclip = (movetype == MOVETYPE_NOCLIP || noclip_anglehack);
+	in_water = (waterlevel >= 2 && movetype != MOVETYPE_NOCLIP);
+	use_full_angles = (movetype == MOVETYPE_NOCLIP || movetype == MOVETYPE_FLY || noclip_anglehack);
+
+	VectorCopy (cmd->viewangles, moveangles);
+	if (!use_full_angles)
+	{
+		moveangles[PITCH] = 0.0f;
+		moveangles[ROLL] = 0.0f;
+	}
+	AngleVectors (moveangles, forward, right, up);
 
 	wishvel[0] = forward[0] * cmd->forwardmove + right[0] * cmd->sidemove;
 	wishvel[1] = forward[1] * cmd->forwardmove + right[1] * cmd->sidemove;
-	wishvel[2] = forward[2] * cmd->forwardmove + right[2] * cmd->sidemove;
-	wishvel[2] += cmd->upmove;
+	wishvel[2] = 0.0f;
+	if (use_full_angles)
+		wishvel[2] += forward[2] * cmd->forwardmove + right[2] * cmd->sidemove;
+	if (use_full_angles || in_water)
+		wishvel[2] += cmd->upmove;
+	if (in_water && !cmd->forwardmove && !cmd->sidemove && !cmd->upmove)
+		wishvel[2] -= 60.0f;
 
 	VectorCopy (wishvel, wishdir);
 	wishspeed = VectorNormalize (wishdir);
@@ -1654,15 +1703,55 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 		wishspeed = sv_maxspeed.value;
 	}
 
-	if (noclip_anglehack)
+	if (use_noclip)
 	{
+		if (use_alt_noclip)
+			wishvel[2] += cmd->upmove;
 		VectorCopy (wishvel, state->velocity);
 		VectorMA (state->origin, dt, state->velocity, state->origin);
 		state->onground = false;
 		return;
 	}
 
-	if (state->onground)
+	if (in_water)
+	{
+		float speed, newspeed, addspeed, accelspeed;
+
+		wishspeed = VectorLength (wishvel);
+		if (wishspeed > sv_maxspeed.value)
+		{
+			VectorScale (wishvel, sv_maxspeed.value / wishspeed, wishvel);
+			wishspeed = sv_maxspeed.value;
+		}
+		wishspeed *= 0.7f;
+
+		speed = VectorLength (state->velocity);
+		if (speed)
+		{
+			newspeed = speed - dt * speed * sv_friction.value;
+			if (newspeed < 0.0f)
+				newspeed = 0.0f;
+			VectorScale (state->velocity, newspeed / speed, state->velocity);
+		}
+		else
+		{
+			newspeed = 0.0f;
+		}
+
+		if (wishspeed > 0.0f)
+		{
+			addspeed = wishspeed - newspeed;
+			if (addspeed > 0.0f)
+			{
+				VectorNormalize (wishvel);
+				accelspeed = sv_accelerate.value * wishspeed * dt;
+				if (accelspeed > addspeed)
+					accelspeed = addspeed;
+				VectorMA (state->velocity, accelspeed, wishvel, state->velocity);
+			}
+		}
+	}
+	else if (state->onground)
 	{
 		if (cmd->buttons & 2)
 		{
