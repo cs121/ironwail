@@ -564,7 +564,14 @@ void CL_JitterDebug_Log (void)
 		VectorClear (pred.base_angles);
 		VectorClear (pred.predicted_origin);
 		VectorClear (pred.predicted_angles);
+		pred.pred_error_len = 0.0f;
+		pred.pred_smooth_error_len = 0.0f;
+		pred.pred_angle_error_len = 0.0f;
 		pred.onground = false;
+		pred.ack_seq = 0;
+		pred.pred_frame_found = false;
+		pred.replay_count = 0;
+		pred.snap_count = 0;
 		pred.groundent = 0;
 		pred.ground_valid = false;
 		pred.ground_valid_reason = CL_GROUND_REASON_OK;
@@ -596,7 +603,8 @@ void CL_JitterDebug_Log (void)
 	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
 		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
+		"server_applied %d pred_steps %d ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
 		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
@@ -615,6 +623,12 @@ void CL_JitterDebug_Log (void)
 		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
 		pred.prediction_steps,
+		pred.ack_seq,
+		pred.pred_frame_found ? 1 : 0,
+		pred.pred_error_len,
+		pred.pred_smooth_error_len,
+		pred.replay_count,
+		pred.snap_count,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
 		pred.pred_angle_delta_shortest[0],
@@ -650,7 +664,8 @@ void CL_JitterDebug_Log (void)
 	JITTER_LOG ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
 		"pred_accum %.4f pred_step_dt %.4f pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
 		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
+		"server_applied %d pred_steps %d ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
+		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
 		"local_interp_bypassed %d viewheight %.2f view_src %d "
 		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
 		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
@@ -669,6 +684,12 @@ void CL_JitterDebug_Log (void)
 		pred.pred_apply_render_reason,
 		pred.server_update_applied ? 1 : 0,
 		pred.prediction_steps,
+		pred.ack_seq,
+		pred.pred_frame_found ? 1 : 0,
+		pred.pred_error_len,
+		pred.pred_smooth_error_len,
+		pred.replay_count,
+		pred.snap_count,
 		pred.pred_error_len,
 		pred.pred_angle_error_len,
 		pred.pred_angle_delta_shortest[0],

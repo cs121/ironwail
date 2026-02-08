@@ -38,7 +38,7 @@ static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE
 static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
 static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
 
-#define CL_PRED_FRAME_RING 128
+#define CL_PRED_FRAME_RING 256
 
 typedef struct
 {
@@ -159,6 +159,9 @@ static double cl_pred_error_time;
 static int cl_pred_replay_count;
 static int cl_pred_snap_count;
 static int cl_pred_smooth_count;
+static float cl_pred_true_error_len;
+static qboolean cl_pred_pred_frame_found;
+static unsigned int cl_pred_last_ack_seq;
 
 static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
@@ -1929,6 +1932,7 @@ void CL_Predict_Clear (void)
 	cl_pred_replay_count = 0;
 	cl_pred_snap_count = 0;
 	cl_pred_smooth_count = 0;
+	cl_pred_last_ack_seq = 0;
 }
 
 void CL_Predict_ResetGround (void)
@@ -1953,6 +1957,8 @@ void CL_Predict_BeginFrame (void)
 	cl_pred_replay_count = 0;
 	cl_pred_snap_count = 0;
 	cl_pred_smooth_count = 0;
+	cl_pred_true_error_len = 0.0f;
+	cl_pred_pred_frame_found = false;
 
 	enabled = CL_Predict_IsEnabled ();
 	if (enabled && !cl_pred_prev_enabled && cl_pred.has_base)
@@ -2116,9 +2122,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	cl_pred.seq_acked = ack;
 	cl_pred_server_update_this_frame = true;
+	cl_pred_last_ack_seq = ack;
 	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
 	if (cl_pred.has_base)
 		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
+	cl_pred_pred_frame_found = pred_frame_valid ? true : false;
 	if (cl_pred.has_base)
 	{
 		if (pred_frame_valid)
@@ -2285,6 +2293,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorClear (cl_pred_angle_error);
 		cl_pred_reset = false;
 	}
+	cl_pred_true_error_len = error_len;
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (velocity, cl_pred.base.velocity);
 	cl_pred.base.viewangles[0] = NormalizeAngle180 (viewangles[0]);
@@ -2462,10 +2471,15 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	memset (out, 0, sizeof(*out));
 	out->prediction_steps = cl_pred_steps_this_frame;
 	out->server_update_applied = cl_pred_server_update_this_frame;
-	out->pred_error_len = VectorLength (cl_pred_error);
+	out->pred_error_len = cl_pred_true_error_len;
+	out->pred_smooth_error_len = VectorLength (cl_pred_error);
 	out->pred_angle_error_len = VectorLength (cl_pred_angle_error);
 	VectorCopy (cl_pred_error, out->pred_error);
 	VectorCopy (cl_pred_angle_error, out->pred_angle_error);
+	out->ack_seq = cl_pred_last_ack_seq;
+	out->pred_frame_found = cl_pred_pred_frame_found;
+	out->replay_count = cl_pred_replay_count;
+	out->snap_count = cl_pred_snap_count;
 	out->onground = cl_pred_ground_dbg.onground;
 	out->groundent = cl_pred_ground_dbg.groundent;
 	out->ground_valid = cl_pred_ground_dbg.ground_valid;
