@@ -113,6 +113,8 @@ GENERIC_TYPES (IMPL_GENERIC_FUNCS, NO_COMMA)
 // Wrap-safe sequence comparisons for 32-bit command ids (valid for < 2^31 gaps).
 #define NETSEQ_GT(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) > 0)
 #define NETSEQ_GEQ(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) >= 0)
+#define seq_newer(a, b) NETSEQ_GT((a), (b))
+#define seq_delta(a, b) ((unsigned int)((unsigned int)(a) - (unsigned int)(b)))
 
 #define countof(arr) (sizeof(arr) / sizeof(arr[0]))
 
