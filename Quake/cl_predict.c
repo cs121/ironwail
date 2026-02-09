@@ -10,6 +10,7 @@ Copyright (C) 2024
 #include "quakedef.h"
 #include <float.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <time.h>
 
 extern cvar_t sv_maxspeed;
@@ -71,6 +72,7 @@ static cvar_t cl_pred_guard = {"cl_pred_guard", "1", CVAR_NONE};
 #endif
 
 #define CL_PRED_FRAME_RING 1024
+#define CL_PRED_INVALID_SEQ UINT32_MAX
 
 typedef struct cl_pred_ground_cache_s
 {
@@ -215,6 +217,8 @@ static qboolean cl_pred_warned_replay;
 static double cl_pred_frame_drop_time;
 static int cl_pred_last_reset_frame;
 static char cl_pred_last_reset_reason[64];
+static qboolean cl_pred_history_missing;
+static unsigned int cl_pred_last_store_seq[CL_PRED_FRAME_RING];
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref);
 
@@ -398,7 +402,7 @@ static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec);
 static qboolean CL_Predict_Vec3Sane (const vec3_t v);
 static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
-static void CL_Predict_ClearFrames (void);
+static void CL_Predict_ClearFrames (const char *reason);
 static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq);
 static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq);
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state);
@@ -1187,34 +1191,53 @@ static void CL_Predict_UpdateAuthoritativeGround (const cl_pred_state_t *state)
 	cl.predicted_groundent = state->onground ? state->groundent : 0;
 }
 
-static void CL_Predict_ClearFrames (void)
+static void CL_Predict_ClearFrames (const char *reason)
 {
 	int i;
 
+	if (cl_pred_debug.value > 0.0f)
+	{
+		Con_DPrintf ("PredFrame clear: reason=%s ring=%u\n",
+			reason ? reason : "unknown", CL_PRED_FRAME_RING);
+		JITTER_LOG ("PredFrame clear: reason=%s ring=%u\n",
+			reason ? reason : "unknown", CL_PRED_FRAME_RING);
+	}
 	for (i = 0; i < CL_PRED_FRAME_RING; i++)
 	{
 		memset (&cl_pred.frames[i], 0, sizeof(cl_pred.frames[i]));
 		cl_pred.frames[i].valid = false;
-		cl_pred.frames[i].cmd_seq = 0u;
+		cl_pred.frames[i].cmd_seq = CL_PRED_INVALID_SEQ;
+		cl_pred_last_store_seq[i] = CL_PRED_INVALID_SEQ;
 	}
 }
 
 static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq)
 {
-#if CL_PRED_RING_IS_POW2(CL_PRED_FRAME_RING)
+	CL_PRED_ASSERT (CL_PRED_RING_IS_POW2 (CL_PRED_FRAME_RING));
 	return seq & (CL_PRED_FRAME_RING - 1u);
-#else
-	return seq % CL_PRED_FRAME_RING;
-#endif
 }
 
 static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq)
 {
-#if CL_PRED_RING_IS_POW2(CMD_RING)
+	CL_PRED_ASSERT (CL_PRED_RING_IS_POW2 (CMD_RING));
 	return seq & (CMD_RING - 1u);
-#else
-	return seq % CMD_RING;
-#endif
+}
+
+static void CL_Predict_RecordFrameSeq (unsigned int seq, const char *reason)
+{
+	unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+	unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
+	cl_pred_frame_t *frame = &cl_pred.frames[slot];
+
+	frame->cmd_seq = seq;
+	frame->valid = false;
+	if (cl_pred_debug.value > 0.0f)
+	{
+		Con_DPrintf ("PredFrame mark: seq=%u slot=%u idx=%u reason=%s\n",
+			seq, slot, idx, reason ? reason : "unknown");
+		JITTER_LOG ("PredFrame mark: seq=%u slot=%u idx=%u reason=%s\n",
+			seq, slot, idx, reason ? reason : "unknown");
+	}
 }
 
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state)
@@ -1237,6 +1260,7 @@ static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const
 	// Canonical prediction key = usercmd sequence number (cmd_seq).
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_STOREFRAME);
 	frame->cmd_seq = seq;
+	cl_pred_last_store_seq[slot] = seq;
 	if (cmd)
 		frame->cmd = *cmd;
 	else
@@ -1277,6 +1301,23 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 {
 	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
 
+	if (frame->cmd_seq == CL_PRED_INVALID_SEQ)
+	{
+		unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+		unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
+
+		cl_pred_history_missing = true;
+		frame->valid = false;
+		if (cl_pred_debug.value > 0.0f)
+		{
+			Con_DPrintf ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u\n",
+				seq, slot, idx, cl_pred_last_store_seq[slot]);
+			JITTER_LOG ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u\n",
+				seq, slot, idx, cl_pred_last_store_seq[slot]);
+		}
+		return false;
+	}
+
 	if (!frame->valid)
 		return false;
 
@@ -1291,14 +1332,16 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 			unsigned int next_slot = (slot + 1u) % CL_PRED_FRAME_RING;
 			unsigned int cmdbackup = CL_Predict_GetCmdBackup ();
 
-			Con_DPrintf ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+			Con_DPrintf ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d last_store=%u prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
 				seq, slot, idx, frame->cmd_seq, frame->valid ? 1 : 0,
+				cl_pred_last_store_seq[slot],
 				cl_pred.frames[prev_slot].cmd_seq,
 				frame->cmd_seq,
 				cl_pred.frames[next_slot].cmd_seq,
 				seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
-			JITTER_LOG ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+			JITTER_LOG ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d last_store=%u prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
 				seq, slot, idx, frame->cmd_seq, frame->valid ? 1 : 0,
+				cl_pred_last_store_seq[slot],
 				cl_pred.frames[prev_slot].cmd_seq,
 				frame->cmd_seq,
 				cl_pred.frames[next_slot].cmd_seq,
@@ -1910,6 +1953,8 @@ static void CL_Predict_RunFrameSteps (void)
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
+			else if (cmd.sequence > 0)
+				CL_Predict_RecordFrameSeq (cmd.sequence, "render_cmd_invalid");
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -1959,6 +2004,8 @@ static void CL_Predict_RunFrameSteps (void)
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
+			else if (cmd.sequence > 0)
+				CL_Predict_RecordFrameSeq (cmd.sequence, "render_cmd_invalid");
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -3532,7 +3579,7 @@ void CL_Predict_Clear (void)
 {
 	CL_Predict_RegisterDebugCvars ();
 	memset (&cl_pred, 0, sizeof(cl_pred));
-	CL_Predict_ClearFrames ();
+	CL_Predict_ClearFrames ("predict clear");
 	cl_pred_warned_solid = false;
 	cl_pred_warned_no_snapshot = false;
 	VectorClear (cl_pred_error);
@@ -3571,6 +3618,7 @@ void CL_Predict_Clear (void)
 	cl_pred_warned_overflow = false;
 	cl_pred_warned_replay = false;
 	cl_pred_frame_mismatch = false;
+	cl_pred_history_missing = false;
 	cl_pred_frame_drop_time = 0.0;
 	cl_pred_last_reset_frame = -1;
 	cl_pred_last_reset_reason[0] = '\0';
@@ -4045,12 +4093,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	unsigned int ack_cmd_gap = 0;
 	qboolean guard_hard_reset = false;
 	const char *guard_reason = NULL;
+	qboolean resim_from_base = false;
 
 	CL_Predict_RegisterDebugCvars ();
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_SERVERUPDATE);
 	use_ultra = CL_Predict_UseUltra ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
 	cl_pred_frame_mismatch = false;
+	cl_pred_history_missing = false;
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
 
@@ -4097,6 +4147,19 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		pred_frame_seq = ack;
 		if (!pred_frame_valid)
 			pred_frame_valid = CL_Predict_FindNewestNotNewer (ack, &pred_frame, &pred_frame_seq);
+		if (cl_pred_history_missing)
+		{
+			resim_from_base = true;
+			pred_frame_valid = false;
+			pred_frame_seq = ack;
+			if (cl_pred_debug.value > 0.0f)
+			{
+				Con_DPrintf ("PredFrame history missing: ack=%u latest=%u cmdbackup=%u\n",
+					ack, cl_pred.seq_latest, CL_Predict_GetCmdBackup ());
+				JITTER_LOG ("PredFrame history missing: ack=%u latest=%u cmdbackup=%u\n",
+					ack, cl_pred.seq_latest, CL_Predict_GetCmdBackup ());
+			}
+		}
 		if (CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
 		{
 			unsigned int delta = seq_delta (cl_pred.seq_latest, ack);
@@ -4262,7 +4325,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			cl_pred_reset = true;
 			cl_pred_snap_count++;
 			snap_correction = true;
-			CL_Predict_ClearFrames ();
+			CL_Predict_ClearFrames ("snap correction");
 		}
 		else if (!use_ultra)
 		{
@@ -4519,39 +4582,69 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			step_dt = 0.016f;
 	}
 
-	for (seq = pred_frame_valid ? (pred_frame_seq + 1) : (ack + 1);
-		!CL_Predict_SeqNewer (seq, cl_pred.seq_latest);
-		seq++)
 	{
-		usercmd_t cmd;
+		unsigned int replay_start = pred_frame_valid ? (pred_frame_seq + 1) : (ack + 1);
 
-		if (!CL_Predict_GetCmd (seq, &cmd))
+		if (resim_from_base)
 		{
-			reconcile_outcome = CL_PRED_RECONCILE_HARD_APPLY_NO_RESIM;
-			reconcile_reasons |= CL_PRED_REASON_CMD_MISMATCH;
-			if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+			unsigned int cmdbackup = CL_Predict_GetCmdBackup ();
+
+			if (cmdbackup > 0u)
 			{
-				cl_pred_trace_cur->reconcile_outcome = reconcile_outcome;
-				cl_pred_trace_cur->reconcile_reasons = reconcile_reasons;
+				unsigned int candidate = cl_pred.seq_latest - (cmdbackup - 1u);
+
+				if (CL_Predict_SeqNewer (ack + 1u, candidate))
+					candidate = ack + 1u;
+				replay_start = candidate;
 			}
-			CL_Predict_HardResetToBase ("cmd chain broken");
-			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
-			return;
 		}
-		if (cl_jitter_debug.value > 0.0f)
+
+		for (seq = replay_start;
+			!CL_Predict_SeqNewer (seq, cl_pred.seq_latest);
+			seq++)
 		{
-			Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
-				cmd.sequence, step_dt, host_frametime, 1, step_dt, IN_DidApplyMouseDelta () ? 1 : 0);
-			JITTER_LOG ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
-				cmd.sequence, step_dt, host_frametime, 1, step_dt, IN_DidApplyMouseDelta () ? 1 : 0);
+			usercmd_t cmd;
+
+			if (!CL_Predict_GetCmd (seq, &cmd))
+			{
+				if (resim_from_base)
+				{
+					if (cl_pred_debug.value > 0.0f)
+					{
+						Con_DPrintf ("PredFrame history missing: replay cmd missing seq=%u start=%u latest=%u\n",
+							seq, replay_start, cl_pred.seq_latest);
+						JITTER_LOG ("PredFrame history missing: replay cmd missing seq=%u start=%u latest=%u\n",
+							seq, replay_start, cl_pred.seq_latest);
+					}
+					replay_miss_reason = CL_PRED_REPLAY_MISS_SLOT_MISMATCH;
+					break;
+				}
+				reconcile_outcome = CL_PRED_RECONCILE_HARD_APPLY_NO_RESIM;
+				reconcile_reasons |= CL_PRED_REASON_CMD_MISMATCH;
+				if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+				{
+					cl_pred_trace_cur->reconcile_outcome = reconcile_outcome;
+					cl_pred_trace_cur->reconcile_reasons = reconcile_reasons;
+				}
+				CL_Predict_HardResetToBase ("cmd chain broken");
+				CL_Predict_ApplyToClient (&cl_pred.predicted, false);
+				return;
+			}
+			if (cl_jitter_debug.value > 0.0f)
+			{
+				Con_Printf ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+					cmd.sequence, step_dt, host_frametime, 1, step_dt, IN_DidApplyMouseDelta () ? 1 : 0);
+				JITTER_LOG ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
+					cmd.sequence, step_dt, host_frametime, 1, step_dt, IN_DidApplyMouseDelta () ? 1 : 0);
+			}
+			CL_Predict_TraceMark (CL_PRED_TRACE_MARK_REPLAY);
+			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
+			CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
+			resim_cmd = cmd;
+			resim_cmd_valid = true;
+			CL_Predict_DebugLogCmd ("resim", &cmd, step_dt);
+			cl_pred_replay_count++;
 		}
-		CL_Predict_TraceMark (CL_PRED_TRACE_MARK_REPLAY);
-		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
-		CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
-		resim_cmd = cmd;
-		resim_cmd_valid = true;
-		CL_Predict_DebugLogCmd ("resim", &cmd, step_dt);
-		cl_pred_replay_count++;
 	}
 	if (!CL_Predict_SelfCheck (ack, "post-replay"))
 		return;
