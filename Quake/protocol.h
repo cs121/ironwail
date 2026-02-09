@@ -383,7 +383,7 @@ typedef struct
 	byte	impulse;
 } usercmd_t;
 
-#define CMD_BACKUP	2
+#define CMD_BACKUP	64
 #define CMD_RING	256
 
 #endif	/* _QUAKE_PROTOCOL_H */
