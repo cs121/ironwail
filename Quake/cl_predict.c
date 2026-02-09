@@ -71,6 +71,8 @@ static cvar_t cl_pred_hard_snap_threshold = {"cl_pred_hard_snap_threshold", "12"
 
 #define CL_PRED_FRAME_RING 1024
 
+typedef struct cl_pred_ground_cache_s cl_pred_ground_cache_t;
+
 typedef struct
 {
 	unsigned int	cmd_seq;
@@ -94,7 +96,7 @@ typedef struct
 	qboolean	valid;
 } cl_pred_frame_t;
 
-typedef struct
+typedef struct cl_pred_ground_cache_s
 {
 	int		id;
 	vec3_t		last_origin;
@@ -357,7 +359,7 @@ typedef struct
 	int			replay_miss_total;
 } cl_pred_trace_ring_t;
 
-static cl_pred_trace_ring_t cl_pred_trace;
+static cl_pred_trace_ring_t cl_pred_trace_state;
 static cl_pred_trace_record_t *cl_pred_trace_cur;
 static float cl_pred_dt_snap_target;
 static unsigned int cl_pred_dt_flags_last;
@@ -508,12 +510,12 @@ static void CL_Predict_TraceWriteLine (const char *fmt, ...)
 
 static void CL_Predict_TraceReset (void)
 {
-	if (cl_pred_trace.records)
+	if (cl_pred_trace_state.records)
 	{
-		Z_Free (cl_pred_trace.records);
-		cl_pred_trace.records = NULL;
+		Z_Free (cl_pred_trace_state.records);
+		cl_pred_trace_state.records = NULL;
 	}
-	memset (&cl_pred_trace, 0, sizeof(cl_pred_trace));
+	memset (&cl_pred_trace_state, 0, sizeof(cl_pred_trace_state));
 	cl_pred_trace_cur = NULL;
 	cl.predicted_onground = false;
 	cl.predicted_groundent = 0;
@@ -546,13 +548,13 @@ static void CL_Predict_TraceEnsureBuffer (void)
 	}
 
 	capacity = CL_Predict_TraceDesiredCapacity ();
-	if (capacity == cl_pred_trace.capacity && cl_pred_trace.records)
+	if (capacity == cl_pred_trace_state.capacity && cl_pred_trace_state.records)
 		return;
 
 	CL_Predict_TraceReset ();
-	cl_pred_trace.capacity = capacity;
-	cl_pred_trace.records = (cl_pred_trace_record_t *)Z_Malloc (sizeof(*cl_pred_trace.records) * (size_t)capacity);
-	memset (cl_pred_trace.records, 0, sizeof(*cl_pred_trace.records) * (size_t)capacity);
+	cl_pred_trace_state.capacity = capacity;
+	cl_pred_trace_state.records = (cl_pred_trace_record_t *)Z_Malloc (sizeof(*cl_pred_trace_state.records) * (size_t)capacity);
+	memset (cl_pred_trace_state.records, 0, sizeof(*cl_pred_trace_state.records) * (size_t)capacity);
 }
 
 static cl_pred_trace_record_t *CL_Predict_TraceAllocRecord (int type)
@@ -560,15 +562,15 @@ static cl_pred_trace_record_t *CL_Predict_TraceAllocRecord (int type)
 	cl_pred_trace_record_t *rec;
 
 	CL_Predict_TraceEnsureBuffer ();
-	if (!cl_pred_trace.records || cl_pred_trace.capacity <= 0)
+	if (!cl_pred_trace_state.records || cl_pred_trace_state.capacity <= 0)
 		return NULL;
 
-	rec = &cl_pred_trace.records[cl_pred_trace.head];
+	rec = &cl_pred_trace_state.records[cl_pred_trace_state.head];
 	memset (rec, 0, sizeof(*rec));
 	rec->type = type;
-	cl_pred_trace.head = (cl_pred_trace.head + 1) % cl_pred_trace.capacity;
-	if (cl_pred_trace.count < cl_pred_trace.capacity)
-		cl_pred_trace.count++;
+	cl_pred_trace_state.head = (cl_pred_trace_state.head + 1) % cl_pred_trace_state.capacity;
+	if (cl_pred_trace_state.count < cl_pred_trace_state.capacity)
+		cl_pred_trace_state.count++;
 	return rec;
 }
 
@@ -613,15 +615,15 @@ static float CL_Predict_TraceReplayHitRate (double now)
 	int total = 0;
 	double window = cl_pred_trace_ring.value;
 
-	if (!cl_pred_trace.records || cl_pred_trace.count <= 0)
+	if (!cl_pred_trace_state.records || cl_pred_trace_state.count <= 0)
 		return 0.0f;
 	if (!isfinite (window) || window <= 0.0)
 		window = 10.0;
 
-	for (i = 0; i < cl_pred_trace.count; i++)
+	for (i = 0; i < cl_pred_trace_state.count; i++)
 	{
-		int index = (cl_pred_trace.head - 1 - i + cl_pred_trace.capacity) % cl_pred_trace.capacity;
-		const cl_pred_trace_record_t *rec = &cl_pred_trace.records[index];
+		int index = (cl_pred_trace_state.head - 1 - i + cl_pred_trace_state.capacity) % cl_pred_trace_state.capacity;
+		const cl_pred_trace_record_t *rec = &cl_pred_trace_state.records[index];
 
 		if (rec->type != CL_PRED_TRACE_TYPE_FRAME)
 			continue;
@@ -672,7 +674,7 @@ static void CL_Predict_TraceDumpInternal (const char *reason)
 
 	if (!CL_Predict_TraceEnabled ())
 		return;
-	if (!cl_pred_trace.records || cl_pred_trace.count <= 0)
+	if (!cl_pred_trace_state.records || cl_pred_trace_state.count <= 0)
 		return;
 
 	fp = CL_Predict_TraceOpenFile ();
@@ -687,13 +689,13 @@ static void CL_Predict_TraceDumpInternal (const char *reason)
 		q_strlcpy (stamp, "unknown", sizeof(stamp));
 
 	fprintf (fp, "=== pred_trace dump start time=%s reason=%s ring=%.2fs count=%d ===\n",
-		stamp, reason ? reason : "manual", cl_pred_trace_ring.value, cl_pred_trace.count);
+		stamp, reason ? reason : "manual", cl_pred_trace_ring.value, cl_pred_trace_state.count);
 	fprintf (fp, "columns: type frame rt cltime svtime ack latest dt_real dt_raw dt_host dt_use dt_use_auto src_force src_auto flags snap_target acc_before acc_after step_dt steps steps_cap steps_cap_hit render_frac pred_apply render_apply markers order_warn server snap hard_reset pred_err pos_err vel_err onground groundent ground_valid ground_delta ground_yaw store_written store_seq store_count store_skip store_skip_reason replay_hit replay_miss pred_count pred_min pred_max pred_overwrite replay_hit_rate outcome reasons inv_break steps_zero dt_real_raw_mean dt_real_raw_var dt_real_host_mean dt_real_host_var dt_samples_raw dt_samples_host\n");
 
-	for (i = 0; i < cl_pred_trace.count; i++)
+	for (i = 0; i < cl_pred_trace_state.count; i++)
 	{
-		int index = (cl_pred_trace.head - cl_pred_trace.count + i + cl_pred_trace.capacity) % cl_pred_trace.capacity;
-		const cl_pred_trace_record_t *rec = &cl_pred_trace.records[index];
+		int index = (cl_pred_trace_state.head - cl_pred_trace_state.count + i + cl_pred_trace_state.capacity) % cl_pred_trace_state.capacity;
+		const cl_pred_trace_record_t *rec = &cl_pred_trace_state.records[index];
 
 		fprintf (fp,
 			"%d %d %.6f %.6f %.6f %u %u %.6f %.6f %.6f %.6f %.6f %d %d 0x%X %.6f %.6f %.6f %.6f %d %d %d %.6f %d %d 0x%X %d %d %d %d %.3f %.3f %.3f %d %d %d %.3f %.3f %d %u %d %d %d %d %d %d %d %u %u %d %.3f %d 0x%X %d %d %.6f %.6f %.6f %.6f %d %d\n",
@@ -777,10 +779,10 @@ static void CL_Predict_TraceMaybeAutodump (const char *reason, float error_len, 
 		return;
 	if ((snap || steps_zero) && cl_pred_trace_autodump_snap.value <= 0.0f)
 		return;
-	if (realtime - cl_pred_trace.last_autodump_time < 1.0)
+	if (realtime - cl_pred_trace_state.last_autodump_time < 1.0)
 		return;
 
-	cl_pred_trace.last_autodump_time = realtime;
+	cl_pred_trace_state.last_autodump_time = realtime;
 	CL_Predict_TraceDumpInternal (reason);
 }
 
@@ -1154,8 +1156,8 @@ static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const
 	if (CL_Predict_TraceEnabled ())
 	{
 		if (overwrite)
-			cl_pred_trace.storeframe_overwrites++;
-		cl_pred_trace.storeframe_written_total++;
+			cl_pred_trace_state.storeframe_overwrites++;
+		cl_pred_trace_state.storeframe_written_total++;
 		if (cl_pred_trace_cur)
 		{
 			cl_pred_trace_cur->storeframe_written = 1;
@@ -1742,8 +1744,8 @@ static void CL_Predict_RunFrameSteps (void)
 			if (!store_frame && CL_Predict_TraceEnabled ())
 			{
 				store_skip_reason = (cmd.sequence <= 0) ? CL_PRED_STORE_SKIP_SEQ_ZERO : CL_PRED_STORE_SKIP_RENDER_CMD_INVALID;
-				cl_pred_trace.storeframe_skipped_total++;
-				cl_pred_trace.storeframe_skip_reason = store_skip_reason;
+				cl_pred_trace_state.storeframe_skipped_total++;
+				cl_pred_trace_state.storeframe_skip_reason = store_skip_reason;
 				if (cl_pred_trace_cur)
 				{
 					cl_pred_trace_cur->storeframe_skip_count++;
@@ -1791,8 +1793,8 @@ static void CL_Predict_RunFrameSteps (void)
 			if (!store_frame && CL_Predict_TraceEnabled ())
 			{
 				store_skip_reason = (cmd.sequence <= 0) ? CL_PRED_STORE_SKIP_SEQ_ZERO : CL_PRED_STORE_SKIP_RENDER_CMD_INVALID;
-				cl_pred_trace.storeframe_skipped_total++;
-				cl_pred_trace.storeframe_skip_reason = store_skip_reason;
+				cl_pred_trace_state.storeframe_skipped_total++;
+				cl_pred_trace_state.storeframe_skip_reason = store_skip_reason;
 				if (cl_pred_trace_cur)
 				{
 					cl_pred_trace_cur->storeframe_skip_count++;
@@ -2077,8 +2079,8 @@ static void CL_Predict_StateDump_f (void)
 	CL_Predict_TraceWriteLine ("apply pred_reason=%d render_reason=%d replay=%d snap=%d smooth=%d",
 		cl_pred_apply_pred_reason, cl_pred_apply_render_reason, cl_pred_replay_count, cl_pred_snap_count, cl_pred_smooth_count);
 	CL_Predict_TraceWriteLine ("storeframe total_written=%d total_skipped=%d overwrites=%d replay_hits=%d replay_miss=%d",
-		cl_pred_trace.storeframe_written_total, cl_pred_trace.storeframe_skipped_total, cl_pred_trace.storeframe_overwrites,
-		cl_pred_trace.replay_hits_total, cl_pred_trace.replay_miss_total);
+		cl_pred_trace_state.storeframe_written_total, cl_pred_trace_state.storeframe_skipped_total, cl_pred_trace_state.storeframe_overwrites,
+		cl_pred_trace_state.replay_hits_total, cl_pred_trace_state.replay_miss_total);
 	CL_Predict_TraceWriteLine ("base origin=%.3f %.3f %.3f vel=%.3f %.3f %.3f ang=%.3f %.3f %.3f onground=%d groundent=%d",
 		cl_pred.base.origin[0], cl_pred.base.origin[1], cl_pred.base.origin[2],
 		cl_pred.base.velocity[0], cl_pred.base.velocity[1], cl_pred.base.velocity[2],
@@ -3475,7 +3477,7 @@ void CL_Predict_BeginFrame (void)
 			cl_pred_trace_cur->server_time = cl.server_time;
 			cl_pred_trace_cur->ack_seq = cl_pred_last_ack_seq;
 			cl_pred_trace_cur->latest_seq = cl_pred.seq_latest;
-			cl_pred_trace_cur->pred_frame_overwrites = cl_pred_trace.storeframe_overwrites;
+			cl_pred_trace_cur->pred_frame_overwrites = cl_pred_trace_state.storeframe_overwrites;
 			CL_Predict_TraceComputeFrameWindow (&cl_pred_trace_cur->pred_frame_count,
 				&cl_pred_trace_cur->pred_frame_min_seq, &cl_pred_trace_cur->pred_frame_max_seq);
 			cl_pred_trace_cur->replay_hit_rate = CL_Predict_TraceReplayHitRate (realtime);
@@ -3670,16 +3672,16 @@ void CL_Predict_BeginFrame (void)
 			if (dt_real_valid && isfinite (raw_dt) && raw_dt > 0.0f)
 			{
 				double diff = (double)(real_dt - raw_dt);
-				cl_pred_trace.dt_real_raw_sum += diff;
-				cl_pred_trace.dt_real_raw_sumsq += diff * diff;
-				cl_pred_trace.dt_samples_raw++;
+				cl_pred_trace_state.dt_real_raw_sum += diff;
+				cl_pred_trace_state.dt_real_raw_sumsq += diff * diff;
+				cl_pred_trace_state.dt_samples_raw++;
 			}
 			if (dt_real_valid && isfinite (host_dt) && host_dt > 0.0f)
 			{
 				double diff = (double)(real_dt - host_dt);
-				cl_pred_trace.dt_real_host_sum += diff;
-				cl_pred_trace.dt_real_host_sumsq += diff * diff;
-				cl_pred_trace.dt_samples_host++;
+				cl_pred_trace_state.dt_real_host_sum += diff;
+				cl_pred_trace_state.dt_real_host_sumsq += diff * diff;
+				cl_pred_trace_state.dt_samples_host++;
 			}
 		}
 	}
@@ -3699,9 +3701,9 @@ void CL_Predict_BeginFrame (void)
 	if (CL_Predict_TraceEnabled ())
 	{
 		double now = realtime;
-		if (cl_pred_trace.next_summary_time <= 0.0)
-			cl_pred_trace.next_summary_time = now + 1.0;
-		if (now >= cl_pred_trace.next_summary_time && (cl_pred_trace.dt_samples_raw > 0 || cl_pred_trace.dt_samples_host > 0))
+		if (cl_pred_trace_state.next_summary_time <= 0.0)
+			cl_pred_trace_state.next_summary_time = now + 1.0;
+		if (now >= cl_pred_trace_state.next_summary_time && (cl_pred_trace_state.dt_samples_raw > 0 || cl_pred_trace_state.dt_samples_host > 0))
 		{
 			cl_pred_trace_record_t *summary = CL_Predict_TraceAllocRecord (CL_PRED_TRACE_TYPE_SUMMARY);
 			if (summary)
@@ -3711,15 +3713,15 @@ void CL_Predict_BeginFrame (void)
 				double mean_host = 0.0;
 				double var_host = 0.0;
 
-				if (cl_pred_trace.dt_samples_raw > 0)
+				if (cl_pred_trace_state.dt_samples_raw > 0)
 				{
-					mean_raw = cl_pred_trace.dt_real_raw_sum / (double)cl_pred_trace.dt_samples_raw;
-					var_raw = (cl_pred_trace.dt_real_raw_sumsq / (double)cl_pred_trace.dt_samples_raw) - (mean_raw * mean_raw);
+					mean_raw = cl_pred_trace_state.dt_real_raw_sum / (double)cl_pred_trace_state.dt_samples_raw;
+					var_raw = (cl_pred_trace_state.dt_real_raw_sumsq / (double)cl_pred_trace_state.dt_samples_raw) - (mean_raw * mean_raw);
 				}
-				if (cl_pred_trace.dt_samples_host > 0)
+				if (cl_pred_trace_state.dt_samples_host > 0)
 				{
-					mean_host = cl_pred_trace.dt_real_host_sum / (double)cl_pred_trace.dt_samples_host;
-					var_host = (cl_pred_trace.dt_real_host_sumsq / (double)cl_pred_trace.dt_samples_host) - (mean_host * mean_host);
+					mean_host = cl_pred_trace_state.dt_real_host_sum / (double)cl_pred_trace_state.dt_samples_host;
+					var_host = (cl_pred_trace_state.dt_real_host_sumsq / (double)cl_pred_trace_state.dt_samples_host) - (mean_host * mean_host);
 				}
 
 				summary->realtime = now;
@@ -3727,16 +3729,16 @@ void CL_Predict_BeginFrame (void)
 				summary->dt_real_raw_var = (float)fmax (0.0, var_raw);
 				summary->dt_real_host_mean = (float)mean_host;
 				summary->dt_real_host_var = (float)fmax (0.0, var_host);
-				summary->dt_summary_samples_raw = cl_pred_trace.dt_samples_raw;
-				summary->dt_summary_samples_host = cl_pred_trace.dt_samples_host;
+				summary->dt_summary_samples_raw = cl_pred_trace_state.dt_samples_raw;
+				summary->dt_summary_samples_host = cl_pred_trace_state.dt_samples_host;
 			}
-			cl_pred_trace.dt_real_raw_sum = 0.0;
-			cl_pred_trace.dt_real_raw_sumsq = 0.0;
-			cl_pred_trace.dt_real_host_sum = 0.0;
-			cl_pred_trace.dt_real_host_sumsq = 0.0;
-			cl_pred_trace.dt_samples_raw = 0;
-			cl_pred_trace.dt_samples_host = 0;
-			cl_pred_trace.next_summary_time = now + 1.0;
+			cl_pred_trace_state.dt_real_raw_sum = 0.0;
+			cl_pred_trace_state.dt_real_raw_sumsq = 0.0;
+			cl_pred_trace_state.dt_real_host_sum = 0.0;
+			cl_pred_trace_state.dt_real_host_sumsq = 0.0;
+			cl_pred_trace_state.dt_samples_raw = 0;
+			cl_pred_trace_state.dt_samples_host = 0;
+			cl_pred_trace_state.next_summary_time = now + 1.0;
 		}
 	}
 
@@ -4392,9 +4394,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	if (CL_Predict_TraceEnabled ())
 	{
 		if (pred_frame_valid)
-			cl_pred_trace.replay_hits_total++;
+			cl_pred_trace_state.replay_hits_total++;
 		else
-			cl_pred_trace.replay_miss_total++;
+			cl_pred_trace_state.replay_miss_total++;
 	}
 
 	CL_Predict_TraceMaybeAutodump (snap_correction ? "autodump_snap" : "autodump_err", error_len, snap_correction, (cl_pred_steps_this_frame == 0));
