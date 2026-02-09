@@ -9,6 +9,8 @@ Copyright (C) 2024
 
 #include "quakedef.h"
 #include <float.h>
+#include <stdarg.h>
+#include <time.h>
 
 extern cvar_t sv_maxspeed;
 extern cvar_t sv_accelerate;
@@ -45,6 +47,20 @@ static cvar_t cl_pred_accum_debug_level = {"cl_pred_accum_debug_level", "0", CVA
 static cvar_t cl_pred_accum_maxdt = {"cl_pred_accum_maxdt", "0.25", CVAR_NONE};
 static cvar_t cl_pred_accum_unbias = {"cl_pred_accum_unbias", "0", CVAR_NONE};
 static cvar_t cl_pred_store_render_cmd_only = {"cl_pred_store_render_cmd_only", "0", CVAR_NONE};
+static cvar_t cl_pred_trace = {"cl_pred_trace", "0", CVAR_NONE};
+static cvar_t cl_pred_trace_level = {"cl_pred_trace_level", "1", CVAR_NONE};
+static cvar_t cl_pred_trace_file = {"cl_pred_trace_file", "pred_trace.log", CVAR_NONE};
+static cvar_t cl_pred_trace_ring = {"cl_pred_trace_ring", "10", CVAR_NONE};
+static cvar_t cl_pred_trace_autodump = {"cl_pred_trace_autodump", "1", CVAR_NONE};
+static cvar_t cl_pred_trace_autodump_err = {"cl_pred_trace_autodump_err", "8.0", CVAR_NONE};
+static cvar_t cl_pred_trace_autodump_snap = {"cl_pred_trace_autodump_snap", "1", CVAR_NONE};
+static cvar_t cl_pred_dt_source = {"cl_pred_dt_source", "0", CVAR_NONE};
+static cvar_t cl_pred_storeframe_mode = {"cl_pred_storeframe_mode", "0", CVAR_NONE};
+static cvar_t cl_pred_snap_unbias = {"cl_pred_snap_unbias", "0", CVAR_NONE};
+static cvar_t cl_pred_accum_cap = {"cl_pred_accum_cap", "0", CVAR_NONE};
+static cvar_t cl_pred_max_steps = {"cl_pred_max_steps", "0", CVAR_NONE};
+static cvar_t cl_pred_hard_reset_on_snap = {"cl_pred_hard_reset_on_snap", "0", CVAR_NONE};
+static cvar_t cl_pred_mover_base_fix = {"cl_pred_mover_base_fix", "0", CVAR_NONE};
 
 #if defined(_DEBUG) || !defined(NDEBUG)
 #define CL_PRED_ASSERT(condition) SDL_assert(condition)
@@ -184,7 +200,156 @@ static qboolean cl_pred_warned_overflow;
 static qboolean cl_pred_warned_replay;
 static double cl_pred_frame_drop_time;
 
-#define CL_PRED_ACCUM_DT_HISTORY 120
+#define CL_PRED_ACCUM_DT_HISTORY 240
+#define CL_PRED_TRACE_MAX_RING 8192
+
+typedef enum
+{
+	CL_PRED_DT_SRC_NONE = 0,
+	CL_PRED_DT_SRC_REAL,
+	CL_PRED_DT_SRC_RAW,
+	CL_PRED_DT_SRC_HOST,
+	CL_PRED_DT_SRC_FALLBACK,
+} cl_pred_dt_source_t;
+
+typedef enum
+{
+	CL_PRED_TRACE_MARK_BEGINFRAME = 0,
+	CL_PRED_TRACE_MARK_SETUPCMD,
+	CL_PRED_TRACE_MARK_RUNFRAME,
+	CL_PRED_TRACE_MARK_STOREFRAME,
+	CL_PRED_TRACE_MARK_SERVERUPDATE,
+	CL_PRED_TRACE_MARK_REPLAY,
+	CL_PRED_TRACE_MARK_RENDER,
+	CL_PRED_TRACE_MARK_COUNT,
+} cl_pred_trace_marker_t;
+
+enum
+{
+	CL_PRED_DT_FLAG_SANE = 1 << 0,
+	CL_PRED_DT_FLAG_SNAPPED = 1 << 1,
+	CL_PRED_DT_FLAG_CLAMPED = 1 << 2,
+	CL_PRED_DT_FLAG_DUPLICATE = 1 << 3,
+	CL_PRED_DT_FLAG_NEGATIVE = 1 << 4,
+	CL_PRED_DT_FLAG_ZERO = 1 << 5,
+	CL_PRED_DT_FLAG_FALLBACK = 1 << 6,
+};
+
+enum
+{
+	CL_PRED_TRACE_TYPE_FRAME = 0,
+	CL_PRED_TRACE_TYPE_SUMMARY,
+	CL_PRED_TRACE_TYPE_EVENT,
+};
+
+enum
+{
+	CL_PRED_STORE_SKIP_NONE = 0,
+	CL_PRED_STORE_SKIP_SEQ_ZERO,
+	CL_PRED_STORE_SKIP_RENDER_CMD_INVALID,
+};
+
+enum
+{
+	CL_PRED_REPLAY_MISS_NONE = 0,
+	CL_PRED_REPLAY_MISS_NO_BASE,
+	CL_PRED_REPLAY_MISS_OVERFLOW,
+	CL_PRED_REPLAY_MISS_SLOT_MISMATCH,
+	CL_PRED_REPLAY_MISS_SEQ_GAP,
+};
+
+typedef struct
+{
+	int			type;
+	int			framecount;
+	double			realtime;
+	double			cl_time;
+	double			server_time;
+	unsigned int		ack_seq;
+	unsigned int		latest_seq;
+	float			dt_real;
+	float			dt_raw;
+	float			dt_host;
+	float			dt_use;
+	float			dt_use_auto;
+	int			dt_source_forced;
+	int			dt_source_auto;
+	unsigned int		dt_flags;
+	float			dt_snap_target;
+	float			accum_before;
+	float			accum_after;
+	float			step_dt;
+	int			steps_taken;
+	int			steps_cap;
+	int			steps_cap_hit;
+	float			render_frac;
+	int			pred_apply_reason;
+	int			render_apply_reason;
+	unsigned int		marker_mask;
+	int			order_warn;
+	int			server_applied;
+	int			snap;
+	int			hard_reset;
+	float			pred_err;
+	float			pos_err;
+	float			vel_err;
+	int			onground;
+	int			groundent;
+	int			ground_valid;
+	float			ground_delta;
+	float			ground_yaw;
+	int			storeframe_written;
+	unsigned int		storeframe_seq;
+	int			storeframe_count;
+	int			storeframe_skip_count;
+	int			storeframe_skip_reason;
+	int			replay_hit;
+	int			replay_miss_reason;
+	int			pred_frame_count;
+	unsigned int		pred_frame_min_seq;
+	unsigned int		pred_frame_max_seq;
+	int			pred_frame_overwrites;
+	float			replay_hit_rate;
+	int			reconcile_outcome;
+	unsigned int		reconcile_reasons;
+	int			invariant_break;
+	int			steps_zero;
+	float			dt_real_raw_mean;
+	float			dt_real_raw_var;
+	float			dt_real_host_mean;
+	float			dt_real_host_var;
+	int			dt_summary_samples_raw;
+	int			dt_summary_samples_host;
+} cl_pred_trace_record_t;
+
+typedef struct
+{
+	cl_pred_trace_record_t *records;
+	int			capacity;
+	int			count;
+	int			head;
+	int			last_framecount;
+	double			next_summary_time;
+	double			last_autodump_time;
+	double			dt_real_raw_sum;
+	double			dt_real_raw_sumsq;
+	double			dt_real_host_sum;
+	double			dt_real_host_sumsq;
+	int			dt_samples_raw;
+	int			dt_samples_host;
+	int			storeframe_overwrites;
+	int			storeframe_written_total;
+	int			storeframe_skipped_total;
+	int			storeframe_skip_reason;
+	int			replay_hits_total;
+	int			replay_miss_total;
+} cl_pred_trace_ring_t;
+
+static cl_pred_trace_ring_t cl_pred_trace;
+static cl_pred_trace_record_t *cl_pred_trace_cur;
+static float cl_pred_dt_snap_target;
+static unsigned int cl_pred_dt_flags_last;
+static int cl_pred_steps_cap_hit;
 typedef struct
 {
 	double		dt_sum;
@@ -220,6 +385,9 @@ static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *stat
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
 static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
 static void CL_Predict_AccumSelftest_f (void);
+static void CL_Predict_StateDump_f (void);
+static void CL_Predict_CvarDump_f (void);
+static void CL_Predict_TraceDump_f (void);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -272,11 +440,348 @@ static void CL_EnsureViewEntityOrigin (const char *reason)
 	}
 }
 
+static qboolean CL_Predict_TraceEnabled (void)
+{
+	return (cl_pred_trace.value > 0.0f);
+}
+
+static const char *CL_Predict_TraceLogPath (char *buffer, size_t buffer_size)
+{
+	const char *filename = cl_pred_trace_file.string;
+
+	if (!filename || !filename[0])
+		return NULL;
+
+	if (host_parms && host_parms->userdir && host_parms->userdir[0])
+		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->userdir, filename);
+	else if (host_parms && host_parms->basedir && host_parms->basedir[0])
+		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->basedir, filename);
+	else
+		q_snprintf (buffer, buffer_size, "%s", filename);
+
+	return buffer;
+}
+
+static FILE *CL_Predict_TraceOpenFile (void)
+{
+	char path[MAX_OSPATH];
+	const char *logpath = CL_Predict_TraceLogPath (path, sizeof(path));
+
+	if (!logpath)
+		return NULL;
+
+	return Sys_fopen (logpath, "ab");
+}
+
+static void CL_Predict_TraceWriteLine (const char *fmt, ...)
+{
+	va_list argptr;
+	char text[4096];
+	FILE *fp;
+
+	fp = CL_Predict_TraceOpenFile ();
+	if (!fp)
+		return;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (text, sizeof(text), fmt, argptr);
+	va_end (argptr);
+
+	fwrite (text, 1, strlen (text), fp);
+	fwrite ("\n", 1, 1, fp);
+	fclose (fp);
+}
+
+static void CL_Predict_TraceReset (void)
+{
+	if (cl_pred_trace.records)
+	{
+		Z_Free (cl_pred_trace.records);
+		cl_pred_trace.records = NULL;
+	}
+	memset (&cl_pred_trace, 0, sizeof(cl_pred_trace));
+	cl_pred_trace_cur = NULL;
+}
+
+static int CL_Predict_TraceDesiredCapacity (void)
+{
+	float ring_seconds = cl_pred_trace_ring.value;
+	int capacity;
+
+	if (!isfinite (ring_seconds) || ring_seconds <= 0.0f)
+		ring_seconds = 10.0f;
+
+	capacity = (int)ceilf (ring_seconds * 240.0f);
+	if (capacity < 64)
+		capacity = 64;
+	if (capacity > CL_PRED_TRACE_MAX_RING)
+		capacity = CL_PRED_TRACE_MAX_RING;
+	return capacity;
+}
+
+static void CL_Predict_TraceEnsureBuffer (void)
+{
+	int capacity;
+
+	if (!CL_Predict_TraceEnabled ())
+	{
+		CL_Predict_TraceReset ();
+		return;
+	}
+
+	capacity = CL_Predict_TraceDesiredCapacity ();
+	if (capacity == cl_pred_trace.capacity && cl_pred_trace.records)
+		return;
+
+	CL_Predict_TraceReset ();
+	cl_pred_trace.capacity = capacity;
+	cl_pred_trace.records = (cl_pred_trace_record_t *)Z_Malloc (sizeof(*cl_pred_trace.records) * (size_t)capacity);
+	memset (cl_pred_trace.records, 0, sizeof(*cl_pred_trace.records) * (size_t)capacity);
+}
+
+static cl_pred_trace_record_t *CL_Predict_TraceAllocRecord (int type)
+{
+	cl_pred_trace_record_t *rec;
+
+	CL_Predict_TraceEnsureBuffer ();
+	if (!cl_pred_trace.records || cl_pred_trace.capacity <= 0)
+		return NULL;
+
+	rec = &cl_pred_trace.records[cl_pred_trace.head];
+	memset (rec, 0, sizeof(*rec));
+	rec->type = type;
+	cl_pred_trace.head = (cl_pred_trace.head + 1) % cl_pred_trace.capacity;
+	if (cl_pred_trace.count < cl_pred_trace.capacity)
+		cl_pred_trace.count++;
+	return rec;
+}
+
+static void CL_Predict_TraceComputeFrameWindow (int *out_count, unsigned int *out_min, unsigned int *out_max)
+{
+	int i;
+	int count = 0;
+	unsigned int min_seq = 0;
+	unsigned int max_seq = 0;
+
+	for (i = 0; i < CL_PRED_FRAME_RING; i++)
+	{
+		if (!cl_pred.frames[i].valid)
+			continue;
+		if (count == 0)
+		{
+			min_seq = cl_pred.frames[i].seq;
+			max_seq = cl_pred.frames[i].seq;
+		}
+		else
+		{
+			if (CL_Predict_SeqNewer (min_seq, cl_pred.frames[i].seq))
+				min_seq = cl_pred.frames[i].seq;
+			if (CL_Predict_SeqNewer (cl_pred.frames[i].seq, max_seq))
+				max_seq = cl_pred.frames[i].seq;
+		}
+		count++;
+	}
+
+	if (out_count)
+		*out_count = count;
+	if (out_min)
+		*out_min = min_seq;
+	if (out_max)
+		*out_max = max_seq;
+}
+
+static float CL_Predict_TraceReplayHitRate (double now)
+{
+	int i;
+	int hits = 0;
+	int total = 0;
+	double window = cl_pred_trace_ring.value;
+
+	if (!cl_pred_trace.records || cl_pred_trace.count <= 0)
+		return 0.0f;
+	if (!isfinite (window) || window <= 0.0)
+		window = 10.0;
+
+	for (i = 0; i < cl_pred_trace.count; i++)
+	{
+		int index = (cl_pred_trace.head - 1 - i + cl_pred_trace.capacity) % cl_pred_trace.capacity;
+		const cl_pred_trace_record_t *rec = &cl_pred_trace.records[index];
+
+		if (rec->type != CL_PRED_TRACE_TYPE_FRAME)
+			continue;
+		if (now - rec->realtime > window)
+			break;
+		if (rec->server_applied)
+		{
+			total++;
+			if (rec->replay_hit)
+				hits++;
+		}
+	}
+
+	if (total <= 0)
+		return 0.0f;
+	return (float)hits / (float)total;
+}
+
+static void CL_Predict_TraceMark (cl_pred_trace_marker_t marker)
+{
+	if (!CL_Predict_TraceEnabled () || !cl_pred_trace_cur)
+		return;
+
+	if (marker < 0 || marker >= CL_PRED_TRACE_MARK_COUNT)
+		return;
+
+	if ((marker == CL_PRED_TRACE_MARK_BEGINFRAME) && cl_pred_trace_cur->marker_mask != 0)
+		cl_pred_trace_cur->order_warn = 1;
+	if (marker == CL_PRED_TRACE_MARK_SETUPCMD && !(cl_pred_trace_cur->marker_mask & (1u << CL_PRED_TRACE_MARK_BEGINFRAME)))
+		cl_pred_trace_cur->order_warn = 1;
+	if (marker == CL_PRED_TRACE_MARK_RUNFRAME && !(cl_pred_trace_cur->marker_mask & (1u << CL_PRED_TRACE_MARK_BEGINFRAME)))
+		cl_pred_trace_cur->order_warn = 1;
+	if (marker == CL_PRED_TRACE_MARK_SERVERUPDATE && !(cl_pred_trace_cur->marker_mask & (1u << CL_PRED_TRACE_MARK_BEGINFRAME)))
+		cl_pred_trace_cur->order_warn = 1;
+	if (marker == CL_PRED_TRACE_MARK_RENDER && !(cl_pred_trace_cur->marker_mask & (1u << CL_PRED_TRACE_MARK_RUNFRAME)))
+		cl_pred_trace_cur->order_warn = 1;
+
+	cl_pred_trace_cur->marker_mask |= (1u << marker);
+}
+
+static void CL_Predict_TraceDumpInternal (const char *reason)
+{
+	FILE *fp;
+	time_t now;
+	struct tm *tm_now;
+	char stamp[64];
+	int i;
+
+	if (!CL_Predict_TraceEnabled ())
+		return;
+	if (!cl_pred_trace.records || cl_pred_trace.count <= 0)
+		return;
+
+	fp = CL_Predict_TraceOpenFile ();
+	if (!fp)
+		return;
+
+	now = time (NULL);
+	tm_now = localtime (&now);
+	if (tm_now)
+		strftime (stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", tm_now);
+	else
+		q_strlcpy (stamp, "unknown", sizeof(stamp));
+
+	fprintf (fp, "=== pred_trace dump start time=%s reason=%s ring=%.2fs count=%d ===\n",
+		stamp, reason ? reason : "manual", cl_pred_trace_ring.value, cl_pred_trace.count);
+	fprintf (fp, "columns: type frame rt cltime svtime ack latest dt_real dt_raw dt_host dt_use dt_use_auto src_force src_auto flags snap_target acc_before acc_after step_dt steps steps_cap steps_cap_hit render_frac pred_apply render_apply markers order_warn server snap hard_reset pred_err pos_err vel_err onground groundent ground_valid ground_delta ground_yaw store_written store_seq store_count store_skip store_skip_reason replay_hit replay_miss pred_count pred_min pred_max pred_overwrite replay_hit_rate outcome reasons inv_break steps_zero dt_real_raw_mean dt_real_raw_var dt_real_host_mean dt_real_host_var dt_samples_raw dt_samples_host\n");
+
+	for (i = 0; i < cl_pred_trace.count; i++)
+	{
+		int index = (cl_pred_trace.head - cl_pred_trace.count + i + cl_pred_trace.capacity) % cl_pred_trace.capacity;
+		const cl_pred_trace_record_t *rec = &cl_pred_trace.records[index];
+
+		fprintf (fp,
+			"%d %d %.6f %.6f %.6f %u %u %.6f %.6f %.6f %.6f %.6f %d %d 0x%X %.6f %.6f %.6f %.6f %d %d %d %.6f %d %d 0x%X %d %d %d %d %.3f %.3f %.3f %d %d %d %.3f %.3f %d %u %d %d %d %d %d %d %d %u %u %d %.3f %d 0x%X %d %d %.6f %.6f %.6f %.6f %d %d\n",
+			rec->type,
+			rec->framecount,
+			rec->realtime,
+			rec->cl_time,
+			rec->server_time,
+			rec->ack_seq,
+			rec->latest_seq,
+			rec->dt_real,
+			rec->dt_raw,
+			rec->dt_host,
+			rec->dt_use,
+			rec->dt_use_auto,
+			rec->dt_source_forced,
+			rec->dt_source_auto,
+			rec->dt_flags,
+			rec->dt_snap_target,
+			rec->accum_before,
+			rec->accum_after,
+			rec->step_dt,
+			rec->steps_taken,
+			rec->steps_cap,
+			rec->steps_cap_hit,
+			rec->render_frac,
+			rec->pred_apply_reason,
+			rec->render_apply_reason,
+			rec->marker_mask,
+			rec->order_warn,
+			rec->server_applied,
+			rec->snap,
+			rec->hard_reset,
+			rec->pred_err,
+			rec->pos_err,
+			rec->vel_err,
+			rec->onground,
+			rec->groundent,
+			rec->ground_valid,
+			rec->ground_delta,
+			rec->ground_yaw,
+			rec->storeframe_written,
+			rec->storeframe_seq,
+			rec->storeframe_count,
+			rec->storeframe_skip_count,
+			rec->storeframe_skip_reason,
+			rec->replay_hit,
+			rec->replay_miss_reason,
+			rec->pred_frame_count,
+			rec->pred_frame_min_seq,
+			rec->pred_frame_max_seq,
+			rec->pred_frame_overwrites,
+			rec->replay_hit_rate,
+			rec->reconcile_outcome,
+			rec->reconcile_reasons,
+			rec->invariant_break,
+			rec->steps_zero,
+			rec->dt_real_raw_mean,
+			rec->dt_real_raw_var,
+			rec->dt_real_host_mean,
+			rec->dt_real_host_var,
+			rec->dt_summary_samples_raw,
+			rec->dt_summary_samples_host);
+	}
+
+	fprintf (fp, "=== pred_trace dump end ===\n");
+	fclose (fp);
+}
+
+static void CL_Predict_TraceMaybeAutodump (const char *reason, float error_len, qboolean snap, qboolean steps_zero)
+{
+	float threshold = cl_pred_trace_autodump_err.value;
+
+	if (!CL_Predict_TraceEnabled ())
+		return;
+	if (cl_pred_trace_autodump.value <= 0.0f)
+		return;
+	if (!isfinite (threshold) || threshold <= 0.0f)
+		threshold = 8.0f;
+	if (error_len < threshold)
+		return;
+	if ((snap || steps_zero) && cl_pred_trace_autodump_snap.value <= 0.0f)
+		return;
+	if (realtime - cl_pred_trace.last_autodump_time < 1.0)
+		return;
+
+	cl_pred_trace.last_autodump_time = realtime;
+	CL_Predict_TraceDumpInternal (reason);
+}
+
 static void CL_Predict_RegisterDebugCvars (void)
 {
 	if (cl_pred_debug_registered)
 		return;
 
+	/*
+	Prediction telemetry (pred_trace):
+	- Log path: <userdir>/pred_trace.log (cl_pred_trace_file).
+	- Enable ring buffer: cl_pred_trace 1, adjust cl_pred_trace_ring seconds.
+	- Dump on demand: cl_pred_trace_dump (alias: pred_trace_dump).
+	- One-shot state/cvar dumps: pred_state_dump / pred_cvar_dump.
+	- Autodump triggers: cl_pred_trace_autodump + cl_pred_trace_autodump_err/snap.
+	Reason bits: see CL_PRED_REASON_* in client.h, recorded in trace as hex.
+	*/
 	Cvar_RegisterVariable (&cl_pred_debug);
 	Cvar_RegisterVariable (&cl_pred_correct_angles);
 	Cvar_RegisterVariable (&cl_pred_inherit_ground);
@@ -285,7 +790,25 @@ static void CL_Predict_RegisterDebugCvars (void)
 	Cvar_RegisterVariable (&cl_pred_accum_maxdt);
 	Cvar_RegisterVariable (&cl_pred_accum_unbias);
 	Cvar_RegisterVariable (&cl_pred_store_render_cmd_only);
+	Cvar_RegisterVariable (&cl_pred_trace);
+	Cvar_RegisterVariable (&cl_pred_trace_level);
+	Cvar_RegisterVariable (&cl_pred_trace_file);
+	Cvar_RegisterVariable (&cl_pred_trace_ring);
+	Cvar_RegisterVariable (&cl_pred_trace_autodump);
+	Cvar_RegisterVariable (&cl_pred_trace_autodump_err);
+	Cvar_RegisterVariable (&cl_pred_trace_autodump_snap);
+	Cvar_RegisterVariable (&cl_pred_dt_source);
+	Cvar_RegisterVariable (&cl_pred_storeframe_mode);
+	Cvar_RegisterVariable (&cl_pred_snap_unbias);
+	Cvar_RegisterVariable (&cl_pred_accum_cap);
+	Cvar_RegisterVariable (&cl_pred_max_steps);
+	Cvar_RegisterVariable (&cl_pred_hard_reset_on_snap);
+	Cvar_RegisterVariable (&cl_pred_mover_base_fix);
 	Cmd_AddCommand ("pred_accum_selftest", CL_Predict_AccumSelftest_f);
+	Cmd_AddCommand ("pred_state_dump", CL_Predict_StateDump_f);
+	Cmd_AddCommand ("pred_cvar_dump", CL_Predict_CvarDump_f);
+	Cmd_AddCommand ("cl_pred_trace_dump", CL_Predict_TraceDump_f);
+	Cmd_AddCommand ("pred_trace_dump", CL_Predict_TraceDump_f);
 	cl_pred_debug_registered = true;
 }
 
@@ -297,9 +820,12 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 static float CL_Predict_GetMaxAccumTime (void)
 {
 	float max_accum = cl_pred_accum_maxdt.value;
+	float cap = cl_pred_accum_cap.value;
 
 	if (!isfinite (max_accum) || max_accum <= 0.0f)
 		max_accum = 0.25f;
+	if (isfinite (cap) && cap > 0.0f && cap < max_accum)
+		max_accum = cap;
 	return max_accum;
 }
 
@@ -418,7 +944,7 @@ static void CL_Predict_ReportAccumStats (void)
 
 static qboolean CL_Predict_DtIsSnapped (float dt, float epsilon, float *out_target)
 {
-	static const float snap_rates[] = {30.0f, 60.0f, 72.0f, 90.0f, 120.0f, 144.0f, 165.0f, 240.0f};
+	static const float snap_rates[] = {60.0f, 120.0f, 144.0f, 240.0f};
 	size_t i;
 
 	if (dt <= 0.0f)
@@ -437,13 +963,34 @@ static qboolean CL_Predict_DtIsSnapped (float dt, float epsilon, float *out_targ
 	return false;
 }
 
+static const char *CL_Predict_DtSourceName (cl_pred_dt_source_t src)
+{
+	switch (src)
+	{
+	case CL_PRED_DT_SRC_REAL:
+		return "real";
+	case CL_PRED_DT_SRC_RAW:
+		return "raw";
+	case CL_PRED_DT_SRC_HOST:
+		return "host";
+	case CL_PRED_DT_SRC_FALLBACK:
+		return "fallback";
+	default:
+		return "none";
+	}
+}
+
 static void CL_Predict_UpdateDtSnapState (float dt_use)
 {
 	const float epsilon = 0.00005f;
 	int i;
 	int snap_count = 0;
+	int best_index = -1;
+	int best_count = 0;
 	int sample_count;
 	qboolean snapped;
+	static const float snap_rates[] = {60.0f, 120.0f, 144.0f, 240.0f};
+	int rate_counts[sizeof(snap_rates) / sizeof(snap_rates[0])] = {0};
 
 	if (dt_use <= 0.0f)
 		return;
@@ -456,8 +1003,25 @@ static void CL_Predict_UpdateDtSnapState (float dt_use)
 	sample_count = cl_pred_dt_history_count;
 	for (i = 0; i < sample_count; i++)
 	{
-		if (CL_Predict_DtIsSnapped (cl_pred_dt_history[i], epsilon, NULL))
+		float target = 0.0f;
+		if (CL_Predict_DtIsSnapped (cl_pred_dt_history[i], epsilon, &target))
+		{
+			size_t r;
 			snap_count++;
+			for (r = 0; r < sizeof(snap_rates) / sizeof(snap_rates[0]); r++)
+			{
+				if (fabsf (target - (1.0f / snap_rates[r])) <= epsilon)
+				{
+					rate_counts[r]++;
+					if (rate_counts[r] > best_count)
+					{
+						best_count = rate_counts[r];
+						best_index = (int)r;
+					}
+					break;
+				}
+			}
+		}
 	}
 
 	snapped = (sample_count >= 10) && ((float)snap_count / (float)sample_count >= 0.8f);
@@ -470,6 +1034,8 @@ static void CL_Predict_UpdateDtSnapState (float dt_use)
 			JITTER_LOG ("PREDACCUM snap_detect %s (%d/%d)\n", snapped ? "ON" : "OFF", snap_count, sample_count);
 		}
 	}
+	if (snapped && best_index >= 0)
+		cl_pred_dt_snap_target = 1.0f / snap_rates[best_index];
 }
 
 static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec)
@@ -527,7 +1093,9 @@ static void CL_Predict_ClearFrames (void)
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state)
 {
 	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
+	qboolean overwrite = frame->valid && frame->seq != seq;
 
+	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_STOREFRAME);
 	frame->seq = seq;
 	VectorCopy (state->origin, frame->origin);
 	VectorCopy (state->velocity, frame->velocity);
@@ -537,6 +1105,19 @@ static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *stat
 	frame->pm_flags = state->onground ? SNAP_PM_ONGROUND : 0;
 	frame->waterlevel = 0;
 	frame->valid = true;
+
+	if (CL_Predict_TraceEnabled ())
+	{
+		if (overwrite)
+			cl_pred_trace.storeframe_overwrites++;
+		cl_pred_trace.storeframe_written_total++;
+		if (cl_pred_trace_cur)
+		{
+			cl_pred_trace_cur->storeframe_written = 1;
+			cl_pred_trace_cur->storeframe_seq = seq;
+			cl_pred_trace_cur->storeframe_count++;
+		}
+	}
 }
 
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
@@ -748,6 +1329,12 @@ static void CL_Predict_HardResetToBase (const char *reason)
 	cl_pred.predicted.groundent = cl_pred.base.groundent;
 	CL_Predict_ResetRenderInterp ();
 
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+	{
+		cl_pred_trace_cur->hard_reset = 1;
+		cl_pred_trace_cur->reconcile_outcome = CL_PRED_RECONCILE_HARD_SNAP_RESET;
+	}
+
 	if (cl_pred_debug.value > 0.0f)
 	{
 		Con_Printf ("PREDDBG: HardReset reason=%s base=%.2f %.2f %.2f\n",
@@ -765,10 +1352,19 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 
 	if (trace_onground == state->onground)
 	{
+		int prev_groundent = state->groundent;
+
 		state->ground_transition_count = 0;
 		state->ground_transition_state = state->onground;
 		if (trace_onground)
 			state->groundent = trace_groundent;
+		if (cl_pred_mover_base_fix.value > 0.0f && trace_onground && prev_groundent != trace_groundent)
+		{
+			CL_Predict_InvalidateGroundCache (state);
+			state->pred_ground_ent = 0;
+			VectorClear (state->pred_ground_offset);
+			state->pred_ground_yaw_delta = 0.0f;
+		}
 		return;
 	}
 
@@ -779,6 +1375,13 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 		state->groundent = trace_groundent;
 		state->ground_transition_count = 0;
 		state->ground_transition_state = state->onground;
+		if (cl_pred_mover_base_fix.value > 0.0f)
+		{
+			CL_Predict_InvalidateGroundCache (state);
+			state->pred_ground_ent = 0;
+			VectorClear (state->pred_ground_offset);
+			state->pred_ground_yaw_delta = 0.0f;
+		}
 		return;
 	}
 
@@ -801,6 +1404,13 @@ static void CL_Predict_ApplyGroundTransition (cl_pred_state_t *state, qboolean t
 		state->onground = false;
 		state->groundent = 0;
 		state->ground_transition_count = 0;
+		if (cl_pred_mover_base_fix.value > 0.0f)
+		{
+			CL_Predict_InvalidateGroundCache (state);
+			state->pred_ground_ent = 0;
+			VectorClear (state->pred_ground_offset);
+			state->pred_ground_yaw_delta = 0.0f;
+		}
 	}
 }
 
@@ -968,6 +1578,8 @@ static void CL_Predict_RunFrameSteps (void)
 	float dropped_time = (float)cl_pred_frame_drop_time;
 	qboolean behind = false;
 	qboolean store_frame;
+	int store_skip_reason = CL_PRED_STORE_SKIP_NONE;
+	int steps_cap = 0;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
@@ -1002,6 +1614,9 @@ static void CL_Predict_RunFrameSteps (void)
 		max_steps = (int)ceilf (max_accum_time / step_dt);
 		if (max_steps < 1)
 			max_steps = 1;
+		if (cl_pred_max_steps.value > 0.0f && max_steps > (int)cl_pred_max_steps.value)
+			max_steps = (int)cl_pred_max_steps.value;
+		steps_cap = max_steps;
 		CL_PRED_ASSERT (step_dt > 0.0f);
 
 		if (cl_pred_nullcmd_injected)
@@ -1018,14 +1633,26 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_from = cl_pred.predicted;
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
 			cl_pred_render_to = cl_pred.predicted;
-			store_frame = (cmd.sequence > 0)
-				&& (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
+			store_frame = (cmd.sequence > 0);
+			if (cl_pred_storeframe_mode.value <= 0.0f)
+				store_frame = store_frame && (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
 				JITTER_LOG ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+			}
+			if (!store_frame && CL_Predict_TraceEnabled ())
+			{
+				store_skip_reason = (cmd.sequence <= 0) ? CL_PRED_STORE_SKIP_SEQ_ZERO : CL_PRED_STORE_SKIP_RENDER_CMD_INVALID;
+				cl_pred_trace.storeframe_skipped_total++;
+				cl_pred_trace.storeframe_skip_reason = store_skip_reason;
+				if (cl_pred_trace_cur)
+				{
+					cl_pred_trace_cur->storeframe_skip_count++;
+					cl_pred_trace_cur->storeframe_skip_reason = store_skip_reason;
+				}
 			}
 			cl_pred_frame_accum -= step_dt;
 			if (cl_pred_frame_accum < 0.0)
@@ -1041,8 +1668,11 @@ static void CL_Predict_RunFrameSteps (void)
 		max_steps = (int)ceilf (max_accum_time / step_dt);
 		if (cl_pred_max_substeps.value > 0.0f && max_steps > (int)cl_pred_max_substeps.value)
 			max_steps = (int)cl_pred_max_substeps.value;
+		if (cl_pred_max_steps.value > 0.0f && max_steps > (int)cl_pred_max_steps.value)
+			max_steps = (int)cl_pred_max_steps.value;
 		if (max_steps < 1)
 			max_steps = 1;
+		steps_cap = max_steps;
 
 		if (cl_pred_nullcmd_injected)
 		{
@@ -1058,14 +1688,26 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_from = cl_pred.predicted;
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
 			cl_pred_render_to = cl_pred.predicted;
-			store_frame = (cmd.sequence > 0)
-				&& (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
+			store_frame = (cmd.sequence > 0);
+			if (cl_pred_storeframe_mode.value <= 0.0f)
+				store_frame = store_frame && (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
 				JITTER_LOG ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+			}
+			if (!store_frame && CL_Predict_TraceEnabled ())
+			{
+				store_skip_reason = (cmd.sequence <= 0) ? CL_PRED_STORE_SKIP_SEQ_ZERO : CL_PRED_STORE_SKIP_RENDER_CMD_INVALID;
+				cl_pred_trace.storeframe_skipped_total++;
+				cl_pred_trace.storeframe_skip_reason = store_skip_reason;
+				if (cl_pred_trace_cur)
+				{
+					cl_pred_trace_cur->storeframe_skip_count++;
+					cl_pred_trace_cur->storeframe_skip_reason = store_skip_reason;
+				}
 			}
 			cl_pred_frame_accum -= step_dt;
 			if (cl_pred_frame_accum < 0.0f)
@@ -1078,6 +1720,7 @@ static void CL_Predict_RunFrameSteps (void)
 
 	cl_pred_last_substeps = steps;
 	cl_pred_last_substep_dt = step_dt;
+	cl_pred_steps_cap_hit = (steps_cap > 0 && steps >= steps_cap && step_dt > 0.0f && cl_pred_frame_accum + PRED_EPS >= step_dt) ? 1 : 0;
 	if (!cl_pred_render_interp_valid)
 		CL_Predict_ResetRenderInterp ();
 	if (step_dt > 0.0f)
@@ -1101,6 +1744,31 @@ static void CL_Predict_RunFrameSteps (void)
 	if (CL_Predict_AccumVerboseEnabled ())
 		CL_PRED_ASSERT (step_dt > 0.0f && cl_pred_frame_accum >= 0.0 && cl_pred_frame_accum < step_dt + 0.0001f);
 
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_level.value >= 2.0f && step_dt > 0.0f)
+	{
+		qboolean invariant_break = false;
+		if (!isfinite (cl_pred_frame_accum) || !isfinite (cl_pred_render_frac))
+			invariant_break = true;
+		if (cl_pred_frame_accum < 0.0f)
+			invariant_break = true;
+		if (!cl_pred_steps_cap_hit && cl_pred_frame_accum >= step_dt)
+			invariant_break = true;
+		if (cl_pred_render_frac < 0.0f || cl_pred_render_frac >= 1.0f)
+			invariant_break = true;
+		if (invariant_break)
+		{
+			if (!isfinite (cl_pred_frame_accum) || cl_pred_frame_accum < 0.0f)
+				cl_pred_frame_accum = 0.0f;
+			if (!cl_pred_steps_cap_hit && cl_pred_frame_accum >= step_dt)
+				cl_pred_frame_accum = fmodf (cl_pred_frame_accum, step_dt);
+			cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
+			if (cl_pred_render_frac < 0.0f || cl_pred_render_frac >= 1.0f)
+				cl_pred_render_frac = 0.0f;
+			if (cl_pred_trace_cur)
+				cl_pred_trace_cur->invariant_break = 1;
+		}
+	}
+
 	if (CL_Predict_AccumSummaryEnabled ())
 	{
 		Con_Printf ("ACCUM=%f RENDER_FRAC=%f\n", cl_pred_frame_accum, cl_pred_render_frac);
@@ -1117,6 +1785,19 @@ static void CL_Predict_RunFrameSteps (void)
 
 	CL_Predict_UpdateAccumStatsFrame ((float)cl_pred_frame_accum, cl_pred_render_frac, steps, dropped_time);
 	CL_Predict_ReportAccumStats ();
+
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+	{
+		cl_pred_trace_cur->step_dt = step_dt;
+		cl_pred_trace_cur->accum_after = (float)cl_pred_frame_accum;
+		cl_pred_trace_cur->steps_taken = steps;
+		cl_pred_trace_cur->steps_cap = steps_cap;
+		cl_pred_trace_cur->steps_cap_hit = cl_pred_steps_cap_hit;
+		cl_pred_trace_cur->render_frac = cl_pred_render_frac;
+		cl_pred_trace_cur->steps_zero = (steps == 0);
+	}
+
+	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_RUNFRAME);
 }
 
 static float CL_Predict_Selftest_PatternDt (int pattern, int frame)
@@ -1269,6 +1950,116 @@ static void CL_Predict_AccumSelftest_f (void)
 
 	Con_Printf ("PREDACCUM_SELFTEST SUMMARY %d/%d PASS\n", pass, total);
 	JITTER_LOG ("PREDACCUM_SELFTEST SUMMARY %d/%d PASS\n", pass, total);
+}
+
+static void CL_Predict_DumpCvarValue (const char *name)
+{
+	cvar_t *var = Cvar_FindVar (name);
+
+	if (var)
+		CL_Predict_TraceWriteLine ("cvar %s = \"%s\" (%.6f)", name, var->string, var->value);
+	else
+		CL_Predict_TraceWriteLine ("cvar %s = <missing>", name);
+}
+
+static void CL_Predict_StateDump_f (void)
+{
+	CL_Predict_RegisterDebugCvars ();
+
+	CL_Predict_TraceWriteLine ("=== pred_state_dump rt=%.6f frame=%d ===", realtime, host_framecount);
+	CL_Predict_TraceWriteLine ("state has_base=%d seq_latest=%u seq_acked=%u steps_frame=%d server_update=%d",
+		cl_pred.has_base ? 1 : 0, cl_pred.seq_latest, cl_pred.seq_acked, cl_pred_steps_this_frame, cl_pred_server_update_this_frame ? 1 : 0);
+	CL_Predict_TraceWriteLine ("accum frame_dt_last=%.6f accum=%.6f prev_rt=%.6f last_substep_dt=%.6f last_substeps=%d render_frac=%.6f steps_cap_hit=%d",
+		cl_pred_frame_dt_last, cl_pred_frame_accum, cl_pred_prev_realtime, cl_pred_last_substep_dt, cl_pred_last_substeps, cl_pred_render_frac, cl_pred_steps_cap_hit);
+	CL_Predict_TraceWriteLine ("dt flags=0x%X snapped=%d snap_target=%.6f",
+		cl_pred_dt_flags_last, cl_pred_dt_snapped ? 1 : 0, cl_pred_dt_snap_target);
+	CL_Predict_TraceWriteLine ("error pred_err=%.3f smooth_err=%.3f angle_err=%.3f time=%.6f",
+		cl_pred_true_error_len, VectorLength (cl_pred_error), VectorLength (cl_pred_angle_error), cl_pred_error_time);
+	CL_Predict_TraceWriteLine ("ground onground=%d groundent=%d ground_valid=%d reason=%d delta=%.3f yaw=%.3f switches=%d",
+		cl_pred_ground_dbg.onground ? 1 : 0, cl_pred_ground_dbg.groundent,
+		cl_pred_ground_dbg.ground_valid ? 1 : 0, cl_pred_ground_dbg.ground_valid_reason,
+		cl_pred_ground_dbg.ground_delta_len, cl_pred_ground_dbg.ground_yaw_delta, cl_pred_ground_dbg.ground_switches);
+	CL_Predict_TraceWriteLine ("apply pred_reason=%d render_reason=%d replay=%d snap=%d smooth=%d",
+		cl_pred_apply_pred_reason, cl_pred_apply_render_reason, cl_pred_replay_count, cl_pred_snap_count, cl_pred_smooth_count);
+	CL_Predict_TraceWriteLine ("storeframe total_written=%d total_skipped=%d overwrites=%d replay_hits=%d replay_miss=%d",
+		cl_pred_trace.storeframe_written_total, cl_pred_trace.storeframe_skipped_total, cl_pred_trace.storeframe_overwrites,
+		cl_pred_trace.replay_hits_total, cl_pred_trace.replay_miss_total);
+	CL_Predict_TraceWriteLine ("base origin=%.3f %.3f %.3f vel=%.3f %.3f %.3f ang=%.3f %.3f %.3f onground=%d groundent=%d",
+		cl_pred.base.origin[0], cl_pred.base.origin[1], cl_pred.base.origin[2],
+		cl_pred.base.velocity[0], cl_pred.base.velocity[1], cl_pred.base.velocity[2],
+		cl_pred.base.viewangles[0], cl_pred.base.viewangles[1], cl_pred.base.viewangles[2],
+		cl_pred.base.onground ? 1 : 0, cl_pred.base.groundent);
+	CL_Predict_TraceWriteLine ("pred origin=%.3f %.3f %.3f vel=%.3f %.3f %.3f ang=%.3f %.3f %.3f onground=%d groundent=%d",
+		cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2],
+		cl_pred.predicted.velocity[0], cl_pred.predicted.velocity[1], cl_pred.predicted.velocity[2],
+		cl_pred.predicted.viewangles[0], cl_pred.predicted.viewangles[1], cl_pred.predicted.viewangles[2],
+		cl_pred.predicted.onground ? 1 : 0, cl_pred.predicted.groundent);
+	CL_Predict_TraceWriteLine ("cvars (prediction core)");
+	CL_Predict_DumpCvarValue ("cl_predict");
+	CL_Predict_DumpCvarValue ("cl_nopred");
+	CL_Predict_DumpCvarValue ("cl_physrate");
+	CL_Predict_DumpCvarValue ("cl_pred_step_hz");
+	CL_Predict_DumpCvarValue ("cl_pred_substeps");
+	CL_Predict_DumpCvarValue ("cl_pred_max_substeps");
+	CL_Predict_DumpCvarValue ("cl_pred_accum_maxdt");
+	CL_Predict_DumpCvarValue ("cl_pred_accum_cap");
+	CL_Predict_DumpCvarValue ("cl_pred_snap_unbias");
+	CL_Predict_DumpCvarValue ("cl_pred_storeframe_mode");
+	CL_Predict_DumpCvarValue ("cl_pred_hard_reset_on_snap");
+	CL_Predict_DumpCvarValue ("cl_pred_mover_base_fix");
+	CL_Predict_TraceWriteLine ("=== pred_state_dump end ===");
+}
+
+static void CL_Predict_CvarDump_f (void)
+{
+	static const char *timing_cvars[] =
+	{
+		"host_maxfps", "cl_maxfps", "vid_vsync", "sys_throttle", "host_framerate", "host_timescale"
+	};
+	static const char *pred_cvars[] =
+	{
+		"cl_predict", "cl_nopred", "cl_lerp", "cl_smooth", "cl_interp", "cl_lerp_ms", "cl_lerp_max_gap_ms",
+		"cl_physrate", "cl_independentphysics"
+	};
+	static const char *net_cvars[] =
+	{
+		"rate", "cl_rate", "cl_maxpacket", "net_mtu", "cl_timeout", "cl_cmdrate", "cl_updaterate"
+	};
+	static const char *sv_cvars[] =
+	{
+		"sys_ticrate", "sv_fps", "sv_physics", "sv_maxspeed", "sv_friction", "sv_gravity"
+	};
+	static const char *debug_cvars[] =
+	{
+		"developer", "con_debuglog", "r_drawflat", "r_draworder", "r_fullbright", "r_lightmap"
+	};
+	size_t i;
+
+	CL_Predict_RegisterDebugCvars ();
+
+	CL_Predict_TraceWriteLine ("=== pred_cvar_dump rt=%.6f frame=%d ===", realtime, host_framecount);
+	CL_Predict_TraceWriteLine ("timing:");
+	for (i = 0; i < sizeof(timing_cvars) / sizeof(timing_cvars[0]); i++)
+		CL_Predict_DumpCvarValue (timing_cvars[i]);
+	CL_Predict_TraceWriteLine ("prediction/interp:");
+	for (i = 0; i < sizeof(pred_cvars) / sizeof(pred_cvars[0]); i++)
+		CL_Predict_DumpCvarValue (pred_cvars[i]);
+	CL_Predict_TraceWriteLine ("net:");
+	for (i = 0; i < sizeof(net_cvars) / sizeof(net_cvars[0]); i++)
+		CL_Predict_DumpCvarValue (net_cvars[i]);
+	CL_Predict_TraceWriteLine ("server tick/physics:");
+	for (i = 0; i < sizeof(sv_cvars) / sizeof(sv_cvars[0]); i++)
+		CL_Predict_DumpCvarValue (sv_cvars[i]);
+	CL_Predict_TraceWriteLine ("debug/perf:");
+	for (i = 0; i < sizeof(debug_cvars) / sizeof(debug_cvars[0]); i++)
+		CL_Predict_DumpCvarValue (debug_cvars[i]);
+	CL_Predict_TraceWriteLine ("=== pred_cvar_dump end ===");
+}
+
+static void CL_Predict_TraceDump_f (void)
+{
+	CL_Predict_RegisterDebugCvars ();
+	CL_Predict_TraceDumpInternal ("manual_dump");
 }
 
 static float CL_Predict_AngleDelta (float a, float b)
@@ -2497,6 +3288,10 @@ void CL_Predict_Clear (void)
 	cl_pred_warned_overflow = false;
 	cl_pred_warned_replay = false;
 	cl_pred_frame_drop_time = 0.0;
+	cl_pred_dt_snap_target = 0.0f;
+	cl_pred_dt_flags_last = 0;
+	cl_pred_steps_cap_hit = 0;
+	cl_pred_trace_cur = NULL;
 }
 
 void CL_Predict_ResetGround (void)
@@ -2543,9 +3338,30 @@ void CL_Predict_BeginFrame (void)
 			Con_Printf ("PREDACCUM duplicate BeginFrame host_framecount=%d\n", host_framecount);
 			JITTER_LOG ("PREDACCUM duplicate BeginFrame host_framecount=%d\n", host_framecount);
 		}
+		if (CL_Predict_TraceEnabled () && cl_pred_trace_cur && cl_pred_trace_cur->framecount == host_framecount)
+			cl_pred_trace_cur->dt_flags |= CL_PRED_DT_FLAG_DUPLICATE;
 		return;
 	}
 	cl_pred_last_host_framecount = host_framecount;
+
+	if (CL_Predict_TraceEnabled ())
+	{
+		cl_pred_trace_cur = CL_Predict_TraceAllocRecord (CL_PRED_TRACE_TYPE_FRAME);
+		if (cl_pred_trace_cur)
+		{
+			cl_pred_trace_cur->framecount = host_framecount;
+			cl_pred_trace_cur->realtime = realtime;
+			cl_pred_trace_cur->cl_time = cl.time;
+			cl_pred_trace_cur->server_time = cl.server_time;
+			cl_pred_trace_cur->ack_seq = cl_pred_last_ack_seq;
+			cl_pred_trace_cur->latest_seq = cl_pred.seq_latest;
+			cl_pred_trace_cur->pred_frame_overwrites = cl_pred_trace.storeframe_overwrites;
+			CL_Predict_TraceComputeFrameWindow (&cl_pred_trace_cur->pred_frame_count,
+				&cl_pred_trace_cur->pred_frame_min_seq, &cl_pred_trace_cur->pred_frame_max_seq);
+			cl_pred_trace_cur->replay_hit_rate = CL_Predict_TraceReplayHitRate (realtime);
+		}
+		CL_Predict_TraceMark (CL_PRED_TRACE_MARK_BEGINFRAME);
+	}
 
 	was_enabled = cl_pred_prev_enabled;
 	enabled = CL_Predict_IsEnabled ();
@@ -2559,47 +3375,86 @@ void CL_Predict_BeginFrame (void)
 		const float host_dt = (float)host_frametime;
 		float real_dt = 0.0f;
 		float dt_use = 0.0f;
+		float dt_use_auto = 0.0f;
 		float pre_accum = (float)cl_pred_frame_accum;
 		float post_accum;
 		float step_guess;
-		const char *dt_source = "none";
+		cl_pred_dt_source_t dt_source = CL_PRED_DT_SRC_NONE;
+		cl_pred_dt_source_t dt_source_auto = CL_PRED_DT_SRC_NONE;
+		cl_pred_dt_source_t dt_source_forced = CL_PRED_DT_SRC_NONE;
 		qboolean dt_real_valid = (cl_pred_prev_realtime > 0.0) && isfinite (realtime) && realtime >= cl_pred_prev_realtime;
 		qboolean unbias_applied = false;
 		qboolean clamp_applied = false;
 		float clamp_drop = 0.0f;
+		unsigned int dt_flags = 0;
+		int dt_force = (int)cl_pred_dt_source.value;
 
 		if (dt_real_valid)
 			real_dt = (float)(realtime - cl_pred_prev_realtime);
 
 		if (CL_Predict_DtSane (real_dt, max_accum_time))
 		{
-			dt_use = real_dt;
-			dt_source = "real";
+			dt_use_auto = real_dt;
+			dt_source_auto = CL_PRED_DT_SRC_REAL;
 		}
 		else if (CL_Predict_DtSane (raw_dt, max_accum_time))
 		{
-			dt_use = raw_dt;
-			dt_source = "raw";
+			dt_use_auto = raw_dt;
+			dt_source_auto = CL_PRED_DT_SRC_RAW;
 		}
 		else if (CL_Predict_DtSane (host_dt, max_accum_time))
 		{
-			dt_use = host_dt;
-			dt_source = "host";
+			dt_use_auto = host_dt;
+			dt_source_auto = CL_PRED_DT_SRC_HOST;
 		}
 		else
 		{
-			float fallback = 0.0f;
-			if (real_dt > 0.0f && isfinite (real_dt))
-				fallback = real_dt;
-			else if (raw_dt > 0.0f && isfinite (raw_dt))
-				fallback = raw_dt;
-			else if (host_dt > 0.0f && isfinite (host_dt))
-				fallback = host_dt;
-			if (fallback > 0.0f)
+			dt_use_auto = 0.0f;
+			dt_source_auto = CL_PRED_DT_SRC_FALLBACK;
+		}
+
+		dt_use = dt_use_auto;
+		dt_source = dt_source_auto;
+		if (dt_force == 1)
+		{
+			dt_source_forced = CL_PRED_DT_SRC_REAL;
+			if (CL_Predict_DtSane (real_dt, max_accum_time))
 			{
-				dt_use = fallback;
-				dt_source = "clamp";
+				dt_use = real_dt;
+				dt_source = CL_PRED_DT_SRC_REAL;
 			}
+			else
+				dt_flags |= CL_PRED_DT_FLAG_FALLBACK;
+		}
+		else if (dt_force == 2)
+		{
+			dt_source_forced = CL_PRED_DT_SRC_RAW;
+			if (CL_Predict_DtSane (raw_dt, max_accum_time))
+			{
+				dt_use = raw_dt;
+				dt_source = CL_PRED_DT_SRC_RAW;
+			}
+			else
+				dt_flags |= CL_PRED_DT_FLAG_FALLBACK;
+		}
+		else if (dt_force == 3)
+		{
+			dt_source_forced = CL_PRED_DT_SRC_HOST;
+			if (CL_Predict_DtSane (host_dt, max_accum_time))
+			{
+				dt_use = host_dt;
+				dt_source = CL_PRED_DT_SRC_HOST;
+			}
+			else
+				dt_flags |= CL_PRED_DT_FLAG_FALLBACK;
+		}
+
+		if (!CL_Predict_DtSane (dt_use, max_accum_time))
+		{
+			step_guess = cl_pred_last_substep_dt > 0.0f ? cl_pred_last_substep_dt : CL_Predict_GetFrameStepTime (0.016f);
+			dt_use = (step_guess > 0.0f) ? step_guess : 0.016f;
+			dt_source = CL_PRED_DT_SRC_FALLBACK;
+			dt_flags |= CL_PRED_DT_FLAG_FALLBACK;
 		}
 
 		if (dt_use > max_accum_time)
@@ -2613,7 +3468,7 @@ void CL_Predict_BeginFrame (void)
 
 		CL_Predict_UpdateDtSnapState (dt_use);
 		step_guess = cl_pred_last_substep_dt > 0.0f ? cl_pred_last_substep_dt : CL_Predict_GetFrameStepTime (dt_use > 0.0f ? dt_use : 0.016f);
-		if (cl_pred_accum_unbias.value > 0.0f && cl_pred_dt_snapped && step_guess > 0.0f)
+		if ((cl_pred_snap_unbias.value > 0.0f || cl_pred_accum_unbias.value > 0.0f) && cl_pred_dt_snapped && step_guess > 0.0f)
 		{
 			const float bias = fminf (0.00005f, step_guess * 0.001f);
 			if (bias > 0.0f)
@@ -2622,6 +3477,17 @@ void CL_Predict_BeginFrame (void)
 				unbias_applied = true;
 			}
 		}
+
+		if (CL_Predict_DtSane (dt_use, max_accum_time))
+			dt_flags |= CL_PRED_DT_FLAG_SANE;
+		if (cl_pred_dt_snapped)
+			dt_flags |= CL_PRED_DT_FLAG_SNAPPED;
+		if (clamp_applied)
+			dt_flags |= CL_PRED_DT_FLAG_CLAMPED;
+		if (dt_use < 0.0f)
+			dt_flags |= CL_PRED_DT_FLAG_NEGATIVE;
+		if (dt_use == 0.0f)
+			dt_flags |= CL_PRED_DT_FLAG_ZERO;
 
 		if (raw_dt > 0.0f && host_dt > 0.0f && fabsf (raw_dt - host_dt) > 0.000001f)
 		{
@@ -2642,21 +3508,55 @@ void CL_Predict_BeginFrame (void)
 		cl_pred_frame_dt_last = dt_use;
 		cl_pred_prev_realtime = realtime;
 		cl_pred_frame_drop_time = clamp_drop;
+		cl_pred_dt_flags_last = dt_flags;
 
 		CL_Predict_UpdateAccumStatsDt (dt_use);
 		if (CL_Predict_AccumVerboseEnabled ())
 		{
 			Con_Printf ("PREDACCUM dt_real=%.6f dt_raw=%.6f dt_host=%.6f dt_use=%.6f src=%s pre=%.6f post=%.6f snap=%d clamp=%d drop=%.6f unbias=%d\n",
-				real_dt, raw_dt, host_dt, dt_use, dt_source, pre_accum, post_accum,
+				real_dt, raw_dt, host_dt, dt_use, CL_Predict_DtSourceName (dt_source), pre_accum, post_accum,
 				cl_pred_dt_snapped ? 1 : 0, clamp_applied ? 1 : 0, clamp_drop, unbias_applied ? 1 : 0);
 			JITTER_LOG ("PREDACCUM dt_real=%.6f dt_raw=%.6f dt_host=%.6f dt_use=%.6f src=%s pre=%.6f post=%.6f snap=%d clamp=%d drop=%.6f unbias=%d\n",
-				real_dt, raw_dt, host_dt, dt_use, dt_source, pre_accum, post_accum,
+				real_dt, raw_dt, host_dt, dt_use, CL_Predict_DtSourceName (dt_source), pre_accum, post_accum,
 				cl_pred_dt_snapped ? 1 : 0, clamp_applied ? 1 : 0, clamp_drop, unbias_applied ? 1 : 0);
 		}
 		if (clamp_applied && CL_Predict_AccumSummaryEnabled ())
 		{
 			Con_Printf ("PREDACCUM clamp_begin drop %.6f max %.6f\n", clamp_drop, max_accum_time);
 			JITTER_LOG ("PREDACCUM clamp_begin drop %.6f max %.6f\n", clamp_drop, max_accum_time);
+		}
+
+		if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+		{
+			cl_pred_trace_cur->dt_real = real_dt;
+			cl_pred_trace_cur->dt_raw = raw_dt;
+			cl_pred_trace_cur->dt_host = host_dt;
+			cl_pred_trace_cur->dt_use = dt_use;
+			cl_pred_trace_cur->dt_use_auto = dt_use_auto;
+			cl_pred_trace_cur->dt_source_auto = dt_source_auto;
+			cl_pred_trace_cur->dt_source_forced = dt_source_forced;
+			cl_pred_trace_cur->dt_flags |= dt_flags;
+			cl_pred_trace_cur->dt_snap_target = cl_pred_dt_snap_target;
+			cl_pred_trace_cur->accum_before = pre_accum;
+			cl_pred_trace_cur->accum_after = post_accum;
+		}
+
+		if (CL_Predict_TraceEnabled ())
+		{
+			if (dt_real_valid && isfinite (raw_dt) && raw_dt > 0.0f)
+			{
+				double diff = (double)(real_dt - raw_dt);
+				cl_pred_trace.dt_real_raw_sum += diff;
+				cl_pred_trace.dt_real_raw_sumsq += diff * diff;
+				cl_pred_trace.dt_samples_raw++;
+			}
+			if (dt_real_valid && isfinite (host_dt) && host_dt > 0.0f)
+			{
+				double diff = (double)(real_dt - host_dt);
+				cl_pred_trace.dt_real_host_sum += diff;
+				cl_pred_trace.dt_real_host_sumsq += diff * diff;
+				cl_pred_trace.dt_samples_host++;
+			}
 		}
 	}
 	else if (!enabled || !cl_pred.has_base)
@@ -2671,6 +3571,50 @@ void CL_Predict_BeginFrame (void)
 		cl_pred_render_interp_valid = false;
 	}
 	cl_pred_prev_enabled = enabled;
+
+	if (CL_Predict_TraceEnabled ())
+	{
+		double now = realtime;
+		if (cl_pred_trace.next_summary_time <= 0.0)
+			cl_pred_trace.next_summary_time = now + 1.0;
+		if (now >= cl_pred_trace.next_summary_time && (cl_pred_trace.dt_samples_raw > 0 || cl_pred_trace.dt_samples_host > 0))
+		{
+			cl_pred_trace_record_t *summary = CL_Predict_TraceAllocRecord (CL_PRED_TRACE_TYPE_SUMMARY);
+			if (summary)
+			{
+				double mean_raw = 0.0;
+				double var_raw = 0.0;
+				double mean_host = 0.0;
+				double var_host = 0.0;
+
+				if (cl_pred_trace.dt_samples_raw > 0)
+				{
+					mean_raw = cl_pred_trace.dt_real_raw_sum / (double)cl_pred_trace.dt_samples_raw;
+					var_raw = (cl_pred_trace.dt_real_raw_sumsq / (double)cl_pred_trace.dt_samples_raw) - (mean_raw * mean_raw);
+				}
+				if (cl_pred_trace.dt_samples_host > 0)
+				{
+					mean_host = cl_pred_trace.dt_real_host_sum / (double)cl_pred_trace.dt_samples_host;
+					var_host = (cl_pred_trace.dt_real_host_sumsq / (double)cl_pred_trace.dt_samples_host) - (mean_host * mean_host);
+				}
+
+				summary->realtime = now;
+				summary->dt_real_raw_mean = (float)mean_raw;
+				summary->dt_real_raw_var = (float)fmax (0.0, var_raw);
+				summary->dt_real_host_mean = (float)mean_host;
+				summary->dt_real_host_var = (float)fmax (0.0, var_host);
+				summary->dt_summary_samples_raw = cl_pred_trace.dt_samples_raw;
+				summary->dt_summary_samples_host = cl_pred_trace.dt_samples_host;
+			}
+			cl_pred_trace.dt_real_raw_sum = 0.0;
+			cl_pred_trace.dt_real_raw_sumsq = 0.0;
+			cl_pred_trace.dt_real_host_sum = 0.0;
+			cl_pred_trace.dt_real_host_sumsq = 0.0;
+			cl_pred_trace.dt_samples_raw = 0;
+			cl_pred_trace.dt_samples_host = 0;
+			cl_pred_trace.next_summary_time = now + 1.0;
+		}
+	}
 
 	if (CL_Predict_AccumSummaryEnabled ())
 	{
@@ -2697,6 +3641,12 @@ void CL_Predict_BeginFrame (void)
 		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_CMD;
 	else
 		cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_ACCUM;
+
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+	{
+		cl_pred_trace_cur->pred_apply_reason = cl_pred_apply_pred_reason;
+		cl_pred_trace_cur->render_apply_reason = cl_pred_apply_render_reason;
+	}
 }
 
 void CL_Predict_SetupCmd (usercmd_t *cmd)
@@ -2708,6 +3658,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 
 	CL_Predict_RegisterDebugCvars ();
 	cl_netdbg_predict_ran = false;
+	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_SETUPCMD);
 	cmd->sequence = cl_pred.seq_latest + 1;
 	cl_pred.seq_latest = cmd->sequence;
 	cl_pred.cmds[cmd->sequence % CMD_RING] = *cmd;
@@ -2780,8 +3731,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	qboolean pred_overflow = false;
 	unsigned int pred_slot = 0;
 	unsigned int pred_stored_seq = 0;
+	float vel_error_len = 0.0f;
+	int reconcile_outcome = CL_PRED_RECONCILE_NONE;
+	unsigned int reconcile_reasons = CL_PRED_REASON_NONE;
+	int replay_miss_reason = CL_PRED_REPLAY_MISS_NONE;
 
 	CL_Predict_RegisterDebugCvars ();
+	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_SERVERUPDATE);
 	use_ultra = CL_Predict_UseUltra ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
@@ -2816,6 +3772,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred_server_update_this_frame = true;
 	cl_pred_last_ack_seq = ack;
 	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+		cl_pred_trace_cur->server_applied = 1;
 	if (cl_pred.has_base)
 	{
 		pred_frame_valid = CL_Predict_GetFrame (ack, &pred_frame);
@@ -2856,6 +3814,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			error_len = VectorLength (error);
 			for (i = 0; i < 3; i++)
 				angle_error[i] = CL_Predict_AngleDelta (viewangles[i], pred_frame.viewangles[i]);
+			{
+				vec3_t vel_delta;
+				VectorSubtract (velocity, pred_frame.velocity, vel_delta);
+				vel_error_len = VectorLength (vel_delta);
+			}
 		}
 		else
 		{
@@ -2863,6 +3826,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			error_len = VectorLength (error);
 			for (i = 0; i < 3; i++)
 				angle_error[i] = CL_Predict_AngleDelta (viewangles[i], cl_pred.predicted.viewangles[i]);
+			{
+				vec3_t vel_delta;
+				VectorSubtract (velocity, cl_pred.predicted.velocity, vel_delta);
+				vel_error_len = VectorLength (vel_delta);
+			}
 		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
@@ -3028,7 +3996,27 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
 		cl_pred_reset = false;
+		replay_miss_reason = CL_PRED_REPLAY_MISS_NO_BASE;
 	}
+	if (!cl_pred.has_base)
+		reconcile_reasons |= CL_PRED_REASON_NO_BASE;
+	if (!pred_frame_valid)
+		reconcile_reasons |= CL_PRED_REASON_MISSING_PRED_FRAME;
+	if (pred_overflow)
+		replay_miss_reason = CL_PRED_REPLAY_MISS_OVERFLOW;
+	else if (!pred_frame_valid)
+		replay_miss_reason = CL_PRED_REPLAY_MISS_SLOT_MISMATCH;
+	if (cl_pred_dt_flags_last & (CL_PRED_DT_FLAG_FALLBACK | CL_PRED_DT_FLAG_NEGATIVE | CL_PRED_DT_FLAG_ZERO))
+		reconcile_reasons |= CL_PRED_REASON_DT_BAD;
+	if (cl_pred_steps_this_frame == 0)
+		reconcile_reasons |= CL_PRED_REASON_STEPS_ZERO;
+	if (snap_correction)
+		reconcile_reasons |= CL_PRED_REASON_SNAP_FROM_SERVER;
+	if (cl_pred_ground_dbg.onground && !cl_pred_ground_dbg.ground_valid)
+		reconcile_reasons |= CL_PRED_REASON_MOVER_GROUND_INVALID;
+	if (cl_pred_steps_cap_hit || cl_pred_frame_drop_time > 0.0)
+		reconcile_reasons |= CL_PRED_REASON_CLAMP_SPIRAL;
+
 	cl_pred_true_error_len = pred_frame_valid ? error_len : 0.0f;
 	VectorCopy (origin, cl_pred.base.origin);
 	VectorCopy (velocity, cl_pred.base.velocity);
@@ -3119,6 +4107,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_q3mini_net_active = false;
 		cl_q3mini_net_remaining = 0.0f;
 		cl_q3mini_net_duration = 0.0f;
+		if (cl_pred_hard_reset_on_snap.value > 0.0f && error_len > cl_pred_trace_autodump_err.value)
+			CL_Predict_HardResetToBase ("snap hard reset");
 		if (cl_jitter_debug.value > 0.0f)
 		{
 			Con_Printf ("JITTERDBG snap_correction ack %u latest %u accum %.4f steps %d\n",
@@ -3135,6 +4125,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	if (CL_Predict_SeqNewer (ack, cl_pred.seq_latest))
 	{
+		reconcile_outcome = CL_PRED_RECONCILE_HARD_APPLY_NO_RESIM;
+		reconcile_reasons |= CL_PRED_REASON_SEQ_GAP;
+		if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+		{
+			cl_pred_trace_cur->reconcile_outcome = reconcile_outcome;
+			cl_pred_trace_cur->reconcile_reasons = reconcile_reasons;
+		}
 		CL_Predict_HardResetToBase ("ack ahead of latest");
 		CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 		return;
@@ -3146,6 +4143,13 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 		if (!CL_Predict_GetCmd (seq, &cmd))
 		{
+			reconcile_outcome = CL_PRED_RECONCILE_HARD_APPLY_NO_RESIM;
+			reconcile_reasons |= CL_PRED_REASON_CMD_MISMATCH;
+			if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+			{
+				cl_pred_trace_cur->reconcile_outcome = reconcile_outcome;
+				cl_pred_trace_cur->reconcile_reasons = reconcile_reasons;
+			}
 			CL_Predict_HardResetToBase ("cmd chain broken");
 			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 			return;
@@ -3170,6 +4174,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			JITTER_LOG ("JITTERDBG resim seq %u cmd_dt %.4f host_dt %.4f substeps %d dt_sub %.4f mouse_applied %d\n",
 				cmd.sequence, cmd_dt, host_dt, substeps, dt_sub, IN_DidApplyMouseDelta () ? 1 : 0);
 		}
+		CL_Predict_TraceMark (CL_PRED_TRACE_MARK_REPLAY);
 		for (i = 0; i < substeps; i++)
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, dt_sub, false);
 		CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
@@ -3192,6 +4197,15 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	{
 		cl_pred_render_cmd = resim_cmd;
 		cl_pred_render_cmd_valid = true;
+		reconcile_outcome = CL_PRED_RECONCILE_REPLAY_RESIM;
+	}
+	else if (snap_correction)
+	{
+		reconcile_outcome = CL_PRED_RECONCILE_HARD_SNAP_RESET;
+	}
+	else if (error_len > 0.0f)
+	{
+		reconcile_outcome = CL_PRED_RECONCILE_SOFT_CORRECT;
 	}
 	if (cl_pred_debug.value > 0.0f)
 	{
@@ -3210,6 +4224,34 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
+
+	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+	{
+		cl_pred_trace_cur->pred_err = error_len;
+		cl_pred_trace_cur->pos_err = error_len;
+		cl_pred_trace_cur->vel_err = vel_error_len;
+		cl_pred_trace_cur->snap = snap_correction ? 1 : 0;
+		cl_pred_trace_cur->replay_hit = pred_frame_valid ? 1 : 0;
+		cl_pred_trace_cur->replay_miss_reason = replay_miss_reason;
+		cl_pred_trace_cur->onground = cl_pred_ground_dbg.onground ? 1 : 0;
+		cl_pred_trace_cur->groundent = cl_pred_ground_dbg.groundent;
+		cl_pred_trace_cur->ground_valid = cl_pred_ground_dbg.ground_valid ? 1 : 0;
+		cl_pred_trace_cur->ground_delta = cl_pred_ground_dbg.ground_delta_len;
+		cl_pred_trace_cur->ground_yaw = cl_pred_ground_dbg.ground_yaw_delta;
+		cl_pred_trace_cur->reconcile_outcome = reconcile_outcome;
+		if (reconcile_reasons == CL_PRED_REASON_NONE)
+			reconcile_reasons = CL_PRED_REASON_UNKNOWN;
+		cl_pred_trace_cur->reconcile_reasons = reconcile_reasons;
+	}
+	if (CL_Predict_TraceEnabled ())
+	{
+		if (pred_frame_valid)
+			cl_pred_trace.replay_hits_total++;
+		else
+			cl_pred_trace.replay_miss_total++;
+	}
+
+	CL_Predict_TraceMaybeAutodump (snap_correction ? "autodump_snap" : "autodump_err", error_len, snap_correction, (cl_pred_steps_this_frame == 0));
 }
 
 void CL_Predict_Reapply (void)
@@ -3232,6 +4274,9 @@ void CL_Predict_Reapply (void)
 		if (cl_pred_render_interp_valid)
 			CL_Predict_LerpState (&render_state, &cl_pred_render_from, &cl_pred_render_to, cl_pred_render_frac);
 		CL_Predict_ApplyToClient (&render_state, true);
+		CL_Predict_TraceMark (CL_PRED_TRACE_MARK_RENDER);
+		if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
+			cl_pred_trace_cur->render_apply_reason = cl_pred_apply_render_reason;
 	}
 }
 
