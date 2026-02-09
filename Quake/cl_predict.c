@@ -857,6 +857,53 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 }
 
 #define CL_PRED_RING_IS_POW2(ring) (((ring) != 0u) && (((ring) & ((ring) - 1u)) == 0u))
+#define CL_PRED_CMD_BACKUP_MIN 64u
+#define CL_PRED_CMD_BACKUP_HARD_MIN 8u
+
+static unsigned int CL_Predict_GetCmdBackup (void)
+{
+	static qboolean logged_source = false;
+	static qboolean logged_low = false;
+	static qboolean logged_high = false;
+	unsigned int backup = (CMD_BACKUP > 0) ? (unsigned int)CMD_BACKUP : 0u;
+	unsigned int effective = backup;
+
+	if (effective < CL_PRED_CMD_BACKUP_MIN)
+	{
+		effective = CL_PRED_CMD_BACKUP_MIN;
+		if (!logged_low)
+		{
+			Con_Printf ("PREDDBG cmdbackup bump: CMD_BACKUP=%u -> %u (min=%u)\n",
+				backup, effective, CL_PRED_CMD_BACKUP_MIN);
+			JITTER_LOG ("PREDDBG cmdbackup bump: CMD_BACKUP=%u -> %u (min=%u)\n",
+				backup, effective, CL_PRED_CMD_BACKUP_MIN);
+			logged_low = true;
+		}
+	}
+	if (effective < CL_PRED_CMD_BACKUP_HARD_MIN)
+		effective = CL_PRED_CMD_BACKUP_HARD_MIN;
+	if (CMD_RING > 0 && effective >= CMD_RING)
+	{
+		effective = CMD_RING - 1u;
+		if (!logged_high)
+		{
+			Con_Printf ("PREDDBG cmdbackup clamp: CMD_BACKUP=%u -> %u (cmdring=%u)\n",
+				backup, effective, CMD_RING);
+			JITTER_LOG ("PREDDBG cmdbackup clamp: CMD_BACKUP=%u -> %u (cmdring=%u)\n",
+				backup, effective, CMD_RING);
+			logged_high = true;
+		}
+	}
+	if (!logged_source)
+	{
+		Con_Printf ("PREDDBG cmdbackup source: CMD_BACKUP=%u effective=%u cmdring=%u\n",
+			backup, effective, CMD_RING);
+		JITTER_LOG ("PREDDBG cmdbackup source: CMD_BACKUP=%u effective=%u cmdring=%u\n",
+			backup, effective, CMD_RING);
+		logged_source = true;
+	}
+	return effective;
+}
 
 static void CL_Predict_LogSeqWrap (const char *tag, unsigned int seq, unsigned int prev)
 {
@@ -1224,14 +1271,15 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 		if (cl_pred_debug.value > 0.0f)
 		{
 			unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+			unsigned int cmdbackup = CL_Predict_GetCmdBackup ();
 
 			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
-				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, CMD_BACKUP);
+				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
 			JITTER_LOG ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
-				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, CMD_BACKUP);
+				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
 		}
 		frame->valid = false;
-		frame->cmd_seq = ~0u;
+		frame->cmd_seq = seq;
 		return false;
 	}
 	if (out)
@@ -1514,7 +1562,8 @@ static void CL_Predict_HardResetToBase (const char *reason)
 static qboolean CL_Predict_SelfCheck (unsigned int ack, const char *context)
 {
 	unsigned int max_replay = (CMD_RING > 0) ? (CMD_RING - 1) : 0;
-	unsigned int max_backup = (CMD_BACKUP > 0) ? (CMD_BACKUP - 1) : 0;
+	unsigned int cmdbackup = CL_Predict_GetCmdBackup ();
+	unsigned int max_backup = (cmdbackup > 0) ? (cmdbackup - 1) : 0;
 
 	if (cl_pred_replay_count > (int)max_replay)
 	{
@@ -4048,11 +4097,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (pred_overflow)
 			pred_frame_valid = false;
-		if (cl_pred_guard.value > 0.0f && cl_pred_frame_mismatch && !guard_hard_reset)
-		{
-			guard_hard_reset = true;
-			guard_reason = "pred frame mismatch";
-		}
 		if (use_ultra)
 		{
 			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
@@ -4109,11 +4153,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				VectorSubtract (velocity, error_state->velocity, vel_delta);
 				vel_error_len = VectorLength (vel_delta);
 			}
-		}
-		if (cl_pred_guard.value > 0.0f && !pred_frame_valid && !guard_hard_reset)
-		{
-			guard_hard_reset = true;
-			guard_reason = "pred frame miss";
 		}
 		if (cl_netdbg_pred.value > 0.0f)
 		{
@@ -4373,6 +4412,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		CL_Predict_InvalidateGroundCache (&cl_pred.predicted);
 		cl_pred.predicted.groundent = cl_pred.base.groundent;
 		CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
+		{
+			usercmd_t ack_cmd;
+
+			if (CL_Predict_GetCmd (ack, &ack_cmd))
+				CL_Predict_StoreFrame (ack, &ack_cmd, &cl_pred.predicted);
+			else
+				CL_Predict_StoreFrame (ack, NULL, &cl_pred.predicted);
+		}
 	}
 	CL_Predict_ResetRenderInterp ();
 
