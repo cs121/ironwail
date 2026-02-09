@@ -1195,7 +1195,7 @@ static void CL_Predict_ClearFrames (void)
 	{
 		memset (&cl_pred.frames[i], 0, sizeof(cl_pred.frames[i]));
 		cl_pred.frames[i].valid = false;
-		cl_pred.frames[i].cmd_seq = ~0u;
+		cl_pred.frames[i].cmd_seq = 0u;
 	}
 }
 
@@ -1219,8 +1219,20 @@ static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq)
 
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state)
 {
-	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
+	unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+	unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
+	cl_pred_frame_t *frame = &cl_pred.frames[slot];
 	qboolean overwrite = frame->valid && frame->cmd_seq != seq;
+	unsigned int old_seq = frame->cmd_seq;
+	qboolean old_valid = frame->valid;
+
+	if (cl_pred_debug.value > 0.0f)
+	{
+		Con_DPrintf ("PredFrame write: seq=%u slot=%u idx=%u old_seq=%u valid=%d\n",
+			seq, slot, idx, old_seq, old_valid ? 1 : 0);
+		JITTER_LOG ("PredFrame write: seq=%u slot=%u idx=%u old_seq=%u valid=%d\n",
+			seq, slot, idx, old_seq, old_valid ? 1 : 0);
+	}
 
 	// Canonical prediction key = usercmd sequence number (cmd_seq).
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_STOREFRAME);
@@ -1265,18 +1277,32 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 {
 	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
 
-	if (!frame->valid || frame->cmd_seq != seq)
+	if (!frame->valid)
+		return false;
+
+	if (frame->cmd_seq != seq)
 	{
 		cl_pred_frame_mismatch = true;
 		if (cl_pred_debug.value > 0.0f)
 		{
 			unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+			unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
+			unsigned int prev_slot = (slot + CL_PRED_FRAME_RING - 1u) % CL_PRED_FRAME_RING;
+			unsigned int next_slot = (slot + 1u) % CL_PRED_FRAME_RING;
 			unsigned int cmdbackup = CL_Predict_GetCmdBackup ();
 
-			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
-				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
-			JITTER_LOG ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
-				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
+			Con_DPrintf ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+				seq, slot, idx, frame->cmd_seq, frame->valid ? 1 : 0,
+				cl_pred.frames[prev_slot].cmd_seq,
+				frame->cmd_seq,
+				cl_pred.frames[next_slot].cmd_seq,
+				seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
+			JITTER_LOG ("PredFrame mismatch: seq=%u slot=%u idx=%u found=%u valid=%d prev=%u cur=%u next=%u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+				seq, slot, idx, frame->cmd_seq, frame->valid ? 1 : 0,
+				cl_pred.frames[prev_slot].cmd_seq,
+				frame->cmd_seq,
+				cl_pred.frames[next_slot].cmd_seq,
+				seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, cmdbackup);
 		}
 		frame->valid = false;
 		frame->cmd_seq = seq;
