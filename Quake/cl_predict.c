@@ -8,6 +8,7 @@ Copyright (C) 2024
  */
 
 #include "quakedef.h"
+#include <float.h>
 
 extern cvar_t sv_maxspeed;
 extern cvar_t sv_accelerate;
@@ -40,6 +41,10 @@ static cvar_t cl_pred_debug = {"cl_pred_debug", "1", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
 static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
 static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
+static cvar_t cl_pred_accum_debug_level = {"cl_pred_accum_debug_level", "0", CVAR_NONE};
+static cvar_t cl_pred_accum_maxdt = {"cl_pred_accum_maxdt", "0.25", CVAR_NONE};
+static cvar_t cl_pred_accum_unbias = {"cl_pred_accum_unbias", "0", CVAR_NONE};
+static cvar_t cl_pred_store_render_cmd_only = {"cl_pred_store_render_cmd_only", "0", CVAR_NONE};
 
 #if defined(_DEBUG) || !defined(NDEBUG)
 #define CL_PRED_ASSERT(condition) SDL_assert(condition)
@@ -159,6 +164,9 @@ static int cl_pred_apply_pred_reason;
 static int cl_pred_apply_render_reason;
 static double cl_pred_frame_accum;
 static float cl_pred_frame_dt_last;
+static double cl_pred_prev_realtime;
+static int cl_pred_last_host_framecount = -1;
+static qboolean cl_pred_dt_snapped;
 static cl_pred_state_t cl_pred_render_from;
 static cl_pred_state_t cl_pred_render_to;
 static qboolean cl_pred_render_interp_valid;
@@ -174,6 +182,30 @@ static unsigned int cl_pred_last_ack_seq;
 static qboolean cl_pred_warned_pred_miss;
 static qboolean cl_pred_warned_overflow;
 static qboolean cl_pred_warned_replay;
+static double cl_pred_frame_drop_time;
+
+#define CL_PRED_ACCUM_DT_HISTORY 120
+typedef struct
+{
+	double		dt_sum;
+	double		accum_sum;
+	float		dt_min;
+	float		dt_max;
+	float		accum_min;
+	float		accum_max;
+	float		frac_min;
+	float		frac_max;
+	int		frames;
+	int		steps_total;
+	int		dropped_events;
+	double		dropped_time;
+	double		next_report_time;
+} cl_pred_accum_stats_t;
+
+static float cl_pred_dt_history[CL_PRED_ACCUM_DT_HISTORY];
+static int cl_pred_dt_history_index;
+static int cl_pred_dt_history_count;
+static cl_pred_accum_stats_t cl_pred_accum_stats;
 
 static float CL_Predict_GetStepTime (void);
 static qboolean CL_Predict_IsEnabled (void);
@@ -187,6 +219,7 @@ static void CL_Predict_ClearFrames (void);
 static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state);
 static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
 static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
+static void CL_Predict_AccumSelftest_f (void);
 
 #define CL_PREDICT_MAX_CLIP_PLANES 5
 #define CL_PREDICT_STEP_SIZE 18.0f
@@ -248,12 +281,195 @@ static void CL_Predict_RegisterDebugCvars (void)
 	Cvar_RegisterVariable (&cl_pred_correct_angles);
 	Cvar_RegisterVariable (&cl_pred_inherit_ground);
 	Cvar_RegisterVariable (&cl_pred_ground_yaw);
+	Cvar_RegisterVariable (&cl_pred_accum_debug_level);
+	Cvar_RegisterVariable (&cl_pred_accum_maxdt);
+	Cvar_RegisterVariable (&cl_pred_accum_unbias);
+	Cvar_RegisterVariable (&cl_pred_store_render_cmd_only);
+	Cmd_AddCommand ("pred_accum_selftest", CL_Predict_AccumSelftest_f);
 	cl_pred_debug_registered = true;
 }
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 {
 	return NETSEQ_GT (seq, ref);
+}
+
+static float CL_Predict_GetMaxAccumTime (void)
+{
+	float max_accum = cl_pred_accum_maxdt.value;
+
+	if (!isfinite (max_accum) || max_accum <= 0.0f)
+		max_accum = 0.25f;
+	return max_accum;
+}
+
+static qboolean CL_Predict_DtSane (float dt, float max_dt)
+{
+	return isfinite (dt) && dt > 0.0f && dt < max_dt;
+}
+
+static qboolean CL_Predict_AccumSummaryEnabled (void)
+{
+	return (cl_pred_accum_debug_level.value >= 1.0f) || (cl_pred_accum_debug.value > 0.0f);
+}
+
+static qboolean CL_Predict_AccumVerboseEnabled (void)
+{
+	return (cl_pred_accum_debug_level.value >= 2.0f);
+}
+
+static void CL_Predict_ResetAccumStats (void)
+{
+	memset (&cl_pred_accum_stats, 0, sizeof(cl_pred_accum_stats));
+	cl_pred_accum_stats.dt_min = FLT_MAX;
+	cl_pred_accum_stats.accum_min = FLT_MAX;
+	cl_pred_accum_stats.frac_min = FLT_MAX;
+	cl_pred_accum_stats.dt_max = 0.0f;
+	cl_pred_accum_stats.accum_max = 0.0f;
+	cl_pred_accum_stats.frac_max = 0.0f;
+	cl_pred_accum_stats.next_report_time = 0.0;
+}
+
+static void CL_Predict_UpdateAccumStatsDt (float dt_use)
+{
+	if (!CL_Predict_AccumSummaryEnabled ())
+		return;
+
+	if (dt_use >= 0.0f)
+	{
+		cl_pred_accum_stats.dt_sum += dt_use;
+		if (dt_use < cl_pred_accum_stats.dt_min)
+			cl_pred_accum_stats.dt_min = dt_use;
+		if (dt_use > cl_pred_accum_stats.dt_max)
+			cl_pred_accum_stats.dt_max = dt_use;
+	}
+}
+
+static void CL_Predict_UpdateAccumStatsFrame (float accum, float render_frac, int steps, double dropped_time)
+{
+	if (!CL_Predict_AccumSummaryEnabled ())
+		return;
+
+	cl_pred_accum_stats.frames++;
+	cl_pred_accum_stats.accum_sum += accum;
+	if (accum < cl_pred_accum_stats.accum_min)
+		cl_pred_accum_stats.accum_min = accum;
+	if (accum > cl_pred_accum_stats.accum_max)
+		cl_pred_accum_stats.accum_max = accum;
+	if (render_frac < cl_pred_accum_stats.frac_min)
+		cl_pred_accum_stats.frac_min = render_frac;
+	if (render_frac > cl_pred_accum_stats.frac_max)
+		cl_pred_accum_stats.frac_max = render_frac;
+	cl_pred_accum_stats.steps_total += steps;
+	if (dropped_time > 0.0)
+	{
+		cl_pred_accum_stats.dropped_events++;
+		cl_pred_accum_stats.dropped_time += dropped_time;
+	}
+}
+
+static void CL_Predict_ReportAccumStats (void)
+{
+	double now;
+	double dt_mean;
+	double accum_mean;
+
+	if (!CL_Predict_AccumSummaryEnabled ())
+		return;
+	if (cl_pred_accum_stats.frames <= 0)
+		return;
+
+	now = realtime;
+	if (cl_pred_accum_stats.next_report_time <= 0.0)
+		cl_pred_accum_stats.next_report_time = now + 1.0;
+	if (now < cl_pred_accum_stats.next_report_time)
+		return;
+
+	dt_mean = cl_pred_accum_stats.dt_sum / (double)cl_pred_accum_stats.frames;
+	accum_mean = cl_pred_accum_stats.accum_sum / (double)cl_pred_accum_stats.frames;
+	Con_Printf ("PREDACCUM_SUM dt mean %.6f min %.6f max %.6f | accum mean %.6f min %.6f max %.6f | frac min %.3f max %.3f | steps %d drops %d (%.6f)\n",
+		dt_mean,
+		cl_pred_accum_stats.dt_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.dt_min,
+		cl_pred_accum_stats.dt_max,
+		accum_mean,
+		cl_pred_accum_stats.accum_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.accum_min,
+		cl_pred_accum_stats.accum_max,
+		cl_pred_accum_stats.frac_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.frac_min,
+		cl_pred_accum_stats.frac_max,
+		cl_pred_accum_stats.steps_total,
+		cl_pred_accum_stats.dropped_events,
+		cl_pred_accum_stats.dropped_time);
+	JITTER_LOG ("PREDACCUM_SUM dt mean %.6f min %.6f max %.6f | accum mean %.6f min %.6f max %.6f | frac min %.3f max %.3f | steps %d drops %d (%.6f)\n",
+		dt_mean,
+		cl_pred_accum_stats.dt_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.dt_min,
+		cl_pred_accum_stats.dt_max,
+		accum_mean,
+		cl_pred_accum_stats.accum_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.accum_min,
+		cl_pred_accum_stats.accum_max,
+		cl_pred_accum_stats.frac_min == FLT_MAX ? 0.0f : cl_pred_accum_stats.frac_min,
+		cl_pred_accum_stats.frac_max,
+		cl_pred_accum_stats.steps_total,
+		cl_pred_accum_stats.dropped_events,
+		cl_pred_accum_stats.dropped_time);
+
+	CL_Predict_ResetAccumStats ();
+	cl_pred_accum_stats.next_report_time = now + 1.0;
+}
+
+static qboolean CL_Predict_DtIsSnapped (float dt, float epsilon, float *out_target)
+{
+	static const float snap_rates[] = {30.0f, 60.0f, 72.0f, 90.0f, 120.0f, 144.0f, 165.0f, 240.0f};
+	size_t i;
+
+	if (dt <= 0.0f)
+		return false;
+
+	for (i = 0; i < sizeof(snap_rates) / sizeof(snap_rates[0]); i++)
+	{
+		float target = 1.0f / snap_rates[i];
+		if (fabsf (dt - target) <= epsilon)
+		{
+			if (out_target)
+				*out_target = target;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void CL_Predict_UpdateDtSnapState (float dt_use)
+{
+	const float epsilon = 0.00005f;
+	int i;
+	int snap_count = 0;
+	int sample_count;
+	qboolean snapped;
+
+	if (dt_use <= 0.0f)
+		return;
+
+	cl_pred_dt_history[cl_pred_dt_history_index] = dt_use;
+	cl_pred_dt_history_index = (cl_pred_dt_history_index + 1) % CL_PRED_ACCUM_DT_HISTORY;
+	if (cl_pred_dt_history_count < CL_PRED_ACCUM_DT_HISTORY)
+		cl_pred_dt_history_count++;
+
+	sample_count = cl_pred_dt_history_count;
+	for (i = 0; i < sample_count; i++)
+	{
+		if (CL_Predict_DtIsSnapped (cl_pred_dt_history[i], epsilon, NULL))
+			snap_count++;
+	}
+
+	snapped = (sample_count >= 10) && ((float)snap_count / (float)sample_count >= 0.8f);
+	if (snapped != cl_pred_dt_snapped)
+	{
+		cl_pred_dt_snapped = snapped;
+		if (CL_Predict_AccumSummaryEnabled ())
+		{
+			Con_Printf ("PREDACCUM snap_detect %s (%d/%d)\n", snapped ? "ON" : "OFF", snap_count, sample_count);
+			JITTER_LOG ("PREDACCUM snap_detect %s (%d/%d)\n", snapped ? "ON" : "OFF", snap_count, sample_count);
+		}
+	}
 }
 
 static qboolean CL_Predict_Vec3IsFinite (const vec3_t vec)
@@ -747,9 +963,26 @@ static void CL_Predict_RunFrameSteps (void)
 	int max_steps;
 	int steps = 0;
 	const float PRED_EPS = 0.0005f;
+	const float max_accum_time = CL_Predict_GetMaxAccumTime ();
+	float pre_accum = (float)cl_pred_frame_accum;
+	float dropped_time = (float)cl_pred_frame_drop_time;
+	qboolean behind = false;
+	qboolean store_frame;
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
+
+	if (cl_pred_frame_accum > max_accum_time)
+	{
+		float drop = (float)(cl_pred_frame_accum - max_accum_time);
+		dropped_time += drop;
+		cl_pred_frame_accum = max_accum_time;
+		if (CL_Predict_AccumSummaryEnabled ())
+		{
+			Con_Printf ("PREDACCUM clamp_run drop %.6f max %.6f\n", drop, max_accum_time);
+			JITTER_LOG ("PREDACCUM clamp_run drop %.6f max %.6f\n", drop, max_accum_time);
+		}
+	}
 
 	if (cl_pred_render_cmd_valid)
 	{
@@ -763,11 +996,10 @@ static void CL_Predict_RunFrameSteps (void)
 
 	if (CL_Predict_UseUltra ())
 	{
-		const float max_accum = 0.25f;
 		step_dt = CL_Predict_GetUltraStepTime ();
 		if (step_dt <= 0.0f)
 			return;
-		max_steps = (int)ceilf (max_accum / step_dt);
+		max_steps = (int)ceilf (max_accum_time / step_dt);
 		if (max_steps < 1)
 			max_steps = 1;
 		CL_PRED_ASSERT (step_dt > 0.0f);
@@ -786,8 +1018,15 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_from = cl_pred.predicted;
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
 			cl_pred_render_to = cl_pred.predicted;
-			if (cl_pred_render_cmd_valid && cmd.sequence > 0)
+			store_frame = (cmd.sequence > 0)
+				&& (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
+			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+			else if (CL_Predict_AccumVerboseEnabled ())
+			{
+				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+				JITTER_LOG ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+			}
 			cl_pred_frame_accum -= step_dt;
 			if (cl_pred_frame_accum < 0.0)
 				cl_pred_frame_accum = 0.0;
@@ -799,7 +1038,9 @@ static void CL_Predict_RunFrameSteps (void)
 		step_dt = CL_Predict_GetFrameStepTime (cl_pred_frame_dt_last);
 		if (step_dt <= 0.0f)
 			return;
-		max_steps = (int)cl_pred_max_substeps.value;
+		max_steps = (int)ceilf (max_accum_time / step_dt);
+		if (cl_pred_max_substeps.value > 0.0f && max_steps > (int)cl_pred_max_substeps.value)
+			max_steps = (int)cl_pred_max_substeps.value;
 		if (max_steps < 1)
 			max_steps = 1;
 
@@ -817,8 +1058,15 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_from = cl_pred.predicted;
 			CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
 			cl_pred_render_to = cl_pred.predicted;
-			if (cl_pred_render_cmd_valid && cmd.sequence > 0)
+			store_frame = (cmd.sequence > 0)
+				&& (cl_pred_store_render_cmd_only.value > 0.0f ? cl_pred_render_cmd_valid : true);
+			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+			else if (CL_Predict_AccumVerboseEnabled ())
+			{
+				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+				JITTER_LOG ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
+			}
 			cl_pred_frame_accum -= step_dt;
 			if (cl_pred_frame_accum < 0.0f)
 				cl_pred_frame_accum = 0.0f;
@@ -834,9 +1082,26 @@ static void CL_Predict_RunFrameSteps (void)
 		CL_Predict_ResetRenderInterp ();
 	if (step_dt > 0.0f)
 		cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
+	if (cl_pred_frame_accum < 0.0)
+		cl_pred_frame_accum = 0.0;
+	if (step_dt > 0.0f && cl_pred_frame_accum + PRED_EPS >= step_dt)
+	{
+		behind = true;
+		cl_pred_frame_accum = fmodf ((float)cl_pred_frame_accum, step_dt);
+		cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
+	}
 	cl_pred_render_interp_valid = true;
+	if (CL_Predict_AccumVerboseEnabled () && step_dt > 0.0f)
+	{
+		Con_Printf ("PREDACCUM steps=%d step_dt=%.6f pre=%.6f post=%.6f frac=%.3f behind=%d\n",
+			steps, step_dt, pre_accum, (float)cl_pred_frame_accum, cl_pred_render_frac, behind ? 1 : 0);
+		JITTER_LOG ("PREDACCUM steps=%d step_dt=%.6f pre=%.6f post=%.6f frac=%.3f behind=%d\n",
+			steps, step_dt, pre_accum, (float)cl_pred_frame_accum, cl_pred_render_frac, behind ? 1 : 0);
+	}
+	if (CL_Predict_AccumVerboseEnabled ())
+		CL_PRED_ASSERT (step_dt > 0.0f && cl_pred_frame_accum >= 0.0 && cl_pred_frame_accum < step_dt + 0.0001f);
 
-	if (cl_pred_accum_debug.value > 0.0f)
+	if (CL_Predict_AccumSummaryEnabled ())
 	{
 		Con_Printf ("ACCUM=%f RENDER_FRAC=%f\n", cl_pred_frame_accum, cl_pred_render_frac);
 		JITTER_LOG ("ACCUM=%f RENDER_FRAC=%f\n", cl_pred_frame_accum, cl_pred_render_frac);
@@ -849,6 +1114,161 @@ static void CL_Predict_RunFrameSteps (void)
 		JITTER_LOG ("JITTERDBG pred_accum %.4f step_dt %.4f steps %d render_frac %.3f\n",
 			cl_pred_frame_accum, step_dt, steps, cl_pred_render_frac);
 	}
+
+	CL_Predict_UpdateAccumStatsFrame ((float)cl_pred_frame_accum, cl_pred_render_frac, steps, dropped_time);
+	CL_Predict_ReportAccumStats ();
+}
+
+static float CL_Predict_Selftest_PatternDt (int pattern, int frame)
+{
+	const float dt_60 = 1.0f / 60.0f;
+	const float dt_144 = 1.0f / 144.0f;
+
+	switch (pattern)
+	{
+	case 0:
+		return dt_60;
+	case 1:
+		return dt_144;
+	case 2:
+		return (frame & 1) ? 0.024f : 0.008f;
+	case 3:
+	{
+		static const float jitter[] = {0.0000f, 0.0003f, -0.0002f, 0.0001f, -0.0001f, 0.0002f, -0.0003f, 0.0001f};
+		const float base = dt_60;
+		const float offset = jitter[frame % (int)(sizeof(jitter) / sizeof(jitter[0]))];
+		return base + offset;
+	}
+	case 4:
+		if (frame == 120)
+			return 0.200f;
+		if (frame == 240)
+			return 0.350f;
+		return dt_60;
+	case 5:
+		return dt_60 + ((frame % 10) == 0 ? 0.000001f : 0.0f);
+	default:
+		return dt_60;
+	}
+}
+
+static qboolean CL_Predict_Selftest_RunPattern (const char *name, int pattern, float step_dt, float max_accum_time,
+	int frames, qboolean expect_broad_frac, qboolean expect_clamp)
+{
+	const float PRED_EPS = 0.0005f;
+	float accum = 0.0f;
+	float frac_min = 1.0f;
+	float frac_max = 0.0f;
+	double total_time = 0.0;
+	int steps_total = 0;
+	int clamp_events = 0;
+	double dropped_time = 0.0;
+	qboolean ok = true;
+	int i;
+
+	for (i = 0; i < frames; i++)
+	{
+		float dt = CL_Predict_Selftest_PatternDt (pattern, i);
+		float drop = 0.0f;
+		int steps = 0;
+		int max_steps = (int)ceilf (max_accum_time / step_dt);
+
+		total_time += dt;
+		if (dt > max_accum_time)
+		{
+			drop += dt - max_accum_time;
+			dt = max_accum_time;
+		}
+
+		accum += dt;
+		if (accum > max_accum_time)
+		{
+			drop += accum - max_accum_time;
+			accum = max_accum_time;
+		}
+		if (drop > 0.0f)
+		{
+			clamp_events++;
+			dropped_time += drop;
+		}
+
+		while (accum + PRED_EPS >= step_dt && steps < max_steps)
+		{
+			accum -= step_dt;
+			if (accum < 0.0f)
+				accum = 0.0f;
+			steps++;
+			steps_total++;
+		}
+
+		if (accum < 0.0f)
+			accum = 0.0f;
+		if (accum + PRED_EPS >= step_dt)
+			accum = fmodf (accum, step_dt);
+
+		if (accum < 0.0f || accum >= step_dt + 0.0001f)
+			ok = false;
+
+		if (step_dt > 0.0f)
+		{
+			float frac = accum / step_dt;
+			if (frac < frac_min)
+				frac_min = frac;
+			if (frac > frac_max)
+				frac_max = frac;
+		}
+	}
+
+	{
+		double expected_steps = total_time / (double)step_dt;
+		int min_steps = (int)floor (expected_steps - 1.5);
+		int max_steps = (int)ceil (expected_steps + 1.5);
+		if (steps_total < min_steps || steps_total > max_steps)
+			ok = false;
+	}
+
+	if (expect_broad_frac && (frac_max - frac_min) < 0.4f)
+		ok = false;
+	if (expect_clamp && clamp_events <= 0)
+		ok = false;
+
+	Con_Printf ("PREDACCUM_SELFTEST %s: %s (steps=%d frac=%.3f..%.3f clamp=%d drop=%.6f)\n",
+		name, ok ? "PASS" : "FAIL", steps_total, frac_min, frac_max, clamp_events, dropped_time);
+	JITTER_LOG ("PREDACCUM_SELFTEST %s: %s (steps=%d frac=%.3f..%.3f clamp=%d drop=%.6f)\n",
+		name, ok ? "PASS" : "FAIL", steps_total, frac_min, frac_max, clamp_events, dropped_time);
+
+	return ok;
+}
+
+static void CL_Predict_AccumSelftest_f (void)
+{
+	const float step_dt = 1.0f / 60.0f;
+	const float max_accum_time = CL_Predict_GetMaxAccumTime ();
+	int frames = 600;
+	int pass = 0;
+	int total = 0;
+
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("60hz", 0, step_dt, max_accum_time, frames, true, false))
+		pass++;
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("144hz", 1, step_dt, max_accum_time, frames, true, false))
+		pass++;
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("alt_8_24ms", 2, step_dt, max_accum_time, frames, true, false))
+		pass++;
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("micro_jitter", 3, step_dt, max_accum_time, frames, true, false))
+		pass++;
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("hitch_200ms", 4, step_dt, max_accum_time, frames, true, true))
+		pass++;
+	total++;
+	if (CL_Predict_Selftest_RunPattern ("vsync_snap", 5, step_dt, max_accum_time, frames, false, false))
+		pass++;
+
+	Con_Printf ("PREDACCUM_SELFTEST SUMMARY %d/%d PASS\n", pass, total);
+	JITTER_LOG ("PREDACCUM_SELFTEST SUMMARY %d/%d PASS\n", pass, total);
 }
 
 static float CL_Predict_AngleDelta (float a, float b)
@@ -2057,6 +2477,12 @@ void CL_Predict_Clear (void)
 	cl_pred_apply_render_reason = CL_PRED_APPLY_SKIP_DISABLED;
 	cl_pred_frame_dt_last = 0.0f;
 	cl_pred_frame_accum = 0.0;
+	cl_pred_prev_realtime = 0.0;
+	cl_pred_last_host_framecount = -1;
+	cl_pred_dt_snapped = false;
+	cl_pred_dt_history_index = 0;
+	cl_pred_dt_history_count = 0;
+	CL_Predict_ResetAccumStats ();
 	cl_pred_render_interp_valid = false;
 	cl_pred_render_frac = 0.0f;
 	memset (&cl_pred_render_from, 0, sizeof(cl_pred_render_from));
@@ -2070,6 +2496,7 @@ void CL_Predict_Clear (void)
 	cl_pred_warned_pred_miss = false;
 	cl_pred_warned_overflow = false;
 	cl_pred_warned_replay = false;
+	cl_pred_frame_drop_time = 0.0;
 }
 
 void CL_Predict_ResetGround (void)
@@ -2081,6 +2508,16 @@ void CL_Predict_ResetGround (void)
 	CL_Predict_ResetGroundCache (&cl_pred.predicted);
 }
 
+/*
+Prediction accumulator contract:
+- Feed exactly once per host frame when prediction is enabled and has base.
+- Choose dt in priority order: realtime delta (if sane), raw frame time, host frame time,
+  then clamp any outliers to max_accum_time. Sane = finite and 0 < dt < max_accum_time.
+- Accumulator increases by dt_use, is clamped to max_accum_time (drop excess with logging),
+  then decreased by exact step_dt per simulation step.
+- Remainder is normalized to [0, step_dt) and render_frac = remainder / step_dt.
+- Snap detection (e.g., exact vsync dt) is recorded; optional micro-unbias is behind a cvar.
+*/
 void CL_Predict_BeginFrame (void)
 {
 	qboolean enabled;
@@ -2097,6 +2534,18 @@ void CL_Predict_BeginFrame (void)
 	cl_pred_smooth_count = 0;
 	cl_pred_true_error_len = 0.0f;
 	cl_pred_pred_frame_found = false;
+	cl_pred_frame_drop_time = 0.0;
+
+	if (host_framecount == cl_pred_last_host_framecount)
+	{
+		if (CL_Predict_AccumVerboseEnabled ())
+		{
+			Con_Printf ("PREDACCUM duplicate BeginFrame host_framecount=%d\n", host_framecount);
+			JITTER_LOG ("PREDACCUM duplicate BeginFrame host_framecount=%d\n", host_framecount);
+		}
+		return;
+	}
+	cl_pred_last_host_framecount = host_framecount;
 
 	was_enabled = cl_pred_prev_enabled;
 	enabled = CL_Predict_IsEnabled ();
@@ -2105,19 +2554,110 @@ void CL_Predict_BeginFrame (void)
 
 	if (enabled && cl_pred.has_base)
 	{
-		float frame_dt = (float)host_frametime;
+		const float max_accum_time = CL_Predict_GetMaxAccumTime ();
 		const float raw_dt = (float)host_rawframetime;
+		const float host_dt = (float)host_frametime;
+		float real_dt = 0.0f;
+		float dt_use = 0.0f;
+		float pre_accum = (float)cl_pred_frame_accum;
+		float post_accum;
+		float step_guess;
+		const char *dt_source = "none";
+		qboolean dt_real_valid = (cl_pred_prev_realtime > 0.0) && isfinite (realtime) && realtime >= cl_pred_prev_realtime;
+		qboolean unbias_applied = false;
+		qboolean clamp_applied = false;
+		float clamp_drop = 0.0f;
 
-		if (raw_dt > 0.0f && fabsf (raw_dt - frame_dt) > 0.000001f)
+		if (dt_real_valid)
+			real_dt = (float)(realtime - cl_pred_prev_realtime);
+
+		if (CL_Predict_DtSane (real_dt, max_accum_time))
 		{
-			Con_Printf ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, frame_dt);
-			JITTER_LOG ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, frame_dt);
+			dt_use = real_dt;
+			dt_source = "real";
+		}
+		else if (CL_Predict_DtSane (raw_dt, max_accum_time))
+		{
+			dt_use = raw_dt;
+			dt_source = "raw";
+		}
+		else if (CL_Predict_DtSane (host_dt, max_accum_time))
+		{
+			dt_use = host_dt;
+			dt_source = "host";
+		}
+		else
+		{
+			float fallback = 0.0f;
+			if (real_dt > 0.0f && isfinite (real_dt))
+				fallback = real_dt;
+			else if (raw_dt > 0.0f && isfinite (raw_dt))
+				fallback = raw_dt;
+			else if (host_dt > 0.0f && isfinite (host_dt))
+				fallback = host_dt;
+			if (fallback > 0.0f)
+			{
+				dt_use = fallback;
+				dt_source = "clamp";
+			}
 		}
 
-		cl_pred_frame_accum += frame_dt;
+		if (dt_use > max_accum_time)
+		{
+			clamp_applied = true;
+			clamp_drop = dt_use - max_accum_time;
+			dt_use = max_accum_time;
+		}
+		if (dt_use < 0.0f || !isfinite (dt_use))
+			dt_use = 0.0f;
+
+		CL_Predict_UpdateDtSnapState (dt_use);
+		step_guess = cl_pred_last_substep_dt > 0.0f ? cl_pred_last_substep_dt : CL_Predict_GetFrameStepTime (dt_use > 0.0f ? dt_use : 0.016f);
+		if (cl_pred_accum_unbias.value > 0.0f && cl_pred_dt_snapped && step_guess > 0.0f)
+		{
+			const float bias = fminf (0.00005f, step_guess * 0.001f);
+			if (bias > 0.0f)
+			{
+				dt_use += bias;
+				unbias_applied = true;
+			}
+		}
+
+		if (raw_dt > 0.0f && host_dt > 0.0f && fabsf (raw_dt - host_dt) > 0.000001f)
+		{
+			Con_Printf ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, host_dt);
+			JITTER_LOG ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, host_dt);
+		}
+
+		cl_pred_frame_accum += dt_use;
 		if (cl_pred_frame_accum < 0.0)
 			cl_pred_frame_accum = 0.0;
-		cl_pred_frame_dt_last = frame_dt;
+		if (cl_pred_frame_accum > max_accum_time)
+		{
+			clamp_drop += (float)(cl_pred_frame_accum - max_accum_time);
+			cl_pred_frame_accum = max_accum_time;
+			clamp_applied = true;
+		}
+		post_accum = (float)cl_pred_frame_accum;
+		cl_pred_frame_dt_last = dt_use;
+		cl_pred_prev_realtime = realtime;
+		cl_pred_frame_drop_time = clamp_drop;
+
+		CL_Predict_UpdateAccumStatsDt (dt_use);
+		if (CL_Predict_AccumVerboseEnabled ())
+		{
+			Con_Printf ("PREDACCUM dt_real=%.6f dt_raw=%.6f dt_host=%.6f dt_use=%.6f src=%s pre=%.6f post=%.6f snap=%d clamp=%d drop=%.6f unbias=%d\n",
+				real_dt, raw_dt, host_dt, dt_use, dt_source, pre_accum, post_accum,
+				cl_pred_dt_snapped ? 1 : 0, clamp_applied ? 1 : 0, clamp_drop, unbias_applied ? 1 : 0);
+			JITTER_LOG ("PREDACCUM dt_real=%.6f dt_raw=%.6f dt_host=%.6f dt_use=%.6f src=%s pre=%.6f post=%.6f snap=%d clamp=%d drop=%.6f unbias=%d\n",
+				real_dt, raw_dt, host_dt, dt_use, dt_source, pre_accum, post_accum,
+				cl_pred_dt_snapped ? 1 : 0, clamp_applied ? 1 : 0, clamp_drop, unbias_applied ? 1 : 0);
+		}
+		if (clamp_applied && CL_Predict_AccumSummaryEnabled ())
+		{
+			Con_Printf ("PREDACCUM clamp_begin drop %.6f max %.6f\n", clamp_drop, max_accum_time);
+			JITTER_LOG ("PREDACCUM clamp_begin drop %.6f max %.6f\n", clamp_drop, max_accum_time);
+		}
 	}
 	else if (!enabled || !cl_pred.has_base)
 	{
@@ -2125,12 +2665,14 @@ void CL_Predict_BeginFrame (void)
 		{
 			cl_pred_frame_dt_last = 0.0f;
 			cl_pred_frame_accum = 0.0;
+			cl_pred_prev_realtime = 0.0;
+			CL_Predict_ResetAccumStats ();
 		}
 		cl_pred_render_interp_valid = false;
 	}
 	cl_pred_prev_enabled = enabled;
 
-	if (cl_pred_accum_debug.value > 0.0f)
+	if (CL_Predict_AccumSummaryEnabled ())
 	{
 		Con_Printf ("PREDACCUM dt %.4f accum %.4f step_dt %.4f\n",
 			host_frametime, cl_pred_frame_accum, cl_pred_last_substep_dt);
