@@ -750,8 +750,6 @@ static void CL_Predict_RunFrameSteps (void)
 
 	if (!CL_Predict_IsEnabled () || !cl_pred.has_base)
 		return;
-	if (cl_pred_frame_accum <= 0.0)
-		return;
 
 	if (cl_pred_render_cmd_valid)
 	{
@@ -835,11 +833,14 @@ static void CL_Predict_RunFrameSteps (void)
 	if (!cl_pred_render_interp_valid)
 		CL_Predict_ResetRenderInterp ();
 	if (step_dt > 0.0f)
-	{
 		cl_pred_render_frac = (float)(cl_pred_frame_accum / step_dt);
-		cl_pred_render_frac = CLAMP (0.0f, cl_pred_render_frac, 1.0f);
-	}
 	cl_pred_render_interp_valid = true;
+
+	if (cl_pred_accum_debug.value > 0.0f)
+	{
+		Con_Printf ("ACCUM=%f RENDER_FRAC=%f\n", cl_pred_frame_accum, cl_pred_render_frac);
+		JITTER_LOG ("ACCUM=%f RENDER_FRAC=%f\n", cl_pred_frame_accum, cl_pred_render_frac);
+	}
 
 	if (cl_jitter_debug.value > 0.0f)
 	{
