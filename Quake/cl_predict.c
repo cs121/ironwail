@@ -404,6 +404,7 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 static qboolean CL_Predict_FindNewestNotNewer (unsigned int seq, cl_pred_frame_t *out, unsigned int *found_seq);
 static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
 static qboolean CL_Predict_SelfCheck (unsigned int ack, const char *context);
+static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render);
 static void CL_Predict_AccumSelftest_f (void);
 static void CL_Predict_StateDump_f (void);
 static void CL_Predict_CvarDump_f (void);
