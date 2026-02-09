@@ -1271,10 +1271,11 @@ static void CL_Predict_ResetGroundCache (cl_pred_state_t *state)
 	if (!state)
 		return;
 
-	state->groundent = 0;
+	if (!state->onground)
+		state->groundent = 0;
 	state->ground_valid = false;
 	state->ground_transition_count = 0;
-	state->ground_transition_state = false;
+	state->ground_transition_state = state->onground;
 	state->pred_ground_ent = 0;
 	VectorClear (state->pred_ground_offset);
 	state->pred_ground_yaw_delta = 0.0f;
@@ -1410,6 +1411,7 @@ static void CL_Predict_HardResetToBase (const char *reason)
 	CL_Predict_ResetGroundCache (&cl_pred.predicted);
 	cl_pred.predicted.onground = cl_pred.base.onground;
 	cl_pred.predicted.groundent = cl_pred.base.groundent;
+	CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
 	CL_Predict_ResetRenderInterp ();
 
 	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
@@ -4200,6 +4202,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred.predicted = cl_pred.base;
 		CL_Predict_InvalidateGroundCache (&cl_pred.predicted);
 		cl_pred.predicted.groundent = cl_pred.base.groundent;
+		CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
 	}
 	CL_Predict_ResetRenderInterp ();
 
