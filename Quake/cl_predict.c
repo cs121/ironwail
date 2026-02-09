@@ -71,7 +71,14 @@ static cvar_t cl_pred_hard_snap_threshold = {"cl_pred_hard_snap_threshold", "12"
 
 #define CL_PRED_FRAME_RING 1024
 
-typedef struct cl_pred_ground_cache_s cl_pred_ground_cache_t;
+typedef struct cl_pred_ground_cache_s
+{
+	int		id;
+	vec3_t		last_origin;
+	vec3_t		last_angles;
+	double		last_time;
+	qboolean	valid;
+} cl_pred_ground_cache_t;
 
 typedef struct
 {
@@ -95,15 +102,6 @@ typedef struct
 	byte		pm_flags;
 	qboolean	valid;
 } cl_pred_frame_t;
-
-typedef struct cl_pred_ground_cache_s
-{
-	int		id;
-	vec3_t		last_origin;
-	vec3_t		last_angles;
-	double		last_time;
-	qboolean	valid;
-} cl_pred_ground_cache_t;
 
 typedef struct
 {
@@ -213,6 +211,8 @@ static qboolean cl_pred_warned_pred_miss;
 static qboolean cl_pred_warned_overflow;
 static qboolean cl_pred_warned_replay;
 static double cl_pred_frame_drop_time;
+
+static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref);
 
 #define CL_PRED_ACCUM_DT_HISTORY 240
 #define CL_PRED_TRACE_MAX_RING 8192
@@ -698,7 +698,7 @@ static void CL_Predict_TraceDumpInternal (const char *reason)
 		const cl_pred_trace_record_t *rec = &cl_pred_trace_state.records[index];
 
 		fprintf (fp,
-			"%d %d %.6f %.6f %.6f %u %u %.6f %.6f %.6f %.6f %.6f %d %d 0x%X %.6f %.6f %.6f %.6f %d %d %d %.6f %d %d 0x%X %d %d %d %d %.3f %.3f %.3f %d %d %d %.3f %.3f %d %u %d %d %d %d %d %d %d %u %u %d %.3f %d 0x%X %d %d %.6f %.6f %.6f %.6f %d %d\n",
+			"%d %d %.6f %.6f %.6f %u %u %.6f %.6f %.6f %.6f %.6f %d %d 0x%X %.6f %.6f %.6f %.6f %d %d %d %.6f %d %d 0x%X %d %d %d %d %.3f %.3f %.3f %d %d %d %.3f %.3f %d %u %d %d %d %d %d %d %u %u %d %.3f %d 0x%X %d %d %.6f %.6f %.6f %.6f %d %d\n",
 			rec->type,
 			rec->framecount,
 			rec->realtime,
@@ -784,6 +784,17 @@ static void CL_Predict_TraceMaybeAutodump (const char *reason, float error_len, 
 
 	cl_pred_trace_state.last_autodump_time = realtime;
 	CL_Predict_TraceDumpInternal (reason);
+}
+
+static double CL_Predict_GetServerTimeSample (void)
+{
+	if (cl.server_time_base > 0.0 && cl.server_time_skew > 0.0)
+		return cl.server_time_base + (realtime - cl.server_time_skew);
+	if (cl.clock_offset != 0.0)
+		return realtime + cl.clock_offset;
+	if (cl.latest_server_time > 0.0)
+		return cl.latest_server_time;
+	return cl.mtime[0];
 }
 
 static void CL_Predict_RegisterDebugCvars (void)
@@ -3474,7 +3485,7 @@ void CL_Predict_BeginFrame (void)
 			cl_pred_trace_cur->framecount = host_framecount;
 			cl_pred_trace_cur->realtime = realtime;
 			cl_pred_trace_cur->cl_time = cl.time;
-			cl_pred_trace_cur->server_time = cl.server_time;
+			cl_pred_trace_cur->server_time = CL_Predict_GetServerTimeSample ();
 			cl_pred_trace_cur->ack_seq = cl_pred_last_ack_seq;
 			cl_pred_trace_cur->latest_seq = cl_pred.seq_latest;
 			cl_pred_trace_cur->pred_frame_overwrites = cl_pred_trace_state.storeframe_overwrites;
