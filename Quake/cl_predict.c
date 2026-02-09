@@ -327,7 +327,7 @@ static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
 {
 	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
 
-	if (frame->seq != seq)
+	if (!frame->valid || frame->seq != seq)
 	{
 		if (cl_pred_debug.value > 0.0f)
 		{
@@ -2105,7 +2105,14 @@ void CL_Predict_BeginFrame (void)
 
 	if (enabled && cl_pred.has_base)
 	{
-		float frame_dt = (float)(host_rawframetime > 0.0 ? host_rawframetime : host_frametime);
+		float frame_dt = (float)host_frametime;
+		const float raw_dt = (float)host_rawframetime;
+
+		if (raw_dt > 0.0f && fabsf (raw_dt - frame_dt) > 0.000001f)
+		{
+			Con_Printf ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, frame_dt);
+			JITTER_LOG ("JITTERDBG pred_accum dt clamped raw %.6f ft %.6f\n", raw_dt, frame_dt);
+		}
 
 		cl_pred_frame_accum += frame_dt;
 		if (cl_pred_frame_accum < 0.0)
@@ -2274,7 +2281,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		{
 			unsigned int delta = cl_pred.seq_latest - ack;
 
-			if (delta > (CL_PRED_FRAME_RING - 1))
+			if (delta >= CL_PRED_FRAME_RING)
 			{
 				pred_overflow = true;
 				if (!cl_pred_warned_overflow)
@@ -2285,6 +2292,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				}
 			}
 		}
+		if (pred_overflow)
+			pred_frame_valid = false;
 		if (use_ultra)
 		{
 			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
@@ -2563,6 +2572,18 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		VectorCopy (origin, cl.simorg);
 		VectorClear (cl_pred_error);
 		VectorClear (cl_pred_angle_error);
+		cl_pred_true_error_len = 0.0f;
+		cl_pred_error_time = 0.0f;
+		cl_q3mini_net_active = false;
+		cl_q3mini_net_remaining = 0.0f;
+		cl_q3mini_net_duration = 0.0f;
+		if (cl_jitter_debug.value > 0.0f)
+		{
+			Con_Printf ("JITTERDBG snap_correction ack %u latest %u accum %.4f steps %d\n",
+				ack, cl_pred.seq_latest, cl_pred_frame_accum, cl_pred_steps_this_frame);
+			JITTER_LOG ("JITTERDBG snap_correction ack %u latest %u accum %.4f steps %d\n",
+				ack, cl_pred.seq_latest, cl_pred_frame_accum, cl_pred_steps_this_frame);
+		}
 	}
 	if (use_ultra && snap_correction)
 	{
