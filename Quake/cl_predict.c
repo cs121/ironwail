@@ -207,6 +207,7 @@ static int cl_pred_snap_count;
 static int cl_pred_smooth_count;
 static float cl_pred_true_error_len;
 static qboolean cl_pred_pred_frame_found;
+static qboolean cl_pred_frame_mismatch;
 static unsigned int cl_pred_last_ack_seq;
 static qboolean cl_pred_warned_pred_miss;
 static qboolean cl_pred_warned_overflow;
@@ -399,6 +400,7 @@ static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
 static void CL_Predict_ClearFrames (void);
 static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq);
+static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq);
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state);
 static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *out);
 static qboolean CL_Predict_FindNewestNotNewer (unsigned int seq, cl_pred_frame_t *out, unsigned int *found_seq);
@@ -854,14 +856,7 @@ static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref)
 	return seq_newer (seq, ref);
 }
 
-static unsigned int CL_Predict_RingIndex (unsigned int seq, unsigned int ring)
-{
-	if (ring == 0)
-		return 0;
-	if ((ring & (ring - 1)) == 0)
-		return seq & (ring - 1);
-	return seq % ring;
-}
+#define CL_PRED_RING_IS_POW2(ring) (((ring) != 0u) && (((ring) & ((ring) - 1u)) == 0u))
 
 static void CL_Predict_LogSeqWrap (const char *tag, unsigned int seq, unsigned int prev)
 {
@@ -1151,6 +1146,7 @@ static void CL_Predict_ClearFrames (void)
 
 	for (i = 0; i < CL_PRED_FRAME_RING; i++)
 	{
+		memset (&cl_pred.frames[i], 0, sizeof(cl_pred.frames[i]));
 		cl_pred.frames[i].valid = false;
 		cl_pred.frames[i].cmd_seq = ~0u;
 	}
@@ -1158,7 +1154,20 @@ static void CL_Predict_ClearFrames (void)
 
 static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq)
 {
-	return CL_Predict_RingIndex (seq, CL_PRED_FRAME_RING);
+#if CL_PRED_RING_IS_POW2(CL_PRED_FRAME_RING)
+	return seq & (CL_PRED_FRAME_RING - 1u);
+#else
+	return seq % CL_PRED_FRAME_RING;
+#endif
+}
+
+static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq)
+{
+#if CL_PRED_RING_IS_POW2(CMD_RING)
+	return seq & (CMD_RING - 1u);
+#else
+	return seq % CMD_RING;
+#endif
 }
 
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state)
@@ -1211,13 +1220,18 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 
 	if (!frame->valid || frame->cmd_seq != seq)
 	{
+		cl_pred_frame_mismatch = true;
 		if (cl_pred_debug.value > 0.0f)
 		{
-			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u\n",
-				CL_Predict_RingIndex (seq, CL_PRED_FRAME_RING), frame->cmd_seq, seq);
-			JITTER_LOG ("PredFrame mismatch: slot %u has %u expected %u\n",
-				CL_Predict_RingIndex (seq, CL_PRED_FRAME_RING), frame->cmd_seq, seq);
+			unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+
+			Con_DPrintf ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, CMD_BACKUP);
+			JITTER_LOG ("PredFrame mismatch: slot %u has %u expected %u ack=%u pred=%u ring=%u cmdring=%u cmdbackup=%u\n",
+				slot, frame->cmd_seq, seq, seq, cl_pred.seq_latest, CL_PRED_FRAME_RING, CMD_RING, CMD_BACKUP);
 		}
+		frame->valid = false;
+		frame->cmd_seq = ~0u;
 		return false;
 	}
 	if (out)
@@ -1434,9 +1448,10 @@ static void CL_Predict_DebugLogCmd (const char *tag, const usercmd_t *cmd, float
 	error_len = VectorLength (error);
 	is_local = CL_Predict_IsLocalListenServer () ? 1 : 0;
 
-	Con_Printf ("PREDDBG: %s seq=%u dt=%.4f pred=%.2f %.2f %.2f base=%.2f %.2f %.2f err=%.3f local=%d\n",
+	Con_Printf ("PREDDBG: %s seq=%u idx=%u dt=%.4f pred=%.2f %.2f %.2f base=%.2f %.2f %.2f err=%.3f local=%d\n",
 		tag ? tag : "cmd",
 		cmd->sequence,
+		CL_Predict_CmdIndexForSeq (cmd->sequence),
 		dt,
 		cl_pred.predicted.origin[0],
 		cl_pred.predicted.origin[1],
@@ -1499,6 +1514,7 @@ static void CL_Predict_HardResetToBase (const char *reason)
 static qboolean CL_Predict_SelfCheck (unsigned int ack, const char *context)
 {
 	unsigned int max_replay = (CMD_RING > 0) ? (CMD_RING - 1) : 0;
+	unsigned int max_backup = (CMD_BACKUP > 0) ? (CMD_BACKUP - 1) : 0;
 
 	if (cl_pred_replay_count > (int)max_replay)
 	{
@@ -1509,6 +1525,19 @@ static qboolean CL_Predict_SelfCheck (unsigned int ack, const char *context)
 		if (cl_pred_guard.value > 0.0f)
 		{
 			CL_Predict_HardResetToBase ("selfcheck replay overflow");
+			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
+			return false;
+		}
+	}
+	if (cl_pred_replay_count > (int)max_backup)
+	{
+		Con_Printf ("PREDDBG selfcheck replay backup overflow %s ack=%u replay=%d max=%u\n",
+			context ? context : "unknown", ack, cl_pred_replay_count, max_backup);
+		JITTER_LOG ("PREDDBG selfcheck replay backup overflow %s ack=%u replay=%d max=%u\n",
+			context ? context : "unknown", ack, cl_pred_replay_count, max_backup);
+		if (cl_pred_guard.value > 0.0f)
+		{
+			CL_Predict_HardResetToBase ("selfcheck replay backup overflow");
 			CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 			return false;
 		}
@@ -3466,6 +3495,7 @@ void CL_Predict_Clear (void)
 	cl_pred_warned_pred_miss = false;
 	cl_pred_warned_overflow = false;
 	cl_pred_warned_replay = false;
+	cl_pred_frame_mismatch = false;
 	cl_pred_frame_drop_time = 0.0;
 	cl_pred_last_reset_frame = -1;
 	cl_pred_last_reset_reason[0] = '\0';
@@ -3863,7 +3893,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 		CL_Predict_LogSeqWrap ("cmd", cmd->sequence, prev_seq);
 	}
 	cl_pred.seq_latest = cmd->sequence;
-	cl_pred.cmds[CL_Predict_RingIndex (cmd->sequence, CMD_RING)] = *cmd;
+	cl_pred.cmds[CL_Predict_CmdIndexForSeq (cmd->sequence)] = *cmd;
 	cl_pred_angles_normalized = 1;
 	if (cl_jitter_debug.value > 0.0f)
 	{
@@ -3894,7 +3924,7 @@ void CL_Predict_SetupCmd (usercmd_t *cmd)
 
 qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out)
 {
-	usercmd_t *cmd = &cl_pred.cmds[CL_Predict_RingIndex (seq, CMD_RING)];
+	usercmd_t *cmd = &cl_pred.cmds[CL_Predict_CmdIndexForSeq (seq)];
 
 	if (cmd->sequence != seq)
 		return false;
@@ -3945,6 +3975,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_SERVERUPDATE);
 	use_ultra = CL_Predict_UseUltra ();
 	Q_memset (&resim_cmd, 0, sizeof(resim_cmd));
+	cl_pred_frame_mismatch = false;
 	if (cl_pred.has_base && !CL_Predict_SeqNewer (ack, cl_pred.seq_acked))
 		return;
 
@@ -3977,6 +4008,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	cl_pred_server_update_this_frame = true;
 	CL_Predict_LogSeqWrap ("ack", ack, cl_pred_last_ack_seq);
 	cl_pred_last_ack_seq = ack;
+	if (cl_pred_guard.value > 0.0f && (ack == ~0u || cl_pred.seq_latest == ~0u))
+	{
+		guard_hard_reset = true;
+		guard_reason = "invalid seq";
+	}
 	allow_angle_correction = (cl_pred_correct_angles.value > 0.0f);
 	if (CL_Predict_TraceEnabled () && cl_pred_trace_cur)
 		cl_pred_trace_cur->server_applied = 1;
@@ -4012,11 +4048,16 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (pred_overflow)
 			pred_frame_valid = false;
+		if (cl_pred_guard.value > 0.0f && cl_pred_frame_mismatch && !guard_hard_reset)
+		{
+			guard_hard_reset = true;
+			guard_reason = "pred frame mismatch";
+		}
 		if (use_ultra)
 		{
 			if (!pred_frame_valid && !cl_pred_warned_pred_miss)
 			{
-				pred_slot = CL_Predict_RingIndex (ack, CL_PRED_FRAME_RING);
+				pred_slot = CL_Predict_FrameIndexForSeq (ack);
 				pred_stored_seq = cl_pred.frames[pred_slot].cmd_seq;
 				Con_Printf ("PredFrame MISS: ack=%u stored=%u slot=%u latest=%u\n",
 					ack, pred_stored_seq, pred_slot, cl_pred.seq_latest);
