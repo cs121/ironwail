@@ -512,6 +512,8 @@ static void CL_Predict_TraceReset (void)
 	}
 	memset (&cl_pred_trace, 0, sizeof(cl_pred_trace));
 	cl_pred_trace_cur = NULL;
+	cl.predicted_onground = false;
+	cl.predicted_groundent = 0;
 }
 
 static int CL_Predict_TraceDesiredCapacity (void)
@@ -1089,6 +1091,15 @@ static qboolean CL_Predict_AnglesSane (const vec3_t a)
 	}
 
 	return true;
+}
+
+static void CL_Predict_UpdateAuthoritativeGround (const cl_pred_state_t *state)
+{
+	if (!state)
+		return;
+
+	cl.predicted_onground = state->onground;
+	cl.predicted_groundent = state->onground ? state->groundent : 0;
 }
 
 static void CL_Predict_ClearFrames (void)
@@ -2043,7 +2054,7 @@ static void CL_Predict_StateDump_f (void)
 	CL_Predict_TraceWriteLine ("error pred_err=%.3f smooth_err=%.3f angle_err=%.3f time=%.6f",
 		cl_pred_true_error_len, VectorLength (cl_pred_error), VectorLength (cl_pred_angle_error), cl_pred_error_time);
 	CL_Predict_TraceWriteLine ("ground onground=%d groundent=%d ground_valid=%d reason=%d delta=%.3f yaw=%.3f switches=%d",
-		cl_pred_ground_dbg.onground ? 1 : 0, cl_pred_ground_dbg.groundent,
+		cl.predicted_onground ? 1 : 0, cl.predicted_groundent,
 		cl_pred_ground_dbg.ground_valid ? 1 : 0, cl_pred_ground_dbg.ground_valid_reason,
 		cl_pred_ground_dbg.ground_delta_len, cl_pred_ground_dbg.ground_yaw_delta, cl_pred_ground_dbg.ground_switches);
 	CL_Predict_TraceWriteLine ("apply pred_reason=%d render_reason=%d replay=%d snap=%d smooth=%d",
@@ -2055,12 +2066,12 @@ static void CL_Predict_StateDump_f (void)
 		cl_pred.base.origin[0], cl_pred.base.origin[1], cl_pred.base.origin[2],
 		cl_pred.base.velocity[0], cl_pred.base.velocity[1], cl_pred.base.velocity[2],
 		cl_pred.base.viewangles[0], cl_pred.base.viewangles[1], cl_pred.base.viewangles[2],
-		cl_pred.base.onground ? 1 : 0, cl_pred.base.groundent);
+		cl.predicted_onground ? 1 : 0, cl.predicted_groundent);
 	CL_Predict_TraceWriteLine ("pred origin=%.3f %.3f %.3f vel=%.3f %.3f %.3f ang=%.3f %.3f %.3f onground=%d groundent=%d",
 		cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2],
 		cl_pred.predicted.velocity[0], cl_pred.predicted.velocity[1], cl_pred.predicted.velocity[2],
 		cl_pred.predicted.viewangles[0], cl_pred.predicted.viewangles[1], cl_pred.predicted.viewangles[2],
-		cl_pred.predicted.onground ? 1 : 0, cl_pred.predicted.groundent);
+		cl.predicted_onground ? 1 : 0, cl.predicted_groundent);
 	CL_Predict_TraceWriteLine ("cvars (prediction core)");
 	CL_Predict_DumpCvarValue ("cl_predict");
 	CL_Predict_DumpCvarValue ("cl_nopred");
@@ -2286,7 +2297,7 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 	}
 	VectorCopy (state->velocity, cl.mvelocity[0]);
 	VectorCopy (state->velocity, cl.mvelocity[1]);
-	cl.onground = state->onground;
+	cl.onground = cl.predicted_onground;
 
 	if (apply_smoothing)
 	{
@@ -3311,6 +3322,9 @@ static void CL_Predict_SimulateCmd (cl_pred_state_t *state, const usercmd_t *cmd
 	}
 	if (!ground_applied)
 		cl_pred_ground_dbg.delta_applied = 0;
+
+	if (!is_render)
+		CL_Predict_UpdateAuthoritativeGround (state);
 }
 
 void CL_Predict_Clear (void)
@@ -3951,8 +3965,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
 			Con_Printf ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d switches %d gprev %.2f %.2f %.2f gnow %.2f %.2f %.2f delta_applied %d mouse_applied %d\n",
-				cl_pred_ground_dbg.onground ? 1 : 0,
-				cl_pred_ground_dbg.groundent,
+				cl.predicted_onground ? 1 : 0,
+				cl.predicted_groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
 				cl_pred_ground_dbg.ground_valid_reason,
 				cl_pred_ground_dbg.ground_trace_fraction,
@@ -3975,8 +3989,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_ground_dbg.delta_applied,
 				IN_DidApplyMouseDelta () ? 1 : 0);
 			JITTER_LOG ("JITTERDBG ground onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d switches %d gprev %.2f %.2f %.2f gnow %.2f %.2f %.2f delta_applied %d mouse_applied %d\n",
-				cl_pred_ground_dbg.onground ? 1 : 0,
-				cl_pred_ground_dbg.groundent,
+				cl.predicted_onground ? 1 : 0,
+				cl.predicted_groundent,
 				cl_pred_ground_dbg.ground_valid ? 1 : 0,
 				cl_pred_ground_dbg.ground_valid_reason,
 				cl_pred_ground_dbg.ground_trace_fraction,
@@ -4073,9 +4087,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				if (net_dbg_q3mini.value > 0.0f)
 				{
 					Con_Printf ("NETDBG q3mini smooth_start err %.2f dur %.0fms onground %d groundent %d\n",
-						error_len, smooth_ms, onground ? 1 : 0, cl_pred.base.pred_ground_ent);
+						error_len, smooth_ms, cl.predicted_onground ? 1 : 0, cl.predicted_groundent);
 					JITTER_LOG ("NETDBG q3mini smooth_start err %.2f dur %.0fms onground %d groundent %d\n",
-						error_len, smooth_ms, onground ? 1 : 0, cl_pred.base.pred_ground_ent);
+						error_len, smooth_ms, cl.predicted_onground ? 1 : 0, cl.predicted_groundent);
 				}
 			}
 			else
@@ -4177,7 +4191,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	}
 
 	if (pred_frame_valid)
+	{
 		CL_Predict_ApplyFrameState (&cl_pred.predicted, &pred_frame);
+		CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
+	}
 	else
 	{
 		cl_pred.predicted = cl_pred.base;
@@ -4312,8 +4329,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			cl_pred.seq_latest,
 			cl_pred_replay_count,
 			error_len,
-			cl_pred.predicted.onground ? 1 : 0,
-			cl_pred.predicted.groundent,
+			cl.predicted_onground ? 1 : 0,
+			cl.predicted_groundent,
 			cl_pred_ground_dbg.delta_applied,
 			host_frametime,
 			snap_correction ? 1 : 0,
@@ -4331,8 +4348,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred_trace_cur->snap = snap_correction ? 1 : 0;
 		cl_pred_trace_cur->replay_hit = pred_frame_valid ? 1 : 0;
 		cl_pred_trace_cur->replay_miss_reason = replay_miss_reason;
-		cl_pred_trace_cur->onground = cl_pred_ground_dbg.onground ? 1 : 0;
-		cl_pred_trace_cur->groundent = cl_pred_ground_dbg.groundent;
+		cl_pred_trace_cur->onground = cl.predicted_onground ? 1 : 0;
+		cl_pred_trace_cur->groundent = cl.predicted_groundent;
 		cl_pred_trace_cur->ground_valid = cl_pred_ground_dbg.ground_valid ? 1 : 0;
 		cl_pred_trace_cur->ground_delta = cl_pred_ground_dbg.ground_delta_len;
 		cl_pred_trace_cur->ground_yaw = cl_pred_ground_dbg.ground_yaw_delta;
@@ -4396,8 +4413,8 @@ qboolean CL_Predict_GetDebug (cl_pred_debug_t *out)
 	out->pred_frame_found = cl_pred_pred_frame_found;
 	out->replay_count = cl_pred_replay_count;
 	out->snap_count = cl_pred_snap_count;
-	out->onground = cl_pred_ground_dbg.onground;
-	out->groundent = cl_pred_ground_dbg.groundent;
+	out->onground = cl.predicted_onground;
+	out->groundent = cl.predicted_groundent;
 	out->ground_valid = cl_pred_ground_dbg.ground_valid;
 	out->ground_valid_reason = cl_pred_ground_dbg.ground_valid_reason;
 	out->ground_trace_fraction = cl_pred_ground_dbg.ground_trace_fraction;
