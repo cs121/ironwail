@@ -283,6 +283,8 @@ typedef struct
 
 	qboolean	paused;			// send over by server
 	qboolean	onground;
+	qboolean	predicted_onground;
+	int			predicted_groundent;
 	qboolean	inwater;
 	qboolean	fixangle;		// freeze view angle until next server frame
 
