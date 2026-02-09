@@ -74,6 +74,7 @@ static cvar_t cl_pred_hard_snap_threshold = {"cl_pred_hard_snap_threshold", "12"
 typedef struct
 {
 	unsigned int	cmd_seq;
+	usercmd_t	cmd;
 	vec3_t		origin;
 	vec3_t		velocity;
 	vec3_t		viewangles;
@@ -392,8 +393,10 @@ static qboolean CL_Predict_Vec3Sane (const vec3_t v);
 static qboolean CL_Predict_AnglesSane (const vec3_t a);
 static qboolean CL_Predict_EntityStateSane (const entity_t *e);
 static void CL_Predict_ClearFrames (void);
-static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state);
-static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out);
+static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq);
+static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state);
+static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *out);
+static qboolean CL_Predict_FindNewestNotNewer (unsigned int seq, cl_pred_frame_t *out, unsigned int *found_seq);
 static qboolean CL_Predict_GetLocalMovementState (byte *movetype, byte *waterlevel);
 static void CL_Predict_AccumSelftest_f (void);
 static void CL_Predict_StateDump_f (void);
@@ -1113,14 +1116,23 @@ static void CL_Predict_ClearFrames (void)
 	}
 }
 
-static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *state)
+static unsigned int CL_Predict_FrameIndexForSeq (unsigned int seq)
 {
-	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
+	return seq & (CL_PRED_FRAME_RING - 1);
+}
+
+static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state)
+{
+	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
 	qboolean overwrite = frame->valid && frame->cmd_seq != seq;
 
 	// Canonical prediction key = usercmd sequence number (cmd_seq).
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_STOREFRAME);
 	frame->cmd_seq = seq;
+	if (cmd)
+		frame->cmd = *cmd;
+	else
+		memset (&frame->cmd, 0, sizeof(frame->cmd));
 	VectorCopy (state->origin, frame->origin);
 	VectorCopy (state->velocity, frame->velocity);
 	VectorCopy (state->viewangles, frame->viewangles);
@@ -1153,9 +1165,9 @@ static void CL_Predict_StoreFrame (unsigned int seq, const cl_pred_state_t *stat
 	}
 }
 
-static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
+static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *out)
 {
-	cl_pred_frame_t *frame = &cl_pred.frames[seq & (CL_PRED_FRAME_RING - 1)];
+	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
 
 	if (!frame->valid || frame->cmd_seq != seq)
 	{
@@ -1173,33 +1185,36 @@ static qboolean CL_Predict_GetFrame (unsigned int seq, cl_pred_frame_t *out)
 	return true;
 }
 
-static qboolean CL_Predict_FindFrame (unsigned int seq, cl_pred_frame_t *out, unsigned int *found_seq)
+static qboolean CL_Predict_FindNewestNotNewer (unsigned int seq, cl_pred_frame_t *out, unsigned int *found_seq)
 {
-	unsigned int offset;
+	int i;
+	qboolean found = false;
+	unsigned int best_seq = 0;
+	int best_index = 0;
 
-	if (CL_Predict_GetFrame (seq, out))
+	for (i = 0; i < CL_PRED_FRAME_RING; i++)
 	{
-		if (found_seq)
-			*found_seq = seq;
-		return true;
-	}
+		cl_pred_frame_t *frame = &cl_pred.frames[i];
 
-	for (offset = 1; offset <= 2; offset++)
-	{
-		unsigned int candidate;
-
-		if (seq < offset)
-			break;
-		candidate = seq - offset;
-		if (CL_Predict_GetFrame (candidate, out))
+		if (!frame->valid)
+			continue;
+		if (CL_Predict_SeqNewer (frame->cmd_seq, seq))
+			continue;
+		if (!found || CL_Predict_SeqNewer (frame->cmd_seq, best_seq))
 		{
-			if (found_seq)
-				*found_seq = candidate;
-			return true;
+			found = true;
+			best_seq = frame->cmd_seq;
+			best_index = i;
 		}
 	}
 
-	return false;
+	if (!found)
+		return false;
+	if (out)
+		*out = cl_pred.frames[best_index];
+	if (found_seq)
+		*found_seq = best_seq;
+	return true;
 }
 
 static void CL_Predict_ApplyFrameState (cl_pred_state_t *state, const cl_pred_frame_t *frame)
@@ -1718,7 +1733,7 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_to = cl_pred.predicted;
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
-				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -1767,7 +1782,7 @@ static void CL_Predict_RunFrameSteps (void)
 			cl_pred_render_to = cl_pred.predicted;
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
-				CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -2171,7 +2186,15 @@ qboolean CL_Predict_ShouldBypassInterpolation (void)
 		return false;
 	if (!cl_pred.has_base)
 		return false;
-	return true;
+	if (cl_pred_reset)
+		return true;
+	if (!cl_pred_render_interp_valid)
+		return true;
+	if (cl_pred_steps_cap_hit || cl_pred_frame_drop_time > 0.0)
+		return true;
+	if (cl_pred_frame_dt_last <= 0.0f)
+		return true;
+	return false;
 }
 
 static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render)
@@ -3493,17 +3516,17 @@ void CL_Predict_BeginFrame (void)
 		if (dt_real_valid)
 			real_dt = (float)(realtime - cl_pred_prev_realtime);
 
-		if (CL_Predict_DtSane (real_dt, max_sane_dt))
+		if (dt_real_valid && isfinite (real_dt) && real_dt >= 0.0f)
 		{
 			dt_use_auto = real_dt;
 			dt_source_auto = CL_PRED_DT_SRC_REAL;
 		}
-		else if (CL_Predict_DtSane (raw_dt, max_sane_dt))
+		else if (isfinite (raw_dt) && raw_dt >= 0.0f)
 		{
 			dt_use_auto = raw_dt;
 			dt_source_auto = CL_PRED_DT_SRC_RAW;
 		}
-		else if (CL_Predict_DtSane (host_dt, max_sane_dt))
+		else if (isfinite (host_dt) && host_dt >= 0.0f)
 		{
 			dt_use_auto = host_dt;
 			dt_source_auto = CL_PRED_DT_SRC_HOST;
@@ -3550,7 +3573,7 @@ void CL_Predict_BeginFrame (void)
 				dt_flags |= CL_PRED_DT_FLAG_FALLBACK;
 		}
 
-		if (!CL_Predict_DtSane (dt_use, max_accum_time))
+		if (!isfinite (dt_use) || dt_use < 0.0f)
 		{
 			step_guess = cl_pred_last_substep_dt > 0.0f ? cl_pred_last_substep_dt : CL_Predict_GetFrameStepTime (0.016f);
 			dt_use = (step_guess > 0.0f) ? step_guess : 0.016f;
@@ -3877,7 +3900,10 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred_trace_cur->server_applied = 1;
 	if (cl_pred.has_base)
 	{
-		pred_frame_valid = CL_Predict_FindFrame (ack, &pred_frame, &pred_frame_seq);
+		pred_frame_valid = CL_Predict_FindExactFrame (ack, &pred_frame);
+		pred_frame_seq = ack;
+		if (!pred_frame_valid)
+			pred_frame_valid = CL_Predict_FindNewestNotNewer (ack, &pred_frame, &pred_frame_seq);
 		if (CL_Predict_SeqNewer (cl_pred.seq_latest, ack))
 		{
 			unsigned int delta = cl_pred.seq_latest - ack;
@@ -3908,7 +3934,6 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_warned_pred_miss = true;
 			}
 		}
-		cl_pred_pred_frame_found = pred_frame_valid ? true : false;
 		if (pred_frame_valid)
 		{
 			CL_Predict_ApplyFrameState (&pred_ack_state, &pred_frame);
@@ -3937,6 +3962,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				}
 			}
 		}
+		if (pred_frame_valid && !pred_ack_state_valid)
+			pred_frame_valid = false;
+		cl_pred_pred_frame_found = pred_frame_valid ? true : false;
 		{
 			const cl_pred_state_t *error_state = pred_ack_state_valid ? &pred_ack_state : &cl_pred.predicted;
 
@@ -4295,7 +4323,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		CL_Predict_TraceMark (CL_PRED_TRACE_MARK_REPLAY);
 		CL_Predict_SimulateCmd (&cl_pred.predicted, &cmd, step_dt, false);
-		CL_Predict_StoreFrame (cmd.sequence, &cl_pred.predicted);
+		CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
 		resim_cmd = cmd;
 		resim_cmd_valid = true;
 		CL_Predict_DebugLogCmd ("resim", &cmd, step_dt);
