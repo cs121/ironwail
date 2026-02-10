@@ -192,6 +192,7 @@ extern	const char	*gl_version;
 	x(void,			BlitFramebuffer, (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter))\
 	x(void,			DrawBuffers, (GLsizei n, const GLenum *bufs))\
 	x(void,			ClearBufferfv, (GLenum buffer, GLint drawbuffer, const GLfloat *value))\
+	x(void,			BlendEquation, (GLenum mode))\
 	x(void,			BlendFunci, (GLuint buf, GLenum sfactor, GLenum dfactor))\
 	x(void,			DebugMessageCallback, (GLDEBUGPROC callback, const void *userParam))\
 	x(void,			ObjectLabel, (GLenum identifier, GLuint name, GLsizei length, const GLchar *label))\
