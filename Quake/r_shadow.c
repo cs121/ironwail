@@ -10,6 +10,32 @@ of the License, or (at your option) any later version.
 #include "quakedef.h"
 #include <float.h>
 
+static void R_Shadow_LogClearDebug (const char *tag, GLbitfield clearbits)
+{
+	GLint draw_fbo, read_fbo;
+	GLint viewport[4], scissor_box[4];
+	GLboolean scissor_test;
+	GLfloat clear_color[4];
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	scissor_test = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetFloatv (GL_COLOR_CLEAR_VALUE, clear_color);
+
+	Con_Printf (
+		"CLEARDBG %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) clear_color=(%.3f %.3f %.3f %.3f) clear_mask=0x%08x\n",
+		tag,
+		draw_fbo,
+		read_fbo,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor_test,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		clear_color[0], clear_color[1], clear_color[2], clear_color[3],
+		(unsigned int)clearbits);
+}
+
 extern cvar_t gl_farclip;
 extern cvar_t r_shadows;
 extern cvar_t r_shadow_sun;
@@ -542,6 +568,7 @@ void R_Shadow_SunPass (void)
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+	R_Shadow_LogClearDebug ("R_Shadow_Sun", GL_DEPTH_BUFFER_BIT);
 	glClear (GL_DEPTH_BUFFER_BIT);
 
 	{
@@ -690,6 +717,7 @@ void R_Shadow_DlightPass (void)
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
+		R_Shadow_LogClearDebug ("R_Shadow_Dlight", GL_DEPTH_BUFFER_BIT);
 		glClear (GL_DEPTH_BUFFER_BIT);
 
 		GL_UseProgram (glprogs.shadow_depth);

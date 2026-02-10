@@ -62,6 +62,7 @@ static int r_fogvol_history_height = 0;
 
 typedef struct fogvol_test_state_s
 {
+	unsigned statebits;
 	GLint viewport[4];
 	GLint scissor_box[4];
 	GLint draw_fbo;
@@ -78,10 +79,15 @@ typedef struct fogvol_test_state_s
 	GLboolean depth_writemask;
 	GLboolean color_writemask[4];
 	GLboolean cull_face;
+	GLfloat color_clear_value[4];
+	GLboolean framebuffer_srgb;
+	GLboolean dither;
+	GLboolean multisample;
 } fogvol_test_state_t;
 
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 {
+	state->statebits = glstate;
 	glGetIntegerv (GL_VIEWPORT, state->viewport);
 	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
 	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
@@ -98,6 +104,10 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_writemask);
 	state->cull_face = glIsEnabled (GL_CULL_FACE);
 	glGetIntegerv (GL_POLYGON_MODE, state->polygon_mode);
+	glGetFloatv (GL_COLOR_CLEAR_VALUE, state->color_clear_value);
+	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
+	state->dither = glIsEnabled (GL_DITHER);
+	state->multisample = glIsEnabled (GL_MULTISAMPLE);
 }
 
 static qboolean R_FogVol_TestState_Equals (const fogvol_test_state_t *a, const fogvol_test_state_t *b)
@@ -110,7 +120,8 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 	Con_Printf (
 		"FOGVOL_TEST %s viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
 		"draw_fbo=%d read_fbo=%d prog=%d vao=%d blend=%d blend_func=(%d,%d) blend_eq=%d "
-		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d)\n",
+		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d) "
+		"clear_color=(%.3f %.3f %.3f %.3f) srgb=%d dither=%d multisample=%d glstate=0x%08x\n",
 		phase,
 		state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3],
 		state->scissor_test,
@@ -125,11 +136,17 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 		state->depth_writemask,
 		state->color_writemask[0], state->color_writemask[1], state->color_writemask[2], state->color_writemask[3],
 		state->cull_face,
-		state->polygon_mode[0], state->polygon_mode[1]);
+		state->polygon_mode[0], state->polygon_mode[1],
+		state->color_clear_value[0], state->color_clear_value[1], state->color_clear_value[2], state->color_clear_value[3],
+		state->framebuffer_srgb,
+		state->dither,
+		state->multisample,
+		state->statebits);
 }
 
 static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
 {
+	GL_SetState (state->statebits);
 	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)state->draw_fbo);
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)state->read_fbo);
 	GL_UseProgram ((GLuint)state->program);
@@ -154,6 +171,19 @@ static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
 	else
 		glDisable (GL_CULL_FACE);
 	glPolygonMode (GL_FRONT_AND_BACK, state->polygon_mode[0]);
+	glClearColor (state->color_clear_value[0], state->color_clear_value[1], state->color_clear_value[2], state->color_clear_value[3]);
+	if (state->framebuffer_srgb)
+		glEnable (GL_FRAMEBUFFER_SRGB);
+	else
+		glDisable (GL_FRAMEBUFFER_SRGB);
+	if (state->dither)
+		glEnable (GL_DITHER);
+	else
+		glDisable (GL_DITHER);
+	if (state->multisample)
+		glEnable (GL_MULTISAMPLE);
+	else
+		glDisable (GL_MULTISAMPLE);
 
 	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	if (state->scissor_test)
@@ -922,6 +952,8 @@ void R_FogVol_Render (void)
 done:
 	if (use_test_guard)
 	{
+		GLuint main_fbo = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
+
 		R_FogVol_TestState_Capture (&post_state);
 		mismatch = !R_FogVol_TestState_Equals (&pre_state, &post_state);
 		if (dumpstate_always || mismatch)
@@ -932,8 +964,16 @@ done:
 		}
 
 		R_FogVol_TestState_Restore (&pre_state);
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+
+		/* hard reset for fog volume test mode to keep subsequent 3D rendering stable */
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, main_fbo);
 		glViewport (glx, gly, glwidth, glheight);
+		glDisable (GL_SCISSOR_TEST);
+		glScissor (glx, gly, glwidth, glheight);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glDepthMask (GL_TRUE);
+		glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+		GL_SetState ((glstate & ~(GLS_MASK_BLEND | GLS_MASK_CULL | GLS_NO_ZWRITE)) | GLS_BLEND_OPAQUE | GLS_CULL_NONE);
 	}
 
 	GL_EndGroup ();
