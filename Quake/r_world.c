@@ -292,7 +292,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
-	GLuint64	_pad1;
+	GLuint64	_pad2;
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -631,7 +631,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->_pad1 = 0;
+		call->_pad2 = 0;
 	}
 	else
 	{
@@ -704,7 +704,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->_pad1 = 0;
+		call->_pad2 = 0;
 	}
 	else
 	{
