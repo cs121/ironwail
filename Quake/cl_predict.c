@@ -41,6 +41,11 @@ extern cvar_t cl_netsmooth_maxdist;
 // Q3MINI END
 
 static cvar_t cl_pred_debug = {"cl_pred_debug", "1", CVAR_NONE};
+static cvar_t cl_pred_debug2 = {"cl_pred_debug2", "0", CVAR_NONE};
+static cvar_t cl_pred_antipump = {"cl_pred_antipump", "1", CVAR_ARCHIVE};
+static cvar_t cl_pred_antipump_eps = {"cl_pred_antipump_eps", "0.01", CVAR_NONE};
+static cvar_t cl_pred_antipump_k = {"cl_pred_antipump_k", "6", CVAR_NONE};
+static cvar_t cl_pred_repro = {"cl_pred_repro", "0", CVAR_NONE};
 static cvar_t cl_pred_correct_angles = {"cl_pred_correct_angles", "0", CVAR_NONE};
 static cvar_t cl_pred_inherit_ground = {"cl_pred_inherit_ground", "1", CVAR_ARCHIVE};
 static cvar_t cl_pred_ground_yaw = {"cl_pred_ground_yaw", "0", CVAR_ARCHIVE};
@@ -230,6 +235,19 @@ static unsigned int cl_pred_last_ack_processed;
 static int cl_pred_persistent_err_frames;
 static float cl_pred_last_err_mag;
 static double cl_pred_last_snapshot_time;
+
+typedef struct
+{
+	float		last_err;
+	vec3_t		last_base_origin;
+	vec3_t		last_pred_origin;
+	vec3_t		last_smooth_offset;
+	int		count_same_err;
+	int		count_no_converge;
+	unsigned int	cooldown_until_ack;
+} cl_pred_antipump_state_t;
+
+static cl_pred_antipump_state_t cl_pred_antipump_state;
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref);
 
@@ -835,6 +853,11 @@ static void CL_Predict_RegisterDebugCvars (void)
 	Reason bits: see CL_PRED_REASON_* in client.h, recorded in trace as hex.
 	*/
 	Cvar_RegisterVariable (&cl_pred_debug);
+	Cvar_RegisterVariable (&cl_pred_debug2);
+	Cvar_RegisterVariable (&cl_pred_antipump);
+	Cvar_RegisterVariable (&cl_pred_antipump_eps);
+	Cvar_RegisterVariable (&cl_pred_antipump_k);
+	Cvar_RegisterVariable (&cl_pred_repro);
 	Cvar_RegisterVariable (&cl_pred_correct_angles);
 	Cvar_RegisterVariable (&cl_pred_inherit_ground);
 	Cvar_RegisterVariable (&cl_pred_ground_yaw);
@@ -1578,6 +1601,49 @@ static qboolean CL_Predict_IsLocalListenServer (void)
 	return (sv.active && cls.state == ca_connected && !cls.demoplayback);
 }
 
+qboolean CL_Predict_ReproModeEnabled (void)
+{
+	return (cl_pred_repro.value > 0.0f);
+}
+
+static void CL_Predict_DumpState (const char *tag, unsigned int seq,
+	const char *base_source, const char *pred_source, const char *render_source,
+	int base_entnum, int pred_entnum, int render_entnum,
+	const vec3_t base_origin, const vec3_t base_velocity,
+	const vec3_t pred_origin, const vec3_t pred_velocity,
+	const vec3_t render_origin,
+	const vec3_t smooth_offset, const vec3_t interp_offset,
+	const vec3_t platform_delta, const vec3_t teleport_delta,
+	const vec3_t view_bob_offset,
+	unsigned int pred_idx, unsigned int pred_slot,
+	unsigned int seq_stored, unsigned int seq_read, qboolean seq_match)
+{
+	if (cl_pred_debug2.value <= 0.0f)
+		return;
+
+	Con_Printf ("PREDDBG2 %s seq=%u src(base=%s pred=%s render=%s) ent(base=%d pred=%d render=%d) "
+		"base_org=%.2f %.2f %.2f base_vel=%.2f %.2f %.2f pred_org=%.2f %.2f %.2f pred_vel=%.2f %.2f %.2f "
+		"render_org=%.2f %.2f %.2f offs(smooth=%.2f %.2f %.2f interp=%.2f %.2f %.2f platform=%.2f %.2f %.2f teleport=%.2f %.2f %.2f bob=%.2f %.2f %.2f) "
+		"ring(idx=%u slot=%u stored=%u read=%u match=%d)\n",
+		tag ? tag : "state",
+		seq,
+		base_source ? base_source : "unknown",
+		pred_source ? pred_source : "unknown",
+		render_source ? render_source : "unknown",
+		base_entnum, pred_entnum, render_entnum,
+		base_origin[0], base_origin[1], base_origin[2],
+		base_velocity[0], base_velocity[1], base_velocity[2],
+		pred_origin[0], pred_origin[1], pred_origin[2],
+		pred_velocity[0], pred_velocity[1], pred_velocity[2],
+		render_origin[0], render_origin[1], render_origin[2],
+		smooth_offset[0], smooth_offset[1], smooth_offset[2],
+		interp_offset[0], interp_offset[1], interp_offset[2],
+		platform_delta[0], platform_delta[1], platform_delta[2],
+		teleport_delta[0], teleport_delta[1], teleport_delta[2],
+		view_bob_offset[0], view_bob_offset[1], view_bob_offset[2],
+		pred_idx, pred_slot, seq_stored, seq_read, seq_match ? 1 : 0);
+}
+
 static void CL_Predict_DebugLogCmd (const char *tag, const usercmd_t *cmd, float dt)
 {
 	vec3_t error;
@@ -1606,6 +1672,23 @@ static void CL_Predict_DebugLogCmd (const char *tag, const usercmd_t *cmd, float
 		(*base_origin)[2],
 		error_len,
 		is_local);
+
+	CL_Predict_DumpState (tag, cmd->sequence,
+		"serverstate base", "local sim", "cl.simorg",
+		cl.viewentity, cl.viewentity, cl.viewentity,
+		cl_pred.base.origin, cl_pred.base.velocity,
+		cl_pred.predicted.origin, cl_pred.predicted.velocity,
+		cl.simorg,
+		cl_pred_error,
+		vec3_origin,
+		vec3_origin,
+		vec3_origin,
+		vec3_origin,
+		CL_Predict_CmdIndexForSeq (cmd->sequence),
+		CL_Predict_FrameIndexForSeq (cmd->sequence),
+		cl_pred.frames[CL_Predict_FrameIndexForSeq (cmd->sequence)].cmd_seq,
+		cmd->sequence,
+		cl_pred.frames[CL_Predict_FrameIndexForSeq (cmd->sequence)].cmd_seq == cmd->sequence);
 }
 
 static void CL_Predict_HardResetToBase (const char *reason)
@@ -1654,6 +1737,64 @@ static void CL_Predict_HardResetToBase (const char *reason)
 			cl_pred.base.origin[1],
 			cl_pred.base.origin[2]);
 	}
+}
+
+static void CL_Predict_AntiPumpUpdate (unsigned int ack, float err_len, const vec3_t base_origin, const vec3_t pred_origin)
+{
+	float eps = cl_pred_antipump_eps.value;
+	int no_converge_k = (int)cl_pred_antipump_k.value;
+	qboolean base_same;
+	qboolean pred_same;
+	qboolean err_same;
+	qboolean improved;
+	vec3_t smooth_offset;
+	int cooldown_acks;
+
+	if (eps < 0.0001f)
+		eps = 0.0001f;
+	if (no_converge_k < 1)
+		no_converge_k = 1;
+
+	VectorCopy (cl_pred_error, smooth_offset);
+	base_same = Distance (base_origin, cl_pred_antipump_state.last_base_origin) <= eps;
+	pred_same = Distance (pred_origin, cl_pred_antipump_state.last_pred_origin) <= eps;
+	err_same = fabsf (err_len - cl_pred_antipump_state.last_err) <= eps;
+	improved = (cl_pred_antipump_state.last_err <= 0.0f)
+		? true
+		: (err_len <= cl_pred_antipump_state.last_err * 0.99f);
+
+	if (base_same && pred_same && err_same)
+		cl_pred_antipump_state.count_same_err++;
+	else
+		cl_pred_antipump_state.count_same_err = 0;
+
+	if (improved)
+		cl_pred_antipump_state.count_no_converge = 0;
+	else
+		cl_pred_antipump_state.count_no_converge++;
+
+	if (cl_pred_antipump.value > 0.0f
+		&& CL_Predict_SeqNewer (ack, cl_pred_antipump_state.cooldown_until_ack)
+		&& (cl_pred_antipump_state.count_same_err >= 3 || cl_pred_antipump_state.count_no_converge >= no_converge_k))
+	{
+		Con_Printf ("ANTIPUMP: constant err detected; snapping and clearing smoothing offsets (ack=%u err=%.3f same=%d noconv=%d)\n",
+			ack, err_len, cl_pred_antipump_state.count_same_err, cl_pred_antipump_state.count_no_converge);
+		VectorCopy (cl_pred.base.origin, cl_pred.predicted.origin);
+		VectorCopy (cl_pred.base.velocity, cl_pred.predicted.velocity);
+		VectorCopy (cl_pred.base.viewangles, cl_pred.predicted.viewangles);
+		CL_Predict_ClearFrames ("antipump resync");
+		CL_Predict_HardResetToBase ("antipump constant error");
+		CL_Predict_ApplyToClient (&cl_pred.predicted, false);
+		cl_pred_antipump_state.count_same_err = 0;
+		cl_pred_antipump_state.count_no_converge = 0;
+		cooldown_acks = q_max (30, no_converge_k * 5);
+		cl_pred_antipump_state.cooldown_until_ack = ack + (unsigned int)cooldown_acks;
+	}
+
+	cl_pred_antipump_state.last_err = err_len;
+	VectorCopy (base_origin, cl_pred_antipump_state.last_base_origin);
+	VectorCopy (pred_origin, cl_pred_antipump_state.last_pred_origin);
+	VectorCopy (smooth_offset, cl_pred_antipump_state.last_smooth_offset);
 }
 
 static qboolean CL_Predict_SelfCheck (unsigned int ack, const char *context)
@@ -2447,6 +2588,9 @@ qboolean CL_Predict_ShouldBypassInterpolation (void)
 static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_render)
 {
 	vec3_t smooth_origin;
+	vec3_t smooth_offset;
+	vec3_t interp_offset;
+	vec3_t view_bob_offset;
 	float smooth_ms;
 	float smooth_rate;
 	float decay;
@@ -2529,6 +2673,9 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 		VectorCopy (state->origin, smooth_origin);
 	else
 		VectorAdd (state->origin, cl_pred_error, smooth_origin);
+	VectorSubtract (smooth_origin, state->origin, smooth_offset);
+	VectorClear (interp_offset);
+	VectorClear (view_bob_offset);
 	// Q3MINI BEGIN
 	if (!use_ultra && is_render && cl_q3mini_net_active && cl_netsmooth.value > 0.0f)
 	{
@@ -2602,6 +2749,36 @@ static void CL_Predict_ApplyToClient (const cl_pred_state_t *state, qboolean is_
 			JITTER_LOG ("NETDBG: pred_smooth apply %.2f remaining %.2f\n",
 				error_before - error_after, error_after);
 		}
+
+		}
+
+	if (cl_pred_debug2.value > 0.0f)
+	{
+		unsigned int seq = cl_pred_last_ack_seq;
+		unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+		if (cl_pred_render_interp_valid)
+			VectorSubtract (cl_pred_render_to.origin, cl_pred_render_from.origin, interp_offset);
+		if (is_render && VectorLength (smooth_offset) > 0.0f && VectorLength (interp_offset) > 0.0f)
+		{
+			Con_DPrintf ("PREDWARN smooth+interp both active: smooth=%.3f interp=%.3f seq=%u\n",
+				VectorLength (smooth_offset), VectorLength (interp_offset), seq);
+		}
+		CL_Predict_DumpState (is_render ? "render_apply" : "pred_apply", seq,
+			"serverstate ent", is_render ? "render state" : "pred state", is_render ? "cl.simorg(render)" : "cl.simorg(pred)",
+			cl.playernum + 1, cl.viewentity, cl.viewentity,
+			cl_pred.base.origin, cl_pred.base.velocity,
+			state->origin, state->velocity,
+			smooth_origin,
+			smooth_offset,
+			interp_offset,
+			vec3_origin,
+			vec3_origin,
+			view_bob_offset,
+			CL_Predict_CmdIndexForSeq (seq),
+			slot,
+			cl_pred.frames[slot].cmd_seq,
+			seq,
+			cl_pred.frames[slot].cmd_seq == seq);
 	}
 
 	CL_EnsureViewEntityOrigin ("predict");
@@ -3655,6 +3832,8 @@ void CL_Predict_Clear (void)
 	cl_pred_persistent_err_frames = 0;
 	cl_pred_last_err_mag = 0.0f;
 	cl_pred_last_snapshot_time = 0.0;
+	memset (&cl_pred_antipump_state, 0, sizeof(cl_pred_antipump_state));
+	cl_pred_antipump_state.cooldown_until_ack = 0;
 }
 
 void CL_Predict_ResetGround (void)
@@ -4206,6 +4385,19 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred_trace_cur->server_applied = 1;
 	if (cl_pred.has_base)
 	{
+		unsigned int base_seq_delta = seq_delta (cl_pred.seq_latest, ack);
+		if (base_seq_delta > CL_PRED_FRAME_RING / 2)
+		{
+			Con_Printf ("PREDWARN stale base: ack=%u latest=%u delta=%u\n",
+				ack, cl_pred.seq_latest, base_seq_delta);
+		}
+
+		if (cl.viewentity != cl.playernum + 1)
+		{
+			Con_DPrintf ("PREDWARN ent mismatch: base_ent=%d pred_ent=%d local_ent=%d\n",
+				cl.playernum + 1, cl.viewentity, cl.viewentity);
+		}
+
 		if (ack == cl_pred.seq_latest && !CL_Predict_HasFrameSeq (ack))
 		{
 			usercmd_t ack_cmd;
@@ -4298,6 +4490,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		}
 		if (pred_frame_valid)
 		{
+			if (pred_frame.cmd_seq != ack)
+			{
+				Con_Printf ("PREDWARN ring mismatch: ack=%u stored_seq=%u slot=%u latest=%u\n",
+					ack, pred_frame.cmd_seq, CL_Predict_FrameIndexForSeq (ack), cl_pred.seq_latest);
+			}
 			CL_Predict_ApplyFrameState (&pred_ack_state, &pred_frame);
 			pred_ack_state_valid = true;
 			if (pred_frame_seq != ack)
@@ -4353,6 +4550,14 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				error_len,
 				origin[0], origin[1], origin[2],
 				(*client_origin)[0], (*client_origin)[1], (*client_origin)[2]);
+		}
+
+		if (pred_ack_state_valid
+			&& (fabsf ((origin[2] - pred_ack_state.origin[2]) - cl.viewheight) < 0.25f
+				|| fabsf ((pred_ack_state.origin[2] - origin[2]) - cl.viewheight) < 0.25f))
+		{
+			Con_DPrintf ("PREDWARN space mismatch? z_delta=%.3f viewheight=%.3f ack=%u\n",
+				origin[2] - pred_ack_state.origin[2], cl.viewheight, ack);
 		}
 		if (cl_jitter_debug.value > 0.0f && error_len >= 2.0f)
 		{
@@ -4872,6 +5077,42 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			new_base_applied ? 1 : 0,
 			cl_pred_base_seq_applied);
 	}
+
+	CL_Predict_AntiPumpUpdate (ack, error_len, cl_pred.base.origin, cl_pred.predicted.origin);
+
+	if (cl_pred_repro.value > 0.0f)
+	{
+		Con_Printf ("PREDREPRO ack=%u err=%.3f base=%.2f %.2f %.2f pred=%.2f %.2f %.2f smooth=%.2f %.2f %.2f replay=%d snap=%d\n",
+			ack,
+			error_len,
+			cl_pred.base.origin[0], cl_pred.base.origin[1], cl_pred.base.origin[2],
+			cl_pred.predicted.origin[0], cl_pred.predicted.origin[1], cl_pred.predicted.origin[2],
+			cl_pred_error[0], cl_pred_error[1], cl_pred_error[2],
+			cl_pred_replay_count,
+			snap_correction ? 1 : 0);
+	}
+
+	CL_Predict_DumpState ("ack", ack,
+		"serverstate ent", pred_frame_valid ? "pred frame ring" : "pred current",
+		"rendered cl.simorg",
+		cl.playernum + 1,
+		cl.viewentity,
+		cl.viewentity,
+		cl_pred.base.origin,
+		cl_pred.base.velocity,
+		cl_pred.predicted.origin,
+		cl_pred.predicted.velocity,
+		cl.simorg,
+		cl_pred_error,
+		vec3_origin,
+		vec3_origin,
+		error,
+		vec3_origin,
+		CL_Predict_CmdIndexForSeq (ack),
+		CL_Predict_FrameIndexForSeq (ack),
+		cl_pred.frames[CL_Predict_FrameIndexForSeq (ack)].cmd_seq,
+		ack,
+		cl_pred.frames[CL_Predict_FrameIndexForSeq (ack)].cmd_seq == ack);
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
 
