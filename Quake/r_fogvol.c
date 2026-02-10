@@ -140,7 +140,7 @@ static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
 	else
 		glDisable (GL_BLEND);
 	glBlendFunc (state->blend_src_rgb, state->blend_dst_rgb);
-	glBlendEquation (state->blend_equation_rgb);
+	GL_BlendEquationFunc (state->blend_equation_rgb);
 
 	if (state->depth_test)
 		glEnable (GL_DEPTH_TEST);
