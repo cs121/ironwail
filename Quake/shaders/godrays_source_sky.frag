@@ -4,7 +4,6 @@ layout(location=1) uniform vec4 SkyTint; // rgb: sky tint
 layout(location=2) uniform vec4 SkyMaskParams; // x: mask knee, yzw: unused
 
 layout(location=0) out vec4 outColor;
-layout(location=1) out vec4 outDir;
 
 float BrightPartMask(vec3 color, float threshold, float knee)
 {
@@ -24,5 +23,4 @@ void main()
 		mask = BrightPartMask(SkyTint.rgb, SkyParams.w, SkyMaskParams.x);
 	vec3 color = SkyTint.rgb * SkyParams.y * mask;
 	outColor = vec4(color, mask);
-	outDir = vec4(0.5, 0.5, 0.0, 1.0);
 }

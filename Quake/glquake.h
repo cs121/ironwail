@@ -360,7 +360,6 @@ extern devstats_t dev_stats, dev_peakstats;
 //ohnfitz -- reduce overflow warning spam
 typedef struct {
 	double	packetsize;
-	double	datagram;
 	double	efrags;
 	double	beams;
 	double	varstring;
@@ -440,13 +439,11 @@ typedef struct gpuframedata_s {
         vec4_t          prev_eye;       // xyz: prev_eyepos, w: delta_time
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
-	vec4_t          lightgrid_params; // x: enabled, yzw: unused
-	vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
-	vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
-	vec4_t          shader_params;  // x: shader debug, y: tcgen debug, z: envmap source, w: unused
-	vec4_t          rim_params0;    // x: enabled, y: power, z: strength, w: light scale
-	vec4_t          rim_params1;    // x: ambient scale, y: debug, zw: unused
-	float           shadow_viewproj[16];
+        vec4_t          lightgrid_params; // x: enabled, yzw: unused
+        vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
+        vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
+        vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
+        float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
@@ -477,7 +474,7 @@ void R_MarkSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
 qboolean R_CullModelForEntity (entity_t *e);
 void R_GetEntityBounds (const entity_t *e, vec3_t mins, vec3_t maxs);
-void R_EntityMatrix (float matrix[16], const vec3_t origin, const vec3_t angles, unsigned char scale);
+void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned char scale);
 
 void R_InitParticles (void);
 void R_DrawParticles (qboolean alpha);
@@ -595,8 +592,6 @@ typedef struct glprogs_s {
 	GLuint		fogvol;
 	GLuint		fogvol_upsample;
 	GLuint		fogvol_temporal;
-	GLuint		godray_volume;
-	GLuint		godray_volume_debug;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -686,7 +681,6 @@ typedef struct glframebufs_s {
 
 	struct {
 		GLuint		source_tex;
-		GLuint		dir_tex;
 		GLuint		mask_tex;
 		GLuint		shafts_tex;
 		GLuint		source_fbo;

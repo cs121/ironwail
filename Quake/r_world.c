@@ -30,7 +30,7 @@ extern cvar_t r_godrays_emit_sky;
 extern cvar_t r_godrays_emit_emissive;
 extern cvar_t r_godrays_emit_lighttex;
 extern cvar_t r_godrays_lighttex_name_match;
-extern cvar_t r_godrays_sky_enable;
+extern cvar_t r_godray_sky_enable;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -68,12 +68,6 @@ static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 		&& model->numtextures > 0
 		&& model->textures
 		&& model->usedtextures;
-}
-
-static void R_BindEnvmapCubemap (void)
-{
-	if (r_envmap_source.value > 0.f && skybox && skybox->cubemap)
-		GL_Bind (GL_TEXTURE6, skybox->cubemap);
 }
 
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
@@ -295,12 +289,10 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLfloat		polygon_offset[2];
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
-	GLfloat		texmatrix[8];
-	GLfloat		emitter_center[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
-	GLuint64	_pad1_handle;
+	GLuint64	_pad1;
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -311,8 +303,6 @@ typedef struct bmodel_bound_gpu_call_s {
 	GLfloat		polygon_offset[2];
 	GLfloat		_pad1[2];
 	GLfloat		stage_color[4];
-	GLfloat		texmatrix[8];
-	GLfloat		emitter_center[4];
 	GLint		baseinstance;
 	GLint		padding[3];
 } bmodel_bound_gpu_call_t;
@@ -551,7 +541,7 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 	if (!s)
 		return false;
 
-	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godrays_sky_enable.value > 0.f)
+	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f)
 	{
 		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 		{
@@ -575,63 +565,9 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 R_AddBModelCall
 =============
 */
-static void R_SetCallTexMatrix (float *dst, const mat_texmatrix_t *matrix)
-{
-	if (!dst)
-		return;
-
-	if (!matrix)
-	{
-		dst[0] = 1.f;
-		dst[1] = 0.f;
-		dst[2] = 0.f;
-		dst[3] = 0.f;
-		dst[4] = 0.f;
-		dst[5] = 1.f;
-		dst[6] = 0.f;
-		dst[7] = 0.f;
-		return;
-	}
-
-	dst[0] = matrix->m[0][0];
-	dst[1] = matrix->m[0][1];
-	dst[2] = matrix->m[0][2];
-	dst[3] = 0.f;
-	dst[4] = matrix->m[1][0];
-	dst[5] = matrix->m[1][1];
-	dst[6] = matrix->m[1][2];
-	dst[7] = 0.f;
-}
-
-static void R_SetCallEmitterCenter (float *dst, const vec2_t emitter_center_ss)
-{
-	if (!dst)
-		return;
-
-	if (emitter_center_ss)
-	{
-		dst[0] = emitter_center_ss[0];
-		dst[1] = emitter_center_ss[1];
-	}
-	else
-	{
-		dst[0] = 0.5f;
-		dst[1] = 0.5f;
-	}
-	dst[2] = 0.f;
-	dst[3] = 0.f;
-}
-
-static void R_TransformPoint (const float matrix[16], const vec3_t in, vec3_t out)
-{
-	out[0] = in[0] * matrix[0] + in[1] * matrix[4] + in[2] * matrix[8] + matrix[12];
-	out[1] = in[0] * matrix[1] + in[1] * matrix[5] + in[2] * matrix[9] + matrix[13];
-	out[2] = in[0] * matrix[2] + in[1] * matrix[6] + in[2] * matrix[10] + matrix[14];
-}
-
 static void R_AddBModelCall (int index, int first_instance, int num_instances, texture_t *t, qboolean zfix,
 	float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
-	qboolean force_fullbright, const vec2_t emitter_center_ss)
+	qboolean force_fullbright)
 {
 	GLuint		flags;
 	float		alpha;
@@ -692,12 +628,10 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
-		R_SetCallTexMatrix (call->texmatrix, NULL);
-		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->_pad1_handle = 0;
+		call->_pad1 = 0;
 	}
 	else
 	{
@@ -715,8 +649,6 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
-		R_SetCallTexMatrix (call->texmatrix, NULL);
-		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -736,7 +668,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 
 static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
 	tcgen_mode_t tcgen, qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
-	const mat_texmatrix_t *texmatrix, const vec4_t stage_color, const vec2_t emitter_center_ss)
+	const vec4_t stage_color)
 {
 	GLuint flags;
 	float alpha;
@@ -769,12 +701,10 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
-		R_SetCallTexMatrix (call->texmatrix, texmatrix);
-		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->_pad1_handle = 0;
+		call->_pad1 = 0;
 	}
 	else
 	{
@@ -792,8 +722,6 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
-		R_SetCallTexMatrix (call->texmatrix, texmatrix);
-		R_SetCallEmitterCenter (call->emitter_center, emitter_center_ss);
 		call->baseinstance = first_instance;
 		call->padding[0] = 0;
 		call->padding[1] = 0;
@@ -846,7 +774,6 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 {
 	static qboolean warned_vertex_color = false;
 	float wave_value;
-	float output_scale = 1.f;
 
 	out[0] = 1.f;
 	out[1] = 1.f;
@@ -900,15 +827,6 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 	default:
 		break;
 	}
-
-	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
-		output_scale *= stage->emissive_scale;
-	if (stage->outputs & MAT_STAGE_OUT_BLOOM)
-		output_scale *= stage->bloom_scale;
-
-	out[0] *= output_scale;
-	out[1] *= output_scale;
-	out[2] *= output_scale;
 }
 
 static unsigned R_MapBlendMode (const mat_shader_stage_t *stage)
@@ -1020,9 +938,7 @@ static qboolean R_StageIsOpaqueBase (const shader_material_t *material)
 	return material->sort_key == MAT_SORT_OPAQUE
 		&& stage->blend_mode == MAT_BLEND_REPLACE
 		&& stage->depth_write
-		&& stage->depth_func == MAT_DEPTHFUNC_LEQUAL
-		&& stage->tcgen == MAT_TCGEN_BASE
-		&& stage->tcmod_count == 0;
+		&& stage->depth_func == MAT_DEPTHFUNC_LEQUAL;
 }
 
 /*
@@ -1116,7 +1032,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	R_ResetBModelCalls (program);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-	R_BindEnvmapCubemap ();
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1268,8 +1183,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
-						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color, NULL);
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
 		}
@@ -1366,7 +1280,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 			const shader_material_t *material;
 			unsigned mat_flags = 0u;
 			size_t stage_count;
-			vec2_t emitter_center_ss = { 0.5f, 0.5f };
 
 			if (!t || !R_ValidPtr (t))
 				continue;
@@ -1442,8 +1355,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
 						stage_tex, fb, em, R_ResolveStageTcGen (stage),
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags,
-						MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time), stage_color, emitter_center_ss);
+						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
 		}
@@ -1567,13 +1479,12 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
-R_ResetBModelCalls (program);
-GL_SetState (state);
+        R_ResetBModelCalls (program);
+        GL_SetState (state);
 if (pass <= BP_ALPHATEST)
 {
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-R_BindEnvmapCubemap ();
 R_Shadow_BindShadowMap (GL_TEXTURE5);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
@@ -1676,7 +1587,7 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 					pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
-					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright, NULL);
+					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright);
 			}
 		}
 		
@@ -1774,7 +1685,6 @@ R_ResetBModelCalls (program);
 GL_SetState (state);
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-R_BindEnvmapCubemap ();
 
 GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -1829,7 +1739,7 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 					R_TextureAnimation (t, frame),
-					zfix, polygon_offset_factor, polygon_offset_units, alpha, extra_flags, false, NULL);
+					zfix, polygon_offset_factor, polygon_offset_units, alpha, extra_flags, false);
 			}
 		}
 

@@ -29,9 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
-#include "r_godray_emit.h"
-#include "r_godrayvol.h"
-#include "renderer_backend.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -41,12 +38,6 @@ extern cvar_t gl_fullbrights;
 extern cvar_t gl_farclip;
 extern cvar_t gl_overbright_models;
 extern cvar_t r_model_halflambert;
-extern cvar_t r_rim;
-extern cvar_t r_rim_power;
-extern cvar_t r_rim_strength;
-extern cvar_t r_rim_lightscale;
-extern cvar_t r_rim_ambientscale;
-extern cvar_t r_rim_debug;
 extern cvar_t r_facenormals_enable;
 extern cvar_t r_overbrightbits;
 extern cvar_t r_waterwarp;
@@ -231,10 +222,10 @@ extern cvar_t r_godrays;
 extern cvar_t r_godrays_emit_sky;
 extern cvar_t r_godrays_emit_emissive;
 extern cvar_t r_godrays_emit_lighttex;
-extern cvar_t r_godrays_sky_enable;
-extern cvar_t r_godrays_sky_threshold;
-extern cvar_t r_godrays_sky_intensity_scale;
-extern cvar_t r_godrays_sky_blur;
+extern cvar_t r_godray_sky_enable;
+extern cvar_t r_godray_sky_threshold;
+extern cvar_t r_godray_sky_intensity;
+extern cvar_t r_godray_sky_blur;
 extern cvar_t r_godrays_sky_intensity;
 extern cvar_t r_godrays_sky_tint;
 extern cvar_t r_godrays_emissive_intensity;
@@ -355,14 +346,6 @@ static void R_ShowbboxesFilter_Completion_f (const char *partial)
 
 	if (!sv.active)
 		return;
-
-	if (!sv_player)
-	{
-		Con_Printf ("NETDBG sv_player NULL cl %d reason showbboxes_filter_completion\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_player NULL cl %d reason showbboxes_filter_completion\n", SV_CurrentClientIndex ());
-		SV_PlayerNullTrap (__func__, 0);
-		return;
-	}
 
 	PR_PushQCVM (&sv.qcvm, &oldvm);
 
@@ -541,9 +524,6 @@ R_Init
 void R_Init (void)
 {
         cmd_function_t *cmd;
-
-        // TODO BACKEND: initialize renderer backend (stub in phase 1).
-        RB_Init();
 
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
         Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
@@ -744,10 +724,10 @@ Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_godrays_emit_sky);
 	Cvar_RegisterVariable (&r_godrays_emit_emissive);
 	Cvar_RegisterVariable (&r_godrays_emit_lighttex);
-	Cvar_RegisterVariable (&r_godrays_sky_enable);
-	Cvar_RegisterVariable (&r_godrays_sky_threshold);
-	Cvar_RegisterVariable (&r_godrays_sky_intensity_scale);
-	Cvar_RegisterVariable (&r_godrays_sky_blur);
+	Cvar_RegisterVariable (&r_godray_sky_enable);
+	Cvar_RegisterVariable (&r_godray_sky_threshold);
+	Cvar_RegisterVariable (&r_godray_sky_intensity);
+	Cvar_RegisterVariable (&r_godray_sky_blur);
 	Cvar_RegisterVariable (&r_godrays_sky_intensity);
 	Cvar_RegisterVariable (&r_godrays_sky_tint);
 	Cvar_RegisterVariable (&r_godrays_emissive_intensity);
@@ -833,12 +813,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_SetCallback (&gl_fullbrights, GL_Fullbrights_f);
 	Cvar_RegisterVariable (&gl_overbright_models);
 	Cvar_RegisterVariable (&r_model_halflambert);
-	Cvar_RegisterVariable (&r_rim);
-	Cvar_RegisterVariable (&r_rim_power);
-	Cvar_RegisterVariable (&r_rim_strength);
-	Cvar_RegisterVariable (&r_rim_lightscale);
-	Cvar_RegisterVariable (&r_rim_ambientscale);
-	Cvar_RegisterVariable (&r_rim_debug);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
@@ -856,8 +830,6 @@ Cvar_RegisterVariable (&r_vignette);
 
 	R_PostFX_Init ();
 	R_FogVol_Init ();
-	R_GodrayEmitters_Init ();
-	R_GodrayVolume_Init ();
 
 	R_InitParticles ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
@@ -1013,9 +985,6 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
-
-	// TODO BACKEND: notify renderer backend of new map (stub in phase 1).
-	RB_NewMap();
 
 	for (i=0 ; i<256 ; i++)
 		d_lightstylevalue[i] = 264;		// normal light value

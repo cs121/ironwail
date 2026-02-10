@@ -8,18 +8,13 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
-layout(binding=6) uniform samplerCube EnvmapCube;
 #include "frame_uniforms.glsl"
-#ifndef HAVE_DELUXE_LIGHTING
-#define HAVE_DELUXE_LIGHTING 0
-#endif
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-	if (Fog.w <= 0.0) return clr;
-	float fog = exp2(-Fog.w * dot(p, p));
+	float fog = exp2(-abs(Fog.w) * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);
 }
@@ -58,9 +53,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix0;
-	vec4	texmatrix1;
-	vec4	emitter_center;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -155,8 +147,6 @@ layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
 layout(location=15) flat in vec4 in_stage_color;
 layout(location=16) flat in uint in_tcgen;
-layout(location=18) in vec3 in_view_pos;
-layout(location=19) in vec3 in_view_normal;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -209,13 +199,11 @@ vec4 SampleLightmap(vec2 uv)
 	return lm;
 }
 
-#if HAVE_DELUXE_LIGHTING
 vec3 SampleLightmapDir(vec2 uv)
 {
 	vec3 dir = texture(LMTexDir, uv).xyz * 2.0 - 1.0;
 	return normalize(dir);
 }
-#endif
 
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
@@ -234,15 +222,6 @@ float DepthToCanonical(float depth)
 #else
 	return depth;
 #endif
-}
-
-vec3 ComputeEnvCubeDir(vec3 world_pos, vec3 world_normal)
-{
-	vec3 view_dir = normalize(EyePos - world_pos);
-	vec3 refl = reflect(-view_dir, normalize(world_normal));
-	vec3 refl_view = mat3(View) * refl;
-	vec3 dir = normalize(refl_view);
-	return vec3(-dir.y, dir.z, dir.x);
 }
 
 vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
@@ -286,7 +265,6 @@ void main()
 	vec3 fullbright = vec3(0.0);
 	vec3 emissive = vec3(0.0);
 	vec2 uv = in_uv;
-	bool use_envmap = (in_tcgen == TCGEN_ENVIRONMENT) && (ShaderParams.z > 0.5);
 	
 #if MODE == 2
 	uv = uv * 2.0 + 0.125 * sin(uv.yx * (3.14159265 * 2.0) + Time);
@@ -304,39 +282,30 @@ void main()
 	// Sample textures
 #if BINDLESS
 	sampler2D Tex = sampler2D(in_samplers0.xy);
-	if (!use_envmap && (in_flags & CF_USE_FULLBRIGHT) != 0u)
+	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
 	{
 		sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
 		fullbright = texture(FullbrightTex, uv).rgb;
 	}
-	if (!use_envmap && (in_flags & CF_USE_EMISSIVE) != 0u)
+	if ((in_flags & CF_USE_EMISSIVE) != 0u)
 	{
 		sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
 		emissive = texture(EmissiveSampler, uv).rgb;
 	}
 #else
-	if (!use_envmap && (in_flags & CF_USE_FULLBRIGHT) != 0u)
+	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
 		fullbright = texture(FullbrightTex, uv).rgb;
-	if (!use_envmap && (in_flags & CF_USE_EMISSIVE) != 0u)
+	if ((in_flags & CF_USE_EMISSIVE) != 0u)
 		emissive = texture(EmissiveTex, uv).rgb;
 #endif
 
-	vec4 result;
-	if (use_envmap)
-	{
-		vec3 env_dir = ComputeEnvCubeDir(in_pos, in_normal);
-		result = texture(EnvmapCube, env_dir);
-	}
-	else
-	{
 #if DITHER >= 2
-		result = texture(Tex, uv, -1.0);
+	vec4 result = texture(Tex, uv, -1.0);
 #elif DITHER
-		result = texture(Tex, uv, -0.5);
+	vec4 result = texture(Tex, uv, -0.5);
 #else
-		result = texture(Tex, uv);
+	vec4 result = texture(Tex, uv);
 #endif
-	}
 
 #if MODE == 1
 	if (result.a < 0.666)
@@ -379,29 +348,6 @@ void main()
         bool additive_dlights = DLightParams.x > 0.5;
         bool dlight_debug = DLightParams.y > 0.5;
 
-	// Surface normal computation (shared by lighting and rim)
-	vec3 surface_normal = in_normal;
-	float surface_normal_len = length(surface_normal);
-
-	if (surface_normal_len > 0.0)
-	{
-		surface_normal /= surface_normal_len;
-	}
-	else
-	{
-		vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-		float geom_len = length(surface_normal_vec);
-		surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
-	}
-
-	if (!gl_FrontFacing)
-		surface_normal = -surface_normal;
-
-	vec3 total_light = vec3(1.0);
-	float rim_shadow = 1.0;
-	vec3 rim_ambient_light = vec3(0.0);
-	vec3 rim_direct_light = vec3(0.0);
-
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
 	vec3 total_lightmap = vec3(1.0);
@@ -410,8 +356,7 @@ void main()
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
 #endif
 
-	bool has_lightmap = (in_flags & CF_NOLIGHTMAP) == 0u;
-	if (has_lightmap)
+	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
 #if DITHER
 		lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;
@@ -461,14 +406,12 @@ void main()
 		}
 
 		// Directional lightmap
-#if HAVE_DELUXE_LIGHTING
 		if (LightmapParams.z > 0.5)
 		{
 			vec3 dir = SampleLightmapDir(lmuv);
 			float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
 			static_light *= ndl;
 		}
-#endif
 
 		if (LightmapParams.x > 0.5)
 		{
@@ -480,11 +423,28 @@ void main()
 			return;
 		}
 
+		// Surface normal computation
+		vec3 surface_normal = in_normal;
+		float surface_normal_len = length(surface_normal);
+
+		if (surface_normal_len > 0.0)
+		{
+			surface_normal /= surface_normal_len;
+		}
+		else
+		{
+			vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+			float geom_len = length(surface_normal_vec);
+			surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
+		}
+
+		if (!gl_FrontFacing)
+			surface_normal = -surface_normal;
+
 		float shadow_range = 1.0;
 		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool shadow_enabled = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
-		rim_shadow = shadow_enabled ? shadow_term : 1.0;
 
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
@@ -496,6 +456,7 @@ void main()
 			return;
 		}
 
+		vec3 total_light;
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
 
 		if (lightgrid_shadow)
@@ -503,9 +464,7 @@ void main()
 			vec3 ambient = clamped_static * lightgrid;
 			vec3 direct = clamped_static - ambient;
 			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			rim_ambient_light = ambient;
-			rim_direct_light = direct * shadow_scale;
-			total_light = rim_ambient_light + rim_direct_light;
+			total_light = ambient + direct * shadow_scale;
 		}
 		else
 		{
@@ -513,8 +472,6 @@ void main()
 			if (shadow_enabled)
 				total_light *= shadow_term;
 			total_light *= lightgrid;
-			rim_ambient_light = clamped_static * lightgrid;
-			rim_direct_light = max(total_light - rim_ambient_light, vec3(0.0));
 		}
 	
 	// View direction
@@ -530,11 +487,9 @@ void main()
         {
                 ivec3 cluster_coord = ivec3(
                         int(floor(in_coord.x)),
-                        int(floor(in_coord.y)),
-                        int(floor(log2(max(in_depth, 1e-6)) * ZLogScale + ZLogBias))
-                );
-                // Clamp to valid cluster volume to avoid undefined imageLoad reads at screen edges / extreme depths
-                cluster_coord = clamp(cluster_coord, ivec3(0), ivec3(LIGHT_TILES_X-1, LIGHT_TILES_Y-1, LIGHT_TILES_Z-1));
+			int(floor(in_coord.y)),
+			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
+		);
 		
 		uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
 		
@@ -602,12 +557,6 @@ void main()
         vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
-	if (!has_lightmap)
-	{
-		rim_ambient_light = total_light;
-		rim_direct_light = vec3(0.0);
-	}
-
 		// Apply lighting
 #if DITHER >= 2
 		vec3 clamped_light = clamp(total_light, 0.0, 1.0);
@@ -628,51 +577,6 @@ void main()
 	// Add specular
 	vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
 	result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
-
-	// Rim lighting (edge highlight)
-	if (RimParams0.x > 0.5)
-	{
-		vec3 view_dir = normalize(-in_view_pos);
-		vec3 view_normal = normalize(in_view_normal);
-		float ndotv = clamp(dot(view_normal, view_dir), 0.0, 1.0);
-		float rim_base = pow(1.0 - ndotv, RimParams0.y);
-		float light_len = length(ShadowSunDir.xyz);
-		vec3 light_dir = (light_len > 0.0) ? normalize(-ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
-		float direct_w = clamp(dot(surface_normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
-		float effective_ambient_scale = min(RimParams1.x, 0.25);
-		vec3 ambient_color = rim_ambient_light * effective_ambient_scale;
-		vec3 direct_color = rim_direct_light;
-		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
-		float ambient_strength = clamp(max(max(ambient_color.r, ambient_color.g), ambient_color.b), 0.0, 1.0);
-		const float rim_direct_scale = 1.5;
-		float rim_direct_mask = clamp(direct_strength * rim_direct_scale, 0.0, 1.0);
-		float rim_shadow_mix = mix(0.25, 1.0, rim_shadow);
-		float rim_visibility = mix(effective_ambient_scale, 1.0, direct_w) * rim_shadow_mix;
-		float rim_value = rim_base * RimParams0.z * rim_visibility;
-		vec3 rim_light_rgb = rim_value * (direct_color + 0.15 * ambient_color);
-		float rim_max_allowed = direct_strength + 0.2 * ambient_strength;
-		// Rim rules: direct-light mask, ambient sockel, clamp to local lighting.
-		rim_light_rgb *= rim_direct_mask;
-		rim_light_rgb = min(rim_light_rgb, vec3(rim_max_allowed));
-		int rim_debug = int(clamp(RimParams1.y, 0.0, 2.0) + 0.5);
-		if (rim_debug == 1)
-		{
-			out_fragcolor = vec4(vec3(rim_base), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-		else if (rim_debug == 2)
-		{
-			out_fragcolor = vec4(vec3(ndotv), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-		result.rgb += rim_light_rgb;
-	}
 	
 	// Tone mapping
 	if (LightmapParams.y > 0.5)

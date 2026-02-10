@@ -103,7 +103,7 @@
       <PrecompiledHeaderFile>quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;wsock32.lib;opengl32.lib;winmm.lib;iphlpapi.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;wsock32.lib;opengl32.lib;winmm.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\codecs\x86;..\SDL2\lib;..\curl\lib\$(PlatformShortName);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>msvcrt.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -136,7 +136,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeaderFile>quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;wsock32.lib;opengl32.lib;winmm.lib;iphlpapi.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;wsock32.lib;opengl32.lib;winmm.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\codecs\x86;..\SDL2\lib;..\curl\lib\$(PlatformShortName);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
@@ -172,7 +172,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeaderFile>quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;ws2_32.lib;opengl32.lib;winmm.lib;iphlpapi.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;ws2_32.lib;opengl32.lib;winmm.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\codecs\x64;..\SDL2\lib64;..\curl\lib\$(PlatformShortName);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>msvcrt.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -207,7 +207,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeaderFile>quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;ws2_32.lib;opengl32.lib;winmm.lib;iphlpapi.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libvorbisfile.lib;libvorbis.lib;libopusfile.lib;libopus.lib;libFLAC.lib;libogg.lib;libmpg123.lib;libxmp.lib;ws2_32.lib;opengl32.lib;winmm.lib;SDL2.lib;SDL2main.lib;libcurl.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\codecs\x64;..\SDL2\lib64;..\curl\lib\$(PlatformShortName);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
@@ -241,7 +241,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\cl_input.c" />
     <ClCompile Include="..\..\Quake\cl_main.c" />
     <ClCompile Include="..\..\Quake\cl_parse.c" />
-    <ClCompile Include="..\..\Quake\cl_predict.c" />
     <ClCompile Include="..\..\Quake\cl_postfx.c" />
     <ClCompile Include="..\..\Quake\cl_tent.c" />
     <ClCompile Include="..\..\Quake\cmd.c" />
@@ -258,9 +257,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\gl_rlight.c" />
     <ClCompile Include="..\..\Quake\gl_rmain.c" />
     <ClCompile Include="..\..\Quake\gl_rmisc.c" />
-    <ClCompile Include="..\..\Quake\renderer_backend.c" />
-    <ClCompile Include="..\..\Quake\renderer_backend_gl.c" />
-    <ClCompile Include="..\..\Quake\renderer_backend_null.c" />
     <ClCompile Include="..\..\Quake\gl_screen.c" />
     <ClCompile Include="..\..\Quake\gl_shaders.c" />
     <ClCompile Include="..\..\Quake\gl_sky.c" />
@@ -317,8 +313,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_brush.c" />
     <ClCompile Include="..\..\Quake\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\r_fogvol.c" />
-    <ClCompile Include="..\..\Quake\r_godrayvol.c" />
-    <ClCompile Include="..\..\Quake\r_godray_emit.c" />
     <ClCompile Include="..\..\Quake\r_shadow.c" />
     <ClCompile Include="..\..\Quake\r_maptex_export.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
@@ -428,8 +422,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\render.h" />
     <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
     <ClInclude Include="..\..\Quake\r_fogvol.h" />
-    <ClInclude Include="..\..\Quake\r_godrayvol.h" />
-    <ClInclude Include="..\..\Quake\r_godray_emit.h" />
     <ClInclude Include="..\..\Quake\resource.h" />
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />

@@ -35,17 +35,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	NET_NAMELEN		64
 
 #define NET_MAXMESSAGE		65535	/* ericw -- was 32000 */
-#define MAX_RELIABLE_QUEUE_BYTES NET_MAXMESSAGE
-
-typedef struct net_packetinfo_s
-{
-	unsigned int	sequence;
-	unsigned int	flags;
-	unsigned int	packet_length;
-	unsigned int	payload_length;
-	qboolean		unreliable;
-	qboolean		valid;
-} net_packetinfo_t;
 
 extern int		DEFAULTnet_hostport;
 extern int		net_hostport;
@@ -54,7 +43,6 @@ extern cvar_t		hostname;
 
 extern	double		net_time;
 extern	sizebuf_t	net_message;
-extern	net_packetinfo_t	net_last_incoming;
 extern	int		net_activeconnections;
 
 
@@ -73,7 +61,6 @@ const char *NET_QSocketGetAddressString (const struct qsocket_s *sock);
 qboolean NET_CanSendMessage (struct qsocket_s *sock);
 // Returns true or false if the given qsocket can currently accept a
 // message to be transmitted.
-qboolean NET_CanSendUnreliableMessage (struct qsocket_s *sock);
 
 int	NET_GetMessage (struct qsocket_s *sock);
 // returns data in net_message sizebuf
@@ -124,7 +111,5 @@ extern	qboolean	tcpipAvailable;
 extern	char		my_ipx_address[NET_NAMELEN];
 extern	char		my_tcpip_address[NET_NAMELEN];
 
-extern cvar_t		net_maxpacket;
-extern cvar_t		net_mtu;
-
 #endif	/* _QUAKE_NET_H */
+

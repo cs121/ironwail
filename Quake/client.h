@@ -20,20 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-/* Q3MINI PLAN:
- * - Track server sequence + ackmask state for mini-Q3 acknowledgements.
- * - Store client-side smoothing state (render-only correction) wiring.
- */
-
 #ifndef _CLIENT_H_
 #define _CLIENT_H_
 
 // client.h
 
 #include "../common/lightgrid.h"
-
-// snapshot baseline history
-#define CL_SNAPSHOT_BASELINE_HISTORY 4
 
 typedef struct
 {
@@ -76,37 +68,6 @@ extern cshift_t		cshift_empty;
 //
 
 #define	SIGNONS		4			// signon messages to receive before connected
-
-#define CL_ENTITY_SNAP_HISTORY 3
-#define CL_SNAPSHOT_MAX_CHUNKS 64
-#define CL_SNAPSHOT_CHUNK_INFLIGHT 4
-
-typedef struct cl_snapshot_chunk_asm_s
-{
-	qboolean	active;
-	unsigned int seq;
-	unsigned int expected_total;
-	unsigned int received;
-	unsigned short remaining;
-	unsigned short total_entities;
-	unsigned short total_chunks;
-	unsigned short received_chunks;
-	unsigned int total_bytes;
-	unsigned int flags;
-	byte		*buffers[CL_SNAPSHOT_MAX_CHUNKS];
-	unsigned short sizes[CL_SNAPSHOT_MAX_CHUNKS];
-	byte		received_mask[CL_SNAPSHOT_MAX_CHUNKS];
-	double		start_time;
-	double		server_time;
-	int			packets;
-} cl_snapshot_chunk_asm_t;
-
-typedef struct cl_entity_snap_s
-{
-	double		servertime;
-	vec3_t		origin;
-	vec3_t		angles;
-} cl_entity_snap_t;
 
 typedef enum
 {
@@ -231,14 +192,6 @@ typedef struct
 								// first frame
 	usercmd_t	cmd;			// last command sent to the server
 	usercmd_t	pendingcmd;		// accumulated state from mice+joysticks.
-	unsigned int	last_cmd_ack;		// last command acknowledged by the server
-	unsigned int	last_cmd_ack_echo;	// last command ack echoed back by the server
-	unsigned int	last_snapshot_ack_sent;	// last snapshot ack sent to the server
-	// Q3MINI BEGIN
-	unsigned int	q3mini_srv_ack;		// last received server packet sequence
-	unsigned int	q3mini_srv_ack_mask;	// bitmask of previous received server packets
-	qboolean	q3mini_srv_ack_valid;
-	// Q3MINI END
 
 // information for local display
 	int			stats[MAX_CL_STATS];	// health, etc
@@ -258,7 +211,6 @@ typedef struct
 	vec3_t		mviewangles[2];	// during demo playback viewangles is lerped
 								// between these
 	vec3_t		viewangles;
-	vec3_t		simorg;			// last simulated origin for viewentity
 
 	vec3_t		mvelocity[2];	// update by server, used for lean+bob
 								// (0 is newest)
@@ -283,8 +235,6 @@ typedef struct
 
 	qboolean	paused;			// send over by server
 	qboolean	onground;
-	qboolean	predicted_onground;
-	int			predicted_groundent;
 	qboolean	inwater;
 	qboolean	fixangle;		// freeze view angle until next server frame
 
@@ -297,13 +247,6 @@ typedef struct
 								// a lerp point for other data
 	double		oldtime;		// previous cl.time, time-oldtime is used
 								// to decay light values and smooth step ups
-	double		latest_server_time;	// most recent server time from snapshots
-	double		clock_offset;		// smoothed server_time - realtime offset
-	double		server_time_base;	// last server time sample
-	double		server_time_skew;	// realtime when sample captured
-	double		snapshot_time;		// time applied for snapshot entity state
-	double		snap_last_server_time;	// last applied snapshot time
-	double		snap_last_arrival_time;	// realtime of last snapshot apply
 
 
 	float		last_received_message;	// (realtime) for net trouble icon
@@ -328,51 +271,6 @@ typedef struct
 	int			num_entities;	// held in cl_entities array
 	int			num_statics;	// held in cl_staticentities array
 	entity_t	viewent;			// the gun model
-	unsigned int snapshot_baseline_seq;
-	unsigned short snap_last_applied_seq;
-	unsigned short snap_last_complete_seq;
-	unsigned short snap_last_incomplete_seq;
-	qboolean	snap_last_incomplete;
-	double		snap_incomplete_start_time;
-	qboolean	has_full_snapshot;
-	qboolean	need_full_snapshot;
-	qboolean	has_valid_worldstate;
-	int			snap_parse_errors;
-	int			snap_parse_consecutive;
-	int			snap_delta_mismatch;
-	int			snap_incomplete_count;
-	int			snap_full_midgame_count;
-	int			snap_full_midgame_soft_count;
-	int			snap_full_midgame_missing_grace;
-	int			snap_base_mismatch_count;
-	int			snap_decode_error_count;
-	unsigned int snap_rem0_seq;
-	unsigned int snap_rem0_base;
-	int			snap_rem0_count;
-	int			snapshot_baseline_head;
-	int			snapshot_baseline_index;
-	snapshot_state_t *snapshot_baseline;
-	snapshot_state_t *snapshot_baselines[CL_SNAPSHOT_BASELINE_HISTORY];
-	byte		*snapshot_present;
-	byte		*snapshot_baseline_present[CL_SNAPSHOT_BASELINE_HISTORY];
-	unsigned int snapshot_baseline_seqs[CL_SNAPSHOT_BASELINE_HISTORY];
-	byte		snapshot_baseline_valid[CL_SNAPSHOT_BASELINE_HISTORY];
-	byte		*snapshot_active;
-	double		*snapshot_last_update_time;
-	double		*snapshot_missing_grace_until;
-	double		*snapshot_resync_start_time;
-	double		*snapshot_resync_end_time;
-	vec3_t		*snapshot_resync_from_origin;
-	vec3_t		*snapshot_resync_from_angles;
-	cl_snapshot_chunk_asm_t snapshot_chunk_assemblies[CL_SNAPSHOT_CHUNK_INFLIGHT];
-	snapshot_state_t *snapshot_chunk;
-	byte		*snapshot_chunk_present;
-	snapshot_state_t *snapshot_stage;
-	byte		*snapshot_stage_present;
-	byte		*snapshot_stage_remove;
-	cl_entity_snap_t *entity_snapshots;
-	byte		*entity_snap_head;
-	byte		*entity_snap_count;
 
 	int			cdtrack, looptrack;	// cd audio
 
@@ -381,13 +279,6 @@ typedef struct
 
 	unsigned	protocol; //johnfitz
 	unsigned	protocolflags;
-	qboolean	signon_chunking;
-	byte		signon_chunk_stage;
-	unsigned short	signon_chunk_next_seq;
-	unsigned short	signon_frag_id;
-	unsigned short	signon_frag_total;
-	unsigned short	signon_frag_offset;
-	byte		*signon_frag_buf;
 
 	qboolean	sendprespawn;
 
@@ -442,33 +333,6 @@ extern	cvar_t	m_side;
 
 extern	cvar_t	cl_startdemos;
 extern	cvar_t	cl_confirmquit;
-extern	cvar_t	cl_snap_debug;
-extern	cvar_t	cl_snapshot_debug;
-extern	cvar_t	cl_delta_reject_debug;
-extern	cvar_t	cl_full_reasm_debug;
-extern	cvar_t	cl_full_reasm_timeout_ms;
-extern	cvar_t	cl_snap_incomplete_timeout_ms;
-extern	cvar_t	cl_snap_chunk_drop;
-extern	cvar_t	cl_test_drop;
-extern	cvar_t	cl_entity_timeout_ms;
-extern	cvar_t	cl_entity_dormant_ms;
-extern	cvar_t	cl_snap2_resync_blend_ms;
-extern	cvar_t	cl_snap2_missing_grace_ms;
-extern	cvar_t	cl_lerp_ms;
-extern	cvar_t	cl_lerp_max_gap_ms;
-extern	cvar_t	cl_lerp_debug;
-extern	cvar_t	cl_netdbg_interp;
-extern	cvar_t	cl_netdbg_watch_ent;
-extern	cvar_t	cl_netdbg_pred;
-extern	cvar_t	cl_predict;
-extern	cvar_t	cl_pred_smooth;
-extern	cvar_t	cl_pred_smooth_rate;
-extern	cvar_t	cl_pred_snapdist;
-extern	cvar_t	cl_pred_smooth_ms;
-extern	cvar_t	cl_pred_teleport_dist;
-extern	cvar_t	cl_pred_deadzone;
-extern	cvar_t	cl_pred_angle_deadzone;
-extern	float	cl_lerpfrac;
 
 
 #define	MAX_TEMP_ENTITIES	256		//johnfitz -- was 64
@@ -525,124 +389,15 @@ typedef struct
 	int		state;			// low bit is down state
 } kbutton_t;
 
-typedef struct
-{
-	vec3_t		base_origin;
-	vec3_t		base_angles;
-	vec3_t		predicted_origin;
-	vec3_t		predicted_angles;
-	vec3_t		pred_error;
-	vec3_t		pred_angle_error;
-	float		pred_error_len;
-	float		pred_smooth_error_len;
-	float		pred_angle_error_len;
-	int			prediction_steps;
-	qboolean	server_update_applied;
-	unsigned int	ack_seq;
-	unsigned int	latest_seq;
-	qboolean	pred_frame_found;
-	int			replay_count;
-	int			snap_count;
-	qboolean	onground;
-	int			groundent;
-	qboolean	ground_valid;
-	int			ground_valid_reason;
-	float		ground_trace_fraction;
-	float		ground_trace_normal_z;
-	int			ground_trace_ent;
-	int			ground_trace_startsolid;
-	int			ground_trace_allsolid;
-	int			ground_trace_fallback;
-	float		wishspeed;
-	float		wishvel_z;
-	float		cmd_frametime;
-	int			flags;
-	float		ground_delta_len;
-	float		ground_yaw_delta;
-	int			ground_apply_pred;
-	int			ground_apply_render;
-	float		pred_accum_time;
-	float		pred_step_dt;
-	int			pred_steps;
-	float		pred_render_frac;
-	int			pred_substeps;
-	int			pred_max_substeps;
-	int			pred_nullcmd;
-	int			pred_angles_normalized;
-	int			pred_apply_pred_reason;
-	int			pred_apply_render_reason;
-	vec3_t		pred_angle_delta_shortest;
-} cl_pred_debug_t;
-
-enum
-{
-	CL_GROUND_REASON_OK = 0,
-	CL_GROUND_REASON_TRACE_SOLID,
-	CL_GROUND_REASON_TRACE_MISS,
-	CL_GROUND_REASON_BAD_PLANE,
-	CL_GROUND_REASON_INVALID_ENTITY,
-};
-
-enum
-{
-	CL_PRED_APPLY_OK = 0,
-	CL_PRED_APPLY_SKIP_DISABLED,
-	CL_PRED_APPLY_SKIP_NO_BASE,
-	CL_PRED_APPLY_SKIP_NO_CMD,
-	CL_PRED_APPLY_SKIP_ACCUM,
-};
-
-enum
-{
-	CL_PRED_RECONCILE_NONE = 0,
-	CL_PRED_RECONCILE_REPLAY_RESIM,
-	CL_PRED_RECONCILE_SOFT_CORRECT,
-	CL_PRED_RECONCILE_HARD_SNAP_RESET,
-	CL_PRED_RECONCILE_HARD_APPLY_NO_RESIM,
-};
-
-enum
-{
-	CL_PRED_REASON_NONE = 0,
-	CL_PRED_REASON_NO_BASE = 1 << 0,
-	CL_PRED_REASON_MISSING_PRED_FRAME = 1 << 1,
-	CL_PRED_REASON_SEQ_GAP = 1 << 2,
-	CL_PRED_REASON_CMD_MISMATCH = 1 << 3,
-	CL_PRED_REASON_DT_BAD = 1 << 4,
-	CL_PRED_REASON_STEPS_ZERO = 1 << 5,
-	CL_PRED_REASON_SNAP_FROM_SERVER = 1 << 6,
-	CL_PRED_REASON_MOVER_GROUND_INVALID = 1 << 7,
-	CL_PRED_REASON_COLLISION_MISMATCH = 1 << 8,
-	CL_PRED_REASON_CLAMP_SPIRAL = 1 << 9,
-	CL_PRED_REASON_UNKNOWN = 1 << 10,
-};
-
 extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 extern	kbutton_t	in_attack;
-extern	kbutton_t	in_jump;
-extern	int			in_impulse;
 
 void CL_InitInput (void);
 void CL_AccumulateCmd (void);
 void CL_SendCmd (void);
 void CL_SendMove (const usercmd_t *cmd);
-int CL_CalcMovePacketBytes (const usercmd_t *cmd, int *out_cmd_count);
-void CL_Predict_Clear (void);
-void CL_Predict_BeginFrame (void);
-void CL_Predict_SetupCmd (usercmd_t *cmd);
-void CL_Predict_SetNullCmdInjected (qboolean injected);
-void CL_Predict_ForceNullCmd (void);
-void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_t velocity, const vec3_t viewangles, qboolean onground);
-void CL_Predict_Reapply (void);
-qboolean CL_Predict_GetCmd (unsigned int seq, usercmd_t *out);
-void CL_Predict_ResetGround (void);
-qboolean CL_Predict_GetDebug (cl_pred_debug_t *out);
-qboolean CL_Predict_ShouldBypassInterpolation (void);
-qboolean CL_Predict_ReproModeEnabled (void);
-void CL_JitterDebug_Log (void);
-void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count);
 int  CL_ReadFromServer (void);
 void CL_AdjustAngles (void);
 void CL_BaseMove (usercmd_t *cmd);
@@ -652,7 +407,6 @@ qboolean CL_IsPlayerEnt (const entity_t *ent);
 
 void CL_ParseTEnt (void);
 void CL_UpdateTEnts (void);
-void CL_ResetPlayerSnaps (void);
 
 void CL_FreeState(void);
 void CL_ClearState (void);
@@ -677,8 +431,6 @@ void CL_TimeDemo_f (void);
 //
 void CL_ParseServerMessage (void);
 void CL_NewTranslation (int slot);
-void CL_RecordPlayerSnap (void);
-qboolean CL_WorldReady (void);
 
 //
 // view

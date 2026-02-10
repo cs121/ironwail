@@ -25,8 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "net_sys.h"
 #include "quakedef.h"
 #include "net_defs.h"
-#include <ifaddrs.h>
-#include <net/if.h>
 
 static sys_socket_t net_acceptsocket = INVALID_SOCKET;	// socket for fielding new connections
 static sys_socket_t net_controlsocket;
@@ -170,9 +168,6 @@ sys_socket_t UDP_OpenSocket (int port)
 		Con_SafePrintf("UDP_OpenSocket: %s\n", socketerror(err));
 		return INVALID_SOCKET;
 	}
-
-	setsockopt (newsocket, SOL_SOCKET, SO_BROADCAST, (char *)&_true, sizeof(_true));
-	setsockopt (newsocket, SOL_SOCKET, SO_REUSEADDR, (char *)&_true, sizeof(_true));
 
 	if (ioctlsocket (newsocket, FIONBIO, &_true) == SOCKET_ERROR)
 		goto ErrorReturn;
@@ -326,51 +321,9 @@ static int UDP_MakeSocketBroadcastCapable (sys_socket_t socketid)
 
 //=============================================================================
 
-static int UDP_BroadcastOnInterfaces (sys_socket_t socketid, byte *buf, int len)
-{
-	struct ifaddrs *ifaddr = NULL;
-	struct ifaddrs *ifa;
-	int sent = 0;
-
-	if (getifaddrs (&ifaddr) != 0)
-		return 0;
-
-	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
-	{
-		struct sockaddr_in addr;
-		in_addr_t ip;
-		in_addr_t mask;
-		in_addr_t broadcast;
-
-		if (!ifa->ifa_addr || !ifa->ifa_netmask)
-			continue;
-		if (!(ifa->ifa_flags & IFF_UP))
-			continue;
-		if (ifa->ifa_flags & IFF_LOOPBACK)
-			continue;
-		if (ifa->ifa_addr->sa_family != AF_INET)
-			continue;
-
-		ip = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
-		mask = ((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr.s_addr;
-		broadcast = htonl((ntohl(ip) & ntohl(mask)) | ~ntohl(mask));
-
-		memset(&addr, 0, sizeof(addr));
-		addr.sin_family = AF_INET;
-		addr.sin_addr.s_addr = broadcast;
-		addr.sin_port = htons((unsigned short)net_hostport);
-		if (UDP_Write (socketid, buf, len, (struct qsockaddr *)&addr) >= 0)
-			sent++;
-	}
-
-	freeifaddrs (ifaddr);
-	return sent;
-}
-
 int UDP_Broadcast (sys_socket_t socketid, byte *buf, int len)
 {
 	int	ret;
-	int sent;
 
 	if (socketid != net_broadcastsocket)
 	{
@@ -383,10 +336,6 @@ int UDP_Broadcast (sys_socket_t socketid, byte *buf, int len)
 			return ret;
 		}
 	}
-
-	sent = UDP_BroadcastOnInterfaces (socketid, buf, len);
-	if (sent > 0)
-		return len;
 
 	return UDP_Write (socketid, buf, len, (struct qsockaddr *)&broadcastaddr);
 }
@@ -528,3 +477,4 @@ int UDP_SetSocketPort (struct qsockaddr *addr, int port)
 }
 
 //=============================================================================
+

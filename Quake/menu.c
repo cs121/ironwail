@@ -1411,6 +1411,7 @@ void M_SinglePlayer_Key (int key)
 			Cbuf_AddText ("maxplayers 1\n");
 			Cbuf_AddText ("deathmatch 0\n"); //johnfitz
 			Cbuf_AddText ("coop 0\n"); //johnfitz
+			Cbuf_AddText ("bloodhound 0\n");
 			Cbuf_AddText ("campaign 1\n");
 			Cbuf_AddText ("map start\n");
 			break;
@@ -2203,6 +2204,7 @@ void M_Skill_Key (int key)
 			Cbuf_AddText ("maxplayers 1\n");
 			Cbuf_AddText ("deathmatch 0\n"); //johnfitz
 			Cbuf_AddText ("coop 0\n"); //johnfitz
+			Cbuf_AddText ("bloodhound 0\n");
 			Cbuf_AddText ("campaign 0\n");
 			Cbuf_AddText (va ("map \"%s\"\n", m_skill_mapname));
 		}
@@ -5910,11 +5912,14 @@ void M_Menu_GameOptions_f (void)
 typedef enum
 {
 	GAMETYPE_DEATHMATCH,
-	GAMETYPE_COOPERATIVE
+	GAMETYPE_COOPERATIVE,
+	GAMETYPE_BLOODHOUND
 } gametype_t;
 
 static gametype_t M_GameOptions_CurrentGametype (void)
 {
+	if (bloodhound.value)
+		return GAMETYPE_BLOODHOUND;
 	if (coop.value)
 		return GAMETYPE_COOPERATIVE;
 
@@ -5928,12 +5933,20 @@ static void M_GameOptions_SetGametype (gametype_t type)
 	case GAMETYPE_COOPERATIVE:
 		Cvar_Set ("coop", "1");
 		Cvar_Set ("deathmatch", "0");
+		Cvar_Set ("bloodhound", "0");
+		break;
+
+	case GAMETYPE_BLOODHOUND:
+		Cvar_Set ("coop", "0");
+		Cvar_Set ("deathmatch", "1");
+		Cvar_Set ("bloodhound", "1");
 		break;
 
 	case GAMETYPE_DEATHMATCH:
 	default:
 		Cvar_Set ("coop", "0");
 		Cvar_Set ("deathmatch", "1");
+		Cvar_Set ("bloodhound", "0");
 		break;
 	}
 }
@@ -5963,6 +5976,9 @@ void M_GameOptions_Draw (void)
 	{
 	case GAMETYPE_COOPERATIVE:
 		M_Print (160, 64, "Cooperative");
+		break;
+	case GAMETYPE_BLOODHOUND:
+		M_Print (160, 64, "Bloodhound");
 		break;
 	case GAMETYPE_DEATHMATCH:
 	default:
@@ -6061,7 +6077,7 @@ void M_GameOptions_Draw (void)
 			x = (320-26*8)/2;
 			M_DrawTextBox (x, 138, 24, 4);
 			x += 8;
-			M_Print (x, 146, "  More than 32 players  ");
+			M_Print (x, 146, "  More than 4 players   ");
 			M_Print (x, 154, " requires using command ");
 			M_Print (x, 162, "line parameters; please ");
 			M_Print (x, 170, "   see techinfo.txt.    ");
@@ -6096,10 +6112,10 @@ void M_NetStart_Change (int dir)
 	case 2:
 	{
 		int type = M_GameOptions_CurrentGametype () + dir;
-		if (type > GAMETYPE_COOPERATIVE)
+		if (type > GAMETYPE_BLOODHOUND)
 			type = GAMETYPE_DEATHMATCH;
 		else if (type < GAMETYPE_DEATHMATCH)
-			type = GAMETYPE_COOPERATIVE;
+			type = GAMETYPE_BLOODHOUND;
 	
 		M_GameOptions_SetGametype ((gametype_t) type);
 	}
@@ -7610,3 +7626,4 @@ void M_CheckMods (void)
 	m_skill_usecustomtitle = M_CheckCustomGfx ("gfx/p_skill.lmp",
 		"gfx/ttl_sgl.lmp", 6728, sgl_hashes, countof (sgl_hashes));
 }
+

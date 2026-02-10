@@ -19,17 +19,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-// Q3MINI Phase 4/5 summary: add negotiated message compression on large packets.
 #include "quakedef.h"
 #include "q_stdinc.h"
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
 #include "net_dgrm.h"
-// Q3MINI BEGIN
-#include "miniz.h"
-#include "lodepng.h"
-// Q3MINI END
 
 // This is enables a simple IP banning mechanism
 #define BAN_TEST
@@ -52,743 +47,13 @@ static struct
 {
 	unsigned int	length;
 	unsigned int	sequence;
-	unsigned int	ack;
-	unsigned int	ack_bits;
 	byte	data[MAX_DATAGRAM];
 } packetBuffer;
 
 static int myDriverLevel;
 
-static FILE *net_debug_log;
-static qboolean net_debug_log_tried;
-static double net_debug_next_time;
-static unsigned int net_debug_packets;
-static unsigned int net_debug_bytes;
-static unsigned int net_debug_max;
-static unsigned int net_debug_oversize;
-static unsigned int net_debug_resends;
-static unsigned int net_debug_fragments_sent;
-static unsigned int net_debug_fragments_received;
-static unsigned int net_debug_fragments_lost;
-static unsigned int net_debug_fragments_timeouts;
-
-// Q3MINI BEGIN
-#define NET_COMPRESS_MAGIC0 'C'
-#define NET_COMPRESS_MAGIC1 'M'
-#define NET_COMPRESS_HEADER_BYTES 5
-#define NET_COMPRESS_FLAG_ZLIB 0x01
-
-static qboolean NET_CompressAllowed (const qsocket_t *sock, unsigned int payload_len)
-{
-	if (!sock)
-		return false;
-	if (net_compress.value <= 0.0f)
-		return false;
-	if (net_compress_threshold.value > 0.0f
-		&& payload_len < (unsigned int)net_compress_threshold.value)
-		return false;
-	if ((sock->features & NETFEATURE_Q3MINI_COMPRESS) == 0)
-		return false;
-	if (cls.demoplayback || cls.demorecording)
-		return false;
-	return true;
-}
-
-static qboolean NET_CompressPayload (const byte *in, unsigned int in_len,
-	byte *out, unsigned int out_max, unsigned int *out_len)
-{
-	unsigned char *compressed = NULL;
-	size_t compressed_size = 0;
-	LodePNGCompressSettings settings;
-	unsigned error;
-
-	if (!in || !out || !out_len)
-		return false;
-	if (in_len > 0xFFFFu)
-		return false;
-	if (out_max <= NET_COMPRESS_HEADER_BYTES)
-		return false;
-
-	lodepng_compress_settings_init (&settings);
-	error = lodepng_zlib_compress (&compressed, &compressed_size, in, in_len, &settings);
-	if (error != 0 || !compressed || compressed_size == 0)
-	{
-		if (compressed)
-			free (compressed);
-		return false;
-	}
-
-	if (compressed_size + NET_COMPRESS_HEADER_BYTES >= in_len
-		|| compressed_size + NET_COMPRESS_HEADER_BYTES > out_max)
-	{
-		free (compressed);
-		return false;
-	}
-
-	out[0] = NET_COMPRESS_MAGIC0;
-	out[1] = NET_COMPRESS_MAGIC1;
-	out[2] = NET_COMPRESS_FLAG_ZLIB;
-	out[3] = (byte)(in_len & 0xFF);
-	out[4] = (byte)((in_len >> 8) & 0xFF);
-	memcpy (out + NET_COMPRESS_HEADER_BYTES, compressed, compressed_size);
-	*out_len = (unsigned int)(compressed_size + NET_COMPRESS_HEADER_BYTES);
-	free (compressed);
-	return true;
-}
-
-static int NET_DecompressPayload (const qsocket_t *sock, sizebuf_t *msg)
-{
-	static byte net_decompress_buffer[NET_MAXMESSAGE];
-	unsigned int compressed_len;
-	unsigned int uncompressed_len;
-	unsigned int flags;
-	tinfl_decompressor inflator;
-	size_t in_bytes;
-	size_t out_bytes;
-	tinfl_status status;
-
-	if (!sock || !msg)
-		return 0;
-	if ((sock->features & NETFEATURE_Q3MINI_COMPRESS) == 0)
-		return 0;
-	if (msg->cursize < NET_COMPRESS_HEADER_BYTES)
-		return 0;
-	if (msg->data[0] != NET_COMPRESS_MAGIC0 || msg->data[1] != NET_COMPRESS_MAGIC1)
-		return 0;
-
-	flags = msg->data[2];
-	if ((flags & NET_COMPRESS_FLAG_ZLIB) == 0)
-		return -1;
-
-	uncompressed_len = (unsigned int)msg->data[3] | ((unsigned int)msg->data[4] << 8);
-	if (uncompressed_len == 0 || uncompressed_len > NET_MAXMESSAGE)
-	{
-		if (net_dbg_q3mini.value > 0.0f)
-		{
-			NET_DebugLogEvent (true,
-				"NETDBG time %.3f compress_recv invalid_len addr %s ulen %u\n",
-				net_time, NET_QSocketGetAddressString (sock), uncompressed_len);
-		}
-		return -1;
-	}
-
-	compressed_len = (unsigned int)msg->cursize - NET_COMPRESS_HEADER_BYTES;
-	if (compressed_len == 0)
-		return -1;
-
-	tinfl_init (&inflator);
-	in_bytes = compressed_len;
-	out_bytes = uncompressed_len;
-	status = tinfl_decompress (&inflator,
-		(const mz_uint8 *)(msg->data + NET_COMPRESS_HEADER_BYTES), &in_bytes,
-		(mz_uint8 *)net_decompress_buffer,
-		(mz_uint8 *)net_decompress_buffer, &out_bytes,
-		TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
-
-	if (status != TINFL_STATUS_DONE || out_bytes != uncompressed_len)
-	{
-		if (net_dbg_q3mini.value > 0.0f)
-		{
-			NET_DebugLogEvent (true,
-				"NETDBG time %.3f compress_recv fail addr %s status %d in %u out %u expect %u\n",
-				net_time, NET_QSocketGetAddressString (sock), status,
-				(unsigned int)in_bytes, (unsigned int)out_bytes, uncompressed_len);
-		}
-		return -1;
-	}
-
-	SZ_Clear (msg);
-	SZ_Write (msg, net_decompress_buffer, (int)uncompressed_len);
-	return 1;
-}
-// Q3MINI END
-
-#define NET_UNRELIABLE_FRAG_HEADER_BYTES 8
-#define NET_UNRELIABLE_FRAG_TIMEOUT_S 1.0
-
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
-
-static qboolean NET_DebugEnabled (void)
-{
-	if (developer.value)
-		return true;
-	if (sv.active && sv_mtu_debug.value > 0)
-		return true;
-	return false;
-}
-
-static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr);
-static void NET_DebugLog (qboolean force, const char *fmt, ...) FUNCP_PRINTF(2,3);
-static void NET_DebugLog (qboolean force, const char *fmt, ...)
-{
-	va_list argptr;
-
-	va_start (argptr, fmt);
-	NET_DebugLogV (force, fmt, argptr);
-	va_end (argptr);
-}
-
-static void NET_DebugLogV (qboolean force, const char *fmt, va_list argptr)
-{
-	char text[2048];
-	int len;
-	va_list argcopy;
-
-	if (!NET_DebugEnabled () && (!force || !net_debug_log))
-		return;
-	if (!net_debug_log && !net_debug_log_tried && NET_DebugEnabled ())
-	{
-		char path[MAX_OSPATH];
-		net_debug_log_tried = true;
-		if (host_parms && host_parms->basedir)
-		{
-			q_snprintf (path, sizeof(path), "%s/net_debug.log", host_parms->basedir);
-			net_debug_log = Sys_fopen (path, "ab");
-		}
-	}
-	if (!net_debug_log)
-		return;
-
-	va_copy (argcopy, argptr);
-	len = q_vsnprintf (text, sizeof(text), fmt, argptr);
-	if (len < 0)
-	{
-		va_end (argcopy);
-		return;
-	}
-	if (len >= (int)sizeof(text))
-		len = (int)sizeof(text) - 1;
-	fwrite (text, 1, (size_t)len, net_debug_log);
-	fflush (net_debug_log);
-	Jitter_LogV (fmt, argcopy);
-	va_end (argcopy);
-}
-
-void NET_DebugLogEvent (qboolean force, const char *fmt, ...)
-{
-	va_list argptr;
-
-	va_start (argptr, fmt);
-	NET_DebugLogV (force, fmt, argptr);
-	va_end (argptr);
-}
-
-static void NET_DebugRecordPacket (unsigned int packet_len)
-{
-	net_debug_packets++;
-	net_debug_bytes += packet_len;
-	if (packet_len > net_debug_max)
-		net_debug_max = packet_len;
-}
-
-static void NET_DebugMaybeLogSummary (void)
-{
-	if (!NET_DebugEnabled ())
-		return;
-	if (net_time < net_debug_next_time)
-		return;
-
-	if (net_debug_packets > 0)
-	{
-		unsigned int avg = net_debug_bytes / net_debug_packets;
-		NET_DebugLog (false,
-			"NETDBG time %.3f summary packets %u avg %u max %u oversize %u resends %u frags sent %u recv %u lost %u timeouts %u\n",
-			net_time, net_debug_packets, avg, net_debug_max, net_debug_oversize,
-			net_debug_resends, net_debug_fragments_sent, net_debug_fragments_received,
-			net_debug_fragments_lost, net_debug_fragments_timeouts);
-	}
-
-	net_debug_packets = 0;
-	net_debug_bytes = 0;
-	net_debug_max = 0;
-	net_debug_oversize = 0;
-	net_debug_resends = 0;
-	net_debug_fragments_sent = 0;
-	net_debug_fragments_received = 0;
-	net_debug_fragments_lost = 0;
-	net_debug_fragments_timeouts = 0;
-	net_debug_next_time = net_time + 1.0;
-}
-
-static void NET_ClearUnreliableFragState (qsocket_t *sock)
-{
-	int i;
-
-	for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
-	{
-		if (sock->unreliableFragBuffers[i])
-		{
-			Z_Free (sock->unreliableFragBuffers[i]);
-			sock->unreliableFragBuffers[i] = NULL;
-		}
-		sock->unreliableFragSizes[i] = 0;
-		sock->unreliableFragReceivedMask[i] = 0;
-	}
-	sock->unreliableFragActive = false;
-	sock->unreliableFragSequence = 0;
-	sock->unreliableFragTotal = 0;
-	sock->unreliableFragReceived = 0;
-	sock->unreliableFragTotalBytes = 0;
-	sock->unreliableFragStartTime = 0.0;
-}
-
-static void NET_LogUnreliableFragLoss (const qsocket_t *sock, const char *reason, qboolean timeout)
-{
-	unsigned int missing = 0;
-	float loss_rate = 0.0f;
-
-	if (!sock->unreliableFragActive || sock->unreliableFragTotal == 0)
-		return;
-
-	if (sock->unreliableFragTotal > sock->unreliableFragReceived)
-		missing = (unsigned int)(sock->unreliableFragTotal - sock->unreliableFragReceived);
-	if (sock->unreliableFragTotal > 0)
-		loss_rate = (float)missing / (float)sock->unreliableFragTotal;
-
-	net_debug_fragments_lost += missing;
-	if (timeout)
-		net_debug_fragments_timeouts++;
-	NET_DebugLog (true,
-		"NETDBG time %.3f frag loss addr %s seq %u recv %u total %u missing %u loss_rate %.2f reason %s\n",
-		net_time, NET_QSocketGetAddressString (sock), sock->unreliableFragSequence,
-		(unsigned int)sock->unreliableFragReceived, (unsigned int)sock->unreliableFragTotal,
-		missing, loss_rate, reason ? reason : "unknown");
-}
-
-static void NET_CheckUnreliableFragTimeout (qsocket_t *sock)
-{
-	if (!sock->unreliableFragActive)
-		return;
-	if ((net_time - sock->unreliableFragStartTime) <= NET_UNRELIABLE_FRAG_TIMEOUT_S)
-		return;
-	NET_LogUnreliableFragLoss (sock, "timeout", true);
-	NET_ClearUnreliableFragState (sock);
-	NET_DebugMaybeLogSummary ();
-}
-
-static int NET_GetConfiguredMTU (const qsocket_t *sock)
-{
-	(void)sock;
-	if (sv.active)
-		return (int)sv_mtu.value;
-	return (int)net_mtu.value;
-}
-
-static int NET_GetPacketPayloadLimit (const qsocket_t *sock)
-{
-	int mtu = NET_GetConfiguredMTU (sock);
-	int payload;
-
-	if (mtu <= 0)
-		return NET_DATAGRAMSIZE;
-	payload = mtu - NET_UDPIP_HEADER_BYTES;
-	if (payload < NET_HEADERSIZE + 1)
-		payload = NET_HEADERSIZE + 1;
-	return q_min (payload, NET_DATAGRAMSIZE);
-}
-
-static int NET_GetPacketDataLimit (const qsocket_t *sock)
-{
-	int payload = NET_GetPacketPayloadLimit (sock);
-	int data_limit = payload - NET_HEADERSIZE;
-
-	if (data_limit < 1)
-		data_limit = 1;
-	return q_min (data_limit, MAX_DATAGRAM);
-}
-
-static const client_t *NET_GetClientForSocket (const qsocket_t *sock)
-{
-	int i;
-
-	if (!sv.active || !svs.clients)
-		return NULL;
-	for (i = 0; i < svs.maxclients; i++)
-	{
-		client_t *client = &svs.clients[i];
-
-		if (!client->active)
-			continue;
-		if (client->netconnection == sock)
-			return client;
-	}
-	return NULL;
-}
-
-static unsigned int NET_GetRateBudgetLimit (const qsocket_t *sock)
-{
-	unsigned int payload = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int budget = payload * 4u;
-	const client_t *client = NET_GetClientForSocket (sock);
-
-	if (client && client->rate > 0)
-		budget = (unsigned int)client->rate / 10u;
-	if (budget < (unsigned int)(NET_HEADERSIZE + 1))
-		budget = (unsigned int)(NET_HEADERSIZE + 1);
-	return budget;
-}
-
-static void NET_UpdateRateBudget (qsocket_t *sock)
-{
-	if (IS_LOOP_DRIVER(sock->driver))
-		return;
-	if (sock->rate_next_time == 0.0 || net_time >= sock->rate_next_time)
-	{
-		sock->rate_budget = (int)NET_GetRateBudgetLimit (sock);
-		sock->rate_next_time = net_time + 0.1;
-	}
-}
-
-static qboolean NET_HasRateBudget (qsocket_t *sock, unsigned int packet_len)
-{
-	if (IS_LOOP_DRIVER(sock->driver))
-		return true;
-	NET_UpdateRateBudget(sock);
-	return sock->rate_budget >= (int)packet_len;
-}
-
-static qboolean NET_ConsumeRateBudget (qsocket_t *sock, unsigned int packet_len)
-{
-	if (!NET_HasRateBudget(sock, packet_len))
-	{
-		NET_DebugLog (false,
-			"NETDBG time %.3f rate_budget_block addr %s budget %d wanted %u\n",
-			net_time, NET_QSocketGetAddressString (sock), sock->rate_budget, packet_len);
-		return false;
-	}
-	if (!IS_LOOP_DRIVER(sock->driver))
-		sock->rate_budget -= (int)packet_len;
-	return true;
-}
-
-static void NET_LogOversizedSend (const qsocket_t *sock, unsigned int packet_len)
-{
-	static double next_log_time = 0.0;
-	unsigned int mtu = (unsigned int)NET_GetConfiguredMTU (sock);
-	unsigned int payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int data_limit = (unsigned int)NET_GetPacketDataLimit (sock);
-
-	NET_DebugLog (true,
-		"NETDBG time %.3f PREVENTED_OVERSHOOT addr %s mtu %u payload_cap %u data_cap %u packet %u\n",
-		net_time, NET_QSocketGetAddressString (sock), mtu, payload_limit, data_limit, packet_len);
-	if (sv.active && sv_mtu_debug.value > 0 && net_time >= next_log_time)
-	{
-		Con_Printf ("sv_mtu %d oversize send blocked (%s size %u)\n",
-			(int)sv_mtu.value,
-			NET_QSocketGetAddressString (sock),
-			packet_len);
-		next_log_time = net_time + 1.0;
-	}
-}
-
-static qboolean NET_SequenceLessThan (unsigned int a, unsigned int b)
-{
-	return (int)(a - b) < 0;
-}
-
-static unsigned int NET_GetAckSequence (const qsocket_t *sock)
-{
-	if (!sock->reliableReceiveValid)
-		return 0;
-	return sock->reliableReceiveSequence;
-}
-
-static unsigned int NET_GetAckBits (const qsocket_t *sock)
-{
-	if (!sock->reliableReceiveValid)
-		return 0;
-	return sock->reliableReceiveMask;
-}
-
-static const char *NET_FlagsToString (unsigned int flags, char *buf, size_t buflen)
-{
-	char *ptr = buf;
-	size_t remaining = buflen;
-	int written;
-
-	if (!buflen)
-		return "";
-
-	buf[0] = 0;
-	if (flags & NETFLAG_CTL)
-	{
-		written = q_snprintf (ptr, remaining, "CTL");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-	if (flags & NETFLAG_DATA)
-	{
-		written = q_snprintf (ptr, remaining, "%sDATA", buf[0] ? "|" : "");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-	if (flags & NETFLAG_ACK)
-	{
-		written = q_snprintf (ptr, remaining, "%sACK", buf[0] ? "|" : "");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-	if (flags & NETFLAG_EOM)
-	{
-		written = q_snprintf (ptr, remaining, "%sEOM", buf[0] ? "|" : "");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-	if (flags & NETFLAG_UNRELIABLE)
-	{
-		written = q_snprintf (ptr, remaining, "%sUNREL", buf[0] ? "|" : "");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-	if (flags & NETFLAG_FRAG)
-	{
-		written = q_snprintf (ptr, remaining, "%sFRAG", buf[0] ? "|" : "");
-		if (written > 0 && (size_t)written < remaining)
-		{
-			ptr += written;
-			remaining -= (size_t)written;
-		}
-	}
-
-	if (!buf[0])
-		q_strlcpy (buf, "NONE", buflen);
-
-	return buf;
-}
-
-static void NET_SetPacketHeader (qsocket_t *sock, unsigned int packet_len, unsigned int flags, unsigned int sequence)
-{
-	packetBuffer.length = BigLong(packet_len | flags);
-	packetBuffer.sequence = BigLong(sequence);
-	packetBuffer.ack = BigLong(NET_GetAckSequence(sock));
-	packetBuffer.ack_bits = BigLong(NET_GetAckBits(sock));
-}
-
-static void NET_UpdateReceiveAckState (qsocket_t *sock, unsigned int sequence)
-{
-	if (!sock->reliableReceiveValid)
-	{
-		sock->reliableReceiveValid = true;
-		sock->reliableReceiveSequence = sequence;
-		sock->reliableReceiveMask = 0;
-		return;
-	}
-
-	if (sequence == sock->reliableReceiveSequence)
-		return;
-
-	if (NET_SequenceLessThan(sequence, sock->reliableReceiveSequence))
-	{
-		unsigned int delta = sock->reliableReceiveSequence - sequence;
-		if (delta >= 1 && delta <= NET_ACK_BITS)
-			sock->reliableReceiveMask |= 1u << (delta - 1);
-		return;
-	}
-	else
-	{
-		unsigned int shift = sequence - sock->reliableReceiveSequence;
-		if (shift >= NET_ACK_BITS + 1)
-			sock->reliableReceiveMask = 0;
-		else
-			sock->reliableReceiveMask <<= shift;
-		if (shift >= 1 && shift <= NET_ACK_BITS)
-			sock->reliableReceiveMask |= 1u << (shift - 1);
-		sock->reliableReceiveSequence = sequence;
-	}
-}
-
-static int NET_SendReliablePacket (qsocket_t *sock, net_reliable_send_t *packet, const char *label, qboolean is_resend)
-{
-	unsigned int	packet_len;
-	unsigned int	payload_limit = (unsigned int)NET_GetPacketPayloadLimit (sock);
-	unsigned int	flags = NETFLAG_DATA;
-
-	packet_len = NET_HEADERSIZE + (unsigned int)packet->length;
-	if (packet->eom)
-		flags |= NETFLAG_EOM;
-
-	if (packet_len > payload_limit)
-	{
-		NET_LogOversizedSend (sock, packet_len);
-		net_debug_oversize++;
-		NET_DebugMaybeLogSummary ();
-		return -1;
-	}
-
-	if (!NET_ConsumeRateBudget(sock, packet_len))
-		return 0;
-
-	NET_SetPacketHeader(sock, packet_len, flags, packet->sequence);
-	Q_memcpy (packetBuffer.data, sock->sendMessage + packet->offset, packet->length);
-
-	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packet_len, &sock->addr) == -1)
-		return -1;
-
-	NET_DebugRecordPacket (packet_len);
-	if (is_resend)
-		net_debug_resends++;
-	NET_DebugLog (false,
-		"NETDBG time %.3f send reliable-%s addr %s seq %u len %u data %u eom %u ack %u ack_bits 0x%08x\n",
-		net_time, label, NET_QSocketGetAddressString (sock), packet->sequence,
-		packet_len, (unsigned int)packet->length, packet->eom ? 1u : 0u,
-		NET_GetAckSequence(sock), NET_GetAckBits(sock));
-	NET_DebugMaybeLogSummary ();
-
-	packet->lastSendTime = net_time;
-	sock->lastSendTime = net_time;
-	if (is_resend)
-		packetsReSent++;
-	else
-		packetsSent++;
-	return 1;
-}
-
-static int NET_SendPendingReliable (qsocket_t *sock)
-{
-	unsigned int	max_data = (unsigned int)NET_GetPacketDataLimit (sock);
-
-	while (sock->sendMessageOffset < sock->sendMessageLength)
-	{
-		unsigned int in_flight = sock->sendSequence - sock->sendReliableBase;
-		net_reliable_send_t *packet;
-		unsigned int sequence;
-		int data_len;
-		int offset;
-		qboolean eom;
-
-		if (in_flight >= NET_RELIABLE_WINDOW)
-			break;
-
-		offset = sock->sendMessageOffset;
-		data_len = sock->sendMessageLength - sock->sendMessageOffset;
-		if (data_len > (int)max_data)
-			data_len = (int)max_data;
-		eom = (sock->sendMessageOffset + data_len) >= sock->sendMessageLength;
-		if (!NET_HasRateBudget(sock, (unsigned int)(NET_HEADERSIZE + data_len)))
-			break;
-
-		sequence = sock->sendSequence++;
-		packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
-		packet->sequence = sequence;
-		packet->length = data_len;
-		packet->offset = offset;
-		packet->eom = eom;
-		packet->acked = false;
-		packet->lastSendTime = 0.0;
-
-		{
-			int ret = NET_SendReliablePacket (sock, packet, "window", false);
-			if (ret == -1)
-				return -1;
-			if (ret == 0)
-				break;
-		}
-
-		sock->sendMessageOffset += data_len;
-	}
-
-	return 1;
-}
-
-static void NET_AckReliableSequence (qsocket_t *sock, unsigned int sequence)
-{
-	net_reliable_send_t *packet;
-
-	if (NET_SequenceLessThan(sequence, sock->sendReliableBase))
-		return;
-	if (!NET_SequenceLessThan(sequence, sock->sendSequence))
-		return;
-	if (sequence - sock->sendReliableBase >= NET_RELIABLE_WINDOW)
-		return;
-
-	packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
-	if (packet->sequence != sequence)
-		return;
-	packet->acked = true;
-}
-
-static void NET_AdvanceSendWindow (qsocket_t *sock)
-{
-	while (sock->sendReliableBase != sock->sendSequence)
-	{
-		net_reliable_send_t *packet = &sock->reliableSend[sock->sendReliableBase % NET_RELIABLE_WINDOW];
-		if (!packet->acked || packet->sequence != sock->sendReliableBase)
-			break;
-		memset(packet, 0, sizeof(*packet));
-		sock->sendReliableBase++;
-	}
-
-	if (sock->sendReliableBase == sock->sendSequence &&
-		sock->sendMessageOffset >= sock->sendMessageLength)
-	{
-		sock->sendMessageLength = 0;
-		sock->sendMessageOffset = 0;
-		sock->canSend = true;
-	}
-}
-
-static void NET_ProcessAcks (qsocket_t *sock, unsigned int ack, unsigned int ack_bits)
-{
-	unsigned int i;
-
-	if (ack == 0)
-		return;
-
-	NET_AckReliableSequence(sock, ack);
-	for (i = 0; i < NET_ACK_BITS; ++i)
-	{
-		if (ack_bits & (1u << i))
-			NET_AckReliableSequence(sock, ack - (i + 1));
-	}
-
-	NET_AdvanceSendWindow(sock);
-	NET_SendPendingReliable(sock);
-}
-
-static void NET_ResendReliablePackets (qsocket_t *sock)
-{
-	unsigned int sequence;
-
-	if (sock->sendMessageLength == 0)
-		return;
-
-	for (sequence = sock->sendReliableBase; sequence != sock->sendSequence; ++sequence)
-	{
-		net_reliable_send_t *packet = &sock->reliableSend[sequence % NET_RELIABLE_WINDOW];
-		if (packet->sequence != sequence || packet->acked)
-			continue;
-		if ((net_time - packet->lastSendTime) <= 1.0)
-			continue;
-		if (NET_SendReliablePacket (sock, packet, "resend", true) == 0)
-			break;
-	}
-}
-
-static void NET_ClearReliableReceiveEntry (net_reliable_receive_t *entry)
-{
-	if (entry->data)
-	{
-		Z_Free(entry->data);
-		entry->data = NULL;
-	}
-	memset(entry, 0, sizeof(*entry));
-}
 
 
 static char *StrAddr (struct qsockaddr *addr)
@@ -866,6 +131,10 @@ static void NET_Ban_f (void)
 
 int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 {
+	unsigned int	packetLen;
+	unsigned int	dataLen;
+	unsigned int	eom;
+
 #ifdef DEBUG
 	if (data->cursize == 0)
 		Sys_Error("Datagram_SendMessage: zero length message");
@@ -876,49 +145,107 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 	if (sock->canSend == false)
 		Sys_Error("SendMessage: called with canSend == false");
 #endif
-	// Q3MINI BEGIN
+
+	Q_memcpy(sock->sendMessage, data->data, data->cursize);
+	sock->sendMessageLength = data->cursize;
+
+	if (data->cursize <= MAX_DATAGRAM)
 	{
-		unsigned int payload_len = (unsigned int)data->cursize;
-		unsigned int compressed_len = 0;
-		if (NET_CompressAllowed (sock, payload_len)
-			&& NET_CompressPayload (data->data, payload_len, sock->sendMessage,
-				(unsigned int)sizeof(sock->sendMessage), &compressed_len))
-		{
-			sock->sendMessageLength = (int)compressed_len;
-			if (net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
-			{
-				NET_DebugLogEvent (false,
-					"NETDBG time %.3f compress_send reliable addr %s orig %u comp %u ratio %.2f\n",
-					net_time, NET_QSocketGetAddressString (sock), payload_len,
-					compressed_len, compressed_len ? (float)payload_len / (float)compressed_len : 0.0f);
-			}
-		}
-		else
-		{
-			Q_memcpy(sock->sendMessage, data->data, data->cursize);
-			sock->sendMessageLength = data->cursize;
-		}
+		dataLen = data->cursize;
+		eom = NETFLAG_EOM;
 	}
-	// Q3MINI END
-	sock->sendMessageOffset = 0;
-	sock->sendReliableBase = sock->sendSequence;
+	else
+	{
+		dataLen = MAX_DATAGRAM;
+		eom = 0;
+	}
+	packetLen = NET_HEADERSIZE + dataLen;
+
+	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
+	packetBuffer.sequence = BigLong(sock->sendSequence++);
+	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
 
 	sock->canSend = false;
-	NET_DebugLog (false,
-		"NETDBG time %.3f queue reliable message addr %s bytes %u data_cap %u payload_cap %u\n",
-		net_time, NET_QSocketGetAddressString (sock), (unsigned int)sock->sendMessageLength,
-		(unsigned int)NET_GetPacketDataLimit(sock), (unsigned int)NET_GetPacketPayloadLimit(sock));
-	if (NET_SendPendingReliable(sock) == -1)
+
+	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
+
+	sock->lastSendTime = net_time;
+	packetsSent++;
 	return 1;
 }
 
 
+static int SendMessageNext (qsocket_t *sock)
+{
+	unsigned int	packetLen;
+	unsigned int	dataLen;
+	unsigned int	eom;
+
+	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	{
+		dataLen = sock->sendMessageLength;
+		eom = NETFLAG_EOM;
+	}
+	else
+	{
+		dataLen = MAX_DATAGRAM;
+		eom = 0;
+	}
+	packetLen = NET_HEADERSIZE + dataLen;
+
+	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
+	packetBuffer.sequence = BigLong(sock->sendSequence++);
+	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+
+	sock->sendNext = false;
+
+	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
+		return -1;
+
+	sock->lastSendTime = net_time;
+	packetsSent++;
+	return 1;
+}
+
+
+static int ReSendMessage (qsocket_t *sock)
+{
+	unsigned int	packetLen;
+	unsigned int	dataLen;
+	unsigned int	eom;
+
+	if (sock->sendMessageLength <= MAX_DATAGRAM)
+	{
+		dataLen = sock->sendMessageLength;
+		eom = NETFLAG_EOM;
+	}
+	else
+	{
+		dataLen = MAX_DATAGRAM;
+		eom = 0;
+	}
+	packetLen = NET_HEADERSIZE + dataLen;
+
+	packetBuffer.length = BigLong(packetLen | (NETFLAG_DATA | eom));
+	packetBuffer.sequence = BigLong(sock->sendSequence - 1);
+	Q_memcpy (packetBuffer.data, sock->sendMessage, dataLen);
+
+	sock->sendNext = false;
+
+	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
+		return -1;
+
+	sock->lastSendTime = net_time;
+	packetsReSent++;
+	return 1;
+}
+
 
 qboolean Datagram_CanSendMessage (qsocket_t *sock)
 {
-	if (sock->sendMessageLength > 0)
-		NET_SendPendingReliable(sock);
+	if (sock->sendNext)
+		SendMessageNext (sock);
 
 	return sock->canSend;
 }
@@ -933,14 +260,6 @@ qboolean Datagram_CanSendUnreliableMessage (qsocket_t *sock)
 int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int	packetLen;
-	int	payload_limit = NET_GetPacketPayloadLimit (sock);
-	int	max_data = NET_GetPacketDataLimit (sock);
-	int	frag_payload;
-	// Q3MINI BEGIN
-	static byte	compress_buf[MAX_DATAGRAM];
-	const byte	*payload = data->data;
-	int		payload_len = data->cursize;
-	// Q3MINI END
 
 #ifdef DEBUG
 	if (data->cursize == 0)
@@ -950,135 +269,14 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		Sys_Error("Datagram_SendUnreliableMessage: message too big: %u", data->cursize);
 #endif
 
-	// Q3MINI BEGIN
-	{
-		unsigned int compressed_len = 0;
-		if (NET_CompressAllowed (sock, (unsigned int)payload_len)
-			&& NET_CompressPayload (payload, (unsigned int)payload_len,
-				compress_buf, (unsigned int)sizeof(compress_buf), &compressed_len))
-		{
-			payload = compress_buf;
-			payload_len = (int)compressed_len;
-			if (net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
-			{
-				NET_DebugLogEvent (false,
-					"NETDBG time %.3f compress_send unreliable addr %s orig %u comp %u ratio %.2f\n",
-					net_time, NET_QSocketGetAddressString (sock), (unsigned int)data->cursize,
-					compressed_len, compressed_len ? (float)data->cursize / (float)compressed_len : 0.0f);
-			}
-		}
-	}
-	// Q3MINI END
+	packetLen = NET_HEADERSIZE + data->cursize;
 
-	if (payload_len > max_data)
-	{
-		unsigned int frag_sequence;
-		unsigned int total_bytes = 0;
-		unsigned int offset = 0;
-		unsigned int frag_total;
-		unsigned int i;
-
-		frag_payload = max_data - NET_UNRELIABLE_FRAG_HEADER_BYTES;
-		if (frag_payload <= 0)
-		{
-			NET_DebugLog (true,
-				"NETDBG time %.3f oversize unreliable-data addr %s data %u cap %u payload_cap %u\n",
-				net_time, NET_QSocketGetAddressString (sock), (unsigned int)payload_len,
-				(unsigned int)max_data, (unsigned int)payload_limit);
-			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + payload_len));
-			net_debug_oversize++;
-			NET_DebugMaybeLogSummary ();
-			return 0;
-		}
-
-		frag_total = (unsigned int)((payload_len + frag_payload - 1) / frag_payload);
-		if (frag_total == 0 || frag_total > NET_UNRELIABLE_MAX_FRAGMENTS)
-		{
-			NET_DebugLog (true,
-				"NETDBG time %.3f oversize unreliable-frag addr %s data %u frags %u cap %u\n",
-				net_time, NET_QSocketGetAddressString (sock), (unsigned int)payload_len,
-				frag_total, (unsigned int)NET_UNRELIABLE_MAX_FRAGMENTS);
-			NET_LogOversizedSend (sock, (unsigned int)(NET_HEADERSIZE + payload_len));
-			net_debug_oversize++;
-			NET_DebugMaybeLogSummary ();
-			return 0;
-		}
-
-		for (i = 0; i < frag_total; ++i)
-		{
-			unsigned int frag_size = (unsigned int)q_min(frag_payload, payload_len - (int)offset);
-			unsigned int frag_packet = (unsigned int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
-			total_bytes += frag_packet;
-			offset += frag_size;
-		}
-
-		if (!NET_HasRateBudget(sock, total_bytes))
-			return 0;
-
-		frag_sequence = sock->unreliableFragmentSequence++;
-		offset = 0;
-		for (i = 0; i < frag_total; ++i)
-		{
-			unsigned int frag_size = (unsigned int)q_min(frag_payload, payload_len - (int)offset);
-
-			packetLen = (int)(NET_HEADERSIZE + NET_UNRELIABLE_FRAG_HEADER_BYTES + frag_size);
-			if (!NET_ConsumeRateBudget(sock, (unsigned int)packetLen))
-				return 0;
-			NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE | NETFLAG_FRAG,
-				sock->unreliableSendSequence++);
-
-			*(unsigned int *)packetBuffer.data = BigLong(frag_sequence);
-			*(unsigned short *)(packetBuffer.data + 4) = BigShort((unsigned short)i);
-			*(unsigned short *)(packetBuffer.data + 6) = BigShort((unsigned short)frag_total);
-			Q_memcpy (packetBuffer.data + NET_UNRELIABLE_FRAG_HEADER_BYTES,
-				payload + offset, frag_size);
-
-			if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
-				return -1;
-
-			NET_DebugRecordPacket ((unsigned int)packetLen);
-			net_debug_fragments_sent++;
-			NET_DebugLog (false,
-				"NETDBG time %.3f send unreliable-frag addr %s seq %u frag_seq %u frag %u/%u len %u data %u\n",
-				net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
-				frag_sequence, i + 1, frag_total, (unsigned int)packetLen, frag_size);
-
-			offset += frag_size;
-		}
-
-		NET_DebugMaybeLogSummary ();
-		packetsSent += (int)frag_total;
-		return 1;
-	}
-
-	packetLen = NET_HEADERSIZE + payload_len;
-	if (packetLen > payload_limit)
-	{
-		NET_DebugLog (true,
-			"NETDBG time %.3f oversize unreliable-packet addr %s packet %u payload_cap %u\n",
-			net_time, NET_QSocketGetAddressString (sock), (unsigned int)packetLen, (unsigned int)payload_limit);
-		NET_LogOversizedSend (sock, (unsigned int)packetLen);
-		net_debug_oversize++;
-		NET_DebugMaybeLogSummary ();
-		return 0;
-	}
-
-	if (!NET_ConsumeRateBudget(sock, (unsigned int)packetLen))
-		return 0;
-
-	NET_SetPacketHeader(sock, (unsigned int)packetLen, NETFLAG_UNRELIABLE, sock->unreliableSendSequence++);
-	Q_memcpy (packetBuffer.data, payload, payload_len);
+	packetBuffer.length = BigLong(packetLen | NETFLAG_UNRELIABLE);
+	packetBuffer.sequence = BigLong(sock->unreliableSendSequence++);
+	Q_memcpy (packetBuffer.data, data->data, data->cursize);
 
 	if (sfunc.Write (sock->socket, (byte *)&packetBuffer, packetLen, &sock->addr) == -1)
 		return -1;
-
-	NET_DebugRecordPacket ((unsigned int)packetLen);
-	NET_DebugLog (false,
-		"NETDBG time %.3f send unreliable addr %s seq %u len %u data %u ack %u ack_bits 0x%08x\n",
-		net_time, NET_QSocketGetAddressString (sock), sock->unreliableSendSequence - 1,
-		(unsigned int)packetLen, (unsigned int)payload_len,
-		NET_GetAckSequence(sock), NET_GetAckBits(sock));
-	NET_DebugMaybeLogSummary ();
 
 	packetsSent++;
 	return 1;
@@ -1093,40 +291,26 @@ int	Datagram_GetMessage (qsocket_t *sock)
 	struct qsockaddr readaddr;
 	unsigned int	sequence;
 	unsigned int	count;
-	int				packetLengthRead;
 
-	NET_ResendReliablePackets (sock);
-	NET_CheckUnreliableFragTimeout (sock);
+	if (!sock->canSend)
+		if ((net_time - sock->lastSendTime) > 1.0)
+			ReSendMessage (sock);
 
 	while (1)
 	{
-		packetLengthRead = (int) sfunc.Read(sock->socket, (byte *)&packetBuffer,
+		length = (unsigned int) sfunc.Read(sock->socket, (byte *)&packetBuffer,
 							NET_DATAGRAMSIZE, &readaddr);
 
 	//	if ((rand() & 255) > 220)
 	//		continue;
 
-		if (packetLengthRead == 0)
+		if (length == 0)
 			break;
 
-		if (packetLengthRead == -1)
+		if (length == (unsigned int)-1)
 		{
 			Con_Printf("Read error\n");
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv error addr %s\n",
-				net_time, NET_QSocketGetAddressString (sock));
 			return -1;
-		}
-
-		if (net_maxpacket.value > 0 && packetLengthRead > (int)net_maxpacket.value)
-		{
-			Con_DPrintf("NET_GetMessage: oversized packet (%d > %d)\n",
-				packetLengthRead, (int)net_maxpacket.value);
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv oversized packet addr %s read %d cap %d\n",
-				net_time, NET_QSocketGetAddressString (sock),
-				packetLengthRead, (int)net_maxpacket.value);
-			continue;
 		}
 
 		if (sfunc.AddrCompare(&readaddr, &sock->addr) != 0)
@@ -1134,18 +318,12 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			Con_Printf("Forged packet received\n");
 			Con_Printf("Expected: %s\n", StrAddr (&sock->addr));
 			Con_Printf("Received: %s\n", StrAddr (&readaddr));
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv forged addr %s expected %s\n",
-				net_time, StrAddr (&readaddr), StrAddr (&sock->addr));
 			continue;
 		}
 
-		if (packetLengthRead < NET_HEADERSIZE)
+		if (length < NET_HEADERSIZE)
 		{
 			shortPacketCount++;
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv short packet addr %s read %d\n",
-				net_time, NET_QSocketGetAddressString (sock), packetLengthRead);
 			continue;
 		}
 
@@ -1156,59 +334,14 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		if (flags & NETFLAG_CTL)
 			continue;
 
-		if (length < NET_HEADERSIZE || length > NET_DATAGRAMSIZE)
-		{
-			Con_DPrintf("NET_GetMessage: invalid packet length %u\n", length);
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv invalid packet length addr %s len %u\n",
-				net_time, NET_QSocketGetAddressString (sock), length);
-			continue;
-		}
-
-		if (net_maxpacket.value > 0 && length > (unsigned int)net_maxpacket.value)
-		{
-			Con_DPrintf("NET_GetMessage: oversized packet length %u (cap %d)\n",
-				length, (int)net_maxpacket.value);
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv oversized packet length addr %s len %u cap %d\n",
-				net_time, NET_QSocketGetAddressString (sock), length, (int)net_maxpacket.value);
-			continue;
-		}
-
-		if ((int)length > packetLengthRead)
-		{
-			Con_DPrintf("NET_GetMessage: truncated packet length %u (read %d)\n",
-				length, packetLengthRead);
-			NET_DebugLog (true,
-				"NETDBG time %.3f recv truncated packet addr %s len %u read %d\n",
-				net_time, NET_QSocketGetAddressString (sock), length, packetLengthRead);
-			continue;
-		}
-
 		sequence = BigLong(packetBuffer.sequence);
-		{
-			unsigned int ack = BigLong(packetBuffer.ack);
-			unsigned int ack_bits = BigLong(packetBuffer.ack_bits);
-			char flags_text[64];
-
-			NET_DebugLog (false,
-				"NETDBG time %.3f recv packet addr %s read %d len %u flags %s seq %u ack %u ack_bits 0x%08x\n",
-				net_time, NET_QSocketGetAddressString (sock), packetLengthRead,
-				length, NET_FlagsToString(flags, flags_text, sizeof(flags_text)),
-				sequence, ack, ack_bits);
-			packetsReceived++;
-			NET_ProcessAcks(sock, ack, ack_bits);
-		}
+		packetsReceived++;
 
 		if (flags & NETFLAG_UNRELIABLE)
 		{
 			if (sequence < sock->unreliableReceiveSequence)
 			{
 				Con_DPrintf("Got a stale datagram\n");
-				NET_DebugLog (true,
-					"NETDBG time %.3f recv stale unreliable addr %s seq %u expected %u\n",
-					net_time, NET_QSocketGetAddressString (sock), sequence,
-					sock->unreliableReceiveSequence);
 				ret = 0;
 				break;
 			}
@@ -1217,370 +350,84 @@ int	Datagram_GetMessage (qsocket_t *sock)
 				count = sequence - sock->unreliableReceiveSequence;
 				droppedDatagrams += count;
 				Con_DPrintf("Dropped %u datagram(s)\n", count);
-				NET_DebugLog (true,
-					"NETDBG time %.3f recv dropped datagrams addr %s count %u seq %u expected %u\n",
-					net_time, NET_QSocketGetAddressString (sock), count,
-					sequence, sock->unreliableReceiveSequence);
 			}
 			sock->unreliableReceiveSequence = sequence + 1;
 
 			length -= NET_HEADERSIZE;
 
-			if (length > MAX_DATAGRAM)
-			{
-				Con_DPrintf("NET_GetMessage: unreliable packet too large (%u)\n", length);
-				NET_DebugLog (true,
-					"NETDBG time %.3f recv unreliable too large addr %s len %u cap %u\n",
-					net_time, NET_QSocketGetAddressString (sock), length,
-					(unsigned int)MAX_DATAGRAM);
-				continue;
-			}
-
-			if (flags & NETFLAG_FRAG)
-			{
-				unsigned int frag_sequence;
-				unsigned short frag_index;
-				unsigned short frag_total;
-				unsigned int frag_payload_len;
-				byte *payload = packetBuffer.data;
-				unsigned int i;
-
-				if (length < NET_UNRELIABLE_FRAG_HEADER_BYTES)
-				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f recv unreliable-frag short addr %s len %u\n",
-						net_time, NET_QSocketGetAddressString (sock), (unsigned int)length);
-					continue;
-				}
-
-				frag_sequence = BigLong(*(unsigned int *)payload);
-				frag_index = BigShort(*(unsigned short *)(payload + 4));
-				frag_total = BigShort(*(unsigned short *)(payload + 6));
-				frag_payload_len = length - NET_UNRELIABLE_FRAG_HEADER_BYTES;
-
-				if (frag_total == 0 || frag_total > NET_UNRELIABLE_MAX_FRAGMENTS || frag_index >= frag_total)
-				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f recv unreliable-frag invalid addr %s seq %u frag %u/%u\n",
-						net_time, NET_QSocketGetAddressString (sock), frag_sequence,
-						(unsigned int)frag_index, (unsigned int)frag_total);
-					continue;
-				}
-
-				if (sock->unreliableFragActive && sock->unreliableFragSequence != frag_sequence)
-				{
-					NET_LogUnreliableFragLoss (sock, "sequence jump", false);
-					NET_ClearUnreliableFragState (sock);
-				}
-
-				if (!sock->unreliableFragActive)
-				{
-					sock->unreliableFragActive = true;
-					sock->unreliableFragSequence = frag_sequence;
-					sock->unreliableFragTotal = frag_total;
-					sock->unreliableFragReceived = 0;
-					sock->unreliableFragTotalBytes = 0;
-					sock->unreliableFragStartTime = net_time;
-					for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
-					{
-						if (sock->unreliableFragBuffers[i])
-						{
-							Z_Free (sock->unreliableFragBuffers[i]);
-							sock->unreliableFragBuffers[i] = NULL;
-						}
-						sock->unreliableFragSizes[i] = 0;
-						sock->unreliableFragReceivedMask[i] = 0;
-					}
-				}
-				else if (sock->unreliableFragTotal != frag_total)
-				{
-					NET_LogUnreliableFragLoss (sock, "total mismatch", false);
-					NET_ClearUnreliableFragState (sock);
-					continue;
-				}
-
-				if (sock->unreliableFragReceivedMask[frag_index])
-				{
-					continue;
-				}
-
-				sock->unreliableFragBuffers[frag_index] = (byte *)Z_Malloc (frag_payload_len);
-				Q_memcpy (sock->unreliableFragBuffers[frag_index],
-					payload + NET_UNRELIABLE_FRAG_HEADER_BYTES, frag_payload_len);
-				sock->unreliableFragSizes[frag_index] = (unsigned short)frag_payload_len;
-				sock->unreliableFragReceivedMask[frag_index] = 1;
-				sock->unreliableFragReceived++;
-				sock->unreliableFragTotalBytes += frag_payload_len;
-				net_debug_fragments_received++;
-
-				NET_DebugLog (false,
-					"NETDBG time %.3f recv unreliable-frag addr %s seq %u frag %u/%u len %u\n",
-					net_time, NET_QSocketGetAddressString (sock), frag_sequence,
-					(unsigned int)frag_index + 1, (unsigned int)frag_total, frag_payload_len);
-
-				if (sock->unreliableFragReceived == sock->unreliableFragTotal)
-				{
-					byte *assembled = (byte *)Z_Malloc (sock->unreliableFragTotalBytes);
-					unsigned int offset = 0;
-					qboolean missing = false;
-
-					for (i = 0; i < sock->unreliableFragTotal; ++i)
-					{
-						if (!sock->unreliableFragReceivedMask[i])
-						{
-							missing = true;
-							break;
-						}
-						Q_memcpy (assembled + offset, sock->unreliableFragBuffers[i],
-							sock->unreliableFragSizes[i]);
-						offset += sock->unreliableFragSizes[i];
-					}
-
-					if (missing)
-					{
-						Z_Free (assembled);
-						NET_LogUnreliableFragLoss (sock, "missing", false);
-						NET_ClearUnreliableFragState (sock);
-						continue;
-					}
-
-					SZ_Clear (&net_message);
-					SZ_Write (&net_message, assembled, sock->unreliableFragTotalBytes);
-					Z_Free (assembled);
-					// Q3MINI BEGIN
-					{
-						unsigned int before = (unsigned int)net_message.cursize;
-						int decomp = NET_DecompressPayload (sock, &net_message);
-						if (decomp < 0)
-						{
-							NET_DebugLog (true,
-								"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
-								net_time, NET_QSocketGetAddressString (sock), frag_sequence);
-							NET_ClearUnreliableFragState (sock);
-							ret = 0;
-							break;
-						}
-						if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
-						{
-							NET_DebugLogEvent (false,
-								"NETDBG time %.3f compress_recv unreliable-frag addr %s orig %u decomp %u ratio %.2f\n",
-								net_time, NET_QSocketGetAddressString (sock), before,
-								(unsigned int)net_message.cursize,
-								net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
-						}
-					}
-					// Q3MINI END
-
-					net_last_incoming.sequence = frag_sequence;
-					net_last_incoming.flags = flags;
-					net_last_incoming.packet_length = NET_HEADERSIZE + sock->unreliableFragTotalBytes;
-					net_last_incoming.payload_length = (unsigned int)net_message.cursize;
-					net_last_incoming.unreliable = true;
-					net_last_incoming.valid = true;
-
-					NET_DebugLog (false,
-						"NETDBG time %.3f recv unreliable-frag complete addr %s seq %u payload %u frags %u\n",
-						net_time, NET_QSocketGetAddressString (sock), frag_sequence,
-						sock->unreliableFragTotalBytes, (unsigned int)sock->unreliableFragTotal);
-
-					NET_ClearUnreliableFragState (sock);
-					ret = 2;
-					break;
-				}
-
-				continue;
-			}
-
 			SZ_Clear (&net_message);
 			SZ_Write (&net_message, packetBuffer.data, length);
-			// Q3MINI BEGIN
-			{
-				unsigned int before = (unsigned int)net_message.cursize;
-				int decomp = NET_DecompressPayload (sock, &net_message);
-				if (decomp < 0)
-				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
-						net_time, NET_QSocketGetAddressString (sock), sequence);
-					continue;
-				}
-				if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
-				{
-					NET_DebugLogEvent (false,
-						"NETDBG time %.3f compress_recv unreliable addr %s orig %u decomp %u ratio %.2f\n",
-						net_time, NET_QSocketGetAddressString (sock), before,
-						(unsigned int)net_message.cursize,
-						net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
-				}
-			}
-			// Q3MINI END
 
-			net_last_incoming.sequence = sequence;
-			net_last_incoming.flags = flags;
-			net_last_incoming.packet_length = (unsigned int)packetLengthRead;
-			net_last_incoming.payload_length = (unsigned int)net_message.cursize;
-			net_last_incoming.unreliable = true;
-			net_last_incoming.valid = true;
-
-			NET_DebugLog (false,
-				"NETDBG time %.3f recv unreliable message addr %s seq %u payload %u packet %u\n",
-				net_time, NET_QSocketGetAddressString (sock), sequence,
-				(unsigned int)length, (unsigned int)packetLengthRead);
 			ret = 2;
 			break;
 		}
 
 		if (flags & NETFLAG_ACK)
 		{
-			if (!(flags & (NETFLAG_DATA | NETFLAG_UNRELIABLE)))
+			if (sequence != (sock->sendSequence - 1))
+			{
+				Con_DPrintf("Stale ACK received\n");
 				continue;
+			}
+			if (sequence == sock->ackSequence)
+			{
+				sock->ackSequence++;
+				if (sock->ackSequence != sock->sendSequence)
+					Con_DPrintf("ack sequencing error\n");
+			}
+			else
+			{
+				Con_DPrintf("Duplicate ACK received\n");
+				continue;
+			}
+			sock->sendMessageLength -= MAX_DATAGRAM;
+			if (sock->sendMessageLength > 0)
+			{
+				memmove (sock->sendMessage, sock->sendMessage + MAX_DATAGRAM, sock->sendMessageLength);
+				sock->sendNext = true;
+			}
+			else
+			{
+				sock->sendMessageLength = 0;
+				sock->canSend = true;
+			}
+			continue;
 		}
 
 		if (flags & NETFLAG_DATA)
 		{
-			net_reliable_receive_t *entry;
-			unsigned int window_offset;
-
-			if (NET_SequenceLessThan(sequence, sock->receiveSequence))
-			{
-				NET_UpdateReceiveAckState(sock, sequence);
-				receivedDuplicateCount++;
-				NET_SetPacketHeader(sock, NET_HEADERSIZE, NETFLAG_ACK, 0);
-				sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
-				NET_DebugLog (false,
-					"NETDBG time %.3f recv duplicate reliable addr %s seq %u expected %u\n",
-					net_time, NET_QSocketGetAddressString (sock), sequence,
-					sock->receiveSequence);
-				continue;
-			}
-
-			window_offset = sequence - sock->receiveSequence;
-			if (window_offset >= NET_RELIABLE_WINDOW)
-			{
-				NET_DebugLog (true,
-					"NETDBG time %.3f recv reliable out of window addr %s seq %u base %u window %u\n",
-					net_time, NET_QSocketGetAddressString (sock), sequence,
-					sock->receiveSequence, (unsigned int)NET_RELIABLE_WINDOW);
-				continue;
-			}
-
-			NET_UpdateReceiveAckState(sock, sequence);
-
-			length -= NET_HEADERSIZE;
-			if (length > MAX_DATAGRAM)
-			{
-				Con_DPrintf("NET_GetMessage: reliable packet too large (%u)\n", length);
-				NET_DebugLog (true,
-					"NETDBG time %.3f recv reliable too large addr %s len %u cap %u\n",
-					net_time, NET_QSocketGetAddressString (sock), length,
-					(unsigned int)MAX_DATAGRAM);
-				continue;
-			}
-
-			entry = &sock->reliableReceive[sequence % NET_RELIABLE_WINDOW];
-			if (entry->received && entry->sequence == sequence)
-			{
-				receivedDuplicateCount++;
-				NET_DebugLog (false,
-					"NETDBG time %.3f recv reliable duplicate entry addr %s seq %u\n",
-					net_time, NET_QSocketGetAddressString (sock), sequence);
-			}
-			else
-			{
-				NET_ClearReliableReceiveEntry(entry);
-				entry->sequence = sequence;
-				entry->length = (int)length;
-				entry->eom = (flags & NETFLAG_EOM) != 0;
-				entry->received = true;
-				entry->data = (byte *)Z_Malloc(length);
-				Q_memcpy(entry->data, packetBuffer.data, length);
-			}
-
-			NET_SetPacketHeader(sock, NET_HEADERSIZE, NETFLAG_ACK, 0);
+			packetBuffer.length = BigLong(NET_HEADERSIZE | NETFLAG_ACK);
+			packetBuffer.sequence = BigLong(sequence);
 			sfunc.Write (sock->socket, (byte *)&packetBuffer, NET_HEADERSIZE, &readaddr);
 
-			while (1)
+			if (sequence != sock->receiveSequence)
 			{
-				unsigned int message_sequence;
-				entry = &sock->reliableReceive[sock->receiveSequence % NET_RELIABLE_WINDOW];
-				if (!entry->received || entry->sequence != sock->receiveSequence)
-					break;
+				receivedDuplicateCount++;
+				continue;
+			}
+			sock->receiveSequence++;
 
-				if (sock->receiveMessageLength + entry->length > MAX_RELIABLE_QUEUE_BYTES)
-				{
-					Con_DPrintf("NET_GetMessage: reliable message overflow (%u + %u)\n",
-						sock->receiveMessageLength, entry->length);
-					NET_DebugLog (true,
-						"NETDBG time %.3f recv reliable overflow addr %s queue %u + %u limit %u\n",
-						net_time, NET_QSocketGetAddressString (sock),
-						sock->receiveMessageLength, entry->length,
-						(unsigned int)MAX_RELIABLE_QUEUE_BYTES);
-					sock->receiveMessageLength = 0;
-					message_sequence = entry->sequence;
-					NET_ClearReliableReceiveEntry(entry);
-					sock->receiveSequence++;
-					continue;
-				}
+			length -= NET_HEADERSIZE;
 
-				Q_memcpy(sock->receiveMessage + sock->receiveMessageLength, entry->data, entry->length);
-				sock->receiveMessageLength += entry->length;
-				message_sequence = entry->sequence;
+			if (flags & NETFLAG_EOM)
+			{
+				SZ_Clear(&net_message);
+				SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
+				SZ_Write(&net_message, packetBuffer.data, length);
+				sock->receiveMessageLength = 0;
 
-				if (entry->eom)
-				{
-					SZ_Clear(&net_message);
-					SZ_Write(&net_message, sock->receiveMessage, sock->receiveMessageLength);
-					sock->receiveMessageLength = 0;
-					// Q3MINI BEGIN
-					{
-						unsigned int before = (unsigned int)net_message.cursize;
-						int decomp = NET_DecompressPayload (sock, &net_message);
-						if (decomp < 0)
-						{
-							NET_DebugLog (true,
-								"NETDBG time %.3f compress_recv drop addr %s seq %u\n",
-								net_time, NET_QSocketGetAddressString (sock), message_sequence);
-							NET_ClearReliableReceiveEntry(entry);
-							sock->receiveSequence++;
-							continue;
-						}
-						if (decomp > 0 && net_dbg_q3mini.value > 0.0f && net_compress_debug.value > 0.0f)
-						{
-							NET_DebugLogEvent (false,
-								"NETDBG time %.3f compress_recv reliable addr %s orig %u decomp %u ratio %.2f\n",
-								net_time, NET_QSocketGetAddressString (sock), before,
-								(unsigned int)net_message.cursize,
-								net_message.cursize ? (float)net_message.cursize / (float)before : 0.0f);
-						}
-					}
-					// Q3MINI END
-
-					net_last_incoming.sequence = message_sequence;
-					net_last_incoming.flags = NETFLAG_DATA | NETFLAG_EOM;
-					net_last_incoming.packet_length = NET_HEADERSIZE + (unsigned int)entry->length;
-					net_last_incoming.payload_length = (unsigned int)(net_message.cursize);
-					net_last_incoming.unreliable = false;
-					net_last_incoming.valid = true;
-
-					NET_DebugLog (false,
-						"NETDBG time %.3f recv reliable message addr %s seq %u payload %u\n",
-						net_time, NET_QSocketGetAddressString (sock), message_sequence,
-						(unsigned int)net_message.cursize);
-					NET_ClearReliableReceiveEntry(entry);
-					sock->receiveSequence++;
-					ret = 1;
-					break;
-				}
-
-				NET_ClearReliableReceiveEntry(entry);
-				sock->receiveSequence++;
+				ret = 1;
+				break;
 			}
 
-			if (ret == 1)
-				break;
+			Q_memcpy(sock->receiveMessage + sock->receiveMessageLength, packetBuffer.data, length);
+			sock->receiveMessageLength += length;
 			continue;
 		}
 	}
+
+	if (sock->sendNext)
+		SendMessageNext (sock);
 
 	return ret;
 }
@@ -2020,10 +867,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	int			command;
 	int			control;
 	int			ret;
-	// Q3MINI BEGIN
-	unsigned int	client_features = 0;
-	unsigned int	accepted_features = 0;
-	// Q3MINI END
 
 	acceptsock = dfunc.CheckNewConnections();
 	if (acceptsock == INVALID_SOCKET)
@@ -2040,47 +883,13 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	control = BigLong(*((int *)net_message.data));
 	MSG_ReadLong();
 	if (control == -1)
-	{
-		const char *request = MSG_ReadString();
-
-		if (!q_strncasecmp(request, "status", 6) ||
-			!q_strncasecmp(request, "info", 4) ||
-			!q_strncasecmp(request, "A2A_INFO", 8))
-		{
-			char reply[MAX_MSGLEN];
-
-			q_snprintf (reply, sizeof (reply),
-					"\\hostname\\%s\\map\\%s\\players\\%d\\max\\%d",
-					hostname.string, sv.name, net_activeconnections, svs.maxclients);
-
-			SZ_Clear(&net_message);
-			MSG_WriteLong(&net_message, -1);
-			MSG_WriteString(&net_message, "statusResponse");
-			MSG_WriteString(&net_message, reply);
-			dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-			NET_DebugLog (false,
-				"NETDBG time %.3f handshake status_reply addr %s reply_len %u\n",
-				net_time, dfunc.AddrToString (&clientaddr),
-				(unsigned int)net_message.cursize);
-			SZ_Clear(&net_message);
-		}
-		else
-		{
-			NET_DebugLog (false,
-				"NETDBG time %.3f handshake info request addr %s request %s\n",
-				net_time, dfunc.AddrToString (&clientaddr), request);
-		}
 		return NULL;
-	}
 	if ((control & (~NETFLAG_LENGTH_MASK)) != (int)NETFLAG_CTL)
 		return NULL;
 	if ((control & NETFLAG_LENGTH_MASK) != len)
 		return NULL;
 
 	command = MSG_ReadByte();
-	NET_DebugLog (false,
-		"NETDBG time %.3f handshake ctl addr %s cmd %d len %d\n",
-		net_time, dfunc.AddrToString (&clientaddr), command, len);
 	if (command == CCREQ_SERVER_INFO)
 	{
 		if (Q_strcmp(MSG_ReadString(), "QUAKE") != 0)
@@ -2099,9 +908,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		NET_DebugLog (false,
-			"NETDBG time %.3f handshake server_info reply addr %s players %d/%d\n",
-			net_time, dfunc.AddrToString (&clientaddr), net_activeconnections, svs.maxclients);
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -2141,9 +947,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, client->netconnection->address);
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		NET_DebugLog (false,
-			"NETDBG time %.3f handshake player_info reply addr %s player %d\n",
-			net_time, dfunc.AddrToString (&clientaddr), playerNumber);
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -2170,10 +973,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		}
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		NET_DebugLog (false,
-			"NETDBG time %.3f handshake rule_info reply addr %s name %s\n",
-			net_time, dfunc.AddrToString (&clientaddr),
-			var ? var->name : "<none>");
 		SZ_Clear(&net_message);
 
 		return NULL;
@@ -2194,16 +993,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, "Incompatible version.\n");
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake reject addr %s reason incompatible_version\n",
-			net_time, dfunc.AddrToString (&clientaddr));
 		SZ_Clear(&net_message);
 		return NULL;
 	}
-	// Q3MINI BEGIN
-	if (msg_readcount + 4 <= net_message.cursize)
-		client_features = (unsigned int)MSG_ReadLong();
-	// Q3MINI END
 
 #ifdef BAN_TEST
 	// check for a ban
@@ -2246,10 +1038,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 				MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
 				*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 				dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-				NET_DebugLog (false,
-					"NETDBG time %.3f handshake duplicate accept addr %s port %d\n",
-					net_time, dfunc.AddrToString (&clientaddr),
-					dfunc.GetSocketPort(&newaddr));
 				SZ_Clear(&net_message);
 				return NULL;
 			}
@@ -2271,9 +1059,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 		MSG_WriteString(&net_message, "Server is full.\n");
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake reject addr %s reason server_full\n",
-			net_time, dfunc.AddrToString (&clientaddr));
 		SZ_Clear(&net_message);
 		return NULL;
 	}
@@ -2291,9 +1076,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	{
 		dfunc.Close_Socket(newsock);
 		NET_FreeQSocket(sock);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake connect_failed addr %s\n",
-			net_time, dfunc.AddrToString (&clientaddr));
 		return NULL;
 	}
 
@@ -2302,13 +1084,6 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	sock->landriver = net_landriverlevel;
 	sock->addr = clientaddr;
 	Q_strcpy(sock->address, dfunc.AddrToString(&clientaddr));
-	// Q3MINI BEGIN
-	if (net_compress.value > 0.0f
-		&& (client_features & NETFEATURE_Q3MINI_COMPRESS)
-		&& !cls.demoplayback && !cls.demorecording)
-		accepted_features |= NETFEATURE_Q3MINI_COMPRESS;
-	sock->features = accepted_features;
-	// Q3MINI END
 
 	// send him back the info about the server connection he has been allocated
 	SZ_Clear(&net_message);
@@ -2317,17 +1092,9 @@ static qsocket_t *_Datagram_CheckNewConnections (void)
 	MSG_WriteByte(&net_message, CCREP_ACCEPT);
 	dfunc.GetSocketAddr(newsock, &newaddr);
 	MSG_WriteLong(&net_message, dfunc.GetSocketPort(&newaddr));
-	// Q3MINI BEGIN
-	if (client_features || accepted_features)
-		MSG_WriteLong(&net_message, (int)accepted_features);
-	// Q3MINI END
 //	MSG_WriteString(&net_message, dfunc.AddrToString(&newaddr));
 	*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 	dfunc.Write (acceptsock, net_message.data, net_message.cursize, &clientaddr);
-	NET_DebugLog (false,
-		"NETDBG time %.3f handshake accept addr %s port %d\n",
-		net_time, dfunc.AddrToString (&clientaddr),
-		dfunc.GetSocketPort(&newaddr));
 	SZ_Clear(&net_message);
 
 	return sock;
@@ -2474,9 +1241,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	double		start_time;
 	int			control;
 	const char		*reason;
-	// Q3MINI BEGIN
-	unsigned int	request_features = 0;
-	// Q3MINI END
 
 	// see if we can resolve the host name
 	if (dfunc.GetAddrFromName(host, &sendaddr) == -1)
@@ -2512,17 +1276,8 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		MSG_WriteByte(&net_message, CCREQ_CONNECT);
 		MSG_WriteString(&net_message, "QUAKE");
 		MSG_WriteByte(&net_message, NET_PROTOCOL_VERSION);
-		// Q3MINI BEGIN
-		if (net_compress.value > 0.0f && !cls.demoplayback && !cls.demorecording)
-			request_features |= NETFEATURE_Q3MINI_COMPRESS;
-		if (request_features)
-			MSG_WriteLong(&net_message, (int)request_features);
-		// Q3MINI END
 		*((int *)net_message.data) = BigLong(NETFLAG_CTL | (net_message.cursize & NETFLAG_LENGTH_MASK));
 		dfunc.Write (newsock, net_message.data, net_message.cursize, &sendaddr);
-		NET_DebugLog (false,
-			"NETDBG time %.3f handshake connect request addr %s attempt %d\n",
-			net_time, dfunc.AddrToString (&sendaddr), reps + 1);
 		SZ_Clear(&net_message);
 		do
 		{
@@ -2536,9 +1291,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 					Con_Printf("wrong reply address\n");
 					Con_Printf("Expected: %s | %s\n", dfunc.AddrToString (&sendaddr), StrAddr(&sendaddr));
 					Con_Printf("Received: %s | %s\n", dfunc.AddrToString (&readaddr), StrAddr(&readaddr));
-					NET_DebugLog (true,
-						"NETDBG time %.3f handshake reply wrong addr expected %s got %s\n",
-						net_time, dfunc.AddrToString (&sendaddr), dfunc.AddrToString (&readaddr));
 					SCR_UpdateScreen ();
 					ret = 0;
 					continue;
@@ -2557,26 +1309,16 @@ static qsocket_t *_Datagram_Connect (const char *host)
 				MSG_ReadLong();
 				if (control == -1)
 				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f handshake reply invalid control -1 addr %s\n",
-						net_time, dfunc.AddrToString (&readaddr));
 					ret = 0;
 					continue;
 				}
 				if ((control & (~NETFLAG_LENGTH_MASK)) != (int)NETFLAG_CTL)
 				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f handshake reply invalid control flags addr %s control 0x%x\n",
-						net_time, dfunc.AddrToString (&readaddr), control);
 					ret = 0;
 					continue;
 				}
 				if ((control & NETFLAG_LENGTH_MASK) != ret)
 				{
-					NET_DebugLog (true,
-						"NETDBG time %.3f handshake reply length mismatch addr %s control_len %d read %d\n",
-						net_time, dfunc.AddrToString (&readaddr),
-						control & NETFLAG_LENGTH_MASK, ret);
 					ret = 0;
 					continue;
 				}
@@ -2597,9 +1339,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "No Response";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake no response addr %s\n",
-			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -2608,9 +1347,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "Network Error";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake network error addr %s\n",
-			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -2620,9 +1356,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = MSG_ReadString();
 		Con_Printf("%s\n", reason);
 		q_strlcpy(m_return_reason, reason, sizeof(m_return_reason));
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake rejected addr %s reason %s\n",
-			net_time, dfunc.AddrToString (&sendaddr), reason);
 		goto ErrorReturn;
 	}
 
@@ -2630,22 +1363,12 @@ static qsocket_t *_Datagram_Connect (const char *host)
 	{
 		Q_memcpy(&sock->addr, &sendaddr, sizeof(struct qsockaddr));
 		dfunc.SetSocketPort (&sock->addr, MSG_ReadLong());
-		// Q3MINI BEGIN
-		if (msg_readcount + 4 <= net_message.cursize)
-			sock->features = (unsigned int)MSG_ReadLong();
-		// Q3MINI END
-		NET_DebugLog (false,
-			"NETDBG time %.3f handshake accepted addr %s port %d\n",
-			net_time, dfunc.AddrToString (&sendaddr), dfunc.GetSocketPort (&sock->addr));
 	}
 	else
 	{
 		reason = "Bad Response";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake bad response addr %s\n",
-			net_time, dfunc.AddrToString (&sendaddr));
 		goto ErrorReturn;
 	}
 
@@ -2660,9 +1383,6 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		reason = "Connect to Game failed";
 		Con_Printf("%s\n", reason);
 		Q_strcpy(m_return_reason, reason);
-		NET_DebugLog (true,
-			"NETDBG time %.3f handshake connect failed addr %s\n",
-			net_time, dfunc.AddrToString (&sock->addr));
 		goto ErrorReturn;
 	}
 
@@ -2698,3 +1418,4 @@ qsocket_t *Datagram_Connect (const char *host)
 	}
 	return ret;
 }
+

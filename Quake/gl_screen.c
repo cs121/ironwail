@@ -25,13 +25,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_fogvol.h"
-#include "r_godray_emit.h"
 #include "steam.h"
 #include <time.h>
 
 extern cvar_t r_autoexposure;
 extern cvar_t r_exposure_debug;
-extern cvar_t r_godrays_debug;
 extern float r_autoexposure_debug_exposure;
 extern float r_autoexposure_debug_luminance;
 
@@ -1053,35 +1051,6 @@ void SCR_DrawExposureDebug (void)
 	Draw_String (x, (y++) * 8 - x, str);
 
 	sprintf (str, "AutoExp  %s", r_autoexposure.value > 0.f ? "on" : "off");
-	Draw_String (x, (y++) * 8 - x, str);
-}
-
-/*
-==============
-SCR_DrawGodraysDebug
-==============
-*/
-void SCR_DrawGodraysDebug (void)
-{
-	char str[64];
-	int y = 25 - 4;
-	int x = 0;
-	const godray_emitter_stats_t *stats;
-
-	if (r_godrays_debug.value <= 0.f)
-		return;
-
-	stats = R_GodrayEmitters_GetStats ();
-	if (!stats)
-		return;
-
-	GL_SetCanvas (CANVAS_BOTTOMLEFT);
-
-	snprintf (str, sizeof (str), "godrays emitters: %d", stats->total);
-	Draw_String (x, (y++) * 8 - x, str);
-	snprintf (str, sizeof (str), "found %d culled %d clamp %d", stats->found, stats->culled, stats->clamped);
-	Draw_String (x, (y++) * 8 - x, str);
-	snprintf (str, sizeof (str), "rendered vol %d fx %d", stats->rendered_volume, stats->rendered_postfx);
 	Draw_String (x, (y++) * 8 - x, str);
 }
 
@@ -2183,8 +2152,6 @@ void SCR_UpdateScreen (void)
 
        V_PolyBlend ();
 
-	CL_JitterDebug_Log ();
-
        R_StorePrevFrameState ();
 
 	GL_BeginGroup ("2D");
@@ -2231,7 +2198,6 @@ void SCR_UpdateScreen (void)
 		Sbar_Draw ();
 		SCR_DrawDevStats (); //johnfitz
 		SCR_DrawExposureDebug ();
-		SCR_DrawGodraysDebug ();
 		SCR_DrawClock (); //johnfitz
 		SCR_DrawDemoControls ();
 		SCR_DrawSpeed ();

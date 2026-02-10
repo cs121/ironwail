@@ -24,10 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
-#include "renderer_backend.h"
 #include "r_fogvol.h"
-#include "r_godray_emit.h"
-#include "r_godrayvol.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -198,7 +195,6 @@ vec3_t	r_origin;
 
 float r_fovx, r_fovy; //johnfitz -- rendering fov may be different becuase of r_waterwarp and r_stereo
 qboolean water_warp;
-static qboolean r_underwater_dof_active = false;
 
 extern byte* SV_FatPVS (vec3_t org, qmodel_t* worldmodel);
 extern qboolean SV_EdictInPVS (edict_t* test, byte* pvs);
@@ -305,8 +301,8 @@ cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.02", CVAR_ARCHIVE };
 cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.25", CVAR_ARCHIVE };
 cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "8.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
-cvar_t	r_exposure_min = { "r_exposure_min", "0.25", CVAR_ARCHIVE };
-cvar_t	r_exposure_max = { "r_exposure_max", "8.0", CVAR_ARCHIVE };
+cvar_t	r_exposure_min = { "r_exposure_min", "0.85", CVAR_ARCHIVE };
+cvar_t	r_exposure_max = { "r_exposure_max", "1.15", CVAR_ARCHIVE };
 cvar_t	r_exposure_speed_up = { "r_exposure_speed_up", "0.6", CVAR_ARCHIVE };
 cvar_t	r_exposure_speed_down = { "r_exposure_speed_down", "0.3", CVAR_ARCHIVE };
 cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
@@ -411,10 +407,10 @@ cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_enable = { "r_godrays_sky_enable", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_threshold = { "r_godrays_sky_threshold", "0.05", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_intensity_scale = { "r_godrays_sky_intensity_scale", "1.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_blur = { "r_godrays_sky_blur", "1.5", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_threshold = { "r_godray_sky_threshold", "0.05", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_intensity = { "r_godray_sky_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_blur = { "r_godray_sky_blur", "1.5", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
@@ -484,12 +480,6 @@ cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
 cvar_t	gl_overbright_models = { "gl_overbright_models", "0", CVAR_ARCHIVE };
 cvar_t	r_model_halflambert = { "r_model_halflambert", "0", CVAR_ARCHIVE };
-cvar_t	r_rim = { "r_rim", "0", CVAR_ARCHIVE };
-cvar_t	r_rim_power = { "r_rim_power", "3.0", CVAR_ARCHIVE };
-cvar_t	r_rim_strength = { "r_rim_strength", "0.35", CVAR_ARCHIVE };
-cvar_t	r_rim_lightscale = { "r_rim_lightscale", "1.0", CVAR_ARCHIVE };
-cvar_t	r_rim_ambientscale = { "r_rim_ambientscale", "0.15", CVAR_ARCHIVE };
-cvar_t	r_rim_debug = { "r_rim_debug", "0", CVAR_NONE };
 cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
 cvar_t	r_drawworld = { "r_drawworld", "1", CVAR_NONE };
@@ -572,19 +562,15 @@ static float R_GetDynamicDoFFocus (float fallback)
 	if (sv.active)
 	{
 		extern edict_t* sv_player;
+		qcvm_t* oldvm = qcvm;
 
-		if (sv_player)
-		{
-			qcvm_t* oldvm = qcvm;
+		PR_SwitchQCVM (NULL);
+		PR_SwitchQCVM (&sv.qcvm);
 
-			PR_SwitchQCVM (NULL);
-			PR_SwitchQCVM (&sv.qcvm);
+		trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
+		traced = true;
 
-			trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
-			traced = true;
-
-			PR_SwitchQCVM (oldvm);
-		}
+		PR_SwitchQCVM (oldvm);
 	}
 
 	if (!traced)
@@ -628,7 +614,7 @@ static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean
 //
 //==============================================================================
 
-glframebufs_t framebufs = {0};
+glframebufs_t framebufs;
 
 #define SSAO_MAX_SAMPLES 32
 // SSAO FIX: Use a larger noise tile to reduce visible tiling in half-res AO.
@@ -731,7 +717,6 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, 
 		Sys_Error ("GL_CreateFBO: too many color buffers (%d)", numcolors);
 
 	GL_GenFramebuffersFunc (1, &fbo);
-	Con_DPrintf ("GL_CreateFBO: %s id=%u\n", name ? name : "(unnamed)", fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, fbo, -1, name);
 	GL_LogErrorIfDeveloper ("GL_CreateFBO bind");
@@ -833,16 +818,12 @@ void GL_CreateFrameBuffers (void)
 	framebufs.godrays.width = q_max (1, vid.width / 2);
 	framebufs.godrays.height = q_max (1, vid.height / 2);
 	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_LINEAR, "godrays source");
-	framebufs.godrays.dir_tex = GL_CreateTexture2D (GL_RG16F, vid.width, vid.height, GL_LINEAR, "godrays dir");
 	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
 	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
-	{
-		GLuint colors[2] = { framebufs.godrays.source_tex, framebufs.godrays.dir_tex };
-		framebufs.godrays.source_fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2,
-			framebufs.composite.depth_stencil_tex,
-			framebufs.composite.depth_stencil_tex,
-			"godrays source fbo");
-	}
+	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
+		framebufs.composite.depth_stencil_tex,
+		framebufs.composite.depth_stencil_tex,
+		"godrays source fbo");
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
@@ -850,10 +831,6 @@ void GL_CreateFrameBuffers (void)
 	framebufs.ssao.height[0] = vid.height;
 	framebufs.ssao.width[1] = q_max (1, vid.width / 2);
 	framebufs.ssao.height[1] = q_max (1, vid.height / 2);
-#ifndef NDEBUG
-	if (!VID_GLContextIsCurrent ())
-		Sys_Error ("SSAO framebuffer init requires an active GL context.");
-#endif
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
@@ -862,8 +839,6 @@ void GL_CreateFrameBuffers (void)
 		int width = framebufs.ssao.width[i];
 		int height = framebufs.ssao.height[i];
 		const char *suffix = (i == 0) ? "full" : "half";
-		framebufs.ssao.ao_fbo[i] = 0;
-		framebufs.ssao.blur_fbo[i] = 0;
 		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao %s", suffix));
 		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao blur %s", suffix));
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
@@ -989,7 +964,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
-	GL_DeleteNativeTexture (framebufs.godrays.dir_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
@@ -1299,11 +1273,6 @@ static float R_SanitizeSSAOValue (float value, float fallback, float minval, flo
 
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
-	if (!VID_GLContextIsCurrent ())
-	{
-		Con_Warning ("SSAO skipped: no current GL context.\n");
-		return 0;
-	}
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
 		return 0;
 	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
@@ -1358,20 +1327,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		ssao_logged = true;
 	}
 
-	while (glGetError () != GL_NO_ERROR) {}
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
-#ifndef NDEBUG
-	{
-		static qboolean ssao_fbo_validated = false;
-		if (!ssao_fbo_validated)
-		{
-			if (framebufs.ssao.ao_fbo[index] != 0 && !glIsFramebuffer (framebufs.ssao.ao_fbo[index]))
-				Con_Warning ("SSAO FBO invalid: %u\n", framebufs.ssao.ao_fbo[index]);
-			ssao_fbo_validated = true;
-		}
-	}
-#endif
 	GL_LogErrorIfDeveloper ("SSAO bind FBO");
 	{
 		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
@@ -1626,7 +1583,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 {
 	int width = vid.width;
 	int height = vid.height;
-	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0 || framebufs.godrays.dir_tex == 0)
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return;
 	if (!draw_sky && !draw_brush)
 		return;
@@ -1637,15 +1594,13 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
-		const float clear_dir[4] = { 0.5f, 0.5f, 0.f, 1.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
-		GL_ClearBufferfvFunc (GL_COLOR, 1, clear_dir);
 	}
 
 	if (draw_sky && glprogs.godrays_source_sky)
 	{
-		float sky_intensity = q_max (0.f, r_godrays_sky_intensity_scale.value) * q_max (0.f, r_godrays_sky_intensity.value);
-		float sky_threshold = q_max (0.f, r_godrays_sky_threshold.value);
+		float sky_intensity = q_max (0.f, r_godray_sky_intensity.value) * q_max (0.f, r_godrays_sky_intensity.value);
+		float sky_threshold = q_max (0.f, r_godray_sky_threshold.value);
 		if (sky_intensity > 0.f)
 		{
 			vec3_t tint;
@@ -1676,7 +1631,6 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 				q_max (0.f, r_godrays_emissive_threshold.value),
 				q_max (0.f, r_godrays_light_threshold.value));
 			GL_Uniform4fFunc (1, mask_knee, 0.f, 0.f, 0.f);
-			GL_Uniform2fFunc (2, (float)width, (float)height);
 			R_DrawBrushModels_Godrays (ents, count);
 		}
 	}
@@ -1697,14 +1651,12 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
 		return fallback;
-	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0 || framebufs.godrays.dir_tex == 0)
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return fallback;
 	if (!R_GodraysReady ())
 		return fallback;
-	if ((int)CLAMP (0, (int)Q_rint (r_godrays_mode.value), 2) == 1)
-		return fallback;
 
-	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godrays_sky_enable.value > 0.f && glprogs.godrays_source_sky);
+	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
@@ -1725,86 +1677,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
-	float inv_viewproj[16];
-	vec3_t light_dir;
-	vec3_t emitter_normal;
-	GLuint depth_tex = framebufs.composite.depth_stencil_tex;
-	vec4_t emitter_centers[MAX_GODRAY_POSTFX_EMITTERS];
-	vec4_t emitter_dirs[MAX_GODRAY_POSTFX_EMITTERS];
-	vec4_t emitter_colors[MAX_GODRAY_POSTFX_EMITTERS];
-	int total_emitters = 0;
-	int volume_emitters = 0;
-	int postfx_emitters = 0;
-	const godray_emitter_t *emitters = R_GodrayEmitters_GetList (&total_emitters);
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
-	if (!MatrixInverse4x4 (r_matviewproj, inv_viewproj))
-		memcpy (inv_viewproj, r_identity_mat4, sizeof (inv_viewproj));
-	VectorCopy (r_framedata.shadow_sun_dir, light_dir);
-	if (VectorNormalize (light_dir) <= 0.f)
-		VectorSet (light_dir, 0.f, 0.f, -1.f);
-	VectorSet (emitter_normal, 0.f, 0.f, 1.f);
-
-	R_GodrayEmitters_GetRenderCounts (&volume_emitters, &postfx_emitters);
-	postfx_emitters = q_min (postfx_emitters, MAX_GODRAY_POSTFX_EMITTERS);
-	if (volume_emitters + postfx_emitters > total_emitters)
-		postfx_emitters = q_max (0, total_emitters - volume_emitters);
-	for (int i = 0; i < postfx_emitters; ++i)
-	{
-		const godray_emitter_t *emitter = &emitters[volume_emitters + i];
-		vec3_t center_proj;
-		vec3_t dir_proj;
-		vec3_t center_ss;
-		vec3_t dir_ss;
-		vec3_t end_ws;
-		vec3_t end_proj;
-		float dir_len2;
-
-		ProjectVector (emitter->center_ws, r_matviewproj, center_proj);
-		center_ss[0] = CLAMP (0.f, center_proj[0] * 0.5f + 0.5f, 1.f);
-		center_ss[1] = CLAMP (0.f, center_proj[1] * 0.5f + 0.5f, 1.f);
-		center_ss[2] = 0.f;
-
-		VectorMA (emitter->center_ws, 16.f, emitter->ray_dir_ws, end_ws);
-		ProjectVector (end_ws, r_matviewproj, dir_proj);
-		dir_ss[0] = dir_proj[0] * 0.5f + 0.5f - center_ss[0];
-		dir_ss[1] = dir_proj[1] * 0.5f + 0.5f - center_ss[1];
-		dir_ss[2] = 0.f;
-		dir_len2 = dir_ss[0] * dir_ss[0] + dir_ss[1] * dir_ss[1];
-		if (dir_len2 > 1e-6f)
-		{
-			float inv_len = 1.f / sqrtf (dir_len2);
-			dir_ss[0] *= inv_len;
-			dir_ss[1] *= inv_len;
-		}
-		else
-		{
-			dir_ss[0] = 1.f;
-			dir_ss[1] = 0.f;
-		}
-
-		VectorMA (emitter->center_ws, emitter->ray_length, emitter->ray_dir_ws, end_ws);
-		ProjectVector (end_ws, r_matviewproj, end_proj);
-		float end_ss_x = end_proj[0] * 0.5f + 0.5f;
-		float end_ss_y = end_proj[1] * 0.5f + 0.5f;
-		float max_radius_ss = sqrtf ((end_ss_x - center_ss[0]) * (end_ss_x - center_ss[0])
-			+ (end_ss_y - center_ss[1]) * (end_ss_y - center_ss[1]));
-
-		emitter_centers[i][0] = center_ss[0];
-		emitter_centers[i][1] = center_ss[1];
-		emitter_centers[i][2] = CLAMP (0.f, max_radius_ss, 1.f);
-		emitter_centers[i][3] = emitter->intensity;
-		emitter_dirs[i][0] = dir_ss[0];
-		emitter_dirs[i][1] = dir_ss[1];
-		emitter_dirs[i][2] = 0.f;
-		emitter_dirs[i][3] = 0.f;
-		emitter_colors[i][0] = emitter->color[0];
-		emitter_colors[i][1] = emitter->color[1];
-		emitter_colors[i][2] = emitter->color[2];
-		emitter_colors[i][3] = 1.f;
-	}
-	if (postfx_emitters <= 0)
-		emit_brush = false;
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
@@ -1817,7 +1691,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 	{
 		qboolean first_pass = true;
-		float sky_softness = R_SanitizeGodraysValue (r_godrays_sky_blur.value, 1.5f, 0.f, FLT_MAX);
+		float sky_softness = R_SanitizeGodraysValue (r_godray_sky_blur.value, 1.5f, 0.f, FLT_MAX);
 		if (sky_softness <= 0.f)
 			sky_softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
 
@@ -1848,15 +1722,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-			GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
-			GL_UniformMatrix4fvFunc (2, 1, GL_FALSE, inv_viewproj);
-			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
-			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
-			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
-			GL_Uniform1iFunc (12, 0);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
@@ -1889,21 +1756,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
-			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-			GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.godrays.dir_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
-			GL_UniformMatrix4fvFunc (2, 1, GL_FALSE, inv_viewproj);
-			GL_UniformMatrix4fvFunc (6, 1, GL_FALSE, r_matviewproj);
-			GL_Uniform3fFunc (10, light_dir[0], light_dir[1], light_dir[2]);
-			GL_Uniform3fFunc (11, emitter_normal[0], emitter_normal[1], emitter_normal[2]);
-			GL_Uniform1iFunc (12, postfx_emitters);
-			if (postfx_emitters > 0)
-			{
-				GL_Uniform4fvFunc (13, postfx_emitters, &emitter_centers[0][0]);
-				GL_Uniform4fvFunc (21, postfx_emitters, &emitter_dirs[0][0]);
-				GL_Uniform4fvFunc (29, postfx_emitters, &emitter_colors[0][0]);
-			}
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
@@ -1912,7 +1766,6 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (out_mask)
 		*out_mask = framebufs.godrays.mask_tex;
 
-	R_GodrayEmitters_SetRenderedCounts (volume_emitters, postfx_emitters);
 	return framebufs.godrays.shafts_tex;
 }
 
@@ -2113,10 +1966,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		const float g = pixels[i * 4 + 1];
 		const float b = pixels[i * 4 + 2];
 		float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-		const float min_scene_luma = q_max (0.f, r_ae_min_scene_luma.value);
 		lum = q_max (lum, 0.0001f);
-		if (min_scene_luma > 0.f)
-			lum = q_max (lum, min_scene_luma);
 		luminance_samples[i] = lum;
 	}
 
@@ -2564,13 +2414,6 @@ void GL_PostProcess (void)
 		dof_focus = R_GetDynamicDoFFocus (dof_focus);
 		dof_range = q_max (0.f, r_dof_range.value);
 		dof_strength = q_max (0.f, r_dof_strength.value);
-		if (r_underwater_dof_active)
-		{
-			const float underwater_strength_scale = 2.0f;
-			const float underwater_range_scale = 0.4f;
-			dof_strength = q_max (0.f, dof_strength * underwater_strength_scale);
-			dof_range = q_max (1.f, dof_range * underwater_range_scale);
-		}
 		dof_znear = (view_znear > 0.f) ? view_znear : 0.5f;
 		dof_zfar = (view_zfar > dof_znear) ? view_zfar : dof_znear + 1.f;
 		GL_Uniform4fFunc (1, 1.f, dof_focus, dof_range, dof_strength);
@@ -2705,7 +2548,7 @@ R_EntityMatrix
 PERF OPT: Calculate sin/cos only once, reuse for both branches
 ===============
 */
-void R_EntityMatrix (float matrix[16], const vec3_t origin, const vec3_t angles, unsigned char scale)
+void R_EntityMatrix (float matrix[16], vec3_t origin, vec3_t angles, unsigned char scale)
 {
 	float scalefactor = ENTSCALE_DECODE (scale);
 	float yaw = DEG2RAD (angles[YAW]);
@@ -3407,16 +3250,8 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = 0.f;
         r_framedata.shader_params[0] = r_shader_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = (r_envmap_source.value > 0.f && skybox && skybox->cubemap) ? 1.f : 0.f;
+        r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
-        r_framedata.rim_params0[0] = (r_rim.value > 0.f) ? 1.f : 0.f;
-        r_framedata.rim_params0[1] = r_rim_power.value;
-        r_framedata.rim_params0[2] = r_rim_strength.value;
-        r_framedata.rim_params0[3] = r_rim_lightscale.value;
-        r_framedata.rim_params1[0] = r_rim_ambientscale.value;
-        r_framedata.rim_params1[1] = CLAMP (0.f, r_rim_debug.value, 2.f);
-        r_framedata.rim_params1[2] = 0.f;
-        r_framedata.rim_params1[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
@@ -3497,26 +3332,25 @@ void R_SetupView (void)
 		int contents = r_viewleaf->contents;
 		qboolean forced = M_ForcedUnderwater ();
 		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
-		r_underwater_dof_active = underwater_active;
-		if (r_waterwarp.value)
+	if (r_waterwarp.value)
+	{
+		if (underwater_active)
 		{
-			if (underwater_active)
+			double t = forced ? realtime : cl.time;
+			if (r_waterwarp.value > 1.f)
 			{
-				double t = forced ? realtime : cl.time;
-				if (r_waterwarp.value > 1.f)
-				{
-					//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
-					r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
-					r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
-				}
-				else
-				{
-					water_warp = true;
-				}
+				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
+				r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+			}
+			else
+			{
+				water_warp = true;
 			}
 		}
-		// TODO(postfx): hook underwater contents for postfx stack here.
-		CL_PostFX_SetContents (contents, underwater_active);
+	}
+	// TODO(postfx): hook underwater contents for postfx stack here.
+	CL_PostFX_SetContents (contents, underwater_active);
 	}
 	//johnfitz
 
@@ -4116,14 +3950,6 @@ static void R_ShowBoundingBoxes (void)
 	if ((!mode && !r_showfields.value) || cl.maxclients > 1 || !r_drawentities.value || !sv.active)
 		return;
 
-	if (!sv_player)
-	{
-		Con_Printf ("NETDBG sv_player NULL cl %d reason showbboxes\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_player NULL cl %d reason showbboxes\n", SV_CurrentClientIndex ());
-		SV_PlayerNullTrap (__func__, 0);
-		return;
-	}
-
 	GL_BeginGroup ("Show bounding boxes");
 
 	R_SetDebugGeometryZTest (false);
@@ -4677,7 +4503,6 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_GodrayEmitters_BuildList ();
 	R_Shadow_SunPass ();
 	R_Shadow_DlightPass ();
 	R_SetupGL ();
@@ -4693,7 +4518,6 @@ void R_RenderScene (void)
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
-	R_GodrayVolume_Render ();
 	R_BeginTranslucency ();
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
@@ -4876,9 +4700,6 @@ void R_RenderView (void)
         else if (gl_finish.value)
                 glFinish ();
 
-	// TODO BACKEND: begin frame once backend owns frame sequencing.
-	RB_BeginFrame();
-
         R_SetupView (); //johnfitz -- this does everything that should be done once per frame
         Fog_EnableGFog ();
         R_RenderScene ();
@@ -4887,9 +4708,6 @@ void R_RenderView (void)
         R_FogVol_Render ();
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
-
-	// TODO BACKEND: end frame once backend owns frame sequencing.
-	RB_EndFrame();
 
 	r_frame_rendered_this_update = true;
 

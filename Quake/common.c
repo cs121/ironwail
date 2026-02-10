@@ -31,7 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <limits.h>
 #include "miniz.h"
 #include "unicode_translit.h"
-#include <stdarg.h>
 
 static const char	*largv[MAX_NUM_ARGVS + 1];
 static char	argvdummy[] = " ";
@@ -39,139 +38,6 @@ static char	argvdummy[] = " ";
 int		safemode;
 
 cvar_t	registered = {"registered","1",CVAR_ROM}; /* set to correct value in COM_CheckRegistered() */
-cvar_t	jitter_log_enable = {"jitter_log_enable", "0", CVAR_NONE};
-cvar_t	jitter_log_file = {"jitter_log_file", "jitter_debug.log", CVAR_NONE};
-cvar_t	jitter_log_flush = {"jitter_log_flush", "0", CVAR_NONE};
-cvar_t	jitter_log_force_developer = {"jitter_log_force_developer", "0", CVAR_NONE};
-
-static FILE *jitter_log_fp;
-static qboolean jitter_log_tried;
-
-static const char *Jitter_LogPath (char *buffer, size_t buffer_size)
-{
-	const char *filename = jitter_log_file.string;
-
-	if (!filename || !filename[0])
-		return NULL;
-
-	if (host_parms && host_parms->userdir && host_parms->userdir[0])
-		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->userdir, filename);
-	else if (host_parms && host_parms->basedir && host_parms->basedir[0])
-		q_snprintf (buffer, buffer_size, "%s/%s", host_parms->basedir, filename);
-	else
-		q_snprintf (buffer, buffer_size, "%s", filename);
-
-	return buffer;
-}
-
-static void Jitter_LogWriteRaw (const char *tag, const char *text, size_t len)
-{
-	char prefix[256];
-	int prefix_len;
-
-	prefix_len = q_snprintf (prefix, sizeof(prefix), "[%.3f][%d][%s] ", realtime, host_framecount, tag ? tag : "LOG");
-	if (prefix_len < 0)
-		return;
-	if (prefix_len >= (int)sizeof(prefix))
-		prefix_len = (int)sizeof(prefix) - 1;
-
-	fwrite (prefix, 1, (size_t)prefix_len, jitter_log_fp);
-	if (len > 0 && text)
-		fwrite (text, 1, len, jitter_log_fp);
-	fwrite ("\n", 1, 1, jitter_log_fp);
-}
-
-void JitterLog_WriteLine (const char *tag, const char *text)
-{
-	const char *p;
-	const char *line_start;
-
-	if (jitter_log_enable.value <= 0.0f)
-		return;
-
-	if (!jitter_log_fp && !jitter_log_tried)
-	{
-		char path[MAX_OSPATH];
-		const char *logpath = Jitter_LogPath (path, sizeof(path));
-
-		jitter_log_tried = true;
-		if (logpath)
-			jitter_log_fp = Sys_fopen (logpath, "ab");
-
-		if (jitter_log_fp)
-		{
-			time_t now = time (NULL);
-			struct tm *tm_now = localtime (&now);
-			char stamp[64];
-			char mapname[64];
-			const char *map = "(none)";
-
-			if (tm_now)
-				strftime (stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", tm_now);
-			else
-				q_strlcpy (stamp, "unknown", sizeof(stamp));
-
-			if (sv.active && sv.name[0])
-				map = sv.name;
-			else if (cl.worldmodel && cl.worldmodel->name[0])
-			{
-				COM_StripExtension (COM_SkipPath (cl.worldmodel->name), mapname, sizeof(mapname));
-				map = mapname[0] ? mapname : cl.worldmodel->name;
-			}
-
-			{
-				char header[512];
-				q_snprintf (header, sizeof(header), "=== jitter log start, map=%s, build=%s, time=%s ===", map, IRONWAIL_VER_STRING, stamp);
-				Jitter_LogWriteRaw ("JIT", header, strlen(header));
-			}
-		}
-	}
-
-	if (!jitter_log_fp)
-		return;
-
-	line_start = text ? text : "";
-	for (p = line_start; ; ++p)
-	{
-		if (*p == '\n' || *p == '\0')
-		{
-			Jitter_LogWriteRaw (tag, line_start, (size_t)(p - line_start));
-			if (*p == '\0')
-				break;
-			line_start = p + 1;
-		}
-	}
-
-	if (jitter_log_flush.value > 0.0f)
-		fflush (jitter_log_fp);
-}
-
-void Jitter_Log_Close (void)
-{
-	if (jitter_log_fp)
-	{
-		fclose (jitter_log_fp);
-		jitter_log_fp = NULL;
-	}
-	jitter_log_tried = false;
-}
-
-void Jitter_LogV (const char *fmt, va_list argptr)
-{
-	char text[4096];
-
-	q_vsnprintf (text, sizeof(text), fmt, argptr);
-	JitterLog_WriteLine ("JIT", text);
-}
-
-void Jitter_Log (const char *fmt, ...)
-{
-	va_list argptr;
-
-	va_start (argptr, fmt);
-	Jitter_LogV (fmt, argptr);
-	va_end (argptr);
-}
 cvar_t	standalone = {"standalone","0"}; /* allow standalone mods without pak0/CRC gating */
 cvar_t	cmdline = {"cmdline","",CVAR_ROM/*|CVAR_SERVERINFO*/}; /* sending cmdline upon CCREQ_RULE_INFO is evil */
 cvar_t	language = {"language","auto",CVAR_ARCHIVE}; /* for 2021 rerelease text */
@@ -822,55 +688,6 @@ Handles byte ordering and avoids alignment errors
 ==============================================================================
 */
 
-static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length);
-static const char *SZ_DebugName (const sizebuf_t *buf);
-
-static qboolean MSG_EnsureSpace (sizebuf_t *sb, int length)
-{
-	if (sb->overflowed || sb->write_blocked || sb->write_locked)
-	{
-#if !defined(NDEBUG)
-		SDL_assert (!"MSG write after overflow");
-#endif
-		return false;
-	}
-
-	if (!MSG_CAN_FIT(sb, length))
-	{
-		if (!sb->allowoverflow)
-		{
-			SZ_PrintOverflowDiagnostics (sb, length);
-			Host_Error ("SZ_GetSpace: overflow without allowoverflow set"); // ericw -- made Host_Error to be less annoying
-		}
-
-		if (length > sb->maxsize)
-			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
-
-		if (sb->overflowed_once)
-		{
-			const char *name = SZ_DebugName (sb);
-			Sys_Error ("Repeated SZ overflow on '%s': indicates buffer reuse / reentrant append bug (last write %s:%d msgkind=%d id=%d aux=%d)",
-				name,
-				sb->dbg_file ? sb->dbg_file : "unknown",
-				sb->dbg_line,
-				sb->dbg_msgkind,
-				sb->dbg_id,
-				sb->dbg_aux);
-		}
-
-		sb->overflowed = true;
-		sb->overflowed_once = true;
-		sb->write_blocked = true;
-		sb->write_locked = true;
-		sb->blocked_file = __FILE__;
-		sb->blocked_line = __LINE__;
-		SZ_PrintOverflowDiagnostics (sb, length);
-		return false;
-	}
-
-	return true;
-}
-
 //
 // writing functions
 //
@@ -884,8 +701,6 @@ void MSG_WriteChar (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteChar: range error");
 #endif
 
-	if (!MSG_EnsureSpace (sb, 1))
-		return;
 	buf = (byte *) SZ_GetSpace (sb, 1);
 	buf[0] = c;
 }
@@ -899,8 +714,6 @@ void MSG_WriteByte (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteByte: range error");
 #endif
 
-	if (!MSG_EnsureSpace (sb, 1))
-		return;
 	buf = (byte *) SZ_GetSpace (sb, 1);
 	buf[0] = c;
 }
@@ -914,8 +727,6 @@ void MSG_WriteShort (sizebuf_t *sb, int c)
 		Sys_Error ("MSG_WriteShort: range error");
 #endif
 
-	if (!MSG_EnsureSpace (sb, 2))
-		return;
 	buf = (byte *) SZ_GetSpace (sb, 2);
 	buf[0] = c&0xff;
 	buf[1] = c>>8;
@@ -925,8 +736,6 @@ void MSG_WriteLong (sizebuf_t *sb, int c)
 {
 	byte	*buf;
 
-	if (!MSG_EnsureSpace (sb, 4))
-		return;
 	buf = (byte *) SZ_GetSpace (sb, 4);
 	buf[0] = c&0xff;
 	buf[1] = (c>>8)&0xff;
@@ -956,54 +765,6 @@ void MSG_WriteString (sizebuf_t *sb, const char *s)
 		SZ_Write (sb, s, Q_strlen(s)+1);
 }
 
-void MSG_WriteBits (sizebuf_t *sb, unsigned int value, int bits)
-{
-	int bytes_needed;
-	int i;
-
-	bytes_needed = (sb->bitpos + bits + 7) / 8;
-	if (sb->bitpos != 0)
-		bytes_needed--;
-	if (bytes_needed > 0 && !MSG_EnsureSpace (sb, bytes_needed))
-		return;
-
-	for (i = 0; i < bits; i++)
-	{
-		if (sb->bitpos == 0)
-		{
-			byte *buf = (byte *)SZ_GetSpace (sb, 1);
-			*buf = 0;
-		}
-		if (value & 1u)
-			sb->data[sb->cursize - 1] |= (byte)(1u << sb->bitpos);
-		sb->bitpos++;
-		if (sb->bitpos == 8)
-			sb->bitpos = 0;
-		value >>= 1;
-	}
-}
-
-void MSG_WriteInt8 (sizebuf_t *sb, int c)
-{
-	MSG_WriteChar (sb, c);
-}
-
-void MSG_WriteInt16 (sizebuf_t *sb, int c)
-{
-	MSG_WriteShort (sb, c);
-}
-
-void MSG_WriteUInt16 (sizebuf_t *sb, unsigned int c)
-{
-	byte *buf;
-
-	if (!MSG_EnsureSpace (sb, 2))
-		return;
-	buf = (byte *) SZ_GetSpace (sb, 2);
-	buf[0] = c & 0xff;
-	buf[1] = (c >> 8) & 0xff;
-}
-
 //johnfitz -- original behavior, 13.3 fixed point coords, max range +-4096
 void MSG_WriteCoord16 (sizebuf_t *sb, float f)
 {
@@ -1025,21 +786,30 @@ void MSG_WriteCoord32f (sizebuf_t *sb, float f)
 
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags)
 {
-	if (flags & PRFL_INT32COORD)
+	if (flags & PRFL_FLOATCOORD)
+		MSG_WriteFloat (sb, f);
+	else if (flags & PRFL_INT32COORD)
 		MSG_WriteLong (sb, Q_rint (f * 16));
+	else if (flags & PRFL_24BITCOORD)
+		MSG_WriteCoord24 (sb, f);
 	else MSG_WriteCoord16 (sb, f);
 }
 
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags)
 {
-	if (flags & PRFL_SHORTANGLE)
+	if (flags & PRFL_FLOATANGLE)
+		MSG_WriteFloat (sb, f);
+	else if (flags & PRFL_SHORTANGLE)
 		MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 	else MSG_WriteByte (sb, Q_rint(f * 256.0 / 360.0) & 255); //johnfitz -- use Q_rint instead of (int)	}
 }
 
+//johnfitz -- for PROTOCOL_FITZQUAKE
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 {
-	MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
+	if (flags & PRFL_FLOATANGLE)
+		MSG_WriteFloat (sb, f);
+	else MSG_WriteShort (sb, Q_rint(f * 65536.0 / 360.0) & 65535);
 }
 //johnfitz
 
@@ -1048,13 +818,11 @@ void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags)
 //
 int		msg_readcount;
 qboolean	msg_badread;
-int		msg_readbitpos;
 
 void MSG_BeginReading (void)
 {
 	msg_readcount = 0;
 	msg_badread = false;
-	msg_readbitpos = 0;
 }
 
 // returns -1 and sets msg_badread if no more characters are available
@@ -1106,128 +874,6 @@ int MSG_ReadShort (void)
 	msg_readcount += 2;
 
 	return c;
-}
-
-unsigned int MSG_ReadBits (int bits)
-{
-	unsigned int value = 0;
-	int i;
-
-	for (i = 0; i < bits; i++)
-	{
-		if (msg_readcount >= net_message.cursize)
-		{
-			msg_badread = true;
-			return value;
-		}
-		value |= ((net_message.data[msg_readcount] >> msg_readbitpos) & 1u) << i;
-		msg_readbitpos++;
-		if (msg_readbitpos == 8)
-		{
-			msg_readbitpos = 0;
-			msg_readcount++;
-		}
-	}
-	return value;
-}
-
-int MSG_ReadInt8 (void)
-{
-	return MSG_ReadChar ();
-}
-
-int MSG_ReadInt16 (void)
-{
-	return MSG_ReadShort ();
-}
-
-unsigned int MSG_ReadUInt16 (void)
-{
-	unsigned int c;
-
-	if (msg_readcount+2 > net_message.cursize)
-	{
-		msg_badread = true;
-		return 0;
-	}
-
-	c = (unsigned int)net_message.data[msg_readcount]
-		| ((unsigned int)net_message.data[msg_readcount+1] << 8);
-
-	msg_readcount += 2;
-
-	return c;
-}
-
-qboolean MSG_PackedSelfTest (void)
-{
-#if defined(DEBUG) || defined(_DEBUG)
-	byte buffer[64];
-	sizebuf_t buf;
-	sizebuf_t old_message = net_message;
-	int old_readcount = msg_readcount;
-	int old_readbitpos = msg_readbitpos;
-	qboolean old_badread = msg_badread;
-	unsigned int read_u32;
-	int read_i16;
-
-	buf.data = buffer;
-	buf.maxsize = sizeof(buffer);
-	buf.cursize = 0;
-	buf.allowoverflow = false;
-	buf.overflowed = false;
-	buf.overflowed_once = false;
-	buf.write_blocked = false;
-	buf.write_locked = false;
-	buf.blocked_file = NULL;
-	buf.blocked_line = 0;
-	buf.dbg_name = "packed_selftest";
-	buf.dbg_file = NULL;
-	buf.dbg_line = 0;
-	buf.dbg_msgkind = 0;
-	buf.dbg_id = 0;
-	buf.dbg_aux = 0;
-	buf.bitpos = 0;
-
-	MSG_WriteBits (&buf, 0x3, 2);
-	MSG_WriteBits (&buf, 0xA5, 8);
-	MSG_WriteUInt16 (&buf, 0xBEEF);
-	MSG_WriteInt16 (&buf, -12345);
-
-	net_message.data = buf.data;
-	net_message.cursize = buf.cursize;
-	net_message.maxsize = buf.maxsize;
-
-	MSG_BeginReading ();
-	read_u32 = MSG_ReadBits (2);
-	if (read_u32 != 0x3)
-		goto fail;
-	read_u32 = MSG_ReadBits (8);
-	if (read_u32 != 0xA5)
-		goto fail;
-	read_u32 = MSG_ReadUInt16 ();
-	if (read_u32 != 0xBEEF)
-		goto fail;
-	read_i16 = MSG_ReadInt16 ();
-	if (read_i16 != -12345)
-		goto fail;
-
-	net_message = old_message;
-	msg_readcount = old_readcount;
-	msg_readbitpos = old_readbitpos;
-	msg_badread = old_badread;
-	return true;
-
-fail:
-	net_message = old_message;
-	msg_readcount = old_readcount;
-	msg_readbitpos = old_readbitpos;
-	msg_badread = old_badread;
-	Con_DPrintf ("MSG_PackedSelfTest: failed\n");
-	return false;
-#else
-	return true;
-#endif
 }
 
 int MSG_ReadLong (void)
@@ -1311,123 +957,34 @@ float MSG_ReadCoord32f (void)
 
 float MSG_ReadCoord (unsigned int flags)
 {
-	if (flags & PRFL_INT32COORD)
+	if (flags & PRFL_FLOATCOORD)
+		return MSG_ReadFloat ();
+	else if (flags & PRFL_INT32COORD)
 		return MSG_ReadLong () * (1.0 / 16.0);
+	else if (flags & PRFL_24BITCOORD)
+		return MSG_ReadCoord24 ();
 	else return MSG_ReadCoord16 ();
 }
 
 float MSG_ReadAngle (unsigned int flags)
 {
-	if (flags & PRFL_SHORTANGLE)
+	if (flags & PRFL_FLOATANGLE)
+		return MSG_ReadFloat ();
+	else if (flags & PRFL_SHORTANGLE)
 		return MSG_ReadShort () * (360.0 / 65536);
 	else return MSG_ReadChar () * (360.0 / 256);
 }
 
+//johnfitz -- for PROTOCOL_FITZQUAKE
 float MSG_ReadAngle16 (unsigned int flags)
 {
-	return MSG_ReadShort () * (360.0 / 65536);
+	if (flags & PRFL_FLOATANGLE)
+		return MSG_ReadFloat ();	// make sure
+	else return MSG_ReadShort () * (360.0 / 65536);
 }
+//johnfitz
 
 //===========================================================================
-
-cvar_t sz_debug_hexdump = {"sz_debug_hexdump", "0", CVAR_NONE};
-
-static void SZ_DumpBufferTail (const sizebuf_t *buf)
-{
-	int start;
-	int count;
-	int i;
-
-	if (!buf->data || buf->cursize <= 0)
-		return;
-
-	count = q_min(buf->cursize, 32);
-	start = buf->cursize - count;
-	Con_Printf ("  tail[%d..%d]:", start, buf->cursize - 1);
-	for (i = start; i < buf->cursize; i++)
-		Con_Printf (" %02x", buf->data[i]);
-	Con_Printf ("\n");
-}
-
-static void SZ_PrintOverflowDiagnostics (const sizebuf_t *buf, int length)
-{
-	const char *name = "unnamed";
-	const char *file = "unknown";
-	qboolean name_valid = false;
-	qboolean file_valid = false;
-
-	if (buf->dbg_name)
-	{
-#if UINTPTR_MAX > 0xFFFFFFFFu
-		uintptr_t dbg_name_ptr = (uintptr_t)buf->dbg_name;
-		name_valid = ((dbg_name_ptr >> 48) == 0u) || ((dbg_name_ptr >> 48) == 0xFFFFu);
-#else
-		name_valid = true;
-#endif
-	}
-	if (buf->dbg_file)
-	{
-#if UINTPTR_MAX > 0xFFFFFFFFu
-		uintptr_t dbg_file_ptr = (uintptr_t)buf->dbg_file;
-		file_valid = ((dbg_file_ptr >> 48) == 0u) || ((dbg_file_ptr >> 48) == 0xFFFFu);
-#else
-		file_valid = true;
-#endif
-	}
-
-	if (name_valid)
-		name = buf->dbg_name;
-	if (file_valid)
-		file = buf->dbg_file;
-
-	Con_Printf ("SZ_GetSpace overflow on '%s': max=%d cursize=%d request=%d\n",
-		name, buf->maxsize, buf->cursize, length);
-	if (buf->dbg_name && !name_valid)
-		Con_Printf ("  dbg_name pointer looks invalid: %p\n", (void *)buf->dbg_name);
-	Con_Printf ("  last write at %s:%d msgkind=%d id=%d aux=%d\n",
-		file, buf->dbg_line, buf->dbg_msgkind, buf->dbg_id, buf->dbg_aux);
-	if (buf->dbg_file && !file_valid)
-		Con_Printf ("  dbg_file pointer looks invalid: %p\n", (void *)buf->dbg_file);
-	if (sz_debug_hexdump.value)
-		SZ_DumpBufferTail (buf);
-}
-
-static const char *SZ_DebugName (const sizebuf_t *buf)
-{
-	const char *name = "unnamed";
-	qboolean name_valid = false;
-
-	if (buf->dbg_name)
-	{
-#if UINTPTR_MAX > 0xFFFFFFFFu
-		uintptr_t dbg_name_ptr = (uintptr_t)buf->dbg_name;
-		name_valid = ((dbg_name_ptr >> 48) == 0u) || ((dbg_name_ptr >> 48) == 0xFFFFu);
-#else
-		name_valid = true;
-#endif
-	}
-
-	if (name_valid)
-		name = buf->dbg_name;
-
-	return name;
-}
-
-void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line)
-{
-	buf->write_blocked = true;
-	buf->write_locked = true;
-	buf->blocked_file = file;
-	buf->blocked_line = line;
-}
-
-void SZ_UnblockWrites (sizebuf_t *buf)
-{
-	buf->write_blocked = false;
-	buf->write_locked = false;
-	buf->blocked_file = NULL;
-	buf->blocked_line = 0;
-}
 
 void SZ_Alloc (sizebuf_t *buf, int startsize)
 {
@@ -1436,19 +993,6 @@ void SZ_Alloc (sizebuf_t *buf, int startsize)
 	buf->data = (byte *) Hunk_AllocName (startsize, "sizebuf");
 	buf->maxsize = startsize;
 	buf->cursize = 0;
-	buf->bitpos = 0;
-	buf->overflowed = false;
-	buf->overflowed_once = false;
-	buf->write_blocked = false;
-	buf->write_locked = false;
-	buf->blocked_file = NULL;
-	buf->blocked_line = 0;
-	buf->dbg_name = NULL;
-	buf->dbg_file = NULL;
-	buf->dbg_line = 0;
-	buf->dbg_msgkind = 0;
-	buf->dbg_id = 0;
-	buf->dbg_aux = 0;
 }
 
 
@@ -1463,58 +1007,23 @@ void SZ_Free (sizebuf_t *buf)
 void SZ_Clear (sizebuf_t *buf)
 {
 	buf->cursize = 0;
-	buf->bitpos = 0;
-	buf->overflowed = false;
-	buf->overflowed_once = false;
-	buf->write_locked = false;
 }
 
 void *SZ_GetSpace (sizebuf_t *buf, int length)
 {
 	void	*data;
 
-	if (buf->write_blocked || buf->write_locked)
-	{
-		const char *name = SZ_DebugName (buf);
-		Sys_Error ("SZ_GetSpace: write blocked on '%s' (blocked at %s:%d, last write %s:%d msgkind=%d id=%d aux=%d)",
-			name,
-			buf->blocked_file ? buf->blocked_file : "unknown",
-			buf->blocked_line,
-			buf->dbg_file ? buf->dbg_file : "unknown",
-			buf->dbg_line,
-			buf->dbg_msgkind,
-			buf->dbg_id,
-			buf->dbg_aux);
-	}
-
 	if (buf->cursize + length > buf->maxsize)
 	{
 		if (!buf->allowoverflow)
-		{
-			SZ_PrintOverflowDiagnostics (buf, length);
 			Host_Error ("SZ_GetSpace: overflow without allowoverflow set"); // ericw -- made Host_Error to be less annoying
-		}
 
 		if (length > buf->maxsize)
 			Sys_Error ("SZ_GetSpace: %i is > full buffer size", length);
 
-		if (buf->overflowed_once)
-		{
-			const char *name = SZ_DebugName (buf);
-			Sys_Error ("Repeated SZ overflow on '%s': indicates buffer reuse / reentrant append bug (last write %s:%d msgkind=%d id=%d aux=%d)",
-				name,
-				buf->dbg_file ? buf->dbg_file : "unknown",
-				buf->dbg_line,
-				buf->dbg_msgkind,
-				buf->dbg_id,
-				buf->dbg_aux);
-		}
-
 		buf->overflowed = true;
-		buf->overflowed_once = true;
-		SZ_PrintOverflowDiagnostics (buf, length);
-		buf->cursize = 0;
-		buf->bitpos = 0;
+		Con_Printf ("SZ_GetSpace: overflow\n");
+		SZ_Clear (buf);
 	}
 
 	data = buf->data + buf->cursize;
@@ -1525,8 +1034,6 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 void SZ_Write (sizebuf_t *buf, const void *data, int length)
 {
-	if (!MSG_EnsureSpace (buf, length))
-		return;
 	Q_memcpy (SZ_GetSpace(buf,length),data,length);
 }
 
@@ -1536,14 +1043,10 @@ void SZ_Print (sizebuf_t *buf, const char *data)
 
 	if (buf->data[buf->cursize-1])
 	{	/* no trailing 0 */
-		if (!MSG_EnsureSpace (buf, len))
-			return;
 		Q_memcpy ((byte *)SZ_GetSpace(buf, len  )  , data, len);
 	}
 	else
 	{	/* write over trailing 0 */
-		if (!MSG_EnsureSpace (buf, len - 1))
-			return;
 		Q_memcpy ((byte *)SZ_GetSpace(buf, len-1)-1, data, len);
 	}
 }

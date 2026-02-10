@@ -39,9 +39,6 @@
     <ClCompile Include="..\..\Quake\cl_parse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\cl_predict.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\cl_tent.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -186,12 +183,6 @@
     <ClCompile Include="..\..\Quake\r_fogvol.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\r_godrayvol.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Quake\r_godray_emit.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\r_shadow.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -307,15 +298,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\snd_mpg123.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Quake\renderer_backend.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Quake\renderer_backend_gl.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Quake\renderer_backend_null.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -459,12 +441,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\r_fogvol.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Quake\r_godrayvol.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Quake\r_godray_emit.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\resource.h">

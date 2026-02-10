@@ -12,23 +12,20 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	inst_ViewProj;
-	mat4	inst_PrevViewProj;
-	mat4	inst_View;
-	vec3	inst_EyePos;
-	float	inst_Pad0;
-	vec4	inst_Fog;
-	float	inst_ScreenDither;
-	float	inst_Overbright;
-	float	inst_ModelHalfLambert;
-	float	inst_Pad1;
-	vec4	inst_RimParams0;
-	vec4	inst_RimParams1;
-	mat4	inst_ShadowViewProj;
-	vec4	inst_ShadowParams;
-	vec4	inst_ShadowDebug;
-	vec4	inst_ShadowSunDir;
-	InstanceData inst_instances[];
+	mat4	ViewProj;
+	mat4	PrevViewProj;
+	vec3	EyePos;
+	float	_Pad0;
+	vec4	Fog;
+	float	ScreenDither;
+	float	Overbright;
+	float	ModelHalfLambert;
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
+	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -50,9 +47,9 @@ float bayer(ivec2 coord)
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-abs(inst_Fog.w) * dot(p, p));
+        float fog = exp2(-abs(Fog.w) * dot(p, p));
         fog = clamp(fog, 0.0, 1.0);
-        return mix(inst_Fog.rgb, clr, fog);
+        return mix(Fog.rgb, clr, fog);
 }
 
 // Hash without Sine
@@ -105,15 +102,7 @@ layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
 
 #define SHADOW_SUN 1
-#define SHADOW_VIEWPROJ inst_ShadowViewProj
-#define SHADOW_PARAMS inst_ShadowParams
-#define SHADOW_DEBUG inst_ShadowDebug
-#define SHADOW_SUN_DIR inst_ShadowSunDir
 #include "shadow_sample.glsl"
-#undef SHADOW_VIEWPROJ
-#undef SHADOW_PARAMS
-#undef SHADOW_DEBUG
-#undef SHADOW_SUN_DIR
 
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
@@ -126,10 +115,6 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
-layout(location=7) flat in vec3 in_ambient;
-layout(location=8) flat in vec3 in_direct;
-layout(location=9) in vec3 in_view_pos;
-layout(location=10) in vec3 in_view_normal;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -173,18 +158,19 @@ layout(location=10) in vec3 in_view_normal;
 void main()
 {
         vec2 uv = in_texcoord;
+        vec3 emissive = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
 
-	if (inst_ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
-		vec3 world_pos = in_pos + inst_EyePos;
+		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
-		if (inst_ShadowDebug.y > 1.5)
+		if (ShadowDebug.y > 1.5)
 		{
-			float debug_value = (inst_ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
 			out_fragcolor = vec4(vec3(debug_value), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
@@ -210,10 +196,13 @@ void main()
         vec3 fullbright;
 #if MODE == 2
         fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
+        emissive = textureLod(EmissiveTex, uv, 0.).rgb;
 #else
         fullbright = texture(FullbrightTex, uv).rgb;
+        emissive = texture(EmissiveTex, uv).rgb;
 #endif
         result.rgb += fullbright;
+        result.rgb += emissive;
 
         if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
         {
@@ -221,50 +210,6 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
-
-	if (inst_RimParams0.x > 0.5)
-	{
-		vec3 normal = normalize(gl_FrontFacing ? in_view_normal : -in_view_normal);
-		vec3 view_dir = normalize(-in_view_pos);
-		float ndotv = clamp(dot(normal, view_dir), 0.0, 1.0);
-		float rim_base = pow(1.0 - ndotv, inst_RimParams0.y);
-		float light_len = length(inst_ShadowSunDir.xyz);
-		vec3 light_dir = (light_len > 0.0) ? normalize(-inst_ShadowSunDir.xyz) : vec3(0.0, 0.0, 1.0);
-		float direct_w = clamp(dot(normal, light_dir) * 0.5 + 0.5, 0.0, 1.0);
-		float effective_ambient_scale = min(inst_RimParams1.x, 0.25);
-		vec3 ambient_color = in_ambient * effective_ambient_scale;
-		vec3 direct_color = in_direct;
-		float direct_strength = clamp(max(max(direct_color.r, direct_color.g), direct_color.b), 0.0, 1.0);
-		float ambient_strength = clamp(max(max(ambient_color.r, ambient_color.g), ambient_color.b), 0.0, 1.0);
-		const float rim_direct_scale = 1.5;
-		float rim_direct_mask = clamp(direct_strength * rim_direct_scale, 0.0, 1.0);
-		float rim_shadow = mix(0.25, 1.0, shadow_term);
-		float rim_visibility = mix(effective_ambient_scale, 1.0, direct_w) * rim_shadow;
-		float rim_value = rim_base * inst_RimParams0.z * rim_visibility;
-		vec3 rim_light_rgb = rim_value * (direct_color + 0.15 * ambient_color);
-		float rim_max_allowed = direct_strength + 0.2 * ambient_strength;
-		// Rim rules: direct-light mask, ambient sockel, clamp to local lighting.
-		rim_light_rgb *= rim_direct_mask;
-		rim_light_rgb = min(rim_light_rgb, vec3(rim_max_allowed));
-		int rim_debug = int(clamp(inst_RimParams1.y, 0.0, 2.0) + 0.5);
-		if (rim_debug == 1)
-		{
-			out_fragcolor = vec4(vec3(rim_base), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-		else if (rim_debug == 2)
-		{
-			out_fragcolor = vec4(vec3(ndotv), 1.0);
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-		result.rgb += rim_light_rgb;
-	}
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);
@@ -275,17 +220,17 @@ void main()
         vec2 velocityOut = vec2(0.0);
         if (viewModelMask < 0.5 && result.a >= 0.999)
                 velocityOut = velocity * result.a;
-        out_velocity = vec4(velocityOut, viewModelMask, 0.0);
+        out_velocity = vec4(velocityOut, viewModelMask, 1.0);
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
-	if (abs(inst_Fog.w) > 0.)
+	if (abs(Fog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * inst_ScreenDither;
+		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
 		out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
-	out_fragcolor.rgb += SUPPRESS_BANDING() * inst_ScreenDither;
+	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
 }

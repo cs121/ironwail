@@ -799,41 +799,6 @@ static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboo
         return (offs + 3) & ~((size_t)3);
 }
 
-static qboolean Mod_ValidateBSPXHeader(const bspx_header_disk_t *header, size_t header_offset, size_t filelen, int *out_numlumps)
-{
-        size_t directory_size;
-        int numlumps;
-        int i;
-
-        if (!header)
-                return false;
-
-        numlumps = LittleLong(header->numlumps);
-        if (numlumps <= 0)
-                return false;
-
-        directory_size = sizeof(*header) + sizeof(header->lumps[0]) * (size_t)(numlumps - 1);
-        if (header_offset + directory_size > filelen)
-                return false;
-
-        for (i = 0; i < numlumps; i++)
-        {
-                int fileofs = LittleLong(header->lumps[i].fileofs);
-                int filelen_lump = LittleLong(header->lumps[i].filelen);
-
-                if (fileofs < 0 || filelen_lump < 0)
-                        return false;
-
-                if ((size_t)fileofs + (size_t)filelen_lump > filelen)
-                        return false;
-        }
-
-        if (out_numlumps)
-                *out_numlumps = numlumps;
-
-        return true;
-}
-
 static qboolean Mod_ParseBSPHeader(const byte *buffer, size_t length, bsp_header_info_t *out)
 {
         const lump_t *raw_lumps;
@@ -886,7 +851,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         size_t                  header_offset;
         const bspx_header_disk_t        *h = NULL;
         qboolean                misaligned = false;
-        int                             i, numlumps = 0;
+        int                             i, numlumps;
 
         Q1BSPX_ResetUsage();
         mod->bspx_entries = NULL;
@@ -904,10 +869,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 const char *candidate = (const char *)mod_base + offs;
 
                 if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
-                {
-                        if (Mod_ValidateBSPXHeader((const bspx_header_disk_t *)candidate, offs, filelen, &numlumps))
-                                h = (const bspx_header_disk_t *)candidate;
-                }
+                        h = (const bspx_header_disk_t *)candidate;
         }
 
         if (!h && header->has_bspx_header && header->header_size + sizeof(*h) <= filelen)
@@ -916,38 +878,19 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
 
                 if (!strncmp(candidate, "BSPX", 4) || !strncmp(candidate, "BSP2X", 5))
                 {
-                        if (Mod_ValidateBSPXHeader((const bspx_header_disk_t *)candidate, header->header_size, filelen, &numlumps))
-                        {
-                                h = (const bspx_header_disk_t *)candidate;
-                                header_offset = header->header_size;
-                        }
-                }
-        }
-
-        if (!h && filelen >= sizeof(*h))
-        {
-                for (size_t scan = filelen - sizeof(*h); ; scan--)
-                {
-                        const char *candidate = (const char *)mod_base + scan;
-                        qboolean is_bspx = !strncmp(candidate, "BSPX", 4);
-                        qboolean is_bsp2x = (scan + 5 <= filelen) && !strncmp(candidate, "BSP2X", 5);
-
-                        if (is_bspx || is_bsp2x)
-                        {
-                                if (Mod_ValidateBSPXHeader((const bspx_header_disk_t *)candidate, scan, filelen, &numlumps))
-                                {
-                                        h = (const bspx_header_disk_t *)candidate;
-                                        header_offset = scan;
-                                        break;
-                                }
-                        }
-
-                        if (scan == 0)
-                                break;
+                        h = (const bspx_header_disk_t *)candidate;
+                        header_offset = header->header_size;
                 }
         }
 
         if (!h)
+                return false;
+
+        numlumps = LittleLong(h->numlumps);
+        if (numlumps <= 0)
+                return false;
+
+        if (header_offset + sizeof(*h) + sizeof(h->lumps[0]) * (numlumps - 1) > filelen)
                 return false;
 
         for (i = 0; i < numlumps; i++)
@@ -958,10 +901,7 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 if (fileofs & 3)
                         Con_DWarning("%s contains misaligned bspx lump %s\n", mod->name, h->lumps[i].lumpname);
 
-                if (fileofs < 0 || filelen_lump < 0)
-                        return false;
-
-                if ((size_t)fileofs + (size_t)filelen_lump > filelen)
+                if ((unsigned int)fileofs + (unsigned int)filelen_lump > filelen)
                         return false;
         }
 
@@ -1609,13 +1549,6 @@ static void Mod_LoadLighting (lump_t *l)
 	unsigned int path_id;
 	int	bspxsize;
 	qboolean bspx_dlit;
-	qboolean has_classic_lighting;
-	qboolean allow_bspx_lighting;
-	byte *bspx_rgb = NULL;
-	int bspx_rgb_size = 0;
-	qboolean loaded_bspx_rgb = false;
-	qboolean loaded_bspx_dir = false;
-	const char *lighting_mode = "none";
 
 	loadmodel->lightdata = NULL;
 	loadmodel->lightdatasamples = 0;
@@ -1628,12 +1561,6 @@ static void Mod_LoadLighting (lump_t *l)
 	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
 	bspx_dlit = Q1BSPX_IsProcessed("DLIT");
-	has_classic_lighting = (l->filelen > 0);
-	allow_bspx_lighting = (gl_loadlitfiles.value > 0) || !has_classic_lighting;
-	if (!allow_bspx_lighting)
-	{
-		bspx_rgb = Q1BSPX_FindLump("RGBLIGHTING", &bspx_rgb_size);
-	}
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -1696,7 +1623,6 @@ static void Mod_LoadLighting (lump_t *l)
 					loadmodel->lightdata = data + 8;
 					loadmodel->lightdatasamples = l->filelen;
 					loadmodel->litfile = true;
-					lighting_mode = "lit";
 					goto loadlightdir;
                                 }
 				Hunk_FreeToLowMark(mark);
@@ -1729,7 +1655,6 @@ static void Mod_LoadLighting (lump_t *l)
                                         loadmodel->lightdata = decoded;
                                         loadmodel->lightdatasamples = l->filelen;
                                         loadmodel->litfile = true;
-                                        lighting_mode = "lit";
 
                                         goto loadlightdir;
                                 }
@@ -1749,8 +1674,10 @@ static void Mod_LoadLighting (lump_t *l)
 		}
 	}
 	// LordHavoc: no .lit found, expand the white lighting data to color
+	if (!l->filelen)
+		goto loadlightdir;
 
-        if (allow_bspx_lighting) // woods #loadlits
+        if (gl_loadlitfiles.value > 0) // woods #loadlits
         {
                 in = Q1BSPX_FindLump("LIGHTING_E5BGR9", &bspxsize);
                 if (in && bspxsize && (bspxsize % 4 == 0))
@@ -1759,11 +1686,9 @@ static void Mod_LoadLighting (lump_t *l)
                         loadmodel->lightdata = (byte*)Hunk_AllocName(samples * 3, litfilename);
                         loadmodel->lightdatasamples = samples;
                         loadmodel->litfile = true;
-                        loadmodel->lightdatasize = samples;
                         Q1BSPX_DecodeE5BGR9Lighting(loadmodel->lightdata, (const unsigned int *)in, samples);
                         Q1BSPX_MarkUsed("LIGHTING_E5BGR9");
-					Con_DPrintf("loaded BSPX HDR lighting (E5BGR9)\n");
-					lighting_mode = "bspx_hdr";
+					Con_Printf("loaded BSPX HDR lighting (E5BGR9)\n");
                         goto loadlightdir;
                 }
                 else if (in)
@@ -1777,18 +1702,14 @@ static void Mod_LoadLighting (lump_t *l)
                 {
                         int samples = bspxsize / 3;
 
-                        // BSPX RGBLIGHTING: raw texels as R, G, B (0..255), in classic Quake lightmap order.
                         loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
                         loadmodel->lightdatasamples = samples;
                         loadmodel->litfile = true;
-                        loadmodel->lightdatasize = samples;
 
                         memcpy(loadmodel->lightdata, in, bspxsize);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
 
-					Con_DPrintf("loaded BSPX lighting (%d samples)\n", samples);
-					lighting_mode = "bspx_rgb";
-					loaded_bspx_rgb = true;
+					Con_Printf("loaded BSPX lighting (%d samples)\n", samples);
                         goto loadlightdir;
                 }
                 else if (in)
@@ -1798,31 +1719,7 @@ static void Mod_LoadLighting (lump_t *l)
                 }
 
         }
-        else if (bspx_rgb)
-        {
-                if (bspx_rgb_size % 3 == 0)
-                {
-                        int samples = bspx_rgb_size / 3;
-
-                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspx_rgb_size, litfilename);
-                        loadmodel->lightdatasamples = samples;
-                        loadmodel->litfile = true;
-                        loadmodel->lightdatasize = samples;
-
-                        memcpy(loadmodel->lightdata, bspx_rgb, bspx_rgb_size);
-                        Q1BSPX_MarkUsed("RGBLIGHTING");
-
-                        Con_DPrintf("loaded BSPX lighting (%d samples)\n", samples);
-                        lighting_mode = "bspx_rgb";
-                        loaded_bspx_rgb = true;
-                        goto loadlightdir;
-                }
-
-                Q1BSPX_MarkUnsupported("RGBLIGHTING");
-                Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspx_rgb_size);
-        }
-        else if (gl_loadlitfiles.value <= 0)
-        {
+        else {
                 Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
         }
 
@@ -1841,7 +1738,6 @@ static void Mod_LoadLighting (lump_t *l)
 
                         loadmodel->lightdata = (byte *)Hunk_AllocName(samples * 3, litfilename);
                         loadmodel->lightdatasamples = samples;
-                        loadmodel->lightdatasize = samples;
                         loadmodel->lightdirdata = (byte *)Hunk_AllocName(samples * 3, litfilename);
                         loadmodel->lightdirsamples = samples;
                         in = mod_base + l->fileofs;
@@ -1860,7 +1756,6 @@ static void Mod_LoadLighting (lump_t *l)
                         }
 
                         Q1BSPX_MarkUsed("DLIT");
-                        lighting_mode = "dlit";
                         goto loadlightdir;
                 }
         }
@@ -1874,7 +1769,6 @@ static void Mod_LoadLighting (lump_t *l)
                 loadmodel->lightdata = (byte *) Hunk_AllocName ( (l->filelen / 2)*3, litfilename);
                 loadmodel->lightdatasamples = (l->filelen / 2);
                 loadmodel->litfile = true;
-                loadmodel->lightdatasize = loadmodel->lightdatasamples;
                 in = mod_base + l->fileofs;
                 out = loadmodel->lightdata;
 
@@ -1887,7 +1781,6 @@ static void Mod_LoadLighting (lump_t *l)
                         *out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
                         *out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
                 }
-                lighting_mode = "quake64";
                 goto loadlightdir;
         }
 
@@ -1895,7 +1788,6 @@ static void Mod_LoadLighting (lump_t *l)
 	{
 		loadmodel->lightdata = (byte *) Hunk_AllocName ( l->filelen*3, litfilename);
 		loadmodel->lightdatasamples = l->filelen;
-                loadmodel->lightdatasize = loadmodel->lightdatasamples;
 		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
 		out = loadmodel->lightdata;
 		memcpy (in, mod_base + l->fileofs, l->filelen);
@@ -1906,7 +1798,6 @@ static void Mod_LoadLighting (lump_t *l)
 			*out++ = d;
 			*out++ = d;
 		}
-		lighting_mode = "classic";
 		goto loadlightdir;
 	}
 
@@ -1936,30 +1827,15 @@ loadlightdir:
 
 				if (sample_count_ok)
 				{
-					// BSPX LIGHTINGDIR: raw texels as X, Y, Z (0..255), decode to ((c/255)*2-1) then normalize.
 					loadmodel->lightdirdata = (byte *) Hunk_AllocNameNoFill (bspxsize, litfilename);
 					loadmodel->lightdirsamples = samples;
 					memcpy (loadmodel->lightdirdata, in, bspxsize);
 					Q1BSPX_MarkUsed("LIGHTINGDIR");
-					loaded_bspx_dir = true;
 				}
 				else
 					Q1BSPX_MarkUnsupported("LIGHTINGDIR");
 			}
 		}
-	}
-	if (loadmodel->name[0] != '*')
-	{
-		Con_DPrintf(
-			"%s BSPX lighting: found=%s rgb=%s(%d) dir=%s(%d) source=%s\n",
-			loadmodel->name,
-			loadmodel->bspx_header ? "yes" : "no",
-			loaded_bspx_rgb ? "yes" : "no",
-			loaded_bspx_rgb ? loadmodel->lightdatasamples : 0,
-			loaded_bspx_dir ? "yes" : "no",
-			loaded_bspx_dir ? loadmodel->lightdirsamples : 0,
-			lighting_mode
-		);
 	}
 	return;
 }

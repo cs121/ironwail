@@ -19,17 +19,9 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-/* Q3MINI PLAN:
- * - Add client cvars for cmd redundancy/maxpackets and smoothing.
- * - Throttle outgoing packets (maxpackets/rate) with debug logging.
- */
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
-#include <stdint.h>
-#include "arch_def.h"
-#include "net_sys.h"
-#include "net_defs.h"
 #include "cl_postfx.h"
 #include "bgmusic.h"
 #include "../common/lightgrid.h"
@@ -43,65 +35,7 @@ cvar_t	cl_name = {"_cl_name", "player", CVAR_ARCHIVE};
 cvar_t	cl_color = {"_cl_color", "0", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet","0",CVAR_NONE};	// can be 0, 1, or 2
-cvar_t	cl_netdebug_parse = {"cl_netdebug_parse", "0", CVAR_NONE};
-cvar_t	cl_netdebug_hexdump = {"cl_netdebug_hexdump", "0", CVAR_NONE};
-cvar_t	cl_netdebug_dropbad = {"cl_netdebug_dropbad", "1", CVAR_NONE};
-cvar_t	cl_netdebug_maxdump = {"cl_netdebug_maxdump", "256", CVAR_NONE};
-cvar_t	cl_signon_chunk_debug = {"cl_signon_chunk_debug", "0", CVAR_NONE};
-cvar_t	cl_signon_debug = {"cl_signon_debug", "0", CVAR_NONE};
 cvar_t	cl_nolerp = {"cl_nolerp","0",CVAR_NONE};
-cvar_t	cl_rate = {"cl_rate", "25000", CVAR_ARCHIVE};
-cvar_t	cl_updaterate = {"cl_updaterate", "20", CVAR_ARCHIVE};
-cvar_t	cl_cmdrate = {"cl_cmdrate", "60", CVAR_ARCHIVE};
-cvar_t	cl_cmd_maxbatch = {"cl_cmd_maxbatch", "6", CVAR_ARCHIVE};
-// Q3MINI BEGIN
-cvar_t	cl_cmd_redundancy = {"cl_cmd_redundancy", "2", CVAR_ARCHIVE};
-cvar_t	cl_maxpackets = {"cl_maxpackets", "60", CVAR_ARCHIVE};
-// Q3MINI END
-cvar_t	cl_interp = {"cl_interp", "0.05", CVAR_ARCHIVE};
-cvar_t	cl_jitter = {"cl_jitter", "0.02", CVAR_ARCHIVE};
-cvar_t	cl_jitter_debug = {"cl_jitter_debug", "0", CVAR_NONE};
-cvar_t	cl_physrate = {"cl_physrate", "0", CVAR_ARCHIVE};
-cvar_t	cl_snap_debug = {"cl_snap_debug", "0", CVAR_NONE};
-cvar_t	cl_snapshot_debug = {"cl_snapshot_debug", "0", CVAR_NONE};
-cvar_t	cl_delta_reject_debug = {"cl_delta_reject_debug", "0", CVAR_NONE};
-cvar_t	cl_full_reasm_debug = {"cl_full_reasm_debug", "0", CVAR_NONE};
-cvar_t	cl_full_reasm_timeout_ms = {"cl_full_reasm_timeout_ms", "1000", CVAR_NONE};
-cvar_t	cl_snap_incomplete_timeout_ms = {"cl_snap_incomplete_timeout_ms", "1500", CVAR_NONE};
-cvar_t	cl_snap_chunk_drop = {"cl_snap_chunk_drop", "0", CVAR_NONE};
-cvar_t	cl_test_drop = {"cl_test_drop", "0", CVAR_NONE};
-cvar_t	cl_entity_timeout_ms = {"cl_entity_timeout_ms", "750", CVAR_NONE};
-cvar_t	cl_entity_dormant_ms = {"cl_entity_dormant_ms", "400", CVAR_NONE};
-cvar_t	cl_snap2_resync_blend_ms = {"cl_snap2_resync_blend_ms", "150", CVAR_NONE};
-cvar_t	cl_snap2_missing_grace_ms = {"cl_snap2_missing_grace_ms", "400", CVAR_NONE};
-cvar_t	cl_lerp_ms = {"cl_lerp_ms", "120", CVAR_NONE};
-cvar_t	cl_lerp_max_gap_ms = {"cl_lerp_max_gap_ms", "250", CVAR_NONE};
-cvar_t	cl_lerp_debug = {"cl_lerp_debug", "0", CVAR_NONE};
-cvar_t	cl_netdbg_interp = {"cl_netdbg_interp", "0", CVAR_NONE};
-cvar_t	cl_netdbg_watch_ent = {"cl_netdbg_watch_ent", "0", CVAR_NONE};
-cvar_t	cl_netdbg_pred = {"cl_netdbg_pred", "0", CVAR_NONE};
-cvar_t	cl_predict = {"cl_predict", "1", CVAR_ARCHIVE};
-// Ultra deterministic prediction core toggles.
-cvar_t	cl_pred_ultra = {"cl_pred_ultra", "1", CVAR_ARCHIVE};
-cvar_t	cl_pred_tick = {"cl_pred_tick", "60", CVAR_ARCHIVE};
-cvar_t	cl_pred_eps = {"cl_pred_eps", "0.0005", CVAR_ARCHIVE};
-// Prediction smoothing: test with moving platforms (e1m1 elevator) and slopes; compare cl_predict/cl_pred_smooth on/off.
-cvar_t	cl_pred_smooth = {"cl_pred_smooth", "1", CVAR_ARCHIVE};
-cvar_t	cl_pred_smooth_rate = {"cl_pred_smooth_rate", "10", CVAR_ARCHIVE};
-cvar_t	cl_pred_snapdist = {"cl_pred_snapdist", "64", CVAR_ARCHIVE};
-cvar_t	cl_pred_smooth_ms = {"cl_pred_smooth_ms", "120", CVAR_NONE};
-// Q3MINI BEGIN
-cvar_t	cl_netsmooth = {"cl_netsmooth", "1", CVAR_ARCHIVE};
-cvar_t	cl_netsmooth_time = {"cl_netsmooth_time", "100", CVAR_ARCHIVE};
-cvar_t	cl_netsmooth_maxdist = {"cl_netsmooth_maxdist", "12", CVAR_ARCHIVE};
-// Q3MINI END
-cvar_t	cl_pred_teleport_dist = {"cl_pred_teleport_dist", "128", CVAR_NONE};
-cvar_t	cl_pred_deadzone = {"cl_pred_deadzone", "0.25", CVAR_NONE};
-cvar_t	cl_pred_angle_deadzone = {"cl_pred_angle_deadzone", "0.1", CVAR_NONE};
-cvar_t	cl_pred_substeps = {"cl_pred_substeps", "0", CVAR_ARCHIVE};
-cvar_t	cl_pred_max_substeps = {"cl_pred_max_substeps", "6", CVAR_ARCHIVE};
-cvar_t	cl_pred_step_hz = {"cl_pred_step_hz", "60", CVAR_ARCHIVE};
-cvar_t	cl_pred_accum_debug = {"cl_pred_accum_debug", "0", CVAR_NONE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
@@ -138,944 +72,14 @@ entity_t		*cl_visedicts[MAX_VISEDICTS];
 
 extern cvar_t	r_lerpmodels, r_lerpmove; //johnfitz
 extern float	host_netinterval;	//Spike
-extern qboolean	con_forcedup;
 
 extern vec3_t	v_punchangles[2];
-extern qboolean	CL_NetDbg_PredictRan (void);
-
-#define CL_PLAYER_SNAP_HISTORY 64
-#define CL_PLAYER_SNAP_MASK_WORDS ((MAX_SCOREBOARD + 31) / 32)
-
-typedef struct cl_player_snap_s
-{
-	double		t;
-	int			servertime;
-	vec3_t		org[MAX_SCOREBOARD];
-	vec3_t		ang[MAX_SCOREBOARD];
-	uint32_t	valid_mask_words[CL_PLAYER_SNAP_MASK_WORDS];
-} cl_player_snap_t;
-
-static cl_player_snap_t	cl_psnaps[CL_PLAYER_SNAP_HISTORY];
-static int				cl_psnap_head = 0;
-static int				cl_psnap_count = 0;
-
-static int				cl_lerp_miss_pairs = 0;
-static int				cl_lerp_hold_newest = 0;
-static int				cl_lerp_hold_oldest = 0;
-static int				cl_lerp_gap_holds = 0;
-static double			cl_lerp_debug_next_time = 0.0;
-static double			cl_netdbg_move_next_time = 0.0;
-static int64_t			cl_cmd_accum_us = 0;
-static double			cl_cmd_debug_next_time = 0.0;
-static unsigned int		cl_cmds_built_since_log = 0;
-static unsigned int		cl_cmds_sent_since_log = 0;
-static unsigned int		cl_cmd_packets_since_log = 0;
-static int			cl_cmd_msec_last_generated = 0;
-static int			cl_cmds_generated_last_frame = 0;
-// Q3MINI BEGIN
-static double			cl_q3mini_next_send_time = 0.0;
-static double			cl_q3mini_rate_tokens = 0.0;
-static double			cl_q3mini_rate_last_time = 0.0;
-// Q3MINI END
-
-static inline void CL_SetValidBit (cl_player_snap_t *snap, int idx)
-{
-	int word = idx >> 5;
-	int bit = idx & 31;
-
-	if (word < 0 || word >= CL_PLAYER_SNAP_MASK_WORDS)
-		return;
-	snap->valid_mask_words[word] |= (1u << bit);
-}
-
-static inline qboolean CL_IsValidBit (const cl_player_snap_t *snap, int idx)
-{
-	int word = idx >> 5;
-	int bit = idx & 31;
-
-	if (word < 0 || word >= CL_PLAYER_SNAP_MASK_WORDS)
-		return false;
-	return (snap->valid_mask_words[word] & (1u << bit)) != 0;
-}
-
-static void CL_ClearPlayerSnaps (void)
-{
-	memset (cl_psnaps, 0, sizeof(cl_psnaps));
-	cl_psnap_head = 0;
-	cl_psnap_count = 0;
-	cl_lerp_miss_pairs = 0;
-	cl_lerp_hold_newest = 0;
-	cl_lerp_hold_oldest = 0;
-	cl_lerp_gap_holds = 0;
-	cl_lerp_debug_next_time = 0.0;
-}
-
-void CL_ResetPlayerSnaps (void)
-{
-	CL_ClearPlayerSnaps ();
-	cl_cmd_accum_us = 0;
-	cl_cmd_debug_next_time = 0.0;
-	cl_cmds_built_since_log = 0;
-	cl_cmds_sent_since_log = 0;
-	cl_cmd_packets_since_log = 0;
-}
-
-float cl_lerpfrac = 1.0f;
-qboolean cl_viewent_needs_init = true;
-
-void CL_GetPlayerSnapRange (double *out_oldest, double *out_newest, int *out_count)
-{
-	double oldest = 0.0;
-	double newest = 0.0;
-	int count = cl_psnap_count;
-	int idx;
-	int i;
-
-	if (count <= 0)
-	{
-		if (out_oldest)
-			*out_oldest = 0.0;
-		if (out_newest)
-			*out_newest = 0.0;
-		if (out_count)
-			*out_count = 0;
-		return;
-	}
-
-	idx = (cl_psnap_head - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
-	for (i = 0; i < count; i++)
-	{
-		const cl_player_snap_t *snap = &cl_psnaps[idx];
-		double t = (snap->servertime > 0 ? snap->servertime : snap->t);
-		if (i == 0)
-		{
-			oldest = t;
-			newest = t;
-		}
-		else
-		{
-			if (t < oldest)
-				oldest = t;
-			if (t > newest)
-				newest = t;
-		}
-		idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
-	}
-
-	if (out_oldest)
-		*out_oldest = oldest;
-	if (out_newest)
-		*out_newest = newest;
-	if (out_count)
-		*out_count = count;
-}
-
-static qboolean CL_ViewEntityOriginIsBad (const vec3_t origin)
-{
-	const float max_abs = 65536.0f;
-	int i;
-
-	if (VectorCompare (origin, vec3_origin))
-		return true;
-	for (i = 0; i < 3; i++)
-	{
-		if (!isfinite (origin[i]) || fabsf (origin[i]) > max_abs)
-			return true;
-	}
-
-	return false;
-}
-
-static void CL_EnsureViewEntityOrigin (const char *reason)
-{
-	entity_t *ent;
-
-	if (!cl_entities || cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
-		return;
-	ent = &cl_entities[cl.viewentity];
-	if (!CL_ViewEntityOriginIsBad (ent->origin))
-		return;
-
-	// The renderer/camera rely on the viewentity origin; repair it using simorg.
-	VectorCopy (cl.simorg, ent->origin);
-	VectorCopy (cl.simorg, ent->msg_origins[0]);
-	VectorCopy (cl.simorg, ent->msg_origins[1]);
-	if (cl_netdebug_parse.value)
-	{
-		Con_Printf ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
-			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
-		JITTER_LOG ("NETDBG: viewentity origin repaired (%s): simorg=%f %f %f\n",
-			reason ? reason : "unknown", cl.simorg[0], cl.simorg[1], cl.simorg[2]);
-	}
-}
-
-void CL_RecordPlayerSnap (void)
-{
-	cl_player_snap_t *snap;
-	int i;
-
-	if (cl.maxclients <= 0)
-		return;
-
-	snap = &cl_psnaps[cl_psnap_head];
-	memset (snap, 0, sizeof(*snap));
-	snap->t = Sys_DoubleTime ();
-	snap->servertime = cl.snapshot_time > 0.0 ? cl.snapshot_time : cl.mtime[0];
-
-	for (i = 0; i < cl.maxclients && i < MAX_SCOREBOARD; i++)
-	{
-		int entnum = i + 1;
-		entity_t *ent;
-
-		if (entnum == cl.viewentity)
-			continue;
-		if (!cl.snapshot_present || !cl.snapshot_present[entnum])
-			continue;
-		ent = &cl_entities[entnum];
-		if (!ent->model)
-			continue;
-		VectorCopy (ent->msg_origins[0], snap->org[i]);
-		VectorCopy (ent->msg_angles[0], snap->ang[i]);
-		CL_SetValidBit (snap, i);
-	}
-
-	cl_psnap_head = (cl_psnap_head + 1) % CL_PLAYER_SNAP_HISTORY;
-	cl_psnap_count = q_min (cl_psnap_count + 1, CL_PLAYER_SNAP_HISTORY);
-}
-
-qboolean CL_WorldReady (void)
-{
-	// Strict mapload gating: only allow prediction/input when the viewentity has a sane origin.
-	if (cls.signon != SIGNONS)
-		return false;
-	if (!cl.worldmodel)
-		return false;
-	if (cl.viewentity <= 0 || cl.viewentity >= cl_max_edicts)
-		return false;
-	if (!cl_entities)
-		return false;
-	if (CL_ViewEntityOriginIsBad (cl.simorg))
-		return false;
-
-	return true;
-}
-
-static void CL_NetDbg_LogMovement (const usercmd_t *cmd, qboolean sendcmd_ran)
-{
-	double now;
-	double cmd_rate;
-	double cmd_dt;
-	double cmd_accum_s;
-	vec3_t vieworg;
-	int forward = 0;
-	int side = 0;
-	int up = 0;
-	unsigned int cmd_seq = 0u;
-	unsigned int cmd_ack = cl.last_cmd_ack;
-	unsigned int cmd_ack_echo = cl.last_cmd_ack_echo;
-	unsigned int snap_ack = cl.last_snapshot_ack_sent;
-	unsigned int net_rx_seq = 0u;
-	unsigned int net_tx_seq = 0u;
-	unsigned int net_rel_recv_seq = 0u;
-	unsigned int net_rel_send_base = 0u;
-	unsigned int net_unrel_rx = 0u;
-	double net_last_msg_age = 0.0;
-	double net_last_send_age = 0.0;
-	int net_rate_budget = 0;
-	int net_disconnected = 0;
-	int net_can_send = 0;
-
-	if (!cl_netdebug_parse.value)
-		return;
-
-	now = Sys_DoubleTime ();
-	if (now < cl_netdbg_move_next_time)
-		return;
-	cl_netdbg_move_next_time = now + 1.0;
-
-	VectorCopy (vec3_origin, vieworg);
-	if (cl_entities && cl.viewentity > 0 && cl.viewentity < cl_max_edicts)
-		VectorCopy (cl_entities[cl.viewentity].origin, vieworg);
-
-	if (cmd)
-	{
-		cmd_seq = cmd->sequence;
-		forward = cmd->forwardmove;
-		side = cmd->sidemove;
-		up = cmd->upmove;
-	}
-
-	if (cls.netcon)
-	{
-		net_rx_seq = cls.netcon->receiveSequence;
-		net_tx_seq = cls.netcon->sendSequence;
-		net_rel_recv_seq = cls.netcon->reliableReceiveSequence;
-		net_rel_send_base = cls.netcon->sendReliableBase;
-		net_unrel_rx = cls.netcon->unreliableReceiveSequence;
-		net_rate_budget = cls.netcon->rate_budget;
-		net_disconnected = cls.netcon->disconnected ? 1 : 0;
-		net_can_send = cls.netcon->canSend ? 1 : 0;
-		if (cls.netcon->lastMessageTime > 0.0)
-			net_last_msg_age = now - cls.netcon->lastMessageTime;
-		if (cls.netcon->lastSendTime > 0.0)
-		net_last_send_age = now - cls.netcon->lastSendTime;
-	}
-
-	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
-	cmd_dt = 1.0 / cmd_rate;
-	cmd_accum_s = (double)cl_cmd_accum_us / 1000000.0;
-
-	Con_Printf ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
-		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d "
-		"cmd_seq %u cmd_ack %u ack_echo %u snap_ack %u cmd_accum %.4f cmd_dt %.4f "
-		"net_rx %u net_tx %u net_rel_rx %u net_rel_base %u net_unrel_rx %u "
-		"net_last_msg %.3f net_last_send %.3f net_budget %d net_can_send %d net_disc %d\n",
-		cls.signon,
-		cl.has_full_snapshot ? 1 : 0,
-		cl.need_full_snapshot ? 1 : 0,
-		cl_viewent_needs_init ? 1 : 0,
-		cl.worldmodel ? 1 : 0,
-		cl.paused ? 1 : 0,
-		cl.intermission ? 1 : 0,
-		vieworg[0], vieworg[1], vieworg[2],
-		cl.simorg[0], cl.simorg[1], cl.simorg[2],
-		forward, side, up,
-		CL_NetDbg_PredictRan () ? 1 : 0,
-		sendcmd_ran ? 1 : 0,
-		cmd_seq, cmd_ack, cmd_ack_echo, snap_ack,
-		cmd_accum_s, cmd_dt,
-		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
-		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
-	JITTER_LOG ("NETDBG move signon %d has_full %d need_full %d viewent_init %d world %d paused %d intermission %d "
-		"vieworg %.1f %.1f %.1f simorg %.1f %.1f %.1f cmd %d %d %d predict %d sendcmd %d "
-		"cmd_seq %u cmd_ack %u ack_echo %u snap_ack %u cmd_accum %.4f cmd_dt %.4f "
-		"net_rx %u net_tx %u net_rel_rx %u net_rel_base %u net_unrel_rx %u "
-		"net_last_msg %.3f net_last_send %.3f net_budget %d net_can_send %d net_disc %d\n",
-		cls.signon,
-		cl.has_full_snapshot ? 1 : 0,
-		cl.need_full_snapshot ? 1 : 0,
-		cl_viewent_needs_init ? 1 : 0,
-		cl.worldmodel ? 1 : 0,
-		cl.paused ? 1 : 0,
-		cl.intermission ? 1 : 0,
-		vieworg[0], vieworg[1], vieworg[2],
-		cl.simorg[0], cl.simorg[1], cl.simorg[2],
-		forward, side, up,
-		CL_NetDbg_PredictRan () ? 1 : 0,
-		sendcmd_ran ? 1 : 0,
-		cmd_seq, cmd_ack, cmd_ack_echo, snap_ack,
-		cmd_accum_s, cmd_dt,
-		net_rx_seq, net_tx_seq, net_rel_recv_seq, net_rel_send_base, net_unrel_rx,
-		net_last_msg_age, net_last_send_age, net_rate_budget, net_can_send, net_disconnected);
-}
-
-static float CL_LerpAngle (float a, float b, float f)
-{
-	return LerpAngleShortest (a, b, f);
-}
-
-static double CL_GetInterpDelaySeconds (void)
-{
-	double interp = cl_interp.value;
-	double jitter = cl_jitter.value;
-	double min_delay = 0.0;
-	double base;
-	double jitter_scale = 1.0;
-
-	if (interp <= 0.0)
-	{
-		if (cl_lerp_ms.value <= 0.0)
-			return 0.0;
-		interp = cl_lerp_ms.value * 0.001;
-	}
-
-	if (jitter < 0.0)
-		jitter = 0.0;
-	if (cl_updaterate.value > 0.0)
-		min_delay = 2.0 / cl_updaterate.value;
-	base = interp;
-	if (min_delay > 0.0 && base < min_delay)
-	{
-		jitter_scale = interp > 0.0 ? (interp / min_delay) : 0.0;
-		base = min_delay;
-	}
-	return base + (jitter * jitter_scale);
-}
-
-static double CL_GetInterpTargetTime (void)
-{
-	double delay = CL_GetInterpDelaySeconds ();
-	double server_time = 0.0;
-
-	if (cl.server_time_base > 0.0 && cl.server_time_skew > 0.0)
-		server_time = cl.server_time_base + (realtime - cl.server_time_skew);
-	else if (cl.clock_offset != 0.0)
-		server_time = realtime + cl.clock_offset;
-	else
-		server_time = cl.latest_server_time > 0.0 ? cl.latest_server_time : cl.mtime[0];
-
-	if (server_time > 0.0)
-		return server_time - delay;
-	return Sys_DoubleTime () - delay;
-}
-
-static int64_t CL_SecondsToUsec (double seconds)
-{
-	if (seconds <= 0.0)
-		return 0;
-	return (int64_t)(seconds * 1000000.0 + 0.5);
-}
-
-static qboolean CL_InputBlocked (void);
-
-void CL_JitterDebug_Log (void)
-{
-	double interp_delay;
-	double interp_target;
-	cl_pred_debug_t pred;
-	vec3_t render_org;
-	vec3_t render_ang;
-	qboolean has_pred;
-	qboolean local_interp_bypassed;
-	int view_origin_source;
-	float viewheight_used;
-
-	if (jitter_time_debug.value > 0.0f)
-	{
-		Con_Printf ("JITTIME CL rt=%.6f hf=%.6f clt=%.6f cmdmsec=%d cmds=%u predsteps=%d\n",
-			realtime, host_frametime, cl.time, cl_cmd_msec_last_generated, cl_cmds_generated_last_frame, sys_step_debug_info.cl_pred_steps);
-		JITTER_LOG ("JITTIME CL rt=%.6f hf=%.6f clt=%.6f cmdmsec=%d cmds=%u predsteps=%d\n",
-			realtime, host_frametime, cl.time, cl_cmd_msec_last_generated, cl_cmds_generated_last_frame, sys_step_debug_info.cl_pred_steps);
-	}
-
-	if (cl_jitter_debug.value <= 0.0f)
-		return;
-
-
-	interp_delay = CL_GetInterpDelaySeconds ();
-	interp_target = CL_GetInterpTargetTime ();
-	has_pred = CL_Predict_GetDebug (&pred);
-	local_interp_bypassed = CL_Predict_ShouldBypassInterpolation ();
-	view_origin_source = local_interp_bypassed ? 1 : 0;
-	viewheight_used = cl.viewheight;
-
-	VectorCopy (r_refdef.vieworg, render_org);
-	VectorCopy (r_refdef.viewangles, render_ang);
-
-	if (!has_pred)
-	{
-		VectorClear (pred.base_origin);
-		VectorClear (pred.base_angles);
-		VectorClear (pred.predicted_origin);
-		VectorClear (pred.predicted_angles);
-		pred.pred_error_len = 0.0f;
-		pred.pred_smooth_error_len = 0.0f;
-		pred.pred_angle_error_len = 0.0f;
-		pred.onground = false;
-		pred.ack_seq = 0;
-		pred.latest_seq = 0;
-		pred.pred_frame_found = false;
-		pred.replay_count = 0;
-		pred.snap_count = 0;
-		pred.groundent = 0;
-		pred.ground_valid = false;
-		pred.ground_valid_reason = CL_GROUND_REASON_OK;
-		pred.ground_trace_fraction = 1.0f;
-		pred.ground_trace_normal_z = 0.0f;
-		pred.ground_trace_ent = 0;
-		pred.ground_trace_startsolid = 0;
-		pred.ground_trace_allsolid = 0;
-		pred.ground_trace_fallback = 0;
-		pred.wishspeed = 0.0f;
-		pred.wishvel_z = 0.0f;
-		pred.cmd_frametime = 0.0f;
-		pred.flags = 0;
-		pred.ground_delta_len = 0.0f;
-		pred.ground_yaw_delta = 0.0f;
-		pred.ground_apply_pred = 0;
-		pred.ground_apply_render = 0;
-		pred.pred_accum_time = 0.0f;
-		pred.pred_step_dt = 0.0f;
-		pred.pred_steps = 0;
-		pred.pred_render_frac = 0.0f;
-		pred.pred_substeps = 0;
-		pred.pred_max_substeps = 0;
-		pred.pred_nullcmd = 0;
-		pred.pred_angles_normalized = 0;
-		pred.pred_apply_pred_reason = CL_PRED_APPLY_SKIP_NO_BASE;
-		pred.pred_apply_render_reason = CL_PRED_APPLY_SKIP_NO_BASE;
-		VectorClear (pred.pred_angle_delta_shortest);
-	}
-
-	Con_Printf ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"seq %u ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
-		"pred_accum %.4f step_dt %.4f steps %d render_frac %.3f "
-		"pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
-		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d "
-		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
-		"local_interp_bypassed %d viewheight %.2f view_src %d "
-		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
-		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
-		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
-		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
-		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
-		cl.time, realtime, host_frametime, interp_target, interp_delay,
-		pred.latest_seq,
-		pred.ack_seq,
-		pred.pred_frame_found ? 1 : 0,
-		pred.pred_error_len,
-		pred.pred_smooth_error_len,
-		pred.replay_count,
-		pred.snap_count,
-		pred.pred_accum_time,
-		pred.pred_step_dt,
-		pred.pred_steps,
-		pred.pred_render_frac,
-		pred.pred_substeps,
-		pred.pred_max_substeps,
-		pred.pred_nullcmd,
-		pred.pred_angles_normalized,
-		IN_DidApplyMouseDelta () ? 1 : 0,
-		pred.pred_apply_pred_reason,
-		pred.pred_apply_render_reason,
-		pred.server_update_applied ? 1 : 0,
-		pred.prediction_steps,
-		pred.pred_error_len,
-		pred.pred_angle_error_len,
-		pred.pred_angle_delta_shortest[0],
-		pred.pred_angle_delta_shortest[1],
-		pred.pred_angle_delta_shortest[2],
-		local_interp_bypassed ? 1 : 0,
-		viewheight_used,
-		view_origin_source,
-		pred.onground ? 1 : 0,
-		pred.groundent,
-		pred.ground_valid ? 1 : 0,
-		pred.ground_valid_reason,
-		pred.ground_trace_fraction,
-		pred.ground_trace_normal_z,
-		pred.ground_trace_ent,
-		pred.ground_trace_startsolid,
-		pred.ground_trace_allsolid,
-		pred.ground_trace_fallback,
-		pred.wishspeed,
-		pred.wishvel_z,
-		pred.cmd_frametime,
-		pred.flags,
-		pred.ground_delta_len,
-		pred.ground_yaw_delta,
-		pred.ground_apply_pred,
-		pred.ground_apply_render,
-		pred.base_origin[0], pred.base_origin[1], pred.base_origin[2],
-		pred.base_angles[0], pred.base_angles[1], pred.base_angles[2],
-		pred.predicted_origin[0], pred.predicted_origin[1], pred.predicted_origin[2],
-		pred.predicted_angles[0], pred.predicted_angles[1], pred.predicted_angles[2],
-		render_org[0], render_org[1], render_org[2],
-		render_ang[0], render_ang[1], render_ang[2]);
-	JITTER_LOG ("JITTERDBG cl.time %.3f realtime %.3f host_frametime %.4f interp_target %.3f interp_delay %.3f "
-		"seq %u ack %u pred_frame %d true_pred_err %.2f smooth_err %.2f replay %d snaps %d "
-		"pred_accum %.4f step_dt %.4f steps %d render_frac %.3f "
-		"pred_substeps %d/%d nullcmd %d ang_norm %d mouse_applied %d "
-		"pred_apply_reason %d render_apply_reason %d "
-		"server_applied %d pred_steps %d "
-		"pred_err %.2f ang_err %.2f ang_delta %.2f %.2f %.2f "
-		"local_interp_bypassed %d viewheight %.2f view_src %d "
-		"onground %d groundent %d ground_valid %d reason %d trace_frac %.2f trace_nz %.2f trace_ent %d trace_solid %d/%d trace_fallback %d "
-		"wishspeed %.1f wishvel_z %.1f dt %.4f flags %d ground_delta %.2f ground_yaw %.2f apply_pred %d apply_render %d "
-		"auth_org %.2f %.2f %.2f auth_ang %.2f %.2f %.2f "
-		"pred_org %.2f %.2f %.2f pred_ang %.2f %.2f %.2f "
-		"rend_org %.2f %.2f %.2f rend_ang %.2f %.2f %.2f\n",
-		cl.time, realtime, host_frametime, interp_target, interp_delay,
-		pred.latest_seq,
-		pred.ack_seq,
-		pred.pred_frame_found ? 1 : 0,
-		pred.pred_error_len,
-		pred.pred_smooth_error_len,
-		pred.replay_count,
-		pred.snap_count,
-		pred.pred_accum_time,
-		pred.pred_step_dt,
-		pred.pred_steps,
-		pred.pred_render_frac,
-		pred.pred_substeps,
-		pred.pred_max_substeps,
-		pred.pred_nullcmd,
-		pred.pred_angles_normalized,
-		IN_DidApplyMouseDelta () ? 1 : 0,
-		pred.pred_apply_pred_reason,
-		pred.pred_apply_render_reason,
-		pred.server_update_applied ? 1 : 0,
-		pred.prediction_steps,
-		pred.pred_error_len,
-		pred.pred_angle_error_len,
-		pred.pred_angle_delta_shortest[0],
-		pred.pred_angle_delta_shortest[1],
-		pred.pred_angle_delta_shortest[2],
-		local_interp_bypassed ? 1 : 0,
-		viewheight_used,
-		view_origin_source,
-		pred.onground ? 1 : 0,
-		pred.groundent,
-		pred.ground_valid ? 1 : 0,
-		pred.ground_valid_reason,
-		pred.ground_trace_fraction,
-		pred.ground_trace_normal_z,
-		pred.ground_trace_ent,
-		pred.ground_trace_startsolid,
-		pred.ground_trace_allsolid,
-		pred.ground_trace_fallback,
-		pred.wishspeed,
-		pred.wishvel_z,
-		pred.cmd_frametime,
-		pred.flags,
-		pred.ground_delta_len,
-		pred.ground_yaw_delta,
-		pred.ground_apply_pred,
-		pred.ground_apply_render,
-		pred.base_origin[0], pred.base_origin[1], pred.base_origin[2],
-		pred.base_angles[0], pred.base_angles[1], pred.base_angles[2],
-		pred.predicted_origin[0], pred.predicted_origin[1], pred.predicted_origin[2],
-		pred.predicted_angles[0], pred.predicted_angles[1], pred.predicted_angles[2],
-		render_org[0], render_org[1], render_org[2],
-		render_ang[0], render_ang[1], render_ang[2]);
-}
-
-static qboolean CL_GetInterpolatedPlayer (int player, vec3_t out_org, vec3_t out_ang)
-{
-	double render_t;
-	double max_gap_s;
-	double delay;
-	cl_player_snap_t *newest;
-	cl_player_snap_t *oldest = NULL;
-	cl_player_snap_t *snap;
-	cl_player_snap_t *prev;
-	int idx;
-	int count;
-
-	delay = CL_GetInterpDelaySeconds ();
-	if (delay <= 0.0)
-		return false;
-	if (player < 0 || player >= MAX_SCOREBOARD)
-		return false;
-	if (cl_psnap_count <= 0)
-		return false;
-
-	render_t = CL_GetInterpTargetTime ();
-	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
-
-	idx = (cl_psnap_head - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
-	newest = &cl_psnaps[idx];
-
-	if (render_t >= (newest->servertime > 0 ? newest->servertime : newest->t))
-	{
-		int prev_idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
-		cl_player_snap_t *prev_snap = &cl_psnaps[prev_idx];
-		double newest_time = (newest->servertime > 0 ? newest->servertime : newest->t);
-		double prev_time = (prev_snap->servertime > 0 ? prev_snap->servertime : prev_snap->t);
-
-		if (cl_psnap_count > 1 && CL_IsValidBit (newest, player) && CL_IsValidBit (prev_snap, player)
-			&& prev_time > 0.0 && newest_time > prev_time)
-		{
-			double dt = newest_time - prev_time;
-			double extrap_t = render_t - newest_time;
-			double max_extrap_s = 0.1;
-			int axis;
-
-			if (max_gap_s > 0.0 && max_gap_s < max_extrap_s)
-				max_extrap_s = max_gap_s;
-			if ((max_gap_s <= 0.0 || dt <= max_gap_s) && dt > 0.0)
-			{
-				float f;
-
-				if (extrap_t < 0.0)
-					extrap_t = 0.0;
-				if (extrap_t > max_extrap_s)
-					extrap_t = max_extrap_s;
-
-				for (axis = 0; axis < 3; axis++)
-				{
-					float delta = newest->org[player][axis] - prev_snap->org[player][axis];
-					if (delta > 100.0f || delta < -100.0f)
-					{
-						VectorCopy (newest->org[player], out_org);
-						VectorCopy (newest->ang[player], out_ang);
-						return true;
-					}
-				}
-
-				f = (float)((dt + extrap_t) / dt);
-				f = CLAMP (0.0f, f, 1.0f);
-				for (axis = 0; axis < 3; axis++)
-				{
-					out_org[axis] = prev_snap->org[player][axis] + f * (newest->org[player][axis] - prev_snap->org[player][axis]);
-					out_ang[axis] = CL_LerpAngle (prev_snap->ang[player][axis], newest->ang[player][axis], f);
-				}
-				return true;
-			}
-		}
-
-		if (!CL_IsValidBit (newest, player))
-			return false;
-		VectorCopy (newest->org[player], out_org);
-		VectorCopy (newest->ang[player], out_ang);
-		cl_lerp_hold_newest++;
-		return true;
-	}
-
-	prev = newest;
-	for (count = 0; count < cl_psnap_count; count++)
-	{
-		snap = &cl_psnaps[idx];
-		oldest = snap;
-		if ((snap->servertime > 0 ? snap->servertime : snap->t) <= render_t)
-		{
-			if (!CL_IsValidBit (snap, player) || !CL_IsValidBit (prev, player))
-				break;
-			if ((prev->servertime > 0 ? prev->servertime : prev->t)
-				- (snap->servertime > 0 ? snap->servertime : snap->t) > max_gap_s)
-			{
-				VectorCopy (snap->org[player], out_org);
-				VectorCopy (snap->ang[player], out_ang);
-				cl_lerp_gap_holds++;
-				return true;
-			}
-			if ((prev->servertime > 0 ? prev->servertime : prev->t)
-				<= (snap->servertime > 0 ? snap->servertime : snap->t))
-				break;
-			{
-				double snap_time = (snap->servertime > 0 ? snap->servertime : snap->t);
-				double prev_time = (prev->servertime > 0 ? prev->servertime : prev->t);
-				float f = (float)((render_t - snap_time) / (prev_time - snap_time));
-				int axis;
-				f = CLAMP (0.0f, f, 1.0f);
-				for (axis = 0; axis < 3; axis++)
-				{
-					out_org[axis] = snap->org[player][axis] + f * (prev->org[player][axis] - snap->org[player][axis]);
-					out_ang[axis] = CL_LerpAngle (snap->ang[player][axis], prev->ang[player][axis], f);
-				}
-				return true;
-			}
-		}
-		prev = snap;
-		idx = (idx - 1 + CL_PLAYER_SNAP_HISTORY) % CL_PLAYER_SNAP_HISTORY;
-	}
-
-	if (oldest && render_t < (oldest->servertime > 0 ? oldest->servertime : oldest->t)
-		&& CL_IsValidBit (oldest, player))
-	{
-		VectorCopy (oldest->org[player], out_org);
-		VectorCopy (oldest->ang[player], out_ang);
-		cl_lerp_hold_oldest++;
-		return true;
-	}
-
-	cl_lerp_miss_pairs++;
-	return false;
-}
-
-static qboolean CL_GetInterpolatedEntity (int entnum, vec3_t out_org, vec3_t out_ang)
-{
-	double render_t;
-	double max_gap_s;
-	double max_extrap_s;
-	double delay;
-	cl_entity_snap_t *snaps;
-	cl_entity_snap_t *newest;
-	cl_entity_snap_t *oldest = NULL;
-	cl_entity_snap_t *snap;
-	cl_entity_snap_t *prev;
-	int snap_count;
-	int head;
-	int idx;
-	int axis;
-
-	delay = CL_GetInterpDelaySeconds ();
-	if (delay <= 0.0)
-		return false;
-	if (!cl.entity_snapshots || !cl.entity_snap_head || !cl.entity_snap_count)
-		return false;
-	if (entnum <= 0 || entnum >= cl_max_edicts)
-		return false;
-
-	snap_count = cl.entity_snap_count[entnum];
-	if (snap_count <= 0)
-		return false;
-
-	render_t = CL_GetInterpTargetTime ();
-	max_gap_s = cl_lerp_max_gap_ms.value * 0.001;
-	max_extrap_s = 0.05;
-	if (max_gap_s > 0.0 && max_gap_s < max_extrap_s)
-		max_extrap_s = max_gap_s;
-
-	snaps = &cl.entity_snapshots[entnum * CL_ENTITY_SNAP_HISTORY];
-	head = cl.entity_snap_head[entnum];
-	newest = &snaps[head];
-
-	if (snap_count == 1)
-	{
-		VectorCopy (newest->origin, out_org);
-		VectorCopy (newest->angles, out_ang);
-		return true;
-	}
-
-	if (render_t >= newest->servertime)
-	{
-		int prev_idx = (head - 1 + CL_ENTITY_SNAP_HISTORY) % CL_ENTITY_SNAP_HISTORY;
-		prev = &snaps[prev_idx];
-		if (prev->servertime > 0.0 && newest->servertime > prev->servertime)
-		{
-			double dt = newest->servertime - prev->servertime;
-			double extrap_t = render_t - newest->servertime;
-
-			if ((max_gap_s <= 0.0 || dt <= max_gap_s) && dt > 0.0)
-			{
-				float f;
-
-				if (extrap_t < 0.0)
-					extrap_t = 0.0;
-				if (extrap_t > max_extrap_s)
-					extrap_t = max_extrap_s;
-
-				for (axis = 0; axis < 3; axis++)
-				{
-					float delta = newest->origin[axis] - prev->origin[axis];
-					if (delta > 100.0f || delta < -100.0f)
-					{
-						VectorCopy (newest->origin, out_org);
-						VectorCopy (newest->angles, out_ang);
-						return true;
-					}
-				}
-
-				f = (float)((dt + extrap_t) / dt);
-				if (f < 0.0f || f > 1.0f)
-					f = 1.0f;
-				for (axis = 0; axis < 3; axis++)
-				{
-					out_org[axis] = prev->origin[axis] + f * (newest->origin[axis] - prev->origin[axis]);
-					out_ang[axis] = CL_LerpAngle (prev->angles[axis], newest->angles[axis], f);
-				}
-				return true;
-			}
-		}
-		VectorCopy (newest->origin, out_org);
-		VectorCopy (newest->angles, out_ang);
-		return true;
-	}
-
-	prev = newest;
-	idx = head;
-	for (idx = 0; idx < snap_count; idx++)
-	{
-		snap = &snaps[head];
-		oldest = snap;
-		if (snap->servertime <= render_t)
-		{
-			double span = prev->servertime - snap->servertime;
-			float f;
-
-			if (span <= 0.0)
-			{
-				VectorCopy (prev->origin, out_org);
-				VectorCopy (prev->angles, out_ang);
-				return true;
-			}
-			if (max_gap_s > 0.0 && span > max_gap_s)
-			{
-				VectorCopy (snap->origin, out_org);
-				VectorCopy (snap->angles, out_ang);
-				return true;
-			}
-
-			for (axis = 0; axis < 3; axis++)
-			{
-				float delta = prev->origin[axis] - snap->origin[axis];
-				if (delta > 100.0f || delta < -100.0f)
-				{
-					VectorCopy (prev->origin, out_org);
-					VectorCopy (prev->angles, out_ang);
-					return true;
-				}
-			}
-
-			f = (float)((render_t - snap->servertime) / span);
-			f = CLAMP (0.0f, f, 1.0f);
-			for (axis = 0; axis < 3; axis++)
-			{
-				out_org[axis] = snap->origin[axis] + f * (prev->origin[axis] - snap->origin[axis]);
-				out_ang[axis] = CL_LerpAngle (snap->angles[axis], prev->angles[axis], f);
-			}
-			return true;
-		}
-		prev = snap;
-		head = (head - 1 + CL_ENTITY_SNAP_HISTORY) % CL_ENTITY_SNAP_HISTORY;
-	}
-
-	if (oldest && render_t < oldest->servertime)
-	{
-		VectorCopy (oldest->origin, out_org);
-		VectorCopy (oldest->angles, out_ang);
-		return true;
-	}
-
-	return false;
-}
-
-static void CL_ApplySnapshotResyncBlend (int entnum, vec3_t org, vec3_t ang)
-{
-	double end_time;
-	double start_time;
-	double duration;
-	double frac;
-	double now;
-	int axis;
-
-	if (!cl.snapshot_resync_end_time || !cl.snapshot_resync_start_time
-		|| !cl.snapshot_resync_from_origin || !cl.snapshot_resync_from_angles)
-		return;
-	if (entnum <= 0 || entnum >= cl_max_edicts)
-		return;
-
-	end_time = cl.snapshot_resync_end_time[entnum];
-	if (end_time <= 0.0)
-		return;
-	start_time = cl.snapshot_resync_start_time[entnum];
-	duration = end_time - start_time;
-	if (duration <= 0.0)
-	{
-		cl.snapshot_resync_end_time[entnum] = 0.0;
-		return;
-	}
-
-	now = cl.time;
-	if (now >= end_time)
-	{
-		cl.snapshot_resync_end_time[entnum] = 0.0;
-		return;
-	}
-
-	if (now <= start_time)
-		frac = 0.0;
-	else
-		frac = (now - start_time) / duration;
-	frac = CLAMP (0.0, frac, 1.0);
-
-	for (axis = 0; axis < 3; axis++)
-	{
-		float from = cl.snapshot_resync_from_origin[entnum][axis];
-		org[axis] = from + (float)frac * (org[axis] - from);
-		ang[axis] = CL_LerpAngle (cl.snapshot_resync_from_angles[entnum][axis], ang[axis], (float)frac);
-	}
-}
 
 void CL_FreeState(void)
 {
         int i;
         for (i = 0; i < MAX_CL_STATS; i++)
                 free (cl.statss[i]);
-        if (cl.signon_frag_buf)
-                Z_Free (cl.signon_frag_buf);
         Lightgrid_Free(cl.lightgrid);
         PR_ClearProgs (&cl.qcvm);
         memset (&cl, 0, sizeof(cl));
@@ -1089,8 +93,6 @@ CL_ClearState
 */
 void CL_ClearState (void)
 {
-	int i;
-
 	if (cl.qcvm.extfuncs.CSQC_Shutdown)
 	{
 		PR_SwitchQCVM(&cl.qcvm);
@@ -1104,12 +106,6 @@ void CL_ClearState (void)
 
 // wipe the entire cl structure
 	CL_FreeState ();
-	CL_ClearPlayerSnaps ();
-	// Q3MINI BEGIN
-	cl_q3mini_next_send_time = 0.0;
-	cl_q3mini_rate_tokens = 0.0;
-	cl_q3mini_rate_last_time = 0.0;
-	// Q3MINI END
 
 	SZ_Clear (&cls.message);
 
@@ -1123,106 +119,9 @@ void CL_ClearState (void)
 	//johnfitz -- cl_entities is now dynamically allocated
 	cl_max_edicts = CLAMP (MIN_EDICTS,(int)max_edicts.value,MAX_EDICTS);
 	cl_entities = (entity_t *) Hunk_AllocName (cl_max_edicts*sizeof(entity_t), "cl_entities");
-	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
-	{
-		cl.snapshot_baselines[i] = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_base");
-		cl.snapshot_baseline_present[i] = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_present");
-	}
-	cl.snapshot_baseline = cl.snapshot_baselines[0];
-	cl.snapshot_present = cl.snapshot_baseline_present[0];
-	cl.snapshot_active = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_active");
-	cl.snapshot_last_update_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_time");
-	cl.snapshot_missing_grace_until = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_missing_grace");
-	cl.snapshot_resync_start_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_resync_start");
-	cl.snapshot_resync_end_time = (double *) Hunk_AllocName (cl_max_edicts*sizeof(double), "cl_snap_resync_end");
-	cl.snapshot_resync_from_origin = (vec3_t *) Hunk_AllocName (cl_max_edicts*sizeof(vec3_t), "cl_snap_resync_org");
-	cl.snapshot_resync_from_angles = (vec3_t *) Hunk_AllocName (cl_max_edicts*sizeof(vec3_t), "cl_snap_resync_ang");
-	cl.snapshot_chunk = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_chunk");
-	cl.snapshot_chunk_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_chunk_present");
-	cl.snapshot_stage = (snapshot_state_t *) Hunk_AllocName (cl_max_edicts*sizeof(snapshot_state_t), "cl_snap_stage");
-	cl.snapshot_stage_present = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_present");
-	cl.snapshot_stage_remove = (byte *) Hunk_AllocName (cl_max_edicts*sizeof(byte), "cl_snap_stage_remove");
-	cl.entity_snapshots = (cl_entity_snap_t *) Hunk_AllocName (cl_max_edicts * CL_ENTITY_SNAP_HISTORY * sizeof(cl_entity_snap_t), "cl_ent_snaps");
-	cl.entity_snap_head = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_head");
-	cl.entity_snap_count = (byte *) Hunk_AllocName (cl_max_edicts * sizeof(byte), "cl_ent_snap_count");
 	//johnfitz
-	if (cl_entities)
-		memset (cl_entities, 0, cl_max_edicts * sizeof(entity_t));
-	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
-	{
-		if (cl.snapshot_baseline_present[i])
-			memset (cl.snapshot_baseline_present[i], 0, cl_max_edicts * sizeof(byte));
-		cl.snapshot_baseline_valid[i] = 0;
-		cl.snapshot_baseline_seqs[i] = 0;
-	}
-	cl.snapshot_baseline_head = 0;
-	cl.snapshot_baseline_index = -1;
-	if (cl.snapshot_active)
-		memset (cl.snapshot_active, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_last_update_time)
-		memset (cl.snapshot_last_update_time, 0, cl_max_edicts * sizeof(double));
-	if (cl.snapshot_missing_grace_until)
-		memset (cl.snapshot_missing_grace_until, 0, cl_max_edicts * sizeof(double));
-	if (cl.snapshot_resync_start_time)
-		memset (cl.snapshot_resync_start_time, 0, cl_max_edicts * sizeof(double));
-	if (cl.snapshot_resync_end_time)
-		memset (cl.snapshot_resync_end_time, 0, cl_max_edicts * sizeof(double));
-	if (cl.snapshot_resync_from_origin)
-		memset (cl.snapshot_resync_from_origin, 0, cl_max_edicts * sizeof(vec3_t));
-	if (cl.snapshot_resync_from_angles)
-		memset (cl.snapshot_resync_from_angles, 0, cl_max_edicts * sizeof(vec3_t));
-	if (cl.snapshot_chunk_present)
-		memset (cl.snapshot_chunk_present, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_stage_present)
-		memset (cl.snapshot_stage_present, 0, cl_max_edicts * sizeof(byte));
-	if (cl.snapshot_stage_remove)
-		memset (cl.snapshot_stage_remove, 0, cl_max_edicts * sizeof(byte));
-	if (cl.entity_snapshots)
-		memset (cl.entity_snapshots, 0, cl_max_edicts * CL_ENTITY_SNAP_HISTORY * sizeof(cl_entity_snap_t));
-	if (cl.entity_snap_head)
-		memset (cl.entity_snap_head, 0, cl_max_edicts * sizeof(byte));
-	if (cl.entity_snap_count)
-		memset (cl.entity_snap_count, 0, cl_max_edicts * sizeof(byte));
-	cl.mtime[0] = 0.0;
-	cl.mtime[1] = 0.0;
-	cl.time = 0.0;
-	cl.oldtime = 0.0;
-	cl_lerpfrac = 1.0f;
-	cl_viewent_needs_init = true;
-	for (i = 0; i < CL_SNAPSHOT_CHUNK_INFLIGHT; i++)
-	{
-		cl_snapshot_chunk_asm_t *chunk = &cl.snapshot_chunk_assemblies[i];
-		int j;
-
-		for (j = 0; j < CL_SNAPSHOT_MAX_CHUNKS; j++)
-		{
-			if (chunk->buffers[j])
-				Z_Free (chunk->buffers[j]);
-			chunk->buffers[j] = NULL;
-			chunk->sizes[j] = 0;
-			chunk->received_mask[j] = 0;
-		}
-		memset (chunk, 0, sizeof(*chunk));
-	}
-	cl.snapshot_baseline_seq = 0;
-	cl.snap_last_applied_seq = 0;
-	cl.snap_last_complete_seq = 0;
-	cl.snap_last_incomplete_seq = 0;
-	cl.snap_last_incomplete = false;
-	cl.snap_incomplete_start_time = 0;
-	cl.has_full_snapshot = false;
-	cl.need_full_snapshot = true;
-	cl.has_valid_worldstate = false;
-	cl.snap_parse_errors = 0;
-	cl.snap_delta_mismatch = 0;
-	cl.snap_incomplete_count = 0;
-	cl.snap_rem0_seq = 0;
-	cl.snap_rem0_base = 0;
-	cl.snap_rem0_count = 0;
 
 	memset (v_punchangles, 0, sizeof (v_punchangles));
-
-	CL_Predict_Clear ();
 }
 
 /*
@@ -1335,12 +234,6 @@ void CL_SignonReply (void)
 
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, va("color %i %i\n", ((int)cl_color.value)>>4, ((int)cl_color.value)&15));
-
-		MSG_WriteByte (&cls.message, clc_stringcmd);
-		MSG_WriteString (&cls.message, va("rate %d\n", (int)cl_rate.value));
-
-		MSG_WriteByte (&cls.message, clc_stringcmd);
-		MSG_WriteString (&cls.message, va("updaterate %d\n", (int)cl_updaterate.value));
 
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		sprintf (str, "spawn %s", cls.spawnparms);
@@ -1519,10 +412,9 @@ float	CL_LerpPoint (void)
 
 	f = cl.mtime[0] - cl.mtime[1];
 
-	if (f <= 0.0f || cls.timedemo || (sv.active && !host_netinterval))
+	if (!f || cls.timedemo || (sv.active && !host_netinterval))
 	{
 		cl.time = cl.mtime[0];
-		cl.mtime[1] = cl.mtime[0];
 		return 1;
 	}
 
@@ -1534,11 +426,17 @@ float	CL_LerpPoint (void)
 
 	frac = (cl.time - cl.mtime[1]) / f;
 
-	if (frac < 0.0f || frac > 1.0f)
+	if (frac < 0)
 	{
-		cl.time = cl.mtime[0];
-		cl.mtime[1] = cl.mtime[0];
-		frac = 1.0f;
+		if (frac < -0.01)
+			cl.time = cl.mtime[1];
+		frac = 0;
+	}
+	else if (frac > 1)
+	{
+		if (frac > 1.01)
+			cl.time = cl.mtime[0];
+		frac = 1;
 	}
 
 	//johnfitz -- better nolerp behavior
@@ -1652,7 +550,7 @@ void CL_RelinkEntities (void)
 {
 	entity_t	*ent;
 	int			i, j;
-	float		frac, f;
+	float		frac, f, d;
 	vec3_t		delta;
 	float		bobjrotate;
 	dlight_t	*dl;
@@ -1660,7 +558,6 @@ void CL_RelinkEntities (void)
 
 // determine partial update time
 	frac = CL_LerpPoint ();
-	cl_lerpfrac = frac;
 
 	cl_numvisedicts = 0;
 
@@ -1678,7 +575,12 @@ void CL_RelinkEntities (void)
 	// interpolate the angles
 		for (j=0 ; j<3 ; j++)
 		{
-			cl.viewangles[j] = LerpAngleShortest (cl.mviewangles[1][j], cl.mviewangles[0][j], frac);
+			d = cl.mviewangles[0][j] - cl.mviewangles[1][j];
+			if (d > 180)
+				d -= 360;
+			else if (d < -180)
+				d += 360;
+			cl.viewangles[j] = cl.mviewangles[1][j] + frac*d;
 		}
 	}
 
@@ -1688,7 +590,6 @@ void CL_RelinkEntities (void)
 	for (i=1,ent=cl_entities+1 ; i<cl.num_entities ; i++,ent++)
 	{
 		qboolean teleported = false;
-		qboolean bypass_local_interp = false;
 
 		if (!ent->model)
 		{	// empty slot
@@ -1700,65 +601,15 @@ void CL_RelinkEntities (void)
 			continue;
 		}
 
-// if the object wasn't included in the last packet, remove it (or hold briefly)
+// if the object wasn't included in the last packet, remove it
 		if (ent->msgtime != cl.mtime[0])
 		{
-			qboolean keepalive = false;
-			double timeout_s = cl_entity_timeout_ms.value / 1000.0;
-			double dormant_s = cl_entity_dormant_ms.value / 1000.0;
-			double grace_s = 0.0;
-
-			if (cl.snap_last_incomplete)
-			{
-				keepalive = true;
-			}
-			if (cl.snapshot_missing_grace_until)
-			{
-				double grace_until = cl.snapshot_missing_grace_until[i];
-				if (grace_until > cl.time)
-					keepalive = true;
-				else if (grace_until > 0.0)
-					cl.snapshot_missing_grace_until[i] = 0.0;
-			}
-
-			if (dormant_s > 0.0)
-				grace_s = dormant_s;
-			if (timeout_s > 0.0 && timeout_s > grace_s)
-				grace_s = timeout_s;
-			if (grace_s > 0.0 && cl.snapshot_active && cl.snapshot_active[i] && cl.snapshot_last_update_time)
-			{
-				if (grace_s > 0.0 && cl.time - cl.snapshot_last_update_time[i] <= grace_s)
-				{
-					keepalive = true;
-				}
-			}
-			else
-			{
-				keepalive = true;
-			}
-
-			if (keepalive)
-			{
-				ent->msgtime = cl.mtime[0];
-			}
-			else
-			{
-				ent->model = NULL;
-				ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM; //johnfitz -- next time this entity slot is reused, the lerp will need to be reset
-				if (cl.snapshot_active)
-					cl.snapshot_active[i] = 0;
-				continue;
-			}
+			ent->model = NULL;
+			ent->lerpflags |= LERP_RESETMOVE|LERP_RESETANIM; //johnfitz -- next time this entity slot is reused, the lerp will need to be reset
+			continue;
 		}
 
-		if (ent == &cl_entities[cl.viewentity] && CL_Predict_ShouldBypassInterpolation ())
-			bypass_local_interp = true;
-
-		if (bypass_local_interp)
-		{
-			VectorCopy (cl.simorg, ent->origin);
-		}
-		else if (ent->forcelink)
+		if (ent->forcelink)
 		{	// the entity was not updated in the last message
 			// so move to the final spot
 			VectorCopy (ent->msg_origins[0], ent->origin);
@@ -1767,11 +618,6 @@ void CL_RelinkEntities (void)
 		else
 		{	// if the delta is large, assume a teleport and don't lerp
 			f = frac;
-			if (ent == &cl_entities[cl.viewentity] && cl_viewent_needs_init)
-			{
-				f = 1.0f;
-				ent->lerpflags |= LERP_RESETMOVE;
-			}
 			for (j=0 ; j<3 ; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
@@ -1793,35 +639,12 @@ void CL_RelinkEntities (void)
 			{
 				ent->origin[j] = ent->msg_origins[1][j] + f*delta[j];
 
-				ent->angles[j] = LerpAngleShortest (ent->msg_angles[1][j], ent->msg_angles[0][j], f);
-			}
-		}
-
-		if (ent == &cl_entities[cl.viewentity] && !cl.onground)
-			VectorCopy (cl.simorg, ent->origin);
-
-		if (i <= cl.maxclients && i != cl.viewentity)
-		{
-			vec3_t lerp_org;
-			vec3_t lerp_ang;
-
-			if (CL_GetInterpolatedPlayer (i - 1, lerp_org, lerp_ang))
-			{
-				VectorCopy (lerp_org, ent->origin);
-				VectorCopy (lerp_ang, ent->angles);
-				CL_ApplySnapshotResyncBlend (i, ent->origin, ent->angles);
-			}
-		}
-		else if (i > cl.maxclients)
-		{
-			vec3_t lerp_org;
-			vec3_t lerp_ang;
-
-			if (CL_GetInterpolatedEntity (i, lerp_org, lerp_ang))
-			{
-				VectorCopy (lerp_org, ent->origin);
-				VectorCopy (lerp_ang, ent->angles);
-				CL_ApplySnapshotResyncBlend (i, ent->origin, ent->angles);
+				d = ent->msg_angles[0][j] - ent->msg_angles[1][j];
+				if (d > 180)
+					d -= 360;
+				else if (d < -180)
+					d += 360;
+				ent->angles[j] = ent->msg_angles[1][j] + f*d;
 			}
 		}
 
@@ -1953,26 +776,6 @@ void CL_RelinkEntities (void)
 
 	if (viewentity_teleported)
 		cl.teleport_fx_time = cl.time;
-
-	if (cl_lerp_debug.value > 0.0f)
-	{
-		double now = Sys_DoubleTime ();
-
-		if (now >= cl_lerp_debug_next_time)
-		{
-			double delay = CL_GetInterpDelaySeconds ();
-			double target_time = CL_GetInterpTargetTime ();
-			Con_Printf ("lerp: miss_pairs %d hold_newest %d hold_oldest %d gap_holds %d "
-				"interp_delay %.3f target_time %.3f psnaps %d\n",
-				cl_lerp_miss_pairs, cl_lerp_hold_newest, cl_lerp_hold_oldest, cl_lerp_gap_holds,
-				delay, target_time, cl_psnap_count);
-			cl_lerp_miss_pairs = 0;
-			cl_lerp_hold_newest = 0;
-			cl_lerp_hold_oldest = 0;
-			cl_lerp_gap_holds = 0;
-			cl_lerp_debug_next_time = now + 1.0;
-		}
-	}
 }
 
 
@@ -1992,9 +795,6 @@ int CL_ReadFromServer (void)
 	beam_t		*b; //johnfitz
 	int			i; //johnfitz
 
-	if (sys_step_debug.value > 0.0f)
-		sys_step_debug_info.cl_readfromserver_calls++;
-
 	CL_AdvanceTime ();
 
 	do
@@ -2012,7 +812,6 @@ int CL_ReadFromServer (void)
 	if (cl_shownet.value)
 		Con_Printf ("\n");
 
-	CL_EnsureViewEntityOrigin ("render");
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
 
@@ -2067,11 +866,6 @@ Spike: split from CL_SendCmd, to do clientside viewangle changes separately from
 */
 void CL_AccumulateCmd (void)
 {
-	CL_Predict_BeginFrame ();
-	if (CL_InputBlocked ())
-		// Force prediction to stop immediately when UI/console owns input.
-		CL_Predict_ForceNullCmd ();
-	CL_Predict_Reapply ();
 	if (cls.signon == SIGNONS)
 	{
 		//basic keyboard looking
@@ -2087,279 +881,29 @@ void CL_AccumulateCmd (void)
 CL_SendCmd
 =================
 */
-static qboolean CL_InputBlocked (void)
-{
-	return key_dest != key_game || con_forcedup;
-}
-
 void CL_SendCmd (void)
 {
 	usercmd_t		cmd;
-	double			cmd_rate;
-	double			cmd_dt;
-	int64_t			cmd_dt_us;
-	int64_t			max_accum_us;
-	int64_t			frame_us;
-	int				max_catchup;
-	int				cmds_built;
-	qboolean		send_move;
-	qboolean		sendcmd_ran;
-	// Q3MINI BEGIN
-	int				packet_bytes = 0;
-	int				packet_cmd_count = 0;
-	int				maxpackets = 0;
-	double			maxpackets_interval = 0.0;
-	qboolean		send_allowed = true;
-	qboolean		sent_move = false;
-	// Q3MINI END
-	static int		last_cmd_msec = -1;
 
 	if (cls.state != ca_connected)
 		return;
 
-	if (sys_step_debug.value > 0.0f)
-		sys_step_debug_info.cl_sendcmd_calls++;
-
-	cmd_rate = cl_cmdrate.value > 0.0 ? cl_cmdrate.value : 60.0;
-	cmd_dt = 1.0 / cmd_rate;
-	cmd_dt_us = CL_SecondsToUsec (cmd_dt);
-	if (cmd_dt_us <= 0)
-		cmd_dt_us = 1;
-	max_catchup = (int)cl_cmd_maxbatch.value;
-	if (max_catchup < 1)
-		max_catchup = 1;
-
-	frame_us = CL_SecondsToUsec (host_rawframetime);
-	if (sys_step_debug.value > 0.0f)
-		sys_step_debug_info.cl_cmd_accum_us_before = cl_cmd_accum_us;
-	cl_cmd_accum_us += frame_us;
-	if (cl_cmd_accum_us < 0)
-		cl_cmd_accum_us = 0;
-	max_accum_us = cmd_dt_us * (int64_t)max_catchup * 2;
-	if (cl_cmd_accum_us > max_accum_us)
+	if (cls.signon == SIGNONS)
 	{
-		if (sys_step_debug.value > 0.0f)
-			sys_step_debug_info.cl_cmds_dropped++;
-		cl_cmd_accum_us = max_accum_us;
+	// get basic movement from keyboard
+		CL_BaseMove (&cmd);
+
+	// allow mice or other external controllers to add to the move
+		cmd.forwardmove	+= cl.pendingcmd.forwardmove;
+		cmd.sidemove	+= cl.pendingcmd.sidemove;
+		cmd.upmove		+= cl.pendingcmd.upmove;
+
+	// send the unreliable message
+		CL_SendMove (&cmd);
 	}
-
-	cmds_built = 0;
-	send_move = false;
-	sendcmd_ran = false;
-
-	while (cl_cmd_accum_us >= cmd_dt_us && cmds_built < max_catchup)
-	{
-		int cmd_msec = (int)((cmd_dt_us + 500) / 1000);
-
-			if (cmd_msec < 1)
-			{
-				if (sys_step_debug.value > 0.0f)
-					sys_step_debug_info.cl_cmd_msec_zero++;
-				if (jitter_time_debug.value > 0.0f)
-				{
-					Con_Printf ("JITWARN cmdmsec_zero_or_out_of_range\n");
-					JITTER_LOG ("JITWARN cmdmsec_zero_or_out_of_range\n");
-				}
-				cmd_msec = 1;
-			}
-		else if (cmd_msec > 255)
-		{
-			if (sys_step_debug.value > 0.0f)
-				sys_step_debug_info.cl_cmd_msec_over++;
-			if (jitter_time_debug.value > 0.0f)
-			{
-				Con_Printf ("JITWARN cmdmsec_zero_or_out_of_range\n");
-				JITTER_LOG ("JITWARN cmdmsec_zero_or_out_of_range\n");
-			}
-			cmd_msec = 255;
-		}
-		if (sys_step_debug.value > 0.0f)
-		{
-			sys_step_debug_info.cl_cmd_msec_min = q_min (sys_step_debug_info.cl_cmd_msec_min, cmd_msec);
-			sys_step_debug_info.cl_cmd_msec_max = q_max (sys_step_debug_info.cl_cmd_msec_max, cmd_msec);
-			sys_step_debug_info.cl_cmd_msec_last = cmd_msec;
-			if (last_cmd_msec >= 0 && abs (cmd_msec - last_cmd_msec) >= 20)
-				sys_step_debug_info.cl_cmd_msec_wild++;
-		}
-		last_cmd_msec = cmd_msec;
-
-		if (cls.signon == SIGNONS)
-		{
-		// get basic movement from keyboard
-			CL_BaseMove (&cmd);
-
-		// allow mice or other external controllers to add to the move
-			cmd.forwardmove	+= cl.pendingcmd.forwardmove;
-			cmd.sidemove	+= cl.pendingcmd.sidemove;
-			cmd.upmove		+= cl.pendingcmd.upmove;
-
-			{
-				int axis;
-
-				VectorCopy (cl.viewangles, cmd.viewangles);
-				for (axis = 0; axis < 3; axis++)
-					cmd.viewangles[axis] = NormalizeAngle180 (cmd.viewangles[axis]);
-			}
-			cmd.buttons = 0;
-			if ( in_attack.state & 3 )
-				cmd.buttons |= 1;
-			if (in_jump.state & 3)
-				cmd.buttons |= 2;
-			cmd.impulse = in_impulse;
-			if (CL_InputBlocked ())
-			{
-				// If UI/console owns input, ensure we send a null command to stop movement.
-				cmd.forwardmove = 0;
-				cmd.sidemove = 0;
-				cmd.upmove = 0;
-				cmd.buttons = 0;
-				cmd.impulse = 0;
-				CL_Predict_SetNullCmdInjected (true);
-			}
-
-			// NOTE: Never gate command generation/sending on snapshot readiness.
-			// Prediction handles world-ready checks; the server still needs cmds every tick.
-			CL_Predict_SetupCmd (&cmd);
-
-			in_attack.state &= ~2;
-			in_jump.state &= ~2;
-			in_impulse = 0;
-			send_move = true;
-			cl_cmds_built_since_log++;
-		}
-		else
-		{
-			send_move = true;
-		}
-
-		cl_cmd_accum_us -= cmd_dt_us;
-		cmds_built++;
-		sendcmd_ran = true;
-	}
-
-	cl_cmds_generated_last_frame = cmds_built;
-	if (cmds_built > 0 && last_cmd_msec >= 0)
-		cl_cmd_msec_last_generated = last_cmd_msec;
-
-	if (sys_step_debug.value > 0.0f)
-	{
-		if (cmds_built == 0)
-		{
-			sys_step_debug_info.cl_cmd_no_cmd++;
-			sys_step_debug_info.cl_cmd_skipped_frame = 1;
-		}
-		sys_step_debug_info.cl_cmds_built += cmds_built;
-		sys_step_debug_info.cl_cmd_accum_us_after = cl_cmd_accum_us;
-	}
-
-	if (cmds_built >= max_catchup && cl_cmd_accum_us >= cmd_dt_us && cl_netdebug_parse.value)
-	{
-		Con_Printf ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
-			(double)cl_cmd_accum_us / 1000000.0, cmd_dt);
-		JITTER_LOG ("NETDBG cmdrate catchup clamped accum %.6f dt %.6f\n",
-			(double)cl_cmd_accum_us / 1000000.0, cmd_dt);
-	}
-
-	if (send_move)
-	{
-		if (cls.signon == SIGNONS)
-		{
-			// Q3MINI BEGIN
-			packet_bytes = CL_CalcMovePacketBytes (&cmd, &packet_cmd_count);
-			{
-				maxpackets = (int)cl_maxpackets.value;
-
-				if (maxpackets < 10)
-					maxpackets = 10;
-				if (maxpackets > 125)
-					maxpackets = 125;
-				maxpackets_interval = 1.0 / (double)maxpackets;
-				if (realtime < cl_q3mini_next_send_time)
-					send_allowed = false;
-				if (!send_allowed && net_dbg_q3mini.value > 0.0f)
-				{
-					Con_Printf ("NETDBG q3mini send_skip maxpackets=%d next=%.3f now=%.3f\n",
-						maxpackets, cl_q3mini_next_send_time, realtime);
-					JITTER_LOG ("NETDBG q3mini send_skip maxpackets=%d next=%.3f now=%.3f\n",
-						maxpackets, cl_q3mini_next_send_time, realtime);
-				}
-			}
-			if (send_allowed && cl_rate.value > 0.0f)
-			{
-				double now = realtime;
-				double rate = cl_rate.value;
-				double cap = rate;
-
-				if (cl_q3mini_rate_last_time <= 0.0 || now <= cl_q3mini_rate_last_time)
-				{
-					cl_q3mini_rate_last_time = now;
-					if (cl_q3mini_rate_tokens <= 0.0)
-						cl_q3mini_rate_tokens = cap;
-				}
-				cl_q3mini_rate_tokens += (now - cl_q3mini_rate_last_time) * rate;
-				cl_q3mini_rate_last_time = now;
-				if (cl_q3mini_rate_tokens > cap)
-					cl_q3mini_rate_tokens = cap;
-				if (packet_bytes > 0 && cl_q3mini_rate_tokens < (double)packet_bytes)
-				{
-					send_allowed = false;
-					if (net_dbg_q3mini.value > 0.0f)
-					{
-						Con_Printf ("NETDBG q3mini send_skip rate=%.0f tokens=%.1f want=%d\n",
-							rate, cl_q3mini_rate_tokens, packet_bytes);
-						JITTER_LOG ("NETDBG q3mini send_skip rate=%.0f tokens=%.1f want=%d\n",
-							rate, cl_q3mini_rate_tokens, packet_bytes);
-					}
-				}
-			}
-			// Q3MINI END
-			if (send_allowed)
-			{
-				CL_NetDbg_LogMovement (&cmd, sendcmd_ran);
-				CL_SendMove (&cmd);
-				// Q3MINI BEGIN
-				if (packet_bytes > 0 && cl_rate.value > 0.0f)
-					cl_q3mini_rate_tokens = q_max (0.0, cl_q3mini_rate_tokens - (double)packet_bytes);
-				sent_move = true;
-				if (maxpackets_interval > 0.0)
-					cl_q3mini_next_send_time = realtime + maxpackets_interval;
-				// Q3MINI END
-				cl_cmds_sent_since_log++;
-				if (sys_step_debug.value > 0.0f)
-					sys_step_debug_info.cl_cmds_sent++;
-			}
-		}
-		else
-		{
-			CL_NetDbg_LogMovement (NULL, sendcmd_ran);
-			CL_SendMove (NULL);
-		}
-		if (send_allowed)
-		{
-			cl_cmd_packets_since_log++;
-			if (sys_step_debug.value > 0.0f)
-				sys_step_debug_info.cl_cmd_packets++;
-		}
-	}
-	if (send_move && cls.signon == SIGNONS && sent_move)
-		memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
-
-	if (cl_netdebug_parse.value)
-	{
-		if (realtime >= cl_cmd_debug_next_time)
-		{
-			Con_Printf ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
-				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
-				cmd_dt, (double)cl_cmd_accum_us / 1000000.0);
-			JITTER_LOG ("NETDBG cmdrate built %u sent_cmds %u packets %u cmd_dt %.4f accum %.4f\n",
-				cl_cmds_built_since_log, cl_cmds_sent_since_log, cl_cmd_packets_since_log,
-				cmd_dt, (double)cl_cmd_accum_us / 1000000.0);
-			cl_cmds_built_since_log = 0;
-			cl_cmds_sent_since_log = 0;
-			cl_cmd_packets_since_log = 0;
-			cl_cmd_debug_next_time = realtime + 1.0;
-		}
-	}
+	else
+		CL_SendMove (NULL);
+	memset(&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
 
 	if (cls.demoplayback)
 	{
@@ -2546,63 +1090,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_pitchspeed);
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
-	Cvar_RegisterVariable (&cl_netdebug_parse);
-	Cvar_RegisterVariable (&cl_netdebug_hexdump);
-	Cvar_RegisterVariable (&cl_netdebug_dropbad);
-	Cvar_RegisterVariable (&cl_netdebug_maxdump);
-	Cvar_RegisterVariable (&cl_signon_chunk_debug);
-	Cvar_RegisterVariable (&cl_signon_debug);
 	Cvar_RegisterVariable (&cl_nolerp);
-	Cvar_RegisterVariable (&cl_rate);
-	Cvar_RegisterVariable (&cl_updaterate);
-	Cvar_RegisterVariable (&cl_cmdrate);
-	Cvar_RegisterVariable (&cl_cmd_maxbatch);
-	// Q3MINI BEGIN
-	Cvar_RegisterVariable (&cl_cmd_redundancy);
-	Cvar_RegisterVariable (&cl_maxpackets);
-	// Q3MINI END
-	Cvar_RegisterVariable (&cl_interp);
-	Cvar_RegisterVariable (&cl_jitter);
-	Cvar_RegisterVariable (&cl_jitter_debug);
-	Cvar_RegisterVariable (&cl_physrate);
-	Cvar_RegisterVariable (&cl_snap_debug);
-	Cvar_RegisterVariable (&cl_snapshot_debug);
-	Cvar_RegisterVariable (&cl_delta_reject_debug);
-	Cvar_RegisterVariable (&cl_full_reasm_debug);
-	Cvar_RegisterVariable (&cl_full_reasm_timeout_ms);
-	Cvar_RegisterVariable (&cl_snap_incomplete_timeout_ms);
-	Cvar_RegisterVariable (&cl_snap_chunk_drop);
-	Cvar_RegisterVariable (&cl_test_drop);
-	Cvar_RegisterVariable (&cl_entity_timeout_ms);
-	Cvar_RegisterVariable (&cl_entity_dormant_ms);
-	Cvar_RegisterVariable (&cl_snap2_resync_blend_ms);
-	Cvar_RegisterVariable (&cl_snap2_missing_grace_ms);
-	Cvar_RegisterVariable (&cl_lerp_ms);
-	Cvar_RegisterVariable (&cl_lerp_max_gap_ms);
-	Cvar_RegisterVariable (&cl_lerp_debug);
-	Cvar_RegisterVariable (&cl_netdbg_interp);
-	Cvar_RegisterVariable (&cl_netdbg_watch_ent);
-	Cvar_RegisterVariable (&cl_netdbg_pred);
-	Cvar_RegisterVariable (&cl_predict);
-	Cvar_RegisterVariable (&cl_pred_ultra);
-	Cvar_RegisterVariable (&cl_pred_tick);
-	Cvar_RegisterVariable (&cl_pred_eps);
-	Cvar_RegisterVariable (&cl_pred_smooth);
-	Cvar_RegisterVariable (&cl_pred_smooth_rate);
-	Cvar_RegisterVariable (&cl_pred_snapdist);
-	Cvar_RegisterVariable (&cl_pred_smooth_ms);
-	// Q3MINI BEGIN
-	Cvar_RegisterVariable (&cl_netsmooth);
-	Cvar_RegisterVariable (&cl_netsmooth_time);
-	Cvar_RegisterVariable (&cl_netsmooth_maxdist);
-	// Q3MINI END
-	Cvar_RegisterVariable (&cl_pred_teleport_dist);
-	Cvar_RegisterVariable (&cl_pred_deadzone);
-	Cvar_RegisterVariable (&cl_pred_angle_deadzone);
-	Cvar_RegisterVariable (&cl_pred_substeps);
-	Cvar_RegisterVariable (&cl_pred_max_substeps);
-	Cvar_RegisterVariable (&cl_pred_step_hz);
-	Cvar_RegisterVariable (&cl_pred_accum_debug);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);

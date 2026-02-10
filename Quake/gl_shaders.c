@@ -526,15 +526,13 @@ void GL_CreateShaders (void)
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
 	glprogs.fogvol_upsample = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_upsample.frag"), "fog volumes upsample");
 	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
-	glprogs.godray_volume = GL_CreateProgram (GLSL_PATH("godray_volume.vert"), GLSL_PATH("godray_volume.frag"), "godray volumes");
-	glprogs.godray_volume_debug = GL_CreateProgram (GLSL_PATH("godray_volume_debug.vert"), GLSL_PATH("godray_volume_debug.frag"), "godray volumes debug");
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
         for (oit = 0; oit < 2; oit++)
                 for (dither = 0; dither < 3; dither++)
                         for (mode = 0; mode < 3; mode++)
-                glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d; HAVE_DELUXE_LIGHTING 1", oit, dither, mode);
+                                glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
 
         for (alphatest = 0; alphatest < 2; alphatest++)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);

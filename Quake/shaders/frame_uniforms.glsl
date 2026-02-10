@@ -25,13 +25,11 @@ layout(std140, binding=0) uniform FrameDataUBO
         vec4    LightmapParams;
         vec4    LightgridParams;
         vec4    DLightParams;
-	vec4    ColorSpaceParams;
-	vec4    ShaderParams;
-	vec4    RimParams0;
-	vec4    RimParams1;
-	mat4    ShadowViewProj;
-	vec4    ShadowParams;
-	vec4    ShadowDebug;
+        vec4    ColorSpaceParams;
+        vec4    ShaderParams;
+        mat4    ShadowViewProj;
+        vec4    ShadowParams;
+        vec4    ShadowDebug;
         vec4    ShadowSunDir;
         mat4    ShadowDlightViewProj[SHADOW_DLIGHT_MAX];
         vec4    ShadowDlightAtlas[SHADOW_DLIGHT_MAX];

@@ -117,19 +117,6 @@ float NormalizeAngle (float degrees)
 	return degrees;
 }
 
-float NormalizeAngle180 (float degrees)
-{
-	return NormalizeAngle (degrees);
-}
-
-float NormalizeAngle360 (float degrees)
-{
-	degrees -= floor (degrees * (1.f/360.f)) * 360.f;
-	if (degrees < 0.f)
-		degrees += 360.f;
-	return degrees;
-}
-
 /*
 ==================
 AngleDifference
@@ -142,11 +129,6 @@ float AngleDifference (float dega, float degb)
 	return NormalizeAngle (dega - degb);
 }
 
-float AngleDeltaShortest (float degfrom, float degto)
-{
-	return NormalizeAngle (degto - degfrom);
-}
-
 /*
 ==================
 LerpAngle
@@ -157,11 +139,6 @@ Returns a value between -180 and 180
 float LerpAngle (float degfrom, float degto, float frac)
 {
 	return NormalizeAngle (degfrom + AngleDifference (degto, degfrom) * frac);
-}
-
-float LerpAngleShortest (float degfrom, float degto, float frac)
-{
-	return NormalizeAngle (degfrom + AngleDeltaShortest (degfrom, degto) * frac);
 }
 
 
@@ -259,7 +236,7 @@ void VectorAngles (const vec3_t forward, vec3_t angles)
 	angles[ROLL] = 0;
 }
 
-void AngleVectors (const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
+void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 {
 	float		angle;
 	float		sr, sp, sy, cr, cp, cy;
@@ -277,18 +254,12 @@ void AngleVectors (const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	forward[0] = cp*cy;
 	forward[1] = cp*sy;
 	forward[2] = -sp;
-	if (right)
-	{
-		right[0] = (-1*sr*sp*cy+-1*cr*-sy);
-		right[1] = (-1*sr*sp*sy+-1*cr*cy);
-		right[2] = -1*sr*cp;
-	}
-	if (up)
-	{
-		up[0] = (cr*sp*cy+-sr*-sy);
-		up[1] = (cr*sp*sy+-sr*cy);
-		up[2] = cr*cp;
-	}
+	right[0] = (-1*sr*sp*cy+-1*cr*-sy);
+	right[1] = (-1*sr*sp*sy+-1*cr*cy);
+	right[2] = -1*sr*cp;
+	up[0] = (cr*sp*cy+-sr*-sy);
+	up[1] = (cr*sp*sy+-sr*cy);
+	up[2] = cr*cp;
 }
 
 int VectorCompare (const vec3_t v1, const vec3_t v2)

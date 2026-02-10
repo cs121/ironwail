@@ -149,7 +149,6 @@ typedef enum
 	MAT_TCMOD_SCROLL,
 	MAT_TCMOD_SCALE,
 	MAT_TCMOD_ROTATE,
-	MAT_TCMOD_TRANSFORM,
 	MAT_TCMOD_TURB,
 	MAT_TCMOD_STRETCH
 } mat_tcmod_type_t;
@@ -157,7 +156,7 @@ typedef enum
 typedef struct mat_tcmod_s
 {
 	mat_tcmod_type_t type;
-	float args[6];
+	float args[4];
 } mat_tcmod_t;
 
 typedef struct mat_texmatrix_s
@@ -243,22 +242,13 @@ typedef struct shader_material_s
 	float			emissive_scale;
 	float			bloom_scale;
 	float			godray_scale;
-	float			godray_intensity;
-	float			godray_length;
-	float			godray_color[3];
-	float			godray_dir[3];
-	qboolean		godray_intensity_set;
-	qboolean		godray_length_set;
-	qboolean		godray_color_set;
-	qboolean		godray_dir_set;
 	mat_shader_stage_t	stage0;
 	mat_shader_stage_t	*stages;
 } shader_material_t;
 
 // Developer note:
 // Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
-// bloom_scale, godray_scale, godray_intensity, godray_length, godray_color, godray_dir,
-// emissiveScale, bloomScale, godrayScale, and a single stage block
+// bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
 // with map + rgbGen identity.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
@@ -267,7 +257,6 @@ typedef struct texture_s texture_t;
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
 extern cvar_t r_tcgen_debug;
-extern cvar_t r_envmap_source;
 extern cvar_t r_matshader_debug_parse;
 
 typedef enum

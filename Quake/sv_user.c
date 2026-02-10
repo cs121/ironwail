@@ -18,10 +18,6 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
-/* Q3MINI PLAN:
- * - Parse client ackmask fields and dedupe redundant usercmds with debug logs.
- */
-
 */
 // sv_user.c -- server code for moving users
 
@@ -32,14 +28,6 @@ edict_t	*sv_player;
 extern	cvar_t	sv_friction;
 cvar_t	sv_edgefriction = {"edgefriction", "2", CVAR_NONE};
 extern	cvar_t	sv_stopspeed;
-extern	cvar_t	sv_minrate;
-extern	cvar_t	sv_maxrate;
-extern	cvar_t	sv_minupdaterate;
-extern	cvar_t	sv_maxupdaterate;
-extern	cvar_t	sv_cmd_ack_slack;
-extern	cvar_t	sv_cmd_ack_bad_limit;
-extern	cvar_t	sv_cmd_ack_bad_window;
-extern	cvar_t	sv_cmd_ack_debug;
 
 static	vec3_t		forward, right, up;
 
@@ -49,41 +37,6 @@ float	*origin;
 float	*velocity;
 
 qboolean	onground;
-
-#define SV_PLAYER_GUARD_VOID(reason, fatal) \
-	do { \
-		if (!sv_player) \
-		{ \
-			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
-			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
-			SV_PlayerNullTrap (__func__, fatal); \
-			return; \
-		} \
-	} while (0)
-
-#define SV_PLAYER_GUARD_BOOL(reason, fatal, retval) \
-	do { \
-		if (!sv_player) \
-		{ \
-			Con_Printf ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
-			JITTER_LOG ("NETDBG sv_player NULL cl %d reason %s\n", SV_CurrentClientIndex (), reason); \
-			SV_PlayerNullTrap (__func__, fatal); \
-			return retval; \
-		} \
-	} while (0)
-
-static int SV_ClampClientRate (int value, const cvar_t *min_rate, const cvar_t *max_rate)
-{
-	int clamped = value;
-
-	if (clamped < 0)
-		clamped = 0;
-	if (min_rate->value > 0.0f && clamped < (int)min_rate->value)
-		clamped = (int)min_rate->value;
-	if (max_rate->value > 0.0f && clamped > (int)max_rate->value)
-		clamped = (int)max_rate->value;
-	return clamped;
-}
 
 usercmd_t	cmd;
 
@@ -104,8 +57,6 @@ void SV_SetIdealPitch (void)
 	float	z[MAX_FORWARD];
 	int		i, j;
 	int		step, dir, steps;
-
-	SV_PLAYER_GUARD_VOID ("SV_SetIdealPitch", 0);
 
 	if (!((int)sv_player->v.flags & FL_ONGROUND))
 		return;
@@ -174,8 +125,6 @@ void SV_UserFriction (void)
 	vec3_t	start, stop;
 	float	friction;
 	trace_t	trace;
-
-	SV_PLAYER_GUARD_VOID ("SV_UserFriction", 0);
 
 	vel = velocity;
 
@@ -259,8 +208,6 @@ void DropPunchAngle (void)
 {
 	float	len;
 
-	SV_PLAYER_GUARD_VOID ("DropPunchAngle", 0);
-
 	len = VectorNormalize (sv_player->v.punchangle);
 
 	len -= 10*host_frametime;
@@ -280,17 +227,11 @@ void SV_WaterMove (void)
 	int		i;
 	vec3_t	wishvel;
 	float	speed, newspeed, wishspeed, addspeed, accelspeed;
-	vec3_t	moveangles;
-
-	SV_PLAYER_GUARD_VOID ("SV_WaterMove", 0);
 
 //
 // user intentions
 //
-	VectorCopy (sv_player->v.v_angle, moveangles);
-	moveangles[PITCH] = 0.0f;
-	moveangles[ROLL] = 0.0f;
-	AngleVectors (moveangles, forward, right, up);
+	AngleVectors (sv_player->v.v_angle, forward, right, up);
 
 	for (i=0 ; i<3 ; i++)
 		wishvel[i] = forward[i]*cmd.forwardmove + right[i]*cmd.sidemove;
@@ -343,8 +284,6 @@ void SV_WaterMove (void)
 
 void SV_WaterJump (void)
 {
-	SV_PLAYER_GUARD_VOID ("SV_WaterJump", 0);
-
 	if (qcvm->time > sv_player->v.teleport_time
 	|| !sv_player->v.waterlevel)
 	{
@@ -364,8 +303,6 @@ new, alternate noclip. old noclip is still handled in SV_AirMove
 */
 void SV_NoclipMove (void)
 {
-	SV_PLAYER_GUARD_VOID ("SV_NoclipMove", 0);
-
 	AngleVectors (sv_player->v.v_angle, forward, right, up);
 
 	velocity[0] = forward[0]*cmd.forwardmove + right[0]*cmd.sidemove;
@@ -391,17 +328,8 @@ void SV_AirMove (void)
 	vec3_t		wishvel, wishdir;
 	float		wishspeed;
 	float		fmove, smove;
-	vec3_t		moveangles;
 
-	SV_PLAYER_GUARD_VOID ("SV_AirMove", 0);
-
-	VectorCopy (sv_player->v.angles, moveangles);
-	if ((int)sv_player->v.movetype == MOVETYPE_WALK)
-	{
-		moveangles[PITCH] = 0.0f;
-		moveangles[ROLL] = 0.0f;
-	}
-	AngleVectors (moveangles, forward, right, up);
+	AngleVectors (sv_player->v.angles, forward, right, up);
 
 	fmove = cmd.forwardmove;
 	smove = cmd.sidemove;
@@ -452,8 +380,6 @@ the angle fields specify an exact angular motion in degrees
 void SV_ClientThink (void)
 {
 	vec3_t		v_angle;
-
-	SV_PLAYER_GUARD_VOID ("SV_ClientThink", 0);
 
 	if (sv_player->v.movetype == MOVETYPE_NONE)
 		return;
@@ -509,72 +435,27 @@ void SV_ClientThink (void)
 SV_ReadClientMove
 ===================
 */
-static qboolean SV_CmdSeqNewer (unsigned int seq, unsigned int last)
-{
-	return NETSEQ_GT (seq, last);
-}
-
-extern void NET_DebugLogEvent (qboolean important, const char *fmt, ...);
-
-static void SV_CmdAckResync (client_t *client, const char *reason)
-{
-	unsigned int base_preview = client->snapshot_safe_base_seq
-		? client->snapshot_safe_base_seq
-		: client->snapshot_last_acked_seq;
-	int slot = (int)(client - svs.clients);
-	client->snapshot_force_full = true;
-	client->snapshot_force_full_reason = SNAP_FULL_DECODE_ERROR;
-	client->snapshot_decode_error_count++;
-	NET_DebugLogEvent (true,
-		"NETDBG time %.3f snap_force_full_on cl %d %s seq_build %u base %u signon %d reason DECODE_ERROR last_full %.3f\n",
-		realtime, slot, client->name, client->snapshot_next_seq, base_preview,
-		client->entstream.signon_stage, client->snapshot_last_full_time);
-	client->snapshot_pending_seq = 0;
-	client->snapshot_pending_incomplete = false;
-	client->snapshot_pending_is_delta = false;
-	client->snapshot_unacked_frames = 0;
-	client->entstream.active = false;
-	client->entstream.next_edict = 1;
-	client->entstream.base_snapshot = 0;
-	if (sv_cmd_ack_debug.value)
-	{
-		Con_Printf ("NETDBG time %.3f cmd_ack_resync %s reason %s\n",
-			realtime, client->name, reason ? reason : "unknown");
-		JITTER_LOG ("NETDBG time %.3f cmd_ack_resync %s reason %s\n",
-			realtime, client->name, reason ? reason : "unknown");
-	}
-}
-
-static void SV_NetHexDump (const byte *data, int len, int max)
-{
-	int dump_len = q_min(len, max);
-	int i;
-	char line[256];
-	char *out = line;
-	char *line_end = line + sizeof(line);
-
-	Con_Printf ("NETDBG cmd_ack_hexdump %d bytes (cursize %d):", dump_len, len);
-	out += q_snprintf (out, (size_t)(line_end - out), "NETDBG cmd_ack_hexdump %d bytes (cursize %d):", dump_len, len);
-	for (i = 0; i < dump_len; i++)
-	{
-		Con_Printf (" %02x", data[i]);
-		out += q_snprintf (out, (size_t)(line_end - out), " %02x", data[i]);
-	}
-	Con_Printf ("\n");
-	out += q_snprintf (out, (size_t)(line_end - out), "\n");
-	JITTER_LOG ("%s", line);
-}
-
 void SV_ReadClientMove (usercmd_t *move)
 {
 	int		i;
+	vec3_t	angle;
 	int		bits;
 
-	move->sequence = (unsigned int)MSG_ReadLong ();
+// read ping time
+	host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
+		= qcvm->time - MSG_ReadFloat ();
+	host_client->num_pings++;
 
 // read current angles
 	for (i=0 ; i<3 ; i++)
-		move->viewangles[i] = MSG_ReadAngle16 (sv.protocolflags);
+		//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
+		if (sv.protocol == PROTOCOL_NETQUAKE)
+			angle[i] = MSG_ReadAngle (sv.protocolflags);
+		else
+			angle[i] = MSG_ReadAngle16 (sv.protocolflags);
+		//johnfitz
+
+	VectorCopy (angle, host_client->edict->v.v_angle);
 
 // read movement
 	move->forwardmove = MSG_ReadShort ();
@@ -583,9 +464,12 @@ void SV_ReadClientMove (usercmd_t *move)
 
 // read buttons
 	bits = MSG_ReadByte ();
-	move->buttons = bits;
+	host_client->edict->v.button0 = bits & 1;
+	host_client->edict->v.button2 = (bits & 2)>>1;
 
-	move->impulse = MSG_ReadByte ();
+	i = MSG_ReadByte ();
+	if (i)
+		host_client->edict->v.impulse = i;
 }
 
 /*
@@ -600,29 +484,6 @@ qboolean SV_ReadClientMessage (void)
 	int		ret;
 	int		ccmd;
 	const char	*s;
-
-	// Server-only: should never parse client messages without an active server.
-	if (!sv.active || sv.state != ss_active)
-	{
-		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason server_inactive\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason server_inactive\n", SV_CurrentClientIndex ());
-		return true;
-	}
-
-	if (cls.demoplayback)
-	{
-		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
-		return true;
-	}
-
-	if (!host_client || !host_client->netconnection)
-	{
-		Con_Printf ("NETDBG sv_readclientmessage skipped cl %d reason no_client_context\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_readclientmessage skipped cl %d reason no_client_context\n", SV_CurrentClientIndex ());
-		SV_PlayerNullTrap (__func__, 0);
-		return false;
-	}
 
 	do
 	{
@@ -666,18 +527,6 @@ nextmsg:
 
 			case clc_stringcmd:
 				s = MSG_ReadString ();
-				if (q_strncasecmp(s, "rate", 4) == 0)
-				{
-					int rate = Q_atoi(s + 4);
-					host_client->rate = SV_ClampClientRate (rate, &sv_minrate, &sv_maxrate);
-					break;
-				}
-				if (q_strncasecmp(s, "updaterate", 10) == 0)
-				{
-					int updaterate = Q_atoi(s + 10);
-					host_client->updaterate = SV_ClampClientRate (updaterate, &sv_minupdaterate, &sv_maxupdaterate);
-					break;
-				}
 				if (q_strncasecmp(s, "spawn", 5) && q_strncasecmp(s, "begin", 5) && q_strncasecmp(s, "prespawn", 8) && qcvm->extfuncs.SV_ParseClientCommand)
 				{	//the spawn/begin/prespawn are because of numerous mods that disobey the rules.
 					//at a minimum, we must be able to join the server, so that we can see any sprints/bprints (because dprint sucks, yes there's proper ways to deal with this, but moders don't always know them).
@@ -751,232 +600,8 @@ nextmsg:
 				return false;
 
 			case clc_move:
-			{
-				int cmd_count;
-				int cmd_index;
-				unsigned int cmd_seq;
-				unsigned int cmd_ack;
-				// Q3MINI BEGIN
-				unsigned int srv_ack = 0;
-				unsigned int srv_ack_mask = 0;
-				qboolean q3mini_enabled = (sv.protocolflags & PRFL_Q3MINI) && (net_ackmask.value > 0.0f);
-				int accepted_cmds = 0;
-				int dropped_cmds = 0;
-				// Q3MINI END
-				unsigned int prev_seq = 0;
-				int readcount_before_time;
-				int readcount_after_time;
-				int readcount_before_seq;
-				int readcount_after_seq;
-				int readcount_before_ack;
-				int readcount_after_ack;
-				const int header_bytes = 4 + 4 + 4 + (q3mini_enabled ? 8 : 0);
-				const int cmd_bytes = 4 + (3 * 2) + (3 * 2) + 1 + 1;
-				float mtime;
-
-			// read ping time
-				if (msg_readcount + header_bytes > net_message.cursize)
-				{
-					Con_Printf ("SV_ReadClientMessage: truncated clc_move header from %s\n",
-						host_client->name);
-					JITTER_LOG ("SV_ReadClientMessage: truncated clc_move header from %s\n",
-						host_client->name);
-					return true;
-				}
-				readcount_before_time = msg_readcount;
-				mtime = MSG_ReadFloat ();
-				readcount_after_time = msg_readcount;
-				host_client->ping_times[host_client->num_pings%NUM_PING_TIMES]
-					= qcvm->time - mtime;
-				host_client->num_pings++;
-
-				readcount_before_seq = msg_readcount;
-				cmd_seq = (unsigned int)MSG_ReadLong ();
-				readcount_after_seq = msg_readcount;
-				readcount_before_ack = msg_readcount;
-				cmd_ack = (unsigned int)MSG_ReadLong ();
-				readcount_after_ack = msg_readcount;
-				// Q3MINI BEGIN
-				if (q3mini_enabled)
-				{
-					srv_ack = (unsigned int)MSG_ReadLong ();
-					srv_ack_mask = (unsigned int)MSG_ReadLong ();
-					host_client->q3mini_last_srv_ack = srv_ack;
-					host_client->q3mini_last_srv_ack_mask = srv_ack_mask;
-				}
-				// Q3MINI END
-				if (sv_cmd_ack_debug.value)
-				{
-					int remaining = net_message.cursize - msg_readcount;
-					unsigned int newest_cmd_seq = cmd_seq;
-					unsigned int last_cmd_received = host_client->last_cmd_seq;
-					unsigned int last_cmd_acked = host_client->last_cmd_ack;
-					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
-					unsigned int window_tail = last_cmd_acked - slack;
-					Con_Printf ("NETDBG time %.3f cmd_ack_read %s cmd %d flags 0x%x "
-						"mtime %d->%d seq %d->%d ack %d->%d rem %d cmd_ack %u "
-						"newest_cmd %u last_recv %u last_ack %u win_tail %u slack %u\n",
-						realtime, host_client->name, clc_move, sv.protocolflags,
-						readcount_before_time, readcount_after_time,
-						readcount_before_seq, readcount_after_seq,
-						readcount_before_ack, readcount_after_ack,
-						remaining, cmd_ack, newest_cmd_seq,
-						last_cmd_received, last_cmd_acked, window_tail, slack);
-					JITTER_LOG ("NETDBG time %.3f cmd_ack_read %s cmd %d flags 0x%x "
-						"mtime %d->%d seq %d->%d ack %d->%d rem %d cmd_ack %u "
-						"newest_cmd %u last_recv %u last_ack %u win_tail %u slack %u\n",
-						realtime, host_client->name, clc_move, sv.protocolflags,
-						readcount_before_time, readcount_after_time,
-						readcount_before_seq, readcount_after_seq,
-						readcount_before_ack, readcount_after_ack,
-						remaining, cmd_ack, newest_cmd_seq,
-						last_cmd_received, last_cmd_acked, window_tail, slack);
-				}
-				{
-					// Ack window: not ahead of newest, not too far behind last ack (wrap-safe via NETSEQ_GT).
-					unsigned int slack = (unsigned int)q_max(0, (int)sv_cmd_ack_slack.value);
-					unsigned int newest_cmd_seq = cmd_seq;
-					unsigned int last_cmd_acked = host_client->last_cmd_ack;
-					qboolean ack_ahead = NETSEQ_GT (cmd_ack, newest_cmd_seq);
-					qboolean ack_behind = false;
-					unsigned int ack_behind_delta = 0;
-
-					if (NETSEQ_GT (last_cmd_acked, cmd_ack))
-					{
-						ack_behind_delta = last_cmd_acked - cmd_ack;
-						ack_behind = ack_behind_delta > slack;
-					}
-
-					if (ack_ahead || ack_behind)
-					{
-						int limit = (int)sv_cmd_ack_bad_limit.value;
-						double window_s = sv_cmd_ack_bad_window.value;
-						const char *reason = ack_ahead ? "ahead" : "behind";
-
-						if (limit < 2)
-							limit = 2;
-						if (window_s <= 0.0)
-							window_s = 1.0;
-						if (realtime - host_client->invalid_cmd_ack_time > window_s)
-						{
-							host_client->invalid_cmd_ack_time = realtime;
-							host_client->invalid_cmd_ack_count = 0;
-						}
-						host_client->invalid_cmd_ack_count++;
-						if (sv_cmd_ack_debug.value)
-						{
-							Con_Printf ("NETDBG cmd_ack_invalid %s ack %u newest %u last_ack %u "
-								"behind_delta %u slack %u reason %s count %d\n",
-								host_client->name, cmd_ack, newest_cmd_seq, last_cmd_acked,
-								ack_behind_delta, slack, reason, host_client->invalid_cmd_ack_count);
-							JITTER_LOG ("NETDBG cmd_ack_invalid %s ack %u newest %u last_ack %u "
-								"behind_delta %u slack %u reason %s count %d\n",
-								host_client->name, cmd_ack, newest_cmd_seq, last_cmd_acked,
-								ack_behind_delta, slack, reason, host_client->invalid_cmd_ack_count);
-							SV_NetHexDump (net_message.data, net_message.cursize, 48);
-						}
-						cmd_ack = host_client->last_cmd_ack;
-						SV_CmdAckResync (host_client, reason);
-						if (limit > 0 && host_client->invalid_cmd_ack_count >= limit)
-						{
-							Con_Printf ("SV_ReadClientMessage: invalid cmd ack from %s\n",
-								host_client->name);
-							SV_DropClient (true);
-							return false;
-						}
-					}
-				}
-				if (SV_CmdSeqNewer (cmd_ack, host_client->last_cmd_ack))
-					host_client->last_cmd_ack = cmd_ack;
-
-				if (msg_readcount + 1 > net_message.cursize)
-				{
-					Con_Printf ("SV_ReadClientMessage: truncated clc_move cmdcount from %s\n",
-						host_client->name);
-					return true;
-				}
-				cmd_count = MSG_ReadByte ();
-				if (cmd_count > MAX_CMDS_PER_PACKET)
-				{
-					Con_Printf ("SV_ReadClientMessage: too many cmds (%d) from %s\n",
-						cmd_count, host_client->name);
-					SV_DropClient (true);
-					return false;
-				}
-				if (cmd_count > 0 && msg_readcount + (cmd_count * cmd_bytes) > net_message.cursize)
-				{
-					Con_Printf ("SV_ReadClientMessage: truncated clc_move cmds from %s\n",
-						host_client->name);
-					return true;
-				}
-				for (cmd_index = 0; cmd_index < cmd_count; cmd_index++)
-				{
-					usercmd_t move;
-
-					SV_ReadClientMove (&move);
-					if (cmd_index > 0 && !SV_CmdSeqNewer (move.sequence, prev_seq))
-					{
-						Con_Printf ("SV_ReadClientMessage: non-increasing cmd seq from %s\n",
-							host_client->name);
-						SV_DropClient (true);
-						return false;
-					}
-					prev_seq = move.sequence;
-					if (!SV_CmdSeqNewer (move.sequence, host_client->last_cmd_seq))
-					{
-						// Q3MINI BEGIN
-						dropped_cmds++;
-						// Q3MINI END
-						continue;
-					}
-
-					host_client->last_cmd_seq = move.sequence;
-					host_client->cmd = move;
-					// Q3MINI BEGIN
-					accepted_cmds++;
-					// Q3MINI END
-
-					VectorCopy (move.viewangles, host_client->edict->v.v_angle);
-					host_client->edict->v.button0 = move.buttons & 1;
-					host_client->edict->v.button2 = (move.buttons & 2) >> 1;
-					if (move.impulse)
-						host_client->edict->v.impulse = move.impulse;
-				}
-				if (cmd_count == 0 && SV_CmdSeqNewer (cmd_seq, host_client->last_cmd_seq))
-					host_client->last_cmd_seq = cmd_seq;
-				// Q3MINI BEGIN
-				if (net_dbg_q3mini.value > 0.0f)
-				{
-					Con_Printf ("NETDBG q3mini recv %s cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d accepted %d dropped %d\n",
-						host_client->name, cmd_seq, cmd_ack, srv_ack, srv_ack_mask, cmd_count,
-						accepted_cmds, dropped_cmds);
-					JITTER_LOG ("NETDBG q3mini recv %s cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d accepted %d dropped %d\n",
-						host_client->name, cmd_seq, cmd_ack, srv_ack, srv_ack_mask, cmd_count,
-						accepted_cmds, dropped_cmds);
-				}
-				// Q3MINI END
+				SV_ReadClientMove (&host_client->cmd);
 				break;
-			}
-
-			case clc_snapshot_ack:
-				SV_SnapshotAck (host_client, (unsigned int)MSG_ReadLong ());
-				break;
-
-			case clc_snapshot_nak:
-				SV_SnapshotNak (host_client, (unsigned int)MSG_ReadLong (), (unsigned int)MSG_ReadLong ());
-				break;
-
-			case clc_signon_ack:
-			{
-				MSG_ReadByte ();
-				{
-					unsigned short next_seq = (unsigned short)MSG_ReadShort ();
-					signon_stream_t *stream = &host_client->signon_stream;
-					if (stream->active && next_seq > stream->acked_seq)
-						stream->acked_seq = next_seq;
-				}
-				break;
-			}
 			}
 		}
 	} while (ret == 1);
@@ -984,289 +609,6 @@ nextmsg:
 	return true;
 }
 
-static float SV_BotRandom (void)
-{
-	return (float)(rand() & 0x7fff) / 32767.0f;
-}
-
-static void SV_BotReset (client_t *client, double now)
-{
-	client->bot.enemy = -1;
-	client->bot.next_target_scan = 0;
-	client->bot.next_fire_time = 0;
-	client->bot.next_wander_time = now;
-	client->bot.next_strafe_time = now;
-	client->bot.last_progress_time = now;
-	client->bot.wander_yaw = client->edict->v.angles[YAW];
-	client->bot.strafe_dir = 1;
-	VectorCopy (client->edict->v.origin, client->bot.last_origin);
-}
-
-static qboolean SV_BotCanSee (edict_t *self, edict_t *other)
-{
-	vec3_t start;
-	vec3_t end;
-	trace_t trace;
-
-	VectorAdd (self->v.origin, self->v.view_ofs, start);
-	VectorAdd (other->v.origin, other->v.view_ofs, end);
-	trace = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
-	return (trace.fraction >= 1.0f);
-}
-
-static void SV_BotSelectEnemy (client_t *client, double now)
-{
-	int i;
-	float best_dist = 0;
-	int best_index = -1;
-	vec3_t delta;
-
-	if (now < client->bot.next_target_scan)
-		return;
-
-	client->bot.next_target_scan = now + 0.3 + SV_BotRandom() * 0.2;
-
-	for (i = 0; i < svs.maxclients; i++)
-	{
-		client_t *other = &svs.clients[i];
-		float dist;
-
-		if (!other->active || !other->spawned || other == client)
-			continue;
-		if (other->edict->v.health <= 0)
-			continue;
-		if (!SV_BotCanSee (client->edict, other->edict))
-			continue;
-
-		VectorSubtract (other->edict->v.origin, client->edict->v.origin, delta);
-		dist = VectorLength (delta);
-		if (best_index == -1 || dist < best_dist)
-		{
-			best_index = i;
-			best_dist = dist;
-		}
-	}
-
-	client->bot.enemy = best_index;
-}
-
-void SV_BotFrame (client_t *client, double now)
-{
-	usercmd_t cmd;
-	vec3_t target_dir;
-	vec3_t angles;
-	vec3_t forward;
-	float dot;
-	vec3_t delta;
-
-	if (!client->spawned)
-		return;
-
-	if (client->bot.last_progress_time == 0)
-		SV_BotReset (client, now);
-
-	SV_BotSelectEnemy (client, now);
-
-	memset (&cmd, 0, sizeof(cmd));
-	client->edict->v.button0 = 0;
-	client->edict->v.button2 = 0;
-	client->edict->v.impulse = 0;
-
-	if (client->bot.enemy >= 0 && client->bot.enemy < svs.maxclients)
-	{
-		client_t *enemy = &svs.clients[client->bot.enemy];
-		if (!enemy->active || !enemy->spawned || enemy->edict->v.health <= 0
-			|| !SV_BotCanSee (client->edict, enemy->edict))
-			client->bot.enemy = -1;
-	}
-
-	if (client->bot.enemy >= 0)
-	{
-		client_t *enemy = &svs.clients[client->bot.enemy];
-
-		VectorSubtract (enemy->edict->v.origin, client->edict->v.origin, target_dir);
-		VectorNormalize (target_dir);
-		VectorAngles (target_dir, angles);
-		angles[ROLL] = 0;
-		if (angles[PITCH] > 80)
-			angles[PITCH] = 80;
-		if (angles[PITCH] < -80)
-			angles[PITCH] = -80;
-
-		VectorCopy (angles, client->edict->v.v_angle);
-		client->edict->v.fixangle = 0;
-
-		cmd.forwardmove = 400;
-		if (now >= client->bot.next_strafe_time)
-		{
-			client->bot.strafe_dir = (SV_BotRandom() > 0.5f) ? 1 : -1;
-			client->bot.next_strafe_time = now + 0.8 + SV_BotRandom() * 0.6;
-		}
-		cmd.sidemove = client->bot.strafe_dir * 200;
-
-		AngleVectors (angles, forward, NULL, NULL);
-		dot = DotProduct (forward, target_dir);
-		if (dot > 0.9f && now >= client->bot.next_fire_time)
-		{
-			client->edict->v.button0 = 1;
-			client->bot.next_fire_time = now + 0.2 + SV_BotRandom() * 0.4;
-		}
-	}
-	else
-	{
-		if (now >= client->bot.next_wander_time)
-		{
-			client->bot.wander_yaw += (SV_BotRandom() - 0.5f) * 120.0f;
-			client->bot.next_wander_time = now + 1.0 + SV_BotRandom() * 1.5;
-		}
-
-		angles[PITCH] = 0;
-		angles[YAW] = client->bot.wander_yaw;
-		angles[ROLL] = 0;
-		VectorCopy (angles, client->edict->v.v_angle);
-		client->edict->v.fixangle = 0;
-
-		cmd.forwardmove = 200;
-		if (now >= client->bot.next_strafe_time)
-		{
-			client->bot.strafe_dir = (SV_BotRandom() > 0.5f) ? 1 : -1;
-			client->bot.next_strafe_time = now + 1.0 + SV_BotRandom() * 1.0;
-		}
-		cmd.sidemove = client->bot.strafe_dir * 120;
-	}
-
-	VectorSubtract (client->edict->v.origin, client->bot.last_origin, delta);
-	if (VectorLength (delta) > 8.0f)
-	{
-		VectorCopy (client->edict->v.origin, client->bot.last_origin);
-		client->bot.last_progress_time = now;
-	}
-	else if (now - client->bot.last_progress_time > 1.0)
-	{
-		client->bot.wander_yaw += 120.0f;
-		cmd.sidemove = client->bot.strafe_dir * 300;
-		cmd.upmove = 200;
-		VectorCopy (client->edict->v.origin, client->bot.last_origin);
-		client->bot.last_progress_time = now;
-	}
-
-	client->cmd = cmd;
-}
-
-qboolean SV_AddBot (const char *name)
-{
-	int i;
-	client_t *client = NULL;
-	edict_t *ent;
-	const char *bot_name = name;
-	qcvm_t *oldvm;
-	double bot_time;
-
-	if (!sv.active)
-	{
-		Con_Printf ("No active server.\n");
-		return false;
-	}
-
-	for (i = 0; i < svs.maxclients; i++)
-	{
-		if (!svs.clients[i].active)
-		{
-			client = &svs.clients[i];
-			break;
-		}
-	}
-
-	if (!client)
-	{
-		Con_Printf ("No free client slots.\n");
-		return false;
-	}
-
-	ent = client->edict ? client->edict : EDICT_NUM(i + 1);
-	memset (client, 0, sizeof(*client));
-	client->edict = ent;
-	client->message.data = client->msgbuf;
-	client->message.maxsize = sizeof(client->msgbuf);
-	client->message.allowoverflow = true;
-	client->active = true;
-	client->spawned = true;
-	client->is_bot = true;
-	client->old_frags = 0;
-	client->colors = 0;
-
-	if (!bot_name || !bot_name[0])
-	{
-		static char default_name[32];
-		q_snprintf (default_name, sizeof(default_name), "bot%i", i + 1);
-		bot_name = default_name;
-	}
-	q_strlcpy (client->name, bot_name, sizeof(client->name));
-
-	oldvm = qcvm;
-	PR_SwitchQCVM(NULL);
-	PR_SwitchQCVM(&sv.qcvm);
-
-	if (sv.loadgame)
-		memset (client->spawn_parms, 0, sizeof(client->spawn_parms));
-	else
-	{
-		PR_ExecuteProgram (pr_global_struct->SetNewParms);
-		for (i = 0; i < NUM_SPAWN_PARMS; i++)
-			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
-	}
-
-	host_client = client;
-	sv_player = ent;
-
-	memset (&ent->v, 0, qcvm->progs->entityfields * 4);
-	ent->v.colormap = NUM_FOR_EDICT(ent);
-	ent->v.team = (client->colors & 15) + 1;
-	ent->v.netname = PR_SetEngineString(client->name);
-
-	for (i = 0; i < NUM_SPAWN_PARMS; i++)
-		(&pr_global_struct->parm1)[i] = client->spawn_parms[i];
-
-	pr_global_struct->time = qcvm->time;
-	pr_global_struct->self = EDICT_TO_PROG(sv_player);
-	PR_ExecuteProgram (pr_global_struct->ClientConnect);
-	PR_ExecuteProgram (pr_global_struct->PutClientInServer);
-
-	bot_time = qcvm->time;
-
-	PR_SwitchQCVM(NULL);
-	PR_SwitchQCVM(oldvm);
-
-	SV_BotReset (client, bot_time);
-
-	MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
-	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
-	MSG_WriteString (&sv.reliable_datagram, client->name);
-	MSG_WriteByte (&sv.reliable_datagram, svc_updatefrags);
-	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
-	MSG_WriteShort (&sv.reliable_datagram, client->edict->v.frags);
-	MSG_WriteByte (&sv.reliable_datagram, svc_updatecolors);
-	MSG_WriteByte (&sv.reliable_datagram, client - svs.clients);
-	MSG_WriteByte (&sv.reliable_datagram, client->colors);
-
-	Con_Printf ("Added bot %s\n", client->name);
-	return true;
-}
-
-void SV_KickBots (void)
-{
-	int i;
-	client_t *client;
-
-	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
-	{
-		if (!client->active || !client->is_bot)
-			continue;
-		host_client = client;
-		sv_player = client->edict;
-		SV_DropClient (false);
-	}
-}
 
 /*
 ==================
@@ -1277,45 +619,17 @@ void SV_RunClients (void)
 {
 	int				i;
 
-	// Server-only: requires an active server and a valid client context.
-	if (!sv.active || sv.state != ss_active)
-		return;
-
-	if (cls.demoplayback)
-	{
-		Con_Printf ("NETDBG sv_runclients skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
-		JITTER_LOG ("NETDBG sv_runclients skipped cl %d reason demo_playback\n", SV_CurrentClientIndex ());
-		return;
-	}
-
 	for (i=0, host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 	{
 		if (!host_client->active)
 			continue;
 
-		if (!host_client->edict)
-		{
-			Con_Printf ("NETDBG sv_player NULL cl %d reason runclients_no_edict\n",
-				SV_CurrentClientIndex ());
-			JITTER_LOG ("NETDBG sv_player NULL cl %d reason runclients_no_edict\n",
-				SV_CurrentClientIndex ());
-			SV_PlayerNullTrap (__func__, 0);
-			continue;
-		}
-
 		sv_player = host_client->edict;
 
-		if (host_client->is_bot)
+		if (!SV_ReadClientMessage ())
 		{
-			SV_BotFrame (host_client, qcvm->time);
-		}
-		else
-		{
-			if (!SV_ReadClientMessage ())
-			{
-				SV_DropClient (false);	// client misbehaved...
-				continue;
-			}
+			SV_DropClient (false);	// client misbehaved...
+			continue;
 		}
 
 		if (!host_client->spawned)
@@ -1330,3 +644,4 @@ void SV_RunClients (void)
 			SV_ClientThink ();
 	}
 }
+

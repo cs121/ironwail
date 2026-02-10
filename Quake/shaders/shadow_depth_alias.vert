@@ -12,21 +12,20 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	inst_ViewProj;
-	mat4	inst_PrevViewProj;
-	mat4	inst_View;
-	vec3	inst_EyePos;
-	float	inst_Pad0;
-	vec4	inst_Fog;
-	float	inst_ScreenDither;
-	float	inst_Overbright;
-	float	inst_ModelHalfLambert;
-	float	inst_Pad1;
-	mat4	inst_ShadowViewProj;
-	vec4	inst_ShadowParams;
-	vec4	inst_ShadowDebug;
-	vec4	inst_ShadowSunDir;
-	InstanceData inst_instances[];
+	mat4	ViewProj;
+	mat4	PrevViewProj;
+	vec3	EyePos;
+	float	_Pad0;
+	vec4	Fog;
+	float	ScreenDither;
+	float	Overbright;
+	float	ModelHalfLambert;
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
+	InstanceData instances[];
 };
 
 struct PoseVertex
@@ -78,11 +77,11 @@ struct PoseVertex
 
 void main()
 {
-	InstanceData inst = inst_instances[gl_InstanceID];
+	InstanceData inst = instances[gl_InstanceID];
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
 	vec3 local_vert = mix(pose1.pos, pose2.pos, inst.Blend);
 	mat4x3 worldmatrix = transpose(mat3x4(inst.WorldMatrix[0], inst.WorldMatrix[1], inst.WorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
-	gl_Position = inst_ShadowViewProj * vec4(world_vert, 1.0);
+	gl_Position = ShadowViewProj * vec4(world_vert, 1.0);
 }

@@ -76,8 +76,6 @@ cvar_t	r_viewmodel_quake = {"r_viewmodel_quake", "0", CVAR_ARCHIVE};
 
 vec3_t	v_punchangles[2]; //johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous value. never the same unless map just loaded
 
-extern cvar_t cl_netdebug_parse;
-
 /*
 ===============
 V_CalcRoll
@@ -761,9 +759,6 @@ Idle swaying
 */
 void V_AddIdle (void)
 {
-	if (CL_Predict_ReproModeEnabled ())
-		return;
-
 	r_refdef.viewangles[ROLL] += v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value;
 	r_refdef.viewangles[PITCH] += v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
 	r_refdef.viewangles[YAW] += v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
@@ -773,9 +768,6 @@ void V_AddIdle (void)
 static void V_AddGunSway (entity_t *view)
 {
 	float sway;
-
-	if (CL_Predict_ReproModeEnabled ())
-		return;
 
 	if (!v_gunsway.value)
 		return;
@@ -801,9 +793,6 @@ static void V_AddWeaponWhip (entity_t *view)
         float scale;
         float dt;
         float velz;
-
-	if (CL_Predict_ReproModeEnabled ())
-		return;
 
         player = &cl_entities[cl.viewentity];
 
@@ -940,8 +929,6 @@ void V_CalcRefdef (void)
 	ent->angles[PITCH] = -cl.viewangles[PITCH];	// the model should face the view dir
 
 	bob = V_CalcBob ();
-	if (CL_Predict_ReproModeEnabled ())
-		bob = 0.0f;
 
 // refresh position
 	VectorCopy (ent->origin, r_refdef.vieworg);
@@ -1072,22 +1059,6 @@ void V_CalcRefdef (void)
 	}
 	else
 		oldz = ent->origin[2];
-
-	if (cl_netdebug_parse.value)
-	{
-		Con_Printf ("NETDBG vieworg ent %d cur %.2f %.2f %.2f prev %.2f %.2f %.2f lerp %.3f view %.2f %.2f %.2f\n",
-			cl.viewentity,
-			ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
-			ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
-			cl_lerpfrac,
-			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-		JITTER_LOG ("NETDBG vieworg ent %d cur %.2f %.2f %.2f prev %.2f %.2f %.2f lerp %.3f view %.2f %.2f %.2f\n",
-			cl.viewentity,
-			ent->msg_origins[0][0], ent->msg_origins[0][1], ent->msg_origins[0][2],
-			ent->msg_origins[1][0], ent->msg_origins[1][1], ent->msg_origins[1][2],
-			cl_lerpfrac,
-			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	}
 
 	if (chase_active.value)
 		Chase_UpdateForDrawing (); //johnfitz

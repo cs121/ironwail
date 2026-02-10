@@ -219,13 +219,8 @@ GLOBJS = \
 	gl_rmain.o \
 	gl_fog.o \
 	gl_rmisc.o \
-	renderer_backend.o \
-	renderer_backend_gl.o \
-	renderer_backend_null.o \
 	r_shadow.o \
 	r_postfx.o \
-	r_godrayvol.o \
-	r_godray_emit.o \
 	r_part.o \
 	r_world.o \
 	gl_screen.o \
@@ -258,7 +253,6 @@ OBJS = strlcat.o \
 	chase.o \
 	cl_demo.o \
 	cl_input.o \
-	cl_predict.o \
 	cl_main.o \
 	cl_postfx.o \
 	cl_parse.o \

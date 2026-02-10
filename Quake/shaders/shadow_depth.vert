@@ -16,9 +16,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix0;
-	vec4	texmatrix1;
-	vec4	emitter_center;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;

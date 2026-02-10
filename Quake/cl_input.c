@@ -24,39 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Quake is a trademark of Id Software, Inc., (c) 1996 Id Software, Inc. All
 // rights reserved.
 
-/* Q3MINI PLAN:
- * - Add cmd redundancy + ackmask fields to clc_move.
- * - Provide packet-size estimation for client throttling.
- */
-
 #include "quakedef.h"
-#include "arch_def.h"
-#include "net_sys.h"
-#include "net_defs.h"
 
 extern cvar_t cl_maxpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_minpitch; //johnfitz -- variable pitch clamping
 extern cvar_t cl_mwheelpitch;
-extern cvar_t cl_netdebug_parse;
-extern cvar_t cl_cmd_maxbatch;
-
-// Q3MINI BEGIN
-static qboolean CL_Q3Mini_Enabled (void)
-{
-	return (cl.protocolflags & PRFL_Q3MINI) != 0;
-}
-
-static int CL_Q3Mini_Redundancy (void)
-{
-	int redundancy = (int)cl_cmd_redundancy.value;
-
-	if (redundancy < 0)
-		redundancy = 0;
-	if (redundancy > 8)
-		redundancy = 8;
-	return redundancy;
-}
-// Q3MINI END
 
 /*
 ===============================================================================
@@ -310,7 +282,7 @@ void CL_AdjustAngles (void)
 	{
 		cl.viewangles[YAW] -= speed*cl_yawspeed.value*CL_KeyState (&in_right);
 		cl.viewangles[YAW] += speed*cl_yawspeed.value*CL_KeyState (&in_left);
-		cl.viewangles[YAW] = NormalizeAngle180 (cl.viewangles[YAW]);
+		cl.viewangles[YAW] -= floor (cl.viewangles[YAW]/360.0) * 360.0;
 	}
 	if (in_klook.state & 1)
 	{
@@ -410,29 +382,13 @@ CL_SendMove
 void CL_SendMove (const usercmd_t *cmd)
 {
 	int		i;
-	int		cmd_count;
-	int		j;
+	int		bits;
 	sizebuf_t	buf;
 	byte	data[128];
-	usercmd_t	cmd_buf[CMD_BACKUP + 1];
 
 	buf.maxsize = 128;
 	buf.cursize = 0;
 	buf.data = data;
-	buf.allowoverflow = false;
-	buf.overflowed = false;
-	buf.overflowed_once = false;
-	buf.write_blocked = false;
-	buf.write_locked = false;
-	buf.blocked_file = NULL;
-	buf.blocked_line = 0;
-	buf.dbg_name = "cl_move";
-	buf.dbg_file = NULL;
-	buf.dbg_line = 0;
-	buf.dbg_msgkind = 0;
-	buf.dbg_id = 0;
-	buf.dbg_aux = 0;
-	buf.bitpos = 0;
 
 	if (cmd) 
 	{
@@ -444,84 +400,36 @@ void CL_SendMove (const usercmd_t *cmd)
 		MSG_WriteByte (&buf, clc_move);
 
 		MSG_WriteFloat (&buf, cl.mtime[0]);	// so server can get ping times
-		// RMQ wire format: cmd_seq/cmd_ack are 32-bit unsigned (wrap-safe via NETSEQ_GT).
-		MSG_WriteLong (&buf, (int)cmd->sequence);
-		MSG_WriteLong (&buf, (int)cl.last_cmd_ack);
-		// Q3MINI BEGIN
-		if (CL_Q3Mini_Enabled () && net_ackmask.value > 0.0f)
-		{
-			unsigned int srv_ack = cl.q3mini_srv_ack_valid ? cl.q3mini_srv_ack : 0u;
-			unsigned int srv_ack_mask = cl.q3mini_srv_ack_valid ? cl.q3mini_srv_ack_mask : 0u;
 
-			MSG_WriteLong (&buf, (int)srv_ack);
-			MSG_WriteLong (&buf, (int)srv_ack_mask);
-		}
-		// Q3MINI END
+		for (i=0 ; i<3 ; i++)
+			//johnfitz -- 16-bit angles for PROTOCOL_FITZQUAKE
+			if (cl.protocol == PROTOCOL_NETQUAKE)
+				MSG_WriteAngle (&buf, cl.viewangles[i], cl.protocolflags);
+			else
+				MSG_WriteAngle16 (&buf, cl.viewangles[i], cl.protocolflags);
+			//johnfitz
 
-		cmd_count = 0;
-		{
-			int maxbatch = (int)cl_cmd_maxbatch.value;
-			int redundancy = CL_Q3Mini_Redundancy ();
-			int desired = redundancy + 1;
+		MSG_WriteShort (&buf, cmd->forwardmove);
+		MSG_WriteShort (&buf, cmd->sidemove);
+		MSG_WriteShort (&buf, cmd->upmove);
 
-			if (maxbatch < 1)
-				maxbatch = 1;
-			if (maxbatch > MAX_CMDS_PER_PACKET)
-				maxbatch = MAX_CMDS_PER_PACKET;
-			if (maxbatch > desired)
-				maxbatch = desired;
+	//
+	// send button bits
+	//
+		bits = 0;
 
-			for (i = redundancy; i >= 0 && cmd_count < maxbatch; i--)
-			{
-				unsigned int seq = cmd->sequence - (unsigned int)i;
+		if ( in_attack.state & 3 )
+			bits |= 1;
+		in_attack.state &= ~2;
 
-				if (CL_Predict_GetCmd (seq, &cmd_buf[cmd_count]))
-					cmd_count++;
-			}
-		}
+		if (in_jump.state & 3)
+			bits |= 2;
+		in_jump.state &= ~2;
 
-		MSG_WriteByte (&buf, cmd_count);
-		for (i = 0; i < cmd_count; i++)
-		{
-			const usercmd_t *out = &cmd_buf[i];
+		MSG_WriteByte (&buf, bits);
 
-			MSG_WriteLong (&buf, (int)out->sequence);
-			for (j=0 ; j<3 ; j++)
-				MSG_WriteAngle16 (&buf, out->viewangles[j], cl.protocolflags);
-
-			MSG_WriteShort (&buf, out->forwardmove);
-			MSG_WriteShort (&buf, out->sidemove);
-			MSG_WriteShort (&buf, out->upmove);
-			MSG_WriteByte (&buf, out->buttons);
-			MSG_WriteByte (&buf, out->impulse);
-		}
-
-		if (cl_netdebug_parse.value)
-		{
-			unsigned int reliable_seq = cls.netcon ? cls.netcon->sendSequence : 0u;
-			unsigned int reliable_base = cls.netcon ? cls.netcon->sendReliableBase : 0u;
-			Con_Printf ("NETDBG time %.3f cmd_move_write msg %d type %d flags 0x%x cmd_seq %u "
-				"cmd_ack %u snap_ack %u rel_seq %u rel_base %u widths[mtime=float cmd_seq=long "
-				"cmd_ack=long cmd_count=byte ucmd_seq=long angles=short moves=short buttons=byte impulse=byte]\n",
-				realtime, buf.cursize, clc_move, cl.protocolflags, cmd->sequence,
-				cl.last_cmd_ack, cl.last_snapshot_ack_sent, reliable_seq, reliable_base);
-			JITTER_LOG ("NETDBG time %.3f cmd_move_write msg %d type %d flags 0x%x cmd_seq %u "
-				"cmd_ack %u snap_ack %u rel_seq %u rel_base %u widths[mtime=float cmd_seq=long "
-				"cmd_ack=long cmd_count=byte ucmd_seq=long angles=short moves=short buttons=byte impulse=byte]\n",
-				realtime, buf.cursize, clc_move, cl.protocolflags, cmd->sequence,
-				cl.last_cmd_ack, cl.last_snapshot_ack_sent, reliable_seq, reliable_base);
-		}
-		// Q3MINI BEGIN
-		if (net_dbg_q3mini.value > 0.0f)
-		{
-			unsigned int srv_ack = cl.q3mini_srv_ack_valid ? cl.q3mini_srv_ack : 0u;
-			unsigned int srv_ack_mask = cl.q3mini_srv_ack_valid ? cl.q3mini_srv_ack_mask : 0u;
-			Con_Printf ("NETDBG q3mini send cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d\n",
-				cmd->sequence, cl.last_cmd_ack, srv_ack, srv_ack_mask, cmd_count);
-			JITTER_LOG ("NETDBG q3mini send cmd_seq %u cmd_ack %u srv_ack %u mask 0x%08x cmds %d\n",
-				cmd->sequence, cl.last_cmd_ack, srv_ack, srv_ack_mask, cmd_count);
-		}
-		// Q3MINI END
+		MSG_WriteByte (&buf, in_impulse);
+		in_impulse = 0;
 	}
 
 //
@@ -543,52 +451,6 @@ void CL_SendMove (const usercmd_t *cmd)
 		CL_Disconnect ();
 	}
 }
-
-// Q3MINI BEGIN
-int CL_CalcMovePacketBytes (const usercmd_t *cmd, int *out_cmd_count)
-{
-	int cmd_count = 0;
-	int i;
-	int header_bytes = 1 + 4 + 4 + 4; // clc_move + mtime + cmd_seq + cmd_ack
-	int cmd_bytes = 4 + (3 * 2) + (3 * 2) + 1 + 1;
-
-	if (!cmd)
-	{
-		if (out_cmd_count)
-			*out_cmd_count = 0;
-		return 0;
-	}
-
-	if (CL_Q3Mini_Enabled () && net_ackmask.value > 0.0f)
-		header_bytes += 8;
-
-	{
-		int maxbatch = (int)cl_cmd_maxbatch.value;
-		int redundancy = CL_Q3Mini_Redundancy ();
-		int desired = redundancy + 1;
-
-		if (maxbatch < 1)
-			maxbatch = 1;
-		if (maxbatch > MAX_CMDS_PER_PACKET)
-			maxbatch = MAX_CMDS_PER_PACKET;
-		if (maxbatch > desired)
-			maxbatch = desired;
-
-		for (i = redundancy; i >= 0 && cmd_count < maxbatch; i--)
-		{
-			unsigned int seq = cmd->sequence - (unsigned int)i;
-
-			if (CL_Predict_GetCmd (seq, NULL))
-				cmd_count++;
-		}
-	}
-
-	if (out_cmd_count)
-		*out_cmd_count = cmd_count;
-
-	return header_bytes + 1 + (cmd_count * cmd_bytes);
-}
-// Q3MINI END
 
 /*
 ============
@@ -634,3 +496,4 @@ void CL_InitInput (void)
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
 }
+

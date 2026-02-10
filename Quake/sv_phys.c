@@ -47,32 +47,11 @@ cvar_t	sv_gravity = {"sv_gravity","800",CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	sv_maxvelocity = {"sv_maxvelocity","2000",CVAR_NONE};
 cvar_t	sv_nostep = {"sv_nostep","0",CVAR_NONE};
 cvar_t	sv_freezenonclients = {"sv_freezenonclients","0",CVAR_NONE};
-cvar_t	sv_phys_debug = {"sv_phys_debug","0",CVAR_NONE};
 
 
 #define	MOVE_EPSILON	0.01
 
 void SV_Physics_Toss (edict_t *ent);
-
-static qboolean sv_phys_debug_registered;
-
-static void SV_Phys_RegisterDebugCvars (void)
-{
-	if (sv_phys_debug_registered)
-		return;
-
-	Cvar_RegisterVariable (&sv_phys_debug);
-	sv_phys_debug_registered = true;
-}
-
-static qboolean SV_TraceHasValidGroundPlane (const trace_t *trace)
-{
-	if (trace->fraction <= 0.0f && (trace->startsolid || trace->allsolid || trace->plane.normal[2] <= 0.0f))
-		return false;
-	if (trace->plane.normal[2] <= 0.7f)
-		return false;
-	return true;
-}
 
 /*
 ================
@@ -895,7 +874,7 @@ void SV_WalkMove (edict_t *ent)
 	if (sv_nostep.value)
 		return;
 
-	if ( (int)ent->v.flags & FL_WATERJUMP )
+	if ( (int)sv_player->v.flags & FL_WATERJUMP )
 		return;
 
 	VectorCopy (ent->v.origin, nosteporg);
@@ -938,32 +917,7 @@ void SV_WalkMove (edict_t *ent)
 // move down
 	downtrace = SV_PushEntity (ent, downmove);	// FIXME: don't link?
 
-	if (!SV_TraceHasValidGroundPlane (&downtrace) && downtrace.fraction <= 0.0f)
-	{
-		vec3_t nudge;
-		trace_t retrace;
-
-		VectorCopy (vec3_origin, nudge);
-		nudge[2] = 1.0f;
-		SV_PushEntity (ent, nudge);
-		retrace = SV_PushEntity (ent, downmove);
-		if (SV_TraceHasValidGroundPlane (&retrace))
-		{
-			downtrace = retrace;
-			if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
-				sys_step_debug_info.player_ground_trace_fallback = 1;
-		}
-	}
-
-	if (sys_step_debug.value > 1.0f && ((int)ent->v.flags & FL_CLIENT))
-	{
-		sys_step_debug_info.player_ground_trace_fraction = downtrace.fraction;
-		sys_step_debug_info.player_ground_trace_normal_z = downtrace.plane.normal[2];
-		sys_step_debug_info.player_ground_trace_startsolid = downtrace.startsolid ? 1 : 0;
-		sys_step_debug_info.player_ground_trace_allsolid = downtrace.allsolid ? 1 : 0;
-	}
-
-	if (SV_TraceHasValidGroundPlane (&downtrace))
+	if (downtrace.plane.normal[2] > 0.7)
 	{
 		if (ent->v.solid == SOLID_BSP)
 		{
@@ -973,8 +927,6 @@ void SV_WalkMove (edict_t *ent)
 	}
 	else
 	{
-		ent->v.flags = (int)ent->v.flags & ~FL_ONGROUND;
-		ent->v.groundentity = EDICT_TO_PROG(qcvm->edicts);
 // if the push down didn't end up on good ground, use the move without
 // the step up.  This happens near wall / slope combinations, and can
 // cause the player to hop up higher on a slope too steep to climb
@@ -997,23 +949,6 @@ void SV_Physics_Client (edict_t	*ent, int num)
 
 	if ( ! svs.clients[num-1].active )
 		return;		// unconnected slot
-
-	if (sys_step_debug.value > 0.0f)
-	{
-		if (num == 1)
-		{
-			sys_step_debug_info.player_valid = 1;
-			VectorCopy (ent->v.origin, sys_step_debug_info.player_origin_before);
-			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_before);
-			sys_step_debug_info.player_groundent_before = (int)ent->v.groundentity;
-			sys_step_debug_info.player_onground_before = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
-			sys_step_debug_info.player_ground_trace_fraction = 1.0f;
-			sys_step_debug_info.player_ground_trace_normal_z = 0.0f;
-			sys_step_debug_info.player_ground_trace_startsolid = 0;
-			sys_step_debug_info.player_ground_trace_allsolid = 0;
-			sys_step_debug_info.player_ground_trace_fallback = 0;
-		}
-	}
 
 //
 // call standard client pre-think
@@ -1084,32 +1019,6 @@ void SV_Physics_Client (edict_t	*ent, int num)
 	{
 		ent->forcewater = forceunderwater;
 		ent->sendforcewater = true;
-	}
-
-	if (sys_step_debug.value > 0.0f)
-	{
-		if (num == 1)
-		{
-			edict_t *groundent;
-
-			VectorCopy (ent->v.origin, sys_step_debug_info.player_origin_after);
-			VectorCopy (ent->v.velocity, sys_step_debug_info.player_vel_after);
-			VectorClear (sys_step_debug_info.player_basevel_after);
-			sys_step_debug_info.player_groundent_after = (int)ent->v.groundentity;
-			sys_step_debug_info.player_onground_after = ((int)ent->v.flags & FL_ONGROUND) ? 1 : 0;
-			VectorClear (sys_step_debug_info.player_ground_vel);
-			sys_step_debug_info.player_ground_is_mover = 0;
-			groundent = PROG_TO_EDICT (ent->v.groundentity);
-			if (groundent && groundent != qcvm->edicts && groundent->v.movetype == MOVETYPE_PUSH)
-			{
-				vec3_t gdelta;
-
-				sys_step_debug_info.player_ground_is_mover = 1;
-				VectorSubtract (groundent->v.origin, groundent->v.oldorigin, gdelta);
-				if (host_frametime > 0.0f)
-					VectorScale (gdelta, 1.0f / host_frametime, sys_step_debug_info.player_ground_vel);
-			}
-		}
 	}
 }
 
@@ -1319,16 +1228,6 @@ void SV_Physics (void)
 	int	i;
 	int	entity_cap; // For sv_freezenonclients 
 	edict_t	*ent;
-	int steps = 1;
-
-	SV_Phys_RegisterDebugCvars ();
-	if (sv_phys_debug.value > 0.0f)
-	{
-		Con_Printf ("SVPHYS: frametime=%.4f steps=%d\n", host_frametime, steps);
-	}
-
-	if (sys_step_debug.value > 0.0f)
-		sys_step_debug_info.sv_physics_calls++;
 
 // let the progs know that a new frame has started
 	pr_global_struct->self = EDICT_TO_PROG(qcvm->edicts);
@@ -1349,26 +1248,9 @@ void SV_Physics (void)
 	  entity_cap = qcvm->num_edicts;
 
 	//for (i=0 ; i<sv.num_edicts ; i++, ent = NEXT_EDICT(ent))
-	for (i=0, ent = qcvm->edicts ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
+	for (i=0 ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
-			continue;
-		if (ent->v.movetype != MOVETYPE_PUSH)
-			continue;
-
-		VectorCopy (ent->v.origin, ent->v.oldorigin);
-
-		if (pr_global_struct->force_retouch)
-			SV_LinkEdict (ent, true);	// force retouch even for stationary
-
-		SV_Physics_Pusher (ent);
-	}
-
-	for (i=0, ent = qcvm->edicts ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
-	{
-		if (ent->free)
-			continue;
-		if (ent->v.movetype == MOVETYPE_PUSH)
 			continue;
 
 		if (pr_global_struct->force_retouch)
@@ -1378,6 +1260,8 @@ void SV_Physics (void)
 
 		if (i > 0 && i <= svs.maxclients)
 			SV_Physics_Client (ent, i);
+		else if (ent->v.movetype == MOVETYPE_PUSH)
+			SV_Physics_Pusher (ent);
 		else if (ent->v.movetype == MOVETYPE_NONE)
 			SV_Physics_None (ent);
 		else if (ent->v.movetype == MOVETYPE_NOCLIP)
@@ -1393,6 +1277,7 @@ void SV_Physics (void)
 		else
 			Sys_Error ("SV_Physics: bad movetype %i", (int)ent->v.movetype);
 
+	//johnfitz -- PROTOCOL_FITZQUAKE
 	//capture interval to nextthink here and send it to client for better
 	//lerp timing, but only if interval is not 0.1 (which client assumes)
 		ent->sendinterval = false;
@@ -1402,6 +1287,7 @@ void SV_Physics (void)
 			if (j >= 0 && j < 256 && j != 25 && j != 26) //25 and 26 are close enough to 0.1 to not send
 				ent->sendinterval = true;
 		}
+	//johnfitz
 	}
 
 	if (pr_global_struct->force_retouch)
@@ -1409,20 +1295,4 @@ void SV_Physics (void)
 
 	if (!sv_freezenonclients.value) 
 	  qcvm->time += host_frametime;
-
-	if (sv_phys_debug.value > 0.0f)
-	{
-		for (i = 1; i <= svs.maxclients; i++)
-		{
-			edict_t *player = EDICT_NUM (i);
-
-			if (!player || player->free)
-				continue;
-			Con_Printf ("SVPHYS: player %d origin=%.2f %.2f %.2f\n",
-				i,
-				player->v.origin[0],
-				player->v.origin[1],
-				player->v.origin[2]);
-		}
-	}
 }

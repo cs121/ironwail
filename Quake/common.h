@@ -110,67 +110,16 @@ GENERIC_TYPES (IMPL_GENERIC_FUNCS, NO_COMMA)
 
 #define LERP(a, b, t) ((a) + ((b)-(a))*(t))
 
-// Wrap-safe sequence comparisons for 32-bit command ids (valid for < 2^31 gaps).
-#define NETSEQ_GT(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) > 0)
-#define NETSEQ_GEQ(a, b) ((int)((unsigned int)(a) - (unsigned int)(b)) >= 0)
-#define seq_newer(a, b) NETSEQ_GT((a), (b))
-#define seq_delta(a, b) ((unsigned int)((unsigned int)(a) - (unsigned int)(b)))
-
 #define countof(arr) (sizeof(arr) / sizeof(arr[0]))
 
 typedef struct sizebuf_s
 {
 	qboolean	allowoverflow;	// if false, do a Sys_Error
 	qboolean	overflowed;		// set to true if the buffer size failed
-	qboolean	overflowed_once;	// set on first overflow until explicit clear/init
-	qboolean	write_blocked;		// set when writes are not allowed
-	qboolean	write_locked;		// set when no more writes should occur
-	const char	*blocked_file;
-	int		blocked_line;
-	const char	*dbg_name;
-	const char	*dbg_file;
-	int		dbg_line;
-	int		dbg_msgkind; // 0 unknown, 1 server svc, 2 client clc, 3 misc
-	int		dbg_id;
-	int		dbg_aux;
 	byte		*data;
 	int		maxsize;
 	int		cursize;
-	int		bitpos;
 } sizebuf_t;
-
-#define MSG_DBG_SET(msg, kind, id, aux) do { \
-	(msg)->dbg_msgkind = (kind); \
-	(msg)->dbg_id = (id); \
-	(msg)->dbg_aux = (aux); \
-	(msg)->dbg_file = __FILE__; \
-	(msg)->dbg_line = __LINE__; \
-} while (0)
-
-#define MSG_BEGINSVC(msg, svc_id) do { \
-	SV_SignonFirewallCheck((msg), (svc_id), __FILE__, __LINE__); \
-	MSG_DBG_SET((msg), 1, (svc_id), (msg)->dbg_aux); \
-} while (0)
-
-#define MSG_BEGINCLC(msg, clc_id) do { \
-	MSG_DBG_SET((msg), 2, (clc_id), (msg)->dbg_aux); \
-} while (0)
-
-#define MSG_DBGAUX(msg, aux) do { \
-	(msg)->dbg_aux = (aux); \
-} while (0)
-
-#define MSG_CAN_FIT(msg, bytes) ((msg)->cursize + (bytes) <= (msg)->maxsize)
-static inline qboolean MSG_CanFit (sizebuf_t *msg, int bytes)
-{
-	return MSG_CAN_FIT (msg, bytes);
-}
-static inline qboolean MSG_CanWrite (sizebuf_t *msg, int bytes)
-{
-	return MSG_CAN_FIT (msg, bytes) && !msg->write_locked;
-}
-
-void SV_SignonFirewallCheck (sizebuf_t *msg, int svc_id, const char *file, int line);
 
 void SZ_Alloc (sizebuf_t *buf, int startsize);
 void SZ_Free (sizebuf_t *buf);
@@ -178,11 +127,6 @@ void SZ_Clear (sizebuf_t *buf);
 void *SZ_GetSpace (sizebuf_t *buf, int length);
 void SZ_Write (sizebuf_t *buf, const void *data, int length);
 void SZ_Print (sizebuf_t *buf, const char *data);	// strcats onto the sizebuf
-void SZ_BlockWrites (sizebuf_t *buf, const char *file, int line);
-void SZ_UnblockWrites (sizebuf_t *buf);
-
-#define SZ_BLOCK_WRITES(buf) SZ_BlockWrites((buf), __FILE__, __LINE__)
-#define SZ_UNBLOCK_WRITES(buf) SZ_UnblockWrites((buf))
 
 //============================================================================
 
@@ -279,17 +223,11 @@ void MSG_WriteShort (sizebuf_t *sb, int c);
 void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
 void MSG_WriteString (sizebuf_t *sb, const char *s);
-void MSG_WriteBits (sizebuf_t *sb, unsigned int value, int bits);
-void MSG_WriteInt8 (sizebuf_t *sb, int c);
-void MSG_WriteInt16 (sizebuf_t *sb, int c);
-void MSG_WriteUInt16 (sizebuf_t *sb, unsigned int c);
-void MSG_WriteCoord32f (sizebuf_t *sb, float f);
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags); //johnfitz
 
 extern	int			msg_readcount;
-extern	int			msg_readbitpos;
 extern	qboolean	msg_badread;		// set if a read goes beyond end of message
 
 void MSG_BeginReading (void);
@@ -299,11 +237,6 @@ int MSG_ReadShort (void);
 int MSG_ReadLong (void);
 float MSG_ReadFloat (void);
 const char *MSG_ReadString (void);
-unsigned int MSG_ReadBits (int bits);
-int MSG_ReadInt8 (void);
-int MSG_ReadInt16 (void);
-unsigned int MSG_ReadUInt16 (void);
-qboolean MSG_PackedSelfTest (void);
 
 float MSG_ReadCoord (unsigned int flags);
 float MSG_ReadAngle (unsigned int flags);
@@ -551,3 +484,4 @@ extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
 
 #endif	/* _Q_COMMON_H */
+

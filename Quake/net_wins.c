@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "arch_def.h"
 #include "net_sys.h"
 #include "net_defs.h"
-#include <iphlpapi.h>
 
 static sys_socket_t net_acceptsocket = INVALID_SOCKET;	// socket for fielding new connections
 static sys_socket_t net_controlsocket;
@@ -231,9 +230,6 @@ sys_socket_t WINS_OpenSocket (int port)
 		return INVALID_SOCKET;
 	}
 
-	setsockopt (newsocket, SOL_SOCKET, SO_BROADCAST, (char *)&_true, sizeof(_true));
-	setsockopt (newsocket, SOL_SOCKET, SO_REUSEADDR, (char *)&_true, sizeof(_true));
-
 	if (ioctlsocket (newsocket, FIONBIO, &_true) == SOCKET_ERROR)
 		goto ErrorReturn;
 
@@ -389,83 +385,9 @@ static int WINS_MakeSocketBroadcastCapable (sys_socket_t socketid)
 
 //=============================================================================
 
-static int WINS_BroadcastOnInterfaces (sys_socket_t socketid, byte *buf, int len)
-{
-	IP_ADAPTER_ADDRESSES *addrs = NULL;
-	IP_ADAPTER_ADDRESSES *adapter;
-	IP_ADAPTER_UNICAST_ADDRESS *unicast;
-	ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
-	ULONG size = 15000;
-	DWORD status;
-	int sent = 0;
-
-	addrs = (IP_ADAPTER_ADDRESSES *)malloc(size);
-	if (!addrs)
-		return 0;
-
-	status = GetAdaptersAddresses(AF_INET, flags, NULL, addrs, &size);
-	if (status == ERROR_BUFFER_OVERFLOW)
-	{
-		free(addrs);
-		addrs = (IP_ADAPTER_ADDRESSES *)malloc(size);
-		if (!addrs)
-			return 0;
-		status = GetAdaptersAddresses(AF_INET, flags, NULL, addrs, &size);
-	}
-
-	if (status != NO_ERROR)
-	{
-		free(addrs);
-		return 0;
-	}
-
-	for (adapter = addrs; adapter; adapter = adapter->Next)
-	{
-		if (adapter->OperStatus != IfOperStatusUp)
-			continue;
-		if (adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
-			continue;
-
-		for (unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next)
-		{
-			struct sockaddr_in *addr;
-			struct sockaddr_in dest;
-			ULONG prefix;
-			uint32_t mask;
-			uint32_t host_addr;
-			uint32_t broadcast_host;
-
-			if (!unicast->Address.lpSockaddr)
-				continue;
-			if (unicast->Address.lpSockaddr->sa_family != AF_INET)
-				continue;
-
-			addr = (struct sockaddr_in *)unicast->Address.lpSockaddr;
-			prefix = unicast->OnLinkPrefixLength;
-			if (prefix > 32)
-				continue;
-
-			mask = (prefix == 0) ? 0 : (0xffffffffu << (32 - prefix));
-			host_addr = ntohl(addr->sin_addr.s_addr);
-			broadcast_host = (host_addr & mask) | (~mask);
-
-			memset(&dest, 0, sizeof(dest));
-			dest.sin_family = AF_INET;
-			dest.sin_addr.s_addr = htonl(broadcast_host);
-			dest.sin_port = htons((unsigned short)net_hostport);
-			if (WINS_Write (socketid, buf, len, (struct qsockaddr *)&dest) >= 0)
-				sent++;
-		}
-	}
-
-	free(addrs);
-	return sent;
-}
-
 int WINS_Broadcast (sys_socket_t socketid, byte *buf, int len)
 {
 	int	ret;
-	int sent;
 
 	if (socketid != net_broadcastsocket)
 	{
@@ -479,10 +401,6 @@ int WINS_Broadcast (sys_socket_t socketid, byte *buf, int len)
 			return ret;
 		}
 	}
-
-	sent = WINS_BroadcastOnInterfaces (socketid, buf, len);
-	if (sent > 0)
-		return len;
 
 	return WINS_Write (socketid, buf, len, (struct qsockaddr *)&broadcastaddr);
 }
@@ -623,3 +541,4 @@ int WINS_SetSocketPort (struct qsockaddr *addr, int port)
 }
 
 //=============================================================================
+

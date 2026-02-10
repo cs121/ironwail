@@ -40,30 +40,6 @@ read from the demo file.
 static byte		*demo_head;
 static int		*demo_head_sizes;
 
-/*
-==============================================================================
-IW demo header format (little-endian):
-
-magic[8]  = "IWDEMO99"
-uint32    demo_format_version
-uint32    demo_protocol
-uint32    demo_features
-==============================================================================
-*/
-
-#define IW_DEMO_MAGIC "IWDEMO99"
-#define IW_DEMO_MAGIC_LEN 8
-#define IW_DEMO_FORMAT_VERSION 2
-#define IW_DEMO_HEADER_SIZE (IW_DEMO_MAGIC_LEN + 3u * sizeof (uint32_t))
-
-typedef struct
-{
-	char		magic[IW_DEMO_MAGIC_LEN];
-	uint32_t	version;
-	uint32_t	protocol;
-	uint32_t	features;
-} iw_demo_hdr_t;
-
 // Demo rewinding
 typedef struct
 {
@@ -111,28 +87,9 @@ CL_ClearSignons
 */
 void CL_ClearSignons (void)
 {
-	int i;
-
 	VEC_CLEAR (demo_head);
 	VEC_CLEAR (demo_head_sizes);
 	cls.signon = 0;
-	cl.has_full_snapshot = false;
-	cl.need_full_snapshot = true;
-	cl.snap_last_applied_seq = 0;
-	cl.snap_last_complete_seq = 0;
-	cl.snap_last_incomplete_seq = 0;
-	cl.snap_last_incomplete = false;
-	cl.snap_incomplete_start_time = 0;
-	cl.snapshot_baseline_seq = 0;
-	cl.snapshot_baseline_head = 0;
-	cl.snapshot_baseline_index = -1;
-	for (i = 0; i < CL_SNAPSHOT_BASELINE_HISTORY; i++)
-	{
-		cl.snapshot_baseline_valid[i] = 0;
-		cl.snapshot_baseline_seqs[i] = 0;
-		if (cl.snapshot_baseline_present[i])
-			memset (cl.snapshot_baseline_present[i], 0, cl_max_edicts * sizeof(byte));
-	}
 }
 
 /*
@@ -188,83 +145,6 @@ static void CL_WriteDemoMessage (void)
 	}
 	fwrite (net_message.data, net_message.cursize, 1, cls.demofile);
 	fflush (cls.demofile);
-}
-
-static qboolean CL_WriteDemoHeader (FILE *demofile)
-{
-	uint32_t value;
-
-	if (fwrite (IW_DEMO_MAGIC, 1, IW_DEMO_MAGIC_LEN, demofile) != IW_DEMO_MAGIC_LEN)
-		return false;
-
-	value = LittleLong (IW_DEMO_FORMAT_VERSION);
-	if (fwrite (&value, sizeof (value), 1, demofile) != 1)
-		return false;
-
-	value = LittleLong (PROTOCOL_RMQ);
-	if (fwrite (&value, sizeof (value), 1, demofile) != 1)
-		return false;
-
-	value = LittleLong (PROTOCOL_RMQ_FLAGS);
-	if (fwrite (&value, sizeof (value), 1, demofile) != 1)
-		return false;
-
-	return true;
-}
-
-static qboolean CL_ReadDemoHeader (const char *name, iw_demo_hdr_t *header)
-{
-	if (com_filesize < (qfileofs_t) IW_DEMO_HEADER_SIZE)
-	{
-		Con_Printf ("Demo is not compatible with this Ironwail build. Only IW demo format v%i supported.\n", IW_DEMO_FORMAT_VERSION);
-		return false;
-	}
-
-	if (fread (header->magic, 1, IW_DEMO_MAGIC_LEN, cls.demofile) != IW_DEMO_MAGIC_LEN)
-	{
-		Con_Printf ("ERROR: demo \"%s\" is invalid\n", name);
-		return false;
-	}
-
-	if (memcmp (header->magic, IW_DEMO_MAGIC, IW_DEMO_MAGIC_LEN) != 0)
-	{
-		Con_Printf ("Demo is not compatible with this Ironwail build. Only IW demo format v%i supported.\n", IW_DEMO_FORMAT_VERSION);
-		return false;
-	}
-
-	if (fread (&header->version, sizeof (header->version), 1, cls.demofile) != 1
-		|| fread (&header->protocol, sizeof (header->protocol), 1, cls.demofile) != 1
-		|| fread (&header->features, sizeof (header->features), 1, cls.demofile) != 1)
-	{
-		Con_Printf ("ERROR: demo \"%s\" is invalid\n", name);
-		return false;
-	}
-
-	header->version = LittleLong (header->version);
-	header->protocol = LittleLong (header->protocol);
-	header->features = LittleLong (header->features);
-
-	if (header->version != IW_DEMO_FORMAT_VERSION)
-	{
-		Con_Printf ("Demo format v%u is not supported. Record a new demo with this Ironwail build.\n", header->version);
-		return false;
-	}
-
-	if (header->protocol != PROTOCOL_RMQ)
-	{
-		Con_Printf ("Demo protocol %u is not supported (expected %i). Record a new demo with this Ironwail build.\n",
-			header->protocol, PROTOCOL_RMQ);
-		return false;
-	}
-
-	if (header->features != PROTOCOL_RMQ_FLAGS)
-	{
-		Con_Printf ("Demo protocol features 0x%x are not supported (expected 0x%x). Record a new demo with this Ironwail build.\n",
-			header->features, PROTOCOL_RMQ_FLAGS);
-		return false;
-	}
-
-	return true;
 }
 
 /*
@@ -579,15 +459,11 @@ static int CL_GetDemoMessage (void)
 	}
 
 	net_message.cursize = LittleLong (net_message.cursize);
-	if (net_message.cursize < 0 || net_message.cursize > MAX_MSGLEN)
-	{
-		Con_Printf ("Demo message length %d is invalid\n", net_message.cursize);
-		goto readerror;
-	}
+	if (net_message.cursize > MAX_MSGLEN)
+		Sys_Error ("Demo message > MAX_MSGLEN");
 	if (fread (net_message.data, net_message.cursize, 1, cls.demofile) != 1)
 	{
 	readerror:
-		Con_Printf ("Demo playback aborted due to read error.\n");
 		CL_StopPlayback ();
 		return 0;
 	}
@@ -760,14 +636,6 @@ void CL_Record_f (void)
 		return;
 	}
 
-	if (!CL_WriteDemoHeader (cls.demofile))
-	{
-		Con_Printf ("ERROR: couldn't write demo header to %s\n", relname);
-		fclose (cls.demofile);
-		cls.demofile = NULL;
-		return;
-	}
-
 	cls.forcetrack = track;
 	fprintf (cls.demofile, "%i\n", cls.forcetrack);
 	q_strlcpy (cls.demofilename, name, sizeof (cls.demofilename));
@@ -892,7 +760,6 @@ play [demoname]
 void CL_PlayDemo_f (void)
 {
 	char	name[MAX_OSPATH];
-	iw_demo_hdr_t header;
 
 	if (cmd_source != src_command)
 		return;
@@ -916,14 +783,6 @@ void CL_PlayDemo_f (void)
 	if (!cls.demofile)
 	{
 		Con_Printf ("ERROR: couldn't open %s\n", name);
-		cls.demonum = -1;	// stop demo loop
-		return;
-	}
-
-	if (!CL_ReadDemoHeader (name, &header))
-	{
-		fclose (cls.demofile);
-		cls.demofile = NULL;
 		cls.demonum = -1;	// stop demo loop
 		return;
 	}
@@ -1009,3 +868,4 @@ void CL_TimeDemo_f (void)
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;	// get a new message this frame
 }
+

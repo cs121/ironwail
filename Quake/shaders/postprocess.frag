@@ -151,7 +151,7 @@ layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: 
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
-layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: shadow threshold, w: shadow softness
+layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -446,7 +446,7 @@ void main()
                                         float t = (float(i) - 0.5 + jitter) / float(sampleCount);
                                         t = clamp(t, 0.0, 1.0);
                                         vec2 offsetPx = direction * (t * radius);
-                                        if (dot(offsetPx, offsetPx) < 1e-12)
+                                        if (length(offsetPx) < 1e-6)
                                                 continue;
                                         vec2 offsetUV = offsetPx * invTexSize;
                                         vec2 sampleUVPos = uv + offsetUV;
@@ -520,8 +520,8 @@ void main()
                         float px = maxPx * a * (0.65 + 0.35 * abs(osc));
                         vec2 baseDir = vec2(cos(t * 1.7), sin(t * 1.31));
                         vec2 dir = baseDir + vec2(jitter, -jitter);
-                        float dirLen2 = dot(dir, dir);
-                        dir = (dirLen2 > 1e-8) ? (dir * inversesqrt(dirLen2)) : vec2(1.0, 0.0);
+                        float dirLen = length(dir);
+                        dir = (dirLen > 1e-4) ? (dir / dirLen) : vec2(1.0, 0.0);
                         vec2 offset1 = dir * px * invTexSize;
                         vec2 offset2 = vec2(-dir.y, dir.x) * (px * 0.75) * invTexSize;
                         vec3 base = color.rgb;
@@ -781,22 +781,10 @@ void main()
         {
                 float blackLift = max(TonemapBlackLiftParams.x, 0.0);
                 float blackLiftStrength = max(TonemapBlackLiftParams.y, 0.0);
-                float shadowThreshold = max(TonemapBlackLiftParams.z, 0.0);
-                float shadowSoftness = max(TonemapBlackLiftParams.w, 1e-4);
                 if (blackLift > 0.0 && blackLiftStrength > 0.0)
                 {
-                        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-                        float luma = dot(mapped, lumaWeights);
-                        float shadow = 1.0 - smoothstep(shadowThreshold,
-                                shadowThreshold + shadowSoftness, luma);
-                        shadow = pow(shadow, 1.5);
-                        float amt = clamp(blackLiftStrength, 0.0, 1.0) * shadow;
-                        vec3 lifted = mix(mapped, vec3(blackLift), amt);
-                        float satKeep = 0.7;
-                        float l0 = dot(mapped, lumaWeights);
-                        float l1 = dot(lifted, lumaWeights);
-                        vec3 chroma = mapped - vec3(l0);
-                        mapped = vec3(l1) + chroma * satKeep;
+                        mapped = mix(mapped, vec3(blackLift),
+                                1.0 - exp(-mapped * blackLiftStrength));
                         mapped = clamp(mapped, 0.0, 1.0);
                 }
         }

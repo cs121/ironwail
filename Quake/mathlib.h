@@ -97,7 +97,6 @@ float DistanceSquared (const vec3_t a, const vec3_t b);
 float Distance (const vec3_t a, const vec3_t b);
 void VectorInverse (vec3_t v);
 void VectorScale (const vec3_t in, vec_t scale, vec3_t out);
-void PerpendicularVector (vec3_t dst, const vec3_t src);
 int Q_log2(int val);
 int Q_nextPow2(int val);
 
@@ -126,17 +125,13 @@ void FloorDivMod (double numer, double denom, int *quotient,
 fixed16_t Invert24To16(fixed16_t val);
 int GreatestCommonDivisor (int i1, int i2);
 
-void AngleVectors (const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
+void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up);
 int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, struct mplane_s *plane);
 float	anglemod(float a);
 
 float NormalizeAngle (float degrees);
-float NormalizeAngle180 (float degrees);
-float NormalizeAngle360 (float degrees);
 float AngleDifference (float dega, float degb);
-float AngleDeltaShortest (float degfrom, float degto);
 float LerpAngle (float degfrom, float degto, float frac);
-float LerpAngleShortest (float degfrom, float degto, float frac);
 
 void MatrixMultiply(float left[16], float right[16]);
 void RotationMatrix(float matrix[16], float angle, int axis);
@@ -178,3 +173,4 @@ qboolean RayVsBox (const vec3_t org, const vec3_t rcpdelta, const vec3_t mins, c
 /*==========================================================================*/
 
 #endif	/* __MATHLIB_H */
+

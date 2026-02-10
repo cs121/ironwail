@@ -8,7 +8,6 @@
 
 layout(location=0) uniform vec4 GodraysSourceParams0; // x: emissive intensity, y: light intensity, z: emissive threshold, w: light threshold
 layout(location=1) uniform vec4 GodraysSourceParams1; // x: mask knee, yzw: unused
-layout(location=2) uniform vec2 GodraysViewportSize; // viewport size in pixels
 
 const uint
 	CF_USE_FULLBRIGHT = 2u,
@@ -20,14 +19,12 @@ const uint
 layout(location=0) flat in uint in_flags;
 layout(location=3) in vec2 in_uv;
 layout(location=15) flat in vec4 in_stage_color;
-layout(location=17) flat in vec2 in_emitter_center_ss;
 #if BINDLESS
 	layout(location=9) flat in uvec4 in_samplers0;
 	layout(location=10) flat in uvec2 in_samplers1;
 #endif
 
-layout(location=0) out vec4 outMask;
-layout(location=1) out vec4 outDir;
+layout(location=0) out vec4 outColor;
 
 float BrightPartMask(vec3 color, float threshold, float knee)
 {
@@ -98,12 +95,5 @@ void main()
 	if (emissive_strength > 0.0)
 		color += emissive_color * emissive_strength * emissive_mask;
 
-	outMask = vec4(color, mask);
-
-	vec2 uv = (gl_FragCoord.xy + vec2(0.5)) / max(GodraysViewportSize, vec2(1.0));
-	vec2 dir = uv - in_emitter_center_ss;
-	dir.y *= 0.7;
-	float len2 = dot(dir, dir);
-	dir = (len2 > 1e-6) ? dir * inversesqrt(len2) : vec2(1.0, 0.0);
-	outDir = vec4(dir * 0.5 + 0.5, 0.0, 1.0);
+	outColor = vec4(color, mask);
 }

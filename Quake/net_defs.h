@@ -35,8 +35,7 @@ struct qsockaddr
 	unsigned char qsa_data[14];
 };
 
-#define NET_HEADERSIZE		(4 * sizeof(unsigned int))
-#define NET_UDPIP_HEADER_BYTES	28
+#define NET_HEADERSIZE		(2 * sizeof(unsigned int))
 #define NET_DATAGRAMSIZE	(MAX_DATAGRAM + NET_HEADERSIZE)
 
 // NetHeader flags
@@ -46,39 +45,14 @@ struct qsockaddr
 #define NETFLAG_NAK		0x00040000
 #define NETFLAG_EOM		0x00080000
 #define NETFLAG_UNRELIABLE	0x00100000
-#define NETFLAG_FRAG		0x00200000
 #define NETFLAG_CTL		0x80000000
 
 #if (NETFLAG_LENGTH_MASK & NET_MAXMESSAGE) != NET_MAXMESSAGE
 #error "NET_MAXMESSAGE must fit within NETFLAG_LENGTH_MASK"
 #endif
 
-#define NET_PROTOCOL_VERSION	4
+#define NET_PROTOCOL_VERSION	3
 
-#define NET_ACK_BITS		32
-#define NET_RELIABLE_WINDOW	32
-#define NET_UNRELIABLE_MAX_FRAGMENTS	256
-
-typedef struct
-{
-	unsigned int	sequence;
-	int		length;
-	int		offset;
-	qboolean	eom;
-	qboolean	acked;
-	double		lastSendTime;
-} net_reliable_send_t;
-
-typedef struct
-{
-	unsigned int	sequence;
-	int		length;
-	qboolean	eom;
-	qboolean	received;
-	byte		*data;
-} net_reliable_receive_t;
-
-/* Q3MINI Phase 4/5 summary: add net feature flag storage for compression negotiation. */
 /**
 
 This is the network info/connection protocol.  It is used to find Quake
@@ -153,59 +127,35 @@ CCREP_RULE_INFO
 #define CCREP_PLAYER_INFO	0x84
 #define CCREP_RULE_INFO		0x85
 
-// Q3MINI BEGIN
-#define NETFEATURE_Q3MINI_COMPRESS	(1u << 0)
-// Q3MINI END
-
 typedef struct qsocket_s
 {
 	struct qsocket_s	*next;
 	double		connecttime;
 	double		lastMessageTime;
 	double		lastSendTime;
-	double		rate_next_time;
-	int		rate_budget;
 
 	qboolean	disconnected;
 	qboolean	canSend;
+	qboolean	sendNext;
 
 	int		driver;
 	int		landriver;
 	sys_socket_t	socket;
 	void		*driverdata;
 
+	unsigned int	ackSequence;
 	unsigned int	sendSequence;
 	unsigned int	unreliableSendSequence;
-	unsigned int	unreliableFragmentSequence;
 	int		sendMessageLength;
-	int		sendMessageOffset;
 	byte		sendMessage [NET_MAXMESSAGE];
-	unsigned int	sendReliableBase;
-	net_reliable_send_t	reliableSend [NET_RELIABLE_WINDOW];
 
 	unsigned int	receiveSequence;
-	qboolean	reliableReceiveValid;
-	unsigned int	reliableReceiveSequence;
-	unsigned int	reliableReceiveMask;
 	unsigned int	unreliableReceiveSequence;
-	qboolean	unreliableFragActive;
-	unsigned int	unreliableFragSequence;
-	unsigned short	unreliableFragTotal;
-	unsigned short	unreliableFragReceived;
-	unsigned int	unreliableFragTotalBytes;
-	double		unreliableFragStartTime;
-	byte		*unreliableFragBuffers[NET_UNRELIABLE_MAX_FRAGMENTS];
-	unsigned short	unreliableFragSizes[NET_UNRELIABLE_MAX_FRAGMENTS];
-	byte		unreliableFragReceivedMask[NET_UNRELIABLE_MAX_FRAGMENTS];
 	int		receiveMessageLength;
 	byte		receiveMessage [NET_MAXMESSAGE];
-	net_reliable_receive_t	reliableReceive [NET_RELIABLE_WINDOW];
 
 	struct qsockaddr	addr;
 	char		address[NET_NAMELEN];
-	// Q3MINI BEGIN
-	unsigned int	features;
-	// Q3MINI END
 
 } qsocket_t;
 
@@ -307,3 +257,4 @@ typedef struct _PollProcedure
 void SchedulePollProcedure(PollProcedure *pp, double timeOffset);
 
 #endif	/* __NET_DEFS_H */
+

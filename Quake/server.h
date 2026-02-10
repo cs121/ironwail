@@ -20,10 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-/* Q3MINI PLAN:
- * - Track mini-Q3 server sequence and client ackmask bookkeeping for debug/logging.
- */
-
 #ifndef QUAKE_SERVER_H
 #define QUAKE_SERVER_H
 
@@ -37,10 +33,6 @@ typedef struct
 	int			serverflags;		// episode completion information
 	qboolean	changelevel_issued;	// cleared when at SV_SpawnServer
 } server_static_t;
-
-extern cvar_t sv_mtu;
-extern cvar_t sv_mtu_headroom;
-extern cvar_t sv_mtu_debug;
 
 //=============================================================================
 
@@ -125,7 +117,6 @@ typedef struct
 
 
 #define	NUM_PING_TIMES		16
-#define SV_SNAPSHOT_BASELINE_HISTORY 4
 
 enum sendsignon_e
 {
@@ -135,115 +126,18 @@ enum sendsignon_e
 	PRESPAWN_SIGNONMSG,
 };
 
-typedef struct bot_state_s
-{
-	int			enemy;
-	double		next_target_scan;
-	double		next_fire_time;
-	double		next_wander_time;
-	double		next_strafe_time;
-	double		last_progress_time;
-	float		wander_yaw;
-	int			strafe_dir;
-	vec3_t		last_origin;
-} bot_state_t;
-
-typedef struct signon_stream_s
-{
-	qboolean	active;
-	qboolean	complete;
-	byte		stage;
-	unsigned short	next_seq;
-	unsigned short	acked_seq;
-	unsigned short	next_record_id;
-	int			buffer_index;
-	int			buffer_offset;
-	int			record_len;
-	int			record_offset;
-	int			record_cmd;
-	byte		record_stage;
-	qboolean	record_active;
-	double		start_time;
-	size_t		stage_bytes[SIGNON_STAGE_COUNT];
-	size_t		stage_records[SIGNON_STAGE_COUNT];
-	size_t		stage_max_record[SIGNON_STAGE_COUNT];
-} signon_stream_t;
-
-typedef struct sv_entity_stream_s
-{
-	qboolean	active;
-	int			signon_stage;
-	int			next_edict;
-	int			total_edicts;
-	int			base_snapshot;
-	int			total_entities;
-	int			sent_entities;
-	int			total_chunks;
-	int			chunk_index;
-	double		next_log_time;
-} sv_entity_stream_t;
-
-typedef enum snapshot_client_state_e
-{
-	SNAP_INIT = 0,
-	SNAP_WAIT_FULL_ACK,
-	SNAP_ACTIVE
-} snapshot_client_state_t;
-
-typedef enum snapshot_full_reason_e
-{
-	SNAP_FULL_CONNECT = 0,
-	SNAP_FULL_MAPRESET,
-	SNAP_FULL_CLIENT_REQUEST,
-	SNAP_FULL_BASE_MISMATCH,
-	SNAP_FULL_DECODE_ERROR,
-	SNAP_FULL_INTERNAL_ERROR,
-	SNAP_FULL_REASON_COUNT
-} snapshot_full_reason_t;
-
-typedef enum sv_unreliable_mode_e
-{
-	UNRELIABLE_NORMAL = 0,
-	UNRELIABLE_CONSERVATIVE
-} sv_unreliable_mode_t;
-
-typedef struct net_budget_stats_s
-{
-	double		avg_ctrl_bytes;
-	double		avg_snap_bytes;
-	double		avg_ent_bytes;
-	double		avg_remove_bytes;
-	double		avg_temp_bytes;
-	double		avg_sound_bytes;
-	double		avg_print_bytes;
-	double		avg_misc_bytes;
-	double		avg_fields_per_ent;
-	double		avg_bytes_per_ent;
-	int			total_datagrams;
-	int			total_trim_unreliable;
-	int			total_drop_events;
-	int			total_drop_temps;
-	int			total_drop_sounds;
-	int			total_drop_prints;
-} net_budget_stats_t;
-
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
 	qboolean		spawned;			// false = don't send datagrams
 	qboolean		dropasap;			// has been told to go to another level
-	qboolean		is_bot;
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
-	signon_stream_t	signon_stream;
-	sv_entity_stream_t entstream;
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
 
 	struct qsocket_s *netconnection;	// communications handle
-	int				rate;				// bytes per second
-	int				updaterate;			// snapshots per second
 
 	usercmd_t		cmd;				// movement
 	vec3_t			wishdir;			// intended motion calced from cmd
@@ -267,114 +161,6 @@ typedef struct client_s
 	int				oldstats_i[MAX_CL_STATS];		//previous values of stats. if these differ from the current values, reflag resendstats.
 	float			oldstats_f[MAX_CL_STATS];		//previous values of stats. if these differ from the current values, reflag resendstats.
 	char			*oldstats_s[MAX_CL_STATS];
-
-	snapshot_state_t *snapshot_baselines[SV_SNAPSHOT_BASELINE_HISTORY];
-	byte			*snapshot_baseline_present[SV_SNAPSHOT_BASELINE_HISTORY];
-	unsigned int	snapshot_baseline_seqs[SV_SNAPSHOT_BASELINE_HISTORY];
-	byte			snapshot_baseline_valid[SV_SNAPSHOT_BASELINE_HISTORY];
-	int				snapshot_baseline_head;
-	int				snapshot_baseline_index;
-	unsigned int	snapshot_next_seq;
-	unsigned int	snapshot_pending_seq;
-	unsigned int	snapshot_pending_baseline_seq;
-	unsigned int	snapshot_last_sent_seq;
-	unsigned int	snapshot_last_acked_seq;
-	unsigned int	snapshot_last_acked_complete_seq;
-	unsigned int	snapshot_last_acked_full_seq;
-	unsigned int	snapshot_last_full_seq;
-	double			snapshot_last_full_time;
-	double			snapshot_last_acked_time;
-	qboolean		snapshot_has_valid_base;
-	// Snapshot2 join state machine:
-	// SNAP_INIT -> SNAP_WAIT_FULL_ACK after sending FULL; SNAP_ACTIVE after FULL ack.
-	qboolean		snapshot_force_full;
-	snapshot_full_reason_t snapshot_force_full_reason;
-	snapshot_client_state_t snapshot_state;
-	unsigned int	snapshot_safe_base_seq;
-	unsigned int	snapshot_join_epoch;
-	double			snapshot_pending_time;
-	qboolean		snapshot_pending_is_delta;
-	snapshot_state_t *snapshot_pending;
-	byte			*snapshot_pending_present;
-	byte			*snapshot_pending_relevant;
-	byte			*snapshot_pending_remove;
-	byte			*snapshot_pending_flags;
-	snapshot_state_t *snapshot_build_state;
-	byte			*snapshot_build_present;
-	unsigned int	*snapshot_last_sent_seq_by_ent;
-	double			*snapshot_last_sent_time_by_ent;
-	double			*snapshot_last_relevant_time_by_ent;
-	double			snapshot_rate_tokens;
-	double			snapshot_rate_last_time;
-	int				snapshot_prio_cursor;
-	int				snapshot_unacked_frames;
-	int				snapshot_pending_mandatory;
-	int				snapshot_pending_dropped_optional;
-	qboolean		snapshot_pending_missing_mandatory;
-	qboolean		snapshot_pending_incomplete;
-	unsigned int	snapshot_ack_stall_seq;
-	int				snapshot_ack_stall_frames;
-	int				snapshot_incomplete_streak;
-	qboolean		snapshot_force_full_until_ack;
-	qboolean		snapshot_need_complete_delta_after_full;
-	unsigned int	snapshot_need_complete_delta_seq;
-	unsigned int	snapshot_force_full_ack_seq;
-	double			snapshot_force_full_next_time;
-	unsigned int	snapshot_no_progress_seq;
-	unsigned int	snapshot_no_progress_base;
-	int				snapshot_no_progress_next_edict;
-	int				snapshot_no_progress_bytes;
-	int				snapshot_no_progress_remaining;
-	int				snapshot_no_progress_count;
-	unsigned int	snapshot_debug_flags;
-	unsigned int	snapshot_debug_base;
-	int				snapshot_debug_add;
-	int				snapshot_debug_update;
-	int				snapshot_debug_remove;
-	int				snapshot_debug_full_count;
-	int				snapshot_stats_full;
-	int				snapshot_stats_delta;
-	int				snapshot_stats_forced_full;
-	unsigned int	snapshot_full_counted_seq;
-	int				snapshot_full_sent_by_reason[SNAP_FULL_REASON_COUNT];
-	int				snapshot_full_sent_midgame;
-	int				snapshot_full_rate_limited_count;
-	int				snapshot_base_mismatch_count;
-	int				snapshot_decode_error_count;
-	double			snapshot_full_rate_limited_until;
-	int				snapshot_stats_mandatory;
-	int				snapshot_stats_dropped;
-	double			snapshot_stats_next_time;
-	double			snapshot_debug_next_time;
-	int				mtu_last_snapshot_size;
-	int				mtu_last_cap;
-	int				mtu_dropped_tier1;
-	int				mtu_dropped_tier2;
-	double			mtu_debug_next_time;
-	sizebuf_t		unrel_queue;
-	byte			unrel_queue_buf[MAX_DATAGRAM];
-	int				datagram_overflow_count;
-	double			datagram_overflow_next_time;
-	double			net_send_next_time;
-	sv_unreliable_mode_t unreliable_mode;
-	int				unreliable_cooldown_frames;
-	double			net_budget_second_start;
-	int				net_budget_sec_event_bytes;
-	int				net_budget_sec_event_count;
-	int				net_budget_sec_temp_count;
-	int				net_budget_sec_sound_count;
-	int				net_budget_sec_print_count;
-	net_budget_stats_t net_budget_stats;
-	bot_state_t		bot;
-	unsigned int	last_cmd_seq;
-	unsigned int	last_cmd_ack;
-	int				invalid_cmd_ack_count;
-	double			invalid_cmd_ack_time;
-	// Q3MINI BEGIN
-	unsigned int	q3mini_srv_seq;
-	unsigned int	q3mini_last_srv_ack;
-	unsigned int	q3mini_last_srv_ack_mask;
-	// Q3MINI END
 } client_t;
 
 
@@ -470,6 +256,7 @@ extern	cvar_t	teamplay;
 extern	cvar_t	skill;
 extern	cvar_t	deathmatch;
 extern	cvar_t	coop;
+extern	cvar_t	bloodhound;
 extern	cvar_t	fraglimit;
 extern	cvar_t	timelimit;
 
@@ -512,18 +299,13 @@ void SV_Physics (void);
 qboolean SV_CheckBottom (edict_t *ent);
 qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink);
 
-void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg);
+void SV_WriteClientdataToMessage (edict_t *ent, sizebuf_t *msg);
 
 void SV_MoveToGoal (void);
 
 void SV_CheckForNewClients (void);
 void SV_RunClients (void);
-qboolean SV_AddBot (const char *name);
-void SV_KickBots (void);
-void SV_BotFrame (client_t *client, double now);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server);
-void SV_SnapshotAck (client_t *client, unsigned int seq);
-void SV_SnapshotNak (client_t *client, unsigned int expected_base, unsigned int received_base);
 
 #endif	/* QUAKE_SERVER_H */

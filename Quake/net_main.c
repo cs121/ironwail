@@ -29,10 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <curl/curl.h>
 #endif
 
-/* Q3MINI PLAN:
- * - Register shared netcode cvars for mini-Q3 features (ackmask, debug, protocol gate).
- */
-
 qsocket_t	*net_activeSockets = NULL;
 qsocket_t	*net_freeSockets = NULL;
 int		net_numsockets = 0;
@@ -57,12 +53,10 @@ static int		slistLastShown;
 static void Slist_Send (void *);
 static void Slist_Poll (void *);
 static PollProcedure	slistSendProcedure = {NULL, 0.0, Slist_Send};
-// Q3MINI Phase 4/5 summary: add net compression cvars and feature initialization.
 static PollProcedure	slistPollProcedure = {NULL, 0.0, Slist_Poll};
 
 sizebuf_t	net_message;
 int		net_activeconnections		= 0;
-net_packetinfo_t	net_last_incoming;
 
 int		messagesSent			= 0;
 int		messagesReceived		= 0;
@@ -71,16 +65,6 @@ int		unreliableMessagesReceived	= 0;
 
 static	cvar_t	net_messagetimeout = {"net_messagetimeout","300",CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
-cvar_t	net_maxpacket = {"net_maxpacket", "1400", CVAR_NONE};
-cvar_t	net_mtu = {"net_mtu", "1400", CVAR_NONE};
-// Q3MINI BEGIN
-cvar_t	net_ackmask = {"net_ackmask", "1", CVAR_NONE};
-cvar_t	net_dbg_q3mini = {"net_dbg_q3mini", "0", CVAR_NONE};
-cvar_t	net_force_q3mini = {"net_force_q3mini", "0", CVAR_NONE};
-cvar_t	net_compress = {"net_compress", "0", CVAR_NONE};
-cvar_t	net_compress_threshold = {"net_compress_threshold", "900", CVAR_NONE};
-cvar_t	net_compress_debug = {"net_compress_debug", "0", CVAR_NONE};
-// Q3MINI END
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -131,35 +115,15 @@ qsocket_t *NET_NewQSocket (void)
 	sock->socket = 0;
 	sock->driverdata = NULL;
 	sock->canSend = true;
+	sock->sendNext = false;
 	sock->lastMessageTime = net_time;
-	sock->rate_next_time = 0.0;
-	sock->rate_budget = 0;
-	sock->sendSequence = 1;
+	sock->ackSequence = 0;
+	sock->sendSequence = 0;
 	sock->unreliableSendSequence = 0;
-	sock->unreliableFragmentSequence = 0;
 	sock->sendMessageLength = 0;
-	sock->sendMessageOffset = 0;
-	sock->sendReliableBase = sock->sendSequence;
-	memset(sock->reliableSend, 0, sizeof(sock->reliableSend));
-	sock->receiveSequence = 1;
-	// Q3MINI BEGIN
-	sock->features = 0;
-	// Q3MINI END
-	sock->reliableReceiveValid = false;
-	sock->reliableReceiveSequence = 0;
-	sock->reliableReceiveMask = 0;
+	sock->receiveSequence = 0;
 	sock->unreliableReceiveSequence = 0;
-	sock->unreliableFragActive = false;
-	sock->unreliableFragSequence = 0;
-	sock->unreliableFragTotal = 0;
-	sock->unreliableFragReceived = 0;
-	sock->unreliableFragTotalBytes = 0;
-	sock->unreliableFragStartTime = 0.0;
-	memset(sock->unreliableFragBuffers, 0, sizeof(sock->unreliableFragBuffers));
-	memset(sock->unreliableFragSizes, 0, sizeof(sock->unreliableFragSizes));
-	memset(sock->unreliableFragReceivedMask, 0, sizeof(sock->unreliableFragReceivedMask));
 	sock->receiveMessageLength = 0;
-	memset(sock->reliableReceive, 0, sizeof(sock->reliableReceive));
 
 	return sock;
 }
@@ -188,37 +152,6 @@ void NET_FreeQSocket(qsocket_t *sock)
 	}
 
 	// add it to free list
-	{
-		int i;
-		for (i = 0; i < NET_RELIABLE_WINDOW; ++i)
-		{
-			if (sock->reliableReceive[i].data)
-			{
-				Z_Free(sock->reliableReceive[i].data);
-				sock->reliableReceive[i].data = NULL;
-			}
-			sock->reliableReceive[i].received = false;
-		}
-	}
-	{
-		int i;
-		for (i = 0; i < NET_UNRELIABLE_MAX_FRAGMENTS; ++i)
-		{
-			if (sock->unreliableFragBuffers[i])
-			{
-				Z_Free(sock->unreliableFragBuffers[i]);
-				sock->unreliableFragBuffers[i] = NULL;
-			}
-			sock->unreliableFragSizes[i] = 0;
-			sock->unreliableFragReceivedMask[i] = 0;
-		}
-		sock->unreliableFragActive = false;
-		sock->unreliableFragSequence = 0;
-		sock->unreliableFragTotal = 0;
-		sock->unreliableFragReceived = 0;
-		sock->unreliableFragTotalBytes = 0;
-		sock->unreliableFragStartTime = 0.0;
-	}
 	sock->next = net_freeSockets;
 	net_freeSockets = sock;
 	sock->disconnected = true;
@@ -742,19 +675,6 @@ qboolean NET_CanSendMessage (qsocket_t *sock)
 	return sfunc.CanSendMessage(sock);
 }
 
-qboolean NET_CanSendUnreliableMessage (qsocket_t *sock)
-{
-	if (!sock)
-		return false;
-
-	if (sock->disconnected)
-		return false;
-
-	SetNetTime();
-
-	return sfunc.CanSendUnreliableMessage(sock);
-}
-
 
 int NET_SendToAll (sizebuf_t *data, double blocktime)
 {
@@ -879,21 +799,9 @@ void NET_Init (void)
 
 	// allocate space for network message buffer
 	SZ_Alloc (&net_message, NET_MAXMESSAGE);
-	net_message.dbg_name = "net_message";
-	Q_memset(&net_last_incoming, 0, sizeof(net_last_incoming));
 
 	Cvar_RegisterVariable (&net_messagetimeout);
 	Cvar_RegisterVariable (&hostname);
-	Cvar_RegisterVariable (&net_maxpacket);
-	Cvar_RegisterVariable (&net_mtu);
-	// Q3MINI BEGIN
-	Cvar_RegisterVariable (&net_ackmask);
-	Cvar_RegisterVariable (&net_dbg_q3mini);
-	Cvar_RegisterVariable (&net_force_q3mini);
-	Cvar_RegisterVariable (&net_compress);
-	Cvar_RegisterVariable (&net_compress_threshold);
-	Cvar_RegisterVariable (&net_compress_debug);
-	// Q3MINI END
 
 	Cmd_AddCommand ("slist", NET_Slist_f);
 	Cmd_AddCommand ("listen", NET_Listen_f);
@@ -1006,3 +914,4 @@ void SchedulePollProcedure(PollProcedure *proc, double timeOffset)
 	proc->next = pp;
 	prev->next = proc;
 }
+

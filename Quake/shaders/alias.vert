@@ -12,23 +12,20 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	inst_ViewProj;
-	mat4	inst_PrevViewProj;
-	mat4	inst_View;
-	vec3	inst_EyePos;
-	float	inst_Pad0;
-	vec4	inst_Fog;
-	float	inst_ScreenDither;
-	float	inst_Overbright;
-	float	inst_ModelHalfLambert;
-	float	inst_Pad1;
-	vec4	inst_RimParams0;
-	vec4	inst_RimParams1;
-	mat4	inst_ShadowViewProj;
-	vec4	inst_ShadowParams;
-	vec4	inst_ShadowDebug;
-	vec4	inst_ShadowSunDir;
-	InstanceData inst_instances[];
+	mat4	ViewProj;
+	mat4	PrevViewProj;
+	vec3	EyePos;
+	float	_Pad0;
+	vec4	Fog;
+	float	ScreenDither;
+	float	Overbright;
+	float	ModelHalfLambert;
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
+	InstanceData instances[];
 };
 
 struct PoseVertex
@@ -84,7 +81,7 @@ float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH, blended with 
         float halfLambert = max(d, 0.0) * 0.5 + 0.5;
         // wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
         float quakeShade = d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
-        float halfLambertMix = clamp(inst_ModelHalfLambert, 0.0, 1.0);
+        float halfLambertMix = clamp(ModelHalfLambert, 0.0, 1.0);
         return mix(quakeShade, halfLambert, halfLambertMix);
 }
 
@@ -99,16 +96,12 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
-layout(location=7) flat out vec3 out_ambient;
-layout(location=8) flat out vec3 out_direct;
-layout(location=9) out vec3 out_view_pos;
-layout(location=10) out vec3 out_view_normal;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
 void main()
 {
-	InstanceData inst = inst_instances[gl_InstanceID];
+	InstanceData inst = instances[gl_InstanceID];
 	out_texcoord = in_uv;
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
@@ -117,13 +110,13 @@ void main()
 	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
-	vec4 curr_clip = inst_ViewProj * vec4(world_vert, 1.0);
-	vec4 prev_clip = inst_PrevViewProj * vec4(prev_world_vert, 1.0);
+	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
+	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_flags = inst.Flags;
-	out_pos = world_vert - inst_EyePos;
+	out_pos = world_vert - EyePos;
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
@@ -131,19 +124,17 @@ void main()
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
-	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-	mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
-	vec3 world_normal = normalize(world_orientation * blended_normal);
-	vec3 view_pos = (inst_View * vec4(world_vert, 1.0)).xyz;
-	vec3 view_normal = normalize((inst_View * vec4(world_normal, 0.0)).xyz);
-	vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-	vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * inst_Overbright);
-	vec3 litDlight = inst.DLightColor.rgb * lighting;
-	vec3 base_color = litAmbient + litDlight;
-	out_color = clamp(vec4(base_color, inst.LightColor.a), 0.0, inst_Overbright);
-	out_ambient = ambient;
-	out_direct = inst.DLightColor.rgb;
+        vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
+        mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
+        vec3 world_normal = normalize(world_orientation * blended_normal);
+        vec3 view_dir = normalize(-out_pos);
+        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
+        vec3 litDlight = inst.DLightColor.rgb * lighting;
+        vec3 base_color = litAmbient + litDlight;
+        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
+        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
+        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
 	out_normal = world_normal;
-	out_view_pos = view_pos;
-	out_view_normal = view_normal;
 }

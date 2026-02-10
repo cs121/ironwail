@@ -10,7 +10,6 @@
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-	if (Fog.w <= 0.0) return clr;
 	float fog = exp2(-Fog.w * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);
@@ -53,9 +52,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix0;
-	vec4	texmatrix1;
-	vec4	emitter_center;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -156,9 +152,6 @@ layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
 layout(location=15) flat out vec4 out_stage_color;
 layout(location=16) flat out uint out_tcgen;
-layout(location=17) flat out vec2 out_emitter_center_ss;
-layout(location=18) out vec3 out_view_pos;
-layout(location=19) out vec3 out_view_normal;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -169,12 +162,6 @@ vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 	return refl_view.xy / max(m, 1e-6) + 0.5;
 }
 
-vec2 ApplyTexMatrix(Call call, vec2 uv)
-{
-	vec3 uvh = vec3(uv, 1.0);
-	return vec2(dot(call.texmatrix0.xyz, uvh), dot(call.texmatrix1.xyz, uvh));
-}
-
 void main()
 {
 	Call call = call_data[DRAW_ID];
@@ -182,8 +169,6 @@ void main()
 	Instance instance = instance_data[instance_id];
 	vec3 world_pos = Transform(in_pos, instance);
         vec3 world_normal = TransformDirection(in_normal, instance);
-	vec3 view_pos = (View * vec4(world_pos, 1.0)).xyz;
-	vec3 view_normal = normalize((View * vec4(world_normal, 0.0)).xyz);
 	vec3 prev_world_pos = TransformPrev(in_pos, instance);
 	vec4 curr_clip = ViewProj * vec4(world_pos, 1.0);
 	vec4 prev_clip = PrevViewProj * vec4(prev_world_pos, 1.0);
@@ -205,14 +190,11 @@ void main()
         out_pos = world_pos;
         out_normal = normalize(world_normal);
         out_lightgrid = in_lightgrid;
-	out_view_pos = view_pos;
-	out_view_normal = view_normal;
 	vec2 uv = in_uv.xy;
 	if (call.tcgen == TCGEN_LIGHTMAP)
 		uv = in_uv.zw;
 	else if (call.tcgen == TCGEN_ENVIRONMENT)
 		uv = ComputeEnvUV(world_pos, world_normal);
-	uv = ApplyTexMatrix(call, uv);
         out_uv = uv;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
@@ -240,7 +222,6 @@ void main()
 	out_lmofs = in_lmofs;
 	out_stage_color = call.stage_color;
 	out_tcgen = call.tcgen;
-	out_emitter_center_ss = call.emitter_center.xy;
 #if BINDLESS
 	out_samplers0.xy = call.txhandle;
 	if ((call.flags & CF_USE_FULLBRIGHT) != 0u)

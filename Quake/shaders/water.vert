@@ -23,9 +23,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix0;
-	vec4	texmatrix1;
-	vec4	emitter_center;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -84,12 +81,6 @@ vec3 TransformPrev(vec3 p, Instance instance)
 	return TransformPosition(p, instance.prev_mat);
 }
 
-vec2 ApplyTexMatrix(Call call, vec2 uv)
-{
-	vec3 uvh = vec3(uv, 1.0);
-	return vec2(dot(call.texmatrix0.xyz, uvh), dot(call.texmatrix1.xyz, uvh));
-}
-
 layout(location=0) in vec3 in_pos;
 layout(location=1) in vec4 in_uv;
 layout(location=2) in float in_lmofs;
@@ -120,7 +111,7 @@ void main()
         out_curr_clip = curr_clip;
         out_prev_clip = prev_clip;
         out_flags = call.flags;
-        out_uv = ApplyTexMatrix(call, in_uv.xy);
+        out_uv = in_uv.xy;
         out_pos = world_pos;
         out_alpha = instance.alpha < 0.0 ? call.wateralpha : instance.alpha;
 #if BINDLESS

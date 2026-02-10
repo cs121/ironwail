@@ -83,7 +83,6 @@ typedef struct entity_s
 	vec3_t					origin;
 	vec3_t					msg_angles[2];	// last two updates (0 is newest)
 	vec3_t					angles;
-	vec3_t					packed_velocity;
 	struct qmodel_s			*model;			// NULL = no model
 	int						frame;
 	float					syncbase;		// for client-side animations

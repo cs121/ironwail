@@ -21,11 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-/* Q3MINI PLAN:
- * - Expose shared cvars for mini-Q3 netcode (ackmask/debug/protocol gate, client throttles).
- */
-// Q3MINI Phase 4/5 summary: add externs for compression cvars used in netcode.
-
 #ifndef QUAKEDEFS_H
 #define QUAKEDEFS_H
 
@@ -103,7 +98,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define	DIST_EPSILON	(0.03125)	// 1/32 epsilon to keep floating point happy (moved from world.c)
 
-#define	MAX_MSGLEN	65535		// max length of a reliable message //ericw -- was 32000
+#define	MAX_MSGLEN	64000		// max length of a reliable message //ericw -- was 32000
 #define	MAX_DATAGRAM	64000		// max length of unreliable message //johnfitz -- was 1024
 
 #define	DATAGRAM_MTU	1400		// johnfitz -- actual limit for unreliable messages to nonlocal clients
@@ -225,7 +220,7 @@ typedef enum
 
 //===========================================
 
-#define	MAX_SCOREBOARD		32
+#define	MAX_SCOREBOARD		16
 #define	MAX_SCOREBOARDNAME	32
 
 #define	SOUND_CHANNELS		8
@@ -263,9 +258,6 @@ typedef struct
 #include "crc.h"
 
 #include "platform.h"
-#if defined(_WIN32) && defined(_DEBUG)
-#include <windows.h>
-#endif
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
@@ -318,93 +310,10 @@ extern qboolean noclip_anglehack;
 extern	quakeparms_t *host_parms;
 
 extern	cvar_t		sys_ticrate;
-// Q3MINI Phase 4/5 summary: add cvar hooks for entity prioritization and packet compression toggles.
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 extern	cvar_t		map_checks;
 extern	cvar_t		max_edicts; //johnfitz
-extern	cvar_t		sz_debug_hexdump;
-extern	cvar_t		sys_step_debug;
-extern	cvar_t		sys_step_dump;
-extern	cvar_t		sys_step_hitch_ms;
-extern	cvar_t		jitter_log_enable;
-extern	cvar_t		jitter_log_file;
-extern	cvar_t		jitter_log_flush;
-extern	cvar_t		jitter_log_force_developer;
-extern	cvar_t		jitter_time_debug;
-extern	cvar_t		sv_fixedtick;
-extern	cvar_t		sv_maxsteps_per_frame;
-// Q3MINI BEGIN
-extern	cvar_t		net_ackmask;
-extern	cvar_t		net_dbg_q3mini;
-extern	cvar_t		net_force_q3mini;
-extern	cvar_t		net_compress;
-extern	cvar_t		net_compress_threshold;
-extern	cvar_t		net_compress_debug;
-extern	cvar_t		cl_cmd_redundancy;
-extern	cvar_t		cl_maxpackets;
-extern	cvar_t		cl_netsmooth;
-extern	cvar_t		cl_netsmooth_time;
-extern	cvar_t		cl_netsmooth_maxdist;
-// Q3MINI END
-
-typedef struct sys_step_debug_info_s
-{
-	int		frame;
-	double		realtime;
-	double		host_frametime;
-	double		host_rawframetime;
-	double		cl_time;
-	double		cl_servertime;
-	double		cl_snapshot_time;
-	int		sv_ticks;
-	int		sv_physics_calls;
-	int		cl_sendcmd_calls;
-	int		cl_readfromserver_calls;
-	int		cl_parse_calls;
-	int		cl_pred_steps;
-	int		cl_cmds_built;
-	int		cl_cmds_sent;
-	int		cl_cmd_packets;
-	int		cl_cmds_dropped;
-	int		cl_cmd_no_cmd;
-	int		cl_cmd_msec_min;
-	int		cl_cmd_msec_max;
-	int		cl_cmd_msec_last;
-	int		cl_cmd_msec_wild;
-	int		cl_cmd_msec_zero;
-	int		cl_cmd_msec_over;
-	int		cl_cmd_skipped_frame;
-	int64_t		sv_accum_us_before;
-	int64_t		sv_accum_us_after;
-	int64_t		cl_cmd_accum_us_before;
-	int64_t		cl_cmd_accum_us_after;
-	int64_t		frame_us;
-	int64_t		tick_us;
-	int		warn_host_frametime_clamped;
-	int		warn_zero_sim_dt;
-	int		warn_many_ticks;
-	int		warn_zero_frametime;
-	int		player_valid;
-	vec3_t		player_origin_before;
-	vec3_t		player_origin_after;
-	vec3_t		player_vel_before;
-	vec3_t		player_vel_after;
-	vec3_t		player_basevel_after;
-	int		player_groundent_before;
-	int		player_groundent_after;
-	int		player_onground_before;
-	int		player_onground_after;
-	float		player_ground_trace_fraction;
-	float		player_ground_trace_normal_z;
-	int		player_ground_trace_startsolid;
-	int		player_ground_trace_allsolid;
-	int		player_ground_trace_fallback;
-	vec3_t		player_ground_vel;
-	int		player_ground_is_mover;
-} sys_step_debug_info_t;
-
-extern	sys_step_debug_info_t sys_step_debug_info;
 
 extern	qboolean	host_initialized;	// true if into command execution
 extern	double		host_frametime;
@@ -413,70 +322,6 @@ extern	byte		*host_colormap;
 extern	int		host_framecount;	// incremented every frame, never reset
 extern	double		realtime;		// not bounded in any way, changed at
 							// start of every frame, never reset
-
-void Jitter_Log (const char *fmt, ...) FUNCP_PRINTF(1,2);
-void Jitter_LogV (const char *fmt, va_list argptr);
-void JitterLog_WriteLine (const char *tag, const char *text);
-void Jitter_Log_Close (void);
-
-#define JITTER_LOG(...) \
-	do \
-	{ \
-		if (jitter_log_enable.value > 0.0f) \
-			Jitter_Log (__VA_ARGS__); \
-	} while (0)
-
-static inline int SV_CurrentClientIndex (void)
-{
-	if (!host_client || !svs.clients || svs.maxclients <= 0)
-		return -1;
-	if (host_client < svs.clients || host_client >= svs.clients + svs.maxclients)
-		return -1;
-	return (int)(host_client - svs.clients);
-}
-
-static inline void SV_PlayerNullTrap (const char *where, int fatal)
-{
-	int client_index = SV_CurrentClientIndex ();
-	const char *client_name = (host_client && host_client->name[0]) ? host_client->name : "(null)";
-
-	Con_Printf ("NETDBG sv_player NULL cl %d name %s where %s fatal %d\n",
-		client_index, client_name, where ? where : "(unknown)", fatal);
-	JITTER_LOG ("NETDBG sv_player NULL cl %d name %s where %s fatal %d\n",
-		client_index, client_name, where ? where : "(unknown)", fatal);
-	Con_Printf ("NETDBG sv_player NULL sv.active %d sv.state %d cls.state %d cls.demoplayback %d "
-		"signon %d frame %d\n",
-		sv.active, sv.state, cls.state, cls.demoplayback, cls.signon, host_framecount);
-	JITTER_LOG ("NETDBG sv_player NULL sv.active %d sv.state %d cls.state %d cls.demoplayback %d "
-		"signon %d frame %d\n",
-		sv.active, sv.state, cls.state, cls.demoplayback, cls.signon, host_framecount);
-
-#if defined(_WIN32) && defined(_DEBUG)
-	{
-		void *stack[32];
-		USHORT frames = RtlCaptureStackBackTrace (0, (ULONG)(sizeof (stack) / sizeof (stack[0])), stack, NULL);
-		Con_Printf ("NETDBG sv_player NULL stack frames %u\n", frames);
-		JITTER_LOG ("NETDBG sv_player NULL stack frames %u\n", frames);
-		for (USHORT i = 0; i < frames; ++i)
-		{
-			Con_Printf ("NETDBG sv_player NULL  #%u %p\n", i, stack[i]);
-			JITTER_LOG ("NETDBG sv_player NULL  #%u %p\n", i, stack[i]);
-		}
-	}
-#endif
-
-#if defined(_DEBUG)
-	if (fatal)
-		SDL_assert (!"sv_player NULL");
-#endif
-
-	if (cls.demoplayback)
-	{
-		Con_Printf ("NETDBG sv_player NULL cl %d reason demo_playback_abort\n", client_index);
-		JITTER_LOG ("NETDBG sv_player NULL cl %d reason demo_playback_abort\n", client_index);
-		CL_StopPlayback ();
-	}
-}
 
 typedef struct filelist_item_s
 {
