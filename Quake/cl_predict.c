@@ -1197,10 +1197,18 @@ static void CL_Predict_ClearFrames (const char *reason)
 
 	if (cl_pred_debug.value > 0.0f)
 	{
-		Con_DPrintf ("PredFrame clear: reason=%s ring=%u\n",
-			reason ? reason : "unknown", CL_PRED_FRAME_RING);
-		JITTER_LOG ("PredFrame clear: reason=%s ring=%u\n",
-			reason ? reason : "unknown", CL_PRED_FRAME_RING);
+		Con_DPrintf ("PredFrame clear: reason=%s ring=%u slots=0..%u ack=%u latest=%u\n",
+			reason ? reason : "unknown",
+			CL_PRED_FRAME_RING,
+			(CL_PRED_FRAME_RING > 0) ? (CL_PRED_FRAME_RING - 1u) : 0u,
+			cl_pred.seq_acked,
+			cl_pred.seq_latest);
+		JITTER_LOG ("PredFrame clear: reason=%s ring=%u slots=0..%u ack=%u latest=%u\n",
+			reason ? reason : "unknown",
+			CL_PRED_FRAME_RING,
+			(CL_PRED_FRAME_RING > 0) ? (CL_PRED_FRAME_RING - 1u) : 0u,
+			cl_pred.seq_acked,
+			cl_pred.seq_latest);
 	}
 	for (i = 0; i < CL_PRED_FRAME_RING; i++)
 	{
@@ -1310,9 +1318,9 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 		frame->valid = false;
 		if (cl_pred_debug.value > 0.0f)
 		{
-			Con_DPrintf ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u\n",
+			Con_DPrintf ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u (uninitialized)\n",
 				seq, slot, idx, cl_pred_last_store_seq[slot]);
-			JITTER_LOG ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u\n",
+			JITTER_LOG ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u (uninitialized)\n",
 				seq, slot, idx, cl_pred_last_store_seq[slot]);
 		}
 		return false;
@@ -1323,6 +1331,22 @@ static qboolean CL_Predict_FindExactFrame (unsigned int seq, cl_pred_frame_t *ou
 
 	if (frame->cmd_seq != seq)
 	{
+		if (frame->cmd_seq == CL_PRED_INVALID_SEQ)
+		{
+			unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
+			unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
+
+			cl_pred_history_missing = true;
+			frame->valid = false;
+			if (cl_pred_debug.value > 0.0f)
+			{
+				Con_DPrintf ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u (uninitialized)\n",
+					seq, slot, idx, cl_pred_last_store_seq[slot]);
+				JITTER_LOG ("PredFrame history missing: seq=%u slot=%u idx=%u last_store=%u (uninitialized)\n",
+					seq, slot, idx, cl_pred_last_store_seq[slot]);
+			}
+			return false;
+		}
 		cl_pred_frame_mismatch = true;
 		if (cl_pred_debug.value > 0.0f)
 		{
