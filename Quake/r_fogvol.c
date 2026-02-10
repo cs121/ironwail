@@ -67,6 +67,20 @@ typedef struct fogvol_test_state_s
 	GLint scissor_box[4];
 	GLint draw_fbo;
 	GLint read_fbo;
+	GLint draw_buffer;
+	GLint read_buffer;
+	GLint draw_buffers[8];
+	GLint num_draw_buffers;
+	GLint draw_status;
+	GLint read_status;
+	GLint draw_color_type[2];
+	GLint draw_color_name[2];
+	GLint draw_depth_type;
+	GLint draw_depth_name;
+	GLint read_color_type;
+	GLint read_color_name;
+	GLint read_depth_type;
+	GLint read_depth_name;
 	GLint program;
 	GLint vao;
 	GLint blend_src_rgb;
@@ -85,14 +99,96 @@ typedef struct fogvol_test_state_s
 	GLboolean multisample;
 } fogvol_test_state_t;
 
+static qboolean R_FogVol_TestDebugEnabled (void)
+{
+	return r_fogvol_testvolumes.value > 0.f || r_fogvol_testvolumes_dumpstate.value > 0.f;
+}
+
+static void R_FogVol_LogBufferMarker (const char *marker)
+{
+	GLint draw_fbo = 0, read_fbo = 0;
+	GLint draw_buffer = 0, read_buffer = 0;
+
+	if (!R_FogVol_TestDebugEnabled ())
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+	Con_Printf ("FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
+		marker, draw_fbo, read_fbo, (unsigned)draw_buffer, (unsigned)read_buffer);
+}
+
+static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
+{
+	glDrawBuffer (buf);
+	R_FogVol_LogBufferMarker (marker);
+}
+
+static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
+{
+	glReadBuffer (buf);
+	R_FogVol_LogBufferMarker (marker);
+}
+
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 {
+	GLenum draw_color_attachment = GL_BACK_LEFT;
+	GLenum read_color_attachment = GL_BACK_LEFT;
+
 	state->statebits = glstate;
 	glGetIntegerv (GL_VIEWPORT, state->viewport);
 	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
 	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
+	state->num_draw_buffers = 0;
+	for (int i = 0; i < (int)countof (state->draw_buffers); ++i)
+		state->draw_buffers[i] = GL_NONE;
+	{
+		GLint max_draw_buffers = 0;
+		glGetIntegerv (GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
+		state->num_draw_buffers = q_min (max_draw_buffers, (int)countof (state->draw_buffers));
+		for (int i = 0; i < state->num_draw_buffers; ++i)
+			glGetIntegerv (GL_DRAW_BUFFER0 + i, &state->draw_buffers[i]);
+	}
+	state->draw_status = (GLint)GL_CheckFramebufferStatusFunc (GL_DRAW_FRAMEBUFFER);
+	state->read_status = (GLint)GL_CheckFramebufferStatusFunc (GL_READ_FRAMEBUFFER);
+	if (state->draw_fbo)
+		draw_color_attachment = GL_COLOR_ATTACHMENT0;
+	if (state->read_fbo)
+		read_color_attachment = GL_COLOR_ATTACHMENT0;
+	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[0]);
+	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[0]);
+	if (state->draw_fbo)
+	{
+		glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[1]);
+		glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[1]);
+	}
+	else
+	{
+		state->draw_color_type[1] = GL_NONE;
+		state->draw_color_name[1] = 0;
+	}
+	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_depth_type);
+	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_depth_name);
+	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, read_color_attachment,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_color_type);
+	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, read_color_attachment,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_color_name);
+	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_depth_type);
+	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_depth_name);
 	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
 	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
 	state->blend = glIsEnabled (GL_BLEND);
@@ -119,7 +215,12 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 {
 	Con_Printf (
 		"FOGVOL_TEST %s viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
-		"draw_fbo=%d read_fbo=%d prog=%d vao=%d blend=%d blend_func=(%d,%d) blend_eq=%d "
+		"draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x "
+		"draw_buffers=[0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x] "
+		"draw_status=0x%04x read_status=0x%04x "
+		"draw_att0=(type=0x%04x,name=%d) draw_att1=(type=0x%04x,name=%d) draw_depth=(type=0x%04x,name=%d) "
+		"read_att0=(type=0x%04x,name=%d) read_depth=(type=0x%04x,name=%d) "
+		"prog=%d vao=%d blend=%d blend_func=(%d,%d) blend_eq=%d "
 		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d) "
 		"clear_color=(%.3f %.3f %.3f %.3f) srgb=%d dither=%d multisample=%d glstate=0x%08x\n",
 		phase,
@@ -127,6 +228,17 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 		state->scissor_test,
 		state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3],
 		state->draw_fbo, state->read_fbo,
+		(unsigned)state->draw_buffer, (unsigned)state->read_buffer,
+		(unsigned)state->draw_buffers[0], (unsigned)state->draw_buffers[1],
+		(unsigned)state->draw_buffers[2], (unsigned)state->draw_buffers[3],
+		(unsigned)state->draw_buffers[4], (unsigned)state->draw_buffers[5],
+		(unsigned)state->draw_buffers[6], (unsigned)state->draw_buffers[7],
+		(unsigned)state->draw_status, (unsigned)state->read_status,
+		(unsigned)state->draw_color_type[0], state->draw_color_name[0],
+		(unsigned)state->draw_color_type[1], state->draw_color_name[1],
+		(unsigned)state->draw_depth_type, state->draw_depth_name,
+		(unsigned)state->read_color_type, state->read_color_name,
+		(unsigned)state->read_depth_type, state->read_depth_name,
 		state->program,
 		state->vao,
 		state->blend,
@@ -149,6 +261,11 @@ static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
 	GL_SetState (state->statebits);
 	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)state->draw_fbo);
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)state->read_fbo);
+	if (state->num_draw_buffers > 1)
+		GL_DrawBuffersFunc (state->num_draw_buffers, (const GLenum *)state->draw_buffers);
+	else
+		glDrawBuffer ((GLenum)state->draw_buffer);
+	glReadBuffer ((GLenum)state->read_buffer);
 	GL_UseProgram ((GLuint)state->program);
 	GL_BindVertexArrayFunc ((GLuint)state->vao);
 
@@ -826,8 +943,8 @@ void R_FogVol_Render (void)
 		GL_SetScissorEnabled (false);
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, src_fbo);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, dst_fbo);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "iter read=COLOR_ATTACHMENT0");
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "iter draw=COLOR_ATTACHMENT0");
 		if (use_halfres && i == 0)
 		{
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
@@ -842,8 +959,8 @@ void R_FogVol_Render (void)
 		}
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "final copy draw=COLOR_ATTACHMENT0");
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "final copy read=COLOR_ATTACHMENT0");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
@@ -862,8 +979,8 @@ void R_FogVol_Render (void)
 	if (!has_drawn)
 	{
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "temporal draw=COLOR_ATTACHMENT0");
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "temporal read=COLOR_ATTACHMENT0");
 		glViewport (glx, gly, glwidth, glheight);
 		goto done;
 	}
@@ -885,8 +1002,8 @@ void R_FogVol_Render (void)
 		GL_UseProgram (glprogs.fogvol_temporal);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "composite draw=COLOR_ATTACHMENT0");
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "composite read=COLOR_ATTACHMENT0");
 		glViewport (0, 0, fog_width, fog_height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
@@ -909,8 +1026,8 @@ void R_FogVol_Render (void)
 	if (has_drawn)
 	{
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "history draw=COLOR_ATTACHMENT0");
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "history read=COLOR_ATTACHMENT0");
 		glViewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
@@ -967,6 +1084,18 @@ done:
 
 		/* hard reset for fog volume test mode to keep subsequent 3D rendering stable */
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, main_fbo);
+		if (main_fbo)
+		{
+			GLenum main_draw_buffers[1] = {GL_COLOR_ATTACHMENT0};
+			GL_DrawBuffersFunc (1, main_draw_buffers);
+			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "restore main_fbo draw=COLOR_ATTACHMENT0");
+			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "restore main_fbo read=COLOR_ATTACHMENT0");
+		}
+		else
+		{
+			R_FogVol_SetDrawBufferDebug (GL_BACK, "restore default draw=BACK");
+			R_FogVol_SetReadBufferDebug (GL_BACK, "restore default read=BACK");
+		}
 		glViewport (glx, gly, glwidth, glheight);
 		GL_SetScissorEnabled (false);
 		glScissor (glx, gly, glwidth, glheight);
