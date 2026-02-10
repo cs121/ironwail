@@ -38,7 +38,7 @@ layout(rg32ui, binding=0) uniform writeonly uimage3D LightClusters;
 layout(std140, binding=1) uniform InputUBO
 {
 	mat4	TransposedProj;
-	mat4	View;
+	mat4	ClusterView;
 };
 
 shared vec4 local_lights[MAX_LIGHTS]; // xyz = view space pos; w = radius
@@ -131,7 +131,7 @@ void main()
 		{
 			Light l = Lights[lightIdx];
 			// Transformiere ins View Space und speichere in shared memory
-			local_lights[lightIdx] = vec4((View * vec4(l.origin, 1.0)).xyz, l.radius);
+			local_lights[lightIdx] = vec4((ClusterView * vec4(l.origin, 1.0)).xyz, l.radius);
 		}
 	}
 	
