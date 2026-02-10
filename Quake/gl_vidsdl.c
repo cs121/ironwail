@@ -1230,6 +1230,20 @@ void GL_SetState (unsigned mask)
 	GL_SetStateEx (mask, 0);
 }
 
+void GL_SetScissorEnabled (qboolean enabled)
+{
+	if (enabled)
+	{
+		glEnable (GL_SCISSOR_TEST);
+		glScissor (glx, gly, glwidth, glheight);
+	}
+	else
+	{
+		glDisable (GL_SCISSOR_TEST);
+		glScissor (glx, gly, glwidth, glheight);
+	}
+}
+
 /*
 =============
 GL_ResetState

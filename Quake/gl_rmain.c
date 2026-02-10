@@ -1340,7 +1340,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		}
 	}
 	// SSAO FIX: Reset viewport/scissor/color mask per pass to avoid banding from stale state.
-	glDisable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (0, 0, width, height);
 	{
@@ -1415,7 +1415,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glViewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
@@ -1424,7 +1424,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_LogErrorIfDeveloper ("SSAO blur horizontal draw");
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
