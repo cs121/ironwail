@@ -161,15 +161,15 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 		draw_color_attachment = GL_COLOR_ATTACHMENT0;
 	if (state->read_fbo)
 		read_color_attachment = GL_COLOR_ATTACHMENT0;
-	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[0]);
-	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[0]);
 	if (state->draw_fbo)
 	{
-		glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+		GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
 			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[1]);
-		glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+		GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
 			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[1]);
 	}
 	else
@@ -177,17 +177,17 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 		state->draw_color_type[1] = GL_NONE;
 		state->draw_color_name[1] = 0;
 	}
-	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_depth_type);
-	glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_depth_name);
-	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, read_color_attachment,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, read_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_color_type);
-	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, read_color_attachment,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, read_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_color_name);
-	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_depth_type);
-	glGetFramebufferAttachmentParameteriv (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_depth_name);
 	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
 	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
