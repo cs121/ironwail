@@ -4166,8 +4166,8 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	else if (cl.snapshot_time != prev_snapshot_time)
 		incoming_base_advanced = true;
 	else if (Distance (origin, prev_base_origin) > 0.0001f
-		|| fabsf (AngleDelta (viewangles[0], prev_base_angles[0])) > 0.01f
-		|| fabsf (AngleDelta (viewangles[1], prev_base_angles[1])) > 0.01f)
+		|| fabsf (AngleDeltaShortest (viewangles[0], prev_base_angles[0])) > 0.01f
+		|| fabsf (AngleDeltaShortest (viewangles[1], prev_base_angles[1])) > 0.01f)
 		incoming_base_advanced = true;
 
 	if (cl_pred.has_base && cl_netdebug_parse.value)
@@ -4515,8 +4515,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_q3mini_net_remaining = 0.0f;
 				cl_q3mini_net_duration = 0.0f;
 			}
+			}
+			// Q3MINI END
 		}
-		// Q3MINI END
 	}
 	else
 	{
