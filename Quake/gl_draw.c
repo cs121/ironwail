@@ -1139,7 +1139,7 @@ void Draw_SetClipRect (float x, float y, float width, float height)
 	y2 = floor (gly + y2 * glheight + 0.5f);
 
 	Draw_Flush ();
-	glEnable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (true);
 	glScissor (x, y2, x2 - x, y - y2);
 }
 
@@ -1151,7 +1151,7 @@ Draw_ResetClipping
 void Draw_ResetClipping (void)
 {
 	Draw_Flush ();
-	glDisable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (false);
 }
 
 #define CANVAS_ALIGN_LEFT		0.f

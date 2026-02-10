@@ -187,9 +187,9 @@ static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
 
 	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	if (state->scissor_test)
-		glEnable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (true);
 	else
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
 }
 
@@ -761,7 +761,7 @@ void R_FogVol_Render (void)
 	GL_BeginGroup ("Fog volumes");
 	GL_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	glDisable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -823,7 +823,7 @@ void R_FogVol_Render (void)
 		if (i > 0)
 			src_tex = framebufs.fogvol.color_tex[fog_src_index];
 		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src_index];
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, src_fbo);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, dst_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -846,17 +846,17 @@ void R_FogVol_Render (void)
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-		glEnable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (true);
 		glScissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 
 		fog_src_index = fog_dst_index;
 		final_tex = framebufs.fogvol.color_tex[fog_src_index];
 		has_drawn = true;
 	}
-	glDisable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (false);
 	GLuint final_fbo = framebufs.fogvol.fbo[fog_src_index];
 
 	if (!has_drawn)
@@ -968,7 +968,7 @@ done:
 		/* hard reset for fog volume test mode to keep subsequent 3D rendering stable */
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, main_fbo);
 		glViewport (glx, gly, glwidth, glheight);
-		glDisable (GL_SCISSOR_TEST);
+		GL_SetScissorEnabled (false);
 		glScissor (glx, gly, glwidth, glheight);
 		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glDepthMask (GL_TRUE);

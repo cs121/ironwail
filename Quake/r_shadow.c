@@ -682,7 +682,7 @@ void R_Shadow_DlightPass (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	glEnable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (true);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
@@ -735,7 +735,7 @@ void R_Shadow_DlightPass (void)
 		}
 	}
 
-	glDisable (GL_SCISSOR_TEST);
+	GL_SetScissorEnabled (false);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 
