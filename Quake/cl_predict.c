@@ -64,6 +64,8 @@ static cvar_t cl_pred_hard_reset_on_snap = {"cl_pred_hard_reset_on_snap", "0", C
 static cvar_t cl_pred_mover_base_fix = {"cl_pred_mover_base_fix", "0", CVAR_NONE};
 static cvar_t cl_pred_hard_snap_threshold = {"cl_pred_hard_snap_threshold", "12", CVAR_NONE};
 static cvar_t cl_pred_guard = {"cl_pred_guard", "1", CVAR_NONE};
+static cvar_t cl_pred_stale_base_gate = {"cl_pred_stale_base_gate", "1", CVAR_NONE};
+static cvar_t cl_pred_stale_base_hardsnap = {"cl_pred_stale_base_hardsnap", "1", CVAR_NONE};
 
 #if defined(_DEBUG) || !defined(NDEBUG)
 #define CL_PRED_ASSERT(condition) SDL_assert(condition)
@@ -223,6 +225,11 @@ static unsigned int cl_pred_history_miss_ack_eq_current;
 static double cl_pred_history_miss_last_log_time;
 static double cl_pred_history_miss_last_summary_time;
 static unsigned int cl_pred_last_store_seq[CL_PRED_FRAME_RING];
+static unsigned int cl_pred_base_seq_applied;
+static unsigned int cl_pred_last_ack_processed;
+static int cl_pred_persistent_err_frames;
+static float cl_pred_last_err_mag;
+static double cl_pred_last_snapshot_time;
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref);
 
@@ -851,6 +858,8 @@ static void CL_Predict_RegisterDebugCvars (void)
 	Cvar_RegisterVariable (&cl_pred_mover_base_fix);
 	Cvar_RegisterVariable (&cl_pred_hard_snap_threshold);
 	Cvar_RegisterVariable (&cl_pred_guard);
+	Cvar_RegisterVariable (&cl_pred_stale_base_gate);
+	Cvar_RegisterVariable (&cl_pred_stale_base_hardsnap);
 	Cmd_AddCommand ("pred_accum_selftest", CL_Predict_AccumSelftest_f);
 	Cmd_AddCommand ("pred_state_dump", CL_Predict_StateDump_f);
 	Cmd_AddCommand ("pred_cvar_dump", CL_Predict_CvarDump_f);
@@ -1240,23 +1249,6 @@ static qboolean CL_Predict_HasFrameSeq (unsigned int seq)
 	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
 
 	return frame->valid && frame->cmd_seq == seq;
-}
-
-static void CL_Predict_RecordFrameSeq (unsigned int seq, const char *reason)
-{
-	unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
-	unsigned int idx = CL_Predict_CmdIndexForSeq (seq);
-	cl_pred_frame_t *frame = &cl_pred.frames[slot];
-
-	frame->cmd_seq = seq;
-	frame->valid = false;
-	if (cl_pred_debug.value > 0.0f)
-	{
-		Con_DPrintf ("PredFrame mark: seq=%u slot=%u idx=%u reason=%s\n",
-			seq, slot, idx, reason ? reason : "unknown");
-		JITTER_LOG ("PredFrame mark: seq=%u slot=%u idx=%u reason=%s\n",
-			seq, slot, idx, reason ? reason : "unknown");
-	}
 }
 
 static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const cl_pred_state_t *state)
@@ -1989,8 +1981,6 @@ static void CL_Predict_RunFrameSteps (void)
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
-			else if (cmd.sequence > 0)
-				CL_Predict_RecordFrameSeq (cmd.sequence, "render_cmd_invalid");
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -2040,8 +2030,6 @@ static void CL_Predict_RunFrameSteps (void)
 			store_frame = (cmd.sequence > 0 && cl_pred_render_cmd_valid);
 			if (store_frame)
 				CL_Predict_StoreFrame (cmd.sequence, &cmd, &cl_pred.predicted);
-			else if (cmd.sequence > 0)
-				CL_Predict_RecordFrameSeq (cmd.sequence, "render_cmd_invalid");
 			else if (CL_Predict_AccumVerboseEnabled ())
 			{
 				Con_Printf ("PREDACCUM store skip seq=%u render_cmd=%d\n", cmd.sequence, cl_pred_render_cmd_valid ? 1 : 0);
@@ -3662,6 +3650,11 @@ void CL_Predict_Clear (void)
 	cl_pred_dt_flags_last = 0;
 	cl_pred_steps_cap_hit = 0;
 	cl_pred_trace_cur = NULL;
+	cl_pred_base_seq_applied = 0;
+	cl_pred_last_ack_processed = CL_PRED_INVALID_SEQ;
+	cl_pred_persistent_err_frames = 0;
+	cl_pred_last_err_mag = 0.0f;
+	cl_pred_last_snapshot_time = 0.0;
 }
 
 void CL_Predict_ResetGround (void)
@@ -4130,6 +4123,17 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 	qboolean guard_hard_reset = false;
 	const char *guard_reason = NULL;
 	qboolean resim_from_base = false;
+	qboolean new_base_applied = false;
+	qboolean stale_base_gate = false;
+	qboolean stale_break_hardsnap = false;
+	qboolean has_prev_base_snapshot = false;
+	qboolean incoming_base_advanced = false;
+	unsigned int prev_base_seq_applied = cl_pred_base_seq_applied;
+	double prev_snapshot_time = cl_pred_last_snapshot_time;
+	vec3_t prev_base_origin;
+	vec3_t prev_base_angles;
+	const float persistent_eps = 0.01f;
+	const int persistent_frames_threshold = 8;
 
 	CL_Predict_RegisterDebugCvars ();
 	CL_Predict_TraceMark (CL_PRED_TRACE_MARK_SERVERUPDATE);
@@ -4141,13 +4145,30 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		return;
 
 	had_base = cl_pred.has_base;
+	has_prev_base_snapshot = had_base;
 	VectorClear (prev_pred_ground_offset);
+	VectorClear (prev_base_origin);
+	VectorClear (prev_base_angles);
+	if (had_base)
+	{
+		VectorCopy (cl_pred.base.origin, prev_base_origin);
+		VectorCopy (cl_pred.base.viewangles, prev_base_angles);
+	}
 	if (cl_pred.has_base)
 	{
 		prev_pred_ground_ent = cl_pred.predicted.pred_ground_ent;
 		VectorCopy (cl_pred.predicted.pred_ground_offset, prev_pred_ground_offset);
 		prev_pred_ground_yaw_delta = cl_pred.predicted.pred_ground_yaw_delta;
 	}
+
+	if (!has_prev_base_snapshot)
+		incoming_base_advanced = true;
+	else if (cl.snapshot_time != prev_snapshot_time)
+		incoming_base_advanced = true;
+	else if (Distance (origin, prev_base_origin) > 0.0001f
+		|| fabsf (AngleDelta (viewangles[0], prev_base_angles[0])) > 0.01f
+		|| fabsf (AngleDelta (viewangles[1], prev_base_angles[1])) > 0.01f)
+		incoming_base_advanced = true;
 
 	if (cl_pred.has_base && cl_netdebug_parse.value)
 	{
@@ -4167,6 +4188,12 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	cl_pred.seq_acked = ack;
 	cl_pred_server_update_this_frame = true;
+	if (cl_pred_last_ack_processed != CL_PRED_INVALID_SEQ && ack == cl_pred_last_ack_processed && cl_pred_debug.value > 0.0f)
+	{
+		Con_DPrintf ("PREDDBG duplicate ack %u\n", ack);
+		JITTER_LOG ("PREDDBG duplicate ack %u\n", ack);
+	}
+	cl_pred_last_ack_processed = ack;
 	CL_Predict_LogSeqWrap ("ack", ack, cl_pred_last_ack_seq);
 	cl_pred_last_ack_seq = ack;
 	if (cl_pred_guard.value > 0.0f && (ack == ~0u || cl_pred.seq_latest == ~0u))
@@ -4386,8 +4413,17 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			guard_reason = "pred err threshold";
 		}
 
-		if (!cl_pred_history_missing)
 		{
+			qboolean allow_stale_correction = (cl_pred_stale_base_gate.value <= 0.0f || incoming_base_advanced || !had_base);
+
+			if (!allow_stale_correction && cl_pred_debug.value > 0.0f)
+			{
+				Con_DPrintf ("PREDDBG smooth_skip stale_base ack %u snap_time %.3f base_seq %u\n", ack, cl.snapshot_time, prev_base_seq_applied);
+				JITTER_LOG ("PREDDBG smooth_skip stale_base ack %u snap_time %.3f base_seq %u\n", ack, cl.snapshot_time, prev_base_seq_applied);
+			}
+
+			if (!cl_pred_history_missing && allow_stale_correction)
+			{
 			if ((teleport_dist > 0.0f && error_len > teleport_dist)
 				|| (snap_dist > 0.0f && error_len > snap_dist)
 				|| (!pred_frame_valid && error_len > hard_snap_threshold))
@@ -4441,9 +4477,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				cl_pred_reset = false;
 				cl_pred_smooth_count++;
 			}
-		}
-		// Q3MINI BEGIN
-		if (!use_ultra && !cl_pred_history_missing)
+			}
+			// Q3MINI BEGIN
+			if (!use_ultra && !cl_pred_history_missing && allow_stale_correction)
 		{
 			float smooth_ms = cl_netsmooth_time.value;
 			float maxdist = cl_netsmooth_maxdist.value;
@@ -4563,6 +4599,11 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred.base.pred_ground_yaw_delta = 0.0f;
 	}
 
+	new_base_applied = incoming_base_advanced;
+	if (new_base_applied)
+		cl_pred_base_seq_applied++;
+	cl_pred_last_snapshot_time = cl.snapshot_time;
+
 	if (pred_frame_valid)
 	{
 		CL_Predict_ApplyFrameState (&cl_pred.predicted, &pred_frame);
@@ -4603,6 +4644,32 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		return;
 	}
 
+	stale_base_gate = (cl_pred_stale_base_gate.value > 0.0f && had_base && !new_base_applied && !snap_correction);
+	if (stale_base_gate)
+	{
+		if (fabsf (error_len - cl_pred_last_err_mag) < persistent_eps)
+			cl_pred_persistent_err_frames++;
+		else
+			cl_pred_persistent_err_frames = 0;
+		if (cl_pred_debug.value > 0.0f)
+		{
+			Con_DPrintf ("PREDDBG stale base gate ack %u base_seq %u err %.2f persist %d\n",
+				ack, cl_pred_base_seq_applied, error_len, cl_pred_persistent_err_frames);
+			JITTER_LOG ("PREDDBG stale base gate ack %u base_seq %u err %.2f persist %d\n",
+				ack, cl_pred_base_seq_applied, error_len, cl_pred_persistent_err_frames);
+		}
+		if (cl_pred_stale_base_hardsnap.value > 0.0f && cl_pred_persistent_err_frames >= persistent_frames_threshold)
+		{
+			stale_break_hardsnap = true;
+			cl_pred_persistent_err_frames = 0;
+		}
+	}
+	else
+	{
+		cl_pred_persistent_err_frames = 0;
+	}
+	cl_pred_last_err_mag = error_len;
+
 	if (snap_correction)
 	{
 		VectorCopy (origin, cl.simorg);
@@ -4623,6 +4690,25 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				ack, cl_pred.seq_latest, cl_pred_frame_accum, cl_pred_steps_this_frame);
 		}
 	}
+	if (stale_break_hardsnap)
+	{
+		snap_correction = true;
+		cl_pred_snap_count++;
+		VectorClear (cl_pred_error);
+		VectorClear (cl_pred_angle_error);
+		cl_pred.predicted = cl_pred.base;
+		CL_Predict_InvalidateGroundCache (&cl_pred.predicted);
+		CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
+		cl_q3mini_net_active = false;
+		cl_q3mini_net_remaining = 0.0f;
+		cl_q3mini_net_duration = 0.0f;
+		if (cl_pred_debug.value > 0.0f)
+		{
+			Con_Printf ("PREDDBG stale base hard snap ack %u base_seq %u err %.2f\n", ack, cl_pred_base_seq_applied, error_len);
+			JITTER_LOG ("PREDDBG stale base hard snap ack %u base_seq %u err %.2f\n", ack, cl_pred_base_seq_applied, error_len);
+		}
+	}
+
 	if (use_ultra && snap_correction)
 	{
 		cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
@@ -4657,6 +4743,16 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 
 	{
 		unsigned int replay_start = pred_frame_valid ? (pred_frame_seq + 1) : (ack + 1);
+
+		if (stale_base_gate && !stale_break_hardsnap)
+		{
+			if (cl_pred_debug.value > 0.0f)
+			{
+				Con_DPrintf ("PREDDBG replay_skip stale_base ack %u latest %u base_seq %u\n", ack, cl_pred.seq_latest, cl_pred_base_seq_applied);
+				JITTER_LOG ("PREDDBG replay_skip stale_base ack %u latest %u base_seq %u\n", ack, cl_pred.seq_latest, cl_pred_base_seq_applied);
+			}
+			replay_start = cl_pred.seq_latest + 1u;
+		}
 
 		if (resim_from_base)
 		{
@@ -4757,7 +4853,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			: "none";
 
 		Con_Printf ("PREDDBG ack %u pred %u replay %d err %.2f base_delta %.2f hard %d reason %s "
-			"onground %d groundent %d platform_delta %d dt %.4f snap %d snaps %d smooth %d\n",
+			"onground %d groundent %d platform_delta %d dt %.4f snap %d snaps %d smooth %d new_base %d base_seq %u\n",
 			ack,
 			cl_pred.seq_latest,
 			cl_pred_replay_count,
@@ -4771,7 +4867,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			host_frametime,
 			snap_correction ? 1 : 0,
 			cl_pred_snap_count,
-			cl_pred_smooth_count);
+			cl_pred_smooth_count,
+			new_base_applied ? 1 : 0,
+			cl_pred_base_seq_applied);
 	}
 	cl_pred_apply_pred_reason = CL_PRED_APPLY_OK;
 	CL_Predict_ApplyToClient (&cl_pred.predicted, false);
