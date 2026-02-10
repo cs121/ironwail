@@ -218,6 +218,10 @@ static double cl_pred_frame_drop_time;
 static int cl_pred_last_reset_frame;
 static char cl_pred_last_reset_reason[64];
 static qboolean cl_pred_history_missing;
+static unsigned int cl_pred_history_miss_count;
+static unsigned int cl_pred_history_miss_ack_eq_current;
+static double cl_pred_history_miss_last_log_time;
+static double cl_pred_history_miss_last_summary_time;
 static unsigned int cl_pred_last_store_seq[CL_PRED_FRAME_RING];
 
 static qboolean CL_Predict_SeqNewer (unsigned int seq, unsigned int ref);
@@ -1231,6 +1235,13 @@ static unsigned int CL_Predict_CmdIndexForSeq (unsigned int seq)
 	return seq & (CMD_RING - 1u);
 }
 
+static qboolean CL_Predict_HasFrameSeq (unsigned int seq)
+{
+	cl_pred_frame_t *frame = &cl_pred.frames[CL_Predict_FrameIndexForSeq (seq)];
+
+	return frame->valid && frame->cmd_seq == seq;
+}
+
 static void CL_Predict_RecordFrameSeq (unsigned int seq, const char *reason)
 {
 	unsigned int slot = CL_Predict_FrameIndexForSeq (seq);
@@ -1290,6 +1301,7 @@ static void CL_Predict_StoreFrame (unsigned int seq, const usercmd_t *cmd, const
 	frame->pm_flags = state->onground ? SNAP_PM_ONGROUND : 0;
 	frame->waterlevel = 0;
 	frame->valid = true;
+	CL_PRED_ASSERT (CL_Predict_HasFrameSeq (seq));
 
 	if (CL_Predict_TraceEnabled ())
 	{
@@ -4167,15 +4179,49 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		cl_pred_trace_cur->server_applied = 1;
 	if (cl_pred.has_base)
 	{
+		if (ack == cl_pred.seq_latest && !CL_Predict_HasFrameSeq (ack))
+		{
+			usercmd_t ack_cmd;
+
+			if (CL_Predict_GetCmd (ack, &ack_cmd))
+				CL_Predict_StoreFrame (ack, &ack_cmd, &cl_pred.predicted);
+			else
+				CL_Predict_StoreFrame (ack, NULL, &cl_pred.predicted);
+		}
 		pred_frame_valid = CL_Predict_FindExactFrame (ack, &pred_frame);
 		pred_frame_seq = ack;
 		if (!pred_frame_valid)
 			pred_frame_valid = CL_Predict_FindNewestNotNewer (ack, &pred_frame, &pred_frame_seq);
 		if (cl_pred_history_missing)
 		{
+			unsigned int slot = CL_Predict_FrameIndexForSeq (ack);
+			unsigned int idx = CL_Predict_CmdIndexForSeq (ack);
+			double now = realtime;
+
 			resim_from_base = true;
 			pred_frame_valid = false;
 			pred_frame_seq = ack;
+			cl_pred_history_miss_count++;
+			if (ack == cl_pred.seq_latest)
+				cl_pred_history_miss_ack_eq_current++;
+			if (cl_pred_debug.value > 0.0f && now - cl_pred_history_miss_last_log_time >= 1.0)
+			{
+				Con_DPrintf ("PredFrame history miss (rate): ack=%u latest=%u current=%u slot=%u idx=%u\n",
+					ack, cl_pred.seq_latest, cl_pred.seq_latest, slot, idx);
+				JITTER_LOG ("PredFrame history miss (rate): ack=%u latest=%u current=%u slot=%u idx=%u\n",
+					ack, cl_pred.seq_latest, cl_pred.seq_latest, slot, idx);
+				cl_pred_history_miss_last_log_time = now;
+			}
+			if (cl_pred_debug.value > 0.0f && now - cl_pred_history_miss_last_summary_time >= 2.0)
+			{
+				Con_Printf ("PredFrame history miss summary: total=%u ack_eq_current=%u\n",
+					cl_pred_history_miss_count, cl_pred_history_miss_ack_eq_current);
+				JITTER_LOG ("PredFrame history miss summary: total=%u ack_eq_current=%u\n",
+					cl_pred_history_miss_count, cl_pred_history_miss_ack_eq_current);
+				cl_pred_history_miss_count = 0;
+				cl_pred_history_miss_ack_eq_current = 0;
+				cl_pred_history_miss_last_summary_time = now;
+			}
 			if (cl_pred_debug.value > 0.0f)
 			{
 				Con_DPrintf ("PredFrame history missing: ack=%u latest=%u cmdbackup=%u\n",
@@ -4340,61 +4386,64 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 			guard_reason = "pred err threshold";
 		}
 
-		if ((teleport_dist > 0.0f && error_len > teleport_dist)
-			|| (snap_dist > 0.0f && error_len > snap_dist)
-			|| (!pred_frame_valid && error_len > hard_snap_threshold))
+		if (!cl_pred_history_missing)
 		{
-			VectorClear (cl_pred_error);
-			VectorClear (cl_pred_angle_error);
-			cl_pred_reset = true;
-			cl_pred_snap_count++;
-			snap_correction = true;
-			CL_Predict_ClearFrames ("snap correction");
-		}
-		else if (!use_ultra)
-		{
-			float deadzone = cl_pred_deadzone.value;
-			float angle_deadzone = cl_pred_angle_deadzone.value;
-
-			if (deadzone > 0.0f && error_len < deadzone)
-				VectorClear (error);
-			if (angle_deadzone > 0.0f)
+			if ((teleport_dist > 0.0f && error_len > teleport_dist)
+				|| (snap_dist > 0.0f && error_len > snap_dist)
+				|| (!pred_frame_valid && error_len > hard_snap_threshold))
 			{
-				for (i = 0; i < 3; i++)
+				VectorClear (cl_pred_error);
+				VectorClear (cl_pred_angle_error);
+				cl_pred_reset = true;
+				cl_pred_snap_count++;
+				snap_correction = true;
+				CL_Predict_ClearFrames ("snap correction");
+			}
+			else if (!use_ultra)
+			{
+				float deadzone = cl_pred_deadzone.value;
+				float angle_deadzone = cl_pred_angle_deadzone.value;
+
+				if (deadzone > 0.0f && error_len < deadzone)
+					VectorClear (error);
+				if (angle_deadzone > 0.0f)
 				{
-					if (fabsf (angle_error[i]) < angle_deadzone)
-						angle_error[i] = 0.0f;
+					for (i = 0; i < 3; i++)
+					{
+						if (fabsf (angle_error[i]) < angle_deadzone)
+							angle_error[i] = 0.0f;
+					}
+				}
+				VectorAdd (cl_pred_error, error, cl_pred_error);
+				if (allow_angle_correction)
+					VectorCopy (angle_error, cl_pred_angle_error);
+				else
+					VectorClear (cl_pred_angle_error);
+				cl_pred_error_time = realtime;
+				cl_pred_reset = false;
+				cl_pred_smooth_count++;
+				if (cl_pred_debug.value > 0.0f)
+				{
+					float total_error = VectorLength (cl_pred_error);
+
+					Con_Printf ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
+					JITTER_LOG ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
 				}
 			}
-			VectorAdd (cl_pred_error, error, cl_pred_error);
-			if (allow_angle_correction)
-				VectorCopy (angle_error, cl_pred_angle_error);
 			else
-				VectorClear (cl_pred_angle_error);
-			cl_pred_error_time = realtime;
-			cl_pred_reset = false;
-			cl_pred_smooth_count++;
-			if (cl_pred_debug.value > 0.0f)
 			{
-				float total_error = VectorLength (cl_pred_error);
-
-				Con_Printf ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
-				JITTER_LOG ("PREDDBG smooth_add err %.2f total %.2f\n", error_len, total_error);
+				VectorAdd (cl_pred_error, error, cl_pred_error);
+				if (allow_angle_correction)
+					VectorCopy (angle_error, cl_pred_angle_error);
+				else
+					VectorClear (cl_pred_angle_error);
+				cl_pred_error_time = realtime;
+				cl_pred_reset = false;
+				cl_pred_smooth_count++;
 			}
 		}
-		else
-		{
-			VectorAdd (cl_pred_error, error, cl_pred_error);
-			if (allow_angle_correction)
-				VectorCopy (angle_error, cl_pred_angle_error);
-			else
-				VectorClear (cl_pred_angle_error);
-			cl_pred_error_time = realtime;
-			cl_pred_reset = false;
-			cl_pred_smooth_count++;
-		}
 		// Q3MINI BEGIN
-		if (!use_ultra)
+		if (!use_ultra && !cl_pred_history_missing)
 		{
 			float smooth_ms = cl_netsmooth_time.value;
 			float maxdist = cl_netsmooth_maxdist.value;
@@ -4519,7 +4568,7 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 		CL_Predict_ApplyFrameState (&cl_pred.predicted, &pred_frame);
 		CL_Predict_UpdateAuthoritativeGround (&cl_pred.predicted);
 	}
-	else
+	else if (!cl_pred_history_missing)
 	{
 		cl_pred.predicted = cl_pred.base;
 		CL_Predict_InvalidateGroundCache (&cl_pred.predicted);
@@ -4622,6 +4671,9 @@ void CL_Predict_ServerUpdate (unsigned int ack, const vec3_t origin, const vec3_
 				replay_start = candidate;
 			}
 		}
+
+		if (cl_pred_history_missing)
+			replay_start = cl_pred.seq_latest + 1u;
 
 		for (seq = replay_start;
 			!CL_Predict_SeqNewer (seq, cl_pred.seq_latest);
