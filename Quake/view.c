@@ -761,6 +761,9 @@ Idle swaying
 */
 void V_AddIdle (void)
 {
+	if (CL_Predict_ReproModeEnabled ())
+		return;
+
 	r_refdef.viewangles[ROLL] += v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value;
 	r_refdef.viewangles[PITCH] += v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
 	r_refdef.viewangles[YAW] += v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
@@ -770,6 +773,9 @@ void V_AddIdle (void)
 static void V_AddGunSway (entity_t *view)
 {
 	float sway;
+
+	if (CL_Predict_ReproModeEnabled ())
+		return;
 
 	if (!v_gunsway.value)
 		return;
@@ -795,6 +801,9 @@ static void V_AddWeaponWhip (entity_t *view)
         float scale;
         float dt;
         float velz;
+
+	if (CL_Predict_ReproModeEnabled ())
+		return;
 
         player = &cl_entities[cl.viewentity];
 
@@ -931,6 +940,8 @@ void V_CalcRefdef (void)
 	ent->angles[PITCH] = -cl.viewangles[PITCH];	// the model should face the view dir
 
 	bob = V_CalcBob ();
+	if (CL_Predict_ReproModeEnabled ())
+		bob = 0.0f;
 
 // refresh position
 	VectorCopy (ent->origin, r_refdef.vieworg);
