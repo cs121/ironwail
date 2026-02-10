@@ -50,6 +50,7 @@ cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", C
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
@@ -58,6 +59,109 @@ cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
+
+typedef struct fogvol_test_state_s
+{
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLint draw_fbo;
+	GLint read_fbo;
+	GLint program;
+	GLint vao;
+	GLint blend_src_rgb;
+	GLint blend_dst_rgb;
+	GLint blend_equation_rgb;
+	GLint polygon_mode[2];
+	GLboolean scissor_test;
+	GLboolean blend;
+	GLboolean depth_test;
+	GLboolean depth_writemask;
+	GLboolean color_writemask[4];
+	GLboolean cull_face;
+} fogvol_test_state_t;
+
+static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
+{
+	glGetIntegerv (GL_VIEWPORT, state->viewport);
+	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
+	state->blend = glIsEnabled (GL_BLEND);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &state->blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &state->blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_EQUATION_RGB, &state->blend_equation_rgb);
+	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_writemask);
+	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_writemask);
+	state->cull_face = glIsEnabled (GL_CULL_FACE);
+	glGetIntegerv (GL_POLYGON_MODE, state->polygon_mode);
+}
+
+static qboolean R_FogVol_TestState_Equals (const fogvol_test_state_t *a, const fogvol_test_state_t *b)
+{
+	return memcmp (a, b, sizeof (*a)) == 0;
+}
+
+static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t *state)
+{
+	Con_Printf (
+		"FOGVOL_TEST %s viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
+		"draw_fbo=%d read_fbo=%d prog=%d vao=%d blend=%d blend_func=(%d,%d) blend_eq=%d "
+		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d)\n",
+		phase,
+		state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3],
+		state->scissor_test,
+		state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3],
+		state->draw_fbo, state->read_fbo,
+		state->program,
+		state->vao,
+		state->blend,
+		state->blend_src_rgb, state->blend_dst_rgb,
+		state->blend_equation_rgb,
+		state->depth_test,
+		state->depth_writemask,
+		state->color_writemask[0], state->color_writemask[1], state->color_writemask[2], state->color_writemask[3],
+		state->cull_face,
+		state->polygon_mode[0], state->polygon_mode[1]);
+}
+
+static void R_FogVol_TestState_Restore (const fogvol_test_state_t *state)
+{
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)state->draw_fbo);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)state->read_fbo);
+	GL_UseProgram ((GLuint)state->program);
+	GL_BindVertexArrayFunc ((GLuint)state->vao);
+
+	if (state->blend)
+		glEnable (GL_BLEND);
+	else
+		glDisable (GL_BLEND);
+	glBlendFunc (state->blend_src_rgb, state->blend_dst_rgb);
+	glBlendEquation (state->blend_equation_rgb);
+
+	if (state->depth_test)
+		glEnable (GL_DEPTH_TEST);
+	else
+		glDisable (GL_DEPTH_TEST);
+	glDepthMask (state->depth_writemask);
+	glColorMask (state->color_writemask[0], state->color_writemask[1], state->color_writemask[2], state->color_writemask[3]);
+
+	if (state->cull_face)
+		glEnable (GL_CULL_FACE);
+	else
+		glDisable (GL_CULL_FACE);
+	glPolygonMode (GL_FRONT_AND_BACK, state->polygon_mode[0]);
+
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	if (state->scissor_test)
+		glEnable (GL_SCISSOR_TEST);
+	else
+		glDisable (GL_SCISSOR_TEST);
+	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
+}
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
 {
@@ -134,6 +238,7 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_noise);
 	Cvar_RegisterVariable (&r_fogvol_noisemode);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
+	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
@@ -510,6 +615,7 @@ void R_FogVol_DrawDebug2D (void)
 
 void R_FogVol_Render (void)
 {
+	static int last_dumpstate = -1;
 	int steps;
 	GLuint buf;
 	GLbyte *ofs;
@@ -533,6 +639,11 @@ void R_FogVol_Render (void)
 	int fog_src_index = 0;
 	int fog_dst_index = 0;
 	GLuint final_tex = 0;
+	qboolean use_test_guard;
+	qboolean dumpstate_always;
+	fogvol_test_state_t pre_state;
+	fogvol_test_state_t post_state;
+	qboolean mismatch;
 
 	if (r_fogvol.value <= 0.f)
 		return;
@@ -546,6 +657,21 @@ void R_FogVol_Render (void)
 		return;
 	if (!R_FogVol_MatrixInverse4x4 (r_matviewproj, inv_viewproj))
 		return;
+
+	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
+	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
+	{
+		Con_Printf ("FOGVOL_TEST dumpstate %s\n", dumpstate_always ? "enabled" : "disabled");
+		last_dumpstate = (int)Q_rint (r_fogvol_testvolumes_dumpstate.value);
+	}
+
+	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
+	if (use_test_guard)
+	{
+		R_FogVol_TestState_Capture (&pre_state);
+		if (dumpstate_always)
+			R_FogVol_TestState_Log ("pre", &pre_state);
+	}
 
 	use_halfres = (r_fogvol_halfres.value > 0.f);
 	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
@@ -709,8 +835,7 @@ void R_FogVol_Render (void)
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		glViewport (glx, gly, glwidth, glheight);
-		GL_EndGroup ();
-		return;
+		goto done;
 	}
 
 	if (has_drawn && glprogs.fogvol_temporal && final_tex)
@@ -793,6 +918,23 @@ void R_FogVol_Render (void)
 
 	if (mode == 1)
 		R_DebugFlushGeometry ();
+
+done:
+	if (use_test_guard)
+	{
+		R_FogVol_TestState_Capture (&post_state);
+		mismatch = !R_FogVol_TestState_Equals (&pre_state, &post_state);
+		if (dumpstate_always || mismatch)
+		{
+			R_FogVol_TestState_Log ("post", &post_state);
+			if (mismatch)
+				Con_Printf ("FOGVOL_TEST state mismatch detected, restoring saved GL state\n");
+		}
+
+		R_FogVol_TestState_Restore (&pre_state);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+		glViewport (glx, gly, glwidth, glheight);
+	}
 
 	GL_EndGroup ();
 }
