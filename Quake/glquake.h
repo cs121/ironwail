@@ -664,6 +664,10 @@ typedef struct glframebufs_s {
 		GLuint		fbo[2];
 		GLuint		history_tex[2];
 		GLuint		history_fbo[2];
+		GLuint		composite_tex[2];
+		GLuint		composite_fbo[2];
+		GLuint		finalcopy_tex;
+		GLuint		finalcopy_fbo;
 		int			width;
 		int			height;
 	}				fogvol;
