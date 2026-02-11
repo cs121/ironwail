@@ -1,0 +1,43 @@
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D DepthTexture;
+layout(binding=1) uniform sampler2D DepthPrefilter;
+layout(r16f, binding=0) uniform writeonly image2D OutAO;
+layout(rg8, binding=1) uniform writeonly image2D OutEdges;
+layout(rg16f, binding=2) uniform writeonly image2D OutBent;
+layout(location=0) uniform mat4 u_invProj;
+layout(location=1) uniform vec4 u_screen;
+layout(location=2) uniform vec4 u_ao;
+layout(location=3) uniform vec4 u_misc;
+layout(location=4) uniform vec4 u_viewRect;
+layout(location=5) uniform vec4 u_depth;
+layout(location=6) uniform vec4 u_quality;
+#include "ao_common.glsl"
+void main(){
+ ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutAO); if(any(greaterThanEqual(px,size))) return;
+ vec2 uv=(vec2(px)+0.5)/vec2(size); vec2 suv=mix(u_viewRect.xy,u_viewRect.zw,uv);
+ ivec2 sp=ivec2(suv*u_screen.zw);
+ float d=texelFetch(DepthTexture,sp,0).r;
+ vec3 p=AO_ReconstructViewPos(u_invProj,suv,d,u_depth.z);
+ vec3 n=AO_ReconstructNormalFromDepth(DepthTexture,u_invProj,sp,u_screen.xy,u_depth.z);
+ int slices=max(1,int(u_quality.y)); int steps=max(1,int(u_quality.z));
+ float occ=0.0; vec3 bent=vec3(0.0);
+ for(int s=0;s<slices;s++){
+  float a=(float(s)+AO_Hash12(vec2(px)+u_ao.w))*3.14159265/float(slices);
+  vec2 dir=vec2(cos(a),sin(a)); float h=-1.0;
+  for(int t=1;t<=steps;t++){
+   float r=(float(t)/float(steps))*u_ao.x*0.0025;
+   vec2 uv2=clamp(suv+dir*r,u_viewRect.xy,u_viewRect.zw);
+   float sd=textureLod(DepthPrefilter,uv2,0.0).r;
+   float v=(p.x-sd)/max(abs(sd),1e-3);
+   h=max(h,v);
+  }
+  float ho=clamp(h*0.5+0.5,0.0,1.0);
+  occ += ho;
+  bent += (1.0-ho) * vec3(-dir,0.0);
+ }
+ float ao=1.0-occ/float(slices);
+ imageStore(OutAO,px,vec4(clamp(ao,0.0,1.0)));
+ float edge=clamp(length(fwidth(vec2(p.x,d)))*24.0,0.0,1.0);
+ imageStore(OutEdges,px,vec4(edge,ao,0,0));
+ imageStore(OutBent,px,vec4(normalize(bent).xy*0.5+0.5,0,1));
+}

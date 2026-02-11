@@ -144,6 +144,7 @@ layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
+layout(location=19) uniform vec4 AOParams; // x: power, y: apply mode (0 final color), zw: reserved
 layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
@@ -657,6 +658,7 @@ void main()
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
                                 float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
+                                float aoShaped = pow(clamp(aoDamped, 0.0, 1.0), max(AOParams.x, 0.01));
                                 if (ssaoDebugMode == 12)
                                 {
                                         float mask = centerOpaque ? (1.0 - ao) : 0.0;
@@ -668,7 +670,7 @@ void main()
                                 }
                                 else if (ssaoDebugMode == 14)
                                 {
-                                        color.rgb = vec3(aoDamped);
+                                        color.rgb = vec3(aoShaped);
                                 }
                                 else if (ssaoDebugMode == 11)
                                 {
@@ -719,11 +721,11 @@ void main()
                                 }
                                 else if (ssaoDebugMode > 0)
                                 {
-                                        color.rgb = vec3(ao);
+                                        color.rgb = vec3(aoShaped);
                                 }
                                 else if (centerOpaque)
                                 {
-                                        color.rgb *= mix(1.0, aoDamped, ssaoIntensity);
+                                        color.rgb *= mix(1.0, aoShaped, ssaoIntensity);
                                 }
                         }
                 }

@@ -519,6 +519,11 @@ void GL_CreateShaders (void)
     glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
+	glprogs.ao_assao_main = GL_CreateComputeProgram (GLSL_PATH("ao_assao_main.comp"), "ao assao main");
+	glprogs.ao_gtao_prefilter = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_prefilter.comp"), "ao gtao prefilter");
+	glprogs.ao_gtao_main = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_main.comp"), "ao gtao main");
+	glprogs.ao_denoise = GL_CreateComputeProgram (GLSL_PATH("ao_denoise.comp"), "ao denoise");
+	glprogs.ao_bent_pack = GL_CreateComputeProgram (GLSL_PATH("ao_bent_pack.comp"), "ao bent pack");
 	glprogs.godrays_mask = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_mask.frag"), "godrays mask");
 	glprogs.godrays = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"), "godrays");
 	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");
