@@ -52,6 +52,7 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
+	vec4	texmatrix[3];
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -195,7 +196,9 @@ void main()
 		uv = in_uv.zw;
 	else if (call.tcgen == TCGEN_ENVIRONMENT)
 		uv = ComputeEnvUV(world_pos, world_normal);
-        out_uv = uv;
+        mat3 tcmod = mat3(call.texmatrix[0].xyz, call.texmatrix[1].xyz, call.texmatrix[2].xyz);
+	uv = (tcmod * vec3(uv, 1.0)).xy;
+	out_uv = uv;
 	out_lmuv = in_uv.zw;
 	out_depth = gl_Position.w;
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
