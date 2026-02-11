@@ -499,6 +499,12 @@ void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
+void R_Shadow_Log_BeginFrame (void);
+void R_Shadow_Log_SunPassEarlyOut (const char *reason);
+void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);
+void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj);
+GLuint R_Shadow_GetShadowMapTextureId (void);
+GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
