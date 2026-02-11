@@ -234,11 +234,11 @@ static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
 	GLint object_type = GL_NONE;
 	GLint object_name = 0;
 
-	glGetFramebufferAttachmentParameteriv (target, GL_COLOR_ATTACHMENT0,
+	GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
 	if (object_type == GL_TEXTURE)
 	{
-		glGetFramebufferAttachmentParameteriv (target, GL_COLOR_ATTACHMENT0,
+		GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0,
 			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object_name);
 		return (GLuint)object_name;
 	}
