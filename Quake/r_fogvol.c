@@ -290,11 +290,22 @@ static void R_FogVol_AssertNoFeedbackHazard (const char *pass_name, GLuint draw_
 {
 #if !defined(NDEBUG)
 	if (draw_tex && read_tex && draw_tex == read_tex)
-		Sys_Error ("FOGVOL feedback hazard in %s", pass_name);
+		Sys_Error ("Fogvol feedback hazard in pass %s", pass_name);
 #else
 	(void)pass_name;
 	(void)draw_tex;
 	(void)read_tex;
+#endif
+}
+
+static void R_FogVol_AssertNoBoundFeedbackHazard (const char *pass_name)
+{
+#if !defined(NDEBUG)
+	const GLuint draw_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_DRAW_FRAMEBUFFER);
+	const GLuint read_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_READ_FRAMEBUFFER);
+	R_FogVol_AssertNoFeedbackHazard (pass_name, draw_tex, read_tex);
+#else
+	(void)pass_name;
 #endif
 }
 
@@ -927,6 +938,10 @@ void R_FogVol_Render (void)
 	GLuint dst_tex;
 	GLuint dst_fbo;
 	GLuint depth_tex;
+	GLuint fog_tex[2];
+	GLuint fog_fbo[2];
+	GLuint history_tex[2];
+	GLuint history_fbo[2];
 	qboolean has_drawn = false;
 	qboolean use_halfres;
 	int fog_width;
@@ -1050,6 +1065,14 @@ void R_FogVol_Render (void)
 	else
 		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
+	fog_tex[0] = framebufs.fogvol.color_tex[0];
+	fog_tex[1] = framebufs.fogvol.color_tex[1];
+	fog_fbo[0] = framebufs.fogvol.fbo[0];
+	fog_fbo[1] = framebufs.fogvol.fbo[1];
+	history_tex[0] = framebufs.fogvol.history_tex[0];
+	history_tex[1] = framebufs.fogvol.history_tex[1];
+	history_fbo[0] = framebufs.fogvol.history_fbo[0];
+	history_fbo[1] = framebufs.fogvol.history_fbo[1];
 	src_tex = framebufs.composite.color_tex;
 	final_tex = 0;
 
@@ -1087,8 +1110,8 @@ void R_FogVol_Render (void)
 		}
 
 		fog_dst = (i == 0) ? 0 : (1 - fog_src);
-		dst_tex = framebufs.fogvol.color_tex[fog_dst];
-		dst_fbo = framebufs.fogvol.fbo[fog_dst];
+		dst_tex = fog_tex[fog_dst];
+		dst_fbo = fog_fbo[fog_dst];
 
 		if (i == 0)
 		{
@@ -1117,13 +1140,17 @@ void R_FogVol_Render (void)
 		}
 		else
 		{
-			src_tex = framebufs.fogvol.color_tex[fog_src];
+			src_tex = fog_tex[fog_src];
+			src_fbo = fog_fbo[fog_src];
 		}
 
-		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, dst_fbo);
+		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
+		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
 		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
+		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
@@ -1133,7 +1160,7 @@ void R_FogVol_Render (void)
 		GL_SetScissorEnabled (false);
 
 		fog_src = fog_dst;
-		final_tex = framebufs.fogvol.color_tex[fog_src];
+		final_tex = fog_tex[fog_src];
 		has_drawn = true;
 	}
 	GL_SetScissorEnabled (false);
@@ -1172,17 +1199,18 @@ void R_FogVol_Render (void)
 			history_dst = 1 - history_src;
 		if (composite_src == composite_dst)
 			composite_dst = 1 - composite_src;
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_src]);
+		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, history_fbo[history_src]);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
 		glViewport (0, 0, fog_width, fog_height);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], final_tex);
-		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], framebufs.fogvol.history_tex[history_src]);
+		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], history_tex[history_src]);
+		R_FogVol_AssertNoBoundFeedbackHazard ("COMPOSITE");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
-		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
-		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, framebufs.fogvol.history_tex[history_src], final_tex);
+		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_tex[history_src], final_tex);
 		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
 		GL_Uniform1iFunc (2, mode);
@@ -1194,10 +1222,11 @@ void R_FogVol_Render (void)
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
-		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
+		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, history_fbo[history_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.fogvol.history_tex[history_dst], framebufs.fogvol.composite_tex[composite_dst]);
+		R_FogVol_AssertNoFeedbackHazard ("HISTORY", history_tex[history_dst], framebufs.fogvol.composite_tex[composite_dst]);
+		R_FogVol_AssertNoBoundFeedbackHazard ("HISTORY");
 		R_FogVol_LogHazardPass ("HISTORY", framebufs.fogvol.composite_tex[composite_dst], 0, framebufs.fogvol.composite_tex[composite_dst]);
 		GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 			0, 0, fog_width, fog_height,
@@ -1205,8 +1234,8 @@ void R_FogVol_Render (void)
 
 		composite_src_tex = framebufs.fogvol.composite_tex[composite_dst];
 		composite_src_fbo = framebufs.fogvol.composite_fbo[composite_dst];
-		final_tex = framebufs.fogvol.history_tex[history_dst];
-		final_fbo = framebufs.fogvol.history_fbo[history_dst];
+		final_tex = history_tex[history_dst];
+		final_fbo = history_fbo[history_dst];
 		r_fogvol_history_index = history_dst;
 	}
 
