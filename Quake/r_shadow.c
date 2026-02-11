@@ -9,6 +9,7 @@ of the License, or (at your option) any later version.
 
 #include "quakedef.h"
 #include <float.h>
+#include <time.h>
 
 static void R_Shadow_LogClearDebug (const char *tag, GLbitfield clearbits)
 {
@@ -64,6 +65,307 @@ static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
 static int shadow_dlight_selected_count;
 static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
+
+extern cvar_t r_shadow_log;
+extern cvar_t r_shadow_log_rate;
+extern cvar_t r_shadow_log_gl;
+extern cvar_t r_shadow_log_dump;
+extern cvar_t r_shadow_log_file;
+
+#define SHDLOG_PREFIX "SHDLOG: "
+
+typedef struct shadow_log_state_s {
+	int frame;
+	qboolean active;
+	qboolean dump;
+	qboolean file_enabled;
+	FILE *file;
+	int last_rate_frame;
+	GLuint last_shadow_tex;
+	GLenum last_shadow_compare_mode;
+	GLint last_shadow_sampler_unit;
+	GLint last_program;
+} shadow_log_state_t;
+
+static shadow_log_state_t shdlog;
+
+static const char *R_Shadow_LogFBOStatusString (GLenum status)
+{
+	switch (status)
+	{
+	case GL_FRAMEBUFFER_COMPLETE: return "COMPLETE";
+	case GL_FRAMEBUFFER_UNDEFINED: return "UNDEFINED";
+	case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT: return "INCOMPLETE_ATTACHMENT";
+	case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT: return "MISSING_ATTACHMENT";
+	case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER: return "INCOMPLETE_DRAW_BUFFER";
+	case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER: return "INCOMPLETE_READ_BUFFER";
+	case GL_FRAMEBUFFER_UNSUPPORTED: return "UNSUPPORTED";
+	case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE: return "INCOMPLETE_MULTISAMPLE";
+#ifdef GL_FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS
+	case GL_FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS: return "INCOMPLETE_LAYER_TARGETS";
+#endif
+	default: return "UNKNOWN";
+	}
+}
+
+static const char *R_Shadow_LogGLErrorString (GLenum err)
+{
+	switch (err)
+	{
+	case GL_NO_ERROR: return "GL_NO_ERROR";
+	case GL_INVALID_ENUM: return "GL_INVALID_ENUM";
+	case GL_INVALID_VALUE: return "GL_INVALID_VALUE";
+	case GL_INVALID_OPERATION: return "GL_INVALID_OPERATION";
+	case GL_STACK_OVERFLOW: return "GL_STACK_OVERFLOW";
+	case GL_STACK_UNDERFLOW: return "GL_STACK_UNDERFLOW";
+	case GL_OUT_OF_MEMORY: return "GL_OUT_OF_MEMORY";
+	case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
+	default: return "GL_UNKNOWN_ERROR";
+	}
+}
+
+static void R_Shadow_LogWrite (const char *fmt, ...)
+{
+	va_list argptr;
+	char msg[2048];
+	if (!shdlog.active)
+		return;
+	va_start (argptr, fmt);
+	q_vsnprintf (msg, sizeof (msg), fmt, argptr);
+	va_end (argptr);
+	Con_Printf (SHDLOG_PREFIX "%s", msg);
+	if (shdlog.file_enabled && shdlog.file)
+	{
+		time_t now = time (NULL);
+		struct tm *tmv = localtime (&now);
+		if (tmv)
+			fprintf (shdlog.file, "%04d-%02d-%02d %02d:%02d:%02d " SHDLOG_PREFIX "%s", tmv->tm_year + 1900, tmv->tm_mon + 1, tmv->tm_mday, tmv->tm_hour, tmv->tm_min, tmv->tm_sec, msg);
+		else
+			fprintf (shdlog.file, SHDLOG_PREFIX "%s", msg);
+		fflush (shdlog.file);
+	}
+}
+
+static void R_Shadow_LogEnsureFile (void)
+{
+	char path[MAX_OSPATH];
+	if (r_shadow_log_file.value <= 0.f)
+	{
+		if (shdlog.file)
+		{
+			fclose (shdlog.file);
+			shdlog.file = NULL;
+		}
+		shdlog.file_enabled = false;
+		return;
+	}
+	if (!shdlog.file)
+	{
+		q_snprintf (path, sizeof (path), "%s/%s", com_gamedir, "shadow_debug.log");
+		shdlog.file = Sys_fopen (path, "at");
+		if (!shdlog.file)
+		{
+			Con_Printf (SHDLOG_PREFIX "WARN could not open %s for append; using console only\n", path);
+			shdlog.file_enabled = false;
+			return;
+		}
+		setvbuf (shdlog.file, NULL, _IOLBF, 0);
+	}
+	shdlog.file_enabled = true;
+}
+
+static qboolean R_Shadow_LogMatrixHasBadValues (const float m[16], float *out_det)
+{
+	float det;
+	for (int i = 0; i < 16; ++i)
+		if (!isfinite (m[i]))
+			return true;
+	det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
+	if (out_det)
+		*out_det = det;
+	return fabsf (det) < 1e-8f;
+}
+
+static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
+{
+	GLint width, height, internal, maxlevel;
+	GLint minf, magf, wraps, wrapt, cmode, cfunc;
+	GLfloat border[4];
+	if (!tex)
+	{
+		R_Shadow_LogWrite ("%s tex=0 (unbound)\n", tag);
+		return;
+	}
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magf);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &wraps);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, &wrapt);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &cmode);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &maxlevel);
+	glGetTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	R_Shadow_LogWrite ("%s tex=%u size=%dx%d ifmt=0x%X min=0x%X mag=0x%X wrap=(0x%X,0x%X) compare=(0x%X,0x%X) maxlevel=%d border=(%.2f %.2f %.2f %.2f)\n",
+		tag, tex, width, height, (unsigned)internal, (unsigned)minf, (unsigned)magf, (unsigned)wraps, (unsigned)wrapt, (unsigned)cmode, (unsigned)cfunc, maxlevel,
+		border[0], border[1], border[2], border[3]);
+	if (width <= 0 || height <= 0)
+		R_Shadow_LogWrite ("WARN shadow texture has zero size\n");
+	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
+		R_Shadow_LogWrite ("WARN unexpected depth internal format 0x%X\n", (unsigned)internal);
+	if (cmode == GL_NONE)
+		R_Shadow_LogWrite ("WARN texture compare mode is GL_NONE; sampler2DShadow path will not compare\n");
+	shdlog.last_shadow_compare_mode = (GLenum)cmode;
+}
+
+static void R_Shadow_LogGLStage (const char *stage)
+{
+	GLenum err;
+	if (r_shadow_log_gl.value <= 0.f)
+		return;
+	err = glGetError ();
+	if (err != GL_NO_ERROR)
+		R_Shadow_LogWrite ("GL %s error=0x%X (%s)\n", stage, (unsigned)err, R_Shadow_LogGLErrorString (err));
+	else
+		R_Shadow_LogWrite ("GL %s error=GL_NO_ERROR\n", stage);
+}
+
+void R_Shadow_Log_BeginFrame (void)
+{
+	qboolean enabled;
+	int rate;
+	if (shdlog.frame == r_framecount)
+		return;
+	shdlog.frame = r_framecount;
+	enabled = r_shadow_log.value > 0.f;
+	shdlog.dump = r_shadow_log_dump.value > 0.f;
+	shdlog.active = false;
+	if (!enabled && !shdlog.dump)
+	{
+		R_Shadow_LogEnsureFile ();
+		return;
+	}
+	rate = (int)r_shadow_log_rate.value;
+	if (rate < 1)
+		rate = 1;
+	if (shdlog.dump || (r_framecount - shdlog.last_rate_frame) >= rate)
+	{
+		shdlog.active = true;
+		shdlog.last_rate_frame = r_framecount;
+	}
+	R_Shadow_LogEnsureFile ();
+	if (shdlog.active)
+	{
+		R_Shadow_LogWrite ("----- frame=%d map=%s vieworg=(%.1f %.1f %.1f) viewangles=(%.1f %.1f %.1f) -----\n",
+			r_framecount,
+			cl.mapname[0] ? cl.mapname : "(nomap)",
+			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],
+			r_refdef.viewangles[0], r_refdef.viewangles[1], r_refdef.viewangles[2]);
+	}
+}
+
+static void R_Shadow_LogEndFrameIfNeeded (void)
+{
+	if (shdlog.dump)
+		Cvar_SetValueQuick (&r_shadow_log_dump, 0.f);
+}
+
+void R_Shadow_Log_SunPassEarlyOut (const char *reason)
+{
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+	R_Shadow_LogWrite ("SUNPASS skip: %s\n", reason);
+}
+
+void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec)
+{
+	GLint viewport[4], scissor[4], draw_fbo, read_fbo, depthfunc, cullmode, prog;
+	GLboolean scissoren, depthtest, depthwrite, cullen, po;
+	GLfloat pof, pou, depthclear;
+	GLenum status;
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &prog);
+	depthtest = glIsEnabled (GL_DEPTH_TEST);
+	depthwrite = 0;
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depthwrite);
+	glGetIntegerv (GL_DEPTH_FUNC, &depthfunc);
+	cullen = glIsEnabled (GL_CULL_FACE);
+	glGetIntegerv (GL_CULL_FACE_MODE, &cullmode);
+	po = glIsEnabled (GL_POLYGON_OFFSET_FILL);
+	glGetFloatv (GL_POLYGON_OFFSET_FACTOR, &pof);
+	glGetFloatv (GL_POLYGON_OFFSET_UNITS, &pou);
+	glGetFloatv (GL_DEPTH_CLEAR_VALUE, &depthclear);
+	scissoren = glIsEnabled (GL_SCISSOR_TEST);
+	R_Shadow_LogWrite ("%s enter/exit dt=%.3fms draw_fbo=%d read_fbo=%d fbo=%u check=0x%X(%s) viewport=(%d %d %d %d) scissor_en=%d scissor=(%d %d %d %d) shadow_vp=%dx%d prog=%d draws=%d tris=%d clearDepth=%.3f\n",
+		tag, (float)msec, draw_fbo, read_fbo, (unsigned)fbo, (unsigned)status, R_Shadow_LogFBOStatusString (status),
+		viewport[0], viewport[1], viewport[2], viewport[3], scissoren, scissor[0], scissor[1], scissor[2], scissor[3], vpw, vph, prog, drawcalls, tris, depthclear);
+	R_Shadow_LogWrite ("%s state depth_test=%d depth_write=%d depth_func=0x%X cull=%d cull_mode=0x%X polyoffset=%d factor=%.4f units=%.4f\n",
+		tag, depthtest, depthwrite, (unsigned)depthfunc, cullen, (unsigned)cullmode, po, pof, pou);
+	R_Shadow_LogTextureParams (tag, depth_tex);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+		R_Shadow_LogWrite ("WARN shadow FBO incomplete for %s\n", tag);
+	R_Shadow_LogGLStage (tag);
+}
+
+void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj)
+{
+	GLint active_tex, bound_tex, draw_fbo, read_fbo, current_program;
+	GLint vp[4], sc[4];
+	float det = 0.f;
+	qboolean bad;
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_tex);
+	glActiveTexture (texunit);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
+	glActiveTexture (active_tex);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, vp);
+	glGetIntegerv (GL_SCISSOR_BOX, sc);
+	bad = shadow_viewproj ? R_Shadow_LogMatrixHasBadValues (shadow_viewproj, &det) : true;
+	if (!shdlog.dump && shdlog.last_program == program && shdlog.last_shadow_sampler_unit == (GLint)(texunit - GL_TEXTURE0) && shdlog.last_shadow_tex == expected_tex && (GLuint)bound_tex == expected_tex)
+	{
+		R_Shadow_LogEndFrameIfNeeded ();
+		return;
+	}
+	shdlog.last_program = program;
+	shdlog.last_shadow_sampler_unit = (GLint)(texunit - GL_TEXTURE0);
+	shdlog.last_shadow_tex = expected_tex;
+	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_row0=(%.4f %.4f %.4f %.4f) det3x3=%.6g\n",
+		tag, bias, normalbias, pcf, taps,
+		shadow_viewproj ? shadow_viewproj[0] : 0.f,
+		shadow_viewproj ? shadow_viewproj[1] : 0.f,
+		shadow_viewproj ? shadow_viewproj[2] : 0.f,
+		shadow_viewproj ? shadow_viewproj[3] : 0.f,
+		det);
+	if (!shadows_enabled)
+		R_Shadow_LogWrite ("WARN receiver shadow branch disabled\n");
+	if ((GLuint)bound_tex != expected_tex)
+		R_Shadow_LogWrite ("WARN receiver shadow texture mismatch: expected=%u bound=%d\n", expected_tex, bound_tex);
+	if (bad)
+		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
+	if (bias < 1e-7f || bias > 0.1f)
+		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
+	if (pcf > 0.f && shdlog.last_shadow_compare_mode == GL_NONE)
+		R_Shadow_LogWrite ("WARN PCF enabled but depth compare mode is GL_NONE\n");
+	R_Shadow_LogGLStage (tag);
+	R_Shadow_LogEndFrameIfNeeded ();
+}
 
 static void R_Shadow_DestroyDlightResources (void)
 {
@@ -537,21 +839,45 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
 }
 
+GLuint R_Shadow_GetShadowMapTextureId (void)
+{
+	return shadow_depth_tex;
+}
+
+GLuint R_Shadow_GetDlightShadowMapTextureId (void)
+{
+	return shadow_dlight_depth_tex;
+}
+
 void R_Shadow_SunPass (void)
 {
 	qboolean enabled = r_shadows.value > 0.f && r_shadow_sun.value > 0.f;
 	vec4_t sun_dir;
+	double t0, t1;
+	int draws0, tris0;
 
+	R_Shadow_Log_BeginFrame ();
 	r_framedata.shadow_debug[0] = 0.f;
 	IdentityMatrix (r_framedata.shadow_viewproj);
 	VectorSet (r_framedata.shadow_sun_dir, 0.f, 0.f, -1.f);
 	r_framedata.shadow_sun_dir[3] = 0.f;
-	if (!enabled || !glprogs.shadow_depth)
+	if (!enabled)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("disabled by r_shadows/r_shadow_sun");
 		return;
+	}
+	if (!glprogs.shadow_depth)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("missing glprogs.shadow_depth");
+		return;
+	}
 
 	R_ResizeShadowMapIfNeeded ();
 	if (!shadow_depth_tex || !shadow_fbo)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("shadow map resources unavailable");
 		return;
+	}
 
 	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
 	r_framedata.shadow_debug[0] = 1.f;
@@ -560,6 +886,9 @@ void R_Shadow_SunPass (void)
 	R_UploadFrameData ();
 
 	GL_BeginGroup ("Shadow map (sun)");
+	t0 = Sys_DoubleTime ();
+	draws0 = rs_brushpasses + rs_aliaspasses;
+	tris0 = rs_brushpasses + rs_aliaspasses;
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
@@ -581,6 +910,9 @@ void R_Shadow_SunPass (void)
 		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
 		R_DrawAliasModels_Shadow (ents, count);
 	}
+	t1 = Sys_DoubleTime ();
+	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
+		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
 
 	GL_EndGroup ();
 }
@@ -588,6 +920,9 @@ void R_Shadow_SunPass (void)
 void R_Shadow_DlightPass (void)
 {
 	qboolean enabled = r_shadows.value > 0.f && r_shadow_dlights.value > 0.f;
+	double t0, t1;
+	int draws0, tris0;
+	R_Shadow_Log_BeginFrame ();
 	float sun_viewproj[16];
 	int max_tiles;
 	int grid;
@@ -609,21 +944,38 @@ void R_Shadow_DlightPass (void)
 		shadow_dlight_light_indices[i] = -1;
 	}
 
-	if (!enabled || !glprogs.shadow_depth)
+	if (!enabled)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS disabled by cvars");
 		return;
+	}
+	if (!glprogs.shadow_depth)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS missing glprogs.shadow_depth");
+		return;
+	}
 
 	R_Shadow_ResizeDlightAtlasIfNeeded ();
 	if (!shadow_dlight_depth_tex || !shadow_dlight_fbo)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS resources unavailable");
 		return;
+	}
 
 	max_tiles = CLAMP (0, (int)r_shadow_dlight_max.value, SHADOW_DLIGHT_MAX);
 	if (shadow_dlight_tile_count > 0)
 		max_tiles = q_min (max_tiles, shadow_dlight_tile_count);
 	if (max_tiles <= 0)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS max_tiles <= 0");
 		return;
+	}
 
 	if (r_framedata.numlights == 0)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no gpu lights");
 		return;
+	}
 
 	{
 		float scores[SHADOW_DLIGHT_MAX];
@@ -673,11 +1025,17 @@ void R_Shadow_DlightPass (void)
 	shadow_dlight_selected_count = tiles_used;
 
 	if (!tiles_used)
+	{
+		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no selected lights");
 		return;
+	}
 
 	memcpy (sun_viewproj, r_framedata.shadow_viewproj, sizeof (sun_viewproj));
 
 	GL_BeginGroup ("Shadow map (dlights)");
+	t0 = Sys_DoubleTime ();
+	draws0 = rs_brushpasses + rs_aliaspasses;
+	tris0 = rs_brushpasses + rs_aliaspasses;
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
@@ -736,6 +1094,10 @@ void R_Shadow_DlightPass (void)
 	}
 
 	GL_SetScissorEnabled (false);
+	t1 = Sys_DoubleTime ();
+	R_Shadow_Log_ShadowPassSnapshot ("DLIGHTPASS", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size,
+		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
+	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 
