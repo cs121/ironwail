@@ -1,0 +1,9 @@
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D BentTexture;
+layout(r16f, binding=0) uniform writeonly image2D OutAO;
+void main(){
+ ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutAO); if(any(greaterThanEqual(px,size))) return;
+ vec2 bn=texelFetch(BentTexture,px,0).rg*2.0-1.0;
+ float viz=clamp(length(bn),0.0,1.0);
+ imageStore(OutAO,px,vec4(viz));
+}

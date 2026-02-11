@@ -594,6 +594,11 @@ typedef struct glprogs_s {
 	GLuint		bloom_blur;
 	GLuint		ssao;
 	GLuint		ssao_blur;
+	GLuint		ao_assao_main;
+	GLuint		ao_gtao_prefilter;
+	GLuint		ao_gtao_main;
+	GLuint		ao_denoise;
+	GLuint		ao_bent_pack;
 	GLuint		godrays_mask;
 	GLuint		godrays;
 	GLuint		godrays_source;
@@ -709,8 +714,14 @@ typedef struct glframebufs_s {
 		GLuint		blur_tex[2];
 		GLuint		ao_fbo[2];
 		GLuint		blur_fbo[2];
+		GLuint		raw_tex[2];
+		GLuint		final_tex[2];
+		GLuint		edges_tex[2];
+		GLuint		depth_prefilter_tex;
+		GLuint		bentnormal_tex[2];
 		int			width[2];
 		int			height[2];
+		int			depth_mips;
 	}				ssao;
 
 	struct {
