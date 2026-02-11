@@ -286,6 +286,12 @@ static void R_FogVol_LogHazardPass (const char *pass,
 	}
 }
 
+static void R_FogVol_AssertNoFeedbackHazard (GLuint draw_tex, GLuint read_tex)
+{
+	if (draw_tex && read_tex && draw_tex == read_tex)
+		Sys_Error ("Fogvol feedback hazard");
+}
+
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 {
 	GLenum draw_color_attachment = GL_BACK_LEFT;
@@ -925,8 +931,8 @@ void R_FogVol_Render (void)
 	float view_y;
 	float view_w;
 	float view_h;
-	int fog_src_index = 0;
-	int fog_dst_index = 0;
+	int fog_src = 0;
+	int fog_dst = 0;
 	GLuint final_tex = 0;
 	qboolean use_test_guard;
 	qboolean dumpstate_always;
@@ -1072,19 +1078,20 @@ void R_FogVol_Render (void)
 			R_DebugDrawWireBox (v->mins, v->maxs, color, true);
 		}
 
-		fog_dst_index = (i == 0) ? 0 : (1 - fog_src_index);
-		dst_tex = framebufs.fogvol.color_tex[fog_dst_index];
-		dst_fbo = framebufs.fogvol.fbo[fog_dst_index];
+		fog_dst = (i == 0) ? 0 : (1 - fog_src);
+		dst_tex = framebufs.fogvol.color_tex[fog_dst];
+		dst_fbo = framebufs.fogvol.fbo[fog_dst];
 
 		if (i > 0)
-			src_tex = framebufs.fogvol.color_tex[fog_src_index];
-		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src_index];
+			src_tex = framebufs.fogvol.color_tex[fog_src];
+		src_fbo = (i == 0) ? framebufs.composite.fbo : framebufs.fogvol.fbo[fog_src];
 		GL_SetScissorEnabled (false);
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
 		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
+		R_FogVol_AssertNoFeedbackHazard (dst_tex, src_tex);
 		if (use_halfres && i == 0)
 		{
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
@@ -1101,6 +1108,7 @@ void R_FogVol_Render (void)
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, dst_fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
 		R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, src_tex);
+		R_FogVol_AssertNoFeedbackHazard (dst_tex, src_tex);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
@@ -1109,12 +1117,12 @@ void R_FogVol_Render (void)
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_SetScissorEnabled (false);
 
-		fog_src_index = fog_dst_index;
-		final_tex = framebufs.fogvol.color_tex[fog_src_index];
+		fog_src = fog_dst;
+		final_tex = framebufs.fogvol.color_tex[fog_src];
 		has_drawn = true;
 	}
 	GL_SetScissorEnabled (false);
-	GLuint final_fbo = framebufs.fogvol.fbo[fog_src_index];
+	GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
 
 	if (!has_drawn)
 	{
@@ -1148,6 +1156,8 @@ void R_FogVol_Render (void)
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
 		glViewport (0, 0, fog_width, fog_height);
+		R_FogVol_AssertNoFeedbackHazard (framebufs.fogvol.history_tex[history_dst], final_tex);
+		R_FogVol_AssertNoFeedbackHazard (framebufs.fogvol.history_tex[history_dst], framebufs.fogvol.history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
@@ -1162,9 +1172,15 @@ void R_FogVol_Render (void)
 		GL_Uniform4fFunc (7, view_x, view_y, 1.f / view_w, 1.f / view_h);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
-		final_tex = framebufs.fogvol.history_tex[history_dst];
-		final_fbo = framebufs.fogvol.history_fbo[history_dst];
-		r_fogvol_history_index = history_dst;
+		{
+			int history_tmp = history_src;
+			history_src = history_dst;
+			history_dst = history_tmp;
+		}
+
+		final_tex = framebufs.fogvol.history_tex[history_src];
+		final_fbo = framebufs.fogvol.history_fbo[history_src];
+		r_fogvol_history_index = history_src;
 	}
 
 	if (has_drawn)
@@ -1180,6 +1196,7 @@ void R_FogVol_Render (void)
 				taps = (taps == 9) ? 9 : 4;
 				R_FogVol_UseProgram (glprogs.fogvol_upsample);
 				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+				R_FogVol_AssertNoFeedbackHazard (framebufs.composite.color_tex, final_tex);
 				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
@@ -1195,6 +1212,7 @@ void R_FogVol_Render (void)
 				R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
 				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
+				R_FogVol_AssertNoFeedbackHazard (framebufs.composite.color_tex, final_tex);
 				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 					0, 0, glwidth, glheight,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -1207,6 +1225,7 @@ void R_FogVol_Render (void)
 			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
 			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
+			R_FogVol_AssertNoFeedbackHazard (framebufs.composite.color_tex, final_tex);
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 				0, 0, glwidth, glheight,
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
