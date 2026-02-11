@@ -229,6 +229,63 @@ static void R_FogVol_LogPipelineState (const char *marker)
 		(unsigned)read_buffer);
 }
 
+static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
+{
+	GLint object_type = GL_NONE;
+	GLint object_name = 0;
+
+	glGetFramebufferAttachmentParameteriv (target, GL_COLOR_ATTACHMENT0,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
+	if (object_type == GL_TEXTURE)
+	{
+		glGetFramebufferAttachmentParameteriv (target, GL_COLOR_ATTACHMENT0,
+			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object_name);
+		return (GLuint)object_name;
+	}
+
+	return 0;
+}
+
+static void R_FogVol_LogHazardPass (const char *pass,
+	GLuint main_tex,
+	GLuint history_tex,
+	GLuint fog_tex)
+{
+	GLint draw_fbo = 0;
+	GLint read_fbo = 0;
+	GLuint draw_tex = 0;
+	GLuint read_tex = 0;
+
+	if (!R_FogVol_TestDebugEnabled ())
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	draw_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_DRAW_FRAMEBUFFER);
+	read_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_READ_FRAMEBUFFER);
+
+	Con_Printf (
+		"FOGVOL_HAZARD pass=%s draw_fbo=%d read_fbo=%d draw_tex=%u read_tex=%u input_main=%u input_history=%u input_fog=%u\n",
+		pass,
+		draw_fbo,
+		read_fbo,
+		draw_tex,
+		read_tex,
+		main_tex,
+		history_tex,
+		fog_tex);
+
+	if (draw_tex && (main_tex == draw_tex || history_tex == draw_tex || fog_tex == draw_tex))
+	{
+		Con_Printf ("FOGVOL_HAZARD pass=%s hazard=feedback_loop draw_tex=%u\n", pass, draw_tex);
+	}
+
+	if (!q_strcasecmp (pass, "FINAL_COPY") && draw_tex && read_tex && draw_tex == read_tex)
+	{
+		Con_Printf ("FOGVOL_HAZARD pass=%s hazard=inplace_copy tex=%u\n", pass, draw_tex);
+	}
+}
+
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 {
 	GLenum draw_color_attachment = GL_BACK_LEFT;
@@ -1025,8 +1082,9 @@ void R_FogVol_Render (void)
 		GL_SetScissorEnabled (false);
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "iter read=COLOR_ATTACHMENT0");
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "iter draw=COLOR_ATTACHMENT0");
+		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
+		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
 		if (use_halfres && i == 0)
 		{
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
@@ -1041,8 +1099,8 @@ void R_FogVol_Render (void)
 		}
 
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, dst_fbo);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "final copy draw=COLOR_ATTACHMENT0");
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "final copy read=COLOR_ATTACHMENT0");
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
+		R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, src_tex);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
@@ -1083,13 +1141,17 @@ void R_FogVol_Render (void)
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		if (history_src == history_dst)
+			history_dst = 1 - history_src;
+		if (framebufs.fogvol.history_tex[history_dst] == final_tex)
+			history_dst = 1 - history_dst;
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[history_dst]);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "composite draw=COLOR_ATTACHMENT0");
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "composite read=COLOR_ATTACHMENT0");
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
 		glViewport (0, 0, fog_width, fog_height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.fogvol.history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
+		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, framebufs.fogvol.history_tex[history_src], final_tex);
 		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
 		GL_Uniform1iFunc (2, mode);
@@ -1108,8 +1170,7 @@ void R_FogVol_Render (void)
 	if (has_drawn)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "history draw=COLOR_ATTACHMENT0");
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "history read=COLOR_ATTACHMENT0");
+		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 		glViewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
@@ -1121,6 +1182,7 @@ void R_FogVol_Render (void)
 				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
 				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
 				GL_Uniform1iFunc (2, taps);
@@ -1130,6 +1192,9 @@ void R_FogVol_Render (void)
 			{
 				R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
 				R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+				R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
+				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
+				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 					0, 0, glwidth, glheight,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -1139,6 +1204,9 @@ void R_FogVol_Render (void)
 		{
 			R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
 			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
+			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
+			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 				0, 0, glwidth, glheight,
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
