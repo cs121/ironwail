@@ -279,6 +279,7 @@ cvar_t	r_shadow_log_rate = { "r_shadow_log_rate", "60", CVAR_NONE };
 cvar_t	r_shadow_log_gl = { "r_shadow_log_gl", "0", CVAR_NONE };
 cvar_t	r_shadow_log_dump = { "r_shadow_log_dump", "0", CVAR_NONE };
 cvar_t	r_shadow_log_file = { "r_shadow_log_file", "0", CVAR_NONE };
+cvar_t	r_shadow_validate = { "r_shadow_validate", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };

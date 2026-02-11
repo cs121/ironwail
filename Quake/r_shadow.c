@@ -71,6 +71,7 @@ extern cvar_t r_shadow_log_rate;
 extern cvar_t r_shadow_log_gl;
 extern cvar_t r_shadow_log_dump;
 extern cvar_t r_shadow_log_file;
+extern cvar_t r_shadow_validate;
 
 #define SHDLOG_PREFIX "SHDLOG: "
 
@@ -88,6 +89,20 @@ typedef struct shadow_log_state_s {
 } shadow_log_state_t;
 
 static shadow_log_state_t shdlog;
+static qboolean shadow_sun_validated_once;
+static qboolean shadow_dlight_validated_once;
+
+/*
+Root Cause(s) + Fix Summary:
+1) Shadow caster pass used front-face culling. Quake BSP caster geometry is effectively
+   single-sided for shadow rendering; culling fronts dropped most/all casters, leaving
+   an empty depth map and fully lit receivers.
+2) Shadow map configuration and validation were spread out and easy to regress.
+   Centralized depth texture setup and added optional runtime validation to catch
+   FBO/texture/state mismatches early.
+3) Logging assumed hardware depth-compare PCF, but the shader path is manual PCF
+   with sampler2D. Updated diagnostics to match the intended pipeline.
+*/
 
 static const char *R_Shadow_LogFBOStatusString (GLenum status)
 {
@@ -215,9 +230,59 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 		R_Shadow_LogWrite ("WARN shadow texture has zero size\n");
 	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
 		R_Shadow_LogWrite ("WARN unexpected depth internal format 0x%X\n", (unsigned)internal);
-	if (cmode == GL_NONE)
-		R_Shadow_LogWrite ("WARN texture compare mode is GL_NONE; sampler2DShadow path will not compare\n");
+	if (cmode != GL_NONE)
+		R_Shadow_LogWrite ("WARN compare mode != GL_NONE but current shaders use sampler2D/manual compare\n");
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
+}
+
+static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
+{
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	{
+		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
+		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	}
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, hw_compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+}
+
+static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint tex, int expected_w, int expected_h, GLenum expected_compare_mode)
+{
+	GLint width = 0, height = 0, cmode = GL_NONE, minf = 0, magf = 0;
+	GLenum status;
+
+	if (r_shadow_validate.value <= 0.f)
+		return;
+
+	if (!fbo || !tex)
+	{
+		Con_DWarning ("%s: missing shadow resource(s): fbo=%u tex=%u\n", tag, (unsigned)fbo, (unsigned)tex);
+		return;
+	}
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &cmode);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magf);
+
+	if (width != expected_w || height != expected_h)
+		Con_DWarning ("%s: shadow texture size mismatch (%dx%d, expected %dx%d)\n", tag, width, height, expected_w, expected_h);
+	if ((GLenum)cmode != expected_compare_mode)
+		Con_DWarning ("%s: shadow compare mode mismatch (0x%X, expected 0x%X)\n", tag, (unsigned)cmode, (unsigned)expected_compare_mode);
+	if (minf != GL_NEAREST || magf != GL_NEAREST)
+		Con_DWarning ("%s: unexpected filter state min=0x%X mag=0x%X (expected NEAREST)\n", tag, (unsigned)minf, (unsigned)magf);
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
+	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+		Con_DWarning ("%s: shadow FBO incomplete 0x%X (%s)\n", tag, (unsigned)status, R_Shadow_LogFBOStatusString (status));
 }
 
 static void R_Shadow_LogGLStage (const char *stage)
@@ -361,8 +426,8 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
-	if (pcf > 0.f && shdlog.last_shadow_compare_mode == GL_NONE)
-		R_Shadow_LogWrite ("WARN PCF enabled but depth compare mode is GL_NONE\n");
+	if (pcf > 0.f && shdlog.last_shadow_compare_mode != GL_NONE)
+		R_Shadow_LogWrite ("WARN manual PCF enabled but depth compare mode is not GL_NONE\n");
 	R_Shadow_LogGLStage (tag);
 	R_Shadow_LogEndFrameIfNeeded ();
 }
@@ -382,6 +447,7 @@ static void R_Shadow_DestroyDlightResources (void)
 	shadow_dlight_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
+	shadow_dlight_validated_once = false;
 }
 
 static void R_Shadow_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
@@ -428,6 +494,7 @@ static void R_Shadow_DestroyResources (void)
 		shadow_depth_tex = 0;
 	}
 	shadowmap_size = 0;
+	shadow_sun_validated_once = false;
 	R_Shadow_DestroyDlightResources ();
 }
 
@@ -726,16 +793,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-	{
-		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
-		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	R_Shadow_ConfigureDepthTexture (shadow_dlight_depth_tex, false);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
@@ -754,6 +812,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	shadow_dlight_tile_size = tile_size;
 	shadow_dlight_tile_count = grid * grid;
 }
+
 void R_InitShadow (void)
 {
 	shadow_fbo = 0;
@@ -765,6 +824,8 @@ void R_InitShadow (void)
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
 	shadow_dlight_selected_count = 0;
+	shadow_sun_validated_once = false;
+	shadow_dlight_validated_once = false;
 }
 
 void R_ShutdownShadow (void)
@@ -799,16 +860,7 @@ void R_ResizeShadowMapIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_depth_tex, -1, "shadowmap depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, desired, desired);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-	{
-		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
-		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	R_Shadow_ConfigureDepthTexture (shadow_depth_tex, false);
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
@@ -894,9 +946,15 @@ void R_Shadow_SunPass (void)
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
+	GL_DepthRange (ZRANGE_FULL);
+	if (!shadow_sun_validated_once || r_shadow_validate.value > 1.f)
+	{
+		R_Shadow_ValidateDepthResources ("sun", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size, GL_NONE);
+		shadow_sun_validated_once = true;
+	}
 
 	GL_UseProgram (glprogs.shadow_depth);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS (6));
 	R_Shadow_LogClearDebug ("R_Shadow_Sun", GL_DEPTH_BUFFER_BIT);
 	glClear (GL_DEPTH_BUFFER_BIT);
 
@@ -1040,6 +1098,12 @@ void R_Shadow_DlightPass (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
+	GL_DepthRange (ZRANGE_FULL);
+	if (!shadow_dlight_validated_once || r_shadow_validate.value > 1.f)
+	{
+		R_Shadow_ValidateDepthResources ("dlight", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size, GL_NONE);
+		shadow_dlight_validated_once = true;
+	}
 	GL_SetScissorEnabled (true);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
