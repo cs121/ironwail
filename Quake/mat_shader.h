@@ -34,7 +34,12 @@ typedef enum
 	MAT_SURFPARM_SKY		= (1u << 6),
 	MAT_SURFPARM_FOG		= (1u << 7),
 	MAT_SURFPARM_NODRAW		= (1u << 8),
-	MAT_SURFPARM_STONE		= (1u << 9)
+	MAT_SURFPARM_STONE		= (1u << 9),
+	MAT_SURFPARM_WATER		= (1u << 10),
+	MAT_SURFPARM_SLIME		= (1u << 11),
+	MAT_SURFPARM_LAVA		= (1u << 12),
+	MAT_SURFPARM_NOIMPACT		= (1u << 13),
+	MAT_SURFPARM_NOMARKS		= (1u << 14)
 } mat_surfaceparm_t;
 
 typedef enum
@@ -67,8 +72,26 @@ typedef enum
 	MAT_ALPHAGEN_IDENTITY = 0,
 	MAT_ALPHAGEN_VERTEX,
 	MAT_ALPHAGEN_CONST,
-	MAT_ALPHAGEN_WAVE
+	MAT_ALPHAGEN_WAVE,
+	MAT_ALPHAGEN_LIGHTINGSPECULAR
 } mat_alphagen_t;
+
+typedef enum
+{
+	MAT_DEFORM_NONE = 0,
+	MAT_DEFORM_WAVE,
+	MAT_DEFORM_BULGE,
+	MAT_DEFORM_MOVE,
+	MAT_DEFORM_AUTOSPRITE
+} mat_deform_type_t;
+
+typedef struct mat_deform_s
+{
+	mat_deform_type_t type;
+	mat_wave_t	wave;
+	vec3_t		move;
+	float		args[4];
+} mat_deform_t;
 
 typedef enum
 {
@@ -239,9 +262,13 @@ typedef struct shader_material_s
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
 	qboolean		godray_enable;
+	qboolean		has_fogparms;
 	float			emissive_scale;
 	float			bloom_scale;
 	float			godray_scale;
+	vec3_t		fog_color;
+	float			fog_distance;
+	mat_deform_t	*deforms;
 	mat_shader_stage_t	stage0;
 	mat_shader_stage_t	*stages;
 } shader_material_t;
@@ -256,6 +283,7 @@ typedef struct texture_s texture_t;
 
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
+extern cvar_t r_shader_verbose;
 extern cvar_t r_tcgen_debug;
 extern cvar_t r_matshader_debug_parse;
 

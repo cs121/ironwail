@@ -51,6 +51,11 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "sky", MAT_SURFPARM_SKY, MAT_RENDER_SKY, 0u },
 	{ "fog", MAT_SURFPARM_FOG, MAT_RENDER_FOG, 0u },
 	{ "nodraw", MAT_SURFPARM_NODRAW, MAT_RENDER_NODRAW, 0u },
+	{ "water", MAT_SURFPARM_WATER, MAT_RENDER_TRANS, 0u },
+	{ "slime", MAT_SURFPARM_SLIME, MAT_RENDER_TRANS, 0u },
+	{ "lava", MAT_SURFPARM_LAVA, MAT_RENDER_TRANS, 0u },
+	{ "noimpact", MAT_SURFPARM_NOIMPACT, 0u, 0u },
+	{ "nomarks", MAT_SURFPARM_NOMARKS, 0u, 0u },
 	{ "stone", MAT_SURFPARM_STONE, 0u, 0u }
 };
 
@@ -1139,6 +1144,10 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.alphagen = MAT_ALPHAGEN_CONST;
 				stage.const_alpha = alpha;
 			}
+			else if (!q_strcasecmp (value, "lightingSpecular"))
+			{
+				stage.alphagen = MAT_ALPHAGEN_LIGHTINGSPECULAR;
+			}
 			else if (!q_strcasecmp (value, "wave"))
 			{
 				mat_wave_type_t wave_type;
@@ -1684,6 +1693,68 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 				break;
 			}
 			Mat_Shader_ApplySurfaceParm (&material, value, state);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "fogparms") || !q_strcasecmp (com_token, "fogParms"))
+		{
+			float r,g,b,dist;
+			Mat_Shader_MarkKeywordSeen ("fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			if (!ExpectToken (&data, "(", state) || !ParseFloat (&data, &r, state) || !ParseFloat (&data, &g, state) || !ParseFloat (&data, &b, state) || !ExpectToken (&data, ")", state) || !ParseFloat (&data, &dist, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			material.has_fogparms = true;
+			material.fog_color[0] = CLAMP(0.f, r, 1.f);
+			material.fog_color[1] = CLAMP(0.f, g, 1.f);
+			material.fog_color[2] = CLAMP(0.f, b, 1.f);
+			material.fog_distance = q_max(0.f, dist);
+			material.render_flags |= MAT_RENDER_FOG;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "deformVertexes"))
+		{
+			const char *deform_type;
+			mat_deform_t deform;
+			memset(&deform, 0, sizeof(deform));
+			Mat_Shader_MarkKeywordSeen ("deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			if (!ParseIdentExpected (&data, &deform_type, state, "deformVertexes mode"))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			if (!q_strcasecmp(deform_type, "wave"))
+			{
+				const char *wt; float spread, base, amp, phase, freq;
+				deform.type = MAT_DEFORM_WAVE;
+				if (!ParseFloat(&data, &spread, state) || !ParseIdentExpected(&data, &wt, state, "deform wave type") || !ParseFloat(&data,&base,state) || !ParseFloat(&data,&amp,state) || !ParseFloat(&data,&phase,state) || !ParseFloat(&data,&freq,state)) { data = ResyncMaterialBlock(data,state); break; }
+				deform.args[0] = spread;
+				if (!ParseWaveType (wt, &deform.wave.type)) deform.wave.type = MAT_WAVE_SIN;
+				deform.wave.base=base; deform.wave.amp=amp; deform.wave.phase=phase; deform.wave.freq=freq;
+			}
+			else if (!q_strcasecmp(deform_type, "move"))
+			{
+				const char *wt; float base, amp, phase, freq;
+				deform.type = MAT_DEFORM_MOVE;
+				if (!ParseFloat(&data, &deform.move[0], state) || !ParseFloat(&data, &deform.move[1], state) || !ParseFloat(&data, &deform.move[2], state) || !ParseIdentExpected(&data, &wt, state, "deform move wave") || !ParseFloat(&data,&base,state) || !ParseFloat(&data,&amp,state) || !ParseFloat(&data,&phase,state) || !ParseFloat(&data,&freq,state)) { data = ResyncMaterialBlock(data,state); break; }
+				if (!ParseWaveType (wt, &deform.wave.type)) deform.wave.type = MAT_WAVE_SIN;
+				deform.wave.base=base; deform.wave.amp=amp; deform.wave.phase=phase; deform.wave.freq=freq;
+			}
+			else if (!q_strcasecmp(deform_type, "bulge"))
+			{
+				deform.type = MAT_DEFORM_BULGE;
+				if (!ParseFloat(&data, &deform.args[0], state) || !ParseFloat(&data, &deform.args[1], state) || !ParseFloat(&data, &deform.args[2], state)) { data = ResyncMaterialBlock(data,state); break; }
+			}
+			else if (!q_strcasecmp(deform_type, "autosprite"))
+			{
+				deform.type = MAT_DEFORM_AUTOSPRITE;
+			}
+			else
+			{
+				Mat_Shader_ReportUnknownToken (deform_type, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, state ? state->source_file : material.source_file, state ? state->token_line : 0u);
+				continue;
+			}
+			VEC_PUSH(material.deforms, deform);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "cull"))

@@ -144,6 +144,7 @@ static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
+cvar_t r_shader_verbose = { "r_shader_verbose", "0", CVAR_ARCHIVE };
 cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
 cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
@@ -188,6 +189,7 @@ static void Mat_Shader_FreeMaterial (shader_material_t *material)
 		}
 	}
 	VEC_FREE (material->stages);
+	VEC_FREE (material->deforms);
 
 	if (material->editor_image)
 		Z_Free (material->editor_image);
@@ -1064,6 +1066,7 @@ void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
+	Cvar_RegisterVariable (&r_shader_verbose);
 	Cvar_RegisterVariable (&r_tcgen_debug);
 	Cvar_RegisterVariable (&r_matshader_debug_parse);
 	Cvar_RegisterVariable (&r_reloadshaders);
@@ -1257,10 +1260,11 @@ void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname)
 	if ((material->render_flags & MAT_RENDER_TRANS) && r_shader_debug.value >= 1.f)
 		Con_DPrintf ("MatShader: surfaceparm trans on %s (TODO: blend path)\n", tex->name);
 
-	if (r_shader_debug.value >= 1.f)
+	if (r_shader_verbose.value >= 1.f)
 	{
 		if (tex->shader_map)
 			Con_Printf ("MatShader: %s overrides %s\n", tex->name, tex->shader_map);
+		Mat_Shader_Print (material);
 	}
 }
 
@@ -1292,6 +1296,10 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
 	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
+	if (material->has_fogparms)
+		Con_Printf ("  fogparms: (%.2f %.2f %.2f) dist %.2f\n", material->fog_color[0], material->fog_color[1], material->fog_color[2], material->fog_distance);
+	if (material->deforms)
+		Con_Printf ("  deformVertexes: %d entry(s)\n", (int)VEC_SIZE(material->deforms));
 	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
 	{
 		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];
@@ -1345,7 +1353,8 @@ void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_
 	else
 		q_snprintf (warn_context, sizeof (warn_context), "shader (%s at %s)", scope_name, warn_location);
 
-	Mat_Shader_WarnOnce (warn_key, token, warn_context);
+	if (r_shader_verbose.value > 0.f)
+		Mat_Shader_WarnOnce (warn_key, token, warn_context);
 	Mat_Shader_RecordUnknownToken (token, scope, context, source_file, line);
 }
 

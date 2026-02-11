@@ -23,6 +23,7 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
+	vec4	texmatrix[3];
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;

@@ -53,6 +53,7 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
+	vec4	texmatrix[3];
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -323,22 +324,17 @@ void main()
         }
 
         int shader_debug = int(ShaderParams.x + 0.5);
-        if (shader_debug >= 2)
+        if (shader_debug == 2)
         {
-                vec3 debug_color = vec3(0.0);
-                if ((in_flags & CF_MAT_BLOOM) != 0u)
-                        debug_color += vec3(1.0, 0.0, 1.0);
-                if ((in_flags & CF_MAT_EMISSIVE) != 0u)
-                        debug_color += vec3(1.0, 1.0, 0.0);
-                if ((in_flags & CF_MAT_GODRAY) != 0u)
-                        debug_color += vec3(0.0, 1.0, 1.0);
-                if ((in_flags & CF_MAT_TRANS) != 0u)
-                        debug_color += vec3(0.0, 1.0, 0.0);
-                if ((in_flags & CF_MAT_SKY) != 0u)
-                        debug_color += vec3(0.0, 0.0, 1.0);
-                if (all(lessThanEqual(debug_color, vec3(0.0))))
-                        debug_color = result.rgb;
-                out_fragcolor = vec4(clamp(debug_color, 0.0, 1.0), 1.0);
+                out_fragcolor = vec4(fract(uv), 0.0, 1.0);
+#if !OIT
+                out_velocity = vec4(0.0);
+#endif
+                return;
+        }
+        if (shader_debug == 3)
+        {
+                out_fragcolor = clamp(in_stage_color, 0.0, 1.0);
 #if !OIT
                 out_velocity = vec4(0.0);
 #endif
@@ -585,6 +581,16 @@ void main()
 	result.rgb *= in_stage_color.rgb;
 	result.a = in_alpha * in_stage_color.a;
 	result = clamp(result, 0.0, 1.0);
+	if (shader_debug == 4)
+	{
+		float fog_factor = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));
+		fog_factor = clamp(fog_factor, 0.0, 1.0);
+		out_fragcolor = vec4(vec3(fog_factor), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 	result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 
 	out_fragcolor = result;
