@@ -112,6 +112,19 @@ typedef struct fogvol_state_cache_s
 	GLint vao;
 } fogvol_state_cache_t;
 
+typedef struct fogvol_restore_state_s
+{
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLint draw_fbo;
+	GLint read_fbo;
+	GLint draw_buffer;
+	GLint read_buffer;
+	GLint program;
+	GLint vao;
+	GLboolean scissor_test;
+} fogvol_restore_state_t;
+
 static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
 
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
@@ -179,6 +192,41 @@ static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
 {
 	glReadBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
+}
+
+static void R_FogVol_LogPipelineState (const char *marker)
+{
+	GLint viewport[4] = {0};
+	GLint scissor_box[4] = {0};
+	GLint draw_fbo = 0, read_fbo = 0;
+	GLint draw_buffer = 0, read_buffer = 0;
+	GLint program = 0;
+	GLboolean scissor_enabled = GL_FALSE;
+
+	if (!R_FogVol_TestDebugEnabled ())
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+
+	Con_Printf (
+		"FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) "
+		"scissor=%d scissor_box=(%d %d %d %d) prog=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
+		marker,
+		draw_fbo,
+		read_fbo,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor_enabled,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		program,
+		(unsigned)draw_buffer,
+		(unsigned)read_buffer);
 }
 
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
@@ -313,33 +361,38 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 }
 
 
-static void R_FogVol_Restore3DRenderState (void)
+static void R_FogVol_CaptureRestoreState (fogvol_restore_state_t *state)
 {
-	GLuint main_fbo = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
+	glGetIntegerv (GL_VIEWPORT, state->viewport);
+	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
+}
 
-	R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, main_fbo);
-	if (main_fbo)
-	{
-		GLenum draw_buffers[1] = {GL_COLOR_ATTACHMENT0};
-		GL_DrawBuffersFunc (1, draw_buffers);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "restore baseline draw=COLOR_ATTACHMENT0");
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "restore baseline read=COLOR_ATTACHMENT0");
-	}
+static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
+{
+	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, state->draw_fbo);
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
+	glDrawBuffer ((GLenum)state->draw_buffer);
+	glReadBuffer ((GLenum)state->read_buffer);
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	if (state->scissor_test)
+		GL_SetScissorEnabled (true);
 	else
-	{
-		R_FogVol_SetDrawBufferDebug (GL_BACK, "restore baseline draw=BACK");
-		R_FogVol_SetReadBufferDebug (GL_BACK, "restore baseline read=BACK");
-	}
+		GL_SetScissorEnabled (false);
+	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
+	R_FogVol_UseProgram ((GLuint)state->program);
+	R_FogVol_BindVertexArray ((GLuint)state->vao);
 
-	glViewport (glx, gly, glwidth, glheight);
-	GL_SetScissorEnabled (false);
-	glScissor (glx, gly, glwidth, glheight);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	R_FogVol_UseProgram (0);
-	R_FogVol_BindVertexArray (0);
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -820,6 +873,7 @@ void R_FogVol_Render (void)
 	GLuint final_tex = 0;
 	qboolean use_test_guard;
 	qboolean dumpstate_always;
+	fogvol_restore_state_t restore_state;
 
 	if (r_fogvol.value <= 0.f)
 		return;
@@ -842,6 +896,9 @@ void R_FogVol_Render (void)
 	}
 
 	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
+	if (use_test_guard)
+		R_FogVol_CaptureRestoreState (&restore_state);
+	R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
 
@@ -1092,9 +1149,10 @@ void R_FogVol_Render (void)
 		R_DebugFlushGeometry ();
 
 done:
+	R_FogVol_LogPipelineState ("FOGVOL_END");
 	if (use_test_guard)
 	{
-		R_FogVol_Restore3DRenderState ();
+		R_FogVol_Restore3DRenderState (&restore_state);
 		if (dumpstate_always)
 		{
 			fogvol_test_state_t restored_state;
@@ -1104,6 +1162,12 @@ done:
 	}
 
 	GL_EndGroup ();
+}
+
+
+void R_FogVol_LogEndFrameState (void)
+{
+	R_FogVol_LogPipelineState ("END_FRAME");
 }
 
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
