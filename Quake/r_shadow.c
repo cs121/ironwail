@@ -327,9 +327,9 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	if (!shdlog.active)
 		return;
 	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_tex);
-	glActiveTexture (texunit);
+	GL_ActiveTextureFunc (texunit);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
-	glActiveTexture (active_tex);
+	GL_ActiveTextureFunc (active_tex);
 	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
