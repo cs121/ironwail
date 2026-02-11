@@ -33,6 +33,8 @@ extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
 extern cvar_t r_shadow_bias_mdl;
 extern cvar_t r_shadow_normalbias_mdl;
+extern cvar_t r_shadows;
+extern cvar_t r_shadow_sun;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_twosided_mdl;

@@ -39,6 +39,13 @@ extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_mode;
 
+extern cvar_t r_shadows;
+extern cvar_t r_shadow_sun;
+extern cvar_t r_shadow_bias;
+extern cvar_t r_shadow_normalbias;
+extern cvar_t r_shadow_pcf;
+extern cvar_t r_shadow_pcf_taps;
+
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
 extern GLuint gl_bmodel_ibo;
