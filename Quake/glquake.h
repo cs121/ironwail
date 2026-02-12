@@ -606,6 +606,9 @@ typedef struct glprogs_s {
 	GLuint		fogvol;
 	GLuint		fogvol_upsample;
 	GLuint		fogvol_temporal;
+	GLuint		atmos_froxel_build;
+	GLuint		atmos_froxel_integrate;
+	GLuint		atmos_froxel_temporal;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
@@ -680,8 +683,19 @@ typedef struct glframebufs_s {
 		GLuint		finalcopy_tex;
 		GLuint		finalcopy_fbo;
 		int			width;
-		int			height;
+	int			height;
 	}				fogvol;
+
+	struct {
+		GLuint		scatter_tex;
+		GLuint		transmittance_tex;
+		GLuint		scatter_history_tex[2];
+		GLuint		scatter_resolved_tex;
+		int			width;
+		int			height;
+		int			depth;
+		int			history_index;
+	}				atmos_froxel;
 
 	struct {
 		GLuint		extract_tex;

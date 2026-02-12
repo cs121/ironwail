@@ -96,6 +96,7 @@ typedef struct atmosphere_runtime_s
 	atmosphere_settings_t settings;
 	qboolean settings_valid;
 	qboolean fog_enabled_for_scene;
+	qboolean froxel_enabled;
 	GLuint godrays_texture;
 	GLuint godrays_mask;
 	GLuint godrays_source;
@@ -489,6 +490,10 @@ cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
 cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_atmos_log = { "r_atmos_log", "0", CVAR_NONE };
+cvar_t	r_atmos_froxel = { "r_atmos_froxel", "0", CVAR_ARCHIVE };
+cvar_t	r_atmos_froxel_res = { "r_atmos_froxel_res", "1", CVAR_ARCHIVE };
+cvar_t	r_atmos_zslices = { "r_atmos_zslices", "64", CVAR_ARCHIVE };
+cvar_t	r_atmos_historyweight = { "r_atmos_historyweight", "0.9", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
@@ -870,6 +875,58 @@ void GL_CreateFrameBuffers (void)
 		framebufs.fogvol.height, GL_NEAREST, "fogvol finalcopy");
 	framebufs.fogvol.finalcopy_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.finalcopy_tex, 0, 0, "fogvol finalcopy fbo");
 
+	{
+		int froxel_res = CLAMP (0, (int)Q_rint (r_atmos_froxel_res.value), 3);
+		int downsample = (froxel_res <= 0) ? 4 : (froxel_res == 1 ? 2 : (froxel_res == 2 ? 1 : 1));
+		int zslices = CLAMP (8, (int)Q_rint (r_atmos_zslices.value), 128);
+		framebufs.atmos_froxel.width = q_max (1, (vid.width + downsample - 1) / downsample);
+		framebufs.atmos_froxel.height = q_max (1, (vid.height + downsample - 1) / downsample);
+		framebufs.atmos_froxel.depth = zslices;
+		framebufs.atmos_froxel.history_index = 0;
+		glGenTextures (1, &framebufs.atmos_froxel.scatter_tex);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_tex);
+		GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.scatter_tex, -1, "atmos froxel scatter");
+		GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_RGBA16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+		glGenTextures (1, &framebufs.atmos_froxel.transmittance_tex);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.transmittance_tex);
+		GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.transmittance_tex, -1, "atmos froxel transmittance");
+		GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_R16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+		for (int i = 0; i < 2; ++i)
+		{
+			glGenTextures (1, &framebufs.atmos_froxel.scatter_history_tex[i]);
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_history_tex[i]);
+			GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.scatter_history_tex[i], -1, i == 0 ? "atmos froxel history 0" : "atmos froxel history 1");
+			GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_RGBA16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+			glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		}
+
+		glGenTextures (1, &framebufs.atmos_froxel.scatter_resolved_tex);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_resolved_tex);
+		GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.scatter_resolved_tex, -1, "atmos froxel resolved");
+		GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_RGBA16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	}
+
 	framebufs.autoexposure.width = 16;
 	framebufs.autoexposure.height = 16;
 	framebufs.autoexposure.tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.autoexposure.width, framebufs.autoexposure.height,
@@ -1047,6 +1104,11 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[0]);
 	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[1]);
 	GL_DeleteNativeTexture (framebufs.fogvol.finalcopy_tex);
+	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_tex);
+	GL_DeleteNativeTexture (framebufs.atmos_froxel.transmittance_tex);
+	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_history_tex[0]);
+	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_history_tex[1]);
+	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_resolved_tex);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
@@ -2283,7 +2345,86 @@ static float GL_UpdateAutoExposure (void)
 
 static atmosphere_settings_t Atmosphere_ReadSettings (void);
 static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage);
-static void R_Atmosphere_Render (qboolean after_scene);
+
+static float Atmosphere_Halton (int index, int base)
+{
+	float f = 1.f;
+	float r = 0.f;
+	while (index > 0)
+	{
+		f /= (float)base;
+		r += f * (float)(index % base);
+		index /= base;
+	}
+	return r;
+}
+
+static void Atmosphere_Froxel_InitResources (void) { (void)0; }
+
+static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings, vec2_t jitter)
+{
+	int gx, gy, gz;
+	if (!settings || !glprogs.atmos_froxel_build)
+		return;
+	gx = (framebufs.atmos_froxel.width + 3) / 4;
+	gy = (framebufs.atmos_froxel.height + 3) / 4;
+	gz = (framebufs.atmos_froxel.depth + 3) / 4;
+	GL_BeginGroup ("Atmosphere: Froxel Build");
+	GL_UseProgram (glprogs.atmos_froxel_build);
+	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R16F);
+	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
+	GL_Uniform4fFunc (1, settings->density, q_max (0.01f, r_godrays_density.value), CLAMP (0.f, r_godrays_sky_intensity.value, 8.f), q_max (0.f, r_godrays_weight.value));
+	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], CLAMP (0.f, r_godrays_exposure.value, 8.f));
+	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
+	GL_DispatchComputeFunc (gx, gy, gz);
+	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_EndGroup ();
+}
+
+static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *settings)
+{
+	int gx, gy, gz;
+	if (!settings || !glprogs.atmos_froxel_integrate)
+		return;
+	gx = (framebufs.atmos_froxel.width + 3) / 4;
+	gy = (framebufs.atmos_froxel.height + 3) / 4;
+	gz = (framebufs.atmos_froxel.depth + 3) / 4;
+	GL_BeginGroup ("Atmosphere: Froxel LightIntegrate");
+	GL_UseProgram (glprogs.atmos_froxel_integrate);
+	R_Shadow_BindShadowMap (GL_TEXTURE6);
+	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
+	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R16F);
+	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
+	GL_Uniform4fFunc (1, q_max (0.f, settings->anisotropy), CLAMP (0.f, r_godrays_exposure.value, 8.f), settings->shadow_enable ? 1.f : 0.f, 0.f);
+	GL_DispatchComputeFunc (gx, gy, gz);
+	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_EndGroup ();
+}
+
+static void Atmosphere_Froxel_TemporalResolve (const atmosphere_settings_t *settings)
+{
+	int gx, gy, gz;
+	int src = framebufs.atmos_froxel.history_index;
+	int dst = 1 - src;
+	if (!settings || !glprogs.atmos_froxel_temporal)
+		return;
+	gx = (framebufs.atmos_froxel.width + 3) / 4;
+	gy = (framebufs.atmos_froxel.height + 3) / 4;
+	gz = (framebufs.atmos_froxel.depth + 3) / 4;
+	GL_BeginGroup ("Atmosphere: Froxel Temporal");
+	GL_UseProgram (glprogs.atmos_froxel_temporal);
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_history_tex[src]);
+	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_ONLY, GL_RGBA16F);
+	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.scatter_resolved_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+	GL_BindImageTextureFunc (2, framebufs.atmos_froxel.scatter_history_tex[dst], 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
+	GL_Uniform4fFunc (1, CLAMP (0.f, r_atmos_historyweight.value, 0.99f), r_prev_frame_valid ? 1.f : 0.f, settings->history_weight, 0.f);
+	GL_DispatchComputeFunc (gx, gy, gz);
+	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	framebufs.atmos_froxel.history_index = dst;
+	GL_EndGroup ();
+}
 
 static atmosphere_settings_t Atmosphere_ReadSettings (void)
 {
@@ -2294,28 +2435,13 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	settings.mode = (int)Q_rint (CLAMP (0.f, r_atmos_mode.value, 1.f));
 	settings.enabled_fog = (fog_density > 0.f);
 	settings.enabled_shafts = (r_godrays.value > 0.f && R_GodraysReady ());
-	settings.enabled_volumetrics = (r_fogvol.value > 0.f);
+	settings.enabled_volumetrics = (r_atmos_froxel.value > 0.f || r_fogvol.value > 0.f);
 	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
 	settings.density = fog_density;
 	settings.anisotropy = q_max (0.f, r_godrays_weight.value);
 	settings.steps = q_max (1.f, r_godrays_samples.value);
-	settings.history_weight = CLAMP (0.f, r_godrays_stabilize_strength.value, 1.f);
+	settings.history_weight = CLAMP (0.f, (r_atmos_historyweight.value > 0.f ? r_atmos_historyweight.value : r_godrays_stabilize_strength.value), 1.f);
 	settings.debug_mode = CLAMP (0.f, r_atmos_debug.value, 6.f);
-
-	if (settings.debug_mode <= 0.f)
-	{
-		if (r_godrays_debug_source.value > 0.f)
-			settings.debug_mode = 3.f;
-		else if (r_godrays_debug.value > 0.f)
-			settings.debug_mode = 4.f;
-	}
-
-	if (settings.mode == 0)
-	{
-		settings.enabled_shafts = (r_godrays.value > 0.f && R_GodraysReady ());
-		settings.enabled_volumetrics = (r_fogvol.value > 0.f);
-	}
-
 	return settings;
 }
 
@@ -2323,26 +2449,22 @@ static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, con
 {
 	if (r_atmos_log.value <= 0.f || !settings)
 		return;
-	if (r_atmosphere.logged_frame == r_framecount && stage && !strcmp (stage, "final"))
-		return;
-
-	Con_Printf ("atmos[%s] mode=%d fog=%d shafts=%d vol=%d shadow=%d density=%.5f anisotropy=%.5f steps=%.1f history=%.3f debug=%.0f\n",
+	Con_Printf ("atmos[%s] mode=%d fog=%d shafts=%d vol=%d froxel=%d shadow=%d density=%.5f anisotropy=%.5f steps=%.1f history=%.3f debug=%.0f\n",
 		stage ? stage : "?",
 		settings->mode,
 		settings->enabled_fog ? 1 : 0,
 		settings->enabled_shafts ? 1 : 0,
 		settings->enabled_volumetrics ? 1 : 0,
+		r_atmosphere.froxel_enabled ? 1 : 0,
 		settings->shadow_enable ? 1 : 0,
 		settings->density,
 		settings->anisotropy,
 		settings->steps,
 		settings->history_weight,
 		settings->debug_mode);
-
-	if (stage && !strcmp (stage, "final"))
-		r_atmosphere.logged_frame = r_framecount;
+	if (r_atmosphere.froxel_enabled)
+		Con_Printf ("atmos[froxel] dims=%dx%dx%d formats=scatter:RGBA16F trans:R16F\n", framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
 }
-
 static void R_Atmosphere_Render (qboolean after_scene)
 {
 	if (!after_scene)
@@ -2354,6 +2476,7 @@ static void R_Atmosphere_Render (qboolean after_scene)
 		r_atmosphere.godrays_source = 0;
 		r_atmosphere.godrays_ready = false;
 		r_atmosphere.fog_enabled_for_scene = false;
+		r_atmosphere.froxel_enabled = (r_atmosphere.settings.enabled_volumetrics && r_atmos_froxel.value > 0.f);
 
 		if (r_atmosphere.settings.enabled_fog)
 		{
@@ -2373,8 +2496,23 @@ static void R_Atmosphere_Render (qboolean after_scene)
 
 	if (r_atmosphere.settings.enabled_volumetrics)
 	{
-		R_FogVol_BuildList ();
-		R_FogVol_Render ();
+		if (r_atmos_froxel.value > 0.f)
+		{
+			vec2_t jitter;
+			Atmosphere_Froxel_InitResources ();
+			jitter[0] = Atmosphere_Halton (r_framecount & 1023, 2) - 0.5f;
+			jitter[1] = Atmosphere_Halton (r_framecount & 1023, 3) - 0.5f;
+			Atmosphere_Froxel_BuildVolume (&r_atmosphere.settings, jitter);
+			Atmosphere_Froxel_LightIntegrate (&r_atmosphere.settings);
+			Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
+			/* Froxel path owns shafts via anisotropic phase; avoid duplicate radial blur path. */
+			r_atmosphere.settings.enabled_shafts = false;
+		}
+		else
+		{
+			R_FogVol_BuildList ();
+			R_FogVol_Render ();
+		}
 	}
 
 	if (r_atmosphere.settings.enabled_shafts || r_atmosphere.settings.debug_mode == 3.f || r_atmosphere.settings.debug_mode == 4.f)
@@ -2645,6 +2783,8 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_resolved_tex);
+	GL_BindNative (GL_TEXTURE11, GL_TEXTURE_3D, framebufs.atmos_froxel.transmittance_tex);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
@@ -2685,6 +2825,16 @@ void GL_PostProcess (void)
 		float black_lift_strength = q_max (0.f, r_tonemap_black_lift_strength.value);
 		GL_Uniform4fFunc (27, black_lift, black_lift_strength, 0.f, 0.f);
 	}
+	GL_Uniform4fFunc (28,
+		r_atmosphere.froxel_enabled ? 1.f : 0.f,
+		(float)framebufs.atmos_froxel.width,
+		(float)framebufs.atmos_froxel.height,
+		(float)framebufs.atmos_froxel.depth);
+	GL_Uniform4fFunc (29,
+		(float)q_max (1, (int)Q_rint (r_atmos_froxel_res.value)),
+		(float)framebufs.atmos_froxel.depth,
+		q_max (view_zfar, 1.f),
+		0.f);
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);

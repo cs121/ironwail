@@ -531,6 +531,9 @@ void GL_CreateShaders (void)
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
 	glprogs.fogvol_upsample = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_upsample.frag"), "fog volumes upsample");
 	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
+	glprogs.atmos_froxel_build = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_build.comp"), "atmos froxel build");
+	glprogs.atmos_froxel_integrate = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_integrate.comp"), "atmos froxel integrate");
+	glprogs.atmos_froxel_temporal = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_temporal.comp"), "atmos froxel temporal");
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 

@@ -8,6 +8,8 @@ layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
+layout(binding=10) uniform sampler3D AtmosFroxelScatter;
+layout(binding=11) uniform sampler3D AtmosFroxelTransmittance;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -153,6 +155,8 @@ layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
+layout(location=28) uniform vec4 AtmosFroxelParams0; // x: enabled, yzw: dimensions
+layout(location=29) uniform vec4 AtmosFroxelParams1; // x: downsample, y: z slices, z: z far, w: reserved
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -760,7 +764,17 @@ void main()
         vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
         combined = max(combined, vec3(0.0));
         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
-        if (fogStrength > 0.0 && depthInfo.valid)
+        if (AtmosFroxelParams0.x > 0.5 && depthInfo.valid)
+        {
+                float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
+                float zFar = max(AtmosFroxelParams1.z, 1.0);
+                float zNorm = clamp(log2(depth + 1.0) / log2(zFar + 1.0), 0.0, 1.0);
+                vec3 froxelUVW = vec3(uv, zNorm);
+                vec3 froxelScatter = texture(AtmosFroxelScatter, froxelUVW).rgb;
+                float froxelTransmittance = texture(AtmosFroxelTransmittance, froxelUVW).r;
+                combined = combined * clamp(froxelTransmittance, 0.0, 1.0) + froxelScatter;
+        }
+        else if (fogStrength > 0.0 && depthInfo.valid)
         {
                 float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
                 float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
