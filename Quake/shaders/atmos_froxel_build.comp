@@ -1,0 +1,51 @@
+#version 430
+layout(local_size_x=4, local_size_y=4, local_size_z=4) in;
+layout(rgba16f, binding=0) uniform image3D OutScatter;
+layout(r16f, binding=1) uniform image3D OutTransmittance;
+#include "frame_uniforms.glsl"
+
+layout(location=0) uniform vec4 FroxelDims;
+layout(location=1) uniform vec4 MediumParams0; // x density, y falloff, z albedo, w emissive
+layout(location=2) uniform vec4 MediumParams1; // rgb color, w intensity
+layout(location=3) uniform vec4 Jitter;
+
+float Atmosphere_Froxel_ZToViewDepth(float z)
+{
+    float zn = clamp((z + 0.5) / max(FroxelDims.z, 1.0), 0.0, 1.0);
+    float zfar = max(ShadowDebug.w, 2048.0);
+    return exp2(zn * log2(zfar + 1.0)) - 1.0;
+}
+
+vec3 Atmosphere_Froxel_InvProjRay(vec2 uv)
+{
+    vec2 ndc = uv * 2.0 - 1.0;
+    return normalize(vec3(ndc, 1.0));
+}
+
+void Atmosphere_EvalMedium(vec3 worldPos, vec3 viewPos, out float sigma_t, out vec3 sigma_s)
+{
+    float h = max(0.0, worldPos.z);
+    float density = MediumParams0.x * exp(-MediumParams0.y * h);
+    sigma_t = max(density, 0.0);
+    sigma_s = sigma_t * MediumParams1.rgb * MediumParams0.z;
+}
+
+void main()
+{
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+    if (any(greaterThanEqual(coord, ivec3(FroxelDims.xyz))))
+        return;
+
+    vec2 uv = (vec2(coord.xy) + vec2(0.5) + Jitter.xy) / max(FroxelDims.xy, vec2(1.0));
+    float viewDepth = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
+    vec3 ray = Atmosphere_Froxel_InvProjRay(uv);
+    vec3 viewPos = ray * viewDepth;
+    vec3 worldPos = EyePos + viewPos;
+
+    float sigma_t;
+    vec3 sigma_s;
+    Atmosphere_EvalMedium(worldPos, viewPos, sigma_t, sigma_s);
+
+    imageStore(OutScatter, coord, vec4(sigma_s, sigma_t));
+    imageStore(OutTransmittance, coord, vec4(exp(-sigma_t), 0.0, 0.0, 0.0));
+}
