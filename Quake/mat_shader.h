@@ -163,7 +163,8 @@ typedef enum
 {
 	MAT_TCGEN_BASE = 0,
 	MAT_TCGEN_ENVIRONMENT,
-	MAT_TCGEN_LIGHTMAP
+	MAT_TCGEN_LIGHTMAP,
+	MAT_TCGEN_VECTOR
 } mat_tcgen_t;
 
 typedef enum
@@ -173,14 +174,23 @@ typedef enum
 	MAT_TCMOD_SCALE,
 	MAT_TCMOD_ROTATE,
 	MAT_TCMOD_TURB,
-	MAT_TCMOD_STRETCH
+	MAT_TCMOD_STRETCH,
+	MAT_TCMOD_TRANSFORM
 } mat_tcmod_type_t;
 
 typedef struct mat_tcmod_s
 {
 	mat_tcmod_type_t type;
-	float args[4];
+	float args[6];
 } mat_tcmod_t;
+
+typedef enum
+{
+	MAT_ALPHAFUNC_NONE = 0,
+	MAT_ALPHAFUNC_GT0,
+	MAT_ALPHAFUNC_LT128,
+	MAT_ALPHAFUNC_GE128
+} mat_alphafunc_t;
 
 typedef struct mat_texmatrix_s
 {
@@ -228,6 +238,10 @@ typedef struct mat_shader_stage_s
 	mat_depthfunc_t		depth_func;
 	mat_map_type_t		map_type;
 	mat_tcgen_t		tcgen;
+	vec3_t			tcgen_vec0;
+	vec3_t			tcgen_vec1;
+	qboolean		tcgen_is_vector;
+	mat_alphafunc_t		alpha_func;
 	int			tcmod_count;
 	mat_tcmod_t		tcmods[4];
 	float			anim_map_fps;

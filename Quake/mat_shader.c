@@ -117,10 +117,10 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: identity/vertex/const/wave." },
 	{ "blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports add/filter/blend/premult or explicit factors." },
 	{ "depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
-	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: lequal/equal/always." },
-	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test." },
-	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap." },
-	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
+	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Modes: lequal/less/equal/greater/gequal/always/never." },
+	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Modes: GT0/LT128/GE128." },
+	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap/vector." },
+	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch/transform." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom toggle." },
 	{ "godray", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray toggle." },
@@ -1458,6 +1458,18 @@ const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float 
 			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
 			break;
 		}
+		case MAT_TCMOD_TRANSFORM:
+			tmp.m[0][0] = mod->args[0];
+			tmp.m[0][1] = mod->args[2];
+			tmp.m[0][2] = mod->args[4];
+			tmp.m[1][0] = mod->args[1];
+			tmp.m[1][1] = mod->args[3];
+			tmp.m[1][2] = mod->args[5];
+			tmp.m[2][0] = 0.f;
+			tmp.m[2][1] = 0.f;
+			tmp.m[2][2] = 1.f;
+			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
+			break;
 		default:
 			break;
 		}

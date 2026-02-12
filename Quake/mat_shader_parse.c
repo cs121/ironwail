@@ -416,6 +416,17 @@ static qboolean ParseVec2 (const char **data, vec2_t out, mat_shader_parse_state
 	return true;
 }
 
+static qboolean ParseVec3 (const char **data, vec3_t out, mat_shader_parse_state_t *state)
+{
+	if (!ParseFloat (data, &out[0], state))
+		return false;
+	if (!ParseFloat (data, &out[1], state))
+		return false;
+	if (!ParseFloat (data, &out[2], state))
+		return false;
+	return true;
+}
+
 static qboolean ParseVec4 (const char **data, vec4_t out, mat_shader_parse_state_t *state)
 {
 	if (!ParseFloat (data, &out[0], state))
@@ -547,6 +558,11 @@ static qboolean Mat_Shader_ParseTcGen (const char *token, mat_tcgen_t *out)
 	if (!q_strcasecmp (token, "lightmap"))
 	{
 		*out = MAT_TCGEN_LIGHTMAP;
+		return true;
+	}
+	if (!q_strcasecmp (token, "vector"))
+	{
+		*out = MAT_TCGEN_VECTOR;
 		return true;
 	}
 	return false;
@@ -917,6 +933,10 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	stage.blend_src = GL_ONE;
 	stage.blend_dst = GL_ZERO;
 	stage.tcgen = MAT_TCGEN_BASE;
+	stage.alpha_func = MAT_ALPHAFUNC_NONE;
+	VectorClear (stage.tcgen_vec0);
+	VectorClear (stage.tcgen_vec1);
+	stage.tcgen_is_vector = false;
 	stage.anim_map_fps = 0.f;
 	stage.anim_map_frame = 0;
 	stage.texmatrix_time_bucket = -1;
@@ -1329,6 +1349,29 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				state ? state->token_line : 0u);
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "alphaFunc"))
+		{
+			Mat_Shader_MarkKeywordSeen ("alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "alphaFunc mode"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			if (!q_strcasecmp (value, "GT0"))
+				stage.alpha_func = MAT_ALPHAFUNC_GT0;
+			else if (!q_strcasecmp (value, "LT128"))
+				stage.alpha_func = MAT_ALPHAFUNC_LT128;
+			else if (!q_strcasecmp (value, "GE128"))
+				stage.alpha_func = MAT_ALPHAFUNC_GE128;
+			else if (!q_strcasecmp (value, "none"))
+				stage.alpha_func = MAT_ALPHAFUNC_NONE;
+			else
+				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
+					state ? state->source_file : material->source_file,
+					state ? state->token_line : 0u);
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "tcGen"))
 		{
 			Mat_Shader_MarkKeywordSeen ("tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1339,9 +1382,31 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				break;
 			}
 			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
+			{
 				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 					state ? state->source_file : material->source_file,
 					state ? state->token_line : 0u);
+				continue;
+			}
+			if (stage.tcgen == MAT_TCGEN_VECTOR)
+			{
+				if (!ExpectToken (&data, "(", state)
+					|| !ParseVec3 (&data, stage.tcgen_vec0, state)
+					|| !ExpectToken (&data, ")", state)
+					|| !ExpectToken (&data, "(", state)
+					|| !ParseVec3 (&data, stage.tcgen_vec1, state)
+					|| !ExpectToken (&data, ")", state))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+				stage.tcgen_is_vector = true;
+			}
+			else
+			{
+				stage.tcgen_is_vector = false;
+			}
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcMod"))
@@ -1421,6 +1486,25 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				}
 				Mat_Shader_ValidateTcModArgs (state, "tcMod stretch", stretch, stretch_defaults, 4);
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
+				continue;
+			}
+			if (!q_strcasecmp (value, "transform"))
+			{
+				float transform[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
+				const float transform_defaults[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
+				if (!ParseFloat (&data, &transform[0], state)
+					|| !ParseFloat (&data, &transform[1], state)
+					|| !ParseFloat (&data, &transform[2], state)
+					|| !ParseFloat (&data, &transform[3], state)
+					|| !ParseFloat (&data, &transform[4], state)
+					|| !ParseFloat (&data, &transform[5], state))
+				{
+					valid = false;
+					data = SkipUnknownBlockOrLine (data, true, state);
+					break;
+				}
+				Mat_Shader_ValidateTcModArgs (state, "tcMod transform", transform, transform_defaults, 6);
+				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TRANSFORM, transform, 6);
 				continue;
 			}
 			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
