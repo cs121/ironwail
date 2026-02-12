@@ -953,6 +953,8 @@ static tcgen_mode_t R_ResolveStageTcGen (const mat_shader_stage_t *stage)
 		return TCGEN_ENVIRONMENT;
 	case MAT_TCGEN_LIGHTMAP:
 		return TCGEN_LIGHTMAP;
+	case MAT_TCGEN_VECTOR:
+		return TCGEN_BASE;
 	case MAT_TCGEN_BASE:
 	default:
 		break;
@@ -1182,7 +1184,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				uses_lightmap = R_StageUsesLightmap (stage, stage_index);
 				if (!uses_lightmap)
 					extra_flags |= CALLFLAG_NOLIGHTMAP;
-				if (t->type == TEXTYPE_CUTOUT)
+				if (t->type == TEXTYPE_CUTOUT || stage->alpha_func != MAT_ALPHAFUNC_NONE)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
 
 				stage_state = GLS_ATTRIBS (6) | R_MapBlendMode (stage) | R_MapCullMode (material->cull_mode);
@@ -1385,7 +1387,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
 					continue;
 
-				if (t->type == TEXTYPE_CUTOUT)
+				if (t->type == TEXTYPE_CUTOUT || stage->alpha_func != MAT_ALPHAFUNC_NONE)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
 
 				{
