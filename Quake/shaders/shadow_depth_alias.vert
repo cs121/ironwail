@@ -4,6 +4,7 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	AmbientColor; // xyz=AmbientColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -21,6 +22,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
+	vec4	RimParams0;
+	vec4	RimParams1;
+	vec4	RimParams2;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;

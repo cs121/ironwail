@@ -4,6 +4,7 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	AmbientColor; // xyz=AmbientColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -21,6 +22,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
+	vec4	RimParams0;
+	vec4	RimParams1;
+	vec4	RimParams2;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
@@ -96,8 +100,10 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
+layout(location=7) out vec3 out_static_light;
+layout(location=8) out vec3 out_dyn_light;
+layout(location=9) out vec3 out_amb_light;
 
-const int ALIAS_FLAG_VIEWMODEL = 2;
 
 void main()
 {
@@ -127,14 +133,15 @@ void main()
         vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
         mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
         vec3 world_normal = normalize(world_orientation * blended_normal);
-        vec3 view_dir = normalize(-out_pos);
-        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
-        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
+        vec3 ambient = max(inst.AmbientColor.rgb, vec3(0.0));
+        float static_mix = mix(0.35, 1.0, lighting) * Overbright;
+        vec3 litAmbient = ambient * 0.35 * Overbright;
+        vec3 litStatic = ambient * max(static_mix - (0.35 * Overbright), 0.0);
         vec3 litDlight = inst.DLightColor.rgb * lighting;
-        vec3 base_color = litAmbient + litDlight;
-        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
-        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
+        vec3 base_color = litAmbient + litStatic + litDlight;
+        out_color = clamp(vec4(base_color, inst.LightColor.a), 0.0, Overbright);
 	out_normal = world_normal;
+	out_static_light = litStatic;
+	out_dyn_light = litDlight;
+	out_amb_light = litAmbient;
 }
