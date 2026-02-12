@@ -77,6 +77,34 @@ typedef struct godrays_stabilization_s
 
 static godrays_stabilization_t r_godrays_stabilization;
 
+typedef struct atmosphere_settings_s
+{
+	int mode;
+	qboolean enabled_fog;
+	qboolean enabled_shafts;
+	qboolean enabled_volumetrics;
+	qboolean shadow_enable;
+	float density;
+	float anisotropy;
+	float steps;
+	float history_weight;
+	float debug_mode;
+} atmosphere_settings_t;
+
+typedef struct atmosphere_runtime_s
+{
+	atmosphere_settings_t settings;
+	qboolean settings_valid;
+	qboolean fog_enabled_for_scene;
+	GLuint godrays_texture;
+	GLuint godrays_mask;
+	GLuint godrays_source;
+	qboolean godrays_ready;
+	int logged_frame;
+} atmosphere_runtime_t;
+
+static atmosphere_runtime_t r_atmosphere;
+
 typedef struct framesetup_s
 {
         GLuint          scene_fbo;
@@ -458,6 +486,9 @@ cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
+cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
+cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_atmos_log = { "r_atmos_log", "0", CVAR_NONE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
@@ -2250,6 +2281,115 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
+static atmosphere_settings_t Atmosphere_ReadSettings (void);
+static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage);
+static void R_Atmosphere_Render (qboolean after_scene);
+
+static atmosphere_settings_t Atmosphere_ReadSettings (void)
+{
+	atmosphere_settings_t settings;
+	float fog_density = fabsf (Fog_GetDensity ());
+
+	memset (&settings, 0, sizeof (settings));
+	settings.mode = (int)Q_rint (CLAMP (0.f, r_atmos_mode.value, 1.f));
+	settings.enabled_fog = (fog_density > 0.f);
+	settings.enabled_shafts = (r_godrays.value > 0.f && R_GodraysReady ());
+	settings.enabled_volumetrics = (r_fogvol.value > 0.f);
+	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
+	settings.density = fog_density;
+	settings.anisotropy = q_max (0.f, r_godrays_weight.value);
+	settings.steps = q_max (1.f, r_godrays_samples.value);
+	settings.history_weight = CLAMP (0.f, r_godrays_stabilize_strength.value, 1.f);
+	settings.debug_mode = CLAMP (0.f, r_atmos_debug.value, 6.f);
+
+	if (settings.debug_mode <= 0.f)
+	{
+		if (r_godrays_debug_source.value > 0.f)
+			settings.debug_mode = 3.f;
+		else if (r_godrays_debug.value > 0.f)
+			settings.debug_mode = 4.f;
+	}
+
+	if (settings.mode == 0)
+	{
+		settings.enabled_shafts = (r_godrays.value > 0.f && R_GodraysReady ());
+		settings.enabled_volumetrics = (r_fogvol.value > 0.f);
+	}
+
+	return settings;
+}
+
+static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage)
+{
+	if (r_atmos_log.value <= 0.f || !settings)
+		return;
+	if (r_atmosphere.logged_frame == r_framecount && stage && !strcmp (stage, "final"))
+		return;
+
+	Con_Printf ("atmos[%s] mode=%d fog=%d shafts=%d vol=%d shadow=%d density=%.5f anisotropy=%.5f steps=%.1f history=%.3f debug=%.0f\n",
+		stage ? stage : "?",
+		settings->mode,
+		settings->enabled_fog ? 1 : 0,
+		settings->enabled_shafts ? 1 : 0,
+		settings->enabled_volumetrics ? 1 : 0,
+		settings->shadow_enable ? 1 : 0,
+		settings->density,
+		settings->anisotropy,
+		settings->steps,
+		settings->history_weight,
+		settings->debug_mode);
+
+	if (stage && !strcmp (stage, "final"))
+		r_atmosphere.logged_frame = r_framecount;
+}
+
+static void R_Atmosphere_Render (qboolean after_scene)
+{
+	if (!after_scene)
+	{
+		r_atmosphere.settings = Atmosphere_ReadSettings ();
+		r_atmosphere.settings_valid = true;
+		r_atmosphere.godrays_texture = 0;
+		r_atmosphere.godrays_mask = 0;
+		r_atmosphere.godrays_source = 0;
+		r_atmosphere.godrays_ready = false;
+		r_atmosphere.fog_enabled_for_scene = false;
+
+		if (r_atmosphere.settings.enabled_fog)
+		{
+			Fog_EnableGFog ();
+			r_atmosphere.fog_enabled_for_scene = true;
+		}
+		else
+		{
+			Fog_DisableGFog ();
+		}
+		R_Atmosphere_LogSettings (&r_atmosphere.settings, "begin");
+		return;
+	}
+
+	if (!r_atmosphere.settings_valid)
+		r_atmosphere.settings = Atmosphere_ReadSettings ();
+
+	if (r_atmosphere.settings.enabled_volumetrics)
+	{
+		R_FogVol_BuildList ();
+		R_FogVol_Render ();
+	}
+
+	if (r_atmosphere.settings.enabled_shafts || r_atmosphere.settings.debug_mode == 3.f || r_atmosphere.settings.debug_mode == 4.f)
+	{
+		r_atmosphere.godrays_texture = GL_GenerateGodraysTexture (&r_atmosphere.godrays_mask);
+		r_atmosphere.godrays_source = framebufs.godrays.source_tex;
+		r_atmosphere.godrays_ready = (r_atmosphere.godrays_texture != 0 || r_atmosphere.settings.debug_mode == 3.f || r_atmosphere.settings.debug_mode == 4.f);
+	}
+
+	if (r_atmosphere.fog_enabled_for_scene)
+		Fog_DisableGFog ();
+
+	R_Atmosphere_LogSettings (&r_atmosphere.settings, "final");
+}
+
 void GL_PostProcess (void)
 {
 	int palidx, variant;
@@ -2405,24 +2545,21 @@ void GL_PostProcess (void)
 		postfx_lut_strength = 0.f;
 	}
 
-	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
-	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
-	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	if (!r_atmosphere.settings_valid)
+		r_atmosphere.settings = Atmosphere_ReadSettings ();
+	godrays_enabled = (r_atmosphere.settings.enabled_shafts && r_atmosphere.godrays_texture != 0);
+	godrays_debug = (r_atmosphere.settings.debug_mode == 4.f) ? 1.f : 0.f;
+	godrays_debug_source = (r_atmosphere.settings.debug_mode == 3.f) ? 1.f : 0.f;
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
-	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_GodraysReady ()));
+	godrays_preview = (godrays_enabled || godrays_debug_enabled) && r_atmosphere.godrays_ready;
 	if (!godrays_preview)
 	{
 		godrays_debug = 0.f;
 		godrays_debug_source = 0.f;
 	}
-	godrays_texture = 0;
-	godrays_mask = 0;
-	godrays_source = 0;
-	if (godrays_preview)
-	{
-		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
-		godrays_source = framebufs.godrays.source_tex;
-	}
+	godrays_texture = r_atmosphere.godrays_texture;
+	godrays_mask = r_atmosphere.godrays_mask;
+	godrays_source = r_atmosphere.godrays_source;
 
 	view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
 	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
@@ -4922,12 +5059,10 @@ void R_RenderView (void)
                 glFinish ();
 
         R_SetupView (); //johnfitz -- this does everything that should be done once per frame
-        Fog_EnableGFog ();
+        R_Atmosphere_Render (false);
         R_RenderScene ();
         R_WarpScaleView ();
-        R_FogVol_BuildList ();
-        R_FogVol_Render ();
-        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
+        R_Atmosphere_Render (true); // Leave fog disabled for 2D overlays
 	R_Shadow_DrawDebug ();
 
 	r_frame_rendered_this_update = true;
