@@ -4,6 +4,7 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	AmbientColor; // xyz=AmbientColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -21,6 +22,9 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
+	vec4	RimParams0;
+	vec4	RimParams1;
+	vec4	RimParams2;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
@@ -115,6 +119,9 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
+layout(location=7) in vec3 in_static_light;
+layout(location=8) in vec3 in_dyn_light;
+layout(location=9) in vec3 in_amb_light;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -155,6 +162,25 @@ layout(location=6) in vec3 in_normal;
         layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
+
+float saturate(float x)
+{
+	return clamp(x, 0.0, 1.0);
+}
+
+float luminance(vec3 rgb)
+{
+	return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 normalize_safe(vec3 v)
+{
+	float len2 = dot(v, v);
+	if (len2 < 1e-12)
+		return vec3(0.0);
+	return v * inversesqrt(len2);
+}
+
 void main()
 {
         vec2 uv = in_texcoord;
@@ -162,6 +188,9 @@ void main()
         float shadow_range = 1.0;
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
+	vec3 L_static = max(in_static_light, vec3(0.0));
+	vec3 L_dyn = max(in_dyn_light, vec3(0.0));
+	vec3 L_amb = max(in_amb_light, vec3(0.0));
 
 	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
@@ -210,6 +239,46 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
+
+	if (RimParams0.x > 0.5)
+	{
+		vec3 N = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
+		vec3 V = normalize_safe(-in_pos);
+		float ndv = saturate(dot(N, V));
+		float rim_raw = pow(1.0 - ndv, RimParams0.z) * RimParams0.y;
+
+		vec3 scaled_static = RimParams0.w * L_static;
+		vec3 scaled_dyn = RimParams1.x * L_dyn;
+		vec3 scaled_amb = RimParams1.y * L_amb;
+		vec3 L_total = scaled_static + scaled_dyn + scaled_amb;
+
+		float direct_intensity = luminance(scaled_static + scaled_dyn);
+		float gate = saturate(direct_intensity * RimParams1.z + RimParams1.w);
+		float rim = rim_raw * gate;
+
+		vec3 rim_color = normalize_safe(L_total);
+		vec3 rim_light = rim * rim_color * RimParams2.x;
+
+		vec3 clamp_ceiling = (RimParams2.y * (scaled_static + scaled_dyn))
+			+ (RimParams2.z * scaled_amb);
+		rim_light = min(rim_light, clamp_ceiling);
+
+		result.rgb += rim_light;
+
+		if (RimParams2.w > 0.5)
+		{
+			if (RimParams2.w < 1.5)
+				result.rgb = vec3(rim_raw);
+			else if (RimParams2.w < 2.5)
+				result.rgb = vec3(gate);
+			else if (RimParams2.w < 3.5)
+				result.rgb = rim_light;
+			else
+				result.rgb = L_total;
+			result.a = 1.0;
+		}
+	}
+
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);

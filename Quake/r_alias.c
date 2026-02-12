@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
+extern cvar_t r_rim, r_rim_strength, r_rim_power, r_rim_staticScale, r_rim_dynScale, r_rim_ambScale;
+extern cvar_t r_rim_gateK, r_rim_gateBias, r_rim_colorScale, r_rim_clampDirect, r_rim_clampAmb, r_rim_debug;
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
@@ -69,6 +71,8 @@ typedef struct aliasinstance_s {
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
+	vec3_t		ambientcolor;
+	float		_pad1;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -94,6 +98,9 @@ struct ibuf_s {
 		float	overbright;
 		float	half_lambert;
 		float	_pad1;
+		vec4_t	rim_params0; // x=enable y=strength z=power w=staticScale
+		vec4_t	rim_params1; // x=dynScale y=ambScale z=gateK w=gateBias
+		vec4_t	rim_params2; // x=colorScale y=clampDirect z=clampAmb w=debug
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
 		vec4_t	shadow_debug;
@@ -571,6 +578,18 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+ibuf.global.rim_params0[0] = r_rim.value > 0.f ? 1.f : 0.f;
+ibuf.global.rim_params0[1] = q_max (0.f, r_rim_strength.value);
+ibuf.global.rim_params0[2] = q_max (0.f, r_rim_power.value);
+ibuf.global.rim_params0[3] = q_max (0.f, r_rim_staticScale.value);
+ibuf.global.rim_params1[0] = q_max (0.f, r_rim_dynScale.value);
+ibuf.global.rim_params1[1] = q_max (0.f, r_rim_ambScale.value);
+ibuf.global.rim_params1[2] = q_max (0.f, r_rim_gateK.value);
+ibuf.global.rim_params1[3] = r_rim_gateBias.value;
+ibuf.global.rim_params2[0] = q_max (0.f, r_rim_colorScale.value);
+ibuf.global.rim_params2[1] = q_max (0.f, r_rim_clampDirect.value);
+ibuf.global.rim_params2[2] = q_max (0.f, r_rim_clampAmb.value);
+ibuf.global.rim_params2[3] = CLAMP (0.f, r_rim_debug.value, 4.f);
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
 	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
@@ -931,16 +950,17 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	e->motion_blur_prev_frame = r_framecount;
 	e->motion_blur_prev_valid = true;
 
-        VectorCopy (lightcolor, instance->lightcolor);
-        VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
-        instance->alpha = entalpha;
-        if (e == &cl.viewent)
-                instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
-if (!Q_strncmp (e->model->name, "progs/bolt", 10))
-                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
-        instance->pose1 = lerpdata.pose1;
-        instance->pose2 = lerpdata.pose2;
-        instance->blend = lerpdata.blend;
+	VectorCopy (lightcolor, instance->lightcolor);
+	VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
+	VectorCopy (e->lightcache.ambientcolor, instance->ambientcolor);
+	instance->alpha = entalpha;
+	if (e == &cl.viewent)
+		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
+	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
+		instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+	instance->pose1 = lerpdata.pose1;
+	instance->pose2 = lerpdata.pose2;
+	instance->blend = lerpdata.blend;
 
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
@@ -1009,6 +1029,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 
 	VectorClear (instance->lightcolor);
 	VectorClear (instance->dlightcolor);
+	VectorClear (instance->ambientcolor);
 	instance->alpha = entalpha;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
