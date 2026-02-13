@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "simd_caps.h"
 #include "bgmusic.h"
 #include "steam.h"
 #include <setjmp.h>
@@ -420,6 +421,8 @@ void Host_InitLocal (void)
         Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
 
         Host_InitCommands ();
+
+	SIMD_Init ();
 
     Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_speeds);

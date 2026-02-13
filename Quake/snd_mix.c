@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_mix.c -- portable code to mix sounds for snd_dma.c
 
 #include "quakedef.h"
+#include "simd_caps.h"
 
 #define	PAINTBUFFER_SIZE	2048
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
@@ -34,7 +35,7 @@ static int	snd_vol;
 static float	snd_lofreqlevel;
 static float	snd_hifreqlevel;
 
-static void Snd_WriteLinearBlastStereo16 (void)
+static void Snd_WriteLinearBlastStereo16_Scalar (void)
 {
 	int		i;
 	int		val;
@@ -57,6 +58,51 @@ static void Snd_WriteLinearBlastStereo16 (void)
 		else
 			snd_out[i+1] = val;
 	}
+}
+
+static void Snd_WriteLinearBlastStereo16_SSE2 (void)
+{
+#if defined(USE_SSE2)
+	/*
+	 * Converts paintbuffer int samples to clamped int16 DMA output.
+	 * Input units/scaling match scalar path exactly: output = clamp(sample / 256).
+	 * Uses integer arithmetic (arith shift + saturating pack) to preserve behavior.
+	 */
+	int i = 0;
+	const __m128i div_bias = _mm_set1_epi32 (255);
+
+	for (; i + 8 <= snd_linear_count; i += 8)
+	{
+		__m128i s0 = _mm_loadu_si128 ((const __m128i *)(snd_p + i));
+		__m128i s1 = _mm_loadu_si128 ((const __m128i *)(snd_p + i + 4));
+		s0 = _mm_add_epi32 (s0, _mm_and_si128 (_mm_srai_epi32 (s0, 31), div_bias));
+		s1 = _mm_add_epi32 (s1, _mm_and_si128 (_mm_srai_epi32 (s1, 31), div_bias));
+		s0 = _mm_srai_epi32 (s0, 8);
+		s1 = _mm_srai_epi32 (s1, 8);
+		_mm_storeu_si128 ((__m128i *)(snd_out + i), _mm_packs_epi32 (s0, s1));
+	}
+
+	for (; i < snd_linear_count; ++i)
+	{
+		int val = snd_p[i] / 256;
+		if (val > 0x7fff)
+			snd_out[i] = 0x7fff;
+		else if (val < (short)0x8000)
+			snd_out[i] = (short)0x8000;
+		else
+			snd_out[i] = val;
+	}
+#else
+	Snd_WriteLinearBlastStereo16_Scalar ();
+#endif
+}
+
+static void Snd_WriteLinearBlastStereo16 (void)
+{
+	if (SIMD_Mode () >= SIMD_MODE_SSE2)
+		Snd_WriteLinearBlastStereo16_SSE2 ();
+	else
+		Snd_WriteLinearBlastStereo16_Scalar ();
 }
 
 static void S_TransferStereo16 (int endtime)

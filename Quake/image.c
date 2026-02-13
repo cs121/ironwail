@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //image.c -- image loading
 
 #include "quakedef.h"
+#include "simd_caps.h"
 
 static byte *Image_LoadPCX (FILE *f, int *width, int *height);
 static byte *Image_LoadLMP (FILE *f, int *width, int *height);
@@ -197,11 +198,18 @@ qboolean Image_WriteTGA (const char *name, byte *data, int width, int height, in
 	// swap red and blue bytes
 	bytes = bpp/8;
 	size = width*height*bytes;
-	for (i=0; i<size; i+=bytes)
+	if (bytes == 4)
 	{
-		temp = data[i];
-		data[i] = data[i+2];
-		data[i+2] = temp;
+		swizzle_rgba_bgra (data, data, (size_t)width * (size_t)height);
+	}
+	else
+	{
+		for (i=0; i<size; i+=bytes)
+		{
+			temp = data[i];
+			data[i] = data[i+2];
+			data[i+2] = temp;
+		}
 	}
 
 	ret =
