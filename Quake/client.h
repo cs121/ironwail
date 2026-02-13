@@ -105,6 +105,8 @@ typedef struct dlight_s
 	qboolean active;
 	float	spawn_time;
 	float	last_score;
+	float	lod_scale;
+	int		selected_until_frame;
 	int		flags;
 	int		last_frame_touched;
 } dlight_t;

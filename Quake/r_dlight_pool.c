@@ -27,6 +27,11 @@ static dlight_t dlight_fallback;
 
 cvar_t r_dlight_budget = { "r_dlight_budget", "64", CVAR_ARCHIVE };
 cvar_t r_dlight_pool_max = { "r_dlight_pool_max", "512", CVAR_ARCHIVE };
+cvar_t r_dlight_cull_distance = { "r_dlight_cull_distance", "0", CVAR_ARCHIVE };
+cvar_t r_dlight_min_radius = { "r_dlight_min_radius", "8", CVAR_ARCHIVE };
+cvar_t r_dlight_min_brightness = { "r_dlight_min_brightness", "0.02", CVAR_ARCHIVE };
+cvar_t r_dlight_hysteresis = { "r_dlight_hysteresis", "6", CVAR_ARCHIVE };
+cvar_t r_dlight_smooth = { "r_dlight_smooth", "0.25", CVAR_ARCHIVE };
 
 int DLightPool_GetBudget (void)
 {
@@ -56,12 +61,53 @@ static void DLightPool_PoolMax_Changed (cvar_t *var)
 	DLightPool_ClampCvar (var, 0, 8192);
 }
 
+static void DLightPool_CullDistance_Changed (cvar_t *var)
+{
+	if (var->value < 0.f)
+		Cvar_SetValueQuick (var, 0.f);
+}
+
+static void DLightPool_MinRadius_Changed (cvar_t *var)
+{
+	if (var->value < 0.f)
+		Cvar_SetValueQuick (var, 0.f);
+}
+
+static void DLightPool_MinBrightness_Changed (cvar_t *var)
+{
+	if (var->value < 0.f)
+		Cvar_SetValueQuick (var, 0.f);
+}
+
+static void DLightPool_Hysteresis_Changed (cvar_t *var)
+{
+	DLightPool_ClampCvar (var, 0, 120);
+}
+
+static void DLightPool_Smooth_Changed (cvar_t *var)
+{
+	if (var->value < 0.f)
+		Cvar_SetValueQuick (var, 0.f);
+	else if (var->value > 1.f)
+		Cvar_SetValueQuick (var, 1.f);
+}
+
 void DLightPool_RegisterCvars (void)
 {
 	Cvar_RegisterVariable (&r_dlight_budget);
 	Cvar_RegisterVariable (&r_dlight_pool_max);
+	Cvar_RegisterVariable (&r_dlight_cull_distance);
+	Cvar_RegisterVariable (&r_dlight_min_radius);
+	Cvar_RegisterVariable (&r_dlight_min_brightness);
+	Cvar_RegisterVariable (&r_dlight_hysteresis);
+	Cvar_RegisterVariable (&r_dlight_smooth);
 	Cvar_SetCallback (&r_dlight_budget, DLightPool_Budget_Changed);
 	Cvar_SetCallback (&r_dlight_pool_max, DLightPool_PoolMax_Changed);
+	Cvar_SetCallback (&r_dlight_cull_distance, DLightPool_CullDistance_Changed);
+	Cvar_SetCallback (&r_dlight_min_radius, DLightPool_MinRadius_Changed);
+	Cvar_SetCallback (&r_dlight_min_brightness, DLightPool_MinBrightness_Changed);
+	Cvar_SetCallback (&r_dlight_hysteresis, DLightPool_Hysteresis_Changed);
+	Cvar_SetCallback (&r_dlight_smooth, DLightPool_Smooth_Changed);
 }
 
 static void DLightPool_ResetStats (void)
@@ -140,6 +186,8 @@ static void DLightPool_ResetLight (dlight_t *dl, dlight_kind_t kind, double time
 	dl->spawn_time = (float)time;
 	dl->spawn = (float)time;
 	dl->die = (kind == DL_PERSISTENT) ? FLT_MAX : (float)time;
+	dl->lod_scale = 1.f;
+	dl->selected_until_frame = 0;
 	dl->last_frame_touched = dlight_pool.framecount;
 }
 
@@ -154,7 +202,7 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 
 	VectorSubtract (vieworg, dl->origin, delta);
 	dist = VectorLength (delta);
-	influence = radius / q_max (dist, 1.f);
+	influence = (radius * q_max (dl->lod_scale, 0.01f)) / q_max (dist, 1.f);
 	lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
 
 	if (dl->kind == DL_TRANSIENT)
@@ -168,6 +216,9 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	{
 		bias *= 1.05f;
 	}
+
+	if (dl->selected_until_frame >= dlight_pool.framecount)
+		bias *= 1.1f;
 
 	return influence * lum * bias;
 }
@@ -410,6 +461,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		dlight_t **out, int out_max)
 {
 	(void)viewleaf;
+	const float min_radius = q_max (0.f, r_dlight_min_radius.value);
+	const float min_brightness = q_max (0.f, r_dlight_min_brightness.value);
+	const float cull_distance = q_max (0.f, r_dlight_cull_distance.value);
+	const float smooth = CLAMP (0.f, r_dlight_smooth.value, 1.f);
 
 	dlight_pool.time = time;
 	VectorCopy (vieworg, dlight_pool.last_vieworg);
@@ -433,6 +488,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
 		dlight_t *dl = &dlight_pool.items[i];
+		float lum;
+		float dist;
+		float target_scale;
+		vec3_t delta;
 		if (!dl->active)
 			continue;
 
@@ -455,8 +514,25 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		if (!dl->baseradius)
 			continue;
 
-		if (dl->color[0] <= 0.f && dl->color[1] <= 0.f && dl->color[2] <= 0.f)
+		if (dl->radius < min_radius && dl->baseradius < min_radius)
 			continue;
+
+		lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+		if (lum <= 0.f)
+			continue;
+		if (lum < min_brightness)
+			continue;
+
+		VectorSubtract (vieworg, dl->origin, delta);
+		dist = VectorLength (delta);
+		if (cull_distance > 0.f && dist > cull_distance + q_max (dl->radius, dl->baseradius))
+			continue;
+
+		target_scale = 1.f;
+		if (dl->radius > 0.f && dl->radius < min_radius)
+			target_scale = q_max (0.1f, dl->radius / min_radius);
+		dl->lod_scale += (target_scale - dl->lod_scale) * smooth;
+		dl->lod_scale = CLAMP (0.1f, dl->lod_scale, 1.f);
 
 		dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
 		dlight_pool.scratch[found++] = dl;
@@ -467,7 +543,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 
 	const int submit_count = q_min (found, out_max);
 	for (int i = 0; i < submit_count; i++)
+	{
 		out[i] = dlight_pool.scratch[i];
+		out[i]->selected_until_frame = dlight_pool.framecount + CLAMP (0, (int)r_dlight_hysteresis.value, 120);
+	}
 
 	dlight_pool.stats.submitted = submit_count;
 	DLightPool_UpdateStats ();

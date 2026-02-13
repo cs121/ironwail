@@ -71,6 +71,11 @@ extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
+extern cvar_t r_dlight_enable;
+extern cvar_t r_dlight_max;
+extern cvar_t r_dlight_quality;
+extern cvar_t r_dlight_shadows;
+extern cvar_t r_dlight_preset;
 extern cvar_t r_dlight_style;
 extern cvar_t r_dlight_debug;
 extern cvar_t r_dlight_entities;
@@ -534,6 +539,53 @@ static void R_OverbrightBits_f (cvar_t *var)
 		Cvar_SetValueQuick (var, (float)value);
 }
 
+static void R_DLightPreset_f (cvar_t *var)
+{
+	const int preset = CLAMP (0, (int)var->value, 3);
+	if (preset != (int)var->value)
+		Cvar_SetValueQuick (var, (float)preset);
+
+	switch (preset)
+	{
+	case 0:
+		Cvar_SetValueQuick (&r_dlight_enable, 0.f);
+		Cvar_SetValueQuick (&r_dlight_max, 0.f);
+		Cvar_SetValueQuick (&r_dlight_quality, 0.f);
+		Cvar_SetValueQuick (&r_dlight_shadows, 0.f);
+		Cvar_SetValueQuick (&r_dlight_budget, 0.f);
+		Cvar_SetValueQuick (&r_shadow_dlights, 0.f);
+		Cvar_SetValueQuick (&r_shadow_dlight_max, 0.f);
+		break;
+	case 1:
+		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
+		Cvar_SetValueQuick (&r_dlight_max, 24.f);
+		Cvar_SetValueQuick (&r_dlight_quality, 1.f);
+		Cvar_SetValueQuick (&r_dlight_shadows, 0.f);
+		Cvar_SetValueQuick (&r_dlight_budget, 24.f);
+		Cvar_SetValueQuick (&r_shadow_dlights, 0.f);
+		Cvar_SetValueQuick (&r_shadow_dlight_max, 0.f);
+		break;
+	case 2:
+		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
+		Cvar_SetValueQuick (&r_dlight_max, 64.f);
+		Cvar_SetValueQuick (&r_dlight_quality, 2.f);
+		Cvar_SetValueQuick (&r_dlight_shadows, 1.f);
+		Cvar_SetValueQuick (&r_dlight_budget, 64.f);
+		Cvar_SetValueQuick (&r_shadow_dlights, 1.f);
+		Cvar_SetValueQuick (&r_shadow_dlight_max, 2.f);
+		break;
+	default:
+		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
+		Cvar_SetValueQuick (&r_dlight_max, 128.f);
+		Cvar_SetValueQuick (&r_dlight_quality, 3.f);
+		Cvar_SetValueQuick (&r_dlight_shadows, 1.f);
+		Cvar_SetValueQuick (&r_dlight_budget, 128.f);
+		Cvar_SetValueQuick (&r_shadow_dlights, 1.f);
+		Cvar_SetValueQuick (&r_shadow_dlight_max, 4.f);
+		break;
+	}
+}
+
 /*
 ====================
 GL_WaterAlphaForTextureType
@@ -593,6 +645,12 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_dynamic);
+        Cvar_RegisterVariable (&r_dlight_enable);
+        Cvar_RegisterVariable (&r_dlight_max);
+        Cvar_RegisterVariable (&r_dlight_quality);
+        Cvar_RegisterVariable (&r_dlight_shadows);
+        Cvar_RegisterVariable (&r_dlight_preset);
+        Cvar_SetCallback (&r_dlight_preset, R_DLightPreset_f);
         Cvar_RegisterVariable (&r_dlight_style);
         Cvar_RegisterVariable (&r_dlight_debug);
         Cvar_RegisterVariable (&r_dlight_entities);

@@ -31,6 +31,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
+extern cvar_t r_dlight_enable;
+extern cvar_t r_dlight_max;
+extern cvar_t r_dlight_quality;
 extern cvar_t r_dlight_style;
 extern cvar_t r_dlight_entities;
 extern cvar_t r_dlight_mode;
@@ -427,9 +430,14 @@ void R_PushDlights (void)
         // enabled and when the Quake3-style additive path is requested via
         // r_dlight_style. The latter needs the light list even if r_dynamic
         // was disabled by the user.
-        if (r_dynamic.value > 0.f || r_dlight_style.value > 0.f)
-        {
-		const int budget = q_min (DLightPool_GetBudget (), DLIGHT_GPU_MAX);
+	if ((r_dynamic.value > 0.f || r_dlight_style.value > 0.f) && r_dlight_enable.value > 0.f)
+	{
+		int hard_cap = CLAMP (0, (int)r_dlight_max.value, DLIGHT_GPU_MAX);
+		if (r_dlight_quality.value <= 0.f)
+			hard_cap = 0;
+		else if (r_dlight_quality.value < 2.f)
+			hard_cap = q_min (hard_cap, 32);
+		const int budget = q_min (q_min (DLightPool_GetBudget (), DLIGHT_GPU_MAX), hard_cap);
 		DLightPool_NewFrame (cl.time, r_framecount);
 		const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
 		if (num_submit > 0)
