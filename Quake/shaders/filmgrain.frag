@@ -18,14 +18,33 @@ float InterleavedGradientNoise(vec2 p)
 	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-vec3 FilmGrainNoise(vec2 coord, float time, float seed, float colored)
+float Hash12(vec2 p)
 {
-	vec2 base = coord + vec2(seed, seed * 0.37);
-	float n0 = tri(InterleavedGradientNoise(base + vec2(time * 11.1, time * 7.3)));
-	float n1 = tri(InterleavedGradientNoise(base + vec2(17.7 + time * 5.2, 3.1 + time * 9.2)));
-	float n2 = tri(InterleavedGradientNoise(base + vec2(8.3 + time * 6.7, 12.9 + time * 4.1)));
-	vec3 colorNoise = (vec3(n0, n1, n2) + n0) * 0.5;
-	return mix(vec3(n0), colorNoise, colored);
+	p = fract(p * vec2(0.1031, 0.1030));
+	p += dot(p, p.yx + 33.33);
+	return fract((p.x + p.y) * p.x);
+}
+
+vec3 FilmGrainNoise(vec2 fragCoord, float time, float seed, float colored, float grainSize)
+{
+	vec2 seedOffset = vec2(seed * 1.173, seed * 2.417);
+	float t = time + Hash12(vec2(time * 0.123, seed * 1.37));
+
+	float sizeA = max(0.25, grainSize * mix(0.55, 1.65, Hash12(floor(fragCoord * 0.03125) + seedOffset)));
+	float sizeB = max(0.25, grainSize * mix(0.45, 2.05, Hash12(floor(fragCoord * 0.046875) + seedOffset.yx + 17.0)));
+	float sizeC = max(0.25, grainSize * mix(0.65, 2.35, Hash12(floor(fragCoord * 0.0625) + seedOffset + 91.0)));
+
+	vec2 coordA = (fragCoord + vec2(0.31, 0.73)) / sizeA;
+	vec2 coordB = (fragCoord + vec2(0.91, 0.27)) / sizeB;
+	vec2 coordC = (fragCoord + vec2(0.53, 0.49)) / sizeC;
+
+	float n0 = tri(InterleavedGradientNoise(coordA + vec2(t * 13.11, t * 7.97) + seedOffset));
+	float n1 = tri(InterleavedGradientNoise(coordB + vec2(17.7 + t * 5.23, 3.1 + t * 9.19) + seedOffset.yx));
+	float n2 = tri(InterleavedGradientNoise(coordC + vec2(8.3 + t * 6.71, 12.9 + t * 4.07) + seedOffset * 0.7));
+
+	float mono = (n0 + n1 + n2) * (1.0 / 3.0);
+	vec3 colorNoise = vec3(n0, n1, n2);
+	return mix(vec3(mono), colorNoise, colored);
 }
 
 layout(location=0) out vec4 out_fragcolor;
@@ -47,13 +66,13 @@ void main()
 		float seed = FilmGrainParams1.w;
 		float frame = FilmGrainParams2.x;
 		float time = frame * grainSpeed;
-		vec2 grainCoord = (gl_FragCoord.xy + vec2(0.25, 0.75)) / grainSize;
-		vec3 grain = FilmGrainNoise(grainCoord, time, seed, colored);
+		vec3 grain = FilmGrainNoise(gl_FragCoord.xy, time, seed, colored, grainSize);
 
 		float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-		float shadow = clamp(1.0 - luma, 0.0, 1.0);
-		float lumaFactor = mix(1.0, shadow, lumaWeight);
-		float response = mix(1.0, smoothstep(0.0, 1.0, shadow), 0.5);
+		float shadow = 1.0 - clamp(luma, 0.0, 1.0);
+		float lumaCurve = smoothstep(0.0, 1.0, shadow * shadow);
+		float lumaFactor = mix(1.0, mix(shadow, lumaCurve, 0.65), lumaWeight);
+		float response = 0.65 + 0.35 * smoothstep(0.0, 1.0, shadow);
 		float amount = grainAmount * lumaFactor * response;
 
 		if (grainDebug > 0.5)
