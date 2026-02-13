@@ -288,6 +288,12 @@ cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE }
 cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
 cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
 cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
+cvar_t  r_clustered_lighting = { "r_clustered_lighting", "0", CVAR_ARCHIVE };
+cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
+cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
+cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCHIVE };
+cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
+cvar_t  r_clustered_log = { "r_clustered_log", "1", CVAR_NONE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
@@ -3753,7 +3759,7 @@ void R_SetupView (void)
                 ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
                 : 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
-	r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
+	r_framedata.dlight_params[0] = (r_dlight_style.value > 0.f && r_clustered_lighting.value <= 0.f) ? 1.f : 0.f;
 	r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
 	r_framedata.dlight_params[2] = 0.f;
 	r_framedata.dlight_params[3] = CLAMP (0.f, r_dlight_quality.value, 3.f);
@@ -4924,7 +4930,7 @@ static void R_DrawDLightPass (void)
 
 	r_dlight_buffered_frame = false;
 
-        if (r_dlight_style.value <= 0.f)
+        if (r_dlight_style.value <= 0.f || r_clustered_lighting.value > 0.f)
                 return;
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
