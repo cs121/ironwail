@@ -30,7 +30,8 @@ void main()
     }
 
     history.rgb = clamp(history.rgb, minC, maxC);
-    float w = (TemporalParams.y > 0.5) ? clamp(TemporalParams.x, 0.0, 0.99) : 0.0;
+    float wTarget = (TemporalParams.z > 0.0) ? TemporalParams.z : TemporalParams.x;
+    float w = (TemporalParams.y > 0.5) ? clamp(wTarget, 0.0, 0.99) : 0.0;
     vec4 outv = mix(current, history, w);
     imageStore(OutResolved, coord, outv);
     imageStore(OutHistory, coord, outv);
