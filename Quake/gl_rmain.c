@@ -2430,7 +2430,7 @@ static void Atmosphere_Froxel_TemporalResolve (const atmosphere_settings_t *sett
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.scatter_resolved_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_BindImageTextureFunc (2, framebufs.atmos_froxel.scatter_history_tex[dst], 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
-	GL_Uniform4fFunc (1, CLAMP (0.f, r_atmos_historyweight.value, 0.99f), r_prev_frame_valid ? 1.f : 0.f, settings->history_weight, 0.f);
+	GL_Uniform4fFunc (1, CLAMP (0.f, settings->history_weight, 0.99f), r_prev_frame_valid ? 1.f : 0.f, settings->history_weight, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	framebufs.atmos_froxel.history_index = dst;

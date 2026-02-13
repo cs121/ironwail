@@ -27,7 +27,8 @@ void Atmosphere_EvalMedium(vec3 worldPos, vec3 viewPos, out float sigma_t, out v
     float h = max(0.0, worldPos.z);
     float density = MediumParams0.x * exp(-MediumParams0.y * h);
     sigma_t = max(density, 0.0);
-    sigma_s = sigma_t * MediumParams1.rgb * MediumParams0.z;
+    sigma_s = sigma_t * MediumParams1.rgb * MediumParams0.z * max(MediumParams1.w, 0.0);
+    sigma_s += MediumParams1.rgb * max(MediumParams0.w, 0.0);
 }
 
 void main()
