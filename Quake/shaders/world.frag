@@ -476,7 +476,8 @@ void main()
 	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
 
 	const float SPECULAR_POWER = 16.0;
-	const float SPECULAR_SCALE = 0.4;
+	float specular_quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
+	float specular_scale = 0.4 * specular_quality;
 
         // Dynamic lights (clustered lighting)
         if (!additive_dlights && NumLights > 0u)
@@ -539,7 +540,8 @@ void main()
 								half_vec /= half_len;
 								float ndoth = max(dot(surface_normal, half_vec), 0.0);
 								float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-								specular_light += light_contrib * spec * SPECULAR_SCALE;
+                                    float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
+								specular_light += light_contrib * (spec * specular_scale * energy);
 							}
 						}
 					}
@@ -571,7 +573,8 @@ void main()
 	result.rgb += fullbright + emissive;
 	
 	// Add specular
-	vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
+	vec3 spec_budget = max(vec3(0.0), vec3(Overbright) - total_lightmap);
+	vec3 spec_clamped = min(max(specular_light, vec3(0.0)), spec_budget);
 	result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
 	
 	// Tone mapping
