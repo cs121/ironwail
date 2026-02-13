@@ -276,12 +276,16 @@ typedef struct shader_material_s
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
 	qboolean		godray_enable;
+	qboolean		has_skyparms;
 	qboolean		has_fogparms;
 	float			emissive_scale;
 	float			bloom_scale;
 	float			godray_scale;
 	vec3_t		fog_color;
 	float			fog_distance;
+	char			*skybox_far;
+	char			*skybox_near;
+	float			sky_cloudheight;
 	mat_deform_t	*deforms;
 	mat_shader_stage_t	stage0;
 	mat_shader_stage_t	*stages;

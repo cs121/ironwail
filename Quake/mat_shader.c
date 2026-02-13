@@ -105,9 +105,9 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters." },
-	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters." },
-	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation." },
+	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses farbox/cloudheight/nearbox and marks sky surfaces." },
+	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses fog color and distance into material metadata." },
+	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses deform parameters; render-time deformation is still pending." },
 	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives." },
 
 	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
@@ -193,6 +193,10 @@ static void Mat_Shader_FreeMaterial (shader_material_t *material)
 
 	if (material->editor_image)
 		Z_Free (material->editor_image);
+	if (material->skybox_far)
+		Z_Free (material->skybox_far);
+	if (material->skybox_near)
+		Z_Free (material->skybox_near);
 	if (material->name)
 		Z_Free (material->name);
 	if (material->source_file)
@@ -1296,6 +1300,11 @@ void Mat_Shader_Print (const shader_material_t *material)
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
 	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
+	if (material->has_skyparms)
+		Con_Printf ("  skyParms: far=%s cloudheight=%.2f near=%s\n",
+			material->skybox_far ? material->skybox_far : "-",
+			material->sky_cloudheight,
+			material->skybox_near ? material->skybox_near : "-");
 	if (material->has_fogparms)
 		Con_Printf ("  fogparms: (%.2f %.2f %.2f) dist %.2f\n", material->fog_color[0], material->fog_color[1], material->fog_color[2], material->fog_distance);
 	if (material->deforms)
