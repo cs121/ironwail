@@ -13,6 +13,11 @@ typedef struct dlight_pool_stats_s
 
 extern cvar_t r_dlight_budget;
 extern cvar_t r_dlight_pool_max;
+extern cvar_t r_dlight_cull_distance;
+extern cvar_t r_dlight_min_radius;
+extern cvar_t r_dlight_min_brightness;
+extern cvar_t r_dlight_hysteresis;
+extern cvar_t r_dlight_smooth;
 
 void DLightPool_RegisterCvars (void);
 void DLightPool_Init (void);
