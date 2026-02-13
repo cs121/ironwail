@@ -2441,17 +2441,34 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 {
 	atmosphere_settings_t settings;
 	float fog_density = fabsf (Fog_GetDensity ());
+	qboolean froxel_requested;
+	qboolean fogvol_requested;
+	qboolean shafts_requested;
 
 	memset (&settings, 0, sizeof (settings));
 	settings.mode = (int)Q_rint (CLAMP (0.f, r_atmos_mode.value, 1.f));
+	froxel_requested = (r_atmos_froxel.value > 0.f);
+	fogvol_requested = (r_fogvol.value > 0.f);
+	shafts_requested = (r_godrays.value > 0.f && R_GodraysReady ());
+
+	/*
+	 * r_atmos_mode keeps a compatibility path for users that only want legacy
+	 * radial shafts/fog-volume behavior. Mode 1 enables the unified froxel path.
+	 */
 	settings.enabled_fog = (fog_density > 0.f);
-	settings.enabled_shafts = (r_godrays.value > 0.f && R_GodraysReady ());
-	settings.enabled_volumetrics = (r_atmos_froxel.value > 0.f || r_fogvol.value > 0.f);
+	settings.enabled_shafts = shafts_requested;
+	settings.enabled_volumetrics = (settings.mode > 0)
+		? (froxel_requested || fogvol_requested)
+		: fogvol_requested;
+	if (settings.mode <= 0)
+		froxel_requested = false;
 	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
 	settings.density = fog_density;
-	settings.anisotropy = q_max (0.f, r_godrays_weight.value);
+	settings.anisotropy = CLAMP (-0.99f, r_godrays_weight.value, 0.99f);
 	settings.steps = q_max (1.f, r_godrays_samples.value);
 	settings.history_weight = CLAMP (0.f, (r_atmos_historyweight.value > 0.f ? r_atmos_historyweight.value : r_godrays_stabilize_strength.value), 1.f);
+	if (froxel_requested)
+		settings.enabled_shafts = false;
 	settings.debug_mode = CLAMP (0.f, r_atmos_debug.value, 6.f);
 	return settings;
 }
