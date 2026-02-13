@@ -19,9 +19,6 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 	return mix(Fog.rgb, clr, fog);
 }
 
-#define LIGHT_TILES_X 32
-#define LIGHT_TILES_Y 16
-#define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
 
 struct Light
@@ -43,7 +40,49 @@ float GetLightStyle(int index)
 	return (index < 64) ? mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w) : 1.0;
 }
 
-layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
+struct ClusterHeader
+{
+	uint offset;
+	uint count;
+};
+
+struct PackedLight
+{
+	vec4 posRadius;
+	vec4 colorIntensity;
+	ivec4 flags;
+};
+
+layout(std430, binding=4) readonly buffer ClusterHeaderBuffer
+{
+	ClusterHeader headers[];
+};
+
+layout(std430, binding=5) readonly buffer ClusterIndexBuffer
+{
+	uint lightIndices[];
+};
+
+layout(std430, binding=3) readonly buffer PackedLightsBuffer
+{
+	PackedLight packedLights[];
+};
+
+layout(std140, binding=2) uniform ClusterParams
+{
+	ivec2 ClusterScreenSize;
+	ivec2 ClusterGridXY;
+	int ClusterZSlices;
+	float ClusterNearPlane;
+	float ClusterFarPlane;
+	float ClusterZLogScale;
+	float ClusterZLogBias;
+	mat4 ClusterViewMatrix;
+	mat4 ClusterProjMatrix;
+	mat4 ClusterInvProj;
+	int ClusterTileSize;
+	int ClusterDebugMode;
+};
 
 struct Call
 {
@@ -480,76 +519,86 @@ void main()
 	float specular_scale = 0.4 * specular_quality;
 
         // Dynamic lights (clustered lighting)
-        if (!additive_dlights && NumLights > 0u)
+        if (!additive_dlights && NumLights > 0u && ClusterTileSize > 0)
         {
-                ivec3 cluster_coord = ivec3(
-                        int(floor(in_coord.x)),
-			int(floor(in_coord.y)),
-			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
-		);
-		
-		uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
-		
-		if ((clusterdata.x | clusterdata.y) != 0u)
-		{
-			vec3 dynamic_light = vec3(0.0);
-			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-			
-			for (uint i = 0u, ofs = 0u; i < 2u; i++, ofs += 32u)
-			{
-				uint mask = clusterdata[i];
-				while (mask != 0u)
-				{
-					int j = findLSB(mask);
-					mask ^= 1u << j;
-					Light l = Lights[ofs + uint(j)];
-					
-					// Light culling
-					float rad = l.radius;
-					float dist = dot(l.origin, plane.xyz) - plane.w;
-					rad -= abs(dist);
-					float minlight = l.minlight;
-					
-					if (rad <= 0.0 || rad < minlight)
-						continue;
-					
-					vec3 local_pos = l.origin - plane.xyz * dist;
-					minlight = rad - minlight;
-					vec3 light_vec = local_pos - in_pos;
-					float surface_dist = length(light_vec);
-					float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
-					float normalized_dist = surface_dist / rad;
-					float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-					vec3 light_contrib = attenuation * falloff * l.color * dynamic_light_noise;
-					dynamic_light += light_contrib;
-					
-					// Specular calculation
-					if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
-					{
-						vec3 light_dir = light_vec / surface_dist;
-						float ndotl = max(dot(surface_normal, light_dir), 0.0);
-						
-						if (ndotl > 0.0)
-						{
-							vec3 half_vec = light_dir + view_dir;
-							float half_len = length(half_vec);
-							
-							if (half_len > 0.0)
-							{
-								half_vec /= half_len;
-								float ndoth = max(dot(surface_normal, half_vec), 0.0);
-								float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-                                    float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
-								specular_light += light_contrib * (spec * specular_scale * energy);
-							}
-						}
-					}
-				}
-			}
-			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
-		}
-	}
+                int tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
+                int tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
+                int zSlice = clamp(int(floor(log2(max(in_depth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
+                int clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
+                ClusterHeader header = headers[clusterIdx];
+                vec3 dynamic_light = vec3(0.0);
+                float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
+                vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+
+                for (uint i = 0u; i < header.count; ++i)
+                {
+                        uint lightId = lightIndices[header.offset + i];
+                        if (lightId >= NumLights)
+                                continue;
+                        PackedLight pl = packedLights[lightId];
+                        vec3 lightOrigin = pl.posRadius.xyz;
+                        float radius = pl.posRadius.w;
+                        vec3 lightColor = pl.colorIntensity.rgb;
+
+                        float dist = dot(lightOrigin, plane.xyz) - plane.w;
+                        float rad = radius - abs(dist);
+                        if (rad <= 0.0)
+                                continue;
+
+                        vec3 local_pos = lightOrigin - plane.xyz * dist;
+                        vec3 light_vec = local_pos - in_pos;
+                        float surface_dist = length(light_vec);
+                        float attenuation = clamp((rad - surface_dist) / 16.0, 0.0, 1.0);
+                        float normalized_dist = surface_dist / max(rad, 1e-4);
+                        float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
+                        vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
+                        dynamic_light += light_contrib;
+
+                        if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+                        {
+                                vec3 light_dir = light_vec / surface_dist;
+                                float ndotl = max(dot(surface_normal, light_dir), 0.0);
+                                if (ndotl > 0.0)
+                                {
+                                        vec3 half_vec = normalize(light_dir + view_dir);
+                                        float ndoth = max(dot(surface_normal, half_vec), 0.0);
+                                        float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+                                        float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
+                                        specular_light += light_contrib * (spec * specular_scale * energy);
+                                }
+                        }
+                }
+
+                if (ClusterDebugMode == 1)
+                {
+                        float h = clamp(float(header.count) / 16.0, 0.0, 1.0);
+                        OUT_COLOR = vec4(h, h * h, 0.0, 1.0);
+#if !OIT
+                        out_velocity = vec4(0.0);
+#endif
+                        return;
+                }
+                else if (ClusterDebugMode == 2)
+                {
+                        float b = float(zSlice) / max(float(ClusterZSlices - 1), 1.0);
+                        OUT_COLOR = vec4(b, 1.0 - b, 0.5, 1.0);
+#if !OIT
+                        out_velocity = vec4(0.0);
+#endif
+                        return;
+                }
+                else if (ClusterDebugMode == 3)
+                {
+                        float g = clamp(float(header.count) / 32.0, 0.0, 1.0);
+                        OUT_COLOR = vec4(vec3(g), 1.0);
+#if !OIT
+                        out_velocity = vec4(0.0);
+#endif
+                        return;
+                }
+
+                total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
+        }
 
 	// Sun light
         vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
