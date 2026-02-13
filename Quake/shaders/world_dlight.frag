@@ -80,6 +80,15 @@ float ComputeFalloff(float x, float mode, float expval)
         return pow(max(x, 0.0), expval);
 }
 
+float ComputeSpecEnergy(vec3 surface_normal, vec3 light_dir, vec3 view_dir, float ndotl, float quality, float energy)
+{
+        vec3 half_vec = normalize(light_dir + view_dir);
+        float ndoth = max(dot(surface_normal, half_vec), 0.0);
+        float spec_power = mix(8.0, 24.0, quality);
+        float spec = pow(ndoth, spec_power) * ndotl;
+        return spec * energy * (0.35 * quality);
+}
+
 void main()
 {
         vec2 uv = in_uv;
@@ -109,6 +118,9 @@ void main()
                 surface_normal = -surface_normal;
 
         vec3 dynamic_light = vec3(0.0);
+        vec3 specular_light = vec3(0.0);
+        float quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
+        vec3 view_dir = normalize(EyePos - in_pos);
         if (NumLights > 0u)
         {
                 ivec3 cluster_coord = ivec3(
@@ -160,9 +172,10 @@ void main()
                                         float core_intensity = intensity * core;
                                         float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
                                         float ndotl = 1.0;
+                                        vec3 light_dir = vec3(0.0, 0.0, 1.0);
                                         if (surface_dist > 0.0)
                                         {
-                                                vec3 light_dir = light_vec / surface_dist;
+                                                light_dir = light_vec / surface_dist;
                                                 float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
                                                 ndotl = mix(1.0, ndotl_raw, ndotl_mix);
                                         }
@@ -171,6 +184,12 @@ void main()
                                         float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, ofs + uint(j), shadow_range);
                                         vec3 light_contrib = shaped * ndotl * shadow_term * l.color * dynamic_light_noise;
                                         dynamic_light += light_contrib;
+                                        if (surface_dist > 0.0)
+                                        {
+                                                float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
+                                                float spec = ComputeSpecEnergy(surface_normal, light_dir, view_dir, ndotl, quality, energy);
+                                                specular_light += l.color * spec * shadow_term;
+                                        }
                                 }
                         }
                 }
@@ -184,7 +203,9 @@ void main()
         }
 
         vec3 contrib = clamp(dynamic_light * DLightConfig0.x * Overbright, 0.0, Overbright);
-        vec3 color = albedo * contrib;
+        vec3 spec_budget = max(vec3(0.0), vec3(Overbright) - contrib);
+        vec3 spec_contrib = min(max(specular_light, vec3(0.0)), spec_budget);
+        vec3 color = albedo * contrib + spec_contrib;
 
         color = ApplyFog(color, in_pos - EyePos);
 

@@ -1060,6 +1060,8 @@ void R_Shadow_DlightPass (void)
 				continue;
 
 			score = (glight->radius * (glight->color[0] + glight->color[1] + glight->color[2])) / (1.f + dist);
+			if (dl->kind == DL_PERSISTENT)
+				score *= 1.15f;
 
 			for (int slot = 0; slot < max_tiles; ++slot)
 			{
@@ -1120,12 +1122,31 @@ void R_Shadow_DlightPass (void)
 			continue;
 
 		const gpulight_t *glight = &r_lightbuffer.lights[light_index];
+		dlight_t *dl = r_dlight_sources[light_index];
 		float viewproj[16];
 		int tile_x = i % grid;
 		int tile_y = i / grid;
-		float scale = (float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size;
-		float offset_x = tile_x * scale;
-		float offset_y = tile_y * scale;
+		float lod_mul = 1.f;
+		float dist_weight;
+		float radius_weight;
+		float coverage;
+		float scale;
+		float offset_x;
+		float offset_y;
+
+		dist_weight = 1.f / (1.f + VectorDistance (glight->pos, r_refdef.vieworg));
+		radius_weight = CLAMP (0.f, glight->radius / 384.f, 1.f);
+		coverage = CLAMP (0.f, glight->radius * dist_weight * 4.f + radius_weight * 0.5f, 1.f);
+		if (dl && dl->kind == DL_PERSISTENT)
+			coverage = q_min (1.f, coverage + 0.15f);
+		if (coverage < 0.20f)
+			lod_mul = 0.5f;
+		else if (coverage < 0.45f)
+			lod_mul = 0.75f;
+
+		scale = ((float)shadow_dlight_tile_size * lod_mul) / (float)shadow_dlight_atlas_size;
+		offset_x = tile_x * ((float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size);
+		offset_y = tile_y * ((float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size);
 
 		R_Shadow_BuildDlightViewProj (viewproj, glight->pos, glight->radius);
 		memcpy (r_framedata.shadow_dlight_viewproj[i], viewproj, sizeof (viewproj));
@@ -1138,10 +1159,13 @@ void R_Shadow_DlightPass (void)
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
 
-		glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
-			shadow_dlight_tile_size, shadow_dlight_tile_size);
-		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
-			shadow_dlight_tile_size, shadow_dlight_tile_size);
+		{
+			int tile_dim = q_max (64, (int)((float)shadow_dlight_tile_size * lod_mul));
+			glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+				tile_dim, tile_dim);
+			glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+				tile_dim, tile_dim);
+		}
 		R_Shadow_LogClearDebug ("R_Shadow_Dlight", GL_DEPTH_BUFFER_BIT);
 		glClear (GL_DEPTH_BUFFER_BIT);
 

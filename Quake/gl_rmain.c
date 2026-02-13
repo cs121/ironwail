@@ -3753,10 +3753,10 @@ void R_SetupView (void)
                 ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
                 : 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
-        r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
-        r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
-        r_framedata.dlight_params[2] = 0.f;
-        r_framedata.dlight_params[3] = 0.f;
+	r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
+	r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
+	r_framedata.dlight_params[2] = 0.f;
+	r_framedata.dlight_params[3] = CLAMP (0.f, r_dlight_quality.value, 3.f);
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
