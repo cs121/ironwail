@@ -1779,6 +1779,43 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			Mat_Shader_ApplySurfaceParm (&material, value, state);
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "skyparms") || !q_strcasecmp (com_token, "skyParms"))
+		{
+			const char *farbox;
+			const char *cloudheight_token;
+			const char *nearbox;
+			float cloudheight = 0.f;
+
+			Mat_Shader_MarkKeywordSeen ("skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			if (!ParseIdentExpected (&data, &farbox, state, "skyParms farbox")
+				|| !ParseIdentExpected (&data, &cloudheight_token, state, "skyParms cloudheight")
+				|| !ParseIdentExpected (&data, &nearbox, state, "skyParms nearbox"))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			if (Mat_Shader_IsNumericToken (cloudheight_token))
+				cloudheight = Q_atof (cloudheight_token);
+			else if (q_strcasecmp (cloudheight_token, "-"))
+			{
+				Mat_Shader_WarnExpectedToken (state, "skyParms cloudheight float or '-'", cloudheight_token);
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			if (material.skybox_far)
+				Z_Free (material.skybox_far);
+			if (material.skybox_near)
+				Z_Free (material.skybox_near);
+
+			material.skybox_far = (q_strcasecmp (farbox, "-") == 0) ? NULL : Mat_Shader_DupString (farbox);
+			material.skybox_near = (q_strcasecmp (nearbox, "-") == 0) ? NULL : Mat_Shader_DupString (nearbox);
+			material.sky_cloudheight = q_max (0.f, cloudheight);
+			material.has_skyparms = true;
+			material.render_flags |= MAT_RENDER_SKY;
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "fogparms") || !q_strcasecmp (com_token, "fogParms"))
 		{
 			float r,g,b,dist;
