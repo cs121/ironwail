@@ -247,34 +247,35 @@ void main()
 		float ndv = saturate(dot(N, V));
 		float rim_raw = pow(1.0 - ndv, RimParams0.z) * RimParams0.y;
 
-		vec3 scaled_static = RimParams0.w * L_static;
-		vec3 scaled_dyn = RimParams1.x * L_dyn;
-		vec3 scaled_amb = RimParams1.y * L_amb;
-		vec3 L_total = scaled_static + scaled_dyn + scaled_amb;
-
-		float direct_intensity = luminance(scaled_static + scaled_dyn);
+		vec3 direct_static = RimParams0.w * L_static * shadow_term;
+		vec3 direct_dyn = RimParams1.x * L_dyn;
+		vec3 direct_rgb = direct_static + direct_dyn;
+		vec3 ambient_rgb = L_amb;
+		float direct_intensity = luminance(direct_rgb);
 		float gate = saturate(direct_intensity * RimParams1.z + RimParams1.w);
 		float rim = rim_raw * gate;
 
-		vec3 rim_color = normalize_safe(L_total);
-		vec3 rim_light = rim * rim_color * RimParams2.x;
-
-		vec3 clamp_ceiling = (RimParams2.y * (scaled_static + scaled_dyn))
-			+ (RimParams2.z * scaled_amb);
-		rim_light = min(rim_light, clamp_ceiling);
+		vec3 rim_light_preclamp = rim * (direct_rgb + RimParams1.y * ambient_rgb) * RimParams2.x;
+		vec3 local_limit_rgb = (RimParams2.y * direct_rgb) + (RimParams2.z * ambient_rgb);
+		vec3 rim_light = min(rim_light_preclamp, local_limit_rgb);
 
 		result.rgb += rim_light;
 
 		if (RimParams2.w > 0.5)
 		{
 			if (RimParams2.w < 1.5)
-				result.rgb = vec3(rim_raw);
+				result.rgb = vec3(rim);
 			else if (RimParams2.w < 2.5)
-				result.rgb = vec3(gate);
+				result.rgb = vec3(direct_intensity);
 			else if (RimParams2.w < 3.5)
-				result.rgb = rim_light;
+				result.rgb = direct_rgb;
+			else if (RimParams2.w < 4.5)
+				result.rgb = ambient_rgb;
 			else
-				result.rgb = L_total;
+			{
+				vec3 clamp_delta = max(rim_light_preclamp - rim_light, vec3(0.0));
+				result.rgb = vec3(saturate(luminance(clamp_delta) * 8.0));
+			}
 			result.a = 1.0;
 		}
 	}
