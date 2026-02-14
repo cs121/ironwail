@@ -462,6 +462,11 @@ cvar_t	r_ao_bentnormals = { "r_ao_bentnormals", "0", CVAR_ARCHIVE };
 cvar_t	r_ao_temporal = { "r_ao_temporal", "0", CVAR_ARCHIVE };
 cvar_t	r_ao_timing = { "r_ao_timing", "0", CVAR_NONE };
 
+cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
+cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
+cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
+cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_ARCHIVE };
+
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
@@ -3788,6 +3793,10 @@ void R_SetupView (void)
         r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
+        r_framedata.lighting_params[0] = r_reflection_probes.value > 0.f ? 1.f : 0.f;
+        r_framedata.lighting_params[1] = CLAMP (0.f, r_reflection_probe_debug.value, 1.f);
+        r_framedata.lighting_params[2] = r_lightgrid_directional.value > 0.f ? 1.f : 0.f;
+        r_framedata.lighting_params[3] = CLAMP (0.f, r_lighting_debug.value, 6.f);
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;

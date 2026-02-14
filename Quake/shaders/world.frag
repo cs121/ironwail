@@ -8,6 +8,7 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=6) uniform samplerCube ReflectionTex;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -245,6 +246,27 @@ vec3 SampleLightmapDir(vec2 uv)
 	return normalize(dir);
 }
 
+vec3 EvaluateDirectionalAmbient(vec3 ambientColor, vec3 normal)
+{
+	if (LightingParams.z <= 0.5)
+		return ambientColor;
+	vec3 dominantDir = vec3(0.0, 0.0, 1.0);
+	float nd = max(dot(normalize(normal), dominantDir), 0.0);
+	float ambientBias = 0.25;
+	return ambientColor * (ambientBias + (1.0 - ambientBias) * nd);
+}
+
+vec3 EvaluateReflectionProbe(vec3 worldPos, vec3 normal, vec3 viewDir, float roughness)
+{
+	if (LightingParams.x <= 0.5)
+		return vec3(0.0);
+	vec3 refl = reflect(-viewDir, normalize(normal));
+	float maxMip = 6.0;
+	float lod = clamp(roughness, 0.0, 1.0) * maxMip;
+	vec3 reflColor = textureLod(ReflectionTex, refl, lod).rgb;
+	return reflColor * 0.12;
+}
+
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
 	const float EPS = 1e-6;
@@ -391,6 +413,23 @@ void main()
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
 #endif
 
+	// Surface normal/view computation
+	vec3 surface_normal = in_normal;
+	float surface_normal_len = length(surface_normal);
+	if (surface_normal_len > 0.0)
+		surface_normal /= surface_normal_len;
+	else
+	{
+		vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+		float geom_len = length(surface_normal_vec);
+		surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
+	}
+	if (!gl_FrontFacing)
+		surface_normal = -surface_normal;
+	vec3 to_eye = EyePos - in_pos;
+	float view_length = length(to_eye);
+	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
+
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
 #if DITHER
@@ -423,6 +462,7 @@ void main()
 		}
 
 		vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
+		vec3 ambient_lightgrid = EvaluateDirectionalAmbient(lightgrid, surface_normal);
 
 		if (LightgridParams.y > 0.5)
 		{
@@ -458,24 +498,6 @@ void main()
 			return;
 		}
 
-		// Surface normal computation
-		vec3 surface_normal = in_normal;
-		float surface_normal_len = length(surface_normal);
-
-		if (surface_normal_len > 0.0)
-		{
-			surface_normal /= surface_normal_len;
-		}
-		else
-		{
-			vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-			float geom_len = length(surface_normal_vec);
-			surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
-		}
-
-		if (!gl_FrontFacing)
-			surface_normal = -surface_normal;
-
 		float shadow_range = 1.0;
 		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
 		bool shadow_enabled = ShadowDebug.x > 0.5;
@@ -496,7 +518,7 @@ void main()
 
 		if (lightgrid_shadow)
 		{
-			vec3 ambient = clamped_static * lightgrid;
+			vec3 ambient = clamped_static * ambient_lightgrid;
 			vec3 direct = clamped_static - ambient;
 			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
 			total_light = ambient + direct * shadow_scale;
@@ -506,14 +528,9 @@ void main()
 			total_light = clamped_static;
 			if (shadow_enabled)
 				total_light *= shadow_term;
-			total_light *= lightgrid;
+			total_light *= ambient_lightgrid;
 		}
 	
-	// View direction
-	vec3 to_eye = EyePos - in_pos;
-	float view_length = length(to_eye);
-	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
-
 	const float SPECULAR_POWER = 16.0;
 	float specular_quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
 	float specular_scale = 0.4 * specular_quality;
@@ -620,6 +637,20 @@ void main()
 #endif
 
 	result.rgb += fullbright + emissive;
+
+	float roughness = 0.65;
+	if (in_tcgen == TCGEN_ENVIRONMENT)
+		roughness = 0.25;
+	vec3 reflection_spec = EvaluateReflectionProbe(in_pos, surface_normal, view_dir, roughness);
+	specular_light += reflection_spec;
+	if (int(LightingParams.w + 0.5) == 6)
+	{
+		out_fragcolor = vec4(clamp(specular_light, 0.0, 1.0), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 	
 	// Add specular
 	vec3 spec_budget = max(vec3(0.0), vec3(Overbright) - total_lightmap);
@@ -633,6 +664,31 @@ void main()
 	result.rgb *= in_stage_color.rgb;
 	result.a = in_alpha * in_stage_color.a;
 	result = clamp(result, 0.0, 1.0);
+	int lighting_debug = int(LightingParams.w + 0.5);
+	if (lighting_debug == 2)
+	{
+		out_fragcolor = vec4(vec3(clamp(length(reflection_spec) * 6.0, 0.0, 1.0)), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (lighting_debug == 4)
+	{
+		out_fragcolor = vec4(normalize(surface_normal) * 0.5 + 0.5, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (lighting_debug == 5)
+	{
+		out_fragcolor = vec4(clamp(total_lightmap, 0.0, 1.0), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 	if (shader_debug == 4)
 	{
 		float fog_factor = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));

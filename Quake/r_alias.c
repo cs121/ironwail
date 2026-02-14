@@ -607,6 +607,7 @@ ibuf.global.rim_params2[3] = CLAMP (0.f, r_rim_debug.value, 4.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_CUBE_MAP, (skybox && skybox->cubemap) ? skybox->cubemap->texnum : 0);
 	R_Shadow_BindShadowMap (GL_TEXTURE5);
 	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias_mdl.value, r_shadow_normalbias_mdl.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
 
