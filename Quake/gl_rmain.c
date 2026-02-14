@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_postfx.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
+#include "r_decals.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -4864,6 +4865,7 @@ void R_ShowTris (void)
 	}
 
 	R_DrawParticles_ShowTris ();
+	R_DrawDecals_ShowTris ();
 
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	GL_PolygonOffset (OFFSET_NONE);
@@ -5048,6 +5050,7 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+	R_Decals_FrameBegin ();
 	R_Shadow_SunPass ();
 	R_Shadow_DlightPass ();
 	R_SetupGL ();
@@ -5060,6 +5063,7 @@ void R_RenderScene (void)
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDLightPass ();
+	R_DrawDecals (false);
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);

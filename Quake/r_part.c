@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "r_decals.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -511,6 +512,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				p->color = 67 + (rand()&3);
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
+				R_AddBloodDecal (start, vec);
 				break;
 
 			case 3:
@@ -542,6 +544,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 				p->color = 67 + (rand()&3);
 				for (j=0 ; j<3 ; j++)
 					p->org[j] = start[j] + ((rand()%6)-3);
+				R_AddBloodDecal (start, vec);
 				len -= 3;
 				break;
 

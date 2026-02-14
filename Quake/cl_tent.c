@@ -22,6 +22,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_tent.c -- client side temporary entities
 
 #include "quakedef.h"
+#include "r_decals.h"
+#include "world.h"
 
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
@@ -34,6 +36,27 @@ sfx_t			*cl_sfx_ric1;
 sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
+
+
+static void CL_DecalImpactNormal (const vec3_t pos, vec3_t out_normal)
+{
+	trace_t trace;
+	vec3_t down, up;
+	if (!cl.worldmodel)
+	{
+		VectorSet (out_normal, 0.f, 0.f, 1.f);
+		return;
+	}
+	VectorSet (down, pos[0], pos[1], pos[2] - 16.f);
+	VectorSet (up, pos[0], pos[1], pos[2] + 16.f);
+	memset (&trace, 0, sizeof (trace));
+	trace.fraction = 1.f;
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, up, down, &trace);
+	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
+		VectorCopy (trace.plane.normal, out_normal);
+	else
+		VectorSet (out_normal, 0.f, 0.f, 1.f);
+}
 
 /*
 =================
@@ -143,10 +166,14 @@ void CL_ParseTEnt (void)
 		break;
 
 	case TE_SPIKE:			// spike hitting wall
+	{
+		vec3_t nrm;
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 10);
+		CL_DecalImpactNormal (pos, nrm);
+		R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -160,11 +187,16 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
+	}
 	case TE_SUPERSPIKE:			// super spike hitting wall
+	{
+		vec3_t nrm;
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		CL_DecalImpactNormal (pos, nrm);
+		R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -179,12 +211,18 @@ void CL_ParseTEnt (void)
 				S_StartSound (-1, 0, cl_sfx_ric3, pos, 1, 1);
 		}
 		break;
+	}
 
 	case TE_GUNSHOT:			// bullet hitting wall
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		{
+			vec3_t nrm;
+			R_RunParticleEffect (pos, vec3_origin, 0, 20);
+			CL_DecalImpactNormal (pos, nrm);
+			R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
+		}
 		break;
 
 	case TE_EXPLOSION:                      // rocket explosion
@@ -193,6 +231,7 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		R_ParticleExplosion (pos);
+		R_AddScorchDecal (pos);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
@@ -254,6 +293,7 @@ void CL_ParseTEnt (void)
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
                 R_ParticleExplosion2 (pos, colorStart, colorLength);
+                R_AddScorchDecal (pos);
                 dl = CL_AllocDlight (0);
                 VectorCopy (pos, dl->origin);
                 dl->radius = 350;
