@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "r_decals.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include "r_maptex_export.h"
@@ -632,6 +633,7 @@ void R_Init (void)
 
         Lightgrid_Init ();
         Mat_Shader_Init ();
+        R_Decals_Init ();
         R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);
@@ -1142,6 +1144,7 @@ void R_NewMap (void)
 	R_ClearEfrags ();
 	r_viewleaf = NULL;
 	R_ClearParticles ();
+	R_Decals_Clear ();
 	VEC_CLEAR (r_pointfile);
 
 	R_ResetGodraysStabilization ();
