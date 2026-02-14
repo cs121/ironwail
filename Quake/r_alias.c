@@ -98,9 +98,9 @@ struct ibuf_s {
 		float	overbright;
 		float	half_lambert;
 		float	_pad1;
-		vec4_t	rim_params0; // x=enable y=strength z=power w=staticScale
-		vec4_t	rim_params1; // x=dynScale y=ambScale z=gateK w=gateBias
-		vec4_t	rim_params2; // x=colorScale y=clampDirect z=clampAmb w=debug
+		vec4_t	rim_params0; // x=enable y=scale z=power w=staticScale
+		vec4_t	rim_params1; // x=dynScale y=ambientScale z=directK w=gateBias
+		vec4_t	rim_params2; // x=colorScale y=clampDirect z=ambientLimit w=debug
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
 		vec4_t	shadow_debug;
@@ -589,7 +589,7 @@ ibuf.global.rim_params1[3] = r_rim_gateBias.value;
 ibuf.global.rim_params2[0] = q_max (0.f, r_rim_colorScale.value);
 ibuf.global.rim_params2[1] = q_max (0.f, r_rim_clampDirect.value);
 ibuf.global.rim_params2[2] = q_max (0.f, r_rim_clampAmb.value);
-ibuf.global.rim_params2[3] = CLAMP (0.f, r_rim_debug.value, 4.f);
+ibuf.global.rim_params2[3] = CLAMP (0.f, r_rim_debug.value, 5.f);
 	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
 	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
