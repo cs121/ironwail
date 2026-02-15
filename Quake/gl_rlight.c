@@ -451,6 +451,7 @@ void R_Clustered_Shutdown (void)
 void R_Clustered_BuildLists (void)
 {
 	int i;
+	unsigned int light_index;
 	int tile_size;
 	int grid_x, grid_y, z_slices;
 	gpu_cluster_inputs_t inputs;
@@ -478,10 +479,10 @@ void R_Clustered_BuildLists (void)
 	if (!r_clustered_headers_cpu)
 		return;
 
-	for (i = 0; i < r_framedata.numlights; i++)
+	for (light_index = 0; light_index < r_framedata.numlights; light_index++)
 	{
-		clustered_light_t *out = &lights_local[i];
-		const gpulight_t *in = &r_lightbuffer.lights[i];
+		clustered_light_t *out = &lights_local[light_index];
+		const gpulight_t *in = &r_lightbuffer.lights[light_index];
 		out->pos_radius[0] = in->pos[0];
 		out->pos_radius[1] = in->pos[1];
 		out->pos_radius[2] = in->pos[2];
