@@ -51,6 +51,9 @@ cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
+cvar_t r_fogvol_test_rate = { "r_fogvol_test_rate", "10", CVAR_ARCHIVE };
+cvar_t r_fogvol_test_every_n_frames = { "r_fogvol_test_every_n_frames", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_test_verbose = { "r_fogvol_test_verbose", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
@@ -127,6 +130,168 @@ typedef struct fogvol_restore_state_s
 
 static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
 
+typedef struct fogvol_test_marker_counter_s
+{
+	char marker[64];
+	int count;
+} fogvol_test_marker_counter_t;
+
+typedef struct fogvol_test_log_snapshot_s
+{
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLint draw_fbo;
+	GLint read_fbo;
+	GLint draw_buffer;
+	GLint read_buffer;
+	GLint program;
+	GLboolean scissor_enabled;
+} fogvol_test_log_snapshot_t;
+
+typedef struct fogvol_test_logctrl_s
+{
+	int frame_id;
+	fogvol_test_marker_counter_t marker_counts[32];
+	int marker_count;
+	double window_start;
+	double last_suppressed_report;
+	int emitted_in_window;
+	int suppressed_in_window;
+	qboolean has_last_snapshot;
+	fogvol_test_log_snapshot_t last_snapshot;
+} fogvol_test_logctrl_t;
+
+static fogvol_test_logctrl_t r_fogvol_test_logctrl = {
+	-1,
+	{{0}},
+	0,
+	0.0,
+	0.0,
+	0,
+	0,
+	false,
+	{{0}, {0}, 0, 0, 0, 0, 0, 0}
+};
+
+static int R_FogVol_TestFrameId (void)
+{
+	return (r_framecount > 0) ? r_framecount : host_framecount;
+}
+
+static void R_FogVol_TestLog_ReportSuppressedIfNeeded (void)
+{
+	if (r_fogvol_test_logctrl.suppressed_in_window <= 0)
+		return;
+	if ((realtime - r_fogvol_test_logctrl.last_suppressed_report) < 1.0)
+		return;
+	Con_Printf ("FOGVOL_TEST frame_id=%d host_frame=%d marker=SUPPRESSED_SUMMARY call_index=0 callsite=%s:%d suppressed %d logs\n",
+		R_FogVol_TestFrameId (),
+		host_framecount,
+		__FILE__,
+		__LINE__,
+		r_fogvol_test_logctrl.suppressed_in_window);
+	r_fogvol_test_logctrl.last_suppressed_report = realtime;
+	r_fogvol_test_logctrl.suppressed_in_window = 0;
+}
+
+static void R_FogVol_TestLog_PrepareFrame (void)
+{
+	const int frame_id = R_FogVol_TestFrameId ();
+
+	if (r_fogvol_test_logctrl.frame_id != frame_id)
+	{
+		r_fogvol_test_logctrl.frame_id = frame_id;
+		r_fogvol_test_logctrl.marker_count = 0;
+	}
+
+	if ((realtime - r_fogvol_test_logctrl.window_start) >= 1.0)
+	{
+		R_FogVol_TestLog_ReportSuppressedIfNeeded ();
+		r_fogvol_test_logctrl.window_start = realtime;
+		r_fogvol_test_logctrl.emitted_in_window = 0;
+	}
+}
+
+static int R_FogVol_TestLog_NextCallIndex (const char *marker)
+{
+	for (int i = 0; i < r_fogvol_test_logctrl.marker_count; ++i)
+	{
+		if (!q_strcasecmp (r_fogvol_test_logctrl.marker_counts[i].marker, marker))
+			return r_fogvol_test_logctrl.marker_counts[i].count++;
+	}
+
+	if (r_fogvol_test_logctrl.marker_count < (int)countof (r_fogvol_test_logctrl.marker_counts))
+	{
+		fogvol_test_marker_counter_t *entry = &r_fogvol_test_logctrl.marker_counts[r_fogvol_test_logctrl.marker_count++];
+		q_strlcpy (entry->marker, marker, sizeof (entry->marker));
+		entry->count = 1;
+		return 0;
+	}
+
+	return 0;
+}
+
+static qboolean R_FogVol_TestLog_AllowLog (void)
+{
+	int every_n_frames = (int)Q_rint (r_fogvol_test_every_n_frames.value);
+	int rate = (int)Q_rint (r_fogvol_test_rate.value);
+
+	if (every_n_frames < 1)
+		every_n_frames = 1;
+
+	if ((R_FogVol_TestFrameId () % every_n_frames) != 0)
+	{
+		++r_fogvol_test_logctrl.suppressed_in_window;
+		R_FogVol_TestLog_ReportSuppressedIfNeeded ();
+		return false;
+	}
+
+	if (rate > 0 && r_fogvol_test_logctrl.emitted_in_window >= rate)
+	{
+		++r_fogvol_test_logctrl.suppressed_in_window;
+		R_FogVol_TestLog_ReportSuppressedIfNeeded ();
+		return false;
+	}
+
+	++r_fogvol_test_logctrl.emitted_in_window;
+	return true;
+}
+
+static qboolean R_FogVol_TestLog_ShouldEmitSnapshot (const fogvol_test_log_snapshot_t *snapshot)
+{
+	if (r_fogvol_test_verbose.value >= 2.f)
+		return true;
+	if (!r_fogvol_test_logctrl.has_last_snapshot)
+	{
+		r_fogvol_test_logctrl.last_snapshot = *snapshot;
+		r_fogvol_test_logctrl.has_last_snapshot = true;
+		return true;
+	}
+	if (memcmp (&r_fogvol_test_logctrl.last_snapshot, snapshot, sizeof (*snapshot)) != 0)
+	{
+		r_fogvol_test_logctrl.last_snapshot = *snapshot;
+		return true;
+	}
+	return false;
+}
+
+static qboolean R_FogVol_TestLog_Begin (const char *marker, const char *file, int line, int *call_index)
+{
+	R_FogVol_TestLog_PrepareFrame ();
+	*call_index = R_FogVol_TestLog_NextCallIndex (marker);
+	if (!R_FogVol_TestLog_AllowLog ())
+		return false;
+	(void)file;
+	(void)line;
+	return true;
+}
+
+#define R_FogVol_LogBufferMarker(marker) R_FogVol_LogBufferMarker_Impl ((marker), __FILE__, __LINE__)
+#define R_FogVol_SetDrawBufferDebug(buf, marker) R_FogVol_SetDrawBufferDebug_Impl ((buf), (marker), __FILE__, __LINE__)
+#define R_FogVol_SetReadBufferDebug(buf, marker) R_FogVol_SetReadBufferDebug_Impl ((buf), (marker), __FILE__, __LINE__)
+#define R_FogVol_LogPipelineState(marker) R_FogVol_LogPipelineState_Impl ((marker), __FILE__, __LINE__)
+#define R_FogVol_TestState_Log(phase, state) R_FogVol_TestState_Log_Impl ((phase), (state), __FILE__, __LINE__)
+
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 {
 	GL_BindFramebufferFunc (target, fbo);
@@ -166,42 +331,48 @@ static qboolean R_FogVol_TestDebugEnabled (void)
 	return r_fogvol_testvolumes.value > 0.f || r_fogvol_testvolumes_dumpstate.value > 0.f;
 }
 
-static void R_FogVol_LogBufferMarker (const char *marker)
+static void R_FogVol_LogBufferMarker_Impl (const char *marker, const char *file, int line)
 {
 	GLint draw_fbo = 0, read_fbo = 0;
 	GLint draw_buffer = 0, read_buffer = 0;
+	int call_index = 0;
 
 	if (!R_FogVol_TestDebugEnabled ())
+		return;
+	if (!R_FogVol_TestLog_Begin (marker, file, line, &call_index))
 		return;
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
 	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
 	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
-	Con_Printf ("FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
-		marker, draw_fbo, read_fbo, (unsigned)draw_buffer, (unsigned)read_buffer);
+	Con_Printf ("FOGVOL_TEST frame_id=%d host_frame=%d marker=%s call_index=%d callsite=%s:%d draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
+		R_FogVol_TestFrameId (), host_framecount, marker, call_index, file, line,
+		draw_fbo, read_fbo, (unsigned)draw_buffer, (unsigned)read_buffer);
 }
 
-static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
+static void R_FogVol_SetDrawBufferDebug_Impl (GLenum buf, const char *marker, const char *file, int line)
 {
 	glDrawBuffer (buf);
-	R_FogVol_LogBufferMarker (marker);
+	R_FogVol_LogBufferMarker_Impl (marker, file, line);
 }
 
-static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
+static void R_FogVol_SetReadBufferDebug_Impl (GLenum buf, const char *marker, const char *file, int line)
 {
 	glReadBuffer (buf);
-	R_FogVol_LogBufferMarker (marker);
+	R_FogVol_LogBufferMarker_Impl (marker, file, line);
 }
 
-static void R_FogVol_LogPipelineState (const char *marker)
+static void R_FogVol_LogPipelineState_Impl (const char *marker, const char *file, int line)
 {
+	fogvol_test_log_snapshot_t snapshot;
 	GLint viewport[4] = {0};
 	GLint scissor_box[4] = {0};
 	GLint draw_fbo = 0, read_fbo = 0;
 	GLint draw_buffer = 0, read_buffer = 0;
 	GLint program = 0;
 	GLboolean scissor_enabled = GL_FALSE;
+	int call_index = 0;
 
 	if (!R_FogVol_TestDebugEnabled ())
 		return;
@@ -215,10 +386,30 @@ static void R_FogVol_LogPipelineState (const char *marker)
 	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
 	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
 
+	snapshot.viewport[0] = viewport[0];
+	snapshot.viewport[1] = viewport[1];
+	snapshot.viewport[2] = viewport[2];
+	snapshot.viewport[3] = viewport[3];
+	snapshot.scissor_box[0] = scissor_box[0];
+	snapshot.scissor_box[1] = scissor_box[1];
+	snapshot.scissor_box[2] = scissor_box[2];
+	snapshot.scissor_box[3] = scissor_box[3];
+	snapshot.draw_fbo = draw_fbo;
+	snapshot.read_fbo = read_fbo;
+	snapshot.draw_buffer = draw_buffer;
+	snapshot.read_buffer = read_buffer;
+	snapshot.program = program;
+	snapshot.scissor_enabled = scissor_enabled;
+
+	if (!R_FogVol_TestLog_Begin (marker, file, line, &call_index))
+		return;
+	if (!R_FogVol_TestLog_ShouldEmitSnapshot (&snapshot))
+		return;
+
 	Con_Printf (
-		"FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) "
+		"FOGVOL_TEST frame_id=%d host_frame=%d marker=%s call_index=%d callsite=%s:%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) "
 		"scissor=%d scissor_box=(%d %d %d %d) prog=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
-		marker,
+		R_FogVol_TestFrameId (), host_framecount, marker, call_index, file, line,
 		draw_fbo,
 		read_fbo,
 		viewport[0], viewport[1], viewport[2], viewport[3],
@@ -389,10 +580,18 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 }
 
 
-static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t *state)
+static void R_FogVol_TestState_Log_Impl (const char *phase, const fogvol_test_state_t *state, const char *file, int line)
 {
+	int call_index = 0;
+
+	if (!R_FogVol_TestDebugEnabled ())
+		return;
+	if (!R_FogVol_TestLog_Begin (phase, file, line, &call_index))
+		return;
+
 	Con_Printf (
-		"FOGVOL_TEST %s viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
+		"FOGVOL_TEST frame_id=%d host_frame=%d marker=%s call_index=%d callsite=%s:%d "
+		"viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
 		"draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x "
 		"draw_buffers=[0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x] "
 		"draw_status=0x%04x read_status=0x%04x "
@@ -402,7 +601,7 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d) "
 		"clear_color=(%.3f %.3f %.3f %.3f) srgb=%d dither=%d multisample=%d glstate=0x%08x "
 		"cache(glstate=0x%08x draw_fbo=%d read_fbo=%d prog=%d vao=%d)\n",
-		phase,
+		R_FogVol_TestFrameId (), host_framecount, phase, call_index, file, line,
 		state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3],
 		state->scissor_test,
 		state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3],
@@ -551,6 +750,9 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_noisemode);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
+	Cvar_RegisterVariable (&r_fogvol_test_rate);
+	Cvar_RegisterVariable (&r_fogvol_test_every_n_frames);
+	Cvar_RegisterVariable (&r_fogvol_test_verbose);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
@@ -977,7 +1179,13 @@ void R_FogVol_Render (void)
 	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
 	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
 	{
-		Con_Printf ("FOGVOL_TEST dumpstate %s\n", dumpstate_always ? "enabled" : "disabled");
+		int call_index = 0;
+		if (R_FogVol_TestLog_Begin ("DUMPSTATE", __FILE__, __LINE__, &call_index))
+		{
+			Con_Printf ("FOGVOL_TEST frame_id=%d host_frame=%d marker=DUMPSTATE call_index=%d callsite=%s:%d dumpstate %s\n",
+				R_FogVol_TestFrameId (), host_framecount, call_index, __FILE__, __LINE__,
+				dumpstate_always ? "enabled" : "disabled");
+		}
 		last_dumpstate = (int)Q_rint (r_fogvol_testvolumes_dumpstate.value);
 	}
 
