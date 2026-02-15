@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "steam.h"
+#include "simd_caps.h"
 
 #ifndef MICROSOFT_WINDOWS_WINBASE_H_DEFINE_INTERLOCKED_CPLUSPLUS_OVERLOADS
 #define MICROSOFT_WINDOWS_WINBASE_H_DEFINE_INTERLOCKED_CPLUSPLUS_OVERLOADS 0
@@ -1012,7 +1013,6 @@ qboolean Sys_IsStartedFromMapEditor (void)
 
 void Sys_Init (void)
 {
-	SYSTEM_INFO info;
 
 	Sys_SetTimerResolution ();
 	Sys_SetDPIAware ();
@@ -1030,10 +1030,7 @@ void Sys_Init (void)
 	if (!IsWindowsXPOrGreater ())
 		Sys_Error ("This engine requires Windows XP or newer");
 
-	GetSystemInfo(&info);
-	host_parms->numcpus = info.dwNumberOfProcessors;
-	if (host_parms->numcpus < 1)
-		host_parms->numcpus = 1;
+	host_parms->numcpus = CPU_GetCoreCount ();
 	Sys_Printf("Detected %d CPUs.\n", host_parms->numcpus);
 
 	if (isDedicated)
