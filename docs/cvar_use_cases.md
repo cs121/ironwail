@@ -245,42 +245,12 @@ Total registered cvars reviewed: **627**.
 | `r_filmgrain_speed` | `1.0` |
 | `r_flatlightstyles` | `0` |
 | `r_fullbright` | `0` |
-| `r_godray_sky_blur` | `1.5` |
-| `r_godray_sky_enable` | `1` |
-| `r_godray_sky_intensity` | `1.0` |
-| `r_godray_sky_threshold` | `0.05` |
 | `r_godrays` | `0` |
-| `r_godrays_blur` | `1.5` |
+| `r_godrays_quality` | `1` |
 | `r_godrays_debug` | `0` |
-| `r_godrays_debug_source` | `0` |
-| `r_godrays_decay` | `0.97` |
-| `r_godrays_density` | `0.9` |
-| `r_godrays_emissive_intensity` | `1.0` |
-| `r_godrays_emissive_threshold` | `0.4` |
-| `r_godrays_emit_emissive` | `1` |
-| `r_godrays_emit_lighttex` | `1` |
-| `r_godrays_emit_sky` | `1` |
-| `r_godrays_exposure` | `1.0` |
-| `r_godrays_light_sharpness` | `1.25` |
-| `r_godrays_light_threshold` | `0.6` |
-| `r_godrays_light_x` | `0.5` |
-| `r_godrays_light_y` | `1` |
-| `r_godrays_lighttex_intensity` | `1.0` |
-| `r_godrays_lighttex_name_match` | `1` |
-| `r_godrays_mask_knee` | `0.0` |
-| `r_godrays_max_radius` | `1.0` |
-| `r_godrays_max_shift` | `0.0` |
-| `r_godrays_reset_on_teleport` | `1` |
-| `r_godrays_samples` | `48` |
-| `r_godrays_sky_intensity` | `1.0` |
-| `r_godrays_sky_softness` | `1.5` |
-| `r_godrays_sky_tint` | `1 1 1` |
-| `r_godrays_smooth_rate` | `8.0` |
-| `r_godrays_stabilize` | `0.0` |
-| `r_godrays_stabilize_max_px` | `0.0` |
-| `r_godrays_stabilize_strength` | `0.5` |
-| `r_godrays_threshold` | `0.0` |
-| `r_godrays_weight` | `0.015` |
+| `r_godrays_sky` *(deprecated)* | `0` |
+| `r_godrays_light` *(deprecated)* | `0` |
+| `r_godrays_world` *(deprecated)* | `0` |
 | `r_lerplightstyles` | `1` |
 | `r_lerpmodels` | `1` |
 | `r_lerpmove` | `1` |

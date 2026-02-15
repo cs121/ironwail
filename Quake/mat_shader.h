@@ -210,8 +210,7 @@ typedef enum
 	MAT_SHADERFLAG_MONSTERCLIP	= (1u << 8),
 	MAT_SHADERFLAG_STONE		= (1u << 9),
 	MAT_SHADERFLAG_EMISSIVE		= (1u << 10),
-	MAT_SHADERFLAG_BLOOM		= (1u << 11),
-	MAT_SHADERFLAG_GODRAY		= (1u << 12)
+	MAT_SHADERFLAG_BLOOM		= (1u << 11)
 } mat_shader_flags_t;
 
 typedef struct mat_shader_stage_s
@@ -220,10 +219,8 @@ typedef struct mat_shader_stage_s
 	unsigned int		output_overrides;
 	float			emissive_scale;
 	float			bloom_scale;
-	float			godray_scale;
 	qboolean		emissive_scale_set;
 	qboolean		bloom_scale_set;
-	qboolean		godray_scale_set;
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
 	mat_alphagen_t	alphagen;
@@ -256,8 +253,7 @@ typedef enum
 {
 	MAT_STAGE_OUT_COLOR		= (1u << 0),
 	MAT_STAGE_OUT_EMISSIVE		= (1u << 1),
-	MAT_STAGE_OUT_BLOOM		= (1u << 2),
-	MAT_STAGE_OUT_GODRAY_SOURCE	= (1u << 3)
+	MAT_STAGE_OUT_BLOOM		= (1u << 2)
 } mat_stage_output_flags_t;
 
 typedef struct shader_material_s
@@ -275,12 +271,10 @@ typedef struct shader_material_s
 	float			polygon_offset_units;
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
-	qboolean		godray_enable;
 	qboolean		has_skyparms;
 	qboolean		has_fogparms;
 	float			emissive_scale;
 	float			bloom_scale;
-	float			godray_scale;
 	vec3_t		fog_color;
 	float			fog_distance;
 	char			*skybox_far;
@@ -292,8 +286,8 @@ typedef struct shader_material_s
 } shader_material_t;
 
 // Developer note:
-// Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
-// bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
+// Supported directives: qer_editorimage, surfaceparm, emissive, bloom, emissive_scale,
+// bloom_scale, emissiveScale, bloomScale, and a single stage block
 // with map + rgbGen identity.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
