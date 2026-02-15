@@ -461,14 +461,22 @@ static gltexture_t *R_Decals_LoadTexture (decal_def_t *def, int def_index)
 	int width, height;
 	enum srcformat fmt;
 	byte *data;
+	char image_name[MAX_QPATH];
+	const char *ext;
 	if (def->num_textures <= 0)
 		return NULL;
 	if (!def->textures[0])
 	{
-		data = Image_LoadImage (def->texture_paths[0], &width, &height, &fmt);
+		q_strlcpy (image_name, def->texture_paths[0], sizeof (image_name));
+		ext = COM_FileGetExtension (image_name);
+		if (*ext && (!q_strcasecmp (ext, "png") || !q_strcasecmp (ext, "tga")
+			|| !q_strcasecmp (ext, "jpg") || !q_strcasecmp (ext, "pcx") || !q_strcasecmp (ext, "lmp")))
+			COM_StripExtension (image_name, image_name, sizeof (image_name));
+
+		data = Image_LoadImage (image_name, &width, &height, &fmt);
 		if (data)
 		{
-			def->textures[0] = TexMgr_LoadImage (NULL, def->texture_paths[0], width, height, fmt, data, def->texture_paths[0], 0,
+			def->textures[0] = TexMgr_LoadImage (NULL, def->texture_paths[0], width, height, fmt, data, image_name, 0,
 				TEXPREF_ALPHA | TEXPREF_MIPMAP | TEXPREF_CLAMP);
 			free (data);
 		}
