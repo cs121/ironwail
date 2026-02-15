@@ -244,8 +244,9 @@ void main()
 	{
 		vec3 N = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 		vec3 V = normalize_safe(-in_pos);
-		float ndv = saturate(dot(N, V));
-		float rim_raw = pow(1.0 - ndv, RimParams0.z) * RimParams0.y;
+		// Use abs(dot(N,V)) to avoid blown-out fronts on assets with inconsistent normal orientation/winding.
+		float ndv = saturate(abs(dot(N, V)));
+		float rim_raw = pow(saturate(1.0 - ndv), RimParams0.z) * RimParams0.y;
 
 		vec3 direct_static = RimParams0.w * L_static * shadow_term;
 		vec3 direct_dyn = RimParams1.x * L_dyn;
@@ -267,17 +268,8 @@ void main()
 		{
 			if (RimParams2.w < 1.5)
 				result.rgb = vec3(rim);
-			else if (RimParams2.w < 2.5)
-				result.rgb = vec3(direct_intensity);
-			else if (RimParams2.w < 3.5)
-				result.rgb = direct_rgb;
-			else if (RimParams2.w < 4.5)
-				result.rgb = ambient_rgb;
 			else
-			{
-				vec3 clamp_delta = max(rim_light_preclamp - rim_light, vec3(0.0));
-				result.rgb = vec3(saturate(luminance(clamp_delta) * 8.0));
-			}
+				result.rgb = vec3(ndv);
 			result.a = 1.0;
 		}
 	}
