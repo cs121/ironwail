@@ -1665,11 +1665,11 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	if (!framebufs.composite.depth_stencil_tex)
 		return 0;
 	if (method == 1 && !glprogs.ao_assao_main)
-		return GL_GenerateLegacySSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+		return 0;
 	if (method == 2 && (!glprogs.ao_gtao_prefilter || !glprogs.ao_gtao_main || !glprogs.ao_denoise))
-		return GL_GenerateLegacySSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+		return 0;
 	if (!glprogs.ao_denoise)
-		return GL_GenerateLegacySSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+		return 0;
 
 	/*
 	Integration Plan
@@ -3564,7 +3564,7 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
 		return true;
-	if (r_ssao.value > 0.f)
+	if (r_ao_method.value > 0.f)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
@@ -5110,7 +5110,7 @@ void R_WarpScaleView (void)
 	needwarpscale = r_refdef.scale != 1 || water_warp;
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
-		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || r_fogvol.value > 0.f);
+		&& (R_DoFEnabled () || r_ao_method.value > 0.f || r_ao_debug.value > 0.f || r_fogvol.value > 0.f);
 
 	if (msaa)
 	{
