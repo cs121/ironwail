@@ -1,11 +1,9 @@
-#version 430
 layout(local_size_x=4, local_size_y=4, local_size_z=4) in;
 layout(rgba16f, binding=0) uniform image3D InOutScatter;
 layout(r16f, binding=1) uniform image3D InOutTransmittance;
 layout(binding=6) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
-#define REVERSED_Z 0
 #include "shadow_sample.glsl"
 
 layout(location=0) uniform vec4 FroxelParams0; // xyz dims, w steps
