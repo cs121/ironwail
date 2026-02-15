@@ -372,9 +372,9 @@ Total registered cvars reviewed: **627**.
 | `r_rim_dynScale` | `1.0` |
 | `r_rim_gateBias` | `0.0` |
 | `r_rim_gateK` | `1.0` |
-| `r_rim_power` | `2.5` |
+| `r_rim_power` | `4.0` |
 | `r_rim_staticScale` | `1.0` |
-| `r_rim_strength` | `0.8` |
+| `r_rim_strength` | `0.15` |
 | `r_scale` | `1` |
 | `r_screendarken` | `0` |
 | `r_screendarken_depth` | `0.4` |
