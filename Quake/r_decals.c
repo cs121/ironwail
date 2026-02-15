@@ -99,6 +99,8 @@ static int decal_next_spawn_id;
 static int decal_frame;
 static decal_stats_t decal_stats;
 
+#define DECAL_BATCH_MAX 256
+
 static int R_Decals_GetMax (void)
 {
 	return CLAMP (0, (int)r_decals_max.value, 4096);
@@ -145,6 +147,47 @@ static void R_Decals_BuildBasis (const vec3_t normal, vec3_t tangent, vec3_t bit
 	VectorNormalizeFast (tangent);
 	CrossProduct (normal, tangent, bitangent);
 	VectorNormalizeFast (bitangent);
+}
+
+static float R_Decals_Random01 (void)
+{
+	return (float)rand () / (float)RAND_MAX;
+}
+
+static float R_Decals_RandomRange (float minval, float maxval)
+{
+	if (maxval <= minval)
+		return minval;
+	return minval + R_Decals_Random01 () * (maxval - minval);
+}
+
+static void R_Decals_SanitizeDef (decal_def_t *def)
+{
+	if (def->size_max < def->size_min)
+	{
+		float tmp = def->size_min;
+		def->size_min = def->size_max;
+		def->size_max = tmp;
+	}
+	if (def->alpha_max < def->alpha_min)
+	{
+		float tmp = def->alpha_min;
+		def->alpha_min = def->alpha_max;
+		def->alpha_max = tmp;
+	}
+	def->size_min = q_max (1.f, def->size_min);
+	def->size_max = q_max (def->size_min, def->size_max);
+	def->alpha_min = CLAMP (0.f, def->alpha_min, 1.f);
+	def->alpha_max = CLAMP (def->alpha_min, def->alpha_max, 1.f);
+	def->priority = CLAMP (0, def->priority, 16);
+}
+
+static void R_Decals_EmitQuad (const vec3_t center, const vec3_t right, const vec3_t up, vec3_t out_verts[4])
+{
+	VectorSubtract (center, right, out_verts[0]); VectorSubtract (out_verts[0], up, out_verts[0]);
+	VectorSubtract (center, right, out_verts[1]); VectorAdd (out_verts[1], up, out_verts[1]);
+	VectorAdd (center, right, out_verts[2]); VectorAdd (out_verts[2], up, out_verts[2]);
+	VectorAdd (center, right, out_verts[3]); VectorSubtract (out_verts[3], up, out_verts[3]);
 }
 
 static const char *R_Decal_CategoryName (decal_category_t cat)
@@ -391,6 +434,8 @@ static void R_Decals_LoadScripts (void)
 		if (*search->filename) R_Decals_LoadFromDir (search);
 		else if (search->pack) R_Decals_LoadFromPack (search);
 	}
+	for (i = 0; i < (size_t)decal_def_count; ++i)
+		R_Decals_SanitizeDef (&decal_defs[i]);
 	VEC_FREE (paths);
 }
 
@@ -437,16 +482,76 @@ static decal_instance_t *R_Decals_FindOverwriteSlot (int priority)
 	return best;
 }
 
+static void R_Decals_InitInstance (decal_instance_t *d, const decal_def_t *def, const vec3_t center, const vec3_t verts[4], float alpha)
+{
+	memset (d, 0, sizeof (*d));
+	d->active = true;
+	d->priority = def->priority;
+	d->category = def->category;
+	d->blend = def->blend;
+	d->spawn_time = cl.time;
+	d->spawn_id = ++decal_next_spawn_id;
+	d->frame_touched = decal_frame;
+	VectorCopy (center, d->origin);
+	memcpy (d->verts, verts, sizeof (d->verts));
+	d->lifetime = def->lifetime > 0.f ? def->lifetime : q_max (1.f, r_decals_lifetime.value);
+	d->fade = def->fade > 0.f ? def->fade : q_max (0.f, r_decals_fade.value);
+	d->alpha = CLAMP (0.f, alpha, 1.f);
+}
+
+static void R_Decals_GetRotationAxes (const decal_def_t *def, float *out_c, float *out_s)
+{
+	if (def->random_rotation)
+	{
+		float angle = R_Decals_Random01 () * 2.f * (float)M_PI;
+		*out_c = cosf (angle);
+		*out_s = sinf (angle);
+		return;
+	}
+	*out_c = 1.f;
+	*out_s = 0.f;
+}
+
+static void R_Decals_BuildOrthonormalQuad (const vec3_t org, const vec3_t normal, const decal_def_t *def, float size_opt, vec3_t center, vec3_t out_verts[4])
+{
+	vec3_t nrm, tangent, bitangent;
+	vec3_t right, up;
+	float half;
+	float c, s;
+
+	VectorCopy (normal, nrm);
+	if (VectorLengthSquared (nrm) < 0.01f)
+		VectorSet (nrm, 0.f, 0.f, 1.f);
+	VectorNormalizeFast (nrm);
+	R_Decals_BuildBasis (nrm, tangent, bitangent);
+	R_Decals_GetRotationAxes (def, &c, &s);
+
+	half = (size_opt > 0.f) ? size_opt * 0.5f : R_Decals_RandomRange (def->size_min, def->size_max) * 0.5f;
+	VectorMA (org, r_decals_bias.value, nrm, center);
+	for (int i = 0; i < 3; ++i)
+	{
+		right[i] = (tangent[i] * c + bitangent[i] * s) * half;
+		up[i] = (bitangent[i] * c - tangent[i] * s) * half;
+	}
+	R_Decals_EmitQuad (center, right, up, out_verts);
+}
+
+static float R_Decals_GetSpawnAlpha (const decal_def_t *def, const float *rgba_opt)
+{
+	float alpha = R_Decals_RandomRange (def->alpha_min, def->alpha_max);
+	if (rgba_opt)
+		alpha *= rgba_opt[3];
+	return alpha;
+}
+
 void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, const float *rgba_opt, float size_opt, int flags)
 {
 	int def_index;
 	decal_def_t *def;
 	decal_instance_t *d;
-	vec3_t nrm, tangent, bitangent;
-	vec3_t center, right, up;
-	float half, alpha;
-	float angle = 0.f;
-	float c = 1.f, s = 0.f;
+	vec3_t center;
+	vec3_t verts[4];
+	float alpha;
 	(void)flags;
 
 	if (!r_decals.value || !name || !name[0] || !decal_pool || !decal_capacity)
@@ -471,47 +576,9 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 	if (d->active)
 		decal_stats.dropped_pool_overwrite++;
 
-	VectorCopy (normal, nrm);
-	if (VectorLengthSquared (nrm) < 0.01f)
-		VectorSet (nrm, 0.f, 0.f, 1.f);
-	VectorNormalizeFast (nrm);
-	R_Decals_BuildBasis (nrm, tangent, bitangent);
-	if (def->random_rotation)
-	{
-		angle = ((float)rand() / (float)RAND_MAX) * 2.f * (float)M_PI;
-		c = cosf (angle); s = sinf (angle);
-	}
-	if (size_opt > 0.f)
-		half = size_opt * 0.5f;
-	else
-		half = (def->size_min + ((float)rand()/(float)RAND_MAX) * (def->size_max - def->size_min)) * 0.5f;
-	alpha = def->alpha_min + ((float)rand()/(float)RAND_MAX) * (def->alpha_max - def->alpha_min);
-	if (rgba_opt)
-		alpha *= rgba_opt[3];
-
-	VectorMA (org, r_decals_bias.value, nrm, center);
-	for (int i = 0; i < 3; ++i)
-	{
-		right[i] = (tangent[i] * c + bitangent[i] * s) * half;
-		up[i] = (bitangent[i] * c - tangent[i] * s) * half;
-	}
-	VectorSubtract (center, right, d->verts[0]); VectorSubtract (d->verts[0], up, d->verts[0]);
-	VectorSubtract (center, right, d->verts[1]); VectorAdd (d->verts[1], up, d->verts[1]);
-	VectorAdd (center, right, d->verts[2]); VectorAdd (d->verts[2], up, d->verts[2]);
-	VectorAdd (center, right, d->verts[3]); VectorSubtract (d->verts[3], up, d->verts[3]);
-
-	memset (d, 0, sizeof (*d));
-	d->active = true;
-	d->priority = def->priority;
-	d->category = def->category;
-	d->blend = def->blend;
-	d->spawn_time = cl.time;
-	d->spawn_id = ++decal_next_spawn_id;
-	d->frame_touched = decal_frame;
-	VectorCopy (center, d->origin);
-	if (def->lifetime > 0.f) d->lifetime = def->lifetime; else d->lifetime = q_max (1.f, r_decals_lifetime.value);
-	if (def->fade > 0.f) d->fade = def->fade; else d->fade = q_max (0.f, r_decals_fade.value);
-	d->alpha = CLAMP (0.f, alpha, 1.f);
+	R_Decals_BuildOrthonormalQuad (org, normal, def, size_opt, center, verts);
+	alpha = R_Decals_GetSpawnAlpha (def, rgba_opt);
+	R_Decals_InitInstance (d, def, center, verts, alpha);
 	d->texture = R_Decals_LoadTexture (def, def_index);
 	if (!d->texture)
 	{
@@ -596,19 +663,76 @@ static void R_Decals_SetBlend (decal_blend_t blend, qboolean showtris)
 	}
 }
 
+static void R_Decals_FlushBatch (const decalvertex_t *verts, const GLushort *idx, int count, qboolean showtris, gltexture_t *tex, decal_blend_t blend)
+{
+	GLuint buf;
+	GLbyte *ofs;
+
+	if (count <= 0)
+		return;
+	GL_Bind (GL_TEXTURE0, showtris ? whitetexture : tex);
+	R_Decals_SetBlend (blend, showtris);
+	GL_Upload (GL_ARRAY_BUFFER, verts, sizeof (decalvertex_t) * count * 4, &buf, &ofs);
+	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
+	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, pos));
+	GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, uv));
+	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, idx, sizeof (GLushort) * count * 6, &buf, &ofs);
+	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
+	glDrawElements (GL_TRIANGLES, count * 6, GL_UNSIGNED_SHORT, ofs);
+}
+
+static void R_Decals_WriteBatchEntry (const decal_instance_t *d, decalvertex_t *verts, GLushort *idx, int batch_index)
+{
+	int k;
+	for (k = 0; k < 4; ++k)
+	{
+		VectorCopy (d->verts[k], verts[batch_index * 4 + k].pos);
+		verts[batch_index * 4 + k].uv[0] = (k == 0 || k == 1) ? 0.f : 1.f;
+		verts[batch_index * 4 + k].uv[1] = (k == 0 || k == 3) ? 1.f : 0.f;
+	}
+	idx[batch_index * 6 + 0] = batch_index * 4 + 0;
+	idx[batch_index * 6 + 1] = batch_index * 4 + 1;
+	idx[batch_index * 6 + 2] = batch_index * 4 + 2;
+	idx[batch_index * 6 + 3] = batch_index * 4 + 0;
+	idx[batch_index * 6 + 4] = batch_index * 4 + 2;
+	idx[batch_index * 6 + 5] = batch_index * 4 + 3;
+}
+
+static qboolean R_Decals_PrepareVisible (decal_instance_t *d, double now, float drawdist, float drawdist_sq)
+{
+	float age;
+	float fade_start;
+	vec3_t dv;
+
+	if (!d->active)
+		return false;
+	age = (float)(now - d->spawn_time);
+	if (age >= d->lifetime)
+	{
+		d->active = false;
+		return false;
+	}
+	VectorSubtract (r_origin, d->origin, dv);
+	d->dist_sq = DotProduct (dv, dv);
+	if (drawdist > 0.f && d->dist_sq > drawdist_sq)
+		return false;
+	fade_start = q_max (0.f, d->lifetime - d->fade);
+	if (age > fade_start && d->fade > 0.f)
+		d->alpha = CLAMP (0.f, 1.f - (age - fade_start) / d->fade, 1.f);
+	return d->alpha > 0.f;
+}
+
 void R_DrawDecals (qboolean showtris)
 {
 	decal_instance_t *visible[4096];
-	decalvertex_t verts[4 * 256];
-	GLushort idx[6 * 256];
+	decalvertex_t verts[4 * DECAL_BATCH_MAX];
+	GLushort idx[6 * DECAL_BATCH_MAX];
 	int vis_count = 0, draw_count = 0;
-	int i, j = 0;
+	int i, batch_count = 0;
 	double now = cl.time;
 	float drawdist = q_max (0.f, r_decals_drawdist.value);
 	float drawdist_sq = drawdist * drawdist;
 	int budget = CLAMP (0, (int)r_decals_render_budget_decals.value, 4096);
-	GLuint buf;
-	GLbyte *ofs;
 	gltexture_t *current_tex = NULL;
 	decal_blend_t current_blend = DECAL_BLEND_ALPHA;
 
@@ -618,19 +742,8 @@ void R_DrawDecals (qboolean showtris)
 	for (i = 0; i < decal_capacity; ++i)
 	{
 		decal_instance_t *d = &decal_pool[i];
-		float age, fade_start;
-		if (!d->active)
-			continue;
-		age = (float)(now - d->spawn_time);
-		if (age >= d->lifetime)
-		{ d->active = false; continue; }
-		{ vec3_t dv; VectorSubtract (r_origin, d->origin, dv); d->dist_sq = DotProduct (dv, dv); }
-		if (drawdist > 0.f && d->dist_sq > drawdist_sq)
-			continue;
-		fade_start = q_max (0.f, d->lifetime - d->fade);
-		if (age > fade_start && d->fade > 0.f)
-			d->alpha = CLAMP (0.f, 1.f - (age - fade_start) / d->fade, 1.f);
-		visible[vis_count++] = d;
+		if (R_Decals_PrepareVisible (d, now, drawdist, drawdist_sq))
+			visible[vis_count++] = d;
 	}
 
 	if (!vis_count)
@@ -646,48 +759,22 @@ void R_DrawDecals (qboolean showtris)
 	for (i = 0; i < vis_count && draw_count < budget; ++i)
 	{
 		decal_instance_t *d = visible[i];
-		if (d->alpha <= 0.f || !d->texture)
+		if (!d->texture)
 			continue;
-		if (!current_tex || current_tex != d->texture || current_blend != d->blend || j >= 256)
+		if (!current_tex || current_tex != d->texture || current_blend != d->blend || batch_count >= DECAL_BATCH_MAX)
 		{
-			if (j > 0)
-			{
-				GL_Bind (GL_TEXTURE0, showtris ? whitetexture : current_tex);
-				R_Decals_SetBlend (current_blend, showtris);
-				GL_Upload (GL_ARRAY_BUFFER, verts, sizeof (decalvertex_t) * j * 4, &buf, &ofs);
-				GL_BindBuffer (GL_ARRAY_BUFFER, buf);
-				GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, pos));
-				GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, uv));
-				GL_Upload (GL_ELEMENT_ARRAY_BUFFER, idx, sizeof (GLushort) * j * 6, &buf, &ofs);
-				GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-				glDrawElements (GL_TRIANGLES, j * 6, GL_UNSIGNED_SHORT, ofs);
-			}
-			j = 0;
+			if (batch_count > 0)
+				R_Decals_FlushBatch (verts, idx, batch_count, showtris, current_tex, current_blend);
+			batch_count = 0;
 			current_tex = d->texture;
 			current_blend = d->blend;
 		}
-		for (int k = 0; k < 4; ++k)
-		{
-			VectorCopy (d->verts[k], verts[j * 4 + k].pos);
-			verts[j * 4 + k].uv[0] = (k == 0 || k == 1) ? 0.f : 1.f;
-			verts[j * 4 + k].uv[1] = (k == 0 || k == 3) ? 1.f : 0.f;
-		}
-		idx[j*6+0]=j*4+0; idx[j*6+1]=j*4+1; idx[j*6+2]=j*4+2; idx[j*6+3]=j*4+0; idx[j*6+4]=j*4+2; idx[j*6+5]=j*4+3;
-		++j;
+		R_Decals_WriteBatchEntry (d, verts, idx, batch_count);
+		++batch_count;
 		++draw_count;
 	}
-	if (j > 0)
-	{
-		GL_Bind (GL_TEXTURE0, showtris ? whitetexture : current_tex);
-		R_Decals_SetBlend (current_blend, showtris);
-		GL_Upload (GL_ARRAY_BUFFER, verts, sizeof (decalvertex_t) * j * 4, &buf, &ofs);
-		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
-		GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, pos));
-		GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, uv));
-		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, idx, sizeof (GLushort) * j * 6, &buf, &ofs);
-		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-		glDrawElements (GL_TRIANGLES, j * 6, GL_UNSIGNED_SHORT, ofs);
-	}
+	if (batch_count > 0)
+		R_Decals_FlushBatch (verts, idx, batch_count, showtris, current_tex, current_blend);
 	GL_PolygonOffset (OFFSET_NONE);
 	GL_EndGroup ();
 	decal_stats.rendered = draw_count;
