@@ -541,6 +541,11 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
         }
 }
 
+static int CL_DlightKeyForEntityEffect (int entnum, int effect_channel)
+{
+	return (entnum << 4) | (effect_channel & 0xF);
+}
+
 /*
 ===============
 CL_RelinkEntities
@@ -665,7 +670,7 @@ void CL_RelinkEntities (void)
 		{
 			vec3_t		fv, rv, uv;
 
-			dl = CL_AllocDlight (i);
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 1));
 			VectorCopy (ent->origin,  dl->origin);
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
@@ -696,7 +701,7 @@ void CL_RelinkEntities (void)
 		}
                 if (ent->effects & EF_BRIGHTLIGHT)
                 {
-                        dl = CL_AllocDlight (i);
+                        dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 2));
                         VectorCopy (ent->origin,  dl->origin);
                         dl->origin[2] += 16;
                         dl->radius = 400 + (rand()&31);
@@ -706,7 +711,7 @@ void CL_RelinkEntities (void)
                 }
                 if (ent->effects & EF_DIMLIGHT)
                 {
-                        dl = CL_AllocDlight (i);
+                        dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 3));
                         VectorCopy (ent->origin,  dl->origin);
                         dl->radius = 200 + (rand()&31);
                         dl->baseradius = dl->radius;
@@ -715,7 +720,7 @@ void CL_RelinkEntities (void)
                 }
                 if (ent->effects & EF_QEX_QUADLIGHT)
                 {
-                        dl = CL_AllocDlight (i);
+                        dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 4));
                         VectorCopy (ent->origin,  dl->origin);
                         dl->radius = 200 + (rand()&31);
                         dl->baseradius = dl->radius;
@@ -726,7 +731,7 @@ void CL_RelinkEntities (void)
                 }
                 if (ent->effects & EF_QEX_PENTALIGHT)
                 {
-                        dl = CL_AllocDlight (i);
+                        dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 5));
                         VectorCopy (ent->origin,  dl->origin);
                         dl->radius = 200 + (rand()&31);
                         dl->baseradius = dl->radius;
@@ -747,7 +752,7 @@ void CL_RelinkEntities (void)
                 else if (ent->model->flags & EF_ROCKET)
                 {
                         CL_RocketTrail (ent, 0);
-                        dl = CL_AllocDlight (i);
+                        dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 6));
                         VectorCopy (ent->origin, dl->origin);
                         dl->radius = 200;
                         dl->baseradius = dl->radius;
