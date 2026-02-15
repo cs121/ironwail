@@ -35,9 +35,9 @@ void main()
     if (any(greaterThanEqual(coord, ivec3(FroxelParams0.xyz))))
         return;
 
-    vec4 packed = imageLoad(InOutScatter, coord);
-    float sigma_t = packed.a;
-    vec3 sigma_s = packed.rgb;
+    vec4 froxelData = imageLoad(InOutScatter, coord);
+    float sigma_t = froxelData.a;
+    vec3 sigma_s = froxelData.rgb;
 
     vec2 uv = (vec2(coord.xy) + vec2(0.5)) / max(FroxelParams0.xy, vec2(1.0));
     vec3 ray = Atmosphere_Froxel_InvProjRay(uv);
