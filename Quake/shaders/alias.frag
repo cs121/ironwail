@@ -244,6 +244,7 @@ void main()
 	{
 		vec3 N = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 		vec3 V = normalize_safe(-in_pos);
+		vec3 L = normalize_safe(-ShadowSunDir.xyz);
 		// Keep shading normals oriented with the geometric face normal so inconsistent
 		// asset normals don't force a full rim contribution on front-facing polygons.
 		vec3 Ng = normalize_safe(cross(dFdx(in_pos), dFdy(in_pos)));
@@ -253,13 +254,13 @@ void main()
 			N = -N;
 		float ndv = saturate(dot(N, V));
 		float rim_raw = pow(saturate(1.0 - ndv), RimParams0.z) * RimParams0.y;
+		float ndotl = saturate(dot(N, L));
+		float gate = saturate((1.0 - ndotl) * RimParams1.z + RimParams1.w);
 
 		vec3 direct_static = RimParams0.w * L_static * shadow_term;
 		vec3 direct_dyn = RimParams1.x * L_dyn;
 		vec3 direct_rgb = direct_static + direct_dyn;
 		vec3 ambient_rgb = L_amb;
-		float direct_intensity = luminance(direct_rgb);
-		float gate = saturate(direct_intensity * RimParams1.z + RimParams1.w);
 		float rim = rim_raw * gate;
 		if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
 			rim *= RimViewmodelScale;
@@ -274,8 +275,10 @@ void main()
 		{
 			if (RimParams2.w < 1.5)
 				result.rgb = vec3(rim);
-			else
+			else if (RimParams2.w < 2.5)
 				result.rgb = vec3(ndv);
+			else
+				result.rgb = vec3(ndotl);
 			result.a = 1.0;
 		}
 	}
