@@ -639,9 +639,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[3] = 1.f;
 		for (int row = 0; row < 3; ++row)
 		{
-			call->texmatrix[row * 4 + 0] = texmatrix ? texmatrix->m[row][0] : (row == 0 ? 1.f : 0.f);
-			call->texmatrix[row * 4 + 1] = texmatrix ? texmatrix->m[row][1] : (row == 1 ? 1.f : 0.f);
-			call->texmatrix[row * 4 + 2] = texmatrix ? texmatrix->m[row][2] : (row == 2 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 0] = (row == 0 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 1] = (row == 1 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 2] = (row == 2 ? 1.f : 0.f);
 			call->texmatrix[row * 4 + 3] = 0.f;
 		}
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
@@ -667,9 +667,9 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[3] = 1.f;
 		for (int row = 0; row < 3; ++row)
 		{
-			call->texmatrix[row * 4 + 0] = texmatrix ? texmatrix->m[row][0] : (row == 0 ? 1.f : 0.f);
-			call->texmatrix[row * 4 + 1] = texmatrix ? texmatrix->m[row][1] : (row == 1 ? 1.f : 0.f);
-			call->texmatrix[row * 4 + 2] = texmatrix ? texmatrix->m[row][2] : (row == 2 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 0] = (row == 0 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 1] = (row == 1 ? 1.f : 0.f);
+			call->texmatrix[row * 4 + 2] = (row == 2 ? 1.f : 0.f);
 			call->texmatrix[row * 4 + 3] = 0.f;
 		}
 		call->baseinstance = first_instance;
