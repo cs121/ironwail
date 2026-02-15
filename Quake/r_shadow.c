@@ -1134,7 +1134,7 @@ void R_Shadow_DlightPass (void)
 		float offset_x;
 		float offset_y;
 
-		dist_weight = 1.f / (1.f + VectorDistance (glight->pos, r_refdef.vieworg));
+		dist_weight = 1.f / (1.f + Distance (glight->pos, r_refdef.vieworg));
 		radius_weight = CLAMP (0.f, glight->radius / 384.f, 1.f);
 		coverage = CLAMP (0.f, glight->radius * dist_weight * 4.f + radius_weight * 0.5f, 1.f);
 		if (dl && dl->kind == DL_PERSISTENT)

@@ -2395,7 +2395,7 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], CLAMP (0.f, r_godrays_exposure.value, 8.f));
 	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
-	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
 }
 
@@ -2415,7 +2415,7 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
 	GL_Uniform4fFunc (1, q_max (0.f, settings->anisotropy), CLAMP (0.f, r_godrays_exposure.value, 8.f), settings->shadow_enable ? 1.f : 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
-	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
 }
 
@@ -2438,7 +2438,7 @@ static void Atmosphere_Froxel_TemporalResolve (const atmosphere_settings_t *sett
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
 	GL_Uniform4fFunc (1, CLAMP (0.f, settings->history_weight, 0.99f), r_prev_frame_valid ? 1.f : 0.f, settings->history_weight, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
-	glMemoryBarrier (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	framebufs.atmos_froxel.history_index = dst;
 	GL_EndGroup ();
 }

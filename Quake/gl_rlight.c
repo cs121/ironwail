@@ -364,15 +364,15 @@ void R_Clustered_Init (void)
 {
 	memset (&r_clustered, 0, sizeof (r_clustered));
 
-	if (!gl_glsl_able)
+	if (!glprogs.cluster_lights)
 		return;
 
-	glGenBuffers (1, &r_clustered.lights_ssbo);
-	glGenBuffers (1, &r_clustered.headers_ssbo);
-	glGenBuffers (1, &r_clustered.indices_ssbo);
-	glGenBuffers (1, &r_clustered.counters_ssbo);
-	glGenBuffers (1, &r_clustered.temp_counts_ssbo);
-	glGenBuffers (1, &r_clustered.params_ubo);
+	GL_GenBuffersFunc (1, &r_clustered.lights_ssbo);
+	GL_GenBuffersFunc (1, &r_clustered.headers_ssbo);
+	GL_GenBuffersFunc (1, &r_clustered.indices_ssbo);
+	GL_GenBuffersFunc (1, &r_clustered.counters_ssbo);
+	GL_GenBuffersFunc (1, &r_clustered.temp_counts_ssbo);
+	GL_GenBuffersFunc (1, &r_clustered.params_ubo);
 
 	r_clustered.available = (r_clustered.lights_ssbo && r_clustered.headers_ssbo &&
 		r_clustered.indices_ssbo && r_clustered.counters_ssbo &&
@@ -431,17 +431,17 @@ static void R_ClusteredEnsureCapacity (int grid_x, int grid_y, int z_slices)
 void R_Clustered_Shutdown (void)
 {
 	if (r_clustered.lights_ssbo)
-		glDeleteBuffers (1, &r_clustered.lights_ssbo);
+		GL_DeleteBuffersFunc (1, &r_clustered.lights_ssbo);
 	if (r_clustered.headers_ssbo)
-		glDeleteBuffers (1, &r_clustered.headers_ssbo);
+		GL_DeleteBuffersFunc (1, &r_clustered.headers_ssbo);
 	if (r_clustered.indices_ssbo)
-		glDeleteBuffers (1, &r_clustered.indices_ssbo);
+		GL_DeleteBuffersFunc (1, &r_clustered.indices_ssbo);
 	if (r_clustered.counters_ssbo)
-		glDeleteBuffers (1, &r_clustered.counters_ssbo);
+		GL_DeleteBuffersFunc (1, &r_clustered.counters_ssbo);
 	if (r_clustered.temp_counts_ssbo)
-		glDeleteBuffers (1, &r_clustered.temp_counts_ssbo);
+		GL_DeleteBuffersFunc (1, &r_clustered.temp_counts_ssbo);
 	if (r_clustered.params_ubo)
-		glDeleteBuffers (1, &r_clustered.params_ubo);
+		GL_DeleteBuffersFunc (1, &r_clustered.params_ubo);
 	memset (&r_clustered, 0, sizeof (r_clustered));
 	free (r_clustered_headers_cpu);
 	r_clustered_headers_cpu = NULL;
@@ -450,7 +450,7 @@ void R_Clustered_Shutdown (void)
 
 void R_Clustered_BuildLists (void)
 {
-	int i;
+	unsigned int i;
 	int tile_size;
 	int grid_x, grid_y, z_slices;
 	gpu_cluster_inputs_t inputs;
