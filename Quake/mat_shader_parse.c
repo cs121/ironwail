@@ -2127,6 +2127,18 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 
 	while ((cursor = Mat_Shader_ParseToken (cursor, &file_state)) != NULL)
 	{
+		if (!q_strcasecmp (com_token, "decal"))
+		{
+			const char *decl_name;
+
+			if (!ParseIdentExpected (&cursor, &decl_name, NULL, "decal name"))
+				continue;
+			if (!ExpectToken (&cursor, "{", NULL))
+				continue;
+			cursor = SkipUnknownBlockOrLine (cursor, true, &file_state);
+			continue;
+		}
+
 		if (!com_token[0])
 			continue;
 		if (!strcmp (com_token, "{"))
