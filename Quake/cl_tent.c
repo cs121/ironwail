@@ -41,17 +41,23 @@ sfx_t			*cl_sfx_r_exp3;
 static void CL_DecalImpactNormal (const vec3_t pos, vec3_t out_normal)
 {
 	trace_t trace;
-	vec3_t down, up;
+	vec3_t start, end;
+	vec3_t dir;
 	if (!cl.worldmodel)
 	{
 		VectorSet (out_normal, 0.f, 0.f, 1.f);
 		return;
 	}
-	VectorSet (down, pos[0], pos[1], pos[2] - 16.f);
-	VectorSet (up, pos[0], pos[1], pos[2] + 16.f);
+	VectorSubtract (pos, r_refdef.vieworg, dir);
+	if (VectorNormalize (dir) <= 0.001f)
+		VectorCopy (vpn, dir);
+	VectorMA (pos, -16.f, dir, start);
+	VectorMA (pos, 16.f, dir, end);
 	memset (&trace, 0, sizeof (trace));
 	trace.fraction = 1.f;
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, up, down, &trace);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, start, end, &trace);
+	if (trace.fraction >= 1.f)
+		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
 	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
 		VectorCopy (trace.plane.normal, out_normal);
 	else
