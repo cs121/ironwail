@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
+#include "simd_caps.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -482,9 +483,9 @@ R_SIMD_f
 static void R_SIMD_f (cvar_t *var)
 {
 #if defined(USE_SSE2)
-	use_simd = SDL_HasSSE() && SDL_HasSSE2() && (var->value != 0.0f);
+	use_simd = CPU_HasSSE2 () && (var->value != 0.0f);
 #else
-	#error not implemented
+	use_simd = false;
 #endif
 }
 #endif

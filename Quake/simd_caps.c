@@ -30,6 +30,22 @@ static int simd_mode_cache = -1;
 static int simd_force_cache = -999;
 static int simd_enable_cache = -999;
 
+
+int CPU_GetCoreCount (void)
+{
+	int cores = SDL_GetCPUCount ();
+	return cores > 0 ? cores : 1;
+}
+
+qboolean CPU_HasSSE2 (void)
+{
+#if SIMD_X86_FAMILY
+	return SIMD_GetCaps ().sse2 ? true : false;
+#else
+	return false;
+#endif
+}
+
 #if SIMD_X86_FAMILY && defined(_MSC_VER)
 static void SIMD_CPUID (int out[4], int leaf, int subleaf)
 {
@@ -109,11 +125,33 @@ void SIMD_Init (void)
 	simd_caps_initialized = true;
 }
 
+qboolean SIMD_SupportsMode (int mode)
+{
+	if (!simd_caps_initialized)
+		SIMD_Init ();
+
+	switch (mode)
+	{
+	case SIMD_MODE_SCALAR:
+	case SIMD_MODE_AUTO:
+		return true;
+	case SIMD_MODE_SSE2:
+		return simd_caps.sse2 ? true : false;
+	case SIMD_MODE_SSSE3:
+		return simd_caps.ssse3 ? true : false;
+	case SIMD_MODE_SSE41:
+		return simd_caps.sse41 ? true : false;
+	case SIMD_MODE_AVX2:
+		return simd_caps.avx2 ? true : false;
+	default:
+		return false;
+	}
+}
+
 int SIMD_Mode (void)
 {
 	int force;
 	int enable;
-	int mode;
 
 	if (!simd_caps_initialized)
 		SIMD_Init ();
@@ -127,33 +165,18 @@ int SIMD_Mode (void)
 	simd_enable_cache = enable;
 
 	if (!enable)
-	{
-		simd_mode_cache = SIMD_MODE_SCALAR;
-		return simd_mode_cache;
-	}
+		return simd_mode_cache = SIMD_MODE_SCALAR;
 
 	if (force >= SIMD_MODE_SCALAR && force <= SIMD_MODE_AVX2)
-	{
-		mode = force;
-		if (mode == SIMD_MODE_AVX2 && !simd_caps.avx2)
-			mode = SIMD_MODE_SCALAR;
-		else if (mode == SIMD_MODE_SSE41 && !simd_caps.sse41)
-			mode = SIMD_MODE_SCALAR;
-		else if (mode == SIMD_MODE_SSSE3 && !simd_caps.ssse3)
-			mode = SIMD_MODE_SCALAR;
-		else if (mode == SIMD_MODE_SSE2 && !simd_caps.sse2)
-			mode = SIMD_MODE_SCALAR;
-		simd_mode_cache = mode;
-		return simd_mode_cache;
-	}
+		return simd_mode_cache = SIMD_SupportsMode (force) ? force : SIMD_MODE_SCALAR;
 
-	if (simd_caps.avx2)
+	if (SIMD_SupportsMode (SIMD_MODE_AVX2))
 		simd_mode_cache = SIMD_MODE_AVX2;
-	else if (simd_caps.sse41)
+	else if (SIMD_SupportsMode (SIMD_MODE_SSE41))
 		simd_mode_cache = SIMD_MODE_SSE41;
-	else if (simd_caps.ssse3)
+	else if (SIMD_SupportsMode (SIMD_MODE_SSSE3))
 		simd_mode_cache = SIMD_MODE_SSSE3;
-	else if (simd_caps.sse2)
+	else if (SIMD_SupportsMode (SIMD_MODE_SSE2))
 		simd_mode_cache = SIMD_MODE_SSE2;
 	else
 		simd_mode_cache = SIMD_MODE_SCALAR;

@@ -25,6 +25,11 @@ enum
 simd_caps_t SIMD_GetCaps (void);
 void SIMD_Init (void);
 int SIMD_Mode (void);
+qboolean SIMD_SupportsMode (int mode);
+
+/* Shared CPU helpers for non-SIMD systems code. */
+int CPU_GetCoreCount (void);
+qboolean CPU_HasSSE2 (void);
 
 /* RGBA/BGRA channel swap helpers used by upload/conversion loops. */
 void swizzle_rgba_bgra_scalar (uint8_t *dst, const uint8_t *src, size_t n_pixels);
