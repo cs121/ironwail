@@ -16,9 +16,53 @@ struct FogVolume
 	vec4 misc;
 };
 
-layout(std140, binding=2) uniform FogVolumeUBO
+layout(std140, binding=12) uniform FogVolumeUBO
 {
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
+};
+
+struct ClusterHeader
+{
+	uint offset;
+	uint count;
+};
+
+struct PackedLight
+{
+	vec4 posRadius;
+	vec4 colorIntensity;
+	ivec4 flags;
+};
+
+layout(std430, binding=4) readonly buffer ClusterHeaderBuffer
+{
+	ClusterHeader headers[];
+};
+
+layout(std430, binding=5) readonly buffer ClusterIndexBuffer
+{
+	uint lightIndices[];
+};
+
+layout(std430, binding=3) readonly buffer PackedLightsBuffer
+{
+	PackedLight packedLights[];
+};
+
+layout(std140, binding=2) uniform ClusterParams
+{
+	ivec2 ClusterScreenSize;
+	ivec2 ClusterGridXY;
+	int ClusterZSlices;
+	float ClusterNearPlane;
+	float ClusterFarPlane;
+	float ClusterZLogScale;
+	float ClusterZLogBias;
+	mat4 ClusterViewMatrix;
+	mat4 ClusterProjMatrix;
+	mat4 ClusterInvProj;
+	int ClusterTileSize;
+	int ClusterDebugMode;
 };
 
 layout(location=0) uniform int FogSteps;
@@ -40,6 +84,7 @@ const int NOISE_PERIOD = 64;
 const float NOISE_SCALE_MIN = 0.005;
 const float NOISE_SCALE_MAX = 0.5;
 const float LUT_PERIOD = 64.0;
+const float PI = 3.14159265358979323846;
 
 int WrapIndex(int v, int period)
 {
@@ -164,6 +209,42 @@ vec3 DebugVolumeColor(float id, float priority)
 	return mix(base, vec3(1.0, 1.0 - tint, tint), 0.35);
 }
 
+float HGPhase(float cosTheta, float g)
+{
+	float g2 = g * g;
+	float d = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-3);
+	return (1.0 - g2) / (4.0 * PI * d * sqrt(d));
+}
+
+vec3 EvaluateDynamicLights(vec3 worldPos, vec2 screenPos, float viewDepth)
+{
+	if (NumLights == 0u || ClusterTileSize <= 0)
+		return vec3(0.0);
+
+	int tileX = clamp(int(screenPos.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
+	int tileY = clamp(int(screenPos.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
+	int zSlice = clamp(int(floor(log2(max(viewDepth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
+	int clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
+	ClusterHeader header = headers[clusterIdx];
+	vec3 dynamicLight = vec3(0.0);
+
+	for (uint i = 0u; i < header.count; ++i)
+	{
+		uint lightId = lightIndices[header.offset + i];
+		if (lightId >= NumLights)
+			continue;
+		PackedLight pl = packedLights[lightId];
+		vec3 lightVec = pl.posRadius.xyz - worldPos;
+		float dist = length(lightVec);
+		float radius = pl.posRadius.w;
+		float nd = dist / max(radius, 1e-4);
+		float attenuation = pow(1.0 - clamp(nd, 0.0, 1.0), 1.5);
+		dynamicLight += pl.colorIntensity.rgb * attenuation;
+	}
+
+	return dynamicLight;
+}
+
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 {
 	float edgeThickness = max(falloff, 0.0);
@@ -202,6 +283,7 @@ void main()
 
 	vec3 ro = FogCameraPosWS;
 	vec3 rd = normalize(worldPos - ro);
+	vec3 viewDir = -rd;
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
 		tScene = 1e6;
@@ -236,13 +318,26 @@ void main()
 		tEnter += jitter * stepLen;
 	}
 
-	vec3 scatterColor = volume.color_density.rgb;
+	vec3 scatterColor = max(volume.color_density.rgb, vec3(0.0));
 	float density = max(volume.color_density.a, 0.0);
 	float falloff = volume.misc.z;
+	float anisotropy = clamp(0.2 + 0.2 * float(volume.misc.w), -0.6, 0.6);
+	float fogDensity = max(Fog.w, 0.0);
+	vec3 ambientWorld = max(Fog.rgb, vec3(0.0));
+	vec3 ambientSky = max(SkyFog.rgb, vec3(0.0));
+	vec3 ambientStatic = mix(ambientWorld, ambientSky, clamp(LightgridParams.x, 0.0, 1.0));
+	float ambientWeight = clamp(0.25 + 0.75 * LightgridParams.x, 0.0, 1.0);
+	vec3 LiAmbient = ambientStatic * (0.5 + 0.5 * ambientWeight);
+	vec3 sunDir = normalize(-ShadowSunDir.xyz);
+	float sunEnabled = ShadowDebug.x > 0.5 ? 1.0 : 0.0;
+	vec3 sunColor = vec3(0.9, 0.95, 1.0) * sunEnabled;
 
-	vec3 accum = vec3(0.0);
+	vec3 inscatter = vec3(0.0);
+	vec3 accumAmbient = vec3(0.0);
+	vec3 accumDyn = vec3(0.0);
+	vec3 accumSun = vec3(0.0);
 	float transmittance = 1.0;
-	float tau = 0.0;
+	float sigmaIntegral = 0.0;
 	float edgeFadeSum = 0.0;
 	float edgeFadeSamples = 0.0;
 	float stepsTaken = 0.0;
@@ -270,14 +365,34 @@ void main()
 			noiseFactor = mix(1.0, n, amt);
 		}
 
-		float sigma = density * noiseFactor * edgeFade;
-		float att = exp(-sigma * stepLen);
-		vec3 stepScatter = (1.0 - att) * scatterColor;
-		accum += transmittance * stepScatter;
+		float sigma_t = density * noiseFactor * edgeFade;
+		sigma_t = max(sigma_t, 0.0);
+		float sigma_s = sigma_t * clamp(max(scatterColor.r, max(scatterColor.g, scatterColor.b)), 0.0, 1.0);
+		vec3 pView = (View * vec4(p, 1.0)).xyz;
+		float viewDepth = max(-pView.z, 1e-4);
+		vec3 LiDyn = EvaluateDynamicLights(p, screenPos, viewDepth) * clamp(DLightParams.w / 3.0, 0.0, 1.0);
+		float cosTheta = dot(viewDir, sunDir);
+		float phase = HGPhase(cosTheta, anisotropy);
+		vec3 LiSun = sunColor * max(dot(rd, sunDir), 0.0);
+		vec3 LiTotal = LiAmbient + LiDyn + LiSun;
+		vec3 stepScatter = sigma_s * LiTotal * phase * stepLen;
+		float att = exp(-sigma_t * stepLen);
+		inscatter += transmittance * stepScatter;
+		accumAmbient += transmittance * (sigma_s * LiAmbient * phase * stepLen);
+		accumDyn += transmittance * (sigma_s * LiDyn * phase * stepLen);
+		accumSun += transmittance * (sigma_s * LiSun * phase * stepLen);
 		transmittance *= att;
-		tau += sigma * stepLen;
+		sigmaIntegral += sigma_t * stepLen;
 		edgeFadeSum += edgeFade;
 		edgeFadeSamples += 1.0;
+		if (FogDebugMode > 0)
+		{
+			if (any(isnan(vec4(transmittance, stepScatter))) || any(isinf(vec4(transmittance, stepScatter))) || isnan(sigmaIntegral) || isinf(sigmaIntegral))
+			{
+				transmittance = clamp(transmittance, 0.0, 1.0);
+				sigmaIntegral = clamp(sigmaIntegral, 0.0, 64.0);
+			}
+		}
 		if (transmittance < 0.01)
 		{
 			earlyTerminated = true;
@@ -293,8 +408,33 @@ void main()
 	}
 	if (FogDebugMode == 3)
 	{
-		float tauViz = tau / (1.0 + tau);
+		float tauViz = sigmaIntegral / (1.0 + sigmaIntegral);
 		FragColor = vec4(vec3(tauViz), 1.0);
+		return;
+	}
+	if (FogDebugMode == 6)
+	{
+		FragColor = vec4(vec3(transmittance), 1.0);
+		return;
+	}
+	if (FogDebugMode == 7)
+	{
+		FragColor = vec4(inscatter, 1.0);
+		return;
+	}
+	if (FogDebugMode == 9)
+	{
+		FragColor = vec4(accumAmbient, 1.0);
+		return;
+	}
+	if (FogDebugMode == 10)
+	{
+		FragColor = vec4(accumDyn, 1.0);
+		return;
+	}
+	if (FogDebugMode == 11)
+	{
+		FragColor = vec4(accumSun, 1.0);
 		return;
 	}
 	if (FogDebugMode == 4)
@@ -314,8 +454,8 @@ void main()
 	vec3 scene = texture(SceneColor, screenUv).rgb;
 	vec3 outColor;
 	if (FogPhysBlend != 0)
-		outColor = scene * transmittance + accum;
+		outColor = scene * transmittance + inscatter * (1.0 + fogDensity);
 	else
-		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
+		outColor = mix(scene, scatterColor, clamp(sigmaIntegral, 0.0, 1.0));
 	FragColor = vec4(outColor, transmittance);
 }

@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_fogvol.h"
 #include <math.h>
 
+extern void R_Clustered_BindForShading (void);
+
 typedef struct fog_volume_gpu_s
 {
 	float mins[4];
@@ -62,6 +64,7 @@ cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
+static double r_fogvol_debug_summary_time = 0.0;
 
 typedef struct fogvol_test_state_s
 {
@@ -1131,10 +1134,10 @@ void R_FogVol_Render (void)
 {
 	static int last_dumpstate = -1;
 	int steps;
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_testvolumes.value), 11);
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
-	const int mode = 0;
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
@@ -1212,6 +1215,18 @@ void R_FogVol_Render (void)
 		steps = (int)Q_rint (r_fogvol_steps.value);
 	steps = CLAMP (8, steps, 128);
 
+	if (r_fogvol_testvolumes.value > 0.f && r_fogvol_test_verbose.value > 0.f && (realtime - r_fogvol_debug_summary_time) >= 1.0)
+	{
+		const int lightgrid_active = (r_framedata.lightgrid_params[0] > 0.5f);
+		const int dlights_active = (r_framedata.numlights > 0 && r_framedata.dlight_params[3] > 0.f);
+		const int sun_active = (r_framedata.shadow_debug[0] > 0.5f);
+		const int ambient_active = (r_framedata.fogdata[3] > 0.f);
+		Con_Printf ("FOGVOL_SUMMARY grid=%dx%d steps=%d z=ray-linear halfres=%d format=fogvol_rgba16f active_lights ambient=%d static=%d dyn=%d sun=%d phys=%d\n",
+			fog_width, fog_height, steps, use_halfres ? 1 : 0, ambient_active, lightgrid_active, dlights_active, sun_active,
+			r_fogvol_physblend.value > 0.f ? 1 : 0);
+		r_fogvol_debug_summary_time = realtime;
+	}
+
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
@@ -1249,9 +1264,18 @@ void R_FogVol_Render (void)
 	}
 
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, 12, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
 	GL_BeginGroup ("Fog volumes");
+	// Pipeline map: SceneColor + SceneDepth + FrameData + clustered-light buffers feed
+	// the fog volume raymarch pass (physical blend: scene*T + inscatter), then optional
+	// temporal resolve + optional depth-aware upsample before compositing back to framebufs.composite.
+	// Space conventions: SceneDepth (clip/NDC) -> world via FogInvViewProj, march in world/view distance.
+	// Validation checklist (debug views via r_fogvol_testvolumes):
+	//  - Nearby surfaces should keep contrast (transmittance near 1), distant pixels should fade.
+	//  - Colored dynlights should tint inscattering; disabling dynamic lights removes only that term.
+	//  - Maps with/without lightgrid should stay plausible via ambient/static fallback terms.
+	R_Clustered_BindForShading ();
 	R_FogVol_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
