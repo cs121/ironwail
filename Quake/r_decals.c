@@ -476,6 +476,7 @@ static gltexture_t *R_Decals_LoadTexture (decal_def_t *def, int def_index)
 		{
 			Con_Warning ("Decal texture missing: %s (%s)\n", def->texture_paths[0], def->name);
 			decal_warned_missing_tex[def_index][0] = true;
+			def->textures[0] = notexture;
 		}
 	}
 	return def->textures[0];
