@@ -149,10 +149,19 @@ void DLightPool_ClearPersistent (void)
 
 static void DLightPool_EnsureScratch (int needed)
 {
+	dlight_t **scratch;
+
 	if (needed <= dlight_pool.scratch_capacity)
 		return;
 
-	dlight_pool.scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	if (!scratch)
+	{
+		Con_Printf ("WARNING: failed to grow dlight scratch buffer to %d entries\n", needed);
+		return;
+	}
+
+	dlight_pool.scratch = scratch;
 	dlight_pool.scratch_capacity = needed;
 }
 
@@ -172,7 +181,14 @@ static void DLightPool_EnsureCapacity (int desired)
 	if (new_capacity <= dlight_pool.capacity)
 		return;
 
-	dlight_pool.items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	dlight_t *items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	if (!items)
+	{
+		Con_Printf ("WARNING: failed to grow dlight pool to %d entries\n", new_capacity);
+		return;
+	}
+
+	dlight_pool.items = items;
 	memset (dlight_pool.items + dlight_pool.capacity, 0, sizeof (dlight_pool.items[0]) * (new_capacity - dlight_pool.capacity));
 	dlight_pool.capacity = new_capacity;
 }
@@ -442,6 +458,8 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 		return NULL;
 
 	DLightPool_EnsureScratch (dlight_pool.capacity);
+	if (!dlight_pool.scratch || dlight_pool.scratch_capacity < dlight_pool.capacity)
+		return NULL;
 
 	int found = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
@@ -483,6 +501,11 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 	}
 
 	DLightPool_EnsureScratch (dlight_pool.capacity);
+	if (!dlight_pool.scratch || dlight_pool.scratch_capacity < dlight_pool.capacity)
+	{
+		dlight_pool.stats.submitted = 0;
+		return 0;
+	}
 
 	int found = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
