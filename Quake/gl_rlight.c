@@ -450,7 +450,7 @@ void R_Clustered_Shutdown (void)
 
 void R_Clustered_BuildLists (void)
 {
-	unsigned int i;
+	int i;
 	int tile_size;
 	int grid_x, grid_y, z_slices;
 	gpu_cluster_inputs_t inputs;
