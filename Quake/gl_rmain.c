@@ -563,6 +563,7 @@ cvar_t	r_rim_gateBias = { "r_rim_gateBias", "0.0", CVAR_ARCHIVE };
 cvar_t	r_rim_colorScale = { "r_rim_colorScale", "1.0", CVAR_ARCHIVE };
 cvar_t	r_rim_clampDirect = { "r_rim_clampDirect", "1.0", CVAR_ARCHIVE };
 cvar_t	r_rim_clampAmb = { "r_rim_clampAmb", "0.2", CVAR_ARCHIVE };
+cvar_t	r_rim_viewmodel = { "r_rim_viewmodel", "0.35", CVAR_ARCHIVE };
 cvar_t	r_rim_debug = { "r_rim_debug", "0", CVAR_NONE };
 cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
@@ -3681,7 +3682,7 @@ static void R_LogClearDebug (const char *tag, GLbitfield clearbits)
 	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
 	glGetFloatv (GL_COLOR_CLEAR_VALUE, clear_color);
 
-	Con_Printf (
+	Con_DPrintf (
 		"CLEARDBG %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) clear_color=(%.3f %.3f %.3f %.3f) clear_mask=0x%08x\n",
 		tag,
 		draw_fbo,

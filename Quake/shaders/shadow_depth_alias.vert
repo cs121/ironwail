@@ -21,7 +21,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float	_Pad1;
+	float	RimViewmodelScale;
 	vec4	RimParams0;
 	vec4	RimParams1;
 	vec4	RimParams2;
