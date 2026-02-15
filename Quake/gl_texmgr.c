@@ -1249,8 +1249,7 @@ must be called before any texture loading
 void TexMgr_Init (void)
 {
 	int i;
-	static byte notexture_data[16] = {159,91,83,255,0,0,0,255,0,0,0,255,159,91,83,255}; //black and pink checker
-	static byte nulltexture_data[16] = {127,191,255,255,0,0,0,255,0,0,0,255,127,191,255,255}; //black and blue checker
+	static byte notexture_data[2 * 2 * 4];
 	static byte whitetexture_data[16] = {255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}; //white
 	static byte greytexture_data[16] = {127,127,127,255,127,127,127,255,127,127,127,255,127,127,127,255}; //50% grey
 	static byte blacktexture_data[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; //black
@@ -1301,9 +1300,29 @@ Cvar_RegisterVariable (&r_softemu_mdl_warp);
 	// poll max size from hardware
 	glGetIntegerv (GL_MAX_TEXTURE_SIZE, &gl_max_texture_size);
 
+	for (i = 0; i < 2 * 2; ++i)
+	{
+		const qboolean dark_square = (((i % 2) + (i / 2)) & 1) != 0;
+		byte *p = &notexture_data[i * 4];
+
+		if (dark_square)
+		{
+			p[0] = 0;
+			p[1] = 0;
+			p[2] = 0;
+		}
+		else
+		{
+			p[0] = 159;
+			p[1] = 91;
+			p[2] = 83;
+		}
+		p[3] = 255;
+	}
+
 	// load notexture images
 	notexture = TexMgr_LoadImage (NULL, "notexture", 2, 2, SRC_RGBA, notexture_data, "", (src_offset_t)notexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
-	nulltexture = TexMgr_LoadImage (NULL, "nulltexture", 2, 2, SRC_RGBA, nulltexture_data, "", (src_offset_t)nulltexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	nulltexture = notexture;
 	whitetexture = TexMgr_LoadImage (NULL, "whitetexture", 2, 2, SRC_RGBA, whitetexture_data, "", (src_offset_t)whitetexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
 	greytexture = TexMgr_LoadImage (NULL, "greytexture", 2, 2, SRC_RGBA, greytexture_data, "", (src_offset_t)greytexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
 	blacktexture = TexMgr_LoadImage (NULL, "blacktexture", 2, 2, SRC_RGBA, blacktexture_data, "", (src_offset_t)blacktexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
