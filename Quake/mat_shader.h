@@ -85,14 +85,6 @@ typedef enum
 	MAT_DEFORM_AUTOSPRITE
 } mat_deform_type_t;
 
-typedef struct mat_deform_s
-{
-	mat_deform_type_t type;
-	mat_wave_t	wave;
-	vec3_t		move;
-	float		args[4];
-} mat_deform_t;
-
 typedef enum
 {
 	MAT_WAVE_SIN = 0,
@@ -109,6 +101,14 @@ typedef struct mat_wave_s
 	float		phase;
 	float		freq;
 } mat_wave_t;
+
+typedef struct mat_deform_s
+{
+	mat_deform_type_t type;
+	mat_wave_t	wave;
+	vec3_t		move;
+	float		args[4];
+} mat_deform_t;
 
 typedef enum
 {
