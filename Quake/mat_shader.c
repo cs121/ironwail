@@ -101,10 +101,8 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean or factor/units pair." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses farbox/cloudheight/nearbox and marks sky surfaces." },
 	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses fog color and distance into material metadata." },
 	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses deform parameters; render-time deformation is still pending." },
@@ -123,10 +121,8 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch/transform." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
 	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom toggle." },
-	{ "godray", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray toggle." },
 	{ "emissiveScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive scale." },
 	{ "bloomScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom scale." },
-	{ "godrayScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray scale." },
 
 	{ "solid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface solid." },
 	{ "nonsolid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface non-solid." },
@@ -1211,8 +1207,6 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_EMISSIVE;
 	if (material->bloom_enable)
 		flags |= MAT_SHADERFLAG_BLOOM;
-	if (material->godray_enable)
-		flags |= MAT_SHADERFLAG_GODRAY;
 
 	return flags;
 }
@@ -1299,7 +1293,6 @@ void Mat_Shader_Print (const shader_material_t *material)
 		Con_Printf ("  polygon offset: off\n");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
-	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
 	if (material->has_skyparms)
 		Con_Printf ("  skyParms: far=%s cloudheight=%.2f near=%s\n",
 			material->skybox_far ? material->skybox_far : "-",

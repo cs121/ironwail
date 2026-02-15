@@ -26,11 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
-extern cvar_t r_godrays_emit_sky;
-extern cvar_t r_godrays_emit_emissive;
-extern cvar_t r_godrays_emit_lighttex;
-extern cvar_t r_godrays_lighttex_name_match;
-extern cvar_t r_godray_sky_enable;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -485,11 +480,10 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
 #define CALLFLAG_NOLIGHTMAP      (1u << 2)
-#define CALLFLAG_GODRAYS_LIGHT   (1u << 5)
-#define CALLFLAG_GODRAYS_EMISSIVE (1u << 6)
+#define CALLFLAG_GODRAYS_LIGHT   (1u << 5) /* deprecated */
+#define CALLFLAG_GODRAYS_EMISSIVE (1u << 6) /* deprecated */
 #define CALLFLAG_MAT_BLOOM       (1u << 7)
 #define CALLFLAG_MAT_EMISSIVE    (1u << 8)
-#define CALLFLAG_MAT_GODRAY      (1u << 9)
 #define CALLFLAG_MAT_TRANS       (1u << 10)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
@@ -504,70 +498,22 @@ static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 		flags |= CALLFLAG_MAT_BLOOM;
 	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 		flags |= CALLFLAG_MAT_EMISSIVE;
-	if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
-		flags |= CALLFLAG_MAT_GODRAY;
 
 	return flags;
 }
 
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
-	if (!t)
-		return false;
-
-	if (!R_ValidPtr (t))
-		return false;
-
-	if (r_shaders.value <= 0.f || !t->shader)
-		return false;
-
-	if (t->shader->stages)
-	{
-		size_t stage_count = VEC_SIZE (t->shader->stages);
-		qboolean has_godray = false;
-		qboolean has_emissive = false;
-
-		for (size_t i = 0; i < stage_count; ++i)
-		{
-			const mat_shader_stage_t *stage = &t->shader->stages[i];
-			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
-				has_godray = true;
-			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
-				has_emissive = true;
-		}
-
-		if (has_godray && r_godrays_emit_lighttex.value > 0.f)
-			return true;
-		if (has_godray && has_emissive && r_godrays_emit_emissive.value > 0.f)
-			return true;
-	}
-
+	(void)t;
 	return false;
 }
 
 qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 {
-	if (!s)
-		return false;
-
-	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f)
-	{
-		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
-		{
-			texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
-			return R_TextureEmitsGodrays (t);
-		}
-		return false;
-	}
-
-	if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
-	{
-		texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
-		return R_TextureEmitsGodrays (t);
-	}
-
+	(void)s;
 	return false;
 }
+
 
 /*
 =============
@@ -1347,10 +1293,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				const mat_texmatrix_t *stage_texmatrix;
 				unsigned extra_flags = CALLFLAG_MAT_HAS_SHADER;
 				qboolean wants_emissive = (stage->outputs & MAT_STAGE_OUT_EMISSIVE) != 0u;
-				qboolean wants_godray = (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE) != 0u;
-
-				if (!wants_godray)
-					continue;
 
 				if (stage->map_type == MAT_MAP_MAP && (!stage->map_path || !stage->map_path[0]) && stage_index == 0)
 					stage_tex = t->gltexture;
@@ -1362,10 +1304,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 
 				R_EvalStageColorAlpha (stage, cl.time, stage_color);
 				stage_texmatrix = MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time);
-				stage_color[0] *= stage->godray_scale;
-				stage_color[1] *= stage->godray_scale;
-				stage_color[2] *= stage->godray_scale;
-				stage_color[3] *= stage->godray_scale;
 
 				if (stage_index == 0 && stage_tex == t->gltexture)
 				{
@@ -1375,17 +1313,12 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 						fb = NULL;
 				}
 
-				if (r_godrays_emit_lighttex.value > 0.f)
-					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
-
-				if (wants_emissive && r_godrays_emit_emissive.value > 0.f)
+				if (wants_emissive)
 				{
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;
 				}
 
-				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
-					continue;
 
 				if (t->type == TEXTYPE_CUTOUT || stage->alpha_func != MAT_ALPHAFUNC_NONE)
 					extra_flags |= CALLFLAG_ALPHA_TEST;

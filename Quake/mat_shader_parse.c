@@ -1597,23 +1597,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.outputs &= ~MAT_STAGE_OUT_BLOOM;
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "godray"))
-		{
-			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_STAGE);
-			qboolean parsed = false;
-			qboolean value_bool = true;
-
-			parsed = ParseOptionalBool (&data, &value_bool, state);
-			if (!parsed)
-				value_bool = true;
-
-			stage.output_overrides |= MAT_STAGE_OUT_GODRAY_SOURCE;
-			if (value_bool)
-				stage.outputs |= MAT_STAGE_OUT_GODRAY_SOURCE;
-			else
-				stage.outputs &= ~MAT_STAGE_OUT_GODRAY_SOURCE;
-			continue;
-		}
 		if (!q_strcasecmp (com_token, "emissiveScale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissiveScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1646,23 +1629,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			Mat_Shader_ValidateFiniteFloat (state, "bloomScale", scale, 1.f, &validated_scale);
 			stage.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			stage.bloom_scale_set = true;
-			continue;
-		}
-		if (!q_strcasecmp (com_token, "godrayScale"))
-		{
-			Mat_Shader_MarkKeywordSeen ("godrayScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
-			float validated_scale = 1.f;
-			float scale;
-
-			if (!ParseFloat (&data, &scale, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-
-			Mat_Shader_ValidateFiniteFloat (state, "godrayScale", scale, 1.f, &validated_scale);
-			stage.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
-			stage.godray_scale_set = true;
 			continue;
 		}
 
@@ -1719,7 +1685,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.source_file = Mat_Shader_DupString (source_file ? source_file : "");
 	material.emissive_scale = 1.f;
 	material.bloom_scale = 1.f;
-	material.godray_scale = 1.f;
 	material.cull_mode = MAT_CULL_BACK;
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
@@ -2003,16 +1968,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "godray"))
-		{
-			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			if (!ParseRequiredBool (&data, &material.godray_enable, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			continue;
-		}
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
@@ -2039,19 +1994,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			material.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "godray_scale"))
-		{
-			Mat_Shader_MarkKeywordSeen ("godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			float validated_scale = 1.f;
-			if (!ParseFloat (&data, &scale, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			Mat_Shader_ValidateFiniteFloat (state, "godray_scale", scale, 1.f, &validated_scale);
-			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
-			continue;
-		}
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
 			state ? state->source_file : material.source_file,
 			state ? state->token_line : 0u);
@@ -2065,7 +2007,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		size_t stage_count = VEC_SIZE (material.stages);
 		qboolean has_emissive = false;
 		qboolean has_bloom = false;
-		qboolean has_godray = false;
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
@@ -2076,27 +2017,20 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 				stage->outputs |= MAT_STAGE_OUT_EMISSIVE;
 			if ((stage->output_overrides & MAT_STAGE_OUT_BLOOM) == 0u && material.bloom_enable)
 				stage->outputs |= MAT_STAGE_OUT_BLOOM;
-			if ((stage->output_overrides & MAT_STAGE_OUT_GODRAY_SOURCE) == 0u && material.godray_enable)
-				stage->outputs |= MAT_STAGE_OUT_GODRAY_SOURCE;
 
 			if (!stage->emissive_scale_set)
 				stage->emissive_scale = material.emissive_scale;
 			if (!stage->bloom_scale_set)
 				stage->bloom_scale = material.bloom_scale;
-			if (!stage->godray_scale_set)
-				stage->godray_scale = material.godray_scale;
 
 			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 				has_emissive = true;
 			if (stage->outputs & MAT_STAGE_OUT_BLOOM)
 				has_bloom = true;
-			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
-				has_godray = true;
 		}
 
 		material.emissive_enable = has_emissive;
 		material.bloom_enable = has_bloom;
-		material.godray_enable = has_godray;
 		material.stage0 = material.stages[0];
 	}
 
@@ -2236,7 +2170,6 @@ void Mat_Shader_DebugFuzzParse (void)
 		"{\n"
 		" emissive_scale nan\n"
 		" bloom_scale inf\n"
-		" godray_scale -inf\n"
 		" { map $whiteimage }\n"
 		"}\n";
 	const char *fuzz_duplicate =

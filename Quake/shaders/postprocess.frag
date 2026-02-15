@@ -162,7 +162,7 @@ layout(location=12) uniform float u_saturation;
 layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
 layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
 layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
-layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
+layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug mode (0..5), z: sun x, w: sun y
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
 layout(location=19) uniform vec4 AOParams; // x: power, y: apply mode (0 final color), zw: reserved
@@ -403,22 +403,23 @@ void main()
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
 
-        if (GodraysParams.z > 0.5)
-        {
-                vec4 source = texture(GodraysSourceTexture, uv);
-                if (GodraysParams.z < 1.5)
-                        out_fragcolor = vec4(source.rgb, 1.0);
-                else
-                        out_fragcolor = vec4(vec3(source.a), 1.0);
-                return;
-        }
-        if (GodraysParams.y > 0.5)
+        int godrayDebugMode = int(floor(GodraysParams.y + 0.5));
+        if (godrayDebugMode == 2)
         {
                 vec3 maskColor = texture(GodraysMaskTexture, uv).rgb;
-                vec3 shaftsColor = vec3(0.0);
-                if (GodraysParams.x > 0.5)
-                        shaftsColor = texture(GodraysTexture, uv).rgb;
-                out_fragcolor = vec4(max(maskColor, shaftsColor), 1.0);
+                out_fragcolor = vec4(maskColor, 1.0);
+                return;
+        }
+        if (godrayDebugMode == 3)
+        {
+                vec3 depthViz = texture(GodraysMaskTexture, uv).rgb;
+                out_fragcolor = vec4(depthViz, 1.0);
+                return;
+        }
+        if (godrayDebugMode == 4)
+        {
+                vec3 shaftsColor = texture(GodraysTexture, uv).rgb;
+                out_fragcolor = vec4(shaftsColor, 1.0);
                 return;
         }
 
@@ -776,6 +777,17 @@ void main()
         vec3 godraysColor = vec3(0.0);
         if (GodraysParams.x > 0.5)
                 godraysColor = texture(GodraysTexture, uv).rgb;
+        if (godrayDebugMode == 1)
+        {
+                float d = length(uv - GodraysParams.zw);
+                float marker = smoothstep(0.015, 0.0, d);
+                godraysColor += vec3(marker, marker * 0.25, 0.0);
+        }
+        if (godrayDebugMode == 5)
+        {
+                out_fragcolor = vec4(godraysColor, 1.0);
+                return;
+        }
         float exposure = max(HDRParams.y, 0.0);
         float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
         exposure *= exp2(exposureAdd);

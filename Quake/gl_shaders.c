@@ -526,8 +526,8 @@ void GL_CreateShaders (void)
 	glprogs.ao_bent_pack = GL_CreateComputeProgram (GLSL_PATH("ao_bent_pack.comp"), "ao bent pack");
 	glprogs.godrays_mask = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_mask.frag"), "godrays mask");
 	glprogs.godrays = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"), "godrays");
-	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");
-	glprogs.godrays_source_sky = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_source_sky.frag"), "godrays source sky");
+	glprogs.godrays_source = 0;
+	glprogs.godrays_source_sky = 0;
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
 	glprogs.fogvol_upsample = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_upsample.frag"), "fog volumes upsample");
 	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
