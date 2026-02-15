@@ -25,7 +25,7 @@ static void R_Shadow_LogClearDebug (const char *tag, GLbitfield clearbits)
 	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
 	glGetFloatv (GL_COLOR_CLEAR_VALUE, clear_color);
 
-	Con_Printf (
+	Con_DPrintf (
 		"CLEARDBG %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) clear_color=(%.3f %.3f %.3f %.3f) clear_mask=0x%08x\n",
 		tag,
 		draw_fbo,

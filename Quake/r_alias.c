@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t r_rim, r_rim_strength, r_rim_power, r_rim_staticScale, r_rim_dynScale, r_rim_ambScale;
-extern cvar_t r_rim_gateK, r_rim_gateBias, r_rim_colorScale, r_rim_clampDirect, r_rim_clampAmb, r_rim_debug;
+extern cvar_t r_rim_gateK, r_rim_gateBias, r_rim_colorScale, r_rim_clampDirect, r_rim_clampAmb, r_rim_viewmodel, r_rim_debug;
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
@@ -578,6 +578,7 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+ibuf.global._pad1 = q_max (0.f, r_rim_viewmodel.value);
 ibuf.global.rim_params0[0] = r_rim.value > 0.f ? 1.f : 0.f;
 ibuf.global.rim_params0[1] = q_max (0.f, r_rim_strength.value);
 ibuf.global.rim_params0[2] = q_max (0.f, r_rim_power.value);

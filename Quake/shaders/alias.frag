@@ -21,7 +21,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float	_Pad1;
+	float	RimViewmodelScale;
 	vec4	RimParams0;
 	vec4	RimParams1;
 	vec4	RimParams2;
@@ -254,6 +254,8 @@ void main()
 		float direct_intensity = luminance(direct_rgb);
 		float gate = saturate(direct_intensity * RimParams1.z + RimParams1.w);
 		float rim = rim_raw * gate;
+		if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
+			rim *= RimViewmodelScale;
 
 		vec3 rim_light_preclamp = rim * (direct_rgb + RimParams1.y * ambient_rgb) * RimParams2.x;
 		vec3 local_limit_rgb = (RimParams2.y * direct_rgb) + (RimParams2.z * ambient_rgb);
