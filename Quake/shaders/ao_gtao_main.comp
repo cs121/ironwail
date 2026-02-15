@@ -37,7 +37,12 @@ void main(){
  }
  float ao=1.0-occ/float(slices);
  imageStore(OutAO,px,vec4(clamp(ao,0.0,1.0)));
- float edge=clamp(length(fwidth(vec2(p.x,d)))*24.0,0.0,1.0);
+ ivec2 depthSize=textureSize(DepthTexture,0);
+ ivec2 spR=clamp(sp+ivec2(1,0),ivec2(0),depthSize-ivec2(1));
+ ivec2 spU=clamp(sp+ivec2(0,1),ivec2(0),depthSize-ivec2(1));
+ float dR=texelFetch(DepthTexture,spR,0).r;
+ float dU=texelFetch(DepthTexture,spU,0).r;
+ float edge=clamp(length(vec2(dR-d,dU-d))*24.0,0.0,1.0);
  imageStore(OutEdges,px,vec4(edge,ao,0,0));
  imageStore(OutBent,px,vec4(normalize(bent).xy*0.5+0.5,0,1));
 }

@@ -34,7 +34,7 @@ vec3 AO_ReconstructNormalFromDepth(sampler2D depthTex, mat4 invProj, ivec2 pixel
         vec3 pR = AO_ReconstructViewPos(invProj, uvR, dR, reversedZ);
         vec3 pU = AO_ReconstructViewPos(invProj, uvU, dU, reversedZ);
         vec3 n = normalize(cross(pR - pC, pU - pC));
-        if (!all(isfinite(n)))
+        if (any(isnan(n)) || any(isinf(n)))
                 n = vec3(0.0, 0.0, 1.0);
         return n;
 }

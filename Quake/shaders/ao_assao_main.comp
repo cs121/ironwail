@@ -43,7 +43,13 @@ void main(){
         float ao=1.0-occ/float(max(taps,1));
         ao=clamp(ao,0.0,1.0);
         imageStore(OutAO,px,vec4(ao));
-        float edge=length(fwidth(vec2(p.x,d)))*32.0;
+        ivec2 dpx = ivec2(suv * u_screen.zw);
+        ivec2 depthSize = textureSize(DepthTexture, 0);
+        ivec2 pxR = clamp(dpx + ivec2(1, 0), ivec2(0), depthSize - ivec2(1));
+        ivec2 pxU = clamp(dpx + ivec2(0, 1), ivec2(0), depthSize - ivec2(1));
+        float dR = texelFetch(DepthTexture, pxR, 0).r;
+        float dU = texelFetch(DepthTexture, pxU, 0).r;
+        float edge = length(vec2(dR - d, dU - d)) * 32.0;
         imageStore(OutEdges,px,vec4(clamp(edge,0.0,1.0),ao,0,0));
         vec2 b=normalize(bent).yz;
         imageStore(OutBent,px,vec4(b*0.5+0.5,0,1));
