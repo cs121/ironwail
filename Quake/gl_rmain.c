@@ -2155,6 +2155,8 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	if (R_FogVol_BindForFroxelBuild () > 0)
+		R_FogVol_InjectBuiltIntoFroxel ();
 	GL_EndGroup ();
 }
 

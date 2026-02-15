@@ -66,6 +66,15 @@ static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
 static double r_fogvol_debug_summary_time = 0.0;
 
+typedef struct froxel_grid_s
+{
+	int width;
+	int height;
+	int depth;
+	GLuint scatter_tex;
+	GLuint transmittance_tex;
+} froxel_grid_t;
+
 typedef struct fogvol_test_state_s
 {
 	unsigned statebits;
@@ -1550,9 +1559,70 @@ void R_FogVol_LogEndFrameState (void)
 	R_FogVol_LogPipelineState ("END_FRAME");
 }
 
+int R_FogVol_BindForFroxelBuild (void)
+{
+	R_FogVol_BuildList ();
+	if (r_fogvol.value <= 0.f)
+		return 0;
+	if (r_fogvolume_count <= 0)
+		return 0;
+	return r_fogvolume_count;
+}
+
+void R_FogVol_InjectBuiltIntoFroxel (void)
+{
+	froxel_grid_t grid;
+	if (r_fogvolume_count <= 0)
+		return;
+	grid.width = framebufs.atmos_froxel.width;
+	grid.height = framebufs.atmos_froxel.height;
+	grid.depth = framebufs.atmos_froxel.depth;
+	grid.scatter_tex = framebufs.atmos_froxel.scatter_tex;
+	grid.transmittance_tex = framebufs.atmos_froxel.transmittance_tex;
+	R_FogVol_InjectIntoGrid (&grid, r_fogvolumes, r_fogvolume_count);
+}
+
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
 {
-	(void)grid;
-	(void)vols;
-	(void)num;
+	int gx, gy, gz;
+
+	if (!grid || !vols || num <= 0)
+		return;
+	if (grid->scatter_tex == 0 || grid->transmittance_tex == 0)
+		return;
+	if (grid->width <= 0 || grid->height <= 0 || grid->depth <= 0)
+		return;
+	if (!glprogs.atmos_froxel_build)
+		return;
+
+	gx = (grid->width + 3) / 4;
+	gy = (grid->height + 3) / 4;
+	gz = (grid->depth + 3) / 4;
+
+	GL_BeginGroup ("Atmosphere: FogVol Inject");
+	GL_UseProgram (glprogs.atmos_froxel_build);
+	GL_BindImageTextureFunc (0, grid->scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
+	GL_BindImageTextureFunc (1, grid->transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R16F);
+	GL_Uniform4fFunc (0, (float)grid->width, (float)grid->height, (float)grid->depth, 0.f);
+
+	for (int i = 0; i < num; ++i)
+	{
+		const fog_volume_t *v = &vols[i];
+		float albedo = CLAMP (0.f, v->noiseAmount, 1.f);
+		float emissive = q_max (0.f, v->noiseBias);
+		float intensity = q_max (0.f, v->density);
+
+		if (!v->enabled || v->density <= 0.f)
+			continue;
+
+		GL_Uniform4fFunc (1, q_max (0.f, v->density), q_max (0.f, v->falloff), albedo, emissive);
+		GL_Uniform4fFunc (2, CLAMP (0.f, v->color[0], 4.f), CLAMP (0.f, v->color[1], 4.f), CLAMP (0.f, v->color[2], 4.f), intensity);
+		GL_Uniform4fFunc (3, 0.f, 0.f, 1.f, 0.f);
+		GL_Uniform4fFunc (4, v->mins[0], v->mins[1], v->mins[2], 1.f);
+		GL_Uniform4fFunc (5, v->maxs[0], v->maxs[1], v->maxs[2], 0.f);
+		GL_DispatchComputeFunc (gx, gy, gz);
+	}
+
+	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	GL_EndGroup ();
 }
