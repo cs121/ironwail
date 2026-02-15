@@ -610,12 +610,14 @@ static qboolean R_Decals_TraceNormal (const vec3_t point, vec3_t out_normal)
 {
 	trace_t trace;
 	vec3_t end;
+	vec3_t start;
 	if (!cl.worldmodel)
 		return false;
+	VectorCopy (point, start);
 	VectorMA (point, 32.f, vpn, end);
 	memset (&trace, 0, sizeof (trace));
 	trace.fraction = 1.f;
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, point, &trace);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
 	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
 	{
 		VectorCopy (trace.plane.normal, out_normal);
