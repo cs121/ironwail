@@ -273,27 +273,44 @@ static decal_def_t *R_Decal_GetOrCreateDef (const char *name)
 	return def;
 }
 
-static void R_Decals_AddDefaultDefs (void)
+static void R_Decals_AddDefaultDef (const char *name, const char *texture, decal_category_t category,
+	float size_min, float size_max, float alpha_min, float alpha_max,
+	float lifetime, float fade, int priority)
 {
 	decal_def_t *def;
-	#define DEF(name, tex, cat, s0, s1, a0, a1, life, fade, pri) \
-		def = R_Decal_GetOrCreateDef (name); \
-		if (def) { q_strlcpy(def->texture_paths[0], tex, sizeof(def->texture_paths[0])); def->num_textures = 1; def->category=cat; def->size_min=s0; def->size_max=s1; def->alpha_min=a0; def->alpha_max=a1; def->lifetime=life; def->fade=fade; def->priority=pri; }
-	DEF ("bullet_hole_default", "decals/bullet/bhole_01", DECAL_CAT_BULLET, 5.f, 8.f, 0.65f, 0.9f, 32.f, 8.f, 4);
-	DEF ("bullet_hole_metal", "decals/bullet/bhole_metal_01", DECAL_CAT_BULLET, 4.f, 7.f, 0.6f, 0.85f, 28.f, 6.f, 4);
-	DEF ("blood_splat_small", "decals/blood/splat_01", DECAL_CAT_BLOOD, 5.f, 10.f, 0.45f, 0.75f, 22.f, 6.f, 1);
-	DEF ("blood_splat_large", "decals/blood/splat_02", DECAL_CAT_BLOOD, 10.f, 16.f, 0.35f, 0.65f, 26.f, 8.f, 1);
-	DEF ("scorch_small", "decals/scorch/scorch_01", DECAL_CAT_SCORCH, 12.f, 20.f, 0.45f, 0.7f, 36.f, 10.f, 3);
-	DEF ("scorch_large", "decals/scorch/scorch_02", DECAL_CAT_SCORCH, 20.f, 32.f, 0.35f, 0.6f, 40.f, 12.f, 3);
-	DEF ("dirt_hit", "decals/dirt/dirt_01", DECAL_CAT_DIRT, 8.f, 14.f, 0.4f, 0.65f, 24.f, 6.f, 2);
-	DEF ("plaster_hit", "decals/dirt/plaster_01", DECAL_CAT_DIRT, 7.f, 12.f, 0.45f, 0.7f, 24.f, 6.f, 2);
-	DEF ("concrete_hit", "decals/dirt/concrete_01", DECAL_CAT_DIRT, 7.f, 12.f, 0.45f, 0.7f, 24.f, 6.f, 2);
-	#undef DEF
+
+	def = R_Decal_GetOrCreateDef (name);
+	if (!def)
+		return;
+
+	q_strlcpy (def->texture_paths[0], texture, sizeof (def->texture_paths[0]));
+	def->num_textures = 1;
+	def->category = category;
+	def->size_min = size_min;
+	def->size_max = size_max;
+	def->alpha_min = alpha_min;
+	def->alpha_max = alpha_max;
+	def->lifetime = lifetime;
+	def->fade = fade;
+	def->priority = priority;
 }
 
-static void R_Decals_ParseFile (const char *path, char *buffer)
+static void R_Decals_AddDefaultDefs (void)
 {
-	char *data = buffer;
+	R_Decals_AddDefaultDef ("bullet_hole_default", "decals/bullet/bhole_01", DECAL_CAT_BULLET, 5.f, 8.f, 0.65f, 0.9f, 32.f, 8.f, 4);
+	R_Decals_AddDefaultDef ("bullet_hole_metal", "decals/bullet/bhole_metal_01", DECAL_CAT_BULLET, 4.f, 7.f, 0.6f, 0.85f, 28.f, 6.f, 4);
+	R_Decals_AddDefaultDef ("blood_splat_small", "decals/blood/splat_01", DECAL_CAT_BLOOD, 5.f, 10.f, 0.45f, 0.75f, 22.f, 6.f, 1);
+	R_Decals_AddDefaultDef ("blood_splat_large", "decals/blood/splat_02", DECAL_CAT_BLOOD, 10.f, 16.f, 0.35f, 0.65f, 26.f, 8.f, 1);
+	R_Decals_AddDefaultDef ("scorch_small", "decals/scorch/scorch_01", DECAL_CAT_SCORCH, 12.f, 20.f, 0.45f, 0.7f, 36.f, 10.f, 3);
+	R_Decals_AddDefaultDef ("scorch_large", "decals/scorch/scorch_02", DECAL_CAT_SCORCH, 20.f, 32.f, 0.35f, 0.6f, 40.f, 12.f, 3);
+	R_Decals_AddDefaultDef ("dirt_hit", "decals/dirt/dirt_01", DECAL_CAT_DIRT, 8.f, 14.f, 0.4f, 0.65f, 24.f, 6.f, 2);
+	R_Decals_AddDefaultDef ("plaster_hit", "decals/dirt/plaster_01", DECAL_CAT_DIRT, 7.f, 12.f, 0.45f, 0.7f, 24.f, 6.f, 2);
+	R_Decals_AddDefaultDef ("concrete_hit", "decals/dirt/concrete_01", DECAL_CAT_DIRT, 7.f, 12.f, 0.45f, 0.7f, 24.f, 6.f, 2);
+}
+
+static void R_Decals_ParseFile (const char *path, const char *buffer)
+{
+	const char *data = buffer;
 	while ((data = COM_Parse (data)))
 	{
 		decal_def_t *def;
