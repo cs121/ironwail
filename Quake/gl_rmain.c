@@ -1742,6 +1742,22 @@ static int R_GodraysQualityScaleDivisor (void)
 	return 1;
 }
 
+static qboolean R_GodraysReady (void)
+{
+	if (!glprogs.godrays_mask || !glprogs.godrays)
+		return false;
+	if (!framebufs.composite.depth_stencil_tex)
+		return false;
+	if (!framebufs.godrays.mask_fbo || !framebufs.godrays.shafts_fbo)
+		return false;
+	if (!framebufs.godrays.mask_tex || !framebufs.godrays.shafts_tex)
+		return false;
+	if (framebufs.godrays.width <= 0 || framebufs.godrays.height <= 0)
+		return false;
+
+	return true;
+}
+
 static qboolean R_ComputeGodraysSunScreenPos (float *out_x, float *out_y, qboolean *out_visible)
 {
 	vec3_t sun_dir, sun_point, clip;
@@ -2268,7 +2284,6 @@ static void R_Atmosphere_Render (qboolean after_scene)
 		r_atmosphere.settings_valid = true;
 		r_atmosphere.godrays_texture = 0;
 		r_atmosphere.godrays_mask = 0;
-		r_atmosphere.godrays_source = 0;
 		r_atmosphere.godrays_ready = false;
 		r_atmosphere.fog_enabled_for_scene = false;
 		r_atmosphere.froxel_enabled = (r_atmosphere.settings.enabled_volumetrics && r_atmos_froxel.value > 0.f);
@@ -2313,7 +2328,6 @@ static void R_Atmosphere_Render (qboolean after_scene)
 	if (r_godrays.value > 0.f || r_godrays_debug.value > 0.f)
 	{
 		r_atmosphere.godrays_texture = GL_GenerateGodraysTexture (&r_atmosphere.godrays_mask);
-		r_atmosphere.godrays_source = 0;
 		r_atmosphere.godrays_ready = (r_atmosphere.godrays_texture != 0 || r_godrays_debug.value > 0.f);
 	}
 
