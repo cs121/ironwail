@@ -36,6 +36,8 @@ void R_FogVol_Render (void);
 void R_FogVol_DrawDebug2D (void);
 void R_FogVol_LogEndFrameState (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
+int R_FogVol_BindForFroxelBuild (void);
+void R_FogVol_InjectBuiltIntoFroxel (void);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 
 #endif // R_FOGVOL_H

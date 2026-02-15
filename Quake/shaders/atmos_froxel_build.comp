@@ -7,6 +7,8 @@ layout(location=0) uniform vec4 FroxelDims;
 layout(location=1) uniform vec4 MediumParams0; // x density, y falloff, z albedo, w emissive
 layout(location=2) uniform vec4 MediumParams1; // rgb color, w intensity
 layout(location=3) uniform vec4 Jitter;
+layout(location=4) uniform vec4 VolumeMins; // xyz mins, w enable
+layout(location=5) uniform vec4 VolumeMaxs; // xyz maxs, w reserved
 
 float Atmosphere_Froxel_ZToViewDepth(float z)
 {
@@ -44,8 +46,31 @@ void main()
 
     float sigma_t;
     vec3 sigma_s;
+    bool injectMode = (Jitter.z > 0.5);
+
     Atmosphere_EvalMedium(worldPos, viewPos, sigma_t, sigma_s);
 
-    imageStore(OutScatter, coord, vec4(sigma_s, sigma_t));
-    imageStore(OutTransmittance, coord, vec4(exp(-sigma_t), 0.0, 0.0, 0.0));
+    if (injectMode)
+    {
+        if (VolumeMins.w > 0.5)
+        {
+            bvec3 geMin = greaterThanEqual(worldPos, VolumeMins.xyz);
+            bvec3 leMax = lessThanEqual(worldPos, VolumeMaxs.xyz);
+            if (!(all(geMin) && all(leMax)))
+                return;
+        }
+
+        vec4 prevScatter = imageLoad(OutScatter, coord);
+        vec4 prevTrans = imageLoad(OutTransmittance, coord);
+        float newSigmaT = max(0.0, prevScatter.a + sigma_t);
+        vec3 newSigmaS = max(vec3(0.0), prevScatter.rgb + sigma_s);
+        float newTrans = clamp(prevTrans.r * exp(-sigma_t), 0.0, 1.0);
+        imageStore(OutScatter, coord, vec4(newSigmaS, newSigmaT));
+        imageStore(OutTransmittance, coord, vec4(newTrans, 0.0, 0.0, 0.0));
+    }
+    else
+    {
+        imageStore(OutScatter, coord, vec4(sigma_s, sigma_t));
+        imageStore(OutTransmittance, coord, vec4(exp(-sigma_t), 0.0, 0.0, 0.0));
+    }
 }
