@@ -818,23 +818,28 @@ void main()
                         accumT *= stepTrans;
                 }
 
-                if (FogDebugViews.x > 0.5)
+                int fogDbgMode = int(FogDebugViews.x + 0.5);
+                if (fogDbgMode == 1)
                         combined = accumScatter;
-                else if (FogDebugViews.y > 0.5)
+                else if (fogDbgMode == 2)
                         combined = vec3(accumT);
-                else if (FogDebugViews.z > 0.5)
+                else if (fogDbgMode == 3)
                         combined = accumScatter;
-                else if (FogDebugViews.w > 2.5)
+                else if (fogDbgMode == 4)
+                        combined = vec3(float(maxSlice + 1) / zSlicesF);
+                else if (fogDbgMode == 5)
+                {
+                        int dbgSlice = clamp(int(FogDebugViews.y * zSlicesF), 0, zSlices - 1);
+                        float zf = (float(dbgSlice) + 0.5) / zSlicesF;
+                        combined = texture(AtmosFroxelScatter, vec3(uv, zf)).rgb;
+                }
+                else if (fogDbgMode == 6)
                 {
                         float gridViz = float(maxSlice + 1) / zSlicesF;
                         vec2 cell = fract(uv * vec2(AtmosFroxelParams0.y, AtmosFroxelParams0.z));
                         float edge = step(cell.x, 0.05) + step(cell.y, 0.05);
                         combined = mix(vec3(gridViz), vec3(1.0, 0.6, 0.1), clamp(edge, 0.0, 1.0));
                 }
-                else if (FogDebugViews.w > 1.5)
-                        combined = vec3(float(maxSlice + 1) / zSlicesF);
-                else if (FogDebugViews.w > 0.5)
-                        combined = accumScatter;
                 else
                         combined = combined * clamp(accumT, 0.0, 1.0) + accumScatter;
         }

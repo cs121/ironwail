@@ -297,7 +297,10 @@ extern cvar_t r_fog_g;
 extern cvar_t r_fog_albedo;
 extern cvar_t r_fog_sun_strength;
 extern cvar_t r_fog_height_falloff;
+extern cvar_t r_fog_height_base;
 extern cvar_t r_fog_noise_strength;
+extern cvar_t r_fog_noise_scale;
+extern cvar_t r_fog_noise_drift;
 extern cvar_t r_fog_debug;
 extern cvar_t r_fog_debug_sun;
 extern cvar_t r_fog_validate;
@@ -306,11 +309,15 @@ extern cvar_t r_fog_debug_transmittance;
 extern cvar_t r_fog_debug_scattering;
 extern cvar_t r_fog_debug_light_injection;
 extern cvar_t r_fog_debug_step_length;
+extern cvar_t r_fog_debug_mode;
+extern cvar_t r_fog_debug_slice;
 extern cvar_t r_fog_debug_showgrid;
 extern cvar_t r_fog_debug_composite_stage;
+extern cvar_t r_fog_debug_volume_bounds;
 extern cvar_t r_fog_log;
 extern cvar_t r_fog_froxel_res;
 extern cvar_t r_fog_zslices;
+extern cvar_t r_fog_volume_max_active;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
 extern cvar_t r_vignette_radius_outer;
@@ -891,7 +898,10 @@ Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_fog_albedo);
 	Cvar_RegisterVariable (&r_fog_sun_strength);
 	Cvar_RegisterVariable (&r_fog_height_falloff);
+	Cvar_RegisterVariable (&r_fog_height_base);
 	Cvar_RegisterVariable (&r_fog_noise_strength);
+	Cvar_RegisterVariable (&r_fog_noise_scale);
+	Cvar_RegisterVariable (&r_fog_noise_drift);
 	Cvar_RegisterVariable (&r_fog_debug);
 	Cvar_RegisterVariable (&r_fog_debug_sun);
 	Cvar_RegisterVariable (&r_fog_validate);
@@ -900,11 +910,15 @@ Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_fog_debug_scattering);
 	Cvar_RegisterVariable (&r_fog_debug_light_injection);
 	Cvar_RegisterVariable (&r_fog_debug_step_length);
+	Cvar_RegisterVariable (&r_fog_debug_mode);
+	Cvar_RegisterVariable (&r_fog_debug_slice);
 	Cvar_RegisterVariable (&r_fog_debug_showgrid);
 	Cvar_RegisterVariable (&r_fog_debug_composite_stage);
+	Cvar_RegisterVariable (&r_fog_debug_volume_bounds);
 	Cvar_RegisterVariable (&r_fog_log);
 	Cvar_RegisterVariable (&r_fog_froxel_res);
 	Cvar_RegisterVariable (&r_fog_zslices);
+	Cvar_RegisterVariable (&r_fog_volume_max_active);
 Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
 	Cvar_RegisterVariable (&r_vignette_radius_outer);
@@ -1143,6 +1157,8 @@ map_slimealpha = CLAMP(0.f, map_slimealpha, 1.f);
 R_NewMap
 ===============
 */
+extern void R_Fog_ParseVolumes (void);
+
 void R_NewMap (void)
 {
 	int		i;
@@ -1169,6 +1185,7 @@ void R_NewMap (void)
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
+        R_Fog_ParseVolumes (); // froxel fog volumes in entity lump
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
         R_ParseDlightEntities (); // persistent dlights from BSP entities
         R_UpdateSunFallback ();

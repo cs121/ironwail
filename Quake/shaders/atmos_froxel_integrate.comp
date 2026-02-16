@@ -1,6 +1,6 @@
 layout(local_size_x=4, local_size_y=4, local_size_z=4) in;
 layout(rgba16f, binding=0) uniform image3D InOutScatter;
-layout(r16f, binding=1) uniform image3D InOutTransmittance;
+layout(rg16f, binding=1) uniform image3D InOutTransmittance;
 layout(binding=6) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
@@ -137,14 +137,16 @@ void main()
     vec3 viewPos = ray * (z0 + 0.5 * stepLen);
     vec3 worldPos = Atmosphere_ViewToWorld(viewPos);
 
-    float T = exp(-sigma_t * stepLen);
+    vec4 transData = imageLoad(InOutTransmittance, coord);
+    float T = clamp(transData.r, 0.0, 1.0);
+    float phaseGLocal = clamp(transData.g * 2.0 - 1.0, -0.95, 0.95);
 
     vec3 lightDir = normalize(-ShadowSunDir.xyz);
     if (length(lightDir) < 1e-5)
         lightDir = vec3(0.0, 0.0, 1.0);
 
     float cosTheta = clamp(dot(-ray, lightDir), -1.0, 1.0);
-    float phase = PhaseHG(cosTheta, clamp(LightParams0.x, -0.99, 0.99));
+    float phase = PhaseHG(cosTheta, clamp((phaseGLocal + LightParams0.x) * 0.5, -0.99, 0.99));
 
     float inRange = 1.0;
     float shadow = (LightParams0.z > 0.5) ? ShadowVisibility(worldPos, lightDir, inRange) : 1.0;
@@ -201,5 +203,5 @@ void main()
     }
 
     imageStore(InOutScatter, coord, vec4(scatter, sigma_t));
-    imageStore(InOutTransmittance, coord, vec4(T, 0.0, 0.0, 0.0));
+    imageStore(InOutTransmittance, coord, vec4(T, transData.g, 0.0, 0.0));
 }

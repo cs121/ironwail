@@ -99,7 +99,58 @@ typedef struct atmosphere_settings_s
 	float steps;
 	float history_weight;
 	float debug_mode;
+	float debug_slice;
+	float noise_scale;
+	float noise_drift;
+	float height_base;
 } atmosphere_settings_t;
+
+#define MAX_FOG_VOLUMES 64
+
+typedef enum fog_volume_shape_e
+{
+	FOG_VOLUME_BOX = 0,
+	FOG_VOLUME_SPHERE = 1
+} fog_volume_shape_t;
+
+typedef enum fog_volume_blend_e
+{
+	FOG_VOLUME_BLEND_ADD = 0,
+	FOG_VOLUME_BLEND_OVERRIDE = 1
+} fog_volume_blend_t;
+
+typedef struct fog_volume_s
+{
+	qboolean used;
+	fog_volume_shape_t shape;
+	fog_volume_blend_t blend;
+	vec3_t mins;
+	vec3_t maxs;
+	vec3_t origin;
+	float radius;
+	float density;
+	vec3_t color;
+	float height_falloff;
+	float noise_amount;
+	float noise_scale;
+	float anisotropy;
+	int flags;
+} fog_volume_t;
+
+static fog_volume_t r_fog_volumes[MAX_FOG_VOLUMES];
+static int r_fog_volume_count;
+
+typedef struct packed_fog_volume_s
+{
+	vec4_t data0;	/* xyz center, w radius */
+	vec4_t data1;	/* xyz extents, w density */
+	vec4_t data2;	/* rgb color, w height_falloff */
+	vec4_t data3;	/* x noise amount, y noise scale, z anisotropy, w shape */
+	vec4_t data4;	/* x blend, y flags */
+} packed_fog_volume_t;
+
+static packed_fog_volume_t r_fog_volume_gpu[MAX_FOG_VOLUMES];
+static GLuint r_fog_volume_ssbo;
 
 typedef struct atmosphere_runtime_s
 {
@@ -576,7 +627,11 @@ cvar_t	r_fog_g = { "r_fog_g", "0.76", CVAR_ARCHIVE };
 cvar_t	r_fog_albedo = { "r_fog_albedo", "0.92", CVAR_ARCHIVE };
 cvar_t	r_fog_sun_strength = { "r_fog_sun_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_fog_height_falloff = { "r_fog_height_falloff", "0.0025", CVAR_ARCHIVE };
+cvar_t	r_fog_height_base = { "r_fog_height_base", "0", CVAR_ARCHIVE };
 cvar_t	r_fog_noise_strength = { "r_fog_noise_strength", "0.15", CVAR_ARCHIVE };
+cvar_t	r_fog_noise_scale = { "r_fog_noise_scale", "0.06", CVAR_ARCHIVE };
+cvar_t	r_fog_noise_drift = { "r_fog_noise_drift", "0.15", CVAR_ARCHIVE };
+cvar_t	r_fog_volume_max_active = { "r_fog_volume_max_active", "16", CVAR_ARCHIVE };
 cvar_t	r_fog_debug = { "r_fog_debug", "0", CVAR_NONE };
 cvar_t	r_fog_debug_sun = { "r_fog_debug_sun", "0", CVAR_NONE };
 cvar_t	r_fog_validate = { "r_fog_validate", "0", CVAR_NONE };
@@ -585,8 +640,11 @@ cvar_t	r_fog_debug_transmittance = { "r_fog_debug_transmittance", "0", CVAR_NONE
 cvar_t	r_fog_debug_scattering = { "r_fog_debug_scattering", "0", CVAR_NONE };
 cvar_t	r_fog_debug_light_injection = { "r_fog_debug_light_injection", "0", CVAR_NONE };
 cvar_t	r_fog_debug_step_length = { "r_fog_debug_step_length", "0", CVAR_NONE };
+cvar_t	r_fog_debug_mode = { "r_fog_debug_mode", "0", CVAR_NONE };
+cvar_t	r_fog_debug_slice = { "r_fog_debug_slice", "0", CVAR_NONE };
 cvar_t	r_fog_debug_showgrid = { "r_fog_debug_showgrid", "0", CVAR_NONE };
 cvar_t	r_fog_debug_composite_stage = { "r_fog_debug_composite_stage", "0", CVAR_NONE };
+cvar_t	r_fog_debug_volume_bounds = { "r_fog_debug_volume_bounds", "0", CVAR_NONE };
 
 cvar_t	r_fog_log = { "r_fog_log", "0", CVAR_NONE };
 cvar_t	r_fog_froxel_res = { "r_fog_froxel_res", "1", CVAR_ARCHIVE };
@@ -963,7 +1021,7 @@ void GL_CreateFrameBuffers (void)
 		glGenTextures (1, &framebufs.atmos_froxel.transmittance_tex);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.transmittance_tex);
 		GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.transmittance_tex, -1, "atmos froxel transmittance");
-		GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_R16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+		GL_TexStorage3DFunc (GL_TEXTURE_3D, 1, GL_RG16F, framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
 		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1160,6 +1218,11 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_history_tex[0]);
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_history_tex[1]);
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_resolved_tex);
+	if (r_fog_volume_ssbo)
+	{
+		GL_DeleteBuffersFunc (1, &r_fog_volume_ssbo);
+		r_fog_volume_ssbo = 0;
+	}
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
@@ -2228,6 +2291,106 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
+static qboolean R_ParseFogVector3 (const char *value, vec3_t out)
+{
+	float x, y, z;
+	if (!value || sscanf (value, "%f %f %f", &x, &y, &z) != 3)
+		return false;
+	out[0] = x; out[1] = y; out[2] = z;
+	return true;
+}
+
+static void R_FogVolume_Default (fog_volume_t *v)
+{
+	memset (v, 0, sizeof (*v));
+	v->shape = FOG_VOLUME_BOX;
+	v->blend = FOG_VOLUME_BLEND_ADD;
+	v->density = 1.f;
+	v->color[0] = v->color[1] = v->color[2] = 1.f;
+	v->noise_scale = 0.06f;
+}
+
+void R_Fog_ParseVolumes (void)
+{
+	const char *data;
+	r_fog_volume_count = 0;
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+	data = cl.worldmodel->entities;
+	data = COM_Parse (data);
+	while (data && com_token[0])
+	{
+		fog_volume_t vol;
+		char classname[64] = "";
+		if (com_token[0] != '{')
+			break;
+		R_FogVolume_Default (&vol);
+		while (1)
+		{
+			char key[64], value[1024];
+			data = COM_Parse (data);
+			if (!data || !com_token[0])
+				return;
+			if (com_token[0] == '}')
+				break;
+			q_strlcpy (key, com_token, sizeof (key));
+			if (key[0] == '_')
+				memmove (key, key + 1, strlen (key));
+			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+			if (!data)
+				return;
+			q_strlcpy (value, com_token, sizeof (value));
+			if (!strcmp (key, "classname"))
+				q_strlcpy (classname, value, sizeof (classname));
+			else if (!strcmp (key, "origin"))
+				R_ParseFogVector3 (value, vol.origin);
+			else if (!strcmp (key, "mins"))
+				R_ParseFogVector3 (value, vol.mins);
+			else if (!strcmp (key, "maxs"))
+				R_ParseFogVector3 (value, vol.maxs);
+			else if (!strcmp (key, "radius"))
+				vol.radius = atof (value);
+			else if (!strcmp (key, "shape"))
+				vol.shape = (!q_strcasecmp (value, "sphere")) ? FOG_VOLUME_SPHERE : FOG_VOLUME_BOX;
+			else if (!strcmp (key, "blend"))
+				vol.blend = (!q_strcasecmp (value, "override")) ? FOG_VOLUME_BLEND_OVERRIDE : FOG_VOLUME_BLEND_ADD;
+			else if (!strcmp (key, "density"))
+				vol.density = atof (value);
+			else if (!strcmp (key, "color") || !strcmp (key, "albedo"))
+				R_ParseFogVector3 (value, vol.color);
+			else if (!strcmp (key, "height_falloff"))
+				vol.height_falloff = atof (value);
+			else if (!strcmp (key, "noise_amount"))
+				vol.noise_amount = atof (value);
+			else if (!strcmp (key, "noise_scale"))
+				vol.noise_scale = atof (value);
+			else if (!strcmp (key, "anisotropy") || !strcmp (key, "g"))
+				vol.anisotropy = atof (value);
+			else if (!strcmp (key, "flags"))
+				vol.flags = atoi (value);
+		}
+		if ((!q_strcasecmp (classname, "fog_volume") || !q_strcasecmp (classname, "env_fog_volume"))
+			&& r_fog_volume_count < MAX_FOG_VOLUMES)
+		{
+			if (vol.shape == FOG_VOLUME_BOX && (VectorCompare (vol.maxs, vec3_origin) || VectorCompare (vol.mins, vec3_origin)))
+			{
+				VectorAdd (vol.origin, vol.mins, vol.mins);
+				VectorAdd (vol.origin, vol.maxs, vol.maxs);
+			}
+			else if (vol.shape == FOG_VOLUME_BOX)
+			{
+				VectorSet (vol.mins, vol.origin[0] - 64.f, vol.origin[1] - 64.f, vol.origin[2] - 64.f);
+				VectorSet (vol.maxs, vol.origin[0] + 64.f, vol.origin[1] + 64.f, vol.origin[2] + 64.f);
+			}
+			if (vol.shape == FOG_VOLUME_SPHERE && vol.radius <= 0.f)
+				vol.radius = 128.f;
+			vol.used = true;
+			r_fog_volumes[r_fog_volume_count++] = vol;
+		}
+		data = COM_Parse (data);
+	}
+}
+
 static atmosphere_settings_t Atmosphere_ReadSettings (void);
 static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage);
 
@@ -2246,9 +2409,53 @@ static float Atmosphere_Halton (int index, int base)
 
 static void Atmosphere_Froxel_InitResources (void) { (void)0; }
 
+
+static void Atmosphere_Froxel_UploadVolumeBuffer (int *out_count)
+{
+	int i, active;
+	if (out_count)
+		*out_count = 0;
+	if (!r_fog_volume_ssbo)
+		GL_GenBuffersFunc (1, &r_fog_volume_ssbo);
+	active = CLAMP (0, (int)Q_rint (r_fog_volume_max_active.value), MAX_FOG_VOLUMES);
+	active = q_min (active, r_fog_volume_count);
+	for (i = 0; i < active; ++i)
+	{
+		fog_volume_t *v = &r_fog_volumes[i];
+		packed_fog_volume_t *dst = &r_fog_volume_gpu[i];
+		vec3_t center;
+		vec3_t ext;
+		if (v->shape == FOG_VOLUME_BOX)
+		{
+			center[0] = (v->mins[0] + v->maxs[0]) * 0.5f;
+			center[1] = (v->mins[1] + v->maxs[1]) * 0.5f;
+			center[2] = (v->mins[2] + v->maxs[2]) * 0.5f;
+			ext[0] = q_max (1.f, (v->maxs[0] - v->mins[0]) * 0.5f);
+			ext[1] = q_max (1.f, (v->maxs[1] - v->mins[1]) * 0.5f);
+			ext[2] = q_max (1.f, (v->maxs[2] - v->mins[2]) * 0.5f);
+		}
+		else
+		{
+			VectorCopy (v->origin, center);
+			VectorSet (ext, v->radius, v->radius, v->radius);
+		}
+		dst->data0[0] = center[0]; dst->data0[1] = center[1]; dst->data0[2] = center[2]; dst->data0[3] = q_max (v->radius, 1.f);
+		dst->data1[0] = ext[0]; dst->data1[1] = ext[1]; dst->data1[2] = ext[2]; dst->data1[3] = q_max (v->density, 0.f);
+		dst->data2[0] = CLAMP (0.f, v->color[0], 8.f); dst->data2[1] = CLAMP (0.f, v->color[1], 8.f); dst->data2[2] = CLAMP (0.f, v->color[2], 8.f); dst->data2[3] = q_max (v->height_falloff, 0.f);
+		dst->data3[0] = CLAMP (0.f, v->noise_amount, 2.f); dst->data3[1] = q_max (0.0001f, v->noise_scale); dst->data3[2] = CLAMP (-0.95f, v->anisotropy, 0.95f); dst->data3[3] = (float)v->shape;
+		dst->data4[0] = (float)v->blend; dst->data4[1] = (float)v->flags;
+	}
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fog_volume_ssbo);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (packed_fog_volume_t) * q_max (1, active), active > 0 ? r_fog_volume_gpu : NULL, GL_STREAM_DRAW);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 7, r_fog_volume_ssbo, 0, sizeof (packed_fog_volume_t) * q_max (1, active));
+	if (out_count)
+		*out_count = active;
+}
+
 static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings, vec2_t jitter)
 {
 	int gx, gy, gz;
+	int active_volumes = 0;
 	if (!settings || !glprogs.atmos_froxel_build)
 		return;
 	gx = (framebufs.atmos_froxel.width + 3) / 4;
@@ -2257,12 +2464,15 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_BeginGroup ("Atmosphere: Froxel Build");
 	GL_UseProgram (glprogs.atmos_froxel_build);
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R16F);
+	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RG16F);
+	Atmosphere_Froxel_UploadVolumeBuffer (&active_volumes);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
-	GL_Uniform4fFunc (1, settings->density, q_max (0.00001f, r_fog_height_falloff.value), CLAMP (0.f, r_fog_albedo.value, 1.f), 0.0f);
-	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], 1.0f);
-	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, CLAMP (0.f, r_fog_noise_strength.value, 2.f));
+	GL_Uniform4fFunc (1, settings->density, q_max (0.00001f, r_fog_height_falloff.value), CLAMP (0.f, r_fog_albedo.value, 1.f), settings->anisotropy);
+	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], settings->noise_scale);
+	GL_Uniform4fFunc (3, jitter[0], jitter[1], settings->noise_drift, CLAMP (0.f, r_fog_noise_strength.value, 2.f));
 	GL_Uniform4fFunc (4, r_matproj[0], r_matproj[5], q_max (view_znear, 0.01f), q_max (view_zfar, 1.f));
+	GL_Uniform4fFunc (5, (float)active_volumes, r_fog_volume_max_active.value, 0.f, 0.f);
+	GL_Uniform4fFunc (6, settings->height_base, settings->debug_slice, settings->debug_mode, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -2282,19 +2492,23 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	R_Clustered_BindForShading ();
 	R_Shadow_BindShadowMap (GL_TEXTURE6);
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
-	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R16F);
-	if (r_fog_debug_density.value > 0.f)
-		debug_mode = 1;
-	else if (r_fog_debug_transmittance.value > 0.f)
-		debug_mode = 2;
-	else if (r_fog_debug_scattering.value > 0.f)
-		debug_mode = 3;
-	else if (r_fog_debug_light_injection.value > 0.f)
-		debug_mode = 4;
-	else if (r_fog_debug_step_length.value > 0.f)
-		debug_mode = 5;
-	else if (r_fog_debug_showgrid.value > 0.f)
-		debug_mode = 6;
+	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RG16F);
+	debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0, (int)Q_rint (r_fog_debug_mode.value), 6) : 0;
+	if (debug_mode <= 0)
+	{
+		if (r_fog_debug_density.value > 0.f)
+			debug_mode = 1;
+		else if (r_fog_debug_transmittance.value > 0.f)
+			debug_mode = 2;
+		else if (r_fog_debug_scattering.value > 0.f)
+			debug_mode = 3;
+		else if (r_fog_debug_light_injection.value > 0.f)
+			debug_mode = 4;
+		else if (r_fog_debug_step_length.value > 0.f)
+			debug_mode = 5;
+		else if (r_fog_debug_showgrid.value > 0.f)
+			debug_mode = 6;
+	}
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
 	GL_Uniform4fFunc (1, settings->anisotropy, q_max (0.f, r_fog_sun_strength.value), settings->shadow_enable ? 1.f : 0.f, 0.f);
 	GL_Uniform4fFunc (2, (float)debug_mode, settings->density, q_max (view_zfar, 1.f), 0.f);
@@ -2364,7 +2578,11 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	}
 	settings.steps = (float)(16 + quality * 16);
 	settings.history_weight = CLAMP (0.f, r_fog_history_weight.value, 1.f);
-	settings.debug_mode = CLAMP (0.f, r_fog_debug.value, 6.f);
+	settings.debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 6.f) : 0.f;
+	settings.debug_slice = CLAMP (0.f, r_fog_debug_slice.value, (float)q_max (framebufs.atmos_froxel.depth - 1, 0));
+	settings.noise_scale = q_max (0.0001f, r_fog_noise_scale.value);
+	settings.noise_drift = q_max (0.f, r_fog_noise_drift.value);
+	settings.height_base = r_fog_height_base.value;
 	settings.enabled_shafts = false;
 	return settings;
 }
@@ -2388,7 +2606,7 @@ static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, con
 		settings->history_weight,
 		settings->debug_mode);
 	if (r_atmosphere.froxel_enabled)
-		Con_Printf ("atmos[froxel] dims=%dx%dx%d formats=scatter:RGBA16F trans:R16F\n", framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
+		Con_Printf ("atmos[froxel] dims=%dx%dx%d formats=scatter:RGBA16F trans:RG16F\n", framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
 }
 static void R_Fog_BeginFrame (void)
 {
@@ -2432,6 +2650,27 @@ static void R_Fog_Render (void)
 			jitter[1] = 0.f;
 		}
 		Atmosphere_Froxel_BuildVolume (&r_atmosphere.settings, jitter);
+		if (r_fog_debug_volume_bounds.value > 0.f)
+		{
+			int i;
+			vec3_t color = {0.2f, 0.8f, 1.0f};
+			for (i = 0; i < r_fog_volume_count; ++i)
+			{
+				fog_volume_t *v = &r_fog_volumes[i];
+				vec3_t mins, maxs;
+				if (v->shape == FOG_VOLUME_SPHERE)
+				{
+					VectorSet (mins, v->origin[0] - v->radius, v->origin[1] - v->radius, v->origin[2] - v->radius);
+					VectorSet (maxs, v->origin[0] + v->radius, v->origin[1] + v->radius, v->origin[2] + v->radius);
+				}
+				else
+				{
+					VectorCopy (v->mins, mins);
+					VectorCopy (v->maxs, maxs);
+				}
+				R_DebugDrawWireBox (mins, maxs, color, true);
+			}
+		}
 		Atmosphere_Froxel_LightIntegrate (&r_atmosphere.settings);
 		Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
 		r_atmosphere.settings.enabled_shafts = false;
@@ -2777,11 +3016,21 @@ void GL_PostProcess (void)
 		(float)framebufs.atmos_froxel.depth,
 		q_max (view_zfar, 1.f),
 		0.f);
-	GL_Uniform4fFunc (30,
-		r_fog_debug_density.value > 0.f ? 1.f : 0.f,
-		r_fog_debug_transmittance.value > 0.f ? 1.f : 0.f,
-		r_fog_debug_scattering.value > 0.f ? 1.f : 0.f,
-		r_fog_debug_light_injection.value > 0.f ? 1.f : (r_fog_debug_step_length.value > 0.f ? 2.f : (r_fog_debug_showgrid.value > 0.f ? 3.f : 0.f)));
+	{
+		float dbg_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 6.f) : 0.f;
+		if (dbg_mode <= 0.f)
+		{
+			if (r_fog_debug_density.value > 0.f) dbg_mode = 1.f;
+			else if (r_fog_debug_transmittance.value > 0.f) dbg_mode = 2.f;
+			else if (r_fog_debug_scattering.value > 0.f) dbg_mode = 3.f;
+			else if (r_fog_debug_showgrid.value > 0.f) dbg_mode = 6.f;
+		}
+		GL_Uniform4fFunc (30,
+			dbg_mode,
+			r_atmosphere.settings.debug_slice / q_max (1.f, (float)framebufs.atmos_froxel.depth),
+			(float)r_fog_volume_count,
+			0.f);
+	}
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
