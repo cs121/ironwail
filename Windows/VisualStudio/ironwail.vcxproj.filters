@@ -186,6 +186,9 @@
     <ClCompile Include="..\..\Quake\renderer\r_dlight_pool.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\renderer\r_envlight.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\renderer\r_shadow.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -444,6 +447,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\renderer\r_dlight_pool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Quake\renderer\r_envlight.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\resource.h">
