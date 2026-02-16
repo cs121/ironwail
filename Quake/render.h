@@ -145,6 +145,8 @@ extern vec3_t	r_origin, vpn, vright, vup;
 
 void R_Init (void);
 void R_RenderView (void);		// must set r_refdef first
+void R_ResetViewportAndScissorFullscreen (const char *label);
+void R_StateDebugMark (const char *label);
 void R_ClearEfrags (void);
 void R_CheckEfrags (void); //johnfitz
 void R_AddEfrags (entity_t *ent);
