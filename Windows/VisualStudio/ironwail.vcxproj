@@ -315,7 +315,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\renderer\r_decals.c" />
     <ClCompile Include="..\..\Quake\renderer\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\renderer\r_shadow.c" />
-    <ClCompile Include="..\..\Quake\renderer\r_maptex_export.c" />
     <ClCompile Include="..\..\Quake\renderer\r_postfx.c" />
     <ClCompile Include="..\..\Quake\renderer\r_part.c" />
     <ClCompile Include="..\..\Quake\renderer\r_sprite.c" />

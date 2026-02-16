@@ -234,7 +234,6 @@ opengl/gl_draw.o \
 image.o \
 opengl/gl_texmgr.o \
 ktx2_write.o \
-renderer/r_maptex_export.o \
 bc7enc.o \
 opengl/gl_mesh.o \
 renderer/r_sprite.o \

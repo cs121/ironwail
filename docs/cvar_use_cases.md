@@ -734,19 +734,6 @@ Total registered cvars reviewed: **627**.
 | `r_fogvol_upsample_k` | `100` |
 | `r_fogvol_upsample_taps` | `4` |
 
-## Quake/r_maptex_export.c
-
-**Use case:** Map texture export pipeline settings.
-
-| CVar | Default |
-|---|---:|
-| `r_maptex_export` | `0` |
-| `r_maptex_export_format` | `ktx2` |
-| `r_maptex_export_mipmaps` | `1` |
-| `r_maptex_export_overwrite` | `0` |
-| `r_maptex_export_uastc` | `0` |
-| `r_maptex_export_verbose` | `0` |
-
 ## Quake/r_part.c
 
 **Use case:** Particle system rendering behavior.
