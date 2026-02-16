@@ -69,7 +69,6 @@ static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 
 extern cvar_t r_dynamic;
-extern cvar_t r_dlight_style;
 extern cvar_t r_clustered_lighting;
 
 static qboolean R_DlightsAdditivePassEnabled (void)
@@ -77,7 +76,7 @@ static qboolean R_DlightsAdditivePassEnabled (void)
 	if (r_clustered_lighting.value > 0.f)
 		return false;
 
-	return (r_dlight_style.value > 0.f || r_dynamic.value > 0.f);
+	return (r_dynamic.value > 0.f);
 }
 
 typedef struct godrays_stabilization_s
