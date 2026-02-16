@@ -129,6 +129,69 @@ static void GL_LogErrorIfDeveloper (const char *label)
 		Con_DPrintf ("GL error after %s: 0x%04X\n", label, err);
 }
 
+static qboolean GL_StateDebugMatchesFilter (const char *label)
+{
+	const char *filter = r_state_debug_filter.string;
+
+	if (!filter || !*filter)
+		return true;
+
+	return (q_strcasestr (label, filter) != NULL);
+}
+
+static void GL_DumpRenderState (const char *label)
+{
+	GLint viewport[4], scissor_box[4];
+	GLint draw_fbo, read_fbo, program, vao;
+	GLint blend_src_rgb, blend_dst_rgb, depth_func;
+	qboolean scissor, depth, blend, cull;
+
+	if (r_state_debug.value <= 0.f)
+		return;
+	if (!GL_StateDebugMatchesFilter (label))
+		return;
+
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &vao);
+	scissor = glIsEnabled (GL_SCISSOR_TEST);
+	depth = glIsEnabled (GL_DEPTH_TEST);
+	blend = glIsEnabled (GL_BLEND);
+	cull = glIsEnabled (GL_CULL_FACE);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
+	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+
+	Con_Printf (
+		"STATEDBG frame=%d pass=%s vp=(%d %d %d %d) scissor=%d box=(%d %d %d %d) "
+		"draw_fbo=%d read_fbo=%d prog=%d vao=%d depth=%d blend=%d cull=%d blendfunc=(%d,%d) depthfunc=0x%04x\n",
+		r_framecount,
+		label,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		draw_fbo, read_fbo, program, vao,
+		depth, blend, cull,
+		blend_src_rgb, blend_dst_rgb,
+		(unsigned)depth_func);
+}
+
+void R_ResetViewportAndScissorFullscreen (const char *label)
+{
+	glDisable (GL_SCISSOR_TEST);
+	glViewport (glx, gly, glwidth, glheight);
+	glScissor (glx, gly, glwidth, glheight);
+	GL_DumpRenderState (label);
+}
+
+void R_StateDebugMark (const char *label)
+{
+	GL_DumpRenderState (label);
+}
+
 
 // Returns how much of the console is currently covering the screen in the range [0, 1].
 static float GL_ConsoleVisibility (void)
@@ -256,6 +319,8 @@ cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
+cvar_t	r_state_debug = { "r_state_debug", "0", CVAR_NONE };
+cvar_t	r_state_debug_filter = { "r_state_debug_filter", "", CVAR_NONE };
 cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
 cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
@@ -2491,12 +2556,19 @@ static void R_Atmosphere_Render (qboolean after_scene)
 {
 	if (!after_scene)
 	{
+		R_StateDebugMark ("POST_FOG_BEGIN_BEFORE");
 		R_Fog_BeginFrame ();
+		R_StateDebugMark ("POST_FOG_BEGIN_AFTER");
 		return;
 	}
+	R_StateDebugMark ("POST_FOG_RENDER_BEFORE");
 	R_Fog_Render ();
+	R_StateDebugMark ("POST_FOG_RENDER_AFTER");
+	R_StateDebugMark ("POST_FOG_COMPOSITE_BEFORE");
 	R_Fog_Composite ();
+	R_StateDebugMark ("POST_FOG_COMPOSITE_AFTER");
 	R_Fog_EndFrame ();
+	R_StateDebugMark ("POST_FOG_END_AFTER");
 }
 
 void GL_PostProcess (void)
@@ -2717,8 +2789,9 @@ void GL_PostProcess (void)
 	}
 	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
+	R_StateDebugMark ("POST_BEFORE_FINAL_COMPOSITE");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-	glViewport (glx, gly, glwidth, glheight);
+	R_ResetViewportAndScissorFullscreen ("POST_FINAL_COMPOSITE_RESET");
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
 		qboolean linear_debug = (debug_mode == 2);
@@ -2876,6 +2949,7 @@ void GL_PostProcess (void)
 	}
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	R_StateDebugMark ("POST_AFTER_FINAL_COMPOSITE");
 
 	GL_EndGroup ();
 }
@@ -3631,6 +3705,7 @@ void R_Clear (void)
 	if (gl_clear.value)
 		clearbits |= GL_COLOR_BUFFER_BIT;
 
+	glDisable (GL_SCISSOR_TEST);
 	GL_SetState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
 	glStencilMask (~0u);
 	R_LogClearDebug ("R_Clear", clearbits);
@@ -4981,17 +5056,22 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
+	R_StateDebugMark ("FRAME_START");
+	R_ResetViewportAndScissorFullscreen ("WORLD_RESET_BEFORE_SETUP");
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Decals_FrameBegin ();
 	R_Shadow_SunPass ();
 	R_Shadow_DlightPass ();
 	R_SetupGL ();
 	R_Clear ();
+	R_StateDebugMark ("WORLD_BEFORE_GEOMETRY");
 	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
+	R_StateDebugMark ("WEAPON_BEFORE");
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	R_StateDebugMark ("WEAPON_AFTER");
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDLightPass ();
@@ -5008,6 +5088,7 @@ void R_RenderScene (void)
 	R_ShowBoundingBoxes (); //johnfitz
 	R_ShowPointFile ();
 	R_ShowLightgridDebug ();
+	R_StateDebugMark ("WORLD_AFTER_GEOMETRY");
 }
 
 /*

@@ -2131,6 +2131,7 @@ void SCR_UpdateScreen (void)
 
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
+	R_StateDebugMark ("FRAME_BEGIN_AFTER_BEGINRENDERING");
 
 	//
 	// determine size of refresh window
@@ -2156,7 +2157,9 @@ void SCR_UpdateScreen (void)
 
 	GL_BeginGroup ("2D");
 
+	R_ResetViewportAndScissorFullscreen ("2D_RESET_BEFORE_SET2D");
 	GL_Set2D ();
+	R_StateDebugMark ("2D_AFTER_SET2D");
 	R_FogVol_DrawDebug2D ();
 
 	//FIXME: only call this when needed
@@ -2209,7 +2212,10 @@ void SCR_UpdateScreen (void)
 	}
 
 	Draw_Flush ();
+	R_StateDebugMark ("2D_AFTER_HUD");
+	R_ResetViewportAndScissorFullscreen ("2D_RESET_AFTER_HUD");
 	GL_ApplyFilmgrainUI ();
+	R_StateDebugMark ("FRAME_FINAL_BEFORE_ENDRENDERING");
 
 	GL_EndGroup ();
 
