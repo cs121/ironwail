@@ -5,6 +5,7 @@ struct InstanceData
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	AmbientColor; // xyz=AmbientColor
+	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -104,7 +105,9 @@ layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=6) uniform samplerCube ReflectionTex;
 
+#include "envlight.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -125,6 +128,7 @@ layout(location=6) in vec3 in_normal;
 layout(location=7) in vec3 in_static_light;
 layout(location=8) in vec3 in_dyn_light;
 layout(location=9) in vec3 in_amb_light;
+layout(location=10) flat in vec4 in_env_params;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -242,6 +246,22 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
+
+	vec3 N_env = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
+	vec3 V_env = normalize_safe(-in_pos);
+	float ambient_luma = EnvLightLuma(clamp(L_amb / max(Overbright, 1e-4), 0.0, 1.0));
+	float indoor_factor = DeriveIndoorFactor(ambient_luma, in_env_params.z, shadow_term);
+	float env_mask = max(in_env_params.x, 0.0);
+	vec3 env_spec = EvaluateReflectionProbe(
+		ReflectionTex,
+		1.0,
+		in_pos + EyePos,
+		N_env,
+		V_env,
+		in_env_params.y * env_mask,
+		indoor_factor,
+		in_env_params.w * env_mask);
+	result.rgb += env_spec;
 
 	if (RimParams0.x > 0.5)
 	{
