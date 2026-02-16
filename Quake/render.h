@@ -154,6 +154,7 @@ void R_AddStaticModels (const byte *vis);
 
 void R_NewMap (void);
 void R_ParseDlightEntities (void);
+void R_UpdateSunFallback (void);
 
 
 void R_ParseParticleEffect (void);

@@ -472,6 +472,9 @@ extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
+extern vec3_t r_sun_origin;
+extern vec3_t r_sun_dir_override;
+extern qboolean r_sun_dir_override_active;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);

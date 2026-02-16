@@ -507,7 +507,11 @@ static void R_Shadow_GetSunDirection (vec3_t out_dir)
 	float y = dir[1];
 	float z = dir[2];
 
-	if (r_shadow_sun_dir.string && *r_shadow_sun_dir.string)
+	if (r_sun_dir_override_active)
+	{
+		VectorCopy (r_sun_dir_override, dir);
+	}
+	else if (r_shadow_sun_dir.string && *r_shadow_sun_dir.string)
 	{
 		if (sscanf (r_shadow_sun_dir.string, "%f %f %f", &x, &y, &z) == 3)
 		{
