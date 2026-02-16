@@ -29,6 +29,12 @@ vec3 Atmosphere_Froxel_InvProjRay(vec2 uv)
     return normalize(vec3(ndc, 1.0));
 }
 
+vec3 Atmosphere_ViewToWorld(vec3 viewPos)
+{
+    mat3 invViewRot = transpose(mat3(View));
+    return EyePos + invViewRot * viewPos;
+}
+
 void main()
 {
     ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
@@ -45,7 +51,7 @@ void main()
     float z1 = Atmosphere_Froxel_ZToViewDepth(float(coord.z + 1));
     float stepLen = max(1e-3, z1 - z0);
     vec3 viewPos = ray * (z0 + 0.5 * stepLen);
-    vec3 worldPos = EyePos + viewPos;
+    vec3 worldPos = Atmosphere_ViewToWorld(viewPos);
 
     float T = exp(-sigma_t * stepLen);
     float phase = PhaseHG(1.0, clamp(LightParams0.x, 0.0, 0.99));

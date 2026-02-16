@@ -23,6 +23,12 @@ vec3 Atmosphere_Froxel_InvProjRay(vec2 uv)
     return normalize(vec3(ndc, 1.0));
 }
 
+vec3 Atmosphere_ViewToWorld(vec3 viewPos)
+{
+    mat3 invViewRot = transpose(mat3(View));
+    return EyePos + invViewRot * viewPos;
+}
+
 void Atmosphere_EvalMedium(vec3 worldPos, vec3 viewPos, out float sigma_t, out vec3 sigma_s)
 {
     float h = max(0.0, worldPos.z);
@@ -42,7 +48,7 @@ void main()
     float viewDepth = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
     vec3 ray = Atmosphere_Froxel_InvProjRay(uv);
     vec3 viewPos = ray * viewDepth;
-    vec3 worldPos = EyePos + viewPos;
+    vec3 worldPos = Atmosphere_ViewToWorld(viewPos);
 
     float sigma_t;
     vec3 sigma_s;
