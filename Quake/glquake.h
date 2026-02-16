@@ -472,9 +472,25 @@ extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
-extern vec3_t r_sun_origin;
-extern vec3_t r_sun_dir_override;
-extern qboolean r_sun_dir_override_active;
+
+typedef enum sun_source_e {
+	SUN_SOURCE_NONE = 0,
+	SUN_SOURCE_MAP,
+	SUN_SOURCE_CVAR,
+	SUN_SOURCE_FALLBACK
+} sun_source_t;
+
+typedef struct sun_state_s {
+	qboolean enabled;
+	vec3_t direction;
+	vec3_t color;
+	float intensity;
+	vec3_t virtual_origin;
+	sun_source_t source;
+	vec3_t dir_viewspace;
+} sun_state_t;
+
+extern sun_state_t r_sun;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
