@@ -5,6 +5,7 @@ struct InstanceData
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	AmbientColor; // xyz=AmbientColor
+	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -103,6 +104,7 @@ layout(location=6) out vec3 out_normal;
 layout(location=7) out vec3 out_static_light;
 layout(location=8) out vec3 out_dyn_light;
 layout(location=9) out vec3 out_amb_light;
+layout(location=10) flat out vec4 out_env_params;
 
 
 void main()
@@ -144,4 +146,5 @@ void main()
 	out_static_light = litStatic;
 	out_dyn_light = litDlight;
 	out_amb_light = litAmbient;
+	out_env_params = inst.EnvMapParams;
 }
