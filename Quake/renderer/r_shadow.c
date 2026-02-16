@@ -94,6 +94,9 @@ typedef struct shadow_log_state_s {
 static shadow_log_state_t shdlog;
 static qboolean shadow_sun_validated_once;
 static qboolean shadow_dlight_validated_once;
+static qboolean shadow_warned_sun_dir_sanitize;
+static qboolean shadow_warned_receiver_program_mismatch;
+static qboolean shadow_warned_matrix_sanitize;
 
 typedef struct shadow_gl_state_s {
 	GLint draw_fbo;
@@ -243,6 +246,40 @@ static qboolean R_Shadow_LogMatrixHasBadValues (const float m[16], float *out_de
 	if (out_det)
 		*out_det = det;
 	return fabsf (det) < 1e-8f;
+}
+
+static void R_Shadow_LogMatrixDump (const char *tag, const float m[16])
+{
+	if (!shdlog.active || !m)
+		return;
+	R_Shadow_LogWrite ("%s matrix=[%.6g %.6g %.6g %.6g | %.6g %.6g %.6g %.6g | %.6g %.6g %.6g %.6g | %.6g %.6g %.6g %.6g]\n",
+		tag,
+		m[0], m[1], m[2], m[3],
+		m[4], m[5], m[6], m[7],
+		m[8], m[9], m[10], m[11],
+		m[12], m[13], m[14], m[15]);
+}
+
+void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program)
+{
+	GLint current_program = 0;
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
+	if ((GLuint)current_program == target_program)
+		return;
+
+	if (r_shadow_log.value > 0.f || r_shadow_validate.value > 0.f)
+	{
+		R_Shadow_Log_BeginFrame ();
+		if (!shadow_warned_receiver_program_mismatch || shdlog.active)
+		{
+			R_Shadow_LogWrite ("WARN %s receiver program mismatch: target=%u current=%d -- rebinding target\n",
+				tag ? tag : "SHADOW", (unsigned)target_program, (int)current_program);
+			shadow_warned_receiver_program_mismatch = true;
+		}
+	}
+
+	GL_UseProgram (target_program);
 }
 
 static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
@@ -455,6 +492,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	shdlog.last_shadow_tex = expected_tex;
 	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
 		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s receiver uniform-target program=%d gl_current_program=%d\n", tag, program, current_program);
 	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_row0=(%.4f %.4f %.4f %.4f) det3x3=%.6g\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,
@@ -467,7 +505,10 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	if ((GLuint)bound_tex != expected_tex)
 		R_Shadow_LogWrite ("WARN receiver shadow texture mismatch: expected=%u bound=%d\n", expected_tex, bound_tex);
 	if (bad)
+	{
 		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
+		R_Shadow_LogMatrixDump (tag, shadow_viewproj);
+	}
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
 	if (pcf > 0.f && shdlog.last_shadow_compare_mode != GL_NONE)
@@ -544,15 +585,33 @@ static void R_Shadow_DestroyResources (void)
 
 static void R_Shadow_GetSunDirection (vec3_t out_dir)
 {
+	qboolean sanitized = false;
+
 	if (r_sun.enabled)
 	{
 		VectorCopy (r_sun.direction, out_dir);
-		if (VectorNormalize (out_dir) == 0.f)
+		if (!isfinite (out_dir[0]) || !isfinite (out_dir[1]) || !isfinite (out_dir[2]))
+		{
 			VectorSet (out_dir, 0.f, 0.f, -1.f);
-		return;
+			sanitized = true;
+		}
+		if (VectorNormalize (out_dir) == 0.f)
+		{
+			VectorSet (out_dir, 0.f, 0.f, -1.f);
+			sanitized = true;
+		}
+	}
+	else
+	{
+		VectorSet (out_dir, 0.f, 0.f, -1.f);
+		sanitized = true;
 	}
 
-	VectorSet (out_dir, 0.f, 0.f, -1.f);
+	if (sanitized && !shadow_warned_sun_dir_sanitize)
+	{
+		Con_DWarning ("R_Shadow_GetSunDirection: sanitized invalid sun direction, using fallback (0 0 -1)\n");
+		shadow_warned_sun_dir_sanitize = true;
+	}
 }
 
 static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
@@ -649,6 +708,17 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 		extents[i] = 0.5f * (max_ls[i] - min_ls[i]);
 	}
 
+	for (i = 0; i < 3; ++i)
+	{
+		if (!isfinite (extents[i]) || extents[i] < 1.f)
+		{
+			extents[i] = 1.f;
+			if (!shadow_warned_matrix_sanitize)
+				Con_DWarning ("R_Shadow_BuildViewProj: sanitized degenerate shadow extent axis=%d\n", i);
+			shadow_warned_matrix_sanitize = true;
+		}
+	}
+
 	if (shadowmap_size > 0)
 	{
 		float texel_x = (extents[0] * 2.f) / (float)shadowmap_size;
@@ -691,8 +761,17 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 		R_Shadow_OrthoMatrix (ortho, -extents[0], extents[0], -extents[1], extents[1], min_z, max_z);
 	}
 
+	R_Shadow_Log_BeginFrame ();
+	if (shdlog.active)
+	{
+		R_Shadow_LogWrite ("SUNPASS inputs sun_dir=(%.6f %.6f %.6f) intensity=%.6f near=%.6f far=%.6f extents=(%.6f %.6f %.6f) center_ls=(%.6f %.6f %.6f) clipctl=%d\n",
+			sun_dir[0], sun_dir[1], sun_dir[2], out_sun_dir[3], znear, zfar, extents[0], extents[1], extents[2], center_ls[0], center_ls[1], center_ls[2], gl_clipcontrol_able ? 1 : 0);
+	}
+
 	memcpy (out_viewproj, ortho, sizeof (ortho));
 	MatrixMultiply (out_viewproj, view);
+	if (shdlog.active)
+		R_Shadow_LogMatrixDump ("SUNPASS out_viewproj", out_viewproj);
 }
 
 static void R_Shadow_PerspectiveMatrix (float matrix[16], float fovx, float fovy, float n, float f)
