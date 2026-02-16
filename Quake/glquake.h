@@ -524,6 +524,7 @@ void R_Shadow_Log_SunPassEarlyOut (const char *reason);
 void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);
 void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj);
 void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program);
+void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program);
 GLuint R_Shadow_GetShadowMapTextureId (void);
 GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 
@@ -669,6 +670,8 @@ extern glprogs_t glprogs;
 
 void GL_UseProgram (GLuint program);
 void GL_ClearCachedProgram (void);
+GLuint GL_GetCurrentProgramCached (void);
+const char *GL_GetProgramDebugName (GLuint program);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
 void GL_ApplyFilmgrainUI (void);

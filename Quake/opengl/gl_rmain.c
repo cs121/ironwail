@@ -197,6 +197,7 @@ static const float r_identity_mat4[16] = {
 
 extern cvar_t r_state_debug;
 extern cvar_t r_state_debug_filter;
+extern cvar_t r_gl_verify_program;
 
 static void GL_LogErrorIfDeveloper (const char *label)
 {
@@ -263,9 +264,31 @@ void R_ResetViewportAndScissorFullscreen (const char *label)
 	GL_DumpRenderState (label);
 }
 
+static void R_VerifyProgramCache (const char *label)
+{
+	GLint gl_program = 0;
+	GLuint cached_program;
+
+	if (r_gl_verify_program.value <= 0.f)
+		return;
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &gl_program);
+	cached_program = GL_GetCurrentProgramCached ();
+	if ((GLuint)gl_program == cached_program)
+		return;
+
+	Con_DWarning ("R_VerifyProgramCache(%s): cache desync cached=%u(%s) gl_current=%d(%s)\n",
+		label,
+		(unsigned)cached_program,
+		GL_GetProgramDebugName (cached_program),
+		(int)gl_program,
+		GL_GetProgramDebugName ((GLuint)gl_program));
+}
+
 void R_StateDebugMark (const char *label)
 {
 	GL_DumpRenderState (label);
+	R_VerifyProgramCache (label);
 }
 
 
@@ -468,6 +491,7 @@ cvar_t	r_shadow_log_gl = { "r_shadow_log_gl", "0", CVAR_NONE };
 cvar_t	r_shadow_log_dump = { "r_shadow_log_dump", "0", CVAR_NONE };
 cvar_t	r_shadow_log_file = { "r_shadow_log_file", "0", CVAR_NONE };
 cvar_t	r_shadow_validate = { "r_shadow_validate", "0", CVAR_NONE };
+cvar_t	r_gl_verify_program = { "r_gl_verify_program", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
