@@ -239,6 +239,7 @@ opengl/gl_mesh.o \
 renderer/r_sprite.o \
 renderer/r_alias.o \
 renderer/r_brush.o \
+renderer/r_envlight.o \
 	opengl/gl_model.o
 
 OBJS = strlcat.o \

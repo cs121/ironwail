@@ -22,9 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_light.c
 
 #include "quakedef.h"
-#include "../common/lightgrid.h"
 #include "opengl/gl_lightgrid.h"
 #include "renderer/r_dlight_pool.h"
+#include "renderer/r_envlight.h"
 #include <float.h>
 #include <math.h>
 
@@ -1816,34 +1816,11 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 
         VectorClear (out_color255);
 
-        if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
+        if (R_EnvLight_SampleEntityAmbient (e, lightgrid_color, &lightgrid_ao))
         {
-                vec3_t sample_pos;
-                VectorCopy (e->origin, sample_pos);
-
-                for (int attempt = 0; attempt < 2; attempt++)
-                {
-                        const lightgrid_probe_t *probe = R_GetLightgridSample (sample_pos);
-                        if (!probe)
-                                break;
-
-                        VectorCopy (probe->rgb, lightgrid_color);
-                        lightgrid_ao = CLAMP (0.f, probe->ao, 1.f);
-                        lightgrid_valid = probe->intensity > 0.f || lightgrid_ao > 0.f;
-                        if (lightgrid_valid || attempt == 1 || !e->model)
-                                break;
-
-                        float ofs = e->model->maxs[2] * 0.5f;
-                        if (ofs <= 0.f)
-                                break;
-                        sample_pos[2] += ofs;
-                }
-
-                if (lightgrid_valid)
-                {
-                        VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
-                        used_lightgrid = true;
-                }
+                lightgrid_valid = true;
+                VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
+                used_lightgrid = true;
         }
 
         if (!used_lightgrid)
@@ -1894,18 +1871,4 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
         }
 
         return used_lightgrid || used_lightpoint || used_minlight;
-}
-
-const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)
-{
-        static lightgrid_probe_t probe;
-        const lightgrid_t *lg = Lightgrid_Get ();
-
-        if (!R_LightgridEnabledInternal (lg))
-                return NULL;
-
-        if (!Lightgrid_SampleProbe (lg, pos, &probe))
-                return NULL;
-
-        return &probe;
 }

@@ -407,23 +407,19 @@ static void Lightgrid_DefaultSample(vec3_t out_color, float *out_ao)
         *out_ao = 1.f;
 }
 
-static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
+static qboolean Lightgrid_FetchOctreeCellSample(const lightgrid_octree_t *oct, const int cell[3], lightgrid_probe_t *out_probe, qboolean *out_occluded)
 {
-    const lightgrid_octree_t *oct = lg ? lg->octree : NULL;
-    int test_point[3];
     const lightgrid_octree_leaf_t *leaf = NULL;
     const lightgrid_octree_sampleset_t *set = NULL;
     uint32_t node_index;
     size_t steps = 0;
 
-    if (!oct || !out_probe)
+    if (!oct || !out_probe || !cell)
         return false;
 
     for (int i = 0; i < 3; i++)
     {
-        float local = (pos[i] - oct->header.grid_mins[i]) / oct->header.grid_dist[i];
-        test_point[i] = Q_rint(local);
-        if (test_point[i] < 0 || test_point[i] >= oct->header.grid_size[i])
+        if (cell[i] < 0 || cell[i] >= oct->header.grid_size[i])
             return false;
     }
 
@@ -454,9 +450,9 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
 
         const lightgrid_octree_node_t *node = &oct->nodes[node_index];
 
-        int signx = test_point[0] >= node->division_point[0];
-        int signy = test_point[1] >= node->division_point[1];
-        int signz = test_point[2] >= node->division_point[2];
+        int signx = cell[0] >= node->division_point[0];
+        int signy = cell[1] >= node->division_point[1];
+        int signz = cell[2] >= node->division_point[2];
         int child = 4 * signx + 2 * signy + signz;
 
         node_index = node->child[child];
@@ -469,15 +465,17 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
     if (leaf->size[0] <= 0 || leaf->size[1] <= 0 || leaf->size[2] <= 0)
         return false;
 
-    int lx = CLAMP(0, test_point[0] - leaf->mins[0], leaf->size[0] - 1);
-    int ly = CLAMP(0, test_point[1] - leaf->mins[1], leaf->size[1] - 1);
-    int lz = CLAMP(0, test_point[2] - leaf->mins[2], leaf->size[2] - 1);
+    int lx = CLAMP(0, cell[0] - leaf->mins[0], leaf->size[0] - 1);
+    int ly = CLAMP(0, cell[1] - leaf->mins[1], leaf->size[1] - 1);
+    int lz = CLAMP(0, cell[2] - leaf->mins[2], leaf->size[2] - 1);
 
     size_t idx = ((size_t)leaf->size[0] * (size_t)leaf->size[1] * (size_t)lz) + ((size_t)leaf->size[0] * (size_t)ly) + (size_t)lx;
     set = &leaf->samples[idx];
 
     if (set->occluded)
     {
+        if (out_occluded)
+            *out_occluded = true;
         VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
         VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
         out_probe->ao = 0.f;
@@ -486,6 +484,8 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
     }
 
     const lightgrid_octree_sample_t *chosen = Lightgrid_SelectOctreeSample(set);
+    if (out_occluded)
+        *out_occluded = false;
 
     if (chosen)
     {
@@ -500,6 +500,99 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
 
     VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
     out_probe->ao = 1.f;
+    out_probe->intensity = (out_probe->rgb[0] + out_probe->rgb[1] + out_probe->rgb[2]) * (1.f / 3.f);
+    return true;
+}
+
+static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t pos, lightgrid_probe_t *out_probe)
+{
+    const lightgrid_octree_t *oct = lg ? lg->octree : NULL;
+    int base[3];
+    float frac[3];
+    vec3_t accum_rgb = {0.f, 0.f, 0.f};
+    float accum_ao = 0.f;
+    float total_weight = 0.f;
+    int nearest_cell[3];
+
+    if (!oct || !out_probe)
+        return false;
+
+    for (int i = 0; i < 3; i++)
+    {
+        float local = (pos[i] - oct->header.grid_mins[i]) / oct->header.grid_dist[i];
+
+        if (!R_IsFinite(local))
+            return false;
+
+        base[i] = (int)floorf(local);
+        frac[i] = local - (float)base[i];
+
+        if (frac[i] < 0.f)
+            frac[i] = 0.f;
+        else if (frac[i] > 1.f)
+            frac[i] = 1.f;
+
+        nearest_cell[i] = Q_rint(local);
+    }
+
+    for (int sx = 0; sx <= 1; sx++)
+    {
+        float wx = sx ? frac[0] : (1.f - frac[0]);
+        int cx = base[0] + sx;
+
+        for (int sy = 0; sy <= 1; sy++)
+        {
+            float wy = sy ? frac[1] : (1.f - frac[1]);
+            int cy = base[1] + sy;
+
+            for (int sz = 0; sz <= 1; sz++)
+            {
+                float wz = sz ? frac[2] : (1.f - frac[2]);
+                int cz = base[2] + sz;
+                float weight = wx * wy * wz;
+                int cell[3] = {cx, cy, cz};
+                lightgrid_probe_t sample;
+                qboolean occluded = false;
+
+                if (weight <= 0.f)
+                    continue;
+
+                if (!Lightgrid_FetchOctreeCellSample(oct, cell, &sample, &occluded))
+                    continue;
+
+                if (occluded)
+                    continue;
+
+                VectorMA(accum_rgb, weight, sample.rgb, accum_rgb);
+                accum_ao += sample.ao * weight;
+                total_weight += weight;
+            }
+        }
+    }
+
+    if (total_weight <= 0.f)
+    {
+        qboolean occluded = false;
+
+        for (int i = 0; i < 3; i++)
+            nearest_cell[i] = CLAMP(0, nearest_cell[i], oct->header.grid_size[i] - 1);
+
+        if (!Lightgrid_FetchOctreeCellSample(oct, nearest_cell, out_probe, &occluded))
+            return false;
+
+        if (occluded)
+        {
+            VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
+            out_probe->ao = 0.f;
+            out_probe->intensity = 0.f;
+        }
+
+        return true;
+    }
+
+    VectorScale(accum_rgb, 1.f / total_weight, out_probe->rgb);
+    out_probe->ao = CLAMP(0.f, accum_ao / total_weight, 1.f);
+    VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
     out_probe->intensity = (out_probe->rgb[0] + out_probe->rgb[1] + out_probe->rgb[2]) * (1.f / 3.f);
     return true;
 }
