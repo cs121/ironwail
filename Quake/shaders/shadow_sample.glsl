@@ -1,6 +1,8 @@
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
+#include "depth_common.glsl"
+
 // -----------------------------------------------------------------------------
 // Matrix multiplication robustness
 //
@@ -45,13 +47,7 @@ vec4 ShadowMul(mat4 M, vec4 v)
 
 float ShadowReference01(float proj_z)
 {
-    // Robustly convert proj.z into [0..1].
-    // If the engine already uses clip-control 0..1, proj_z will already be in-range.
-    // If it's OpenGL NDC (-1..1), this remaps.
-    float ref = proj_z;
-    if (ref < 0.0 || ref > 1.0)
-        ref = ref * 0.5 + 0.5;
-    return clamp(ref, 0.0, 1.0);
+    return ShadowReferenceFromProjZ(proj_z);
 }
 
 #ifdef SHADOW_SUN
