@@ -38,8 +38,25 @@ static int shader_cache_count;
 
 glprogs_t glprogs;
 static GLuint gl_programs[128];
+static const char *gl_program_names[128];
 static GLuint gl_current_program;
 static int gl_num_programs;
+
+static const char *GL_LookupProgramName (GLuint program)
+{
+	int i;
+
+	if (!program)
+		return "none";
+
+	for (i = 0; i < gl_num_programs; i++)
+	{
+		if (gl_programs[i] == program)
+			return gl_program_names[i] ? gl_program_names[i] : "unnamed";
+	}
+
+	return "unknown";
+}
 
 /*
 =============
@@ -202,7 +219,10 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 	if (gl_num_programs == countof(gl_programs))
 		Sys_Error ("gl_programs overflow");
 	gl_programs[gl_num_programs] = program;
+	gl_program_names[gl_num_programs] = name;
 	gl_num_programs++;
+
+	Con_DPrintf ("SHDLOG: PROGRAM id=%u name=%s\n", (unsigned)program, name ? name : "unnamed");
 
 	return program;
 }
@@ -498,6 +518,16 @@ void GL_ClearCachedProgram (void)
 	GL_UseProgramFunc (0);
 }
 
+GLuint GL_GetCurrentProgramCached (void)
+{
+	return gl_current_program;
+}
+
+const char *GL_GetProgramDebugName (GLuint program)
+{
+	return GL_LookupProgramName (program);
+}
+
 /*
 =============
 GL_CreateShaders
@@ -594,6 +624,7 @@ void GL_DeleteShaders (void)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
                 gl_programs[i] = 0;
+                gl_program_names[i] = NULL;
         }
         gl_num_programs = 0;
 

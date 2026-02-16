@@ -75,6 +75,7 @@ extern cvar_t r_shadow_log_gl;
 extern cvar_t r_shadow_log_dump;
 extern cvar_t r_shadow_log_file;
 extern cvar_t r_shadow_validate;
+extern cvar_t r_gl_verify_program;
 
 #define SHDLOG_PREFIX "SHDLOG: "
 
@@ -280,6 +281,45 @@ void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program
 	}
 
 	GL_UseProgram (target_program);
+}
+
+void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
+{
+	GLint gl_current = 0;
+	GLint loc_shadow_viewproj = 0;
+	GLint loc_shadow_params = 0;
+	GLint loc_shadow_debug = 0;
+	const char *target_name = GL_GetProgramDebugName (target_program);
+	const char *current_name = GL_GetProgramDebugName (GL_GetCurrentProgramCached ());
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current);
+
+	loc_shadow_viewproj = glGetUniformLocation (target_program, "ShadowViewProj");
+	loc_shadow_params = glGetUniformLocation (target_program, "ShadowParams");
+	loc_shadow_debug = glGetUniformLocation (target_program, "ShadowDebug");
+
+	R_Shadow_Log_BeginFrame ();
+	if (shdlog.active)
+	{
+		R_Shadow_LogWrite (
+			"UPLOAD shadow uniforms: tag=%s target=%u(%s) gl_current=%d(%s) loc_matrix=%d loc_params=%d loc_debug=%d\n",
+			tag ? tag : "SHADOW",
+			(unsigned)target_program,
+			target_name,
+			(int)gl_current,
+			current_name,
+			(int)loc_shadow_viewproj,
+			(int)loc_shadow_params,
+			(int)loc_shadow_debug);
+	}
+
+	if ((GLuint)gl_current != target_program)
+	{
+#if defined(_DEBUG)
+		if (r_gl_verify_program.value > 0.f)
+			Sys_Error ("R_Shadow_LogReceiverUniformUpload: gl_current=%d target=%u (%s)", (int)gl_current, (unsigned)target_program, target_name);
+#endif
+	}
 }
 
 static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)

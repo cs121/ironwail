@@ -1283,6 +1283,7 @@ GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 GL_BindNative (GL_TEXTURE6, GL_TEXTURE_CUBE_MAP, (skybox && skybox->cubemap) ? skybox->cubemap->texnum : 0);
 R_Shadow_EnsureReceiverProgramBound ("WORLD", program);
+R_Shadow_LogReceiverUniformUpload ("WORLD", program);
 R_Shadow_BindShadowMap (GL_TEXTURE5);
 R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias.value, r_shadow_normalbias.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
 }
