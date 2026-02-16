@@ -33,7 +33,6 @@ skybox_t		*skybox;
 
 extern cvar_t gl_farclip;
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_NONE};
-cvar_t r_skyalpha = {"r_skyalpha", "1", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog","0.5",CVAR_NONE};
 cvar_t r_skywind = {"r_skywind","1",CVAR_ARCHIVE};
 
@@ -649,7 +648,6 @@ Sky_Init
 void Sky_Init (void)
 {
 	Cvar_RegisterVariable (&r_fastsky);
-	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_skyfog);
 	Cvar_RegisterVariable (&r_skywind);
 	Cvar_SetCallback (&r_skyfog, R_SetSkyfog_f);

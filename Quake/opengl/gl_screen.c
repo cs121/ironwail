@@ -99,9 +99,6 @@ cvar_t		scr_showfps = {"scr_showfps", "0", CVAR_ARCHIVE};
 cvar_t		scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
 cvar_t		scr_showspeed_ofs = {"scr_showspeed_ofs", "0", CVAR_ARCHIVE};
 cvar_t		scr_clock = {"scr_clock", "0", CVAR_ARCHIVE};
-//johnfitz
-cvar_t		scr_usekfont = {"scr_usekfont", "0", CVAR_NONE}; // 2021 re-release
-
 cvar_t		scr_hudstyle = {"hudstyle", "2", CVAR_ARCHIVE};
 cvar_t		cl_screenshotname = {"cl_screenshotname", "screenshots/%map%_%date%_%time%", CVAR_ARCHIVE};
 cvar_t		scr_demobar_timeout = {"scr_demobar_timeout", "1", CVAR_ARCHIVE};
@@ -647,7 +644,6 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&cl_screenshotname);
 	Cvar_RegisterVariable (&scr_demobar_timeout);
 	//johnfitz
-	Cvar_RegisterVariable (&scr_usekfont); // 2021 re-release
 	Cvar_SetCallback (&scr_fov, SCR_Callback_refdef);
 	Cvar_SetCallback (&scr_fov_adapt, SCR_Callback_refdef);
 	Cvar_SetCallback (&scr_zoomfov, SCR_Callback_refdef);

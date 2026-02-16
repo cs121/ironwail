@@ -84,7 +84,6 @@ static cvar_t r_decals_bias = { "r_decals_bias", "0.6", CVAR_ARCHIVE };
 static cvar_t r_decals_spawn_budget = { "r_decals_spawn_budget", "8", CVAR_ARCHIVE };
 static cvar_t r_decals_render_budget_decals = { "r_decals_render_budget_decals", "256", CVAR_ARCHIVE };
 static cvar_t r_decals_debug = { "r_decals_debug", "0", CVAR_NONE };
-static cvar_t r_decals_on_liquids = { "r_decals_on_liquids", "0", CVAR_ARCHIVE };
 static cvar_t r_decals_reload = { "r_decals_reload", "0", CVAR_NONE };
 
 static decal_def_t decal_defs[DECAL_MAX_DEFS];
@@ -857,7 +856,6 @@ void R_Decals_Init (void)
 	Cvar_RegisterVariable (&r_decals_spawn_budget);
 	Cvar_RegisterVariable (&r_decals_render_budget_decals);
 	Cvar_RegisterVariable (&r_decals_debug);
-	Cvar_RegisterVariable (&r_decals_on_liquids);
 	Cvar_RegisterVariable (&r_decals_reload);
 	Cvar_SetCallback (&r_decals_max, R_Decals_Max_Changed);
 	Cvar_SetCallback (&r_decals_spawn_budget, R_Decals_Budget_Changed);
