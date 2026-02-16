@@ -176,6 +176,7 @@ extern	const char	*gl_version;
 	x(void,			GetActiveUniform, (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name))\
 	x(GLuint,		GetUniformBlockIndex, (GLuint program, const GLchar *uniformBlockName))\
 	x(void,			GetActiveUniformBlockName, (GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName))\
+	x(void,			GetActiveUniformBlockiv, (GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params))\
 	x(void,			UniformBlockBinding, (GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding))\
 	x(void,			Uniform1i, (GLint location, GLint v0))\
 	x(void,			Uniform1f, (GLint location, GLfloat v0))\
@@ -426,6 +427,8 @@ typedef struct gpulight_s {
 #define DLIGHT_GPU_MAX 64
 
 #define SHADOW_DLIGHT_MAX 4
+#define FRAME_UBO_BINDING 0
+#define FRAME_DATA_UBO_NAME "FrameDataUBO"
 
 typedef struct gpulightbuffer_s {
 	float		lightstyles[MAX_LIGHTSTYLES * 2];
@@ -526,7 +529,8 @@ void R_Shadow_Log_BeginFrame (void);
 void R_Shadow_Log_SunPassEarlyOut (const char *reason);
 void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);
 void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj);
-void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program);
+void R_Shadow_BindProgram (const char *tag, GLuint target_program);
+qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_name, GLuint binding_point);
 void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program);
 GLuint R_Shadow_GetShadowMapTextureId (void);
 GLuint R_Shadow_GetDlightShadowMapTextureId (void);

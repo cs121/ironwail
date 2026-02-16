@@ -357,7 +357,7 @@ static void R_Shadow_LogMatrixDump (const char *tag, const float m[16])
 		m[12], m[13], m[14], m[15]);
 }
 
-void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program)
+void R_Shadow_BindProgram (const char *tag, GLuint target_program)
 {
 	GLint current_program = 0;
 
@@ -377,6 +377,55 @@ void R_Shadow_EnsureReceiverProgramBound (const char *tag, GLuint target_program
 	}
 
 	GL_UseProgram (target_program);
+}
+
+qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_name, GLuint binding_point)
+{
+	GLuint block_index;
+	GLint current_binding = -1;
+	const char *name = (block_name && block_name[0]) ? block_name : FRAME_DATA_UBO_NAME;
+	GLint data_size = (GLint)sizeof (r_framedata);
+
+	if (!GL_GetUniformBlockIndexFunc || !GL_UniformBlockBindingFunc || !GL_GetActiveUniformBlockivFunc)
+		return false;
+
+	block_index = GL_GetUniformBlockIndexFunc (program, name);
+	if (block_index == GL_INVALID_INDEX)
+	{
+		if (r_shadow_log.value > 0.f || r_shadow_validate.value > 0.f)
+		{
+			R_Shadow_Log_BeginFrame ();
+			if (shdlog.active)
+				R_Shadow_LogWrite ("WARN %s missing UBO block '%s' in program=%u\n",
+					tag ? tag : "SHADOW", name, (unsigned)program);
+		}
+		return false;
+	}
+
+	GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_DATA_SIZE, &data_size);
+	GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &current_binding);
+	if (data_size != (GLint)sizeof (r_framedata))
+	{
+		R_Shadow_Log_BeginFrame ();
+		if (shdlog.active)
+			R_Shadow_LogWrite ("WARN %s UBO block '%s' size mismatch: got=%d expected=%d program=%u\n",
+				tag ? tag : "SHADOW", name, (int)data_size, (int)sizeof (r_framedata), (unsigned)program);
+	}
+	if (current_binding != (GLint)binding_point)
+		GL_UniformBlockBindingFunc (program, block_index, binding_point);
+
+	if (r_shadow_log.value > 0.f)
+	{
+		GLint final_binding = current_binding;
+		if (final_binding != (GLint)binding_point)
+			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &final_binding);
+		R_Shadow_Log_BeginFrame ();
+		if (shdlog.active)
+			R_Shadow_LogWrite ("UBO_BIND tag=%s program=%u block=%s index=%u binding=%d size=%d\n",
+				tag ? tag : "SHADOW", (unsigned)program, name, (unsigned)block_index, (int)final_binding, (int)data_size);
+	}
+
+	return true;
 }
 
 void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
@@ -399,15 +448,15 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	loc_shadow_viewproj = GL_GetUniformLocationFunc (target_program, "ShadowViewProj");
 	loc_shadow_params = GL_GetUniformLocationFunc (target_program, "ShadowParams");
 	loc_shadow_debug = GL_GetUniformLocationFunc (target_program, "ShadowDebug");
-	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, "FrameDataUBO");
-	if (frame_ubo_index != GL_INVALID_INDEX)
+	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, FRAME_DATA_UBO_NAME);
+	if (frame_ubo_index != GL_INVALID_INDEX && GL_GetActiveUniformBlockivFunc)
 	{
 		GLint block_count = 0;
 		GL_GetProgramivFunc (target_program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
 		if ((GLint)frame_ubo_index < block_count)
 		{
-			frame_ubo_binding = 0;
-			frame_ubo_data_size = (GLint)sizeof (r_framedata);
+			GL_GetActiveUniformBlockivFunc (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_BINDING, &frame_ubo_binding);
+			GL_GetActiveUniformBlockivFunc (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_DATA_SIZE, &frame_ubo_data_size);
 		}
 	}
 
@@ -429,7 +478,7 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 			(int)loc_shadow_debug);
 		if (frame_ubo_index != GL_INVALID_INDEX)
 		{
-			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=FrameDataUBO index=%u binding=%d data_size=%d\n",
+			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=" FRAME_DATA_UBO_NAME " index=%u binding=%d data_size=%d\n",
 				tag ? tag : "SHADOW", (unsigned)frame_ubo_index, (int)frame_ubo_binding, (int)frame_ubo_data_size);
 			if (frame_ubo_binding < 0 || frame_ubo_data_size <= 0)
 				R_Shadow_LogWrite ("WARN %s FrameDataUBO metadata invalid (binding=%d data_size=%d)\n",
@@ -678,6 +727,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	GLint vp[4], sc[4];
 	float det = 0.f;
 	qboolean bad;
+	qboolean finite = false;
 	R_Shadow_Log_BeginFrame ();
 	if (!shdlog.active)
 		return;
@@ -691,6 +741,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	glGetIntegerv (GL_VIEWPORT, vp);
 	glGetIntegerv (GL_SCISSOR_BOX, sc);
 	bad = shadow_viewproj ? R_Shadow_LogMatrixHasBadValues (shadow_viewproj, &det) : true;
+	finite = !bad;
 	if (!shdlog.dump && shdlog.last_program == program && shdlog.last_shadow_sampler_unit == (GLint)(texunit - GL_TEXTURE0) && shdlog.last_shadow_tex == expected_tex && (GLuint)bound_tex == expected_tex)
 	{
 		R_Shadow_LogEndFrameIfNeeded ();
@@ -702,13 +753,13 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
 		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
 	R_Shadow_LogWrite ("%s receiver uniform-target program=%d gl_current_program=%d\n", tag, program, current_program);
-	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_row0=(%.4f %.4f %.4f %.4f) det3x3=%.6g\n",
+	R_Shadow_LogWrite ("%s params bias=%.9g normalbias=%.9g pcf=%.3g taps=%.3g matrix_row0=(%.9g %.9g %.9g %.9g) det3x3=%.9g finite=%d\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,
 		shadow_viewproj ? shadow_viewproj[1] : 0.f,
 		shadow_viewproj ? shadow_viewproj[2] : 0.f,
 		shadow_viewproj ? shadow_viewproj[3] : 0.f,
-		det);
+		det, finite ? 1 : 0);
 	if (!shadows_enabled)
 		R_Shadow_LogWrite ("WARN receiver shadow branch disabled\n");
 	if ((GLuint)bound_tex != expected_tex)

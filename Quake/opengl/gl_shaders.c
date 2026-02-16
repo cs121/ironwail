@@ -244,9 +244,9 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 
 	if (GL_GetUniformBlockIndexFunc && GL_UniformBlockBindingFunc)
 	{
-		GLuint frame_data_block = GL_GetUniformBlockIndexFunc (program, "FrameDataUBO");
+		GLuint frame_data_block = GL_GetUniformBlockIndexFunc (program, FRAME_DATA_UBO_NAME);
 		if (frame_data_block != GL_INVALID_INDEX)
-			GL_UniformBlockBindingFunc (program, frame_data_block, 0);
+			GL_UniformBlockBindingFunc (program, frame_data_block, FRAME_UBO_BINDING);
 	}
 
 	if (status != GL_TRUE)
