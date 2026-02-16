@@ -73,12 +73,14 @@ void main()
 
 	PackedLight l = lights[lightId];
 	vec4 v = viewMatrix * vec4(l.posRadius.xyz, 1.0);
-	float vz = max(1e-4, v.x);
+	// View-space forward is -Z; using X here breaks depth slicing and
+	// effectively culls most lights from clustered assignment.
+	float vz = max(1e-4, -v.z);
 	float radius = max(0.0, l.posRadius.w);
 	if (radius <= 0.0)
 		return;
 
-	vec4 clip = projMatrix * vec4(l.posRadius.xyz, 1.0);
+	vec4 clip = projMatrix * v;
 	if (clip.w <= 0.0001)
 		return;
 	vec2 ndc = clip.xy / clip.w;
