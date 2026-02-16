@@ -1,3 +1,5 @@
+#include "frame_uniforms.glsl"
+
 struct InstanceData
 {
 	vec4	WorldMatrix[3];
@@ -14,22 +16,22 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	ViewProj;
-	mat4	PrevViewProj;
-	vec3	EyePos;
+	mat4	AliasViewProj;
+	mat4	AliasPrevViewProj;
+	vec3	AliasEyePos;
 	float	_Pad0;
-	vec4	Fog;
-	float	ScreenDither;
-	float	Overbright;
+	vec4	AliasFog;
+	float	AliasScreenDither;
+	float	AliasOverbright;
 	float	ModelHalfLambert;
 	float	RimViewmodelScale;
 	vec4	RimParams0;
 	vec4	RimParams1;
 	vec4	RimParams2;
-	mat4	ShadowViewProj;
-	vec4	ShadowParams;
-	vec4	ShadowDebug;
-	vec4	ShadowSunDir;
+	mat4	AliasShadowViewProj;
+	vec4	AliasShadowParams;
+	vec4	AliasShadowDebug;
+	vec4	AliasShadowSunDir;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -52,9 +54,9 @@ float bayer(ivec2 coord)
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-abs(Fog.w) * dot(p, p));
+        float fog = exp2(-abs(AliasFog.w) * dot(p, p));
         fog = clamp(fog, 0.0, 1.0);
-        return mix(Fog.rgb, clr, fog);
+        return mix(AliasFog.rgb, clr, fog);
 }
 
 // Hash without Sine
@@ -249,7 +251,7 @@ void main()
 
 	vec3 N_env = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 	vec3 V_env = normalize_safe(-in_pos);
-	float ambient_luma = EnvLightLuma(clamp(L_amb / max(Overbright, 1e-4), 0.0, 1.0));
+	float ambient_luma = EnvLightLuma(clamp(L_amb / max(AliasOverbright, 1e-4), 0.0, 1.0));
 	float indoor_factor = DeriveIndoorFactor(ambient_luma, in_env_params.z, shadow_term);
 	float env_mask = max(in_env_params.x, 0.0);
 	vec3 env_spec = EvaluateReflectionProbe(
@@ -320,13 +322,13 @@ void main()
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
-	if (abs(Fog.w) > 0.)
+	if (abs(AliasFog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
+		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * AliasScreenDither;
 		out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
-	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
+	out_fragcolor.rgb += SUPPRESS_BANDING() * AliasScreenDither;
 #endif
 }

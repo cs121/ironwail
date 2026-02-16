@@ -402,13 +402,13 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, "FrameDataUBO");
 	if (frame_ubo_index != GL_INVALID_INDEX)
 	{
-		/*
-		 * Keep this diagnostics path compatible with the project's GL loader setup:
-		 * glGetActiveUniformBlockiv is not loaded through GL_*Func wrappers yet,
-		 * so querying binding/data size directly can fail to compile on MSVC.
-		 */
-		frame_ubo_binding = -2;
-		frame_ubo_data_size = -2;
+		GLint block_count = 0;
+		GL_GetProgramivFunc (target_program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
+		if ((GLint)frame_ubo_index < block_count)
+		{
+			frame_ubo_binding = 0;
+			frame_ubo_data_size = (GLint)sizeof (r_framedata);
+		}
 	}
 
 	R_Shadow_Log_BeginFrame ();
@@ -431,6 +431,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 		{
 			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=FrameDataUBO index=%u binding=%d data_size=%d\n",
 				tag ? tag : "SHADOW", (unsigned)frame_ubo_index, (int)frame_ubo_binding, (int)frame_ubo_data_size);
+			if (frame_ubo_binding < 0 || frame_ubo_data_size <= 0)
+				R_Shadow_LogWrite ("WARN %s FrameDataUBO metadata invalid (binding=%d data_size=%d)\n",
+					tag ? tag : "SHADOW", (int)frame_ubo_binding, (int)frame_ubo_data_size);
 		}
 		else if (loc_shadow_viewproj == -1 && loc_shadow_params == -1 && loc_shadow_debug == -1)
 		{
@@ -441,6 +444,10 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 		{
 			R_Shadow_DumpActiveUniforms (target_program);
 			R_Shadow_DumpActiveUniformBlocks (target_program);
+		}
+		if (r_shadow_validate.value > 0.f && loc_shadow_viewproj == -1 && loc_shadow_params == -1 && loc_shadow_debug == -1 && frame_ubo_index == GL_INVALID_INDEX)
+		{
+			R_Shadow_LogWrite ("WARN %s receiver missing both fallback uniforms and FrameDataUBO\n", tag ? tag : "SHADOW");
 		}
 		if (target_program == 67 || target_program == 207 || target_program == 210)
 		{
