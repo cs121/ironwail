@@ -315,28 +315,6 @@ static qboolean ParseOptionalBool (const char **data, qboolean *out, mat_shader_
 	return true;
 }
 
-static qboolean ParseIdent (const char **data, const char **out, mat_shader_parse_state_t *state)
-{
-	const char *cursor;
-
-	if (!data || !*data)
-		return false;
-
-	cursor = Mat_Shader_ParseToken (*data, state);
-	if (!cursor)
-		return false;
-
-	*data = cursor;
-	if (!com_token[0])
-		return false;
-
-	if (state && state->token_limit_hit)
-		return false;
-
-	*out = com_token;
-	return true;
-}
-
 static qboolean ParseIdentExpected (const char **data, const char **out, mat_shader_parse_state_t *state, const char *expected)
 {
 	const char *cursor;

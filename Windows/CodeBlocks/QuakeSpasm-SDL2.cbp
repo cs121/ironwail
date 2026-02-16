@@ -250,9 +250,6 @@
 		<Unit filename="..\..\Quake\r_brush.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\r_fogvol.c">
-			<Option compilerVar="CC" />
-		</Unit>
 		<Unit filename="..\..\Quake\r_part.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -263,7 +260,6 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="..\..\Quake\render.h" />
-		<Unit filename="..\..\Quake\r_fogvol.h" />
 		<Unit filename="..\..\Quake\resource.h" />
 		<Unit filename="..\..\Quake\sbar.c">
 			<Option compilerVar="CC" />

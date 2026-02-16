@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
-#include "r_fogvol.h"
 #include "r_decals.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
@@ -1167,38 +1166,6 @@ void GL_DeleteFrameBuffers (void)
 	memset (&framebufs, 0, sizeof (framebufs));
 }
 
-static void GL_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
-{
-	float rl = right - left;
-	float tb = top - bottom;
-	float fn = f - n;
-
-	memset (matrix, 0, 16 * sizeof (float));
-
-	if (rl == 0.f || tb == 0.f || fn == 0.f)
-	{
-		IdentityMatrix (matrix);
-		return;
-	}
-
-	matrix[0 * 4 + 0] = 2.f / rl;
-	matrix[1 * 4 + 1] = 2.f / tb;
-	if (gl_clipcontrol_able)
-	{
-		matrix[2 * 4 + 2] = 1.f / (n - f);
-		matrix[3 * 4 + 2] = n / (n - f);
-	}
-	else
-	{
-		matrix[2 * 4 + 2] = -2.f / fn;
-		matrix[3 * 4 + 2] = -(f + n) / fn;
-	}
-	matrix[3 * 4 + 0] = -(right + left) / rl;
-	matrix[3 * 4 + 1] = -(top + bottom) / tb;
-	matrix[3 * 4 + 3] = 1.f;
-}
-
-
 static GLuint GL_GenerateBloomTexture (void)
 {
 	int width = framebufs.bloom.width;
@@ -2271,8 +2238,6 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-	if (R_FogVol_BindForFroxelBuild () > 0)
-		R_FogVol_InjectBuiltIntoFroxel ();
 	GL_EndGroup ();
 }
 
@@ -4141,28 +4106,6 @@ void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t colo
 void R_DebugFlushGeometry (void)
 {
 	R_FlushDebugGeometry ();
-}
-
-static void R_EmitDiamond (const vec3_t center, float radius, uint32_t color)
-{
-	debugvert_t v[6];
-	uint16_t idx[] = {
-		0, 2, 0, 3, 0, 4, 0, 5,
-		1, 2, 1, 3, 1, 4, 1, 5,
-		2, 4, 2, 5, 3, 4, 3, 5
-	};
-
-	VectorSet (v[0].pos, center[0] + radius, center[1], center[2]);
-	VectorSet (v[1].pos, center[0] - radius, center[1], center[2]);
-	VectorSet (v[2].pos, center[0], center[1] + radius, center[2]);
-	VectorSet (v[3].pos, center[0], center[1] - radius, center[2]);
-	VectorSet (v[4].pos, center[0], center[1], center[2] + radius);
-	VectorSet (v[5].pos, center[0], center[1], center[2] - radius);
-
-	for (size_t i = 0; i < countof (v); i++)
-		v[i].color = color;
-
-	R_AddDebugGeometry (v, countof (v), idx, countof (idx));
 }
 
 /*

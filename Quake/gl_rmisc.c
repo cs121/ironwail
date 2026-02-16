@@ -29,7 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_maptex_export.h"
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
-#include "r_fogvol.h"
 #include "simd_caps.h"
 
 //johnfitz -- new cvars
@@ -968,7 +967,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
 	R_PostFX_Init ();
-	R_FogVol_Init ();
 
 	R_InitParticles ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
@@ -1149,7 +1147,6 @@ void R_NewMap (void)
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
         R_ParseDlightEntities (); // persistent dlights from BSP entities
-        R_FogVol_ParseEntities (); // fog volume entities from BSP
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)
