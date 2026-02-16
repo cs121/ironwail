@@ -179,7 +179,11 @@ bool IsSkyDepth(float depth)
 
 bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float tExit)
 {
-	vec3 invRd = 1.0 / rd;
+	vec3 safeRd = vec3(
+	(abs(rd.x) < 1e-6) ? ((rd.x >= 0.0) ? 1e-6 : -1e-6) : rd.x,
+	(abs(rd.y) < 1e-6) ? ((rd.y >= 0.0) ? 1e-6 : -1e-6) : rd.y,
+	(abs(rd.z) < 1e-6) ? ((rd.z >= 0.0) ? 1e-6 : -1e-6) : rd.z);
+	vec3 invRd = 1.0 / safeRd;
 	vec3 t0 = (bmin - ro) * invRd;
 	vec3 t1 = (bmax - ro) * invRd;
 	vec3 tmin = min(t0, t1);
@@ -282,9 +286,15 @@ void main()
 	vec3 worldPos = world.xyz / world.w;
 
 	vec3 ro = FogCameraPosWS;
-	vec3 rd = normalize(worldPos - ro);
+	vec3 ray = worldPos - ro;
+	float tScene = length(ray);
+	if (tScene < 1e-6)
+	{
+		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		return;
+	}
+	vec3 rd = ray / tScene;
 	vec3 viewDir = -rd;
-	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
 		tScene = 1e6;
 
@@ -328,7 +338,9 @@ void main()
 	vec3 ambientStatic = mix(ambientWorld, ambientSky, clamp(LightgridParams.x, 0.0, 1.0));
 	float ambientWeight = clamp(0.25 + 0.75 * LightgridParams.x, 0.0, 1.0);
 	vec3 LiAmbient = ambientStatic * (0.5 + 0.5 * ambientWeight);
-	vec3 sunDir = normalize(-ShadowSunDir.xyz);
+	vec3 sunRaw = -ShadowSunDir.xyz;
+	float sunLen = length(sunRaw);
+	vec3 sunDir = (sunLen > 1e-6) ? (sunRaw / sunLen) : vec3(0.0, 0.0, 1.0);
 	float sunEnabled = ShadowDebug.x > 0.5 ? 1.0 : 0.0;
 	vec3 sunColor = vec3(0.9, 0.95, 1.0) * sunEnabled;
 
@@ -457,5 +469,24 @@ void main()
 		outColor = scene * transmittance + inscatter * (1.0 + fogDensity);
 	else
 		outColor = mix(scene, scatterColor, clamp(sigmaIntegral, 0.0, 1.0));
+	if (FogDebugMode == 12)
+	{
+		bvec4 bad = bvec4(any(isnan(vec4(outColor, transmittance))) || any(isinf(vec4(outColor, transmittance))),
+			any(lessThan(vec4(outColor, transmittance), vec4(-1e6))),
+			any(greaterThan(vec4(outColor, transmittance), vec4(1e6))),
+			false);
+		if (bad.x)
+			FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+		else if (bad.y || bad.z)
+			FragColor = vec4(1.0, 1.0, 0.0, 1.0);
+		else
+			FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+	if (any(isnan(vec4(outColor, transmittance))) || any(isinf(vec4(outColor, transmittance))))
+	{
+		FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
 	FragColor = vec4(outColor, transmittance);
 }
