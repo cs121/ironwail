@@ -402,8 +402,13 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, "FrameDataUBO");
 	if (frame_ubo_index != GL_INVALID_INDEX)
 	{
-		glGetActiveUniformBlockiv (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_BINDING, &frame_ubo_binding);
-		glGetActiveUniformBlockiv (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_DATA_SIZE, &frame_ubo_data_size);
+		/*
+		 * Keep this diagnostics path compatible with the project's GL loader setup:
+		 * glGetActiveUniformBlockiv is not loaded through GL_*Func wrappers yet,
+		 * so querying binding/data size directly can fail to compile on MSVC.
+		 */
+		frame_ubo_binding = -2;
+		frame_ubo_data_size = -2;
 	}
 
 	R_Shadow_Log_BeginFrame ();
