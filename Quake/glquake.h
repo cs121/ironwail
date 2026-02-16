@@ -650,6 +650,7 @@ typedef struct glprogs_s {
 	GLuint		skyboxside[2];		// [dither]
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
 	GLuint		sprites[2];			// [dither]
+	GLuint		decals[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
 	GLuint		dlight_composite;

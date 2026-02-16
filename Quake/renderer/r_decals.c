@@ -4,6 +4,9 @@
 #include "world.h"
 #include <float.h>
 
+extern cvar_t r_tonemap;
+extern cvar_t r_bloom;
+
 #define DECAL_MAX_DEFS 256
 #define DECAL_MAX_TEXTURES 8
 
@@ -38,6 +41,7 @@ typedef struct decal_def_s
 	int priority;
 	int random_rotation;
 	decal_blend_t blend;
+	float emissive_scale;
 	decal_category_t category;
 } decal_def_t;
 
@@ -45,6 +49,8 @@ typedef struct decalvertex_s
 {
 	vec3_t pos;
 	float uv[2];
+	float color[3];
+	float params[2];
 } decalvertex_t;
 
 typedef struct decal_instance_s
@@ -62,7 +68,9 @@ typedef struct decal_instance_s
 	gltexture_t *texture;
 	vec3_t origin;
 	vec3_t verts[4];
+	vec3_t light;
 	float alpha;
+	float emissive_scale;
 	qboolean selected;
 } decal_instance_t;
 
@@ -97,6 +105,9 @@ static int decal_spawned_this_frame;
 static int decal_next_spawn_id;
 static int decal_frame;
 static decal_stats_t decal_stats;
+
+static void R_Decals_ComputeLighting (decal_instance_t *d);
+static void R_Decals_DebugState (void);
 
 #define DECAL_BATCH_MAX 256
 
@@ -243,6 +254,7 @@ static decal_def_t *R_Decal_GetOrCreateDef (const char *name)
 	VectorSet (def->color, 1.f, 1.f, 1.f);
 	def->random_rotation = true;
 	def->blend = DECAL_BLEND_ALPHA;
+	def->emissive_scale = 0.f;
 	def->category = DECAL_CAT_GENERIC;
 	def->priority = 2;
 	return def;
@@ -329,6 +341,7 @@ static void R_Decals_ParseFile (const char *path, const char *buffer)
 			else if (!q_strcasecmp (com_token, "lifetime")) { data = COM_Parse (data); if (!data) break; def->lifetime = atof (com_token); }
 			else if (!q_strcasecmp (com_token, "fade")) { data = COM_Parse (data); if (!data) break; def->fade = atof (com_token); }
 			else if (!q_strcasecmp (com_token, "blend")) { data = COM_Parse (data); if (!data) break; def->blend = R_Decal_ParseBlend (com_token); }
+			else if (!q_strcasecmp (com_token, "emissive") || !q_strcasecmp (com_token, "decal_emissive")) { data = COM_Parse (data); if (!data) break; def->emissive_scale = q_max (0.f, atof (com_token)); }
 			else if (!q_strcasecmp (com_token, "random_rotation")) { data = COM_Parse (data); if (!data) break; def->random_rotation = atof (com_token) != 0.f; }
 			else if (!q_strcasecmp (com_token, "priority")) { data = COM_Parse (data); if (!data) break; def->priority = (int)atof (com_token); }
 			else if (!q_strcasecmp (com_token, "category")) { data = COM_Parse (data); if (!data) break; def->category = R_Decal_ParseCategory (com_token); }
@@ -497,6 +510,8 @@ static void R_Decals_InitInstance (decal_instance_t *d, const decal_def_t *def, 
 	d->lifetime = def->lifetime > 0.f ? def->lifetime : q_max (1.f, r_decals_lifetime.value);
 	d->fade = def->fade > 0.f ? def->fade : q_max (0.f, r_decals_fade.value);
 	d->alpha = CLAMP (0.f, alpha, 1.f);
+	VectorSet (d->light, 1.f, 1.f, 1.f);
+	d->emissive_scale = q_max (0.f, def->emissive_scale);
 }
 
 static void R_Decals_GetRotationAxes (const decal_def_t *def, float *out_c, float *out_s)
@@ -579,6 +594,7 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 	R_Decals_BuildOrthonormalQuad (org, normal, def, size_opt, center, verts);
 	alpha = R_Decals_GetSpawnAlpha (def, rgba_opt);
 	R_Decals_InitInstance (d, def, center, verts, alpha);
+	R_Decals_ComputeLighting (d);
 	d->texture = R_Decals_LoadTexture (def, def_index);
 	if (!d->texture)
 	{
@@ -652,16 +668,16 @@ static void R_Decals_SetBlend (decal_blend_t blend, qboolean showtris)
 {
 	if (showtris)
 	{
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4));
 		return;
 	}
 	switch (blend)
 	{
 	default:
-	case DECAL_BLEND_ALPHA: GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2)); break;
-	case DECAL_BLEND_ADD: GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2)); break;
-	case DECAL_BLEND_MODULATE: GL_SetState (GLS_BLEND_MULTIPLY | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2)); break;
-	case DECAL_BLEND_PREMUL: GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (2)); break;
+	case DECAL_BLEND_ALPHA: GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4)); break;
+	case DECAL_BLEND_ADD: GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4)); break;
+	case DECAL_BLEND_MODULATE: GL_SetState (GLS_BLEND_MULTIPLY | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4)); break;
+	case DECAL_BLEND_PREMUL: GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (4)); break;
 	}
 }
 
@@ -678,6 +694,8 @@ static void R_Decals_FlushBatch (const decalvertex_t *verts, const GLushort *idx
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
 	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, pos));
 	GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, uv));
+	GL_VertexAttribPointerFunc (2, 3, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, color));
+	GL_VertexAttribPointerFunc (3, 2, GL_FLOAT, GL_FALSE, sizeof (decalvertex_t), ofs + offsetof (decalvertex_t, params));
 	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, idx, sizeof (GLushort) * count * 6, &buf, &ofs);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
 	glDrawElements (GL_TRIANGLES, count * 6, GL_UNSIGNED_SHORT, ofs);
@@ -691,6 +709,11 @@ static void R_Decals_WriteBatchEntry (const decal_instance_t *d, decalvertex_t *
 		VectorCopy (d->verts[k], verts[batch_index * 4 + k].pos);
 		verts[batch_index * 4 + k].uv[0] = (k == 0 || k == 1) ? 0.f : 1.f;
 		verts[batch_index * 4 + k].uv[1] = (k == 0 || k == 3) ? 1.f : 0.f;
+		verts[batch_index * 4 + k].color[0] = d->light[0];
+		verts[batch_index * 4 + k].color[1] = d->light[1];
+		verts[batch_index * 4 + k].color[2] = d->light[2];
+		verts[batch_index * 4 + k].params[0] = d->alpha;
+		verts[batch_index * 4 + k].params[1] = d->emissive_scale;
 	}
 	idx[batch_index * 6 + 0] = batch_index * 4 + 0;
 	idx[batch_index * 6 + 1] = batch_index * 4 + 1;
@@ -698,6 +721,36 @@ static void R_Decals_WriteBatchEntry (const decal_instance_t *d, decalvertex_t *
 	idx[batch_index * 6 + 3] = batch_index * 4 + 0;
 	idx[batch_index * 6 + 4] = batch_index * 4 + 2;
 	idx[batch_index * 6 + 5] = batch_index * 4 + 3;
+}
+
+static void R_Decals_ComputeLighting (decal_instance_t *d)
+{
+	lightcache_t cache = {0};
+	if (!cl.worldmodel)
+	{
+		VectorSet (d->light, 1.f, 1.f, 1.f);
+		return;
+	}
+	R_LightPoint (cl.worldmodel, d->origin, 0.f, &cache);
+	d->light[0] = CLAMP (0.f, lightcolor[0] * (1.f / 255.f), 4.f);
+	d->light[1] = CLAMP (0.f, lightcolor[1] * (1.f / 255.f), 4.f);
+	d->light[2] = CLAMP (0.f, lightcolor[2] * (1.f / 255.f), 4.f);
+}
+
+static void R_Decals_DebugState (void)
+{
+	GLint fbo = 0, src = 0, dst = 0, depthfunc = 0, drawbuf = 0;
+	GLboolean blend = GL_FALSE, srgb = GL_FALSE, depth = GL_FALSE;
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &src);
+	glGetIntegerv (GL_BLEND_DST_RGB, &dst);
+	glGetBooleanv (GL_BLEND, &blend);
+	glGetBooleanv (GL_FRAMEBUFFER_SRGB, &srgb);
+	glGetBooleanv (GL_DEPTH_TEST, &depth);
+	glGetIntegerv (GL_DEPTH_FUNC, &depthfunc);
+	glGetIntegerv (GL_DRAW_BUFFER, &drawbuf);
+	Con_DPrintf ("decals debug: fbo=%d drawbuf=0x%x blend=%d src=0x%x dst=0x%x depth=%d depthfunc=0x%x srgb=%d tonemap=%.0f bloom=%.2f\n",
+		fbo, drawbuf, blend != GL_FALSE, src, dst, depth != GL_FALSE, depthfunc, srgb != GL_FALSE, r_tonemap.value, r_bloom.value);
 }
 
 static qboolean R_Decals_PrepareVisible (decal_instance_t *d, double now, float drawdist, float drawdist_sq)
@@ -755,7 +808,10 @@ void R_DrawDecals (qboolean showtris)
 		decal_stats.skipped_render_budget += (vis_count - budget);
 
 	GL_BeginGroup ("Decals");
-	GL_UseProgram (glprogs.sprites[softemu == SOFTEMU_COARSE && !showtris]);
+	GL_UseProgram (glprogs.decals[softemu == SOFTEMU_COARSE && !showtris]);
+	GL_Uniform1iFunc (0, r_decals_debug.value >= 2.f ? 1 : 0);
+	if (r_decals_debug.value >= 1.f)
+		R_Decals_DebugState ();
 	GL_PolygonOffset (OFFSET_DECAL);
 
 	for (i = 0; i < vis_count && draw_count < budget; ++i)

@@ -1,3 +1,4 @@
+// emissive <scale> enables HDR emissive contribution (default: 0 / lit only)
 // Base decal definitions (override in mods/paks with later searchpath priority)
 
 decal bullet_hole_default {
@@ -116,3 +117,12 @@ decal concrete_hit {
   priority 2
   category dirt
 }
+
+// Example:
+// decal test_neon_mark {
+//   texture "decals/neon/mark_01"
+//   size 10 10
+//   alpha 0.8 0.8
+//   emissive 1.5
+//   blend alpha
+// }
