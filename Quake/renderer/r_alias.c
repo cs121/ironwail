@@ -982,10 +982,16 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	{
 		const qboolean env_hint = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING)
 			|| (e->model->flags & MOD_FBRIGHTHACK);
-		instance->envmap_params[0] = (r_reflection_probes.value > 0.f && env_hint) ? 1.f : 0.f;
-		instance->envmap_params[1] = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING) ? 0.95f : 0.55f;
-		instance->envmap_params[2] = R_AliasEnvIndoorHint (e);
-		instance->envmap_params[3] = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING) ? 0.14f : 0.08f;
+		const float indoor_hint = R_AliasEnvIndoorHint (e);
+		const float envmap_base = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING) ? 0.95f : 0.55f;
+		const float indoor_dampen = CLAMP (0.f, r_envlight_indoor_dampen.value, 1.f);
+
+		instance->envmap_params[0] = (r_envlight.value > 0.f && r_envlight_envmap.value > 0.f && env_hint) ? 1.f : 0.f;
+		instance->envmap_params[1] = envmap_base * CLAMP (0.f, r_envlight_envmap.value, 1.f);
+		instance->envmap_params[2] = indoor_hint;
+		instance->envmap_params[3] = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING)
+			? 0.14f
+			: 0.08f + indoor_hint * indoor_dampen * 0.18f;
 	}
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;

@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 #include "renderer/r_dlight_pool.h"
 #include "renderer/r_postfx.h"
+#include "renderer/r_envlight.h"
 #include "simd_caps.h"
 
 //johnfitz -- new cvars
@@ -284,6 +285,12 @@ extern cvar_t r_reflection_probe_debug;
 extern cvar_t r_envlight_world_fill;
 extern cvar_t r_lightgrid_directional;
 extern cvar_t r_lighting_debug;
+extern cvar_t r_envlight;
+extern cvar_t r_envlight_entity_intensity;
+extern cvar_t r_envlight_world_fill;
+extern cvar_t r_envlight_sky_sh;
+extern cvar_t r_envlight_envmap;
+extern cvar_t r_envlight_indoor_dampen;
 extern cvar_t r_godrays;
 extern cvar_t r_godrays_quality;
 extern cvar_t r_godrays_debug;
@@ -665,6 +672,8 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_debug_itemlight);
         Cvar_RegisterVariable (&r_minlight_models);
         Cvar_RegisterVariable (&r_model_lightgrid);
+        /* Envlight centralization: register master controls and legacy alias bridge. */
+        R_EnvLight_RegisterCvars ();
         Cvar_RegisterVariable (&r_wateralpha);
         Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
         Cvar_RegisterVariable (&r_litwater);
@@ -881,10 +890,8 @@ Cvar_RegisterVariable (&r_ssao_samples);
 	Cvar_RegisterVariable (&s_ao_halfres);
 	Cvar_RegisterVariable (&s_ao_debug);
 	Cvar_RegisterVariable (&s_ao_temporal);
-	Cvar_RegisterVariable (&r_reflection_probes);
+	/* Legacy aliases (r_reflection_probes/r_lightgrid_directional) are synced via R_EnvLight_RegisterCvars. */
 	Cvar_RegisterVariable (&r_reflection_probe_debug);
-	Cvar_RegisterVariable (&r_envlight_world_fill);
-	Cvar_RegisterVariable (&r_lightgrid_directional);
 	Cvar_RegisterVariable (&r_lighting_debug);
 Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_godrays_quality);
