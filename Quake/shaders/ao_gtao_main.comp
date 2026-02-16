@@ -44,5 +44,11 @@ void main(){
  float dU=texelFetch(DepthTexture,spU,0).r;
  float edge=clamp(length(vec2(dR-d,dU-d))*24.0,0.0,1.0);
  imageStore(OutEdges,px,vec4(edge,ao,0,0));
- imageStore(OutBent,px,vec4(normalize(bent).xy*0.5+0.5,0,1));
+ if (u_quality.w > 0.5)
+ {
+  vec2 b=normalize(bent).xy;
+  if(any(isnan(b)) || any(isinf(b)))
+   b=vec2(0.0);
+  imageStore(OutBent,px,vec4(b*0.5+0.5,0,1));
+ }
 }

@@ -14,6 +14,14 @@
   - `2`: invert NDC
 - Debug mode 1/2/3 should remain monotonic when toggling these.
 
+## Unified AO controls (`s_ao_*`)
+- `s_ao`: master AO enable.
+- `s_ao_mode`: `0=off`, `1=legacy SSAO`, `2=ASSAO`, `3=GTAO`.
+- `s_ao_quality`: quality tier (`0..3`) used by compute AO modes.
+- `s_ao_radius`, `s_ao_strength`, `s_ao_power`: shared AO shaping controls.
+- `s_ao_blur`, `s_ao_halfres`, `s_ao_debug`, `s_ao_temporal`: shared pipeline toggles.
+- `r_ssao` is deprecated and only kept as a compatibility alias to `s_ao`/`s_ao_mode`.
+
 ## AO resolution mapping
 - The SSAO pass can run at full or half resolution.
 - AO UVs are derived from AO buffer size, while depth sampling is derived from screen size.
