@@ -824,6 +824,13 @@ void main()
                         combined = vec3(accumT);
                 else if (FogDebugViews.z > 0.5)
                         combined = accumScatter;
+                else if (FogDebugViews.w > 2.5)
+                {
+                        float gridViz = float(maxSlice + 1) / zSlicesF;
+                        vec2 cell = fract(uv * vec2(AtmosFroxelParams0.y, AtmosFroxelParams0.z));
+                        float edge = step(cell.x, 0.05) + step(cell.y, 0.05);
+                        combined = mix(vec3(gridViz), vec3(1.0, 0.6, 0.1), clamp(edge, 0.0, 1.0));
+                }
                 else if (FogDebugViews.w > 1.5)
                         combined = vec3(float(maxSlice + 1) / zSlicesF);
                 else if (FogDebugViews.w > 0.5)
