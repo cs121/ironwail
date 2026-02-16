@@ -283,11 +283,11 @@ typedef struct
 #include "q_sound.h"
 #include "client.h"
 
-#include "gl_model.h"
+#include "opengl/gl_model.h"
 #include "world.h"
 
 #include "image.h"	//johnfitz
-#include "gl_texmgr.h"	//johnfitz
+#include "opengl/gl_texmgr.h"	//johnfitz
 #include "input.h"
 #include "keys.h"
 #include "menu.h"

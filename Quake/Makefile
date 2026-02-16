@@ -62,6 +62,7 @@ CFLAGS += -D_FILE_OFFSET_BITS=64
 CFLAGS += $(call check_gcc,-std=gnu11,)
 CFLAGS += $(call check_gcc,-Werror=format,)
 CFLAGS += $(CPUFLAGS)
+CFLAGS += -I. -Iserver -Isound -Irenderer -Iopengl -Inet -Iclient
 CXXFLAGS = $(filter-out -std=gnu11,$(CFLAGS)) $(call check_cxx,-std=gnu++17,)
 ifneq ($(DEBUG),0)
 DFLAGS += -DDEBUG
@@ -122,11 +123,11 @@ $(error Invalid MP3LIB setting)
 endif
 endif
 ifeq ($(MP3LIB),mad)
-mp3_obj=snd_mp3
+mp3_obj=sound/snd_mp3
 lib_mp3dec=-lmad
 endif
 ifeq ($(MP3LIB),mpg123)
-mp3_obj=snd_mpg123
+mp3_obj=sound/snd_mpg123
 lib_mp3dec=-lmpg123
 endif
 ifeq ($(VORBISLIB),vorbis)
@@ -194,52 +195,52 @@ MAKEFILE := $(lastword $(MAKEFILE_LIST))
 # ---------------------------
 
 MUSIC_OBJS= bgmusic.o \
-	snd_codec.o \
-	snd_flac.o \
-	snd_wave.o \
-	snd_vorbis.o \
-	snd_opus.o \
+	sound/snd_codec.o \
+	sound/snd_flac.o \
+	sound/snd_wave.o \
+	sound/snd_vorbis.o \
+	sound/snd_opus.o \
 	$(mp3_obj).o \
-	snd_mp3tag.o \
-	snd_mikmod.o \
-	snd_modplug.o \
-	snd_xmp.o \
-	snd_umx.o
-COMOBJ_SND = snd_dma.o snd_mix.o snd_mem.o $(MUSIC_OBJS)
-SYSOBJ_SND = snd_sdl.o
+	sound/snd_mp3tag.o \
+	sound/snd_mikmod.o \
+	sound/snd_modplug.o \
+	sound/snd_xmp.o \
+	sound/snd_umx.o
+COMOBJ_SND = sound/snd_dma.o sound/snd_mix.o sound/snd_mem.o $(MUSIC_OBJS)
+SYSOBJ_SND = sound/snd_sdl.o
 SYSOBJ_CDA = cd_null.o
 SYSOBJ_INPUT = in_sdl.o
-SYSOBJ_GL_VID= gl_vidsdl.o
-SYSOBJ_NET = net_bsd.o net_udp.o
+SYSOBJ_GL_VID= opengl/gl_vidsdl.o
+SYSOBJ_NET = net/net_bsd.o net/net_udp.o
 SYSOBJ_SYS = pl_linux.o sys_sdl_unix.o
 SYSOBJ_MAIN= main_sdl.o
 
 GLOBJS = \
-	gl_refrag.o \
-	gl_rlight.o \
-	gl_rmain.o \
-	gl_fog.o \
-	gl_rmisc.o \
-	r_shadow.o \
-	r_postfx.o \
-	r_part.o \
-	r_world.o \
-	gl_screen.o \
-gl_shaders.o \
-gl_sky.o \
-gl_warp.o \
+	opengl/gl_refrag.o \
+	opengl/gl_rlight.o \
+	opengl/gl_rmain.o \
+	opengl/gl_fog.o \
+	opengl/gl_rmisc.o \
+	renderer/r_shadow.o \
+	renderer/r_postfx.o \
+	renderer/r_part.o \
+	renderer/r_world.o \
+	opengl/gl_screen.o \
+opengl/gl_shaders.o \
+opengl/gl_sky.o \
+opengl/gl_warp.o \
 $(SYSOBJ_GL_VID) \
-gl_draw.o \
+opengl/gl_draw.o \
 image.o \
-gl_texmgr.o \
+opengl/gl_texmgr.o \
 ktx2_write.o \
-r_maptex_export.o \
+renderer/r_maptex_export.o \
 bc7enc.o \
-gl_mesh.o \
-r_sprite.o \
-r_alias.o \
-r_brush.o \
-	gl_model.o
+opengl/gl_mesh.o \
+renderer/r_sprite.o \
+renderer/r_alias.o \
+renderer/r_brush.o \
+	opengl/gl_model.o
 
 OBJS = strlcat.o \
 	strlcpy.o \
@@ -249,16 +250,16 @@ OBJS = strlcat.o \
 	$(SYSOBJ_SND) \
 	$(SYSOBJ_CDA) \
 	$(SYSOBJ_NET) \
-	net_dgrm.o \
-	net_loop.o \
-	net_main.o \
+	net/net_dgrm.o \
+	net/net_loop.o \
+	net/net_main.o \
 	chase.o \
-	cl_demo.o \
-	cl_input.o \
-	cl_main.o \
-	cl_postfx.o \
-	cl_parse.o \
-	cl_tent.o \
+	client/cl_demo.o \
+	client/cl_input.o \
+	client/cl_main.o \
+	client/cl_postfx.o \
+	client/cl_parse.o \
+	client/cl_tent.o \
 	console.o \
 	keys.o \
 	menu.o \
@@ -283,10 +284,10 @@ OBJS = strlcat.o \
 	pr_cmds.o \
 	pr_edict.o \
 	pr_exec.o \
-	sv_main.o \
-	sv_move.o \
-	sv_phys.o \
-	sv_user.o \
+	server/sv_main.o \
+	server/sv_move.o \
+	server/sv_phys.o \
+	server/sv_user.o \
 	world.o \
 	zone.o \
 	$(SYSOBJ_SYS) $(SYSOBJ_MAIN)

@@ -80,19 +80,19 @@
 		<Unit filename="..\..\Quake\chase.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\cl_demo.c">
+		<Unit filename="..\..\Quake\client\cl_demo.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\cl_input.c">
+		<Unit filename="..\..\Quake\client\cl_input.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\cl_main.c">
+		<Unit filename="..\..\Quake\client\cl_main.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\cl_parse.c">
+		<Unit filename="..\..\Quake\client\cl_parse.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\cl_tent.c">
+		<Unit filename="..\..\Quake\client\cl_tent.c">
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="..\..\Quake\client.h" />
@@ -117,52 +117,52 @@
 		</Unit>
 		<Unit filename="..\..\Quake\cvar.h" />
 		<Unit filename="..\..\Quake\draw.h" />
-		<Unit filename="..\..\Quake\gl_draw.c">
+		<Unit filename="..\..\Quake\opengl\gl_draw.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_fog.c">
+		<Unit filename="..\..\Quake\opengl\gl_fog.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_mesh.c">
+		<Unit filename="..\..\Quake\opengl\gl_mesh.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_model.c">
+		<Unit filename="..\..\Quake\opengl\gl_model.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_model.h" />
-		<Unit filename="..\..\Quake\gl_refrag.c">
+		<Unit filename="..\..\Quake\opengl\gl_model.h" />
+		<Unit filename="..\..\Quake\opengl\gl_refrag.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_rlight.c">
+		<Unit filename="..\..\Quake\opengl\gl_rlight.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_rmain.c">
+		<Unit filename="..\..\Quake\opengl\gl_rmain.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_rmisc.c">
+		<Unit filename="..\..\Quake\opengl\gl_rmisc.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_screen.c">
+		<Unit filename="..\..\Quake\opengl\gl_screen.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_shaders.c">
+		<Unit filename="..\..\Quake\opengl\gl_shaders.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_shaders.h" />
-		<Unit filename="..\..\Quake\gl_sky.c">
+		<Unit filename="..\..\Quake\opengl\gl_shaders.h" />
+		<Unit filename="..\..\Quake\opengl\gl_sky.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_texmgr.c">
+		<Unit filename="..\..\Quake\opengl\gl_texmgr.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_texmgr.h" />
-		<Unit filename="..\..\Quake\gl_vidsdl.c">
+		<Unit filename="..\..\Quake\opengl\gl_texmgr.h" />
+		<Unit filename="..\..\Quake\opengl\gl_vidsdl.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_warp.c">
+		<Unit filename="..\..\Quake\opengl\gl_warp.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\gl_warp_sin.h" />
+		<Unit filename="..\..\Quake\opengl\gl_warp_sin.h" />
 		<Unit filename="..\..\Quake\glquake.h" />
 		<Unit filename="..\..\Quake\host.c">
 			<Option compilerVar="CC" />
@@ -199,30 +199,30 @@
 		<Unit filename="..\..\Quake\miniz.h" />
 		<Unit filename="..\..\Quake\modelgen.h" />
 		<Unit filename="..\..\Quake\net.h" />
-		<Unit filename="..\..\Quake\net_defs.h" />
-		<Unit filename="..\..\Quake\net_dgrm.c">
+		<Unit filename="..\..\Quake\net\net_defs.h" />
+		<Unit filename="..\..\Quake\net\net_dgrm.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_dgrm.h" />
-		<Unit filename="..\..\Quake\net_loop.c">
+		<Unit filename="..\..\Quake\net\net_dgrm.h" />
+		<Unit filename="..\..\Quake\net\net_loop.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_loop.h" />
-		<Unit filename="..\..\Quake\net_main.c">
+		<Unit filename="..\..\Quake\net\net_loop.h" />
+		<Unit filename="..\..\Quake\net\net_main.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_sys.h" />
-		<Unit filename="..\..\Quake\net_win.c">
+		<Unit filename="..\..\Quake\net\net_sys.h" />
+		<Unit filename="..\..\Quake\net\net_win.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_wins.c">
+		<Unit filename="..\..\Quake\net\net_wins.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_wins.h" />
-		<Unit filename="..\..\Quake\net_wipx.c">
+		<Unit filename="..\..\Quake\net\net_wins.h" />
+		<Unit filename="..\..\Quake\net\net_wipx.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\net_wipx.h" />
+		<Unit filename="..\..\Quake\net\net_wipx.h" />
 		<Unit filename="..\..\Quake\pl_win.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -244,19 +244,19 @@
 		<Unit filename="..\..\Quake\q_stdinc.h" />
 		<Unit filename="..\..\Quake\qs_bmp.h" />
 		<Unit filename="..\..\Quake\quakedef.h" />
-		<Unit filename="..\..\Quake\r_alias.c">
+		<Unit filename="..\..\Quake\renderer\r_alias.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\r_brush.c">
+		<Unit filename="..\..\Quake\renderer\r_brush.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\r_part.c">
+		<Unit filename="..\..\Quake\renderer\r_part.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\r_sprite.c">
+		<Unit filename="..\..\Quake\renderer\r_sprite.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\r_world.c">
+		<Unit filename="..\..\Quake\renderer\r_world.c">
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="..\..\Quake\render.h" />
@@ -267,67 +267,67 @@
 		<Unit filename="..\..\Quake\sbar.h" />
 		<Unit filename="..\..\Quake\screen.h" />
 		<Unit filename="..\..\Quake\server.h" />
-		<Unit filename="..\..\Quake\snd_codec.c">
+		<Unit filename="..\..\Quake\sound\snd_codec.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_codec.h" />
-		<Unit filename="..\..\Quake\snd_codeci.h" />
-		<Unit filename="..\..\Quake\snd_dma.c">
+		<Unit filename="..\..\Quake\sound\snd_codec.h" />
+		<Unit filename="..\..\Quake\sound\snd_codeci.h" />
+		<Unit filename="..\..\Quake\sound\snd_dma.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_flac.c">
+		<Unit filename="..\..\Quake\sound\snd_flac.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_flac.h" />
-		<Unit filename="..\..\Quake\snd_mem.c">
+		<Unit filename="..\..\Quake\sound\snd_flac.h" />
+		<Unit filename="..\..\Quake\sound\snd_mem.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_mikmod.c">
+		<Unit filename="..\..\Quake\sound\snd_mikmod.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_mikmod.h" />
-		<Unit filename="..\..\Quake\snd_mix.c">
+		<Unit filename="..\..\Quake\sound\snd_mikmod.h" />
+		<Unit filename="..\..\Quake\sound\snd_mix.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_modplug.c">
+		<Unit filename="..\..\Quake\sound\snd_modplug.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_modplug.h" />
-		<Unit filename="..\..\Quake\snd_mp3.c">
+		<Unit filename="..\..\Quake\sound\snd_modplug.h" />
+		<Unit filename="..\..\Quake\sound\snd_mp3.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_mp3.h" />
-		<Unit filename="..\..\Quake\snd_mp3tag.c">
+		<Unit filename="..\..\Quake\sound\snd_mp3.h" />
+		<Unit filename="..\..\Quake\sound\snd_mp3tag.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_mpg123.c">
+		<Unit filename="..\..\Quake\sound\snd_mpg123.c">
 			<Option compilerVar="CC" />
 +			<Option compile="0" />
 +			<Option link="0" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_opus.c">
+		<Unit filename="..\..\Quake\sound\snd_opus.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_opus.h" />
-		<Unit filename="..\..\Quake\snd_sdl.c">
+		<Unit filename="..\..\Quake\sound\snd_opus.h" />
+		<Unit filename="..\..\Quake\sound\snd_sdl.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_umx.c">
+		<Unit filename="..\..\Quake\sound\snd_umx.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_umx.h" />
-		<Unit filename="..\..\Quake\snd_vorbis.c">
+		<Unit filename="..\..\Quake\sound\snd_umx.h" />
+		<Unit filename="..\..\Quake\sound\snd_vorbis.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_vorbis.h" />
-		<Unit filename="..\..\Quake\snd_wave.c">
+		<Unit filename="..\..\Quake\sound\snd_vorbis.h" />
+		<Unit filename="..\..\Quake\sound\snd_wave.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_wave.h" />
-		<Unit filename="..\..\Quake\snd_xmp.c">
+		<Unit filename="..\..\Quake\sound\snd_wave.h" />
+		<Unit filename="..\..\Quake\sound\snd_xmp.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\snd_xmp.h" />
+		<Unit filename="..\..\Quake\sound\snd_xmp.h" />
 		<Unit filename="..\..\Quake\spritegn.h" />
 		<Unit filename="..\..\Quake\strl_fn.h" />
 		<Unit filename="..\..\Quake\strlcat.c">
@@ -336,16 +336,16 @@
 		<Unit filename="..\..\Quake\strlcpy.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\sv_main.c">
+		<Unit filename="..\..\Quake\server\sv_main.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\sv_move.c">
+		<Unit filename="..\..\Quake\server\sv_move.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\sv_phys.c">
+		<Unit filename="..\..\Quake\server\sv_phys.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="..\..\Quake\sv_user.c">
+		<Unit filename="..\..\Quake\server\sv_user.c">
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="..\..\Quake\sys.h" />
