@@ -780,6 +780,7 @@ void R_Clustered_BuildLists (void)
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.temp_counts_ssbo);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
 		(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.cluster_count), temp_counts);
+	counters[0] = (GLuint)r_clustered.max_indices;
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.counters_ssbo);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
@@ -820,10 +821,14 @@ void R_Clustered_BuildLists (void)
 			GLuint prefix = 0;
 			for (i = 0; i < r_clustered.cluster_count; i++)
 			{
-				r_clustered_headers_cpu[i].count = mapped[i].count;
+				GLuint count = mapped[i].count;
+				GLuint remaining = (prefix < (GLuint)r_clustered.max_indices) ? ((GLuint)r_clustered.max_indices - prefix) : 0u;
+				if (count > remaining)
+					count = remaining;
+				r_clustered_headers_cpu[i].count = count;
 				r_clustered_headers_cpu[i].offset = prefix;
 				temp_counts[i] = 0u;
-				prefix += mapped[i].count;
+				prefix += count;
 			}
 			GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER);
 		}
