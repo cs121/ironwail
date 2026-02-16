@@ -462,6 +462,18 @@ cvar_t	r_ao_bentnormals = { "r_ao_bentnormals", "0", CVAR_ARCHIVE };
 cvar_t	r_ao_temporal = { "r_ao_temporal", "0", CVAR_ARCHIVE };
 cvar_t	r_ao_timing = { "r_ao_timing", "0", CVAR_NONE };
 
+/* Unified AO controls (authoritative). Legacy r_ssao/r_ao cvars are compatibility aliases. */
+cvar_t	s_ao = { "s_ao", "1", CVAR_ARCHIVE };
+cvar_t	s_ao_mode = { "s_ao_mode", "2", CVAR_ARCHIVE }; /* 0=off, 1=ssao(legacy), 2=assao, 3=gtao */
+cvar_t	s_ao_quality = { "s_ao_quality", "1", CVAR_ARCHIVE };
+cvar_t	s_ao_radius = { "s_ao_radius", "24", CVAR_ARCHIVE };
+cvar_t	s_ao_strength = { "s_ao_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	s_ao_power = { "s_ao_power", "1.5", CVAR_ARCHIVE };
+cvar_t	s_ao_blur = { "s_ao_blur", "1", CVAR_ARCHIVE };
+cvar_t	s_ao_halfres = { "s_ao_halfres", "1", CVAR_ARCHIVE };
+cvar_t	s_ao_debug = { "s_ao_debug", "0", CVAR_ARCHIVE }; /* 0=off,1=ao_only,2=inputs,3=depth_lin,4=normals,5=edges,6=history */
+cvar_t	s_ao_temporal = { "s_ao_temporal", "0", CVAR_ARCHIVE };
+
 cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
 cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
 cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
@@ -1629,12 +1641,20 @@ static GLuint GL_GenerateLegacySSAOTexture (float view_min_x, float view_min_y, 
 }
 
 
-static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
+static GLuint R_RenderAO (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
-	int method = CLAMP (0, (int)Q_rint (r_ao_method.value), 2);
-	int debug_mode = CLAMP (0, (int)Q_rint (r_ao_debug.value), 5);
+	int mode = CLAMP (0, (int)Q_rint (s_ao_mode.value), 3);
+	int method;
+	int debug_mode = CLAMP (0, (int)Q_rint (r_ao_debug.value), 6);
 	int quality = CLAMP (0, (int)Q_rint (r_ao_quality.value), 3);
 	ao_quality_preset_t preset = R_GetAOQualityPreset (quality);
+
+	if (s_ao.value <= 0.f)
+		mode = 0;
+	if (mode == 1)
+		return GL_GenerateLegacySSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+	method = CLAMP (0, mode - 1, 2);
+
 	qboolean use_halfres = (r_ao_halfres.value > 0.f) ? true : preset.halfres;
 	int index = use_halfres ? 1 : 0;
 	int width = framebufs.ssao.width[index];
@@ -1686,6 +1706,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform4fFunc (6, (float)preset.assao_samples, (float)preset.gtao_slices, (float)preset.gtao_steps, want_bent ? 1.f : 0.f);
 	if (method == 2)
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.depth_prefilter_tex);
+	else
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindImageTextureFunc (0, framebufs.ssao.raw_tex[index], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R16F);
 	GL_BindImageTextureFunc (1, framebufs.ssao.edges_tex[index], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG8);
 	if (want_bent)
@@ -1728,6 +1750,68 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 static qboolean r_godrays_deprecated_warned = false;
 static qboolean r_godrays_rt_logged = false;
 static qboolean r_fog_deprecated_warned = false;
+static qboolean r_ao_deprecated_warned = false;
+static int r_ao_last_logged_mode = -1;
+
+static void R_AOHandleDeprecatedCvars (void)
+{
+	int s_mode = CLAMP (0, (int)Q_rint (s_ao_mode.value), 3);
+	if (s_ao.value <= 0.f)
+		s_mode = 0;
+
+	if (r_ssao.value <= 0.f && (s_ao.value > 0.f || s_mode > 0))
+	{
+		if (!r_ao_deprecated_warned)
+		{
+			Con_Printf ("r_ssao is deprecated; use s_ao/s_ao_mode.\n");
+			r_ao_deprecated_warned = true;
+		}
+		Cvar_SetValueQuick (&s_ao, 0.f);
+		Cvar_SetValueQuick (&s_ao_mode, 0.f);
+		s_mode = 0;
+	}
+	else if (r_ssao.value > 0.f && s_mode == 0)
+	{
+		if (!r_ao_deprecated_warned)
+		{
+			Con_Printf ("r_ssao is deprecated; use s_ao/s_ao_mode.\n");
+			r_ao_deprecated_warned = true;
+		}
+		Cvar_SetValueQuick (&s_ao, 1.f);
+		Cvar_SetValueQuick (&s_ao_mode, 1.f);
+		s_mode = 1;
+	}
+
+	/* Unified AO parameters override legacy AO controls. */
+	Cvar_SetValueQuick (&r_ao_method, (float)((s_mode >= 2) ? (s_mode - 1) : 0));
+	Cvar_SetValueQuick (&r_ao_quality, CLAMP (0.f, s_ao_quality.value, 3.f));
+	Cvar_SetValueQuick (&r_ao_radius, R_SanitizeSSAOValue (s_ao_radius.value, 24.f, 0.01f, 8192.f));
+	Cvar_SetValueQuick (&r_ao_intensity, CLAMP (0.f, s_ao_strength.value, 4.f));
+	Cvar_SetValueQuick (&r_ao_power, R_SanitizeSSAOValue (s_ao_power.value, 1.5f, 0.01f, 8.f));
+	Cvar_SetValueQuick (&r_ao_halfres, (s_ao_halfres.value > 0.f) ? 1.f : 0.f);
+	Cvar_SetValueQuick (&r_ao_temporal, (s_ao_temporal.value > 0.f) ? 1.f : 0.f);
+	Cvar_SetValueQuick (&r_ao_debug, CLAMP (0.f, s_ao_debug.value, 6.f));
+
+	/* Legacy SSAO path mirrors unified controls when selected. */
+	if (s_mode == 1)
+	{
+		Cvar_SetValueQuick (&r_ssao, (s_ao.value > 0.f) ? 1.f : 0.f);
+		Cvar_SetValueQuick (&r_ssao_radius, r_ao_radius.value);
+		Cvar_SetValueQuick (&r_ssao_intensity, r_ao_intensity.value);
+		Cvar_SetValueQuick (&r_ssao_power, r_ao_power.value);
+		Cvar_SetValueQuick (&r_ssao_blur, (s_ao_blur.value > 0.f) ? 1.f : 0.f);
+		Cvar_SetValueQuick (&r_ssao_halfres, r_ao_halfres.value);
+		Cvar_SetValueQuick (&r_ssao_debug, CLAMP (0.f, s_ao_debug.value, 14.f));
+	}
+
+	if (r_ao_last_logged_mode != s_mode)
+	{
+		Con_DPrintf ("AO mode switch: s_ao=%d mode=%d quality=%d radius=%.2f strength=%.2f halfres=%d reversedZ=%d\n",
+			(s_ao.value > 0.f) ? 1 : 0, s_mode, (int)Q_rint (r_ao_quality.value),
+			r_ao_radius.value, r_ao_intensity.value, (r_ao_halfres.value > 0.f) ? 1 : 0, gl_clipcontrol_able ? 1 : 0);
+		r_ao_last_logged_mode = s_mode;
+	}
+}
 
 
 void R_ResetGodraysStabilization (void)
@@ -2562,7 +2646,8 @@ void GL_PostProcess (void)
 	view_max_y = view_min_y + r_refdef.vrect.height / (float)vid.height;
 	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
 
-	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
+	R_AOHandleDeprecatedCvars ();
+	ssao_texture = R_RenderAO (view_min_x, view_min_y, view_max_x, view_max_y);
 	ssao_intensity = R_SanitizeSSAOValue (r_ao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ao_debug.value);
@@ -2571,7 +2656,7 @@ void GL_PostProcess (void)
 	}
 	if (ssao_texture == 0)
 		ssao_debug_mode = -1.f;
-	if (ssao_texture == 0 || r_ao_method.value <= 0.f)
+	if (ssao_texture == 0 || s_ao.value <= 0.f || s_ao_mode.value <= 0.f)
 		ssao_intensity = 0.f;
 	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
@@ -2740,7 +2825,7 @@ void GL_PostProcess (void)
 	depth_texture = 0;
 	{
 		qboolean ssao_needs_depth = (ssao_texture != 0
-			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
+			&& (s_ao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
 		if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
 			depth_texture = framebufs.composite.depth_stencil_tex;
 	}
