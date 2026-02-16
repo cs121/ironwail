@@ -442,11 +442,11 @@ typedef struct gpuframedata_s {
         vec4_t          prev_eye;       // xyz: prev_eyepos, w: delta_time
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
-        vec4_t          lightgrid_params; // x: enabled, yzw: unused
+        vec4_t          lightgrid_params; // x: enabled, y: debug, z: shadow mode, w: world fill
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
-        vec4_t          lighting_params; // x: reflection probes enabled, y: reflection debug, z: directional lightgrid, w: lighting debug view
+        vec4_t          lighting_params; // x: envmap enabled, y: reflection debug, z: sky SH enabled, w: lighting debug view
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
@@ -597,6 +597,12 @@ extern cvar_t r_reflection_probes;
 extern cvar_t r_reflection_probe_debug;
 extern cvar_t r_lightgrid_directional;
 extern cvar_t r_lighting_debug;
+extern cvar_t r_envlight;
+extern cvar_t r_envlight_entity_intensity;
+extern cvar_t r_envlight_world_fill;
+extern cvar_t r_envlight_sky_sh;
+extern cvar_t r_envlight_envmap;
+extern cvar_t r_envlight_indoor_dampen;
 
 #define WORLDSHADER_SOLID		0
 #define WORLDSHADER_ALPHATEST	1

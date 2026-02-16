@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "client/cl_postfx.h"
 #include "renderer/r_postfx.h"
 #include "renderer/r_decals.h"
+#include "renderer/r_envlight.h"
 #include "opengl/gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -606,6 +607,7 @@ cvar_t	s_ao_halfres = { "s_ao_halfres", "1", CVAR_ARCHIVE };
 cvar_t	s_ao_debug = { "s_ao_debug", "0", CVAR_NONE }; /* 0=off,1=ao_only,2=inputs,3=depth_lin,4=normals,5=edges,6=history */
 cvar_t	s_ao_temporal = { "s_ao_temporal", "0", CVAR_ARCHIVE };
 
+/* Legacy compatibility aliases; real envlight controls live in renderer/r_envlight.c. */
 cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
 cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
 cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
@@ -3959,13 +3961,7 @@ void R_SetupView (void)
         r_framedata.lightmap_params[1] = r_tonemap.value > 0.f ? 1.f : 0.f;
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
-        r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
-        r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
-        r_framedata.lightgrid_params[2] =
-                (r_shadows.value > 0.f && r_shadow_sun.value > 0.f && r_shadow_lightgrid.value > 0.f)
-                ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
-                : 0.f;
-        r_framedata.lightgrid_params[3] = 0.f;
+	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
 	r_framedata.dlight_params[0] = (r_dlight_style.value > 0.f && r_clustered_lighting.value <= 0.f) ? 1.f : 0.f;
 	r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
 	r_framedata.dlight_params[2] = 0.f;
@@ -3978,10 +3974,6 @@ void R_SetupView (void)
         r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
-        r_framedata.lighting_params[0] = r_reflection_probes.value > 0.f ? 1.f : 0.f;
-        r_framedata.lighting_params[1] = CLAMP (0.f, r_reflection_probe_debug.value, 1.f);
-        r_framedata.lighting_params[2] = r_lightgrid_directional.value > 0.f ? 1.f : 0.f;
-        r_framedata.lighting_params[3] = CLAMP (0.f, r_lighting_debug.value, 6.f);
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
