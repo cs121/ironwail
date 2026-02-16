@@ -474,6 +474,18 @@ cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky = { "r_godrays_sky", "0", CVAR_NONE };
 cvar_t	r_godrays_light = { "r_godrays_light", "0", CVAR_NONE };
 cvar_t	r_godrays_world = { "r_godrays_world", "0", CVAR_NONE };
+/* Unified fog controls. Legacy r_atmos_* / r_fogvol_* cvars are still honored via compat mapping. */
+cvar_t	r_fog_enable = { "r_fog_enable", "1", CVAR_ARCHIVE };
+cvar_t	r_fog_backend = { "r_fog_backend", "1", CVAR_ARCHIVE }; /* 0=legacy, 1=froxel, 2=fogvol-fallback */
+cvar_t	r_fog_density = { "r_fog_density", "1.0", CVAR_ARCHIVE };
+cvar_t	r_fog_quality = { "r_fog_quality", "1", CVAR_ARCHIVE };
+cvar_t	r_fog_temporal = { "r_fog_temporal", "1", CVAR_ARCHIVE };
+cvar_t	r_fog_history_weight = { "r_fog_history_weight", "0.9", CVAR_ARCHIVE };
+cvar_t	r_fog_jitter = { "r_fog_jitter", "1", CVAR_ARCHIVE };
+cvar_t	r_fog_anisotropy = { "r_fog_anisotropy", "0.2", CVAR_ARCHIVE };
+cvar_t	r_fog_debug = { "r_fog_debug", "0", CVAR_NONE };
+cvar_t	r_fog_validate = { "r_fog_validate", "0", CVAR_NONE };
+
 cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_atmos_log = { "r_atmos_log", "0", CVAR_NONE };
@@ -1715,6 +1727,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 static qboolean r_godrays_deprecated_warned = false;
 static qboolean r_godrays_rt_logged = false;
+static qboolean r_fog_deprecated_warned = false;
+
 
 void R_ResetGodraysStabilization (void)
 {
@@ -1732,6 +1746,20 @@ static void R_GodraysHandleDeprecatedCvars (void)
 		if (r_godrays.value <= 0.f)
 			Cvar_SetValueQuick (&r_godrays, 1.f);
 	}
+}
+
+static void R_FogHandleDeprecatedCvars (void)
+{
+	if (r_fog_deprecated_warned)
+		return;
+	if (r_atmos_froxel.value > 0.f || r_atmos_mode.value != 1.f || r_atmos_historyweight.value != 0.9f || r_atmos_debug.value > 0.f || r_fogvol.value > 0.f)
+	{
+		Con_Printf ("Legacy fog cvars (r_atmos_* / r_fogvol_*) are deprecated; use r_fog_* controls.\n");
+		r_fog_deprecated_warned = true;
+	}
+
+	if (r_fog_enable.value <= 0.f && (r_atmos_froxel.value > 0.f || r_fogvol.value > 0.f))
+		Cvar_SetValueQuick (&r_fog_enable, 1.f);
 }
 
 static int R_GodraysQualityScaleDivisor (void)
@@ -2169,7 +2197,7 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R16F);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
-	GL_Uniform4fFunc (1, settings->density, 0.9f, 1.0f, 0.02f);
+	GL_Uniform4fFunc (1, settings->density, CLAMP (0.f, r_fog_anisotropy.value * 0.5f + 0.8f, 1.f), 1.0f, 0.02f);
 	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], 1.0f);
 	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
@@ -2193,7 +2221,7 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R16F);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
-	GL_Uniform4fFunc (1, q_max (0.f, settings->anisotropy), 1.0f, settings->shadow_enable ? 1.f : 0.f, 0.f);
+	GL_Uniform4fFunc (1, settings->anisotropy, 1.0f, settings->shadow_enable ? 1.f : 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -2205,6 +2233,8 @@ static void Atmosphere_Froxel_TemporalResolve (const atmosphere_settings_t *sett
 	int src = framebufs.atmos_froxel.history_index;
 	int dst = 1 - src;
 	if (!settings || !glprogs.atmos_froxel_temporal)
+		return;
+	if (r_fog_temporal.value <= 0.f)
 		return;
 	gx = (framebufs.atmos_froxel.width + 3) / 4;
 	gy = (framebufs.atmos_froxel.height + 3) / 4;
@@ -2226,38 +2256,41 @@ static void Atmosphere_Froxel_TemporalResolve (const atmosphere_settings_t *sett
 static atmosphere_settings_t Atmosphere_ReadSettings (void)
 {
 	atmosphere_settings_t settings;
-	float fog_density = fabsf (Fog_GetDensity ());
-	qboolean froxel_requested;
-	qboolean fogvol_requested;
+	float fog_density = fabsf (Fog_GetDensity ()) * q_max (0.f, r_fog_density.value);
 	qboolean shafts_requested;
+	int backend;
+	int quality;
+	qboolean legacy_wants_froxel;
+	qboolean legacy_wants_fogvol;
 
 	memset (&settings, 0, sizeof (settings));
-	settings.mode = (int)Q_rint (CLAMP (0.f, r_atmos_mode.value, 1.f));
-	froxel_requested = (r_atmos_froxel.value > 0.f);
-	fogvol_requested = (r_fogvol.value > 0.f);
+	R_FogHandleDeprecatedCvars ();
+
+	legacy_wants_froxel = (r_atmos_froxel.value > 0.f);
+	legacy_wants_fogvol = (r_fogvol.value > 0.f);
+	backend = CLAMP (0, (int)Q_rint (r_fog_backend.value), 2);
+	if (backend == 0 && (legacy_wants_froxel || legacy_wants_fogvol))
+		backend = legacy_wants_froxel ? 1 : 2;
+	quality = CLAMP (0, (int)Q_rint (r_fog_quality.value), 3);
 	shafts_requested = (r_godrays.value > 0.f && R_GodraysReady ());
 
-	/*
-	 * r_atmos_mode keeps a compatibility path for users that only want legacy
-	 * radial shafts/fog-volume behavior. Mode 1 enables the unified froxel path.
-	 */
-	settings.enabled_fog = (fog_density > 0.f);
+	settings.mode = backend;
+	settings.enabled_fog = (r_fog_enable.value > 0.f && fog_density > 0.f);
 	settings.enabled_shafts = shafts_requested;
-	settings.enabled_volumetrics = (settings.mode > 0)
-		? (froxel_requested || fogvol_requested)
-		: fogvol_requested;
-	if (settings.mode <= 0)
-		froxel_requested = false;
+	settings.enabled_volumetrics = settings.enabled_fog && (backend == 1 || backend == 2);
 	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
 	settings.density = fog_density;
-	settings.anisotropy = 0.2f;
-	settings.steps = 32.f;
-	settings.history_weight = CLAMP (0.f, r_atmos_historyweight.value > 0.f ? r_atmos_historyweight.value : 0.5f, 1.f);
-	if (froxel_requested)
+	settings.anisotropy = CLAMP (-0.9f, r_fog_anisotropy.value, 0.9f);
+	settings.steps = (float)(16 + quality * 16);
+	settings.history_weight = CLAMP (0.f, r_fog_history_weight.value, 1.f);
+	if (r_atmos_historyweight.value != 0.9f)
+		settings.history_weight = CLAMP (0.f, r_atmos_historyweight.value, 1.f);
+	settings.debug_mode = CLAMP (0.f, q_max (r_fog_debug.value, r_atmos_debug.value), 6.f);
+	if (backend == 1)
 		settings.enabled_shafts = false;
-	settings.debug_mode = CLAMP (0.f, r_atmos_debug.value, 6.f);
 	return settings;
 }
+
 
 static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage)
 {
@@ -2279,46 +2312,52 @@ static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, con
 	if (r_atmosphere.froxel_enabled)
 		Con_Printf ("atmos[froxel] dims=%dx%dx%d formats=scatter:RGBA16F trans:R16F\n", framebufs.atmos_froxel.width, framebufs.atmos_froxel.height, framebufs.atmos_froxel.depth);
 }
-static void R_Atmosphere_Render (qboolean after_scene)
+static void R_Fog_BeginFrame (void)
 {
-	if (!after_scene)
+	r_atmosphere.settings = Atmosphere_ReadSettings ();
+	r_atmosphere.settings_valid = true;
+	r_atmosphere.godrays_texture = 0;
+	r_atmosphere.godrays_mask = 0;
+	r_atmosphere.godrays_ready = false;
+	r_atmosphere.fog_enabled_for_scene = false;
+	r_atmosphere.froxel_enabled = (r_atmosphere.settings.enabled_volumetrics && r_atmosphere.settings.mode == 1);
+
+	if (r_atmosphere.settings.enabled_fog)
 	{
-		r_atmosphere.settings = Atmosphere_ReadSettings ();
-		r_atmosphere.settings_valid = true;
-		r_atmosphere.godrays_texture = 0;
-		r_atmosphere.godrays_mask = 0;
-		r_atmosphere.godrays_ready = false;
-		r_atmosphere.fog_enabled_for_scene = false;
-		r_atmosphere.froxel_enabled = (r_atmosphere.settings.enabled_volumetrics && r_atmos_froxel.value > 0.f);
-
-		if (r_atmosphere.settings.enabled_fog)
-		{
-			Fog_EnableGFog ();
-			r_atmosphere.fog_enabled_for_scene = true;
-		}
-		else
-		{
-			Fog_DisableGFog ();
-		}
-		R_Atmosphere_LogSettings (&r_atmosphere.settings, "begin");
-		return;
+		Fog_EnableGFog ();
+		r_atmosphere.fog_enabled_for_scene = true;
 	}
+	else
+	{
+		Fog_DisableGFog ();
+	}
+	R_Atmosphere_LogSettings (&r_atmosphere.settings, "begin");
+}
 
+static void R_Fog_Render (void)
+{
 	if (!r_atmosphere.settings_valid)
 		r_atmosphere.settings = Atmosphere_ReadSettings ();
 
 	if (r_atmosphere.settings.enabled_volumetrics)
 	{
-		if (r_atmos_froxel.value > 0.f)
+		if (r_atmosphere.settings.mode == 1)
 		{
 			vec2_t jitter;
 			Atmosphere_Froxel_InitResources ();
-			jitter[0] = Atmosphere_Halton (r_framecount & 1023, 2) - 0.5f;
-			jitter[1] = Atmosphere_Halton (r_framecount & 1023, 3) - 0.5f;
+			if (r_fog_jitter.value > 0.f)
+			{
+				jitter[0] = Atmosphere_Halton (r_framecount & 1023, 2) - 0.5f;
+				jitter[1] = Atmosphere_Halton (r_framecount & 1023, 3) - 0.5f;
+			}
+			else
+			{
+				jitter[0] = 0.f;
+				jitter[1] = 0.f;
+			}
 			Atmosphere_Froxel_BuildVolume (&r_atmosphere.settings, jitter);
 			Atmosphere_Froxel_LightIntegrate (&r_atmosphere.settings);
 			Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
-			/* Froxel path owns shafts via anisotropic phase; avoid duplicate radial blur path. */
 			r_atmosphere.settings.enabled_shafts = false;
 		}
 		else
@@ -2327,17 +2366,34 @@ static void R_Atmosphere_Render (qboolean after_scene)
 			R_FogVol_Render ();
 		}
 	}
+}
 
+static void R_Fog_Composite (void)
+{
 	if (r_godrays.value > 0.f || r_godrays_debug.value > 0.f)
 	{
 		r_atmosphere.godrays_texture = GL_GenerateGodraysTexture (&r_atmosphere.godrays_mask);
 		r_atmosphere.godrays_ready = (r_atmosphere.godrays_texture != 0 || r_godrays_debug.value > 0.f);
 	}
+}
 
+static void R_Fog_EndFrame (void)
+{
 	if (r_atmosphere.fog_enabled_for_scene)
 		Fog_DisableGFog ();
-
 	R_Atmosphere_LogSettings (&r_atmosphere.settings, "final");
+}
+
+static void R_Atmosphere_Render (qboolean after_scene)
+{
+	if (!after_scene)
+	{
+		R_Fog_BeginFrame ();
+		return;
+	}
+	R_Fog_Render ();
+	R_Fog_Composite ();
+	R_Fog_EndFrame ();
 }
 
 void GL_PostProcess (void)
