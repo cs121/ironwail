@@ -1013,6 +1013,7 @@ void GL_CreateFrameBuffers (void)
 		framebufs.atmos_froxel.height = q_max (1, (vid.height + downsample - 1) / downsample);
 		framebufs.atmos_froxel.depth = zslices;
 		framebufs.atmos_froxel.history_index = 0;
+		r_prev_frame_valid = false;
 		glGenTextures (1, &framebufs.atmos_froxel.scatter_tex);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_tex);
 		GL_ObjectLabelFunc (GL_TEXTURE, framebufs.atmos_froxel.scatter_tex, -1, "atmos froxel scatter");
@@ -2969,7 +2970,8 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
-	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_3D, framebufs.atmos_froxel.scatter_resolved_tex);
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_3D,
+		(r_fog_temporal.value > 0.f) ? framebufs.atmos_froxel.scatter_resolved_tex : framebufs.atmos_froxel.scatter_tex);
 	GL_BindNative (GL_TEXTURE11, GL_TEXTURE_3D, framebufs.atmos_froxel.transmittance_tex);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
