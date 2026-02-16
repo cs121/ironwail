@@ -320,6 +320,30 @@ static union {
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+static int							shadow_brush_entities_input;
+static int							shadow_brush_entities_instanced;
+static int							shadow_brush_surfaces_considered;
+static int							shadow_brush_surfaces_submitted;
+
+void R_Shadow_ResetBrushAuditCounters (void)
+{
+	shadow_brush_entities_input = 0;
+	shadow_brush_entities_instanced = 0;
+	shadow_brush_surfaces_considered = 0;
+	shadow_brush_surfaces_submitted = 0;
+}
+
+void R_Shadow_GetBrushAuditCounters (int *out_entities_input, int *out_entities_instanced, int *out_surfaces_considered, int *out_surfaces_submitted)
+{
+	if (out_entities_input)
+		*out_entities_input = shadow_brush_entities_input;
+	if (out_entities_instanced)
+		*out_entities_instanced = shadow_brush_entities_instanced;
+	if (out_surfaces_considered)
+		*out_surfaces_considered = shadow_brush_surfaces_considered;
+	if (out_surfaces_submitted)
+		*out_surfaces_submitted = shadow_brush_surfaces_submitted;
+}
 
 static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolean use_offset,
 	float *factor, float *units)
@@ -1193,6 +1217,9 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         if (!count)
                 return;
 
+	if (pass == BP_SHADOW)
+		shadow_brush_entities_input += count;
+
         if (count > countof(bmodel_instances))
         {
                 Con_DWarning ("bmodel instance overflow: %d > %d\n", count, (int)countof(bmodel_instances));
@@ -1261,6 +1288,9 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 
         if (!totalinst)
                 return;
+
+	if (pass == BP_SHADOW)
+		shadow_brush_entities_instanced += totalinst;
 
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
@@ -1337,6 +1367,8 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		{
 			int texnum = -1;
 			texture_t *t = R_GetUsedTexture (model, j, &texnum);
+			if (pass == BP_SHADOW)
+				shadow_brush_surfaces_considered++;
 			unsigned extra_flags = 0u;
 			qboolean force_fullbright = false;
 			unsigned mat_flags = 0u;
@@ -1379,6 +1411,8 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
 					pass != BP_SHOWTRIS ? R_TextureAnimation (t, frame) : 0,
 					zfix, polygon_offset_factor, polygon_offset_units, -1, extra_flags, force_fullbright);
+				if (pass == BP_SHADOW)
+					shadow_brush_surfaces_submitted++;
 			}
 		}
 		

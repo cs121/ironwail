@@ -533,6 +533,28 @@ static void R_Shadow_LogGLStage (const char *stage)
 		R_Shadow_LogWrite ("GL %s error=GL_NO_ERROR\n", stage);
 }
 
+static void R_Shadow_LogMainViewCullContext (const char *tag)
+{
+	int i;
+
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+
+	R_Shadow_LogWrite ("%s world_bounds mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f) vieworg=(%.3f %.3f %.3f) clipctl=%d\n",
+		tag,
+		cl.worldmodel ? cl.worldmodel->mins[0] : 0.f, cl.worldmodel ? cl.worldmodel->mins[1] : 0.f, cl.worldmodel ? cl.worldmodel->mins[2] : 0.f,
+		cl.worldmodel ? cl.worldmodel->maxs[0] : 0.f, cl.worldmodel ? cl.worldmodel->maxs[1] : 0.f, cl.worldmodel ? cl.worldmodel->maxs[2] : 0.f,
+		r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2], gl_clipcontrol_able ? 1 : 0);
+
+	for (i = 0; i < 4; ++i)
+	{
+		R_Shadow_LogWrite ("%s frustum[%d] n=(%.6f %.6f %.6f) d=%.6f\n",
+			tag, i,
+			frustum[i].normal[0], frustum[i].normal[1], frustum[i].normal[2], frustum[i].dist);
+	}
+}
+
 void R_Shadow_Log_BeginFrame (void)
 {
 	qboolean enabled;
@@ -926,7 +948,10 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	memcpy (out_viewproj, ortho, sizeof (ortho));
 	MatrixMultiply (out_viewproj, view);
 	if (shdlog.active)
+	{
+		R_Shadow_LogWrite ("SUNPASS proj_sign ortho_m10=%.6f ortho_m14=%.6f clipctl=%d\n", ortho[10], ortho[14], gl_clipcontrol_able ? 1 : 0);
 		R_Shadow_LogMatrixDump ("SUNPASS out_viewproj", out_viewproj);
+	}
 }
 
 static void R_Shadow_PerspectiveMatrix (float matrix[16], float fovx, float fovy, float n, float f)
@@ -1179,6 +1204,7 @@ void R_Shadow_SunPass (void)
 	vec4_t sun_dir;
 	double t0, t1;
 	int draws0, tris0;
+	int shadow_drawcalls = 0;
 	shadow_gl_state_t saved_state;
 
 	R_Shadow_Log_BeginFrame ();
@@ -1206,6 +1232,8 @@ void R_Shadow_SunPass (void)
 
 	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
 	r_framedata.shadow_debug[0] = 1.f;
+	R_Shadow_ResetBrushAuditCounters ();
+	R_Shadow_ResetAliasAuditCounters ();
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = sun_dir[3];
 	R_UploadFrameData ();
@@ -1221,6 +1249,9 @@ void R_Shadow_SunPass (void)
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
 	GL_DepthRange (ZRANGE_FULL);
+	R_Shadow_LogMainViewCullContext ("SUNPASS");
+	R_Shadow_LogWrite ("SUNPASS depthcfg clearDepth_expected=%.1f depthFunc_expected=0x%X depth_range=FULL clipctl=%d\n",
+		gl_clipcontrol_able ? 0.f : 1.f, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL, gl_clipcontrol_able ? 1 : 0);
 	if (!shadow_sun_validated_once || r_shadow_validate.value > 1.f)
 	{
 		R_Shadow_ValidateDepthResources ("sun", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size, GL_NONE);
@@ -1235,16 +1266,29 @@ void R_Shadow_SunPass (void)
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+		R_Shadow_LogWrite ("SUNPASS vis brush_entities=%d\n", count);
 		R_DrawBrushModels_Shadow (ents, count);
 	}
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
+		R_Shadow_LogWrite ("SUNPASS vis alias_entities=%d\n", count);
 		R_DrawAliasModels_Shadow (ents, count);
 	}
 	t1 = Sys_DoubleTime ();
+	{
+		int brush_in = 0, brush_inst = 0, surf_considered = 0, surf_submitted = 0;
+		int alias_in = 0, alias_submitted = 0;
+		int legacy_draws = (rs_brushpasses + rs_aliaspasses) - draws0;
+		int legacy_tris = (rs_brushpasses + rs_aliaspasses) - tris0;
+		R_Shadow_GetBrushAuditCounters (&brush_in, &brush_inst, &surf_considered, &surf_submitted);
+		R_Shadow_GetAliasAuditCounters (&alias_in, &alias_submitted);
+		shadow_drawcalls = surf_submitted + alias_submitted;
+		R_Shadow_LogWrite ("SUNPASS audit brush_entities_in=%d brush_entities_after_cull=%d brush_surfaces=%d brush_surfaces_after_filters=%d alias_entities_in=%d alias_entities_after_cull=%d drawcalls_est=%d legacy_draws=%d legacy_tris=%d\n",
+			brush_in, brush_inst, surf_considered, surf_submitted, alias_in, alias_submitted, shadow_drawcalls, legacy_draws, legacy_tris);
+	}
 	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
-		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
+		shadow_drawcalls, shadow_drawcalls, (t1 - t0) * 1000.0);
 	R_Shadow_RestoreGLState (&saved_state);
 
 	GL_EndGroup ();

@@ -41,6 +41,23 @@ extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_twosided_mdl;
 
+static int shadow_alias_entities_input;
+static int shadow_alias_entities_submitted;
+
+void R_Shadow_ResetAliasAuditCounters (void)
+{
+	shadow_alias_entities_input = 0;
+	shadow_alias_entities_submitted = 0;
+}
+
+void R_Shadow_GetAliasAuditCounters (int *out_entities_input, int *out_entities_submitted)
+{
+	if (out_entities_input)
+		*out_entities_input = shadow_alias_entities_input;
+	if (out_entities_submitted)
+		*out_entities_submitted = shadow_alias_entities_submitted;
+}
+
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
 
@@ -1018,6 +1035,7 @@ R_DrawAliasModel_Shadow_Real
 */
 static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 {
+	shadow_alias_entities_input++;
 	aliashdr_t	*paliashdr;
 	lerpdata_t	lerpdata;
 	float		model_matrix[16];
@@ -1059,6 +1077,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 		ibuf.ent = e;
 
 	instance = &ibuf.inst[ibuf.count++];
+	shadow_alias_entities_submitted++;
 	instance->flags = ALIAS_INSTANCE_FLAG_NONE;
 
 	MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
