@@ -1,3 +1,6 @@
+#ifndef DEPTH_COMMON_GLSL
+#define DEPTH_COMMON_GLSL
+
 // Shared depth helpers for both normal-Z and reversed-Z paths.
 //
 // Canonical depth convention used here:
@@ -49,3 +52,5 @@ float ShadowReferenceFromProjZ(float projZ)
         return clamp(projZ * 0.5 + 0.5, 0.0, 1.0);
 #endif
 }
+
+#endif
