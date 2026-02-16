@@ -490,6 +490,7 @@ cvar_t	r_shadow_log_gl = { "r_shadow_log_gl", "0", CVAR_NONE };
 cvar_t	r_shadow_log_dump = { "r_shadow_log_dump", "0", CVAR_NONE };
 cvar_t	r_shadow_log_file = { "r_shadow_log_file", "0", CVAR_NONE };
 cvar_t	r_shadow_validate = { "r_shadow_validate", "0", CVAR_NONE };
+cvar_t	r_shadow_coord_debug = { "r_shadow_coord_debug", "0", CVAR_NONE };
 cvar_t	r_gl_verify_program = { "r_gl_verify_program", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
@@ -3977,7 +3978,7 @@ void R_UploadFrameData (void)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, buf, (GLintptr)ofs, size);
 
 	GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
 }
 
 /*
@@ -5203,7 +5204,7 @@ static void R_DrawDLightPass (void)
                 GLuint buf;
                 GLbyte *ofs;
                 GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-                GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+                GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
 	{
@@ -5236,7 +5237,7 @@ static void R_DrawDLightPass (void)
                 GLuint buf;
                 GLbyte *ofs;
                 GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-                GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+                GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
 	if (use_buffer)
