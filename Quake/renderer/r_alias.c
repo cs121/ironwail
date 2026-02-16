@@ -1066,7 +1066,10 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	VectorClear (instance->dlightcolor);
 	VectorClear (instance->ambientcolor);
 	instance->alpha = entalpha;
-	Vector4Set (instance->envmap_params, 0.f, 0.f, 0.f, 0.f);
+	instance->envmap_params[0] = 0.f;
+	instance->envmap_params[1] = 0.f;
+	instance->envmap_params[2] = 0.f;
+	instance->envmap_params[3] = 0.f;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;

@@ -183,6 +183,9 @@ static const float r_identity_mat4[16] = {
 		0.f, 0.f, 0.f, 1.f
 };
 
+extern cvar_t r_state_debug;
+extern cvar_t r_state_debug_filter;
+
 static void GL_LogErrorIfDeveloper (const char *label)
 {
 	GLenum err = glGetError ();
