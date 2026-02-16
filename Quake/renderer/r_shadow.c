@@ -106,11 +106,15 @@ static void R_Shadow_DumpActiveUniforms (GLuint program)
 	GLint uniform_count = 0;
 	GLint max_name_len = 0;
 	int i;
+	char *name;
 
 	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORMS, &uniform_count);
 	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_len);
 	if (max_name_len < 1)
 		max_name_len = 1;
+	name = (char *)malloc ((size_t)max_name_len);
+	if (!name)
+		return;
 
 	R_Shadow_LogWrite ("UNIFORMS program=%u count=%d\n", (unsigned)program, (int)uniform_count);
 	for (i = 0; i < uniform_count; ++i)
@@ -118,12 +122,10 @@ static void R_Shadow_DumpActiveUniforms (GLuint program)
 		GLsizei length = 0;
 		GLint size = 0;
 		GLenum type = 0;
-		char *name = (char *)Hunk_TempAlloc ((size_t)max_name_len);
-		if (!name)
-			continue;
 		GL_GetActiveUniformFunc (program, (GLuint)i, (GLsizei)max_name_len, &length, &size, &type, name);
 		R_Shadow_LogWrite ("UNIFORM program=%u index=%d name=%s type=0x%X size=%d\n", (unsigned)program, i, name, (unsigned)type, (int)size);
 	}
+	free (name);
 }
 
 static void R_Shadow_DumpActiveUniformBlocks (GLuint program)
@@ -131,6 +133,7 @@ static void R_Shadow_DumpActiveUniformBlocks (GLuint program)
 	GLint block_count = 0;
 	GLint max_name_len = 0;
 	int i;
+	char *name;
 
 	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
 	if (block_count <= 0)
@@ -148,17 +151,18 @@ static void R_Shadow_DumpActiveUniformBlocks (GLuint program)
 	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &max_name_len);
 	if (max_name_len < 1)
 		max_name_len = 1;
+	name = (char *)malloc ((size_t)max_name_len);
+	if (!name)
+		return;
 
 	R_Shadow_LogWrite ("UNIFORM_BLOCKS program=%u count=%d\n", (unsigned)program, (int)block_count);
 	for (i = 0; i < block_count; ++i)
 	{
 		GLsizei length = 0;
-		char *name = (char *)Hunk_TempAlloc ((size_t)max_name_len);
-		if (!name)
-			continue;
 		GL_GetActiveUniformBlockNameFunc (program, (GLuint)i, (GLsizei)max_name_len, &length, name);
 		R_Shadow_LogWrite ("UNIFORM_BLOCK program=%u index=%d name=%s\n", (unsigned)program, i, name);
 	}
+	free (name);
 }
 
 typedef struct shadow_gl_state_s {
