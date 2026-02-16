@@ -480,13 +480,13 @@ void R_SetupAliasLighting (entity_t     *e)
 
 	{
 		vec3_t pre_total;
-		vec3_t post_total;
+		vec3_t linear_total;
 		VectorAdd (ambientcolor, dlightcolor, pre_total);
 		for (i = 0; i < 3; i++)
 		{
 			float L = pre_total[i] * (1.0f / 256.0f);
 			L = fminf(L, 1.0f);
-			post_total[i] = L;
+			linear_total[i] = L;
 		}
 
 		for (i = 0; i < 3; i++)
@@ -494,9 +494,9 @@ void R_SetupAliasLighting (entity_t     *e)
 			const float total = pre_total[i];
 			const float ambient_ratio = total > 0.0f ? ambientcolor[i] / total : 0.0f;
 			const float dlight_ratio = total > 0.0f ? dlightcolor[i] / total : 0.0f;
-			ambientcolor[i] = post_total[i] * ambient_ratio;
-			dlightcolor[i] = post_total[i] * dlight_ratio;
-			lightcolor[i] = post_total[i];
+			ambientcolor[i] = linear_total[i] * ambient_ratio;
+			dlightcolor[i] = linear_total[i] * dlight_ratio;
+			lightcolor[i] = linear_total[i];
 		}
 	}
 

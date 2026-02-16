@@ -120,6 +120,8 @@ layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
 // Per-instance lighting inputs are linear RGB intensities.
+// Do not apply per-material gamma here; final transfer is handled globally
+// by postprocess / framebuffer-sRGB selection.
 layout(location=7) in vec3 in_static_light;
 layout(location=8) in vec3 in_dyn_light;
 layout(location=9) in vec3 in_amb_light;
