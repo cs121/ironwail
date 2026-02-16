@@ -38,7 +38,10 @@ static int shader_cache_count;
 
 glprogs_t glprogs;
 static GLuint gl_programs[128];
-static const char *gl_program_names[128];
+static char *gl_program_names[128];
+static char *gl_program_defines[128];
+static char *gl_program_vert_paths[128];
+static char *gl_program_frag_paths[128];
 static GLuint gl_current_program;
 static int gl_num_programs;
 
@@ -56,6 +59,37 @@ static const char *GL_LookupProgramName (GLuint program)
 	}
 
 	return "unknown";
+}
+static const char *GL_LookupProgramValue (GLuint program, char *const *table, const char *fallback)
+{
+	int i;
+
+	if (!program)
+		return fallback;
+
+	for (i = 0; i < gl_num_programs; i++)
+	{
+		if (gl_programs[i] == program)
+			return table[i] ? table[i] : fallback;
+	}
+
+	return fallback;
+}
+
+
+static char *GL_CopyString (const char *src)
+{
+	size_t len;
+	char *out;
+
+	if (!src)
+		return NULL;
+	len = strlen (src) + 1;
+	out = (char *) malloc (len);
+	if (!out)
+		Sys_Error ("GL_CopyString: out of memory");
+	memcpy (out, src, len);
+	return out;
 }
 
 /*
@@ -190,7 +224,7 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 GL_CreateProgramFromShaders
 =============
 */
-static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders, const char *name)
+static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders, const char *name, const char *defines, const char *vert_path, const char *frag_path)
 {
 	GLuint program;
 	GLint status;
@@ -219,10 +253,18 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 	if (gl_num_programs == countof(gl_programs))
 		Sys_Error ("gl_programs overflow");
 	gl_programs[gl_num_programs] = program;
-	gl_program_names[gl_num_programs] = name;
+	gl_program_names[gl_num_programs] = GL_CopyString (name ? name : "unnamed");
+	gl_program_defines[gl_num_programs] = GL_CopyString ((defines && defines[0]) ? defines : "");
+	gl_program_vert_paths[gl_num_programs] = GL_CopyString (vert_path ? vert_path : "none");
+	gl_program_frag_paths[gl_num_programs] = GL_CopyString (frag_path ? frag_path : "none");
 	gl_num_programs++;
 
-	Con_DPrintf ("SHDLOG: PROGRAM id=%u name=%s\n", (unsigned)program, name ? name : "unnamed");
+	Con_DPrintf ("SHDLOG: PROGRAM id=%u name=%s vert=%s frag=%s defines=%s\n",
+		(unsigned)program,
+		name ? name : "unnamed",
+		vert_path ? vert_path : "none",
+		frag_path ? frag_path : "none",
+		(defines && defines[0]) ? defines : "<none>");
 
 	return program;
 }
@@ -445,7 +487,7 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
                 }
         }
 
-        program = GL_CreateProgramFromShaders (shaders, realcount, name);
+        program = GL_CreateProgramFromShaders (shaders, realcount, name, macros, paths[0], (count > 1) ? paths[1] : NULL);
 
         return program;
 }
@@ -526,6 +568,21 @@ GLuint GL_GetCurrentProgramCached (void)
 const char *GL_GetProgramDebugName (GLuint program)
 {
 	return GL_LookupProgramName (program);
+}
+
+const char *GL_GetProgramDebugDefines (GLuint program)
+{
+	return GL_LookupProgramValue (program, gl_program_defines, "");
+}
+
+const char *GL_GetProgramVertexShaderPath (GLuint program)
+{
+	return GL_LookupProgramValue (program, gl_program_vert_paths, "none");
+}
+
+const char *GL_GetProgramFragmentShaderPath (GLuint program)
+{
+	return GL_LookupProgramValue (program, gl_program_frag_paths, "none");
 }
 
 /*
@@ -624,7 +681,14 @@ void GL_DeleteShaders (void)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
                 gl_programs[i] = 0;
+                free (gl_program_names[i]);
                 gl_program_names[i] = NULL;
+                free (gl_program_defines[i]);
+                gl_program_defines[i] = NULL;
+                free (gl_program_vert_paths[i]);
+                gl_program_vert_paths[i] = NULL;
+                free (gl_program_frag_paths[i]);
+                gl_program_frag_paths[i] = NULL;
         }
         gl_num_programs = 0;
 
