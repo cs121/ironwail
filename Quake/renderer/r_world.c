@@ -1298,7 +1298,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else if (pass == BP_SHADOW)
         {
                 state &= ~GLS_MASK_CULL;
-                state |= GLS_BLEND_OPAQUE | GLS_CULL_FRONT;
+                state |= GLS_BLEND_OPAQUE | GLS_CULL_BACK;
         }
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
@@ -1717,6 +1717,17 @@ void R_DrawBrushModels_SkyStencil (entity_t **ents, int count)
 void R_DrawBrushModels_Shadow (entity_t **ents, int count)
 {
 	R_DrawBrushModels_Real (ents, count, BP_SHADOW, false);
+}
+
+qboolean R_DrawWorld_Shadow (void)
+{
+	entity_t *world = &cl_entities[0];
+
+	if (!world->model || !Mod_IsKnownModel (world->model))
+		return false;
+
+	R_DrawBrushModels_Real (&world, 1, BP_SHADOW, false);
+	return true;
 }
 
 /*
