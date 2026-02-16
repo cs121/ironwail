@@ -314,6 +314,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\renderer\r_brush.c" />
     <ClCompile Include="..\..\Quake\renderer\r_decals.c" />
     <ClCompile Include="..\..\Quake\renderer\r_dlight_pool.c" />
+    <ClCompile Include="..\..\Quake\renderer\r_envlight.c" />
     <ClCompile Include="..\..\Quake\renderer\r_shadow.c" />
     <ClCompile Include="..\..\Quake\renderer\r_postfx.c" />
     <ClCompile Include="..\..\Quake\renderer\r_part.c" />
@@ -422,6 +423,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\render.h" />
     <ClInclude Include="..\..\Quake\renderer\r_decals.h" />
     <ClInclude Include="..\..\Quake\renderer\r_dlight_pool.h" />
+    <ClInclude Include="..\..\Quake\renderer\r_envlight.h" />
     <ClInclude Include="..\..\Quake\resource.h" />
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />
