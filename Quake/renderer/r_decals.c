@@ -6,6 +6,7 @@
 
 extern cvar_t r_tonemap;
 extern cvar_t r_bloom;
+extern vec3_t lightcolor;
 
 #define DECAL_MAX_DEFS 256
 #define DECAL_MAX_TEXTURES 8
