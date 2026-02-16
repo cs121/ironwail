@@ -98,6 +98,7 @@ static qboolean shadow_dlight_validated_once;
 static qboolean shadow_warned_sun_dir_sanitize;
 static qboolean shadow_warned_receiver_program_mismatch;
 static qboolean shadow_warned_matrix_sanitize;
+static char shadow_last_empty_sunpass_map[MAX_QPATH];
 
 static void R_Shadow_LogWrite (const char *fmt, ...);
 
@@ -384,6 +385,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	GLint loc_shadow_viewproj = 0;
 	GLint loc_shadow_params = 0;
 	GLint loc_shadow_debug = 0;
+	GLuint frame_ubo_index = GL_INVALID_INDEX;
+	GLint frame_ubo_binding = -1;
+	GLint frame_ubo_data_size = -1;
 	const char *target_name = GL_GetProgramDebugName (target_program);
 	const char *target_defines = GL_GetProgramDebugDefines (target_program);
 	const char *target_vert = GL_GetProgramVertexShaderPath (target_program);
@@ -395,6 +399,12 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	loc_shadow_viewproj = GL_GetUniformLocationFunc (target_program, "ShadowViewProj");
 	loc_shadow_params = GL_GetUniformLocationFunc (target_program, "ShadowParams");
 	loc_shadow_debug = GL_GetUniformLocationFunc (target_program, "ShadowDebug");
+	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, "FrameDataUBO");
+	if (frame_ubo_index != GL_INVALID_INDEX)
+	{
+		glGetActiveUniformBlockiv (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_BINDING, &frame_ubo_binding);
+		glGetActiveUniformBlockiv (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_DATA_SIZE, &frame_ubo_data_size);
+	}
 
 	R_Shadow_Log_BeginFrame ();
 	if (shdlog.active)
@@ -412,7 +422,17 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 			(int)loc_shadow_viewproj,
 			(int)loc_shadow_params,
 			(int)loc_shadow_debug);
-		if (((tag && !q_strcasecmp (tag, "WORLD")) || (tag && !q_strcasecmp (tag, "ALIAS"))) && loc_shadow_viewproj == -1)
+		if (frame_ubo_index != GL_INVALID_INDEX)
+		{
+			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=FrameDataUBO index=%u binding=%d data_size=%d\n",
+				tag ? tag : "SHADOW", (unsigned)frame_ubo_index, (int)frame_ubo_binding, (int)frame_ubo_data_size);
+		}
+		else if (loc_shadow_viewproj == -1 && loc_shadow_params == -1 && loc_shadow_debug == -1)
+		{
+			R_Shadow_LogWrite ("WARN %s has no shadow uniforms and no FrameDataUBO block (likely shadows not compiled in this receiver variant)\n",
+				tag ? tag : "SHADOW");
+		}
+		if (((tag && !q_strcasecmp (tag, "WORLD")) || (tag && !q_strcasecmp (tag, "ALIAS"))) && loc_shadow_viewproj == -1 && frame_ubo_index == GL_INVALID_INDEX)
 		{
 			R_Shadow_DumpActiveUniforms (target_program);
 			R_Shadow_DumpActiveUniformBlocks (target_program);
@@ -1205,6 +1225,9 @@ void R_Shadow_SunPass (void)
 	double t0, t1;
 	int draws0, tris0;
 	int shadow_drawcalls = 0;
+	int brush_count = 0;
+	int alias_count = 0;
+	qboolean drew_world_caster = false;
 	shadow_gl_state_t saved_state;
 
 	R_Shadow_Log_BeginFrame ();
@@ -1264,17 +1287,17 @@ void R_Shadow_SunPass (void)
 	glClear (GL_DEPTH_BUFFER_BIT);
 
 	{
-		int count = 0;
-		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
-		R_Shadow_LogWrite ("SUNPASS vis brush_entities=%d\n", count);
-		R_DrawBrushModels_Shadow (ents, count);
+		entity_t **ents = R_GetVisEntities (mod_brush, false, &brush_count);
+		R_Shadow_LogWrite ("SUNPASS vis brush_entities=%d\n", brush_count);
+		R_DrawBrushModels_Shadow (ents, brush_count);
 	}
 	{
-		int count = 0;
-		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
-		R_Shadow_LogWrite ("SUNPASS vis alias_entities=%d\n", count);
-		R_DrawAliasModels_Shadow (ents, count);
+		entity_t **ents = R_GetVisEntities (mod_alias, false, &alias_count);
+		R_Shadow_LogWrite ("SUNPASS vis alias_entities=%d\n", alias_count);
+		R_DrawAliasModels_Shadow (ents, alias_count);
 	}
+	drew_world_caster = R_DrawWorld_Shadow ();
+	R_Shadow_LogWrite ("SUNPASS world_caster=%s\n", drew_world_caster ? "drawn" : "missing");
 	t1 = Sys_DoubleTime ();
 	{
 		int brush_in = 0, brush_inst = 0, surf_considered = 0, surf_submitted = 0;
@@ -1286,6 +1309,19 @@ void R_Shadow_SunPass (void)
 		shadow_drawcalls = surf_submitted + alias_submitted;
 		R_Shadow_LogWrite ("SUNPASS audit brush_entities_in=%d brush_entities_after_cull=%d brush_surfaces=%d brush_surfaces_after_filters=%d alias_entities_in=%d alias_entities_after_cull=%d drawcalls_est=%d legacy_draws=%d legacy_tris=%d\n",
 			brush_in, brush_inst, surf_considered, surf_submitted, alias_in, alias_submitted, shadow_drawcalls, legacy_draws, legacy_tris);
+		if (shadow_drawcalls <= 0)
+		{
+			if (q_strcasecmp (shadow_last_empty_sunpass_map, cl.mapname))
+			{
+				q_strlcpy (shadow_last_empty_sunpass_map, cl.mapname, sizeof (shadow_last_empty_sunpass_map));
+				Con_Warning ("SUNPASS produced no casters on map '%s' (brush=%d alias=%d world=%s). World caster missing?\n",
+					cl.mapname[0] ? cl.mapname : "<unknown>", brush_count, alias_count, drew_world_caster ? "yes" : "no");
+			}
+		}
+		else
+		{
+			shadow_last_empty_sunpass_map[0] = '\0';
+		}
 	}
 	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
 		shadow_drawcalls, shadow_drawcalls, (t1 - t0) * 1000.0);
@@ -1489,18 +1525,21 @@ void R_Shadow_DlightPass (void)
 		glClear (GL_DEPTH_BUFFER_BIT);
 
 		GL_UseProgram (glprogs.shadow_depth);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS (6));
 
 		{
 			int count = 0;
 			entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+			R_Shadow_LogWrite ("DLIGHTPASS tile=%d vis brush_entities=%d\n", i, count);
 			R_DrawBrushModels_Shadow (ents, count);
 		}
 		{
 			int count = 0;
 			entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
+			R_Shadow_LogWrite ("DLIGHTPASS tile=%d vis alias_entities=%d\n", i, count);
 			R_DrawAliasModels_Shadow (ents, count);
 		}
+		R_Shadow_LogWrite ("DLIGHTPASS tile=%d world_caster=%s\n", i, R_DrawWorld_Shadow () ? "drawn" : "missing");
 	}
 
 	GL_SetScissorEnabled (false);

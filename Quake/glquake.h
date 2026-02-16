@@ -538,6 +538,7 @@ void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
 void R_DrawBrushModels_Shadow (entity_t **ents, int count);
+qboolean R_DrawWorld_Shadow (void);
 void R_Shadow_ResetBrushAuditCounters (void);
 void R_Shadow_GetBrushAuditCounters (int *out_entities_input, int *out_entities_instanced, int *out_surfaces_considered, int *out_surfaces_submitted);
 void R_DrawAliasModels (entity_t **ents, int count);
