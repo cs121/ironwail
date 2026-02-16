@@ -486,7 +486,6 @@ void R_SetupAliasLighting (entity_t     *e)
 		{
 			float L = pre_total[i] * (1.0f / 256.0f);
 			L = fminf(L, 1.0f);
-			L = powf(L, 1.0f / 2.2f);
 			post_total[i] = L;
 		}
 
