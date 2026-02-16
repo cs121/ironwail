@@ -430,6 +430,7 @@ void main()
 
 	float shadow_term = 1.0;
 	bool shadow_enabled = false;
+	vec3 env_fill = vec3(0.0);
 
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
@@ -531,6 +532,14 @@ void main()
 				total_light *= shadow_term;
 			total_light *= ambient_lightgrid;
 		}
+
+		float static_luma = EnvLightLuma(total_light);
+		float ao_hint = clamp(EnvLightLuma(in_lightgrid), 0.0, 1.0);
+		float visibility_hint = ComputeEnvVisibilityHint(shadow_term, shadow_enabled);
+		float indoor_factor = DeriveIndoorFactor(static_luma, ao_hint, visibility_hint);
+		float env_fill_strength = clamp(LightingParams.y, 0.0, 1.0);
+		env_fill = EvaluateWorldEnvFill(total_light, ambient_lightgrid, indoor_factor, env_fill_strength);
+		total_light = clamp(total_light + env_fill, 0.0, 1.0);
 	
 	const float SPECULAR_POWER = 16.0;
 	float specular_quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
@@ -707,6 +716,14 @@ void main()
 	if (lighting_debug == 5)
 	{
 		out_fragcolor = vec4(clamp(total_lightmap, 0.0, 1.0), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (lighting_debug == 8)
+	{
+		out_fragcolor = vec4(clamp(env_fill, 0.0, 1.0), 1.0);
 #if !OIT
 		out_velocity = vec4(0.0);
 #endif

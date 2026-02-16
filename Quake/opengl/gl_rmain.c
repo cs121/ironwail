@@ -610,6 +610,7 @@ cvar_t	s_ao_temporal = { "s_ao_temporal", "0", CVAR_ARCHIVE };
 /* Legacy compatibility aliases; real envlight controls live in renderer/r_envlight.c. */
 cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
 cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
+cvar_t	r_envlight_world_fill = { "r_envlight_world_fill", "0", CVAR_ARCHIVE };
 cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
 cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_NONE };
 

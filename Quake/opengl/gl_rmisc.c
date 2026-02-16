@@ -282,6 +282,7 @@ extern cvar_t s_ao_debug;
 extern cvar_t s_ao_temporal;
 extern cvar_t r_reflection_probes;
 extern cvar_t r_reflection_probe_debug;
+extern cvar_t r_envlight_world_fill;
 extern cvar_t r_lightgrid_directional;
 extern cvar_t r_lighting_debug;
 extern cvar_t r_envlight;
