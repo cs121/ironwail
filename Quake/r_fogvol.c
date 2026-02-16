@@ -60,10 +60,18 @@ cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal = { "r_fogvol_temporal", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_debug_graph = { "r_fogvol_debug_graph", "0", CVAR_NONE };
+cvar_t r_fogvol_hazardlog = { "r_fogvol_hazardlog", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_history_force_clear = { "r_fogvol_history_force_clear", "0", CVAR_NONE };
+cvar_t r_fogvol_history_weight_override = { "r_fogvol_history_weight_override", "-1", CVAR_NONE };
 
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
+static qboolean r_fogvol_history_valid = false;
+static qboolean r_fogvol_hazard_logged_frame = false;
+static int r_fogvol_hazard_logged_frame_id = -1;
 static double r_fogvol_debug_summary_time = 0.0;
 
 typedef struct froxel_grid_s
@@ -459,7 +467,9 @@ static void R_FogVol_LogHazardPass (const char *pass,
 	GLuint draw_tex = 0;
 	GLuint read_tex = 0;
 
-	if (!R_FogVol_TestDebugEnabled ())
+	if (r_fogvol_hazardlog.value <= 0.f)
+		return;
+	if (!R_FogVol_TestDebugEnabled () && r_fogvol_debug_graph.value <= 0.f)
 		return;
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
@@ -510,6 +520,113 @@ static void R_FogVol_AssertNoBoundFeedbackHazard (const char *pass_name)
 #else
 	(void)pass_name;
 #endif
+}
+
+static void R_FogVol_SetHistoryValid (qboolean valid, const char *reason)
+{
+	if (r_fogvol_history_valid == valid)
+		return;
+	r_fogvol_history_valid = valid;
+	if (r_fogvol_debug_graph.value > 0.f)
+	{
+		Con_Printf ("FOGVOL_HISTORY_VALID %d reason=%s\n", valid ? 1 : 0, reason ? reason : "unknown");
+	}
+}
+
+static void R_FogVol_ClearHistoryTexture (GLuint tex, GLuint fbo, int width, int height)
+{
+	if (!tex || !fbo || width <= 0 || height <= 0)
+		return;
+	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fbo);
+	R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY_CLEAR draw=COLOR_ATTACHMENT0");
+	glViewport (0, 0, width, height);
+	glDisable (GL_SCISSOR_TEST);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glClearColor (0.f, 0.f, 0.f, 0.f);
+	glClear (GL_COLOR_BUFFER_BIT);
+}
+
+static GLuint R_FogVol_GetAttachmentTextureByIndex (GLenum target, int attachment_index)
+{
+	GLint object_type = GL_NONE;
+	GLint object_name = 0;
+	if (attachment_index < 0)
+		return 0;
+	GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0 + attachment_index,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
+	if (object_type != GL_TEXTURE)
+		return 0;
+	GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0 + attachment_index,
+		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object_name);
+	return (GLuint)object_name;
+}
+
+static qboolean R_FogVol_LogHazardOncePerFrame (const char *pass, const char *reason)
+{
+	const int frame_id = R_FogVol_TestFrameId ();
+	if (r_fogvol_hazard_logged_frame_id != frame_id)
+	{
+		r_fogvol_hazard_logged_frame_id = frame_id;
+		r_fogvol_hazard_logged_frame = false;
+	}
+	if (r_fogvol_hazard_logged_frame)
+		return false;
+	r_fogvol_hazard_logged_frame = true;
+	Con_Printf ("FOGVOL_HAZARD pass=%s hazard=%s\n", pass, reason);
+	return true;
+}
+
+static qboolean R_FogVol_PassHasFeedbackHazard (const char *pass, GLuint draw_tex, const GLuint *read_tex, int num_read_tex, qboolean log_hazard)
+{
+	GLint draw_fbo = 0, read_fbo = 0, viewport[4] = {0};
+	GLuint attachments[2] = {0, 0};
+	qboolean hazard = false;
+	char reason[128] = "";
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	attachments[0] = R_FogVol_GetAttachmentTextureByIndex (GL_DRAW_FRAMEBUFFER, 0);
+	attachments[1] = R_FogVol_GetAttachmentTextureByIndex (GL_DRAW_FRAMEBUFFER, 1);
+
+	for (int i = 0; i < num_read_tex; ++i)
+	{
+		if (!read_tex[i])
+			continue;
+		if (draw_tex && read_tex[i] == draw_tex)
+		{
+			hazard = true;
+			q_snprintf (reason, sizeof (reason), "read_tex[%d]=%u equals draw_tex=%u", i, read_tex[i], draw_tex);
+			break;
+		}
+		for (int a = 0; a < 2; ++a)
+		{
+			if (attachments[a] && read_tex[i] == attachments[a])
+			{
+				hazard = true;
+				q_snprintf (reason, sizeof (reason), "read_tex[%d]=%u attached to draw_fbo color%d", i, read_tex[i], a);
+				break;
+			}
+		}
+		if (hazard)
+			break;
+	}
+
+	if (r_fogvol_debug_graph.value > 0.f)
+	{
+		Con_Printf ("FOGVOL_GRAPH pass=%s draw_fbo=%d read_fbo=%d viewport=%dx%d draw_tex=%u read_tex0=%u read_tex1=%u att0=%u att1=%u srgb=%d msaa=%d\n",
+			pass, draw_fbo, read_fbo, viewport[2], viewport[3], draw_tex,
+			num_read_tex > 0 ? read_tex[0] : 0, num_read_tex > 1 ? read_tex[1] : 0, attachments[0], attachments[1],
+			glIsEnabled(GL_FRAMEBUFFER_SRGB) ? 1 : 0, glIsEnabled(GL_MULTISAMPLE) ? 1 : 0);
+	}
+
+	if (hazard)
+	{
+		if (log_hazard && r_fogvol_hazardlog.value > 0.f)
+			R_FogVol_LogHazardOncePerFrame (pass, reason);
+		R_FogVol_SetHistoryValid (false, "hazard");
+	}
+
+	return hazard;
 }
 
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
@@ -769,11 +886,25 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
+	Cvar_RegisterVariable (&r_fogvol_temporal);
+	Cvar_RegisterVariable (&r_fogvol_debug_graph);
+	Cvar_RegisterVariable (&r_fogvol_hazardlog);
+	Cvar_RegisterVariable (&r_fogvol_history_force_clear);
+	Cvar_RegisterVariable (&r_fogvol_history_weight_override);
 }
 
 void R_FogVol_Clear (void)
 {
 	r_fogvolume_count = 0;
+	R_FogVol_SetHistoryValid (false, "clear");
+}
+
+void R_FogVol_NotifyFramebuffersRecreated (void)
+{
+	r_fogvol_history_width = 0;
+	r_fogvol_history_height = 0;
+	r_fogvol_history_index = 0;
+	R_FogVol_SetHistoryValid (false, "framebuffers_recreated");
 }
 
 static void R_FogVol_ClearEntities (void)
@@ -1416,9 +1547,9 @@ void R_FogVol_Render (void)
 		goto done;
 	}
 
-	if (has_drawn && glprogs.fogvol_temporal && final_tex)
+	if (has_drawn && r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex)
 	{
-		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
+		int history_valid = (r_fogvol_history_valid && r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
 		int history_src = r_fogvol_history_index;
 		int history_dst = 1 - history_src;
 		int composite_src = history_src;
@@ -1432,6 +1563,22 @@ void R_FogVol_Render (void)
 			composite_src = 0;
 			composite_dst = 1;
 			r_fogvol_history_index = history_src;
+			R_FogVol_ClearHistoryTexture (history_tex[0], history_fbo[0], fog_width, fog_height);
+			R_FogVol_ClearHistoryTexture (history_tex[1], history_fbo[1], fog_width, fog_height);
+			R_FogVol_SetHistoryValid (false, "history_resize_or_init");
+		}
+
+		if (r_fogvol_history_force_clear.value > 0.f)
+		{
+			R_FogVol_ClearHistoryTexture (history_tex[history_src], history_fbo[history_src], fog_width, fog_height);
+			history_valid = 0;
+			R_FogVol_SetHistoryValid (false, "history_force_clear");
+		}
+
+		if (!history_tex[history_src])
+		{
+			history_valid = 0;
+			R_FogVol_SetHistoryValid (false, "history_tex_zero");
 		}
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
@@ -1445,14 +1592,27 @@ void R_FogVol_Render (void)
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
 		glViewport (0, 0, fog_width, fog_height);
+		{
+			GLuint read_texes[2] = { final_tex, history_valid ? history_tex[history_src] : 0 };
+			qboolean hazard = R_FogVol_PassHasFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], read_texes, 2, true);
+			if (hazard)
+				history_valid = 0;
+		}
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], final_tex);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], history_tex[history_src]);
 		R_FogVol_AssertNoBoundFeedbackHazard ("COMPOSITE");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
-		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_tex[history_src]);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_valid ? history_tex[history_src] : 0);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
-		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_tex[history_src], final_tex);
-		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
+		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_valid ? history_tex[history_src] : 0, final_tex);
+		{
+			float history_alpha = r_fogvol_temporal_alpha.value;
+			if (r_fogvol_history_weight_override.value >= 0.f)
+				history_alpha = CLAMP (0.f, r_fogvol_history_weight_override.value, 1.f);
+			if (!history_valid)
+				history_alpha = 0.f;
+			GL_Uniform1fFunc (0, history_alpha);
+		}
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
 		GL_Uniform1iFunc (2, mode);
 		GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_viewproj);
@@ -1478,10 +1638,15 @@ void R_FogVol_Render (void)
 		final_tex = history_tex[history_dst];
 		final_fbo = history_fbo[history_dst];
 		r_fogvol_history_index = history_dst;
+		r_fogvol_history_width = fog_width;
+		r_fogvol_history_height = fog_height;
+		R_FogVol_SetHistoryValid (true, "history_written");
 	}
 
 	if (has_drawn)
 	{
+		if (!(r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex))
+			R_FogVol_SetHistoryValid (false, "temporal_disabled_or_unavailable");
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 		glViewport (glx, gly, glwidth, glheight);
