@@ -2493,7 +2493,7 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	R_Shadow_BindShadowMap (GL_TEXTURE6);
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RG16F);
-	debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0, (int)Q_rint (r_fog_debug_mode.value), 6) : 0;
+	debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0, (int)Q_rint (r_fog_debug_mode.value), 7) : 0;
 	if (debug_mode <= 0)
 	{
 		if (r_fog_debug_density.value > 0.f)
@@ -2578,7 +2578,7 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	}
 	settings.steps = (float)(16 + quality * 16);
 	settings.history_weight = CLAMP (0.f, r_fog_history_weight.value, 1.f);
-	settings.debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 6.f) : 0.f;
+	settings.debug_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 7.f) : 0.f;
 	settings.debug_slice = CLAMP (0.f, r_fog_debug_slice.value, (float)q_max (framebufs.atmos_froxel.depth - 1, 0));
 	settings.noise_scale = q_max (0.0001f, r_fog_noise_scale.value);
 	settings.noise_drift = q_max (0.f, r_fog_noise_drift.value);
@@ -3017,7 +3017,7 @@ void GL_PostProcess (void)
 		q_max (view_zfar, 1.f),
 		0.f);
 	{
-		float dbg_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 6.f) : 0.f;
+		float dbg_mode = (r_fog_debug.value > 0.f) ? CLAMP (0.f, r_fog_debug_mode.value, 7.f) : 0.f;
 		if (dbg_mode <= 0.f)
 		{
 			if (r_fog_debug_density.value > 0.f) dbg_mode = 1.f;

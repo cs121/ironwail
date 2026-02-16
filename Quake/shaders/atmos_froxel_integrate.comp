@@ -201,6 +201,11 @@ void main()
         scatter = vec3(zSlice, 1.0 - zSlice, 0.5) * checker;
         T = 1.0;
     }
+    else if (debugMode == 7)
+    {
+        scatter = vec3(clamp(shadow, 0.0, 1.0));
+        T = 1.0;
+    }
 
     imageStore(InOutScatter, coord, vec4(scatter, sigma_t));
     imageStore(InOutTransmittance, coord, vec4(T, transData.g, 0.0, 0.0));
