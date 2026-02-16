@@ -240,7 +240,6 @@ GLOBJS = \
 	image.o \
 	opengl/gl_texmgr.o \
 	ktx2_write.o \
-	renderer/r_maptex_export.o \
 	opengl/gl_mesh.o \
 	renderer/r_sprite.o \
 	renderer/r_alias.o \

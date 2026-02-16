@@ -28,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "opengl/gl_lightgrid.h"
 #include "opengl/gl_ktx2.h"
 #include "mat_shader.h"
-#include "renderer/r_maptex_export.h"
 #include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
@@ -4066,8 +4065,6 @@ visdone:
 	mod->nummodelsurfaces = mod->numsurfaces;
 	mod->sortkey = (CRC_Block (mod->name, strlen(mod->name)) & MODSORT_MODELMASK) << MODSORT_FRAMEBITS;
 	Mod_FindUsedTextures (mod);
-	if (is_main_model)
-		R_MapTex_ExportFromBsp (mod, mod_base, &header.lumps[LUMP_TEXTURES]);
 
 	// johnfitz -- okay, so that i stop getting confused every time i look at this loop, here's how it works:
 	// we're looping through the submodels starting at 0.  Submodel 0 is the main model, so we don't have to

@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "renderer/r_decals.h"
 #include "opengl/gl_lightgrid.h"
 #include "mat_shader.h"
-#include "renderer/r_maptex_export.h"
 #include "renderer/r_dlight_pool.h"
 #include "renderer/r_postfx.h"
 #include "simd_caps.h"
@@ -624,7 +623,6 @@ void R_Init (void)
         Lightgrid_Init ();
         Mat_Shader_Init ();
         R_Decals_Init ();
-        R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
