@@ -1048,6 +1048,8 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
+	R_FogVol_NotifyFramebuffersRecreated ();
+
         GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
         GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
 }
