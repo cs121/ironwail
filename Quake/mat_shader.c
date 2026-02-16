@@ -139,10 +139,10 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
-cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
+cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_NONE };
 cvar_t r_shader_verbose = { "r_shader_verbose", "0", CVAR_ARCHIVE };
-cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
-cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
+cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_NONE };
+cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_NONE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 static cvar_t r_matshader_fuzz = { "r_matshader_fuzz", "0", CVAR_NONE };
 static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };

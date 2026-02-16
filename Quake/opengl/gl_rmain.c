@@ -381,12 +381,12 @@ cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
 cvar_t	r_state_debug = { "r_state_debug", "0", CVAR_NONE };
 cvar_t	r_state_debug_filter = { "r_state_debug_filter", "", CVAR_NONE };
-cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
+cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_NONE };
 cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_saturation = { "r_color_saturation", "1.05", CVAR_ARCHIVE };
 cvar_t	r_lightmap_colorspace = { "r_lightmap_colorspace", "srgb", CVAR_ARCHIVE };
-cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -566,8 +566,8 @@ cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
 // r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance, 14 fog-damped AO.
-cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
-cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
+cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_NONE };
+cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_NONE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_noise = { "r_ssao_noise", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_noise_mode = { "r_ssao_noise_mode", "1", CVAR_ARCHIVE };
@@ -584,7 +584,7 @@ cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 // Unified AO controls: r_ao_method 0=off, 1=ASSAO-like, 2=GTAO-like.
 cvar_t	r_ao_method = { "r_ao_method", "1", CVAR_ARCHIVE };
 cvar_t	r_ao_quality = { "r_ao_quality", "1", CVAR_ARCHIVE };
-cvar_t	r_ao_debug = { "r_ao_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_ao_debug = { "r_ao_debug", "0", CVAR_NONE };
 cvar_t	r_ao_radius = { "r_ao_radius", "24", CVAR_ARCHIVE };
 cvar_t	r_ao_power = { "r_ao_power", "1.5", CVAR_ARCHIVE };
 cvar_t	r_ao_intensity = { "r_ao_intensity", "1.0", CVAR_ARCHIVE };
@@ -603,17 +603,17 @@ cvar_t	s_ao_strength = { "s_ao_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	s_ao_power = { "s_ao_power", "1.5", CVAR_ARCHIVE };
 cvar_t	s_ao_blur = { "s_ao_blur", "1", CVAR_ARCHIVE };
 cvar_t	s_ao_halfres = { "s_ao_halfres", "1", CVAR_ARCHIVE };
-cvar_t	s_ao_debug = { "s_ao_debug", "0", CVAR_ARCHIVE }; /* 0=off,1=ao_only,2=inputs,3=depth_lin,4=normals,5=edges,6=history */
+cvar_t	s_ao_debug = { "s_ao_debug", "0", CVAR_NONE }; /* 0=off,1=ao_only,2=inputs,3=depth_lin,4=normals,5=edges,6=history */
 cvar_t	s_ao_temporal = { "s_ao_temporal", "0", CVAR_ARCHIVE };
 
 cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
 cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
 cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
-cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_NONE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_quality = { "r_godrays_quality", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_NONE };
 cvar_t	r_sun_debug = { "r_sun_debug", "0", CVAR_NONE };
 /* Unified fog controls. Froxel fog is the only volumetric fog backend. */
 cvar_t	r_fog_enable = { "r_fog_enable", "1", CVAR_ARCHIVE };
@@ -672,7 +672,7 @@ cvar_t	r_filmgrain_luma_weight = { "r_filmgrain_luma_weight", "0.6", CVAR_ARCHIV
 cvar_t	r_filmgrain_blend = { "r_filmgrain_blend", "0.6", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_seed = { "r_filmgrain_seed", "0", CVAR_ARCHIVE };
 cvar_t	r_filmgrain_affect_ui = { "r_filmgrain_affect_ui", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_debug = { "r_filmgrain_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_filmgrain_debug = { "r_filmgrain_debug", "0", CVAR_NONE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
 
