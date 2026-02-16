@@ -202,30 +202,6 @@ static const char *R_Decal_CategoryName (decal_category_t cat)
 	}
 }
 
-static int R_Decal_DefaultPriority (decal_category_t cat)
-{
-	switch (cat)
-	{
-	case DECAL_CAT_BULLET: return 4;
-	case DECAL_CAT_SCORCH: return 3;
-	case DECAL_CAT_DIRT: return 2;
-	case DECAL_CAT_BLOOD: return 1;
-	default: return 2;
-	}
-}
-
-static float R_Decal_DefaultSize (decal_category_t cat)
-{
-	switch (cat)
-	{
-	case DECAL_CAT_BULLET: return 7.f;
-	case DECAL_CAT_SCORCH: return 18.f;
-	case DECAL_CAT_DIRT: return 10.f;
-	case DECAL_CAT_BLOOD: return 9.f;
-	default: return 8.f;
-	}
-}
-
 static decal_category_t R_Decal_ParseCategory (const char *token)
 {
 	if (!q_strcasecmp (token, "bullet")) return DECAL_CAT_BULLET;

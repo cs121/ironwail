@@ -63,15 +63,6 @@ byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 static inline qboolean R_ValidPtr (const void *ptr);
 
-static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
-{
-	return model
-		&& model->type == mod_brush
-		&& model->numtextures > 0
-		&& model->textures
-		&& model->usedtextures;
-}
-
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
 {
 	int used_count;
