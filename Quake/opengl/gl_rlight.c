@@ -47,6 +47,8 @@ extern cvar_t r_clustered_log;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
+extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_sun_fallback;
 
 cvar_t r_debug_itemlight = { "r_debug_itemlight", "0", CVAR_NONE };
 cvar_t r_minlight_models = { "r_minlight_models", "0.02", CVAR_ARCHIVE };
@@ -211,6 +213,94 @@ void R_ParseDlightEntities (void)
 		}
 	}
 	return;
+}
+
+
+static qboolean R_EntityHasSunClassname (const char *classname)
+{
+	return !q_strcasecmp (classname, "light_environment")
+		|| !q_strcasecmp (classname, "sun")
+		|| !q_strcasecmp (classname, "env_sun");
+}
+
+void R_UpdateSunFallback (void)
+{
+	const char *data;
+	qboolean has_worldspawn_sun = false;
+	qboolean has_entity_sun = false;
+	qboolean has_runtime_sun = false;
+	int entity_index = 0;
+
+	VectorSet (r_sun_origin, 0.f, 0.f, 8192.f);
+	VectorSet (r_sun_dir_override, 0.f, 0.f, -1.f);
+	r_sun_dir_override_active = false;
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	data = cl.worldmodel->entities;
+	data = COM_Parse (data);
+	while (data && com_token[0])
+	{
+		qboolean entity_is_sun = false;
+		qboolean is_worldspawn_entity = (entity_index == 0);
+
+		if (com_token[0] != '{')
+			break;
+
+		while (1)
+		{
+			char key[64], value[1024];
+			data = COM_Parse (data);
+			if (!data || !com_token[0])
+				return;
+			if (com_token[0] == '}')
+				break;
+
+			q_strlcpy (key, com_token, sizeof (key));
+			if (key[0] == '_')
+				memmove (key, key + 1, strlen (key));
+
+			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+			if (!data)
+				return;
+			q_strlcpy (value, com_token, sizeof (value));
+
+			if (!strcmp (key, "classname"))
+			{
+				if (entity_index == 0)
+					is_worldspawn_entity = !q_strcasecmp (value, "worldspawn");
+				if (R_EntityHasSunClassname (value))
+					entity_is_sun = true;
+				continue;
+			}
+
+			if (is_worldspawn_entity)
+			{
+				if (!q_strcasecmp (key, "sunlight") || !q_strcasecmp (key, "sun_mangle") || !q_strcasecmp (key, "sunlight_color"))
+					has_worldspawn_sun = true;
+			}
+		}
+
+		if (entity_is_sun)
+			has_entity_sun = true;
+
+		entity_index++;
+		data = COM_Parse (data);
+	}
+
+	has_runtime_sun = (r_shadow_sun_dir.string && *r_shadow_sun_dir.string
+		&& r_shadow_sun_dir.default_string
+		&& q_strcasecmp (r_shadow_sun_dir.string, r_shadow_sun_dir.default_string));
+
+	if (r_sun_fallback.value > 0.f && !has_worldspawn_sun && !has_entity_sun && !has_runtime_sun)
+	{
+		VectorSet (r_sun_dir_override, -0.3f, -0.6f, -0.7f);
+		if (VectorNormalize (r_sun_dir_override) == 0.f)
+			VectorSet (r_sun_dir_override, 0.f, 0.f, -1.f);
+		r_sun_dir_override_active = true;
+		Con_Printf ("Sun: no map sun found, using default fallback (origin 0 0 8192, dir -0.3 -0.6 -0.7)\n");
+	}
 }
 
 int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist);

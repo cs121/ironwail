@@ -77,6 +77,10 @@ typedef struct godrays_stabilization_s
 
 static godrays_stabilization_t r_godrays_stabilization;
 
+vec3_t	r_sun_origin = { 0.f, 0.f, 8192.f };
+vec3_t	r_sun_dir_override = { 0.f, 0.f, -1.f };
+qboolean	r_sun_dir_override_active = false;
+
 typedef struct atmosphere_settings_s
 {
 	int mode;
@@ -369,6 +373,7 @@ cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
+cvar_t	r_sun_fallback = { "r_sun_fallback", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
@@ -1843,7 +1848,10 @@ static qboolean R_ComputeGodraysSunScreenPos (float *out_x, float *out_y, qboole
 		VectorSet (sun_dir, 0.f, 0.f, -1.f);
 	VectorNormalize (sun_dir);
 
-	VectorMA (r_refdef.vieworg, -4096.f, sun_dir, sun_point);
+	if (r_sun_dir_override_active)
+		VectorCopy (r_sun_origin, sun_point);
+	else
+		VectorMA (r_refdef.vieworg, -4096.f, sun_dir, sun_point);
 	clip[0] = r_matviewproj[0] * sun_point[0] + r_matviewproj[4] * sun_point[1] + r_matviewproj[8] * sun_point[2] + r_matviewproj[12];
 	clip[1] = r_matviewproj[1] * sun_point[0] + r_matviewproj[5] * sun_point[1] + r_matviewproj[9] * sun_point[2] + r_matviewproj[13];
 	clip[2] = r_matviewproj[2] * sun_point[0] + r_matviewproj[6] * sun_point[1] + r_matviewproj[10] * sun_point[2] + r_matviewproj[14];

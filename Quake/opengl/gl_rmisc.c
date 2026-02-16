@@ -112,6 +112,7 @@ extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_sun_fallback;
 extern cvar_t r_shadow_twosided_mdl;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_max;
@@ -693,6 +694,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadow_pcf_taps);
         Cvar_RegisterVariable (&r_shadow_debug);
         Cvar_RegisterVariable (&r_shadow_sun_dir);
+        Cvar_RegisterVariable (&r_sun_fallback);
         Cvar_RegisterVariable (&r_shadow_twosided_mdl);
         Cvar_RegisterVariable (&r_shadow_dlights);
         Cvar_RegisterVariable (&r_shadow_dlight_max);
@@ -1153,6 +1155,7 @@ void R_NewMap (void)
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
         R_ParseDlightEntities (); // persistent dlights from BSP entities
+        R_UpdateSunFallback ();
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)
