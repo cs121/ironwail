@@ -15,6 +15,36 @@ float DeriveIndoorFactor(float lightgridLuma, float aoHint, float visibilityHint
 	return clamp(1.0 - openness, 0.0, 1.0);
 }
 
+float EnvIndoorSkyAttenuation(float indoorFactor)
+{
+	return mix(1.0, 0.3, clamp(indoorFactor, 0.0, 1.0));
+}
+
+vec3 EvaluateWorldEnvFill(
+	vec3 staticLight,
+	vec3 ambientLightgrid,
+	float indoorFactor,
+	float fillStrength)
+{
+	if (fillStrength <= 0.0)
+		return vec3(0.0);
+
+	vec3 baseStatic = clamp(staticLight, 0.0, 1.0);
+	float staticLuma = EnvLightLuma(baseStatic);
+	float darkness = 1.0 - staticLuma;
+	float fillWeight = darkness * darkness;
+
+	// Conservative defaults: keep fill subtle and mostly limited to dark regions.
+	const float FILL_ADD_MAX = 0.06;
+	const float FILL_MUL_MAX = 0.10;
+	float indoorAtten = EnvIndoorSkyAttenuation(indoorFactor);
+	vec3 fillColor = clamp(ambientLightgrid, 0.0, 1.0);
+	vec3 additive = fillColor * (FILL_ADD_MAX * fillWeight);
+	vec3 multiplicative = baseStatic * (FILL_MUL_MAX * fillWeight);
+
+	return (additive + multiplicative) * (fillStrength * indoorAtten);
+}
+
 vec3 EvaluateReflectionProbe(
 	samplerCube reflectionTex,
 	float probesEnabled,
@@ -35,7 +65,7 @@ vec3 EvaluateReflectionProbe(
 	float lod = clamp(1.0 - glossOrSpecMask, 0.0, 1.0) * maxMip;
 	vec3 reflColor = textureLod(reflectionTex, refl, lod).rgb;
 
-	float indoorAtten = mix(1.0, 0.3, clamp(indoorFactor, 0.0, 1.0));
+	float indoorAtten = EnvIndoorSkyAttenuation(indoorFactor);
 	float fresnel = pow(1.0 - max(dot(N, V), 0.0), 5.0);
 	float fresnelTerm = mix(0.04, 1.0, fresnel);
 	return reflColor * (intensity * glossOrSpecMask * indoorAtten * fresnelTerm);
