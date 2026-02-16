@@ -896,6 +896,14 @@ void R_Shadow_Log_SunPassEarlyOut (const char *reason)
 	R_Shadow_LogWrite ("SUNPASS skip: %s\n", reason);
 }
 
+static void R_Shadow_Log_DlightPassEarlyOut (const char *reason)
+{
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+	R_Shadow_LogWrite ("DLIGHTPASS skip: %s\n", reason);
+}
+
 void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec)
 {
 	GLint viewport[4], scissor[4], draw_fbo, read_fbo, depthfunc, cullmode, prog;
@@ -1608,7 +1616,9 @@ void R_Shadow_SunPass (void)
 
 void R_Shadow_DlightPass (void)
 {
-	qboolean enabled = r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_dlight_shadows.value > 0.f;
+	qboolean shadows_enabled = r_shadows.value > 0.f;
+	qboolean dlight_shadows_enabled = r_shadow_dlights.value > 0.f;
+	qboolean dlight_lighting_shadows_enabled = r_dlight_shadows.value > 0.f;
 	double t0, t1;
 	int draws0, tris0;
 	shadow_gl_state_t saved_state;
@@ -1634,21 +1644,31 @@ void R_Shadow_DlightPass (void)
 		shadow_dlight_light_indices[i] = -1;
 	}
 
-	if (!enabled || !r_sun.enabled || r_sun.intensity <= 0.f)
+	if (!shadows_enabled)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS disabled by cvars");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = r_shadows=0");
+		return;
+	}
+	if (!dlight_shadows_enabled)
+	{
+		R_Shadow_Log_DlightPassEarlyOut ("reason = r_shadow_dlights=0");
+		return;
+	}
+	if (!dlight_lighting_shadows_enabled)
+	{
+		R_Shadow_Log_DlightPassEarlyOut ("reason = r_dlight_shadows=0");
 		return;
 	}
 	if (!glprogs.shadow_depth)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS missing glprogs.shadow_depth");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = missing glprogs.shadow_depth");
 		return;
 	}
 
 	R_Shadow_ResizeDlightAtlasIfNeeded ();
 	if (!shadow_dlight_depth_tex || !shadow_dlight_fbo)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS resources unavailable");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = resources unavailable");
 		return;
 	}
 
@@ -1658,13 +1678,13 @@ void R_Shadow_DlightPass (void)
 		max_tiles = q_min (max_tiles, shadow_dlight_tile_count);
 	if (max_tiles <= 0)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS max_tiles <= 0");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = max_tiles <= 0");
 		return;
 	}
 
 	if (r_framedata.numlights == 0)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no gpu lights");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = no gpu lights");
 		return;
 	}
 
@@ -1719,7 +1739,7 @@ void R_Shadow_DlightPass (void)
 
 	if (!tiles_used)
 	{
-		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no selected lights");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = no selected lights");
 		return;
 	}
 
