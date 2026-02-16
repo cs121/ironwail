@@ -446,7 +446,7 @@ typedef struct gpuframedata_s {
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
-        vec4_t          lighting_params; // x: reflection probes enabled, y: reflection debug, z: directional lightgrid, w: lighting debug view
+        vec4_t          lighting_params; // x: reflection probes enabled, y: world env fill strength, z: directional lightgrid, w: lighting debug view
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
@@ -595,6 +595,7 @@ extern cvar_t r_minlight_models;
 extern cvar_t r_model_lightgrid;
 extern cvar_t r_reflection_probes;
 extern cvar_t r_reflection_probe_debug;
+extern cvar_t r_envlight_world_fill;
 extern cvar_t r_lightgrid_directional;
 extern cvar_t r_lighting_debug;
 

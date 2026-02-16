@@ -608,6 +608,7 @@ cvar_t	s_ao_temporal = { "s_ao_temporal", "0", CVAR_ARCHIVE };
 
 cvar_t	r_reflection_probes = { "r_reflection_probes", "0", CVAR_ARCHIVE };
 cvar_t	r_reflection_probe_debug = { "r_reflection_probe_debug", "0", CVAR_NONE };
+cvar_t	r_envlight_world_fill = { "r_envlight_world_fill", "0", CVAR_ARCHIVE };
 cvar_t	r_lightgrid_directional = { "r_lightgrid_directional", "1", CVAR_ARCHIVE };
 cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_NONE };
 
@@ -3979,9 +3980,9 @@ void R_SetupView (void)
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
         r_framedata.lighting_params[0] = r_reflection_probes.value > 0.f ? 1.f : 0.f;
-        r_framedata.lighting_params[1] = CLAMP (0.f, r_reflection_probe_debug.value, 1.f);
+        r_framedata.lighting_params[1] = CLAMP (0.f, r_envlight_world_fill.value, 1.f);
         r_framedata.lighting_params[2] = r_lightgrid_directional.value > 0.f ? 1.f : 0.f;
-        r_framedata.lighting_params[3] = CLAMP (0.f, r_lighting_debug.value, 6.f);
+        r_framedata.lighting_params[3] = CLAMP (0.f, r_lighting_debug.value, 8.f);
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
