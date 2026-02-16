@@ -2676,6 +2676,10 @@ void COM_AddGameDirectory (const char *dir)
 		q_strlcpy (search->filename, com_gamedir, sizeof(search->filename));
 		COM_PushSearchPath (search, append_paths);
 
+		// keep engine assets ahead of pak0 for both prepend and append path modes
+		if (j == 0 && path_id == 1u && !fitzmode && append_paths)
+			COM_AddEnginePak (path_id, append_paths);
+
                 // add any pak files in the format pak0.pak pak1.pak, ...
                 for (i = 0; ; i++)
                 {
@@ -2689,13 +2693,13 @@ void COM_AddGameDirectory (const char *dir)
 			search->pack = pak;
 			COM_PushSearchPath (search, append_paths);
 
-                        // add engine pak after pak0.pak
-                        if (i == 0 && j == 0 && path_id == 1u && !fitzmode)
-                                COM_AddEnginePak (path_id, append_paths);
-                }
+		}
 
-                COM_AddPk3Files (com_gamedir, path_id, append_paths);
-        }
+		if (j == 0 && path_id == 1u && !fitzmode && !append_paths)
+			COM_AddEnginePak (path_id, append_paths);
+
+		COM_AddPk3Files (com_gamedir, path_id, append_paths);
+	}
 }
 
 void COM_ResetGameDirectories(const char *newgamedirs)
