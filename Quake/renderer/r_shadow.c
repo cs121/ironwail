@@ -95,6 +95,47 @@ static shadow_log_state_t shdlog;
 static qboolean shadow_sun_validated_once;
 static qboolean shadow_dlight_validated_once;
 
+typedef struct shadow_gl_state_s {
+	GLint draw_fbo;
+	GLint read_fbo;
+	GLint draw_buffer;
+	GLint read_buffer;
+	GLint viewport[4];
+	GLint scissor[4];
+	GLboolean scissor_test;
+} shadow_gl_state_t;
+
+static void R_Shadow_SaveGLState (shadow_gl_state_t *state)
+{
+	if (!state)
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
+	glGetIntegerv (GL_VIEWPORT, state->viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, state->scissor);
+	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
+}
+
+static void R_Shadow_RestoreGLState (const shadow_gl_state_t *state)
+{
+	if (!state)
+		return;
+
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)state->draw_fbo);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)state->read_fbo);
+	glDrawBuffer ((GLenum)state->draw_buffer);
+	glReadBuffer ((GLenum)state->read_buffer);
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	glScissor (state->scissor[0], state->scissor[1], state->scissor[2], state->scissor[3]);
+	if (state->scissor_test)
+		glEnable (GL_SCISSOR_TEST);
+	else
+		glDisable (GL_SCISSOR_TEST);
+}
+
 /*
 Root Cause(s) + Fix Summary:
 1) Shadow caster pass used front-face culling. Quake BSP caster geometry is effectively
@@ -904,6 +945,7 @@ void R_Shadow_SunPass (void)
 	vec4_t sun_dir;
 	double t0, t1;
 	int draws0, tris0;
+	shadow_gl_state_t saved_state;
 
 	R_Shadow_Log_BeginFrame ();
 	r_framedata.shadow_debug[0] = 0.f;
@@ -933,6 +975,7 @@ void R_Shadow_SunPass (void)
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = sun_dir[3];
 	R_UploadFrameData ();
+	R_Shadow_SaveGLState (&saved_state);
 
 	GL_BeginGroup ("Shadow map (sun)");
 	t0 = Sys_DoubleTime ();
@@ -968,6 +1011,7 @@ void R_Shadow_SunPass (void)
 	t1 = Sys_DoubleTime ();
 	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
 		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
+	R_Shadow_RestoreGLState (&saved_state);
 
 	GL_EndGroup ();
 }
@@ -977,6 +1021,7 @@ void R_Shadow_DlightPass (void)
 	qboolean enabled = r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_dlight_shadows.value > 0.f;
 	double t0, t1;
 	int draws0, tris0;
+	shadow_gl_state_t saved_state;
 	R_Shadow_Log_BeginFrame ();
 	float sun_viewproj[16];
 	int max_tiles;
@@ -1089,6 +1134,7 @@ void R_Shadow_DlightPass (void)
 	}
 
 	memcpy (sun_viewproj, r_framedata.shadow_viewproj, sizeof (sun_viewproj));
+	R_Shadow_SaveGLState (&saved_state);
 
 	GL_BeginGroup ("Shadow map (dlights)");
 	t0 = Sys_DoubleTime ();
@@ -1186,6 +1232,7 @@ void R_Shadow_DlightPass (void)
 	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
+	R_Shadow_RestoreGLState (&saved_state);
 
 	GL_EndGroup ();
 }
