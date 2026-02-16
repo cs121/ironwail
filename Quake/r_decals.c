@@ -478,7 +478,6 @@ static gltexture_t *R_Decals_LoadTexture (decal_def_t *def, int def_index)
 		{
 			def->textures[0] = TexMgr_LoadImage (NULL, def->texture_paths[0], width, height, fmt, data, image_name, 0,
 				TEXPREF_ALPHA | TEXPREF_MIPMAP | TEXPREF_CLAMP);
-			free (data);
 		}
 		else if (!decal_warned_missing_tex[def_index][0])
 		{
