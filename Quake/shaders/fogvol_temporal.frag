@@ -47,6 +47,11 @@ void main()
 	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 	vec2 viewSize = 1.0 / max(FogViewParams.zw, vec2(1e-6));
 	vec4 current = texture(FogCurrent, screenUv);
+	if (any(isnan(current)) || any(isinf(current)))
+	{
+		OutColor = vec4(1.0, 0.0, 1.0, 1.0);
+		return;
+	}
 
 	if (FogHistoryValid == 0 || PrevFrameValid == 0u || FogTemporalAlpha <= 0.0 || FogDebugMode == 5 || FogDebugMode == 8)
 	{
@@ -78,7 +83,11 @@ void main()
 	}
 
 	if (valid)
+	{
 		history = texture(FogHistory, prevScreenUv);
+		if (any(isnan(history)) || any(isinf(history)))
+			valid = false;
+	}
 
 	if (FogDebugMode == 6)
 	{
@@ -113,5 +122,16 @@ void main()
 
 	vec3 blended = mix(current.rgb, history.rgb, alpha);
 	float blendedAlpha = mix(current.a, history.a, alpha);
+	if (FogDebugMode == 12)
+	{
+		bvec4 bad = bvec4(any(isnan(vec4(blended, blendedAlpha))) || any(isinf(vec4(blended, blendedAlpha))), false, false, false);
+		OutColor = bad.x ? vec4(1.0, 1.0, 0.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+	if (any(isnan(vec4(blended, blendedAlpha))) || any(isinf(vec4(blended, blendedAlpha))))
+	{
+		OutColor = current;
+		return;
+	}
 	OutColor = vec4(blended, blendedAlpha);
 }

@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "draw.h"
 #include "r_fogvol.h"
 #include <math.h>
+#include <stdlib.h>
 
 extern void R_Clustered_BindForShading (void);
 
@@ -65,6 +66,11 @@ cvar_t r_fogvol_debug_graph = { "r_fogvol_debug_graph", "0", CVAR_NONE };
 cvar_t r_fogvol_hazardlog = { "r_fogvol_hazardlog", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_history_force_clear = { "r_fogvol_history_force_clear", "0", CVAR_NONE };
 cvar_t r_fogvol_history_weight_override = { "r_fogvol_history_weight_override", "-1", CVAR_NONE };
+cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_NONE };
+cvar_t r_fogvol_validate = { "r_fogvol_validate", "0", CVAR_NONE };
+cvar_t r_fogvol_repro = { "r_fogvol_repro", "0", CVAR_NONE };
+cvar_t r_fogvol_black_detect = { "r_fogvol_black_detect", "0", CVAR_NONE };
+cvar_t r_fogvol_capture_on_black = { "r_fogvol_capture_on_black", "0", CVAR_NONE };
 
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
@@ -73,6 +79,7 @@ static qboolean r_fogvol_history_valid = false;
 static qboolean r_fogvol_hazard_logged_frame = false;
 static int r_fogvol_hazard_logged_frame_id = -1;
 static double r_fogvol_debug_summary_time = 0.0;
+static int r_fogvol_black_capture_index = 0;
 
 typedef struct froxel_grid_s
 {
@@ -311,6 +318,11 @@ static qboolean R_FogVol_TestLog_Begin (const char *marker, const char *file, in
 #define R_FogVol_SetReadBufferDebug(buf, marker) R_FogVol_SetReadBufferDebug_Impl ((buf), (marker), __FILE__, __LINE__)
 #define R_FogVol_LogPipelineState(marker) R_FogVol_LogPipelineState_Impl ((marker), __FILE__, __LINE__)
 #define R_FogVol_TestState_Log(phase, state) R_FogVol_TestState_Log_Impl ((phase), (state), __FILE__, __LINE__)
+
+static int R_FogVol_DebugLevel (void)
+{
+	return CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 3);
+}
 
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 {
@@ -629,6 +641,143 @@ static qboolean R_FogVol_PassHasFeedbackHazard (const char *pass, GLuint draw_te
 	return hazard;
 }
 
+static void R_FogVol_ValidateFramebufferStatus (const char *pass, GLenum target)
+{
+	GLenum status;
+	if (r_fogvol_validate.value <= 0.f && R_FogVol_DebugLevel () < 2)
+		return;
+	status = GL_CheckFramebufferStatusFunc (target);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_Printf ("FOGVOL_VALIDATE pass=%s target=0x%04x fbo_incomplete=0x%04x\n", pass, (unsigned)target, (unsigned)status);
+#if !defined(NDEBUG)
+		Sys_Error ("Fogvol framebuffer incomplete in pass %s", pass);
+#endif
+	}
+}
+
+static void R_FogVol_ValidatePassState (const char *pass)
+{
+	GLint draw_fbo = 0, read_fbo = 0;
+	GLint viewport[4] = {0};
+	GLint scissor_box[4] = {0};
+	GLint draw_buffer = 0, read_buffer = 0;
+	GLint program = 0, vao = 0;
+	GLboolean scissor_enabled = GL_FALSE;
+	GLboolean blend = GL_FALSE, depth = GL_FALSE, cull = GL_FALSE;
+	GLboolean depth_mask = GL_TRUE;
+	GLboolean color_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+	GLint active_tex = 0;
+	GLint max_units = 0;
+	if (r_fogvol_validate.value <= 0.f && R_FogVol_DebugLevel () < 2)
+		return;
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &vao);
+	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+	blend = glIsEnabled (GL_BLEND);
+	depth = glIsEnabled (GL_DEPTH_TEST);
+	cull = glIsEnabled (GL_CULL_FACE);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+	Con_Printf ("FOGVOL_VALIDATE pass=%s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=%d scissor_box=(%d %d %d %d) draw_buffer=0x%04x read_buffer=0x%04x prog=%d vao=%d blend=%d depth=%d cull=%d depthmask=%d colormask=%d%d%d%d srgb=%d dither=%d msaa=%d\n",
+		pass, draw_fbo, read_fbo, viewport[0], viewport[1], viewport[2], viewport[3], scissor_enabled,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3], (unsigned)draw_buffer, (unsigned)read_buffer,
+		program, vao, blend, depth, cull, depth_mask,
+		color_mask[0], color_mask[1], color_mask[2], color_mask[3],
+		glIsEnabled (GL_FRAMEBUFFER_SRGB), glIsEnabled (GL_DITHER), glIsEnabled (GL_MULTISAMPLE));
+	if (viewport[2] <= 0 || viewport[3] <= 0)
+	{
+		Con_Printf ("FOGVOL_VALIDATE pass=%s hazard=bad_viewport size=%dx%d\n", pass, viewport[2], viewport[3]);
+#if !defined(NDEBUG)
+		Sys_Error ("Fogvol invalid viewport in pass %s", pass);
+#endif
+	}
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_tex);
+	glGetIntegerv (GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_units);
+	max_units = q_min (max_units, 8);
+	for (int unit = 0; unit < max_units; ++unit)
+	{
+		GLint tex2d = 0;
+		GL_ActiveTextureFunc (GL_TEXTURE0 + unit);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d);
+		if (tex2d)
+			Con_Printf ("FOGVOL_VALIDATE pass=%s tex_unit=%d tex2d=%d\n", pass, unit, tex2d);
+	}
+	GL_ActiveTextureFunc ((GLenum)active_tex);
+	R_FogVol_ValidateFramebufferStatus (pass, GL_DRAW_FRAMEBUFFER);
+	R_FogVol_ValidateFramebufferStatus (pass, GL_READ_FRAMEBUFFER);
+}
+
+static void R_FogVol_DumpFBOToPPM (const char *prefix, GLuint fbo, int width, int height)
+{
+	byte *pixels;
+	char path[256];
+	FILE *fp;
+	if (!fbo || width <= 0 || height <= 0)
+		return;
+	pixels = (byte *)malloc ((size_t)width * (size_t)height * 3u);
+	if (!pixels)
+		return;
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, fbo);
+	R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "DUMP read=COLOR_ATTACHMENT0");
+	glReadPixels (0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	q_snprintf (path, sizeof (path), "fogvol_%s_%05d.ppm", prefix, r_fogvol_black_capture_index);
+	fp = fopen (path, "wb");
+	if (fp)
+	{
+		fprintf (fp, "P6\n%d %d\n255\n", width, height);
+		fwrite (pixels, 1, (size_t)width * (size_t)height * 3u, fp);
+		fclose (fp);
+		Con_Printf ("FOGVOL_CAPTURE wrote=%s\n", path);
+	}
+	free (pixels);
+}
+
+static void R_FogVol_DetectBlackFrameAndCapture (const char *pass, GLuint read_fbo, GLuint draw_fbo, GLuint final_tex, GLuint history_tex, GLuint depth_tex, int width, int height)
+{
+	float sample[8 * 8 * 4];
+	int sample_w = q_min (8, width);
+	int sample_h = q_min (8, height);
+	qboolean all_black = true;
+	qboolean non_finite = false;
+	if (r_fogvol_black_detect.value <= 0.f)
+		return;
+	if (!draw_fbo || width <= 0 || height <= 0)
+		return;
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, draw_fbo);
+	R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "BLACK_DETECT read=COLOR_ATTACHMENT0");
+	glReadPixels (0, 0, sample_w, sample_h, GL_RGBA, GL_FLOAT, sample);
+	for (int i = 0; i < sample_w * sample_h; ++i)
+	{
+		float r = sample[i * 4 + 0];
+		float g = sample[i * 4 + 1];
+		float b = sample[i * 4 + 2];
+		float a = sample[i * 4 + 3];
+		if (!isfinite (r) || !isfinite (g) || !isfinite (b) || !isfinite (a))
+			non_finite = true;
+		if (fabsf (r) > 1e-5f || fabsf (g) > 1e-5f || fabsf (b) > 1e-5f || a > 1e-5f)
+			all_black = false;
+	}
+	if (!all_black && !non_finite)
+		return;
+	Con_Printf ("FOGVOL_BLACK pass=%s all_black=%d non_finite=%d draw_fbo=%u read_fbo=%u final_tex=%u history_tex=%u depth_tex=%u size=%dx%d\n",
+		pass, all_black ? 1 : 0, non_finite ? 1 : 0, draw_fbo, read_fbo, final_tex, history_tex, depth_tex, width, height);
+	R_FogVol_ValidatePassState ("BLACK_DETECT");
+	if (r_fogvol_capture_on_black.value > 0.f)
+	{
+		++r_fogvol_black_capture_index;
+		R_FogVol_DumpFBOToPPM ("final", draw_fbo, width, height);
+		if (read_fbo)
+			R_FogVol_DumpFBOToPPM ("read", read_fbo, width, height);
+	}
+}
+
 static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 {
 	GLenum draw_color_attachment = GL_BACK_LEFT;
@@ -891,6 +1040,11 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_hazardlog);
 	Cvar_RegisterVariable (&r_fogvol_history_force_clear);
 	Cvar_RegisterVariable (&r_fogvol_history_weight_override);
+	Cvar_RegisterVariable (&r_fogvol_debug);
+	Cvar_RegisterVariable (&r_fogvol_validate);
+	Cvar_RegisterVariable (&r_fogvol_repro);
+	Cvar_RegisterVariable (&r_fogvol_black_detect);
+	Cvar_RegisterVariable (&r_fogvol_capture_on_black);
 }
 
 void R_FogVol_Clear (void)
@@ -1289,6 +1443,7 @@ void R_FogVol_Render (void)
 	GLuint history_fbo[2];
 	qboolean has_drawn = false;
 	qboolean use_halfres;
+	qboolean repro_mode;
 	int fog_width;
 	int fog_height;
 	float depth_scale_x;
@@ -1354,6 +1509,9 @@ void R_FogVol_Render (void)
 	else
 		steps = (int)Q_rint (r_fogvol_steps.value);
 	steps = CLAMP (8, steps, 128);
+	repro_mode = (r_fogvol_repro.value > 0.f);
+	if (repro_mode)
+		R_FogVol_SetHistoryValid (false, "repro_mode");
 
 	if (r_fogvol_testvolumes.value > 0.f && r_fogvol_test_verbose.value > 0.f && (realtime - r_fogvol_debug_summary_time) >= 1.0)
 	{
@@ -1421,11 +1579,11 @@ void R_FogVol_Render (void)
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
-	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (1, (r_fogvol_noise.value > 0.f && !repro_mode) ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
 	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
 	GL_Uniform1iFunc (6, r_fogvol_physblend.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (7, r_fogvol_jitter.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (7, (r_fogvol_jitter.value > 0.f && !repro_mode) ? 1 : 0);
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
@@ -1495,6 +1653,7 @@ void R_FogVol_Render (void)
 			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY read=COLOR_ATTACHMENT0");
 			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
 			R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, src_tex);
+			R_FogVol_ValidatePassState ("FINAL_COPY");
 			R_FogVol_AssertNoFeedbackHazard ("FINAL_COPY", framebufs.fogvol.finalcopy_tex, src_tex);
 			if (use_halfres)
 			{
@@ -1521,6 +1680,7 @@ void R_FogVol_Render (void)
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
 		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
+			R_FogVol_ValidatePassState ("ITER");
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
 		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
@@ -1547,7 +1707,7 @@ void R_FogVol_Render (void)
 		goto done;
 	}
 
-	if (has_drawn && r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex)
+	if (has_drawn && !repro_mode && r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex)
 	{
 		int history_valid = (r_fogvol_history_valid && r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
 		int history_src = r_fogvol_history_index;
@@ -1605,6 +1765,7 @@ void R_FogVol_Render (void)
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_valid ? history_tex[history_src] : 0);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
 		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_valid ? history_tex[history_src] : 0, final_tex);
+			R_FogVol_ValidatePassState ("COMPOSITE");
 		{
 			float history_alpha = r_fogvol_temporal_alpha.value;
 			if (r_fogvol_history_weight_override.value >= 0.f)
@@ -1629,6 +1790,7 @@ void R_FogVol_Render (void)
 		R_FogVol_AssertNoFeedbackHazard ("HISTORY", history_tex[history_dst], framebufs.fogvol.composite_tex[composite_dst]);
 		R_FogVol_AssertNoBoundFeedbackHazard ("HISTORY");
 		R_FogVol_LogHazardPass ("HISTORY", framebufs.fogvol.composite_tex[composite_dst], 0, framebufs.fogvol.composite_tex[composite_dst]);
+			R_FogVol_ValidatePassState ("HISTORY_COPY");
 		GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 			0, 0, fog_width, fog_height,
 			GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -1698,11 +1860,13 @@ void R_FogVol_Render (void)
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 	}
+	R_FogVol_DetectBlackFrameAndCapture ("FINAL_COMPOSITE", r_fogvol_state_cache.read_fbo, framebufs.composite.fbo, final_tex, framebufs.fogvol.history_tex[r_fogvol_history_index], depth_tex, glwidth, glheight);
 
 	if (mode == 1)
 		R_DebugFlushGeometry ();
 
 done:
+	R_FogVol_ValidatePassState ("FOGVOL_END");
 	R_FogVol_LogPipelineState ("FOGVOL_END");
 	if (use_test_guard)
 	{
