@@ -1,31 +1,44 @@
-#ifndef R_FOGVOL_H
-#define R_FOGVOL_H
+/*
+Copyright (C) 1996-2001 Id Software, Inc.
+Copyright (C) 2002-2009 John Fitzgibbons and others
+Copyright (C) 2007-2008 Kristian Duske
+Copyright (C) 2010-2014 QuakeSpasm developers
 
-#define MAX_FOGVOLUMES 64
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+*/
+
+#ifndef __R_FOGVOL_H__
+#define __R_FOGVOL_H__
+
+#include "q_stdinc.h"
 
 typedef struct fog_volume_s
 {
-	vec3_t mins;
-	vec3_t maxs;
-	vec3_t color;
+	float mins[3];
+	float maxs[3];
+	float color[3];
 	float density;
+	float noise_scale;
+	float noise_strength;
+	float velocity[3];
 	float falloff;
-	int mode;
-	float noiseScale;
-	float noiseAmount;
-	float noiseBias;
-	vec3_t velocity;
-	float maxDistance;
-	int priority;
-	int enabled;
-	float height;
-	float heightScale;
+	int flags;
 } fog_volume_t;
 
 typedef struct froxel_grid_s froxel_grid_t;
-
-extern cvar_t r_fogvol;
-extern cvar_t r_fogvol_halfres;
 
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
@@ -41,4 +54,4 @@ void R_FogVol_InjectBuiltIntoFroxel (void);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 void R_FogVol_NotifyFramebuffersRecreated (void);
 
-#endif // R_FOGVOL_H
+#endif /* __R_FOGVOL_H__ */
