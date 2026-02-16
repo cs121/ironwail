@@ -77,6 +77,7 @@ extern cvar_t r_shadow_log_file;
 extern cvar_t r_shadow_validate;
 extern cvar_t r_gl_verify_program;
 extern cvar_t r_shadow_coord_debug;
+extern cvar_t r_shadow_comparefunc;
 
 #define SHDLOG_PREFIX "SHDLOG: "
 
@@ -744,6 +745,7 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magf);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &wraps);
@@ -760,12 +762,24 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
 		R_Shadow_LogWrite ("WARN unexpected depth internal format 0x%X\n", (unsigned)internal);
 	if (cmode != GL_NONE)
-		R_Shadow_LogWrite ("WARN compare mode != GL_NONE but current shaders use sampler2D/manual compare\n");
+		R_Shadow_LogWrite ("INFO compare mode is hardware compare (0x%X) while current path uses sampler2D/manual compare\n", (unsigned)cmode);
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
+}
+
+static GLenum R_Shadow_SelectCompareFunc (void)
+{
+	int mode = (int)r_shadow_comparefunc.value;
+	if (mode == 1)
+		return GL_LEQUAL;
+	if (mode == 2)
+		return GL_GEQUAL;
+	return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
 }
 
 static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
 {
+	GLenum compare_func = R_Shadow_SelectCompareFunc ();
+
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -776,13 +790,13 @@ static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, hw_compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, (GLint)compare_func);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 }
 
-static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint tex, int expected_w, int expected_h, GLenum expected_compare_mode)
+static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint tex, int expected_w, int expected_h, GLenum expected_compare_mode, GLenum expected_compare_func)
 {
-	GLint width = 0, height = 0, cmode = GL_NONE, minf = 0, magf = 0;
+	GLint width = 0, height = 0, cmode = GL_NONE, cfunc = GL_LEQUAL, minf = 0, magf = 0;
 	GLenum status;
 
 	if (r_shadow_validate.value <= 0.f)
@@ -798,6 +812,7 @@ static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &cmode);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magf);
 
@@ -805,6 +820,8 @@ static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint
 		Con_DWarning ("%s: shadow texture size mismatch (%dx%d, expected %dx%d)\n", tag, width, height, expected_w, expected_h);
 	if ((GLenum)cmode != expected_compare_mode)
 		Con_DWarning ("%s: shadow compare mode mismatch (0x%X, expected 0x%X)\n", tag, (unsigned)cmode, (unsigned)expected_compare_mode);
+	if ((GLenum)cfunc != expected_compare_func)
+		Con_DWarning ("%s: shadow compare func mismatch (0x%X, expected 0x%X)\n", tag, (unsigned)cfunc, (unsigned)expected_compare_func);
 	if (minf != GL_NEAREST || magf != GL_NEAREST)
 		Con_DWarning ("%s: unexpected filter state min=0x%X mag=0x%X (expected NEAREST)\n", tag, (unsigned)minf, (unsigned)magf);
 
@@ -943,7 +960,7 @@ void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_
 
 void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj)
 {
-	GLint active_tex, bound_tex, draw_fbo, read_fbo, current_program;
+	GLint active_tex, bound_tex, draw_fbo, read_fbo, current_program, compare_mode, compare_func;
 	GLint vp[4], sc[4];
 	float det = 0.f;
 	qboolean bad;
@@ -955,6 +972,9 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	GL_ActiveTextureFunc (texunit);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
 	GL_ActiveTextureFunc (active_tex);
+	GL_BindNative (texunit, GL_TEXTURE_2D, (GLuint)bound_tex);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &compare_mode);
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &compare_func);
 	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
@@ -970,8 +990,8 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	shdlog.last_program = program;
 	shdlog.last_shadow_sampler_unit = (GLint)(texunit - GL_TEXTURE0);
 	shdlog.last_shadow_tex = expected_tex;
-	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
-		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d compare=(0x%X,0x%X) draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, (unsigned)compare_mode, (unsigned)compare_func, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
 	R_Shadow_LogWrite ("%s receiver uniform-target program=%d gl_current_program=%d\n", tag, program, current_program);
 	R_Shadow_LogWrite ("%s params bias=%.9g normalbias=%.9g pcf=%.3g taps=%.3g matrix_row0=(%.9g %.9g %.9g %.9g) det3x3=%.9g finite=%d\n",
 		tag, bias, normalbias, pcf, taps,
@@ -992,7 +1012,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	}
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
-	if (pcf > 0.f && shdlog.last_shadow_compare_mode != GL_NONE)
+	if (pcf > 0.f && compare_mode != GL_NONE)
 		R_Shadow_LogWrite ("WARN manual PCF enabled but depth compare mode is not GL_NONE\n");
 	R_Shadow_LogGLStage (tag);
 	R_Shadow_LogEndFrameIfNeeded ();
@@ -1481,13 +1501,18 @@ void R_ResizeShadowMapIfNeeded (void)
 
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
+	if (shadow_depth_tex)
+		R_Shadow_ConfigureDepthTexture (shadow_depth_tex, false);
 	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
 {
 	if (shadow_dlight_depth_tex)
+	{
+		R_Shadow_ConfigureDepthTexture (shadow_dlight_depth_tex, false);
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
 }
@@ -1559,9 +1584,12 @@ void R_Shadow_SunPass (void)
 	R_Shadow_LogMainViewCullContext ("SUNPASS");
 	R_Shadow_LogWrite ("SUNPASS depthcfg clearDepth_expected=%.1f depthFunc_expected=0x%X depth_range=FULL clipctl=%d\n",
 		gl_clipcontrol_able ? 0.f : 1.f, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL, gl_clipcontrol_able ? 1 : 0);
+	R_Shadow_LogWrite ("SUNPASS comparefunc mode=%d selected=0x%X reason=%s\n",
+		(int)r_shadow_comparefunc.value, (unsigned)R_Shadow_SelectCompareFunc (),
+		((int)r_shadow_comparefunc.value == 1) ? "forced LEQUAL" : ((int)r_shadow_comparefunc.value == 2) ? "forced GEQUAL" : (gl_clipcontrol_able ? "auto reverse-z" : "auto forward-z"));
 	if (!shadow_sun_validated_once || r_shadow_validate.value > 1.f)
 	{
-		R_Shadow_ValidateDepthResources ("sun", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size, GL_NONE);
+		R_Shadow_ValidateDepthResources ("sun", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size, GL_NONE, R_Shadow_SelectCompareFunc ());
 		shadow_sun_validated_once = true;
 	}
 
@@ -1757,7 +1785,7 @@ void R_Shadow_DlightPass (void)
 	GL_DepthRange (ZRANGE_FULL);
 	if (!shadow_dlight_validated_once || r_shadow_validate.value > 1.f)
 	{
-		R_Shadow_ValidateDepthResources ("dlight", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size, GL_NONE);
+		R_Shadow_ValidateDepthResources ("dlight", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size, GL_NONE, R_Shadow_SelectCompareFunc ());
 		shadow_dlight_validated_once = true;
 	}
 	GL_SetScissorEnabled (true);

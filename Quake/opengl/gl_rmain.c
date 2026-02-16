@@ -487,6 +487,7 @@ cvar_t	r_shadow_log_dump = { "r_shadow_log_dump", "0", CVAR_NONE };
 cvar_t	r_shadow_log_file = { "r_shadow_log_file", "0", CVAR_NONE };
 cvar_t	r_shadow_validate = { "r_shadow_validate", "0", CVAR_NONE };
 cvar_t	r_shadow_coord_debug = { "r_shadow_coord_debug", "0", CVAR_NONE };
+cvar_t	r_shadow_comparefunc = { "r_shadow_comparefunc", "0", CVAR_ARCHIVE };
 cvar_t	r_gl_verify_program = { "r_gl_verify_program", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
@@ -4037,7 +4038,7 @@ void R_SetupView (void)
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
         r_framedata.shadow_debug[0] = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
-        r_framedata.shadow_debug[2] = 0.f;
+        r_framedata.shadow_debug[2] = CLAMP (0.f, r_shadow_comparefunc.value, 2.f);
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;

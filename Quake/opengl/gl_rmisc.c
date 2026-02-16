@@ -137,6 +137,7 @@ extern cvar_t r_shadow_log_dump;
 extern cvar_t r_shadow_log_file;
 extern cvar_t r_shadow_validate;
 extern cvar_t r_shadow_coord_debug;
+extern cvar_t r_shadow_comparefunc;
 extern cvar_t r_gl_verify_program;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -745,6 +746,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadow_log_file);
         Cvar_RegisterVariable (&r_shadow_validate);
         Cvar_RegisterVariable (&r_shadow_coord_debug);
+        Cvar_RegisterVariable (&r_shadow_comparefunc);
         Cvar_RegisterVariable (&r_gl_verify_program);
 	DLightPool_RegisterCvars ();
         Cvar_RegisterVariable (&r_novis);

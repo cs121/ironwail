@@ -3,46 +3,13 @@
 
 #include "depth_common.glsl"
 
-// -----------------------------------------------------------------------------
-// Matrix multiplication robustness
-//
-// If the engine uploads row-major matrices to GLSL with transpose=GL_FALSE,
-// then (mat4 * vec4) will behave like a transposed matrix and shadow
-// projection turns into "screen-space" diagonal banding.
-//
-// To make shader-side testing robust (without touching engine code), we compute
-// BOTH variants and pick the one that looks more plausible.
-// This is cheap compared to the ray/pcf work and dramatically reduces the odds
-// that a row/column-major mismatch breaks shadows.
-// -----------------------------------------------------------------------------
-
+// ShadowViewProj is uploaded as std140 mat4 and consumed as GLSL column-major.
+// Keep receiver projection deterministic; adaptive row/column switching here causes
+// view-dependent instability/flicker because neighboring fragments can choose
+// different paths.
 vec4 ShadowMul(mat4 M, vec4 v)
 {
-    vec4 a = M * v; // GLSL default (column-major expectation)
-    vec4 b = v * M; // "row-major" style
-
-    // Prefer a result with a sane perspective divide and reasonable NDC range.
-    // We don't require it to be inside [-1,1] (cascades/atlases can overscan),
-    // but we reject extreme values that typically come from a bad transpose.
-    bool a_ok = (abs(a.w) > 1e-6);
-    bool b_ok = (abs(b.w) > 1e-6);
-    if (a_ok)
-    {
-        vec3 pa = a.xyz / a.w;
-        a_ok = all(lessThanEqual(abs(pa), vec3(20.0)));
-    }
-    if (b_ok)
-    {
-        vec3 pb = b.xyz / b.w;
-        b_ok = all(lessThanEqual(abs(pb), vec3(20.0)));
-    }
-
-    if (a_ok && !b_ok) return a;
-    if (b_ok && !a_ok) return b;
-
-    // If both look OK (or both look bad), prefer the one with a larger |w|
-    // (more numerically stable divide).
-    return (abs(a.w) >= abs(b.w)) ? a : b;
+    return M * v;
 }
 
 float ShadowReference01(float proj_z)
@@ -53,11 +20,17 @@ float ShadowReference01(float proj_z)
 #ifdef SHADOW_SUN
 float ShadowCompare(float depth, float reference, float bias)
 {
+	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
+	bool reversed_auto =
 #if REVERSED_Z
-	return (reference >= (depth - bias)) ? 1.0 : 0.0;
+		true;
 #else
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
+		false;
 #endif
+	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
+	if (use_gequal)
+		return (reference >= (depth - bias)) ? 1.0 : 0.0;
+	return (reference <= (depth + bias)) ? 1.0 : 0.0;
 }
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
@@ -150,11 +123,17 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 #ifdef SHADOW_DLIGHT
 float ShadowCompare(float depth, float reference, float bias)
 {
+	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
+	bool reversed_auto =
 #if REVERSED_Z
-	return (reference >= (depth - bias)) ? 1.0 : 0.0;
+		true;
 #else
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
+		false;
 #endif
+	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
+	if (use_gequal)
+		return (reference >= (depth - bias)) ? 1.0 : 0.0;
+	return (reference <= (depth + bias)) ? 1.0 : 0.0;
 }
 
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
