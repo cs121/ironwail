@@ -294,9 +294,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 
 	glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current);
 
-	loc_shadow_viewproj = glGetUniformLocation (target_program, "ShadowViewProj");
-	loc_shadow_params = glGetUniformLocation (target_program, "ShadowParams");
-	loc_shadow_debug = glGetUniformLocation (target_program, "ShadowDebug");
+	loc_shadow_viewproj = GL_GetUniformLocationFunc (target_program, "ShadowViewProj");
+	loc_shadow_params = GL_GetUniformLocationFunc (target_program, "ShadowParams");
+	loc_shadow_debug = GL_GetUniformLocationFunc (target_program, "ShadowDebug");
 
 	R_Shadow_Log_BeginFrame ();
 	if (shdlog.active)
