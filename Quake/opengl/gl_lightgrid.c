@@ -508,7 +508,7 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
 {
     const lightgrid_octree_t *oct = lg ? lg->octree : NULL;
     int base[3];
-    float frac[3];
+    float fx, fy, fz;
     vec3_t accum_rgb = {0.f, 0.f, 0.f};
     float accum_ao = 0.f;
     float total_weight = 0.f;
@@ -525,30 +525,37 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
             return false;
 
         base[i] = (int)floorf(local);
-        frac[i] = local - (float)base[i];
 
-        if (frac[i] < 0.f)
-            frac[i] = 0.f;
-        else if (frac[i] > 1.f)
-            frac[i] = 1.f;
+        float frac = local - (float)base[i];
+        if (frac < 0.f)
+            frac = 0.f;
+        else if (frac > 1.f)
+            frac = 1.f;
+
+        switch (i)
+        {
+        case 0: fx = frac; break;
+        case 1: fy = frac; break;
+        default: fz = frac; break;
+        }
 
         nearest_cell[i] = Q_rint(local);
     }
 
     for (int sx = 0; sx <= 1; sx++)
     {
-        float wx = sx ? frac[0] : (1.f - frac[0]);
-        int cx = base[0] + sx;
+        float wx = sx ? fx : (1.f - fx);
+        int cx = CLAMP(0, base[0] + sx, oct->header.grid_size[0] - 1);
 
         for (int sy = 0; sy <= 1; sy++)
         {
-            float wy = sy ? frac[1] : (1.f - frac[1]);
-            int cy = base[1] + sy;
+            float wy = sy ? fy : (1.f - fy);
+            int cy = CLAMP(0, base[1] + sy, oct->header.grid_size[1] - 1);
 
             for (int sz = 0; sz <= 1; sz++)
             {
-                float wz = sz ? frac[2] : (1.f - frac[2]);
-                int cz = base[2] + sz;
+                float wz = sz ? fz : (1.f - fz);
+                int cz = CLAMP(0, base[2] + sz, oct->header.grid_size[2] - 1);
                 float weight = wx * wy * wz;
                 int cell[3] = {cx, cy, cz};
                 lightgrid_probe_t sample;
@@ -572,20 +579,46 @@ static qboolean Lightgrid_SampleOctreeProbe(const lightgrid_t *lg, const vec3_t 
 
     if (total_weight <= 0.f)
     {
-        qboolean occluded = false;
+        vec3_t fallback_rgb = {0.f, 0.f, 0.f};
+        float fallback_ao = 0.f;
+        float fallback_total = 0.f;
 
-        for (int i = 0; i < 3; i++)
-            nearest_cell[i] = CLAMP(0, nearest_cell[i], oct->header.grid_size[i] - 1);
+        for (int dz = -1; dz <= 1; dz++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    int cell[3];
+                    qboolean occluded = false;
+                    lightgrid_probe_t sample;
+                    float dist2;
+                    float weight;
 
-        if (!Lightgrid_FetchOctreeCellSample(oct, nearest_cell, out_probe, &occluded))
+                    cell[0] = CLAMP(0, nearest_cell[0] + dx, oct->header.grid_size[0] - 1);
+                    cell[1] = CLAMP(0, nearest_cell[1] + dy, oct->header.grid_size[1] - 1);
+                    cell[2] = CLAMP(0, nearest_cell[2] + dz, oct->header.grid_size[2] - 1);
+
+                    if (!Lightgrid_FetchOctreeCellSample(oct, cell, &sample, &occluded) || occluded)
+                        continue;
+
+                    dist2 = (float)(dx * dx + dy * dy + dz * dz);
+                    weight = 1.f / (1.f + dist2);
+
+                    VectorMA(fallback_rgb, weight, sample.rgb, fallback_rgb);
+                    fallback_ao += sample.ao * weight;
+                    fallback_total += weight;
+                }
+            }
+        }
+
+        if (fallback_total <= 0.f)
             return false;
 
-        if (occluded)
-        {
-            VectorSet(out_probe->rgb, 0.f, 0.f, 0.f);
-            out_probe->ao = 0.f;
-            out_probe->intensity = 0.f;
-        }
+        VectorScale(fallback_rgb, 1.f / fallback_total, out_probe->rgb);
+        out_probe->ao = CLAMP(0.f, fallback_ao / fallback_total, 1.f);
+        VectorSet(out_probe->dir, 0.f, 0.f, 1.f);
+        out_probe->intensity = (out_probe->rgb[0] + out_probe->rgb[1] + out_probe->rgb[2]) * (1.f / 3.f);
 
         return true;
     }
