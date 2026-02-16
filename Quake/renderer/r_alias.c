@@ -73,6 +73,7 @@ typedef struct aliasinstance_s {
 	float		_pad0;
 	vec3_t		ambientcolor;
 	float		_pad1;
+	vec4_t		envmap_params;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -113,6 +114,25 @@ COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
+
+static float R_AliasLuma (const vec3_t rgb)
+{
+	return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
+}
+
+static float R_AliasEnvIndoorHint (const entity_t *e)
+{
+	float luma = 0.f;
+	float ao = 1.f;
+
+	if (e && e->lightcache.lightgrid_has_sample)
+	{
+		luma = CLAMP (0.f, R_AliasLuma (e->lightcache.lightgrid_color), 1.f);
+		ao = CLAMP (0.f, e->lightcache.lightgrid_ao, 1.f);
+	}
+
+	return CLAMP (0.f, (1.f - luma) * (1.f - 0.5f * ao), 1.f);
+}
 
 static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
 {
@@ -959,6 +979,14 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
 	if (!Q_strncmp (e->model->name, "progs/bolt", 10))
 		instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+	{
+		const qboolean env_hint = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING)
+			|| (e->model->flags & MOD_FBRIGHTHACK);
+		instance->envmap_params[0] = (r_reflection_probes.value > 0.f && env_hint) ? 1.f : 0.f;
+		instance->envmap_params[1] = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING) ? 0.95f : 0.55f;
+		instance->envmap_params[2] = R_AliasEnvIndoorHint (e);
+		instance->envmap_params[3] = (instance->flags & ALIAS_INSTANCE_FLAG_LIGHTNING) ? 0.14f : 0.08f;
+	}
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;
@@ -1032,6 +1060,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	VectorClear (instance->dlightcolor);
 	VectorClear (instance->ambientcolor);
 	instance->alpha = entalpha;
+	Vector4Set (instance->envmap_params, 0.f, 0.f, 0.f, 0.f);
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
 	instance->blend = lerpdata.blend;

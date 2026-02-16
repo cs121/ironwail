@@ -11,6 +11,7 @@ layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform samplerCube ReflectionTex;
 #include "frame_uniforms.glsl"
 #include "depth_common.glsl"
+#include "envlight.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -256,16 +257,13 @@ vec3 EvaluateDirectionalAmbient(vec3 ambientColor, vec3 normal)
 	return ambientColor * (ambientBias + (1.0 - ambientBias) * nd);
 }
 
-vec3 EvaluateReflectionProbe(vec3 worldPos, vec3 normal, vec3 viewDir, float roughness)
+float ComputeEnvVisibilityHint(float shadowTerm, bool shadowEnabled)
 {
-	if (LightingParams.x <= 0.5)
-		return vec3(0.0);
-	vec3 refl = reflect(-viewDir, normalize(normal));
-	float maxMip = 6.0;
-	float lod = clamp(roughness, 0.0, 1.0) * maxMip;
-	vec3 reflColor = textureLod(ReflectionTex, refl, lod).rgb;
-	return reflColor * 0.12;
+	if (!shadowEnabled)
+		return 1.0;
+	return clamp(shadowTerm, 0.0, 1.0);
 }
+
 
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
@@ -430,6 +428,9 @@ void main()
 	float view_length = length(to_eye);
 	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
 
+	float shadow_term = 1.0;
+	bool shadow_enabled = false;
+
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
 #if DITHER
@@ -499,8 +500,8 @@ void main()
 		}
 
 		float shadow_range = 1.0;
-		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
-		bool shadow_enabled = ShadowDebug.x > 0.5;
+		shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
+		shadow_enabled = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
@@ -638,10 +639,24 @@ void main()
 
 	result.rgb += fullbright + emissive;
 
-	float roughness = 0.65;
-	if (in_tcgen == TCGEN_ENVIRONMENT)
-		roughness = 0.25;
-	vec3 reflection_spec = EvaluateReflectionProbe(in_pos, surface_normal, view_dir, roughness);
+	bool env_hint_tcgen = (in_tcgen == TCGEN_ENVIRONMENT);
+	bool env_hint_shader = ((in_flags & CF_MAT_HAS_SHADER) != 0u);
+	float env_spec_mask = (env_hint_tcgen || env_hint_shader) ? 1.0 : 0.0;
+	float env_gloss = env_hint_tcgen ? 0.90 : (env_hint_shader ? 0.55 : 0.0);
+	float static_luma = EnvLightLuma(clamp(total_lightmap / max(Overbright, 1e-4), 0.0, 1.0));
+	float ao_hint = clamp(EnvLightLuma(in_lightgrid), 0.0, 1.0);
+	float visibility_hint = ComputeEnvVisibilityHint(shadow_term, shadow_enabled);
+	float indoor_factor = DeriveIndoorFactor(static_luma, ao_hint, visibility_hint);
+	float env_intensity = env_hint_tcgen ? 0.12 : 0.07;
+	vec3 reflection_spec = EvaluateReflectionProbe(
+		ReflectionTex,
+		LightingParams.x,
+		in_pos,
+		surface_normal,
+		view_dir,
+		env_gloss * env_spec_mask,
+		indoor_factor,
+		env_intensity);
 	specular_light += reflection_spec;
 	if (int(LightingParams.w + 0.5) == 6)
 	{
@@ -668,6 +683,14 @@ void main()
 	if (lighting_debug == 2)
 	{
 		out_fragcolor = vec4(vec3(clamp(length(reflection_spec) * 6.0, 0.0, 1.0)), 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	if (lighting_debug == 7)
+	{
+		out_fragcolor = vec4(clamp(reflection_spec, 0.0, 1.0), 1.0);
 #if !OIT
 		out_velocity = vec4(0.0);
 #endif
