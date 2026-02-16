@@ -68,15 +68,11 @@ static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 
-extern cvar_t r_dynamic;
 extern cvar_t r_clustered_lighting;
 
 static qboolean R_DlightsAdditivePassEnabled (void)
 {
-	if (r_clustered_lighting.value > 0.f)
-		return false;
-
-	return (r_dynamic.value > 0.f);
+	return (r_clustered_lighting.value <= 0.f);
 }
 
 typedef struct godrays_stabilization_s
@@ -3775,7 +3771,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
-	if (r_dlight_mode.value > 0.f && R_DlightsAdditivePassEnabled () && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
+	if (r_dlight_mode.value > 0.f && R_DlightsAdditivePassEnabled () && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo && r_framedata.numlights > 0)
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())

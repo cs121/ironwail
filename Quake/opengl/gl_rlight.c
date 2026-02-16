@@ -592,8 +592,6 @@ static qboolean R_ClusteredEnabled (void)
 		return false;
 	if (r_clustered_lighting.value <= 0.f)
 		return false;
-	if (r_dynamic.value <= 0.f)
-		return false;
 	if (r_framedata.numlights <= 0)
 		return false;
 	return true;
@@ -1006,28 +1004,19 @@ void R_PushDlights (void)
 	r_framedata.numlights = 0;
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 
-	// Dynamic lights are controlled exclusively by r_dynamic.
-	if (r_dynamic.value > 0.f)
-	{
-		int hard_cap = CLAMP (1, (int)r_dlight_max.value, DLIGHT_GPU_MAX);
-		if (r_dlight_quality.value < 2.f)
-			hard_cap = q_min (hard_cap, 32);
-		const int budget = q_min (q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX), hard_cap);
-		DLightPool_NewFrame (cl.time, r_framecount);
-		const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
-		if (num_submit > 0)
-			R_PushDlightArray (submit, num_submit);
-		DLightPool_DebugPrintIfEnabled ();
-	}
-	else
-	{
-		DLightPool_NewFrame (cl.time, r_framecount);
-		DLightPool_DebugPrintIfEnabled ();
-	}
+	int hard_cap = CLAMP (1, (int)r_dlight_max.value, DLIGHT_GPU_MAX);
+	if (r_dlight_quality.value < 2.f)
+		hard_cap = q_min (hard_cap, 32);
+	const int budget = q_min (q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX), hard_cap);
+	DLightPool_NewFrame (cl.time, r_framecount);
+	const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
+	if (num_submit > 0)
+		R_PushDlightArray (submit, num_submit);
+	DLightPool_DebugPrintIfEnabled ();
 
 	R_UploadFrameData ();
 
-	clustered_enabled = (r_clustered_lighting.value > 0.f && r_dynamic.value > 0.f && r_framedata.numlights > 0);
+	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
 	if (clustered_enabled)
 	{
 		GL_BeginGroup ("Light clustering");
@@ -1116,9 +1105,6 @@ static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, in
 
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 {
-	if (!r_dynamic.value)
-		return;
-
 	int count = 0;
 	const dlight_t *const *active = DLightPool_GetActiveList (&count);
 	if (active && count > 0)
