@@ -96,9 +96,27 @@ static shadow_log_state_t shdlog;
 static qboolean shadow_sun_validated_once;
 static qboolean shadow_dlight_validated_once;
 static qboolean shadow_warned_sun_dir_sanitize;
-static qboolean shadow_warned_receiver_program_mismatch;
 static qboolean shadow_warned_matrix_sanitize;
 static char shadow_last_empty_sunpass_map[MAX_QPATH];
+
+typedef struct shadow_program_ubo_info_s {
+	GLuint program;
+	GLuint block_index;
+	GLint data_size;
+	qboolean has_block;
+	qboolean warned_missing;
+	qboolean warned_size;
+	qboolean logged_bind;
+} shadow_program_ubo_info_t;
+
+static shadow_program_ubo_info_t shadow_program_ubo_info[256];
+static int shadow_program_ubo_info_count;
+
+void R_Shadow_ResetUBOBindings (void)
+{
+	shadow_program_ubo_info_count = 0;
+	memset (shadow_program_ubo_info, 0, sizeof (shadow_program_ubo_info));
+}
 
 static void R_Shadow_LogWrite (const char *fmt, ...);
 
@@ -368,11 +386,10 @@ void R_Shadow_BindProgram (const char *tag, GLuint target_program)
 	if (r_shadow_log.value > 0.f || r_shadow_validate.value > 0.f)
 	{
 		R_Shadow_Log_BeginFrame ();
-		if (!shadow_warned_receiver_program_mismatch || shdlog.active)
+		if (shdlog.active)
 		{
-			R_Shadow_LogWrite ("WARN %s receiver program mismatch: target=%u current=%d -- rebinding target\n",
+			R_Shadow_LogWrite ("DEBUG %s receiver program rebind: target=%u current=%d\n",
 				tag ? tag : "SHADOW", (unsigned)target_program, (int)current_program);
-			shadow_warned_receiver_program_mismatch = true;
 		}
 	}
 
@@ -381,48 +398,80 @@ void R_Shadow_BindProgram (const char *tag, GLuint target_program)
 
 qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_name, GLuint binding_point)
 {
-	GLuint block_index;
-	GLint current_binding = -1;
+	shadow_program_ubo_info_t *info = NULL;
 	const char *name = (block_name && block_name[0]) ? block_name : FRAME_DATA_UBO_NAME;
-	GLint data_size = (GLint)sizeof (r_framedata);
+	int i;
 
 	if (!GL_GetUniformBlockIndexFunc || !GL_UniformBlockBindingFunc || !GL_GetActiveUniformBlockivFunc)
 		return false;
 
-	block_index = GL_GetUniformBlockIndexFunc (program, name);
-	if (block_index == GL_INVALID_INDEX)
+	for (i = 0; i < shadow_program_ubo_info_count; ++i)
 	{
-		if (r_shadow_log.value > 0.f || r_shadow_validate.value > 0.f)
+		if (shadow_program_ubo_info[i].program == program)
+		{
+			info = &shadow_program_ubo_info[i];
+			break;
+		}
+	}
+
+	if (!info)
+	{
+		GLuint block_index;
+		GLint current_binding = -1;
+		GLint data_size = (GLint)sizeof (r_framedata);
+
+		if (shadow_program_ubo_info_count >= (int)countof (shadow_program_ubo_info))
+			return false;
+
+		info = &shadow_program_ubo_info[shadow_program_ubo_info_count++];
+		memset (info, 0, sizeof (*info));
+		info->program = program;
+		info->block_index = GL_INVALID_INDEX;
+
+		block_index = GL_GetUniformBlockIndexFunc (program, name);
+		if (block_index != GL_INVALID_INDEX)
+		{
+			info->has_block = true;
+			info->block_index = block_index;
+			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_DATA_SIZE, &data_size);
+			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &current_binding);
+			info->data_size = data_size;
+			if (current_binding != (GLint)binding_point)
+				GL_UniformBlockBindingFunc (program, block_index, binding_point);
+		}
+	}
+
+	if (!info->has_block)
+	{
+		if (!info->warned_missing && (r_shadow_validate.value > 0.f || r_shadow_log.value > 0.f))
 		{
 			R_Shadow_Log_BeginFrame ();
 			if (shdlog.active)
 				R_Shadow_LogWrite ("WARN %s missing UBO block '%s' in program=%u\n",
 					tag ? tag : "SHADOW", name, (unsigned)program);
+			info->warned_missing = true;
 		}
 		return false;
 	}
 
-	GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_DATA_SIZE, &data_size);
-	GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &current_binding);
-	if (data_size != (GLint)sizeof (r_framedata))
+	if (info->data_size != (GLint)sizeof (r_framedata) && !info->warned_size)
 	{
 		R_Shadow_Log_BeginFrame ();
 		if (shdlog.active)
 			R_Shadow_LogWrite ("WARN %s UBO block '%s' size mismatch: got=%d expected=%d program=%u\n",
-				tag ? tag : "SHADOW", name, (int)data_size, (int)sizeof (r_framedata), (unsigned)program);
+				tag ? tag : "SHADOW", name, (int)info->data_size, (int)sizeof (r_framedata), (unsigned)program);
+		info->warned_size = true;
 	}
-	if (current_binding != (GLint)binding_point)
-		GL_UniformBlockBindingFunc (program, block_index, binding_point);
 
-	if (r_shadow_log.value > 0.f)
+	if (r_shadow_log.value > 0.f && !info->logged_bind)
 	{
-		GLint final_binding = current_binding;
-		if (final_binding != (GLint)binding_point)
-			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &final_binding);
+		GLint final_binding = -1;
+		GL_GetActiveUniformBlockivFunc (program, info->block_index, GL_UNIFORM_BLOCK_BINDING, &final_binding);
 		R_Shadow_Log_BeginFrame ();
 		if (shdlog.active)
 			R_Shadow_LogWrite ("UBO_BIND tag=%s program=%u block=%s index=%u binding=%d size=%d\n",
-				tag ? tag : "SHADOW", (unsigned)program, name, (unsigned)block_index, (int)final_binding, (int)data_size);
+				tag ? tag : "SHADOW", (unsigned)program, name, (unsigned)info->block_index, (int)final_binding, (int)info->data_size);
+		info->logged_bind = true;
 	}
 
 	return true;
@@ -435,8 +484,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	GLint loc_shadow_params = 0;
 	GLint loc_shadow_debug = 0;
 	GLuint frame_ubo_index = GL_INVALID_INDEX;
-	GLint frame_ubo_binding = -1;
-	GLint frame_ubo_data_size = -1;
+	GLint frame_ubo_binding = 0;
+	GLint frame_ubo_data_size = 0;
+	qboolean frame_ubo_metadata_valid = false;
 	const char *target_name = GL_GetProgramDebugName (target_program);
 	const char *target_defines = GL_GetProgramDebugDefines (target_program);
 	const char *target_vert = GL_GetProgramVertexShaderPath (target_program);
@@ -457,6 +507,7 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 		{
 			GL_GetActiveUniformBlockivFunc (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_BINDING, &frame_ubo_binding);
 			GL_GetActiveUniformBlockivFunc (target_program, frame_ubo_index, GL_UNIFORM_BLOCK_DATA_SIZE, &frame_ubo_data_size);
+			frame_ubo_metadata_valid = true;
 		}
 	}
 
@@ -478,9 +529,10 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 			(int)loc_shadow_debug);
 		if (frame_ubo_index != GL_INVALID_INDEX)
 		{
-			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=" FRAME_DATA_UBO_NAME " index=%u binding=%d data_size=%d\n",
-				tag ? tag : "SHADOW", (unsigned)frame_ubo_index, (int)frame_ubo_binding, (int)frame_ubo_data_size);
-			if (frame_ubo_binding < 0 || frame_ubo_data_size <= 0)
+			R_Shadow_LogWrite ("UPLOAD shadow uniforms via UBO: tag=%s block=" FRAME_DATA_UBO_NAME " index=%u binding=%d data_size=%d metadata=%s\n",
+				tag ? tag : "SHADOW", (unsigned)frame_ubo_index, (int)frame_ubo_binding, (int)frame_ubo_data_size,
+				frame_ubo_metadata_valid ? "ok" : "invalid");
+			if (!frame_ubo_metadata_valid)
 				R_Shadow_LogWrite ("WARN %s FrameDataUBO metadata invalid (binding=%d data_size=%d)\n",
 					tag ? tag : "SHADOW", (int)frame_ubo_binding, (int)frame_ubo_data_size);
 		}
