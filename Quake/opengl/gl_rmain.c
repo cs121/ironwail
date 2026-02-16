@@ -2638,6 +2638,16 @@ static void R_Fog_BeginFrame (void)
 
 static void R_Fog_Render (void)
 {
+	/*
+	 * Volumetric fog is compute-driven, but still explicitly pins baseline GL
+	 * state so this pass never depends on whatever transparent/world pass ran
+	 * before it.  STATEDBG markers around POST_FOG_* then reflect deterministic
+	 * state instead of leaks from previous draws.
+	 */
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	glDisable (GL_SCISSOR_TEST);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
 	if (!r_atmosphere.settings_valid)
 		r_atmosphere.settings = Atmosphere_ReadSettings ();
 
@@ -2681,10 +2691,18 @@ static void R_Fog_Render (void)
 		Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
 		r_atmosphere.settings.enabled_shafts = false;
 	}
+
+	/* Keep post-fog stage hand-off explicit as well. */
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 }
 
 static void R_Fog_Composite (void)
 {
+	/* Composite setup must be explicit: no inherited alpha blending. */
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	glDisable (GL_SCISSOR_TEST);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
 	static int last_composite_log_frame = -1000000;
 	if (r_fog_debug_composite_stage.value > 0.f && r_framecount - last_composite_log_frame >= 60)
 	{
@@ -2696,6 +2714,8 @@ static void R_Fog_Composite (void)
 		r_atmosphere.godrays_texture = GL_GenerateGodraysTexture (&r_atmosphere.godrays_mask);
 		r_atmosphere.godrays_ready = (r_atmosphere.godrays_texture != 0 || r_godrays_debug.value > 0.f);
 	}
+
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 }
 
 static void R_Fog_EndFrame (void)
