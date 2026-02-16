@@ -36,7 +36,6 @@ Atmosphere orchestration (gl_rmain.c / R_Atmosphere_Render)
 - Final post composite path:
   - `Quake/shaders/postprocess.frag`
 - Atmos shafts:
-  - `Quake/shaders/godrays_source*.frag`
   - `Quake/shaders/godrays_mask.frag`
   - `Quake/shaders/godrays.frag`
 

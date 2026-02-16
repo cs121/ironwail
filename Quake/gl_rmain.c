@@ -547,10 +547,6 @@ cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_quality = { "r_godrays_quality", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
-/* Deprecated godray cvars kept for backward compatibility; mapped to global r_godrays. */
-cvar_t	r_godrays_sky = { "r_godrays_sky", "0", CVAR_NONE };
-cvar_t	r_godrays_light = { "r_godrays_light", "0", CVAR_NONE };
-cvar_t	r_godrays_world = { "r_godrays_world", "0", CVAR_NONE };
 /* Unified fog controls. Froxel fog is the only volumetric fog backend. */
 cvar_t	r_fog_enable = { "r_fog_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_density = { "r_fog_density", "1.0", CVAR_ARCHIVE };
@@ -993,13 +989,8 @@ void GL_CreateFrameBuffers (void)
 
 	framebufs.godrays.width = q_max (1, vid.width / 2);
 	framebufs.godrays.height = q_max (1, vid.height / 2);
-	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RGBA16F, vid.width, vid.height, GL_LINEAR, "godrays source");
 	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
 	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
-	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
-		framebufs.composite.depth_stencil_tex,
-		framebufs.composite.depth_stencil_tex,
-		"godrays source fbo");
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
@@ -1131,7 +1122,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
-	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.source_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
 	for (int i = 0; i < 2; ++i)
@@ -1158,7 +1148,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
-	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
@@ -1772,7 +1761,6 @@ static GLuint R_RenderAO (float view_min_x, float view_min_y, float view_max_x, 
 	return framebufs.ssao.final_tex[index];
 }
 
-static qboolean r_godrays_deprecated_warned = false;
 static qboolean r_godrays_rt_logged = false;
 static qboolean r_ao_deprecated_warned = false;
 static int r_ao_last_logged_mode = -1;
@@ -1843,18 +1831,6 @@ void R_ResetGodraysStabilization (void)
 	r_godrays_stabilization.valid = false;
 }
 
-static void R_GodraysHandleDeprecatedCvars (void)
-{
-	if (r_godrays_deprecated_warned)
-		return;
-	if (r_godrays_sky.value > 0.f || r_godrays_light.value > 0.f || r_godrays_world.value > 0.f)
-	{
-		Con_Printf ("r_godrays_* per-source cvars are deprecated; use r_godrays only.\n");
-		r_godrays_deprecated_warned = true;
-		if (r_godrays.value <= 0.f)
-			Cvar_SetValueQuick (&r_godrays, 1.f);
-	}
-}
 
 static int R_GodraysQualityScaleDivisor (void)
 {
@@ -1929,7 +1905,6 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!glprogs.godrays_mask || !glprogs.godrays || !framebufs.composite.depth_stencil_tex)
 		return 0;
 
-	R_GodraysHandleDeprecatedCvars ();
 	quality_div = R_GodraysQualityScaleDivisor ();
 	R_ComputeGodraysSunScreenPos (&sun_x, &sun_y, &sun_visible);
 	if (!sun_visible && r_godrays_debug.value <= 0.f)

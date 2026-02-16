@@ -961,7 +961,6 @@ typedef enum {
         BP_SOLID,
         BP_ALPHATEST,
         BP_SHADOW,
-        BP_GODRAYS,
         BP_SKYLAYERS,
         BP_SKYCUBEMAP,
         BP_SKYSTENCIL,
@@ -1184,167 +1183,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
-static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
-{
-	int i, j;
-	int totalinst, baseinst;
-	GLuint buf;
-	GLbyte *ofs;
-	textype_t texbegin, texend;
-
-	if (!count || r_shaders.value <= 0.f || !glprogs.godrays_source)
-		return;
-
-	if (count > countof (bmodel_instances))
-	{
-		Con_DWarning ("bmodel instance overflow: %d > %d\n", count, (int)countof (bmodel_instances));
-		count = countof (bmodel_instances);
-	}
-
-	texbegin = 0;
-	texend = TEXTYPE_COUNT;
-
-	for (i = 0, totalinst = 0; i < count; i++)
-	{
-		entity_t *ent = ents[i];
-		if (!ent || !Mod_IsKnownModel (ent->model))
-			continue;
-		if (!R_BrushModelHasTextureTables (ent->model))
-			continue;
-		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
-			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
-	}
-
-	if (!totalinst)
-		return;
-
-	R_ResetBModelCalls (glprogs.godrays_source);
-	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
-	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
-
-	for (i = 0, baseinst = 0; i < count; /**/)
-	{
-		int numinst;
-		entity_t *e = ents[i++];
-		qmodel_t *model;
-
-		if (!e || !Mod_IsKnownModel (e->model))
-			continue;
-		model = e->model;
-		qboolean isworld = (e == &cl_entities[0]);
-		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
-		qboolean zfix = !isworld && !isstatic;
-		int numtex = model->texofs[texend] - model->texofs[texbegin];
-
-		if (model->texofs[TEXTYPE_COUNT] < 0
-			|| model->texofs[TEXTYPE_COUNT] > model->numtextures
-			|| model->texofs[texbegin] < 0
-			|| model->texofs[texend] < model->texofs[texbegin]
-			|| model->texofs[texend] > model->texofs[TEXTYPE_COUNT])
-		{
-			Con_DWarning ("R_DrawBrushModels_GodrayStages: invalid texofs for %s (%d..%d of %d)\n",
-				model->name, model->texofs[texbegin], model->texofs[texend], model->texofs[TEXTYPE_COUNT]);
-			continue;
-		}
-
-		if (!numtex)
-			continue;
-
-		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
-		{
-			if (!ents[i] || ents[i]->model != model)
-				break;
-			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
-		}
-
-		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
-		{
-			texture_t *t = R_GetUsedTexture (model, j, NULL);
-			const shader_material_t *material;
-			unsigned mat_flags = 0u;
-			size_t stage_count;
-
-			if (!t || !R_ValidPtr (t))
-				continue;
-
-			if (!t->shader || !t->shader->stages)
-				continue;
-
-			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
-			if (mat_flags & MAT_SHADERFLAG_NODRAW)
-				continue;
-
-			material = t->shader;
-			stage_count = material->stages ? VEC_SIZE (material->stages) : 0;
-			if (!stage_count)
-				continue;
-
-			for (size_t stage_index = 0; stage_index < stage_count; stage_index++)
-			{
-				const mat_shader_stage_t *stage = &material->stages[stage_index];
-				gltexture_t *stage_tex;
-				gltexture_t *fb = NULL;
-				gltexture_t *em = NULL;
-				vec4_t stage_color;
-				const mat_texmatrix_t *stage_texmatrix;
-				unsigned extra_flags = CALLFLAG_MAT_HAS_SHADER;
-				qboolean wants_emissive = (stage->outputs & MAT_STAGE_OUT_EMISSIVE) != 0u;
-
-				if (stage->map_type == MAT_MAP_MAP && (!stage->map_path || !stage->map_path[0]) && stage_index == 0)
-					stage_tex = t->gltexture;
-				else
-					stage_tex = R_FindStageTexture (model, stage, cl.time);
-
-				if (!stage_tex)
-					continue;
-
-				R_EvalStageColorAlpha (stage, cl.time, stage_color);
-				stage_texmatrix = MatStage_EvalTexMatrix ((mat_shader_stage_t *)stage, cl.time);
-
-				if (stage_index == 0 && stage_tex == t->gltexture)
-				{
-					fb = t->fullbright;
-					em = t->emissive;
-					if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
-						fb = NULL;
-				}
-
-				if (wants_emissive)
-				{
-					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
-					extra_flags |= CALLFLAG_MAT_EMISSIVE;
-				}
-
-
-				if (t->type == TEXTYPE_CUTOUT || stage->alpha_func != MAT_ALPHAFUNC_NONE)
-					extra_flags |= CALLFLAG_ALPHA_TEST;
-
-				{
-					float polygon_offset_factor;
-					float polygon_offset_units;
-					qboolean use_polygon_offset = zfix || material->polygon_offset;
-
-					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
-					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-						stage_tex, fb, em, R_ResolveStageTcGen (stage),
-						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color, stage_texmatrix);
-				}
-			}
-		}
-
-		baseinst += numinst;
-	}
-
-	if (num_bmodel_calls)
-		R_FlushBModelCalls ();
-
-	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
-}
-
 /*
 =============
 R_DrawBrushModels_Real
@@ -1389,11 +1227,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_CUTOUT;
                 program = glprogs.shadow_depth;
                 break;
-        case BP_GODRAYS:
-                texbegin = 0;
-                texend = TEXTYPE_COUNT;
-                program = glprogs.godrays_source;
-                break;
         case BP_SKYLAYERS:
                 texbegin = TEXTYPE_SKY;
                 texend = TEXTYPE_SKY + 1;
@@ -1431,8 +1264,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 		entity_t *ent = ents[i];
 		if (!ent || !Mod_IsKnownModel (ent->model))
 			continue;
-		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (ent->model))
-			continue;
 		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
 	}
@@ -1442,8 +1273,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
-        else if (pass == BP_GODRAYS)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (pass == BP_SHADOW)
         {
@@ -1484,8 +1313,6 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 		if (!e || !Mod_IsKnownModel (e->model))
 			continue;
 		model = e->model;
-		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
-			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 		qboolean zfix = !isworld && !isstatic;
@@ -1528,13 +1355,6 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
 			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
 			if (mat_flags & MAT_SHADERFLAG_NODRAW)
 				continue;
-
-			if (pass == BP_GODRAYS)
-			{
-				if (r_shaders.value <= 0.f || !t->shader || !t->shader->stages)
-					continue;
-				continue;
-			}
 
 			if (r_shaders.value > 0.f && t->shader)
 			{
@@ -1836,20 +1656,6 @@ void R_DrawBrushModels_DLights (entity_t **ents, int count)
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
 }
-
-/*
-=============
-R_DrawBrushModels_Godrays
-=============
-*/
-void R_DrawBrushModels_Godrays (entity_t **ents, int count)
-{
-	if (!count || !glprogs.godrays_source)
-		return;
-
-	R_DrawBrushModels_GodrayStages (ents, count);
-}
-
 
 /*
 =============
