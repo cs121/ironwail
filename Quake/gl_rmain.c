@@ -562,12 +562,9 @@ cvar_t	r_fog_debug_scattering = { "r_fog_debug_scattering", "0", CVAR_NONE };
 cvar_t	r_fog_debug_light_injection = { "r_fog_debug_light_injection", "0", CVAR_NONE };
 cvar_t	r_fog_debug_step_length = { "r_fog_debug_step_length", "0", CVAR_NONE };
 
-cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
-cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
-cvar_t	r_atmos_log = { "r_atmos_log", "0", CVAR_NONE };
-cvar_t	r_atmos_froxel_res = { "r_atmos_froxel_res", "1", CVAR_ARCHIVE };
-cvar_t	r_atmos_zslices = { "r_atmos_zslices", "64", CVAR_ARCHIVE };
-cvar_t	r_atmos_historyweight = { "r_atmos_historyweight", "0.9", CVAR_ARCHIVE };
+cvar_t	r_fog_log = { "r_fog_log", "0", CVAR_NONE };
+cvar_t	r_fog_froxel_res = { "r_fog_froxel_res", "1", CVAR_ARCHIVE };
+cvar_t	r_fog_zslices = { "r_fog_zslices", "64", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
@@ -920,9 +917,9 @@ void GL_CreateFrameBuffers (void)
 		"composite fbo"
 	);
 	{
-		int froxel_res = CLAMP (0, (int)Q_rint (r_atmos_froxel_res.value), 3);
+		int froxel_res = CLAMP (0, (int)Q_rint (r_fog_froxel_res.value), 3);
 		int downsample = (froxel_res <= 0) ? 4 : (froxel_res == 1 ? 2 : (froxel_res == 2 ? 1 : 1));
-		int zslices = CLAMP (8, (int)Q_rint (r_atmos_zslices.value), 128);
+		int zslices = CLAMP (8, (int)Q_rint (r_fog_zslices.value), 128);
 		framebufs.atmos_froxel.width = q_max (1, (vid.width + downsample - 1) / downsample);
 		framebufs.atmos_froxel.height = q_max (1, (vid.height + downsample - 1) / downsample);
 		framebufs.atmos_froxel.depth = zslices;
@@ -2320,9 +2317,7 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	settings.anisotropy = CLAMP (-0.9f, r_fog_anisotropy.value, 0.9f);
 	settings.steps = (float)(16 + quality * 16);
 	settings.history_weight = CLAMP (0.f, r_fog_history_weight.value, 1.f);
-	if (r_atmos_historyweight.value != 0.9f)
-		settings.history_weight = CLAMP (0.f, r_atmos_historyweight.value, 1.f);
-	settings.debug_mode = CLAMP (0.f, q_max (r_fog_debug.value, r_atmos_debug.value), 6.f);
+	settings.debug_mode = CLAMP (0.f, r_fog_debug.value, 6.f);
 	settings.enabled_shafts = false;
 	return settings;
 }
@@ -2330,7 +2325,7 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 
 static void R_Atmosphere_LogSettings (const atmosphere_settings_t *settings, const char *stage)
 {
-	if (r_atmos_log.value <= 0.f || !settings)
+	if (r_fog_log.value <= 0.f || !settings)
 		return;
 	Con_Printf ("atmos[%s] mode=%d fog=%d shafts=%d vol=%d froxel=%d shadow=%d density=%.5f anisotropy=%.5f steps=%.1f history=%.3f debug=%.0f\n",
 		stage ? stage : "?",
@@ -2725,7 +2720,7 @@ void GL_PostProcess (void)
 		(float)framebufs.atmos_froxel.height,
 		(float)framebufs.atmos_froxel.depth);
 	GL_Uniform4fFunc (29,
-		(float)q_max (1, (int)Q_rint (r_atmos_froxel_res.value)),
+		(float)q_max (1, (int)Q_rint (r_fog_froxel_res.value)),
 		(float)framebufs.atmos_froxel.depth,
 		q_max (view_zfar, 1.f),
 		0.f);
