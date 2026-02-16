@@ -16,7 +16,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	mat4	ViewProj;
 	mat4	PrevViewProj;
 	vec3	EyePos;
-	float	_Pad0;
+	float	_ShadowAliasPad0;
 	vec4	Fog;
 	float	ScreenDither;
 	float	Overbright;

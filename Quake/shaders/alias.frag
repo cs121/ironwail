@@ -19,7 +19,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	mat4	AliasViewProj;
 	mat4	AliasPrevViewProj;
 	vec3	AliasEyePos;
-	float	_Pad0;
+	float	_AliasPad0;
 	vec4	AliasFog;
 	float	AliasScreenDither;
 	float	AliasOverbright;
