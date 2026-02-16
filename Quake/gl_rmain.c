@@ -480,11 +480,16 @@ cvar_t	r_fog_backend = { "r_fog_backend", "1", CVAR_ARCHIVE }; /* 0=legacy, 1=fr
 cvar_t	r_fog_density = { "r_fog_density", "1.0", CVAR_ARCHIVE };
 cvar_t	r_fog_quality = { "r_fog_quality", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_temporal = { "r_fog_temporal", "1", CVAR_ARCHIVE };
-cvar_t	r_fog_history_weight = { "r_fog_history_weight", "0.9", CVAR_ARCHIVE };
+cvar_t	r_fog_history_weight = { "r_fog_history_weight", "0.85", CVAR_ARCHIVE };
 cvar_t	r_fog_jitter = { "r_fog_jitter", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_anisotropy = { "r_fog_anisotropy", "0.2", CVAR_ARCHIVE };
 cvar_t	r_fog_debug = { "r_fog_debug", "0", CVAR_NONE };
 cvar_t	r_fog_validate = { "r_fog_validate", "0", CVAR_NONE };
+cvar_t	r_fog_debug_density = { "r_fog_debug_density", "0", CVAR_NONE };
+cvar_t	r_fog_debug_transmittance = { "r_fog_debug_transmittance", "0", CVAR_NONE };
+cvar_t	r_fog_debug_scattering = { "r_fog_debug_scattering", "0", CVAR_NONE };
+cvar_t	r_fog_debug_light_injection = { "r_fog_debug_light_injection", "0", CVAR_NONE };
+cvar_t	r_fog_debug_step_length = { "r_fog_debug_step_length", "0", CVAR_NONE };
 
 cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
@@ -563,6 +568,7 @@ cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
 cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
 cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
 
+extern void R_Clustered_BindForShading (void);
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
 //johnfitz
@@ -2197,7 +2203,7 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R16F);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
-	GL_Uniform4fFunc (1, settings->density, CLAMP (0.f, r_fog_anisotropy.value * 0.5f + 0.8f, 1.f), 1.0f, 0.02f);
+	GL_Uniform4fFunc (1, settings->density, 0.0025f, 0.92f, 0.0f);
 	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], 1.0f);
 	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
@@ -2210,6 +2216,7 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *settings)
 {
 	int gx, gy, gz;
+	int debug_mode = 0;
 	if (!settings || !glprogs.atmos_froxel_integrate)
 		return;
 	gx = (framebufs.atmos_froxel.width + 3) / 4;
@@ -2217,11 +2224,23 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	gz = (framebufs.atmos_froxel.depth + 3) / 4;
 	GL_BeginGroup ("Atmosphere: Froxel LightIntegrate");
 	GL_UseProgram (glprogs.atmos_froxel_integrate);
+	R_Clustered_BindForShading ();
 	R_Shadow_BindShadowMap (GL_TEXTURE6);
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R16F);
+	if (r_fog_debug_density.value > 0.f)
+		debug_mode = 1;
+	else if (r_fog_debug_transmittance.value > 0.f)
+		debug_mode = 2;
+	else if (r_fog_debug_scattering.value > 0.f)
+		debug_mode = 3;
+	else if (r_fog_debug_light_injection.value > 0.f)
+		debug_mode = 4;
+	else if (r_fog_debug_step_length.value > 0.f)
+		debug_mode = 5;
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
 	GL_Uniform4fFunc (1, settings->anisotropy, 1.0f, settings->shadow_enable ? 1.f : 0.f, 0.f);
+	GL_Uniform4fFunc (2, (float)debug_mode, settings->density, q_max (view_zfar, 1.f), 0.f);
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -2692,6 +2711,11 @@ void GL_PostProcess (void)
 		(float)framebufs.atmos_froxel.depth,
 		q_max (view_zfar, 1.f),
 		0.f);
+	GL_Uniform4fFunc (30,
+		r_fog_debug_density.value > 0.f ? 1.f : 0.f,
+		r_fog_debug_transmittance.value > 0.f ? 1.f : 0.f,
+		r_fog_debug_scattering.value > 0.f ? 1.f : 0.f,
+		r_fog_debug_light_injection.value > 0.f ? 1.f : (r_fog_debug_step_length.value > 0.f ? 2.f : 0.f));
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);

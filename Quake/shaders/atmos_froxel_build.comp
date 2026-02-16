@@ -4,8 +4,8 @@ layout(r16f, binding=1) uniform image3D OutTransmittance;
 #include "frame_uniforms.glsl"
 
 layout(location=0) uniform vec4 FroxelDims;
-layout(location=1) uniform vec4 MediumParams0; // x density, y falloff, z albedo, w emissive
-layout(location=2) uniform vec4 MediumParams1; // rgb color, w intensity
+layout(location=1) uniform vec4 MediumParams0; // x density, y height falloff, z albedo, w emissive
+layout(location=2) uniform vec4 MediumParams1; // rgb albedo tint, w intensity
 layout(location=3) uniform vec4 Jitter;
 layout(location=4) uniform vec4 VolumeMins; // xyz mins, w enable
 layout(location=5) uniform vec4 VolumeMaxs; // xyz maxs, w reserved
@@ -29,13 +29,32 @@ vec3 Atmosphere_ViewToWorld(vec3 viewPos)
     return EyePos + invViewRot * viewPos;
 }
 
-void Atmosphere_EvalMedium(vec3 worldPos, vec3 viewPos, out float sigma_t, out vec3 sigma_s)
+float Hash13(vec3 p)
 {
-    float h = max(0.0, worldPos.z);
-    float density = MediumParams0.x * exp(-MediumParams0.y * h);
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+void Atmosphere_EvalMedium(vec3 worldPos, out float sigma_t, out vec3 sigma_s)
+{
+    float heightBase = max(worldPos.z, 0.0);
+    float heightFalloff = max(MediumParams0.y, 1e-4);
+    float heightDensity = exp(-heightFalloff * heightBase);
+
+    float coarseNoise = Hash13(floor(worldPos * 0.015625));
+    float fineNoise = Hash13(worldPos * 0.0625 + vec3(Time * 0.15));
+    float noise = mix(coarseNoise, fineNoise, 0.5);
+    float noiseMod = mix(0.85, 1.15, noise);
+
+    float density = max(MediumParams0.x, 0.0) * heightDensity * noiseMod;
     sigma_t = max(density, 0.0);
-    sigma_s = sigma_t * MediumParams1.rgb * MediumParams0.z * max(MediumParams1.w, 0.0);
-    sigma_s += MediumParams1.rgb * max(MediumParams0.w, 0.0);
+
+    vec3 albedoColor = clamp(MediumParams1.rgb, vec3(0.0), vec3(1.0));
+    float albedo = clamp(MediumParams0.z, 0.0, 1.0);
+    float intensity = max(MediumParams1.w, 0.0);
+    sigma_s = sigma_t * albedoColor * albedo * intensity;
+    sigma_s += albedoColor * max(MediumParams0.w, 0.0);
 }
 
 void main()
@@ -45,16 +64,18 @@ void main()
         return;
 
     vec2 uv = (vec2(coord.xy) + vec2(0.5) + Jitter.xy) / max(FroxelDims.xy, vec2(1.0));
-    float viewDepth = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
+    float z0 = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
+    float z1 = Atmosphere_Froxel_ZToViewDepth(float(coord.z + 1));
+    float stepLen = max(1e-3, z1 - z0);
     vec3 ray = Atmosphere_Froxel_InvProjRay(uv);
-    vec3 viewPos = ray * viewDepth;
+    vec3 viewPos = ray * (z0 + 0.5 * stepLen);
     vec3 worldPos = Atmosphere_ViewToWorld(viewPos);
 
     float sigma_t;
     vec3 sigma_s;
     bool injectMode = (Jitter.z > 0.5);
 
-    Atmosphere_EvalMedium(worldPos, viewPos, sigma_t, sigma_s);
+    Atmosphere_EvalMedium(worldPos, sigma_t, sigma_s);
 
     if (injectMode)
     {
@@ -70,13 +91,13 @@ void main()
         vec4 prevTrans = imageLoad(OutTransmittance, coord);
         float newSigmaT = max(0.0, prevScatter.a + sigma_t);
         vec3 newSigmaS = max(vec3(0.0), prevScatter.rgb + sigma_s);
-        float newTrans = clamp(prevTrans.r * exp(-sigma_t), 0.0, 1.0);
+        float newTrans = clamp(prevTrans.r * exp(-sigma_t * stepLen), 0.0, 1.0);
         imageStore(OutScatter, coord, vec4(newSigmaS, newSigmaT));
         imageStore(OutTransmittance, coord, vec4(newTrans, 0.0, 0.0, 0.0));
     }
     else
     {
         imageStore(OutScatter, coord, vec4(sigma_s, sigma_t));
-        imageStore(OutTransmittance, coord, vec4(exp(-sigma_t), 0.0, 0.0, 0.0));
+        imageStore(OutTransmittance, coord, vec4(exp(-sigma_t * stepLen), 0.0, 0.0, 0.0));
     }
 }

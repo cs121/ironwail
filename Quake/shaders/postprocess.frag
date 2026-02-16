@@ -176,6 +176,7 @@ layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: deb
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
 layout(location=28) uniform vec4 AtmosFroxelParams0; // x: enabled, yzw: dimensions
 layout(location=29) uniform vec4 AtmosFroxelParams1; // x: downsample, y: z slices, z: z far, w: reserved
+layout(location=30) uniform vec4 FogDebugViews; // x density, y transmittance, z scattering, w light/step
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -800,10 +801,35 @@ void main()
                 float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
                 float zFar = max(AtmosFroxelParams1.z, 1.0);
                 float zNorm = clamp(log2(depth + 1.0) / log2(zFar + 1.0), 0.0, 1.0);
-                vec3 froxelUVW = vec3(uv, zNorm);
-                vec3 froxelScatter = texture(AtmosFroxelScatter, froxelUVW).rgb;
-                float froxelTransmittance = texture(AtmosFroxelTransmittance, froxelUVW).r;
-                combined = combined * clamp(froxelTransmittance, 0.0, 1.0) + froxelScatter;
+                float zSlicesF = max(AtmosFroxelParams1.y, 1.0);
+                int zSlices = int(zSlicesF + 0.5);
+                int maxSlice = clamp(int(floor(zNorm * zSlicesF)), 0, zSlices - 1);
+                vec3 accumScatter = vec3(0.0);
+                float accumT = 1.0;
+                for (int zi = 0; zi < 128; ++zi)
+                {
+                        if (zi > maxSlice || zi >= zSlices)
+                                break;
+                        float zf = (float(zi) + 0.5) / zSlicesF;
+                        vec3 froxelUVW = vec3(uv, zf);
+                        vec3 stepScatter = texture(AtmosFroxelScatter, froxelUVW).rgb;
+                        float stepTrans = clamp(texture(AtmosFroxelTransmittance, froxelUVW).r, 0.0, 1.0);
+                        accumScatter += accumT * stepScatter;
+                        accumT *= stepTrans;
+                }
+
+                if (FogDebugViews.x > 0.5)
+                        combined = accumScatter;
+                else if (FogDebugViews.y > 0.5)
+                        combined = vec3(accumT);
+                else if (FogDebugViews.z > 0.5)
+                        combined = accumScatter;
+                else if (FogDebugViews.w > 1.5)
+                        combined = vec3(float(maxSlice + 1) / zSlicesF);
+                else if (FogDebugViews.w > 0.5)
+                        combined = accumScatter;
+                else
+                        combined = combined * clamp(accumT, 0.0, 1.0) + accumScatter;
         }
         else if (fogStrength > 0.0 && depthInfo.valid)
         {
