@@ -1760,7 +1760,8 @@ static qboolean R_GodraysReady (void)
 
 static qboolean R_ComputeGodraysSunScreenPos (float *out_x, float *out_y, qboolean *out_visible)
 {
-	vec3_t sun_dir, sun_point, clip;
+	vec3_t sun_dir, sun_point;
+	vec4_t clip;
 	float inv_w;
 
 	if (!out_x || !out_y || !out_visible)
