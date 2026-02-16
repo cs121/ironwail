@@ -2,6 +2,7 @@ layout(binding=0) uniform sampler2D DepthTexture;
 layout(binding=1) uniform sampler2D NoiseTexture;
 
 #include "frame_uniforms.glsl"
+#include "depth_common.glsl"
 
 layout(location=0) uniform mat4 u_proj;
 layout(location=1) uniform mat4 u_invProj;
@@ -145,23 +146,6 @@ vec2 ScreenUvFromPixel(ivec2 pixel)
 }
 
 // Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
-float DepthToNdcZ(float depth, float reversed, int mode)
-{
-        float raw = depth;
-        if (mode == 1)
-                raw = 1.0 - raw;
-        if (reversed > 0.5)
-        {
-                if (mode == 2)
-                        raw = 1.0 - raw;
-                return raw;
-        }
-        float ndc = raw * 2.0 - 1.0;
-        if (mode == 2)
-                ndc = -ndc;
-        return ndc;
-}
-
 vec3 ReconstructViewPos(vec2 uv, float depth);
 
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
@@ -184,7 +168,7 @@ float DepthRawFromUv(vec2 uv)
 
 vec3 ReconstructViewPos(vec2 uv, float depth)
 {
-        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+        float ndcDepth = DepthRawToNdcDebug(depth, u_depthParams.z, u_reversedZMode);
         vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
         vec4 view = u_invProj * clip;
         float w = view.w;
@@ -207,15 +191,6 @@ vec3 ComputeNormalFromViewPos(vec3 viewPos)
         return normal;
 }
 
-bool IsSkyDepth(float depth, vec4 depthParams)
-{
-        float reversed = depthParams.z;
-        float cutoff = depthParams.w;
-        if (reversed > 0.5)
-                return depth <= cutoff;
-        return depth >= cutoff;
-}
-
 vec3 ReconstructNormalFromDepth(vec2 uv)
 {
         ivec2 centerPixel = ScreenPixelFromUv(uv);
@@ -227,21 +202,21 @@ vec3 ReconstructNormalFromDepth(vec2 uv)
         ivec2 downPixel = ivec2(clamp(vec2(centerPixel - ivec2(0, 1)), viewMinPx, viewMaxPx));
 
         float centerDepth = DepthRawFromPixel(centerPixel);
-        if (IsSkyDepth(centerDepth, u_depthParams))
+        if (DepthIsSkyDepth(centerDepth, u_depthParams.z, u_depthParams.w))
                 return vec3(0.0, 0.0, 1.0);
 
         vec2 uvCenter = ScreenUvFromPixel(centerPixel);
         vec3 p = ReconstructViewPos(uvCenter, centerDepth);
         float depthRight = DepthRawFromPixel(rightPixel);
-        if (IsSkyDepth(depthRight, u_depthParams))
+        if (DepthIsSkyDepth(depthRight, u_depthParams.z, u_depthParams.w))
                 depthRight = DepthRawFromPixel(leftPixel);
-        vec2 uvRight = ScreenUvFromPixel(IsSkyDepth(depthRight, u_depthParams) ? centerPixel : rightPixel);
+        vec2 uvRight = ScreenUvFromPixel(DepthIsSkyDepth(depthRight, u_depthParams.z, u_depthParams.w) ? centerPixel : rightPixel);
         vec3 pr = ReconstructViewPos(uvRight, depthRight);
 
         float depthUp = DepthRawFromPixel(upPixel);
-        if (IsSkyDepth(depthUp, u_depthParams))
+        if (DepthIsSkyDepth(depthUp, u_depthParams.z, u_depthParams.w))
                 depthUp = DepthRawFromPixel(downPixel);
-        vec2 uvUp = ScreenUvFromPixel(IsSkyDepth(depthUp, u_depthParams) ? centerPixel : upPixel);
+        vec2 uvUp = ScreenUvFromPixel(DepthIsSkyDepth(depthUp, u_depthParams.z, u_depthParams.w) ? centerPixel : upPixel);
         vec3 pu = ReconstructViewPos(uvUp, depthUp);
 
         vec3 normal = normalize(cross(pr - p, pu - p));
@@ -339,7 +314,7 @@ void main()
         }
         if (debugMode == 5)
         {
-                if (IsSkyDepth(depth, u_depthParams))
+                if (DepthIsSkyDepth(depth, u_depthParams.z, u_depthParams.w))
                 {
                         outColor = vec4(1.0);
                         return;
@@ -356,7 +331,7 @@ void main()
         }
         if (debugMode == 6)
         {
-                if (IsSkyDepth(depth, u_depthParams))
+                if (DepthIsSkyDepth(depth, u_depthParams.z, u_depthParams.w))
                 {
                         outColor = vec4(1.0);
                         return;
@@ -372,7 +347,7 @@ void main()
                 outColor = vec4(v, v, v, 1.0);
                 return;
         }
-        if (IsSkyDepth(depth, u_depthParams))
+        if (DepthIsSkyDepth(depth, u_depthParams.z, u_depthParams.w))
         {
                 outColor = vec4(1.0);
                 return;
@@ -421,7 +396,7 @@ void main()
                 if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
                         continue;
                 float sampleDepth = DepthRawFromUv(sampleUV);
-                if (IsSkyDepth(sampleDepth, u_depthParams))
+                if (DepthIsSkyDepth(sampleDepth, u_depthParams.z, u_depthParams.w))
                         continue;
                 float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepth, u_depthParams.z > 0.5);
                 if (IsInvalidFloat(sampleViewDepth))

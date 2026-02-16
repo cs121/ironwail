@@ -1,3 +1,5 @@
+#include "depth_common.glsl"
+
 float AO_Hash12(vec2 p)
 {
         vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -5,16 +7,9 @@ float AO_Hash12(vec2 p)
         return fract((p3.x + p3.y) * p3.z);
 }
 
-float AO_DepthToNdc(float depth, float reversedZ)
-{
-        if (reversedZ > 0.5)
-                return depth;
-        return depth * 2.0 - 1.0;
-}
-
 vec3 AO_ReconstructViewPos(mat4 invProj, vec2 uv, float depth, float reversedZ)
 {
-        vec4 clip = vec4(uv * 2.0 - 1.0, AO_DepthToNdc(depth, reversedZ), 1.0);
+        vec4 clip = vec4(uv * 2.0 - 1.0, DepthRawToNdc(depth, reversedZ), 1.0);
         vec4 view = invProj * clip;
         float w = max(abs(view.w), 1e-6);
         return view.xyz / w;

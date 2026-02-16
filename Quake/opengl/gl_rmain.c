@@ -3091,6 +3091,26 @@ Wrapper around glDepthRange that handles clip control/reversed Z differences
 */
 void GL_DepthRange (zrange_t range)
 {
+	/*
+	Reverse-Z / Normal-Z invariants (source of truth):
+
+	1) Context setup (GL_SetupState):
+	   - Reverse-Z path (gl_clipcontrol_able):
+	       ClipControl = GL_ZERO_TO_ONE, ClearDepth = 0, DepthFunc = GL_GEQUAL.
+	   - Normal path:
+	       default clip space (-1..1), ClearDepth = 1, DepthFunc = GL_LEQUAL.
+
+	2) Depth range wrappers must preserve draw ordering semantics:
+	   - ZRANGE_FULL:      [0, 1] in both modes.
+	   - ZRANGE_VIEWMODEL: [0.7, 1] in reverse-Z, [0, 0.3] in normal-Z.
+	   - ZRANGE_NEAR:      [1, 1] in reverse-Z, [0, 0] in normal-Z.
+
+	3) All mode-dependent depth compares map through R_MapDepthFunc(),
+	   so material depth funcs keep the same logical meaning across modes.
+
+	These invariants are consumed by projection/depth reconstruction shaders and
+	the sky-depth cutoffs sent from GL_GenerateLegacySSAOTexture().
+	*/
 	switch (range)
 	{
 	default:

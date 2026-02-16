@@ -10,6 +10,7 @@ layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform samplerCube ReflectionTex;
 #include "frame_uniforms.glsl"
+#include "depth_common.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -279,9 +280,9 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 float DepthToCanonical(float depth)
 {
 #if REVERSED_Z
-	return 1.0 - depth;
+	return DepthRawToCanonical(depth, 1.0);
 #else
-	return depth;
+	return DepthRawToCanonical(depth, 0.0);
 #endif
 }
 
