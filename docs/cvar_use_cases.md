@@ -248,9 +248,6 @@ Total registered cvars reviewed: **627**.
 | `r_godrays` | `0` |
 | `r_godrays_quality` | `1` |
 | `r_godrays_debug` | `0` |
-| `r_godrays_sky` *(deprecated)* | `0` |
-| `r_godrays_light` *(deprecated)* | `0` |
-| `r_godrays_world` *(deprecated)* | `0` |
 | `r_lerplightstyles` | `1` |
 | `r_lerpmodels` | `1` |
 | `r_lerpmove` | `1` |

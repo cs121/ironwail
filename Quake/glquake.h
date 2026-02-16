@@ -510,7 +510,6 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
 void R_DrawBrushModels_DLights (entity_t **ents, int count);
-void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -606,8 +605,6 @@ typedef struct glprogs_s {
 	GLuint		ao_bent_pack;
 	GLuint		godrays_mask;
 	GLuint		godrays;
-	GLuint		godrays_source;
-	GLuint		godrays_source_sky;
 	GLuint		atmos_froxel_build;
 	GLuint		atmos_froxel_integrate;
 	GLuint		atmos_froxel_temporal;
@@ -702,10 +699,8 @@ typedef struct glframebufs_s {
 	}				dlight;
 
 	struct {
-		GLuint		source_tex;
 		GLuint		mask_tex;
 		GLuint		shafts_tex;
-		GLuint		source_fbo;
 		GLuint		mask_fbo;
 		GLuint		shafts_fbo;
 		int			width;
