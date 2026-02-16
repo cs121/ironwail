@@ -48,7 +48,13 @@ extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
 extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_shadow_sun_color;
+extern cvar_t r_shadow_sun_intensity;
 extern cvar_t r_sun_fallback;
+extern cvar_t r_sun_force_fallback;
+extern cvar_t r_sun_allow_no_sun;
+extern cvar_t r_sun_distance;
+extern cvar_t r_sun_debug;
 
 cvar_t r_debug_itemlight = { "r_debug_itemlight", "0", CVAR_NONE };
 cvar_t r_minlight_models = { "r_minlight_models", "0.02", CVAR_ARCHIVE };
@@ -223,84 +229,231 @@ static qboolean R_EntityHasSunClassname (const char *classname)
 		|| !q_strcasecmp (classname, "env_sun");
 }
 
+static void R_ParseSunColor (const char *value, vec3_t out_color)
+{
+	float r = 1.f, g = 1.f, b = 1.f;
+	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
+	{
+		if (r > 2.f || g > 2.f || b > 2.f)
+		{
+			r *= 1.f / 255.f;
+			g *= 1.f / 255.f;
+			b *= 1.f / 255.f;
+		}
+	}
+	out_color[0] = CLAMP (0.f, r, 8.f);
+	out_color[1] = CLAMP (0.f, g, 8.f);
+	out_color[2] = CLAMP (0.f, b, 8.f);
+}
+
+static qboolean R_ParseSunDir (const char *value, vec3_t out_dir)
+{
+	float x, y, z;
+	if (!value || sscanf (value, "%f %f %f", &x, &y, &z) != 3)
+		return false;
+	VectorSet (out_dir, x, y, z);
+	if (VectorNormalize (out_dir) == 0.f)
+		return false;
+	return true;
+}
+
+static qboolean R_ParseSunMangle (const char *value, vec3_t out_dir)
+{
+	vec3_t angles, forward;
+	if (!value || sscanf (value, "%f %f %f", &angles[0], &angles[1], &angles[2]) != 3)
+		return false;
+	AngleVectors (angles, forward, NULL, NULL);
+	VectorCopy (forward, out_dir);
+	if (VectorNormalize (out_dir) == 0.f)
+		return false;
+	return true;
+}
+
+static qboolean R_CvarDiffersDefault (const cvar_t *var)
+{
+	if (!var || !var->string || !*var->string)
+		return false;
+	if (!var->default_string)
+		return true;
+	return q_strcasecmp (var->string, var->default_string) != 0;
+}
+
 void R_UpdateSunFallback (void)
 {
 	const char *data;
-	qboolean has_worldspawn_sun = false;
-	qboolean has_entity_sun = false;
-	qboolean has_runtime_sun = false;
+	qboolean map_has_sun = false;
+	qboolean map_explicit_no_sun = false;
+	qboolean entity_has_sun = false;
+	qboolean cvar_has_sun = false;
+	qboolean fallback_allowed;
+	qboolean fallback_used = false;
+	qboolean use_fallback;
 	int entity_index = 0;
+	qboolean is_worldspawn_entity = false;
+	qboolean map_has_color = false;
+	float map_intensity = 1.f;
+	vec3_t map_dir = { 0.3f, 0.5f, -1.f };
+	vec3_t map_color = { 1.f, 1.f, 1.f };
+	vec3_t cvar_dir = { 0.3f, 0.5f, -1.f };
+	vec3_t cvar_color = { 1.f, 1.f, 1.f };
+	float cvar_intensity = 1.f;
 
-	VectorSet (r_sun_origin, 0.f, 0.f, 8192.f);
-	VectorSet (r_sun_dir_override, 0.f, 0.f, -1.f);
-	r_sun_dir_override_active = false;
+	r_sun.enabled = false;
+	VectorSet (r_sun.direction, 0.f, 0.f, -1.f);
+	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+	r_sun.intensity = 1.f;
+	VectorSet (r_sun.virtual_origin, 0.f, 0.f, 8192.f);
+	r_sun.source = SUN_SOURCE_NONE;
+	VectorSet (r_sun.dir_viewspace, 0.f, 0.f, -1.f);
 
-	if (!cl.worldmodel || !cl.worldmodel->entities)
-		return;
+	if (VectorNormalize (map_dir) == 0.f)
+		VectorSet (map_dir, 0.f, 0.f, -1.f);
+	if (VectorNormalize (cvar_dir) == 0.f)
+		VectorSet (cvar_dir, 0.f, 0.f, -1.f);
 
-	data = cl.worldmodel->entities;
-	data = COM_Parse (data);
-	while (data && com_token[0])
+	if (cl.worldmodel && cl.worldmodel->entities)
 	{
-		qboolean entity_is_sun = false;
-		qboolean is_worldspawn_entity = (entity_index == 0);
-
-		if (com_token[0] != '{')
-			break;
-
-		while (1)
+		data = cl.worldmodel->entities;
+		data = COM_Parse (data);
+		while (data && com_token[0])
 		{
-			char key[64], value[1024];
-			data = COM_Parse (data);
-			if (!data || !com_token[0])
-				return;
-			if (com_token[0] == '}')
+			qboolean entity_is_sun = false;
+			is_worldspawn_entity = (entity_index == 0);
+
+			if (com_token[0] != '{')
 				break;
 
-			q_strlcpy (key, com_token, sizeof (key));
-			if (key[0] == '_')
-				memmove (key, key + 1, strlen (key));
-
-			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
-			if (!data)
-				return;
-			q_strlcpy (value, com_token, sizeof (value));
-
-			if (!strcmp (key, "classname"))
+			while (1)
 			{
-				if (entity_index == 0)
-					is_worldspawn_entity = !q_strcasecmp (value, "worldspawn");
-				if (R_EntityHasSunClassname (value))
-					entity_is_sun = true;
-				continue;
+				char key[64], value[1024];
+				data = COM_Parse (data);
+				if (!data || !com_token[0])
+					break;
+				if (com_token[0] == '}')
+					break;
+
+				q_strlcpy (key, com_token, sizeof (key));
+				if (key[0] == '_')
+					memmove (key, key + 1, strlen (key));
+
+				data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+				if (!data)
+					break;
+				q_strlcpy (value, com_token, sizeof (value));
+
+				if (!q_strcasecmp (key, "classname"))
+				{
+					if (entity_index == 0)
+						is_worldspawn_entity = !q_strcasecmp (value, "worldspawn");
+					if (R_EntityHasSunClassname (value))
+						entity_is_sun = true;
+					continue;
+				}
+
+				if (!is_worldspawn_entity)
+					continue;
+
+				if (!q_strcasecmp (key, "sunlight"))
+				{
+					map_intensity = q_max (0.f, (float)atof (value));
+					map_has_sun = true;
+					if (map_intensity <= 0.f)
+						map_explicit_no_sun = true;
+					continue;
+				}
+				if (!q_strcasecmp (key, "sunlight_color"))
+				{
+					R_ParseSunColor (value, map_color);
+					map_has_color = true;
+					map_has_sun = true;
+					continue;
+				}
+				if (!q_strcasecmp (key, "sun_mangle"))
+				{
+					R_ParseSunMangle (value, map_dir);
+					map_has_sun = true;
+					continue;
+				}
 			}
 
-			if (is_worldspawn_entity)
-			{
-				if (!q_strcasecmp (key, "sunlight") || !q_strcasecmp (key, "sun_mangle") || !q_strcasecmp (key, "sunlight_color"))
-					has_worldspawn_sun = true;
-			}
+			if (entity_is_sun)
+				entity_has_sun = true;
+
+			entity_index++;
+			data = COM_Parse (data);
 		}
-
-		if (entity_is_sun)
-			has_entity_sun = true;
-
-		entity_index++;
-		data = COM_Parse (data);
 	}
 
-	has_runtime_sun = (r_shadow_sun_dir.string && *r_shadow_sun_dir.string
-		&& r_shadow_sun_dir.default_string
-		&& q_strcasecmp (r_shadow_sun_dir.string, r_shadow_sun_dir.default_string));
+	if (R_ParseSunDir (r_shadow_sun_dir.string, cvar_dir)
+		|| R_CvarDiffersDefault (&r_shadow_sun_color)
+		|| R_CvarDiffersDefault (&r_shadow_sun_intensity))
+		cvar_has_sun = true;
+	R_ParseSunColor (r_shadow_sun_color.string, cvar_color);
+	cvar_intensity = q_max (0.f, r_shadow_sun_intensity.value);
 
-	if (r_sun_fallback.value > 0.f && !has_worldspawn_sun && !has_entity_sun && !has_runtime_sun)
+	fallback_allowed = (r_sun_fallback.value > 0.f && r_sun_allow_no_sun.value <= 0.f);
+	if (r_sun_force_fallback.value > 0.f)
+		use_fallback = (r_sun_fallback.value > 0.f);
+	else
+		use_fallback = (fallback_allowed && !map_has_sun && !entity_has_sun && !cvar_has_sun);
+
+	if (map_has_sun || entity_has_sun)
 	{
-		VectorSet (r_sun_dir_override, -0.3f, -0.6f, -0.7f);
-		if (VectorNormalize (r_sun_dir_override) == 0.f)
-			VectorSet (r_sun_dir_override, 0.f, 0.f, -1.f);
-		r_sun_dir_override_active = true;
-		Con_Printf ("Sun: no map sun found, using default fallback (origin 0 0 8192, dir -0.3 -0.6 -0.7)\n");
+		r_sun.enabled = !map_explicit_no_sun;
+		VectorCopy (map_dir, r_sun.direction);
+		if (map_has_color)
+			VectorCopy (map_color, r_sun.color);
+		r_sun.intensity = map_intensity;
+		r_sun.source = SUN_SOURCE_MAP;
 	}
+	else if (cvar_has_sun)
+	{
+		r_sun.enabled = (cvar_intensity > 0.f);
+		VectorCopy (cvar_dir, r_sun.direction);
+		VectorCopy (cvar_color, r_sun.color);
+		r_sun.intensity = cvar_intensity;
+		r_sun.source = SUN_SOURCE_CVAR;
+	}
+	else if (use_fallback)
+	{
+		VectorSet (r_sun.direction, -0.3f, -0.6f, -0.7f);
+		if (VectorNormalize (r_sun.direction) == 0.f)
+			VectorSet (r_sun.direction, 0.f, 0.f, -1.f);
+		VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+		r_sun.intensity = 1.f;
+		r_sun.enabled = true;
+		r_sun.source = SUN_SOURCE_FALLBACK;
+		fallback_used = true;
+	}
+
+	if (fallback_used)
+		Con_Printf ("Sun: no map sun found, using fallback origin (0 0 8192), dir (-0.3 -0.6 -0.7)\n");
+
+	if (r_sun.enabled && VectorNormalize (r_sun.direction) == 0.f)
+	{
+		VectorSet (r_sun.direction, 0.f, 0.f, -1.f);
+	}
+
+	if (r_sun_debug.value > 0.f)
+	{
+		const char *source = "NONE";
+		if (r_sun.source == SUN_SOURCE_MAP) source = "MAP";
+		else if (r_sun.source == SUN_SOURCE_CVAR) source = "CVAR";
+		else if (r_sun.source == SUN_SOURCE_FALLBACK) source = "FALLBACK";
+		Con_Printf ("SunState: source=%s enabled=%d dir=(%.3f %.3f %.3f) color=(%.3f %.3f %.3f) intensity=%.3f\n",
+			source, r_sun.enabled ? 1 : 0,
+			r_sun.direction[0], r_sun.direction[1], r_sun.direction[2],
+			r_sun.color[0], r_sun.color[1], r_sun.color[2], r_sun.intensity);
+	}
+}
+
+void R_UpdateSunVirtualOrigin (void)
+{
+	float dist = q_max (1.f, r_sun_distance.value);
+	VectorMA (r_refdef.vieworg, -dist, r_sun.direction, r_sun.virtual_origin);
+	r_sun.dir_viewspace[0] = DotProduct (r_sun.direction, vright);
+	r_sun.dir_viewspace[1] = DotProduct (r_sun.direction, vup);
+	r_sun.dir_viewspace[2] = DotProduct (r_sun.direction, vpn);
 }
 
 int RecursiveLightPoint (qmodel_t *model, lightcache_t *cache, mnode_t *node, vec3_t rayorg, vec3_t start, vec3_t end, float *maxdist);

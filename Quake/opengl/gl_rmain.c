@@ -77,9 +77,15 @@ typedef struct godrays_stabilization_s
 
 static godrays_stabilization_t r_godrays_stabilization;
 
-vec3_t	r_sun_origin = { 0.f, 0.f, 8192.f };
-vec3_t	r_sun_dir_override = { 0.f, 0.f, -1.f };
-qboolean	r_sun_dir_override_active = false;
+sun_state_t	r_sun = {
+	false,
+	{ 0.f, 0.f, -1.f },
+	{ 1.f, 1.f, 1.f },
+	1.f,
+	{ 0.f, 0.f, 8192.f },
+	SUN_SOURCE_NONE,
+	{ 0.f, 0.f, -1.f }
+};
 
 typedef struct atmosphere_settings_s
 {
@@ -372,8 +378,14 @@ cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIV
 cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
+cvar_t	r_shadow_csm_debug = { "r_shadow_csm_debug", "0", CVAR_NONE };
 cvar_t	r_shadow_sun_dir = { "r_shadow_sun_dir", "0.3 0.5 -1.0", CVAR_ARCHIVE };
+cvar_t	r_shadow_sun_color = { "r_shadow_sun_color", "1 1 1", CVAR_ARCHIVE };
+cvar_t	r_shadow_sun_intensity = { "r_shadow_sun_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_sun_fallback = { "r_sun_fallback", "1", CVAR_ARCHIVE };
+cvar_t	r_sun_force_fallback = { "r_sun_force_fallback", "0", CVAR_ARCHIVE };
+cvar_t	r_sun_allow_no_sun = { "r_sun_allow_no_sun", "0", CVAR_ARCHIVE };
+cvar_t	r_sun_distance = { "r_sun_distance", "10000", CVAR_ARCHIVE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
@@ -551,6 +563,7 @@ cvar_t	r_lighting_debug = { "r_lighting_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_quality = { "r_godrays_quality", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_sun_debug = { "r_sun_debug", "0", CVAR_NONE };
 /* Unified fog controls. Froxel fog is the only volumetric fog backend. */
 cvar_t	r_fog_enable = { "r_fog_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_density = { "r_fog_density", "1.0", CVAR_ARCHIVE };
@@ -565,6 +578,7 @@ cvar_t	r_fog_sun_strength = { "r_fog_sun_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_fog_height_falloff = { "r_fog_height_falloff", "0.0025", CVAR_ARCHIVE };
 cvar_t	r_fog_noise_strength = { "r_fog_noise_strength", "0.15", CVAR_ARCHIVE };
 cvar_t	r_fog_debug = { "r_fog_debug", "0", CVAR_NONE };
+cvar_t	r_fog_debug_sun = { "r_fog_debug_sun", "0", CVAR_NONE };
 cvar_t	r_fog_validate = { "r_fog_validate", "0", CVAR_NONE };
 cvar_t	r_fog_debug_density = { "r_fog_debug_density", "0", CVAR_NONE };
 cvar_t	r_fog_debug_transmittance = { "r_fog_debug_transmittance", "0", CVAR_NONE };
@@ -1842,16 +1856,15 @@ static qboolean R_ComputeGodraysSunScreenPos (float *out_x, float *out_y, qboole
 
 	if (!out_x || !out_y || !out_visible)
 		return false;
+	if (!r_sun.enabled || r_sun.intensity <= 0.f)
+		return false;
 
 	VectorCopy (r_framedata.shadow_sun_dir, sun_dir);
 	if (DotProduct (sun_dir, sun_dir) <= 1e-6f)
 		VectorSet (sun_dir, 0.f, 0.f, -1.f);
 	VectorNormalize (sun_dir);
 
-	if (r_sun_dir_override_active)
-		VectorCopy (r_sun_origin, sun_point);
-	else
-		VectorMA (r_refdef.vieworg, -4096.f, sun_dir, sun_point);
+	VectorCopy (r_sun.virtual_origin, sun_point);
 	clip[0] = r_matviewproj[0] * sun_point[0] + r_matviewproj[4] * sun_point[1] + r_matviewproj[8] * sun_point[2] + r_matviewproj[12];
 	clip[1] = r_matviewproj[1] * sun_point[0] + r_matviewproj[5] * sun_point[1] + r_matviewproj[9] * sun_point[2] + r_matviewproj[13];
 	clip[2] = r_matviewproj[2] * sun_point[0] + r_matviewproj[6] * sun_point[1] + r_matviewproj[10] * sun_point[2] + r_matviewproj[14];
@@ -1920,6 +1933,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 	GL_Uniform4fFunc (0, sun_x, sun_y, density, weight);
 	GL_Uniform4fFunc (1, decay, exposure, 1.f, (float)samples);
+	GL_Uniform4fFunc (2, r_sun.color[0], r_sun.color[1], r_sun.color[2], r_sun.intensity);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	if (out_mask)
@@ -2285,6 +2299,14 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 	GL_Uniform4fFunc (1, settings->anisotropy, q_max (0.f, r_fog_sun_strength.value), settings->shadow_enable ? 1.f : 0.f, 0.f);
 	GL_Uniform4fFunc (2, (float)debug_mode, settings->density, q_max (view_zfar, 1.f), 0.f);
 	GL_Uniform4fFunc (3, r_matproj[0], r_matproj[5], q_max (view_znear, 0.01f), q_max (view_zfar, 1.f));
+	GL_Uniform4fFunc (4, r_sun.color[0], r_sun.color[1], r_sun.color[2], 0.f);
+	if (r_fog_debug_sun.value > 0.f)
+	{
+		Con_Printf ("FogSun: dir=(%.3f %.3f %.3f) color=(%.3f %.3f %.3f) intensity=%.3f anisotropy=%.3f sunStrength=%.3f\n",
+			r_sun.direction[0], r_sun.direction[1], r_sun.direction[2],
+			r_sun.color[0], r_sun.color[1], r_sun.color[2], r_sun.intensity,
+			settings->anisotropy, q_max (0.f, r_fog_sun_strength.value));
+	}
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -3755,6 +3777,7 @@ void R_SetupView (void)
 	// build the transformation matrix for the given view angles
 	VectorCopy (r_refdef.vieworg, r_origin);
 	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+	R_UpdateSunVirtualOrigin ();
 
 	// current viewleaf
 	r_oldviewleaf = r_viewleaf;

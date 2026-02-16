@@ -47,6 +47,7 @@ extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_sun_dir;
+extern cvar_t r_shadow_csm_debug;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_max;
 extern cvar_t r_shadow_dlight_size;
@@ -502,32 +503,15 @@ static void R_Shadow_DestroyResources (void)
 
 static void R_Shadow_GetSunDirection (vec3_t out_dir)
 {
-	vec3_t dir = { 0.3f, 0.5f, -1.0f };
-	float x = dir[0];
-	float y = dir[1];
-	float z = dir[2];
-
-	if (r_sun_dir_override_active)
+	if (r_sun.enabled)
 	{
-		VectorCopy (r_sun_dir_override, dir);
-	}
-	else if (r_shadow_sun_dir.string && *r_shadow_sun_dir.string)
-	{
-		if (sscanf (r_shadow_sun_dir.string, "%f %f %f", &x, &y, &z) == 3)
-		{
-			dir[0] = x;
-			dir[1] = y;
-			dir[2] = z;
-		}
+		VectorCopy (r_sun.direction, out_dir);
+		if (VectorNormalize (out_dir) == 0.f)
+			VectorSet (out_dir, 0.f, 0.f, -1.f);
+		return;
 	}
 
-	VectorCopy (dir, out_dir);
-	if (VectorNormalize (out_dir) == 0.f)
-	{
-		out_dir[0] = 0.f;
-		out_dir[1] = 0.f;
-		out_dir[2] = -1.f;
-	}
+	VectorSet (out_dir, 0.f, 0.f, -1.f);
 }
 
 static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
@@ -559,7 +543,7 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 
 	R_Shadow_GetSunDirection (sun_dir);
 	VectorCopy (sun_dir, out_sun_dir);
-	out_sun_dir[3] = 0.f;
+	out_sun_dir[3] = r_sun.enabled ? r_sun.intensity : 0.f;
 
 	if (fabsf (DotProduct (sun_dir, up)) > 0.95f)
 	{
@@ -628,10 +612,17 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	{
 		float texel_x = (extents[0] * 2.f) / (float)shadowmap_size;
 		float texel_y = (extents[1] * 2.f) / (float)shadowmap_size;
+		float prev_x = center_ls[0];
+		float prev_y = center_ls[1];
 		if (texel_x > 0.f)
 			center_ls[0] = floorf (center_ls[0] / texel_x) * texel_x;
 		if (texel_y > 0.f)
 			center_ls[1] = floorf (center_ls[1] / texel_y) * texel_y;
+		if (r_shadow_csm_debug.value > 0.f)
+		{
+			Con_Printf ("CSM debug: split=[%.1f %.1f] texel=(%.5f %.5f) center=(%.3f %.3f)->(%.3f %.3f)\n",
+				znear, zfar, texel_x, texel_y, prev_x, prev_y, center_ls[0], center_ls[1]);
+		}
 	}
 
 	VectorScale (right, center_ls[0], origin_world);
@@ -919,7 +910,7 @@ void R_Shadow_SunPass (void)
 	IdentityMatrix (r_framedata.shadow_viewproj);
 	VectorSet (r_framedata.shadow_sun_dir, 0.f, 0.f, -1.f);
 	r_framedata.shadow_sun_dir[3] = 0.f;
-	if (!enabled)
+	if (!enabled || !r_sun.enabled || r_sun.intensity <= 0.f)
 	{
 		R_Shadow_Log_SunPassEarlyOut ("disabled by r_shadows/r_shadow_sun");
 		return;
@@ -940,7 +931,7 @@ void R_Shadow_SunPass (void)
 	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
 	r_framedata.shadow_debug[0] = 1.f;
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
-	r_framedata.shadow_sun_dir[3] = 0.f;
+	r_framedata.shadow_sun_dir[3] = sun_dir[3];
 	R_UploadFrameData ();
 
 	GL_BeginGroup ("Shadow map (sun)");
@@ -1008,7 +999,7 @@ void R_Shadow_DlightPass (void)
 		shadow_dlight_light_indices[i] = -1;
 	}
 
-	if (!enabled)
+	if (!enabled || !r_sun.enabled || r_sun.intensity <= 0.f)
 	{
 		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS disabled by cvars");
 		return;
