@@ -68,6 +68,10 @@ static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 
+extern cvar_t r_dynamic;
+extern cvar_t r_dlight_style;
+extern cvar_t r_clustered_lighting;
+
 static qboolean R_DlightsAdditivePassEnabled (void)
 {
 	if (r_clustered_lighting.value > 0.f)
