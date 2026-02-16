@@ -28,3 +28,14 @@
 | `r_fogvol_validate` | `r_fog_validate` | kompatibel, deprecated warning once |
 
 Hinweis: Laufzeitsteuerung für Froxel-Fog erfolgt über `r_fog_*`.
+
+## Erweiterte lokale Volume/Debug-Controls
+
+
+| `r_fog_height_base` | `0` | Referenzhöhe für Height-Fog-Abfall |
+| `r_fog_noise_scale` | `0.06` | Welt-Rauschskalierung (kamera-stabil) |
+| `r_fog_noise_drift` | `0.15` | Zeitliche Driftgeschwindigkeit des Rauschens |
+| `r_fog_volume_max_active` | `16` | Maximal aktiv hochgeladene Fog-Volumes pro Frame |
+| `r_fog_debug_mode` | `0` | Debug-Ausgabe 0..6 (density/lighting/transmittance/slice/volume/grid) |
+| `r_fog_debug_slice` | `0` | Gewählte Z-Slice für Debug-Mode 5 |
+| `r_fog_debug_volume_bounds` | `0` | Wireframe-Overlay für Fog-Volume-Bounds |

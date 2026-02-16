@@ -1,20 +1,34 @@
 layout(local_size_x=4, local_size_y=4, local_size_z=4) in;
 layout(rgba16f, binding=0) uniform image3D OutScatter;
-layout(r16f, binding=1) uniform image3D OutTransmittance;
+layout(rg16f, binding=1) uniform image3D OutTransmittance;
 #include "frame_uniforms.glsl"
+
+struct FogVolume
+{
+    vec4 data0; // xyz center, w radius
+    vec4 data1; // xyz extents, w density
+    vec4 data2; // rgb color, w height_falloff
+    vec4 data3; // x noise amount, y noise scale, z anisotropy, w shape
+    vec4 data4; // x blend, y flags
+};
+
+layout(std430, binding=7) readonly buffer FogVolumeBuffer
+{
+    FogVolume fogVolumes[];
+};
 
 layout(location=0) uniform vec4 FroxelDims;
 layout(location=1) uniform vec4 MediumParams0; // x density, y height falloff, z albedo, w emissive
 layout(location=2) uniform vec4 MediumParams1; // rgb albedo tint, w intensity
-layout(location=3) uniform vec4 Jitter;
+layout(location=3) uniform vec4 Jitter;        // xy jitter, z noise drift, w noise amount
 layout(location=4) uniform vec4 ProjParams; // x proj[0], y proj[5], z znear, w zfar
-layout(location=5) uniform vec4 VolumeMins; // xyz mins, w enable
-layout(location=6) uniform vec4 VolumeMaxs; // xyz maxs, w reserved
+layout(location=5) uniform vec4 VolumeParams0; // x active volume count, y max active
+layout(location=6) uniform vec4 HeightParams; // x height base, y debug slice index, z debug mode
 
 float Atmosphere_Froxel_ZToViewDepth(float z)
 {
     float zn = clamp((z + 0.5) / max(FroxelDims.z, 1.0), 0.0, 1.0);
-    float zfar = max(ShadowDebug.w, 2048.0);
+    float zfar = max(ProjParams.w, 1.0);
     return exp2(zn * log2(zfar + 1.0)) - 1.0;
 }
 
@@ -40,26 +54,68 @@ float Hash13(vec3 p)
     return fract((p.x + p.y) * p.z);
 }
 
-void Atmosphere_EvalMedium(vec3 worldPos, out float sigma_t, out vec3 sigma_s)
+float EvalNoise(vec3 worldPos, float noiseScale, float noiseAmount)
 {
-    float heightBase = max(worldPos.z, 0.0);
+    float coarseNoise = Hash13(floor(worldPos * max(noiseScale * 0.25, 1e-4)));
+    float fineNoise = Hash13(worldPos * max(noiseScale, 1e-4) + vec3(Time * Jitter.z));
+    float noise = mix(coarseNoise, fineNoise, 0.5);
+    float strength = clamp(noiseAmount, 0.0, 2.0);
+    return mix(1.0, mix(0.85, 1.15, noise), clamp(strength, 0.0, 1.0));
+}
+
+void Atmosphere_EvalGlobalMedium(vec3 worldPos, out float sigma_t, out vec3 sigma_s)
+{
+    float heightBase = max(worldPos.z - HeightParams.x, 0.0);
     float heightFalloff = max(MediumParams0.y, 1e-4);
     float heightDensity = exp(-heightFalloff * heightBase);
 
-    float coarseNoise = Hash13(floor(worldPos * 0.015625));
-    float fineNoise = Hash13(worldPos * 0.0625 + vec3(Time * 0.15));
-    float noise = mix(coarseNoise, fineNoise, 0.5);
-    float noiseStrength = clamp(Jitter.w, 0.0, 2.0);
-    float noiseMod = mix(1.0, mix(0.85, 1.15, noise), clamp(noiseStrength, 0.0, 1.0));
+    float noiseMod = EvalNoise(worldPos, max(MediumParams1.w, 1e-4), Jitter.w);
 
     float density = max(MediumParams0.x, 0.0) * heightDensity * noiseMod;
     sigma_t = max(density, 0.0);
 
     vec3 albedoColor = clamp(MediumParams1.rgb, vec3(0.0), vec3(1.0));
     float albedo = clamp(MediumParams0.z, 0.0, 1.0);
-    float intensity = max(MediumParams1.w, 0.0);
-    sigma_s = sigma_t * albedoColor * albedo * intensity;
+    sigma_s = sigma_t * albedoColor * albedo;
     sigma_s += albedoColor * max(MediumParams0.w, 0.0);
+}
+
+void ApplyVolumes(vec3 worldPos, inout float sigma_t, inout vec3 sigma_s, inout float phaseG)
+{
+    uint count = uint(clamp(VolumeParams0.x, 0.0, 64.0));
+    for (uint i = 0u; i < count; ++i)
+    {
+        FogVolume v = fogVolumes[i];
+        float inside = 0.0;
+        if (int(v.data3.w + 0.5) == 1)
+        {
+            inside = (length(worldPos - v.data0.xyz) <= max(v.data0.w, 1e-3)) ? 1.0 : 0.0;
+        }
+        else
+        {
+            vec3 d = abs(worldPos - v.data0.xyz) - max(v.data1.xyz, vec3(1e-3));
+            inside = (max(d.x, max(d.y, d.z)) <= 0.0) ? 1.0 : 0.0;
+        }
+        if (inside < 0.5)
+            continue;
+
+        float h = exp(-max(v.data2.w, 0.0) * max(worldPos.z - HeightParams.x, 0.0));
+        float n = EvalNoise(worldPos, max(v.data3.y, 1e-4), max(v.data3.x, 0.0));
+        float localSigmaT = max(v.data1.w, 0.0) * h * n;
+        vec3 localSigmaS = localSigmaT * clamp(v.data2.rgb, vec3(0.0), vec3(1.0));
+
+        if (int(v.data4.x + 0.5) == 1)
+        {
+            sigma_t = localSigmaT;
+            sigma_s = localSigmaS;
+        }
+        else
+        {
+            sigma_t += localSigmaT;
+            sigma_s += localSigmaS;
+        }
+        phaseG = clamp(mix(phaseG, v.data3.z, 0.5), -0.95, 0.95);
+    }
 }
 
 void main()
@@ -78,31 +134,11 @@ void main()
 
     float sigma_t;
     vec3 sigma_s;
-    bool injectMode = (Jitter.z > 0.5);
+    float phaseG = clamp(MediumParams0.w, -0.95, 0.95);
 
-    Atmosphere_EvalMedium(worldPos, sigma_t, sigma_s);
+    Atmosphere_EvalGlobalMedium(worldPos, sigma_t, sigma_s);
+    ApplyVolumes(worldPos, sigma_t, sigma_s, phaseG);
 
-    if (injectMode)
-    {
-        if (VolumeMins.w > 0.5)
-        {
-            bvec3 geMin = greaterThanEqual(worldPos, VolumeMins.xyz);
-            bvec3 leMax = lessThanEqual(worldPos, VolumeMaxs.xyz);
-            if (!(all(geMin) && all(leMax)))
-                return;
-        }
-
-        vec4 prevScatter = imageLoad(OutScatter, coord);
-        vec4 prevTrans = imageLoad(OutTransmittance, coord);
-        float newSigmaT = max(0.0, prevScatter.a + sigma_t);
-        vec3 newSigmaS = max(vec3(0.0), prevScatter.rgb + sigma_s);
-        float newTrans = clamp(prevTrans.r * exp(-sigma_t * stepLen), 0.0, 1.0);
-        imageStore(OutScatter, coord, vec4(newSigmaS, newSigmaT));
-        imageStore(OutTransmittance, coord, vec4(newTrans, 0.0, 0.0, 0.0));
-    }
-    else
-    {
-        imageStore(OutScatter, coord, vec4(sigma_s, sigma_t));
-        imageStore(OutTransmittance, coord, vec4(exp(-sigma_t * stepLen), 0.0, 0.0, 0.0));
-    }
+    imageStore(OutScatter, coord, vec4(max(sigma_s, vec3(0.0)), max(sigma_t, 0.0)));
+    imageStore(OutTransmittance, coord, vec4(clamp(exp(-sigma_t * stepLen), 0.0, 1.0), clamp(phaseG * 0.5 + 0.5, 0.0, 1.0), 0.0, 0.0));
 }
