@@ -76,6 +76,7 @@ extern cvar_t r_shadow_log_dump;
 extern cvar_t r_shadow_log_file;
 extern cvar_t r_shadow_validate;
 extern cvar_t r_gl_verify_program;
+extern cvar_t r_shadow_coord_debug;
 
 #define SHDLOG_PREFIX "SHDLOG: "
 
@@ -103,10 +104,12 @@ typedef struct shadow_program_ubo_info_s {
 	GLuint program;
 	GLuint block_index;
 	GLint data_size;
+	GLint binding_point;
 	qboolean has_block;
 	qboolean warned_missing;
 	qboolean warned_size;
 	qboolean logged_bind;
+	qboolean logged_receiver_upload;
 } shadow_program_ubo_info_t;
 
 static shadow_program_ubo_info_t shadow_program_ubo_info[256];
@@ -427,6 +430,7 @@ qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_na
 		memset (info, 0, sizeof (*info));
 		info->program = program;
 		info->block_index = GL_INVALID_INDEX;
+		info->binding_point = -1;
 
 		block_index = GL_GetUniformBlockIndexFunc (program, name);
 		if (block_index != GL_INVALID_INDEX)
@@ -436,8 +440,12 @@ qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_na
 			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_DATA_SIZE, &data_size);
 			GL_GetActiveUniformBlockivFunc (program, block_index, GL_UNIFORM_BLOCK_BINDING, &current_binding);
 			info->data_size = data_size;
+			info->binding_point = current_binding;
 			if (current_binding != (GLint)binding_point)
+			{
 				GL_UniformBlockBindingFunc (program, block_index, binding_point);
+				info->binding_point = (GLint)binding_point;
+			}
 		}
 	}
 
@@ -467,6 +475,7 @@ qboolean R_Shadow_BindUBO (const char *tag, GLuint program, const char *block_na
 	{
 		GLint final_binding = -1;
 		GL_GetActiveUniformBlockivFunc (program, info->block_index, GL_UNIFORM_BLOCK_BINDING, &final_binding);
+		info->binding_point = final_binding;
 		R_Shadow_Log_BeginFrame ();
 		if (shdlog.active)
 			R_Shadow_LogWrite ("UBO_BIND tag=%s program=%u block=%s index=%u binding=%d size=%d\n",
@@ -487,6 +496,8 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	GLint frame_ubo_binding = 0;
 	GLint frame_ubo_data_size = 0;
 	qboolean frame_ubo_metadata_valid = false;
+	shadow_program_ubo_info_t *ubo_info = NULL;
+	int i;
 	const char *target_name = GL_GetProgramDebugName (target_program);
 	const char *target_defines = GL_GetProgramDebugDefines (target_program);
 	const char *target_vert = GL_GetProgramVertexShaderPath (target_program);
@@ -498,8 +509,23 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	loc_shadow_viewproj = GL_GetUniformLocationFunc (target_program, "ShadowViewProj");
 	loc_shadow_params = GL_GetUniformLocationFunc (target_program, "ShadowParams");
 	loc_shadow_debug = GL_GetUniformLocationFunc (target_program, "ShadowDebug");
+	for (i = 0; i < shadow_program_ubo_info_count; ++i)
+	{
+		if (shadow_program_ubo_info[i].program == target_program)
+		{
+			ubo_info = &shadow_program_ubo_info[i];
+			break;
+		}
+	}
+
 	frame_ubo_index = GL_GetUniformBlockIndexFunc (target_program, FRAME_DATA_UBO_NAME);
-	if (frame_ubo_index != GL_INVALID_INDEX && GL_GetActiveUniformBlockivFunc)
+	if (ubo_info && ubo_info->has_block)
+	{
+		frame_ubo_binding = ubo_info->binding_point;
+		frame_ubo_data_size = ubo_info->data_size;
+		frame_ubo_metadata_valid = (frame_ubo_binding >= 0 && frame_ubo_data_size > 0);
+	}
+	else if (frame_ubo_index != GL_INVALID_INDEX && GL_GetActiveUniformBlockivFunc)
 	{
 		GLint block_count = 0;
 		GL_GetProgramivFunc (target_program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
@@ -514,6 +540,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	R_Shadow_Log_BeginFrame ();
 	if (shdlog.active)
 	{
+		if (ubo_info && ubo_info->logged_receiver_upload && !shdlog.dump)
+			return;
+
 		R_Shadow_LogWrite (
 			"UPLOAD shadow uniforms: tag=%s target=%u(%s) vert=%s frag=%s defines=%s gl_current=%d(%s) loc_matrix=%d loc_params=%d loc_debug=%d\n",
 			tag ? tag : "SHADOW",
@@ -559,6 +588,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 				target_frag,
 				(target_defines && target_defines[0]) ? target_defines : "<none>");
 		}
+
+		if (ubo_info)
+			ubo_info->logged_receiver_upload = true;
 	}
 
 	if ((GLuint)gl_current != target_program)
@@ -567,6 +599,134 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 		if (r_gl_verify_program.value > 0.f)
 			Sys_Error ("R_Shadow_LogReceiverUniformUpload: gl_current=%d target=%u (%s)", (int)gl_current, (unsigned)target_program, target_name);
 #endif
+	}
+}
+
+static void R_Shadow_ProjectWithFallback (const float m[16], const vec3_t point, float out_proj[3], qboolean *out_valid)
+{
+	float a[4], b[4], pa[3], pb[3];
+	qboolean a_ok = false;
+	qboolean b_ok = false;
+
+	a[0] = m[0] * point[0] + m[4] * point[1] + m[8] * point[2] + m[12];
+	a[1] = m[1] * point[0] + m[5] * point[1] + m[9] * point[2] + m[13];
+	a[2] = m[2] * point[0] + m[6] * point[1] + m[10] * point[2] + m[14];
+	a[3] = m[3] * point[0] + m[7] * point[1] + m[11] * point[2] + m[15];
+
+	b[0] = point[0] * m[0] + point[1] * m[1] + point[2] * m[2] + m[3];
+	b[1] = point[0] * m[4] + point[1] * m[5] + point[2] * m[6] + m[7];
+	b[2] = point[0] * m[8] + point[1] * m[9] + point[2] * m[10] + m[11];
+	b[3] = point[0] * m[12] + point[1] * m[13] + point[2] * m[14] + m[15];
+
+	if (fabsf (a[3]) > 1e-6f)
+	{
+		pa[0] = a[0] / a[3]; pa[1] = a[1] / a[3]; pa[2] = a[2] / a[3];
+		a_ok = fabsf (pa[0]) <= 20.f && fabsf (pa[1]) <= 20.f && fabsf (pa[2]) <= 20.f;
+	}
+	if (fabsf (b[3]) > 1e-6f)
+	{
+		pb[0] = b[0] / b[3]; pb[1] = b[1] / b[3]; pb[2] = b[2] / b[3];
+		b_ok = fabsf (pb[0]) <= 20.f && fabsf (pb[1]) <= 20.f && fabsf (pb[2]) <= 20.f;
+	}
+
+	if (a_ok && !b_ok)
+	{
+		out_proj[0] = pa[0]; out_proj[1] = pa[1]; out_proj[2] = pa[2];
+		*out_valid = true;
+		return;
+	}
+	if (b_ok && !a_ok)
+	{
+		out_proj[0] = pb[0]; out_proj[1] = pb[1]; out_proj[2] = pb[2];
+		*out_valid = true;
+		return;
+	}
+	if (fabsf (a[3]) > 1e-6f && fabsf (a[3]) >= fabsf (b[3]))
+	{
+		out_proj[0] = a[0] / a[3]; out_proj[1] = a[1] / a[3]; out_proj[2] = a[2] / a[3];
+		*out_valid = true;
+		return;
+	}
+	if (fabsf (b[3]) > 1e-6f)
+	{
+		out_proj[0] = b[0] / b[3]; out_proj[1] = b[1] / b[3]; out_proj[2] = b[2] / b[3];
+		*out_valid = true;
+		return;
+	}
+
+	out_proj[0] = out_proj[1] = out_proj[2] = 0.f;
+	*out_valid = false;
+}
+
+static float R_Shadow_ProjectZToReference01 (float proj_z)
+{
+	if (gl_clipcontrol_able)
+		return proj_z;
+	return proj_z * 0.5f + 0.5f;
+}
+
+static void R_Shadow_LogReceiverCoordRange (const char *tag, const float m[16])
+{
+	vec3_t mins, maxs;
+	vec3_t samples[9];
+	float min_uv[2] = { FLT_MAX, FLT_MAX };
+	float max_uv[2] = { -FLT_MAX, -FLT_MAX };
+	float min_ref = FLT_MAX;
+	float max_ref = -FLT_MAX;
+	int inside = 0;
+	int valid = 0;
+	int i;
+
+	if (r_shadow_coord_debug.value <= 0.f || !cl.worldmodel || !m)
+		return;
+
+	VectorCopy (cl.worldmodel->mins, mins);
+	VectorCopy (cl.worldmodel->maxs, maxs);
+
+	for (i = 0; i < 8; ++i)
+	{
+		samples[i][0] = (i & 1) ? maxs[0] : mins[0];
+		samples[i][1] = (i & 2) ? maxs[1] : mins[1];
+		samples[i][2] = (i & 4) ? maxs[2] : mins[2];
+	}
+	VectorCopy (r_refdef.vieworg, samples[8]);
+
+	for (i = 0; i < 9; ++i)
+	{
+		float proj[3];
+		qboolean is_valid = false;
+		float uv[2];
+		float reference;
+
+		R_Shadow_ProjectWithFallback (m, samples[i], proj, &is_valid);
+		if (!is_valid)
+			continue;
+
+		uv[0] = proj[0] * 0.5f + 0.5f;
+		uv[1] = proj[1] * 0.5f + 0.5f;
+		reference = R_Shadow_ProjectZToReference01 (proj[2]);
+		min_uv[0] = q_min (min_uv[0], uv[0]);
+		min_uv[1] = q_min (min_uv[1], uv[1]);
+		max_uv[0] = q_max (max_uv[0], uv[0]);
+		max_uv[1] = q_max (max_uv[1], uv[1]);
+		min_ref = q_min (min_ref, reference);
+		max_ref = q_max (max_ref, reference);
+		valid++;
+
+		if (uv[0] >= 0.f && uv[0] <= 1.f
+			&& uv[1] >= 0.f && uv[1] <= 1.f
+			&& reference >= 0.f && reference <= 1.f)
+			inside++;
+	}
+
+	if (valid > 0)
+	{
+		R_Shadow_LogWrite ("%s coord_range samples=%d inside01=%d uv_min=(%.5f %.5f) uv_max=(%.5f %.5f) ref_min=%.5f ref_max=%.5f\n",
+			tag ? tag : "SHADOW", valid, inside, min_uv[0], min_uv[1], max_uv[0], max_uv[1], min_ref, max_ref);
+	}
+	else
+	{
+		R_Shadow_LogWrite ("%s coord_range samples=0 (projection invalid)\n", tag ? tag : "SHADOW");
 	}
 }
 
@@ -814,6 +974,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 		det, finite ? 1 : 0);
 	if (!shadows_enabled)
 		R_Shadow_LogWrite ("WARN receiver shadow branch disabled\n");
+	R_Shadow_LogReceiverCoordRange (tag, shadow_viewproj);
 	if ((GLuint)bound_tex != expected_tex)
 		R_Shadow_LogWrite ("WARN receiver shadow texture mismatch: expected=%u bound=%d\n", expected_tex, bound_tex);
 	if (bad)
