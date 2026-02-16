@@ -174,6 +174,9 @@ extern	const char	*gl_version;
 	x(void,			VertexAttribIPointer, (GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer))\
 	x(GLint,		GetUniformLocation, (GLuint program, const GLchar *name))\
 	x(void,			GetActiveUniform, (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name))\
+	x(GLuint,		GetUniformBlockIndex, (GLuint program, const GLchar *uniformBlockName))\
+	x(void,			GetActiveUniformBlockName, (GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName))\
+	x(void,			UniformBlockBinding, (GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding))\
 	x(void,			Uniform1i, (GLint location, GLint v0))\
 	x(void,			Uniform1f, (GLint location, GLfloat v0))\
 	x(void,			Uniform2f, (GLint location, GLfloat v0, GLfloat v1))\
@@ -672,6 +675,9 @@ void GL_UseProgram (GLuint program);
 void GL_ClearCachedProgram (void);
 GLuint GL_GetCurrentProgramCached (void);
 const char *GL_GetProgramDebugName (GLuint program);
+const char *GL_GetProgramDebugDefines (GLuint program);
+const char *GL_GetProgramVertexShaderPath (GLuint program);
+const char *GL_GetProgramFragmentShaderPath (GLuint program);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
 void GL_ApplyFilmgrainUI (void);

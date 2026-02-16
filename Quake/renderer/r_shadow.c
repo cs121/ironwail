@@ -99,6 +99,68 @@ static qboolean shadow_warned_sun_dir_sanitize;
 static qboolean shadow_warned_receiver_program_mismatch;
 static qboolean shadow_warned_matrix_sanitize;
 
+static void R_Shadow_LogWrite (const char *fmt, ...);
+
+static void R_Shadow_DumpActiveUniforms (GLuint program)
+{
+	GLint uniform_count = 0;
+	GLint max_name_len = 0;
+	int i;
+
+	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORMS, &uniform_count);
+	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_len);
+	if (max_name_len < 1)
+		max_name_len = 1;
+
+	R_Shadow_LogWrite ("UNIFORMS program=%u count=%d\n", (unsigned)program, (int)uniform_count);
+	for (i = 0; i < uniform_count; ++i)
+	{
+		GLsizei length = 0;
+		GLint size = 0;
+		GLenum type = 0;
+		char *name = (char *)Hunk_TempAlloc ((size_t)max_name_len);
+		if (!name)
+			continue;
+		GL_GetActiveUniformFunc (program, (GLuint)i, (GLsizei)max_name_len, &length, &size, &type, name);
+		R_Shadow_LogWrite ("UNIFORM program=%u index=%d name=%s type=0x%X size=%d\n", (unsigned)program, i, name, (unsigned)type, (int)size);
+	}
+}
+
+static void R_Shadow_DumpActiveUniformBlocks (GLuint program)
+{
+	GLint block_count = 0;
+	GLint max_name_len = 0;
+	int i;
+
+	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_BLOCKS, &block_count);
+	if (block_count <= 0)
+	{
+		R_Shadow_LogWrite ("UNIFORM_BLOCKS program=%u count=0\n", (unsigned)program);
+		return;
+	}
+
+	if (!GL_GetActiveUniformBlockNameFunc)
+	{
+		R_Shadow_LogWrite ("UNIFORM_BLOCKS program=%u unavailable (missing GL_GetActiveUniformBlockName)\n", (unsigned)program);
+		return;
+	}
+
+	GL_GetProgramivFunc (program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &max_name_len);
+	if (max_name_len < 1)
+		max_name_len = 1;
+
+	R_Shadow_LogWrite ("UNIFORM_BLOCKS program=%u count=%d\n", (unsigned)program, (int)block_count);
+	for (i = 0; i < block_count; ++i)
+	{
+		GLsizei length = 0;
+		char *name = (char *)Hunk_TempAlloc ((size_t)max_name_len);
+		if (!name)
+			continue;
+		GL_GetActiveUniformBlockNameFunc (program, (GLuint)i, (GLsizei)max_name_len, &length, name);
+		R_Shadow_LogWrite ("UNIFORM_BLOCK program=%u index=%d name=%s\n", (unsigned)program, i, name);
+	}
+}
+
 typedef struct shadow_gl_state_s {
 	GLint draw_fbo;
 	GLint read_fbo;
@@ -239,14 +301,43 @@ static void R_Shadow_LogEnsureFile (void)
 
 static qboolean R_Shadow_LogMatrixHasBadValues (const float m[16], float *out_det)
 {
-	float det;
-	for (int i = 0; i < 16; ++i)
+	float det = 0.f;
+	qboolean basis_degenerate = true;
+	int i;
+
+	for (i = 0; i < 16; ++i)
+	{
 		if (!isfinite (m[i]))
+		{
+			if (out_det)
+				*out_det = 0.f;
 			return true;
+		}
+	}
+
 	det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
 	if (out_det)
 		*out_det = det;
-	return fabsf (det) < 1e-8f;
+
+	for (i = 0; i < 3; ++i)
+	{
+		const float x = m[i * 4 + 0];
+		const float y = m[i * 4 + 1];
+		const float z = m[i * 4 + 2];
+		if (x * x + y * y + z * z > 1e-12f)
+		{
+			basis_degenerate = false;
+			break;
+		}
+	}
+
+	if (basis_degenerate)
+		return true;
+
+	if (fabsf (m[15] - 1.f) > 1e-3f)
+		R_Shadow_LogWrite ("INFO shadow matrix m[15]=%.6f (expected near 1 for affine proj path)\n", m[15]);
+
+	return false;
 }
 
 static void R_Shadow_LogMatrixDump (const char *tag, const float m[16])
@@ -290,6 +381,9 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	GLint loc_shadow_params = 0;
 	GLint loc_shadow_debug = 0;
 	const char *target_name = GL_GetProgramDebugName (target_program);
+	const char *target_defines = GL_GetProgramDebugDefines (target_program);
+	const char *target_vert = GL_GetProgramVertexShaderPath (target_program);
+	const char *target_frag = GL_GetProgramFragmentShaderPath (target_program);
 	const char *current_name = GL_GetProgramDebugName (GL_GetCurrentProgramCached ());
 
 	glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current);
@@ -302,15 +396,32 @@ void R_Shadow_LogReceiverUniformUpload (const char *tag, GLuint target_program)
 	if (shdlog.active)
 	{
 		R_Shadow_LogWrite (
-			"UPLOAD shadow uniforms: tag=%s target=%u(%s) gl_current=%d(%s) loc_matrix=%d loc_params=%d loc_debug=%d\n",
+			"UPLOAD shadow uniforms: tag=%s target=%u(%s) vert=%s frag=%s defines=%s gl_current=%d(%s) loc_matrix=%d loc_params=%d loc_debug=%d\n",
 			tag ? tag : "SHADOW",
 			(unsigned)target_program,
 			target_name,
+			target_vert,
+			target_frag,
+			(target_defines && target_defines[0]) ? target_defines : "<none>",
 			(int)gl_current,
 			current_name,
 			(int)loc_shadow_viewproj,
 			(int)loc_shadow_params,
 			(int)loc_shadow_debug);
+		if (((tag && !q_strcasecmp (tag, "WORLD")) || (tag && !q_strcasecmp (tag, "ALIAS"))) && loc_shadow_viewproj == -1)
+		{
+			R_Shadow_DumpActiveUniforms (target_program);
+			R_Shadow_DumpActiveUniformBlocks (target_program);
+		}
+		if (target_program == 67 || target_program == 207 || target_program == 210)
+		{
+			R_Shadow_LogWrite ("PROGRAM FOCUS id=%u name=%s vert=%s frag=%s defines=%s\n",
+				(unsigned)target_program,
+				target_name,
+				target_vert,
+				target_frag,
+				(target_defines && target_defines[0]) ? target_defines : "<none>");
+		}
 	}
 
 	if ((GLuint)gl_current != target_program)
@@ -546,7 +657,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 		R_Shadow_LogWrite ("WARN receiver shadow texture mismatch: expected=%u bound=%d\n", expected_tex, bound_tex);
 	if (bad)
 	{
-		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
+		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or degenerate basis)\n");
 		R_Shadow_LogMatrixDump (tag, shadow_viewproj);
 	}
 	if (bias < 1e-7f || bias > 0.1f)
