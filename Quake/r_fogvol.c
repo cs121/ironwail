@@ -28,6 +28,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern void R_Clustered_BindForShading (void);
 
+extern cvar_t r_fog_enable;
+extern cvar_t r_fog_backend;
+extern cvar_t r_fog_quality;
+extern cvar_t r_fog_temporal;
+extern cvar_t r_fog_history_weight;
+extern cvar_t r_fog_jitter;
+extern cvar_t r_fog_debug;
+extern cvar_t r_fog_validate;
+
 typedef struct fog_volume_gpu_s
 {
 	float mins[4];
@@ -71,6 +80,43 @@ cvar_t r_fogvol_validate = { "r_fogvol_validate", "0", CVAR_NONE };
 cvar_t r_fogvol_repro = { "r_fogvol_repro", "0", CVAR_NONE };
 cvar_t r_fogvol_black_detect = { "r_fogvol_black_detect", "0", CVAR_NONE };
 cvar_t r_fogvol_capture_on_black = { "r_fogvol_capture_on_black", "0", CVAR_NONE };
+
+typedef struct fogvol_runtime_settings_s
+{
+	qboolean enabled;
+	qboolean temporal;
+	qboolean jitter;
+	qboolean validate;
+	int steps;
+	qboolean halfres;
+	float history_weight;
+	int debug_level;
+} fogvol_runtime_settings_t;
+
+static qboolean r_fogvol_deprecated_warned = false;
+
+static fogvol_runtime_settings_t R_FogVol_ReadSettings (void)
+{
+	fogvol_runtime_settings_t s;
+	int quality = CLAMP (0, (int)Q_rint (r_fog_quality.value), 3);
+	memset (&s, 0, sizeof (s));
+	s.enabled = (r_fog_enable.value > 0.f && CLAMP (0, (int)Q_rint (r_fog_backend.value), 2) == 2) || r_fogvol.value > 0.f;
+	s.temporal = (r_fog_temporal.value > 0.f) || (r_fogvol_temporal.value > 0.f);
+	s.jitter = (r_fog_jitter.value > 0.f) || (r_fogvol_jitter.value > 0.f);
+	s.validate = (r_fog_validate.value > 0.f) || (r_fogvol_validate.value > 0.f);
+	s.halfres = (r_fogvol_halfres.value > 0.f);
+	s.steps = CLAMP (8, (int)Q_rint (r_fogvol_steps.value), 128);
+	if (r_fog_quality.value >= 0.f)
+		s.steps = CLAMP (8, 16 + quality * 16, 128);
+	s.history_weight = CLAMP (0.f, r_fog_history_weight.value >= 0.f ? r_fog_history_weight.value : r_fogvol_temporal_alpha.value, 1.f);
+	s.debug_level = CLAMP (0, (int)Q_rint (q_max (r_fog_debug.value, r_fogvol_debug.value)), 3);
+	if (!r_fogvol_deprecated_warned && (r_fogvol.value > 0.f || r_fogvol_temporal.value != 1.f || r_fogvol_jitter.value != 1.f || r_fogvol_validate.value > 0.f || r_fogvol_debug.value > 0.f))
+	{
+		Con_Printf ("r_fogvol_* controls are deprecated; prefer unified r_fog_* controls.\n");
+		r_fogvol_deprecated_warned = true;
+	}
+	return s;
+}
 
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
@@ -321,7 +367,7 @@ static qboolean R_FogVol_TestLog_Begin (const char *marker, const char *file, in
 
 static int R_FogVol_DebugLevel (void)
 {
-	return CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 3);
+	return R_FogVol_ReadSettings ().debug_level;
 }
 
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
@@ -644,7 +690,7 @@ static qboolean R_FogVol_PassHasFeedbackHazard (const char *pass, GLuint draw_te
 static void R_FogVol_ValidateFramebufferStatus (const char *pass, GLenum target)
 {
 	GLenum status;
-	if (r_fogvol_validate.value <= 0.f && R_FogVol_DebugLevel () < 2)
+	if (!R_FogVol_ReadSettings ().validate && R_FogVol_DebugLevel () < 2)
 		return;
 	status = GL_CheckFramebufferStatusFunc (target);
 	if (status != GL_FRAMEBUFFER_COMPLETE)
@@ -669,7 +715,7 @@ static void R_FogVol_ValidatePassState (const char *pass)
 	GLboolean color_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
 	GLint active_tex = 0;
 	GLint max_units = 0;
-	if (r_fogvol_validate.value <= 0.f && R_FogVol_DebugLevel () < 2)
+	if (!R_FogVol_ReadSettings ().validate && R_FogVol_DebugLevel () < 2)
 		return;
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
@@ -1321,7 +1367,7 @@ void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
 
-	if (r_fogvol.value <= 0.f)
+	if (!R_FogVol_ReadSettings ().enabled)
 		return;
 
 	for (int i = 0; i < r_fogvolume_entity_count; ++i)
@@ -1461,7 +1507,7 @@ void R_FogVol_Render (void)
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
 
-	if (r_fogvol.value <= 0.f)
+	if (!R_FogVol_ReadSettings ().enabled)
 		return;
 	if (!glprogs.fogvol)
 		return;
@@ -1494,7 +1540,7 @@ void R_FogVol_Render (void)
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
 
-	use_halfres = (r_fogvol_halfres.value > 0.f);
+	use_halfres = R_FogVol_ReadSettings ().halfres;
 	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
 	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
 	depth_scale_x = (float)glwidth / (float)fog_width;
@@ -1504,11 +1550,9 @@ void R_FogVol_Render (void)
 	view_w = (float)r_refdef.vrect.width;
 	view_h = (float)r_refdef.vrect.height;
 
+	steps = R_FogVol_ReadSettings ().steps;
 	if (use_halfres && r_fogvol_steps_scale_halfres.value > 0.f)
-		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
-	else
-		steps = (int)Q_rint (r_fogvol_steps.value);
-	steps = CLAMP (8, steps, 128);
+		steps = CLAMP (8, (int)Q_rint ((float)steps * r_fogvol_steps_scale_halfres.value), 128);
 	repro_mode = (r_fogvol_repro.value > 0.f);
 	if (repro_mode)
 		R_FogVol_SetHistoryValid (false, "repro_mode");
@@ -1707,7 +1751,7 @@ void R_FogVol_Render (void)
 		goto done;
 	}
 
-	if (has_drawn && !repro_mode && r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex)
+	if (has_drawn && !repro_mode && R_FogVol_ReadSettings ().temporal && glprogs.fogvol_temporal && final_tex)
 	{
 		int history_valid = (r_fogvol_history_valid && r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
 		int history_src = r_fogvol_history_index;
@@ -1767,7 +1811,7 @@ void R_FogVol_Render (void)
 		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_valid ? history_tex[history_src] : 0, final_tex);
 			R_FogVol_ValidatePassState ("COMPOSITE");
 		{
-			float history_alpha = r_fogvol_temporal_alpha.value;
+			float history_alpha = R_FogVol_ReadSettings ().history_weight;
 			if (r_fogvol_history_weight_override.value >= 0.f)
 				history_alpha = CLAMP (0.f, r_fogvol_history_weight_override.value, 1.f);
 			if (!history_valid)
@@ -1807,7 +1851,7 @@ void R_FogVol_Render (void)
 
 	if (has_drawn)
 	{
-		if (!(r_fogvol_temporal.value > 0.f && glprogs.fogvol_temporal && final_tex))
+		if (!(R_FogVol_ReadSettings ().temporal && glprogs.fogvol_temporal && final_tex))
 			R_FogVol_SetHistoryValid (false, "temporal_disabled_or_unavailable");
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
