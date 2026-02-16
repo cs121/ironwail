@@ -68,6 +68,14 @@ static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 
+static qboolean R_DlightsAdditivePassEnabled (void)
+{
+	if (r_clustered_lighting.value > 0.f)
+		return false;
+
+	return (r_dlight_style.value > 0.f || r_dynamic.value > 0.f);
+}
+
 typedef struct godrays_stabilization_s
 {
 	qboolean	valid;
@@ -3739,7 +3747,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
-	if (r_dlight_mode.value > 0.f && r_dlight_style.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
+	if (r_dlight_mode.value > 0.f && R_DlightsAdditivePassEnabled () && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -3987,7 +3995,7 @@ void R_SetupView (void)
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
-	r_framedata.dlight_params[0] = (r_dlight_style.value > 0.f && r_clustered_lighting.value <= 0.f) ? 1.f : 0.f;
+	r_framedata.dlight_params[0] = R_DlightsAdditivePassEnabled () ? 1.f : 0.f;
 	r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
 	r_framedata.dlight_params[2] = 0.f;
 	r_framedata.dlight_params[3] = CLAMP (0.f, r_dlight_quality.value, 3.f);
@@ -5138,7 +5146,7 @@ static void R_DrawDLightPass (void)
 
 	r_dlight_buffered_frame = false;
 
-        if (r_dlight_style.value <= 0.f || r_clustered_lighting.value > 0.f)
+	if (!R_DlightsAdditivePassEnabled ())
                 return;
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
