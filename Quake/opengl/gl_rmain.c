@@ -554,6 +554,11 @@ cvar_t	r_fog_temporal = { "r_fog_temporal", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_history_weight = { "r_fog_history_weight", "0.85", CVAR_ARCHIVE };
 cvar_t	r_fog_jitter = { "r_fog_jitter", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_anisotropy = { "r_fog_anisotropy", "0.2", CVAR_ARCHIVE };
+cvar_t	r_fog_g = { "r_fog_g", "0.76", CVAR_ARCHIVE };
+cvar_t	r_fog_albedo = { "r_fog_albedo", "0.92", CVAR_ARCHIVE };
+cvar_t	r_fog_sun_strength = { "r_fog_sun_strength", "1.0", CVAR_ARCHIVE };
+cvar_t	r_fog_height_falloff = { "r_fog_height_falloff", "0.0025", CVAR_ARCHIVE };
+cvar_t	r_fog_noise_strength = { "r_fog_noise_strength", "0.15", CVAR_ARCHIVE };
 cvar_t	r_fog_debug = { "r_fog_debug", "0", CVAR_NONE };
 cvar_t	r_fog_validate = { "r_fog_validate", "0", CVAR_NONE };
 cvar_t	r_fog_debug_density = { "r_fog_debug_density", "0", CVAR_NONE };
@@ -561,6 +566,8 @@ cvar_t	r_fog_debug_transmittance = { "r_fog_debug_transmittance", "0", CVAR_NONE
 cvar_t	r_fog_debug_scattering = { "r_fog_debug_scattering", "0", CVAR_NONE };
 cvar_t	r_fog_debug_light_injection = { "r_fog_debug_light_injection", "0", CVAR_NONE };
 cvar_t	r_fog_debug_step_length = { "r_fog_debug_step_length", "0", CVAR_NONE };
+cvar_t	r_fog_debug_showgrid = { "r_fog_debug_showgrid", "0", CVAR_NONE };
+cvar_t	r_fog_debug_composite_stage = { "r_fog_debug_composite_stage", "0", CVAR_NONE };
 
 cvar_t	r_fog_log = { "r_fog_log", "0", CVAR_NONE };
 cvar_t	r_fog_froxel_res = { "r_fog_froxel_res", "1", CVAR_ARCHIVE };
@@ -2230,9 +2237,10 @@ static void Atmosphere_Froxel_BuildVolume (const atmosphere_settings_t *settings
 	GL_BindImageTextureFunc (0, framebufs.atmos_froxel.scatter_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_BindImageTextureFunc (1, framebufs.atmos_froxel.transmittance_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R16F);
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, 0.f);
-	GL_Uniform4fFunc (1, settings->density, 0.0025f, 0.92f, 0.0f);
+	GL_Uniform4fFunc (1, settings->density, q_max (0.00001f, r_fog_height_falloff.value), CLAMP (0.f, r_fog_albedo.value, 1.f), 0.0f);
 	GL_Uniform4fFunc (2, Fog_GetColor()[0], Fog_GetColor()[1], Fog_GetColor()[2], 1.0f);
-	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, 0.f);
+	GL_Uniform4fFunc (3, jitter[0], jitter[1], 0.f, CLAMP (0.f, r_fog_noise_strength.value, 2.f));
+	GL_Uniform4fFunc (4, r_matproj[0], r_matproj[5], q_max (view_znear, 0.01f), q_max (view_zfar, 1.f));
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -2263,9 +2271,12 @@ static void Atmosphere_Froxel_LightIntegrate (const atmosphere_settings_t *setti
 		debug_mode = 4;
 	else if (r_fog_debug_step_length.value > 0.f)
 		debug_mode = 5;
+	else if (r_fog_debug_showgrid.value > 0.f)
+		debug_mode = 6;
 	GL_Uniform4fFunc (0, (float)framebufs.atmos_froxel.width, (float)framebufs.atmos_froxel.height, (float)framebufs.atmos_froxel.depth, q_max (1.f, settings->steps));
-	GL_Uniform4fFunc (1, settings->anisotropy, 1.0f, settings->shadow_enable ? 1.f : 0.f, 0.f);
+	GL_Uniform4fFunc (1, settings->anisotropy, q_max (0.f, r_fog_sun_strength.value), settings->shadow_enable ? 1.f : 0.f, 0.f);
 	GL_Uniform4fFunc (2, (float)debug_mode, settings->density, q_max (view_zfar, 1.f), 0.f);
+	GL_Uniform4fFunc (3, r_matproj[0], r_matproj[5], q_max (view_znear, 0.01f), q_max (view_zfar, 1.f));
 	GL_DispatchComputeFunc (gx, gy, gz);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 	GL_EndGroup ();
@@ -2314,7 +2325,13 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	settings.enabled_volumetrics = settings.enabled_fog;
 	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
 	settings.density = fog_density;
-	settings.anisotropy = CLAMP (-0.9f, r_fog_anisotropy.value, 0.9f);
+	{
+		float legacy_g = r_fog_anisotropy.value;
+		float g = r_fog_g.value;
+		if (fabsf (g - 0.76f) < 0.0001f && fabsf (legacy_g - 0.2f) > 0.0001f)
+			g = legacy_g;
+		settings.anisotropy = CLAMP (-0.9f, g, 0.9f);
+	}
 	settings.steps = (float)(16 + quality * 16);
 	settings.history_weight = CLAMP (0.f, r_fog_history_weight.value, 1.f);
 	settings.debug_mode = CLAMP (0.f, r_fog_debug.value, 6.f);
@@ -2353,7 +2370,7 @@ static void R_Fog_BeginFrame (void)
 	r_atmosphere.fog_enabled_for_scene = false;
 	r_atmosphere.froxel_enabled = r_atmosphere.settings.enabled_volumetrics;
 
-	if (r_atmosphere.settings.enabled_fog)
+	if (r_atmosphere.settings.enabled_fog && !r_atmosphere.settings.enabled_volumetrics)
 	{
 		Fog_EnableGFog ();
 		r_atmosphere.fog_enabled_for_scene = true;
@@ -2393,6 +2410,12 @@ static void R_Fog_Render (void)
 
 static void R_Fog_Composite (void)
 {
+	static int last_composite_log_frame = -1000000;
+	if (r_fog_debug_composite_stage.value > 0.f && r_framecount - last_composite_log_frame >= 60)
+	{
+		Con_Printf ("fog composite stage: before post tonemap/bloom (linear HDR) frame=%d\n", r_framecount);
+		last_composite_log_frame = r_framecount;
+	}
 	if (r_godrays.value > 0.f || r_godrays_debug.value > 0.f)
 	{
 		r_atmosphere.godrays_texture = GL_GenerateGodraysTexture (&r_atmosphere.godrays_mask);
@@ -2728,7 +2751,7 @@ void GL_PostProcess (void)
 		r_fog_debug_density.value > 0.f ? 1.f : 0.f,
 		r_fog_debug_transmittance.value > 0.f ? 1.f : 0.f,
 		r_fog_debug_scattering.value > 0.f ? 1.f : 0.f,
-		r_fog_debug_light_injection.value > 0.f ? 1.f : (r_fog_debug_step_length.value > 0.f ? 2.f : 0.f));
+		r_fog_debug_light_injection.value > 0.f ? 1.f : (r_fog_debug_step_length.value > 0.f ? 2.f : (r_fog_debug_showgrid.value > 0.f ? 3.f : 0.f)));
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
