@@ -551,9 +551,8 @@ cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky = { "r_godrays_sky", "0", CVAR_NONE };
 cvar_t	r_godrays_light = { "r_godrays_light", "0", CVAR_NONE };
 cvar_t	r_godrays_world = { "r_godrays_world", "0", CVAR_NONE };
-/* Unified fog controls. Legacy r_atmos_* / r_fogvol_* cvars are still honored via compat mapping. */
+/* Unified fog controls. Froxel fog is the only volumetric fog backend. */
 cvar_t	r_fog_enable = { "r_fog_enable", "1", CVAR_ARCHIVE };
-cvar_t	r_fog_backend = { "r_fog_backend", "1", CVAR_ARCHIVE }; /* 0=legacy, 1=froxel, 2=fogvol-fallback */
 cvar_t	r_fog_density = { "r_fog_density", "1.0", CVAR_ARCHIVE };
 cvar_t	r_fog_quality = { "r_fog_quality", "1", CVAR_ARCHIVE };
 cvar_t	r_fog_temporal = { "r_fog_temporal", "1", CVAR_ARCHIVE };
@@ -571,7 +570,6 @@ cvar_t	r_fog_debug_step_length = { "r_fog_debug_step_length", "0", CVAR_NONE };
 cvar_t	r_atmos_mode = { "r_atmos_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_atmos_debug = { "r_atmos_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_atmos_log = { "r_atmos_log", "0", CVAR_NONE };
-cvar_t	r_atmos_froxel = { "r_atmos_froxel", "0", CVAR_ARCHIVE };
 cvar_t	r_atmos_froxel_res = { "r_atmos_froxel_res", "1", CVAR_ARCHIVE };
 cvar_t	r_atmos_zslices = { "r_atmos_zslices", "64", CVAR_ARCHIVE };
 cvar_t	r_atmos_historyweight = { "r_atmos_historyweight", "0.9", CVAR_ARCHIVE };
@@ -926,38 +924,6 @@ void GL_CreateFrameBuffers (void)
 		framebufs.composite.depth_stencil_tex,
 		"composite fbo"
 	);
-	framebufs.fogvol.width = vid.width;
-	framebufs.fogvol.height = vid.height;
-	if (r_fogvol_halfres.value > 0.f)
-	{
-		framebufs.fogvol.width = q_max (1, vid.width / 2);
-		framebufs.fogvol.height = q_max (1, vid.height / 2);
-	}
-	for (int i = 0; i < 2; ++i)
-	{
-		const char *suffix = (i == 0) ? "fogvol color 0" : "fogvol color 1";
-		const char *fbo_suffix = (i == 0) ? "fogvol fbo 0" : "fogvol fbo 1";
-		framebufs.fogvol.color_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, suffix);
-		framebufs.fogvol.fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex[i], 0, 0, fbo_suffix);
-	}
-	for (int i = 0; i < 2; ++i)
-	{
-		const char *suffix = (i == 0) ? "fogvol history 0" : "fogvol history 1";
-		const char *fbo_suffix = (i == 0) ? "fogvol history fbo 0" : "fogvol history fbo 1";
-		const char *composite_suffix = (i == 0) ? "fogvol composite 0" : "fogvol composite 1";
-		const char *composite_fbo_suffix = (i == 0) ? "fogvol composite fbo 0" : "fogvol composite fbo 1";
-		framebufs.fogvol.history_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, suffix);
-		framebufs.fogvol.history_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.history_tex[i], 0, 0, fbo_suffix);
-		framebufs.fogvol.composite_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, composite_suffix);
-		framebufs.fogvol.composite_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.composite_tex[i], 0, 0, composite_fbo_suffix);
-	}
-	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-		framebufs.fogvol.height, GL_NEAREST, "fogvol finalcopy");
-	framebufs.fogvol.finalcopy_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.finalcopy_tex, 0, 0, "fogvol finalcopy fbo");
-
 	{
 		int froxel_res = CLAMP (0, (int)Q_rint (r_atmos_froxel_res.value), 3);
 		int downsample = (froxel_res <= 0) ? 4 : (froxel_res == 1 ? 2 : (froxel_res == 2 ? 1 : 1));
@@ -1143,7 +1109,6 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-	R_FogVol_NotifyFramebuffersRecreated ();
 
         GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
         GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
@@ -1162,10 +1127,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.history_fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.composite_fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.finalcopy_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
@@ -1182,13 +1143,6 @@ void GL_DeleteFrameBuffers (void)
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
-	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.finalcopy_tex);
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_tex);
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.transmittance_tex);
 	GL_DeleteNativeTexture (framebufs.atmos_froxel.scatter_history_tex[0]);
@@ -1820,7 +1774,6 @@ static GLuint R_RenderAO (float view_min_x, float view_min_y, float view_max_x, 
 
 static qboolean r_godrays_deprecated_warned = false;
 static qboolean r_godrays_rt_logged = false;
-static qboolean r_fog_deprecated_warned = false;
 static qboolean r_ao_deprecated_warned = false;
 static int r_ao_last_logged_mode = -1;
 
@@ -1901,20 +1854,6 @@ static void R_GodraysHandleDeprecatedCvars (void)
 		if (r_godrays.value <= 0.f)
 			Cvar_SetValueQuick (&r_godrays, 1.f);
 	}
-}
-
-static void R_FogHandleDeprecatedCvars (void)
-{
-	if (r_fog_deprecated_warned)
-		return;
-	if (r_atmos_froxel.value > 0.f || r_atmos_mode.value != 1.f || r_atmos_historyweight.value != 0.9f || r_atmos_debug.value > 0.f || r_fogvol.value > 0.f)
-	{
-		Con_Printf ("Legacy fog cvars (r_atmos_* / r_fogvol_*) are deprecated; use r_fog_* controls.\n");
-		r_fog_deprecated_warned = true;
-	}
-
-	if (r_fog_enable.value <= 0.f && (r_atmos_froxel.value > 0.f || r_fogvol.value > 0.f))
-		Cvar_SetValueQuick (&r_fog_enable, 1.f);
 }
 
 static int R_GodraysQualityScaleDivisor (void)
@@ -2426,26 +2365,16 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	atmosphere_settings_t settings;
 	float fog_density = fabsf (Fog_GetDensity ()) * q_max (0.f, r_fog_density.value);
 	qboolean shafts_requested;
-	int backend;
 	int quality;
-	qboolean legacy_wants_froxel;
-	qboolean legacy_wants_fogvol;
 
 	memset (&settings, 0, sizeof (settings));
-	R_FogHandleDeprecatedCvars ();
-
-	legacy_wants_froxel = (r_atmos_froxel.value > 0.f);
-	legacy_wants_fogvol = (r_fogvol.value > 0.f);
-	backend = CLAMP (0, (int)Q_rint (r_fog_backend.value), 2);
-	if (backend == 0 && (legacy_wants_froxel || legacy_wants_fogvol))
-		backend = legacy_wants_froxel ? 1 : 2;
 	quality = CLAMP (0, (int)Q_rint (r_fog_quality.value), 3);
 	shafts_requested = (r_godrays.value > 0.f && R_GodraysReady ());
 
-	settings.mode = backend;
+	settings.mode = 1;
 	settings.enabled_fog = (r_fog_enable.value > 0.f && fog_density > 0.f);
 	settings.enabled_shafts = shafts_requested;
-	settings.enabled_volumetrics = settings.enabled_fog && (backend == 1 || backend == 2);
+	settings.enabled_volumetrics = settings.enabled_fog;
 	settings.shadow_enable = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f);
 	settings.density = fog_density;
 	settings.anisotropy = CLAMP (-0.9f, r_fog_anisotropy.value, 0.9f);
@@ -2454,8 +2383,7 @@ static atmosphere_settings_t Atmosphere_ReadSettings (void)
 	if (r_atmos_historyweight.value != 0.9f)
 		settings.history_weight = CLAMP (0.f, r_atmos_historyweight.value, 1.f);
 	settings.debug_mode = CLAMP (0.f, q_max (r_fog_debug.value, r_atmos_debug.value), 6.f);
-	if (backend == 1)
-		settings.enabled_shafts = false;
+	settings.enabled_shafts = false;
 	return settings;
 }
 
@@ -2488,7 +2416,7 @@ static void R_Fog_BeginFrame (void)
 	r_atmosphere.godrays_mask = 0;
 	r_atmosphere.godrays_ready = false;
 	r_atmosphere.fog_enabled_for_scene = false;
-	r_atmosphere.froxel_enabled = (r_atmosphere.settings.enabled_volumetrics && r_atmosphere.settings.mode == 1);
+	r_atmosphere.froxel_enabled = r_atmosphere.settings.enabled_volumetrics;
 
 	if (r_atmosphere.settings.enabled_fog)
 	{
@@ -2509,30 +2437,22 @@ static void R_Fog_Render (void)
 
 	if (r_atmosphere.settings.enabled_volumetrics)
 	{
-		if (r_atmosphere.settings.mode == 1)
+		vec2_t jitter;
+		Atmosphere_Froxel_InitResources ();
+		if (r_fog_jitter.value > 0.f)
 		{
-			vec2_t jitter;
-			Atmosphere_Froxel_InitResources ();
-			if (r_fog_jitter.value > 0.f)
-			{
-				jitter[0] = Atmosphere_Halton (r_framecount & 1023, 2) - 0.5f;
-				jitter[1] = Atmosphere_Halton (r_framecount & 1023, 3) - 0.5f;
-			}
-			else
-			{
-				jitter[0] = 0.f;
-				jitter[1] = 0.f;
-			}
-			Atmosphere_Froxel_BuildVolume (&r_atmosphere.settings, jitter);
-			Atmosphere_Froxel_LightIntegrate (&r_atmosphere.settings);
-			Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
-			r_atmosphere.settings.enabled_shafts = false;
+			jitter[0] = Atmosphere_Halton (r_framecount & 1023, 2) - 0.5f;
+			jitter[1] = Atmosphere_Halton (r_framecount & 1023, 3) - 0.5f;
 		}
 		else
 		{
-			R_FogVol_BuildList ();
-			R_FogVol_Render ();
+			jitter[0] = 0.f;
+			jitter[1] = 0.f;
 		}
+		Atmosphere_Froxel_BuildVolume (&r_atmosphere.settings, jitter);
+		Atmosphere_Froxel_LightIntegrate (&r_atmosphere.settings);
+		Atmosphere_Froxel_TemporalResolve (&r_atmosphere.settings);
+		r_atmosphere.settings.enabled_shafts = false;
 	}
 }
 
@@ -3544,7 +3464,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (r_fogvol.value > 0.f)
+	if (r_fog_enable.value > 0.f && fabsf (Fog_GetDensity ()) * q_max (0.f, r_fog_density.value) > 0.f)
 		return true;
 
 	return false;
@@ -3573,7 +3493,7 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
-	if (r_fogvol.value > 0.f)
+	if (r_fog_enable.value > 0.f && fabsf (Fog_GetDensity ()) * q_max (0.f, r_fog_density.value) > 0.f)
 		return true;
 	return false;
 }
@@ -5122,7 +5042,7 @@ void R_WarpScaleView (void)
 	needwarpscale = r_refdef.scale != 1 || water_warp;
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
-		&& (R_DoFEnabled () || r_ao_method.value > 0.f || r_ao_debug.value > 0.f || r_fogvol.value > 0.f);
+		&& (R_DoFEnabled () || r_ao_method.value > 0.f || r_ao_debug.value > 0.f || (r_fog_enable.value > 0.f && fabsf (Fog_GetDensity ()) * q_max (0.f, r_fog_density.value) > 0.f));
 
 	if (msaa)
 	{

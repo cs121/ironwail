@@ -608,9 +608,6 @@ typedef struct glprogs_s {
 	GLuint		godrays;
 	GLuint		godrays_source;
 	GLuint		godrays_source_sky;
-	GLuint		fogvol;
-	GLuint		fogvol_upsample;
-	GLuint		fogvol_temporal;
 	GLuint		atmos_froxel_build;
 	GLuint		atmos_froxel_integrate;
 	GLuint		atmos_froxel_temporal;
@@ -678,18 +675,6 @@ typedef struct glframebufs_s {
 		GLuint		fbo;
 	}				composite;
 
-	struct {
-		GLuint		color_tex[2];
-		GLuint		fbo[2];
-		GLuint		history_tex[2];
-		GLuint		history_fbo[2];
-		GLuint		composite_tex[2];
-		GLuint		composite_fbo[2];
-		GLuint		finalcopy_tex;
-		GLuint		finalcopy_fbo;
-		int			width;
-	int			height;
-	}				fogvol;
 
 	struct {
 		GLuint		scatter_tex;
