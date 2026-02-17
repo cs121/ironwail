@@ -1558,23 +1558,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.outputs &= ~MAT_STAGE_OUT_EMISSIVE;
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "bloom"))
-		{
-			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE);
-			qboolean parsed = false;
-			qboolean value_bool = true;
 
-			parsed = ParseOptionalBool (&data, &value_bool, state);
-			if (!parsed)
-				value_bool = true;
-
-			stage.output_overrides |= MAT_STAGE_OUT_BLOOM;
-			if (value_bool)
-				stage.outputs |= MAT_STAGE_OUT_BLOOM;
-			else
-				stage.outputs &= ~MAT_STAGE_OUT_BLOOM;
-			continue;
-		}
 		if (!q_strcasecmp (com_token, "emissiveScale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissiveScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1592,23 +1576,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			stage.emissive_scale_set = true;
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "bloomScale"))
-		{
-			Mat_Shader_MarkKeywordSeen ("bloomScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
-			float validated_scale = 1.f;
-			float scale;
 
-			if (!ParseFloat (&data, &scale, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-
-			Mat_Shader_ValidateFiniteFloat (state, "bloomScale", scale, 1.f, &validated_scale);
-			stage.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
-			stage.bloom_scale_set = true;
-			continue;
-		}
 
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 			state ? state->source_file : material->source_file,
@@ -1662,7 +1630,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.name = Mat_Shader_DupString (canonical);
 	material.source_file = Mat_Shader_DupString (source_file ? source_file : "");
 	material.emissive_scale = 1.f;
-	material.bloom_scale = 1.f;
 	material.cull_mode = MAT_CULL_BACK;
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
@@ -1936,16 +1903,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "bloom"))
-		{
-			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			if (!ParseRequiredBool (&data, &material.bloom_enable, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			continue;
-		}
+
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
@@ -1959,19 +1917,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			material.emissive_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "bloom_scale"))
-		{
-			Mat_Shader_MarkKeywordSeen ("bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			float validated_scale = 1.f;
-			if (!ParseFloat (&data, &scale, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			Mat_Shader_ValidateFiniteFloat (state, "bloom_scale", scale, 1.f, &validated_scale);
-			material.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
-			continue;
-		}
+
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
 			state ? state->source_file : material.source_file,
 			state ? state->token_line : 0u);
@@ -1984,7 +1930,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	{
 		size_t stage_count = VEC_SIZE (material.stages);
 		qboolean has_emissive = false;
-		qboolean has_bloom = false;
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
@@ -1993,22 +1938,15 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			stage->outputs |= MAT_STAGE_OUT_COLOR;
 			if ((stage->output_overrides & MAT_STAGE_OUT_EMISSIVE) == 0u && material.emissive_enable)
 				stage->outputs |= MAT_STAGE_OUT_EMISSIVE;
-			if ((stage->output_overrides & MAT_STAGE_OUT_BLOOM) == 0u && material.bloom_enable)
-				stage->outputs |= MAT_STAGE_OUT_BLOOM;
 
 			if (!stage->emissive_scale_set)
 				stage->emissive_scale = material.emissive_scale;
-			if (!stage->bloom_scale_set)
-				stage->bloom_scale = material.bloom_scale;
 
 			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 				has_emissive = true;
-			if (stage->outputs & MAT_STAGE_OUT_BLOOM)
-				has_bloom = true;
 		}
 
 		material.emissive_enable = has_emissive;
-		material.bloom_enable = has_bloom;
 		material.stage0 = material.stages[0];
 	}
 
@@ -2147,7 +2085,6 @@ void Mat_Shader_DebugFuzzParse (void)
 		"fuzz_nonfinite\n"
 		"{\n"
 		" emissive_scale nan\n"
-		" bloom_scale inf\n"
 		" { map $whiteimage }\n"
 		"}\n";
 	const char *fuzz_duplicate =

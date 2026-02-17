@@ -501,9 +501,6 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
 #define CALLFLAG_NOLIGHTMAP      (1u << 2)
-#define CALLFLAG_GODRAYS_LIGHT   (1u << 5) /* deprecated */
-#define CALLFLAG_GODRAYS_EMISSIVE (1u << 6) /* deprecated */
-#define CALLFLAG_MAT_BLOOM       (1u << 7)
 #define CALLFLAG_MAT_EMISSIVE    (1u << 8)
 #define CALLFLAG_MAT_TRANS       (1u << 10)
 #define CALLFLAG_MAT_SKY         (1u << 11)
@@ -515,25 +512,13 @@ static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 
 	if (!stage)
 		return flags;
-	if (stage->outputs & MAT_STAGE_OUT_BLOOM)
-		flags |= CALLFLAG_MAT_BLOOM;
 	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 		flags |= CALLFLAG_MAT_EMISSIVE;
 
 	return flags;
 }
 
-qboolean R_TextureEmitsGodrays (texture_t *t)
-{
-	(void)t;
-	return false;
-}
 
-qboolean R_SurfaceEmitsGodrays (msurface_t *s)
-{
-	(void)s;
-	return false;
-}
 
 
 /*

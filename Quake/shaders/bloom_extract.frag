@@ -32,19 +32,15 @@ void main()
                         {
                                 float rawMask = texelFetch(MaskTexture, ivec2(sampleCoord), 0).w;
                                 int maskBits = int(floor(rawMask + 0.5));
-                                bool bloomMask = (maskBits & 1) != 0;
                                 bool emissiveMask = (maskBits & 4) != 0;
-                                if (bloomMask)
-                                {
-                                        accum_bloom += sampleColor.rgb;
-                                        weight_bloom += 1.0;
-                                }
+                                accum_bloom += sampleColor.rgb;
+                                weight_bloom += 1.0;
                                 if (emissiveMask)
                                 {
                                         accum_emissive += sampleColor.rgb;
                                         weight_emissive += 1.0;
                                 }
-                                mask = (bloomMask || emissiveMask) ? 1.0 : 0.0;
+                                mask = 1.0;
                         }
                         accum += sampleColor.rgb * mask;
                         weight += mask;

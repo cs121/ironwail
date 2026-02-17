@@ -112,7 +112,6 @@ const uint
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
 	CF_ALPHA_TEST = 16u,
-	CF_MAT_BLOOM = 128u,
 	CF_MAT_EMISSIVE = 256u,
 	CF_MAT_TRANS = 1024u,
 	CF_MAT_SKY = 2048u,
@@ -746,9 +745,9 @@ void main()
 #if !OIT
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	vec2 velocityOut = (result.a >= 0.999) ? (velocity * result.a) : vec2(0.0);
-	float materialMask = ((in_flags & CF_MAT_BLOOM) != 0u) ? 1.0 : 0.0;
+	float materialMask = 0.0;
 	if ((in_flags & CF_MAT_EMISSIVE) != 0u)
-		materialMask += 4.0;
+		materialMask = 4.0;
 	if ((in_flags & CF_MAT_TRANS) != 0u)
 		materialMask += 2.0;
 	out_velocity = vec4(velocityOut, 0.0, materialMask);
