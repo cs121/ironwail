@@ -803,9 +803,19 @@ static float R_Shadow_CompareFuncToDebugMode (GLenum compare_func)
 	return (compare_func == GL_GEQUAL || compare_func == GL_GREATER) ? 2.f : 1.f;
 }
 
+static float R_Shadow_DepthBorderValue (void)
+{
+	/*
+	 * Manual shadow compare path uses sampler2D in GLSL. Border depth must
+	 * represent "no occluder" for the active depth convention.
+	 */
+	return gl_clipcontrol_able ? 0.f : 1.f;
+}
+
 static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
 {
 	GLenum compare_func = R_Shadow_SelectCompareFunc ();
+	const float border_depth = R_Shadow_DepthBorderValue ();
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -813,7 +823,7 @@ static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 	{
-		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
+		const float border[4] = { border_depth, border_depth, border_depth, border_depth };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, hw_compare ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE);
@@ -824,6 +834,7 @@ static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
 static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint tex, int expected_w, int expected_h, GLenum expected_compare_mode, GLenum expected_compare_func)
 {
 	GLint width = 0, height = 0, cmode = GL_NONE, cfunc = GL_LEQUAL, minf = 0, magf = 0;
+	GLfloat border[4] = { 0.f, 0.f, 0.f, 0.f };
 	GLenum status;
 
 	if (r_shadow_validate.value <= 0.f)
@@ -842,6 +853,7 @@ static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magf);
+	glGetTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 
 	if (width != expected_w || height != expected_h)
 		Con_DWarning ("%s: shadow texture size mismatch (%dx%d, expected %dx%d)\n", tag, width, height, expected_w, expected_h);
@@ -851,6 +863,8 @@ static void R_Shadow_ValidateDepthResources (const char *tag, GLuint fbo, GLuint
 		Con_DWarning ("%s: shadow compare func mismatch (0x%X, expected 0x%X)\n", tag, (unsigned)cfunc, (unsigned)expected_compare_func);
 	if (minf != GL_NEAREST || magf != GL_NEAREST)
 		Con_DWarning ("%s: unexpected filter state min=0x%X mag=0x%X (expected NEAREST)\n", tag, (unsigned)minf, (unsigned)magf);
+	if (fabsf (border[0] - R_Shadow_DepthBorderValue ()) > 0.001f)
+		Con_DWarning ("%s: unexpected border depth %.3f (expected %.3f for clipctl=%d)\n", tag, border[0], R_Shadow_DepthBorderValue (), gl_clipcontrol_able ? 1 : 0);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
@@ -1021,6 +1035,11 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, (unsigned)compare_mode, (unsigned)compare_func, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
 	R_Shadow_LogWrite ("%s receiver tex_compare mode=%s func=%s\n", tag,
 		R_Shadow_CompareModeString ((GLenum)compare_mode), R_Shadow_CompareFuncString ((GLenum)compare_func));
+	R_Shadow_LogWrite ("%s receiver sampler_expect=sampler2D(manual compare) compare_mode_expected=%s compare_func_selected=%s clipctl=%d\n",
+		tag,
+		R_Shadow_CompareModeString (GL_NONE),
+		R_Shadow_CompareFuncString (R_Shadow_SelectCompareFunc ()),
+		gl_clipcontrol_able ? 1 : 0);
 	R_Shadow_LogWrite ("%s receiver uniform-target program=%d gl_current_program=%d\n", tag, program, current_program);
 	R_Shadow_LogWrite ("%s params bias=%.9g normalbias=%.9g pcf=%.3g taps=%.3g matrix_row0=(%.9g %.9g %.9g %.9g) det3x3=%.9g finite=%d\n",
 		tag, bias, normalbias, pcf, taps,
