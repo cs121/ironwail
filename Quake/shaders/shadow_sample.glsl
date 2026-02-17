@@ -22,10 +22,6 @@ vec3 ShadowProject01(vec4 shadow_pos)
 	vec3 p = shadow_pos.xyz / shadow_pos.w;
 	// UVs always come from XY NDC [-1..1] -> [0..1].
 	p.xy = p.xy * 0.5 + 0.5;
-#if !REVERSED_Z
-	// Without clip-control, NDC Z is also [-1..1] and needs remap.
-	p.z = p.z * 0.5 + 0.5;
-#endif
 	return p;
 }
 
@@ -176,7 +172,7 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 
 	vec3 proj = ShadowProject01(clip);
 	vec2 uv = proj.xy;
-	float reference = proj.z;
+	float reference = ShadowReference01(proj.z);
 
 	g_shadow_debug_coord = vec3(uv, reference);
 	g_shadow_debug_receiver_depth = reference;
@@ -295,7 +291,7 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 
 	vec3 proj = ShadowProject01(clip);
 	vec2 uv = proj.xy;
-	float reference = proj.z;
+	float reference = ShadowReference01(proj.z);
 
 	bool inside_local = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
 		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
