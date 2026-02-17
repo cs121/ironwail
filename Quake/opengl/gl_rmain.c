@@ -5184,7 +5184,7 @@ static void R_DlightDebugReport (int vis_brush_count)
 	R_GetBrushDlightPassDebugStats (&drawcalls, &instances, &batches);
 	R_GetClusterDlightDebugStats (&clusters, &indices, &cluster_hits, &max_hits);
 
-	for (int i = 0; i < r_framedata.numlights; i++)
+	for (unsigned i = 0; i < r_framedata.numlights; i++)
 	{
 		if (!r_dlight_sources[i])
 			continue;
