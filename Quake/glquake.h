@@ -835,8 +835,6 @@ void Sky_LoadSkyBox (const char *name);
 void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
 
-qboolean R_TextureEmitsGodrays (texture_t *t);
-qboolean R_SurfaceEmitsGodrays (msurface_t *s);
 
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
