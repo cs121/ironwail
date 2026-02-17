@@ -439,12 +439,21 @@ static void R_DlightLogWorldProgramBindings (const char *pass_name, GLuint progr
 	if (r_dlight_log.value <= 0.f)
 		return;
 
+#if defined(GL_VERSION_3_0)
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 3, &ssbo3);
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 4, &ssbo4);
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 5, &ssbo5);
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 6, &ssbo6);
 	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
 	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
+#else
+	(void)ssbo3;
+	(void)ssbo4;
+	(void)ssbo5;
+	(void)ssbo6;
+	(void)ubo0;
+	(void)ubo2;
+#endif
 
 	Con_Printf ("DLIGHTLOG f=%d pass=%s draw program=%u(%s) numlights=%u ssbo={3:%d 4:%d 5:%d 6:%d} ubo={0:%d 2:%d}\n",
 		r_framecount,
