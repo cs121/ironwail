@@ -31,12 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern cvar_t r_dlight_max;
-extern cvar_t r_dlight_quality;
-extern cvar_t r_dlight_entities;
-extern cvar_t r_dlight_mode;
-extern cvar_t r_dlight_debug;
-extern cvar_t r_dlight_log;
+extern cvar_t r_dlight_enable;
 extern cvar_t r_dlight_radius_scale;
 extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
@@ -134,9 +129,6 @@ void R_ParseDlightEntities (void)
 	DLightPool_ClearPersistent ();
 
 	if (!cl.worldmodel || !cl.worldmodel->entities)
-		return;
-
-	if (r_dlight_entities.value <= 0.f)
 		return;
 
 	data = cl.worldmodel->entities;
@@ -633,7 +625,7 @@ static void R_ClusteredEnsureCapacity (int grid_x, int grid_y, int z_slices)
 {
 	const int cluster_count = q_max (1, grid_x * grid_y * z_slices);
 	const int max_indices = q_max (1024, (int)r_clustered_maxindices.value);
-	const int max_lights = q_max (1, q_min ((int)r_dlight_max.value, DLIGHT_GPU_MAX));
+	const int max_lights = DLIGHT_GPU_MAX;
 
 	if (r_clustered.cluster_count == cluster_count &&
 		r_clustered.max_indices == max_indices &&
@@ -873,7 +865,7 @@ void R_Clustered_BuildLists (void)
 	r_clustered_debug_cluster_count = r_clustered.cluster_count;
 	r_clustered_debug_index_count = 0;
 	memset (r_clustered_debug_light_cluster_hits, 0, sizeof (r_clustered_debug_light_cluster_hits));
-	if (r_dlight_debug.value > 0.f)
+	if (0)
 	{
 		GLuint *indices_mapped = NULL;
 
@@ -928,20 +920,6 @@ void R_Clustered_RebindForProgram (GLuint program, const char *pass_name)
 
 	R_Clustered_BindForShading ();
 
-	if (r_dlight_log.value > 0.f)
-	{
-		int clusters = 0;
-		int indices = 0;
-		R_GetClusterDlightDebugStats (&clusters, &indices, NULL, NULL);
-		Con_Printf ("DLIGHTLOG f=%d pass=%s cluster_rebind program=%u(%s) numlights=%u grid=%dx%dx%d indices=%d\n",
-			r_framecount,
-			(pass_name && *pass_name) ? pass_name : "<unknown>",
-			(unsigned)program,
-			GL_GetProgramDebugName (program),
-			r_framedata.numlights,
-			r_clustered.grid_x, r_clustered.grid_y, r_clustered.z_slices,
-			indices);
-	}
 }
 
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits)
@@ -1080,23 +1058,15 @@ void R_PushDlights (void)
 	r_framedata.numlights = 0;
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 
-	int hard_cap = CLAMP (1, (int)r_dlight_max.value, DLIGHT_GPU_MAX);
-	if (r_dlight_quality.value < 2.f)
-		hard_cap = q_min (hard_cap, 32);
-	const int budget = q_min (q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX), hard_cap);
+	if (r_dlight_enable.value <= 0.f || r_dynamic.value <= 0.f)
+		return;
+
+	const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
 	DLightPool_NewFrame (cl.time, r_framecount);
 	const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
 	if (num_submit > 0)
 		R_PushDlightArray (submit, num_submit);
-	DLightPool_DebugPrintIfEnabled ();
-	if (r_dlight_log.value > 0.f)
-	{
-		dlight_pool_stats_t stats;
-		DLightPool_GetStats (&stats);
-		Con_Printf ("DLIGHTLOG f=%d pass=CPU active=%d submitted=%d gpu=%u budget=%d clustered=%d\n",
-			r_framecount, stats.active, stats.submitted, r_framedata.numlights, budget,
-			(r_clustered_lighting.value > 0.f) ? 1 : 0);
-	}
+	DLightPool_DebugPrint ();
 
 	R_UploadFrameData ();
 
@@ -1106,16 +1076,6 @@ void R_PushDlights (void)
 		GL_BeginGroup ("Light clustering");
 		R_Clustered_BuildLists ();
 		R_Clustered_BindForShading ();
-		if (r_dlight_log.value > 0.f)
-		{
-			int clusters = 0;
-			int indices = 0;
-			R_GetClusterDlightDebugStats (&clusters, &indices, NULL, NULL);
-			Con_Printf ("DLIGHTLOG f=%d pass=CLUSTER grid=%dx%dx%d indices=%d tile=%d zlog=(%.5f,%.5f)\n",
-				r_framecount, r_clustered.grid_x, r_clustered.grid_y, r_clustered.z_slices,
-				indices, q_max (1, (int)r_clustered_tilesize.value),
-				r_framedata.zparams[0], r_framedata.zparams[1]);
-		}
 		GL_EndGroup ();
 	}
 
@@ -1180,8 +1140,6 @@ static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, in
 		vec3_t dist;
 		float add;
 
-		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
 
 		if (!CL_DlightIsActive (l))
 			continue;

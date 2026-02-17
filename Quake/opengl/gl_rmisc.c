@@ -74,31 +74,8 @@ extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_enable;
-extern cvar_t r_dlight_max;
-extern cvar_t r_dlight_quality;
-extern cvar_t r_dlight_shadows;
-extern cvar_t r_dlight_preset;
-extern cvar_t r_dlight_style;
-extern cvar_t r_dlight_debug;
-extern cvar_t r_dlight_log;
-extern cvar_t r_dlight_log_frame;
-extern cvar_t r_dlight_log_filter;
-extern cvar_t r_dlight_entities;
-extern cvar_t r_dlight_mode;
 extern cvar_t r_dlight_scale;
 extern cvar_t r_dlight_radius_scale;
-extern cvar_t r_dlight_falloff;
-extern cvar_t r_dlight_exp;
-extern cvar_t r_dlight_core_boost;
-extern cvar_t r_dlight_core_exp;
-extern cvar_t r_dlight_softknee;
-extern cvar_t r_dlight_buffer;
-extern cvar_t r_dlight_bloom;
-extern cvar_t r_dlight_bloom_scale;
-extern cvar_t r_dlight_bloom_radius;
-extern cvar_t r_dlight_bloom_threshold;
-extern cvar_t r_dlight_ndotl;
-extern cvar_t r_dlight_satchop;
 extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
 extern cvar_t r_clustered_zslices;
@@ -576,53 +553,6 @@ static void R_OverbrightBits_f (cvar_t *var)
 		Cvar_SetValueQuick (var, (float)value);
 }
 
-static void R_DLightPreset_f (cvar_t *var)
-{
-	const int preset = CLAMP (0, (int)var->value, 3);
-	if (preset != (int)var->value)
-		Cvar_SetValueQuick (var, (float)preset);
-
-	switch (preset)
-	{
-	case 0:
-		Cvar_SetValueQuick (&r_dlight_enable, 0.f);
-		Cvar_SetValueQuick (&r_dlight_max, 0.f);
-		Cvar_SetValueQuick (&r_dlight_quality, 0.f);
-		Cvar_SetValueQuick (&r_dlight_shadows, 0.f);
-		Cvar_SetValueQuick (&r_dlight_budget, 0.f);
-		Cvar_SetValueQuick (&r_shadow_dlights, 0.f);
-		Cvar_SetValueQuick (&r_shadow_dlight_max, 0.f);
-		break;
-	case 1:
-		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
-		Cvar_SetValueQuick (&r_dlight_max, 24.f);
-		Cvar_SetValueQuick (&r_dlight_quality, 1.f);
-		Cvar_SetValueQuick (&r_dlight_shadows, 0.f);
-		Cvar_SetValueQuick (&r_dlight_budget, 24.f);
-		Cvar_SetValueQuick (&r_shadow_dlights, 0.f);
-		Cvar_SetValueQuick (&r_shadow_dlight_max, 0.f);
-		break;
-	case 2:
-		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
-		Cvar_SetValueQuick (&r_dlight_max, 64.f);
-		Cvar_SetValueQuick (&r_dlight_quality, 2.f);
-		Cvar_SetValueQuick (&r_dlight_shadows, 1.f);
-		Cvar_SetValueQuick (&r_dlight_budget, 64.f);
-		Cvar_SetValueQuick (&r_shadow_dlights, 1.f);
-		Cvar_SetValueQuick (&r_shadow_dlight_max, 2.f);
-		break;
-	default:
-		Cvar_SetValueQuick (&r_dlight_enable, 1.f);
-		Cvar_SetValueQuick (&r_dlight_max, 128.f);
-		Cvar_SetValueQuick (&r_dlight_quality, 3.f);
-		Cvar_SetValueQuick (&r_dlight_shadows, 1.f);
-		Cvar_SetValueQuick (&r_dlight_budget, 128.f);
-		Cvar_SetValueQuick (&r_shadow_dlights, 1.f);
-		Cvar_SetValueQuick (&r_shadow_dlight_max, 4.f);
-		break;
-	}
-}
-
 /*
 ====================
 GL_WaterAlphaForTextureType
@@ -685,32 +615,8 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_dynamic);
         Cvar_RegisterVariable (&r_dlight_enable);
-        Cvar_RegisterVariable (&r_dlight_max);
-        Cvar_RegisterVariable (&r_dlight_quality);
-        Cvar_RegisterVariable (&r_dlight_shadows);
-        Cvar_RegisterVariable (&r_dlight_preset);
-        Cvar_SetCallback (&r_dlight_preset, R_DLightPreset_f);
-        Cvar_RegisterVariable (&r_dlight_style);
-        Cvar_RegisterVariable (&r_dlight_debug);
-        Cvar_RegisterVariable (&r_dlight_log);
-        Cvar_RegisterVariable (&r_dlight_log_frame);
-        Cvar_RegisterVariable (&r_dlight_log_filter);
-        Cvar_RegisterVariable (&r_dlight_entities);
-        Cvar_RegisterVariable (&r_dlight_mode);
         Cvar_RegisterVariable (&r_dlight_scale);
         Cvar_RegisterVariable (&r_dlight_radius_scale);
-        Cvar_RegisterVariable (&r_dlight_falloff);
-        Cvar_RegisterVariable (&r_dlight_exp);
-        Cvar_RegisterVariable (&r_dlight_core_boost);
-        Cvar_RegisterVariable (&r_dlight_core_exp);
-        Cvar_RegisterVariable (&r_dlight_softknee);
-        Cvar_RegisterVariable (&r_dlight_buffer);
-        Cvar_RegisterVariable (&r_dlight_bloom);
-        Cvar_RegisterVariable (&r_dlight_bloom_scale);
-        Cvar_RegisterVariable (&r_dlight_bloom_radius);
-        Cvar_RegisterVariable (&r_dlight_bloom_threshold);
-        Cvar_RegisterVariable (&r_dlight_ndotl);
-        Cvar_RegisterVariable (&r_dlight_satchop);
         Cvar_RegisterVariable (&r_clustered_lighting);
         Cvar_RegisterVariable (&r_clustered_tilesize);
         Cvar_RegisterVariable (&r_clustered_zslices);
@@ -754,8 +660,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_shadow_coord_debug);
         Cvar_RegisterVariable (&r_shadow_comparefunc);
         Cvar_RegisterVariable (&r_gl_verify_program);
-	DLightPool_RegisterCvars ();
-        Cvar_RegisterVariable (&r_novis);
+	        Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);
         Cvar_SetCallback (&r_simd, R_SIMD_f);

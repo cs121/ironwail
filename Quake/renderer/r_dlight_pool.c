@@ -5,9 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern cvar_t r_dlight_debug;
-extern cvar_t r_dlight_entities;
-
 typedef struct dlight_pool_s
 {
 	dlight_t *items;
@@ -25,89 +22,21 @@ typedef struct dlight_pool_s
 static dlight_pool_t dlight_pool;
 static dlight_t dlight_fallback;
 
-cvar_t r_dlight_budget = { "r_dlight_budget", "64", CVAR_ARCHIVE };
-cvar_t r_dlight_pool_max = { "r_dlight_pool_max", "512", CVAR_ARCHIVE };
-cvar_t r_dlight_cull_distance = { "r_dlight_cull_distance", "0", CVAR_ARCHIVE };
-cvar_t r_dlight_min_radius = { "r_dlight_min_radius", "8", CVAR_ARCHIVE };
-cvar_t r_dlight_min_brightness = { "r_dlight_min_brightness", "0.02", CVAR_ARCHIVE };
-cvar_t r_dlight_hysteresis = { "r_dlight_hysteresis", "6", CVAR_ARCHIVE };
-cvar_t r_dlight_smooth = { "r_dlight_smooth", "0.25", CVAR_ARCHIVE };
+#define DLIGHT_POOL_BUDGET DLIGHT_GPU_MAX
+#define DLIGHT_POOL_MAX 512
+#define DLIGHT_POOL_MIN_RADIUS 8.0f
+#define DLIGHT_POOL_MIN_BRIGHTNESS 0.02f
+#define DLIGHT_POOL_HYSTERESIS_FRAMES 6
+#define DLIGHT_POOL_SMOOTH 0.25f
 
 int DLightPool_GetBudget (void)
 {
-	return CLAMP (0, (int)r_dlight_budget.value, 1024);
+	return DLIGHT_POOL_BUDGET;
 }
 
 static int DLightPool_GetPoolMax (void)
 {
-	return CLAMP (0, (int)r_dlight_pool_max.value, 8192);
-}
-
-static void DLightPool_ClampCvar (cvar_t *var, int minval, int maxval)
-{
-	const int value = (int)var->value;
-	const int clamped = CLAMP (minval, value, maxval);
-	if (clamped != value)
-		Cvar_SetValueQuick (var, (float)clamped);
-}
-
-static void DLightPool_Budget_Changed (cvar_t *var)
-{
-	DLightPool_ClampCvar (var, 0, 1024);
-}
-
-static void DLightPool_PoolMax_Changed (cvar_t *var)
-{
-	DLightPool_ClampCvar (var, 0, 8192);
-}
-
-static void DLightPool_CullDistance_Changed (cvar_t *var)
-{
-	if (var->value < 0.f)
-		Cvar_SetValueQuick (var, 0.f);
-}
-
-static void DLightPool_MinRadius_Changed (cvar_t *var)
-{
-	if (var->value < 0.f)
-		Cvar_SetValueQuick (var, 0.f);
-}
-
-static void DLightPool_MinBrightness_Changed (cvar_t *var)
-{
-	if (var->value < 0.f)
-		Cvar_SetValueQuick (var, 0.f);
-}
-
-static void DLightPool_Hysteresis_Changed (cvar_t *var)
-{
-	DLightPool_ClampCvar (var, 0, 120);
-}
-
-static void DLightPool_Smooth_Changed (cvar_t *var)
-{
-	if (var->value < 0.f)
-		Cvar_SetValueQuick (var, 0.f);
-	else if (var->value > 1.f)
-		Cvar_SetValueQuick (var, 1.f);
-}
-
-void DLightPool_RegisterCvars (void)
-{
-	Cvar_RegisterVariable (&r_dlight_budget);
-	Cvar_RegisterVariable (&r_dlight_pool_max);
-	Cvar_RegisterVariable (&r_dlight_cull_distance);
-	Cvar_RegisterVariable (&r_dlight_min_radius);
-	Cvar_RegisterVariable (&r_dlight_min_brightness);
-	Cvar_RegisterVariable (&r_dlight_hysteresis);
-	Cvar_RegisterVariable (&r_dlight_smooth);
-	Cvar_SetCallback (&r_dlight_budget, DLightPool_Budget_Changed);
-	Cvar_SetCallback (&r_dlight_pool_max, DLightPool_PoolMax_Changed);
-	Cvar_SetCallback (&r_dlight_cull_distance, DLightPool_CullDistance_Changed);
-	Cvar_SetCallback (&r_dlight_min_radius, DLightPool_MinRadius_Changed);
-	Cvar_SetCallback (&r_dlight_min_brightness, DLightPool_MinBrightness_Changed);
-	Cvar_SetCallback (&r_dlight_hysteresis, DLightPool_Hysteresis_Changed);
-	Cvar_SetCallback (&r_dlight_smooth, DLightPool_Smooth_Changed);
+	return DLIGHT_POOL_MAX;
 }
 
 static void DLightPool_ResetStats (void)
@@ -479,10 +408,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		dlight_t **out, int out_max)
 {
 	(void)viewleaf;
-	const float min_radius = q_max (0.f, r_dlight_min_radius.value);
-	const float min_brightness = q_max (0.f, r_dlight_min_brightness.value);
-	const float cull_distance = q_max (0.f, r_dlight_cull_distance.value);
-	const float smooth = CLAMP (0.f, r_dlight_smooth.value, 1.f);
+	const float min_radius = DLIGHT_POOL_MIN_RADIUS;
+	const float min_brightness = DLIGHT_POOL_MIN_BRIGHTNESS;
+	const float cull_distance = 0.f;
+	const float smooth = DLIGHT_POOL_SMOOTH;
 
 	dlight_pool.time = time;
 	VectorCopy (vieworg, dlight_pool.last_vieworg);
@@ -518,8 +447,6 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		if (!dl->active)
 			continue;
 
-		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
 
 		if (dl->kind == DL_TRANSIENT && dl->die < time)
 		{
@@ -568,7 +495,7 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 	for (int i = 0; i < submit_count; i++)
 	{
 		out[i] = dlight_pool.scratch[i];
-		out[i]->selected_until_frame = dlight_pool.framecount + CLAMP (0, (int)r_dlight_hysteresis.value, 120);
+		out[i]->selected_until_frame = dlight_pool.framecount + DLIGHT_POOL_HYSTERESIS_FRAMES;
 	}
 
 	dlight_pool.stats.submitted = submit_count;
@@ -585,18 +512,6 @@ void DLightPool_GetStats (dlight_pool_stats_t *out)
 	*out = dlight_pool.stats;
 }
 
-void DLightPool_DebugPrintIfEnabled (void)
+void DLightPool_DebugPrint (void)
 {
-	if (r_dlight_debug.value <= 0.f)
-		return;
-
-	DLightPool_UpdateStats ();
-
-	Con_DPrintf ("pool active=%d persistent=%d transient=%d submitted=%d expired=%d evicted=%d\n",
-			dlight_pool.stats.active,
-			dlight_pool.stats.persistent,
-			dlight_pool.stats.transient,
-			dlight_pool.stats.submitted,
-			dlight_pool.stats.expired,
-			dlight_pool.stats.evicted);
 }

@@ -193,30 +193,9 @@ Total registered cvars reviewed: **627**.
 | `r_color_saturation` | `1.05` |
 | `r_debug_colorspace` | `0` |
 | `r_dither` | `1.0` |
-| `r_dlight_bloom` | `1` |
-| `r_dlight_bloom_radius` | `1.0` |
-| `r_dlight_bloom_scale` | `0.15` |
-| `r_dlight_bloom_threshold` | `0.1` |
-| `r_dlight_buffer` | `1` |
-| `r_dlight_core_boost` | `0.75` |
-| `r_dlight_core_exp` | `6.0` |
-| `r_dlight_debug` | `0` |
-| `r_dlight_log` | `0` |
 | `r_dlight_enable` | `1` |
-| `r_dlight_entities` | `1` |
-| `r_dlight_exp` | `2.2` |
-| `r_dlight_falloff` | `3` |
-| `r_dlight_max` | `64` |
-| `r_dlight_mode` | `0` |
-| `r_dlight_ndotl` | `0.2` |
-| `r_dlight_preset` | `2` |
-| `r_dlight_quality` | `2` |
 | `r_dlight_radius_scale` | `1.0` |
-| `r_dlight_satchop` | `0.1` |
 | `r_dlight_scale` | `1.0` |
-| `r_dlight_shadows` | `0` |
-| `r_dlight_softknee` | `1.5` |
-| `r_dlight_style` | `0` |
 | `r_dof` | `1` |
 | `r_dof_autofocus` | `1` |
 | `r_dof_focus` | `64` |
@@ -705,13 +684,6 @@ Total registered cvars reviewed: **627**.
 
 | CVar | Default |
 |---|---:|
-| `r_dlight_budget` | `64` |
-| `r_dlight_cull_distance` | `0` |
-| `r_dlight_hysteresis` | `6` |
-| `r_dlight_min_brightness` | `0.02` |
-| `r_dlight_min_radius` | `8` |
-| `r_dlight_pool_max` | `512` |
-| `r_dlight_smooth` | `0.25` |
 
 ## Quake/r_fogvol.c
 
