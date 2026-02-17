@@ -224,6 +224,8 @@ static void GL_DumpRenderState (const char *label)
 	GLint viewport[4], scissor_box[4];
 	GLint draw_fbo, read_fbo, program, vao;
 	GLint blend_src_rgb, blend_dst_rgb, depth_func;
+	GLboolean depth_mask;
+	GLboolean color_mask[4];
 	qboolean scissor, depth, blend, cull;
 
 	if (r_state_debug.value <= 0.f)
@@ -244,19 +246,78 @@ static void GL_DumpRenderState (const char *label)
 	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
 	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
 	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
 
 	Con_Printf (
 		"STATEDBG frame=%d pass=%s vp=(%d %d %d %d) scissor=%d box=(%d %d %d %d) "
-		"draw_fbo=%d read_fbo=%d prog=%d vao=%d depth=%d blend=%d cull=%d blendfunc=(%d,%d) depthfunc=0x%04x\n",
+		"draw_fbo=%d read_fbo=%d prog=%d(%s) vao=%d depth=%d blend=%d cull=%d blendfunc=(%d,%d) depthfunc=0x%04x depthmask=%d colormask=(%d%d%d%d)\n",
 		r_framecount,
 		label,
 		viewport[0], viewport[1], viewport[2], viewport[3],
 		scissor,
 		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
-		draw_fbo, read_fbo, program, vao,
+		draw_fbo, read_fbo, program, GL_GetProgramDebugName ((GLuint)program), vao,
 		depth, blend, cull,
 		blend_src_rgb, blend_dst_rgb,
-		(unsigned)depth_func);
+		(unsigned)depth_func,
+		depth_mask ? 1 : 0,
+		color_mask[0] ? 1 : 0, color_mask[1] ? 1 : 0, color_mask[2] ? 1 : 0, color_mask[3] ? 1 : 0);
+}
+
+
+static void R_LogWorldDlightState (const char *marker)
+{
+	GLint draw_fbo = 0;
+	GLint draw_buf[4] = { 0, 0, 0, 0 };
+	GLint attachment[4] = { 0, 0, 0, 0 };
+	GLint attachment_type[4] = { 0, 0, 0, 0 };
+	GLint program = 0;
+	GLint depth_func = 0;
+	GLboolean color_mask[4] = { 0, 0, 0, 0 };
+	GLboolean depth_mask = GL_FALSE;
+	qboolean depth = false;
+	qboolean blend = false;
+	GLint blend_src_rgb = 0, blend_dst_rgb = 0;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER0, &draw_buf[0]);
+	glGetIntegerv (GL_DRAW_BUFFER1, &draw_buf[1]);
+	glGetIntegerv (GL_DRAW_BUFFER2, &draw_buf[2]);
+	glGetIntegerv (GL_DRAW_BUFFER3, &draw_buf[3]);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	depth = glIsEnabled (GL_DEPTH_TEST);
+	blend = glIsEnabled (GL_BLEND);
+	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
+
+	if (draw_fbo != 0)
+	{
+		int i;
+		for (i = 0; i < 4; ++i)
+		{
+			GLenum attach = GL_COLOR_ATTACHMENT0 + i;
+			glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachment[i]);
+			glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &attachment_type[i]);
+		}
+	}
+
+	Con_Printf (
+		"STATEDBG frame=%d pass=%s draw_fbo=%d drawbufs=(0x%X,0x%X,0x%X,0x%X) att=(%d/%d,%d/%d,%d/%d,%d/%d) colormask=(%d%d%d%d) "
+		"depthtest=%d depthfunc=0x%04X depthmask=%d blend=%d blendfunc=(%d,%d) prog=%d(%s) numlights=%u\n",
+		r_framecount,
+		marker,
+		draw_fbo,
+		draw_buf[0], draw_buf[1], draw_buf[2], draw_buf[3],
+		attachment[0], attachment_type[0], attachment[1], attachment_type[1], attachment[2], attachment_type[2], attachment[3], attachment_type[3],
+		color_mask[0] ? 1 : 0, color_mask[1] ? 1 : 0, color_mask[2] ? 1 : 0, color_mask[3] ? 1 : 0,
+		depth ? 1 : 0, depth_func, depth_mask ? 1 : 0,
+		blend ? 1 : 0, blend_src_rgb, blend_dst_rgb,
+		program, GL_GetProgramDebugName ((GLuint)program),
+		r_framedata.numlights);
 }
 
 void R_ResetViewportAndScissorFullscreen (const char *label)
@@ -435,6 +496,7 @@ cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE };
 cvar_t  r_clustered_lighting = { "r_clustered_lighting", "0", CVAR_ARCHIVE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
@@ -1490,16 +1552,20 @@ static void R_CompositeDlightBuffer (void)
 	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
 		return;
 
-	float scale = q_max (0.f, r_dlight_scale.value);
+	float scale = (r_dlight_debug_visualize.value > 0.f) ? 1.f : q_max (0.f, r_dlight_scale.value);
 	if (scale <= 0.f)
 		return;
 
 	GL_BeginGroup ("Dlight composite");
 	GL_UseProgram (glprogs.dlight_composite);
-	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	if (r_dlight_debug_visualize.value > 0.f)
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	else
+		GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
 	GL_Uniform1fFunc (0, scale);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	r_dlight_buffered_frame = false;
 	GL_EndGroup ();
 }
 
@@ -5241,7 +5307,12 @@ void R_RenderScene (void)
 	R_StateDebugMark ("WEAPON_AFTER");
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	R_StateDebugMark ("WORLD_DLIGHT_BEGIN");
+	R_LogWorldDlightState ("WORLD_DLIGHT_BEGIN");
 	R_DrawDLightPass ();
+	R_CompositeDlightBuffer ();
+	R_LogWorldDlightState ("WORLD_DLIGHT_END");
+	R_StateDebugMark ("WORLD_DLIGHT_END");
 	R_DrawDecals (false);
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
