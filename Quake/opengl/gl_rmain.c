@@ -435,6 +435,8 @@ cvar_t  r_dlight_preset = { "r_dlight_preset", "2", CVAR_ARCHIVE };
 cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t  r_dlight_log = { "r_dlight_log", "0", CVAR_NONE };
+cvar_t  r_dlight_log_frame = { "r_dlight_log_frame", "-1", CVAR_NONE };
+cvar_t  r_dlight_log_filter = { "r_dlight_log_filter", "all", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
@@ -5227,12 +5229,31 @@ static void R_DlightDebugReport (int vis_brush_count)
 	}
 }
 
+static qboolean R_DlightLogPassMatchesFilter (const char *pass)
+{
+	const char *filter = r_dlight_log_filter.string;
+	if (!filter || !*filter || !q_strcasecmp (filter, "all"))
+		return true;
+	return q_strcasestr (pass, filter) != NULL;
+}
+
+static qboolean R_DlightLogEnabledForPass (const char *pass)
+{
+	if (r_dlight_log.value <= 0.f)
+		return false;
+	if (r_dlight_log_frame.value >= 0.f && r_framecount != (int)r_dlight_log_frame.value)
+		return false;
+	if (!R_DlightLogPassMatchesFilter (pass))
+		return false;
+	return true;
+}
+
 static void R_DlightLogf (const char *pass, const char *fmt, ...)
 {
 	va_list argptr;
 	char msg[512];
 
-	if (r_dlight_log.value <= 0.f)
+	if (!R_DlightLogEnabledForPass (pass))
 		return;
 
 	va_start (argptr, fmt);
@@ -5287,6 +5308,10 @@ static void R_DrawDLightPass (void)
 	R_DlightLogf ("WORLD", "active=1 numlights=%u visible_brush=%d programs=(%u,%u) hybrid=%d buffered=%d",
 		r_framedata.numlights, count, glprogs.world_dlight[0], glprogs.world_dlight[1],
 		(r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[0]) ? 1 : 0, use_buffer ? 1 : 0);
+	if (R_DlightLogEnabledForPass ("WORLD") && r_framedata.numlights > 0 && !glprogs.world_dlight[0])
+		Con_Printf ("DLIGHTWARN f=%d pass=WORLD world_dlight_program_missing numlights=%u\n", r_framecount, r_framedata.numlights);
+	if (R_DlightLogEnabledForPass ("WORLD") && r_framedata.numlights > 0 && r_framedata.dlight_params[2] <= 0.f)
+		Con_Printf ("DLIGHTWARN f=%d pass=WORLD additive_pass_draw_with_dlights_disabled_toggle dlight_params2=%.2f\n", r_framecount, r_framedata.dlight_params[2]);
 
         r_framedata.dlight_params[2] = 1.f;
         {

@@ -694,6 +694,7 @@ const char *GL_GetProgramFragmentShaderPath (GLuint program);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
 void GL_ApplyFilmgrainUI (void);
+void R_Clustered_RebindForProgram (GLuint program, const char *pass_name);
 void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
 void R_DebugFlushGeometry (void);
 
