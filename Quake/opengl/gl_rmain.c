@@ -4038,7 +4038,7 @@ void R_SetupView (void)
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
         r_framedata.shadow_debug[0] = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
-        r_framedata.shadow_debug[2] = CLAMP (0.f, r_shadow_comparefunc.value, 2.f);
+        r_framedata.shadow_debug[2] = gl_clipcontrol_able ? 2.f : 1.f;
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
