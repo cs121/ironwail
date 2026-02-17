@@ -36,6 +36,7 @@ extern cvar_t r_dlight_quality;
 extern cvar_t r_dlight_entities;
 extern cvar_t r_dlight_mode;
 extern cvar_t r_dlight_debug;
+extern cvar_t r_dlight_log;
 extern cvar_t r_dlight_radius_scale;
 extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
@@ -1062,6 +1063,14 @@ void R_PushDlights (void)
 	if (num_submit > 0)
 		R_PushDlightArray (submit, num_submit);
 	DLightPool_DebugPrintIfEnabled ();
+	if (r_dlight_log.value > 0.f)
+	{
+		dlight_pool_stats_t stats;
+		DLightPool_GetStats (&stats);
+		Con_Printf ("DLIGHTLOG f=%d pass=CPU active=%d submitted=%d gpu=%u budget=%d clustered=%d\n",
+			r_framecount, stats.active, stats.submitted, r_framedata.numlights, budget,
+			(r_clustered_lighting.value > 0.f) ? 1 : 0);
+	}
 
 	R_UploadFrameData ();
 
@@ -1071,6 +1080,16 @@ void R_PushDlights (void)
 		GL_BeginGroup ("Light clustering");
 		R_Clustered_BuildLists ();
 		R_Clustered_BindForShading ();
+		if (r_dlight_log.value > 0.f)
+		{
+			int clusters = 0;
+			int indices = 0;
+			R_GetClusterDlightDebugStats (&clusters, &indices, NULL, NULL);
+			Con_Printf ("DLIGHTLOG f=%d pass=CLUSTER grid=%dx%dx%d indices=%d tile=%d zlog=(%.5f,%.5f)\n",
+				r_framecount, r_clustered.grid_x, r_clustered.grid_y, r_clustered.z_slices,
+				indices, q_max (1, (int)r_clustered_tilesize.value),
+				r_framedata.zparams[0], r_framedata.zparams[1]);
+		}
 		GL_EndGroup ();
 	}
 

@@ -200,7 +200,12 @@ void main()
 	uv = (tcmod * vec3(uv, 1.0)).xy;
 	out_uv = uv;
 	out_lmuv = in_uv.zw;
-	out_depth = gl_Position.w;
+	// Clustered dynamic-light Z slicing expects linear view-space depth.
+	// Using clip-space W here desynchronizes slice lookup from cluster build
+	// (especially with reverse-Z projection), causing world fragments to read
+	// empty light clusters while alias/viewmodel lights still work.
+	vec4 view_pos = View * vec4(world_pos, 1.0);
+	out_depth = abs(view_pos.z);
 	out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
 	out_flags = call.flags;
 #if MODE == 2

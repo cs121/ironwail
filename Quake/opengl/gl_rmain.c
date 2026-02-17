@@ -432,6 +432,7 @@ cvar_t  r_dlight_shadows = { "r_dlight_shadows", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_preset = { "r_dlight_preset", "2", CVAR_ARCHIVE };
 cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
+cvar_t  r_dlight_log = { "r_dlight_log", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
@@ -4244,6 +4245,12 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	GL_BeginGroup (alphapass ? "Translucent entities" : "Opaque entities");
 
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
+	if (!alphapass)
+		R_DlightLogf ("MODELS", "opaque brush=%d alias=%d sprites=%d numlights=%u",
+			ofs[2 * mod_brush + 1] - ofs[2 * mod_brush],
+			ofs[2 * mod_alias + 1] - ofs[2 * mod_alias],
+			cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite],
+			r_framedata.numlights);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
 	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
 	if (!alphapass)
@@ -4286,7 +4293,12 @@ void R_DrawViewModel (void)
 	entity_t* e = &cl.viewent;
 
 	if (!R_IsViewModelVisible ())
+	{
+		R_DlightLogf ("VIEWWEAPON", "visible=0");
 		return;
+	}
+
+	R_DlightLogf ("VIEWWEAPON", "visible=1 model=%s numlights=%u", e->model ? e->model->name : "<none>", r_framedata.numlights);
 
 	GL_BeginGroup ("View model");
 
@@ -5213,6 +5225,21 @@ static void R_DlightDebugReport (int vis_brush_count)
 	}
 }
 
+static void R_DlightLogf (const char *pass, const char *fmt, ...)
+{
+	va_list argptr;
+	char msg[512];
+
+	if (r_dlight_log.value <= 0.f)
+		return;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (msg, sizeof (msg), fmt, argptr);
+	va_end (argptr);
+
+	Con_Printf ("DLIGHTLOG f=%d pass=%s %s\n", r_framecount, pass, msg);
+}
+
 static void R_DrawDLightPass (void)
 {
         int count = 0;
@@ -5222,14 +5249,23 @@ static void R_DrawDLightPass (void)
 	r_dlight_buffered_frame = false;
 
 	if (!R_DlightsAdditivePassEnabled ())
+	{
+		R_DlightLogf ("WORLD", "skip=additive_disabled numlights=%u", r_framedata.numlights);
                 return;
+	}
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
+	{
+		R_DlightLogf ("WORLD", "skip=numlights_or_world_disabled numlights=%u drawworld=%d", r_framedata.numlights, r_drawworld_cheatsafe ? 1 : 0);
                 return;
+	}
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
+	{
+		R_DlightLogf ("WORLD", "skip=no_visible_brushes");
                 return;
+	}
 
         GL_BeginGroup ("Dynamic lights (additive)");
 
@@ -5245,6 +5281,10 @@ static void R_DrawDLightPass (void)
 			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
 		}
 	}
+
+	R_DlightLogf ("WORLD", "active=1 numlights=%u visible_brush=%d programs=(%u,%u) hybrid=%d buffered=%d",
+		r_framedata.numlights, count, glprogs.world_dlight[0], glprogs.world_dlight[1],
+		(r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[0]) ? 1 : 0, use_buffer ? 1 : 0);
 
         r_framedata.dlight_params[2] = 1.f;
         {
@@ -5303,6 +5343,8 @@ static void R_DrawDLightPass (void)
 	}
 
 	R_DlightDebugReport (count);
+	R_DlightLogf ("WORLD", "drawn=1 dlight_params=(%.2f %.2f %.2f %.2f)",
+		r_framedata.dlight_params[0], r_framedata.dlight_params[1], r_framedata.dlight_params[2], r_framedata.dlight_params[3]);
 
         GL_EndGroup ();
 }
