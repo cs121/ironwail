@@ -300,8 +300,8 @@ static void R_LogWorldDlightState (const char *marker)
 		for (i = 0; i < 4; ++i)
 		{
 			GLenum attach = GL_COLOR_ATTACHMENT0 + i;
-			glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachment[i]);
-			glGetFramebufferAttachmentParameteriv (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &attachment_type[i]);
+			GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attachment[i]);
+			GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, attach, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &attachment_type[i]);
 		}
 	}
 
