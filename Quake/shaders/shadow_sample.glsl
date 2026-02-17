@@ -17,6 +17,13 @@ float ShadowReference01(float proj_z)
     return ShadowReferenceFromProjZ(proj_z);
 }
 
+float ShadowTestManual(float receiverDepth, float shadowDepth, float bias, bool isReverseZ)
+{
+	if (isReverseZ)
+		return (receiverDepth >= (shadowDepth - bias)) ? 1.0 : 0.0;
+	return (receiverDepth <= (shadowDepth + bias)) ? 1.0 : 0.0;
+}
+
 #ifdef SHADOW_SUN
 
 vec3 g_shadow_debug_coord = vec3(0.0);
@@ -36,13 +43,6 @@ float ShadowDebugReverseZ()
 #endif
 	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
 	return use_gequal ? 1.0 : 0.0;
-}
-
-float ShadowTestManual(float receiverDepth, float shadowDepth, float bias, bool isReverseZ)
-{
-	if (isReverseZ)
-		return (receiverDepth >= (shadowDepth - bias)) ? 1.0 : 0.0;
-	return (receiverDepth <= (shadowDepth + bias)) ? 1.0 : 0.0;
 }
 
 vec3 ShadowDebugCoordVisualize()
@@ -192,7 +192,12 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowDlightMap, uv).r;
-	bool reversez = ShadowDebugReverseZ() > 0.5;
+	bool reversez =
+#if REVERSED_Z
+		true;
+#else
+		false;
+#endif
 	return ShadowTestManual(reference, depth, bias, reversez);
 }
 
