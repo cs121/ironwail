@@ -76,7 +76,12 @@ static qboolean R_DlightsAdditivePassEnabled (void)
 	return (r_clustered_lighting.value <= 0.f);
 }
 
-static void R_DlightLogf (const char *pass, const char *fmt, ...);
+static void R_DlightLogf (const char *pass, const char *fmt, ...)
+{
+	(void)pass;
+	(void)fmt;
+}
+
 
 typedef struct godrays_stabilization_s
 {
@@ -428,31 +433,8 @@ cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_max = { "r_dlight_max", "64", CVAR_ARCHIVE };
-cvar_t  r_dlight_quality = { "r_dlight_quality", "2", CVAR_ARCHIVE };
-cvar_t  r_dlight_shadows = { "r_dlight_shadows", "0", CVAR_ARCHIVE };
-cvar_t  r_dlight_preset = { "r_dlight_preset", "2", CVAR_ARCHIVE };
-cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
-cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
-cvar_t  r_dlight_log = { "r_dlight_log", "0", CVAR_NONE };
-cvar_t  r_dlight_log_frame = { "r_dlight_log_frame", "-1", CVAR_NONE };
-cvar_t  r_dlight_log_filter = { "r_dlight_log_filter", "all", CVAR_NONE };
-cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_falloff = { "r_dlight_falloff", "3", CVAR_ARCHIVE };
-cvar_t  r_dlight_exp = { "r_dlight_exp", "2.2", CVAR_ARCHIVE };
-cvar_t  r_dlight_core_boost = { "r_dlight_core_boost", "0.75", CVAR_ARCHIVE };
-cvar_t  r_dlight_core_exp = { "r_dlight_core_exp", "6.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_softknee = { "r_dlight_softknee", "1.5", CVAR_ARCHIVE };
-cvar_t  r_dlight_buffer = { "r_dlight_buffer", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom = { "r_dlight_bloom", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_scale = { "r_dlight_bloom_scale", "0.15", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
-cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
-cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t  r_clustered_lighting = { "r_clustered_lighting", "0", CVAR_ARCHIVE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
@@ -1503,18 +1485,13 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 
 static void R_CompositeDlightBuffer (void)
 {
-	if (!r_dlight_buffered_frame || r_dlight_mode.value <= 0.f || r_dlight_buffer.value <= 0.f)
+	if (!r_dlight_buffered_frame)
 		return;
 	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
 		return;
 
 	float scale = q_max (0.f, r_dlight_scale.value);
-	float bloom_enabled = q_max (0.f, r_dlight_bloom.value);
-	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value);
-	float bloom_radius = q_max (0.f, r_dlight_bloom_radius.value);
-	float bloom_threshold = q_max (0.f, r_dlight_bloom_threshold.value);
-
-	if (scale <= 0.f && (bloom_enabled <= 0.f || bloom_scale <= 0.f))
+	if (scale <= 0.f)
 		return;
 
 	GL_BeginGroup ("Dlight composite");
@@ -1524,21 +1501,6 @@ static void R_CompositeDlightBuffer (void)
 	GL_Uniform1fFunc (0, scale);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
-
-	if (bloom_enabled > 0.f && bloom_scale > 0.f)
-	{
-		GLuint bloom_tex = GL_GenerateBloomTextureFrom (framebufs.dlight.tex, bloom_threshold, bloom_radius);
-		if (bloom_tex)
-		{
-			GL_BeginGroup ("Dlight bloom composite");
-			GL_UseProgram (glprogs.dlight_composite);
-			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, bloom_tex);
-			GL_Uniform1fFunc (0, bloom_scale);
-			glDrawArrays (GL_TRIANGLES, 0, 3);
-			GL_EndGroup ();
-		}
-	}
 }
 
 static float R_SanitizeSSAOValue (float value, float fallback, float minval, float maxval)
@@ -3778,7 +3740,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
-	if (r_dlight_mode.value > 0.f && R_DlightsAdditivePassEnabled () && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo && r_framedata.numlights > 0)
+	if (R_DlightsAdditivePassEnabled () && framebufs.dlight.fbo && r_framedata.numlights > 0)
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -4027,9 +3989,9 @@ void R_SetupView (void)
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
 	r_framedata.dlight_params[0] = R_DlightsAdditivePassEnabled () ? 1.f : 0.f;
-	r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
+	r_framedata.dlight_params[1] = 0.f;
 	r_framedata.dlight_params[2] = 0.f;
-	r_framedata.dlight_params[3] = CLAMP (0.f, r_dlight_quality.value, 3.f);
+	r_framedata.dlight_params[3] = 1.f;
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
@@ -5167,100 +5129,15 @@ static void R_EndTranslucency (void)
 // contributions (albedo * dlight) in a separate pass to preserve contrast of
 // the baked lighting while avoiding gamma artifacts from modulating the base
 // color. Static lighting remains untouched in the base pass.
-static void R_SetDlightConfig (GLuint program, float scale, float falloff, float expval,
-			       float core_boost, float core_exp, float knee, float ndotl,
-			       float satchop)
+static void R_SetDlightConfig (GLuint program, float scale)
 {
 	if (!program)
 		return;
 
 	GL_UseProgram (program);
-	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, falloff, expval);
-	GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
-	GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
-}
-
-static void R_DlightDebugReport (int vis_brush_count)
-{
-	const int *cluster_hits = NULL;
-	int max_hits = 0;
-	int clusters = 0;
-	int indices = 0;
-	int drawcalls = 0;
-	int instances = 0;
-	int batches = 0;
-	dlight_pool_stats_t pool_stats;
-	int best = -1;
-	float best_dist2 = FLT_MAX;
-
-	if (r_dlight_debug.value <= 0.f)
-		return;
-
-	DLightPool_GetStats (&pool_stats);
-	R_GetBrushDlightPassDebugStats (&drawcalls, &instances, &batches);
-	R_GetClusterDlightDebugStats (&clusters, &indices, &cluster_hits, &max_hits);
-
-	for (unsigned i = 0; i < r_framedata.numlights; i++)
-	{
-		if (!r_dlight_sources[i])
-			continue;
-		vec3_t delta;
-		VectorSubtract (r_dlight_sources[i]->origin, r_refdef.vieworg, delta);
-		float dist2 = DotProduct (delta, delta);
-		if (dist2 < best_dist2)
-		{
-			best_dist2 = dist2;
-			best = i;
-		}
-	}
-
-	Con_DPrintf ("dlight world: active=%d submitted=%d gpu=%u vis_brush=%d dlight_batches=%d dlight_instances=%d dlight_drawcalls=%d clustered=%d mode=%d\n",
-		pool_stats.active, pool_stats.submitted, r_framedata.numlights, vis_brush_count, batches, instances, drawcalls,
-		(r_clustered_lighting.value > 0.f) ? 1 : 0, (r_dlight_mode.value > 0.f) ? 1 : 0);
-	Con_DPrintf ("dlight world checks: r_dynamic=%.0f r_dlight_enable=%.0f cluster_cells=%d cluster_indices=%d\n",
-		r_dynamic.value, r_dlight_enable.value, clusters, indices);
-
-	if (best >= 0 && r_dlight_sources[best])
-	{
-		dlight_t *dl = r_dlight_sources[best];
-		int touched = (cluster_hits && best < max_hits) ? cluster_hits[best] : 0;
-		Con_DPrintf ("dlight focus[%d]: org=(%.1f %.1f %.1f) radius=%.1f color=(%.2f %.2f %.2f) world_clusters=%d\n",
-			best, dl->origin[0], dl->origin[1], dl->origin[2], dl->radius, dl->color[0], dl->color[1], dl->color[2], touched);
-	}
-}
-
-static qboolean R_DlightLogPassMatchesFilter (const char *pass)
-{
-	const char *filter = r_dlight_log_filter.string;
-	if (!filter || !*filter || !q_strcasecmp (filter, "all"))
-		return true;
-	return q_strcasestr (pass, filter) != NULL;
-}
-
-static qboolean R_DlightLogEnabledForPass (const char *pass)
-{
-	if (r_dlight_log.value <= 0.f)
-		return false;
-	if (r_dlight_log_frame.value >= 0.f && r_framecount != (int)r_dlight_log_frame.value)
-		return false;
-	if (!R_DlightLogPassMatchesFilter (pass))
-		return false;
-	return true;
-}
-
-static void R_DlightLogf (const char *pass, const char *fmt, ...)
-{
-	va_list argptr;
-	char msg[512];
-
-	if (!R_DlightLogEnabledForPass (pass))
-		return;
-
-	va_start (argptr, fmt);
-	q_vsnprintf (msg, sizeof (msg), fmt, argptr);
-	va_end (argptr);
-
-	Con_Printf ("DLIGHTLOG f=%d pass=%s %s\n", r_framecount, pass, msg);
+	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, 1.f, 2.f);
+	GL_Uniform4fFunc (1, 0.f, 1.f, 0.f, 0.f);
+	GL_Uniform4fFunc (2, 0.f, 0.f, 0.f, 0.f);
 }
 
 static void R_DrawDLightPass (void)
@@ -5272,27 +5149,18 @@ static void R_DrawDLightPass (void)
 	r_dlight_buffered_frame = false;
 
 	if (!R_DlightsAdditivePassEnabled ())
-	{
-		R_DlightLogf ("WORLD", "skip=additive_disabled numlights=%u", r_framedata.numlights);
-                return;
-	}
+		return;
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
-	{
-		R_DlightLogf ("WORLD", "skip=numlights_or_world_disabled numlights=%u drawworld=%d", r_framedata.numlights, r_drawworld_cheatsafe ? 1 : 0);
                 return;
-	}
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
-	{
-		R_DlightLogf ("WORLD", "skip=no_visible_brushes");
                 return;
-	}
 
         GL_BeginGroup ("Dynamic lights (additive)");
 
-	if (r_dlight_mode.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo && framebufs.scene.samples == 1)
+	if (framebufs.dlight.fbo && framebufs.scene.samples == 1)
 	{
 		use_buffer = true;
 		r_dlight_buffered_frame = true;
@@ -5305,13 +5173,6 @@ static void R_DrawDLightPass (void)
 		}
 	}
 
-	R_DlightLogf ("WORLD", "active=1 numlights=%u visible_brush=%d programs=(%u,%u) hybrid=%d buffered=%d",
-		r_framedata.numlights, count, glprogs.world_dlight[0], glprogs.world_dlight[1],
-		(r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[0]) ? 1 : 0, use_buffer ? 1 : 0);
-	if (R_DlightLogEnabledForPass ("WORLD") && r_framedata.numlights > 0 && !glprogs.world_dlight[0])
-		Con_Printf ("DLIGHTWARN f=%d pass=WORLD world_dlight_program_missing numlights=%u\n", r_framecount, r_framedata.numlights);
-	if (R_DlightLogEnabledForPass ("WORLD") && r_framedata.numlights > 0 && r_framedata.dlight_params[2] <= 0.f)
-		Con_Printf ("DLIGHTWARN f=%d pass=WORLD additive_pass_draw_with_dlights_disabled_toggle dlight_params2=%.2f\n", r_framecount, r_framedata.dlight_params[2]);
 
         r_framedata.dlight_params[2] = 1.f;
         {
@@ -5321,27 +5182,10 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	{
-		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
-		float falloff = (float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3);
-		float expval = q_max (0.01f, r_dlight_exp.value);
-		float core_boost = q_max (0.f, r_dlight_core_boost.value);
-		float core_exp = q_max (0.01f, r_dlight_core_exp.value);
-		float knee = q_max (0.f, r_dlight_softknee.value);
-		float ndotl = CLAMP (0.f, r_dlight_ndotl.value, 1.f);
-		float satchop = CLAMP (0.f, r_dlight_satchop.value, 1.f);
-
-		R_SetDlightConfig (glprogs.world_dlight[0], scale, falloff, expval,
-			core_boost, core_exp, knee, ndotl, satchop);
-		R_SetDlightConfig (glprogs.world_dlight[1], scale, falloff, expval,
-			core_boost, core_exp, knee, ndotl, satchop);
-		if (r_dlight_mode.value > 0.f)
 		{
-			R_SetDlightConfig (glprogs.world_dlight_hybrid[0], scale, falloff, expval,
-				core_boost, core_exp, knee, ndotl, satchop);
-			R_SetDlightConfig (glprogs.world_dlight_hybrid[1], scale, falloff, expval,
-				core_boost, core_exp, knee, ndotl, satchop);
-		}
+		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
+		R_SetDlightConfig (glprogs.world_dlight[0], scale);
+		R_SetDlightConfig (glprogs.world_dlight[1], scale);
 	}
 
         R_DrawBrushModels_DLights (ents, count);
@@ -5368,10 +5212,6 @@ static void R_DrawDLightPass (void)
 			glReadBuffer (GL_BACK);
 		}
 	}
-
-	R_DlightDebugReport (count);
-	R_DlightLogf ("WORLD", "drawn=1 dlight_params=(%.2f %.2f %.2f %.2f)",
-		r_framedata.dlight_params[0], r_framedata.dlight_params[1], r_framedata.dlight_params[2], r_framedata.dlight_params[3]);
 
         GL_EndGroup ();
 }

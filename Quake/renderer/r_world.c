@@ -32,9 +32,6 @@ extern cvar_t r_oit;
 extern gltexture_t *lightmap_texture;
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
-extern cvar_t r_dlight_mode;
-extern cvar_t r_dlight_log;
-
 extern cvar_t r_shadows;
 extern cvar_t r_shadow_sun;
 extern cvar_t r_shadow_bias;
@@ -431,40 +428,6 @@ R_ResetBModelCalls
 =============
 */
 
-static void R_DlightLogWorldProgramBindings (const char *pass_name, GLuint program)
-{
-	GLint ssbo3 = 0, ssbo4 = 0, ssbo5 = 0, ssbo6 = 0;
-	GLint ubo0 = 0, ubo2 = 0;
-
-	if (r_dlight_log.value <= 0.f)
-		return;
-
-#if defined(GL_VERSION_3_0)
-	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 3, &ssbo3);
-	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 4, &ssbo4);
-	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 5, &ssbo5);
-	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 6, &ssbo6);
-	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
-	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
-#else
-	(void)ssbo3;
-	(void)ssbo4;
-	(void)ssbo5;
-	(void)ssbo6;
-	(void)ubo0;
-	(void)ubo2;
-#endif
-
-	Con_Printf ("DLIGHTLOG f=%d pass=%s draw program=%u(%s) numlights=%u ssbo={3:%d 4:%d 5:%d 6:%d} ubo={0:%d 2:%d}\n",
-		r_framecount,
-		pass_name ? pass_name : "WORLD",
-		(unsigned)program,
-		GL_GetProgramDebugName (program),
-		r_framedata.numlights,
-		(int)ssbo3, (int)ssbo4, (int)ssbo5, (int)ssbo6,
-		(int)ubo0, (int)ubo2);
-}
-
 static void R_ResetBModelCalls (GLuint program)
 {
 	bmodel_batch_program = program;
@@ -485,8 +448,7 @@ static void R_FlushBModelCalls (void)
 	if (!num_bmodel_calls)
 		return;
 
-	if (bmodel_batch_program == glprogs.world_dlight[0] || bmodel_batch_program == glprogs.world_dlight[1] ||
-		bmodel_batch_program == glprogs.world_dlight_hybrid[0] || bmodel_batch_program == glprogs.world_dlight_hybrid[1])
+	if (bmodel_batch_program == glprogs.world_dlight[0] || bmodel_batch_program == glprogs.world_dlight[1])
 		r_brush_dlight_debug_drawcalls += num_bmodel_calls;
 
 	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
@@ -501,7 +463,6 @@ static void R_FlushBModelCalls (void)
 
 	GL_UseProgram (bmodel_batch_program);
 	R_Clustered_RebindForProgram (bmodel_batch_program, "WORLD_BATCH");
-	R_DlightLogWorldProgramBindings ("WORLD_BATCH", bmodel_batch_program);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
@@ -1313,12 +1274,12 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         case BP_DLIGHT_SOLID:
                 texbegin = 0;
                 texend = TEXTYPE_CUTOUT;
-                program = (r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[0]) ? glprogs.world_dlight_hybrid[0] : glprogs.world_dlight[0];
+                program = glprogs.world_dlight[0];
                 break;
         case BP_DLIGHT_ALPHA:
                 texbegin = TEXTYPE_CUTOUT;
                 texend = TEXTYPE_CUTOUT + 1;
-                program = (r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[1]) ? glprogs.world_dlight_hybrid[1] : glprogs.world_dlight[1];
+                program = glprogs.world_dlight[1];
                 break;
         }
 

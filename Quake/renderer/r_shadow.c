@@ -54,8 +54,6 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_dlight_distance;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
-extern cvar_t r_dlight_shadows;
-extern cvar_t r_dlight_max;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_fbo;
@@ -1812,7 +1810,6 @@ void R_Shadow_DlightPass (void)
 {
 	qboolean shadows_enabled = r_shadows.value > 0.f;
 	qboolean dlight_shadows_enabled = r_shadow_dlights.value > 0.f;
-	qboolean dlight_lighting_shadows_enabled = r_dlight_shadows.value > 0.f;
 	double t0, t1;
 	int draws0, tris0;
 	shadow_gl_state_t saved_state;
@@ -1848,11 +1845,6 @@ void R_Shadow_DlightPass (void)
 		R_Shadow_Log_DlightPassEarlyOut ("reason = r_shadow_dlights=0");
 		return;
 	}
-	if (!dlight_lighting_shadows_enabled)
-	{
-		R_Shadow_Log_DlightPassEarlyOut ("reason = r_dlight_shadows=0");
-		return;
-	}
 	if (!glprogs.shadow_depth)
 	{
 		R_Shadow_Log_DlightPassEarlyOut ("reason = missing glprogs.shadow_depth");
@@ -1867,7 +1859,6 @@ void R_Shadow_DlightPass (void)
 	}
 
 	max_tiles = CLAMP (0, (int)r_shadow_dlight_max.value, SHADOW_DLIGHT_MAX);
-	max_tiles = q_min (max_tiles, CLAMP (0, (int)r_dlight_max.value, SHADOW_DLIGHT_MAX));
 	if (shadow_dlight_tile_count > 0)
 		max_tiles = q_min (max_tiles, shadow_dlight_tile_count);
 	if (max_tiles <= 0)
