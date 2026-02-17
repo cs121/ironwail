@@ -18,6 +18,17 @@ float ShadowReference01(float proj_z)
 }
 
 #ifdef SHADOW_SUN
+
+vec3 g_shadow_debug_coord = vec3(0.0);
+float g_shadow_debug_inside = 0.0;
+
+vec3 ShadowDebugCoordVisualize()
+{
+	if (g_shadow_debug_inside > 0.5)
+		return vec3(clamp(g_shadow_debug_coord.xy, 0.0, 1.0), clamp(g_shadow_debug_coord.z, 0.0, 1.0));
+	return vec3(1.0, 0.0, 1.0);
+}
+
 float ShadowCompare(float depth, float reference, float bias)
 {
 	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
@@ -104,9 +115,12 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	vec2 uv = proj.xy * 0.5 + 0.5;
 	float reference = ShadowReference01(proj.z);
 
+	g_shadow_debug_coord = vec3(uv, reference);
+
 	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
 		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
-	in_range = inside ? 1.0 : 0.0;
+	g_shadow_debug_inside = inside ? 1.0 : 0.0;
+	in_range = g_shadow_debug_inside;
 	if (!inside)
 		return 1.0;
 

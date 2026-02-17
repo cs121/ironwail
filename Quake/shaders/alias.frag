@@ -208,8 +208,11 @@ void main()
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
 		if (ShadowDebug.y > 1.5)
 		{
-			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
-			out_fragcolor = vec4(vec3(debug_value), 1.0);
+			int shadow_debug_mode = int(ShadowDebug.y + 0.5);
+			if (shadow_debug_mode == 2)
+				out_fragcolor = vec4(ShadowDebugCoordVisualize(), 1.0);
+			else
+				out_fragcolor = vec4(vec3(shadow_term), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif

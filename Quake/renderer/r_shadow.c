@@ -260,6 +260,31 @@ static const char *R_Shadow_LogFBOStatusString (GLenum status)
 	}
 }
 
+static const char *R_Shadow_CompareModeString (GLenum mode)
+{
+	if (mode == GL_NONE)
+		return "GL_NONE";
+	if (mode == GL_COMPARE_REF_TO_TEXTURE)
+		return "GL_COMPARE_REF_TO_TEXTURE";
+	return "UNKNOWN_COMPARE_MODE";
+}
+
+static const char *R_Shadow_CompareFuncString (GLenum func)
+{
+	switch (func)
+	{
+	case GL_NEVER: return "GL_NEVER";
+	case GL_LESS: return "GL_LESS";
+	case GL_EQUAL: return "GL_EQUAL";
+	case GL_LEQUAL: return "GL_LEQUAL";
+	case GL_GREATER: return "GL_GREATER";
+	case GL_NOTEQUAL: return "GL_NOTEQUAL";
+	case GL_GEQUAL: return "GL_GEQUAL";
+	case GL_ALWAYS: return "GL_ALWAYS";
+	default: return "UNKNOWN_COMPARE_FUNC";
+	}
+}
+
 static const char *R_Shadow_LogGLErrorString (GLenum err)
 {
 	switch (err)
@@ -757,6 +782,7 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	R_Shadow_LogWrite ("%s tex=%u size=%dx%d ifmt=0x%X min=0x%X mag=0x%X wrap=(0x%X,0x%X) compare=(0x%X,0x%X) maxlevel=%d border=(%.2f %.2f %.2f %.2f)\n",
 		tag, tex, width, height, (unsigned)internal, (unsigned)minf, (unsigned)magf, (unsigned)wraps, (unsigned)wrapt, (unsigned)cmode, (unsigned)cfunc, maxlevel,
 		border[0], border[1], border[2], border[3]);
+	R_Shadow_LogWrite ("%s tex_compare mode=%s func=%s\n", tag, R_Shadow_CompareModeString ((GLenum)cmode), R_Shadow_CompareFuncString ((GLenum)cfunc));
 	if (width <= 0 || height <= 0)
 		R_Shadow_LogWrite ("WARN shadow texture has zero size\n");
 	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
@@ -768,12 +794,13 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 
 static GLenum R_Shadow_SelectCompareFunc (void)
 {
-	int mode = (int)r_shadow_comparefunc.value;
-	if (mode == 1)
-		return GL_LEQUAL;
-	if (mode == 2)
-		return GL_GEQUAL;
+	(void)r_shadow_comparefunc;
 	return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+}
+
+static float R_Shadow_CompareFuncToDebugMode (GLenum compare_func)
+{
+	return (compare_func == GL_GEQUAL || compare_func == GL_GREATER) ? 2.f : 1.f;
 }
 
 static void R_Shadow_ConfigureDepthTexture (GLuint tex, qboolean hw_compare)
@@ -992,6 +1019,8 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	shdlog.last_shadow_tex = expected_tex;
 	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d compare=(0x%X,0x%X) draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
 		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, (unsigned)compare_mode, (unsigned)compare_func, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s receiver tex_compare mode=%s func=%s\n", tag,
+		R_Shadow_CompareModeString ((GLenum)compare_mode), R_Shadow_CompareFuncString ((GLenum)compare_func));
 	R_Shadow_LogWrite ("%s receiver uniform-target program=%d gl_current_program=%d\n", tag, program, current_program);
 	R_Shadow_LogWrite ("%s params bias=%.9g normalbias=%.9g pcf=%.3g taps=%.3g matrix_row0=(%.9g %.9g %.9g %.9g) det3x3=%.9g finite=%d\n",
 		tag, bias, normalbias, pcf, taps,
@@ -1568,6 +1597,7 @@ void R_Shadow_SunPass (void)
 	R_Shadow_ResetAliasAuditCounters ();
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = sun_dir[3];
+	r_framedata.shadow_debug[2] = R_Shadow_CompareFuncToDebugMode (R_Shadow_SelectCompareFunc ());
 	R_UploadFrameData ();
 	R_Shadow_SaveGLState (&saved_state);
 
@@ -1586,7 +1616,9 @@ void R_Shadow_SunPass (void)
 		gl_clipcontrol_able ? 0.f : 1.f, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL, gl_clipcontrol_able ? 1 : 0);
 	R_Shadow_LogWrite ("SUNPASS comparefunc mode=%d selected=0x%X reason=%s\n",
 		(int)r_shadow_comparefunc.value, (unsigned)R_Shadow_SelectCompareFunc (),
-		((int)r_shadow_comparefunc.value == 1) ? "forced LEQUAL" : ((int)r_shadow_comparefunc.value == 2) ? "forced GEQUAL" : (gl_clipcontrol_able ? "auto reverse-z" : "auto forward-z"));
+		gl_clipcontrol_able ? "reverse-z (normalized)" : "forward-z (normalized)");
+	R_Shadow_LogWrite ("SUNPASS compare_state mode=%s func=%s\n",
+		R_Shadow_CompareModeString (GL_NONE), R_Shadow_CompareFuncString (R_Shadow_SelectCompareFunc ()));
 	if (!shadow_sun_validated_once || r_shadow_validate.value > 1.f)
 	{
 		R_Shadow_ValidateDepthResources ("sun", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size, GL_NONE, R_Shadow_SelectCompareFunc ());
