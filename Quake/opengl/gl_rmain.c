@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "renderer/r_postfx.h"
 #include "renderer/r_decals.h"
 #include "renderer/r_envlight.h"
+#include "renderer/r_dlight_pool.h"
 #include "opengl/gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -5183,7 +5184,7 @@ static void R_DlightDebugReport (int vis_brush_count)
 	R_GetBrushDlightPassDebugStats (&drawcalls, &instances, &batches);
 	R_GetClusterDlightDebugStats (&clusters, &indices, &cluster_hits, &max_hits);
 
-	for (int i = 0; i < r_framedata.numlights; i++)
+	for (unsigned i = 0; i < r_framedata.numlights; i++)
 	{
 		if (!r_dlight_sources[i])
 			continue;
@@ -5200,8 +5201,8 @@ static void R_DlightDebugReport (int vis_brush_count)
 	Con_DPrintf ("dlight world: active=%d submitted=%d gpu=%u vis_brush=%d dlight_batches=%d dlight_instances=%d dlight_drawcalls=%d clustered=%d mode=%d\n",
 		pool_stats.active, pool_stats.submitted, r_framedata.numlights, vis_brush_count, batches, instances, drawcalls,
 		(r_clustered_lighting.value > 0.f) ? 1 : 0, (r_dlight_mode.value > 0.f) ? 1 : 0);
-	Con_DPrintf ("dlight world checks: r_dynamic=%.0f gl_flashblend=%.0f r_dlight_enable=%.0f cluster_cells=%d cluster_indices=%d\n",
-		r_dynamic.value, gl_flashblend.value, r_dlight_enable.value, clusters, indices);
+	Con_DPrintf ("dlight world checks: r_dynamic=%.0f r_dlight_enable=%.0f cluster_cells=%d cluster_indices=%d\n",
+		r_dynamic.value, r_dlight_enable.value, clusters, indices);
 
 	if (best >= 0 && r_dlight_sources[best])
 	{
