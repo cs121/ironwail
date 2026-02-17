@@ -315,10 +315,12 @@ static void R_Shadow_RestoreGLState (const shadow_gl_state_t *state)
 	}
 	glDepthFunc ((GLenum)state->depth_func);
 	glDepthRange (state->depth_range[0], state->depth_range[1]);
-	if (GL_BlendFuncSeparateFunc)
-		GL_BlendFuncSeparateFunc (state->blend_src_rgb, state->blend_dst_rgb, state->blend_src_alpha, state->blend_dst_alpha);
-	else
-		glBlendFunc (state->blend_src_rgb, state->blend_dst_rgb);
+#if defined(GL_VERSION_1_4) && defined(GL_GLEXT_PROTOTYPES)
+	glBlendFuncSeparate (state->blend_src_rgb, state->blend_dst_rgb, state->blend_src_alpha, state->blend_dst_alpha);
+#else
+	/* Older GL headers (notably on MSVC) may not declare glBlendFuncSeparate. */
+	glBlendFunc (state->blend_src_rgb, state->blend_dst_rgb);
+#endif
 	glColorMask (state->color_mask[0], state->color_mask[1], state->color_mask[2], state->color_mask[3]);
 	glDepthMask (state->depth_mask);
 	glCullFace (state->cull_face_mode);
