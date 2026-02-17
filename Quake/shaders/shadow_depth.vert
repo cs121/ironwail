@@ -78,8 +78,14 @@ void main()
 #endif
 	if ((call.flags & CF_USE_POLYGON_OFFSET) != 0u)
 	{
-		float zoffset = (call.polygon_offset.x + call.polygon_offset.y) * ZBIAS;
-		clip.z += zoffset;
+		// FIX: polygon_offset.x = factor (slope-dependent), polygon_offset.y = units (constant).
+		// Approximate slope factor from clip-space z/w gradient magnitude.
+		// This avoids adding factor+units directly which caused incorrect offsets
+		// on sloped geometry (shadow acne / peter panning).
+		vec2 dz_dxy = vec2(dFdx(clip.z / clip.w), dFdy(clip.z / clip.w));
+		float slope = clamp(length(dz_dxy), 0.0, 1.0);
+		float zoffset = (call.polygon_offset.x * slope + call.polygon_offset.y) * ZBIAS;
+		clip.z += zoffset * clip.w;
 	}
 	gl_Position = clip;
 }

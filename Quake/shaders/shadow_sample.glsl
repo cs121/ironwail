@@ -4,9 +4,6 @@
 #include "depth_common.glsl"
 
 // ShadowViewProj is uploaded as std140 mat4 and consumed as GLSL column-major.
-// Keep receiver projection deterministic; adaptive row/column switching here causes
-// view-dependent instability/flicker because neighboring fragments can choose
-// different paths.
 vec4 ShadowMul(mat4 M, vec4 v)
 {
     return M * v;
@@ -99,16 +96,30 @@ vec3 ShadowDebugVisualize(int mode, float visibility)
 	return vec3(clamp(visibility, 0.0, 1.0));
 }
 
+// FIX: Separated into two functions so debug globals are only written once
+// from a single representative sample, not overwritten by every PCF tap.
+float ShadowTestSingle(vec2 uv, float reference, float bias)
+{
+	float depth = texture(ShadowMap, uv).r;
+	bool reversez = ShadowDebugReverseZ() > 0.5;
+	return ShadowTestManual(reference, depth, bias, reversez);
+}
+
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowMap, uv).r;
 	bool reversez = ShadowDebugReverseZ() > 0.5;
 	float lit = ShadowTestManual(reference, depth, bias, reversez);
+	// Debug globals written here (single sample path only).
 	g_shadow_debug_sampled_depth = depth;
 	g_shadow_debug_depth_delta = reference - depth;
 	return lit;
 }
 
+// PCF quality levels:
+//   taps <= 2  ->  4 samples  (2x2 rotated grid)
+//   taps <= 4  ->  9 samples  (3x3 grid)
+//   taps >= 5  -> 25 samples  (5x5 grid)
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 {
 	vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
@@ -125,8 +136,12 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 		);
 		for (int i = 0; i < 4; ++i)
 		{
-			sum += ShadowSampleRaw(uv + offsets[i] * texel, reference, bias);
+			// FIX: use ShadowTestSingle to avoid overwriting debug globals per tap.
+			sum += ShadowTestSingle(uv + offsets[i] * texel, reference, bias);
 		}
+		// FIX: write debug globals once from center sample.
+		g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
+		g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
 		return sum * 0.25;
 	}
 
@@ -136,10 +151,12 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 		{
 			for (int x = -1; x <= 1; ++x)
 			{
-				sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
+				sum += ShadowTestSingle(uv + vec2(x, y) * texel, reference, bias);
 				++count;
 			}
 		}
+		g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
+		g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
 		return sum / float(count);
 	}
 
@@ -147,11 +164,12 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 	{
 		for (int x = -2; x <= 2; ++x)
 		{
-			sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
+			sum += ShadowTestSingle(uv + vec2(x, y) * texel, reference, bias);
 			++count;
 		}
 	}
-
+	g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
+	g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
 	return sum / float(count);
 }
 
@@ -209,6 +227,10 @@ float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 	return ShadowTestManual(reference, depth, bias, reversez);
 }
 
+// PCF quality levels (same as sun):
+//   taps <= 2  ->  4 samples  (2x2 rotated grid)
+//   taps <= 4  ->  9 samples  (3x3 grid)
+//   taps >= 5  -> 25 samples  (5x5 grid)
 float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
 {
 	vec2 texel = 1.0 / vec2(textureSize(ShadowDlightMap, 0));
@@ -304,9 +326,13 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 
 	vec3 light_dir = normalize(light_pos - world_pos);
 	float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
-	float bias = ShadowDlightParams.x * (1.0 - ndotl);
+	// FIX: Added constant bias term (ShadowDlightParams.x) to prevent shadow acne
+	// at near-perpendicular angles (ndotl ≈ 1 made old bias ≈ 0).
+	// ShadowDlightParams.x = constant bias, ShadowDlightParams.y = slope bias,
+	// matching the convention used in the sun shadow path.
+	float bias = ShadowDlightParams.x + ShadowDlightParams.y * (1.0 - ndotl);
 
-	int taps = int(ShadowDlightParams.y + 0.5);
+	int taps = int(ShadowDlightParams.w + 0.5);
 	if (taps > 0)
 		return ShadowSamplePCFDlight(uv, reference, bias, taps);
 

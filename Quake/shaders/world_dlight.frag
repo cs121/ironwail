@@ -139,7 +139,6 @@ void main()
                 if ((clusterdata.x | clusterdata.y) != 0u)
                 {
                         float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-                        vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
                         float falloff_mode = DLightConfig0.z;
                         float falloff_exp = max(DLightConfig0.w, 0.01);
                         float core_boost = max(DLightConfig1.x, 0.0);
@@ -152,22 +151,30 @@ void main()
                                 uint mask = clusterdata[i];
                                 while (mask != 0u)
                                 {
-                                        int j = findLSB(mask);
-                                        mask ^= 1u << j;
-                                        Light l = Lights[ofs + uint(j)];
+                                        // FIX: mask &= mask - 1u loescht das niederwertigste Bit
+                                        // sicher ohne Shift-UB (kein "1u << int_j" mehr noetig).
+                                        uint j = uint(findLSB(mask));
+                                        mask &= mask - 1u;
+                                        Light l = Lights[ofs + j];
 
                                         float rad = l.radius;
-                                        float dist = dot(l.origin, plane.xyz) - plane.w;
+
+                                        // FIX: light_vec vom echten Lichtpunkt (nicht vom
+                                        // auf die Oberflaeche projizierten), damit surface_dist
+                                        // den tatsaechlichen 3D-Abstand wiedergibt.
+                                        vec3 light_vec = l.origin - in_pos;
+                                        float surface_dist = length(light_vec);
+
+                                        // Planarer Abstand des Lichts von der Oberflaeche
+                                        // (fuer Radius-Abzug und minlight-Pruefung).
+                                        float dist = dot(l.origin - in_pos, surface_normal);
                                         rad -= abs(dist);
                                         float minlight = l.minlight;
 
                                         if (rad <= 0.0 || rad < minlight)
                                                 continue;
 
-                                        vec3 local_pos = l.origin - plane.xyz * dist;
                                         minlight = rad - minlight;
-                                        vec3 light_vec = local_pos - in_pos;
-                                        float surface_dist = length(light_vec);
                                         float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
                                         float normalized_dist = surface_dist / rad;
                                         float x = clamp(1.0 - clamp(normalized_dist, 0.0, 1.0), 0.0, 1.0);
@@ -185,13 +192,18 @@ void main()
                                                 ndotl = mix(1.0, ndotl_raw, ndotl_mix);
                                         }
 
-                                        float shadow_range = 1.0;
-                                        float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, ofs + uint(j), shadow_range);
+                                        // FIX: shadow_range = l.radius statt fest 1.0,
+                                        // damit ShadowVisibilityDlight korrekt skaliert.
+                                        float shadow_range = l.radius;
+                                        float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, ofs + j, shadow_range);
                                         vec3 light_contrib = shaped * ndotl * shadow_term * l.color * dynamic_light_noise;
                                         dynamic_light += light_contrib;
                                         if (surface_dist > 0.0)
                                         {
-                                                float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
+                                                // FIX: energy aus geometrischer Intensitaet (shaped * ndotl * shadow_term),
+                                                // nicht aus der farbgewichteten light_contrib, um Verzerrung durch
+                                                // Lichtfarbe im Spekularbeitrag zu vermeiden.
+                                                float energy = min(1.0, shaped * ndotl * shadow_term);
                                                 float spec = ComputeSpecEnergy(surface_normal, light_dir, view_dir, ndotl, quality, energy);
                                                 specular_light += l.color * spec * shadow_term;
                                         }
@@ -214,6 +226,8 @@ void main()
 
         color = ApplyFog(color, in_pos - EyePos);
 
-        out_fragcolor = vec4(color, 0.0);
+        // FIX: alpha (texel.a * in_alpha) korrekt in out_fragcolor schreiben,
+        // statt fest 0.0 -- sonst geht jede Transparenz (z.B. Wasser) verloren.
+        out_fragcolor = vec4(color, alpha);
         out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 }
