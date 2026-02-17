@@ -582,6 +582,8 @@ static int r_clustered_debug_light_cluster_hits[DLIGHT_GPU_MAX];
 static int r_clustered_debug_cluster_count;
 static int r_clustered_debug_index_count;
 
+void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits);
+
 typedef struct gpu_cluster_inputs_s {
 	int pass_mode;
 	int num_lights;
@@ -916,6 +918,30 @@ void R_Clustered_BindForShading (void)
 		(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.max_indices));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, r_clustered.counters_ssbo, 0, sizeof (GLuint) * 2);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, r_clustered.params_ubo, 0, sizeof (clustered_params_t));
+}
+
+
+void R_Clustered_RebindForProgram (GLuint program, const char *pass_name)
+{
+	if (!R_ClusteredEnabled ())
+		return;
+
+	R_Clustered_BindForShading ();
+
+	if (r_dlight_log.value > 0.f)
+	{
+		int clusters = 0;
+		int indices = 0;
+		R_GetClusterDlightDebugStats (&clusters, &indices, NULL, NULL);
+		Con_Printf ("DLIGHTLOG f=%d pass=%s cluster_rebind program=%u(%s) numlights=%u grid=%dx%dx%d indices=%d\n",
+			r_framecount,
+			(pass_name && *pass_name) ? pass_name : "<unknown>",
+			(unsigned)program,
+			GL_GetProgramDebugName (program),
+			r_framedata.numlights,
+			r_clustered.grid_x, r_clustered.grid_y, r_clustered.z_slices,
+			indices);
+	}
 }
 
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits)
