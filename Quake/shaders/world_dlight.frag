@@ -123,12 +123,17 @@ void main()
         vec3 view_dir = normalize(EyePos - in_pos);
         if (NumLights > 0u)
         {
+                // in_depth is provided as absolute view-space Z from the vertex shader.
+                // Convert that linear view depth into clustered logarithmic Z-slice space.
                 ivec3 cluster_coord = ivec3(
                         int(floor(in_coord.x)),
                         int(floor(in_coord.y)),
-                        int(floor(log2(in_depth) * ZLogScale + ZLogBias))
+                        int(floor(log2(max(in_depth, 1e-6)) * ZLogScale + ZLogBias))
                 );
 
+                // Clamp cluster coordinates before imageLoad to avoid undefined out-of-bounds access.
+                ivec3 cluster_max = ivec3(LIGHT_TILES_X - 1, LIGHT_TILES_Y - 1, LIGHT_TILES_Z - 1);
+                cluster_coord = clamp(cluster_coord, ivec3(0), cluster_max);
                 uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
 
                 if ((clusterdata.x | clusterdata.y) != 0u)
