@@ -315,7 +315,7 @@ static void R_Shadow_RestoreGLState (const shadow_gl_state_t *state)
 	}
 	glDepthFunc ((GLenum)state->depth_func);
 	glDepthRange (state->depth_range[0], state->depth_range[1]);
-#ifdef GL_VERSION_1_4
+#if defined(GL_VERSION_1_4) && defined(GL_GLEXT_PROTOTYPES)
 	glBlendFuncSeparate (state->blend_src_rgb, state->blend_dst_rgb, state->blend_src_alpha, state->blend_dst_alpha);
 #else
 	/* Older GL headers (notably on MSVC) may not declare glBlendFuncSeparate. */
