@@ -539,6 +539,7 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
 void R_DrawBrushModels_DLights (entity_t **ents, int count);
+void R_GetBrushDlightPassDebugStats (int *out_drawcalls, int *out_instances, int *out_batches);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -604,6 +605,7 @@ qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, v
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
+void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;

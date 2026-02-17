@@ -128,7 +128,7 @@ void main()
                 ivec3 cluster_coord = ivec3(
                         int(floor(in_coord.x)),
                         int(floor(in_coord.y)),
-                        int(floor(log2(max(in_depth, 1e-6)) * ZLogScale + ZLogBias))
+                        int(floor(log2(max(in_depth, 1e-4)) * ZLogScale + ZLogBias))
                 );
 
                 // Clamp cluster coordinates before imageLoad to avoid undefined out-of-bounds access.

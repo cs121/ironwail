@@ -5163,6 +5163,55 @@ static void R_SetDlightConfig (GLuint program, float scale, float falloff, float
 	GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
 }
 
+static void R_DlightDebugReport (int vis_brush_count)
+{
+	const int *cluster_hits = NULL;
+	int max_hits = 0;
+	int clusters = 0;
+	int indices = 0;
+	int drawcalls = 0;
+	int instances = 0;
+	int batches = 0;
+	dlight_pool_stats_t pool_stats;
+	int best = -1;
+	float best_dist2 = FLT_MAX;
+
+	if (r_dlight_debug.value <= 0.f)
+		return;
+
+	DLightPool_GetStats (&pool_stats);
+	R_GetBrushDlightPassDebugStats (&drawcalls, &instances, &batches);
+	R_GetClusterDlightDebugStats (&clusters, &indices, &cluster_hits, &max_hits);
+
+	for (int i = 0; i < r_framedata.numlights; i++)
+	{
+		if (!r_dlight_sources[i])
+			continue;
+		vec3_t delta;
+		VectorSubtract (r_dlight_sources[i]->origin, r_refdef.vieworg, delta);
+		float dist2 = DotProduct (delta, delta);
+		if (dist2 < best_dist2)
+		{
+			best_dist2 = dist2;
+			best = i;
+		}
+	}
+
+	Con_DPrintf ("dlight world: active=%d submitted=%d gpu=%u vis_brush=%d dlight_batches=%d dlight_instances=%d dlight_drawcalls=%d clustered=%d mode=%d\n",
+		pool_stats.active, pool_stats.submitted, r_framedata.numlights, vis_brush_count, batches, instances, drawcalls,
+		(r_clustered_lighting.value > 0.f) ? 1 : 0, (r_dlight_mode.value > 0.f) ? 1 : 0);
+	Con_DPrintf ("dlight world checks: r_dynamic=%.0f gl_flashblend=%.0f r_dlight_enable=%.0f cluster_cells=%d cluster_indices=%d\n",
+		r_dynamic.value, gl_flashblend.value, r_dlight_enable.value, clusters, indices);
+
+	if (best >= 0 && r_dlight_sources[best])
+	{
+		dlight_t *dl = r_dlight_sources[best];
+		int touched = (cluster_hits && best < max_hits) ? cluster_hits[best] : 0;
+		Con_DPrintf ("dlight focus[%d]: org=(%.1f %.1f %.1f) radius=%.1f color=(%.2f %.2f %.2f) world_clusters=%d\n",
+			best, dl->origin[0], dl->origin[1], dl->origin[2], dl->radius, dl->color[0], dl->color[1], dl->color[2], touched);
+	}
+}
+
 static void R_DrawDLightPass (void)
 {
         int count = 0;
@@ -5251,6 +5300,8 @@ static void R_DrawDLightPass (void)
 			glReadBuffer (GL_BACK);
 		}
 	}
+
+	R_DlightDebugReport (count);
 
         GL_EndGroup ();
 }
