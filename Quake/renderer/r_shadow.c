@@ -195,6 +195,13 @@ typedef struct shadow_gl_state_s {
 	GLint read_buffer;
 	GLint viewport[4];
 	GLint scissor[4];
+	GLint program;
+	GLint depth_func;
+	GLboolean depth_test;
+	GLboolean blend;
+	GLboolean cull;
+	GLboolean depth_mask;
+	GLfloat depth_range[2];
 	GLboolean scissor_test;
 } shadow_gl_state_t;
 
@@ -209,6 +216,13 @@ static void R_Shadow_SaveGLState (shadow_gl_state_t *state)
 	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
 	glGetIntegerv (GL_VIEWPORT, state->viewport);
 	glGetIntegerv (GL_SCISSOR_BOX, state->scissor);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
+	glGetIntegerv (GL_DEPTH_FUNC, &state->depth_func);
+	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
+	state->blend = glIsEnabled (GL_BLEND);
+	state->cull = glIsEnabled (GL_CULL_FACE);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_mask);
+	glGetFloatv (GL_DEPTH_RANGE, state->depth_range);
 	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
 }
 
@@ -223,6 +237,22 @@ static void R_Shadow_RestoreGLState (const shadow_gl_state_t *state)
 	glReadBuffer ((GLenum)state->read_buffer);
 	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	glScissor (state->scissor[0], state->scissor[1], state->scissor[2], state->scissor[3]);
+	GL_UseProgram ((GLuint)state->program);
+	glDepthFunc ((GLenum)state->depth_func);
+	glDepthRange (state->depth_range[0], state->depth_range[1]);
+	glDepthMask (state->depth_mask);
+	if (state->depth_test)
+		glEnable (GL_DEPTH_TEST);
+	else
+		glDisable (GL_DEPTH_TEST);
+	if (state->blend)
+		glEnable (GL_BLEND);
+	else
+		glDisable (GL_BLEND);
+	if (state->cull)
+		glEnable (GL_CULL_FACE);
+	else
+		glDisable (GL_CULL_FACE);
 	if (state->scissor_test)
 		glEnable (GL_SCISSOR_TEST);
 	else
@@ -1932,6 +1962,7 @@ void R_Shadow_DlightPass (void)
 void R_Shadow_DrawDebug (void)
 {
 	int mode = (int)r_shadow_debug.value;
+	shadow_gl_state_t saved_state;
 	if (mode != 1 && mode != 4)
 		return;
 	if (!glprogs.shadow_debug)
@@ -1940,6 +1971,8 @@ void R_Shadow_DrawDebug (void)
 		return;
 	if (mode == 4 && !shadow_dlight_depth_tex)
 		return;
+
+	R_Shadow_SaveGLState (&saved_state);
 
 	GL_BeginGroup ("Shadow map debug");
 
@@ -1950,6 +1983,7 @@ void R_Shadow_DrawDebug (void)
 	else
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	R_Shadow_RestoreGLState (&saved_state);
 
 	GL_EndGroup ();
 }
