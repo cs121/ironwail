@@ -21,15 +21,11 @@ float ShadowReference01(float proj_z)
 
 vec3 g_shadow_debug_coord = vec3(0.0);
 float g_shadow_debug_inside = 0.0;
+float g_shadow_debug_receiver_depth = 0.0;
+float g_shadow_debug_sampled_depth = 0.0;
+float g_shadow_debug_depth_delta = 0.0;
 
-vec3 ShadowDebugCoordVisualize()
-{
-	if (g_shadow_debug_inside > 0.5)
-		return vec3(clamp(g_shadow_debug_coord.xy, 0.0, 1.0), clamp(g_shadow_debug_coord.z, 0.0, 1.0));
-	return vec3(1.0, 0.0, 1.0);
-}
-
-float ShadowCompare(float depth, float reference, float bias)
+float ShadowDebugReverseZ()
 {
 	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
 	bool reversed_auto =
@@ -39,15 +35,70 @@ float ShadowCompare(float depth, float reference, float bias)
 		false;
 #endif
 	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
-	if (use_gequal)
-		return (reference >= (depth - bias)) ? 1.0 : 0.0;
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
+	return use_gequal ? 1.0 : 0.0;
+}
+
+float ShadowTestManual(float receiverDepth, float shadowDepth, float bias, bool isReverseZ)
+{
+	if (isReverseZ)
+		return (receiverDepth >= (shadowDepth - bias)) ? 1.0 : 0.0;
+	return (receiverDepth <= (shadowDepth + bias)) ? 1.0 : 0.0;
+}
+
+vec3 ShadowDebugCoordVisualize()
+{
+	if (g_shadow_debug_inside > 0.5)
+		return vec3(clamp(g_shadow_debug_coord.xy, 0.0, 1.0), 0.0);
+	return vec3(1.0, 0.0, 0.0);
+}
+
+vec3 ShadowDebugReceiverDepthVisualize()
+{
+	if (g_shadow_debug_inside < 0.5)
+		return vec3(1.0, 0.0, 0.0);
+	float d = clamp(g_shadow_debug_receiver_depth, 0.0, 1.0);
+	return vec3(d);
+}
+
+vec3 ShadowDebugSampleDepthVisualize()
+{
+	if (g_shadow_debug_inside < 0.5)
+		return vec3(1.0, 0.0, 0.0);
+	float d = clamp(g_shadow_debug_sampled_depth, 0.0, 1.0);
+	return vec3(d);
+}
+
+vec3 ShadowDebugDeltaVisualize()
+{
+	if (g_shadow_debug_inside < 0.5)
+		return vec3(1.0, 0.0, 0.0);
+	float delta = clamp(g_shadow_debug_depth_delta, -1.0, 1.0);
+	if (delta >= 0.0)
+		return vec3(delta, 0.0, 0.0);
+	return vec3(0.0, 0.0, -delta);
+}
+
+vec3 ShadowDebugVisualize(int mode, float visibility)
+{
+	if (mode == 2)
+		return ShadowDebugCoordVisualize();
+	if (mode == 3)
+		return ShadowDebugReceiverDepthVisualize();
+	if (mode == 4)
+		return ShadowDebugSampleDepthVisualize();
+	if (mode == 5)
+		return ShadowDebugDeltaVisualize();
+	return vec3(clamp(visibility, 0.0, 1.0));
 }
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowMap, uv).r;
-	return ShadowCompare(depth, reference, bias);
+	bool reversez = ShadowDebugReverseZ() > 0.5;
+	float lit = ShadowTestManual(reference, depth, bias, reversez);
+	g_shadow_debug_sampled_depth = depth;
+	g_shadow_debug_depth_delta = reference - depth;
+	return lit;
 }
 
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
@@ -116,6 +167,9 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 	float reference = ShadowReference01(proj.z);
 
 	g_shadow_debug_coord = vec3(uv, reference);
+	g_shadow_debug_receiver_depth = reference;
+	g_shadow_debug_sampled_depth = 0.0;
+	g_shadow_debug_depth_delta = 0.0;
 
 	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
 		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
@@ -135,25 +189,11 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 #endif
 
 #ifdef SHADOW_DLIGHT
-float ShadowCompare(float depth, float reference, float bias)
-{
-	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
-	bool reversed_auto =
-#if REVERSED_Z
-		true;
-#else
-		false;
-#endif
-	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
-	if (use_gequal)
-		return (reference >= (depth - bias)) ? 1.0 : 0.0;
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
-}
-
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowDlightMap, uv).r;
-	return ShadowCompare(depth, reference, bias);
+	bool reversez = ShadowDebugReverseZ() > 0.5;
+	return ShadowTestManual(reference, depth, bias, reversez);
 }
 
 float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)

@@ -508,10 +508,7 @@ void main()
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
 			int shadow_debug_mode = int(ShadowDebug.y + 0.5);
-			if (shadow_debug_mode == 2)
-				out_fragcolor = vec4(ShadowDebugCoordVisualize(), 1.0);
-			else
-				out_fragcolor = vec4(vec3(shadow_term), 1.0);
+			out_fragcolor = vec4(ShadowDebugVisualize(shadow_debug_mode, shadow_term), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
