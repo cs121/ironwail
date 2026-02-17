@@ -76,6 +76,8 @@ static qboolean R_DlightsAdditivePassEnabled (void)
 	return (r_clustered_lighting.value <= 0.f);
 }
 
+static void R_DlightLogf (const char *pass, const char *fmt, ...);
+
 typedef struct godrays_stabilization_s
 {
 	qboolean	valid;
