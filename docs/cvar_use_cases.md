@@ -201,6 +201,7 @@ Total registered cvars reviewed: **627**.
 | `r_dlight_core_boost` | `0.75` |
 | `r_dlight_core_exp` | `6.0` |
 | `r_dlight_debug` | `0` |
+| `r_dlight_log` | `0` |
 | `r_dlight_enable` | `1` |
 | `r_dlight_entities` | `1` |
 | `r_dlight_exp` | `2.2` |
