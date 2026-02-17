@@ -439,7 +439,7 @@ static void R_DlightLogWorldProgramBindings (const char *pass_name, GLuint progr
 	if (r_dlight_log.value <= 0.f)
 		return;
 
-#if defined(GL_VERSION_3_0)
+#if defined(GL_VERSION_3_0) && !defined(_WIN32)
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 3, &ssbo3);
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 4, &ssbo4);
 	glGetIntegeri_v (GL_SHADER_STORAGE_BUFFER_BINDING, 5, &ssbo5);
