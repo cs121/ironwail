@@ -200,10 +200,65 @@ typedef struct shadow_gl_state_s {
 	GLboolean depth_test;
 	GLboolean blend;
 	GLboolean cull;
+	GLint cull_face_mode;
+	GLint blend_src_rgb;
+	GLint blend_dst_rgb;
+	GLint blend_src_alpha;
+	GLint blend_dst_alpha;
+	GLboolean color_mask[4];
 	GLboolean depth_mask;
 	GLfloat depth_range[2];
 	GLboolean scissor_test;
 } shadow_gl_state_t;
+
+static void R_Shadow_LogStateSnapshot (const char *tag)
+{
+	GLint draw_fbo = 0, read_fbo = 0, program = 0;
+	GLint viewport[4], scissor_box[4], depth_func = 0, cull_face_mode = 0;
+	GLint blend_src_rgb = 0, blend_dst_rgb = 0, blend_src_alpha = 0, blend_dst_alpha = 0;
+	GLboolean depth_mask = GL_TRUE;
+	GLboolean color_mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+	qboolean scissor = false, depth = false, blend = false, cull = false;
+
+	if (r_shadow_log.value <= 0.f && r_shadow_log_gl.value <= 0.f)
+		return;
+
+	R_Shadow_Log_BeginFrame ();
+	if (!shdlog.active)
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetIntegerv (GL_CULL_FACE_MODE, &cull_face_mode);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_SRC_ALPHA, &blend_src_alpha);
+	glGetIntegerv (GL_BLEND_DST_ALPHA, &blend_dst_alpha);
+	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	scissor = glIsEnabled (GL_SCISSOR_TEST);
+	depth = glIsEnabled (GL_DEPTH_TEST);
+	blend = glIsEnabled (GL_BLEND);
+	cull = glIsEnabled (GL_CULL_FACE);
+
+	R_Shadow_LogWrite (
+		"STATE %s draw_fbo=%d read_fbo=%d prog=%d viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d) "
+		"depth=%d depthmask=%d depthfunc=0x%04x cull=%d cullmode=0x%04x blend=%d blendfunc=(%d,%d,%d,%d) colormask=(%d%d%d%d)\n",
+		tag ? tag : "<null>",
+		draw_fbo, read_fbo, program,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		depth, depth_mask, (unsigned)depth_func,
+		cull, (unsigned)cull_face_mode,
+		blend,
+		blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha,
+		color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
+}
 
 static void R_Shadow_SaveGLState (shadow_gl_state_t *state)
 {
@@ -221,6 +276,12 @@ static void R_Shadow_SaveGLState (shadow_gl_state_t *state)
 	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
 	state->blend = glIsEnabled (GL_BLEND);
 	state->cull = glIsEnabled (GL_CULL_FACE);
+	glGetIntegerv (GL_CULL_FACE_MODE, &state->cull_face_mode);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &state->blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &state->blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_SRC_ALPHA, &state->blend_src_alpha);
+	glGetIntegerv (GL_BLEND_DST_ALPHA, &state->blend_dst_alpha);
+	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_mask);
 	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_mask);
 	glGetFloatv (GL_DEPTH_RANGE, state->depth_range);
 	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
@@ -237,10 +298,32 @@ static void R_Shadow_RestoreGLState (const shadow_gl_state_t *state)
 	glReadBuffer ((GLenum)state->read_buffer);
 	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	glScissor (state->scissor[0], state->scissor[1], state->scissor[2], state->scissor[3]);
-	GL_UseProgram ((GLuint)state->program);
+	if (GL_GetCurrentProgramCached () != (GLuint)state->program)
+		GL_UseProgram ((GLuint)state->program);
+	else
+	{
+		GLint gl_program = 0;
+		glGetIntegerv (GL_CURRENT_PROGRAM, &gl_program);
+		if (gl_program != state->program)
+		{
+			if (r_gl_verify_program.value > 0.f)
+				Con_DWarning ("R_Shadow_RestoreGLState: shader cache desync detected cached=%u gl=%d target=%d\n",
+					(unsigned)GL_GetCurrentProgramCached (), (int)gl_program, (int)state->program);
+			GL_ClearCachedProgram ();
+			GL_UseProgram ((GLuint)state->program);
+		}
+	}
 	glDepthFunc ((GLenum)state->depth_func);
 	glDepthRange (state->depth_range[0], state->depth_range[1]);
+#ifdef GL_VERSION_1_4
+	glBlendFuncSeparate (state->blend_src_rgb, state->blend_dst_rgb, state->blend_src_alpha, state->blend_dst_alpha);
+#else
+	/* Older GL headers (notably on MSVC) may not declare glBlendFuncSeparate. */
+	glBlendFunc (state->blend_src_rgb, state->blend_dst_rgb);
+#endif
+	glColorMask (state->color_mask[0], state->color_mask[1], state->color_mask[2], state->color_mask[3]);
 	glDepthMask (state->depth_mask);
+	glCullFace (state->cull_face_mode);
 	if (state->depth_test)
 		glEnable (GL_DEPTH_TEST);
 	else
@@ -1718,7 +1801,9 @@ void R_Shadow_SunPass (void)
 	}
 	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
 		shadow_drawcalls, shadow_drawcalls, (t1 - t0) * 1000.0);
+	R_Shadow_LogStateSnapshot ("SUNPASS_BEFORE_RESTORE");
 	R_Shadow_RestoreGLState (&saved_state);
+	R_Shadow_LogStateSnapshot ("SUNPASS_AFTER_RESTORE");
 
 	GL_EndGroup ();
 }
@@ -1952,9 +2037,11 @@ void R_Shadow_DlightPass (void)
 	R_Shadow_Log_ShadowPassSnapshot ("DLIGHTPASS", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size,
 		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
 	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
+	R_Shadow_LogStateSnapshot ("DLIGHTPASS_BEFORE_RESTORE");
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 	R_Shadow_RestoreGLState (&saved_state);
+	R_Shadow_LogStateSnapshot ("DLIGHTPASS_AFTER_RESTORE");
 
 	GL_EndGroup ();
 }
@@ -1983,7 +2070,9 @@ void R_Shadow_DrawDebug (void)
 	else
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	R_Shadow_LogStateSnapshot ("SHADOW_DEBUG_BEFORE_RESTORE");
 	R_Shadow_RestoreGLState (&saved_state);
+	R_Shadow_LogStateSnapshot ("SHADOW_DEBUG_AFTER_RESTORE");
 
 	GL_EndGroup ();
 }
