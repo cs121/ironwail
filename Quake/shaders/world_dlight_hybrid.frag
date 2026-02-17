@@ -126,7 +126,7 @@ void main()
                 ivec3 cluster_coord = ivec3(
                         int(floor(in_coord.x)),
                         int(floor(in_coord.y)),
-                        int(floor(log2(in_depth) * ZLogScale + ZLogBias))
+                        int(floor(log2(max(in_depth, 1e-4)) * ZLogScale + ZLogBias))
                 );
 
                 uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;

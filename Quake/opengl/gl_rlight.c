@@ -35,6 +35,7 @@ extern cvar_t r_dlight_max;
 extern cvar_t r_dlight_quality;
 extern cvar_t r_dlight_entities;
 extern cvar_t r_dlight_mode;
+extern cvar_t r_dlight_debug;
 extern cvar_t r_dlight_radius_scale;
 extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
@@ -576,6 +577,9 @@ static struct {
 } r_clustered;
 
 static clustered_header_t *r_clustered_headers_cpu;
+static int r_clustered_debug_light_cluster_hits[DLIGHT_GPU_MAX];
+static int r_clustered_debug_cluster_count;
+static int r_clustered_debug_index_count;
 
 typedef struct gpu_cluster_inputs_s {
 	int pass_mode;
@@ -682,6 +686,9 @@ void R_Clustered_Shutdown (void)
 	memset (&r_clustered, 0, sizeof (r_clustered));
 	free (r_clustered_headers_cpu);
 	r_clustered_headers_cpu = NULL;
+	memset (r_clustered_debug_light_cluster_hits, 0, sizeof (r_clustered_debug_light_cluster_hits));
+	r_clustered_debug_cluster_count = 0;
+	r_clustered_debug_index_count = 0;
 }
 
 
@@ -860,6 +867,36 @@ void R_Clustered_BuildLists (void)
 		r_clustered.last_overflow_log = realtime;
 	}
 
+	r_clustered_debug_cluster_count = r_clustered.cluster_count;
+	r_clustered_debug_index_count = 0;
+	memset (r_clustered_debug_light_cluster_hits, 0, sizeof (r_clustered_debug_light_cluster_hits));
+	if (r_dlight_debug.value > 0.f)
+	{
+		GLuint *indices_mapped = NULL;
+
+		for (i = 0; i < r_clustered.cluster_count; i++)
+			r_clustered_debug_index_count += (int)r_clustered_headers_cpu[i].count;
+
+		GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.indices_ssbo);
+		indices_mapped = (GLuint *)GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0,
+			(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.max_indices), GL_MAP_READ_BIT);
+		if (indices_mapped)
+		{
+			for (i = 0; i < r_clustered.cluster_count; i++)
+			{
+				GLuint ofs = r_clustered_headers_cpu[i].offset;
+				GLuint cnt = r_clustered_headers_cpu[i].count;
+				for (GLuint j = 0; j < cnt; j++)
+				{
+					GLuint light_id = indices_mapped[ofs + j];
+					if (light_id < DLIGHT_GPU_MAX)
+						r_clustered_debug_light_cluster_hits[light_id]++;
+				}
+			}
+			GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER);
+		}
+	}
+
 	free (temp_counts);
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, 0);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, 0);
@@ -878,6 +915,18 @@ void R_Clustered_BindForShading (void)
 		(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.max_indices));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, r_clustered.counters_ssbo, 0, sizeof (GLuint) * 2);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, r_clustered.params_ubo, 0, sizeof (clustered_params_t));
+}
+
+void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits)
+{
+	if (out_clusters)
+		*out_clusters = r_clustered_debug_cluster_count;
+	if (out_indices)
+		*out_indices = r_clustered_debug_index_count;
+	if (out_light_hits)
+		*out_light_hits = r_clustered_debug_light_cluster_hits;
+	if (out_max_hits)
+		*out_max_hits = (int)countof (r_clustered_debug_light_cluster_hits);
 }
 
 const vec3_t *R_GetDynamicLightTemperature (int type)
