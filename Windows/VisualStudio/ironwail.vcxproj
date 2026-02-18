@@ -275,7 +275,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\in_sdl.c" />
     <ClCompile Include="..\..\Quake\json.c" />
     <ClCompile Include="..\..\Quake\keys.c" />
-    <ClCompile Include="..\..\Quake\lodepng.c" />
     <ClCompile Include="..\..\Quake\main_sdl.c" />
     <ClCompile Include="..\..\Quake\mathlib.c" />
     <ClCompile Include="..\..\Quake\mat_shader.c" />
