@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "renderer/r_decals.h"
-#include "world.h"
 
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
@@ -37,32 +36,6 @@ sfx_t			*cl_sfx_ric2;
 sfx_t			*cl_sfx_ric3;
 sfx_t			*cl_sfx_r_exp3;
 
-
-static void CL_DecalImpactNormal (const vec3_t pos, vec3_t out_normal)
-{
-	trace_t trace;
-	vec3_t start, end;
-	vec3_t dir;
-	if (!cl.worldmodel)
-	{
-		VectorSet (out_normal, 0.f, 0.f, 1.f);
-		return;
-	}
-	VectorSubtract (pos, r_refdef.vieworg, dir);
-	if (VectorNormalize (dir) <= 0.001f)
-		VectorCopy (vpn, dir);
-	VectorMA (pos, -16.f, dir, start);
-	VectorMA (pos, 16.f, dir, end);
-	memset (&trace, 0, sizeof (trace));
-	trace.fraction = 1.f;
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, start, end, &trace);
-	if (trace.fraction >= 1.f)
-		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
-	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
-		VectorCopy (trace.plane.normal, out_normal);
-	else
-		VectorSet (out_normal, 0.f, 0.f, 1.f);
-}
 
 /*
 =================
@@ -173,13 +146,13 @@ void CL_ParseTEnt (void)
 
 	case TE_SPIKE:			// spike hitting wall
 	{
-		vec3_t nrm;
+		vec3_t nrm, hit;
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 10);
-		CL_DecalImpactNormal (pos, nrm);
-		R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
+		if (R_Decals_ResolveSurface (pos, vpn, hit, nrm))
+			R_Decals_Add ("bullet_hole_default", hit, nrm, NULL, 0.f, 0);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -196,13 +169,13 @@ void CL_ParseTEnt (void)
 	}
 	case TE_SUPERSPIKE:			// super spike hitting wall
 	{
-		vec3_t nrm;
+		vec3_t nrm, hit;
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
-		CL_DecalImpactNormal (pos, nrm);
-		R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
+		if (R_Decals_ResolveSurface (pos, vpn, hit, nrm))
+			R_Decals_Add ("bullet_hole_default", hit, nrm, NULL, 0.f, 0);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -224,10 +197,10 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		{
-			vec3_t nrm;
+			vec3_t nrm, hit;
 			R_RunParticleEffect (pos, vec3_origin, 0, 20);
-			CL_DecalImpactNormal (pos, nrm);
-			R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
+			if (R_Decals_ResolveSurface (pos, vpn, hit, nrm))
+				R_Decals_Add ("bullet_hole_default", hit, nrm, NULL, 0.f, 0);
 		}
 		break;
 

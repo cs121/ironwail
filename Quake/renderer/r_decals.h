@@ -7,6 +7,7 @@ void R_Decals_Clear (void);
 void R_Decals_ReloadScripts (void);
 void R_Decals_FrameBegin (void);
 void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, const float *rgba_opt, float size_opt, int flags);
+qboolean R_Decals_ResolveSurface (const vec3_t point, const vec3_t preferred_dir, vec3_t out_point, vec3_t out_normal);
 void R_DrawDecals (qboolean showtris);
 void R_DrawDecals_ShowTris (void);
 
