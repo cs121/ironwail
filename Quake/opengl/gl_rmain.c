@@ -546,6 +546,8 @@ cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
 cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
 cvar_t  r_clustered_profile_dumpinterval = { "r_clustered_profile_dumpinterval", "60", CVAR_NONE };
 cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
+// Debug-only instrumentation toggles. Production clustered list build always
+// runs regardless of these values.
 cvar_t  r_clustered_buildlists = { "r_clustered_buildlists", "1", CVAR_NONE };
 cvar_t  r_clustered_clearlists = { "r_clustered_clearlists", "1", CVAR_NONE };
 cvar_t  r_clustered_barriers = { "r_clustered_barriers", "1", CVAR_NONE };

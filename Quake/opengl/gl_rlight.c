@@ -860,8 +860,9 @@ static qboolean R_ClusteredShouldLog (void)
 
 static void R_ClusteredBarrier (GLbitfield bits)
 {
-	if (r_clustered_barriers.value > 0.f)
-		GL_MemoryBarrierFunc (bits);
+	if (r_clustered_barriers.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
+		R_ClusterPerf_MarkReason ("r_clustered_barriers=0 ignored (memory barriers always enabled)");
+	GL_MemoryBarrierFunc (bits);
 }
 
 static void R_ClusteredLabelBuffer (GLuint buffer, const char *name)
@@ -1066,7 +1067,6 @@ void R_Clustered_BuildLists (void)
 	clustered_params_t params;
 	clustered_light_t lights_local[DLIGHT_GPU_MAX];
 	GLuint counters[2] = {0u, 0u};
-	const qboolean clear_lists = (r_clustered_clearlists.value > 0.f);
 	const GLuint barrier_bits = GL_SHADER_STORAGE_BARRIER_BIT;
 
 	if (!R_ClusteredEnabled () || !glprogs.cluster_lights || !glprogs.cluster_prefix)
@@ -1140,9 +1140,9 @@ void R_Clustered_BuildLists (void)
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
 		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_framedata.numlights), lights_local);
-	if (!clear_lists)
+	if (r_clustered_clearlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
 	{
-		R_ClusterPerf_MarkReason ("r_clustered_clearlists=0 (cluster clear/prefix clear disabled)");
+		R_ClusterPerf_MarkReason ("r_clustered_clearlists=0 ignored (cluster clear/prefix clear always enabled)");
 	}
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.headers_ssbo);
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.temp_counts_ssbo);
@@ -1184,15 +1184,12 @@ void R_Clustered_BuildLists (void)
 		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
 	}
-	if (clear_lists)
-	{
-		R_ClusterPerf_BeginClusterClearGPU ();
-		GL_UseProgram (glprogs.cluster_prefix);
-		GL_DispatchComputeFunc (1, 1, 1);
-		R_ClusteredBarrier (barrier_bits);
-		GL_UseProgram (glprogs.cluster_lights);
-		R_ClusterPerf_EndClusterClearGPU ();
-	}
+	R_ClusterPerf_BeginClusterClearGPU ();
+	GL_UseProgram (glprogs.cluster_prefix);
+	GL_DispatchComputeFunc (1, 1, 1);
+	R_ClusteredBarrier (barrier_bits);
+	GL_UseProgram (glprogs.cluster_lights);
+	R_ClusterPerf_EndClusterClearGPU ();
 
 	R_ClusterPerf_BeginClusterBuildGPU ();
 	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
@@ -1477,6 +1474,8 @@ void R_PushDlights (void)
 
 	if (clustered_enabled)
 	{
+		if (r_clustered_buildlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
+			R_ClusterPerf_MarkReason ("r_clustered_buildlists=0 ignored (cluster list build always enabled)");
 		if (!r_clustered.available)
 		{
 			Con_Printf ("CLUSTERDBG ERROR numlights=%u but clustered buffers unavailable\n", r_framedata.numlights);
