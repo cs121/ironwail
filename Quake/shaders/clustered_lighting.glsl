@@ -44,7 +44,8 @@ layout(std140, binding=2) uniform ClusterParams
 
 bool ClusterLightingEnabled()
 {
-	return NumLights > 0u
+	return ClusteredLightParams.z > 0.5
+		&& NumLights > 0u
 		&& ClusterTileSize > 0
 		&& ClusterGridXY.x > 0
 		&& ClusterGridXY.y > 0
