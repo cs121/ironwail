@@ -4,6 +4,7 @@
 
 #define FS_ASYNC_MAX_REQUESTS 1024
 #define FS_ASYNC_COMPLETED_CAPACITY 1024
+#define FS_ASYNC_DEFAULT_WORKERS 1
 
 #define FS_ASYNC_HANDLE_INDEX_BITS 16
 #define FS_ASYNC_HANDLE_INDEX_MASK ((1u << FS_ASYNC_HANDLE_INDEX_BITS) - 1u)
@@ -390,7 +391,7 @@ void FS_Async_Init (void)
 	if (!fs_async_mutex || !fs_async_done_cond)
 		Sys_Error ("FS_Async_Init: failed to create synchronization primitives");
 
-	fs_async_queue = Sys_Jobs_CreateQueue ("FS Async", 256);
+	fs_async_queue = Sys_Jobs_CreateQueue ("FS Async", 256, FS_ASYNC_DEFAULT_WORKERS);
 	if (!fs_async_queue)
 		Sys_Error ("FS_Async_Init: failed to create fs async queue");
 
