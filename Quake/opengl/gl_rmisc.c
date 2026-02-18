@@ -86,7 +86,7 @@ extern cvar_t r_clustered_log;
 extern cvar_t r_clustered_profile;
 extern cvar_t r_clustered_profile_dumpinterval;
 extern cvar_t r_clustered_validate;
-extern cvar_t r_clustered_buildlists;
+extern cvar_t r_dbg_clustered_force_fallback;
 extern cvar_t r_clustered_clearlists;
 extern cvar_t r_clustered_barriers;
 extern cvar_t r_clustered_shadows;
@@ -636,7 +636,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_clustered_profile_dumpinterval);
 	Cvar_RegisterVariable (&r_clustered_validate);
 #ifdef _DEBUG
-	Cvar_RegisterVariable (&r_clustered_buildlists);
+	Cvar_RegisterVariable (&r_dbg_clustered_force_fallback);
 	Cvar_RegisterVariable (&r_clustered_clearlists);
 	Cvar_RegisterVariable (&r_clustered_barriers);
 #endif
