@@ -147,8 +147,10 @@ static asset_image_payload_t *Asset_DecodeKTX2(const void *raw_data, size_t raw_
 		img->mips[i].pitch = (size_t)w * 4u;
 
 		if (!basisu_transcoder_transcode_image_level(data + off, (size_t)len,
+			supercompression == 0,
 			sgd_length ? data + sgd_offset : NULL, (size_t)sgd_length,
-			supercompression == 0, (uint8_t *)img->mips[i].data, w, h, 4, 4u, 0))
+			(uint32_t)i, (uint32_t)w, (uint32_t)h,
+			(uint8_t *)img->mips[i].data, dst_size))
 			goto fail;
 	}
 
