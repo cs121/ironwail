@@ -198,6 +198,8 @@ vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 	int cluster_idx;
 	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
 		return vec3(0.0);
+	if (cluster_count == 0u)
+		return vec3(0.0);
 
 	vec3 dynamic_light = vec3(0.0);
 

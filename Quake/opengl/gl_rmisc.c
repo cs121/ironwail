@@ -93,6 +93,7 @@ extern cvar_t r_clustered_validate;
 extern cvar_t r_dbg_clustered_force_fallback;
 extern cvar_t r_clustered_clearlists;
 extern cvar_t r_clustered_barriers;
+extern cvar_t r_clustered_force_empty;
 extern cvar_t r_clustered_shadows;
 extern cvar_t r_shadows;
 extern cvar_t r_shadow_sun;
@@ -391,6 +392,7 @@ extern cvar_t r_filmgrain_debug;
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
 #endif
+	Cvar_RegisterVariable (&r_clustered_force_empty);
 qboolean use_simd;
 
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
@@ -544,8 +546,10 @@ static void R_SIMD_f (cvar_t *var)
 #else
 	use_simd = false;
 #endif
+	Cvar_RegisterVariable (&r_clustered_force_empty);
 }
 #endif
+	Cvar_RegisterVariable (&r_clustered_force_empty);
 
 /*
 ====================
@@ -698,6 +702,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_clustered_clearlists);
 	Cvar_RegisterVariable (&r_clustered_barriers);
 #endif
+	Cvar_RegisterVariable (&r_clustered_force_empty);
 	Cvar_RegisterVariable (&r_clustered_shadows);
         Cvar_RegisterVariable (&r_shadows);
         Cvar_RegisterVariable (&r_shadow_sun);
@@ -742,6 +747,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_SetCallback (&r_simd, R_SIMD_f);
 	R_SIMD_f(&r_simd);
 #endif
+	Cvar_RegisterVariable (&r_clustered_force_empty);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_pos);
 	Cvar_RegisterVariable (&r_alphasort);

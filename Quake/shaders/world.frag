@@ -562,7 +562,9 @@ void main()
 		int resolvedClusterIdx;
 		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header, clusterCount))
 			clusterCount = 0u;
-		vec3 dynamic_light = vec3(0.0);
+		if (clusterCount > 0u)
+		{
+			vec3 dynamic_light = vec3(0.0);
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
