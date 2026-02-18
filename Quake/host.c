@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "fs_async.h"
+#include "asset_decode_async.h"
 #include "simd_caps.h"
 #include "bgmusic.h"
 #include "steam.h"
@@ -1281,6 +1282,7 @@ void _Host_Frame (double time)
 // run async procs
 	AsyncQueue_Drain (&async_queue);
 	FS_Async_Pump ();
+	Asset_Async_Pump ();
 
 // get new key events
 	Key_UpdateForDest ();
@@ -1465,6 +1467,7 @@ void Host_Init (void)
 	COM_Init ();
 	COM_InitFilesystem ();
 	FS_Async_Init ();
+	Asset_Async_Init ();
 	Host_InitLocal ();
 	W_LoadWadFile (); //johnfitz -- filename is now hard-coded for honesty
 	if (cls.state != ca_dedicated)
@@ -1569,6 +1572,7 @@ void Host_Shutdown(void)
 
 	AsyncQueue_Destroy (&async_queue);
 	FS_Async_Shutdown ();
+	Asset_Async_Shutdown ();
 
 	Host_ShutdownSave ();
 	Host_WriteConfiguration ();

@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "opengl/gl_lightgrid.h"
 #include "opengl/gl_ktx2.h"
 #include "mat_shader.h"
+#include "asset_decode_async.h"
 #include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
@@ -1132,6 +1133,43 @@ static gltexture_t *Mod_LoadEmissiveMap (qmodel_t *mod, const char *basename, in
         return tex;
 }
 
+
+static gltexture_t *Mod_LoadTextureAsyncDuringLoad(qmodel_t *owner, const char *basepath, unsigned texflags)
+{
+	asset_tex_params_t params;
+	asset_result_t result;
+	asset_handle_t h;
+	char path[MAX_OSPATH];
+	int i;
+	static const char *const exts[] = {"ktx2", "png", NULL};
+
+	if (!Host_IsAssetLoading ())
+		return NULL;
+
+	memset(&params, 0, sizeof(params));
+	params.owner = owner;
+	params.name = basepath;
+	params.flags = texflags;
+
+	for (i = 0; exts[i]; ++i)
+	{
+		q_snprintf(path, sizeof(path), "%s.%s", basepath, exts[i]);
+		h = Asset_LoadTextureAsync(path, &params);
+		if (!h)
+			continue;
+		Asset_Wait(h, &result);
+		if (result.status == ASSET_RESULT_OK && result.image)
+		{
+			gltexture_t *tex = R_CommitDecodedTexture(result.image, &params);
+			Asset_Release(h);
+			return tex;
+		}
+		Asset_Release(h);
+	}
+
+	return NULL;
+}
+
 static gltexture_t *Mod_LoadKTX2Texture(const char *name)
 {
         byte *rawbuf;
@@ -1295,7 +1333,9 @@ static void Mod_LoadTextures (lump_t *l)
                                 if (tx->shader_map && tx->shader_map[0])
                                 {
                                         COM_StripExtension (tx->shader_map, filename, sizeof (filename));
-                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                        if (!ktx2tex)
+                                                ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                 }
                                 else
@@ -1304,12 +1344,16 @@ static void Mod_LoadTextures (lump_t *l)
                                                 q_snprintf (filename, sizeof(filename), "textures/%s/#%s", mapname, tx->name+1); //this also replaces the '*' with a '#'
                                         else
                                                 q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
-                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                        if (!ktx2tex)
+                                                ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                         if (!ktx2tex && !data && mapname[0])
                                         {
                                                 q_snprintf (filename, sizeof(filename), "textures/#%s", tx->name+1);
-                                                ktx2tex = Mod_LoadKTX2Texture (filename);
+                                                ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                                if (!ktx2tex)
+                                                        ktx2tex = Mod_LoadKTX2Texture (filename);
                                                 if (!ktx2tex)
                                                         data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                         }
@@ -1351,7 +1395,7 @@ static void Mod_LoadTextures (lump_t *l)
                                         }
                                 }
                                 tx->emissive = Mod_LoadEmissiveMap (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
-                                if (malloced)
+                                if (malloced && data)
                                         free(data);
                                 Hunk_FreeToLowMark (mark);
                         }
@@ -1367,7 +1411,9 @@ static void Mod_LoadTextures (lump_t *l)
                                 if (tx->shader_map && tx->shader_map[0])
                                 {
                                         COM_StripExtension (tx->shader_map, filename, sizeof (filename));
-                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | TEXPREF_BINDLESS);
+                                        if (!ktx2tex)
+                                                ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                 }
                                 else
@@ -1376,12 +1422,16 @@ static void Mod_LoadTextures (lump_t *l)
                                                 q_snprintf (filename, sizeof(filename), "textures/%s/%s", mapname, tx->name);
                                         else
                                                 q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
-                                        ktx2tex = Mod_LoadKTX2Texture (filename);
+                                        ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | extraflags);
+                                        if (!ktx2tex)
+                                                ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                         if (!ktx2tex && !data && mapname[0])
                                         {
                                                 q_snprintf (filename, sizeof(filename), "textures/%s", tx->name);
-                                                ktx2tex = Mod_LoadKTX2Texture (filename);
+                                                ktx2tex = Mod_LoadTextureAsyncDuringLoad (loadmodel, filename, TEXPREF_MIPMAP | extraflags);
+                                                if (!ktx2tex)
+                                                        ktx2tex = Mod_LoadKTX2Texture (filename);
                                                 if (!ktx2tex)
                                                         data = Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                         }

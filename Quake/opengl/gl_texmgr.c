@@ -3090,3 +3090,14 @@ Returns index of palette buffer to use:
 
 	return 1;
 }
+
+
+gltexture_t *R_CommitDecodedTexture (const asset_image_payload_t *img, const asset_tex_params_t *params)
+{
+	if (!img || !params || img->format != ASSET_IMAGE_FMT_RGBA8 || img->mip_count < 1 || !img->mips[0].data)
+		return NULL;
+
+	return TexMgr_LoadImage (params->owner, params->name ? params->name : "",
+		img->width, img->height, SRC_RGBA, (byte *)img->mips[0].data,
+		params->name ? params->name : "", 0, params->flags);
+}

@@ -164,6 +164,8 @@ void TexMgr_DeleteTextureObjects (void);
 void TexMgr_ApplySettings (void);
 qboolean TexMgr_UsesFilterOverride (void);
 
+#include "asset_decode_async.h"
+
 // IMAGE LOADING
 gltexture_t *TexMgr_LoadImage (qmodel_t *owner, const char *name, int width, int height, enum srcformat format,
                                byte *data, const char *source_file, src_offset_t source_offset, unsigned flags);
@@ -173,6 +175,7 @@ GLuint TexMgr_LoadDDS (const char *path);
 void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants);
 void TexMgr_ReloadImages (void);
 void TexMgr_ReloadNobrightImages (void);
+gltexture_t *R_CommitDecodedTexture (const asset_image_payload_t *img, const asset_tex_params_t *params);
 void TexMgr_SRGBTextures_f (cvar_t *var);
 qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file);
 
