@@ -5,8 +5,8 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	DLightColor; // xyz=DLightColor
 	vec4	AmbientColor; // xyz=AmbientColor
+	vec4	UnusedDynLightPad;
 	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
 	int		Pose1;
 	int		Pose2;
@@ -172,9 +172,8 @@ layout(location=6) in vec3 in_normal;
 // Do not apply per-material gamma here; final transfer is handled globally
 // by postprocess / framebuffer-sRGB selection.
 layout(location=7) in vec3 in_static_light;
-layout(location=8) in vec3 in_dyn_light;
-layout(location=9) in vec3 in_amb_light;
-layout(location=10) flat in vec4 in_env_params;
+layout(location=8) in vec3 in_amb_light;
+layout(location=9) flat in vec4 in_env_params;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -279,12 +278,10 @@ void main()
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
 	vec3 L_static = max(in_static_light, vec3(0.0));
-	vec3 L_dyn = max(in_dyn_light, vec3(0.0));
 	vec3 L_amb = max(in_amb_light, vec3(0.0));
 	vec3 N_lighting = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 	vec3 world_pos = in_pos + AliasEyePos;
 	vec3 clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
-	L_dyn += clustered_dyn;
 	lit_color.rgb += clustered_dyn;
 
 	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)

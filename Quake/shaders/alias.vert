@@ -5,8 +5,8 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	DLightColor; // xyz=DLightColor
 	vec4	AmbientColor; // xyz=AmbientColor
+	vec4	UnusedDynLightPad;
 	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
 	int		Pose1;
 	int		Pose2;
@@ -104,9 +104,8 @@ layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
 layout(location=7) out vec3 out_static_light;
-layout(location=8) out vec3 out_dyn_light;
-layout(location=9) out vec3 out_amb_light;
-layout(location=10) flat out vec4 out_env_params;
+layout(location=8) out vec3 out_amb_light;
+layout(location=9) flat out vec4 out_env_params;
 
 
 void main()
@@ -141,12 +140,10 @@ void main()
         float static_mix = mix(0.35, 1.0, lighting) * AliasOverbright;
         vec3 litAmbient = ambient * 0.35 * AliasOverbright;
         vec3 litStatic = ambient * max(static_mix - (0.35 * AliasOverbright), 0.0);
-        vec3 litDlight = inst.DLightColor.rgb * lighting;
-        vec3 base_color = litAmbient + litStatic + litDlight;
+        vec3 base_color = litAmbient + litStatic;
         out_color = clamp(vec4(base_color, inst.LightColor.a), 0.0, AliasOverbright);
 	out_normal = world_normal;
 	out_static_light = litStatic;
-	out_dyn_light = litDlight;
 	out_amb_light = litAmbient;
 	out_env_params = inst.EnvMapParams;
 }

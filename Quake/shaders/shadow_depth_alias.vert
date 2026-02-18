@@ -3,8 +3,9 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	DLightColor; // xyz=DLightColor
 	vec4	AmbientColor; // xyz=AmbientColor
+	vec4	UnusedDynLightPad;
+	vec4	EnvMapParams;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
