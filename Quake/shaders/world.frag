@@ -607,7 +607,8 @@ void main()
 			}
 		}
 
-		total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
+			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
+		}
 	}
 
 	// Sun light
