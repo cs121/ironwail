@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "q_ctype.h"
 #include "simd_caps.h"
 
 #if defined(_MSC_VER)
