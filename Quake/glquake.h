@@ -450,7 +450,7 @@ typedef struct gpuframedata_s {
         vec4_t          zparams;        // x: zlogscale, y: zlogbias, zw: padding
         float           lightmap_params[4];
         vec4_t          lightgrid_params; // x: enabled, y: debug, z: shadow mode, w: world fill
-        vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
+        vec4_t          clustered_light_params;  // x: debug visualize, y: clustered debug mode, z: clustered enabled, w: dynamic light quality scale
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
         vec4_t          lighting_params; // x: envmap enabled, y: reflection debug, z: sky SH enabled, w: lighting debug view
@@ -458,10 +458,10 @@ typedef struct gpuframedata_s {
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
         vec4_t          shadow_sun_dir; // xyz: direction, w: unused
-        float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
-        vec4_t          shadow_dlight_atlas[SHADOW_DLIGHT_MAX]; // xy: scale, zw: offset
-        vec4_t          shadow_dlight_info[SHADOW_DLIGHT_MAX]; // x: light index, yzw: unused
-        vec4_t          shadow_dlight_params; // x: bias, y: pcf taps, z: enabled, w: unused
+        float           shadow_clustered_light_viewproj[SHADOW_DLIGHT_MAX][16];
+        vec4_t          shadow_clustered_light_atlas[SHADOW_DLIGHT_MAX]; // xy: scale, zw: offset
+        vec4_t          shadow_clustered_light_info[SHADOW_DLIGHT_MAX]; // x: light index, yzw: unused
+        vec4_t          shadow_clustered_light_params; // x: bias, y: pcf taps, z: enabled, w: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;

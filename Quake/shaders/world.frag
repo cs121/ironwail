@@ -399,7 +399,7 @@ void main()
                 return;
         }
 
-        bool dlight_debug = DLightParams.y > 0.5;
+        bool clustered_light_debug = ClusteredLightParams.y > 0.5;
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
@@ -473,7 +473,7 @@ void main()
 			return;
 		}
 
-		if (dlight_debug)
+		if (clustered_light_debug)
 		{
 			static_light = vec3(0.0);
 			fullbright = vec3(0.0);
@@ -540,7 +540,7 @@ void main()
 		total_light = clamp(total_light + env_fill, 0.0, 1.0);
 	
 	const float SPECULAR_POWER = 16.0;
-	float specular_quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
+	float specular_quality = clamp(ClusteredLightParams.w / 3.0, 0.25, 1.0);
 	float specular_scale = 0.4 * specular_quality;
 
 	int tileX = 0;
@@ -649,7 +649,7 @@ void main()
 	}
 
 	// Sun light
-        vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
+        vec3 sun_light = clustered_light_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
 		// Apply lighting

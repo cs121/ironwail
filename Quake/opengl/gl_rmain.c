@@ -192,7 +192,7 @@ static const float r_identity_mat4[16] = {
 
 extern cvar_t r_state_debug;
 extern cvar_t r_state_debug_filter;
-extern cvar_t r_dlight_debug_visualize;
+extern cvar_t r_clustered_light_debug_visualize;
 extern cvar_t r_gl_verify_program;
 
 static void GL_LogErrorIfDeveloper (const char *label)
@@ -275,7 +275,7 @@ static void R_LogWorldLightState (const char *marker)
 
 	if (r_state_debug.value <= 0.f)
 	{
-		if (q_strcasecmp (marker, "WORLD_LIGHTS_BEGIN") || r_dlight_debug_visualize.value < 2.f)
+		if (q_strcasecmp (marker, "WORLD_CLUSTERED_LIGHTS_BEGIN") || r_clustered_light_debug_visualize.value < 2.f)
 			return;
 	}
 	else if (!GL_StateDebugMatchesFilter (marker))
@@ -322,12 +322,12 @@ static void R_LogWorldLightState (const char *marker)
 		program, GL_GetProgramDebugName ((GLuint)program),
 		r_framedata.numlights);
 
-	if (!q_strcasecmp (marker, "WORLD_LIGHTS_BEGIN"))
+	if (!q_strcasecmp (marker, "WORLD_CLUSTERED_LIGHTS_BEGIN"))
 	{
 		dlight_filter_debug_t filter_stats;
 		dlight_debug_entry_t entries[4];
 		DLightPool_GetFilterDebug (&filter_stats, entries);
-		Con_Printf ("STATEDBG dlight_filter total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
+		Con_Printf ("STATEDBG clustered_light_filter total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
 			filter_stats.total_active,
 			filter_stats.pass_lifetime_radius,
 			filter_stats.pass_world_flag,
@@ -344,7 +344,7 @@ static void R_LogWorldLightState (const char *marker)
 			const dlight_debug_entry_t *entry = &entries[i];
 			if (!entry->captured)
 				continue;
-			Con_Printf ("STATEDBG dlight[%d] id=%d org=(%.1f %.1f %.1f) radius=%.1f base=%.1f color=(%.2f %.2f %.2f) die=%.3f flags=0x%X bbox=(%.1f %.1f %.1f)-(%.1f %.1f %.1f) leaf=%d has_leaf=%d in_pvs=%d in_frustum=%d reason=%s\n",
+			Con_Printf ("STATEDBG clustered_light[%d] id=%d org=(%.1f %.1f %.1f) radius=%.1f base=%.1f color=(%.2f %.2f %.2f) die=%.3f flags=0x%X bbox=(%.1f %.1f %.1f)-(%.1f %.1f %.1f) leaf=%d has_leaf=%d in_pvs=%d in_frustum=%d reason=%s\n",
 				i,
 				entry->id,
 				entry->origin[0], entry->origin[1], entry->origin[2],
@@ -533,8 +533,12 @@ cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
+/* Clustered-light controls. */
+cvar_t  r_clustered_light_enable = { "r_clustered_light_enable", "1", CVAR_ARCHIVE };
+cvar_t  r_clustered_light_radius_scale = { "r_clustered_light_radius_scale", "1.0", CVAR_ARCHIVE };
+cvar_t  r_clustered_light_debug_visualize = { "r_clustered_light_debug_visualize", "0", CVAR_NONE };
+/* Deprecated compatibility aliases for legacy dynamic light controls. */
 cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE };
 cvar_t  r_clustered_lighting = { "r_clustered_lighting", "0", CVAR_ARCHIVE };
@@ -4063,10 +4067,10 @@ void R_SetupView (void)
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
-	r_framedata.dlight_params[0] = 0.f;
-	r_framedata.dlight_params[1] = 0.f;
-	r_framedata.dlight_params[2] = 0.f;
-	r_framedata.dlight_params[3] = 1.f;
+	r_framedata.clustered_light_params[0] = CLAMP (0.f, r_clustered_light_debug_visualize.value, 1.f);
+	r_framedata.clustered_light_params[1] = CLAMP (0.f, r_clustered_debug.value, 2.f);
+	r_framedata.clustered_light_params[2] = (r_clustered_lighting.value > 0.f) ? 1.f : 0.f;
+	r_framedata.clustered_light_params[3] = CLAMP (0.f, r_clustered_light_radius_scale.value, 3.f);
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
@@ -4083,10 +4087,10 @@ void R_SetupView (void)
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
         r_framedata.shadow_debug[2] = gl_clipcontrol_able ? 2.f : 1.f;
         r_framedata.shadow_debug[3] = 0.f;
-        r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
-        r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_clustered_shadows.value > 0.f) ? 1.f : 0.f;
-        r_framedata.shadow_dlight_params[3] = 0.f;
+        r_framedata.shadow_clustered_light_params[0] = r_shadow_dlight_bias.value;
+        r_framedata.shadow_clustered_light_params[1] = r_shadow_dlight_pcf_taps.value;
+        r_framedata.shadow_clustered_light_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_clustered_shadows.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_clustered_light_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
@@ -5227,10 +5231,10 @@ void R_RenderScene (void)
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_ClusterPerf_BeginWorld ();
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-	R_StateDebugMark ("WORLD_LIGHTS_BEGIN");
-	R_LogWorldLightState ("WORLD_LIGHTS_BEGIN");
-	R_LogWorldLightState ("WORLD_LIGHTS_END");
-	R_StateDebugMark ("WORLD_LIGHTS_END");
+	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_BEGIN");
+	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_BEGIN");
+	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_END");
+	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_END");
 	R_ClusterPerf_EndWorld ();
 	R_DrawDecals (false);
 	R_DrawParticles (false);
