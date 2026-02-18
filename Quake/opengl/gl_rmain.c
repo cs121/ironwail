@@ -556,6 +556,7 @@ cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
 cvar_t  r_dbg_clustered_force_fallback = { "r_dbg_clustered_force_fallback", "0", CVAR_NONE };
 cvar_t  r_clustered_clearlists = { "r_clustered_clearlists", "1", CVAR_NONE };
 cvar_t  r_clustered_barriers = { "r_clustered_barriers", "1", CVAR_NONE };
+cvar_t  r_clustered_force_empty = { "r_clustered_force_empty", "0", CVAR_NONE };
 cvar_t  r_clustered_shadows = { "r_clustered_shadows", "1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };

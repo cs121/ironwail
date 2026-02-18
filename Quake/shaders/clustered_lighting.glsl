@@ -78,7 +78,9 @@ bool ClusterResolve(vec2 screenPos, float viewDepth, out int clusterIdx, out Clu
 	clusterIdx = ClusterComputeIndex(screenPos, viewDepth);
 	header = headers[clusterIdx];
 	clusterCount = min(header.count, NumLights);
-	return clusterCount > 0u;
+	if (clusterCount == 0u)
+		return false;
+	return true;
 }
 
 bool ClusterFetchLight(ClusterHeader header, uint localIndex, out uint lightId, out PackedLight light)
