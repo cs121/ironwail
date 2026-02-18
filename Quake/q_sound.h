@@ -155,6 +155,7 @@ void SNDDMA_UnblockSound(void);
  * ====================================================================
  */
 
+#define	MAX_SFX			1024
 #define	MAX_CHANNELS		1024 // ericw -- was 512 /* johnfitz -- was 128 */
 #define	MAX_DYNAMIC_CHANNELS	128 /* johnfitz -- was 8   */
 
