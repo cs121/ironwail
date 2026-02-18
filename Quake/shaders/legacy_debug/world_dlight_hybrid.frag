@@ -119,7 +119,7 @@ void main()
 
         vec3 dynamic_light = vec3(0.0);
         vec3 specular_light = vec3(0.0);
-        float quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
+        float quality = clamp(ClusteredLightParams.w / 3.0, 0.25, 1.0);
         vec3 view_dir = normalize(EyePos - in_pos);
         if (NumLights > 0u)
         {

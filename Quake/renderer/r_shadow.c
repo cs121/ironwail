@@ -62,7 +62,7 @@ static GLuint shadow_depth_tex;
 static int shadowmap_size;
 static GLuint shadow_dlight_fbo;
 static GLuint shadow_dlight_depth_tex;
-static int shadow_dlight_atlas_size;
+static int shadow_clustered_light_atlas_size;
 static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
 static int shadow_dlight_selected_count;
@@ -1190,7 +1190,7 @@ static void R_Shadow_DestroyDlightResources (void)
 		GL_DeleteNativeTexture (shadow_dlight_depth_tex);
 		shadow_dlight_depth_tex = 0;
 	}
-	shadow_dlight_atlas_size = 0;
+	shadow_clustered_light_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
 	shadow_dlight_validated_once = false;
@@ -1562,7 +1562,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	}
 
 	if (shadow_dlight_depth_tex && shadow_dlight_fbo &&
-		shadow_dlight_atlas_size == atlas_size &&
+		shadow_clustered_light_atlas_size == atlas_size &&
 		shadow_dlight_tile_size == tile_size &&
 		shadow_dlight_tile_count == grid * grid)
 		return;
@@ -1589,7 +1589,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 			Sys_Error ("Failed to create dlight shadowmap FBO (status code 0x%X)", status);
 	}
 
-	shadow_dlight_atlas_size = atlas_size;
+	shadow_clustered_light_atlas_size = atlas_size;
 	shadow_dlight_tile_size = tile_size;
 	shadow_dlight_tile_count = grid * grid;
 }
@@ -1601,7 +1601,7 @@ void R_InitShadow (void)
 	shadowmap_size = 0;
 	shadow_dlight_fbo = 0;
 	shadow_dlight_depth_tex = 0;
-	shadow_dlight_atlas_size = 0;
+	shadow_clustered_light_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
 	shadow_dlight_selected_count = 0;
@@ -1824,15 +1824,15 @@ void R_Shadow_DlightPass (void)
 
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
-		IdentityMatrix (r_framedata.shadow_dlight_viewproj[i]);
-		r_framedata.shadow_dlight_atlas[i][0] = 0.f;
-		r_framedata.shadow_dlight_atlas[i][1] = 0.f;
-		r_framedata.shadow_dlight_atlas[i][2] = 0.f;
-		r_framedata.shadow_dlight_atlas[i][3] = 0.f;
-		r_framedata.shadow_dlight_info[i][0] = -1.f;
-		r_framedata.shadow_dlight_info[i][1] = 0.f;
-		r_framedata.shadow_dlight_info[i][2] = 0.f;
-		r_framedata.shadow_dlight_info[i][3] = 0.f;
+		IdentityMatrix (r_framedata.shadow_clustered_light_viewproj[i]);
+		r_framedata.shadow_clustered_light_atlas[i][0] = 0.f;
+		r_framedata.shadow_clustered_light_atlas[i][1] = 0.f;
+		r_framedata.shadow_clustered_light_atlas[i][2] = 0.f;
+		r_framedata.shadow_clustered_light_atlas[i][3] = 0.f;
+		r_framedata.shadow_clustered_light_info[i][0] = -1.f;
+		r_framedata.shadow_clustered_light_info[i][1] = 0.f;
+		r_framedata.shadow_clustered_light_info[i][2] = 0.f;
+		r_framedata.shadow_clustered_light_info[i][3] = 0.f;
 		shadow_dlight_light_indices[i] = -1;
 	}
 
@@ -1944,12 +1944,12 @@ void R_Shadow_DlightPass (void)
 	GL_DepthRange (ZRANGE_FULL);
 	if (!shadow_dlight_validated_once || r_shadow_validate.value > 1.f)
 	{
-		R_Shadow_ValidateDepthResources ("dlight", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size, GL_NONE, R_Shadow_SelectCompareFunc ());
+		R_Shadow_ValidateDepthResources ("dlight", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_clustered_light_atlas_size, shadow_clustered_light_atlas_size, GL_NONE, R_Shadow_SelectCompareFunc ());
 		shadow_dlight_validated_once = true;
 	}
 	GL_SetScissorEnabled (true);
 
-	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
+	grid = shadow_clustered_light_atlas_size / shadow_dlight_tile_size;
 	if (grid < 1)
 		grid = 1;
 
@@ -1982,17 +1982,17 @@ void R_Shadow_DlightPass (void)
 		else if (coverage < 0.45f)
 			lod_mul = 0.75f;
 
-		scale = ((float)shadow_dlight_tile_size * lod_mul) / (float)shadow_dlight_atlas_size;
-		offset_x = tile_x * ((float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size);
-		offset_y = tile_y * ((float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size);
+		scale = ((float)shadow_dlight_tile_size * lod_mul) / (float)shadow_clustered_light_atlas_size;
+		offset_x = tile_x * ((float)shadow_dlight_tile_size / (float)shadow_clustered_light_atlas_size);
+		offset_y = tile_y * ((float)shadow_dlight_tile_size / (float)shadow_clustered_light_atlas_size);
 
 		R_Shadow_BuildDlightViewProj (viewproj, glight->pos, glight->radius);
-		memcpy (r_framedata.shadow_dlight_viewproj[i], viewproj, sizeof (viewproj));
-		r_framedata.shadow_dlight_atlas[i][0] = scale;
-		r_framedata.shadow_dlight_atlas[i][1] = scale;
-		r_framedata.shadow_dlight_atlas[i][2] = offset_x;
-		r_framedata.shadow_dlight_atlas[i][3] = offset_y;
-		r_framedata.shadow_dlight_info[i][0] = (float)light_index;
+		memcpy (r_framedata.shadow_clustered_light_viewproj[i], viewproj, sizeof (viewproj));
+		r_framedata.shadow_clustered_light_atlas[i][0] = scale;
+		r_framedata.shadow_clustered_light_atlas[i][1] = scale;
+		r_framedata.shadow_clustered_light_atlas[i][2] = offset_x;
+		r_framedata.shadow_clustered_light_atlas[i][3] = offset_y;
+		r_framedata.shadow_clustered_light_info[i][0] = (float)light_index;
 
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
@@ -2027,9 +2027,9 @@ void R_Shadow_DlightPass (void)
 
 	GL_SetScissorEnabled (false);
 	t1 = Sys_DoubleTime ();
-	R_Shadow_Log_ShadowPassSnapshot ("DLIGHTPASS", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size,
+	R_Shadow_Log_ShadowPassSnapshot ("DLIGHTPASS", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_clustered_light_atlas_size, shadow_clustered_light_atlas_size,
 		(rs_brushpasses + rs_aliaspasses) - draws0, (rs_brushpasses + rs_aliaspasses) - tris0, (t1 - t0) * 1000.0);
-	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
+	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_clustered_light_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 	R_Shadow_LogStateSnapshot ("DLIGHTPASS_BEFORE_RESTORE");
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));

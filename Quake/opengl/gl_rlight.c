@@ -31,8 +31,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern cvar_t r_dlight_enable;
-extern cvar_t r_dlight_radius_scale;
+extern cvar_t r_clustered_light_enable;
+extern cvar_t r_clustered_light_radius_scale;
+extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
 extern cvar_t r_clustered_zslices;
 extern cvar_t r_clustered_maxindices;
@@ -1398,7 +1399,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
 		else
 			radius = l->baseradius;
-		radius *= q_max (0.f, r_dlight_radius_scale.value);
+		radius *= q_max (0.f, r_clustered_light_radius_scale.value);
 		radius = q_max (radius, 0.f);
 		l->radius = radius;
 
@@ -1448,7 +1449,7 @@ void R_PushDlights (void)
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 	R_ClusterPerf_BeginPush ();
 
-	if (r_dlight_enable.value > 0.f && r_dynamic.value > 0.f)
+	if (r_clustered_light_enable.value > 0.f && r_dynamic.value > 0.f)
 	{
 		R_ClusterPerf_BeginLightFilter ();
 		const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);

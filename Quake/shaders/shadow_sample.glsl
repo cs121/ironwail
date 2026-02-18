@@ -279,7 +279,7 @@ float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
 
 float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint light_index, out float in_range)
 {
-	if (ShadowDlightParams.z < 0.5)
+	if (ShadowClusteredLightParams.z < 0.5)
 	{
 		in_range = 1.0;
 		return 1.0;
@@ -288,9 +288,9 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 	int shadow_index = -1;
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
-		if (ShadowDlightInfo[i].x < 0.0)
+		if (ShadowClusteredLightInfo[i].x < 0.0)
 			continue;
-		int idx = int(ShadowDlightInfo[i].x + 0.5);
+		int idx = int(ShadowClusteredLightInfo[i].x + 0.5);
 		if (idx == int(light_index))
 		{
 			shadow_index = i;
@@ -304,7 +304,7 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 		return 1.0;
 	}
 
-	vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
+	vec4 clip = ShadowMul(ShadowClusteredLightViewProj[shadow_index], vec4(world_pos, 1.0));
 	if (clip.w <= 0.0)
 	{
 		in_range = 0.0;
@@ -321,18 +321,18 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 	if (!inside_local)
 		return 1.0;
 
-	vec4 atlas = ShadowDlightAtlas[shadow_index];
+	vec4 atlas = ShadowClusteredLightAtlas[shadow_index];
 	uv = uv * atlas.xy + atlas.zw;
 
 	vec3 light_dir = normalize(light_pos - world_pos);
 	float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
-	// FIX: Added constant bias term (ShadowDlightParams.x) to prevent shadow acne
+	// FIX: Added constant bias term (ShadowClusteredLightParams.x) to prevent shadow acne
 	// at near-perpendicular angles (ndotl ≈ 1 made old bias ≈ 0).
-	// ShadowDlightParams.x = constant bias, ShadowDlightParams.y = slope bias,
+	// ShadowClusteredLightParams.x = constant bias, ShadowClusteredLightParams.y = slope bias,
 	// matching the convention used in the sun shadow path.
-	float bias = ShadowDlightParams.x + ShadowDlightParams.y * (1.0 - ndotl);
+	float bias = ShadowClusteredLightParams.x + ShadowClusteredLightParams.y * (1.0 - ndotl);
 
-	int taps = int(ShadowDlightParams.w + 0.5);
+	int taps = int(ShadowClusteredLightParams.w + 0.5);
 	if (taps > 0)
 		return ShadowSamplePCFDlight(uv, reference, bias, taps);
 

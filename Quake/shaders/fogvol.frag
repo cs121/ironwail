@@ -382,7 +382,7 @@ void main()
 		float sigma_s = sigma_t * clamp(max(scatterColor.r, max(scatterColor.g, scatterColor.b)), 0.0, 1.0);
 		vec3 pView = (View * vec4(p, 1.0)).xyz;
 		float viewDepth = max(-pView.z, 1e-4);
-		vec3 LiDyn = EvaluateDynamicLights(p, screenPos, viewDepth) * clamp(DLightParams.w / 3.0, 0.0, 1.0);
+		vec3 LiDyn = EvaluateDynamicLights(p, screenPos, viewDepth) * clamp(ClusteredLightParams.w / 3.0, 0.0, 1.0);
 		float cosTheta = dot(viewDir, sunDir);
 		float phase = HGPhase(cosTheta, anisotropy);
 		vec3 LiSun = sunColor * max(dot(rd, sunDir), 0.0);
