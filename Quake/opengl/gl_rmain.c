@@ -67,14 +67,6 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
-static qboolean r_dlight_buffered_frame = false;
-
-extern cvar_t r_clustered_lighting;
-
-static qboolean R_DlightsAdditivePassEnabled (void)
-{
-	return (r_clustered_lighting.value <= 0.f);
-}
 
 static void R_DlightLogf (const char *pass, const char *fmt, ...)
 {
@@ -1264,18 +1256,6 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-	framebufs.dlight.tex = 0;
-	framebufs.dlight.fbo = 0;
-	if (framebufs.scene.samples == 1)
-	{
-		framebufs.dlight.tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_LINEAR, "dlight buffer");
-		framebufs.dlight.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.dlight.tex,
-			framebufs.scene.depth_stencil_tex,
-			framebufs.scene.depth_stencil_tex,
-			"dlight fbo"
-		);
-	}
-
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
 	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
 	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, framebufs.scene.samples, GL_NEAREST, "oit revealage");
@@ -1332,7 +1312,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
@@ -1364,7 +1343,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
-	GL_DeleteNativeTexture (framebufs.dlight.tex);
 	GL_DeleteNativeTexture (framebufs.autoexposure.tex);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
@@ -1590,30 +1568,6 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 		view_min_x, view_min_y, view_max_x, view_max_y,
 		ssao_width, ssao_height, debug_mode);
 	GL_LogErrorIfDeveloper ("GL_LogSSAODepthInfo");
-}
-
-static void R_CompositeDlightBuffer (void)
-{
-	if (!r_dlight_buffered_frame)
-		return;
-	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
-		return;
-
-	float scale = (r_dlight_debug_visualize.value > 0.f) ? 1.f : q_max (0.f, r_dlight_scale.value);
-	if (scale <= 0.f)
-		return;
-
-	GL_BeginGroup ("Dlight composite");
-	GL_UseProgram (glprogs.dlight_composite);
-	if (r_dlight_debug_visualize.value > 0.f)
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	else
-		GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
-	GL_Uniform1fFunc (0, scale);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	r_dlight_buffered_frame = false;
-	GL_EndGroup ();
 }
 
 static float R_SanitizeSSAOValue (float value, float fallback, float minval, float maxval)
@@ -3853,9 +3807,6 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
-	if (R_DlightsAdditivePassEnabled () && framebufs.dlight.fbo && r_framedata.numlights > 0)
-		return true;
-
         if (GL_ShouldApplyMotionBlur ())
 		return true;
 
@@ -4066,7 +4017,6 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 */
 void R_SetupView (void)
 {
-	r_dlight_buffered_frame = false;
 	framesetup.composite_ready = false;
 
 	R_AnimateLight ();
@@ -4101,7 +4051,7 @@ void R_SetupView (void)
         r_framedata.lightmap_params[2] = (r_lightingdir.value > 0.f && lightmap_dir_texture) ? 1.f : 0.f;
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
-	r_framedata.dlight_params[0] = R_DlightsAdditivePassEnabled () ? 1.f : 0.f;
+	r_framedata.dlight_params[0] = 0.f;
 	r_framedata.dlight_params[1] = 0.f;
 	r_framedata.dlight_params[2] = 0.f;
 	r_framedata.dlight_params[3] = 1.f;
@@ -5238,98 +5188,6 @@ static void R_EndTranslucency (void)
         GL_EndGroup (); // translucent objects
 }
 
-// Quake3-style dynamic light pass rationale: render only additive dlight
-// contributions (albedo * dlight) in a separate pass to preserve contrast of
-// the baked lighting while avoiding gamma artifacts from modulating the base
-// color. Static lighting remains untouched in the base pass.
-static void R_SetDlightConfig (GLuint program, float scale)
-{
-	if (!program)
-		return;
-
-	GL_UseProgram (program);
-	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, 1.f, 2.f);
-	GL_Uniform4fFunc (1, 0.f, 1.f, 0.f, 0.f);
-	GL_Uniform4fFunc (2, 0.f, 0.f, 0.f, 0.f);
-}
-
-static void R_DrawDLightPass (void)
-{
-        int count = 0;
-        entity_t **ents;
-	qboolean use_buffer = false;
-
-	r_dlight_buffered_frame = false;
-
-	if (!R_DlightsAdditivePassEnabled ())
-		return;
-
-        if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
-                return;
-
-        ents = R_GetVisEntities (mod_brush, false, &count);
-        if (count <= 0)
-                return;
-
-        GL_BeginGroup ("Dynamic lights (additive)");
-
-	if (framebufs.dlight.fbo && framebufs.scene.samples == 1)
-	{
-		use_buffer = true;
-		r_dlight_buffered_frame = true;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		{
-			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
-			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
-		}
-	}
-
-
-        r_framedata.dlight_params[2] = 1.f;
-        {
-                GLuint buf;
-                GLbyte *ofs;
-                GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-                GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
-        }
-
-		{
-		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
-		R_SetDlightConfig (glprogs.world_dlight[0], scale);
-		R_SetDlightConfig (glprogs.world_dlight[1], scale);
-	}
-
-	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
-        R_DrawBrushModels_DLights (ents, count);
-
-        r_framedata.dlight_params[2] = 0.f;
-        {
-                GLuint buf;
-                GLbyte *ofs;
-                GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-                GL_BindBufferRange (GL_UNIFORM_BUFFER, FRAME_UBO_BINDING, buf, (GLintptr)ofs, sizeof (r_framedata));
-        }
-
-	if (use_buffer)
-	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
-		if (framesetup.scene_fbo)
-		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
-		}
-		else
-		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
-		}
-	}
-
-        GL_EndGroup ();
-}
-
 /*
 ================
 R_RenderScene
@@ -5357,8 +5215,6 @@ void R_RenderScene (void)
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_StateDebugMark ("WORLD_DLIGHT_BEGIN");
 	R_LogWorldDlightState ("WORLD_DLIGHT_BEGIN");
-	R_DrawDLightPass ();
-	R_CompositeDlightBuffer ();
 	R_LogWorldDlightState ("WORLD_DLIGHT_END");
 	R_StateDebugMark ("WORLD_DLIGHT_END");
 	R_DrawDecals (false);
@@ -5491,7 +5347,6 @@ void R_WarpScaleView (void)
 	{
 		if (fbodest == framebufs.composite.fbo)
 			framesetup.composite_ready = true;
-		R_CompositeDlightBuffer ();
 		return;
 	}
 
@@ -5517,7 +5372,6 @@ void R_WarpScaleView (void)
 
 	if (fbodest == framebufs.composite.fbo)
 		framesetup.composite_ready = true;
-	R_CompositeDlightBuffer ();
 }
 
 /*

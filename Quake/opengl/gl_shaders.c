@@ -633,15 +633,9 @@ void GL_CreateShaders (void)
                         for (mode = 0; mode < 3; mode++)
                                 glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
 
-        for (alphatest = 0; alphatest < 2; alphatest++)
-                glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
-        for (alphatest = 0; alphatest < 2; alphatest++)
-                glprogs.world_dlight_hybrid[alphatest] = glprogs.world_dlight[alphatest];
-
         glprogs.shadow_depth = GL_CreateProgram (GLSL_PATH("shadow_depth.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth");
 	for (md5 = 0; md5 < 2; md5++)
 		glprogs.shadow_depth_alias[md5] = GL_CreateProgram (GLSL_PATH("shadow_depth_alias.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth alias|MD5 %d", md5);
-	glprogs.dlight_composite = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("dlight_composite.frag"), "dlight composite");
 
 	for (dither = 0; dither < 2; dither++)
 	{

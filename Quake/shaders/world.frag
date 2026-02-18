@@ -399,7 +399,6 @@ void main()
                 return;
         }
 
-        bool additive_dlights = DLightParams.x > 0.5;
         bool dlight_debug = DLightParams.y > 0.5;
 
 	// Lightmap sampling
@@ -545,7 +544,7 @@ void main()
 	float specular_scale = 0.4 * specular_quality;
 
         // Dynamic lights (clustered lighting)
-        if (!additive_dlights && NumLights > 0u && ClusterTileSize > 0)
+        if (NumLights > 0u && ClusterTileSize > 0)
         {
                 int tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
                 int tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
