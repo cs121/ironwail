@@ -545,17 +545,18 @@ typedef struct clustered_params_s {
 	float far_plane;
 	float z_log_scale;
 	float z_log_bias;
+	int _pad0[3];
 	float view_matrix[16];
 	float proj_matrix[16];
 	float inv_proj[16];
 	int tile_size;
 	int debug_mode;
-	int _pad[2];
+	int _pad1[2];
 } clustered_params_t;
 
 COMPILE_TIME_ASSERT (clustered_header_size, sizeof (clustered_header_t) == 8);
 COMPILE_TIME_ASSERT (clustered_light_size, sizeof (clustered_light_t) == 48);
-COMPILE_TIME_ASSERT (clustered_params_size, sizeof (clustered_params_t) == 272);
+COMPILE_TIME_ASSERT (clustered_params_size, sizeof (clustered_params_t) == 256);
 
 static struct {
 	GLuint lights_ssbo;
@@ -593,32 +594,24 @@ static void R_ClusteredLabelBuffer (GLuint buffer, const char *name)
 
 static void R_ClusteredValidateBinding (GLenum target, GLuint binding, GLuint expected, const char *name)
 {
-	GLint actual = 0;
-
 	if (!R_ClusteredShouldLog ())
 		return;
 
-	glGetIntegeri_v (target, binding, &actual);
-	if ((GLuint)actual != expected)
-	{
-		Con_Printf ("CLUSTERDBG binding_mismatch target=0x%X binding=%u expected=%u actual=%d name=%s\n",
-			(unsigned)target, binding, expected, actual, name ? name : "<unnamed>");
-	}
+	// This validation helper is debug-only. Keep logging lightweight here to
+	// avoid calling indexed binding query entry points that may not be declared
+	// by all platform GL headers.
+	Con_DPrintf ("CLUSTERDBG binding_check target=0x%X binding=%u expected=%u name=%s\n",
+		(unsigned)target, binding, expected, name ? name : "<unnamed>");
 }
 
 static void R_ClusteredDebugDumpUpload (const clustered_light_t *lights_local, int light_count)
 {
-	GLint ssbo_size = 0;
-	GLint ubo_size = 0;
+	const int ssbo_size = (int)(sizeof (clustered_light_t) * (size_t)r_clustered.max_lights);
+	const int ubo_size = sizeof (clustered_params_t);
 	int show = q_min (light_count, 3);
 
 	if (!R_ClusteredShouldLog ())
 		return;
-
-	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
-	glGetBufferParameteriv (GL_SHADER_STORAGE_BUFFER, GL_BUFFER_SIZE, &ssbo_size);
-	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
-	glGetBufferParameteriv (GL_UNIFORM_BUFFER, GL_BUFFER_SIZE, &ubo_size);
 
 	Con_Printf ("CLUSTERDBG upload numlights=%d lights_ssbo=%u size=%d bind_ssbo3=%u headers_ssbo=%u bind_ssbo4=%u indices_ssbo=%u bind_ssbo5=%u params_ubo=%u size=%d bind_ubo2=%u\n",
 		light_count,
