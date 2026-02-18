@@ -392,7 +392,6 @@ extern cvar_t r_filmgrain_debug;
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
 #endif
-	Cvar_RegisterVariable (&r_clustered_force_empty);
 qboolean use_simd;
 
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
@@ -546,10 +545,8 @@ static void R_SIMD_f (cvar_t *var)
 #else
 	use_simd = false;
 #endif
-	Cvar_RegisterVariable (&r_clustered_force_empty);
 }
 #endif
-	Cvar_RegisterVariable (&r_clustered_force_empty);
 
 /*
 ====================
@@ -747,7 +744,6 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_SetCallback (&r_simd, R_SIMD_f);
 	R_SIMD_f(&r_simd);
 #endif
-	Cvar_RegisterVariable (&r_clustered_force_empty);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_pos);
 	Cvar_RegisterVariable (&r_alphasort);
