@@ -39,42 +39,142 @@ static uint64_t fs_async_enqueued;
 static uint64_t fs_async_completed_count;
 static uint64_t fs_async_completed_bytes;
 
-static qboolean FS_Async_ReadFileSync (const char *path, fs_async_result_t *result)
+typedef struct
+{
+	qboolean is_pack;
+	qboolean is_pk3;
+	char filename[MAX_OSPATH];
+	int numfiles;
+	packfile_t *files;
+} fs_async_searchpath_entry_t;
+
+typedef struct
+{
+	fs_async_searchpath_entry_t *entries;
+	size_t count;
+} fs_async_searchpath_view_t;
+
+static void FS_Async_ReleaseSearchPathView (fs_async_searchpath_view_t *view)
+{
+	size_t i;
+
+	if (!view || !view->entries)
+		return;
+
+	for (i = 0; i < view->count; ++i)
+	{
+		if (view->entries[i].files)
+			free (view->entries[i].files);
+	}
+
+	free (view->entries);
+	view->entries = NULL;
+	view->count = 0;
+}
+
+static qboolean FS_Async_CaptureSearchPathView (fs_async_searchpath_view_t *view)
 {
 	searchpath_t *search;
+	size_t count = 0;
+	size_t i = 0;
 
+	memset (view, 0, sizeof (*view));
+
+	COM_LockSearchPaths ();
 	for (search = com_searchpaths; search; search = search->next)
+		count++;
+
+	if (!count)
 	{
+		COM_UnlockSearchPaths ();
+		return true;
+	}
+
+	view->entries = (fs_async_searchpath_entry_t *) calloc (count, sizeof (*view->entries));
+	if (!view->entries)
+	{
+		COM_UnlockSearchPaths ();
+		return false;
+	}
+	view->count = count;
+
+	for (search = com_searchpaths; search; search = search->next, ++i)
+	{
+		fs_async_searchpath_entry_t *entry = &view->entries[i];
+
 		if (search->pack)
 		{
-			pack_t *pak = search->pack;
+			entry->is_pack = true;
+			entry->is_pk3 = search->pack->is_pk3;
+			q_strlcpy (entry->filename, search->pack->filename, sizeof (entry->filename));
+			entry->numfiles = search->pack->numfiles;
+			if (entry->numfiles > 0)
+			{
+				size_t n = (size_t) entry->numfiles;
+
+				entry->files = (packfile_t *) malloc (n * sizeof (*entry->files));
+				if (!entry->files)
+				{
+					COM_UnlockSearchPaths ();
+					FS_Async_ReleaseSearchPathView (view);
+					return false;
+				}
+				memcpy (entry->files, search->pack->files, n * sizeof (*entry->files));
+			}
+		}
+		else
+		{
+			q_strlcpy (entry->filename, search->filename, sizeof (entry->filename));
+		}
+	}
+	COM_UnlockSearchPaths ();
+
+	return true;
+}
+
+/*
+ * Thread-safety: this function runs on worker threads and only reads
+ * request-local arguments plus the immutable snapshot in search_view.
+ * It never dereferences com_searchpaths directly and therefore does not
+ * require holding the global filesystem search-path lock while doing IO.
+ */
+static qboolean FS_Async_ReadFileSync (const char *path, const fs_async_searchpath_view_t *search_view, fs_async_result_t *result)
+{
+	size_t search_idx;
+
+	for (search_idx = 0; search_idx < search_view->count; ++search_idx)
+	{
+		const fs_async_searchpath_entry_t *search = &search_view->entries[search_idx];
+
+		if (search->is_pack)
+		{
 			int i;
 
-			if (pak->is_pk3)
+			if (search->is_pk3)
 			{
 				mz_zip_archive zip;
 				qboolean zip_open = false;
 
 				memset (&zip, 0, sizeof (zip));
-				if (mz_zip_reader_init_file (&zip, pak->filename, 0))
+				if (mz_zip_reader_init_file (&zip, search->filename, 0))
 					zip_open = true;
 
 				if (!zip_open)
 					continue;
 
-				for (i = 0; i < pak->numfiles; i++)
+				for (i = 0; i < search->numfiles; i++)
 				{
 					size_t extracted_size;
 					void *extracted;
 
-					if (q_strcasecmp (pak->files[i].name, path) != 0)
+					if (q_strcasecmp (search->files[i].name, path) != 0)
 						continue;
 
-					extracted = mz_zip_reader_extract_to_heap (&zip, pak->files[i].filepos, &extracted_size, 0);
+					extracted = mz_zip_reader_extract_to_heap (&zip, search->files[i].filepos, &extracted_size, 0);
 					if (!extracted)
 					{
 						result->status = FS_ASYNC_STATUS_IO_ERROR;
-						result->error_code = 2;
+						result->error_code = EIO;
 						mz_zip_reader_end (&zip);
 						return false;
 					}
@@ -90,18 +190,18 @@ static qboolean FS_Async_ReadFileSync (const char *path, fs_async_result_t *resu
 			}
 			else
 			{
-				for (i = 0; i < pak->numfiles; i++)
+				for (i = 0; i < search->numfiles; i++)
 				{
 					FILE *f;
 					long nread;
 					int len;
 					byte *buf;
 
-					if (strcmp (pak->files[i].name, path) != 0)
+					if (strcmp (search->files[i].name, path) != 0)
 						continue;
 
-					len = pak->files[i].filelen;
-					buf = (byte *) malloc ((size_t)len + 1);
+					len = search->files[i].filelen;
+					buf = (byte *) malloc ((size_t) len + 1);
 					if (!buf)
 					{
 						result->status = FS_ASYNC_STATUS_IO_ERROR;
@@ -109,7 +209,7 @@ static qboolean FS_Async_ReadFileSync (const char *path, fs_async_result_t *resu
 						return false;
 					}
 
-					f = Sys_fopen (pak->filename, "rb");
+					f = Sys_fopen (search->filename, "rb");
 					if (!f)
 					{
 						free (buf);
@@ -118,7 +218,7 @@ static qboolean FS_Async_ReadFileSync (const char *path, fs_async_result_t *resu
 						return false;
 					}
 
-					if (fseek (f, pak->files[i].filepos, SEEK_SET) != 0)
+					if (fseek (f, search->files[i].filepos, SEEK_SET) != 0)
 					{
 						fclose (f);
 						free (buf);
@@ -228,9 +328,13 @@ static void FS_Async_Worker (void *job_data)
 	unsigned int idx = FS_ASYNC_HANDLE_INDEX (h);
 	unsigned int gen = FS_ASYNC_HANDLE_GEN (h);
 	fs_async_result_t result;
+	fs_async_searchpath_view_t search_view;
+	char path[MAX_QPATH];
 	qboolean ok;
 
 	memset (&result, 0, sizeof (result));
+	memset (&search_view, 0, sizeof (search_view));
+	path[0] = 0;
 
 	SDL_LockMutex (fs_async_mutex);
 	if (idx >= FS_ASYNC_MAX_REQUESTS || !fs_async_requests[idx].in_use || fs_async_requests[idx].generation != gen)
@@ -238,11 +342,22 @@ static void FS_Async_Worker (void *job_data)
 		SDL_UnlockMutex (fs_async_mutex);
 		return;
 	}
+	q_strlcpy (path, fs_async_requests[idx].path, sizeof (path));
 	SDL_UnlockMutex (fs_async_mutex);
 
-	ok = FS_Async_ReadFileSync (fs_async_requests[idx].path, &result);
-	if (!ok && result.status == FS_ASYNC_STATUS_PENDING)
+	if (!FS_Async_CaptureSearchPathView (&search_view))
+	{
 		result.status = FS_ASYNC_STATUS_IO_ERROR;
+		result.error_code = ENOMEM;
+		ok = false;
+	}
+	else
+	{
+		ok = FS_Async_ReadFileSync (path, &search_view, &result);
+		if (!ok && result.status == FS_ASYNC_STATUS_PENDING)
+			result.status = FS_ASYNC_STATUS_IO_ERROR;
+	}
+	FS_Async_ReleaseSearchPathView (&search_view);
 
 	SDL_LockMutex (fs_async_mutex);
 	if (idx < FS_ASYNC_MAX_REQUESTS && fs_async_requests[idx].in_use && fs_async_requests[idx].generation == gen)
