@@ -419,7 +419,6 @@ R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritt
 */
 void R_SetupAliasLighting (entity_t     *e)
 {
-        vec3_t          dist;
         float           add;
         unsigned int    i;
         vec3_t          dlightcolor = {0.f, 0.f, 0.f};
@@ -440,22 +439,6 @@ void R_SetupAliasLighting (entity_t     *e)
                 R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
                 VectorSubtract (lightcolor, ambientcolor, dlightcolor);
         }
-        else
-        {
-                //add dlights
-                for (i=0; i<r_framedata.numlights; i++)
-                {
-                        gpulight_t *l = &r_lightbuffer.lights[i];
-                        VectorSubtract (e->origin, l->pos, dist);
-                        add = DotProduct (dist, dist);
-                        if (l->radius * l->radius > add)
-                        {
-                                const float intensity = l->radius - sqrtf (add);
-                                VectorMA (lightcolor, intensity, l->color, lightcolor);
-                                VectorMA (dlightcolor, intensity, l->color, dlightcolor);
-                        }
-                }
-        }
 
         R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
 
@@ -464,25 +447,20 @@ void R_SetupAliasLighting (entity_t     *e)
 	{
 		for (i = 0; i < 3; i++)
 		{
-			const float L = lightcolor[i];
+			const float L = ambientcolor[i];
 			const float new_L = fmaxf (L * 1.5f, L + 40.0f);
 			const float scale = L > 0.0f ? new_L / L : 0.0f;
 			ambientcolor[i] *= scale;
-			dlightcolor[i] *= scale;
-			lightcolor[i] = new_L;
 		}
 	}
 
 	// minimum light value on gun (24)
 	if (e == &cl.viewent)
 	{
-		add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+		add = 72.0f - (ambientcolor[0] + ambientcolor[1] + ambientcolor[2]);
 		if (add > 0.0f)
 		{
 			add *= 1.0f / 3.0f;
-			lightcolor[0] += add;
-			lightcolor[1] += add;
-			lightcolor[2] += add;
 			ambientcolor[0] += add;
 			ambientcolor[1] += add;
 			ambientcolor[2] += add;
@@ -492,13 +470,10 @@ void R_SetupAliasLighting (entity_t     *e)
 	// minimum light value on players (8)
 	if (e > cl_entities && e <= cl_entities + cl.maxclients)
 	{
-		add = 24.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
+		add = 24.0f - (ambientcolor[0] + ambientcolor[1] + ambientcolor[2]);
 		if (add > 0.0f)
 		{
 			add *= 1.0f / 3.0f;
-			lightcolor[0] += add;
-			lightcolor[1] += add;
-			lightcolor[2] += add;
 			ambientcolor[0] += add;
 			ambientcolor[1] += add;
 			ambientcolor[2] += add;
@@ -589,6 +564,7 @@ void R_FlushAliasInstances (qboolean showtris)
 		break;
 	}
 	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+	R_Clustered_RebindForProgram (glprogs.alias[oit][mode][alphatest][md5], "ALIAS");
 
 	if (md5)
 		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
