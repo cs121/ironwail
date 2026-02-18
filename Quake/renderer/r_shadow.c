@@ -54,6 +54,7 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_dlight_distance;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
+extern cvar_t r_clustered_shadows;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_fbo;
@@ -1809,7 +1810,7 @@ void R_Shadow_SunPass (void)
 void R_Shadow_DlightPass (void)
 {
 	qboolean shadows_enabled = r_shadows.value > 0.f;
-	qboolean dlight_shadows_enabled = r_shadow_dlights.value > 0.f;
+	qboolean dlight_shadows_enabled = (r_shadow_dlights.value > 0.f && r_clustered_shadows.value > 0.f);
 	double t0, t1;
 	int draws0, tris0;
 	shadow_gl_state_t saved_state;
@@ -1842,7 +1843,7 @@ void R_Shadow_DlightPass (void)
 	}
 	if (!dlight_shadows_enabled)
 	{
-		R_Shadow_Log_DlightPassEarlyOut ("reason = r_shadow_dlights=0");
+		R_Shadow_Log_DlightPassEarlyOut ("reason = r_shadow_dlights=0_or_r_clustered_shadows=0");
 		return;
 	}
 	if (!glprogs.shadow_depth)
@@ -1932,6 +1933,7 @@ void R_Shadow_DlightPass (void)
 	R_Shadow_SaveGLState (&saved_state);
 
 	GL_BeginGroup ("Shadow map (dlights)");
+	R_ClusterPerf_BeginShadowDlightGPU ();
 	t0 = Sys_DoubleTime ();
 	draws0 = rs_brushpasses + rs_aliaspasses;
 	tris0 = rs_brushpasses + rs_aliaspasses;
@@ -2034,6 +2036,7 @@ void R_Shadow_DlightPass (void)
 	R_Shadow_RestoreGLState (&saved_state);
 	R_Shadow_LogStateSnapshot ("DLIGHTPASS_AFTER_RESTORE");
 
+	R_ClusterPerf_EndShadowDlightGPU ();
 	GL_EndGroup ();
 }
 

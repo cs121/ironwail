@@ -548,7 +548,8 @@ void main()
 	int zSlice = 0;
 	int clusterIdx = 0;
 	uint clusterCount = 0u;
-	bool clusterActive = (NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
+	bool directSmallPath = (DLightParams.z > 0.5);
+	bool clusterActive = (!directSmallPath && NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
 
 	if (clusterActive)
 	{
@@ -598,7 +599,35 @@ void main()
 	}
 
         // Dynamic lights (clustered lighting)
-	if (clusterActive)
+	if (directSmallPath)
+	{
+		vec3 dynamic_light = vec3(0.0);
+		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
+		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+		uint directCount = min(NumLights, 8u);
+
+		for (uint i = 0u; i < directCount; ++i)
+		{
+			PackedLight pl = packedLights[i];
+			vec3 lightOrigin = pl.posRadius.xyz;
+			float radius = pl.posRadius.w;
+			vec3 lightColor = pl.colorIntensity.rgb;
+			float dist = dot(lightOrigin, plane.xyz) - plane.w;
+			float rad = radius - abs(dist);
+			if (rad <= 0.0)
+				continue;
+			vec3 local_pos = lightOrigin - plane.xyz * dist;
+			vec3 light_vec = local_pos - in_pos;
+			float surface_dist = length(light_vec);
+			float attenuation = clamp((rad - surface_dist) / 16.0, 0.0, 1.0);
+			float normalized_dist = surface_dist / max(rad, 1e-4);
+			float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
+			vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
+			dynamic_light += light_contrib;
+		}
+		total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
+	}
+	else if (clusterActive)
 	{
 		ClusterHeader header = headers[clusterIdx];
 		uint clusterCount = min(header.count, NumLights);
