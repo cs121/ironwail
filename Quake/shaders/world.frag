@@ -548,8 +548,7 @@ void main()
 	int zSlice = 0;
 	int clusterIdx = 0;
 	uint clusterCount = 0u;
-	bool directSmallPath = (DLightParams.z > 0.5);
-	bool clusterActive = (!directSmallPath && NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
+	bool clusterActive = (NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
 
 	if (clusterActive)
 	{
@@ -598,24 +597,30 @@ void main()
 		return;
 	}
 
-        // Dynamic lights (clustered lighting)
-	if (directSmallPath)
+	// Dynamic lights (clustered lighting)
+	if (clusterActive)
 	{
+		ClusterHeader header = headers[clusterIdx];
+		uint clusterCount = min(header.count, NumLights);
 		vec3 dynamic_light = vec3(0.0);
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-		uint directCount = min(NumLights, 8u);
 
-		for (uint i = 0u; i < directCount; ++i)
+		for (uint i = 0u; i < clusterCount; ++i)
 		{
-			PackedLight pl = packedLights[i];
+			uint lightId = lightIndices[header.offset + i];
+			if (lightId >= NumLights)
+				continue;
+			PackedLight pl = packedLights[lightId];
 			vec3 lightOrigin = pl.posRadius.xyz;
 			float radius = pl.posRadius.w;
 			vec3 lightColor = pl.colorIntensity.rgb;
+
 			float dist = dot(lightOrigin, plane.xyz) - plane.w;
 			float rad = radius - abs(dist);
 			if (rad <= 0.0)
 				continue;
+
 			vec3 local_pos = lightOrigin - plane.xyz * dist;
 			vec3 light_vec = local_pos - in_pos;
 			float surface_dist = length(light_vec);
@@ -624,58 +629,24 @@ void main()
 			float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
 			vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
 			dynamic_light += light_contrib;
+
+			if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+			{
+				vec3 light_dir = light_vec / surface_dist;
+				float ndotl = max(dot(surface_normal, light_dir), 0.0);
+				if (ndotl > 0.0)
+				{
+					vec3 half_vec = normalize(light_dir + view_dir);
+					float ndoth = max(dot(surface_normal, half_vec), 0.0);
+					float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+					float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
+					specular_light += light_contrib * (spec * specular_scale * energy);
+				}
+			}
 		}
+
 		total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
 	}
-	else if (clusterActive)
-	{
-		ClusterHeader header = headers[clusterIdx];
-		uint clusterCount = min(header.count, NumLights);
-		vec3 dynamic_light = vec3(0.0);
-                float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-                vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-
-		for (uint i = 0u; i < clusterCount; ++i)
-		{
-			uint lightId = lightIndices[header.offset + i];
-			if (lightId >= NumLights)
-                                continue;
-                        PackedLight pl = packedLights[lightId];
-                        vec3 lightOrigin = pl.posRadius.xyz;
-                        float radius = pl.posRadius.w;
-                        vec3 lightColor = pl.colorIntensity.rgb;
-
-                        float dist = dot(lightOrigin, plane.xyz) - plane.w;
-                        float rad = radius - abs(dist);
-                        if (rad <= 0.0)
-                                continue;
-
-                        vec3 local_pos = lightOrigin - plane.xyz * dist;
-                        vec3 light_vec = local_pos - in_pos;
-                        float surface_dist = length(light_vec);
-                        float attenuation = clamp((rad - surface_dist) / 16.0, 0.0, 1.0);
-                        float normalized_dist = surface_dist / max(rad, 1e-4);
-                        float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-                        vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
-                        dynamic_light += light_contrib;
-
-                        if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
-                        {
-                                vec3 light_dir = light_vec / surface_dist;
-                                float ndotl = max(dot(surface_normal, light_dir), 0.0);
-                                if (ndotl > 0.0)
-                                {
-                                        vec3 half_vec = normalize(light_dir + view_dir);
-                                        float ndoth = max(dot(surface_normal, half_vec), 0.0);
-                                        float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-                                        float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
-                                        specular_light += light_contrib * (spec * specular_scale * energy);
-                                }
-                        }
-                }
-
-                total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
-        }
 
 	// Sun light
         vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);

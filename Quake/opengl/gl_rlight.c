@@ -1078,12 +1078,6 @@ void R_Clustered_BuildLists (void)
 		return;
 	}
 
-	if (r_clustered_buildlists.value <= 0.f)
-	{
-		R_ClusterPerf_MarkReason ("buildlists skipped by r_clustered_buildlists=0");
-		return;
-	}
-
 	tile_size = (int)r_clustered_tilesize.value;
 	if (tile_size <= 8)
 		tile_size = 8;
@@ -1454,9 +1448,7 @@ R_PushDlights
 void R_PushDlights (void)
 {
 	qboolean clustered_enabled;
-	qboolean use_cluster_lists;
 	dlight_t *submit[DLIGHT_GPU_MAX];
-	const unsigned int small_light_threshold = 8;
 
 	r_framedata.numlights = 0;
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
@@ -1481,20 +1473,7 @@ void R_PushDlights (void)
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
 
-	r_framedata.dlight_params[2] = 0.f;
-
 	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
-	use_cluster_lists = (clustered_enabled && r_clustered_buildlists.value > 0.f);
-	if (clustered_enabled && r_clustered_buildlists.value <= 0.f)
-	{
-		r_framedata.dlight_params[2] = 1.f;
-		use_cluster_lists = false;
-		R_ClusterPerf_MarkReason ("cluster build disabled (direct lightbuffer loop)");
-	}
-	else if (clustered_enabled && r_framedata.numlights <= small_light_threshold)
-	{
-		R_ClusterPerf_MarkReason ("small-light clustered path active");
-	}
 
 	if (clustered_enabled)
 	{
@@ -1504,20 +1483,12 @@ void R_PushDlights (void)
 			R_ClusterPerf_EndPush ();
 			return;
 		}
-		if (use_cluster_lists)
-		{
-			GL_BeginGroup ("Light clustering");
-			R_ClusterPerf_BeginBuild ();
-			R_Clustered_BuildLists ();
-			R_ClusterPerf_EndBuild ();
-		}
-		else
-		{
-			R_ClusterPerf_MarkReason ("cluster build skipped");
-		}
+		GL_BeginGroup ("Light clustering");
+		R_ClusterPerf_BeginBuild ();
+		R_Clustered_BuildLists ();
+		R_ClusterPerf_EndBuild ();
 		R_Clustered_BindForShading ();
-		if (use_cluster_lists)
-			GL_EndGroup ();
+		GL_EndGroup ();
 	}
 	else
 	{
