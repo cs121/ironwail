@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __QUAKE_SOUND__
 #define __QUAKE_SOUND__
 
+#include "fs_async.h"
+
 /* !!! if this is changed, it must be changed in asm_i386.h too !!! */
 typedef struct
 {
@@ -107,6 +109,9 @@ qboolean S_IsSoundBlocked (void);
 sfx_t *S_PrecacheSound (const char *sample);
 void S_TouchSound (const char *sample);
 void S_ClearPrecache (void);
+void S_AsyncRegisterPrecacheRead (const char *sample, fs_async_handle_t handle);
+void S_AsyncClearPrecacheReads (void);
+
 void S_BeginPrecaching (void);
 void S_EndPrecaching (void);
 void S_PaintChannels (int endtime);

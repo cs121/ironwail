@@ -289,6 +289,7 @@ void CL_ParseServerInfo (void)
 	int		nummodels, numsounds;
 	char	model_precache[MAX_MODELS][MAX_QPATH];
 	char	sound_precache[MAX_SOUNDS][MAX_QPATH];
+	fs_async_handle_t	sound_async[MAX_SOUNDS];
 
 	Con_DPrintf ("Serverinfo packet received.\n");
 
@@ -378,6 +379,7 @@ void CL_ParseServerInfo (void)
 
 // precache sounds
 	memset (cl.sound_precache, 0, sizeof(cl.sound_precache));
+	memset (sound_async, 0, sizeof (sound_async));
 	for (numsounds = 1 ; ; numsounds++)
 	{
 		str = MSG_ReadString ();
@@ -389,6 +391,11 @@ void CL_ParseServerInfo (void)
 		}
 		q_strlcpy (sound_precache[numsounds], str, MAX_QPATH);
 		S_TouchSound (str);
+		{
+			char sndpath[MAX_QPATH];
+			q_snprintf (sndpath, sizeof (sndpath), "sound/%s", str);
+			sound_async[numsounds] = FS_ReadFileAsync (sndpath, FS_ASYNC_FLAG_ALLOW_DECOMPRESS);
+		}
 	}
 
 	//johnfitz -- check for excessive sounds
@@ -416,6 +423,8 @@ void CL_ParseServerInfo (void)
 	S_BeginPrecaching ();
 	for (i = 1; i < numsounds; i++)
 	{
+		if (sound_async[i])
+			S_AsyncRegisterPrecacheRead (sound_precache[i], sound_async[i]);
 		cl.sound_precache[i] = S_PrecacheSound (sound_precache[i]);
 		CL_KeepaliveMessage ();
 	}
