@@ -553,6 +553,10 @@ typedef struct clustered_params_s {
 	int _pad[2];
 } clustered_params_t;
 
+COMPILE_TIME_ASSERT (clustered_header_size, sizeof (clustered_header_t) == 8);
+COMPILE_TIME_ASSERT (clustered_light_size, sizeof (clustered_light_t) == 48);
+COMPILE_TIME_ASSERT (clustered_params_size, sizeof (clustered_params_t) == 272);
+
 static struct {
 	GLuint lights_ssbo;
 	GLuint headers_ssbo;
@@ -574,6 +578,88 @@ static clustered_header_t *r_clustered_headers_cpu;
 static int r_clustered_debug_light_cluster_hits[DLIGHT_GPU_MAX];
 static int r_clustered_debug_cluster_count;
 static int r_clustered_debug_index_count;
+
+static qboolean R_ClusteredShouldLog (void)
+{
+	return r_clustered_log.value > 0.f || r_clustered_debug.value > 0.f;
+}
+
+static void R_ClusteredLabelBuffer (GLuint buffer, const char *name)
+{
+	if (!buffer || !name || !name[0] || !GL_ObjectLabelFunc)
+		return;
+	GL_ObjectLabelFunc (GL_BUFFER, buffer, -1, name);
+}
+
+static void R_ClusteredValidateBinding (GLenum target, GLuint binding, GLuint expected, const char *name)
+{
+	GLint actual = 0;
+
+	if (!R_ClusteredShouldLog ())
+		return;
+
+	glGetIntegeri_v (target, binding, &actual);
+	if ((GLuint)actual != expected)
+	{
+		Con_Printf ("CLUSTERDBG binding_mismatch target=0x%X binding=%u expected=%u actual=%d name=%s\n",
+			(unsigned)target, binding, expected, actual, name ? name : "<unnamed>");
+	}
+}
+
+static void R_ClusteredDebugDumpUpload (const clustered_light_t *lights_local, int light_count)
+{
+	GLint ssbo_size = 0;
+	GLint ubo_size = 0;
+	int show = q_min (light_count, 3);
+
+	if (!R_ClusteredShouldLog ())
+		return;
+
+	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
+	glGetBufferParameteriv (GL_SHADER_STORAGE_BUFFER, GL_BUFFER_SIZE, &ssbo_size);
+	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
+	glGetBufferParameteriv (GL_UNIFORM_BUFFER, GL_BUFFER_SIZE, &ubo_size);
+
+	Con_Printf ("CLUSTERDBG upload numlights=%d lights_ssbo=%u size=%d bind_ssbo3=%u headers_ssbo=%u bind_ssbo4=%u indices_ssbo=%u bind_ssbo5=%u params_ubo=%u size=%d bind_ubo2=%u\n",
+		light_count,
+		r_clustered.lights_ssbo,
+		ssbo_size,
+		r_clustered.lights_ssbo,
+		r_clustered.headers_ssbo,
+		r_clustered.headers_ssbo,
+		r_clustered.indices_ssbo,
+		r_clustered.indices_ssbo,
+		r_clustered.params_ubo,
+		ubo_size,
+		r_clustered.params_ubo);
+
+	for (int i = 0; i < show; i++)
+	{
+		Con_Printf ("CLUSTERDBG cpu_light[%d] org=(%.2f %.2f %.2f) radius=%.2f color=(%.2f %.2f %.2f)\n",
+			i,
+			lights_local[i].pos_radius[0], lights_local[i].pos_radius[1], lights_local[i].pos_radius[2], lights_local[i].pos_radius[3],
+			lights_local[i].color_intensity[0], lights_local[i].color_intensity[1], lights_local[i].color_intensity[2]);
+	}
+
+	if (show > 0)
+	{
+		const clustered_light_t *mapped;
+		GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
+		mapped = (const clustered_light_t *)GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0,
+			(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)show), GL_MAP_READ_BIT);
+		if (mapped)
+		{
+			for (int i = 0; i < show; i++)
+			{
+				Con_Printf ("CLUSTERDBG gpu_light[%d] org=(%.2f %.2f %.2f) radius=%.2f color=(%.2f %.2f %.2f)\n",
+					i,
+					mapped[i].pos_radius[0], mapped[i].pos_radius[1], mapped[i].pos_radius[2], mapped[i].pos_radius[3],
+					mapped[i].color_intensity[0], mapped[i].color_intensity[1], mapped[i].color_intensity[2]);
+			}
+			GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER);
+		}
+	}
+}
 
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits);
 
@@ -619,7 +705,15 @@ void R_Clustered_Init (void)
 	{
 		Con_Printf ("Clustered lighting init failed, falling back to legacy dynlights.\n");
 		R_Clustered_Shutdown ();
+		return;
 	}
+
+	R_ClusteredLabelBuffer (r_clustered.lights_ssbo, "cluster lights");
+	R_ClusteredLabelBuffer (r_clustered.headers_ssbo, "cluster headers");
+	R_ClusteredLabelBuffer (r_clustered.indices_ssbo, "cluster indices");
+	R_ClusteredLabelBuffer (r_clustered.counters_ssbo, "cluster counters");
+	R_ClusteredLabelBuffer (r_clustered.temp_counts_ssbo, "cluster temp counts");
+	R_ClusteredLabelBuffer (r_clustered.params_ubo, "cluster params");
 }
 
 static void R_ClusteredEnsureCapacity (int grid_x, int grid_y, int z_slices)
@@ -782,6 +876,7 @@ void R_Clustered_BuildLists (void)
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
 	GL_BufferSubDataFunc (GL_UNIFORM_BUFFER, 0, sizeof (params), &params);
+	R_ClusteredDebugDumpUpload (lights_local, r_framedata.numlights);
 
 	GL_UseProgram (glprogs.cluster_lights);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 3, r_clustered.lights_ssbo, 0,
@@ -794,6 +889,10 @@ void R_Clustered_BuildLists (void)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 7, r_clustered.temp_counts_ssbo, 0,
 		(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.cluster_count));
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, r_clustered.params_ubo, 0, sizeof (clustered_params_t));
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 3, r_clustered.lights_ssbo, "PackedLightsBuffer");
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 4, r_clustered.headers_ssbo, "ClusterHeaderBuffer");
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 5, r_clustered.indices_ssbo, "ClusterIndexBuffer");
+	R_ClusteredValidateBinding (GL_UNIFORM_BUFFER_BINDING, 2, r_clustered.params_ubo, "ClusterParams");
 
 	memset (&inputs, 0, sizeof (inputs));
 	inputs.pass_mode = 0;
@@ -866,6 +965,28 @@ void R_Clustered_BuildLists (void)
 	r_clustered_debug_cluster_count = r_clustered.cluster_count;
 	r_clustered_debug_index_count = 0;
 	memset (r_clustered_debug_light_cluster_hits, 0, sizeof (r_clustered_debug_light_cluster_hits));
+	for (i = 0; i < r_clustered.cluster_count; i++)
+		r_clustered_debug_index_count += (int)r_clustered_headers_cpu[i].count;
+
+	if (R_ClusteredShouldLog ())
+	{
+		const int sample_tiles = q_min (3, r_clustered.cluster_count);
+		Con_Printf ("CLUSTERDBG summary clusters=%d indices=%d overflow=%u grid=(%d %d %d) tile=%d\n",
+			r_clustered.cluster_count,
+			r_clustered_debug_index_count,
+			counters[1],
+			r_clustered.grid_x,
+			r_clustered.grid_y,
+			r_clustered.z_slices,
+			tile_size);
+		for (i = 0; i < sample_tiles; i++)
+		{
+			Con_Printf ("CLUSTERDBG tile[%d] offset=%u count=%u\n",
+				i,
+				r_clustered_headers_cpu[i].offset,
+				r_clustered_headers_cpu[i].count);
+		}
+	}
 	if (0)
 	{
 		GLuint *indices_mapped = NULL;
@@ -911,6 +1032,10 @@ void R_Clustered_BindForShading (void)
 		(GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.max_indices));
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, r_clustered.counters_ssbo, 0, sizeof (GLuint) * 2);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, r_clustered.params_ubo, 0, sizeof (clustered_params_t));
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 3, r_clustered.lights_ssbo, "PackedLightsBuffer");
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 4, r_clustered.headers_ssbo, "ClusterHeaderBuffer");
+	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 5, r_clustered.indices_ssbo, "ClusterIndexBuffer");
+	R_ClusteredValidateBinding (GL_UNIFORM_BUFFER_BINDING, 2, r_clustered.params_ubo, "ClusterParams");
 }
 
 
@@ -1059,6 +1184,11 @@ void R_PushDlights (void)
 	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
 	if (clustered_enabled)
 	{
+		if (!r_clustered.available)
+		{
+			Con_Printf ("CLUSTERDBG ERROR numlights=%u but clustered buffers unavailable\n", r_framedata.numlights);
+			return;
+		}
 		GL_BeginGroup ("Light clustering");
 		R_Clustered_BuildLists ();
 		R_Clustered_BindForShading ();
