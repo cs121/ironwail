@@ -125,3 +125,22 @@ qboolean Sys_Jobs_Submit (sys_job_queue_t *queue, sys_job_execute_fn execute, vo
 	SDL_UnlockMutex (queue->mutex);
 	return true;
 }
+
+qboolean Sys_Jobs_TrySubmit (sys_job_queue_t *queue, sys_job_execute_fn execute, void *job_data)
+{
+	qboolean submitted = false;
+
+	if (!queue || !execute)
+		return false;
+
+	SDL_LockMutex (queue->mutex);
+	if (!queue->teardown && queue->tail - queue->head < queue->capacity)
+	{
+		queue->entries[(queue->tail++) & (queue->capacity - 1)] = (sys_job_entry_t) { execute, job_data };
+		SDL_CondSignal (queue->notempty);
+		submitted = true;
+	}
+	SDL_UnlockMutex (queue->mutex);
+
+	return submitted;
+}

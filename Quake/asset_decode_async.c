@@ -23,6 +23,7 @@ typedef struct {
 	fs_async_handle_t fs_handle;
 	void *raw_data;
 	size_t raw_size;
+	qboolean decode_queued;
 	asset_result_t result;
 } asset_request_t;
 
@@ -316,6 +317,7 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 		if (params)
 			asset_requests[i].params = *params;
 		asset_requests[i].stage = ASSET_STAGE_FS;
+		asset_requests[i].decode_queued = false;
 		asset_requests[i].result.status = ASSET_RESULT_PENDING;
 		h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
 		break;
@@ -335,6 +337,7 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 	return h;
 }
 
+/* Main thread only: this pump must never block on worker queue backpressure. */
 void Asset_Async_Pump (void)
 {
 	unsigned i;
@@ -343,24 +346,59 @@ void Asset_Async_Pump (void)
 
 	for (i = 0; i < ASSET_MAX_REQUESTS; ++i)
 	{
-		asset_handle_t h;
+		asset_handle_t h = 0;
+		fs_async_handle_t fs_handle = 0;
 		fs_async_result_t fs;
 		qboolean has_fs;
+		qboolean submit_decode = false;
+
 		SDL_LockMutex(asset_mutex);
-		if (!asset_requests[i].in_use || asset_requests[i].stage != ASSET_STAGE_FS || !asset_requests[i].fs_handle)
+		if (!asset_requests[i].in_use)
 		{
 			SDL_UnlockMutex(asset_mutex);
 			continue;
 		}
-		h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
+
+		if (asset_requests[i].stage == ASSET_STAGE_FS && asset_requests[i].fs_handle)
+		{
+			h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
+			fs_handle = asset_requests[i].fs_handle;
+		}
+		else if (asset_requests[i].stage == ASSET_STAGE_DECODE && !asset_requests[i].decode_queued && asset_requests[i].raw_data && asset_requests[i].raw_size)
+		{
+			h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
+			asset_requests[i].decode_queued = true;
+			submit_decode = true;
+		}
 		SDL_UnlockMutex(asset_mutex);
 
-		has_fs = FS_Poll(asset_requests[i].fs_handle, &fs);
+		if (submit_decode)
+		{
+			if (Sys_Jobs_TrySubmit(asset_decode_queue, Asset_DecodeWorker, (void *)(uintptr_t)h))
+			{
+				SDL_LockMutex(asset_mutex);
+				asset_queued_decode++;
+				SDL_UnlockMutex(asset_mutex);
+			}
+			else
+			{
+				SDL_LockMutex(asset_mutex);
+				if (asset_requests[i].in_use && asset_requests[i].generation == ASSET_HANDLE_GEN(h) && asset_requests[i].stage == ASSET_STAGE_DECODE)
+					asset_requests[i].decode_queued = false;
+				SDL_UnlockMutex(asset_mutex);
+			}
+			continue;
+		}
+
+		if (!fs_handle)
+			continue;
+
+		has_fs = FS_Poll(fs_handle, &fs);
 		if (!has_fs)
 			continue;
 
 		SDL_LockMutex(asset_mutex);
-		if (!asset_requests[i].in_use || asset_requests[i].generation != ASSET_HANDLE_GEN(h))
+		if (!asset_requests[i].in_use || asset_requests[i].generation != ASSET_HANDLE_GEN(h) || asset_requests[i].stage != ASSET_STAGE_FS)
 		{
 			SDL_UnlockMutex(asset_mutex);
 			continue;
@@ -373,10 +411,9 @@ void Asset_Async_Pump (void)
 			{
 				memcpy(asset_requests[i].raw_data, fs.data, fs.size);
 				asset_requests[i].raw_size = fs.size;
+				asset_requests[i].decode_queued = false;
 				asset_inflight_raw_bytes += fs.size;
 				asset_requests[i].stage = ASSET_STAGE_DECODE;
-				asset_queued_decode++;
-				Sys_Jobs_Submit(asset_decode_queue, Asset_DecodeWorker, (void *)(uintptr_t)h);
 			}
 			else
 			{
