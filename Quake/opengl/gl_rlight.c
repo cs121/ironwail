@@ -42,7 +42,7 @@ extern cvar_t r_clustered_log;
 extern cvar_t r_clustered_profile;
 extern cvar_t r_clustered_profile_dumpinterval;
 extern cvar_t r_clustered_validate;
-extern cvar_t r_clustered_buildlists;
+extern cvar_t r_dbg_clustered_force_fallback;
 extern cvar_t r_clustered_clearlists;
 extern cvar_t r_clustered_barriers;
 extern cvar_t r_lightgrid;
@@ -1461,9 +1461,6 @@ void R_PushDlights (void)
 		DLightPool_DebugPrint ();
 	}
 
-	if (r_clustered_lighting.value <= 0.f)
-		r_framedata.numlights = 0;
-
 	R_ClusterPerf_BeginLightUpload ();
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
@@ -1471,14 +1468,18 @@ void R_PushDlights (void)
 	clustered_enabled = (r_clustered.available != 0);
 	if (!clustered_enabled)
 	{
-		if (r_clustered_lighting.value > 0.f)
-			R_ClusterPerf_MarkReason ("clustered resources unavailable");
+		R_ClusterPerf_MarkReason ("clustered resources unavailable");
 		R_ClusterPerf_EndPush ();
 		return;
 	}
 
-	if (r_clustered_buildlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
-		R_ClusterPerf_MarkReason ("r_clustered_buildlists=0 ignored (cluster list build always enabled)");
+	if (r_dbg_clustered_force_fallback.value > 0.f)
+	{
+		if (developer.value > 0.f && R_ClusteredShouldLog ())
+			R_ClusterPerf_MarkReason ("r_dbg_clustered_force_fallback=1 (developer fallback)");
+		R_ClusterPerf_EndPush ();
+		return;
+	}
 
 	GL_BeginGroup ("Light clustering");
 	R_ClusterPerf_BeginBuild ();
