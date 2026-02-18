@@ -53,7 +53,6 @@ static byte *Image_LoadLMP (FILE *f, int *width, int *height);
 #define STB_IMAGE_WRITE_STATIC
 #include "stb_image_write.h"
 
-#define LODEPNG_NO_COMPILE_DECODER
 #define LODEPNG_NO_COMPILE_CPP
 #define LODEPNG_NO_COMPILE_ANCILLARY_CHUNKS
 #define LODEPNG_NO_COMPILE_ERROR_TEXT
