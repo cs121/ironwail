@@ -605,6 +605,18 @@ qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits);
+void R_ClusterPerf_BeginFrame (void);
+void R_ClusterPerf_EndFrame (void);
+void R_ClusterPerf_BeginPush (void);
+void R_ClusterPerf_EndPush (void);
+void R_ClusterPerf_BeginBuild (void);
+void R_ClusterPerf_EndBuild (void);
+void R_ClusterPerf_BeginWorld (void);
+void R_ClusterPerf_EndWorld (void);
+void R_ClusterPerf_BeginDebug (void);
+void R_ClusterPerf_EndDebug (void);
+void R_ClusterPerf_BeginPost (void);
+void R_ClusterPerf_EndPost (void);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
@@ -673,6 +685,7 @@ typedef struct glprogs_s {
 	GLuint		gather_indirect;
 	GLuint		cull_mark;
 	GLuint		cluster_lights;
+	GLuint		cluster_prefix;
 	GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
 	GLuint		palette_postprocess;
 } glprogs_t;

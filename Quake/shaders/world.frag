@@ -598,17 +598,18 @@ void main()
 	}
 
         // Dynamic lights (clustered lighting)
-        if (clusterActive)
-        {
-                ClusterHeader header = headers[clusterIdx];
-                vec3 dynamic_light = vec3(0.0);
+	if (clusterActive)
+	{
+		ClusterHeader header = headers[clusterIdx];
+		uint clusterCount = min(header.count, NumLights);
+		vec3 dynamic_light = vec3(0.0);
                 float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
                 vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
-                for (uint i = 0u; i < header.count; ++i)
-                {
-                        uint lightId = lightIndices[header.offset + i];
-                        if (lightId >= NumLights)
+		for (uint i = 0u; i < clusterCount; ++i)
+		{
+			uint lightId = lightIndices[header.offset + i];
+			if (lightId >= NumLights)
                                 continue;
                         PackedLight pl = packedLights[lightId];
                         vec3 lightOrigin = pl.posRadius.xyz;
