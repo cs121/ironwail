@@ -29,6 +29,75 @@ static dlight_t dlight_fallback;
 #define DLIGHT_POOL_HYSTERESIS_FRAMES 6
 #define DLIGHT_POOL_SMOOTH 0.25f
 
+#define DLIGHT_DEBUG_SAMPLE_MAX 4
+
+static dlight_filter_debug_t dlight_filter_debug;
+static dlight_debug_entry_t dlight_debug_samples[DLIGHT_DEBUG_SAMPLE_MAX];
+
+static void DLightPool_DebugReset (void)
+{
+	memset (&dlight_filter_debug, 0, sizeof (dlight_filter_debug));
+	memset (dlight_debug_samples, 0, sizeof (dlight_debug_samples));
+}
+
+static dlight_debug_entry_t *DLightPool_DebugCapture (const dlight_t *dl)
+{
+	for (int i = 0; i < DLIGHT_DEBUG_SAMPLE_MAX; i++)
+	{
+		if (dlight_debug_samples[i].captured)
+			continue;
+		dlight_debug_entry_t *entry = &dlight_debug_samples[i];
+		memset (entry, 0, sizeof (*entry));
+		entry->captured = true;
+		entry->id = dl ? dl->id : 0;
+		if (dl)
+		{
+			VectorCopy (dl->origin, entry->origin);
+			VectorCopy (dl->color, entry->color);
+			entry->radius = dl->radius;
+			entry->baseradius = dl->baseradius;
+			entry->die = dl->die;
+			entry->flags = dl->flags;
+		}
+		entry->reason = DLIGHT_REJECT_NONE;
+		return entry;
+	}
+	return NULL;
+}
+
+static void DLightPool_DebugSetReason (dlight_debug_entry_t *entry, dlight_reject_reason_t reason)
+{
+	if (!entry || entry->reason != DLIGHT_REJECT_NONE)
+		return;
+	entry->reason = reason;
+}
+
+const char *DLightPool_RejectReasonName (dlight_reject_reason_t reason)
+{
+	switch (reason)
+	{
+	default:
+	case DLIGHT_REJECT_NONE: return "accepted";
+	case DLIGHT_REJECT_INACTIVE: return "inactive";
+	case DLIGHT_REJECT_LIFETIME: return "lifetime/radius";
+	case DLIGHT_REJECT_RADIUS: return "radius";
+	case DLIGHT_REJECT_WORLD_FLAG: return "world_flag";
+	case DLIGHT_REJECT_PVS: return "pvs";
+	case DLIGHT_REJECT_FRUSTUM: return "frustum";
+	case DLIGHT_REJECT_BUDGET: return "budget";
+	case DLIGHT_REJECT_OTHER: return "other";
+	}
+}
+
+void DLightPool_GetFilterDebug (dlight_filter_debug_t *out_stats, dlight_debug_entry_t out_entries[4])
+{
+	if (out_stats)
+		*out_stats = dlight_filter_debug;
+	if (out_entries)
+		memcpy (out_entries, dlight_debug_samples, sizeof (dlight_debug_samples));
+}
+
+
 int DLightPool_GetBudget (void)
 {
 	return DLIGHT_POOL_BUDGET;
@@ -64,6 +133,7 @@ void DLightPool_Clear (void)
 		memset (dlight_pool.items, 0, sizeof (dlight_pool.items[0]) * dlight_pool.capacity);
 	dlight_pool.next_id = 1;
 	DLightPool_ResetStats ();
+	DLightPool_DebugReset ();
 }
 
 void DLightPool_ClearPersistent (void)
@@ -134,6 +204,7 @@ static void DLightPool_ResetLight (dlight_t *dl, dlight_kind_t kind, double time
 	dl->lod_scale = 1.f;
 	dl->selected_until_frame = 0;
 	dl->last_frame_touched = dlight_pool.framecount;
+	dl->flags = DLIGHTF_DEFAULT;
 }
 
 static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t vieworg)
@@ -322,6 +393,7 @@ void DLightPool_NewFrame (double time, int framecount)
 	dlight_pool.framecount = framecount;
 	dlight_pool.has_vieworg = false;
 	DLightPool_ResetStats ();
+	DLightPool_DebugReset ();
 
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
@@ -407,15 +479,20 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_t *viewleaf,
 		dlight_t **out, int out_max)
 {
-	(void)viewleaf;
 	const float min_radius = DLIGHT_POOL_MIN_RADIUS;
 	const float min_brightness = DLIGHT_POOL_MIN_BRIGHTNESS;
 	const float cull_distance = 0.f;
 	const float smooth = DLIGHT_POOL_SMOOTH;
+	qboolean have_world = (cl.worldmodel != NULL && cl.worldmodel->leafs != NULL);
+	byte *view_pvs = NULL;
 
 	dlight_pool.time = time;
 	VectorCopy (vieworg, dlight_pool.last_vieworg);
 	dlight_pool.has_vieworg = true;
+	DLightPool_DebugReset ();
+
+	if (viewleaf && have_world)
+		view_pvs = Mod_LeafPVS ((mleaf_t *)viewleaf, cl.worldmodel);
 
 	if (!out || out_max <= 0)
 	{
@@ -444,45 +521,120 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		float dist;
 		float target_scale;
 		vec3_t delta;
+		vec3_t mins, maxs;
+		qboolean in_pvs = true;
+		qboolean in_frustum = true;
+		dlight_debug_entry_t *dbg;
+
 		if (!dl->active)
 			continue;
 
+		dlight_filter_debug.total_active++;
+		dbg = DLightPool_DebugCapture (dl);
 
 		if (dl->kind == DL_TRANSIENT && dl->die < time)
 		{
 			dl->active = false;
 			dlight_pool.stats.expired++;
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_LIFETIME);
+			dlight_filter_debug.rejected_lifetime_radius++;
 			continue;
 		}
 
-		if (dl->spawn > time)
+		if (dl->spawn > time || !dl->baseradius || (dl->radius < min_radius && dl->baseradius < min_radius))
 		{
-			dl->die = 0.f;
+			if (dl->spawn > time)
+				dl->die = 0.f;
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_LIFETIME);
+			dlight_filter_debug.rejected_lifetime_radius++;
 			continue;
 		}
+		dlight_filter_debug.pass_lifetime_radius++;
 
-		if (!dl->baseradius)
+		if ((dl->flags & DLIGHTF_AFFECTS_WORLD) == 0)
+		{
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_WORLD_FLAG);
+			dlight_filter_debug.rejected_world_flag++;
 			continue;
-
-		if (dl->radius < min_radius && dl->baseradius < min_radius)
-			continue;
+		}
+		dlight_filter_debug.pass_world_flag++;
 
 		lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-		if (lum <= 0.f)
+		if (lum <= 0.f || lum < min_brightness)
+		{
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_LIFETIME);
+			dlight_filter_debug.rejected_lifetime_radius++;
 			continue;
-		if (lum < min_brightness)
-			continue;
+		}
 
 		VectorSubtract (vieworg, dl->origin, delta);
 		dist = VectorLength (delta);
 		if (cull_distance > 0.f && dist > cull_distance + q_max (dl->radius, dl->baseradius))
+		{
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_LIFETIME);
+			dlight_filter_debug.rejected_lifetime_radius++;
 			continue;
+		}
 
 		target_scale = 1.f;
 		if (dl->radius > 0.f && dl->radius < min_radius)
 			target_scale = q_max (0.1f, dl->radius / min_radius);
 		dl->lod_scale += (target_scale - dl->lod_scale) * smooth;
 		dl->lod_scale = CLAMP (0.1f, dl->lod_scale, 1.f);
+
+		VectorSet (mins, dl->origin[0] - dl->radius, dl->origin[1] - dl->radius, dl->origin[2] - dl->radius);
+		VectorSet (maxs, dl->origin[0] + dl->radius, dl->origin[1] + dl->radius, dl->origin[2] + dl->radius);
+		if (dbg)
+		{
+			VectorCopy (mins, dbg->mins);
+			VectorCopy (maxs, dbg->maxs);
+		}
+
+		if (have_world && viewleaf && view_pvs)
+		{
+			mleaf_t *lightleaf = Mod_PointInLeaf (dl->origin, cl.worldmodel);
+			if (dbg)
+			{
+				dbg->has_leaf = (lightleaf != NULL);
+				dbg->leaf_index = lightleaf ? (int)(lightleaf - cl.worldmodel->leafs) : -1;
+			}
+			if (!lightleaf)
+				in_pvs = false;
+			else
+			{
+				int leafnum = (int)(lightleaf - cl.worldmodel->leafs) - 1;
+				if (leafnum >= 0)
+					in_pvs = ((view_pvs[leafnum >> 3] & (1 << (leafnum & 7))) != 0);
+			}
+		}
+		if (dbg)
+			dbg->in_pvs = in_pvs;
+		if (!in_pvs)
+		{
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_PVS);
+			dlight_filter_debug.rejected_pvs++;
+			continue;
+		}
+		dlight_filter_debug.pass_pvs++;
+
+		for (int j = 0; j < 4; j++)
+		{
+			const mplane_t *p = &frustum[j];
+			if (DotProduct (p->normal, dl->origin) - p->dist + dl->radius < 0.f)
+			{
+				in_frustum = false;
+				break;
+			}
+		}
+		if (dbg)
+			dbg->in_frustum = in_frustum;
+		if (!in_frustum)
+		{
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_FRUSTUM);
+			dlight_filter_debug.rejected_frustum++;
+			continue;
+		}
+		dlight_filter_debug.pass_frustum++;
 
 		dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
 		dlight_pool.scratch[found++] = dl;
@@ -498,11 +650,28 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		out[i]->selected_until_frame = dlight_pool.framecount + DLIGHT_POOL_HYSTERESIS_FRAMES;
 	}
 
+	dlight_filter_debug.pass_budget = submit_count;
+	if (found > submit_count)
+		dlight_filter_debug.rejected_budget = found - submit_count;
+	for (int i = submit_count; i < found; i++)
+	{
+		dlight_t *dl = dlight_pool.scratch[i];
+		for (int j = 0; j < DLIGHT_DEBUG_SAMPLE_MAX; j++)
+		{
+			dlight_debug_entry_t *entry = &dlight_debug_samples[j];
+			if (!entry->captured || entry->id != dl->id)
+				continue;
+			DLightPool_DebugSetReason (entry, DLIGHT_REJECT_BUDGET);
+			break;
+		}
+	}
+
 	dlight_pool.stats.submitted = submit_count;
 	DLightPool_UpdateStats ();
 
 	return submit_count;
 }
+
 
 void DLightPool_GetStats (dlight_pool_stats_t *out)
 {

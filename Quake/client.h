@@ -111,6 +111,10 @@ typedef struct dlight_s
 	int		last_frame_touched;
 } dlight_t;
 
+#define DLIGHTF_AFFECTS_WORLD	(1 << 0)
+#define DLIGHTF_AFFECTS_MODELS	(1 << 1)
+#define DLIGHTF_DEFAULT		(DLIGHTF_AFFECTS_WORLD | DLIGHTF_AFFECTS_MODELS)
+
 #define	MAX_BEAMS	32 //johnfitz -- was 24
 typedef struct
 {
