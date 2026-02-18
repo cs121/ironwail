@@ -1144,7 +1144,6 @@ void R_Clustered_BuildLists (void)
 	params.debug_mode = (int)r_clustered_debug.value;
 
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_clustered.max_lights), NULL, GL_STREAM_DRAW);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
 		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_framedata.numlights), lights_local);
 	if (!clear_lists)
@@ -1152,17 +1151,11 @@ void R_Clustered_BuildLists (void)
 		R_ClusterPerf_MarkReason ("r_clustered_clearlists=0 (cluster clear/prefix clear disabled)");
 	}
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.headers_ssbo);
-	if (clear_lists)
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (*r_clustered_headers_cpu) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.temp_counts_ssbo);
-	if (clear_lists)
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
 	counters[0] = (GLuint)r_clustered.max_indices;
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.counters_ssbo);
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (counters), NULL, GL_STREAM_DRAW);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
-	GL_BufferDataFunc (GL_UNIFORM_BUFFER, sizeof (params), NULL, GL_STREAM_DRAW);
 	GL_BufferSubDataFunc (GL_UNIFORM_BUFFER, 0, sizeof (params), &params);
 	R_ClusteredDebugDumpUpload (lights_local, r_framedata.numlights);
 
@@ -1207,16 +1200,6 @@ void R_Clustered_BuildLists (void)
 		R_ClusterPerf_EndClusterClearGPU ();
 	}
 
-	memset (&inputs, 0, sizeof (inputs));
-	inputs.pass_mode = 0;
-	inputs.num_lights = r_framedata.numlights;
-	inputs._pad0 = r_clustered.cluster_count;
-	{
-		GLuint buf;
-		GLbyte *ofs;
-		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
-	}
 	R_ClusterPerf_BeginClusterBuildGPU ();
 	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
 	R_ClusteredBarrier (barrier_bits);
@@ -1502,12 +1485,15 @@ void R_PushDlights (void)
 
 	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
 	use_cluster_lists = (clustered_enabled && r_clustered_buildlists.value > 0.f);
-	if (clustered_enabled && (r_framedata.numlights <= small_light_threshold || r_clustered_buildlists.value <= 0.f))
+	if (clustered_enabled && r_clustered_buildlists.value <= 0.f)
 	{
 		r_framedata.dlight_params[2] = 1.f;
 		use_cluster_lists = false;
-		if (r_framedata.numlights <= small_light_threshold)
-			R_ClusterPerf_MarkReason ("small-light fast path active (direct lightbuffer loop)");
+		R_ClusterPerf_MarkReason ("cluster build disabled (direct lightbuffer loop)");
+	}
+	else if (clustered_enabled && r_framedata.numlights <= small_light_threshold)
+	{
+		R_ClusterPerf_MarkReason ("small-light clustered path active");
 	}
 
 	if (clustered_enabled)
