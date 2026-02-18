@@ -443,12 +443,14 @@ void Asset_Async_Pump (void)
 			{
 				asset_requests[i].result.status = ASSET_RESULT_FAILED;
 				asset_requests[i].stage = ASSET_STAGE_DONE;
+				SDL_CondBroadcast(asset_done_cond);
 			}
 		}
 		else
 		{
 			asset_requests[i].result.status = (fs.status == FS_ASYNC_STATUS_NOT_FOUND) ? ASSET_RESULT_NOT_FOUND : ASSET_RESULT_FAILED;
 			asset_requests[i].stage = ASSET_STAGE_DONE;
+			SDL_CondBroadcast(asset_done_cond);
 		}
 		FS_Release(asset_requests[i].fs_handle);
 		asset_requests[i].fs_handle = 0;
@@ -463,6 +465,10 @@ void Asset_Async_Pump (void)
 	}
 }
 
+/*
+ * Non-blocking query. Callers are expected to keep pumping async FS/decode work
+ * from the frame loop via Asset_Async_Pump().
+ */
 qboolean Asset_Poll (asset_handle_t h, asset_result_t *out)
 {
 	unsigned idx = ASSET_HANDLE_INDEX(h), gen = ASSET_HANDLE_GEN(h);
@@ -485,11 +491,24 @@ qboolean Asset_Poll (asset_handle_t h, asset_result_t *out)
 
 void Asset_Wait (asset_handle_t h, asset_result_t *out)
 {
-	while (!Asset_Poll(h, out))
-	{
-		Asset_Async_Pump();
-		SDL_Delay(1);
-	}
+	unsigned idx = ASSET_HANDLE_INDEX(h), gen = ASSET_HANDLE_GEN(h);
+
+	if (out)
+		memset(out, 0, sizeof(*out));
+	if (!h || idx >= ASSET_MAX_REQUESTS || !asset_initialized)
+		return;
+
+	/*
+	 * Blocking wait for completion only; this does not poll filesystem progress.
+	 * The caller (usually the frame loop) must continue calling Asset_Async_Pump().
+	 */
+	SDL_LockMutex(asset_mutex);
+	while (asset_requests[idx].in_use && asset_requests[idx].generation == gen && asset_requests[idx].stage != ASSET_STAGE_DONE)
+		SDL_CondWait(asset_done_cond, asset_mutex);
+
+	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen && asset_requests[idx].stage == ASSET_STAGE_DONE && out)
+		*out = asset_requests[idx].result;
+	SDL_UnlockMutex(asset_mutex);
 }
 
 void Asset_Release (asset_handle_t h)
