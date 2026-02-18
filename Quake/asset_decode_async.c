@@ -36,6 +36,7 @@ static qboolean asset_initialized;
 static cvar_t asset_async = {"asset_async", "0", CVAR_ARCHIVE};
 static cvar_t asset_async_max_inflight_mb = {"asset_async_max_inflight_mb", "256", CVAR_ARCHIVE};
 static cvar_t asset_async_debug = {"asset_async_debug", "0", CVAR_NONE};
+static cvar_t asset_async_decode_workers = {"asset_async_decode_workers", "2", CVAR_ARCHIVE};
 
 static uint64_t asset_queued_fs;
 static uint64_t asset_completed_fs;
@@ -224,12 +225,13 @@ void Asset_Async_Init (void)
 		return;
 	asset_mutex = SDL_CreateMutex();
 	asset_done_cond = SDL_CreateCond();
-	asset_decode_queue = Sys_Jobs_CreateQueue("Asset Decode", 256);
+	asset_decode_queue = Sys_Jobs_CreateQueue("Asset Decode", 256, (size_t)q_max(1.0f, asset_async_decode_workers.value));
 	if (!asset_mutex || !asset_done_cond || !asset_decode_queue)
 		Sys_Error("Asset_Async_Init failed");
 	Cvar_RegisterVariable(&asset_async);
 	Cvar_RegisterVariable(&asset_async_max_inflight_mb);
 	Cvar_RegisterVariable(&asset_async_debug);
+	Cvar_RegisterVariable(&asset_async_decode_workers);
 	asset_initialized = true;
 }
 
