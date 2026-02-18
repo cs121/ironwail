@@ -31,6 +31,7 @@ layout(std140, binding=2) uniform ClusterParams
 	ivec2 ClusterScreenSize;
 	ivec2 ClusterGridXY;
 	int ClusterZSlices;
+	int ClusteredEnabled;
 	float ClusterNearPlane;
 	float ClusterFarPlane;
 	float ClusterZLogScale;
@@ -45,6 +46,7 @@ layout(std140, binding=2) uniform ClusterParams
 bool ClusterLightingEnabled()
 {
 	return ClusteredLightParams.z > 0.5
+		&& ClusteredEnabled > 0
 		&& NumLights > 0u
 		&& ClusterTileSize > 0
 		&& ClusterGridXY.x > 0

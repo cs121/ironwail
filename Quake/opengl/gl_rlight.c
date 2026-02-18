@@ -550,11 +550,12 @@ typedef struct clustered_params_s {
 	int screen_size[2];
 	int grid_xy[2];
 	int z_slices;
+	int clustered_enabled;
 	float near_plane;
 	float far_plane;
 	float z_log_scale;
 	float z_log_bias;
-	int _pad0[3];
+	int _pad0[2];
 	float view_matrix[16];
 	float proj_matrix[16];
 	float inv_proj[16];
@@ -594,6 +595,7 @@ static struct {
 	int max_indices;
 	int max_lights;
 	qboolean has_frame_data;
+	qboolean shading_enabled;
 	qboolean shading_bound;
 	GLuint bound_lights_ssbo;
 	GLuint bound_headers_ssbo;
@@ -614,7 +616,18 @@ static struct {
 	int last_frame_uploaded;
 	cluster_runtime_params_t params;
 	GLuint debug_indices_written_count;
+	double build_ms;
+	double upload_ms;
+	double bind_ms_total;
+	int num_glget_calls_in_bind;
+	int num_buffer_allocs;
+	int num_barriers;
 } r_clustered;
+
+static double R_ClusteredNowMS (void)
+{
+	return Sys_DoubleTime () * 1000.0;
+}
 
 static clustered_header_t *r_clustered_headers_cpu;
 static int r_clustered_debug_light_cluster_hits[DLIGHT_GPU_MAX];
@@ -908,6 +921,7 @@ static void R_ClusteredBarrier (GLbitfield bits)
 {
 	if (r_clustered_barriers.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
 		R_ClusterPerf_MarkReason ("r_clustered_barriers=0 ignored (memory barriers always enabled)");
+	r_clustered.num_barriers++;
 	GL_MemoryBarrierFunc (bits);
 }
 
@@ -1031,6 +1045,7 @@ void R_Clustered_Init (void)
 	R_ClusteredLabelBuffer (r_clustered.params_ubo, "cluster params");
 	r_clustered.shading_bound = false;
 	r_clustered.has_frame_data = false;
+	r_clustered.shading_enabled = false;
 }
 
 static void R_ClusteredEnsureCapacity (int grid_x, int grid_y, int z_slices)
@@ -1072,6 +1087,8 @@ static void R_ClusteredEnsureCapacity (int grid_x, int grid_y, int z_slices)
 
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
 	GL_BufferDataFunc (GL_UNIFORM_BUFFER, sizeof (clustered_params_t), NULL, GL_DYNAMIC_DRAW);
+
+	r_clustered.num_buffer_allocs += 6;
 
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, 0);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, 0);
@@ -1171,6 +1188,7 @@ static void R_ClusteredFillParamsUBO (clustered_params_t *params, const cluster_
 	params->grid_xy[0] = runtime->grid_x;
 	params->grid_xy[1] = runtime->grid_y;
 	params->z_slices = runtime->z_slices;
+	params->clustered_enabled = r_clustered.shading_enabled ? 1 : 0;
 	params->near_plane = runtime->near_plane;
 	params->far_plane = runtime->far_plane;
 	params->z_log_scale = runtime->z_log_scale;
@@ -1188,26 +1206,18 @@ static void R_ClusteredFillParamsUBO (clustered_params_t *params, const cluster_
 
 static void R_ClusteredResetFrameState (const cluster_runtime_params_t *runtime)
 {
-	gpu_cluster_inputs_t inputs;
 	clustered_params_t params;
-	GLint zero = 0;
+	double upload_start_ms;
 
-	memset (&inputs, 0, sizeof (inputs));
+	r_clustered.shading_enabled = false;
 	R_ClusteredFillParamsUBO (&params, runtime);
 	r_clustered.upload_calls++;
 	r_clustered.last_frame_uploaded = r_framecount;
+	upload_start_ms = R_ClusteredNowMS ();
 
-	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.counters_ssbo);
-	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (zero), &zero);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
 	GL_BufferSubDataFunc (GL_UNIFORM_BUFFER, 0, sizeof (params), &params);
-
-	{
-		GLuint buf;
-		GLbyte *ofs;
-		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
-	}
+	r_clustered.upload_ms += R_ClusteredNowMS () - upload_start_ms;
 
 	r_clustered.has_frame_data = false;
 	r_clustered_debug_cluster_count = r_clustered.cluster_count;
@@ -1216,18 +1226,24 @@ static void R_ClusteredResetFrameState (const cluster_runtime_params_t *runtime)
 
 	if (R_ClusteredShouldLog ())
 	{
-		Con_Printf ("CLUSTERDBG summary clusters=%d indices=%u (empty-frame) overflow=0 grid=(%d %d %d) tile=%d calls=(b:%d u:%d n:%d) frame=(b:%d u:%d)\n",
+		Con_Printf ("CLUSTERDBG summary clusters=%d indices=%u (empty-frame) overflow=0 grid=(%d %d %d) tile=%d calls=(b:%d u:%d n:%d) frame=(b:%d u:%d) cpu_ms=(build:%.3f upload:%.3f bind:%.3f) counters=(glget_bind:%d alloc:%d barrier:%d)\n",
 			r_clustered.cluster_count,
 			r_clustered.debug_indices_written_count,
 			r_clustered.grid_x,
 			r_clustered.grid_y,
 			r_clustered.z_slices,
 			r_clustered.params.tile_size,
-			r_clustered.build_calls,
-			r_clustered.upload_calls,
-			r_clustered.bind_calls,
-			r_clustered.last_frame_built,
-			r_clustered.last_frame_uploaded);
+				r_clustered.build_calls,
+				r_clustered.upload_calls,
+				r_clustered.bind_calls,
+				r_clustered.last_frame_built,
+				r_clustered.last_frame_uploaded,
+				r_clustered.build_ms,
+				r_clustered.upload_ms,
+				r_clustered.bind_ms_total,
+				r_clustered.num_glget_calls_in_bind,
+				r_clustered.num_buffer_allocs,
+				r_clustered.num_barriers);
 	}
 
 	R_ClusterPerf_MarkReason ("cluster build skipped (numlights=0)");
@@ -1244,6 +1260,8 @@ void R_Clustered_BuildLists (void)
 	GLuint counters[2] = {0u, 0u};
 	const GLuint barrier_bits = GL_SHADER_STORAGE_BARRIER_BIT;
 	cluster_runtime_params_t runtime;
+	double build_start_ms;
+	double upload_start_ms;
 
 	if (!R_ClusteredEnabled () || !glprogs.cluster_lights || !glprogs.cluster_prefix)
 		return;
@@ -1251,6 +1269,7 @@ void R_Clustered_BuildLists (void)
 	if (r_clustered.last_frame_built == r_framecount)
 		return;
 
+	build_start_ms = R_ClusteredNowMS ();
 	R_ClusteredComputeRuntimeParams (&runtime);
 	r_clustered.params = runtime;
 	R_ClusteredEnsureCapacity (runtime.grid_x, runtime.grid_y, runtime.z_slices);
@@ -1262,14 +1281,16 @@ void R_Clustered_BuildLists (void)
 
 	if (r_framedata.numlights == 0)
 	{
-		r_clustered.debug_indices_written_count = 0u;
-		R_ClusteredResetFrameState (&runtime);
-		GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, 0);
-		GL_BindBufferFunc (GL_UNIFORM_BUFFER, 0);
-		return;
+			r_clustered.debug_indices_written_count = 0u;
+			R_ClusteredResetFrameState (&runtime);
+			r_clustered.build_ms += R_ClusteredNowMS () - build_start_ms;
+			GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, 0);
+			GL_BindBufferFunc (GL_UNIFORM_BUFFER, 0);
+			return;
 	}
 
 	r_clustered.has_frame_data = true;
+	r_clustered.shading_enabled = true;
 
 	for (light_index = 0; light_index < r_framedata.numlights; light_index++)
 	{
@@ -1289,6 +1310,7 @@ void R_Clustered_BuildLists (void)
 	R_ClusteredFillParamsUBO (&params, &runtime);
 	r_clustered.upload_calls++;
 	r_clustered.last_frame_uploaded = r_framecount;
+	upload_start_ms = R_ClusteredNowMS ();
 
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
@@ -1304,6 +1326,7 @@ void R_Clustered_BuildLists (void)
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
 	GL_BindBufferFunc (GL_UNIFORM_BUFFER, r_clustered.params_ubo);
 	GL_BufferSubDataFunc (GL_UNIFORM_BUFFER, 0, sizeof (params), &params);
+	r_clustered.upload_ms += R_ClusteredNowMS () - upload_start_ms;
 	R_ClusteredDebugDumpUpload (lights_local, r_framedata.numlights);
 
 	GL_UseProgram (glprogs.cluster_lights);
@@ -1427,7 +1450,7 @@ void R_Clustered_BuildLists (void)
 	if (R_ClusteredShouldLog ())
 	{
 		const int sample_tiles = q_min (3, r_clustered.cluster_count);
-		Con_Printf ("CLUSTERDBG summary clusters=%d indices=%u overflow=%u grid=(%d %d %d) tile=%d calls=(b:%d u:%d n:%d) frame=(b:%d u:%d)\n",
+		Con_Printf ("CLUSTERDBG summary clusters=%d indices=%u overflow=%u grid=(%d %d %d) tile=%d calls=(b:%d u:%d n:%d) frame=(b:%d u:%d) cpu_ms=(build:%.3f upload:%.3f bind:%.3f) counters=(glget_bind:%d alloc:%d barrier:%d)\n",
 			r_clustered.cluster_count,
 			r_clustered.debug_indices_written_count,
 			counters[1],
@@ -1435,11 +1458,17 @@ void R_Clustered_BuildLists (void)
 			r_clustered.grid_y,
 			r_clustered.z_slices,
 			r_clustered.params.tile_size,
-			r_clustered.build_calls,
-			r_clustered.upload_calls,
-			r_clustered.bind_calls,
-			r_clustered.last_frame_built,
-			r_clustered.last_frame_uploaded);
+				r_clustered.build_calls,
+				r_clustered.upload_calls,
+				r_clustered.bind_calls,
+				r_clustered.last_frame_built,
+				r_clustered.last_frame_uploaded,
+				r_clustered.build_ms,
+				r_clustered.upload_ms,
+				r_clustered.bind_ms_total,
+				r_clustered.num_glget_calls_in_bind,
+				r_clustered.num_buffer_allocs,
+				r_clustered.num_barriers);
 		for (i = 0; i < sample_tiles; i++)
 		{
 			Con_Printf ("CLUSTERDBG tile[%d] offset=%u count=%u\n", i,
@@ -1454,11 +1483,16 @@ void R_Clustered_BuildLists (void)
 
 void R_Clustered_BindForShading (void)
 {
+	double bind_start_ms;
+
 	if (!R_ClusteredEnabled ())
+		return;
+	if (!r_clustered.shading_enabled)
 		return;
 	if (r_clustered.shading_bound)
 		return;
 
+	bind_start_ms = R_ClusteredNowMS ();
 	R_ClusterPerf_BeginClusterBindBarrier ();
 	R_ClusteredBindRangeCached (GL_SHADER_STORAGE_BUFFER, 3, r_clustered.lights_ssbo,
 		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_clustered.max_lights), &r_clustered.bound_lights_ssbo, &r_clustered.bound_lights_size);
@@ -1475,6 +1509,7 @@ void R_Clustered_BindForShading (void)
 	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 5, r_clustered.indices_ssbo, "ClusterIndexBuffer");
 	R_ClusteredValidateBinding (GL_UNIFORM_BUFFER_BINDING, 2, r_clustered.params_ubo, "ClusterParams");
 	R_ClusterPerf_EndClusterBindBarrier ();
+	r_clustered.bind_ms_total += R_ClusteredNowMS () - bind_start_ms;
 	r_clustered.shading_bound = true;
 }
 
@@ -1625,6 +1660,12 @@ void R_PushDlights (void)
 		r_clustered.build_calls = 0;
 		r_clustered.upload_calls = 0;
 		r_clustered.bind_calls = 0;
+		r_clustered.build_ms = 0.0;
+		r_clustered.upload_ms = 0.0;
+		r_clustered.bind_ms_total = 0.0;
+		r_clustered.num_glget_calls_in_bind = 0;
+		r_clustered.num_buffer_allocs = 0;
+		r_clustered.num_barriers = 0;
 	}
 	R_ClusterPerf_BeginPush ();
 
@@ -1672,6 +1713,7 @@ void R_PushDlights (void)
 	else
 	{
 		r_clustered.has_frame_data = false;
+		r_clustered.shading_enabled = false;
 		r_clustered.shading_bound = false;
 		R_ClusterPerf_MarkReason (r_clustered_lighting.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
 	}
