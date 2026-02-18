@@ -12,6 +12,7 @@ layout(binding=6) uniform samplerCube ReflectionTex;
 #include "frame_uniforms.glsl"
 #include "depth_common.glsl"
 #include "envlight.glsl"
+#include "clustered_lighting.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -42,50 +43,6 @@ float GetLightStyle(int index)
 {
 	return (index < 64) ? mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w) : 1.0;
 }
-
-struct ClusterHeader
-{
-	uint offset;
-	uint count;
-};
-
-struct PackedLight
-{
-	vec4 posRadius;
-	vec4 colorIntensity;
-	ivec4 flags;
-};
-
-layout(std430, binding=4) readonly buffer ClusterHeaderBuffer
-{
-	ClusterHeader headers[];
-};
-
-layout(std430, binding=5) readonly buffer ClusterIndexBuffer
-{
-	uint lightIndices[];
-};
-
-layout(std430, binding=3) readonly buffer PackedLightsBuffer
-{
-	PackedLight packedLights[];
-};
-
-layout(std140, binding=2) uniform ClusterParams
-{
-	ivec2 ClusterScreenSize;
-	ivec2 ClusterGridXY;
-	int ClusterZSlices;
-	float ClusterNearPlane;
-	float ClusterFarPlane;
-	float ClusterZLogScale;
-	float ClusterZLogBias;
-	mat4 ClusterViewMatrix;
-	mat4 ClusterProjMatrix;
-	mat4 ClusterInvProj;
-	int ClusterTileSize;
-	int ClusterDebugMode;
-};
 
 struct Call
 {
@@ -548,13 +505,13 @@ void main()
 	int zSlice = 0;
 	int clusterIdx = 0;
 	uint clusterCount = 0u;
-	bool clusterActive = (NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
+	bool clusterActive = ClusterLightingEnabled();
 
 	if (clusterActive)
 	{
 		tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
 		tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
-		zSlice = clamp(int(floor(log2(max(in_depth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
+		zSlice = ClusterComputeZSlice(in_depth);
 		clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
 		clusterCount = headers[clusterIdx].count;
 	}
@@ -600,18 +557,21 @@ void main()
 	// Dynamic lights (clustered lighting)
 	if (clusterActive)
 	{
-		ClusterHeader header = headers[clusterIdx];
-		uint clusterCount = min(header.count, NumLights);
+		ClusterHeader header;
+		uint clusterCount;
+		int resolvedClusterIdx;
+		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header, clusterCount))
+			clusterCount = 0u;
 		vec3 dynamic_light = vec3(0.0);
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
 		for (uint i = 0u; i < clusterCount; ++i)
 		{
-			uint lightId = lightIndices[header.offset + i];
-			if (lightId >= NumLights)
+			uint lightId;
+			PackedLight pl;
+			if (!ClusterFetchLight(header, i, lightId, pl))
 				continue;
-			PackedLight pl = packedLights[lightId];
 			vec3 lightOrigin = pl.posRadius.xyz;
 			float radius = pl.posRadius.w;
 			vec3 lightColor = pl.colorIntensity.rgb;

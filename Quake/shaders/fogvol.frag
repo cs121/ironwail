@@ -21,49 +21,7 @@ layout(std140, binding=12) uniform FogVolumeUBO
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
 };
 
-struct ClusterHeader
-{
-	uint offset;
-	uint count;
-};
-
-struct PackedLight
-{
-	vec4 posRadius;
-	vec4 colorIntensity;
-	ivec4 flags;
-};
-
-layout(std430, binding=4) readonly buffer ClusterHeaderBuffer
-{
-	ClusterHeader headers[];
-};
-
-layout(std430, binding=5) readonly buffer ClusterIndexBuffer
-{
-	uint lightIndices[];
-};
-
-layout(std430, binding=3) readonly buffer PackedLightsBuffer
-{
-	PackedLight packedLights[];
-};
-
-layout(std140, binding=2) uniform ClusterParams
-{
-	ivec2 ClusterScreenSize;
-	ivec2 ClusterGridXY;
-	int ClusterZSlices;
-	float ClusterNearPlane;
-	float ClusterFarPlane;
-	float ClusterZLogScale;
-	float ClusterZLogBias;
-	mat4 ClusterViewMatrix;
-	mat4 ClusterProjMatrix;
-	mat4 ClusterInvProj;
-	int ClusterTileSize;
-	int ClusterDebugMode;
-};
+#include "clustered_lighting.glsl"
 
 layout(location=0) uniform int FogSteps;
 layout(location=1) uniform int FogNoiseEnabled;
@@ -222,22 +180,21 @@ float HGPhase(float cosTheta, float g)
 
 vec3 EvaluateDynamicLights(vec3 worldPos, vec2 screenPos, float viewDepth)
 {
-	if (NumLights == 0u || ClusterTileSize <= 0)
+	ClusterHeader header;
+	uint clusterCount;
+	int clusterIdx;
+	if (!ClusterResolve(screenPos, viewDepth, clusterIdx, header, clusterCount))
 		return vec3(0.0);
 
-	int tileX = clamp(int(screenPos.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
-	int tileY = clamp(int(screenPos.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
-	int zSlice = clamp(int(floor(log2(max(viewDepth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
-	int clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
-	ClusterHeader header = headers[clusterIdx];
 	vec3 dynamicLight = vec3(0.0);
 
-	for (uint i = 0u; i < header.count; ++i)
+	for (uint i = 0u; i < clusterCount; ++i)
 	{
-		uint lightId = lightIndices[header.offset + i];
-		if (lightId >= NumLights)
+		uint lightId;
+		PackedLight pl;
+		if (!ClusterFetchLight(header, i, lightId, pl))
 			continue;
-		PackedLight pl = packedLights[lightId];
+
 		vec3 lightVec = pl.posRadius.xyz - worldPos;
 		float dist = length(lightVec);
 		float radius = pl.posRadius.w;
