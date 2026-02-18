@@ -635,9 +635,11 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_clustered_profile);
 	Cvar_RegisterVariable (&r_clustered_profile_dumpinterval);
 	Cvar_RegisterVariable (&r_clustered_validate);
+#ifdef _DEBUG
 	Cvar_RegisterVariable (&r_clustered_buildlists);
 	Cvar_RegisterVariable (&r_clustered_clearlists);
 	Cvar_RegisterVariable (&r_clustered_barriers);
+#endif
 	Cvar_RegisterVariable (&r_clustered_shadows);
         Cvar_RegisterVariable (&r_shadows);
         Cvar_RegisterVariable (&r_shadow_sun);
