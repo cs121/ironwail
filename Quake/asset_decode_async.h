@@ -4,7 +4,7 @@
 #include "q_stdinc.h"
 #include "fs_async.h"
 
-typedef struct model_s qmodel_t;
+typedef struct qmodel_s qmodel_t;
 
 typedef uint32_t asset_handle_t;
 
