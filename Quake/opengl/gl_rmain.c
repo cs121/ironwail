@@ -280,6 +280,11 @@ static void R_LogWorldDlightState (const char *marker)
 	qboolean blend = false;
 	GLint blend_src_rgb = 0, blend_dst_rgb = 0;
 
+	if (r_state_debug.value <= 0.f)
+		return;
+	if (!GL_StateDebugMatchesFilter (marker))
+		return;
+
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_DRAW_BUFFER0, &draw_buf[0]);
 	glGetIntegerv (GL_DRAW_BUFFER1, &draw_buf[1]);
