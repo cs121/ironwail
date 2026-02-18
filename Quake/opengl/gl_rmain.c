@@ -192,6 +192,7 @@ static const float r_identity_mat4[16] = {
 
 extern cvar_t r_state_debug;
 extern cvar_t r_state_debug_filter;
+extern cvar_t r_dlight_debug_visualize;
 extern cvar_t r_gl_verify_program;
 
 static void GL_LogErrorIfDeveloper (const char *label)
