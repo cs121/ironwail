@@ -543,13 +543,63 @@ void main()
 	float specular_quality = clamp(DLightParams.w / 3.0, 0.25, 1.0);
 	float specular_scale = 0.4 * specular_quality;
 
+	int tileX = 0;
+	int tileY = 0;
+	int zSlice = 0;
+	int clusterIdx = 0;
+	uint clusterCount = 0u;
+	bool clusterActive = (NumLights > 0u && ClusterTileSize > 0 && ClusterGridXY.x > 0 && ClusterGridXY.y > 0 && ClusterZSlices > 0);
+
+	if (clusterActive)
+	{
+		tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
+		tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
+		zSlice = clamp(int(floor(log2(max(in_depth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
+		clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
+		clusterCount = headers[clusterIdx].count;
+	}
+
+	if (ClusterDebugMode == 1)
+	{
+		OUT_COLOR = (NumLights > 0u) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	else if (ClusterDebugMode == 2)
+	{
+		float t = clamp(float(ClusterTileSize) / 32.0, 0.0, 1.0);
+		OUT_COLOR = clusterActive ? vec4(0.0, t, 1.0 - t, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	else if (ClusterDebugMode == 3)
+	{
+		float g = clamp(float(clusterCount) / 32.0, 0.0, 1.0);
+		OUT_COLOR = clusterActive ? vec4(g, g, g, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+	else if (ClusterDebugMode == 4)
+	{
+		float fx = (ClusterGridXY.x > 1) ? float(tileX) / float(ClusterGridXY.x - 1) : 0.0;
+		float fy = (ClusterGridXY.y > 1) ? float(tileY) / float(ClusterGridXY.y - 1) : 0.0;
+		float fz = (ClusterZSlices > 1) ? float(zSlice) / float(ClusterZSlices - 1) : 0.0;
+		OUT_COLOR = clusterActive ? vec4(fx, fy, fz, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
+
         // Dynamic lights (clustered lighting)
-        if (NumLights > 0u && ClusterTileSize > 0)
+        if (clusterActive)
         {
-                int tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
-                int tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
-                int zSlice = clamp(int(floor(log2(max(in_depth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
-                int clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
                 ClusterHeader header = headers[clusterIdx];
                 vec3 dynamic_light = vec3(0.0);
                 float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
@@ -592,34 +642,6 @@ void main()
                                         specular_light += light_contrib * (spec * specular_scale * energy);
                                 }
                         }
-                }
-
-                if (ClusterDebugMode == 1)
-                {
-                        float h = clamp(float(header.count) / 16.0, 0.0, 1.0);
-                        OUT_COLOR = vec4(h, h * h, 0.0, 1.0);
-#if !OIT
-                        out_velocity = vec4(0.0);
-#endif
-                        return;
-                }
-                else if (ClusterDebugMode == 2)
-                {
-                        float b = float(zSlice) / max(float(ClusterZSlices - 1), 1.0);
-                        OUT_COLOR = vec4(b, 1.0 - b, 0.5, 1.0);
-#if !OIT
-                        out_velocity = vec4(0.0);
-#endif
-                        return;
-                }
-                else if (ClusterDebugMode == 3)
-                {
-                        float g = clamp(float(header.count) / 32.0, 0.0, 1.0);
-                        OUT_COLOR = vec4(vec3(g), 1.0);
-#if !OIT
-                        out_velocity = vec4(0.0);
-#endif
-                        return;
                 }
 
                 total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);

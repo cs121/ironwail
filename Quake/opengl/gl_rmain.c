@@ -259,7 +259,7 @@ static void GL_DumpRenderState (const char *label)
 }
 
 
-static void R_LogWorldDlightState (const char *marker)
+static void R_LogWorldLightState (const char *marker)
 {
 	GLint draw_fbo = 0;
 	GLint draw_buf[4] = { 0, 0, 0, 0 };
@@ -275,7 +275,7 @@ static void R_LogWorldDlightState (const char *marker)
 
 	if (r_state_debug.value <= 0.f)
 	{
-		if (q_strcasecmp (marker, "WORLD_DLIGHT_BEGIN") || r_dlight_debug_visualize.value < 2.f)
+		if (q_strcasecmp (marker, "WORLD_LIGHTS_BEGIN") || r_dlight_debug_visualize.value < 2.f)
 			return;
 	}
 	else if (!GL_StateDebugMatchesFilter (marker))
@@ -322,7 +322,7 @@ static void R_LogWorldDlightState (const char *marker)
 		program, GL_GetProgramDebugName ((GLuint)program),
 		r_framedata.numlights);
 
-	if (!q_strcasecmp (marker, "WORLD_DLIGHT_BEGIN"))
+	if (!q_strcasecmp (marker, "WORLD_LIGHTS_BEGIN"))
 	{
 		dlight_filter_debug_t filter_stats;
 		dlight_debug_entry_t entries[4];
@@ -5214,10 +5214,10 @@ void R_RenderScene (void)
 	R_StateDebugMark ("WEAPON_AFTER");
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-	R_StateDebugMark ("WORLD_DLIGHT_BEGIN");
-	R_LogWorldDlightState ("WORLD_DLIGHT_BEGIN");
-	R_LogWorldDlightState ("WORLD_DLIGHT_END");
-	R_StateDebugMark ("WORLD_DLIGHT_END");
+	R_StateDebugMark ("WORLD_LIGHTS_BEGIN");
+	R_LogWorldLightState ("WORLD_LIGHTS_BEGIN");
+	R_LogWorldLightState ("WORLD_LIGHTS_END");
+	R_StateDebugMark ("WORLD_LIGHTS_END");
 	R_DrawDecals (false);
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
