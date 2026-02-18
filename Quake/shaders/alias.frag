@@ -109,50 +109,7 @@ layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
 layout(binding=6) uniform samplerCube ReflectionTex;
 
-struct ClusterHeader
-{
-	uint offset;
-	uint count;
-};
-
-struct PackedLight
-{
-	vec4 posRadius;
-	vec4 colorIntensity;
-	ivec4 flags;
-};
-
-layout(std430, binding=4) readonly buffer ClusterHeaderBuffer
-{
-	ClusterHeader headers[];
-};
-
-layout(std430, binding=5) readonly buffer ClusterIndexBuffer
-{
-	uint lightIndices[];
-};
-
-layout(std430, binding=3) readonly buffer PackedLightsBuffer
-{
-	PackedLight packedLights[];
-};
-
-layout(std140, binding=2) uniform ClusterParams
-{
-	ivec2 ClusterScreenSize;
-	ivec2 ClusterGridXY;
-	int ClusterZSlices;
-	float ClusterNearPlane;
-	float ClusterFarPlane;
-	float ClusterZLogScale;
-	float ClusterZLogBias;
-	mat4 ClusterViewMatrix;
-	mat4 ClusterProjMatrix;
-	mat4 ClusterInvProj;
-	int ClusterTileSize;
-	int ClusterDebugMode;
-};
-
+#include "clustered_lighting.glsl"
 #include "envlight.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -235,25 +192,22 @@ vec3 normalize_safe(vec3 v)
 
 vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 {
-	if (NumLights == 0u || ClusterTileSize <= 0 || ClusterGridXY.x <= 0 || ClusterGridXY.y <= 0 || ClusterZSlices <= 0)
+	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
+	ClusterHeader header;
+	uint cluster_count;
+	int cluster_idx;
+	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
 		return vec3(0.0);
 
-	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
-	int tile_x = clamp(int(screen_pos.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
-	int tile_y = clamp(int(screen_pos.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
-	int z_slice = clamp(int(floor(log2(max(view_depth, 1e-4)) * ClusterZLogScale + ClusterZLogBias)), 0, ClusterZSlices - 1);
-	int cluster_idx = (z_slice * ClusterGridXY.y + tile_y) * ClusterGridXY.x + tile_x;
-	ClusterHeader header = headers[cluster_idx];
-	uint cluster_count = min(header.count, NumLights);
 	vec3 dynamic_light = vec3(0.0);
 
 	for (uint i = 0u; i < cluster_count; ++i)
 	{
-		uint light_id = lightIndices[header.offset + i];
-		if (light_id >= NumLights)
+		uint light_id;
+		PackedLight pl;
+		if (!ClusterFetchLight(header, i, light_id, pl))
 			continue;
 
-		PackedLight pl = packedLights[light_id];
 		vec3 light_vec = pl.posRadius.xyz - world_pos;
 		float dist = length(light_vec);
 		float radius = pl.posRadius.w;
@@ -282,6 +236,7 @@ void main()
 	vec3 N_lighting = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 	vec3 world_pos = in_pos + AliasEyePos;
 	vec3 clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
+	vec3 L_dyn = clustered_dyn;
 	lit_color.rgb += clustered_dyn;
 
 	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
