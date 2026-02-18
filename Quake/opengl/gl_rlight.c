@@ -109,6 +109,7 @@ static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t c
 	dl->style = style;
 	dl->flicker_seed = (float) rand ();
 	dl->kind = DL_PERSISTENT;
+	dl->flags = DLIGHTF_DEFAULT;
 	dl->active = true;
 }
 
@@ -975,13 +976,10 @@ void GLLight_DeleteResources (void)
 
 static void R_PushDlightArray (dlight_t *const *lights, int count)
 {
-	int	j;
-
-	for (int i = 0; i < count; i++)
+		for (int i = 0; i < count; i++)
 	{
 		dlight_t *l = lights[i];
 		gpulight_t *out;
-		qboolean cull = false;
 		float radius;
 
 		if (l->spawn > cl.time)
@@ -1000,18 +998,6 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		radius *= q_max (0.f, r_dlight_radius_scale.value);
 		radius = q_max (radius, 0.f);
 		l->radius = radius;
-
-		for (j = 0; j < 4; j++)
-		{
-			mplane_t *p = &frustum[j];
-			if (DotProduct (p->normal, l->origin) - p->dist + radius < 0.f)
-			{
-				cull = true;
-				break;
-			}
-		}
-		if (cull)
-			continue;
 
 		out = &r_lightbuffer.lights[r_framedata.numlights++];
 		r_dlight_sources[r_framedata.numlights - 1] = l;

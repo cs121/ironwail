@@ -368,6 +368,7 @@ dlight_t *CL_AllocDlight (int key)
 	dl->flicker_seed = (float) rand ();
 	dl->active = true;
 	dl->kind = DL_TRANSIENT;
+	dl->flags = DLIGHTF_DEFAULT;
 	return dl;
 }
 

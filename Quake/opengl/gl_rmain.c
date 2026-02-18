@@ -281,9 +281,14 @@ static void R_LogWorldDlightState (const char *marker)
 	GLint blend_src_rgb = 0, blend_dst_rgb = 0;
 
 	if (r_state_debug.value <= 0.f)
+	{
+		if (q_strcasecmp (marker, "WORLD_DLIGHT_BEGIN") || r_dlight_debug_visualize.value < 2.f)
+			return;
+	}
+	else if (!GL_StateDebugMatchesFilter (marker))
+	{
 		return;
-	if (!GL_StateDebugMatchesFilter (marker))
-		return;
+	}
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_DRAW_BUFFER0, &draw_buf[0]);
@@ -323,6 +328,43 @@ static void R_LogWorldDlightState (const char *marker)
 		blend ? 1 : 0, blend_src_rgb, blend_dst_rgb,
 		program, GL_GetProgramDebugName ((GLuint)program),
 		r_framedata.numlights);
+
+	if (!q_strcasecmp (marker, "WORLD_DLIGHT_BEGIN"))
+	{
+		dlight_filter_debug_t filter_stats;
+		dlight_debug_entry_t entries[4];
+		DLightPool_GetFilterDebug (&filter_stats, entries);
+		Con_Printf ("STATEDBG dlight_filter total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
+			filter_stats.total_active,
+			filter_stats.pass_lifetime_radius,
+			filter_stats.pass_world_flag,
+			filter_stats.pass_pvs,
+			filter_stats.pass_frustum,
+			filter_stats.pass_budget,
+			filter_stats.rejected_lifetime_radius,
+			filter_stats.rejected_world_flag,
+			filter_stats.rejected_pvs,
+			filter_stats.rejected_frustum,
+			filter_stats.rejected_budget);
+		for (int i = 0; i < 4; i++)
+		{
+			const dlight_debug_entry_t *entry = &entries[i];
+			if (!entry->captured)
+				continue;
+			Con_Printf ("STATEDBG dlight[%d] id=%d org=(%.1f %.1f %.1f) radius=%.1f base=%.1f color=(%.2f %.2f %.2f) die=%.3f flags=0x%X bbox=(%.1f %.1f %.1f)-(%.1f %.1f %.1f) leaf=%d has_leaf=%d in_pvs=%d in_frustum=%d reason=%s\n",
+				i,
+				entry->id,
+				entry->origin[0], entry->origin[1], entry->origin[2],
+				entry->radius, entry->baseradius,
+				entry->color[0], entry->color[1], entry->color[2],
+				entry->die, entry->flags,
+				entry->mins[0], entry->mins[1], entry->mins[2],
+				entry->maxs[0], entry->maxs[1], entry->maxs[2],
+				entry->leaf_index, entry->has_leaf ? 1 : 0,
+				entry->in_pvs ? 1 : 0, entry->in_frustum ? 1 : 0,
+				DLightPool_RejectReasonName (entry->reason));
+		}
+	}
 }
 
 void R_ResetViewportAndScissorFullscreen (const char *label)
@@ -5259,6 +5301,7 @@ static void R_DrawDLightPass (void)
 		R_SetDlightConfig (glprogs.world_dlight[1], scale);
 	}
 
+	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
         R_DrawBrushModels_DLights (ents, count);
 
         r_framedata.dlight_params[2] = 0.f;
