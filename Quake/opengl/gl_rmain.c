@@ -544,7 +544,12 @@ cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCH
 cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
 cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
+cvar_t  r_clustered_profile_dumpinterval = { "r_clustered_profile_dumpinterval", "60", CVAR_NONE };
 cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
+cvar_t  r_clustered_buildlists = { "r_clustered_buildlists", "1", CVAR_NONE };
+cvar_t  r_clustered_clearlists = { "r_clustered_clearlists", "1", CVAR_NONE };
+cvar_t  r_clustered_barriers = { "r_clustered_barriers", "1", CVAR_NONE };
+cvar_t  r_clustered_shadows = { "r_clustered_shadows", "1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
@@ -4078,7 +4083,7 @@ void R_SetupView (void)
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_clustered_shadows.value > 0.f) ? 1.f : 0.f;
         r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;

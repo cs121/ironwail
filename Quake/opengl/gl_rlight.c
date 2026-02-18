@@ -40,7 +40,11 @@ extern cvar_t r_clustered_maxindices;
 extern cvar_t r_clustered_debug;
 extern cvar_t r_clustered_log;
 extern cvar_t r_clustered_profile;
+extern cvar_t r_clustered_profile_dumpinterval;
 extern cvar_t r_clustered_validate;
+extern cvar_t r_clustered_buildlists;
+extern cvar_t r_clustered_clearlists;
+extern cvar_t r_clustered_barriers;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
@@ -582,22 +586,31 @@ static int r_clustered_debug_light_cluster_hits[DLIGHT_GPU_MAX];
 static int r_clustered_debug_cluster_count;
 static int r_clustered_debug_index_count;
 
-#define CLUSTER_PERF_RING 8
+#define CLUSTER_PERF_RING 16
 
 typedef enum {
-	CLPERF_PUSH = 0,
-	CLPERF_BUILD,
-	CLPERF_WORLD,
-	CLPERF_DEBUG,
-	CLPERF_POST,
-	CLPERF_COUNT
-} cluster_perf_block_t;
+	CLCPU_PUSH_TOTAL = 0,
+	CLCPU_DLIGHT_FILTER,
+	CLCPU_LIGHT_UPLOAD,
+	CLCPU_CLUSTER_BUILD_CPU,
+	CLCPU_CLUSTER_BIND_BARRIER,
+	CLCPU_WORLD,
+	CLCPU_COUNT
+} cluster_cpu_block_t;
+
+typedef enum {
+	CLGPU_CLUSTER_CLEAR = 0,
+	CLGPU_CLUSTER_BUILD,
+	CLGPU_WORLD,
+	CLGPU_SHADOW_DLIGHT,
+	CLGPU_COUNT
+} cluster_gpu_block_t;
 
 typedef struct cluster_perf_sample_s {
-	double cpu_ms[CLPERF_COUNT];
-	GLuint gpu_queries[CLPERF_COUNT][2];
-	qboolean gpu_open[CLPERF_COUNT];
-	qboolean gpu_issued[CLPERF_COUNT];
+	double cpu_ms[CLCPU_COUNT];
+	GLuint gpu_queries[CLGPU_COUNT];
+	qboolean gpu_open[CLGPU_COUNT];
+	qboolean gpu_issued[CLGPU_COUNT];
 	qboolean valid;
 	int frame_index;
 } cluster_perf_sample_t;
@@ -607,7 +620,12 @@ static struct {
 	qboolean gpu_supported;
 	int frame_counter;
 	int current_slot;
-	double cpu_begin[CLPERF_COUNT];
+	double cpu_begin[CLCPU_COUNT];
+	double gpu_sum_ms[CLGPU_COUNT];
+	double gpu_max_ms[CLGPU_COUNT];
+	double cpu_sum_ms[CLCPU_COUNT];
+	double cpu_max_ms[CLCPU_COUNT];
+	int agg_samples;
 	cluster_perf_sample_t slots[CLUSTER_PERF_RING];
 } r_cluster_perf;
 
@@ -622,8 +640,8 @@ static void R_ClusterPerf_Init (void)
 	if (!r_cluster_perf.gpu_supported)
 		return;
 	for (s = 0; s < CLUSTER_PERF_RING; ++s)
-		for (b = 0; b < CLPERF_COUNT; ++b)
-			GL_GenQueriesFunc (2, r_cluster_perf.slots[s].gpu_queries[b]);
+		for (b = 0; b < CLGPU_COUNT; ++b)
+			GL_GenQueriesFunc (1, &r_cluster_perf.slots[s].gpu_queries[b]);
 }
 
 static void R_ClusterPerf_Destroy (void)
@@ -634,13 +652,13 @@ static void R_ClusterPerf_Destroy (void)
 	if (r_cluster_perf.gpu_supported && GL_DeleteQueriesFunc)
 	{
 		for (s = 0; s < CLUSTER_PERF_RING; ++s)
-			for (b = 0; b < CLPERF_COUNT; ++b)
-				GL_DeleteQueriesFunc (2, r_cluster_perf.slots[s].gpu_queries[b]);
+			for (b = 0; b < CLGPU_COUNT; ++b)
+				GL_DeleteQueriesFunc (1, &r_cluster_perf.slots[s].gpu_queries[b]);
 	}
 	memset (&r_cluster_perf, 0, sizeof (r_cluster_perf));
 }
 
-static void R_ClusterPerf_BeginBlock (cluster_perf_block_t block)
+static void R_ClusterPerf_BeginCPU (cluster_cpu_block_t block)
 {
 	cluster_perf_sample_t *slot;
 	if (r_clustered_profile.value <= 0.f)
@@ -648,26 +666,83 @@ static void R_ClusterPerf_BeginBlock (cluster_perf_block_t block)
 	R_ClusterPerf_Init ();
 	slot = &r_cluster_perf.slots[r_cluster_perf.current_slot];
 	r_cluster_perf.cpu_begin[block] = Sys_DoubleTime ();
-	if (r_cluster_perf.gpu_supported)
-	{
-		GL_BeginQueryFunc (GL_TIME_ELAPSED, slot->gpu_queries[block][0]);
-		slot->gpu_open[block] = true;
-	}
 }
 
-static void R_ClusterPerf_EndBlock (cluster_perf_block_t block)
+static void R_ClusterPerf_EndCPU (cluster_cpu_block_t block)
 {
 	cluster_perf_sample_t *slot;
 	if (r_clustered_profile.value <= 0.f)
 		return;
 	slot = &r_cluster_perf.slots[r_cluster_perf.current_slot];
 	slot->cpu_ms[block] += (Sys_DoubleTime () - r_cluster_perf.cpu_begin[block]) * 1000.0;
-	if (r_cluster_perf.gpu_supported && slot->gpu_open[block])
+	if (slot->cpu_ms[block] > r_cluster_perf.cpu_max_ms[block])
+		r_cluster_perf.cpu_max_ms[block] = slot->cpu_ms[block];
+}
+
+static void R_ClusterPerf_BeginGPU (cluster_gpu_block_t block)
+{
+	cluster_perf_sample_t *slot;
+	if (r_clustered_profile.value <= 0.f)
+		return;
+	R_ClusterPerf_Init ();
+	if (!r_cluster_perf.gpu_supported)
+		return;
+	slot = &r_cluster_perf.slots[r_cluster_perf.current_slot];
+	GL_BeginQueryFunc (GL_TIME_ELAPSED, slot->gpu_queries[block]);
+	slot->gpu_open[block] = true;
+}
+
+static void R_ClusterPerf_EndGPU (cluster_gpu_block_t block)
+{
+	cluster_perf_sample_t *slot;
+	if (r_clustered_profile.value <= 0.f)
+		return;
+	if (!r_cluster_perf.gpu_supported)
+		return;
+	slot = &r_cluster_perf.slots[r_cluster_perf.current_slot];
+	if (slot->gpu_open[block])
 	{
 		GL_EndQueryFunc (GL_TIME_ELAPSED);
 		slot->gpu_open[block] = false;
 		slot->gpu_issued[block] = true;
 	}
+}
+
+static void R_ClusterPerf_DumpIfNeeded (void)
+{
+	int i;
+	int interval;
+	if (r_clustered_profile.value <= 0.f)
+		return;
+	interval = q_max (1, (int)r_clustered_profile_dumpinterval.value);
+	if (r_cluster_perf.agg_samples <= 0 || (r_cluster_perf.frame_counter % interval) != 0)
+		return;
+	Con_Printf ("CLPROFILE avg/max over %d frames | CPU(ms): push %.3f/%.3f filter %.3f/%.3f upload %.3f/%.3f build %.3f/%.3f bind+barrier %.3f/%.3f world %.3f/%.3f\n",
+		r_cluster_perf.agg_samples,
+		r_cluster_perf.cpu_sum_ms[CLCPU_PUSH_TOTAL] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_PUSH_TOTAL],
+		r_cluster_perf.cpu_sum_ms[CLCPU_DLIGHT_FILTER] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_DLIGHT_FILTER],
+		r_cluster_perf.cpu_sum_ms[CLCPU_LIGHT_UPLOAD] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_LIGHT_UPLOAD],
+		r_cluster_perf.cpu_sum_ms[CLCPU_CLUSTER_BUILD_CPU] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_CLUSTER_BUILD_CPU],
+		r_cluster_perf.cpu_sum_ms[CLCPU_CLUSTER_BIND_BARRIER] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_CLUSTER_BIND_BARRIER],
+		r_cluster_perf.cpu_sum_ms[CLCPU_WORLD] / r_cluster_perf.agg_samples, r_cluster_perf.cpu_max_ms[CLCPU_WORLD]);
+	Con_Printf ("CLPROFILE avg/max over %d frames | GPU(ms): clear %.3f/%.3f build %.3f/%.3f world %.3f/%.3f shadow %.3f/%.3f\n",
+		r_cluster_perf.agg_samples,
+		r_cluster_perf.gpu_sum_ms[CLGPU_CLUSTER_CLEAR] / r_cluster_perf.agg_samples, r_cluster_perf.gpu_max_ms[CLGPU_CLUSTER_CLEAR],
+		r_cluster_perf.gpu_sum_ms[CLGPU_CLUSTER_BUILD] / r_cluster_perf.agg_samples, r_cluster_perf.gpu_max_ms[CLGPU_CLUSTER_BUILD],
+		r_cluster_perf.gpu_sum_ms[CLGPU_WORLD] / r_cluster_perf.agg_samples, r_cluster_perf.gpu_max_ms[CLGPU_WORLD],
+		r_cluster_perf.gpu_sum_ms[CLGPU_SHADOW_DLIGHT] / r_cluster_perf.agg_samples, r_cluster_perf.gpu_max_ms[CLGPU_SHADOW_DLIGHT]);
+	for (i = 0; i < CLCPU_COUNT; ++i)
+		r_cluster_perf.cpu_sum_ms[i] = r_cluster_perf.cpu_max_ms[i] = 0.0;
+	for (i = 0; i < CLGPU_COUNT; ++i)
+		r_cluster_perf.gpu_sum_ms[i] = r_cluster_perf.gpu_max_ms[i] = 0.0;
+	r_cluster_perf.agg_samples = 0;
+}
+
+static void R_ClusterPerf_Reason (const char *reason)
+{
+	if (r_clustered_profile.value <= 0.f)
+		return;
+	Con_Printf ("CLPROFILE reason frame=%d numlights=%u %s\n", r_framecount, r_framedata.numlights, reason);
 }
 
 void R_ClusterPerf_BeginFrame (void)
@@ -682,7 +757,7 @@ void R_ClusterPerf_BeginFrame (void)
 	memset (slot->cpu_ms, 0, sizeof (slot->cpu_ms));
 	memset (slot->gpu_open, 0, sizeof (slot->gpu_open));
 	memset (slot->gpu_issued, 0, sizeof (slot->gpu_issued));
-	for (b = 0; b < CLPERF_COUNT; ++b)
+	for (b = 0; b < CLGPU_COUNT; ++b)
 	{
 		slot->gpu_open[b] = false;
 		slot->gpu_issued[b] = false;
@@ -705,16 +780,16 @@ void R_ClusterPerf_EndFrame (void)
 	if (slot->valid)
 	{
 		int b;
-		double gpu_ms[CLPERF_COUNT] = {0};
+		double gpu_ms[CLGPU_COUNT] = {0};
 		qboolean gpu_ready = r_cluster_perf.gpu_supported;
-		for (b = 0; b < CLPERF_COUNT; ++b)
+		for (b = 0; b < CLGPU_COUNT; ++b)
 		{
 			if (!slot->gpu_issued[b])
 				continue;
 			if (r_cluster_perf.gpu_supported)
 			{
 				GLuint available = 0;
-				GL_GetQueryObjectuivFunc (slot->gpu_queries[b][0], GL_QUERY_RESULT_AVAILABLE, &available);
+				GL_GetQueryObjectuivFunc (slot->gpu_queries[b], GL_QUERY_RESULT_AVAILABLE, &available);
 				if (!available)
 				{
 					gpu_ready = false;
@@ -724,41 +799,69 @@ void R_ClusterPerf_EndFrame (void)
 		}
 		if (gpu_ready)
 		{
-			for (b = 0; b < CLPERF_COUNT; ++b)
+			for (b = 0; b < CLGPU_COUNT; ++b)
 			{
 				if (!slot->gpu_issued[b])
 					continue;
 				if (r_cluster_perf.gpu_supported)
 				{
 					GLuint64 ns = 0;
-					GL_GetQueryObjectui64vFunc (slot->gpu_queries[b][0], GL_QUERY_RESULT, &ns);
+					GL_GetQueryObjectui64vFunc (slot->gpu_queries[b], GL_QUERY_RESULT, &ns);
 					gpu_ms[b] = (double)ns * (1.0 / 1000000.0);
 				}
 			}
-			Con_Printf (
-				"CLUSTERPERF frame=%d cpu_ms: push=%.3f build=%.3f world=%.3f debug=%.3f post=%.3f | gpu_ms: push=%.3f build=%.3f world=%.3f debug=%.3f post=%.3f\n",
-				slot->frame_index,
-				slot->cpu_ms[CLPERF_PUSH], slot->cpu_ms[CLPERF_BUILD], slot->cpu_ms[CLPERF_WORLD], slot->cpu_ms[CLPERF_DEBUG], slot->cpu_ms[CLPERF_POST],
-				gpu_ms[CLPERF_PUSH], gpu_ms[CLPERF_BUILD], gpu_ms[CLPERF_WORLD], gpu_ms[CLPERF_DEBUG], gpu_ms[CLPERF_POST]);
+			for (b = 0; b < CLCPU_COUNT; ++b)
+			{
+				r_cluster_perf.cpu_sum_ms[b] += slot->cpu_ms[b];
+				if (slot->cpu_ms[b] > r_cluster_perf.cpu_max_ms[b])
+					r_cluster_perf.cpu_max_ms[b] = slot->cpu_ms[b];
+			}
+			for (b = 0; b < CLGPU_COUNT; ++b)
+			{
+				r_cluster_perf.gpu_sum_ms[b] += gpu_ms[b];
+				if (gpu_ms[b] > r_cluster_perf.gpu_max_ms[b])
+					r_cluster_perf.gpu_max_ms[b] = gpu_ms[b];
+			}
+			r_cluster_perf.agg_samples++;
+			R_ClusterPerf_DumpIfNeeded ();
 			slot->valid = false;
 		}
 	}
 }
 
-void R_ClusterPerf_BeginPush (void) { R_ClusterPerf_BeginBlock (CLPERF_PUSH); }
-void R_ClusterPerf_EndPush (void) { R_ClusterPerf_EndBlock (CLPERF_PUSH); }
-void R_ClusterPerf_BeginBuild (void) { R_ClusterPerf_BeginBlock (CLPERF_BUILD); }
-void R_ClusterPerf_EndBuild (void) { R_ClusterPerf_EndBlock (CLPERF_BUILD); }
-void R_ClusterPerf_BeginWorld (void) { R_ClusterPerf_BeginBlock (CLPERF_WORLD); }
-void R_ClusterPerf_EndWorld (void) { R_ClusterPerf_EndBlock (CLPERF_WORLD); }
-void R_ClusterPerf_BeginDebug (void) { R_ClusterPerf_BeginBlock (CLPERF_DEBUG); }
-void R_ClusterPerf_EndDebug (void) { R_ClusterPerf_EndBlock (CLPERF_DEBUG); }
-void R_ClusterPerf_BeginPost (void) { R_ClusterPerf_BeginBlock (CLPERF_POST); }
-void R_ClusterPerf_EndPost (void) { R_ClusterPerf_EndBlock (CLPERF_POST); }
+void R_ClusterPerf_BeginPush (void) { R_ClusterPerf_BeginCPU (CLCPU_PUSH_TOTAL); }
+void R_ClusterPerf_EndPush (void) { R_ClusterPerf_EndCPU (CLCPU_PUSH_TOTAL); }
+void R_ClusterPerf_BeginBuild (void) { R_ClusterPerf_BeginCPU (CLCPU_CLUSTER_BUILD_CPU); }
+void R_ClusterPerf_EndBuild (void) { R_ClusterPerf_EndCPU (CLCPU_CLUSTER_BUILD_CPU); }
+void R_ClusterPerf_BeginWorld (void) { R_ClusterPerf_BeginCPU (CLCPU_WORLD); R_ClusterPerf_BeginGPU (CLGPU_WORLD); }
+void R_ClusterPerf_EndWorld (void) { R_ClusterPerf_EndGPU (CLGPU_WORLD); R_ClusterPerf_EndCPU (CLCPU_WORLD); }
+void R_ClusterPerf_BeginDebug (void) { }
+void R_ClusterPerf_EndDebug (void) { }
+void R_ClusterPerf_BeginPost (void) { }
+void R_ClusterPerf_EndPost (void) { }
+void R_ClusterPerf_BeginLightFilter (void) { R_ClusterPerf_BeginCPU (CLCPU_DLIGHT_FILTER); }
+void R_ClusterPerf_EndLightFilter (void) { R_ClusterPerf_EndCPU (CLCPU_DLIGHT_FILTER); }
+void R_ClusterPerf_BeginLightUpload (void) { R_ClusterPerf_BeginCPU (CLCPU_LIGHT_UPLOAD); }
+void R_ClusterPerf_EndLightUpload (void) { R_ClusterPerf_EndCPU (CLCPU_LIGHT_UPLOAD); }
+void R_ClusterPerf_BeginClusterBindBarrier (void) { R_ClusterPerf_BeginCPU (CLCPU_CLUSTER_BIND_BARRIER); }
+void R_ClusterPerf_EndClusterBindBarrier (void) { R_ClusterPerf_EndCPU (CLCPU_CLUSTER_BIND_BARRIER); }
+void R_ClusterPerf_BeginClusterClearGPU (void) { R_ClusterPerf_BeginGPU (CLGPU_CLUSTER_CLEAR); }
+void R_ClusterPerf_EndClusterClearGPU (void) { R_ClusterPerf_EndGPU (CLGPU_CLUSTER_CLEAR); }
+void R_ClusterPerf_BeginClusterBuildGPU (void) { R_ClusterPerf_BeginGPU (CLGPU_CLUSTER_BUILD); }
+void R_ClusterPerf_EndClusterBuildGPU (void) { R_ClusterPerf_EndGPU (CLGPU_CLUSTER_BUILD); }
+void R_ClusterPerf_BeginShadowDlightGPU (void) { R_ClusterPerf_BeginGPU (CLGPU_SHADOW_DLIGHT); }
+void R_ClusterPerf_EndShadowDlightGPU (void) { R_ClusterPerf_EndGPU (CLGPU_SHADOW_DLIGHT); }
+void R_ClusterPerf_MarkReason (const char *reason) { R_ClusterPerf_Reason (reason); }
 
 static qboolean R_ClusteredShouldLog (void)
 {
 	return r_clustered_log.value > 0.f || r_clustered_debug.value > 0.f;
+}
+
+static void R_ClusteredBarrier (GLbitfield bits)
+{
+	if (r_clustered_barriers.value > 0.f)
+		GL_MemoryBarrierFunc (bits);
 }
 
 static void R_ClusteredLabelBuffer (GLuint buffer, const char *name)
@@ -963,9 +1066,23 @@ void R_Clustered_BuildLists (void)
 	clustered_params_t params;
 	clustered_light_t lights_local[DLIGHT_GPU_MAX];
 	GLuint counters[2] = {0u, 0u};
+	const qboolean clear_lists = (r_clustered_clearlists.value > 0.f);
+	const GLuint barrier_bits = GL_SHADER_STORAGE_BARRIER_BIT;
 
 	if (!R_ClusteredEnabled () || !glprogs.cluster_lights || !glprogs.cluster_prefix)
 		return;
+
+	if (r_framedata.numlights == 0)
+	{
+		R_ClusterPerf_MarkReason ("buildlists called with numlights=0");
+		return;
+	}
+
+	if (r_clustered_buildlists.value <= 0.f)
+	{
+		R_ClusterPerf_MarkReason ("buildlists skipped by r_clustered_buildlists=0");
+		return;
+	}
 
 	tile_size = (int)r_clustered_tilesize.value;
 	if (tile_size <= 8)
@@ -1030,10 +1147,16 @@ void R_Clustered_BuildLists (void)
 	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_clustered.max_lights), NULL, GL_STREAM_DRAW);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
 		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_framedata.numlights), lights_local);
+	if (!clear_lists)
+	{
+		R_ClusterPerf_MarkReason ("r_clustered_clearlists=0 (cluster clear/prefix clear disabled)");
+	}
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.headers_ssbo);
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (*r_clustered_headers_cpu) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
+	if (clear_lists)
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (*r_clustered_headers_cpu) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.temp_counts_ssbo);
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
+	if (clear_lists)
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr)(sizeof (GLuint) * (size_t)r_clustered.cluster_count), NULL, GL_STREAM_DRAW);
 	counters[0] = (GLuint)r_clustered.max_indices;
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.counters_ssbo);
 	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (counters), NULL, GL_STREAM_DRAW);
@@ -1074,10 +1197,15 @@ void R_Clustered_BuildLists (void)
 		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
 	}
-	GL_UseProgram (glprogs.cluster_prefix);
-	GL_DispatchComputeFunc (1, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
-	GL_UseProgram (glprogs.cluster_lights);
+	if (clear_lists)
+	{
+		R_ClusterPerf_BeginClusterClearGPU ();
+		GL_UseProgram (glprogs.cluster_prefix);
+		GL_DispatchComputeFunc (1, 1, 1);
+		R_ClusteredBarrier (barrier_bits);
+		GL_UseProgram (glprogs.cluster_lights);
+		R_ClusterPerf_EndClusterClearGPU ();
+	}
 
 	memset (&inputs, 0, sizeof (inputs));
 	inputs.pass_mode = 0;
@@ -1089,8 +1217,9 @@ void R_Clustered_BuildLists (void)
 		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
 	}
+	R_ClusterPerf_BeginClusterBuildGPU ();
 	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_ClusteredBarrier (barrier_bits);
 
 	inputs.pass_mode = 1;
 	inputs._pad0 = r_clustered.cluster_count;
@@ -1102,7 +1231,7 @@ void R_Clustered_BuildLists (void)
 	}
 	GL_UseProgram (glprogs.cluster_prefix);
 	GL_DispatchComputeFunc (1, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_ClusteredBarrier (barrier_bits);
 	GL_UseProgram (glprogs.cluster_lights);
 
 	inputs.pass_mode = 1;
@@ -1114,7 +1243,8 @@ void R_Clustered_BuildLists (void)
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
 	}
 	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+	R_ClusteredBarrier (barrier_bits);
+	R_ClusterPerf_EndClusterBuildGPU ();
 
 	r_clustered_debug_cluster_count = r_clustered.cluster_count;
 	r_clustered_debug_index_count = -1;
@@ -1193,6 +1323,12 @@ void R_Clustered_BindForShading (void)
 {
 	if (!R_ClusteredEnabled ())
 		return;
+	if (r_framedata.numlights == 0)
+	{
+		R_ClusterPerf_MarkReason ("bind for shading called with numlights=0");
+		return;
+	}
+	R_ClusterPerf_BeginClusterBindBarrier ();
 
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 3, r_clustered.lights_ssbo, 0,
 		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_clustered.max_lights));
@@ -1206,6 +1342,7 @@ void R_Clustered_BindForShading (void)
 	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 4, r_clustered.headers_ssbo, "ClusterHeaderBuffer");
 	R_ClusteredValidateBinding (GL_SHADER_STORAGE_BUFFER_BINDING, 5, r_clustered.indices_ssbo, "ClusterIndexBuffer");
 	R_ClusteredValidateBinding (GL_UNIFORM_BUFFER_BINDING, 2, r_clustered.params_ubo, "ClusterParams");
+	R_ClusterPerf_EndClusterBindBarrier ();
 }
 
 
@@ -1334,7 +1471,9 @@ R_PushDlights
 void R_PushDlights (void)
 {
 	qboolean clustered_enabled;
+	qboolean use_cluster_lists;
 	dlight_t *submit[DLIGHT_GPU_MAX];
+	const unsigned int small_light_threshold = 8;
 
 	r_framedata.numlights = 0;
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
@@ -1346,16 +1485,31 @@ void R_PushDlights (void)
 		return;
 	}
 
+	R_ClusterPerf_BeginLightFilter ();
 	const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
 	DLightPool_NewFrame (cl.time, r_framecount);
 	const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
+	R_ClusterPerf_EndLightFilter ();
 	if (num_submit > 0)
 		R_PushDlightArray (submit, num_submit);
 	DLightPool_DebugPrint ();
 
+	R_ClusterPerf_BeginLightUpload ();
 	R_UploadFrameData ();
+	R_ClusterPerf_EndLightUpload ();
+
+	r_framedata.dlight_params[2] = 0.f;
 
 	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
+	use_cluster_lists = (clustered_enabled && r_clustered_buildlists.value > 0.f);
+	if (clustered_enabled && (r_framedata.numlights <= small_light_threshold || r_clustered_buildlists.value <= 0.f))
+	{
+		r_framedata.dlight_params[2] = 1.f;
+		use_cluster_lists = false;
+		if (r_framedata.numlights <= small_light_threshold)
+			R_ClusterPerf_MarkReason ("small-light fast path active (direct lightbuffer loop)");
+	}
+
 	if (clustered_enabled)
 	{
 		if (!r_clustered.available)
@@ -1364,12 +1518,25 @@ void R_PushDlights (void)
 			R_ClusterPerf_EndPush ();
 			return;
 		}
-		GL_BeginGroup ("Light clustering");
-		R_ClusterPerf_BeginBuild ();
-		R_Clustered_BuildLists ();
-		R_ClusterPerf_EndBuild ();
+		if (use_cluster_lists)
+		{
+			GL_BeginGroup ("Light clustering");
+			R_ClusterPerf_BeginBuild ();
+			R_Clustered_BuildLists ();
+			R_ClusterPerf_EndBuild ();
+		}
+		else
+		{
+			R_ClusterPerf_MarkReason ("cluster build skipped");
+		}
 		R_Clustered_BindForShading ();
-		GL_EndGroup ();
+		if (use_cluster_lists)
+			GL_EndGroup ();
+	}
+	else
+	{
+		if (r_clustered_lighting.value > 0.f)
+			R_ClusterPerf_MarkReason ("cluster path skipped: numlights=0");
 	}
 	R_ClusterPerf_EndPush ();
 
