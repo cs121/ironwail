@@ -544,6 +544,8 @@ cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE 
 cvar_t  r_clustered_lighting = { "r_clustered_lighting", "1", CVAR_ARCHIVE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
+cvar_t  r_clustered_zslices_low = { "r_clustered_zslices_low", "16", CVAR_ARCHIVE };
+cvar_t  r_clustered_zslices_low_lights = { "r_clustered_zslices_low_lights", "8", CVAR_ARCHIVE };
 cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCHIVE };
 cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
@@ -4296,7 +4298,9 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 			cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite],
 			r_framedata.numlights);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
+	R_ClusterPerf_BeginAlias ();
 	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
+	R_ClusterPerf_EndAlias ();
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 

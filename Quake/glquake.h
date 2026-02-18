@@ -612,6 +612,8 @@ void R_ClusterPerf_BeginBuild (void);
 void R_ClusterPerf_EndBuild (void);
 void R_ClusterPerf_BeginWorld (void);
 void R_ClusterPerf_EndWorld (void);
+void R_ClusterPerf_BeginAlias (void);
+void R_ClusterPerf_EndAlias (void);
 void R_ClusterPerf_BeginDebug (void);
 void R_ClusterPerf_EndDebug (void);
 void R_ClusterPerf_BeginPost (void);
