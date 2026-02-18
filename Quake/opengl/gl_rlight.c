@@ -947,13 +947,7 @@ static void R_Clustered_Shutdown (void);
 
 static qboolean R_ClusteredEnabled (void)
 {
-	if (!r_clustered.available)
-		return false;
-	if (r_clustered_lighting.value <= 0.f)
-		return false;
-	if (r_framedata.numlights <= 0)
-		return false;
-	return true;
+	return r_clustered.available;
 }
 
 void R_Clustered_Init (void)
@@ -977,7 +971,7 @@ void R_Clustered_Init (void)
 
 	if (!r_clustered.available)
 	{
-		Con_Printf ("Clustered lighting init failed, falling back to legacy dynlights.\n");
+		Con_Printf ("Clustered lighting init failed; clustered shading disabled.\n");
 		R_Clustered_Shutdown ();
 		return;
 	}
@@ -1072,11 +1066,6 @@ void R_Clustered_BuildLists (void)
 	if (!R_ClusteredEnabled () || !glprogs.cluster_lights || !glprogs.cluster_prefix)
 		return;
 
-	if (r_framedata.numlights == 0)
-	{
-		R_ClusterPerf_MarkReason ("buildlists called with numlights=0");
-		return;
-	}
 
 	tile_size = (int)r_clustered_tilesize.value;
 	if (tile_size <= 8)
@@ -1138,8 +1127,11 @@ void R_Clustered_BuildLists (void)
 	params.debug_mode = (int)r_clustered_debug.value;
 
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
-	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
-		(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_framedata.numlights), lights_local);
+	if (r_framedata.numlights > 0)
+	{
+		GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
+			(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)r_framedata.numlights), lights_local);
+	}
 	if (r_clustered_clearlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
 	{
 		R_ClusterPerf_MarkReason ("r_clustered_clearlists=0 ignored (cluster clear/prefix clear always enabled)");
@@ -1192,7 +1184,7 @@ void R_Clustered_BuildLists (void)
 	R_ClusterPerf_EndClusterClearGPU ();
 
 	R_ClusterPerf_BeginClusterBuildGPU ();
-	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
+	GL_DispatchComputeFunc ((GLuint)q_max (1, (r_framedata.numlights + 63) / 64), 1, 1);
 	R_ClusteredBarrier (barrier_bits);
 
 	inputs.pass_mode = 1;
@@ -1216,7 +1208,7 @@ void R_Clustered_BuildLists (void)
 		GL_Upload (GL_UNIFORM_BUFFER, &inputs, sizeof (inputs), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof (inputs));
 	}
-	GL_DispatchComputeFunc ((GLuint)((r_framedata.numlights + 63) / 64), 1, 1);
+	GL_DispatchComputeFunc ((GLuint)q_max (1, (r_framedata.numlights + 63) / 64), 1, 1);
 	R_ClusteredBarrier (barrier_bits);
 	R_ClusterPerf_EndClusterBuildGPU ();
 
@@ -1297,11 +1289,6 @@ void R_Clustered_BindForShading (void)
 {
 	if (!R_ClusteredEnabled ())
 		return;
-	if (r_framedata.numlights == 0)
-	{
-		R_ClusterPerf_MarkReason ("bind for shading called with numlights=0");
-		return;
-	}
 	R_ClusterPerf_BeginClusterBindBarrier ();
 
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 3, r_clustered.lights_ssbo, 0,
@@ -1327,6 +1314,17 @@ void R_Clustered_RebindForProgram (GLuint program, const char *pass_name)
 
 	R_Clustered_BindForShading ();
 
+	if (R_ClusteredShouldLog ())
+	{
+		Con_Printf ("CLUSTERDBG bind pass=%s program=%u buffers=ok lights=%u grid=(%d %d %d) tile=%d\n",
+			pass_name ? pass_name : "<unknown>",
+			(unsigned)program,
+			r_framedata.numlights,
+			r_clustered.grid_x,
+			r_clustered.grid_y,
+			r_clustered.z_slices,
+			(int)r_clustered_tilesize.value);
+	}
 }
 
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits)
@@ -1451,54 +1449,46 @@ void R_PushDlights (void)
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 	R_ClusterPerf_BeginPush ();
 
-	if (r_dlight_enable.value <= 0.f || r_dynamic.value <= 0.f)
+	if (r_dlight_enable.value > 0.f && r_dynamic.value > 0.f)
 	{
-		R_ClusterPerf_EndPush ();
-		return;
+		R_ClusterPerf_BeginLightFilter ();
+		const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
+		DLightPool_NewFrame (cl.time, r_framecount);
+		const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
+		R_ClusterPerf_EndLightFilter ();
+		if (num_submit > 0)
+			R_PushDlightArray (submit, num_submit);
+		DLightPool_DebugPrint ();
 	}
 
-	R_ClusterPerf_BeginLightFilter ();
-	const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
-	DLightPool_NewFrame (cl.time, r_framecount);
-	const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
-	R_ClusterPerf_EndLightFilter ();
-	if (num_submit > 0)
-		R_PushDlightArray (submit, num_submit);
-	DLightPool_DebugPrint ();
+	if (r_clustered_lighting.value <= 0.f)
+		r_framedata.numlights = 0;
 
 	R_ClusterPerf_BeginLightUpload ();
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
 
-	clustered_enabled = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0);
-
-	if (clustered_enabled)
-	{
-		if (r_clustered_buildlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
-			R_ClusterPerf_MarkReason ("r_clustered_buildlists=0 ignored (cluster list build always enabled)");
-		if (!r_clustered.available)
-		{
-			Con_Printf ("CLUSTERDBG ERROR numlights=%u but clustered buffers unavailable\n", r_framedata.numlights);
-			R_ClusterPerf_EndPush ();
-			return;
-		}
-		GL_BeginGroup ("Light clustering");
-		R_ClusterPerf_BeginBuild ();
-		R_Clustered_BuildLists ();
-		R_ClusterPerf_EndBuild ();
-		R_Clustered_BindForShading ();
-		GL_EndGroup ();
-	}
-	else
+	clustered_enabled = (r_clustered.available != 0);
+	if (!clustered_enabled)
 	{
 		if (r_clustered_lighting.value > 0.f)
-			R_ClusterPerf_MarkReason ("cluster path skipped: numlights=0");
+			R_ClusterPerf_MarkReason ("clustered resources unavailable");
+		R_ClusterPerf_EndPush ();
+		return;
 	}
+
+	if (r_clustered_buildlists.value <= 0.f && developer.value > 0.f && R_ClusteredShouldLog ())
+		R_ClusterPerf_MarkReason ("r_clustered_buildlists=0 ignored (cluster list build always enabled)");
+
+	GL_BeginGroup ("Light clustering");
+	R_ClusterPerf_BeginBuild ();
+	R_Clustered_BuildLists ();
+	R_ClusterPerf_EndBuild ();
+	R_Clustered_BindForShading ();
+	GL_EndGroup ();
 	R_ClusterPerf_EndPush ();
 
 }
-
-
 
 /*
 =============================================================================
@@ -1542,42 +1532,6 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
         VectorScale (out_color, ao, out_color);
         if (out_ao)
                 *out_ao = ao;
-}
-
-/*
-==================
-R_AddDynamicLights_Lightgrid
-==================
-*/
-static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, int count, const vec3_t pos, vec3_t lightcolor)
-{
-	for (int i = 0; i < count; i++)
-	{
-		const dlight_t *l = lights[i];
-		vec3_t dist;
-		float add;
-
-
-		if (!CL_DlightIsActive (l))
-			continue;
-
-		VectorSubtract (pos, l->origin, dist);
-		add = l->radius - VectorLength (dist);
-
-		if (add <= l->minlight)
-			continue;
-
-		add -= l->minlight;
-		VectorMA (lightcolor, add, l->color, lightcolor);
-	}
-}
-
-void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
-{
-	int count = 0;
-	const dlight_t *const *active = DLightPool_GetActiveList (&count);
-	if (active && count > 0)
-		R_AddDynamicLights_LightgridArray (active, count, pos, lightcolor);
 }
 
 
@@ -2157,7 +2111,6 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
                 VectorScale (lg_color, 255.f, lg_color255);
 
                 VectorCopy (lg_color255, lightcolor);
-                R_AddDynamicLights_Lightgrid (p, lightcolor);
 
                 cache->surfidx = 0;
                 VectorCopy (p, cache->pos);

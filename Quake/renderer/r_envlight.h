@@ -4,7 +4,7 @@
 
 /*
  * Envlight/entity ambient probes are expressed in linear RGB intensity.
- * Callers must keep entity lighting data (ambientcolor/dlightcolor/lightcolor)
+ * Callers must keep entity lighting data (ambientcolor/lightcolor)
  * in linear space and rely on the renderer's global postprocess / framebuffer
  * sRGB path for the final transfer conversion.
  *

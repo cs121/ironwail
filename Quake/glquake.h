@@ -603,7 +603,6 @@ qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb);
 qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir);
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
-void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits);
 void R_ClusterPerf_BeginFrame (void);
 void R_ClusterPerf_EndFrame (void);

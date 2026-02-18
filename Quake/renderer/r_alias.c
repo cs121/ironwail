@@ -86,10 +86,10 @@ typedef struct aliasinstance_s {
 	float		prev_worldmatrix[12];
 	vec3_t		lightcolor;
 	float		alpha;
-	vec3_t		dlightcolor;
-	float		_pad0;
 	vec3_t		ambientcolor;
-	float		_pad1;
+	float		_pad0;
+	vec3_t		_pad1;
+	float		_pad2;
 	vec4_t		envmap_params;
 	int32_t		pose1;
 	int32_t		pose2;
@@ -177,7 +177,7 @@ static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
                 ambient_add[0], ambient_add[1], ambient_add[2]);
 }
 
-static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, vec3_t dlightcolor)
+static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
 {
         vec3_t          gridcolor;
 
@@ -421,26 +421,16 @@ void R_SetupAliasLighting (entity_t     *e)
 {
         float           add;
         unsigned int    i;
-        vec3_t          dlightcolor = {0.f, 0.f, 0.f};
         vec3_t          ambientcolor;
-        vec3_t          static_color;
         entity_lightinfo_t lightinfo;
         entity_lightinfo_t *lightinfo_ptr = r_debug_itemlight.value > 0.f ? &lightinfo : NULL;
 
-        R_EntityStaticLight (e, static_color, lightinfo_ptr);
-        VectorCopy (static_color, lightcolor);
-        VectorCopy (static_color, ambientcolor);
+        R_EntityStaticLight (e, ambientcolor, lightinfo_ptr);
 
         if (lightinfo_ptr && R_DebugItemLightEnabled (e))
                 R_LogItemLight (e, lightinfo_ptr);
 
-        if (lightinfo_ptr ? lightinfo_ptr->used_lightgrid : e->lightcache.lightgrid_has_sample)
-        {
-                R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
-                VectorSubtract (lightcolor, ambientcolor, dlightcolor);
-        }
-
-        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
+        R_ApplyLightgridLighting (e, ambientcolor);
 
         // viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)
@@ -483,37 +473,19 @@ void R_SetupAliasLighting (entity_t     *e)
 	//hack up the brightness when fullbrights but no overbrights (256)
 	if (!gl_overbright_models.value && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value)
 	{
-		lightcolor[0] = 256.0f;
-		lightcolor[1] = 256.0f;
-		lightcolor[2] = 256.0f;
-		VectorCopy (lightcolor, ambientcolor);
-		VectorClear (dlightcolor);
+		ambientcolor[0] = 256.0f;
+		ambientcolor[1] = 256.0f;
+		ambientcolor[2] = 256.0f;
 	}
 
+	for (i = 0; i < 3; i++)
 	{
-		vec3_t pre_total;
-		vec3_t linear_total;
-		VectorAdd (ambientcolor, dlightcolor, pre_total);
-		for (i = 0; i < 3; i++)
-		{
-			float L = pre_total[i] * (1.0f / 256.0f);
-			L = fminf(L, 1.0f);
-			linear_total[i] = L;
-		}
-
-		for (i = 0; i < 3; i++)
-		{
-			const float total = pre_total[i];
-			const float ambient_ratio = total > 0.0f ? ambientcolor[i] / total : 0.0f;
-			const float dlight_ratio = total > 0.0f ? dlightcolor[i] / total : 0.0f;
-			ambientcolor[i] = linear_total[i] * ambient_ratio;
-			dlightcolor[i] = linear_total[i] * dlight_ratio;
-			lightcolor[i] = linear_total[i];
-		}
+		float L = ambientcolor[i] * (1.0f / 256.0f);
+		ambientcolor[i] = fminf (L, 1.0f);
 	}
 
+	VectorCopy (ambientcolor, lightcolor);
 	VectorCopy (ambientcolor, e->lightcache.ambientcolor);
-	VectorCopy (dlightcolor, e->lightcache.dlightcolor);
 }
 
 /*
@@ -910,7 +882,6 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         {
                 lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
                 VectorCopy (lightcolor, e->lightcache.ambientcolor);
-                VectorClear (e->lightcache.dlightcolor);
                 e->lightcache.lightgrid_has_sample = false;
                 e->lightcache.lightgrid_ao = 0.f;
                 VectorClear (e->lightcache.lightgrid_color);
@@ -968,7 +939,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	e->motion_blur_prev_valid = true;
 
 	VectorCopy (lightcolor, instance->lightcolor);
-	VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
+	VectorClear (instance->_pad1);
 	VectorCopy (e->lightcache.ambientcolor, instance->ambientcolor);
 	instance->alpha = entalpha;
 	if (e == &cl.viewent)
@@ -1061,7 +1032,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	MatrixTranspose4x3 (model_matrix, instance->prev_worldmatrix);
 
 	VectorClear (instance->lightcolor);
-	VectorClear (instance->dlightcolor);
+	VectorClear (instance->_pad1);
 	VectorClear (instance->ambientcolor);
 	instance->alpha = entalpha;
 	instance->envmap_params[0] = 0.f;
