@@ -1,6 +1,7 @@
 #include "quakedef.h"
 #include "fs_async.h"
 #include "sys_jobs.h"
+#include "miniz.h"
 
 #define FS_ASYNC_MAX_REQUESTS 1024
 #define FS_ASYNC_COMPLETED_CAPACITY 1024
@@ -39,6 +40,8 @@ static cvar_t fs_async_debug = {"fs_async_debug", "0", CVAR_NONE};
 static uint64_t fs_async_enqueued;
 static uint64_t fs_async_completed_count;
 static uint64_t fs_async_completed_bytes;
+
+extern qfileofs_t COM_filelength (FILE *f);
 
 typedef struct
 {
