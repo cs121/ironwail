@@ -1113,6 +1113,7 @@ void S_LocalSound (const char *name)
 
 void S_ClearPrecache (void)
 {
+	S_AsyncClearPrecacheReads ();
 }
 
 void S_BeginPrecaching (void)

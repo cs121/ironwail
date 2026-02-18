@@ -22,6 +22,67 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_mem.c: sound caching
 
 #include "quakedef.h"
+#include "fs_async.h"
+
+#define S_ASYNC_PENDING_MAX MAX_SFX
+
+typedef struct
+{
+	char name[MAX_QPATH];
+	fs_async_handle_t handle;
+} s_async_pending_t;
+
+static s_async_pending_t s_async_pending[S_ASYNC_PENDING_MAX];
+
+static fs_async_handle_t S_AsyncTakePrecacheRead (const char *name)
+{
+	int i;
+	for (i = 0; i < S_ASYNC_PENDING_MAX; ++i)
+	{
+		fs_async_handle_t handle;
+
+		if (!s_async_pending[i].handle)
+			continue;
+		if (strcmp (s_async_pending[i].name, name) != 0)
+			continue;
+		handle = s_async_pending[i].handle;
+		s_async_pending[i].handle = 0;
+		s_async_pending[i].name[0] = '\0';
+		return handle;
+	}
+	return 0;
+}
+
+void S_AsyncRegisterPrecacheRead (const char *name, fs_async_handle_t handle)
+{
+	int i;
+	if (!name || !*name || !handle)
+		return;
+
+	for (i = 0; i < S_ASYNC_PENDING_MAX; ++i)
+	{
+		if (s_async_pending[i].handle)
+			continue;
+		q_strlcpy (s_async_pending[i].name, name, sizeof (s_async_pending[i].name));
+		s_async_pending[i].handle = handle;
+		return;
+	}
+
+	FS_Release (handle);
+}
+
+void S_AsyncClearPrecacheReads (void)
+{
+	int i;
+	for (i = 0; i < S_ASYNC_PENDING_MAX; ++i)
+	{
+		if (s_async_pending[i].handle)
+			FS_Release (s_async_pending[i].handle);
+		s_async_pending[i].handle = 0;
+		s_async_pending[i].name[0] = '\0';
+	}
+}
+
 
 /*
 ================
@@ -114,7 +175,28 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 //	Con_Printf ("loading %s\n",namebuffer);
 
-	data = COM_LoadMallocFile (namebuffer, NULL);
+	{
+		fs_async_handle_t async_handle = S_AsyncTakePrecacheRead (s->name);
+		if (async_handle)
+		{
+			fs_async_result_t async_result;
+			FS_Wait (async_handle, &async_result);
+			if (async_result.status == FS_ASYNC_STATUS_OK)
+			{
+				data = (byte *) async_result.data;
+				com_filesize = (qfileofs_t) async_result.size;
+			}
+			else
+			{
+				data = NULL;
+			}
+			FS_Release (async_handle);
+		}
+		else
+		{
+			data = COM_LoadMallocFile (namebuffer, NULL);
+		}
+	}
 
 	if (!data)
 	{
