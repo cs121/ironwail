@@ -1,0 +1,62 @@
+layout(local_size_x=64, local_size_y=1, local_size_z=1) in;
+
+struct ClusterHeader
+{
+	uint offset;
+	uint count;
+};
+
+layout(std430, binding=4) buffer ClusterHeaderBuffer
+{
+	ClusterHeader headers[];
+};
+
+layout(std430, binding=6) buffer ClusterCounterBuffer
+{
+	uint clusterAlloc;
+	uint overflowCount;
+};
+
+layout(std430, binding=7) buffer ClusterTempCountBuffer
+{
+	uint tempCounts[];
+};
+
+layout(std140, binding=1) uniform ClusterBuildParams
+{
+	ivec4 BuildInfo; // x=passMode (0=clear,1=prefix), y=numLights, z=clusterCount
+};
+
+void main()
+{
+	if (gl_GlobalInvocationID.x != 0u)
+		return;
+
+	uint clusterCount = uint(max(BuildInfo.z, 0));
+	if (BuildInfo.x == 0)
+	{
+		for (uint i = 0u; i < clusterCount; ++i)
+		{
+			headers[i].offset = 0u;
+			headers[i].count = 0u;
+			tempCounts[i] = 0u;
+		}
+		overflowCount = 0u;
+		return;
+	}
+
+	uint prefix = 0u;
+	for (uint i = 0u; i < clusterCount; ++i)
+	{
+		uint count = headers[i].count;
+		uint remaining = (prefix < clusterAlloc) ? (clusterAlloc - prefix) : 0u;
+		if (count > remaining)
+			count = remaining;
+		headers[i].count = count;
+		headers[i].offset = prefix;
+		tempCounts[i] = 0u;
+		prefix += count;
+	}
+
+	overflowCount = 0u;
+}

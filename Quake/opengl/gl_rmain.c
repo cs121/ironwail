@@ -542,7 +542,9 @@ cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
 cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCHIVE };
 cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
-cvar_t  r_clustered_log = { "r_clustered_log", "1", CVAR_NONE };
+cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
+cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
+cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
@@ -2891,6 +2893,7 @@ void GL_PostProcess (void)
 	}
 
 	GL_BeginGroup ("Postprocess");
+	R_ClusterPerf_BeginPost ();
 
 	R_PostFX_GetState (&postfx_state);
 
@@ -3203,6 +3206,7 @@ void GL_PostProcess (void)
 
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	R_StateDebugMark ("POST_AFTER_FINAL_COMPOSITE");
+	R_ClusterPerf_EndPost ();
 
 	GL_EndGroup ();
 }
@@ -5196,6 +5200,7 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
+	R_ClusterPerf_BeginFrame ();
 	R_StateDebugMark ("FRAME_START");
 	R_ResetViewportAndScissorFullscreen ("WORLD_RESET_BEFORE_SETUP");
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
@@ -5213,11 +5218,13 @@ void R_RenderScene (void)
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_StateDebugMark ("WEAPON_AFTER");
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
+	R_ClusterPerf_BeginWorld ();
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_StateDebugMark ("WORLD_LIGHTS_BEGIN");
 	R_LogWorldLightState ("WORLD_LIGHTS_BEGIN");
 	R_LogWorldLightState ("WORLD_LIGHTS_END");
 	R_StateDebugMark ("WORLD_LIGHTS_END");
+	R_ClusterPerf_EndWorld ();
 	R_DrawDecals (false);
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
@@ -5232,6 +5239,7 @@ void R_RenderScene (void)
 	R_ShowPointFile ();
 	R_ShowLightgridDebug ();
 	R_StateDebugMark ("WORLD_AFTER_GEOMETRY");
+	R_ClusterPerf_EndFrame ();
 }
 
 /*
@@ -5408,7 +5416,9 @@ void R_RenderView (void)
         R_RenderScene ();
         R_WarpScaleView ();
         R_Atmosphere_Render (true); // Leave fog disabled for 2D overlays
+	R_ClusterPerf_BeginDebug ();
 	R_Shadow_DrawDebug ();
+	R_ClusterPerf_EndDebug ();
 
 	r_frame_rendered_this_update = true;
 
