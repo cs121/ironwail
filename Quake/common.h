@@ -399,6 +399,9 @@ typedef struct searchpath_s
 extern searchpath_t *com_searchpaths;
 extern searchpath_t *com_base_searchpaths;
 
+void COM_LockSearchPaths (void);
+void COM_UnlockSearchPaths (void);
+
 extern THREAD_LOCAL qfileofs_t com_filesize;
 struct cache_user_s;
 
@@ -484,4 +487,3 @@ extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
 
 #endif	/* _Q_COMMON_H */
-

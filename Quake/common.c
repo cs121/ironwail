@@ -1746,6 +1746,20 @@ THREAD_LOCAL int	file_from_pak;		// ZOID: global indicating that file came from 
 searchpath_t	*com_searchpaths;
 searchpath_t	*com_base_searchpaths;
 
+static SDL_mutex *com_searchpaths_mutex;
+
+void COM_LockSearchPaths (void)
+{
+	if (com_searchpaths_mutex)
+		SDL_LockMutex (com_searchpaths_mutex);
+}
+
+void COM_UnlockSearchPaths (void)
+{
+	if (com_searchpaths_mutex)
+		SDL_UnlockMutex (com_searchpaths_mutex);
+}
+
 /*
 ============
 COM_Path_f
@@ -2629,7 +2643,7 @@ static void COM_AddPk3Files (const char *gamedir, unsigned int path_id, qboolean
 COM_AddGameDirectory -- johnfitz -- modified based on topaz's tutorial
 =================
 */
-void COM_AddGameDirectory (const char *dir)
+static void COM_AddGameDirectoryLocked (const char *dir)
 {
 	const char *base;
 	int i, j;
@@ -2700,10 +2714,19 @@ void COM_AddGameDirectory (const char *dir)
 
 		COM_AddPk3Files (com_gamedir, path_id, append_paths);
 	}
+
+}
+
+void COM_AddGameDirectory (const char *dir)
+{
+	COM_LockSearchPaths ();
+	COM_AddGameDirectoryLocked (dir);
+	COM_UnlockSearchPaths ();
 }
 
 void COM_ResetGameDirectories(const char *newgamedirs)
 {
+	COM_LockSearchPaths ();
 	const char *newpath, *path;
 	searchpath_t *search;
 	//Kill the extra game if it is loaded
@@ -2752,9 +2775,10 @@ void COM_ResetGameDirectories(const char *newgamedirs)
 		}
 
 		if (path == newpath)	//not already loaded
-			COM_AddGameDirectory(newpath);
+			COM_AddGameDirectoryLocked(newpath);
 		newpath = e;
 	}
+	COM_UnlockSearchPaths ();
 }
 
 //==============================================================================
@@ -3525,6 +3549,11 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 	Cvar_RegisterVariable (&fs_integrity_report);
 	Cmd_AddCommand ("path", COM_Path_f);
 	Cmd_AddCommand ("game", COM_Game_f); //johnfitz
+
+	if (!com_searchpaths_mutex)
+		com_searchpaths_mutex = SDL_CreateMutex ();
+	if (!com_searchpaths_mutex)
+		Sys_Error ("COM_InitFilesystem: failed to create search-path mutex");
 
 	standalone_requested = (COM_CheckParm ("-standalone") != 0);
 	if (standalone_requested)
