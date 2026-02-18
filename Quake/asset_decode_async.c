@@ -268,6 +268,7 @@ void Asset_Async_Shutdown (void)
 asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_t *params)
 {
 	asset_handle_t h = 0;
+	fs_async_handle_t fs_handle = 0;
 	unsigned i;
 	size_t budget;
 
@@ -327,13 +328,36 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 	if (!h)
 		return 0;
 
-	asset_requests[ASSET_HANDLE_INDEX(h)].fs_handle = FS_ReadFileAsync(path, FS_ASYNC_FLAG_ALLOW_DECOMPRESS);
-	if (!asset_requests[ASSET_HANDLE_INDEX(h)].fs_handle)
+	fs_handle = FS_ReadFileAsync(path, FS_ASYNC_FLAG_ALLOW_DECOMPRESS);
+	if (!fs_handle)
 	{
-		Asset_Release(h);
+		const unsigned idx = ASSET_HANDLE_INDEX(h);
+		const unsigned gen = ASSET_HANDLE_GEN(h);
+
+		SDL_LockMutex(asset_mutex);
+		if (asset_requests[idx].in_use && asset_requests[idx].generation == gen)
+			memset(&asset_requests[idx], 0, sizeof(asset_requests[idx]));
+		SDL_UnlockMutex(asset_mutex);
 		return 0;
 	}
-	asset_queued_fs++;
+
+	SDL_LockMutex(asset_mutex);
+	{
+		const unsigned idx = ASSET_HANDLE_INDEX(h);
+		const unsigned gen = ASSET_HANDLE_GEN(h);
+
+		if (!asset_requests[idx].in_use || asset_requests[idx].generation != gen)
+		{
+			SDL_UnlockMutex(asset_mutex);
+			FS_Release(fs_handle);
+			return 0;
+		}
+
+		/* asset_requests[idx].fs_handle is protected by asset_mutex for all reads/writes. */
+		asset_requests[idx].fs_handle = fs_handle;
+		asset_queued_fs++;
+	}
+	SDL_UnlockMutex(asset_mutex);
 	return h;
 }
 
