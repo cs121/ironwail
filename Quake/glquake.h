@@ -539,8 +539,6 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
-void R_DrawBrushModels_DLights (entity_t **ents, int count);
-void R_GetBrushDlightPassDebugStats (int *out_drawcalls, int *out_instances, int *out_batches);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -656,8 +654,6 @@ typedef struct glprogs_s {
 
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
-	GLuint		world_dlight[2];		// [alpha test]
-	GLuint		world_dlight_hybrid[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		shadow_depth;
 	GLuint		shadow_depth_alias[2]; // [md5]
@@ -671,7 +667,6 @@ typedef struct glprogs_s {
 	GLuint		decals[2];			// [dither]
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
-	GLuint		dlight_composite;
 
 	/* compute */
 	GLuint		clear_indirect;
@@ -743,11 +738,6 @@ typedef struct glframebufs_s {
 		int			width;
 		int			height;
 	}				bloom;
-
-	struct {
-		GLuint		tex;
-		GLuint		fbo;
-	}				dlight;
 
 	struct {
 		GLuint		mask_tex;

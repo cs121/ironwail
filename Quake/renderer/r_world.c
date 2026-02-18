@@ -317,9 +317,6 @@ static union {
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
-static int							r_brush_dlight_debug_drawcalls;
-static int							r_brush_dlight_debug_instances;
-static int							r_brush_dlight_debug_batches;
 static GLuint						bmodel_batch_program;
 static int							shadow_brush_entities_input;
 static int							shadow_brush_entities_instanced;
@@ -447,9 +444,6 @@ static void R_FlushBModelCalls (void)
 
 	if (!num_bmodel_calls)
 		return;
-
-	if (bmodel_batch_program == glprogs.world_dlight[0] || bmodel_batch_program == glprogs.world_dlight[1])
-		r_brush_dlight_debug_drawcalls += num_bmodel_calls;
 
 	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
 
@@ -971,8 +965,6 @@ typedef enum {
         BP_SKYCUBEMAP,
         BP_SKYSTENCIL,
         BP_SHOWTRIS,
-        BP_DLIGHT_SOLID,
-        BP_DLIGHT_ALPHA,
 } brushpass_t;
 
 static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushpass_t pass, qboolean translucent, mat_sort_key_t sort_key)
@@ -1256,16 +1248,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_COUNT;
                 program = glprogs.world[0][0][0];
                 break;
-        case BP_DLIGHT_SOLID:
-                texbegin = 0;
-                texend = TEXTYPE_CUTOUT;
-                program = glprogs.world_dlight[0];
-                break;
-        case BP_DLIGHT_ALPHA:
-                texbegin = TEXTYPE_CUTOUT;
-                texend = TEXTYPE_CUTOUT + 1;
-                program = glprogs.world_dlight[1];
-                break;
         }
 
 	for (i = 0, totalinst = 0; i < count; i++)
@@ -1283,16 +1265,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	if (pass == BP_SHADOW)
 		shadow_brush_entities_instanced += totalinst;
 
-	if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-	{
-		r_brush_dlight_debug_batches++;
-		r_brush_dlight_debug_instances += totalinst;
-	}
-
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
-        if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
-        else if (pass == BP_SHADOW)
+        if (pass == BP_SHADOW)
         {
                 state &= ~GLS_MASK_CULL;
                 state |= GLS_BLEND_OPAQUE | GLS_CULL_BACK;
@@ -1314,10 +1288,6 @@ R_Shadow_BindUBO ("WORLD", program, FRAME_DATA_UBO_NAME, FRAME_UBO_BINDING);
 R_Shadow_LogReceiverUniformUpload ("WORLD", program);
 R_Shadow_BindShadowMap (GL_TEXTURE5);
 R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias.value, r_shadow_normalbias.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
-}
-else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-{
-R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
 }
 else if (pass == BP_SKYCUBEMAP)
 GL_Bind (GL_TEXTURE2, skybox->cubemap);
@@ -1671,29 +1641,6 @@ void R_DrawBrushModels (entity_t **ents, int count)
 			i = j;
 		}
 	}
-}
-
-void R_DrawBrushModels_DLights (entity_t **ents, int count)
-{
-	r_brush_dlight_debug_drawcalls = 0;
-	r_brush_dlight_debug_instances = 0;
-	r_brush_dlight_debug_batches = 0;
-
-        if (!count)
-                return;
-
-        R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
-        R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
-}
-
-void R_GetBrushDlightPassDebugStats (int *out_drawcalls, int *out_instances, int *out_batches)
-{
-	if (out_drawcalls)
-		*out_drawcalls = r_brush_dlight_debug_drawcalls;
-	if (out_instances)
-		*out_instances = r_brush_dlight_debug_instances;
-	if (out_batches)
-		*out_batches = r_brush_dlight_debug_batches;
 }
 
 /*
