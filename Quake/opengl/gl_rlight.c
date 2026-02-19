@@ -36,7 +36,6 @@ extern cvar_t r_dlight_enable;
 extern cvar_t r_dlight_debug;
 extern cvar_t r_clustered_light_enable;
 extern cvar_t r_clustered_light_radius_scale;
-extern cvar_t r_clustered_lighting;
 extern cvar_t r_clustered_tilesize;
 extern cvar_t r_clustered_zslices;
 extern cvar_t r_clustered_zslices_low;
@@ -1815,7 +1814,7 @@ void R_PushDlights (void)
 	}
 
 	R_ClusterPerf_BeginLightUpload ();
-	r_framedata.clustered_light_params[2] = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
+	r_framedata.clustered_light_params[2] = (r_clustered_light_enable.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
 
@@ -1835,7 +1834,7 @@ void R_PushDlights (void)
 		return;
 	}
 
-	if (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0)
+	if (r_clustered_light_enable.value > 0.f && r_framedata.numlights > 0)
 	{
 		GL_BeginGroup ("Light clustering");
 		if (r_clustered.last_frame_built != r_framecount)
@@ -1857,7 +1856,7 @@ void R_PushDlights (void)
 		r_clustered.has_frame_data = false;
 		r_clustered.shading_enabled = false;
 		r_clustered.shading_bound = false;
-		R_ClusterPerf_MarkReason (r_clustered_lighting.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
+		R_ClusterPerf_MarkReason (r_clustered_light_enable.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
 	}
 	R_ClusterPerf_EndPush ();
 
