@@ -785,6 +785,36 @@ void CL_RelinkEntities (void)
 }
 
 
+static void CL_SpawnDebugDlight_f (void)
+{
+	vec3_t forward, right, up;
+	dlight_t *dl;
+	float radius = 300.f;
+	float duration = 1.f;
+
+	if (Cmd_Argc () >= 2)
+		radius = q_max (8.f, (float)atof (Cmd_Argv (1)));
+	if (Cmd_Argc () >= 3)
+		duration = q_max (0.05f, (float)atof (Cmd_Argv (2)));
+
+	dl = CL_AllocDlight (0);
+	AngleVectors (cl.viewangles, forward, right, up);
+	(void)right;
+	(void)up;
+	VectorMA (r_refdef.vieworg, 128.f, forward, dl->origin);
+	dl->radius = radius;
+	dl->baseradius = radius;
+	dl->die = cl.time + duration;
+	dl->decay = 0.f;
+	dl->type = DLIGHT_DEFAULT;
+	dl->color[0] = 1.0f;
+	dl->color[1] = 0.85f;
+	dl->color[2] = 0.6f;
+	dl->flags = DLIGHTF_DEFAULT;
+	Con_Printf ("spawned debug dlight org=(%.1f %.1f %.1f) radius=%.1f die=%.3f\n",
+		dl->origin[0], dl->origin[1], dl->origin[2], dl->radius, dl->die);
+}
+
 /*
 ===============
 CL_ReadFromServer
@@ -1113,6 +1143,7 @@ void CL_Init (void)
 
 	Cvar_RegisterVariable (&cl_maxpitch); //johnfitz -- variable pitch clamping
 	Cvar_RegisterVariable (&cl_minpitch); //johnfitz -- variable pitch clamping
+	Cmd_AddCommand ("cl_spawn_debug_dlight", CL_SpawnDebugDlight_f);
 
 	Cvar_RegisterVariable (&cl_mwheelpitch);
 

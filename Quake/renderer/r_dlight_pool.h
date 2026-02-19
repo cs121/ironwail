@@ -26,12 +26,17 @@ typedef enum dlight_reject_reason_e
 
 typedef struct dlight_filter_debug_s
 {
+	int created_count;
+	int after_merge_count;
 	int total_active;
 	int pass_lifetime_radius;
 	int pass_world_flag;
 	int pass_pvs;
 	int pass_frustum;
 	int pass_budget;
+	int final_active_count;
+	float min_radius;
+	float max_radius;
 	int rejected_lifetime_radius;
 	int rejected_world_flag;
 	int rejected_pvs;

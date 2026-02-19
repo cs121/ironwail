@@ -327,13 +327,18 @@ static void R_LogWorldLightState (const char *marker)
 		dlight_filter_debug_t filter_stats;
 		dlight_debug_entry_t entries[4];
 		DLightPool_GetFilterDebug (&filter_stats, entries);
-		Con_Printf ("STATEDBG clustered_light_filter total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
+		Con_Printf ("STATEDBG clustered_light_filter created=%d after_merge=%d total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d final=%d radius=(%.1f..%.1f) reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
+			filter_stats.created_count,
+			filter_stats.after_merge_count,
 			filter_stats.total_active,
 			filter_stats.pass_lifetime_radius,
 			filter_stats.pass_world_flag,
 			filter_stats.pass_pvs,
 			filter_stats.pass_frustum,
 			filter_stats.pass_budget,
+			filter_stats.final_active_count,
+			filter_stats.min_radius,
+			filter_stats.max_radius,
 			filter_stats.rejected_lifetime_radius,
 			filter_stats.rejected_world_flag,
 			filter_stats.rejected_pvs,
@@ -575,6 +580,7 @@ cvar_t  r_clustered_light_debug_visualize = { "r_clustered_light_debug_visualize
 cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE };
+cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_lighting = { "r_clustered_lighting", "1", CVAR_ARCHIVE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };

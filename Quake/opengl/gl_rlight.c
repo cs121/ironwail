@@ -32,6 +32,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
+extern cvar_t r_dlight_enable;
+extern cvar_t r_dlight_debug;
 extern cvar_t r_clustered_light_enable;
 extern cvar_t r_clustered_light_radius_scale;
 extern cvar_t r_clustered_lighting;
@@ -1033,7 +1035,7 @@ static void R_ClusteredDebugDumpUpload (const clustered_light_t *lights_local, i
 			lights_local[i].color_intensity[0], lights_local[i].color_intensity[1], lights_local[i].color_intensity[2]);
 	}
 
-	if (show > 0)
+	if (show > 0 && r_clustered_debug.value >= 2.f)
 	{
 		const clustered_light_t *mapped;
 		GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
@@ -1452,10 +1454,15 @@ static void R_Clustered_CommitLists (const clustered_async_frame_t *frame)
 {
 	clustered_params_t params;
 	GLuint counters[2] = {0u, 0u};
+	double upload_start_ms;
 	int i, j;
 	int global = 0;
 	if (!frame)
 		return;
+
+	r_clustered.upload_calls++;
+	r_clustered.last_frame_uploaded = r_framecount;
+	upload_start_ms = R_ClusteredNowMS ();
 	for (i = 0; i < frame->num_jobs; ++i)
 	{
 		const clustered_job_output_t *job = &frame->jobs[i];
@@ -1490,6 +1497,7 @@ static void R_Clustered_CommitLists (const clustered_async_frame_t *frame)
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
 	r_clustered.debug_indices_written_count = (GLuint)global;
 	((clustered_async_frame_t *)frame)->output_bytes = (int)(sizeof (clustered_header_t) * (size_t)r_clustered.cluster_count + sizeof (GLuint) * (size_t)global);
+	r_clustered.upload_ms += R_ClusteredNowMS () - upload_start_ms;
 	r_clustered.shading_enabled = true;
 	r_clustered.has_frame_data = true;
 }
@@ -1529,6 +1537,9 @@ void R_Clustered_BuildLists (void)
 	R_ClusteredAsync_EnsureBuffers ();
 	if (!r_clustered_headers_cpu)
 		return;
+
+	r_clustered.build_calls++;
+	r_clustered.last_frame_built = r_framecount;
 
 	if (r_framedata.numlights == 0)
 	{
@@ -1791,7 +1802,7 @@ void R_PushDlights (void)
 	}
 	R_ClusterPerf_BeginPush ();
 
-	if (r_clustered_light_enable.value > 0.f && r_dynamic.value > 0.f)
+	if (r_dynamic.value > 0.f && (r_clustered_light_enable.value > 0.f || r_dlight_enable.value > 0.f))
 	{
 		R_ClusterPerf_BeginLightFilter ();
 		const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
@@ -1827,10 +1838,17 @@ void R_PushDlights (void)
 	if (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0)
 	{
 		GL_BeginGroup ("Light clustering");
-		R_PerfStats_SetClusterBuildRan (true);
-		R_ClusterPerf_BeginBuild ();
-		R_Clustered_BuildLists ();
-		R_ClusterPerf_EndBuild ();
+		if (r_clustered.last_frame_built != r_framecount)
+		{
+			R_PerfStats_SetClusterBuildRan (true);
+			R_ClusterPerf_BeginBuild ();
+			R_Clustered_BuildLists ();
+			R_ClusterPerf_EndBuild ();
+		}
+		else if (R_ClusteredShouldLog ())
+		{
+			R_ClusterPerf_MarkReason ("cluster build reused (already built this frame)");
+		}
 		R_Clustered_BindForShading ();
 		GL_EndGroup ();
 	}
