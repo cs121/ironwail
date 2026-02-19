@@ -1,6 +1,6 @@
 // clustered_lighting.glsl
-// Fragment-Shader-Include für Clustered Lighting.
-// Wird per #include oder shader-stage-Verkettung eingebunden.
+// Fragment-shader include for Clustered Lighting.
+// Included via #include or shader-stage concatenation.
 
 struct ClusterHeader
 {
@@ -35,7 +35,7 @@ layout(std140, binding=2) uniform ClusterParams
 	ivec2 ClusterScreenSize;
 	ivec2 ClusterGridXY;
 	int   ClusterZSlices;
-	int   ClusteredEnabled;      // 0 = aus, 1 = an
+	int   ClusteredEnabled;      // 0 = off, 1 = on
 	float ClusterNearPlane;
 	float ClusterFarPlane;
 	float ClusterZLogScale;
@@ -47,16 +47,8 @@ layout(std140, binding=2) uniform ClusterParams
 	int   ClusterDebugMode;
 };
 
-// NumLights muss vom aufrufenden Shader als Uniform bereitgestellt werden,
-// z.B.: uniform uint NumLights;
-// Alternativ kann es aus einem weiteren Uniform-Block kommen.
-// Deklaration hier als extern (wird vom Linker aufgelöst):
-// uniform uint NumLights;  ← auskommentiert, da der Host-Shader es bereitstellt.
-
 // -------------------------------------------------------------------------
-// Prüft, ob Clustered Lighting für diesen Frame aktiv ist.
-// BUG-FIX: Originalcode referenzierte 'ClusteredLightParams.z' (undefiniert).
-//          Korrekt ist die Abfrage von 'ClusteredEnabled' aus dem Uniform-Block.
+// Returns true if Clustered Lighting is active for this frame.
 // -------------------------------------------------------------------------
 bool ClusterLightingEnabled()
 {
@@ -68,39 +60,33 @@ bool ClusterLightingEnabled()
 }
 
 // -------------------------------------------------------------------------
-// Berechnet den Z-Slice für eine gegebene positive View-Space-Tiefe.
-// viewDepth muss positiv sein (OpenGL: -v.z).
+// Converts a positive view-space depth to a Z-slice index.
+// viewDepth must be positive (OpenGL: -v.z).
 // -------------------------------------------------------------------------
 int ClusterComputeZSlice(float viewDepth)
 {
-	// BUG-FIX: max(viewDepth, 1e-4) schützt log2 vor 0 und negativen Werten.
+	// max(viewDepth, 1e-4) guards log2 against zero and negative values.
 	float z = floor(log2(max(viewDepth, 1e-4)) * ClusterZLogScale + ClusterZLogBias);
 	return clamp(int(z), 0, ClusterZSlices - 1);
 }
 
 // -------------------------------------------------------------------------
-// Berechnet den linearen Cluster-Index für eine Bildschirmposition und Tiefe.
-// screenPos: Fragmentposition in Pixel [0, screenSize).
-// viewDepth:  positive View-Space-Tiefe (-fragPosView.z).
+// Computes the linear cluster index for a screen position and depth.
+// screenPos: fragment position in pixels [0, screenSize).
+// viewDepth: positive view-space depth (-fragPosView.z).
 // -------------------------------------------------------------------------
 int ClusterComputeIndex(vec2 screenPos, float viewDepth)
 {
-	// OPTIMIERUNG: Integer-Division direkt, kein float-cast nötig.
 	int tileX  = clamp(int(screenPos.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
 	int tileY  = clamp(int(screenPos.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
 	int zSlice = ClusterComputeZSlice(viewDepth);
-	// Index-Layout: [z][y][x] (z-major für Cache-Lokalität bei konstanter Tiefe).
+	// Index layout: [z][y][x] (z-major for cache locality at constant depth).
 	return (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
 }
 
 // -------------------------------------------------------------------------
-// Löst den Cluster für einen Fragmentpunkt auf.
-// Gibt false zurück, wenn Clustered Lighting deaktiviert ist oder
-// der Cluster leer ist.
-//
-// BUG-FIX: 'clusterCount = min(header.count, NumLights)' verwendete die
-//          undefinierte Variable NumLights. Stattdessen: header.count
-//          ist bereits durch cluster_prefix.comp auf clusterAlloc gecappt.
+// Resolves the cluster for a fragment point.
+// Returns false if Clustered Lighting is disabled or the cluster is empty.
 // -------------------------------------------------------------------------
 bool ClusterResolve(vec2 screenPos, float viewDepth,
                     out int clusterIdx,
@@ -119,12 +105,8 @@ bool ClusterResolve(vec2 screenPos, float viewDepth,
 }
 
 // -------------------------------------------------------------------------
-// Liest ein einzelnes Licht aus dem Cluster-Index-Buffer.
-// localIndex: Index innerhalb des Clusters [0, header.count).
-//
-// OPTIMIERUNG: Kein redundanter Bounds-Check auf NumLights (undefiniert/
-//              potenziell falsch); lightIndices enthält nur valide IDs,
-//              die vom Fill-Pass korrekt begrenzt wurden.
+// Fetches a single light from the cluster index buffer.
+// localIndex: index within the cluster [0, header.count).
 // -------------------------------------------------------------------------
 bool ClusterFetchLight(ClusterHeader header, uint localIndex,
                        out uint lightId, out PackedLight light)
@@ -141,8 +123,7 @@ bool ClusterFetchLight(ClusterHeader header, uint localIndex,
 }
 
 // -------------------------------------------------------------------------
-// Convenience-Makro für den typischen Render-Loop.
-// Verwendung im Fragment-Shader:
+// Typical usage in a fragment shader:
 //
 //   vec3 Lo = vec3(0.0);
 //   int clusterIdx;

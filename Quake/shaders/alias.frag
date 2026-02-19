@@ -194,16 +194,13 @@ vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 {
 	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
 	ClusterHeader header;
-	uint cluster_count;
 	int cluster_idx;
-	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
-		return vec3(0.0);
-	if (cluster_count == 0u)
+	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header))
 		return vec3(0.0);
 
 	vec3 dynamic_light = vec3(0.0);
 
-	for (uint i = 0u; i < cluster_count; ++i)
+	for (uint i = 0u; i < header.count; ++i)
 	{
 		uint light_id;
 		PackedLight pl;

@@ -181,14 +181,13 @@ float HGPhase(float cosTheta, float g)
 vec3 EvaluateDynamicLights(vec3 worldPos, vec2 screenPos, float viewDepth)
 {
 	ClusterHeader header;
-	uint clusterCount;
 	int clusterIdx;
-	if (!ClusterResolve(screenPos, viewDepth, clusterIdx, header, clusterCount))
+	if (!ClusterResolve(screenPos, viewDepth, clusterIdx, header))
 		return vec3(0.0);
 
 	vec3 dynamicLight = vec3(0.0);
 
-	for (uint i = 0u; i < clusterCount; ++i)
+	for (uint i = 0u; i < header.count; ++i)
 	{
 		uint lightId;
 		PackedLight pl;
