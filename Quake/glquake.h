@@ -105,6 +105,8 @@ extern	cvar_t	r_telealpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_litwater;
 extern	cvar_t	r_dynamic;
+extern  cvar_t  r_dynamic_zero_cost_debug;
+extern  cvar_t  r_beam_clustered_lighting;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
 
@@ -718,6 +720,16 @@ void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
 void GL_ApplyFilmgrainUI (void);
 void R_Clustered_RebindForProgram (GLuint program, const char *pass_name);
+qboolean R_ClusteredShadingActive (void);
+unsigned int R_ClusteredSubmittedLightCount (void);
+
+void R_PerfStats_BeginFrame (void);
+void R_PerfStats_AddWorldDrawCalls (int count);
+void R_PerfStats_AddAliasDrawCalls (int count);
+void R_PerfStats_AddParticleDrawCalls (int count);
+void R_PerfStats_AddBeamEntities (int count);
+void R_PerfStats_SetClusterBuildRan (qboolean ran);
+void R_PerfStats_SetDlightShadowPassRan (qboolean ran);
 void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
 void R_DebugFlushGeometry (void);
 

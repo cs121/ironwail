@@ -670,6 +670,8 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_dynamic);
+        Cvar_RegisterVariable (&r_dynamic_zero_cost_debug);
+        Cvar_RegisterVariable (&r_beam_clustered_lighting);
         Cvar_RegisterVariable (&r_clustered_light_enable);
         Cvar_RegisterVariable (&r_clustered_light_radius_scale);
         Cvar_RegisterVariable (&r_clustered_light_debug_visualize);

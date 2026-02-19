@@ -669,6 +669,7 @@ static void R_FlushParticleBatch (void)
 	GL_VertexAttribPointerFunc (1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(partverts[0]), ofs + offsetof(particlevert_t, color));
 
 	GL_DrawArraysInstancedFunc (GL_TRIANGLE_STRIP, 0, 4, numpartverts);
+	R_PerfStats_AddParticleDrawCalls (1);
 
 	numpartverts = 0;
 }
