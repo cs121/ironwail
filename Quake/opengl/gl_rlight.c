@@ -1498,6 +1498,19 @@ static void R_Clustered_CommitLists (const clustered_async_frame_t *frame)
 	counters[1] = frame->overflowed ? 1u : 0u;
 	GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.counters_ssbo);
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (counters), counters);
+
+	// Upload packed light data (positions, radii, colors) so fragment shaders can
+	// read from PackedLightsBuffer (binding=3).  This was missing: headers and
+	// indices were uploaded but lights_ssbo was left uninitialised, causing every
+	// ClusterFetchLight() call to return zero-radius / black lights.
+	if (frame->snapshot.num_lights > 0)
+	{
+		GL_BindBufferFunc (GL_SHADER_STORAGE_BUFFER, r_clustered.lights_ssbo);
+		GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
+			(GLsizeiptr)(sizeof (clustered_light_t) * (size_t)frame->snapshot.num_lights),
+			frame->snapshot.lights);
+	}
+
 	r_clustered.debug_indices_written_count = (GLuint)global;
 	((clustered_async_frame_t *)frame)->output_bytes = (int)(sizeof (clustered_header_t) * (size_t)r_clustered.cluster_count + sizeof (GLuint) * (size_t)global);
 	r_clustered.upload_ms += R_ClusteredNowMS () - upload_start_ms;

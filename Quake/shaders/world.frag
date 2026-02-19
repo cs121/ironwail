@@ -590,9 +590,14 @@ void main()
 			vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
 			dynamic_light += light_contrib;
 
-			if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+			if (attenuation > 0.0 && falloff > 0.0)
 			{
-				vec3 light_dir = light_vec / surface_dist;
+				// Use the true 3-D direction from fragment to light for NdotL,
+				// not the 2-D in-plane projection (light_vec / surface_dist),
+				// which is perpendicular to the normal and always gives NdotL=0.
+				vec3 light_dir_3d = lightOrigin - in_pos;
+				float dist_3d = length(light_dir_3d);
+				vec3 light_dir = (dist_3d > 1e-6) ? (light_dir_3d / dist_3d) : surface_normal;
 				float ndotl = max(dot(surface_normal, light_dir), 0.0);
 				if (ndotl > 0.0)
 				{
