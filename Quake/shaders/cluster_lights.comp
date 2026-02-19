@@ -1,13 +1,17 @@
+// cluster_lights.comp
+// Pass 0 (count): Zählt, wie viele Lichter jeden Cluster berühren.
+// Pass 1 (fill):  Schreibt die Licht-Indizes in den Index-Buffer.
+
 layout(local_size_x=64, local_size_y=1, local_size_z=1) in;
 
 layout(std140, binding=1) uniform ClusterBuildParams
 {
-	ivec4 BuildInfo; // x=passMode (0=count,1=fill), y=numLights
+	ivec4 BuildInfo; // x=passMode (0=count, 1=fill), y=numLights
 };
 
 struct PackedLight
 {
-	vec4 posRadius;
+	vec4 posRadius;      // xyz=worldPos, w=radius
 	vec4 colorIntensity;
 	ivec4 flags;
 };
@@ -48,21 +52,23 @@ layout(std140, binding=2) uniform ClusterParams
 {
 	ivec2 screenSize;
 	ivec2 gridXY;
-	int zSlices;
-	int clusteredEnabled;
+	int   zSlices;
+	int   clusteredEnabled;
 	float nearPlane;
 	float farPlane;
 	float zLogScale;
 	float zLogBias;
-	mat4 viewMatrix;
-	mat4 projMatrix;
-	mat4 invProj;
-	int tileSize;
-	int debugMode;
+	mat4  viewMatrix;
+	mat4  projMatrix;
+	mat4  invProj;
+	int   tileSize;
+	int   debugMode;
 };
 
+// Konvertiert eine positive View-Space-Tiefe in einen Z-Slice-Index.
 int zToSlice(float depth)
 {
+	// depth muss > 0 sein; Schutz gegen log2(0) oder Negative.
 	return clamp(int(floor(log2(max(depth, 1e-4)) * zLogScale + zLogBias)), 0, zSlices - 1);
 }
 
@@ -73,49 +79,84 @@ void main()
 		return;
 
 	PackedLight l = lights[lightId];
-	vec4 v = viewMatrix * vec4(l.posRadius.xyz, 1.0);
-	// View-space forward is -Z; using X here breaks depth slicing and
-	// effectively culls most lights from clustered assignment.
-	float vz = max(1e-4, -v.z);
-	float radius = max(0.0, l.posRadius.w);
+	float radius = l.posRadius.w;
+
+	// BUG-FIX: radius <= 0 früh rauswerfen (war vorher nach viewMatrix-Transform).
 	if (radius <= 0.0)
 		return;
 
+	// Licht in View-Space transformieren.
+	vec4 v = viewMatrix * vec4(l.posRadius.xyz, 1.0);
+
+	// BUG-FIX: View-Space-Z ist negativ für Objekte vor der Kamera (OpenGL-Konvention).
+	//          -v.z ergibt die positive Tiefe.
+	float vz = -v.z;
+
+	// Licht liegt vollständig hinter der Kamera → überspringen.
+	if (vz + radius <= 0.0)
+		return;
+
+	// Clip-Space für 2D-Tile-Berechnung.
 	vec4 clip = projMatrix * v;
 	if (clip.w <= 0.0001)
 		return;
+
 	vec2 ndc = clip.xy / clip.w;
-	float pixRadius = (radius / max(vz, 1e-4)) * float(screenSize.y) * 0.5;
+
+	// OPTIMIERUNG: Perspektivische Radius-Projektion über proj[1][1] (fovy-Skalierung).
+	// Genauer als die frühere screenSize.y * 0.5 Näherung (die nur für 90° FOV stimmte).
+	float projScale = projMatrix[1][1]; // = 1/tan(fovy/2)
+	float pixRadius = (radius / max(vz, 1e-4)) * projScale * float(screenSize.y) * 0.5;
+
 	vec2 centerPix = (ndc * 0.5 + 0.5) * vec2(screenSize);
 
-	int minX = clamp(int(floor((centerPix.x - pixRadius) / float(tileSize))), 0, gridXY.x - 1);
-	int maxX = clamp(int(floor((centerPix.x + pixRadius) / float(tileSize))), 0, gridXY.x - 1);
-	int minY = clamp(int(floor((centerPix.y - pixRadius) / float(tileSize))), 0, gridXY.y - 1);
-	int maxY = clamp(int(floor((centerPix.y + pixRadius) / float(tileSize))), 0, gridXY.y - 1);
+	// Tile-Range in X und Y.
+	float invTile = 1.0 / float(tileSize);
+	int minX = clamp(int(floor((centerPix.x - pixRadius) * invTile)), 0, gridXY.x - 1);
+	int maxX = clamp(int(floor((centerPix.x + pixRadius) * invTile)), 0, gridXY.x - 1);
+	int minY = clamp(int(floor((centerPix.y - pixRadius) * invTile)), 0, gridXY.y - 1);
+	int maxY = clamp(int(floor((centerPix.y + pixRadius) * invTile)), 0, gridXY.y - 1);
 
-	int minZ = zToSlice(vz - radius);
+	// BUG-FIX: vz - radius kann negativ werden → max(1e-4, ...) schützt log2.
+	int minZ = zToSlice(max(vz - radius, 1e-4));
 	int maxZ = zToSlice(vz + radius);
+
+	// Sicherheitscheck: sollte durch die obigen clamps nie passieren,
+	// aber defensiv gegen degenerierten Zustand.
+	if (minZ > maxZ || minX > maxX || minY > maxY)
+		return;
+
+	// OPTIMIERUNG: Lese clusterAlloc einmal in eine lokale Variable (weniger globale Zugriffe).
+	uint allocLimit = clusterAlloc;
+
+	bool isCountPass = (BuildInfo.x == 0);
 
 	for (int z = minZ; z <= maxZ; ++z)
 	for (int y = minY; y <= maxY; ++y)
 	for (int x = minX; x <= maxX; ++x)
 	{
 		uint clusterIdx = uint((z * gridXY.y + y) * gridXY.x + x);
-		if (BuildInfo.x == 0)
+
+		if (isCountPass)
 		{
+			// Pass 0: Nur zählen.
 			atomicAdd(headers[clusterIdx].count, 1u);
 		}
 		else
 		{
+			// Pass 1: Index in den reservierten Slot schreiben.
 			uint localIdx = atomicAdd(tempCounts[clusterIdx], 1u);
 			uint writeIdx = headers[clusterIdx].offset + localIdx;
-			if (writeIdx >= clusterAlloc)
+
+			// BUG-FIX: Vergleich mit allocLimit (lokal gecacht) statt wiederholtem
+			//          globalem Lesen von clusterAlloc.
+			if (writeIdx < allocLimit)
 			{
-				atomicAdd(overflowCount, 1u);
+				lightIndices[writeIdx] = lightId;
 			}
 			else
 			{
-				lightIndices[writeIdx] = lightId;
+				atomicAdd(overflowCount, 1u);
 			}
 		}
 	}

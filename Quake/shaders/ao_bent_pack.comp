@@ -1,9 +1,27 @@
-layout(local_size_x=8, local_size_y=8) in;
-layout(binding=0) uniform sampler2D BentTexture;
-layout(r16f, binding=0) uniform writeonly image2D OutAO;
-void main(){
- ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutAO); if(any(greaterThanEqual(px,size))) return;
- vec2 bn=texelFetch(BentTexture,px,0).rg*2.0-1.0;
- float viz=clamp(length(bn),0.0,1.0);
- imageStore(OutAO,px,vec4(viz));
+// Bent Normal Visualization / Pack Pass
+// Reads the RG16F bent-normal texture (XY stored as [0,1]) and outputs
+// the magnitude as an AO-like value.
+// Note: the bent normal encodes the unoccluded hemisphere direction;
+// a shorter vector = more occlusion from all directions.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D BentTexture;
+
+layout(r16f, binding = 0) uniform writeonly image2D OutAO;
+
+void main()
+{
+    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(OutAO);
+    if (any(greaterThanEqual(px, size))) return;
+
+    // Decode stored XY from [0,1] back to [-1,1]
+    vec2  bn  = texelFetch(BentTexture, px, 0).rg * 2.0 - 1.0;
+
+    // Magnitude of the bent normal XY projection:
+    // 1.0 = unoccluded (full-length), 0.0 = fully occluded
+    float viz = clamp(length(bn), 0.0, 1.0);
+
+    imageStore(OutAO, px, vec4(viz));
 }
