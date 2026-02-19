@@ -795,14 +795,14 @@ static unsigned int R_ClusteredComputeDirtyReasons (const cluster_runtime_params
 	view_key.vup_q[0] = R_ClusteredQuantizeFloat (vup[0], 8192.f);
 	view_key.vup_q[1] = R_ClusteredQuantizeFloat (vup[1], 8192.f);
 	view_key.vup_q[2] = R_ClusteredQuantizeFloat (vup[2], 8192.f);
-	view_key.znear_q = R_ClusteredQuantizeFloat (view_znear, 1024.f);
-	view_key.zfar_q = R_ClusteredQuantizeFloat (view_zfar, 128.f);
+	view_key.znear_q = R_ClusteredQuantizeFloat (runtime->near_plane, 1024.f);
+	view_key.zfar_q = R_ClusteredQuantizeFloat (runtime->far_plane, 128.f);
 	view_key.reverse_z = gl_clipcontrol_able ? 1 : 0;
 
 	proj_key.fov_x_q = R_ClusteredQuantizeFloat (r_fovx, 4096.f);
 	proj_key.fov_y_q = R_ClusteredQuantizeFloat (r_fovy, 4096.f);
-	proj_key.znear_q = R_ClusteredQuantizeFloat (view_znear, 1024.f);
-	proj_key.zfar_q = R_ClusteredQuantizeFloat (view_zfar, 128.f);
+	proj_key.znear_q = R_ClusteredQuantizeFloat (runtime->near_plane, 1024.f);
+	proj_key.zfar_q = R_ClusteredQuantizeFloat (runtime->far_plane, 128.f);
 	proj_key.reverse_z = gl_clipcontrol_able ? 1 : 0;
 
 	viewport_key.screen_w = runtime->screen_w;
