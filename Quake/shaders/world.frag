@@ -563,43 +563,30 @@ void main()
 		{
 			uint clusterCount = header.count;
 			vec3 dynamic_light = vec3(0.0);
-		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 
-		for (uint i = 0u; i < clusterCount; ++i)
-		{
-			uint lightId;
-			PackedLight pl;
-			if (!ClusterFetchLight(header, i, lightId, pl))
-				continue;
-			vec3 lightOrigin = pl.posRadius.xyz;
-			float radius = pl.posRadius.w;
-			vec3 lightColor = pl.colorIntensity.rgb;
-
-			float dist = dot(lightOrigin, plane.xyz) - plane.w;
-			float rad = radius - abs(dist);
-			if (rad <= 0.0)
-				continue;
-
-			vec3 local_pos = lightOrigin - plane.xyz * dist;
-			vec3 light_vec = local_pos - in_pos;
-			float surface_dist = length(light_vec);
-			float attenuation = clamp((rad - surface_dist) / 16.0, 0.0, 1.0);
-			float normalized_dist = surface_dist / max(rad, 1e-4);
-			float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-			vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
-			dynamic_light += light_contrib;
-
-			if (attenuation > 0.0 && falloff > 0.0)
+			for (uint i = 0u; i < clusterCount; ++i)
 			{
-				// Use the true 3-D direction from fragment to light for NdotL,
-				// not the 2-D in-plane projection (light_vec / surface_dist),
-				// which is perpendicular to the normal and always gives NdotL=0.
-				vec3 light_dir_3d = lightOrigin - in_pos;
-				float dist_3d = length(light_dir_3d);
-				vec3 light_dir = (dist_3d > 1e-6) ? (light_dir_3d / dist_3d) : surface_normal;
+				uint lightId;
+				PackedLight pl;
+				if (!ClusterFetchLight(header, i, lightId, pl))
+					continue;
+				vec3 lightOrigin = pl.posRadius.xyz;
+				float radius = pl.posRadius.w;
+				vec3 lightColor = pl.colorIntensity.rgb;
+				vec3 light_vec = lightOrigin - in_pos;
+				float surface_dist = length(light_vec);
+				if (radius <= 0.0 || surface_dist >= radius)
+					continue;
+
+				float normalized_dist = surface_dist / max(radius, 1e-4);
+				float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
+				vec3 light_dir = (surface_dist > 1e-6) ? (light_vec / surface_dist) : surface_normal;
 				float ndotl = max(dot(surface_normal, light_dir), 0.0);
-				if (ndotl > 0.0)
+				vec3 light_contrib = (falloff * ndotl) * lightColor * dynamic_light_noise;
+				dynamic_light += light_contrib;
+
+				if (falloff > 0.0 && ndotl > 0.0)
 				{
 					vec3 half_vec = normalize(light_dir + view_dir);
 					float ndoth = max(dot(surface_normal, half_vec), 0.0);
@@ -608,7 +595,6 @@ void main()
 					specular_light += light_contrib * (spec * specular_scale * energy);
 				}
 			}
-		}
 
 			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
 		}
