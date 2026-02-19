@@ -31,10 +31,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
-extern cvar_t r_dynamic;
-extern cvar_t r_dlight_enable;
-extern cvar_t r_dlight_debug;
-extern cvar_t r_clustered_light_enable;
+extern cvar_t r_clustered_lights;
+extern cvar_t r_clustered_light_debug;
 extern cvar_t r_clustered_light_radius_scale;
 extern cvar_t r_clustered_tilesize;
 extern cvar_t r_clustered_zslices;
@@ -510,7 +508,7 @@ void R_AnimateLight (void)
 		//johnfitz -- r_flatlightstyles
 		if (r_flatlightstyles.value == 2)
 			k = n = cl_lightstyle[j].peak - 'a';
-		else if (r_flatlightstyles.value == 1 || !r_dynamic.value)
+		else if (r_flatlightstyles.value == 1 || !r_clustered_lights.value)
 			k = n = cl_lightstyle[j].average - 'a';
 		else
 		{
@@ -1817,7 +1815,7 @@ void R_PushDlights (void)
 	}
 	R_ClusterPerf_BeginPush ();
 
-	if (r_dynamic.value > 0.f && (r_clustered_light_enable.value > 0.f || r_dlight_enable.value > 0.f))
+	if (r_clustered_lights.value > 0.f)
 	{
 		R_ClusterPerf_BeginLightFilter ();
 		const int budget = q_min (q_max (1, DLightPool_GetBudget ()), DLIGHT_GPU_MAX);
@@ -1842,7 +1840,7 @@ void R_PushDlights (void)
 	}
 
 	R_ClusterPerf_BeginLightUpload ();
-	r_framedata.clustered_light_params[2] = (r_clustered_light_enable.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
+	r_framedata.clustered_light_params[2] = (r_clustered_lights.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
 
@@ -1862,7 +1860,7 @@ void R_PushDlights (void)
 		return;
 	}
 
-	if (r_clustered_light_enable.value > 0.f && r_framedata.numlights > 0)
+	if (r_clustered_lights.value > 0.f && r_framedata.numlights > 0)
 	{
 		GL_BeginGroup ("Light clustering");
 		if (r_clustered.last_frame_built != r_framecount)
@@ -1884,7 +1882,7 @@ void R_PushDlights (void)
 		r_clustered.has_frame_data = false;
 		r_clustered.shading_enabled = false;
 		r_clustered.shading_bound = false;
-		R_ClusterPerf_MarkReason (r_clustered_light_enable.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
+		R_ClusterPerf_MarkReason (r_clustered_lights.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
 	}
 	R_ClusterPerf_EndPush ();
 

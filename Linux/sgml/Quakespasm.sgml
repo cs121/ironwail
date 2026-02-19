@@ -693,7 +693,7 @@ quakespasm (cl_alwaysrun 1, cl_forwardspeed 200, cl_backspeed 200)
 <item>Don't play demos on program init
 <item>Default heapsize is 64 MB.
 <item>Changes to default console alpha, speed
-<item>Changes to cvar persistence gl_flashblend (default 0), r_shadow, r_wateralpha, r_dynamic, r_novis.
+<item>Changes to cvar persistence gl_flashblend (default 0), r_shadow, r_wateralpha, r_clustered_lights, r_novis.
 </itemize>
 
 <sect>Copyright<p>

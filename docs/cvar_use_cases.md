@@ -183,7 +183,7 @@ Total registered cvars reviewed: **627**.
 | `r_bloom_threshold` | `1.0` |
 | `r_clearcolor` | `2` |
 | `r_clustered_debug` | `0` |
-| `r_clustered_lighting` | `0` |
+| `r_clustered_lights` | `0` |
 | `r_clustered_log` | `1` |
 | `r_clustered_maxindices` | `262144` |
 | `r_clustered_tilesize` | `16` |
@@ -193,9 +193,8 @@ Total registered cvars reviewed: **627**.
 | `r_color_saturation` | `1.05` |
 | `r_debug_colorspace` | `0` |
 | `r_dither` | `1.0` |
-| `r_dlight_enable` | `1` |
-| `r_dlight_radius_scale` | `1.0` |
-| `r_dlight_scale` | `1.0` |
+| `r_clustered_lights` | `1` |
+| `r_clustered_light_radius_scale` | `1.0` |
 | `r_dof` | `1` |
 | `r_dof_autofocus` | `1` |
 | `r_dof_focus` | `64` |
@@ -204,7 +203,7 @@ Total registered cvars reviewed: **627**.
 | `r_drawentities` | `1` |
 | `r_drawviewmodel` | `1` |
 | `r_drawworld` | `1` |
-| `r_dynamic` | `1` |
+| `r_clustered_lights` | `1` |
 | `r_exposure_bias` | `1.0` |
 | `r_exposure_debug` | `0` |
 | `r_exposure_lock` | `0` |

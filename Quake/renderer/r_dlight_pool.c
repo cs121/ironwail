@@ -34,7 +34,7 @@ static dlight_t dlight_fallback;
 static dlight_filter_debug_t dlight_filter_debug;
 static dlight_debug_entry_t dlight_debug_samples[DLIGHT_DEBUG_SAMPLE_MAX];
 
-extern cvar_t r_dlight_debug;
+extern cvar_t r_clustered_light_debug;
 
 static void DLightPool_DebugReset (void)
 {
@@ -697,7 +697,7 @@ void DLightPool_GetStats (dlight_pool_stats_t *out)
 
 void DLightPool_DebugPrint (void)
 {
-	if (r_dlight_debug.value < 2.f)
+	if (r_clustered_light_debug.value < 2.f)
 		return;
 
 	Con_Printf ("DLIGHTDBG frame=%d created_count=%d after_merge_count=%d after_lifetime_radius_count=%d rejected_lifetime=%d after_world_count=%d rejected_world=%d after_pvs_count=%d rejected_pvs=%d after_frustum_count=%d rejected_frustum=%d after_budget_count=%d rejected_budget=%d final_active_count=%d radius_min=%.1f radius_max=%.1f\n",

@@ -569,19 +569,13 @@ cvar_t	r_lightmap_colorspace = { "r_lightmap_colorspace", "srgb", CVAR_ARCHIVE }
 cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
-cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
-cvar_t  r_dynamic_zero_cost_debug = { "r_dynamic_zero_cost_debug", "0", CVAR_NONE };
+cvar_t  r_lightstyles_zero_cost_debug = { "r_lightstyles_zero_cost_debug", "0", CVAR_NONE };
 cvar_t  r_beam_clustered_lighting = { "r_beam_clustered_lighting", "0", CVAR_NONE };
 /* Clustered-light controls. */
-cvar_t  r_clustered_light_enable = { "r_clustered_light_enable", "1", CVAR_ARCHIVE };
+cvar_t  r_clustered_lights = { "r_clustered_lights", "1", CVAR_ARCHIVE };
 cvar_t  r_clustered_light_radius_scale = { "r_clustered_light_radius_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_clustered_light_debug_visualize = { "r_clustered_light_debug_visualize", "0", CVAR_NONE };
-/* Deprecated compatibility aliases for legacy dynamic light controls. */
-cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE };
-cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
-cvar_t  r_clustered_lighting = { "r_clustered_lighting", "1", CVAR_ARCHIVE };
+cvar_t  r_clustered_light_debug = { "r_clustered_light_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices_low = { "r_clustered_zslices_low", "16", CVAR_ARCHIVE };
@@ -4116,7 +4110,7 @@ void R_SetupView (void)
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
 	r_framedata.clustered_light_params[0] = CLAMP (0.f, r_clustered_light_debug_visualize.value, 1.f);
 	r_framedata.clustered_light_params[1] = CLAMP (0.f, r_clustered_debug.value, 2.f);
-	r_framedata.clustered_light_params[2] = (r_clustered_lighting.value > 0.f) ? 1.f : 0.f;
+	r_framedata.clustered_light_params[2] = (r_clustered_lights.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
 	r_framedata.clustered_light_params[3] = CLAMP (0.f, r_clustered_light_radius_scale.value, 3.f);
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
@@ -5315,7 +5309,7 @@ void R_RenderScene (void)
 	R_StateDebugMark ("WORLD_AFTER_GEOMETRY");
 	R_ClusterPerf_EndFrame ();
 	r_perf_stats.frame_ms = (Sys_DoubleTime () - r_perf_stats.frame_begin_time) * 1000.0;
-	if (r_dynamic_zero_cost_debug.value > 0.f)
+	if (r_lightstyles_zero_cost_debug.value > 0.f)
 	{
 		Con_Printf ("RPERF frame_ms=%.3f world_draws=%d alias_draws=%d particles_draws=%d beams=%d cluster_build=%d dlight_shadow=%d world_ms=%.3f alias_ms=%.3f particles_ms=%.3f dlight_shadow_ms=%.3f num_dlights=%u\n",
 			r_perf_stats.frame_ms,
