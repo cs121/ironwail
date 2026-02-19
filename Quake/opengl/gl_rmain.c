@@ -499,6 +499,10 @@ typedef struct r_perf_stats_s {
 	double beams_ms;
 	double dlight_shadow_ms;
 	double cluster_push_ms;
+	double cluster_build_ms;
+	double cluster_upload_ms;
+	int cluster_indices;
+	unsigned int cluster_lights;
 	double frame_ms;
 } r_perf_stats_t;
 
@@ -515,6 +519,10 @@ void R_PerfStats_AddAliasDrawCalls (int count) { if (count > 0) r_perf_stats.ali
 void R_PerfStats_AddParticleDrawCalls (int count) { if (count > 0) r_perf_stats.particle_draw_calls += count; }
 void R_PerfStats_AddBeamEntities (int count) { if (count > 0) r_perf_stats.beam_entities += count; }
 void R_PerfStats_SetClusterBuildRan (qboolean ran) { r_perf_stats.clustered_build_ran = ran; }
+void R_PerfStats_SetClusterBuildMS (double ms) { r_perf_stats.cluster_build_ms = ms; }
+void R_PerfStats_SetClusterUploadMS (double ms) { r_perf_stats.cluster_upload_ms = ms; }
+void R_PerfStats_SetClusterIndices (int indices) { r_perf_stats.cluster_indices = q_max (0, indices); }
+void R_PerfStats_SetClusterLights (unsigned int lights) { r_perf_stats.cluster_lights = lights; }
 void R_PerfStats_SetDlightShadowPassRan (qboolean ran) { r_perf_stats.dlight_shadow_pass_ran = ran; }
 
 //
@@ -5311,13 +5319,17 @@ void R_RenderScene (void)
 	r_perf_stats.frame_ms = (Sys_DoubleTime () - r_perf_stats.frame_begin_time) * 1000.0;
 	if (r_lightstyles_zero_cost_debug.value > 0.f)
 	{
-		Con_Printf ("RPERF frame_ms=%.3f world_draws=%d alias_draws=%d particles_draws=%d beams=%d cluster_build=%d dlight_shadow=%d world_ms=%.3f alias_ms=%.3f particles_ms=%.3f dlight_shadow_ms=%.3f num_dlights=%u\n",
+		Con_Printf ("RPERF frame_ms=%.3f world_draws=%d alias_draws=%d particles_draws=%d beams=%d cluster_build=%d cluster_build_ms=%.3f cluster_upload_ms=%.3f cluster_indices=%d cluster_lights=%u dlight_shadow=%d world_ms=%.3f alias_ms=%.3f particles_ms=%.3f dlight_shadow_ms=%.3f num_dlights=%u\n",
 			r_perf_stats.frame_ms,
 			r_perf_stats.world_draw_calls,
 			r_perf_stats.alias_draw_calls,
 			r_perf_stats.particle_draw_calls,
 			r_perf_stats.beam_entities,
 			r_perf_stats.clustered_build_ran ? 1 : 0,
+			r_perf_stats.cluster_build_ms,
+			r_perf_stats.cluster_upload_ms,
+			r_perf_stats.cluster_indices,
+			r_perf_stats.cluster_lights,
 			r_perf_stats.dlight_shadow_pass_ran ? 1 : 0,
 			r_perf_stats.world_ms,
 			r_perf_stats.alias_ms,
