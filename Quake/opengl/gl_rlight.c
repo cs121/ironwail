@@ -624,6 +624,16 @@ static struct {
 	int num_barriers;
 } r_clustered;
 
+qboolean R_ClusteredShadingActive (void)
+{
+	return r_clustered.shading_enabled;
+}
+
+unsigned int R_ClusteredSubmittedLightCount (void)
+{
+	return (unsigned int)r_framedata.numlights;
+}
+
 static double R_ClusteredNowMS (void)
 {
 	return Sys_DoubleTime () * 1000.0;
@@ -1654,6 +1664,7 @@ void R_PushDlights (void)
 	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
+	R_PerfStats_SetClusterBuildRan (false);
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 	if (r_clustered.last_frame_built != r_framecount)
 	{
@@ -1682,6 +1693,7 @@ void R_PushDlights (void)
 	}
 
 	R_ClusterPerf_BeginLightUpload ();
+	r_framedata.clustered_light_params[2] = (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
 	R_UploadFrameData ();
 	R_ClusterPerf_EndLightUpload ();
 
@@ -1701,9 +1713,10 @@ void R_PushDlights (void)
 		return;
 	}
 
-	if (r_clustered_lighting.value > 0.f)
+	if (r_clustered_lighting.value > 0.f && r_framedata.numlights > 0)
 	{
 		GL_BeginGroup ("Light clustering");
+		R_PerfStats_SetClusterBuildRan (true);
 		R_ClusterPerf_BeginBuild ();
 		R_Clustered_BuildLists ();
 		R_ClusterPerf_EndBuild ();

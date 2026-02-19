@@ -671,6 +671,7 @@ ibuf.global.rim_params2[3] = CLAMP (0.f, r_rim_debug.value, 3.f);
 		GL_BindTextures (0, 3, textures);
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
+		R_PerfStats_AddAliasDrawCalls (1);
 
 		rs_aliaspasses += hdr->numtris * ibuf.count;
 	}
@@ -769,6 +770,7 @@ static void R_FlushAliasInstances_Shadow (void)
 		GL_BindBuffersRange (GL_SHADER_STORAGE_BUFFER, 1, 2, buffers, offsets, sizes);
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
+		R_PerfStats_AddAliasDrawCalls (1);
 
 		rs_aliaspasses += hdr->numtris * ibuf.count;
 	}
