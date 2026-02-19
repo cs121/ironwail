@@ -43,6 +43,7 @@ extern cvar_t r_clustered_zslices_low_lights;
 extern cvar_t r_clustered_maxindices;
 extern cvar_t r_clustered_debug;
 extern cvar_t r_clustered_log;
+extern cvar_t r_clustered_sanity_debug;
 extern cvar_t r_clustered_profile;
 extern cvar_t r_clustered_profile_dumpinterval;
 extern cvar_t r_clustered_validate;
@@ -628,6 +629,9 @@ static struct {
 	int num_glget_calls_in_bind;
 	int num_buffer_allocs;
 	int num_barriers;
+	unsigned int last_upload_light_count;
+	qboolean build_ran_this_frame;
+	qboolean bind_ran_this_frame;
 } r_clustered;
 
 qboolean R_ClusteredShadingActive (void)
@@ -1275,6 +1279,7 @@ static void R_ClusteredResetFrameState (const cluster_runtime_params_t *runtime)
 	double upload_start_ms;
 
 	r_clustered.shading_enabled = false;
+	r_clustered.last_upload_light_count = 0;
 	R_ClusteredFillParamsUBO (&params, runtime);
 	r_clustered.upload_calls++;
 	r_clustered.last_frame_uploaded = r_framecount;
@@ -1460,6 +1465,7 @@ static void R_Clustered_CommitLists (const clustered_async_frame_t *frame)
 		return;
 
 	r_clustered.upload_calls++;
+	r_clustered.last_upload_light_count = (unsigned int)frame->snapshot.num_lights;
 	r_clustered.last_frame_uploaded = r_framecount;
 	upload_start_ms = R_ClusteredNowMS ();
 	for (i = 0; i < frame->num_jobs; ++i)
@@ -1538,6 +1544,7 @@ void R_Clustered_BuildLists (void)
 		return;
 
 	r_clustered.build_calls++;
+	r_clustered.build_ran_this_frame = true;
 	r_clustered.last_frame_built = r_framecount;
 
 	if (r_framedata.numlights == 0)
@@ -1642,6 +1649,7 @@ void R_Clustered_BindForShading (void)
 	R_ClusterPerf_EndClusterBindBarrier ();
 	r_clustered.bind_ms_total += R_ClusteredNowMS () - bind_start_ms;
 	r_clustered.shading_bound = true;
+	r_clustered.bind_ran_this_frame = true;
 }
 
 
@@ -1783,8 +1791,16 @@ void R_PushDlights (void)
 {
 	qboolean clustered_enabled;
 	dlight_t *submit[DLIGHT_GPU_MAX];
+	dlight_filter_debug_t filter_stats;
+	int final_filtered_count;
+	int upload_count;
+	int enable_flag;
+	int indices_count;
 
 	r_framedata.numlights = 0;
+	r_clustered.last_upload_light_count = 0;
+	r_clustered.build_ran_this_frame = false;
+	r_clustered.bind_ran_this_frame = false;
 	R_PerfStats_SetClusterBuildRan (false);
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 	if (r_clustered.last_frame_built != r_framecount)
@@ -1811,6 +1827,18 @@ void R_PushDlights (void)
 		if (num_submit > 0)
 			R_PushDlightArray (submit, num_submit);
 		DLightPool_DebugPrint ();
+	}
+
+	DLightPool_GetFilterDebug (&filter_stats, NULL);
+	final_filtered_count = filter_stats.final_active_count;
+	if (final_filtered_count < 0)
+		final_filtered_count = 0;
+	if ((unsigned int)final_filtered_count != r_framedata.numlights)
+	{
+		Con_Printf ("CLUSTERERR desync final_filtered=%d framedata_numlights=%u (R_PushDlights)\n",
+			final_filtered_count, r_framedata.numlights);
+		if (final_filtered_count > 0)
+			r_framedata.numlights = (unsigned int)q_min (final_filtered_count, DLIGHT_GPU_MAX);
 	}
 
 	R_ClusterPerf_BeginLightUpload ();
@@ -1859,6 +1887,35 @@ void R_PushDlights (void)
 		R_ClusterPerf_MarkReason (r_clustered_light_enable.value <= 0.f ? "clustered disabled" : "cluster build skipped (numlights=0)");
 	}
 	R_ClusterPerf_EndPush ();
+
+	upload_count = (int)r_clustered.last_upload_light_count;
+	enable_flag = r_framedata.clustered_light_params[2] > 0.f ? 1 : 0;
+	indices_count = (int)r_clustered.debug_indices_written_count;
+	if (final_filtered_count > 0 && upload_count == 0)
+	{
+		Con_Printf ("CLUSTERERR desync final_filtered=%d framedata_numlights=%u upload_count=%d enable=%d build=%d bind=%d indices=%d (R_PushDlights)\n",
+			final_filtered_count,
+			r_framedata.numlights,
+			upload_count,
+			enable_flag,
+			r_clustered.build_ran_this_frame ? 1 : 0,
+			r_clustered.bind_ran_this_frame ? 1 : 0,
+			indices_count);
+	}
+	if (r_clustered_sanity_debug.value > 0.f)
+	{
+		Con_Printf ("CLSANITY frame=%d created=%d after_merge=%d final=%d framedata_numlights=%u upload_count=%d enable=%d build_ran=%d bind_ran=%d indices=%d\n",
+			r_framecount,
+			filter_stats.created_count,
+			filter_stats.after_merge_count,
+			final_filtered_count,
+			r_framedata.numlights,
+			upload_count,
+			enable_flag,
+			r_clustered.build_ran_this_frame ? 1 : 0,
+			r_clustered.bind_ran_this_frame ? 1 : 0,
+			indices_count);
+	}
 
 }
 
