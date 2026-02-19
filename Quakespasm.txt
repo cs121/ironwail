@@ -1265,7 +1265,7 @@
   -  Changes to default console alpha, speed
 
   -  Changes to cvar persistence gl_flashblend (default 0), r_shadow,
-     r_wateralpha, r_dynamic, r_novis.
+     r_wateralpha, r_clustered_lights, r_novis.
 
 
   6. Copyright

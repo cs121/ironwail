@@ -168,7 +168,7 @@ extern cvar_t gl_compress_textures;
 extern cvar_t gl_lodbias;
 extern cvar_t r_softemu_metric;
 extern cvar_t r_particles;
-extern cvar_t r_dynamic;
+extern cvar_t r_clustered_lights;
 extern cvar_t host_maxfps;
 extern cvar_t scr_showfps;
 extern cvar_t scr_pixelaspect;

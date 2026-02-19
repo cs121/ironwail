@@ -73,14 +73,10 @@ extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
-extern cvar_t r_clustered_light_enable;
+extern cvar_t r_clustered_lights;
 extern cvar_t r_clustered_light_radius_scale;
 extern cvar_t r_clustered_light_debug_visualize;
-extern cvar_t r_dlight_enable;
-extern cvar_t r_dlight_radius_scale;
-extern cvar_t r_dlight_debug_visualize;
-extern cvar_t r_dlight_debug;
-extern cvar_t r_clustered_lighting;
+extern cvar_t r_clustered_light_debug;
 extern cvar_t r_clustered_tilesize;
 extern cvar_t r_clustered_zslices;
 extern cvar_t r_clustered_zslices_low;
@@ -138,48 +134,6 @@ extern cvar_t r_shadow_validate;
 extern cvar_t r_shadow_coord_debug;
 extern cvar_t r_shadow_comparefunc;
 extern cvar_t r_gl_verify_program;
-
-static qboolean r_clustered_light_compat_busy;
-static qboolean r_clustered_light_deprecated_warned;
-
-static void R_ClusteredLight_PrintDeprecatedWarning (const cvar_t *var)
-{
-	if (r_clustered_light_deprecated_warned)
-		return;
-
-	Con_Printf ("%s is deprecated; use r_clustered_light_enable/r_clustered_light_radius_scale/r_clustered_light_debug_visualize.\n", var->name);
-	r_clustered_light_deprecated_warned = true;
-}
-
-static void R_ClusteredLight_MasterCallback (cvar_t *var)
-{
-	(void)var;
-	if (r_clustered_light_compat_busy)
-		return;
-
-	r_clustered_light_compat_busy = true;
-	Cvar_SetValueQuick (&r_dlight_enable, r_clustered_light_enable.value > 0.f ? 1.f : 0.f);
-	Cvar_SetValueQuick (&r_dlight_radius_scale, r_clustered_light_radius_scale.value);
-	Cvar_SetValueQuick (&r_dlight_debug_visualize, r_clustered_light_debug_visualize.value);
-	r_clustered_light_compat_busy = false;
-}
-
-static void R_ClusteredLight_LegacyCallback (cvar_t *var)
-{
-	if (r_clustered_light_compat_busy)
-		return;
-
-	R_ClusteredLight_PrintDeprecatedWarning (var);
-	r_clustered_light_compat_busy = true;
-	if (var == &r_dlight_enable)
-		Cvar_SetValueQuick (&r_clustered_light_enable, var->value > 0.f ? 1.f : 0.f);
-	else if (var == &r_dlight_radius_scale)
-		Cvar_SetValueQuick (&r_clustered_light_radius_scale, var->value);
-	else if (var == &r_dlight_debug_visualize)
-		Cvar_SetValueQuick (&r_clustered_light_debug_visualize, var->value);
-	r_clustered_light_compat_busy = false;
-	R_ClusteredLight_MasterCallback (NULL);
-}
 
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
@@ -675,24 +629,12 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_wateralpha);
         Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
         Cvar_RegisterVariable (&r_litwater);
-        Cvar_RegisterVariable (&r_dynamic);
-        Cvar_RegisterVariable (&r_dynamic_zero_cost_debug);
+        Cvar_RegisterVariable (&r_clustered_lights);
+        Cvar_RegisterVariable (&r_lightstyles_zero_cost_debug);
         Cvar_RegisterVariable (&r_beam_clustered_lighting);
-        Cvar_RegisterVariable (&r_clustered_light_enable);
         Cvar_RegisterVariable (&r_clustered_light_radius_scale);
         Cvar_RegisterVariable (&r_clustered_light_debug_visualize);
-        Cvar_RegisterVariable (&r_dlight_enable);
-        Cvar_RegisterVariable (&r_dlight_radius_scale);
-        Cvar_RegisterVariable (&r_dlight_debug_visualize);
-        Cvar_RegisterVariable (&r_dlight_debug);
-        Cvar_SetCallback (&r_clustered_light_enable, R_ClusteredLight_MasterCallback);
-        Cvar_SetCallback (&r_clustered_light_radius_scale, R_ClusteredLight_MasterCallback);
-        Cvar_SetCallback (&r_clustered_light_debug_visualize, R_ClusteredLight_MasterCallback);
-        Cvar_SetCallback (&r_dlight_enable, R_ClusteredLight_LegacyCallback);
-        Cvar_SetCallback (&r_dlight_radius_scale, R_ClusteredLight_LegacyCallback);
-        Cvar_SetCallback (&r_dlight_debug_visualize, R_ClusteredLight_LegacyCallback);
-        R_ClusteredLight_MasterCallback (NULL);
-        Cvar_RegisterVariable (&r_clustered_lighting);
+        Cvar_RegisterVariable (&r_clustered_light_debug);
         Cvar_RegisterVariable (&r_clustered_tilesize);
         Cvar_RegisterVariable (&r_clustered_zslices);
         Cvar_RegisterVariable (&r_clustered_zslices_low);

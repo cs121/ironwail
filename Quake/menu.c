@@ -3875,7 +3875,7 @@ void M_AdjustSliders (int dir)
 		VID_Menu_ChooseNextAlphaMode (dir);
 		break;
         case OPT_DLIGHTS:
-                Cbuf_AddText ("toggle r_dynamic\n");
+                Cbuf_AddText ("toggle r_clustered_lights\n");
                 break;
 	case OPT_SOFTEMU:
 		Cvar_SetValueQuick (&r_softemu, (int)(q_max (r_softemu.value, 0.f) + 4 + dir) % 4);
@@ -4494,7 +4494,7 @@ static void M_Options_DrawItem (int y, int item)
 		M_Print (x, y, VID_Menu_GetAlphaModeDesc ());
 		break;
         case OPT_DLIGHTS:
-                M_DrawCheckbox (x, y, r_dynamic.value);
+                M_DrawCheckbox (x, y, r_clustered_lights.value);
                 break;
 	case OPT_SOFTEMU:
 		M_Print (x, y, VID_Menu_GetSoftEmuDesc ());
