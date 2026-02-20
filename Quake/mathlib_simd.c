@@ -209,9 +209,12 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 {
 	float		sr, sp, sy, cr, cp, cy;
 
-	sincosf(angles[YAW]   * M_PI_DIV_180, &sy, &cy);
-	sincosf(angles[PITCH] * M_PI_DIV_180, &sp, &cp);
-	sincosf(angles[ROLL]  * M_PI_DIV_180, &sr, &cr);
+	sy = sinf(angles[YAW]   * M_PI_DIV_180);
+	cy = cosf(angles[YAW]   * M_PI_DIV_180);
+	sp = sinf(angles[PITCH] * M_PI_DIV_180);
+	cp = cosf(angles[PITCH] * M_PI_DIV_180);
+	sr = sinf(angles[ROLL]  * M_PI_DIV_180);
+	cr = cosf(angles[ROLL]  * M_PI_DIV_180);
 
 	forward[0] = cp*cy;
 	forward[1] = cp*sy;
@@ -565,13 +568,6 @@ void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3])
 		   But in2 is stored row-major [row][col], so in2[r][c].
 		   col j of in2 = (in2[0][j], in2[1][j], in2[2][j])              */
 
-		/* Load in2 rows as SSE (only 3 elements used, 4th padding fine)  */
-		__m128 r2_0 = _mm_set_ps (0, in2[0][2], in2[0][1], in2[0][0]);
-		__m128 r2_1 = _mm_set_ps (0, in2[1][2], in2[1][1], in2[1][0]);
-		__m128 r2_2 = _mm_set_ps (0, in2[2][2], in2[2][1], in2[2][0]);
-
-		/* Transpose in2 to get columns */
-		/* col j = (r2_0[j], r2_1[j], r2_2[j]) */
 		/* out[i][j] = dot(in1[i], col_j_of_in2) */
 
 		int i, j;
@@ -634,25 +630,12 @@ void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4])
 			/* col 3 of in2 (translation part) */
 			__m128 c3 = _mm_set_ps (0, in2[2][3], in2[1][3], in2[0][3]);
 
-			/* mask to use only xyz of row1 */
-			__m128 xyz = _mm_set_ps (0, 1, 1, 1);
 			__m128 r   = _mm_and_ps (row1, _mm_castsi128_ps (_mm_set_epi32 (0, -1, -1, -1)));
 
-			#define HDOT3(a, b) do { \
-				__m128 p = _mm_mul_ps (a, b); \
-				__m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); \
-				p = _mm_add_ps (p, s); \
-				s = _mm_movehl_ps (s, p); \
-				p = _mm_add_ss (p, s); \
-				out[i][_j] = _mm_cvtss_f32 (p); \
-			} while(0)
-
-			{ int _j = 0; __m128 p = _mm_mul_ps (r, c0); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][0] = _mm_cvtss_f32(p); }
-			{ int _j = 1; __m128 p = _mm_mul_ps (r, c1); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][1] = _mm_cvtss_f32(p); }
-			{ int _j = 2; __m128 p = _mm_mul_ps (r, c2); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][2] = _mm_cvtss_f32(p); }
-			{ int _j = 3; __m128 p = _mm_mul_ps (r, c3); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][3] = _mm_cvtss_f32(p) + in1[i][3]; }
-
-			#undef HDOT3
+			{ __m128 p = _mm_mul_ps (r, c0); __m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); p = _mm_add_ps (p, s); s = _mm_movehl_ps (s, p); p = _mm_add_ss (p, s); out[i][0] = _mm_cvtss_f32 (p); }
+			{ __m128 p = _mm_mul_ps (r, c1); __m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); p = _mm_add_ps (p, s); s = _mm_movehl_ps (s, p); p = _mm_add_ss (p, s); out[i][1] = _mm_cvtss_f32 (p); }
+			{ __m128 p = _mm_mul_ps (r, c2); __m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); p = _mm_add_ps (p, s); s = _mm_movehl_ps (s, p); p = _mm_add_ss (p, s); out[i][2] = _mm_cvtss_f32 (p); }
+			{ __m128 p = _mm_mul_ps (r, c3); __m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); p = _mm_add_ps (p, s); s = _mm_movehl_ps (s, p); p = _mm_add_ss (p, s); out[i][3] = _mm_cvtss_f32 (p) + in1[i][3]; }
 		}
 		return;
 	}
