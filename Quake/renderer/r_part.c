@@ -40,7 +40,6 @@ static float uvscale;
 static float texturescalefactor; //johnfitz -- compensate for apparent size of different particle textures
 
 cvar_t	r_particles = {"r_particles","2", CVAR_ARCHIVE}; //johnfitz
-extern cvar_t r_particles_debug;
 
 typedef struct particlevert_t {
 	vec3_t		pos;
@@ -704,11 +703,6 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
 	oit = (alpha && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
-	if (r_particles_debug.value > 0.f)
-	{
-		dither = false;
-		oit = false;
-	}
 	GL_UseProgram (glprogs.particles[oit][dither]);
 
 	// compensate for apparent size of different particle textures
@@ -768,3 +762,4 @@ void R_DrawParticles_ShowTris (void)
 {
 	R_DrawParticles_Real (false, true);
 }
+

@@ -1,147 +1,62 @@
-// cluster_prefix.comp — Optimized
-// 
-// FIXES vs. original:
-//  - CRITICAL: original ran the entire prefix-sum on a SINGLE GPU thread.
-//    Now uses a two-phase parallel approach:
-//      Pass 0 (clear):  1 invocation per cluster, clears headers + tempCounts in parallel.
-//      Pass 1 (prefix): parallel prefix sum via shared memory (Blelloch scan),
-//                       processes 128 clusters per workgroup.
-//  - Branch on passMode moved outside the main loop (compile-time specialization
-//    via a second layout or uniform branch hoisting).
-//  - tempCounts zeroing folded into the prefix pass (no extra dispatch needed).
-
-layout(local_size_x=128, local_size_y=1, local_size_z=1) in;
+layout(local_size_x=64, local_size_y=1, local_size_z=1) in;
 
 struct ClusterHeader
 {
-    uint offset;
-    uint count;
+	uint offset;
+	uint count;
 };
 
-layout(std430, binding=4) buffer ClusterHeaderBuffer  { ClusterHeader headers[]; };
-layout(std430, binding=6) buffer ClusterCounterBuffer { uint clusterAlloc; uint overflowCount; uint prefixAlloc; };
-layout(std430, binding=7) buffer ClusterTempCountBuffer { uint tempCounts[]; };
+layout(std430, binding=4) buffer ClusterHeaderBuffer
+{
+	ClusterHeader headers[];
+};
+
+layout(std430, binding=6) buffer ClusterCounterBuffer
+{
+	uint clusterAlloc;
+	uint overflowCount;
+};
+
+layout(std430, binding=7) buffer ClusterTempCountBuffer
+{
+	uint tempCounts[];
+};
 
 layout(std140, binding=1) uniform ClusterBuildParams
 {
-    ivec4 BuildInfo; // x=passMode (0=clear,1=prefix), y=numLights, z=clusterCount
+	ivec4 BuildInfo; // x=passMode (0=clear,1=prefix), y=numLights, z=clusterCount
 };
-
-// ---- shared memory for parallel prefix sum ----
-shared uint sData[128];
 
 void main()
 {
-    uint clusterCount = uint(max(BuildInfo.z, 0));
-    uint gid = gl_GlobalInvocationID.x;
-    uint lid = gl_LocalInvocationID.x;
+	if (gl_GlobalInvocationID.x != 0u)
+		return;
 
-    // ------------------------------------------------------------------ CLEAR
-    if (BuildInfo.x == 0)
-    {
-        // One thread per cluster — fully parallel clear.
-        if (gid < clusterCount)
-        {
-            headers[gid].offset = 0u;
-            headers[gid].count  = 0u;
-            tempCounts[gid]     = 0u;
-        }
-        if (gid == 0u)
-        {
-            overflowCount = 0u;
-            prefixAlloc = 0u;
-            // clusterAlloc is set by the host before this pass; don't reset here.
-        }
-        return;
-    }
+	uint clusterCount = uint(max(BuildInfo.z, 0));
+	if (BuildInfo.x == 0)
+	{
+		for (uint i = 0u; i < clusterCount; ++i)
+		{
+			headers[i].offset = 0u;
+			headers[i].count = 0u;
+			tempCounts[i] = 0u;
+		}
+		overflowCount = 0u;
+		return;
+	}
 
-    // ----------------------------------------------------------------- PREFIX
-    // Parallel exclusive prefix sum (Blelloch / work-efficient scan).
-    // Each workgroup processes 128 consecutive clusters.
-    // Host must dispatch ceil(clusterCount / 128) workgroups.
-    //
-    // For clusterCount > 128 a multi-level scan would be ideal, but in practice
-    // cluster counts are small (e.g. 16x9x24 = 3456) so a single-level scan
-    // with a loop over tiles is sufficient and avoids driver complexity.
-    //
-    // Simple approach: each workgroup handles its tile independently,
-    // accumulating a running base offset via a global atomic (one per workgroup).
-    // This is correct as long as workgroups execute the atomic in order, which
-    // is enforced by the host dispatching prefix passes sequentially or by
-    // using a spin-wait on a counter — kept simple here with a single dispatch.
-    //
-    // For maximum correctness at any cluster count, the host should dispatch
-    // this shader with local_size=128 and clusterCount threads total, but
-    // serialize workgroups via the globalPrefix trick below.
+	uint prefix = 0u;
+	for (uint i = 0u; i < clusterCount; ++i)
+	{
+		uint count = headers[i].count;
+		uint remaining = (prefix < clusterAlloc) ? (clusterAlloc - prefix) : 0u;
+		if (count > remaining)
+			count = remaining;
+		headers[i].count = count;
+		headers[i].offset = prefix;
+		tempCounts[i] = 0u;
+		prefix += count;
+	}
 
-    uint base = gl_WorkGroupID.x * 128u;
-
-    // Load counts into shared memory
-    uint myCount = 0u;
-    if (base + lid < clusterCount)
-        myCount = headers[base + lid].count;
-    sData[lid] = myCount;
-
-    barrier();
-    memoryBarrierShared();
-
-    // Up-sweep (reduce)
-    for (uint stride = 1u; stride < 128u; stride <<= 1u)
-    {
-        uint idx = (lid + 1u) * (stride << 1u) - 1u;
-        if (idx < 128u)
-            sData[idx] += sData[idx - stride];
-        barrier();
-        memoryBarrierShared();
-    }
-
-    // Store total for this workgroup and clear last element
-    uint wgTotal = sData[127];
-    if (lid == 127u) sData[127] = 0u;
-    barrier();
-    memoryBarrierShared();
-
-    // Down-sweep
-    for (uint stride = 64u; stride >= 1u; stride >>= 1u)
-    {
-        uint idx = (lid + 1u) * (stride << 1u) - 1u;
-        if (idx < 128u)
-        {
-            uint tmp    = sData[idx - stride];
-            sData[idx - stride] = sData[idx];
-            sData[idx]          = sData[idx] + tmp;
-        }
-        barrier();
-        memoryBarrierShared();
-    }
-
-    // Claim an exclusive base offset for this workgroup.
-    uint wgBase = 0u;
-    if (lid == 0u)
-        wgBase = atomicAdd(prefixAlloc, wgTotal);
-    // Broadcast wgBase to all threads in workgroup
-    sData[0] = (lid == 0u) ? wgBase : 0u; // reuse shared mem slot
-    barrier();
-    memoryBarrierShared();
-    wgBase = sData[0];
-    barrier();
-
-    // Write results
-    uint cap = clusterAlloc;
-    if (base + lid < clusterCount)
-    {
-        uint localOff  = sData[lid];          // exclusive prefix within workgroup
-        uint globalOff = wgBase + localOff;   // global offset
-        uint cnt       = myCount;
-
-        // Clamp count to remaining capacity
-        uint remaining = (globalOff < cap) ? cap - globalOff : 0u;
-        if (cnt > remaining) cnt = remaining;
-
-        headers[base + lid].count  = cnt;
-        headers[base + lid].offset = globalOff;
-        tempCounts[base + lid]     = 0u;
-    }
-
-    // overflowCount remains a dedicated overflow flag/counter for the fill pass.
+	overflowCount = 0u;
 }

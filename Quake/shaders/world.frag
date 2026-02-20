@@ -554,81 +554,26 @@ void main()
 		return;
 	}
 
-	else if (ClusterDebugMode == 5 || ClusterDebugMode == 6)
-	{
-		float debugAtten = 0.0;
-		float debugDelta = 0.0;
-		if (clusterActive)
-		{
-			ClusterHeader dbgHeader;
-			int dbgClusterIdx;
-			if (ClusterResolve(gl_FragCoord.xy, in_depth, dbgClusterIdx, dbgHeader) && dbgHeader.count > 0u)
-			{
-				uint lightId;
-				PackedLight pl = ClusterFetchLight(dbgHeader, 0u, lightId);
-				vec3 lightOrigin = pl.posRadius.xyz;
-				float radius = pl.posRadius.w;
-				vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-				float dist = dot(lightOrigin, plane.xyz) - plane.w;
-				float rad = radius - abs(dist);
-				if (rad > 0.0)
-				{
-					vec3 local_pos = lightOrigin - plane.xyz * dist;
-					vec3 light_vec_real = local_pos - in_pos;
-					float real_surface_dist = length(light_vec_real);
-					float attenuation_real = clamp((rad - real_surface_dist) / 16.0, 0.0, 1.0);
-
-					vec2 tileCenterPx = (vec2(float(tileX), float(tileY)) + vec2(0.5)) * float(ClusterTileSize);
-					float zNorm = (float(zSlice) + 0.5) / max(float(ClusterZSlices), 1.0);
-					float viewDepthQ = exp2((zNorm * float(ClusterZSlices) - ClusterZLogBias) / max(ClusterZLogScale, 1e-4));
-					vec2 ndc = tileCenterPx / vec2(ClusterScreenSize) * 2.0 - 1.0;
-					vec3 viewPosQ = vec3(
-						ndc.x * viewDepthQ / max(abs(ClusterProjMatrix[0][0]), 1e-4),
-						ndc.y * viewDepthQ / max(abs(ClusterProjMatrix[1][1]), 1e-4),
-						-viewDepthQ);
-					vec3 worldPosQ = (inverse(ClusterViewMatrix) * vec4(viewPosQ, 1.0)).xyz;
-					vec3 light_vec_quant = local_pos - worldPosQ;
-					float quant_surface_dist = length(light_vec_quant);
-					float attenuation_quant = clamp((rad - quant_surface_dist) / 16.0, 0.0, 1.0);
-
-					debugAtten = attenuation_real;
-					debugDelta = abs(attenuation_real - attenuation_quant);
-				}
-			}
-		}
-		OUT_COLOR = (ClusterDebugMode == 5) ? vec4(vec3(debugAtten), 1.0) : vec4(clamp(debugDelta * 8.0, 0.0, 1.0), 0.0, 0.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	else if (ClusterDebugMode == 7)
-	{
-		float d = clamp((in_depth - ClusterNearPlane) / max(ClusterFarPlane - ClusterNearPlane, 1e-4), 0.0, 1.0);
-		OUT_COLOR = vec4(vec3(d), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-
 	// Dynamic lights (clustered lighting)
 	if (clusterActive)
 	{
 		ClusterHeader header;
+		uint clusterCount;
 		int resolvedClusterIdx;
-		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header))
-			header.count = 0u;
-		if (header.count > 0u)
+		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header, clusterCount))
+			clusterCount = 0u;
+		if (clusterCount > 0u)
 		{
 			vec3 dynamic_light = vec3(0.0);
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
-		for (uint i = 0u; i < header.count; ++i)
+		for (uint i = 0u; i < clusterCount; ++i)
 		{
 			uint lightId;
-			PackedLight pl = ClusterFetchLight(header, i, lightId);
+			PackedLight pl;
+			if (!ClusterFetchLight(header, i, lightId, pl))
+				continue;
 			vec3 lightOrigin = pl.posRadius.xyz;
 			float radius = pl.posRadius.w;
 			vec3 lightColor = pl.colorIntensity.rgb;

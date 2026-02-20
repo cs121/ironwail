@@ -1,158 +1,121 @@
-// cluster_lights.comp — Optimized
-//
-// FIXES vs. original:
-//  1. Branch `if (BuildInfo.x == 0)` was evaluated inside every cluster iteration
-//     (hot inner loop). Hoisted to top-level with early-out specialization.
-//  2. Added sphere-vs-frustum tile intersection test (conservative AABB was
-//     assigning lights to tiles they don't actually touch — O(tiles) wasted
-//     atomic ops per light).
-//  3. Pixel-space radius calculation now correctly accounts for asymmetric proj.
-//  4. Cluster index computation uses uint arithmetic to avoid signed overflow UB.
-//  5. atomicAdd on overflowCount accumulated one call per overflow write;
-//     now counted once per invocation at the end.
-//  6. `radius <= 0.0` check moved before expensive matrix multiply.
-
 layout(local_size_x=64, local_size_y=1, local_size_z=1) in;
 
 layout(std140, binding=1) uniform ClusterBuildParams
 {
-    ivec4 BuildInfo; // x=passMode (0=count,1=fill), y=numLights
+	ivec4 BuildInfo; // x=passMode (0=count,1=fill), y=numLights
 };
 
 struct PackedLight
 {
-    vec4 posRadius;
-    vec4 colorIntensity;
-    ivec4 flags;
+	vec4 posRadius;
+	vec4 colorIntensity;
+	ivec4 flags;
 };
 
 struct ClusterHeader
 {
-    uint offset;
-    uint count;
+	uint offset;
+	uint count;
 };
 
-layout(std430, binding=3) readonly buffer PackedLightsBuffer  { PackedLight lights[]; };
-layout(std430, binding=4) buffer ClusterHeaderBuffer          { ClusterHeader headers[]; };
-layout(std430, binding=5) buffer ClusterIndexBuffer           { uint lightIndices[]; };
-layout(std430, binding=6) buffer ClusterCounterBuffer         { uint clusterAlloc; uint overflowCount; uint prefixAlloc; };
-layout(std430, binding=7) buffer ClusterTempCountBuffer       { uint tempCounts[]; };
+layout(std430, binding=3) readonly buffer PackedLightsBuffer
+{
+	PackedLight lights[];
+};
+
+layout(std430, binding=4) buffer ClusterHeaderBuffer
+{
+	ClusterHeader headers[];
+};
+
+layout(std430, binding=5) buffer ClusterIndexBuffer
+{
+	uint lightIndices[];
+};
+
+layout(std430, binding=6) buffer ClusterCounterBuffer
+{
+	uint clusterAlloc;
+	uint overflowCount;
+};
+
+layout(std430, binding=7) buffer ClusterTempCountBuffer
+{
+	uint tempCounts[];
+};
 
 layout(std140, binding=2) uniform ClusterParams
 {
-    ivec2 screenSize;
-    ivec2 gridXY;
-    int   zSlices;
-    float nearPlane;
-    float farPlane;
-    float zLogScale;
-    float zLogBias;
-    mat4  viewMatrix;
-    mat4  projMatrix;
-    mat4  invProj;
-    int   tileSize;
-    int   debugMode;
+	ivec2 screenSize;
+	ivec2 gridXY;
+	int zSlices;
+	float nearPlane;
+	float farPlane;
+	float zLogScale;
+	float zLogBias;
+	mat4 viewMatrix;
+	mat4 projMatrix;
+	mat4 invProj;
+	int tileSize;
+	int debugMode;
 };
 
 int zToSlice(float depth)
 {
-    return clamp(int(floor(log2(max(depth, 1e-4)) * zLogScale + zLogBias)), 0, zSlices - 1);
-}
-
-// Conservative sphere-vs-AABB tile test in NDC.
-// Returns true if the projected sphere overlaps the tile in screen space.
-bool sphereTileOverlap(vec2 centerNdc, vec2 radiusNdc, vec2 ndcMin, vec2 ndcMax)
-{
-    // Conservative AABB-vs-AABB overlap test in NDC.
-    // radiusNdc uses projection scale terms, so this remains conservative.
-    float halfW = (ndcMax.x - ndcMin.x) * 0.5;
-    float halfH = (ndcMax.y - ndcMin.y) * 0.5;
-    vec2  tileCenter = (ndcMin + ndcMax) * 0.5;
-    vec2  delta = abs(centerNdc - tileCenter);
-    if (delta.x > halfW + radiusNdc.x) return false;
-    if (delta.y > halfH + radiusNdc.y) return false;
-    return true;
+	return clamp(int(floor(log2(max(depth, 1e-4)) * zLogScale + zLogBias)), 0, zSlices - 1);
 }
 
 void main()
 {
-    uint lightId = gl_GlobalInvocationID.x;
-    if (lightId >= uint(BuildInfo.y))
-        return;
+	uint lightId = gl_GlobalInvocationID.x;
+	if (lightId >= uint(BuildInfo.y))
+		return;
 
-    PackedLight l = lights[lightId];
+	PackedLight l = lights[lightId];
+	vec4 v = viewMatrix * vec4(l.posRadius.xyz, 1.0);
+	// View-space forward is -Z; using X here breaks depth slicing and
+	// effectively culls most lights from clustered assignment.
+	float vz = max(1e-4, -v.z);
+	float radius = max(0.0, l.posRadius.w);
+	if (radius <= 0.0)
+		return;
 
-    // Early-out before matrix multiply
-    float radius = l.posRadius.w;
-    if (radius <= 0.0)
-        return;
+	vec4 clip = projMatrix * v;
+	if (clip.w <= 0.0001)
+		return;
+	vec2 ndc = clip.xy / clip.w;
+	float pixRadius = (radius / max(vz, 1e-4)) * float(screenSize.y) * 0.5;
+	vec2 centerPix = (ndc * 0.5 + 0.5) * vec2(screenSize);
 
-    // Transform to view space
-    vec4 v  = viewMatrix * vec4(l.posRadius.xyz, 1.0);
-    float vz = -v.z; // view-space depth (positive = in front)
+	int minX = clamp(int(floor((centerPix.x - pixRadius) / float(tileSize))), 0, gridXY.x - 1);
+	int maxX = clamp(int(floor((centerPix.x + pixRadius) / float(tileSize))), 0, gridXY.x - 1);
+	int minY = clamp(int(floor((centerPix.y - pixRadius) / float(tileSize))), 0, gridXY.y - 1);
+	int maxY = clamp(int(floor((centerPix.y + pixRadius) / float(tileSize))), 0, gridXY.y - 1);
 
-    // Light is behind near plane and sphere doesn't reach it → skip
-    if (vz + radius < nearPlane)
-        return;
+	int minZ = zToSlice(vz - radius);
+	int maxZ = zToSlice(vz + radius);
 
-    // Project center to clip space
-    vec4 clip = projMatrix * v;
-    if (clip.w <= 0.0001)
-        return;
-
-    vec2 ndc       = clip.xy / clip.w;
-    float vzSafe   = max(vz, 1e-4);
-    float pixRadius = (radius / vzSafe) * float(screenSize.y) * abs(projMatrix[1][1]) * 0.5;
-    vec2 ndcRadius = vec2(
-        (radius / vzSafe) * abs(projMatrix[0][0]),
-        (radius / vzSafe) * abs(projMatrix[1][1]));
-    vec2 centerPix  = (ndc * 0.5 + 0.5) * vec2(screenSize);
-
-    int minX = clamp(int(floor((centerPix.x - pixRadius) / float(tileSize))), 0, gridXY.x - 1);
-    int maxX = clamp(int(ceil ((centerPix.x + pixRadius) / float(tileSize))) - 1, 0, gridXY.x - 1);
-    int minY = clamp(int(floor((centerPix.y - pixRadius) / float(tileSize))), 0, gridXY.y - 1);
-    int maxY = clamp(int(ceil ((centerPix.y + pixRadius) / float(tileSize))) - 1, 0, gridXY.y - 1);
-    int minZ = zToSlice(max(vzSafe - radius, nearPlane));
-    int maxZ = zToSlice(vzSafe + radius);
-
-    // Hoist pass-mode branch OUTSIDE the cluster loop
-    bool isFillPass = (BuildInfo.x != 0);
-    uint cap        = clusterAlloc;
-    uint overflows  = 0u;
-
-    for (int z = minZ; z <= maxZ; ++z)
-    for (int y = minY; y <= maxY; ++y)
-    for (int x = minX; x <= maxX; ++x)
-    {
-        // Optional: per-tile sphere overlap refinement
-        // (reduces atomic pressure for large lights spanning many tiles)
-        vec2 ndcTileMin = vec2(float(x    ) * float(tileSize), float(y    ) * float(tileSize)) / vec2(screenSize) * 2.0 - 1.0;
-        vec2 ndcTileMax = vec2(float(x + 1) * float(tileSize), float(y + 1) * float(tileSize)) / vec2(screenSize) * 2.0 - 1.0;
-        if (!sphereTileOverlap(ndc, ndcRadius, ndcTileMin, ndcTileMax))
-            continue;
-
-        uint clusterIdx = uint((z * gridXY.y + y) * gridXY.x + x);
-
-        if (!isFillPass)
-        {
-            atomicAdd(headers[clusterIdx].count, 1u);
-        }
-        else
-        {
-            uint localIdx = atomicAdd(tempCounts[clusterIdx], 1u);
-            uint writeIdx = headers[clusterIdx].offset + localIdx;
-            if (writeIdx >= cap)
-            {
-                ++overflows; // accumulate, single atomic at end
-            }
-            else
-            {
-                lightIndices[writeIdx] = lightId;
-            }
-        }
-    }
-
-    // Single atomic for all overflows from this invocation
-    if (overflows > 0u)
-        atomicAdd(overflowCount, overflows);
+	for (int z = minZ; z <= maxZ; ++z)
+	for (int y = minY; y <= maxY; ++y)
+	for (int x = minX; x <= maxX; ++x)
+	{
+		uint clusterIdx = uint((z * gridXY.y + y) * gridXY.x + x);
+		if (BuildInfo.x == 0)
+		{
+			atomicAdd(headers[clusterIdx].count, 1u);
+		}
+		else
+		{
+			uint localIdx = atomicAdd(tempCounts[clusterIdx], 1u);
+			uint writeIdx = headers[clusterIdx].offset + localIdx;
+			if (writeIdx >= clusterAlloc)
+			{
+				atomicAdd(overflowCount, 1u);
+			}
+			else
+			{
+				lightIndices[writeIdx] = lightId;
+			}
+		}
+	}
 }
