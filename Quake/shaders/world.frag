@@ -485,14 +485,13 @@ void main()
 			total_light = clamped_static;
 			if (shadow_enabled)
 				total_light *= shadow_term;
-			total_light *= ambient_lightgrid;
 		}
 
 		float static_luma = EnvLightLuma(total_light);
 		float ao_hint = clamp(EnvLightLuma(in_lightgrid), 0.0, 1.0);
 		float visibility_hint = ComputeEnvVisibilityHint(shadow_term, shadow_enabled);
 		float indoor_factor = DeriveIndoorFactor(static_luma, ao_hint, visibility_hint);
-		float env_fill_strength = clamp(LightingParams.y, 0.0, 1.0);
+		float env_fill_strength = clamp(LightgridParams.w, 0.0, 1.0);
 		env_fill = EvaluateWorldEnvFill(total_light, ambient_lightgrid, indoor_factor, env_fill_strength);
 		total_light = clamp(total_light + env_fill, 0.0, 1.0);
 	
