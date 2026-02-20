@@ -478,6 +478,54 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 	return (const dlight_t *const *)dlight_pool.scratch;
 }
 
+static qboolean DLightPool_AABBIntersectsLeafBounds (const vec3_t mins, const vec3_t maxs, const mleaf_t *leaf)
+{
+	if (!leaf)
+		return false;
+
+	if (maxs[0] < leaf->minmaxs[0] || mins[0] > leaf->minmaxs[3])
+		return false;
+	if (maxs[1] < leaf->minmaxs[1] || mins[1] > leaf->minmaxs[4])
+		return false;
+	if (maxs[2] < leaf->minmaxs[2] || mins[2] > leaf->minmaxs[5])
+		return false;
+
+	return true;
+}
+
+static qboolean DLightPool_PVSVolumeFallbackAccept (const vec3_t mins, const vec3_t maxs, float radius, const byte *view_pvs)
+{
+	const float pvs_fallback_radius = 192.f;
+	const int pvs_fallback_leaf_budget = 64;
+	const qmodel_t *world = cl.worldmodel;
+
+	if (!world || !world->leafs || world->numleafs <= 0)
+		return false;
+
+	if (radius >= pvs_fallback_radius)
+		return true;
+
+	if (!view_pvs)
+		return false;
+
+	int tested = 0;
+	for (int leafnum = 0; leafnum < world->numleafs; leafnum++)
+	{
+		if ((view_pvs[leafnum >> 3] & (1 << (leafnum & 7))) == 0)
+			continue;
+
+		tested++;
+		if (tested > pvs_fallback_leaf_budget)
+			break;
+
+		if (DLightPool_AABBIntersectsLeafBounds (mins, maxs, &world->leafs[leafnum + 1]))
+			return true;
+	}
+
+	return false;
+}
+
+
 int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_t *viewleaf,
 		dlight_t **out, int out_max)
 {
@@ -527,6 +575,8 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		vec3_t delta;
 		vec3_t mins, maxs;
 		qboolean in_pvs = true;
+		qboolean origin_pvs_failed = false;
+		qboolean fallback_accepted = false;
 		qboolean in_frustum = true;
 		dlight_debug_entry_t *dbg;
 
@@ -615,15 +665,28 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 				else
 					in_pvs = ((view_pvs[leafnum >> 3] & (1 << (leafnum & 7))) != 0);
 			}
+
+			if (!in_pvs)
+			{
+				origin_pvs_failed = true;
+				fallback_accepted = DLightPool_PVSVolumeFallbackAccept (mins, maxs, q_max (dl->radius, dl->baseradius), view_pvs);
+				in_pvs = fallback_accepted;
+			}
 		}
 		if (dbg)
+		{
+			dbg->pvs_origin_failed = origin_pvs_failed;
+			dbg->pvs_volume_accepted = fallback_accepted;
 			dbg->in_pvs = in_pvs;
+		}
 		if (!in_pvs)
 		{
 			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_PVS);
 			dlight_filter_debug.rejected_pvs++;
 			continue;
 		}
+		if (origin_pvs_failed)
+			dlight_filter_debug.pass_pvs_fallback++;
 		dlight_filter_debug.pass_pvs++;
 
 		for (int j = 0; j < 4; j++)
@@ -698,7 +761,7 @@ void DLightPool_DebugPrint (void)
 	if (r_clustered_light_debug.value < 2.f)
 		return;
 
-	Con_Printf ("DLIGHTDBG frame=%d created_count=%d after_merge_count=%d after_lifetime_radius_count=%d rejected_lifetime=%d after_world_count=%d rejected_world=%d after_pvs_count=%d rejected_pvs=%d after_frustum_count=%d rejected_frustum=%d after_budget_count=%d rejected_budget=%d final_active_count=%d radius_min=%.1f radius_max=%.1f\n",
+	Con_Printf ("DLIGHTDBG frame=%d created_count=%d after_merge_count=%d after_lifetime_radius_count=%d rejected_lifetime=%d after_world_count=%d rejected_world=%d after_pvs_count=%d after_pvs_fallback_count=%d rejected_pvs=%d after_frustum_count=%d rejected_frustum=%d after_budget_count=%d rejected_budget=%d final_active_count=%d radius_min=%.1f radius_max=%.1f\n",
 		dlight_pool.framecount,
 		dlight_filter_debug.created_count,
 		dlight_filter_debug.after_merge_count,
@@ -707,6 +770,7 @@ void DLightPool_DebugPrint (void)
 		dlight_filter_debug.pass_world_flag,
 		dlight_filter_debug.rejected_world_flag,
 		dlight_filter_debug.pass_pvs,
+		dlight_filter_debug.pass_pvs_fallback,
 		dlight_filter_debug.rejected_pvs,
 		dlight_filter_debug.pass_frustum,
 		dlight_filter_debug.rejected_frustum,
@@ -721,13 +785,15 @@ void DLightPool_DebugPrint (void)
 		const dlight_debug_entry_t *entry = &dlight_debug_samples[i];
 		if (!entry->captured)
 			continue;
-		Con_Printf ("DLIGHTDBG sample[%d] id=%d pos=(%.1f %.1f %.1f) radius=%.1f color=(%.2f %.2f %.2f) die=%.3f reason=%s\n",
+		Con_Printf ("DLIGHTDBG sample[%d] id=%d pos=(%.1f %.1f %.1f) radius=%.1f color=(%.2f %.2f %.2f) die=%.3f reason=%s pvs_origin_failed=%d pvs_volume_accepted=%d\n",
 			i,
 			entry->id,
 			entry->origin[0], entry->origin[1], entry->origin[2],
 			entry->radius,
 			entry->color[0], entry->color[1], entry->color[2],
 			entry->die,
-			DLightPool_RejectReasonName (entry->reason));
+			DLightPool_RejectReasonName (entry->reason),
+			entry->pvs_origin_failed,
+			entry->pvs_volume_accepted);
 	}
 }

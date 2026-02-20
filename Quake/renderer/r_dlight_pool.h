@@ -32,6 +32,7 @@ typedef struct dlight_filter_debug_s
 	int pass_lifetime_radius;
 	int pass_world_flag;
 	int pass_pvs;
+	int pass_pvs_fallback;
 	int pass_frustum;
 	int pass_budget;
 	int final_active_count;
@@ -58,6 +59,8 @@ typedef struct dlight_debug_entry_s
 	vec3_t maxs;
 	qboolean has_leaf;
 	int leaf_index;
+	qboolean pvs_origin_failed;
+	qboolean pvs_volume_accepted;
 	qboolean in_pvs;
 	qboolean in_frustum;
 	dlight_reject_reason_t reason;
