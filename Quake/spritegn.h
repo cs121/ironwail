@@ -59,7 +59,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "dictlib.h"
 #include "trilib.h"
 #include "lbmlib.h"
-#include "mathlib.h"
+#include "mathlib_simd.h"
 
 #endif
 

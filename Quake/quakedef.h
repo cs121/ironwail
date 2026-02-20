@@ -248,7 +248,7 @@ typedef struct
 #include "common.h"
 #include "bspfile.h"
 #include "zone.h"
-#include "mathlib.h"
+#include "mathlib_simd.h"
 #include "cvar.h"
 
 #include "protocol.h"

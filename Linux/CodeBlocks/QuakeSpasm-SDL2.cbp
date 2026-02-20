@@ -177,10 +177,10 @@
 		<Unit filename="../../Quake/main_sdl.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="../../Quake/mathlib.c">
+		<Unit filename="../../Quake/mathlib_simd.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="../../Quake/mathlib.h" />
+		<Unit filename="../../Quake/mathlib_simd.h" />
 		<Unit filename="../../Quake/menu.c">
 			<Option compilerVar="CC" />
 		</Unit>
