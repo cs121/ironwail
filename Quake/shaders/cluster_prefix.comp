@@ -19,7 +19,7 @@ struct ClusterHeader
 };
 
 layout(std430, binding=4) buffer ClusterHeaderBuffer  { ClusterHeader headers[]; };
-layout(std430, binding=6) buffer ClusterCounterBuffer { uint clusterAlloc; uint overflowCount; };
+layout(std430, binding=6) buffer ClusterCounterBuffer { uint clusterAlloc; uint overflowCount; uint prefixAlloc; };
 layout(std430, binding=7) buffer ClusterTempCountBuffer { uint tempCounts[]; };
 
 layout(std140, binding=1) uniform ClusterBuildParams
@@ -49,6 +49,7 @@ void main()
         if (gid == 0u)
         {
             overflowCount = 0u;
+            prefixAlloc = 0u;
             // clusterAlloc is set by the host before this pass; don't reset here.
         }
         return;
@@ -114,18 +115,10 @@ void main()
         memoryBarrierShared();
     }
 
-    // Claim a base offset for this workgroup (atomic so workgroups don't collide)
+    // Claim an exclusive base offset for this workgroup.
     uint wgBase = 0u;
     if (lid == 0u)
-        wgBase = atomicAdd(clusterAlloc, 0u); // read-only; actual alloc already set by host
-
-    // We need the exclusive prefix across workgroups.
-    // Simple solution: use a dedicated counter buffer slot (clusterAlloc is the
-    // total capacity; use overflowCount as a running prefix accumulator, reset
-    // to 0 before this dispatch by the host, and only read clusterAlloc as cap).
-    // Re-purpose: overflowCount starts at 0 before prefix pass; each wg adds its total.
-    if (lid == 0u)
-        wgBase = atomicAdd(overflowCount, wgTotal); // overflowCount acts as running prefix
+        wgBase = atomicAdd(prefixAlloc, wgTotal);
     // Broadcast wgBase to all threads in workgroup
     sData[0] = (lid == 0u) ? wgBase : 0u; // reuse shared mem slot
     barrier();
@@ -150,6 +143,5 @@ void main()
         tempCounts[base + lid]     = 0u;
     }
 
-    // After all workgroups finish, overflowCount holds the total index buffer usage.
-    // Host can read it for diagnostics. Reset by host before next frame.
+    // overflowCount remains a dedicated overflow flag/counter for the fill pass.
 }
