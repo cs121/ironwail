@@ -216,10 +216,14 @@ static void GL_DumpRenderState (const char *label)
 {
 	GLint viewport[4], scissor_box[4];
 	GLint draw_fbo, read_fbo, program, vao;
-	GLint blend_src_rgb, blend_dst_rgb, depth_func;
+	GLint blend_src_rgb, blend_dst_rgb, blend_eq_rgb, depth_func;
+	GLint active_tex;
+	GLint tex2d[4] = {0, 0, 0, 0};
+	GLint samplers[4] = {0, 0, 0, 0};
 	GLboolean depth_mask;
 	GLboolean color_mask[4];
 	qboolean scissor, depth, blend, cull;
+	int i;
 
 	if (r_state_debug.value <= 0.f)
 		return;
@@ -238,13 +242,22 @@ static void GL_DumpRenderState (const char *label)
 	cull = glIsEnabled (GL_CULL_FACE);
 	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
 	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_EQUATION_RGB, &blend_eq_rgb);
 	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_tex);
 	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
 	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+	for (i = 0; i < 4; ++i)
+	{
+		glActiveTexture (GL_TEXTURE0 + i);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d[i]);
+		GL_GetIntegeri_vFunc (GL_SAMPLER_BINDING, i, &samplers[i]);
+	}
+	glActiveTexture (active_tex);
 
 	Con_Printf (
 		"STATEDBG frame=%d pass=%s vp=(%d %d %d %d) scissor=%d box=(%d %d %d %d) "
-		"draw_fbo=%d read_fbo=%d prog=%d(%s) vao=%d depth=%d blend=%d cull=%d blendfunc=(%d,%d) depthfunc=0x%04x depthmask=%d colormask=(%d%d%d%d)\n",
+		"draw_fbo=%d read_fbo=%d prog=%d(%s) vao=%d depth=%d blend=%d cull=%d blendfunc=(%d,%d) blendeq=0x%04x depthfunc=0x%04x depthmask=%d colormask=(%d%d%d%d) active_tex=%d tex2d=(%d,%d,%d,%d) sampler=(%d,%d,%d,%d)\n",
 		r_framecount,
 		label,
 		viewport[0], viewport[1], viewport[2], viewport[3],
@@ -253,9 +266,37 @@ static void GL_DumpRenderState (const char *label)
 		draw_fbo, read_fbo, program, GL_GetProgramDebugName ((GLuint)program), vao,
 		depth, blend, cull,
 		blend_src_rgb, blend_dst_rgb,
+		(unsigned)blend_eq_rgb,
 		(unsigned)depth_func,
 		depth_mask ? 1 : 0,
-		color_mask[0] ? 1 : 0, color_mask[1] ? 1 : 0, color_mask[2] ? 1 : 0, color_mask[3] ? 1 : 0);
+		color_mask[0] ? 1 : 0, color_mask[1] ? 1 : 0, color_mask[2] ? 1 : 0, color_mask[3] ? 1 : 0,
+		active_tex - GL_TEXTURE0,
+		tex2d[0], tex2d[1], tex2d[2], tex2d[3],
+		samplers[0], samplers[1], samplers[2], samplers[3]);
+}
+
+static void R_ValidateParticlePassState (qboolean alpha)
+{
+	GLint draw_fbo = 0;
+	GLint viewport[4] = {0, 0, 0, 0};
+	GLuint expected_fbo = framesetup.scene_fbo;
+	qboolean expect_oit = alpha && (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
+
+	if (expect_oit)
+		expected_fbo = framesetup.oit_fbo;
+
+	if (r_state_debug.value <= 0.f)
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+
+	if ((GLuint)draw_fbo != expected_fbo)
+		Con_DWarning ("STATEDBG particles draw_fbo mismatch got=%d expected=%u alpha=%d oit=%d\n",
+			draw_fbo, (unsigned)expected_fbo, alpha ? 1 : 0, expect_oit ? 1 : 0);
+	if (viewport[2] != glwidth || viewport[3] != glheight)
+		Con_DWarning ("STATEDBG particles viewport mismatch got=(%d %d %d %d) expected=(%d %d %d %d)\n",
+			viewport[0], viewport[1], viewport[2], viewport[3], glx, gly, glwidth, glheight);
 }
 
 
@@ -562,6 +603,7 @@ cvar_t  r_clustered_debug_repro = { "r_clustered_debug_repro", "0", CVAR_NONE };
 cvar_t  r_clustered_build = { "r_clustered_build", "1", CVAR_NONE };
 cvar_t  r_clustered_bind = { "r_clustered_bind", "1", CVAR_NONE };
 cvar_t  r_clustered_shade = { "r_clustered_shade", "1", CVAR_NONE };
+cvar_t  r_particles_debug = { "r_particles_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_shadows = { "r_clustered_shadows", "1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
@@ -5246,13 +5288,19 @@ void R_RenderScene (void)
 	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_END");
 	R_ClusterPerf_EndWorld ();
 	R_DrawDecals (false);
+	R_StateDebugMark ("PARTICLES_OPAQUE_BEFORE");
+	R_ValidateParticlePassState (false);
 	R_DrawParticles (false);
+	R_StateDebugMark ("PARTICLES_OPAQUE_AFTER");
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
 	R_BeginTranslucency ();
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+	R_StateDebugMark ("PARTICLES_ALPHA_BEFORE");
+	R_ValidateParticlePassState (true);
 	R_DrawParticles (true);
+	R_StateDebugMark ("PARTICLES_ALPHA_AFTER");
 	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
