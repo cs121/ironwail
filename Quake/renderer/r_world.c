@@ -1680,6 +1680,17 @@ void R_DrawBrushModels_Shadow (entity_t **ents, int count)
 	R_DrawBrushModels_Real (ents, count, BP_SHADOW, false);
 }
 
+void R_DrawWorld (void)
+{
+	entity_t *world = &cl_entities[0];
+
+	if (!world->model || !Mod_IsKnownModel (world->model))
+		return;
+
+	R_DrawBrushModels_Real (&world, 1, BP_SOLID, false);
+	R_DrawBrushModels_Real (&world, 1, BP_ALPHATEST, false);
+}
+
 qboolean R_DrawWorld_Shadow (void)
 {
 	entity_t *world = &cl_entities[0];
