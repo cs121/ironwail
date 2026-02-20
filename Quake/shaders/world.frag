@@ -596,7 +596,10 @@ void main()
 				}
 			}
 
-			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
+			// Keep dynamic lights additive. Clamping against (1 - total_light)
+			// suppresses dlight contribution on already-lit surfaces, which makes
+			// clustered dlights appear to vanish in normal gameplay.
+			total_light += max(dynamic_light, 0.0);
 		}
 	}
 
