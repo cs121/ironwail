@@ -910,6 +910,8 @@ cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,prog
 cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
 
 extern void R_Clustered_BindForShading (void);
+extern void R_Clustered_ForceBindForShading (void);
+extern void R_DrawWorld (void);
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
 //johnfitz
@@ -4118,7 +4120,8 @@ void R_SetupView (void)
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
 	r_framedata.clustered_light_params[0] = CLAMP (0.f, r_clustered_light_debug_visualize.value, 1.f);
 	r_framedata.clustered_light_params[1] = CLAMP (0.f, r_clustered_debug.value, 2.f);
-	r_framedata.clustered_light_params[2] = (r_clustered_lights.value > 0.f && r_framedata.numlights > 0) ? 1.f : 0.f;
+	// Note: clustered_light_params[2] (enable flag) is set by R_PushDlights after numlights is populated
+	r_framedata.clustered_light_params[2] = 0.f;
 	r_framedata.clustered_light_params[3] = CLAMP (0.f, r_clustered_light_radius_scale.value, 3.f);
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
@@ -5281,6 +5284,10 @@ void R_RenderScene (void)
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
+	// Ensure cluster SSBO bindings are active for all subsequent draw passes.
+	// R_PushDlights (called from R_SetupView) may have set shading_bound=true,
+	// but R_Shadow_DlightPass can reset cluster state; rebind unconditionally here.
+	R_Clustered_ForceBindForShading ();
 	R_StateDebugMark ("WEAPON_BEFORE");
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_StateDebugMark ("WEAPON_AFTER");
@@ -5292,6 +5299,14 @@ void R_RenderScene (void)
 	r_perf_stats.world_ms += (t1 - t0) * 1000.0;
 	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_BEGIN");
 	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_BEGIN");
+	if (r_drawworld_cheatsafe)
+	{
+		GL_BeginGroup ("World geometry");
+		t0 = Sys_DoubleTime ();
+		R_DrawWorld ();
+		r_perf_stats.world_ms += (Sys_DoubleTime () - t0) * 1000.0;
+		GL_EndGroup ();
+	}
 	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_END");
 	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_END");
 	R_ClusterPerf_EndWorld ();

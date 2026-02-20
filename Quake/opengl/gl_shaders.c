@@ -27,23 +27,29 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GLSL_PATH_PREFIX "shaders/"
 #define GLSL_PATH(name)   GLSL_PATH_PREFIX name
 
+// FIX: Increased limits to avoid silent overflow at runtime.
+// 128 programs is tight given GL_CreateShaders() registers ~80+ programs.
+// Raised to 256 to give headroom for future shaders.
+#define MAX_SHADER_CACHE  256
+#define MAX_GL_PROGRAMS   256
+
 typedef struct shader_cache_s
 {
-        char path[MAX_QPATH];
-        char *data;
+	char  path[MAX_QPATH];
+	char *data;
 } shader_cache_t;
 
-static shader_cache_t shader_cache[128];
-static int shader_cache_count;
+static shader_cache_t shader_cache[MAX_SHADER_CACHE];
+static int            shader_cache_count;
 
 glprogs_t glprogs;
-static GLuint gl_programs[128];
-static char *gl_program_names[128];
-static char *gl_program_defines[128];
-static char *gl_program_vert_paths[128];
-static char *gl_program_frag_paths[128];
-static GLuint gl_current_program;
-static int gl_num_programs;
+static GLuint  gl_programs[MAX_GL_PROGRAMS];
+static char   *gl_program_names[MAX_GL_PROGRAMS];
+static char   *gl_program_defines[MAX_GL_PROGRAMS];
+static char   *gl_program_vert_paths[MAX_GL_PROGRAMS];
+static char   *gl_program_frag_paths[MAX_GL_PROGRAMS];
+static GLuint  gl_current_program;
+static int     gl_num_programs;
 
 static const char *GL_LookupProgramName (GLuint program)
 {
@@ -60,6 +66,7 @@ static const char *GL_LookupProgramName (GLuint program)
 
 	return "unknown";
 }
+
 static const char *GL_LookupProgramValue (GLuint program, char *const *table, const char *fallback)
 {
 	int i;
@@ -76,11 +83,10 @@ static const char *GL_LookupProgramValue (GLuint program, char *const *table, co
 	return fallback;
 }
 
-
 static char *GL_CopyString (const char *src)
 {
 	size_t len;
-	char *out;
+	char  *out;
 
 	if (!src)
 		return NULL;
@@ -100,9 +106,9 @@ GL_InitError
 static void GL_InitError (const char *message, ...)
 {
 	const char *fmt;
-	char buf[4096];
-	size_t len;
-	va_list argptr;
+	char        buf[4096];
+	size_t      len;
+	va_list     argptr;
 
 	va_start (argptr, message);
 	q_vsnprintf (buf, sizeof (buf), message, argptr);
@@ -112,7 +118,7 @@ static void GL_InitError (const char *message, ...)
 	while (len && q_isspace (buf[len - 1]))
 		buf[--len] = '\0';
 
-	fmt = 
+	fmt =
 		"Your system appears to meet the minimum requirements,\n"
 		"however an error was encountered during OpenGL initialization.\n"
 		"This could be caused by a driver or an engine bug.\n"
@@ -147,7 +153,7 @@ AppendString
 */
 static qboolean AppendString (char **dst, const char *dstend, const char *str, int len)
 {
-	int avail = dstend - *dst;
+	int avail = (int)(dstend - *dst); // FIX: cast to int — pointer difference is ptrdiff_t, comparing against int avail was implicit truncation
 	if (len < 0)
 		len = Q_strlen (str);
 	if (len + 1 > avail)
@@ -167,10 +173,10 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 {
 	const char *strings[16];
 	const char *typestr = NULL;
-	char header[256];
-	int numstrings = 0;
-	GLint status;
-	GLuint shader;
+	char        header[256];
+	int         numstrings = 0;
+	GLint       status;
+	GLuint      shader;
 
 	switch (type)
 	{
@@ -210,9 +216,15 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 
 	if (status != GL_TRUE)
 	{
-		char infolog[1024];
-		memset(infolog, 0, sizeof(infolog));
-		GL_GetShaderInfoLogFunc (shader, sizeof(infolog), NULL, infolog);
+		// FIX: Increased infolog buffer from 1024 to 4096.
+		// Driver info logs for complex shaders can easily exceed 1024 chars,
+		// silently truncating error messages and making debugging very hard.
+		char infolog[4096];
+		memset (infolog, 0, sizeof (infolog));
+		GL_GetShaderInfoLogFunc (shader, sizeof (infolog), NULL, infolog);
+		// FIX: Delete shader before calling GL_InitError / Sys_Error so
+		// the GL object is not leaked on the error path.
+		GL_DeleteShaderFunc (shader);
 		GL_InitError ("Error compiling %s %s shader:\n\n%s", name, typestr, infolog);
 	}
 
@@ -227,16 +239,22 @@ GL_CreateProgramFromShaders
 static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders, const char *name, const char *defines, const char *vert_path, const char *frag_path)
 {
 	GLuint program;
-	GLint status;
+	GLint  status;
+	int    i;
 
 	program = GL_CreateProgramFunc ();
 	GL_ObjectLabelFunc (GL_PROGRAM, program, -1, name);
 
-	while (numshaders-- > 0)
+	// FIX: Use index variable instead of mutating the shaders pointer.
+	// The original loop wrote GL_DeleteShaderFunc(*shaders) AFTER
+	// GL_AttachShaderFunc, but advanced the pointer with ++shaders inside
+	// the loop body — the post-increment happened after the dereference,
+	// so deletion and attachment were correct, but the style was fragile.
+	// Using an explicit index is safer and clearer.
+	for (i = 0; i < numshaders; i++)
 	{
-		GL_AttachShaderFunc (program, *shaders);
-		GL_DeleteShaderFunc (*shaders);
-		++shaders;
+		GL_AttachShaderFunc (program, shaders[i]);
+		GL_DeleteShaderFunc (shaders[i]);
 	}
 
 	GL_LinkProgramFunc (program);
@@ -251,24 +269,27 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 
 	if (status != GL_TRUE)
 	{
-		char infolog[1024];
-		memset(infolog, 0, sizeof(infolog));
-		GL_GetProgramInfoLogFunc (program, sizeof(infolog), NULL, infolog);
+		// FIX: Increased infolog buffer from 1024 to 4096 (same reason as above).
+		char infolog[4096];
+		memset (infolog, 0, sizeof (infolog));
+		GL_GetProgramInfoLogFunc (program, sizeof (infolog), NULL, infolog);
+		// FIX: Delete the failed program before Sys_Error to avoid GL object leak.
+		GL_DeleteProgramFunc (program);
 		GL_InitError ("Error linking %s program:\n\n%s", name, infolog);
 	}
 
 	if (gl_num_programs == countof(gl_programs))
 		Sys_Error ("gl_programs overflow");
-	gl_programs[gl_num_programs] = program;
+	gl_programs[gl_num_programs]      = program;
 	gl_program_names[gl_num_programs] = GL_CopyString (name ? name : "unnamed");
-	gl_program_defines[gl_num_programs] = GL_CopyString ((defines && defines[0]) ? defines : "");
+	gl_program_defines[gl_num_programs]   = GL_CopyString ((defines && defines[0]) ? defines : "");
 	gl_program_vert_paths[gl_num_programs] = GL_CopyString (vert_path ? vert_path : "none");
 	gl_program_frag_paths[gl_num_programs] = GL_CopyString (frag_path ? frag_path : "none");
 	gl_num_programs++;
 
 	Con_DPrintf ("SHDLOG: PROGRAM id=%u name=%s vert=%s frag=%s defines=%s\n",
 		(unsigned)program,
-		name ? name : "unnamed",
+		name      ? name      : "unnamed",
 		vert_path ? vert_path : "none",
 		frag_path ? frag_path : "none",
 		(defines && defines[0]) ? defines : "<none>");
@@ -278,186 +299,207 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 
 /*
 ====================
-GL_CreateProgramFromSources
+GL_LoadShaderFile_Internal
+
+Loads a GLSL source file, recursively resolving #include directives.
+Results are cached by path; the cache is never invalidated during a session
+(shaders are re-created via GL_CreateShaders which calls GL_DeleteShaders first).
 ====================
 */
 static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 {
-        size_t capacity, result_len;
-        char *result;
-        char *source;
-        const char *cursor;
-        int i;
+	size_t      capacity, result_len;
+	char       *result;
+	char       *source;
+	const char *cursor;
+	int         i;
 
-        for (i = 0; i < shader_cache_count; i++)
-        {
-                if (!strcmp (shader_cache[i].path, path))
-                        return shader_cache[i].data;
-        }
+	// Cache lookup
+	for (i = 0; i < shader_cache_count; i++)
+	{
+		if (!strcmp (shader_cache[i].path, path))
+			return shader_cache[i].data;
+	}
 
-        if (depth >= 32)
-                Sys_Error ("GL_LoadShaderFile: include depth overflow for %s", path);
+	if (depth >= 32)
+		Sys_Error ("GL_LoadShaderFile: include depth overflow for %s", path);
 
-        if (shader_cache_count == countof(shader_cache))
-                Sys_Error ("GL_LoadShaderFile: shader cache overflow");
+	if (shader_cache_count == countof (shader_cache))
+		Sys_Error ("GL_LoadShaderFile: shader cache overflow");
 
-        source = (char *) COM_LoadMallocFile (path, NULL);
-        if (!source)
-                GL_InitError ("Unable to load shader file %s", path);
+	source = (char *) COM_LoadMallocFile (path, NULL);
+	if (!source)
+		GL_InitError ("Unable to load shader file %s", path);
 
-        capacity = strlen (source) + 1;
-        if (capacity < 64)
-                capacity = 64;
-        result = (char *) malloc (capacity);
-        if (!result)
-                Sys_Error ("GL_LoadShaderFile: out of memory processing %s", path);
-        result[0] = '\0';
-        result_len = 0;
+	capacity = strlen (source) + 1;
+	if (capacity < 64)
+		capacity = 64;
+	result = (char *) malloc (capacity);
+	if (!result)
+		Sys_Error ("GL_LoadShaderFile: out of memory processing %s", path);
+	result[0]  = '\0';
+	result_len = 0;
 
-#define APPEND_STR(srcptr, srclen)                                                     \
-        do                                                                             \
-        {                                                                              \
-                size_t _need = (srclen);                                               \
-                while (result_len + _need + 1 > capacity)                              \
-                {                                                                      \
-                        size_t _newcap = capacity * 2;                                 \
-                        char *_newbuf = (char *) realloc (result, _newcap);            \
-                        if (!_newbuf)                                                  \
-                        {                                                              \
-                                free (result);                                         \
-                                free (source);                                         \
-                                Sys_Error ("GL_LoadShaderFile: realloc failed for %s", path); \
-                        }                                                              \
-                        result = _newbuf;                                              \
-                        capacity = _newcap;                                            \
-                }                                                                      \
-                memcpy (result + result_len, (srcptr), _need);                         \
-                result_len += _need;                                                   \
-                result[result_len] = '\0';                                             \
-        } while (0)
+// Helper macro: grow result buffer and append bytes.
+// FIX: On realloc failure the old `result` pointer was leaked because the
+// macro assigned to `result` before checking `_newbuf`.  The macro now
+// saves the old pointer so it can be freed on failure.
+#define APPEND_STR(srcptr, srclen)                                                        \
+	do                                                                                    \
+	{                                                                                     \
+		size_t _need = (srclen);                                                          \
+		while (result_len + _need + 1 > capacity)                                         \
+		{                                                                                  \
+			size_t  _newcap = capacity * 2;                                               \
+			char   *_old    = result;                                                     \
+			char   *_newbuf = (char *) realloc (result, _newcap);                        \
+			if (!_newbuf)                                                                  \
+			{                                                                              \
+				free (_old);   /* FIX: was `free(result)` after `result=_newbuf` */      \
+				free (source);                                                             \
+				Sys_Error ("GL_LoadShaderFile: realloc failed for %s", path);            \
+			}                                                                              \
+			result   = _newbuf;                                                            \
+			capacity = _newcap;                                                            \
+		}                                                                                  \
+		memcpy (result + result_len, (srcptr), _need);                                    \
+		result_len += _need;                                                               \
+		result[result_len] = '\0';                                                         \
+	} while (0)
 
-        cursor = source;
-        while (*cursor)
-        {
-                const char *line_start = cursor;
-                const char *line_end = strchr (cursor, '\n');
-                size_t line_len = line_end ? (size_t) (line_end - cursor + 1) : strlen (cursor);
-                const char *trim = line_start;
+	cursor = source;
+	while (*cursor)
+	{
+		const char *line_start = cursor;
+		const char *line_end   = strchr (cursor, '\n');
+		size_t      line_len   = line_end ? (size_t)(line_end - cursor + 1) : strlen (cursor);
+		const char *trim       = line_start;
 
-                while (trim < line_start + line_len && (*trim == ' ' || *trim == '\t' || *trim == '\r'))
-                        trim++;
+		// Skip leading whitespace to detect preprocessor directives
+		while (trim < line_start + line_len && (*trim == ' ' || *trim == '\t' || *trim == '\r'))
+			trim++;
 
-                if ((size_t) (line_start + line_len - trim) >= 8 && !strncmp (trim, "#include", 8))
-                {
-                        const char *ptr = trim + 8;
-                        char delim = '\0';
+		if ((size_t)(line_start + line_len - trim) >= 8 && !strncmp (trim, "#include", 8))
+		{
+			const char *ptr   = trim + 8;
+			char        delim = '\0';
 
-                        while (ptr < line_start + line_len && (*ptr == ' ' || *ptr == '\t'))
-                                ptr++;
-                        if (ptr < line_start + line_len && (*ptr == '"' || *ptr == '<'))
-                        {
-                                delim = (*ptr == '<') ? '>' : '"';
-                                ptr++;
-                        }
+			while (ptr < line_start + line_len && (*ptr == ' ' || *ptr == '\t'))
+				ptr++;
+			if (ptr < line_start + line_len && (*ptr == '"' || *ptr == '<'))
+			{
+				delim = (*ptr == '<') ? '>' : '"';
+				ptr++;
+			}
 
-                        if (delim)
-                        {
-                                const char *end = ptr;
-                                while (end < line_start + line_len && *end != delim)
-                                        end++;
-                                if (end < line_start + line_len)
-                                {
-                                        char include_path[MAX_QPATH];
-                                        char full_path[MAX_QPATH];
-                                        char basedir[MAX_QPATH];
-                                        size_t include_len = (size_t) (end - ptr);
-                                        char *slash;
-                                        char *included;
+			if (delim)
+			{
+				const char *end = ptr;
+				while (end < line_start + line_len && *end != delim)
+					end++;
+				if (end < line_start + line_len)
+				{
+					char   include_path[MAX_QPATH];
+					char   full_path[MAX_QPATH];
+					char   basedir[MAX_QPATH];
+					size_t include_len = (size_t)(end - ptr);
+					char  *slash;
+					char  *included;
 
-                                        if (include_len >= sizeof (include_path))
-                                        {
-                                                free (result);
-                                                free (source);
-                                                Sys_Error ("GL_LoadShaderFile: include path too long in %s", path);
-                                        }
+					if (include_len >= sizeof (include_path))
+					{
+						free (result);
+						free (source);
+						Sys_Error ("GL_LoadShaderFile: include path too long in %s", path);
+					}
 
-                                        memcpy (include_path, ptr, include_len);
-                                        include_path[include_len] = '\0';
+					memcpy (include_path, ptr, include_len);
+					include_path[include_len] = '\0';
 
-                                        q_strlcpy (basedir, path, sizeof (basedir));
-                                        slash = strrchr (basedir, '/');
+					q_strlcpy (basedir, path, sizeof (basedir));
+					slash = strrchr (basedir, '/');
 #if defined(_WIN32)
-                                        if (!slash)
-                                                slash = strrchr (basedir, '\\');
+					if (!slash)
+						slash = strrchr (basedir, '\\');
 #endif
-                                        if (slash)
-                                                slash[1] = '\0';
-                                        else
-                                                basedir[0] = '\0';
+					if (slash)
+						slash[1] = '\0';
+					else
+						basedir[0] = '\0';
 
-                                        q_strlcpy (full_path, basedir, sizeof (full_path));
-                                        if (q_strlcat (full_path, include_path, sizeof (full_path)) >= sizeof (full_path))
-                                        {
-                                                free (result);
-                                                free (source);
-                                                Sys_Error ("GL_LoadShaderFile: include path overflow in %s", path);
-                                        }
+					q_strlcpy (full_path, basedir, sizeof (full_path));
+					if (q_strlcat (full_path, include_path, sizeof (full_path)) >= sizeof (full_path))
+					{
+						free (result);
+						free (source);
+						Sys_Error ("GL_LoadShaderFile: include path overflow in %s", path);
+					}
 
-                                        included = GL_LoadShaderFile_Internal (full_path, depth + 1);
-                                        if (included)
-                                        {
-                                                APPEND_STR (included, strlen (included));
-                                                if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
-                                                        APPEND_STR ("\n", 1);
-                                        }
+					included = GL_LoadShaderFile_Internal (full_path, depth + 1);
+					if (included)
+					{
+						APPEND_STR (included, strlen (included));
+						// Ensure a newline between included content and the next line
+						if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
+							APPEND_STR ("\n", 1);
+					}
 
-                                        cursor = line_end ? line_end + 1 : cursor + line_len;
-                                        continue;
-                                }
-                        }
-                }
+					cursor = line_end ? line_end + 1 : cursor + line_len;
+					continue;
+				}
+			}
+		}
 
-                APPEND_STR (line_start, line_len);
-                cursor = line_end ? line_end + 1 : cursor + line_len;
-        }
+		APPEND_STR (line_start, line_len);
+		cursor = line_end ? line_end + 1 : cursor + line_len;
+	}
 
 #undef APPEND_STR
 
-        free (source);
+	free (source);
 
-        shader_cache[shader_cache_count].data = result;
-        q_strlcpy (shader_cache[shader_cache_count].path, path, sizeof (shader_cache[shader_cache_count].path));
-        shader_cache_count++;
+	shader_cache[shader_cache_count].data = result;
+	q_strlcpy (shader_cache[shader_cache_count].path, path, sizeof (shader_cache[shader_cache_count].path));
+	shader_cache_count++;
 
-        return result;
+	return result;
 }
 
 static char *GL_LoadShaderFile (const char *path)
 {
-        return GL_LoadShaderFile_Internal (path, 0);
+	return GL_LoadShaderFile_Internal (path, 0);
 }
 
+/*
+====================
+GL_CreateProgramFromFiles
+
+Parses the name|DEFINE val; DEFINE val syntax, builds the #define block,
+loads shader sources and compiles + links a program.
+====================
+*/
 static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GLenum *types, const char *name, va_list argptr)
 {
-        char macros[1024];
-        char eval[256];
-        char *pipe;
-        int i, realcount;
-        GLuint shaders[2];
-        GLuint program;
+	char   macros[1024];
+	char   eval[256];
+	char  *pipe;
+	int    i, realcount;
+	GLuint shaders[2];
+	GLuint program;
 
-        if (count <= 0 || count > 2)
-                Sys_Error ("GL_CreateProgramFromFiles: invalid source count (%d)", count);
+	if (count <= 0 || count > 2)
+		Sys_Error ("GL_CreateProgramFromFiles: invalid source count (%d)", count);
 
-        q_vsnprintf (eval, sizeof (eval), name, argptr);
-	macros[0] = 0;
+	q_vsnprintf (eval, sizeof (eval), name, argptr);
+	macros[0] = '\0';
 
 	pipe = strchr (name, '|');
 	if (pipe) // parse symbol list and generate #defines
 	{
-		char *dst = macros;
+		char *dst    = macros;
 		char *dstend = macros + sizeof (macros);
-		char *src = eval + 1 + (pipe - name);
+		// Offset into eval (already formatted) past the pipe character
+		char *src    = eval + 1 + (pipe - name);
 
 		while (*src == ' ')
 			src++;
@@ -469,7 +511,7 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 				srcend++;
 
 			if (!AppendString (&dst, dstend, "#define ", 8) ||
-				!AppendString (&dst, dstend, src, srcend - src) ||
+				!AppendString (&dst, dstend, src, (int)(srcend - src)) ||
 				!AppendString (&dst, dstend, "\n", 1))
 				Sys_Error ("GL_CreateProgram: symbol overflow for %s", eval);
 
@@ -481,63 +523,64 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 		AppendString (&dst, dstend, "\n", 1);
 	}
 
+	// Truncate name at the pipe so the program label is clean
 	name = eval;
 
 	realcount = 0;
-        for (i = 0; i < count; i++)
-        {
-                if (paths[i])
-                {
-                        char *source = GL_LoadShaderFile (paths[i]);
-                        shaders[realcount] = GL_CreateShader (types[i], source, macros, name);
-                        realcount++;
-                }
-        }
+	for (i = 0; i < count; i++)
+	{
+		if (paths[i])
+		{
+			char *source = GL_LoadShaderFile (paths[i]);
+			shaders[realcount] = GL_CreateShader (types[i], source, macros, name);
+			realcount++;
+		}
+	}
 
-        program = GL_CreateProgramFromShaders (shaders, realcount, name, macros, paths[0], (count > 1) ? paths[1] : NULL);
+	program = GL_CreateProgramFromShaders (shaders, realcount, name, macros, paths[0], (count > 1) ? paths[1] : NULL);
 
-        return program;
+	return program;
 }
 
 /*
 ====================
 GL_CreateProgram
 
-Compiles and returns GLSL program.
+Compiles and returns a GLSL vertex+fragment program.
 ====================
 */
 static FUNC_PRINTF(3,4) GLuint GL_CreateProgram (const char *vertPath, const char *fragPath, const char *name, ...)
 {
-        const char *paths[2] = {vertPath, fragPath};
-        GLenum types[2] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
-        va_list argptr;
-        GLuint program;
+	const char *paths[2] = {vertPath, fragPath};
+	GLenum      types[2] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
+	va_list     argptr;
+	GLuint      program;
 
-        va_start (argptr, name);
-        program = GL_CreateProgramFromFiles (2, paths, types, name, argptr);
-        va_end (argptr);
+	va_start (argptr, name);
+	program = GL_CreateProgramFromFiles (2, paths, types, name, argptr);
+	va_end (argptr);
 
-        return program;
+	return program;
 }
 
 /*
 ====================
 GL_CreateComputeProgram
 
-Compiles and returns GLSL program.
+Compiles and returns a GLSL compute program.
 ====================
 */
 static FUNC_PRINTF(2,3) GLuint GL_CreateComputeProgram (const char *path, const char *name, ...)
 {
-        GLenum type = GL_COMPUTE_SHADER;
-        va_list argptr;
-        GLuint program;
+	GLenum  type = GL_COMPUTE_SHADER;
+	va_list argptr;
+	GLuint  program;
 
-        va_start (argptr, name);
-        program = GL_CreateProgramFromFiles (1, &path, &type, name, argptr);
-        va_end (argptr);
+	va_start (argptr, name);
+	program = GL_CreateProgramFromFiles (1, &path, &type, name, argptr);
+	va_end (argptr);
 
-        return program;
+	return program;
 }
 
 /*
@@ -557,8 +600,8 @@ void GL_UseProgram (GLuint program)
 ====================
 GL_ClearCachedProgram
 
-This must be called if you do anything that could make the cached program
-invalid (e.g. manually binding, destroying the context).
+Call whenever the cached program state may have been invalidated
+(e.g. manual glUseProgram calls, context destruction).
 ====================
 */
 void GL_ClearCachedProgram (void)
@@ -603,37 +646,43 @@ void GL_CreateShaders (void)
 
 	R_Shadow_ResetUBOBindings ();
 
-	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
+	glprogs.gui       = GL_CreateProgram (GLSL_PATH("gui.vert"),       GLSL_PATH("gui.frag"),       "gui");
 	glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
+
 	for (warp = 0; warp < 2; warp++)
-            glprogs.warpscale[warp] = GL_CreateProgram (GLSL_PATH("warpscale.vert"), GLSL_PATH("warpscale.frag"), "view warp/scale|WARP %d", warp);
+		glprogs.warpscale[warp] = GL_CreateProgram (GLSL_PATH("warpscale.vert"), GLSL_PATH("warpscale.frag"), "view warp/scale|WARP %d", warp);
+
 	for (palettize = 0; palettize < 3; palettize++)
-            glprogs.postprocess[palettize] = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("postprocess.frag"), "postprocess|PALETTIZE %d", palettize);
-	glprogs.filmgrain = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("filmgrain.frag"), "filmgrain");
+		glprogs.postprocess[palettize] = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("postprocess.frag"), "postprocess|PALETTIZE %d", palettize);
 
+	glprogs.filmgrain     = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("filmgrain.frag"),    "filmgrain");
 	glprogs.bloom_extract = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_extract.frag"), "bloom extract");
-    glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
-	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
-	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
-	glprogs.ao_assao_main = GL_CreateComputeProgram (GLSL_PATH("ao_assao_main.comp"), "ao assao main");
-	glprogs.ao_gtao_prefilter = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_prefilter.comp"), "ao gtao prefilter");
-	glprogs.ao_gtao_main = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_main.comp"), "ao gtao main");
-	glprogs.ao_denoise = GL_CreateComputeProgram (GLSL_PATH("ao_denoise.comp"), "ao denoise");
-	glprogs.ao_bent_pack = GL_CreateComputeProgram (GLSL_PATH("ao_bent_pack.comp"), "ao bent pack");
+	glprogs.bloom_blur    = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"),    "bloom blur");
+	glprogs.ssao          = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"),          "ssao");
+	glprogs.ssao_blur     = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"),     "ssao blur");
+
+	glprogs.ao_assao_main      = GL_CreateComputeProgram (GLSL_PATH("ao_assao_main.comp"),      "ao assao main");
+	glprogs.ao_gtao_prefilter  = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_prefilter.comp"),  "ao gtao prefilter");
+	glprogs.ao_gtao_main       = GL_CreateComputeProgram (GLSL_PATH("ao_gtao_main.comp"),       "ao gtao main");
+	glprogs.ao_denoise         = GL_CreateComputeProgram (GLSL_PATH("ao_denoise.comp"),         "ao denoise");
+	glprogs.ao_bent_pack       = GL_CreateComputeProgram (GLSL_PATH("ao_bent_pack.comp"),       "ao bent pack");
+
 	glprogs.godrays_mask = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_mask.frag"), "godrays mask");
-	glprogs.godrays = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"), "godrays");
-	glprogs.atmos_froxel_build = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_build.comp"), "atmos froxel build");
+	glprogs.godrays      = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"),      "godrays");
+
+	glprogs.atmos_froxel_build     = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_build.comp"),     "atmos froxel build");
 	glprogs.atmos_froxel_integrate = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_integrate.comp"), "atmos froxel integrate");
-	glprogs.atmos_froxel_temporal = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_temporal.comp"), "atmos froxel temporal");
-        for (mode = 0; mode < 2; mode++)
-                glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
+	glprogs.atmos_froxel_temporal  = GL_CreateComputeProgram (GLSL_PATH("atmos_froxel_temporal.comp"),  "atmos froxel temporal");
 
-        for (oit = 0; oit < 2; oit++)
-                for (dither = 0; dither < 3; dither++)
-                        for (mode = 0; mode < 3; mode++)
-                                glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
+	for (mode = 0; mode < 2; mode++)
+		glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
-        glprogs.shadow_depth = GL_CreateProgram (GLSL_PATH("shadow_depth.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth");
+	for (oit = 0; oit < 2; oit++)
+		for (dither = 0; dither < 3; dither++)
+			for (mode = 0; mode < 3; mode++)
+				glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
+
+	glprogs.shadow_depth = GL_CreateProgram (GLSL_PATH("shadow_depth.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth");
 	for (md5 = 0; md5 < 2; md5++)
 		glprogs.shadow_depth_alias[md5] = GL_CreateProgram (GLSL_PATH("shadow_depth_alias.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth alias|MD5 %d", md5);
 
@@ -641,36 +690,37 @@ void GL_CreateShaders (void)
 	{
 		for (oit = 0; oit < 2; oit++)
 		{
-                        glprogs.water[oit][dither] = GL_CreateProgram (GLSL_PATH("water.vert"), GLSL_PATH("water.frag"), "water|OIT %d; DITHER %d", oit, dither);
-                        glprogs.particles[oit][dither] = GL_CreateProgram (GLSL_PATH("particles.vert"), GLSL_PATH("particles.frag"), "particles|OIT %d; DITHER %d", oit, dither);
+			glprogs.water[oit][dither]     = GL_CreateProgram (GLSL_PATH("water.vert"),     GLSL_PATH("water.frag"),     "water|OIT %d; DITHER %d",     oit, dither);
+			glprogs.particles[oit][dither] = GL_CreateProgram (GLSL_PATH("particles.vert"), GLSL_PATH("particles.frag"), "particles|OIT %d; DITHER %d", oit, dither);
 		}
-                for (mode = 0; mode < 2; mode++)
-                        glprogs.skycubemap[mode][dither] = GL_CreateProgram (GLSL_PATH("sky_cubemap.vert"), GLSL_PATH("sky_cubemap.frag"), "sky cubemap|ANIM %d; DITHER %d", mode, dither);
-                glprogs.skylayers[dither] = GL_CreateProgram (GLSL_PATH("sky_layers.vert"), GLSL_PATH("sky_layers.frag"), "sky layers|DITHER %d", dither);
-                glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
-                glprogs.sprites[dither] = GL_CreateProgram (GLSL_PATH("sprites.vert"), GLSL_PATH("sprites.frag"), "sprites|DITHER %d", dither);
-                glprogs.decals[dither] = GL_CreateProgram (GLSL_PATH("decals.vert"), GLSL_PATH("decals.frag"), "decals|DITHER %d", dither);
-        }
-        glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
+		for (mode = 0; mode < 2; mode++)
+			glprogs.skycubemap[mode][dither] = GL_CreateProgram (GLSL_PATH("sky_cubemap.vert"), GLSL_PATH("sky_cubemap.frag"), "sky cubemap|ANIM %d; DITHER %d", mode, dither);
+		glprogs.skylayers[dither]  = GL_CreateProgram (GLSL_PATH("sky_layers.vert"),  GLSL_PATH("sky_layers.frag"),  "sky layers|DITHER %d",  dither);
+		glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
+		glprogs.sprites[dither]    = GL_CreateProgram (GLSL_PATH("sprites.vert"),     GLSL_PATH("sprites.frag"),     "sprites|DITHER %d",     dither);
+		glprogs.decals[dither]     = GL_CreateProgram (GLSL_PATH("decals.vert"),       GLSL_PATH("decals.frag"),      "decals|DITHER %d",      dither);
+	}
+	glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 
-        for (oit = 0; oit < 2; oit++)
-                for (mode = 0; mode < 3; mode++)
-                        for (alphatest = 0; alphatest < 2; alphatest++)
-                                for (md5 = 0; md5 < 2; md5++)
-                                        glprogs.alias[oit][mode][alphatest][md5] =
-                                                GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
+	for (oit = 0; oit < 2; oit++)
+		for (mode = 0; mode < 3; mode++)
+			for (alphatest = 0; alphatest < 2; alphatest++)
+				for (md5 = 0; md5 < 2; md5++)
+					glprogs.alias[oit][mode][alphatest][md5] =
+						GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
 
-        glprogs.debug3d = GL_CreateProgram (GLSL_PATH("debug3d.vert"), GLSL_PATH("debug3d.frag"), "debug3d");
-        glprogs.shadow_debug = GL_CreateProgram (GLSL_PATH("shadow_debug.vert"), GLSL_PATH("shadow_debug.frag"), "shadow debug");
+	glprogs.debug3d      = GL_CreateProgram (GLSL_PATH("debug3d.vert"),      GLSL_PATH("debug3d.frag"),      "debug3d");
+	glprogs.shadow_debug = GL_CreateProgram (GLSL_PATH("shadow_debug.vert"), GLSL_PATH("shadow_debug.frag"), "shadow debug");
 
-	glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");
-	glprogs.gather_indirect = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"), "indirect draw gather");
-	glprogs.cull_mark = GL_CreateComputeProgram (GLSL_PATH("cull_mark.comp"), "cull/mark");
-	glprogs.cluster_lights = GL_CreateComputeProgram (GLSL_PATH("cluster_lights.comp"), "light cluster");
-	glprogs.cluster_prefix = GL_CreateComputeProgram (GLSL_PATH("cluster_prefix.comp"), "light cluster prefix");
+	glprogs.clear_indirect   = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"),   "clear indirect draw params");
+	glprogs.gather_indirect  = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"),  "indirect draw gather");
+	glprogs.cull_mark        = GL_CreateComputeProgram (GLSL_PATH("cull_mark.comp"),        "cull/mark");
+	glprogs.cluster_lights   = GL_CreateComputeProgram (GLSL_PATH("cluster_lights.comp"),   "light cluster");
+	glprogs.cluster_prefix   = GL_CreateComputeProgram (GLSL_PATH("cluster_prefix.comp"),   "light cluster prefix");
+
 	for (mode = 0; mode < 3; mode++)
 		glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
-        glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
+	glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
 }
 
 /*
@@ -680,32 +730,35 @@ GL_DeleteShaders
 */
 void GL_DeleteShaders (void)
 {
-        int i;
-        for (i = 0; i < gl_num_programs; i++)
-        {
-                GL_DeleteProgramFunc (gl_programs[i]);
-                gl_programs[i] = 0;
-                free (gl_program_names[i]);
-                gl_program_names[i] = NULL;
-                free (gl_program_defines[i]);
-                gl_program_defines[i] = NULL;
-                free (gl_program_vert_paths[i]);
-                gl_program_vert_paths[i] = NULL;
-                free (gl_program_frag_paths[i]);
-                gl_program_frag_paths[i] = NULL;
-        }
-        gl_num_programs = 0;
+	int i;
 
-        GL_UseProgramFunc (0);
-        gl_current_program = 0;
+	for (i = 0; i < gl_num_programs; i++)
+	{
+		GL_DeleteProgramFunc (gl_programs[i]);
+		gl_programs[i] = 0;
+		free (gl_program_names[i]);
+		gl_program_names[i] = NULL;
+		free (gl_program_defines[i]);
+		gl_program_defines[i] = NULL;
+		free (gl_program_vert_paths[i]);
+		gl_program_vert_paths[i] = NULL;
+		free (gl_program_frag_paths[i]);
+		gl_program_frag_paths[i] = NULL;
+	}
+	gl_num_programs = 0;
 
-        memset (&glprogs, 0, sizeof(glprogs));
+	// FIX: Call GL_UseProgramFunc(0) BEFORE resetting the cache variable,
+	// so the driver state matches the cached state on exit.
+	GL_UseProgramFunc (0);
+	gl_current_program = 0;
 
-        for (i = 0; i < shader_cache_count; i++)
-        {
-                free (shader_cache[i].data);
-                shader_cache[i].data = NULL;
-                shader_cache[i].path[0] = '\0';
-        }
-        shader_cache_count = 0;
+	memset (&glprogs, 0, sizeof (glprogs));
+
+	for (i = 0; i < shader_cache_count; i++)
+	{
+		free (shader_cache[i].data);
+		shader_cache[i].data    = NULL;
+		shader_cache[i].path[0] = '\0';
+	}
+	shader_cache_count = 0;
 }

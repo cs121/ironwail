@@ -308,7 +308,7 @@ static dlight_t *DLightPool_AcquireSlot (double time)
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			return dl;
-		if (dl->kind == DL_TRANSIENT && (dl->die < time || dl->spawn > time))
+		if (dl->kind == DL_TRANSIENT && dl->die < time)
 			return dl;
 	}
 
@@ -327,7 +327,6 @@ static dlight_t *DLightPool_AcquireSlot (double time)
 	if (evicted)
 		return evicted;
 
-	dlight_pool.stats.evicted++;
 	return &dlight_fallback;
 }
 
@@ -384,10 +383,7 @@ void DLightPool_KillByKey (int key)
 	{
 		dlight_t *dl = &dlight_pool.items[i];
 		if (dl->active && dl->key == key)
-		{
 			dl->active = false;
-			break;
-		}
 	}
 }
 
@@ -571,9 +567,9 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		dlight_filter_debug.pass_world_flag++;
 
 		lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-		if (lum <= 0.f || lum < min_brightness)
+		if (lum < min_brightness)
 		{
-			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_LIFETIME);
+			DLightPool_DebugSetReason (dbg, DLIGHT_REJECT_OTHER);
 			dlight_filter_debug.rejected_lifetime_radius++;
 			continue;
 		}
@@ -614,7 +610,9 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 			else
 			{
 				int leafnum = (int)(lightleaf - cl.worldmodel->leafs) - 1;
-				if (leafnum >= 0)
+				if (leafnum < 0)
+					in_pvs = false; // Solid-Leaf (index 0) is never visible
+				else
 					in_pvs = ((view_pvs[leafnum >> 3] & (1 << (leafnum & 7))) != 0);
 			}
 		}

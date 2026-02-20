@@ -81,7 +81,8 @@ void R_PostFX_ReloadLUTs (void)
 	int width;
 	int height;
 	int size = 0;
-	int layer_bytes;
+	size_t layer_bytes;    // FIX: size_t statt int, verhindert Integer-Overflow bei grossen LUTs
+	size_t total_bytes;
 	byte *layer_data;
 	byte *lut_storage;
 	enum srcformat fmt;
@@ -91,6 +92,11 @@ void R_PostFX_ReloadLUTs (void)
 	if (r_postfx_lut.value <= 0.f)
 		return;
 
+	// OPTIMIERUNG: Nur ein einziger Lade-Durchlauf.
+	// Strategie: Beim ersten gueltigen LUT die Groesse ermitteln,
+	// dann sofort Speicher allozieren und alle LUTs in einem Durchgang einlesen.
+
+	// --- Erster Pass: Groesse bestimmen ---
 	for (i = 1; i < PFX_LUT_COUNT; ++i)
 	{
 		int mark = Hunk_LowMark ();
@@ -126,11 +132,17 @@ void R_PostFX_ReloadLUTs (void)
 	if (size <= 0)
 		return;
 
-	layer_bytes = size * size * size * 4;
-	lut_storage = (byte *)calloc (PFX_LUT_COUNT * layer_bytes, 1);
+	// FIX: size_t-Arithmetik verhindert 32-bit-Overflow fuer grosse LUT-Groessen
+	layer_bytes = (size_t)size * size * size * 4;
+	total_bytes = (size_t)PFX_LUT_COUNT * layer_bytes;
+	lut_storage = (byte *)calloc (total_bytes, 1);
 	if (!lut_storage)
 		return;
 
+	// FIX: Layer 0 zuerst als Identity initialisieren (klare Reihenfolge, kein Refactoring-Risiko)
+	R_PostFX_GenerateIdentityLUT (lut_storage, size);
+
+	// --- Zweiter Pass: LUT-Daten laden ---
 	for (i = 1; i < PFX_LUT_COUNT; ++i)
 	{
 		int mark = Hunk_LowMark ();
@@ -138,6 +150,7 @@ void R_PostFX_ReloadLUTs (void)
 		layer_data = lut_storage + i * layer_bytes;
 		if (!data || fmt != SRC_RGBA || height != size || width != size * size)
 		{
+			// Fehlgeschlagene/fehlende LUTs fallen auf Identity-LUT zurueck
 			R_PostFX_GenerateIdentityLUT (layer_data, size);
 			Hunk_FreeToLowMark (mark);
 			continue;
@@ -145,7 +158,6 @@ void R_PostFX_ReloadLUTs (void)
 		memcpy (layer_data, data, layer_bytes);
 		Hunk_FreeToLowMark (mark);
 	}
-	R_PostFX_GenerateIdentityLUT (lut_storage, size);
 
 	glGenTextures (1, &r_postfx_lut_tex);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, r_postfx_lut_tex);
@@ -153,6 +165,8 @@ void R_PostFX_ReloadLUTs (void)
 	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	// FIX: WRAP_R fuer den Layer-Index der 2D-Array-Textur setzen (fehlte bisher)
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
 	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
 

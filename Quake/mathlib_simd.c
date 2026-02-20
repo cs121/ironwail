@@ -237,16 +237,37 @@ int VectorCompare (const vec3_t v1, const vec3_t v2)
 
 void VectorMA (const vec3_t veca, float scale, const vec3_t vecb, vec3_t vecc)
 {
-        vecc[0] = veca[0] + scale*vecb[0];
-        vecc[1] = veca[1] + scale*vecb[1];
-        vecc[2] = veca[2] + scale*vecb[2];
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		__m128 a = _mm_loadu_ps (veca);
+		__m128 b = _mm_loadu_ps (vecb);
+		__m128 s = _mm_set_ps1 (scale);
+		_mm_storeu_ps (vecc, _mm_add_ps (a, _mm_mul_ps (s, b)));
+		return;
+	}
+#endif
+	vecc[0] = veca[0] + scale*vecb[0];
+	vecc[1] = veca[1] + scale*vecb[1];
+	vecc[2] = veca[2] + scale*vecb[2];
 }
 
 void VectorLerp (const vec3_t veca, const vec3_t vecb, float frac, vec3_t dst)
 {
-        dst[0] = LERP (veca[0], vecb[0], frac);
-        dst[1] = LERP (veca[1], vecb[1], frac);
-        dst[2] = LERP (veca[2], vecb[2], frac);
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		__m128 a = _mm_loadu_ps (veca);
+		__m128 b = _mm_loadu_ps (vecb);
+		__m128 f = _mm_set_ps1 (frac);
+		/* dst = a + frac*(b-a) */
+		_mm_storeu_ps (dst, _mm_add_ps (a, _mm_mul_ps (f, _mm_sub_ps (b, a))));
+		return;
+	}
+#endif
+	dst[0] = LERP (veca[0], vecb[0], frac);
+	dst[1] = LERP (veca[1], vecb[1], frac);
+	dst[2] = LERP (veca[2], vecb[2], frac);
 }
 
 void VectorAverage (const vec3_t veca, const vec3_t vecb, vec3_t dst)
@@ -285,6 +306,27 @@ void _VectorCopy (const vec3_t in, vec3_t out)
 
 void CrossProduct (const vec3_t v1, const vec3_t v2, vec3_t cross)
 {
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		/* Load v1 = (x1,y1,z1,0), v2 = (x2,y2,z2,0)
+		   cross = (y1*z2 - z1*y2,  z1*x2 - x1*z2,  x1*y2 - y1*x2)
+		   Achieved with two shuffles + mul + sub                    */
+		__m128 a = _mm_loadu_ps (v1); /* x1 y1 z1 ? */
+		__m128 b = _mm_loadu_ps (v2); /* x2 y2 z2 ? */
+
+		__m128 a_yzx = _mm_shuffle_ps (a, a, _MM_SHUFFLE (3, 0, 2, 1)); /* y1 z1 x1 ? */
+		__m128 b_yzx = _mm_shuffle_ps (b, b, _MM_SHUFFLE (3, 0, 2, 1)); /* y2 z2 x2 ? */
+		__m128 a_zxy = _mm_shuffle_ps (a, a, _MM_SHUFFLE (3, 1, 0, 2)); /* z1 x1 y1 ? */
+		__m128 b_zxy = _mm_shuffle_ps (b, b, _MM_SHUFFLE (3, 1, 0, 2)); /* z2 x2 y2 ? */
+
+		__m128 result = _mm_sub_ps (_mm_mul_ps (a_yzx, b_zxy),
+		                            _mm_mul_ps (a_zxy, b_yzx));
+		/* result = (y1*z2-z1*y2, z1*x2-x1*z2, x1*y2-y1*x2, ?) */
+		_mm_storeu_ps (cross, result); /* stores 4 floats; 4th is garbage but vec3_t has room */
+		return;
+	}
+#endif
 	cross[0] = v1[1]*v2[2] - v1[2]*v2[1];
 	cross[1] = v1[2]*v2[0] - v1[0]*v2[2];
 	cross[2] = v1[0]*v2[1] - v1[1]*v2[0];
@@ -292,24 +334,51 @@ void CrossProduct (const vec3_t v1, const vec3_t v2, vec3_t cross)
 
 vec_t VectorLength(const vec3_t v)
 {
+#ifdef USE_SSE41
+	if (use_simd)
+	{
+		__m128 a = _mm_loadu_ps (v);
+		/* _mm_dp_ps: dot product of xyz (mask 0x71 = use xyz, store in lane 0) */
+		__m128 dot = _mm_dp_ps (a, a, 0x71);
+		return _mm_cvtss_f32 (_mm_sqrt_ss (dot));
+	}
+#endif
 	return sqrtf(DotProduct(v,v));
 }
 
 float VectorNormalize (vec3_t v)
 {
-	float	length, ilength;
-
-	length = sqrtf(DotProduct(v,v));
-
-	if (length)
+#ifdef USE_SSE41
+	if (use_simd)
 	{
-		ilength = 1/length;
-		v[0] *= ilength;
-		v[1] *= ilength;
-		v[2] *= ilength;
+		__m128 a   = _mm_loadu_ps (v);
+		__m128 dot = _mm_dp_ps (a, a, 0x77); /* dot in all lanes, xyz only */
+		/* rsqrt estimate (~11-bit precision), refined once with Newton-Raphson:
+		   nr = est * (1.5 - 0.5 * x * est^2)  -->  ~23-bit accuracy         */
+		__m128 est  = _mm_rsqrt_ps (dot);
+		__m128 half = _mm_set_ps1 (0.5f);
+		__m128 three= _mm_set_ps1 (3.0f);
+		__m128 nr   = _mm_mul_ps (est, _mm_sub_ps (three,
+		                _mm_mul_ps (dot, _mm_mul_ps (est, est))));
+		nr = _mm_mul_ps (nr, half); /* nr = refined 1/sqrt(dot) */
+		__m128 norm = _mm_mul_ps (a, nr);
+		_mm_storeu_ps (v, norm);
+		/* return the actual length = 1 / nr[0] */
+		return _mm_cvtss_f32 (_mm_rcp_ss (_mm_shuffle_ps (nr, nr, 0)));
 	}
-
-	return length;
+#endif
+	{
+		float length, ilength;
+		length = sqrtf(DotProduct(v,v));
+		if (length)
+		{
+			ilength = 1/length;
+			v[0] *= ilength;
+			v[1] *= ilength;
+			v[2] *= ilength;
+		}
+		return length;
+	}
 }
 
 float DistanceSquared (const vec3_t a, const vec3_t b)
@@ -333,6 +402,15 @@ void VectorInverse (vec3_t v)
 
 void VectorScale (const vec3_t in, vec_t scale, vec3_t out)
 {
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		__m128 v = _mm_loadu_ps (in);
+		__m128 s = _mm_set_ps1 (scale);
+		_mm_storeu_ps (out, _mm_mul_ps (v, s));
+		return;
+	}
+#endif
 	out[0] = in[0]*scale;
 	out[1] = in[1]*scale;
 	out[2] = in[2]*scale;
@@ -478,24 +556,55 @@ R_ConcatRotations
 */
 void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3])
 {
-	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] +
-				in1[0][2] * in2[2][0];
-	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] +
-				in1[0][2] * in2[2][1];
-	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] +
-				in1[0][2] * in2[2][2];
-	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] +
-				in1[1][2] * in2[2][0];
-	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] +
-				in1[1][2] * in2[2][1];
-	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] +
-				in1[1][2] * in2[2][2];
-	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] +
-				in1[2][2] * in2[2][0];
-	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] +
-				in1[2][2] * in2[2][1];
-	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] +
-				in1[2][2] * in2[2][2];
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		/* Each row of out = dot(row of in1, cols of in2)
+		   We process one row of in1 at a time.
+		   in2 columns: col0=(in2[0][0],in2[1][0],in2[2][0]), etc.
+		   But in2 is stored row-major [row][col], so in2[r][c].
+		   col j of in2 = (in2[0][j], in2[1][j], in2[2][j])              */
+
+		/* Load in2 rows as SSE (only 3 elements used, 4th padding fine)  */
+		__m128 r2_0 = _mm_set_ps (0, in2[0][2], in2[0][1], in2[0][0]);
+		__m128 r2_1 = _mm_set_ps (0, in2[1][2], in2[1][1], in2[1][0]);
+		__m128 r2_2 = _mm_set_ps (0, in2[2][2], in2[2][1], in2[2][0]);
+
+		/* Transpose in2 to get columns */
+		/* col j = (r2_0[j], r2_1[j], r2_2[j]) */
+		/* out[i][j] = dot(in1[i], col_j_of_in2) */
+
+		int i, j;
+		for (i = 0; i < 3; i++)
+		{
+			__m128 row1 = _mm_set_ps (0, in1[i][2], in1[i][1], in1[i][0]);
+			for (j = 0; j < 3; j++)
+			{
+				__m128 col2;
+				if      (j == 0) col2 = _mm_set_ps (0, in2[2][0], in2[1][0], in2[0][0]);
+				else if (j == 1) col2 = _mm_set_ps (0, in2[2][1], in2[1][1], in2[0][1]);
+				else             col2 = _mm_set_ps (0, in2[2][2], in2[1][2], in2[0][2]);
+				__m128 prod = _mm_mul_ps (row1, col2);
+				/* horizontal add xyz */
+				__m128 shuf = _mm_shuffle_ps (prod, prod, _MM_SHUFFLE (2, 3, 0, 1));
+				__m128 sums = _mm_add_ps (prod, shuf);
+				shuf = _mm_movehl_ps (shuf, sums);
+				sums = _mm_add_ss (sums, shuf);
+				out[i][j] = _mm_cvtss_f32 (sums);
+			}
+		}
+		return;
+	}
+#endif
+	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] + in1[0][2] * in2[2][0];
+	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] + in1[0][2] * in2[2][1];
+	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] + in1[0][2] * in2[2][2];
+	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] + in1[1][2] * in2[2][0];
+	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] + in1[1][2] * in2[2][1];
+	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] + in1[1][2] * in2[2][2];
+	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] + in1[2][2] * in2[2][0];
+	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] + in1[2][2] * in2[2][1];
+	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] + in1[2][2] * in2[2][2];
 }
 
 
@@ -506,30 +615,60 @@ R_ConcatTransforms
 */
 void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4])
 {
-	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] +
-				in1[0][2] * in2[2][0];
-	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] +
-				in1[0][2] * in2[2][1];
-	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] +
-				in1[0][2] * in2[2][2];
-	out[0][3] = in1[0][0] * in2[0][3] + in1[0][1] * in2[1][3] +
-				in1[0][2] * in2[2][3] + in1[0][3];
-	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] +
-				in1[1][2] * in2[2][0];
-	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] +
-				in1[1][2] * in2[2][1];
-	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] +
-				in1[1][2] * in2[2][2];
-	out[1][3] = in1[1][0] * in2[0][3] + in1[1][1] * in2[1][3] +
-				in1[1][2] * in2[2][3] + in1[1][3];
-	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] +
-				in1[2][2] * in2[2][0];
-	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] +
-				in1[2][2] * in2[2][1];
-	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] +
-				in1[2][2] * in2[2][2];
-	out[2][3] = in1[2][0] * in2[0][3] + in1[2][1] * in2[1][3] +
-				in1[2][2] * in2[2][3] + in1[2][3];
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		/* in2 has an implicit 4th row [0 0 0 1].
+		   out[i][0..2] = in1[i][0..2] dot cols 0..2 of in2 (3x3 part)
+		   out[i][3]    = in1[i][0..2] dot in2_col3 + in1[i][3]         */
+		int i;
+		for (i = 0; i < 3; i++)
+		{
+			__m128 row1 = _mm_loadu_ps (in1[i]); /* x y z w */
+
+			/* Compute 3x3 part: out[i][j] = dot(in1[i][0..2], col_j_in2) */
+			/* col 0 of in2 (rotation part) */
+			__m128 c0 = _mm_set_ps (0, in2[2][0], in2[1][0], in2[0][0]);
+			__m128 c1 = _mm_set_ps (0, in2[2][1], in2[1][1], in2[0][1]);
+			__m128 c2 = _mm_set_ps (0, in2[2][2], in2[1][2], in2[0][2]);
+			/* col 3 of in2 (translation part) */
+			__m128 c3 = _mm_set_ps (0, in2[2][3], in2[1][3], in2[0][3]);
+
+			/* mask to use only xyz of row1 */
+			__m128 xyz = _mm_set_ps (0, 1, 1, 1);
+			__m128 r   = _mm_and_ps (row1, _mm_castsi128_ps (_mm_set_epi32 (0, -1, -1, -1)));
+
+			#define HDOT3(a, b) do { \
+				__m128 p = _mm_mul_ps (a, b); \
+				__m128 s = _mm_shuffle_ps (p, p, _MM_SHUFFLE (2, 3, 0, 1)); \
+				p = _mm_add_ps (p, s); \
+				s = _mm_movehl_ps (s, p); \
+				p = _mm_add_ss (p, s); \
+				out[i][_j] = _mm_cvtss_f32 (p); \
+			} while(0)
+
+			{ int _j = 0; __m128 p = _mm_mul_ps (r, c0); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][0] = _mm_cvtss_f32(p); }
+			{ int _j = 1; __m128 p = _mm_mul_ps (r, c1); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][1] = _mm_cvtss_f32(p); }
+			{ int _j = 2; __m128 p = _mm_mul_ps (r, c2); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][2] = _mm_cvtss_f32(p); }
+			{ int _j = 3; __m128 p = _mm_mul_ps (r, c3); __m128 s = _mm_shuffle_ps(p,p,_MM_SHUFFLE(2,3,0,1)); p=_mm_add_ps(p,s); s=_mm_movehl_ps(s,p); p=_mm_add_ss(p,s); out[i][3] = _mm_cvtss_f32(p) + in1[i][3]; }
+
+			#undef HDOT3
+		}
+		return;
+	}
+#endif
+	out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] + in1[0][2] * in2[2][0];
+	out[0][1] = in1[0][0] * in2[0][1] + in1[0][1] * in2[1][1] + in1[0][2] * in2[2][1];
+	out[0][2] = in1[0][0] * in2[0][2] + in1[0][1] * in2[1][2] + in1[0][2] * in2[2][2];
+	out[0][3] = in1[0][0] * in2[0][3] + in1[0][1] * in2[1][3] + in1[0][2] * in2[2][3] + in1[0][3];
+	out[1][0] = in1[1][0] * in2[0][0] + in1[1][1] * in2[1][0] + in1[1][2] * in2[2][0];
+	out[1][1] = in1[1][0] * in2[0][1] + in1[1][1] * in2[1][1] + in1[1][2] * in2[2][1];
+	out[1][2] = in1[1][0] * in2[0][2] + in1[1][1] * in2[1][2] + in1[1][2] * in2[2][2];
+	out[1][3] = in1[1][0] * in2[0][3] + in1[1][1] * in2[1][3] + in1[1][2] * in2[2][3] + in1[1][3];
+	out[2][0] = in1[2][0] * in2[0][0] + in1[2][1] * in2[1][0] + in1[2][2] * in2[2][0];
+	out[2][1] = in1[2][0] * in2[0][1] + in1[2][1] * in2[1][1] + in1[2][2] * in2[2][1];
+	out[2][2] = in1[2][0] * in2[0][2] + in1[2][1] * in2[1][2] + in1[2][2] * in2[2][2];
+	out[2][3] = in1[2][0] * in2[0][3] + in1[2][1] * in2[1][3] + in1[2][2] * in2[2][3] + in1[2][3];
 }
 
 
@@ -626,6 +765,49 @@ MatrixMultiply
 */
 void MatrixMultiply(float left[16], float right[16])
 {
+#ifdef USE_AVX
+	if (use_simd)
+	{
+		/* Load all 4 left columns as 128-bit registers */
+		__m128 lc0 = _mm_loadu_ps (left + 0);
+		__m128 lc1 = _mm_loadu_ps (left + 4);
+		__m128 lc2 = _mm_loadu_ps (left + 8);
+		__m128 lc3 = _mm_loadu_ps (left + 12);
+
+		/* Broadcast left cols into 256-bit: [col | col] */
+		__m256 L0 = _mm256_set_m128 (lc0, lc0);
+		__m256 L1 = _mm256_set_m128 (lc1, lc1);
+		__m256 L2 = _mm256_set_m128 (lc2, lc2);
+		__m256 L3 = _mm256_set_m128 (lc3, lc3);
+
+		#define VBCAST256(v256, lane) \
+			_mm256_set_m128 (_mm_shuffle_ps (_mm256_extractf128_ps(v256,1), _mm256_extractf128_ps(v256,1), _MM_SHUFFLE(lane,lane,lane,lane)), \
+			                 _mm_shuffle_ps (_mm256_castps256_ps128(v256),  _mm256_castps256_ps128(v256),  _MM_SHUFFLE(lane,lane,lane,lane)))
+
+		/* Process 2 right columns per iteration */
+		int i;
+		for (i = 0; i < 4; i += 2, left += 8, right += 8)
+		{
+			/* Load 2 right columns into one 256-bit register: [col+1 | col] */
+			__m256 RC = _mm256_loadu_ps (right); /* right[0..7] = col_i and col_{i+1} */
+
+			/* Broadcast each scalar from RC to all lanes within each 128-bit half */
+			__m256 c0 = _mm256_mul_ps (L0, VBCAST256 (RC, 0));
+			__m256 c1 = _mm256_mul_ps (L1, VBCAST256 (RC, 1));
+			__m256 c2 = _mm256_mul_ps (L2, VBCAST256 (RC, 2));
+			__m256 c3 = _mm256_mul_ps (L3, VBCAST256 (RC, 3));
+
+			c0 = _mm256_add_ps (c0, c1);
+			c2 = _mm256_add_ps (c2, c3);
+			c0 = _mm256_add_ps (c0, c2);
+
+			_mm256_storeu_ps (left, c0);
+		}
+		#undef VBCAST256
+		_mm256_zeroupper ();
+		return;
+	}
+#endif
 #ifdef USE_SSE2
 	if (use_simd)
 	{
@@ -653,8 +835,8 @@ void MatrixMultiply(float left[16], float right[16])
 		}
 
 		#undef VBROADCAST
+		return;
 	}
-	else
 #endif
 	{
 		float temp[16];
@@ -765,20 +947,21 @@ ApplyScale
 */
 void ApplyScale(float matrix[16], float x, float y, float z)
 {
-	matrix[0*4 + 0] *= x;
-	matrix[0*4 + 1] *= x;
-	matrix[0*4 + 2] *= x;
-	matrix[0*4 + 3] *= x;
-
-	matrix[1*4 + 0] *= y;
-	matrix[1*4 + 1] *= y;
-	matrix[1*4 + 2] *= y;
-	matrix[1*4 + 3] *= y;
-
-	matrix[2*4 + 0] *= z;
-	matrix[2*4 + 1] *= z;
-	matrix[2*4 + 2] *= z;
-	matrix[2*4 + 3] *= z;
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		__m128 sx = _mm_set_ps1 (x);
+		__m128 sy = _mm_set_ps1 (y);
+		__m128 sz = _mm_set_ps1 (z);
+		_mm_storeu_ps (matrix + 0*4, _mm_mul_ps (_mm_loadu_ps (matrix + 0*4), sx));
+		_mm_storeu_ps (matrix + 1*4, _mm_mul_ps (_mm_loadu_ps (matrix + 1*4), sy));
+		_mm_storeu_ps (matrix + 2*4, _mm_mul_ps (_mm_loadu_ps (matrix + 2*4), sz));
+		return;
+	}
+#endif
+	matrix[0*4 + 0] *= x; matrix[0*4 + 1] *= x; matrix[0*4 + 2] *= x; matrix[0*4 + 3] *= x;
+	matrix[1*4 + 0] *= y; matrix[1*4 + 1] *= y; matrix[1*4 + 2] *= y; matrix[1*4 + 3] *= y;
+	matrix[2*4 + 0] *= z; matrix[2*4 + 1] *= z; matrix[2*4 + 2] *= z; matrix[2*4 + 3] *= z;
 }
 
 /*
@@ -819,42 +1002,86 @@ ProjectVector
 */
 void ProjectVector(const vec3_t src, const float matrix[16], vec3_t dst)
 {
-	float z;
-	vec4_t proj;
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		/* proj = col3 + src[0]*col0 + src[1]*col1 + src[2]*col2 */
+		__m128 col0 = _mm_loadu_ps (matrix + 0*4);
+		__m128 col1 = _mm_loadu_ps (matrix + 1*4);
+		__m128 col2 = _mm_loadu_ps (matrix + 2*4);
+		__m128 col3 = _mm_loadu_ps (matrix + 3*4);
 
-	proj[0] = matrix[3*4 + 0];
-	proj[1] = matrix[3*4 + 1];
-	proj[2] = matrix[3*4 + 2];
-	proj[3] = matrix[3*4 + 3];
+		__m128 proj = _mm_add_ps (col3,
+		              _mm_add_ps (_mm_mul_ps (_mm_set_ps1 (src[0]), col0),
+		              _mm_add_ps (_mm_mul_ps (_mm_set_ps1 (src[1]), col1),
+		                          _mm_mul_ps (_mm_set_ps1 (src[2]), col2))));
 
-	proj[0] += src[0]*matrix[0*4 + 0];
-	proj[1] += src[0]*matrix[0*4 + 1];
-	proj[2] += src[0]*matrix[0*4 + 2];
-	proj[3] += src[0]*matrix[0*4 + 3];
-
-	proj[0] += src[1]*matrix[1*4 + 0];
-	proj[1] += src[1]*matrix[1*4 + 1];
-	proj[2] += src[1]*matrix[1*4 + 2];
-	proj[3] += src[1]*matrix[1*4 + 3];
-
-	proj[0] += src[2]*matrix[2*4 + 0];
-	proj[1] += src[2]*matrix[2*4 + 1];
-	proj[2] += src[2]*matrix[2*4 + 2];
-	proj[3] += src[2]*matrix[2*4 + 3];
-
-	z = fabs (proj[3]);
-
-	dst[0] = proj[0] / z;
-	dst[1] = proj[1] / z;
-	dst[2] = proj[3];
+		float buf[4];
+		_mm_storeu_ps (buf, proj);
+		float z = fabsf (buf[3]);
+		dst[0] = buf[0] / z;
+		dst[1] = buf[1] / z;
+		dst[2] = buf[3];
+		return;
+	}
+#endif
+	{
+		float z;
+		vec4_t proj;
+		proj[0] = matrix[3*4 + 0];
+		proj[1] = matrix[3*4 + 1];
+		proj[2] = matrix[3*4 + 2];
+		proj[3] = matrix[3*4 + 3];
+		proj[0] += src[0]*matrix[0*4 + 0];
+		proj[1] += src[0]*matrix[0*4 + 1];
+		proj[2] += src[0]*matrix[0*4 + 2];
+		proj[3] += src[0]*matrix[0*4 + 3];
+		proj[0] += src[1]*matrix[1*4 + 0];
+		proj[1] += src[1]*matrix[1*4 + 1];
+		proj[2] += src[1]*matrix[1*4 + 2];
+		proj[3] += src[1]*matrix[1*4 + 3];
+		proj[0] += src[2]*matrix[2*4 + 0];
+		proj[1] += src[2]*matrix[2*4 + 1];
+		proj[2] += src[2]*matrix[2*4 + 2];
+		proj[3] += src[2]*matrix[2*4 + 3];
+		z = fabs (proj[3]);
+		dst[0] = proj[0] / z;
+		dst[1] = proj[1] / z;
+		dst[2] = proj[3];
+	}
 }
 
 void MatrixTranspose4x3(const float src[16], float dst[12])
 {
-	#define COPY_ROW(row)					\
-		dst[row*4+0] = src[row+0],	\
-		dst[row*4+1] = src[row+4],	\
-		dst[row*4+2] = src[row+8],	\
+#ifdef USE_SSE2
+	if (use_simd)
+	{
+		/* src is column-major 4x4, we want the transpose of the top 3 rows as 3x4 row-major
+		   i.e. dst[row][col] = src[col][row] for row in 0..2, col in 0..3
+		   Use SSE transpose trick with unpack + shuffle                                    */
+		__m128 c0 = _mm_loadu_ps (src + 0);  /* col0: r0c0 r1c0 r2c0 r3c0 */
+		__m128 c1 = _mm_loadu_ps (src + 4);  /* col1: r0c1 r1c1 r2c1 r3c1 */
+		__m128 c2 = _mm_loadu_ps (src + 8);  /* col2: r0c2 r1c2 r2c2 r3c2 */
+		__m128 c3 = _mm_loadu_ps (src + 12); /* col3: r0c3 r1c3 r2c3 r3c3 */
+
+		__m128 t0 = _mm_unpacklo_ps (c0, c1); /* r0c0 r0c1 r1c0 r1c1 */
+		__m128 t1 = _mm_unpacklo_ps (c2, c3); /* r0c2 r0c3 r1c2 r1c3 */
+		__m128 t2 = _mm_unpackhi_ps (c0, c1); /* r2c0 r2c1 r3c0 r3c1 */
+		__m128 t3 = _mm_unpackhi_ps (c2, c3); /* r2c2 r2c3 r3c2 r3c3 */
+
+		/* Row 0: r0c0 r0c1 r0c2 r0c3 */
+		_mm_storeu_ps (dst + 0*4, _mm_movelh_ps (t0, t1));
+		/* Row 1: r1c0 r1c1 r1c2 r1c3 */
+		_mm_storeu_ps (dst + 1*4, _mm_movehl_ps (t1, t0));
+		/* Row 2: r2c0 r2c1 r2c2 r2c3 */
+		_mm_storeu_ps (dst + 2*4, _mm_movelh_ps (t2, t3));
+		return;
+	}
+#endif
+	#define COPY_ROW(row)				\
+		dst[row*4+0] = src[row+0],		\
+		dst[row*4+1] = src[row+4],		\
+		dst[row*4+2] = src[row+8],		\
 		dst[row*4+3] = src[row+12]
 
 	COPY_ROW (0);
@@ -866,30 +1093,74 @@ void MatrixTranspose4x3(const float src[16], float dst[12])
 
 qboolean RayVsBox (const vec3_t org, const vec3_t rcpdelta, const vec3_t mins, const vec3_t maxs, float *frac)
 {
-	int		i;
-	float	enter, exit;
-
-	if (frac)
-		*frac = 1.f;
-
-	enter = 0.f;
-	exit = 1.f;
-
-	for (i = 0; i < 3; i++)
+#ifdef USE_SSE41
+	if (use_simd)
 	{
-		float t0 = (mins[i] - org[i]) * rcpdelta[i];
-		float t1 = (maxs[i] - org[i]) * rcpdelta[i];
-		float tmin = q_min (t0, t1);
-		float tmax = q_max (t0, t1);
-		enter = q_max (enter, tmin);
-		exit = q_min (exit, tmax);
+		/* Load as 4-wide (w lane is harmless: rcpdelta[3]=0 gives t=±inf, clipped away) */
+		__m128 vorg    = _mm_loadu_ps (org);
+		__m128 vrcpd   = _mm_loadu_ps (rcpdelta);
+		__m128 vmins   = _mm_loadu_ps (mins);
+		__m128 vmaxs   = _mm_loadu_ps (maxs);
+
+		__m128 t0 = _mm_mul_ps (_mm_sub_ps (vmins, vorg), vrcpd);
+		__m128 t1 = _mm_mul_ps (_mm_sub_ps (vmaxs, vorg), vrcpd);
+
+		__m128 tmin4 = _mm_min_ps (t0, t1);
+		__m128 tmax4 = _mm_max_ps (t0, t1);
+
+		/* Clamp entry to [0,1], exit to [0,1] */
+		__m128 zero = _mm_setzero_ps ();
+		__m128 one  = _mm_set_ps1 (1.f);
+
+		/* enter = max(0, max(tmin.x, tmin.y, tmin.z)) */
+		/* We need horizontal max of xyz lanes of tmin4 */
+		__m128 tmp = _mm_shuffle_ps (tmin4, tmin4, _MM_SHUFFLE (2, 1, 0, 3));
+		__m128 enter4 = _mm_max_ps (tmin4, _mm_shuffle_ps (tmin4, tmin4, _MM_SHUFFLE (1, 0, 3, 2)));
+		enter4 = _mm_max_ps (enter4, tmp);
+		enter4 = _mm_max_ps (enter4, zero);
+
+		/* exit = min(1, min(tmax.x, tmax.y, tmax.z)) */
+		__m128 tmp2  = _mm_shuffle_ps (tmax4, tmax4, _MM_SHUFFLE (2, 1, 0, 3));
+		__m128 exit4 = _mm_min_ps (tmax4, _mm_shuffle_ps (tmax4, tmax4, _MM_SHUFFLE (1, 0, 3, 2)));
+		exit4 = _mm_min_ps (exit4, tmp2);
+		exit4 = _mm_min_ps (exit4, one);
+
+		float enter_f = _mm_cvtss_f32 (enter4);
+		float exit_f  = _mm_cvtss_f32 (exit4);
+
+		if (frac) *frac = 1.f;
+		if (enter_f > exit_f)
+			return false;
+		if (frac) *frac = enter_f;
+		return true;
 	}
+#endif
+	{
+		int		i;
+		float	enter, exit;
 
-	if (enter > exit)
-		return false;
+		if (frac)
+			*frac = 1.f;
 
-	if (frac)
-		*frac = enter;
+		enter = 0.f;
+		exit = 1.f;
 
-	return true;
+		for (i = 0; i < 3; i++)
+		{
+			float t0 = (mins[i] - org[i]) * rcpdelta[i];
+			float t1 = (maxs[i] - org[i]) * rcpdelta[i];
+			float tmin = q_min (t0, t1);
+			float tmax = q_max (t0, t1);
+			enter = q_max (enter, tmin);
+			exit = q_min (exit, tmax);
+		}
+
+		if (enter > exit)
+			return false;
+
+		if (frac)
+			*frac = enter;
+
+		return true;
+	}
 }

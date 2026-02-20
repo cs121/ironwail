@@ -1861,7 +1861,12 @@ static void R_Clustered_BuildLists (void)
 	}
 	else
 	{
-		R_ClusteredResetFrameState (&runtime);
+		// Async worker not done yet.  If we have valid data from a previous frame,
+		// keep it active so world/entity draw passes still get dynamic lighting
+		// (one frame stale).  Only reset when we have no data at all.
+		if (!r_clustered.has_frame_data)
+			R_ClusteredResetFrameState (&runtime);
+		// else: retain shading_enabled=true and existing SSBO contents from last commit
 	}
 	if (r_clustered_async_debug.value > 0.f)
 	{
@@ -2009,6 +2014,17 @@ void R_Clustered_RebindForProgram (GLuint program, const char *pass_name)
 			r_clustered.z_slices,
 			r_clustered.params.tile_size);
 	}
+}
+
+// R_Clustered_ForceBindForShading
+// Like R_Clustered_BindForShading but clears shading_bound first so the bind
+// always executes.  Call this once per frame before world/entity draw passes
+// to re-establish SSBO bindings after R_Shadow_DlightPass or other passes that
+// may have disturbed cluster state.
+void R_Clustered_ForceBindForShading (void)
+{
+	r_clustered.shading_bound = false;
+	R_Clustered_BindForShading ();
 }
 
 void R_GetClusterDlightDebugStats (int *out_clusters, int *out_indices, const int **out_light_hits, int *out_max_hits)
