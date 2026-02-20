@@ -194,13 +194,16 @@ vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 {
 	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
 	ClusterHeader header;
+	uint cluster_count;
 	int cluster_idx;
-	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header))
+	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
+		return vec3(0.0);
+	if (cluster_count == 0u)
 		return vec3(0.0);
 
 	vec3 dynamic_light = vec3(0.0);
 
-	for (uint i = 0u; i < header.count; ++i)
+	for (uint i = 0u; i < cluster_count; ++i)
 	{
 		uint light_id;
 		PackedLight pl;
@@ -234,9 +237,7 @@ void main()
 	vec3 L_amb = max(in_amb_light, vec3(0.0));
 	vec3 N_lighting = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 	vec3 world_pos = in_pos + AliasEyePos;
-	vec3 clustered_dyn = vec3(0.0);
-	if ((in_flags & ALIAS_FLAG_LIGHTNING) == 0 || ShaderParams.z > 0.5)
-		clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
+	vec3 clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
 	vec3 L_dyn = clustered_dyn;
 	lit_color.rgb += clustered_dyn;
 

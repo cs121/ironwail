@@ -1,21 +1,3 @@
-// cluster_prefix.comp
-//
-// Pass 0 (clear):  Setzt alle Header, tempCounts und overflowCount auf 0.
-// Pass 1 (prefix): Berechnet Prefix-Summe der Counts → füllt header.offset.
-//
-// OPTIMIERUNG: Beide Passes sind in Work-Groups parallelisiert.
-//   - Clear-Pass:  Jeder Thread löscht einen Block von Clustern.
-//   - Prefix-Pass: Zwei-Phasen-Approach:
-//       Phase A) Jede Work-Group berechnet eine lokale Partial-Sum
-//                und speichert das Gruppen-Gesamt in partialSums[].
-//       Phase B) Thread 0 akkumuliert die Gruppen-Offsets (sequenziell,
-//                aber jetzt nur noch numGroups Iterationen statt numClusters).
-//       Phase C) Jede Work-Group addiert ihren Gruppen-Offset auf ihre lokalen Offsets.
-//   Das reduziert den sequenziellen Anteil von O(N) auf O(N/64) Iterationen.
-//
-// HINWEIS: Für sehr große Cluster-Counts (>100k) empfiehlt sich ein vollständig
-//          GPU-paralleler Exclusive-Scan (z.B. Blelloch-Scan mit mehreren Passes).
-
 layout(local_size_x=64, local_size_y=1, local_size_z=1) in;
 
 struct ClusterHeader
@@ -40,149 +22,41 @@ layout(std430, binding=7) buffer ClusterTempCountBuffer
 	uint tempCounts[];
 };
 
-// Partial-Sum-Buffer: ein Eintrag pro Work-Group (Gruppen-Summe nach Phase A).
-layout(std430, binding=8) buffer PartialSumBuffer
-{
-	uint partialSums[];
-};
-
 layout(std140, binding=1) uniform ClusterBuildParams
 {
-	// x = passMode:
-	//   0 = clear
-	//   1 = prefix Phase A (lokale Partial-Sum pro Gruppe)
-	//   2 = prefix Phase B (sequenzieller Gruppen-Offset-Scan, Thread 0 only)
-	//   3 = prefix Phase C (Gruppen-Offset auf lokale Offsets addieren)
-	// y = numLights
-	// z = clusterCount
-	// w = numGroups (= ceil(clusterCount / 64))
-	ivec4 BuildInfo;
+	ivec4 BuildInfo; // x=passMode (0=clear,1=prefix), y=numLights, z=clusterCount
 };
-
-// Shared Memory für lokale Prefix-Berechnung innerhalb der Work-Group.
-shared uint s_counts[64];
-shared uint s_offsets[64];
 
 void main()
 {
-	uint gid        = gl_GlobalInvocationID.x;
-	uint lid        = gl_LocalInvocationID.x;
-	uint groupId    = gl_WorkGroupID.x;
-	uint clusterCount = uint(max(BuildInfo.z, 0));
-	uint numGroups    = uint(max(BuildInfo.w, 0));
+	if (gl_GlobalInvocationID.x != 0u)
+		return;
 
-	// -------------------------------------------------------------------------
-	// Pass 0: Clear
-	// -------------------------------------------------------------------------
+	uint clusterCount = uint(max(BuildInfo.z, 0));
 	if (BuildInfo.x == 0)
 	{
-		if (gid < clusterCount)
+		for (uint i = 0u; i < clusterCount; ++i)
 		{
-			headers[gid].offset = 0u;
-			headers[gid].count  = 0u;
-			tempCounts[gid]     = 0u;
+			headers[i].offset = 0u;
+			headers[i].count = 0u;
+			tempCounts[i] = 0u;
 		}
-		// BUG-FIX: overflowCount nur einmal durch Thread 0 zurücksetzen.
-		if (gid == 0u)
-		{
-			overflowCount = 0u;
-		}
+		overflowCount = 0u;
 		return;
 	}
 
-	// -------------------------------------------------------------------------
-	// Pass 1 – Phase A: Lokale Exclusive-Prefix-Summe pro Work-Group
-	// -------------------------------------------------------------------------
-	if (BuildInfo.x == 1)
+	uint prefix = 0u;
+	for (uint i = 0u; i < clusterCount; ++i)
 	{
-		// Lade Count für diesen Thread (0 wenn außerhalb des Cluster-Bereichs).
-		uint myCount = 0u;
-		if (gid < clusterCount)
-			myCount = headers[gid].count;
-
-		// Begrenze auf verfügbaren Platz (wird in Phase C final angepasst,
-		// hier für Partial-Sum-Korrektheit trotzdem schon kappen).
-		s_counts[lid] = myCount;
-		barrier();
-
-		// Inclusive-Prefix-Scan (Up-Sweep).
-		for (uint stride = 1u; stride < 64u; stride <<= 1u)
-		{
-			uint val = (lid >= stride) ? s_counts[lid - stride] : 0u;
-			barrier();
-			s_counts[lid] += val;
-			barrier();
-		}
-
-		// s_counts[lid] enthält jetzt die inclusive sum bis lid.
-		// Exclusive offset für diesen Thread:
-		uint localExclusiveOffset = (lid > 0u) ? s_counts[lid - 1u] : 0u;
-		s_offsets[lid] = localExclusiveOffset;
-
-		// Gruppen-Gesamt (= inclusive sum des letzten Threads) in partialSums speichern.
-		if (lid == 63u || gid == clusterCount - 1u)
-		{
-			partialSums[groupId] = s_counts[min(lid, 63u)];
-		}
-		barrier();
-
-		// Schreibe lokalen Offset zurück in den Header (wird in Phase C korrigiert).
-		if (gid < clusterCount)
-		{
-			headers[gid].offset  = s_offsets[lid];
-			tempCounts[gid]      = 0u; // Für Fill-Pass zurücksetzen.
-		}
-		return;
+		uint count = headers[i].count;
+		uint remaining = (prefix < clusterAlloc) ? (clusterAlloc - prefix) : 0u;
+		if (count > remaining)
+			count = remaining;
+		headers[i].count = count;
+		headers[i].offset = prefix;
+		tempCounts[i] = 0u;
+		prefix += count;
 	}
 
-	// -------------------------------------------------------------------------
-	// Pass 2 – Phase B: Sequenzieller Scan der Gruppen-Summen (nur Thread 0)
-	//          Jetzt nur noch O(N/64) statt O(N).
-	// -------------------------------------------------------------------------
-	if (BuildInfo.x == 2)
-	{
-		if (gid != 0u)
-			return;
-
-		uint allocLimit = clusterAlloc;
-		uint prefix = 0u;
-		for (uint g = 0u; g < numGroups; ++g)
-		{
-			uint groupSum = partialSums[g];
-			// Cap: Kann nicht mehr allozieren als der Buffer erlaubt.
-			uint remaining = (prefix < allocLimit) ? (allocLimit - prefix) : 0u;
-			groupSum = min(groupSum, remaining);
-			partialSums[g] = prefix; // Exclusive-Offset für Gruppe g.
-			prefix += groupSum;
-		}
-
-		// BUG-FIX: overflowCount wird hier NICHT zurückgesetzt.
-		//          Es darf erst nach vollständigem Auslesen zurückgesetzt werden
-		//          (außerhalb des Shaders oder explizit durch den Clear-Pass).
-		return;
-	}
-
-	// -------------------------------------------------------------------------
-	// Pass 3 – Phase C: Gruppen-Offset zu lokalen Offsets addieren.
-	// -------------------------------------------------------------------------
-	if (BuildInfo.x == 3)
-	{
-		if (gid >= clusterCount)
-			return;
-
-		uint groupOffset = partialSums[groupId];
-		uint allocLimit  = clusterAlloc;
-
-		uint rawOffset = headers[gid].offset + groupOffset;
-		uint rawCount  = headers[gid].count;
-
-		// Clamp: Offset + Count darf clusterAlloc nicht überschreiten.
-		uint cappedOffset = min(rawOffset, allocLimit);
-		uint remaining    = (cappedOffset < allocLimit) ? (allocLimit - cappedOffset) : 0u;
-		uint cappedCount  = min(rawCount, remaining);
-
-		headers[gid].offset = cappedOffset;
-		headers[gid].count  = cappedCount;
-		return;
-	}
+	overflowCount = 0u;
 }

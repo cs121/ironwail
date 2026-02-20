@@ -10,7 +10,7 @@ Atmosphere orchestration (gl_rmain.c / R_Atmosphere_Render)
   -> volumetric backend
      - mode=froxel: atmos_froxel_build.comp -> atmos_froxel_integrate.comp -> atmos_froxel_temporal.comp
        + optional fog-volume injection via R_FogVol_InjectBuiltIntoFroxel()
-     - mode=fogvol fallback: fixed-function fallback path (no dedicated fogvol GLSL files)
+     - mode=fogvol fallback: fogvol.frag (+ fogvol_temporal.frag, fogvol_upsample.frag)
   -> optional godrays pass (godrays_*.frag)
   -> post composite (postprocess.frag)
 ```
@@ -29,6 +29,10 @@ Atmosphere orchestration (gl_rmain.c / R_Atmosphere_Render)
   - `Quake/shaders/atmos_froxel_build.comp`
   - `Quake/shaders/atmos_froxel_integrate.comp`
   - `Quake/shaders/atmos_froxel_temporal.comp`
+- Fogvol raster path:
+  - `Quake/shaders/fogvol.frag`
+  - `Quake/shaders/fogvol_temporal.frag`
+  - `Quake/shaders/fogvol_upsample.frag`
 - Final post composite path:
   - `Quake/shaders/postprocess.frag`
 - Atmos shafts:

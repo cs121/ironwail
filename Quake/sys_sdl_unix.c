@@ -767,8 +767,7 @@ void Sys_Init (void)
 	host_parms->userdir = userdir;
 #endif
 	host_parms->numcpus = Sys_NumCPUs ();
-	Sys_Printf("Detected %d CPUs (%s).\n", host_parms->numcpus, CPU_GetBrandString ());
-	Sys_Printf("SIMD extensions: %s.\n", CPU_GetSIMDExtensionsString ());
+	Sys_Printf("Detected %d CPUs.\n", host_parms->numcpus);
 
 	rcp_counter_freq = 1.0 / SDL_GetPerformanceFrequency();
 }

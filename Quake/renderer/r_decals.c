@@ -89,7 +89,7 @@ static cvar_t r_decals_max = { "r_decals_max", "512", CVAR_ARCHIVE };
 static cvar_t r_decals_drawdist = { "r_decals_drawdist", "1536", CVAR_ARCHIVE };
 static cvar_t r_decals_lifetime = { "r_decals_lifetime", "30", CVAR_ARCHIVE };
 static cvar_t r_decals_fade = { "r_decals_fade", "6", CVAR_ARCHIVE };
-static cvar_t r_decals_bias = { "r_decals_bias", "0.25", CVAR_ARCHIVE };
+static cvar_t r_decals_bias = { "r_decals_bias", "0.6", CVAR_ARCHIVE };
 static cvar_t r_decals_spawn_budget = { "r_decals_spawn_budget", "8", CVAR_ARCHIVE };
 static cvar_t r_decals_render_budget_decals = { "r_decals_render_budget_decals", "256", CVAR_ARCHIVE };
 static cvar_t r_decals_debug = { "r_decals_debug", "0", CVAR_NONE };
@@ -109,27 +109,6 @@ static decal_stats_t decal_stats;
 
 static void R_Decals_ComputeLighting (decal_instance_t *d);
 static void R_Decals_DebugState (void);
-
-static qboolean R_Decals_VectorFinite (const vec3_t v)
-{
-	return isfinite (v[0]) && isfinite (v[1]) && isfinite (v[2]);
-}
-
-static qboolean R_Decals_NormalizeSafe (vec3_t v)
-{
-	float len = VectorLength (v);
-	if (!isfinite (len) || len <= 0.001f)
-		return false;
-	VectorScale (v, 1.f / len, v);
-	return R_Decals_VectorFinite (v);
-}
-
-static void R_Decals_DebugReject (const char *reason, const vec3_t point)
-{
-	if (r_decals_debug.value < 1.f)
-		return;
-	Con_DPrintf ("decals reject: %s at (%.2f %.2f %.2f)\n", reason, point[0], point[1], point[2]);
-}
 
 #define DECAL_BATCH_MAX 256
 
@@ -172,29 +151,13 @@ static void R_Decals_Reload_f (cvar_t *var)
 
 static void R_Decals_BuildBasis (const vec3_t normal, vec3_t tangent, vec3_t bitangent)
 {
-	vec3_t nrm;
-	vec3_t up;
-
-	VectorCopy (normal, nrm);
-	if (!R_Decals_NormalizeSafe (nrm))
-		VectorSet (nrm, 0.f, 0.f, 1.f);
-
-	if (fabsf (nrm[2]) < 0.999f)
-		VectorSet (up, 0.f, 0.f, 1.f);
-	else
-		VectorSet (up, 0.f, 1.f, 0.f);
-
-	CrossProduct (up, nrm, tangent);
-	if (!R_Decals_NormalizeSafe (tangent))
-	{
+	vec3_t up = { 0.f, 0.f, 1.f };
+	if (fabsf (normal[2]) > 0.95f)
 		VectorSet (up, 1.f, 0.f, 0.f);
-		CrossProduct (up, nrm, tangent);
-		if (!R_Decals_NormalizeSafe (tangent))
-			VectorSet (tangent, 1.f, 0.f, 0.f);
-	}
-	CrossProduct (nrm, tangent, bitangent);
-	if (!R_Decals_NormalizeSafe (bitangent))
-		VectorSet (bitangent, 0.f, 1.f, 0.f);
+	CrossProduct (up, normal, tangent);
+	VectorNormalizeFast (tangent);
+	CrossProduct (normal, tangent, bitangent);
+	VectorNormalizeFast (bitangent);
 }
 
 static float R_Decals_Random01 (void)
@@ -597,66 +560,6 @@ static float R_Decals_GetSpawnAlpha (const decal_def_t *def, const float *rgba_o
 	return alpha;
 }
 
-qboolean R_Decals_ResolveSurface (const vec3_t point, const vec3_t preferred_dir, vec3_t out_point, vec3_t out_normal)
-{
-	trace_t trace;
-	vec3_t start, end;
-	vec3_t dir;
-	float dir_len;
-
-	if (!cl.worldmodel)
-	{
-		R_Decals_DebugReject ("no worldmodel", point);
-		return false;
-	}
-	if (!R_Decals_VectorFinite (point))
-	{
-		R_Decals_DebugReject ("invalid point", point);
-		return false;
-	}
-
-	if (preferred_dir && R_Decals_VectorFinite (preferred_dir))
-		VectorCopy (preferred_dir, dir);
-	else
-		VectorCopy (vpn, dir);
-
-	dir_len = VectorLength (dir);
-	if (!isfinite (dir_len) || dir_len <= 0.001f)
-	{
-		R_Decals_DebugReject ("invalid trace dir", point);
-		return false;
-	}
-	VectorScale (dir, 1.f / dir_len, dir);
-
-	VectorMA (point, -24.f, dir, start);
-	VectorMA (point, 24.f, dir, end);
-
-	memset (&trace, 0, sizeof (trace));
-	trace.fraction = 1.f;
-	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, start, end, &trace);
-	if (trace.fraction >= 1.f)
-		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
-
-	if (trace.fraction >= 1.f || trace.startsolid || trace.allsolid)
-	{
-		R_Decals_DebugReject ("no hit", point);
-		return false;
-	}
-	if (!R_Decals_VectorFinite (trace.endpos) || !R_Decals_VectorFinite (trace.plane.normal))
-	{
-		R_Decals_DebugReject ("trace produced invalid values", point);
-		return false;
-	}
-	VectorCopy (trace.plane.normal, out_normal);
-	if (!R_Decals_NormalizeSafe (out_normal))
-	{
-		R_Decals_DebugReject ("invalid normal", point);
-		return false;
-	}
-	VectorCopy (trace.endpos, out_point);
-	return true;
-}
-
 void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, const float *rgba_opt, float size_opt, int flags)
 {
 	int def_index;
@@ -669,16 +572,6 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 
 	if (!r_decals.value || !name || !name[0] || !decal_pool || !decal_capacity)
 		return;
-	if (!R_Decals_VectorFinite (org))
-	{
-		R_Decals_DebugReject ("spawn origin not finite", org);
-		return;
-	}
-	if (!R_Decals_VectorFinite (normal) || VectorLengthSquared (normal) <= 0.0001f)
-	{
-		R_Decals_DebugReject ("spawn normal invalid", org);
-		return;
-	}
 	if (decal_spawned_this_frame >= (int)r_decals_spawn_budget.value)
 	{
 		decal_stats.dropped_spawn_budget++;
@@ -715,43 +608,48 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 
 static qboolean R_Decals_TraceNormal (const vec3_t point, vec3_t out_normal)
 {
-	vec3_t hit;
-	if (!R_Decals_ResolveSurface (point, vpn, hit, out_normal))
-	{
-		VectorSet (out_normal, 0.f, 0.f, 1.f);
+	trace_t trace;
+	vec3_t end;
+	vec3_t start;
+	if (!cl.worldmodel)
 		return false;
+	VectorCopy (point, start);
+	VectorMA (point, 32.f, vpn, end);
+	memset (&trace, 0, sizeof (trace));
+	trace.fraction = 1.f;
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
+	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
+	{
+		VectorCopy (trace.plane.normal, out_normal);
+		return true;
 	}
-	return true;
+	VectorSet (out_normal, 0.f, 0.f, 1.f);
+	return false;
 }
 
 void R_AddBulletDecal (const vec3_t point)
 {
-	vec3_t hit;
 	vec3_t n;
-	if (!R_Decals_ResolveSurface (point, vpn, hit, n))
-		return;
-	R_Decals_Add ("bullet_hole_default", hit, n, NULL, 0.f, 0);
+	R_Decals_TraceNormal (point, n);
+	R_Decals_Add ("bullet_hole_default", point, n, NULL, 0.f, 0);
 }
 
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
-	vec3_t hit;
 	vec3_t n;
-	vec3_t preferred_dir;
-
-	VectorScale (dir, -1.f, preferred_dir);
-	if (!R_Decals_ResolveSurface (point, preferred_dir, hit, n) && !R_Decals_ResolveSurface (point, vpn, hit, n))
+	if ((rand () & 3) != 0)
 		return;
-	R_Decals_Add ((rand() & 1) ? "blood_splat_small" : "blood_splat_large", hit, n, NULL, 0.f, 0);
+	VectorScale (dir, -1.f, n);
+	if (VectorLengthSquared (n) < 0.01f)
+		R_Decals_TraceNormal (point, n);
+	R_Decals_Add ((rand() & 1) ? "blood_splat_small" : "blood_splat_large", point, n, NULL, 0.f, 0);
 }
 
 void R_AddScorchDecal (const vec3_t point)
 {
-	vec3_t hit;
 	vec3_t n;
-	if (!R_Decals_ResolveSurface (point, vpn, hit, n))
-		return;
-	R_Decals_Add ((rand() & 1) ? "scorch_small" : "scorch_large", hit, n, NULL, 0.f, 0);
+	R_Decals_TraceNormal (point, n);
+	R_Decals_Add ((rand() & 1) ? "scorch_small" : "scorch_large", point, n, NULL, 0.f, 0);
 }
 
 static int R_Decal_CompareRender (const void *a, const void *b)

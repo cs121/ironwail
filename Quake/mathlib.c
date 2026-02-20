@@ -168,9 +168,6 @@ int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, mplane_t *p)
 	}
 #endif
 
-	if (p->signbits & ~7)
-		Sys_Error ("BoxOnPlaneSide:  Bad signbits");
-
 	xneg = p->signbits & 1;
 	yneg = (p->signbits >> 1) & 1;
 	zneg = (p->signbits >> 2) & 1;
@@ -181,6 +178,35 @@ int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, mplane_t *p)
 	dist2 = p->normal[0] * (xneg ? emaxs : emins)[0] +
 			p->normal[1] * (yneg ? emaxs : emins)[1] +
 			p->normal[2] * (zneg ? emaxs : emins)[2];
+
+	if (p->signbits & ~7)
+		Sys_Error ("BoxOnPlaneSide:  Bad signbits");
+
+#if 0
+	int		i;
+	vec3_t	corners[2];
+
+	for (i=0 ; i<3 ; i++)
+	{
+		if (plane->normal[i] < 0)
+		{
+			corners[0][i] = emins[i];
+			corners[1][i] = emaxs[i];
+		}
+		else
+		{
+			corners[1][i] = emins[i];
+			corners[0][i] = emaxs[i];
+		}
+	}
+	dist = DotProduct (plane->normal, corners[0]) - plane->dist;
+	dist2 = DotProduct (plane->normal, corners[1]) - plane->dist;
+	sides = 0;
+	if (dist1 >= 0)
+		sides = 1;
+	if (dist2 < 0)
+		sides |= 2;
+#endif
 
 	sides = 0;
 	if (dist1 >= p->dist)
@@ -200,27 +226,39 @@ int BoxOnPlaneSide (vec3_t emins, vec3_t emaxs, mplane_t *p)
 //TODO: take right and up vectors to properly set yaw and roll
 void VectorAngles (const vec3_t forward, vec3_t angles)
 {
-	angles[PITCH] = -atan2f(forward[2], hypotf(forward[0], forward[1])) / M_PI_DIV_180;
-	angles[YAW]   =  atan2f(forward[1], forward[0]) / M_PI_DIV_180;
-	angles[ROLL]  = 0;
+	vec3_t temp;
+
+	temp[0] = forward[0];
+	temp[1] = forward[1];
+	temp[2] = 0;
+	angles[PITCH] = -atan2(forward[2], VectorLength(temp)) / M_PI_DIV_180;
+	angles[YAW] = atan2(forward[1], forward[0]) / M_PI_DIV_180;
+	angles[ROLL] = 0;
 }
 
 void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 {
+	float		angle;
 	float		sr, sp, sy, cr, cp, cy;
 
-	sincosf(angles[YAW]   * M_PI_DIV_180, &sy, &cy);
-	sincosf(angles[PITCH] * M_PI_DIV_180, &sp, &cp);
-	sincosf(angles[ROLL]  * M_PI_DIV_180, &sr, &cr);
+	angle = angles[YAW] * (M_PI*2 / 360);
+	sy = sin(angle);
+	cy = cos(angle);
+	angle = angles[PITCH] * (M_PI*2 / 360);
+	sp = sin(angle);
+	cp = cos(angle);
+	angle = angles[ROLL] * (M_PI*2 / 360);
+	sr = sin(angle);
+	cr = cos(angle);
 
 	forward[0] = cp*cy;
 	forward[1] = cp*sy;
 	forward[2] = -sp;
-	right[0] = cr*sy  - sr*sp*cy;
-	right[1] = -cr*cy - sr*sp*sy;
-	right[2] = -sr*cp;
-	up[0] = cr*sp*cy + sr*sy;
-	up[1] = cr*sp*sy - sr*cy;
+	right[0] = (-1*sr*sp*cy+-1*cr*-sy);
+	right[1] = (-1*sr*sp*sy+-1*cr*cy);
+	right[2] = -1*sr*cp;
+	up[0] = (cr*sp*cy+-sr*-sy);
+	up[1] = (cr*sp*sy+-sr*cy);
 	up[2] = cr*cp;
 }
 
@@ -292,14 +330,14 @@ void CrossProduct (const vec3_t v1, const vec3_t v2, vec3_t cross)
 
 vec_t VectorLength(const vec3_t v)
 {
-	return sqrtf(DotProduct(v,v));
+	return sqrt(DotProduct(v,v));
 }
 
 float VectorNormalize (vec3_t v)
 {
 	float	length, ilength;
 
-	length = sqrtf(DotProduct(v,v));
+	length = sqrt(DotProduct(v,v));
 
 	if (length)
 	{
@@ -321,7 +359,7 @@ float DistanceSquared (const vec3_t a, const vec3_t b)
 
 float Distance (const vec3_t a, const vec3_t b)
 {
-	return sqrtf (DistanceSquared (a, b));
+	return sqrt (DistanceSquared (a, b));
 }
 
 void VectorInverse (vec3_t v)
@@ -341,14 +379,10 @@ void VectorScale (const vec3_t in, vec_t scale, vec3_t out)
 
 int Q_log2(int val)
 {
-#if defined(__GNUC__) || defined(__clang__)
-	return (val > 1) ? (31 - __builtin_clz((unsigned int)val)) : 0;
-#else
-	int answer = 0;
-	while (val >>= 1)
+	int answer=0;
+	while (val>>=1)
 		answer++;
 	return answer;
-#endif
 }
 
 int Q_nextPow2(int val)
@@ -376,17 +410,17 @@ float GetClampedFraction (float val, float minval, float maxval)
 
 float Log2f (float val)
 {
-	return log2f (val);
+	return log (val) * 1.44269504;
 }
 
 float Exp2f (float val)
 {
-	return exp2f (val);
+	return exp (val * 0.693147181);
 }
 
 float GetLogFraction (float val, float minval, float maxval)
 {
-	return logf (val / minval) / logf (maxval / minval);
+	return GetFraction (log (val), log (minval), log (maxval));
 }
 
 float GetClampedLogFraction (float val, float minval, float maxval)
@@ -402,7 +436,7 @@ float Lerp (float minval, float maxval, float t)
 
 float LogLerp (float minval, float maxval, float t)
 {
-	return minval * expf (t * logf (maxval / minval));
+	return minval * exp (t * log (maxval / minval));
 }
 
 float EaseInOut (float t)
@@ -592,13 +626,18 @@ GreatestCommonDivisor
 */
 int GreatestCommonDivisor (int i1, int i2)
 {
-	while (i2)
+	if (i1 > i2)
 	{
-		int t = i2;
-		i2 = i1 % i2;
-		i1 = t;
+		if (i2 == 0)
+			return (i1);
+		return GreatestCommonDivisor (i2, i1 % i2);
 	}
-	return i1;
+	else
+	{
+		if (i1 == 0)
+			return (i2);
+		return GreatestCommonDivisor (i1, i2 % i1);
+	}
 }
 
 
@@ -749,13 +788,19 @@ IdentityMatrix
 */
 void IdentityMatrix(float matrix[16])
 {
-	static const float ident[16] = {
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 1.0f, 0.0f,
-		0.0f, 0.0f, 0.0f, 1.0f
-	};
-	memcpy(matrix, ident, 16 * sizeof(float));
+	memset(matrix, 0, 16 * sizeof(float));
+
+	// First column
+	matrix[0*4 + 0] = 1.0f;
+
+	// Second column
+	matrix[1*4 + 1] = 1.0f;
+
+	// Third column
+	matrix[2*4 + 2] = 1.0f;
+
+	// Fourth column
+	matrix[3*4 + 3] = 1.0f;
 }
 
 /*
@@ -789,27 +834,32 @@ ApplyTranslation
 void ApplyTranslation(float matrix[16], float x, float y, float z)
 {
 #ifdef USE_SSE2
-	if (use_simd)
-	{
-		__m128 v0 = _mm_loadu_ps (matrix + 0*4);
-		__m128 v1 = _mm_loadu_ps (matrix + 1*4);
-		__m128 v2 = _mm_loadu_ps (matrix + 2*4);
-		__m128 v3 = _mm_loadu_ps (matrix + 3*4);
+	__m128 v0 = _mm_loadu_ps (matrix + 0*4);
+	__m128 v1 = _mm_loadu_ps (matrix + 1*4);
+	__m128 v2 = _mm_loadu_ps (matrix + 2*4);
+	__m128 v3 = _mm_loadu_ps (matrix + 3*4);
 
-		v3 = _mm_add_ps (v3, _mm_mul_ps (v0, _mm_set_ps1 (x)));
-		v3 = _mm_add_ps (v3, _mm_mul_ps (v1, _mm_set_ps1 (y)));
-		v3 = _mm_add_ps (v3, _mm_mul_ps (v2, _mm_set_ps1 (z)));
+	v3 = _mm_add_ps (v3, _mm_mul_ps (v0, _mm_set_ps1 (x)));
+	v3 = _mm_add_ps (v3, _mm_mul_ps (v1, _mm_set_ps1 (y)));
+	v3 = _mm_add_ps (v3, _mm_mul_ps (v2, _mm_set_ps1 (z)));
 
-		_mm_storeu_ps (matrix + 3*4, v3);
-	}
-	else
+	_mm_storeu_ps (matrix + 3*4, v3);
+#else
+	matrix[3*4 + 0] += x*matrix[0*4 + 0];
+	matrix[3*4 + 1] += x*matrix[0*4 + 1];
+	matrix[3*4 + 2] += x*matrix[0*4 + 2];
+	matrix[3*4 + 3] += x*matrix[0*4 + 3];
+
+	matrix[3*4 + 0] += y*matrix[1*4 + 0];
+	matrix[3*4 + 1] += y*matrix[1*4 + 1];
+	matrix[3*4 + 2] += y*matrix[1*4 + 2];
+	matrix[3*4 + 3] += y*matrix[1*4 + 3];
+
+	matrix[3*4 + 0] += z*matrix[2*4 + 0];
+	matrix[3*4 + 1] += z*matrix[2*4 + 1];
+	matrix[3*4 + 2] += z*matrix[2*4 + 2];
+	matrix[3*4 + 3] += z*matrix[2*4 + 3];
 #endif
-	{
-		matrix[3*4 + 0] += x*matrix[0*4 + 0] + y*matrix[1*4 + 0] + z*matrix[2*4 + 0];
-		matrix[3*4 + 1] += x*matrix[0*4 + 1] + y*matrix[1*4 + 1] + z*matrix[2*4 + 1];
-		matrix[3*4 + 2] += x*matrix[0*4 + 2] + y*matrix[1*4 + 2] + z*matrix[2*4 + 2];
-		matrix[3*4 + 3] += x*matrix[0*4 + 3] + y*matrix[1*4 + 3] + z*matrix[2*4 + 3];
-	}
 }
 
 /*

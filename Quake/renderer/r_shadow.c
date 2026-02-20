@@ -1809,7 +1809,6 @@ void R_Shadow_SunPass (void)
 
 void R_Shadow_DlightPass (void)
 {
-	R_PerfStats_SetDlightShadowPassRan (false);
 	qboolean shadows_enabled = r_shadows.value > 0.f;
 	qboolean dlight_shadows_enabled = (r_shadow_dlights.value > 0.f && r_clustered_shadows.value > 0.f);
 	double t0, t1;
@@ -1930,7 +1929,6 @@ void R_Shadow_DlightPass (void)
 		return;
 	}
 
-	R_PerfStats_SetDlightShadowPassRan (true);
 	memcpy (sun_viewproj, r_framedata.shadow_viewproj, sizeof (sun_viewproj));
 	R_Shadow_SaveGLState (&saved_state);
 

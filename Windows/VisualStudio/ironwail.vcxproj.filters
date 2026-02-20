@@ -135,7 +135,7 @@
     <ClCompile Include="..\..\Quake\main_sdl.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\mathlib_simd.c">
+    <ClCompile Include="..\..\Quake\mathlib.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\mat_shader.c">
@@ -386,7 +386,7 @@
     <ClInclude Include="..\..\Quake\keys.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\mathlib_simd.h">
+    <ClInclude Include="..\..\Quake\mathlib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\mat_shader.h">

@@ -35,7 +35,7 @@ Static code review of current renderer behavior.
 ### Sampling
 - **CPU sample path:** `gl_rlight.c::InterpolateLightmap` (bilinear in lightmap texel space), combines up to `MAXLIGHTMAPS` styles via `LightStyleValue`.
 - **GPU world path:** `world.frag::SampleLightmap` with style blending in shader.
-- **Developer note:** The clustered world renderer path (`Quake/shaders/world.vert` + `Quake/shaders/world.frag`) is canonical. Legacy split world dlight fragment variants were removed from the repository during shader cleanup because they are excluded from normal runtime shader loading.
+- **Developer note:** The clustered world renderer path (`Quake/shaders/world.vert` + `Quake/shaders/world.frag`) is canonical. Legacy split world dlight fragment variants are kept only under `Quake/shaders/legacy_debug/` for reference/debug use and are excluded from normal runtime shader loading.
 
 ### Encoding / storage
 - Surface sample pointers in BSP load:

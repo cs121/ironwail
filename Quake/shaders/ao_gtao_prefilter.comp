@@ -1,60 +1,12 @@
-// GTAO Depth Prefilter
-// Downsamples and linearizes depth into a mip-friendly format for the GTAO horizon search.
-// Previously this was a no-op (1:1 copy). Now it writes linear view-space Z so the
-// main pass can do fast, meaningful horizon comparisons without re-reconstructing position
-// for every sample.
-
-layout(local_size_x = 8, local_size_y = 8) in;
-
-layout(binding = 0) uniform sampler2D DepthTexture;
-layout(r16f,  binding = 0) uniform writeonly image2D OutDepth;
-
-layout(location = 0) uniform vec4 u_depth;   // x=near, y=far, z=reversedZ(0/1), w=unused
-layout(location = 1) uniform vec4 u_screen;  // xy=invSize, zw=size
-
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D DepthTexture;
+layout(r16f, binding=0) uniform writeonly image2D OutDepth;
+layout(location=0) uniform vec4 u_depth;
+layout(location=1) uniform vec4 u_screen;
 #include "ao_common.glsl"
-
-// Linearize raw depth to view-space Z (negative in standard OpenGL View Space).
-float LinearizeDepth(float rawDepth)
-{
-    float n = u_depth.x;
-    float f = u_depth.y;
-    bool  rev = u_depth.z > 0.5;
-
-    // For reversed-Z the mapping is flipped
-    float d = rev ? (1.0 - rawDepth) : rawDepth;
-
-    // Perspective: linear view-space Z
-    return -(2.0 * n * f) / (f + n - d * (f - n));
-}
-
-void main()
-{
-    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(OutDepth);
-    if (any(greaterThanEqual(px, size))) return;
-
-    // Gather a 2x2 block from the full-res depth and take the minimum (closest)
-    // depth, which avoids leaking behind thin geometry during AO sampling.
-    ivec2 srcPx = px * 2;
-    ivec2 srcSize = textureSize(DepthTexture, 0);
-
-    ivec2 s0 = clamp(srcPx + ivec2(0, 0), ivec2(0), srcSize - ivec2(1));
-    ivec2 s1 = clamp(srcPx + ivec2(1, 0), ivec2(0), srcSize - ivec2(1));
-    ivec2 s2 = clamp(srcPx + ivec2(0, 1), ivec2(0), srcSize - ivec2(1));
-    ivec2 s3 = clamp(srcPx + ivec2(1, 1), ivec2(0), srcSize - ivec2(1));
-
-    float d0 = texelFetch(DepthTexture, s0, 0).r;
-    float d1 = texelFetch(DepthTexture, s1, 0).r;
-    float d2 = texelFetch(DepthTexture, s2, 0).r;
-    float d3 = texelFetch(DepthTexture, s3, 0).r;
-
-    // In reversed-Z the numerically largest value is the closest surface
-    float chosen = u_depth.z > 0.5
-        ? max(max(d0, d1), max(d2, d3))
-        : min(min(d0, d1), min(d2, d3));
-
-    float linearZ = LinearizeDepth(chosen);
-
-    imageStore(OutDepth, px, vec4(linearZ));
+void main(){
+ ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutDepth); if(any(greaterThanEqual(px,size))) return;
+ vec2 uv=(vec2(px)+0.5)/vec2(size);
+ float d=texelFetch(DepthTexture,px,0).r;
+ imageStore(OutDepth,px,vec4(d));
 }

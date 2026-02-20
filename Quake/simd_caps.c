@@ -1,18 +1,14 @@
 #include "quakedef.h"
-#include "q_ctype.h"
 #include "simd_caps.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define SIMD_X86_FAMILY 1
 #else
 #define SIMD_X86_FAMILY 0
-#endif
-
-#if SIMD_X86_FAMILY && (defined(__GNUC__) || defined(__clang__))
-#include <cpuid.h>
 #endif
 
 #if SIMD_X86_FAMILY
@@ -29,127 +25,11 @@ cvar_t simd_force = {"simd_force", "0", CVAR_ARCHIVE};
 
 static simd_caps_t simd_caps;
 static qboolean simd_caps_initialized;
-static qboolean cpu_info_initialized;
 
 static int simd_mode_cache = -1;
 static int simd_force_cache = -999;
 static int simd_enable_cache = -999;
 
-
-static char cpu_brand_string[64] = "Unknown";
-static void CPU_NormalizeWhitespace (const char *src, char *dst, size_t dst_size)
-{
-	qboolean in_space = false;
-	size_t out = 0;
-
-	while (*src && q_isspace ((unsigned char)*src))
-		++src;
-
-	for (; *src && out + 1 < dst_size; ++src)
-	{
-		if (q_isspace ((unsigned char)*src))
-		{
-			in_space = true;
-			continue;
-		}
-
-		if (in_space && out > 0 && out + 1 < dst_size)
-			dst[out++] = ' ';
-		in_space = false;
-		dst[out++] = *src;
-	}
-
-	if (out > 0 && dst[out - 1] == ' ')
-		--out;
-
-	dst[out] = '\0';
-}
-
-static char simd_extensions_string[64] = "none";
-
-static void CPU_BuildSIMDExtensionsString (simd_caps_t caps)
-{
-	q_strlcpy (simd_extensions_string, "none", sizeof (simd_extensions_string));
-
-	if (caps.sse2)
-		q_strlcpy (simd_extensions_string, "SSE2", sizeof (simd_extensions_string));
-	if (caps.ssse3)
-		q_strlcpy (simd_extensions_string, "SSE2 SSSE3", sizeof (simd_extensions_string));
-	if (caps.sse41)
-		q_strlcpy (simd_extensions_string, "SSE2 SSSE3 SSE4.1", sizeof (simd_extensions_string));
-	if (caps.avx2)
-		q_strlcpy (simd_extensions_string, "SSE2 SSSE3 SSE4.1 AVX2", sizeof (simd_extensions_string));
-}
-
-#if SIMD_X86_FAMILY
-static void CPU_DetectBrandString (void)
-{
-	int regs[4] = {0, 0, 0, 0};
-	int max_extended = 0;
-	char raw[49];
-
-#if defined(_MSC_VER)
-	__cpuidex (regs, 0x80000000, 0);
-	max_extended = regs[0];
-#elif defined(__GNUC__) || defined(__clang__)
-	__cpuid_count (0x80000000, 0, regs[0], regs[1], regs[2], regs[3]);
-	max_extended = regs[0];
-#endif
-
-	if (max_extended < 0x80000004)
-		return;
-
-	memset (raw, 0, sizeof (raw));
-
-#if defined(_MSC_VER)
-	__cpuidex (&regs[0], 0x80000002, 0);
-	memcpy (raw + 0, regs, 16);
-	__cpuidex (&regs[0], 0x80000003, 0);
-	memcpy (raw + 16, regs, 16);
-	__cpuidex (&regs[0], 0x80000004, 0);
-	memcpy (raw + 32, regs, 16);
-#elif defined(__GNUC__) || defined(__clang__)
-	__cpuid_count (0x80000002, 0, regs[0], regs[1], regs[2], regs[3]);
-	memcpy (raw + 0, regs, 16);
-	__cpuid_count (0x80000003, 0, regs[0], regs[1], regs[2], regs[3]);
-	memcpy (raw + 16, regs, 16);
-	__cpuid_count (0x80000004, 0, regs[0], regs[1], regs[2], regs[3]);
-	memcpy (raw + 32, regs, 16);
-#endif
-
-	CPU_NormalizeWhitespace (raw, cpu_brand_string, sizeof (cpu_brand_string));
-	if (!cpu_brand_string[0])
-		q_strlcpy (cpu_brand_string, "Unknown", sizeof (cpu_brand_string));
-}
-#else
-static void CPU_DetectBrandString (void)
-{
-	/* Best effort on non-x86: leave as Unknown when no portable brand source exists. */
-}
-#endif
-
-static void CPU_InitInfo (void)
-{
-	if (cpu_info_initialized)
-		return;
-
-	simd_caps = SIMD_GetCaps ();
-	CPU_DetectBrandString ();
-	CPU_BuildSIMDExtensionsString (simd_caps);
-	cpu_info_initialized = true;
-}
-
-const char *CPU_GetBrandString (void)
-{
-	CPU_InitInfo ();
-	return cpu_brand_string;
-}
-
-const char *CPU_GetSIMDExtensionsString (void)
-{
-	CPU_InitInfo ();
-	return simd_extensions_string;
-}
 
 int CPU_GetCoreCount (void)
 {
@@ -241,7 +121,7 @@ void SIMD_Init (void)
 	Cvar_RegisterVariable (&simd_enable);
 	Cvar_RegisterVariable (&simd_force);
 
-	CPU_InitInfo ();
+	simd_caps = SIMD_GetCaps ();
 	simd_caps_initialized = true;
 }
 

@@ -2373,13 +2373,6 @@ static qboolean PR_IsValidString (const char *p)
 	return d >= qcvm->maxknownstrings * sizeof (*qcvm->knownstrings);
 }
 
-qboolean PR_IsValidStringOffset (int num)
-{
-	if (num >= 0)
-		return num < qcvm->stringssize;
-	return num >= -qcvm->numknownstrings && qcvm->knownstrings[-1 - num] != NULL;
-}
-
 const char *PR_GetString (int num)
 {
 	if (num >= 0 && num < qcvm->stringssize)

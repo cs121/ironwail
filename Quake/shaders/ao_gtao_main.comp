@@ -1,136 +1,54 @@
-// GTAO Main Pass
-// Fixes:
-//  - Horizon comparison now uses View-Space Z from the prefiltered linear-depth buffer
-//    instead of comparing raw NDC depth against p.x (was semantically wrong).
-//  - Bent-normal accumulation weighted by (1 - occlusion) and stored in XY (not YZ).
-//  - Edge detection moved to a helper to reduce repeated texelFetch.
-//  - Noise offset read from u_ao.w applied as a per-frame jitter.
-
-layout(local_size_x = 8, local_size_y = 8) in;
-
-layout(binding = 0) uniform sampler2D DepthTexture;    // Full-res raw depth
-layout(binding = 1) uniform sampler2D DepthPrefilter;  // Half-res linear View-Z (from prefilter pass)
-
-layout(r16f,   binding = 0) uniform writeonly image2D OutAO;
-layout(rg8,    binding = 1) uniform writeonly image2D OutEdges;
-layout(rg16f,  binding = 2) uniform writeonly image2D OutBent;
-
-layout(location = 0) uniform mat4 u_invProj;
-layout(location = 1) uniform vec4 u_screen;   // xy=invSize, zw=size
-layout(location = 2) uniform vec4 u_ao;       // x=radius(px), y=falloff, z=intensity, w=noiseOffset
-layout(location = 3) uniform vec4 u_misc;
-layout(location = 4) uniform vec4 u_viewRect; // xy=uvMin, zw=uvMax (sub-viewport support)
-layout(location = 5) uniform vec4 u_depth;    // x=near, y=far, z=reversedZ, w=unused
-layout(location = 6) uniform vec4 u_quality;  // x=taps(unused), y=slices, z=steps, w=bentEnable
-
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D DepthTexture;
+layout(binding=1) uniform sampler2D DepthPrefilter;
+layout(r16f, binding=0) uniform writeonly image2D OutAO;
+layout(rg8, binding=1) uniform writeonly image2D OutEdges;
+layout(rg16f, binding=2) uniform writeonly image2D OutBent;
+layout(location=0) uniform mat4 u_invProj;
+layout(location=1) uniform vec4 u_screen;
+layout(location=2) uniform vec4 u_ao;
+layout(location=3) uniform vec4 u_misc;
+layout(location=4) uniform vec4 u_viewRect;
+layout(location=5) uniform vec4 u_depth;
+layout(location=6) uniform vec4 u_quality;
 #include "ao_common.glsl"
-
-void main()
-{
-    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(OutAO);
-    if (any(greaterThanEqual(px, size))) return;
-
-    // Map output pixel to sub-viewport UV
-    vec2 uv  = (vec2(px) + 0.5) / vec2(size);
-    vec2 suv = mix(u_viewRect.xy, u_viewRect.zw, uv);
-
-    // Full-res source pixel
-    ivec2 sp = ivec2(suv * u_screen.zw);
-
-    float d = texelFetch(DepthTexture, sp, 0).r;
-
-    // Early-out on sky / background (raw depth == 0 for reversed-Z, or 1 for standard)
-    float skyDepth = (u_depth.z > 0.5) ? 0.0 : 1.0;
-    if (abs(d - skyDepth) < 1e-5)
-    {
-        imageStore(OutAO,    px, vec4(1.0));
-        imageStore(OutEdges, px, vec4(0.0));
-        if (u_quality.w > 0.5)
-            imageStore(OutBent, px, vec4(0.5, 0.5, 0.0, 1.0)); // neutral bent normal
-        return;
-    }
-
-    vec3 p = AO_ReconstructViewPos(u_invProj, suv, d, u_depth.z);
-    vec3 n = AO_ReconstructNormalFromDepth(DepthTexture, u_invProj, sp, u_screen.xy, u_depth.z);
-
-    int slices = max(1, int(u_quality.y));
-    int steps  = max(1, int(u_quality.z));
-
-    // Radius in UV space; scale by aspect to keep circular samples
-    float radiusUV = u_ao.x * u_screen.x; // u_screen.x = 1/width
-
-    float occ  = 0.0;
-    vec3  bent = vec3(0.0);
-
-    float jitter = AO_Hash12(vec2(px) + u_ao.w);
-
-    for (int s = 0; s < slices; s++)
-    {
-        // Distribute slices evenly over [0, PI) with per-frame jitter
-        float a   = (float(s) + jitter) * (3.14159265 / float(slices));
-        vec2  dir = vec2(cos(a), sin(a));
-
-        // Account for non-square texels
-        vec2 dirUV = dir * vec2(u_screen.x / u_screen.y, 1.0); // correct aspect
-
-        float maxH = -1.0; // cosine of max elevation angle seen
-
-        for (int t = 1; t <= steps; t++)
-        {
-            float frac = float(t) / float(steps);
-            // Quadratic step distribution: more samples close to the pixel
-            float r  = frac * frac * radiusUV;
-            vec2  s2 = clamp(suv + dirUV * r, u_viewRect.xy, u_viewRect.zw);
-
-            // Prefiltered buffer contains linear View-Z (negative)
-            float sViewZ = textureLod(DepthPrefilter, s2, 0.0).r;
-
-            // Reconstruct approximate 3-D sample position on the fly from View-Z
-            // using the known UV (cheap: avoids full matrix multiply)
-            vec4 clip = vec4(s2 * 2.0 - 1.0, 0.0, 1.0); // z irrelevant for xy
-            vec4 view = u_invProj * clip;
-            vec2 xyAtUnit = view.xy / view.w; // xy at z = -1
-            vec3 sp3 = vec3(xyAtUnit * (-sViewZ), sViewZ); // View-Z is negative
-
-            vec3  v    = sp3 - p;
-            float dist = length(v);
-            if (dist < 1e-4) continue;
-
-            // Horizon angle cosine (elevation of sample relative to surface tangent plane)
-            float sinH   = dot(n, v / dist); // = sin(elevation) when n is unit normal
-            // Falloff: reduce contribution for far samples
-            float falloff = 1.0 - smoothstep(0.0, u_ao.y > 0.0 ? u_ao.y : 1.0, dist);
-            float h      = sinH * falloff;
-
-            maxH = max(maxH, h);
-        }
-
-        // Convert horizon to occlusion: 1 = fully occluded, 0 = unoccluded
-        float ho  = clamp(maxH * 0.5 + 0.5, 0.0, 1.0);
-        occ      += ho;
-        bent     += (1.0 - ho) * vec3(-dir, 0.0); // XY only; Z stays 0 (flat in slice plane)
-    }
-
-    float ao = clamp(1.0 - occ / float(slices), 0.0, 1.0);
-    // Apply intensity curve
-    ao = pow(ao, max(u_ao.z, 0.01));
-
-    imageStore(OutAO, px, vec4(ao));
-
-    // --- Edge detection for the denoiser ---
-    ivec2 depthSize = textureSize(DepthTexture, 0);
-    float dR = texelFetch(DepthTexture, clamp(sp + ivec2(1, 0), ivec2(0), depthSize - ivec2(1)), 0).r;
-    float dU = texelFetch(DepthTexture, clamp(sp + ivec2(0, 1), ivec2(0), depthSize - ivec2(1)), 0).r;
-    float edge = clamp(length(vec2(dR - d, dU - d)) * 24.0, 0.0, 1.0);
-    imageStore(OutEdges, px, vec4(edge, ao, 0.0, 0.0));
-
-    // --- Bent Normal ---
-    if (u_quality.w > 0.5)
-    {
-        vec2 b = normalize(bent).xy; // BUG FIX: was storing YZ, now correctly XY
-        if (any(isnan(b)) || any(isinf(b)))
-            b = vec2(0.0);
-        imageStore(OutBent, px, vec4(b * 0.5 + 0.5, 0.0, 1.0));
-    }
+void main(){
+ ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutAO); if(any(greaterThanEqual(px,size))) return;
+ vec2 uv=(vec2(px)+0.5)/vec2(size); vec2 suv=mix(u_viewRect.xy,u_viewRect.zw,uv);
+ ivec2 sp=ivec2(suv*u_screen.zw);
+ float d=texelFetch(DepthTexture,sp,0).r;
+ vec3 p=AO_ReconstructViewPos(u_invProj,suv,d,u_depth.z);
+ vec3 n=AO_ReconstructNormalFromDepth(DepthTexture,u_invProj,sp,u_screen.xy,u_depth.z);
+ int slices=max(1,int(u_quality.y)); int steps=max(1,int(u_quality.z));
+ float occ=0.0; vec3 bent=vec3(0.0);
+ for(int s=0;s<slices;s++){
+  float a=(float(s)+AO_Hash12(vec2(px)+u_ao.w))*3.14159265/float(slices);
+  vec2 dir=vec2(cos(a),sin(a)); float h=-1.0;
+  for(int t=1;t<=steps;t++){
+   float r=(float(t)/float(steps))*u_ao.x*0.0025;
+   vec2 uv2=clamp(suv+dir*r,u_viewRect.xy,u_viewRect.zw);
+   float sd=textureLod(DepthPrefilter,uv2,0.0).r;
+   float v=(p.x-sd)/max(abs(sd),1e-3);
+   h=max(h,v);
+  }
+  float ho=clamp(h*0.5+0.5,0.0,1.0);
+  occ += ho;
+  bent += (1.0-ho) * vec3(-dir,0.0);
+ }
+ float ao=1.0-occ/float(slices);
+ imageStore(OutAO,px,vec4(clamp(ao,0.0,1.0)));
+ ivec2 depthSize=textureSize(DepthTexture,0);
+ ivec2 spR=clamp(sp+ivec2(1,0),ivec2(0),depthSize-ivec2(1));
+ ivec2 spU=clamp(sp+ivec2(0,1),ivec2(0),depthSize-ivec2(1));
+ float dR=texelFetch(DepthTexture,spR,0).r;
+ float dU=texelFetch(DepthTexture,spU,0).r;
+ float edge=clamp(length(vec2(dR-d,dU-d))*24.0,0.0,1.0);
+ imageStore(OutEdges,px,vec4(edge,ao,0,0));
+ if (u_quality.w > 0.5)
+ {
+  vec2 b=normalize(bent).xy;
+  if(any(isnan(b)) || any(isinf(b)))
+   b=vec2(0.0);
+  imageStore(OutBent,px,vec4(b*0.5+0.5,0,1));
+ }
 }

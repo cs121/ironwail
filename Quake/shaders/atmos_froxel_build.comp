@@ -134,7 +134,7 @@ void main()
 
     float sigma_t;
     vec3 sigma_s;
-    float phaseG = 0.0; // global medium is isotropic; per-volume anisotropy is applied in ApplyVolumes
+    float phaseG = clamp(MediumParams0.w, -0.95, 0.95);
 
     Atmosphere_EvalGlobalMedium(worldPos, sigma_t, sigma_s);
     ApplyVolumes(worldPos, sigma_t, sigma_s, phaseG);

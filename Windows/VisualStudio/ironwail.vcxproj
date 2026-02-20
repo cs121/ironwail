@@ -276,7 +276,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\json.c" />
     <ClCompile Include="..\..\Quake\keys.c" />
     <ClCompile Include="..\..\Quake\main_sdl.c" />
-    <ClCompile Include="..\..\Quake\mathlib_simd.c" />
+    <ClCompile Include="..\..\Quake\mathlib.c" />
     <ClCompile Include="..\..\Quake\mat_shader.c" />
     <ClCompile Include="..\..\Quake\mat_shader_parse.c" />
     <ClCompile Include="..\..\Quake\menu.c" />
@@ -401,7 +401,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\jsmn.h" />
     <ClInclude Include="..\..\Quake\json.h" />
     <ClInclude Include="..\..\Quake\keys.h" />
-    <ClInclude Include="..\..\Quake\mathlib_simd.h" />
+    <ClInclude Include="..\..\Quake\mathlib.h" />
     <ClInclude Include="..\..\Quake\mat_shader.h" />
     <ClInclude Include="..\..\Quake\mat_shader_parse.h" />
     <ClInclude Include="..\..\Quake\menu.h" />

@@ -327,18 +327,13 @@ static void R_LogWorldLightState (const char *marker)
 		dlight_filter_debug_t filter_stats;
 		dlight_debug_entry_t entries[4];
 		DLightPool_GetFilterDebug (&filter_stats, entries);
-		Con_Printf ("STATEDBG clustered_light_filter created=%d after_merge=%d total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d final=%d radius=(%.1f..%.1f) reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
-			filter_stats.created_count,
-			filter_stats.after_merge_count,
+		Con_Printf ("STATEDBG clustered_light_filter total_active=%d lifetime_radius=%d world=%d pvs=%d frustum=%d budget=%d reject_lifetime=%d reject_world=%d reject_pvs=%d reject_frustum=%d reject_budget=%d\n",
 			filter_stats.total_active,
 			filter_stats.pass_lifetime_radius,
 			filter_stats.pass_world_flag,
 			filter_stats.pass_pvs,
 			filter_stats.pass_frustum,
 			filter_stats.pass_budget,
-			filter_stats.final_active_count,
-			filter_stats.min_radius,
-			filter_stats.max_radius,
 			filter_stats.rejected_lifetime_radius,
 			filter_stats.rejected_world_flag,
 			filter_stats.rejected_pvs,
@@ -485,46 +480,6 @@ static qboolean MatrixInverse4x4(const float m[16], float out[16])
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
 
-typedef struct r_perf_stats_s {
-	int world_draw_calls;
-	int alias_draw_calls;
-	int particle_draw_calls;
-	int beam_entities;
-	qboolean clustered_build_ran;
-	qboolean dlight_shadow_pass_ran;
-	double frame_begin_time;
-	double world_ms;
-	double alias_ms;
-	double particles_ms;
-	double beams_ms;
-	double dlight_shadow_ms;
-	double cluster_push_ms;
-	double cluster_build_ms;
-	double cluster_upload_ms;
-	int cluster_indices;
-	unsigned int cluster_lights;
-	double frame_ms;
-} r_perf_stats_t;
-
-static r_perf_stats_t r_perf_stats;
-
-void R_PerfStats_BeginFrame (void)
-{
-	memset (&r_perf_stats, 0, sizeof (r_perf_stats));
-	r_perf_stats.frame_begin_time = Sys_DoubleTime ();
-}
-
-void R_PerfStats_AddWorldDrawCalls (int count) { if (count > 0) r_perf_stats.world_draw_calls += count; }
-void R_PerfStats_AddAliasDrawCalls (int count) { if (count > 0) r_perf_stats.alias_draw_calls += count; }
-void R_PerfStats_AddParticleDrawCalls (int count) { if (count > 0) r_perf_stats.particle_draw_calls += count; }
-void R_PerfStats_AddBeamEntities (int count) { if (count > 0) r_perf_stats.beam_entities += count; }
-void R_PerfStats_SetClusterBuildRan (qboolean ran) { r_perf_stats.clustered_build_ran = ran; }
-void R_PerfStats_SetClusterBuildMS (double ms) { r_perf_stats.cluster_build_ms = ms; }
-void R_PerfStats_SetClusterUploadMS (double ms) { r_perf_stats.cluster_upload_ms = ms; }
-void R_PerfStats_SetClusterIndices (int indices) { r_perf_stats.cluster_indices = q_max (0, indices); }
-void R_PerfStats_SetClusterLights (unsigned int lights) { r_perf_stats.cluster_lights = lights; }
-void R_PerfStats_SetDlightShadowPassRan (qboolean ran) { r_perf_stats.dlight_shadow_pass_ran = ran; }
-
 //
 // view origin
 //
@@ -577,13 +532,16 @@ cvar_t	r_lightmap_colorspace = { "r_lightmap_colorspace", "srgb", CVAR_ARCHIVE }
 cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
-cvar_t  r_lightstyles_zero_cost_debug = { "r_lightstyles_zero_cost_debug", "0", CVAR_NONE };
-cvar_t  r_beam_clustered_lighting = { "r_beam_clustered_lighting", "0", CVAR_NONE };
+cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 /* Clustered-light controls. */
-cvar_t  r_clustered_lights = { "r_clustered_lights", "1", CVAR_ARCHIVE };
+cvar_t  r_clustered_light_enable = { "r_clustered_light_enable", "1", CVAR_ARCHIVE };
 cvar_t  r_clustered_light_radius_scale = { "r_clustered_light_radius_scale", "1.0", CVAR_ARCHIVE };
 cvar_t  r_clustered_light_debug_visualize = { "r_clustered_light_debug_visualize", "0", CVAR_NONE };
-cvar_t  r_clustered_light_debug = { "r_clustered_light_debug", "0", CVAR_NONE };
+/* Deprecated compatibility aliases for legacy dynamic light controls. */
+cvar_t  r_dlight_enable = { "r_dlight_enable", "1", CVAR_ARCHIVE };
+cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
+cvar_t  r_dlight_debug_visualize = { "r_dlight_debug_visualize", "0", CVAR_NONE };
+cvar_t  r_clustered_lighting = { "r_clustered_lighting", "1", CVAR_ARCHIVE };
 cvar_t  r_clustered_tilesize = { "r_clustered_tilesize", "16", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices = { "r_clustered_zslices", "24", CVAR_ARCHIVE };
 cvar_t  r_clustered_zslices_low = { "r_clustered_zslices_low", "16", CVAR_ARCHIVE };
@@ -591,7 +549,6 @@ cvar_t  r_clustered_zslices_low_lights = { "r_clustered_zslices_low_lights", "8"
 cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCHIVE };
 cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
-cvar_t  r_clustered_sanity_debug = { "r_clustered_sanity_debug", "0", CVAR_NONE };
 cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
 cvar_t  r_clustered_profile_dumpinterval = { "r_clustered_profile_dumpinterval", "60", CVAR_NONE };
 cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
@@ -601,10 +558,6 @@ cvar_t  r_clustered_clearlists = { "r_clustered_clearlists", "1", CVAR_NONE };
 cvar_t  r_clustered_barriers = { "r_clustered_barriers", "1", CVAR_NONE };
 cvar_t  r_clustered_force_empty = { "r_clustered_force_empty", "0", CVAR_NONE };
 cvar_t  r_clustered_shadows = { "r_clustered_shadows", "1", CVAR_ARCHIVE };
-cvar_t  r_clustered_async = { "r_clustered_async", "1", CVAR_ARCHIVE };
-cvar_t  r_clustered_workers = { "r_clustered_workers", "2", CVAR_ARCHIVE };
-cvar_t  r_clustered_async_debug = { "r_clustered_async_debug", "0", CVAR_NONE };
-cvar_t  r_clustered_force_sync = { "r_clustered_force_sync", "0", CVAR_NONE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
@@ -910,8 +863,6 @@ cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,prog
 cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", CVAR_NONE };
 
 extern void R_Clustered_BindForShading (void);
-extern void R_Clustered_ForceBindForShading (void);
-extern void R_DrawWorld (void);
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
 //johnfitz
@@ -4120,8 +4071,7 @@ void R_SetupView (void)
 	R_EnvLight_BuildFrameUniforms (r_framedata.lighting_params, r_framedata.lightgrid_params);
 	r_framedata.clustered_light_params[0] = CLAMP (0.f, r_clustered_light_debug_visualize.value, 1.f);
 	r_framedata.clustered_light_params[1] = CLAMP (0.f, r_clustered_debug.value, 2.f);
-	// Note: clustered_light_params[2] (enable flag) is set by R_PushDlights after numlights is populated
-	r_framedata.clustered_light_params[2] = 0.f;
+	r_framedata.clustered_light_params[2] = (r_clustered_lighting.value > 0.f) ? 1.f : 0.f;
 	r_framedata.clustered_light_params[3] = CLAMP (0.f, r_clustered_light_radius_scale.value, 3.f);
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
@@ -4129,7 +4079,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = 0.f;
         r_framedata.shader_params[0] = r_shader_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = r_beam_clustered_lighting.value > 0.f ? 1.f : 0.f;
+        r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
         r_framedata.shadow_params[0] = r_shadow_bias.value;
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
@@ -5265,18 +5215,13 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-	double t0, t1;
-	R_PerfStats_BeginFrame ();
-	R_PerfStats_AddBeamEntities (dev_stats.beams);
 	R_ClusterPerf_BeginFrame ();
 	R_StateDebugMark ("FRAME_START");
 	R_ResetViewportAndScissorFullscreen ("WORLD_RESET_BEFORE_SETUP");
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Decals_FrameBegin ();
 	R_Shadow_SunPass ();
-	t0 = Sys_DoubleTime ();
 	R_Shadow_DlightPass ();
-	r_perf_stats.dlight_shadow_ms += (Sys_DoubleTime () - t0) * 1000.0;
 	R_SetupGL ();
 	R_Clear ();
 	R_StateDebugMark ("WORLD_BEFORE_GEOMETRY");
@@ -5284,46 +5229,25 @@ void R_RenderScene (void)
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	// Ensure cluster SSBO bindings are active for all subsequent draw passes.
-	// R_PushDlights (called from R_SetupView) may have set shading_bound=true,
-	// but R_Shadow_DlightPass can reset cluster state; rebind unconditionally here.
-	R_Clustered_ForceBindForShading ();
 	R_StateDebugMark ("WEAPON_BEFORE");
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	R_StateDebugMark ("WEAPON_AFTER");
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_ClusterPerf_BeginWorld ();
-	t0 = Sys_DoubleTime ();
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-	t1 = Sys_DoubleTime ();
-	r_perf_stats.world_ms += (t1 - t0) * 1000.0;
 	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_BEGIN");
 	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_BEGIN");
-	if (r_drawworld_cheatsafe)
-	{
-		GL_BeginGroup ("World geometry");
-		t0 = Sys_DoubleTime ();
-		R_DrawWorld ();
-		r_perf_stats.world_ms += (Sys_DoubleTime () - t0) * 1000.0;
-		GL_EndGroup ();
-	}
 	R_LogWorldLightState ("WORLD_CLUSTERED_LIGHTS_END");
 	R_StateDebugMark ("WORLD_CLUSTERED_LIGHTS_END");
 	R_ClusterPerf_EndWorld ();
 	R_DrawDecals (false);
-	t0 = Sys_DoubleTime ();
 	R_DrawParticles (false);
-	r_perf_stats.particles_ms += (Sys_DoubleTime () - t0) * 1000.0;
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
 	R_BeginTranslucency ();
 	R_DrawWater (true);
-	t0 = Sys_DoubleTime ();
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
-	r_perf_stats.alias_ms += (Sys_DoubleTime () - t0) * 1000.0;
-	t0 = Sys_DoubleTime ();
 	R_DrawParticles (true);
-	r_perf_stats.particles_ms += (Sys_DoubleTime () - t0) * 1000.0;
 	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
@@ -5331,27 +5255,6 @@ void R_RenderScene (void)
 	R_ShowLightgridDebug ();
 	R_StateDebugMark ("WORLD_AFTER_GEOMETRY");
 	R_ClusterPerf_EndFrame ();
-	r_perf_stats.frame_ms = (Sys_DoubleTime () - r_perf_stats.frame_begin_time) * 1000.0;
-	if (r_lightstyles_zero_cost_debug.value > 0.f)
-	{
-		Con_Printf ("RPERF frame_ms=%.3f world_draws=%d alias_draws=%d particles_draws=%d beams=%d cluster_build=%d cluster_build_ms=%.3f cluster_upload_ms=%.3f cluster_indices=%d cluster_lights=%u dlight_shadow=%d world_ms=%.3f alias_ms=%.3f particles_ms=%.3f dlight_shadow_ms=%.3f num_dlights=%u\n",
-			r_perf_stats.frame_ms,
-			r_perf_stats.world_draw_calls,
-			r_perf_stats.alias_draw_calls,
-			r_perf_stats.particle_draw_calls,
-			r_perf_stats.beam_entities,
-			r_perf_stats.clustered_build_ran ? 1 : 0,
-			r_perf_stats.cluster_build_ms,
-			r_perf_stats.cluster_upload_ms,
-			r_perf_stats.cluster_indices,
-			r_perf_stats.cluster_lights,
-			r_perf_stats.dlight_shadow_pass_ran ? 1 : 0,
-			r_perf_stats.world_ms,
-			r_perf_stats.alias_ms,
-			r_perf_stats.particles_ms,
-			r_perf_stats.dlight_shadow_ms,
-			R_ClusteredSubmittedLightCount ());
-	}
 }
 
 /*

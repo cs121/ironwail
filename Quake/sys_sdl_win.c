@@ -1031,8 +1031,7 @@ void Sys_Init (void)
 		Sys_Error ("This engine requires Windows XP or newer");
 
 	host_parms->numcpus = CPU_GetCoreCount ();
-	Sys_Printf("Detected %d CPUs (%s).\n", host_parms->numcpus, CPU_GetBrandString ());
-	Sys_Printf("SIMD extensions: %s.\n", CPU_GetSIMDExtensionsString ());
+	Sys_Printf("Detected %d CPUs.\n", host_parms->numcpus);
 
 	if (isDedicated)
 	{

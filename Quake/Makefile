@@ -55,14 +55,6 @@ STRIP ?= strip
 PKG_CONFIG ?= pkg-config
 
 CPUFLAGS=
-
-# Build SIMD mathlib with host-tuned instructions by default.
-# Set MATHLIB_NATIVE=0 to build a more portable binary for older CPUs.
-MATHLIB_NATIVE ?= 1
-MATHLIB_NATIVE_FLAG :=
-ifeq ($(MATHLIB_NATIVE),1)
-MATHLIB_NATIVE_FLAG := $(call check_gcc,-march=native,)
-endif
 LDFLAGS?=
 DFLAGS ?=
 CFLAGS ?= -Wall -Wno-trigraphs
@@ -288,7 +280,7 @@ OBJS = strlcat.o \
 	cfgfile.o \
 	host.o \
 	host_cmd.o \
-	mathlib_simd.o \
+	mathlib.o \
 	pr_cmds.o \
 	pr_edict.o \
 	pr_exec.o \
@@ -306,9 +298,6 @@ OBJS += $(SYSOBJ_RES)
 bc7enc.o: bc7enc.c bc7enc.h $(MAKEFILE)
 	@echo "Compiling $<" && \
 	$(CXX) $(DFLAGS) -c $(CXXFLAGS) $(SDL_CFLAGS) -o $@ $<
-
-mathlib_simd.o: CFLAGS += $(MATHLIB_NATIVE_FLAG)
-mathlib_simd.d: CFLAGS += $(MATHLIB_NATIVE_FLAG)
 
 # ---------------------------
 # targets / rules

@@ -1,65 +1,26 @@
-// AO Bilateral Denoiser
-// Optimizations:
-//  - Loop range now driven directly by `radius` to avoid the branch inside the double loop.
-//  - Added depth-based bilateral weight (not only edge texture) for sharper feature preservation.
-//  - `sigma` clamped more precisely; wsum guard retained.
-
-layout(local_size_x = 8, local_size_y = 8) in;
-
-layout(binding = 0) uniform sampler2D RawAO;
-layout(binding = 1) uniform sampler2D DepthTexture;
-layout(binding = 2) uniform sampler2D EdgeTexture;
-
-layout(r16f, binding = 0) uniform writeonly image2D OutAO;
-
-layout(location = 0) uniform vec4 u_params0; // x=unused, y=unused, z=sigma, w=radius(1-4)
-layout(location = 1) uniform vec4 u_screen;  // xy=invSize, zw=size
-layout(location = 2) uniform vec4 u_depth;   // x=near, y=far, z=reversedZ, w=unused
-layout(location = 3) uniform vec4 u_viewRect;
-
-void main()
-{
-    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(OutAO);
-    if (any(greaterThanEqual(px, size))) return;
-
-    float sigma  = max(u_params0.z, 0.01);
-    int   radius = clamp(int(u_params0.w + 0.5), 1, 4);
-
-    float centerAO   = texelFetch(RawAO,      px, 0).r;
-    float centerEdge = texelFetch(EdgeTexture, px, 0).r;
-    float centerD    = texelFetch(DepthTexture, px, 0).r;
-
-    // Pre-compute 1/(2*sigma^2) once
-    float invSigma2 = 1.0 / (2.0 * sigma * sigma);
-
-    float sum  = 0.0;
-    float wsum = 0.0;
-
-    // Drive loop with actual radius — no branch inside
-    for (int y = -radius; y <= radius; y++)
-    {
-        for (int x = -radius; x <= radius; x++)
-        {
-            ivec2 sp = clamp(px + ivec2(x, y), ivec2(0), size - ivec2(1));
-
-            float ao   = texelFetch(RawAO,      sp, 0).r;
-            float e    = texelFetch(EdgeTexture, sp, 0).r;
-            float sd   = texelFetch(DepthTexture, sp, 0).r;
-
-            // Spatial Gaussian
-            float d2 = float(x * x + y * y);
-            float w  = exp(-d2 * invSigma2);
-
-            // Edge / depth bilateral weights
-            w *= mix(1.0, 0.25, abs(e - centerEdge));
-            w *= exp(-abs(sd - centerD) * 200.0); // depth similarity
-
-            sum  += ao * w;
-            wsum += w;
-        }
-    }
-
-    float outAO = (wsum > 0.0) ? (sum / wsum) : centerAO;
-    imageStore(OutAO, px, vec4(clamp(outAO, 0.0, 1.0)));
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D RawAO;
+layout(binding=1) uniform sampler2D DepthTexture;
+layout(binding=2) uniform sampler2D EdgeTexture;
+layout(r16f, binding=0) uniform writeonly image2D OutAO;
+layout(location=0) uniform vec4 u_params0;
+layout(location=1) uniform vec4 u_screen;
+layout(location=2) uniform vec4 u_depth;
+layout(location=3) uniform vec4 u_viewRect;
+void main(){
+ ivec2 px=ivec2(gl_GlobalInvocationID.xy); ivec2 size=imageSize(OutAO); if(any(greaterThanEqual(px,size))) return;
+ vec2 uv=(vec2(px)+0.5)/vec2(size);
+ float sigma=max(u_params0.z,0.01); int radius=clamp(int(u_params0.w+0.5),1,4);
+ float center=texelFetch(RawAO,px,0).r; float edge=texelFetch(EdgeTexture,px,0).r;
+ float sum=0.0, wsum=0.0;
+ for(int y=-4;y<=4;y++) for(int x=-4;x<=4;x++){
+  if(abs(x)>radius||abs(y)>radius) continue;
+  ivec2 sp=clamp(px+ivec2(x,y),ivec2(0),size-ivec2(1));
+  float ao=texelFetch(RawAO,sp,0).r; float e=texelFetch(EdgeTexture,sp,0).r;
+  float d2=float(x*x+y*y); float w=exp(-d2/(2.0*sigma*sigma));
+  w*=mix(1.0,0.25,abs(e-edge));
+  sum += ao*w; wsum += w;
+ }
+ float outAO = (wsum>0.0)?sum/wsum:center;
+ imageStore(OutAO,px,vec4(clamp(outAO,0.0,1.0)));
 }
