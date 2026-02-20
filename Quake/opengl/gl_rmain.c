@@ -548,6 +548,7 @@ cvar_t  r_clustered_zslices_low = { "r_clustered_zslices_low", "16", CVAR_ARCHIV
 cvar_t  r_clustered_zslices_low_lights = { "r_clustered_zslices_low_lights", "8", CVAR_ARCHIVE };
 cvar_t  r_clustered_maxindices = { "r_clustered_maxindices", "262144", CVAR_ARCHIVE };
 cvar_t  r_clustered_debug = { "r_clustered_debug", "0", CVAR_NONE };
+cvar_t  r_clustered_debug_tiles = { "r_clustered_debug_tiles", "0", CVAR_NONE };
 cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
 cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
 cvar_t  r_clustered_profile_dumpinterval = { "r_clustered_profile_dumpinterval", "60", CVAR_NONE };

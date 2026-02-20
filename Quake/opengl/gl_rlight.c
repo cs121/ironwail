@@ -40,6 +40,7 @@ extern cvar_t r_clustered_zslices_low;
 extern cvar_t r_clustered_zslices_low_lights;
 extern cvar_t r_clustered_maxindices;
 extern cvar_t r_clustered_debug;
+extern cvar_t r_clustered_debug_tiles;
 extern cvar_t r_clustered_log;
 extern cvar_t r_clustered_profile;
 extern cvar_t r_clustered_profile_dumpinterval;
@@ -577,8 +578,21 @@ typedef struct cluster_runtime_params_s {
 } cluster_runtime_params_t;
 
 COMPILE_TIME_ASSERT (clustered_header_size, sizeof (clustered_header_t) == 8);
+COMPILE_TIME_ASSERT (clustered_header_offset_offset, offsetof (clustered_header_t, offset) == 0);
+COMPILE_TIME_ASSERT (clustered_header_offset_count, offsetof (clustered_header_t, count) == 4);
 COMPILE_TIME_ASSERT (clustered_light_size, sizeof (clustered_light_t) == 48);
+COMPILE_TIME_ASSERT (clustered_light_offset_pos_radius, offsetof (clustered_light_t, pos_radius) == 0);
+COMPILE_TIME_ASSERT (clustered_light_offset_color_intensity, offsetof (clustered_light_t, color_intensity) == 16);
+COMPILE_TIME_ASSERT (clustered_light_offset_flags, offsetof (clustered_light_t, flags) == 32);
 COMPILE_TIME_ASSERT (clustered_params_size, sizeof (clustered_params_t) == 256);
+COMPILE_TIME_ASSERT (clustered_params_offset_screen_size, offsetof (clustered_params_t, screen_size) == 0);
+COMPILE_TIME_ASSERT (clustered_params_offset_grid_xy, offsetof (clustered_params_t, grid_xy) == 8);
+COMPILE_TIME_ASSERT (clustered_params_offset_z_slices, offsetof (clustered_params_t, z_slices) == 16);
+COMPILE_TIME_ASSERT (clustered_params_offset_view_matrix, offsetof (clustered_params_t, view_matrix) == 48);
+COMPILE_TIME_ASSERT (clustered_params_offset_proj_matrix, offsetof (clustered_params_t, proj_matrix) == 112);
+COMPILE_TIME_ASSERT (clustered_params_offset_inv_proj, offsetof (clustered_params_t, inv_proj) == 176);
+COMPILE_TIME_ASSERT (clustered_params_offset_tile_size, offsetof (clustered_params_t, tile_size) == 240);
+COMPILE_TIME_ASSERT (clustered_params_offset_debug_mode, offsetof (clustered_params_t, debug_mode) == 244);
 
 static struct {
 	GLuint lights_ssbo;
@@ -1184,6 +1198,8 @@ static void R_ClusteredFillParamsUBO (clustered_params_t *params, const cluster_
 	params->inv_proj[15] = 1.f;
 	params->tile_size = runtime->tile_size;
 	params->debug_mode = (int)r_clustered_debug.value;
+	if (params->debug_mode == 0 && r_clustered_debug_tiles.value > 0.f)
+		params->debug_mode = 4;
 }
 
 static void R_ClusteredResetFrameState (const cluster_runtime_params_t *runtime)
