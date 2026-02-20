@@ -325,6 +325,7 @@ dfunction_t *PR_FindFunction (const char *fn_name);
 void PR_ReloadPics (qboolean purge);					//for gamedir or video changes
 
 const char *PR_GetString (int num);
+qboolean PR_IsValidStringOffset (int num);
 int PR_SetEngineString (const char *s);
 void PR_ClearEngineString (int num);
 int PR_AllocString (int bufferlength, char **ptr);

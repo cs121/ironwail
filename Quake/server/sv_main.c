@@ -426,7 +426,10 @@ void SV_SendServerinfo (client_t *client)
 	else
 		MSG_WriteByte (&client->message, GAME_COOP);
 
-	MSG_WriteString (&client->message, PR_GetString(qcvm->edicts->v.message));
+	if (PR_IsValidStringOffset ((int)qcvm->edicts->v.message))
+		MSG_WriteString (&client->message, PR_GetString((int)qcvm->edicts->v.message));
+	else
+		MSG_WriteString (&client->message, "");
 
 	//johnfitz -- only send the first 256 model and sound precaches if protocol is 15
 	for (i = 1, s = sv.model_precache+1; *s; s++,i++)
@@ -1856,7 +1859,10 @@ static void SV_PrintMapChecklist (void)
 	//
 	// map title
 	//
-	Mod_SanitizeMapDescription (buf, sizeof (buf), PR_GetString ((int)qcvm->edicts->v.message));
+	if (PR_IsValidStringOffset ((int)qcvm->edicts->v.message))
+		Mod_SanitizeMapDescription (buf, sizeof (buf), PR_GetString ((int)qcvm->edicts->v.message));
+	else
+		buf[0] = 0;
 	if (buf[0])
 		SV_PrintMapCheck (MAPCHECK_OK, "map title (%s)", buf);
 	else
