@@ -249,11 +249,11 @@ static void GL_DumpRenderState (const char *label)
 	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
 	for (i = 0; i < 4; ++i)
 	{
-		glActiveTexture (GL_TEXTURE0 + i);
+		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d[i]);
 		glGetIntegerv (GL_SAMPLER_BINDING, &samplers[i]);
 	}
-	glActiveTexture (active_tex);
+	GL_ActiveTextureFunc (active_tex);
 
 	Con_Printf (
 		"STATEDBG frame=%d pass=%s vp=(%d %d %d %d) scissor=%d box=(%d %d %d %d) "
