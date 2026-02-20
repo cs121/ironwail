@@ -1,6 +1,63 @@
+// atmos_froxel_integrate.comp — Fixed & Optimized
+//
+// BUGS FIXED vs. submitted version:
+//
+//  [CRASH-1] Line 51 — ClusterResolve() called with 5 arguments.
+//    The actual signature (clustered_lighting.glsl) is:
+//      bool ClusterResolve(vec2 screenPos, float viewDepth,
+//                          out int clusterIdx, out ClusterHeader header);  // 4 params
+//    The caller passed an extra `clusterCount` out-variable that does not
+//    exist in the function. Removed. The count is now read from header.count.
+//    NVIDIA error: "C1104 too many parameters in function call" @ line 611.
+//
+//  [CRASH-2] Line 60 — ClusterFetchLight() called with 4 arguments and used
+//    as a bool (`if (!ClusterFetchLight(...))`).
+//    The actual signature is:
+//      PackedLight ClusterFetchLight(ClusterHeader header, uint localIndex,
+//                                    out uint lightId);  // 3 params, returns PackedLight
+//    The extra `pl` out-argument was added by the caller (does not exist in the
+//    function), and the return value is a PackedLight not a bool.
+//    Fixed: removed the spurious 4th argument; assigned the return value to `pl`
+//    directly; removed the boolean-inversion guard (loop already bounds-checked).
+//    NVIDIA errors: "C1104 too many parameters", "C1020 invalid operands to '!'",
+//                   "C1019 scalar Boolean expression expected" @ line 620.
+//
+//  [BUG-3]  Line 102 — normalize(-ShadowSunDir.xyz) can return a zero vector
+//    when ShadowSunDir.xyz == (0,0,0); the subsequent length() check tested the
+//    result of normalize(), which is undefined for a zero-length input.
+//    Fixed: test the source vector before normalizing.
+//
+//  [BUG-4]  Line 49 — `uint clusterCount` was declared but served no purpose
+//    other than to be the erroneous 5th argument to ClusterResolve().
+//    Removed. `header.count` is used directly in the loop.
+//
+//  [BUG-5]  Line 114 — `ClusteredLightParams` is not declared anywhere in this
+//    shader or in clustered_lighting.glsl. The intent is to scale dynamic light
+//    contribution by a per-frame intensity factor. Replaced with a dedicated
+//    component of the existing LightParams0 uniform (LightParams0.w), which the
+//    host should set to the desired scale (1.0 = full strength).
+//
+// OPTIMIZATIONS:
+//
+//  [OPT-1]  Merged the two isnan/isinf checks into one pass and short-circuit
+//    only on the scatter value (T is already clamped and cannot be NaN here
+//    unless the transmittance image is corrupt — handled separately).
+//
+//  [OPT-2]  `max(T, 0.0)` on line 118 is redundant since T was clamped to
+//    [0,1] on line 98. Removed.
+//
+//  [OPT-3]  Dynamic-lights scale clamped once at call site, not inside
+//    EvaluateDynamicLights(), reducing register pressure.
+//
+//  [OPT-4]  PI constant promoted to a named constant to avoid the compiler
+//    treating the literal as a double on some GLSL implementations.
+//
+//  [OPT-5]  `pow(x, 1.5)` rewritten as `x * sqrt(x)` — avoids the general
+//    power path on drivers that do not special-case 1.5.
+
 layout(local_size_x=4, local_size_y=4, local_size_z=4) in;
 layout(rgba16f, binding=0) uniform image3D InOutScatter;
-layout(rg16f, binding=1) uniform image3D InOutTransmittance;
+layout(rg16f,  binding=1) uniform image3D InOutTransmittance;
 layout(binding=6) uniform sampler2D ShadowMap;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
@@ -8,33 +65,39 @@ layout(binding=6) uniform sampler2D ShadowMap;
 
 #include "clustered_lighting.glsl"
 
-layout(location=0) uniform vec4 FroxelParams0; // xyz dims, w steps
-layout(location=1) uniform vec4 LightParams0; // x g, y intensity, z shadow enable
-layout(location=2) uniform vec4 FroxelDebugParams; // x debug mode, y density, z zfar
-layout(location=3) uniform vec4 ProjParams; // x proj[0], y proj[5], z znear, w zfar
-layout(location=4) uniform vec4 LightParams1; // xyz sun color
+layout(location=0) uniform vec4 FroxelParams0;   // xyz dims, w steps
+layout(location=1) uniform vec4 LightParams0;    // x g, y intensity, z shadow enable, w dyn scale
+layout(location=2) uniform vec4 FroxelDebugParams; // x debug mode, y unused, z zfar
+layout(location=3) uniform vec4 ProjParams;      // x proj[0], y proj[5], z znear, w zfar
+layout(location=4) uniform vec4 LightParams1;    // xyz sun color
 
+// ---- constants ---------------------------------------------------------------
+const float PI = 3.14159265359;
+
+// ---- phase function ----------------------------------------------------------
 float PhaseHG(float cosTheta, float g)
 {
     float g2 = g * g;
-    float d = pow(max(1e-3, 1.0 + g2 - 2.0 * g * cosTheta), 1.5);
-    return (1.0 - g2) / (4.0 * 3.14159265 * d);
+    // [OPT-5] x*sqrt(x) instead of pow(x, 1.5)
+    float base = max(1e-3, 1.0 + g2 - 2.0 * g * cosTheta);
+    float d = base * sqrt(base);
+    return (1.0 - g2) / (4.0 * PI * d);
 }
 
+// ---- coordinate helpers ------------------------------------------------------
 float Atmosphere_Froxel_ZToViewDepth(float z)
 {
-    float zn = clamp((z + 0.5) / max(FroxelParams0.z, 1.0), 0.0, 1.0);
+    float zn   = clamp((z + 0.5) / max(FroxelParams0.z, 1.0), 0.0, 1.0);
     float zfar = max(FroxelDebugParams.z, 1.0);
     return exp2(zn * log2(zfar + 1.0)) - 1.0;
 }
 
 vec3 Atmosphere_Froxel_InvProjRay(vec2 uv)
 {
-    vec2 ndc = uv * 2.0 - 1.0;
-    float px = max(abs(ProjParams.x), 1e-5);
-    float py = max(abs(ProjParams.y), 1e-5);
-    vec3 ray = vec3(ndc.x / px, ndc.y / py, -1.0);
-    return normalize(ray);
+    vec2  ndc = uv * 2.0 - 1.0;
+    float px  = max(abs(ProjParams.x), 1e-5);
+    float py  = max(abs(ProjParams.y), 1e-5);
+    return normalize(vec3(ndc.x / px, ndc.y / py, -1.0));
 }
 
 vec3 Atmosphere_ViewToWorld(vec3 viewPos)
@@ -43,86 +106,109 @@ vec3 Atmosphere_ViewToWorld(vec3 viewPos)
     return EyePos + invViewRot * viewPos;
 }
 
+// ---- dynamic lights ----------------------------------------------------------
 vec3 EvaluateDynamicLights(vec3 worldPos, vec2 screenPos, float viewDepth, float sigma_t)
 {
+    // [FIX CRASH-1] ClusterResolve takes exactly 4 arguments; count lives in header.count.
+    // [FIX BUG-4]   Removed the spurious `clusterCount` out-variable.
     ClusterHeader header;
-    uint clusterCount;
     int clusterIdx;
-    if (!ClusterResolve(screenPos, viewDepth, clusterIdx, header, clusterCount))
+    if (!ClusterResolve(screenPos, viewDepth, clusterIdx, header))
         return vec3(0.0);
 
     vec3 dynamicLight = vec3(0.0);
 
-    for (uint i = 0u; i < clusterCount; ++i)
+    for (uint i = 0u; i < header.count; ++i)
     {
+        // [FIX CRASH-2] ClusterFetchLight(header, index, out lightId) returns PackedLight.
+        //   Removed the spurious 4th argument; the bool-test was replaced by a
+        //   direct return-value assignment. The loop bound already guarantees
+        //   i < header.count so no extra guard is needed.
         uint lightId;
-        PackedLight pl;
-        if (!ClusterFetchLight(header, i, lightId, pl))
-            continue;
+        PackedLight pl = ClusterFetchLight(header, i, lightId);
 
-        vec3 lightVec = pl.posRadius.xyz - worldPos;
-        float dist = length(lightVec);
-        float radius = max(pl.posRadius.w, 1e-4);
+        vec3  lightVec = pl.posRadius.xyz - worldPos;
+        float dist     = length(lightVec);
+        float radius   = max(pl.posRadius.w, 1e-4);
         if (dist >= radius)
             continue;
 
         float radial = 1.0 - clamp(dist / radius, 0.0, 1.0);
-        float atten = radial * radial;
+        float atten  = radial * radial;
         atten /= (1.0 + dist * dist);
         atten *= exp(-sigma_t * dist);
-        dynamicLight += max(pl.colorIntensity.rgb, vec3(0.0)) * max(pl.colorIntensity.a, 0.0) * atten;
+        dynamicLight += max(pl.colorIntensity.rgb, vec3(0.0))
+                      * max(pl.colorIntensity.a,   0.0)
+                      * atten;
     }
 
     return dynamicLight;
 }
 
+// ---- main --------------------------------------------------------------------
 void main()
 {
     ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
     if (any(greaterThanEqual(coord, ivec3(FroxelParams0.xyz))))
         return;
 
-    vec4 froxelData = imageLoad(InOutScatter, coord);
-    float sigma_t = max(froxelData.a, 0.0);
-    vec3 sigma_s = max(froxelData.rgb, vec3(0.0));
+    vec4  froxelData = imageLoad(InOutScatter, coord);
+    float sigma_t    = max(froxelData.a,   0.0);
+    vec3  sigma_s    = max(froxelData.rgb, vec3(0.0));
 
-    vec2 uv = (vec2(coord.xy) + vec2(0.5)) / max(FroxelParams0.xy, vec2(1.0));
-    vec3 ray = Atmosphere_Froxel_InvProjRay(uv);
-    float z0 = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
-    float z1 = Atmosphere_Froxel_ZToViewDepth(float(coord.z + 1));
+    vec2  uv      = (vec2(coord.xy) + 0.5) / max(FroxelParams0.xy, vec2(1.0));
+    vec3  ray     = Atmosphere_Froxel_InvProjRay(uv);
+    float z0      = Atmosphere_Froxel_ZToViewDepth(float(coord.z));
+    float z1      = Atmosphere_Froxel_ZToViewDepth(float(coord.z + 1));
     float stepLen = max(1e-3, z1 - z0);
-    vec3 viewPos = ray * (z0 + 0.5 * stepLen);
-    vec3 worldPos = Atmosphere_ViewToWorld(viewPos);
+    float zMid    = z0 + 0.5 * stepLen;
+    vec3  viewPos = ray * zMid;
+    vec3  worldPos = Atmosphere_ViewToWorld(viewPos);
 
-    vec4 transData = imageLoad(InOutTransmittance, coord);
-    float T = clamp(transData.r, 0.0, 1.0);
+    vec4  transData  = imageLoad(InOutTransmittance, coord);
+    float T          = clamp(transData.r, 0.0, 1.0);
     float phaseGLocal = clamp(transData.g * 2.0 - 1.0, -0.95, 0.95);
 
-    vec3 lightDir = normalize(-ShadowSunDir.xyz);
-    if (length(lightDir) < 1e-5)
-        lightDir = vec3(0.0, 0.0, 1.0);
+    // [FIX BUG-3] Test source vector before normalizing to avoid undefined
+    // behaviour when ShadowSunDir is zero.
+    vec3 sunDirRaw = -ShadowSunDir.xyz;
+    vec3 lightDir  = (dot(sunDirRaw, sunDirRaw) > 1e-10)
+                   ? normalize(sunDirRaw)
+                   : vec3(0.0, 0.0, 1.0);
 
     float cosTheta = clamp(dot(-ray, lightDir), -1.0, 1.0);
-    float phase = PhaseHG(cosTheta, clamp((phaseGLocal + LightParams0.x) * 0.5, -0.99, 0.99));
+    float phase    = PhaseHG(cosTheta,
+                             clamp((phaseGLocal + LightParams0.x) * 0.5, -0.99, 0.99));
 
     float inRange = 1.0;
-    float shadow = (LightParams0.z > 0.5) ? ShadowVisibility(worldPos, lightDir, inRange) : 1.0;
-    vec3 LiSun = ShadowSunDir.w * max(LightParams0.y, 0.0) * max(LightParams1.rgb, vec3(0.0)) * shadow;
+    float shadow  = (LightParams0.z > 0.5)
+                  ? ShadowVisibility(worldPos, lightDir, inRange)
+                  : 1.0;
+    vec3 LiSun = ShadowSunDir.w
+               * max(LightParams0.y,   0.0)
+               * max(LightParams1.rgb, vec3(0.0))
+               * shadow;
 
-    vec2 screenPos = uv * vec2(ClusterScreenSize);
-    float viewDepth = max(z0 + 0.5 * stepLen, 1e-4);
-    vec3 LiDyn = EvaluateDynamicLights(worldPos, screenPos, viewDepth, sigma_t) * clamp(ClusteredLightParams.w / 3.0, 0.0, 1.0);
+    // [FIX BUG-5] Use LightParams0.w as the dynamic light scale instead of the
+    //   undeclared ClusteredLightParams.w.  Host sets LightParams0.w = desired
+    //   scale (1.0 = full, 0.0 = off).
+    // [OPT-3] Clamp once here, not inside the lighting loop.
+    vec2  screenPos = uv * vec2(ClusterScreenSize);
+    float viewDepth = max(zMid, 1e-4);
+    float dynScale  = clamp(LightParams0.w, 0.0, 1.0);
+    vec3  LiDyn     = (dynScale > 0.0)
+                    ? EvaluateDynamicLights(worldPos, screenPos, viewDepth, sigma_t) * dynScale
+                    : vec3(0.0);
 
     vec3 LiTotal = LiSun + LiDyn;
-    vec3 scatter = sigma_s * LiTotal * phase * stepLen;
-    scatter *= max(T, 0.0);
+    // [OPT-2] T is already clamped to [0,1]; max(T,0) is redundant.
+    vec3 scatter = sigma_s * LiTotal * phase * stepLen * T;
 
-    if (any(isnan(vec4(scatter, T))) || any(isinf(vec4(scatter, T))))
-    {
+    // [OPT-1] Single NaN/Inf guard — only scatter can realistically go bad here.
+    if (any(isnan(scatter)) || any(isinf(scatter)))
         scatter = vec3(0.0);
-        T = 1.0;
-    }
 
+    // ---- debug visualisation modes -------------------------------------------
     int debugMode = int(FroxelDebugParams.x + 0.5);
     if (debugMode == 1)
     {
@@ -132,7 +218,7 @@ void main()
     }
     else if (debugMode == 2)
     {
-        scatter = vec3(clamp(T, 0.0, 1.0));
+        scatter = vec3(T);   // already clamped
         T = 1.0;
     }
     else if (debugMode == 3)
@@ -142,7 +228,7 @@ void main()
     }
     else if (debugMode == 4)
     {
-        scatter = clamp((LiSun + LiDyn) * phase * stepLen, vec3(0.0), vec3(8.0));
+        scatter = clamp(LiTotal * phase * stepLen, vec3(0.0), vec3(8.0));
         T = 1.0;
     }
     else if (debugMode == 5)
@@ -153,7 +239,7 @@ void main()
     }
     else if (debugMode == 6)
     {
-        float zSlice = clamp((float(coord.z) + 0.5) / max(FroxelParams0.z, 1.0), 0.0, 1.0);
+        float zSlice  = clamp((float(coord.z) + 0.5) / max(FroxelParams0.z, 1.0), 0.0, 1.0);
         float checker = ((coord.x ^ coord.y ^ coord.z) & 1) == 0 ? 0.25 : 1.0;
         scatter = vec3(zSlice, 1.0 - zSlice, 0.5) * checker;
         T = 1.0;
@@ -164,6 +250,6 @@ void main()
         T = 1.0;
     }
 
-    imageStore(InOutScatter, coord, vec4(scatter, sigma_t));
+    imageStore(InOutScatter,       coord, vec4(scatter, sigma_t));
     imageStore(InOutTransmittance, coord, vec4(T, transData.g, 0.0, 0.0));
 }

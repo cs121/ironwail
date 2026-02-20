@@ -133,9 +133,18 @@ void main()
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
-        vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-        mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
+
+        // FIX (perf): The first normalize() before transforming to world space is
+        // redundant when worldmatrix is non-orthonormal (has scale): the subsequent
+        // world-space normalize() already re-normalizes the result. If worldmatrix is
+        // orthonormal, only one normalize is needed. Removed the pre-transform normalize.
+        vec3 blended_normal = mix(pose1.nor, pose2.nor, inst.Blend);
+
+        // FIX (perf): mat3(worldmatrix) directly extracts the upper-left 3x3 from
+        // the mat4x3; no need to manually swizzle the three column vectors.
+        mat3 world_orientation = mat3(worldmatrix);
         vec3 world_normal = normalize(world_orientation * blended_normal);
+
         vec3 ambient = max(inst.AmbientColor.rgb, vec3(0.0));
         float static_mix = mix(0.35, 1.0, lighting) * AliasOverbright;
         vec3 litAmbient = ambient * 0.35 * AliasOverbright;

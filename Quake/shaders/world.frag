@@ -558,22 +558,19 @@ void main()
 	if (clusterActive)
 	{
 		ClusterHeader header;
-		uint clusterCount;
 		int resolvedClusterIdx;
-		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header, clusterCount))
-			clusterCount = 0u;
-		if (clusterCount > 0u)
+		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header))
+			header.count = 0u;
+		if (header.count > 0u)
 		{
 			vec3 dynamic_light = vec3(0.0);
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
-		for (uint i = 0u; i < clusterCount; ++i)
+		for (uint i = 0u; i < header.count; ++i)
 		{
 			uint lightId;
-			PackedLight pl;
-			if (!ClusterFetchLight(header, i, lightId, pl))
-				continue;
+			PackedLight pl = ClusterFetchLight(header, i, lightId);
 			vec3 lightOrigin = pl.posRadius.xyz;
 			float radius = pl.posRadius.w;
 			vec3 lightColor = pl.colorIntensity.rgb;

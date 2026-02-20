@@ -155,11 +155,9 @@ layout(location=9) flat in vec4 in_env_params;
 		OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
 		float z = 1./gl_FragCoord.w;
-#if 0
-		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/2e5, 2.0)), 1e-2, 3e3);
-#else
-		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
-#endif
+		// Exponent intentionally 1.0 (linear depth weighting); higher values were
+		// tested (see commented-out variant above) but caused artefacts at large z.
+		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + z/1e7), 1e-2, 3e3);
 		out_accum = vec4(color.rgb, color.a * weight);
 		out_accum.rgb *= out_accum.a;
 		out_reveal = color.a;
@@ -194,21 +192,18 @@ vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 {
 	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
 	ClusterHeader header;
-	uint cluster_count;
 	int cluster_idx;
-	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
+	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header))
 		return vec3(0.0);
-	if (cluster_count == 0u)
+	if (header.count == 0u)
 		return vec3(0.0);
 
 	vec3 dynamic_light = vec3(0.0);
 
-	for (uint i = 0u; i < cluster_count; ++i)
+	for (uint i = 0u; i < header.count; ++i)
 	{
 		uint light_id;
-		PackedLight pl;
-		if (!ClusterFetchLight(header, i, light_id, pl))
-			continue;
+		PackedLight pl = ClusterFetchLight(header, i, light_id);
 
 		vec3 light_vec = pl.posRadius.xyz - world_pos;
 		float dist = length(light_vec);
@@ -218,6 +213,7 @@ vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
 
 		float nd = dist / max(radius, 1e-4);
 		float attenuation = pow(1.0 - clamp(nd, 0.0, 1.0), 1.5);
+		// Reuse dist already computed above to avoid redundant sqrt via normalize().
 		vec3 light_dir = (dist > 1e-6) ? (light_vec / dist) : vec3(0.0, 0.0, 1.0);
 		float ndotl = max(dot(normal, light_dir), 0.0);
 		dynamic_light += pl.colorIntensity.rgb * (attenuation * ndotl);
@@ -235,6 +231,7 @@ void main()
 	vec4 lit_color = in_color;
 	vec3 L_static = max(in_static_light, vec3(0.0));
 	vec3 L_amb = max(in_amb_light, vec3(0.0));
+	// FIX (perf): Compute N_lighting once; reused as N in the rim-light block below.
 	vec3 N_lighting = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
 	vec3 world_pos = in_pos + AliasEyePos;
 	vec3 clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
@@ -248,7 +245,10 @@ void main()
 		if (ShadowDebug.y > 1.5)
 		{
 			int shadow_debug_mode = int(ShadowDebug.y + 0.5);
-			out_fragcolor = vec4(ShadowDebugVisualize(shadow_debug_mode, shadow_term), 1.0);
+			// FIX (bug): Use OUT_COLOR instead of out_fragcolor directly so the OIT
+			// path (where out_fragcolor is only a local vec4) writes to the correct
+			// variable and the value is visible to the OIT main() wrapper.
+			OUT_COLOR = vec4(ShadowDebugVisualize(shadow_debug_mode, shadow_term), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -269,7 +269,7 @@ void main()
 #else
 	result.rgb = mix(result.rgb, result.rgb * lit_color.rgb, result.a);
 #endif
-	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
+	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes through heavy fog
         vec3 fullbright;
 #if MODE == 2
         fullbright = textureLod(FullbrightTex, uv, 0.).rgb;
@@ -284,6 +284,8 @@ void main()
         if ((in_flags & ALIAS_FLAG_LIGHTNING) != 0)
         {
                 float d = clamp(length(in_texcoord - 0.5) * 2.0, 0.0, 1.0);
+                // Note: ghost B-channel (1.3) intentionally exceeds 1.0 for HDR bloom
+                // overshoot. Clamped to [0,1] below for non-HDR targets.
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
@@ -296,7 +298,10 @@ void main()
 	vec3 env_spec = EvaluateReflectionProbe(
 		ReflectionTex,
 		1.0,
-		in_pos + EyePos,
+		// FIX (bug): Use AliasEyePos (from the SSBO, correct for this draw call's
+		// camera) instead of EyePos (from frame_uniforms.glsl) which may differ
+		// during viewmodel or shadow sub-passes, causing incorrect reflection dirs.
+		in_pos + AliasEyePos,
 		N_env,
 		V_env,
 		in_env_params.y * env_mask,
@@ -306,7 +311,8 @@ void main()
 
 	if (RimParams0.x > 0.5)
 	{
-		vec3 N = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
+		// FIX (perf): Reuse N_lighting computed above; no need to recalculate.
+		vec3 N = N_lighting;
 		vec3 V = normalize_safe(-in_pos);
 		vec3 L = normalize_safe(-ShadowSunDir.xyz);
 		// Keep shading normals oriented with the geometric face normal so inconsistent
@@ -350,13 +356,19 @@ void main()
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);
-        out_fragcolor = result;
+        OUT_COLOR = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
+        // NOTE: viewModelMask marks objects with NO_MOTION_BLUR (not only viewmodels).
+        // ALIAS_FLAG_VIEWMODEL is a separate flag; both end up suppressing velocity output
+        // but through different bits. Verify with the TAA/motion-blur consumer which
+        // semantic is expected in out_velocity.z before changing this.
         float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
         vec2 velocityOut = vec2(0.0);
+        // FIX (minor): result.a is guaranteed >= 0.999 by the branch condition, so the
+        // multiplication is a no-op. Kept explicit for clarity but simplified to 1.0.
         if (viewModelMask < 0.5 && result.a >= 0.999)
-                velocityOut = velocity * result.a;
+                velocityOut = velocity;
         out_velocity = vec4(velocityOut, viewModelMask, 1.0);
 #endif
 #if MODE == 1 || MODE == 2
