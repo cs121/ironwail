@@ -1597,6 +1597,26 @@ void R_Clustered_RebindForProgram (GLuint program, const char *pass_name)
 	if (!R_ClusteredEnabled ())
 		return;
 
+	/*
+	 * Compute/cull passes reuse SSBO bindings 3..7 for unrelated data.
+	 * The cached "already bound" state can therefore become stale while
+	 * clustered shading still needs those same binding points.
+	 *
+	 * Force a real rebind here so every clustered shading program gets the
+	 * correct buffers even after intermediate compute work.
+	 */
+	r_clustered.shading_bound = false;
+	r_clustered.bound_lights_ssbo = 0;
+	r_clustered.bound_headers_ssbo = 0;
+	r_clustered.bound_indices_ssbo = 0;
+	r_clustered.bound_counters_ssbo = 0;
+	r_clustered.bound_params_ubo = 0;
+	r_clustered.bound_lights_size = 0;
+	r_clustered.bound_headers_size = 0;
+	r_clustered.bound_indices_size = 0;
+	r_clustered.bound_counters_size = 0;
+	r_clustered.bound_params_size = 0;
+
 	R_Clustered_BindForShading ();
 	r_clustered.bind_calls++;
 
