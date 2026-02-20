@@ -31,8 +31,6 @@ This document records where **Reverse-Z** is explicitly handled in the codebase,
 
 - `Quake/shaders/world.vert`
   - `#if REVERSED_Z` changes polygon-offset Z bias sign.
-- `Quake/shaders/world_dlight.vert`
-  - `#if REVERSED_Z` changes polygon-offset Z bias sign.
 - `Quake/shaders/shadow_depth.vert`
   - `#if REVERSED_Z` changes polygon-offset Z bias sign.
 - `Quake/shaders/shadow_sample.glsl`
@@ -66,8 +64,6 @@ These locations include explicit fallback logic for non-reversed depth (`gl_clip
 - `Quake/renderer/r_shadow.c`
   - Non-clip-control branches in orthographic and perspective shadow matrix builders.
 - `Quake/shaders/world.vert`
-  - `#else` branch of `ZBIAS` sign.
-- `Quake/shaders/world_dlight.vert`
   - `#else` branch of `ZBIAS` sign.
 - `Quake/shaders/shadow_depth.vert`
   - `#else` branch of `ZBIAS` sign.
