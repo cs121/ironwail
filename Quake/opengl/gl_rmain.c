@@ -251,7 +251,7 @@ static void GL_DumpRenderState (const char *label)
 	{
 		glActiveTexture (GL_TEXTURE0 + i);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d[i]);
-		GL_GetIntegeri_vFunc (GL_SAMPLER_BINDING, i, &samplers[i]);
+		glGetIntegerv (GL_SAMPLER_BINDING, &samplers[i]);
 	}
 	glActiveTexture (active_tex);
 
