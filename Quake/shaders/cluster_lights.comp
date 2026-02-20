@@ -59,23 +59,18 @@ int zToSlice(float depth)
     return clamp(int(floor(log2(max(depth, 1e-4)) * zLogScale + zLogBias)), 0, zSlices - 1);
 }
 
-// Conservative sphere-vs-AABB tile test in view space.
-// tileFrustum is [minX, maxX, minY, maxY] in NDC.
-// Returns true if the sphere (center vc, radius r) intersects the tile column.
-bool sphereTileOverlap(vec3 vc, float r, vec2 ndcMin, vec2 ndcMax, float vz)
+// Conservative sphere-vs-AABB tile test in NDC.
+// Returns true if the projected sphere overlaps the tile in screen space.
+bool sphereTileOverlap(vec2 centerNdc, vec2 radiusNdc, vec2 ndcMin, vec2 ndcMax)
 {
-    // Project tile NDC corners back to view-space planes at depth vz
-    // and test sphere against that slab.  Cheap 2D separating axis test.
-    float scaleY = vz; // perspective: view-X = NDC-X * vz / projMatrix[0][0], approx
-    // Fast conservative test: if sphere center NDC is within (radius_ndc) of tile, overlap.
+    // Conservative AABB-vs-AABB overlap test in NDC.
+    // radiusNdc uses projection scale terms, so this remains conservative.
     float halfW = (ndcMax.x - ndcMin.x) * 0.5;
     float halfH = (ndcMax.y - ndcMin.y) * 0.5;
     vec2  tileCenter = (ndcMin + ndcMax) * 0.5;
-    // Project sphere radius to NDC at vz
-    float ndcRadius = r / max(vz, 1e-4);
-    vec2  delta = abs(vc.xy / max(vz, 1e-4) - tileCenter);
-    if (delta.x > halfW + ndcRadius) return false;
-    if (delta.y > halfH + ndcRadius) return false;
+    vec2  delta = abs(centerNdc - tileCenter);
+    if (delta.x > halfW + radiusNdc.x) return false;
+    if (delta.y > halfH + radiusNdc.y) return false;
     return true;
 }
 
@@ -108,6 +103,9 @@ void main()
     vec2 ndc       = clip.xy / clip.w;
     float vzSafe   = max(vz, 1e-4);
     float pixRadius = (radius / vzSafe) * float(screenSize.y) * abs(projMatrix[1][1]) * 0.5;
+    vec2 ndcRadius = vec2(
+        (radius / vzSafe) * abs(projMatrix[0][0]),
+        (radius / vzSafe) * abs(projMatrix[1][1]));
     vec2 centerPix  = (ndc * 0.5 + 0.5) * vec2(screenSize);
 
     int minX = clamp(int(floor((centerPix.x - pixRadius) / float(tileSize))), 0, gridXY.x - 1);
@@ -130,7 +128,7 @@ void main()
         // (reduces atomic pressure for large lights spanning many tiles)
         vec2 ndcTileMin = vec2(float(x    ) * float(tileSize), float(y    ) * float(tileSize)) / vec2(screenSize) * 2.0 - 1.0;
         vec2 ndcTileMax = vec2(float(x + 1) * float(tileSize), float(y + 1) * float(tileSize)) / vec2(screenSize) * 2.0 - 1.0;
-        if (!sphereTileOverlap(v.xyz, radius, ndcTileMin, ndcTileMax, vzSafe))
+        if (!sphereTileOverlap(ndc, ndcRadius, ndcTileMin, ndcTileMax))
             continue;
 
         uint clusterIdx = uint((z * gridXY.y + y) * gridXY.x + x);
