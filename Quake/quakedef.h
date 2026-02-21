@@ -252,7 +252,7 @@ typedef struct
 #include "cvar.h"
 
 #include "protocol.h"
-#include "net.h"
+#include "net/net.h"
 
 #include "cmd.h"
 #include "crc.h"
