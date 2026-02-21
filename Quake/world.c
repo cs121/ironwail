@@ -393,6 +393,9 @@ void SV_FindTouchedLeafs (edict_t *ent, mnode_t *node)
 	int			sides;
 	int			leafnum;
 
+	if (!sv.worldmodel)
+		return;
+
 	if (node->contents == CONTENTS_SOLID)
 		return;
 
@@ -435,6 +438,9 @@ qboolean SV_BoxInPVS (vec3_t mins, vec3_t maxs, byte *pvs, mnode_t *node)
 	mleaf_t		*leaf;
 	int			sides;
 	int			leafnum;
+
+	if (!sv.worldmodel)
+		return false;
 
 	if (node->contents == CONTENTS_SOLID)
 		return false;
@@ -503,9 +509,9 @@ void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
 		ent->v.absmax[2] += 1;
 	}
 
-// link to PVS leafs
+	// link to PVS leafs
 	ent->num_leafs = 0;
-	if (ent->v.modelindex)
+	if (ent->v.modelindex && sv.worldmodel)
 		SV_FindTouchedLeafs (ent, sv.worldmodel->nodes);
 
 	if (ent->v.solid == SOLID_NOT)
@@ -969,4 +975,3 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 	return clip.trace;
 }
-
