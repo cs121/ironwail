@@ -2209,7 +2209,6 @@ void SCR_UpdateScreen (void)
 	}
 
 	Draw_Flush ();
-	GL_ApplyFilmgrainUI ();
 
 	GL_EndGroup ();
 
