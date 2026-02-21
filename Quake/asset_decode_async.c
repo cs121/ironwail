@@ -1,8 +1,8 @@
 #include "quakedef.h"
 #include "asset_decode_async.h"
 #include "sys_jobs.h"
-#include "basisu_transcoder.h"
 #include "lodepng.h"
+#include "opengl/gl_ktx2.h"
 
 #define ASSET_MAX_REQUESTS 512
 #define ASSET_HANDLE_INDEX_BITS 16
@@ -11,12 +11,14 @@
 #define ASSET_HANDLE_INDEX(h) ((unsigned int)((h) & ASSET_HANDLE_INDEX_MASK))
 #define ASSET_HANDLE_GEN(h) ((unsigned int)((h) >> ASSET_HANDLE_INDEX_BITS))
 
-typedef enum { ASSET_STAGE_EMPTY = 0, ASSET_STAGE_FS, ASSET_STAGE_DECODE, ASSET_STAGE_DONE } asset_stage_t;
+typedef enum { ASSET_STAGE_EMPTY = 0, ASSET_STAGE_IO_PENDING, ASSET_STAGE_DECODE_PENDING, ASSET_STAGE_FINALIZE_PENDING, ASSET_STAGE_FAILED } asset_stage_t;
 
 typedef struct {
 	qboolean in_use;
 	unsigned int generation;
 	asset_stage_t stage;
+	asset_kind_t kind;
+	uint64_t t_io_start_us;
 	char path[MAX_QPATH];
 	asset_tex_params_t params;
 	char key[MAX_QPATH + 64];
@@ -36,12 +38,15 @@ static qboolean asset_initialized;
 static cvar_t asset_async = {"asset_async", "0", CVAR_ARCHIVE};
 static cvar_t asset_async_max_inflight_mb = {"asset_async_max_inflight_mb", "256", CVAR_ARCHIVE};
 static cvar_t asset_async_debug = {"asset_async_debug", "0", CVAR_NONE};
-static cvar_t asset_async_decode_workers = {"asset_async_decode_workers", "2", CVAR_ARCHIVE};
+static cvar_t asset_async_decode_workers = {"asset_async_decode_workers", "1", CVAR_ARCHIVE};
 
 static uint64_t asset_queued_fs;
 static uint64_t asset_completed_fs;
 static uint64_t asset_queued_decode;
 static uint64_t asset_completed_decode;
+static uint64_t asset_failed_decode;
+static uint64_t asset_decode_us_png;
+static uint64_t asset_decode_us_ktx2;
 static size_t asset_inflight_raw_bytes;
 static size_t asset_inflight_decoded_bytes;
 
@@ -51,16 +56,6 @@ static qboolean Asset_IsKTX2(const void *data, size_t size)
 	return size >= sizeof(magic) && memcmp(data, magic, sizeof(magic)) == 0;
 }
 
-static uint32_t Asset_ReadLE32(const uint8_t *p)
-{
-	return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static uint64_t Asset_ReadLE64(const uint8_t *p)
-{
-	return ((uint64_t)p[0]) | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 24) |
-		((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) | ((uint64_t)p[6] << 48) | ((uint64_t)p[7] << 56);
-}
 
 static asset_image_payload_t *Asset_DecodePNG(const void *raw_data, size_t raw_size)
 {
@@ -93,76 +88,41 @@ static asset_image_payload_t *Asset_DecodePNG(const void *raw_data, size_t raw_s
 
 static asset_image_payload_t *Asset_DecodeKTX2(const void *raw_data, size_t raw_size)
 {
-	const uint8_t *data = (const uint8_t *)raw_data;
-	uint32_t width, height, mip_count;
-	uint64_t supercompression, sgd_offset, sgd_length;
-	size_t header_size = 100;
-	size_t level_entry_size = 24;
-	size_t level_table_size;
+	ktx2_header_t hdr;
+	ktx2_decoded_image_t decoded;
 	asset_image_payload_t *img;
 	int i;
 
-	if (raw_size < header_size)
+	memset(&decoded, 0, sizeof(decoded));
+	if (!KTX2_ParseHeaderPublic(&hdr, (const uint8_t *)raw_data, raw_size))
 		return NULL;
-	width = Asset_ReadLE32(data + 20);
-	height = Asset_ReadLE32(data + 24);
-	mip_count = Asset_ReadLE32(data + 40);
-	supercompression = Asset_ReadLE64(data + 44);
-	sgd_offset = Asset_ReadLE64(data + 84);
-	sgd_length = Asset_ReadLE64(data + 92);
-	if (!width || !height || mip_count < 1 || mip_count > 32)
-		return NULL;
-
-	level_table_size = (size_t)mip_count * level_entry_size;
-	if (header_size + level_table_size > raw_size)
+	if (!KTX2_TranscodeToRGBA((const uint8_t *)raw_data, raw_size, &hdr, &decoded))
 		return NULL;
 
 	img = (asset_image_payload_t *)calloc(1, sizeof(*img));
 	if (!img)
+	{
+		KTX2_FreeDecodedImage(&decoded);
 		return NULL;
+	}
 
-	img->width = (int)width;
-	img->height = (int)height;
-	img->mip_count = (int)mip_count;
+	img->width = decoded.width[0];
+	img->height = decoded.height[0];
+	img->mip_count = decoded.mip_count;
 	img->format = ASSET_IMAGE_FMT_RGBA8;
 	img->has_alpha = true;
 
-	basisu_transcoder_init();
-	for (i = 0; i < (int)mip_count; ++i)
+	for (i = 0; i < decoded.mip_count; ++i)
 	{
-		const uint8_t *entry = data + header_size + (size_t)i * level_entry_size;
-		uint64_t off = Asset_ReadLE64(entry + 0);
-		uint64_t len = Asset_ReadLE64(entry + 8);
-		size_t dst_size;
-		int w = (int)q_max(1u, width >> i);
-		int h = (int)q_max(1u, height >> i);
-
-		if (off > raw_size || len > raw_size - off)
-			goto fail;
-		dst_size = (size_t)w * (size_t)h * 4u;
-		img->mips[i].data = malloc(dst_size);
-		if (!img->mips[i].data)
-			goto fail;
-		img->mips[i].size = dst_size;
-		img->mips[i].pitch = (size_t)w * 4u;
-
-		if (!basisu_transcoder_transcode_image_level(data + off, (size_t)len,
-			supercompression == 0,
-			sgd_length ? data + sgd_offset : NULL, (size_t)sgd_length,
-			(uint32_t)i, (uint32_t)w, (uint32_t)h,
-			(uint8_t *)img->mips[i].data, dst_size))
-			goto fail;
+		img->mips[i].data = decoded.mip_data[i];
+		img->mips[i].size = decoded.mip_size[i];
+		img->mips[i].pitch = (size_t)decoded.width[i] * 4u;
+		decoded.mip_data[i] = NULL;
+		decoded.mip_size[i] = 0;
 	}
 
+	KTX2_FreeDecodedImage(&decoded);
 	return img;
-fail:
-	for (i = 0; i < 32; ++i)
-	{
-		if (img->mips[i].data)
-			free(img->mips[i].data);
-	}
-	free(img);
-	return NULL;
 }
 
 static void Asset_DecodeWorker(void *job_data)
@@ -172,6 +132,9 @@ static void Asset_DecodeWorker(void *job_data)
 	unsigned gen = ASSET_HANDLE_GEN(h);
 	void *raw_data = NULL;
 	size_t raw_size = 0;
+	asset_kind_t kind = ASSET_KIND_UNKNOWN;
+	uint64_t t0_us = 0;
+	uint64_t decode_us = 0;
 	asset_image_payload_t *img = NULL;
 
 	SDL_LockMutex(asset_mutex);
@@ -182,33 +145,49 @@ static void Asset_DecodeWorker(void *job_data)
 	}
 	raw_data = asset_requests[idx].raw_data;
 	raw_size = asset_requests[idx].raw_size;
+	kind = asset_requests[idx].kind;
+	t0_us = SDL_GetPerformanceCounter();
 	asset_requests[idx].raw_data = NULL;
 	asset_requests[idx].raw_size = 0;
 	asset_inflight_raw_bytes -= raw_size;
 	SDL_UnlockMutex(asset_mutex);
 
-	if (Asset_IsKTX2(raw_data, raw_size))
+	if (kind == ASSET_KIND_KTX2 || Asset_IsKTX2(raw_data, raw_size))
 		img = Asset_DecodeKTX2(raw_data, raw_size);
 	else
 		img = Asset_DecodePNG(raw_data, raw_size);
 
+	decode_us = (uint64_t)((SDL_GetPerformanceCounter() - t0_us) * 1000000ull / SDL_GetPerformanceFrequency());
 	free(raw_data);
 
 	SDL_LockMutex(asset_mutex);
 	if (idx < ASSET_MAX_REQUESTS && asset_requests[idx].in_use && asset_requests[idx].generation == gen)
 	{
 		asset_completed_decode++;
+		asset_requests[idx].result.decode_us = decode_us;
+		if (kind == ASSET_KIND_KTX2)
+			asset_decode_us_ktx2 += decode_us;
+		else
+			asset_decode_us_png += decode_us;
 		if (img)
 		{
 			asset_requests[idx].result.status = ASSET_RESULT_OK;
 			asset_requests[idx].result.image = img;
-			asset_requests[idx].stage = ASSET_STAGE_DONE;
+			asset_requests[idx].stage = ASSET_STAGE_FINALIZE_PENDING;
 			{ size_t total = 0; for (int m = 0; m < img->mip_count; ++m) total += img->mips[m].size; asset_inflight_decoded_bytes += total; }
 		}
 		else
 		{
+			asset_failed_decode++;
 			asset_requests[idx].result.status = ASSET_RESULT_FAILED;
-			asset_requests[idx].stage = ASSET_STAGE_DONE;
+			q_snprintf(asset_requests[idx].result.error, sizeof(asset_requests[idx].result.error), "decode failed");
+			asset_requests[idx].stage = ASSET_STAGE_FAILED;
+		}
+		if (asset_async_debug.value)
+		{
+			Con_DPrintf("asset_async_done: %s kind=%d status=%d io_ms=%.3f decode_ms=%.3f\n",
+				asset_requests[idx].path, (int)asset_requests[idx].result.kind, (int)asset_requests[idx].result.status,
+				(double)asset_requests[idx].result.io_us / 1000.0, (double)asset_requests[idx].result.decode_us / 1000.0);
 		}
 		SDL_CondBroadcast(asset_done_cond);
 	}
@@ -321,7 +300,14 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 		q_snprintf(asset_requests[i].key, sizeof(asset_requests[i].key), "%s|%u", path, params ? params->flags : 0u);
 		if (params)
 			asset_requests[i].params = *params;
-		asset_requests[i].stage = ASSET_STAGE_FS;
+		asset_requests[i].stage = ASSET_STAGE_IO_PENDING;
+		asset_requests[i].kind = ASSET_KIND_UNKNOWN;
+		asset_requests[i].t_io_start_us = SDL_GetPerformanceCounter();
+		asset_requests[i].result.kind = ASSET_KIND_UNKNOWN;
+		asset_requests[i].result.error_code = 0;
+		asset_requests[i].result.error[0] = 0;
+		asset_requests[i].result.io_us = 0;
+		asset_requests[i].result.decode_us = 0;
 		asset_requests[i].decode_queued = false;
 		asset_requests[i].result.status = ASSET_RESULT_PENDING;
 		h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
@@ -387,12 +373,12 @@ void Asset_Async_Pump (void)
 			continue;
 		}
 
-		if (asset_requests[i].stage == ASSET_STAGE_FS && asset_requests[i].fs_handle)
+		if (asset_requests[i].stage == ASSET_STAGE_IO_PENDING && asset_requests[i].fs_handle)
 		{
 			h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
 			fs_handle = asset_requests[i].fs_handle;
 		}
-		else if (asset_requests[i].stage == ASSET_STAGE_DECODE && !asset_requests[i].decode_queued && asset_requests[i].raw_data && asset_requests[i].raw_size)
+		else if (asset_requests[i].stage == ASSET_STAGE_DECODE_PENDING && !asset_requests[i].decode_queued && asset_requests[i].raw_data && asset_requests[i].raw_size)
 		{
 			h = ASSET_MAKE_HANDLE(i, asset_requests[i].generation);
 			asset_requests[i].decode_queued = true;
@@ -411,7 +397,7 @@ void Asset_Async_Pump (void)
 			else
 			{
 				SDL_LockMutex(asset_mutex);
-				if (asset_requests[i].in_use && asset_requests[i].generation == ASSET_HANDLE_GEN(h) && asset_requests[i].stage == ASSET_STAGE_DECODE)
+				if (asset_requests[i].in_use && asset_requests[i].generation == ASSET_HANDLE_GEN(h) && asset_requests[i].stage == ASSET_STAGE_DECODE_PENDING)
 					asset_requests[i].decode_queued = false;
 				SDL_UnlockMutex(asset_mutex);
 			}
@@ -426,7 +412,7 @@ void Asset_Async_Pump (void)
 			continue;
 
 		SDL_LockMutex(asset_mutex);
-		if (!asset_requests[i].in_use || asset_requests[i].generation != ASSET_HANDLE_GEN(h) || asset_requests[i].stage != ASSET_STAGE_FS)
+		if (!asset_requests[i].in_use || asset_requests[i].generation != ASSET_HANDLE_GEN(h) || asset_requests[i].stage != ASSET_STAGE_IO_PENDING)
 		{
 			SDL_UnlockMutex(asset_mutex);
 			continue;
@@ -441,19 +427,26 @@ void Asset_Async_Pump (void)
 				asset_requests[i].raw_size = fs.size;
 				asset_requests[i].decode_queued = false;
 				asset_inflight_raw_bytes += fs.size;
-				asset_requests[i].stage = ASSET_STAGE_DECODE;
+				asset_requests[i].stage = ASSET_STAGE_DECODE_PENDING;
+				asset_requests[i].kind = Asset_IsKTX2(fs.data, fs.size) ? ASSET_KIND_KTX2 : ASSET_KIND_PNG;
+				asset_requests[i].result.kind = asset_requests[i].kind;
+				asset_requests[i].result.io_us = (uint64_t)((SDL_GetPerformanceCounter() - asset_requests[i].t_io_start_us) * 1000000ull / SDL_GetPerformanceFrequency());
 			}
 			else
 			{
 				asset_requests[i].result.status = ASSET_RESULT_FAILED;
-				asset_requests[i].stage = ASSET_STAGE_DONE;
+				asset_requests[i].result.error_code = ENOMEM;
+				q_strlcpy(asset_requests[i].result.error, "malloc failed", sizeof(asset_requests[i].result.error));
+				asset_requests[i].stage = ASSET_STAGE_FAILED;
 				SDL_CondBroadcast(asset_done_cond);
 			}
 		}
 		else
 		{
 			asset_requests[i].result.status = (fs.status == FS_ASYNC_STATUS_NOT_FOUND) ? ASSET_RESULT_NOT_FOUND : ASSET_RESULT_FAILED;
-			asset_requests[i].stage = ASSET_STAGE_DONE;
+			asset_requests[i].result.error_code = fs.error_code;
+			q_snprintf(asset_requests[i].result.error, sizeof(asset_requests[i].result.error), "fs status=%d", (int)fs.status);
+			asset_requests[i].stage = ASSET_STAGE_FAILED;
 			SDL_CondBroadcast(asset_done_cond);
 		}
 		FS_Release(asset_requests[i].fs_handle);
@@ -463,9 +456,10 @@ void Asset_Async_Pump (void)
 
 	if (asset_async_debug.value)
 	{
-		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " inflight_raw=%zu inflight_decoded=%zu\n",
-			asset_completed_fs, asset_queued_fs, asset_completed_decode, asset_queued_decode,
-			asset_inflight_raw_bytes, asset_inflight_decoded_bytes);
+		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " failed=%" SDL_PRIu64 " inflight_raw=%zu inflight_decoded=%zu decode_ms[png]=%.3f decode_ms[ktx2]=%.3f\n",
+			asset_completed_fs, asset_queued_fs, asset_completed_decode, asset_queued_decode, asset_failed_decode,
+			asset_inflight_raw_bytes, asset_inflight_decoded_bytes,
+			(double)asset_decode_us_png / 1000.0, (double)asset_decode_us_ktx2 / 1000.0);
 	}
 }
 
@@ -482,7 +476,7 @@ qboolean Asset_Poll (asset_handle_t h, asset_result_t *out)
 		return false;
 	Asset_Async_Pump();
 	SDL_LockMutex(asset_mutex);
-	if (!asset_requests[idx].in_use || asset_requests[idx].generation != gen || asset_requests[idx].stage != ASSET_STAGE_DONE)
+	if (!asset_requests[idx].in_use || asset_requests[idx].generation != gen || (asset_requests[idx].stage != ASSET_STAGE_FINALIZE_PENDING && asset_requests[idx].stage != ASSET_STAGE_FAILED))
 	{
 		SDL_UnlockMutex(asset_mutex);
 		return false;
@@ -507,10 +501,10 @@ void Asset_Wait (asset_handle_t h, asset_result_t *out)
 	 * The caller (usually the frame loop) must continue calling Asset_Async_Pump().
 	 */
 	SDL_LockMutex(asset_mutex);
-	while (asset_requests[idx].in_use && asset_requests[idx].generation == gen && asset_requests[idx].stage != ASSET_STAGE_DONE)
+	while (asset_requests[idx].in_use && asset_requests[idx].generation == gen && (asset_requests[idx].stage != ASSET_STAGE_FINALIZE_PENDING && asset_requests[idx].stage != ASSET_STAGE_FAILED))
 		SDL_CondWait(asset_done_cond, asset_mutex);
 
-	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen && asset_requests[idx].stage == ASSET_STAGE_DONE && out)
+	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen && (asset_requests[idx].stage == ASSET_STAGE_FINALIZE_PENDING || asset_requests[idx].stage == ASSET_STAGE_FAILED) && out)
 		*out = asset_requests[idx].result;
 	SDL_UnlockMutex(asset_mutex);
 }
