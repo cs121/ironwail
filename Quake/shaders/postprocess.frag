@@ -15,6 +15,7 @@ layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 	uint Palette[256];
 };
 #include "frame_uniforms.glsl"
+#include "depth_common.glsl"
 
 uvec3 UnpackRGB8(uint c)
 {
@@ -153,6 +154,7 @@ layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength
 layout(location=28) uniform vec4 AtmosFroxelParams0; // x: enabled, yzw: dimensions
 layout(location=29) uniform vec4 AtmosFroxelParams1; // x: downsample, y: z slices, z: z far, w: reserved
 layout(location=30) uniform vec4 FogDebugViews; // x density, y transmittance, z scattering, w light/step
+layout(location=31) uniform mat4 DoFInvProj;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -208,20 +210,12 @@ float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
         if (depthUV.x < 0.0 || depthUV.y < 0.0)
                 return 0.0;
         float rawDepth = texture(DepthTexture, depthUV).r;
-        float nearPlane = DoFParams1.x;
-        float farPlane = DoFParams1.y;
-        float reversed = DoFParams1.z;
-        if (reversed > 0.5)
-        {
-                float denom = nearPlane + rawDepth * (farPlane - nearPlane);
-                return (nearPlane * farPlane) / max(denom, 1e-6);
-        }
-        else
-        {
-                float ndcDepth = rawDepth * 2.0 - 1.0;
-                float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
-                return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
-        }
+        float ndcDepth = DepthRawToNdc(rawDepth, DoFParams1.z);
+        vec4 clip = vec4(depthUV * 2.0 - 1.0, ndcDepth, 1.0);
+        vec4 view = DoFInvProj * clip;
+        float invW = (abs(view.w) > 1e-6) ? (1.0 / view.w) : 0.0;
+        float viewDepth = view.x * invW;
+        return max(viewDepth, 0.0);
 }
 
 float FogTransmittanceFromDepth(float depth, float fogStrength)
