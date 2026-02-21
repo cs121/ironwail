@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern qboolean SV_BoxInPVS (vec3_t mins, vec3_t maxs, byte *pvs, mnode_t *node);
+
 typedef struct dlight_pool_s
 {
 	dlight_t *items;
@@ -590,7 +592,7 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 			VectorCopy (maxs, dbg->maxs);
 		}
 
-		if (have_world && viewleaf && view_pvs)
+		if (have_world && viewleaf && view_pvs && cl.worldmodel->nodes)
 		{
 			mleaf_t *lightleaf = Mod_PointInLeaf (dl->origin, cl.worldmodel);
 			if (dbg)
@@ -598,14 +600,13 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 				dbg->has_leaf = (lightleaf != NULL);
 				dbg->leaf_index = lightleaf ? (int)(lightleaf - cl.worldmodel->leafs) : -1;
 			}
-			if (!lightleaf)
-				in_pvs = false;
-			else
-			{
-				int leafnum = (int)(lightleaf - cl.worldmodel->leafs) - 1;
-				if (leafnum >= 0)
-					in_pvs = ((view_pvs[leafnum >> 3] & (1 << (leafnum & 7))) != 0);
-			}
+
+			/*
+			 * Use the light bounds for visibility tests rather than only its origin leaf.
+			 * Cluster lights can straddle multiple leaves, and origin-only PVS checks
+			 * can cause lights to pop on/off too aggressively when crossing portals.
+			 */
+			in_pvs = SV_BoxInPVS (mins, maxs, view_pvs, cl.worldmodel->nodes);
 		}
 		if (dbg)
 			dbg->in_pvs = in_pvs;
