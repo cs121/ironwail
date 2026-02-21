@@ -309,7 +309,7 @@
     <ClCompile Include="..\..\Quake\pl_linux.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\cd_null.c">
+    <ClCompile Include="..\..\Quake\sound\cd_null.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\sound\snd_mpg123.c">
@@ -335,10 +335,10 @@
     <ClInclude Include="..\..\Quake\bspfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\cdaudio.h">
+    <ClInclude Include="..\..\Quake\sound\cdaudio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\client.h">
+    <ClInclude Include="..\..\Quake\client\client.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\cmd.h">
@@ -374,7 +374,7 @@
     <ClInclude Include="..\..\Quake\opengl\gl_warp_sin.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\glquake.h">
+    <ClInclude Include="..\..\Quake\opengl\glquake.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\image.h">
@@ -404,7 +404,7 @@
     <ClInclude Include="..\..\Quake\modelgen.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\net.h">
+    <ClInclude Include="..\..\Quake\net\net.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\net\net_defs.h">
@@ -449,7 +449,7 @@
     <ClInclude Include="..\..\Quake\quakedef.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\render.h">
+    <ClInclude Include="..\..\Quake\renderer\render.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\renderer\r_decals.h">
@@ -473,7 +473,7 @@
     <ClInclude Include="..\..\Quake\sidebar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\server.h">
+    <ClInclude Include="..\..\Quake\server\server.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\q_sound.h">
