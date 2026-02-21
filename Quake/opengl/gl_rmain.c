@@ -552,6 +552,10 @@ cvar_t  r_clustered_log = { "r_clustered_log", "0", CVAR_NONE };
 cvar_t  r_clustered_profile = { "r_clustered_profile", "0", CVAR_NONE };
 cvar_t  r_clustered_profile_dumpinterval = { "r_clustered_profile_dumpinterval", "60", CVAR_NONE };
 cvar_t  r_clustered_validate = { "r_clustered_validate", "0", CVAR_NONE };
+cvar_t  r_clustered_workers = { "r_clustered_workers", "2", CVAR_ARCHIVE };
+cvar_t  r_clustered_async = { "r_clustered_async", "1", CVAR_ARCHIVE };
+cvar_t  r_clustered_async_debug = { "r_clustered_async_debug", "0", CVAR_NONE };
+cvar_t  r_clustered_force_sync = { "r_clustered_force_sync", "0", CVAR_NONE };
 // Debug-only instrumentation toggles.
 cvar_t  r_dbg_clustered_force_fallback = { "r_dbg_clustered_force_fallback", "0", CVAR_NONE };
 cvar_t  r_clustered_clearlists = { "r_clustered_clearlists", "1", CVAR_NONE };
