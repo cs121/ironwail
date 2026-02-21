@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //image.c -- image loading
 
 #include "quakedef.h"
-#include "simd_caps.h"
 
 static byte *Image_LoadPCX (FILE *f, int *width, int *height);
 static byte *Image_LoadLMP (FILE *f, int *width, int *height);
@@ -53,6 +52,7 @@ static byte *Image_LoadLMP (FILE *f, int *width, int *height);
 #define STB_IMAGE_WRITE_STATIC
 #include "stb_image_write.h"
 
+#define LODEPNG_NO_COMPILE_DECODER
 #define LODEPNG_NO_COMPILE_CPP
 #define LODEPNG_NO_COMPILE_ANCILLARY_CHUNKS
 #define LODEPNG_NO_COMPILE_ERROR_TEXT
@@ -197,18 +197,11 @@ qboolean Image_WriteTGA (const char *name, byte *data, int width, int height, in
 	// swap red and blue bytes
 	bytes = bpp/8;
 	size = width*height*bytes;
-	if (bytes == 4)
+	for (i=0; i<size; i+=bytes)
 	{
-		swizzle_rgba_bgra (data, data, (size_t)width * (size_t)height);
-	}
-	else
-	{
-		for (i=0; i<size; i+=bytes)
-		{
-			temp = data[i];
-			data[i] = data[i+2];
-			data[i+2] = temp;
-		}
+		temp = data[i];
+		data[i] = data[i+2];
+		data[i+2] = temp;
 	}
 
 	ret =

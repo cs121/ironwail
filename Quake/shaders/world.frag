@@ -8,11 +8,7 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2D ShadowMap;
-layout(binding=6) uniform samplerCube ReflectionTex;
 #include "frame_uniforms.glsl"
-#include "depth_common.glsl"
-#include "envlight.glsl"
-#include "clustered_lighting.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -23,6 +19,9 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 	return mix(Fog.rgb, clr, fog);
 }
 
+#define LIGHT_TILES_X 32
+#define LIGHT_TILES_Y 16
+#define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
 
 struct Light
@@ -44,6 +43,8 @@ float GetLightStyle(int index)
 	return (index < 64) ? mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w) : 1.0;
 }
 
+layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
+
 struct Call
 {
 	uint	flags;
@@ -52,7 +53,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix[3];
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -69,7 +69,9 @@ const uint
 	CF_NOLIGHTMAP = 4u,
 	CF_USE_EMISSIVE = 8u,
 	CF_ALPHA_TEST = 16u,
+	CF_MAT_BLOOM = 128u,
 	CF_MAT_EMISSIVE = 256u,
+	CF_MAT_GODRAY = 512u,
 	CF_MAT_TRANS = 1024u,
 	CF_MAT_SKY = 2048u,
 	CF_MAT_HAS_SHADER = 4096u;
@@ -203,24 +205,6 @@ vec3 SampleLightmapDir(vec2 uv)
 	return normalize(dir);
 }
 
-vec3 EvaluateDirectionalAmbient(vec3 ambientColor, vec3 normal)
-{
-	if (LightingParams.z <= 0.5)
-		return ambientColor;
-	vec3 dominantDir = vec3(0.0, 0.0, 1.0);
-	float nd = max(dot(normalize(normal), dominantDir), 0.0);
-	float ambientBias = 0.25;
-	return ambientColor * (ambientBias + (1.0 - ambientBias) * nd);
-}
-
-float ComputeEnvVisibilityHint(float shadowTerm, bool shadowEnabled)
-{
-	if (!shadowEnabled)
-		return 1.0;
-	return clamp(shadowTerm, 0.0, 1.0);
-}
-
-
 vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 {
 	const float EPS = 1e-6;
@@ -234,9 +218,9 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 float DepthToCanonical(float depth)
 {
 #if REVERSED_Z
-	return DepthRawToCanonical(depth, 1.0);
+	return 1.0 - depth;
 #else
-	return DepthRawToCanonical(depth, 0.0);
+	return depth;
 #endif
 }
 
@@ -339,24 +323,30 @@ void main()
         }
 
         int shader_debug = int(ShaderParams.x + 0.5);
-        if (shader_debug == 2)
+        if (shader_debug >= 2)
         {
-                out_fragcolor = vec4(fract(uv), 0.0, 1.0);
-#if !OIT
-                out_velocity = vec4(0.0);
-#endif
-                return;
-        }
-        if (shader_debug == 3)
-        {
-                out_fragcolor = clamp(in_stage_color, 0.0, 1.0);
+                vec3 debug_color = vec3(0.0);
+                if ((in_flags & CF_MAT_BLOOM) != 0u)
+                        debug_color += vec3(1.0, 0.0, 1.0);
+                if ((in_flags & CF_MAT_EMISSIVE) != 0u)
+                        debug_color += vec3(1.0, 1.0, 0.0);
+                if ((in_flags & CF_MAT_GODRAY) != 0u)
+                        debug_color += vec3(0.0, 1.0, 1.0);
+                if ((in_flags & CF_MAT_TRANS) != 0u)
+                        debug_color += vec3(0.0, 1.0, 0.0);
+                if ((in_flags & CF_MAT_SKY) != 0u)
+                        debug_color += vec3(0.0, 0.0, 1.0);
+                if (all(lessThanEqual(debug_color, vec3(0.0))))
+                        debug_color = result.rgb;
+                out_fragcolor = vec4(clamp(debug_color, 0.0, 1.0), 1.0);
 #if !OIT
                 out_velocity = vec4(0.0);
 #endif
                 return;
         }
 
-        bool clustered_light_debug = ClusteredLightParams.y > 0.5;
+        bool additive_dlights = DLightParams.x > 0.5;
+        bool dlight_debug = DLightParams.y > 0.5;
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
@@ -365,27 +355,6 @@ void main()
 #if DITHER
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
 #endif
-
-	// Surface normal/view computation
-	vec3 surface_normal = in_normal;
-	float surface_normal_len = length(surface_normal);
-	if (surface_normal_len > 0.0)
-		surface_normal /= surface_normal_len;
-	else
-	{
-		vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
-		float geom_len = length(surface_normal_vec);
-		surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
-	}
-	if (!gl_FrontFacing)
-		surface_normal = -surface_normal;
-	vec3 to_eye = EyePos - in_pos;
-	float view_length = length(to_eye);
-	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
-
-	float shadow_term = 1.0;
-	bool shadow_enabled = false;
-	vec3 env_fill = vec3(0.0);
 
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
@@ -419,7 +388,6 @@ void main()
 		}
 
 		vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
-		vec3 ambient_lightgrid = EvaluateDirectionalAmbient(lightgrid, surface_normal);
 
 		if (LightgridParams.y > 0.5)
 		{
@@ -430,7 +398,7 @@ void main()
 			return;
 		}
 
-		if (clustered_light_debug)
+		if (dlight_debug)
 		{
 			static_light = vec3(0.0);
 			fullbright = vec3(0.0);
@@ -455,15 +423,33 @@ void main()
 			return;
 		}
 
+		// Surface normal computation
+		vec3 surface_normal = in_normal;
+		float surface_normal_len = length(surface_normal);
+
+		if (surface_normal_len > 0.0)
+		{
+			surface_normal /= surface_normal_len;
+		}
+		else
+		{
+			vec3 surface_normal_vec = cross(dFdx(in_pos), dFdy(in_pos));
+			float geom_len = length(surface_normal_vec);
+			surface_normal = (geom_len > 0.0) ? (surface_normal_vec / geom_len) : vec3(0.0, 0.0, 1.0);
+		}
+
+		if (!gl_FrontFacing)
+			surface_normal = -surface_normal;
+
 		float shadow_range = 1.0;
-		shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
-		shadow_enabled = ShadowDebug.x > 0.5;
+		float shadow_term = ShadowVisibility(in_pos, surface_normal, shadow_range);
+		bool shadow_enabled = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
 		if (ShadowDebug.x > 0.5 && ShadowDebug.y > 1.5)
 		{
-			int shadow_debug_mode = int(ShadowDebug.y + 0.5);
-			out_fragcolor = vec4(ShadowDebugVisualize(shadow_debug_mode, shadow_term), 1.0);
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			out_fragcolor = vec4(vec3(debug_value), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -475,7 +461,7 @@ void main()
 
 		if (lightgrid_shadow)
 		{
-			vec3 ambient = clamped_static * ambient_lightgrid;
+			vec3 ambient = clamped_static * lightgrid;
 			vec3 direct = clamped_static - ambient;
 			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
 			total_light = ambient + direct * shadow_scale;
@@ -485,133 +471,90 @@ void main()
 			total_light = clamped_static;
 			if (shadow_enabled)
 				total_light *= shadow_term;
+			total_light *= lightgrid;
 		}
-
-		float static_luma = EnvLightLuma(total_light);
-		float ao_hint = clamp(EnvLightLuma(in_lightgrid), 0.0, 1.0);
-		float visibility_hint = ComputeEnvVisibilityHint(shadow_term, shadow_enabled);
-		float indoor_factor = DeriveIndoorFactor(static_luma, ao_hint, visibility_hint);
-		float env_fill_strength = clamp(LightgridParams.w, 0.0, 1.0);
-		env_fill = EvaluateWorldEnvFill(total_light, ambient_lightgrid, indoor_factor, env_fill_strength);
-		total_light = clamp(total_light + env_fill, 0.0, 1.0);
 	
+	// View direction
+	vec3 to_eye = EyePos - in_pos;
+	float view_length = length(to_eye);
+	vec3 view_dir = (view_length > 0.0) ? (to_eye / view_length) : vec3(0.0, 0.0, 1.0);
+
 	const float SPECULAR_POWER = 16.0;
-	float specular_quality = clamp(ClusteredLightParams.w / 3.0, 0.25, 1.0);
-	float specular_scale = 0.4 * specular_quality;
+	const float SPECULAR_SCALE = 0.4;
 
-	int tileX = 0;
-	int tileY = 0;
-	int zSlice = 0;
-	int clusterIdx = 0;
-	uint clusterCount = 0u;
-	bool clusterActive = ClusterLightingEnabled();
-
-	if (clusterActive)
-	{
-		tileX = clamp(int(gl_FragCoord.x) / ClusterTileSize, 0, ClusterGridXY.x - 1);
-		tileY = clamp(int(gl_FragCoord.y) / ClusterTileSize, 0, ClusterGridXY.y - 1);
-		zSlice = ClusterComputeZSlice(in_depth);
-		clusterIdx = (zSlice * ClusterGridXY.y + tileY) * ClusterGridXY.x + tileX;
-		clusterCount = headers[clusterIdx].count;
-	}
-
-	if (ClusterDebugMode == 1)
-	{
-		OUT_COLOR = (NumLights > 0u) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	else if (ClusterDebugMode == 2)
-	{
-		float t = clamp(float(ClusterTileSize) / 32.0, 0.0, 1.0);
-		OUT_COLOR = clusterActive ? vec4(0.0, t, 1.0 - t, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	else if (ClusterDebugMode == 3)
-	{
-		float g = clamp(float(clusterCount) / 32.0, 0.0, 1.0);
-		OUT_COLOR = clusterActive ? vec4(g, g, g, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	else if (ClusterDebugMode == 4)
-	{
-		float fx = (ClusterGridXY.x > 1) ? float(tileX) / float(ClusterGridXY.x - 1) : 0.0;
-		float fy = (ClusterGridXY.y > 1) ? float(tileY) / float(ClusterGridXY.y - 1) : 0.0;
-		float fz = (ClusterZSlices > 1) ? float(zSlice) / float(ClusterZSlices - 1) : 0.0;
-		OUT_COLOR = clusterActive ? vec4(fx, fy, fz, 1.0) : vec4(1.0, 0.0, 1.0, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-
-	// Dynamic lights (clustered lighting)
-	if (clusterActive)
-	{
-		ClusterHeader header;
-		uint clusterCount;
-		int resolvedClusterIdx;
-		if (!ClusterResolve(gl_FragCoord.xy, in_depth, resolvedClusterIdx, header, clusterCount))
-			clusterCount = 0u;
-		if (clusterCount > 0u)
+        // Dynamic lights (clustered lighting)
+        if (!additive_dlights && NumLights > 0u)
+        {
+                ivec3 cluster_coord = ivec3(
+                        int(floor(in_coord.x)),
+			int(floor(in_coord.y)),
+			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
+		);
+		
+		uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
+		
+		if ((clusterdata.x | clusterdata.y) != 0u)
 		{
 			vec3 dynamic_light = vec3(0.0);
-		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-		vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-
-		for (uint i = 0u; i < clusterCount; ++i)
-		{
-			uint lightId;
-			PackedLight pl;
-			if (!ClusterFetchLight(header, i, lightId, pl))
-				continue;
-			vec3 lightOrigin = pl.posRadius.xyz;
-			float radius = pl.posRadius.w;
-			vec3 lightColor = pl.colorIntensity.rgb;
-
-			float dist = dot(lightOrigin, plane.xyz) - plane.w;
-			float rad = radius - abs(dist);
-			if (rad <= 0.0)
-				continue;
-
-			vec3 local_pos = lightOrigin - plane.xyz * dist;
-			vec3 light_vec = local_pos - in_pos;
-			float surface_dist = length(light_vec);
-			float attenuation = clamp((rad - surface_dist) / 16.0, 0.0, 1.0);
-			float normalized_dist = surface_dist / max(rad, 1e-4);
-			float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
-			vec3 light_contrib = attenuation * falloff * lightColor * dynamic_light_noise;
-			dynamic_light += light_contrib;
-
-			if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
+			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+			
+			for (uint i = 0u, ofs = 0u; i < 2u; i++, ofs += 32u)
 			{
-				vec3 light_dir = light_vec / surface_dist;
-				float ndotl = max(dot(surface_normal, light_dir), 0.0);
-				if (ndotl > 0.0)
+				uint mask = clusterdata[i];
+				while (mask != 0u)
 				{
-					vec3 half_vec = normalize(light_dir + view_dir);
-					float ndoth = max(dot(surface_normal, half_vec), 0.0);
-					float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
-					float energy = min(1.0, max(light_contrib.r, max(light_contrib.g, light_contrib.b)));
-					specular_light += light_contrib * (spec * specular_scale * energy);
+					int j = findLSB(mask);
+					mask ^= 1u << j;
+					Light l = Lights[ofs + uint(j)];
+					
+					// Light culling
+					float rad = l.radius;
+					float dist = dot(l.origin, plane.xyz) - plane.w;
+					rad -= abs(dist);
+					float minlight = l.minlight;
+					
+					if (rad <= 0.0 || rad < minlight)
+						continue;
+					
+					vec3 local_pos = l.origin - plane.xyz * dist;
+					minlight = rad - minlight;
+					vec3 light_vec = local_pos - in_pos;
+					float surface_dist = length(light_vec);
+					float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
+					float normalized_dist = surface_dist / rad;
+					float falloff = pow(1.0 - clamp(normalized_dist, 0.0, 1.0), 1.5);
+					vec3 light_contrib = attenuation * falloff * l.color * dynamic_light_noise;
+					dynamic_light += light_contrib;
+					
+					// Specular calculation
+					if (attenuation > 0.0 && falloff > 0.0 && surface_dist > 0.0)
+					{
+						vec3 light_dir = light_vec / surface_dist;
+						float ndotl = max(dot(surface_normal, light_dir), 0.0);
+						
+						if (ndotl > 0.0)
+						{
+							vec3 half_vec = light_dir + view_dir;
+							float half_len = length(half_vec);
+							
+							if (half_len > 0.0)
+							{
+								half_vec /= half_len;
+								float ndoth = max(dot(surface_normal, half_vec), 0.0);
+								float spec = pow(ndoth, SPECULAR_POWER) * ndotl;
+								specular_light += light_contrib * spec * SPECULAR_SCALE;
+							}
+						}
+					}
 				}
 			}
-		}
-
 			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
 		}
 	}
 
 	// Sun light
-        vec3 sun_light = clustered_light_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
+        vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
 	total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
 		// Apply lighting
@@ -630,38 +573,9 @@ void main()
 #endif
 
 	result.rgb += fullbright + emissive;
-
-	bool env_hint_tcgen = (in_tcgen == TCGEN_ENVIRONMENT);
-	bool env_hint_shader = ((in_flags & CF_MAT_HAS_SHADER) != 0u);
-	float env_spec_mask = (env_hint_tcgen || env_hint_shader) ? 1.0 : 0.0;
-	float env_gloss = env_hint_tcgen ? 0.90 : (env_hint_shader ? 0.55 : 0.0);
-	float static_luma = EnvLightLuma(clamp(total_lightmap / max(Overbright, 1e-4), 0.0, 1.0));
-	float ao_hint = clamp(EnvLightLuma(in_lightgrid), 0.0, 1.0);
-	float visibility_hint = ComputeEnvVisibilityHint(shadow_term, shadow_enabled);
-	float indoor_factor = DeriveIndoorFactor(static_luma, ao_hint, visibility_hint);
-	float env_intensity = env_hint_tcgen ? 0.12 : 0.07;
-	vec3 reflection_spec = EvaluateReflectionProbe(
-		ReflectionTex,
-		LightingParams.x,
-		in_pos,
-		surface_normal,
-		view_dir,
-		env_gloss * env_spec_mask,
-		indoor_factor,
-		env_intensity);
-	specular_light += reflection_spec;
-	if (int(LightingParams.w + 0.5) == 6)
-	{
-		out_fragcolor = vec4(clamp(specular_light, 0.0, 1.0), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
 	
 	// Add specular
-	vec3 spec_budget = max(vec3(0.0), vec3(Overbright) - total_lightmap);
-	vec3 spec_clamped = min(max(specular_light, vec3(0.0)), spec_budget);
+	vec3 spec_clamped = clamp(specular_light, vec3(0.0), vec3(Overbright));
 	result.rgb += spec_clamped * clamp(result.a, 0.0, 1.0);
 	
 	// Tone mapping
@@ -671,57 +585,6 @@ void main()
 	result.rgb *= in_stage_color.rgb;
 	result.a = in_alpha * in_stage_color.a;
 	result = clamp(result, 0.0, 1.0);
-	int lighting_debug = int(LightingParams.w + 0.5);
-	if (lighting_debug == 2)
-	{
-		out_fragcolor = vec4(vec3(clamp(length(reflection_spec) * 6.0, 0.0, 1.0)), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (lighting_debug == 7)
-	{
-		out_fragcolor = vec4(clamp(reflection_spec, 0.0, 1.0), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (lighting_debug == 4)
-	{
-		out_fragcolor = vec4(normalize(surface_normal) * 0.5 + 0.5, 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (lighting_debug == 5)
-	{
-		out_fragcolor = vec4(clamp(total_lightmap, 0.0, 1.0), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (lighting_debug == 8)
-	{
-		out_fragcolor = vec4(clamp(env_fill, 0.0, 1.0), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
-	if (shader_debug == 4)
-	{
-		float fog_factor = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));
-		fog_factor = clamp(fog_factor, 0.0, 1.0);
-		out_fragcolor = vec4(vec3(fog_factor), 1.0);
-#if !OIT
-		out_velocity = vec4(0.0);
-#endif
-		return;
-	}
 	result.rgb = ApplyFog(result.rgb, in_pos - EyePos);
 
 	out_fragcolor = result;
@@ -729,9 +592,9 @@ void main()
 #if !OIT
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	vec2 velocityOut = (result.a >= 0.999) ? (velocity * result.a) : vec2(0.0);
-	float materialMask = 0.0;
+	float materialMask = ((in_flags & CF_MAT_BLOOM) != 0u) ? 1.0 : 0.0;
 	if ((in_flags & CF_MAT_EMISSIVE) != 0u)
-		materialMask = 4.0;
+		materialMask += 4.0;
 	if ((in_flags & CF_MAT_TRANS) != 0u)
 		materialMask += 2.0;
 	out_velocity = vec4(velocityOut, 0.0, materialMask);

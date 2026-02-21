@@ -227,6 +227,7 @@ typedef struct texinfo_s
 #define TEX_MISSING		2		// johnfitz -- this texinfo does not have a texture
 #define     TEX_VERTEXNORMALS       0x800   // bspx smooth shading
 #define	TEX_LIGHT		0x1000	// explicitly marks a light-emitting texture
+#define	TEX_GODRAY_EMIT	TEX_LIGHT
 
 // note that edge 0 is never used, because negative edge nums are used for
 // counterclockwise use of the edge in a face

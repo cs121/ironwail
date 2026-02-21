@@ -51,11 +51,6 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "sky", MAT_SURFPARM_SKY, MAT_RENDER_SKY, 0u },
 	{ "fog", MAT_SURFPARM_FOG, MAT_RENDER_FOG, 0u },
 	{ "nodraw", MAT_SURFPARM_NODRAW, MAT_RENDER_NODRAW, 0u },
-	{ "water", MAT_SURFPARM_WATER, MAT_RENDER_TRANS, 0u },
-	{ "slime", MAT_SURFPARM_SLIME, MAT_RENDER_TRANS, 0u },
-	{ "lava", MAT_SURFPARM_LAVA, MAT_RENDER_TRANS, 0u },
-	{ "noimpact", MAT_SURFPARM_NOIMPACT, 0u, 0u },
-	{ "nomarks", MAT_SURFPARM_NOMARKS, 0u, 0u },
 	{ "stone", MAT_SURFPARM_STONE, 0u, 0u }
 };
 
@@ -315,6 +310,28 @@ static qboolean ParseOptionalBool (const char **data, qboolean *out, mat_shader_
 	return true;
 }
 
+static qboolean ParseIdent (const char **data, const char **out, mat_shader_parse_state_t *state)
+{
+	const char *cursor;
+
+	if (!data || !*data)
+		return false;
+
+	cursor = Mat_Shader_ParseToken (*data, state);
+	if (!cursor)
+		return false;
+
+	*data = cursor;
+	if (!com_token[0])
+		return false;
+
+	if (state && state->token_limit_hit)
+		return false;
+
+	*out = com_token;
+	return true;
+}
+
 static qboolean ParseIdentExpected (const char **data, const char **out, mat_shader_parse_state_t *state, const char *expected)
 {
 	const char *cursor;
@@ -390,17 +407,6 @@ static qboolean ParseVec2 (const char **data, vec2_t out, mat_shader_parse_state
 	if (!ParseFloat (data, &out[0], state))
 		return false;
 	if (!ParseFloat (data, &out[1], state))
-		return false;
-	return true;
-}
-
-static qboolean ParseVec3 (const char **data, vec3_t out, mat_shader_parse_state_t *state)
-{
-	if (!ParseFloat (data, &out[0], state))
-		return false;
-	if (!ParseFloat (data, &out[1], state))
-		return false;
-	if (!ParseFloat (data, &out[2], state))
 		return false;
 	return true;
 }
@@ -536,11 +542,6 @@ static qboolean Mat_Shader_ParseTcGen (const char *token, mat_tcgen_t *out)
 	if (!q_strcasecmp (token, "lightmap"))
 	{
 		*out = MAT_TCGEN_LIGHTMAP;
-		return true;
-	}
-	if (!q_strcasecmp (token, "vector"))
-	{
-		*out = MAT_TCGEN_VECTOR;
 		return true;
 	}
 	return false;
@@ -911,10 +912,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 	stage.blend_src = GL_ONE;
 	stage.blend_dst = GL_ZERO;
 	stage.tcgen = MAT_TCGEN_BASE;
-	stage.alpha_func = MAT_ALPHAFUNC_NONE;
-	VectorClear (stage.tcgen_vec0);
-	VectorClear (stage.tcgen_vec1);
-	stage.tcgen_is_vector = false;
 	stage.anim_map_fps = 0.f;
 	stage.anim_map_frame = 0;
 	stage.texmatrix_time_bucket = -1;
@@ -1142,10 +1139,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.alphagen = MAT_ALPHAGEN_CONST;
 				stage.const_alpha = alpha;
 			}
-			else if (!q_strcasecmp (value, "lightingSpecular"))
-			{
-				stage.alphagen = MAT_ALPHAGEN_LIGHTINGSPECULAR;
-			}
 			else if (!q_strcasecmp (value, "wave"))
 			{
 				mat_wave_type_t wave_type;
@@ -1327,29 +1320,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				state ? state->token_line : 0u);
 			continue;
 		}
-		if (!q_strcasecmp (com_token, "alphaFunc"))
-		{
-			Mat_Shader_MarkKeywordSeen ("alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE);
-			if (!ParseIdentExpected (&data, &value, state, "alphaFunc mode"))
-			{
-				valid = false;
-				data = SkipUnknownBlockOrLine (data, true, state);
-				break;
-			}
-			if (!q_strcasecmp (value, "GT0"))
-				stage.alpha_func = MAT_ALPHAFUNC_GT0;
-			else if (!q_strcasecmp (value, "LT128"))
-				stage.alpha_func = MAT_ALPHAFUNC_LT128;
-			else if (!q_strcasecmp (value, "GE128"))
-				stage.alpha_func = MAT_ALPHAFUNC_GE128;
-			else if (!q_strcasecmp (value, "none"))
-				stage.alpha_func = MAT_ALPHAFUNC_NONE;
-			else
-				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
-					state ? state->source_file : material->source_file,
-					state ? state->token_line : 0u);
-			continue;
-		}
 		if (!q_strcasecmp (com_token, "tcGen"))
 		{
 			Mat_Shader_MarkKeywordSeen ("tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1360,31 +1330,9 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				break;
 			}
 			if (!Mat_Shader_ParseTcGen (value, &stage.tcgen))
-			{
 				Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 					state ? state->source_file : material->source_file,
 					state ? state->token_line : 0u);
-				continue;
-			}
-			if (stage.tcgen == MAT_TCGEN_VECTOR)
-			{
-				if (!ExpectToken (&data, "(", state)
-					|| !ParseVec3 (&data, stage.tcgen_vec0, state)
-					|| !ExpectToken (&data, ")", state)
-					|| !ExpectToken (&data, "(", state)
-					|| !ParseVec3 (&data, stage.tcgen_vec1, state)
-					|| !ExpectToken (&data, ")", state))
-				{
-					valid = false;
-					data = SkipUnknownBlockOrLine (data, true, state);
-					break;
-				}
-				stage.tcgen_is_vector = true;
-			}
-			else
-			{
-				stage.tcgen_is_vector = false;
-			}
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "tcMod"))
@@ -1466,25 +1414,6 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
 				continue;
 			}
-			if (!q_strcasecmp (value, "transform"))
-			{
-				float transform[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
-				const float transform_defaults[6] = { 1.f, 0.f, 0.f, 1.f, 0.f, 0.f };
-				if (!ParseFloat (&data, &transform[0], state)
-					|| !ParseFloat (&data, &transform[1], state)
-					|| !ParseFloat (&data, &transform[2], state)
-					|| !ParseFloat (&data, &transform[3], state)
-					|| !ParseFloat (&data, &transform[4], state)
-					|| !ParseFloat (&data, &transform[5], state))
-				{
-					valid = false;
-					data = SkipUnknownBlockOrLine (data, true, state);
-					break;
-				}
-				Mat_Shader_ValidateTcModArgs (state, "tcMod transform", transform, transform_defaults, 6);
-				Mat_Shader_PushTcMod (&stage, MAT_TCMOD_TRANSFORM, transform, 6);
-				continue;
-			}
 			Mat_Shader_ReportUnknownToken (value, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 				state ? state->source_file : material->source_file,
 				state ? state->token_line : 0u);
@@ -1558,7 +1487,40 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 				stage.outputs &= ~MAT_STAGE_OUT_EMISSIVE;
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "bloom"))
+		{
+			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			qboolean parsed = false;
+			qboolean value_bool = true;
 
+			parsed = ParseOptionalBool (&data, &value_bool, state);
+			if (!parsed)
+				value_bool = true;
+
+			stage.output_overrides |= MAT_STAGE_OUT_BLOOM;
+			if (value_bool)
+				stage.outputs |= MAT_STAGE_OUT_BLOOM;
+			else
+				stage.outputs &= ~MAT_STAGE_OUT_BLOOM;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			qboolean parsed = false;
+			qboolean value_bool = true;
+
+			parsed = ParseOptionalBool (&data, &value_bool, state);
+			if (!parsed)
+				value_bool = true;
+
+			stage.output_overrides |= MAT_STAGE_OUT_GODRAY_SOURCE;
+			if (value_bool)
+				stage.outputs |= MAT_STAGE_OUT_GODRAY_SOURCE;
+			else
+				stage.outputs &= ~MAT_STAGE_OUT_GODRAY_SOURCE;
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "emissiveScale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissiveScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
@@ -1576,7 +1538,40 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 			stage.emissive_scale_set = true;
 			continue;
 		}
+		if (!q_strcasecmp (com_token, "bloomScale"))
+		{
+			Mat_Shader_MarkKeywordSeen ("bloomScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			float validated_scale = 1.f;
+			float scale;
 
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			Mat_Shader_ValidateFiniteFloat (state, "bloomScale", scale, 1.f, &validated_scale);
+			stage.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+			stage.bloom_scale_set = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godrayScale"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godrayScale", MAT_SHADER_KEYWORD_SCOPE_STAGE);
+			float validated_scale = 1.f;
+			float scale;
+
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			Mat_Shader_ValidateFiniteFloat (state, "godrayScale", scale, 1.f, &validated_scale);
+			stage.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+			stage.godray_scale_set = true;
+			continue;
+		}
 
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 			state ? state->source_file : material->source_file,
@@ -1630,6 +1625,8 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	material.name = Mat_Shader_DupString (canonical);
 	material.source_file = Mat_Shader_DupString (source_file ? source_file : "");
 	material.emissive_scale = 1.f;
+	material.bloom_scale = 1.f;
+	material.godray_scale = 1.f;
 	material.cull_mode = MAT_CULL_BACK;
 	material.sort_key = MAT_SORT_OPAQUE;
 	material.polygon_offset = false;
@@ -1687,105 +1684,6 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 				break;
 			}
 			Mat_Shader_ApplySurfaceParm (&material, value, state);
-			continue;
-		}
-		if (!q_strcasecmp (com_token, "skyparms") || !q_strcasecmp (com_token, "skyParms"))
-		{
-			const char *farbox;
-			const char *cloudheight_token;
-			const char *nearbox;
-			float cloudheight = 0.f;
-
-			Mat_Shader_MarkKeywordSeen ("skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			if (!ParseIdentExpected (&data, &farbox, state, "skyParms farbox")
-				|| !ParseIdentExpected (&data, &cloudheight_token, state, "skyParms cloudheight")
-				|| !ParseIdentExpected (&data, &nearbox, state, "skyParms nearbox"))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-
-			if (Mat_Shader_IsNumericToken (cloudheight_token))
-				cloudheight = Q_atof (cloudheight_token);
-			else if (q_strcasecmp (cloudheight_token, "-"))
-			{
-				Mat_Shader_WarnExpectedToken (state, "skyParms cloudheight float or '-'", cloudheight_token);
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-
-			if (material.skybox_far)
-				Z_Free (material.skybox_far);
-			if (material.skybox_near)
-				Z_Free (material.skybox_near);
-
-			material.skybox_far = (q_strcasecmp (farbox, "-") == 0) ? NULL : Mat_Shader_DupString (farbox);
-			material.skybox_near = (q_strcasecmp (nearbox, "-") == 0) ? NULL : Mat_Shader_DupString (nearbox);
-			material.sky_cloudheight = q_max (0.f, cloudheight);
-			material.has_skyparms = true;
-			material.render_flags |= MAT_RENDER_SKY;
-			continue;
-		}
-		if (!q_strcasecmp (com_token, "fogparms") || !q_strcasecmp (com_token, "fogParms"))
-		{
-			float r,g,b,dist;
-			Mat_Shader_MarkKeywordSeen ("fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			if (!ExpectToken (&data, "(", state) || !ParseFloat (&data, &r, state) || !ParseFloat (&data, &g, state) || !ParseFloat (&data, &b, state) || !ExpectToken (&data, ")", state) || !ParseFloat (&data, &dist, state))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			material.has_fogparms = true;
-			material.fog_color[0] = CLAMP(0.f, r, 1.f);
-			material.fog_color[1] = CLAMP(0.f, g, 1.f);
-			material.fog_color[2] = CLAMP(0.f, b, 1.f);
-			material.fog_distance = q_max(0.f, dist);
-			material.render_flags |= MAT_RENDER_FOG;
-			continue;
-		}
-		if (!q_strcasecmp (com_token, "deformVertexes"))
-		{
-			const char *deform_type;
-			mat_deform_t deform;
-			memset(&deform, 0, sizeof(deform));
-			Mat_Shader_MarkKeywordSeen ("deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			if (!ParseIdentExpected (&data, &deform_type, state, "deformVertexes mode"))
-			{
-				data = ResyncMaterialBlock (data, state);
-				break;
-			}
-			if (!q_strcasecmp(deform_type, "wave"))
-			{
-				const char *wt; float spread, base, amp, phase, freq;
-				deform.type = MAT_DEFORM_WAVE;
-				if (!ParseFloat(&data, &spread, state) || !ParseIdentExpected(&data, &wt, state, "deform wave type") || !ParseFloat(&data,&base,state) || !ParseFloat(&data,&amp,state) || !ParseFloat(&data,&phase,state) || !ParseFloat(&data,&freq,state)) { data = ResyncMaterialBlock(data,state); break; }
-				deform.args[0] = spread;
-				if (!ParseWaveType (wt, &deform.wave.type)) deform.wave.type = MAT_WAVE_SIN;
-				deform.wave.base=base; deform.wave.amp=amp; deform.wave.phase=phase; deform.wave.freq=freq;
-			}
-			else if (!q_strcasecmp(deform_type, "move"))
-			{
-				const char *wt; float base, amp, phase, freq;
-				deform.type = MAT_DEFORM_MOVE;
-				if (!ParseFloat(&data, &deform.move[0], state) || !ParseFloat(&data, &deform.move[1], state) || !ParseFloat(&data, &deform.move[2], state) || !ParseIdentExpected(&data, &wt, state, "deform move wave") || !ParseFloat(&data,&base,state) || !ParseFloat(&data,&amp,state) || !ParseFloat(&data,&phase,state) || !ParseFloat(&data,&freq,state)) { data = ResyncMaterialBlock(data,state); break; }
-				if (!ParseWaveType (wt, &deform.wave.type)) deform.wave.type = MAT_WAVE_SIN;
-				deform.wave.base=base; deform.wave.amp=amp; deform.wave.phase=phase; deform.wave.freq=freq;
-			}
-			else if (!q_strcasecmp(deform_type, "bulge"))
-			{
-				deform.type = MAT_DEFORM_BULGE;
-				if (!ParseFloat(&data, &deform.args[0], state) || !ParseFloat(&data, &deform.args[1], state) || !ParseFloat(&data, &deform.args[2], state)) { data = ResyncMaterialBlock(data,state); break; }
-			}
-			else if (!q_strcasecmp(deform_type, "autosprite"))
-			{
-				deform.type = MAT_DEFORM_AUTOSPRITE;
-			}
-			else
-			{
-				Mat_Shader_ReportUnknownToken (deform_type, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name, state ? state->source_file : material.source_file, state ? state->token_line : 0u);
-				continue;
-			}
-			VEC_PUSH(material.deforms, deform);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "cull"))
@@ -1903,7 +1801,26 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			}
 			continue;
 		}
-
+		if (!q_strcasecmp (com_token, "bloom"))
+		{
+			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			if (!ParseRequiredBool (&data, &material.bloom_enable, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			if (!ParseRequiredBool (&data, &material.godray_enable, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			continue;
+		}
 		if (!q_strcasecmp (com_token, "emissive_scale"))
 		{
 			Mat_Shader_MarkKeywordSeen ("emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
@@ -1917,7 +1834,32 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			material.emissive_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
 			continue;
 		}
-
+		if (!q_strcasecmp (com_token, "bloom_scale"))
+		{
+			Mat_Shader_MarkKeywordSeen ("bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float validated_scale = 1.f;
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			Mat_Shader_ValidateFiniteFloat (state, "bloom_scale", scale, 1.f, &validated_scale);
+			material.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "godray_scale"))
+		{
+			Mat_Shader_MarkKeywordSeen ("godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			float validated_scale = 1.f;
+			if (!ParseFloat (&data, &scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+			Mat_Shader_ValidateFiniteFloat (state, "godray_scale", scale, 1.f, &validated_scale);
+			material.godray_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+			continue;
+		}
 		Mat_Shader_ReportUnknownToken (com_token, MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, material.name,
 			state ? state->source_file : material.source_file,
 			state ? state->token_line : 0u);
@@ -1930,6 +1872,8 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 	{
 		size_t stage_count = VEC_SIZE (material.stages);
 		qboolean has_emissive = false;
+		qboolean has_bloom = false;
+		qboolean has_godray = false;
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
@@ -1938,15 +1882,29 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 			stage->outputs |= MAT_STAGE_OUT_COLOR;
 			if ((stage->output_overrides & MAT_STAGE_OUT_EMISSIVE) == 0u && material.emissive_enable)
 				stage->outputs |= MAT_STAGE_OUT_EMISSIVE;
+			if ((stage->output_overrides & MAT_STAGE_OUT_BLOOM) == 0u && material.bloom_enable)
+				stage->outputs |= MAT_STAGE_OUT_BLOOM;
+			if ((stage->output_overrides & MAT_STAGE_OUT_GODRAY_SOURCE) == 0u && material.godray_enable)
+				stage->outputs |= MAT_STAGE_OUT_GODRAY_SOURCE;
 
 			if (!stage->emissive_scale_set)
 				stage->emissive_scale = material.emissive_scale;
+			if (!stage->bloom_scale_set)
+				stage->bloom_scale = material.bloom_scale;
+			if (!stage->godray_scale_set)
+				stage->godray_scale = material.godray_scale;
 
 			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 				has_emissive = true;
+			if (stage->outputs & MAT_STAGE_OUT_BLOOM)
+				has_bloom = true;
+			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
+				has_godray = true;
 		}
 
 		material.emissive_enable = has_emissive;
+		material.bloom_enable = has_bloom;
+		material.godray_enable = has_godray;
 		material.stage0 = material.stages[0];
 	}
 
@@ -1977,18 +1935,6 @@ int Mat_Shader_ParseFile (const char *path, const char *data, const char *source
 
 	while ((cursor = Mat_Shader_ParseToken (cursor, &file_state)) != NULL)
 	{
-		if (!q_strcasecmp (com_token, "decal"))
-		{
-			const char *decl_name;
-
-			if (!ParseIdentExpected (&cursor, &decl_name, NULL, "decal name"))
-				continue;
-			if (!ExpectToken (&cursor, "{", NULL))
-				continue;
-			cursor = SkipUnknownBlockOrLine (cursor, true, &file_state);
-			continue;
-		}
-
 		if (!com_token[0])
 			continue;
 		if (!strcmp (com_token, "{"))
@@ -2085,6 +2031,8 @@ void Mat_Shader_DebugFuzzParse (void)
 		"fuzz_nonfinite\n"
 		"{\n"
 		" emissive_scale nan\n"
+		" bloom_scale inf\n"
+		" godray_scale -inf\n"
 		" { map $whiteimage }\n"
 		"}\n";
 	const char *fuzz_duplicate =

@@ -1,0 +1,3072 @@
+/*
+Copyright (C) 1996-2001 Id Software, Inc.
+Copyright (C) 2002-2009 John Fitzgibbons and others
+Copyright (C) 2007-2008 Kristian Duske
+Copyright (C) 2010-2014 QuakeSpasm developers
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+*/
+
+//gl_texmgr.c -- fitzquake's texture manager. manages opengl texture images
+
+#include "quakedef.h"
+#include "glquake.h"
+#include "bc7enc.h"
+#include "gl_ktx2.h"
+#include <ctype.h>
+
+#ifndef GL_COMPRESSED_RED_GREEN_RGTC2
+#define GL_COMPRESSED_RED_GREEN_RGTC2 0x8DBD
+#endif
+
+extern cvar_t r_lightmap_mipmaps;
+extern cvar_t r_lightmap16f;
+extern cvar_t r_lightmap_linear;
+extern cvar_t r_lightmap_colorspace;
+extern cvar_t r_srgb_textures;
+extern cvar_t r_color_contrast;
+
+typedef struct {
+	GLenum		id;
+	int			ratio;
+} glformat_t;
+
+static const struct {
+	glformat_t	solid, alpha;
+} glformats[2] = {
+	{{GL_RGB8, 1},							{GL_RGBA8, 1}},
+	{{GL_COMPRESSED_RGBA_BPTC_UNORM, 4},	{GL_COMPRESSED_RGBA_BPTC_UNORM, 4}},
+};
+
+cvar_t			r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
+cvar_t			r_softemu_metric = {"r_softemu_metric", "-1", CVAR_ARCHIVE};
+cvar_t			r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_ARCHIVE};
+cvar_t			r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
+cvar_t			r_softemu_dither_screen = {"r_softemu_dither_screen", "1.0", CVAR_ARCHIVE};
+cvar_t			r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
+cvar_t			r_bc7_compress = {"r_bc7_compress", "0", CVAR_ARCHIVE};
+static cvar_t		gl_legacy_palettes = {"gl_legacy_palettes", "0", CVAR_ARCHIVE};
+
+static cvar_t	gl_max_size = {"gl_max_size", "0", CVAR_NONE};
+static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
+cvar_t			gl_lodbias = {"gl_lodbias", "auto", CVAR_ARCHIVE };
+cvar_t			gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
+cvar_t			gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
+cvar_t			gl_compress_textures = {"gl_compress_textures", "0", CVAR_ARCHIVE};
+GLint			gl_max_texture_size;
+
+static float	lodbias;
+softemu_t		softemu;
+
+static GLuint lightmap_upload_pbo = 0;
+static GLsizeiptr lightmap_upload_pbo_size = 0;
+static byte *lightmap_upload_ptr = NULL;
+
+#define	MAX_GLTEXTURES	4096
+static int numgltextures;
+static gltexture_t	*active_gltextures, *free_gltextures;
+gltexture_t		*notexture, *nulltexture, *whitetexture, *greytexture, *blacktexture;
+gltexture_t		*lavaemissivetexture;
+
+	unsigned int d_8to24table_opaque[256];			//standard palette with alpha 255 for all colors
+	unsigned int d_8to24table[256];					//standard palette, 255 is transparent
+	unsigned int d_8to24table_fbright[256];			//fullbright palette, 0-223 are black (for additive blending)
+	unsigned int d_8to24table_alphabright[256];		//palette with lighting mask in alpha channel (0=fullbright, 255=lit)
+	unsigned int d_8to24table_fbright_fence[256];	//fullbright palette, for fence textures
+	unsigned int d_8to24table_nobright[256];		//nobright palette, 224-255 are black (for additive blending)
+	unsigned int d_8to24table_nobright_fence[256];	//nobright palette, for fence textures
+	unsigned int d_8to24table_conchars[256];		//conchars palette, 0 and 255 are transparent
+
+uint32_t is_fullbright[256/32];
+
+static void GL_DeleteTexture (gltexture_t *texture);
+
+/*
+================================================================================
+
+	COMMANDS
+
+================================================================================
+*/
+
+const glmode_t glmodes[NUM_GLMODES] =
+{
+	{GL_NEAREST, GL_NEAREST,					"GL_NEAREST",					"Classic"},
+	{GL_NEAREST, GL_NEAREST_MIPMAP_NEAREST,		"GL_NEAREST_MIPMAP_NEAREST",	"Classic"},
+	{GL_NEAREST, GL_NEAREST_MIPMAP_LINEAR,		"GL_NEAREST_MIPMAP_LINEAR",		"Classic"},
+	{GL_LINEAR,  GL_LINEAR,						"GL_LINEAR",					"Smooth"},
+	{GL_LINEAR,  GL_LINEAR_MIPMAP_NEAREST,		"GL_LINEAR_MIPMAP_NEAREST",		"Smooth"},
+	{GL_LINEAR,  GL_LINEAR_MIPMAP_LINEAR,		"GL_LINEAR_MIPMAP_LINEAR",		"Smooth"},
+};
+static int glmode_idx = 2; /* nearest with linear mips */
+
+static GLuint gl_samplers[NUM_GLMODES * 2]; // x2: nomip + mip
+
+texfilter_t gl_texfilter;
+
+
+/*
+===============
+TexMgr_DeleteSamplers
+===============
+*/
+static void TexMgr_DeleteSamplers (void)
+{
+	GL_DeleteSamplersFunc (countof(gl_samplers), gl_samplers);
+	memset (gl_samplers, 0, sizeof(gl_samplers));
+}
+
+/*
+===============
+TexMgr_CreateSamplers
+===============
+*/
+static void TexMgr_CreateSamplers (void)
+{
+	int i;
+
+	TexMgr_DeleteSamplers ();
+	GL_GenSamplersFunc (countof(gl_samplers), gl_samplers);
+
+	for (i = 0; i < NUM_GLMODES; i++)
+	{
+		GL_SamplerParameteriFunc (gl_samplers[i*2+0], GL_TEXTURE_MAG_FILTER, glmodes[i].magfilter);
+		GL_SamplerParameteriFunc (gl_samplers[i*2+0], GL_TEXTURE_MIN_FILTER, glmodes[i].magfilter);
+		GL_SamplerParameterfFunc (gl_samplers[i*2+0], GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texfilter.anisotropy);
+		GL_SamplerParameterfFunc (gl_samplers[i*2+0], GL_TEXTURE_LOD_BIAS, gl_texfilter.lodbias);
+
+		GL_SamplerParameteriFunc (gl_samplers[i*2+1], GL_TEXTURE_MAG_FILTER, glmodes[i].magfilter);
+		GL_SamplerParameteriFunc (gl_samplers[i*2+1], GL_TEXTURE_MIN_FILTER, glmodes[i].minfilter);
+		GL_SamplerParameterfFunc (gl_samplers[i*2+1], GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texfilter.anisotropy);
+		GL_SamplerParameterfFunc (gl_samplers[i*2+1], GL_TEXTURE_LOD_BIAS, gl_texfilter.lodbias);
+	}
+}
+
+/*
+===============
+TexMgr_DescribeTextureModes_f -- report available texturemodes
+===============
+*/
+static void TexMgr_DescribeTextureModes_f (void)
+{
+	int i;
+	for (i = 0; i < NUM_GLMODES; i++)
+		Con_SafePrintf ("   %2i: %s\n", i + 1, glmodes[i].name);
+	Con_Printf ("%i modes\n", i);
+}
+
+/*
+===============
+TexMgr_SetFilterModes
+===============
+*/
+static void TexMgr_SetFilterModes (gltexture_t *glt)
+{
+	if (glt->bindless_handle)
+	{
+		int sampleridx;
+		if (glt->flags & (TEXPREF_NEAREST|TEXPREF_LINEAR))
+			return;
+
+		GL_MakeTextureHandleNonResidentARBFunc (glt->bindless_handle);
+		sampleridx = gl_texfilter.mode * 2;
+		if (glt->flags & TEXPREF_MIPMAP)
+			sampleridx++;
+		glt->bindless_handle = GL_GetTextureSamplerHandleARBFunc (glt->texnum, gl_samplers[sampleridx]);
+		GL_MakeTextureHandleResidentARBFunc (glt->bindless_handle);
+
+		return;
+	}
+
+	GL_Bind (GL_TEXTURE0, glt);
+
+	if (glt->flags & TEXPREF_NEAREST)
+	{
+		glTexParameterf(glt->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf(glt->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	}
+	else if (glt->flags & TEXPREF_LINEAR)
+	{
+		glTexParameterf(glt->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameterf(glt->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	}
+	else if (glt->flags & TEXPREF_MIPMAP)
+	{
+		glTexParameterf(glt->target, GL_TEXTURE_MAG_FILTER, glmodes[gl_texfilter.mode].magfilter);
+		glTexParameterf(glt->target, GL_TEXTURE_MIN_FILTER, glmodes[gl_texfilter.mode].minfilter);
+		glTexParameterf(glt->target, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texfilter.anisotropy);
+		glTexParameterf(glt->target, GL_TEXTURE_LOD_BIAS, gl_texfilter.lodbias);
+	}
+	else
+	{
+		glTexParameterf(glt->target, GL_TEXTURE_MAG_FILTER, glmodes[gl_texfilter.mode].magfilter);
+		glTexParameterf(glt->target, GL_TEXTURE_MIN_FILTER, glmodes[gl_texfilter.mode].magfilter);
+	}
+
+	if (glt->flags & TEXPREF_CLAMP)
+	{
+		glTexParameteri(glt->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(glt->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+}
+
+/*
+===============
+TexMgr_TextureMode_Completion_f -- tab completion for gl_texturemode
+===============
+*/
+static void TexMgr_TextureMode_Completion_f (cvar_t *cvar, const char *partial)
+{
+	int i;
+
+	for (i = 0; i < NUM_GLMODES; i++)
+		Con_AddToTabList (glmodes[i].name, partial, NULL);
+}
+
+/*
+===============
+TexMgr_TextureMode_f -- called when gl_texturemode changes
+===============
+*/
+static void TexMgr_TextureMode_f (cvar_t *var)
+{
+	int i;
+
+	for (i = 0; i < NUM_GLMODES; i++)
+	{
+		if (!Q_strcmp (glmodes[i].name, gl_texturemode.string))
+		{
+			glmode_idx = i;
+			return;
+		}
+	}
+
+	for (i = 0; i < NUM_GLMODES; i++)
+	{
+		if (!q_strcasecmp (glmodes[i].name, gl_texturemode.string))
+		{
+			Cvar_SetQuick (&gl_texturemode, glmodes[i].name);
+			return;
+		}
+	}
+
+	i = atoi(gl_texturemode.string);
+	if (i >= 1 && i <= NUM_GLMODES)
+	{
+		Cvar_SetQuick (&gl_texturemode, glmodes[i-1].name);
+		return;
+	}
+
+	Con_Printf ("\"%s\" is not a valid texturemode\n", gl_texturemode.string);
+	Cvar_SetQuick (&gl_texturemode, glmodes[glmode_idx].name);
+}
+
+/*
+===============
+TexMgr_Anisotropy_f -- called when gl_texture_anisotropy changes
+===============
+*/
+void TexMgr_Anisotropy_f (cvar_t *var)
+{
+	if (!host_initialized)
+		return;
+
+	if (gl_texture_anisotropy.value < 1)
+	{
+		Cvar_SetQuick (&gl_texture_anisotropy, "1");
+	}
+	else if (gl_texture_anisotropy.value > gl_max_anisotropy)
+	{
+		Cvar_SetValueQuick (&gl_texture_anisotropy, gl_max_anisotropy);
+	}
+}
+
+/*
+===============
+TexMgr_SoftEmu_f -- called when r_softemu changes
+===============
+*/
+static void TexMgr_SoftEmu_f (cvar_t *var)
+{
+	softemu = (int)r_softemu.value;
+	softemu = CLAMP (0, (int)softemu, SOFTEMU_NUMMODES - 1);
+}
+
+/*
+===============
+TexMgr_LodBias_f -- called when gl_lodbias changes
+===============
+*/
+static void TexMgr_LodBias_f (cvar_t *var)
+{
+	extern cvar_t vid_fsaa, vid_fsaamode;
+
+	lodbias = var->value;
+
+	if (!q_strcasecmp (var->string, "auto"))
+		lodbias = Q_log2 (vid_fsaa.value * vid_fsaamode.value) / -2.f;
+}
+
+/*
+===============
+TexMgr_ForceFilterUpdate
+
+Forces an update the next time TexMgr_ApplySettings is called
+===============
+*/
+static void TexMgr_ForceFilterUpdate (void)
+{
+	gl_texfilter.mode = -1;
+	gl_texfilter.anisotropy = -1.f;
+}
+
+/*
+===============
+TexMgr_UsesFilterOverride
+===============
+*/
+qboolean TexMgr_UsesFilterOverride (void)
+{
+	return softemu >= SOFTEMU_COARSE || r_softemu_lightmap_banding.value > 0.f;
+}
+
+/*
+===============
+TexMgr_ApplySettings -- called at the beginning of each frame
+===============
+*/
+void TexMgr_ApplySettings (void)
+{
+	texfilter_t prev = gl_texfilter;
+	gltexture_t	*glt;
+
+	gl_texfilter.mode		= glmode_idx;
+	gl_texfilter.anisotropy	= CLAMP (1.f, gl_texture_anisotropy.value, gl_max_anisotropy);
+	gl_texfilter.lodbias	= lodbias;
+
+	// if softemu is either 2 & 3 or r_softemu_lightmap_banding is > 0 we override the filtering mode, unless it's GL_NEAREST
+	if (gl_texfilter.mode != 0 && TexMgr_UsesFilterOverride ())
+	{
+		const float SOFTEMU_ANISOTROPY = 8.f;
+		gl_texfilter.mode = 2; // nearest with linear mips
+		if (gl_texfilter.anisotropy < SOFTEMU_ANISOTROPY)
+			gl_texfilter.anisotropy = q_min (SOFTEMU_ANISOTROPY, gl_max_anisotropy);
+	}
+
+	if (gl_texfilter.mode		== prev.mode &&
+		gl_texfilter.anisotropy	== prev.anisotropy &&
+		gl_texfilter.lodbias	== prev.lodbias)
+		return;
+
+	if (gl_bindless_able)
+		if (gl_texfilter.anisotropy	!= prev.anisotropy ||
+			gl_texfilter.lodbias	!= prev.lodbias)
+			TexMgr_CreateSamplers ();
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+		TexMgr_SetFilterModes (glt);
+
+	Sbar_Changed (); //sbar graphics need to be redrawn with new filter mode
+}
+
+/*
+===============
+TexMgr_Imagelist_Completion_f -- tab completion for imagelist/imagedump
+===============
+*/
+static void TexMgr_Imagelist_Completion_f (const char *partial)
+{
+	gltexture_t	*glt;
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+		Con_AddToTabList (glt->name, partial, NULL);
+}
+
+/*
+===============
+TexMgr_Imagelist_f -- report loaded textures
+===============
+*/
+static void TexMgr_Imagelist_f (void)
+{
+	double bytes = 0;
+	double texels = 0;
+	int count = 0;
+	const char *filter = NULL;
+	gltexture_t	*glt;
+
+	if (Cmd_Argc () >= 2)
+		filter = Cmd_Argv (1);
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		char buf[MAX_QPATH];
+		char mip = glt->flags & TEXPREF_MIPMAP ? 'm' : ' ';
+		char comp = glt->compression > 1 ? 'c' : ' ';
+		unsigned int layers = glt->flags & TEXPREF_CUBEMAP ? glt->depth * 6 : glt->depth;
+		unsigned int s = glt->width * glt->height * layers;
+
+		if (filter)
+		{
+			if (!q_strcasestr (glt->name, filter))
+				continue;
+			COM_TintSubstring (glt->name, filter, buf, sizeof (buf));
+		}
+		else
+		{
+			q_strlcpy (buf, glt->name, sizeof (buf));
+		}
+
+		if (layers > 1)
+			Con_SafePrintf ("%3i x %4i x %4i %c%c %s\n", layers, glt->width, glt->height, comp, mip, buf);
+		else
+			Con_SafePrintf ("      %4i x %4i %c%c %s\n", glt->width, glt->height, comp, mip, buf);
+
+		if (glt->flags & TEXPREF_MIPMAP)
+			s = (s * 4 + 3) / 3;
+		texels += s;
+		bytes += s * 4 / glt->compression;
+		count++;
+	}
+
+	if (filter)
+		Con_Printf ("%i/%i textures containing '%s': %.1lf mpixels %1.1lf megabytes\n",
+			count, numgltextures, filter, texels * 1e-6, bytes / 0x100000);
+	else
+		Con_Printf ("%i textures %.1lf mpixels %1.1lf megabytes\n",
+			numgltextures, texels * 1e-6, bytes / 0x100000);
+}
+
+/*
+===============
+TexMgr_Imagedump_f -- dump all current textures to TGA files
+===============
+*/
+static void TexMgr_Imagedump_f (void)
+{
+	char tganame[MAX_OSPATH], tempname[MAX_OSPATH], dirname[MAX_OSPATH];
+	const char *reldirname = "imagedump";
+	const char *filter = NULL;
+	int count = 0;
+	gltexture_t	*glt;
+	byte *buffer;
+	char *c;
+
+	if (Cmd_Argc () >= 2)
+		filter = Cmd_Argv (1);
+
+	q_snprintf(dirname, sizeof(dirname), "%s/%s", com_gamedir, reldirname);
+
+	glPixelStorei (GL_PACK_ALIGNMENT, 1);/* for widths that aren't a multiple of 4 */
+
+	//loop through textures
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		int channels = (glt->flags & TEXPREF_HASALPHA) ? 4 : 3;
+		int format   = (glt->flags & TEXPREF_HASALPHA) ? GL_RGBA : GL_RGB;
+
+		if (filter && !q_strcasestr (glt->name, filter))
+			continue;
+
+		q_strlcpy (tempname, glt->name, sizeof(tempname));
+		for (c = tempname; *c; ++c)
+			if (*c == ':' || *c == '/' || *c == '*')
+				*c = '_';
+
+		GL_Bind (GL_TEXTURE0, glt);
+		buffer = (byte *) malloc(glt->width * glt->height * glt->depth * channels);
+		if (!buffer)
+			Sys_Error ("TexMgr_Imagedump_f: out of memory (%dx%dx%d %d bpp)", glt->width, glt->height, glt->depth, channels * 8);
+
+		if (glt->flags & TEXPREF_CUBEMAP)
+		{
+			const char *suf[6] = {"ft", "bk", "up", "dn", "rt", "lf"};
+			int i;
+			for (i = 0; i < 6; i++)
+			{
+				q_snprintf(tganame, sizeof(tganame), "imagedump/%s%s.tga", tempname, suf[i]);
+				glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, GL_UNSIGNED_BYTE, buffer);
+				Image_WriteTGA (tganame, buffer, glt->width, glt->height*glt->depth, channels*8, true);
+			}
+		}
+		else
+		{
+			q_snprintf(tganame, sizeof(tganame), "imagedump/%s.tga", tempname);
+			glGetTexImage(glt->target, 0, format, GL_UNSIGNED_BYTE, buffer);
+			Image_WriteTGA (tganame, buffer, glt->width, glt->height*glt->depth, channels*8, true);
+		}
+
+		free (buffer);
+		count++;
+	}
+
+	if (filter)
+		Con_SafePrintf ("dumped %i textures containing '%s' to ", count, filter);
+	else
+		Con_SafePrintf ("dumped %i textures to ", count);
+	Con_LinkPrintf (va ("%s/", dirname), "%s", reldirname);
+	Con_SafePrintf (".\n");
+}
+
+/*
+===============
+TexMgr_FrameUsage -- report texture memory usage for this frame
+===============
+*/
+float TexMgr_FrameUsage (void)
+{
+	float mb;
+	float texels = 0;
+	gltexture_t	*glt;
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		if (glt->visframe == r_framecount)
+		{
+			int faces = glt->flags & TEXPREF_CUBEMAP ? 6 : 1;
+			if (glt->flags & TEXPREF_MIPMAP)
+				texels += glt->width * glt->height * glt->depth * faces * (4.0f / 3.0f);
+			else
+				texels += (glt->width * glt->height * glt->depth * faces);
+		}
+	}
+
+	mb = texels * 4.0f / 0x100000;
+	return mb;
+}
+
+/*
+===============
+TexMgr_CanCompress
+===============
+*/
+static qboolean TexMgr_CanCompress (gltexture_t *glt)
+{
+	return glt->source_format != SRC_LIGHTMAP && (glt->flags & TEXPREF_PERSIST) == 0;
+}
+
+/*
+===============
+TexMgr_CompressTextures_f -- called when gl_compress_textures changes
+===============
+*/
+void TexMgr_CompressTextures_f (cvar_t *var)
+{
+	gltexture_t	*glt;
+
+	Host_BeginAssetLoading ();
+
+	Con_SafePrintf ("Using %s textures\n", var->value ? "compressed" : "uncompressed");
+
+	// In an attempt to reduce VRAM fragmentation, instead of unloading and reloading
+	// each texture sequentially, we first unload them all, then reload them
+	for (glt = active_gltextures; glt; glt = glt->next)
+		if (TexMgr_CanCompress (glt))
+			GL_DeleteTexture (glt);
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+		if (TexMgr_CanCompress (glt))
+			TexMgr_ReloadImage (glt, -1, -1);
+
+	Host_EndAssetLoading ();
+}
+
+/*
+================================================================================
+
+	TEXTURE MANAGER
+
+================================================================================
+*/
+
+/*
+================
+TexMgr_FindTexture
+================
+*/
+gltexture_t *TexMgr_FindTexture (qmodel_t *owner, const char *name)
+{
+	gltexture_t	*glt;
+
+	if (name)
+	{
+		for (glt = active_gltextures; glt; glt = glt->next)
+		{
+			if (glt->owner == owner && !strcmp (glt->name, name))
+				return glt;
+		}
+	}
+
+	return NULL;
+}
+
+/*
+================
+TexMgr_NewTexture
+================
+*/
+gltexture_t *TexMgr_NewTexture (void)
+{
+	gltexture_t *glt;
+
+	if (numgltextures == MAX_GLTEXTURES)
+		Sys_Error("numgltextures == MAX_GLTEXTURES\n");
+
+	glt = free_gltextures;
+	free_gltextures = glt->next;
+	glt->next = active_gltextures;
+	active_gltextures = glt;
+
+	glGenTextures(1, &glt->texnum);
+	numgltextures++;
+	return glt;
+}
+
+//ericw -- workaround for preventing TexMgr_FreeTexture during TexMgr_ReloadImages
+static qboolean in_reload_images;
+
+/*
+================
+TexMgr_FreeTexture
+================
+*/
+void TexMgr_FreeTexture (gltexture_t *kill)
+{
+	gltexture_t *glt;
+
+	if (in_reload_images)
+		return;
+
+	if (kill == NULL)
+	{
+		Con_Printf ("TexMgr_FreeTexture: NULL texture\n");
+		return;
+	}
+
+	if (active_gltextures == kill)
+	{
+		active_gltextures = kill->next;
+		kill->next = free_gltextures;
+		free_gltextures = kill;
+
+		GL_DeleteTexture(kill);
+		numgltextures--;
+		return;
+	}
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		if (glt->next == kill)
+		{
+			glt->next = kill->next;
+			kill->next = free_gltextures;
+			free_gltextures = kill;
+
+			GL_DeleteTexture(kill);
+			numgltextures--;
+			return;
+		}
+	}
+
+	Con_Printf ("TexMgr_FreeTexture: not found\n");
+}
+
+/*
+================
+TexMgr_FreeTextures
+
+compares each bit in "flags" to the one in glt->flags only if that bit is active in "mask"
+================
+*/
+void TexMgr_FreeTextures (unsigned int flags, unsigned int mask)
+{
+	gltexture_t *glt, *next;
+
+	for (glt = active_gltextures; glt; glt = next)
+	{
+		next = glt->next;
+		if ((glt->flags & mask) == (flags & mask))
+			TexMgr_FreeTexture (glt);
+	}
+}
+
+/*
+================
+TexMgr_FreeTexturesForOwner
+================
+*/
+void TexMgr_FreeTexturesForOwner (qmodel_t *owner)
+{
+	gltexture_t *glt, *next;
+
+	for (glt = active_gltextures; glt; glt = next)
+	{
+		next = glt->next;
+		if (glt && glt->owner == owner)
+			TexMgr_FreeTexture (glt);
+	}
+}
+
+/*
+================
+TexMgr_DeleteTextureObjects
+================
+*/
+void TexMgr_DeleteTextureObjects (void)
+{
+	gltexture_t *glt;
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		GL_DeleteTexture (glt);
+	}
+	TexMgr_DeleteSamplers ();
+}
+
+/*
+================================================================================
+
+	INIT
+
+================================================================================
+*/
+
+static void SetColor (uint32_t *dst, byte r, byte g, byte b, byte a)
+{
+	((byte*)dst)[0] = r;
+	((byte*)dst)[1] = g;
+	((byte*)dst)[2] = b;
+	((byte*)dst)[3] = a;
+}
+
+static qboolean TexMgr_IsLinearDataTextureName (const char *name)
+{
+	char lower[MAX_QPATH];
+	size_t len;
+
+	if (!name || !name[0])
+		return false;
+
+	q_strlcpy (lower, name, sizeof (lower));
+	len = strlen (lower);
+	for (size_t i = 0; i < len; ++i)
+		lower[i] = (char)tolower ((unsigned char)lower[i]);
+
+	if (strstr (lower, "lightmap") || strstr (lower, "_lm") || strstr (lower, "lightmap_"))
+		return true;
+	if (strstr (lower, "normal") || strstr (lower, "_nrm") || strstr (lower, "_norm"))
+		return true;
+	if (strstr (lower, "_rough") || strstr (lower, "roughness") || strstr (lower, "_metal") || strstr (lower, "metallic"))
+		return true;
+	if (strstr (lower, "_ao") || strstr (lower, "ambientocclusion"))
+		return true;
+	if (strstr (lower, "height") || strstr (lower, "_height"))
+		return true;
+	if (strstr (lower, "depth") || strstr (lower, "velocity"))
+		return true;
+	if (strstr (lower, "ssao") || strstr (lower, "noise") || strstr (lower, "blue"))
+		return true;
+	if (strstr (lower, "lut") || strstr (lower, "shadow"))
+		return true;
+
+	return false;
+}
+
+qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file)
+{
+	if (r_srgb_textures.value <= 0.f)
+		return false;
+
+	if (format == SRC_LIGHTMAP)
+		return false;
+
+	if (TexMgr_IsLinearDataTextureName (name))
+		return false;
+
+	if (source_file && !q_strcasecmp (source_file, "lightmap"))
+		return false;
+
+	return true;
+}
+
+static const char *TexMgr_InternalFormatName (GLenum format)
+{
+	switch (format)
+	{
+	case GL_RGB:
+		return "GL_RGB";
+	case GL_RGBA:
+		return "GL_RGBA";
+	case GL_RGB8:
+		return "GL_RGB8";
+	case GL_RGBA8:
+		return "GL_RGBA8";
+#ifdef GL_SRGB8
+	case GL_SRGB8:
+		return "GL_SRGB8";
+	case GL_SRGB8_ALPHA8:
+		return "GL_SRGB8_ALPHA8";
+#endif
+	case GL_RGBA16F:
+		return "GL_RGBA16F";
+	case GL_RGB16F:
+		return "GL_RGB16F";
+	case GL_COMPRESSED_RGBA_BPTC_UNORM:
+		return "GL_COMPRESSED_RGBA_BPTC_UNORM";
+	case GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM:
+		return "GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM";
+	default:
+		return "GL_UNKNOWN";
+	}
+}
+
+static float TexMgr_SRGBToLinear (float c)
+{
+	if (c <= 0.04045f)
+		return c / 12.92f;
+	return powf ((c + 0.055f) / 1.055f, 2.4f);
+}
+
+static qboolean TexMgr_LightmapUsesSRGB (void)
+{
+	return !q_strcasecmp (r_lightmap_colorspace.string, "srgb");
+}
+
+static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
+{
+	size_t pixel_count;
+	byte *bytes;
+
+	if (r_srgb_textures.value > 0.f)
+		return;
+
+	if (q_strcasecmp (glt->source_file, WADFILENAME))
+		return;
+
+	pixel_count = (size_t) glt->width * glt->height * glt->depth;
+	bytes = (byte *) data;
+
+	for (size_t i = 0; i < pixel_count; ++i, bytes += 4)
+	{
+		for (int c = 0; c < 3; ++c)
+		{
+			float linear = powf (bytes[c] * (1.0f / 255.0f), 2.2f) * 255.0f + 0.5f;
+			if (linear < 0.0f)
+				linear = 0.0f;
+			else if (linear > 255.0f)
+				linear = 255.0f;
+			bytes[c] = (byte) linear;
+		}
+	}
+}
+
+void TexMgr_SRGBTextures_f (cvar_t *var)
+{
+	(void)var;
+	TexMgr_ReloadImages ();
+}
+
+static qboolean texmgr_lightmap_colorspace_syncing = false;
+
+void TexMgr_LightmapColorspace_f (cvar_t *var)
+{
+	if (texmgr_lightmap_colorspace_syncing)
+		return;
+
+	if (q_strcasecmp (var->string, "srgb") && q_strcasecmp (var->string, "linear"))
+	{
+		Con_Warning ("r_lightmap_colorspace must be \"srgb\" or \"linear\".\n");
+		texmgr_lightmap_colorspace_syncing = true;
+		Cvar_SetQuick (var, "srgb");
+		texmgr_lightmap_colorspace_syncing = false;
+		return;
+	}
+
+	texmgr_lightmap_colorspace_syncing = true;
+	Cvar_SetValueQuick (&r_lightmap_linear, !q_strcasecmp (var->string, "linear") ? 1.f : 0.f);
+	texmgr_lightmap_colorspace_syncing = false;
+
+	TexMgr_ReloadImages ();
+}
+
+void TexMgr_LightmapLinearCompat_f (cvar_t *var)
+{
+	if (texmgr_lightmap_colorspace_syncing)
+		return;
+
+	texmgr_lightmap_colorspace_syncing = true;
+	Cvar_SetQuick (&r_lightmap_colorspace, (var->value > 0.f) ? "linear" : "srgb");
+	texmgr_lightmap_colorspace_syncing = false;
+
+	TexMgr_ReloadImages ();
+}
+
+static void TexMgr_LogTextureUpload (const gltexture_t *glt)
+{
+	const char *colorspace = (glt->flags & TEXPREF_SRGB) ? "sRGB" : "linear";
+	Con_DPrintf ("Texture %s: %s, %s\n", glt->name, colorspace, TexMgr_InternalFormatName (glt->internal_format));
+}
+
+static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
+{
+	FILE *f;
+	byte *buffer;
+	long length;
+
+	COM_FOpenFile (path, &f, NULL);
+	if (!f)
+		return NULL;
+
+	if (fseek (f, 0, SEEK_END) != 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	length = ftell (f);
+	if (length <= 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	if (fseek (f, 0, SEEK_SET) != 0)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	buffer = (byte *) malloc ((size_t) length);
+	if (!buffer)
+	{
+		fclose (f);
+		return NULL;
+	}
+
+	if (fread (buffer, 1, (size_t) length, f) != (size_t) length)
+	{
+		fclose (f);
+		free (buffer);
+		return NULL;
+	}
+
+	fclose (f);
+	*size_out = (size_t) length;
+	return buffer;
+}
+
+static qboolean TexMgr_LoadPaletteKTX2 (byte *pal)
+{
+	ktx2_header_t hdr;
+	ktx2_decoded_image_t decoded;
+	byte *raw;
+	size_t size;
+	qboolean ok = false;
+
+	raw = TexMgr_LoadFileWithSize ("gfx/palette.ktx2", &size);
+	if (!raw)
+		return false;
+
+	memset (&decoded, 0, sizeof (decoded));
+	if (!KTX2_ParseHeaderPublic (&hdr, raw, size))
+		goto cleanup;
+
+	if (!KTX2_TranscodeToRGBA (raw, size, &hdr, &decoded))
+		goto cleanup;
+
+	if (hdr.width * hdr.height < 256u)
+	{
+		Con_Warning ("palette.ktx2 too small (%ux%u)\n", (unsigned) hdr.width, (unsigned) hdr.height);
+		goto cleanup;
+	}
+
+	if (!decoded.mip_data[0] || decoded.mip_size[0] < 256u * 4u)
+		goto cleanup;
+
+	for (unsigned i = 0; i < 256; ++i)
+	{
+		const byte *src = decoded.mip_data[0] + i * 4;
+		pal[i * 3 + 0] = src[0];
+		pal[i * 3 + 1] = src[1];
+		pal[i * 3 + 2] = src[2];
+	}
+
+	ok = true;
+
+cleanup:
+	KTX2_FreeDecodedImage (&decoded);
+	free (raw);
+	return ok;
+}
+
+static qboolean TexMgr_LoadPaletteImage (byte *pal)
+{
+	int width, height;
+	enum srcformat fmt;
+	byte *data = Image_LoadImage ("gfx/palette", &width, &height, &fmt);
+
+	if (!data)
+		return false;
+	if (fmt != SRC_RGBA)
+	{
+		Con_Warning ("gfx/palette loaded with unexpected format %d\n", fmt);
+		return false;
+	}
+	if (width * height < 256)
+	{
+		Con_Warning ("gfx/palette image too small (%dx%d)\n", width, height);
+		return false;
+	}
+
+	for (int i = 0; i < 256; ++i)
+	{
+		pal[i * 3 + 0] = data[i * 4 + 0];
+		pal[i * 3 + 1] = data[i * 4 + 1];
+		pal[i * 3 + 2] = data[i * 4 + 2];
+	}
+
+	return true;
+}
+
+static qboolean TexMgr_LoadColormap (byte **colormap)
+{
+	FILE *f;
+
+	COM_FOpenFile ("gfx/colormap.lmp", &f, NULL);
+	if (!f)
+		return false;
+
+	*colormap = (byte *) Hunk_AllocNoFill (256 * 64);
+	if (fread (*colormap, 256 * 64, 1, f) != 1)
+		Sys_Error ("TexMgr_LoadPalette: colormap read error");
+	fclose (f);
+	return true;
+}
+
+static void TexMgr_SetDefaultFullbright (const byte *pal)
+{
+	memset (is_fullbright, 0, sizeof (is_fullbright));
+	for (int i = 224; i < 255; ++i)
+	{
+		const byte *src = pal + i * 3;
+		if (src[0] || src[1] || src[2])
+			SetBit (is_fullbright, i);
+	}
+}
+
+/*
+=================
+TexMgr_LoadPalette -- johnfitz -- was VID_SetPalette, moved here, renamed, rewritten
+=================
+*/
+void TexMgr_LoadPalette (void)
+{
+	byte *pal, *src, *colormap;
+	int i, j, mark, numfb;
+	qboolean pal_loaded = false;
+	FILE *f;
+
+	mark = Hunk_LowMark ();
+	pal = (byte *) Hunk_AllocNoFill (768);
+	colormap = NULL;
+
+	if (!gl_legacy_palettes.value)
+	{
+		pal_loaded = TexMgr_LoadPaletteKTX2 (pal);
+		if (!pal_loaded)
+			pal_loaded = TexMgr_LoadPaletteImage (pal);
+	}
+
+	if (!pal_loaded)
+	{
+		COM_FOpenFile ("gfx/palette.lmp", &f, NULL);
+		if (!f)
+			Sys_Error ("Couldn't load gfx/palette.lmp");
+
+		if (fread (pal, 768, 1, f) != 1)
+			Sys_Error ("Failed reading gfx/palette.lmp");
+		fclose (f);
+		pal_loaded = true;
+	}
+
+	if (!TexMgr_LoadColormap (&colormap))
+	{
+		if (gl_legacy_palettes.value)
+			Sys_Error ("Couldn't load gfx/colormap.lmp");
+		Con_Warning ("Couldn't load gfx/colormap.lmp, using default fullbright range\n");
+		TexMgr_SetDefaultFullbright (pal);
+		colormap = NULL;
+	}
+
+	//find fullbright colors
+	if (colormap)
+	{
+		memset (is_fullbright, 0, sizeof (is_fullbright));
+		numfb = 0;
+		src = pal;
+		for (i = 0; i < 256; i++, src += 3)
+		{
+			if (!src[0] && !src[1] && !src[2])
+				continue; // black can't be fullbright
+
+			for (j = 1; j < 64; j++)
+				if (colormap[i + j * 256] != colormap[i])
+					break;
+
+			if (j == 64) 
+			{
+				SetBit (is_fullbright, i);
+				numfb++;
+			}
+		}
+		if (developer.value)
+			Con_SafePrintf ("Colormap has %d fullbright colors\n", numfb);
+	}
+
+	//fill color tables
+	src = pal;
+	for (i = 0; i < 256; i++, src += 3)
+	{
+		SetColor (&d_8to24table_opaque[i], src[0], src[1], src[2], 255);
+		if (GetBit (is_fullbright, i))
+		{
+			SetColor (&d_8to24table_alphabright[i],	src[0], src[1], src[2], 0);
+			SetColor (&d_8to24table_fbright[i],		src[0], src[1], src[2], 255);
+			SetColor (&d_8to24table_nobright[i],	0, 0, 0, 255);
+		}
+		else
+		{
+			SetColor (&d_8to24table_alphabright[i],	src[0], src[1], src[2], 255);
+			SetColor (&d_8to24table_fbright[i],		0, 0, 0, 255);
+			SetColor (&d_8to24table_nobright[i],	src[0], src[1], src[2], 255);
+		}
+	}
+
+	memcpy(d_8to24table, d_8to24table_opaque, 256*4);
+	((byte *) &d_8to24table[255]) [3] = 0; //standard palette, 255 is transparent
+
+	//fullbright palette, for fence textures
+	memcpy(d_8to24table_fbright_fence, d_8to24table_fbright, 256*4);
+	d_8to24table_fbright_fence[255] = 0; // Alpha of zero.
+
+	//nobright palette, for fence textures
+	memcpy(d_8to24table_nobright_fence, d_8to24table_nobright, 256*4);
+	d_8to24table_nobright_fence[255] = 0; // Alpha of zero.
+
+	//conchars palette, 0 and 255 are transparent
+	memcpy(d_8to24table_conchars, d_8to24table, 256*4);
+	((byte *) &d_8to24table_conchars[0]) [3] = 0;
+
+	Hunk_FreeToLowMark (mark);
+}
+
+void TexMgr_DecodeIndexedToRGBA (const byte *indexed, int pixel_count, int transparent_index, texmgr_palmode_t mode, byte *rgba)
+{
+	for (int i = 0; i < pixel_count; ++i)
+	{
+		int idx = indexed[i];
+		byte *dst = rgba + i * 4;
+		const byte *src = (const byte *) &d_8to24table_opaque[idx];
+		qboolean transparent = (transparent_index >= 0 && idx == transparent_index);
+		qboolean is_fb = GetBit (is_fullbright, idx);
+
+		if (transparent)
+		{
+			dst[0] = dst[1] = dst[2] = 0;
+			dst[3] = 0;
+			continue;
+		}
+
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = 255;
+
+		if (mode == TEXMGR_PALMODE_ALPHABRIGHT)
+			dst[3] = is_fb ? 0 : 255;
+		else if (mode == TEXMGR_PALMODE_NOBRIGHT && is_fb)
+		{
+			dst[0] = dst[1] = dst[2] = 0;
+		}
+	}
+}
+
+void TexMgr_BuildFullbrightRGBA (const byte *indexed, int pixel_count, int transparent_index, byte *rgba)
+{
+	for (int i = 0; i < pixel_count; ++i)
+	{
+		int idx = indexed[i];
+		byte *dst = rgba + i * 4;
+		const byte *src = (const byte *) &d_8to24table_opaque[idx];
+		qboolean transparent = (transparent_index >= 0 && idx == transparent_index);
+		qboolean is_fb = GetBit (is_fullbright, idx);
+
+		if (transparent || !is_fb)
+		{
+			dst[0] = dst[1] = dst[2] = dst[3] = 0;
+			continue;
+		}
+
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = 255;
+	}
+}
+
+/*
+================
+TexMgr_NewGame
+================
+*/
+void TexMgr_NewGame (void)
+{
+	TexMgr_FreeTextures (0, TEXPREF_PERSIST); //deletes all textures where TEXPREF_PERSIST is unset
+	TexMgr_LoadPalette ();
+}
+
+
+/*
+================
+TexMgr_Init
+
+must be called before any texture loading
+================
+*/
+void TexMgr_Init (void)
+{
+	int i;
+	static byte notexture_data[16] = {159,91,83,255,0,0,0,255,0,0,0,255,159,91,83,255}; //black and pink checker
+	static byte nulltexture_data[16] = {127,191,255,255,0,0,0,255,0,0,0,255,127,191,255,255}; //black and blue checker
+	static byte whitetexture_data[16] = {255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}; //white
+	static byte greytexture_data[16] = {127,127,127,255,127,127,127,255,127,127,127,255,127,127,127,255}; //50% grey
+	static byte blacktexture_data[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; //black
+	static byte lavaemissive_data[16] = {255,0,0,255,255,0,0,255,255,0,0,255,255,0,0,255}; //bright red
+	extern texture_t *r_notexture_mip, *r_notexture_mip2;
+	cmd_function_t	*cmd;
+
+	// init texture list
+	free_gltextures = (gltexture_t *) Hunk_AllocName (MAX_GLTEXTURES * sizeof(gltexture_t), "gltextures");
+	active_gltextures = NULL;
+	for (i = 0; i < MAX_GLTEXTURES - 1; i++)
+		free_gltextures[i].next = &free_gltextures[i+1];
+	free_gltextures[i].next = NULL;
+	numgltextures = 0;
+
+	// init texture filter
+	TexMgr_ForceFilterUpdate ();
+	TexMgr_ApplySettings ();
+
+	// palette
+	Cvar_RegisterVariable (&gl_legacy_palettes);
+	TexMgr_LoadPalette ();
+
+Cvar_RegisterVariable (&gl_max_size);
+Cvar_RegisterVariable (&gl_picmip);
+gl_texturemode.string = glmodes[glmode_idx].name;
+Cvar_RegisterVariable (&gl_texturemode);
+Cvar_SetCallback (&gl_texturemode, &TexMgr_TextureMode_f);
+Cvar_SetCompletion (&gl_texturemode, &TexMgr_TextureMode_Completion_f);
+Cvar_RegisterVariable (&gl_lodbias);
+Cvar_SetCallback (&gl_lodbias, TexMgr_LodBias_f);
+Cvar_RegisterVariable (&r_bc7_compress);
+Cvar_RegisterVariable (&r_softemu);
+Cvar_SetCallback (&r_softemu, TexMgr_SoftEmu_f);
+Cvar_RegisterVariable (&r_softemu_lightmap_banding);
+Cvar_SetCallback (&r_softemu_lightmap_banding, TexMgr_SoftEmu_f);
+Cvar_RegisterVariable (&r_softemu_mdl_warp);
+	Cvar_RegisterVariable (&r_softemu_dither_screen);
+	Cvar_RegisterVariable (&r_softemu_dither_texture);
+	Cmd_AddCommand ("gl_describetexturemodes", &TexMgr_DescribeTextureModes_f);
+	cmd = Cmd_AddCommand ("imagelist", &TexMgr_Imagelist_f);
+	if (cmd)
+		cmd->completion = TexMgr_Imagelist_Completion_f;
+	cmd = Cmd_AddCommand ("imagedump", &TexMgr_Imagedump_f);
+	if (cmd)
+		cmd->completion = TexMgr_Imagelist_Completion_f;
+
+	// poll max size from hardware
+	glGetIntegerv (GL_MAX_TEXTURE_SIZE, &gl_max_texture_size);
+
+	// load notexture images
+	notexture = TexMgr_LoadImage (NULL, "notexture", 2, 2, SRC_RGBA, notexture_data, "", (src_offset_t)notexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	nulltexture = TexMgr_LoadImage (NULL, "nulltexture", 2, 2, SRC_RGBA, nulltexture_data, "", (src_offset_t)nulltexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	whitetexture = TexMgr_LoadImage (NULL, "whitetexture", 2, 2, SRC_RGBA, whitetexture_data, "", (src_offset_t)whitetexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	greytexture = TexMgr_LoadImage (NULL, "greytexture", 2, 2, SRC_RGBA, greytexture_data, "", (src_offset_t)greytexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	blacktexture = TexMgr_LoadImage (NULL, "blacktexture", 2, 2, SRC_RGBA, blacktexture_data, "", (src_offset_t)blacktexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	lavaemissivetexture = TexMgr_LoadImage (NULL, "lavaemissive", 2, 2, SRC_RGBA, lavaemissive_data, "", (src_offset_t)lavaemissive_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+
+	//have to assign these here becuase Mod_Init is called before TexMgr_Init
+	r_notexture_mip->gltexture = r_notexture_mip2->gltexture = notexture;
+}
+
+/*
+================================================================================
+
+	IMAGE LOADING
+
+================================================================================
+*/
+
+/*
+================
+TexMgr_Pad -- return smallest power of two greater than or equal to s
+================
+*/
+	int TexMgr_Pad (int s)
+{
+	int i;
+	for (i = 1; i < s; i<<=1)
+		;
+	return i;
+}
+
+/*
+===============
+TexMgr_SafeTextureSize -- return a size with hardware and user prefs in mind
+===============
+*/
+	int TexMgr_SafeTextureSize (int s)
+{
+	int p = (int)gl_max_size.value;
+	if (p > 0) {
+		p = TexMgr_Pad(p);
+		if (p < s) s = p;
+	}
+	s = CLAMP(1, s, gl_max_texture_size);
+	return s;
+}
+
+/*
+================
+TexMgr_PadConditional -- only pad if a texture of that size would be padded. (used for tex coords)
+================
+*/
+	int TexMgr_PadConditional (int s)
+{
+	if (s < TexMgr_SafeTextureSize(s))
+		return TexMgr_Pad(s);
+	return s;
+}
+
+/*
+================
+TexMgr_MipMapW
+================
+*/
+static unsigned *TexMgr_MipMapW (unsigned *data, int width, int height, int depth)
+{
+	int	i, size;
+	byte	*out, *in;
+
+	if (!data)
+		return NULL;
+
+	out = in = (byte *)data;
+	size = ((width*height)>>1)*depth;
+
+#ifdef USE_SSE2
+	while (size >= 4)
+	{
+		__m128i v0, v1, v2, v3;
+
+		v0 = _mm_loadu_si128 ((const __m128i *)in);
+		v1 = _mm_loadu_si128 ((const __m128i *)in + 1);
+		v0 = _mm_shuffle_epi32 (v0, _MM_SHUFFLE (3, 1, 2, 0));
+		v1 = _mm_shuffle_epi32 (v1, _MM_SHUFFLE (3, 1, 2, 0));
+		v2 = _mm_unpacklo_epi64 (v0, v1);
+		v3 = _mm_unpackhi_epi64 (v0, v1);
+		v0 = _mm_avg_epu8 (v2, v3);
+		_mm_storeu_si128 ((__m128i *)out, v0);
+
+		size -= 4;
+		in += 32;
+		out += 16;
+	}
+#endif
+
+	for (i = 0; i < size; i++, out += 4, in += 8)
+	{
+		out[0] = (in[0] + in[4] + 1)>>1;
+		out[1] = (in[1] + in[5] + 1)>>1;
+		out[2] = (in[2] + in[6] + 1)>>1;
+		out[3] = (in[3] + in[7] + 1)>>1;
+	}
+
+			return data;
+}
+
+
+/*
+================
+TexMgr_MipMapH
+================
+*/
+static unsigned *TexMgr_MipMapH (unsigned *data, int width, int height, int depth)
+{
+	int	i, j;
+	byte	*out, *in;
+
+	if (!data)
+		return NULL;
+
+	out = in = (byte *)data;
+	height>>=1;
+	height*=depth;
+	width<<=2;
+
+	for (i = 0; i < height; i++, in += width)
+	{
+		j = 0;
+#ifdef USE_SSE2
+		while (j + 16 <= width)
+		{
+			__m128i v0, v1;
+
+			v0 = _mm_loadu_si128 ((const __m128i *)in);
+			v1 = _mm_loadu_si128 ((const __m128i *)(in + width));
+			v0 = _mm_avg_epu8 (v0, v1);
+			_mm_storeu_si128 ((__m128i *)out, v0);
+
+			j += 16;
+			in += 16;
+			out += 16;
+		}
+#endif
+		for (; j < width; j += 4, out += 4, in += 4)
+		{
+			out[0] = (in[0] + in[width+0] + 1)>>1;
+			out[1] = (in[1] + in[width+1] + 1)>>1;
+			out[2] = (in[2] + in[width+2] + 1)>>1;
+			out[3] = (in[3] + in[width+3] + 1)>>1;
+		}
+	}
+
+	return data;
+}
+
+/*
+===============
+TexMgr_AlphaEdgeFix
+
+eliminate pink edges on sprites, etc.
+operates in place on 32bit data
+===============
+*/
+static void TexMgr_AlphaEdgeFix (byte *data, int width, int height)
+{
+	int	i, j, n = 0, b, c[3] = {0,0,0},
+		lastrow, thisrow, nextrow,
+		lastpix, thispix, nextpix;
+	byte	*dest = data;
+
+	if (!data)
+		return;
+
+	for (i = 0; i < height; i++)
+	{
+		lastrow = width * 4 * ((i == 0) ? height-1 : i-1);
+		thisrow = width * 4 * i;
+		nextrow = width * 4 * ((i == height-1) ? 0 : i+1);
+
+		for (j = 0; j < width; j++, dest += 4)
+		{
+			if (dest[3]) //not transparent
+				continue;
+
+			lastpix = 4 * ((j == 0) ? width-1 : j-1);
+			thispix = 4 * j;
+			nextpix = 4 * ((j == width-1) ? 0 : j+1);
+
+			b = lastrow + lastpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = thisrow + lastpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = nextrow + lastpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = lastrow + thispix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = nextrow + thispix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = lastrow + nextpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = thisrow + nextpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+			b = nextrow + nextpix; if (data[b+3]) {c[0] += data[b]; c[1] += data[b+1]; c[2] += data[b+2]; n++;}
+
+			//average all non-transparent neighbors
+			if (n)
+			{
+				dest[0] = (byte)(c[0]/n);
+				dest[1] = (byte)(c[1]/n);
+				dest[2] = (byte)(c[2]/n);
+
+				n = c[0] = c[1] = c[2] = 0;
+			}
+		}
+	}
+}
+
+/*
+===============
+TexMgr_PadEdgeFixW -- special case of AlphaEdgeFix for textures that only need it because they were padded
+
+operates in place on 32bit data, and expects unpadded height and width values
+===============
+*/
+static void TexMgr_PadEdgeFixW (byte *data, int width, int height)
+{
+	byte *src, *dst;
+	int i, padw, padh;
+
+	padw = TexMgr_PadConditional(width);
+	padh = TexMgr_PadConditional(height);
+
+	//copy last full column to first empty column, leaving alpha byte at zero
+	src = data + (width - 1) * 4;
+	for (i = 0; i < padh; i++)
+	{
+		src[4] = src[0];
+		src[5] = src[1];
+		src[6] = src[2];
+		src += padw * 4;
+	}
+
+	//copy first full column to last empty column, leaving alpha byte at zero
+	src = data;
+	dst = data + (padw - 1) * 4;
+	for (i = 0; i < padh; i++)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		src += padw * 4;
+		dst += padw * 4;
+	}
+}
+
+/*
+===============
+TexMgr_PadEdgeFixH -- special case of AlphaEdgeFix for textures that only need it because they were padded
+
+operates in place on 32bit data, and expects unpadded height and width values
+===============
+*/
+static void TexMgr_PadEdgeFixH (byte *data, int width, int height)
+{
+	byte *src, *dst;
+	int i, padw, padh;
+
+	padw = TexMgr_PadConditional(width);
+	padh = TexMgr_PadConditional(height);
+
+	//copy last full row to first empty row, leaving alpha byte at zero
+	dst = data + height * padw * 4;
+	src = dst - padw * 4;
+	for (i = 0; i < padw; i++)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		src += 4;
+		dst += 4;
+	}
+
+	//copy first full row to last empty row, leaving alpha byte at zero
+	dst = data + (padh - 1) * padw * 4;
+	src = data;
+	for (i = 0; i < padw; i++)
+	{
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		src += 4;
+		dst += 4;
+	}
+}
+
+/*
+================
+TexMgr_8to32
+================
+*/
+static unsigned *TexMgr_8to32 (byte *in, int pixels, unsigned int *usepal)
+{
+	int i;
+	unsigned *out, *data;
+
+	out = data = (unsigned *) Hunk_AllocNoFill (pixels*4);
+
+	for (i = 0; i < pixels; i++)
+		*out++ = usepal[*in++];
+
+	return data;
+}
+
+/*
+================
+TexMgr_PadImageW -- return image with width padded up to power-of-two dimentions
+================
+*/
+static byte *TexMgr_PadImageW (byte *in, int width, int height, byte padbyte)
+{
+	int i, j, outwidth;
+	byte *out, *data;
+
+	if (width == TexMgr_Pad(width))
+		return in;
+
+	outwidth = TexMgr_Pad(width);
+
+	out = data = (byte *) Hunk_AllocNoFill(outwidth*height);
+
+	for (i = 0; i < height; i++)
+	{
+		for (j = 0; j < width; j++)
+			*out++ = *in++;
+		for (  ; j < outwidth; j++)
+			*out++ = padbyte;
+	}
+
+	return data;
+}
+
+/*
+================
+TexMgr_PadImageH -- return image with height padded up to power-of-two dimentions
+================
+*/
+static byte *TexMgr_PadImageH (byte *in, int width, int height, byte padbyte)
+{
+        int i, srcpix, dstpix;
+        byte *data, *out;
+
+        if (height == TexMgr_Pad(height))
+                return in;
+
+        srcpix = width * height;
+        dstpix = width * TexMgr_Pad(height);
+
+        out = data = (byte *) Hunk_AllocNoFill(dstpix);
+
+        for (i = 0; i < srcpix; i++)
+                *out++ = *in++;
+        for (     ; i < dstpix; i++)
+                *out++ = padbyte;
+
+        return data;
+}
+
+static void BC7_Compress (const uint8_t *rgba, int width, int height, uint8_t *out_blocks, qboolean srgb)
+{
+	int blocks_w, blocks_h, bx, by, x, y;
+	static qboolean bc7_initialized;
+	static bc7enc_compress_block_params base_params;
+
+	if (width <= 0 || height <= 0)
+		return;
+
+	if (!bc7_initialized)
+	{
+		bc7enc_compress_block_init ();
+		bc7enc_compress_block_params_init (&base_params);
+		base_params.m_uber_level = BC7ENC_MAX_UBER_LEVEL;
+		base_params.m_mode_mask = UINT32_MAX;
+		base_params.m_max_partitions = BC7ENC_MAX_PARTITIONS;
+		bc7_initialized = true;
+	}
+
+	blocks_w = (width + 3) / 4;
+	blocks_h = (height + 3) / 4;
+
+	for (by = 0; by < blocks_h; by++)
+	{
+		for (bx = 0; bx < blocks_w; bx++)
+		{
+			color_rgba block_pixels[16];
+			bc7enc_compress_block_params params = base_params;
+
+			if (srgb)
+				bc7enc_compress_block_params_init_perceptual_weights (&params);
+			else
+				bc7enc_compress_block_params_init_linear_weights (&params);
+
+			for (y = 0; y < 4; y++)
+			{
+				int sy = (by * 4 + y);
+				if (sy >= height)
+					sy = height - 1;
+
+				for (x = 0; x < 4; x++)
+				{
+					int sx = (bx * 4 + x);
+					const uint8_t *src;
+
+					if (sx >= width)
+						sx = width - 1;
+
+					src = rgba + (sy * width + sx) * 4;
+					block_pixels[y * 4 + x].m_c[0] = src[0];
+					block_pixels[y * 4 + x].m_c[1] = src[1];
+					block_pixels[y * 4 + x].m_c[2] = src[2];
+					block_pixels[y * 4 + x].m_c[3] = src[3];
+				}
+			}
+
+			bc7enc_compress_block (out_blocks + ((by * blocks_w + bx) * BC7ENC_BLOCK_SIZE), block_pixels, &params);
+		}
+	}
+}
+
+static qboolean TexMgr_CompressLevelToBC7 (const byte *rgba, int width, int height, qboolean srgb, uint8_t **out_blocks, size_t *out_size)
+{
+	size_t blocks_w, blocks_h, block_count;
+
+	blocks_w = (size_t) ((width + 3) / 4);
+	blocks_h = (size_t) ((height + 3) / 4);
+	block_count = blocks_w * blocks_h;
+	*out_size = block_count * BC7ENC_BLOCK_SIZE;
+	*out_blocks = (uint8_t *) malloc (*out_size);
+	if (!*out_blocks)
+		return false;
+
+	BC7_Compress (rgba, width, height, *out_blocks, srgb);
+	return true;
+}
+
+static qboolean TexMgr_UploadBC7 (gltexture_t *glt, unsigned *data)
+{
+	int miplevel = 0;
+	int mipwidth = glt->width;
+	int mipheight = glt->height;
+	unsigned *level_data = data;
+	const qboolean use_mipmaps = (glt->flags & TEXPREF_MIPMAP) != 0;
+	const qboolean srgb = (glt->flags & TEXPREF_SRGB) != 0;
+	GLenum internal_format = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
+
+	GL_Bind (GL_TEXTURE0, glt);
+
+	for (;;)
+	{
+		uint8_t *bc7_blocks = NULL;
+		size_t bc7_size = 0;
+
+		if (!TexMgr_CompressLevelToBC7 ((byte *) level_data, mipwidth, mipheight, srgb, &bc7_blocks, &bc7_size))
+		return false;
+
+		GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, miplevel, internal_format, mipwidth, mipheight, 0, (GLsizei) bc7_size, bc7_blocks);
+		free (bc7_blocks);
+
+		if (!use_mipmaps || (mipwidth == 1 && mipheight == 1))
+		break;
+
+		if (mipheight > 1)
+		{
+		TexMgr_MipMapH (level_data, mipwidth, mipheight, glt->depth);
+		mipheight >>= 1;
+		}
+		if (mipwidth > 1)
+		{
+		TexMgr_MipMapW (level_data, mipwidth, mipheight, glt->depth);
+		mipwidth >>= 1;
+		}
+
+		miplevel++;
+	}
+
+	return true;
+}
+/*
+================
+GL_TexImage -- calls glTexImage2D/3D based on texture type
+================
+*/
+static void GL_TexImage (gltexture_t *glt, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels)
+{
+const GLvoid **images = (const GLvoid **)pixels; // for arrays/cubemaps "pixels" is actually an array of pointers
+	unsigned int i;
+
+	switch (glt->target)
+	{
+	case GL_TEXTURE_2D_ARRAY:
+		GL_TexImage3DFunc (glt->target, level, internalformat, width, height, glt->depth, 0, format, type, NULL);
+		for (i = 0; i < glt->depth; i++)
+			GL_TexSubImage3DFunc (glt->target, level, 0, 0, i, width, height, 1, format, type, images ? images[i] : NULL);
+		break;
+
+	case GL_TEXTURE_CUBE_MAP:
+		for (i = 0; i < 6; i++)
+			glTexImage2D (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, level, internalformat, width, height, 0, format, type, images ? images[i] : NULL);
+		break;
+
+	case GL_TEXTURE_2D:
+		glTexImage2D (glt->target, level, internalformat, width, height, 0, format, type, pixels);
+		break;
+
+	default:
+		Sys_Error ("GL_TexImage: unknown target %d for %s", glt->target, glt->name);
+		break;
+	}
+}
+
+/*
+================
+TexMgr_LoadImage32 -- handles 32bit source data
+================
+*/
+static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
+{
+        int     miplevel, mipwidth, mipheight, picmip;
+        glformat_t internalformat;
+        qboolean compress, bc7_uploaded;
+        qboolean bc7_requested;
+        qboolean srgb;
+        unsigned *base_copy = NULL;
+        size_t base_pixels = 0;
+
+        TexMgr_LinearizeWadPixels (glt, data);
+        srgb = (glt->flags & TEXPREF_SRGB) != 0;
+
+        // mipmap down
+        picmip = (glt->flags & TEXPREF_NOPICMIP) ? 0 : q_max((int)gl_picmip.value, 0);
+        mipwidth = TexMgr_SafeTextureSize (glt->width >> picmip);
+        mipheight = TexMgr_SafeTextureSize (glt->height >> picmip);
+        while ((int) glt->height > mipheight)
+        {
+                TexMgr_MipMapH (data, glt->width, glt->height, glt->depth);
+                glt->height >>= 1;
+                if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
+                        TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
+        }
+        while ((int) glt->width > mipwidth)
+        {
+                TexMgr_MipMapW (data, glt->width, glt->height, glt->depth);
+                glt->width >>= 1;
+                if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
+                        TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
+        }
+
+        // upload
+        bc7_requested = (r_bc7_compress.value != 0) && glt->target == GL_TEXTURE_2D && glt->depth == 1;
+        compress = gl_compress_textures.value && TexMgr_CanCompress (glt);
+        internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[compress].alpha : glformats[compress].solid;
+
+#ifdef GL_SRGB8
+        if (srgb)
+                internalformat.id = (glt->flags & TEXPREF_HASALPHA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
+#endif
+
+        bc7_uploaded = false;
+        if (bc7_requested)
+        {
+                base_pixels = (size_t) glt->width * glt->height * glt->depth;
+                if (base_pixels)
+                {
+                        base_copy = (unsigned *) malloc (base_pixels * sizeof (*base_copy));
+                        if (!base_copy)
+                                bc7_requested = false;
+                        else
+                                memcpy (base_copy, data, base_pixels * sizeof (*base_copy));
+                }
+
+                if (bc7_requested)
+                {
+                        glt->compression = 4;
+                        glt->internal_format = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
+                        bc7_uploaded = TexMgr_UploadBC7 (glt, data);
+                        if (!bc7_uploaded && base_copy)
+                                memcpy (data, base_copy, base_pixels * sizeof (*base_copy));
+                }
+        }
+        if (base_copy)
+                free (base_copy);
+
+        if (bc7_requested && !bc7_uploaded)
+        {
+                internalformat = (glt->flags & TEXPREF_HASALPHA) ? glformats[0].alpha : glformats[0].solid;
+
+#ifdef GL_SRGB8
+                if (srgb)
+                        internalformat.id = (glt->flags & TEXPREF_HASALPHA) ? GL_SRGB8_ALPHA8 : GL_SRGB8;
+#endif
+        }
+
+        if (!bc7_uploaded)
+        {
+                glt->compression = internalformat.ratio;
+                glt->internal_format = internalformat.id;
+                GL_Bind (GL_TEXTURE0, glt);
+                GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+                // upload mipmaps
+                if (glt->flags & TEXPREF_MIPMAP)
+                {
+                        if (glt->flags & (TEXPREF_CUBEMAP|TEXPREF_ARRAY))
+                        {
+                                GL_GenerateMipmapFunc (glt->target);
+                        }
+                        else
+                        {
+                                mipwidth = glt->width;
+                                mipheight = glt->height;
+
+                                for (miplevel=1; mipwidth > 1 || mipheight > 1; miplevel++)
+                                {
+                                        if (mipheight > 1)
+                                        {
+                                                TexMgr_MipMapH (data, mipwidth, mipheight, glt->depth);
+                                                mipheight >>= 1;
+                                        }
+                                        if (mipwidth > 1)
+                                        {
+                                                TexMgr_MipMapW (data, mipwidth, mipheight, glt->depth);
+                                                mipwidth >>= 1;
+                                        }
+                                        GL_TexImage (glt, miplevel, internalformat.id, mipwidth, mipheight, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                                }
+                        }
+                }
+        }
+
+#ifdef GL_EXT_texture_sRGB_decode
+        if (srgb)
+                glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
+#endif
+
+	TexMgr_LogTextureUpload (glt);
+
+        // set filter modes
+        TexMgr_SetFilterModes (glt);
+}
+
+/*
+================================================================================
+
+        DDS LOADER
+
+================================================================================
+*/
+
+typedef struct dds_pixel_format_s
+{
+uint32_t        size;
+uint32_t        flags;
+uint32_t        four_cc;
+uint32_t        rgb_bit_count;
+uint32_t        r_bitmask;
+uint32_t        g_bitmask;
+uint32_t        b_bitmask;
+uint32_t        a_bitmask;
+} dds_pixel_format_t;
+
+typedef struct dds_header_s
+{
+uint32_t        size;
+uint32_t        flags;
+uint32_t        height;
+uint32_t        width;
+uint32_t        pitch_or_linear_size;
+uint32_t        depth;
+uint32_t        mip_map_count;
+uint32_t        reserved1[11];
+dds_pixel_format_t      ddspf;
+uint32_t        caps;
+uint32_t        caps2;
+uint32_t        caps3;
+uint32_t        caps4;
+uint32_t        reserved2;
+} dds_header_t;
+
+typedef struct dds_header_dx10_s
+{
+uint32_t        dxgi_format;
+uint32_t        resource_dimension;
+uint32_t        misc_flag;
+uint32_t        array_size;
+uint32_t        misc_flags2;
+} dds_header_dx10_t;
+
+#define DDS_MAGIC                       ((' ' << 24) | ('S' << 16) | ('D' << 8) | 'D')
+#define DDS_FOURCC_DX10                 (('0' << 24) | ('1' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_DXT1                 (('1' << 24) | ('T' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_DXT5                 (('5' << 24) | ('T' << 16) | ('X' << 8) | 'D')
+#define DDS_FOURCC_BC5                  ((' ' << 24) | ('5' << 16) | ('C' << 8) | 'B')
+#define DDS_FOURCC_ATI2                 (('2' << 24) | ('I' << 16) | ('T' << 8) | 'A')
+
+#define DDSCAPS2_CUBEMAP                0x00000200
+#define DDSCAPS2_VOLUME                 0x00200000
+
+enum dxgi_format
+{
+DXGI_FORMAT_BC1_TYPELESS           = 70,
+DXGI_FORMAT_BC1_UNORM              = 71,
+DXGI_FORMAT_BC1_UNORM_SRGB         = 72,
+DXGI_FORMAT_BC3_TYPELESS           = 76,
+DXGI_FORMAT_BC3_UNORM              = 77,
+DXGI_FORMAT_BC3_UNORM_SRGB         = 78,
+DXGI_FORMAT_BC5_TYPELESS           = 82,
+DXGI_FORMAT_BC5_UNORM              = 83,
+DXGI_FORMAT_BC5_SNORM              = 84,
+DXGI_FORMAT_BC7_TYPELESS           = 96,
+DXGI_FORMAT_BC7_UNORM              = 98,
+DXGI_FORMAT_BC7_UNORM_SRGB         = 99,
+};
+
+enum dxgi_resource_dimension
+{
+DXGI_RESOURCE_DIMENSION_UNKNOWN    = 0,
+DXGI_RESOURCE_DIMENSION_BUFFER     = 1,
+DXGI_RESOURCE_DIMENSION_TEXTURE1D  = 2,
+DXGI_RESOURCE_DIMENSION_TEXTURE2D  = 3,
+DXGI_RESOURCE_DIMENSION_TEXTURE3D  = 4,
+};
+
+typedef struct dds_format_info_s
+{
+GLenum          internal_format;
+uint32_t        block_size;
+} dds_format_info_t;
+
+static qboolean Dds_DetermineFormat(const dds_header_t *header, const dds_header_dx10_t *dx10, dds_format_info_t *out)
+{
+	uint32_t four_cc = header->ddspf.four_cc;
+
+	if (dx10)
+	{
+	switch (dx10->dxgi_format)
+	{
+	case DXGI_FORMAT_BC1_TYPELESS:
+	case DXGI_FORMAT_BC1_UNORM:
+	case DXGI_FORMAT_BC1_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+	out->block_size = 8;
+	return true;
+
+	case DXGI_FORMAT_BC3_TYPELESS:
+	case DXGI_FORMAT_BC3_UNORM:
+	case DXGI_FORMAT_BC3_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+	out->block_size = 16;
+	return true;
+
+	case DXGI_FORMAT_BC5_TYPELESS:
+	case DXGI_FORMAT_BC5_UNORM:
+	case DXGI_FORMAT_BC5_SNORM:
+	out->internal_format = GL_COMPRESSED_RED_GREEN_RGTC2;
+	out->block_size = 16;
+	return true;
+
+	case DXGI_FORMAT_BC7_TYPELESS:
+	case DXGI_FORMAT_BC7_UNORM:
+	case DXGI_FORMAT_BC7_UNORM_SRGB:
+	out->internal_format = GL_COMPRESSED_RGBA_BPTC_UNORM;
+	out->block_size = 16;
+	return true;
+	}
+	}
+
+	switch (four_cc)
+	{
+	case DDS_FOURCC_DXT1:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+	out->block_size = 8;
+	return true;
+
+	case DDS_FOURCC_DXT5:
+	out->internal_format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+	out->block_size = 16;
+	return true;
+
+	case DDS_FOURCC_ATI2:
+	case DDS_FOURCC_BC5:
+	out->internal_format = GL_COMPRESSED_RED_GREEN_RGTC2;
+	out->block_size = 16;
+	return true;
+	}
+
+	return false;
+}
+
+static size_t Dds_CalcLevelSize(const dds_format_info_t *format, uint32_t width, uint32_t height)
+{
+	uint32_t blocks_w = q_max(1U, (width + 3) / 4);
+	uint32_t blocks_h = q_max(1U, (height + 3) / 4);
+
+	return (size_t) blocks_w * blocks_h * format->block_size;
+}
+
+GLuint TexMgr_LoadDDS (const char *path)
+{
+	dds_header_t header;
+	dds_header_dx10_t dx10_header;
+	dds_header_dx10_t *dx10 = NULL;
+	dds_format_info_t format;
+	byte *file_buffer = NULL;
+	qfileofs_t file_size;
+	size_t data_offset;
+	uint32_t mip_levels;
+	uint32_t width, height;
+	GLuint texnum = 0;
+	unsigned int path_id;
+
+	file_buffer = COM_LoadMallocFile (path, &path_id);
+	file_size = com_filesize;
+	if (!file_buffer || file_size < (qfileofs_t) (4 + sizeof(dds_header_t)))
+	goto fail;
+
+	if (memcmp (file_buffer, "DDS ", 4) != 0)
+	goto fail;
+
+	memcpy (&header, file_buffer + 4, sizeof(header));
+	if (header.size != sizeof(dds_header_t) || header.ddspf.size != sizeof(dds_pixel_format_t))
+	goto fail;
+
+	if (!header.width || !header.height)
+	goto fail;
+
+	if (header.caps2 & (DDSCAPS2_CUBEMAP | DDSCAPS2_VOLUME))
+	goto fail; // only 2D textures are supported
+
+	data_offset = 4 + sizeof(dds_header_t);
+	if (header.ddspf.four_cc == DDS_FOURCC_DX10)
+	{
+	if (file_size < (qfileofs_t) (data_offset + sizeof(dds_header_dx10_t)))
+	goto fail;
+
+	memcpy (&dx10_header, file_buffer + data_offset, sizeof(dx10_header));
+	if (dx10_header.resource_dimension != DXGI_RESOURCE_DIMENSION_TEXTURE2D || dx10_header.array_size == 0)
+	goto fail;
+
+	dx10 = &dx10_header;
+	data_offset += sizeof(dds_header_dx10_t);
+	}
+
+	if (!Dds_DetermineFormat(&header, dx10, &format))
+	goto fail;
+
+	mip_levels = header.mip_map_count ? header.mip_map_count : 1;
+	width = header.width;
+	height = header.height;
+
+	// Validate that the file contains enough data for all mip levels
+	{
+	size_t offset = data_offset;
+	uint32_t level_width = width;
+	uint32_t level_height = height;
+	uint32_t level;
+
+	for (level = 0; level < mip_levels; level++)
+	{
+	size_t level_size = Dds_CalcLevelSize(&format, level_width, level_height);
+	if (offset + level_size > (size_t) file_size)
+	goto fail;
+
+	offset += level_size;
+	if (level_width > 1)
+	level_width >>= 1;
+	if (level_height > 1)
+	level_height >>= 1;
+	}
+	}
+
+	glGenTextures (1, &texnum);
+	glBindTexture (GL_TEXTURE_2D, texnum);
+	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+
+	{
+	size_t offset = data_offset;
+	uint32_t level_width = width;
+	uint32_t level_height = height;
+	uint32_t level;
+
+	for (level = 0; level < mip_levels; level++)
+	{
+	size_t level_size = Dds_CalcLevelSize(&format, level_width, level_height);
+        GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, level, format.internal_format, level_width, level_height, 0, (GLsizei) level_size, file_buffer + offset);
+
+	offset += level_size;
+	if (level_width > 1)
+	level_width >>= 1;
+	if (level_height > 1)
+	level_height >>= 1;
+	}
+	}
+
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
+
+	free (file_buffer);
+	return texnum;
+
+	fail:
+	if (texnum)
+	glDeleteTextures (1, &texnum);
+	if (file_buffer)
+	free (file_buffer);
+	return 0;
+}
+
+/*
+================
+TexMgr_LoadImage8 -- handles 8bit source data, then passes it to LoadImage32
+================
+*/
+static void TexMgr_LoadImage8 (gltexture_t *glt, byte *data)
+{
+	extern cvar_t gl_fullbrights;
+	qboolean padw = false, padh = false;
+	byte padbyte;
+	unsigned int *usepal;
+	int i;
+
+	// HACK HACK HACK -- taken from tomazquake
+	if (strstr(glt->name, "shot1sid") &&
+	    glt->width == 32 && glt->height == 32 &&
+	    CRC_Block(data, 1024) == 65393)
+	{
+		// This texture in b_shell1.bsp has some of the first 32 pixels painted white.
+		// They are invisible in software, but look really ugly in GL. So we just copy
+		// 32 pixels from the bottom to make it look nice.
+		memcpy (data, data + 32*31, 32);
+	}
+
+	// detect false alpha cases
+	if (glt->flags & TEXPREF_ALPHA && !(glt->flags & TEXPREF_CONCHARS))
+	{
+		for (i = 0; i < (int) (glt->width * glt->height * glt->depth); i++)
+			if (data[i] == 255) //transparent index
+				break;
+		if (i == (int) (glt->width * glt->height * glt->depth))
+			glt->flags -= TEXPREF_ALPHA;
+	}
+
+	// choose palette and padbyte
+	if (glt->flags & TEXPREF_ALPHABRIGHT)
+	{
+		usepal = gl_fullbrights.value ? d_8to24table_alphabright : d_8to24table_opaque;
+		padbyte = 0;
+	}
+	else if (glt->flags & TEXPREF_FULLBRIGHT)
+	{
+		if (glt->flags & TEXPREF_ALPHA)
+			usepal = d_8to24table_fbright_fence;
+		else
+			usepal = d_8to24table_fbright;
+		padbyte = 0;
+	}
+	else if (glt->flags & TEXPREF_NOBRIGHT && gl_fullbrights.value)
+	{
+		if (glt->flags & TEXPREF_ALPHA)
+			usepal = d_8to24table_nobright_fence;
+		else
+			usepal = d_8to24table_nobright;
+		padbyte = 0;
+	}
+	else if (glt->flags & TEXPREF_CONCHARS)
+	{
+		usepal = d_8to24table_conchars;
+		padbyte = 0;
+	}
+	else
+	{
+		usepal = d_8to24table;
+		padbyte = 255;
+	}
+
+	// pad each dimention, but only if it's not going to be downsampled later
+	if (glt->flags & TEXPREF_PAD)
+	{
+		if ((int) glt->width < TexMgr_SafeTextureSize(glt->width))
+		{
+			data = TexMgr_PadImageW (data, glt->width, glt->height, padbyte);
+			glt->width = TexMgr_Pad(glt->width);
+			padw = true;
+		}
+		if ((int) glt->height < TexMgr_SafeTextureSize(glt->height))
+		{
+			data = TexMgr_PadImageH (data, glt->width, glt->height, padbyte);
+			glt->height = TexMgr_Pad(glt->height);
+			padh = true;
+		}
+	}
+
+	// convert to 32bit
+	data = (byte *)TexMgr_8to32(data, glt->width * glt->height * glt->depth, usepal);
+
+	// fix edges
+	if (glt->flags & TEXPREF_ALPHA)
+		TexMgr_AlphaEdgeFix (data, glt->width, glt->height);
+	else
+	{
+		if (padw)
+			TexMgr_PadEdgeFixW (data, glt->source_width, glt->source_height);
+		if (padh)
+			TexMgr_PadEdgeFixH (data, glt->source_width, glt->source_height);
+	}
+
+        // upload it
+        TexMgr_LoadImage32 (glt, (unsigned *)data);
+}
+
+static void TexMgr_DestroyLightmapUploadBuffer (void)
+{
+	if (!lightmap_upload_pbo)
+	        return;
+
+	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+	if (lightmap_upload_ptr)
+	        GL_UnmapBufferFunc (GL_PIXEL_UNPACK_BUFFER);
+	lightmap_upload_ptr = NULL;
+
+	GL_DeleteBuffer (lightmap_upload_pbo);
+	lightmap_upload_pbo = 0;
+	lightmap_upload_pbo_size = 0;
+
+	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
+static qboolean TexMgr_EnsureLightmapUploadBuffer (GLsizeiptr size)
+{
+	GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+
+	if (!gl_buffer_storage_able)
+	        return false;
+
+	if (lightmap_upload_pbo && size > lightmap_upload_pbo_size)
+	        TexMgr_DestroyLightmapUploadBuffer ();
+
+	if (!lightmap_upload_pbo)
+	{
+	        GL_GenBuffersFunc (1, &lightmap_upload_pbo);
+	        lightmap_upload_pbo_size = size;
+	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+	        GL_ObjectLabelFunc (GL_BUFFER, lightmap_upload_pbo, -1, "lightmap upload");
+	        GL_BufferStorageFunc (GL_PIXEL_UNPACK_BUFFER, size, NULL, flags);
+	        lightmap_upload_ptr = (byte *) GL_MapBufferRangeFunc (GL_PIXEL_UNPACK_BUFFER, 0, size, flags);
+	        if (!lightmap_upload_ptr)
+	        {
+	                TexMgr_DestroyLightmapUploadBuffer ();
+	                return false;
+	        }
+	}
+	else
+	        GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
+
+	return lightmap_upload_ptr != NULL;
+}
+
+/*
+================
+TexMgr_LoadLightmap -- handles lightmap data
+================
+*/
+static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
+{
+	qboolean use_mipmaps = (r_lightmap_mipmaps.value > 0.f) && (glt->flags & TEXPREF_MIPMAP);
+	qboolean use_half = (r_lightmap16f.value > 0.f) && (!strstr(glt->name, "lightmap_dir"));
+	qboolean use_srgb = TexMgr_LightmapUsesSRGB ();
+	if (use_srgb)
+		glt->flags |= TEXPREF_SRGB;
+
+	// upload it
+	glt->compression = 1;
+	GL_Bind (GL_TEXTURE0, glt);
+	if (use_half)
+	{
+		glt->internal_format = GL_RGBA16F;
+	        size_t pixels = (size_t)glt->width * glt->height * 4;
+	        GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
+	        if (!float_data)
+	                Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
+	        for (size_t idx = 0; idx < pixels; idx++)
+	        {
+	                float value = data[idx] * (1.0f / 255.0f);
+	                if (use_srgb)
+	                        value = TexMgr_SRGBToLinear (value);
+	                float_data[idx] = value;
+	        }
+	        GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
+	        free (float_data);
+	}
+	else
+	{
+		glt->internal_format = use_srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+	        GLsizeiptr upload_size = (GLsizeiptr) glt->width * glt->height * 4;
+	        if (TexMgr_EnsureLightmapUploadBuffer (upload_size))
+	        {
+	                glTexImage2D (glt->target, 0, glt->internal_format, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, NULL);
+	                memcpy (lightmap_upload_ptr, data, upload_size);
+	                glTexSubImage2D (glt->target, 0, 0, 0, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, (const GLvoid *) 0);
+	                GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
+	        }
+	        else
+	                GL_TexImage (glt, 0, glt->internal_format, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	}
+
+#ifdef GL_EXT_texture_sRGB_decode
+        glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT,
+                        use_srgb ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
+#endif
+
+	TexMgr_LogTextureUpload (glt);
+
+	// set filter modes
+	TexMgr_SetFilterModes (glt);
+
+	if (use_mipmaps)
+	{
+		GL_GenerateMipmapFunc (glt->target);
+		glTexParameteri (glt->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri (glt->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+	else
+	{
+		glTexParameteri (glt->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri (glt->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+}
+
+/*
+================
+TexMgr_LoadImageEx -- the one entry point for loading all textures
+================
+*/
+gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, int height, int depth, enum srcformat format,
+			       byte *data, const char *source_file, src_offset_t source_offset, unsigned flags)
+{
+	unsigned short crc = 0;
+	gltexture_t *glt = NULL;
+	int mark;
+
+	if (isDedicated)
+		return NULL;
+
+	// cubemaps/arrays are only partially implemented, disable unsupported flags
+	if (flags & (TEXPREF_ARRAY | TEXPREF_CUBEMAP))
+		flags = (flags & ~(TEXPREF_OVERWRITE | TEXPREF_PAD)) | TEXPREF_NOPICMIP;
+
+	// cache check
+	if (data && (flags & TEXPREF_OVERWRITE))
+	{
+		switch (format)
+		{
+		case SRC_INDEXED:
+			crc = CRC_Block(data, width * height * depth);
+			break;
+		case SRC_LIGHTMAP:
+			crc = CRC_Block(data, width * height * depth * lightmap_bytes);
+			break;
+		case SRC_RGBA:
+			crc = CRC_Block(data, width * height * depth * 4);
+			break;
+		default: /* not reachable but avoids compiler warnings */
+			crc = 0;
+			break;
+		}
+
+		if ((glt = TexMgr_FindTexture (owner, name)) && glt->source_crc == crc)
+			return glt;
+	}
+
+	if (!glt)
+		glt = TexMgr_NewTexture ();
+
+	// copy data
+	glt->owner = owner;
+	if (flags & TEXPREF_CUBEMAP)
+		glt->target = GL_TEXTURE_CUBE_MAP;
+	else if (flags & TEXPREF_ARRAY)
+		glt->target = GL_TEXTURE_2D_ARRAY;
+	else
+		glt->target = GL_TEXTURE_2D;
+	q_strlcpy (glt->name, name, sizeof(glt->name));
+	glt->width = width;
+	glt->height = height;
+	glt->depth = depth;
+	glt->compression = 1;
+	glt->flags = flags;
+	if (TexMgr_ShouldUseSRGB (name, format, flags, source_file))
+		glt->flags |= TEXPREF_SRGB;
+	glt->shirt = -1;
+	glt->pants = -1;
+	q_strlcpy (glt->source_file, source_file, sizeof(glt->source_file));
+        glt->source_offset = source_offset;
+        glt->source_format = format;
+        glt->source_width = width;
+        glt->source_height = height;
+        glt->source_crc = crc;
+        glt->mipmap = 0;
+        glt->internal_format = 0;
+
+	//upload it
+	mark = Hunk_LowMark();
+
+	switch (glt->source_format)
+	{
+	case SRC_INDEXED:
+		TexMgr_LoadImage8 (glt, data);
+		break;
+	case SRC_LIGHTMAP:
+		TexMgr_LoadLightmap (glt, data);
+		break;
+	case SRC_RGBA:
+		TexMgr_LoadImage32 (glt, (unsigned *)data);
+		break;
+	}
+
+	GL_ObjectLabelFunc (GL_TEXTURE, glt->texnum, -1, glt->name);
+	if (flags & TEXPREF_BINDLESS && gl_bindless_able)
+	{
+		glt->bindless_handle = GL_GetTextureHandleARBFunc (glt->texnum);
+		GL_MakeTextureHandleResidentARBFunc (glt->bindless_handle);
+	}
+
+	Hunk_FreeToLowMark(mark);
+
+	return glt;
+}
+
+/*
+================
+TexMgr_LoadImage
+================
+*/
+gltexture_t *TexMgr_LoadImage (qmodel_t *owner, const char *name, int width, int height, enum srcformat format,
+			       byte *data, const char *source_file, src_offset_t source_offset, unsigned flags)
+{
+	return TexMgr_LoadImageEx (owner, name, width, height, 1, format, data, source_file, source_offset, flags);
+}
+
+
+/*
+================================================================================
+
+	COLORMAPPING AND TEXTURE RELOADING
+
+================================================================================
+*/
+
+/*
+================
+TexMgr_ReloadImage -- reloads a texture, and colormaps it if needed
+================
+*/
+void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants)
+{
+	byte	translation[256];
+	byte	*src, *dst, *data = NULL, *translated;
+	int		mark, size, i;
+	enum srcformat fmt = glt->source_format;
+
+//
+// get source data
+//
+	mark = Hunk_LowMark ();
+
+	if (glt->source_file[0] && glt->source_offset) {
+		//lump inside file
+		FILE *f;
+		int sz;
+		COM_FOpenFile(glt->source_file, &f, NULL);
+		if (!f) goto invalid;
+		fseek (f, glt->source_offset, SEEK_CUR);
+		size = glt->source_width * glt->source_height;
+		/* should be SRC_INDEXED, but no harm being paranoid:  */
+		if (glt->source_format == SRC_RGBA) {
+			size *= 4;
+		}
+		else if (glt->source_format == SRC_LIGHTMAP) {
+			size *= lightmap_bytes;
+		}
+		data = (byte *) Hunk_AllocNoFill (size);
+		sz = (int) fread (data, 1, size, f);
+		fclose (f);
+		if (sz != size) {
+			Hunk_FreeToLowMark(mark);
+			Host_Error("Read error for %s", glt->name);
+		}
+	}
+	else if (glt->source_file[0] && !glt->source_offset) {
+		data = Image_LoadImage (glt->source_file, (int *)&glt->source_width, (int *)&glt->source_height, &fmt); //simple file
+	}
+	else if (!glt->source_file[0] && glt->source_offset) {
+		data = (byte *) glt->source_offset; //image in memory
+	}
+	if (!data && shirt > -1 && pants > -1) {
+invalid:	Con_Printf ("TexMgr_ReloadImage: invalid source for %s\n", glt->name);
+		Hunk_FreeToLowMark(mark);
+		return;
+	}
+
+	if (fmt != glt->source_format)
+		Sys_Error ("Texture %s changed format from %i to %i", glt->name, glt->source_format, fmt);
+
+	glt->width = glt->source_width;
+	glt->height = glt->source_height;
+//
+// apply shirt and pants colors
+//
+// if shirt and pants are -1,-1, use existing shirt and pants colors
+// if existing shirt and pants colors are -1,-1, don't bother colormapping
+	if (shirt > -1 && pants > -1)
+	{
+		if (glt->source_format == SRC_INDEXED)
+		{
+			glt->shirt = shirt;
+			glt->pants = pants;
+		}
+		else
+			Con_Printf ("TexMgr_ReloadImage: can't colormap a non SRC_INDEXED texture: %s\n", glt->name);
+	}
+	if (glt->shirt > -1 && glt->pants > -1)
+	{
+		//create new translation table
+		for (i = 0; i < 256; i++)
+			translation[i] = i;
+
+		shirt = glt->shirt * 16;
+		if (shirt < 128)
+		{
+			for (i = 0; i < 16; i++)
+				translation[TOP_RANGE+i] = shirt + i;
+		}
+		else
+		{
+			for (i = 0; i < 16; i++)
+				translation[TOP_RANGE+i] = shirt+15-i;
+		}
+
+		pants = glt->pants * 16;
+		if (pants < 128)
+		{
+			for (i = 0; i < 16; i++)
+				translation[BOTTOM_RANGE+i] = pants + i;
+		}
+		else
+		{
+			for (i = 0; i < 16; i++)
+				translation[BOTTOM_RANGE+i] = pants+15-i;
+		}
+
+		//translate texture
+		size = glt->width * glt->height;
+		dst = translated = (byte *) Hunk_AllocNoFill (size);
+		src = data;
+
+		for (i = 0; i < size; i++)
+			*dst++ = translation[*src++];
+
+		data = translated;
+	}
+//
+// upload it
+//
+	GL_DeleteTexture (glt);
+	glGenTextures (1, &glt->texnum);
+
+	switch (glt->source_format)
+	{
+	case SRC_INDEXED:
+		TexMgr_LoadImage8 (glt, data);
+		break;
+	case SRC_LIGHTMAP:
+		TexMgr_LoadLightmap (glt, data);
+		break;
+	case SRC_RGBA:
+		TexMgr_LoadImage32 (glt, (unsigned *)data);
+		break;
+	}
+
+	GL_ObjectLabelFunc (GL_TEXTURE, glt->texnum, -1, glt->name);
+	if (glt->flags & TEXPREF_BINDLESS && gl_bindless_able)
+	{
+		glt->bindless_handle = GL_GetTextureHandleARBFunc (glt->texnum);
+		GL_MakeTextureHandleResidentARBFunc (glt->bindless_handle);
+	}
+
+	Hunk_FreeToLowMark(mark);
+}
+
+/*
+================
+TexMgr_ReloadImages -- reloads all texture images. called only by vid_restart
+================
+*/
+void TexMgr_ReloadImages (void)
+{
+	gltexture_t *glt;
+
+	TexMgr_CreateSamplers ();
+
+// ericw -- tricky bug: if the hunk is almost full, an allocation in TexMgr_ReloadImage
+// triggers cache items to be freed, which calls back into TexMgr to free the
+// texture. If this frees 'glt' in the loop below, the active_gltextures
+// list gets corrupted.
+// A test case is jam3_tronyn.bsp with -heapsize 65536, and do several mode
+// switches/fullscreen toggles
+// 2015-09-04 -- Cache_Flush workaround was causing issues (http://sourceforge.net/p/quakespasm/bugs/10/)
+// switching to a boolean flag.
+	in_reload_images = true;
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+	{
+		glGenTextures(1, &glt->texnum);
+		TexMgr_ReloadImage (glt, -1, -1);
+	}
+
+	in_reload_images = false;
+}
+
+/*
+================
+TexMgr_ReloadNobrightImages -- reloads all texture that were loaded with the nobright palette.  called when gl_fullbrights changes
+================
+*/
+void TexMgr_ReloadNobrightImages (void)
+{
+	gltexture_t *glt;
+
+	for (glt = active_gltextures; glt; glt = glt->next)
+		if (glt->flags & (TEXPREF_NOBRIGHT|TEXPREF_ALPHABRIGHT))
+			TexMgr_ReloadImage(glt, -1, -1);
+}
+
+/*
+================================================================================
+
+	TEXTURE BINDING / TEXTURE UNIT SWITCHING
+
+================================================================================
+*/
+
+static GLuint	currenttexture[4]; // to avoid unnecessary texture sets
+static GLenum	currenttexunit = GL_TEXTURE0_ARB;
+
+/*
+================
+GL_SelectTexture
+================
+*/
+static void GL_SelectTexture (GLenum texunit)
+{
+	if (texunit == currenttexunit)
+		return;
+
+	GL_ActiveTextureFunc(texunit);
+	currenttexunit = texunit;
+}
+
+/*
+================
+GL_Bind
+================
+*/
+qboolean GL_Bind (GLenum texunit, gltexture_t *texture)
+{
+	if (!texture)
+		texture = nulltexture;
+	if (!GL_BindNative (texunit, texture->target, texture->texnum))
+		return false;
+	texture->visframe = r_framecount;
+	return true;
+}
+
+/*
+================
+GL_BindTextures
+
+Wrapper around glBindTextures with fallback
+if ARB_multi_bind is not present
+================
+*/
+void GL_BindTextures (GLuint first, GLsizei count, gltexture_t **textures)
+{
+	GLuint handles[8];
+	GLsizei i;
+
+	if (gl_multi_bind_able && count < countof (handles))
+	{
+		for (i = 0; i < count; i++)
+		{
+			gltexture_t *tex = textures[i];
+			if (!tex)
+				tex = nulltexture;
+			tex->visframe = r_framecount;
+			handles[i] = tex->texnum;
+			if (i + first < countof (currenttexture))
+				currenttexture[i + first] = tex->texnum;
+		}
+		GL_BindTexturesFunc (first, count, handles);
+	}
+	else
+	{
+		for (i = 0; i < count; i++)
+			GL_Bind (GL_TEXTURE0 + first + i, textures[i]);
+	}
+}
+
+/*
+================
+GL_BindNative
+================
+*/
+qboolean GL_BindNative (GLenum texunit, GLenum type, GLuint handle)
+{
+	GLuint index = texunit - GL_TEXTURE0;
+	SDL_assert(texunit >= GL_TEXTURE0);
+
+	if (index < countof (currenttexture))
+	{
+		if (currenttexture[index] == handle)
+			return false;
+		currenttexture[index] = handle;
+	}
+
+	GL_SelectTexture (texunit);
+	glBindTexture (type, handle);
+
+	return true;
+}
+
+/*
+================
+GL_DeleteNativeTexture -- ericw
+
+Wrapper around glDeleteTextures that also clears the given texture number
+from our per-TMU cached texture binding table.
+================
+*/
+void GL_DeleteNativeTexture (GLuint texnum)
+{
+	int i;
+	for (i = 0; i < countof(currenttexture); i++)
+		if (texnum == currenttexture[i])
+			currenttexture[i] = 0;
+	glDeleteTextures (1, &texnum);
+}
+
+/*
+================
+GL_DeleteTexture -- ericw
+================
+*/
+static void GL_DeleteTexture (gltexture_t *texture)
+{
+	if (!texture->texnum)
+		return;
+	if (texture->bindless_handle)
+	{
+		GL_MakeTextureHandleNonResidentARBFunc (texture->bindless_handle);
+		texture->bindless_handle = 0;
+	}
+	GL_DeleteNativeTexture (texture->texnum);
+	texture->texnum = 0;
+}
+
+/*
+================
+GL_ClearBindings -- ericw
+================
+*/
+void GL_ClearBindings(void)
+{
+	int i;
+
+	memset (&currenttexture, 0, sizeof (currenttexture));
+	if (gl_multi_bind_able)
+	{
+		GL_BindTexturesFunc (0, countof (currenttexture), NULL);
+		GL_BindSamplersFunc (0, countof (currenttexture), NULL);
+	}
+	else
+		for (i = 0; i < countof (currenttexture); i++)
+		{
+			GL_SelectTexture (GL_TEXTURE0 + i);
+			glBindTexture (GL_TEXTURE_2D, 0);
+			GL_BindSamplerFunc (i, 0);
+		}
+}
+
+/*
+================================================================================
+
+	PALETTIZATION
+
+================================================================================
+*/
+
+GLuint gl_palette_lut;
+GLuint gl_palette_buffer[2]; // original + postprocessed
+
+static unsigned int cached_palette[256];
+static softemu_metric_t cached_softemu_metric = SOFTEMU_METRIC_INVALID;
+static float cached_contrast;
+static vec4_t cached_blendcolor;
+
+/*
+================
+GLPalette_DeleteResources
+================
+*/
+static void GLPalette_InvalidateRemapped (void)
+{
+	int i;
+	cached_contrast = -1.f;
+	for (i = 0; i < 4; i++)
+		cached_blendcolor[i] = -1.f;
+}
+
+/*
+================
+GLPalette_DeleteResources
+================
+*/
+void GLPalette_DeleteResources (void)
+{
+	GL_DeleteNativeTexture (gl_palette_lut);
+	GL_DeleteBuffer (gl_palette_buffer[1]);
+	GL_DeleteBuffer (gl_palette_buffer[0]);
+	gl_palette_lut = 0;
+	gl_palette_buffer[0] = 0;
+	gl_palette_buffer[1] = 0;
+}
+
+/*
+================
+GLPalette_CreateResources
+================
+*/
+void GLPalette_CreateResources (void)
+{
+	int i;
+
+	glGenTextures (1, &gl_palette_lut);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, gl_palette_lut);
+	GL_ObjectLabelFunc (GL_TEXTURE, gl_palette_lut, -1, "palette lut");
+	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_R8UI, 128, 128, 128, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+	for (i = 0; i < 2; i++)
+		gl_palette_buffer[i] =
+			GL_CreateBuffer (GL_SHADER_STORAGE_BUFFER, GL_STATIC_DRAW,
+				i ? "remapped palette buffer" : "src palette buffer",
+				256 * sizeof (GLuint), NULL
+			);
+
+	memset (cached_palette, 0, sizeof (cached_palette));
+	cached_softemu_metric = SOFTEMU_METRIC_INVALID;
+	GLPalette_InvalidateRemapped ();
+}
+
+/*
+================
+GLPalette_UpdateLookupTable
+================
+*/
+void GLPalette_UpdateLookupTable (void)
+{
+	softemu_metric_t metric;
+	int i;
+
+	if (r_softemu_metric.value < 0.f)
+	{
+		qboolean oklab =
+			softemu != SOFTEMU_BANDED ||
+			cls.state != ca_connected ||
+			cls.signon != SIGNONS ||
+			!cl.worldmodel ||
+			cl.worldmodel->litfile
+		;
+		metric = oklab ? SOFTEMU_METRIC_OKLAB : SOFTEMU_METRIC_NAIVE;
+	}
+	else
+	{
+		metric = (int)r_softemu_metric.value;
+		metric = CLAMP (0, (int)metric, SOFTEMU_METRIC_COUNT - 1);
+	}
+
+	SDL_assert ((unsigned)metric < SOFTEMU_METRIC_COUNT);
+
+	if (cached_softemu_metric == metric && !memcmp (cached_palette, d_8to24table, sizeof (cached_palette)))
+		return;
+
+	cached_softemu_metric = metric;
+	memcpy (cached_palette, d_8to24table, sizeof (cached_palette));
+	GLPalette_InvalidateRemapped ();
+
+	GL_UseProgramFunc (glprogs.palette_init[metric]);
+	GL_BindImageTextureFunc (0, gl_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R8UI);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof (GLuint), d_8to24table);
+
+	for (i = 0; i < 128; i++)
+	{
+		GL_Uniform1iFunc (0, i << 16);
+		GL_DispatchComputeFunc (1, 128, 1);
+	}
+
+	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
+}
+
+/*
+================
+GLPalette_Postprocess
+
+Applies viewblend, gamma, and contrast if needed
+
+Returns index of palette buffer to use:
+0 = original palette
+1 = postprocessed palette
+================
+*/
+	int GLPalette_Postprocess (void)
+{
+	const float *blend;
+	
+	if (!softemu)
+		return 0;
+
+	blend = (v_blend[3] && gl_polyblend.value) ? v_blend : vec4_origin;
+
+	/* can we use the original palette? */
+	{
+		float contrast = r_color_contrast.value;
+		if (contrast == 1.f && blend[3] == 0.f)
+			return 0;
+
+		/* no change since last time? */
+		if (cached_contrast == contrast &&
+		memcmp (cached_blendcolor, blend, 4 * sizeof (float)) == 0)
+			return 1;
+
+		cached_contrast = contrast;
+	}
+	memcpy (cached_blendcolor, blend, 4 * sizeof (float));
+
+	GL_BeginGroup ("Postprocess palette");
+
+	GL_UseProgram (glprogs.palette_postprocess);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_palette_buffer[1], 0, 256 * sizeof (GLuint));
+	{
+		float contrast = CLAMP (0.1f, r_color_contrast.value, 2.0f);
+		GL_Uniform1fFunc (0, contrast);
+	}
+	GL_Uniform4fvFunc (1, 1, blend);
+	GL_DispatchComputeFunc (256/64, 1, 1);
+	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+
+	GL_EndGroup ();
+
+	return 1;
+}

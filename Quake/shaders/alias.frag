@@ -1,13 +1,9 @@
-#include "frame_uniforms.glsl"
-
 struct InstanceData
 {
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	AmbientColor; // xyz=AmbientColor
-	vec4	UnusedDynLightPad;
-	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
+	vec4	DLightColor; // xyz=DLightColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -16,22 +12,19 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	AliasViewProj;
-	mat4	AliasPrevViewProj;
-	vec3	AliasEyePos;
-	float	_AliasPad0;
-	vec4	AliasFog;
-	float	AliasScreenDither;
-	float	AliasOverbright;
+	mat4	ViewProj;
+	mat4	PrevViewProj;
+	vec3	EyePos;
+	float	_Pad0;
+	vec4	Fog;
+	float	ScreenDither;
+	float	Overbright;
 	float	ModelHalfLambert;
-	float	RimViewmodelScale;
-	vec4	RimParams0;
-	vec4	RimParams1;
-	vec4	RimParams2;
-	mat4	AliasShadowViewProj;
-	vec4	AliasShadowParams;
-	vec4	AliasShadowDebug;
-	vec4	AliasShadowSunDir;
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -54,9 +47,9 @@ float bayer(ivec2 coord)
 
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-        float fog = exp2(-abs(AliasFog.w) * dot(p, p));
+        float fog = exp2(-abs(Fog.w) * dot(p, p));
         fog = clamp(fog, 0.0, 1.0);
-        return mix(AliasFog.rgb, clr, fog);
+        return mix(Fog.rgb, clr, fog);
 }
 
 // Hash without Sine
@@ -107,10 +100,7 @@ layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2D ShadowMap;
-layout(binding=6) uniform samplerCube ReflectionTex;
 
-#include "clustered_lighting.glsl"
-#include "envlight.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
 
@@ -125,12 +115,6 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
-// Per-instance lighting inputs are linear RGB intensities.
-// Do not apply per-material gamma here; final transfer is handled globally
-// by postprocess / framebuffer-sRGB selection.
-layout(location=7) in vec3 in_static_light;
-layout(location=8) in vec3 in_amb_light;
-layout(location=9) flat in vec4 in_env_params;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -171,61 +155,6 @@ layout(location=9) flat in vec4 in_env_params;
         layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
-
-float saturate(float x)
-{
-	return clamp(x, 0.0, 1.0);
-}
-
-float luminance(vec3 rgb)
-{
-	return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-}
-
-vec3 normalize_safe(vec3 v)
-{
-	float len2 = dot(v, v);
-	if (len2 < 1e-12)
-		return vec3(0.0);
-	return v * inversesqrt(len2);
-}
-
-vec3 EvaluateAliasClusteredLights(vec3 world_pos, vec3 normal, vec2 screen_pos)
-{
-	float view_depth = abs((ClusterViewMatrix * vec4(world_pos, 1.0)).z);
-	ClusterHeader header;
-	uint cluster_count;
-	int cluster_idx;
-	if (!ClusterResolve(screen_pos, view_depth, cluster_idx, header, cluster_count))
-		return vec3(0.0);
-	if (cluster_count == 0u)
-		return vec3(0.0);
-
-	vec3 dynamic_light = vec3(0.0);
-
-	for (uint i = 0u; i < cluster_count; ++i)
-	{
-		uint light_id;
-		PackedLight pl;
-		if (!ClusterFetchLight(header, i, light_id, pl))
-			continue;
-
-		vec3 light_vec = pl.posRadius.xyz - world_pos;
-		float dist = length(light_vec);
-		float radius = pl.posRadius.w;
-		if (radius <= 0.0 || dist >= radius)
-			continue;
-
-		float nd = dist / max(radius, 1e-4);
-		float attenuation = pow(1.0 - clamp(nd, 0.0, 1.0), 1.5);
-		vec3 light_dir = (dist > 1e-6) ? (light_vec / dist) : vec3(0.0, 0.0, 1.0);
-		float ndotl = max(dot(normal, light_dir), 0.0);
-		dynamic_light += pl.colorIntensity.rgb * (attenuation * ndotl);
-	}
-
-	return dynamic_light;
-}
-
 void main()
 {
         vec2 uv = in_texcoord;
@@ -233,22 +162,16 @@ void main()
         float shadow_range = 1.0;
         float shadow_term = 1.0;
 	vec4 lit_color = in_color;
-	vec3 L_static = max(in_static_light, vec3(0.0));
-	vec3 L_amb = max(in_amb_light, vec3(0.0));
-	vec3 N_lighting = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
-	vec3 world_pos = in_pos + AliasEyePos;
-	vec3 clustered_dyn = EvaluateAliasClusteredLights(world_pos, N_lighting, gl_FragCoord.xy);
-	vec3 L_dyn = clustered_dyn;
-	lit_color.rgb += clustered_dyn;
 
 	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
+		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
 		if (ShadowDebug.y > 1.5)
 		{
-			int shadow_debug_mode = int(ShadowDebug.y + 0.5);
-			out_fragcolor = vec4(ShadowDebugVisualize(shadow_debug_mode, shadow_term), 1.0);
+			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
+			out_fragcolor = vec4(vec3(debug_value), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -287,66 +210,6 @@ void main()
                 float ghost = pow(1.0 - d, 3.0) * 0.2;
                 result.rgb += ghost * vec3(0.5, 0.7, 1.3);
         }
-
-	vec3 N_env = N_lighting;
-	vec3 V_env = normalize_safe(-in_pos);
-	float ambient_luma = EnvLightLuma(clamp(L_amb / max(AliasOverbright, 1e-4), 0.0, 1.0));
-	float indoor_factor = DeriveIndoorFactor(ambient_luma, in_env_params.z, shadow_term);
-	float env_mask = max(in_env_params.x, 0.0);
-	vec3 env_spec = EvaluateReflectionProbe(
-		ReflectionTex,
-		1.0,
-		in_pos + EyePos,
-		N_env,
-		V_env,
-		in_env_params.y * env_mask,
-		indoor_factor,
-		in_env_params.w * env_mask);
-	result.rgb += env_spec;
-
-	if (RimParams0.x > 0.5)
-	{
-		vec3 N = normalize_safe(gl_FrontFacing ? in_normal : -in_normal);
-		vec3 V = normalize_safe(-in_pos);
-		vec3 L = normalize_safe(-ShadowSunDir.xyz);
-		// Keep shading normals oriented with the geometric face normal so inconsistent
-		// asset normals don't force a full rim contribution on front-facing polygons.
-		vec3 Ng = normalize_safe(cross(dFdx(in_pos), dFdy(in_pos)));
-		if (!gl_FrontFacing)
-			Ng = -Ng;
-		if (dot(N, Ng) < 0.0)
-			N = -N;
-		float ndv = saturate(dot(N, V));
-		float rim_raw = pow(saturate(1.0 - ndv), RimParams0.z) * RimParams0.y;
-		float ndotl = saturate(dot(N, L));
-		float gate = saturate((1.0 - ndotl) * RimParams1.z + RimParams1.w);
-
-		vec3 direct_static = RimParams0.w * L_static * shadow_term;
-		vec3 direct_dyn = RimParams1.x * L_dyn;
-		vec3 direct_rgb = direct_static + direct_dyn;
-		vec3 ambient_rgb = L_amb;
-		float rim = rim_raw * gate;
-		if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
-			rim *= RimViewmodelScale;
-
-		vec3 rim_light_preclamp = rim * (direct_rgb + RimParams1.y * ambient_rgb) * RimParams2.x;
-		vec3 local_limit_rgb = (RimParams2.y * direct_rgb) + (RimParams2.z * ambient_rgb);
-		vec3 rim_light = min(rim_light_preclamp, local_limit_rgb);
-
-		result.rgb += rim_light;
-
-		if (RimParams2.w > 0.5)
-		{
-			if (RimParams2.w < 1.5)
-				result.rgb = vec3(rim);
-			else if (RimParams2.w < 2.5)
-				result.rgb = vec3(ndv);
-			else
-				result.rgb = vec3(ndotl);
-			result.a = 1.0;
-		}
-	}
-
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);
@@ -361,13 +224,13 @@ void main()
 #endif
 #if MODE == 1 || MODE == 2
 	// Note: sign bit is used as overbright flag
-	if (abs(AliasFog.w) > 0.)
+	if (abs(Fog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * AliasScreenDither;
+		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
 		out_fragcolor.rgb *= out_fragcolor.rgb;
 	}
 #else
-	out_fragcolor.rgb += SUPPRESS_BANDING() * AliasScreenDither;
+	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
 }

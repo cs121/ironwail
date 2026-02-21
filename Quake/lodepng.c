@@ -28,7 +28,6 @@ The manual and changelog are in the header file "lodepng.h"
 Rename this file to lodepng.cpp to use it for C++, or to lodepng.c to use it for C.
 */
 
-#include "quakedef.h"
 #include "lodepng.h"
 
 #ifdef LODEPNG_COMPILE_DISK
@@ -101,23 +100,19 @@ void lodepng_free(void* ptr);
 
 /* convince the compiler to inline a function, for use when this measurably improves performance */
 /* inline is not available in C90, but use it when supported by the compiler */
-#ifndef LODEPNG_INLINE
 #if (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)) || (defined(__cplusplus) && (__cplusplus >= 199711L))
 #define LODEPNG_INLINE inline
 #else
 #define LODEPNG_INLINE /* not available */
 #endif
-#endif
 
 /* restrict is not available in C90, but use it when supported by the compiler */
-#ifndef LODEPNG_RESTRICT
 #if (defined(__GNUC__) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))) ||\
     (defined(_MSC_VER) && (_MSC_VER >= 1400)) || \
     (defined(__WATCOMC__) && (__WATCOMC__ >= 1250) && !defined(__cplusplus))
 #define LODEPNG_RESTRICT __restrict
 #else
 #define LODEPNG_RESTRICT /* not available */
-#endif
 #endif
 
 /* Replacements for C library functions such as memcpy and strlen, to support platforms

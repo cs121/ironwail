@@ -1,13 +1,9 @@
-#include "frame_uniforms.glsl"
-
 struct InstanceData
 {
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	AmbientColor; // xyz=AmbientColor
-	vec4	UnusedDynLightPad;
-	vec4	EnvMapParams; // x=enable y=glossMask z=indoorHint w=intensity
+	vec4	DLightColor; // xyz=DLightColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -16,22 +12,19 @@ struct InstanceData
 
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
-	mat4	AliasViewProj;
-	mat4	AliasPrevViewProj;
-	vec3	AliasEyePos;
-	float	_AliasPad0;
-	vec4	AliasFog;
-	float	AliasScreenDither;
-	float	AliasOverbright;
+	mat4	ViewProj;
+	mat4	PrevViewProj;
+	vec3	EyePos;
+	float	_Pad0;
+	vec4	Fog;
+	float	ScreenDither;
+	float	Overbright;
 	float	ModelHalfLambert;
-	float	RimViewmodelScale;
-	vec4	RimParams0;
-	vec4	RimParams1;
-	vec4	RimParams2;
-	mat4	AliasShadowViewProj;
-	vec4	AliasShadowParams;
-	vec4	AliasShadowDebug;
-	vec4	AliasShadowSunDir;
+	float	_Pad1;
+	mat4	ShadowViewProj;
+	vec4	ShadowParams;
+	vec4	ShadowDebug;
+	vec4	ShadowSunDir;
 	InstanceData instances[];
 };
 
@@ -103,10 +96,8 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
-layout(location=7) out vec3 out_static_light;
-layout(location=8) out vec3 out_amb_light;
-layout(location=9) flat out vec4 out_env_params;
 
+const int ALIAS_FLAG_VIEWMODEL = 2;
 
 void main()
 {
@@ -119,13 +110,13 @@ void main()
 	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
-	vec4 curr_clip = AliasViewProj * vec4(world_vert, 1.0);
-	vec4 prev_clip = AliasPrevViewProj * vec4(prev_world_vert, 1.0);
+	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
+	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_flags = inst.Flags;
-	out_pos = world_vert - AliasEyePos;
+	out_pos = world_vert - EyePos;
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
@@ -136,14 +127,14 @@ void main()
         vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
         mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
         vec3 world_normal = normalize(world_orientation * blended_normal);
-        vec3 ambient = max(inst.AmbientColor.rgb, vec3(0.0));
-        float static_mix = mix(0.35, 1.0, lighting) * AliasOverbright;
-        vec3 litAmbient = ambient * 0.35 * AliasOverbright;
-        vec3 litStatic = ambient * max(static_mix - (0.35 * AliasOverbright), 0.0);
-        vec3 base_color = litAmbient + litStatic;
-        out_color = clamp(vec4(base_color, inst.LightColor.a), 0.0, AliasOverbright);
+        vec3 view_dir = normalize(-out_pos);
+        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
+        vec3 litDlight = inst.DLightColor.rgb * lighting;
+        vec3 base_color = litAmbient + litDlight;
+        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
+        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
+        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
 	out_normal = world_normal;
-	out_static_light = litStatic;
-	out_amb_light = litAmbient;
-	out_env_params = inst.EnvMapParams;
 }

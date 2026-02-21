@@ -23,8 +23,8 @@
  */
 
 #include "quakedef.h"
-#include "sound/snd_codec.h"
-#include "sound/snd_codeci.h"
+#include "snd_codec.h"
+#include "snd_codeci.h"
 #include "bgmusic.h"
 
 #define MUSIC_DIRNAME	"music"

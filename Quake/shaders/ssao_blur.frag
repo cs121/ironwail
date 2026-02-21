@@ -11,8 +11,6 @@ layout(location=6) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2:
 layout(location=7) uniform int u_yFlip; // 0: none, 1: flip Y
 layout(location=8) uniform mat4 u_invProj;
 
-#include "depth_common.glsl"
-
 layout(location=0) out vec4 outColor;
 
 vec2 ApplyYFlip(vec2 uv)
@@ -98,11 +96,28 @@ ivec2 ScreenPixelFromUv(vec2 uv)
         return ClampScreenPixel(screenPixel);
 }
 
+float DepthToNdcZ(float depth, float reversed, int mode)
+{
+        float raw = depth;
+        if (mode == 1)
+                raw = 1.0 - raw;
+        if (reversed > 0.5)
+        {
+                if (mode == 2)
+                        raw = 1.0 - raw;
+                return raw;
+        }
+        float ndc = raw * 2.0 - 1.0;
+        if (mode == 2)
+                ndc = -ndc;
+        return ndc;
+}
+
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
 float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
 {
         // SSAO FIX: Use inverse projection to keep blur depth comparisons consistent with SSAO reconstruction.
-        float ndcDepth = DepthRawToNdcDebug(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
+        float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
         vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
         vec4 view = u_invProj * clip;
         float w = view.w;
@@ -126,6 +141,15 @@ bool IsInvalidFloat(float v)
         return !(v > -1e20 && v < 1e20);
 }
 
+bool IsSkyDepth(float depth, vec4 depthParams)
+{
+        float reversed = depthParams.z;
+        float cutoff = depthParams.w;
+        if (reversed > 0.5)
+                return depth <= cutoff;
+        return depth >= cutoff;
+}
+
 float Gaussian(float x, float sigma)
 {
         float denom = max(2.0 * sigma * sigma, 1e-6);
@@ -146,7 +170,7 @@ void main()
         ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
         vec2 screenUv = ScreenUvFromPixel(screenPixel);
         float centerDepthRaw = DepthRawFromPixel(screenPixel);
-        if (DepthIsSkyDepth(centerDepthRaw, u_depthParams.z, u_depthParams.w))
+        if (IsSkyDepth(centerDepthRaw, u_depthParams))
         {
                 outColor = vec4(1.0);
                 return;
@@ -175,7 +199,7 @@ void main()
                 vec2 sampleUV = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
                 vec2 sampleDepthUv = ScreenUvFromAoUv(sampleUV);
                 float sampleDepthRaw = DepthRawFromUv(sampleDepthUv);
-                if (DepthIsSkyDepth(sampleDepthRaw, u_depthParams.z, u_depthParams.w))
+                if (IsSkyDepth(sampleDepthRaw, u_depthParams))
                         continue;
                 float sampleDepth = ViewZFromDepth(sampleDepthUv, sampleDepthRaw, u_depthParams.z > 0.5);
                 if (IsInvalidFloat(sampleDepth))

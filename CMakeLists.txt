@@ -30,14 +30,7 @@ if (WIN32)
 	find_package(BundledCODECS)
 endif()
 
-file(GLOB IWAIL_SRC CONFIGURE_DEPENDS
-    "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp"
-    "Quake/server/*.[ch]"
-    "Quake/sound/*.[ch]"
-    "Quake/renderer/*.[ch]"
-    "Quake/opengl/*.[ch]"
-    "Quake/net/*.[ch]"
-    "Quake/client/*.[ch]")
+file(GLOB IWAIL_SRC CONFIGURE_DEPENDS "Quake/*.c" "Quake/*.h" "Quake/*.cpp" "Quake/*.hpp")
 file(GLOB COMMON_SRC CONFIGURE_DEPENDS "common/*.c" "common/*.h")
 
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/bc7enc.c PROPERTIES LANGUAGE CXX)
@@ -47,38 +40,30 @@ list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
 
 if (UNIX)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/pl_win.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_wipx.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_wipx.h)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_wins.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_wins.h)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_win.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_win.h)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_wipx.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_wipx.h)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_wins.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_wins.h)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_win.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_win.h)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/sys_sdl_win.c)
 elseif (WIN32)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/pl_linux.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_bsd.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_bsd.h)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_udp.c)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net/net_udp.h)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_bsd.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_bsd.h)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_udp.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net_udp.h)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/sys_sdl_unix.c)
     list(APPEND IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Windows/QuakeSpasm.rc)
 endif()
 
 if (PC_MPG123_FOUND)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/sound/snd_mp3.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/snd_mp3.c)
 elseif (PC_MAD_FOUND)
-    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/sound/snd_mpg123.c)
+    list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/snd_mpg123.c)
 endif()
 
 add_executable(ironwail ${IWAIL_SRC} ${COMMON_SRC})
-target_include_directories(ironwail PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/server
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/sound
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/opengl
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/net
-    ${CMAKE_CURRENT_SOURCE_DIR}/Quake/client)
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
@@ -194,3 +179,4 @@ if (WIN32)
 				COMMAND_EXPAND_LISTS)
 	endif()
 endif()
+

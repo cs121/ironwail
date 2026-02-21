@@ -8,14 +8,11 @@ layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
-layout(binding=10) uniform sampler3D AtmosFroxelScatter;
-layout(binding=11) uniform sampler3D AtmosFroxelTransmittance;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
 };
 #include "frame_uniforms.glsl"
-#include "depth_common.glsl"
 
 uvec3 UnpackRGB8(uint c)
 {
@@ -71,13 +68,15 @@ float InterleavedGradientNoise(vec2 p)
 	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
-float Hash12(vec2 p)
+vec3 FilmGrainNoise(vec2 coord, float time, float seed, float colored)
 {
-	p = fract(p * vec2(0.1031, 0.1030));
-	p += dot(p, p.yx + 33.33);
-	return fract((p.x + p.y) * p.x);
+	vec2 base = coord + vec2(seed, seed * 0.37);
+	float n0 = tri(InterleavedGradientNoise(base + vec2(time * 11.1, time * 7.3)));
+	float n1 = tri(InterleavedGradientNoise(base + vec2(17.7 + time * 5.2, 3.1 + time * 9.2)));
+	float n2 = tri(InterleavedGradientNoise(base + vec2(8.3 + time * 6.7, 12.9 + time * 4.1)));
+	vec3 colorNoise = (vec3(n0, n1, n2) + n0) * 0.5;
+	return mix(vec3(n0), colorNoise, colored);
 }
-
 
 vec3 UchimuraTonemap(vec3 x)
 {
@@ -139,10 +138,12 @@ layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend 
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: screen-space darken strength, z: screen-space darken depth range, w: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
-layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug mode (0..5), z: sun x, w: sun y
+layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
+layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
+layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
+layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
-layout(location=19) uniform vec4 AOParams; // x: power, y: apply mode (0 final color), zw: reserved
 layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
@@ -151,10 +152,6 @@ layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
-layout(location=28) uniform vec4 AtmosFroxelParams0; // x: enabled, yzw: dimensions
-layout(location=29) uniform vec4 AtmosFroxelParams1; // x: downsample, y: z slices, z: z far, w: reserved
-layout(location=30) uniform vec4 FogDebugViews; // x density, y transmittance, z scattering, w light/step
-layout(location=31) uniform mat4 DoFInvProj;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -210,12 +207,20 @@ float SampleLinearDepth(vec2 fragPx, DepthSamplingInfo info)
         if (depthUV.x < 0.0 || depthUV.y < 0.0)
                 return 0.0;
         float rawDepth = texture(DepthTexture, depthUV).r;
-        float ndcDepth = DepthRawToNdc(rawDepth, DoFParams1.z);
-        vec4 clip = vec4(depthUV * 2.0 - 1.0, ndcDepth, 1.0);
-        vec4 view = DoFInvProj * clip;
-        float invW = (abs(view.w) > 1e-6) ? (1.0 / view.w) : 0.0;
-        float viewDepth = view.x * invW;
-        return max(viewDepth, 0.0);
+        float nearPlane = DoFParams1.x;
+        float farPlane = DoFParams1.y;
+        float reversed = DoFParams1.z;
+        if (reversed > 0.5)
+        {
+                float denom = nearPlane + rawDepth * (farPlane - nearPlane);
+                return (nearPlane * farPlane) / max(denom, 1e-6);
+        }
+        else
+        {
+                float ndcDepth = rawDepth * 2.0 - 1.0;
+                float denom = farPlane + nearPlane - ndcDepth * (farPlane - nearPlane);
+                return (2.0 * nearPlane * farPlane) / max(denom, 1e-6);
+        }
 }
 
 float FogTransmittanceFromDepth(float depth, float fogStrength)
@@ -374,23 +379,22 @@ void main()
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
 
-        int godrayDebugMode = int(floor(GodraysParams.y + 0.5));
-        if (godrayDebugMode == 2)
+        if (GodraysParams.z > 0.5)
+        {
+                vec4 source = texture(GodraysSourceTexture, uv);
+                if (GodraysParams.z < 1.5)
+                        out_fragcolor = vec4(source.rgb, 1.0);
+                else
+                        out_fragcolor = vec4(vec3(source.a), 1.0);
+                return;
+        }
+        if (GodraysParams.y > 0.5)
         {
                 vec3 maskColor = texture(GodraysMaskTexture, uv).rgb;
-                out_fragcolor = vec4(maskColor, 1.0);
-                return;
-        }
-        if (godrayDebugMode == 3)
-        {
-                vec3 depthViz = texture(GodraysMaskTexture, uv).rgb;
-                out_fragcolor = vec4(depthViz, 1.0);
-                return;
-        }
-        if (godrayDebugMode == 4)
-        {
-                vec3 shaftsColor = texture(GodraysTexture, uv).rgb;
-                out_fragcolor = vec4(shaftsColor, 1.0);
+                vec3 shaftsColor = vec3(0.0);
+                if (GodraysParams.x > 0.5)
+                        shaftsColor = texture(GodraysTexture, uv).rgb;
+                out_fragcolor = vec4(max(maskColor, shaftsColor), 1.0);
                 return;
         }
 
@@ -653,7 +657,6 @@ void main()
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
                                 float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
-                                float aoShaped = pow(clamp(aoDamped, 0.0, 1.0), max(AOParams.x, 0.01));
                                 if (ssaoDebugMode == 12)
                                 {
                                         float mask = centerOpaque ? (1.0 - ao) : 0.0;
@@ -665,7 +668,7 @@ void main()
                                 }
                                 else if (ssaoDebugMode == 14)
                                 {
-                                        color.rgb = vec3(aoShaped);
+                                        color.rgb = vec3(aoDamped);
                                 }
                                 else if (ssaoDebugMode == 11)
                                 {
@@ -716,11 +719,11 @@ void main()
                                 }
                                 else if (ssaoDebugMode > 0)
                                 {
-                                        color.rgb = vec3(aoShaped);
+                                        color.rgb = vec3(ao);
                                 }
                                 else if (centerOpaque)
                                 {
-                                        color.rgb *= mix(1.0, aoShaped, ssaoIntensity);
+                                        color.rgb *= mix(1.0, aoDamped, ssaoIntensity);
                                 }
                         }
                 }
@@ -748,17 +751,6 @@ void main()
         vec3 godraysColor = vec3(0.0);
         if (GodraysParams.x > 0.5)
                 godraysColor = texture(GodraysTexture, uv).rgb;
-        if (godrayDebugMode == 1)
-        {
-                float d = length(uv - GodraysParams.zw);
-                float marker = smoothstep(0.015, 0.0, d);
-                godraysColor += vec3(marker, marker * 0.25, 0.0);
-        }
-        if (godrayDebugMode == 5)
-        {
-                out_fragcolor = vec4(godraysColor, 1.0);
-                return;
-        }
         float exposure = max(HDRParams.y, 0.0);
         float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
         exposure *= exp2(exposureAdd);
@@ -766,54 +758,7 @@ void main()
         vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
         combined = max(combined, vec3(0.0));
         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
-        if (AtmosFroxelParams0.x > 0.5 && depthInfo.valid)
-        {
-                float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
-                float zFar = max(AtmosFroxelParams1.z, 1.0);
-                float zNorm = clamp(log2(depth + 1.0) / log2(zFar + 1.0), 0.0, 1.0);
-                float zSlicesF = max(AtmosFroxelParams1.y, 1.0);
-                int zSlices = int(zSlicesF + 0.5);
-                int maxSlice = clamp(int(floor(zNorm * zSlicesF)), 0, zSlices - 1);
-                vec3 accumScatter = vec3(0.0);
-                float accumT = 1.0;
-                for (int zi = 0; zi < 128; ++zi)
-                {
-                        if (zi > maxSlice || zi >= zSlices)
-                                break;
-                        float zf = (float(zi) + 0.5) / zSlicesF;
-                        vec3 froxelUVW = vec3(uv, zf);
-                        vec3 stepScatter = texture(AtmosFroxelScatter, froxelUVW).rgb;
-                        float stepTrans = clamp(texture(AtmosFroxelTransmittance, froxelUVW).r, 0.0, 1.0);
-                        accumScatter += accumT * stepScatter;
-                        accumT *= stepTrans;
-                }
-
-                int fogDbgMode = int(FogDebugViews.x + 0.5);
-                if (fogDbgMode == 1)
-                        combined = accumScatter;
-                else if (fogDbgMode == 2)
-                        combined = vec3(accumT);
-                else if (fogDbgMode == 3)
-                        combined = accumScatter;
-                else if (fogDbgMode == 4)
-                        combined = vec3(float(maxSlice + 1) / zSlicesF);
-                else if (fogDbgMode == 5)
-                {
-                        int dbgSlice = clamp(int(FogDebugViews.y * zSlicesF), 0, zSlices - 1);
-                        float zf = (float(dbgSlice) + 0.5) / zSlicesF;
-                        combined = texture(AtmosFroxelScatter, vec3(uv, zf)).rgb;
-                }
-                else if (fogDbgMode == 6)
-                {
-                        float gridViz = float(maxSlice + 1) / zSlicesF;
-                        vec2 cell = fract(uv * vec2(AtmosFroxelParams0.y, AtmosFroxelParams0.z));
-                        float edge = step(cell.x, 0.05) + step(cell.y, 0.05);
-                        combined = mix(vec3(gridViz), vec3(1.0, 0.6, 0.1), clamp(edge, 0.0, 1.0));
-                }
-                else
-                        combined = combined * clamp(accumT, 0.0, 1.0) + accumScatter;
-        }
-        else if (fogStrength > 0.0 && depthInfo.valid)
+        if (fogStrength > 0.0 && depthInfo.valid)
         {
                 float depth = SampleLinearDepth(vec2(pixel) + vec2(0.5), depthInfo);
                 float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
@@ -882,4 +827,36 @@ void main()
         out_fragcolor = vec4(mapped, 1.0);
 #endif // PALETTIZE
 
+	float grainAmount = clamp(FilmGrainParams0.x, 0.0, 1.0);
+	float grainDebug = FilmGrainParams1.z;
+	if (grainAmount > 0.0 || grainDebug > 0.5)
+	{
+		float grainSize = max(FilmGrainParams0.y, 0.01);
+		float grainSpeed = max(FilmGrainParams0.z, 0.0);
+		float lumaWeight = clamp(FilmGrainParams0.w, 0.0, 1.0);
+		float blend = clamp(FilmGrainParams1.x, 0.0, 1.0);
+		float colored = clamp(FilmGrainParams1.y, 0.0, 1.0);
+		float seed = FilmGrainParams1.w;
+		float frame = FilmGrainParams2.x;
+		float time = frame * grainSpeed;
+		vec2 grainCoord = (gl_FragCoord.xy + vec2(0.25, 0.75)) / grainSize;
+		vec3 grain = FilmGrainNoise(grainCoord, time, seed, colored);
+
+		float luma = dot(out_fragcolor.rgb, vec3(0.299, 0.587, 0.114));
+		float shadow = clamp(1.0 - luma, 0.0, 1.0);
+		float lumaFactor = mix(1.0, shadow, lumaWeight);
+		float response = mix(1.0, smoothstep(0.0, 1.0, shadow), 0.5);
+		float amount = grainAmount * lumaFactor * response;
+
+		if (grainDebug > 0.5)
+		{
+			out_fragcolor.rgb = vec3(0.5) + grain * 0.5;
+		}
+		else
+		{
+			vec3 add = out_fragcolor.rgb + grain * amount;
+			vec3 soft = out_fragcolor.rgb + (out_fragcolor.rgb - out_fragcolor.rgb * out_fragcolor.rgb) * grain * amount;
+			out_fragcolor.rgb = clamp(mix(add, soft, blend), vec3(0.0), vec3(1.0));
+		}
+	}
 }

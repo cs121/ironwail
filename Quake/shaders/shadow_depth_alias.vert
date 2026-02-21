@@ -3,9 +3,7 @@ struct InstanceData
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
-	vec4	AmbientColor; // xyz=AmbientColor
-	vec4	UnusedDynLightPad;
-	vec4	EnvMapParams;
+	vec4	DLightColor; // xyz=DLightColor
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -17,15 +15,12 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	mat4	ViewProj;
 	mat4	PrevViewProj;
 	vec3	EyePos;
-	float	_ShadowAliasPad0;
+	float	_Pad0;
 	vec4	Fog;
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float	RimViewmodelScale;
-	vec4	RimParams0;
-	vec4	RimParams1;
-	vec4	RimParams2;
+	float	_Pad1;
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;

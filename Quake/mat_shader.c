@@ -100,10 +100,14 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "sort", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Keys: sky/opaque/seeThrough/decal/banner/underwater/additive/nearest or numeric." },
 	{ "polygonOffset", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean or factor/units pair." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "godray", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses farbox/cloudheight/nearbox and marks sky surfaces." },
-	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses fog color and distance into material metadata." },
-	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Parses deform parameters; render-time deformation is still pending." },
+	{ "bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
+	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters." },
+	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters." },
+	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation." },
 	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives." },
 
 	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
@@ -113,12 +117,16 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "alphaGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: identity/vertex/const/wave." },
 	{ "blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports add/filter/blend/premult or explicit factors." },
 	{ "depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
-	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Modes: lequal/less/equal/greater/gequal/always/never." },
-	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Modes: GT0/LT128/GE128." },
-	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap/vector." },
-	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch/transform." },
+	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: lequal/equal/always." },
+	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test." },
+	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap." },
+	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
+	{ "bloom", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom toggle." },
+	{ "godray", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray toggle." },
 	{ "emissiveScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive scale." },
+	{ "bloomScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom scale." },
+	{ "godrayScale", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray scale." },
 
 	{ "solid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface solid." },
 	{ "nonsolid", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Surface non-solid." },
@@ -135,10 +143,9 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 static qboolean mat_shader_keyword_seen[countof (mat_shader_keyword_table)];
 
 cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
-cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_NONE };
-cvar_t r_shader_verbose = { "r_shader_verbose", "0", CVAR_ARCHIVE };
-cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_NONE };
-cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_NONE };
+cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
+cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
+cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 static cvar_t r_matshader_fuzz = { "r_matshader_fuzz", "0", CVAR_NONE };
 static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };
@@ -181,14 +188,9 @@ static void Mat_Shader_FreeMaterial (shader_material_t *material)
 		}
 	}
 	VEC_FREE (material->stages);
-	VEC_FREE (material->deforms);
 
 	if (material->editor_image)
 		Z_Free (material->editor_image);
-	if (material->skybox_far)
-		Z_Free (material->skybox_far);
-	if (material->skybox_near)
-		Z_Free (material->skybox_near);
 	if (material->name)
 		Z_Free (material->name);
 	if (material->source_file)
@@ -1062,7 +1064,6 @@ void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
-	Cvar_RegisterVariable (&r_shader_verbose);
 	Cvar_RegisterVariable (&r_tcgen_debug);
 	Cvar_RegisterVariable (&r_matshader_debug_parse);
 	Cvar_RegisterVariable (&r_reloadshaders);
@@ -1201,6 +1202,10 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_STONE;
 	if (material->emissive_enable)
 		flags |= MAT_SHADERFLAG_EMISSIVE;
+	if (material->bloom_enable)
+		flags |= MAT_SHADERFLAG_BLOOM;
+	if (material->godray_enable)
+		flags |= MAT_SHADERFLAG_GODRAY;
 
 	return flags;
 }
@@ -1252,11 +1257,10 @@ void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname)
 	if ((material->render_flags & MAT_RENDER_TRANS) && r_shader_debug.value >= 1.f)
 		Con_DPrintf ("MatShader: surfaceparm trans on %s (TODO: blend path)\n", tex->name);
 
-	if (r_shader_verbose.value >= 1.f)
+	if (r_shader_debug.value >= 1.f)
 	{
 		if (tex->shader_map)
 			Con_Printf ("MatShader: %s overrides %s\n", tex->name, tex->shader_map);
-		Mat_Shader_Print (material);
 	}
 }
 
@@ -1286,15 +1290,8 @@ void Mat_Shader_Print (const shader_material_t *material)
 	else
 		Con_Printf ("  polygon offset: off\n");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
-	if (material->has_skyparms)
-		Con_Printf ("  skyParms: far=%s cloudheight=%.2f near=%s\n",
-			material->skybox_far ? material->skybox_far : "-",
-			material->sky_cloudheight,
-			material->skybox_near ? material->skybox_near : "-");
-	if (material->has_fogparms)
-		Con_Printf ("  fogparms: (%.2f %.2f %.2f) dist %.2f\n", material->fog_color[0], material->fog_color[1], material->fog_color[2], material->fog_distance);
-	if (material->deforms)
-		Con_Printf ("  deformVertexes: %d entry(s)\n", (int)VEC_SIZE(material->deforms));
+	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
+	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
 	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
 	{
 		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];
@@ -1348,8 +1345,7 @@ void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_
 	else
 		q_snprintf (warn_context, sizeof (warn_context), "shader (%s at %s)", scope_name, warn_location);
 
-	if (r_shader_verbose.value > 0.f)
-		Mat_Shader_WarnOnce (warn_key, token, warn_context);
+	Mat_Shader_WarnOnce (warn_key, token, warn_context);
 	Mat_Shader_RecordUnknownToken (token, scope, context, source_file, line);
 }
 
@@ -1453,18 +1449,6 @@ const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float 
 			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
 			break;
 		}
-		case MAT_TCMOD_TRANSFORM:
-			tmp.m[0][0] = mod->args[0];
-			tmp.m[0][1] = mod->args[2];
-			tmp.m[0][2] = mod->args[4];
-			tmp.m[1][0] = mod->args[1];
-			tmp.m[1][1] = mod->args[3];
-			tmp.m[1][2] = mod->args[5];
-			tmp.m[2][0] = 0.f;
-			tmp.m[2][1] = 0.f;
-			tmp.m[2][2] = 1.f;
-			Mat_MatrixMultiply (&matrix, &tmp, &matrix);
-			break;
 		default:
 			break;
 		}

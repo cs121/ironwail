@@ -252,7 +252,7 @@ typedef struct
 #include "cvar.h"
 
 #include "protocol.h"
-#include "net/net.h"
+#include "net.h"
 
 #include "cmd.h"
 #include "crc.h"
@@ -283,11 +283,11 @@ typedef struct
 #include "q_sound.h"
 #include "client.h"
 
-#include "opengl/gl_model.h"
+#include "gl_model.h"
 #include "world.h"
 
 #include "image.h"	//johnfitz
-#include "opengl/gl_texmgr.h"	//johnfitz
+#include "gl_texmgr.h"	//johnfitz
 #include "input.h"
 #include "keys.h"
 #include "menu.h"

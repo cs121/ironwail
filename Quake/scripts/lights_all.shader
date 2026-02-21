@@ -4,7 +4,7 @@
 //
 // Behavior:
 // - Base pass draws the texture normally.
-// - Additive pass re-adds the same texture as emissive + bloom.
+// - Additive pass re-adds the same texture as emissive + bloom + godray.
 //
 // NOTE: These names are emitted without extensions on purpose, matching Ironwail's shader canonicalization.
 
@@ -22,8 +22,10 @@
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -41,8 +43,10 @@
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -60,8 +64,10 @@
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -79,8 +85,10 @@ enter01
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -98,8 +106,10 @@ exit01
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -117,8 +127,10 @@ light1_1
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -136,8 +148,10 @@ light1_2
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -155,8 +169,10 @@ light1_3
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -174,8 +190,10 @@ light1_4
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -193,8 +211,10 @@ light1_5
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -212,8 +232,10 @@ light1_7
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -231,8 +253,10 @@ light1_8
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -250,8 +274,10 @@ light3_3
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -269,8 +295,10 @@ light3_5
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -288,8 +316,10 @@ light3_6
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -307,8 +337,10 @@ light3_7
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -326,8 +358,10 @@ light3_8
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -345,8 +379,10 @@ sliplite
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -364,8 +400,10 @@ tele_top
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -383,8 +421,10 @@ tlight01
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -402,8 +442,10 @@ tlight01_2
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -421,8 +463,10 @@ tlight02
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -440,8 +484,10 @@ tlight03
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -459,8 +505,10 @@ tlight05
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -478,8 +526,10 @@ tlight07
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -497,8 +547,10 @@ tlight08
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -516,8 +568,10 @@ tlight09
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -535,8 +589,10 @@ tlight10
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -554,8 +610,10 @@ tlight11
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -573,8 +631,10 @@ wenter01
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -592,8 +652,10 @@ wexit01
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -611,8 +673,10 @@ window01_1
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -630,8 +694,10 @@ window01_2
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -649,8 +715,10 @@ window01_3
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -668,8 +736,10 @@ window01_4
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -687,8 +757,10 @@ window02_1
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -706,8 +778,10 @@ window03
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -725,8 +799,10 @@ window1_2
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -744,8 +820,10 @@ window1_3
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -763,8 +841,10 @@ window1_4
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -782,8 +862,10 @@ wizwin1_2
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -801,8 +883,10 @@ wizwin1_8
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 
@@ -820,8 +904,10 @@ z_exit
         rgbGen identity
         emissive true
         bloom true
+        godray true
         emissiveScale 1.0
         bloomScale 1.0
+        godrayScale 1.0
     }
 }
 

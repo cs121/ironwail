@@ -2,7 +2,6 @@ layout(binding=0) uniform sampler2D MaskTexture;
 
 layout(location=0) uniform vec4 LightParams; // xy: light position, z: density, w: weight
 layout(location=1) uniform vec4 ScatterParams; // x: decay, y: exposure, z: max radius, w: samples
-layout(location=2) uniform vec4 SunTint; // xyz color, w intensity
 
 layout(location=0) out vec4 outColor;
 
@@ -39,5 +38,5 @@ void main()
                 illuminationDecay *= decay;
         }
 
-        outColor = vec4(accum * exposure * max(SunTint.rgb, vec3(0.0)) * max(SunTint.w, 0.0), 1.0);
+        outColor = vec4(accum * exposure, 1.0);
 }

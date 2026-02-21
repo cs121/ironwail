@@ -34,12 +34,7 @@ typedef enum
 	MAT_SURFPARM_SKY		= (1u << 6),
 	MAT_SURFPARM_FOG		= (1u << 7),
 	MAT_SURFPARM_NODRAW		= (1u << 8),
-	MAT_SURFPARM_STONE		= (1u << 9),
-	MAT_SURFPARM_WATER		= (1u << 10),
-	MAT_SURFPARM_SLIME		= (1u << 11),
-	MAT_SURFPARM_LAVA		= (1u << 12),
-	MAT_SURFPARM_NOIMPACT		= (1u << 13),
-	MAT_SURFPARM_NOMARKS		= (1u << 14)
+	MAT_SURFPARM_STONE		= (1u << 9)
 } mat_surfaceparm_t;
 
 typedef enum
@@ -72,18 +67,8 @@ typedef enum
 	MAT_ALPHAGEN_IDENTITY = 0,
 	MAT_ALPHAGEN_VERTEX,
 	MAT_ALPHAGEN_CONST,
-	MAT_ALPHAGEN_WAVE,
-	MAT_ALPHAGEN_LIGHTINGSPECULAR
+	MAT_ALPHAGEN_WAVE
 } mat_alphagen_t;
-
-typedef enum
-{
-	MAT_DEFORM_NONE = 0,
-	MAT_DEFORM_WAVE,
-	MAT_DEFORM_BULGE,
-	MAT_DEFORM_MOVE,
-	MAT_DEFORM_AUTOSPRITE
-} mat_deform_type_t;
 
 typedef enum
 {
@@ -101,14 +86,6 @@ typedef struct mat_wave_s
 	float		phase;
 	float		freq;
 } mat_wave_t;
-
-typedef struct mat_deform_s
-{
-	mat_deform_type_t type;
-	mat_wave_t	wave;
-	vec3_t		move;
-	float		args[4];
-} mat_deform_t;
 
 typedef enum
 {
@@ -163,8 +140,7 @@ typedef enum
 {
 	MAT_TCGEN_BASE = 0,
 	MAT_TCGEN_ENVIRONMENT,
-	MAT_TCGEN_LIGHTMAP,
-	MAT_TCGEN_VECTOR
+	MAT_TCGEN_LIGHTMAP
 } mat_tcgen_t;
 
 typedef enum
@@ -174,23 +150,14 @@ typedef enum
 	MAT_TCMOD_SCALE,
 	MAT_TCMOD_ROTATE,
 	MAT_TCMOD_TURB,
-	MAT_TCMOD_STRETCH,
-	MAT_TCMOD_TRANSFORM
+	MAT_TCMOD_STRETCH
 } mat_tcmod_type_t;
 
 typedef struct mat_tcmod_s
 {
 	mat_tcmod_type_t type;
-	float args[6];
+	float args[4];
 } mat_tcmod_t;
-
-typedef enum
-{
-	MAT_ALPHAFUNC_NONE = 0,
-	MAT_ALPHAFUNC_GT0,
-	MAT_ALPHAFUNC_LT128,
-	MAT_ALPHAFUNC_GE128
-} mat_alphafunc_t;
 
 typedef struct mat_texmatrix_s
 {
@@ -209,7 +176,9 @@ typedef enum
 	MAT_SHADERFLAG_PLAYERCLIP	= (1u << 7),
 	MAT_SHADERFLAG_MONSTERCLIP	= (1u << 8),
 	MAT_SHADERFLAG_STONE		= (1u << 9),
-	MAT_SHADERFLAG_EMISSIVE		= (1u << 10)
+	MAT_SHADERFLAG_EMISSIVE		= (1u << 10),
+	MAT_SHADERFLAG_BLOOM		= (1u << 11),
+	MAT_SHADERFLAG_GODRAY		= (1u << 12)
 } mat_shader_flags_t;
 
 typedef struct mat_shader_stage_s
@@ -217,7 +186,11 @@ typedef struct mat_shader_stage_s
 	unsigned int		outputs;
 	unsigned int		output_overrides;
 	float			emissive_scale;
+	float			bloom_scale;
+	float			godray_scale;
 	qboolean		emissive_scale_set;
+	qboolean		bloom_scale_set;
+	qboolean		godray_scale_set;
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
 	mat_alphagen_t	alphagen;
@@ -232,10 +205,6 @@ typedef struct mat_shader_stage_s
 	mat_depthfunc_t		depth_func;
 	mat_map_type_t		map_type;
 	mat_tcgen_t		tcgen;
-	vec3_t			tcgen_vec0;
-	vec3_t			tcgen_vec1;
-	qboolean		tcgen_is_vector;
-	mat_alphafunc_t		alpha_func;
 	int			tcmod_count;
 	mat_tcmod_t		tcmods[4];
 	float			anim_map_fps;
@@ -249,7 +218,9 @@ typedef struct mat_shader_stage_s
 typedef enum
 {
 	MAT_STAGE_OUT_COLOR		= (1u << 0),
-	MAT_STAGE_OUT_EMISSIVE		= (1u << 1)
+	MAT_STAGE_OUT_EMISSIVE		= (1u << 1),
+	MAT_STAGE_OUT_BLOOM		= (1u << 2),
+	MAT_STAGE_OUT_GODRAY_SOURCE	= (1u << 3)
 } mat_stage_output_flags_t;
 
 typedef struct shader_material_s
@@ -266,22 +237,18 @@ typedef struct shader_material_s
 	float			polygon_offset_factor;
 	float			polygon_offset_units;
 	qboolean		emissive_enable;
-	qboolean		has_skyparms;
-	qboolean		has_fogparms;
+	qboolean		bloom_enable;
+	qboolean		godray_enable;
 	float			emissive_scale;
-	vec3_t		fog_color;
-	float			fog_distance;
-	char			*skybox_far;
-	char			*skybox_near;
-	float			sky_cloudheight;
-	mat_deform_t	*deforms;
+	float			bloom_scale;
+	float			godray_scale;
 	mat_shader_stage_t	stage0;
 	mat_shader_stage_t	*stages;
 } shader_material_t;
 
 // Developer note:
-// Supported directives: qer_editorimage, surfaceparm, emissive, emissive_scale,
-// emissiveScale, and a single stage block
+// Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
+// bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
 // with map + rgbGen identity.
 // To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
 
@@ -289,7 +256,6 @@ typedef struct texture_s texture_t;
 
 extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
-extern cvar_t r_shader_verbose;
 extern cvar_t r_tcgen_debug;
 extern cvar_t r_matshader_debug_parse;
 

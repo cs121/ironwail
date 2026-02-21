@@ -16,7 +16,6 @@ struct Call
 	float	_pad0;
 	vec2	polygon_offset;
 	vec4	stage_color;
-	vec4	texmatrix[3];
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
@@ -78,11 +77,8 @@ void main()
 #endif
 	if ((call.flags & CF_USE_POLYGON_OFFSET) != 0u)
 	{
-		// NOTE: derivatives are not available in the vertex stage on all drivers,
-		// so applying a slope-dependent term here can fail shader compilation.
-		// Keep the constant units term to preserve a stable depth bias path.
-		float zoffset = call.polygon_offset.y * ZBIAS;
-		clip.z += zoffset * clip.w;
+		float zoffset = (call.polygon_offset.x + call.polygon_offset.y) * ZBIAS;
+		clip.z += zoffset;
 	}
 	gl_Position = clip;
 }

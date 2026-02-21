@@ -1,125 +1,75 @@
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
-#include "depth_common.glsl"
+// -----------------------------------------------------------------------------
+// Matrix multiplication robustness
+//
+// If the engine uploads row-major matrices to GLSL with transpose=GL_FALSE,
+// then (mat4 * vec4) will behave like a transposed matrix and shadow
+// projection turns into "screen-space" diagonal banding.
+//
+// To make shader-side testing robust (without touching engine code), we compute
+// BOTH variants and pick the one that looks more plausible.
+// This is cheap compared to the ray/pcf work and dramatically reduces the odds
+// that a row/column-major mismatch breaks shadows.
+// -----------------------------------------------------------------------------
 
-// ShadowViewProj is uploaded as std140 mat4 and consumed as GLSL column-major.
 vec4 ShadowMul(mat4 M, vec4 v)
 {
-    return M * v;
+    vec4 a = M * v; // GLSL default (column-major expectation)
+    vec4 b = v * M; // "row-major" style
+
+    // Prefer a result with a sane perspective divide and reasonable NDC range.
+    // We don't require it to be inside [-1,1] (cascades/atlases can overscan),
+    // but we reject extreme values that typically come from a bad transpose.
+    bool a_ok = (abs(a.w) > 1e-6);
+    bool b_ok = (abs(b.w) > 1e-6);
+    if (a_ok)
+    {
+        vec3 pa = a.xyz / a.w;
+        a_ok = all(lessThanEqual(abs(pa), vec3(20.0)));
+    }
+    if (b_ok)
+    {
+        vec3 pb = b.xyz / b.w;
+        b_ok = all(lessThanEqual(abs(pb), vec3(20.0)));
+    }
+
+    if (a_ok && !b_ok) return a;
+    if (b_ok && !a_ok) return b;
+
+    // If both look OK (or both look bad), prefer the one with a larger |w|
+    // (more numerically stable divide).
+    return (abs(a.w) >= abs(b.w)) ? a : b;
 }
 
 float ShadowReference01(float proj_z)
 {
-    return ShadowReferenceFromProjZ(proj_z);
-}
-
-vec3 ShadowProject01(vec4 shadow_pos)
-{
-	vec3 p = shadow_pos.xyz / shadow_pos.w;
-	// UVs always come from XY NDC [-1..1] -> [0..1].
-	p.xy = p.xy * 0.5 + 0.5;
-	return p;
-}
-
-float ShadowTestManual(float receiverDepth, float shadowDepth, float bias, bool isReverseZ)
-{
-	if (isReverseZ)
-		return (receiverDepth >= (shadowDepth - bias)) ? 1.0 : 0.0;
-	return (receiverDepth <= (shadowDepth + bias)) ? 1.0 : 0.0;
+    // Robustly convert proj.z into [0..1].
+    // If the engine already uses clip-control 0..1, proj_z will already be in-range.
+    // If it's OpenGL NDC (-1..1), this remaps.
+    float ref = proj_z;
+    if (ref < 0.0 || ref > 1.0)
+        ref = ref * 0.5 + 0.5;
+    return clamp(ref, 0.0, 1.0);
 }
 
 #ifdef SHADOW_SUN
-
-vec3 g_shadow_debug_coord = vec3(0.0);
-float g_shadow_debug_inside = 0.0;
-float g_shadow_debug_receiver_depth = 0.0;
-float g_shadow_debug_sampled_depth = 0.0;
-float g_shadow_debug_depth_delta = 0.0;
-
-float ShadowDebugReverseZ()
+float ShadowCompare(float depth, float reference, float bias)
 {
-	int compare_mode = int(ShadowDebug.z + 0.5); // 0=auto, 1=LEQUAL, 2=GEQUAL
-	bool reversed_auto =
 #if REVERSED_Z
-		true;
+	return (reference >= (depth - bias)) ? 1.0 : 0.0;
 #else
-		false;
+	return (reference <= (depth + bias)) ? 1.0 : 0.0;
 #endif
-	bool use_gequal = (compare_mode == 2) || (compare_mode == 0 && reversed_auto);
-	return use_gequal ? 1.0 : 0.0;
-}
-
-vec3 ShadowDebugCoordVisualize()
-{
-	if (g_shadow_debug_inside > 0.5)
-		return vec3(clamp(g_shadow_debug_coord.xy, 0.0, 1.0), 0.0);
-	return vec3(1.0, 0.0, 0.0);
-}
-
-vec3 ShadowDebugReceiverDepthVisualize()
-{
-	if (g_shadow_debug_inside < 0.5)
-		return vec3(1.0, 0.0, 0.0);
-	float d = clamp(g_shadow_debug_receiver_depth, 0.0, 1.0);
-	return vec3(d);
-}
-
-vec3 ShadowDebugSampleDepthVisualize()
-{
-	if (g_shadow_debug_inside < 0.5)
-		return vec3(1.0, 0.0, 0.0);
-	float d = clamp(g_shadow_debug_sampled_depth, 0.0, 1.0);
-	return vec3(d);
-}
-
-vec3 ShadowDebugDeltaVisualize()
-{
-	if (g_shadow_debug_inside < 0.5)
-		return vec3(1.0, 0.0, 0.0);
-	float delta = clamp(g_shadow_debug_depth_delta, -1.0, 1.0);
-	if (delta >= 0.0)
-		return vec3(delta, 0.0, 0.0);
-	return vec3(0.0, 0.0, -delta);
-}
-
-vec3 ShadowDebugVisualize(int mode, float visibility)
-{
-	if (mode == 2)
-		return ShadowDebugCoordVisualize();
-	if (mode == 3)
-		return ShadowDebugReceiverDepthVisualize();
-	if (mode == 4)
-		return ShadowDebugSampleDepthVisualize();
-	if (mode == 5)
-		return ShadowDebugDeltaVisualize();
-	return vec3(clamp(visibility, 0.0, 1.0));
-}
-
-// FIX: Separated into two functions so debug globals are only written once
-// from a single representative sample, not overwritten by every PCF tap.
-float ShadowTestSingle(vec2 uv, float reference, float bias)
-{
-	float depth = texture(ShadowMap, uv).r;
-	bool reversez = ShadowDebugReverseZ() > 0.5;
-	return ShadowTestManual(reference, depth, bias, reversez);
 }
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowMap, uv).r;
-	bool reversez = ShadowDebugReverseZ() > 0.5;
-	float lit = ShadowTestManual(reference, depth, bias, reversez);
-	// Debug globals written here (single sample path only).
-	g_shadow_debug_sampled_depth = depth;
-	g_shadow_debug_depth_delta = reference - depth;
-	return lit;
+	return ShadowCompare(depth, reference, bias);
 }
 
-// PCF quality levels:
-//   taps <= 2  ->  4 samples  (2x2 rotated grid)
-//   taps <= 4  ->  9 samples  (3x3 grid)
-//   taps >= 5  -> 25 samples  (5x5 grid)
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 {
 	vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
@@ -136,12 +86,8 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 		);
 		for (int i = 0; i < 4; ++i)
 		{
-			// FIX: use ShadowTestSingle to avoid overwriting debug globals per tap.
-			sum += ShadowTestSingle(uv + offsets[i] * texel, reference, bias);
+			sum += ShadowSampleRaw(uv + offsets[i] * texel, reference, bias);
 		}
-		// FIX: write debug globals once from center sample.
-		g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
-		g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
 		return sum * 0.25;
 	}
 
@@ -151,12 +97,10 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 		{
 			for (int x = -1; x <= 1; ++x)
 			{
-				sum += ShadowTestSingle(uv + vec2(x, y) * texel, reference, bias);
+				sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
 				++count;
 			}
 		}
-		g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
-		g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
 		return sum / float(count);
 	}
 
@@ -164,12 +108,11 @@ float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 	{
 		for (int x = -2; x <= 2; ++x)
 		{
-			sum += ShadowTestSingle(uv + vec2(x, y) * texel, reference, bias);
+			sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
 			++count;
 		}
 	}
-	g_shadow_debug_sampled_depth = texture(ShadowMap, uv).r;
-	g_shadow_debug_depth_delta = reference - g_shadow_debug_sampled_depth;
+
 	return sum / float(count);
 }
 
@@ -188,19 +131,13 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 		return 1.0;
 	}
 
-	vec3 proj = ShadowProject01(clip);
-	vec2 uv = proj.xy;
+	vec3 proj = clip.xyz / clip.w;
+	vec2 uv = proj.xy * 0.5 + 0.5;
 	float reference = ShadowReference01(proj.z);
-
-	g_shadow_debug_coord = vec3(uv, reference);
-	g_shadow_debug_receiver_depth = reference;
-	g_shadow_debug_sampled_depth = 0.0;
-	g_shadow_debug_depth_delta = 0.0;
 
 	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
 		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
-	g_shadow_debug_inside = inside ? 1.0 : 0.0;
-	in_range = g_shadow_debug_inside;
+	in_range = inside ? 1.0 : 0.0;
 	if (!inside)
 		return 1.0;
 
@@ -215,22 +152,21 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 #endif
 
 #ifdef SHADOW_DLIGHT
+float ShadowCompare(float depth, float reference, float bias)
+{
+#if REVERSED_Z
+	return (reference >= (depth - bias)) ? 1.0 : 0.0;
+#else
+	return (reference <= (depth + bias)) ? 1.0 : 0.0;
+#endif
+}
+
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
 	float depth = texture(ShadowDlightMap, uv).r;
-	bool reversez =
-#if REVERSED_Z
-		true;
-#else
-		false;
-#endif
-	return ShadowTestManual(reference, depth, bias, reversez);
+	return ShadowCompare(depth, reference, bias);
 }
 
-// PCF quality levels (same as sun):
-//   taps <= 2  ->  4 samples  (2x2 rotated grid)
-//   taps <= 4  ->  9 samples  (3x3 grid)
-//   taps >= 5  -> 25 samples  (5x5 grid)
 float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
 {
 	vec2 texel = 1.0 / vec2(textureSize(ShadowDlightMap, 0));
@@ -279,7 +215,7 @@ float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
 
 float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint light_index, out float in_range)
 {
-	if (ShadowClusteredLightParams.z < 0.5)
+	if (ShadowDlightParams.z < 0.5)
 	{
 		in_range = 1.0;
 		return 1.0;
@@ -288,9 +224,9 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 	int shadow_index = -1;
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
-		if (ShadowClusteredLightInfo[i].x < 0.0)
+		if (ShadowDlightInfo[i].x < 0.0)
 			continue;
-		int idx = int(ShadowClusteredLightInfo[i].x + 0.5);
+		int idx = int(ShadowDlightInfo[i].x + 0.5);
 		if (idx == int(light_index))
 		{
 			shadow_index = i;
@@ -304,35 +240,31 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint l
 		return 1.0;
 	}
 
-	vec4 clip = ShadowMul(ShadowClusteredLightViewProj[shadow_index], vec4(world_pos, 1.0));
+	vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
 	if (clip.w <= 0.0)
 	{
 		in_range = 0.0;
 		return 1.0;
 	}
 
-	vec3 proj = ShadowProject01(clip);
-	vec2 uv = proj.xy;
+	vec3 proj = clip.xyz / clip.w;
+	vec2 uv = proj.xy * 0.5 + 0.5;
 	float reference = ShadowReference01(proj.z);
 
-	bool inside_local = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
-	in_range = inside_local ? 1.0 : 0.0;
-	if (!inside_local)
-		return 1.0;
-
-	vec4 atlas = ShadowClusteredLightAtlas[shadow_index];
+	vec4 atlas = ShadowDlightAtlas[shadow_index];
 	uv = uv * atlas.xy + atlas.zw;
+
+	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
+		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
+	in_range = inside ? 1.0 : 0.0;
+	if (!inside)
+		return 1.0;
 
 	vec3 light_dir = normalize(light_pos - world_pos);
 	float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
-	// FIX: Added constant bias term (ShadowClusteredLightParams.x) to prevent shadow acne
-	// at near-perpendicular angles (ndotl ≈ 1 made old bias ≈ 0).
-	// ShadowClusteredLightParams.x = constant bias, ShadowClusteredLightParams.y = slope bias,
-	// matching the convention used in the sun shadow path.
-	float bias = ShadowClusteredLightParams.x + ShadowClusteredLightParams.y * (1.0 - ndotl);
+	float bias = ShadowDlightParams.x * (1.0 - ndotl);
 
-	int taps = int(ShadowClusteredLightParams.w + 0.5);
+	int taps = int(ShadowDlightParams.y + 0.5);
 	if (taps > 0)
 		return ShadowSamplePCFDlight(uv, reference, bias, taps);
 
