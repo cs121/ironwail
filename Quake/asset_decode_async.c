@@ -17,6 +17,9 @@ typedef struct {
 	qboolean in_use;
 	unsigned int generation;
 	asset_stage_t stage;
+	int active_prev;
+	int active_next;
+	qboolean in_active_set;
 	asset_kind_t kind;
 	uint64_t t_io_start_us;
 	char path[MAX_QPATH];
@@ -35,6 +38,11 @@ static SDL_cond *asset_done_cond;
 static sys_job_queue_t *asset_decode_queue;
 static qboolean asset_initialized;
 static Uint32 asset_main_thread_id;
+static int asset_active_head = -1;
+
+#ifndef ASSET_ASYNC_DEBUG_FULLSCAN_COMPARE
+#define ASSET_ASYNC_DEBUG_FULLSCAN_COMPARE 0
+#endif
 
 #define ASSET_WAIT_PUMP_INTERVAL_MS 16
 #define ASSET_WAIT_WARN_THRESHOLD_MS 250
@@ -55,6 +63,9 @@ static uint64_t asset_decode_us_png;
 static uint64_t asset_decode_us_ktx2;
 static size_t asset_inflight_raw_bytes;
 static size_t asset_inflight_decoded_bytes;
+static uint64_t asset_pump_calls;
+static uint64_t asset_pump_visited_slots;
+static uint32_t asset_pump_last_visited_slots;
 
 typedef enum
 {
@@ -87,6 +98,64 @@ static qboolean Asset_IsKTX2(const void *data, size_t size)
 {
 	static const uint8_t magic[12] = {0xAB,0x4B,0x54,0x58,0x20,0x32,0x30,0xBB,0x0D,0x0A,0x1A,0x0A};
 	return size >= sizeof(magic) && memcmp(data, magic, sizeof(magic)) == 0;
+}
+
+static qboolean Asset_StageNeedsActiveSet(asset_stage_t stage)
+{
+	return stage == ASSET_STAGE_IO_PENDING || stage == ASSET_STAGE_DECODE_PENDING;
+}
+
+/*
+ * Active-set invariants (always under asset_mutex):
+ * - Any request in IO_PENDING/DECODE_PENDING must be linked exactly once.
+ * - Requests in any other stage must not be linked.
+ * - active_prev/active_next are valid only while in_active_set == true.
+ */
+static void Asset_ActiveSetRemoveLocked(unsigned idx)
+{
+	asset_request_t *req = &asset_requests[idx];
+	if (!req->in_active_set)
+		return;
+	if (req->active_prev >= 0)
+		asset_requests[req->active_prev].active_next = req->active_next;
+	else
+		asset_active_head = req->active_next;
+	if (req->active_next >= 0)
+		asset_requests[req->active_next].active_prev = req->active_prev;
+	req->active_prev = -1;
+	req->active_next = -1;
+	req->in_active_set = false;
+}
+
+static void Asset_ActiveSetInsertLocked(unsigned idx)
+{
+	asset_request_t *req = &asset_requests[idx];
+	if (req->in_active_set)
+		return;
+	req->active_prev = -1;
+	req->active_next = asset_active_head;
+	if (asset_active_head >= 0)
+		asset_requests[asset_active_head].active_prev = (int)idx;
+	asset_active_head = (int)idx;
+	req->in_active_set = true;
+}
+
+static void Asset_SetStageLocked(unsigned idx, asset_stage_t stage)
+{
+	asset_request_t *req = &asset_requests[idx];
+	if (req->stage == stage)
+		return;
+	if (Asset_StageNeedsActiveSet(req->stage) && !Asset_StageNeedsActiveSet(stage))
+		Asset_ActiveSetRemoveLocked(idx);
+	else if (!Asset_StageNeedsActiveSet(req->stage) && Asset_StageNeedsActiveSet(stage))
+		Asset_ActiveSetInsertLocked(idx);
+	req->stage = stage;
+}
+
+static void Asset_ResetRequestLocked(unsigned idx)
+{
+	Asset_ActiveSetRemoveLocked(idx);
+	memset(&asset_requests[idx], 0, sizeof(asset_requests[idx]));
 }
 
 
@@ -206,7 +275,7 @@ static void Asset_DecodeWorker(void *job_data)
 		{
 			asset_requests[idx].result.status = ASSET_RESULT_OK;
 			asset_requests[idx].result.image = img;
-			asset_requests[idx].stage = ASSET_STAGE_FINALIZE_PENDING;
+			Asset_SetStageLocked(idx, ASSET_STAGE_FINALIZE_PENDING);
 			{ size_t total = 0; for (int m = 0; m < img->mip_count; ++m) total += img->mips[m].size; asset_inflight_decoded_bytes += total; }
 		}
 		else
@@ -214,7 +283,7 @@ static void Asset_DecodeWorker(void *job_data)
 			asset_failed_decode++;
 			asset_requests[idx].result.status = ASSET_RESULT_FAILED;
 			q_snprintf(asset_requests[idx].result.error, sizeof(asset_requests[idx].result.error), "decode failed");
-			asset_requests[idx].stage = ASSET_STAGE_FAILED;
+			Asset_SetStageLocked(idx, ASSET_STAGE_FAILED);
 		}
 		if (asset_async_debug.value)
 		{
@@ -290,7 +359,7 @@ void Asset_Async_Shutdown (void)
 				free(asset_requests[i].result.image->mips[j].data);
 			free(asset_requests[i].result.image);
 		}
-		memset(&asset_requests[i], 0, sizeof(asset_requests[i]));
+		Asset_ResetRequestLocked(i);
 	}
 	SDL_UnlockMutex(asset_mutex);
 	SDL_DestroyCond(asset_done_cond);
@@ -353,7 +422,11 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 		q_snprintf(asset_requests[i].key, sizeof(asset_requests[i].key), "%s|%u", path, params ? params->flags : 0u);
 		if (params)
 			asset_requests[i].params = *params;
-		asset_requests[i].stage = ASSET_STAGE_IO_PENDING;
+		asset_requests[i].stage = ASSET_STAGE_EMPTY;
+		asset_requests[i].active_prev = -1;
+		asset_requests[i].active_next = -1;
+		asset_requests[i].in_active_set = false;
+		Asset_SetStageLocked(i, ASSET_STAGE_IO_PENDING);
 		asset_requests[i].kind = ASSET_KIND_UNKNOWN;
 		asset_requests[i].t_io_start_us = SDL_GetPerformanceCounter();
 		asset_requests[i].result.kind = ASSET_KIND_UNKNOWN;
@@ -379,7 +452,7 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 
 		SDL_LockMutex(asset_mutex);
 		if (asset_requests[idx].in_use && asset_requests[idx].generation == gen)
-			memset(&asset_requests[idx], 0, sizeof(asset_requests[idx]));
+			Asset_ResetRequestLocked(idx);
 		SDL_UnlockMutex(asset_mutex);
 		return 0;
 	}
@@ -407,22 +480,35 @@ asset_handle_t Asset_LoadTextureAsync (const char *path, const asset_tex_params_
 /* Main thread only: this pump must never block on worker queue backpressure. */
 void Asset_Async_Pump (void)
 {
-	unsigned i;
+	unsigned visited_slots = 0;
+	int idx;
 	if (!asset_initialized)
 		return;
 
-	for (i = 0; i < ASSET_MAX_REQUESTS; ++i)
+	asset_pump_calls++;
+
+	SDL_LockMutex(asset_mutex);
+	idx = asset_active_head;
+	SDL_UnlockMutex(asset_mutex);
+
+	while (idx >= 0)
 	{
 		asset_handle_t h = 0;
+		unsigned i = (unsigned)idx;
 		fs_async_handle_t fs_handle = 0;
 		fs_async_result_t fs;
 		qboolean has_fs;
 		qboolean submit_decode = false;
+		int next_idx = -1;
+
+		visited_slots++;
 
 		SDL_LockMutex(asset_mutex);
-		if (!asset_requests[i].in_use)
+		next_idx = asset_requests[i].active_next;
+		if (!asset_requests[i].in_use || !asset_requests[i].in_active_set)
 		{
 			SDL_UnlockMutex(asset_mutex);
+			idx = next_idx;
 			continue;
 		}
 
@@ -457,20 +543,28 @@ void Asset_Async_Pump (void)
 					asset_requests[i].decode_queued = false;
 				SDL_UnlockMutex(asset_mutex);
 			}
+			idx = next_idx;
 			continue;
 		}
 
 		if (!fs_handle)
+		{
+			idx = next_idx;
 			continue;
+		}
 
 		has_fs = FS_Poll(fs_handle, &fs);
 		if (!has_fs)
+		{
+			idx = next_idx;
 			continue;
+		}
 
 		SDL_LockMutex(asset_mutex);
 		if (!asset_requests[i].in_use || asset_requests[i].generation != ASSET_HANDLE_GEN(h) || asset_requests[i].stage != ASSET_STAGE_IO_PENDING)
 		{
 			SDL_UnlockMutex(asset_mutex);
+			idx = next_idx;
 			continue;
 		}
 		asset_completed_fs++;
@@ -483,7 +577,7 @@ void Asset_Async_Pump (void)
 				asset_requests[i].raw_size = fs.size;
 				asset_requests[i].decode_queued = false;
 				asset_inflight_raw_bytes += fs.size;
-				asset_requests[i].stage = ASSET_STAGE_DECODE_PENDING;
+				Asset_SetStageLocked(i, ASSET_STAGE_DECODE_PENDING);
 				asset_requests[i].kind = Asset_IsKTX2(fs.data, fs.size) ? ASSET_KIND_KTX2 : ASSET_KIND_PNG;
 				asset_requests[i].result.kind = asset_requests[i].kind;
 				asset_requests[i].result.io_us = (uint64_t)((SDL_GetPerformanceCounter() - asset_requests[i].t_io_start_us) * 1000000ull / SDL_GetPerformanceFrequency());
@@ -493,7 +587,7 @@ void Asset_Async_Pump (void)
 				asset_requests[i].result.status = ASSET_RESULT_FAILED;
 				asset_requests[i].result.error_code = ENOMEM;
 				q_strlcpy(asset_requests[i].result.error, "malloc failed", sizeof(asset_requests[i].result.error));
-				asset_requests[i].stage = ASSET_STAGE_FAILED;
+				Asset_SetStageLocked(i, ASSET_STAGE_FAILED);
 				SDL_CondBroadcast(asset_done_cond);
 			}
 		}
@@ -502,22 +596,46 @@ void Asset_Async_Pump (void)
 			asset_requests[i].result.status = (fs.status == FS_ASYNC_STATUS_NOT_FOUND) ? ASSET_RESULT_NOT_FOUND : ASSET_RESULT_FAILED;
 			asset_requests[i].result.error_code = fs.error_code;
 			q_snprintf(asset_requests[i].result.error, sizeof(asset_requests[i].result.error), "fs status=%d", (int)fs.status);
-			asset_requests[i].stage = ASSET_STAGE_FAILED;
+			Asset_SetStageLocked(i, ASSET_STAGE_FAILED);
 			SDL_CondBroadcast(asset_done_cond);
 		}
 		FS_Release(asset_requests[i].fs_handle);
 		asset_requests[i].fs_handle = 0;
 		SDL_UnlockMutex(asset_mutex);
+
+		idx = next_idx;
 	}
+
+	asset_pump_last_visited_slots = visited_slots;
+	asset_pump_visited_slots += visited_slots;
+
+#if ASSET_ASYNC_DEBUG_FULLSCAN_COMPARE
+	{
+		unsigned fullscan_active = 0;
+		unsigned set_active = 0;
+		int walk;
+		SDL_LockMutex(asset_mutex);
+		for (unsigned i = 0; i < ASSET_MAX_REQUESTS; ++i)
+			if (asset_requests[i].in_use && Asset_StageNeedsActiveSet(asset_requests[i].stage))
+				fullscan_active++;
+		for (walk = asset_active_head; walk >= 0; walk = asset_requests[walk].active_next)
+			set_active++;
+		SDL_UnlockMutex(asset_mutex);
+		if (fullscan_active != set_active)
+			Con_Warning("asset_async active-set mismatch: fullscan=%u set=%u\n", fullscan_active, set_active);
+	}
+#endif
 
 	if (asset_async_debug.value)
 	{
-		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " failed=%" SDL_PRIu64 " decode_backpressure=%" SDL_PRIu64 " decode_policy=%s inflight_raw=%zu inflight_decoded=%zu decode_ms[png]=%.3f decode_ms[ktx2]=%.3f\n",
+		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " failed=%" SDL_PRIu64 " decode_backpressure=%" SDL_PRIu64 " decode_policy=%s inflight_raw=%zu inflight_decoded=%zu decode_ms[png]=%.3f decode_ms[ktx2]=%.3f pump_visited[last]=%u pump_visited_avg=%.2f\n",
 			asset_completed_fs, asset_queued_fs, asset_completed_decode, asset_queued_decode, asset_failed_decode,
 			asset_decode_submit_backpressure,
 			asset_decode_submit_policy == ASSET_DECODE_SUBMIT_POLICY_BLOCKING ? "block" : "nonblock",
 			asset_inflight_raw_bytes, asset_inflight_decoded_bytes,
-			(double)asset_decode_us_png / 1000.0, (double)asset_decode_us_ktx2 / 1000.0);
+			(double)asset_decode_us_png / 1000.0, (double)asset_decode_us_ktx2 / 1000.0,
+			asset_pump_last_visited_slots,
+			asset_pump_calls ? (double)asset_pump_visited_slots / (double)asset_pump_calls : 0.0);
 	}
 }
 
@@ -606,7 +724,7 @@ void Asset_Release (asset_handle_t h)
 			{ size_t total = 0; for (int m = 0; m < asset_requests[idx].result.image->mip_count; ++m) total += asset_requests[idx].result.image->mips[m].size; if (asset_inflight_decoded_bytes >= total) asset_inflight_decoded_bytes -= total; else asset_inflight_decoded_bytes = 0; }
 			free(asset_requests[idx].result.image);
 		}
-		memset(&asset_requests[idx], 0, sizeof(asset_requests[idx]));
+		Asset_ResetRequestLocked(idx);
 	}
 	SDL_UnlockMutex(asset_mutex);
 }
