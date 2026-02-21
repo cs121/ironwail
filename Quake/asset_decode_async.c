@@ -34,6 +34,11 @@ static SDL_mutex *asset_mutex;
 static SDL_cond *asset_done_cond;
 static sys_job_queue_t *asset_decode_queue;
 static qboolean asset_initialized;
+static Uint32 asset_main_thread_id;
+
+#define ASSET_WAIT_PUMP_INTERVAL_MS 16
+#define ASSET_WAIT_WARN_THRESHOLD_MS 250
+#define ASSET_WAIT_WARN_REPEAT_MS 1000
 
 static cvar_t asset_async = {"asset_async", "0", CVAR_ARCHIVE};
 static cvar_t asset_async_max_inflight_mb = {"asset_async_max_inflight_mb", "256", CVAR_ARCHIVE};
@@ -49,6 +54,24 @@ static uint64_t asset_decode_us_png;
 static uint64_t asset_decode_us_ktx2;
 static size_t asset_inflight_raw_bytes;
 static size_t asset_inflight_decoded_bytes;
+
+static const char *Asset_StageName(asset_stage_t stage)
+{
+	switch (stage)
+	{
+	case ASSET_STAGE_EMPTY: return "empty";
+	case ASSET_STAGE_IO_PENDING: return "io_pending";
+	case ASSET_STAGE_DECODE_PENDING: return "decode_pending";
+	case ASSET_STAGE_FINALIZE_PENDING: return "finalize_pending";
+	case ASSET_STAGE_FAILED: return "failed";
+	default: return "unknown";
+	}
+}
+
+static qboolean Asset_CanPumpCurrentThread(void)
+{
+	return asset_main_thread_id != 0 && SDL_ThreadID() == asset_main_thread_id;
+}
 
 static qboolean Asset_IsKTX2(const void *data, size_t size)
 {
@@ -200,6 +223,24 @@ static void Asset_DecodeWorker(void *job_data)
 	SDL_UnlockMutex(asset_mutex);
 }
 
+/*
+ * Asset async API contract and thread-affinity rules:
+ * - Asset_Async_Pump() must run on the thread that called Asset_Async_Init()
+ *   (normally the main thread). It advances FS polling and decode scheduling.
+ * - Asset_Poll() is non-blocking and opportunistically pumps; call it from the
+ *   main thread/frame loop.
+ * - Asset_Wait() may block on any thread. On the main thread it performs a
+ *   timed wait loop and pumps work periodically; on other threads it only waits
+ *   and therefore relies on main-thread pumping to make progress.
+ * - Asset_Release() is synchronous: it ensures completion before freeing state,
+ *   and triggers an immediate pump when called on the main thread so callers do
+ *   not silently depend on external pumping right before release.
+ *
+ * Wait-time diagnostics:
+ * - Asset_Wait() logs a warning after a threshold and repeats periodically with
+ *   handle/path/stage context. It does not enforce a functional timeout abort.
+ */
+
 void Asset_Async_Init (void)
 {
 	if (asset_initialized)
@@ -209,6 +250,7 @@ void Asset_Async_Init (void)
 	asset_decode_queue = Sys_Jobs_CreateQueue("Asset Decode", 256, (size_t)q_max(1.0f, asset_async_decode_workers.value));
 	if (!asset_mutex || !asset_done_cond || !asset_decode_queue)
 		Sys_Error("Asset_Async_Init failed");
+	asset_main_thread_id = SDL_ThreadID();
 	Cvar_RegisterVariable(&asset_async);
 	Cvar_RegisterVariable(&asset_async_max_inflight_mb);
 	Cvar_RegisterVariable(&asset_async_debug);
@@ -245,6 +287,7 @@ void Asset_Async_Shutdown (void)
 	SDL_DestroyMutex(asset_mutex);
 	asset_done_cond = NULL;
 	asset_mutex = NULL;
+	asset_main_thread_id = 0;
 	asset_initialized = false;
 }
 
@@ -490,19 +533,40 @@ qboolean Asset_Poll (asset_handle_t h, asset_result_t *out)
 void Asset_Wait (asset_handle_t h, asset_result_t *out)
 {
 	unsigned idx = ASSET_HANDLE_INDEX(h), gen = ASSET_HANDLE_GEN(h);
+	uint32_t waited_ms = 0;
+	uint32_t next_warn_ms = ASSET_WAIT_WARN_THRESHOLD_MS;
+	const qboolean can_pump = Asset_CanPumpCurrentThread();
 
 	if (out)
 		memset(out, 0, sizeof(*out));
 	if (!h || idx >= ASSET_MAX_REQUESTS || !asset_initialized)
 		return;
 
-	/*
-	 * Blocking wait for completion only; this does not poll filesystem progress.
-	 * The caller (usually the frame loop) must continue calling Asset_Async_Pump().
-	 */
 	SDL_LockMutex(asset_mutex);
 	while (asset_requests[idx].in_use && asset_requests[idx].generation == gen && (asset_requests[idx].stage != ASSET_STAGE_FINALIZE_PENDING && asset_requests[idx].stage != ASSET_STAGE_FAILED))
-		SDL_CondWait(asset_done_cond, asset_mutex);
+	{
+		if (SDL_CondWaitTimeout(asset_done_cond, asset_mutex, ASSET_WAIT_PUMP_INTERVAL_MS) == SDL_MUTEX_TIMEDOUT)
+		{
+			waited_ms += ASSET_WAIT_PUMP_INTERVAL_MS;
+			if (waited_ms >= next_warn_ms)
+			{
+				Con_Warning("Asset_Wait: still waiting after %ums (handle=%u stage=%s path=%s%s)\n",
+					waited_ms,
+					h,
+					Asset_StageName(asset_requests[idx].stage),
+					asset_requests[idx].path,
+					can_pump ? "" : ", non-main-thread");
+				next_warn_ms += ASSET_WAIT_WARN_REPEAT_MS;
+			}
+
+			if (can_pump)
+			{
+				SDL_UnlockMutex(asset_mutex);
+				Asset_Async_Pump();
+				SDL_LockMutex(asset_mutex);
+			}
+		}
+	}
 
 	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen && (asset_requests[idx].stage == ASSET_STAGE_FINALIZE_PENDING || asset_requests[idx].stage == ASSET_STAGE_FAILED) && out)
 		*out = asset_requests[idx].result;
@@ -514,6 +578,8 @@ void Asset_Release (asset_handle_t h)
 	unsigned idx = ASSET_HANDLE_INDEX(h), gen = ASSET_HANDLE_GEN(h);
 	if (!h || idx >= ASSET_MAX_REQUESTS || !asset_initialized)
 		return;
+	if (Asset_CanPumpCurrentThread())
+		Asset_Async_Pump();
 	Asset_Wait(h, NULL);
 	SDL_LockMutex(asset_mutex);
 	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen)
