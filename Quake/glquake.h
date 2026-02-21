@@ -662,7 +662,6 @@ typedef struct glprogs_s {
 	GLuint		viewblend;
 	GLuint		warpscale[2];		// [warp]
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
-	GLuint		filmgrain;
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
 	GLuint		ssao;
@@ -716,7 +715,6 @@ const char *GL_GetProgramVertexShaderPath (GLuint program);
 const char *GL_GetProgramFragmentShaderPath (GLuint program);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
-void GL_ApplyFilmgrainUI (void);
 void R_Clustered_RebindForProgram (GLuint program, const char *pass_name);
 void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
 void R_DebugFlushGeometry (void);

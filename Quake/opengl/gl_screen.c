@@ -2208,7 +2208,6 @@ void SCR_UpdateScreen (void)
 	Draw_Flush ();
 	R_StateDebugMark ("2D_AFTER_HUD");
 	R_ResetViewportAndScissorFullscreen ("2D_RESET_AFTER_HUD");
-	GL_ApplyFilmgrainUI ();
 	R_StateDebugMark ("FRAME_FINAL_BEFORE_ENDRENDERING");
 
 	GL_EndGroup ();
