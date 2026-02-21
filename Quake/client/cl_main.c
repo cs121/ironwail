@@ -747,9 +747,25 @@ void CL_RelinkEntities (void)
 		else if (ent->model->flags & EF_ZOMGIB)
 			CL_RocketTrail (ent, 4);
 		else if (ent->model->flags & EF_TRACER)
+		{
 			CL_RocketTrail (ent, 3);
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 7));
+			VectorCopy (ent->origin, dl->origin);
+			dl->radius = 96;
+			dl->baseradius = dl->radius;
+			dl->die = cl.time + 0.01;
+			dl->color[0] = 1.00f; dl->color[1] = 0.84f; dl->color[2] = 0.38f;
+		}
 		else if (ent->model->flags & EF_TRACER2)
+		{
 			CL_RocketTrail (ent, 5);
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 8));
+			VectorCopy (ent->origin, dl->origin);
+			dl->radius = 96;
+			dl->baseradius = dl->radius;
+			dl->die = cl.time + 0.01;
+			dl->color[0] = 0.45f; dl->color[1] = 0.90f; dl->color[2] = 0.30f;
+		}
                 else if (ent->model->flags & EF_ROCKET)
                 {
                         CL_RocketTrail (ent, 0);
@@ -761,10 +777,26 @@ void CL_RelinkEntities (void)
                         dl->type = DLIGHT_ROCKET;
                         CL_SetDlightColorForEntity (dl, ent);
                 }
-                else if (ent->model->flags & EF_GRENADE)
+		else if (ent->model->flags & EF_GRENADE)
+		{
 			CL_RocketTrail (ent, 1);
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 9));
+			VectorCopy (ent->origin, dl->origin);
+			dl->radius = 144;
+			dl->baseradius = dl->radius;
+			dl->die = cl.time + 0.01;
+			dl->color[0] = 1.00f; dl->color[1] = 0.62f; dl->color[2] = 0.24f;
+		}
 		else if (ent->model->flags & EF_TRACER3)
+		{
 			CL_RocketTrail (ent, 6);
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 10));
+			VectorCopy (ent->origin, dl->origin);
+			dl->radius = 104;
+			dl->baseradius = dl->radius;
+			dl->die = cl.time + 0.01;
+			dl->color[0] = 0.80f; dl->color[1] = 0.45f; dl->color[2] = 1.00f;
+		}
 		else
 			CL_ResetTrail (ent);
 

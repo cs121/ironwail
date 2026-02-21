@@ -101,6 +101,12 @@ static qboolean R_ParseDlightOrigin (const char *value, vec3_t origin)
 	return value && sscanf (value, "%f %f %f", &origin[0], &origin[1], &origin[2]) == 3;
 }
 
+static qboolean R_IsTorchOrFireEntity (const char *classname, const char *modelname)
+{
+	return (classname && (q_strcasestr (classname, "torch") || q_strcasestr (classname, "fire") || q_strcasestr (classname, "flame")))
+		|| (modelname && (q_strcasestr (modelname, "torch") || q_strcasestr (modelname, "fire") || q_strcasestr (modelname, "flame")));
+}
+
 static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t color, int style, int key)
 {
 	dlight_t *dl = DLightPool_GetOrCreatePersistent (key, cl.time);
@@ -151,8 +157,10 @@ void R_ParseDlightEntities (void)
 		int style = 0;
 		qboolean classname_is_dlight = false;
 		qboolean classname_is_light = false;
+		qboolean classname_is_torchfire = false;
 		qboolean marked_dynamic = false;
 		qboolean parsed_origin = false;
+		char modelname[1024] = "";
 
 		if (com_token[0] != '{')
 			break;
@@ -176,9 +184,12 @@ void R_ParseDlightEntities (void)
 			{
 				classname_is_dlight = !strcmp (value, "dlight");
 				classname_is_light = !strcmp (value, "light");
+				classname_is_torchfire = R_IsTorchOrFireEntity (value, NULL);
 			}
 			else if (!strcmp (key, "origin"))
 				parsed_origin = R_ParseDlightOrigin (value, origin);
+			else if (!strcmp (key, "model"))
+				q_strlcpy (modelname, value, sizeof (modelname));
 			else if (!strcmp (key, "_color") || !strcmp (key, "color"))
 				R_ParseDlightColor (value, color);
 			else if (!strcmp (key, "radius"))
@@ -195,6 +206,20 @@ void R_ParseDlightEntities (void)
 		{
 			const int key = -(1000 + ++entity_dlight_count);
 			R_AddEntityDlight (origin, radius, color, style, key);
+		}
+		else if (parsed_origin && (classname_is_torchfire || R_IsTorchOrFireEntity (NULL, modelname)))
+		{
+			const int key = -(1000 + ++entity_dlight_count);
+			vec3_t torch_color = {1.0f, 0.72f, 0.26f};
+
+			if (radius <= 0.f)
+				radius = 128.f;
+			if (style <= 0)
+				style = 1; // torch-like flicker
+
+			R_AddEntityDlight (origin, radius, torch_color, style, key);
+			dlight_t *dl = DLightPool_GetOrCreatePersistent (key, cl.time);
+			dl->type = DLIGHT_TORCH;
 		}
 
 		data = COM_Parse (data);
