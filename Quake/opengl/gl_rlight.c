@@ -210,10 +210,11 @@ void R_ParseDlightEntities (void)
 		else if (parsed_origin && (classname_is_torchfire || R_IsTorchOrFireEntity (NULL, modelname)))
 		{
 			const int key = -(1000 + ++entity_dlight_count);
-			vec3_t torch_color = {1.0f, 0.72f, 0.26f};
+			vec3_t torch_color = {0.5f, 0.36f, 0.13f};
 
 			if (radius <= 0.f)
 				radius = 128.f;
+			radius *= 0.5f;
 			if (style <= 0)
 				style = 1; // torch-like flicker
 
