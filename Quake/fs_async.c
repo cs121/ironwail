@@ -40,6 +40,17 @@ static cvar_t fs_async_debug = {"fs_async_debug", "0", CVAR_NONE};
 static uint64_t fs_async_enqueued;
 static uint64_t fs_async_completed_count;
 static uint64_t fs_async_completed_bytes;
+static uint64_t fs_async_completed_overflow_count;
+static uint64_t fs_async_submit_backpressure_count;
+
+typedef enum
+{
+	FS_ASYNC_SUBMIT_POLICY_BLOCKING = 0,
+	FS_ASYNC_SUBMIT_POLICY_NONBLOCKING
+} fs_async_submit_policy_t;
+
+/* Request submission can be called from frame-critical paths: avoid blocking by default. */
+static const fs_async_submit_policy_t fs_async_submit_policy = FS_ASYNC_SUBMIT_POLICY_NONBLOCKING;
 
 extern qfileofs_t COM_filelength (FILE *f);
 
@@ -320,7 +331,10 @@ static void FS_Async_Complete (fs_async_handle_t h)
 
 	count = fs_async_completed_tail - fs_async_completed_head;
 	if (count >= FS_ASYNC_COMPLETED_CAPACITY)
+	{
+		fs_async_completed_overflow_count++;
 		return;
+	}
 
 	fs_async_completed[fs_async_completed_tail & (FS_ASYNC_COMPLETED_CAPACITY - 1)] = h;
 	fs_async_completed_tail++;
@@ -388,6 +402,8 @@ void FS_Async_Init (void)
 	fs_async_enqueued = 0;
 	fs_async_completed_count = 0;
 	fs_async_completed_bytes = 0;
+	fs_async_completed_overflow_count = 0;
+	fs_async_submit_backpressure_count = 0;
 
 	fs_async_mutex = SDL_CreateMutex ();
 	fs_async_done_cond = SDL_CreateCond ();
@@ -465,8 +481,11 @@ fs_async_handle_t FS_ReadFileAsync (const char *path, int flags)
 	if (!h)
 		return 0;
 
-	if (!Sys_Jobs_Submit (fs_async_queue, FS_Async_Worker, (void *) (uintptr_t) h))
+	if ((fs_async_submit_policy == FS_ASYNC_SUBMIT_POLICY_BLOCKING
+		? !Sys_Jobs_Submit (fs_async_queue, FS_Async_Worker, (void *) (uintptr_t) h)
+		: !Sys_Jobs_TrySubmit (fs_async_queue, FS_Async_Worker, (void *) (uintptr_t) h)))
 	{
+		fs_async_submit_backpressure_count++;
 		FS_Release (h);
 		return 0;
 	}
@@ -587,7 +606,10 @@ void FS_Async_Pump (void)
 	if (fs_async_debug.value && pumped)
 	{
 		double avg = (double) fs_async_completed_bytes / (double) (fs_async_completed_count ? fs_async_completed_count : 1);
-		Con_Printf ("fs_async: enqueued=%" SDL_PRIu64 " completed=%" SDL_PRIu64 " avg_bytes=%.1f\n",
-			fs_async_enqueued, fs_async_completed_count, avg);
+		Con_Printf ("fs_async: enqueued=%" SDL_PRIu64 " completed=%" SDL_PRIu64 " avg_bytes=%.1f complete_overflow=%" SDL_PRIu64 " submit_backpressure=%" SDL_PRIu64 " policy=%s\n",
+			fs_async_enqueued, fs_async_completed_count, avg,
+			fs_async_completed_overflow_count,
+			fs_async_submit_backpressure_count,
+			fs_async_submit_policy == FS_ASYNC_SUBMIT_POLICY_BLOCKING ? "block" : "nonblock");
 	}
 }
