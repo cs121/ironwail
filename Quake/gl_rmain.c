@@ -257,12 +257,6 @@ cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t	r_shadowmap_size = { "r_shadowmap_size", "2048", CVAR_ARCHIVE };
-// Maximum distance (in Quake units) used to fit the sun shadow frustum.
-// gl_farclip can be 65536+, which makes the frustum enormous and shadow resolution
-// terrible (49 units/texel on start.bsp). This cvar limits shadow coverage to a
-// tighter range so shadow map resolution stays useful.
-// Rule of thumb: for a 2048-unit map use 4096; for larger outdoor areas use 8192.
-cvar_t	r_shadow_maxdist = { "r_shadow_maxdist", "4096", CVAR_ARCHIVE };
 cvar_t	r_shadow_bias = { "r_shadow_bias", "0.001", CVAR_ARCHIVE };
 cvar_t	r_shadow_normalbias = { "r_shadow_normalbias", "1.0", CVAR_ARCHIVE };
 cvar_t	r_shadow_bias_mdl = { "r_shadow_bias_mdl", "0.001", CVAR_ARCHIVE };
