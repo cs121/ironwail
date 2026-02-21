@@ -158,10 +158,47 @@ static void Asset_ResetRequestLocked(unsigned idx)
 	memset(&asset_requests[idx], 0, sizeof(asset_requests[idx]));
 }
 
-
-static asset_image_payload_t *Asset_DecodePNG(const void *raw_data, size_t raw_size)
+static void Asset_FreeDecodeJob(asset_decode_job_t *job)
 {
-	asset_image_payload_t *img;
+	int i;
+
+	if (!job)
+		return;
+
+	if (job->kind == ASSET_KIND_SOUND)
+	{
+		free(job->payload.audio.data);
+	}
+	else
+	{
+		for (i = 0; i < job->payload.image.mip_count; ++i)
+			free(job->payload.image.mips[i].data);
+	}
+
+	free(job);
+}
+
+static size_t Asset_DecodeJobBytes(const asset_decode_job_t *job)
+{
+	size_t total = 0;
+	int i;
+
+	if (!job)
+		return 0;
+
+	if (job->kind == ASSET_KIND_SOUND)
+		return job->payload.audio.size;
+
+	for (i = 0; i < job->payload.image.mip_count; ++i)
+		total += job->payload.image.mips[i].size;
+
+	return total;
+}
+
+
+static asset_decode_job_t *Asset_DecodePNG(const void *raw_data, size_t raw_size)
+{
+	asset_decode_job_t *job;
 	unsigned char *rgba = NULL;
 	unsigned w = 0, h = 0;
 	unsigned err;
@@ -170,29 +207,31 @@ static asset_image_payload_t *Asset_DecodePNG(const void *raw_data, size_t raw_s
 	if (err || !rgba)
 		return NULL;
 
-	img = (asset_image_payload_t *)calloc(1, sizeof(*img));
-	if (!img)
+	job = (asset_decode_job_t *)calloc(1, sizeof(*job));
+	if (!job)
 	{
 		free(rgba);
 		return NULL;
 	}
 
-	img->width = (int)w;
-	img->height = (int)h;
-	img->mip_count = 1;
-	img->format = ASSET_IMAGE_FMT_RGBA8;
-	img->has_alpha = true;
-	img->mips[0].data = rgba;
-	img->mips[0].size = (size_t)w * (size_t)h * 4u;
-	img->mips[0].pitch = (size_t)w * 4u;
-	return img;
+	job->kind = ASSET_KIND_PNG;
+	job->target_format = ASSET_BACKEND_FMT_RGBA8;
+	job->payload.image.width = (int)w;
+	job->payload.image.height = (int)h;
+	job->payload.image.mip_count = 1;
+	job->payload.image.format = ASSET_IMAGE_FMT_RGBA8;
+	job->payload.image.has_alpha = true;
+	job->payload.image.mips[0].data = rgba;
+	job->payload.image.mips[0].size = (size_t)w * (size_t)h * 4u;
+	job->payload.image.mips[0].pitch = (size_t)w * 4u;
+	return job;
 }
 
-static asset_image_payload_t *Asset_DecodeKTX2(const void *raw_data, size_t raw_size)
+static asset_decode_job_t *Asset_DecodeKTX2(const void *raw_data, size_t raw_size)
 {
 	ktx2_header_t hdr;
 	ktx2_decoded_image_t decoded;
-	asset_image_payload_t *img;
+	asset_decode_job_t *job;
 	int i;
 
 	memset(&decoded, 0, sizeof(decoded));
@@ -201,30 +240,32 @@ static asset_image_payload_t *Asset_DecodeKTX2(const void *raw_data, size_t raw_
 	if (!KTX2_TranscodeToRGBA((const uint8_t *)raw_data, raw_size, &hdr, &decoded))
 		return NULL;
 
-	img = (asset_image_payload_t *)calloc(1, sizeof(*img));
-	if (!img)
+	job = (asset_decode_job_t *)calloc(1, sizeof(*job));
+	if (!job)
 	{
 		KTX2_FreeDecodedImage(&decoded);
 		return NULL;
 	}
 
-	img->width = decoded.width[0];
-	img->height = decoded.height[0];
-	img->mip_count = decoded.mip_count;
-	img->format = ASSET_IMAGE_FMT_RGBA8;
-	img->has_alpha = true;
+	job->kind = ASSET_KIND_KTX2;
+	job->target_format = KTX2_SelectBackendTargetFormat();
+	job->payload.image.width = decoded.width[0];
+	job->payload.image.height = decoded.height[0];
+	job->payload.image.mip_count = decoded.mip_count;
+	job->payload.image.format = ASSET_IMAGE_FMT_RGBA8;
+	job->payload.image.has_alpha = true;
 
 	for (i = 0; i < decoded.mip_count; ++i)
 	{
-		img->mips[i].data = decoded.mip_data[i];
-		img->mips[i].size = decoded.mip_size[i];
-		img->mips[i].pitch = (size_t)decoded.width[i] * 4u;
+		job->payload.image.mips[i].data = decoded.mip_data[i];
+		job->payload.image.mips[i].size = decoded.mip_size[i];
+		job->payload.image.mips[i].pitch = (size_t)decoded.width[i] * 4u;
 		decoded.mip_data[i] = NULL;
 		decoded.mip_size[i] = 0;
 	}
 
 	KTX2_FreeDecodedImage(&decoded);
-	return img;
+	return job;
 }
 
 static void Asset_DecodeWorker(void *job_data)
@@ -237,7 +278,7 @@ static void Asset_DecodeWorker(void *job_data)
 	asset_kind_t kind = ASSET_KIND_UNKNOWN;
 	uint64_t t0_us = 0;
 	uint64_t decode_us = 0;
-	asset_image_payload_t *img = NULL;
+	asset_decode_job_t *job = NULL;
 
 	SDL_LockMutex(asset_mutex);
 	if (idx >= ASSET_MAX_REQUESTS || !asset_requests[idx].in_use || asset_requests[idx].generation != gen)
@@ -255,9 +296,9 @@ static void Asset_DecodeWorker(void *job_data)
 	SDL_UnlockMutex(asset_mutex);
 
 	if (kind == ASSET_KIND_KTX2 || Asset_IsKTX2(raw_data, raw_size))
-		img = Asset_DecodeKTX2(raw_data, raw_size);
+		job = Asset_DecodeKTX2(raw_data, raw_size);
 	else
-		img = Asset_DecodePNG(raw_data, raw_size);
+		job = Asset_DecodePNG(raw_data, raw_size);
 
 	decode_us = (uint64_t)((SDL_GetPerformanceCounter() - t0_us) * 1000000ull / SDL_GetPerformanceFrequency());
 	free(raw_data);
@@ -271,12 +312,12 @@ static void Asset_DecodeWorker(void *job_data)
 			asset_decode_us_ktx2 += decode_us;
 		else
 			asset_decode_us_png += decode_us;
-		if (img)
+		if (job)
 		{
 			asset_requests[idx].result.status = ASSET_RESULT_OK;
-			asset_requests[idx].result.image = img;
+			asset_requests[idx].result.job = job;
 			Asset_SetStageLocked(idx, ASSET_STAGE_FINALIZE_PENDING);
-			{ size_t total = 0; for (int m = 0; m < img->mip_count; ++m) total += img->mips[m].size; asset_inflight_decoded_bytes += total; }
+			asset_inflight_decoded_bytes += Asset_DecodeJobBytes(job);
 		}
 		else
 		{
@@ -293,11 +334,9 @@ static void Asset_DecodeWorker(void *job_data)
 		}
 		SDL_CondBroadcast(asset_done_cond);
 	}
-	else if (img)
+	else if (job)
 	{
-		for (int i = 0; i < img->mip_count; ++i)
-			free(img->mips[i].data);
-		free(img);
+		Asset_FreeDecodeJob(job);
 	}
 	SDL_UnlockMutex(asset_mutex);
 }
@@ -353,11 +392,9 @@ void Asset_Async_Shutdown (void)
 			FS_Release(asset_requests[i].fs_handle);
 		if (asset_requests[i].raw_data)
 			free(asset_requests[i].raw_data);
-		if (asset_requests[i].result.image)
+		if (asset_requests[i].result.job)
 		{
-			for (int j = 0; j < asset_requests[i].result.image->mip_count; ++j)
-				free(asset_requests[i].result.image->mips[j].data);
-			free(asset_requests[i].result.image);
+			Asset_FreeDecodeJob(asset_requests[i].result.job);
 		}
 		Asset_ResetRequestLocked(i);
 	}
@@ -717,12 +754,14 @@ void Asset_Release (asset_handle_t h)
 	SDL_LockMutex(asset_mutex);
 	if (asset_requests[idx].in_use && asset_requests[idx].generation == gen)
 	{
-		if (asset_requests[idx].result.image)
+		if (asset_requests[idx].result.job)
 		{
-			for (int i = 0; i < asset_requests[idx].result.image->mip_count; ++i)
-				free(asset_requests[idx].result.image->mips[i].data);
-			{ size_t total = 0; for (int m = 0; m < asset_requests[idx].result.image->mip_count; ++m) total += asset_requests[idx].result.image->mips[m].size; if (asset_inflight_decoded_bytes >= total) asset_inflight_decoded_bytes -= total; else asset_inflight_decoded_bytes = 0; }
-			free(asset_requests[idx].result.image);
+			size_t total = Asset_DecodeJobBytes(asset_requests[idx].result.job);
+			if (asset_inflight_decoded_bytes >= total)
+				asset_inflight_decoded_bytes -= total;
+			else
+				asset_inflight_decoded_bytes = 0;
+			Asset_FreeDecodeJob(asset_requests[idx].result.job);
 		}
 		Asset_ResetRequestLocked(idx);
 	}

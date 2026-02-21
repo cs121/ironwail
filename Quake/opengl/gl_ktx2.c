@@ -138,6 +138,18 @@ static qboolean KTX2_ParseHeader(ktx2_header_t *out, const uint8_t *data, size_t
     return true;
 }
 
+
+asset_backend_format_t KTX2_SelectBackendTargetFormat(void)
+{
+    if (gl_texcomp_astc_able)
+        return ASSET_BACKEND_FMT_ASTC_4X4;
+    if (gl_texcomp_etc2_able)
+        return ASSET_BACKEND_FMT_ETC2;
+    if (gl_texcomp_bptc_able)
+        return ASSET_BACKEND_FMT_BC7;
+    return ASSET_BACKEND_FMT_RGBA8;
+}
+
 qboolean KTX2_IsValid(const uint8_t *data, size_t size)
 {
     ktx2_header_t hdr;
