@@ -46,9 +46,22 @@ typedef enum
 	ASSET_RESULT_NOT_FOUND
 } asset_result_status_t;
 
+typedef enum
+{
+	ASSET_KIND_UNKNOWN = 0,
+	ASSET_KIND_PNG,
+	ASSET_KIND_KTX2,
+	ASSET_KIND_SOUND
+} asset_kind_t;
+
 typedef struct
 {
 	asset_result_status_t status;
+	asset_kind_t kind;
+	int error_code;
+	char error[128];
+	uint64_t io_us;
+	uint64_t decode_us;
 	asset_image_payload_t *image;
 } asset_result_t;
 
