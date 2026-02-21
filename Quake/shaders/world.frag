@@ -19,9 +19,6 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 	return mix(Fog.rgb, clr, fog);
 }
 
-#define LIGHT_TILES_X 32
-#define LIGHT_TILES_Y 16
-#define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
 
 struct Light
@@ -42,8 +39,6 @@ float GetLightStyle(int index)
 {
 	return (index < 64) ? mix(LightStyles[index].x, LightStyles[index].y, LightmapParams.w) : 1.0;
 }
-
-layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
 
 struct Call
 {
@@ -482,31 +477,16 @@ void main()
 	const float SPECULAR_POWER = 16.0;
 	const float SPECULAR_SCALE = 0.4;
 
-        // Dynamic lights (clustered lighting)
+        // Dynamic lights
         if (!additive_dlights && NumLights > 0u)
         {
-                ivec3 cluster_coord = ivec3(
-                        int(floor(in_coord.x)),
-			int(floor(in_coord.y)),
-			int(floor(log2(in_depth) * ZLogScale + ZLogBias))
-		);
-		
-		uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
-		
-		if ((clusterdata.x | clusterdata.y) != 0u)
-		{
 			vec3 dynamic_light = vec3(0.0);
 			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
 			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 			
-			for (uint i = 0u, ofs = 0u; i < 2u; i++, ofs += 32u)
+			for (uint light_index = 0u; light_index < NumLights; light_index++)
 			{
-				uint mask = clusterdata[i];
-				while (mask != 0u)
-				{
-					int j = findLSB(mask);
-					mask ^= 1u << j;
-					Light l = Lights[ofs + uint(j)];
+				Light l = Lights[light_index];
 					
 					// Light culling
 					float rad = l.radius;
@@ -550,7 +530,6 @@ void main()
 				}
 			}
 			total_light += max(min(dynamic_light, 1.0 - total_light), 0.0);
-		}
 	}
 
 	// Sun light

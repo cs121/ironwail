@@ -606,7 +606,6 @@ typedef struct glprogs_s {
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
 	GLuint		world_dlight[2];		// [alpha test]
-	GLuint		world_dlight_hybrid[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		shadow_depth;
 	GLuint		shadow_depth_alias[2]; // [md5]
@@ -625,7 +624,6 @@ typedef struct glprogs_s {
 	GLuint		clear_indirect;
 	GLuint		gather_indirect;
 	GLuint		cull_mark;
-	GLuint		cluster_lights;
 	GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
 	GLuint		palette_postprocess;
 } glprogs_t;
