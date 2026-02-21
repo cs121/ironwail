@@ -475,6 +475,17 @@ static void CL_RocketTrail (entity_t *ent, int type)
 	CL_ResetTrail (ent);
 }
 
+static qboolean CL_IsTorchFireEntity (const entity_t *ent)
+{
+	const char *name;
+
+	if (!ent || !ent->model || !ent->model->name)
+		return false;
+
+	name = ent->model->name;
+	return q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch");
+}
+
 /*
 ===============
 			CL_SetDlightColorForEntity
@@ -518,11 +529,6 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
         if (name && (q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch")))
         {
                 dl->type = DLIGHT_TORCH;
-                dl->radius *= 0.5f;
-                dl->baseradius *= 0.5f;
-                dl->color[0] *= 0.5f;
-                dl->color[1] *= 0.5f;
-                dl->color[2] *= 0.5f;
                 return;
         }
 
@@ -707,21 +713,35 @@ void CL_RelinkEntities (void)
 		}
                 if (ent->effects & EF_BRIGHTLIGHT)
                 {
+                        const qboolean is_torchfire = CL_IsTorchFireEntity (ent);
                         dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 2));
                         VectorCopy (ent->origin,  dl->origin);
                         dl->origin[2] += 16;
-                        dl->radius = 400 + (rand()&31);
+                        dl->radius = is_torchfire ? (400 + (rand()&31)) * 0.5f : 400 + (rand()&31);
                         dl->baseradius = dl->radius;
                         dl->die = cl.time + 0.001;
+                        if (is_torchfire)
+                        {
+                                dl->color[0] = 0.50f;
+                                dl->color[1] = 0.36f;
+                                dl->color[2] = 0.13f;
+                        }
                         CL_SetDlightColorForEntity (dl, ent);
                 }
                 if (ent->effects & EF_DIMLIGHT)
                 {
+                        const qboolean is_torchfire = CL_IsTorchFireEntity (ent);
                         dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 3));
                         VectorCopy (ent->origin,  dl->origin);
-                        dl->radius = 200 + (rand()&31);
+                        dl->radius = is_torchfire ? (200 + (rand()&31)) * 0.5f : 200 + (rand()&31);
                         dl->baseradius = dl->radius;
                         dl->die = cl.time + 0.001;
+                        if (is_torchfire)
+                        {
+                                dl->color[0] = 0.50f;
+                                dl->color[1] = 0.36f;
+                                dl->color[2] = 0.13f;
+                        }
                         CL_SetDlightColorForEntity (dl, ent);
                 }
                 if (ent->effects & EF_QEX_QUADLIGHT)
