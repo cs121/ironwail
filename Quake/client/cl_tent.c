@@ -228,13 +228,6 @@ void CL_ParseTEnt (void)
 			R_RunParticleEffect (pos, vec3_origin, 0, 20);
 			CL_DecalImpactNormal (pos, nrm);
 			R_Decals_Add ("bullet_hole_default", pos, nrm, NULL, 0.f, 0);
-			dl = CL_AllocDlight (0);
-			VectorCopy (pos, dl->origin);
-			dl->radius = 96;
-			dl->baseradius = dl->radius;
-			dl->color[0] = 1.00f; dl->color[1] = 1.00f; dl->color[2] = 1.00f;
-			dl->die = cl.time + 0.75;
-			dl->decay = 96;
 		}
 		break;
 

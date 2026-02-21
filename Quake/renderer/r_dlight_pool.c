@@ -425,7 +425,19 @@ void DLightPool_Decay (float frametime, double time)
 			dl->baseradius = 0.f;
 
 		if (CL_DlightShouldFlicker (dl))
-			dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (time * 9.0 + dl->flicker_seed));
+		{
+			if (dl->type == DLIGHT_TORCH)
+			{
+				float seed = dl->flicker_seed;
+				float f1 = (float) sin (time * 11.3 + seed * 0.013f);
+				float f2 = (float) sin (time * 19.7 + seed * 0.031f);
+				float f3 = (float) sin (time * 27.1 + seed * 0.071f);
+				float irregular = f1 * 0.11f + f2 * 0.07f + f3 * 0.04f;
+				dl->radius = dl->baseradius * (1.0f + irregular);
+			}
+			else
+				dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (time * 9.0 + dl->flicker_seed));
+		}
 		else
 			dl->radius = dl->baseradius;
 		if (dl->radius < 0.f)
@@ -522,6 +534,7 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		float lum;
 		float dist;
 		float target_scale;
+		float cull_radius;
 		vec3_t delta;
 		vec3_t mins, maxs;
 		qboolean in_pvs = true;
@@ -584,8 +597,9 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		dl->lod_scale += (target_scale - dl->lod_scale) * smooth;
 		dl->lod_scale = CLAMP (0.1f, dl->lod_scale, 1.f);
 
-		VectorSet (mins, dl->origin[0] - dl->radius, dl->origin[1] - dl->radius, dl->origin[2] - dl->radius);
-		VectorSet (maxs, dl->origin[0] + dl->radius, dl->origin[1] + dl->radius, dl->origin[2] + dl->radius);
+		cull_radius = q_max (q_max (dl->radius, dl->baseradius), min_radius) + 32.f;
+		VectorSet (mins, dl->origin[0] - cull_radius, dl->origin[1] - cull_radius, dl->origin[2] - cull_radius);
+		VectorSet (maxs, dl->origin[0] + cull_radius, dl->origin[1] + cull_radius, dl->origin[2] + cull_radius);
 		if (dbg)
 		{
 			VectorCopy (mins, dbg->mins);
@@ -621,7 +635,7 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		for (int j = 0; j < 4; j++)
 		{
 			const mplane_t *p = &frustum[j];
-			if (DotProduct (p->normal, dl->origin) - p->dist + dl->radius < 0.f)
+			if (DotProduct (p->normal, dl->origin) - p->dist + cull_radius < 0.f)
 			{
 				in_frustum = false;
 				break;

@@ -518,6 +518,11 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
         if (name && (q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch")))
         {
                 dl->type = DLIGHT_TORCH;
+                dl->radius *= 0.5f;
+                dl->baseradius *= 0.5f;
+                dl->color[0] *= 0.5f;
+                dl->color[1] *= 0.5f;
+                dl->color[2] *= 0.5f;
                 return;
         }
 
