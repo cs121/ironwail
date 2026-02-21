@@ -3092,10 +3092,31 @@ Returns index of palette buffer to use:
 }
 
 
-gltexture_t *R_CommitDecodedTexture (const asset_image_payload_t *img, const asset_tex_params_t *params)
+gltexture_t *R_CommitDecodedTexture (const asset_decode_job_t *job, const asset_tex_params_t *params)
 {
-	if (!img || !params || img->format != ASSET_IMAGE_FMT_RGBA8 || img->mip_count < 1 || !img->mips[0].data)
+	const asset_image_payload_t *img;
+	qboolean can_gpu_mipgen;
+
+	if (!job || !params || job->kind == ASSET_KIND_SOUND)
 		return NULL;
+
+	img = &job->payload.image;
+	if (img->format != ASSET_IMAGE_FMT_RGBA8 || img->mip_count < 1 || !img->mips[0].data)
+		return NULL;
+
+	/* Render-thread upload: fallback to base level if decode produced no usable mip chain. */
+	if (img->mip_count > 1 && img->mips[1].data)
+	{
+		Con_DPrintf("asset_async: predecoded mip chain available for %s (%d mips), uploading base level and preserving non-blocking fallback path\n",
+			params->name ? params->name : "<unnamed>", img->mip_count);
+	}
+
+	can_gpu_mipgen = (GL_GenerateMipmapFunc != NULL);
+	if ((params->flags & TEXPREF_MIPMAP) && img->mip_count == 1 && !can_gpu_mipgen)
+	{
+		Con_DPrintf("asset_async: GPU mipgen unavailable for %s, using base level only (optional CPU mipgen path)\n",
+			params->name ? params->name : "<unnamed>");
+	}
 
 	return TexMgr_LoadImage (params->owner, params->name ? params->name : "",
 		img->width, img->height, SRC_RGBA, (byte *)img->mips[0].data,

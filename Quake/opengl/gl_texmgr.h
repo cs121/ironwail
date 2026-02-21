@@ -175,7 +175,7 @@ GLuint TexMgr_LoadDDS (const char *path);
 void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants);
 void TexMgr_ReloadImages (void);
 void TexMgr_ReloadNobrightImages (void);
-gltexture_t *R_CommitDecodedTexture (const asset_image_payload_t *img, const asset_tex_params_t *params);
+gltexture_t *R_CommitDecodedTexture (const asset_decode_job_t *job, const asset_tex_params_t *params);
 void TexMgr_SRGBTextures_f (cvar_t *var);
 qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file);
 

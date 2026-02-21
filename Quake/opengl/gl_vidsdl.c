@@ -89,6 +89,9 @@ qboolean gl_buffer_storage_able = false;
 qboolean gl_multi_bind_able = false;
 qboolean gl_bindless_able = false;
 qboolean gl_clipcontrol_able = false;
+qboolean gl_texcomp_bptc_able = false;
+qboolean gl_texcomp_etc2_able = false;
+qboolean gl_texcomp_astc_able = false;
 float gl_max_anisotropy; //johnfitz
 int gl_stencilbits;
 
@@ -1110,6 +1113,10 @@ static void GL_CheckExtensions (void)
 		GL_FindExtension ("GL_ARB_clip_control") &&
 		GL_InitFunctions (gl_arb_clip_control_functions, false)
 	;
+
+	gl_texcomp_bptc_able = GL_FindExtension ("GL_ARB_texture_compression_bptc");
+	gl_texcomp_etc2_able = GL_FindExtension ("GL_ARB_ES3_compatibility") || GL_FindExtension ("GL_OES_compressed_ETC2_RGB8_texture");
+	gl_texcomp_astc_able = GL_FindExtension ("GL_KHR_texture_compression_astc_ldr") || GL_FindExtension ("GL_OES_texture_compression_astc");
 }
 
 /*
