@@ -2263,17 +2263,31 @@ void Host_ShutdownSave (void)
 		SDL_CondWait (save_finished_condition, save_mutex);
 	save_pending = true;
 	save_data.file = NULL;
-	SDL_CondSignal (save_pending_condition);
+	if (save_pending_condition)
+		SDL_CondSignal (save_pending_condition);
 	SDL_UnlockMutex (save_mutex);
 
-	SDL_WaitThread (save_thread, NULL);
-	save_thread = NULL;
+	if (save_thread)
+	{
+		SDL_WaitThread (save_thread, NULL);
+		save_thread = NULL;
+	}
 
-	SDL_DestroyCond (save_finished_condition);
-	save_finished_condition = NULL;
+	if (save_finished_condition)
+	{
+		SDL_DestroyCond (save_finished_condition);
+		save_finished_condition = NULL;
+	}
 
-	SDL_DestroyCond (save_pending_condition);
-	save_pending_condition = NULL;
+	if (save_pending_condition)
+	{
+		SDL_DestroyCond (save_pending_condition);
+		save_pending_condition = NULL;
+	}
+
+	SDL_DestroyMutex (save_mutex);
+	save_mutex = NULL;
+	save_pending = false;
 
 	SaveData_Clear (&save_data);
 }
@@ -2356,11 +2370,53 @@ static int Host_BackgroundSave (void *param)
 
 static void Host_InitSaveThread (void)
 {
-	save_mutex = SDL_CreateMutex ();
-	save_finished_condition = SDL_CreateCond ();
-	save_pending_condition = SDL_CreateCond ();
-	save_thread = SDL_CreateThread (Host_BackgroundSave, "SaveThread", &save_data);
 	SaveData_Init (&save_data);
+
+	save_mutex = SDL_CreateMutex ();
+	if (!save_mutex)
+		goto fail;
+
+	save_finished_condition = SDL_CreateCond ();
+	if (!save_finished_condition)
+		goto fail;
+
+	save_pending_condition = SDL_CreateCond ();
+	if (!save_pending_condition)
+		goto fail;
+
+	save_thread = SDL_CreateThread (Host_BackgroundSave, "SaveThread", &save_data);
+	if (!save_thread)
+		goto fail;
+
+	return;
+
+fail:
+	if (save_thread)
+	{
+		SDL_WaitThread (save_thread, NULL);
+		save_thread = NULL;
+	}
+
+	if (save_pending_condition)
+	{
+		SDL_DestroyCond (save_pending_condition);
+		save_pending_condition = NULL;
+	}
+
+	if (save_finished_condition)
+	{
+		SDL_DestroyCond (save_finished_condition);
+		save_finished_condition = NULL;
+	}
+
+	if (save_mutex)
+	{
+		SDL_DestroyMutex (save_mutex);
+		save_mutex = NULL;
+	}
+
+	SaveData_Clear (&save_data);
+	Sys_Error ("Host_InitSaveThread: failed to create synchronization primitives");
 }
 
 /*
@@ -3817,4 +3873,3 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewnext", Host_Viewnext_f);
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 }
-
