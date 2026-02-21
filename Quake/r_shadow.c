@@ -555,7 +555,11 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	view[14] = -DotProduct (sun_dir, origin_world);
 
 	{
-		float min_z = -extents[2];
+		// FIX: Extend the depth range backward so shadow casters BEHIND the camera
+		// (Peter-Pan shadow problem) are still included in the shadow map.
+		// Use the far-clip distance as a conservative extension.
+		float z_extend = zfar;
+		float min_z = -extents[2] - z_extend;
 		float max_z = extents[2];
 		R_Shadow_OrthoMatrix (ortho, -extents[0], extents[0], -extents[1], extents[1], min_z, max_z);
 	}
@@ -751,9 +755,13 @@ void R_ResizeShadowMapIfNeeded (void)
 	int desired;
 
 	if (r_shadowmap_size.value <= 0.f)
-		desired = 0;
-	else
-		desired = (int)r_shadowmap_size.value;
+	{
+		// FIX: Destroy resources and exit before min-clamp so r_shadowmap_size 0 actually disables shadows.
+		R_Shadow_DestroyResources ();
+		return;
+	}
+
+	desired = (int)r_shadowmap_size.value;
 
 	if (desired > gl_max_texture_size)
 		desired = gl_max_texture_size;
@@ -765,9 +773,6 @@ void R_ResizeShadowMapIfNeeded (void)
 		return;
 
 	R_Shadow_DestroyResources ();
-
-	if (desired <= 0)
-		return;
 
 	glGenTextures (1, &shadow_depth_tex);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
@@ -868,6 +873,9 @@ void R_Shadow_SunPass (void)
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
+	// FIX: Explicitly disable scissor test – a previous DlightPass or SSAO pass may
+	// have left it enabled, which would clip the shadow map clear/draw incorrectly.
+	GL_SetScissorEnabled (false);
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
