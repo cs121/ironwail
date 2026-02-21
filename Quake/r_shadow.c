@@ -15,6 +15,7 @@ extern cvar_t gl_farclip;
 extern cvar_t r_shadows;
 extern cvar_t r_shadow_sun;
 extern cvar_t r_shadowmap_size;
+extern cvar_t r_shadow_maxdist;
 extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
 extern cvar_t r_shadow_pcf;
@@ -512,7 +513,15 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 		znear = CLAMP (0.5f, d, 4.f);
 	}
 
+	// FIX: gl_farclip defaults to 65536 which makes the shadow frustum cover ~100,000
+	// Quake units. On a typical map (~2000 units wide) this gives ~49 units/texel on
+	// a 2048px shadow map -- shadows land at completely wrong positions.
+	// Clamp to r_shadow_maxdist (default 4096) so coverage stays tight and resolution
+	// stays useful. The cvar can be raised for large outdoor maps.
 	zfar = gl_farclip.value;
+	if (r_shadow_maxdist.value > 0.f)
+		zfar = q_min (zfar, r_shadow_maxdist.value);
+	if (zfar < 64.f) zfar = 64.f; // never degenerate
 
 	wnear = tanx * znear;
 	hnear = tany * znear;
@@ -882,6 +891,22 @@ void R_Shadow_SunPass (void)
 	}
 
 	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
+
+	// Log the effective shadow zfar so it's visible when diagnosing shadow resolution.
+	if (shdlog.active)
+	{
+		float shadow_zfar = gl_farclip.value;
+		if (r_shadow_maxdist.value > 0.f)
+			shadow_zfar = q_min (shadow_zfar, r_shadow_maxdist.value);
+		// Derive approximate frustum width from the matrix X scale (col0[0] = 2/rl * right[0])
+		// right[0] ≈ -0.857 for default sun dir; rl = 2 / (col0[0] / right[0])
+		// Report in the log as an informational hint.
+		R_Shadow_LogWrite ("SUNPASS frustum shadow_zfar=%.0f matrix_xscale=%g (rl≈%.0f units/2048px=%.1f u/px)\n",
+			shadow_zfar,
+			r_framedata.shadow_viewproj[0],
+			(r_framedata.shadow_viewproj[0] != 0.f) ? fabsf(2.f / r_framedata.shadow_viewproj[0]) : 0.f,
+			(r_framedata.shadow_viewproj[0] != 0.f) ? fabsf(2.f / r_framedata.shadow_viewproj[0]) / 2048.f : 0.f);
+	}
 	r_framedata.shadow_debug[0] = 1.f;
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = 0.f;
