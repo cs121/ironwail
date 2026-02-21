@@ -235,7 +235,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">CompileAsCpp</CompileAs>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">CompileAsCpp</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\cd_null.c" />
+    <ClCompile Include="..\..\Quake\sound\cd_null.c" />
     <ClCompile Include="..\..\Quake\cfgfile.c" />
     <ClCompile Include="..\..\Quake\chase.c" />
     <ClCompile Include="..\..\Quake\client\cl_demo.c" />
@@ -381,9 +381,9 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\arch_def.h" />
     <ClInclude Include="..\..\Quake\bgmusic.h" />
     <ClInclude Include="..\..\Quake\bspfile.h" />
-    <ClInclude Include="..\..\Quake\cdaudio.h" />
+    <ClInclude Include="..\..\Quake\sound\cdaudio.h" />
     <ClInclude Include="..\..\Quake\cfgfile.h" />
-    <ClInclude Include="..\..\Quake\client.h" />
+    <ClInclude Include="..\..\Quake\client\client.h" />
     <ClInclude Include="..\..\Quake\cmd.h" />
     <ClInclude Include="..\..\Quake\common.h" />
     <ClInclude Include="..\..\Quake\console.h" />
@@ -391,7 +391,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\cvar.h" />
     <ClInclude Include="..\..\Quake\draw.h" />
     <ClInclude Include="..\..\Quake\opengl\gl_lightgrid.h" />
-    <ClInclude Include="..\..\Quake\glquake.h" />
+    <ClInclude Include="..\..\Quake\opengl\glquake.h" />
     <ClInclude Include="..\..\Quake\opengl\gl_model.h" />
     <ClInclude Include="..\..\Quake\opengl\gl_shaders.h" />
     <ClInclude Include="..\..\Quake\opengl\gl_texmgr.h" />
@@ -407,7 +407,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\menu.h" />
     <ClInclude Include="..\..\Quake\miniz.h" />
     <ClInclude Include="..\..\Quake\modelgen.h" />
-    <ClInclude Include="..\..\Quake\net.h" />
+    <ClInclude Include="..\..\Quake\net\net.h" />
     <ClInclude Include="..\..\Quake\net\net_defs.h" />
     <ClInclude Include="..\..\Quake\net\net_dgrm.h" />
     <ClInclude Include="..\..\Quake\net\net_loop.h" />
@@ -423,7 +423,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\quakedef.h" />
     <ClInclude Include="..\..\Quake\q_sound.h" />
     <ClInclude Include="..\..\Quake\q_stdinc.h" />
-    <ClInclude Include="..\..\Quake\render.h" />
+    <ClInclude Include="..\..\Quake\renderer\render.h" />
     <ClInclude Include="..\..\Quake\renderer\r_decals.h" />
     <ClInclude Include="..\..\Quake\renderer\r_dlight_pool.h" />
     <ClInclude Include="..\..\Quake\renderer\r_envlight.h" />
@@ -431,7 +431,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />
     <ClInclude Include="..\..\Quake\sidebar.h" />
-    <ClInclude Include="..\..\Quake\server.h" />
+    <ClInclude Include="..\..\Quake\server\server.h" />
     <ClInclude Include="..\..\Quake\sound\snd_codec.h" />
     <ClInclude Include="..\..\Quake\simd_caps.h" />
     <ClInclude Include="..\..\Quake\sound\snd_codeci.h" />
