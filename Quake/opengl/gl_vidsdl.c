@@ -261,7 +261,9 @@ VID_GetCurrentWidth
 static int VID_GetCurrentWidth (void)
 {
 	int w = 0, h = 0;
-	SDL_GetWindowSize(draw_context, &w, &h);
+	SDL_GL_GetDrawableSize (draw_context, &w, &h);
+	if (w <= 0)
+		SDL_GetWindowSize (draw_context, &w, &h);
 	return w;
 }
 
@@ -273,7 +275,9 @@ VID_GetCurrentHeight
 static int VID_GetCurrentHeight (void)
 {
 	int w = 0, h = 0;
-	SDL_GetWindowSize(draw_context, &w, &h);
+	SDL_GL_GetDrawableSize (draw_context, &w, &h);
+	if (h <= 0)
+		SDL_GetWindowSize (draw_context, &w, &h);
 	return h;
 }
 
