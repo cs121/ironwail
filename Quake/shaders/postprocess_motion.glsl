@@ -67,6 +67,6 @@ void ApplyMotionBlur(inout vec4 color, vec2 uv, vec2 viewMin, vec2 viewMax, vec2
                 AccumulateMotionSample(accum, weight, sampleUVPos, fragCoordPos, viewMin, viewMax, depthInfo, useDepth, centerDepth, depthThresholdRatio);
                 AccumulateMotionSample(accum, weight, sampleUVNeg, fragCoordNeg, viewMin, viewMax, depthInfo, useDepth, centerDepth, depthThresholdRatio);
         }
-        if (weight > 0.0)
+        if (weight > 1.0)
                 color.rgb = accum / weight;
 }

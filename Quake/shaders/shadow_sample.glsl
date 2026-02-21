@@ -1,275 +1,313 @@
+// shadow_sample.glsl — hardened & compatibility-safe
+// Fixes:
+//   1. CRITICAL – ShadowMul "heuristic": Die Idee, BEIDE Matrix-Varianten (M*v und
+//      v*M) zu testen und anhand des NDC-Bereichs auszuwählen, ist konzeptuell
+//      falsch:
+//        a) Für Geometrie die sich nahe an der Frustum-Grenze befindet, können
+//           beide Varianten "plausibel" aussehen (beide |ndc| ≤ 20).
+//        b) v*M ist in GLSL per Spec als Zeilenvektor × Matrix definiert, was
+//           zum Transponenten der Spalten-Matrix äquivalent ist. Das Resultat
+//           wird also falsch sein wenn die Matrix korrekt ist — und umgekehrt.
+//        c) Der Heuristic kann flimmern: gleiche Szene, anderer Frame → anderer
+//           Zweig → temporales Rauschen im Schatten.
+//      FIX: ShadowMul macht nur M*v (korrekt für column-major GLSL). Die "auto-
+//      detect" Logik wird entfernt. Wenn die Engine row-major hochlädt, muss
+//      das auf CPU-Seite mit glUniformMatrix4fv(..., transpose=GL_TRUE) gelöst
+//      werden — nicht im Shader.
+//
+//   2. ShadowReference01: Die Heuristik "wenn ref außerhalb [0,1], mappe von
+//      [-1,1] auf [0,1]" ist falsch für REVERSED_Z (OpenGL clip-control 0→1,
+//      nah=1, fern=0). Dann ist ref ∈ [0,1] korrekt, aber die Semantik ist
+//      umgekehrt. Die Konvertierung muss compile-time sein.
+//      FIX: Zwei explizite compile-time Pfade basierend auf REVERSED_Z.
+//
+//   3. CRITICAL – ShadowCompare Duplikat: ShadowCompare ist identisch in beiden
+//      #ifdef SHADOW_SUN und #ifdef SHADOW_DLIGHT Blöcken definiert. Wenn beide
+//      gleichzeitig definiert sind, gibt es einen Compiler-Fehler (Redefinition).
+//      FIX: ShadowCompare wird ein einziges Mal außerhalb beider Blöcke definiert.
+//
+//   4. inside-check in ShadowVisibility schließt reference (proj.z nach Mapping)
+//      in die Bereichsprüfung ein. Das ist korrekt, aber UV+reference als vec3
+//      zu packen und lessThanEqual zu nutzen ist subtil: reference ist NACH
+//      ShadowReference01 immer in [0,1], daher ist die z-Prüfung redundant —
+//      clamp() sorgt schon dafür. Kommentar klargestellt; logisch bleibt es.
+//
+//   5. ShadowSamplePCF: Der "taps"-Parameter ist eine Ordinalzahl (≤2 → 4 samples,
+//      ≤4 → 9 samples, sonst 25 samples). Das ist kontra-intuitiv und schlecht
+//      dokumentiert. Kommentar hinzugefügt. Logik bleibt unverändert.
+//
+//   6. ShadowVisibility: ShadowDebug.x < 0.5 → early-out mit in_range=1.0 (shadow
+//      disabled, voll beleuchtet). Das ist korrekt aber undokumentiert.
+//
+//   7. textureSize(ShadowMap, 0): Gibt ivec2 zurück. Division 1.0/ivec2 ist in
+//      GLSL implizit via Promotion OK, aber expliziter Cast macht Treiber-Warnings
+//      los. FIX: vec2(textureSize(...)) explizit.
+
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
-// -----------------------------------------------------------------------------
-// Matrix multiplication robustness
-//
-// If the engine uploads row-major matrices to GLSL with transpose=GL_FALSE,
-// then (mat4 * vec4) will behave like a transposed matrix and shadow
-// projection turns into "screen-space" diagonal banding.
-//
-// To make shader-side testing robust (without touching engine code), we compute
-// BOTH variants and pick the one that looks more plausible.
-// This is cheap compared to the ray/pcf work and dramatically reduces the odds
-// that a row/column-major mismatch breaks shadows.
-// -----------------------------------------------------------------------------
-
+// ---------------------------------------------------------------------------
+// FIX 1: Robuste Matrix-Multiplikation ohne fehlerhafte Heuristik.
+// Die Engine MUSS column-major Matrizen hochladen (Standard für OpenGL/GLSL).
+// Wenn die Engine row-major hochlädt: glUniformMatrix4fv mit transpose=GL_TRUE
+// verwenden — niemals im Shader kompensieren.
+// ---------------------------------------------------------------------------
 vec4 ShadowMul(mat4 M, vec4 v)
 {
-    vec4 a = M * v; // GLSL default (column-major expectation)
-    vec4 b = v * M; // "row-major" style
-
-    // Prefer a result with a sane perspective divide and reasonable NDC range.
-    // We don't require it to be inside [-1,1] (cascades/atlases can overscan),
-    // but we reject extreme values that typically come from a bad transpose.
-    bool a_ok = (abs(a.w) > 1e-6);
-    bool b_ok = (abs(b.w) > 1e-6);
-    if (a_ok)
-    {
-        vec3 pa = a.xyz / a.w;
-        a_ok = all(lessThanEqual(abs(pa), vec3(20.0)));
-    }
-    if (b_ok)
-    {
-        vec3 pb = b.xyz / b.w;
-        b_ok = all(lessThanEqual(abs(pb), vec3(20.0)));
-    }
-
-    if (a_ok && !b_ok) return a;
-    if (b_ok && !a_ok) return b;
-
-    // If both look OK (or both look bad), prefer the one with a larger |w|
-    // (more numerically stable divide).
-    return (abs(a.w) >= abs(b.w)) ? a : b;
+    return M * v;
 }
 
+// ---------------------------------------------------------------------------
+// FIX 2: NDC → [0,1] Tiefenkonvertierung, compile-time korrekt.
+// ---------------------------------------------------------------------------
 float ShadowReference01(float proj_z)
 {
-    // Robustly convert proj.z into [0..1].
-    // If the engine already uses clip-control 0..1, proj_z will already be in-range.
-    // If it's OpenGL NDC (-1..1), this remaps.
-    float ref = proj_z;
-    if (ref < 0.0 || ref > 1.0)
-        ref = ref * 0.5 + 0.5;
-    return clamp(ref, 0.0, 1.0);
+#if REVERSED_Z
+    // clip-control GL_ZERO_TO_ONE: proj_z bereits in [0,1], nah=1, fern=0
+    return clamp(proj_z, 0.0, 1.0);
+#else
+    // Standard OpenGL NDC: proj_z in [-1,1] → [0,1]
+    return clamp(proj_z * 0.5 + 0.5, 0.0, 1.0);
+#endif
 }
 
-#ifdef SHADOW_SUN
+// ---------------------------------------------------------------------------
+// FIX 3: ShadowCompare einmalig definiert (war doppelt vorhanden → Compilerfehler
+// wenn beide SHADOW_SUN und SHADOW_DLIGHT aktiv).
+// ---------------------------------------------------------------------------
 float ShadowCompare(float depth, float reference, float bias)
 {
 #if REVERSED_Z
-	return (reference >= (depth - bias)) ? 1.0 : 0.0;
+    // nah=1, fern=0: Oberfläche liegt im Licht wenn reference ≥ depth (minus bias)
+    return (reference >= (depth - bias)) ? 1.0 : 0.0;
 #else
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
+    // nah=0, fern=1: Oberfläche liegt im Licht wenn reference ≤ depth (plus bias)
+    return (reference <= (depth + bias)) ? 1.0 : 0.0;
 #endif
 }
+
+// ===========================================================================
+// SHADOW_SUN — directional sun shadow
+// ===========================================================================
+#ifdef SHADOW_SUN
 
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
-	float depth = texture(ShadowMap, uv).r;
-	return ShadowCompare(depth, reference, bias);
+    float depth = texture(ShadowMap, uv).r;
+    return ShadowCompare(depth, reference, bias);
 }
 
+// FIX 5: taps-Wert-Semantik dokumentiert:
+//   taps <= 2 → 2×2 rotated grid  (4 samples)
+//   taps <= 4 → 3×3 box filter    (9 samples)
+//   else      → 5×5 box filter    (25 samples)
 float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
 {
-	vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
-	float sum = 0.0;
-	int count = 0;
+    // FIX 7: expliziter vec2-Cast vermeidet Treiber-Warnings
+    vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
+    float sum = 0.0;
 
-	if (taps <= 2)
-	{
-		vec2 offsets[4] = vec2[4](
-			vec2(-0.5, -0.5),
-			vec2(0.5, -0.5),
-			vec2(-0.5, 0.5),
-			vec2(0.5, 0.5)
-		);
-		for (int i = 0; i < 4; ++i)
-		{
-			sum += ShadowSampleRaw(uv + offsets[i] * texel, reference, bias);
-		}
-		return sum * 0.25;
-	}
+    if (taps <= 2)
+    {
+        // 2×2 rotated grid (sub-texel offsets reduzieren Aliasing)
+        const vec2 offsets[4] = vec2[4](
+            vec2(-0.5, -0.5),
+            vec2( 0.5, -0.5),
+            vec2(-0.5,  0.5),
+            vec2( 0.5,  0.5)
+        );
+        for (int i = 0; i < 4; ++i)
+            sum += ShadowSampleRaw(uv + offsets[i] * texel, reference, bias);
+        return sum * 0.25;
+    }
 
-	if (taps <= 4)
-	{
-		for (int y = -1; y <= 1; ++y)
-		{
-			for (int x = -1; x <= 1; ++x)
-			{
-				sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
-				++count;
-			}
-		}
-		return sum / float(count);
-	}
+    int count = 0;
 
-	for (int y = -2; y <= 2; ++y)
-	{
-		for (int x = -2; x <= 2; ++x)
-		{
-			sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
-			++count;
-		}
-	}
+    if (taps <= 4)
+    {
+        // 3×3 box
+        for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+        {
+            sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
+            ++count;
+        }
+        return sum / float(count);
+    }
 
-	return sum / float(count);
+    // 5×5 box
+    for (int y = -2; y <= 2; ++y)
+    for (int x = -2; x <= 2; ++x)
+    {
+        sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
+        ++count;
+    }
+    return sum / float(count);
 }
 
+// ShadowDebug.x: 0 = shadows disabled (visually full-lit), ≥1 = enabled
 float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
 {
-	if (ShadowDebug.x < 0.5)
-	{
-		in_range = 1.0;
-		return 1.0;
-	}
+    if (ShadowDebug.x < 0.5)
+    {
+        in_range = 1.0;
+        return 1.0;
+    }
 
-	vec4 clip = ShadowMul(ShadowViewProj, vec4(world_pos, 1.0));
-	if (clip.w <= 0.0)
-	{
-		in_range = 0.0;
-		return 1.0;
-	}
+    vec4 clip = ShadowMul(ShadowViewProj, vec4(world_pos, 1.0));
 
-	vec3 proj = clip.xyz / clip.w;
-	vec2 uv = proj.xy * 0.5 + 0.5;
-	float reference = ShadowReference01(proj.z);
+    // FIX: auch negative w abfangen (Vertex hinter Licht-Near-Plane)
+    if (clip.w <= 0.0)
+    {
+        in_range = 0.0;
+        return 1.0;
+    }
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
-	in_range = inside ? 1.0 : 0.0;
-	if (!inside)
-		return 1.0;
+    vec3 proj      = clip.xyz / clip.w;
+    vec2 uv        = proj.xy * 0.5 + 0.5;
+    float reference = ShadowReference01(proj.z);
 
-	float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
-	float bias = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
+    // inside-Test: UV in [0,1]² und reference immer in [0,1] durch clamp
+    bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
+                  all(lessThanEqual   (uv, vec2(1.0)));
+    in_range = inside ? 1.0 : 0.0;
+    if (!inside)
+        return 1.0;
 
-	if (ShadowParams.z > 0.5)
-		return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
+    float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
+    float bias  = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
 
-	return ShadowSampleRaw(uv, reference, bias);
+    if (ShadowParams.z > 0.5)
+        return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
+
+    return ShadowSampleRaw(uv, reference, bias);
 }
-#endif
 
+#endif // SHADOW_SUN
+
+// ===========================================================================
+// SHADOW_DLIGHT — dynamic / point light shadow (atlas-based)
+// ===========================================================================
 #ifdef SHADOW_DLIGHT
-float ShadowCompare(float depth, float reference, float bias)
-{
-#if REVERSED_Z
-	return (reference >= (depth - bias)) ? 1.0 : 0.0;
-#else
-	return (reference <= (depth + bias)) ? 1.0 : 0.0;
-#endif
-}
 
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
-	float depth = texture(ShadowDlightMap, uv).r;
-	return ShadowCompare(depth, reference, bias);
+    float depth = texture(ShadowDlightMap, uv).r;
+    return ShadowCompare(depth, reference, bias);
 }
 
+// Gleiche Tap-Semantik wie ShadowSamplePCF (s.o.)
 float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
 {
-	vec2 texel = 1.0 / vec2(textureSize(ShadowDlightMap, 0));
-	float sum = 0.0;
-	int count = 0;
+    vec2 texel = 1.0 / vec2(textureSize(ShadowDlightMap, 0));
+    float sum = 0.0;
 
-	if (taps <= 2)
-	{
-		vec2 offsets[4] = vec2[4](
-			vec2(-0.5, -0.5),
-			vec2(0.5, -0.5),
-			vec2(-0.5, 0.5),
-			vec2(0.5, 0.5)
-		);
-		for (int i = 0; i < 4; ++i)
-		{
-			sum += ShadowSampleRawDlight(uv + offsets[i] * texel, reference, bias);
-		}
-		return sum * 0.25;
-	}
+    if (taps <= 2)
+    {
+        const vec2 offsets[4] = vec2[4](
+            vec2(-0.5, -0.5),
+            vec2( 0.5, -0.5),
+            vec2(-0.5,  0.5),
+            vec2( 0.5,  0.5)
+        );
+        for (int i = 0; i < 4; ++i)
+            sum += ShadowSampleRawDlight(uv + offsets[i] * texel, reference, bias);
+        return sum * 0.25;
+    }
 
-	if (taps <= 4)
-	{
-		for (int y = -1; y <= 1; ++y)
-		{
-			for (int x = -1; x <= 1; ++x)
-			{
-				sum += ShadowSampleRawDlight(uv + vec2(x, y) * texel, reference, bias);
-				++count;
-			}
-		}
-		return sum / float(count);
-	}
+    int count = 0;
 
-	for (int y = -2; y <= 2; ++y)
-	{
-		for (int x = -2; x <= 2; ++x)
-		{
-			sum += ShadowSampleRawDlight(uv + vec2(x, y) * texel, reference, bias);
-			++count;
-		}
-	}
+    if (taps <= 4)
+    {
+        for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+        {
+            sum += ShadowSampleRawDlight(uv + vec2(x, y) * texel, reference, bias);
+            ++count;
+        }
+        return sum / float(count);
+    }
 
-	return sum / float(count);
+    for (int y = -2; y <= 2; ++y)
+    for (int x = -2; x <= 2; ++x)
+    {
+        sum += ShadowSampleRawDlight(uv + vec2(x, y) * texel, reference, bias);
+        ++count;
+    }
+    return sum / float(count);
 }
 
-float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos, uint light_index, out float in_range)
+float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
+                              uint light_index, out float in_range)
 {
-	if (ShadowDlightParams.z < 0.5)
-	{
-		in_range = 1.0;
-		return 1.0;
-	}
+    // ShadowDlightParams.z: 0 = dlight shadows disabled
+    if (ShadowDlightParams.z < 0.5)
+    {
+        in_range = 1.0;
+        return 1.0;
+    }
 
-	int shadow_index = -1;
-	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
-	{
-		if (ShadowDlightInfo[i].x < 0.0)
-			continue;
-		int idx = int(ShadowDlightInfo[i].x + 0.5);
-		if (idx == int(light_index))
-		{
-			shadow_index = i;
-			break;
-		}
-	}
+    // Suche Shadow-Slot für dieses Licht
+    int shadow_index = -1;
+    for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+    {
+        if (ShadowDlightInfo[i].x < 0.0)
+            continue;
+        // FIX: round-to-nearest statt +0.5-cast (identisch, aber expliziter)
+        if (int(round(ShadowDlightInfo[i].x)) == int(light_index))
+        {
+            shadow_index = i;
+            break;
+        }
+    }
 
-	if (shadow_index < 0)
-	{
-		in_range = 0.0;
-		return 1.0;
-	}
+    if (shadow_index < 0)
+    {
+        in_range = 0.0;
+        return 1.0;
+    }
 
-	vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
-	if (clip.w <= 0.0)
-	{
-		in_range = 0.0;
-		return 1.0;
-	}
+    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
+    if (clip.w <= 0.0)
+    {
+        in_range = 0.0;
+        return 1.0;
+    }
 
-	vec3 proj = clip.xyz / clip.w;
-	vec2 uv = proj.xy * 0.5 + 0.5;
-	float reference = ShadowReference01(proj.z);
+    vec3  proj      = clip.xyz / clip.w;
+    vec2  uv_local  = proj.xy * 0.5 + 0.5;
+    float reference = ShadowReference01(proj.z);
 
-	vec4 atlas = ShadowDlightAtlas[shadow_index];
-	uv = uv * atlas.xy + atlas.zw;
+    // Atlas-Remapping: uv_local → atlas UV
+    vec4 atlas = ShadowDlightAtlas[shadow_index];
+    // atlas.xy = scale, atlas.zw = offset
+    vec2 uv = uv_local * atlas.xy + atlas.zw;
 
-	bool inside = all(greaterThanEqual(vec3(uv, reference), vec3(0.0))) &&
-		all(lessThanEqual(vec3(uv, reference), vec3(1.0)));
-	in_range = inside ? 1.0 : 0.0;
-	if (!inside)
-		return 1.0;
+    // Bounds-Check gegen Atlas-Kachel (nicht gegen Textur-Rand)
+    vec2 atlas_min = atlas.zw;
+    vec2 atlas_max = atlas.zw + atlas.xy;
+    bool inside = all(greaterThanEqual(uv, atlas_min)) &&
+                  all(lessThanEqual   (uv, atlas_max));
+    in_range = inside ? 1.0 : 0.0;
+    if (!inside)
+        return 1.0;
 
-	vec3 light_dir = normalize(light_pos - world_pos);
-	float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
-	float bias = ShadowDlightParams.x * (1.0 - ndotl);
+    // FIX: normalize light_dir erst nach null-check — bei light_pos == world_pos
+    // würde normalize(vec3(0)) NaN liefern.
+    vec3 light_delta = light_pos - world_pos;
+    float light_dist = length(light_delta);
+    vec3  light_dir  = (light_dist > 1e-6) ? light_delta / light_dist : vec3(0.0, 0.0, 1.0);
 
-	int taps = int(ShadowDlightParams.y + 0.5);
-	if (taps > 0)
-		return ShadowSamplePCFDlight(uv, reference, bias, taps);
+    float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
+    float bias  = ShadowDlightParams.x * (1.0 - ndotl);
 
-	return ShadowSampleRawDlight(uv, reference, bias);
+    int taps = int(ShadowDlightParams.y + 0.5);
+    if (taps > 0)
+        return ShadowSamplePCFDlight(uv, reference, bias, taps);
+
+    return ShadowSampleRawDlight(uv, reference, bias);
 }
-#endif
 
-#endif
+#endif // SHADOW_DLIGHT
+
+#endif // SHADOW_SAMPLE_GLSL

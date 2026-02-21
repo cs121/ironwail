@@ -23,455 +23,484 @@ layout(location=0) out vec4 outColor;
 
 const int SSAO_MAX_SAMPLES = 32;
 const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
-        vec3(0.5381, 0.1856, 0.4319),
-        vec3(0.1379, 0.2486, 0.4430),
-        vec3(0.3371, 0.5679, 0.0057),
-        vec3(-0.6999, -0.0451, 0.0019),
-        vec3(0.0689, -0.1598, 0.8547),
-        vec3(0.0560, 0.0069, 0.1843),
-        vec3(-0.0146, 0.1402, 0.0762),
-        vec3(0.0100, -0.1924, 0.0344),
-        vec3(-0.3577, -0.5301, 0.4358),
-        vec3(-0.3169, 0.1063, 0.0158),
-        vec3(0.0103, -0.5869, 0.0046),
-        vec3(-0.0897, -0.4940, 0.3287),
-        vec3(0.7119, -0.0154, 0.0918),
-        vec3(-0.0533, 0.0596, 0.5411),
-        vec3(0.0352, -0.0631, 0.5460),
-        vec3(-0.4776, 0.2847, 0.0271),
-        vec3(0.6281, 0.2908, 0.1163),
-        vec3(0.3174, -0.1646, 0.5042),
-        vec3(-0.2505, 0.4580, 0.0136),
-        vec3(0.2067, -0.3752, 0.0631),
-        vec3(-0.6681, -0.5057, 0.1395),
-        vec3(0.1885, 0.4704, 0.1952),
-        vec3(0.4441, 0.1386, 0.1782),
-        vec3(-0.0791, 0.3005, 0.4190),
-        vec3(-0.1153, 0.5775, 0.1735),
-        vec3(0.4251, 0.0601, 0.1049),
-        vec3(0.0587, -0.6517, 0.0442),
-        vec3(-0.0837, 0.1302, 0.5580),
-        vec3(0.1036, 0.0927, 0.1655),
-        vec3(-0.0347, -0.3855, 0.3385),
-        vec3(-0.3756, 0.4976, 0.0275),
-        vec3(0.2397, -0.1794, 0.3984)
+	vec3(0.5381, 0.1856, 0.4319),
+	vec3(0.1379, 0.2486, 0.4430),
+	vec3(0.3371, 0.5679, 0.0057),
+	vec3(-0.6999, -0.0451, 0.0019),
+	vec3(0.0689, -0.1598, 0.8547),
+	vec3(0.0560, 0.0069, 0.1843),
+	vec3(-0.0146, 0.1402, 0.0762),
+	vec3(0.0100, -0.1924, 0.0344),
+	vec3(-0.3577, -0.5301, 0.4358),
+	vec3(-0.3169, 0.1063, 0.0158),
+	vec3(0.0103, -0.5869, 0.0046),
+	vec3(-0.0897, -0.4940, 0.3287),
+	vec3(0.7119, -0.0154, 0.0918),
+	vec3(-0.0533, 0.0596, 0.5411),
+	vec3(0.0352, -0.0631, 0.5460),
+	vec3(-0.4776, 0.2847, 0.0271),
+	vec3(0.6281, 0.2908, 0.1163),
+	vec3(0.3174, -0.1646, 0.5042),
+	vec3(-0.2505, 0.4580, 0.0136),
+	vec3(0.2067, -0.3752, 0.0631),
+	vec3(-0.6681, -0.5057, 0.1395),
+	vec3(0.1885, 0.4704, 0.1952),
+	vec3(0.4441, 0.1386, 0.1782),
+	vec3(-0.0791, 0.3005, 0.4190),
+	vec3(-0.1153, 0.5775, 0.1735),
+	vec3(0.4251, 0.0601, 0.1049),
+	vec3(0.0587, -0.6517, 0.0442),
+	vec3(-0.0837, 0.1302, 0.5580),
+	vec3(0.1036, 0.0927, 0.1655),
+	vec3(-0.0347, -0.3855, 0.3385),
+	vec3(-0.3756, 0.4976, 0.0275),
+	vec3(0.2397, -0.1794, 0.3984)
 );
 
 // SSAO conventions:
 // - View space uses +X forward (camera looks down +X).
 // - When reverse-Z (clip control) is enabled, NDC depth is [0..1]; otherwise [-1..1].
 // - All comparisons are done in view space using +X depth.
+
 vec2 ApplyYFlip(vec2 uv)
 {
-        if (u_yFlip != 0)
-                uv.y = 1.0 - uv.y;
-        return uv;
+	if (u_yFlip != 0)
+		uv.y = 1.0 - uv.y;
+	return uv;
 }
 
 vec2 ScreenInvSize()
 {
-        return u_screenParams.xy;
+	return u_screenParams.xy;
 }
 
 vec2 ScreenSize()
 {
-        return u_screenParams.zw;
+	return u_screenParams.zw;
 }
 
 vec2 AoInvSize()
 {
-        return u_aoParams.xy;
+	return u_aoParams.xy;
 }
 
 vec2 AoSize()
 {
-        return u_aoParams.zw;
+	return u_aoParams.zw;
 }
 
 vec2 AoPixelCoord()
 {
-        return floor(gl_FragCoord.xy);
+	return floor(gl_FragCoord.xy);
 }
 
 vec2 AoUvFromPixel(vec2 aoPixel)
 {
-        return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+	return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
 }
 
 vec2 UnflipUv(vec2 uv)
 {
-        if (u_yFlip != 0)
-                uv.y = 1.0 - uv.y;
-        return uv;
+	if (u_yFlip != 0)
+		uv.y = 1.0 - uv.y;
+	return uv;
 }
 
 vec2 ViewMinPx()
 {
-        return floor(u_viewRect.xy * ScreenSize());
+	return floor(u_viewRect.xy * ScreenSize());
 }
 
 vec2 ViewMaxPx()
 {
-        vec2 minPx = ViewMinPx();
-        vec2 maxPx = floor(u_viewRect.zw * ScreenSize() - vec2(1.0));
-        return max(minPx, maxPx);
+	vec2 minPx = ViewMinPx();
+	vec2 maxPx = floor(u_viewRect.zw * ScreenSize() - vec2(1.0));
+	return max(minPx, maxPx);
 }
 
 ivec2 ClampScreenPixel(vec2 pixel)
 {
-        vec2 maxPx = ScreenSize() - vec2(1.0);
-        return ivec2(clamp(pixel, vec2(0.0), maxPx));
+	vec2 maxPx = ScreenSize() - vec2(1.0);
+	return ivec2(clamp(pixel, vec2(0.0), maxPx));
 }
 
 ivec2 ScreenPixelFromAoPixelNearest(vec2 aoPixel)
 {
-        vec2 screenSize = ScreenSize();
-        vec2 aoSize = max(AoSize(), vec2(1.0));
-        // SSAO FIX: Snap AO pixels to integer depth texels to avoid half-res UV drift/banding.
-        vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
-        return ClampScreenPixel(screenPixel);
+	vec2 screenSize = ScreenSize();
+	vec2 aoSize = max(AoSize(), vec2(1.0));
+	vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
+	return ClampScreenPixel(screenPixel);
 }
 
 ivec2 ScreenPixelFromUv(vec2 uv)
 {
-        vec2 unflipped = UnflipUv(uv);
-        vec2 screenPixel = floor(unflipped * ScreenSize());
-        return ClampScreenPixel(screenPixel);
+	vec2 unflipped = UnflipUv(uv);
+	vec2 screenPixel = floor(unflipped * ScreenSize());
+	return ClampScreenPixel(screenPixel);
 }
 
 vec2 ScreenUvFromPixel(ivec2 pixel)
 {
-        return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
+	return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
 }
 
 // Ironwail uses reverse-Z with clip control: near depth ~1, far depth ~0 when reversed is enabled.
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
-        float raw = depth;
-        if (mode == 1)
-                raw = 1.0 - raw;
-        if (reversed > 0.5)
-        {
-                if (mode == 2)
-                        raw = 1.0 - raw;
-                return raw;
-        }
-        float ndc = raw * 2.0 - 1.0;
-        if (mode == 2)
-                ndc = -ndc;
-        return ndc;
-}
-
-vec3 ReconstructViewPos(vec2 uv, float depth);
-
-// Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
-float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
-{
-        // SSAO FIX: Use inverse projection for depth reconstruction to avoid reversed-Z/clip-control mismatches.
-        vec3 viewPos = ReconstructViewPos(uv, depth01);
-        return viewPos.x;
-}
-
-float DepthRawFromPixel(ivec2 pixel)
-{
-        return texelFetch(DepthTexture, pixel, 0).r;
-}
-
-float DepthRawFromUv(vec2 uv)
-{
-        return DepthRawFromPixel(ScreenPixelFromUv(uv));
+	float raw = depth;
+	if (mode == 1)
+		raw = 1.0 - raw;
+	if (reversed > 0.5)
+	{
+		if (mode == 2)
+			raw = 1.0 - raw;
+		return raw;
+	}
+	float ndc = raw * 2.0 - 1.0;
+	if (mode == 2)
+		ndc = -ndc;
+	return ndc;
 }
 
 vec3 ReconstructViewPos(vec2 uv, float depth)
 {
-        float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
-        vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
-        vec4 view = u_invProj * clip;
-        float w = view.w;
-        if (abs(w) < 1e-6)
-                return vec3(1e30);
-        return view.xyz / w;
+	float ndcDepth = DepthToNdcZ(depth, u_depthParams.z, u_reversedZMode);
+	vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
+	vec4 view = u_invProj * clip;
+	float w = view.w;
+	if (abs(w) < 1e-6)
+		return vec3(1e30);
+	return view.xyz / w;
+}
+
+// FIX: ViewZFromDepth now uses ReconstructViewPos consistently; unused reversedZ param removed.
+float ViewZFromDepth(vec2 uv, float depth01)
+{
+	vec3 viewPos = ReconstructViewPos(uv, depth01);
+	return viewPos.x;
+}
+
+float DepthRawFromPixel(ivec2 pixel)
+{
+	return texelFetch(DepthTexture, pixel, 0).r;
+}
+
+float DepthRawFromUv(vec2 uv)
+{
+	return DepthRawFromPixel(ScreenPixelFromUv(uv));
 }
 
 vec3 ComputeNormalFromViewPos(vec3 viewPos)
 {
-        vec3 dx = dFdx(viewPos);
-        vec3 dy = dFdy(viewPos);
-        vec3 normal = normalize(cross(dx, dy));
-        if (length(normal) < 1e-4)
-                return vec3(0.0, 0.0, 1.0);
-        // SSAO FIX: Orient reconstructed normals toward the camera for stable TBN.
-        vec3 viewDir = normalize(-viewPos);
-        if (dot(normal, viewDir) < 0.0)
-                normal = -normal;
-        return normal;
+	vec3 dx = dFdx(viewPos);
+	vec3 dy = dFdy(viewPos);
+	vec3 normal = normalize(cross(dx, dy));
+	if (length(normal) < 1e-4)
+		return vec3(0.0, 0.0, 1.0);
+	vec3 viewDir = normalize(-viewPos);
+	if (dot(normal, viewDir) < 0.0)
+		normal = -normal;
+	return normal;
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
 {
-        float reversed = depthParams.z;
-        float cutoff = depthParams.w;
-        if (reversed > 0.5)
-                return depth <= cutoff;
-        return depth >= cutoff;
+	float reversed = depthParams.z;
+	float cutoff = depthParams.w;
+	if (reversed > 0.5)
+		return depth <= cutoff;
+	return depth >= cutoff;
 }
 
 vec3 ReconstructNormalFromDepth(vec2 uv)
 {
-        ivec2 centerPixel = ScreenPixelFromUv(uv);
-        vec2 viewMinPx = ViewMinPx();
-        vec2 viewMaxPx = ViewMaxPx();
-        ivec2 rightPixel = ivec2(clamp(vec2(centerPixel + ivec2(1, 0)), viewMinPx, viewMaxPx));
-        ivec2 leftPixel = ivec2(clamp(vec2(centerPixel - ivec2(1, 0)), viewMinPx, viewMaxPx));
-        ivec2 upPixel = ivec2(clamp(vec2(centerPixel + ivec2(0, 1)), viewMinPx, viewMaxPx));
-        ivec2 downPixel = ivec2(clamp(vec2(centerPixel - ivec2(0, 1)), viewMinPx, viewMaxPx));
+	ivec2 centerPixel = ScreenPixelFromUv(uv);
+	vec2 viewMinPx = ViewMinPx();
+	vec2 viewMaxPx = ViewMaxPx();
 
-        float centerDepth = DepthRawFromPixel(centerPixel);
-        if (IsSkyDepth(centerDepth, u_depthParams))
-                return vec3(0.0, 0.0, 1.0);
+	// FIX: Track both pixel and depth together so UV and depth always match the same pixel.
+	ivec2 rightPixel = ivec2(clamp(vec2(centerPixel + ivec2(1, 0)), viewMinPx, viewMaxPx));
+	ivec2 upPixel    = ivec2(clamp(vec2(centerPixel + ivec2(0, 1)), viewMinPx, viewMaxPx));
 
-        vec2 uvCenter = ScreenUvFromPixel(centerPixel);
-        vec3 p = ReconstructViewPos(uvCenter, centerDepth);
-        float depthRight = DepthRawFromPixel(rightPixel);
-        if (IsSkyDepth(depthRight, u_depthParams))
-                depthRight = DepthRawFromPixel(leftPixel);
-        vec2 uvRight = ScreenUvFromPixel(IsSkyDepth(depthRight, u_depthParams) ? centerPixel : rightPixel);
-        vec3 pr = ReconstructViewPos(uvRight, depthRight);
+	float centerDepth = DepthRawFromPixel(centerPixel);
+	if (IsSkyDepth(centerDepth, u_depthParams))
+		return vec3(0.0, 0.0, 1.0);
 
-        float depthUp = DepthRawFromPixel(upPixel);
-        if (IsSkyDepth(depthUp, u_depthParams))
-                depthUp = DepthRawFromPixel(downPixel);
-        vec2 uvUp = ScreenUvFromPixel(IsSkyDepth(depthUp, u_depthParams) ? centerPixel : upPixel);
-        vec3 pu = ReconstructViewPos(uvUp, depthUp);
+	vec2  uvCenter = ScreenUvFromPixel(centerPixel);
+	vec3  p        = ReconstructViewPos(uvCenter, centerDepth);
 
-        vec3 normal = normalize(cross(pr - p, pu - p));
-        if (length(normal) < 1e-4)
-                return vec3(0.0, 0.0, 1.0);
-        vec3 viewDir = normalize(-p);
-        if (dot(normal, viewDir) < 0.0)
-                normal = -normal;
-        return normal;
+	// Right neighbor — fall back to left if sky, then center.
+	float depthRight = DepthRawFromPixel(rightPixel);
+	ivec2 usedRightPixel = rightPixel;
+	if (IsSkyDepth(depthRight, u_depthParams))
+	{
+		ivec2 leftPixel = ivec2(clamp(vec2(centerPixel - ivec2(1, 0)), viewMinPx, viewMaxPx));
+		float depthLeft = DepthRawFromPixel(leftPixel);
+		if (!IsSkyDepth(depthLeft, u_depthParams))
+		{
+			depthRight     = depthLeft;
+			usedRightPixel = leftPixel;
+		}
+		else
+		{
+			usedRightPixel = centerPixel;
+			depthRight     = centerDepth;
+		}
+	}
+	vec2 uvRight = ScreenUvFromPixel(usedRightPixel);
+	vec3 pr      = ReconstructViewPos(uvRight, depthRight);
+
+	// Up neighbor — fall back to down if sky, then center.
+	float depthUp = DepthRawFromPixel(upPixel);
+	ivec2 usedUpPixel = upPixel;
+	if (IsSkyDepth(depthUp, u_depthParams))
+	{
+		ivec2 downPixel = ivec2(clamp(vec2(centerPixel - ivec2(0, 1)), viewMinPx, viewMaxPx));
+		float depthDown = DepthRawFromPixel(downPixel);
+		if (!IsSkyDepth(depthDown, u_depthParams))
+		{
+			depthUp     = depthDown;
+			usedUpPixel = downPixel;
+		}
+		else
+		{
+			usedUpPixel = centerPixel;
+			depthUp     = centerDepth;
+		}
+	}
+	vec2 uvUp = ScreenUvFromPixel(usedUpPixel);
+	vec3 pu   = ReconstructViewPos(uvUp, depthUp);
+
+	vec3 normal = normalize(cross(pr - p, pu - p));
+	if (length(normal) < 1e-4)
+		return vec3(0.0, 0.0, 1.0);
+	vec3 viewDir = normalize(-p);
+	if (dot(normal, viewDir) < 0.0)
+		normal = -normal;
+	return normal;
 }
 
 float RandIGN(ivec2 pixel, float seed)
 {
-        float x = float(pixel.x);
-        float y = float(pixel.y);
-        float f = fract(0.06711056 * x + 0.00583715 * y + seed);
-        return fract(52.9829189 * f);
+	float x = float(pixel.x);
+	float y = float(pixel.y);
+	float f = fract(0.06711056 * x + 0.00583715 * y + seed);
+	return fract(52.9829189 * f);
 }
 
+// FIX: Fog density is applied linearly over distance, not over squared distance.
 float FogTransmittanceFromViewPos(vec3 viewPos)
 {
-        float density = abs(Fog.w);
-        if (density <= 0.0)
-                return 1.0;
-        float fog = exp2(-density * dot(viewPos, viewPos));
-        return clamp(fog, 0.0, 1.0);
+	float density = abs(Fog.w);
+	if (density <= 0.0)
+		return 1.0;
+	float dist = length(viewPos);
+	float fog = exp2(-density * dist);
+	return clamp(fog, 0.0, 1.0);
 }
 
 float FogFactorFromViewPos(vec3 viewPos)
 {
-        return 1.0 - FogTransmittanceFromViewPos(viewPos);
+	return 1.0 - FogTransmittanceFromViewPos(viewPos);
 }
 
 bool IsInvalidFloat(float v)
 {
-        return !(v > -1e20 && v < 1e20);
+	return !(v > -1e20 && v < 1e20);
 }
 
 bool IsInvalidVec3(vec3 v)
 {
-        return IsInvalidFloat(v.x) || IsInvalidFloat(v.y) || IsInvalidFloat(v.z);
+	return IsInvalidFloat(v.x) || IsInvalidFloat(v.y) || IsInvalidFloat(v.z);
 }
 
 void main()
 {
-        vec2 aoPixel = AoPixelCoord();
-        vec2 uv = AoUvFromPixel(aoPixel);
-        int debugMode = -1;
-        if (u_debugParams.x >= 0.5)
-                debugMode = int(u_debugParams.x + 0.5);
-        float debugFar = max(u_debugParams.y, 1e-3);
-        if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
-        {
-                outColor = vec4(1.0);
-                return;
-        }
+	vec2 aoPixel = AoPixelCoord();
+	vec2 uv      = AoUvFromPixel(aoPixel);
 
-        float noiseSeed = u_noiseParams.w;
-        float noiseEnabled = u_noiseParams.z;
-        vec2 noiseVec;
-        if (noiseEnabled > 0.5 && u_noiseMode > 0)
-        {
-                ivec2 noisePixel = ivec2(aoPixel);
-                if (u_noiseMode == 2)
-                {
-                        vec2 noiseJitter = vec2(noiseSeed, noiseSeed * 1.37);
-                        vec2 noiseUV = (aoPixel + noiseJitter + 0.5) * AoInvSize() * u_noiseParams.xy;
-                        noiseUV = fract(noiseUV);
-                        vec2 noiseSample = texture(NoiseTexture, noiseUV).rg * 2.0 - 1.0;
-                        noiseVec = normalize(noiseSample);
-                }
-                else
-                {
-                        float angle = RandIGN(noisePixel, noiseSeed) * 6.2831853;
-                        noiseVec = vec2(cos(angle), sin(angle));
-                }
-        }
-        else
-        {
-                noiseVec = vec2(1.0, 0.0);
-        }
-        if (debugMode == 8)
-        {
-                outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
-                return;
-        }
+	int debugMode = -1;
+	if (u_debugParams.x >= 0.5)
+		debugMode = int(u_debugParams.x + 0.5);
+	float debugFar = max(u_debugParams.y, 1e-3);
 
-        ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
-        vec2 screenUv = ScreenUvFromPixel(screenPixel);
-        float depth = DepthRawFromPixel(screenPixel);
-        if (debugMode == 4)
-        {
-                outColor = vec4(vec3(depth), 1.0);
-                return;
-        }
-        if (debugMode == 5)
-        {
-                if (IsSkyDepth(depth, u_depthParams))
-                {
-                        outColor = vec4(1.0);
-                        return;
-                }
-                float viewZ = ViewZFromDepth(screenUv, depth, u_depthParams.z > 0.5);
-                if (IsInvalidFloat(viewZ))
-                {
-                        outColor = vec4(1.0, 0.0, 1.0, 1.0);
-                        return;
-                }
-                float v = clamp(viewZ / debugFar, 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
-                return;
-        }
-        if (debugMode == 6)
-        {
-                if (IsSkyDepth(depth, u_depthParams))
-                {
-                        outColor = vec4(1.0);
-                        return;
-                }
-                vec3 viewPos = ReconstructViewPos(screenUv, depth);
-                if (IsInvalidVec3(viewPos))
-                {
-                        outColor = vec4(1.0, 0.0, 1.0, 1.0);
-                        return;
-                }
-                float viewLen = length(viewPos);
-                float v = clamp(viewLen / debugFar, 0.0, 1.0);
-                outColor = vec4(v, v, v, 1.0);
-                return;
-        }
-        if (IsSkyDepth(depth, u_depthParams))
-        {
-                outColor = vec4(1.0);
-                return;
-        }
+	if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
+	{
+		outColor = vec4(1.0);
+		return;
+	}
 
-        vec3 viewPos = ReconstructViewPos(screenUv, depth);
-        if (IsInvalidVec3(viewPos))
-        {
-                outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
-                return;
-        }
-        vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(screenUv);
-        if (IsInvalidVec3(normal))
-        {
-                outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
-                return;
-        }
-        if (debugMode == 7)
-        {
-                vec3 debugNormal = normal * 0.5 + 0.5;
-                outColor = vec4(debugNormal, 1.0);
-                return;
-        }
+	// --- Noise ---
+	float noiseSeed    = u_noiseParams.w;
+	float noiseEnabled = u_noiseParams.z;
+	vec2  noiseVec;
+	if (noiseEnabled > 0.5 && u_noiseMode > 0)
+	{
+		if (u_noiseMode == 2)
+		{
+			vec2 noiseJitter = vec2(noiseSeed, noiseSeed * 1.37);
+			vec2 noiseUV     = fract((aoPixel + noiseJitter + 0.5) * AoInvSize() * u_noiseParams.xy);
+			vec2 noiseSample = texture(NoiseTexture, noiseUV).rg * 2.0 - 1.0;
+			noiseVec = normalize(noiseSample);
+		}
+		else
+		{
+			float angle = RandIGN(ivec2(aoPixel), noiseSeed) * 6.2831853;
+			noiseVec = vec2(cos(angle), sin(angle));
+		}
+	}
+	else
+	{
+		noiseVec = vec2(1.0, 0.0);
+	}
 
-        vec3 tangent = normalize(vec3(noiseVec, 0.0) - normal * dot(vec3(noiseVec, 0.0), normal));
-        vec3 bitangent = cross(normal, tangent);
-        mat3 tbn = mat3(tangent, bitangent, normal);
+	if (debugMode == 8)
+	{
+		outColor = vec4(noiseVec * 0.5 + 0.5, 0.0, 1.0);
+		return;
+	}
 
-        float radius = u_params0.x;
-        float bias = u_params0.y;
-        float occlusion = 0.0;
-        float validSamples = 0.0;
-        int samples = clamp(u_samples, 1, SSAO_MAX_SAMPLES);
+	// --- Depth / position ---
+	ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
+	vec2  screenUv    = ScreenUvFromPixel(screenPixel);
+	float depth       = DepthRawFromPixel(screenPixel);
 
-        for (int i = 0; i < SSAO_MAX_SAMPLES; ++i)
-        {
-                if (i >= samples)
-                        break;
-                vec3 sampleVec = tbn * SSAO_KERNEL[i];
-                vec3 samplePos = viewPos + sampleVec * radius;
-                vec4 offset = u_proj * vec4(samplePos, 1.0);
-                if (offset.w <= 1e-6)
-                        continue;
-                vec2 sampleUV = offset.xy / offset.w * 0.5 + 0.5;
-                sampleUV = ApplyYFlip(sampleUV);
-                if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
-                        continue;
-                float sampleDepth = DepthRawFromUv(sampleUV);
-                if (IsSkyDepth(sampleDepth, u_depthParams))
-                        continue;
-                float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepth, u_depthParams.z > 0.5);
-                if (IsInvalidFloat(sampleViewDepth))
-                        continue;
-                validSamples += 1.0;
-                float samplePosDepth = samplePos.x;
-                float depthDelta = samplePosDepth - sampleViewDepth;
-                float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(depthDelta), 1e-4));
-                if (depthDelta > bias)
-                        occlusion += rangeCheck;
-        }
+	if (debugMode == 4)
+	{
+		outColor = vec4(vec3(depth), 1.0);
+		return;
+	}
+	if (debugMode == 5)
+	{
+		if (IsSkyDepth(depth, u_depthParams)) { outColor = vec4(1.0); return; }
+		float viewZ = ViewZFromDepth(screenUv, depth);
+		if (IsInvalidFloat(viewZ)) { outColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
+		float v = clamp(viewZ / debugFar, 0.0, 1.0);
+		outColor = vec4(v, v, v, 1.0);
+		return;
+	}
+	if (debugMode == 6)
+	{
+		if (IsSkyDepth(depth, u_depthParams)) { outColor = vec4(1.0); return; }
+		vec3 viewPos = ReconstructViewPos(screenUv, depth);
+		if (IsInvalidVec3(viewPos)) { outColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
+		float v = clamp(length(viewPos) / debugFar, 0.0, 1.0);
+		outColor = vec4(v, v, v, 1.0);
+		return;
+	}
+	if (IsSkyDepth(depth, u_depthParams))
+	{
+		outColor = vec4(1.0);
+		return;
+	}
 
-        if (debugMode == 9)
-        {
-                float ratio = validSamples / float(samples);
-                ratio = clamp(ratio, 0.0, 1.0);
-                outColor = vec4(vec3(ratio), 1.0);
-                return;
-        }
+	vec3 viewPos = ReconstructViewPos(screenUv, depth);
+	if (IsInvalidVec3(viewPos))
+	{
+		outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
+		return;
+	}
 
-        float ao = 1.0 - occlusion / float(samples);
-        ao = clamp(ao, 0.0, 1.0);
-        ao = pow(ao, u_params0.z);
-        ao = max(ao, u_params0.w);
+	vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(screenUv);
+	if (IsInvalidVec3(normal))
+	{
+		outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
+		return;
+	}
+	if (debugMode == 7)
+	{
+		outColor = vec4(normal * 0.5 + 0.5, 1.0);
+		return;
+	}
 
-        float viewZ = viewPos.x;
-        float maxDistance = max(u_fogParams.x, 1.0);
-        if (viewZ > maxDistance)
-                ao = 1.0;
+	// FIX: Guard against degenerate tangent (noiseVec parallel to normal).
+	vec3 noiseDir  = vec3(noiseVec, 0.0);
+	float dp       = dot(noiseDir, normal);
+	vec3  tangentT = noiseDir - normal * dp;
+	float tLen     = length(tangentT);
+	// If the noise vector is (nearly) parallel to the normal, fall back to a safe perpendicular.
+	if (tLen < 1e-4)
+	{
+		// Find a component of normal that is smallest to build a robust perpendicular.
+		vec3 alt = (abs(normal.x) <= abs(normal.y) && abs(normal.x) <= abs(normal.z))
+		           ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+		tangentT = normalize(alt - normal * dot(alt, normal));
+	}
+	else
+	{
+		tangentT = tangentT / tLen;
+	}
+	vec3 bitangent = cross(normal, tangentT);
+	mat3 tbn       = mat3(tangentT, bitangent, normal);
 
-        float fogFactor = FogFactorFromViewPos(viewPos);
-        float aoFogWeight = 1.0 - clamp(fogFactor, 0.0, 1.0);
-        aoFogWeight = smoothstep(0.0, 0.6, aoFogWeight);
+	// --- Sample loop ---
+	float radius       = u_params0.x;
+	float bias         = u_params0.y;
+	float occlusion    = 0.0;
+	float validSamples = 0.0;
+	// FIX: Loop bound uses the actual sample count so the GPU can unroll/early-out properly.
+	int   samples      = clamp(u_samples, 1, SSAO_MAX_SAMPLES);
 
-        if (debugMode == 3)
-        {
-                outColor = vec4(vec3(clamp(fogFactor, 0.0, 1.0)), 1.0);
-                return;
-        }
-        if (debugMode == 2)
-        {
-                outColor = vec4(vec3(ao * aoFogWeight), 1.0);
-                return;
-        }
-        if (debugMode == 1)
-        {
-                outColor = vec4(vec3(ao), 1.0);
-                return;
-        }
+	for (int i = 0; i < samples; ++i)
+	{
+		vec3 sampleVec = tbn * SSAO_KERNEL[i];
+		vec3 samplePos = viewPos + sampleVec * radius;
+		vec4 offset    = u_proj * vec4(samplePos, 1.0);
+		if (offset.w <= 1e-6)
+			continue;
+		vec2 sampleUV = offset.xy / offset.w * 0.5 + 0.5;
+		sampleUV = ApplyYFlip(sampleUV);
+		if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
+			continue;
+		float sampleDepthRaw = DepthRawFromUv(sampleUV);
+		if (IsSkyDepth(sampleDepthRaw, u_depthParams))
+			continue;
+		float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepthRaw);
+		if (IsInvalidFloat(sampleViewDepth))
+			continue;
+		validSamples += 1.0;
+		float depthDelta  = samplePos.x - sampleViewDepth;
+		float rangeCheck  = smoothstep(0.0, 1.0, radius / max(abs(depthDelta), 1e-4));
+		if (depthDelta > bias)
+			occlusion += rangeCheck;
+	}
 
-        ao = mix(1.0, ao, aoFogWeight);
-        outColor = vec4(ao, ao, ao, 1.0);
+	if (debugMode == 9)
+	{
+		float ratio = clamp(validSamples / float(samples), 0.0, 1.0);
+		outColor = vec4(vec3(ratio), 1.0);
+		return;
+	}
+
+	float ao = 1.0 - occlusion / float(samples);
+	ao = clamp(ao, 0.0, 1.0);
+	ao = pow(ao, u_params0.z);
+	ao = max(ao, u_params0.w);
+
+	float viewZ       = viewPos.x;
+	float maxDistance = max(u_fogParams.x, 1.0);
+	if (viewZ > maxDistance)
+		ao = 1.0;
+
+	float fogFactor    = FogFactorFromViewPos(viewPos);
+	float aoFogWeight  = smoothstep(0.0, 0.6, 1.0 - clamp(fogFactor, 0.0, 1.0));
+
+	if (debugMode == 3)
+	{
+		outColor = vec4(vec3(clamp(fogFactor, 0.0, 1.0)), 1.0);
+		return;
+	}
+	if (debugMode == 2)
+	{
+		outColor = vec4(vec3(ao * aoFogWeight), 1.0);
+		return;
+	}
+	if (debugMode == 1)
+	{
+		outColor = vec4(vec3(ao), 1.0);
+		return;
+	}
+
+	ao = mix(1.0, ao, aoFogWeight);
+	outColor = vec4(ao, ao, ao, 1.0);
 }

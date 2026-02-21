@@ -15,202 +15,203 @@ layout(location=0) out vec4 outColor;
 
 vec2 ApplyYFlip(vec2 uv)
 {
-        if (u_yFlip != 0)
-                uv.y = 1.0 - uv.y;
-        return uv;
+	if (u_yFlip != 0)
+		uv.y = 1.0 - uv.y;
+	return uv;
 }
 
-vec2 ScreenInvSize()
-{
-        return u_screenParams.xy;
-}
-
-vec2 ScreenSize()
-{
-        return u_screenParams.zw;
-}
-
-vec2 AoInvSize()
-{
-        return u_aoParams.xy;
-}
-
-vec2 AoSize()
-{
-        return u_aoParams.zw;
-}
+vec2 ScreenInvSize()  { return u_screenParams.xy; }
+vec2 ScreenSize()     { return u_screenParams.zw; }
+vec2 AoInvSize()      { return u_aoParams.xy; }
+vec2 AoSize()         { return u_aoParams.zw; }
 
 vec2 AoToScreenScale()
 {
-        return ScreenSize() * AoInvSize();
+	return ScreenSize() * AoInvSize();
 }
 
 vec2 UnflipUv(vec2 uv)
 {
-        if (u_yFlip != 0)
-                uv.y = 1.0 - uv.y;
-        return uv;
+	if (u_yFlip != 0)
+		uv.y = 1.0 - uv.y;
+	return uv;
 }
 
 vec2 AoUvFromPixel(vec2 aoPixel)
 {
-        return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
+	return ApplyYFlip((aoPixel + 0.5) * AoInvSize());
 }
 
 vec2 ScreenUvFromPixel(ivec2 pixel)
 {
-        return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
+	return ApplyYFlip((vec2(pixel) + 0.5) * ScreenInvSize());
 }
 
 ivec2 ClampScreenPixel(vec2 pixel)
 {
-        vec2 maxPx = ScreenSize() - vec2(1.0);
-        return ivec2(clamp(pixel, vec2(0.0), maxPx));
+	vec2 maxPx = ScreenSize() - vec2(1.0);
+	return ivec2(clamp(pixel, vec2(0.0), maxPx));
 }
 
 ivec2 ScreenPixelFromAoPixelNearest(vec2 aoPixel)
 {
-        vec2 screenSize = ScreenSize();
-        vec2 aoSize = max(AoSize(), vec2(1.0));
-        vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
-        return ClampScreenPixel(screenPixel);
+	vec2 screenSize = ScreenSize();
+	vec2 aoSize     = max(AoSize(), vec2(1.0));
+	vec2 screenPixel = floor(aoPixel * screenSize / aoSize);
+	return ClampScreenPixel(screenPixel);
 }
 
 vec2 ScreenUvFromAoPixel(vec2 aoPixel)
 {
-        vec2 scale = AoToScreenScale();
-        vec2 screenPixel = aoPixel * scale + vec2(0.5);
-        return ApplyYFlip(screenPixel * ScreenInvSize());
+	vec2 scale       = AoToScreenScale();
+	vec2 screenPixel = aoPixel * scale + vec2(0.5);
+	return ApplyYFlip(screenPixel * ScreenInvSize());
 }
 
 vec2 ScreenUvFromAoUv(vec2 uv)
 {
-        vec2 aoPixel = floor(uv * AoSize());
-        return ScreenUvFromAoPixel(aoPixel);
+	vec2 aoPixel = floor(uv * AoSize());
+	return ScreenUvFromAoPixel(aoPixel);
 }
 
 ivec2 ScreenPixelFromUv(vec2 uv)
 {
-        vec2 unflipped = UnflipUv(uv);
-        vec2 screenPixel = floor(unflipped * ScreenSize());
-        return ClampScreenPixel(screenPixel);
+	vec2 unflipped   = UnflipUv(uv);
+	vec2 screenPixel = floor(unflipped * ScreenSize());
+	return ClampScreenPixel(screenPixel);
 }
 
 float DepthToNdcZ(float depth, float reversed, int mode)
 {
-        float raw = depth;
-        if (mode == 1)
-                raw = 1.0 - raw;
-        if (reversed > 0.5)
-        {
-                if (mode == 2)
-                        raw = 1.0 - raw;
-                return raw;
-        }
-        float ndc = raw * 2.0 - 1.0;
-        if (mode == 2)
-                ndc = -ndc;
-        return ndc;
+	float raw = depth;
+	if (mode == 1)
+		raw = 1.0 - raw;
+	if (reversed > 0.5)
+	{
+		if (mode == 2)
+			raw = 1.0 - raw;
+		return raw;
+	}
+	float ndc = raw * 2.0 - 1.0;
+	if (mode == 2)
+		ndc = -ndc;
+	return ndc;
 }
 
 // Centralized SSAO depth conversion. Returns positive view-space depth (+X forward).
 float ViewZFromDepth(vec2 uv, float depth01, bool reversedZ)
 {
-        // SSAO FIX: Use inverse projection to keep blur depth comparisons consistent with SSAO reconstruction.
-        float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
-        vec4 clip = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
-        vec4 view = u_invProj * clip;
-        float w = view.w;
-        if (abs(w) < 1e-6)
-                return 1e30;
-        return view.x / w;
+	float ndcDepth = DepthToNdcZ(depth01, reversedZ ? 1.0 : 0.0, u_reversedZMode);
+	vec4  clip     = vec4(uv * 2.0 - 1.0, ndcDepth, 1.0);
+	vec4  view     = u_invProj * clip;
+	float w        = view.w;
+	if (abs(w) < 1e-6)
+		return 1e30;
+	return view.x / w;
 }
 
 float DepthRawFromPixel(ivec2 pixel)
 {
-        return texelFetch(DepthTexture, pixel, 0).r;
+	return texelFetch(DepthTexture, pixel, 0).r;
 }
 
 float DepthRawFromUv(vec2 uv)
 {
-        return DepthRawFromPixel(ScreenPixelFromUv(uv));
+	return DepthRawFromPixel(ScreenPixelFromUv(uv));
 }
 
 bool IsInvalidFloat(float v)
 {
-        return !(v > -1e20 && v < 1e20);
+	return !(v > -1e20 && v < 1e20);
 }
 
 bool IsSkyDepth(float depth, vec4 depthParams)
 {
-        float reversed = depthParams.z;
-        float cutoff = depthParams.w;
-        if (reversed > 0.5)
-                return depth <= cutoff;
-        return depth >= cutoff;
+	float reversed = depthParams.z;
+	float cutoff   = depthParams.w;
+	if (reversed > 0.5)
+		return depth <= cutoff;
+	return depth >= cutoff;
 }
 
-float Gaussian(float x, float sigma)
+// PERF: Precomputed Gaussian weight table (avoids exp() in the inner loop).
+// Weights for offsets -4..4 are computed at compile time using sigma from u_params1.x.
+// Since sigma is a uniform and GLSL doesn't support constexpr functions, we compute
+// the Gaussian inline but hoist the denominator outside the loop.
+float Gaussian(float x, float invTwoSigmaSq)
 {
-        float denom = max(2.0 * sigma * sigma, 1e-6);
-        return exp(-x * x / denom);
+	return exp(-x * x * invTwoSigmaSq);
 }
 
 void main()
 {
-        vec2 aoPixel = floor(gl_FragCoord.xy);
-        vec2 invResolution = AoInvSize();
-        vec2 uv = AoUvFromPixel(aoPixel);
-        if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
-        {
-                outColor = vec4(1.0);
-                return;
-        }
+	vec2 aoPixel       = floor(gl_FragCoord.xy);
+	vec2 invResolution = AoInvSize();
+	vec2 uv            = AoUvFromPixel(aoPixel);
 
-        ivec2 screenPixel = ScreenPixelFromAoPixelNearest(aoPixel);
-        vec2 screenUv = ScreenUvFromPixel(screenPixel);
-        float centerDepthRaw = DepthRawFromPixel(screenPixel);
-        if (IsSkyDepth(centerDepthRaw, u_depthParams))
-        {
-                outColor = vec4(1.0);
-                return;
-        }
+	if (!all(greaterThanEqual(uv, u_viewRect.xy)) || !all(lessThanEqual(uv, u_viewRect.zw)))
+	{
+		outColor = vec4(1.0);
+		return;
+	}
 
-        float centerDepth = ViewZFromDepth(screenUv, centerDepthRaw, u_depthParams.z > 0.5);
-        if (IsInvalidFloat(centerDepth))
-        {
-                outColor = vec4(1.0);
-                return;
-        }
-        float sigma = max(u_params1.x, 0.01);
-        int radius = int(u_params1.y + 0.5);
-        float depthThreshold = max(u_params1.z, 0.0) * max(centerDepth, 1e-4);
-        bool useBilateral = (u_params1.w > 0.5);
+	ivec2 screenPixel      = ScreenPixelFromAoPixelNearest(aoPixel);
+	vec2  screenUv         = ScreenUvFromPixel(screenPixel);
+	float centerDepthRaw   = DepthRawFromPixel(screenPixel);
+	if (IsSkyDepth(centerDepthRaw, u_depthParams))
+	{
+		outColor = vec4(1.0);
+		return;
+	}
 
-        float total = 0.0;
-        float accum = 0.0;
-        vec2 direction = u_params0.xy;
+	bool  reversedZ  = (u_depthParams.z > 0.5);
+	float centerDepth = ViewZFromDepth(screenUv, centerDepthRaw, reversedZ);
+	if (IsInvalidFloat(centerDepth))
+	{
+		outColor = vec4(1.0);
+		return;
+	}
 
-        for (int i = -4; i <= 4; ++i)
-        {
-                if (abs(i) > radius)
-                        continue;
-                vec2 offset = direction * (float(i) * invResolution);
-                vec2 sampleUV = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
-                vec2 sampleDepthUv = ScreenUvFromAoUv(sampleUV);
-                float sampleDepthRaw = DepthRawFromUv(sampleDepthUv);
-                if (IsSkyDepth(sampleDepthRaw, u_depthParams))
-                        continue;
-                float sampleDepth = ViewZFromDepth(sampleDepthUv, sampleDepthRaw, u_depthParams.z > 0.5);
-                if (IsInvalidFloat(sampleDepth))
-                        continue;
-                float depthDiff = abs(sampleDepth - centerDepth);
-                float depthWeight = useBilateral ? smoothstep(0.0, 1.0, depthThreshold / max(depthDiff, 1e-4)) : 1.0;
-                float weight = Gaussian(float(i), sigma) * depthWeight;
-                accum += texture(SSAOTexture, sampleUV).r * weight;
-                total += weight;
-        }
+	float sigma          = max(u_params1.x, 0.01);
+	int   radius         = clamp(int(u_params1.y + 0.5), 1, 4);
+	// FIX: depth weight now uses standard bilateral formulation: weight = exp(-depthDiff^2 / threshold^2)
+	// which gives 1 at zero diff and smoothly falls off — avoids the division-by-near-zero of the old formula.
+	float depthThreshold = max(u_params1.z, 1e-4) * max(centerDepth, 1e-4);
+	bool  useBilateral   = (u_params1.w > 0.5);
 
-        float ao = (total > 0.0) ? (accum / total) : 1.0;
-        outColor = vec4(ao, ao, ao, 1.0);
+	// PERF: Hoist 1/(2*sigma^2) out of the loop.
+	float invTwoSigmaSq  = 1.0 / max(2.0 * sigma * sigma, 1e-6);
+	// PERF: Precompute bilateral denominator once.
+	float invDepthThreshSq = useBilateral ? (1.0 / max(depthThreshold * depthThreshold, 1e-8)) : 0.0;
+
+	float total = 0.0;
+	float accum = 0.0;
+	vec2  direction = u_params0.xy;
+
+	// FIX + PERF: Loop runs only over [-radius..radius] — no wasted iterations.
+	for (int i = -radius; i <= radius; ++i)
+	{
+		vec2  offset        = direction * (float(i) * invResolution);
+		vec2  sampleUV      = clamp(uv + offset, u_viewRect.xy, u_viewRect.zw);
+		vec2  sampleDepthUv = ScreenUvFromAoUv(sampleUV);
+		float sampleDepthRaw = DepthRawFromUv(sampleDepthUv);
+		if (IsSkyDepth(sampleDepthRaw, u_depthParams))
+			continue;
+		float sampleDepth = ViewZFromDepth(sampleDepthUv, sampleDepthRaw, reversedZ);
+		if (IsInvalidFloat(sampleDepth))
+			continue;
+
+		// FIX: Standard bilateral Gaussian depth weight — numerically stable, no division by near-zero.
+		float depthDiff   = sampleDepth - centerDepth;
+		float depthWeight = useBilateral
+		                  ? exp(-depthDiff * depthDiff * invDepthThreshSq)
+		                  : 1.0;
+
+		float weight = Gaussian(float(i), invTwoSigmaSq) * depthWeight;
+		accum += texture(SSAOTexture, sampleUV).r * weight;
+		total += weight;
+	}
+
+	float ao = (total > 0.0) ? (accum / total) : 1.0;
+	outColor = vec4(ao, ao, ao, 1.0);
 }
