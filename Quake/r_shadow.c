@@ -901,6 +901,33 @@ void R_Shadow_SunPass (void)
 
 	R_Shadow_BuildViewProj (r_framedata.shadow_viewproj, sun_dir);
 
+	// FIX 2: Log the ACTUAL computed shadow zfar (after worldmodel clamping).
+	// Re-derive it here using the same logic as BuildViewProj so the log
+	// reflects what was actually used, not the raw gl_farclip value.
+	if (shdlog.active)
+	{
+		float log_zfar = gl_farclip.value;
+		if (cl.worldmodel)
+		{
+			float world_extent = 0.f;
+			int ax;
+			for (ax = 0; ax < 3; ax++)
+			{
+				world_extent = q_max (world_extent, fabsf (cl.worldmodel->maxs[ax]));
+				world_extent = q_max (world_extent, fabsf (cl.worldmodel->mins[ax]));
+			}
+			if (world_extent > 32.f)
+				log_zfar = q_min (log_zfar, world_extent * 2.f);
+		}
+		// xscale = viewproj[0][0] (first element = 2/frustum_width * right.x)
+		// frustum_width (rl) ≈ |2 / xscale| (approximate; accurate for symmetric ortho)
+		float xscale = r_framedata.shadow_viewproj[0];
+		float rl_approx = (xscale != 0.f) ? fabsf (2.f / xscale) : 0.f;
+		R_Shadow_LogWrite ("SUNPASS frustum shadow_zfar=%.0f xscale=%g rl~%.0f units/px=%.2f\n",
+			log_zfar, xscale, rl_approx,
+			(rl_approx > 0.f && shadowmap_size > 0) ? rl_approx / (float)shadowmap_size : 0.f);
+	}
+
 	r_framedata.shadow_debug[0] = 1.f;
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = 0.f;
@@ -908,8 +935,10 @@ void R_Shadow_SunPass (void)
 
 	GL_BeginGroup ("Shadow map (sun)");
 	t0 = Sys_DoubleTime ();
-	draws0 = rs_brushpasses + rs_aliaspasses;
-	tris0  = rs_brushpolys  + rs_aliaspolys;   // FIX: was wrongly using rs_brushpasses (draw call count)
+	// FIX 3: draws0 is now an entity-count accumulator (reset to 0 here).
+	// tris0 is still a counter baseline for rs_brushpolys+rs_aliaspolys.
+	draws0 = 0;
+	tris0  = rs_brushpolys + rs_aliaspolys;
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_fbo);
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
@@ -935,20 +964,29 @@ void R_Shadow_SunPass (void)
 	}
 	glClear (GL_DEPTH_BUFFER_BIT);
 
+	// FIX 3: Track shadow geometry via entity counts from R_GetVisEntities.
+	// rs_brushpasses / rs_aliaspasses are NOT incremented by shadow draw functions
+	// (they use dedicated shadow paths without stats tracking), so the old
+	// (rs_brushpasses - draws0) approach always reported 0.
+	// Instead, sum entity counts as a proxy for "entities submitted to shadow map".
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 		R_DrawBrushModels_Shadow (ents, count);
+		draws0 += count;
 	}
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
 		R_DrawAliasModels_Shadow (ents, count);
+		draws0 += count;
 	}
 	t1 = Sys_DoubleTime ();
+	// Report entity count (draws0 accumulated above) and 0 for tris
+	// (shadow polys not tracked separately — focus on entity count).
 	R_Shadow_Log_ShadowPassSnapshot ("SUNPASS", shadow_fbo, shadow_depth_tex, shadowmap_size, shadowmap_size,
-		(rs_brushpasses + rs_aliaspasses) - draws0,
-		(rs_brushpolys  + rs_aliaspolys)  - tris0,   // FIX: actual poly count
+		draws0,
+		(rs_brushpolys  + rs_aliaspolys)  - tris0,
 		(t1 - t0) * 1000.0);
 
 	GL_EndGroup ();
@@ -1071,8 +1109,9 @@ void R_Shadow_DlightPass (void)
 
 	GL_BeginGroup ("Shadow map (dlights)");
 	t0 = Sys_DoubleTime ();
-	draws0 = rs_brushpasses + rs_aliaspasses;
-	tris0  = rs_brushpolys  + rs_aliaspolys;   // FIX: was wrongly using rs_brushpasses
+	// FIX 3: draws0 is now an entity-count accumulator (reset to 0 here).
+	draws0 = 0;
+	tris0  = rs_brushpolys + rs_aliaspolys;
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
@@ -1132,19 +1171,21 @@ void R_Shadow_DlightPass (void)
 			int count = 0;
 			entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 			R_DrawBrushModels_Shadow (ents, count);
+			draws0 += count;
 		}
 		{
 			int count = 0;
 			entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
 			R_DrawAliasModels_Shadow (ents, count);
+			draws0 += count;
 		}
 	}
 
 	GL_SetScissorEnabled (false);
 	t1 = Sys_DoubleTime ();
 	R_Shadow_Log_ShadowPassSnapshot ("DLIGHTPASS", shadow_dlight_fbo, shadow_dlight_depth_tex, shadow_dlight_atlas_size, shadow_dlight_atlas_size,
-		(rs_brushpasses + rs_aliaspasses) - draws0,
-		(rs_brushpolys  + rs_aliaspolys)  - tris0,   // FIX: actual poly count
+		draws0,
+		(rs_brushpolys  + rs_aliaspolys)  - tris0,
 		(t1 - t0) * 1000.0);
 	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 
