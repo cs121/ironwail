@@ -649,7 +649,7 @@ static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir
 		VectorCopy (prefer_dir_opt, dirs[dir_count]);
 		VectorNormalizeFast (dirs[dir_count]);
 		dir_count++;
-		VectorNegate (dirs[0], dirs[dir_count]);
+		VectorScale (dirs[0], -1.f, dirs[dir_count]);
 		dir_count++;
 	}
 
@@ -660,7 +660,7 @@ static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir
 	VectorSet (dirs[dir_count++], 0.f, 0.f, 1.f);
 	VectorSet (dirs[dir_count++], 0.f, 0.f, -1.f);
 	VectorCopy (vpn, dirs[dir_count++]);
-	VectorNegate (vpn, dirs[dir_count++]);
+	VectorScale (vpn, -1.f, dirs[dir_count++]);
 
 	for (i = 0; i < dir_count; ++i)
 	{
