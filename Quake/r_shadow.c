@@ -151,13 +151,25 @@ static void R_Shadow_LogEnsureFile (void)
 static qboolean R_Shadow_LogMatrixHasBadValues (const float m[16], float *out_det)
 {
 	float det;
-	for (int i = 0; i < 16; ++i)
+	float col_scale;
+	int i;
+	for (i = 0; i < 16; ++i)
 		if (!isfinite (m[i]))
 			return true;
 	det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
 	if (out_det)
 		*out_det = det;
-	return fabsf (det) < 1e-8f;
+	// FIX: The old absolute threshold (1e-8) is a false positive for large-world shadow
+	// matrices. An ortho shadow covering a 8192-unit scene has scale ~1/8192 per axis,
+	// giving det3x3 ~ (1/8192)^2 * depth_scale << 1e-8 even when perfectly valid.
+	// Use a scale-relative threshold: compare |det| against the cube of the largest
+	// column-0 magnitude (the X-scale of the matrix), so the check stays meaningful
+	// regardless of scene size. Flag only NaN/Inf (already caught above) and true
+	// zero-scale matrices (col0 AND col1 both zero).
+	col_scale = sqrtf (m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
+	if (col_scale < 1e-30f)
+		return true; // X-scale column is genuinely zero -> degenerate
+	return fabsf (det) < (col_scale * col_scale * col_scale * 1e-6f);
 }
 
 static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
@@ -335,8 +347,10 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
-	if (pcf > 0.f && shdlog.last_shadow_compare_mode == GL_NONE)
-		R_Shadow_LogWrite ("WARN PCF enabled but depth compare mode is GL_NONE\n");
+	// NOTE: GL_TEXTURE_COMPARE_MODE == GL_NONE is intentional: this engine performs
+	// shadow comparison manually in the fragment shader (ShadowCompare in shadow_sample.glsl)
+	// rather than using sampler2DShadow hardware compare. The warning below was a
+	// false positive and has been removed.
 	R_Shadow_LogGLStage (tag);
 	R_Shadow_LogEndFrameIfNeeded ();
 }
@@ -555,12 +569,14 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	view[14] = -DotProduct (sun_dir, origin_world);
 
 	{
-		// FIX: Extend the depth range backward so shadow casters BEHIND the camera
-		// (Peter-Pan shadow problem) are still included in the shadow map.
-		// Use the far-clip distance as a conservative extension.
+		// FIX: The frustum corners only cover geometry VISIBLE to the camera.
+		// Shadow casters that are behind the player but cast shadows into the view
+		// (Peter-Pan problem) fall outside [min_ls[2], max_ls[2]] and are clipped
+		// from the shadow map. Extend the near side by zfar to conservatively cover
+		// the entire half-space behind the camera.
 		float z_extend = zfar;
 		float min_z = -extents[2] - z_extend;
-		float max_z = extents[2];
+		float max_z =  extents[2];
 		R_Shadow_OrthoMatrix (ortho, -extents[0], extents[0], -extents[1], extents[1], min_z, max_z);
 	}
 
@@ -756,7 +772,8 @@ void R_ResizeShadowMapIfNeeded (void)
 
 	if (r_shadowmap_size.value <= 0.f)
 	{
-		// FIX: Destroy resources and exit before min-clamp so r_shadowmap_size 0 actually disables shadows.
+		// FIX: Check and destroy BEFORE the min-256 clamp, otherwise desired gets
+		// raised to 256 and the "if (desired <= 0) return" below is never reached.
 		R_Shadow_DestroyResources ();
 		return;
 	}
@@ -873,12 +890,32 @@ void R_Shadow_SunPass (void)
 	glViewport (0, 0, shadowmap_size, shadowmap_size);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
-	// FIX: Explicitly disable scissor test – a previous DlightPass or SSAO pass may
-	// have left it enabled, which would clip the shadow map clear/draw incorrectly.
+	// FIX: Scissor test must be disabled here; a previous DlightPass (or SSAO pass
+	// from the prior frame) may have left it active, which would silently clip both
+	// the glClear and all draw calls to a stale scissor rectangle.
 	GL_SetScissorEnabled (false);
 
 	GL_UseProgram (glprogs.shadow_depth);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+
+	// FIX: GL_SetState sets depth func based on the main scene convention, but the
+	// shadow depth pass writes into its own FBO and must explicitly use the correct
+	// function. With reversed-Z (near=1, far=0, clearDepth=0):
+	//   GL_GREATER lets fragments closer to the light (higher depth) overwrite far ones.
+	// With standard Z (near=0, far=1, clearDepth=1):
+	//   GL_LESS is the normal convention.
+	// Without this fix all shadow fragments fail against clearDepth=0, leaving the
+	// shadow map fully empty and producing no shadows at all.
+	if (gl_clipcontrol_able)
+	{
+		glDepthFunc (GL_GREATER);
+		glClearDepth (0.0);
+	}
+	else
+	{
+		glDepthFunc (GL_LESS);
+		glClearDepth (1.0);
+	}
 	glClear (GL_DEPTH_BUFFER_BIT);
 
 	{
@@ -1021,6 +1058,18 @@ void R_Shadow_DlightPass (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	glDrawBuffer (GL_NONE);
 	glReadBuffer (GL_NONE);
+	// FIX: Ensure correct depth function and clear value for the dlight shadow atlas,
+	// same reversed-Z correction as in R_Shadow_SunPass.
+	if (gl_clipcontrol_able)
+	{
+		glDepthFunc (GL_GREATER);
+		glClearDepth (0.0);
+	}
+	else
+	{
+		glDepthFunc (GL_LESS);
+		glClearDepth (1.0);
+	}
 	GL_SetScissorEnabled (true);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
