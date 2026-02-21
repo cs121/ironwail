@@ -26,9 +26,6 @@ vec3 ApplyFog(vec3 clr, vec3 p)
         return mix(Fog.rgb, clr, fog);
 }
 
-#define LIGHT_TILES_X 32
-#define LIGHT_TILES_Y 16
-#define LIGHT_TILES_Z 32
 #define MAX_LIGHTS    64
 
 struct Light
@@ -44,8 +41,6 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
         vec2    LightStyles[64];
         Light   Lights[];
 };
-
-layout(rg32ui, binding=0) uniform readonly uimage3D LightClusters;
 
 layout(location=0) flat in uint in_flags;
 layout(location=1) flat in float in_alpha;
@@ -111,33 +106,18 @@ void main()
         vec3 dynamic_light = vec3(0.0);
         if (NumLights > 0u)
         {
-                ivec3 cluster_coord = ivec3(
-                        int(floor(in_coord.x)),
-                        int(floor(in_coord.y)),
-                        int(floor(log2(in_depth) * ZLogScale + ZLogBias))
-                );
+                float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
+                vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+                float falloff_mode = DLightConfig0.z;
+                float falloff_exp = max(DLightConfig0.w, 0.01);
+                float core_boost = max(DLightConfig1.x, 0.0);
+                float core_exp = max(DLightConfig1.y, 0.01);
+                float knee = max(DLightConfig1.z, 0.0);
+                float ndotl_mix = clamp(DLightConfig1.w, 0.0, 1.0);
 
-                uvec2 clusterdata = imageLoad(LightClusters, cluster_coord).xy;
-
-                if ((clusterdata.x | clusterdata.y) != 0u)
+                for (uint light_index = 0u; light_index < NumLights; light_index++)
                 {
-                        float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-                        vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
-                        float falloff_mode = DLightConfig0.z;
-                        float falloff_exp = max(DLightConfig0.w, 0.01);
-                        float core_boost = max(DLightConfig1.x, 0.0);
-                        float core_exp = max(DLightConfig1.y, 0.01);
-                        float knee = max(DLightConfig1.z, 0.0);
-                        float ndotl_mix = clamp(DLightConfig1.w, 0.0, 1.0);
-
-                        for (uint i = 0u, ofs = 0u; i < 2u; i++, ofs += 32u)
-                        {
-                                uint mask = clusterdata[i];
-                                while (mask != 0u)
-                                {
-                                        int j = findLSB(mask);
-                                        mask ^= 1u << j;
-                                        Light l = Lights[ofs + uint(j)];
+                        Light l = Lights[light_index];
 
                                         float rad = l.radius;
                                         float dist = dot(l.origin, plane.xyz) - plane.w;
@@ -168,11 +148,9 @@ void main()
                                         }
 
                                         float shadow_range = 1.0;
-                                        float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, ofs + uint(j), shadow_range);
+                                        float shadow_term = ShadowVisibilityDlight(in_pos, surface_normal, l.origin, light_index, shadow_range);
                                         vec3 light_contrib = shaped * ndotl * shadow_term * l.color * dynamic_light_noise;
                                         dynamic_light += light_contrib;
-                                }
-                        }
                 }
         }
 

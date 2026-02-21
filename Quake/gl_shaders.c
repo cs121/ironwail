@@ -536,8 +536,6 @@ void GL_CreateShaders (void)
 
         for (alphatest = 0; alphatest < 2; alphatest++)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
-        for (alphatest = 0; alphatest < 2; alphatest++)
-                glprogs.world_dlight_hybrid[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight_hybrid.frag"), "world dlight hybrid|ALPHATEST %d", alphatest);
 
         glprogs.shadow_depth = GL_CreateProgram (GLSL_PATH("shadow_depth.vert"), GLSL_PATH("shadow_depth.frag"), "shadow depth");
 	for (md5 = 0; md5 < 2; md5++)
@@ -572,7 +570,6 @@ void GL_CreateShaders (void)
         glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");
         glprogs.gather_indirect = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"), "indirect draw gather");
         glprogs.cull_mark = GL_CreateComputeProgram (GLSL_PATH("cull_mark.comp"), "cull/mark");
-        glprogs.cluster_lights = GL_CreateComputeProgram (GLSL_PATH("cluster_lights.comp"), "light cluster");
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");

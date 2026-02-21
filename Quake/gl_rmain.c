@@ -4503,13 +4503,6 @@ static void R_DrawDLightPass (void)
 			core_boost, core_exp, knee, ndotl, satchop);
 		R_SetDlightConfig (glprogs.world_dlight[1], scale, falloff, expval,
 			core_boost, core_exp, knee, ndotl, satchop);
-		if (r_dlight_mode.value > 0.f)
-		{
-			R_SetDlightConfig (glprogs.world_dlight_hybrid[0], scale, falloff, expval,
-				core_boost, core_exp, knee, ndotl, satchop);
-			R_SetDlightConfig (glprogs.world_dlight_hybrid[1], scale, falloff, expval,
-				core_boost, core_exp, knee, ndotl, satchop);
-		}
 	}
 
         R_DrawBrushModels_DLights (ents, count);

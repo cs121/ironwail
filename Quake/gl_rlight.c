@@ -281,13 +281,6 @@ DYNAMIC LIGHTS
 =============================================================================
 */
 
-static GLuint gl_lightclustertexture;
-
-typedef struct gpu_cluster_inputs_s {
-	float		transposed_proj[16];
-	float		view_matrix[16];
-} gpu_cluster_inputs_t;
-
 const vec3_t *R_GetDynamicLightTemperature (int type)
 {
 	static const vec3_t temps[DLIGHT_MAX_TYPES] = {
@@ -314,14 +307,6 @@ GLLight_CreateResources
 */
 void GLLight_CreateResources (void)
 {
-	glGenTextures (1, &gl_lightclustertexture);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, gl_lightclustertexture);
-	GL_ObjectLabelFunc (GL_TEXTURE, gl_lightclustertexture, -1, "light clusters");
-	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RG32UI, LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, 0, GL_RG_INTEGER, GL_UNSIGNED_INT, NULL);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 }
 
 /*
@@ -331,8 +316,6 @@ GLLight_DeleteResources
 */
 void GLLight_DeleteResources (void)
 {
-	glDeleteTextures (1, &gl_lightclustertexture);
-	gl_lightclustertexture = 0;
 }
 
 static void R_PushDlightArray (dlight_t *const *lights, int count)
@@ -414,10 +397,6 @@ R_PushDlights
 */
 void R_PushDlights (void)
 {
-	int					i;
-	GLuint		buf;
-	GLbyte		*ofs;
-	gpu_cluster_inputs_t cluster_inputs;
 	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
@@ -442,24 +421,7 @@ void R_PushDlights (void)
 		DLightPool_DebugPrintIfEnabled ();
 	}
 
-	GL_BeginGroup ("Light clustering");
-
 	R_UploadFrameData ();
-
-	for (i = 0; i < 16; i++)
-		cluster_inputs.transposed_proj[i] = r_matproj[((i & 3) << 2) | (i >> 2)];
-	memcpy (cluster_inputs.view_matrix, r_matview, 16 * sizeof (float));
-
-	GL_UseProgram (glprogs.cluster_lights);
-	GL_Upload (GL_UNIFORM_BUFFER, &cluster_inputs, sizeof (cluster_inputs), &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr) ofs, sizeof (cluster_inputs));
-	GL_BindImageTextureFunc (0, gl_lightclustertexture, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RG32UI);
-	GL_DispatchComputeFunc ((LIGHT_TILES_X+7)/8, (LIGHT_TILES_Y+7)/8, LIGHT_TILES_Z);
-	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-	GL_BindImageTextureFunc (0, gl_lightclustertexture, 0, GL_TRUE, 0, GL_READ_ONLY, GL_RG32UI);
-
-	GL_EndGroup ();
 }
 
 

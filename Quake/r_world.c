@@ -1448,12 +1448,12 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         case BP_DLIGHT_SOLID:
                 texbegin = 0;
                 texend = TEXTYPE_CUTOUT;
-                program = (r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[0]) ? glprogs.world_dlight_hybrid[0] : glprogs.world_dlight[0];
+                program = glprogs.world_dlight[0];
                 break;
         case BP_DLIGHT_ALPHA:
                 texbegin = TEXTYPE_CUTOUT;
                 texend = TEXTYPE_CUTOUT + 1;
-                program = (r_dlight_mode.value > 0.f && glprogs.world_dlight_hybrid[1]) ? glprogs.world_dlight_hybrid[1] : glprogs.world_dlight[1];
+                program = glprogs.world_dlight[1];
                 break;
         }
 
