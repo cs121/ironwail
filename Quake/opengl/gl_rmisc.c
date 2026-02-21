@@ -378,16 +378,6 @@ extern cvar_t r_screendarken;
 extern cvar_t r_screendarken_depth;
 extern cvar_t r_teleportfx;
 extern cvar_t r_teleportfx_time;
-extern cvar_t r_filmgrain;
-extern cvar_t r_filmgrain_amount;
-extern cvar_t r_filmgrain_size;
-extern cvar_t r_filmgrain_speed;
-extern cvar_t r_filmgrain_color;
-extern cvar_t r_filmgrain_luma_weight;
-extern cvar_t r_filmgrain_blend;
-extern cvar_t r_filmgrain_seed;
-extern cvar_t r_filmgrain_affect_ui;
-extern cvar_t r_filmgrain_debug;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -936,16 +926,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_screendarken_depth);
 	Cvar_RegisterVariable (&r_teleportfx);
 	Cvar_RegisterVariable (&r_teleportfx_time);
-	Cvar_RegisterVariable (&r_filmgrain);
-	Cvar_RegisterVariable (&r_filmgrain_amount);
-	Cvar_RegisterVariable (&r_filmgrain_size);
-	Cvar_RegisterVariable (&r_filmgrain_speed);
-	Cvar_RegisterVariable (&r_filmgrain_color);
-	Cvar_RegisterVariable (&r_filmgrain_luma_weight);
-	Cvar_RegisterVariable (&r_filmgrain_blend);
-	Cvar_RegisterVariable (&r_filmgrain_seed);
-	Cvar_RegisterVariable (&r_filmgrain_affect_ui);
-	Cvar_RegisterVariable (&r_filmgrain_debug);
         Cvar_RegisterVariable (&r_overbrightbits);
         Cvar_SetCallback (&r_overbrightbits, R_OverbrightBits_f);
 

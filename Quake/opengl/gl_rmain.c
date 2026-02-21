@@ -806,16 +806,6 @@ cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
 cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
 cvar_t	r_teleportfx = { "r_teleportfx", "1", CVAR_ARCHIVE };
 cvar_t	r_teleportfx_time = { "r_teleportfx_time", "0.35", CVAR_ARCHIVE };
-cvar_t	r_filmgrain = { "r_filmgrain", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_amount = { "r_filmgrain_amount", "0.08", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_size = { "r_filmgrain_size", "1.0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_speed = { "r_filmgrain_speed", "1.0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_color = { "r_filmgrain_color", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_luma_weight = { "r_filmgrain_luma_weight", "0.6", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_blend = { "r_filmgrain_blend", "0.6", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_seed = { "r_filmgrain_seed", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_affect_ui = { "r_filmgrain_affect_ui", "0", CVAR_ARCHIVE };
-cvar_t	r_filmgrain_debug = { "r_filmgrain_debug", "0", CVAR_NONE };
 
 cvar_t	r_overbrightbits = { "r_overbrightbits", "2", CVAR_ARCHIVE };
 
@@ -2232,23 +2222,6 @@ static void GL_PostProcessFallback (void)
 	free (pixels);
 }
 
-static void GL_SetFilmgrainUniforms (float amount, qboolean allow_debug)
-{
-	float amount_clamped = CLAMP (0.f, amount, 1.f);
-	float size = CLAMP (0.5f, r_filmgrain_size.value, 4.f);
-	float speed = q_max (0.f, r_filmgrain_speed.value);
-	float luma_weight = CLAMP (0.f, r_filmgrain_luma_weight.value, 1.f);
-	float blend = CLAMP (0.f, r_filmgrain_blend.value, 1.f);
-	float color = r_filmgrain_color.value > 0.f ? 1.f : 0.f;
-	float debug = (allow_debug && r_filmgrain_debug.value > 0.f) ? 1.f : 0.f;
-	float seed = r_filmgrain_seed.value;
-	float frame = (r_filmgrain_seed.value != 0.f) ? (float)r_framecount : (float)cl.time;
-
-	GL_Uniform4fFunc (13, amount_clamped, size, speed, luma_weight);
-	GL_Uniform4fFunc (14, blend, color, debug, seed);
-	GL_Uniform4fFunc (15, frame, 0.f, 0.f, 0.f);
-}
-
 static int GL_CompareFloat (const void *a, const void *b)
 {
 	const float fa = *(const float *)a;
@@ -3173,13 +3146,6 @@ void GL_PostProcess (void)
 		}
 		GL_Uniform4fFunc (19, R_SanitizeSSAOValue (r_ao_power.value, 1.5f, 0.01f, 8.f), CLAMP (0.f, r_ao_applymode.value, 1.f), 0.f, 0.f);
 	}
-	{
-		float filmgrain_amount = 0.f;
-		qboolean filmgrain_enabled = (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f);
-		if (filmgrain_enabled)
-			filmgrain_amount = r_filmgrain_amount.value;
-		GL_SetFilmgrainUniforms (filmgrain_amount, filmgrain_enabled);
-	}
 
 	dof_enabled = R_DoFEnabled ();
 
@@ -3854,8 +3820,6 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_srgb_framebuffer.value <= 0.f)
 		return true;
-	if (r_filmgrain.value > 0.f && r_filmgrain_affect_ui.value <= 0.f)
-		return true;
 	if (r_ao_method.value > 0.f)
 		return true;
 	if (r_godrays.value > 0.f)
@@ -3879,30 +3843,6 @@ COLOR-SPACE POLICY (HYBRID LINEAR)
    conversion if the backbuffer is not sRGB-capable.
 ====================================================================================================
 */
-
-void GL_ApplyFilmgrainUI (void)
-{
-	if (r_filmgrain.value <= 0.f || r_filmgrain_affect_ui.value <= 0.f)
-		return;
-	if (!glprogs.filmgrain || framebufs.composite.color_tex == 0)
-		return;
-
-	GL_BeginGroup ("Filmgrain UI");
-
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
-	glViewport (glx, gly, glwidth, glheight);
-	glReadBuffer (GL_BACK);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	glCopyTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, glx, gly, glwidth, glheight);
-
-	GL_UseProgram (glprogs.filmgrain);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_SetFilmgrainUniforms (r_filmgrain_amount.value, true);
-
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-
-	GL_EndGroup ();
-}
 
 /*
 =============

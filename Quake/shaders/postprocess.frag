@@ -77,27 +77,6 @@ float Hash12(vec2 p)
 	return fract((p.x + p.y) * p.x);
 }
 
-vec3 FilmGrainNoise(vec2 fragCoord, float time, float seed, float colored, float grainSize)
-{
-	vec2 seedOffset = vec2(seed * 1.173, seed * 2.417);
-	float t = time + Hash12(vec2(time * 0.123, seed * 1.37));
-
-	float sizeA = max(0.25, grainSize * mix(0.55, 1.65, Hash12(floor(fragCoord * 0.03125) + seedOffset)));
-	float sizeB = max(0.25, grainSize * mix(0.45, 2.05, Hash12(floor(fragCoord * 0.046875) + seedOffset.yx + 17.0)));
-	float sizeC = max(0.25, grainSize * mix(0.65, 2.35, Hash12(floor(fragCoord * 0.0625) + seedOffset + 91.0)));
-
-	vec2 coordA = (fragCoord + vec2(0.31, 0.73)) / sizeA;
-	vec2 coordB = (fragCoord + vec2(0.91, 0.27)) / sizeB;
-	vec2 coordC = (fragCoord + vec2(0.53, 0.49)) / sizeC;
-
-	float n0 = tri(InterleavedGradientNoise(coordA + vec2(t * 13.11, t * 7.97) + seedOffset));
-	float n1 = tri(InterleavedGradientNoise(coordB + vec2(17.7 + t * 5.23, 3.1 + t * 9.19) + seedOffset.yx));
-	float n2 = tri(InterleavedGradientNoise(coordC + vec2(8.3 + t * 6.71, 12.9 + t * 4.07) + seedOffset * 0.7));
-
-	float mono = (n0 + n1 + n2) * (1.0 / 3.0);
-	vec3 colorNoise = vec3(n0, n1, n2);
-	return mix(vec3(mono), colorNoise, colored);
-}
 
 vec3 UchimuraTonemap(vec3 x)
 {
@@ -159,9 +138,6 @@ layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend 
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: screen-space darken strength, z: screen-space darken depth range, w: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
-layout(location=13) uniform vec4 FilmGrainParams0; // x: amount, y: size, z: speed, w: luma weight
-layout(location=14) uniform vec4 FilmGrainParams1; // x: blend, y: color, z: debug, w: seed
-layout(location=15) uniform vec4 FilmGrainParams2; // x: frame, yzw: unused
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug mode (0..5), z: sun x, w: sun y
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
@@ -912,36 +888,4 @@ void main()
         out_fragcolor = vec4(mapped, 1.0);
 #endif // PALETTIZE
 
-	float grainAmount = clamp(FilmGrainParams0.x, 0.0, 1.0);
-	float grainDebug = FilmGrainParams1.z;
-	if (grainAmount > 0.0 || grainDebug > 0.5)
-	{
-		float grainSize = max(FilmGrainParams0.y, 0.01);
-		float grainSpeed = max(FilmGrainParams0.z, 0.0);
-		float lumaWeight = clamp(FilmGrainParams0.w, 0.0, 1.0);
-		float blend = clamp(FilmGrainParams1.x, 0.0, 1.0);
-		float colored = clamp(FilmGrainParams1.y, 0.0, 1.0);
-		float seed = FilmGrainParams1.w;
-		float frame = FilmGrainParams2.x;
-		float time = frame * grainSpeed;
-		vec3 grain = FilmGrainNoise(gl_FragCoord.xy, time, seed, colored, grainSize);
-
-		float luma = dot(out_fragcolor.rgb, vec3(0.299, 0.587, 0.114));
-		float shadow = 1.0 - clamp(luma, 0.0, 1.0);
-		float lumaCurve = smoothstep(0.0, 1.0, shadow * shadow);
-		float lumaFactor = mix(1.0, mix(shadow, lumaCurve, 0.65), lumaWeight);
-		float response = 0.65 + 0.35 * smoothstep(0.0, 1.0, shadow);
-		float amount = grainAmount * lumaFactor * response;
-
-		if (grainDebug > 0.5)
-		{
-			out_fragcolor.rgb = vec3(0.5) + grain * 0.5;
-		}
-		else
-		{
-			vec3 add = out_fragcolor.rgb + grain * amount;
-			vec3 soft = out_fragcolor.rgb + (out_fragcolor.rgb - out_fragcolor.rgb * out_fragcolor.rgb) * grain * amount;
-			out_fragcolor.rgb = clamp(mix(add, soft, blend), vec3(0.0), vec3(1.0));
-		}
-	}
 }
