@@ -260,14 +260,22 @@ void Cmd_StuffCmds_f (void)
 			if (j > 0)
 			{
 				cmds[j-1] = ';';
-				cmds[j++] = ' ';
+				if (j < (int)sizeof (cmds) - 1)
+					cmds[j++] = ' ';
 			}
 		}
 		else if (cmdline.string[i] == '-' &&
 			(i==0 || cmdline.string[i-1] == ' ')) //johnfitz -- allow hypenated map names with +map
 				plus = false;
 		else if (plus)
+		{
+			if (j >= (int)sizeof (cmds) - 1)
+			{
+				Con_Warning ("Command line script is too long, truncating startup commands\n");
+				break;
+			}
 			cmds[j++] = cmdline.string[i];
+		}
 	}
 	cmds[j] = 0;
 
@@ -980,4 +988,3 @@ int Cmd_CheckParm (const char *parm)
 
 	return 0;
 }
-
