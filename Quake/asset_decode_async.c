@@ -50,10 +50,20 @@ static uint64_t asset_completed_fs;
 static uint64_t asset_queued_decode;
 static uint64_t asset_completed_decode;
 static uint64_t asset_failed_decode;
+static uint64_t asset_decode_submit_backpressure;
 static uint64_t asset_decode_us_png;
 static uint64_t asset_decode_us_ktx2;
 static size_t asset_inflight_raw_bytes;
 static size_t asset_inflight_decoded_bytes;
+
+typedef enum
+{
+	ASSET_DECODE_SUBMIT_POLICY_BLOCKING = 0,
+	ASSET_DECODE_SUBMIT_POLICY_NONBLOCKING
+} asset_decode_submit_policy_t;
+
+/* Pump runs in the frame loop; keep decode queue submission explicitly non-blocking. */
+static const asset_decode_submit_policy_t asset_decode_submit_policy = ASSET_DECODE_SUBMIT_POLICY_NONBLOCKING;
 
 static const char *Asset_StageName(asset_stage_t stage)
 {
@@ -431,7 +441,9 @@ void Asset_Async_Pump (void)
 
 		if (submit_decode)
 		{
-			if (Sys_Jobs_TrySubmit(asset_decode_queue, Asset_DecodeWorker, (void *)(uintptr_t)h))
+			if ((asset_decode_submit_policy == ASSET_DECODE_SUBMIT_POLICY_BLOCKING
+				? Sys_Jobs_Submit(asset_decode_queue, Asset_DecodeWorker, (void *)(uintptr_t)h)
+				: Sys_Jobs_TrySubmit(asset_decode_queue, Asset_DecodeWorker, (void *)(uintptr_t)h)))
 			{
 				SDL_LockMutex(asset_mutex);
 				asset_queued_decode++;
@@ -440,6 +452,7 @@ void Asset_Async_Pump (void)
 			else
 			{
 				SDL_LockMutex(asset_mutex);
+				asset_decode_submit_backpressure++;
 				if (asset_requests[i].in_use && asset_requests[i].generation == ASSET_HANDLE_GEN(h) && asset_requests[i].stage == ASSET_STAGE_DECODE_PENDING)
 					asset_requests[i].decode_queued = false;
 				SDL_UnlockMutex(asset_mutex);
@@ -499,8 +512,10 @@ void Asset_Async_Pump (void)
 
 	if (asset_async_debug.value)
 	{
-		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " failed=%" SDL_PRIu64 " inflight_raw=%zu inflight_decoded=%zu decode_ms[png]=%.3f decode_ms[ktx2]=%.3f\n",
+		Con_DPrintf("asset_async: fs=%" SDL_PRIu64 "/%" SDL_PRIu64 " decode=%" SDL_PRIu64 "/%" SDL_PRIu64 " failed=%" SDL_PRIu64 " decode_backpressure=%" SDL_PRIu64 " decode_policy=%s inflight_raw=%zu inflight_decoded=%zu decode_ms[png]=%.3f decode_ms[ktx2]=%.3f\n",
 			asset_completed_fs, asset_queued_fs, asset_completed_decode, asset_queued_decode, asset_failed_decode,
+			asset_decode_submit_backpressure,
+			asset_decode_submit_policy == ASSET_DECODE_SUBMIT_POLICY_BLOCKING ? "block" : "nonblock",
 			asset_inflight_raw_bytes, asset_inflight_decoded_bytes,
 			(double)asset_decode_us_png / 1000.0, (double)asset_decode_us_ktx2 / 1000.0);
 	}
