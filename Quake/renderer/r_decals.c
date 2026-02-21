@@ -973,7 +973,7 @@ static void R_Decals_Test_f (void)
 	const char *name = (Cmd_Argc () > 1) ? Cmd_Argv (1) : "bullet_hole_default";
 	VectorMA (r_refdef.vieworg, 256.f, vpn, end);
 	TraceLine (r_refdef.vieworg, end, point);
-	if (!R_Decals_FindImpact (point, NULL, hit, nrm))
+	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, nrm))
 		return;
 	R_Decals_Add (name, hit, nrm, NULL, 0.f, 0);
 }
