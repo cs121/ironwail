@@ -3109,31 +3109,6 @@ void R_SetupGL (void)
 R_Clear -- johnfitz -- rewritten and gutted
 =============
 */
-static void R_LogClearDebug (const char *tag, GLbitfield clearbits)
-{
-	GLint draw_fbo, read_fbo;
-	GLint viewport[4], scissor_box[4];
-	GLboolean scissor_test;
-	GLfloat clear_color[4];
-
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetIntegerv (GL_VIEWPORT, viewport);
-	scissor_test = glIsEnabled (GL_SCISSOR_TEST);
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-	glGetFloatv (GL_COLOR_CLEAR_VALUE, clear_color);
-
-	Con_Printf (
-		"CLEARDBG %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) clear_color=(%.3f %.3f %.3f %.3f) clear_mask=0x%08x\n",
-		tag,
-		draw_fbo,
-		read_fbo,
-		viewport[0], viewport[1], viewport[2], viewport[3],
-		scissor_test,
-		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
-		clear_color[0], clear_color[1], clear_color[2], clear_color[3],
-		(unsigned int)clearbits);
-}
 
 void R_Clear (void)
 {
@@ -3143,7 +3118,6 @@ void R_Clear (void)
 
 	GL_SetState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
 	glStencilMask (~0u);
-	R_LogClearDebug ("R_Clear", clearbits);
 	glClear (clearbits);
 }
 
