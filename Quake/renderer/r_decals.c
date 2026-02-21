@@ -89,7 +89,7 @@ static cvar_t r_decals_max = { "r_decals_max", "512", CVAR_ARCHIVE };
 static cvar_t r_decals_drawdist = { "r_decals_drawdist", "1536", CVAR_ARCHIVE };
 static cvar_t r_decals_lifetime = { "r_decals_lifetime", "30", CVAR_ARCHIVE };
 static cvar_t r_decals_fade = { "r_decals_fade", "6", CVAR_ARCHIVE };
-static cvar_t r_decals_bias = { "r_decals_bias", "0.25", CVAR_ARCHIVE };
+static cvar_t r_decals_bias = { "r_decals_bias", "0.03", CVAR_ARCHIVE };
 static cvar_t r_decals_spawn_budget = { "r_decals_spawn_budget", "8", CVAR_ARCHIVE };
 static cvar_t r_decals_render_budget_decals = { "r_decals_render_budget_decals", "256", CVAR_ARCHIVE };
 static cvar_t r_decals_debug = { "r_decals_debug", "0", CVAR_NONE };
@@ -631,9 +631,10 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 	decal_spawned_this_frame++;
 }
 
-static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir_opt, vec3_t out_pos, vec3_t out_normal)
+static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir_opt, float max_dist, vec3_t out_pos, vec3_t out_normal)
 {
 	const float trace_dist = 32.f;
+	const float max_dist_sq = (max_dist > 0.f) ? (max_dist * max_dist) : FLT_MAX;
 	float best_dist_sq = FLT_MAX;
 	qboolean found = false;
 	vec3_t dirs[10];
@@ -682,6 +683,8 @@ static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir
 			VectorSubtract (trace.endpos, point, delta);
 			dist_sq = DotProduct (delta, delta);
 		}
+		if (dist_sq > max_dist_sq)
+			continue;
 		if (!found || dist_sq < best_dist_sq)
 		{
 			best_dist_sq = dist_sq;
@@ -702,7 +705,7 @@ static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir
 void R_AddBulletDecal (const vec3_t point)
 {
 	vec3_t hit, n;
-	if (!R_Decals_FindImpact (point, NULL, hit, n))
+	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, n))
 		return;
 	R_Decals_Add ("bullet_hole_default", hit, n, NULL, 0.f, 0);
 }
@@ -711,7 +714,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
 	vec3_t hit, n, prefer;
 	VectorScale (dir, -1.f, prefer);
-	if (!R_Decals_FindImpact (point, prefer, hit, n))
+	if (!R_Decals_FindImpact (point, prefer, 4.f, hit, n))
 		return;
 	R_Decals_Add ((rand() & 1) ? "blood_splat_small" : "blood_splat_large", hit, n, NULL, 0.f, 0);
 }
@@ -719,7 +722,7 @@ void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 void R_AddScorchDecal (const vec3_t point)
 {
 	vec3_t hit, n;
-	if (!R_Decals_FindImpact (point, NULL, hit, n))
+	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, n))
 		return;
 	R_Decals_Add ((rand() & 1) ? "scorch_small" : "scorch_large", hit, n, NULL, 0.f, 0);
 }

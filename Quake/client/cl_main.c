@@ -547,6 +547,20 @@ static int CL_DlightKeyForEntityEffect (int entnum, int effect_channel)
 	return (entnum << 4) | (effect_channel & 0xF);
 }
 
+static qboolean CL_EntityModelLooksLikeFire (const entity_t *ent)
+{
+	const char *name;
+
+	if (!ent || !ent->model)
+		return false;
+
+	name = ent->model->name;
+	if (!name || !name[0])
+		return false;
+
+	return q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch");
+}
+
 /*
 ===============
 CL_RelinkEntities
@@ -666,6 +680,23 @@ void CL_RelinkEntities (void)
 
 		if (ent->effects & EF_BRIGHTFIELD)
 			R_EntityParticles (ent);
+
+		if (CL_EntityModelLooksLikeFire (ent))
+		{
+			float flicker;
+			dl = CL_AllocDlight (CL_DlightKeyForEntityEffect (i, 7));
+			VectorCopy (ent->origin, dl->origin);
+			dl->origin[2] += 8;
+			dl->type = DLIGHT_TORCH;
+			flicker = (float)sin (cl.time * 13.0 + (double)i * 0.73);
+			dl->radius = 185.f + 45.f * flicker + (float)(rand () & 7);
+			dl->baseradius = dl->radius;
+			dl->die = cl.time + 0.1;
+			dl->minlight = 24;
+			dl->color[0] = 1.00f;
+			dl->color[1] = 0.65f;
+			dl->color[2] = 0.18f;
+		}
 
 		if (ent->effects & EF_MUZZLEFLASH)
 		{
