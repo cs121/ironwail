@@ -3120,6 +3120,7 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
+	GL_UniformMatrix4fvFunc (31, 1, GL_FALSE, r_matinvproj);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
 		dv_quality = (float)CLAMP (0, quality, 2);
