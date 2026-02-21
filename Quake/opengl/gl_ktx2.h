@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include "q_stdinc.h"
-#include "asset_decode_async.h"
 
 typedef struct {
     int mip_count;
@@ -51,7 +50,6 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
 void KTX2_LogInfo(const char *fmt, ...);
 void KTX2_LogError(const char *fmt, ...);
 void R_TestKTX2(void);
-asset_backend_format_t KTX2_SelectBackendTargetFormat(void);
 qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const ktx2_header_t *hdr, ktx2_decoded_image_t *out);
 void KTX2_FreeDecodedImage(ktx2_decoded_image_t *img);
 

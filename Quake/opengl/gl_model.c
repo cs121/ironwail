@@ -1158,9 +1158,9 @@ static gltexture_t *Mod_LoadTextureAsyncDuringLoad(qmodel_t *owner, const char *
 		if (!h)
 			continue;
 		Asset_Wait(h, &result);
-		if (result.status == ASSET_RESULT_OK && result.job)
+		if (result.status == ASSET_RESULT_OK && result.image)
 		{
-			gltexture_t *tex = R_CommitDecodedTexture(result.job, &params);
+			gltexture_t *tex = R_CommitDecodedTexture(result.image, &params);
 			Asset_Release(h);
 			return tex;
 		}

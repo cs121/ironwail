@@ -2255,42 +2255,25 @@ static void Host_InvalidateSave (const char *relname)
 
 void Host_ShutdownSave (void)
 {
-	if (save_mutex)
-	{
-		SDL_LockMutex (save_mutex);
-		while (save_pending && save_finished_condition)
-			SDL_CondWait (save_finished_condition, save_mutex);
-		save_pending = true;
-		save_data.file = NULL;
-		if (save_pending_condition)
-			SDL_CondSignal (save_pending_condition);
-		SDL_UnlockMutex (save_mutex);
-	}
+	if (!save_mutex)
+		return; // not initialized yet
 
-	if (save_thread)
-	{
-		SDL_WaitThread (save_thread, NULL);
-		save_thread = NULL;
-	}
+	SDL_LockMutex (save_mutex);
+	while (save_pending)
+		SDL_CondWait (save_finished_condition, save_mutex);
+	save_pending = true;
+	save_data.file = NULL;
+	SDL_CondSignal (save_pending_condition);
+	SDL_UnlockMutex (save_mutex);
 
-	if (save_finished_condition)
-	{
-		SDL_DestroyCond (save_finished_condition);
-		save_finished_condition = NULL;
-	}
+	SDL_WaitThread (save_thread, NULL);
+	save_thread = NULL;
 
-	if (save_pending_condition)
-	{
-		SDL_DestroyCond (save_pending_condition);
-		save_pending_condition = NULL;
-	}
+	SDL_DestroyCond (save_finished_condition);
+	save_finished_condition = NULL;
 
-	if (save_mutex)
-	{
-		SDL_DestroyMutex (save_mutex);
-		save_mutex = NULL;
-	}
-	save_pending = false;
+	SDL_DestroyCond (save_pending_condition);
+	save_pending_condition = NULL;
 
 	SaveData_Clear (&save_data);
 }
@@ -2373,72 +2356,11 @@ static int Host_BackgroundSave (void *param)
 
 static void Host_InitSaveThread (void)
 {
-	const char *error_step = NULL;
-	const char *sdl_error = NULL;
-
-	SaveData_Init (&save_data);
-
 	save_mutex = SDL_CreateMutex ();
-	if (!save_mutex)
-	{
-		error_step = "create save mutex";
-		sdl_error = SDL_GetError ();
-		goto fail;
-	}
-
 	save_finished_condition = SDL_CreateCond ();
-	if (!save_finished_condition)
-	{
-		error_step = "create save finished condition";
-		sdl_error = SDL_GetError ();
-		goto fail;
-	}
-
 	save_pending_condition = SDL_CreateCond ();
-	if (!save_pending_condition)
-	{
-		error_step = "create save pending condition";
-		sdl_error = SDL_GetError ();
-		goto fail;
-	}
-
 	save_thread = SDL_CreateThread (Host_BackgroundSave, "SaveThread", &save_data);
-	if (!save_thread)
-	{
-		error_step = "create save worker thread";
-		sdl_error = SDL_GetError ();
-		goto fail;
-	}
-
-	return;
-
-fail:
-	if (save_thread)
-	{
-		SDL_WaitThread (save_thread, NULL);
-		save_thread = NULL;
-	}
-
-	if (save_pending_condition)
-	{
-		SDL_DestroyCond (save_pending_condition);
-		save_pending_condition = NULL;
-	}
-
-	if (save_finished_condition)
-	{
-		SDL_DestroyCond (save_finished_condition);
-		save_finished_condition = NULL;
-	}
-
-	if (save_mutex)
-	{
-		SDL_DestroyMutex (save_mutex);
-		save_mutex = NULL;
-	}
-
-	SaveData_Clear (&save_data);
-	Sys_Error ("Host_InitSaveThread: failed to %s (%s)", error_step ? error_step : "initialize save thread", (sdl_error && *sdl_error) ? sdl_error : "unknown SDL error");
+	SaveData_Init (&save_data);
 }
 
 /*
@@ -3895,3 +3817,4 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewnext", Host_Viewnext_f);
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 }
+

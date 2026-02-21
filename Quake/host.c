@@ -777,27 +777,6 @@ static void AsyncQueue_Init (asyncqueue_t *queue, size_t capacity)
 		Sys_Error ("AsyncQueue_Init: could not create condition variable");
 }
 
-static qboolean AsyncQueue_TryPush (asyncqueue_t *queue, void (*func) (void *param), void *param)
-{
-	asyncproc_t *proc;
-	qboolean queued = false;
-
-	if (!queue->mutex)
-		return false;
-
-	SDL_LockMutex (queue->mutex);
-	if (!queue->teardown && queue->tail - queue->head < queue->capacity)
-	{
-		proc = &queue->procs[(queue->tail++) & (queue->capacity - 1)];
-		proc->func = func;
-		proc->param = param;
-		queued = true;
-	}
-	SDL_UnlockMutex (queue->mutex);
-
-	return queued;
-}
-
 static void AsyncQueue_Push (asyncqueue_t *queue, void (*func) (void *param), void *param)
 {
 	asyncproc_t *proc;
@@ -820,30 +799,14 @@ static void AsyncQueue_Push (asyncqueue_t *queue, void (*func) (void *param), vo
 
 static void AsyncQueue_Drain (asyncqueue_t *queue)
 {
-	if (!queue->mutex)
-		return;
-
-	for (;;)
+	SDL_LockMutex (queue->mutex);
+	while (queue->head != queue->tail)
 	{
-		asyncproc_t proc;
-
-		SDL_LockMutex (queue->mutex);
-		if (queue->head == queue->tail)
-		{
-			SDL_UnlockMutex (queue->mutex);
-			return;
-		}
-
-		proc = queue->procs[(queue->head++) & (queue->capacity - 1)];
+		asyncproc_t *proc = &queue->procs[(queue->head++) & (queue->capacity - 1)];
+		proc->func (proc->param);
 		SDL_CondSignal (queue->notfull);
-		SDL_UnlockMutex (queue->mutex);
-
-		/*
-		 * Never execute callbacks while holding queue->mutex.
-		 * This prevents reentrancy deadlocks when callbacks queue more work.
-		 */
-		proc.func (proc.param);
 	}
+	SDL_UnlockMutex (queue->mutex);
 }
 
 static void AsyncQueue_Destroy (asyncqueue_t *queue)
@@ -865,8 +828,7 @@ static void AsyncQueue_Destroy (asyncqueue_t *queue)
 
 void Host_InvokeOnMainThread (void (*func) (void *param), void *param)
 {
-	if (!AsyncQueue_TryPush (&async_queue, func, param))
-		AsyncQueue_Push (&async_queue, func, param);
+	AsyncQueue_Push (&async_queue, func, param);
 }
 
 //==============================================================================

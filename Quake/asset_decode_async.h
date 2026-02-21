@@ -13,23 +13,6 @@ typedef enum
 	ASSET_IMAGE_FMT_RGBA8 = 0
 } asset_image_format_t;
 
-typedef enum
-{
-	ASSET_BACKEND_FMT_AUTO = 0,
-	ASSET_BACKEND_FMT_RGBA8,
-	ASSET_BACKEND_FMT_BC7,
-	ASSET_BACKEND_FMT_ETC2,
-	ASSET_BACKEND_FMT_ASTC_4X4
-} asset_backend_format_t;
-
-typedef enum
-{
-	ASSET_KIND_UNKNOWN = 0,
-	ASSET_KIND_PNG,
-	ASSET_KIND_KTX2,
-	ASSET_KIND_SOUND
-} asset_kind_t;
-
 typedef struct
 {
 	void *data;
@@ -50,26 +33,6 @@ typedef struct
 
 typedef struct
 {
-	void *data;
-	size_t size;
-	int channels;
-	int sample_rate;
-	int sample_count;
-} asset_audio_payload_t;
-
-typedef struct
-{
-	asset_kind_t kind;
-	asset_backend_format_t target_format;
-	union
-	{
-		asset_image_payload_t image;
-		asset_audio_payload_t audio;
-	} payload;
-} asset_decode_job_t;
-
-typedef struct
-{
 	const char *name;
 	unsigned flags;
 	qmodel_t *owner;
@@ -86,12 +49,7 @@ typedef enum
 typedef struct
 {
 	asset_result_status_t status;
-	asset_kind_t kind;
-	int error_code;
-	char error[128];
-	uint64_t io_us;
-	uint64_t decode_us;
-	asset_decode_job_t *job;
+	asset_image_payload_t *image;
 } asset_result_t;
 
 void Asset_Async_Init (void);

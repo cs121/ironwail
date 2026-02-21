@@ -89,7 +89,7 @@ static cvar_t r_decals_max = { "r_decals_max", "512", CVAR_ARCHIVE };
 static cvar_t r_decals_drawdist = { "r_decals_drawdist", "1536", CVAR_ARCHIVE };
 static cvar_t r_decals_lifetime = { "r_decals_lifetime", "30", CVAR_ARCHIVE };
 static cvar_t r_decals_fade = { "r_decals_fade", "6", CVAR_ARCHIVE };
-static cvar_t r_decals_bias = { "r_decals_bias", "0.03", CVAR_ARCHIVE };
+static cvar_t r_decals_bias = { "r_decals_bias", "0.6", CVAR_ARCHIVE };
 static cvar_t r_decals_spawn_budget = { "r_decals_spawn_budget", "8", CVAR_ARCHIVE };
 static cvar_t r_decals_render_budget_decals = { "r_decals_render_budget_decals", "256", CVAR_ARCHIVE };
 static cvar_t r_decals_debug = { "r_decals_debug", "0", CVAR_NONE };
@@ -106,23 +106,9 @@ static int decal_spawned_this_frame;
 static int decal_next_spawn_id;
 static int decal_frame;
 static decal_stats_t decal_stats;
-static int decal_debug_next_log_frame;
 
 static void R_Decals_ComputeLighting (decal_instance_t *d);
 static void R_Decals_DebugState (void);
-
-static qboolean R_Decals_IsFiniteVec3 (const vec3_t v)
-{
-	return isfinite (v[0]) && isfinite (v[1]) && isfinite (v[2]);
-}
-
-static void R_Decals_DebugReject (const char *name, const char *reason)
-{
-	if (r_decals_debug.value < 1.f || decal_frame < decal_debug_next_log_frame)
-		return;
-	decal_debug_next_log_frame = decal_frame + 30;
-	Con_DPrintf ("decal reject: name=%s reason=%s\n", name ? name : "<null>", reason ? reason : "unknown");
-}
 
 #define DECAL_BATCH_MAX 256
 
@@ -586,16 +572,6 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 
 	if (!r_decals.value || !name || !name[0] || !decal_pool || !decal_capacity)
 		return;
-	if (!R_Decals_IsFiniteVec3 (org))
-	{
-		R_Decals_DebugReject (name, "invalid origin");
-		return;
-	}
-	if (!R_Decals_IsFiniteVec3 (normal) || VectorLengthSquared (normal) < 0.0001f)
-	{
-		R_Decals_DebugReject (name, "invalid normal");
-		return;
-	}
 	if (decal_spawned_this_frame >= (int)r_decals_spawn_budget.value)
 	{
 		decal_stats.dropped_spawn_budget++;
@@ -624,107 +600,56 @@ void R_Decals_Add (const char *name, const vec3_t org, const vec3_t normal, cons
 	if (!d->texture)
 	{
 		d->active = false;
-		R_Decals_DebugReject (name, "missing texture");
 		return;
 	}
 	decal_stats.spawned++;
 	decal_spawned_this_frame++;
 }
 
-static qboolean R_Decals_FindImpact (const vec3_t point, const vec3_t prefer_dir_opt, float max_dist, vec3_t out_pos, vec3_t out_normal)
+static qboolean R_Decals_TraceNormal (const vec3_t point, vec3_t out_normal)
 {
-	const float trace_dist = 32.f;
-	const float max_dist_sq = (max_dist > 0.f) ? (max_dist * max_dist) : FLT_MAX;
-	float best_dist_sq = FLT_MAX;
-	qboolean found = false;
-	vec3_t dirs[10];
-	int dir_count = 0;
-	int i;
+	trace_t trace;
+	vec3_t end;
+	vec3_t start;
 	if (!cl.worldmodel)
 		return false;
-	if (!R_Decals_IsFiniteVec3 (point))
-		return false;
-
-	if (prefer_dir_opt && VectorLengthSquared (prefer_dir_opt) > 0.0001f)
+	VectorCopy (point, start);
+	VectorMA (point, 32.f, vpn, end);
+	memset (&trace, 0, sizeof (trace));
+	trace.fraction = 1.f;
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, end, start, &trace);
+	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) > 0.001f)
 	{
-		VectorCopy (prefer_dir_opt, dirs[dir_count]);
-		VectorNormalizeFast (dirs[dir_count]);
-		dir_count++;
-		VectorScale (dirs[0], -1.f, dirs[dir_count]);
-		dir_count++;
-	}
-
-	VectorSet (dirs[dir_count++], 1.f, 0.f, 0.f);
-	VectorSet (dirs[dir_count++], -1.f, 0.f, 0.f);
-	VectorSet (dirs[dir_count++], 0.f, 1.f, 0.f);
-	VectorSet (dirs[dir_count++], 0.f, -1.f, 0.f);
-	VectorSet (dirs[dir_count++], 0.f, 0.f, 1.f);
-	VectorSet (dirs[dir_count++], 0.f, 0.f, -1.f);
-	VectorCopy (vpn, dirs[dir_count++]);
-	VectorScale (vpn, -1.f, dirs[dir_count++]);
-
-	for (i = 0; i < dir_count; ++i)
-	{
-		trace_t trace;
-		vec3_t start, end;
-		float dist_sq;
-
-		VectorMA (point, trace_dist, dirs[i], start);
-		VectorMA (point, -trace_dist, dirs[i], end);
-		memset (&trace, 0, sizeof (trace));
-		trace.fraction = 1.f;
-		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, start, end, &trace);
-		if (trace.fraction >= 1.f)
-			continue;
-		if (VectorLengthSquared (trace.plane.normal) <= 0.001f || !R_Decals_IsFiniteVec3 (trace.endpos))
-			continue;
-		{
-			vec3_t delta;
-			VectorSubtract (trace.endpos, point, delta);
-			dist_sq = DotProduct (delta, delta);
-		}
-		if (dist_sq > max_dist_sq)
-			continue;
-		if (!found || dist_sq < best_dist_sq)
-		{
-			best_dist_sq = dist_sq;
-			VectorCopy (trace.endpos, out_pos);
-			VectorCopy (trace.plane.normal, out_normal);
-			found = true;
-		}
-	}
-
-	if (found)
-	{
-		VectorNormalizeFast (out_normal);
+		VectorCopy (trace.plane.normal, out_normal);
 		return true;
 	}
+	VectorSet (out_normal, 0.f, 0.f, 1.f);
 	return false;
 }
 
 void R_AddBulletDecal (const vec3_t point)
 {
-	vec3_t hit, n;
-	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, n))
-		return;
-	R_Decals_Add ("bullet_hole_default", hit, n, NULL, 0.f, 0);
+	vec3_t n;
+	R_Decals_TraceNormal (point, n);
+	R_Decals_Add ("bullet_hole_default", point, n, NULL, 0.f, 0);
 }
 
 void R_AddBloodDecal (const vec3_t point, const vec3_t dir)
 {
-	vec3_t hit, n, prefer;
-	VectorScale (dir, -1.f, prefer);
-	if (!R_Decals_FindImpact (point, prefer, 4.f, hit, n))
+	vec3_t n;
+	if ((rand () & 3) != 0)
 		return;
-	R_Decals_Add ((rand() & 1) ? "blood_splat_small" : "blood_splat_large", hit, n, NULL, 0.f, 0);
+	VectorScale (dir, -1.f, n);
+	if (VectorLengthSquared (n) < 0.01f)
+		R_Decals_TraceNormal (point, n);
+	R_Decals_Add ((rand() & 1) ? "blood_splat_small" : "blood_splat_large", point, n, NULL, 0.f, 0);
 }
 
 void R_AddScorchDecal (const vec3_t point)
 {
-	vec3_t hit, n;
-	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, n))
-		return;
-	R_Decals_Add ((rand() & 1) ? "scorch_small" : "scorch_large", hit, n, NULL, 0.f, 0);
+	vec3_t n;
+	R_Decals_TraceNormal (point, n);
+	R_Decals_Add ((rand() & 1) ? "scorch_small" : "scorch_large", point, n, NULL, 0.f, 0);
 }
 
 static int R_Decal_CompareRender (const void *a, const void *b)
@@ -969,12 +894,11 @@ static void R_Decals_ReloadCmd_f (void)
 
 static void R_Decals_Test_f (void)
 {
-	vec3_t end, point, hit, nrm;
+	vec3_t end, hit, nrm;
 	const char *name = (Cmd_Argc () > 1) ? Cmd_Argv (1) : "bullet_hole_default";
 	VectorMA (r_refdef.vieworg, 256.f, vpn, end);
-	TraceLine (r_refdef.vieworg, end, point);
-	if (!R_Decals_FindImpact (point, NULL, 24.f, hit, nrm))
-		return;
+	TraceLine (r_refdef.vieworg, end, hit);
+	R_Decals_TraceNormal (hit, nrm);
 	R_Decals_Add (name, hit, nrm, NULL, 0.f, 0);
 }
 
@@ -1003,7 +927,6 @@ void R_Decals_Init (void)
 	R_Decals_EnsurePool ();
 	R_Decals_LoadScripts ();
 	R_Decals_ResetFrameStats ();
-	decal_debug_next_log_frame = 0;
 }
 
 void R_Decals_Shutdown (void)

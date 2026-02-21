@@ -123,9 +123,6 @@ extern	qboolean	gl_buffer_storage_able;
 extern	qboolean	gl_multi_bind_able;
 extern	qboolean	gl_bindless_able;
 extern	qboolean	gl_clipcontrol_able;
-extern	qboolean	gl_texcomp_bptc_able;
-extern	qboolean	gl_texcomp_etc2_able;
-extern	qboolean	gl_texcomp_astc_able;
 
 extern	const char	*gl_vendor;
 extern	const char	*gl_renderer;
