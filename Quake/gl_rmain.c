@@ -238,6 +238,7 @@ cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
+cvar_t  r_dlight_debug_spawn = { "r_dlight_debug_spawn", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
