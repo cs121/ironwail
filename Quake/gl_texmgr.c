@@ -3004,7 +3004,12 @@ void GLPalette_UpdateLookupTable (void)
 	memcpy (cached_palette, d_8to24table, sizeof (cached_palette));
 	GLPalette_InvalidateRemapped ();
 
-	GL_UseProgramFunc (glprogs.palette_init[metric]);
+	/*
+	 * Keep GL's tracked current program in sync with the actual binding.
+	 * Bypassing GL_UseProgram() here can leave gl_current_program stale,
+	 * which later causes render passes to skip required rebinding.
+	 */
+	GL_UseProgram (glprogs.palette_init[metric]);
 	GL_BindImageTextureFunc (0, gl_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_R8UI);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[0], 0, 256 * sizeof (GLuint));
 	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof (GLuint), d_8to24table);
