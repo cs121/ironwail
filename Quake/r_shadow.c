@@ -39,7 +39,7 @@ static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
 static int shadow_dlight_selected_count;
 static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
-static qboolean shadow_receiver_use_dlight;
+static shadow_receiver_source_t shadow_receiver_source;
 static GLuint shadow_receiver_tex;
 static float shadow_receiver_viewproj[16];
 
@@ -433,8 +433,10 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cach
 	shdlog.last_program = program;
 	shdlog.last_shadow_sampler_unit = (GLint)(texunit - GL_TEXTURE0);
 	shdlog.last_shadow_tex = expected_tex;
-	R_Shadow_LogWrite ("%s receiver program=%d cached_current=%d gl_current=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
-		tag, program, cached_current_program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s receiver program=%d cached_current=%d gl_current=%d source=%s enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+		tag, program, cached_current_program, current_program,
+		(shadow_receiver_source == SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS) ? "dlight_atlas" : "sun",
+		shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
 	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_col0=(%g %g %g %g) matrix_col1=(%g %g %g %g) matrix_col2=(%g %g %g %g) matrix_col3=(%g %g %g %g) det3x3=%.6g\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,
@@ -1007,9 +1009,9 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void)
 }
 
 
-static void R_Shadow_SelectReceiverSource (qboolean use_dlight, GLuint tex, const float viewproj[16])
+static void R_Shadow_SelectReceiverSource (shadow_receiver_source_t source, GLuint tex, const float viewproj[16])
 {
-	shadow_receiver_use_dlight = use_dlight;
+	shadow_receiver_source = source;
 	shadow_receiver_tex = tex;
 	if (viewproj)
 		memcpy (shadow_receiver_viewproj, viewproj, sizeof (shadow_receiver_viewproj));
@@ -1017,7 +1019,7 @@ static void R_Shadow_SelectReceiverSource (qboolean use_dlight, GLuint tex, cons
 		IdentityMatrix (shadow_receiver_viewproj);
 
 	r_framedata.shadow_debug[0] = tex ? 1.f : 0.f;
-	if (use_dlight)
+	if (source == SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS)
 	{
 		r_framedata.shadow_params[0] = r_shadow_dlight_bias.value;
 		r_framedata.shadow_params[1] = 0.f;
@@ -1033,9 +1035,25 @@ static void R_Shadow_SelectReceiverSource (qboolean use_dlight, GLuint tex, cons
 	}
 }
 
-void R_Shadow_BindReceiverShadowMap (GLenum texunit)
+static void R_Shadow_BuildReceiverAtlasViewProj (float out_viewproj[16], const float viewproj[16], const vec4_t atlas)
 {
-	if (shadow_receiver_use_dlight)
+	float atlas_transform[16];
+	float viewproj_copy[16];
+
+	IdentityMatrix (atlas_transform);
+	atlas_transform[0] = atlas[0];
+	atlas_transform[5] = atlas[1];
+	atlas_transform[12] = atlas[2];
+	atlas_transform[13] = atlas[3];
+
+	memcpy (viewproj_copy, viewproj, sizeof (viewproj_copy));
+	memcpy (out_viewproj, atlas_transform, sizeof (atlas_transform));
+	MatrixMultiply (out_viewproj, viewproj_copy);
+}
+
+void R_Shadow_BindReceiverShadowMap (GLenum texunit, shadow_receiver_source_t source)
+{
+	if (source == SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS)
 		R_Shadow_BindDlightShadowMap (texunit);
 	else
 		R_Shadow_BindShadowMap (texunit);
@@ -1053,7 +1071,12 @@ const float *R_Shadow_GetReceiverShadowViewProj (void)
 
 qboolean R_Shadow_ReceiverUsesDlight (void)
 {
-	return shadow_receiver_use_dlight;
+	return shadow_receiver_source == SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS;
+}
+
+shadow_receiver_source_t R_Shadow_GetReceiverSource (void)
+{
+	return shadow_receiver_source;
 }
 
 void R_Shadow_SunPass (void)
@@ -1066,7 +1089,7 @@ void R_Shadow_SunPass (void)
 	R_Shadow_Log_BeginFrame ();
 	r_framedata.shadow_debug[0] = 0.f;
 	IdentityMatrix (r_framedata.shadow_viewproj);
-	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
+	R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_SUN, shadow_depth_tex, r_framedata.shadow_viewproj);
 	VectorSet (r_framedata.shadow_sun_dir, 0.f, 0.f, -1.f);
 	r_framedata.shadow_sun_dir[3] = 0.f;
 	if (!enabled)
@@ -1117,7 +1140,7 @@ void R_Shadow_SunPass (void)
 	}
 
 	r_framedata.shadow_debug[0] = 1.f;
-	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
+	R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_SUN, shadow_depth_tex, r_framedata.shadow_viewproj);
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = 0.f;
 	R_UploadFrameData ();
@@ -1194,7 +1217,7 @@ void R_Shadow_DlightPass (void)
 
 	shadow_dlight_selected_count = 0;
 
-	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
+	R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_SUN, shadow_depth_tex, r_framedata.shadow_viewproj);
 
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
@@ -1293,7 +1316,7 @@ void R_Shadow_DlightPass (void)
 	if (!tiles_used)
 	{
 		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no selected lights");
-		R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
+		R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_SUN, shadow_depth_tex, r_framedata.shadow_viewproj);
 		return;
 	}
 
@@ -1384,13 +1407,14 @@ void R_Shadow_DlightPass (void)
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
 	if (shadow_dlight_selected_count > 0)
 	{
-		const float *receiver_viewproj = r_framedata.shadow_dlight_viewproj[0];
-		R_Shadow_SelectReceiverSource (true, shadow_dlight_depth_tex, receiver_viewproj);
+		float receiver_viewproj[16];
+		R_Shadow_BuildReceiverAtlasViewProj (receiver_viewproj, r_framedata.shadow_dlight_viewproj[0], r_framedata.shadow_dlight_atlas[0]);
+		R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS, shadow_dlight_depth_tex, receiver_viewproj);
 		memcpy (r_framedata.shadow_viewproj, receiver_viewproj, sizeof (r_framedata.shadow_viewproj));
 	}
 	else
 	{
-		R_Shadow_SelectReceiverSource (false, shadow_depth_tex, sun_viewproj);
+		R_Shadow_SelectReceiverSource (SHADOW_RECEIVER_SOURCE_SUN, shadow_depth_tex, sun_viewproj);
 	}
 	R_UploadFrameData ();
 
@@ -1413,10 +1437,10 @@ void R_Shadow_DrawDebug (void)
 
 	GL_UseProgram (glprogs.shadow_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	if (mode == 4)
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
-	else
+	if (mode == 5)
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	else
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
