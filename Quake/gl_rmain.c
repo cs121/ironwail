@@ -300,7 +300,7 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
-cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.02", CVAR_ARCHIVE };
+cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.001", CVAR_ARCHIVE };
 cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.25", CVAR_ARCHIVE };
 cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "8.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
@@ -2014,13 +2014,18 @@ static float GL_UpdateAutoExposure (void)
 		return current_exposure;
 
 	{
-		const float exposure_middle_gray = 0.18f;
+		const float min_scene_luma = 0.001f;
+		const float max_scene_luma = 0.01f;
+		const float min_scene_log = log10f (min_scene_luma);
+		const float max_scene_log = log10f (max_scene_luma);
+		const float scene_log = log10f (q_max (scene_luminance, min_scene_luma));
 		const float bias = q_max (0.f, r_exposure_bias.value);
 		const float min_exposure = q_min (r_exposure_min.value, r_exposure_max.value);
 		const float max_exposure = q_max (r_exposure_min.value, r_exposure_max.value);
 		const float hard_min_exposure = q_max (0.f, q_min (r_ae_min_exposure.value, r_ae_max_exposure.value));
 		const float hard_max_exposure = q_max (hard_min_exposure, q_max (r_ae_min_exposure.value, r_ae_max_exposure.value));
-		float target = exposure_middle_gray * bias / scene_luminance;
+		float interpolation = (scene_log - min_scene_log) / (max_scene_log - min_scene_log);
+		float target = LERP (hard_max_exposure, hard_min_exposure, interpolation) * bias;
 		float speed_up = q_max (0.f, r_exposure_speed_up.value);
 		float speed_down = q_max (0.f, r_exposure_speed_down.value);
 		float adaptation_speed = (target > current_exposure) ? speed_up : speed_down;
@@ -2033,6 +2038,7 @@ static float GL_UpdateAutoExposure (void)
 
 		last_time = cl.time;
 
+		target = CLAMP (hard_min_exposure, target, hard_max_exposure);
 		target = CLAMP (min_exposure, target, max_exposure);
 		target = CLAMP (hard_min_exposure, target, hard_max_exposure);
 		change = (target - current_exposure) * delta * adaptation_speed;
