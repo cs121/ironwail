@@ -40,7 +40,6 @@ extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_mode;
 
 extern cvar_t r_shadows;
-extern cvar_t r_shadow_sun;
 extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
 extern cvar_t r_shadow_pcf;
@@ -1520,7 +1519,7 @@ if ((GLuint)gl_current_program != program)
 #endif
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-R_Shadow_BindReceiverShadowMap (GL_TEXTURE5, SHADOW_RECEIVER_SOURCE_SUN);
+R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	// FIX: Always bind the raw shadow depth texture on TEXTURE6 so that
 	// ShadowMapRaw (sampler2D, no hardware compare) works correctly in ALL
 	// debug modes (ShadowDebug.y > 2.5 path in shadow_sample.glsl).

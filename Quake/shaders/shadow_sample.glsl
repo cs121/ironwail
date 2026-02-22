@@ -22,7 +22,7 @@
 //      FIX: Zwei explizite compile-time Pfade basierend auf REVERSED_Z.
 //
 //   3. CRITICAL – ShadowCompare Duplikat: ShadowCompare ist identisch in beiden
-//      #ifdef SHADOW_SUN und #ifdef SHADOW_DLIGHT Blöcken definiert. Wenn beide
+//      #ifdef SHADOW_DLIGHT_RECEIVER und #ifdef SHADOW_DLIGHT Blöcken definiert. Wenn beide
 //      gleichzeitig definiert sind, gibt es einen Compiler-Fehler (Redefinition).
 //      FIX: ShadowCompare wird ein einziges Mal außerhalb beider Blöcke definiert.
 //
@@ -73,7 +73,7 @@ float ShadowReference01(float proj_z)
 
 // ---------------------------------------------------------------------------
 // FIX 3: ShadowCompare einmalig definiert (war doppelt vorhanden → Compilerfehler
-// wenn beide SHADOW_SUN und SHADOW_DLIGHT aktiv).
+// wenn beide SHADOW_DLIGHT_RECEIVER und SHADOW_DLIGHT aktiv).
 // ---------------------------------------------------------------------------
 float ShadowCompare(float depth, float reference, float bias)
 {
@@ -85,136 +85,6 @@ float ShadowCompare(float depth, float reference, float bias)
     return (reference <= (depth + bias)) ? 1.0 : 0.0;
 #endif
 }
-
-// ===========================================================================
-// SHADOW_SUN — directional sun shadow
-// ===========================================================================
-#ifdef SHADOW_SUN
-
-// ShadowSampleRawDepth: reads raw (uncompared) depth from the shadow map.
-// Requires ShadowMapRaw (sampler2D) bound on TEXTURE6 with GL_NONE compare mode.
-// ShadowMap (sampler2DShadow) is on TEXTURE5 with GL_COMPARE_REF_TO_TEXTURE.
-// Both samplers reference the same underlying depth texture; the split binding
-// allows hardware-PCF via sampler2DShadow (TEXTURE5) and raw reads via TEXTURE6.
-float ShadowSampleRawDepth(vec2 uv)
-{
-    return texture(ShadowMapRaw, uv).r;
-}
-
-float ShadowSampleRawCompare(vec2 uv, float reference)
-{
-    return texture(ShadowMap, vec3(uv, reference));
-}
-
-float ShadowApplyBias(float reference, float bias)
-{
-#if REVERSED_Z
-    return clamp(reference - bias, 0.0, 1.0);
-#else
-    return clamp(reference + bias, 0.0, 1.0);
-#endif
-}
-
-float ShadowSampleRaw(vec2 uv, float reference, float bias)
-{
-    if (ShadowDebug.y > 2.5)
-    {
-        float depth = ShadowSampleRawDepth(uv);
-        return ShadowCompare(depth, reference, bias);
-    }
-    return ShadowSampleRawCompare(uv, ShadowApplyBias(reference, bias));
-}
-
-// FIX 5: taps-Wert-Semantik dokumentiert:
-//   taps <= 2 → 2×2 rotated grid  (4 samples)
-//   taps <= 4 → 3×3 box filter    (9 samples)
-//   else      → 5×5 box filter    (25 samples)
-float ShadowSamplePCF(vec2 uv, float reference, float bias, int taps)
-{
-    // FIX 7: expliziter vec2-Cast vermeidet Treiber-Warnings
-    vec2 texel = 1.0 / vec2(textureSize(ShadowMap, 0));
-    float sum = 0.0;
-
-    if (taps <= 2)
-    {
-        // 2×2 rotated grid (sub-texel offsets reduzieren Aliasing)
-        const vec2 offsets[4] = vec2[4](
-            vec2(-0.5, -0.5),
-            vec2( 0.5, -0.5),
-            vec2(-0.5,  0.5),
-            vec2( 0.5,  0.5)
-        );
-        for (int i = 0; i < 4; ++i)
-            sum += ShadowSampleRaw(uv + offsets[i] * texel, reference, bias);
-        return sum * 0.25;
-    }
-
-    int count = 0;
-
-    if (taps <= 4)
-    {
-        // 3×3 box
-        for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
-        {
-            sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
-            ++count;
-        }
-        return sum / float(count);
-    }
-
-    // 5×5 box
-    for (int y = -2; y <= 2; ++y)
-    for (int x = -2; x <= 2; ++x)
-    {
-        sum += ShadowSampleRaw(uv + vec2(x, y) * texel, reference, bias);
-        ++count;
-    }
-    return sum / float(count);
-}
-
-// ShadowDebug.x: 0 = shadows disabled (visually full-lit), ≥1 = enabled
-float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
-{
-    if (ShadowDebug.x < 0.5)
-    {
-        in_range = 1.0;
-        return 1.0;
-    }
-
-    vec4 clip = ShadowMul(ShadowViewProj, vec4(world_pos, 1.0));
-
-    // FIX: auch negative w abfangen (Vertex hinter Licht-Near-Plane)
-    if (clip.w <= 0.0)
-    {
-        in_range = 0.0;
-        return 1.0;
-    }
-
-    vec3 proj      = clip.xyz / clip.w;
-    vec2 uv        = proj.xy * 0.5 + 0.5;
-    float reference = ShadowReference01(proj.z);
-
-    bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
-                  all(lessThanEqual   (uv, vec2(1.0))) &&
-                  reference >= 0.0 && reference <= 1.0;
-    in_range = inside ? 1.0 : 0.0;
-    if (!inside)
-        return 1.0;
-
-    if (ShadowDebug.y > 3.5)
-        return ShadowSampleRawCompare(uv, reference);
-
-    float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
-    float bias  = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
-
-    if (ShadowParams.z > 0.5)
-        return ShadowSamplePCF(uv, reference, bias, int(ShadowParams.w + 0.5));
-
-    return ShadowSampleRaw(uv, reference, bias);
-}
-
-#endif // SHADOW_SUN
 
 // ===========================================================================
 // SHADOW_DLIGHT — dynamic / point light shadow (atlas-based)

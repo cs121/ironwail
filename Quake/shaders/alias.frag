@@ -24,7 +24,6 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
-	vec4	ShadowSunDir;
 	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
@@ -99,10 +98,9 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2DShadow ShadowMap;
-layout(binding=6) uniform sampler2D ShadowMapRaw;
+layout(binding=5) uniform sampler2D ShadowDlightMap;
 
-#define SHADOW_SUN 1
+#define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
 
 #if MODE == 2
@@ -162,13 +160,15 @@ void main()
         vec3 emissive = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
+        uint shadow_light_index = 0u;
+        vec3 shadow_light_pos = EyePos;
 	vec4 lit_color = in_color;
 
 	if (ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
 		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
+		shadow_term = ShadowVisibilityDlight(world_pos, shadow_normal, shadow_light_pos, shadow_light_index, shadow_range);
 		if (ShadowDebug.y > 0.5)
 		{
 			if (ShadowDebug.y < 1.5)
@@ -187,7 +187,7 @@ void main()
 				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
 				vec2 uv = proj.xy * 0.5 + 0.5;
 				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowMapRaw, uv).r;
+				float raw_depth = texture(ShadowDlightMap, uv).r;
 				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
 			}
 #if !OIT

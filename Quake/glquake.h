@@ -450,7 +450,6 @@ typedef struct gpuframedata_s {
         float           shadow_viewproj[16];
         vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
         vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
-        vec4_t          shadow_sun_dir; // xyz: direction, w: unused
         float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
         vec4_t          shadow_dlight_atlas[SHADOW_DLIGHT_MAX]; // xy: scale, zw: offset
         vec4_t          shadow_dlight_info[SHADOW_DLIGHT_MAX]; // x: light index, yzw: unused
@@ -472,12 +471,6 @@ extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
-
-typedef enum
-{
-	SHADOW_RECEIVER_SOURCE_SUN = 0,
-	SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS = 1
-} shadow_receiver_source_t;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
@@ -501,15 +494,14 @@ qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
-void R_Shadow_SunPass (void);
 void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
-void R_Shadow_BindReceiverShadowMap (GLenum texunit, shadow_receiver_source_t source);
+void R_Shadow_BindReceiverShadowMap (GLenum texunit);
 void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex);
 void R_Shadow_Log_BeginFrame (void);
-void R_Shadow_Log_SunPassEarlyOut (const char *reason);
+void R_Shadow_Log_DlightEarlyOut (const char *reason);
 void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);
 void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cached_current_program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj);
 GLuint R_Shadow_GetShadowMapTextureId (void);
@@ -517,7 +509,6 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 GLuint R_Shadow_GetReceiverShadowMapTextureId (void);
 const float *R_Shadow_GetReceiverShadowViewProj (void);
 qboolean R_Shadow_ReceiverUsesDlight (void);
-shadow_receiver_source_t R_Shadow_GetReceiverSource (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
