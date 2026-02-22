@@ -7,10 +7,9 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2DShadow ShadowMap;
-layout(binding=6) uniform sampler2D ShadowMapRaw;
+layout(binding=5) uniform sampler2D ShadowDlightMap;
 #include "frame_uniforms.glsl"
-#define SHADOW_SUN 1
+#define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
 
 // BUG FIX: world.vert uses exp2(-Fog.w * ...) but frag used exp2(-abs(Fog.w) * ...)
@@ -222,11 +221,6 @@ float DepthToCanonical(float depth)
 #endif
 }
 
-vec3 ComputeSunLight(vec3 world_pos, vec3 normal)
-{
-	return vec3(0.0);
-}
-
 #define OUT_COLOR out_fragcolor
 
 #if OIT
@@ -374,7 +368,7 @@ void main()
 			surface_normal = -surface_normal;
 	}
 
-	// View direction (computed once; used by specular and sun light)
+	// View direction (computed once; used by specular lighting)
 	vec3 to_eye    = EyePos - in_pos;
 	float view_len = length(to_eye);
 	// OPT: avoid normalize() call by inlining division guard
@@ -450,10 +444,10 @@ void main()
 		}
 
 		// BUG FIX: surface_normal computation was inside the lightmap block but
-		// referenced AFTER the closing brace via sun_light / dlight. Moved above.
+		// referenced AFTER the closing brace via dlight. Moved above.
 
 		float shadow_range = 1.0;
-		float shadow_term  = ShadowVisibility(in_pos, surface_normal, shadow_range);
+		float shadow_term  = ShadowVisibilityDlight(in_pos, surface_normal, EyePos, 0u, shadow_range);
 		bool shadow_enabled  = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
@@ -475,7 +469,7 @@ void main()
 				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
 				vec2 uv = proj.xy * 0.5 + 0.5;
 				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowMapRaw, uv).r;
+				float raw_depth = texture(ShadowDlightMap, uv).r;
 				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
 			}
 #if !OIT
@@ -565,8 +559,6 @@ void main()
 		}
 
 		// Sun light
-		vec3 sun_light = dlight_debug ? vec3(0.0) : ComputeSunLight(in_pos, surface_normal);
-		total_light += max(min(sun_light, 1.0 - total_light), 0.0);
 
 		// Apply lighting
 #if DITHER >= 2

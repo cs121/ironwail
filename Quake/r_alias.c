@@ -34,7 +34,6 @@ extern cvar_t r_lightgrid_debug;
 extern cvar_t r_shadow_bias_mdl;
 extern cvar_t r_shadow_normalbias_mdl;
 extern cvar_t r_shadows;
-extern cvar_t r_shadow_sun;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
@@ -98,7 +97,6 @@ struct ibuf_s {
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
 		vec4_t	shadow_debug;
-		vec4_t	shadow_sun_dir;
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -578,7 +576,6 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
-	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -589,7 +586,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5, SHADOW_RECEIVER_SOURCE_SUN);
+	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	// FIX: Always bind raw shadow depth on TEXTURE6 for ShadowMapRaw (sampler2D).
 	// See matching fix in r_world.c R_DrawBrushModels_Real BP_SHADOW block.
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetReceiverShadowMapTextureId ());
@@ -728,7 +725,6 @@ static void R_FlushAliasInstances_Shadow (void)
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
-	memcpy (ibuf.global.shadow_sun_dir, r_framedata.shadow_sun_dir, sizeof (r_framedata.shadow_sun_dir));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
