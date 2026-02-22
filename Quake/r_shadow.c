@@ -742,11 +742,6 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
 }
 
-GLuint R_Shadow_GetShadowMapTextureId (void)
-{
-	return shadow_dlight_depth_tex;
-}
-
 GLuint R_Shadow_GetDlightShadowMapTextureId (void)
 {
 	return shadow_dlight_depth_tex;
