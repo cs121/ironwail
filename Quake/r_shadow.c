@@ -377,7 +377,7 @@ void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_
 	R_Shadow_LogGLStage (tag);
 }
 
-void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj)
+void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cached_current_program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj)
 {
 	GLint active_tex, bound_tex, draw_fbo, read_fbo, current_program;
 	GLint vp[4], sc[4];
@@ -390,7 +390,13 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	GL_ActiveTextureFunc (texunit);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
 	GL_ActiveTextureFunc (active_tex);
+#if defined(SHDLOG)
 	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
+#else
+	current_program = cached_current_program;
+	if (r_shadow_debug.value > 0.f)
+		glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
+#endif
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
 	glGetIntegerv (GL_VIEWPORT, vp);
@@ -404,8 +410,8 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	shdlog.last_program = program;
 	shdlog.last_shadow_sampler_unit = (GLint)(texunit - GL_TEXTURE0);
 	shdlog.last_shadow_tex = expected_tex;
-	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
-		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+	R_Shadow_LogWrite ("%s receiver program=%d cached_current=%d gl_current=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+		tag, program, cached_current_program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
 	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_col0=(%g %g %g %g) matrix_col1=(%g %g %g %g) matrix_col2=(%g %g %g %g) matrix_col3=(%g %g %g %g) det3x3=%.6g\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,

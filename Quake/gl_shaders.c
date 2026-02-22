@@ -484,6 +484,11 @@ void GL_UseProgram (GLuint program)
 	GL_UseProgramFunc (program);
 }
 
+GLuint GL_GetCurrentProgram (void)
+{
+	return gl_current_program;
+}
+
 /*
 ====================
 GL_ClearCachedProgram

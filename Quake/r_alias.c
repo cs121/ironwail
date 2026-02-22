@@ -592,7 +592,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	R_Shadow_BindShadowMap (GL_TEXTURE5);
 	if (r_shadow_debug.value >= 3.f)
 		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetShadowMapTextureId ());
-	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias_mdl.value, r_shadow_normalbias_mdl.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
+	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias_mdl.value, r_shadow_normalbias_mdl.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
 	R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, R_Shadow_GetShadowMapTextureId ());
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
