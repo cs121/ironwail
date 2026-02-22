@@ -1,5 +1,5 @@
 
-layout(std430, binding=1) restrict readonly buffer AliasFrameBuffer
+layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	ViewProj;
 	mat4	PrevViewProj;
