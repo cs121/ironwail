@@ -37,6 +37,7 @@ extern cvar_t r_shadows;
 extern cvar_t r_shadow_sun;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
+extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_twosided_mdl;
 
 //up to 16 color translated skins
