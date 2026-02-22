@@ -227,9 +227,11 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 
 static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
 {
+	const GLenum compare_func = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, compare_mode);
 	if (compare_mode == GL_COMPARE_REF_TO_TEXTURE)
-		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, compare_func);
 }
 
 static void R_Shadow_SetTextureCompareState (void)
@@ -872,9 +874,7 @@ const float *R_Shadow_GetReceiverShadowViewProj (void)
 
 qboolean R_Shadow_ReceiverUsesDlight (void)
 {
-	return shadow_dlight_shadows_active_this_frame &&
-		shadow_dlight_atlas_valid_frame_id == r_framecount &&
-		shadow_receiver_tex != 0;
+	return shadow_dlight_shadow_caster_count > 0 && shadow_receiver_tex != 0;
 }
 
 void R_Shadow_DlightPass (void)
@@ -892,9 +892,6 @@ void R_Shadow_DlightPass (void)
 	shadow_dlight_selected_slot = -1;
 	shadow_dlight_shadow_caster_count = 0;
 	shadow_dlight_shadows_active_this_frame = false;
-	shadow_dlight_atlas_valid_frame_id = -1;
-
-	R_Shadow_SelectReceiverSource (0, NULL);
 
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
@@ -939,6 +936,8 @@ void R_Shadow_DlightPass (void)
 
 	if (r_framedata.numlights == 0)
 	{
+		shadow_dlight_atlas_valid_frame_id = -1;
+		R_Shadow_SelectReceiverSource (0, NULL);
 		R_Shadow_Log_DlightEarlyOut ("DLIGHTPASS no gpu lights");
 		return;
 	}
@@ -984,6 +983,8 @@ void R_Shadow_DlightPass (void)
 
 	if (!shadow_dlight_shadows_active_this_frame || !tiles_used)
 	{
+		R_Shadow_SelectReceiverSource (0, NULL);
+		shadow_dlight_atlas_valid_frame_id = -1;
 		R_Shadow_Log_DlightEarlyOut (shadow_dlight_shadows_active_this_frame ? "DLIGHTPASS no selected lights" : "DLIGHTPASS no shadow casters");
 		return;
 	}
