@@ -196,12 +196,46 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 		R_Shadow_LogWrite ("WARN shadow texture has zero size\n");
 	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
 		R_Shadow_LogWrite ("WARN unexpected depth internal format 0x%X\n", (unsigned)internal);
-	// NOTE: GL_TEXTURE_COMPARE_MODE == GL_NONE is intentional. Shadow comparison is done
-	// manually in the fragment shader (ShadowCompare() in shadow_sample.glsl) rather than
-	// via sampler2DShadow. This is not an error.
-	if (cmode != GL_NONE && cmode != GL_COMPARE_REF_TO_TEXTURE)
+	if (cmode != GL_COMPARE_REF_TO_TEXTURE)
 		R_Shadow_LogWrite ("WARN unexpected texture compare mode 0x%X\n", (unsigned)cmode);
+	if (cfunc != (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL))
+		R_Shadow_LogWrite ("WARN unexpected texture compare func 0x%X expected=0x%X\n", (unsigned)cfunc, (unsigned)(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL));
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
+}
+
+static void R_Shadow_SetTextureCompareState (void)
+{
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+}
+
+void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex)
+{
+	GLint previous_active, previous_binding;
+	GLint bound_tex, cmode, cfunc;
+	if ((r_shadow_log.value <= 0.f && r_shadow_log_dump.value <= 0.f) || !expected_tex)
+		return;
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
+	glActiveTexture (texunit);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
+	if ((GLuint)bound_tex == expected_tex)
+	{
+		glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &cmode);
+		glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
+		if (cmode != GL_COMPARE_REF_TO_TEXTURE || cfunc != (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL))
+			R_Shadow_LogWrite ("WARN %s sampler validate texunit=%d tex=%u compare=(0x%X,0x%X) expected=(0x%X,0x%X)\n",
+				tag, (int)(texunit - GL_TEXTURE0), expected_tex, (unsigned)cmode, (unsigned)cfunc,
+				(unsigned)GL_COMPARE_REF_TO_TEXTURE, (unsigned)(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL));
+	}
+	else
+	{
+		R_Shadow_LogWrite ("WARN %s sampler validate texunit=%d expected_tex=%u bound_tex=%d\n",
+			tag, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex);
+	}
+	glActiveTexture ((GLenum)previous_active);
+	GL_BindNative ((GLenum)previous_active, GL_TEXTURE_2D, (GLuint)previous_binding);
 }
 
 static void R_Shadow_LogGLStage (const char *stage)
@@ -754,7 +788,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	R_Shadow_SetTextureCompareState ();
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
@@ -827,7 +861,7 @@ void R_ResizeShadowMapIfNeeded (void)
 		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	R_Shadow_SetTextureCompareState ();
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &shadow_fbo);
