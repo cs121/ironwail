@@ -10,7 +10,7 @@ struct InstanceData
 	int		Flags;
 };
 
-layout(std430, binding=1) restrict readonly buffer InstanceBuffer
+layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 {
 	mat4	ViewProj;
 	mat4	PrevViewProj;
