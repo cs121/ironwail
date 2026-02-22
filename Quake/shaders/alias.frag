@@ -99,7 +99,8 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2D ShadowDlightMap;
+layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
+layout(binding=6) uniform sampler2D ShadowDlightMapRaw;
 
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
 // Provide the dynamic-light shadow uniforms explicitly so shadow_sample.glsl compiles.
@@ -183,20 +184,14 @@ void main()
 			if (AliasFrameBuffer.ShadowDebug.y < 1.5)
 				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
 			else if (AliasFrameBuffer.ShadowDebug.y < 2.5)
-			{
-				vec4 shadow_clip = AliasFrameBuffer.ShadowViewProj * vec4(world_pos, 1.0);
-				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
-				vec2 uv = proj.xy * 0.5 + 0.5;
-				float reference = ShadowReference01(proj.z);
-				OUT_COLOR = vec4(uv, reference, 1.0);
-			}
+				OUT_COLOR = ShadowDebugDlight(world_pos, shadow_light_index);
 			else
 			{
 				vec4 shadow_clip = AliasFrameBuffer.ShadowViewProj * vec4(world_pos, 1.0);
 				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
 				vec2 uv = proj.xy * 0.5 + 0.5;
 				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowDlightMap, uv).r;
+				float raw_depth = texture(ShadowDlightMapRaw, uv).r;
 				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
 			}
 #if !OIT

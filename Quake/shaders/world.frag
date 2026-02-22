@@ -7,7 +7,8 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2D ShadowDlightMap;
+layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
+layout(binding=6) uniform sampler2D ShadowDlightMapRaw;
 #include "frame_uniforms.glsl"
 #define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
@@ -457,11 +458,7 @@ void main()
 				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
 			else if (ShadowDebug.y < 2.5)
 			{
-				vec4 shadow_clip = ShadowViewProj * vec4(in_pos, 1.0);
-				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
-				vec2 uv = proj.xy * 0.5 + 0.5;
-				float reference = ShadowReference01(proj.z);
-				OUT_COLOR = vec4(uv, reference, 1.0);
+				OUT_COLOR = ShadowDebugDlight(in_pos, 0u);
 			}
 			else
 			{
@@ -469,7 +466,7 @@ void main()
 				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
 				vec2 uv = proj.xy * 0.5 + 0.5;
 				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowDlightMap, uv).r;
+				float raw_depth = texture(ShadowDlightMapRaw, uv).r;
 				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
 			}
 #if !OIT
