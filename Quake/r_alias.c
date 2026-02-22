@@ -572,7 +572,7 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
-	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
+	memcpy (ibuf.global.shadow_viewproj, R_Shadow_GetReceiverShadowViewProj (), sizeof (ibuf.global.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
 	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
@@ -589,12 +589,12 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindShadowMap (GL_TEXTURE5);
+	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	// FIX: Always bind raw shadow depth on TEXTURE6 for ShadowMapRaw (sampler2D).
 	// See matching fix in r_world.c R_DrawBrushModels_Real BP_SHADOW block.
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetShadowMapTextureId ());
-	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias_mdl.value, r_shadow_normalbias_mdl.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
-	R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, R_Shadow_GetShadowMapTextureId ());
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetReceiverShadowMapTextureId ());
+	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId (), r_shadows.value > 0.f && R_Shadow_GetReceiverShadowMapTextureId () != 0, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
+	R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId ());
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
 	{
@@ -722,7 +722,7 @@ static void R_FlushAliasInstances_Shadow (void)
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-	memcpy (ibuf.global.shadow_viewproj, r_framedata.shadow_viewproj, sizeof (r_framedata.shadow_viewproj));
+	memcpy (ibuf.global.shadow_viewproj, R_Shadow_GetReceiverShadowViewProj (), sizeof (ibuf.global.shadow_viewproj));
 	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
 	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;

@@ -39,6 +39,9 @@ static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
 static int shadow_dlight_selected_count;
 static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
+static qboolean shadow_receiver_use_dlight;
+static GLuint shadow_receiver_tex;
+static float shadow_receiver_viewproj[16];
 
 extern cvar_t r_shadow_log;
 extern cvar_t r_shadow_log_rate;
@@ -772,8 +775,12 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 
 	R_Shadow_BuildViewMatrixColumns (view, right, light_up, forward, origin);
 
+	if (!isfinite (radius) || radius < 1.f)
+		radius = 1.f;
 	znear = 4.f;
 	zfar = q_max (radius, znear + 1.f);
+	if (zfar - znear < 1.f)
+		zfar = znear + 1.f;
 	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (90.f), DEG2RAD (90.f), znear, zfar);
 
 	memcpy (out_viewproj, proj, sizeof (proj));
@@ -962,7 +969,11 @@ void R_Shadow_BindShadowMap (GLenum texunit)
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
 {
 	if (shadow_dlight_depth_tex)
+	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+		GL_ActiveTextureFunc (texunit);
+		R_Shadow_SetTextureCompareStateForMode (GL_NONE);
+	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
 }
@@ -977,6 +988,56 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void)
 	return shadow_dlight_depth_tex;
 }
 
+
+static void R_Shadow_SelectReceiverSource (qboolean use_dlight, GLuint tex, const float viewproj[16])
+{
+	shadow_receiver_use_dlight = use_dlight;
+	shadow_receiver_tex = tex;
+	if (viewproj)
+		memcpy (shadow_receiver_viewproj, viewproj, sizeof (shadow_receiver_viewproj));
+	else
+		IdentityMatrix (shadow_receiver_viewproj);
+
+	r_framedata.shadow_debug[0] = tex ? 1.f : 0.f;
+	if (use_dlight)
+	{
+		r_framedata.shadow_params[0] = r_shadow_dlight_bias.value;
+		r_framedata.shadow_params[1] = 0.f;
+		r_framedata.shadow_params[2] = r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f;
+		r_framedata.shadow_params[3] = r_shadow_dlight_pcf_taps.value;
+	}
+	else
+	{
+		r_framedata.shadow_params[0] = r_shadow_bias.value;
+		r_framedata.shadow_params[1] = r_shadow_normalbias.value;
+		r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
+		r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
+	}
+}
+
+void R_Shadow_BindReceiverShadowMap (GLenum texunit)
+{
+	if (shadow_receiver_use_dlight)
+		R_Shadow_BindDlightShadowMap (texunit);
+	else
+		R_Shadow_BindShadowMap (texunit);
+}
+
+GLuint R_Shadow_GetReceiverShadowMapTextureId (void)
+{
+	return shadow_receiver_tex;
+}
+
+const float *R_Shadow_GetReceiverShadowViewProj (void)
+{
+	return shadow_receiver_viewproj;
+}
+
+qboolean R_Shadow_ReceiverUsesDlight (void)
+{
+	return shadow_receiver_use_dlight;
+}
+
 void R_Shadow_SunPass (void)
 {
 	qboolean enabled = r_shadows.value > 0.f && r_shadow_sun.value > 0.f;
@@ -987,6 +1048,7 @@ void R_Shadow_SunPass (void)
 	R_Shadow_Log_BeginFrame ();
 	r_framedata.shadow_debug[0] = 0.f;
 	IdentityMatrix (r_framedata.shadow_viewproj);
+	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
 	VectorSet (r_framedata.shadow_sun_dir, 0.f, 0.f, -1.f);
 	r_framedata.shadow_sun_dir[3] = 0.f;
 	if (!enabled)
@@ -1037,6 +1099,7 @@ void R_Shadow_SunPass (void)
 	}
 
 	r_framedata.shadow_debug[0] = 1.f;
+	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
 	VectorCopy (sun_dir, r_framedata.shadow_sun_dir);
 	r_framedata.shadow_sun_dir[3] = 0.f;
 	R_UploadFrameData ();
@@ -1112,6 +1175,8 @@ void R_Shadow_DlightPass (void)
 	int tiles_used = 0;
 
 	shadow_dlight_selected_count = 0;
+
+	R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
 
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
@@ -1210,6 +1275,7 @@ void R_Shadow_DlightPass (void)
 	if (!tiles_used)
 	{
 		R_Shadow_Log_SunPassEarlyOut ("DLIGHTPASS no selected lights");
+		R_Shadow_SelectReceiverSource (false, shadow_depth_tex, r_framedata.shadow_viewproj);
 		return;
 	}
 
@@ -1298,6 +1364,17 @@ void R_Shadow_DlightPass (void)
 	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 
 	memcpy (r_framedata.shadow_viewproj, sun_viewproj, sizeof (sun_viewproj));
+	if (shadow_dlight_selected_count > 0)
+	{
+		const float *receiver_viewproj = r_framedata.shadow_dlight_viewproj[0];
+		R_Shadow_SelectReceiverSource (true, shadow_dlight_depth_tex, receiver_viewproj);
+		memcpy (r_framedata.shadow_viewproj, receiver_viewproj, sizeof (r_framedata.shadow_viewproj));
+	}
+	else
+	{
+		R_Shadow_SelectReceiverSource (false, shadow_depth_tex, sun_viewproj);
+	}
+	R_UploadFrameData ();
 
 	GL_EndGroup ();
 }
