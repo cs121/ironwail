@@ -25,7 +25,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
 	InstanceData instances[];
-};
+} AliasFrameBuffer;
 
 struct PoseVertex
 {
@@ -80,7 +80,7 @@ float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH, blended with 
         float halfLambert = max(d, 0.0) * 0.5 + 0.5;
         // wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
         float quakeShade = d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
-        float halfLambertMix = clamp(ModelHalfLambert, 0.0, 1.0);
+        float halfLambertMix = clamp(AliasFrameBuffer.ModelHalfLambert, 0.0, 1.0);
         return mix(quakeShade, halfLambert, halfLambertMix);
 }
 
@@ -100,7 +100,7 @@ const int ALIAS_FLAG_VIEWMODEL = 2;
 
 void main()
 {
-	InstanceData inst = instances[gl_InstanceID];
+	InstanceData inst = AliasFrameBuffer.instances[gl_InstanceID];
 	out_texcoord = in_uv;
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
@@ -109,13 +109,13 @@ void main()
 	mat4x3 prev_worldmatrix = transpose(mat3x4(inst.PrevWorldMatrix[0], inst.PrevWorldMatrix[1], inst.PrevWorldMatrix[2]));
 	vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 	vec3 prev_world_vert = (prev_worldmatrix * vec4(local_vert, 1.0)).xyz;
-	vec4 curr_clip = ViewProj * vec4(world_vert, 1.0);
-	vec4 prev_clip = PrevViewProj * vec4(prev_world_vert, 1.0);
+	vec4 curr_clip = AliasFrameBuffer.ViewProj * vec4(world_vert, 1.0);
+	vec4 prev_clip = AliasFrameBuffer.PrevViewProj * vec4(prev_world_vert, 1.0);
 	gl_Position = curr_clip;
 	out_curr_clip = curr_clip;
 	out_prev_clip = prev_clip;
 	out_flags = inst.Flags;
-	out_pos = world_vert - EyePos;
+	out_pos = world_vert - AliasFrameBuffer.EyePos;
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
@@ -129,11 +129,11 @@ void main()
         vec3 view_dir = normalize(-out_pos);
         float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
         vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * Overbright);
+        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
         vec3 litDlight = inst.DLightColor.rgb * lighting;
         vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
-        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, Overbright);
+        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, AliasFrameBuffer.Overbright);
 	out_normal = world_normal;
 }
