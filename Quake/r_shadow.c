@@ -687,6 +687,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 		R_Shadow_DestroyDlightResources ();
 
 	glGenTextures (1, &shadow_dlight_depth_tex);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
@@ -752,9 +753,8 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 {
 	if (shadow_dlight_depth_tex)
 	{
-		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		GL_ActiveTextureFunc (texunit);
-		// FIX Bug 2: War immer GL_NONE - korrekt: wie R_Shadow_BindShadowMap.
+		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
 	}
 	else
