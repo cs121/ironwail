@@ -589,9 +589,13 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	// FIX: Always bind raw shadow depth on TEXTURE6 for ShadowMapRaw (sampler2D).
 	// See matching fix in r_world.c R_DrawBrushModels_Real BP_SHADOW block.
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetReceiverShadowMapTextureId ());
-	R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId (), r_shadows.value > 0.f && R_Shadow_GetReceiverShadowMapTextureId () != 0, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
-	R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId ());
+		{
+		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
+		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, receiver_tex);
+		R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
+		R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, receiver_tex);
+	}
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
 	{

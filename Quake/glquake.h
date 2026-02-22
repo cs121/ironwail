@@ -509,6 +509,9 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 GLuint R_Shadow_GetReceiverShadowMapTextureId (void);
 const float *R_Shadow_GetReceiverShadowViewProj (void);
 qboolean R_Shadow_ReceiverUsesDlight (void);
+qboolean R_Shadow_DlightShadowsActiveThisFrame (void);
+int R_Shadow_DlightAtlasValidFrameId (void);
+int R_Shadow_DlightShadowCasterCount (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);

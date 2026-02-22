@@ -35,6 +35,10 @@ static int shadow_dlight_selected_count;
 static int shadow_dlight_light_indices[SHADOW_DLIGHT_MAX];
 static GLuint shadow_receiver_tex;
 static float shadow_receiver_viewproj[16];
+static qboolean shadow_dlight_shadows_active_this_frame;
+static int shadow_dlight_shadow_caster_count;
+static int shadow_dlight_atlas_valid_frame_id = -1;
+static int shadow_dlight_selected_slot = -1;
 
 extern cvar_t r_shadow_log;
 extern cvar_t r_shadow_log_rate;
@@ -58,6 +62,8 @@ typedef struct shadow_log_state_s {
 } shadow_log_state_t;
 
 static shadow_log_state_t shdlog;
+
+static unsigned int R_Shadow_MatrixHash (const float matrix[16]);
 
 static const char *R_Shadow_LogFBOStatusString (GLenum status)
 {
@@ -423,13 +429,24 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cach
 		R_Shadow_LogEndFrameIfNeeded ();
 		return;
 	}
+	if (shadow_dlight_selected_slot >= 0 && shadow_dlight_selected_slot < SHADOW_DLIGHT_MAX)
+	{
+		R_Shadow_LogWrite ("%s receiver_select slot=%d light=%d tile=(%.3f %.3f %.3f %.3f) matrix_hash=%08X\n",
+			tag, shadow_dlight_selected_slot, shadow_dlight_light_indices[shadow_dlight_selected_slot],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][0],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][1],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][2],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][3],
+			shadow_viewproj ? R_Shadow_MatrixHash (shadow_viewproj) : 0u);
+	}
 	shdlog.last_program = program;
 	shdlog.last_shadow_sampler_unit = (GLint)(texunit - GL_TEXTURE0);
 	shdlog.last_shadow_tex = expected_tex;
-	R_Shadow_LogWrite ("%s receiver program=%d cached_current=%d gl_current=%d source=%s enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+	R_Shadow_LogWrite ("%s receiver program=%d cached_current=%d gl_current=%d source=%s enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d) casters=%d atlas_valid_frame=%d frame=%d selected_slot=%d\n",
 		tag, program, cached_current_program, current_program,
 		"dlight_atlas",
-		shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
+		shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3],
+		shadow_dlight_shadow_caster_count, shadow_dlight_atlas_valid_frame_id, r_framecount, shadow_dlight_selected_slot);
 	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_col0=(%g %g %g %g) matrix_col1=(%g %g %g %g) matrix_col2=(%g %g %g %g) matrix_col3=(%g %g %g %g) det3x3=%.6g\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,
@@ -747,6 +764,62 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void)
 	return shadow_dlight_depth_tex;
 }
 
+qboolean R_Shadow_DlightShadowsActiveThisFrame (void)
+{
+	return shadow_dlight_shadows_active_this_frame;
+}
+
+int R_Shadow_DlightAtlasValidFrameId (void)
+{
+	return shadow_dlight_atlas_valid_frame_id;
+}
+
+int R_Shadow_DlightShadowCasterCount (void)
+{
+	return shadow_dlight_shadow_caster_count;
+}
+
+static qboolean R_Shadow_IsDlightShadowCaster (int light_index, float *out_score)
+{
+	dlight_t *dl;
+	const gpulight_t *glight;
+	vec3_t delta;
+	float dist;
+	float score;
+
+	if (light_index < 0 || (unsigned)light_index >= r_framedata.numlights)
+		return false;
+
+	dl = r_dlight_sources[light_index];
+	if (!dl)
+		return false;
+
+	glight = &r_lightbuffer.lights[light_index];
+	if (glight->radius <= 0.f)
+		return false;
+
+	VectorSubtract (glight->pos, r_refdef.vieworg, delta);
+	dist = VectorLength (delta);
+	if (r_shadow_dlight_distance.value > 0.f && dist > r_shadow_dlight_distance.value + glight->radius)
+		return false;
+
+	score = (glight->radius * (glight->color[0] + glight->color[1] + glight->color[2])) / (1.f + dist);
+	if (out_score)
+		*out_score = score;
+
+	return true;
+}
+
+static unsigned int R_Shadow_MatrixHash (const float matrix[16])
+{
+	unsigned int h = 2166136261u;
+	for (int i = 0; i < 16; ++i)
+	{
+		unsigned int v = (unsigned int)(fabsf (matrix[i]) * 1048576.f);
+		h ^= v + 0x9e3779b9u + (h << 6) + (h >> 2);
+	}
+	return h;
+}
 
 static void R_Shadow_SelectReceiverSource (GLuint tex, const float viewproj[16])
 {
@@ -761,6 +834,7 @@ static void R_Shadow_SelectReceiverSource (GLuint tex, const float viewproj[16])
 	r_framedata.shadow_params[1] = 0.f;
 	r_framedata.shadow_params[2] = r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f;
 	r_framedata.shadow_params[3] = r_shadow_dlight_pcf_taps.value;
+	r_framedata.shadow_dlight_params[2] = tex ? 1.f : 0.f;
 }
 
 static void R_Shadow_BuildReceiverAtlasViewProj (float out_viewproj[16], const float viewproj[16], const vec4_t atlas)
@@ -781,6 +855,11 @@ static void R_Shadow_BuildReceiverAtlasViewProj (float out_viewproj[16], const f
 
 void R_Shadow_BindReceiverShadowMap (GLenum texunit)
 {
+	if (!R_Shadow_ReceiverUsesDlight ())
+	{
+		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
+		return;
+	}
 	R_Shadow_BindDlightShadowMap (texunit);
 }
 
@@ -796,7 +875,9 @@ const float *R_Shadow_GetReceiverShadowViewProj (void)
 
 qboolean R_Shadow_ReceiverUsesDlight (void)
 {
-	return true;
+	return shadow_dlight_shadows_active_this_frame &&
+		shadow_dlight_atlas_valid_frame_id == r_framecount &&
+		shadow_receiver_tex != 0;
 }
 
 void R_Shadow_DlightPass (void)
@@ -811,8 +892,12 @@ void R_Shadow_DlightPass (void)
 	int tiles_used = 0;
 
 	shadow_dlight_selected_count = 0;
+	shadow_dlight_selected_slot = -1;
+	shadow_dlight_shadow_caster_count = 0;
+	shadow_dlight_shadows_active_this_frame = false;
+	shadow_dlight_atlas_valid_frame_id = -1;
 
-	R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, r_framedata.shadow_viewproj);
+	R_Shadow_SelectReceiverSource (0, NULL);
 
 	for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
@@ -868,22 +953,11 @@ void R_Shadow_DlightPass (void)
 
 		for (unsigned int i = 0; i < r_framedata.numlights; ++i)
 		{
-			dlight_t *dl = r_dlight_sources[i];
-			const gpulight_t *glight = &r_lightbuffer.lights[i];
-			float dist;
-			float score;
-			vec3_t delta;
-
-			if (!dl)
+			float score = -FLT_MAX;
+			if (!R_Shadow_IsDlightShadowCaster ((int)i, &score))
 				continue;
 
-			VectorSubtract (glight->pos, r_refdef.vieworg, delta);
-			dist = VectorLength (delta);
-			if (r_shadow_dlight_distance.value > 0.f && dist > r_shadow_dlight_distance.value + glight->radius)
-				continue;
-
-			score = (glight->radius * (glight->color[0] + glight->color[1] + glight->color[2])) / (1.f + dist);
-
+			shadow_dlight_shadow_caster_count++;
 			for (int slot = 0; slot < max_tiles; ++slot)
 			{
 				if (score > scores[slot])
@@ -899,6 +973,9 @@ void R_Shadow_DlightPass (void)
 				}
 			}
 		}
+		shadow_dlight_shadows_active_this_frame = shadow_dlight_shadow_caster_count > 0;
+		R_Shadow_LogWrite ("DLIGHTPASS casters=%d frame=%d atlas_valid_frame=%d\n",
+			shadow_dlight_shadow_caster_count, r_framecount, shadow_dlight_atlas_valid_frame_id);
 	}
 
 	for (int i = 0; i < max_tiles; ++i)
@@ -908,10 +985,9 @@ void R_Shadow_DlightPass (void)
 	}
 	shadow_dlight_selected_count = tiles_used;
 
-	if (!tiles_used)
+	if (!shadow_dlight_shadows_active_this_frame || !tiles_used)
 	{
-		R_Shadow_Log_DlightEarlyOut ("DLIGHTPASS no selected lights");
-		R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, r_framedata.shadow_viewproj);
+		R_Shadow_Log_DlightEarlyOut (shadow_dlight_shadows_active_this_frame ? "DLIGHTPASS no selected lights" : "DLIGHTPASS no shadow casters");
 		return;
 	}
 
@@ -948,6 +1024,8 @@ void R_Shadow_DlightPass (void)
 		int light_index = shadow_dlight_light_indices[i];
 		if (light_index < 0)
 			continue;
+		if (shadow_dlight_selected_slot < 0)
+			shadow_dlight_selected_slot = i;
 
 		const gpulight_t *glight = &r_lightbuffer.lights[light_index];
 		float viewproj[16];
@@ -997,19 +1075,25 @@ void R_Shadow_DlightPass (void)
 		draws0,
 		(rs_brushpolys  + rs_aliaspolys)  - tris0,
 		(t1 - t0) * 1000.0);
-	R_Shadow_LogWrite ("DLIGHTPASS selected=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
+	R_Shadow_LogWrite ("DLIGHTPASS selected=%d casters=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_shadow_caster_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
 
 	memcpy (r_framedata.shadow_viewproj, saved_viewproj, sizeof (saved_viewproj));
-	if (shadow_dlight_selected_count > 0)
+	if (shadow_dlight_selected_slot >= 0)
 	{
 		float receiver_viewproj[16];
-		R_Shadow_BuildReceiverAtlasViewProj (receiver_viewproj, r_framedata.shadow_dlight_viewproj[0], r_framedata.shadow_dlight_atlas[0]);
+		int selected_light_index = shadow_dlight_light_indices[shadow_dlight_selected_slot];
+		R_Shadow_BuildReceiverAtlasViewProj (receiver_viewproj, r_framedata.shadow_dlight_viewproj[shadow_dlight_selected_slot], r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot]);
 		R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, receiver_viewproj);
 		memcpy (r_framedata.shadow_viewproj, receiver_viewproj, sizeof (r_framedata.shadow_viewproj));
-	}
-	else
-	{
-		R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, saved_viewproj);
+		shadow_dlight_atlas_valid_frame_id = r_framecount;
+		R_Shadow_LogWrite ("DLIGHTPASS receiver slot=%d light=%d tile=(%.3f %.3f %.3f %.3f) matrix_hash=%08X atlas_valid_frame=%d frame=%d\n",
+			shadow_dlight_selected_slot, selected_light_index,
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][0],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][1],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][2],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][3],
+			R_Shadow_MatrixHash (receiver_viewproj),
+			shadow_dlight_atlas_valid_frame_id, r_framecount);
 	}
 	R_UploadFrameData ();
 
