@@ -499,6 +499,7 @@ void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
+void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex);
 void R_Shadow_Log_BeginFrame (void);
 void R_Shadow_Log_SunPassEarlyOut (const char *reason);
 void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);

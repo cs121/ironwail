@@ -45,6 +45,9 @@ extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
+extern cvar_t r_shadow_dlights;
+extern cvar_t r_shadow_dlight_bias;
+extern cvar_t r_shadow_dlight_pcf_taps;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -1486,28 +1489,26 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
-	R_ResetBModelCalls (program);
-	GL_SetState (state);
-
-	// Prime the draw program before shadow/lightmap texture setup so diagnostics
-	// report the actual receiver program and explicit sampler bindings stay robust
-	// on drivers that don't fully honor layout(binding=...).
-	if (pass <= BP_ALPHATEST || pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-		GL_UseProgram (program);
-
-	if (pass <= BP_ALPHATEST)
-	{
-		GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-		GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-		R_Shadow_BindShadowMap (GL_TEXTURE5);
-		R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias.value, r_shadow_normalbias.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
-	}
-	else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-	{
-		R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
-	}
-	else if (pass == BP_SKYCUBEMAP)
-		GL_Bind (GL_TEXTURE2, skybox->cubemap);
+        R_ResetBModelCalls (program);
+        GL_SetState (state);
+if (pass <= BP_ALPHATEST)
+{
+GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+R_Shadow_BindShadowMap (GL_TEXTURE5);
+R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias.value, r_shadow_normalbias.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
+		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, R_Shadow_GetShadowMapTextureId ());
+}
+else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
+{
+R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
+		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
+			r_shadows.value > 0.f && r_shadow_dlights.value > 0.f, r_shadow_dlight_bias.value, 0.f,
+			r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f, r_shadow_dlight_pcf_taps.value, r_framedata.shadow_viewproj);
+		R_Shadow_DebugValidateBinding ("WORLD_DLIGHT", GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId ());
+}
+else if (pass == BP_SKYCUBEMAP)
+GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
