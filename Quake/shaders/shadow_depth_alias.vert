@@ -37,7 +37,6 @@
 //   offset 176: ShadowViewProj  (mat4, 64B)
 //   offset 240: ShadowParams    (vec4, 16B)
 //   offset 256: ShadowDebug     (vec4, 16B)
-//   offset 272: ShadowSunDir    (vec4, 16B)
 //   offset 288: instances[]     (InstanceData[], stride=?)
 // ---------------------------------------------------------------------------
 
@@ -68,7 +67,6 @@ layout(std430, binding = 1) restrict readonly buffer InstanceBuffer
     mat4        ShadowViewProj;   // column-major, as GLSL expects
     vec4        ShadowParams;
     vec4        ShadowDebug;
-    vec4        ShadowSunDir;
     InstanceData instances[];
 };
 
