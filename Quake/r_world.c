@@ -45,6 +45,7 @@ extern cvar_t r_shadow_bias;
 extern cvar_t r_shadow_normalbias;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
+extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;

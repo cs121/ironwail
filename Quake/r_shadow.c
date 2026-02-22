@@ -225,10 +225,10 @@ static void R_Shadow_DebugValidateProgramSampler (const char *tag, const char *u
 	glGetIntegerv (GL_CURRENT_PROGRAM, &prog);
 	if (prog <= 0)
 		return;
-	loc = glGetUniformLocation ((GLuint)prog, uniform_name);
+	loc = GL_GetUniformLocationFunc ((GLuint)prog, uniform_name);
 	if (loc < 0)
 		return;
-	glGetUniformiv ((GLuint)prog, loc, &value);
+	GL_GetUniformivFunc ((GLuint)prog, loc, &value);
 	if (value != expected_unit)
 		R_Shadow_LogWrite ("WARN %s sampler uniform %s=%d expected=%d (prog=%d)\n", tag, uniform_name, value, expected_unit, prog);
 }
