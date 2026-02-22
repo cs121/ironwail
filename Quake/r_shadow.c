@@ -203,10 +203,34 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
 }
 
+static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
+{
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, compare_mode);
+	if (compare_mode == GL_COMPARE_REF_TO_TEXTURE)
+		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+}
+
 static void R_Shadow_SetTextureCompareState (void)
 {
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	R_Shadow_SetTextureCompareStateForMode (GL_COMPARE_REF_TO_TEXTURE);
+}
+
+static void R_Shadow_DebugValidateProgramSampler (const char *tag, const char *uniform_name, GLint expected_unit)
+{
+	GLint prog = 0;
+	GLint loc;
+	GLint value = -1;
+	if ((r_shadow_log.value <= 0.f && r_shadow_log_dump.value <= 0.f))
+		return;
+	glGetIntegerv (GL_CURRENT_PROGRAM, &prog);
+	if (prog <= 0)
+		return;
+	loc = glGetUniformLocation ((GLuint)prog, uniform_name);
+	if (loc < 0)
+		return;
+	glGetUniformiv ((GLuint)prog, loc, &value);
+	if (value != expected_unit)
+		R_Shadow_LogWrite ("WARN %s sampler uniform %s=%d expected=%d (prog=%d)\n", tag, uniform_name, value, expected_unit, prog);
 }
 
 void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex)
@@ -220,6 +244,7 @@ void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expe
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
 	GL_ActiveTextureFunc (texunit);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
+	R_Shadow_DebugValidateProgramSampler (tag, "ShadowMap", 5);
 	if ((GLuint)bound_tex == expected_tex)
 	{
 		glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &cmode);
@@ -381,12 +406,24 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLenum tex
 	shdlog.last_shadow_tex = expected_tex;
 	R_Shadow_LogWrite ("%s receiver program=%d current_program=%d enable=%d texunit=%d expected_tex=%u bound_tex=%d draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
 		tag, program, current_program, shadows_enabled, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex, draw_fbo, read_fbo, vp[0], vp[1], vp[2], vp[3], sc[0], sc[1], sc[2], sc[3]);
-	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_col0=(%g %g %g %g) det3x3=%.6g\n",
+	R_Shadow_LogWrite ("%s params bias=%.6f normalbias=%.6f pcf=%.1f taps=%.1f matrix_col0=(%g %g %g %g) matrix_col1=(%g %g %g %g) matrix_col2=(%g %g %g %g) matrix_col3=(%g %g %g %g) det3x3=%.6g\n",
 		tag, bias, normalbias, pcf, taps,
 		shadow_viewproj ? shadow_viewproj[0] : 0.f,
 		shadow_viewproj ? shadow_viewproj[1] : 0.f,
 		shadow_viewproj ? shadow_viewproj[2] : 0.f,
 		shadow_viewproj ? shadow_viewproj[3] : 0.f,
+		shadow_viewproj ? shadow_viewproj[4] : 0.f,
+		shadow_viewproj ? shadow_viewproj[5] : 0.f,
+		shadow_viewproj ? shadow_viewproj[6] : 0.f,
+		shadow_viewproj ? shadow_viewproj[7] : 0.f,
+		shadow_viewproj ? shadow_viewproj[8] : 0.f,
+		shadow_viewproj ? shadow_viewproj[9] : 0.f,
+		shadow_viewproj ? shadow_viewproj[10] : 0.f,
+		shadow_viewproj ? shadow_viewproj[11] : 0.f,
+		shadow_viewproj ? shadow_viewproj[12] : 0.f,
+		shadow_viewproj ? shadow_viewproj[13] : 0.f,
+		shadow_viewproj ? shadow_viewproj[14] : 0.f,
+		shadow_viewproj ? shadow_viewproj[15] : 0.f,
 		det);
 	if (!shadows_enabled)
 		R_Shadow_LogWrite ("WARN receiver shadow branch disabled\n");
@@ -633,10 +670,14 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	view[14] = -DotProduct (sun_dir, origin_world);
 
 	{
-		// FIX: Extend depth range backward to include shadow casters behind the camera.
 		float z_extend = zfar;
 		float min_z = -extents[2] - z_extend;
 		float max_z =  extents[2];
+		if (shdlog.active)
+		{
+			R_Shadow_LogWrite ("SUNPASS lightdir=(%.5f %.5f %.5f) ortho_lrtb=(%.3f %.3f %.3f %.3f) near=%.3f far=%.3f extents=(%.3f %.3f %.3f)\n",
+				sun_dir[0], sun_dir[1], sun_dir[2], -extents[0], extents[0], -extents[1], extents[1], min_z, max_z, extents[0], extents[1], extents[2]);
+		}
 		R_Shadow_OrthoMatrix (ortho, -extents[0], extents[0], -extents[1], extents[1], min_z, max_z);
 	}
 
@@ -882,7 +923,15 @@ void R_ResizeShadowMapIfNeeded (void)
 
 void R_Shadow_BindShadowMap (GLenum texunit)
 {
-	GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
+	if (shadow_depth_tex)
+	{
+		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
+		R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	}
+	else
+	{
+		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
+	}
 }
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
@@ -1231,20 +1280,20 @@ void R_Shadow_DlightPass (void)
 void R_Shadow_DrawDebug (void)
 {
 	int mode = (int)r_shadow_debug.value;
-	if (mode != 1 && mode != 4)
+	if (mode != 4 && mode != 5)
 		return;
 	if (!glprogs.shadow_debug)
 		return;
-	if (mode == 1 && !shadow_depth_tex)
+	if (mode == 4 && !shadow_depth_tex)
 		return;
-	if (mode == 4 && !shadow_dlight_depth_tex)
+	if (mode == 5 && !shadow_dlight_depth_tex)
 		return;
 
 	GL_BeginGroup ("Shadow map debug");
 
 	GL_UseProgram (glprogs.shadow_debug);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	if (mode == 1)
+	if (mode == 4)
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_depth_tex);
 	else
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
