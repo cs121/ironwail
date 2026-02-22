@@ -1492,6 +1492,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 
         R_ResetBModelCalls (program);
         GL_SetState (state);
+        GL_UseProgram (program);
 if (pass <= BP_ALPHATEST)
 {
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
