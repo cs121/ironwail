@@ -218,7 +218,7 @@ void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expe
 
 	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
-	glActiveTexture (texunit);
+	GL_ActiveTextureFunc (texunit);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_tex);
 	if ((GLuint)bound_tex == expected_tex)
 	{
@@ -234,7 +234,7 @@ void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expe
 		R_Shadow_LogWrite ("WARN %s sampler validate texunit=%d expected_tex=%u bound_tex=%d\n",
 			tag, (int)(texunit - GL_TEXTURE0), expected_tex, bound_tex);
 	}
-	glActiveTexture ((GLenum)previous_active);
+	GL_ActiveTextureFunc ((GLenum)previous_active);
 	GL_BindNative ((GLenum)previous_active, GL_TEXTURE_2D, (GLuint)previous_binding);
 }
 
