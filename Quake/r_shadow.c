@@ -829,28 +829,25 @@ static void R_Shadow_SelectReceiverSource (GLuint tex, const float viewproj[16])
 	else
 		IdentityMatrix (shadow_receiver_viewproj);
 
+#if defined(SHDLOG)
+	if (r_shadow_debug.value > 0.f)
+	{
+		R_Shadow_LogWrite ("receiver_upload path=UBO/std140 matrix_layout=column_major transpose=GL_FALSE(implicit) matrix_hash=%08X\n",
+			R_Shadow_MatrixHash (shadow_receiver_viewproj));
+		R_Shadow_LogWrite ("receiver_upload m=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
+			shadow_receiver_viewproj[0], shadow_receiver_viewproj[1], shadow_receiver_viewproj[2], shadow_receiver_viewproj[3],
+			shadow_receiver_viewproj[4], shadow_receiver_viewproj[5], shadow_receiver_viewproj[6], shadow_receiver_viewproj[7],
+			shadow_receiver_viewproj[8], shadow_receiver_viewproj[9], shadow_receiver_viewproj[10], shadow_receiver_viewproj[11],
+			shadow_receiver_viewproj[12], shadow_receiver_viewproj[13], shadow_receiver_viewproj[14], shadow_receiver_viewproj[15]);
+	}
+#endif
+
 	r_framedata.shadow_debug[0] = tex ? 1.f : 0.f;
 	r_framedata.shadow_params[0] = r_shadow_dlight_bias.value;
 	r_framedata.shadow_params[1] = 0.f;
 	r_framedata.shadow_params[2] = r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f;
 	r_framedata.shadow_params[3] = r_shadow_dlight_pcf_taps.value;
 	r_framedata.shadow_dlight_params[2] = tex ? 1.f : 0.f;
-}
-
-static void R_Shadow_BuildReceiverAtlasViewProj (float out_viewproj[16], const float viewproj[16], const vec4_t atlas)
-{
-	float atlas_transform[16];
-	float viewproj_copy[16];
-
-	IdentityMatrix (atlas_transform);
-	atlas_transform[0] = atlas[0];
-	atlas_transform[5] = atlas[1];
-	atlas_transform[12] = atlas[2];
-	atlas_transform[13] = atlas[3];
-
-	memcpy (viewproj_copy, viewproj, sizeof (viewproj_copy));
-	memcpy (out_viewproj, atlas_transform, sizeof (atlas_transform));
-	MatrixMultiply (out_viewproj, viewproj_copy);
 }
 
 void R_Shadow_BindReceiverShadowMap (GLenum texunit)
@@ -1082,7 +1079,7 @@ void R_Shadow_DlightPass (void)
 	{
 		float receiver_viewproj[16];
 		int selected_light_index = shadow_dlight_light_indices[shadow_dlight_selected_slot];
-		R_Shadow_BuildReceiverAtlasViewProj (receiver_viewproj, r_framedata.shadow_dlight_viewproj[shadow_dlight_selected_slot], r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot]);
+		memcpy (receiver_viewproj, r_framedata.shadow_dlight_viewproj[shadow_dlight_selected_slot], sizeof (receiver_viewproj));
 		R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, receiver_viewproj);
 		memcpy (r_framedata.shadow_viewproj, receiver_viewproj, sizeof (r_framedata.shadow_viewproj));
 		shadow_dlight_atlas_valid_frame_id = r_framecount;

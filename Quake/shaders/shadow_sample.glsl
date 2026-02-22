@@ -93,8 +93,13 @@ float ShadowCompare(float depth, float reference, float bias)
 
 float ShadowSampleRawDlight(vec2 uv, float reference, float bias)
 {
-    float depth = texture(ShadowDlightMap, uv).r;
-    return ShadowCompare(depth, reference, bias);
+    float ref = reference;
+#if REVERSED_Z
+    ref += bias;
+#else
+    ref -= bias;
+#endif
+    return texture(ShadowDlightMap, vec3(uv, clamp(ref, 0.0, 1.0)));
 }
 
 // Gleiche Tap-Semantik wie ShadowSamplePCF (s.o.)
@@ -207,6 +212,45 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
         return ShadowSamplePCFDlight(uv, reference, bias, taps);
 
     return ShadowSampleRawDlight(uv, reference, bias);
+}
+
+vec4 ShadowDebugDlight(vec3 world_pos, uint light_index)
+{
+    int shadow_index = -1;
+    for (int i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+    {
+        if (ShadowDlightInfo[i].x < 0.0)
+            continue;
+        if (int(round(ShadowDlightInfo[i].x)) == int(light_index))
+        {
+            shadow_index = i;
+            break;
+        }
+    }
+
+    if (shadow_index < 0)
+        return vec4(1.0, 0.0, 1.0, 1.0);
+
+    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
+    if (abs(clip.w) <= 1e-6)
+        return vec4(1.0, 0.0, 1.0, 1.0);
+
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv_local = ndc.xy * 0.5 + 0.5;
+    float reference = ShadowReference01(ndc.z);
+
+    vec4 atlas = ShadowDlightAtlas[shadow_index];
+    vec2 uv = uv_local * atlas.xy + atlas.zw;
+
+    vec2 atlas_min = atlas.zw;
+    vec2 atlas_max = atlas.zw + atlas.xy;
+    bool inside = all(greaterThanEqual(uv, atlas_min)) &&
+                  all(lessThanEqual(uv, atlas_max));
+
+    if (!inside)
+        return vec4(1.0, 0.0, 0.0, 1.0);
+
+    return vec4(uv, reference, 1.0);
 }
 
 #endif // SHADOW_DLIGHT
