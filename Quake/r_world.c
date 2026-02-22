@@ -1527,15 +1527,19 @@ R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	// ShadowMapRaw unbound (reading 0) for intermediate debug modes 2.5..3.
 	// Note: TEXTURE6 must stay GL_NONE compare mode – only TEXTURE5 uses
 	// GL_COMPARE_REF_TO_TEXTURE (set inside R_Shadow_BindShadowMap).
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetReceiverShadowMapTextureId ());
-R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId (), r_shadows.value > 0.f && R_Shadow_GetReceiverShadowMapTextureId () != 0, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
-		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, R_Shadow_GetReceiverShadowMapTextureId ());
+		{
+		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
+		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, receiver_tex);
+		R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
+		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
+	}
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
-			r_shadows.value > 0.f && r_shadow_dlights.value > 0.f, r_shadow_dlight_bias.value, 0.f,
+			R_Shadow_ReceiverUsesDlight (), r_shadow_dlight_bias.value, 0.f,
 			r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f, r_shadow_dlight_pcf_taps.value, R_Shadow_GetReceiverShadowViewProj ());
 		R_Shadow_DebugValidateBinding ("WORLD_DLIGHT", GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId ());
 }

@@ -3217,7 +3217,7 @@ void R_SetupView (void)
         r_framedata.shadow_debug[3] = 0.f;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] = (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f) ? 1.f : 0.f;
+        r_framedata.shadow_dlight_params[2] = 0.f;
         r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
