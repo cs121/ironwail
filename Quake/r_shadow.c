@@ -239,6 +239,23 @@ static void R_Shadow_SetTextureCompareState (void)
 	R_Shadow_SetTextureCompareStateForMode (GL_COMPARE_REF_TO_TEXTURE);
 }
 
+void R_EnsureShadowSamplerState (GLuint texture)
+{
+	GLint previous_active;
+	GLint previous_binding;
+
+	if (!texture)
+		return;
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
+	glBindTexture (GL_TEXTURE_2D, texture);
+	R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	glBindTexture (GL_TEXTURE_2D, (GLuint)previous_binding);
+	GL_ActiveTextureFunc ((GLenum)previous_active);
+}
+
 static void R_Shadow_DebugValidateProgramSampler (const char *tag, const char *uniform_name, GLint expected_unit)
 {
 	GLint prog = 0;
@@ -755,7 +772,7 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 	{
 		GL_ActiveTextureFunc (texunit);
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
-		R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+		R_EnsureShadowSamplerState (shadow_dlight_depth_tex);
 	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);

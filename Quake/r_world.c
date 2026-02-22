@@ -1530,6 +1530,7 @@ R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 		{
 		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
 		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
+		R_EnsureShadowSamplerState (receiver_tex);
 		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, receiver_tex);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
 		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
