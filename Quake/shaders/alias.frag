@@ -1,4 +1,16 @@
 
+struct InstanceData
+{
+	vec4	WorldMatrix[3];
+	vec4	PrevWorldMatrix[3];
+	vec4	LightColor; // xyz=LightColor w=Alpha
+	vec4	DLightColor; // xyz=DLightColor
+	int		Pose1;
+	int		Pose2;
+	float	Blend;
+	int		Flags;
+};
+
 layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 {
 	mat4	ViewProj;
@@ -13,6 +25,7 @@ layout(std430, binding=1) restrict readonly buffer InstanceBuffer
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
+	InstanceData instances[];
 };
 // ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
