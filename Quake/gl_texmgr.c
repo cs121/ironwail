@@ -2825,7 +2825,13 @@ qboolean GL_BindNative (GLenum texunit, GLenum type, GLuint handle)
 	if (index < countof (currenttexture))
 	{
 		if (currenttexture[index] == handle)
+		{
+			// Keep the active texture unit in sync even on cache hits.
+			// Callers may issue glTexParameteri/glGetTexParameter* immediately
+			// after GL_BindNative and rely on texunit being active.
+			GL_SelectTexture (texunit);
 			return false;
+		}
 		currenttexture[index] = handle;
 	}
 
