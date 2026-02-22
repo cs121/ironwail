@@ -473,6 +473,12 @@ extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
+typedef enum
+{
+	SHADOW_RECEIVER_SOURCE_SUN = 0,
+	SHADOW_RECEIVER_SOURCE_DLIGHT_ATLAS = 1
+} shadow_receiver_source_t;
+
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
@@ -500,7 +506,7 @@ void R_Shadow_DlightPass (void);
 void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
-void R_Shadow_BindReceiverShadowMap (GLenum texunit);
+void R_Shadow_BindReceiverShadowMap (GLenum texunit, shadow_receiver_source_t source);
 void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex);
 void R_Shadow_Log_BeginFrame (void);
 void R_Shadow_Log_SunPassEarlyOut (const char *reason);
@@ -511,6 +517,7 @@ GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 GLuint R_Shadow_GetReceiverShadowMapTextureId (void);
 const float *R_Shadow_GetReceiverShadowViewProj (void);
 qboolean R_Shadow_ReceiverUsesDlight (void);
+shadow_receiver_source_t R_Shadow_GetReceiverSource (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
