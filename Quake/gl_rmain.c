@@ -3214,7 +3214,7 @@ void R_SetupView (void)
         r_framedata.shadow_params[1] = r_shadow_normalbias.value;
         r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
-        r_framedata.shadow_debug[0] = (r_shadows.value > 0.f && r_shadow_sun.value > 0.f) ? 1.f : 0.f;
+        // FIX Bug 3: shadow_debug[0] wird von r_shadow.c korrekt verwaltet - nicht hier ueberschreiben.
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
         r_framedata.shadow_debug[2] = 0.f;
         r_framedata.shadow_debug[3] = 0.f;

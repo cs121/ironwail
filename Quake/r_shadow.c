@@ -175,12 +175,24 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	GLint width, height, internal, maxlevel;
 	GLint minf, magf, wraps, wrapt, cmode, cfunc;
 	GLfloat border[4];
+	// FIX Bug 4: GL_BindNative(TEXTURE0, tex) poisonierte den Unit-Cache und
+	// lies die aktive GL-Unit auf TEXTURE0 haengen. Nachfolgende
+	// glTexParameteri-Calls (z.B. SetTextureCompareStateForMode) landeten
+	// dann auf der falschen Unit → shadow_depth_tex behielt GL_NONE.
+	// Ausserdem: glGetTexParameteriv liest von der aktiven Unit, nicht TEXTURE0,
+	// falls GL_BindNative einen Cache-Hit hatte → Log-Werte waren falsch.
+	// FIX: Raw GL ohne Cache, aktive Unit sichern und restaurieren.
+	GLint prev_active;
+	GLint prev_binding_tex0;
 	if (!tex)
 	{
 		R_Shadow_LogWrite ("%s tex=0 (unbound)\n", tag);
 		return;
 	}
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, tex);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &prev_binding_tex0);
+	glBindTexture (GL_TEXTURE_2D, tex);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
 	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal);
@@ -192,6 +204,9 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, &cfunc);
 	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &maxlevel);
 	glGetTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	// Restore TEXTURE0 binding and active unit (raw GL, no cache touch)
+	glBindTexture (GL_TEXTURE_2D, (GLuint)prev_binding_tex0);
+	GL_ActiveTextureFunc ((GLenum)prev_active);
 	R_Shadow_LogWrite ("%s tex=%u size=%dx%d ifmt=0x%X min=0x%X mag=0x%X wrap=(0x%X,0x%X) compare=(0x%X,0x%X) maxlevel=%d border=(%.2f %.2f %.2f %.2f)\n",
 		tag, tex, width, height, (unsigned)internal, (unsigned)minf, (unsigned)magf, (unsigned)wraps, (unsigned)wrapt, (unsigned)cmode, (unsigned)cfunc, maxlevel,
 		border[0], border[1], border[2], border[3]);
@@ -700,7 +715,9 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	R_Shadow_BuildViewMatrixColumns (view, right, light_up, sun_dir, origin_world);
 
 	{
-		float z_extend = zfar;
+		// FIX Bug 1: z_extend=zfar verdoppelte den Z-Frustum → singuläre Matrix (det≈-1e-12)
+		// → falsche Shadow-Koordinaten. Korrekt: symmetrisch, z_extend=extents[2].
+		float z_extend = extents[2];
 		float min_z = -extents[2] - z_extend;
 		float max_z =  extents[2];
 		if (shdlog.active)
@@ -972,7 +989,8 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 		GL_ActiveTextureFunc (texunit);
-		R_Shadow_SetTextureCompareStateForMode (GL_NONE);
+		// FIX Bug 2: War immer GL_NONE - korrekt: wie R_Shadow_BindShadowMap.
+		R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
 	}
 	else
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
