@@ -99,7 +99,8 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=5) uniform sampler2DShadow ShadowMap;
+layout(binding=6) uniform sampler2D ShadowMapRaw;
 
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -168,10 +169,27 @@ void main()
 		vec3 world_pos = in_pos + EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		shadow_term = ShadowVisibility(world_pos, shadow_normal, shadow_range);
-		if (ShadowDebug.y > 1.5)
+		if (ShadowDebug.y > 0.5)
 		{
-			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
-			out_fragcolor = vec4(vec3(debug_value), 1.0);
+			if (ShadowDebug.y < 1.5)
+				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
+			else if (ShadowDebug.y < 2.5)
+			{
+				vec4 shadow_clip = ShadowViewProj * vec4(world_pos, 1.0);
+				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
+				vec2 uv = proj.xy * 0.5 + 0.5;
+				float reference = ShadowReference01(proj.z);
+				OUT_COLOR = vec4(uv, reference, 1.0);
+			}
+			else
+			{
+				vec4 shadow_clip = ShadowViewProj * vec4(world_pos, 1.0);
+				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
+				vec2 uv = proj.xy * 0.5 + 0.5;
+				float reference = ShadowReference01(proj.z);
+				float raw_depth = texture(ShadowMapRaw, uv).r;
+				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
+			}
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif
@@ -213,7 +231,7 @@ void main()
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
         result.rgb = ApplyFog(result.rgb, in_pos);
-        out_fragcolor = result;
+        OUT_COLOR = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
         float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
@@ -226,11 +244,11 @@ void main()
 	// Note: sign bit is used as overbright flag
 	if (abs(Fog.w) > 0.)
 	{
-		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
-		out_fragcolor.rgb *= out_fragcolor.rgb;
+		OUT_COLOR.rgb = sqrt(OUT_COLOR.rgb);
+		OUT_COLOR.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
+		OUT_COLOR.rgb *= OUT_COLOR.rgb;
 	}
 #else
-	out_fragcolor.rgb += SUPPRESS_BANDING() * ScreenDither;
+	OUT_COLOR.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
 }

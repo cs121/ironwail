@@ -1496,6 +1496,8 @@ if (pass <= BP_ALPHATEST)
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 R_Shadow_BindShadowMap (GL_TEXTURE5);
+	if (r_shadow_debug.value >= 3.f)
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, R_Shadow_GetShadowMapTextureId ());
 R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, GL_TEXTURE5, R_Shadow_GetShadowMapTextureId (), r_shadows.value > 0.f && r_shadow_sun.value > 0.f, r_shadow_bias.value, r_shadow_normalbias.value, r_shadow_pcf.value > 0.f ? 1.f : 0.f, r_shadow_pcf_taps.value, r_framedata.shadow_viewproj);
 		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, R_Shadow_GetShadowMapTextureId ());
 }

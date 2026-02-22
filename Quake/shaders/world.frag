@@ -7,7 +7,8 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2D ShadowMap;
+layout(binding=5) uniform sampler2DShadow ShadowMap;
+layout(binding=6) uniform sampler2D ShadowMapRaw;
 #include "frame_uniforms.glsl"
 #define SHADOW_SUN 1
 #include "shadow_sample.glsl"
@@ -456,11 +457,27 @@ void main()
 		bool shadow_enabled  = ShadowDebug.x > 0.5;
 		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
 
-		if (shadow_enabled && ShadowDebug.y > 1.5)
+		if (shadow_enabled && ShadowDebug.y > 0.5)
 		{
-			float debug_value = (ShadowDebug.y > 2.5) ? shadow_range : shadow_term;
-			// BUG FIX: same out_fragcolor alias issue
-			OUT_COLOR = vec4(vec3(debug_value), 1.0);
+			if (ShadowDebug.y < 1.5)
+				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
+			else if (ShadowDebug.y < 2.5)
+			{
+				vec4 shadow_clip = ShadowViewProj * vec4(in_pos, 1.0);
+				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
+				vec2 uv = proj.xy * 0.5 + 0.5;
+				float reference = ShadowReference01(proj.z);
+				OUT_COLOR = vec4(uv, reference, 1.0);
+			}
+			else
+			{
+				vec4 shadow_clip = ShadowViewProj * vec4(in_pos, 1.0);
+				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
+				vec2 uv = proj.xy * 0.5 + 0.5;
+				float reference = ShadowReference01(proj.z);
+				float raw_depth = texture(ShadowMapRaw, uv).r;
+				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
+			}
 #if !OIT
 			out_velocity = vec4(0.0);
 #endif

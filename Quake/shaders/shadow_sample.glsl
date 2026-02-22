@@ -91,10 +91,33 @@ float ShadowCompare(float depth, float reference, float bias)
 // ===========================================================================
 #ifdef SHADOW_SUN
 
+float ShadowSampleRawDepth(vec2 uv)
+{
+    return texture(ShadowMapRaw, uv).r;
+}
+
+float ShadowSampleRawCompare(vec2 uv, float reference)
+{
+    return texture(ShadowMap, vec3(uv, reference));
+}
+
+float ShadowApplyBias(float reference, float bias)
+{
+#if REVERSED_Z
+    return clamp(reference - bias, 0.0, 1.0);
+#else
+    return clamp(reference + bias, 0.0, 1.0);
+#endif
+}
+
 float ShadowSampleRaw(vec2 uv, float reference, float bias)
 {
-    float depth = texture(ShadowMap, uv).r;
-    return ShadowCompare(depth, reference, bias);
+    if (ShadowDebug.y > 2.5)
+    {
+        float depth = ShadowSampleRawDepth(uv);
+        return ShadowCompare(depth, reference, bias);
+    }
+    return ShadowSampleRawCompare(uv, ShadowApplyBias(reference, bias));
 }
 
 // FIX 5: taps-Wert-Semantik dokumentiert:
@@ -167,12 +190,15 @@ float ShadowVisibility(vec3 world_pos, vec3 normal, out float in_range)
     vec2 uv        = proj.xy * 0.5 + 0.5;
     float reference = ShadowReference01(proj.z);
 
-    // inside-Test: UV in [0,1]² und reference immer in [0,1] durch clamp
     bool inside = all(greaterThanEqual(uv, vec2(0.0))) &&
-                  all(lessThanEqual   (uv, vec2(1.0)));
+                  all(lessThanEqual   (uv, vec2(1.0))) &&
+                  reference >= 0.0 && reference <= 1.0;
     in_range = inside ? 1.0 : 0.0;
     if (!inside)
         return 1.0;
+
+    if (ShadowDebug.y > 3.5)
+        return ShadowSampleRawCompare(uv, reference);
 
     float ndotl = clamp(dot(normal, -ShadowSunDir.xyz), 0.0, 1.0);
     float bias  = ShadowParams.x + ShadowParams.y * (1.0 - ndotl);
