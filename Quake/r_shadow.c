@@ -486,6 +486,35 @@ static void R_Shadow_OrthoMatrix (float matrix[16], float left, float right, flo
 	matrix[3 * 4 + 3] = 1.f;
 }
 
+static void R_Shadow_BuildViewMatrixColumns (float matrix[16], const vec3_t right, const vec3_t up, const vec3_t forward, const vec3_t origin)
+{
+	memset (matrix, 0, 16 * sizeof (float));
+
+	/*
+	 * Matrices are column-major (OpenGL convention, vector on the right):
+	 * [ right.x   up.x   forward.x   tx ]
+	 * [ right.y   up.y   forward.y   ty ]
+	 * [ right.z   up.z   forward.z   tz ]
+	 * [   0        0        0        1 ]
+	 */
+	matrix[0 * 4 + 0] = right[0];
+	matrix[0 * 4 + 1] = right[1];
+	matrix[0 * 4 + 2] = right[2];
+
+	matrix[1 * 4 + 0] = up[0];
+	matrix[1 * 4 + 1] = up[1];
+	matrix[1 * 4 + 2] = up[2];
+
+	matrix[2 * 4 + 0] = forward[0];
+	matrix[2 * 4 + 1] = forward[1];
+	matrix[2 * 4 + 2] = forward[2];
+
+	matrix[3 * 4 + 0] = -DotProduct (right, origin);
+	matrix[3 * 4 + 1] = -DotProduct (up, origin);
+	matrix[3 * 4 + 2] = -DotProduct (forward, origin);
+	matrix[3 * 4 + 3] = 1.f;
+}
+
 static void R_Shadow_DestroyResources (void)
 {
 	if (shadow_fbo)
@@ -654,20 +683,7 @@ static void R_Shadow_BuildViewProj (float out_viewproj[16], vec4_t out_sun_dir)
 	VectorMA (origin_world, center_ls[1], light_up, origin_world);
 	VectorMA (origin_world, center_ls[2], sun_dir, origin_world);
 
-	memset (view, 0, sizeof (view));
-	view[0] = right[0];
-	view[1] = right[1];
-	view[2] = right[2];
-	view[4] = light_up[0];
-	view[5] = light_up[1];
-	view[6] = light_up[2];
-	view[8] = sun_dir[0];
-	view[9] = sun_dir[1];
-	view[10] = sun_dir[2];
-	view[15] = 1.f;
-	view[12] = -DotProduct (right, origin_world);
-	view[13] = -DotProduct (light_up, origin_world);
-	view[14] = -DotProduct (sun_dir, origin_world);
+	R_Shadow_BuildViewMatrixColumns (view, right, light_up, sun_dir, origin_world);
 
 	{
 		float z_extend = zfar;
@@ -743,20 +759,7 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	CrossProduct (forward, right, light_up);
 	VectorNormalize (light_up);
 
-	memset (view, 0, sizeof (view));
-	view[0] = right[0];
-	view[1] = right[1];
-	view[2] = right[2];
-	view[4] = light_up[0];
-	view[5] = light_up[1];
-	view[6] = light_up[2];
-	view[8] = forward[0];
-	view[9] = forward[1];
-	view[10] = forward[2];
-	view[15] = 1.f;
-	view[12] = -DotProduct (right, origin);
-	view[13] = -DotProduct (light_up, origin);
-	view[14] = -DotProduct (forward, origin);
+	R_Shadow_BuildViewMatrixColumns (view, right, light_up, forward, origin);
 
 	znear = 4.f;
 	zfar = q_max (radius, znear + 1.f);
