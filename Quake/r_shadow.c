@@ -197,7 +197,12 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	if (internal != GL_DEPTH_COMPONENT24 && internal != GL_DEPTH_COMPONENT32F && internal != GL_DEPTH_COMPONENT16)
 		R_Shadow_LogWrite ("WARN unexpected depth internal format 0x%X\n", (unsigned)internal);
 	if (cmode != GL_COMPARE_REF_TO_TEXTURE)
-		R_Shadow_LogWrite ("WARN unexpected texture compare mode 0x%X\n", (unsigned)cmode);
+	{
+		// GL_NONE compare mode is intentional when r_shadow_debug >= 3 (raw-depth visualisation).
+		// Only warn if it's unexpected outside that debug mode.
+		if (r_shadow_debug.value < 3.f)
+			R_Shadow_LogWrite ("WARN unexpected texture compare mode 0x%X\n", (unsigned)cmode);
+	}
 	if (cfunc != (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL))
 		R_Shadow_LogWrite ("WARN unexpected texture compare func 0x%X expected=0x%X\n", (unsigned)cfunc, (unsigned)(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL));
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
@@ -935,6 +940,17 @@ void R_Shadow_BindShadowMap (GLenum texunit)
 	if (shadow_depth_tex)
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_depth_tex);
+		// FIX: GL_BindNative may return early on a cache hit (texture already bound
+		// to this unit), skipping the internal GL_SelectTexture / glActiveTexture call.
+		// glTexParameteri (called by SetTextureCompareStateForMode) operates on
+		// whatever texture-unit is *currently active*, NOT on `texunit`.  If the cache
+		// skipped the unit-switch, the compare-mode parameter lands on the last active
+		// unit (e.g. GL_TEXTURE3 for the dir-lightmap), leaving shadow_depth_tex with
+		// compare_mode = GL_NONE.  A sampler2DShadow reading a texture with GL_NONE
+		// is undefined behaviour — NVIDIA returns raw depth, AMD may return 0 — so
+		// either all fragments appear shadowed or PCF returns garbage.
+		// Explicitly select the correct unit here to guarantee the parameter target.
+		GL_ActiveTextureFunc (texunit);
 		R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
 	}
 	else

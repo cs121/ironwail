@@ -91,6 +91,11 @@ float ShadowCompare(float depth, float reference, float bias)
 // ===========================================================================
 #ifdef SHADOW_SUN
 
+// ShadowSampleRawDepth: reads raw (uncompared) depth from the shadow map.
+// Requires ShadowMapRaw (sampler2D) bound on TEXTURE6 with GL_NONE compare mode.
+// ShadowMap (sampler2DShadow) is on TEXTURE5 with GL_COMPARE_REF_TO_TEXTURE.
+// Both samplers reference the same underlying depth texture; the split binding
+// allows hardware-PCF via sampler2DShadow (TEXTURE5) and raw reads via TEXTURE6.
 float ShadowSampleRawDepth(vec2 uv)
 {
     return texture(ShadowMapRaw, uv).r;
