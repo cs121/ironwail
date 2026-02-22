@@ -32,6 +32,7 @@ extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
 extern cvar_t r_dlight_style;
+extern cvar_t r_dlight_debug_spawn;
 extern cvar_t r_dlight_entities;
 extern cvar_t r_dlight_mode;
 extern cvar_t r_dlight_radius_scale;
@@ -318,6 +319,53 @@ void GLLight_DeleteResources (void)
 {
 }
 
+
+static void R_SpawnDebugPlayerDlight (void)
+{
+	vec3_t color;
+	vec3_t origin;
+	const int key = -900001;
+	dlight_t *dl;
+
+	if (r_dlight_debug_spawn.value <= 0.f)
+		return;
+
+	if (cls.state != ca_connected || cl.worldmodel == NULL)
+	{
+		Con_Printf ("r_dlight_debug_spawn: not connected to a world.\n");
+		Cvar_SetValueQuick (&r_dlight_debug_spawn, 0.f);
+		return;
+	}
+
+	VectorCopy (cl_entities[cl.viewentity].origin, origin);
+	origin[2] += 16.f;
+
+	color[0] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
+	color[1] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
+	color[2] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
+
+	dl = DLightPool_GetOrCreatePersistent (key, cl.time);
+	VectorCopy (origin, dl->origin);
+	VectorCopy (color, dl->color);
+	dl->baseradius = 220.f;
+	dl->radius = 220.f;
+	dl->spawn = cl.time - 0.001f;
+	dl->die = FLT_MAX;
+	dl->decay = 0.f;
+	dl->minlight = 0.f;
+	dl->key = key;
+	dl->type = DLIGHT_DEFAULT;
+	dl->style = 0;
+	dl->flicker_seed = (float) rand ();
+	dl->kind = DL_PERSISTENT;
+	dl->active = true;
+
+	Con_Printf ("Spawned debug dlight at %.1f %.1f %.1f color %.2f %.2f %.2f\n",
+		dl->origin[0], dl->origin[1], dl->origin[2], dl->color[0], dl->color[1], dl->color[2]);
+
+	Cvar_SetValueQuick (&r_dlight_debug_spawn, 0.f);
+}
+
 static void R_PushDlightArray (dlight_t *const *lights, int count)
 {
 	int	j;
@@ -400,6 +448,7 @@ void R_PushDlights (void)
 	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
+	R_SpawnDebugPlayerDlight ();
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
 
         // Collect dynamic lights both when the legacy r_dynamic toggle is
