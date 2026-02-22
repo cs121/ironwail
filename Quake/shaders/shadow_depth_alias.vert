@@ -68,7 +68,7 @@ layout(std430, binding = 1) restrict readonly buffer InstanceBuffer
     vec4        ShadowParams;
     vec4        ShadowDebug;
     InstanceData instances[];
-};
+} AliasFrameBuffer;
 
 // ---------------------------------------------------------------------------
 // Pose vertex
@@ -147,7 +147,7 @@ void main()
     // FIX 3: clamp instance index — gl_InstanceID is 0-based per the spec but
     // baseInstance variants may shift it; keep non-negative for array safety.
     int inst_id = max(0, gl_InstanceID);
-    InstanceData inst = instances[inst_id];
+    InstanceData inst = AliasFrameBuffer.instances[inst_id];
 
     PoseVertex pose1 = GetPoseVertex(uint(inst.Pose1));
     PoseVertex pose2 = GetPoseVertex(uint(inst.Pose2));
@@ -164,5 +164,5 @@ void main()
 
     vec3 world_vert = (worldmatrix * vec4(local_vert, 1.0)).xyz;
 
-    gl_Position = ShadowViewProj * vec4(world_vert, 1.0);
+    gl_Position = AliasFrameBuffer.ShadowViewProj * vec4(world_vert, 1.0);
 }
