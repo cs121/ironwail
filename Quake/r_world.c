@@ -1524,25 +1524,29 @@ R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	{
 		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
 		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
-		/*
-		 * TEXTURE6 is intentionally unbound for world receiver draws.
-		 * Binding the same depth texture on TEXTURE5 (sampler2DShadow)
-		 * and TEXTURE6 (sampler2D) can trigger GL_INVALID_OPERATION due
-		 * to incompatible sampler types on the same texture object.
-		 */
-		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
-		R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
-		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
-	}
+			/*
+			 * TEXTURE6 is intentionally unbound for world receiver draws.
+			 * Binding the same depth texture on TEXTURE5 (sampler2DShadow)
+			 * and TEXTURE6 (sampler2D) can trigger GL_INVALID_OPERATION due
+			 * to incompatible sampler types on the same texture object.
+			 *
+			 * Keep this bind after receiver logging. The first snapshot in a
+			 * frame can execute FRAME_BEGIN diagnostics with framebuffer queries,
+			 * and changing the active texture state beforehand can interfere.
+			 */
+			R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
+			GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
+			R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
+		}
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
 			R_Shadow_ReceiverUsesDlight (), r_shadow_dlight_bias.value, 0.f,
 			r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f, r_shadow_dlight_pcf_taps.value, R_Shadow_GetReceiverShadowViewProj ());
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 		R_Shadow_DebugValidateBinding ("WORLD_DLIGHT", GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId ());
 }
 else if (pass == BP_SKYCUBEMAP)

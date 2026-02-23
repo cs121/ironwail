@@ -595,9 +595,13 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 		 * Keep TEXTURE6 unbound for alias receiver draws to avoid
 		 * sampler-type conflicts (sampler2DShadow on unit 5 vs sampler2D on 6)
 		 * when both units point at the same texture object.
+		 *
+		 * Important: do not switch/bind TEXTURE6 until after
+		 * R_Shadow_Log_ReceiverPassSnapshot(), because that call may emit the
+		 * FRAME_BEGIN logging block and framebuffer attachment queries.
 		 */
-		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 		R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 		R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, receiver_tex);
 	}
 
