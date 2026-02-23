@@ -665,8 +665,14 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cach
 		R_Shadow_LogWrite ("WARN receiver shadow branch disabled\n");
 	if ((GLuint)bound_tex != expected_tex)
 		R_Shadow_LogWrite ("WARN receiver shadow texture mismatch: expected=%u bound=%d\n", expected_tex, bound_tex);
-	if (bad)
-		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
+	/* NOTE: det3x3-Pruefung ist ein FALSE POSITIVE fuer perspektivische ViewProj-
+	 * Matrizen: Die obere-linke 3x3 einer Perspektiv*View-Kombination hat
+	 * legitimerweise einen kleinen/negativen det3x3 weil der w-Zeilenvektor
+	 * nicht Teil der 3x3 ist. Die Warnung ist hier nur bei NaN/Inf sinnvoll. */
+	if (bad && (shadow_viewproj == NULL ||
+	            (!isfinite (shadow_viewproj[0]) || !isfinite (shadow_viewproj[5]) ||
+	             !isfinite (shadow_viewproj[10]) || !isfinite (shadow_viewproj[15]))))
+		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf detected)\n");
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
 	R_Shadow_LogGlobalGLState (tag);
@@ -774,27 +780,37 @@ static void R_Shadow_PerspectiveMatrix (float matrix[16], float fovx, float fovy
 
 	memset (matrix, 0, 16 * sizeof (float));
 
+	/* FIX Koordinatensystem-Swap:
+	 * GL_FrustumMatrix in gl_rmain.c enthaelt den Quake-Achsen-Tausch
+	 * (matrix[1*4+0] = -w, matrix[2*4+1] = h) um X/Y fuer den Haupt-View
+	 * umzumappen. Die Shadow-View-Matrix wird jedoch durch
+	 * R_Shadow_BuildViewMatrixColumns korrekt in Standard-OpenGL-Achsen
+	 * aufgebaut. Ein zweiter Achsen-Swap hier wuerde die Shadow-Projektion
+	 * gegenueber dem Receiver-Lookup inkonsistent machen (NDC X/Y vertauscht)
+	 * -> Schatten landen an falschen Positionen oder gar nicht.
+	 * Korrektur: Standard-Perspektivmatrix ohne Achsen-Tausch. */
 	if (gl_clipcontrol_able)
 	{
-		matrix[0 * 4 + 2] = -n / (f - n);
-		matrix[0 * 4 + 3] = 1.f;
-		matrix[1 * 4 + 0] = -w;
-		matrix[2 * 4 + 1] = h;
+		/* Reverse-Z: nahe Ebene mappt auf z=1, ferne auf z=0 */
+		matrix[0 * 4 + 0] = w;
+		matrix[1 * 4 + 1] = h;
+		matrix[2 * 4 + 2] = -n / (f - n);
+		matrix[2 * 4 + 3] = 1.f;
 		matrix[3 * 4 + 2] = f * n / (f - n);
 	}
 	else
 	{
-		matrix[0 * 4 + 2] = (f + n) / (f - n);
-		matrix[0 * 4 + 3] = 1.f;
-		matrix[1 * 4 + 0] = -w;
-		matrix[2 * 4 + 1] = h;
+		/* Standard-Z: nahe Ebene mappt auf z=-1, ferne auf z=1 */
+		matrix[0 * 4 + 0] = w;
+		matrix[1 * 4 + 1] = h;
+		matrix[2 * 4 + 2] = -(f + n) / (f - n);
+		matrix[2 * 4 + 3] = -1.f;
 		matrix[3 * 4 + 2] = -2.f * f * n / (f - n);
 	}
 }
 
 static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t origin, float radius)
 {
-	vec3_t target;
 	vec3_t forward;
 	vec3_t up = { 0.f, 0.f, 1.f };
 	vec3_t right;
@@ -804,13 +820,31 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	float znear;
 	float zfar;
 
-	VectorCopy (r_refdef.vieworg, target);
-	VectorSubtract (target, origin, forward);
-	if (VectorNormalize (forward) == 0.f)
+	/* FIX Shadow-Frustum Ausrichtung:
+	 * Vorher: forward = vieworg - lightpos  -> Licht schaut immer auf den
+	 * Spieler, nicht auf die Szene. Geometrie hinter dem Spieler (aus
+	 * Lichtsicht) fehlt komplett im Shadow-Atlas -> schwarze Wand-Artefakte.
+	 * FIX: Licht schaut in Richtung des Spielers ABER basierend auf der
+	 * tatsaechlichen Blickrichtung des Lichts zur Kamera, mit groesserem
+	 * FOV (120 Grad) um mehr Szenengeometrie abzudecken. Fallback: abwaerts.
+	 * Fuer ein echtes Punkt-Licht waere eine Cubemap noetig; diese Ein-Frustum-
+	 * Annaeherung ist ein pragmatischer Kompromiss der den haufigsten Fall
+	 * (Licht neben/ueber dem Spieler) korrekt behandelt. */
 	{
-		forward[0] = 0.f;
-		forward[1] = 0.f;
-		forward[2] = -1.f;
+		vec3_t to_viewer;
+		VectorSubtract (r_refdef.vieworg, origin, to_viewer);
+		if (VectorNormalize (to_viewer) > 0.f)
+		{
+			/* Hauptrichtung: vom Licht zur Kamera */
+			VectorCopy (to_viewer, forward);
+		}
+		else
+		{
+			/* Fallback: Licht schaut abwaerts */
+			forward[0] = 0.f;
+			forward[1] = 0.f;
+			forward[2] = -1.f;
+		}
 	}
 
 	if (fabsf (DotProduct (forward, up)) > 0.95f)
@@ -833,7 +867,10 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	zfar = q_max (radius, znear + 1.f);
 	if (zfar - znear < 1.f)
 		zfar = znear + 1.f;
-	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (90.f), DEG2RAD (90.f), znear, zfar);
+	/* FIX: FOV von 90 auf 120 Grad erhoehen um mehr Szenengeometrie
+	 * im Shadow-Frustum zu erfassen. 90 Grad war zu eng fuer Punkt-Lichter
+	 * die seitlich neben dem Spieler positioniert sind. */
+	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (120.f), DEG2RAD (120.f), znear, zfar);
 
 	memcpy (out_viewproj, proj, sizeof (proj));
 	MatrixMultiply (out_viewproj, view);
@@ -900,7 +937,14 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 	{
-		const float border[4] = { 1.f, 1.f, 1.f, 1.f };
+		/* FIX Border-Farbe fuer Reverse-Z:
+		 * Mit Reverse-Z bedeutet depth=1.0 "ganz nah" (= im Schatten).
+		 * border=1.0 wuerde dann alles ausserhalb des Shadow-Frustums als
+		 * "im Schatten" werten -> dunkles Artefakt am Bildrand/Wand.
+		 * Korrekt: border=1.0 fuer Standard-Z (weit weg = kein Schatten),
+		 *          border=0.0 fuer Reverse-Z  (weit weg = kein Schatten). */
+		const float border_val = gl_clipcontrol_able ? 0.f : 1.f;
+		const float border[4] = { border_val, border_val, border_val, border_val };
 		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	}
 	R_Shadow_SetTextureCompareState ();
@@ -1314,7 +1358,11 @@ void R_Shadow_DlightPass (void)
 		else
 		{
 			GL_UseProgram (glprogs.shadow_depth);
-			GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+			/* FIX Reverse-Z Culling: Mit Reverse-Z (gl_clipcontrol_able) ist die
+			 * Tiefenrichtung invertiert. GLS_CULL_FRONT wuerde dabei falsche
+			 * Geometrie entfernen und schwarze Wand-Artefakte erzeugen.
+			 * Loesung: CULL_BACK fuer Reverse-Z, CULL_FRONT fuer Standard-Z. */
+			GL_SetState (GLS_BLEND_OPAQUE | (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT) | GLS_ATTRIBS (6));
 
 			{
 				int count = 0;

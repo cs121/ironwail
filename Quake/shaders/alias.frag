@@ -100,7 +100,7 @@ layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
-layout(binding=6) uniform sampler2D ShadowDlightMapRaw;
+// binding=6 (ShadowDlightMapRaw) entfernt - nur fuer Sun-Shadow-Debug genutzt
 layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
@@ -172,16 +172,25 @@ void main()
         vec3 emissive = vec3(0.0);
         float shadow_range = 1.0;
         float shadow_term = 1.0;
-        uint shadow_light_index = 0u;
+        uint shadow_light_index = 0u;  // Slot 0: erster DLight-Caster
+        // NOTE: shadow_light_pos wird nur fuer ndotl-Bias in ShadowVisibilityDlight
+        // genutzt. Alias-Shader hat keinen Zugriff auf die echte Lichtposition.
+        // EyePos als Fallback liefert konservativen (leicht zu hohen) Bias.
         vec3 shadow_light_pos = AliasFrameBuffer.EyePos;
 	vec4 lit_color = in_color;
 
-	if (AliasFrameBuffer.ShadowDebug.x > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+	// FIX: Shadow-Berechnung laeuft immer (nicht nur wenn ShadowDebug.x > 0.5).
+	// Das alte Gate verhinderte Schatten ausserhalb des Debug-Modus.
+	// FIX: shadow_light_pos war EyePos (falsch) - Alias-Schatten nutzen DLight-Slot 0.
+	// ShadowVisibilityDlight sucht selbst den passenden Slot per light_index.
+	if ((in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
 		vec3 world_pos = in_pos + AliasFrameBuffer.EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
 		shadow_term = ShadowVisibilityDlight(world_pos, shadow_normal, shadow_light_pos, shadow_light_index, shadow_range);
-		if (AliasFrameBuffer.ShadowDebug.y > 0.5)
+
+		// Debug-Visualisierung (nur wenn ShadowDebug.x > 0.5)
+		if (AliasFrameBuffer.ShadowDebug.x > 0.5 && AliasFrameBuffer.ShadowDebug.y > 0.5)
 		{
 			if (AliasFrameBuffer.ShadowDebug.y < 1.5)
 				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
@@ -191,10 +200,9 @@ void main()
 			{
 				vec4 shadow_clip = AliasFrameBuffer.ShadowViewProj * vec4(world_pos, 1.0);
 				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
-				vec2 uv = proj.xy * 0.5 + 0.5;
+				vec2 uv_dbg = proj.xy * 0.5 + 0.5;
 				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowDlightMapRaw, uv).r;
-				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
+				OUT_COLOR = vec4(reference, reference, shadow_term, 1.0);
 			}
 #if !OIT
 			out_velocity = vec4(0.0);

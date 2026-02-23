@@ -720,10 +720,13 @@ static void R_FlushAliasInstances_Shadow (void)
 	else
 		state = GLS_ATTRIBS(1);
 
+	/* FIX Reverse-Z Culling fuer Alias-Modell Shadow Pass:
+	 * Gleiches Problem wie bei Brush-Modellen: Mit Reverse-Z muss
+	 * GLS_CULL_BACK statt GLS_CULL_FRONT verwendet werden. */
 	if (r_shadow_twosided_mdl.value > 0.f)
 		state |= GLS_CULL_NONE;
 	else
-		state |= GLS_CULL_FRONT;
+		state |= (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT);
 
 	state |= GLS_BLEND_OPAQUE;
 	GL_SetState (state);

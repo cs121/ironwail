@@ -26,11 +26,11 @@
 //      gleichzeitig definiert sind, gibt es einen Compiler-Fehler (Redefinition).
 //      FIX: ShadowCompare wird ein einziges Mal außerhalb beider Blöcke definiert.
 //
-//   4. inside-check in ShadowVisibility schließt reference (proj.z nach Mapping)
-//      in die Bereichsprüfung ein. Das ist korrekt, aber UV+reference als vec3
-//      zu packen und lessThanEqual zu nutzen ist subtil: reference ist NACH
-//      ShadowReference01 immer in [0,1], daher ist die z-Prüfung redundant —
-//      clamp() sorgt schon dafür. Kommentar klargestellt; logisch bleibt es.
+//   4. CRITICAL FIX: Frustum-Tiefenbereichscheck in ShadowVisibilityDlight.
+//      Punkte HINTER der Far-Ebene (proj.z < 0 bei Reverse-Z) wurden durch
+//      ShadowReference01 auf 0.0 geclamppt. Mit GL_GEQUAL und border=0.0 wurde
+//      dann ref(negativ->0) >= texture(0.0 Border) FALSE -> falscher SCHATTEN.
+//      FIX: Expliziter Bereichscheck vor ShadowReference01; out-of-range -> lit.
 //
 //   5. ShadowSamplePCF: Der "taps"-Parameter ist eine Ordinalzahl (≤2 → 4 samples,
 //      ≤4 → 9 samples, sonst 25 samples). Das ist kontra-intuitiv und schlecht
@@ -201,6 +201,29 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
     }
 
     vec3  proj      = clip.xyz / clip.w;
+
+    // FIX: Frustum-Tiefenbereichscheck vor ShadowReference01.
+    // proj.z (NDC-Tiefe nach w-Division) liegt fuer Punkte HINTER der Far-Ebene
+    // ausserhalb des gueltigen Bereichs. ShadowReference01 wuerde solche Werte
+    // auf 0.0 clampen, was mit GL_GEQUAL (Reverse-Z) als "im Schatten" bewertet
+    // wird -- das erzeugt das dunkle Artefakt an Geometrie jenseits des Lichtradius.
+    // Korrekt: Punkte ausserhalb des Shadow-Frustum-Tiefenbereichs sind BELEUCHTET.
+#if REVERSED_Z
+    // Reverse-Z: gueltiger NDC-Z-Bereich [0,1] (0=fern, 1=nah)
+    if (proj.z < 0.0 || proj.z > 1.0)
+    {
+        in_range = 0.0;
+        return 1.0;
+    }
+#else
+    // Standard-Z: gueltiger NDC-Z-Bereich [-1,1]
+    if (proj.z < -1.0 || proj.z > 1.0)
+    {
+        in_range = 0.0;
+        return 1.0;
+    }
+#endif
+
     vec2  uv_local  = proj.xy * 0.5 + 0.5;
     float reference = ShadowReference01(proj.z);
 

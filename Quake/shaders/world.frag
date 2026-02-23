@@ -488,6 +488,14 @@ void main()
 				float nc            = clamp(1.0 - normalized_d, 0.0, 1.0);
 				float falloff       = nc * sqrt(nc);
 				vec3  light_contrib = attenuation * falloff * l.color * dynamic_light_noise;
+
+				// FIX: Shadow-Term fuer dieses DLight berechnen.
+				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.
+				float shadow_range  = 1.0;
+				float shadow_term   = ShadowVisibilityDlight(
+					in_pos, surface_normal, l.origin, light_index, shadow_range);
+				light_contrib      *= shadow_term;
+
 				dynamic_light      += light_contrib;
 
 				// Specular

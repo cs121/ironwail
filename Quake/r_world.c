@@ -1482,7 +1482,10 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         else if (pass == BP_SHADOW)
         {
                 state &= ~GLS_MASK_CULL;
-                state |= GLS_BLEND_OPAQUE | GLS_CULL_FRONT;
+                /* FIX Reverse-Z Culling: Mit Reverse-Z (gl_clipcontrol_able) muessen
+                 * Frontfaces gerendert werden (CULL_BACK), weil die Tiefe invertiert
+                 * ist. Ohne Reverse-Z: CULL_FRONT (Backfaces rendern) ist korrekt. */
+                state |= GLS_BLEND_OPAQUE | (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT);
         }
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
