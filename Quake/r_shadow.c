@@ -1342,6 +1342,10 @@ void R_Shadow_DlightPass (void)
 	}
 	R_UploadFrameData ();
 
+	// Restore a color draw buffer before handing this FBO into the next frame.
+	// Some drivers reject depth-attachment framebuffer queries while GL_DRAW_BUFFER is GL_NONE.
+	glDrawBuffer (GL_COLOR_ATTACHMENT0);
+
 	GL_EndGroup ();
 }
 
