@@ -56,7 +56,8 @@ layout(std140, binding=0) uniform FrameDataUBO
     // Die 96 Byte (mat4 + vec4 + vec4) werden durch explizites Padding ersetzt damit
     // die CPU-seitige Struct-Grösse und alle nachfolgenden Offsets stabil bleiben,
     // bis die CPU-Seite ebenfalls bereinigt ist. Danach kann _ShadowSunReserved entfernt werden.
-    vec4    _ShadowSunReserved[6];   // 384..479  (96B Platzhalter, war: ShadowViewProj+ShadowParams+ShadowDebug)
+    vec4    ShadowDebug;             // 384 (x: enabled, y: debug mode, z: dummy tex, w: source)
+    vec4    _ShadowSunReserved[5];    // 400..479
 
     mat4    ShadowDlightViewProj[SHADOW_DLIGHT_MAX];  // 480
     vec4    ShadowDlightAtlas[SHADOW_DLIGHT_MAX];     // 736

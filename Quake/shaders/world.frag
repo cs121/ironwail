@@ -8,8 +8,10 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
+layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 // binding=6 (ShadowDlightMapRaw) entfernt — wurde nur für Sun-Shadow-Debug genutzt
 #include "frame_uniforms.glsl"
+#define SHADOW_DEBUG_VALUES ShadowDebug
 #define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
 
