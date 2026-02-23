@@ -258,7 +258,7 @@ static void R_Shadow_CreateDummyTexture (void)
 	glGenTextures (1, &shadow_dlight_dummy_tex);
 	GL_ActiveTextureFunc (GL_TEXTURE0);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_dummy_tex);
-	GL_TexImage2DFunc (GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 8, 8, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depth_data);
+	glTexImage2D (GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 8, 8, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depth_data);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
