@@ -163,6 +163,31 @@ float ShadowSampleDlightSource(vec2 uv, float reference, float bias, int taps)
     return ShadowSampleRawDlight(uv, reference, bias);
 }
 
+bool ShadowProjectToAtlasUV(vec4 clip, vec4 atlas, out vec2 uv_local, out vec2 uv_atlas, out float reference)
+{
+    if (clip.w <= 0.0)
+        return false;
+
+    vec3 proj = clip.xyz / clip.w;
+
+#if REVERSED_Z
+    if (proj.z < 0.0 || proj.z > 1.0)
+        return false;
+#else
+    if (proj.z < -1.0 || proj.z > 1.0)
+        return false;
+#endif
+
+    uv_local = proj.xy * 0.5 + 0.5;
+    uv_atlas = uv_local * atlas.xy + atlas.zw;
+    reference = ShadowReference01(proj.z);
+
+    vec2 atlas_min = atlas.zw;
+    vec2 atlas_max = atlas.zw + atlas.xy;
+    return all(greaterThanEqual(uv_atlas, atlas_min)) &&
+           all(lessThanEqual(uv_atlas, atlas_max));
+}
+
 float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
                               uint light_index, out float in_range)
 {
@@ -193,50 +218,11 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
         return 1.0;
     }
 
-    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
-    if (clip.w <= 0.0)
-    {
-        in_range = 0.0;
-        return 1.0;
-    }
-
-    vec3  proj      = clip.xyz / clip.w;
-
-    // FIX: Frustum-Tiefenbereichscheck vor ShadowReference01.
-    // proj.z (NDC-Tiefe nach w-Division) liegt fuer Punkte HINTER der Far-Ebene
-    // ausserhalb des gueltigen Bereichs. ShadowReference01 wuerde solche Werte
-    // auf 0.0 clampen, was mit GL_GEQUAL (Reverse-Z) als "im Schatten" bewertet
-    // wird -- das erzeugt das dunkle Artefakt an Geometrie jenseits des Lichtradius.
-    // Korrekt: Punkte ausserhalb des Shadow-Frustum-Tiefenbereichs sind BELEUCHTET.
-#if REVERSED_Z
-    // Reverse-Z: gueltiger NDC-Z-Bereich [0,1] (0=fern, 1=nah)
-    if (proj.z < 0.0 || proj.z > 1.0)
-    {
-        in_range = 0.0;
-        return 1.0;
-    }
-#else
-    // Standard-Z: gueltiger NDC-Z-Bereich [-1,1]
-    if (proj.z < -1.0 || proj.z > 1.0)
-    {
-        in_range = 0.0;
-        return 1.0;
-    }
-#endif
-
-    vec2  uv_local  = proj.xy * 0.5 + 0.5;
-    float reference = ShadowReference01(proj.z);
-
-    // Atlas-Remapping: uv_local → atlas UV
     vec4 atlas = ShadowDlightAtlas[shadow_index];
-    // atlas.xy = scale, atlas.zw = offset
-    vec2 uv = uv_local * atlas.xy + atlas.zw;
-
-    // Bounds-Check gegen Atlas-Kachel (nicht gegen Textur-Rand)
-    vec2 atlas_min = atlas.zw;
-    vec2 atlas_max = atlas.zw + atlas.xy;
-    bool inside = all(greaterThanEqual(uv, atlas_min)) &&
-                  all(lessThanEqual   (uv, atlas_max));
+    vec2 uv_local, uv;
+    float reference;
+    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
+    bool inside = ShadowProjectToAtlasUV(clip, atlas, uv_local, uv, reference);
     in_range = inside ? 1.0 : 0.0;
     if (!inside)
         return 1.0;
@@ -262,6 +248,10 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
         return ShadowDebugChecker(uv * 32.0);
     if (SHADOW_DEBUG_VALUES.y >= 2.5 && SHADOW_DEBUG_VALUES.y < 3.5)
         return reference;
+    if (SHADOW_DEBUG_VALUES.y >= 3.5 && SHADOW_DEBUG_VALUES.y < 4.5)
+        return uv.x;
+    if (SHADOW_DEBUG_VALUES.y >= 4.5 && SHADOW_DEBUG_VALUES.y < 5.5)
+        return uv.y;
 
     return shadow_term;
 }
@@ -283,21 +273,11 @@ vec4 ShadowDebugDlight(vec3 world_pos, uint light_index)
     if (shadow_index < 0)
         return vec4(1.0, 0.0, 1.0, 1.0);
 
-    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
-    if (abs(clip.w) <= 1e-6)
-        return vec4(1.0, 0.0, 1.0, 1.0);
-
-    vec3 ndc = clip.xyz / clip.w;
-    vec2 uv_local = ndc.xy * 0.5 + 0.5;
-    float reference = ShadowReference01(ndc.z);
-
     vec4 atlas = ShadowDlightAtlas[shadow_index];
-    vec2 uv = uv_local * atlas.xy + atlas.zw;
-
-    vec2 atlas_min = atlas.zw;
-    vec2 atlas_max = atlas.zw + atlas.xy;
-    bool inside = all(greaterThanEqual(uv, atlas_min)) &&
-                  all(lessThanEqual(uv, atlas_max));
+    vec2 uv_local, uv;
+    float reference;
+    vec4 clip = ShadowMul(ShadowDlightViewProj[shadow_index], vec4(world_pos, 1.0));
+    bool inside = ShadowProjectToAtlasUV(clip, atlas, uv_local, uv, reference);
 
     if (!inside)
         return vec4(1.0, 0.0, 0.0, 1.0);
