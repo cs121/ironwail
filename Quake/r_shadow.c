@@ -398,6 +398,17 @@ static void R_Shadow_LogFramebufferAttachment (const char *tag, GLenum target, G
 	R_Shadow_LogWrite ("%s %s target=0x%X type=0x%X object=%d\n", tag, label, (unsigned)target, (unsigned)type, name);
 }
 
+static GLenum R_Shadow_LogDepthAttachmentEnum (void)
+{
+	/*
+	 * Shadow atlas FBOs are depth-only.
+	 * Querying GL_DEPTH_STENCIL_ATTACHMENT on a depth-only FBO can raise
+	 * GL_INVALID_OPERATION on some drivers, so keep this pinned to
+	 * GL_DEPTH_ATTACHMENT for draw/read framebuffer attachment probes.
+	 */
+	return GL_DEPTH_ATTACHMENT;
+}
+
 static void R_Shadow_LogGlobalGLState (const char *tag)
 {
 	GLint draw_fbo, read_fbo, draw_buf, read_buf, rbo, vao, prog;
@@ -457,8 +468,8 @@ static void R_Shadow_LogGlobalGLState (const char *tag)
 		(unsigned)stencil_func, stencil_ref, (unsigned)stencil_value_mask,
 		(unsigned)stencil_fail, (unsigned)stencil_zfail, (unsigned)stencil_zpass, (unsigned)stencil_write_mask);
 
-	R_Shadow_LogFramebufferAttachment (tag, GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, "draw_depth_attachment");
-	R_Shadow_LogFramebufferAttachment (tag, GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, "read_depth_attachment");
+	R_Shadow_LogFramebufferAttachment (tag, GL_DRAW_FRAMEBUFFER, R_Shadow_LogDepthAttachmentEnum (), "draw_depth_attachment");
+	R_Shadow_LogFramebufferAttachment (tag, GL_READ_FRAMEBUFFER, R_Shadow_LogDepthAttachmentEnum (), "read_depth_attachment");
 	R_Shadow_LogTextureUnitBindings (tag);
 }
 
