@@ -316,6 +316,124 @@ static void R_Shadow_LogGLStage (const char *stage)
 		R_Shadow_LogWrite ("GL %s error=GL_NO_ERROR\n", stage);
 }
 
+static void R_Shadow_LogTextureUnitBindings (const char *tag)
+{
+	GLint prev_active, max_units;
+	int i;
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &prev_active);
+	glGetIntegerv (GL_MAX_TEXTURE_IMAGE_UNITS, &max_units);
+	if (max_units < 1)
+		max_units = 1;
+	if (max_units > 16)
+		max_units = 16;
+
+	for (i = 0; i < max_units; ++i)
+	{
+		GLint tex2d = 0;
+		GLint texcube = 0;
+		GLint sampler = 0;
+		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d);
+		glGetIntegerv (GL_TEXTURE_BINDING_CUBE_MAP, &texcube);
+#ifdef GL_SAMPLER_BINDING
+		glGetIntegerv (GL_SAMPLER_BINDING, &sampler);
+#endif
+		if (tex2d != 0 || texcube != 0 || sampler != 0 || i == 5)
+			R_Shadow_LogWrite ("%s texunit[%d] tex2d=%d texcube=%d sampler=%d\n", tag, i, tex2d, texcube, sampler);
+	}
+
+	GL_ActiveTextureFunc ((GLenum)prev_active);
+}
+
+static void R_Shadow_LogFramebufferAttachment (const char *tag, GLenum target, GLenum attachment, const char *label)
+{
+	GLint type = GL_NONE;
+	GLint name = 0;
+	GLenum err;
+
+	GL_GetFramebufferAttachmentParameterivFunc (target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+	err = glGetError ();
+	if (err != GL_NO_ERROR)
+	{
+		R_Shadow_LogWrite ("%s %s target=0x%X query failed err=0x%X (%s)\n", tag, label, (unsigned)target, (unsigned)err, R_Shadow_LogGLErrorString (err));
+		return;
+	}
+
+	if (type == GL_NONE)
+	{
+		R_Shadow_LogWrite ("%s %s target=0x%X attachment=none\n", tag, label, (unsigned)target);
+		return;
+	}
+
+	GL_GetFramebufferAttachmentParameterivFunc (target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
+	R_Shadow_LogWrite ("%s %s target=0x%X type=0x%X object=%d\n", tag, label, (unsigned)target, (unsigned)type, name);
+}
+
+static void R_Shadow_LogGlobalGLState (const char *tag)
+{
+	GLint draw_fbo, read_fbo, draw_buf, read_buf, rbo, vao, prog;
+	GLint array_buf, elem_buf;
+	GLint viewport[4], scissor[4], blend_src_rgb, blend_dst_rgb, blend_eq_rgb;
+	GLint depth_func, cull_mode, front_face, polygon_mode[2];
+	GLint stencil_func, stencil_ref, stencil_value_mask;
+	GLint stencil_fail, stencil_zfail, stencil_zpass, stencil_write_mask;
+	GLboolean colormask[4], depthmask;
+	GLboolean depthtest, blend, cull, scissortest, stencilen;
+
+	if (!shdlog.active)
+		return;
+
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buf);
+	glGetIntegerv (GL_READ_BUFFER, &read_buf);
+	glGetIntegerv (GL_RENDERBUFFER_BINDING, &rbo);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &vao);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &prog);
+	glGetIntegerv (GL_ARRAY_BUFFER_BINDING, &array_buf);
+	glGetIntegerv (GL_ELEMENT_ARRAY_BUFFER_BINDING, &elem_buf);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_EQUATION_RGB, &blend_eq_rgb);
+	glGetIntegerv (GL_DEPTH_FUNC, &depth_func);
+	glGetIntegerv (GL_CULL_FACE_MODE, &cull_mode);
+	glGetIntegerv (GL_FRONT_FACE, &front_face);
+	glGetIntegerv (GL_POLYGON_MODE, polygon_mode);
+	glGetIntegerv (GL_STENCIL_FUNC, &stencil_func);
+	glGetIntegerv (GL_STENCIL_REF, &stencil_ref);
+	glGetIntegerv (GL_STENCIL_VALUE_MASK, &stencil_value_mask);
+	glGetIntegerv (GL_STENCIL_FAIL, &stencil_fail);
+	glGetIntegerv (GL_STENCIL_PASS_DEPTH_FAIL, &stencil_zfail);
+	glGetIntegerv (GL_STENCIL_PASS_DEPTH_PASS, &stencil_zpass);
+	glGetIntegerv (GL_STENCIL_WRITEMASK, &stencil_write_mask);
+	glGetBooleanv (GL_COLOR_WRITEMASK, colormask);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depthmask);
+	depthtest = glIsEnabled (GL_DEPTH_TEST);
+	blend = glIsEnabled (GL_BLEND);
+	cull = glIsEnabled (GL_CULL_FACE);
+	scissortest = glIsEnabled (GL_SCISSOR_TEST);
+	stencilen = glIsEnabled (GL_STENCIL_TEST);
+
+	R_Shadow_LogWrite ("%s glstate prog=%d vao=%d vbo=%d ebo=%d draw_fbo=%d read_fbo=%d draw_buf=0x%X read_buf=0x%X rbo=%d viewport=(%d %d %d %d) scissor=(%d %d %d %d)\n",
+		tag, prog, vao, array_buf, elem_buf, draw_fbo, read_fbo, (unsigned)draw_buf, (unsigned)read_buf, rbo,
+		viewport[0], viewport[1], viewport[2], viewport[3], scissor[0], scissor[1], scissor[2], scissor[3]);
+	R_Shadow_LogWrite ("%s glflags depth=(test:%d write:%d func:0x%X) blend=(en:%d src:0x%X dst:0x%X eq:0x%X) cull=(en:%d mode:0x%X front:0x%X) scissor=%d stencil=%d\n",
+		tag, depthtest, depthmask, (unsigned)depth_func, blend, (unsigned)blend_src_rgb, (unsigned)blend_dst_rgb, (unsigned)blend_eq_rgb,
+		cull, (unsigned)cull_mode, (unsigned)front_face, scissortest, stencilen);
+	R_Shadow_LogWrite ("%s glmasks color=(%d %d %d %d) polygon_mode=(0x%X,0x%X) stencil=(func:0x%X ref:%d mask:0x%X fail:0x%X zfail:0x%X zpass:0x%X writemask:0x%X)\n",
+		tag, colormask[0], colormask[1], colormask[2], colormask[3],
+		(unsigned)polygon_mode[0], (unsigned)polygon_mode[1],
+		(unsigned)stencil_func, stencil_ref, (unsigned)stencil_value_mask,
+		(unsigned)stencil_fail, (unsigned)stencil_zfail, (unsigned)stencil_zpass, (unsigned)stencil_write_mask);
+
+	R_Shadow_LogFramebufferAttachment (tag, GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, "draw_depth_attachment");
+	R_Shadow_LogFramebufferAttachment (tag, GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, "read_depth_attachment");
+	R_Shadow_LogTextureUnitBindings (tag);
+}
+
 void R_Shadow_Log_BeginFrame (void)
 {
 	qboolean enabled;
@@ -364,6 +482,7 @@ void R_Shadow_Log_BeginFrame (void)
 			cl.mapname[0] ? cl.mapname : "(nomap)",
 			r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2],
 			r_refdef.viewangles[0], r_refdef.viewangles[1], r_refdef.viewangles[2]);
+		R_Shadow_LogGlobalGLState ("FRAME_BEGIN");
 	}
 }
 
@@ -412,6 +531,7 @@ void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_
 		viewport[0], viewport[1], viewport[2], viewport[3], scissoren, scissor[0], scissor[1], scissor[2], scissor[3], vpw, vph, prog, drawcalls, tris, depthclear);
 	R_Shadow_LogWrite ("%s state depth_test=%d depth_write=%d depth_func=0x%X cull=%d cull_mode=0x%X polyoffset=%d factor=%.4f units=%.4f\n",
 		tag, depthtest, depthwrite, (unsigned)depthfunc, cullen, (unsigned)cullmode, po, pof, pou);
+	R_Shadow_LogGlobalGLState (tag);
 	R_Shadow_LogTextureParams (tag, depth_tex);
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 		R_Shadow_LogWrite ("WARN shadow FBO incomplete for %s\n", tag);
@@ -493,6 +613,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cach
 		R_Shadow_LogWrite ("WARN shadow matrix invalid (NaN/Inf or near-singular determinant)\n");
 	if (bias < 1e-7f || bias > 0.1f)
 		R_Shadow_LogWrite ("WARN suspicious shadow bias %.6f\n", bias);
+	R_Shadow_LogGlobalGLState (tag);
 	// NOTE: GL_NONE compare mode is intentional (manual shader compare); warning removed.
 	R_Shadow_LogGLStage (tag);
 	R_Shadow_LogEndFrameIfNeeded ();
