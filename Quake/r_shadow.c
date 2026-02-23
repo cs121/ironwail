@@ -379,9 +379,26 @@ static void R_Shadow_LogFramebufferAttachment (const char *tag, GLenum target, G
 	GLint type = GL_NONE;
 	GLint name = 0;
 	GLenum err;
+	GLenum query_target = target;
 
-	GL_GetFramebufferAttachmentParameterivFunc (target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+	GL_GetFramebufferAttachmentParameterivFunc (query_target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
 	err = glGetError ();
+	if (err == GL_INVALID_OPERATION && (target == GL_DRAW_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER))
+	{
+		/*
+		 * Some drivers reject attachment queries against split read/draw targets
+		 * for specific FBOs even though the same attachment is queryable through
+		 * GL_FRAMEBUFFER. This logger is diagnostic-only, so fall back to the
+		 * generic target to keep depth attachment state visible in logs.
+		 */
+		query_target = GL_FRAMEBUFFER;
+		GL_GetFramebufferAttachmentParameterivFunc (query_target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+		err = glGetError ();
+		if (err == GL_NO_ERROR)
+			R_Shadow_LogWrite ("%s %s target=0x%X fallback_target=0x%X after err=0x%X (%s)\n",
+				tag, label, (unsigned)target, (unsigned)query_target, (unsigned)GL_INVALID_OPERATION,
+				R_Shadow_LogGLErrorString (GL_INVALID_OPERATION));
+	}
 	if (err != GL_NO_ERROR)
 	{
 		R_Shadow_LogWrite ("%s %s target=0x%X query failed err=0x%X (%s)\n", tag, label, (unsigned)target, (unsigned)err, R_Shadow_LogGLErrorString (err));
@@ -390,12 +407,12 @@ static void R_Shadow_LogFramebufferAttachment (const char *tag, GLenum target, G
 
 	if (type == GL_NONE)
 	{
-		R_Shadow_LogWrite ("%s %s target=0x%X attachment=none\n", tag, label, (unsigned)target);
+		R_Shadow_LogWrite ("%s %s target=0x%X attachment=none\n", tag, label, (unsigned)query_target);
 		return;
 	}
 
-	GL_GetFramebufferAttachmentParameterivFunc (target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
-	R_Shadow_LogWrite ("%s %s target=0x%X type=0x%X object=%d\n", tag, label, (unsigned)target, (unsigned)type, name);
+	GL_GetFramebufferAttachmentParameterivFunc (query_target, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
+	R_Shadow_LogWrite ("%s %s target=0x%X type=0x%X object=%d\n", tag, label, (unsigned)query_target, (unsigned)type, name);
 }
 
 static GLenum R_Shadow_LogDepthAttachmentEnum (void)
