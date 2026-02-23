@@ -37,7 +37,9 @@
 //   offset 176: ShadowViewProj  (mat4, 64B)
 //   offset 240: ShadowParams    (vec4, 16B)
 //   offset 256: ShadowDebug     (vec4, 16B)
-//   offset 288: instances[]     (InstanceData[], stride=?)
+//   offset 272: ShadowSunDir    (vec4, 16B)  ← KRITISCH: fehlte → instances[] 16B
+//                                               zu früh → falsches WorldMatrix/Pose/Blend
+//   offset 288: instances[]     (InstanceData[], stride=144B)
 // ---------------------------------------------------------------------------
 
 struct InstanceData
@@ -67,6 +69,9 @@ layout(std430, binding = 1) restrict readonly buffer InstanceBuffer
     mat4        ShadowViewProj;   // column-major, as GLSL expects
     vec4        ShadowParams;
     vec4        ShadowDebug;
+    vec4        ShadowSunDir;     // FIX: fehlte → instances[] begann 16B zu früh
+                                  // CPU ibuf.global: shadow_debug@256 + shadow_sun_dir@272
+                                  // → instances@288. Shader muss übereinstimmen.
     InstanceData instances[];
 } AliasFrameBuffer;
 
