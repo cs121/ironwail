@@ -8,7 +8,7 @@
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
-layout(binding=6) uniform sampler2D ShadowDlightMapRaw;
+// binding=6 (ShadowDlightMapRaw) entfernt — wurde nur für Sun-Shadow-Debug genutzt
 #include "frame_uniforms.glsl"
 #define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
@@ -408,7 +408,11 @@ void main()
 			}
 		}
 
-		vec3 lightgrid = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
+		// Sun-Shadow entfernt: Sonne ist keine Lichtquelle mehr.
+		// DLight-Schatten werden ausschliesslich in world_dlight.frag pro Licht berechnet.
+		// static_light geht ungekürzt in total_light ein.
+
+		vec3 lightgrid   = mix(vec3(1.0), in_lightgrid, LightgridParams.x);
 
 		if (LightgridParams.y > 0.5)
 		{
@@ -444,54 +448,8 @@ void main()
 			return;
 		}
 
-		// BUG FIX: surface_normal computation was inside the lightmap block but
-		// referenced AFTER the closing brace via dlight. Moved above.
-
-		float shadow_range = 1.0;
-		float shadow_term  = ShadowVisibilityDlight(in_pos, surface_normal, EyePos, 0u, shadow_range);
-		bool shadow_enabled  = ShadowDebug.x > 0.5;
-		bool lightgrid_shadow = LightgridParams.z > 0.5 && LightgridParams.x > 0.5;
-
-		if (shadow_enabled && ShadowDebug.y > 0.5)
-		{
-			if (ShadowDebug.y < 1.5)
-				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
-			else if (ShadowDebug.y < 2.5)
-			{
-				OUT_COLOR = ShadowDebugDlight(in_pos, 0u);
-			}
-			else
-			{
-				vec4 shadow_clip = ShadowViewProj * vec4(in_pos, 1.0);
-				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
-				vec2 uv = proj.xy * 0.5 + 0.5;
-				float reference = ShadowReference01(proj.z);
-				float raw_depth = texture(ShadowDlightMapRaw, uv).r;
-				OUT_COLOR = vec4(raw_depth, reference, shadow_term, 1.0);
-			}
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
-		vec3 total_light;
-
-		if (lightgrid_shadow)
-		{
-			vec3 ambient    = clamped_static * lightgrid;
-			vec3 direct     = clamped_static - ambient;
-			float shadow_scale = shadow_enabled ? shadow_term : 1.0;
-			total_light = ambient + direct * shadow_scale;
-		}
-		else
-		{
-			total_light = clamped_static;
-			if (shadow_enabled)
-				total_light *= shadow_term;
-			total_light *= lightgrid;
-		}
+		vec3 total_light    = clamped_static * lightgrid;
 
 		// Dynamic lights
 		if (!additive_dlights && NumLights > 0u)
