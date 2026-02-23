@@ -1521,18 +1521,16 @@ GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
-	// FIX: Always bind the raw shadow depth texture on TEXTURE6 so that
-	// ShadowMapRaw (sampler2D, no hardware compare) works correctly in ALL
-	// debug modes (ShadowDebug.y > 2.5 path in shadow_sample.glsl).
-	// Previously this was only done for r_shadow_debug >= 3, leaving
-	// ShadowMapRaw unbound (reading 0) for intermediate debug modes 2.5..3.
-	// Note: TEXTURE6 must stay GL_NONE compare mode – only TEXTURE5 uses
-	// GL_COMPARE_REF_TO_TEXTURE (set inside R_Shadow_BindShadowMap).
-		{
+	{
 		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
 		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
-		R_EnsureShadowSamplerState (receiver_tex);
-		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, receiver_tex);
+		/*
+		 * TEXTURE6 is intentionally unbound for world receiver draws.
+		 * Binding the same depth texture on TEXTURE5 (sampler2DShadow)
+		 * and TEXTURE6 (sampler2D) can trigger GL_INVALID_OPERATION due
+		 * to incompatible sampler types on the same texture object.
+		 */
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
 		R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
 	}
@@ -1540,6 +1538,7 @@ R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
 			R_Shadow_ReceiverUsesDlight (), r_shadow_dlight_bias.value, 0.f,

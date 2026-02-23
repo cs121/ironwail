@@ -588,13 +588,15 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
 	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
-	// FIX: Always bind raw shadow depth on TEXTURE6 for ShadowMapRaw (sampler2D).
-	// See matching fix in r_world.c R_DrawBrushModels_Real BP_SHADOW block.
-		{
+	{
 		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
 		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
-		R_EnsureShadowSamplerState (receiver_tex);
-		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, receiver_tex);
+		/*
+		 * Keep TEXTURE6 unbound for alias receiver draws to avoid
+		 * sampler-type conflicts (sampler2DShadow on unit 5 vs sampler2D on 6)
+		 * when both units point at the same texture object.
+		 */
+		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
 		R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
 		R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, receiver_tex);
 	}
