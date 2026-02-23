@@ -263,6 +263,8 @@ cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIV
 cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
+cvar_t	r_shadow_debug_dummytex = { "r_shadow_debug_dummytex", "0", CVAR_NONE };
+cvar_t	r_shadow_debug_source = { "r_shadow_debug_source", "0", CVAR_NONE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
@@ -3220,8 +3222,8 @@ void R_SetupView (void)
         r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
         // FIX Bug 3: shadow_debug[0] wird von r_shadow.c korrekt verwaltet - nicht hier ueberschreiben.
         r_framedata.shadow_debug[1] = r_shadow_debug.value;
-        r_framedata.shadow_debug[2] = 0.f;
-        r_framedata.shadow_debug[3] = 0.f;
+        r_framedata.shadow_debug[2] = r_shadow_debug_dummytex.value;
+        r_framedata.shadow_debug[3] = r_shadow_debug_source.value;
         r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
         r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
         r_framedata.shadow_dlight_params[2] = 0.f;

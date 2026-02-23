@@ -587,6 +587,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
 	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
+	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 	// FIX: Always bind raw shadow depth on TEXTURE6 for ShadowMapRaw (sampler2D).
 	// See matching fix in r_world.c R_DrawBrushModels_Real BP_SHADOW block.
 		{

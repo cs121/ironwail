@@ -101,6 +101,7 @@ layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
 layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
 layout(binding=6) uniform sampler2D ShadowDlightMapRaw;
+layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
 // Provide the dynamic-light shadow uniforms explicitly so shadow_sample.glsl compiles.
@@ -110,6 +111,7 @@ uniform vec4 ShadowDlightAtlas[SHADOW_DLIGHT_MAX];
 uniform vec4 ShadowDlightInfo[SHADOW_DLIGHT_MAX];
 uniform vec4 ShadowDlightParams;
 
+#define SHADOW_DEBUG_VALUES AliasFrameBuffer.ShadowDebug
 #define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
 

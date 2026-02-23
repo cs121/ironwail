@@ -46,6 +46,17 @@
 #ifndef SHADOW_SAMPLE_GLSL
 #define SHADOW_SAMPLE_GLSL
 
+#ifndef SHADOW_DEBUG_VALUES
+#define SHADOW_DEBUG_VALUES ShadowDebug
+#endif
+
+float ShadowDebugChecker(vec2 p)
+{
+    vec2 cell = floor(p);
+    float c = mod(cell.x + cell.y, 2.0);
+    return mix(0.2, 1.0, c);
+}
+
 // ---------------------------------------------------------------------------
 // FIX 1: Robuste Matrix-Multiplikation ohne fehlerhafte Heuristik.
 // Die Engine MUSS column-major Matrizen hochladen (Standard für OpenGL/GLSL).
@@ -143,6 +154,15 @@ float ShadowSamplePCFDlight(vec2 uv, float reference, float bias, int taps)
     return sum / float(count);
 }
 
+float ShadowSampleDlightSource(vec2 uv, float reference, float bias, int taps)
+{
+    if (SHADOW_DEBUG_VALUES.w >= 0.5)
+        return texture(ShadowDlightMapDebug, uv).r;
+    if (taps > 0)
+        return ShadowSamplePCFDlight(uv, reference, bias, taps);
+    return ShadowSampleRawDlight(uv, reference, bias);
+}
+
 float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
                               uint light_index, out float in_range)
 {
@@ -211,10 +231,16 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
     float bias  = ShadowDlightParams.x * max(0.15, 1.0 - ndotl);
 
     int taps = int(ShadowDlightParams.y + 0.5);
-    if (taps > 0)
-        return ShadowSamplePCFDlight(uv, reference, bias, taps);
+    float shadow_term = ShadowSampleDlightSource(uv, reference, bias, taps);
 
-    return ShadowSampleRawDlight(uv, reference, bias);
+    if (SHADOW_DEBUG_VALUES.y > 0.5 && SHADOW_DEBUG_VALUES.y < 1.5)
+        return ShadowDebugChecker(gl_FragCoord.xy / 32.0);
+    if (SHADOW_DEBUG_VALUES.y >= 1.5 && SHADOW_DEBUG_VALUES.y < 2.5)
+        return ShadowDebugChecker(uv * 32.0);
+    if (SHADOW_DEBUG_VALUES.y >= 2.5 && SHADOW_DEBUG_VALUES.y < 3.5)
+        return reference;
+
+    return shadow_term;
 }
 
 vec4 ShadowDebugDlight(vec3 world_pos, uint light_index)

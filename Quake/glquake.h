@@ -499,6 +499,7 @@ void R_Shadow_DrawDebug (void);
 void R_Shadow_BindShadowMap (GLenum texunit);
 void R_Shadow_BindDlightShadowMap (GLenum texunit);
 void R_Shadow_BindReceiverShadowMap (GLenum texunit);
+void R_Shadow_BindDebugColorAtlas (GLenum texunit);
 void R_EnsureShadowSamplerState (GLuint texture);
 void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex);
 void R_Shadow_Log_BeginFrame (void);
@@ -508,6 +509,7 @@ void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cach
 GLuint R_Shadow_GetShadowMapTextureId (void);
 GLuint R_Shadow_GetDlightShadowMapTextureId (void);
 GLuint R_Shadow_GetReceiverShadowMapTextureId (void);
+GLuint R_Shadow_GetDebugColorAtlasTextureId (void);
 const float *R_Shadow_GetReceiverShadowViewProj (void);
 qboolean R_Shadow_ReceiverUsesDlight (void);
 qboolean R_Shadow_DlightShadowsActiveThisFrame (void);

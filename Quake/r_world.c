@@ -1520,6 +1520,7 @@ if ((GLuint)gl_current_program != program)
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
+	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 	// FIX: Always bind the raw shadow depth texture on TEXTURE6 so that
 	// ShadowMapRaw (sampler2D, no hardware compare) works correctly in ALL
 	// debug modes (ShadowDebug.y > 2.5 path in shadow_sample.glsl).
@@ -1539,6 +1540,7 @@ R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
+	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
 			R_Shadow_ReceiverUsesDlight (), r_shadow_dlight_bias.value, 0.f,
 			r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f, r_shadow_dlight_pcf_taps.value, R_Shadow_GetReceiverShadowViewProj ());

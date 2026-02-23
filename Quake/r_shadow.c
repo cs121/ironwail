@@ -18,6 +18,8 @@ extern cvar_t r_shadow_normalbias;
 extern cvar_t r_shadow_pcf;
 extern cvar_t r_shadow_pcf_taps;
 extern cvar_t r_shadow_debug;
+extern cvar_t r_shadow_debug_dummytex;
+extern cvar_t r_shadow_debug_source;
 extern cvar_t r_shadow_dlights;
 extern cvar_t r_shadow_dlight_max;
 extern cvar_t r_shadow_dlight_size;
@@ -28,6 +30,8 @@ extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_dlight_fbo;
 static GLuint shadow_dlight_depth_tex;
+static GLuint shadow_dlight_dummy_tex;
+static GLuint shadow_dlight_debug_color_tex;
 static int shadow_dlight_atlas_size;
 static int shadow_dlight_tile_size;
 static int shadow_dlight_tile_count;
@@ -237,6 +241,30 @@ static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
 static void R_Shadow_SetTextureCompareState (void)
 {
 	R_Shadow_SetTextureCompareStateForMode (GL_COMPARE_REF_TO_TEXTURE);
+}
+
+static void R_Shadow_CreateDummyTexture (void)
+{
+	float depth_data[8 * 8];
+	int x, y;
+
+	if (shadow_dlight_dummy_tex)
+		return;
+
+	for (y = 0; y < 8; ++y)
+	for (x = 0; x < 8; ++x)
+		depth_data[y * 8 + x] = (((x ^ y) & 1) != 0) ? 0.85f : 0.15f;
+
+	glGenTextures (1, &shadow_dlight_dummy_tex);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_dummy_tex);
+	GL_TexImage2DFunc (GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 8, 8, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depth_data);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	R_Shadow_SetTextureCompareState ();
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 }
 
 void R_EnsureShadowSamplerState (GLuint texture)
@@ -631,6 +659,16 @@ static void R_Shadow_DestroyDlightResources (void)
 		GL_DeleteNativeTexture (shadow_dlight_depth_tex);
 		shadow_dlight_depth_tex = 0;
 	}
+	if (shadow_dlight_dummy_tex)
+	{
+		GL_DeleteNativeTexture (shadow_dlight_dummy_tex);
+		shadow_dlight_dummy_tex = 0;
+	}
+	if (shadow_dlight_debug_color_tex)
+	{
+		GL_DeleteNativeTexture (shadow_dlight_debug_color_tex);
+		shadow_dlight_debug_color_tex = 0;
+	}
 	shadow_dlight_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
@@ -840,6 +878,17 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	R_Shadow_SetTextureCompareState ();
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
+	glGenTextures (1, &shadow_dlight_debug_color_tex);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_debug_color_tex);
+	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_debug_color_tex, -1, "shadowmap dlight debug color");
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_R8, atlas_size, atlas_size);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
 	GL_GenFramebuffersFunc (1, &shadow_dlight_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, shadow_dlight_fbo, -1, "shadowmap dlight fbo");
@@ -861,6 +910,8 @@ void R_InitShadow (void)
 {
 	shadow_dlight_fbo = 0;
 	shadow_dlight_depth_tex = 0;
+	shadow_dlight_dummy_tex = 0;
+	shadow_dlight_debug_color_tex = 0;
 	shadow_dlight_atlas_size = 0;
 	shadow_dlight_tile_size = 0;
 	shadow_dlight_tile_count = 0;
@@ -889,7 +940,14 @@ GLuint R_Shadow_GetShadowMapTextureId (void)
 
 void R_Shadow_BindDlightShadowMap (GLenum texunit)
 {
-	if (shadow_dlight_depth_tex)
+	R_Shadow_CreateDummyTexture ();
+	if (r_shadow_debug_dummytex.value > 0.f && shadow_dlight_dummy_tex)
+	{
+		GL_ActiveTextureFunc (texunit);
+		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_dummy_tex);
+		R_EnsureShadowSamplerState (shadow_dlight_dummy_tex);
+	}
+	else if (shadow_dlight_depth_tex)
 	{
 		GL_ActiveTextureFunc (texunit);
 		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_depth_tex);
@@ -901,7 +959,23 @@ void R_Shadow_BindDlightShadowMap (GLenum texunit)
 
 GLuint R_Shadow_GetDlightShadowMapTextureId (void)
 {
+	if (r_shadow_debug_dummytex.value > 0.f && shadow_dlight_dummy_tex)
+		return shadow_dlight_dummy_tex;
 	return shadow_dlight_depth_tex;
+}
+
+void R_Shadow_BindDebugColorAtlas (GLenum texunit)
+{
+	GL_ActiveTextureFunc (texunit);
+	if (shadow_dlight_debug_color_tex)
+		GL_BindNative (texunit, GL_TEXTURE_2D, shadow_dlight_debug_color_tex);
+	else
+		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
+}
+
+GLuint R_Shadow_GetDebugColorAtlasTextureId (void)
+{
+	return shadow_dlight_debug_color_tex;
 }
 
 qboolean R_Shadow_DlightShadowsActiveThisFrame (void)
@@ -1136,8 +1210,20 @@ void R_Shadow_DlightPass (void)
 	tris0  = rs_brushpolys + rs_aliaspolys;
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, shadow_dlight_fbo);
-	glDrawBuffer (GL_NONE);
-	glReadBuffer (GL_NONE);
+	if (r_shadow_debug_source.value >= 1.f)
+	{
+		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, shadow_dlight_debug_color_tex, 0);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+	}
+	else
+	{
+		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadow_dlight_depth_tex, 0);
+		glDrawBuffer (GL_NONE);
+		glReadBuffer (GL_NONE);
+	}
 	// FIX: Same reversed-Z depth correction as SunPass.
 	if (gl_clipcontrol_able)
 	{
@@ -1186,22 +1272,34 @@ void R_Shadow_DlightPass (void)
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
-		glClear (GL_DEPTH_BUFFER_BIT);
+		if (r_shadow_debug_source.value >= 1.f)
+			glClear (GL_COLOR_BUFFER_BIT);
+		else
+			glClear (GL_DEPTH_BUFFER_BIT);
 
-		GL_UseProgram (glprogs.shadow_depth);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
-
+		if (r_shadow_debug_source.value >= 1.f)
 		{
-			int count = 0;
-			entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
-			R_DrawBrushModels_Shadow (ents, count);
-			draws0 += count;
+			GL_UseProgram (glprogs.shadow_debug);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 		}
+		else
 		{
-			int count = 0;
-			entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
-			R_DrawAliasModels_Shadow (ents, count);
-			draws0 += count;
+			GL_UseProgram (glprogs.shadow_depth);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_FRONT | GLS_ATTRIBS (6));
+
+			{
+				int count = 0;
+				entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+				R_DrawBrushModels_Shadow (ents, count);
+				draws0 += count;
+			}
+			{
+				int count = 0;
+				entity_t **ents = R_GetVisEntities (mod_alias, false, &count);
+				R_DrawAliasModels_Shadow (ents, count);
+				draws0 += count;
+			}
 		}
 	}
 
@@ -1219,7 +1317,7 @@ void R_Shadow_DlightPass (void)
 		float receiver_viewproj[16];
 		int selected_light_index = shadow_dlight_light_indices[shadow_dlight_selected_slot];
 		memcpy (receiver_viewproj, r_framedata.shadow_dlight_viewproj[shadow_dlight_selected_slot], sizeof (receiver_viewproj));
-		R_Shadow_SelectReceiverSource (shadow_dlight_depth_tex, receiver_viewproj);
+		R_Shadow_SelectReceiverSource (r_shadow_debug_source.value >= 1.f ? shadow_dlight_debug_color_tex : shadow_dlight_depth_tex, receiver_viewproj);
 		memcpy (r_framedata.shadow_viewproj, receiver_viewproj, sizeof (r_framedata.shadow_viewproj));
 		shadow_dlight_atlas_valid_frame_id = r_framecount;
 		R_Shadow_LogWrite ("DLIGHTPASS receiver slot=%d light=%d tile=(%.3f %.3f %.3f %.3f) matrix_hash=%08X atlas_valid_frame=%d frame=%d\n",

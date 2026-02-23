@@ -6,8 +6,10 @@ layout(binding=0) uniform sampler2D Tex;
 layout(binding=2) uniform sampler2D LMTex; // unused, kept for binding slot consistency
 layout(binding=3) uniform sampler2D LMTexDir; // unused
 layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
+layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 
 #include "frame_uniforms.glsl"
+#define SHADOW_DEBUG_VALUES ShadowDebug
 #define SHADOW_DLIGHT 1
 #include "shadow_sample.glsl"
 
