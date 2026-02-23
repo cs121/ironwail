@@ -25,6 +25,10 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
+	mat4	ShadowDlightViewProj[4];
+	vec4	ShadowDlightAtlas[4];
+	vec4	ShadowDlightInfo[4];
+	vec4	ShadowDlightParams;
 	InstanceData instances[];
 } AliasFrameBuffer;
 // ALU-only 16x16 Bayer matrix
@@ -104,12 +108,12 @@ layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
 layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
-// Provide the dynamic-light shadow uniforms explicitly so shadow_sample.glsl compiles.
+// Mirror the same names expected by shadow_sample.glsl via AliasFrameBuffer fields.
 #define SHADOW_DLIGHT_MAX 4
-uniform mat4 ShadowDlightViewProj[SHADOW_DLIGHT_MAX];
-uniform vec4 ShadowDlightAtlas[SHADOW_DLIGHT_MAX];
-uniform vec4 ShadowDlightInfo[SHADOW_DLIGHT_MAX];
-uniform vec4 ShadowDlightParams;
+#define ShadowDlightViewProj AliasFrameBuffer.ShadowDlightViewProj
+#define ShadowDlightAtlas AliasFrameBuffer.ShadowDlightAtlas
+#define ShadowDlightInfo AliasFrameBuffer.ShadowDlightInfo
+#define ShadowDlightParams AliasFrameBuffer.ShadowDlightParams
 
 #define SHADOW_DEBUG_VALUES AliasFrameBuffer.ShadowDebug
 #define SHADOW_DLIGHT 1

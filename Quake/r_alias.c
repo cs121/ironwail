@@ -97,6 +97,10 @@ struct ibuf_s {
 		float	shadow_viewproj[16];
 		vec4_t	shadow_params;
 		vec4_t	shadow_debug;
+		float	shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
+		vec4_t	shadow_dlight_atlas[SHADOW_DLIGHT_MAX];
+		vec4_t	shadow_dlight_info[SHADOW_DLIGHT_MAX];
+		vec4_t	shadow_dlight_params;
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -576,6 +580,10 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
+	memcpy (ibuf.global.shadow_dlight_viewproj, r_framedata.shadow_dlight_viewproj, sizeof (ibuf.global.shadow_dlight_viewproj));
+	memcpy (ibuf.global.shadow_dlight_atlas, r_framedata.shadow_dlight_atlas, sizeof (ibuf.global.shadow_dlight_atlas));
+	memcpy (ibuf.global.shadow_dlight_info, r_framedata.shadow_dlight_info, sizeof (ibuf.global.shadow_dlight_info));
+	memcpy (ibuf.global.shadow_dlight_params, r_framedata.shadow_dlight_params, sizeof (ibuf.global.shadow_dlight_params));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -740,6 +748,10 @@ static void R_FlushAliasInstances_Shadow (void)
 	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
 	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
 	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
+	memcpy (ibuf.global.shadow_dlight_viewproj, r_framedata.shadow_dlight_viewproj, sizeof (ibuf.global.shadow_dlight_viewproj));
+	memcpy (ibuf.global.shadow_dlight_atlas, r_framedata.shadow_dlight_atlas, sizeof (ibuf.global.shadow_dlight_atlas));
+	memcpy (ibuf.global.shadow_dlight_info, r_framedata.shadow_dlight_info, sizeof (ibuf.global.shadow_dlight_info));
+	memcpy (ibuf.global.shadow_dlight_params, r_framedata.shadow_dlight_params, sizeof (ibuf.global.shadow_dlight_params));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
