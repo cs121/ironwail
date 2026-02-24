@@ -24,6 +24,10 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	mat4	ShadowViewProj;
 	vec4	ShadowParams;
 	vec4	ShadowDebug;
+	mat4	ShadowDlightViewProj[4];
+	vec4	ShadowDlightAtlas[4];
+	vec4	ShadowDlightInfo[4];
+	vec4	ShadowDlightParams;
 	InstanceData instances[];
 } AliasFrameBuffer;
 
