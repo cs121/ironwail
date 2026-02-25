@@ -22,39 +22,45 @@ layout(location=14) uniform vec4 u_fogParams; // x: max distance
 layout(location=0) out vec4 outColor;
 
 const int SSAO_MAX_SAMPLES = 32;
+// Hemisphere kernel with guaranteed minimum elevation of 15° above the surface
+// (unit-vector z >= sin(15°) = 0.259 for all samples).  The old kernel had 5 samples
+// with unit-z < 0.02 (nearly tangent to the surface) which produced regular stripe
+// artifacts because those grazing samples alternately hit / miss nearby geometry.
+// Samples are length-scaled with accelerating distribution to cluster near the surface
+// for contact shadows while still reaching full radius for broader occlusion.
 const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
-	vec3(0.5381, 0.1856, 0.4319),
-	vec3(0.1379, 0.2486, 0.4430),
-	vec3(0.3371, 0.5679, 0.0057),
-	vec3(-0.6999, -0.0451, 0.0019),
-	vec3(0.0689, -0.1598, 0.8547),
-	vec3(0.0560, 0.0069, 0.1843),
-	vec3(-0.0146, 0.1402, 0.0762),
-	vec3(0.0100, -0.1924, 0.0344),
-	vec3(-0.3577, -0.5301, 0.4358),
-	vec3(-0.3169, 0.1063, 0.0158),
-	vec3(0.0103, -0.5869, 0.0046),
-	vec3(-0.0897, -0.4940, 0.3287),
-	vec3(0.7119, -0.0154, 0.0918),
-	vec3(-0.0533, 0.0596, 0.5411),
-	vec3(0.0352, -0.0631, 0.5460),
-	vec3(-0.4776, 0.2847, 0.0271),
-	vec3(0.6281, 0.2908, 0.1163),
-	vec3(0.3174, -0.1646, 0.5042),
-	vec3(-0.2505, 0.4580, 0.0136),
-	vec3(0.2067, -0.3752, 0.0631),
-	vec3(-0.6681, -0.5057, 0.1395),
-	vec3(0.1885, 0.4704, 0.1952),
-	vec3(0.4441, 0.1386, 0.1782),
-	vec3(-0.0791, 0.3005, 0.4190),
-	vec3(-0.1153, 0.5775, 0.1735),
-	vec3(0.4251, 0.0601, 0.1049),
-	vec3(0.0587, -0.6517, 0.0442),
-	vec3(-0.0837, 0.1302, 0.5580),
-	vec3(0.1036, 0.0927, 0.1655),
-	vec3(-0.0347, -0.3855, 0.3385),
-	vec3(-0.3756, 0.4976, 0.0275),
-	vec3(0.2397, -0.1794, 0.3984)
+	vec3(-0.0620, -0.0745, 0.0280),
+	vec3(-0.0147,  0.0926, 0.0439),
+	vec3(-0.0060, -0.0698, 0.0821),
+	vec3( 0.0841, -0.0677, 0.0369),
+	vec3(-0.1033,  0.0552, 0.0343),
+	vec3( 0.0199,  0.0999, 0.0834),
+	vec3( 0.1289,  0.0217, 0.0581),
+	vec3(-0.0688, -0.0946, 0.1035),
+	vec3( 0.0227,  0.1209, 0.1191),
+	vec3( 0.0661, -0.1688, 0.0495),
+	vec3( 0.0447, -0.1222, 0.1602),
+	vec3(-0.1129,  0.1772, 0.0847),
+	vec3( 0.2063, -0.0568, 0.1263),
+	vec3( 0.2146,  0.1414, 0.0900),
+	vec3( 0.1212, -0.1725, 0.2103),
+	vec3( 0.0685, -0.1827, 0.2599),
+	vec3(-0.0685, -0.0159, 0.3469),
+	vec3(-0.2069,  0.1979, 0.2570),
+	vec3( 0.1391, -0.2553, 0.2993),
+	vec3( 0.2119, -0.2507, 0.3101),
+	vec3(-0.1313, -0.4474, 0.1428),
+	vec3( 0.0641,  0.4584, 0.2487),
+	vec3( 0.4470,  0.2450, 0.2437),
+	vec3( 0.4323,  0.3182, 0.2818),
+	vec3(-0.3626, -0.4148, 0.3436),
+	vec3(-0.4330,  0.4601, 0.2874),
+	vec3(-0.0239,  0.2230, 0.7059),
+	vec3(-0.3320, -0.4453, 0.5605),
+	vec3( 0.2398,  0.4437, 0.6707),
+	vec3( 0.3882,  0.6416, 0.4812),
+	vec3( 0.6410, -0.0423, 0.6926),
+	vec3(-0.6019, -0.2250, 0.7662)
 );
 
 // SSAO conventions:
@@ -212,6 +218,11 @@ bool IsSkyDepth(float depth, vec4 depthParams)
 	return depth >= cutoff;
 }
 
+// Scale-invariant depth discontinuity test: true when two raw depth values
+// differ by more than 2x, meaning they are on different surfaces.
+// Works in both standard and reversed-Z conventions.
+#define DEPTH_JUMP(a, b)  ((a) < (b) * 0.5 || (a) > (b) * 2.0)
+
 vec3 ReconstructNormalFromDepth(vec2 uv)
 {
 	ivec2 centerPixel = ScreenPixelFromUv(uv);
@@ -229,14 +240,14 @@ vec3 ReconstructNormalFromDepth(vec2 uv)
 	vec2  uvCenter = ScreenUvFromPixel(centerPixel);
 	vec3  p        = ReconstructViewPos(uvCenter, centerDepth);
 
-	// Right neighbor — fall back to left if sky, then center.
+	// Right neighbor — fall back to left if sky or depth discontinuity, then center.
 	float depthRight = DepthRawFromPixel(rightPixel);
 	ivec2 usedRightPixel = rightPixel;
-	if (IsSkyDepth(depthRight, u_depthParams))
+	if (IsSkyDepth(depthRight, u_depthParams) || DEPTH_JUMP(depthRight, centerDepth))
 	{
 		ivec2 leftPixel = ivec2(clamp(vec2(centerPixel - ivec2(1, 0)), viewMinPx, viewMaxPx));
 		float depthLeft = DepthRawFromPixel(leftPixel);
-		if (!IsSkyDepth(depthLeft, u_depthParams))
+		if (!IsSkyDepth(depthLeft, u_depthParams) && !DEPTH_JUMP(depthLeft, centerDepth))
 		{
 			depthRight     = depthLeft;
 			usedRightPixel = leftPixel;
@@ -250,14 +261,14 @@ vec3 ReconstructNormalFromDepth(vec2 uv)
 	vec2 uvRight = ScreenUvFromPixel(usedRightPixel);
 	vec3 pr      = ReconstructViewPos(uvRight, depthRight);
 
-	// Up neighbor — fall back to down if sky, then center.
+	// Up neighbor — fall back to down if sky or depth discontinuity, then center.
 	float depthUp = DepthRawFromPixel(upPixel);
 	ivec2 usedUpPixel = upPixel;
-	if (IsSkyDepth(depthUp, u_depthParams))
+	if (IsSkyDepth(depthUp, u_depthParams) || DEPTH_JUMP(depthUp, centerDepth))
 	{
 		ivec2 downPixel = ivec2(clamp(vec2(centerPixel - ivec2(0, 1)), viewMinPx, viewMaxPx));
 		float depthDown = DepthRawFromPixel(downPixel);
-		if (!IsSkyDepth(depthDown, u_depthParams))
+		if (!IsSkyDepth(depthDown, u_depthParams) && !DEPTH_JUMP(depthDown, centerDepth))
 		{
 			depthUp     = depthDown;
 			usedUpPixel = downPixel;
@@ -399,6 +410,15 @@ void main()
 	{
 		outColor = (debugMode >= 0) ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(1.0);
 		return;
+	}
+
+	// Exclude viewmodel/weapon pixels from AO.  Check raw hw depth rather than
+	// viewPos.x so it is immune to r_ssao_reversedz_mode remapping.
+	// Reversed-Z: near=1.0, viewmodel sits above ~0.85 (within ~5 units at znear=4).
+	// Standard Z: near=0.0, viewmodel sits below ~0.15.
+	{
+		bool nearPlane = (u_depthParams.z > 0.5) ? (depth > 0.85) : (depth < 0.15);
+		if (nearPlane) { outColor = vec4(1.0); return; }
 	}
 
 	vec3 normal = (u_normalSource != 0) ? ComputeNormalFromViewPos(viewPos) : ReconstructNormalFromDepth(screenUv);
