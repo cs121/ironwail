@@ -122,7 +122,10 @@ static void R_Alias_SelectDominantShadowDlight (const vec3_t entity_origin, alia
 	dlight_t *best_light = NULL;
 
 	instance->shadow_light_index = UINT32_MAX;
-	Vector4Set (instance->shadow_light_pos_range, 0.f, 0.f, 0.f, 0.f);
+	instance->shadow_light_pos_range[0] = 0.f;
+	instance->shadow_light_pos_range[1] = 0.f;
+	instance->shadow_light_pos_range[2] = 0.f;
+	instance->shadow_light_pos_range[3] = 0.f;
 
 	if (!R_Shadow_DlightShadowsActiveThisFrame ())
 		return;
@@ -1104,7 +1107,10 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 
 	VectorClear (instance->lightcolor);
 	VectorClear (instance->dlightcolor);
-	Vector4Set (instance->shadow_light_pos_range, 0.f, 0.f, 0.f, 0.f);
+	instance->shadow_light_pos_range[0] = 0.f;
+	instance->shadow_light_pos_range[1] = 0.f;
+	instance->shadow_light_pos_range[2] = 0.f;
+	instance->shadow_light_pos_range[3] = 0.f;
 	instance->shadow_light_index = UINT32_MAX;
 	instance->alpha = entalpha;
 	instance->pose1 = lerpdata.pose1;
