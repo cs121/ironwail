@@ -1428,6 +1428,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		return 0;
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
+	qboolean use_halfres = R_SSAOUseHalfRes ();
+	int index = use_halfres ? 1 : 0;
 	if (index == 1)
 		samples = q_min (samples, 8);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
@@ -1435,8 +1437,6 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	float bias = R_SanitizeSSAOValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
 	float power = R_SanitizeSSAOValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
-	qboolean use_halfres = R_SSAOUseHalfRes ();
-	int index = use_halfres ? 1 : 0;
 	int width = framebufs.ssao.width[index];
 	int height = framebufs.ssao.height[index];
 	if (width <= 0 || height <= 0)
