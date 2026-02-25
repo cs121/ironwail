@@ -234,10 +234,9 @@ float ShadowVisibilityDlight(vec3 world_pos, vec3 normal, vec3 light_pos,
     vec3  light_dir  = (light_dist > 1e-6) ? light_delta / light_dist : vec3(0.0, 0.0, 1.0);
 
     float ndotl = clamp(dot(normal, light_dir), 0.0, 1.0);
-    // FIX: bias = slope_scale * (1 - ndotl) wird 0 wenn ndotl=1 (Fläche direkt zum Licht),
-    // was Floating-Point-Acne bei gut beleuchteten Flächen verursacht (schwarze Wände).
-    // max(0.15, ...) garantiert minimalen Bias von 0.0025*0.15=0.000375.
-    float bias  = ShadowDlightParams.x * max(0.15, 1.0 - ndotl);
+    float base_bias = ShadowDlightParams.x * 0.15;
+    float slope_bias = ShadowDlightParams.x * (1.0 - ndotl);
+    float bias  = base_bias + slope_bias;
 
     int taps = int(ShadowDlightParams.y + 0.5);
     float shadow_term = ShadowSampleDlightSource(uv, reference, bias, taps);

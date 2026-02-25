@@ -69,6 +69,11 @@ typedef struct aliasinstance_s {
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
+	vec4_t		shadow_light_pos_range; // xyz: dlight position, w: range
+	uint32_t	shadow_light_index;
+	uint32_t	_pad_shadow1;
+	uint32_t	_pad_shadow2;
+	uint32_t	_pad_shadow3;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -106,6 +111,67 @@ struct ibuf_s {
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 176);
+COMPILE_TIME_ASSERT (alias_instance_shadow_pos_offset, offsetof (aliasinstance_t, shadow_light_pos_range) == 128);
+COMPILE_TIME_ASSERT (alias_instance_shadow_index_offset, offsetof (aliasinstance_t, shadow_light_index) == 144);
+
+static void R_Alias_SelectDominantShadowDlight (const vec3_t entity_origin, aliasinstance_t *instance)
+{
+	float best_score = -FLT_MAX;
+	int best_light_index = -1;
+	dlight_t *best_light = NULL;
+
+	instance->shadow_light_index = UINT32_MAX;
+	Vector4Set (instance->shadow_light_pos_range, 0.f, 0.f, 0.f, 0.f);
+
+	if (!R_Shadow_DlightShadowsActiveThisFrame ())
+		return;
+
+	for (int slot = 0; slot < SHADOW_DLIGHT_MAX; ++slot)
+	{
+		int light_index;
+		dlight_t *dl;
+		float radius;
+		float dist;
+		float score;
+
+		if (r_framedata.shadow_dlight_info[slot][0] < 0.f)
+			continue;
+
+		light_index = (int)Q_rint (r_framedata.shadow_dlight_info[slot][0]);
+		if (light_index < 0 || light_index >= DLIGHT_GPU_MAX)
+			continue;
+
+		dl = r_dlight_sources[light_index];
+		if (!dl || !dl->active)
+			continue;
+
+		radius = dl->radius;
+		if (radius <= 0.f)
+			continue;
+
+		dist = Distance (entity_origin, dl->origin);
+		if (dist > radius)
+			continue;
+
+		score = radius - dist;
+		if (score > best_score)
+		{
+			best_score = score;
+			best_light_index = light_index;
+			best_light = dl;
+		}
+	}
+
+	if (!best_light)
+		return;
+
+	instance->shadow_light_index = (uint32_t)best_light_index;
+	instance->shadow_light_pos_range[0] = best_light->origin[0];
+	instance->shadow_light_pos_range[1] = best_light->origin[1];
+	instance->shadow_light_pos_range[2] = best_light->origin[2];
+	instance->shadow_light_pos_range[3] = best_light->radius;
+}
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
@@ -969,6 +1035,7 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
+	R_Alias_SelectDominantShadowDlight (lerpdata.origin, instance);
 
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
@@ -1037,6 +1104,8 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 
 	VectorClear (instance->lightcolor);
 	VectorClear (instance->dlightcolor);
+	Vector4Set (instance->shadow_light_pos_range, 0.f, 0.f, 0.f, 0.f);
+	instance->shadow_light_index = UINT32_MAX;
 	instance->alpha = entalpha;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;

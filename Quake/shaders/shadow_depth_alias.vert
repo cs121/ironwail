@@ -48,11 +48,16 @@ struct InstanceData
     vec4  PrevWorldMatrix[3];  // 48B
     vec4  LightColor;          // xyz=color w=alpha
     vec4  DLightColor;         // xyz=color
+    vec4  ShadowLightPosRange; // xyz=dlight pos, w=range
+    uint  ShadowLightIndex;
+    uint  _PadShadow1;
+    uint  _PadShadow2;
+    uint  _PadShadow3;
     int   Pose1;               // 4B
     int   Pose2;               // 4B
     float Blend;               // 4B  — clamp before use!
     int   Flags;               // 4B
-    // std430 stride = 48+48+16+16+16 = 144B (verify on CPU side)
+    // std430 stride = 176B (verify on CPU side)
 };
 
 layout(std430, binding = 1) restrict readonly buffer InstanceBuffer

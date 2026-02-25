@@ -5,6 +5,11 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	ShadowLightPosRange; // xyz=dlight pos, w=range
+	uint	ShadowLightIndex;
+	uint	_PadShadow1;
+	uint	_PadShadow2;
+	uint	_PadShadow3;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -130,6 +135,8 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
+layout(location=7) flat in uint in_shadow_light_index;
+layout(location=8) flat in vec4 in_shadow_light_pos_range;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -174,13 +181,11 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
-        float shadow_range = 1.0;
+        float shadow_range = 0.0;
         float shadow_term = 1.0;
-        uint shadow_light_index = 0u;  // Slot 0: erster DLight-Caster
-        // NOTE: shadow_light_pos wird nur fuer ndotl-Bias in ShadowVisibilityDlight
-        // genutzt. Alias-Shader hat keinen Zugriff auf die echte Lichtposition.
-        // EyePos als Fallback liefert konservativen (leicht zu hohen) Bias.
-        vec3 shadow_light_pos = AliasFrameBuffer.EyePos;
+	uint shadow_light_index = in_shadow_light_index;
+	vec3 shadow_light_pos = in_shadow_light_pos_range.xyz;
+	shadow_range = in_shadow_light_pos_range.w;
 	vec4 lit_color = in_color;
 
 	// FIX: Shadow-Berechnung laeuft immer (nicht nur wenn ShadowDebug.x > 0.5).
@@ -191,7 +196,8 @@ void main()
 	{
 		vec3 world_pos = in_pos + AliasFrameBuffer.EyePos;
 		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		shadow_term = ShadowVisibilityDlight(world_pos, shadow_normal, shadow_light_pos, shadow_light_index, shadow_range);
+		if (shadow_light_index != 0xFFFFFFFFu && shadow_range > 0.0)
+			shadow_term = ShadowVisibilityDlight(world_pos, shadow_normal, shadow_light_pos, shadow_light_index, shadow_range);
 
 		// Debug-Visualisierung (nur wenn ShadowDebug.x > 0.5)
 		if (AliasFrameBuffer.ShadowDebug.x > 0.5 && AliasFrameBuffer.ShadowDebug.y > 0.5)
@@ -200,6 +206,12 @@ void main()
 				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
 			else if (AliasFrameBuffer.ShadowDebug.y < 2.5)
 				OUT_COLOR = ShadowDebugDlight(world_pos, shadow_light_index);
+			else if (AliasFrameBuffer.ShadowDebug.y < 3.5)
+			{
+				float idx = (shadow_light_index == 0xFFFFFFFFu) ? -1.0 : float(shadow_light_index);
+				vec3 idx_color = fract(vec3(idx * 0.1031, idx * 0.11369, idx * 0.13787));
+				OUT_COLOR = vec4(idx_color, 1.0);
+			}
 			else
 			{
 				vec4 shadow_clip = AliasFrameBuffer.ShadowViewProj * vec4(world_pos, 1.0);
