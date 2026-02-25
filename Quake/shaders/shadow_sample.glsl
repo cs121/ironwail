@@ -186,8 +186,10 @@ bool ShadowProjectToAtlasUV(vec4 clip, vec4 atlas, out vec2 uv_local, out vec2 u
     vec2 atlas_max = atlas.zw + atlas.xy;
 
     // Inset/clamp in atlas space to reduce cross-tile filtering bleed.
-    // SHADOW_DLIGHT_ATLAS_SIZE is the full atlas dimension in texels.
-    float eps = 0.5 / max(SHADOW_DLIGHT_ATLAS_SIZE, 1.0);
+    // Derive full atlas dimension from the actual shadow texture to avoid
+    // relying on an externally-defined compile-time macro.
+    float atlas_size = float(textureSize(ShadowDlightMap, 0).x);
+    float eps = 0.5 / max(atlas_size, 1.0);
     uv_atlas = clamp(uv_atlas, atlas_min + vec2(eps), atlas_max - vec2(eps));
 
     return all(greaterThanEqual(uv_atlas, atlas_min)) &&
