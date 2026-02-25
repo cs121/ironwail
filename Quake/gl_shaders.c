@@ -36,6 +36,149 @@ typedef struct shader_cache_s
 static shader_cache_t shader_cache[128];
 static int shader_cache_count;
 
+static qboolean GL_IsShaderIncludePathSafe (const char *path, const char **reason)
+{
+	const unsigned char *s = (const unsigned char *)path;
+
+	if (!path || !*path)
+	{
+		if (reason)
+			*reason = "empty path";
+		return false;
+	}
+
+	if (path[0] == '/' || path[0] == '\\')
+	{
+		if (reason)
+			*reason = "absolute paths are not allowed";
+		return false;
+	}
+
+	if ((q_isalpha (s[0]) && path[1] == ':') || strstr (path, "://"))
+	{
+		if (reason)
+			*reason = "device/protocol paths are not allowed";
+		return false;
+	}
+
+	while (*s)
+	{
+		if (*s < 32)
+		{
+			if (reason)
+				*reason = "control characters are not allowed";
+			return false;
+		}
+		s++;
+	}
+
+	return true;
+}
+
+static qboolean GL_NormalizeShaderIncludePath (const char *basepath, const char *includepath, char *out, size_t outsize, const char **reason)
+{
+	char temp[MAX_QPATH];
+	char basedir[MAX_QPATH];
+	const char *src;
+	char *dst;
+	char *slash;
+
+	if (!GL_IsShaderIncludePathSafe (includepath, reason))
+		return false;
+
+	q_strlcpy (basedir, basepath, sizeof (basedir));
+	slash = strrchr (basedir, '/');
+	if (!slash)
+		slash = strrchr (basedir, '\\');
+	if (slash)
+		slash[1] = '\0';
+	else
+		basedir[0] = '\0';
+
+	if (q_strlcpy (temp, basedir, sizeof (temp)) >= sizeof (temp)
+		|| q_strlcat (temp, includepath, sizeof (temp)) >= sizeof (temp))
+	{
+		if (reason)
+			*reason = "path too long";
+		return false;
+	}
+
+	dst = out;
+	src = temp;
+	if (outsize == 0)
+		return false;
+	out[0] = '\0';
+
+	while (*src)
+	{
+		char segment[MAX_QPATH];
+		size_t seglen = 0;
+
+		while (*src == '/' || *src == '\\')
+			src++;
+		if (!*src)
+			break;
+
+		while (*src && *src != '/' && *src != '\\')
+		{
+			if (seglen + 1 >= sizeof (segment))
+			{
+				if (reason)
+					*reason = "path segment too long";
+				return false;
+			}
+			segment[seglen++] = *src++;
+		}
+		segment[seglen] = '\0';
+
+		if (!strcmp (segment, "."))
+			continue;
+		if (!strcmp (segment, ".."))
+		{
+			if (reason)
+				*reason = "parent directory traversal is not allowed";
+			return false;
+		}
+
+		if (dst != out)
+		{
+			if ((size_t)(dst - out + 1) >= outsize)
+			{
+				if (reason)
+					*reason = "normalized path too long";
+				return false;
+			}
+			*dst++ = '/';
+		}
+
+		if ((size_t)(dst - out + seglen) >= outsize)
+		{
+			if (reason)
+				*reason = "normalized path too long";
+			return false;
+		}
+		memcpy (dst, segment, seglen);
+		dst += seglen;
+		*dst = '\0';
+	}
+
+	if (strncmp (out, GLSL_PATH_PREFIX, strlen (GLSL_PATH_PREFIX)) != 0)
+	{
+		if (reason)
+			*reason = "include resolved outside shaders/ root";
+		return false;
+	}
+
+	if (!out[0])
+	{
+		if (reason)
+			*reason = "empty normalized path";
+		return false;
+	}
+
+	return true;
+}
+
 glprogs_t glprogs;
 static GLuint gl_programs[128];
 static GLuint gl_current_program;
@@ -298,12 +441,11 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                                         end++;
                                 if (end < line_start + line_len)
                                 {
-                                        char include_path[MAX_QPATH];
-                                        char full_path[MAX_QPATH];
-                                        char basedir[MAX_QPATH];
-                                        size_t include_len = (size_t) (end - ptr);
-                                        char *slash;
-                                        char *included;
+								char include_path[MAX_QPATH];
+								char full_path[MAX_QPATH];
+								size_t include_len = (size_t) (end - ptr);
+								const char *reason = NULL;
+								char *included;
 
                                         if (include_len >= sizeof (include_path))
                                         {
@@ -315,24 +457,13 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                                         memcpy (include_path, ptr, include_len);
                                         include_path[include_len] = '\0';
 
-                                        q_strlcpy (basedir, path, sizeof (basedir));
-                                        slash = strrchr (basedir, '/');
-#if defined(_WIN32)
-                                        if (!slash)
-                                                slash = strrchr (basedir, '\\');
-#endif
-                                        if (slash)
-                                                slash[1] = '\0';
-                                        else
-                                                basedir[0] = '\0';
-
-                                        q_strlcpy (full_path, basedir, sizeof (full_path));
-                                        if (q_strlcat (full_path, include_path, sizeof (full_path)) >= sizeof (full_path))
-                                        {
-                                                free (result);
-                                                free (source);
-                                                Sys_Error ("GL_LoadShaderFile: include path overflow in %s", path);
-                                        }
+								if (!GL_NormalizeShaderIncludePath (path, include_path, full_path, sizeof (full_path), &reason))
+								{
+									free (result);
+									free (source);
+									GL_InitError ("Shader include rejected in %s: '%s' (%s)",
+										path, include_path, reason ? reason : "invalid path");
+								}
 
                                         included = GL_LoadShaderFile_Internal (full_path, depth + 1);
                                         if (included)
