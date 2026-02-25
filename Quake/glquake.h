@@ -460,6 +460,13 @@ typedef struct gpuframedata_s {
         unsigned int    _padding2;
 } gpuframedata_t;
 
+COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 896);
+COMPILE_TIME_ASSERT (gpuframedata_shadow_viewproj_offset, offsetof (gpuframedata_t, shadow_viewproj) == 384);
+COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_viewproj_offset, offsetof (gpuframedata_t, shadow_dlight_viewproj) == 480);
+COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_atlas_offset, offsetof (gpuframedata_t, shadow_dlight_atlas) == 736);
+COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_info_offset, offsetof (gpuframedata_t, shadow_dlight_info) == 800);
+COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_params_offset, offsetof (gpuframedata_t, shadow_dlight_params) == 864);
+
 typedef enum
 {
 	TCGEN_BASE = 0,

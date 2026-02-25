@@ -44,6 +44,7 @@ static qboolean shadow_dlight_shadows_active_this_frame;
 static int shadow_dlight_shadow_caster_count;
 static int shadow_dlight_atlas_valid_frame_id = -1;
 static int shadow_dlight_selected_slot = -1;
+static int shadow_dlight_slottable_last_frame = -9999;
 
 extern cvar_t r_shadow_log;
 extern cvar_t r_shadow_log_rate;
@@ -239,6 +240,20 @@ static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, compare_func);
 }
 
+static void R_Shadow_ApplyDepthSamplerState (GLenum compare_mode)
+{
+	const float border_val = gl_clipcontrol_able ? 0.f : 1.f;
+	const float border[4] = { border_val, border_val, border_val, border_val };
+
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	R_Shadow_SetTextureCompareStateForMode (compare_mode);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+}
+
 static void R_Shadow_SetTextureCompareState (void)
 {
 	R_Shadow_SetTextureCompareStateForMode (GL_COMPARE_REF_TO_TEXTURE);
@@ -280,7 +295,9 @@ void R_EnsureShadowSamplerState (GLuint texture)
 	GL_ActiveTextureFunc (GL_TEXTURE0);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
 	glBindTexture (GL_TEXTURE_2D, texture);
-	R_Shadow_SetTextureCompareStateForMode (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	R_Shadow_ApplyDepthSamplerState (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	if (r_shadow_debug.value >= 2.f && (r_framecount & 63) == 0)
+		R_Shadow_LogTextureParams ("receiver_sampler_validate", texture);
 	glBindTexture (GL_TEXTURE_2D, (GLuint)previous_binding);
 	GL_ActiveTextureFunc ((GLenum)previous_active);
 }
@@ -985,23 +1002,7 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-	{
-		/* FIX Border-Farbe fuer Reverse-Z:
-		 * Mit Reverse-Z bedeutet depth=1.0 "ganz nah" (= im Schatten).
-		 * border=1.0 wuerde dann alles ausserhalb des Shadow-Frustums als
-		 * "im Schatten" werten -> dunkles Artefakt am Bildrand/Wand.
-		 * Korrekt: border=1.0 fuer Standard-Z (weit weg = kein Schatten),
-		 *          border=0.0 fuer Reverse-Z  (weit weg = kein Schatten). */
-		const float border_val = gl_clipcontrol_able ? 0.f : 1.f;
-		const float border[4] = { border_val, border_val, border_val, border_val };
-		glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-	}
-	R_Shadow_SetTextureCompareState ();
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	R_Shadow_ApplyDepthSamplerState (GL_COMPARE_REF_TO_TEXTURE);
 
 	glGenTextures (1, &shadow_dlight_debug_color_tex);
 	GL_ActiveTextureFunc (GL_TEXTURE0);
@@ -1191,6 +1192,12 @@ static void R_Shadow_SelectReceiverSource (GLuint tex, const float viewproj[16])
 
 void R_Shadow_BindReceiverShadowMap (GLenum texunit)
 {
+	if (R_Shadow_DlightShadowsActiveThisFrame () && shadow_dlight_atlas_valid_frame_id != r_framecount)
+	{
+		Con_DPrintf ("r_shadow: receiver bind before current-frame dlight pass (atlas=%d frame=%d)\n",
+			shadow_dlight_atlas_valid_frame_id, r_framecount);
+	}
+
 	if (!R_Shadow_ReceiverUsesDlight ())
 	{
 		GL_BindNative (texunit, GL_TEXTURE_2D, 0);
@@ -1442,6 +1449,21 @@ void R_Shadow_DlightPass (void)
 		(rs_brushpolys  + rs_aliaspolys)  - tris0,
 		(t1 - t0) * 1000.0);
 	R_Shadow_LogWrite ("DLIGHTPASS selected=%d casters=%d atlas=%d tile=%d tile_count=%d cvar_max=%d\n", shadow_dlight_selected_count, shadow_dlight_shadow_caster_count, shadow_dlight_atlas_size, shadow_dlight_tile_size, shadow_dlight_tile_count, max_tiles);
+
+	if (r_shadow_debug.value > 0.f && r_framecount - shadow_dlight_slottable_last_frame >= 60)
+	{
+		shadow_dlight_slottable_last_frame = r_framecount;
+		for (int i = 0; i < shadow_dlight_selected_count; ++i)
+		{
+			const int li = shadow_dlight_light_indices[i];
+			dlight_t *dl = (li >= 0 && li < DLIGHT_GPU_MAX) ? r_dlight_sources[li] : NULL;
+			R_Shadow_LogWrite ("slot[%d] light=%d rect=(%.3f %.3f %.3f %.3f) range=%.1f\n",
+				i, li,
+				r_framedata.shadow_dlight_atlas[i][0], r_framedata.shadow_dlight_atlas[i][1],
+				r_framedata.shadow_dlight_atlas[i][2], r_framedata.shadow_dlight_atlas[i][3],
+				dl ? dl->radius : 0.f);
+		}
+	}
 
 	memcpy (r_framedata.shadow_viewproj, saved_viewproj, sizeof (saved_viewproj));
 	if (shadow_dlight_selected_slot >= 0)
