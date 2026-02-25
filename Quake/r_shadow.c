@@ -26,6 +26,7 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_dlight_distance;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
+extern cvar_t r_shadow_debug_nocull;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_dlight_fbo;
@@ -768,6 +769,49 @@ static void R_Shadow_BuildViewMatrixColumns (float matrix[16], const vec3_t righ
 	matrix[3 * 4 + 3] = 1.f;
 }
 
+static float R_Shadow_BasisDet3x3 (const vec3_t right, const vec3_t up, const vec3_t forward)
+{
+	vec3_t up_x_forward;
+	CrossProduct (up, forward, up_x_forward);
+	return DotProduct (right, up_x_forward);
+}
+
+static void R_Shadow_BuildOrthoBasisRH (const vec3_t forward, vec3_t up_hint, vec3_t out_right, vec3_t out_up)
+{
+	float right_len;
+
+	/*
+	 * Keep the light basis right-handed:
+	 *   right = normalize(cross(forward, up_hint))
+	 *   up    = normalize(cross(right, forward))
+	 *
+	 * Cross order matters: swapping operands mirrors the basis (det < 0), which
+	 * flips face orientation from the light's POV and breaks shadow-map culling.
+	 */
+	CrossProduct (forward, up_hint, out_right);
+	right_len = VectorNormalize (out_right);
+	if (right_len <= 1e-6f)
+	{
+		if (fabsf (forward[2]) < 0.9f)
+		{
+			up_hint[0] = 0.f;
+			up_hint[1] = 0.f;
+			up_hint[2] = 1.f;
+		}
+		else
+		{
+			up_hint[0] = 1.f;
+			up_hint[1] = 0.f;
+			up_hint[2] = 0.f;
+		}
+		CrossProduct (forward, up_hint, out_right);
+		VectorNormalize (out_right);
+	}
+
+	CrossProduct (out_right, forward, out_up);
+	VectorNormalize (out_up);
+}
+
 static void R_Shadow_DestroyResources (void)
 {
 	R_Shadow_DestroyDlightResources ();
@@ -815,6 +859,7 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	vec3_t up = { 0.f, 0.f, 1.f };
 	vec3_t right;
 	vec3_t light_up;
+	float basis_det;
 	float view[16];
 	float proj[16];
 	float znear;
@@ -854,10 +899,18 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 		up[2] = 0.f;
 	}
 
-	CrossProduct (up, forward, right);
-	VectorNormalize (right);
-	CrossProduct (forward, right, light_up);
-	VectorNormalize (light_up);
+	R_Shadow_BuildOrthoBasisRH (forward, up, right, light_up);
+	basis_det = R_Shadow_BasisDet3x3 (right, light_up, forward);
+#if defined(SHDLOG)
+	if (basis_det <= 0.f && (r_shadow_debug.value > 0.f || r_shadow_log.value > 0.f || developer.value > 0.f))
+	{
+		R_Shadow_LogWrite ("WARN dlight basis mirrored/degenerate det3x3=%.6g fwd=(%.6f %.6f %.6f) right=(%.6f %.6f %.6f) up=(%.6f %.6f %.6f)\n",
+			basis_det,
+			forward[0], forward[1], forward[2],
+			right[0], right[1], right[2],
+			light_up[0], light_up[1], light_up[2]);
+	}
+#endif
 
 	R_Shadow_BuildViewMatrixColumns (view, right, light_up, forward, origin);
 
@@ -1362,7 +1415,10 @@ void R_Shadow_DlightPass (void)
 			 * Tiefenrichtung invertiert. GLS_CULL_FRONT wuerde dabei falsche
 			 * Geometrie entfernen und schwarze Wand-Artefakte erzeugen.
 			 * Loesung: CULL_BACK fuer Reverse-Z, CULL_FRONT fuer Standard-Z. */
-			GL_SetState (GLS_BLEND_OPAQUE | (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT) | GLS_ATTRIBS (6));
+			if (r_shadow_debug_nocull.value > 0.f)
+				GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (6));
+			else
+				GL_SetState (GLS_BLEND_OPAQUE | (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT) | GLS_ATTRIBS (6));
 
 			{
 				int count = 0;

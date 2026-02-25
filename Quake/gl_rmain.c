@@ -265,6 +265,7 @@ cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
 cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t	r_shadow_debug_dummytex = { "r_shadow_debug_dummytex", "0", CVAR_NONE };
 cvar_t	r_shadow_debug_source = { "r_shadow_debug_source", "0", CVAR_NONE };
+cvar_t	r_shadow_debug_nocull = { "r_shadow_debug_nocull", "0", CVAR_NONE };
 cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
