@@ -115,6 +115,7 @@ layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
 // Mirror the same names expected by shadow_sample.glsl via AliasFrameBuffer fields.
 #define SHADOW_DLIGHT_MAX 4
+#define ShadowParams AliasFrameBuffer.ShadowParams
 #define ShadowDlightViewProj AliasFrameBuffer.ShadowDlightViewProj
 #define ShadowDlightAtlas AliasFrameBuffer.ShadowDlightAtlas
 #define ShadowDlightInfo AliasFrameBuffer.ShadowDlightInfo
