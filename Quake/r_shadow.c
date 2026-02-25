@@ -31,6 +31,10 @@ extern cvar_t r_shadow_dlight_aim_dist;
 extern cvar_t r_shadow_dlight_fov;
 extern cvar_t r_shadow_matrix_debug;
 extern cvar_t r_shadow_debug_nocull;
+extern cvar_t r_shadow_debug_atlas_overlay;
+extern cvar_t r_shadow_debug_slot_overlay;
+extern cvar_t r_shadow_debug_yflip;
+extern cvar_t r_shadow_debug_std140_dump;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
 static GLuint shadow_dlight_fbo;
@@ -49,6 +53,8 @@ static int shadow_dlight_shadow_caster_count;
 static int shadow_dlight_atlas_valid_frame_id = -1;
 static int shadow_dlight_selected_slot = -1;
 static int shadow_dlight_slottable_last_frame = -9999;
+static int shadow_dlight_debug_slot_last_frame = -9999;
+static int shadow_dlight_std140_dump_last_frame = -9999;
 
 extern cvar_t r_shadow_log;
 extern cvar_t r_shadow_log_rate;
@@ -74,6 +80,30 @@ typedef struct shadow_log_state_s {
 static shadow_log_state_t shdlog;
 
 static unsigned int R_Shadow_MatrixHash (const float matrix[16]);
+
+static void R_Shadow_DebugDumpStd140Layout (void)
+{
+	if (r_shadow_debug_std140_dump.value <= 0.f)
+		return;
+	if (shadow_dlight_std140_dump_last_frame == r_framecount)
+		return;
+	shadow_dlight_std140_dump_last_frame = r_framecount;
+
+	Con_Printf ("r_shadow std140: sizeof(gpuframedata_t)=%u\n", (unsigned)sizeof (gpuframedata_t));
+	Con_Printf ("r_shadow std140 offsets: shadow_viewproj=%u shadow_params=%u shadow_debug=%u dlight_viewproj=%u dlight_atlas=%u dlight_info=%u dlight_params=%u\n",
+		(unsigned)offsetof (gpuframedata_t, shadow_viewproj),
+		(unsigned)offsetof (gpuframedata_t, shadow_params),
+		(unsigned)offsetof (gpuframedata_t, shadow_debug),
+		(unsigned)offsetof (gpuframedata_t, shadow_dlight_viewproj),
+		(unsigned)offsetof (gpuframedata_t, shadow_dlight_atlas),
+		(unsigned)offsetof (gpuframedata_t, shadow_dlight_info),
+		(unsigned)offsetof (gpuframedata_t, shadow_dlight_params));
+
+	Con_Printf ("r_shadow std140 first data: viewproj0=[%.6f %.6f %.6f %.6f] atlas0=[%.6f %.6f %.6f %.6f] params=[%.6f %.6f %.6f %.6f]\n",
+		r_framedata.shadow_dlight_viewproj[0][0], r_framedata.shadow_dlight_viewproj[0][1], r_framedata.shadow_dlight_viewproj[0][2], r_framedata.shadow_dlight_viewproj[0][3],
+		r_framedata.shadow_dlight_atlas[0][0], r_framedata.shadow_dlight_atlas[0][1], r_framedata.shadow_dlight_atlas[0][2], r_framedata.shadow_dlight_atlas[0][3],
+		r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3]);
+}
 
 static const char *R_Shadow_LogFBOStatusString (GLenum status)
 {
@@ -299,7 +329,7 @@ void R_EnsureShadowSamplerState (GLuint texture)
 	GL_ActiveTextureFunc (GL_TEXTURE0);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
 	glBindTexture (GL_TEXTURE_2D, texture);
-	R_Shadow_ApplyDepthSamplerState (r_shadow_debug.value >= 3.f ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	R_Shadow_ApplyDepthSamplerState ((r_shadow_debug.value >= 3.f || r_shadow_debug_atlas_overlay.value > 0.f) ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
 	if (r_shadow_debug.value >= 2.f && (r_framecount & 63) == 0)
 		R_Shadow_LogTextureParams ("receiver_sampler_validate", texture);
 	glBindTexture (GL_TEXTURE_2D, (GLuint)previous_binding);
@@ -1421,12 +1451,28 @@ void R_Shadow_DlightPass (void)
 		const gpulight_t *glight = &r_lightbuffer.lights[light_index];
 		float viewproj[16];
 		int tile_x = i % grid;
-		int tile_y = i / grid;
+		int tile_y_raw = i / grid;
+		int tile_y_render = tile_y_raw;
 		float scale = (float)shadow_dlight_tile_size / (float)shadow_dlight_atlas_size;
 		float offset_x = tile_x * scale;
-		float offset_y = tile_y * scale;
+		float offset_y = tile_y_raw * scale;
+		const int yflip_mode = (int)r_shadow_debug_yflip.value;
+
+		/*
+		 * OpenGL framebuffer origin is lower-left. Debug toggle for atlas Y-origin
+		 * mismatch hunting:
+		 * 1 = flip atlas offset only (sampling-side hypothesis)
+		 * 2 = flip viewport/scissor tile only (render placement hypothesis)
+		 * 3 = flip both
+		 */
+		if (yflip_mode == 1 || yflip_mode == 3)
+			offset_y = 1.0f - offset_y - scale;
+		if (yflip_mode == 2 || yflip_mode == 3)
+			tile_y_render = (grid - 1) - tile_y_raw;
 
 		R_Shadow_BuildDlightViewProj (viewproj, glight->pos, glight->radius);
+		if (r_shadow_debug_slot_overlay.value > 0.f)
+			viewproj[12] += 0.01f * (float)i;
 		memcpy (r_framedata.shadow_dlight_viewproj[i], viewproj, sizeof (viewproj));
 		r_framedata.shadow_dlight_atlas[i][0] = scale;
 		r_framedata.shadow_dlight_atlas[i][1] = scale;
@@ -1437,9 +1483,9 @@ void R_Shadow_DlightPass (void)
 		memcpy (r_framedata.shadow_viewproj, viewproj, sizeof (viewproj));
 		R_UploadFrameData ();
 
-		glViewport (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		glViewport (tile_x * shadow_dlight_tile_size, tile_y_render * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
-		glScissor (tile_x * shadow_dlight_tile_size, tile_y * shadow_dlight_tile_size,
+		glScissor (tile_x * shadow_dlight_tile_size, tile_y_render * shadow_dlight_tile_size,
 			shadow_dlight_tile_size, shadow_dlight_tile_size);
 		if (r_shadow_debug_source.value >= 1.f)
 			glClear (GL_COLOR_BUFFER_BIT);
@@ -1476,6 +1522,15 @@ void R_Shadow_DlightPass (void)
 				R_DrawAliasModels_Shadow (ents, count);
 				draws0 += count;
 			}
+		}
+
+		if (r_shadow_debug_slot_overlay.value > 0.f)
+		{
+			Con_Printf ("r_shadow caster frame=%d light=%d slot=%d tile=(%d,%d rawY=%d renderY=%d) atlas=(%.6f %.6f %.6f %.6f) hash=%08X\n",
+				r_framecount, light_index, i, tile_x, tile_y_raw, tile_y_raw, tile_y_render,
+				r_framedata.shadow_dlight_atlas[i][0], r_framedata.shadow_dlight_atlas[i][1],
+				r_framedata.shadow_dlight_atlas[i][2], r_framedata.shadow_dlight_atlas[i][3],
+				R_Shadow_MatrixHash (viewproj));
 		}
 	}
 
@@ -1520,6 +1575,18 @@ void R_Shadow_DlightPass (void)
 			R_Shadow_MatrixHash (receiver_viewproj),
 			shadow_dlight_atlas_valid_frame_id, r_framecount);
 	}
+	if (r_shadow_debug_slot_overlay.value > 0.f && shadow_dlight_selected_slot >= 0)
+	{
+		const int selected_light_index = shadow_dlight_light_indices[shadow_dlight_selected_slot];
+		Con_Printf ("r_shadow receiver frame=%d light=%d slot=%d atlas=(%.6f %.6f %.6f %.6f) hash=%08X\n",
+			r_framecount, selected_light_index, shadow_dlight_selected_slot,
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][0],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][1],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][2],
+			r_framedata.shadow_dlight_atlas[shadow_dlight_selected_slot][3],
+			R_Shadow_MatrixHash (r_framedata.shadow_dlight_viewproj[shadow_dlight_selected_slot]));
+	}
+	R_Shadow_DebugDumpStd140Layout ();
 	R_UploadFrameData ();
 
 	// Restore a color draw buffer before handing this FBO into the next frame.
@@ -1532,7 +1599,10 @@ void R_Shadow_DlightPass (void)
 void R_Shadow_DrawDebug (void)
 {
 	int mode = (int)r_shadow_debug.value;
-	if (mode != 5)
+	qboolean show_old_debug = (mode == 5);
+	qboolean show_atlas_overlay = r_shadow_debug_atlas_overlay.value > 0.f;
+	qboolean show_slot_overlay = r_shadow_debug_slot_overlay.value > 0.f;
+	if (!show_old_debug && !show_atlas_overlay && !show_slot_overlay)
 		return;
 	if (!glprogs.shadow_debug)
 		return;
@@ -1541,10 +1611,53 @@ void R_Shadow_DrawDebug (void)
 
 	GL_BeginGroup ("Shadow map debug");
 
-	GL_UseProgram (glprogs.shadow_debug);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
+	if (show_old_debug || show_atlas_overlay)
+	{
+		int vp_x = show_old_debug ? 0 : 8;
+		int vp_y = show_old_debug ? 0 : 8;
+		int vp_w = show_old_debug ? glwidth : q_max (128, glwidth / 4);
+		int vp_h = show_old_debug ? glheight : q_max (128, glheight / 4);
+		GL_UseProgram (glprogs.shadow_debug);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+		GL_Uniform1iFunc (0, show_old_debug ? 0 : 1);
+		GL_Uniform4fFunc (1, 0.f, 0.f, 1.f, 1.f);
+		glViewport (vp_x, vp_y, vp_w, vp_h);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+		glViewport (glx, gly, glwidth, glheight);
+	}
+
+	if (show_slot_overlay && shadow_dlight_selected_slot >= 0)
+	{
+		const int slot = shadow_dlight_selected_slot;
+		const float scale_x = r_framedata.shadow_dlight_atlas[slot][0];
+		const float scale_y = r_framedata.shadow_dlight_atlas[slot][1];
+		const float offs_x = r_framedata.shadow_dlight_atlas[slot][2];
+		const float offs_y = r_framedata.shadow_dlight_atlas[slot][3];
+		char line[256];
+		GL_UseProgram (glprogs.shadow_debug);
+		GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+		GL_Uniform1iFunc (0, 1);
+		GL_Uniform4fFunc (1, offs_x, offs_y, offs_x + scale_x, offs_y + scale_y);
+		glViewport (8, q_max (8, glheight / 4 + 20), q_max (96, glwidth / 8), q_max (96, glheight / 8));
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+		glViewport (glx, gly, glwidth, glheight);
+
+		q_snprintf (line, sizeof (line), "sh slot=%d light=%d tile=(%.3f %.3f %.3f %.3f) atlas=%d hash=%08X",
+			slot,
+			shadow_dlight_light_indices[slot],
+			scale_x, scale_y, offs_x, offs_y,
+			shadow_dlight_atlas_size,
+			R_Shadow_MatrixHash (r_framedata.shadow_dlight_viewproj[slot]));
+		Draw_String (8, 8, line);
+
+		if (shadow_dlight_debug_slot_last_frame != r_framecount)
+		{
+			shadow_dlight_debug_slot_last_frame = r_framecount;
+			Con_Printf ("r_shadow slot_overlay frame=%d %s\n", r_framecount, line);
+		}
+	}
 
 	GL_EndGroup ();
 }
