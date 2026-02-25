@@ -610,6 +610,8 @@ typedef struct glprogs_s {
 	GLuint		bloom_blur;
 	GLuint		ssao;
 	GLuint		ssao_blur;
+	GLuint		ssao_temporal;
+	GLuint		depth_pyramid;
 	GLuint		godrays_mask;
 	GLuint		godrays;
 	GLuint		godrays_source;
@@ -721,8 +723,17 @@ typedef struct glframebufs_s {
 		GLuint		noise_tex;
 		GLuint		ao_tex[2];
 		GLuint		blur_tex[2];
+		GLuint		history_tex[2];
+		GLuint		resolved_tex[2];
+		GLuint		temporal_fbo[2];
+		GLuint		resolved_fbo[2];
 		GLuint		ao_fbo[2];
 		GLuint		blur_fbo[2];
+		GLuint		depth_pyramid_tex;
+		GLuint		depth_pyramid_fbo;
+		int			depth_pyramid_levels;
+		int			history_index;
+		qboolean	history_valid;
 		int			width[2];
 		int			height[2];
 	}				ssao;
