@@ -303,6 +303,7 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
+cvar_t	r_autoexposure_async = { "r_autoexposure_async", "1", CVAR_ARCHIVE };
 cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.001", CVAR_ARCHIVE };
 cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.25", CVAR_ARCHIVE };
 cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "8.0", CVAR_ARCHIVE };
@@ -748,6 +749,10 @@ static GLuint GL_CreateSimpleFBO (GLenum target, GLuint colors, GLuint depth, GL
 	return GL_CreateFBO (target, colors ? &colors : NULL, colors ? 1 : 0, depth, stencil, name);
 }
 
+static qboolean GL_AutoExposurePBOAvailable (void);
+static void GL_AutoExposureDeletePBOs (void);
+static void GL_AutoExposureInitPBOs (void);
+
 /*
 =============
 GL_CreateFrameBuffers
@@ -809,6 +814,7 @@ void GL_CreateFrameBuffers (void)
 	framebufs.autoexposure.tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.autoexposure.width, framebufs.autoexposure.height,
 		GL_LINEAR, "autoexposure downscale");
 	framebufs.autoexposure.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.autoexposure.tex, 0, 0, "autoexposure fbo");
+	GL_AutoExposureInitPBOs ();
 
 	framebufs.bloom.width = q_max (1, vid.width / 2);
 	framebufs.bloom.height = q_max (1, vid.height / 2);
@@ -940,6 +946,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.composite_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.finalcopy_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
+	GL_AutoExposureDeletePBOs ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
@@ -1929,13 +1936,60 @@ static int GL_CompareFloat (const void *a, const void *b)
 	return 0;
 }
 
+static qboolean GL_AutoExposurePBOAvailable (void)
+{
+	return GL_BindBufferFunc && GL_GenBuffersFunc && GL_BufferDataFunc && GL_DeleteBuffersFunc
+		&& GL_MapBufferRangeFunc && GL_UnmapBufferFunc;
+}
+
+static void GL_AutoExposureDeletePBOs (void)
+{
+	if (GL_AutoExposurePBOAvailable ())
+	{
+		if (framebufs.autoexposure.pbo[0] || framebufs.autoexposure.pbo[1])
+			GL_DeleteBuffersFunc (2, framebufs.autoexposure.pbo);
+		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, 0);
+	}
+
+	memset (framebufs.autoexposure.pbo, 0, sizeof (framebufs.autoexposure.pbo));
+	framebufs.autoexposure.pbo_index = 0;
+	framebufs.autoexposure.pbo_ready = false;
+}
+
+static void GL_AutoExposureInitPBOs (void)
+{
+	const GLsizeiptr size = (GLsizeiptr)(framebufs.autoexposure.width * framebufs.autoexposure.height * 4 * (int)sizeof (float));
+
+	GL_AutoExposureDeletePBOs ();
+
+	if (!GL_AutoExposurePBOAvailable () || size <= 0)
+		return;
+
+	GL_GenBuffersFunc (2, framebufs.autoexposure.pbo);
+	if (!framebufs.autoexposure.pbo[0] || !framebufs.autoexposure.pbo[1])
+	{
+		GL_AutoExposureDeletePBOs ();
+		return;
+	}
+
+	for (int i = 0; i < 2; ++i)
+	{
+		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, framebufs.autoexposure.pbo[i]);
+		GL_BufferDataFunc (GL_PIXEL_PACK_BUFFER, size, NULL, GL_STREAM_READ);
+	}
+	GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, 0);
+	framebufs.autoexposure.pbo_ready = false;
+}
+
 static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 {
 	const int width = framebufs.autoexposure.width;
 	const int height = framebufs.autoexposure.height;
 	const int pixel_count = width * height;
+	const GLsizeiptr pbo_size = (GLsizeiptr)(pixel_count * 4 * (int)sizeof (float));
 	float pixels[16 * 16 * 4];
 	float luminance_samples[16 * 16];
+	GLint prev_pack_alignment = 4;
 
 	if (framebufs.composite.fbo == 0 || framebufs.autoexposure.fbo == 0)
 		return false;
@@ -1948,7 +2002,52 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
 	glReadBuffer (GL_COLOR_ATTACHMENT0);
-	glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
+	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
+	glPixelStorei (GL_PACK_ALIGNMENT, 1);
+
+	if (r_autoexposure_async.value > 0.f && framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
+	{
+		const int write_index = framebufs.autoexposure.pbo_index;
+		const int read_index = write_index ^ 1;
+		qboolean got_data = false;
+
+		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, framebufs.autoexposure.pbo[write_index]);
+		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, NULL);
+
+		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, framebufs.autoexposure.pbo[read_index]);
+		if (framebufs.autoexposure.pbo_ready)
+		{
+			void *mapped = GL_MapBufferRangeFunc (GL_PIXEL_PACK_BUFFER, 0, pbo_size, GL_MAP_READ_BIT);
+			if (mapped)
+			{
+				memcpy (pixels, mapped, (size_t)pbo_size);
+				GL_UnmapBufferFunc (GL_PIXEL_PACK_BUFFER);
+				got_data = true;
+			}
+		}
+
+		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, 0);
+		framebufs.autoexposure.pbo_index = read_index;
+		framebufs.autoexposure.pbo_ready = true;
+		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+
+		if (!got_data)
+		{
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+			glReadBuffer (GL_BACK);
+			return false;
+		}
+	}
+	else
+	{
+		if (r_autoexposure_async.value > 0.f && GL_AutoExposurePBOAvailable () && !framebufs.autoexposure.pbo_ready)
+			GL_AutoExposureInitPBOs ();
+		else if (r_autoexposure_async.value <= 0.f && framebufs.autoexposure.pbo_ready)
+			GL_AutoExposureDeletePBOs ();
+
+		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
+		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+	}
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glReadBuffer (GL_BACK);
 
@@ -3906,6 +4005,8 @@ static void R_ShowBoundingBoxes (void)
 	qcvm_t* oldvm;	//in case we ever draw a scene from within csqc.
 	float		dist, bestdist, extend;
 	vec3_t		rcpdelta;
+	const float	bbox_rcp_epsilon = 1e-6f;
+	int			numentityfields;
 
 	VEC_CLEAR (bbox_edicts);
 	VEC_CLEAR (bbox_linked);
@@ -3935,7 +4036,10 @@ static void R_ShowBoundingBoxes (void)
 
 	// Compute ray reciprocal delta
 	for (i = 0; i < 3; i++)
-		rcpdelta[i] = 1.f / (gl_farclip.value * vpn[i]);
+	{
+		const float denom = gl_farclip.value * vpn[i];
+		rcpdelta[i] = (fabsf (denom) > bbox_rcp_epsilon) ? (1.f / denom) : 0.f;
+	}
 
 	// Iterate over all server entities
 	bestdist = FLT_MAX;
@@ -3995,13 +4099,25 @@ static void R_ShowBoundingBoxes (void)
 
 	if (focused && r_showbboxes_links.value)
 	{
+		if (!qcvm || !qcvm->entityfieldofs)
+			numentityfields = 0;
+		else if (qcvm->numentityfields < 0 || qcvm->numentityfields > 16384)
+			numentityfields = 0;
+		else
+			numentityfields = qcvm->numentityfields;
+
 		// Find outgoing links (entity field references other than .chain)
-		if ((int)r_showbboxes_links.value & SHOWBBOX_LINK_OUTGOING)
+		if (((int)r_showbboxes_links.value & SHOWBBOX_LINK_OUTGOING) && numentityfields)
 		{
-			for (i = 0; i < qcvm->numentityfields; i++)
+			for (i = 0; i < numentityfields; i++)
 			{
-				eval_t* val = (eval_t*)((char*)&focused->v + qcvm->entityfieldofs[i]);
-				if (qcvm->entityfieldofs[i] == offsetof (entvars_t, chain) || !val->edict)
+				const int fieldofs = qcvm->entityfieldofs[i];
+				eval_t* val;
+
+				if (fieldofs < 0 || fieldofs > (int)sizeof (entvars_t) - (int)sizeof (eval_t))
+					continue;
+				val = (eval_t*)((char*)&focused->v + fieldofs);
+				if (fieldofs == offsetof (entvars_t, chain) || !val->edict)
 					continue;
 				ed = PROG_TO_EDICT (val->edict);
 				if (ed == focused || ed->free || ed == sv_player)
@@ -4012,7 +4128,7 @@ static void R_ShowBoundingBoxes (void)
 
 		// Inspect all other edicts to find incoming links
 		// (either entity field references or target/targetname matches)
-		if ((int)r_showbboxes_links.value & SHOWBBOX_LINK_INCOMING || r_showbboxes_targets.value)
+		if (((int)r_showbboxes_links.value & SHOWBBOX_LINK_INCOMING) || r_showbboxes_targets.value)
 		{
 			const char* focus_target = PR_GetString (focused->v.target);
 			const char* focus_targetname = PR_GetString (focused->v.targetname);
@@ -4035,12 +4151,17 @@ static void R_ShowBoundingBoxes (void)
 				}
 
 				// Check for entity field references (other than .chain)
-				if ((int)r_showbboxes_links.value & SHOWBBOX_LINK_INCOMING)
+				if (((int)r_showbboxes_links.value & SHOWBBOX_LINK_INCOMING) && numentityfields)
 				{
-					for (j = 0; j < qcvm->numentityfields; j++)
+					for (j = 0; j < numentityfields; j++)
 					{
-						eval_t* val = (eval_t*)((char*)&ed->v + qcvm->entityfieldofs[j]);
-						if (qcvm->entityfieldofs[i] == offsetof (entvars_t, chain) || !val->edict)
+						const int fieldofs = qcvm->entityfieldofs[j];
+						eval_t* val;
+
+						if (fieldofs < 0 || fieldofs > (int)sizeof (entvars_t) - (int)sizeof (eval_t))
+							continue;
+						val = (eval_t*)((char*)&ed->v + fieldofs);
+						if (fieldofs == offsetof (entvars_t, chain) || !val->edict)
 							continue;
 						if (PROG_TO_EDICT (val->edict) == focused)
 							R_AddHighlightedEntity (ed, SHOWBBOX_LINK_INCOMING);

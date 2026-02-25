@@ -730,6 +730,9 @@ typedef struct glframebufs_s {
 	struct {
 		GLuint		tex;
 		GLuint		fbo;
+		GLuint		pbo[2];
+		int			pbo_index;
+		qboolean	pbo_ready;
 		int			width;
 		int			height;
 	}				autoexposure;
