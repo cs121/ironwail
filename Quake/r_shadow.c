@@ -73,6 +73,7 @@ typedef struct shadow_log_state_s {
 	int last_rate_frame;
 	GLuint last_shadow_tex;
 	GLenum last_shadow_compare_mode;
+	GLenum last_shadow_compare_func;
 	GLint last_shadow_sampler_unit;
 	GLint last_program;
 } shadow_log_state_t;
@@ -137,6 +138,41 @@ static const char *R_Shadow_LogGLErrorString (GLenum err)
 	case GL_OUT_OF_MEMORY: return "GL_OUT_OF_MEMORY";
 	case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
 	default: return "GL_UNKNOWN_ERROR";
+	}
+}
+
+static const char *R_Shadow_DepthFuncName (GLenum func)
+{
+	switch (func)
+	{
+	case GL_LEQUAL: return "LEQUAL";
+	case GL_GEQUAL: return "GEQUAL";
+	case GL_LESS: return "LESS";
+	case GL_GREATER: return "GREATER";
+	case GL_EQUAL: return "EQUAL";
+	case GL_NOTEQUAL: return "NOTEQUAL";
+	case GL_ALWAYS: return "ALWAYS";
+	case GL_NEVER: return "NEVER";
+	default: return "UNKNOWN";
+	}
+}
+
+static const char *R_Shadow_CompareFuncName (GLenum func)
+{
+	return R_Shadow_DepthFuncName (func);
+}
+
+static void R_Shadow_SetDepthConvention (qboolean reverse_z)
+{
+	if (reverse_z)
+	{
+		glDepthFunc (GL_GEQUAL);
+		glClearDepth (0.0);
+	}
+	else
+	{
+		glDepthFunc (GL_LEQUAL);
+		glClearDepth (1.0);
 	}
 }
 
@@ -263,6 +299,7 @@ static void R_Shadow_LogTextureParams (const char *tag, GLuint tex)
 	if (cfunc != (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL))
 		R_Shadow_LogWrite ("WARN unexpected texture compare func 0x%X expected=0x%X\n", (unsigned)cfunc, (unsigned)(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL));
 	shdlog.last_shadow_compare_mode = (GLenum)cmode;
+	shdlog.last_shadow_compare_func = (GLenum)cfunc;
 }
 
 static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
@@ -641,6 +678,26 @@ void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_
 		tag, depthtest, depthwrite, (unsigned)depthfunc, cullen, (unsigned)cullmode, po, pof, pou);
 	R_Shadow_LogGlobalGLState (tag);
 	R_Shadow_LogTextureParams (tag, depth_tex);
+	R_Shadow_LogWrite ("%s reverse_z=%d clearDepth=%.3f depth_func=%s compare_func=%s\n",
+		tag,
+		gl_clipcontrol_able ? 1 : 0,
+		depthclear,
+		R_Shadow_DepthFuncName ((GLenum)depthfunc),
+		R_Shadow_CompareFuncName (shdlog.last_shadow_compare_func));
+	if (gl_clipcontrol_able)
+	{
+		if (depthfunc != GL_GEQUAL)
+			R_Shadow_LogWrite ("WARN reverse_z ON but depth_func=%s (expected GEQUAL)\n", R_Shadow_DepthFuncName ((GLenum)depthfunc));
+		if (shdlog.last_shadow_compare_mode == GL_COMPARE_REF_TO_TEXTURE && shdlog.last_shadow_compare_func != GL_GEQUAL)
+			R_Shadow_LogWrite ("WARN reverse_z ON but compare_func=%s (expected GEQUAL)\n", R_Shadow_CompareFuncName (shdlog.last_shadow_compare_func));
+	}
+	else
+	{
+		if (depthfunc != GL_LEQUAL)
+			R_Shadow_LogWrite ("WARN reverse_z OFF but depth_func=%s (expected LEQUAL)\n", R_Shadow_DepthFuncName ((GLenum)depthfunc));
+		if (shdlog.last_shadow_compare_mode == GL_COMPARE_REF_TO_TEXTURE && shdlog.last_shadow_compare_func != GL_LEQUAL)
+			R_Shadow_LogWrite ("WARN reverse_z OFF but compare_func=%s (expected LEQUAL)\n", R_Shadow_CompareFuncName (shdlog.last_shadow_compare_func));
+	}
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 		R_Shadow_LogWrite ("WARN shadow FBO incomplete for %s\n", tag);
 	R_Shadow_LogGLStage (tag);
@@ -1423,17 +1480,7 @@ void R_Shadow_DlightPass (void)
 		glDrawBuffer (GL_NONE);
 		glReadBuffer (GL_NONE);
 	}
-	// FIX: Same reversed-Z depth correction as SunPass.
-	if (gl_clipcontrol_able)
-	{
-		glDepthFunc (GL_GREATER);
-		glClearDepth (0.0);
-	}
-	else
-	{
-		glDepthFunc (GL_LESS);
-		glClearDepth (1.0);
-	}
+	R_Shadow_SetDepthConvention (gl_clipcontrol_able);
 	GL_SetScissorEnabled (true);
 
 	grid = shadow_dlight_atlas_size / shadow_dlight_tile_size;
