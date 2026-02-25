@@ -289,6 +289,11 @@ vec4 ShadowDebugDlight(vec3 world_pos, uint light_index)
     if (!inside)
         return vec4(1.0, 0.0, 0.0, 1.0);
 
+    if (SHADOW_DEBUG_VALUES.y >= 5.5 && SHADOW_DEBUG_VALUES.y < 6.5)
+        return vec4(atlas.xyz, 1.0);
+    if (SHADOW_DEBUG_VALUES.y >= 6.5 && SHADOW_DEBUG_VALUES.y < 7.5)
+        return vec4(ShadowDlightParams.xy, ShadowParams.xy);
+
     return vec4(uv, reference, 1.0);
 }
 
