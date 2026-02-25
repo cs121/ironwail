@@ -26,6 +26,10 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_dlight_distance;
 extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_dlight_pcf_taps;
+extern cvar_t r_shadow_dlight_aim;
+extern cvar_t r_shadow_dlight_aim_dist;
+extern cvar_t r_shadow_dlight_fov;
+extern cvar_t r_shadow_matrix_debug;
 extern cvar_t r_shadow_debug_nocull;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 
@@ -876,37 +880,54 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	vec3_t up = { 0.f, 0.f, 1.f };
 	vec3_t right;
 	vec3_t light_up;
+	vec3_t target;
+	vec3_t to_target;
 	float basis_det;
 	float view[16];
 	float proj[16];
+	float viewproj_view_first[16];
 	float znear;
 	float zfar;
+	float fov_deg;
+	int aim_mode;
+	qboolean matrix_debug;
 
-	/* FIX Shadow-Frustum Ausrichtung:
-	 * Vorher: forward = vieworg - lightpos  -> Licht schaut immer auf den
-	 * Spieler, nicht auf die Szene. Geometrie hinter dem Spieler (aus
-	 * Lichtsicht) fehlt komplett im Shadow-Atlas -> schwarze Wand-Artefakte.
-	 * FIX: Licht schaut in Richtung des Spielers ABER basierend auf der
-	 * tatsaechlichen Blickrichtung des Lichts zur Kamera, mit groesserem
-	 * FOV (120 Grad) um mehr Szenengeometrie abzudecken. Fallback: abwaerts.
-	 * Fuer ein echtes Punkt-Licht waere eine Cubemap noetig; diese Ein-Frustum-
-	 * Annaeherung ist ein pragmatischer Kompromiss der den haufigsten Fall
-	 * (Licht neben/ueber dem Spieler) korrekt behandelt. */
+	aim_mode = CLAMP (0, (int)Q_rint (r_shadow_dlight_aim.value), 2);
+	matrix_debug = r_shadow_matrix_debug.value > 0.f;
+
+	/* Dlight frustum aiming modes:
+	 * 0: legacy, look at camera position (vieworg)
+	 * 1: default, look at a target on the camera forward ray (vieworg + vpn * d)
+	 * 2: fixed stable fallback direction
+	 */
+	if (aim_mode == 0)
 	{
-		vec3_t to_viewer;
-		VectorSubtract (r_refdef.vieworg, origin, to_viewer);
-		if (VectorNormalize (to_viewer) > 0.f)
-		{
-			/* Hauptrichtung: vom Licht zur Kamera */
-			VectorCopy (to_viewer, forward);
-		}
-		else
-		{
-			/* Fallback: Licht schaut abwaerts */
-			forward[0] = 0.f;
-			forward[1] = 0.f;
-			forward[2] = -1.f;
-		}
+		VectorSubtract (r_refdef.vieworg, origin, to_target);
+	}
+	else if (aim_mode == 1)
+	{
+		float aim_dist = r_shadow_dlight_aim_dist.value;
+		if (!isfinite (aim_dist) || aim_dist <= 0.f)
+			aim_dist = 256.f;
+		if (radius > 1.f)
+			aim_dist = CLAMP (8.f, aim_dist, radius);
+		VectorMA (r_refdef.vieworg, aim_dist, vpn, target);
+		VectorSubtract (target, origin, to_target);
+	}
+	else
+	{
+		to_target[0] = 0.f;
+		to_target[1] = 0.f;
+		to_target[2] = -1.f;
+	}
+
+	if (VectorNormalize (to_target) > 0.f)
+		VectorCopy (to_target, forward);
+	else
+	{
+		forward[0] = 0.f;
+		forward[1] = 0.f;
+		forward[2] = -1.f;
 	}
 
 	if (fabsf (DotProduct (forward, up)) > 0.95f)
@@ -919,7 +940,7 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	R_Shadow_BuildOrthoBasisRH (forward, up, right, light_up);
 	basis_det = R_Shadow_BasisDet3x3 (right, light_up, forward);
 #if defined(SHDLOG)
-	if (basis_det <= 0.f && (r_shadow_debug.value > 0.f || r_shadow_log.value > 0.f || developer.value > 0.f))
+	if (basis_det <= 0.f && (r_shadow_debug.value > 0.f || r_shadow_log.value > 0.f || developer.value > 0.f || matrix_debug))
 	{
 		R_Shadow_LogWrite ("WARN dlight basis mirrored/degenerate det3x3=%.6g fwd=(%.6f %.6f %.6f) right=(%.6f %.6f %.6f) up=(%.6f %.6f %.6f)\n",
 			basis_det,
@@ -937,13 +958,29 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	zfar = q_max (radius, znear + 1.f);
 	if (zfar - znear < 1.f)
 		zfar = znear + 1.f;
-	/* FIX: FOV von 90 auf 120 Grad erhoehen um mehr Szenengeometrie
-	 * im Shadow-Frustum zu erfassen. 90 Grad war zu eng fuer Punkt-Lichter
-	 * die seitlich neben dem Spieler positioniert sind. */
-	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (120.f), DEG2RAD (120.f), znear, zfar);
+	fov_deg = CLAMP (45.f, r_shadow_dlight_fov.value, 140.f);
+	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (fov_deg), DEG2RAD (fov_deg), znear, zfar);
 
+	/* MatrixMultiply(left,right) uses column-major multiplication with left = left * right.
+	 * For shader usage clip = viewproj * world_pos we must build viewproj = proj * view.
+	 */
 	memcpy (out_viewproj, proj, sizeof (proj));
 	MatrixMultiply (out_viewproj, view);
+
+	if (matrix_debug)
+	{
+		memcpy (viewproj_view_first, view, sizeof (view));
+		MatrixMultiply (viewproj_view_first, proj);
+		Con_DPrintf ("r_shadow_matrix_debug: aim=%d fov=%.1f origin=(%.1f %.1f %.1f) fwd=(%.3f %.3f %.3f) right=(%.3f %.3f %.3f) up=(%.3f %.3f %.3f) det=%.6g hash(pv)=%08X hash(vp)=%08X\n",
+			aim_mode, fov_deg,
+			origin[0], origin[1], origin[2],
+			forward[0], forward[1], forward[2],
+			right[0], right[1], right[2],
+			light_up[0], light_up[1], light_up[2],
+			basis_det,
+			R_Shadow_MatrixHash (out_viewproj),
+			R_Shadow_MatrixHash (viewproj_view_first));
+	}
 }
 
 static void R_Shadow_ResizeDlightAtlasIfNeeded (void)

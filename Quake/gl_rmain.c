@@ -273,6 +273,10 @@ cvar_t	r_shadow_dlight_size = { "r_shadow_dlight_size", "256", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_distance = { "r_shadow_dlight_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.0025", CVAR_ARCHIVE };
 cvar_t	r_shadow_dlight_pcf_taps = { "r_shadow_dlight_pcf_taps", "4", CVAR_ARCHIVE };
+cvar_t	r_shadow_dlight_aim = { "r_shadow_dlight_aim", "1", CVAR_ARCHIVE }; // 0=legacy(vieworg), 1=view forward ray target, 2=fixed fallback
+cvar_t	r_shadow_dlight_aim_dist = { "r_shadow_dlight_aim_dist", "256", CVAR_ARCHIVE }; // mode 1 forward-ray distance (clamped to radius)
+cvar_t	r_shadow_dlight_fov = { "r_shadow_dlight_fov", "100", CVAR_ARCHIVE }; // single-frustum point-light approximation FOV
+cvar_t	r_shadow_matrix_debug = { "r_shadow_matrix_debug", "0", CVAR_NONE }; // 0=off, 1=log selected dlight matrix/basis checks
 cvar_t	r_shadow_lightgrid = { "r_shadow_lightgrid", "0", CVAR_ARCHIVE };
 cvar_t	r_shadow_lightgrid_mode = { "r_shadow_lightgrid_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_shadow_log = { "r_shadow_log", "0", CVAR_NONE };

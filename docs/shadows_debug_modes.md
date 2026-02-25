@@ -15,6 +15,17 @@ These CVars isolate *pipeline wiring* issues from real shadow math issues.
 - `r_shadow_debug_source` (default `0`)
   - `0`: sample normal shadow depth atlas
   - `1`: use a debug **color atlas source** rendered in the shadow pass
+- `r_shadow_dlight_aim` (default `1`)
+  - `0`: legacy dlight shadow aim at `vieworg` (A/B regression mode)
+  - `1`: aim toward `vieworg + vpn * r_shadow_dlight_aim_dist` (default, more stable)
+  - `2`: fixed fallback direction `(0,0,-1)`
+- `r_shadow_dlight_aim_dist` (default `256`)
+  - forward-ray target distance used by `r_shadow_dlight_aim 1` (clamped to light radius)
+- `r_shadow_dlight_fov` (default `100`)
+  - single-frustum dynamic-light shadow FOV in degrees
+- `r_shadow_matrix_debug` (default `0`)
+  - `0`: off
+  - `1`: log dlight basis + matrix hash for `proj*view` and `view*proj` to validate matrix order
 
 ## Quick tests
 
@@ -54,4 +65,6 @@ Expected:
 r_shadow_debug 0
 r_shadow_debug_dummytex 0
 r_shadow_debug_source 0
+r_shadow_matrix_debug 0
+r_shadow_dlight_aim 1
 ```
