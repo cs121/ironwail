@@ -653,8 +653,6 @@ void GL_CreateShaders (void)
     glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
-	glprogs.ssao_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_temporal.frag"), "ssao temporal");
-	glprogs.depth_pyramid = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("depth_pyramid.frag"), "depth pyramid");
 	glprogs.godrays_mask = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_mask.frag"), "godrays mask");
 	glprogs.godrays = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"), "godrays");
 	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");

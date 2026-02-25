@@ -1,6 +1,5 @@
 layout(binding=0) uniform sampler2D DepthTexture;
 layout(binding=1) uniform sampler2D NoiseTexture;
-layout(binding=2) uniform sampler2D DepthPyramid;
 
 #include "frame_uniforms.glsl"
 
@@ -189,13 +188,6 @@ float DepthRawFromPixel(ivec2 pixel)
 float DepthRawFromUv(vec2 uv)
 {
 	return DepthRawFromPixel(ScreenPixelFromUv(uv));
-}
-
-float DepthRawFromUvPyramid(vec2 uv, float footprintPx)
-{
-	float maxMip = max(u_fogParams.y - 1.0, 0.0);
-	float mip = clamp(log2(max(footprintPx, 1.0)), 0.0, maxMip);
-	return textureLod(DepthPyramid, uv, mip).r;
 }
 
 vec3 ComputeNormalFromViewPos(vec3 viewPos)
@@ -460,8 +452,7 @@ void main()
 		sampleUV = ApplyYFlip(sampleUV);
 		if (!all(greaterThanEqual(sampleUV, u_viewRect.xy)) || !all(lessThanEqual(sampleUV, u_viewRect.zw)))
 			continue;
-		float sampleFootprintPx = length(sampleVec.yz) * u_params0.x / max(samplePos.x, 1e-3) * u_screenParams.w;
-		float sampleDepthRaw = (u_fogParams.z > 0.5) ? DepthRawFromUvPyramid(sampleUV, sampleFootprintPx) : DepthRawFromUv(sampleUV);
+		float sampleDepthRaw = DepthRawFromUv(sampleUV);
 		if (IsSkyDepth(sampleDepthRaw, u_depthParams))
 			continue;
 		float sampleViewDepth = ViewZFromDepth(sampleUV, sampleDepthRaw);
@@ -478,12 +469,6 @@ void main()
 	{
 		float ratio = clamp(validSamples / float(samples), 0.0, 1.0);
 		outColor = vec4(vec3(ratio), 1.0);
-		return;
-	}
-	if (int(u_fogParams.w + 0.5) == 17)
-	{
-		float estMip = clamp(log2(max(radius * 0.1, 1.0)), 0.0, max(u_fogParams.y - 1.0, 0.0));
-		outColor = vec4(estMip / max(u_fogParams.y - 1.0, 1.0), 0.0, 1.0 - estMip / max(u_fogParams.y - 1.0, 1.0), 1.0);
 		return;
 	}
 

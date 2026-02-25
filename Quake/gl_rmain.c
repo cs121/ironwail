@@ -394,7 +394,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance, 14 fog-damped AO, 15 temporal history reprojection, 16 temporal clamp factor, 17 depth pyramid mip selection.
+// r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance, 14 fog-damped AO.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -702,36 +702,6 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 
 	return texnum;
 }
-static GLuint GL_CreateTexture2DMipped (GLenum format, int width, int height, GLenum minfilter, const char* name, int *out_levels)
-{
-	GLuint texnum;
-	int levels = 1;
-	int w = width;
-	int h = height;
-	while (w > 1 || h > 1)
-	{
-		w = q_max (1, w / 2);
-		h = q_max (1, h / 2);
-		levels++;
-	}
-	if (out_levels)
-		*out_levels = levels;
-
-	glGenTextures (1, &texnum);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
-	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
-	GL_TexStorage2DFunc (GL_TEXTURE_2D, levels, format, width, height);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minfilter);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
-	GL_LogErrorIfDeveloper ("GL_CreateTexture2DMipped");
-
-	return texnum;
-}
-
 
 static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, GLuint depth, GLuint stencil, const char* name)
 {
@@ -871,8 +841,6 @@ void GL_CreateFrameBuffers (void)
 	framebufs.ssao.height[0] = vid.height;
 	framebufs.ssao.width[1] = q_max (1, vid.width / 2);
 	framebufs.ssao.height[1] = q_max (1, vid.height / 2);
-	framebufs.ssao.history_index = 0;
-	framebufs.ssao.history_valid = false;
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
@@ -885,13 +853,7 @@ void GL_CreateFrameBuffers (void)
 		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao blur %s", suffix));
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
 		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
-		framebufs.ssao.history_tex[i] = GL_CreateTexture2D (ssao_format, framebufs.ssao.width[1], framebufs.ssao.height[1], GL_NEAREST, va ("ssao history %d", i));
-		framebufs.ssao.resolved_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao resolved %s", suffix));
-		framebufs.ssao.temporal_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.history_tex[i], 0, 0, va ("ssao temporal fbo %d", i));
-		framebufs.ssao.resolved_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.resolved_tex[i], 0, 0, va ("ssao resolved fbo %s", suffix));
 	}
-	framebufs.ssao.depth_pyramid_tex = GL_CreateTexture2DMipped (GL_R32F, vid.width, vid.height, GL_NEAREST_MIPMAP_NEAREST, "ssao depth pyramid", &framebufs.ssao.depth_pyramid_levels);
-	framebufs.ssao.depth_pyramid_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.depth_pyramid_tex, 0, 0, "ssao depth pyramid fbo");
 
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
@@ -995,10 +957,7 @@ void GL_DeleteFrameBuffers (void)
 	{
 		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.ao_fbo[i]);
 		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.blur_fbo[i]);
-		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.temporal_fbo[i]);
-		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.resolved_fbo[i]);
 	}
-	GL_DeleteFramebuffersFunc (1, &framebufs.ssao.depth_pyramid_fbo);
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
@@ -1028,10 +987,7 @@ void GL_DeleteFrameBuffers (void)
 	{
 		GL_DeleteNativeTexture (framebufs.ssao.ao_tex[i]);
 		GL_DeleteNativeTexture (framebufs.ssao.blur_tex[i]);
-		GL_DeleteNativeTexture (framebufs.ssao.history_tex[i]);
-		GL_DeleteNativeTexture (framebufs.ssao.resolved_tex[i]);
 	}
-	GL_DeleteNativeTexture (framebufs.ssao.depth_pyramid_tex);
 	GL_DeleteNativeTexture (framebufs.composite.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.composite.color_tex);
 
@@ -1331,93 +1287,6 @@ static float R_SanitizeSSAOValue (float value, float fallback, float minval, flo
 	return value;
 }
 
-// SSAO mode precedence: r_ssao_force_fullres > r_ssao_halfres (half-res default in shipped config).
-static qboolean R_SSAOUseHalfRes (void)
-{
-	if (r_ssao_force_fullres.value > 0.f)
-		return false;
-	return (r_ssao_halfres.value > 0.f);
-}
-
-static void R_SSAOInvalidateTemporalHistory (void)
-{
-	framebufs.ssao.history_valid = false;
-	framebufs.ssao.history_index = 0;
-}
-
-// Reverse-Z handling: pyramid keeps hardware depth and uses max-reduction for reversed clip control, min otherwise.
-static void GL_BuildSSAODepthPyramid (int reversed_z_mode)
-{
-	if (!glprogs.depth_pyramid || !framebufs.ssao.depth_pyramid_tex)
-		return;
-
-	GL_BeginGroup ("SSAO depth pyramid");
-	GL_UseProgram (glprogs.depth_pyramid);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-	for (int level = 0; level < framebufs.ssao.depth_pyramid_levels; ++level)
-	{
-		int w = q_max (1, vid.width >> level);
-		int h = q_max (1, vid.height >> level);
-		glViewport (0, 0, w, h);
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.depth_pyramid_fbo);
-		GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, framebufs.ssao.depth_pyramid_tex, level);
-		if (level > 0)
-			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.depth_pyramid_tex);
-		GL_Uniform4fFunc (0, 1.f / (float)w, 1.f / (float)h, (float)w, (float)h);
-		GL_Uniform4fFunc (1, (float)level, gl_clipcontrol_able ? 1.f : 0.f, (reversed_z_mode == 1) ? 1.f : 0.f, 0.f);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
-	}
-	GL_EndGroup ();
-}
-
-static GLuint GL_SSAOTemporalResolve (int index, int debug_mode_i, int reversed_z_mode)
-{
-	GLuint curr = framebufs.ssao.ao_tex[index];
-	qboolean use_temporal = (index == 1 && glprogs.ssao_temporal != 0);
-	if (!use_temporal)
-	{
-		R_SSAOInvalidateTemporalHistory ();
-		return curr;
-	}
-
-	int next_index = framebufs.ssao.history_index ^ 1;
-	float inv_viewproj[16];
-	if (!MatrixInverse4x4 (r_matviewproj, inv_viewproj))
-		memcpy (inv_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
-	GLuint velocity_texture = (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-	if (framesetup.scene_fbo != framebufs.scene.fbo)
-		velocity_texture = 0;
-
-	GL_BeginGroup ("SSAO temporal");
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.temporal_fbo[next_index]);
-	glViewport (0, 0, framebufs.ssao.width[1], framebufs.ssao.height[1]);
-	GL_UseProgram (glprogs.ssao_temporal);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, curr);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.history_tex[framebufs.ssao.history_index]);
-	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, velocity_texture);
-	GL_Uniform4fFunc (0, 1.f / (float)vid.width, 1.f / (float)vid.height, (float)vid.width, (float)vid.height);
-	GL_Uniform4fFunc (1, 1.f / (float)framebufs.ssao.width[1], 1.f / (float)framebufs.ssao.height[1], (float)framebufs.ssao.width[1], (float)framebufs.ssao.height[1]);
-	GL_Uniform4fFunc (2, 0.9f, 0.1f, framebufs.ssao.history_valid ? 1.f : 0.f, velocity_texture ? 1.f : 0.f);
-	GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_viewproj);
-	GL_Uniform1iFunc (4, reversed_z_mode);
-	GL_Uniform1iFunc (5, debug_mode_i);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.resolved_fbo[index]);
-	glViewport (0, 0, framebufs.ssao.width[index], framebufs.ssao.height[index]);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.history_tex[next_index]);
-	GL_Uniform1iFunc (5, 0);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_EndGroup ();
-
-	framebufs.ssao.history_index = next_index;
-	framebufs.ssao.history_valid = true;
-	return framebufs.ssao.resolved_tex[index];
-}
-
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
@@ -1428,15 +1297,13 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		return 0;
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
-	qboolean use_halfres = R_SSAOUseHalfRes ();
-	int index = use_halfres ? 1 : 0;
-	if (index == 1)
-		samples = q_min (samples, 8);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
 	float radius = R_SanitizeSSAOValue (r_ssao_radius.value, 24.f, 0.01f, 8192.f);
 	float bias = R_SanitizeSSAOValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
 	float power = R_SanitizeSSAOValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
+	qboolean use_halfres = (r_ssao_halfres.value > 0.f && r_ssao_force_fullres.value <= 0.f);
+	int index = use_halfres ? 1 : 0;
 	int width = framebufs.ssao.width[index];
 	int height = framebufs.ssao.height[index];
 	if (width <= 0 || height <= 0)
@@ -1444,38 +1311,83 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
-	int reversed_z_mode = CLAMP (0, (int)Q_rint (r_ssao_reversedz_mode.value), 2);
-	int debug_mode_i = (r_ssao_debug.value > 0.f) ? CLAMP (1, (int)Q_rint (r_ssao_debug.value), 17) : -1;
+	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
+	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
+	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
+	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 14) : -1;
 	qboolean debug_show_ao_raw = (debug_mode_i == 10);
 	qboolean debug_show_blur_debug = (debug_mode_i == 11);
-	float debug_mode = (debug_mode_i >= 1 && debug_mode_i <= 9) ? (float)debug_mode_i : -1.f;
+	int debug_mode_ssao = -1;
+	if (debug_mode_i >= 1 && debug_mode_i <= 9)
+		debug_mode_ssao = debug_mode_i;
+	float debug_mode = (float)debug_mode_ssao;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
 	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : (float)r_framecount;
-	int noise_mode = CLAMP (0, (int)Q_rint (r_ssao_noise_mode.value), 2);
+	int noise_mode = (int)Q_rint (r_ssao_noise_mode.value);
 	float noise_scale = R_SanitizeSSAOValue (r_ssao_noise_scale.value, 1.f, 0.1f, 64.f);
-	int normal_source = CLAMP (0, (int)Q_rint (r_ssao_normalsource.value), 1);
+	noise_mode = CLAMP (0, noise_mode, 2);
+	if (noise_enabled <= 0.5f)
+		noise_mode = 0;
+	else if (noise_mode == 0)
+		noise_mode = 1;
+	int normal_source = (int)Q_rint (r_ssao_normalsource.value);
+	normal_source = CLAMP (0, normal_source, 1);
 	float max_distance = R_SanitizeSSAOValue (r_ssao_max_distance.value, 1024.f, 1.f, 65536.f);
+	static qboolean ssao_logged = false;
+	if (!ssao_logged)
+	{
+		// SSAO FIX: Log depth configuration once to validate reversed-Z/clip control wiring.
+		Con_DPrintf ("SSAO config: reversedZ=%d clipcontrol=%d znear=%0.4f zfar=%0.4f\n",
+			(int)reversed_z, gl_clipcontrol_able ? 1 : 0, view_znear, view_zfar);
+		ssao_logged = true;
+	}
 
-	GL_BuildSSAODepthPyramid (reversed_z_mode);
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+	GL_LogErrorIfDeveloper ("SSAO bind FBO");
+	{
+		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			Con_DPrintf ("SSAO FBO incomplete (0x%X)\n", status);
+			GL_EndGroup ();
+			return 0;
+		}
+	}
+	// SSAO FIX: Reset viewport/scissor/color mask per pass to avoid banding from stale state.
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (0, 0, width, height);
-	{ const float clear[4] = { 1.f, 1.f, 1.f, 1.f }; GL_ClearBufferfvFunc (GL_COLOR, 0, clear); }
+	{
+		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
+		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
+	}
+
+	GL_LogSSAODepthInfo (framebufs.composite.depth_stencil_tex, framebufs.ssao.ao_tex[index], width, height, view_min_x, view_min_y, view_max_x, view_max_y);
 
 	GL_UseProgram (glprogs.ssao);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.noise_tex);
-	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, framebufs.ssao.depth_pyramid_tex);
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
 	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
 	GL_Uniform4fFunc (2, radius, bias, power, min_ao);
-	GL_Uniform4fFunc (3, 1.f / (float)vid.width, 1.f / (float)vid.height, (float)vid.width, (float)vid.height);
-	GL_Uniform4fFunc (4, 1.f / (float)width, 1.f / (float)height, (float)width, (float)height);
-	GL_Uniform4fFunc (5, ((float)width / (float)SSAO_NOISE_SIZE) * noise_scale, ((float)height / (float)SSAO_NOISE_SIZE) * noise_scale, noise_enabled, noise_seed);
+	GL_Uniform4fFunc (3,
+		1.f / (float)vid.width,
+		1.f / (float)vid.height,
+		(float)vid.width,
+		(float)vid.height);
+	GL_Uniform4fFunc (4,
+		1.f / (float)width,
+		1.f / (float)height,
+		(float)width,
+		(float)height);
+	GL_Uniform4fFunc (5,
+		((float)width / (float)SSAO_NOISE_SIZE) * noise_scale,
+		((float)height / (float)SSAO_NOISE_SIZE) * noise_scale,
+		noise_enabled,
+		noise_seed);
 	GL_Uniform4fFunc (6, view_znear, view_zfar, reversed_z, depth_cutoff);
 	GL_Uniform4fFunc (7, view_min_x, view_min_y, view_max_x, view_max_y);
 	GL_Uniform1iFunc (8, samples);
@@ -1484,39 +1396,61 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
-	GL_Uniform4fFunc (14, max_distance, (float)framebufs.ssao.depth_pyramid_levels, 1.f, (float)debug_mode_i);
+	GL_Uniform4fFunc (14, max_distance, 0.f, 0.f, 0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+	GL_LogErrorIfDeveloper ("SSAO draw");
 
-	GLuint ao_result = GL_SSAOTemporalResolve (index, debug_mode_i, reversed_z_mode);
 	qboolean allow_blur = (r_ssao_blur.value > 0.f) && (debug_mode_i < 0);
 	qboolean run_blur = glprogs.ssao_blur && allow_blur && !debug_show_ao_raw && !debug_show_blur_debug;
 	if (run_blur)
 	{
-		int blur_radius = CLAMP (1, (int)Q_rint (r_ssao_blur_radius.value), 4);
+		int blur_radius = (int)Q_rint (r_ssao_blur_radius.value);
+		blur_radius = CLAMP (1, blur_radius, 4);
 		float blur_sigma = q_max (0.01f, r_ssao_blur_sigma.value);
+		float depth_threshold_scale = 0.02f;
+		float blur_bilateral = (r_ssao_blur_bilateral.value > 0.f) ? 1.f : 0.f;
+
 		GL_UseProgram (glprogs.ssao_blur);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-		GL_Uniform4fFunc (0, 1.f / (float)vid.width, 1.f / (float)vid.height, (float)vid.width, (float)vid.height);
-		GL_Uniform4fFunc (1, 1.f / (float)width, 1.f / (float)height, (float)width, (float)height);
+		GL_Uniform4fFunc (0,
+			1.f / (float)vid.width,
+			1.f / (float)vid.height,
+			(float)vid.width,
+			(float)vid.height);
+		GL_Uniform4fFunc (1,
+			1.f / (float)width,
+			1.f / (float)height,
+			(float)width,
+			(float)height);
 		GL_Uniform4fFunc (3, view_znear, view_zfar, reversed_z, depth_cutoff);
-		GL_Uniform4fFunc (4, blur_sigma, (float)blur_radius, 0.02f, (r_ssao_blur_bilateral.value > 0.f) ? 1.f : 0.f);
+		GL_Uniform4fFunc (4, blur_sigma, (float)blur_radius, depth_threshold_scale, blur_bilateral);
 		GL_Uniform4fFunc (5, view_min_x, view_min_y, view_max_x, view_max_y);
 		GL_Uniform1iFunc (6, reversed_z_mode);
 		GL_Uniform1iFunc (7, 0);
 		GL_UniformMatrix4fvFunc (8, 1, GL_FALSE, r_matinvproj);
+
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
+		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
+		GL_SetScissorEnabled (false);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glViewport (0, 0, width, height);
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, ao_result);
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
 		GL_Uniform4fFunc (2, 1.f, 0.f, 0.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.resolved_fbo[index]);
+		GL_LogErrorIfDeveloper ("SSAO blur horizontal draw");
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+		GL_SetScissorEnabled (false);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
-		ao_result = framebufs.ssao.resolved_tex[index];
+		GL_LogErrorIfDeveloper ("SSAO blur vertical draw");
 	}
+
 	GL_EndGroup ();
-	return ao_result;
+
+	return framebufs.ssao.ao_tex[index];
 }
 
 void R_ResetGodraysStabilization (void)
@@ -2404,7 +2338,7 @@ void GL_PostProcess (void)
 	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
-		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 17) : -1;
+		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 11) : -1;
 		ssao_debug_mode = (debug_mode_i > 0) ? (float)debug_mode_i : -1.f;
 	}
 	if (ssao_texture == 0)
@@ -2557,7 +2491,7 @@ void GL_PostProcess (void)
 	depth_texture = 0;
 	{
 		qboolean ssao_needs_depth = (ssao_texture != 0
-			&& (R_SSAOUseHalfRes () || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
+			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
 		if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
 			depth_texture = framebufs.composite.depth_stencil_tex;
 	}
@@ -3416,7 +3350,6 @@ void R_SetupView (void)
                 r_framedata.prev_eye[3] = 0.f;
 		r_framedata.prev_frame_valid = 0;
 		r_prev_frame_valid = false;
-		R_SSAOInvalidateTemporalHistory ();
 	}
 
 	if (softemu == SOFTEMU_COARSE)
@@ -3517,7 +3450,6 @@ void R_StorePrevFrameState (void)
 	if (!r_frame_rendered_this_update)
 	{
 		r_prev_frame_valid = false;
-		R_SSAOInvalidateTemporalHistory ();
 		return;
 	}
 
