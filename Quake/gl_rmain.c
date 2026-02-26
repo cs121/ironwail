@@ -40,7 +40,7 @@ gpuframedata_t r_framedata;
 
 /* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
  * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
- * Fog_DisableGFog clears r_framedata.fog[3] (density) to 0 so 2D overlays stay
+ * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
  * fog-free. At SSAO generation time the UBO therefore has density=0, making
  * FogTransmittanceFromViewPos always return 1.0 → ssao_fog_strength has zero
  * effect → SSAO darkens far fogged/purple areas with full strength instead of
@@ -2450,7 +2450,7 @@ void GL_PostProcess (void)
 	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
 	 * r_ssao_saved_fog[3] so postprocess.frag SampleSSAO fog-damping works correctly.
 	 * r_ssao_saved_fog is captured in R_RenderView before Fog_DisableGFog zeros the
-	 * density in r_framedata.fog[3]. postprocess.frag must read scene fog density
+	 * density in r_framedata.fogdata[3]. postprocess.frag must read scene fog density
 	 * from uniform 24.w instead of Fog.w (UBO). */
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_saved_fog[3]);
 	{
@@ -4765,13 +4765,13 @@ void R_RenderView (void)
         R_WarpScaleView ();
         R_FogVol_BuildList ();
         R_FogVol_Render ();
-        /* BUG FIX #1: Capture fog params while r_framedata.fog is still valid.
+        /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
          * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
          * fog-damped AO; after Fog_DisableGFog the density is zeroed out. */
-        r_ssao_saved_fog[0] = r_framedata.fog[0];
-        r_ssao_saved_fog[1] = r_framedata.fog[1];
-        r_ssao_saved_fog[2] = r_framedata.fog[2];
-        r_ssao_saved_fog[3] = r_framedata.fog[3];
+        r_ssao_saved_fog[0] = r_framedata.fogdata[0];
+        r_ssao_saved_fog[1] = r_framedata.fogdata[1];
+        r_ssao_saved_fog[2] = r_framedata.fogdata[2];
+        r_ssao_saved_fog[3] = r_framedata.fogdata[3];
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 
 	r_frame_rendered_this_update = true;
