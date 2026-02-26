@@ -62,9 +62,6 @@ typedef struct aliasinstance_s {
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
-	uint32_t	_pad1;
-	uint32_t	_pad2;
-	uint32_t	_pad3;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -95,7 +92,7 @@ struct ibuf_s {
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
-COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 156);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 144);
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
@@ -229,6 +226,7 @@ R_SetupAliasFrame -- johnfitz -- rewritten to support lerping
 */
 void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr, lerpdata_t *lerpdata)
 {
+	static int debug_frame = -1;
 	int posenum, numposes;
 	int frame = e->frame;
 
@@ -291,6 +289,24 @@ void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr, lerpdata_t *lerpdata
 		lerpdata->blend = 1;
 		lerpdata->pose1 = posenum;
 		lerpdata->pose2 = posenum;
+	}
+
+	if (r_debug_itemlight.value > 1.f && r_framecount != debug_frame)
+	{
+		debug_frame = r_framecount;
+		Con_Printf ("alias_anim: host_frametime=%.6f cl.time=%.6f cl.oldtime=%.6f r_refdef.time=%.6f model=%s frame=%d oldframe=%d lerpstart=%.6f lerpfinish=%.6f lerpfrac=%.3f pose=(%d->%d)\n",
+			host_frametime,
+			cl.time,
+			cl.oldtime,
+			r_refdef.time,
+			e->model ? e->model->name : "<null>",
+			e->frame,
+			e->oldframe,
+			e->lerpstart,
+			e->lerpfinish,
+			lerpdata->blend,
+			lerpdata->pose1,
+			lerpdata->pose2);
 	}
 }
 
@@ -566,7 +582,7 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
-ibuf.global.dlight_debug_models = r_dlight_debug_models.value > 0.f ? 1.f : 0.f;
+ibuf.global.dlight_debug_models = r_dlight_debug_models.value;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
