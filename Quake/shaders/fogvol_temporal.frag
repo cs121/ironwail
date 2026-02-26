@@ -48,7 +48,7 @@ void main()
 	vec2 viewSize = 1.0 / max(FogViewParams.zw, vec2(1e-6));
 	vec4 current = texture(FogCurrent, screenUv);
 
-	if (FogHistoryValid == 0 || PrevFrameValid == 0u || FogTemporalAlpha <= 0.0 || FogDebugMode == 5 || FogDebugMode == 8)
+	if (FogHistoryValid == 0 || PrevFrameValid == 0u || FogTemporalAlpha <= 0.0 || (FogDebugMode >= 2 && FogDebugMode <= 6))
 	{
 		OutColor = current;
 		return;
@@ -80,12 +80,6 @@ void main()
 	if (valid)
 		history = texture(FogHistory, prevScreenUv);
 
-	if (FogDebugMode == 6)
-	{
-		OutColor = vec4(vec3(valid ? 1.0 : 0.0), 1.0);
-		return;
-	}
-
 	vec3 minColor = current.rgb;
 	vec3 maxColor = current.rgb;
 	for (int j = -1; j <= 1; ++j)
@@ -107,7 +101,7 @@ void main()
 
 	if (FogDebugMode == 7)
 	{
-		OutColor = vec4(vec3(alpha), 1.0);
+		OutColor = vec4(alpha, valid ? 1.0 : 0.0, motionFactor, 1.0);
 		return;
 	}
 
