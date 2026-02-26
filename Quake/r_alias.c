@@ -865,17 +865,6 @@ void R_DrawAliasModels (entity_t **ents, int count)
 
 /*
 =================
-R_DrawAliasModels_Shadow
-=================
-*/
-void R_DrawAliasModels_Shadow (entity_t **ents, int count)
-{
-	(void) ents;
-	(void) count;
-}
-
-/*
-=================
 R_DrawAliasModels_ShowTris
 =================
 */

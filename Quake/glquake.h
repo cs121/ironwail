@@ -486,10 +486,6 @@ void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases 
 void R_UploadFrameData (void);
 void R_StorePrevFrameState (void);
 qboolean R_PrevFrameValid (void);
-void R_InitShadow (void);
-void R_ShutdownShadow (void);
-void R_ResizeShadowMapIfNeeded (void);
-void R_EnsureShadowSamplerState (GLuint texture);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
@@ -498,9 +494,7 @@ void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
-void R_DrawBrushModels_Shadow (entity_t **ents, int count);
 void R_DrawAliasModels (entity_t **ents, int count);
-void R_DrawAliasModels_Shadow (entity_t **ents, int count);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
