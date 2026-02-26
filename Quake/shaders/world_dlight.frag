@@ -104,7 +104,8 @@ void main()
         if (NumLights > 0u)
         {
                 float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-                vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
+                // BUG FIX #3c: plane-Variable entfernt – die Ebenenprojektion
+                // wurde durch direkte 3D-Abstandsberechnung ersetzt (siehe Schleife).
                 float falloff_mode = DLightConfig0.z;
                 float falloff_exp = max(DLightConfig0.w, 0.01);
                 float core_boost = max(DLightConfig1.x, 0.0);
@@ -117,21 +118,27 @@ void main()
                         Light l = Lights[light_index];
 
                                         float rad = l.radius;
-                                        float dist = dot(l.origin, plane.xyz) - plane.w;
-                                        rad -= abs(dist);
+                                        // BUG FIX #3a: Die alte Berechnung projizierte l.origin auf
+                                        // die Oberflächenebene via plane-Gleichung. Für World-Flächen
+                                        // ok, aber falsch für nicht-planare Geometrie (Modelle) und
+                                        // auch für World ungenau bei großen Polygonen. Direkte 3D-
+                                        // Distanzberechnung ist universell korrekt.
+                                        vec3 to_light = l.origin - in_pos;
+                                        float surface_dist = length(to_light);
+                                        if (surface_dist >= rad)
+                                                continue;
                                         float minlight = l.minlight;
-
-                                        if (rad <= 0.0 || rad < minlight)
+                                        if (rad - surface_dist < minlight)
                                                 continue;
 
-                                        vec3 local_pos = l.origin - plane.xyz * dist;
-                                        minlight = rad - minlight;
-                                        vec3 light_vec = local_pos - in_pos;
-                                        float surface_dist = length(light_vec);
-                                        float attenuation = clamp((minlight - surface_dist) / 16.0, 0.0, 1.0);
-                                        float normalized_dist = surface_dist / rad;
-                                        float x = clamp(1.0 - clamp(normalized_dist, 0.0, 1.0), 0.0, 1.0);
+                                        float normalized_dist = surface_dist / max(rad, 1e-4);
+                                        float x = clamp(1.0 - normalized_dist, 0.0, 1.0);
                                         float falloff = ComputeFalloff(x, falloff_mode, falloff_exp);
+                                        // BUG FIX #3b: minlight-basierter attenuation-Faktor mit
+                                        // hardkodiertem /16 erzeugte harte Ringe. Stattdessen smooth
+                                        // minlight-Fade direkt über x integrieren.
+                                        float minlight_norm = minlight / max(rad, 1e-4);
+                                        float attenuation = clamp((x - minlight_norm) / max(1.0 - minlight_norm, 1e-4), 0.0, 1.0);
                                         float intensity = attenuation * falloff;
                                         float core = 1.0 + core_boost * pow(max(x, 0.0), core_exp);
                                         float core_intensity = intensity * core;
@@ -139,7 +146,7 @@ void main()
                                         float ndotl = 1.0;
                                         if (surface_dist > 0.0)
                                         {
-                                                vec3 light_dir = light_vec / surface_dist;
+                                                vec3 light_dir = to_light / surface_dist;
                                                 float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
                                                 ndotl = mix(1.0, ndotl_raw, ndotl_mix);
                                         }

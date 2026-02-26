@@ -168,7 +168,11 @@ void main()
 		discard;
 	result.rgb *= lit_color.rgb;
 #else
-	result.rgb = mix(result.rgb, result.rgb * lit_color.rgb, result.a);
+	// BP FIX #5: mix(result.rgb, result.rgb * lit_color.rgb, result.a) ist
+	// äquivalent zu result.rgb * (1 + (lit_color.rgb - 1) * result.a).
+	// Für solid alpha (a=1) korrekt, für a=0 keine Modulation (Quake-korrekt).
+	// Explizitere Formulierung macht die Absicht klarer:
+	result.rgb *= mix(vec3(1.0), lit_color.rgb, result.a);
 #endif
 	result.a = lit_color.a; // FIXME: This will make almost transparent things cut holes though heavy fog
         vec3 fullbright;
@@ -190,7 +194,7 @@ void main()
         }
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
-        result.rgb = ApplyFog(result.rgb, in_pos);
+	result.rgb = ApplyFog(result.rgb, in_pos);
         OUT_COLOR = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);

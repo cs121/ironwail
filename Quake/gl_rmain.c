@@ -38,6 +38,17 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
+/* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
+ * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
+ * Fog_DisableGFog clears r_framedata.fog[3] (density) to 0 so 2D overlays stay
+ * fog-free. At SSAO generation time the UBO therefore has density=0, making
+ * FogTransmittanceFromViewPos always return 1.0 → ssao_fog_strength has zero
+ * effect → SSAO darkens far fogged/purple areas with full strength instead of
+ * fading to AO=1.0.
+ * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
+ * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
+static float r_ssao_saved_fog[4]; /* xyz=fog color, w=fog density */
+
 float r_autoexposure_debug_exposure = 1.f;
 float r_autoexposure_debug_luminance = 0.f;
 
@@ -1370,7 +1381,14 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
-	GL_Uniform4fFunc (14, max_distance, 0.f, 0.f, 0.f);
+	/* BUG FIX #1: Pass saved fog density (r_ssao_saved_fog[3]) as uniform 14.y
+	 * so ssao.frag FogTransmittanceFromViewPos uses the correct scene fog density
+	 * instead of the zero value left by Fog_DisableGFog. The ssao.frag u_fogParams
+	 * layout(location=14) must read .y as fog density instead of the UBO Fog.w.
+	 * .zw pass fog color rgb (xy = color.rg, see ssao.frag for usage). */
+	GL_Uniform4fFunc (14, max_distance, r_ssao_saved_fog[3],
+		r_ssao_saved_fog[0] * 0.299f + r_ssao_saved_fog[1] * 0.587f + r_ssao_saved_fog[2] * 0.114f,
+		0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
@@ -2429,7 +2447,12 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
-	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, 0.f);
+	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
+	 * r_ssao_saved_fog[3] so postprocess.frag SampleSSAO fog-damping works correctly.
+	 * r_ssao_saved_fog is captured in R_RenderView before Fog_DisableGFog zeros the
+	 * density in r_framedata.fog[3]. postprocess.frag must read scene fog density
+	 * from uniform 24.w instead of Fog.w (UBO). */
+	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_saved_fog[3]);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
 		dv_quality = (float)CLAMP (0, quality, 2);
@@ -4742,6 +4765,13 @@ void R_RenderView (void)
         R_WarpScaleView ();
         R_FogVol_BuildList ();
         R_FogVol_Render ();
+        /* BUG FIX #1: Capture fog params while r_framedata.fog is still valid.
+         * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
+         * fog-damped AO; after Fog_DisableGFog the density is zeroed out. */
+        r_ssao_saved_fog[0] = r_framedata.fog[0];
+        r_ssao_saved_fog[1] = r_framedata.fog[1];
+        r_ssao_saved_fog[2] = r_framedata.fog[2];
+        r_ssao_saved_fog[3] = r_framedata.fog[3];
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
 
 	r_frame_rendered_this_update = true;

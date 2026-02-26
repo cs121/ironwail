@@ -136,7 +136,7 @@ layout(location=20) uniform float u_midtone;
 layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
-layout(location=24) uniform vec4 PostFXFogColor; // rgb: fog color, w: unused
+layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
@@ -220,7 +220,12 @@ float FogTransmittanceFromDepth(float depth, float fogStrength)
 
 float FogTransmittanceFromGlobalFog(float depth)
 {
-        float density = abs(Fog.w);
+        // FIX #1: Use PostFXFogColor.w (scene fog density saved in gl_rmain.c before
+        // Fog_DisableGFog clears it) instead of Fog.w from the frame_uniforms UBO.
+        // Fog_DisableGFog() runs in R_RenderView before SCR_UpdateScreen calls
+        // GL_PostProcess, so Fog.w is always 0 here → fog damping had zero effect.
+        // gl_rmain.c now writes r_ssao_saved_fog[3] into PostFXFogColor.w (uniform 24.w).
+        float density = abs(PostFXFogColor.w); // .w = saved scene fog density
         if (density <= 0.0)
                 return 1.0;
         float fog = exp2(-density * depth * depth);

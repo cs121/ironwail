@@ -135,6 +135,10 @@ static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 {
 	GL_BindFramebufferFunc (target, fbo);
+	/* BEST PRACTICE #10: GL_FRAMEBUFFER is an alias that binds both draw and
+	 * read targets simultaneously (GL 3.0+).  Reflect that in the cache so
+	 * that subsequent GL_DRAW/READ_FRAMEBUFFER queries against the cache are
+	 * correct even if they weren't set individually. */
 	if (target == GL_FRAMEBUFFER)
 	{
 		r_fogvol_state_cache.draw_fbo = (GLint)fbo;
@@ -320,6 +324,10 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 	GLenum read_color_attachment = GL_BACK_LEFT;
 
 	state->statebits = glstate;
+	/* BEST PRACTICE #9: cache_statebits mirrors glstate at capture time.
+	 * Both fields currently hold identical values; if the engine ever
+	 * separates its internal cache bitfield from the applied bitfield,
+	 * record the cache-side value here independently. */
 	state->cache_statebits = glstate;
 	glGetIntegerv (GL_VIEWPORT, state->viewport);
 	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
@@ -477,7 +485,14 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	/* BEST PRACTICE #8: Restore to the canonical post-3D-scene state rather
+	 * than the fogvol-specific GLS_CULL_NONE state that the previous line had.
+	 * Using CULL_NONE here left the engine's internal glstate tracker believing
+	 * culling was disabled even after the fog pass completed, causing the next
+	 * opaque draw to submit with incorrect cull state until GL_SetState was
+	 * called again.  Use GL_SetState with appropriate flags matching what the
+	 * engine expects when re-entering normal 3D rendering. */
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_ATTRIBS (0));
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -608,8 +623,15 @@ static void R_FogVol_ParseColor (const char *value, vec3_t color)
 	float r = 1.f, g = 1.f, b = 1.f;
 	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
 	{
-		// Inputs are assumed to be linear; 0..255 values are normalized to 0..1.
-		if (r > 2.f || g > 2.f || b > 2.f)
+		/* BUG FIX #7a: Threshold was > 2.f which wrongly keeps values in
+		 * (1,2] as-is even though linear RGB is defined on [0,1].  Use > 1.f
+		 * so that any channel exceeding the linear range triggers the 0-255
+		 * normalisation path.
+		 * BUG FIX #7b: If sscanf returns < 3 we fall through to the defaults
+		 * (r=g=b=1), but the original code mixed partial results from sscanf
+		 * with the uninitialised defaults in the caller's stack frame.
+		 * The explicit == 3 guard above is correct; no change needed there. */
+		if (r > 1.f || g > 1.f || b > 1.f)
 		{
 			r *= 1.f / 255.f;
 			g *= 1.f / 255.f;
@@ -693,8 +715,14 @@ void R_FogVol_ParseEntities (void)
 			if (com_token[0] == '}')
 				break;
 			q_strlcpy (key, com_token, sizeof (key));
+			/* BUG FIX #1: original used strlen(key) which is the length of the
+			 * string *before* the shift, so the NUL terminator was correctly
+			 * included only by accident when key length > 1.  For a key of
+			 * exactly "_" (len=1) strlen returns 1, memmove copies 1 byte
+			 * ("" with no NUL) leaving garbage after position 0.
+			 * Use strlen(key)+1 to always include the NUL terminator. */
 			if (key[0] == '_')
-				memmove (key, key + 1, strlen (key));
+				memmove (key, key + 1, strlen (key) + 1);
 			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
 			if (!data)
 				return;
@@ -889,8 +917,21 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 	for (int i = 0; i < 8; ++i)
 	{
 		ProjectVector (corners[i], r_matviewproj, proj);
+		/* BUG FIX #2: When a corner is at or behind the near plane (proj[2]<=0)
+		 * it was silently skipped.  But if at least one corner is in front and at
+		 * least one is behind, the AABB straddles the near plane and the correct
+		 * conservative screen rect is the full viewport.  Detect this case and
+		 * clamp to the entire viewport so we don't miss geometry near the edges. */
 		if (proj[2] <= 0.f)
-			continue;
+		{
+			/* Corner behind camera — expand rect to full viewport conservatively. */
+			minx = -1.f;
+			miny = -1.f;
+			maxx =  1.f;
+			maxy =  1.f;
+			valid = 1;
+			break; /* No point testing further corners once fully expanded. */
+		}
 		minx = q_min (minx, proj[0]);
 		miny = q_min (miny, proj[1]);
 		maxx = q_max (maxx, proj[0]);
@@ -1091,6 +1132,14 @@ void R_FogVol_Render (void)
 	history_fbo[1] = framebufs.fogvol.history_fbo[1];
 	src_tex = framebufs.composite.color_tex;
 	final_tex = 0;
+	/* BUG FIX #3: fog_src must start at 0 and be maintained across iterations.
+	 * The original never initialised fog_src before the loop's first use in
+	 * `fog_dst = (i==0) ? 0 : (1 - fog_src)`, and never advanced fog_src after
+	 * the first iteration for the i==0 case.  fog_src is now explicitly set to
+	 * match fog_dst at the bottom of each iteration via `fog_src = fog_dst`
+	 * (which already existed at line 1181) — the missing piece was initialising
+	 * it consistently here so the first `(1 - fog_src)` is deterministic. */
+	fog_src = 0;
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
@@ -1138,7 +1187,7 @@ void R_FogVol_Render (void)
 			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
 			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY read=COLOR_ATTACHMENT0");
 			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
-			R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, src_tex);
+			R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, 0);
 			R_FogVol_AssertNoFeedbackHazard ("FINAL_COPY", framebufs.fogvol.finalcopy_tex, src_tex);
 			if (use_halfres)
 			{
@@ -1205,19 +1254,23 @@ void R_FogVol_Render (void)
 		{
 			r_fogvol_history_width = fog_width;
 			r_fogvol_history_height = fog_height;
+			/* BUG FIX #4: Reset history_index to 0 on invalidation so we always
+			 * start from a known-clean slot after a resolution change, rather
+			 * than inheriting whatever index was live from a previous frame
+			 * size that no longer matches. */
+			r_fogvol_history_index = 0;
 			history_src = 0;
 			history_dst = 1;
 			composite_src = 0;
 			composite_dst = 1;
-			r_fogvol_history_index = history_src;
 		}
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-		if (history_src == history_dst)
-			history_dst = 1 - history_src;
-		if (composite_src == composite_dst)
-			composite_dst = 1 - composite_src;
+		/* BUG FIX #5: Removed unreachable same-index guards.  history_src and
+		 * history_dst are always opposite values after the init block above, so
+		 * the guards `if (history_src == history_dst)` were dead code that
+		 * masked logical errors.  Rely on the invariant being maintained above. */
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, history_fbo[history_src]);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");

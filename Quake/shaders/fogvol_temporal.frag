@@ -1,3 +1,38 @@
+// fogvol_temporal.frag  —  temporal reprojection / accumulation for fog
+// ── CHANGES FROM ORIGINAL ──────────────────────────────────────────────────
+//  1. [BUG] motionFactor clamp: `clamp(1.0 - motionPx * 0.1, 0.0, 1.0)` is
+//     a coarse linear ramp.  For a 10 px move the blend weight drops to zero
+//     entirely and ghosting artifacts appear at even moderate motion.  Replaced
+//     with an exponential decay: exp(-motionPx * K) which is smoother and lets
+//     you tune K at the call site.  A define-based K keeps it configurable
+//     without an extra uniform.
+//  2. [BUG] alpha = (valid ? FogTemporalAlpha : 0.0) * motionFactor.
+//     If the reprojection is invalid, motionFactor is wasted work.  Moved the
+//     validity check before the motionFactor multiply (no functional change
+//     when valid=true, but avoids floating-point noise in the zero path).
+//  3. [BUG] Neighbourhood clamp loops over a 3×3 kernel in screen-UV space
+//     using `invScreen` offsets, but the fog buffer is rendered at half
+//     resolution.  Using full-resolution screen offsets means adjacent taps
+//     can land in the same half-resolution texel, so the min/max is wrong.
+//     Fixed to step by (2 * invScreen) when the fog is at half-res, or more
+//     robustly: use the explicit fog-buffer texel size if available.  Here we
+//     keep it at invScreen because we don't know the fog resolution from this
+//     shader's uniforms, but added a comment for the integrator to pass the
+//     correct step.
+//  4. [BEST PRACTICE] PrevFrameValid compared to 0u (unsigned) — correct but
+//     mixing int/uint comparisons is a driver portability pitfall.  Cast to int
+//     for consistency with the rest of the shader.
+//  5. [BEST PRACTICE] prevCoord clamped immediately after derivation but the
+//     texture() call for history uses prevScreenUv (float), which is
+//     *unclamped*.  If prevScreenUv is slightly outside [0,1] the hardware
+//     clamps the texelFetch but not the texture() bilinear sample, giving
+//     edge-bleed.  Fixed: clamp prevScreenUv before the history texture().
+//  6. [BEST PRACTICE] FogDepthParams not available here — the DepthToNdcZ
+//     compile-time #define is fine, but the reverse-Z flag should remain
+//     consistent with fogvol.frag which uses a runtime uniform.  Left as-is
+//     (compile-time) but flagged.
+// ───────────────────────────────────────────────────────────────────────────
+
 #include "frame_uniforms.glsl"
 
 layout(binding=0) uniform sampler2D FogCurrent;
@@ -6,15 +41,17 @@ layout(binding=2) uniform sampler2D SceneDepth;
 
 layout(location=0) uniform float FogTemporalAlpha;
 layout(location=1) uniform float FogTemporalDepthReject;
-layout(location=2) uniform int FogDebugMode;
-layout(location=3) uniform mat4 FogInvViewProj;
-layout(location=4) uniform vec4 FogViewportParams; // xy: screen size, zw: inv screen size
-layout(location=5) uniform vec2 FogDepthScale;
-layout(location=6) uniform int FogHistoryValid;
-layout(location=7) uniform vec4 FogViewParams; // xy: view origin in screen px, zw: inv view size
+layout(location=2) uniform int   FogDebugMode;
+layout(location=3) uniform mat4  FogInvViewProj;
+layout(location=4) uniform vec4  FogViewportParams; // xy: screen size, zw: inv screen size
+layout(location=5) uniform vec2  FogDepthScale;
+layout(location=6) uniform int   FogHistoryValid;
+layout(location=7) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
 
 layout(location=0) out vec4 OutColor;
 
+// FIX #6 comment: compile-time reverse-Z.  Should match fogvol.frag's runtime
+// FogDepthParams.z check if you unify the two shaders.
 float DepthToNdcZ(float depth)
 {
 #if REVERSED_Z
@@ -24,18 +61,25 @@ float DepthToNdcZ(float depth)
 #endif
 }
 
+// ── exponential motion weight decay factor ─────────────────────────────────
+// Controls how quickly the temporal blend is attenuated for moving pixels.
+// Larger K → faster fade-out.  0.05 ≈ full attenuation at ~60 px of motion.
+#ifndef TEMPORAL_MOTION_K
+#define TEMPORAL_MOTION_K 0.05
+#endif
+
 bool Reproject(vec2 viewUv, float depthNdc, out vec2 prevViewUv, out float prevDepthNdc)
 {
-	vec4 clip = vec4(viewUv * 2.0 - 1.0, depthNdc, 1.0);
+	vec4 clip  = vec4(viewUv * 2.0 - 1.0, depthNdc, 1.0);
 	vec4 world = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 		return false;
 	vec4 prevClip = PrevViewProj * vec4(world.xyz / world.w, 1.0);
 	if (abs(prevClip.w) < 1e-6)
 		return false;
-	vec3 prevNdc = prevClip.xyz / prevClip.w;
-	prevViewUv = prevNdc.xy * 0.5 + 0.5;
-	prevDepthNdc = prevNdc.z;
+	vec3 prevNdc   = prevClip.xyz / prevClip.w;
+	prevViewUv     = prevNdc.xy * 0.5 + 0.5;
+	prevDepthNdc   = prevNdc.z;
 	return true;
 }
 
@@ -43,50 +87,65 @@ void main()
 {
 	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
 	vec2 invScreen = FogViewportParams.zw;
-	vec2 screenUv = screenPos * invScreen;
-	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
-	vec2 viewSize = 1.0 / max(FogViewParams.zw, vec2(1e-6));
-	vec4 current = texture(FogCurrent, screenUv);
+	vec2 screenUv  = screenPos * invScreen;
+	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
+	vec2 viewSize  = 1.0 / max(FogViewParams.zw, vec2(1e-6));
+	vec4 current   = texture(FogCurrent, screenUv);
 
-	if (FogHistoryValid == 0 || PrevFrameValid == 0u || FogTemporalAlpha <= 0.0 || (FogDebugMode >= 2 && FogDebugMode <= 6))
+	// FIX #4: Cast PrevFrameValid to int to avoid signed/unsigned comparison
+	// warnings that some GL drivers promote to errors.
+	if (FogHistoryValid == 0 || int(PrevFrameValid) == 0 || FogTemporalAlpha <= 0.0 ||
+	    (FogDebugMode >= 2 && FogDebugMode <= 6))
 	{
 		OutColor = current;
 		return;
 	}
 
 	ivec2 depthCoord = ivec2(screenPos);
-	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
-	float depthNdc = DepthToNdcZ(depth);
+	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
+	float depthNdc   = DepthToNdcZ(depth);
 
-	vec2 prevViewUv;
+	vec2  prevViewUv;
 	float prevDepthNdc;
-	bool valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
+	bool  valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
 	valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
 
-	vec4 history = vec4(0.0);
+	vec4 history     = vec4(0.0);
 	vec2 prevScreenUv = vec2(0.0);
 	if (valid)
 	{
 		prevScreenUv = (prevViewUv * viewSize + FogViewParams.xy) * invScreen;
+
 		ivec2 prevCoord = ivec2(prevScreenUv * FogViewportParams.xy);
 		prevCoord = clamp(prevCoord, ivec2(0), ivec2(FogViewportParams.xy) - ivec2(1));
-		float depthPrev = texelFetch(SceneDepth, prevCoord, 0).r;
+
+		float depthPrev    = texelFetch(SceneDepth, prevCoord, 0).r;
 		float depthPrevNdc = DepthToNdcZ(depthPrev);
-		float depthReject = max(FogTemporalDepthReject, 0.0);
+		float depthReject  = max(FogTemporalDepthReject, 0.0);
 		if (abs(depthPrevNdc - prevDepthNdc) > depthReject)
 			valid = false;
 	}
 
 	if (valid)
-		history = texture(FogHistory, prevScreenUv);
+	{
+		// FIX #5: Clamp prevScreenUv before bilinear history sample.
+		// texelFetch above was already clamped via prevCoord but texture()
+		// does its own wrapping; explicitly clamping prevents edge bleed.
+		vec2 clampedPrevUv = clamp(prevScreenUv, vec2(0.0), vec2(1.0));
+		history = texture(FogHistory, clampedPrevUv);
+	}
 
+	// ── neighbourhood colour clamp ─────────────────────────────────────────
+	// FIX #3 comment: step size should equal one *fog-buffer* texel.  If fog
+	// runs at half resolution, pass (2 * invScreen) here.  The integrator
+	// should add a FogTexelSize uniform and use that instead of invScreen.
 	vec3 minColor = current.rgb;
 	vec3 maxColor = current.rgb;
 	for (int j = -1; j <= 1; ++j)
 	{
 		for (int i = -1; i <= 1; ++i)
 		{
-			vec2 offset = vec2(i, j) * invScreen;
+			vec2 offset = vec2(i, j) * invScreen; // ← see FIX #3
 			vec3 tap = texture(FogCurrent, screenUv + offset).rgb;
 			minColor = min(minColor, tap);
 			maxColor = max(maxColor, tap);
@@ -94,18 +153,26 @@ void main()
 	}
 	history.rgb = clamp(history.rgb, minColor, maxColor);
 
-	float motionPx = length((prevScreenUv - screenUv) * FogViewportParams.xy);
-	float motionFactor = clamp(1.0 - motionPx * 0.1, 0.0, 1.0);
-	float alpha = (valid ? FogTemporalAlpha : 0.0) * motionFactor;
-	alpha = clamp(alpha, 0.0, 1.0);
+	// FIX #1 + #2: Compute motionFactor first; if invalid, skip the multiply.
+	float alpha = 0.0;
+	if (valid)
+	{
+		float motionPx = length((prevScreenUv - screenUv) * FogViewportParams.xy);
+		// Smooth exponential decay instead of abrupt linear clamp.
+		float motionFactor = exp(-motionPx * TEMPORAL_MOTION_K);
+		alpha = clamp(FogTemporalAlpha * motionFactor, 0.0, 1.0);
+	}
 
 	if (FogDebugMode == 7)
 	{
-		OutColor = vec4(alpha, valid ? 1.0 : 0.0, motionFactor, 1.0);
+		// Debug: R=alpha, G=valid, B=motionFactor (recomputed for display only)
+		float motionPx2    = valid ? length((prevScreenUv - screenUv) * FogViewportParams.xy) : 0.0;
+		float motionFactor2 = exp(-motionPx2 * TEMPORAL_MOTION_K);
+		OutColor = vec4(alpha, valid ? 1.0 : 0.0, motionFactor2, 1.0);
 		return;
 	}
 
-	vec3 blended = mix(current.rgb, history.rgb, alpha);
-	float blendedAlpha = mix(current.a, history.a, alpha);
+	vec3  blended      = mix(current.rgb, history.rgb, alpha);
+	float blendedAlpha = mix(current.a,   history.a,   alpha);
 	OutColor = vec4(blended, blendedAlpha);
 }

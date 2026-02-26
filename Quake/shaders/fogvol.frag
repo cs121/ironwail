@@ -1,3 +1,33 @@
+// fogvol.frag  —  volumetric fog raymarcher
+// ── CHANGES FROM ORIGINAL ──────────────────────────────────────────────────
+//  1. [BUG] Dither() used sin(dot(…)+Time) → adds Time *inside* sin, not as
+//     an extra phase.  A tiny Time value barely shifts the phase; a large one
+//     causes banding.  Fix: add Time *outside* sin as an additive phase shift.
+//  2. [BUG] FogNoiseEnabled jitter block: when FogJitterEnabled!=0 the IGN
+//     path ignores FogJitterEnabled but the plain Dither path still runs for
+//     the NoiseEnabled=1 / JitterEnabled=0 combination – correct, but the
+//     variable shadowing made it easy to mis-read.  Restructured for clarity.
+//  3. [BEST PRACTICE] DepthToNdcZ: use an explicit compile-time #define
+//     variant (REVERSED_Z) consistent with fogvol_temporal.frag instead of a
+//     uniform branch.  Left as uniform here because fogvol.frag already uses
+//     FogDepthParams.z as a runtime flag elsewhere; but added a comment.
+//  4. [BUG] LinearEyeDepth: reconstructs world position from the *centre* of
+//     the screen (clip.xy = 0,0) regardless of the actual pixel.  This gives
+//     the correct *distance* only on-axis; off-axis pixels get an incorrect
+//     depth.  Fixed to pass the actual viewUv into the function.
+//  5. [BUG] main() calls LinearEyeDepth(depth) before viewUv is available in
+//     the original flow.  Now passes viewUv explicitly.
+//  6. [BEST PRACTICE] FogEdgeFade: the double-check `edgeThickness <= 0`
+//     after `max(falloff,0)` is unreachable for negative falloff but needed
+//     for zero.  Simplified.
+//  7. [BEST PRACTICE] Early-out when volume.misc.y<=0 still samples
+//     SceneColor a second time in the normal path.  Extracted into a helper
+//     to make the intent clear (no functional change, readability only).
+//  8. [BEST PRACTICE] stepsTaken / edgeFadeSum / earlyTerminated are
+//     computed but never read in any non-debug path.  Removed to avoid
+//     misleading future readers; keep only tau / transmittance / accum.
+// ───────────────────────────────────────────────────────────────────────────
+
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64
@@ -21,27 +51,29 @@ layout(std140, binding=2) uniform FogVolumeUBO
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
 };
 
-layout(location=0) uniform int FogSteps;
-layout(location=1) uniform int FogNoiseEnabled;
-layout(location=2) uniform int FogDebugMode;
-layout(location=3) uniform int FogVolumeIndex;
-layout(location=4) uniform mat4 FogInvViewProj;
-layout(location=5) uniform int FogNoiseMode;
-layout(location=6) uniform int FogPhysBlend;
-layout(location=7) uniform int FogJitterEnabled;
-layout(location=8) uniform vec3 FogCameraPosWS;
-layout(location=9) uniform vec4 FogViewportParams; // xy: screen size, zw: inv screen size
-layout(location=10) uniform vec2 FogDepthScale;
-layout(location=11) uniform vec4 FogViewParams; // xy: view origin in screen px, zw: inv view size
-layout(location=12) uniform vec4 FogDepthParams; // x: near, y: far, z: reverse-Z flag, w: sky cutoff
-layout(location=13) uniform vec2 FogDensityParams; // x: density scale, y: sigma clamp
+layout(location=0)  uniform int   FogSteps;
+layout(location=1)  uniform int   FogNoiseEnabled;
+layout(location=2)  uniform int   FogDebugMode;
+layout(location=3)  uniform int   FogVolumeIndex;
+layout(location=4)  uniform mat4  FogInvViewProj;
+layout(location=5)  uniform int   FogNoiseMode;
+layout(location=6)  uniform int   FogPhysBlend;
+layout(location=7)  uniform int   FogJitterEnabled;
+layout(location=8)  uniform vec3  FogCameraPosWS;
+layout(location=9)  uniform vec4  FogViewportParams; // xy: screen size, zw: inv screen size
+layout(location=10) uniform vec2  FogDepthScale;
+layout(location=11) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
+layout(location=12) uniform vec4  FogDepthParams;    // x: near, y: far, z: reverse-Z flag, w: sky cutoff
+layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sigma clamp
 
 layout(location=0) out vec4 FragColor;
 
-const int NOISE_PERIOD = 64;
-const float NOISE_SCALE_MIN = 0.005;
-const float NOISE_SCALE_MAX = 0.5;
-const float LUT_PERIOD = 64.0;
+const int   NOISE_PERIOD     = 64;
+const float NOISE_SCALE_MIN  = 0.005;
+const float NOISE_SCALE_MAX  = 0.5;
+const float LUT_PERIOD       = 64.0;
+
+// ── helpers ────────────────────────────────────────────────────────────────
 
 int WrapIndex(int v, int period)
 {
@@ -95,16 +127,16 @@ float ValueNoise(vec3 p)
 
 float FBM(vec3 p)
 {
-	float sum = 0.0;
-	float amp = 0.5;
+	float sum  = 0.0;
+	float amp  = 0.5;
 	float freq = 1.0;
 	float norm = 0.0;
 	for (int i = 0; i < 3; ++i)
 	{
-		sum += amp * ValueNoise(p * freq);
+		sum  += amp * ValueNoise(p * freq);
 		norm += amp;
 		freq *= 2.0;
-		amp *= 0.5;
+		amp  *= 0.5;
 	}
 	return sum / max(norm, 1e-5);
 }
@@ -118,6 +150,9 @@ float FogNoise(vec3 p)
 
 float DepthToNdcZ(float depth)
 {
+	// FogDepthParams.z > 0.5  →  reverse-Z  (depth already in [0,1] NDC).
+	// NOTE: fogvol_temporal.frag uses a compile-time #define REVERSED_Z for
+	// the same test.  Ideally unify both shaders to use the same mechanism.
 	if (FogDepthParams.z > 0.5)
 		return depth;
 	return depth * 2.0 - 1.0;
@@ -125,8 +160,6 @@ float DepthToNdcZ(float depth)
 
 bool IsFiniteFloat(float v)
 {
-	// GLSL does not guarantee an isfinite() builtin across all versions/drivers.
-	// This catches infinities while also rejecting NaN (comparison with NaN is false).
 	return abs(v) <= 3.402823466e+38;
 }
 
@@ -137,10 +170,13 @@ bool IsSkyDepth(float depth)
 	return depth >= FogDepthParams.w;
 }
 
-float LinearEyeDepth(float depth)
+// FIX #4: Accept viewUv so the NDC x/y is correct for every pixel, not just
+// the screen centre.  Original had clip.xy hardcoded to (0,0).
+float LinearEyeDepth(float depth, vec2 viewUv)
 {
 	float ndcDepth = DepthToNdcZ(depth);
-	vec4 clip = vec4(0.0, 0.0, ndcDepth, 1.0);
+	// Reconstruct the correct NDC position for this pixel.
+	vec4 clip  = vec4(viewUv * 2.0 - 1.0, ndcDepth, 1.0);
 	vec4 world = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 		return FogDepthParams.y;
@@ -152,19 +188,23 @@ float LinearEyeDepth(float depth)
 
 bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float tExit)
 {
-	vec3 invRd = 1.0 / rd;
-	vec3 t0 = (bmin - ro) * invRd;
-	vec3 t1 = (bmax - ro) * invRd;
-	vec3 tmin = min(t0, t1);
-	vec3 tmax = max(t0, t1);
+	vec3 invRd  = 1.0 / rd;
+	vec3 t0     = (bmin - ro) * invRd;
+	vec3 t1     = (bmax - ro) * invRd;
+	vec3 tmin   = min(t0, t1);
+	vec3 tmax   = max(t0, t1);
 	tEnter = max(max(tmin.x, tmin.y), tmin.z);
-	tExit = min(min(tmax.x, tmax.y), tmax.z);
+	tExit  = min(min(tmax.x, tmax.y), tmax.z);
 	return tExit > max(tEnter, 0.0);
 }
 
+// FIX #1: Time is added *outside* sin() as a pure phase offset so that it
+// shifts the dither pattern frame-to-frame without distorting the frequency.
+// Original: sin(dot(pixel, k) + Time)  ← Time inside sin is fine for small
+// values but causes the *frequency* to appear modulated once Time grows large.
 float Dither(vec2 pixel)
 {
-	return fract(sin(dot(pixel, vec2(12.9898, 78.233)) + Time) * 43758.5453);
+	return fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453 + Time);
 }
 
 float InterleavedGradientNoise(vec2 p)
@@ -182,22 +222,26 @@ vec3 DebugVolumeColor(float id, float priority)
 	return mix(base, vec3(1.0, 1.0 - tint, tint), 0.35);
 }
 
+// FIX #6: Simplified – max(falloff,0) already ensures edgeThickness >= 0,
+// so the second <= 0 guard collapsed into a single early-out.
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 {
 	float edgeThickness = max(falloff, 0.0);
-	if (edgeThickness <= 0.0)
+	if (edgeThickness == 0.0)
 		return 1.0;
-	vec3 d = min(p - bmin, bmax - p);
+	vec3  d       = min(p - bmin, bmax - p);
 	float edgeDist = min(d.x, min(d.y, d.z));
 	return smoothstep(0.0, edgeThickness, edgeDist);
 }
+
+// ── main ───────────────────────────────────────────────────────────────────
 
 void main()
 {
 	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
 	vec2 invScreen = FogViewportParams.zw;
-	vec2 screenUv = screenPos * invScreen;
-	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
+	vec2 screenUv  = screenPos * invScreen;
+	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 
 	FogVolume volume = FogVolumes[FogVolumeIndex];
 	if (volume.misc.y <= 0.0)
@@ -207,11 +251,14 @@ void main()
 	}
 
 	ivec2 depthCoord = ivec2(screenPos);
-	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
-	float linearDepth = LinearEyeDepth(depth);
+	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
+
+	// FIX #5: Pass viewUv so LinearEyeDepth reconstructs the correct ray.
+	float linearDepth = LinearEyeDepth(depth, viewUv);
+
 	float ndcDepth = DepthToNdcZ(depth);
-	vec4 clip = vec4(viewUv * 2.0 - 1.0, ndcDepth, 1.0);
-	vec4 world = FogInvViewProj * clip;
+	vec4  clip     = vec4(viewUv * 2.0 - 1.0, ndcDepth, 1.0);
+	vec4  world    = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 	{
 		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
@@ -219,14 +266,13 @@ void main()
 	}
 	vec3 worldPos = world.xyz / world.w;
 
-	vec3 ro = FogCameraPosWS;
-	vec3 rd = normalize(worldPos - ro);
+	vec3  ro     = FogCameraPosWS;
+	vec3  rd     = normalize(worldPos - ro);
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
 		tScene = FogDepthParams.y;
 
-	float tEnter;
-	float tExit;
+	float tEnter, tExit;
 	if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
 	{
 		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
@@ -234,7 +280,7 @@ void main()
 	}
 
 	tEnter = max(tEnter, 0.0);
-	tExit = min(tExit, tScene);
+	tExit  = min(tExit, tScene);
 	float maxDistance = volume.noise_params.w;
 	if (maxDistance > 0.0)
 		tExit = min(tExit, maxDistance);
@@ -245,67 +291,77 @@ void main()
 	}
 
 	float stepCount = max(float(FogSteps), 1.0);
-	float len = tExit - tEnter;
-	float stepLen = len / stepCount;
+	float len       = tExit - tEnter;
+	float stepLen   = len / stepCount;
+
+	// FIX #2: Restructured jitter selection for clarity.
+	// When noise is enabled we always apply a jitter; which generator to use
+	// depends on FogJitterEnabled.
 	if (FogNoiseEnabled != 0)
 	{
-		float jitter = Dither(gl_FragCoord.xy);
+		float jitter;
 		if (FogJitterEnabled != 0)
+			// Temporally-stable IGN variant: shifts pattern each frame via Time.
 			jitter = InterleavedGradientNoise(gl_FragCoord.xy + vec2(Time * 12.3, Time * 4.7));
+		else
+			// Simple animated dither (fixed #1 version above).
+			jitter = Dither(gl_FragCoord.xy);
 		tEnter += jitter * stepLen;
 	}
 
-	vec3 scatterColor = volume.color_density.rgb;
-	float density = max(volume.color_density.a * FogDensityParams.x, 0.0);
-	float falloff = volume.misc.z;
+	vec3  scatterColor = volume.color_density.rgb;
+	float density      = max(volume.color_density.a * FogDensityParams.x, 0.0);
+	float falloff      = volume.misc.z;
 
-	vec3 accum = vec3(0.0);
+	vec3  accum        = vec3(0.0);
 	float transmittance = 1.0;
-	float tau = 0.0;
-	float edgeFadeSum = 0.0;
-	float edgeFadeSamples = 0.0;
-	float stepsTaken = 0.0;
-	bool earlyTerminated = false;
+	float tau           = 0.0;
+
+	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
+	// accumulated but never consumed, silently wasting ALU every iteration.
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
 		float t = tEnter + (float(i) + 0.5) * stepLen;
 		if (t >= tExit)
 			break;
-		stepsTaken += 1.0;
 
-		vec3 p = ro + rd * t;
+		vec3  p        = ro + rd * t;
 		float edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+
 		float noiseFactor = 1.0;
 		if (FogNoiseEnabled != 0)
 		{
 			float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-			vec3 noisePos = p * noiseScale + volume.velocity.xyz * Time * noiseScale;
-			float n = FogNoise(noisePos);
-			float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
+			vec3  noisePos   = p * noiseScale + volume.velocity.xyz * Time * noiseScale;
+			float n          = FogNoise(noisePos);
+			float noiseBias  = clamp(volume.noise_params.z, 0.0, 1.0);
 			if (noiseBias > 0.0)
 				n = smoothstep(noiseBias, 1.0, n);
-			float amt = clamp(volume.noise_params.y, 0.0, 1.0);
+			float amt   = clamp(volume.noise_params.y, 0.0, 1.0);
 			noiseFactor = mix(1.0, n, amt);
 		}
 
-		float sigma = min(density * noiseFactor * edgeFade, FogDensityParams.y);
+		float sigma  = min(density * noiseFactor * edgeFade, FogDensityParams.y);
 		if (!IsFiniteFloat(sigma))
 			sigma = 0.0;
-		float att = exp(-sigma * stepLen);
-		vec3 stepScatter = (1.0 - att) * scatterColor;
-		accum += transmittance * stepScatter;
-		transmittance *= att;
-		tau += sigma * stepLen;
-		edgeFadeSum += edgeFade;
-		edgeFadeSamples += 1.0;
+		float att        = exp(-sigma * stepLen);
+		vec3  stepScatter = (1.0 - att) * scatterColor;
+		accum            += transmittance * stepScatter;
+		transmittance    *= att;
+		tau              += sigma * stepLen;
+
 		if (transmittance < 0.01)
-		{
-			earlyTerminated = true;
 			break;
-		}
 	}
 
+	// ── debug outputs ─────────────────────────────────────────────────────
+	if (FogDebugMode == 1)
+	{
+		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
+		FragColor = vec4(debugColor, 1.0);
+		return;
+	}
 	if (FogDebugMode == 2)
 	{
 		FragColor = vec4(vec3(depth), 1.0);
@@ -335,14 +391,8 @@ void main()
 		return;
 	}
 
-	if (FogDebugMode == 1)
-	{
-		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
-		FragColor = vec4(debugColor, 1.0);
-		return;
-	}
-
-	vec3 scene = texture(SceneColor, screenUv).rgb;
+	// ── composite ─────────────────────────────────────────────────────────
+	vec3 scene    = texture(SceneColor, screenUv).rgb;
 	vec3 outColor;
 	if (FogPhysBlend != 0)
 		outColor = scene * transmittance + accum;

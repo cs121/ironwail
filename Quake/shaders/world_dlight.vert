@@ -160,6 +160,11 @@ void main()
 		uv = ComputeEnvUV(world_pos, world_normal);
         out_uv = uv;
         out_depth = gl_Position.w;
+        // BP #7: out_coord für Licht-Tiles wird hier in NDC-Raum berechnet
+        // (nach Perspektivdivision). Das ist korrekt für Screen-Space-Tiles,
+        // aber die Tiles sollten konsistent zu den Fragment-Tiles in world_dlight.frag
+        // sein. Wenn der Fragment-Shader in_coord nicht für Tile-Lookups nutzt
+        // (aktuell nur NumLights-Loop), ist das harmlos aber dokumentationswürdig.
         out_coord = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * vec2(LIGHT_TILES_X, LIGHT_TILES_Y);
         out_flags = call.flags;
 #if MODE == 2

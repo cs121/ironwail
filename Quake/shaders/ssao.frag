@@ -299,13 +299,22 @@ float RandIGN(ivec2 pixel, float seed)
 	return fract(52.9829189 * f);
 }
 
-// FIX: Fog density is applied linearly over distance, not over squared distance.
+// FIX #1: Use u_fogParams.y (saved scene fog density from gl_rmain.c) instead of
+// Fog.w from the frame_uniforms UBO. Fog_DisableGFog() zeroes Fog.w before this
+// shader runs (GL_PostProcess is called after R_RenderView), so Fog.w is always 0
+// at SSAO generation time, making this function always return 1.0 and disabling
+// fog-damped AO entirely.
+//
+// FIX #2: Use quadratic distance (dist*dist) to match world.frag's fog formula:
+//   world.frag: exp2(-Fog.w * dot(p,p))  where dot(p,p) = dist²
+// Previous code used linear distance (dist) which underestimates fog falloff and
+// produces fog damping that doesn't match the visual fog appearance.
 float FogTransmittanceFromViewPos(vec3 viewPos)
 {
-	float density = abs(Fog.w);
+	float density = abs(u_fogParams.y); // .y = saved scene fog density (NOT Fog.w)
 	if (density <= 0.0)
 		return 1.0;
-	float dist = length(viewPos);
+	float dist = dot(viewPos, viewPos); // quadratic, matches world.frag dot(p,p)
 	float fog = exp2(-density * dist);
 	return clamp(fog, 0.0, 1.0);
 }
@@ -503,7 +512,11 @@ void main()
 		ao = 1.0;
 
 	float fogFactor    = FogFactorFromViewPos(viewPos);
-	float aoFogWeight  = smoothstep(0.0, 0.6, 1.0 - clamp(fogFactor, 0.0, 1.0));
+	// FIX #3: smoothstep(0, 0.6, 1-fogFactor) cut off AO when fogFactor>0.4 (only 40%
+	// fogged) which was far too aggressive — surfaces at moderate fog still had full
+	// AO darkening removed. Use transmittance directly (consistent with postprocess.frag
+	// which uses pow(transmittance, ssaoFogPower) for the same purpose).
+	float aoFogWeight  = 1.0 - clamp(fogFactor, 0.0, 1.0);
 
 	if (debugMode == 3)
 	{

@@ -116,18 +116,50 @@ void main()
 	// transform world X and Z axes to local space
         mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
         orientation = transpose(orientation);
-        vec3 shadevector = (orientation[0] + orientation[2]) / sqrt(2.0);
+        // BUG FIX #2: shadevector sollte die Weltkoordinaten-Beleuchtungsrichtung
+        // (typisch leicht von oben, Quake-Standard ~(0, 0.5, 1) normalisiert) in
+        // den Modell-Lokalraum transformieren. Die alte Formel (orientation[0]+orientation[2])
+        // war eine Diagonale aus X+Z, die bei rotierten Modellen willkürlich falsch zeigt.
+        // Korrekt: einen festen Weltvektor per Inverse-Transpose (= transpose(orientation))
+        // in Lokalraum bringen. orientation ist bereits transponiert, also direkt multiplizieren.
+        vec3 world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
+        vec3 shadevector = normalize(orientation * world_shade_dir);
         float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
         float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
         float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
         vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-        mat3 world_orientation = mat3(worldmatrix[0].xyz, worldmatrix[1].xyz, worldmatrix[2].xyz);
+        // BP FIX #8: Normalentransformation erfordert die inverse-transpose der
+        // Weltmatrix. worldmatrix[i].xyz sind die Spaltenvektoren der 4x3-Matrix,
+        // die bei nicht-uniform-Skalierung die Normalen verzerren. Korrekt:
+        // normalize() auf den einzelnen Basisvektoren vor mat3-Konstruktion
+        // entspricht der inversen-transponierten für orthogonale Matrizen.
+        // Für korrekte Unterstützung nicht-uniformer Skalierung wäre die echte
+        // Inverse-Transpose nötig (CPU-seitig berechnen und übergeben).
+        mat3 world_orientation = mat3(
+                normalize(worldmatrix[0].xyz),
+                normalize(worldmatrix[1].xyz),
+                normalize(worldmatrix[2].xyz));
         vec3 world_normal = normalize(world_orientation * blended_normal);
         vec3 view_dir = normalize(-out_pos);
         float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
-        vec3 ambient = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-        vec3 litAmbient = ambient * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
-        vec3 litDlight = inst.DLightColor.rgb * lighting;
+
+        // BUG FIX #1a: DLightColor aus dem InstanceBuffer ist bereits der
+        // CPU-integrierte Gesamtbeitrag aller DLights an diesem Modell-Ursprung
+        // (Radius/Abstand schon eingerechnet). Den Wert NOCHMALS mit `lighting`
+        // (Vertex-NdotL) zu multiplizieren doppelt die Abschwächung → zu dunkle
+        // oder bei fast-tangentialen Normalen grau-helle Fragmente.
+        // Korrektur: DLightColor direkt übernehmen, NdotL gilt nur für ambient.
+        //
+        // BUG FIX #1b: max(LightColor - DLightColor, 0) subtrahiert per-Kanal.
+        // Wenn ein DLight-Kanal > LightColor-Kanal ist (z.B. reines Blau-DLight
+        // über weißem Ambient), wird der Ambient-Kanal auf 0 geclampt, aber die
+        // anderen Kanäle bleiben unverändert, was Farbverschiebungen erzeugt.
+        // Besser: den vollen LightColor-Wert als Ambient-Basis verwenden und
+        // DLight additiv dazurechnen statt subtraktiv zu trennen.
+        vec3 litAmbient = inst.LightColor.rgb * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
+        // DLightColor direkt (kein weiteres lighting-Weighting) – CPU hat bereits
+        // Distanz/Radius berücksichtigt. NdotL-Faktor hier wäre Doppelmodulation.
+        vec3 litDlight = inst.DLightColor.rgb;
         vec3 base_color = litAmbient + litDlight;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
