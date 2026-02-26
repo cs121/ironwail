@@ -1472,31 +1472,9 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         R_ResetBModelCalls (program);
         GL_SetState (state);
         GL_UseProgram (program);
-#if defined(SHDLOG)
-        {
-                GLint gl_current_program = 0;
-                glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current_program);
-                if ((GLuint)gl_current_program != program)
-                {
-                        GL_ClearCachedProgram ();
-                        GL_UseProgram (program);
-                }
-        }
-#endif
 if (pass <= BP_ALPHATEST)
 {
 GL_UseProgram (program);
-#if defined(SHDLOG)
-{
-GLint gl_current_program = 0;
-glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current_program);
-if ((GLuint)gl_current_program != program)
-{
-        GL_ClearCachedProgram ();
-        GL_UseProgram (program);
-}
-}
-#endif
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 }
@@ -1607,17 +1585,6 @@ GL_Bind (GL_TEXTURE2, skybox->cubemap);
         }
 
 	GL_UseProgram (program);
-#if defined(SHDLOG)
-	{
-		GLint gl_current_program = 0;
-		glGetIntegerv (GL_CURRENT_PROGRAM, &gl_current_program);
-		if ((GLuint)gl_current_program != program)
-		{
-			GL_ClearCachedProgram ();
-			GL_UseProgram (program);
-		}
-	}
-#endif
 	R_FlushBModelCalls ();
 
 	if (pass == BP_SOLID || pass == BP_ALPHATEST)

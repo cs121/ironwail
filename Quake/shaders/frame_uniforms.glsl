@@ -48,7 +48,7 @@ layout(std140, binding=0) uniform FrameDataUBO
     vec4    ColorSpaceParams;   // 352
     vec4    ShaderParams;       // 368
 
-    // ── Global shadow params (kept for world shadow-depth pass) ── offset 384
+    // ── Global params ── offset 384
     // NOTE: These members must stay layout-compatible with gpuframedata_t
     // their expected offsets.
 

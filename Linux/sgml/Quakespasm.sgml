@@ -479,7 +479,7 @@ quakespasm (cl_alwaysrun 1, cl_forwardspeed 200, cl_backspeed 200)
 <item> New gamma correction implementation using GLSL. Fixes all known gamma issues (affecting the full display, persisting after quitting, or darkening the screen on OS X). Disable with "-noglslgamma".
 <item> Use high-quality water by default (r_oldwater 0).
 <item> Shadows use stencil buffer to avoid overlapping artifacts (from MarkV.)
-<item> r_noshadow_list cvar added (from MarkV.)
+<item> model exclusion list cvar added (from MarkV.)
 </itemize>
 <sect2>Interface improvements
 <itemize>
@@ -693,7 +693,7 @@ quakespasm (cl_alwaysrun 1, cl_forwardspeed 200, cl_backspeed 200)
 <item>Don't play demos on program init
 <item>Default heapsize is 64 MB.
 <item>Changes to default console alpha, speed
-<item>Changes to cvar persistence gl_flashblend (default 0), r_shadow, r_wateralpha, r_dynamic, r_novis.
+<item>Changes to cvar persistence gl_flashblend (default 0), r_wateralpha, r_dynamic, r_novis.
 </itemize>
 
 <sect>Copyright<p>

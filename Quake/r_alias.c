@@ -62,9 +62,9 @@ typedef struct aliasinstance_s {
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
-	uint32_t	_pad_shadow1;
-	uint32_t	_pad_shadow2;
-	uint32_t	_pad_shadow3;
+	uint32_t	_pad1;
+	uint32_t	_pad2;
+	uint32_t	_pad3;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -623,7 +623,7 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
 	{
 		/*
-		 * Keep TEXTURE6 unbound for alias receiver draws to avoid
+		 * Keep TEXTURE6 unbound for alias draws to avoid
 		 * when both units point at the same texture object.
 		 *
 		 * Important: do not switch/bind TEXTURE6 until after
@@ -1005,8 +1005,6 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
 	if (e == &cl.viewent)
 		return;
 
-	if (e->model->flags & MOD_NOSHADOW)
-		return;
 
 	paliashdr = (aliashdr_t *)Mod_Extradata (e->model);
 

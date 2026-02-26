@@ -841,7 +841,7 @@
   -  Shadows use stencil buffer to avoid overlapping artifacts (from
      MarkV.)
 
-  -  r_noshadow_list cvar added (from MarkV.)
+  -  model exclusion list cvar added (from MarkV.)
 
   Interface improvements:
 
@@ -1264,7 +1264,7 @@
 
   -  Changes to default console alpha, speed
 
-  -  Changes to cvar persistence gl_flashblend (default 0), r_shadow,
+  -  Changes to cvar persistence gl_flashblend (default 0),
      r_wateralpha, r_dynamic, r_novis.
 
 
