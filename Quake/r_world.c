@@ -39,15 +39,6 @@ extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_mode;
 
-extern cvar_t r_shadows;
-extern cvar_t r_shadow_bias;
-extern cvar_t r_shadow_normalbias;
-extern cvar_t r_shadow_pcf;
-extern cvar_t r_shadow_pcf_taps;
-extern cvar_t r_shadow_debug;
-extern cvar_t r_shadow_dlights;
-extern cvar_t r_shadow_dlight_bias;
-extern cvar_t r_shadow_dlight_pcf_taps;
 
 extern GLuint gl_bmodel_vbo;
 extern size_t gl_bmodel_vbo_size;
@@ -985,7 +976,6 @@ static GLuint R_ChooseBModelProgram (qboolean oit, qboolean alphatest)
 typedef enum {
         BP_SOLID,
         BP_ALPHATEST,
-        BP_SHADOW,
         BP_GODRAYS,
         BP_SKYLAYERS,
         BP_SKYCUBEMAP,
@@ -1418,11 +1408,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_CUTOUT + 1;
                 program = R_ChooseBModelProgram (oit, true);
                 break;
-        case BP_SHADOW:
-                texbegin = 0;
-                texend = TEXTYPE_CUTOUT;
-                program = glprogs.shadow_depth;
-                break;
         case BP_GODRAYS:
                 texbegin = 0;
                 texend = TEXTYPE_COUNT;
@@ -1479,14 +1464,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (pass == BP_GODRAYS)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
-        else if (pass == BP_SHADOW)
-        {
-                state &= ~GLS_MASK_CULL;
-                /* FIX Reverse-Z Culling: Mit Reverse-Z (gl_clipcontrol_able) muessen
-                 * Frontfaces gerendert werden (CULL_BACK), weil die Tiefe invertiert
-                 * ist. Ohne Reverse-Z: CULL_FRONT (Backfaces rendern) ist korrekt. */
-                state |= GLS_BLEND_OPAQUE | (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT);
-        }
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
         else
@@ -1522,35 +1499,9 @@ if ((GLuint)gl_current_program != program)
 #endif
 GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
-R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
-	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
-	{
-		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
-		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
-			/*
-			 * TEXTURE6 is intentionally unbound for world receiver draws.
-			 * Binding the same depth texture on TEXTURE5 (sampler2DShadow)
-			 * and TEXTURE6 (sampler2D) can trigger GL_INVALID_OPERATION due
-			 * to incompatible sampler types on the same texture object.
-			 *
-			 * Keep this bind after receiver logging. The first snapshot in a
-			 * frame can execute FRAME_BEGIN diagnostics with framebuffer queries,
-			 * and changing the active texture state beforehand can interfere.
-			 */
-			R_Shadow_Log_ReceiverPassSnapshot ("WORLD", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
-			GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
-			R_Shadow_DebugValidateBinding ("WORLD", GL_TEXTURE5, receiver_tex);
-		}
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
-R_Shadow_BindDlightShadowMap (GL_TEXTURE5);
-	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
-		R_Shadow_Log_ReceiverPassSnapshot ("WORLD_DLIGHT", program, (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId (),
-			R_Shadow_ReceiverUsesDlight (), r_shadow_dlight_bias.value, 0.f,
-			r_shadow_dlight_pcf_taps.value > 0.f ? 1.f : 0.f, r_shadow_dlight_pcf_taps.value, R_Shadow_GetReceiverShadowViewProj ());
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
-		R_Shadow_DebugValidateBinding ("WORLD_DLIGHT", GL_TEXTURE5, R_Shadow_GetDlightShadowMapTextureId ());
 }
 else if (pass == BP_SKYCUBEMAP)
 GL_Bind (GL_TEXTURE2, skybox->cubemap);
@@ -1976,10 +1927,6 @@ void R_DrawBrushModels_SkyStencil (entity_t **ents, int count)
 	R_DrawBrushModels_Real (ents, count, BP_SKYSTENCIL, false);
 }
 
-void R_DrawBrushModels_Shadow (entity_t **ents, int count)
-{
-	R_DrawBrushModels_Real (ents, count, BP_SHADOW, false);
-}
 
 /*
 =============

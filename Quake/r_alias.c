@@ -31,13 +31,6 @@ extern cvar_t r_oit;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
-extern cvar_t r_shadow_bias_mdl;
-extern cvar_t r_shadow_normalbias_mdl;
-extern cvar_t r_shadows;
-extern cvar_t r_shadow_pcf;
-extern cvar_t r_shadow_pcf_taps;
-extern cvar_t r_shadow_debug;
-extern cvar_t r_shadow_twosided_mdl;
 
 //up to 16 color translated skins
 gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
@@ -69,8 +62,6 @@ typedef struct aliasinstance_s {
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
-	vec4_t		shadow_light_pos_range; // xyz: dlight position, w: range
-	uint32_t	shadow_light_index;
 	uint32_t	_pad_shadow1;
 	uint32_t	_pad_shadow2;
 	uint32_t	_pad_shadow3;
@@ -99,35 +90,19 @@ struct ibuf_s {
 		float	overbright;
 		float	half_lambert;
 		float	_pad1;
-		float	shadow_viewproj[16];
-		vec4_t	shadow_params;
-		vec4_t	shadow_debug;
-		float	shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
-		vec4_t	shadow_dlight_atlas[SHADOW_DLIGHT_MAX];
-		vec4_t	shadow_dlight_info[SHADOW_DLIGHT_MAX];
-		vec4_t	shadow_dlight_params;
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
 COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 176);
-COMPILE_TIME_ASSERT (alias_instance_shadow_pos_offset, offsetof (aliasinstance_t, shadow_light_pos_range) == 128);
-COMPILE_TIME_ASSERT (alias_instance_shadow_index_offset, offsetof (aliasinstance_t, shadow_light_index) == 144);
 
-static void R_Alias_SelectDominantShadowDlight (const vec3_t entity_origin, aliasinstance_t *instance)
 {
 	float best_score = -FLT_MAX;
 	int best_light_index = -1;
 	dlight_t *best_light = NULL;
 
-	instance->shadow_light_index = UINT32_MAX;
-	instance->shadow_light_pos_range[0] = 0.f;
-	instance->shadow_light_pos_range[1] = 0.f;
-	instance->shadow_light_pos_range[2] = 0.f;
-	instance->shadow_light_pos_range[3] = 0.f;
 
-	if (!R_Shadow_DlightShadowsActiveThisFrame ())
 		return;
 
 	for (int slot = 0; slot < SHADOW_DLIGHT_MAX; ++slot)
@@ -138,10 +113,8 @@ static void R_Alias_SelectDominantShadowDlight (const vec3_t entity_origin, alia
 		float dist;
 		float score;
 
-		if (r_framedata.shadow_dlight_info[slot][0] < 0.f)
 			continue;
 
-		light_index = (int)Q_rint (r_framedata.shadow_dlight_info[slot][0]);
 		if (light_index < 0 || light_index >= DLIGHT_GPU_MAX)
 			continue;
 
@@ -169,11 +142,6 @@ static void R_Alias_SelectDominantShadowDlight (const vec3_t entity_origin, alia
 	if (!best_light)
 		return;
 
-	instance->shadow_light_index = (uint32_t)best_light_index;
-	instance->shadow_light_pos_range[0] = best_light->origin[0];
-	instance->shadow_light_pos_range[1] = best_light->origin[1];
-	instance->shadow_light_pos_range[2] = best_light->origin[2];
-	instance->shadow_light_pos_range[3] = best_light->radius;
 }
 
 static qboolean r_lightgrid_debug_sample_reported = false;
@@ -643,16 +611,6 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
-	memcpy (ibuf.global.shadow_viewproj, R_Shadow_GetReceiverShadowViewProj (), sizeof (ibuf.global.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
-	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
-	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
-	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
-	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
-	memcpy (ibuf.global.shadow_dlight_viewproj, r_framedata.shadow_dlight_viewproj, sizeof (ibuf.global.shadow_dlight_viewproj));
-	memcpy (ibuf.global.shadow_dlight_atlas, r_framedata.shadow_dlight_atlas, sizeof (ibuf.global.shadow_dlight_atlas));
-	memcpy (ibuf.global.shadow_dlight_info, r_framedata.shadow_dlight_info, sizeof (ibuf.global.shadow_dlight_info));
-	memcpy (ibuf.global.shadow_dlight_params, r_framedata.shadow_dlight_params, sizeof (ibuf.global.shadow_dlight_params));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -663,23 +621,15 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 	GL_BindBuffer (GL_ARRAY_BUFFER, model->meshvbo);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, model->meshindexesvbo);
-	R_Shadow_BindReceiverShadowMap (GL_TEXTURE5);
-	R_Shadow_BindDebugColorAtlas (GL_TEXTURE7);
 	{
-		qboolean receiver_enabled = R_Shadow_ReceiverUsesDlight ();
-		GLuint receiver_tex = receiver_enabled ? R_Shadow_GetReceiverShadowMapTextureId () : 0;
 		/*
 		 * Keep TEXTURE6 unbound for alias receiver draws to avoid
-		 * sampler-type conflicts (sampler2DShadow on unit 5 vs sampler2D on 6)
 		 * when both units point at the same texture object.
 		 *
 		 * Important: do not switch/bind TEXTURE6 until after
-		 * R_Shadow_Log_ReceiverPassSnapshot(), because that call may emit the
 		 * FRAME_BEGIN logging block and framebuffer attachment queries.
 		 */
-		R_Shadow_Log_ReceiverPassSnapshot ("ALIAS", glprogs.alias[oit][mode][alphatest][md5], (GLint)GL_GetCurrentProgram (), GL_TEXTURE5, receiver_tex, receiver_enabled, r_framedata.shadow_params[0], r_framedata.shadow_params[1], r_framedata.shadow_params[2], r_framedata.shadow_params[3], R_Shadow_GetReceiverShadowViewProj ());
 		GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, 0);
-		R_Shadow_DebugValidateBinding ("ALIAS", GL_TEXTURE5, receiver_tex);
 	}
 
 	for (hdr = mainhdr; hdr; hdr = hdr->nextsurface ? (aliashdr_t *) ((byte *)hdr + hdr->nextsurface) : NULL)
@@ -765,10 +715,8 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 
 /*
 =================
-R_FlushAliasInstances_Shadow
 =================
 */
-static void R_FlushAliasInstances_Shadow (void)
 {
 	qmodel_t	*model;
 	aliashdr_t	*mainhdr, *hdr;
@@ -790,17 +738,16 @@ static void R_FlushAliasInstances_Shadow (void)
 
 	GL_BeginGroup (model->name);
 
-	GL_UseProgram (glprogs.shadow_depth_alias[md5]);
+	GL_UseProgram (glprogs.alias[0][0][0][md5]);
 
 	if (md5)
 		state = GLS_ATTRIBS(5);
 	else
 		state = GLS_ATTRIBS(1);
 
-	/* FIX Reverse-Z Culling fuer Alias-Modell Shadow Pass:
 	 * Gleiches Problem wie bei Brush-Modellen: Mit Reverse-Z muss
 	 * GLS_CULL_BACK statt GLS_CULL_FRONT verwendet werden. */
-	if (r_shadow_twosided_mdl.value > 0.f)
+	if (0)
 		state |= GLS_CULL_NONE;
 	else
 		state |= (gl_clipcontrol_able ? GLS_CULL_BACK : GLS_CULL_FRONT);
@@ -811,16 +758,6 @@ static void R_FlushAliasInstances_Shadow (void)
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 	memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-	memcpy (ibuf.global.shadow_viewproj, R_Shadow_GetReceiverShadowViewProj (), sizeof (ibuf.global.shadow_viewproj));
-	ibuf.global.shadow_params[0] = r_shadow_bias_mdl.value;
-	ibuf.global.shadow_params[1] = r_shadow_normalbias_mdl.value;
-	ibuf.global.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
-	ibuf.global.shadow_params[3] = r_shadow_pcf_taps.value;
-	memcpy (ibuf.global.shadow_debug, r_framedata.shadow_debug, sizeof (r_framedata.shadow_debug));
-	memcpy (ibuf.global.shadow_dlight_viewproj, r_framedata.shadow_dlight_viewproj, sizeof (ibuf.global.shadow_dlight_viewproj));
-	memcpy (ibuf.global.shadow_dlight_atlas, r_framedata.shadow_dlight_atlas, sizeof (ibuf.global.shadow_dlight_atlas));
-	memcpy (ibuf.global.shadow_dlight_info, r_framedata.shadow_dlight_info, sizeof (ibuf.global.shadow_dlight_info));
-	memcpy (ibuf.global.shadow_dlight_params, r_framedata.shadow_dlight_params, sizeof (ibuf.global.shadow_dlight_params));
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -1038,7 +975,6 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
-	R_Alias_SelectDominantShadowDlight (lerpdata.origin, instance);
 
 	if (paliashdr->poseverttype == PV_QUAKE1)
 	{
@@ -1054,10 +990,8 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
 
 /*
 =================
-R_DrawAliasModel_Shadow_Real
 =================
 */
-static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 {
 	aliashdr_t	*paliashdr;
 	lerpdata_t	lerpdata;
@@ -1094,7 +1028,6 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 		return;
 
 	if (!R_Alias_CanAddToBatch (e))
-		R_FlushAliasInstances_Shadow ();
 
 	if (!ibuf.count)
 		ibuf.ent = e;
@@ -1107,11 +1040,6 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 
 	VectorClear (instance->lightcolor);
 	VectorClear (instance->dlightcolor);
-	instance->shadow_light_pos_range[0] = 0.f;
-	instance->shadow_light_pos_range[1] = 0.f;
-	instance->shadow_light_pos_range[2] = 0.f;
-	instance->shadow_light_pos_range[3] = 0.f;
-	instance->shadow_light_index = UINT32_MAX;
 	instance->alpha = entalpha;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
@@ -1144,15 +1072,11 @@ void R_DrawAliasModels (entity_t **ents, int count)
 
 /*
 =================
-R_DrawAliasModels_Shadow
 =================
 */
-void R_DrawAliasModels_Shadow (entity_t **ents, int count)
 {
 	int i;
 	for (i = 0; i < count; i++)
-		R_DrawAliasModel_Shadow_Real (ents[i]);
-	R_FlushAliasInstances_Shadow ();
 }
 
 /*

@@ -4,11 +4,6 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
-	vec4	ShadowLightPosRange; // xyz=dlight pos, w=range
-	uint	ShadowLightIndex;
-	uint	_PadShadow1;
-	uint	_PadShadow2;
-	uint	_PadShadow3;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -26,13 +21,6 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
-	mat4	ShadowViewProj;
-	vec4	ShadowParams;
-	vec4	ShadowDebug;
-	mat4	ShadowDlightViewProj[4];
-	vec4	ShadowDlightAtlas[4];
-	vec4	ShadowDlightInfo[4];
-	vec4	ShadowDlightParams;
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -104,16 +92,12 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
-layout(location=7) flat out uint out_shadow_light_index;
-layout(location=8) out vec4 out_shadow_light_pos_range;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
 void main()
 {
 	InstanceData inst = AliasFrameBuffer.instances[gl_InstanceID];
-	out_shadow_light_index = inst.ShadowLightIndex;
-	out_shadow_light_pos_range = inst.ShadowLightPosRange;
 	out_texcoord = in_uv;
 	PoseVertex pose1 = GetPoseVertex(inst.Pose1);
 	PoseVertex pose2 = GetPoseVertex(inst.Pose2);
