@@ -311,10 +311,20 @@ static void R_Shadow_SetTextureCompareStateForMode (GLenum compare_mode)
 		glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, compare_func);
 }
 
-static void R_Shadow_ApplyDepthSamplerState (GLenum compare_mode)
+static void R_Shadow_ApplyDepthSamplerState (GLuint texture, GLenum compare_mode)
 {
 	const float border_val = gl_clipcontrol_able ? 0.f : 1.f;
 	const float border[4] = { border_val, border_val, border_val, border_val };
+	GLint previous_active;
+	GLint previous_binding;
+
+	if (!texture)
+		return;
+
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active);
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
+	glBindTexture (GL_TEXTURE_2D, texture);
 
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -323,11 +333,9 @@ static void R_Shadow_ApplyDepthSamplerState (GLenum compare_mode)
 	glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
 	R_Shadow_SetTextureCompareStateForMode (compare_mode);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-}
 
-static void R_Shadow_SetTextureCompareState (void)
-{
-	R_Shadow_SetTextureCompareStateForMode (GL_COMPARE_REF_TO_TEXTURE);
+	glBindTexture (GL_TEXTURE_2D, (GLuint)previous_binding);
+	GL_ActiveTextureFunc ((GLenum)previous_active);
 }
 
 static void R_Shadow_CreateDummyTexture (void)
@@ -344,33 +352,19 @@ static void R_Shadow_CreateDummyTexture (void)
 
 	glGenTextures (1, &shadow_dlight_dummy_tex);
 	GL_ActiveTextureFunc (GL_TEXTURE0);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_dummy_tex);
+	glBindTexture (GL_TEXTURE_2D, shadow_dlight_dummy_tex);
 	glTexImage2D (GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 8, 8, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depth_data);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	R_Shadow_SetTextureCompareState ();
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	R_Shadow_ApplyDepthSamplerState (shadow_dlight_dummy_tex, GL_COMPARE_REF_TO_TEXTURE);
 }
 
 void R_EnsureShadowSamplerState (GLuint texture)
 {
-	GLint previous_active;
-	GLint previous_binding;
-
 	if (!texture)
 		return;
 
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active);
-	GL_ActiveTextureFunc (GL_TEXTURE0);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &previous_binding);
-	glBindTexture (GL_TEXTURE_2D, texture);
-	R_Shadow_ApplyDepthSamplerState ((r_shadow_debug.value >= 3.f || r_shadow_debug_atlas_overlay.value > 0.f) ? GL_NONE : GL_COMPARE_REF_TO_TEXTURE);
+	R_Shadow_ApplyDepthSamplerState (texture, GL_COMPARE_REF_TO_TEXTURE);
 	if (r_shadow_debug.value >= 2.f && (r_framecount & 63) == 0)
 		R_Shadow_LogTextureParams ("receiver_sampler_validate", texture);
-	glBindTexture (GL_TEXTURE_2D, (GLuint)previous_binding);
-	GL_ActiveTextureFunc ((GLenum)previous_active);
 }
 
 static void R_Shadow_DebugValidateProgramSampler (const char *tag, const char *uniform_name, GLint expected_unit)
@@ -1163,10 +1157,10 @@ static void R_Shadow_ResizeDlightAtlasIfNeeded (void)
 
 	glGenTextures (1, &shadow_dlight_depth_tex);
 	GL_ActiveTextureFunc (GL_TEXTURE0);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, shadow_dlight_depth_tex);
+	glBindTexture (GL_TEXTURE_2D, shadow_dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, shadow_dlight_depth_tex, -1, "shadowmap dlight depth");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, atlas_size, atlas_size);
-	R_Shadow_ApplyDepthSamplerState (GL_COMPARE_REF_TO_TEXTURE);
+	R_Shadow_ApplyDepthSamplerState (shadow_dlight_depth_tex, GL_COMPARE_REF_TO_TEXTURE);
 
 	glGenTextures (1, &shadow_dlight_debug_color_tex);
 	GL_ActiveTextureFunc (GL_TEXTURE0);
