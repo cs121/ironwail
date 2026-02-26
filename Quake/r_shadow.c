@@ -1015,7 +1015,6 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	float viewproj_view_first[16];
 	float znear;
 	float zfar;
-	float fov_deg;
 	int aim_mode;
 	qboolean matrix_debug;
 
@@ -1085,12 +1084,9 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 
 	if (!isfinite (radius) || radius < 1.f)
 		radius = 1.f;
-	znear = 4.f;
-	zfar = q_max (radius, znear + 1.f);
-	if (zfar - znear < 1.f)
-		zfar = znear + 1.f;
-	fov_deg = CLAMP (45.f, r_shadow_dlight_fov.value, 140.f);
-	R_Shadow_PerspectiveMatrix (proj, DEG2RAD (fov_deg), DEG2RAD (fov_deg), znear, zfar);
+	znear = -radius;
+	zfar = radius;
+	R_Shadow_OrthoMatrix (proj, -radius, radius, -radius, radius, znear, zfar);
 
 	/* MatrixMultiply(left,right) uses column-major multiplication with left = left * right.
 	 * For shader usage clip = viewproj * world_pos we must build viewproj = proj * view.
@@ -1102,8 +1098,8 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	{
 		memcpy (viewproj_view_first, view, sizeof (view));
 		MatrixMultiply (viewproj_view_first, proj);
-		Con_DPrintf ("r_shadow_matrix_debug: aim=%d fov=%.1f origin=(%.1f %.1f %.1f) fwd=(%.3f %.3f %.3f) right=(%.3f %.3f %.3f) up=(%.3f %.3f %.3f) det=%.6g hash(pv)=%08X hash(vp)=%08X\n",
-			aim_mode, fov_deg,
+		Con_DPrintf ("r_shadow_matrix_debug: aim=%d ortho_radius=%.1f origin=(%.1f %.1f %.1f) fwd=(%.3f %.3f %.3f) right=(%.3f %.3f %.3f) up=(%.3f %.3f %.3f) det=%.6g hash(pv)=%08X hash(vp)=%08X\n",
+			aim_mode, radius,
 			origin[0], origin[1], origin[2],
 			forward[0], forward[1], forward[2],
 			right[0], right[1], right[2],
