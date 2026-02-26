@@ -971,6 +971,36 @@ static void R_Shadow_PerspectiveMatrix (float matrix[16], float fovx, float fovy
 	}
 }
 
+static void R_Shadow_DebugDrawBasisAxes (const vec3_t origin, const vec3_t right, const vec3_t up, const vec3_t forward)
+{
+	vec3_t axis_end;
+	vec3_t mins;
+	vec3_t maxs;
+	const float axis_len = 48.f;
+	const float half_extent = 3.f;
+	static const vec3_t axis_colors[3] = {
+		{1.f, 0.f, 0.f}, /* right   = red   */
+		{0.f, 1.f, 0.f}, /* up      = green */
+		{0.f, 0.f, 1.f}  /* forward = blue  */
+	};
+	const vec3_t *axes[3] = { &right, &up, &forward };
+
+	if (r_shadow_matrix_debug.value <= 0.f)
+		return;
+
+	for (int i = 0; i < 3; ++i)
+	{
+		VectorMA (origin, axis_len, *axes[i], axis_end);
+		mins[0] = axis_end[0] - half_extent;
+		mins[1] = axis_end[1] - half_extent;
+		mins[2] = axis_end[2] - half_extent;
+		maxs[0] = axis_end[0] + half_extent;
+		maxs[1] = axis_end[1] + half_extent;
+		maxs[2] = axis_end[2] + half_extent;
+		R_DebugDrawWireBox (mins, maxs, axis_colors[i], true);
+	}
+}
+
 static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t origin, float radius)
 {
 	vec3_t forward;
@@ -1047,7 +1077,11 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 	}
 #endif
 
+	/* OpenGL view space looks down -Z, so row-2 uses -forward. */
+	VectorNegate (forward, forward);
+
 	R_Shadow_BuildViewMatrixColumns (view, right, light_up, forward, origin);
+	R_Shadow_DebugDrawBasisAxes (origin, right, light_up, forward);
 
 	if (!isfinite (radius) || radius < 1.f)
 		radius = 1.f;
