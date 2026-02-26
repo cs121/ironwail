@@ -7,13 +7,7 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
-layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
-// binding=6 (ShadowDlightMapRaw) entfernt — wurde nur für Sun-Shadow-Debug genutzt
 #include "frame_uniforms.glsl"
-#define SHADOW_DEBUG_VALUES ShadowDebug
-#define SHADOW_DLIGHT 1
-#include "shadow_sample.glsl"
 
 // BUG FIX: world.vert uses exp2(-Fog.w * ...) but frag used exp2(-abs(Fog.w) * ...)
 // Keep abs() for safety but unify sign convention with vertex shader
@@ -491,10 +485,6 @@ void main()
 
 				// FIX: Shadow-Term fuer dieses DLight berechnen.
 				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.
-				float shadow_range  = 1.0;
-				float shadow_term   = ShadowVisibilityDlight(
-					in_pos, surface_normal, l.origin, light_index, shadow_range);
-				light_contrib      *= shadow_term;
 
 				dynamic_light      += light_contrib;
 

@@ -50,16 +50,8 @@ layout(std140, binding=0) uniform FrameDataUBO
 
     // ── Global shadow params (kept for world shadow-depth pass) ── offset 384
     // NOTE: These members must stay layout-compatible with gpuframedata_t
-    // (shadow_viewproj/shadow_params/shadow_debug) so later dlight uniforms keep
     // their expected offsets.
-    mat4    ShadowViewProj;          // 384
-    vec4    ShadowParams;            // 448
-    vec4    ShadowDebug;             // 464 (x: enabled, y: debug mode, z: dummy tex, w: source)
 
-    mat4    ShadowDlightViewProj[SHADOW_DLIGHT_MAX];  // 480
-    vec4    ShadowDlightAtlas[SHADOW_DLIGHT_MAX];     // 736
-    vec4    ShadowDlightInfo[SHADOW_DLIGHT_MAX];      // 800
-    vec4    ShadowDlightParams;                        // 864
 
     // ── Misc ──────────────────────────────────────────── offset 880
     uint    NumLights;      // 880

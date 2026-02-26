@@ -5,11 +5,6 @@ struct InstanceData
 	vec4	PrevWorldMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
-	vec4	ShadowLightPosRange; // xyz=dlight pos, w=range
-	uint	ShadowLightIndex;
-	uint	_PadShadow1;
-	uint	_PadShadow2;
-	uint	_PadShadow3;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -27,13 +22,6 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	_Pad1;
-	mat4	ShadowViewProj;
-	vec4	ShadowParams;
-	vec4	ShadowDebug;
-	mat4	ShadowDlightViewProj[4];
-	vec4	ShadowDlightAtlas[4];
-	vec4	ShadowDlightInfo[4];
-	vec4	ShadowDlightParams;
 	InstanceData instances[];
 } AliasFrameBuffer;
 // ALU-only 16x16 Bayer matrix
@@ -108,22 +96,9 @@ const int ALIAS_FLAG_LIGHTNING = 4;
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2DShadow ShadowDlightMap;
-// binding=6 (ShadowDlightMapRaw) entfernt - nur fuer Sun-Shadow-Debug genutzt
-layout(binding=7) uniform sampler2D ShadowDlightMapDebug;
 
 // alias shaders use an SSBO-backed frame block and don't include frame_uniforms.glsl.
-// Mirror the same names expected by shadow_sample.glsl via AliasFrameBuffer fields.
-#define SHADOW_DLIGHT_MAX 4
-#define ShadowParams AliasFrameBuffer.ShadowParams
-#define ShadowDlightViewProj AliasFrameBuffer.ShadowDlightViewProj
-#define ShadowDlightAtlas AliasFrameBuffer.ShadowDlightAtlas
-#define ShadowDlightInfo AliasFrameBuffer.ShadowDlightInfo
-#define ShadowDlightParams AliasFrameBuffer.ShadowDlightParams
 
-#define SHADOW_DEBUG_VALUES AliasFrameBuffer.ShadowDebug
-#define SHADOW_DLIGHT 1
-#include "shadow_sample.glsl"
 
 #if MODE == 2
 	layout(location=0) noperspective in vec2 in_texcoord;
@@ -136,8 +111,6 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
-layout(location=7) flat in uint in_shadow_light_index;
-layout(location=8) flat in vec4 in_shadow_light_pos_range;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -182,52 +155,8 @@ void main()
 {
         vec2 uv = in_texcoord;
         vec3 emissive = vec3(0.0);
-        float shadow_range = 0.0;
-        float shadow_term = 1.0;
-	uint shadow_light_index = in_shadow_light_index;
-	vec3 shadow_light_pos = in_shadow_light_pos_range.xyz;
-	shadow_range = in_shadow_light_pos_range.w;
 	vec4 lit_color = in_color;
 
-	// FIX: Shadow-Berechnung laeuft immer (nicht nur wenn ShadowDebug.x > 0.5).
-	// Das alte Gate verhinderte Schatten ausserhalb des Debug-Modus.
-	// FIX: shadow_light_pos war EyePos (falsch) - Alias-Schatten nutzen DLight-Slot 0.
-	// ShadowVisibilityDlight sucht selbst den passenden Slot per light_index.
-	if ((in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
-	{
-		vec3 world_pos = in_pos + AliasFrameBuffer.EyePos;
-		vec3 shadow_normal = gl_FrontFacing ? in_normal : -in_normal;
-		if (shadow_light_index != 0xFFFFFFFFu && shadow_range > 0.0)
-			shadow_term = ShadowVisibilityDlight(world_pos, shadow_normal, shadow_light_pos, shadow_light_index, shadow_range);
-
-		// Debug-Visualisierung (nur wenn ShadowDebug.x > 0.5)
-		if (AliasFrameBuffer.ShadowDebug.x > 0.5 && AliasFrameBuffer.ShadowDebug.y > 0.5)
-		{
-			if (AliasFrameBuffer.ShadowDebug.y < 1.5)
-				OUT_COLOR = vec4(vec3(shadow_term), 1.0);
-			else if (AliasFrameBuffer.ShadowDebug.y < 2.5)
-				OUT_COLOR = ShadowDebugDlight(world_pos, shadow_light_index);
-			else if (AliasFrameBuffer.ShadowDebug.y < 3.5)
-			{
-				float idx = (shadow_light_index == 0xFFFFFFFFu) ? -1.0 : float(shadow_light_index);
-				vec3 idx_color = fract(vec3(idx * 0.1031, idx * 0.11369, idx * 0.13787));
-				OUT_COLOR = vec4(idx_color, 1.0);
-			}
-			else
-			{
-				vec4 shadow_clip = AliasFrameBuffer.ShadowViewProj * vec4(world_pos, 1.0);
-				vec3 proj = shadow_clip.xyz / max(shadow_clip.w, 1e-6);
-				vec2 uv_dbg = proj.xy * 0.5 + 0.5;
-				float reference = ShadowReference01(proj.z);
-				OUT_COLOR = vec4(reference, reference, shadow_term, 1.0);
-			}
-#if !OIT
-			out_velocity = vec4(0.0);
-#endif
-			return;
-		}
-		lit_color.rgb *= shadow_term;
-	}
 #if MODE == 2
         uv -= 0.5 / vec2(textureSize(Tex, 0).xy);
         vec4 result = textureLod(Tex, uv, 0.);

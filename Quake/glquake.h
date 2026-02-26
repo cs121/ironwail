@@ -447,13 +447,6 @@ typedef struct gpuframedata_s {
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
-        float           shadow_viewproj[16];
-        vec4_t          shadow_params; // x: bias, y: normal bias, z: pcf enabled, w: pcf taps
-        vec4_t          shadow_debug;  // x: enabled, y: debug mode, zw: unused
-        float           shadow_dlight_viewproj[SHADOW_DLIGHT_MAX][16];
-        vec4_t          shadow_dlight_atlas[SHADOW_DLIGHT_MAX]; // xy: scale, zw: offset
-        vec4_t          shadow_dlight_info[SHADOW_DLIGHT_MAX]; // x: light index, yzw: unused
-        vec4_t          shadow_dlight_params; // x: bias, y: pcf taps, z: enabled, w: unused
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
@@ -461,11 +454,6 @@ typedef struct gpuframedata_s {
 } gpuframedata_t;
 
 COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 896);
-COMPILE_TIME_ASSERT (gpuframedata_shadow_viewproj_offset, offsetof (gpuframedata_t, shadow_viewproj) == 384);
-COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_viewproj_offset, offsetof (gpuframedata_t, shadow_dlight_viewproj) == 480);
-COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_atlas_offset, offsetof (gpuframedata_t, shadow_dlight_atlas) == 736);
-COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_info_offset, offsetof (gpuframedata_t, shadow_dlight_info) == 800);
-COMPILE_TIME_ASSERT (gpuframedata_shadow_dlight_params_offset, offsetof (gpuframedata_t, shadow_dlight_params) == 864);
 
 typedef enum
 {
@@ -501,27 +489,7 @@ qboolean R_PrevFrameValid (void);
 void R_InitShadow (void);
 void R_ShutdownShadow (void);
 void R_ResizeShadowMapIfNeeded (void);
-void R_Shadow_DlightPass (void);
-void R_Shadow_DrawDebug (void);
-void R_Shadow_BindShadowMap (GLenum texunit);
-void R_Shadow_BindDlightShadowMap (GLenum texunit);
-void R_Shadow_BindReceiverShadowMap (GLenum texunit);
-void R_Shadow_BindDebugColorAtlas (GLenum texunit);
 void R_EnsureShadowSamplerState (GLuint texture);
-void R_Shadow_DebugValidateBinding (const char *tag, GLenum texunit, GLuint expected_tex);
-void R_Shadow_Log_BeginFrame (void);
-void R_Shadow_Log_DlightEarlyOut (const char *reason);
-void R_Shadow_Log_ShadowPassSnapshot (const char *tag, GLuint fbo, GLuint depth_tex, int vpw, int vph, int drawcalls, int tris, double msec);
-void R_Shadow_Log_ReceiverPassSnapshot (const char *tag, int program, GLint cached_current_program, GLenum texunit, GLuint expected_tex, qboolean shadows_enabled, float bias, float normalbias, float pcf, float taps, const float *shadow_viewproj);
-GLuint R_Shadow_GetShadowMapTextureId (void);
-GLuint R_Shadow_GetDlightShadowMapTextureId (void);
-GLuint R_Shadow_GetReceiverShadowMapTextureId (void);
-GLuint R_Shadow_GetDebugColorAtlasTextureId (void);
-const float *R_Shadow_GetReceiverShadowViewProj (void);
-qboolean R_Shadow_ReceiverUsesDlight (void);
-qboolean R_Shadow_DlightShadowsActiveThisFrame (void);
-int R_Shadow_DlightAtlasValidFrameId (void);
-int R_Shadow_DlightShadowCasterCount (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
@@ -623,9 +591,6 @@ typedef struct glprogs_s {
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
 	GLuint		world_dlight[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
-	GLuint		shadow_depth;
-	GLuint		shadow_depth_alias[2]; // [md5]
-	GLuint		shadow_debug;
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
 	GLuint		skycubemap[2][2];	// [anim][dither]

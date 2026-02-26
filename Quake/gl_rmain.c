@@ -255,39 +255,6 @@ cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE }
 cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
 cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
 cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
-cvar_t	r_shadows = { "r_shadows", "0", CVAR_ARCHIVE };
-cvar_t	r_shadow_bias = { "r_shadow_bias", "0.001", CVAR_ARCHIVE };
-cvar_t	r_shadow_normalbias = { "r_shadow_normalbias", "1.0", CVAR_ARCHIVE };
-cvar_t	r_shadow_bias_mdl = { "r_shadow_bias_mdl", "0.001", CVAR_ARCHIVE };
-cvar_t	r_shadow_normalbias_mdl = { "r_shadow_normalbias_mdl", "1.0", CVAR_ARCHIVE };
-cvar_t	r_shadow_pcf = { "r_shadow_pcf", "1", CVAR_ARCHIVE };
-cvar_t	r_shadow_pcf_taps = { "r_shadow_pcf_taps", "4", CVAR_ARCHIVE };
-cvar_t	r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_dummytex = { "r_shadow_debug_dummytex", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_source = { "r_shadow_debug_source", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_nocull = { "r_shadow_debug_nocull", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_atlas_overlay = { "r_shadow_debug_atlas_overlay", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_slot_overlay = { "r_shadow_debug_slot_overlay", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_yflip = { "r_shadow_debug_yflip", "0", CVAR_NONE };
-cvar_t	r_shadow_debug_std140_dump = { "r_shadow_debug_std140_dump", "0", CVAR_NONE };
-cvar_t	r_shadow_twosided_mdl = { "r_shadow_twosided_mdl", "0", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlights = { "r_shadow_dlights", "0", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_max = { "r_shadow_dlight_max", "2", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_size = { "r_shadow_dlight_size", "256", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_distance = { "r_shadow_dlight_distance", "1024", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.0025", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_pcf_taps = { "r_shadow_dlight_pcf_taps", "4", CVAR_ARCHIVE };
-cvar_t	r_shadow_dlight_aim = { "r_shadow_dlight_aim", "1", CVAR_ARCHIVE }; // 0=legacy(vieworg), 1=view forward ray target, 2=fixed fallback
-cvar_t	r_shadow_dlight_aim_dist = { "r_shadow_dlight_aim_dist", "256", CVAR_ARCHIVE }; // mode 1 forward-ray distance (clamped to radius)
-cvar_t	r_shadow_dlight_fov = { "r_shadow_dlight_fov", "100", CVAR_ARCHIVE }; // single-frustum point-light approximation FOV
-cvar_t	r_shadow_matrix_debug = { "r_shadow_matrix_debug", "0", CVAR_NONE }; // 0=off, 1=log selected dlight matrix/basis checks
-cvar_t	r_shadow_lightgrid = { "r_shadow_lightgrid", "0", CVAR_ARCHIVE };
-cvar_t	r_shadow_lightgrid_mode = { "r_shadow_lightgrid_mode", "1", CVAR_ARCHIVE };
-cvar_t	r_shadow_log = { "r_shadow_log", "0", CVAR_NONE };
-cvar_t	r_shadow_log_rate = { "r_shadow_log_rate", "60", CVAR_NONE };
-cvar_t	r_shadow_log_gl = { "r_shadow_log_gl", "0", CVAR_NONE };
-cvar_t	r_shadow_log_dump = { "r_shadow_log_dump", "0", CVAR_NONE };
-cvar_t	r_shadow_log_file = { "r_shadow_log_file", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -3307,10 +3274,7 @@ void R_SetupView (void)
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
         r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
-        r_framedata.lightgrid_params[2] =
-                (r_shadows.value > 0.f && r_shadow_dlights.value > 0.f && r_shadow_lightgrid.value > 0.f)
-                ? CLAMP (0.f, r_shadow_lightgrid_mode.value, 2.f)
-                : 0.f;
+        r_framedata.lightgrid_params[2] = 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
         r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
         r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
@@ -3324,18 +3288,6 @@ void R_SetupView (void)
         r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
-        r_framedata.shadow_params[0] = r_shadow_bias.value;
-        r_framedata.shadow_params[1] = r_shadow_normalbias.value;
-        r_framedata.shadow_params[2] = r_shadow_pcf.value > 0.f ? 1.f : 0.f;
-        r_framedata.shadow_params[3] = r_shadow_pcf_taps.value;
-        // FIX Bug 3: shadow_debug[0] wird von r_shadow.c korrekt verwaltet - nicht hier ueberschreiben.
-        r_framedata.shadow_debug[1] = r_shadow_debug.value;
-        r_framedata.shadow_debug[2] = r_shadow_debug_dummytex.value;
-        r_framedata.shadow_debug[3] = r_shadow_debug_source.value;
-        r_framedata.shadow_dlight_params[0] = r_shadow_dlight_bias.value;
-        r_framedata.shadow_dlight_params[1] = r_shadow_dlight_pcf_taps.value;
-        r_framedata.shadow_dlight_params[2] = 0.f;
-        r_framedata.shadow_dlight_params[3] = 0.f;
 
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
@@ -4590,7 +4542,6 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_Shadow_DlightPass ();
 	R_SetupGL ();
 	R_Clear ();
 	
@@ -4793,7 +4744,6 @@ void R_RenderView (void)
         R_FogVol_BuildList ();
         R_FogVol_Render ();
         Fog_DisableGFog (); // Leave fog disabled for 2D overlays
-	R_Shadow_DrawDebug ();
 
 	r_frame_rendered_this_update = true;
 
