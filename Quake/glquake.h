@@ -176,6 +176,7 @@ extern	const char	*gl_version;
 	x(void,			VertexAttribIPointer, (GLuint index, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer))\
 	x(GLint,		GetUniformLocation, (GLuint program, const GLchar *name))\
 	x(void,			GetUniformiv, (GLuint program, GLint location, GLint *params))\
+	x(void,			GetIntegeri_v, (GLenum target, GLuint index, GLint *data))\
 	x(void,			GetActiveUniform, (GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name))\
 	x(void,			Uniform1i, (GLint location, GLint v0))\
 	x(void,			Uniform1f, (GLint location, GLfloat v0))\
