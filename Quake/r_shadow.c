@@ -853,22 +853,32 @@ static void R_Shadow_BuildViewMatrixColumns (float matrix[16], const vec3_t righ
 	memset (matrix, 0, 16 * sizeof (float));
 
 	/*
-	 * Matrices are column-major (OpenGL convention, vector on the right):
-	 * [ right.x   up.x   forward.x   tx ]
-	 * [ right.y   up.y   forward.y   ty ]
-	 * [ right.z   up.z   forward.z   tz ]
-	 * [   0        0        0        1 ]
+	 * Matrices are stored column-major (OpenGL convention), multiplied as M * v.
+	 * For a view transform, camera basis vectors must become matrix ROWS:
+	 *
+	 *   x' = dot(right,   world - origin)
+	 *   y' = dot(up,      world - origin)
+	 *   z' = dot(forward, world - origin)
+	 *
+	 * Written as a 4x4 matrix (mathematical row/column form):
+	 * [ right.x    right.y    right.z    -dot(right, origin)   ]
+	 * [ up.x       up.y       up.z       -dot(up, origin)      ]
+	 * [ forward.x  forward.y  forward.z  -dot(forward, origin) ]
+	 * [ 0          0          0           1                    ]
+	 *
+	 * In column-major memory this means each basis component is written across
+	 * columns with row index fixed (m[col*4 + row]).
 	 */
 	matrix[0 * 4 + 0] = right[0];
-	matrix[0 * 4 + 1] = right[1];
-	matrix[0 * 4 + 2] = right[2];
+	matrix[1 * 4 + 0] = right[1];
+	matrix[2 * 4 + 0] = right[2];
 
-	matrix[1 * 4 + 0] = up[0];
+	matrix[0 * 4 + 1] = up[0];
 	matrix[1 * 4 + 1] = up[1];
-	matrix[1 * 4 + 2] = up[2];
+	matrix[2 * 4 + 1] = up[2];
 
-	matrix[2 * 4 + 0] = forward[0];
-	matrix[2 * 4 + 1] = forward[1];
+	matrix[0 * 4 + 2] = forward[0];
+	matrix[1 * 4 + 2] = forward[1];
 	matrix[2 * 4 + 2] = forward[2];
 
 	matrix[3 * 4 + 0] = -DotProduct (right, origin);
