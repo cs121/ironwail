@@ -654,7 +654,6 @@ static void VID_FSAA_f (cvar_t *cvar)
                 return;
         GL_DeleteFrameBuffers ();
         GL_CreateFrameBuffers ();
-        R_ResizeShadowMapIfNeeded ();
         gl_lodbias.callback (&gl_lodbias);
 }
 
@@ -1356,7 +1355,6 @@ static void GL_Init (void)
 
         GL_CreateShaders ();
         GL_CreateFrameBuffers ();
-        R_InitShadow ();
         GLLight_CreateResources ();
 	GLPalette_CreateResources ();
 
@@ -1387,8 +1385,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
                 VID_RecalcInterfaceSize ();
                 GL_DeleteFrameBuffers ();
                 GL_CreateFrameBuffers ();
-                R_ResizeShadowMapIfNeeded ();
-        }
+                }
 
 	*x = *y = 0;
 	*width = vid.width;
@@ -1435,7 +1432,6 @@ void	VID_Shutdown (void)
 	if (vid_initialized)
 	{
 		Lightgrid_Shutdown ();
-		R_ShutdownShadow ();
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);
 		gl_context = NULL;
