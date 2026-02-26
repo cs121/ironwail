@@ -990,7 +990,7 @@ static void R_Shadow_DebugDrawBasisAxes (const vec3_t origin, const vec3_t right
 
 	for (int i = 0; i < 3; ++i)
 	{
-		VectorMA (origin, axis_len, *axes[i], axis_end);
+		VectorMA (origin, axis_len, axes[i], axis_end);
 		mins[0] = axis_end[0] - half_extent;
 		mins[1] = axis_end[1] - half_extent;
 		mins[2] = axis_end[2] - half_extent;
