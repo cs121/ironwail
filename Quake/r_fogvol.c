@@ -55,6 +55,9 @@ cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "2", CVAR_ARCHIVE };
 
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
@@ -555,6 +558,9 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
+	Cvar_RegisterVariable (&r_fogvol_debug);
+	Cvar_RegisterVariable (&r_fogvol_density_scale);
+	Cvar_RegisterVariable (&r_fogvol_sigma_max);
 }
 
 void R_FogVol_Clear (void)
@@ -932,7 +938,7 @@ void R_FogVol_Render (void)
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
-	const int mode = 0;
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 7);
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
@@ -952,6 +958,9 @@ void R_FogVol_Render (void)
 	float view_y;
 	float view_w;
 	float view_h;
+	float depth_near;
+	float depth_far;
+	float depth_sky_cutoff;
 	int fog_src = 0;
 	int fog_dst = 0;
 	GLuint final_tex = 0;
@@ -997,6 +1006,9 @@ void R_FogVol_Render (void)
 	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
 	view_w = (float)r_refdef.vrect.width;
 	view_h = (float)r_refdef.vrect.height;
+	depth_near = 0.5f;
+	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
+	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
 	if (use_halfres && r_fogvol_steps_scale_halfres.value > 0.f)
 		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
@@ -1059,6 +1071,8 @@ void R_FogVol_Render (void)
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
 	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
+	GL_Uniform4fFunc (12, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
+	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
@@ -1149,6 +1163,9 @@ void R_FogVol_Render (void)
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
 		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
+		if (mode == 1)
+			Con_DPrintf ("FOGVOL debug ITER idx=%d src_tex=%u depth_tex=%u dst_tex=%u src_fbo=%u dst_fbo=%u scissor=(%d %d %d %d)\n",
+				i, src_tex, depth_tex, dst_tex, src_fbo, dst_fbo, x0, y0, x1 - x0, y1 - y0);
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
 		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
@@ -1219,6 +1236,9 @@ void R_FogVol_Render (void)
 		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
 		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
 		GL_Uniform4fFunc (7, view_x, view_y, 1.f / view_w, 1.f / view_h);
+		if (mode == 1)
+			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u dst_tex=%u\n",
+				final_tex, history_tex[history_src], depth_tex, framebufs.fogvol.composite_tex[composite_dst]);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);

@@ -33,6 +33,8 @@ layout(location=8) uniform vec3 FogCameraPosWS;
 layout(location=9) uniform vec4 FogViewportParams; // xy: screen size, zw: inv screen size
 layout(location=10) uniform vec2 FogDepthScale;
 layout(location=11) uniform vec4 FogViewParams; // xy: view origin in screen px, zw: inv view size
+layout(location=12) uniform vec4 FogDepthParams; // x: near, y: far, z: reverse-Z flag, w: sky cutoff
+layout(location=13) uniform vec2 FogDensityParams; // x: density scale, y: sigma clamp
 
 layout(location=0) out vec4 FragColor;
 
@@ -116,20 +118,29 @@ float FogNoise(vec3 p)
 
 float DepthToNdcZ(float depth)
 {
-#if REVERSED_Z
-	return depth;
-#else
+	if (FogDepthParams.z > 0.5)
+		return depth;
 	return depth * 2.0 - 1.0;
-#endif
 }
 
 bool IsSkyDepth(float depth)
 {
-#if REVERSED_Z
-	return depth <= 0.0001;
-#else
-	return depth >= 0.9999;
-#endif
+	if (FogDepthParams.z > 0.5)
+		return depth <= FogDepthParams.w;
+	return depth >= FogDepthParams.w;
+}
+
+float LinearEyeDepth(float depth)
+{
+	float ndcDepth = DepthToNdcZ(depth);
+	vec4 clip = vec4(0.0, 0.0, ndcDepth, 1.0);
+	vec4 world = FogInvViewProj * clip;
+	if (abs(world.w) < 1e-6)
+		return FogDepthParams.y;
+	float dist = length(world.xyz / world.w - FogCameraPosWS);
+	if (!isfinite(dist))
+		return FogDepthParams.y;
+	return clamp(dist, FogDepthParams.x, FogDepthParams.y);
 }
 
 bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float tExit)
@@ -190,6 +201,7 @@ void main()
 
 	ivec2 depthCoord = ivec2(screenPos);
 	float depth = texelFetch(SceneDepth, depthCoord, 0).r;
+	float linearDepth = LinearEyeDepth(depth);
 	float ndcDepth = DepthToNdcZ(depth);
 	vec4 clip = vec4(viewUv * 2.0 - 1.0, ndcDepth, 1.0);
 	vec4 world = FogInvViewProj * clip;
@@ -204,7 +216,7 @@ void main()
 	vec3 rd = normalize(worldPos - ro);
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
-		tScene = 1e6;
+		tScene = FogDepthParams.y;
 
 	float tEnter;
 	float tExit;
@@ -237,7 +249,7 @@ void main()
 	}
 
 	vec3 scatterColor = volume.color_density.rgb;
-	float density = max(volume.color_density.a, 0.0);
+	float density = max(volume.color_density.a * FogDensityParams.x, 0.0);
 	float falloff = volume.misc.z;
 
 	vec3 accum = vec3(0.0);
@@ -270,7 +282,9 @@ void main()
 			noiseFactor = mix(1.0, n, amt);
 		}
 
-		float sigma = density * noiseFactor * edgeFade;
+		float sigma = min(density * noiseFactor * edgeFade, FogDensityParams.y);
+		if (!isfinite(sigma))
+			sigma = 0.0;
 		float att = exp(-sigma * stepLen);
 		vec3 stepScatter = (1.0 - att) * scatterColor;
 		accum += transmittance * stepScatter;
@@ -285,29 +299,39 @@ void main()
 		}
 	}
 
-	if (FogDebugMode == 5)
+	if (FogDebugMode == 2)
 	{
-		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
-		FragColor = vec4(debugColor, 1.0);
+		FragColor = vec4(vec3(depth), 1.0);
 		return;
 	}
 	if (FogDebugMode == 3)
 	{
-		float tauViz = tau / (1.0 + tau);
-		FragColor = vec4(vec3(tauViz), 1.0);
+		float depthViz = linearDepth / max(FogDepthParams.y, 1e-6);
+		FragColor = vec4(vec3(clamp(depthViz, 0.0, 1.0)), 1.0);
 		return;
 	}
 	if (FogDebugMode == 4)
 	{
-		float fadeViz = (edgeFadeSamples > 0.0) ? (edgeFadeSum / edgeFadeSamples) : 0.0;
-		FragColor = vec4(vec3(fadeViz), 1.0);
+		float maskViz = clamp((tExit - tEnter) / max(FogDepthParams.y, 1e-6), 0.0, 1.0);
+		FragColor = vec4(vec3(maskViz), 1.0);
 		return;
 	}
-	if (FogDebugMode == 8)
+	if (FogDebugMode == 5)
 	{
-		float stepViz = stepsTaken / max(stepCount, 1.0);
-		float earlyViz = earlyTerminated ? 1.0 : 0.0;
-		FragColor = vec4(stepViz, earlyViz, 0.0, 1.0);
+		float sigmaViz = 1.0 - exp(-tau);
+		FragColor = vec4(vec3(clamp(sigmaViz, 0.0, 1.0)), 1.0);
+		return;
+	}
+	if (FogDebugMode == 6)
+	{
+		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
+		return;
+	}
+
+	if (FogDebugMode == 1)
+	{
+		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
+		FragColor = vec4(debugColor, 1.0);
 		return;
 	}
 
