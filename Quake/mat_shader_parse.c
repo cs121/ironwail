@@ -47,7 +47,6 @@ static const surfaceparm_map_t mat_surfaceparm_table[] =
 	{ "playerclip", MAT_SURFPARM_PLAYERCLIP, 0u, MAT_CONTENT_PLAYERCLIP },
 	{ "monsterclip", MAT_SURFPARM_MONSTERCLIP, 0u, MAT_CONTENT_MONSTERCLIP },
 	{ "trans", MAT_SURFPARM_TRANS, MAT_RENDER_TRANS, 0u },
-	{ "alphashadow", MAT_SURFPARM_ALPHASHADOW, MAT_RENDER_ALPHASHADOW, 0u },
 	{ "sky", MAT_SURFPARM_SKY, MAT_RENDER_SKY, 0u },
 	{ "fog", MAT_SURFPARM_FOG, MAT_RENDER_FOG, 0u },
 	{ "nodraw", MAT_SURFPARM_NODRAW, MAT_RENDER_NODRAW, 0u },

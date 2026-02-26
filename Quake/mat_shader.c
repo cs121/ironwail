@@ -133,7 +133,6 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "playerclip", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Blocks players." },
 	{ "monsterclip", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Blocks monsters." },
 	{ "trans", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Marks transparent." },
-	{ "alphashadow", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Alpha shadow hint." },
 	{ "sky", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Sky surface." },
 	{ "fog", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Fog surface." },
 	{ "nodraw", MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "No draw surface." },
@@ -1186,8 +1185,8 @@ unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material)
 		flags |= MAT_SHADERFLAG_SKY;
 	if (material->render_flags & MAT_RENDER_TRANS)
 		flags |= MAT_SHADERFLAG_TRANS;
-	if (material->render_flags & MAT_RENDER_ALPHASHADOW)
-		flags |= MAT_SHADERFLAG_ALPHASHADOW;
+	if (material->render_flags & MAT_RENDER_ALPHAOCCLUDE)
+		flags |= MAT_SHADERFLAG_ALPHAOCCLUDE;
 	if (material->render_flags & MAT_RENDER_FOG)
 		flags |= MAT_SHADERFLAG_FOG;
 	if (material->surfaceparms & MAT_SURFPARM_SOLID)

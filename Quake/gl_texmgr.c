@@ -779,7 +779,7 @@ static qboolean TexMgr_IsLinearDataTextureName (const char *name)
 		return true;
 	if (strstr (lower, "ssao") || strstr (lower, "noise") || strstr (lower, "blue"))
 		return true;
-	if (strstr (lower, "lut") || strstr (lower, "shadow"))
+	if (strstr (lower, "lut"))
 		return true;
 
 	return false;

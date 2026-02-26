@@ -183,9 +183,6 @@
     <ClCompile Include="..\..\Quake\r_fogvol.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\r_shadow.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\r_part.c">
       <Filter>Source Files</Filter>
     </ClCompile>

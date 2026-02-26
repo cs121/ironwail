@@ -27,7 +27,7 @@ const int SSAO_MAX_SAMPLES = 32;
 // with unit-z < 0.02 (nearly tangent to the surface) which produced regular stripe
 // artifacts because those grazing samples alternately hit / miss nearby geometry.
 // Samples are length-scaled with accelerating distribution to cluster near the surface
-// for contact shadows while still reaching full radius for broader occlusion.
+// for local contact occlusion while still reaching full radius for broader occlusion.
 const vec3 SSAO_KERNEL[SSAO_MAX_SAMPLES] = vec3[](
 	vec3(-0.0620, -0.0745, 0.0280),
 	vec3(-0.0147,  0.0926, 0.0439),

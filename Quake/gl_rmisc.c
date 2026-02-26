@@ -54,7 +54,6 @@ extern cvar_t r_showfields_align;
 extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
 extern cvar_t r_nolerp_list;
-extern cvar_t r_noshadow_list;
 extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
@@ -102,7 +101,6 @@ extern cvar_t r_showfields_align;
 extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
 extern cvar_t r_nolerp_list;
-extern cvar_t r_noshadow_list;
 extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
@@ -431,7 +429,7 @@ static void R_SetClearColor_f (cvar_t *var)
 
 /*
 ===============
-R_Model_ExtraFlags_List_f -- johnfitz -- called when r_nolerp_list or r_noshadow_list cvar changes
+R_Model_ExtraFlags_List_f -- johnfitz -- called when r_nolerp_list cvar changes
 ===============
 */
 static void R_Model_ExtraFlags_List_f (cvar_t *var)
@@ -809,8 +807,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
 	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
-	Cvar_RegisterVariable (&r_noshadow_list);
-	Cvar_SetCallback (&r_noshadow_list, R_Model_ExtraFlags_List_f);
 	//johnfitz
 
 	Cvar_RegisterVariable (&gl_zfix); // QuakeSpasm z-fighting fix
