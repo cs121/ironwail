@@ -453,7 +453,7 @@ typedef struct gpuframedata_s {
         unsigned int    _padding2;
 } gpuframedata_t;
 
-COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 896);
+COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 400);
 
 typedef enum
 {
