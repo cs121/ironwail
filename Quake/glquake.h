@@ -94,6 +94,8 @@ extern	cvar_t	r_norefresh;
 extern	cvar_t	r_drawentities;
 extern	cvar_t	r_drawworld;
 extern	cvar_t	r_drawviewmodel;
+extern	cvar_t	r_dlight_debug_models;
+extern	cvar_t	r_gl_state_validate;
 extern	cvar_t	r_speeds;
 extern	cvar_t	r_pos;
 extern	cvar_t	r_waterwarp;
@@ -499,6 +501,7 @@ void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
 void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
+void R_GLStateDump (const char *tag);
 
 entity_t **R_GetVisEntities (modtype_t type, qboolean translucent, int *outcount);
 

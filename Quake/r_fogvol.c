@@ -127,7 +127,10 @@ typedef struct fogvol_restore_state_s
 	GLint read_buffer;
 	GLint program;
 	GLint vao;
+	GLint active_texture;
+	unsigned int glstate_bits;
 	GLboolean scissor_test;
+	GLboolean framebuffer_srgb;
 } fogvol_restore_state_t;
 
 static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
@@ -465,6 +468,9 @@ static void R_FogVol_CaptureRestoreState (fogvol_restore_state_t *state)
 	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
 	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
 	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &state->active_texture);
+	state->glstate_bits = glstate;
+	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
 }
 
 static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
@@ -481,18 +487,16 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
 	R_FogVol_UseProgram ((GLuint)state->program);
 	R_FogVol_BindVertexArray ((GLuint)state->vao);
+	GL_ActiveTextureFunc ((GLenum)state->active_texture);
 
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	/* BEST PRACTICE #8: Restore to the canonical post-3D-scene state rather
-	 * than the fogvol-specific GLS_CULL_NONE state that the previous line had.
-	 * Using CULL_NONE here left the engine's internal glstate tracker believing
-	 * culling was disabled even after the fog pass completed, causing the next
-	 * opaque draw to submit with incorrect cull state until GL_SetState was
-	 * called again.  Use GL_SetState with appropriate flags matching what the
-	 * engine expects when re-entering normal 3D rendering. */
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_ATTRIBS (0));
+	GL_SetState (state->glstate_bits);
+	if (state->framebuffer_srgb)
+		glEnable (GL_FRAMEBUFFER_SRGB);
+	else
+		glDisable (GL_FRAMEBUFFER_SRGB);
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -1036,6 +1040,7 @@ void R_FogVol_Render (void)
 	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
 	if (use_test_guard)
 		R_FogVol_CaptureRestoreState (&restore_state);
+	R_GLStateDump ("before-fogvol");
 	R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
@@ -1373,6 +1378,7 @@ void R_FogVol_Render (void)
 
 done:
 	R_FogVol_LogPipelineState ("FOGVOL_END");
+	R_GLStateDump ("after-fogvol");
 	if (use_test_guard)
 	{
 		R_FogVol_Restore3DRenderState (&restore_state);
