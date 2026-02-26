@@ -198,7 +198,36 @@ void main()
 	result.rgb = ApplyFog(result.rgb, in_pos);
 	if (AliasFrameBuffer.DLightDebugModels > 0.5)
 	{
-		result.rgb = vec3(in_dlight_vis);
+		float mode = AliasFrameBuffer.DLightDebugModels;
+		vec3 world_pos = in_pos + AliasFrameBuffer.EyePos;
+		vec3 world_nor = normalize(in_normal);
+		if (mode > 4.5)
+		{
+			result.rgb = vec3(fract(AliasFrameBuffer.EyePos.x * 0.01), fract(AliasFrameBuffer.EyePos.y * 0.01), fract(AliasFrameBuffer.EyePos.z * 0.01));
+		}
+		else if (mode > 3.5)
+		{
+			float attenuation = clamp(in_dlight_vis, 0.0, 1.0);
+			result.rgb = vec3(attenuation);
+		}
+		else if (mode > 2.5)
+		{
+			vec3 L = normalize(vec3(0.3, 0.5, 0.8));
+			float ndotl = max(dot(world_nor, L), 0.0);
+			result.rgb = vec3(ndotl);
+		}
+		else if (mode > 1.5)
+		{
+			result.rgb = world_nor * 0.5 + 0.5;
+		}
+		else if (mode > 0.75)
+		{
+			result.rgb = fract(world_pos * 0.01);
+		}
+		else
+		{
+			result.rgb = vec3(in_dlight_vis);
+		}
 	}
         OUT_COLOR = result;
 #if !OIT

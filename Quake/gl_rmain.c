@@ -38,6 +38,9 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
+static int r_fogvol_update_called = 0;
+static int r_fogvol_draw_called = 0;
+
 /* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
  * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
  * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
@@ -3322,8 +3325,21 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 */
 void R_SetupView (void)
 {
+	static qboolean gpuframedata_layout_logged = false;
 	r_dlight_buffered_frame = false;
 	framesetup.composite_ready = false;
+
+	if (r_gl_state_validate.value > 0.f && !gpuframedata_layout_logged)
+	{
+		gpuframedata_layout_logged = true;
+		Con_Printf ("gpuframedata layout: sizeof=%u vieworg=%u viewproj=%u time=%u dlight_params=%u fog=%u\n",
+			(unsigned)sizeof (gpuframedata_t),
+			(unsigned)offsetof (gpuframedata_t, eye),
+			(unsigned)offsetof (gpuframedata_t, viewproj),
+			(unsigned)(offsetof (gpuframedata_t, eye) + 3 * sizeof (float)),
+			(unsigned)offsetof (gpuframedata_t, dlight_params),
+			(unsigned)offsetof (gpuframedata_t, fogdata));
+	}
 
 	R_AnimateLight ();
 
@@ -4821,11 +4837,17 @@ void R_RenderView (void)
         else if (gl_finish.value)
                 glFinish ();
 
-        R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();
+        r_fogvol_update_called++;
+        if (r_gl_state_validate.value > 0.f)
+                Con_DPrintf ("fogvol_update_called=%d r_fogvol=%.1f\n", r_fogvol_update_called, r_fogvol.value);
         R_FogVol_BuildList ();
+        r_fogvol_draw_called++;
+        if (r_gl_state_validate.value > 0.f)
+                Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
         R_FogVol_Render ();
         /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
          * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
