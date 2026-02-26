@@ -123,6 +123,13 @@ float DepthToNdcZ(float depth)
 	return depth * 2.0 - 1.0;
 }
 
+bool IsFiniteFloat(float v)
+{
+	// GLSL does not guarantee an isfinite() builtin across all versions/drivers.
+	// This catches infinities while also rejecting NaN (comparison with NaN is false).
+	return abs(v) <= 3.402823466e+38;
+}
+
 bool IsSkyDepth(float depth)
 {
 	if (FogDepthParams.z > 0.5)
@@ -138,7 +145,7 @@ float LinearEyeDepth(float depth)
 	if (abs(world.w) < 1e-6)
 		return FogDepthParams.y;
 	float dist = length(world.xyz / world.w - FogCameraPosWS);
-	if (!isfinite(dist))
+	if (!IsFiniteFloat(dist))
 		return FogDepthParams.y;
 	return clamp(dist, FogDepthParams.x, FogDepthParams.y);
 }
@@ -283,7 +290,7 @@ void main()
 		}
 
 		float sigma = min(density * noiseFactor * edgeFade, FogDensityParams.y);
-		if (!isfinite(sigma))
+		if (!IsFiniteFloat(sigma))
 			sigma = 0.0;
 		float att = exp(-sigma * stepLen);
 		vec3 stepScatter = (1.0 - att) * scatterColor;
