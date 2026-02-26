@@ -983,7 +983,7 @@ static void R_Shadow_DebugDrawBasisAxes (const vec3_t origin, const vec3_t right
 		{0.f, 1.f, 0.f}, /* up      = green */
 		{0.f, 0.f, 1.f}  /* forward = blue  */
 	};
-	const vec3_t *axes[3] = { &right, &up, &forward };
+	const vec_t *axes[3] = { right, up, forward };
 
 	if (r_shadow_matrix_debug.value <= 0.f)
 		return;
@@ -1078,7 +1078,7 @@ static void R_Shadow_BuildDlightViewProj (float out_viewproj[16], const vec3_t o
 #endif
 
 	/* OpenGL view space looks down -Z, so row-2 uses -forward. */
-	VectorNegate (forward, forward);
+	VectorScale (forward, -1.f, forward);
 
 	R_Shadow_BuildViewMatrixColumns (view, right, light_up, forward, origin);
 	R_Shadow_DebugDrawBasisAxes (origin, right, light_up, forward);
