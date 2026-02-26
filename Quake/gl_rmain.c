@@ -3285,9 +3285,9 @@ void R_GLStateDump (const char *tag)
 	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
 	prev_active_texture = active_texture;
 
-	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
-	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 1, &ubo1);
-	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
+	GL_GetIntegeri_vFunc (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
+	GL_GetIntegeri_vFunc (GL_UNIFORM_BUFFER_BINDING, 1, &ubo1);
+	GL_GetIntegeri_vFunc (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
 
 	GL_ActiveTextureFunc (GL_TEXTURE0);
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_0);
