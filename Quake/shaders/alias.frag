@@ -21,7 +21,7 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	ScreenDither;
 	float	Overbright;
 	float	ModelHalfLambert;
-	float	_Pad1;
+	float	DLightDebugModels;
 	InstanceData instances[];
 } AliasFrameBuffer;
 // ALU-only 16x16 Bayer matrix
@@ -111,6 +111,7 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
+layout(location=7) in float in_dlight_vis;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -195,6 +196,10 @@ void main()
         result.rgb = clamp(result.rgb, 0.0, 1.0);
 
 	result.rgb = ApplyFog(result.rgb, in_pos);
+	if (AliasFrameBuffer.DLightDebugModels > 0.5)
+	{
+		result.rgb = vec3(in_dlight_vis);
+	}
         OUT_COLOR = result;
 #if !OIT
         vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);

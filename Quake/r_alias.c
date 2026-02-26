@@ -89,7 +89,7 @@ struct ibuf_s {
 		float	dither;
 		float	overbright;
 		float	half_lambert;
-		float	_pad1;
+		float	dlight_debug_models;
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
@@ -515,6 +515,8 @@ void R_FlushAliasInstances (qboolean showtris)
 	if (!ibuf.count)
 		return;
 
+	R_GLStateDump (ibuf.ent == &cl.viewent ? "before-viewmodel" : "before-alias");
+
 	model = ibuf.ent->model;
 	mainhdr = (aliashdr_t *)Mod_Extradata (model);
 	anim = (int)(cl.time*10) & 3;
@@ -564,6 +566,7 @@ gl_overbright_models.value ?
 ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2] : 1.f;
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
+ibuf.global.dlight_debug_models = r_dlight_debug_models.value > 0.f ? 1.f : 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);

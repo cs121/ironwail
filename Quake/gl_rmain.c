@@ -250,6 +250,8 @@ cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t  r_dlight_debug_spawn = { "r_dlight_debug_spawn", "0", CVAR_NONE };
+cvar_t  r_dlight_debug_models = { "r_dlight_debug_models", "0", CVAR_NONE };
+cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
@@ -3251,6 +3253,66 @@ void R_UploadFrameData (void)
 
 	GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+}
+
+void R_GLStateDump (const char *tag)
+{
+	GLint program = 0;
+	GLint active_texture = 0;
+	GLint viewport[4] = {0};
+	GLint scissor_box[4] = {0};
+	GLint draw_fbo = 0;
+	GLint read_fbo = 0;
+	GLint prev_active_texture = 0;
+	GLint ubo0 = 0, ubo1 = 0, ubo2 = 0;
+	GLint tex2d_0 = 0, tex2d_1 = 0, tex2d_2 = 0;
+	GLboolean blend = glIsEnabled (GL_BLEND);
+	GLboolean depth_test = glIsEnabled (GL_DEPTH_TEST);
+	GLboolean cull = glIsEnabled (GL_CULL_FACE);
+	GLboolean scissor = glIsEnabled (GL_SCISSOR_TEST);
+	GLboolean srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
+	GLboolean depth_mask = GL_TRUE;
+
+	if (r_gl_state_validate.value <= 0.f)
+		return;
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	prev_active_texture = active_texture;
+
+	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
+	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 1, &ubo1);
+	glGetIntegeri_v (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
+
+	GL_ActiveTextureFunc (GL_TEXTURE0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_0);
+	GL_ActiveTextureFunc (GL_TEXTURE1);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_1);
+	GL_ActiveTextureFunc (GL_TEXTURE2);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_2);
+	GL_ActiveTextureFunc (prev_active_texture);
+
+	Con_Printf ("GL_STATE[%s] prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
+		tag,
+		program,
+		active_texture - GL_TEXTURE0,
+		draw_fbo,
+		read_fbo,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		blend,
+		depth_test,
+		depth_mask,
+		cull,
+		srgb,
+		ubo0, ubo1, ubo2,
+		tex2d_0, tex2d_1, tex2d_2);
 }
 
 /*
