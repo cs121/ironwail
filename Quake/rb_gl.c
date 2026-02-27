@@ -41,7 +41,14 @@ typedef struct rb_pass_info_s
 {
 	const char *debug_name;
 	unsigned baseline_state;
-	rb_pass_baseline_gl_t baseline_gl;
+	unsigned exit_allow_state_mask;
+	unsigned exit_allow_texture_mask;
+	unsigned exit_allow_sampler_mask;
+	qboolean exit_allow_program;
+	qboolean exit_allow_fbo;
+	qboolean exit_allow_vao;
+	qboolean exit_allow_array_buffer;
+	qboolean exit_allow_element_array_buffer;
 } rb_pass_info_t;
 
 typedef struct rb_gl_state_snapshot_s
@@ -253,6 +260,158 @@ static qboolean RB_LogIncomingStateDiff (rb_pass_t pass, const rb_pass_baseline_
 		Sys_Error ("RB_BeginPass(%s): incoming state mismatch", rb_pass_info[pass].debug_name);
 
 	return mismatch;
+}
+
+static void RB_ValidatePassExit (rb_pass_t pass)
+{
+	const rb_pass_info_t *policy;
+	unsigned expected_state;
+	unsigned state_allow_mask;
+	GLint current_program = 0;
+	GLint previous_active_tex = 0;
+	GLint tex2d[3] = {0};
+	GLint sampler[3] = {0};
+	GLint draw_fbo = 0;
+	GLint vao = 0;
+	GLint array_buffer = 0;
+	GLint element_array_buffer = 0;
+	qboolean mismatch = false;
+	int i;
+
+	if (pass < 0 || pass >= PASS_COUNT)
+		return;
+
+	policy = &rb_pass_info[pass];
+	expected_state = policy->baseline_state;
+	state_allow_mask = policy->exit_allow_state_mask;
+
+	glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &previous_active_tex);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &vao);
+	glGetIntegerv (GL_ARRAY_BUFFER_BINDING, &array_buffer);
+	glGetIntegerv (GL_ELEMENT_ARRAY_BUFFER_BINDING, &element_array_buffer);
+
+	for (i = 0; i < 3; ++i)
+	{
+		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
+		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d[i]);
+		GL_GetIntegeri_vFunc (GL_SAMPLER_BINDING, i, &sampler[i]);
+	}
+	GL_ActiveTextureFunc (previous_active_tex);
+
+	if (((glstate ^ expected_state) & ~state_allow_mask & GLS_MASK_BLEND) != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  blend: expected=%s actual=%s last_owner=%s\n",
+			RB_BlendName (expected_state),
+			RB_BlendName (glstate),
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_blend_owner));
+		mismatch = true;
+	}
+
+	if (((glstate ^ expected_state) & ~state_allow_mask & (GLS_NO_ZTEST | GLS_NO_ZWRITE)) != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  depth: expected=(ztest:%d zwrite:%d) actual=(ztest:%d zwrite:%d) last_owner=%s\n",
+			(expected_state & GLS_NO_ZTEST) == 0,
+			(expected_state & GLS_NO_ZWRITE) == 0,
+			(glstate & GLS_NO_ZTEST) == 0,
+			(glstate & GLS_NO_ZWRITE) == 0,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_depth_owner));
+		mismatch = true;
+	}
+
+	if (((glstate ^ expected_state) & ~state_allow_mask & GLS_MASK_CULL) != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  cull: expected=%s actual=%s last_owner=%s\n",
+			RB_CullName (expected_state),
+			RB_CullName (glstate),
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_cull_owner));
+		mismatch = true;
+	}
+
+	if (!policy->exit_allow_program && current_program != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  program: expected=0 actual=%d last_owner=%s\n",
+			(int)current_program,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_program_owner));
+		mismatch = true;
+	}
+
+	for (i = 0; i < 3; ++i)
+	{
+		if (((policy->exit_allow_texture_mask >> i) & 1u) == 0 && tex2d[i] != 0)
+		{
+			if (!mismatch)
+				Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+			Con_Warning ("  texture[%d]: expected=0 actual=%d last_owner=%s\n",
+				i,
+				(int)tex2d[i],
+				RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[i]));
+			mismatch = true;
+		}
+
+		if (((policy->exit_allow_sampler_mask >> i) & 1u) == 0 && sampler[i] != 0)
+		{
+			if (!mismatch)
+				Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+			Con_Warning ("  sampler[%d]: expected=0 actual=%d last_owner=%s\n",
+				i,
+				(int)sampler[i],
+				RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[i]));
+			mismatch = true;
+		}
+	}
+
+	if (!policy->exit_allow_fbo && draw_fbo != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  draw_fbo: expected=0 actual=%d last_owner=%s\n",
+			(int)draw_fbo,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_fbo_owner));
+		mismatch = true;
+	}
+
+	if (!policy->exit_allow_vao && vao != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  vao: expected=0 actual=%d last_owner=%s\n",
+			(int)vao,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_vao_owner));
+		mismatch = true;
+	}
+
+	if (!policy->exit_allow_array_buffer && array_buffer != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  array_buffer: expected=0 actual=%d last_owner=%s\n",
+			(int)array_buffer,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_array_buffer_owner));
+		mismatch = true;
+	}
+
+	if (!policy->exit_allow_element_array_buffer && element_array_buffer != 0)
+	{
+		if (!mismatch)
+			Con_Warning ("RB_EndPass(%s): exit state mismatch\n", policy->debug_name);
+		Con_Warning ("  element_array_buffer: expected=0 actual=%d last_owner=%s\n",
+			(int)element_array_buffer,
+			RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner));
+		mismatch = true;
+	}
+
+	if (mismatch && r_rb_assert_state.value > 0.f)
+		Sys_Error ("RB_EndPass(%s): exit state mismatch", policy->debug_name);
 }
 #endif
 
@@ -514,6 +673,11 @@ void RB_EndPass (void)
 {
 	if (!rb_pass_active)
 		return;
+
+	#if RB_DEBUG_STATE
+	if (r_gl_state_validate.value > 0.f)
+		RB_ValidatePassExit (rb_current_pass);
+	#endif
 
 	GL_EndGroup ();
 	rb_pass_active = false;
