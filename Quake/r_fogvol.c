@@ -93,14 +93,7 @@ typedef struct fogvol_test_state_s
 {
 	unsigned statebits;
 	unsigned cache_statebits;
-	GLint viewport[4];
-	GLint scissor_box[4];
-	GLint draw_fbo;
-	GLint read_fbo;
-	GLint draw_buffer;
-	GLint read_buffer;
-	GLint draw_buffers[8];
-	GLint num_draw_buffers;
+	rb_fogvol_gl_snapshot_t gl;
 	GLint draw_status;
 	GLint read_status;
 	GLint draw_color_type[2];
@@ -111,22 +104,6 @@ typedef struct fogvol_test_state_s
 	GLint read_color_name;
 	GLint read_depth_type;
 	GLint read_depth_name;
-	GLint program;
-	GLint vao;
-	GLint blend_src_rgb;
-	GLint blend_dst_rgb;
-	GLint blend_equation_rgb;
-	GLint polygon_mode[2];
-	GLboolean scissor_test;
-	GLboolean blend;
-	GLboolean depth_test;
-	GLboolean depth_writemask;
-	GLboolean color_writemask[4];
-	GLboolean cull_face;
-	GLfloat color_clear_value[4];
-	GLboolean framebuffer_srgb;
-	GLboolean dither;
-	GLboolean multisample;
 	GLint cache_draw_fbo;
 	GLint cache_read_fbo;
 	GLint cache_program;
@@ -143,18 +120,8 @@ typedef struct fogvol_state_cache_s
 
 typedef struct fogvol_restore_state_s
 {
-	GLint viewport[4];
-	GLint scissor_box[4];
-	GLint draw_fbo;
-	GLint read_fbo;
-	GLint draw_buffer;
-	GLint read_buffer;
-	GLint program;
-	GLint vao;
-	GLint active_texture;
+	rb_fogvol_gl_snapshot_t gl;
 	unsigned int glstate_bits;
-	GLboolean scissor_test;
-	GLboolean framebuffer_srgb;
 } fogvol_restore_state_t;
 
 static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
@@ -204,19 +171,16 @@ static qboolean R_FogVol_TestDebugEnabled (void)
 
 static void R_FogVol_LogBufferMarker (const char *marker)
 {
-	GLint draw_fbo = 0, read_fbo = 0;
-	GLint draw_buffer = 0, read_buffer = 0;
+	rb_fogvol_gl_snapshot_t snapshot;
 
 	if (!R_FogVol_TestDebugEnabled ())
 		return;
 
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_BUFFER, &read_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
+	RB_FogVol_CaptureStateSnapshot (&snapshot);
 	Con_Printf ("FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
-		marker, draw_fbo, read_fbo, (unsigned)draw_buffer, (unsigned)read_buffer);
+		marker, snapshot.draw_fbo, snapshot.read_fbo, (unsigned)snapshot.draw_buffer, (unsigned)snapshot.read_buffer);
 }
+
 
 static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
 {
@@ -232,38 +196,26 @@ static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
 
 static void R_FogVol_LogPipelineState (const char *marker)
 {
-	GLint viewport[4] = {0};
-	GLint scissor_box[4] = {0};
-	GLint draw_fbo = 0, read_fbo = 0;
-	GLint draw_buffer = 0, read_buffer = 0;
-	GLint program = 0;
-	GLboolean scissor_enabled = GL_FALSE;
+	rb_fogvol_gl_snapshot_t snapshot;
 
 	if (!R_FogVol_TestDebugEnabled ())
 		return;
 
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_VIEWPORT, viewport); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_CURRENT_PROGRAM, &program); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_BUFFER, &read_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-
+	RB_FogVol_CaptureStateSnapshot (&snapshot);
 	Con_Printf (
 		"FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) "
 		"scissor=%d scissor_box=(%d %d %d %d) prog=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
 		marker,
-		draw_fbo,
-		read_fbo,
-		viewport[0], viewport[1], viewport[2], viewport[3],
-		scissor_enabled,
-		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
-		program,
-		(unsigned)draw_buffer,
-		(unsigned)read_buffer);
+		snapshot.draw_fbo,
+		snapshot.read_fbo,
+		snapshot.viewport[0], snapshot.viewport[1], snapshot.viewport[2], snapshot.viewport[3],
+		snapshot.scissor_test,
+		snapshot.scissor_box[0], snapshot.scissor_box[1], snapshot.scissor_box[2], snapshot.scissor_box[3],
+		snapshot.program,
+		(unsigned)snapshot.draw_buffer,
+		(unsigned)snapshot.read_buffer);
 }
+
 
 static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
 {
@@ -287,24 +239,22 @@ static void R_FogVol_LogHazardPass (const char *pass,
 	GLuint history_tex,
 	GLuint fog_tex)
 {
-	GLint draw_fbo = 0;
-	GLint read_fbo = 0;
+	rb_fogvol_gl_snapshot_t snapshot;
 	GLuint draw_tex = 0;
 	GLuint read_tex = 0;
 
 	if (!R_FogVol_TestDebugEnabled ())
 		return;
 
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
+	RB_FogVol_CaptureStateSnapshot (&snapshot);
 	draw_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_DRAW_FRAMEBUFFER);
 	read_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_READ_FRAMEBUFFER);
 
 	Con_Printf (
 		"FOGVOL_HAZARD pass=%s draw_fbo=%d read_fbo=%d draw_tex=%u read_tex=%u input_main=%u input_history=%u input_fog=%u\n",
 		pass,
-		draw_fbo,
-		read_fbo,
+		snapshot.draw_fbo,
+		snapshot.read_fbo,
 		draw_tex,
 		read_tex,
 		main_tex,
@@ -321,6 +271,7 @@ static void R_FogVol_LogHazardPass (const char *pass,
 		Con_Printf ("FOGVOL_HAZARD pass=%s hazard=inplace_copy tex=%u\n", pass, draw_tex);
 	}
 }
+
 
 static void R_FogVol_AssertNoFeedbackHazard (const char *pass_name, GLuint draw_tex, GLuint read_tex)
 {
@@ -356,34 +307,18 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 	 * separates its internal cache bitfield from the applied bitfield,
 	 * record the cache-side value here independently. */
 	state->cache_statebits = glstate;
-	glGetIntegerv (GL_VIEWPORT, state->viewport); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->num_draw_buffers = 0;
-	for (int i = 0; i < (int)countof (state->draw_buffers); ++i)
-		state->draw_buffers[i] = GL_NONE;
-	{
-		GLint max_draw_buffers = 0;
-		glGetIntegerv (GL_MAX_DRAW_BUFFERS, &max_draw_buffers); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-		state->num_draw_buffers = q_min (max_draw_buffers, (int)countof (state->draw_buffers));
-		for (int i = 0; i < state->num_draw_buffers; ++i)
-			glGetIntegerv (GL_DRAW_BUFFER0 + i, &state->draw_buffers[i]); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	}
+	RB_FogVol_CaptureStateSnapshot (&state->gl);
 	state->draw_status = (GLint)GL_CheckFramebufferStatusFunc (GL_DRAW_FRAMEBUFFER);
 	state->read_status = (GLint)GL_CheckFramebufferStatusFunc (GL_READ_FRAMEBUFFER);
-	if (state->draw_fbo)
+	if (state->gl.draw_fbo)
 		draw_color_attachment = GL_COLOR_ATTACHMENT0;
-	if (state->read_fbo)
+	if (state->gl.read_fbo)
 		read_color_attachment = GL_COLOR_ATTACHMENT0;
 	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[0]);
 	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[0]);
-	if (state->draw_fbo)
+	if (state->gl.draw_fbo)
 	{
 		GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
 			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[1]);
@@ -407,21 +342,6 @@ static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_depth_type);
 	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_depth_name);
-	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->blend = glIsEnabled (GL_BLEND); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_BLEND_SRC_RGB, &state->blend_src_rgb); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_BLEND_DST_RGB, &state->blend_dst_rgb); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_BLEND_EQUATION_RGB, &state->blend_equation_rgb); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->depth_test = glIsEnabled (GL_DEPTH_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_writemask); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_writemask); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->cull_face = glIsEnabled (GL_CULL_FACE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_POLYGON_MODE, state->polygon_mode); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetFloatv (GL_COLOR_CLEAR_VALUE, state->color_clear_value); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->dither = glIsEnabled (GL_DITHER); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->multisample = glIsEnabled (GL_MULTISAMPLE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
 	state->cache_draw_fbo = r_fogvol_state_cache.draw_fbo;
 	state->cache_read_fbo = r_fogvol_state_cache.read_fbo;
 	state->cache_program = r_fogvol_state_cache.program;
@@ -443,35 +363,35 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 		"clear_color=(%.3f %.3f %.3f %.3f) srgb=%d dither=%d multisample=%d glstate=0x%08x "
 		"cache(glstate=0x%08x draw_fbo=%d read_fbo=%d prog=%d vao=%d)\n",
 		phase,
-		state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3],
-		state->scissor_test,
-		state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3],
-		state->draw_fbo, state->read_fbo,
-		(unsigned)state->draw_buffer, (unsigned)state->read_buffer,
-		(unsigned)state->draw_buffers[0], (unsigned)state->draw_buffers[1],
-		(unsigned)state->draw_buffers[2], (unsigned)state->draw_buffers[3],
-		(unsigned)state->draw_buffers[4], (unsigned)state->draw_buffers[5],
-		(unsigned)state->draw_buffers[6], (unsigned)state->draw_buffers[7],
+		state->gl.viewport[0], state->gl.viewport[1], state->gl.viewport[2], state->gl.viewport[3],
+		state->gl.scissor_test,
+		state->gl.scissor_box[0], state->gl.scissor_box[1], state->gl.scissor_box[2], state->gl.scissor_box[3],
+		state->gl.draw_fbo, state->gl.read_fbo,
+		(unsigned)state->gl.draw_buffer, (unsigned)state->gl.read_buffer,
+		(unsigned)state->gl.draw_buffers[0], (unsigned)state->gl.draw_buffers[1],
+		(unsigned)state->gl.draw_buffers[2], (unsigned)state->gl.draw_buffers[3],
+		(unsigned)state->gl.draw_buffers[4], (unsigned)state->gl.draw_buffers[5],
+		(unsigned)state->gl.draw_buffers[6], (unsigned)state->gl.draw_buffers[7],
 		(unsigned)state->draw_status, (unsigned)state->read_status,
 		(unsigned)state->draw_color_type[0], state->draw_color_name[0],
 		(unsigned)state->draw_color_type[1], state->draw_color_name[1],
 		(unsigned)state->draw_depth_type, state->draw_depth_name,
 		(unsigned)state->read_color_type, state->read_color_name,
 		(unsigned)state->read_depth_type, state->read_depth_name,
-		state->program,
-		state->vao,
-		state->blend,
-		state->blend_src_rgb, state->blend_dst_rgb,
-		state->blend_equation_rgb,
-		state->depth_test,
-		state->depth_writemask,
-		state->color_writemask[0], state->color_writemask[1], state->color_writemask[2], state->color_writemask[3],
-		state->cull_face,
-		state->polygon_mode[0], state->polygon_mode[1],
-		state->color_clear_value[0], state->color_clear_value[1], state->color_clear_value[2], state->color_clear_value[3],
-		state->framebuffer_srgb,
-		state->dither,
-		state->multisample,
+		state->gl.program,
+		state->gl.vao,
+		state->gl.blend,
+		state->gl.blend_src_rgb, state->gl.blend_dst_rgb,
+		state->gl.blend_equation_rgb,
+		state->gl.depth_test,
+		state->gl.depth_writemask,
+		state->gl.color_writemask[0], state->gl.color_writemask[1], state->gl.color_writemask[2], state->gl.color_writemask[3],
+		state->gl.cull_face,
+		state->gl.polygon_mode[0], state->gl.polygon_mode[1],
+		state->gl.color_clear_value[0], state->gl.color_clear_value[1], state->gl.color_clear_value[2], state->gl.color_clear_value[3],
+		state->gl.framebuffer_srgb,
+		state->gl.dither,
+		state->gl.multisample,
 		state->statebits,
 		state->cache_statebits,
 		state->cache_draw_fbo,
@@ -483,41 +403,23 @@ static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t
 
 static void R_FogVol_CaptureRestoreState (fogvol_restore_state_t *state)
 {
-	glGetIntegerv (GL_VIEWPORT, state->viewport); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &state->active_texture); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
+	RB_FogVol_CaptureStateSnapshot (&state->gl);
 	state->glstate_bits = glstate;
-	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_fogvolc
 }
 
 static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 {
-	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, state->draw_fbo);
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
-	RB_DrawBuffer ((GLenum)state->draw_buffer);
-	RB_ReadBuffer ((GLenum)state->read_buffer);
-	RB_Viewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
-	if (state->scissor_test)
-		GL_SetScissorEnabled (true);
-	else
-		GL_SetScissorEnabled (false);
-	RB_Scissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
-	R_FogVol_UseProgram ((GLuint)state->program);
-	R_FogVol_BindVertexArray ((GLuint)state->vao);
-	GL_ActiveTextureFunc ((GLenum)state->active_texture);
+	RB_FogVol_RestoreStateSnapshot (&state->gl);
+	r_fogvol_state_cache.draw_fbo = state->gl.draw_fbo;
+	r_fogvol_state_cache.read_fbo = state->gl.read_fbo;
+	r_fogvol_state_cache.program = state->gl.program;
+	r_fogvol_state_cache.vao = state->gl.vao;
 
 	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
 	RB_PolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	RB_SetState (state->glstate_bits);
-	RB_EnableFramebufferSRGB (state->framebuffer_srgb);
+	RB_EnableFramebufferSRGB (state->gl.framebuffer_srgb);
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])

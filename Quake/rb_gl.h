@@ -96,4 +96,38 @@ qboolean RB_PassActive (void);
 rb_pass_t RB_CurrentPass (void);
 const char *RB_DebugStateOwnersString (void);
 
+#define RB_FOGVOL_MAX_DRAW_BUFFERS 8
+
+typedef struct rb_fogvol_gl_snapshot_s
+{
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLint draw_fbo;
+	GLint read_fbo;
+	GLint draw_buffer;
+	GLint read_buffer;
+	GLint draw_buffers[RB_FOGVOL_MAX_DRAW_BUFFERS];
+	GLint num_draw_buffers;
+	GLint program;
+	GLint vao;
+	GLint active_texture;
+	GLint blend_src_rgb;
+	GLint blend_dst_rgb;
+	GLint blend_equation_rgb;
+	GLint polygon_mode[2];
+	GLboolean scissor_test;
+	GLboolean blend;
+	GLboolean depth_test;
+	GLboolean depth_writemask;
+	GLboolean color_writemask[4];
+	GLboolean cull_face;
+	GLfloat color_clear_value[4];
+	GLboolean framebuffer_srgb;
+	GLboolean dither;
+	GLboolean multisample;
+} rb_fogvol_gl_snapshot_t;
+
+void RB_FogVol_CaptureStateSnapshot (rb_fogvol_gl_snapshot_t *snapshot);
+void RB_FogVol_RestoreStateSnapshot (const rb_fogvol_gl_snapshot_t *snapshot);
+
 #endif

@@ -706,37 +706,68 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner)
 	glReadBuffer (src);
 }
 
-qboolean RB_ReadPixelsRGB_Owner (GLint x, GLint y, GLsizei width, GLsizei height, void *pixels, const char *owner)
+void RB_FogVol_CaptureStateSnapshot (rb_fogvol_gl_snapshot_t *snapshot)
 {
-	GLint prev_pack_alignment = 4;
-	GLenum err;
+	int i;
 
-	if (!pixels)
+	if (!snapshot)
+		return;
+
+	memset (snapshot, 0, sizeof (*snapshot));
+	glGetIntegerv (GL_VIEWPORT, snapshot->viewport);
+	snapshot->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, snapshot->scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &snapshot->draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &snapshot->read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &snapshot->draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &snapshot->read_buffer);
+	snapshot->num_draw_buffers = 0;
+	for (i = 0; i < RB_FOGVOL_MAX_DRAW_BUFFERS; ++i)
+		snapshot->draw_buffers[i] = GL_NONE;
 	{
-		Con_Warning ("RB_ReadPixelsRGB(%s): NULL destination buffer\n", RB_DebugOwnerOrUnknown (owner));
-		return false;
+		GLint max_draw_buffers = 0;
+		glGetIntegerv (GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
+		snapshot->num_draw_buffers = q_min (max_draw_buffers, RB_FOGVOL_MAX_DRAW_BUFFERS);
+		for (i = 0; i < snapshot->num_draw_buffers; ++i)
+			glGetIntegerv (GL_DRAW_BUFFER0 + i, &snapshot->draw_buffers[i]);
 	}
+	glGetIntegerv (GL_CURRENT_PROGRAM, &snapshot->program);
+	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &snapshot->vao);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &snapshot->active_texture);
+	snapshot->blend = glIsEnabled (GL_BLEND);
+	glGetIntegerv (GL_BLEND_SRC_RGB, &snapshot->blend_src_rgb);
+	glGetIntegerv (GL_BLEND_DST_RGB, &snapshot->blend_dst_rgb);
+	glGetIntegerv (GL_BLEND_EQUATION_RGB, &snapshot->blend_equation_rgb);
+	snapshot->depth_test = glIsEnabled (GL_DEPTH_TEST);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &snapshot->depth_writemask);
+	glGetBooleanv (GL_COLOR_WRITEMASK, snapshot->color_writemask);
+	snapshot->cull_face = glIsEnabled (GL_CULL_FACE);
+	glGetIntegerv (GL_POLYGON_MODE, snapshot->polygon_mode);
+	glGetFloatv (GL_COLOR_CLEAR_VALUE, snapshot->color_clear_value);
+	snapshot->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
+	snapshot->dither = glIsEnabled (GL_DITHER);
+	snapshot->multisample = glIsEnabled (GL_MULTISAMPLE);
+}
 
-	if (width <= 0 || height <= 0)
-	{
-		Con_Warning ("RB_ReadPixelsRGB(%s): invalid size %dx%d\n", RB_DebugOwnerOrUnknown (owner), width, height);
-		return false;
-	}
+void RB_FogVol_RestoreStateSnapshot (const rb_fogvol_gl_snapshot_t *snapshot)
+{
+	if (!snapshot)
+		return;
 
-	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);
-	glReadPixels (x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-	err = glGetError ();
-	glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
-
-	if (err != GL_NO_ERROR)
-	{
-		Con_Warning ("RB_ReadPixelsRGB(%s): glReadPixels failed (err=%#x, x=%d y=%d w=%d h=%d)\n",
-			RB_DebugOwnerOrUnknown (owner), err, x, y, width, height);
-		return false;
-	}
-
-	return true;
+	RB_BindFramebufferWithOwner (GL_DRAW_FRAMEBUFFER, (GLuint)snapshot->draw_fbo, "RB_FogVol_RestoreStateSnapshot");
+	RB_BindFramebufferWithOwner (GL_READ_FRAMEBUFFER, (GLuint)snapshot->read_fbo, "RB_FogVol_RestoreStateSnapshot");
+	RB_DrawBufferWithOwner ((GLenum)snapshot->draw_buffer, "RB_FogVol_RestoreStateSnapshot");
+	RB_ReadBufferWithOwner ((GLenum)snapshot->read_buffer, "RB_FogVol_RestoreStateSnapshot");
+	RB_Viewport (snapshot->viewport[0], snapshot->viewport[1], snapshot->viewport[2], snapshot->viewport[3]);
+	if (snapshot->scissor_test)
+		GL_SetScissorEnabled (true);
+	else
+		GL_SetScissorEnabled (false);
+	RB_ScissorWithOwner (snapshot->scissor_box[0], snapshot->scissor_box[1], snapshot->scissor_box[2], snapshot->scissor_box[3], "RB_FogVol_RestoreStateSnapshot");
+	RB_UseProgramWithOwner ((GLuint)snapshot->program, "RB_FogVol_RestoreStateSnapshot");
+	RB_BindVertexArrayWithOwner ((GLuint)snapshot->vao, "RB_FogVol_RestoreStateSnapshot");
+	GL_ActiveTextureFunc ((GLenum)snapshot->active_texture);
+	RB_EnableFramebufferSRGBWithOwner (snapshot->framebuffer_srgb, "RB_FogVol_RestoreStateSnapshot");
 }
 
 void RB_SetPassSetupHook (rb_pass_setup_hook_t hook)
