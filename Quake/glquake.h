@@ -589,6 +589,7 @@ typedef struct glprogs_s {
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
 	GLuint		world_dlight[2];		// [alpha test]
 	GLuint		water[2][2];		// [OIT][dither]
+	GLuint		teleport[2][2];		// [OIT][dither]
 	GLuint		skystencil;
 	GLuint		skylayers[2];		// [dither]
 	GLuint		skycubemap[2][2];	// [anim][dither]
