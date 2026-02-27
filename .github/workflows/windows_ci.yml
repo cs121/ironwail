@@ -2,12 +2,13 @@ name: Windows CI
 on: [push, pull_request]
 jobs:
   build:
-    name: Windows / ${{ matrix.platform }}
+    name: Windows / ${{ matrix.platform }} / ${{ matrix.configuration }}
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
         platform: [x64, Win32]
+        configuration: [Release, Debug]
     steps:
     - uses: actions/checkout@v4
     - name: Set environment variables
@@ -29,7 +30,7 @@ jobs:
         $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         $msbuild = & "$vswhere" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | select-object -first 1
         $options = @( `
-          '-property:Configuration=Release', `
+          '-property:Configuration=${{ matrix.configuration }}', `
           '-property:Platform=${{ matrix.platform }}', `
           '-maxcpucount', `
           '-verbosity:minimal' `
@@ -37,7 +38,7 @@ jobs:
         & $msbuild Windows\VisualStudio\ironwail.sln $options
         if (-not $?) { throw "Build failed" }
     - name: Prepare archive
-      if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+      if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && matrix.configuration == 'Release'
       run: |
             $compiledir = "Windows\VisualStudio\${env:BUILD_DIR}"
             $zipdir = "artifact\${env:BUILD_ARTIFACT}"
@@ -50,7 +51,7 @@ jobs:
             copy Quakespasm-Music.txt $zipdir
             copy LICENSE.txt $zipdir
     - name: Upload archive
-      if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+      if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && matrix.configuration == 'Release'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.BUILD_ARTIFACT }}
