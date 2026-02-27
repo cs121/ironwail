@@ -535,6 +535,14 @@ void R_FlushAliasInstances (qboolean showtris)
 	if (!ibuf.count)
 		return;
 
+	/*
+	 * Leaf baseline: PASS_ENTS_OPAQUE/PASS_ENTS_ALPHA (or show-tris overlay path
+	 * without a pass). Expected baseline when pass is active: opaque blend,
+	 * depth test/write on, back-face cull, program 0, and textures 0..2 unbound.
+	 */
+	if (RB_PassActive () && RB_CurrentPass () != PASS_ENTS_OPAQUE && RB_CurrentPass () != PASS_ENTS_ALPHA)
+		Con_DWarning ("R_FlushAliasInstances invoked outside entity passes (owners: %s)\n", RB_DebugStateOwnersString ());
+
 	R_GLStateDump (ibuf.ent == &cl.viewent ? "before-viewmodel" : "before-alias");
 
 	model = ibuf.ent->model;

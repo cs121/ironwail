@@ -46,6 +46,8 @@ typedef void (*rb_pass_setup_hook_t) (rb_pass_t pass);
 void RB_SetPassSetupHook (rb_pass_setup_hook_t hook);
 void RB_BeginPass (rb_pass_t pass);
 void RB_EndPass (void);
+qboolean RB_PassActive (void);
+rb_pass_t RB_CurrentPass (void);
 const char *RB_DebugStateOwnersString (void);
 
 #endif
