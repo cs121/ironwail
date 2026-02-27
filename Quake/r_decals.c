@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_decals.c -- runtime decal/mark surface rendering
 
 #include "quakedef.h"
+#include "rb_gl.h"
 
 #define MAX_DECALS                      256
 #define DECAL_TEXTURE_SIZE      64
@@ -135,7 +136,7 @@ static void R_FlushDecalBatch (void)
 
         GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indices, sizeof(decal_indices[0]) * decal_batch_count * 6, &buf, &ofs);
         GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-        glDrawElements (GL_TRIANGLES, decal_batch_count * 6, GL_UNSIGNED_SHORT, ofs);
+        RB_DrawElements (GL_TRIANGLES, decal_batch_count * 6, GL_UNSIGNED_SHORT, ofs);
 
         R_ClearDecalBatch ();
 }

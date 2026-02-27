@@ -265,10 +265,10 @@ void RBackend_DebugCaptureEndFrameHash (void)
 	if (!pixels)
 		return;
 
-	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);
-	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-	glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#backend_gl_execc
+	glPixelStorei (GL_PACK_ALIGNMENT, 1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#backend_gl_execc
+	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, pixels); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#backend_gl_execc
+	glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#backend_gl_execc
 
 	if (state->pixels[backend_index])
 		free (state->pixels[backend_index]);
