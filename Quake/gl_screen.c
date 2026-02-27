@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
+#include "rb_gl.h"
 #include "r_fogvol.h"
 #include "steam.h"
 #include <time.h>
@@ -2154,6 +2155,7 @@ void SCR_UpdateScreen (void)
 
        R_StorePrevFrameState ();
 
+	RB_BeginPass (PASS_UI2D);
 	GL_BeginGroup ("2D");
 
 	GL_Set2D ();
@@ -2211,6 +2213,7 @@ void SCR_UpdateScreen (void)
 	Draw_Flush ();
 
 	GL_EndGroup ();
+	RB_EndPass ();
 
 	GL_EndRendering ();
 }

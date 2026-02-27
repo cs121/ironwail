@@ -3,6 +3,7 @@
 
 #include "glquake.h"
 #include "gl_texmgr.h"
+#include "rb_pass.h"
 
 /*
  * Build guard: wrappers are pass-through only during the initial migration.
@@ -17,5 +18,10 @@ void RB_BindFramebuffer (GLenum target, GLuint framebuffer);
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count);
 void RB_Clear (GLbitfield mask);
 void RB_Viewport (GLint x, GLint y, GLsizei width, GLsizei height);
+
+typedef void (*rb_pass_setup_hook_t) (rb_pass_t pass);
+void RB_SetPassSetupHook (rb_pass_setup_hook_t hook);
+void RB_BeginPass (rb_pass_t pass);
+void RB_EndPass (void);
 
 #endif

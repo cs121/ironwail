@@ -2220,6 +2220,7 @@ void GL_PostProcess (void)
 		return;
 	if (!framesetup.composite_ready)
 	{
+		RB_BeginPass (PASS_POSTFX);
 		GL_BeginGroup ("Postprocess backbuffer copy");
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, 0);
 		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
@@ -2231,8 +2232,10 @@ void GL_PostProcess (void)
 		glReadBuffer (GL_BACK);
 		framesetup.composite_ready = true;
 		GL_EndGroup ();
+		RB_EndPass ();
 	}
 
+	RB_BeginPass (PASS_POSTFX);
 	GL_BeginGroup ("Postprocess");
 
 	R_PostFX_GetState (&postfx_state);
@@ -2397,6 +2400,7 @@ void GL_PostProcess (void)
 	{
 		GL_PostProcessFallback ();
 		GL_EndGroup ();
+		RB_EndPass ();
 		return;
 	}
 	RB_UseProgram (glprogs.postprocess[variant]);
@@ -2523,6 +2527,7 @@ void GL_PostProcess (void)
 	RB_DrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
+	RB_EndPass ();
 }
 
 
@@ -4652,17 +4657,43 @@ void R_RenderScene (void)
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
+	RB_BeginPass (PASS_WORLD_OPAQUE);
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	RB_EndPass ();
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
+
+	RB_BeginPass (PASS_ENTS_OPAQUE);
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_DLIGHT);
 	R_DrawDLightPass ();
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_PARTICLES);
 	R_DrawParticles (false);
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_SKY);
 	Sky_DrawSky (); //johnfitz
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_WATER_OPAQUE);
 	R_DrawWater (false);
+	RB_EndPass ();
+
 	R_BeginTranslucency ();
+	RB_BeginPass (PASS_WATER_ALPHA);
 	R_DrawWater (true);
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_ENTS_ALPHA);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_PARTICLES);
 	R_DrawParticles (true);
+	RB_EndPass ();
 	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
@@ -4705,6 +4736,7 @@ void R_WarpScaleView (void)
 
 	if (msaa)
 	{
+		RB_BeginPass (PASS_POSTFX);
 		GL_BeginGroup ("MSAA resolve");
 
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
@@ -4722,6 +4754,7 @@ void R_WarpScaleView (void)
 		}
 
 		GL_EndGroup ();
+		RB_EndPass ();
 
 		if (!needwarpscale)
 		{
@@ -4788,6 +4821,7 @@ void R_WarpScaleView (void)
 		return;
 	}
 
+	RB_BeginPass (PASS_POSTFX);
 	GL_BeginGroup ("Warp/scale view");
 
 	smax = srcw / (float)vid.width;
@@ -4807,6 +4841,7 @@ void R_WarpScaleView (void)
 	RB_DrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
+	RB_EndPass ();
 
 	if (fbodest == framebufs.composite.fbo)
 		framesetup.composite_ready = true;
