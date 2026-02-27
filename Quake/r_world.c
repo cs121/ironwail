@@ -1475,14 +1475,14 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 if (pass <= BP_ALPHATEST)
 {
 GL_UseProgram (program);
-GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 }
 else if (pass == BP_SKYCUBEMAP)
-GL_Bind (GL_TEXTURE2, skybox->cubemap);
+	GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -1639,9 +1639,10 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	int i, j;
 	int totalinst, baseinst;
 	unsigned state;
-	GLuint buf, program;
+	GLuint buf, program, water_program, teleport_program;
 	GLbyte *ofs;
 	qboolean oit;
+	double shader_time;
 
 	if (count > countof(bmodel_instances))
 	{
@@ -1668,16 +1669,21 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 
 	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
 	if (cl.worldmodel->haslitwater && r_litwater.value)
-		program = glprogs.world[oit][q_max(0, (int)softemu - 1)][WORLDSHADER_WATER];
+		water_program = glprogs.world[oit][q_max(0, (int)softemu - 1)][WORLDSHADER_WATER];
 	else
-		program = glprogs.water[oit][softemu == SOFTEMU_COARSE];
+		water_program = glprogs.water[oit][softemu == SOFTEMU_COARSE];
+	teleport_program = glprogs.teleport[oit][softemu == SOFTEMU_COARSE];
+	program = water_program;
+	shader_time = r_refdef.time;
 
-R_ResetBModelCalls (program);
-GL_SetState (state);
-GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	R_ResetBModelCalls (program);
+	GL_UseProgram (program);
+	GL_Uniform1fFunc (12, shader_time);
+	GL_SetState (state);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 
-GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
 
 	// generate drawcalls
@@ -1702,6 +1708,7 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			texture_t *t = R_GetUsedTexture (model, j, NULL);
 			unsigned extra_flags = 0u;
 			unsigned mat_flags = 0u;
+			GLuint target_program;
 
 			if (!t)
 				continue;
@@ -1721,6 +1728,16 @@ GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
 			if ((alpha < 1.f) != translucent)
 				continue;
+
+			target_program = (t->type == TEXTYPE_TELE) ? teleport_program : water_program;
+			if (target_program != program)
+			{
+				R_FlushBModelCalls ();
+				program = target_program;
+				R_ResetBModelCalls (program);
+				GL_UseProgram (program);
+				GL_Uniform1fFunc (12, shader_time);
+			}
 			{
 				float polygon_offset_factor;
 				float polygon_offset_units;

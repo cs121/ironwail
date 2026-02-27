@@ -678,6 +678,7 @@ void GL_CreateShaders (void)
 		for (oit = 0; oit < 2; oit++)
 		{
                         glprogs.water[oit][dither] = GL_CreateProgram (GLSL_PATH("water.vert"), GLSL_PATH("water.frag"), "water|OIT %d; DITHER %d", oit, dither);
+                        glprogs.teleport[oit][dither] = GL_CreateProgram (GLSL_PATH("water.vert"), GLSL_PATH("glsl/teleport_fbm.frag"), "teleport fbm|OIT %d; DITHER %d", oit, dither);
                         glprogs.particles[oit][dither] = GL_CreateProgram (GLSL_PATH("particles.vert"), GLSL_PATH("particles.frag"), "particles|OIT %d; DITHER %d", oit, dither);
 		}
                 for (mode = 0; mode < 2; mode++)
