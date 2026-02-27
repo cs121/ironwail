@@ -4878,16 +4878,21 @@ static qboolean R_DrawWorldOpaque_Backend (void)
 	return true;
 }
 
-static void R_DrawParticlesOpaque_Legacy (void)
+static void R_DrawParticlesOpaque_Common (void)
 {
 	RB_BeginPass (PASS_PARTICLES);
 	R_DrawParticles (false);
 	RB_EndPass ();
 }
 
+static void R_DrawParticlesOpaque_Legacy (void)
+{
+	R_DrawParticlesOpaque_Common ();
+}
+
 static qboolean R_DrawParticlesOpaque_Backend (void)
 {
-	R_DrawParticlesOpaque_Legacy ();
+	R_DrawParticlesOpaque_Common ();
 	return true;
 }
 
@@ -4910,16 +4915,21 @@ static qboolean R_DrawWorldAlpha_Backend (void)
 	return true;
 }
 
-static void R_DrawParticlesAlpha_Legacy (void)
+static void R_DrawParticlesAlpha_Common (void)
 {
 	RB_BeginPass (PASS_PARTICLES);
 	R_DrawParticles (true);
 	RB_EndPass ();
 }
 
+static void R_DrawParticlesAlpha_Legacy (void)
+{
+	R_DrawParticlesAlpha_Common ();
+}
+
 static qboolean R_DrawParticlesAlpha_Backend (void)
 {
-	R_DrawParticlesAlpha_Legacy ();
+	R_DrawParticlesAlpha_Common ();
 	return true;
 }
 
