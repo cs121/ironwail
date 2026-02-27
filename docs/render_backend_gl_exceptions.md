@@ -17,16 +17,12 @@ Die automatische Prüfung (`scripts/check_gl_exceptions.py`) behandelt aktuell f
 ## Ausnahmen (vollständige Bestandsaufnahme außerhalb `rb_gl.c`)
 
 ### `backend_gl_exec.c` {#backend_gl_execc}
-- **Datei/Stellen:** `Quake/backend_gl_exec.c:268-271`.
-- **Direkte Calls:** `glGetIntegerv`, `glPixelStorei`, `glReadPixels`.
-- **Begründung:** Debug-Framehash erfasst explizit den Backbuffer inklusive temporärem Pack-Alignment-Save/Restore.
-- **Ablöseplan:** `RB_ReadPixelsRGB` als zentrale Readback-Hilfe (inkl. Alignment-Handling) einführen und diesen Pfad darauf umstellen.
+- **Status:** Direkte Readback-Calls entfernt; Pfad nutzt jetzt `RB_ReadPixelsRGB`.
+- **Hinweis:** Koordinaten/Region bleiben unverändert (`glx`, `gly`, `glwidth`, `glheight`) und werden unverändert an die RB-Hilfe durchgereicht.
 
 ### `gl_screen.c` {#gl_screenc}
-- **Datei/Stellen:** `Quake/gl_screen.c:1843-1844`.
-- **Direkte Calls:** `glPixelStorei`, `glReadPixels`.
-- **Begründung:** Screenshot-Pfad liest den finalen Framebuffer direkt aus; derzeit kein RB-Screenshot-API vorhanden.
-- **Ablöseplan:** Screenshot und Framehash auf gemeinsame RB-Readback-API konsolidieren.
+- **Status:** Direkte Readback-Calls entfernt; Pfad nutzt jetzt `RB_ReadPixelsRGB`.
+- **Hinweis:** Bestehende Region (`glx`, `gly`, `glwidth`, `glheight`) bleibt unverändert.
 
 ### `gl_rmain.c` {#gl_rmainc}
 - **Datei/Stellen:** `Quake/gl_rmain.c:199-5101` (siehe direkte `gl*`-Aufrufe mit Marker in Datei).

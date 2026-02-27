@@ -40,6 +40,7 @@ void RB_StencilTest_Owner (qboolean enable, const char *owner);
 void RB_TexParameteri_Owner (GLenum target, GLenum pname, GLint param, const char *owner);
 void RB_DrawBuffer_Owner (GLenum buf, const char *owner);
 void RB_ReadBuffer_Owner (GLenum src, const char *owner);
+qboolean RB_ReadPixelsRGB_Owner (GLint x, GLint y, GLsizei width, GLsizei height, void *pixels, const char *owner);
 #define RB_SetState(mask) RB_SetState_Owner ((mask), __func__)
 #define RB_UseProgram(program) RB_UseProgram_Owner ((program), __func__)
 #define RB_BindTexture(texunit, texture) RB_BindTexture_Owner ((texunit), (texture), __func__)
@@ -57,6 +58,7 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner);
 #define RB_TexParameteri(target, pname, param) RB_TexParameteri_Owner ((target), (pname), (param), __func__)
 #define RB_DrawBuffer(buf) RB_DrawBuffer_Owner ((buf), __func__)
 #define RB_ReadBuffer(src) RB_ReadBuffer_Owner ((src), __func__)
+#define RB_ReadPixelsRGB(x, y, width, height, pixels) RB_ReadPixelsRGB_Owner ((x), (y), (width), (height), (pixels), __func__)
 #define RB_SetStateWithOwner(mask, owner) RB_SetState_Owner ((mask), (owner))
 #define RB_UseProgramWithOwner(program, owner) RB_UseProgram_Owner ((program), (owner))
 #define RB_BindTextureWithOwner(texunit, texture, owner) RB_BindTexture_Owner ((texunit), (texture), (owner))
@@ -75,6 +77,7 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner);
 #define RB_TexParameteriWithOwner(target, pname, param, owner) RB_TexParameteri_Owner ((target), (pname), (param), (owner))
 #define RB_DrawBufferWithOwner(buf, owner) RB_DrawBuffer_Owner ((buf), (owner))
 #define RB_ReadBufferWithOwner(src, owner) RB_ReadBuffer_Owner ((src), (owner))
+#define RB_ReadPixelsRGBWithOwner(x, y, width, height, pixels, owner) RB_ReadPixelsRGB_Owner ((x), (y), (width), (height), (pixels), (owner))
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count);
 void RB_DrawElements (GLenum mode, GLsizei count, GLenum type, const GLvoid *indices);
 void RB_Clear (GLbitfield mask);

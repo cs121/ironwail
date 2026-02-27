@@ -1840,8 +1840,12 @@ void SCR_ScreenShot_f (void)
 		scr_skipupdate = oldskip;
 	}
 
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);/* GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_screenc */
-	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer); /* GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_screenc */
+	if (!RB_ReadPixelsRGB (glx, gly, glwidth, glheight, buffer))
+	{
+		Con_Printf ("SCR_ScreenShot_f: Failed to read pixels\n");
+		free (buffer);
+		return;
+	}
 
 // now write the file
 	if (!Steam_SaveScreenshot (buffer, glwidth, glheight))
