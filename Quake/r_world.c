@@ -1674,7 +1674,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 		water_program = glprogs.water[oit][softemu == SOFTEMU_COARSE];
 	teleport_program = glprogs.teleport[oit][softemu == SOFTEMU_COARSE];
 	program = water_program;
-	shader_time = r_refdef.time;
+	shader_time = cl.time;
 
 	R_ResetBModelCalls (program);
 	GL_UseProgram (program);
