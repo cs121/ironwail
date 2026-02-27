@@ -10,7 +10,6 @@ Diese Liste dokumentiert bewusst erlaubte direkte OpenGL-Aufrufe außerhalb der 
 Die automatische Prüfung (`scripts/check_gl_exceptions.py`) behandelt aktuell folgende Dateien als A2-relevant:
 - `Quake/backend_gl_exec.c`
 - `Quake/gl_screen.c`
-- `Quake/gl_sky.c`
 - `Quake/gl_rmain.c`
 - `Quake/r_fogvol.c`
 - `Quake/r_postfx.c`
@@ -28,12 +27,6 @@ Die automatische Prüfung (`scripts/check_gl_exceptions.py`) behandelt aktuell f
 - **Direkte Calls:** `glPixelStorei`, `glReadPixels`.
 - **Begründung:** Screenshot-Pfad liest den finalen Framebuffer direkt aus; derzeit kein RB-Screenshot-API vorhanden.
 - **Ablöseplan:** Screenshot und Framehash auf gemeinsame RB-Readback-API konsolidieren.
-
-### `gl_sky.c` {#gl_skyc}
-- **Datei/Stellen:** `Quake/gl_sky.c:782`, `Quake/gl_sky.c:796`.
-- **Direkte Calls:** `glEnable(GL_STENCIL_TEST)`, `glDisable(GL_STENCIL_TEST)`.
-- **Begründung:** RB bietet aktuell keine dedizierte Stencil-Test-Toggle-API für den Sky-Maskierungspfad.
-- **Ablöseplan:** Stencil-Test als RB-Stateflag in `RB_SetState`/Pass-Konfiguration ergänzen und direkte Toggles entfernen.
 
 ### `gl_rmain.c` {#gl_rmainc}
 - **Datei/Stellen:** `Quake/gl_rmain.c:199-5101` (siehe direkte `gl*`-Aufrufe mit Marker in Datei).

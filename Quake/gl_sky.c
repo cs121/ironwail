@@ -779,7 +779,7 @@ void Sky_DrawSky (void)
 	}
 	else if (skybox)
 	{
-		glEnable (GL_STENCIL_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_skyc
+		RB_StencilTest (true);
 		RB_StencilMask (1);
 		RB_StencilFunc (GL_ALWAYS, 1, 1);
 		RB_StencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
@@ -793,7 +793,7 @@ void Sky_DrawSky (void)
 
 		Sky_DrawSkyBox ();
 
-		glDisable (GL_STENCIL_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_skyc
+		RB_StencilTest (false);
 	}
 	else
 	{
