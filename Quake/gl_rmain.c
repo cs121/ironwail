@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_fogvol.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
+#include "render_backend.h"
 #include <float.h>
 #include <math.h>
 
@@ -229,6 +230,7 @@ static qboolean gl_srgb_capability_warned = false;
 
 
 cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
+cvar_t	r_backend = { "r_backend", "0", CVAR_ARCHIVE };
 cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
 cvar_t	r_drawviewmodel = { "r_drawviewmodel","1",CVAR_NONE };
 cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
@@ -4855,7 +4857,7 @@ void R_WarpScaleView (void)
 R_RenderView
 ================
 */
-void R_RenderView (void)
+static void R_RenderView_Legacy (void)
 {
 	double	time1, time2;
 
@@ -4929,4 +4931,9 @@ void R_RenderView (void)
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
 	//johnfitz
+}
+
+void R_RenderView (void)
+{
+	RBackend_DispatchRenderView (R_RenderView_Legacy);
 }

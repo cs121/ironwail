@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "rb_gl.h"
 #include "r_fogvol.h"
+#include "render_backend.h"
 #include "steam.h"
 #include <time.h>
 
@@ -2112,7 +2113,7 @@ WARNING: be very careful calling this from elsewhere, because the refresh
 needs almost the entire 256k of stack space!
 ==================
 */
-void SCR_UpdateScreen (void)
+static void SCR_UpdateScreen_Legacy (void)
 {
 	vid.numpages = (gl_triplebuffer.value) ? 3 : 2;
 
@@ -2216,4 +2217,9 @@ void SCR_UpdateScreen (void)
 	RB_EndPass ();
 
 	GL_EndRendering ();
+}
+
+void SCR_UpdateScreen (void)
+{
+	RBackend_DispatchUpdateScreen (SCR_UpdateScreen_Legacy);
 }
