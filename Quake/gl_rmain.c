@@ -43,6 +43,14 @@ gpuframedata_t r_framedata;
 static int r_fogvol_update_called = 0;
 static int r_fogvol_draw_called = 0;
 
+static qboolean r_backend_particles_warned = false;
+static qboolean r_backend_alias_warned = false;
+static qboolean r_backend_world_warned = false;
+static qboolean r_backend_fogvol_warned = false;
+
+static void R_DrawFogvol_Legacy (void);
+static qboolean R_DrawFogvol_Backend (void);
+
 /* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
  * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
  * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
@@ -231,6 +239,12 @@ static qboolean gl_srgb_capability_warned = false;
 
 cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
 cvar_t	r_backend = { "r_backend", "0", CVAR_ARCHIVE };
+cvar_t	r_backend_ui = { "r_backend_ui", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_postfx = { "r_backend_postfx", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_particles = { "r_backend_particles", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_alias = { "r_backend_alias", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_world = { "r_backend_world", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_fogvol = { "r_backend_fogvol", "1", CVAR_ARCHIVE };
 cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
 cvar_t	r_drawviewmodel = { "r_drawviewmodel","1",CVAR_NONE };
 cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
@@ -3586,6 +3600,21 @@ static void R_DrawWater (qboolean translucent)
 
 }
 
+
+static entity_t **r_alias_dispatch_entlist;
+static int r_alias_dispatch_count;
+
+static void R_DrawAliasBatch_Legacy (void)
+{
+	R_DrawAliasModels (r_alias_dispatch_entlist, r_alias_dispatch_count);
+}
+
+static qboolean R_DrawAliasBatch_Backend (void)
+{
+	R_DrawAliasModels (r_alias_dispatch_entlist, r_alias_dispatch_count);
+	return true;
+}
+
 /*
 =============
 R_DrawEntitiesOnList
@@ -3600,7 +3629,10 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
-	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
+	r_alias_dispatch_entlist = entlist + ofs[2 * mod_alias];
+	r_alias_dispatch_count = ofs[2 * mod_alias + 1] - ofs[2 * mod_alias];
+	RBackend_DispatchBlock ("alias", &r_backend_alias, true,
+		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
@@ -3647,7 +3679,10 @@ void R_DrawViewModel (void)
 
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
-	R_DrawAliasModels (&e, 1);
+	r_alias_dispatch_entlist = &e;
+	r_alias_dispatch_count = 1;
+	RBackend_DispatchBlock ("alias", &r_backend_alias, true,
+		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
 	GL_DepthRange (ZRANGE_FULL);
 
 	GL_EndGroup ();
@@ -4647,6 +4682,82 @@ static void R_DrawDLightPass (void)
         GL_EndGroup ();
 }
 
+
+static void R_DrawWorldOpaque_Legacy (void)
+{
+	RB_BeginPass (PASS_WORLD_OPAQUE);
+	R_DrawViewModel ();
+	RB_EndPass ();
+	S_ExtraUpdate ();
+
+	RB_BeginPass (PASS_ENTS_OPAQUE);
+	R_DrawEntitiesOnList (false);
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_DLIGHT);
+	R_DrawDLightPass ();
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_SKY);
+	Sky_DrawSky ();
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_WATER_OPAQUE);
+	R_DrawWater (false);
+	RB_EndPass ();
+}
+
+static qboolean R_DrawWorldOpaque_Backend (void)
+{
+	R_DrawWorldOpaque_Legacy ();
+	return true;
+}
+
+static void R_DrawParticlesOpaque_Legacy (void)
+{
+	RB_BeginPass (PASS_PARTICLES);
+	R_DrawParticles (false);
+	RB_EndPass ();
+}
+
+static qboolean R_DrawParticlesOpaque_Backend (void)
+{
+	R_DrawParticlesOpaque_Legacy ();
+	return true;
+}
+
+static void R_DrawWorldAlpha_Legacy (void)
+{
+	R_BeginTranslucency ();
+	RB_BeginPass (PASS_WATER_ALPHA);
+	R_DrawWater (true);
+	RB_EndPass ();
+
+	RB_BeginPass (PASS_ENTS_ALPHA);
+	R_DrawEntitiesOnList (true);
+	RB_EndPass ();
+	R_EndTranslucency ();
+}
+
+static qboolean R_DrawWorldAlpha_Backend (void)
+{
+	R_DrawWorldAlpha_Legacy ();
+	return true;
+}
+
+static void R_DrawParticlesAlpha_Legacy (void)
+{
+	RB_BeginPass (PASS_PARTICLES);
+	R_DrawParticles (true);
+	RB_EndPass ();
+}
+
+static qboolean R_DrawParticlesAlpha_Backend (void)
+{
+	R_DrawParticlesAlpha_Legacy ();
+	return true;
+}
+
 /*
 ================
 R_RenderScene
@@ -4657,48 +4768,22 @@ void R_RenderScene (void)
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_SetupGL ();
 	R_Clear ();
-	
+
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	RB_BeginPass (PASS_WORLD_OPAQUE);
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
-	RB_EndPass ();
-	S_ExtraUpdate (); // don't let sound get messed up if going slow
 
-	RB_BeginPass (PASS_ENTS_OPAQUE);
-	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_DLIGHT);
-	R_DrawDLightPass ();
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_PARTICLES);
-	R_DrawParticles (false);
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_SKY);
-	Sky_DrawSky (); //johnfitz
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_WATER_OPAQUE);
-	R_DrawWater (false);
-	RB_EndPass ();
-
-	R_BeginTranslucency ();
-	RB_BeginPass (PASS_WATER_ALPHA);
-	R_DrawWater (true);
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_ENTS_ALPHA);
-	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_PARTICLES);
-	R_DrawParticles (true);
-	RB_EndPass ();
-	R_EndTranslucency ();
+	/* Backend migration order (keep incremental PRs consistent):
+	 * UI/Console/2D -> Fullscreen passes -> Particles/Sprites/Beams -> Alias ->
+	 * World (Sky->Opaque->Alpha) -> PostFX graph. */
+	RBackend_DispatchBlock ("world_opaque", &r_backend_world, true,
+		R_DrawWorldOpaque_Backend, R_DrawWorldOpaque_Legacy, &r_backend_world_warned);
+	RBackend_DispatchBlock ("particles_opaque", &r_backend_particles, true,
+		R_DrawParticlesOpaque_Backend, R_DrawParticlesOpaque_Legacy, &r_backend_particles_warned);
+	RBackend_DispatchBlock ("world_alpha", &r_backend_world, true,
+		R_DrawWorldAlpha_Backend, R_DrawWorldAlpha_Legacy, &r_backend_world_warned);
+	RBackend_DispatchBlock ("particles_alpha", &r_backend_particles, true,
+		R_DrawParticlesAlpha_Backend, R_DrawParticlesAlpha_Legacy, &r_backend_particles_warned);
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
 	R_ShowPointFile ();
@@ -4891,7 +4976,8 @@ static void R_RenderView_Legacy (void)
         r_fogvol_draw_called++;
         if (r_gl_state_validate.value > 0.f)
                 Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
-        R_FogVol_Render ();
+	RBackend_DispatchBlock ("fogvol", &r_backend_fogvol, true,
+		R_DrawFogvol_Backend, R_DrawFogvol_Legacy, &r_backend_fogvol_warned);
         /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
          * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
          * fog-damped AO; after Fog_DisableGFog the density is zeroed out. */
@@ -4931,6 +5017,17 @@ static void R_RenderView_Legacy (void)
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
 	//johnfitz
+}
+
+static void R_DrawFogvol_Legacy (void)
+{
+	R_FogVol_Render ();
+}
+
+static qboolean R_DrawFogvol_Backend (void)
+{
+	R_FogVol_Render ();
+	return true;
 }
 
 void R_RenderView (void)

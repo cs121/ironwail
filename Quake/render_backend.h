@@ -19,9 +19,19 @@ typedef struct render_backend_vtable_s
 } render_backend_vtable_t;
 
 extern cvar_t r_backend;
+extern cvar_t r_backend_ui;
+extern cvar_t r_backend_postfx;
+extern cvar_t r_backend_particles;
+extern cvar_t r_backend_alias;
+extern cvar_t r_backend_world;
+extern cvar_t r_backend_fogvol;
+
+typedef qboolean (*rbackend_block_fn_t) (void);
 
 const render_backend_vtable_t *RBackend_GetVTable (void);
 void RBackend_DispatchRenderView (void (*legacy_fn)(void));
 void RBackend_DispatchUpdateScreen (void (*legacy_fn)(void));
+void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean backend_path_available,
+	rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once);
 
 #endif

@@ -104,3 +104,42 @@ void RBackend_DispatchUpdateScreen (void (*legacy_fn)(void))
 
 	legacy_fn ();
 }
+
+void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean backend_path_available,
+	rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once)
+{
+	qboolean can_use_backend;
+
+	if (!legacy_fn)
+		return;
+
+	can_use_backend = ((int)r_backend.value == 1) && toggle && (toggle->value != 0.f);
+	if (!can_use_backend)
+	{
+		legacy_fn ();
+		return;
+	}
+
+	if (!backend_path_available || !backend_fn)
+	{
+		if (warned_once && !*warned_once)
+		{
+			Con_Warning ("render backend: %s backend path unavailable, falling back to legacy\n",
+				block_name ? block_name : "(unknown block)");
+			*warned_once = true;
+		}
+		legacy_fn ();
+		return;
+	}
+
+	if (!backend_fn ())
+	{
+		if (warned_once && !*warned_once)
+		{
+			Con_Warning ("render backend: %s backend block failed, falling back to legacy\n",
+				block_name ? block_name : "(unknown block)");
+			*warned_once = true;
+		}
+		legacy_fn ();
+	}
+}

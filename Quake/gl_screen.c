@@ -32,6 +32,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t r_autoexposure;
 extern cvar_t r_exposure_debug;
+extern cvar_t r_backend_ui;
+extern cvar_t r_backend_postfx;
 extern float r_autoexposure_debug_exposure;
 extern float r_autoexposure_debug_luminance;
 
@@ -2102,6 +2104,86 @@ void SCR_TileClear (void)
 	}
 }
 
+static qboolean scr_backend_ui_warned = false;
+static qboolean scr_backend_postfx_warned = false;
+
+static void SCR_DrawUI2D_Legacy (void)
+{
+	RB_BeginPass (PASS_UI2D);
+	GL_BeginGroup ("2D");
+
+	GL_Set2D ();
+	R_FogVol_DrawDebug2D ();
+	SCR_TileClear ();
+
+	if (scr_drawdialog)
+	{
+		if (con_forcedup)
+			Draw_ConsoleBackground ();
+		else
+			Sbar_Draw ();
+		Draw_FadeScreen (1.f);
+		SCR_DrawNotifyString ();
+	}
+	else if (scr_drawloading)
+	{
+		SCR_DrawLoading ();
+		Sbar_Draw ();
+		M_Draw ();
+	}
+	else if (cl.intermission == 1 && key_dest == key_game)
+	{
+		Sbar_IntermissionOverlay ();
+		SCR_DrawDemoControls ();
+	}
+	else if (cl.intermission == 2 && key_dest == key_game)
+	{
+		Sbar_FinaleOverlay ();
+		SCR_CheckDrawCenterString ();
+		SCR_DrawDemoControls ();
+	}
+	else
+	{
+		SCR_DrawCrosshair ();
+		SCR_DrawNet ();
+		SCR_DrawTurtle ();
+		SCR_DrawPause ();
+		SCR_CheckDrawCenterString ();
+		Sbar_Draw ();
+		SCR_DrawDevStats ();
+		SCR_DrawExposureDebug ();
+		SCR_DrawClock ();
+		SCR_DrawDemoControls ();
+		SCR_DrawSpeed ();
+		SCR_DrawEdictInfo ();
+		SCR_DrawConsole ();
+		M_Draw ();
+		SCR_DrawFPS ();
+		SCR_DrawSaving ();
+	}
+
+	Draw_Flush ();
+	GL_EndGroup ();
+	RB_EndPass ();
+}
+
+static qboolean SCR_DrawUI2D_Backend (void)
+{
+	SCR_DrawUI2D_Legacy ();
+	return true;
+}
+
+static void SCR_PostProcess_Legacy (void)
+{
+	GL_PostProcess ();
+}
+
+static qboolean SCR_PostProcess_Backend (void)
+{
+	GL_PostProcess ();
+	return true;
+}
+
 /*
 ==================
 SCR_UpdateScreen
@@ -2150,71 +2232,15 @@ static void SCR_UpdateScreen_Legacy (void)
 
        V_RenderView ();
 
-       GL_PostProcess ();
+	RBackend_DispatchBlock ("postfx", &r_backend_postfx, true,
+		SCR_PostProcess_Backend, SCR_PostProcess_Legacy, &scr_backend_postfx_warned);
 
        V_PolyBlend ();
 
        R_StorePrevFrameState ();
 
-	RB_BeginPass (PASS_UI2D);
-	GL_BeginGroup ("2D");
-
-	GL_Set2D ();
-	R_FogVol_DrawDebug2D ();
-
-	//FIXME: only call this when needed
-	SCR_TileClear ();
-
-	if (scr_drawdialog) //new game confirm
-	{
-		if (con_forcedup)
-			Draw_ConsoleBackground ();
-		else
-			Sbar_Draw ();
-		Draw_FadeScreen (1.f);
-		SCR_DrawNotifyString ();
-	}
-	else if (scr_drawloading) //loading
-	{
-		SCR_DrawLoading ();
-		Sbar_Draw ();
-		M_Draw ();
-	}
-	else if (cl.intermission == 1 && key_dest == key_game) //end of level
-	{
-		Sbar_IntermissionOverlay ();
-		SCR_DrawDemoControls ();
-	}
-	else if (cl.intermission == 2 && key_dest == key_game) //end of episode
-	{
-		Sbar_FinaleOverlay ();
-		SCR_CheckDrawCenterString ();
-		SCR_DrawDemoControls ();
-	}
-	else
-	{
-		SCR_DrawCrosshair (); //johnfitz
-		SCR_DrawNet ();
-		SCR_DrawTurtle ();
-		SCR_DrawPause ();
-		SCR_CheckDrawCenterString ();
-		Sbar_Draw ();
-		SCR_DrawDevStats (); //johnfitz
-		SCR_DrawExposureDebug ();
-		SCR_DrawClock (); //johnfitz
-		SCR_DrawDemoControls ();
-		SCR_DrawSpeed ();
-		SCR_DrawEdictInfo ();
-		SCR_DrawConsole ();
-		M_Draw ();
-		SCR_DrawFPS (); //johnfitz
-		SCR_DrawSaving ();
-	}
-
-	Draw_Flush ();
-
-	GL_EndGroup ();
-	RB_EndPass ();
+	RBackend_DispatchBlock ("ui", &r_backend_ui, true,
+		SCR_DrawUI2D_Backend, SCR_DrawUI2D_Legacy, &scr_backend_ui_warned);
 
 	GL_EndRendering ();
 }
