@@ -21,6 +21,20 @@ Dieses Dokument definiert einen **reproduzierbaren** Ablauf, um Legacy-Renderpfa
 5. GL-State-Validierung muss aktiv sein:
    - `r_gl_state_validate 1`
 
+### 1.1.1 Debug-Preset für Pass-State-Leaks (Pflicht für QA-Läufe)
+Für konsistente Leak-Reports werden `r_gl_state_validate` und `r_rb_assert_state` gemeinsam als Preset geschaltet.
+
+**Preset aktivieren (empfohlen):**
+- `qa_stateleaks_on`
+
+**Preset deaktivieren (nach dem Lauf):**
+- `qa_stateleaks_off`
+
+**Fallback ohne Alias (optional):**
+- `r_gl_state_validate 1; r_rb_assert_state 1`
+
+Wenn `r_rb_assert_state 1` aktiv ist, werden Pass-Ein-/Ausstiegsmismatches als harter Fehler (`Sys_Error`) sichtbar und können im QA-Protokoll reproduzierbar als Leak-Report erfasst werden.
+
 ### 1.2 Standard-Setup pro Lauf
 Diese CVars **vor jedem** Lauf explizit setzen:
 
@@ -36,6 +50,7 @@ r_backend_framehash_debug 1
 r_backend_framehash_scene <scene_id>
 r_backend_framehash_epsilon <0..255>
 r_gl_state_validate 1
+r_rb_assert_state 1
 ```
 
 ### 1.3 Zwei-Pass-Prozedur je Szene
@@ -52,6 +67,7 @@ Für jede Szene exakt diese Reihenfolge verwenden:
 host_maxfps 0
 r_vsync 0
 r_gl_state_validate 1
+r_rb_assert_state 1
 
 r_backend_framehash_scene <scene_id>
 r_backend_framehash_debug 1
