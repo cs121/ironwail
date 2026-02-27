@@ -805,6 +805,7 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&gl_overbright_models);
 	Cvar_RegisterVariable (&r_model_halflambert);
 	Cvar_RegisterVariable (&r_gl_state_validate);
+	Cvar_RegisterVariable (&r_rb_assert_state);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
