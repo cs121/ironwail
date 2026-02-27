@@ -706,6 +706,17 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner)
 	glReadBuffer (src);
 }
 
+qboolean RB_ReadPixelsRGB_Owner (GLint x, GLint y, GLsizei width, GLsizei height, void *pixels, const char *owner)
+{
+	GLenum err;
+
+	(void)owner;
+	glReadPixels (x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	err = glGetError ();
+
+	return err == GL_NO_ERROR;
+}
+
 void RB_FogVol_CaptureStateSnapshot (rb_fogvol_gl_snapshot_t *snapshot)
 {
 	int i;
