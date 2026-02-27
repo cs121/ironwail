@@ -3364,7 +3364,11 @@ void R_SetupGL (void)
 
 		RB_BindFramebuffer (GL_FRAMEBUFFER, target);
 		GL_SetFramebufferSRGB (srgb_output);
-		framesetup.scene_fbo = framebufs.composite.fbo;
+		/* Keep resolve target aligned with the currently bound scene destination.
+		 * Using composite.fbo unconditionally here can redirect later passes (e.g.
+		 * buffered dlights/OIT resolve) into an off-screen FBO when postfx is off,
+		 * leaving the default framebuffer black. */
+		framesetup.scene_fbo = target;
 		framesetup.oit_fbo = framebufs.oit.fbo_composite;
 		framesetup.composite_ready = (target == framebufs.composite.fbo);
 		if (target)
