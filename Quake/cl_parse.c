@@ -518,8 +518,9 @@ void CL_ParseUpdate (int bits)
 	prevframe = ent->frame;
 	if (bits & U_FRAME)
 		ent->frame = MSG_ReadByte ();
-	else
+	else if (forcelink)
 		ent->frame = ent->baseline.frame;
+	ent->oldframe = prevframe;
 
 	if (bits & U_COLORMAP)
 		i = MSG_ReadByte();
