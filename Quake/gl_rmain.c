@@ -3128,7 +3128,7 @@ static void R_SortEntities (void)
 		// count number of entries in each bin
 		memset (bins, 0, sizeof (bins));
 		for (i = 0; i < cl_numvisedicts; i++)
-			bins[(visedict_keys[i] >> shift) & mask]++;
+			bins[(visedict_keys[src[i]] >> shift) & mask]++;
 
 		// turn bin counts into offsets
 		sum = 0;
