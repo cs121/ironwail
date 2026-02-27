@@ -294,17 +294,22 @@ void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr, lerpdata_t *lerpdata
 	if (r_debug_itemlight.value > 1.f && r_framecount != debug_frame)
 	{
 		debug_frame = r_framecount;
-		Con_Printf ("alias_anim: host_frametime=%.6f cl.time=%.6f cl.oldtime=%.6f r_refdef.time=%.6f model=%s frame=%d oldframe=%d lerpstart=%.6f lerpfinish=%.6f lerpfrac=%.3f pose=(%d->%d)\n",
+		Con_Printf ("alias_anim: host_frametime=%.6f cl.time=%.6f cl.oldtime=%.6f realtime=%.6f r_refdef.time=%.6f model=%s frame=%d oldframe=%d lerpstart=%.6f lerptime=%.6f lerpfinish=%.6f lerpfrac=%.3f origin=(%.1f %.1f %.1f) pose=(%d->%d)\n",
 			host_frametime,
 			cl.time,
 			cl.oldtime,
+			realtime,
 			r_refdef.time,
 			e->model ? e->model->name : "<null>",
 			e->frame,
 			e->oldframe,
 			e->lerpstart,
+			e->lerptime,
 			e->lerpfinish,
 			lerpdata->blend,
+			e->origin[0],
+			e->origin[1],
+			e->origin[2],
 			lerpdata->pose1,
 			lerpdata->pose2);
 	}
