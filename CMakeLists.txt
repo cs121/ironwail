@@ -180,3 +180,8 @@ if (WIN32)
 	endif()
 endif()
 
+
+add_custom_target(check_gl_exceptions
+	COMMAND ${CMAKE_COMMAND} -E env PYTHONIOENCODING=utf-8 python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_gl_exceptions.py
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	COMMENT "Checking direct gl* exceptions in A2-relevant files")

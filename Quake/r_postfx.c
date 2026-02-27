@@ -148,12 +148,12 @@ void R_PostFX_ReloadLUTs (void)
 	}
 	R_PostFX_GenerateIdentityLUT (lut_storage, size);
 
-	glGenTextures (1, &r_postfx_lut_tex);
+	glGenTextures (1, &r_postfx_lut_tex); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, r_postfx_lut_tex);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
 	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
 	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
 
