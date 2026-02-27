@@ -1127,6 +1127,7 @@ void R_FogVol_Render (void)
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
+	RB_BeginPass (PASS_FOGVOL);
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
 	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
@@ -1415,6 +1416,7 @@ done:
 	}
 
 	GL_EndGroup ();
+	RB_EndPass ();
 }
 
 
