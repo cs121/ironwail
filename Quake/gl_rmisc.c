@@ -77,6 +77,7 @@ extern cvar_t r_dlight_bloom_radius;
 extern cvar_t r_dlight_bloom_threshold;
 extern cvar_t r_dlight_ndotl;
 extern cvar_t r_dlight_satchop;
+extern cvar_t r_backend;
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -555,6 +556,7 @@ void R_Init (void)
         R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);
+Cvar_RegisterVariable (&r_backend);
 Cvar_RegisterVariable (&r_lightmap);
 Cvar_RegisterVariable (&r_lightmap_linear);
 Cvar_SetCallback (&r_lightmap_linear, TexMgr_LightmapLinearCompat_f);
