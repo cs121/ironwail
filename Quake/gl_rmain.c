@@ -3830,15 +3830,33 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 
 static void R_DrawWorld (void)
 {
+	entity_t world;
+
 	/* R_DrawEntitiesOnList intentionally skips cl_entities[0] (worldspawn) so
 	 * that the static BSP world is drawn here, in its own dedicated pass.
 	 * Draw worldspawn directly -- do not search the sorted vis list, because
 	 * worldspawn is excluded from the slice returned by R_GetVisEntities after
 	 * R_DrawEntitiesOnList strips it from the front of the brush entity range. */
-	if (r_drawworld_cheatsafe && cl_entities[0].model && cl_entities[0].model->type == mod_brush)
+	if (!r_drawworld_cheatsafe)
+		return;
+
+	/* During signon/level transitions some mods leave cl_entities[0].model
+	 * temporarily unset while cl.worldmodel is already valid. Use worldmodel as
+	 * fallback to avoid presenting a black frame while simulation/audio continue. */
+	if (cl_entities[0].model && cl_entities[0].model->type == mod_brush)
 	{
 		entity_t *world = &cl_entities[0];
 		R_DrawBrushModels (&world, 1);
+		return;
+	}
+
+	if (cl.worldmodel && cl.worldmodel->type == mod_brush)
+	{
+		entity_t *worldlist[1];
+		world = cl_entities[0];
+		world.model = cl.worldmodel;
+		worldlist[0] = &world;
+		R_DrawBrushModels (worldlist, 1);
 	}
 }
 
