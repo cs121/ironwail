@@ -5220,7 +5220,13 @@ static void R_RenderView_Legacy (void)
 		return;
 
 	if (!cl.worldmodel)
-		Sys_Error ("R_RenderView: NULL worldmodel");
+	{
+		/* Startup/menu/loading frames can legitimately render without a world.
+		 * Leave 3D untouched and let the 2D/UI path present the frame. */
+		r_frame_rendered_this_update = false;
+		framesetup.composite_ready = false;
+		return;
+	}
 
 	time1 = 0; /* avoid compiler warning */
 	if (r_speeds.value)
