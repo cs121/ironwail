@@ -2242,6 +2242,7 @@ static void SCR_UpdateScreen_Legacy (void)
 	RBackend_DispatchBlock ("ui", &r_backend_ui, true,
 		SCR_DrawUI2D_Backend, SCR_DrawUI2D_Legacy, &scr_backend_ui_warned);
 
+	RBackend_DebugCaptureEndFrameHash ();
 	GL_EndRendering ();
 }
 
