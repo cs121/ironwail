@@ -2147,13 +2147,31 @@ static qboolean SCR_BackendPostFXPathAvailable (const char **reason)
 	return true;
 }
 
+
+static void SCR_DrawUIDebugDraw_Common (void)
+{
+	R_FogVol_DrawDebug2D ();
+}
+
+static void SCR_DrawUIDebugDraw_Legacy (void)
+{
+	SCR_DrawUIDebugDraw_Common ();
+}
+
+static qboolean SCR_DrawUIDebugDraw_Backend (void)
+{
+	SCR_DrawUIDebugDraw_Common ();
+	return true;
+}
+
 static void SCR_DrawUI2D_Common (void)
 {
 	RB_BeginPass (PASS_UI2D);
 	GL_BeginGroup ("2D");
 
 	GL_Set2D ();
-	R_FogVol_DrawDebug2D ();
+	RBackend_DispatchBlock ("ui_debugdraw", &r_backend_ui_debugdraw, true, NULL,
+		SCR_DrawUIDebugDraw_Backend, SCR_DrawUIDebugDraw_Legacy, &scr_backend_ui_warned);
 	SCR_TileClear ();
 
 	if (scr_drawdialog)
