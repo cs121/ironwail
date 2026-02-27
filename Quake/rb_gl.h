@@ -8,6 +8,10 @@
 /*
  * Build guard: wrappers are pass-through only during the initial migration.
  * Keep this set to 1 until backend behavior intentionally diverges.
+ *
+ * Debug guard: RB_DEBUG_STATE enables state-owner tracking + incoming state-diff
+ * diagnostics. Default maps to debug builds (!defined(NDEBUG) || defined(_DEBUG)
+ * || defined(DEBUG)); override at build-time if needed.
  */
 #define RB_GL_PASSTHROUGH_ONLY 1
 
