@@ -706,6 +706,39 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner)
 	glReadBuffer (src);
 }
 
+qboolean RB_ReadPixelsRGB_Owner (GLint x, GLint y, GLsizei width, GLsizei height, void *pixels, const char *owner)
+{
+	GLint prev_pack_alignment = 4;
+	GLenum err;
+
+	if (!pixels)
+	{
+		Con_Warning ("RB_ReadPixelsRGB(%s): NULL destination buffer\n", RB_DebugOwnerOrUnknown (owner));
+		return false;
+	}
+
+	if (width <= 0 || height <= 0)
+	{
+		Con_Warning ("RB_ReadPixelsRGB(%s): invalid size %dx%d\n", RB_DebugOwnerOrUnknown (owner), width, height);
+		return false;
+	}
+
+	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
+	glPixelStorei (GL_PACK_ALIGNMENT, 1);
+	glReadPixels (x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	err = glGetError ();
+	glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+
+	if (err != GL_NO_ERROR)
+	{
+		Con_Warning ("RB_ReadPixelsRGB(%s): glReadPixels failed (err=%#x, x=%d y=%d w=%d h=%d)\n",
+			RB_DebugOwnerOrUnknown (owner), err, x, y, width, height);
+		return false;
+	}
+
+	return true;
+}
+
 void RB_SetPassSetupHook (rb_pass_setup_hook_t hook)
 {
 	rb_pass_setup_hook = hook;
