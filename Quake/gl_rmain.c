@@ -3790,6 +3790,8 @@ R_DrawEntitiesOnList
 void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 {
 	int* ofs;
+	int brush_start;
+	int brush_count;
 	entity_t** entlist = cl_sorted_visedicts;
 	const char *alias_unavailable_reason = NULL;
 	qboolean alias_backend_available;
@@ -3797,7 +3799,14 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	GL_BeginGroup (alphapass ? "Translucent entities" : "Opaque entities");
 
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
-	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
+	brush_start = ofs[2 * mod_brush];
+	brush_count = ofs[2 * mod_brush + 1] - brush_start;
+	if (!alphapass && brush_count > 0 && entlist[brush_start] == &cl_entities[0])
+	{
+		brush_start++;
+		brush_count--;
+	}
+	R_DrawBrushModels (entlist + brush_start, brush_count);
 	r_alias_dispatch_entlist = entlist + ofs[2 * mod_alias];
 	r_alias_dispatch_count = ofs[2 * mod_alias + 1] - ofs[2 * mod_alias];
 	alias_backend_available = R_BackendAliasPathAvailable (&alias_unavailable_reason);
@@ -3807,6 +3816,15 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
 	GL_EndGroup ();
+}
+
+static void R_DrawWorld (void)
+{
+	int count;
+	entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
+
+	if (count > 0 && ents[0] == &cl_entities[0])
+		R_DrawBrushModels (ents, 1);
 }
 
 /*
@@ -4859,6 +4877,7 @@ static void R_DrawDLightPass (void)
 static void R_DrawWorldOpaqueBody_Common (void)
 {
 	RB_BeginPass (PASS_WORLD_OPAQUE);
+	R_DrawWorld ();
 	R_DrawViewModel ();
 	RB_EndPass ();
 	S_ExtraUpdate ();
@@ -4977,7 +4996,6 @@ void R_RenderScene (void)
 	qboolean world_backend_available;
 	qboolean particles_backend_available;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_SetupGL ();
 	R_Clear ();
 
 	// Upload frame data after fog has been set up to ensure fog parameters
