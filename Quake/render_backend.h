@@ -50,6 +50,7 @@ typedef render_backend_vtable_t IRenderBackend;
 extern cvar_t r_backend;
 extern cvar_t r_backend_ui;
 extern cvar_t r_backend_postfx;
+extern cvar_t r_backend_fullscreen;
 extern cvar_t r_backend_particles;
 extern cvar_t r_backend_alias;
 extern cvar_t r_backend_world;
