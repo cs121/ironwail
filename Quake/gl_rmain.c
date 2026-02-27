@@ -3127,6 +3127,9 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
+	if (r_postfx.value <= 0.f)
+		return false;
+
         float saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	r_color_saturation.value = saturation;
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())

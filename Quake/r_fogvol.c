@@ -65,6 +65,29 @@ static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
 
+
+void R_FogVol_ClearHistory (void)
+{
+	r_fogvol_history_index = 0;
+	r_fogvol_history_width = 0;
+	r_fogvol_history_height = 0;
+
+	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
+		return;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
+	{
+		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+	}
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
+	{
+		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+	}
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+}
+
 typedef struct fogvol_test_state_s
 {
 	unsigned statebits;
@@ -1248,7 +1271,7 @@ void R_FogVol_Render (void)
 		goto done;
 	}
 
-	if (has_drawn && glprogs.fogvol_temporal && final_tex)
+	if (has_drawn && r_fogvol_temporal_alpha.value > 0.f && glprogs.fogvol_temporal && final_tex)
 	{
 		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
 		int history_src = r_fogvol_history_index;

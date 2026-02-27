@@ -654,6 +654,7 @@ static void VID_FSAA_f (cvar_t *cvar)
                 return;
         GL_DeleteFrameBuffers ();
         GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
         gl_lodbias.callback (&gl_lodbias);
 }
 
@@ -751,6 +752,7 @@ static void VID_Restart (void)
 	VID_RecalcInterfaceSize ();
 
 	GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
 //
 // keep cvars in line with actual mode
 //
@@ -1355,6 +1357,7 @@ static void GL_Init (void)
 
         GL_CreateShaders ();
         GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
         GLLight_CreateResources ();
 	GLPalette_CreateResources ();
 
@@ -1385,6 +1388,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
                 VID_RecalcInterfaceSize ();
                 GL_DeleteFrameBuffers ();
                 GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
                 }
 
 	*x = *y = 0;
