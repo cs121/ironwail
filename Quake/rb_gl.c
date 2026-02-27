@@ -41,6 +41,7 @@ typedef struct rb_pass_info_s
 {
 	const char *debug_name;
 	unsigned baseline_state;
+	rb_pass_baseline_gl_t baseline_gl;
 	unsigned exit_allow_state_mask;
 	unsigned exit_allow_texture_mask;
 	unsigned exit_allow_sampler_mask;
