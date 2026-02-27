@@ -196,13 +196,14 @@ void RBackend_DispatchUpdateScreen (void (*legacy_fn)(void))
 void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean backend_path_available,
 	rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once)
 {
-	qboolean can_use_backend;
+	const qboolean backend_globally_enabled = ((int)r_backend.value == 1);
+	const qboolean block_toggle_enabled = toggle && (toggle->value != 0.f);
+	const qboolean can_try_backend = backend_globally_enabled && block_toggle_enabled;
 
 	if (!legacy_fn)
 		return;
 
-	can_use_backend = ((int)r_backend.value == 1) && toggle && (toggle->value != 0.f);
-	if (!can_use_backend)
+	if (!can_try_backend)
 	{
 		legacy_fn ();
 		return;
