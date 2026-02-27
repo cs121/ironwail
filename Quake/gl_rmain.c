@@ -256,6 +256,7 @@ cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t  r_dlight_debug_spawn = { "r_dlight_debug_spawn", "0", CVAR_NONE };
 cvar_t  r_dlight_debug_models = { "r_dlight_debug_models", "0", CVAR_NONE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
+cvar_t  r_rb_assert_state = { "r_rb_assert_state", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
@@ -3309,8 +3310,9 @@ void R_GLStateDump (const char *tag)
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_2);
 	GL_ActiveTextureFunc (prev_active_texture);
 
-	Con_Printf ("GL_STATE[%s] prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
+	Con_Printf ("GL_STATE[%s] %s prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
 		tag,
+		RB_DebugStateOwnersString (),
 		program,
 		active_texture - GL_TEXTURE0,
 		draw_fbo,
