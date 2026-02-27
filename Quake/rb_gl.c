@@ -237,6 +237,11 @@ void RB_DrawArrays (GLenum mode, GLint first, GLsizei count)
 	glDrawArrays (mode, first, count);
 }
 
+void RB_DrawElements (GLenum mode, GLsizei count, GLenum type, const GLvoid *indices)
+{
+	glDrawElements (mode, count, type, indices);
+}
+
 void RB_Clear (GLbitfield mask)
 {
 	glClear (mask);
@@ -245,6 +250,31 @@ void RB_Clear (GLbitfield mask)
 void RB_Viewport (GLint x, GLint y, GLsizei width, GLsizei height)
 {
 	glViewport (x, y, width, height);
+}
+
+void RB_Scissor (GLint x, GLint y, GLsizei width, GLsizei height)
+{
+	glScissor (x, y, width, height);
+}
+
+void RB_DepthFunc (GLenum func)
+{
+	glDepthFunc (func);
+}
+
+void RB_BlendFunc (GLenum sfactor, GLenum dfactor)
+{
+	glBlendFunc (sfactor, dfactor);
+}
+
+void RB_DrawBuffer (GLenum buf)
+{
+	glDrawBuffer (buf);
+}
+
+void RB_ReadBuffer (GLenum src)
+{
+	glReadBuffer (src);
 }
 
 void RB_SetPassSetupHook (rb_pass_setup_hook_t hook)

@@ -22,8 +22,14 @@ qboolean RB_BindTexture_Owner (GLenum texunit, gltexture_t *texture, const char 
 #define RB_BindTextureWithOwner(texunit, texture, owner) RB_BindTexture_Owner ((texunit), (texture), (owner))
 void RB_BindFramebuffer (GLenum target, GLuint framebuffer);
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count);
+void RB_DrawElements (GLenum mode, GLsizei count, GLenum type, const GLvoid *indices);
 void RB_Clear (GLbitfield mask);
 void RB_Viewport (GLint x, GLint y, GLsizei width, GLsizei height);
+void RB_Scissor (GLint x, GLint y, GLsizei width, GLsizei height);
+void RB_DepthFunc (GLenum func);
+void RB_BlendFunc (GLenum sfactor, GLenum dfactor);
+void RB_DrawBuffer (GLenum buf);
+void RB_ReadBuffer (GLenum src);
 
 typedef void (*rb_pass_setup_hook_t) (rb_pass_t pass);
 void RB_SetPassSetupHook (rb_pass_setup_hook_t hook);
