@@ -2147,7 +2147,7 @@ static qboolean SCR_BackendPostFXPathAvailable (const char **reason)
 	return true;
 }
 
-static void SCR_DrawUI2D_Legacy (void)
+static void SCR_DrawUI2D_Common (void)
 {
 	RB_BeginPass (PASS_UI2D);
 	GL_BeginGroup ("2D");
@@ -2207,9 +2207,14 @@ static void SCR_DrawUI2D_Legacy (void)
 	RB_EndPass ();
 }
 
+static void SCR_DrawUI2D_Legacy (void)
+{
+	SCR_DrawUI2D_Common ();
+}
+
 static qboolean SCR_DrawUI2D_Backend (void)
 {
-	SCR_DrawUI2D_Legacy ();
+	SCR_DrawUI2D_Common ();
 	return true;
 }
 
