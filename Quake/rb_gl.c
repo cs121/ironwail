@@ -60,6 +60,11 @@ typedef struct rb_state_debug_s
 	const char *last_cull_owner;
 	const char *last_program_owner;
 	const char *last_texture_owner[3];
+	const char *last_fbo_owner;
+	const char *last_vao_owner;
+	const char *last_array_buffer_owner;
+	const char *last_element_array_buffer_owner;
+	const char *last_sampler_owner[3];
 } rb_state_debug_t;
 
 static rb_state_debug_t rb_state_debug;
@@ -227,9 +232,44 @@ qboolean RB_BindTexture_Owner (GLenum texunit, gltexture_t *texture, const char 
 	return GL_Bind (texunit, texture);
 }
 
-void RB_BindFramebuffer (GLenum target, GLuint framebuffer)
+void RB_BindFramebuffer_Owner (GLenum target, GLuint framebuffer, const char *owner)
 {
+	#if RB_STATE_TRACKER_ENABLED
+	rb_state_debug.last_fbo_owner = owner;
+	#endif
+
 	GL_BindFramebufferFunc (target, framebuffer);
+}
+
+void RB_BindVertexArray_Owner (GLuint array, const char *owner)
+{
+	#if RB_STATE_TRACKER_ENABLED
+	rb_state_debug.last_vao_owner = owner;
+	#endif
+
+	GL_BindVertexArrayFunc (array);
+}
+
+void RB_BindBuffer_Owner (GLenum target, GLuint buffer, const char *owner)
+{
+	#if RB_STATE_TRACKER_ENABLED
+	if (target == GL_ARRAY_BUFFER)
+		rb_state_debug.last_array_buffer_owner = owner;
+	else if (target == GL_ELEMENT_ARRAY_BUFFER)
+		rb_state_debug.last_element_array_buffer_owner = owner;
+	#endif
+
+	GL_BindBufferFunc (target, buffer);
+}
+
+void RB_BindSampler_Owner (GLuint unit, GLuint sampler, const char *owner)
+{
+	#if RB_STATE_TRACKER_ENABLED
+	if (unit < countof (rb_state_debug.last_sampler_owner))
+		rb_state_debug.last_sampler_owner[unit] = owner;
+	#endif
+
+	GL_BindSamplerFunc (unit, sampler);
 }
 
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count)
@@ -327,9 +367,9 @@ void RB_BeginPass (rb_pass_t pass)
 const char *RB_DebugStateOwnersString (void)
 {
 #if RB_STATE_TRACKER_ENABLED
-	static char info[384];
+	static char info[768];
 	q_snprintf (info, sizeof (info),
-		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s)",
+		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s fbo=%s vao=%s arrbuf=%s elembuf=%s samp0=%s samp1=%s samp2=%s)",
 		rb_pass_info[rb_current_pass].debug_name,
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_blend_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_depth_owner),
@@ -337,7 +377,14 @@ const char *RB_DebugStateOwnersString (void)
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_program_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[0]),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[1]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[2]));
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[2]),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_fbo_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_vao_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_array_buffer_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[0]),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[1]),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[2]));
 	return info;
 #else
 	return "pass=<tracker disabled>";
