@@ -2981,6 +2981,16 @@ R_GetEffectiveAlphaMode
 */
 alphamode_t R_GetEffectiveAlphaMode (void)
 {
+	/*
+	 * OIT needs a valid off-screen accumulation framebuffer. When scene effects
+	 * are disabled we render directly to the default framebuffer, and in MSAA
+	 * mode there is no composite OIT target available. Falling back to sorted
+	 * blending avoids binding FBO 0 as an OIT MRT target (which can clear the
+	 * backbuffer to black and leave startup/menu frames blank).
+	 */
+	if (r_oit.value && !GL_NeedsSceneEffects () && framebufs.scene.samples > 1)
+		return ALPHAMODE_SORTED;
+
 	if (map_checks.value)
 		return ALPHAMODE_BASIC;
 	return R_GetAlphaMode ();
