@@ -1860,11 +1860,11 @@ static void GL_PostProcessFallback (void)
 		return;
 
 	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
-	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 	glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-	glReadBuffer (GL_BACK);
+	RB_ReadBuffer (GL_BACK);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 	{
 		qboolean srgb_output = GL_UseSRGBFramebuffer ();
@@ -2016,7 +2016,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 	RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
-	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 
@@ -2049,7 +2049,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		if (!got_data)
 		{
 			RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-			glReadBuffer (GL_BACK);
+			RB_ReadBuffer (GL_BACK);
 			return false;
 		}
 	}
@@ -2064,7 +2064,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
 	}
 	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-	glReadBuffer (GL_BACK);
+	RB_ReadBuffer (GL_BACK);
 
 	for (int i = 0; i < pixel_count; ++i)
 	{
@@ -2241,12 +2241,12 @@ void GL_PostProcess (void)
 		GL_BeginGroup ("Postprocess backbuffer copy");
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, 0);
 		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-		glReadBuffer (GL_BACK);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_BACK);
+		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, vid.width, vid.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-		glDrawBuffer (GL_BACK);
-		glReadBuffer (GL_BACK);
+		RB_DrawBuffer (GL_BACK);
+		RB_ReadBuffer (GL_BACK);
 		framesetup.composite_ready = true;
 		GL_EndGroup ();
 		RB_EndPass ();
@@ -3206,13 +3206,13 @@ void R_SetupGL (void)
 		framesetup.composite_ready = (target == framebufs.composite.fbo);
 		if (target)
 		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
+			RB_DrawBuffer (GL_BACK);
+			RB_ReadBuffer (GL_BACK);
 		}
 		RB_Viewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
 	}
@@ -3227,12 +3227,12 @@ void R_SetupGL (void)
 		{
 			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 			GL_DrawBuffersFunc (2, buffers);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		RB_Viewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
 	}
@@ -3730,7 +3730,7 @@ static void R_FlushDebugGeometry (void)
 
 		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, debugidx, sizeof (debugidx[0]) * numdebugidx, &buf, &ofs);
 		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-		glDrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
+		RB_DrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
 	}
 
 	numdebugverts = 0;
@@ -4622,8 +4622,8 @@ static void R_DrawDLightPass (void)
 		use_buffer = true;
 		r_dlight_buffered_frame = true;
 		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		{
 			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
 			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
@@ -4669,13 +4669,13 @@ static void R_DrawDLightPass (void)
 		RB_BindFramebuffer (GL_FRAMEBUFFER, framesetup.scene_fbo);
 		if (framesetup.scene_fbo)
 		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
+			RB_DrawBuffer (GL_BACK);
+			RB_ReadBuffer (GL_BACK);
 		}
 	}
 
@@ -4831,14 +4831,14 @@ void R_WarpScaleView (void)
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
 		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
 
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 		if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
 		{
-			glReadBuffer (GL_COLOR_ATTACHMENT1);
-			glDrawBuffer (GL_COLOR_ATTACHMENT1);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT1);
+			RB_DrawBuffer (GL_COLOR_ATTACHMENT1);
 			GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 
@@ -4848,12 +4848,12 @@ void R_WarpScaleView (void)
 		if (!needwarpscale)
 		{
 			RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 			RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fbodest);
 			if (fbodest)
-				glDrawBuffer (GL_COLOR_ATTACHMENT0);
+				RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
 			else
-				glDrawBuffer (GL_BACK);
+				RB_DrawBuffer (GL_BACK);
 			{
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
 				if (need_depth_resolve)
@@ -4869,21 +4869,21 @@ void R_WarpScaleView (void)
 		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
 
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
 	if (!msaa && !needwarpscale)
 	{
 		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fbodest);
 		if (fbodest)
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
 		else
-			glDrawBuffer (GL_BACK);
+			RB_DrawBuffer (GL_BACK);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch,
 			srcx, srcy, srcx + srcw, srcy + srch,
 			GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -4892,13 +4892,13 @@ void R_WarpScaleView (void)
 	RB_BindFramebuffer (GL_FRAMEBUFFER, fbodest);
 	if (fbodest)
 	{
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
 	}
 	else
 	{
-		glDrawBuffer (GL_BACK);
-		glReadBuffer (GL_BACK);
+		RB_DrawBuffer (GL_BACK);
+		RB_ReadBuffer (GL_BACK);
 	}
 	RB_Viewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 

@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // draw.c -- 2d drawing
 
 #include "quakedef.h"
+#include "rb_gl.h"
 
 const vec3_t	rgb_black = {0.f, 0.f, 0.f};
 const vec3_t	rgb_white = {1.f, 1.f, 1.f};
@@ -604,7 +605,7 @@ void Draw_Flush (void)
 
 	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, batchindices, sizeof(batchindices[0]) * 6 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-	glDrawElements (GL_TRIANGLES, numbatchquads * 6, GL_UNSIGNED_SHORT, ofs);
+	RB_DrawElements (GL_TRIANGLES, numbatchquads * 6, GL_UNSIGNED_SHORT, ofs);
 
 	numbatchquads = 0;
 }
@@ -1140,7 +1141,7 @@ void Draw_SetClipRect (float x, float y, float width, float height)
 
 	Draw_Flush ();
 	GL_SetScissorEnabled (true);
-	glScissor (x, y2, x2 - x, y - y2);
+	RB_Scissor (x, y2, x2 - x, y - y2);
 }
 
 /*
@@ -1301,7 +1302,7 @@ void GL_Set2D (void)
 	glcanvas.texture = NULL;
 	glcanvas.blendmode = GLS_BLEND_ALPHA;
 	glcanvas.colorstacktop = 0;
-	glViewport (glx, gly, glwidth, glheight);
+	RB_Viewport (glx, gly, glwidth, glheight);
 	GL_SetCanvas (CANVAS_DEFAULT);
 	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }

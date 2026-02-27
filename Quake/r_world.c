@@ -1164,13 +1164,13 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					R_ResetBModelCalls (program);
 					RB_SetState (stage_state);
 					current_state = stage_state;
-					glDepthFunc (depth_func);
+					RB_DepthFunc (depth_func);
 					current_depth = depth_func;
 
 					if (stage->blend_mode == MAT_BLEND_PREMULT)
-						glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+						RB_BlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 					else if (stage->blend_mode == MAT_BLEND_CUSTOM)
-						glBlendFunc (stage->blend_src, stage->blend_dst);
+						RB_BlendFunc (stage->blend_src, stage->blend_dst);
 					current_blend_mode = stage->blend_mode;
 					current_blend_src = stage->blend_src;
 					current_blend_dst = stage->blend_dst;
@@ -1195,7 +1195,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	RB_DepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
@@ -1367,7 +1367,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	RB_DepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 /*
