@@ -194,7 +194,7 @@ void RBackend_DispatchUpdateScreen (void (*legacy_fn)(void))
 }
 
 void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean backend_path_available,
-	rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once)
+	const char *unavailable_reason, rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once)
 {
 	const qboolean backend_globally_enabled = ((int)r_backend.value == 1);
 	const qboolean block_toggle_enabled = toggle && (toggle->value != 0.f);
@@ -213,8 +213,9 @@ void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean ba
 	{
 		if (warned_once && !*warned_once)
 		{
-			Con_Warning ("render backend: %s backend path unavailable, falling back to legacy\n",
-				block_name ? block_name : "(unknown block)");
+			Con_Warning ("render backend: %s backend path unavailable (%s), falling back to legacy\n",
+				block_name ? block_name : "(unknown block)",
+				unavailable_reason ? unavailable_reason : "unspecified");
 			*warned_once = true;
 		}
 		legacy_fn ();

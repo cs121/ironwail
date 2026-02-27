@@ -2107,6 +2107,46 @@ void SCR_TileClear (void)
 static qboolean scr_backend_ui_warned = false;
 static qboolean scr_backend_postfx_warned = false;
 
+static qboolean SCR_BackendUIPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!glprogs.gui)
+	{
+		if (reason)
+			*reason = "missing shader program: gui";
+		return false;
+	}
+
+	return true;
+}
+
+static qboolean SCR_BackendPostFXPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!GL_NeedsPostprocess ())
+		return true;
+
+	if (!framebufs.composite.fbo || !framebufs.composite.color_tex)
+	{
+		if (reason)
+			*reason = "missing postfx framebuffer resources";
+		return false;
+	}
+
+	if (!glprogs.postprocess[0])
+	{
+		if (reason)
+			*reason = "missing shader program: postprocess";
+		return false;
+	}
+
+	return true;
+}
+
 static void SCR_DrawUI2D_Legacy (void)
 {
 	RB_BeginPass (PASS_UI2D);
@@ -2197,6 +2237,10 @@ needs almost the entire 256k of stack space!
 */
 static void SCR_UpdateScreen_Legacy (void)
 {
+	const char *postfx_unavailable_reason = NULL;
+	const char *ui_unavailable_reason = NULL;
+	qboolean postfx_backend_available;
+	qboolean ui_backend_available;
 	vid.numpages = (gl_triplebuffer.value) ? 3 : 2;
 
 	if (scr_disabled_for_loading)
@@ -2232,14 +2276,16 @@ static void SCR_UpdateScreen_Legacy (void)
 
        V_RenderView ();
 
-	RBackend_DispatchBlock ("postfx", &r_backend_postfx, true,
+	postfx_backend_available = SCR_BackendPostFXPathAvailable (&postfx_unavailable_reason);
+	RBackend_DispatchBlock ("postfx", &r_backend_postfx, postfx_backend_available, postfx_unavailable_reason,
 		SCR_PostProcess_Backend, SCR_PostProcess_Legacy, &scr_backend_postfx_warned);
 
        V_PolyBlend ();
 
        R_StorePrevFrameState ();
 
-	RBackend_DispatchBlock ("ui", &r_backend_ui, true,
+	ui_backend_available = SCR_BackendUIPathAvailable (&ui_unavailable_reason);
+	RBackend_DispatchBlock ("ui", &r_backend_ui, ui_backend_available, ui_unavailable_reason,
 		SCR_DrawUI2D_Backend, SCR_DrawUI2D_Legacy, &scr_backend_ui_warned);
 
 	RBackend_DebugCaptureEndFrameHash ();
