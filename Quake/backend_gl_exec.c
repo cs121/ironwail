@@ -294,7 +294,7 @@ void RBackend_DebugCaptureEndFrameHash (void)
 		if (!equal && !epsilon_equal)
 		{
 			Con_Warning ("backend framehash mismatch: map=%s scene=%d backend0=%016llx@f%d backend1=%016llx@f%d "
-				"ctx[r_backend=%d ui=%d postfx=%d alias=%d world=%d particles=%d fogvol=%d r_postfx=%d eps=%d]\n",
+				"ctx[r_backend=%d ui=%d postfx=%d fullscreen=%d alias=%d world=%d particles=%d fogvol=%d r_postfx=%d eps=%d]\n",
 				state->mapname,
 				state->scene_id,
 				(unsigned long long)state->hash[0], state->frame[0],
@@ -302,6 +302,7 @@ void RBackend_DebugCaptureEndFrameHash (void)
 				(int)Q_rint (r_backend.value),
 				(int)Q_rint (r_backend_ui.value),
 				(int)Q_rint (r_backend_postfx.value),
+				(int)Q_rint (r_backend_fullscreen.value),
 				(int)Q_rint (r_backend_alias.value),
 				(int)Q_rint (r_backend_world.value),
 				(int)Q_rint (r_backend_particles.value),

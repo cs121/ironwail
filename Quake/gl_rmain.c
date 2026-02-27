@@ -47,6 +47,7 @@ static qboolean r_backend_particles_warned = false;
 static qboolean r_backend_alias_warned = false;
 static qboolean r_backend_world_warned = false;
 static qboolean r_backend_fogvol_warned = false;
+static qboolean r_backend_fullscreen_warned = false;
 
 static qboolean R_BackendAliasPathAvailable (const char **reason)
 {
@@ -94,6 +95,42 @@ static qboolean R_BackendParticlesPathAvailable (const char **reason)
 	{
 		if (reason)
 			*reason = "missing shader program: particles";
+		return false;
+	}
+
+	return true;
+}
+
+static qboolean R_BackendFullscreenPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!glprogs.warpscale[0] || !glprogs.warpscale[1])
+	{
+		if (reason)
+			*reason = "missing shader program: warpscale";
+		return false;
+	}
+
+	if (!framebufs.scene.fbo)
+	{
+		if (reason)
+			*reason = "missing world framebuffer: scene.fbo";
+		return false;
+	}
+
+	if (framebufs.scene.samples > 1 && !framebufs.resolved_scene.fbo)
+	{
+		if (reason)
+			*reason = "missing resolve framebuffer: resolved_scene.fbo";
+		return false;
+	}
+
+	if (GL_NeedsPostprocess () && !framebufs.composite.fbo)
+	{
+		if (reason)
+			*reason = "missing postfx framebuffer: composite.fbo";
 		return false;
 	}
 
@@ -318,6 +355,7 @@ cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
 cvar_t	r_backend = { "r_backend", "0", CVAR_ARCHIVE };
 cvar_t	r_backend_ui = { "r_backend_ui", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_postfx = { "r_backend_postfx", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_fullscreen = { "r_backend_fullscreen", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_particles = { "r_backend_particles", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_alias = { "r_backend_alias", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_world = { "r_backend_world", "1", CVAR_ARCHIVE };
@@ -4923,6 +4961,14 @@ void R_RenderScene (void)
 	R_ShowLightgridDebug ();
 }
 
+static void R_WarpScaleView_Legacy (void);
+
+static qboolean R_WarpScaleView_Backend (void)
+{
+	R_WarpScaleView_Legacy ();
+	return true;
+}
+
 /*
 ================
 R_WarpScaleView
@@ -4933,7 +4979,7 @@ r_refdef.vrect. This is for emulating a low-resolution pixellated look,
 or possibly as a perforance boost on slow graphics cards.
 ================
 */
-void R_WarpScaleView (void)
+static void R_WarpScaleView_Legacy (void)
 {
 	int srcx, srcy, srcw, srch;
 	float smax, tmax;
@@ -5079,7 +5125,9 @@ static void R_RenderView_Legacy (void)
 {
 	double	time1, time2;
 	const char *fogvol_unavailable_reason = NULL;
+	const char *fullscreen_unavailable_reason = NULL;
 	qboolean fogvol_backend_available;
+	qboolean fullscreen_backend_available;
 
 	if (r_norefresh.value)
 		return;
@@ -5103,7 +5151,9 @@ static void R_RenderView_Legacy (void)
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
         Fog_EnableGFog ();
         R_RenderScene ();
-        R_WarpScaleView ();
+	fullscreen_backend_available = R_BackendFullscreenPathAvailable (&fullscreen_unavailable_reason);
+	RBackend_DispatchBlock ("fullscreen", &r_backend_fullscreen, fullscreen_backend_available, fullscreen_unavailable_reason,
+		R_WarpScaleView_Backend, R_WarpScaleView_Legacy, &r_backend_fullscreen_warned);
         r_fogvol_update_called++;
         if (r_gl_state_validate.value > 0.f)
                 Con_DPrintf ("fogvol_update_called=%d r_fogvol=%.1f\n", r_fogvol_update_called, r_fogvol.value);
