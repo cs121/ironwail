@@ -985,6 +985,7 @@ void R_NewMap (void)
 	VEC_CLEAR (r_pointfile);
 
 	R_ResetGodraysStabilization ();
+	R_FogVol_ClearHistory ();
 
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();
