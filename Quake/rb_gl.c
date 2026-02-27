@@ -632,6 +632,24 @@ void RB_StencilMask_Owner (GLuint mask, const char *owner)
 	glStencilMask (mask);
 }
 
+void RB_StencilTest_Owner (qboolean enable, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_stencil_owner = owner;
+	#endif
+
+	if (enable)
+		glEnable (GL_STENCIL_TEST);
+	else
+		glDisable (GL_STENCIL_TEST);
+}
+
+void RB_TexParameteri_Owner (GLenum target, GLenum pname, GLint param, const char *owner)
+{
+	(void)owner;
+	glTexParameteri (target, pname, param);
+}
+
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count)
 {
 	glDrawArrays (mode, first, count);

@@ -725,11 +725,11 @@ static GLuint GL_CreateSSAONoiseTexture (void)
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, "ssao noise");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_RG8, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE);
 	glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE, GL_RG, GL_UNSIGNED_BYTE, noise);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 	GL_LogErrorIfDeveloper ("GL_CreateSSAONoiseTexture");
 
 	return texnum;
@@ -756,12 +756,12 @@ static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter,
 	else
 	{
 		GL_TexStorage2DFunc (target, 1, format, vid.width, vid.height);
-		glTexParameteri (target, GL_TEXTURE_MAG_FILTER, filter);
-		glTexParameteri (target, GL_TEXTURE_MIN_FILTER, filter);
+		RB_TexParameteri (target, GL_TEXTURE_MAG_FILTER, filter);
+		RB_TexParameteri (target, GL_TEXTURE_MIN_FILTER, filter);
 		if (is_depth_format)
-			glTexParameteri (target, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+			RB_TexParameteri (target, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	}
-	glTexParameteri (target, GL_TEXTURE_MAX_LEVEL, 0);
+	RB_TexParameteri (target, GL_TEXTURE_MAX_LEVEL, 0);
 	GL_LogErrorIfDeveloper ("GL_CreateFBOAttachment");
 
 	return texnum;
@@ -781,11 +781,11 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, format, width, height);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 	GL_LogErrorIfDeveloper ("GL_CreateTexture2D");
 
 	return texnum;
@@ -1478,7 +1478,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	}
 	// SSAO FIX: Reset viewport/scissor/color mask per pass to avoid banding from stale state.
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	RB_Viewport (0, 0, width, height);
 	{
 		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
@@ -1560,7 +1560,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		RB_Viewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
 		GL_Uniform4fFunc (2, 1.f, 0.f, 0.f, 0.f);
@@ -1569,7 +1569,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
 		RB_DrawArrays (GL_TRIANGLES, 0, 3);
@@ -3372,7 +3372,7 @@ void R_Clear (void)
 		clearbits |= GL_COLOR_BUFFER_BIT;
 
 	RB_SetState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
-	glStencilMask (~0u);
+	RB_StencilMask (~0u);
 	RB_Clear (clearbits);
 }
 
@@ -4669,10 +4669,10 @@ static void R_BeginTranslucency (void)
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
 		GL_ClearBufferfvFunc (GL_COLOR, 1, ones);
 
-		glEnable (GL_STENCIL_TEST);
-		glStencilMask (2);
-		glStencilFunc (GL_ALWAYS, 2, 2);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
+		RB_StencilTest (true);
+		RB_StencilMask (2);
+		RB_StencilFunc (GL_ALWAYS, 2, 2);
+		RB_StencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
 	}
 }
 
@@ -4689,8 +4689,8 @@ static void R_EndTranslucency (void)
 
 		RB_BindFramebuffer (GL_FRAMEBUFFER, framesetup.scene_fbo);
 
-		glStencilFunc (GL_EQUAL, 2, 2);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
+		RB_StencilFunc (GL_EQUAL, 2, 2);
+		RB_StencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
 
 		RB_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
 		RB_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
@@ -4699,7 +4699,7 @@ static void R_EndTranslucency (void)
 
 		RB_DrawArrays (GL_TRIANGLES, 0, 3);
 
-		glDisable (GL_STENCIL_TEST);
+		RB_StencilTest (false);
 
 		GL_EndGroup ();
 	}
@@ -5057,8 +5057,8 @@ void R_WarpScaleView (void)
 	// View blends are applied after postprocess/UI to avoid AO/tone-map affecting overlays.
 	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
+	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 
 	RB_DrawArrays (GL_TRIANGLES, 0, 3);
 

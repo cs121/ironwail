@@ -29,6 +29,8 @@ void RB_PolygonMode_Owner (GLenum face, GLenum mode, const char *owner);
 void RB_StencilFunc_Owner (GLenum func, GLint ref, GLuint mask, const char *owner);
 void RB_StencilOp_Owner (GLenum sfail, GLenum dpfail, GLenum dppass, const char *owner);
 void RB_StencilMask_Owner (GLuint mask, const char *owner);
+void RB_StencilTest_Owner (qboolean enable, const char *owner);
+void RB_TexParameteri_Owner (GLenum target, GLenum pname, GLint param, const char *owner);
 void RB_DrawBuffer_Owner (GLenum buf, const char *owner);
 void RB_ReadBuffer_Owner (GLenum src, const char *owner);
 #define RB_SetState(mask) RB_SetState_Owner ((mask), __func__)
@@ -44,6 +46,8 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner);
 #define RB_StencilFunc(func, ref, mask) RB_StencilFunc_Owner ((func), (ref), (mask), __func__)
 #define RB_StencilOp(sfail, dpfail, dppass) RB_StencilOp_Owner ((sfail), (dpfail), (dppass), __func__)
 #define RB_StencilMask(mask) RB_StencilMask_Owner ((mask), __func__)
+#define RB_StencilTest(enable) RB_StencilTest_Owner ((enable), __func__)
+#define RB_TexParameteri(target, pname, param) RB_TexParameteri_Owner ((target), (pname), (param), __func__)
 #define RB_DrawBuffer(buf) RB_DrawBuffer_Owner ((buf), __func__)
 #define RB_ReadBuffer(src) RB_ReadBuffer_Owner ((src), __func__)
 #define RB_SetStateWithOwner(mask, owner) RB_SetState_Owner ((mask), (owner))
@@ -60,6 +64,8 @@ void RB_ReadBuffer_Owner (GLenum src, const char *owner);
 #define RB_StencilFuncWithOwner(func, ref, mask, owner) RB_StencilFunc_Owner ((func), (ref), (mask), (owner))
 #define RB_StencilOpWithOwner(sfail, dpfail, dppass, owner) RB_StencilOp_Owner ((sfail), (dpfail), (dppass), (owner))
 #define RB_StencilMaskWithOwner(mask, owner) RB_StencilMask_Owner ((mask), (owner))
+#define RB_StencilTestWithOwner(enable, owner) RB_StencilTest_Owner ((enable), (owner))
+#define RB_TexParameteriWithOwner(target, pname, param, owner) RB_TexParameteri_Owner ((target), (pname), (param), (owner))
 #define RB_DrawBufferWithOwner(buf, owner) RB_DrawBuffer_Owner ((buf), (owner))
 #define RB_ReadBufferWithOwner(src, owner) RB_ReadBuffer_Owner ((src), (owner))
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count);
