@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "cl_postfx.h"
+#include "rb_gl.h"
 
 /*
 
@@ -643,7 +644,7 @@ void V_PolyBlend (void)
 	GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0));
 	GL_Uniform4fvFunc (0, 1, v_blend);
 
-	glDrawArrays (GL_TRIANGLES, 0, 3);
+	RB_DrawArrays (GL_TRIANGLES, 0, 3);
 
 	v_blend[3] = 0.f; // make sure this doesn't get applied again later in the pipeline
 }

@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //gl_sky.c
 
 #include "quakedef.h"
+#include "rb_gl.h"
 
 extern	int	rs_skypolys; //for r_speeds readout
 extern	int rs_skypasses; //for r_speeds readout
@@ -754,7 +755,7 @@ void Sky_DrawSkyBox (void)
 		GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(verts[0]), ofs + offsetof(struct skyboxvert_s, uv));
 
 		GL_Bind (GL_TEXTURE0, skybox->textures[skytexorder[i]]);
-		glDrawArrays (GL_TRIANGLE_FAN, 0, 4);
+		RB_DrawArrays (GL_TRIANGLE_FAN, 0, 4);
 	}
 }
 
@@ -778,21 +779,21 @@ void Sky_DrawSky (void)
 	}
 	else if (skybox)
 	{
-		glEnable (GL_STENCIL_TEST);
-		glStencilMask (1);
-		glStencilFunc (GL_ALWAYS, 1, 1);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
-		glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glEnable (GL_STENCIL_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_skyc
+		RB_StencilMask (1);
+		RB_StencilFunc (GL_ALWAYS, 1, 1);
+		RB_StencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
+		RB_ColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 		R_DrawBrushModels_SkyStencil (ents, count);
 
-		glStencilFunc (GL_EQUAL, 1, 1);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		RB_StencilFunc (GL_EQUAL, 1, 1);
+		RB_StencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
+		RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 		Sky_DrawSkyBox ();
 
-		glDisable (GL_STENCIL_TEST);
+		glDisable (GL_STENCIL_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_skyc
 	}
 	else
 	{

@@ -1840,8 +1840,8 @@ void SCR_ScreenShot_f (void)
 		scr_skipupdate = oldskip;
 	}
 
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);/* for widths that aren't a multiple of 4 */
-	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+	glPixelStorei (GL_PACK_ALIGNMENT, 1);/* GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_screenc */
+	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer); /* GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_screenc */
 
 // now write the file
 	if (!Steam_SaveScreenshot (buffer, glwidth, glheight))
