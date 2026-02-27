@@ -46,13 +46,15 @@ static rb_pass_setup_hook_t rb_pass_setup_hook;
 static qboolean rb_pass_active;
 static rb_pass_t rb_current_pass = PASS_WORLD_OPAQUE;
 
-#if !defined(NDEBUG) || defined(_DEBUG) || defined(DEBUG)
-#define RB_STATE_TRACKER_ENABLED 1
-#else
-#define RB_STATE_TRACKER_ENABLED 0
+#ifndef RB_DEBUG_STATE
+	#if !defined(NDEBUG) || defined(_DEBUG) || defined(DEBUG)
+		#define RB_DEBUG_STATE 1
+	#else
+		#define RB_DEBUG_STATE 0
+	#endif
 #endif
 
-#if RB_STATE_TRACKER_ENABLED
+#if RB_DEBUG_STATE
 typedef struct rb_state_debug_s
 {
 	const char *last_blend_owner;
@@ -198,7 +200,7 @@ static void RB_ResetMinimalTextureBindings (void)
 
 void RB_SetState_Owner (unsigned mask, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	unsigned changed = glstate ^ mask;
 
 	if ((changed & GLS_MASK_BLEND) != 0)
@@ -214,7 +216,7 @@ void RB_SetState_Owner (unsigned mask, const char *owner)
 
 void RB_UseProgram_Owner (GLuint program, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	rb_state_debug.last_program_owner = owner;
 	#endif
 
@@ -223,7 +225,7 @@ void RB_UseProgram_Owner (GLuint program, const char *owner)
 
 qboolean RB_BindTexture_Owner (GLenum texunit, gltexture_t *texture, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	int texindex = (int)(texunit - GL_TEXTURE0);
 	if (texindex >= 0 && texindex < (int)countof (rb_state_debug.last_texture_owner))
 		rb_state_debug.last_texture_owner[texindex] = owner;
@@ -234,7 +236,7 @@ qboolean RB_BindTexture_Owner (GLenum texunit, gltexture_t *texture, const char 
 
 void RB_BindFramebuffer_Owner (GLenum target, GLuint framebuffer, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	rb_state_debug.last_fbo_owner = owner;
 	#endif
 
@@ -243,7 +245,7 @@ void RB_BindFramebuffer_Owner (GLenum target, GLuint framebuffer, const char *ow
 
 void RB_BindVertexArray_Owner (GLuint array, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	rb_state_debug.last_vao_owner = owner;
 	#endif
 
@@ -252,7 +254,7 @@ void RB_BindVertexArray_Owner (GLuint array, const char *owner)
 
 void RB_BindBuffer_Owner (GLenum target, GLuint buffer, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	if (target == GL_ARRAY_BUFFER)
 		rb_state_debug.last_array_buffer_owner = owner;
 	else if (target == GL_ELEMENT_ARRAY_BUFFER)
@@ -264,7 +266,7 @@ void RB_BindBuffer_Owner (GLenum target, GLuint buffer, const char *owner)
 
 void RB_BindSampler_Owner (GLuint unit, GLuint sampler, const char *owner)
 {
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	if (unit < countof (rb_state_debug.last_sampler_owner))
 		rb_state_debug.last_sampler_owner[unit] = owner;
 	#endif
@@ -334,7 +336,7 @@ void RB_BeginPass (rb_pass_t pass)
 	if (rb_pass_active)
 		RB_EndPass ();
 
-	#if RB_STATE_TRACKER_ENABLED
+	#if RB_DEBUG_STATE
 	if (r_gl_state_validate.value > 0.f)
 	{
 		glGetIntegerv (GL_CURRENT_PROGRAM, &current_program);
@@ -366,7 +368,7 @@ void RB_BeginPass (rb_pass_t pass)
 
 const char *RB_DebugStateOwnersString (void)
 {
-#if RB_STATE_TRACKER_ENABLED
+#if RB_DEBUG_STATE
 	static char info[768];
 	q_snprintf (info, sizeof (info),
 		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s fbo=%s vao=%s arrbuf=%s elembuf=%s samp0=%s samp1=%s samp2=%s)",
