@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "rb_gl.h"
 #include "draw.h"
 #include "r_fogvol.h"
 #include <math.h>
@@ -75,17 +76,17 @@ void R_FogVol_ClearHistory (void)
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
 		return;
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 }
 
 typedef struct fogvol_test_state_s
@@ -160,7 +161,7 @@ static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
 
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 {
-	GL_BindFramebufferFunc (target, fbo);
+	RB_BindFramebuffer (target, fbo);
 	/* BEST PRACTICE #10: GL_FRAMEBUFFER is an alias that binds both draw and
 	 * read targets simultaneously (GL 3.0+).  Reflect that in the cache so
 	 * that subsequent GL_DRAW/READ_FRAMEBUFFER queries against the cache are
@@ -178,7 +179,7 @@ static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 
 static void R_FogVol_UseProgram (GLuint prog)
 {
-	GL_UseProgram (prog);
+	RB_UseProgram (prog);
 	r_fogvol_state_cache.program = (GLint)prog;
 }
 
@@ -191,9 +192,9 @@ static void R_FogVol_BindVertexArray (GLuint vao)
 static void R_FogVol_SetDepthMask (qboolean enabled)
 {
 	if (enabled)
-		GL_SetState (glstate & ~GLS_NO_ZWRITE);
+		RB_SetState (glstate & ~GLS_NO_ZWRITE);
 	else
-		GL_SetState (glstate | GLS_NO_ZWRITE);
+		RB_SetState (glstate | GLS_NO_ZWRITE);
 }
 
 static qboolean R_FogVol_TestDebugEnabled (void)
@@ -502,7 +503,7 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
 	glDrawBuffer ((GLenum)state->draw_buffer);
 	glReadBuffer ((GLenum)state->read_buffer);
-	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	RB_Viewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	if (state->scissor_test)
 		GL_SetScissorEnabled (true);
 	else
@@ -515,7 +516,7 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
 	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	GL_SetState (state->glstate_bits);
+	RB_SetState (state->glstate_bits);
 	if (state->framebuffer_srgb)
 		glEnable (GL_FRAMEBUFFER_SRGB);
 	else
@@ -1128,7 +1129,7 @@ void R_FogVol_Render (void)
 
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
@@ -1146,9 +1147,9 @@ void R_FogVol_Render (void)
 	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 
 	if (use_halfres)
-		glViewport (0, 0, fog_width, fog_height);
+		RB_Viewport (0, 0, fog_width, fog_height);
 	else
-		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
+		RB_Viewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
 	fog_tex[0] = framebufs.fogvol.color_tex[0];
 	fog_tex[1] = framebufs.fogvol.color_tex[1];
@@ -1252,7 +1253,7 @@ void R_FogVol_Render (void)
 		GL_SetScissorEnabled (true);
 		glScissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
+		RB_DrawArrays (GL_TRIANGLES, 0, 3);
 		GL_SetScissorEnabled (false);
 
 		fog_src = fog_dst;
@@ -1267,7 +1268,7 @@ void R_FogVol_Render (void)
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "temporal draw=COLOR_ATTACHMENT0");
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "temporal read=COLOR_ATTACHMENT0");
-		glViewport (glx, gly, glwidth, glheight);
+		RB_Viewport (glx, gly, glwidth, glheight);
 		goto done;
 	}
 
@@ -1294,7 +1295,7 @@ void R_FogVol_Render (void)
 		}
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		/* BUG FIX #5: Removed unreachable same-index guards.  history_src and
 		 * history_dst are always opposite values after the init block above, so
 		 * the guards `if (history_src == history_dst)` were dead code that
@@ -1303,7 +1304,7 @@ void R_FogVol_Render (void)
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
-		glViewport (0, 0, fog_width, fog_height);
+		RB_Viewport (0, 0, fog_width, fog_height);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], final_tex);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], history_tex[history_src]);
 		R_FogVol_AssertNoBoundFeedbackHazard ("COMPOSITE");
@@ -1322,7 +1323,7 @@ void R_FogVol_Render (void)
 		if (mode == 1)
 			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u dst_tex=%u\n",
 				final_tex, history_tex[history_src], depth_tex, framebufs.fogvol.composite_tex[composite_dst]);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
+		RB_DrawArrays (GL_TRIANGLES, 0, 3);
 
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, history_fbo[history_dst]);
@@ -1346,7 +1347,7 @@ void R_FogVol_Render (void)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		glViewport (glx, gly, glwidth, glheight);
+		RB_Viewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
 			if (composite_src_tex)
@@ -1359,7 +1360,7 @@ void R_FogVol_Render (void)
 				int taps = (int)Q_rint (r_fogvol_upsample_taps.value);
 				taps = (taps == 9) ? 9 : 4;
 				R_FogVol_UseProgram (glprogs.fogvol_upsample);
-				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+				RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
 				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
@@ -1367,7 +1368,7 @@ void R_FogVol_Render (void)
 				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
 				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
 				GL_Uniform1iFunc (2, taps);
-				glDrawArrays (GL_TRIANGLES, 0, 3);
+				RB_DrawArrays (GL_TRIANGLES, 0, 3);
 			}
 			else
 			{

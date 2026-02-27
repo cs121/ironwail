@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_sprite.c -- sprite model rendering
 
 #include "quakedef.h"
+#include "rb_gl.h"
 
 typedef struct spritevert_t {
 	vec3_t		pos;
@@ -153,14 +154,14 @@ static void R_FlushSpriteInstances (void)
 		GL_PolygonOffset (OFFSET_DECAL);
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
-	GL_UseProgram (glprogs.sprites[dither]);
+	RB_UseProgram (glprogs.sprites[dither]);
 
 	if (showtris)
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2));
 	else
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		RB_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
 
-	GL_Bind (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
+	RB_BindTexture (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
 
 	GL_Upload (GL_ARRAY_BUFFER, batchverts, sizeof(batchverts[0]) * 4 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
