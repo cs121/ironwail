@@ -5,6 +5,12 @@
 #error "RB wrappers must remain pass-through during this migration stage"
 #endif
 
+#ifndef RB_VALIDATE_TEXTURE_UNIT_LIMIT
+	#define RB_VALIDATE_TEXTURE_UNIT_LIMIT 16
+#endif
+
+#define RB_PASS_BASELINE_TEXTURE_UNITS 3
+
 typedef struct rb_pass_baseline_gl_s
 {
 	GLint draw_fbo;
@@ -32,7 +38,7 @@ typedef struct rb_pass_baseline_gl_s
 	GLuint array_buffer;
 	GLuint element_array_buffer;
 	GLenum active_texture;
-	GLuint sampler_bindings[3];
+	GLuint sampler_bindings[RB_VALIDATE_TEXTURE_UNIT_LIMIT];
 	qboolean framebuffer_srgb;
 	GLenum polygon_mode;
 } rb_pass_baseline_gl_t;
@@ -80,16 +86,16 @@ typedef struct rb_gl_state_snapshot_s
 	GLint array_buffer;
 	GLint element_array_buffer;
 	GLint active_texture;
-	GLint sampler_bindings[3];
+	GLint sampler_bindings[RB_VALIDATE_TEXTURE_UNIT_LIMIT];
 	GLboolean framebuffer_srgb;
 	GLint polygon_mode[2];
-	GLint tex2d[3];
+	GLint tex2d[RB_VALIDATE_TEXTURE_UNIT_LIMIT];
 } rb_gl_state_snapshot_t;
 
 /*
  * Render-backend pass baseline matrix (pass -> expected start state).
  *
- * | Pass               | Blend  | Depth test | Depth write | Cull | Program | Texture units 0..2 |
+ * | Pass               | Blend  | Depth test | Depth write | Cull | Program | Texture units 0..2 (baseline reset) |
  * |--------------------|--------|------------|-------------|------|---------|--------------------|
  * | PASS_WORLD_OPAQUE  | Opaque | On         | On          | Back | 0       | Unbound            |
  * | PASS_DLIGHT        | Opaque | On         | On          | Back | 0       | Unbound            |
@@ -136,12 +142,12 @@ typedef struct rb_state_debug_s
 	const char *last_depth_owner;
 	const char *last_cull_owner;
 	const char *last_program_owner;
-	const char *last_texture_owner[3];
+	const char *last_texture_owner[RB_VALIDATE_TEXTURE_UNIT_LIMIT];
 	const char *last_fbo_owner;
 	const char *last_vao_owner;
 	const char *last_array_buffer_owner;
 	const char *last_element_array_buffer_owner;
-	const char *last_sampler_owner[3];
+	const char *last_sampler_owner[RB_VALIDATE_TEXTURE_UNIT_LIMIT];
 	const char *last_color_mask_owner;
 	const char *last_scissor_owner;
 	const char *last_stencil_owner;
@@ -200,7 +206,7 @@ static void RB_CaptureGLStateSnapshot (rb_gl_state_snapshot_t *snapshot)
 	glGetIntegerv (GL_POLYGON_MODE, snapshot->polygon_mode);
 
 	prev_active_tex = snapshot->active_texture;
-	for (i = 0; i < 3; ++i)
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
 	{
 		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &snapshot->tex2d[i]);
@@ -250,7 +256,7 @@ static qboolean RB_LogIncomingStateDiff (rb_pass_t pass, const rb_pass_baseline_
 		RB_LOG_MISMATCH ("  element_array_buffer: expected=%u actual=%d last_owner=%s\n", expected->element_array_buffer, actual->element_array_buffer, RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner));
 	if (actual->active_texture != (GLint)expected->active_texture)
 		RB_LOG_MISMATCH ("  active_texture: expected=%d actual=%d\n", expected->active_texture - GL_TEXTURE0, actual->active_texture - GL_TEXTURE0);
-	for (i = 0; i < 3; ++i)
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
 	{
 		if (actual->tex2d[i] != 0)
 			RB_LOG_MISMATCH ("  texture[%d]: expected=0 actual=%d last_owner=%s\n", i, actual->tex2d[i], RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[i]));
@@ -277,8 +283,8 @@ static void RB_ValidatePassExit (rb_pass_t pass)
 	unsigned state_allow_mask;
 	GLint current_program = 0;
 	GLint previous_active_tex = 0;
-	GLint tex2d[3] = {0};
-	GLint sampler[3] = {0};
+	GLint tex2d[RB_VALIDATE_TEXTURE_UNIT_LIMIT] = {0};
+	GLint sampler[RB_VALIDATE_TEXTURE_UNIT_LIMIT] = {0};
 	GLint draw_fbo = 0;
 	GLint vao = 0;
 	GLint array_buffer = 0;
@@ -300,7 +306,7 @@ static void RB_ValidatePassExit (rb_pass_t pass)
 	glGetIntegerv (GL_ARRAY_BUFFER_BINDING, &array_buffer);
 	glGetIntegerv (GL_ELEMENT_ARRAY_BUFFER_BINDING, &element_array_buffer);
 
-	for (i = 0; i < 3; ++i)
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
 	{
 		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
 		glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d[i]);
@@ -353,7 +359,7 @@ static void RB_ValidatePassExit (rb_pass_t pass)
 		mismatch = true;
 	}
 
-	for (i = 0; i < 3; ++i)
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
 	{
 		if (((policy->exit_allow_texture_mask >> i) & 1u) == 0 && tex2d[i] != 0)
 		{
@@ -467,7 +473,7 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 	RB_BindBufferWithOwner (GL_ARRAY_BUFFER, baseline->array_buffer, "RB_BeginPass");
 	RB_BindBufferWithOwner (GL_ELEMENT_ARRAY_BUFFER, baseline->element_array_buffer, "RB_BeginPass");
 	GL_ActiveTextureFunc (baseline->active_texture);
-	for (i = 0; i < 3; ++i)
+	for (i = 0; i < RB_PASS_BASELINE_TEXTURE_UNITS; ++i)
 	{
 		GL_ActiveTextureFunc (GL_TEXTURE0 + i);
 		glBindTexture (GL_TEXTURE_2D, 0);
@@ -734,31 +740,54 @@ void RB_BeginPass (rb_pass_t pass)
 const char *RB_DebugStateOwnersString (void)
 {
 #if RB_DEBUG_STATE
-	static char info[768];
+	static char info[3072];
+	char segment[96];
+	int i;
+
 	q_snprintf (info, sizeof (info),
-		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s fbo=%s vao=%s arrbuf=%s elembuf=%s samp0=%s samp1=%s samp2=%s colormask=%s scissor=%s stencil=%s polygon=%s fbo_srgb=%s drawbuf=%s readbuf=%s)",
+		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s",
 		rb_pass_info[rb_current_pass].debug_name,
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_blend_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_depth_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_cull_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_program_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[0]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[1]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[2]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_fbo_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_vao_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_array_buffer_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[0]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[1]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[2]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_color_mask_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_scissor_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_stencil_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_polygon_mode_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_framebuffer_srgb_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_draw_buffer_owner),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_read_buffer_owner));
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_program_owner));
+
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
+	{
+		q_snprintf (segment, sizeof (segment), " tex%d=%s", i, RB_DebugOwnerOrUnknown (rb_state_debug.last_texture_owner[i]));
+		q_strlcat (info, segment, sizeof (info));
+	}
+
+	q_strlcat (info, " fbo=", sizeof (info));
+	q_strlcat (info, RB_DebugOwnerOrUnknown (rb_state_debug.last_fbo_owner), sizeof (info));
+	q_strlcat (info, " vao=", sizeof (info));
+	q_strlcat (info, RB_DebugOwnerOrUnknown (rb_state_debug.last_vao_owner), sizeof (info));
+	q_strlcat (info, " arrbuf=", sizeof (info));
+	q_strlcat (info, RB_DebugOwnerOrUnknown (rb_state_debug.last_array_buffer_owner), sizeof (info));
+	q_strlcat (info, " elembuf=", sizeof (info));
+	q_strlcat (info, RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner), sizeof (info));
+
+	for (i = 0; i < RB_VALIDATE_TEXTURE_UNIT_LIMIT; ++i)
+	{
+		q_snprintf (segment, sizeof (segment), " samp%d=%s", i, RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[i]));
+		q_strlcat (info, segment, sizeof (info));
+	}
+
+	q_snprintf (segment, sizeof (segment), " colormask=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_color_mask_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " scissor=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_scissor_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " stencil=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_stencil_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " polygon=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_polygon_mode_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " fbo_srgb=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_framebuffer_srgb_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " drawbuf=%s", RB_DebugOwnerOrUnknown (rb_state_debug.last_draw_buffer_owner));
+	q_strlcat (info, segment, sizeof (info));
+	q_snprintf (segment, sizeof (segment), " readbuf=%s)", RB_DebugOwnerOrUnknown (rb_state_debug.last_read_buffer_owner));
+	q_strlcat (info, segment, sizeof (info));
+
 	return info;
 #else
 	return "pass=<tracker disabled>";
