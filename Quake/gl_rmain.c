@@ -359,7 +359,11 @@ cvar_t	r_backend_fullscreen = { "r_backend_fullscreen", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_particles = { "r_backend_particles", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_alias = { "r_backend_alias", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_world = { "r_backend_world", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_world_sky = { "r_backend_world_sky", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_world_opaque = { "r_backend_world_opaque", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_world_alpha = { "r_backend_world_alpha", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_fogvol = { "r_backend_fogvol", "1", CVAR_ARCHIVE };
+cvar_t	r_backend_ui_debugdraw = { "r_backend_ui_debugdraw", "1", CVAR_ARCHIVE };
 cvar_t	r_backend_framehash_debug = { "r_backend_framehash_debug", "0", CVAR_NONE };
 cvar_t	r_backend_framehash_scene = { "r_backend_framehash_scene", "0", CVAR_NONE };
 cvar_t	r_backend_framehash_epsilon = { "r_backend_framehash_epsilon", "0", CVAR_NONE };
@@ -4848,7 +4852,7 @@ static void R_DrawDLightPass (void)
 }
 
 
-static void R_DrawWorldOpaque_Legacy (void)
+static void R_DrawWorldOpaqueBody_Common (void)
 {
 	RB_BeginPass (PASS_WORLD_OPAQUE);
 	R_DrawViewModel ();
@@ -4863,13 +4867,32 @@ static void R_DrawWorldOpaque_Legacy (void)
 	R_DrawDLightPass ();
 	RB_EndPass ();
 
-	RB_BeginPass (PASS_SKY);
-	Sky_DrawSky ();
-	RB_EndPass ();
-
 	RB_BeginPass (PASS_WATER_OPAQUE);
 	R_DrawWater (false);
 	RB_EndPass ();
+}
+
+static void R_DrawWorldSky_Common (void)
+{
+	RB_BeginPass (PASS_SKY);
+	Sky_DrawSky ();
+	RB_EndPass ();
+}
+
+static void R_DrawWorldSky_Legacy (void)
+{
+	R_DrawWorldSky_Common ();
+}
+
+static qboolean R_DrawWorldSky_Backend (void)
+{
+	R_DrawWorldSky_Common ();
+	return true;
+}
+
+static void R_DrawWorldOpaque_Legacy (void)
+{
+	R_DrawWorldOpaqueBody_Common ();
 }
 
 static qboolean R_DrawWorldOpaque_Backend (void)
@@ -4896,7 +4919,7 @@ static qboolean R_DrawParticlesOpaque_Backend (void)
 	return true;
 }
 
-static void R_DrawWorldAlpha_Legacy (void)
+static void R_DrawWorldAlpha_Common (void)
 {
 	R_BeginTranslucency ();
 	RB_BeginPass (PASS_WATER_ALPHA);
@@ -4907,6 +4930,11 @@ static void R_DrawWorldAlpha_Legacy (void)
 	R_DrawEntitiesOnList (true);
 	RB_EndPass ();
 	R_EndTranslucency ();
+}
+
+static void R_DrawWorldAlpha_Legacy (void)
+{
+	R_DrawWorldAlpha_Common ();
 }
 
 static qboolean R_DrawWorldAlpha_Backend (void)
@@ -4957,11 +4985,13 @@ void R_RenderScene (void)
 	 * World (Sky->Opaque->Alpha) -> PostFX graph. */
 	world_backend_available = R_BackendWorldPathAvailable (&world_unavailable_reason);
 	particles_backend_available = R_BackendParticlesPathAvailable (&particles_unavailable_reason);
-	RBackend_DispatchBlock ("world_opaque", &r_backend_world, world_backend_available, world_unavailable_reason,
+	RBackend_DispatchBlock ("world_sky", &r_backend_world_sky, world_backend_available, world_unavailable_reason,
+		R_DrawWorldSky_Backend, R_DrawWorldSky_Legacy, &r_backend_world_warned);
+	RBackend_DispatchBlock ("world_opaque", &r_backend_world_opaque, world_backend_available, world_unavailable_reason,
 		R_DrawWorldOpaque_Backend, R_DrawWorldOpaque_Legacy, &r_backend_world_warned);
 	RBackend_DispatchBlock ("particles_opaque", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
 		R_DrawParticlesOpaque_Backend, R_DrawParticlesOpaque_Legacy, &r_backend_particles_warned);
-	RBackend_DispatchBlock ("world_alpha", &r_backend_world, world_backend_available, world_unavailable_reason,
+	RBackend_DispatchBlock ("world_alpha", &r_backend_world_alpha, world_backend_available, world_unavailable_reason,
 		R_DrawWorldAlpha_Backend, R_DrawWorldAlpha_Legacy, &r_backend_world_warned);
 	RBackend_DispatchBlock ("particles_alpha", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
 		R_DrawParticlesAlpha_Backend, R_DrawParticlesAlpha_Legacy, &r_backend_particles_warned);
