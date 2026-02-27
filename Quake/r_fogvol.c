@@ -220,13 +220,13 @@ static void R_FogVol_LogBufferMarker (const char *marker)
 
 static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
 {
-	glDrawBuffer (buf);
+	RB_DrawBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
 }
 
 static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
 {
-	glReadBuffer (buf);
+	RB_ReadBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
 }
 
@@ -501,26 +501,23 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 {
 	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, state->draw_fbo);
 	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
-	glDrawBuffer ((GLenum)state->draw_buffer);
-	glReadBuffer ((GLenum)state->read_buffer);
+	RB_DrawBuffer ((GLenum)state->draw_buffer);
+	RB_ReadBuffer ((GLenum)state->read_buffer);
 	RB_Viewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	if (state->scissor_test)
 		GL_SetScissorEnabled (true);
 	else
 		GL_SetScissorEnabled (false);
-	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
+	RB_Scissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
 	R_FogVol_UseProgram ((GLuint)state->program);
 	R_FogVol_BindVertexArray ((GLuint)state->vao);
 	GL_ActiveTextureFunc ((GLenum)state->active_texture);
 
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
-	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+	RB_PolygonMode (GL_FRONT_AND_BACK, GL_FILL);
 	RB_SetState (state->glstate_bits);
-	if (state->framebuffer_srgb)
-		glEnable (GL_FRAMEBUFFER_SRGB);
-	else
-		glDisable (GL_FRAMEBUFFER_SRGB);
+	RB_EnableFramebufferSRGB (state->framebuffer_srgb);
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -1132,7 +1129,7 @@ void R_FogVol_Render (void)
 	R_FogVol_UseProgram (glprogs.fogvol);
 	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
@@ -1252,7 +1249,7 @@ void R_FogVol_Render (void)
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
-		glScissor (x0, y0, x1 - x0, y1 - y0);
+		RB_Scissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
 		RB_DrawArrays (GL_TRIANGLES, 0, 3);
 		GL_SetScissorEnabled (false);

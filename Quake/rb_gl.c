@@ -141,6 +141,13 @@ typedef struct rb_state_debug_s
 	const char *last_array_buffer_owner;
 	const char *last_element_array_buffer_owner;
 	const char *last_sampler_owner[3];
+	const char *last_color_mask_owner;
+	const char *last_scissor_owner;
+	const char *last_stencil_owner;
+	const char *last_polygon_mode_owner;
+	const char *last_framebuffer_srgb_owner;
+	const char *last_draw_buffer_owner;
+	const char *last_read_buffer_owner;
 } rb_state_debug_t;
 
 static rb_state_debug_t rb_state_debug;
@@ -443,7 +450,7 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 		glEnable (GL_SCISSOR_TEST);
 	else
 		glDisable (GL_SCISSOR_TEST);
-	RB_Scissor (baseline->scissor_box[0], baseline->scissor_box[1], baseline->scissor_box[2], baseline->scissor_box[3]);
+	RB_ScissorWithOwner (baseline->scissor_box[0], baseline->scissor_box[1], baseline->scissor_box[2], baseline->scissor_box[3], "RB_BeginPass");
 	RB_DepthFunc (baseline->depth_func);
 	glDepthMask (baseline->depth_mask);
 	RB_BlendFunc (baseline->blend_src, baseline->blend_dst);
@@ -457,14 +464,14 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 	{
 		glDisable (GL_CULL_FACE);
 	}
-	glColorMask (baseline->color_mask[0], baseline->color_mask[1], baseline->color_mask[2], baseline->color_mask[3]);
+	RB_ColorMaskWithOwner (baseline->color_mask[0], baseline->color_mask[1], baseline->color_mask[2], baseline->color_mask[3], "RB_BeginPass");
 	if (baseline->stencil_enable)
 		glEnable (GL_STENCIL_TEST);
 	else
 		glDisable (GL_STENCIL_TEST);
-	glStencilFunc (baseline->stencil_func, baseline->stencil_ref, baseline->stencil_value_mask);
-	glStencilOp (baseline->stencil_sfail, baseline->stencil_dpfail, baseline->stencil_dppass);
-	glStencilMask (baseline->stencil_writemask);
+	RB_StencilFuncWithOwner (baseline->stencil_func, baseline->stencil_ref, baseline->stencil_value_mask, "RB_BeginPass");
+	RB_StencilOpWithOwner (baseline->stencil_sfail, baseline->stencil_dpfail, baseline->stencil_dppass, "RB_BeginPass");
+	RB_StencilMaskWithOwner (baseline->stencil_writemask, "RB_BeginPass");
 	RB_UseProgramWithOwner (baseline->program, "RB_BeginPass");
 	RB_BindVertexArrayWithOwner (baseline->vao, "RB_BeginPass");
 	RB_BindBufferWithOwner (GL_ARRAY_BUFFER, baseline->array_buffer, "RB_BeginPass");
@@ -477,11 +484,8 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 		RB_BindSamplerWithOwner ((GLuint)i, baseline->sampler_bindings[i], "RB_BeginPass");
 	}
 	GL_ActiveTextureFunc (baseline->active_texture);
-	if (baseline->framebuffer_srgb)
-		glEnable (GL_FRAMEBUFFER_SRGB);
-	else
-		glDisable (GL_FRAMEBUFFER_SRGB);
-	glPolygonMode (GL_FRONT_AND_BACK, baseline->polygon_mode);
+	RB_EnableFramebufferSRGBWithOwner (baseline->framebuffer_srgb, "RB_BeginPass");
+	RB_PolygonModeWithOwner (GL_FRONT_AND_BACK, baseline->polygon_mode, "RB_BeginPass");
 }
 
 void RB_SetState_Owner (unsigned mask, const char *owner)
@@ -560,6 +564,73 @@ void RB_BindSampler_Owner (GLuint unit, GLuint sampler, const char *owner)
 	GL_BindSamplerFunc (unit, sampler);
 }
 
+
+void RB_ColorMask_Owner (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_color_mask_owner = owner;
+	#endif
+
+	glColorMask (red, green, blue, alpha);
+}
+
+void RB_Scissor_Owner (GLint x, GLint y, GLsizei width, GLsizei height, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_scissor_owner = owner;
+	#endif
+
+	glScissor (x, y, width, height);
+}
+
+void RB_EnableFramebufferSRGB_Owner (qboolean enable, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_framebuffer_srgb_owner = owner;
+	#endif
+
+	if (enable)
+		glEnable (GL_FRAMEBUFFER_SRGB);
+	else
+		glDisable (GL_FRAMEBUFFER_SRGB);
+}
+
+void RB_PolygonMode_Owner (GLenum face, GLenum mode, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_polygon_mode_owner = owner;
+	#endif
+
+	glPolygonMode (face, mode);
+}
+
+void RB_StencilFunc_Owner (GLenum func, GLint ref, GLuint mask, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_stencil_owner = owner;
+	#endif
+
+	glStencilFunc (func, ref, mask);
+}
+
+void RB_StencilOp_Owner (GLenum sfail, GLenum dpfail, GLenum dppass, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_stencil_owner = owner;
+	#endif
+
+	glStencilOp (sfail, dpfail, dppass);
+}
+
+void RB_StencilMask_Owner (GLuint mask, const char *owner)
+{
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_stencil_owner = owner;
+	#endif
+
+	glStencilMask (mask);
+}
+
 void RB_DrawArrays (GLenum mode, GLint first, GLsizei count)
 {
 	glDrawArrays (mode, first, count);
@@ -582,7 +653,7 @@ void RB_Viewport (GLint x, GLint y, GLsizei width, GLsizei height)
 
 void RB_Scissor (GLint x, GLint y, GLsizei width, GLsizei height)
 {
-	glScissor (x, y, width, height);
+	RB_ScissorWithOwner (x, y, width, height, "RB_Scissor");
 }
 
 void RB_DepthFunc (GLenum func)
@@ -595,13 +666,21 @@ void RB_BlendFunc (GLenum sfactor, GLenum dfactor)
 	glBlendFunc (sfactor, dfactor);
 }
 
-void RB_DrawBuffer (GLenum buf)
+void RB_DrawBuffer_Owner (GLenum buf, const char *owner)
 {
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_draw_buffer_owner = owner;
+	#endif
+
 	glDrawBuffer (buf);
 }
 
-void RB_ReadBuffer (GLenum src)
+void RB_ReadBuffer_Owner (GLenum src, const char *owner)
 {
+	#if RB_DEBUG_STATE
+	rb_state_debug.last_read_buffer_owner = owner;
+	#endif
+
 	glReadBuffer (src);
 }
 
@@ -647,7 +726,7 @@ const char *RB_DebugStateOwnersString (void)
 #if RB_DEBUG_STATE
 	static char info[768];
 	q_snprintf (info, sizeof (info),
-		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s fbo=%s vao=%s arrbuf=%s elembuf=%s samp0=%s samp1=%s samp2=%s)",
+		"pass=%s owner(blend=%s depth=%s cull=%s prog=%s tex0=%s tex1=%s tex2=%s fbo=%s vao=%s arrbuf=%s elembuf=%s samp0=%s samp1=%s samp2=%s colormask=%s scissor=%s stencil=%s polygon=%s fbo_srgb=%s drawbuf=%s readbuf=%s)",
 		rb_pass_info[rb_current_pass].debug_name,
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_blend_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_depth_owner),
@@ -662,7 +741,14 @@ const char *RB_DebugStateOwnersString (void)
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_element_array_buffer_owner),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[0]),
 		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[1]),
-		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[2]));
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_sampler_owner[2]),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_color_mask_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_scissor_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_stencil_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_polygon_mode_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_framebuffer_srgb_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_draw_buffer_owner),
+		RB_DebugOwnerOrUnknown (rb_state_debug.last_read_buffer_owner));
 	return info;
 #else
 	return "pass=<tracker disabled>";
