@@ -520,7 +520,6 @@ void CL_ParseUpdate (int bits)
 		ent->frame = MSG_ReadByte ();
 	else if (forcelink)
 		ent->frame = ent->baseline.frame;
-	ent->oldframe = prevframe;
 
 	if (bits & U_COLORMAP)
 		i = MSG_ReadByte();
@@ -1392,4 +1391,3 @@ void CL_ParseServerMessage (void)
 		lastcmd = cmd; //johnfitz
 	}
 }
-
