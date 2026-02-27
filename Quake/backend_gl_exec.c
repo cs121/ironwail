@@ -120,7 +120,7 @@ static void BackendGL_DrawArrays (GLenum mode, GLint first, GLsizei count)
 
 static void BackendGL_DrawElements (GLenum mode, GLsizei count, GLenum type, const GLvoid *indices)
 {
-	glDrawElements (mode, count, type, indices);
+	RB_DrawElements (mode, count, type, indices);
 }
 
 static void BackendGL_DispatchCompute (GLuint num_groups_x, GLuint num_groups_y, GLuint num_groups_z)
