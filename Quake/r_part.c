@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "rb_gl.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -700,7 +701,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
 	oit = (alpha && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
-	GL_UseProgram (glprogs.particles[oit][dither]);
+	RB_UseProgram (glprogs.particles[oit][dither]);
 
 	// compensate for apparent size of different particle textures
 	// this bakes in the additional scaling of vup and vright by 1.5f for billboarding,
@@ -712,9 +713,9 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	GL_Uniform3fFunc (0, scalex, scaley, uvscale);
 
 	if (alpha)
-		GL_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		RB_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 	else
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		RB_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 
 	numpartverts = 0;
 	for (i = 0, p = particles; i < r_numactiveparticles; i++, p++)
