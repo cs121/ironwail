@@ -19,6 +19,9 @@
  */
 #define RB_GL_PASSTHROUGH_ONLY 1
 
+/* RB-local extension bit for RB_SetState: toggles GL_STENCIL_TEST. */
+#define RB_GLS_STENCIL_TEST (1u << 31)
+
 void RB_SetState_Owner (unsigned mask, const char *owner);
 void RB_UseProgram_Owner (GLuint program, const char *owner);
 qboolean RB_BindTexture_Owner (GLenum texunit, gltexture_t *texture, const char *owner);

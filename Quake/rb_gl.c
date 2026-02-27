@@ -486,8 +486,11 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 
 void RB_SetState_Owner (unsigned mask, const char *owner)
 {
+	unsigned gl_mask = mask & ~RB_GLS_STENCIL_TEST;
+	qboolean stencil_enable = (mask & RB_GLS_STENCIL_TEST) != 0;
+
 	#if RB_DEBUG_STATE
-	unsigned changed = glstate ^ mask;
+	unsigned changed = glstate ^ gl_mask;
 
 	if ((changed & GLS_MASK_BLEND) != 0)
 		rb_state_debug.last_blend_owner = owner;
@@ -495,9 +498,12 @@ void RB_SetState_Owner (unsigned mask, const char *owner)
 		rb_state_debug.last_depth_owner = owner;
 	if ((changed & GLS_MASK_CULL) != 0)
 		rb_state_debug.last_cull_owner = owner;
+	if ((glIsEnabled (GL_STENCIL_TEST) ? 1 : 0) != (stencil_enable ? 1 : 0))
+		rb_state_debug.last_stencil_owner = owner;
 	#endif
 
-	GL_SetState (mask);
+	GL_SetState (gl_mask);
+	RB_StencilTestWithOwner (stencil_enable, owner);
 }
 
 void RB_UseProgram_Owner (GLuint program, const char *owner)
