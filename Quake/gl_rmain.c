@@ -3831,10 +3831,25 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 static void R_DrawWorld (void)
 {
 	int count;
+	int i;
 	entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 
-	if (count > 0 && ents[0] == &cl_entities[0])
-		R_DrawBrushModels (ents, 1);
+	for (i = 0; i < count; i++)
+	{
+		if (ents[i] == &cl_entities[0])
+		{
+			R_DrawBrushModels (ents + i, 1);
+			return;
+		}
+	}
+
+	/* Keep the static BSP world in the opaque pass even if entity sorting
+	 * omitted worldspawn from the brush list during backend pass refactors. */
+	if (r_drawworld_cheatsafe && cl_entities[0].model && cl_entities[0].model->type == mod_brush)
+	{
+		entity_t *world = &cl_entities[0];
+		R_DrawBrushModels (&world, 1);
+	}
 }
 
 /*
