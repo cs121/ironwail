@@ -6,6 +6,7 @@
 
 typedef struct render_backend_vtable_s
 {
+	/* Render-hotpath state rule: all GL state mutations in A2 render paths must flow through RB_SetState/IRenderBackend helpers; direct GL_SetState usage is only allowed when listed as a temporary exception in the central A2 TODO list. */
 	/* Preconditions: active GL context on render thread; Side effects: starts backend frame bookkeeping/debug scope; Threading: single render thread only. */
 	void (*BeginFrame) (const char *label);
 	/* Preconditions: matching BeginFrame already issued for current frame; Side effects: flushes/completes backend frame scope; Threading: single render thread only. */
@@ -29,6 +30,11 @@ typedef struct render_backend_vtable_s
 } render_backend_vtable_t;
 
 typedef render_backend_vtable_t IRenderBackend;
+
+/*
+ * Central A2 render-state TODO exceptions (temporary):
+ * - none
+ */
 
 extern cvar_t r_backend;
 extern cvar_t r_backend_ui;
