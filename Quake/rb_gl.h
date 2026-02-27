@@ -9,6 +9,10 @@
  * Build guard: wrappers are pass-through only during the initial migration.
  * Keep this set to 1 until backend behavior intentionally diverges.
  *
+ * A2 hotpath rule: state ownership stays in RB_* wrappers. Direct GL state calls
+ * are not allowed in A2 paths, except for explicit transition helpers listed in
+ * render_backend.h (currently RB_DepthFunc/RB_BlendFunc).
+ *
  * Debug guard: RB_DEBUG_STATE enables state-owner tracking + incoming state-diff
  * diagnostics. Default maps to debug builds (!defined(NDEBUG) || defined(_DEBUG)
  * || defined(DEBUG)); override at build-time if needed.
@@ -73,7 +77,9 @@ void RB_DrawElements (GLenum mode, GLsizei count, GLenum type, const GLvoid *ind
 void RB_Clear (GLbitfield mask);
 void RB_Viewport (GLint x, GLint y, GLsizei width, GLsizei height);
 void RB_Scissor (GLint x, GLint y, GLsizei width, GLsizei height);
+/* Transition helper: temporarily allowed for legacy stage/material code. */
 void RB_DepthFunc (GLenum func);
+/* Transition helper: temporarily allowed for legacy stage/material code. */
 void RB_BlendFunc (GLenum sfactor, GLenum dfactor);
 
 typedef void (*rb_pass_setup_hook_t) (rb_pass_t pass);
