@@ -432,15 +432,29 @@ static void RB_ValidatePassExit (rb_pass_t pass)
 static rb_pass_baseline_gl_t RB_BuildPassBaselineGL (rb_pass_t pass)
 {
 	rb_pass_baseline_gl_t baseline = rb_pass_info[pass].baseline_gl;
+	GLint draw_fbo = 0;
+	GLint read_fbo = 0;
+	GLint viewport[4];
+	GLint scissor_box[4];
+	GLboolean scissor_enable;
 
-	baseline.viewport[0] = glx;
-	baseline.viewport[1] = gly;
-	baseline.viewport[2] = glwidth;
-	baseline.viewport[3] = glheight;
-	baseline.scissor_box[0] = glx;
-	baseline.scissor_box[1] = gly;
-	baseline.scissor_box[2] = glwidth;
-	baseline.scissor_box[3] = glheight;
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	scissor_enable = glIsEnabled (GL_SCISSOR_TEST);
+
+	baseline.draw_fbo = (GLint)draw_fbo;
+	baseline.read_fbo = (GLint)read_fbo;
+	baseline.viewport[0] = viewport[0];
+	baseline.viewport[1] = viewport[1];
+	baseline.viewport[2] = viewport[2];
+	baseline.viewport[3] = viewport[3];
+	baseline.scissor_enable = (qboolean)scissor_enable;
+	baseline.scissor_box[0] = scissor_box[0];
+	baseline.scissor_box[1] = scissor_box[1];
+	baseline.scissor_box[2] = scissor_box[2];
+	baseline.scissor_box[3] = scissor_box[3];
 	baseline.depth_func = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
 
 	return baseline;
