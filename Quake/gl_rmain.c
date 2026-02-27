@@ -196,7 +196,7 @@ static const float r_identity_mat4[16] = {
 
 static void GL_LogErrorIfDeveloper (const char *label)
 {
-	GLenum err = glGetError ();
+	GLenum err = glGetError (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	if (err != GL_NO_ERROR)
 		Con_DPrintf ("GL error after %s: 0x%04X\n", label, err);
 }
@@ -720,11 +720,11 @@ static GLuint GL_CreateSSAONoiseTexture (void)
 		noise[i * 2 + 1] = (unsigned char)CLAMP (0.f, y * 255.f, 255.f);
 	}
 
-	glGenTextures (1, &texnum);
+	glGenTextures (1, &texnum); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, "ssao noise");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_RG8, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE);
-	glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE, GL_RG, GL_UNSIGNED_BYTE, noise);
+	glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE, GL_RG, GL_UNSIGNED_BYTE, noise); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	RB_TexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -746,7 +746,7 @@ static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter,
 	GLuint texnum;
 	qboolean is_depth_format = (format == GL_DEPTH24_STENCIL8 || format == GL_DEPTH32F_STENCIL8 || format == GL_DEPTH_COMPONENT24 || format == GL_DEPTH_COMPONENT32F);
 
-	glGenTextures (1, &texnum);
+	glGenTextures (1, &texnum); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_BindNative (GL_TEXTURE0, target, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
 	if (samples > 1)
@@ -777,7 +777,7 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 {
 	GLuint texnum;
 
-	glGenTextures (1, &texnum);
+	glGenTextures (1, &texnum); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, format, width, height);
@@ -852,8 +852,8 @@ void GL_CreateFrameBuffers (void)
 	GLenum depth_format = GL_DEPTH24_STENCIL8;
 
 	/* query MSAA limits */
-	glGetIntegerv (GL_MAX_COLOR_TEXTURE_SAMPLES, &framebufs.max_color_tex_samples);
-	glGetIntegerv (GL_MAX_DEPTH_TEXTURE_SAMPLES, &framebufs.max_depth_tex_samples);
+	glGetIntegerv (GL_MAX_COLOR_TEXTURE_SAMPLES, &framebufs.max_color_tex_samples); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_MAX_DEPTH_TEXTURE_SAMPLES, &framebufs.max_depth_tex_samples); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	framebufs.max_samples = q_min (framebufs.max_color_tex_samples, framebufs.max_depth_tex_samples);
 
 	/* main framebuffer (color + depth + stencil) */
@@ -1308,21 +1308,21 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	const char *target_name = "GL_TEXTURE_2D";
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, depth_tex);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_depth_tex);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_width);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &tex_height);
-	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &compare_mode);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &bound_depth_tex); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_width); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &tex_height); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexParameteriv (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, &compare_mode); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, ao_tex);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &ao_internal_format);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &ao_width);
-	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ao_height);
-	glGetFloatv (GL_DEPTH_RANGE, depth_range);
-	glGetIntegerv (GL_VIEWPORT, viewport);
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &draw_fbo);
-	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
-	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &ao_internal_format); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &ao_width); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ao_height); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetFloatv (GL_DEPTH_RANGE, depth_range); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_VIEWPORT, viewport); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetBooleanv (GL_COLOR_WRITEMASK, color_mask); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 	Con_DPrintf ("SSAO depth input: tex=%u bound=%d target=%s format=0x%X size=%dx%d compare=0x%X viewport=%dx%d+%d+%d fbo=%d scissor=%s %dx%d+%d+%d colorMask=%d%d%d%d\n",
 		depth_tex, bound_depth_tex, target_name, internal_format, tex_width, tex_height,
@@ -1935,12 +1935,12 @@ static void GL_SetFramebufferSRGB (qboolean enable)
 #ifdef GL_FRAMEBUFFER_SRGB
 	if (enable && !gl_framebuffer_srgb_enabled)
 	{
-		glEnable (GL_FRAMEBUFFER_SRGB);
+		glEnable (GL_FRAMEBUFFER_SRGB); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		gl_framebuffer_srgb_enabled = true;
 	}
 	else if (!enable && gl_framebuffer_srgb_enabled)
 	{
-		glDisable (GL_FRAMEBUFFER_SRGB);
+		glDisable (GL_FRAMEBUFFER_SRGB); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		gl_framebuffer_srgb_enabled = false;
 	}
 #else
@@ -1982,11 +1982,11 @@ static void GL_PostProcessFallback (void)
 
 	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);
-	glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glPixelStorei (GL_PACK_ALIGNMENT, 1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
 	RB_ReadBuffer (GL_BACK);
-	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+	glPixelStorei (GL_UNPACK_ALIGNMENT, 1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	{
 		qboolean srgb_output = GL_UseSRGBFramebuffer ();
 		GL_SetFramebufferSRGB (srgb_output);
@@ -2040,22 +2040,22 @@ static void GL_PostProcessFallback (void)
 		pixels[i * 4 + 2] = (byte)CLAMP (0, (int)Q_rint (color[2] * 255.f), 255);
 	}
 
-	glDisable (GL_DEPTH_TEST);
-	glDisable (GL_BLEND);
+	glDisable (GL_DEPTH_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glDisable (GL_BLEND); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
         RB_UseProgram (0);
-	glMatrixMode (GL_PROJECTION);
-	glPushMatrix ();
-	glLoadIdentity ();
-	glOrtho (0, width, 0, height, -1, 1);
-	glMatrixMode (GL_MODELVIEW);
-	glPushMatrix ();
-	glLoadIdentity ();
-	glRasterPos2i (0, 0);
-	glDrawPixels (width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	glPopMatrix ();
-	glMatrixMode (GL_PROJECTION);
-	glPopMatrix ();
-	glMatrixMode (GL_MODELVIEW);
+	glMatrixMode (GL_PROJECTION); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glPushMatrix (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glLoadIdentity (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glOrtho (0, width, 0, height, -1, 1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glMatrixMode (GL_MODELVIEW); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glPushMatrix (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glLoadIdentity (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glRasterPos2i (0, 0); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glDrawPixels (width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glPopMatrix (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glMatrixMode (GL_PROJECTION); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glPopMatrix (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glMatrixMode (GL_MODELVIEW); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 	free (pixels);
 }
@@ -2138,8 +2138,8 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 
 	RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
 	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);
+	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glPixelStorei (GL_PACK_ALIGNMENT, 1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 	if (r_autoexposure_async.value > 0.f && framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
 	{
@@ -2148,7 +2148,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		qboolean got_data = false;
 
 		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, framebufs.autoexposure.pbo[write_index]);
-		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, NULL);
+		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, NULL); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, framebufs.autoexposure.pbo[read_index]);
 		if (framebufs.autoexposure.pbo_ready)
@@ -2165,7 +2165,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		GL_BindBufferFunc (GL_PIXEL_PACK_BUFFER, 0);
 		framebufs.autoexposure.pbo_index = read_index;
 		framebufs.autoexposure.pbo_ready = true;
-		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 		if (!got_data)
 		{
@@ -2181,8 +2181,8 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		else if (r_autoexposure_async.value <= 0.f && framebufs.autoexposure.pbo_ready)
 			GL_AutoExposureDeletePBOs ();
 
-		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
-		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
+		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	}
 	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
 	RB_ReadBuffer (GL_BACK);
@@ -2871,20 +2871,20 @@ void GL_PolygonOffset (int offset)
 
 	if (offset > 0)
 	{
-		glEnable (GL_POLYGON_OFFSET_FILL);
-		glEnable (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset (1, offset);
+		glEnable (GL_POLYGON_OFFSET_FILL); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glEnable (GL_POLYGON_OFFSET_LINE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glPolygonOffset (1, offset); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	}
 	else if (offset < 0)
 	{
-		glEnable (GL_POLYGON_OFFSET_FILL);
-		glEnable (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset (-1, offset);
+		glEnable (GL_POLYGON_OFFSET_FILL); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glEnable (GL_POLYGON_OFFSET_LINE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glPolygonOffset (-1, offset); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	}
 	else
 	{
-		glDisable (GL_POLYGON_OFFSET_FILL);
-		glDisable (GL_POLYGON_OFFSET_LINE);
+		glDisable (GL_POLYGON_OFFSET_FILL); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+		glDisable (GL_POLYGON_OFFSET_LINE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	}
 }
 
@@ -2901,21 +2901,21 @@ void GL_DepthRange (zrange_t range)
 	{
 	default:
 	case ZRANGE_FULL:
-		glDepthRange (0.f, 1.f);
+		glDepthRange (0.f, 1.f); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		break;
 
 	case ZRANGE_VIEWMODEL:
 		if (gl_clipcontrol_able)
-			glDepthRange (0.7f, 1.f);
+			glDepthRange (0.7f, 1.f); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		else
-			glDepthRange (0.f, 0.3f);
+			glDepthRange (0.f, 0.3f); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		break;
 
 	case ZRANGE_NEAR:
 		if (gl_clipcontrol_able)
-			glDepthRange (1.f, 1.f);
+			glDepthRange (1.f, 1.f); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		else
-			glDepthRange (0.f, 0.f);
+			glDepthRange (0.f, 0.f); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		break;
 	}
 }
@@ -3416,23 +3416,23 @@ void R_GLStateDump (const char *tag)
 	GLint prev_active_texture = 0;
 	GLint ubo0 = 0, ubo1 = 0, ubo2 = 0;
 	GLint tex2d_0 = 0, tex2d_1 = 0, tex2d_2 = 0;
-	GLboolean blend = glIsEnabled (GL_BLEND);
-	GLboolean depth_test = glIsEnabled (GL_DEPTH_TEST);
-	GLboolean cull = glIsEnabled (GL_CULL_FACE);
-	GLboolean scissor = glIsEnabled (GL_SCISSOR_TEST);
-	GLboolean srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
+	GLboolean blend = glIsEnabled (GL_BLEND); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	GLboolean depth_test = glIsEnabled (GL_DEPTH_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	GLboolean cull = glIsEnabled (GL_CULL_FACE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	GLboolean scissor = glIsEnabled (GL_SCISSOR_TEST); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	GLboolean srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GLboolean depth_mask = GL_TRUE;
 
 	if (r_gl_state_validate.value <= 0.f)
 		return;
 
-	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture);
-	glGetIntegerv (GL_VIEWPORT, viewport);
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_VIEWPORT, viewport); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_mask); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	prev_active_texture = active_texture;
 
 	GL_GetIntegeri_vFunc (GL_UNIFORM_BUFFER_BINDING, 0, &ubo0);
@@ -3440,11 +3440,11 @@ void R_GLStateDump (const char *tag)
 	GL_GetIntegeri_vFunc (GL_UNIFORM_BUFFER_BINDING, 2, &ubo2);
 
 	GL_ActiveTextureFunc (GL_TEXTURE0);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_0);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_0); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_ActiveTextureFunc (GL_TEXTURE1);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_1);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_1); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_ActiveTextureFunc (GL_TEXTURE2);
-	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_2);
+	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_2); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_ActiveTextureFunc (prev_active_texture);
 
 	Con_Printf ("GL_STATE[%s] %s prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
@@ -4618,7 +4618,7 @@ void R_ShowTris (void)
 
 	if (r_showtris.value == 1)
 		GL_DepthRange (ZRANGE_NEAR);
-	glPolygonMode (GL_FRONT_AND_BACK, GL_LINE);
+	glPolygonMode (GL_FRONT_AND_BACK, GL_LINE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_PolygonOffset (OFFSET_SHOWTRIS);
 
 	ofs = cl_modtype_ofs;
@@ -4641,7 +4641,7 @@ void R_ShowTris (void)
 
 	R_DrawParticles_ShowTris ();
 
-	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 	GL_PolygonOffset (OFFSET_NONE);
 	if (r_showtris.value == 1)
 		GL_DepthRange (ZRANGE_FULL);
@@ -5090,7 +5090,7 @@ static void R_RenderView_Legacy (void)
 	time1 = 0; /* avoid compiler warning */
 	if (r_speeds.value)
 	{
-		glFinish ();
+		glFinish (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 		time1 = Sys_DoubleTime ();
 
 		//johnfitz -- rendering statistics
@@ -5098,7 +5098,7 @@ static void R_RenderView_Legacy (void)
 			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
 	}
         else if (gl_finish.value)
-                glFinish ();
+                glFinish (); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#gl_rmainc
 
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
         Fog_EnableGFog ();
