@@ -6,7 +6,13 @@
 
 typedef struct render_backend_vtable_s
 {
-	/* Render-hotpath state rule: all GL state mutations in A2 render paths must flow through RB_SetState/IRenderBackend helpers; direct GL_SetState usage is only allowed when listed as a temporary exception in the central A2 TODO list. */
+	/*
+	 * A2 render-hotpath state rule:
+	 * - GL state changes in A2 paths must go through RB_* / IRenderBackend entry points.
+	 * - direct GL_* / GL_SetState calls are forbidden in A2 hotpaths.
+	 * - temporary migration exceptions are explicitly listed below and treated as
+	 *   transition-only helpers that must be removed once their callers migrate.
+	 */
 	/* Preconditions: active GL context on render thread; Side effects: starts backend frame bookkeeping/debug scope; Threading: single render thread only. */
 	void (*BeginFrame) (const char *label);
 	/* Preconditions: matching BeginFrame already issued for current frame; Side effects: flushes/completes backend frame scope; Threading: single render thread only. */
@@ -32,8 +38,13 @@ typedef struct render_backend_vtable_s
 typedef render_backend_vtable_t IRenderBackend;
 
 /*
- * Central A2 render-state TODO exceptions (temporary):
- * - none
+ * Central A2 render-state transition exceptions (temporary, explicitly allowed):
+ * - RB_DepthFunc: legacy material code still overrides depth func per stage.
+ * - RB_BlendFunc: legacy material code still uses custom blend tuples not yet
+ *   representable through GLS_* blend policy.
+ *
+ * Everything else in A2 hotpaths must route state through RB_SetState plus the
+ * RB_* owner wrappers.
  */
 
 extern cvar_t r_backend;

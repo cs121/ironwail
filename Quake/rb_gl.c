@@ -452,24 +452,13 @@ static void RB_ApplyPassBaselineGL (const rb_pass_baseline_gl_t *baseline)
 	else
 		glDisable (GL_SCISSOR_TEST);
 	RB_ScissorWithOwner (baseline->scissor_box[0], baseline->scissor_box[1], baseline->scissor_box[2], baseline->scissor_box[3], "RB_BeginPass");
+	/* Transition helper: legacy paths still override depth func directly. */
 	RB_DepthFunc (baseline->depth_func);
-	glDepthMask (baseline->depth_mask);
+	/* Transition helper: legacy paths still use explicit blend tuples. */
 	RB_BlendFunc (baseline->blend_src, baseline->blend_dst);
 	GL_BlendEquationFunc (baseline->blend_equation);
-	if (baseline->cull_mode == GL_FRONT || baseline->cull_mode == GL_BACK)
-	{
-		glEnable (GL_CULL_FACE);
-		glCullFace (baseline->cull_mode);
-	}
-	else
-	{
-		glDisable (GL_CULL_FACE);
-	}
 	RB_ColorMaskWithOwner (baseline->color_mask[0], baseline->color_mask[1], baseline->color_mask[2], baseline->color_mask[3], "RB_BeginPass");
-	if (baseline->stencil_enable)
-		glEnable (GL_STENCIL_TEST);
-	else
-		glDisable (GL_STENCIL_TEST);
+	RB_StencilTestWithOwner (baseline->stencil_enable, "RB_BeginPass");
 	RB_StencilFuncWithOwner (baseline->stencil_func, baseline->stencil_ref, baseline->stencil_value_mask, "RB_BeginPass");
 	RB_StencilOpWithOwner (baseline->stencil_sfail, baseline->stencil_dpfail, baseline->stencil_dppass, "RB_BeginPass");
 	RB_StencilMaskWithOwner (baseline->stencil_writemask, "RB_BeginPass");
@@ -675,11 +664,13 @@ void RB_Scissor (GLint x, GLint y, GLsizei width, GLsizei height)
 	RB_ScissorWithOwner (x, y, width, height, "RB_Scissor");
 }
 
+/* Transition helper: temporarily allowed for legacy stage/material code. */
 void RB_DepthFunc (GLenum func)
 {
 	glDepthFunc (func);
 }
 
+/* Transition helper: temporarily allowed for legacy stage/material code. */
 void RB_BlendFunc (GLenum sfactor, GLenum dfactor)
 {
 	glBlendFunc (sfactor, dfactor);
