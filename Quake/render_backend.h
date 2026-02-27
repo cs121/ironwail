@@ -55,7 +55,7 @@ void RBackend_DispatchUpdateScreen (void (*legacy_fn)(void));
  *   (!backend_path_available or backend_fn == NULL) or when backend_fn returns false.
  */
 void RBackend_DispatchBlock (const char *block_name, cvar_t *toggle, qboolean backend_path_available,
-	rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once);
+	const char *unavailable_reason, rbackend_block_fn_t backend_fn, void (*legacy_fn)(void), qboolean *warned_once);
 void RBackend_DebugCaptureEndFrameHash (void);
 
 #endif

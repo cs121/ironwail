@@ -48,6 +48,83 @@ static qboolean r_backend_alias_warned = false;
 static qboolean r_backend_world_warned = false;
 static qboolean r_backend_fogvol_warned = false;
 
+static qboolean R_BackendAliasPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!glprogs.alias[0][0][0][0])
+	{
+		if (reason)
+			*reason = "missing shader program: alias";
+		return false;
+	}
+
+	return true;
+}
+
+static qboolean R_BackendWorldPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!glprogs.world[0][0][0])
+	{
+		if (reason)
+			*reason = "missing shader program: world";
+		return false;
+	}
+
+	if (!framebufs.scene.fbo)
+	{
+		if (reason)
+			*reason = "missing world framebuffer: scene.fbo";
+		return false;
+	}
+
+	return true;
+}
+
+static qboolean R_BackendParticlesPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (!glprogs.particles[0][0])
+	{
+		if (reason)
+			*reason = "missing shader program: particles";
+		return false;
+	}
+
+	return true;
+}
+
+static qboolean R_BackendFogvolPathAvailable (const char **reason)
+{
+	if (reason)
+		*reason = NULL;
+
+	if (r_fogvol.value <= 0.f)
+		return true;
+
+	if (!glprogs.fogvol || !glprogs.fogvol_upsample || !glprogs.fogvol_temporal)
+	{
+		if (reason)
+			*reason = "missing shader program: fogvol";
+		return false;
+	}
+
+	if (!framebufs.fogvol.fbo[0] || !framebufs.fogvol.fbo[1] || !framebufs.fogvol.color_tex[0] || !framebufs.fogvol.color_tex[1])
+	{
+		if (reason)
+			*reason = "missing fog volume framebuffer resources";
+		return false;
+	}
+
+	return true;
+}
+
 static void R_DrawFogvol_Legacy (void);
 static qboolean R_DrawFogvol_Backend (void);
 
@@ -3668,6 +3745,8 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 {
 	int* ofs;
 	entity_t** entlist = cl_sorted_visedicts;
+	const char *alias_unavailable_reason = NULL;
+	qboolean alias_backend_available;
 
 	GL_BeginGroup (alphapass ? "Translucent entities" : "Opaque entities");
 
@@ -3675,7 +3754,8 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
 	r_alias_dispatch_entlist = entlist + ofs[2 * mod_alias];
 	r_alias_dispatch_count = ofs[2 * mod_alias + 1] - ofs[2 * mod_alias];
-	RBackend_DispatchBlock ("alias", &r_backend_alias, true,
+	alias_backend_available = R_BackendAliasPathAvailable (&alias_unavailable_reason);
+	RBackend_DispatchBlock ("alias", &r_backend_alias, alias_backend_available, alias_unavailable_reason,
 		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
@@ -3715,6 +3795,8 @@ R_DrawViewModel -- johnfitz -- gutted
 void R_DrawViewModel (void)
 {
 	entity_t* e = &cl.viewent;
+	const char *alias_unavailable_reason = NULL;
+	qboolean alias_backend_available;
 
 	if (!R_IsViewModelVisible ())
 		return;
@@ -3725,7 +3807,8 @@ void R_DrawViewModel (void)
 	GL_DepthRange (ZRANGE_VIEWMODEL);
 	r_alias_dispatch_entlist = &e;
 	r_alias_dispatch_count = 1;
-	RBackend_DispatchBlock ("alias", &r_backend_alias, true,
+	alias_backend_available = R_BackendAliasPathAvailable (&alias_unavailable_reason);
+	RBackend_DispatchBlock ("alias", &r_backend_alias, alias_backend_available, alias_unavailable_reason,
 		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
 	GL_DepthRange (ZRANGE_FULL);
 
@@ -4809,6 +4892,10 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
+	const char *world_unavailable_reason = NULL;
+	const char *particles_unavailable_reason = NULL;
+	qboolean world_backend_available;
+	qboolean particles_backend_available;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_SetupGL ();
 	R_Clear ();
@@ -4820,13 +4907,15 @@ void R_RenderScene (void)
 	/* Backend migration order (keep incremental PRs consistent):
 	 * UI/Console/2D -> Fullscreen passes -> Particles/Sprites/Beams -> Alias ->
 	 * World (Sky->Opaque->Alpha) -> PostFX graph. */
-	RBackend_DispatchBlock ("world_opaque", &r_backend_world, true,
+	world_backend_available = R_BackendWorldPathAvailable (&world_unavailable_reason);
+	particles_backend_available = R_BackendParticlesPathAvailable (&particles_unavailable_reason);
+	RBackend_DispatchBlock ("world_opaque", &r_backend_world, world_backend_available, world_unavailable_reason,
 		R_DrawWorldOpaque_Backend, R_DrawWorldOpaque_Legacy, &r_backend_world_warned);
-	RBackend_DispatchBlock ("particles_opaque", &r_backend_particles, true,
+	RBackend_DispatchBlock ("particles_opaque", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
 		R_DrawParticlesOpaque_Backend, R_DrawParticlesOpaque_Legacy, &r_backend_particles_warned);
-	RBackend_DispatchBlock ("world_alpha", &r_backend_world, true,
+	RBackend_DispatchBlock ("world_alpha", &r_backend_world, world_backend_available, world_unavailable_reason,
 		R_DrawWorldAlpha_Backend, R_DrawWorldAlpha_Legacy, &r_backend_world_warned);
-	RBackend_DispatchBlock ("particles_alpha", &r_backend_particles, true,
+	RBackend_DispatchBlock ("particles_alpha", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
 		R_DrawParticlesAlpha_Backend, R_DrawParticlesAlpha_Legacy, &r_backend_particles_warned);
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
@@ -4989,6 +5078,8 @@ R_RenderView
 static void R_RenderView_Legacy (void)
 {
 	double	time1, time2;
+	const char *fogvol_unavailable_reason = NULL;
+	qboolean fogvol_backend_available;
 
 	if (r_norefresh.value)
 		return;
@@ -5020,7 +5111,8 @@ static void R_RenderView_Legacy (void)
         r_fogvol_draw_called++;
         if (r_gl_state_validate.value > 0.f)
                 Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
-	RBackend_DispatchBlock ("fogvol", &r_backend_fogvol, true,
+	fogvol_backend_available = R_BackendFogvolPathAvailable (&fogvol_unavailable_reason);
+	RBackend_DispatchBlock ("fogvol", &r_backend_fogvol, fogvol_backend_available, fogvol_unavailable_reason,
 		R_DrawFogvol_Backend, R_DrawFogvol_Legacy, &r_backend_fogvol_warned);
         /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
          * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
