@@ -685,6 +685,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	//float			alpha; //johnfitz -- particle transparency
 	float			scalex, scaley;
 	qboolean		dither, oit;
+	qboolean		local_pass = false;
 	int				i;
 
 	if (!r_particles.value)
@@ -696,6 +697,19 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	// square particles are drawn opaque (avoiding alpha sorting issues)
 	if (!showtris && alpha != ((int)r_particles.value != 2))
 		return;
+
+	/*
+	 * Leaf baseline: PASS_PARTICLES (or show-tris overlay path without a pass).
+	 * Expected baseline when pass is active: opaque blend, depth test/write on,
+	 * back-face cull, program 0, and texture units 0..2 unbound.
+	 */
+	if (!RB_PassActive ())
+	{
+		RB_BeginPass (PASS_PARTICLES);
+		local_pass = true;
+	}
+	else if (RB_CurrentPass () != PASS_PARTICLES)
+		Con_DWarning ("R_DrawParticles_Real invoked outside PASS_PARTICLES (owners: %s)\n", RB_DebugStateOwnersString ());
 
 	GL_BeginGroup ("Particles");
 
@@ -740,6 +754,9 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	R_FlushParticleBatch ();
 
 	GL_EndGroup ();
+
+	if (local_pass)
+		RB_EndPass ();
 }
 
 /*
@@ -760,4 +777,3 @@ void R_DrawParticles_ShowTris (void)
 {
 	R_DrawParticles_Real (false, true);
 }
-

@@ -590,6 +590,14 @@ void Draw_Flush (void)
 	if (!numbatchquads)
 		return;
 
+	/*
+	 * Leaf baseline: PASS_UI2D.
+	 * Expected baseline when pass is active: opaque blend, no z-test/write,
+	 * no culling, program 0, and texture units 0..2 unbound.
+	 */
+	if (RB_PassActive () && RB_CurrentPass () != PASS_UI2D)
+		Con_DWarning ("Draw_Flush invoked outside PASS_UI2D (owners: %s)\n", RB_DebugStateOwnersString ());
+
 	if (scrap_dirty && glcanvas.texture == scrap_texture)
 		Scrap_Upload ();
 

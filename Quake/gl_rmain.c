@@ -1046,6 +1046,14 @@ static GLuint GL_GenerateBloomTexture (void)
 	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
 		return fallback;
 
+	/*
+	 * Leaf baseline: PASS_POSTFX.
+	 * Expected baseline when pass is active: opaque blend, no z-test/write,
+	 * no culling, program 0, and texture units 0..2 unbound.
+	 */
+	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
+		Con_DWarning ("GL_GenerateBloomTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
+
 	float threshold = q_max (0.f, r_bloom_threshold.value);
 	qboolean msaa = framebufs.scene.samples > 1;
 	GLuint velocity_texture = 0;
@@ -1106,6 +1114,20 @@ static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, f
 	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
 		return fallback;
 
+	/*
+	 * Leaf baseline: PASS_POSTFX (or local standalone fallback path, e.g. dlight composite).
+	 * Expected baseline when pass is active: opaque blend, no z-test/write,
+	 * no culling, program 0, and texture units 0..2 unbound.
+	 */
+	qboolean local_pass = false;
+	if (!RB_PassActive ())
+	{
+		RB_BeginPass (PASS_POSTFX);
+		local_pass = true;
+	}
+	else if (RB_CurrentPass () != PASS_POSTFX)
+		Con_DWarning ("GL_GenerateBloomTextureFrom invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
+
 	threshold = q_max (0.f, threshold);
 	float radius = q_max (0.f, radius_scale);
 	if (radius <= 0.f)
@@ -1143,6 +1165,9 @@ static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, f
 		input_tex = framebufs.bloom.pingpong_tex[target_index];
 	}
 	GL_EndGroup ();
+
+	if (local_pass)
+		RB_EndPass ();
 
 	return input_tex;
 }
@@ -1303,6 +1328,14 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		return 0;
 	if (framebufs.ssao.ao_fbo[0] == 0 || framebufs.ssao.ao_fbo[1] == 0)
 		return 0;
+
+	/*
+	 * Leaf baseline: PASS_POSTFX.
+	 * Expected baseline when pass is active: opaque blend, no z-test/write,
+	 * no culling, program 0, and texture units 0..2 unbound.
+	 */
+	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
+		Con_DWarning ("GL_GenerateSSAOTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
@@ -1686,6 +1719,14 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (!R_GodraysReady ())
 		return fallback;
+
+	/*
+	 * Leaf baseline: PASS_POSTFX.
+	 * Expected baseline when pass is active: opaque blend, no z-test/write,
+	 * no culling, program 0, and texture units 0..2 unbound.
+	 */
+	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
+		Con_DWarning ("GL_GenerateGodraysTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
 
 	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);

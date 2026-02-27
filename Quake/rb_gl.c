@@ -399,3 +399,13 @@ void RB_EndPass (void)
 	GL_EndGroup ();
 	rb_pass_active = false;
 }
+
+qboolean RB_PassActive (void)
+{
+	return rb_pass_active;
+}
+
+rb_pass_t RB_CurrentPass (void)
+{
+	return rb_current_pass;
+}
