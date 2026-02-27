@@ -37,7 +37,7 @@ typedef struct
 {
 	vec3_t		boxmins, boxmaxs;// enclose the test object along entire move
 	float		*mins, *maxs;	// size of the moving object
-	vec3_t		mins2, maxs2;	// size when clipping against mosnters
+	vec3_t		mins2, maxs2;	// size when clipping against monsters
 	float		*start, *end;
 	trace_t		trace;
 	int			type;
@@ -230,7 +230,7 @@ areanode_t *SV_CreateAreaNode (int depth, vec3_t mins, vec3_t maxs)
 	else
 		anode->axis = 1;
 
-	anode->dist = 0.5 * (maxs[anode->axis] + mins[anode->axis]);
+	anode->dist = 0.5f * (maxs[anode->axis] + mins[anode->axis]);
 	VectorCopy (mins, mins1);
 	VectorCopy (mins, mins2);
 	VectorCopy (maxs, maxs1);
@@ -307,7 +307,10 @@ SV_AreaTriggerEdicts ( edict_t *ent, areanode_t *node, edict_t **list, int *list
 			continue;
 
 		if (*listcount == listspace)
-			return; // should never happen
+		{
+			Con_DPrintf ("SV_AreaTriggerEdicts: list overflow\n");
+			continue; // don't stomp; keep recursing for the rest of the tree
+		}
 
 		list[*listcount] = touch;
 		(*listcount)++;
@@ -328,7 +331,7 @@ SV_AreaTriggerEdicts ( edict_t *ent, areanode_t *node, edict_t **list, int *list
 SV_TouchLinks
 
 ericw -- copy the touching edicts to an array so we can avoid
-iteating the trigger_edicts linked list while calling PR_ExecuteProgram
+iterating the trigger_edicts linked list while calling PR_ExecuteProgram
 which could potentially corrupt the list while it's being iterated.
 Based on code from Spike.
 ====================
@@ -649,6 +652,7 @@ qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2
 	int			side;
 	float		midf;
 
+recheck:
 // check for empty
 	if (num < 0)
 	{
@@ -685,16 +689,19 @@ qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2
 		t2 = DoublePrecisionDotProduct (plane->normal, p2) - plane->dist;
 	}
 
+// Both points on the same side of the plane: descend without a recursive call.
+// Note: t1 == t2 == 0 is caught by the first branch (both >= 0), so the
+// division below is only reached when t1 and t2 have opposite signs.
 #if 1
 	if (t1 >= 0 && t2 >= 0)
-		return SV_RecursiveHullCheck (hull, node->children[0], p1f, p2f, p1, p2, trace);
+	{ num = node->children[0]; goto recheck; }
 	if (t1 < 0 && t2 < 0)
-		return SV_RecursiveHullCheck (hull, node->children[1], p1f, p2f, p1, p2, trace);
+	{ num = node->children[1]; goto recheck; }
 #else
 	if ( (t1 >= DIST_EPSILON && t2 >= DIST_EPSILON) || (t2 > t1 && t1 >= 0) )
-		return SV_RecursiveHullCheck (hull, node->children[0], p1f, p2f, p1, p2, trace);
+	{ num = node->children[0]; goto recheck; }
 	if ( (t1 <= -DIST_EPSILON && t2 <= -DIST_EPSILON) || (t2 < t1 && t1 <= 0) )
-		return SV_RecursiveHullCheck (hull, node->children[1], p1f, p2f, p1, p2, trace);
+	{ num = node->children[1]; goto recheck; }
 #endif
 
 // put the crosspoint DIST_EPSILON pixels on the near side
@@ -718,7 +725,7 @@ qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2
 		return false;
 
 #ifdef PARANOID
-	if (SV_HullPointContents (sv_hullmodel, mid, node->children[side])
+	if (SV_HullPointContents (hull, node->children[side], mid)
 	== CONTENTS_SOLID)
 	{
 		Con_Printf ("mid PointInHullSolid\n");
@@ -728,8 +735,13 @@ qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2
 
 	if (SV_HullPointContents (hull, node->children[side^1], mid)
 	!= CONTENTS_SOLID)
-// go past the node
-		return SV_RecursiveHullCheck (hull, node->children[side^1], midf, p2f, mid, p2, trace);
+	{
+// go past the node — iterative restart instead of tail-call
+		VectorCopy (mid, p1);
+		p1f = midf;
+		num = node->children[side^1];
+		goto recheck;
+	}
 
 	if (trace->allsolid)
 		return false;		// never got out of the solid area
@@ -751,7 +763,7 @@ qboolean SV_RecursiveHullCheck (const hull_t *hull, int num, float p1f, float p2
 	while (SV_HullPointContents (hull, hull->firstclipnode, mid)
 	== CONTENTS_SOLID)
 	{ // shouldn't really happen, but does occasionally
-		frac -= 0.1;
+		frac -= 0.1f;
 		if (frac < 0)
 		{
 			trace->fraction = midf;
@@ -871,14 +883,10 @@ void SV_ClipToLinks ( areanode_t *node, moveclip_t *clip )
 		if (trace.allsolid || trace.startsolid ||
 		trace.fraction < clip->trace.fraction)
 		{
+			qboolean was_startsolid = clip->trace.startsolid;
 			trace.ent = touch;
-		 	if (clip->trace.startsolid)
-			{
-				clip->trace = trace;
-				clip->trace.startsolid = true;
-			}
-			else
-				clip->trace = trace;
+			clip->trace = trace;
+			clip->trace.startsolid |= was_startsolid;
 		}
 		else if (trace.startsolid)
 			clip->trace.startsolid = true;
@@ -907,21 +915,15 @@ void SV_MoveBounds (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, vec3_t b
 boxmins[0] = boxmins[1] = boxmins[2] = -9999;
 boxmaxs[0] = boxmaxs[1] = boxmaxs[2] = 9999;
 #else
-	int		i;
-
-	for (i=0 ; i<3 ; i++)
-	{
-		if (end[i] > start[i])
-		{
-			boxmins[i] = start[i] + mins[i] - 1;
-			boxmaxs[i] = end[i] + maxs[i] + 1;
-		}
-		else
-		{
-			boxmins[i] = end[i] + mins[i] - 1;
-			boxmaxs[i] = start[i] + maxs[i] + 1;
-		}
-	}
+// Unrolled: compute per-axis swept AABB without loop overhead.
+// For each axis the swept min is min(start,end)+obj_min-1,
+// and the swept max is max(start,end)+obj_max+1.
+	boxmins[0] = (start[0] < end[0] ? start[0] : end[0]) + mins[0] - 1;
+	boxmaxs[0] = (start[0] > end[0] ? start[0] : end[0]) + maxs[0] + 1;
+	boxmins[1] = (start[1] < end[1] ? start[1] : end[1]) + mins[1] - 1;
+	boxmaxs[1] = (start[1] > end[1] ? start[1] : end[1]) + maxs[1] + 1;
+	boxmins[2] = (start[2] < end[2] ? start[2] : end[2]) + mins[2] - 1;
+	boxmaxs[2] = (start[2] > end[2] ? start[2] : end[2]) + maxs[2] + 1;
 #endif
 }
 

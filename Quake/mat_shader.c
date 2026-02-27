@@ -163,6 +163,27 @@ char *Mat_Shader_DupString (const char *value)
 	return out;
 }
 
+static void Mat_Shader_FreeStageData (mat_shader_stage_t *stage)
+{
+	if (!stage)
+		return;
+	if (stage->map_path)
+	{
+		Z_Free (stage->map_path);
+		stage->map_path = NULL;
+	}
+	if (stage->anim_map_frames)
+	{
+		size_t j;
+		for (j = 0; j < VEC_SIZE (stage->anim_map_frames); ++j)
+		{
+			if (stage->anim_map_frames[j])
+				Z_Free (stage->anim_map_frames[j]);
+		}
+		VEC_FREE (stage->anim_map_frames);
+	}
+}
+
 static void Mat_Shader_FreeMaterial (shader_material_t *material)
 {
 	size_t i;
@@ -170,23 +191,22 @@ static void Mat_Shader_FreeMaterial (shader_material_t *material)
 	if (!material)
 		return;
 
-	for (i = 0; i < VEC_SIZE (material->stages); ++i)
+	if (material->stages)
 	{
-		mat_shader_stage_t *stage = &material->stages[i];
-		if (stage->map_path)
-			Z_Free (stage->map_path);
-		if (stage->anim_map_frames)
-		{
-			size_t j;
-			for (j = 0; j < VEC_SIZE (stage->anim_map_frames); ++j)
-			{
-				if (stage->anim_map_frames[j])
-					Z_Free (stage->anim_map_frames[j]);
-			}
-			VEC_FREE (stage->anim_map_frames);
-		}
+		for (i = 0; i < VEC_SIZE (material->stages); ++i)
+			Mat_Shader_FreeStageData (&material->stages[i]);
+		VEC_FREE (material->stages);
+		/* stage0 is a value copy of stages[0]; its map_path/anim_map_frames
+		   are owned by stages[0] and already freed above. Clear the pointers
+		   to prevent any accidental use-after-free. */
+		material->stage0.map_path = NULL;
+		material->stage0.anim_map_frames = NULL;
 	}
-	VEC_FREE (material->stages);
+	else
+	{
+		/* No stages[] array: stage0 owns its own allocations. */
+		Mat_Shader_FreeStageData (&material->stage0);
+	}
 
 	if (material->editor_image)
 		Z_Free (material->editor_image);
@@ -385,7 +405,7 @@ static void Mat_Shader_RecordUnknownToken (const char *token, mat_shader_keyword
 
 static void Mat_Shader_ReportAppend (char **buffer, size_t *len, size_t *cap, const char *fmt, ...)
 {
-	char temp[1024];
+	char temp[2048];
 	va_list args;
 	size_t add;
 
@@ -400,15 +420,14 @@ static void Mat_Shader_ReportAppend (char **buffer, size_t *len, size_t *cap, co
 	if (*len + add + 1 > *cap)
 	{
 		size_t newcap = *cap ? *cap : 1024;
+		char *newbuf;
 		while (newcap < *len + add + 1)
 			newcap *= 2;
-		{
-			char *newbuf = (char *) realloc (*buffer, newcap);
-			if (!newbuf)
-				return;
-			*buffer = newbuf;
-			*cap = newcap;
-		}
+		newbuf = (char *) realloc (*buffer, newcap);
+		if (!newbuf)
+			return;
+		*buffer = newbuf;
+		*cap = newcap;
 	}
 
 	memcpy (*buffer + *len, temp, add);
@@ -1005,7 +1024,7 @@ static void Mat_Shader_Reload_f (cvar_t *var)
 	if (var->value <= 0.f)
 		return;
 	Con_Printf ("Reloading material shaders\n");
-	r_reloadshaders.value = 0.f;
+	Cvar_SetValue ("r_reloadshaders", 0.f);
 	Mat_Shader_LoadAll ();
 }
 
@@ -1014,7 +1033,7 @@ static void Mat_Shader_Fuzz_f (cvar_t *var)
 	if (var->value <= 0.f)
 		return;
 	Mat_Shader_DebugFuzzParse ();
-	var->value = 0.f;
+	Cvar_SetValue ("r_matshader_fuzz", 0.f);
 }
 
 static void Mat_Shader_List_f (void)

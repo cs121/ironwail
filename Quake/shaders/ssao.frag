@@ -511,12 +511,16 @@ void main()
 	if (viewZ > maxDistance)
 		ao = 1.0;
 
-	float fogFactor    = FogFactorFromViewPos(viewPos);
-	// FIX #3: smoothstep(0, 0.6, 1-fogFactor) cut off AO when fogFactor>0.4 (only 40%
-	// fogged) which was far too aggressive — surfaces at moderate fog still had full
-	// AO darkening removed. Use transmittance directly (consistent with postprocess.frag
-	// which uses pow(transmittance, ssaoFogPower) for the same purpose).
-	float aoFogWeight  = 1.0 - clamp(fogFactor, 0.0, 1.0);
+	// FIX: Fog damping is handled exclusively by postprocess.frag.
+	// ssao.frag previously also applied fog damping (via aoFogWeight / mix), which
+	// caused double-damping: postprocess.frag then damped the already-damped AO again.
+	// Result: fog_power had to be tuned to ~10 to compensate — completely wrong.
+	// ssao.frag now outputs raw AO. postprocess.frag applies fog_strength/fog_power once,
+	// correctly, against the raw value.
+	//
+	// Debug modes 2/3 remain available to inspect the fog factor this pixel would have,
+	// using u_fogParams.y (saved scene density) so they reflect the real fog state.
+	float fogFactor = FogFactorFromViewPos(viewPos);
 
 	if (debugMode == 3)
 	{
@@ -525,6 +529,8 @@ void main()
 	}
 	if (debugMode == 2)
 	{
+		// Diagnostic: show what single-damped AO looks like
+		float aoFogWeight = 1.0 - clamp(fogFactor, 0.0, 1.0);
 		outColor = vec4(vec3(ao * aoFogWeight), 1.0);
 		return;
 	}
@@ -534,6 +540,5 @@ void main()
 		return;
 	}
 
-	ao = mix(1.0, ao, aoFogWeight);
 	outColor = vec4(ao, ao, ao, 1.0);
 }

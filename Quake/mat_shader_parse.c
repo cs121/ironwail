@@ -240,18 +240,44 @@ static qboolean Mat_Shader_IsBraceToken (const char *token)
 static qboolean Mat_Shader_IsNumericToken (const char *token)
 {
 	size_t i;
+	qboolean has_digit = false;
 
 	if (!token || !token[0])
 		return false;
 
-	for (i = 0; token[i]; ++i)
+	/* Optional leading sign */
+	i = 0;
+	if (token[i] == '+' || token[i] == '-')
+		i++;
+
+	for (; token[i]; ++i)
 	{
-		if ((token[i] >= '0' && token[i] <= '9') || token[i] == '+' || token[i] == '-' || token[i] == '.' || token[i] == 'e' || token[i] == 'E')
+		if (token[i] >= '0' && token[i] <= '9')
+		{
+			has_digit = true;
 			continue;
+		}
+		if (token[i] == '.')
+			continue;
+		if ((token[i] == 'e' || token[i] == 'E') && has_digit)
+		{
+			/* Optional exponent sign followed by digits */
+			i++;
+			if (token[i] == '+' || token[i] == '-')
+				i++;
+			for (; token[i]; ++i)
+			{
+				if (token[i] >= '0' && token[i] <= '9')
+					has_digit = true;
+				else
+					return false;
+			}
+			break;
+		}
 		return false;
 	}
 
-	return true;
+	return has_digit;
 }
 
 static qboolean Mat_Shader_IsBoolToken (const char *token)
@@ -268,6 +294,7 @@ static qboolean Mat_Shader_IsBoolToken (const char *token)
 static qboolean Mat_Shader_ParseLine (const char **data, mat_shader_parse_state_t *state)
 {
 	const char *cursor;
+	const char *line_end;
 	stringview_t line;
 
 	if (!data || !*data)
@@ -279,9 +306,15 @@ static qboolean Mat_Shader_ParseLine (const char **data, mat_shader_parse_state_
 
 	if (state)
 	{
-		const char *line_end = cursor + line.len;
-		if (*line_end == '\n')
-			state->line++;
+		/* Count all newlines consumed, not just the terminating one */
+		line_end = cursor + line.len;
+		for (; cursor <= line_end; ++cursor)
+		{
+			if (*cursor == '\n')
+				state->line++;
+			if (cursor == line_end)
+				break;
+		}
 	}
 
 	return true;
@@ -379,7 +412,8 @@ static const char *StripCommaToken (const char *token, char *buffer, size_t buff
 	if (len >= buffer_size)
 		len = buffer_size - 1;
 
-	memcpy (buffer, start, len);
+	/* Use memmove: buffer may alias token (e.g. StripCommaToken(buf, buf, size)) */
+	memmove (buffer, start, len);
 	buffer[len] = '\0';
 	return buffer;
 }
@@ -1279,7 +1313,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 					Mat_Shader_ReportUnknownToken (dst_token, MAT_SHADER_KEYWORD_SCOPE_STAGE, material->name,
 						state ? state->source_file : material->source_file,
 						state ? state->token_line : 0u);
-					break;
+					continue;
 				}
 				stage.blend_mode = MAT_BLEND_CUSTOM;
 				stage.blend_src = src;
@@ -1443,8 +1477,12 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 					break;
 				if (state && state->token_limit_hit)
 				{
+					/* Token limit hit mid-animMap frame list. Simply mark the stage
+					   invalid and break; the outer ParseStageBlock loop will handle
+					   cleanup. Do NOT call SkipUnknownBlockOrLine with already_open=true
+					   here — there is no extra '{' open, so that would consume the
+					   stage block's own closing '}' and corrupt the parse position. */
 					valid = false;
-					data = SkipUnknownBlockOrLine (next, true, NULL);
 					goto stage_done;
 				}
 				if (!strcmp (com_token, "{") || !strcmp (com_token, "}"))
@@ -1600,8 +1638,6 @@ stage_done:
 	if (stage.blend_mode != MAT_BLEND_REPLACE || !stage.depth_write || stage.depth_func != MAT_DEPTHFUNC_LEQUAL)
 		material->render_flags |= MAT_RENDER_TRANS;
 
-	if (!material->stages)
-		material->stages = NULL;
 	VEC_PUSH (material->stages, stage);
 
 	if (stage_index == 0)
