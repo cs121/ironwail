@@ -58,6 +58,18 @@ cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "2", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0.3", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_bias = { "r_fogvol_globalfog_noise_bias", "0.0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_x = { "r_fogvol_globalfog_velocity_x", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_y = { "r_fogvol_globalfog_velocity_y", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_z = { "r_fogvol_globalfog_velocity_z", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
 
 extern cvar_t gl_farclip;
 
@@ -605,6 +617,18 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_density_scale);
 	Cvar_RegisterVariable (&r_fogvol_sigma_max);
+	Cvar_RegisterVariable (&r_fogvol_globalfog);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_density_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_falloff);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_amount);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_bias);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_x);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_y);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_z);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_height);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_height_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
 }
 
 void R_FogVol_Clear (void)
@@ -696,42 +720,41 @@ static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t 
 	return sqrtf (dist2);
 }
 
-static qboolean R_FogVol_BuildGlobalVolume (fog_volume_t *volume)
+static void R_FogVol_AddGlobalFog (void)
 {
-	float density = Fog_GetDensity ();
-	float *color;
+	fog_volume_t volume;
+	float *color = Fog_GetColor ();
 
-	if (density <= 0.f)
-		return false;
+	if (r_fogvol_globalfog.value <= 0.f)
+		return;
+	if (r_fogvol.value <= 0.f)
+		return;
+	if (Fog_GetDensity () <= 0.f)
+		return;
 
-	memset (volume, 0, sizeof (*volume));
-	color = Fog_GetColor ();
-	VectorCopy (color, volume->color);
-	volume->density = density;
-	volume->falloff = 0.f;
-	volume->mode = 0;
-	volume->noiseScale = 0.f;
-	volume->noiseAmount = 0.f;
-	volume->noiseBias = 0.f;
-	VectorSet (volume->velocity, 0.f, 0.f, 0.f);
-	volume->maxDistance = 0.f;
-	volume->priority = -9999;
-	volume->enabled = 1;
-	volume->height = 0.f;
-	volume->heightScale = 0.f;
+	memset (&volume, 0, sizeof (volume));
 
-	if (cl.worldmodel)
-	{
-		VectorCopy (cl.worldmodel->mins, volume->mins);
-		VectorCopy (cl.worldmodel->maxs, volume->maxs);
-	}
-	else
-	{
-		VectorSet (volume->mins, -65536.f, -65536.f, -65536.f);
-		VectorSet (volume->maxs,  65536.f,  65536.f,  65536.f);
-	}
+	VectorSet (volume.mins, -8192.f, -8192.f, -8192.f);
+	VectorSet (volume.maxs, 8192.f, 8192.f, 8192.f);
 
-	return true;
+	VectorCopy (color, volume.color);
+
+	volume.density = Fog_GetDensity () * q_max (0.f, r_fogvol_globalfog_density_scale.value);
+	volume.falloff = q_max (0.f, r_fogvol_globalfog_falloff.value);
+	volume.mode = 0;
+	volume.noiseScale = q_max (0.f, r_fogvol_globalfog_noise_scale.value);
+	volume.noiseAmount = CLAMP (0.f, r_fogvol_globalfog_noise_amount.value, 1.f);
+	volume.noiseBias = r_fogvol_globalfog_noise_bias.value;
+	volume.velocity[0] = r_fogvol_globalfog_velocity_x.value;
+	volume.velocity[1] = r_fogvol_globalfog_velocity_y.value;
+	volume.velocity[2] = r_fogvol_globalfog_velocity_z.value;
+	volume.maxDistance = 0.f;
+	volume.priority = (int)Q_rint (r_fogvol_globalfog_priority.value);
+	volume.enabled = 1;
+	volume.height = r_fogvol_globalfog_height.value;
+	volume.heightScale = r_fogvol_globalfog_height_scale.value;
+
+	R_FogVol_AddVolume (&volume);
 }
 
 qboolean R_FogVol_CanRenderGlobal (void)
@@ -952,14 +975,10 @@ void R_FogVol_BuildList (void)
 	if (r_fogvol_testvolumes.value > 0.f)
 		R_FogVol_AddTestVolumes ();
 
-	{
-		fog_volume_t global_volume;
-		if (R_FogVol_BuildGlobalVolume (&global_volume))
-			R_FogVol_AddVolume (&global_volume);
-	}
-
 	if (r_fogvol.value <= 0.f)
 		goto sort_and_done;
+
+	R_FogVol_AddGlobalFog ();
 
 	for (int i = 0; i < r_fogvolume_entity_count; ++i)
 	{
