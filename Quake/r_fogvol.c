@@ -222,6 +222,45 @@ static qboolean R_FogVol_TestDebugEnabled (void)
 	return r_fogvol_testvolumes.value > 0.f || r_fogvol_testvolumes_dumpstate.value > 0.f;
 }
 
+static qboolean R_FogVol_StateDebugEnabled (void)
+{
+	return r_fogvol_debug.value > 0.f || developer.value > 0.f;
+}
+
+static void R_FogVol_LogStateSnapshot (const char *marker)
+{
+	GLint viewport[4] = {0};
+	GLint scissor_box[4] = {0};
+	GLint draw_fbo = 0, read_fbo = 0;
+	GLint draw_buffer = 0, read_buffer = 0;
+	GLint program = 0;
+	GLint active_texture = 0;
+	GLboolean scissor_enabled = GL_FALSE;
+
+	if (!R_FogVol_StateDebugEnabled ())
+		return;
+
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture);
+
+	Con_DPrintf (
+		"FOGVOL_STATE %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d) drawbuf=0x%04x readbuf=0x%04x prog=%d active_tex=%d\n",
+		marker,
+		draw_fbo, read_fbo,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor_enabled,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		(unsigned)draw_buffer, (unsigned)read_buffer,
+		program, active_texture - GL_TEXTURE0);
+}
+
 static void R_FogVol_LogBufferMarker (const char *marker)
 {
 	GLint draw_fbo = 0, read_fbo = 0;
@@ -1254,6 +1293,7 @@ void R_FogVol_Render (void)
 		R_GLStateDump ("before-fogvol");
 		R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
 	}
+	R_FogVol_LogStateSnapshot ("before-pass");
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
 
@@ -1562,7 +1602,10 @@ void R_FogVol_Render (void)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		glViewport (glx, gly, glwidth, glheight);
+		if (use_halfres)
+			glViewport (0, 0, glwidth, glheight);
+		else
+			glViewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
 			if (composite_src_tex)
@@ -1633,6 +1676,29 @@ void R_FogVol_Render (void)
 		R_DebugFlushGeometry ();
 
 done:
+	R_FogVol_LogStateSnapshot ("after-pass");
+	if (use_halfres)
+	{
+		GLint viewport[4] = {0};
+		GLint scissor_box[4] = {0};
+		GLboolean scissor_enabled = GL_FALSE;
+
+		glGetIntegerv (GL_VIEWPORT, viewport);
+		scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+		glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+
+		if (viewport[0] != 0 || viewport[1] != 0 || viewport[2] != vid.width || viewport[3] != vid.height
+			|| (scissor_enabled && (scissor_box[0] != 0 || scissor_box[1] != 0 || scissor_box[2] != vid.width || scissor_box[3] != vid.height)))
+		{
+			Con_DPrintf ("FOGVOL_STATE defensive-restore viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d)\n",
+				viewport[0], viewport[1], viewport[2], viewport[3],
+				scissor_enabled,
+				scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
+			glViewport (0, 0, vid.width, vid.height);
+			GL_SetScissorEnabled (false);
+			glScissor (0, 0, vid.width, vid.height);
+		}
+	}
 	if (R_FogVol_TestDebugEnabled ())
 	{
 		R_FogVol_LogPipelineState ("FOGVOL_END");
