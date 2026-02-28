@@ -94,8 +94,14 @@ void main()
 
 	// FIX #4: Cast PrevFrameValid to int to avoid signed/unsigned comparison
 	// warnings that some GL drivers promote to errors.
+	// BUG FIX: Bypass temporal blending for ALL debug modes, not just 2-6.
+	// Debug mode 1 (volume colour) was being blended with history, causing
+	// wrong hues from history frame contamination.  Debug modes 2-6 (depth /
+	// tau / transmittance visualisations) were accumulating across frames,
+	// making the visualisation meaningless after the first frame.
+	// Mode 7 (temporal debug) is handled below with its own output path.
 	if (FogHistoryValid == 0 || int(PrevFrameValid) == 0 || FogTemporalAlpha <= 0.0 ||
-	    (FogDebugMode >= 2 && FogDebugMode <= 6))
+	    FogDebugMode != 0)
 	{
 		OutColor = current;
 		return;

@@ -845,39 +845,48 @@ void R_FogVol_ParseEntities (void)
 void R_FogVol_AddTestVolumes (void)
 {
 	fog_volume_t volume;
-	vec3_t origin;
+	vec3_t origin, forward, right, up;
+	AngleVectors (r_refdef.viewangles, forward, right, up);
 	VectorCopy (r_refdef.vieworg, origin);
 
+	/* Single test volume: a fog patch placed 100 units ahead of the camera.
+	 * The player is OUTSIDE the volume looking in, so this cleanly tests
+	 * the compositing pipeline without camera-inside-volume complications.
+	 *
+	 * Expected result: a visible blue-grey fog patch floating in the scene.
+	 * If the scene outside the volume looks correct and the volume itself
+	 * shows fog colour, the pipeline is working.
+	 *
+	 * density=0.02 → tau≈2.0 at 100 units → transmittance≈0.14 (clearly
+	 * visible, opaque-looking fog patch). */
 	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.8f, 0.85f, 0.9f);
-	volume.density = 0.35f;
-	volume.falloff = 24.f;
-	volume.mode = 0;
-	volume.noiseScale = 0.08f;
-	volume.noiseAmount = 0.85f;
-	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, 0.f, 0.f, 6.f);
+	VectorSet (volume.color, 0.6f, 0.75f, 1.0f);
+	volume.density    = 0.02f;
+	volume.falloff    = 16.f;
+	volume.mode       = 0;
+	volume.noiseScale = 0.05f;
+	volume.noiseAmount = 0.6f;
+	volume.noiseBias  = 0.0f;
+	VectorSet (volume.velocity, 0.f, 0.f, 4.f);
 	volume.maxDistance = 0.f;
-	volume.priority = 0;
-	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] - 32.f, origin[1] - 32.f, origin[2] - 16.f);
-	VectorSet (volume.maxs, origin[0] + 32.f, origin[1] + 32.f, origin[2] + 48.f);
-	R_FogVol_AddVolume (&volume);
-
-	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.7f, 0.75f, 0.85f);
-	volume.density = 0.05f;
-	volume.falloff = 32.f;
-	volume.mode = 0;
-	volume.noiseScale = 0.02f;
-	volume.noiseAmount = 0.25f;
-	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, -1.f, 0.5f, 0.f);
-	volume.maxDistance = 0.f;
-	volume.priority = 1;
-	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] - 256.f, origin[1] - 256.f, origin[2] - 128.f);
-	VectorSet (volume.maxs, origin[0] + 256.f, origin[1] + 256.f, origin[2] + 128.f);
+	volume.priority   = 0;
+	volume.enabled    = 1;
+	/* Place the box 100..260 units ahead, 96 units wide, 80 units tall.
+	 * Compute proper axis-aligned bounds from the oriented corners. */
+	{
+		vec3_t c0, c1;
+		VectorMA (origin, 100.f, forward, c0);
+		VectorMA (origin, 260.f, forward, c1);
+		/* half-width along right axis */
+		for (int a = 0; a < 3; ++a)
+		{
+			float span = fabsf (right[a]) * 96.f;
+			volume.mins[a] = q_min (c0[a], c1[a]) - span;
+			volume.maxs[a] = q_max (c0[a], c1[a]) + span;
+		}
+		volume.mins[2] = origin[2] - 40.f;
+		volume.maxs[2] = origin[2] + 80.f;
+	}
 	R_FogVol_AddVolume (&volume);
 }
 
@@ -1177,6 +1186,40 @@ void R_FogVol_Render (void)
 	 * it consistently here so the first `(1 - fog_src)` is deterministic. */
 	fog_src = 0;
 
+	/* BUG FIX (milky white / black outside volumes): after the per-frame clear
+	 * fog_fbo contains (0,0,0,0) everywhere.  The per-volume scissor only
+	 * writes scene+fog inside each volume's AABB projection.  Pixels outside
+	 * stay (0,0,0,0) and get blitted into composite.fbo, overwriting the good
+	 * scene pixels with black, which then accumulates in temporal history.
+	 *
+	 * Fix: pre-fill BOTH fog FBOs with the scene snapshot (finalcopy_tex)
+	 * BEFORE the volume loop.  Each volume's scissored draw then overwrites
+	 * only its AABB region with scene+fog; all other pixels already hold the
+	 * unmodified scene.  The final blit therefore always produces a complete,
+	 * correct image regardless of how small the scissor region is.
+	 *
+	 * We blit into both slots so that ping-pong iteration i>0 (which reads
+	 * fog_tex[fog_src]) also starts with scene content rather than stale data.
+	 */
+	{
+		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		for (int s = 0; s < 2; ++s)
+		{
+			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fog_fbo[s]);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			if (use_halfres)
+				GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
+					0, 0, fog_width, fog_height,
+					GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			else
+				GL_BlitFramebufferFunc (
+					(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+					(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+					GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+	}
+
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
@@ -1237,7 +1280,12 @@ void R_FogVol_Render (void)
 					0, 0, fog_width, fog_height,
 					GL_COLOR_BUFFER_BIT, GL_NEAREST);
 			}
+			/* BUG FIX: Update src_fbo to match src_tex after the copy.
+			 * Previously src_fbo stayed as composite.fbo while src_tex
+			 * became finalcopy_tex, making the subsequent READ_FRAMEBUFFER
+			 * bind incorrect and hazard checks misleading. */
 			src_tex = framebufs.fogvol.finalcopy_tex;
+			src_fbo = framebufs.fogvol.finalcopy_fbo;
 		}
 		else
 		{
@@ -1407,13 +1455,15 @@ void R_FogVol_Render (void)
 			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
 			/* BUG FIX (white screen): Protect composite FBO alpha channel.
-			 * If any fog shader path writes a sub-1 alpha (e.g. transmittance),
-			 * the blit would overwrite composite alpha and the display compositor
-			 * would blend fog pixels against the clear colour → full white frame.
-			 * Belt-and-braces guard complementing the alpha=1.0 fix in shaders. */
+			 * BUG FIX (grey washout): Only blit the viewrect region, not the
+			 * full glwidth×glheight.  The fog FBO is cleared to (0,0,0,0)
+			 * outside the viewrect; blitting that area would overwrite HUD
+			 * and other non-fog pixels with black.  Blit only the view area
+			 * that was actually rendered by the fog shader. */
 			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-				0, 0, glwidth, glheight,
+			GL_BlitFramebufferFunc (
+				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
 			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		}
