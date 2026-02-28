@@ -1602,10 +1602,7 @@ void R_FogVol_Render (void)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		if (use_halfres)
-			glViewport (0, 0, glwidth, glheight);
-		else
-			glViewport (glx, gly, glwidth, glheight);
+		glViewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
 			if (composite_src_tex)
@@ -1682,21 +1679,22 @@ done:
 		GLint viewport[4] = {0};
 		GLint scissor_box[4] = {0};
 		GLboolean scissor_enabled = GL_FALSE;
+		const GLint expected_vp[4] = { glx, gly, glwidth, glheight };
 
 		glGetIntegerv (GL_VIEWPORT, viewport);
 		scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
 		glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
 
-		if (viewport[0] != 0 || viewport[1] != 0 || viewport[2] != vid.width || viewport[3] != vid.height
-			|| (scissor_enabled && (scissor_box[0] != 0 || scissor_box[1] != 0 || scissor_box[2] != vid.width || scissor_box[3] != vid.height)))
+		if (viewport[0] != expected_vp[0] || viewport[1] != expected_vp[1] || viewport[2] != expected_vp[2] || viewport[3] != expected_vp[3]
+			|| (scissor_enabled && (scissor_box[0] != expected_vp[0] || scissor_box[1] != expected_vp[1] || scissor_box[2] != expected_vp[2] || scissor_box[3] != expected_vp[3])))
 		{
 			Con_DPrintf ("FOGVOL_STATE defensive-restore viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d)\n",
 				viewport[0], viewport[1], viewport[2], viewport[3],
 				scissor_enabled,
 				scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
-			glViewport (0, 0, vid.width, vid.height);
+			glViewport (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
 			GL_SetScissorEnabled (false);
-			glScissor (0, 0, vid.width, vid.height);
+			glScissor (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
 		}
 	}
 	if (R_FogVol_TestDebugEnabled ())
