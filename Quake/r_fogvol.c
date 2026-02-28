@@ -29,11 +29,16 @@ typedef struct fog_volume_gpu_s
 {
 	float mins[4];
 	float maxs[4];
+	float sphere[4];
 	float color_density[4];
 	float noise_params[4];
-	float velocity[4];
+	float velocity_windspeed[4];
+	float wind_turbulence[4];
 	float misc[4];
+	float extra[4];
 } fog_volume_gpu_t;
+
+COMPILE_TIME_ASSERT (fog_volume_gpu_align16, (sizeof (fog_volume_gpu_t) % 16) == 0);
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
@@ -42,6 +47,8 @@ static int r_fogvolume_entity_count = 0;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
+cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
+cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "100", CVAR_ARCHIVE };
@@ -52,6 +59,8 @@ cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
@@ -601,6 +610,8 @@ void R_FogVol_Init (void)
 {
 	Cvar_RegisterVariable (&r_fogvol);
 	Cvar_RegisterVariable (&r_fogvol_steps);
+	Cvar_RegisterVariable (&r_fogvol_maxsteps);
+	Cvar_RegisterVariable (&r_fogvol_stepsize);
 	Cvar_RegisterVariable (&r_fogvol_halfres);
 	Cvar_RegisterVariable (&r_fogvol_upsample);
 	Cvar_RegisterVariable (&r_fogvol_upsample_k);
@@ -611,6 +622,8 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
+	Cvar_RegisterVariable (&r_fogvol_blendmode);
+	Cvar_RegisterVariable (&r_fogvol_emissive);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
@@ -645,6 +658,12 @@ static void R_FogVol_ClampVolume (fog_volume_t *volume)
 {
 	volume->density = CLAMP (0.f, volume->density, 10.f);
 	volume->falloff = CLAMP (0.f, volume->falloff, 256.f);
+	volume->noiseAmount = CLAMP (0.f, volume->noiseAmount, 1.f);
+	volume->noiseScale = CLAMP (0.001f, volume->noiseScale, 0.5f);
+	volume->turbulence = CLAMP (0.f, volume->turbulence, 2.f);
+	volume->emissiveStrength = CLAMP (0.f, volume->emissiveStrength, 16.f);
+	volume->shape = CLAMP (0, volume->shape, 2);
+	volume->blendMode = CLAMP (-1, volume->blendMode, 1);
 }
 
 static void R_FogVol_AddVolume (const fog_volume_t *volume)
@@ -699,10 +718,18 @@ static qboolean R_FogVol_ParseVector (const char *value, vec3_t out)
 	return value && sscanf (value, "%f %f %f", &out[0], &out[1], &out[2]) == 3;
 }
 
-static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t *volume)
+static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *volume)
 {
-	float dist2 = 0.f;
+	if (volume->shape == 1)
+	{
+		vec3_t delta;
+		float dist;
+		VectorSubtract (point, volume->sphereCenter, delta);
+		dist = VectorLength (delta) - volume->sphereRadius;
+		return q_max (0.f, dist);
+	}
 
+	float dist2 = 0.f;
 	for (int i = 0; i < 3; ++i)
 	{
 		if (point[i] < volume->mins[i])
@@ -716,7 +743,6 @@ static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t 
 			dist2 += d * d;
 		}
 	}
-
 	return sqrtf (dist2);
 }
 
@@ -797,10 +823,16 @@ void R_FogVol_ParseEntities (void)
 		volume.density = 0.1f;
 		volume.falloff = 16.f;
 		volume.mode = 0;
+		volume.shape = 0;
+		volume.blendMode = -1;
+		volume.emissiveStrength = 0.f;
 		volume.noiseScale = 0.05f;
 		volume.noiseAmount = 0.5f;
 		volume.noiseBias = 0.f;
+		volume.turbulence = 0.f;
 		VectorSet (volume.velocity, 0.f, 0.f, 0.f);
+		volume.windSpeed = 0.f;
+		VectorSet (volume.windDir, 0.f, 0.f, 0.f);
 		volume.maxDistance = 2048.f;
 		volume.priority = 0;
 		volume.enabled = 1;
@@ -882,6 +914,41 @@ void R_FogVol_ParseEntities (void)
 			{
 				volume.mode = atoi (value);
 			}
+			else if (!strcmp (key, "shape"))
+			{
+				if (!q_strcasecmp (value, "sphere") || atoi (value) == 1)
+					volume.shape = 1;
+				else
+					volume.shape = 0;
+			}
+			else if (!strcmp (key, "radius"))
+			{
+				volume.sphereRadius = atof (value);
+			}
+			else if (!strcmp (key, "center"))
+			{
+				R_FogVol_ParseVector (value, volume.sphereCenter);
+			}
+			else if (!strcmp (key, "blendmode"))
+			{
+				volume.blendMode = atoi (value);
+			}
+			else if (!strcmp (key, "emissive"))
+			{
+				volume.emissiveStrength = atof (value);
+			}
+			else if (!strcmp (key, "wind_dir"))
+			{
+				R_FogVol_ParseVector (value, volume.windDir);
+			}
+			else if (!strcmp (key, "wind_speed"))
+			{
+				volume.windSpeed = atof (value);
+			}
+			else if (!strcmp (key, "turbulence"))
+			{
+				volume.turbulence = atof (value);
+			}
 			else if (!strcmp (key, "height"))
 			{
 				volume.height = atof (value);
@@ -908,6 +975,18 @@ void R_FogVol_ParseEntities (void)
 				}
 				VectorCopy (mins, volume.mins);
 				VectorCopy (maxs, volume.maxs);
+				if (volume.shape == 1)
+				{
+					for (int a = 0; a < 3; ++a)
+						volume.sphereCenter[a] = 0.5f * (volume.mins[a] + volume.maxs[a]);
+					if (volume.sphereRadius <= 0.f)
+					{
+						float ex = 0.5f * (volume.maxs[0] - volume.mins[0]);
+						float ey = 0.5f * (volume.maxs[1] - volume.mins[1]);
+						float ez = 0.5f * (volume.maxs[2] - volume.mins[2]);
+						volume.sphereRadius = q_max (ex, q_max (ey, ez));
+					}
+				}
 				R_FogVol_AddEntityVolume (&volume);
 			}
 		}
@@ -938,6 +1017,8 @@ void R_FogVol_AddTestVolumes (void)
 	volume.density    = 0.02f;
 	volume.falloff    = 16.f;
 	volume.mode       = 0;
+	volume.shape      = 0;
+	volume.blendMode  = -1;
 	volume.noiseScale = 0.05f;
 	volume.noiseAmount = 0.6f;
 	volume.noiseBias  = 0.0f;
@@ -988,7 +1069,7 @@ void R_FogVol_BuildList (void)
 			continue;
 		if (volume->maxDistance > 0.f)
 		{
-			float dist = R_FogVol_PointAABBDistance (r_refdef.vieworg, volume);
+			float dist = R_FogVol_PointDistance (r_refdef.vieworg, volume);
 			if (dist > volume->maxDistance)
 				continue;
 		}
@@ -1022,14 +1103,31 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 		view_h = r_refdef.vrect.height;
 	}
 
-	corners[0][0] = v->mins[0]; corners[0][1] = v->mins[1]; corners[0][2] = v->mins[2];
-	corners[1][0] = v->maxs[0]; corners[1][1] = v->mins[1]; corners[1][2] = v->mins[2];
-	corners[2][0] = v->mins[0]; corners[2][1] = v->maxs[1]; corners[2][2] = v->mins[2];
-	corners[3][0] = v->maxs[0]; corners[3][1] = v->maxs[1]; corners[3][2] = v->mins[2];
-	corners[4][0] = v->mins[0]; corners[4][1] = v->mins[1]; corners[4][2] = v->maxs[2];
-	corners[5][0] = v->maxs[0]; corners[5][1] = v->mins[1]; corners[5][2] = v->maxs[2];
-	corners[6][0] = v->mins[0]; corners[6][1] = v->maxs[1]; corners[6][2] = v->maxs[2];
-	corners[7][0] = v->maxs[0]; corners[7][1] = v->maxs[1]; corners[7][2] = v->maxs[2];
+	{
+		vec3_t bmins, bmaxs;
+		if (v->shape == 1)
+		{
+			for (int a = 0; a < 3; ++a)
+			{
+				bmins[a] = v->sphereCenter[a] - v->sphereRadius;
+				bmaxs[a] = v->sphereCenter[a] + v->sphereRadius;
+			}
+		}
+		else
+		{
+			VectorCopy (v->mins, bmins);
+			VectorCopy (v->maxs, bmaxs);
+		}
+
+		corners[0][0] = bmins[0]; corners[0][1] = bmins[1]; corners[0][2] = bmins[2];
+		corners[1][0] = bmaxs[0]; corners[1][1] = bmins[1]; corners[1][2] = bmins[2];
+		corners[2][0] = bmins[0]; corners[2][1] = bmaxs[1]; corners[2][2] = bmins[2];
+		corners[3][0] = bmaxs[0]; corners[3][1] = bmaxs[1]; corners[3][2] = bmins[2];
+		corners[4][0] = bmins[0]; corners[4][1] = bmins[1]; corners[4][2] = bmaxs[2];
+		corners[5][0] = bmaxs[0]; corners[5][1] = bmins[1]; corners[5][2] = bmaxs[2];
+		corners[6][0] = bmins[0]; corners[6][1] = bmaxs[1]; corners[6][2] = bmaxs[2];
+		corners[7][0] = bmaxs[0]; corners[7][1] = bmaxs[1]; corners[7][2] = bmaxs[2];
+	}
 
 	for (int i = 0; i < 8; ++i)
 	{
@@ -1173,7 +1271,12 @@ void R_FogVol_Render (void)
 		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
 	else
 		steps = (int)Q_rint (r_fogvol_steps.value);
-	steps = CLAMP (8, steps, 128);
+	if (r_fogvol_stepsize.value > 0.f)
+	{
+		float step_size = q_max (1.f, r_fogvol_stepsize.value);
+		steps = (int)Q_rint (depth_far / step_size);
+	}
+	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
@@ -1190,6 +1293,11 @@ void R_FogVol_Render (void)
 		gpu->maxs[2] = v->maxs[2];
 		gpu->maxs[3] = 0.f;
 
+		gpu->sphere[0] = v->sphereCenter[0];
+		gpu->sphere[1] = v->sphereCenter[1];
+		gpu->sphere[2] = v->sphereCenter[2];
+		gpu->sphere[3] = q_max (0.f, v->sphereRadius);
+
 		gpu->color_density[0] = v->color[0];
 		gpu->color_density[1] = v->color[1];
 		gpu->color_density[2] = v->color[2];
@@ -1200,15 +1308,25 @@ void R_FogVol_Render (void)
 		gpu->noise_params[2] = v->noiseBias;
 		gpu->noise_params[3] = v->maxDistance;
 
-		gpu->velocity[0] = v->velocity[0];
-		gpu->velocity[1] = v->velocity[1];
-		gpu->velocity[2] = v->velocity[2];
-		gpu->velocity[3] = 0.f;
+		gpu->velocity_windspeed[0] = v->velocity[0];
+		gpu->velocity_windspeed[1] = v->velocity[1];
+		gpu->velocity_windspeed[2] = v->velocity[2];
+		gpu->velocity_windspeed[3] = v->windSpeed;
+
+		gpu->wind_turbulence[0] = v->windDir[0];
+		gpu->wind_turbulence[1] = v->windDir[1];
+		gpu->wind_turbulence[2] = v->windDir[2];
+		gpu->wind_turbulence[3] = v->turbulence;
 
 		gpu->misc[0] = (float)v->priority;
 		gpu->misc[1] = (float)v->enabled;
 		gpu->misc[2] = v->falloff;
-		gpu->misc[3] = (float)v->mode;
+		gpu->misc[3] = v->height;
+
+		gpu->extra[0] = (float)v->shape;
+		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
+		gpu->extra[2] = v->emissiveStrength;
+		gpu->extra[3] = v->heightScale;
 	}
 
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
@@ -1232,6 +1350,8 @@ void R_FogVol_Render (void)
 	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
 	GL_Uniform4fFunc (12, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
 	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
+	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
