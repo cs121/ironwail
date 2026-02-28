@@ -696,6 +696,57 @@ static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t 
 	return sqrtf (dist2);
 }
 
+static qboolean R_FogVol_BuildGlobalVolume (fog_volume_t *volume)
+{
+	float density = Fog_GetDensity ();
+	float *color;
+
+	if (density <= 0.f)
+		return false;
+
+	memset (volume, 0, sizeof (*volume));
+	color = Fog_GetColor ();
+	VectorCopy (color, volume->color);
+	volume->density = density;
+	volume->falloff = 0.f;
+	volume->mode = 0;
+	volume->noiseScale = 0.f;
+	volume->noiseAmount = 0.f;
+	volume->noiseBias = 0.f;
+	VectorSet (volume->velocity, 0.f, 0.f, 0.f);
+	volume->maxDistance = 0.f;
+	volume->priority = -9999;
+	volume->enabled = 1;
+	volume->height = 0.f;
+	volume->heightScale = 0.f;
+
+	if (cl.worldmodel)
+	{
+		VectorCopy (cl.worldmodel->mins, volume->mins);
+		VectorCopy (cl.worldmodel->maxs, volume->maxs);
+	}
+	else
+	{
+		VectorSet (volume->mins, -65536.f, -65536.f, -65536.f);
+		VectorSet (volume->maxs,  65536.f,  65536.f,  65536.f);
+	}
+
+	return true;
+}
+
+qboolean R_FogVol_CanRenderGlobal (void)
+{
+	if (Fog_GetDensity () <= 0.f)
+		return false;
+	if (!glprogs.fogvol)
+		return false;
+	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex[0] == 0)
+		return false;
+	if (framebufs.composite.depth_stencil_tex == 0)
+		return false;
+	return true;
+}
+
 void R_FogVol_ParseEntities (void)
 {
 	const char *data;
@@ -901,6 +952,12 @@ void R_FogVol_BuildList (void)
 	if (r_fogvol_testvolumes.value > 0.f)
 		R_FogVol_AddTestVolumes ();
 
+	{
+		fog_volume_t global_volume;
+		if (R_FogVol_BuildGlobalVolume (&global_volume))
+			R_FogVol_AddVolume (&global_volume);
+	}
+
 	if (r_fogvol.value <= 0.f)
 		goto sort_and_done;
 
@@ -1054,11 +1111,6 @@ void R_FogVol_Render (void)
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
 
-	/* BUG FIX (testvolumes): allow rendering when testvolumes are active even
-	 * if r_fogvol=0.  r_fogvolume_count already reflects testvolumes (set in
-	 * BuildList), so skip only if both flags are off. */
-	if (r_fogvol.value <= 0.f && r_fogvol_testvolumes.value <= 0.f)
-		return;
 	if (!glprogs.fogvol)
 		return;
 	if (r_fogvolume_count <= 0)
