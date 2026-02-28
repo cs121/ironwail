@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "mat_shader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
@@ -207,12 +206,12 @@ static void R_MarkVisSurfaces (byte* vis)
 	COMPILE_TIME_ASSERT (vis_alignment_must_be_multiple_of_uint, (VIS_ALIGN & 3) == 0);
 	vissize = (vissize + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
 
-	RB_UseProgram (glprogs.clear_indirect);
+	GL_UseProgram (glprogs.clear_indirect);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_bmodel_indirect_buffer, 0, cl.worldmodel->texofs[TEXTYPE_COUNT] * sizeof(bmodel_draw_indirect_t));
 	GL_DispatchComputeFunc ((cl.worldmodel->texofs[TEXTYPE_COUNT] + 63) / 64, 1, 1);
 	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
 
-	RB_UseProgram (glprogs.cull_mark);
+	GL_UseProgram (glprogs.cull_mark);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, gl_bmodel_ibo, 0, gl_bmodel_ibo_size);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, vis, vissize, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 3, buf, (GLintptr)ofs, vissize);
@@ -431,7 +430,7 @@ static void R_FlushBModelCalls (void)
 
 	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
 
-	RB_UseProgram (glprogs.gather_indirect);
+	GL_UseProgram (glprogs.gather_indirect);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 5, gl_bmodel_indirect_buffer, 0, gl_bmodel_indirect_buffer_size);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, cmdbuf, dstcmdofs, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_call_remap, sizeof (bmodel_call_remap[0]) * num_bmodel_calls, &buf, &ofs);
@@ -439,7 +438,7 @@ static void R_FlushBModelCalls (void)
 	GL_DispatchComputeFunc ((num_bmodel_calls + 63) / 64, 1, 1);
 	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
 
-	RB_UseProgram (bmodel_batch_program);
+	GL_UseProgram (bmodel_batch_program);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
@@ -467,7 +466,7 @@ static void R_FlushBModelCalls (void)
 		{
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
-			RB_BindTexture (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
+			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
 		}
 	}
@@ -1031,8 +1030,8 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 		return;
 
 	R_ResetBModelCalls (program);
-	RB_BindTexture (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-	RB_BindTexture (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1162,15 +1161,15 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					if (num_bmodel_calls)
 						R_FlushBModelCalls ();
 					R_ResetBModelCalls (program);
-					RB_SetState (stage_state);
+					GL_SetState (stage_state);
 					current_state = stage_state;
-					RB_DepthFunc (depth_func);
+					glDepthFunc (depth_func);
 					current_depth = depth_func;
 
 					if (stage->blend_mode == MAT_BLEND_PREMULT)
-						RB_BlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+						glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 					else if (stage->blend_mode == MAT_BLEND_CUSTOM)
-						RB_BlendFunc (stage->blend_src, stage->blend_dst);
+						glBlendFunc (stage->blend_src, stage->blend_dst);
 					current_blend_mode = stage->blend_mode;
 					current_blend_src = stage->blend_src;
 					current_blend_dst = stage->blend_dst;
@@ -1195,7 +1194,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	RB_DepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
@@ -1233,9 +1232,9 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		return;
 
 	R_ResetBModelCalls (glprogs.godrays_source);
-	RB_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
-	RB_BindTexture (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-	RB_BindTexture (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1367,7 +1366,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	RB_DepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 /*
@@ -1471,19 +1470,19 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
         R_ResetBModelCalls (program);
-        RB_SetState (state);
-        RB_UseProgram (program);
+        GL_SetState (state);
+        GL_UseProgram (program);
 if (pass <= BP_ALPHATEST)
 {
-RB_UseProgram (program);
-	RB_BindTexture (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-	RB_BindTexture (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+GL_UseProgram (program);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
 }
 else if (pass == BP_SKYCUBEMAP)
-	RB_BindTexture (GL_TEXTURE2, skybox->cubemap);
+	GL_Bind (GL_TEXTURE2, skybox->cubemap);
 
         GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
         GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -1585,7 +1584,7 @@ else if (pass == BP_SKYCUBEMAP)
 		baseinst += numinst;
         }
 
-	RB_UseProgram (program);
+	GL_UseProgram (program);
 	R_FlushBModelCalls ();
 
 	if (pass == BP_SOLID || pass == BP_ALPHATEST)
@@ -1678,11 +1677,11 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	shader_time = cl.time;
 
 	R_ResetBModelCalls (program);
-	RB_UseProgram (program);
+	GL_UseProgram (program);
 	GL_Uniform1fFunc (12, shader_time);
-	RB_SetState (state);
-	RB_BindTexture (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
-	RB_BindTexture (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_SetState (state);
+	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
+	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);
@@ -1736,7 +1735,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 				R_FlushBModelCalls ();
 				program = target_program;
 				R_ResetBModelCalls (program);
-				RB_UseProgram (program);
+				GL_UseProgram (program);
 				GL_Uniform1fFunc (12, shader_time);
 			}
 			{

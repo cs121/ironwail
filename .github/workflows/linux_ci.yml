@@ -2,16 +2,15 @@ name: Linux CI
 on: [push, pull_request]
 jobs:
   build:
-    name: Linux / ${{ matrix.compiler }} / ${{ matrix.build_name }}
+    name: Linux / ${{ matrix.compiler }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         compiler: ["clang", "gcc"]
-        build_name: [Release, Debug]
     steps:
     - uses: actions/checkout@v4
     - name: Install Dependencies
       run: sudo apt update && sudo apt install libcurl4-openssl-dev libmpg123-dev libsdl2-dev libvorbis-dev
     - name: Build
-      run: make --jobs=3 --keep-going --directory=Quake CC=${{ matrix.compiler }} ${{ matrix.build_name == 'Debug' && 'DEBUG=1' || '' }}
+      run: make --jobs=3 --keep-going --directory=Quake CC=${{ matrix.compiler }}

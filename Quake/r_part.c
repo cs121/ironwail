@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
-#include "rb_gl.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -685,7 +684,6 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	//float			alpha; //johnfitz -- particle transparency
 	float			scalex, scaley;
 	qboolean		dither, oit;
-	qboolean		local_pass = false;
 	int				i;
 
 	if (!r_particles.value)
@@ -698,24 +696,11 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	if (!showtris && alpha != ((int)r_particles.value != 2))
 		return;
 
-	/*
-	 * Leaf baseline: PASS_PARTICLES (or show-tris overlay path without a pass).
-	 * Expected baseline when pass is active: opaque blend, depth test/write on,
-	 * back-face cull, program 0, and texture units 0..2 unbound.
-	 */
-	if (!RB_PassActive ())
-	{
-		RB_BeginPass (PASS_PARTICLES);
-		local_pass = true;
-	}
-	else if (RB_CurrentPass () != PASS_PARTICLES)
-		Con_DWarning ("R_DrawParticles_Real invoked outside PASS_PARTICLES (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	GL_BeginGroup ("Particles");
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
 	oit = (alpha && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT);
-	RB_UseProgram (glprogs.particles[oit][dither]);
+	GL_UseProgram (glprogs.particles[oit][dither]);
 
 	// compensate for apparent size of different particle textures
 	// this bakes in the additional scaling of vup and vright by 1.5f for billboarding,
@@ -727,9 +712,9 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	GL_Uniform3fFunc (0, scalex, scaley, uvscale);
 
 	if (alpha)
-		RB_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		GL_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 	else
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 
 	numpartverts = 0;
 	for (i = 0, p = particles; i < r_numactiveparticles; i++, p++)
@@ -754,9 +739,6 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	R_FlushParticleBatch ();
 
 	GL_EndGroup ();
-
-	if (local_pass)
-		RB_EndPass ();
 }
 
 /*
@@ -777,3 +759,4 @@ void R_DrawParticles_ShowTris (void)
 {
 	R_DrawParticles_Real (false, true);
 }
+

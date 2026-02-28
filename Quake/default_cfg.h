@@ -45,8 +45,6 @@ static const char default_cfg[] =
 
 "alias zoom_in \"togglezoom\"\n"
 "alias zoom_out \"togglezoom\"\n"
-"alias qa_stateleaks_on \"r_gl_state_validate 1; r_rb_assert_state 1; echo [QA] state-leak preset ON (validate=1 assert=1)\"\n"
-"alias qa_stateleaks_off \"r_gl_state_validate 0; r_rb_assert_state 0; echo [QA] state-leak preset OFF\"\n"
 "bind F11 zoom_in\n"
 
 "bind F1 \"help\"\n"

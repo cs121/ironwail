@@ -1103,18 +1103,6 @@ static void GL_CheckExtensions (void)
 		GL_InitFunctions (gl_arb_bindless_texture_functions, false)
 	;
 
-	if (gl_bindless_able &&
-		(
-			q_strcasestr (gl_vendor, "Intel") ||
-			q_strcasestr (gl_renderer, "llvmpipe") ||
-			q_strcasestr (gl_renderer, "softpipe") ||
-			q_strcasestr (gl_renderer, "SwiftShader")
-		))
-	{
-		Con_Warning ("disabling bindless textures on this renderer due to known stability issues\n");
-		gl_bindless_able = false;
-	}
-
 	gl_clipcontrol_able =
 		!COM_CheckParm ("-noclipcontrol") &&
 		GL_FindExtension ("GL_ARB_clip_control") &&

@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
@@ -535,14 +534,6 @@ void R_FlushAliasInstances (qboolean showtris)
 	if (!ibuf.count)
 		return;
 
-	/*
-	 * Leaf baseline: PASS_ENTS_OPAQUE/PASS_ENTS_ALPHA (or show-tris overlay path
-	 * without a pass). Expected baseline when pass is active: opaque blend,
-	 * depth test/write on, back-face cull, program 0, and textures 0..2 unbound.
-	 */
-	if (RB_PassActive () && RB_CurrentPass () != PASS_ENTS_OPAQUE && RB_CurrentPass () != PASS_ENTS_ALPHA)
-		Con_DWarning ("R_FlushAliasInstances invoked outside entity passes (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	R_GLStateDump (ibuf.ent == &cl.viewent ? "before-viewmodel" : "before-alias");
 
 	model = ibuf.ent->model;
@@ -568,7 +559,7 @@ void R_FlushAliasInstances (qboolean showtris)
 		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
 		break;
 	}
-	RB_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 
 	if (md5)
 		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
@@ -579,7 +570,7 @@ void R_FlushAliasInstances (qboolean showtris)
 		state |= GLS_BLEND_OPAQUE;
 	else
 		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
-	RB_SetState (state);
+	GL_SetState (state);
 
 memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));

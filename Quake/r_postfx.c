@@ -20,7 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "r_postfx.h"
 #include "cl_postfx.h"
 #include "gl_texmgr.h"
@@ -148,12 +147,12 @@ void R_PostFX_ReloadLUTs (void)
 	}
 	R_PostFX_GenerateIdentityLUT (lut_storage, size);
 
-	glGenTextures (1, &r_postfx_lut_tex); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
+	glGenTextures (1, &r_postfx_lut_tex);
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, r_postfx_lut_tex);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); // GL-EXCEPTION: docs/render_backend_gl_exceptions.md#r_postfxc
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
 	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
 

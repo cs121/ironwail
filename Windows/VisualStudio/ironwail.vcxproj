@@ -235,7 +235,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">CompileAsCpp</CompileAs>
     </ClCompile>
     <ClCompile Include="..\..\Quake\cd_null.c" />
-    <ClCompile Include="..\..\Quake\backend_gl_exec.c" />
     <ClCompile Include="..\..\Quake\cfgfile.c" />
     <ClCompile Include="..\..\Quake\chase.c" />
     <ClCompile Include="..\..\Quake\cl_demo.c" />
@@ -311,7 +310,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="..\..\Quake\r_alias.c" />
-    <ClCompile Include="..\..\Quake\rb_gl.c" />
     <ClCompile Include="..\..\Quake\r_brush.c" />
     <ClCompile Include="..\..\Quake\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\r_fogvol.c" />
@@ -424,8 +422,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
     <ClInclude Include="..\..\Quake\r_fogvol.h" />
     <ClInclude Include="..\..\Quake\resource.h" />
-    <ClInclude Include="..\..\Quake\render_backend.h" />
-    <ClInclude Include="..\..\Quake\rb_gl.h" />
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />
     <ClInclude Include="..\..\Quake\sidebar.h" />
