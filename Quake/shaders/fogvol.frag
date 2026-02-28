@@ -391,7 +391,10 @@ void main()
 			if (noiseBias > 0.0)
 				n = smoothstep(noiseBias, 1.0, n);
 			float amt   = clamp(volume.noise_params.y, 0.0, 1.0);
-			noiseFactor = mix(1.0, n, amt);
+			// Keep average density stable while scaling modulation strength.
+			// n is [0..1], so remap to a factor centered around 1.0.
+			float modulation = clamp(2.0 * n, 0.0, 2.0);
+			noiseFactor = mix(1.0, modulation, amt);
 		}
 
 		float sigma  = min(density * noiseFactor * edgeFade * HeightFactor(p, volume), FogDensityParams.y);
