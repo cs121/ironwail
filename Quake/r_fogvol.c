@@ -71,7 +71,7 @@ cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0.3", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_noise_bias = { "r_fogvol_globalfog_noise_bias", "0.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_velocity_x = { "r_fogvol_globalfog_velocity_x", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_velocity_y = { "r_fogvol_globalfog_velocity_y", "0", CVAR_ARCHIVE };
@@ -1249,8 +1249,11 @@ void R_FogVol_Render (void)
 	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
 	if (use_test_guard)
 		R_FogVol_CaptureRestoreState (&restore_state);
-	R_GLStateDump ("before-fogvol");
-	R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
+	if (R_FogVol_TestDebugEnabled ())
+	{
+		R_GLStateDump ("before-fogvol");
+		R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
+	}
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
 
@@ -1376,40 +1379,6 @@ void R_FogVol_Render (void)
 	 * (which already existed at line 1181) — the missing piece was initialising
 	 * it consistently here so the first `(1 - fog_src)` is deterministic. */
 	fog_src = 0;
-
-	/* BUG FIX (milky white / black outside volumes): after the per-frame clear
-	 * fog_fbo contains (0,0,0,0) everywhere.  The per-volume scissor only
-	 * writes scene+fog inside each volume's AABB projection.  Pixels outside
-	 * stay (0,0,0,0) and get blitted into composite.fbo, overwriting the good
-	 * scene pixels with black, which then accumulates in temporal history.
-	 *
-	 * Fix: pre-fill BOTH fog FBOs with the scene snapshot (finalcopy_tex)
-	 * BEFORE the volume loop.  Each volume's scissored draw then overwrites
-	 * only its AABB region with scene+fog; all other pixels already hold the
-	 * unmodified scene.  The final blit therefore always produces a complete,
-	 * correct image regardless of how small the scissor region is.
-	 *
-	 * We blit into both slots so that ping-pong iteration i>0 (which reads
-	 * fog_tex[fog_src]) also starts with scene content rather than stale data.
-	 */
-	{
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		for (int s = 0; s < 2; ++s)
-		{
-			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fog_fbo[s]);
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			if (use_halfres)
-				GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-					0, 0, fog_width, fog_height,
-					GL_COLOR_BUFFER_BIT, GL_LINEAR);
-			else
-				GL_BlitFramebufferFunc (
-					(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-					(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-					GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		}
-	}
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
@@ -1664,8 +1633,11 @@ void R_FogVol_Render (void)
 		R_DebugFlushGeometry ();
 
 done:
-	R_FogVol_LogPipelineState ("FOGVOL_END");
-	R_GLStateDump ("after-fogvol");
+	if (R_FogVol_TestDebugEnabled ())
+	{
+		R_FogVol_LogPipelineState ("FOGVOL_END");
+		R_GLStateDump ("after-fogvol");
+	}
 	if (use_test_guard)
 	{
 		R_FogVol_Restore3DRenderState (&restore_state);
