@@ -173,6 +173,10 @@ void main()
 	}
 
 	vec3  blended      = mix(current.rgb, history.rgb, alpha);
-	float blendedAlpha = mix(current.a,   history.a,   alpha);
-	OutColor = vec4(blended, blendedAlpha);
+	// BUG FIX (white screen): fogvol.frag now writes alpha=1.0 (scene is
+	// already composited in RGB).  Mirror that here so the temporal output
+	// never writes a sub-1 alpha into the history / composite FBO, which
+	// would cause the display to treat fog pixels as semi-transparent and
+	// blend them against the window clear colour (typically white).
+	OutColor = vec4(blended, 1.0);
 }

@@ -885,8 +885,15 @@ void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
 
+	/* BUG FIX (testvolumes): r_fogvol_testvolumes must work independently of
+	 * r_fogvol so developers can test the pipeline without setting up entity
+	 * fog volumes.  Add test volumes first if requested, then check r_fogvol
+	 * for the entity-volume path. */
+	if (r_fogvol_testvolumes.value > 0.f)
+		R_FogVol_AddTestVolumes ();
+
 	if (r_fogvol.value <= 0.f)
-		return;
+		goto sort_and_done;
 
 	for (int i = 0; i < r_fogvolume_entity_count; ++i)
 	{
@@ -903,9 +910,7 @@ void R_FogVol_BuildList (void)
 		R_FogVol_AddVolume (volume);
 	}
 
-	if (r_fogvol_testvolumes.value > 0.f)
-		R_FogVol_AddTestVolumes ();
-
+sort_and_done:
 	if (r_fogvolume_count > 1)
 		qsort (r_fogvolumes, r_fogvolume_count, sizeof (fog_volume_t), R_FogVol_ComparePriority);
 }
@@ -1040,7 +1045,10 @@ void R_FogVol_Render (void)
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
 
-	if (r_fogvol.value <= 0.f)
+	/* BUG FIX (testvolumes): allow rendering when testvolumes are active even
+	 * if r_fogvol=0.  r_fogvolume_count already reflects testvolumes (set in
+	 * BuildList), so skip only if both flags are off. */
+	if (r_fogvol.value <= 0.f && r_fogvol_testvolumes.value <= 0.f)
 		return;
 	if (!glprogs.fogvol)
 		return;
@@ -1367,7 +1375,12 @@ void R_FogVol_Render (void)
 				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
 				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
 				GL_Uniform1iFunc (2, taps);
+				/* BUG FIX (white screen): protect alpha channel — upsample shader
+				 * outputs alpha=1.0 (fixed in fogvol_upsample.frag), but guard here
+				 * so the composite FBO alpha is never overwritten. */
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 				glDrawArrays (GL_TRIANGLES, 0, 3);
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			}
 			else
 			{
@@ -1377,9 +1390,12 @@ void R_FogVol_Render (void)
 				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
+				/* BUG FIX (white screen): protect alpha channel on linear upscale blit. */
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 					0, 0, glwidth, glheight,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			}
 		}
 		else
@@ -1390,9 +1406,16 @@ void R_FogVol_Render (void)
 			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
+			/* BUG FIX (white screen): Protect composite FBO alpha channel.
+			 * If any fog shader path writes a sub-1 alpha (e.g. transmittance),
+			 * the blit would overwrite composite alpha and the display compositor
+			 * would blend fog pixels against the clear colour → full white frame.
+			 * Belt-and-braces guard complementing the alpha=1.0 fix in shaders. */
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 				0, 0, glwidth, glheight,
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		}
 	}
 

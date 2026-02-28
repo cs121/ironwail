@@ -398,5 +398,14 @@ void main()
 		outColor = scene * transmittance + accum;
 	else
 		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
-	FragColor = vec4(outColor, transmittance);
+	// BUG FIX (white screen): FragColor.a must NOT be transmittance here.
+	// The final blit copies this texture into composite.fbo via
+	// GL_BlitFramebufferFunc, overwriting the alpha channel.  A transmittance
+	// near 0 (dense fog) would set composite alpha≈0, which downstream passes
+	// and the display compositor interpret as fully transparent → white/clear.
+	// RGB is already correctly composited (scene * transmittance + accum), so
+	// alpha = 1.0 signals "opaque, use RGB as-is".
+	// The temporal pass (fogvol_temporal.frag) reads this alpha and blends it;
+	// it must also output alpha=1.0 (see corresponding fix there).
+	FragColor = vec4(outColor, 1.0);
 }
