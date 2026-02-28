@@ -169,6 +169,38 @@ static const char *RB_BoolName (int value)
 	return value ? "on" : "off";
 }
 
+static const char *RB_BlendName (unsigned state)
+{
+	switch (state & GLS_MASK_BLEND)
+	{
+	default:
+	case GLS_BLEND_OPAQUE:
+		return "opaque";
+	case GLS_BLEND_ALPHA_OIT:
+		return "alpha_oit";
+	case GLS_BLEND_ALPHA:
+		return "alpha";
+	case GLS_BLEND_MULTIPLY:
+		return "multiply";
+	case GLS_BLEND_ADD:
+		return "add";
+	}
+}
+
+static const char *RB_CullName (unsigned state)
+{
+	switch (state & GLS_MASK_CULL)
+	{
+	case GLS_CULL_NONE:
+		return "none";
+	case GLS_CULL_FRONT:
+		return "front";
+	default:
+	case GLS_CULL_BACK:
+		return "back";
+	}
+}
+
 static void RB_CaptureGLStateSnapshot (rb_gl_state_snapshot_t *snapshot)
 {
 	GLint prev_active_tex;
