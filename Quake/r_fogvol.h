@@ -42,6 +42,18 @@ extern cvar_t r_fogvol_debug;
 extern cvar_t r_fogvol_density_scale;
 extern cvar_t r_fogvol_sigma_max;
 extern cvar_t r_fogvol_testvolumes;
+extern cvar_t r_fogvol_globalfog;
+extern cvar_t r_fogvol_globalfog_density_scale;
+extern cvar_t r_fogvol_globalfog_falloff;
+extern cvar_t r_fogvol_globalfog_noise_scale;
+extern cvar_t r_fogvol_globalfog_noise_amount;
+extern cvar_t r_fogvol_globalfog_noise_bias;
+extern cvar_t r_fogvol_globalfog_velocity_x;
+extern cvar_t r_fogvol_globalfog_velocity_y;
+extern cvar_t r_fogvol_globalfog_velocity_z;
+extern cvar_t r_fogvol_globalfog_height;
+extern cvar_t r_fogvol_globalfog_height_scale;
+extern cvar_t r_fogvol_globalfog_priority;
 
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
