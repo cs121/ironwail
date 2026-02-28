@@ -366,12 +366,7 @@ void main()
 
 	// PERF: Compute noise ONCE per ray, not per step.
 	// Fog noise varies at world scale (feature size ≈ 1/noiseScale ≈ 50–200 qu).
-	// Raymarching steps are len/FogSteps ≈ a few units at typical densities.
-	// The noise field barely changes over a single step, so sampling once at
-	// the ray midpoint (with temporal jitter from tEnter) gives the same
-	// visual result as per-step sampling at 1/FogSteps the ALU cost.
-	// For animated noise (velocity != 0) the time-varying offset already
-	// provides frame-to-frame variation that masks the single-sample artifact.
+	// Raymarching steps are len/FogSteps — noise barely changes between steps.
 	float noiseFactor = 1.0;
 	if (FogNoiseEnabled != 0)
 	{
@@ -379,8 +374,29 @@ void main()
 		float windDirLen = length(volume.wind_turbulence.xyz);
 		vec3 flowDir = (windDirLen > 1e-6) ? (volume.wind_turbulence.xyz / windDirLen) : vec3(0.0);
 		vec3 flow = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
-		// Sample at ray midpoint so all steps share an average noise value.
-		vec3 pNoise = ro + rd * (tEnter + len * 0.5);
+
+		// BUG FIX (noise warp on forward/backward movement):
+		// Previous code: pNoise = ro + rd * (tEnter + len*0.5)
+		// This is camera-relative. When the player moves forward, ro shifts
+		// but tEnter shrinks, so pNoise jumps erratically → fog "warps".
+		// Lateral movement was fine because it moves perpendicular to rd, so
+		// the along-ray component cancels; forward/back movement is exactly
+		// along rd so both ro and tEnter change together with no cancellation.
+		//
+		// Fix: use the world-fixed closest point on the ray to the volume
+		// center. This point is purely a function of the volume geometry and
+		// the ray direction — not of where along the ray we entered the volume.
+		// t_closest = dot(volumeCenter - ro, rd), clamped to [tEnter, tExit].
+		// For a sphere this is just the sphere center projected onto the ray.
+		// For an AABB we use the AABB center. Both are world-fixed and stable.
+		vec3 volCenter;
+		if (volume.extra.x > 0.5)
+			volCenter = volume.sphere.xyz;                    // sphere center
+		else
+			volCenter = (volume.mins.xyz + volume.maxs.xyz) * 0.5; // AABB center
+		float tClosest = clamp(dot(volCenter - ro, rd), tEnter, tExit);
+		vec3 pNoise = ro + rd * tClosest;
+
 		vec3 noisePos = pNoise * noiseScale + flow * Time * noiseScale;
 		// PERF: Domain warp only when turbulence > 0 (3 FBM calls otherwise skipped).
 		if (volume.wind_turbulence.w > 1e-4)
