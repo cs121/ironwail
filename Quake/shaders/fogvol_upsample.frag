@@ -1,17 +1,17 @@
 // fogvol_upsample.frag  —  bilateral depth-weighted upsample from half-res fog
 // ── CHANGES FROM ORIGINAL ──────────────────────────────────────────────────
-//  1. [BUG] halfCoord derivation: `ivec2(gl_FragCoord.xy * 0.5)` uses integer
-//     truncation, which is correct for a simple 2x upsample *but* the tap
-//     offsets in the 2×2 path iterate [0,0],[1,0],[0,1],[1,1] which means the
-//     4 taps span halfCoord…halfCoord+1.  For a pixel at full-res (2,2) you
-//     get halfCoord=(1,1) and taps (1,1),(2,1),(1,2),(2,2) – fine.  For a
-//     pixel at (1,1) you get halfCoord=(0,0) and taps (0,0),(1,0),(0,1),(1,1)
-//     – also fine.  However the 9-tap path iterates [-1,1]×[-1,1] centred on
-//     halfCoord; for the same (0,0) halfCoord pixel the taps go to
-//     halfCoord+(-1,-1) = (-1,-1) which then *clamps* to (0,0), making that
-//     quadrant sample the same texel 4 times and biasing the result.  The fix
-//     is to keep the 9-tap path but ensure halfCoord is the *nearest* half-res
-//     texel to the full-res pixel centre rather than the floor.
+//  1. [BUG] halfCoord derivation: `round(gl_FragCoord.xy * 0.5 - 0.5)` was
+//     introduced as a "fix" but is wrong.  For a 2× downsample the correct
+//     mapping is simple floor/integer-truncation: full-res pixel (fx,fy) →
+//     half-res texel (fx/2, fy/2).  The round()-0.5 formula produces the same
+//     half-res index for two consecutive full-res pixels (e.g. pixels 2 and 3
+//     both map to half-res texel 1 instead of 1 and 1 respectively — actually
+//     round(2*0.5-0.5)=round(0.5)=0 and round(3*0.5-0.5)=round(1.0)=1, but
+//     round(0.5) is implementation-defined and can return 0 or 1).  On many
+//     GPU implementations this causes systematic ½-texel misalignment that
+//     manifests as a warped/distorted upsample.  The fix is to use integer
+//     division (floor) which is unambiguous and correct for 2× downsampling.
+//     The 9-tap path centring concern is handled by clamping to valid range.
 //  2. [BUG] fullTap for depth comparison is always `(tapCoord * 2) + (1,1)`.
 //     This maps every half-res tap to the *odd* full-res pixel, missing the
 //     even ones.  A proper bilateral upsample should compare against the
@@ -73,9 +73,11 @@ void main()
 
 	ivec2 fullCoord  = ivec2(gl_FragCoord.xy);
 
-	// FIX #1: Use round() → nearest half-res texel centre rather than floor().
-	// This centres the 3×3 neighbourhood correctly for both even and odd pixels.
-	ivec2 halfCoord  = clamp(ivec2(round(gl_FragCoord.xy * 0.5 - 0.5)), ivec2(0), halfSizeSafe);
+	// FIX #1: Use integer division (floor) for the half-res texel address.
+	// For a 2× downsample, full-res pixel (fx,fy) → half-res texel (fx/2,fy/2).
+	// The previous round()-0.5 formula was ambiguous at half-integer values and
+	// caused systematic ½-texel misalignment → warped/distorted output.
+	ivec2 halfCoord  = clamp(ivec2(gl_FragCoord.xy) / 2, ivec2(0), halfSizeSafe);
 
 	float depthCenter = texelFetch(SceneDepth, fullCoord, 0).r;
 	vec3  accum       = vec3(0.0);

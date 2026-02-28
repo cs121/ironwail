@@ -66,12 +66,28 @@ cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.0
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "2", CVAR_ARCHIVE };
+/* r_fogvol_sigma_max: maximum optical depth *per raymarching step*.
+ * exp(-4) ≈ 0.018, so 4.0 is already near-black in one step.
+ * Previous default of "2" was applied as a per-unit extinction cap, which
+ * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
+ * depth cap (sigma*stepLen), making the value scale-independent. */
+cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "1", CVAR_ARCHIVE };
+/* r_fogvol_globalfog_density_scale: scales the density taken from the map's
+ * classic Quake fog command before passing it to the volumetric raymarcher.
+ * Quake fog density is dimensionless (used in GL_EXP as exp(-density*z));
+ * the raymarcher treats density as an extinction coefficient in quake-units^-1.
+ * A map fog density of 0.1 means GL_EXP gives 37% transmittance at z=10 units,
+ * which is far too dense for the raymarcher (sigma=0.1, stepLen~64 → opaque).
+ * Scale down by ~0.01–0.1 to get visually comparable results.
+ * Default changed from 1 to 0.05 so global fog is not white-out by default. */
+cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "0.05", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0", CVAR_ARCHIVE };
+/* r_fogvol_globalfog_noise_amount: 0=uniform fog, 1=fully noise-modulated.
+ * Was 0 (disabled) by default, making global fog always uniform regardless of
+ * other noise settings. Changed to 0.4 for visible clumping out of the box. */
+cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0.4", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_noise_bias = { "r_fogvol_globalfog_noise_bias", "0.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_velocity_x = { "r_fogvol_globalfog_velocity_x", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_velocity_y = { "r_fogvol_globalfog_velocity_y", "0", CVAR_ARCHIVE };
@@ -1390,7 +1406,22 @@ void R_FogVol_Render (void)
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
-	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
+	/* BUG FIX (halfres distortion): In halfres mode the fog viewport is placed
+	 * at (0,0) so gl_FragCoord.xy starts from (0,0), not (view_x,view_y).
+	 * FogDepthScale already maps fragcoord to full-res pixel space, so
+	 * screenPos = fragcoord * DepthScale correctly ranges over [0,glwidth) even
+	 * in halfres.  The shader computes viewUv as
+	 *   (screenPos - FogViewParams.xy) * FogViewParams.zw
+	 * In fullres the viewport IS at (view_x,view_y), so screenPos starts there
+	 * and subtracting view_x/view_y gives (0,0) at the view origin — correct.
+	 * In halfres screenPos starts at (0,0), so passing view_x/view_y shifts the
+	 * entire UV mapping into negative territory, causing the visible warping.
+	 * Fix: pass xy=(0,0) in halfres; zw=(1/view_w,1/view_h) is unchanged since
+	 * screenPos is already in full-res-equivalent coordinates. */
+	GL_Uniform4fFunc (11,
+		use_halfres ? 0.f : view_x,
+		use_halfres ? 0.f : view_y,
+		1.f / view_w, 1.f / view_h);
 	GL_Uniform4fFunc (12, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
 	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
@@ -1574,7 +1605,14 @@ void R_FogVol_Render (void)
 		GL_Uniform4fFunc (4, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
 		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
-		GL_Uniform4fFunc (7, view_x, view_y, 1.f / view_w, 1.f / view_h);
+		/* BUG FIX (halfres distortion): temporal shader also runs at viewport
+		 * (0,0,fog_width,fog_height) in halfres, so view_x/view_y must not be
+		 * subtracted — pass (0,0) as the origin, same reasoning as FogViewParams
+		 * in the raymarcher pass above. */
+		GL_Uniform4fFunc (7,
+			use_halfres ? 0.f : view_x,
+			use_halfres ? 0.f : view_y,
+			1.f / view_w, 1.f / view_h);
 		if (mode == 1)
 			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u dst_tex=%u\n",
 				final_tex, history_tex[history_src], depth_tex, framebufs.fogvol.composite_tex[composite_dst]);
