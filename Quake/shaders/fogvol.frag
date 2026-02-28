@@ -40,10 +40,13 @@ struct FogVolume
 {
 	vec4 mins;
 	vec4 maxs;
+	vec4 sphere;
 	vec4 color_density;
 	vec4 noise_params;
-	vec4 velocity;
+	vec4 velocity_windspeed;
+	vec4 wind_turbulence;
 	vec4 misc;
+	vec4 extra;
 };
 
 layout(std140, binding=2) uniform FogVolumeUBO
@@ -65,6 +68,8 @@ layout(location=10) uniform vec2  FogDepthScale;
 layout(location=11) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
 layout(location=12) uniform vec4  FogDepthParams;    // x: near, y: far, z: reverse-Z flag, w: sky cutoff
 layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sigma clamp
+layout(location=14) uniform int   FogEmissiveEnabled;
+layout(location=15) uniform int   FogBlendModeDefault;
 
 layout(location=0) out vec4 FragColor;
 
@@ -224,6 +229,31 @@ vec3 DebugVolumeColor(float id, float priority)
 
 // FIX #6: Simplified – max(falloff,0) already ensures edgeThickness >= 0,
 // so the second <= 0 guard collapsed into a single early-out.
+
+bool RaySphere(vec3 ro, vec3 rd, vec3 center, float radius, out float tEnter, out float tExit)
+{
+	vec3 oc = ro - center;
+	float b = dot(oc, rd);
+	float c = dot(oc, oc) - radius * radius;
+	float h = b * b - c;
+	if (h < 0.0)
+		return false;
+	h = sqrt(h);
+	tEnter = -b - h;
+	tExit = -b + h;
+	return tExit > max(tEnter, 0.0);
+}
+
+float HeightFactor(vec3 p, FogVolume volume)
+{
+	float hScale = volume.extra.w;
+	if (abs(hScale) <= 1e-6)
+		return 1.0;
+	float baseH = volume.misc.w;
+	float dh = p.z - baseH;
+	return exp(-abs(hScale) * dh);
+}
+
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 {
 	float edgeThickness = max(falloff, 0.0);
@@ -273,7 +303,15 @@ void main()
 		tScene = FogDepthParams.y;
 
 	float tEnter, tExit;
-	if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
+	if (volume.extra.x > 0.5)
+	{
+		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
+		{
+			FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+			return;
+		}
+	}
+	else if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
 	{
 		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
 		return;
@@ -327,13 +365,27 @@ void main()
 			break;
 
 		vec3  p        = ro + rd * t;
-		float edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+		float edgeFade;
+		if (volume.extra.x > 0.5)
+		{
+			float d = volume.sphere.w - length(p - volume.sphere.xyz);
+			edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, d);
+		}
+		else
+		{
+			edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+		}
 
 		float noiseFactor = 1.0;
 		if (FogNoiseEnabled != 0)
 		{
 			float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-			vec3  noisePos   = p * noiseScale + volume.velocity.xyz * Time * noiseScale;
+			vec3 flowDir = normalize(volume.wind_turbulence.xyz);
+			if (length(flowDir) < 1e-6)
+				flowDir = vec3(0.0);
+			vec3 flow = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
+			vec3 noisePos   = p * noiseScale + flow * Time * noiseScale;
+			noisePos += vec3(FBM(p * noiseScale * 2.03), FBM(p.yzx * noiseScale * 2.71), FBM(p.zxy * noiseScale * 1.91)) * volume.wind_turbulence.w * 0.35;
 			float n          = FogNoise(noisePos);
 			float noiseBias  = clamp(volume.noise_params.z, 0.0, 1.0);
 			if (noiseBias > 0.0)
@@ -342,7 +394,7 @@ void main()
 			noiseFactor = mix(1.0, n, amt);
 		}
 
-		float sigma  = min(density * noiseFactor * edgeFade, FogDensityParams.y);
+		float sigma  = min(density * noiseFactor * edgeFade * HeightFactor(p, volume), FogDensityParams.y);
 		if (!IsFiniteFloat(sigma))
 			sigma = 0.0;
 		float att        = exp(-sigma * stepLen);
@@ -394,10 +446,20 @@ void main()
 	// ── composite ─────────────────────────────────────────────────────────
 	vec3 scene    = texture(SceneColor, screenUv).rgb;
 	vec3 outColor;
-	if (FogPhysBlend != 0)
+	int blendMode = int(volume.extra.y + 0.5);
+	if (blendMode < 0)
+		blendMode = FogBlendModeDefault;
+	if (blendMode == 1)
+	{
+		outColor = clamp(scene + accum, 0.0, 65504.0);
+	}
+	else if (FogPhysBlend != 0)
 		outColor = scene * transmittance + accum;
 	else
 		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
+
+	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
+		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
 	// BUG FIX (white screen): FragColor.a must NOT be transmittance here.
 	// The final blit copies this texture into composite.fbo via
 	// GL_BlitFramebufferFunc, overwriting the alpha channel.  A transmittance
