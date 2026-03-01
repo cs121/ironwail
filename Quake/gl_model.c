@@ -779,7 +779,50 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size)
         Q1BSPX_MarkUsed("FACENORMALS");
 }
 
-static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
+static qboolean Mod_ValidateLumpRange(const char *modelname, const char *lumpname, int fileofs, int filelen, size_t filelen_total)
+{
+        if (fileofs < 0 || filelen < 0)
+        {
+                Con_Warning("%s: invalid %s lump range (ofs=%d len=%d total=%zu)\n", modelname, lumpname, fileofs, filelen, filelen_total);
+                return false;
+        }
+
+        if ((size_t)fileofs > filelen_total || (size_t)filelen > filelen_total - (size_t)fileofs)
+        {
+                Con_Warning("%s: invalid %s lump range (ofs=%d len=%d total=%zu)\n", modelname, lumpname, fileofs, filelen, filelen_total);
+                return false;
+        }
+
+        return true;
+}
+
+static const char *Mod_StandardLumpName(int lumpindex)
+{
+        static const char *const names[HEADER_LUMPS] = {
+                "ENTITIES",
+                "PLANES",
+                "TEXTURES",
+                "VERTEXES",
+                "VISIBILITY",
+                "NODES",
+                "TEXINFO",
+                "FACES",
+                "LIGHTING",
+                "CLIPNODES",
+                "LEAFS",
+                "MARKSURFACES",
+                "EDGES",
+                "SURFEDGES",
+                "MODELS"
+        };
+
+        if (lumpindex < 0 || lumpindex >= HEADER_LUMPS)
+                return "UNKNOWN";
+
+        return names[lumpindex];
+}
+
+static qboolean Mod_FindEndOfStandardLumps(const qmodel_t *mod, const lump_t *lumps, int numlumps, size_t filelen_total, qboolean *misaligned, size_t *end_offset)
 {
         size_t  offs = 0;
         int             i;
@@ -787,15 +830,24 @@ static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboo
         if (misaligned)
                 *misaligned = false;
 
+        if (end_offset)
+                *end_offset = 0;
+
         for (i = 0; i < numlumps; i++)
         {
+                if (!Mod_ValidateLumpRange(mod->name, Mod_StandardLumpName(i), lumps[i].fileofs, lumps[i].filelen, filelen_total))
+                        return false;
+
                 if (misaligned && (lumps[i].fileofs & 3) && i != LUMP_ENTITIES)
                         *misaligned = true;
 
                 offs = q_max(offs, (size_t)lumps[i].fileofs + (size_t)lumps[i].filelen);
         }
 
-        return (offs + 3) & ~((size_t)3);
+        if (end_offset)
+                *end_offset = (offs + 3) & ~((size_t)3);
+
+        return true;
 }
 
 static qboolean Mod_ParseBSPHeader(const byte *buffer, size_t length, bsp_header_info_t *out)
@@ -857,7 +909,9 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         mod->bspx_entries_count = 0;
         mod->bspx_header = NULL;
 
-        offs = Mod_FindEndOfStandardLumps(header->lumps, HEADER_LUMPS, &misaligned);
+        if (!Mod_FindEndOfStandardLumps(mod, header->lumps, HEADER_LUMPS, filelen, &misaligned, &offs))
+                return false;
+
         header_offset = offs;
 
         if (misaligned)
@@ -897,11 +951,11 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 int fileofs = LittleLong(h->lumps[i].fileofs);
                 int filelen_lump = LittleLong(h->lumps[i].filelen);
 
+                if (!Mod_ValidateLumpRange(mod->name, h->lumps[i].lumpname, fileofs, filelen_lump, filelen))
+                        return false;
+
                 if (fileofs & 3)
                         Con_DWarning("%s contains misaligned bspx lump %s\n", mod->name, h->lumps[i].lumpname);
-
-                if ((unsigned int)fileofs + (unsigned int)filelen_lump > filelen)
-                        return false;
         }
 
         mod->bspx_entries = (bspx_entry_t *)Hunk_AllocName(numlumps * sizeof(bspx_entry_t), loadname);
@@ -967,16 +1021,21 @@ static qboolean BSPX_MarkKnown(qmodel_t *mod, void *data, int size)
         return true;
 }
 
-static qboolean BSPX_ApplyLumpOverride(const char *lumpname, lump_t *target)
+static qboolean BSPX_ApplyLumpOverride(qmodel_t *mod, const char *lumpname, lump_t *target, size_t filelen_total)
 {
         size_t          size;
         void            *data;
+        int                     offset;
 
-        data = BSPX_FindLump(loadmodel ? loadmodel->bspx_header : NULL, mod_base, lumpname, &size);
+        data = BSPX_FindLump(mod ? mod->bspx_header : NULL, mod_base, lumpname, &size);
         if (!data || !size)
                 return false;
 
-        target->fileofs = (int)((byte *)data - mod_base);
+        offset = (int)((byte *)data - mod_base);
+        if (!Mod_ValidateLumpRange(mod ? mod->name : "<unknown>", lumpname, offset, (int)size, filelen_total))
+                return false;
+
+        target->fileofs = offset;
         target->filelen = (int)size;
         Q1BSPX_MarkUsed(lumpname);
         return true;
@@ -3949,21 +4008,21 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
                 if (bspx)
                 {
-                        BSPX_ApplyLumpOverride("BSPX_VERTS", &header.lumps[LUMP_VERTEXES]);
-                        BSPX_ApplyLumpOverride("BSPX_FACES", &header.lumps[LUMP_FACES]);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_VERTS", &header.lumps[LUMP_VERTEXES], (size_t)com_filesize);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_FACES", &header.lumps[LUMP_FACES], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
-                        BSPX_ApplyLumpOverride("DLIT", &header.lumps[LUMP_LIGHTING]);
-                        BSPX_ApplyLumpOverride("RGBLIGHTING", &header.lumps[LUMP_LIGHTING]);
+                        BSPX_ApplyLumpOverride(mod, "LIGHTING", &header.lumps[LUMP_LIGHTING], (size_t)com_filesize);
+                        BSPX_ApplyLumpOverride(mod, "DLIT", &header.lumps[LUMP_LIGHTING], (size_t)com_filesize);
+                        BSPX_ApplyLumpOverride(mod, "RGBLIGHTING", &header.lumps[LUMP_LIGHTING], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES]);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("BSPX_MODELS", &header.lumps[LUMP_MODELS]);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_MODELS", &header.lumps[LUMP_MODELS], (size_t)com_filesize);
 
-                        if (!BSPX_ApplyLumpOverride("VISX", &header.lumps[LUMP_VISIBILITY]))
+                        if (!BSPX_ApplyLumpOverride(mod, "VISX", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize))
                         {
-                                if (!BSPX_ApplyLumpOverride("PVS2", &header.lumps[LUMP_VISIBILITY]))
-                                        BSPX_ApplyLumpOverride("PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY]);
+                                if (!BSPX_ApplyLumpOverride(mod, "PVS2", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize))
+                                        BSPX_ApplyLumpOverride(mod, "PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize);
                         }
                 }
         }
