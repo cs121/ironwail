@@ -355,6 +355,24 @@ static inline qboolean CL_DlightIsActive (const dlight_t *dl)
 	return dl && dl->active && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
 }
 
+static inline qboolean CL_DlightTransientIsLiveAtTime (const dlight_t *dl, double time, qboolean *expired)
+{
+	if (expired)
+		*expired = false;
+
+	if (!dl || dl->kind != DL_TRANSIENT)
+		return true;
+
+	if (dl->die < time)
+	{
+		if (expired)
+			*expired = true;
+		return false;
+	}
+
+	return dl->spawn <= time;
+}
+
 static inline qboolean CL_DlightShouldFlicker (const dlight_t *dl)
 {
 	return dl && (dl->type == DLIGHT_EXPLOSION || dl->type == DLIGHT_TORCH || dl->type == DLIGHT_LAVA);

@@ -237,7 +237,7 @@ static dlight_t *DLightPool_AcquireSlot (double time)
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			return dl;
-		if (dl->kind == DL_TRANSIENT && (dl->die < time || dl->spawn > time))
+		if (dl->kind == DL_TRANSIENT && !CL_DlightTransientIsLiveAtTime (dl, time, NULL))
 			return dl;
 	}
 
@@ -332,10 +332,12 @@ void DLightPool_NewFrame (double time, int framecount)
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			continue;
-		if (dl->kind == DL_TRANSIENT && dl->die < time)
+		qboolean expired = false;
+		if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
 		{
+			if (expired)
+				dlight_pool.stats.expired++;
 			dl->active = false;
-			dlight_pool.stats.expired++;
 		}
 	}
 }
@@ -439,16 +441,14 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
 			continue;
 
-		if (dl->kind == DL_TRANSIENT && dl->die < time)
+		qboolean expired = false;
+		if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
 		{
-			dl->active = false;
-			dlight_pool.stats.expired++;
-			continue;
-		}
-
-		if (dl->spawn > time)
-		{
-			dl->die = 0.f;
+			if (expired)
+			{
+				dlight_pool.stats.expired++;
+				dl->active = false;
+			}
 			continue;
 		}
 
