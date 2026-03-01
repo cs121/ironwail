@@ -290,8 +290,6 @@ extern cvar_t r_vignette_color_g;
 extern cvar_t r_vignette_color_b;
 extern cvar_t r_vignette_blend_mode;
 extern cvar_t r_vignette_noise;
-extern cvar_t r_screendarken;
-extern cvar_t r_screendarken_depth;
 extern cvar_t r_teleportfx;
 extern cvar_t r_teleportfx_time;
 
@@ -764,8 +762,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_color_b);
 	Cvar_RegisterVariable (&r_vignette_blend_mode);
 	Cvar_RegisterVariable (&r_vignette_noise);
-	Cvar_RegisterVariable (&r_screendarken);
-	Cvar_RegisterVariable (&r_screendarken_depth);
 	Cvar_RegisterVariable (&r_teleportfx);
 	Cvar_RegisterVariable (&r_teleportfx_time);
         Cvar_RegisterVariable (&r_overbrightbits);
