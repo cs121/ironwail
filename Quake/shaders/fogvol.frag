@@ -353,6 +353,10 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
 	}
 
+	// PERF: If edgeFade is zero, density is zero regardless of noise — skip noise entirely.
+	if (edgeFade < 1e-5)
+		return 0.0;
+
 	float noiseFactor = 1.0;
 	if (FogNoiseEnabled != 0)
 	{
@@ -472,9 +476,44 @@ void main()
 		return;
 	}
 
-	float stepCount = max(float(FogSteps), 1.0);
 	float len       = tExit - tEnter;
-	float stepLen   = len / stepCount;
+
+	// PERF: Adaptive step count — clamp stepLen to a maximum world-space size.
+	// Without this, a global fog volume (16384^3) with farclip=4096 gives
+	// stepLen = 4096/16 = 256 units, which is very coarse and wastes steps on
+	// short rays (near wall = len of 32 units → stepLen 256 → only 1 effective step).
+	//
+	// Strategy: use a target stepLen based on a fraction of the fog near-distance,
+	// but never more than len/4 (always at least 4 samples per ray) and never
+	// fewer steps than 4. This makes short rays cheap and long rays still sampled.
+	//
+	// FogDepthParams.x = near plane (~0.5 units), not useful here.
+	// Use a fixed world-space target: 32 units (tunable via density).
+	// For global fog, density is very low so large steps are fine visually.
+	const float MAX_STEP_LEN = 64.0; // world units — coarser = faster, less detail
+	float stepCount = max(float(FogSteps), 1.0);
+	float idealStepLen = len / stepCount;
+	// If stepLen would exceed MAX_STEP_LEN, reduce step count proportionally.
+	// This avoids wasting FogSteps iterations on a short ray.
+	float stepLen;
+	if (idealStepLen > MAX_STEP_LEN)
+	{
+		// Long ray: use fixed step size (fewer steps than FogSteps, but each at good spacing).
+		stepLen   = MAX_STEP_LEN;
+		stepCount = max(ceil(len / stepLen), 4.0);
+	}
+	else if (idealStepLen < 1.0 && len < float(FogSteps))
+	{
+		// Very short ray (e.g. 8 units to wall): use fewer steps to save ALU.
+		stepCount = max(ceil(len), 2.0);
+		stepLen   = len / stepCount;
+	}
+	else
+	{
+		stepLen = idealStepLen;
+	}
+	// Safety: cap at FogSteps so we never exceed the uniform limit.
+	stepCount = min(stepCount, float(FogSteps));
 
 	// FIX #2: Restructured jitter selection for clarity.
 	// When noise is enabled we always apply a jitter; which generator to use
@@ -536,16 +575,19 @@ void main()
 		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
 	}
 
+	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
 	for (int i = 0; i < FogSteps; ++i)
 	{
+		if (i >= adaptiveSteps) break; // PERF: early-out for short rays
 		float t = tEnter + (float(i) + 0.5) * stepLen;
 		if (t >= tExit)
 			break;
 
 		vec3  p        = ro + rd * t;
-		// PERF: LOD — beyond 30% of ray length use 1-octave noise (half FBM cost).
-		// len is (tExit - tEnter); steps further than len*0.3 from tEnter get lod=1.
-		int   noiseLod = (t - tEnter > len * 0.3) ? 1 : 0;
+		// PERF: LOD — beyond 128 world units OR when already mostly opaque, use 1-octave noise.
+		// When transmittance < 0.1, the ray contributes < 10% to final color — full quality
+		// noise is indistinguishable from coarse at this opacity level.
+		int   noiseLod = (t > 128.0 || transmittance < 0.1) ? 1 : 0;
 		// BUG FIX: Cap optical depth per step (sigma*stepLen), not sigma itself.
 		float rawSigma = EvaluateFogSigma(p, volume, density, falloff, noiseScalePre, flowPre, noiseLod);
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);

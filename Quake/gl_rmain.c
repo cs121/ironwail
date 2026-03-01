@@ -1398,7 +1398,34 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform4fFunc (14, max_distance, r_ssao_saved_fog[3],
 		r_ssao_saved_fog[0] * 0.299f + r_ssao_saved_fog[1] * 0.587f + r_ssao_saved_fog[2] * 0.114f,
 		0.f);
+
+	/* Volumetric fog SSAO damping (uniform 15 / binding 2):
+	 * Bind the fogvol composite texture so ssao.frag can suppress AO where
+	 * volumetric fog is dense. Without this, SSAO bleeds through fog and darkens
+	 * fogged regions that should appear uniformly lit by the fog color.
+	 *
+	 * composite_tex[0] is always valid after the first fogvol render frame.
+	 * One-frame latency is acceptable for AO damping — it follows the fog closely
+	 * enough and avoids any ordering dependency with the current frame's fogvol pass. */
+	{
+		GLuint fogvol_tex = 0;
+		float fogvol_active = 0.f;
+		if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+		{
+			fogvol_tex = framebufs.fogvol.composite_tex[0];
+			fogvol_active = (fogvol_tex != 0) ? 1.f : 0.f;
+		}
+		if (fogvol_tex)
+			GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, fogvol_tex);
+		/* u_fogvolParams: x=damping strength, y=active flag, zw=unused */
+		float fogvol_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
+		GL_Uniform4fFunc (15, fogvol_strength, fogvol_active, 0.f, 0.f);
+	}
+
 	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	/* Unbind fogvol texture from slot 2 to avoid stale binding in subsequent passes. */
+	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, 0);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
 	qboolean allow_blur = (r_ssao_blur.value > 0.f) && (debug_mode_i < 0);

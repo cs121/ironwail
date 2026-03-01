@@ -1,5 +1,9 @@
 layout(binding=0) uniform sampler2D DepthTexture;
 layout(binding=1) uniform sampler2D NoiseTexture;
+// Fog volume composite texture: RGB=composited fog color, A=unused.
+// We derive volumetric transmittance from luminance: bright fog = low transmittance.
+// Binding=2 is left unbound (white = transmittance 1.0 = no fog damping) when fogvol is inactive.
+layout(binding=2) uniform sampler2D FogVolTexture;
 
 #include "frame_uniforms.glsl"
 
@@ -17,7 +21,11 @@ layout(location=10) uniform int u_reversedZMode; // 0: default, 1: invert raw, 2
 layout(location=11) uniform int u_normalSource; // 0: neighbor, 1: derivatives
 layout(location=12) uniform int u_yFlip; // 0: none, 1: flip Y
 layout(location=13) uniform int u_noiseMode; // 0: off, 1: IGN, 2: texture
-layout(location=14) uniform vec4 u_fogParams; // x: max distance
+layout(location=14) uniform vec4 u_fogParams; // x: max distance, y: scene fog density
+// Volumetric fog damping for SSAO.
+// u_fogvolParams.x: fogvol transmittance damping strength (0=off, 1=full suppress)
+// u_fogvolParams.y: 1.0 if fogvol texture is available, 0.0 otherwise
+layout(location=15) uniform vec4 u_fogvolParams;
 
 layout(location=0) out vec4 outColor;
 
@@ -521,6 +529,29 @@ void main()
 	// Debug modes 2/3 remain available to inspect the fog factor this pixel would have,
 	// using u_fogParams.y (saved scene density) so they reflect the real fog state.
 	float fogFactor = FogFactorFromViewPos(viewPos);
+
+	// Volumetric fog SSAO damping:
+	// The fog volume composite texture contains the rendered volumetric fog for this pixel.
+	// Where fog is dense (bright fogvol output), SSAO should be suppressed because:
+	//   1. The fog visually hides the AO darkening — darkening fog-filled regions is wrong.
+	//   2. SSAO samples behind the fog boundary produce incorrect occlusion.
+	// We use the fogvol RGB luminance as a proxy for (1 - transmittance):
+	//   fogLum ≈ 0 → no fog → full AO  
+	//   fogLum ≈ 1 → dense fog → AO suppressed
+	// This is an approximation but avoids needing a separate transmittance buffer.
+	if (u_fogvolParams.y > 0.5)
+	{
+		// Sample fogvol at screen UV. fogvol renders at halfres then upsamples to full,
+		// so the composite tex is full-res at this point.
+		vec2 screenUv = ApplyYFlip((gl_FragCoord.xy + 0.5) * u_screenParams.xy);
+		vec3 fogColor = texture(FogVolTexture, screenUv).rgb;
+		// Luminance of the fog contribution — high where fog is dense.
+		float fogLum  = dot(fogColor, vec3(0.299, 0.587, 0.114));
+		// Clamp to [0,1] and treat as fog density proxy.
+		float fogDamp = clamp(fogLum * u_fogvolParams.x * 4.0, 0.0, 1.0);
+		// Blend AO toward 1.0 (no occlusion) proportionally to fog density.
+		ao = mix(ao, 1.0, fogDamp);
+	}
 
 	if (debugMode == 3)
 	{
