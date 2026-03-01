@@ -448,6 +448,40 @@ static int R_ProjectDecalToSurface (const msurface_t *surf, const vec3_t origin,
 	return total_added;
 }
 
+static mleaf_t *R_FindImpactLeaf (const vec3_t origin, const vec3_t normal)
+{
+	/*
+	 * Temp entity impacts are quantized and can land a hair inside solid space.
+	 * Probe both sides of the recovered impact normal so we can still find the
+	 * nearby render leaf that owns the wall/floor mark surfaces.
+	 */
+	static const float offsets[] = {0.f, 1.f, -1.f, 2.f, -2.f};
+	mleaf_t *fallback = NULL;
+	int i;
+
+	for (i = 0; i < (int) countof (offsets); ++i)
+	{
+		vec3_t sample;
+		mleaf_t *leaf;
+
+		VectorCopy (origin, sample);
+		if (offsets[i] != 0.f)
+			VectorMA (sample, offsets[i], normal, sample);
+
+		leaf = Mod_PointInLeaf (sample, cl.worldmodel);
+		if (!leaf || !leaf->nummarksurfaces)
+			continue;
+
+		if (leaf->contents != CONTENTS_SOLID)
+			return leaf;
+
+		if (!fallback)
+			fallback = leaf;
+	}
+
+	return fallback;
+}
+
 void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t normal)
 {
 	decaldef_t *def;
@@ -480,7 +514,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 	radius = def->size_min + ((float) rand () / (float) RAND_MAX) * (def->size_max - def->size_min);
 	alpha = def->alpha_min + ((float) rand () / (float) RAND_MAX) * (def->alpha_max - def->alpha_min);
 
-	{ vec3_t point; VectorCopy (origin, point); leaf = Mod_PointInLeaf (point, cl.worldmodel); }
+	leaf = R_FindImpactLeaf (origin, n);
 	if (!leaf || !leaf->nummarksurfaces)
 		return;
 
