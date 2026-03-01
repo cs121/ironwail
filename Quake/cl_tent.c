@@ -141,7 +141,7 @@ static qboolean CL_DecalNormalFromImpactTrace (const vec3_t impact, vec3_t out_n
 	if (!cl.worldmodel)
 		return false;
 
-	for (i = 0; i < (int)q_countof(directions); ++i)
+	for (i = 0; i < (int)countof (directions); ++i)
 	{
 		trace_t trace;
 		vec3_t start, end;
