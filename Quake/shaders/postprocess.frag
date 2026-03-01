@@ -8,6 +8,11 @@ layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
+// Fog volume composite texture (halfres, upsampled to full-res by fogvol pass).
+// RGB = composited fog color as blended into the scene. Used to derive per-pixel
+// volumetric transmittance for SSAO suppression. Binding is left unbound (→ black)
+// when fogvol is inactive, giving transmittance=1.0 and no suppression.
+layout(binding=10) uniform sampler2D FogVolTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -140,6 +145,9 @@ layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
+// Volumetric fog params for SSAO suppression.
+// x: fogvol active flag (1.0 = fogvol texture is bound and valid, 0.0 = inactive)
+layout(location=28) uniform vec4 FogVolParams;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -230,6 +238,23 @@ float FogTransmittanceFromGlobalFog(float depth)
                 return 1.0;
         float fog = exp2(-density * depth * depth);
         return clamp(fog, 0.0, 1.0);
+}
+
+// Returns volumetric fog transmittance [0..1] for the current pixel from the
+// fogvol composite buffer. transmittance=1 means no fog, 0 means fully occluded.
+// The fogvol composite RGB is the fog color contribution already blended into the
+// scene — high luminance means dense fog, so transmittance ≈ 1 - luminance.
+// We clamp aggressively: even moderate fog (lum≥0.15) should fully suppress SSAO.
+float FogVolTransmittance(vec2 uv)
+{
+        if (FogVolParams.x < 0.5)
+                return 1.0; // fogvol inactive — no suppression
+        vec3 fogColor = texture(FogVolTexture, uv).rgb;
+        float lum = dot(fogColor, vec3(0.299, 0.587, 0.114));
+        // Scale: lum=0.0 → transmittance=1.0 (no fog)
+        //        lum≥0.2 → transmittance=0.0 (full suppression)
+        // The *5.0 factor means 20% fog luminance = fully suppressed AO.
+        return clamp(1.0 - lum * 5.0, 0.0, 1.0);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -530,7 +555,12 @@ void main()
                                         if (fogStrength > 0.0)
                                                 underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
                                         float globalTransmittance = FogTransmittanceFromGlobalFog(ssaoCenterDepth);
-                                        fogTransmittance = globalTransmittance * underwaterTransmittance;
+                                        // Volumetric fog transmittance: sample the fogvol composite buffer
+                                        // directly. This correctly handles spatial noise variation and
+                                        // color variation that FogTransmittanceFromGlobalFog cannot model.
+                                        // Take the minimum (most suppressing) of classical and volumetric fog.
+                                        float fogvolTransmittance = FogVolTransmittance(uv);
+                                        fogTransmittance = min(globalTransmittance, fogvolTransmittance) * underwaterTransmittance;
                                 }
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);

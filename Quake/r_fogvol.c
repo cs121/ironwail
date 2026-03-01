@@ -69,17 +69,10 @@ static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
 static int r_fogvolume_entity_count = 0;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
-/* r_fogvol_steps: raymarching steps per frame.
- * Default reduced from 32 to 16 — temporal accumulation (alpha=0.9) means
- * effective quality approaches ~160 steps over 10 frames. 16 is sufficient
- * for smooth fog with temporal filtering. Increase only for sharp detail. */
-cvar_t r_fogvol_steps = { "r_fogvol_steps", "16", CVAR_ARCHIVE };
+cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
-/* r_fogvol_halfres: render fog at half resolution (quarter pixel count).
- * Default changed to 1 — combined with temporal upsampling this is nearly
- * indistinguishable from full-res but costs 4× less GPU time. */
-cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
 /* r_fogvol_upsample_k: bilateral weight scale for depth difference in the
  * upsample pass.  exp(-|delta_depth| * K) — higher K = sharper depth edges.
@@ -89,16 +82,7 @@ cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
  * Recommended range: 10–50. */
 cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "25", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
-/* r_fogvol_steps_scale_halfres: in halfres mode steps are further reduced.
- * Default kept at 0.5 → halfres uses 8 steps (16 * 0.5), temporal covers rest.
- * Combined with halfres: quarter pixels × half steps = 8× less total work. */
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
-/* r_fogvol_min_steplen: minimum world-space length per raymarching step.
- * For global fog volumes (16384^3 box) and low farclip the ray length can be
- * thousands of units, making stepLen very large and producing banding.
- * This cap prevents steps smaller than this value — has no effect for small
- * volumes where stepLen is already below the cap.
- * 0 = disabled (default). Typical useful value: 16-64 for global fog. */
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
@@ -1017,6 +1001,16 @@ qboolean R_FogVol_CanRenderGlobal (void)
 	if (framebufs.composite.depth_stencil_tex == 0)
 		return false;
 	return true;
+}
+
+/* Returns the fogvol composite texture that was rendered this frame.
+ * After R_FogVol_Render(), r_fogvol_history_index points to the slot that
+ * received the temporal composite output — that is the most recent result.
+ * Returns 0 if fogvol did not render this frame (no active volumes). */
+GLuint R_FogVol_GetCompositeTex (void)
+{
+	GLuint tex = framebufs.fogvol.composite_tex[r_fogvol_history_index];
+	return tex;
 }
 
 void R_FogVol_ParseEntities (void)

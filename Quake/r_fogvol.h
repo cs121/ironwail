@@ -94,5 +94,9 @@ void R_FogVol_LogEndFrameState (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 qboolean R_FogVol_CanRenderGlobal (void);
+/* Returns the composite texture that received the fogvol temporal output this
+ * frame. Use this for SSAO suppression — it is the correct per-pixel fog density
+ * source for spatial/noisy volumetric fog that cannot be modelled analytically. */
+GLuint R_FogVol_GetCompositeTex (void);
 
 #endif // R_FOGVOL_H
