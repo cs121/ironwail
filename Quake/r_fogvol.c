@@ -86,6 +86,9 @@ cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_confidence_min_alpha = { "r_fogvol_temporal_confidence_min_alpha", "0.05", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_disocclusion_bias = { "r_fogvol_temporal_disocclusion_bias", "0.5", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_clamp_strength = { "r_fogvol_temporal_clamp_strength", "1.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
@@ -796,6 +799,9 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_emissive);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
+	Cvar_RegisterVariable (&r_fogvol_temporal_confidence_min_alpha);
+	Cvar_RegisterVariable (&r_fogvol_temporal_disocclusion_bias);
+	Cvar_RegisterVariable (&r_fogvol_temporal_clamp_strength);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
 	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_density_scale);
@@ -1379,6 +1385,7 @@ void R_FogVol_Render (void)
 	GLuint dst_tex;
 	GLuint dst_fbo;
 	GLuint depth_tex;
+	GLuint velocity_tex;
 	GLuint fog_tex[2];
 	GLuint fog_fbo[2];
 	GLuint history_tex[2];
@@ -1591,6 +1598,14 @@ void R_FogVol_Render (void)
 	else
 		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
+	velocity_tex = 0;
+	if (framebufs.scene.velocity_tex)
+	{
+		qboolean msaa = framebufs.scene.samples > 1;
+		velocity_tex = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+		if (framesetup.scene_fbo != framebufs.scene.fbo)
+			velocity_tex = 0;
+	}
 	fog_tex[0] = framebufs.fogvol.color_tex[0];
 	fog_tex[1] = framebufs.fogvol.color_tex[1];
 	fog_fbo[0] = framebufs.fogvol.fbo[0];
@@ -1756,6 +1771,7 @@ void R_FogVol_Render (void)
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
+		GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, velocity_tex);
 		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_tex[history_src], final_tex);
 		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
@@ -1772,9 +1788,16 @@ void R_FogVol_Render (void)
 			use_halfres ? 0.f : view_x,
 			use_halfres ? 0.f : view_y,
 			1.f / view_w, 1.f / view_h);
+		GL_Uniform4fFunc (8,
+			CLAMP (0.f, r_fogvol_temporal_confidence_min_alpha.value, 1.f),
+			q_max (0.f, r_fogvol_temporal_disocclusion_bias.value),
+			q_max (0.1f, r_fogvol_temporal_clamp_strength.value),
+			0.f);
+		GL_Uniform1iFunc (9, velocity_tex != 0 ? 1 : 0);
 		if (mode == 1)
-			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u dst_tex=%u\n",
-				final_tex, history_tex[history_src], depth_tex, framebufs.fogvol.composite_tex[composite_dst]);
+			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u velocity_tex=%u dst_tex=%u conf[min=%.3f disocc=%.3f clamp=%.3f]\n",
+				final_tex, history_tex[history_src], depth_tex, velocity_tex, framebufs.fogvol.composite_tex[composite_dst],
+				r_fogvol_temporal_confidence_min_alpha.value, r_fogvol_temporal_disocclusion_bias.value, r_fogvol_temporal_clamp_strength.value);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);

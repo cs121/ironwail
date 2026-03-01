@@ -38,6 +38,7 @@
 layout(binding=0) uniform sampler2D FogCurrent;
 layout(binding=1) uniform sampler2D FogHistory;
 layout(binding=2) uniform sampler2D SceneDepth;
+layout(binding=3) uniform sampler2D SceneVelocity;
 
 layout(location=0) uniform float FogTemporalAlpha;
 layout(location=1) uniform float FogTemporalDepthReject;
@@ -47,6 +48,8 @@ layout(location=4) uniform vec4  FogViewportParams; // xy: screen size, zw: inv 
 layout(location=5) uniform vec2  FogDepthScale;
 layout(location=6) uniform int   FogHistoryValid;
 layout(location=7) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
+layout(location=8) uniform vec4  FogTemporalConfidenceParams; // x: min alpha, y: disocclusion bias, z: clamp strength, w: reserved
+layout(location=9) uniform int   FogHasVelocity;
 
 layout(location=0) out vec4 OutColor;
 
@@ -83,6 +86,30 @@ bool Reproject(vec2 viewUv, float depthNdc, out vec2 prevViewUv, out float prevD
 	return true;
 }
 
+vec3 ComputeHistoryClamp(vec2 uv, vec3 centerColor)
+{
+	vec2 texel = 1.0 / max(vec2(textureSize(FogCurrent, 0)), vec2(1.0));
+	vec3 mean = vec3(0.0);
+	vec3 meanSq = vec3(0.0);
+	for (int j = -1; j <= 1; ++j)
+	{
+		for (int i = -1; i <= 1; ++i)
+		{
+			vec3 tap = texture(FogCurrent, uv + vec2(i, j) * texel).rgb;
+			mean += tap;
+			meanSq += tap * tap;
+		}
+	}
+	mean *= (1.0 / 9.0);
+	meanSq *= (1.0 / 9.0);
+	vec3 variance = max(meanSq - mean * mean, vec3(0.0));
+	vec3 sigma = sqrt(variance);
+	float clampStrength = max(FogTemporalConfidenceParams.z, 0.1);
+	vec3 lo = mean - sigma * clampStrength;
+	vec3 hi = mean + sigma * clampStrength;
+	return clamp(centerColor, lo, hi);
+}
+
 void main()
 {
 	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
@@ -101,7 +128,7 @@ void main()
 	// making the visualisation meaningless after the first frame.
 	// Mode 7 (temporal debug) is handled below with its own output path.
 	if (FogHistoryValid == 0 || int(PrevFrameValid) == 0 || FogTemporalAlpha <= 0.0 ||
-	    FogDebugMode != 0)
+	    (FogDebugMode != 0 && FogDebugMode != 7))
 	{
 		OutColor = current;
 		return;
@@ -111,10 +138,26 @@ void main()
 	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
 	float depthNdc   = DepthToNdcZ(depth);
 
-	vec2  prevViewUv;
-	float prevDepthNdc;
-	bool  valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
-	valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
+	vec2  prevViewUv = vec2(0.0);
+	float prevDepthNdc = depthNdc;
+	bool  valid = false;
+	float depthAgreement = 0.0;
+	float motionConfidence = 0.0;
+	float varianceConfidence = 0.0;
+
+	if (FogHasVelocity != 0)
+	{
+		vec2 velocityUv = clamp(screenUv, vec2(0.0), vec2(1.0));
+		vec2 velocity = texture(SceneVelocity, velocityUv).xy;
+		vec2 prevScreenUvFromVel = screenUv - velocity;
+		prevViewUv = (prevScreenUvFromVel * FogViewportParams.xy - FogViewParams.xy) * FogViewParams.zw;
+		valid = all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
+	}
+	else
+	{
+		valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
+		valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
+	}
 
 	vec4 history     = vec4(0.0);
 	vec2 prevScreenUv = vec2(0.0);
@@ -127,8 +170,11 @@ void main()
 
 		float depthPrev    = texelFetch(SceneDepth, prevCoord, 0).r;
 		float depthPrevNdc = DepthToNdcZ(depthPrev);
-		float depthReject  = max(FogTemporalDepthReject, 0.0);
-		if (abs(depthPrevNdc - prevDepthNdc) > depthReject)
+		float depthReject  = max(FogTemporalDepthReject, 1e-5);
+		float disocclusionBias = max(FogTemporalConfidenceParams.y, 0.0);
+		float depthDelta = abs(depthPrevNdc - (FogHasVelocity != 0 ? depthNdc : prevDepthNdc));
+		depthAgreement = 1.0 - smoothstep(depthReject, depthReject * (1.0 + disocclusionBias), depthDelta);
+		if (depthDelta > depthReject * (1.0 + disocclusionBias))
 			valid = false;
 	}
 
@@ -139,42 +185,31 @@ void main()
 		// does its own wrapping; explicitly clamping prevents edge bleed.
 		vec2 clampedPrevUv = clamp(prevScreenUv, vec2(0.0), vec2(1.0));
 		history = texture(FogHistory, clampedPrevUv);
+		history.rgb = ComputeHistoryClamp(screenUv, history.rgb);
 	}
-
-	// ── neighbourhood colour clamp ─────────────────────────────────────────
-	// FIX #3 comment: step size should equal one *fog-buffer* texel.  If fog
-	// runs at half resolution, pass (2 * invScreen) here.  The integrator
-	// should add a FogTexelSize uniform and use that instead of invScreen.
-	vec3 minColor = current.rgb;
-	vec3 maxColor = current.rgb;
-	for (int j = -1; j <= 1; ++j)
-	{
-		for (int i = -1; i <= 1; ++i)
-		{
-			vec2 offset = vec2(i, j) * invScreen; // ← see FIX #3
-			vec3 tap = texture(FogCurrent, screenUv + offset).rgb;
-			minColor = min(minColor, tap);
-			maxColor = max(maxColor, tap);
-		}
-	}
-	history.rgb = clamp(history.rgb, minColor, maxColor);
 
 	// FIX #1 + #2: Compute motionFactor first; if invalid, skip the multiply.
 	float alpha = 0.0;
+	float confidence = 0.0;
 	if (valid)
 	{
 		float motionPx = length((prevScreenUv - screenUv) * FogViewportParams.xy);
 		// Smooth exponential decay instead of abrupt linear clamp.
-		float motionFactor = exp(-motionPx * TEMPORAL_MOTION_K);
-		alpha = clamp(FogTemporalAlpha * motionFactor, 0.0, 1.0);
+		motionConfidence = exp(-motionPx * TEMPORAL_MOTION_K);
+
+		vec3 diff = history.rgb - current.rgb;
+		float lumaVar = dot(diff * diff, vec3(0.299, 0.587, 0.114));
+		varianceConfidence = 1.0 / (1.0 + lumaVar * 8.0);
+
+		confidence = clamp(depthAgreement * motionConfidence * varianceConfidence, 0.0, 1.0);
+		alpha = clamp(FogTemporalAlpha * confidence, FogTemporalConfidenceParams.x, 1.0);
 	}
 
 	if (FogDebugMode == 7)
 	{
-		// Debug: R=alpha, G=valid, B=motionFactor (recomputed for display only)
-		float motionPx2    = valid ? length((prevScreenUv - screenUv) * FogViewportParams.xy) : 0.0;
-		float motionFactor2 = exp(-motionPx2 * TEMPORAL_MOTION_K);
-		OutColor = vec4(alpha, valid ? 1.0 : 0.0, motionFactor2, 1.0);
+		// Debug: R=confidence, G=depth agreement, B=rejection (1=reject)
+		float rejection = 1.0 - (valid ? confidence : 0.0);
+		OutColor = vec4(valid ? confidence : 0.0, depthAgreement, rejection, 1.0);
 		return;
 	}
 
