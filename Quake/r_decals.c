@@ -368,7 +368,11 @@ static int R_ProjectDecalToSurface (const msurface_t *surf, const vec3_t origin,
 	vec3_t sdir, tdir, normal;
 	int i, count = surf->numedges;
 	int total_added = 0;
-	float depth = q_max (2.f, radius * 0.5f);
+	/*
+	 * Keep depth clipping conservative now that we reconstruct decal verts with
+	 * their normal-space offset to avoid pushing decals through nearby geometry.
+	 */
+	float depth = q_max (1.f, radius * 0.25f);
 
 	if (count < 3 || count >= MAX_POLY_VERTS)
 		return 0;
