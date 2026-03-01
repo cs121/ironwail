@@ -52,6 +52,7 @@ static int r_fogvol_draw_called = 0;
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
 static float r_ssao_saved_fog[4]; /* xyz=fog color, w=fog density */
+static qboolean r_ssao_invalid_warned = false;
 
 float r_autoexposure_debug_exposure = 1.f;
 float r_autoexposure_debug_luminance = 0.f;
@@ -407,6 +408,7 @@ cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
+cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -744,6 +746,22 @@ static GLuint GL_CreateSimpleFBO (GLenum target, GLuint colors, GLuint depth, GL
 	return GL_CreateFBO (target, colors ? &colors : NULL, colors ? 1 : 0, depth, stencil, name);
 }
 
+static qboolean GL_ValidateSimpleFramebuffer (GLuint fbo, const char* name)
+{
+	if (fbo == 0)
+		return false;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
+	GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_DPrintf ("%s incomplete (0x%X)\n", name, status);
+		return false;
+	}
+
+	return true;
+}
+
 static qboolean GL_AutoExposurePBOAvailable (void);
 static void GL_AutoExposureDeletePBOs (void);
 static void GL_AutoExposureInitPBOs (void);
@@ -757,6 +775,9 @@ void GL_CreateFrameBuffers (void)
 {
 	GLenum color_format = GL_RGBA16F;
 	GLenum depth_format = GL_DEPTH24_STENCIL8;
+
+	framebufs.ssao.valid = false;
+	r_ssao_invalid_warned = false;
 
 	/* query MSAA limits */
 	glGetIntegerv (GL_MAX_COLOR_TEXTURE_SAMPLES, &framebufs.max_color_tex_samples);
@@ -849,6 +870,15 @@ void GL_CreateFrameBuffers (void)
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
 		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
 	}
+
+	framebufs.ssao.valid = (framebufs.ssao.noise_tex != 0);
+	for (int i = 0; i < 2 && framebufs.ssao.valid; ++i)
+	{
+		framebufs.ssao.valid = GL_ValidateSimpleFramebuffer (framebufs.ssao.ao_fbo[i], va ("ssao fbo %d", i));
+		framebufs.ssao.valid = framebufs.ssao.valid && GL_ValidateSimpleFramebuffer (framebufs.ssao.blur_fbo[i], va ("ssao blur fbo %d", i));
+	}
+	if (!framebufs.ssao.valid)
+		Con_Warning ("SSAO framebuffer resources are invalid; SSAO disabled until framebuffer rebuild.\n");
 
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
@@ -978,6 +1008,8 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
+	framebufs.ssao.valid = false;
+	r_ssao_invalid_warned = false;
 	for (int i = 0; i < 2; ++i)
 	{
 		GL_DeleteNativeTexture (framebufs.ssao.ao_tex[i]);
@@ -1288,8 +1320,15 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		return 0;
 	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
 		return 0;
-	if (framebufs.ssao.ao_fbo[0] == 0 || framebufs.ssao.ao_fbo[1] == 0)
+	if (!framebufs.ssao.valid)
+	{
+		if (!r_ssao_invalid_warned)
+		{
+			Con_Warning ("Skipping SSAO: framebuffer resources are invalid (rebuild required).\n");
+			r_ssao_invalid_warned = true;
+		}
 		return 0;
+	}
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
@@ -1303,6 +1342,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int height = framebufs.ssao.height[index];
 	if (width <= 0 || height <= 0)
 		return 0;
+
+	r_ssao_invalid_warned = false;
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
@@ -1341,11 +1382,13 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 	GL_LogErrorIfDeveloper ("SSAO bind FBO");
+	if (r_ssao_validate.value > 0.f)
 	{
 		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
-			Con_DPrintf ("SSAO FBO incomplete (0x%X)\n", status);
+			Con_DPrintf ("SSAO runtime validation failed (0x%X)\n", status);
+			framebufs.ssao.valid = false;
 			GL_EndGroup ();
 			return 0;
 		}
