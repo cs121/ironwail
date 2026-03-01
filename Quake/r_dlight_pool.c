@@ -1,7 +1,6 @@
 #include "quakedef.h"
 #include "r_dlight_pool.h"
 #include <float.h>
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -389,12 +388,12 @@ void DLightPool_Decay (float frametime, double time)
 		if (dl->baseradius < 0.f)
 			dl->baseradius = 0.f;
 
-		if (CL_DlightShouldFlicker (dl))
-			dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (time * 9.0 + dl->flicker_seed));
-		else
-			dl->radius = dl->baseradius;
-		if (dl->radius < 0.f)
-			dl->radius = 0.f;
+		/*
+		Keep pool state authoritative for raw light values only.
+		Type-specific flicker is applied in R_PushDlightArray so there is a single
+		submit-time source of truth for radius/color modulation.
+		*/
+		dl->radius = dl->baseradius;
 	}
 }
 
@@ -479,10 +478,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		return 0;
 	}
 
-	int found = 0;
+	int selected = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
-		if (found >= max_scratch)
+		if (selected >= max_scratch)
 			break;
 
 		dlight_t *dl = &dlight_pool.items[i];
