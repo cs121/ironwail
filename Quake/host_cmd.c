@@ -1338,47 +1338,82 @@ void DemoList_Rebuild (void)
 	DemoList_Init ();
 }
 
-// TODO: Factor out to a general-purpose file searching function
+typedef qboolean (*searchpath_exclude_fn_t) (const searchpath_t *search, void *userdata);
+typedef void (*searchpath_file_callback_t) (const char *path, const searchpath_t *search, void *userdata);
+
+/*
+==================
+SearchPaths_ForEachExtension
+
+Iterate over files from all com_searchpaths entries that match an extension.
+`extension` may be passed with or without a leading '.'.
+If `exclude` is set and returns true for a search path, that path is skipped.
+==================
+*/
+static void SearchPaths_ForEachExtension (const char *extension, searchpath_exclude_fn_t exclude, void *excludeuserdata, searchpath_file_callback_t callback, void *callbackuserdata)
+{
+	const char	*ext;
+	searchpath_t	*search;
+
+	if (!extension || !*extension || !callback)
+		return;
+
+	ext = extension[0] == '.' ? extension + 1 : extension;
+
+	for (search = com_searchpaths; search; search = search->next)
+	{
+		pack_t *pak;
+		int i;
+
+		if (exclude && exclude (search, excludeuserdata))
+			continue;
+
+		if (*search->filename) // directory
+		{
+			findfile_t *find;
+			for (find = Sys_FindFirst (search->filename, ext); find; find = Sys_FindNext (find))
+			{
+				if (find->attribs & FA_DIRECTORY)
+					continue;
+				callback (find->name, search, callbackuserdata);
+			}
+		}
+		else // pakfile
+		{
+			for (i = 0, pak = search->pack; i < pak->numfiles; i++)
+			{
+				if (!q_strcasecmp (COM_FileGetExtension (pak->files[i].name), ext))
+					callback (pak->files[i].name, search, callbackuserdata);
+			}
+		}
+	}
+}
+
+static qboolean DemoList_ExcludeBasePak (const searchpath_t *search, void *userdata)
+{
+	const char *ignorepakdir = (const char *) userdata;
+
+	return !*search->filename && strstr (search->pack->filename, ignorepakdir) != NULL;
+}
+
+static void DemoList_AddFile (const char *path, const searchpath_t *search, void *userdata)
+{
+	char demname[MAX_QPATH];
+
+	(void)search;
+	COM_StripExtension (path, demname, sizeof (demname));
+	FileList_Add (demname, (filelist_item_t **) userdata);
+}
+
 void DemoList_Init (void)
 {
-	char		demname[32];
-	char		ignorepakdir[32];
-	searchpath_t	*search;
-	pack_t		*pak;
-	int		i;
+	char ignorepakdir[MAX_QPATH];
 
 	// we don't want to list the demos in id1 pakfiles,
 	// because these are not "add-on" demos
 	q_snprintf (ignorepakdir, sizeof (ignorepakdir), "/%s/", GAMENAME);
-	
-	for (search = com_searchpaths; search; search = search->next)
-	{
-		if (*search->filename) //directory
-		{
-			findfile_t *find;
-			for (find = Sys_FindFirst (search->filename, "dem"); find; find = Sys_FindNext (find))
-			{
-				if (find->attribs & FA_DIRECTORY)
-					continue;
-				COM_StripExtension (find->name, demname, sizeof (demname));
-				FileList_Add (demname, &demolist);
-			}
-		}
-		else //pakfile
-		{
-			if (!strstr(search->pack->filename, ignorepakdir))
-			{ //don't list standard id demos
-				for (i = 0, pak = search->pack; i < pak->numfiles; i++)
-				{
-					if (!strcmp (COM_FileGetExtension (pak->files[i].name), "dem"))
-					{
-						COM_StripExtension (pak->files[i].name, demname, sizeof (demname));
-						FileList_Add (demname, &demolist);
-					}
-				}
-			}
-		}
-	}
+
+	SearchPaths_ForEachExtension (".dem", DemoList_ExcludeBasePak, ignorepakdir, DemoList_AddFile, &demolist);
 }
 
 //==============================================================================
@@ -3817,4 +3852,3 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("viewnext", Host_Viewnext_f);
 	Cmd_AddCommand ("viewprev", Host_Viewprev_f);
 }
-
