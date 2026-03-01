@@ -42,6 +42,7 @@ static postfx_event_t	postfx_events[POSTFX_MAX_EVENTS];
 static double			postfx_last_time;
 static int				postfx_contents = CONTENTS_EMPTY;
 static qboolean			postfx_underwater;
+static qboolean			postfx_underwater_postfx_active;
 static float			postfx_underwater_grade;
 static float			postfx_underwater_fog;
 static int				postfx_powerup_lut = PFX_LUT_NONE;
@@ -208,6 +209,7 @@ void CL_PostFX_Reset (void)
 	postfx_last_time = cl.time;
 	postfx_contents = CONTENTS_EMPTY;
 	postfx_underwater = false;
+	postfx_underwater_postfx_active = false;
 	postfx_underwater_grade = 0.f;
 	postfx_underwater_fog = 0.f;
 	postfx_powerup_lut = PFX_LUT_NONE;
@@ -264,10 +266,10 @@ void CL_PostFX_Frame (void)
 	else
 		postfx_powerup_lut = PFX_LUT_NONE;
 
-	grade_strength = (r_postfx_underwater.value > 0.f && postfx_underwater)
+	grade_strength = (r_postfx_underwater.value > 0.f && postfx_underwater_postfx_active)
 		? q_max (0.f, q_max (r_postfx_underwater_grade_strength.value, r_postfx_lut_strength_underwater.value))
 		: 0.f;
-	fog_strength = (r_postfx_underwater.value > 0.f && postfx_underwater)
+	fog_strength = (r_postfx_underwater.value > 0.f && postfx_underwater_postfx_active)
 		? q_max (0.f, r_postfx_underwater_fog_strength.value)
 		: 0.f;
 	ramp_in = q_max (0.f, r_postfx_underwater_ramp_in.value);
@@ -360,10 +362,11 @@ void CL_PostFX_PushDamage (float damage_amount)
 	event->active = true;
 }
 
-void CL_PostFX_SetContents (int contents, qboolean underwater_active)
+void CL_PostFX_SetContents (int contents, qboolean underwater_active, qboolean underwater_postfx_active)
 {
 	postfx_contents = contents;
 	postfx_underwater = underwater_active;
+	postfx_underwater_postfx_active = underwater_postfx_active;
 }
 
 void CL_PostFX_GetState (postfx_state_t *out_state)
@@ -446,13 +449,14 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 	out_state->underwater_fog_color[0] = PostFX_Saturate (fog_r);
 	out_state->underwater_fog_color[1] = PostFX_Saturate (fog_g);
 	out_state->underwater_fog_color[2] = PostFX_Saturate (fog_b);
+	out_state->underwater_postfx_active = (postfx_underwater && postfx_underwater_postfx_active);
 
 	if (postfx_powerup_strength > 0.f)
 	{
 		out_state->lut_id = postfx_powerup_lut;
 		out_state->lut_strength = PostFX_Saturate (postfx_powerup_strength);
 	}
-	else if (postfx_underwater_grade > 0.f)
+	else if (postfx_underwater_postfx_active && postfx_underwater_grade > 0.f)
 	{
 		if (postfx_contents == CONTENTS_SLIME)
 			out_state->lut_id = PFX_LUT_SLIME;
