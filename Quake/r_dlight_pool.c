@@ -192,6 +192,21 @@ static int DLightPool_CompareScore (const void *a, const void *b)
 	return 0;
 }
 
+static qboolean DLightPool_IsBetterScore (const dlight_t *candidate, const dlight_t *current)
+{
+	if (candidate->last_score > current->last_score)
+		return true;
+	if (candidate->last_score < current->last_score)
+		return false;
+	if (candidate->spawn_time > current->spawn_time)
+		return true;
+	if (candidate->spawn_time < current->spawn_time)
+		return false;
+	if (candidate->id < current->id)
+		return true;
+	return false;
+}
+
 static dlight_t *DLightPool_EvictWorstTransient (double time)
 {
 	int best_index = -1;
@@ -429,9 +444,10 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		return 0;
 	}
 
-	DLightPool_EnsureScratch (dlight_pool.capacity);
+	const int selection_max = q_min (out_max, dlight_pool.capacity);
+	DLightPool_EnsureScratch (selection_max);
 
-	int found = 0;
+	int selected = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
 		dlight_t *dl = &dlight_pool.items[i];
@@ -459,13 +475,31 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 			continue;
 
 		dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
-		dlight_pool.scratch[found++] = dl;
+
+		if (selected < selection_max)
+		{
+			int insert_at = selected;
+			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			{
+				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
+				insert_at--;
+			}
+			dlight_pool.scratch[insert_at] = dl;
+			selected++;
+		}
+		else if (selected > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[selected - 1]))
+		{
+			int insert_at = selected - 1;
+			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			{
+				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
+				insert_at--;
+			}
+			dlight_pool.scratch[insert_at] = dl;
+		}
 	}
 
-	if (found > 1)
-		qsort (dlight_pool.scratch, found, sizeof (dlight_pool.scratch[0]), DLightPool_CompareScore);
-
-	const int submit_count = q_min (found, out_max);
+	const int submit_count = selected;
 	for (int i = 0; i < submit_count; i++)
 		out[i] = dlight_pool.scratch[i];
 
