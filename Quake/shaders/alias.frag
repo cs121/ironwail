@@ -42,6 +42,7 @@ float bayer(ivec2 coord)
         return bayer01(coord) - 0.5;
 }
 
+// AliasFrameBuffer.Fog.w is treated as a signed-friendly density; use abs() so negative CPU values do not invert attenuation.
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
         float fog = exp2(-abs(AliasFrameBuffer.Fog.w) * dot(p, p));

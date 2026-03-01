@@ -1,8 +1,9 @@
 #include "frame_uniforms.glsl"
 
+// Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-	float fog = exp2(-Fog.w * dot(p, p));
+	float fog = exp2(-abs(Fog.w) * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);
 }
@@ -109,7 +110,7 @@ void main()
 	float pixel = fwidth(radius);
 	out_fragcolor.a *= clamp((1. - radius) / pixel, 0., 1.);
 #if DITHER
-	if (Fog.w > 0.)
+	if (abs(Fog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
