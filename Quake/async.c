@@ -14,12 +14,18 @@ static SDL_cond *jobs_cond;
 static jobnode_t *jobs_head;
 static jobnode_t *jobs_tail;
 static qboolean jobs_shutdown;
+static unsigned int jobs_pending;
+static unsigned int jobs_peak_pending;
+static unsigned int jobs_dropped;
+static unsigned int jobs_sync_fallbacks;
 
-static void Jobs_SubmitNode (jobnode_t *node);
+static qboolean Jobs_SubmitNode (jobnode_t *node);
+static void Jobs_LogQueueStats (const char *reason);
 
 static cvar_t host_async = {"host_async", "0", CVAR_ARCHIVE};
 static cvar_t host_async_fs = {"host_async_fs", "0", CVAR_ARCHIVE};
 static cvar_t host_async_assets = {"host_async_assets", "0", CVAR_ARCHIVE};
+static cvar_t host_async_max_pending = {"host_async_max_pending", "128", CVAR_ARCHIVE};
 
 qboolean Host_AsyncEnabled (void)
 {
@@ -54,6 +60,8 @@ static int Jobs_Worker (void *unused)
 		jobs_head = node->next;
 		if (!jobs_head)
 			jobs_tail = NULL;
+		if (jobs_pending > 0)
+			jobs_pending--;
 		SDL_UnlockMutex (jobs_mutex);
 
 		node->func (node->userdata);
@@ -101,21 +109,59 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	node->userdata = userdata;
 	node->handle = handle;
 
-	Jobs_SubmitNode (node);
+	if (!Jobs_SubmitNode (node))
+	{
+		jobs_sync_fallbacks++;
+		func (userdata);
+		SDL_LockMutex (handle->mutex);
+		handle->done = true;
+		SDL_CondSignal (handle->cond);
+		SDL_UnlockMutex (handle->mutex);
+		free (node);
+	}
 
 	return handle;
 }
 
-static void Jobs_SubmitNode (jobnode_t *node)
+static qboolean Jobs_SubmitNode (jobnode_t *node)
 {
+	int max_pending;
+
 	SDL_LockMutex (jobs_mutex);
+	max_pending = (int) host_async_max_pending.value;
+	if (max_pending > 0 && jobs_pending >= (unsigned int) max_pending)
+	{
+		jobs_dropped++;
+		SDL_UnlockMutex (jobs_mutex);
+		Jobs_LogQueueStats ("queue full");
+		return false;
+	}
+
 	if (jobs_tail)
 		jobs_tail->next = node;
 	else
 		jobs_head = node;
 	jobs_tail = node;
+	jobs_pending++;
+	if (jobs_pending > jobs_peak_pending)
+		jobs_peak_pending = jobs_pending;
 	SDL_CondSignal (jobs_cond);
 	SDL_UnlockMutex (jobs_mutex);
+	Jobs_LogQueueStats ("enqueue");
+	return true;
+}
+
+static void Jobs_LogQueueStats (const char *reason)
+{
+	if (!developer.value)
+		return;
+	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u max_pending=%d\n",
+		reason,
+		jobs_pending,
+		jobs_peak_pending,
+		jobs_dropped,
+		jobs_sync_fallbacks,
+		(int) host_async_max_pending.value);
 }
 
 void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
@@ -135,7 +181,12 @@ void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
 	node->userdata = userdata;
 	node->detached = true;
 
-	Jobs_SubmitNode (node);
+	if (!Jobs_SubmitNode (node))
+	{
+		jobs_sync_fallbacks++;
+		func (userdata);
+		free (node);
+	}
 }
 
 void Jobs_Wait (JobHandle *handle)
@@ -371,6 +422,7 @@ void Jobs_Init (void)
 	Cvar_RegisterVariable (&host_async);
 	Cvar_RegisterVariable (&host_async_fs);
 	Cvar_RegisterVariable (&host_async_assets);
+	Cvar_RegisterVariable (&host_async_max_pending);
 
 	jobs_mutex = SDL_CreateMutex ();
 	jobs_cond = SDL_CreateCond ();
